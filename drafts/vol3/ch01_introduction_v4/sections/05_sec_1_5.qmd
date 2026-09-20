@@ -23,7 +23,7 @@ To analyze the stability, latency, and failure modes of an agentic system, we mu
 An *observation* ($o_{t+1}$) is the raw, uncurated return value from an environment effector (e.g., exit code 0 from a shell script). *Verification evidence* ($v_{t+1}$) is the deterministic verdict of an independent, out-of-band evaluation harness (e.g., an immutable test suite or AST parser) that evaluates whether the system state satisfies an operational invariant. Agents that inspect only $o_{t+1}$ are vulnerable to false positives.
 :::
 
-Beyond raw environment observations, robust agentic architectures introduce a seventh, critical feedback signal: **Verification Evidence ($v_{t+1}$)**. While an observation captures the direct, local output of an action, verification evidence represents the outcome of an independent, authoritative validation check executed out-of-band (such as an immutable regression test suite, a static type checker, or a cryptographic signature validator). 
+Beyond raw environment observations, robust agentic architectures introduce a seventh, critical feedback signal: **Verification Evidence ($v_{t+1}$)**. While an observation captures the direct, local output of an action, verification evidence represents the outcome of an independent, authoritative validation check executed out-of-band (such as an immutable regression test suite, a static type checker, or a cryptographic signature validator).
 
 We formally define a completed execution trajectory $\tau$ of length $N$ as a sequence of discrete interaction tuples:
 $$\tau = \big( (a_0, o_1, v_1), (a_1, o_2, v_2), \dots, (a_{N-1}, o_N, v_N) \big)$$
@@ -52,22 +52,22 @@ The execution of an agentic system proceeds through a continuous finite-state ma
 ![The six-phase execution lifecycle finite-state machine. The host runtime advances synchronously across continuation checks, model invocation, action authorization, runtime dispatch, evidence capture, and completion assessment.](images/svg/ch01_execution_lifecycle.svg){#fig-execution-lifecycle}
 
 #### Phase 1: Continuation Check and Context Assembly
-Before allocating accelerator compute, the runtime evaluates trajectory bounds. It checks whether the current step index exceeds the maximum step budget ($t \ge T_{\max}$), whether accumulated financial or token costs exceed operator limits, or whether a cancellation signal has been asserted. If limits are respected, the host constructs $c_t$. 
+Before allocating accelerator compute, the runtime evaluates trajectory bounds. It checks whether the current step index exceeds the maximum step budget ($t \ge T_{\max}$), whether accumulated financial or token costs exceed operator limits, or whether a cancellation signal has been asserted. If limits are respected, the host constructs $c_t$.
 
 Context assembly is an active memory-management operation: the runtime retrieves recent observations, formats them according to the tool specification protocol, compresses or truncates oversized stdout buffers from turn $t-1$, and stages the final token array into host memory.
 
 #### Phase 2: Model Invocation
-The assembled context $c_t$ is dispatched to the inference engine (such as vLLM or a managed model endpoint). The engine executes the prefill phase over newly appended tokens, reuses cached Key-Value (KV) tensors for the static prompt prefix, and enters the autoregressive decode loop. 
+The assembled context $c_t$ is dispatched to the inference engine (such as vLLM or a managed model endpoint). The engine executes the prefill phase over newly appended tokens, reuses cached Key-Value (KV) tensors for the static prompt prefix, and enters the autoregressive decode loop.
 
 Decoding proceeds token-by-token until the model emits a designated stop token (e.g., `<|end_of_action|>`) or a structural delimiter signaling the end of an action invocation block. The output string is captured as $a_{\text{prop}}$.
 
 #### Phase 3: Action Authorization
-The candidate action $a_{\text{prop}}$ enters the host authorization pipeline. Operating under zero ambient authority, the host parses the proposal into an abstract syntax tree or typed payload (e.g., validating against a JSON Schema specification). The runtime checks whether the requested tool is explicitly whitelisted in the agent's capability profile, whether the target file paths remain strictly within the designated workspace directory (preventing directory traversal attacks like `../../etc/shadow`), and whether command arguments satisfy structural invariants. 
+The candidate action $a_{\text{prop}}$ enters the host authorization pipeline. Operating under zero ambient authority, the host parses the proposal into an abstract syntax tree or typed payload (e.g., validating against a JSON Schema specification). The runtime checks whether the requested tool is explicitly whitelisted in the agent's capability profile, whether the target file paths remain strictly within the designated workspace directory (preventing directory traversal attacks like `../../etc/shadow`), and whether command arguments satisfy structural invariants.
 
 If authorization fails—due to invalid JSON, missing required fields, or a security policy violation—the dispatch phase is completely bypassed. The runtime constructs a synthetic observation $o_{t+1}$ stamped with status `REFUSED` containing the schema or policy diagnostic, increments $t$, and routes directly to Phase 6, exposing the structural failure in the context for subsequent error recovery.
 
 #### Phase 4: Runtime Dispatch
-If the action is authorized as $a_{\text{perm}}$, the runtime dispatches it to the appropriate execution backend. For shell commands, the runtime invokes an isolated process inside a container or microVM sandbox. For file modifications, the runtime applies a structured diff to the target repository. 
+If the action is authorized as $a_{\text{perm}}$, the runtime dispatches it to the appropriate execution backend. For shell commands, the runtime invokes an isolated process inside a container or microVM sandbox. For file modifications, the runtime applies a structured diff to the target repository.
 
 Crucially, dispatch is non-blocking with respect to the host's administrative health: the runtime wraps the execution in strict wall-clock timers. If a sandboxed command hangs (for instance, if an invoked script triggers an interactive prompt or an infinite loop), the timer trips, sending a `SIGKILL` to the sandbox process group and returning a deterministic `TRANSPORT_FAILURE` observation to the host runtime.
 
@@ -81,14 +81,14 @@ Once dispatch terminates, the runtime reclaims control. It packages the raw proc
 Simultaneously, if the action mutated the persistent state of the workspace (such as modifying source code), the runtime invokes an out-of-band verification hook: running an immutable unit test suite, triggering a language linter, or parsing the modified files. The resulting pass/fail verdicts and compiler diagnostics are serialized into the verification evidence payload $v_{t+1}$.
 
 #### Phase 6: Completion Assessment
-Finally, the runtime assesses whether the trajectory has reached a terminal boundary. A completion predicate $\Omega(c_{t+1}, v_{t+1})$ inspects the state. If the model proposal emits a terminal completion signal (such as an explicit `complete_task` RPC) and the verification evidence $v_{t+1}$ confirms that all external invariant checks have passed, the trajectory transitions to the `SUCCESS` terminal state and halts. 
+Finally, the runtime assesses whether the trajectory has reached a terminal boundary. A completion predicate $\Omega(c_{t+1}, v_{t+1})$ inspects the state. If the model proposal emits a terminal completion signal (such as an explicit `complete_task` RPC) and the verification evidence $v_{t+1}$ confirms that all external invariant checks have passed, the trajectory transitions to the `SUCCESS` terminal state and halts.
 
 If the model proposal asserts completion but $v_{t+1}$ indicates failing invariant tests, the completion claim is rejected; the runtime converts the verification failure into a corrective observation and forces the trajectory to continue. If resources are exhausted without success, the runtime halts the trajectory as a `FAILURE`. Otherwise, the cycle increments $t \leftarrow t + 1$ and loops back to Phase 1.
 
 ::: {#chk-timeout-ambiguity .callout-checkpoint title="The Two-Phase Commit of Tool Mutation"}
-Consider an agent that issues an HTTP POST action to process a financial charge or provision an external cloud resource. During execution, the network socket drops after 30 seconds, returning an indeterminate `TRANSPORT_FAILURE` observation. 
+Consider an agent that issues an HTTP POST action to process a financial charge or provision an external cloud resource. During execution, the network socket drops after 30 seconds, returning an indeterminate `TRANSPORT_FAILURE` observation.
 
-Did the remote endpoint execute the mutation before the connection dropped, or did it fail before processing? If the agent blindly retries the action on turn $t+1$, it risks duplicating side effects; if it assumes success, it risks leaving the environment unconfigured. 
+Did the remote endpoint execute the mutation before the connection dropped, or did it fail before processing? If the agent blindly retries the action on turn $t+1$, it risks duplicating side effects; if it assumes success, it risks leaving the environment unconfigured.
 
 Because tools are remote effectors operating outside the model's transactional memory, any non-idempotent tool mutation must implement a two-phase protocol:
 1. The model must first supply an *idempotency key* generated deterministically from the goal ID and turn index.
@@ -198,6 +198,6 @@ Second, **authoritative verification must execute out-of-band.** The sandbox loc
 
 Third, **closed-loop error injection drives trajectory self-healing.** When the runtime rejected the completion claim and injected the raw traceback into $c_2$, it provided the precise conditioning signal needed to steer the autoregressive sampling process toward the correct patch. The system converged without human intervention; the deterministic verification harness supplied the missing feedback loop.
 
-Yet, Turn 1 of this trajectory highlights an unsettling systems property of neural execution cores. In classical hardware engineering, an arithmetic logic unit with a broken transistor or a software module with a null-pointer dereference crashes immediately: it triggers an illegal instruction exception, halts the processor, or dumps core. The failure is obvious, unmasked, and fail-stop. 
+Yet, Turn 1 of this trajectory highlights an unsettling systems property of neural execution cores. In classical hardware engineering, an arithmetic logic unit with a broken transistor or a software module with a null-pointer dereference crashes immediately: it triggers an illegal instruction exception, halts the processor, or dumps core. The failure is obvious, unmasked, and fail-stop.
 
 A foundation model, however, does not crash when confronted with a complex algorithmic edge case. Instead, it generates syntactically pristine, beautifully formatted code that superficially satisfies local checks while silently destroying system invariants. How can an engineer construct dependable distributed architectures when the fundamental computational engine fails not by halting, but by fabricating plausible falsehoods? To answer this, we must examine the formal failure model of neural computation: the fail-plausible fault model.

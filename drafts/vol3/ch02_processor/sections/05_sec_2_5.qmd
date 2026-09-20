@@ -1,6 +1,6 @@
 ## Constraining the Output: Grammar-Guided Decoding {#sec-vol3-processor-grammar-constrained}
 
-When an unprivileged foundation model generates an autoregressive token stream, free-form text output is inherently non-deterministic and syntactically unconstrained. In interactive human chat, a missing closing quote, an unexpected conversational preamble ("Sure, here is your JSON:"), or a trailing comma in a list of items is a harmless cosmetic flaw. In an autonomous agent system, however, model outputs serve as machine-to-machine control payloads. If the host agent runtime expects a structured JSON payload to serialize an action parameter, a single illegal character triggers an unhandled `json.decoder.JSONDecodeError`. 
+When an unprivileged foundation model generates an autoregressive token stream, free-form text output is inherently non-deterministic and syntactically unconstrained. In interactive human chat, a missing closing quote, an unexpected conversational preamble ("Sure, here is your JSON:"), or a trailing comma in a list of items is a harmless cosmetic flaw. In an autonomous agent system, however, model outputs serve as machine-to-machine control payloads. If the host agent runtime expects a structured JSON payload to serialize an action parameter, a single illegal character triggers an unhandled `json.decoder.JSONDecodeError`.
 
 If this parsing failure occurs at token 150 of an autoregressive sequence that consumed 3 seconds of High-Bandwidth Memory (HBM) bandwidth on an accelerator, that entire latency envelope and compute expenditure is wasted. The host supervisor must either discard the trajectory or trigger an expensive, multi-second error-correction round trip. To eliminate this structural fragility, modern inference serving systems enforce formal syntax rules directly inside the autoregressive generation loop. By restricting candidate token selections to valid grammatical transitions at every decoding step, **grammar-constrained decoding** guarantees that emitted sequences conform strictly to a predefined schema without relying on prompt compliance or post-hoc text sanitization.
 
@@ -42,7 +42,7 @@ where $V_N$ is a finite set of non-terminal symbols, $\Sigma$ is the terminal al
 └───────────────────────┴───────────────────────┴────────────────────────┘
 ```
 
-The fundamental systems challenge in constraining autoregressive models is the **tokenization impedance mismatch**. Formal grammars and regular expressions operate over characters or raw bytes ($b \in \Sigma$). In contrast, the foundation model emits discrete subword tokens ($v \in \mathcal{V}$), where each token represents a variable-length byte string $s(v)$ containing anywhere from 1 to 16 bytes. A single token might span across structural boundaries (for example, the token `": "` contains a closing quote, a colon, and an opening space). 
+The fundamental systems challenge in constraining autoregressive models is the **tokenization impedance mismatch**. Formal grammars and regular expressions operate over characters or raw bytes ($b \in \Sigma$). In contrast, the foundation model emits discrete subword tokens ($v \in \mathcal{V}$), where each token represents a variable-length byte string $s(v)$ containing anywhere from 1 to 16 bytes. A single token might span across structural boundaries (for example, the token `": "` contains a closing quote, a colon, and an opening space).
 
 Consequently, the grammar compiler cannot simply validate characters after emission; it must compile the schema into an automaton that evaluates multi-byte token transitions directly over the vocabulary index space $\mathcal{V}$.
 
@@ -70,7 +70,7 @@ $$
 \mathcal{V}_{\text{valid}}(q_t, \gamma_t) = \left\{ v \in \mathcal{V} \;\middle|\; \delta^*\left((q_t, \gamma_t), s(v)\right) \neq \bot \right\}
 $$
 
-A token $v$ belongs to $\mathcal{V}_{\text{valid}}$ if and only if its entire byte sequence $s(v)$ can be ingested by the automaton starting from $(q_t, \gamma_t)$ without encountering an undefined transition $\bot$. 
+A token $v$ belongs to $\mathcal{V}_{\text{valid}}$ if and only if its entire byte sequence $s(v)$ can be ingested by the automaton starting from $(q_t, \gamma_t)$ without encountering an undefined transition $\bot$.
 
 ```
                                STEP t LOGIT MASKING
@@ -90,9 +90,9 @@ A token $v$ belongs to $\mathcal{V}_{\text{valid}}$ if and only if its entire by
 Once the admissible token set is identified, the serving engine applies an element-wise **logit mask** to the raw logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$ produced by the final transformer projection:
 
 $$
-\tilde{z}_{t, v} = \begin{cases} 
-z_{t, v}, & \text{if } v \in \mathcal{V}_{\text{valid}}(q_t, \gamma_t) \\ 
--\infty, & \text{if } v \notin \mathcal{V}_{\text{valid}}(q_t, \gamma_t) 
+\tilde{z}_{t, v} = \begin{cases}
+z_{t, v}, & \text{if } v \in \mathcal{V}_{\text{valid}}(q_t, \gamma_t) \\
+-\infty, & \text{if } v \notin \mathcal{V}_{\text{valid}}(q_t, \gamma_t)
 \end{cases}
 $$
 
@@ -106,7 +106,7 @@ Because the probability of selecting any token outside $\mathcal{V}_{\text{valid
 
 ### Accelerator-Native Bitmask Kernels versus Host Latency Stalls {#sec-vol3-processor-grammar-kernels}
 
-While the mathematical formulation of logit masking is straightforward, naive implementations introduce severe systems bottlenecks that can cripple serving throughput. 
+While the mathematical formulation of logit masking is straightforward, naive implementations introduce severe systems bottlenecks that can cripple serving throughput.
 
 Consider a naive host-interception architecture. At every decoding step $t$, the accelerator finishes the transformer forward pass and computes the logit vector $\mathbf{z}_t$. To apply grammar constraints:
 1. The serving runtime copies $\mathbf{z}_t$ across the PCIe bus from GPU High-Bandwidth Memory (HBM) to Host DRAM. For a model with $|\mathcal{V}| = 128{,}000$ in FP16 precision, each logit vector requires shuttling $128{,}000 \times 2\text{ bytes} = 256\text{ KiB}$.
@@ -121,7 +121,7 @@ GPU:  [ Forward Pass (21 ms) ] ──┐ PCIe Copy (256 KB)
                                  ▼
 Host:                            [ CPU Regex / FSM Validation across 128k Tokens (30 ms) ] ──┐ PCIe Copy
                                                                                              ▼
-GPU:                                                                                         [ Sample ] 
+GPU:                                                                                         [ Sample ]
 Total Inter-Token Latency: ~51 ms (Throughput slashed by >60%)
 
 MODERN FUSED ACCELERATOR BITMASK PIPELINE (Zero CPU Synchronization)
@@ -134,7 +134,7 @@ To eliminate this synchronization tax, modern inference engines (such as `xgramm
 
 #### Bitmask Compression and Storage Layout
 
-Because membership in $\mathcal{V}_{\text{valid}}$ is a binary property, the admissible set for any parser state $q$ can be represented as a dense bit array where each bit corresponds to a unique token ID in $\mathcal{V}$. 
+Because membership in $\mathcal{V}_{\text{valid}}$ is a binary property, the admissible set for any parser state $q$ can be represented as a dense bit array where each bit corresponds to a unique token ID in $\mathcal{V}$.
 
 For a vocabulary of size $|\mathcal{V}| = 131{,}072$ ($2^{17}$ tokens), the entire validation state for a given FSM configuration is packed into:
 
@@ -186,7 +186,7 @@ Because the bitmask lookup requires only coalesced memory reads from L2 cache an
 
 ### The Syntactic–Semantic Boundary and Pathological Forcing {#sec-vol3-processor-grammar-semantic-boundary}
 
-Grammar-guided decoding solves the syntactic formatting problem completely: it guarantees that an emitted string will parse without errors according to a context-free grammar or regular expression. However, systems engineers must not confuse syntactic validity with operational correctness. 
+Grammar-guided decoding solves the syntactic formatting problem completely: it guarantees that an emitted string will parse without errors according to a context-free grammar or regular expression. However, systems engineers must not confuse syntactic validity with operational correctness.
 
 Grammar masks enforce structural boundaries; they possess zero awareness of runtime semantics, database state, or physical reality:
 
@@ -225,10 +225,10 @@ Consider an autonomous routing agent deployed to classify user requests. An engi
 }
 ```
 
-The user issues an unhandled or adversarial prompt:  
+The user issues an unhandled or adversarial prompt:
 `"What is the capital city of Mars?"`
 
-**Unconstrained Model State:**  
+**Unconstrained Model State:**
 The model evaluates the prompt. Its highest-likelihood completions describe planetary science:
 - $\mathbf{z}(\text{"Mars"})$: $+14.2$
 - $\mathbf{z}(\text{" does"})$: $+13.8$
@@ -240,8 +240,8 @@ The model evaluates the prompt. Its highest-likelihood completions describe plan
 
 In an unconstrained decoding setup, the model would emit: `"Mars does not have a capital city."`
 
-**Constrained Mask Application:**  
-The grammar engine compiles the JSON schema. At the token position for `"target_cluster"`, the automaton transitions into a state where *only* tokens corresponding to `"billing_eu"`, `"telemetry_us"`, and `"auth_primary"` are admissible. 
+**Constrained Mask Application:**
+The grammar engine compiles the JSON schema. At the token position for `"target_cluster"`, the automaton transitions into a state where *only* tokens corresponding to `"billing_eu"`, `"telemetry_us"`, and `"auth_primary"` are admissible.
 
 Every token in the vocabulary that could explain that Mars has no capital city is masked to $-\infty$:
 
@@ -255,7 +255,7 @@ $$
 \tilde{\mathbf{z}} = [-6.2, -6.5, -7.1]
 $$
 
-**Renormalized Softmax Probability:**  
+**Renormalized Softmax Probability:**
 The Softmax function normalizes across only these three artificially surviving candidates:
 
 $$
@@ -274,8 +274,8 @@ $$
 P(\text{"auth_primary"}) = \frac{0.000825}{0.004357} \approx 18.9\%
 $$
 
-**Systems Consequence:**  
-The model emits `{"target_cluster": "billing_eu"}` with **$100\%$ aggregate confidence**. 
+**Systems Consequence:**
+The model emits `{"target_cluster": "billing_eu"}` with **$100\%$ aggregate confidence**.
 
 By forbidding the expression of epistemic uncertainty, the grammar mask forces the model to route planetary trivia into the European billing infrastructure. The downstream database receives an invalid query that corrupts application metrics.
 :::

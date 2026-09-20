@@ -282,7 +282,7 @@ svg_content = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1150 720" 
 
 </svg>'''
 
-target_svg = "/Users/VJ/GitHub/MLSysBook-vol3/books/vol3/14_rlvr/images/svg/asynchronous-freshness-pipeline.svg"
+target_svg = str(Path(__file__).resolve().parent.parent / "books/vol3/14_rlvr/images/svg/asynchronous-freshness-pipeline.svg")
 
 # Remove symlink if exists
 if os.path.islink(target_svg) or os.path.exists(target_svg):

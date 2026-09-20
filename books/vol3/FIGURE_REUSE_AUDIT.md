@@ -1,6 +1,6 @@
 # Volume III: Figure Reuse Audit
 
-**Status:** Editorial and visual audit for the proposed [chapter and section plan](CHAPTER_SECTION_PLAN.md). No source image has been changed or deleted. “Retire” means remove from the proposed teaching narrative; it does not authorize deleting the source asset.
+**Status:** Editorial and visual audit for the proposed chapter and section plan. No source image has been changed or deleted. “Retire” means remove from the proposed teaching narrative; it does not authorize deleting the source asset.
 
 ## Scope and evidence
 

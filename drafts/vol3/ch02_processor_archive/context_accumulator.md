@@ -30,7 +30,7 @@
 - **File:** `05_sec_2_5.qmd` | **Word Count:** 1,911 words
 - **Active Symbols Added:** `\mathcal{R}`, `M`, `\Theta`, `\mathcal{G}`, `K_{\max}`, `T_{\max}`, `L`, `H_{\text{kv}}`
 - **Terminal Bridge Handed Off:**
-  _Invariant closure is strictly external. The host runtime—using deterministic JSON parsers, compiler type checkers, AST linters, and explicit envelope flags—mechanically decides whe..._
+  _Invariant closure is strictly external. The host runtime—using deterministic JSON parsers, compiler type checkers, AST linters, and explicit envelope flags—mechanically decides whether..._
 
 ### Completed Step 5: Section 2.5: The Invocation Contract
 - **File:** `05_sec_2_5.qmd` | **Word Count:** 2,081 words

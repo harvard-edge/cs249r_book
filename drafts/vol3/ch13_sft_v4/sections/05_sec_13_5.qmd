@@ -16,7 +16,7 @@ where $B$ denotes the per-device micro-batch size, $T$ represents the sequence l
 The empirical success of low-rank adaptation stems from the low intrinsic dimension hypothesis: the weight updates $\Delta W$ necessary to adapt a pre-trained foundation model to downstream agent tasks reside in a subspace of significantly lower dimension than the ambient parameter space.
 :::
 
-Under standard mixed-precision training with the AdamW optimizer, static memory dominates short-sequence regimes. Mixed-precision execution stores model weights in 16-bit brain floating-point format (bfloat16), consuming 2 bytes per parameter. The forward and backward passes compute operations in bfloat16, generating 16-bit gradients that consume an additional 2 bytes per parameter. 
+Under standard mixed-precision training with the AdamW optimizer, static memory dominates short-sequence regimes. Mixed-precision execution stores model weights in 16-bit brain floating-point format (bfloat16), consuming 2 bytes per parameter. The forward and backward passes compute operations in bfloat16, generating 16-bit gradients that consume an additional 2 bytes per parameter.
 
 However, numeric stability prevents the optimizer from updating 16-bit weights directly with tiny gradient magnitudes. AdamW maintains a master copy of model weights in full 32-bit single precision (FP32), consuming 4 bytes per parameter. Furthermore, AdamW tracks two running statistical moments for every parameter: the first momentum vector $m_t$ (the exponentially decaying average of past gradients) and the second raw moment vector $v_t$ (the uncentered variance of past gradients). Both tracking states require 32-bit floating-point precision to avoid catastrophic cancellation, consuming 4 bytes each:
 
@@ -38,7 +38,7 @@ Because the base parameter tensor $W_0$ remains permanently frozen, the training
 NormalFloat4 (NF4) achieves an optimal information-theoretic representation for normally distributed neural weights. By quantizing frozen weights to 4 bits and applying double quantization to the scaling factors, QLoRA compresses static storage to approximately $0.55\text{ bytes}$ per parameter without degrading trajectory modeling accuracy.
 :::
 
-Quantized Low-Rank Adaptation (QLoRA, Dettmers et al., 2023) compresses static memory further by quantizing the frozen base weights $W_0$ to 4-bit NormalFloat (NF4) representations, achieving a static weight density of 0.5 bytes per parameter. QLoRA introduces double quantization (DQ), which compresses the quantization constants themselves from 32-bit floats to 8-bit floats, saving an additional 0.37 bits per parameter. During the forward pass, a fused CUDA dequantization kernel uncompresses the 4-bit NF4 values into 16-bit bfloat16 intermediates on-chip inside the streaming multiprocessor (SM) registers, executes the matrix multiplication against input activations, and discards the uncompressed bfloat16 weights immediately. 
+Quantized Low-Rank Adaptation (QLoRA, Dettmers et al., 2023) compresses static memory further by quantizing the frozen base weights $W_0$ to 4-bit NormalFloat (NF4) representations, achieving a static weight density of 0.5 bytes per parameter. QLoRA introduces double quantization (DQ), which compresses the quantization constants themselves from 32-bit floats to 8-bit floats, saving an additional 0.37 bits per parameter. During the forward pass, a fused CUDA dequantization kernel uncompresses the 4-bit NF4 values into 16-bit bfloat16 intermediates on-chip inside the streaming multiprocessor (SM) registers, executes the matrix multiplication against input activations, and discards the uncompressed bfloat16 weights immediately.
 
 Through this pipeline, static memory for an 8B model drops from $128\text{ GB}$ down to approximately $5.5\text{ GB}$, permitting the parameter tensor and its associated optimizer states to reside on a single consumer-grade accelerator.
 
@@ -64,7 +64,7 @@ Activation memory for a transformer backbone scales proportionally with sequence
 
 $$M_{\text{act}} \approx B \cdot T \cdot L \cdot d_{\text{model}} \cdot \left(34 + 5 \cdot \frac{a \cdot T}{d_{\text{model}}}\right) \text{ bytes}$$
 
-where $a$ denotes the number of attention heads. When sequence lengths expand to accommodate long-horizon agent trajectories ($T = 32{,}768$ to $65{,}536$), activation memory scales quadratically in the self-attention computation (or linearly when using FlashAttention) and linearly across the SwiGLU feed-forward network blocks. 
+where $a$ denotes the number of attention heads. When sequence lengths expand to accommodate long-horizon agent trajectories ($T = 32{,}768$ to $65{,}536$), activation memory scales quadratically in the self-attention computation (or linearly when using FlashAttention) and linearly across the SwiGLU feed-forward network blocks.
 
 At a sequence length of $T = 64\text{k}$ tokens, dynamic activation memory exceeds $150\text{ GB}$ for a 70B model at micro-batch size $B = 1$, far surpassing the entire static memory of a QLoRA-quantized 70B base model.
 
@@ -92,9 +92,9 @@ To prevent out-of-memory crashes on long-horizon trajectories, systems engineers
 Activation checkpointing converts memory capacity limits into computational overhead. While full checkpointing incurs a 33% FLOP penalty, selective checkpointing drops this penalty to under 8% by caching operations with high recomputation costs relative to their storage footprint.
 :::
 
-Full activation checkpointing recomputes every operation in each transformer layer, introducing a $33\%$ computational overhead in floating-point operations (FLOPs) while reducing activation memory to $O(\sqrt{L} \cdot B \cdot T \cdot d_{\text{model}})$. However, for agent training runtimes, *selective activation checkpointing* provides a superior balance. 
+Full activation checkpointing recomputes every operation in each transformer layer, introducing a $33\%$ computational overhead in floating-point operations (FLOPs) while reducing activation memory to $O(\sqrt{L} \cdot B \cdot T \cdot d_{\text{model}})$. However, for agent training runtimes, *selective activation checkpointing* provides a superior balance.
 
-Selective checkpointing analyzes the memory-to-compute ratio of each operation. Large activation tensors that are computationally cheap to evaluate—such as the intermediate hidden representations inside the SwiGLU gated MLP blocks, dropout masks, and root-mean-square layer normalizations (RMSNorm)—are discarded and recomputed during the backward pass. Conversely, operations that are memory-compact but computationally expensive—such as the attention logit softmax evaluations handled by fused FlashAttention kernels—are preserved in HBM. 
+Selective checkpointing analyzes the memory-to-compute ratio of each operation. Large activation tensors that are computationally cheap to evaluate—such as the intermediate hidden representations inside the SwiGLU gated MLP blocks, dropout masks, and root-mean-square layer normalizations (RMSNorm)—are discarded and recomputed during the backward pass. Conversely, operations that are memory-compact but computationally expensive—such as the attention logit softmax evaluations handled by fused FlashAttention kernels—are preserved in HBM.
 
 By combining low-rank parameter adaptation with selective activation checkpointing, total training memory drops below the physical threshold of standard 80 GB accelerator hardware, as quantified in @tbl-vol3-sft-memory-breakdown.
 

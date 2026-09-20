@@ -11,7 +11,8 @@ Generate publication-grade SVGs for Chapter 06 (Episodic & Persistent Memory):
 import os
 import subprocess
 
-TARGET_DIR = "/Users/VJ/GitHub/MLSysBook-vol3/books/vol3/06_episodic_memory/images/svg"
+from pathlib import Path
+TARGET_DIR = str(Path(__file__).resolve().parent.parent / "books/vol3/06_episodic_memory/images/svg")
 os.makedirs(TARGET_DIR, exist_ok=True)
 
 # 1. vol3-lexical-vs-ast.svg

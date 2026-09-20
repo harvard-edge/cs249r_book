@@ -64,4 +64,4 @@
 - **File:** `99_summary_connection.qmd` | **Word Count:** 667 words
 - **Active Symbols Added:** `K_{\text{idem}}`
 - **Terminal Bridge Handed Off:**
-  _correctness and integrity of an agentic system cannot rely on the model’s internal self-consistency or its probabilistic intent. Rather, invariant closure is achieved solely throug..._
+  _correctness and integrity of an agentic system cannot rely on the model’s internal self-consistency or its probabilistic intent. Rather, invariant closure is achieved solely through..._

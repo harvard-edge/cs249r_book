@@ -6,7 +6,8 @@ Refine Chapter 15:
 - Ensure zero untagged code blocks
 """
 
-file_path = "/Users/VJ/GitHub/MLSysBook-vol3/books/vol3/15_multi_agent/15_multi_agent.qmd"
+from pathlib import Path
+file_path = str(Path(__file__).resolve().parent.parent / "books/vol3/15_multi_agent/15_multi_agent.qmd")
 
 with open(file_path, "r", encoding="utf-8") as f:
     text = f.read()

@@ -9,7 +9,7 @@ following the canonical Volume 1 / Volume 2 / Volume 4 margin figure standard.
 from pathlib import Path
 import re
 
-BASE = Path("/Users/VJ/GitHub/MLSysBook-vol3")
+BASE = Path(__file__).resolve().parent.parent
 BOOKS = BASE / "books" / "vol3"
 
 CHAPTER_FILES = {

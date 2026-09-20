@@ -30,12 +30,12 @@ An alternative engineering approach attempts dynamic contiguous reallocation, mi
 ```
        Initial Allocation (512 slots):
        [ Valid KV State (512) ]
-       
+
        Decode step 513 requires resizing:
        Step 1: Allocate new contiguous buffer (1024 slots)
        Step 2: Copy 512 entries over HBM bus (Bandwidth Cost)
        Step 3: Free old 512-slot buffer (Leaves external hole)
-       
+
        Transient Memory Demand = 512 + 1024 = 1536 slots
 ```
 
@@ -51,18 +51,18 @@ The failure of both static reservation and dynamic contiguous allocation stems f
 | **External Fragmentation** | Memory checkerboarding induced by variable-lifetime contiguous extents. | Slices of free physical memory distributed between active buffers that cannot fit new contiguous requests. | Memory compaction requires synchronous, full-cache GPU tensor copies that stall active generation. |
 | **Transient Duplication** | Contiguous reallocation and geometric growth policies. | Overlapping physical memory consumption during dynamic buffer copying and resizing. | Amortized doubling reduces copy frequency but increases instantaneous peak reservation. |
 
-Internal fragmentation occurs when a storage allocator grants memory to an entity in fixed increments that exceed the entity's immediate operational demand. In contiguous KV cache architectures, internal fragmentation manifests in two distinct forms: *reservation waste* and *geometric slack*. 
+Internal fragmentation occurs when a storage allocator grants memory to an entity in fixed increments that exceed the entity's immediate operational demand. In contiguous KV cache architectures, internal fragmentation manifests in two distinct forms: *reservation waste* and *geometric slack*.
 
-Reservation waste represents the gap between the currently written sequence length $t$ and the reserved boundary $S_{\text{alloc}}$. Even if an allocator sizes buffers dynamically using a predictive heuristic rather than $S_{\max}$, any allocation where $S_{\text{alloc}} > t$ leaves $S_{\text{alloc}} - t$ slots unusable by any other concurrent request. Because standard tensor kernels require physical address contiguity, the unwritten slots trailing an active sequence cannot be assigned to an independent sequence. 
+Reservation waste represents the gap between the currently written sequence length $t$ and the reserved boundary $S_{\text{alloc}}$. Even if an allocator sizes buffers dynamically using a predictive heuristic rather than $S_{\max}$, any allocation where $S_{\text{alloc}} > t$ leaves $S_{\text{alloc}} - t$ slots unusable by any other concurrent request. Because standard tensor kernels require physical address contiguity, the unwritten slots trailing an active sequence cannot be assigned to an independent sequence.
 
 Geometric slack arises when runtimes attempt to mitigate reallocation frequency by expanding buffers geometrically—for example, doubling buffer capacity whenever a boundary is reached. A request that finishes at $1{,}025$ tokens inside a $2{,}048$-token buffer leaves $1{,}023$ tokens of internal slack. Across a batch of dozens of concurrent requests, geometric slack consistently strands between $25\%$ and $33\%$ of allocated pool capacity.
 
 ::: {.column-margin}
-![Contiguous Memory Fragmentation](images/svg/fig-vol3-kv-fragmentation.svg){#fig-vol3-kv-fragmentation}
+![Contiguous Memory Fragmentation](images/svg/contiguous_memory_fragmentation.svg){#fig-vol3-kv-fragmentation}
 Contiguous allocation timeline showing the progressive degradation of physical accelerator memory into isolated, unallocatable holes as requests of variable sequence lengths arrive, execute, and depart.
 :::
 
-External fragmentation emerges over time as requests with differing arrival times and completion lengths allocate and release contiguous memory blocks. Consider an accelerator memory space initialized as a unified, contiguous pool. As illustrated in @fig-vol3-kv-fragmentation, the runtime allocates a sequence of contiguous blocks of varying dimensions: Request $A$ claims $4$ GiB, Request $B$ claims $1$ GiB, and Request $C$ claims $6$ GiB. When Request $B$ finishes, its $1$ GiB block returns to the free list. However, if an incoming Request $D$ requires a contiguous $2$ GiB buffer to guarantee its generation budget, it cannot occupy the $1$ GiB hole left by $B$. 
+External fragmentation emerges over time as requests with differing arrival times and completion lengths allocate and release contiguous memory blocks. Consider an accelerator memory space initialized as a unified, contiguous pool. As illustrated in @fig-vol3-kv-fragmentation, the runtime allocates a sequence of contiguous blocks of varying dimensions: Request $A$ claims $4$ GiB, Request $B$ claims $1$ GiB, and Request $C$ claims $6$ GiB. When Request $B$ finishes, its $1$ GiB block returns to the free list. However, if an incoming Request $D$ requires a contiguous $2$ GiB buffer to guarantee its generation budget, it cannot occupy the $1$ GiB hole left by $B$.
 
 As hundreds of requests cycle through the serving engine, the physical address space fragments into an alternating checkerboard of allocated extents and non-contiguous free intervals. Eventually, the system encounters a pathological state: the aggregate quantity of free physical memory across all holes may total $20$ GiB, yet an incoming request requiring a contiguous $4$ GiB buffer is rejected because the largest single contiguous block measures only $1.5$ GiB.
 
@@ -80,7 +80,7 @@ While static conversational requests exhibit moderate variability in sequence le
 
 ```
        Agent Trajectory Execution Horizon:
-       
+
        Turn 1: Plan Generation (Prompt: 400 toks, Gen: 150 toks) -> Total = 550 toks
        [ Tool Execution I/O: Compiler invoked, Process idle for 4.2 seconds ]
        Turn 2: Error Diagnosis (Prompt: +1200 toks compiler stderr, Gen: 80 toks) -> Total = 1830 toks
@@ -88,11 +88,11 @@ While static conversational requests exhibit moderate variability in sequence le
        Turn 3: Patch Refactoring (Prompt: +3500 toks codebase context, Gen: 850 toks) -> Total = 6180 toks
 ```
 
-Consider the memory footprint of an agent engaged in automated software repair. In the first turn, the agent generates a simple patch command based on a $1{,}000$-token prompt, generating $120$ tokens. It then invokes an external compiler tool inside a sandboxed container. During the four seconds required for the compiler to execute and return output, the agent process produces zero tokens. 
+Consider the memory footprint of an agent engaged in automated software repair. In the first turn, the agent generates a simple patch command based on a $1{,}000$-token prompt, generating $120$ tokens. It then invokes an external compiler tool inside a sandboxed container. During the four seconds required for the compiler to execute and return output, the agent process produces zero tokens.
 
 In a contiguous memory system, the serving runtime faces an acute dilemma regarding this suspended trajectory. If the engine retains the agent's contiguous KV cache in HBM throughout the tool execution window, it pins physical memory that cannot be utilized by other active requests. Worse, if the engine allocated a generous contiguous buffer anticipating future turns, that entire reservation remains stranded and locked. If the engine instead deallocates the contiguous buffer to free space for other requests, it must discard the accumulated state entirely, forcing a costly, full-context prefill recomputation phase when the compiler returns its error logs.
 
-Agent workloads inherently exhibit multimodal completion length distributions. Simple queries terminate almost immediately when a tool confirms a precondition ($S < 500$). Complex queries encounter recursive failures, generating stack traces, re-prompting the model, and accumulating context until the sequence approaches the physical window boundary ($S > 30{,}000$). 
+Agent workloads inherently exhibit multimodal completion length distributions. Simple queries terminate almost immediately when a tool confirms a precondition ($S < 500$). Complex queries encounter recursive failures, generating stack traces, re-prompting the model, and accumulating context until the sequence approaches the physical window boundary ($S > 30{,}000$).
 
 When short-lived trajectories and long-lived trajectories execute concurrently within the same physical memory pool, the rate of allocation churn escalates. Short-lived requests rapidly allocate and release small memory extents, perforating the memory space with localized holes. Meanwhile, long-lived, high-capacity agent requests lock large contiguous blocks for minutes at a time. The resulting memory topology represents the worst-case operating environment for a contiguous allocator: an unpredictable sequence of allocation sizes, interleaved with non-deterministic deallocation timings, occurring within an address space that permits neither physical discontiguity nor low-cost compaction.
 
@@ -159,14 +159,14 @@ $$\eta_{\text{effective}} = \frac{1.25 \text{ GiB}}{10.00 \text{ GiB}} = 12.5\%$
 A staggering $8.75 \text{ GiB}$ ($87.5\%$) of the available KV cache capacity is completely idle, trapped in internal reservation fragmentation. Concurrency is capped at four, collapsing serving throughput.
 
 **Scenario B: Dynamic Contiguous Allocation with External Fragmentation:**
-To combat static waste, the runtime switches to dynamic contiguous power-of-two buddy allocation. Ten requests are admitted with varying sequence lengths drawn from the empirical distribution, occupying a total of $M_{\text{useful}} = 4.20 \text{ GiB}$ with allocated buffers totaling $M_{\text{allocated}} = 6.40 \text{ GiB}$ ($\eta_{\text{alloc}} = 65.6\%$). 
+To combat static waste, the runtime switches to dynamic contiguous power-of-two buddy allocation. Ten requests are admitted with varying sequence lengths drawn from the empirical distribution, occupying a total of $M_{\text{useful}} = 4.20 \text{ GiB}$ with allocated buffers totaling $M_{\text{allocated}} = 6.40 \text{ GiB}$ ($\eta_{\text{alloc}} = 65.6\%$).
 
 The remaining free pool memory is $M_{\text{free}} = 10.00 - 6.40 = 3.60 \text{ GiB}$. However, due to past request arrivals and completions, this $3.60 \text{ GiB}$ is partitioned across five isolated non-contiguous memory segments:
 $$\{H_k\} = \{512 \text{ MiB}, \ 256 \text{ MiB}, \ 1024 \text{ MiB}, \ 768 \text{ MiB}, \ 1024 \text{ MiB}\}$$
 
-An eleventh request arrives, bearing a prompt of $4{,}096$ tokens and requiring an initial reservation of $1{,}536 \text{ MiB}$ ($1.50 \text{ GiB}$). 
+An eleventh request arrives, bearing a prompt of $4{,}096$ tokens and requiring an initial reservation of $1{,}536 \text{ MiB}$ ($1.50 \text{ GiB}$).
 
-Although the system possesses $3.60 \text{ GiB}$ of free physical memory, the largest single contiguous extent is $\max(H_k) = 1{,}024 \text{ MiB} < 1{,}536 \text{ MiB}$. 
+Although the system possesses $3.60 \text{ GiB}$ of free physical memory, the largest single contiguous extent is $\max(H_k) = 1{,}024 \text{ MiB} < 1{,}536 \text{ MiB}$.
 The external fragmentation ratio for this request is:
 $$\Phi_{\text{ext}} = 1 - \frac{0}{3.60 \text{ GiB}} = 100\%$$
 The request is rejected or blocked in an admission queue. Despite having more than double the required memory physically free in HBM, the allocator cannot satisfy the contiguous reservation.

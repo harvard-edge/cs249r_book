@@ -1,14 +1,14 @@
 ## Tool Circuit Breakers {#sec-vol3-sagas-containment}
 
-When an external tool dependency experiences transient degradation, an unconstrained autonomous agent behaves as a pathological traffic amplifier. Unlike traditional client-server software, which typically surfaces errors to a human user or executes a deterministic, bounded retry script, an agent guided by an autoregressive model treats a tool failure as an environmental puzzle to be solved. If a code repository API rejects a commit due to lock contention, or an external search service returns an HTTP 503 Service Unavailable status, the agent's generative policy $\pi_\theta$ immediately consumes the failure text within its observation context $o_t^{\text{err}}$ and synthesizes a modified tool invocation $a_{t+1}$. The model may adjust whitespace, permute query tokens, reorder parameters, or repeat the exact call under the stochastic assumption that a second attempt might succeed. When hundreds of concurrent agent trajectories run across an enterprise cluster, this autonomous problem-solving reflex transforms minor upstream hiccups into catastrophic, self-inflicted denial-of-service events known as retry storms. 
+When an external tool dependency experiences transient degradation, an unconstrained autonomous agent behaves as a pathological traffic amplifier. Unlike traditional client-server software, which typically surfaces errors to a human user or executes a deterministic, bounded retry script, an agent guided by an autoregressive model treats a tool failure as an environmental puzzle to be solved. If a code repository API rejects a commit due to lock contention, or an external search service returns an HTTP 503 Service Unavailable status, the agent's generative policy $\pi_\theta$ immediately consumes the failure text within its observation context $o_t^{\text{err}}$ and synthesizes a modified tool invocation $a_{t+1}$. The model may adjust whitespace, permute query tokens, reorder parameters, or repeat the exact call under the stochastic assumption that a second attempt might succeed. When hundreds of concurrent agent trajectories run across an enterprise cluster, this autonomous problem-solving reflex transforms minor upstream hiccups into catastrophic, self-inflicted denial-of-service events known as retry storms.
 
 The runtime cannot rely on the model's internal judgment to cease hammering a collapsing external service. Because the foundation model operates under zero ambient authority ($A=0$) and lacks direct visibility into network socket states, socket queue depths, or remote server health, the host runtime must interpose a defensive traffic-shaping layer between the unprivileged agent and the external tool substrate. This defense requires three complementary mechanisms: tri-state circuit breakers that sever connections to failing services and fail fast, exponential backoff with full jitter that breaks phase synchronization across concurrent agents, and bulkhead isolation that partitions host resources so that a hung external API cannot starve critical local execution threads.
 
 ### The Anatomy of an Agent-Induced Retry Storm
 
-The mechanics of an agent-driven retry storm stem directly from the mismatch between the model's autoregressive generation loop and the queuing dynamics of distributed services. Consider an upstream microservice with service capacity $C$ requests per second and a nominal round-trip latency of $L_{\text{nom}} = 50\text{ ms}$. Under normal operating conditions, an agent trajectory invokes this tool, suspends its decode loop during the Remote Procedure Call (RPC) network transit, receives the structured JSON response, and appends the result to its context window. 
+The mechanics of an agent-driven retry storm stem directly from the mismatch between the model's autoregressive generation loop and the queuing dynamics of distributed services. Consider an upstream microservice with service capacity $C$ requests per second and a nominal round-trip latency of $L_{\text{nom}} = 50\text{ ms}$. Under normal operating conditions, an agent trajectory invokes this tool, suspends its decode loop during the Remote Procedure Call (RPC) network transit, receives the structured JSON response, and appends the result to its context window.
 
-Now suppose the remote service experiences a transient slowdown, causing latency to spike to $L_{\text{degraded}} = 2000\text{ ms}$, or begins dropping a fraction $\epsilon$ of incoming requests. In standard distributed architectures, client SDKs employ static retry counts, such as retrying up to three times before failing the top-level application workflow. In an agentic architecture, however, the retry loop is mediated by the foundation model's context window. When the tool execution framework returns an error string—such as `{"error": "Gateway Timeout", "code": 504}`—the model interprets this string not as a hard operational barrier, but as conversational feedback. 
+Now suppose the remote service experiences a transient slowdown, causing latency to spike to $L_{\text{degraded}} = 2000\text{ ms}$, or begins dropping a fraction $\epsilon$ of incoming requests. In standard distributed architectures, client SDKs employ static retry counts, such as retrying up to three times before failing the top-level application workflow. In an agentic architecture, however, the retry loop is mediated by the foundation model's context window. When the tool execution framework returns an error string—such as `{"error": "Gateway Timeout", "code": 504}`—the model interprets this string not as a hard operational barrier, but as conversational feedback.
 
 ```
 [Trajectory-042] Tool invocation failed: HTTP 504 Gateway Timeout (elapsed: 5002ms)
@@ -21,12 +21,12 @@ The resulting feedback loop is mathematically vicious. If $N$ active agent traje
 
 $$\lambda_{\text{in}} = \sum_{j=1}^{N} \frac{1}{\Delta t_{\text{decode}} + L_{\text{degraded}}}$$
 
-As latency $L_{\text{degraded}}$ increases toward the gateway's client-side timeout $T_{\text{timeout}}$, the host runtime accumulates blocked execution threads. Once the arrival rate exceeds capacity ($\lambda_{\text{in}} > C$), queue lengths at the remote service grow without bound, triggering internal buffer overflows, connection resets, and thread pool exhaustion across upstream dependencies. 
+As latency $L_{\text{degraded}}$ increases toward the gateway's client-side timeout $T_{\text{timeout}}$, the host runtime accumulates blocked execution threads. Once the arrival rate exceeds capacity ($\lambda_{\text{in}} > C$), queue lengths at the remote service grow without bound, triggering internal buffer overflows, connection resets, and thread pool exhaustion across upstream dependencies.
 
 Compounding the crisis, standard agent prompt designs frequently instruct models to "try alternative approaches if a tool fails." The model dutifully obliges by rephrasing its tool calls, expanding query strings, or trying sibling endpoints that hit the exact same back-end database. Consequently, the agent trajectory acts as an adversarial load generator, weaponizing semantic flexibility to bypass simple string-matching deduplication caches and driving the struggling dependency into total failure.
 
 ::: {.column-margin}
-**Fail-Fast Observation Semantics**  
+**Fail-Fast Observation Semantics**
 When a circuit breaker trips to Open, the host runtime immediately synthesizes an `ERR_CIRCUIT_OPEN` observation. This synthetic token sequence explicitly informs the model that physical network access is severed, halting further retries and forcing the trajectory into an alternative plan or a Trajectory Saga compensation path.
 :::
 
@@ -40,7 +40,7 @@ To protect upstream dependencies and conserve host compute, the runtime implemen
 The tri-state tool circuit breaker lifecycle. Transitions between Closed, Open, and Half-Open states are governed by a sliding-window failure rate threshold $\tau_{\text{fail}}$, an inactivity cooldown timer $T_{\text{cooldown}}$, and single-flight canary probes.
 :::
 
-In the **Closed** state, the proxy permits all tool calls issued by agent trajectories to pass through to the external network service. The gateway maintains a rolling ring buffer of the last $W$ tool execution outcomes, where each entry records a binary success ($0$) or failure ($1$). A failure is defined strictly according to physical and transport criteria: TCP connection timeouts, HTTP 5xx server errors, rate-limit rejections (HTTP 429), or malformed protocol frames. Application-level domain errors (such as a database query returning "record not found") do not constitute transport failures and are recorded as successes from the perspective of the circuit breaker. 
+In the **Closed** state, the proxy permits all tool calls issued by agent trajectories to pass through to the external network service. The gateway maintains a rolling ring buffer of the last $W$ tool execution outcomes, where each entry records a binary success ($0$) or failure ($1$). A failure is defined strictly according to physical and transport criteria: TCP connection timeouts, HTTP 5xx server errors, rate-limit rejections (HTTP 429), or malformed protocol frames. Application-level domain errors (such as a database query returning "record not found") do not constitute transport failures and are recorded as successes from the perspective of the circuit breaker.
 
 The proxy continuously computes the moving error fraction:
 
@@ -75,7 +75,7 @@ $$t_{\text{wait}}(k) = T_0 \cdot 2^k$$
 all 100 agents will sleep for exactly $T_0 = 1000\text{ ms}$ and simultaneously reissue their requests at time $t_0 + 1000\text{ ms}$. If the upstream service is operating near its capacity boundary, this sudden synchronized spike—known as the *thundering herd problem*—instantly overwhelms the service's inbound TCP connection backlog. The requests fail again, causing all 100 agents to sleep for exactly $2000\text{ ms}$ and strike the service again in unison at $t_0 + 3000\text{ ms}$. The system enters an artificial resonance pattern where massive load spikes alternate with periods of total silence.
 
 ::: {.column-margin}
-**The Resonance Invariant**  
+**The Resonance Invariant**
 Without stochastic phase dispersion, deterministic retry schedules preserve the initial synchronization of clustered failures. The aggregate arrival rate remains discrete and periodic, maximizing peak queue depth while minimizing average throughput.
 :::
 
@@ -97,22 +97,22 @@ def compute_jittered_backoff(attempt: int, base_ms: float = 100.0, max_ms: float
 By drawing $t_{\text{wait}}$ from a uniform continuous distribution across the entire interval $[0, \text{ceiling}]$, the arrival distribution of the 100 failed requests is transformed from a collection of discrete Dirac delta functions into a smooth probability density spread across time. The upstream service processes requests steadily as its queue capacity allows, breaking the feedback loop that drives retry storms.
 
 ::: {.callout-note title="Worked Example: Sizing Bulkhead Capacity and Jitter Under Degraded Tool RPCs"}
-**Scenario:**  
+**Scenario:**
 An agent execution engine hosts $N = 256$ concurrent worker processes. Each agent trajectory regularly queries an external semantic symbol index via an RPC tool.
 - The external index has a nominal latency of $L_{\text{nom}} = 20\text{ ms}$.
 - During an outage, the index degrades: responses stall until timing out at $T_{\text{timeout}} = 5000\text{ ms}$, with an error rate of $100\%$.
 - The host server allocates a shared thread pool of $M = 300$ worker threads to handle all tool executions across all categories (local file I/O, local git operations, and external RPCs).
 - Unjittered backoff uses $t_{\text{wait}}(k) = 1000 \cdot 2^k\text{ ms}$. Full jitter uses $t_{\text{wait}}(k) = \mathcal{U}(0, \min(30000, 1000 \cdot 2^k))\text{ ms}$.
 
-**Problem:**  
+**Problem:**
 1. Calculate the time $t_{\text{exhaust}}$ required to exhaust the entire host worker thread pool ($M = 300$) if all 256 agents call the failing index without a circuit breaker or bulkhead isolation.
 2. If 128 agents fail their first attempt simultaneously, calculate the peak instantaneous arrival rate under deterministic backoff versus the expected spread of arrivals across time under full jitter for the first retry ($k=1$).
 
 **Solution:**
 
-*Step 1: Time to Thread Exhaustion*  
+*Step 1: Time to Thread Exhaustion*
 Each agent issues an RPC call that blocks a worker thread for the full duration of $T_{\text{timeout}} = 5000\text{ ms}$.
-Because there are $N = 256$ agents running concurrently, all 256 agents allocate an execution thread within the first forward decoding step (taking less than $100\text{ ms}$). 
+Because there are $N = 256$ agents running concurrently, all 256 agents allocate an execution thread within the first forward decoding step (taking less than $100\text{ ms}$).
 
 At $t \approx 100\text{ ms}$, 256 of the 300 available worker threads are fully occupied waiting on the frozen network socket. This leaves only:
 
@@ -124,7 +124,7 @@ $$t_{\text{exhaust}} < 200\text{ ms}$$
 
 For the remaining $4800\text{ ms}$ until the socket timeout fires, the entire agent runtime freezes. It cannot execute trivial, non-failing local tasks because the shared thread pool is completely starved by blocked network sockets.
 
-*Step 2: Arrival Distribution on Retry ($k=1$)*  
+*Step 2: Arrival Distribution on Retry ($k=1$)*
 For $k=1$, the deterministic exponential backoff interval is:
 
 $$t_{\text{wait}}(1) = 1000 \cdot 2^1 = 2000\text{ ms}$$
@@ -212,6 +212,6 @@ This deterministic backpressure forces the agent to either yield execution, proc
 | **Backoff Strategy** | Immediate retry (max 1) | Exponential backoff with full jitter | Full jitter with wide cooldown ($T_{\text{cooldown}} \ge 60\text{ s}$) |
 | **Failure Mode Impact** | Local process termination | Degraded semantic search or indexing | Partial feature loss; fallback to cached data |
 
-By combining tri-state circuit breakers, full jitter backoff, and bulkhead partitioning, the host runtime constructs a resilient execution gateway. The agent's unprivileged, stochastic trial-and-error behaviors are safely contained, preventing local model misjudgments from cascading into catastrophic infrastructure failures. 
+By combining tri-state circuit breakers, full jitter backoff, and bulkhead partitioning, the host runtime constructs a resilient execution gateway. The agent's unprivileged, stochastic trial-and-error behaviors are safely contained, preventing local model misjudgments from cascading into catastrophic infrastructure failures.
 
 Yet, isolating network and tool failures addresses only half of the containment challenge. When an agent trajectory encounters an unrecoverable fault—or worse, falls victim to an adversarial prompt injection embedded within an external tool response—the danger shifts from infrastructure exhaustion to unauthorized state corruption. If an individual trajectory exhibits anomalous behavior, begins corrupting internal data structures, or leaks capability tokens, the runtime cannot simply rely on traffic shaping to restore safety. How does the host architecture instantaneously isolate a malfunctioning or compromised agent trajectory, revoke its environmental permissions, sever its communication channels, and place an immutable quarantine boundary around its blast radius before its corrupt state can propagate across peer workflows?

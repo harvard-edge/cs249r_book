@@ -371,7 +371,7 @@ TIER 1: THE SYSTEMS ENGINEERING STANCE & UNIVERSAL ARCHITECTURAL INVARIANTS
      * Protocol & Interface Boundary: Formal request contracts, typed parameters, and status envelopes belong strictly in invocation interface sections.
      * Verification & Epistemic Boundary: Speculative execution, sandbox isolation, and defense against Oracle Poisoning belong strictly in verification/sandboxing sections.
      * Memory Hierarchy: Virtual memory paging (PagedAttention), fragmentation, and prefix caching belong in context memory sections.
-   - **Adhere Strictly to Assigned Negative Scopes:** Follow all negative constraints in the section specification. If a concept belongs to an adjacent section or chapter, bridge to it cleanly without pre-empting its mathematical derivations or mechanisms.
+   - **Adhere Strictly to Assigned Negative Scopes:** Follow all negative constraints in the section specification. If a concept belongs to an adjacent section or chapter, bridge to it cleanly without preempting its mathematical derivations or mechanisms.
 
 10. LINGUISTIC AND PEDAGOGICAL INTEGRITY:
    - **American English Spelling:** Use -ize, -or, center, defense, meter, labeled, modeled throughout.

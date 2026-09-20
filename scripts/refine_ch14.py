@@ -8,7 +8,8 @@ Refine Chapter 14:
 
 import re
 
-file_path = "/Users/VJ/GitHub/MLSysBook-vol3/books/vol3/14_rlvr/14_rlvr.qmd"
+from pathlib import Path
+file_path = str(Path(__file__).resolve().parent.parent / "books/vol3/14_rlvr/14_rlvr.qmd")
 
 with open(file_path, "r", encoding="utf-8") as f:
     content = f.read()

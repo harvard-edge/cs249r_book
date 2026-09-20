@@ -19,7 +19,7 @@ The preprocessing phase, $T_{\text{prep}}$, represents host CPU overhead. It enc
 
 The queueing delay, $T_{\text{queue}}$, captures the time the tokenized request waits in the serving engine's scheduling backlog before execution begins on accelerator silicon. In a local, single-tenant deployment dedicated to a solitary agent, $T_{\text{queue}}$ approaches zero. In shared enterprise clusters or commercial multi-tenant API endpoints, however, $T_{\text{queue}}$ becomes a non-deterministic random variable governed by arrival rates, dynamic priority classes, and batch scheduling policies. During periods of cluster saturation, queueing jitter frequently dominates the tail latency ($p99$) of an agent's tool loop.
 
-The prefill latency, $T_{\text{prefill}}$, measures the duration required by the accelerator to ingest the entire prompt sequence of length $S$, compute the internal key-value representations across all transformer layers, and evaluate the conditional distribution $P(y_1 \mid \mathbf{x})$ to sample the first generated token. Because all $S$ prompt tokens are known in advance, this phase executes as a sequence of highly parallel matrix multiplications. 
+The prefill latency, $T_{\text{prefill}}$, measures the duration required by the accelerator to ingest the entire prompt sequence of length $S$, compute the internal key-value representations across all transformer layers, and evaluate the conditional distribution $P(y_1 \mid \mathbf{x})$ to sample the first generated token. Because all $S$ prompt tokens are known in advance, this phase executes as a sequence of highly parallel matrix multiplications.
 
 The autoregressive decode latency, $T_{\text{decode}}$, represents the cumulative time required to generate the subsequent $K - 1$ output tokens. Because autoregressive generation possesses an irreducibly serial causal dependency—where step $k$ cannot commence until token $y_{k-1}$ has been sampled and its key-value projections appended to accelerator memory—this phase cannot be parallelized across the generation dimension. It unfolds as a sequence of $K$ distinct execution passes:
 
@@ -28,7 +28,7 @@ $$T_{\text{decode}} = \sum_{k=1}^{K} T_{\text{decode}}^{(k)}$$
 Finally, the postprocessing latency, $T_{\text{post}}$, captures the host supervisor's overhead to detokenize the emitted token IDs back into a UTF-8 byte stream, parse structured envelopes such as JSON tool calls, and execute initial schema validation before yielding control back to the agent policy.
 
 ```python
-def roofline_decode_latency(params_billion: float, bytes_per_param: float, 
+def roofline_decode_latency(params_billion: float, bytes_per_param: float,
                             bandwidth_tb_s: float, tokens_k: int) -> float:
     """Computes theoretical memory-bound decode latency for batch size B=1."""
     model_bytes = params_billion * 1e9 * bytes_per_param
@@ -41,7 +41,7 @@ This decomposition exposes a critical asymmetry in agent architectures. A softwa
 
 ### Prefill versus Decode: The Accelerator Roofline Boundary
 
-The performance of any numerical workload on accelerator silicon is bounded by two fundamental physical ceilings: the peak floating-point compute capacity of its arithmetic units ($\pi$, measured in FLOPs per second) and the peak bandwidth of the bus shuttling data from device High Bandwidth Memory (HBM) into on-chip Static Random-Access Memory (SRAM) registers ($\beta$, measured in bytes per second). 
+The performance of any numerical workload on accelerator silicon is bounded by two fundamental physical ceilings: the peak floating-point compute capacity of its arithmetic units ($\pi$, measured in FLOPs per second) and the peak bandwidth of the bus shuttling data from device High Bandwidth Memory (HBM) into on-chip Static Random-Access Memory (SRAM) registers ($\beta$, measured in bytes per second).
 
 The operational intensity, or arithmetic intensity $I$, characterizes the algorithmic efficiency of a workload by calculating the ratio of floating-point operations performed to the total volume of memory traffic transferred across the bus:
 
@@ -76,7 +76,7 @@ To saturate the accelerator's matrix math units and avoid wasting compute cycles
 
 : Architectural comparison of the prompt prefill and token decode execution regimes. {#tbl-prefill-decode-roofline}
 
-During the prompt prefill phase, the accelerator evaluates the transformer's feed-forward and projection layers across all $S$ tokens simultaneously. The input activation tensor is a two-dimensional matrix $\mathbf{X} \in \mathbb{R}^{S \times d}$, which multiplies the static parameter weight tensor $\mathbf{W} \in \mathbb{R}^{d \times d_{\text{out}}}$. This operation executes as a dense General Matrix-Matrix Multiplication (GEMM). 
+During the prompt prefill phase, the accelerator evaluates the transformer's feed-forward and projection layers across all $S$ tokens simultaneously. The input activation tensor is a two-dimensional matrix $\mathbf{X} \in \mathbb{R}^{S \times d}$, which multiplies the static parameter weight tensor $\mathbf{W} \in \mathbb{R}^{d \times d_{\text{out}}}$. This operation executes as a dense General Matrix-Matrix Multiplication (GEMM).
 
 In a model containing $P = |\Theta|$ parameters stored in 16-bit precision (2 bytes per parameter), loading the weight tensor transfers $2P$ bytes across the bus. Performing the matrix multiplication over $S$ tokens requires $2 \cdot P \cdot S$ floating-point operations. The arithmetic intensity of the prefill phase is therefore:
 
@@ -84,7 +84,7 @@ $$I_{\text{prefill}} \approx \frac{2 \cdot P \cdot S}{2 \cdot P} = S\text{ FLOPs
 
 When an agent supplies a modest context of $S = 4{,}096$ tokens, the operational intensity reaches $I_{\text{prefill}} \approx 4{,}096\text{ FLOPs/byte}$. Because $4{,}096 \gg I^*$, prefill operates deeply within the compute-bound plateau of the Roofline curve. The matrix units run at high utilization, and the latency $T_{\text{prefill}}$ scales primarily with the total arithmetic operation count divided by the Tensor Core throughput $\pi$.
 
-During the autoregressive decode phase, the situation reverses entirely. Because each generation step evaluates the model for exactly one newly sampled token, the input activation collapses to a single row vector $\mathbf{x} \in \mathbb{R}^{1 \times d}$. The linear projections now execute as General Matrix-Vector Multiplications (GEMV). The accelerator must still sweep the entire parameter weight matrix $\mathbf{W}$ across the memory bus from HBM into SRAM registers, transferring $2P$ bytes. Yet, it performs only $2 \cdot P \cdot 1$ floating-point operations against that single vector. 
+During the autoregressive decode phase, the situation reverses entirely. Because each generation step evaluates the model for exactly one newly sampled token, the input activation collapses to a single row vector $\mathbf{x} \in \mathbb{R}^{1 \times d}$. The linear projections now execute as General Matrix-Vector Multiplications (GEMV). The accelerator must still sweep the entire parameter weight matrix $\mathbf{W}$ across the memory bus from HBM into SRAM registers, transferring $2P$ bytes. Yet, it performs only $2 \cdot P \cdot 1$ floating-point operations against that single vector.
 
 Neglecting the transient retrieval of past key-value states for a moment, the arithmetic intensity of a single decode step is:
 
@@ -94,7 +94,7 @@ If parameters are quantized to 8-bit precision (1 byte per parameter), the opera
 
 ### The Memory Bandwidth Shuttle and Trajectory Serialization
 
-The physical consequence of a low arithmetic intensity is that token decode latency is dictated not by how fast the accelerator can compute, but by how fast its memory controllers can sweep parameter weights across physical traces from HBM into processing registers. 
+The physical consequence of a low arithmetic intensity is that token decode latency is dictated not by how fast the accelerator can compute, but by how fast its memory controllers can sweep parameter weights across physical traces from HBM into processing registers.
 
 On-chip SRAM cache memory on modern accelerators is physically constrained by silicon die area, typically offering between 40 megabytes and 100 megabytes of total storage across all streaming multiprocessors. A foundation model containing tens of billions of parameters cannot reside within on-chip cache. A 70-billion-parameter model occupies 140 gigabytes in 16-bit precision, or 70 gigabytes when quantized to 8-bit representations. Consequently, the parameter tensors must reside in off-chip HBM packages interconnected via silicon interposers.
 
@@ -124,7 +124,7 @@ More than $99.3\%$ of the accelerator's matrix math units sit completely idle du
 $$\text{Throughput} \le \frac{1\text{ token}}{0.020895\text{ seconds}} \approx 47.8\text{ tokens/second}$$
 :::
 
-This quantitative reality highlights why multi-tenant inference runtimes rely on request batching. If the serving runtime groups $B$ independent client requests together, it loads the model weights $\mathbf{W}$ across the memory bus once and multiplies them against an activation matrix $\mathbf{X} \in \mathbb{R}^{B \times d}$ representing the current token from all $B$ streams simultaneously. 
+This quantitative reality highlights why multi-tenant inference runtimes rely on request batching. If the serving runtime groups $B$ independent client requests together, it loads the model weights $\mathbf{W}$ across the memory bus once and multiplies them against an activation matrix $\mathbf{X} \in \mathbb{R}^{B \times d}$ representing the current token from all $B$ streams simultaneously.
 
 Because memory traffic remains fixed at the model footprint while floating-point operations scale linearly with $B$, the operational intensity of decode scales directly with batch size:
 
@@ -132,7 +132,7 @@ $$I_{\text{decode}}(B) \approx \frac{2 \cdot B \cdot P}{P \cdot \text{bytes\_per
 
 By increasing the batch size beyond the hardware ridge point—achieving $B \ge 148$ for 8-bit models on an H100 GPU—the serving runtime drives the hardware back into the compute-bound regime. This amortizes the cost of loading parameters across hundreds of concurrent users, maximizing aggregate server throughput (tokens emitted per second across the entire cluster).
 
-For an autonomous agent, however, service-level batching introduces an acute systems dilemma. An agent's execution is intrinsically a closed-loop sequential process. The agent observes the world, dispatches a prompt to the model, waits for the action token sequence to complete, executes the selected tool against an external environment, and incorporates the tool output into the subsequent prompt. 
+For an autonomous agent, however, service-level batching introduces an acute systems dilemma. An agent's execution is intrinsically a closed-loop sequential process. The agent observes the world, dispatches a prompt to the model, waits for the action token sequence to complete, executes the selected tool against an external environment, and incorporates the tool output into the subsequent prompt.
 
 Because the prompt for step $t+1$ depends strictly on the empirical side effects of the tool invoked at step $t$, the agent cannot pre-generate future tokens or parallelize across successive steps of its own trajectory. Along its own execution path, the agent operates at an irreducible batch size of $B = 1$.
 
@@ -143,7 +143,7 @@ Step t:   [Prompt Prefill (GEMM)] -> [Decode Action (GEMV Shuttle: 20.9 ms/tok)]
 Step t+1: [Prompt Prefill (GEMM)] <- [Append Tool Observations to Context] <---------+
 ```
 
-When an agent runtime dispatches calls to a multi-tenant shared serving engine that uses large dynamic batches to maximize GPU efficiency, the agent suffers substantial queueing delay ($T_{\text{queue}}$) and latency jitter. Each step of the agent's tool loop is subjected to scheduling pauses while the serving engine aggregates requests from other network clients to assemble efficient batches. 
+When an agent runtime dispatches calls to a multi-tenant shared serving engine that uses large dynamic batches to maximize GPU efficiency, the agent suffers substantial queueing delay ($T_{\text{queue}}$) and latency jitter. Each step of the agent's tool loop is subjected to scheduling pauses while the serving engine aggregates requests from other network clients to assemble efficient batches.
 
 Conversely, if the systems engineer provisions dedicated, unbatched accelerator silicon exclusively to minimize the agent's cycle time ($T_{\text{queue}} \to 0$), the physical hardware operates at less than one percent compute efficiency. The host system pays the full power, hardware capital, and thermodynamic cost of the accelerator while utilizing only its memory bus.
 

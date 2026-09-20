@@ -1,8 +1,8 @@
 ## Collection Pipeline Architecture {#sec-vol3-flywheel-pipeline}
 
-Executing thousands of multi-turn autonomous agent trajectories against live software environments exposes a fundamental impedance mismatch across the computing stack. An autoregressive rollout worker is bounded by GPU memory bandwidth during decoding and streams token bursts intermittently over tens of seconds. Conversely, the environment sandbox that executes the agent's bash invocations, file modifications, and compiler invocations mutates local kernel state, consumes volatile storage blocks, and allocates host network namespaces. When unvalidated candidate trajectories complete their environment interaction, they must be handed off to a verification pool comprising static linters, hermetic test runners, and secondary neural discriminators whose execution latencies span four orders of magnitude—from $15\text{ ms}$ for an Abstract Syntax Tree (AST) parse to $180\text{ s}$ for a full system integration suite with synthetic network delays. 
+Executing thousands of multi-turn autonomous agent trajectories against live software environments exposes a fundamental impedance mismatch across the computing stack. An autoregressive rollout worker is bounded by GPU memory bandwidth during decoding and streams token bursts intermittently over tens of seconds. Conversely, the environment sandbox that executes the agent's bash invocations, file modifications, and compiler invocations mutates local kernel state, consumes volatile storage blocks, and allocates host network namespaces. When unvalidated candidate trajectories complete their environment interaction, they must be handed off to a verification pool comprising static linters, hermetic test runners, and secondary neural discriminators whose execution latencies span four orders of magnitude—from $15\text{ ms}$ for an Abstract Syntax Tree (AST) parse to $180\text{ s}$ for a full system integration suite with synthetic network delays.
 
-If runtime engineers couple these stages into a monolithic, synchronous execution loop, the slowest verification harness stalls the GPU decode pipeline, while rapid rollout bursts exhaust host kernel file descriptors, leak network namespaces, and drive host hypervisors into catastrophic out-of-memory thrashing. **An industrial trajectory harvesting pipeline cannot treat rollout generation, environment execution, and verification as a monolithic loop; it requires an asynchronous, decoupled pipeline governed by strict backpressure and sub-second ephemeral virtualization.** 
+If runtime engineers couple these stages into a monolithic, synchronous execution loop, the slowest verification harness stalls the GPU decode pipeline, while rapid rollout bursts exhaust host kernel file descriptors, leak network namespaces, and drive host hypervisors into catastrophic out-of-memory thrashing. **An industrial trajectory harvesting pipeline cannot treat rollout generation, environment execution, and verification as a monolithic loop; it requires an asynchronous, decoupled pipeline governed by strict backpressure and sub-second ephemeral virtualization.**
 
 ::: {.column-margin}
 ![Distributed trajectory harvesting topology showing decoupled task dispatch, rollout generation, microVM snapshot pools, staged verification, and columnar sink ingestion governed by closed-loop queue backpressure.](images/svg/vol3-collection-pipeline.svg){#fig-vol3-collection-pipeline}
@@ -24,7 +24,7 @@ To achieve high hardware utilization across heterogeneous compute resources, the
 
 The lifecycle of an individual trajectory begins at the **Task Dispatcher**. The dispatcher maintains a prioritized queue of task fixture descriptors ($\mathcal{F} = \langle S_0, \mathcal{M}_{\text{tool}}, \mathcal{P}_{\text{task}}, K \rangle$). It assigns each task a cryptographic seed to guarantee deterministic pseudo-random number generator (PRNG) initialization across repeated rollouts. Rather than pushing work directly to compute nodes, the dispatcher exposes a pull-based leasing protocol. When an idle worker in the **Rollout Fleet** requests a task, the dispatcher leases the fixture for a duration $T_{\text{lease}} = 2 \times T_{\max}$, where $T_{\max}$ is the task's hard execution timeout. If the rollout worker fails to emit a heartbeat before $T_{\text{lease}}$ expires, the dispatcher re-enqueues the fixture with an incremented retry counter.
 
-The **Rollout Worker** acts as an unprivileged, stateless host supervisor. It executes the agent loop: token generation requests are dispatched over gRPC to an inference cluster (e.g., vLLM or SGLang running high-throughput speculative decoding), while candidate tool actions are mediated under Zero Ambient Authority ($A=0$). The rollout worker does not execute commands locally. Instead, it acquires an execution lease from the **Ephemeral Sandbox Pool**. 
+The **Rollout Worker** acts as an unprivileged, stateless host supervisor. It executes the agent loop: token generation requests are dispatched over gRPC to an inference cluster (e.g., vLLM or SGLang running high-throughput speculative decoding), while candidate tool actions are mediated under Zero Ambient Authority ($A=0$). The rollout worker does not execute commands locally. Instead, it acquires an execution lease from the **Ephemeral Sandbox Pool**.
 
 To prevent agent actions from contaminating the host or cross-pollinating concurrent runs, each trajectory is pinned to an isolated hardware virtual machine (such as a Firecracker microVM) or an unprivileged container sandbox. Rather than incurring the multi-second latency of booting a fresh Linux kernel or running `docker run` from scratch, the sandbox pool maintains a warm pool of paused microVM snapshots. Using copy-on-write (CoW) page tables and overlay block storage on local NVMe arrays, a worker resumes an identical base snapshot $S_0$ in under $10\text{ ms}$.
 
@@ -85,7 +85,7 @@ Trajectories passing the verification threshold $c^*$ are tagged with comprehens
 
 ### Queueing Dynamics and Backpressure Governance
 
-Because the individual stages of the collection pipeline possess vastly disparate service distributions, an unmanaged architecture will inevitably oscillate between catastrophic memory exhaustion and worker starvation. Let $\lambda_{\text{rollout}}$ denote the mean arrival rate of completed trajectories emerging from the rollout fleet, and let $\mu_{\text{verify}}$ represent the aggregate service rate of the verification worker pool. 
+Because the individual stages of the collection pipeline possess vastly disparate service distributions, an unmanaged architecture will inevitably oscillate between catastrophic memory exhaustion and worker starvation. Let $\lambda_{\text{rollout}}$ denote the mean arrival rate of completed trajectories emerging from the rollout fleet, and let $\mu_{\text{verify}}$ represent the aggregate service rate of the verification worker pool.
 
 Under stationary operational conditions, queueing stability requires that the system traffic intensity satisfy:
 
@@ -145,13 +145,13 @@ Setting a high-water mark at $Q_{\text{high}} = 0.75 \times Q_{\max} \approx 2{,
 
 To protect the system from memory exhaustion and cascading worker failure, the harvesting architecture implements a dual-watermark **closed-loop backpressure controller**. The controller monitors the instantaneous queue depth $Q_{\text{current}}$ of the verification staging buffer:
 
-$$\text{Dispatcher State} = \begin{cases} 
+$$\text{Dispatcher State} = \begin{cases}
 \text{ACTIVE} & \text{if } Q_{\text{current}} \le Q_{\text{low}} \\
 \text{THROTTLED}(p_{\text{shed}}) & \text{if } Q_{\text{low}} < Q_{\text{current}} < Q_{\text{high}} \\
 \text{HALTED} & \text{if } Q_{\text{current}} \ge Q_{\text{high}}
 \end{cases}$$
 
-When $Q_{\text{current}}$ crosses $Q_{\text{high}}$, the Task Dispatcher revokes lease offers to the rollout fleet. Idle rollout workers are prevented from initiating new rollouts, remaining parked in an asynchronous wait loop. 
+When $Q_{\text{current}}$ crosses $Q_{\text{high}}$, the Task Dispatcher revokes lease offers to the rollout fleet. Idle rollout workers are prevented from initiating new rollouts, remaining parked in an asynchronous wait loop.
 
 Rather than relying purely on reactive queue watermarks, high-throughput harvesting systems employ **credit-based flow control**. Each rollout worker must acquire an execution credit from a centralized lease manager before pulling a task fixture. The lease manager provisions a total pool of credits bounded by:
 
@@ -227,7 +227,7 @@ The sanitation harness implements process containment using Linux **cgroup v2** 
 echo 1 > /sys/fs/cgroup/agent/sandbox_1042/cgroup.kill
 ```
 
-Unlike sending a positional `kill -9` to the process identifier (which risks leaving orphaned child processes if the agent spawned background daemons that detached from the parent process tree), `cgroup.kill` invokes the kernel's internal task-killer across every thread sharing the cgroup leaf atomically. 
+Unlike sending a positional `kill -9` to the process identifier (which risks leaving orphaned child processes if the agent spawned background daemons that detached from the parent process tree), `cgroup.kill` invokes the kernel's internal task-killer across every thread sharing the cgroup leaf atomically.
 
 To eliminate network interface leakage, the host supervisor wraps network creation in an explicit context manager that pairs the generation of every virtual interface with a guaranteed finalizer. The supervisor tracks the lifecycle using an append-only in-memory lease registry:
 

@@ -3,7 +3,7 @@
 In-memory supervision orchestrates an agent across transient turns, but volatile memory vanishes the instant a host machine reboots, an operating system preempts a container, or a physical power rail faults. If an agent runtime maintains its active control state solely within volatile dynamic random-access memory (DRAM), any infrastructure interruption annihilates the execution context, stranding distributed jobs, abandoning allocated cloud resources, and leaving remote environments in corrupted, partially mutated states. **An append-only event history preserves what the runtime knew, authorized, and observed, while current-state projections make operational resumption efficient; mutable in-place updates destroy causal auditability.**
 
 ::: {.column-margin}
-**Event Sourcing vs. CRUD in Systems Design**  
+**Event Sourcing vs. CRUD in Systems Design**
 In 1992, Mendel Rosenblum and John K. Ousterhout demonstrated in their Log-Structured File System (LFS) that treating storage as an append-only log maximizes write throughput and guarantees rapid crash recovery. Martin Fowler generalized this in software architecture as *Event Sourcing*: capturing all changes to application state as an immutable sequence of events rather than mutating records in place. In agentic systems, this principle becomes a safety and auditability imperative: because the neural inference engine is fundamentally non-deterministic, the historical event log is the sole authoritative record of what the machine observed, decided, and executed.
 :::
 
@@ -46,21 +46,21 @@ $$S_{\text{total}} = 100 \times 15\text{ KB} = 1.5\text{ MB}$$
 
 We compare the physical storage overhead and recovery performance of two architectural approaches on an enterprise NVMe solid-state drive (PCIe Gen 5, $4\text{ KB}$ sector size, sustained sequential read bandwidth $B_{\text{seq}} = 5{,}000\text{ MB/s}$, random $4\text{ KB}$ write latency $T_{\text{rand}} = 25\ \mu\text{s}$):
 
-**Case 1: Mutable In-Place Relational/Document Storage**  
+**Case 1: Mutable In-Place Relational/Document Storage**
 The supervisor maintains a single JSON document or relational row for the trajectory, updating it in place on every turn. Because document updates modify existing pages within a B-tree storage engine, each $15\text{ KB}$ turn triggers random writes across the table space, the write-ahead log of the database engine itself, and secondary indexes (e.g., indexed by `agent_id`, `status`, and `updated_at`). In a typical relational or document database handling random updates, the system-level Write Amplification Factor ($\text{WAF}_{\text{db}}$) ranges from 12 to 25 due to page dirties, double-write buffers, and journal synchronization. Assuming a conservative $\text{WAF}_{\text{db}} = 16$:
 
 $$\text{Bytes Written}_{\text{in-place}} = 100 \times 15\text{ KB} \times 16 = 24.0\text{ MB}$$
 
 Furthermore, each in-place update requires synchronous page-level locking and random I/O coordination, introducing an average write latency of $2.5\text{ ms}$ per turn when accounting for filesystem journal flushing, totaling $250\text{ ms}$ of cumulative blocking delay across the trajectory. Crucially, if the host crashes during turn 75, the intermediate reasoning steps and observations from turns 1 through 74 have been overwritten; the database stores only the latest state, destroying causal history.
 
-**Case 2: Log-Structured Append-Only Event Stream**  
+**Case 2: Log-Structured Append-Only Event Stream**
 The supervisor appends event records sequentially to an open trajectory log file. Modern filesystems and NVMe controllers handle sequential appends with near-optimal efficiency. Because writes are purely append-only, flash translation layers (FTL) avoid read-modify-write cycles, yielding a write amplification factor close to unity ($\text{WAF}_{\text{log}} \approx 1.05$ accounting for filesystem inode updates):
 
 $$\text{Bytes Written}_{\text{append}} = 1.5\text{ MB} \times 1.05 = 1.575\text{ MB}$$
 
 Sequential write transfer time for a $15\text{ KB}$ chunk across the PCIe bus takes less than $3.5\ \mu\text{s}$. The write overhead is dominated entirely by the operating system's non-volatile flush barrier (`fsync()`), which takes approximately $30\ \mu\text{s}$ on modern enterprise drives with power-loss protection (PLP).
 
-**Crash Recovery Calculation**  
+**Crash Recovery Calculation**
 Suppose the host process experiences a panic at turn $t = 100$. To recover the exact control state using event sourcing, the recovering supervisor sequentially reads the entire $1.5\text{ MB}$ event log from disk into memory. The physical I/O read time is:
 
 $$T_{\text{read}} = \frac{1.5\text{ MB}}{5{,}000\text{ MB/s}} = 0.0003\text{ s} = 0.3\text{ ms}$$

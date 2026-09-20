@@ -1,6 +1,6 @@
 ## Prefill, Decode, and Accelerator Hardware Physics {#sec-vol3-processor-cost}
 
-An accelerator executing a foundation model does not operate in a single, uniform execution regime; it bifurcates into two computational phases governed by fundamentally different physical limits. When processing the initial staged prompt of $M$ tokens, the accelerator functions as a massively parallel compute engine running matrix-matrix multiplications (GEMM) that saturate hardware floating-point units. The instant generation transitions to producing output tokens, this parallel efficiency collapses: the accelerator is forced into an iterative sequence of matrix-vector multiplications (GEMV) where execution speed is constrained by the speed of reading model parameters from High-Bandwidth Memory (HBM). 
+An accelerator executing a foundation model does not operate in a single, uniform execution regime; it bifurcates into two computational phases governed by fundamentally different physical limits. When processing the initial staged prompt of $M$ tokens, the accelerator functions as a massively parallel compute engine running matrix-matrix multiplications (GEMM) that saturate hardware floating-point units. The instant generation transitions to producing output tokens, this parallel efficiency collapses: the accelerator is forced into an iterative sequence of matrix-vector multiplications (GEMV) where execution speed is constrained by the speed of reading model parameters from High-Bandwidth Memory (HBM).
 
 Understanding this split is essential for systems engineers. In single-trajectory agentic workloads, the host runtime cannot arbitrarily scale batch sizes to mask latency. To optimize agent responsiveness, manage timeouts, and budget token allocations, we must ground our software architectures in the physical realities of memory bandwidth, operational intensity, and accelerator hardware limits.
 
@@ -61,7 +61,7 @@ During prefill, the serving runtime ingests all $M$ staged tokens of the prompt 
 
 $$\mathbf{Y} = \mathbf{W}\mathbf{X} \in \mathbb{R}^{d_{\text{out}} \times M}$$
 
-This operation is a dense General Matrix-Matrix Multiplication (GEMM). Evaluating $\mathbf{Y}$ requires $2 \cdot d_{\text{out}} \cdot d_{\text{in}} \cdot M$ floating-point operations (each matrix multiply-accumulate represents one multiplication and one addition, or $2\text{ FLOPs}$). 
+This operation is a dense General Matrix-Matrix Multiplication (GEMM). Evaluating $\mathbf{Y}$ requires $2 \cdot d_{\text{out}} \cdot d_{\text{in}} \cdot M$ floating-point operations (each matrix multiply-accumulate represents one multiplication and one addition, or $2\text{ FLOPs}$).
 
 Assuming weights are loaded once from HBM into on-chip SRAM, reading $\mathbf{W}$ in FP16 ($2\text{ bytes/parameter}$) transfers $2 \cdot d_{\text{out}} \cdot d_{\text{in}}$ bytes. Reading $\mathbf{X}$ transfers $2 \cdot d_{\text{in}} \cdot M$ bytes, and writing $\mathbf{Y}$ transfers $2 \cdot d_{\text{out}} \cdot M$ bytes. For substantial prompt lengths ($M \gg 1$), the parameter weight matrix dominates the memory transfer overhead:
 
@@ -159,35 +159,35 @@ class InvocationLatencyProfile:
     # Token Counts
     prompt_tokens: int            # M: Tokens processed in prefill GEMM
     completion_tokens: int        # K: Tokens generated in decode GEMV
-    
+
     # Software & Queue Overhead (Host CPU)
     t_prep_ms: float              # Tokenization, prompt formatting, context assembly
     t_queue_ms: float             # Time spent waiting in the serving engine queue
-    
+
     # Hardware Execution Breakdown (Accelerator)
     t_ttft_ms: float              # Time-to-First-Token: t_prep + t_queue + t_prefill
     t_prefill_ms: float           # Pure accelerator GEMM prefill computation
     t_decode_total_ms: float      # Cumulative time across all K decode cycles
-    
+
     # Derived Physical Hardware Metrics
     sustained_hbm_bandwidth_tbs: float  # Measured sustained HBM bandwidth
     active_param_count: float           # Model parameter count (e.g., 70e9)
     weight_precision_bytes: float       # Bytes per weight parameter (e.g., 1.0 for FP8)
-    
+
     @property
     def inter_token_latency_ms(self) -> float:
         """Mean Inter-Token Latency (ITL) during the decode phase."""
         if self.completion_tokens <= 1:
             return 0.0
         return self.t_decode_total_ms / (self.completion_tokens - 1)
-    
+
     @property
     def physical_shuttle_floor_ms(self) -> float:
         """Physical HBM weight shuttle floor per token (ms)."""
         bytes_per_token = self.active_param_count * self.weight_precision_bytes
         bw_bytes_per_sec = self.sustained_hbm_bandwidth_tbs * 1e12
         return (bytes_per_token / bw_bytes_per_sec) * 1000.0
-    
+
     @property
     def bus_efficiency(self) -> float:
         """Ratio of theoretical physical shuttle minimum to actual ITL."""
@@ -258,7 +258,7 @@ $$I_{\text{decode}}(B) \approx B \cdot I_{\text{decode}}(1) \approx B\text{ FLOP
 
 By increasing $B$ to a value near $I_{\text{sat}}$ (e.g., $B \approx 128\text{ to }256$), the serving runtime shifts decode from the memory-bound regime into the compute-bound regime. Aggregate system throughput across all users scales up by orders of magnitude, amortizing the cost of reading weights across dozens of concurrent requests.
 
-However, an autonomous agent cannot take advantage of this mechanism within its own execution loop. 
+However, an autonomous agent cannot take advantage of this mechanism within its own execution loop.
 
 An autonomous agent's execution trajectory is strictly sequential: step $n+1$ depends directly on the environmental observation returned by tool execution at step $n$, which depends on the completion of the tool call emitted at step $n-1$. The agent's control loop cannot generate alternative trajectories concurrently without spawning speculative execution branches. For a single agent solving a single software problem, **the batch size is fixed at $B = 1$**.
 
@@ -266,6 +266,6 @@ This operational reality creates **The Batching Dilemma**:
 1. If the agent runtime hosts its own dedicated accelerator instance at $B=1$, it achieves minimum queue latency ($T_{\text{queue}} \to 0$), but suffers the full penalty of the parameter shuttle floor, running the accelerator at less than $1\%$ hardware compute efficiency.
 2. If the agent dispatches requests to a shared, multi-tenant serving cluster (such as an enterprise inference fleet running vLLM or continuous-batching engines), the serving engine aggregates hundreds of requests into large batches to maximize GPU utilization. While this lowers the monetary cost per token, it introduces queue latency jitter ($T_{\text{queue}}$) and inter-token latency spikes caused by prefill preemption—often degrading the real-time responsiveness of the agent host.
 
-Because every generated token in an unbatched agent trajectory requires shuttling tens of gigabytes of weights across the accelerator bus, generating syntax errors or unparseable text wastes critical latency and bandwidth budgets. If an agent executes a 100-token decode step that takes $3.5\text{ seconds}$ to stream from HBM, only to emit a malformed JSON payload containing an unescaped string or a hallucinated parameter key, that entire latency envelope is wasted. The host parser rejects the malformed payload, requiring an expensive error-correction round trip that doubles invocation costs.
+Because every generated token in an unbatched agent trajectory requires shuttling tens of gigabytes of weights across the accelerator bus, generating syntax errors or unparsable text wastes critical latency and bandwidth budgets. If an agent executes a 100-token decode step that takes $3.5\text{ seconds}$ to stream from HBM, only to emit a malformed JSON payload containing an unescaped string or a hallucinated parameter key, that entire latency envelope is wasted. The host parser rejects the malformed payload, requiring an expensive error-correction round trip that doubles invocation costs.
 
 To prevent this waste of accelerator bandwidth and runtime latency, production agent architectures enforce structural and syntactic constraints directly during the autoregressive generation loop. By restricting output generation to valid schemas at decoding time, systems eliminate formatting failures before tokens leave the accelerator. This runtime constraint mechanism—**Grammar-Guided Decoding**—is the focus of the next section.

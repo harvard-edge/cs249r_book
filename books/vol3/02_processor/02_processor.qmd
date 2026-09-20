@@ -104,7 +104,7 @@ The physical boundary between the host supervisor and the neural core also impos
 
 A quantitative analysis of the interconnect traffic reveals why logit sampling must reside entirely on the accelerator, making the token ID the irreducible atomic unit of exchange across the host interface.
 
-::: {#exmp-logit-interconnect-bottleneck .callout-example title="The Logit Interconnect Bottleneck"}
+::: {#exmp-logit-interconnect-bottleneck .callout-example title="The logit interconnect bottleneck"}
 **Problem:** Consider an inference service serving an open-weight foundation model with a modern vocabulary size of $|V| = 128{,}000$ subword tokens. The inference service hosts an active concurrent batch of $B = 64$ streams running on a single accelerator board connected via a standard PCIe 4.0 $\times 16$ interconnect. Each generation stream produces output at an average decode rate of $R = 40\text{ tokens/second}$.
 
 Calculate the continuous interconnect bandwidth required if the accelerator transmits raw 16-bit floating-point logits (`fp16`, 2 bytes per logit) back to the host CPU for sampling, versus transmitting discrete 32-bit integer token identifiers (`uint32`, 4 bytes per token). Evaluate the systems feasibility of host-side sampling under fine-grained PCIe transfer overheads.
@@ -143,7 +143,7 @@ A foundation model cannot read strings. While human programmers and software too
 
 **A tokenizer is fundamentally a statistical byte compressor rather than a grammar-aware compiler lexer; this architectural distinction creates severe impedance mismatches with programming language syntax trees, inflates the latency and memory overhead of structured serialization formats, and imposes a rigid physical memory tax on accelerator hardware.** When an agent supervisor dispatches a prompt or ingests an execution trace, it must budget tokens not as abstract lexical units, but as physical resource allocations that consume silicon memory bandwidth and bound the execution horizon of the neural engine.
 
-### The Lexing Boundary
+### The lexing boundary
 
 Traditional compiler frontends partition source text using deterministic, grammar-driven lexers. A compiler lexer maps character streams into a stream of typed tokens defined by a formal language specification (such as `IDENTIFIER`, `KEYWORD_DEF`, or `OPERATOR_PLUS`). In open-domain agent systems, this deterministic approach fails immediately. Natural language exhibits rich morphological diversity, while program execution traces contain an unbounded set of open-vocabulary strings: dynamically generated UUIDs, cryptographic hashes, base64 payloads, obfuscated URLs, and arbitrary variable names like `getUserById_v2_final`. A word-level vocabulary that attempted to catalog this open-ended universe would explode to millions of entries, exhausting host memory and diluting statistical training efficiency. Conversely, capping a word vocabulary at a fixed threshold forces any unseen token to collapse into an out-of-vocabulary (`<UNK>`) sentinel, irrevocably destroying syntactic structure and execution semantics.
 
@@ -164,7 +164,7 @@ $$\text{Offset}(t_i) = t_i \cdot d_{\text{model}} \cdot b$$
 
 where $b$ is the numerical precision in bytes per element (e.g., $b=2$ for 16-bit floating-point formats like FP16 or BF16). The accelerator memory hierarchy pulls the contiguous row vector at $\text{Offset}(t_i)$ from off-chip High-Bandwidth Memory (HBM) into on-chip Streaming Multiprocessor (SM) registers and scratchpad SRAM. The sequence of discrete integer IDs is thereby materialized as a dense activation tensor $\mathbf{X} \in \mathbb{R}^{S \times d_{\text{model}}}$, ready to enter the multi-head attention pipeline.
 
-### The Structural Impedance Mismatch
+### The structural impedance mismatch
 
 ::: {.column-margin}
 ![](images/svg/vol3_processor_margin_003.svg){width="100%" fig-alt="Horizontal bar ladder showing the single-token memory shuttle latency floor for a 70-billion-parameter FP8 model across four accelerator generations: A100 at 34.3 milliseconds, H100 at 20.9 milliseconds, H200 at 14.6 milliseconds, and B200 at 8.8 milliseconds per token."}
@@ -210,14 +210,14 @@ When an agent invokes a tool via JSON, these structural delimiters cannot merge 
 | Hexadecimal Hash / UUID | SHA-256 digests and raw byte strings          |     1,024      |     682     |      1.50     |               1.50              |
 : **Empirical Token Compression Ratios**: Empirical token compression ratios across text representations under the tiktoken cl100k_base vocabulary. Structured JSON schemas and escaped syntax suffer severe token inflation, depressing character-per-token efficiency by over 40% compared to continuous prose. {#tbl-token-compression-ratios}
 
-As tabulated in @tbl-token-compression-ratios, natural prose compresses efficiently at roughly 4.1 characters per token. In sharp contrast, an escaped JSON tool invocation collapses to 1.7 characters per token—a 58% degradation in information density. The host agent system pays a direct 43% token inflation penalty purely to transmit syntactic framing, squandering expensive accelerator context and memory bandwidth on schema overhead rather than substantive problem-solving logic.
+As tabulated in @tbl-token-compression-ratios, natural prose compresses efficiently at roughly 4.1 characters per token. In sharp contrast, an escaped JSON tool invocation collapses to 1.7 characters per token—a 58 percent degradation in information density. The host agent system pays a direct 43 percent token inflation penalty purely to transmit syntactic framing, squandering expensive accelerator context and memory bandwidth on schema overhead rather than substantive problem-solving logic.
 
-### Context Budgeting Dynamics
+### Context budgeting dynamics
 
 ::: {.column-margin}
 ![](images/svg/vol3_processor_margin_004.svg){width="100%" fig-alt="Budget envelope showing total invocation latency against a 15-second SLA deadline: Interface 1 (monolithic JSON) generates 1,850 tokens, taking 39.9 seconds and burning deep into the red violation zone, while Interface 2 (anchored diff) generates 80 tokens, completing in 2.85 seconds well within the allowable budget."}
 
-*Monolithic JSON breaches the 15-second latency SLA by 166%, while anchored diff completes in 2.85 seconds.*
+*Monolithic JSON breaches the 15-second latency SLA by 166 percent, while anchored diff completes in 2.85 seconds.*
 :::
 A common systems error in agent runtime design is relying on naive rules of thumb, such as the widely cited heuristic that "one token equals four characters." While this approximation holds for continuous English paragraphs, @tbl-token-compression-ratios demonstrates that it fails completely when applied to source code, compiler diagnostic traces, and JSON RPC envelopes.
 
@@ -237,13 +237,13 @@ As illustrated in the truncated trace above, hitting a physical context boundary
 
 This failure mode establishes the *Quarantining Invariant*:
 
-::: {#chk-02-context-exhaustion-quarantine .callout-checkpoint title="Context Exhaustion and Quarantine"}
+::: {#chk-02-context-exhaustion-quarantine .callout-checkpoint title="Context exhaustion and quarantine"}
 Under Zero Ambient Authority ($A=0$), any candidate output generated under an exhausted context budget (`finish_reason == "length"`) or missing structural termination delimiters must be treated as an untrusted, corrupted artifact. The host supervisor must quarantine the candidate token stream, refuse to pass the payload to external execution sandboxes, and discard any proposed state mutations.
 :::
 
 When a generation boundary fault occurs, the host runtime must either invoke an explicit context compaction strategy (such as pruning older tool execution turns) or surface an unrecoverable resource exhaustion fault to the user. An unverified, partially generated token stream must never cross the isolation boundary into an active operating system environment.
 
-### Physical Memory Footprint of the Key-Value Cache
+### Physical memory footprint of the key-value cache
 
 The discrete token representation is not merely an abstraction for the input stage; every active token consumes physical hardware memory throughout the entire duration of an agent's execution. While the input embedding gather executes once during the initial prompt processing pass, each token leaves a permanent footprint in the accelerator's High-Bandwidth Memory: the Key-Value (KV) cache.
 
@@ -273,7 +273,7 @@ $$\text{Mem}_{\text{KV}}(S) = S \cdot \text{Mem}_{\text{KV,token}}$$
 
 This linear memory scaling creates an unforgiving systems constraint: on accelerator hardware, context length translates directly into physical capacity saturation.
 
-::: {#exmp-02-kv-cache-memory-explosion .callout-example title="KV Cache Memory Explosion in a 128k Long-Context Serving Node"}
+::: {#exmp-02-kv-cache-memory-explosion .callout-example title="KV cache memory explosion in a 128k long-context serving node"}
 Consider an agentic coding assistant deployed on a frontier model whose architecture matches Llama-3-70B. The network parameters are:
 
 - Layer depth: $L = 80$
@@ -333,13 +333,13 @@ The probabilistic contract where the joint likelihood of a token sequence decomp
 
 **The foundational dilemma of sequence generation is that an accelerator cannot compute token $t$ until the discrete identity of token $t-1$ is finalized and bound to the Key-Value cache.** Generating a sequence requires an iterative serving loop that repeatedly evaluates the model and samples a token, creating an irreducibly serial causal dependency along one output path. For the agent systems engineer, this operational reality dictates both the wall-clock latency characteristics of model invocation and the non-deterministic interface boundaries across which candidate tool calls and structured plans are emitted.
 
-### Autoregressive Factorization
+### Autoregressive factorization
 
-Mathematically, a foundation model does not generate an entire sequence $\mathbf{y} = (y_1, y_2, \dots, y_K)$ in a single holistic calculation. Instead, it defines a joint probability distribution over candidate token sequences conditioned on an input prompt $\mathbf{x} = (x_1, x_2, \dots, x_S)$. By the probability chain rule, this joint distribution decomposes strictly into a directed product of conditional next-token probabilities:
+Mathematically, a foundation model does not generate an entire sequence $\mathbf{y} = (y_1, y_2, \dots, y_K)$ in a single holistic calculation. Instead, it defines a joint probability distribution over candidate token sequences conditioned on an input prompt $\mathbf{x} = (x_1, x_2, \dots, x_S)$. By the probability chain rule, this joint distribution decomposes strictly into a directed product of conditional next-token probabilities (@eq-autoregressive-factorization):
 
 $$P(y_{1:K} \mid x_{1:S}) = \prod_{t=1}^{K} P(y_t \mid x_{1:S}, y_{1:t-1})$$ {#eq-autoregressive-factorization}
 
-In this factorization, the context conditioning token $y_t$ consists of two distinct segments: the static, immutable input prefix $x_{1:S}$ provided by the host application, and the dynamic prefix of previously generated tokens $y_{<t} = (y_1, \dots, y_{t-1})$ produced by prior iterations of the decode loop. At each generation step $t$, the neural network acts as a parameterized function $\mathbf{f}_\Theta$ mapping the current sequence history $(x_{1:S}, y_{<t})$ to an unnormalized vector of scores across the discrete vocabulary $\mathcal{V}$:
+In this factorization, the context conditioning token $y_t$ consists of two distinct segments: the static, immutable input prefix $x_{1:S}$ provided by the host application, and the dynamic prefix of previously generated tokens $y_{<t} = (y_1, \dots, y_{t-1})$ produced by prior iterations of the decode loop. At each generation step $t$, the neural network acts as a parameterized function $\mathbf{f}_\Theta$ mapping the current sequence history $(x_{1:S}, y_{<t})$ to an unnormalized vector of scores across the discrete vocabulary $\mathcal{V}$ (@eq-logit-generation):
 
 $$\mathbf{z}_t = \mathbf{f}_\Theta(x_{1:S}, y_{<t}) \in \mathbb{R}^{|\mathcal{V}|}$$ {#eq-logit-generation}
 
@@ -349,7 +349,7 @@ Because the vocabulary size $|\mathcal{V}|$ typically ranges between $32{,}000$ 
 
 Classical search procedures like beam search retain a small pool of candidate hypotheses at each step, but they scale memory consumption linearly with the beam width and introduce significant decoding synchronization overhead. Modern high-throughput inference engines and agent runtimes almost universally dispense with beam search, opting instead for point-wise sampling or greedy selection along a single trajectory.
 
-### The Serving State Machine
+### The serving state machine
 
 To execute this mathematical factorization on physical hardware, the serving runtime wraps the neural network inside an iterative control loop. This loop maintains dynamic execution state across iterations, coordinating memory buffers, device kernels, and termination delimiters.
 
@@ -392,7 +392,7 @@ The host supervisor enforces three distinct stop conditions during boundary eval
 *   **Host Stop Delimiters:** The runtime matches emitted subword sequences against application-specified byte strings (such as `\nObservation:` or `</tool_call>`), terminating model execution immediately when the generation crosses an external architectural boundary.
 *   **Resource Ceilings ($T_{\max}$):** The loop reaches a strict maximum output token limit $T_{\max}$, preventing non-terminating loops and enforcing budget isolation.
 
-### The Causal Serialization Barrier
+### The causal serialization barrier
 
 ::: {.column-margin}
 ![](images/svg/vol3_processor_margin_002.svg){width="100%" fig-alt="Hardware roofline model on an NVIDIA H100 GPU: a blue memory-bound slope rises to a vertical dashed ridge at 295 FLOPs/byte before flattening into an orange compute ceiling at 989 TFLOP/s. The unbatched decode dot sits at 1 FLOP/byte (0.68% compute utilization), while the prompt prefill dot sits high on the compute plateau at 4,096 FLOPs/byte."}
@@ -401,7 +401,7 @@ The host supervisor enforces three distinct stop conditions during boundary eval
 :::
 To engineers steeped in the design of out-of-order, superscalar microprocessors, this iterative loop appears glaringly inefficient. Modern microprocessors extract extensive instruction-level parallelism (ILP) by looking dozens or hundreds of cycles ahead in an instruction stream, executing instructions out of program order, and employing sophisticated branch predictors to speculate past conditional jumps. One might naturally ask: why cannot a high-throughput tensor accelerator speculatively evaluate token $t+50$ while token $t$ is being sampled?
 
-The obstacle lies in the mathematical structure of the self-attention mechanism and the extreme cardinality of the token vocabulary. In a multi-layer Transformer, the query vector $\mathbf{Q}_t$, key vector $\mathbf{K}_t$, and value vector $\mathbf{V}_t$ computed at layer $l$ for step $t$ depend directly on the contextual representation emitted by layer $l-1$:
+The obstacle lies in the mathematical structure of the self-attention mechanism and the extreme cardinality of the token vocabulary. In a multi-layer Transformer, the query vector $\mathbf{Q}_t$, key vector $\mathbf{K}_t$, and value vector $\mathbf{V}_t$ computed at layer $l$ for step $t$ depend directly on the contextual representation emitted by layer $l-1$ (@eq-attention-causal-step):
 
 $$\operatorname{Attention}(\mathbf{Q}_t, \mathbf{K}_{1:t}, \mathbf{V}_{1:t}) = \operatorname{softmax}\left(\frac{\mathbf{Q}_t \mathbf{K}_{1:t}^T}{\sqrt{d_k}}\right) \mathbf{V}_{1:t}$$ {#eq-attention-causal-step}
 
@@ -412,7 +412,7 @@ Here, $\mathbf{K}_{1:t}$ and $\mathbf{V}_{1:t}$ represent the full concatenated 
 A CPU branch predictor chooses between two explicit instruction addresses ($0$ or $1$). An autoregressive model branches across a simplex of $|\mathcal{V}| \ge 32{,}000$ possible transitions at every step.
 :::
 
-On a general-purpose CPU, conditional branches are binary, exhibiting strong temporal and spatial correlation that enables branch prediction accuracies exceeding 95%. On an accelerator evaluating an autoregressive language model, however, the branching factor at every single step is $|\mathcal{V}| \approx 32{,}000$ to $128{,}000$. Speculating just four tokens ahead without resolving intermediate selections would require expanding a combinatorial tree of $|\mathcal{V}|^4 \approx 10^{18}$ parallel execution paths—vastly exceeding the aggregate computational capacity of any physical data center.
+On a general-purpose CPU, conditional branches are binary, exhibiting strong temporal and spatial correlation that enables branch prediction accuracies exceeding 95 percent. On an accelerator evaluating an autoregressive language model, however, the branching factor at every single step is $|\mathcal{V}| \approx 32{,}000$ to $128{,}000$. Speculating just four tokens ahead without resolving intermediate selections would require expanding a combinatorial tree of $|\mathcal{V}|^4 \approx 10^{18}$ parallel execution paths—vastly exceeding the aggregate computational capacity of any physical data center.
 
 Consequently, generation is bound by an absolute *causal serialization barrier*. The identity of token $y_t$ depends on $y_{t-1}$; the identity of $y_{t+1}$ depends on $y_t$; and no mathematical bypass allows the engine to compute the state representations for step $t+1$ without committing to a concrete choice for $y_t$. While techniques such as speculative decoding can leverage a smaller auxiliary model to propose candidate linear sequences, the primary model must still verify those tokens against its own sequential KV representations, as illustrated in @fig-vol3-speculative-decoding. For standard autoregressive decode loops, the wall-clock execution time scales strictly linearly with the number of generated tokens $K$.
 
@@ -430,14 +430,14 @@ This guarantees that the combined output distribution is bit-exact identical to 
 ![](images/svg/speculative_decoding_pipeline.svg)
 :::
 
-### Sampling on the Vocabulary Simplex
+### Sampling on the vocabulary Simplex
 
 ::: {.column-margin}
 ![](images/svg/vol3_processor_margin_001.svg){width="100%" fig-alt="Ranked vocabulary probability distribution: the top two tokens capture 95.9% of cumulative mass under top-p nucleus truncation (p=0.90, in emerald), while rigid top-k (k=4) forces inclusion of two low-probability tail tokens (in crimson)."}
 
 *Top-p dynamically contracts to two high-confidence tokens while rigid top-k forces low-probability tail inclusion.*
 :::
-Once an execution step emits the unnormalized logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$, the runtime must map these raw scores onto a probability distribution over the vocabulary simplex. This transformation is governed by the *temperature* scaling parameter $\tau > 0$, which modifies the relative sharpness of the distribution prior to applying the softmax operator:
+Once an execution step emits the unnormalized logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$, the runtime must map these raw scores onto a probability distribution over the vocabulary simplex. This transformation is governed by the *temperature* scaling parameter $\tau > 0$, which modifies the relative sharpness of the distribution prior to applying the softmax operator (@eq-temperature-softmax):
 
 $$P(y_t = v \mid x_{1:S}, y_{<t}) = \frac{\exp\left(z_{t, v} / \tau\right)}{\sum_{w \in \mathcal{V}} \exp\left(z_{t, w} / \tau\right)}$$ {#eq-temperature-softmax}
 
@@ -467,7 +467,7 @@ Top-$k$ applies a rigid rank ceiling regardless of certainty. Top-$p$ dynamicall
     $$\mathcal{V}_p = \arg\min_{\mathcal{S} \subseteq \mathcal{V}} |\mathcal{S}| \quad \text{subject to} \quad \sum_{v \in \mathcal{S}} P(v \mid x_{1:S}, y_{<t}) \ge p$$
     All tokens outside $\mathcal{V}_p$ have their logits masked to $-\infty$, and the remaining scores are renormalized. Under high certainty, $|\mathcal{V}_p|$ naturally collapses to one or two tokens; under high entropy, $|\mathcal{V}_p|$ expands to accommodate the broad candidate pool.
 
-::: {#exmp-02-logit-scaling-and-truncation-on .callout-example title="Logit Scaling and Truncation on the Vocabulary Simplex"}
+::: {#exmp-02-logit-scaling-and-truncation-on .callout-example title="Logit scaling and truncation on the vocabulary Simplex"}
 Consider a reduced vocabulary $\mathcal{V} = \{v_1, v_2, v_3, v_4, v_5\}$ where an execution step emits unnormalized logits $\mathbf{z}_t = [12.0, 10.5, 9.0, 6.0, 3.0]$. We examine the resulting probability distributions across three distinct runtime sampling configurations.
 
 **Step 1: Baseline Softmax at Unit Temperature ($\tau = 1.0$)**
@@ -515,7 +515,7 @@ Consider an agent runtime executing a system maintenance task where the foundati
 
 **Sequence likelihood measures statistical typicality within a training corpus, not operational correctness, semantic truth, or system invariant preservation.** A foundation model is an unprivileged, non-deterministic pattern-matching engine that produces hypotheses, not validated operational commands. In an agentic architecture governed by Zero Ambient Authority ($A=0$), candidate token streams must never possess direct execution privileges against physical host resources. The host agent runtime must stage every emitted candidate in memory escrow and subject it to a multi-tiered, deterministic verification perimeter before any state transition is authorized.
 
-### The Epistemic Gap
+### The epistemic gap
 
 During autoregressive generation, the probability assigned to a complete candidate sequence $\mathbf{y}_{1:K} = (y_1, y_2, \dots, y_K)$ conditioned on prompt $\mathbf{x}$ and model weights $\Theta$ is given by the product of individual token likelihoods:
 
@@ -543,7 +543,7 @@ Found 1 validation failure in candidate payload staged in escrow.
 
 The model generated `"worker_threads": 16` because multi-threaded configurations are pervasive in server software. However, the target microservice architecture enforces an asynchronous single-threaded event loop, making this attribute an invalid configuration entry that would prevent service initialization.
 
-### Memory Escrow Mechanics
+### Memory escrow mechanics
 
 To protect host resources against fail-plausible candidates, the agent architecture must adhere to the Saltzer-Kaashoek principle of least privilege. In particular, the foundation model must operate under strict Zero Ambient Authority ($A=0$). Ambient authority occurs when a process possesses system privileges merely by virtue of its existence—such as a program inheriting the full filesystem permissions of the user who launched it. If an LLM invocation had ambient authority, tokens streaming from the accelerator's memory bus could trigger POSIX `write()`, `fork()`, or `socket()` syscalls dynamically as delimiters are decoded.
 
@@ -558,7 +558,7 @@ The lifecycle of every candidate sequence within the host supervisor follows a s
 3. `VALIDATING`: The host runtime dispatches the staged payload to the deterministic verification perimeter. The model cannot alter the payload during this phase.
 4. `COMMITTED` or `REJECTED`: If every verification gate in the perimeter passes, the runtime issues execution capabilities, promoting the candidate to an actionable system command. If any gate rejects the payload, the candidate is discarded, and an error envelope is synthesized for diagnostic logging or subsequent handling.
 
-### The Fallacy of Autoregressive Self-Checking
+### The fallacy of autoregressive self-checking
 
 A tempting but fundamentally flawed approach to verification is *autoregressive self-checking*—prompting the foundation model to inspect its own generated continuation and answer whether the proposed action is correct. Practitioners often construct prompts of the form: *"You generated the above shell command. Review it carefully. Is it correct and safe to execute? Reply YES or NO."*
 
@@ -576,12 +576,12 @@ Because each evaluation step incurs an independent probability of sampling error
 
 In 1984, Saltzer, Reed, and Clark articulated the *End-to-End Argument in System Design*: a function that requires complete correctness cannot be implemented solely inside the lower-level communication or generation mechanism; it can only be reliably implemented with the assistance of the application endpoints that possess full domain knowledge. In agent architectures, the foundation model is an intermediate hypothesis generator. True invariant closure can only be achieved at the host runtime endpoint, using deterministic verification tools that possess ground-truth authority over the system environment. In formal methods terminology, a deterministic software validator (such as a compiler, linter, or schema parser) provides *soundness* with respect to checked invariants: it guarantees zero false approvals on invalid payloads ($P(\text{PASS} \mid \text{Defective}) = 0$). An autoregressive neural self-checker provides neither soundness nor completeness: it routinely approves invalid payloads (false positives) while rejecting valid yet novel structures (false negatives), rendering it fundamentally defective as a systems reference monitor.
 
-::: {#psp-02-the-fallacy-of-correlated-self-verification .callout-perspective title="The Fallacy of Correlated Self-Verification"}
+::: {#psp-02-the-fallacy-of-correlated-self-verification .callout-perspective title="The fallacy of correlated self-verification"}
 **Problem:**
-An agent runtime stages an emitted configuration payload $\mathbf{y}$ consisting of $K = 128$ tokens. Due to imperfect training distribution coverage, the model has an operational error rate of $\epsilon = 0.18$ (18% of generated payloads violate runtime invariants).
+An agent runtime stages an emitted configuration payload $\mathbf{y}$ consisting of $K = 128$ tokens. Due to imperfect training distribution coverage, the model has an operational error rate of $\epsilon = 0.18$ (18 percent of generated payloads violate runtime invariants).
 To catch errors before execution, an engineer considers two verification strategies:
 
-1. *Autoregressive Self-Verification:* The runtime prompts the same model to review the payload. Because the evaluator shares parameter weights $\Theta$ with the generator, it exhibits correlated bias: while its true positive rate on valid payloads is $0.85$, its false positive rate on invalid payloads is $\alpha_{\text{model}} = 0.65$ (it mistakenly validates 65% of its own defective outputs).
+1. *Autoregressive Self-Verification:* The runtime prompts the same model to review the payload. Because the evaluator shares parameter weights $\Theta$ with the generator, it exhibits correlated bias: while its true positive rate on valid payloads is $0.85$, its false positive rate on invalid payloads is $\alpha_{\text{model}} = 0.65$ (it mistakenly validates 65 percent of its own defective outputs).
 2. *Deterministic External Linter:* A host-side static analysis tool checks the payload against schema constraints. The linter has a true positive rate of $1.00$ and a false positive rate on invalid payloads of $\alpha_{\text{ext}} = 0.00$.
 
 Calculate the posterior probability that a staged payload is actually invalid given that it passed the verification check ($P(\text{Defective} \mid \text{PASS})$) under both strategies.
@@ -613,7 +613,7 @@ $$P(D \mid \text{PASS}) = \frac{0.00 \times 0.18}{0.8200} = 0.0000 \quad (0.00\%
 The deterministic external gate eliminates defective candidates completely on the checked invariant, demonstrating that invariant closure requires an external ground-truth authority.
 :::
 
-### The Deterministic Verification Perimeter
+### The deterministic verification perimeter
 
 Rather than relying on model self-reflection, robust agent architectures construct an external *deterministic verification perimeter*. This perimeter consists of a pipeline of specialized software validators operating outside the neural inference engine. Each validator acts as a sieve, intercepting candidate payloads held in memory escrow and evaluating them against explicit, non-probabilistic invariants.
 
@@ -650,7 +650,7 @@ A foundation model invocation is an expensive, stateful, and non-deterministic r
 Treating model calls as typed RPCs enforces Saltzer and Kaashoek's principle of *modular boundary enforcement*: the host system never trusts an unprivileged subsystem to self-police its own execution boundaries or cleanly report its internal resource exhaustion.
 :::
 
-### Formal Request Specification
+### Formal request specification
 
 In a robust agent operating system, an invocation of the underlying foundation model cannot be mediated through ad-hoc string formatting. The host runtime must formalize the call as an immutable, typed request tuple:
 
@@ -666,7 +666,7 @@ The request boundary must satisfy the invariant $S + K_{\max} \le S_{\text{total
 
 Finally, the request designates a set of discrete stop sequences $\mathcal{S} \subset \mathcal{V}^*$. These token combinations explicitly signal to the accelerator serving engine that the unprivileged model has concluded its logical candidate production. When the autoregressive decode loop emits any sequence $s \in \mathcal{S}$, the serving engine must immediately halt token generation and return execution control to the host supervisor, bypassing any remaining allocation headroom within $K_{\max}$.
 
-### Streaming Execution Mechanics
+### Streaming execution mechanics
 
 Because autoregressive token generation is bottlenecked by accelerator memory bandwidth during the decode phase, generating several thousand tokens is an intrinsically slow physical process. A generation budget of $K_{\max} = 2{,}048$ tokens executing on an enterprise accelerator at a rate of 40 tokens per second consumes over 50 seconds of continuous compute. If the host agent runtime were to execute this invocation as a monolithic, blocking RPC—waiting synchronously for all $K_{\max}$ tokens to materialize before inspecting the payload—the agent would surrender all dynamic supervision over the running process.
 
@@ -678,13 +678,13 @@ As traced along the timeline of @fig-vol3-streaming-token-cancellation, token de
 
 Nominal streaming continues until step $t=96$, where the unprivileged model emits an unauthorized instruction or illegal terminal (`"DROP"`). The host stream consumer evaluates the automaton transition $\delta^*(q_{95}, y_{96}) = \emptyset$; encountering an undefined transition immediately triggers an **Invariant Violation Trap**. Rather than waiting passively for the remaining generation budget to exhaust, the host supervisor executes two coordinated actions: it purges the quarantined escrow buffer (guaranteeing zero unauthorized side effects reach real effectors) and dispatches an immediate `HTTP/2 RST_STREAM` cancellation frame carrying error code `CANCEL` across the socket.
 
-The systems consequence of this early cancellation on accelerator silicon is immediate and profound. Upon receiving the cancellation frame, the inference daemon aborts the decode worker thread, evicts the sequence identifier from the continuous batch scheduler, and releases all physical KV cache pages back to the accelerator's memory allocator. As derived in @exmp-02-memory-and-bandwidth-reclamation-via, reclaiming physical memory at step $t=96$ rather than permitting an errant generation to run through $K_{\max} = 4{,}096$ frees over $1.22\text{ GiB}$ of HBM and eliminates $4{,}000$ subsequent memory-bus shuttles of the 140 GB parameter weights.
+The systems consequence of this early cancellation on accelerator silicon is immediate and profound. Upon receiving the cancellation frame, the inference daemon aborts the decode worker thread, evicts the sequence identifier from the continuous batch scheduler, and releases all physical KV cache pages back to the accelerator's memory allocator. As derived in \ref{exmp-02-memory-and-bandwidth-reclamation-via}, reclaiming physical memory at step $t=96$ rather than permitting an errant generation to run through $K_{\max} = 4{,}096$ frees over $1.22\text{ GiB}$ of HBM and eliminates $4{,}000$ subsequent memory-bus shuttles of the 140 GB parameter weights.
 
-::: {#fig-vol3-streaming-token-cancellation fig-env="figure" fig-pos="htb" fig-cap="**Streaming Token Validation and Transport Cancellation Protocol**: Incremental token streaming across HTTP/2 or gRPC multiplexed channels enables the host runtime to validate candidate sequences on-the-fly. At decode steps $t=1$ and $t=2$, sampled tokens cross the network socket in DATA frames, where an incremental partial-validation state machine validates syntax prefixes and holds candidates in host memory escrow. When step $t=96$ emits an illegal token sequence violating schema invariants, the host immediately dispatches an `HTTP/2 RST_STREAM` cancellation frame. The inference service terminates the decode worker thread, evicts the request from the continuous batch queue, and instantly deallocates physical KV cache pages from GPU high-bandwidth memory." fig-alt="Systems protocol sequence diagram between Host Agent Runtime and Inference Service & Neural Core across an HTTP/2 transport boundary. As incremental tokens stream across the socket, an invariant violation at step t=96 triggers an immediate RST_STREAM cancellation frame, terminating the GPU decode loop and freeing 1.22 GiB of KV cache memory in HBM."}
+::: {#fig-vol3-streaming-token-cancellation fig-env="figure" fig-pos="htb" fig-cap="**Streaming Token Validation and Transport Cancellation Protocol**: Incremental token streaming across HTTP/2 or gRPC multiplexed channels enables the host runtime to validate candidate sequences on-the-fly. At decode steps $t=1$ and $t=2$, sampled tokens cross the network socket in DATA frames, where an incremental partial-validation state machine validates syntax prefixes and holds candidates in host memory escrow. When step $t=96$ emits an illegal token sequence violating schema invariants, the host immediately dispatches an `HTTP/2 RST_STREAM` cancellation frame. The inference service terminates the decode worker thread, evicts the request from the continuous batch queue, and instantly deallocates physical KV cache pages from GPU high-bandwidth memory." fig-alt="Systems protocol sequence diagram between Host Agent Runtime and Inference Service & Neural Core across an HTTP/2 transport boundary. As incremental tokens stream across the socket, an invariant violation at step t=96 triggers an immediate RST_STREAM cancellation frame, terminating the GPU decode loop and freeing 1.22 GB of KV cache memory in HBM."}
 ![](images/svg/streaming_token_cancellation.svg)
 :::
 
-::: {#exmp-02-memory-and-bandwidth-reclamation-via .callout-example title="Memory and Bandwidth Reclamation via Early Stream Cancellation"}
+::: {#exmp-02-memory-and-bandwidth-reclamation-via .callout-example title="Memory and bandwidth reclamation via early stream cancellation"}
 Consider a host agent supervising an invocation of a 70-billion parameter model utilizing Grouped-Query Attention (GQA). The model architecture features $L = 80$ transformer layers, an internal head dimension of $d = 128$, and $H_{KV} = 8$ key-value heads. Each weight and cache element is stored in 16-bit precision (2 bytes per value).
 
 First, we calculate the physical KV cache memory consumed by a single token across all layers:
@@ -704,7 +704,7 @@ $$\text{Bandwidth Saved} = 4{,}000 \text{ steps} \times 140\text{ GB/step} = 560
 of aggregate memory transfers across the accelerator's memory bus, freeing substantial execution capacity for concurrent serving batches.
 :::
 
-### The Normalized Status Envelope
+### The normalized status envelope
 
 A robust runtime architecture rejects raw string returns. Instead, every model invocation must resolve into an authoritative, normalized status envelope $\mathcal{E}$:
 
@@ -728,7 +728,7 @@ The core of the envelope is the normalized `status` discriminator. Because distr
 
 The operational taxonomy established in @tbl-vol3-invocation-status underpins the foundational safety property of the host agent runtime:
 
-::: {#pri-02-quarantining-invariant .callout-principle title="The Quarantining Invariant"}
+::: {#pri-02-quarantining-invariant .callout-principle title="The quarantining invariant"}
 No candidate payload $\mathbf{y}$ originating from an invocation envelope whose status is anything other than strictly `COMPLETED` may cross the verification perimeter into an execution, compilation, or actuation pipeline.
 :::
 
@@ -771,7 +771,7 @@ When an unprivileged foundation model generates structured data under standard a
 
 **Grammar-constrained decoding** relocates structural syntax enforcement from post-hoc host parsers directly into the accelerator's token selection stage. By compiling formal grammars into deterministic automata that dynamically project legal transition masks onto candidate logits prior to sampling, the serving runtime guarantees that emitted sequences conform strictly to a target specification, eliminating syntax errors while leaving underlying semantic correctness entirely unverified.
 
-### Automata-Driven Token Masking
+### Automata-driven token masking
 
 To enforce structural syntax on accelerator silicon, the host agent runtime must compile high-level schemas—such as JSON Schemata, regular expressions, or context-free grammars (CFGs)—into low-level state machines that can evaluate token validity during the decode loop. Regular expressions and non-recursive syntactic templates compile directly into Deterministic Finite Automata (DFAs). Context-free structures that exhibit arbitrary nesting, such as recursive JSON objects or balanced mathematical expressions, compile into Pushdown Automata (PDAs) equipped with an explicit parse stack $S_{\text{parse}}$. Formally, a deterministic automaton is defined by the tuple $\mathcal{A} = (Q, \Sigma, \delta, q_0, F)$, where $Q$ is the finite set of parser states, $\Sigma$ is the alphabet of valid UTF-8 byte values, $\delta: Q \times \Sigma \to Q$ is the state transition function, $q_0 \in Q$ is the initial state, and $F \subseteq Q$ is the set of accepting states.
 
@@ -789,7 +789,7 @@ If any intermediate transition in the sequence encounters an undefined transitio
 
 $$\mathcal{V}_{\text{valid}}(q) = \left\{ i \in \mathcal{V} \;\middle|\; \delta^*\left(q, \mathbf{b}^{(i)}\right) \neq \emptyset \right\}$$
 
-where $\delta^*$ denotes the extended transition function evaluated over the complete byte sequence.
+where $\delta^*$ denotes the extended transition function evaluated over the complete byte sequence (@tbl-vol3-automaton-grammar-states).
 
 | Automaton State ($q_t$) | Incoming Token Prefix | Permissible Structural Terminals      | Candidate Token Examples     | Masked Token Examples          |
 |:------------------------|:----------------------|:--------------------------------------|:-----------------------------|:-------------------------------|
@@ -797,6 +797,7 @@ where $\delta^*$ denotes the extended transition function evaluated over the com
 | `EXPECT_COLON`          | `{"id"`               | Whitespace, colon (`:`)               | `":"`, `": "`, `" : "`       | `","`, `"}"`, `"id"`, `true`   |
 | `EXPECT_VALUE_INT`      | `{"id": `             | Digits, minus sign (`-`)              | `"0"`, `"42"`, `"-1"`        | `"true"`, `"\"admin\""`, `","` |
 | `EXPECT_COMMA_OR_END`   | `{"id": 42`           | Comma (`,`), closing brace (`}`)      | `","`, `"}"`, `",\n  "`      | `"43"`, `":"`, `"id"`          |
+: **Automaton Grammar States and Token Masking**: Transition states, structural terminals, and permissible versus forbidden candidate tokens during constrained JSON decoding. {#tbl-vol3-automaton-grammar-states}
 
 At autoregressive decode step $t$, the transformer model evaluates its unprivileged forward pass $\mathbf{f}_{\mathbf{\Theta}}$, computing the unnormalized logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$ at the unembedding layer. Prior to applying the softmax operator or sampling a token, the serving runtime injects a logit mask vector $\mathbf{M}(q_t) \in \{0, -\infty\}^{|\mathcal{V}|}$ determined by the current parser state $q_t$:
 
@@ -814,9 +815,11 @@ The end-to-end systems architecture in @fig-vol3-grammar-constrained-fsm enforce
 ![](images/svg/grammar_constrained_decoding_fsm.svg)
 :::
 
-### Accelerator Bitmask Execution
+### Accelerator bitmask execution
 
 While the theoretical formulation of logit masking is straightforward, implementing it efficiently exposes severe hardware latency bottlenecks. In a naive serving architecture, the host CPU supervises grammar transitions externally. At each decode iteration, the accelerator completes its matrix-vector multiplication (GEMV), writes the sampled token ID to unified host-device memory, and issues an interrupt across the PCIe bus. A host runtime process receives the token, updates the automaton state, identifies $\mathcal{V}_{\text{valid}}(q_{t+1})$, packs the legal token IDs into a mask, and transfers the mask back across PCIe to device memory before the next forward pass can proceed.
+
+The latency profile across host-device masking stages is detailed in @tbl-host-device-masking-latency.
 
 | Pipeline Stage                 | Physical Subsystem           | Typical Latency        | Hardware Operational Impact                          |
 |:-------------------------------|:-----------------------------|:-----------------------|:-----------------------------------------------------|
@@ -826,6 +829,7 @@ While the theoretical formulation of logit masking is straightforward, implement
 | **Bitmask Construction**       | Host CPU Memory Bus          | $10 - 30\ \mu\text{s}$ | Bit-packing legal token IDs into binary bit vector   |
 | **DMA Transfer to Device**     | PCIe Gen5 $\times 16$ DMA    | $15 - 40\ \mu\text{s}$ | Host-to-device memory write into VRAM                |
 | **Device Mask Application**    | Accelerator On-Chip SRAM     | $< 1\ \mu\text{s}$     | Element-wise logit addition ($-\infty$) and softmax  |
+
 : **Host-Device Masking Latency**: Host-device pipeline stages during naive external logit masking, creating an unamortized $50-100\ \mu\text{s}$ stall per generated token. {#tbl-host-device-masking-latency}
 
 This host-mediated design introduces catastrophic synchronization stalls. On modern server-grade accelerators, single-token decode latency ranges between 1 and 20 milliseconds depending on model parameter count, tensor parallelism, and batch size. Meanwhile, a host-device PCIe round trip, kernel launch overhead, and operating system thread scheduling introduce between 20 and 100 microseconds of latency per step under ideal conditions, escalating to hundreds of microseconds when host cores experience thread contention. Because autoregressive decoding is strictly sequential, host-device synchronization forces the accelerator's execution streams to serialize, stalling GPU tensor cores and underutilizing high-bandwidth memory (HBM).
@@ -836,7 +840,7 @@ $$\mathbf{B}(q) \in \{0, 1\}^{\lceil |\mathcal{V}| / 64 \rceil}$$
 
 where each 64-bit unsigned integer represents the validity of 64 contiguous vocabulary token IDs. For an open-weights architecture with $|\mathcal{V}| = 131{,}072$ tokens, the bitmask for a single automaton state requires exactly $131{,}072 / 8 = 16{,}384\text{ bytes}$ ($16\text{ KiB}$). If a target schema compiles into an automaton with $|Q| = 512$ distinct states, the entire transition and validity table occupies $512 \times 16\text{ KiB} = 8\text{ MiB}$ of contiguous memory.
 
-::: {#exmp-02-memory-footprint-and-transfer-latency .callout-example title="Memory Footprint and Transfer Latency of Grammar Bitmasks"}
+::: {#exmp-02-memory-footprint-and-transfer-latency .callout-example title="Memory footprint and transfer latency of grammar bitmasks"}
 Consider serving a 70-billion parameter foundation model on an NVIDIA H100 SXM5 accelerator ($80\text{ GiB}$ HBM3 with $3.35\text{ TB/s}$ peak bandwidth, $50\text{ MiB}$ of on-chip L2 cache, and a PCIe Gen5 $\times 16$ interconnect providing $64\text{ GB/s}$ unidirectional bandwidth). The vocabulary contains $|\mathcal{V}| = 131{,}072$ tokens ($16\text{ KiB}$ per state bitmask). An agent runtime enforces a structured JSON response schema that compiles into a DFA with $|Q| = 512$ states.
 
 **1. Memory Footprint and Cache Residency:**
@@ -870,7 +874,7 @@ Across an output sequence of $S = 500$ tokens, host-driven masking introduces $5
 
 For grammars with recursive nesting or complex regular expressions where the state space $|Q|$ grows into thousands of states, allocating dense bitmasks for all states becomes inefficient. Serving systems address this through compressed transition tries and speculative bitmask generation. By organizing subword tokens into a radix tree structured over byte sequences, the runtime traverses only the active branches matching the current schema depth. Furthermore, by running asynchronous CPU worker threads that anticipate future parser paths, the host supervisor can pre-populate ring buffers of forthcoming bitmasks in GPU memory, keeping the accelerator's decode stream fed without blocking on synchronous round trips.
 
-### The Syntactic Divide
+### The syntactic divide
 
 Grammar-guided decoding establishes a deterministic guarantee at the boundary of string representation: the emitted token sequence is provably well-formed according to the specified formal language. This guarantee is invaluable for systems integration because it eliminates JSON decode exceptions, unclosed quotation marks, and malformed field names. However, system designers frequently fall prey to a dangerous architectural conflation: assuming that syntactic validity implies semantic correctness.
 
@@ -880,7 +884,7 @@ Saltzer and Kaashoek's *Principle of Modular Division* dictates that interface r
 
 Following the modularity principles of Saltzer and Kaashoek, representation must be rigorously distinguished from computation. A grammar mask operates exclusively on lexical tokens and syntax trees. It possesses zero visibility into external environment state, database consistency, operating system filesystems, or the mathematical validity of assertions.
 
-Consider an agent tasked with generating a structured SQL mutation to adjust inventory levels. The governing grammar enforces strict ANSI SQL syntax. Under logit masking, the foundation model is physically incapable of emitting an unclosed string literal or an illegal SQL keyword. Nevertheless, the emitted statement may target a database table that does not exist, violate foreign key constraints, or execute an unindexed join that exhausts server memory. The grammar mask guarantees that the payload is parseable by the database engine, but it provides zero protection against logical corruption or authorization failures.
+Consider an agent tasked with generating a structured SQL mutation to adjust inventory levels. The governing grammar enforces strict ANSI SQL syntax. Under logit masking, the foundation model is physically incapable of emitting an unclosed string literal or an illegal SQL keyword. Nevertheless, the emitted statement may target a database table that does not exist, violate foreign key constraints, or execute an unindexed join that exhausts server memory. The grammar mask guarantees that the payload is parseable by the database engine, but it provides zero protection against logical corruption or authorization failures (@tbl-vol3-verification-dimensions).
 
 | Verification Dimension    | Governed by Grammar Mask? | Enforcement Mechanism                         | Failure Mode Prevented                             |
 |:--------------------------|:--------------------------|:----------------------------------------------|:---------------------------------------------------|
@@ -889,10 +893,11 @@ Consider an agent tasked with generating a structured SQL mutation to adjust inv
 | **Referential Integrity** | No                        | Database catalog / Foreign key validation     | Non-existent table or column references            |
 | **Semantic Invariants**   | No                        | Host supervisor / Deterministic unit tests    | Logically impossible outputs, inverted arithmetic  |
 | **Authorization Bounds**  | No                        | Reference monitor / OS access control ($A=0$) | Privilege escalation, out-of-scope resource access |
+: **Verification Dimension Boundaries**: Separation of syntactic guarantees provided by grammar masking from referential, semantic, and authorization invariants. {#tbl-vol3-verification-dimensions}
 
 Beyond the syntactic divide, rigid grammar constraints introduce a severe failure mode known as *schema forcing*. When an unconstrained foundation model encounters an ambiguous prompt, a missing record, or a question beyond its parametric knowledge, its probability mass naturally concentrates on natural language disclaimers, clarification queries, or error reporting tokens (such as `"Error: record not found"`).
 
-If the host runtime binds this model to a strict output schema that lacks explicit error or unknown states—for example, requiring an immediate JSON object containing `{"customer_id": int, "credit_score": int}`—the masking engine forcibly sets the logits of all explanatory, conversational, or error-signaling tokens to $-\infty$. The model's probability distribution is artificially truncated, leaving only the tokens that satisfy the structural schema.
+If the host runtime binds this model to a strict output schema that lacks explicit error or unknown states—for example, requiring an immediate JSON object containing `{"customer_id": int, "credit_score": int}`—the masking engine forcibly sets the logits of all explanatory, conversational, or error-signaling tokens to $-\infty$. The model's probability distribution is artificially truncated, leaving only the tokens that satisfy the structural schema, as demonstrated in @tbl-schema-forcing-distortion.
 
 | Candidate Token Sequence | Natural Logit ($z_i$) | Natural Probability $P(y_t)$ | Masked Logit ($z_i'$) | Constrained Probability $P_{\text{mask}}(y_t)$ | Semantic Role                             |
 |:-------------------------|:----------------------|:-----------------------------|:----------------------|:-----------------------------------------------|:------------------------------------------|
@@ -913,7 +918,7 @@ The execution of an autoregressive foundation model confronts a stark physical d
 
 **Model invocation latency is split between compute-bound prompt prefill and memory-bandwidth-bound token decode; the dominant bottleneck governing an agent's response time depends on prompt length, output token count, and whether the serving engine processes a solitary trajectory or batches multiple requests.** Understanding the physical boundaries of accelerator hardware allows systems engineers to structure prompts, configure tool interfaces, and establish timeout contracts that align with the underlying mechanics of modern hardware.
 
-### Decomposition of End-to-End Invocation Latency
+### Decomposition of end-to-end invocation latency
 
 To manage the execution budget of an agent task, the host supervisor must decompose wall-clock invocation latency into its constituent physical and operational phases. When an agent emits a request to evaluate model $\mathbf{f}_\Theta$ over an input sequence $\mathbf{x}$ to generate continuation $\mathbf{y}$, the total elapsed time $T_{\text{total}}$ is governed by five discrete latency components:
 
@@ -948,7 +953,7 @@ def roofline_decode_latency(params_billion: float, bytes_per_param: float,
 
 This decomposition exposes a critical asymmetry in agent architectures. A software agent typically constructs large prompt contexts ($S \in [10^3, 10^5]$) containing system directives, environment state, and past execution history, but its immediate operational objective is often a compact action—a structured invocation of twenty tokens ($K \in [10^1, 10^2]$). Despite the prompt being orders of magnitude larger than the response ($S \gg K$), the wall-clock duration of $T_{\text{decode}}$ frequently exceeds $T_{\text{prefill}}$. The physical origin of this asymmetry lies in the hardware Roofline model.
 
-### Prefill versus Decode: The Accelerator Roofline Boundary
+### Prefill versus decode: The accelerator Roofline boundary
 
 The performance of any numerical workload on accelerator silicon is bounded by two fundamental physical ceilings: the peak floating-point compute capacity of its arithmetic units ($\pi$, measured in FLOPs per second) and the peak bandwidth of the bus shuttling data from device High Bandwidth Memory (HBM) into on-chip Static Random-Access Memory (SRAM) registers ($\beta$, measured in bytes per second).
 
@@ -1007,7 +1012,7 @@ $$I_{\text{decode}} \approx \frac{2 \cdot P \cdot 1}{2 \cdot P} = 1\text{ FLOP/b
 
 If parameters are quantized to 8-bit precision (1 byte per parameter), the operational intensity doubles to $I_{\text{decode}} = 2\text{ FLOPs/byte}$. Regardless of precision, $I_{\text{decode}}$ remains more than two orders of magnitude below the hardware ridge point $I^* \approx 295.2\text{ FLOPs/byte}$. The decode phase operates trapped at the extreme bottom of the memory-bandwidth-bound slope.
 
-### The Memory Bandwidth Shuttle
+### The memory bandwidth shuttle
 
 The physical consequence of a low arithmetic intensity is that token decode latency is dictated not by how fast the accelerator can compute, but by how fast its memory controllers can sweep parameter weights across physical traces from HBM into processing registers.
 
@@ -1015,14 +1020,14 @@ On-chip SRAM cache memory on modern accelerators is physically constrained by si
 
 To generate a single output token, the accelerator must transfer the entire 70-gigabyte model across the bus, load the weights into local registers, compute the inner products with the single token activation vector, and discard the weights from local register storage to make room for the subsequent layer's parameter tensors. To generate the next token, the hardware repeats the entire sequence from scratch.
 
-::: {#exmp-02-roofline-bound .callout-example title="The Roofline Bound on Single-Token Generation"}
+::: {#exmp-02-roofline-bound .callout-example title="The Roofline bound on single-token generation"}
 Consider a foundation model with $P = 70 \times 10^9$ parameters quantized to 8-bit precision (FP8, storing 1 byte per parameter, yielding an in-memory footprint of $70 \times 10^9\text{ bytes}$). The model executes on an accelerator with a peak memory bandwidth of $\beta = 3.35\text{ TB/s}$ ($3.35 \times 10^{12}\text{ bytes/s}$) and a peak matrix compute ceiling of $\pi = 989\text{ TFLOP/s}$ ($9.89 \times 10^{14}\text{ FLOP/s}$). We seek to calculate the theoretical minimum inter-token latency for an agent running at batch size $B = 1$.
 
 First, calculate the time required purely to shuttle the model parameters across the memory bus from HBM into SRAM:
 
 $$T_{\text{mem}} = \frac{\text{Model Footprint (Bytes)}}{\text{Memory Bandwidth (Bytes/s)}} = \frac{70 \times 10^9\text{ bytes}}{3.35 \times 10^{12}\text{ bytes/s}} \approx 0.020895\text{ seconds} \approx 20.90\text{ ms}$$
 
-Next, calculate the theoretical time required to execute the floating-point operations if the compute units operated at 100% efficiency:
+Next, calculate the theoretical time required to execute the floating-point operations if the compute units operated at 100 percent efficiency:
 
 $$T_{\text{comp}} = \frac{2 \cdot P \cdot 1\text{ FLOPs}}{\text{Peak Compute Throughput (FLOPs/s)}} = \frac{1.40 \times 10^{11}\text{ FLOPs}}{9.89 \times 10^{14}\text{ FLOPs/s}} \approx 0.0001415\text{ seconds} \approx 0.14\text{ ms}$$
 
@@ -1049,7 +1054,7 @@ By increasing the batch size beyond the hardware ridge point—achieving $B \ge 
 
 For an autonomous agent, however, service-level batching introduces an acute systems dilemma. An agent's execution is intrinsically a closed-loop sequential process. The agent observes the world, dispatches a prompt to the model, waits for the action token sequence to complete, executes the selected tool against an external environment, and incorporates the tool output into the subsequent prompt.
 
-Because the prompt for step $t+1$ depends strictly on the empirical side effects of the tool invoked at step $t$, the agent cannot pre-generate future tokens or parallelize across successive steps of its own trajectory. Along its own execution path, the agent operates at an irreducible batch size of $B = 1$.
+Because the prompt for step $t+1$ depends strictly on the empirical side effects of the tool invoked at step $t$, the agent cannot pre-generate future tokens or parallelize across successive steps of its own trajectory. Along its own execution path, the agent operates at an irreducible batch size of $B = 1$, whose phased execution profile is summarized in @tbl-trajectory-lifecycle-b1.
 
 | Execution Phase           | Hardware Bound           | Dominant Resource        | Latency Profile                             | Arithmetic Utilization                     |
 |:--------------------------|:-------------------------|:-------------------------|:--------------------------------------------|:-------------------------------------------|
@@ -1061,17 +1066,17 @@ Because the prompt for step $t+1$ depends strictly on the empirical side effects
 
 When an agent runtime dispatches calls to a multi-tenant shared serving engine that uses large dynamic batches to maximize GPU efficiency, the agent suffers substantial queueing delay ($T_{\text{queue}}$) and latency jitter. Each step of the agent's tool loop is subjected to scheduling pauses while the serving engine aggregates requests from other network clients to assemble efficient batches.
 
-Conversely, if the systems engineer provisions dedicated, unbatched accelerator silicon exclusively to minimize the agent's cycle time ($T_{\text{queue}} \to 0$), the physical hardware operates at less than one percent compute efficiency. The host system pays the full power, hardware capital, and thermodynamic cost of the accelerator while utilizing only its memory bus. At an enterprise server acquisition cost of approximately $\$30{,}000$ per NVIDIA H100 (or $\$3.50/\text{hr}$ on-demand cloud pricing), unbatched decode at $0.68\%$ arithmetic utilization means that over $99\%$ of the amortized hardware capital and operational cooling budget is wasted maintaining idle matrix math silicon while waiting on the memory bus. This acute capital inefficiency provides the primary economic driver for disaggregated serving architectures that partition physical accelerators into specialized prefill nodes (saturating compute) and decode nodes (maximizing memory throughput).
+Conversely, if the systems engineer provisions dedicated, unbatched accelerator silicon exclusively to minimize the agent's cycle time ($T_{\text{queue}} \to 0$), the physical hardware operates at less than 1 percent compute efficiency. The host system pays the full power, hardware capital, and thermodynamic cost of the accelerator while utilizing only its memory bus. At an enterprise server acquisition cost of approximately $\$30{,}000$ per NVIDIA H100 (or $\$3.50/\text{hr}$ on-demand cloud pricing), unbatched decode at $0.68\%$ arithmetic utilization means that over $99\%$ of the amortized hardware capital and operational cooling budget is wasted maintaining idle matrix math silicon while waiting on the memory bus. This acute capital inefficiency provides the primary economic driver for disaggregated serving architectures that partition physical accelerators into specialized prefill nodes (saturating compute) and decode nodes (maximizing memory throughput).
 
 The physical asymmetry between compute-bound prefill and memory-bound decode imposes an unforgiving economic and temporal calculus on agent system architecture. A single verbose tool call emitting hundreds of unconstrained tokens costs orders of magnitude more accelerator time than processing a thousand-token prompt, while idle Tensor Cores burn energy waiting for weights to transit the memory bus. When system designers attempt to optimize this pipeline—whether through fine-grained prompt compression, grammar-constrained decoding, speculative execution, or specialized tool formats—how can they rigorously determine whether an architectural intervention yields an authentic performance gain? Because superficial metrics such as raw token generation speed or isolated JSON parsing accuracy fail to capture the compound dynamics of multi-turn problem solving, systems engineers require an empirical benchmarking methodology grounded in end-to-end task completion under invariant resource budgets.
 
 ## Interface Benchmarking {#sec-vol3-processor-interface-design}
 
-Evaluating an agent invocation interface solely by its syntactic parsing throughput or schema adherence creates an architectural illusion. A systems engineer evaluating an agent invocation interface faces a deceptive measurement trap: an interface optimized for rapid, error-free parsing often degrades the model's actual problem-solving capacity on physical silicon. Constraining an unprivileged foundation model $\mathbf{f}_{\mathbf{\Theta}}$ to emit strict JSON schemas via decode-time logit masking guarantees a one hundred percent syntactic parsing rate ($R_{\text{syntax}} = 1.0$), yet empirical benchmarks frequently reveal that this structural straitjacket depresses downstream end-to-end task completion. Conversely, permitting unconstrained free-form natural language generation maximizes the generation budget available for intermediate scratchpad reasoning tokens, but it burdens the host supervisor with brittle regular-expression parsers, nondeterministic structural extraction failures, and runaway output token inflation.
+Evaluating an agent invocation interface solely by its syntactic parsing throughput or schema adherence creates an architectural illusion. A systems engineer evaluating an agent invocation interface faces a deceptive measurement trap: an interface optimized for rapid, error-free parsing often degrades the model's actual problem-solving capacity on physical silicon. Constraining an unprivileged foundation model $\mathbf{f}_{\mathbf{\Theta}}$ to emit strict JSON schemas via decode-time logit masking guarantees a 100 percent syntactic parsing rate ($R_{\text{syntax}} = 1.0$), yet empirical benchmarks frequently reveal that this structural straitjacket depresses downstream end-to-end task completion. Conversely, permitting unconstrained free-form natural language generation maximizes the generation budget available for intermediate scratchpad reasoning tokens, but it burdens the host supervisor with brittle regular-expression parsers, nondeterministic structural extraction failures, and runaway output token inflation.
 
 The architectural principle governing interface selection is that invocation contracts cannot be judged by localized syntactic metrics; they must be evaluated by downstream verified task success under invariant compute, latency, and memory budgets. An interface design represents a physical trade-off among prompt prefill overhead, decode serialization latency, context window consumption, and the unprivileged model's semantic expressive capacity. To compare competing invocation interfaces objectively, the systems designer must hold the underlying model parameters $\mathbf{\Theta}$, the evaluation fixtures, and the resource envelope constant, tracking how syntactic constraints perturb the probability distribution over valid solutions.
 
-### Controlled Systems Benchmarking: The Invariant Resource Envelope
+### Controlled systems benchmarking: The invariant resource envelope
 
 In classic computer architecture, an instruction set extension or memory hierarchy alteration is never evaluated in a vacuum; it is benchmarked across standardized workloads while strictly clamping clock frequencies, silicon area, and thermal design power. In agent systems engineering, where the core compute engine is an unprivileged, non-deterministic foundation model, benchmarking an invocation interface requires establishing an identical invariant envelope. Without fixing the resource envelope, a proposed interface modification—such as replacing unstructured text responses with structured JSON-RPC calls—may appear to yield superior reliability simply because it was inadvertently permitted to consume more context tokens, execute additional speculative decoding passes, or burst past the host's wall-clock latency limits.
 
@@ -1092,13 +1097,13 @@ $$\Delta M = M_A - M_B = 1{,}000 \text{ tokens}$$
 
 Within an invariant context window of $S_{\max} = 8{,}192$ tokens, Interface A robs the host system of 1,000 tokens of substantive problem context—such as relevant stack traces, file dependencies, or compiler error diagnostics. Furthermore, because prompt prefill time scales with sequence length as $T_{\text{prefill}} \propto M$ (and quadratically in unoptimized attention implementations), Interface A shifts precious milliseconds into the compute-bound prefill phase before the accelerator generates its first candidate token. Clamping the resource envelope forces the systems benchmark to account for this structural overhead, measuring whether the syntactic guarantees of Interface A justify its consumed context capacity.
 
-### Architectural Taxonomies
+### Architectural taxonomies
 
 Host agent runtimes interact with foundation models across four primary interface archetypes, each balancing host-side parsing complexity against accelerator-side generation efficiency:
 
 *Free-Form Text with Delimiter Extraction:* The model generates unconstrained natural language interleaved with informal markers (such as standard Markdown triple-backtick blocks or XML tags). The host runtime relies on regular expressions or streaming string scanners to isolate the candidate payload. While this interface introduces virtually zero prompt inflation ($\Delta M \approx 0$) and provides unconstrained capacity for the generation sequence to accumulate intermediate scratchpad tokens prior to emitting concrete actions, it exhibits the lowest structural validity ($R_{\text{syntax}} \ll 1.0$). Delimiter omissions, unescaped target strings, or unexpected conversational filler cause catastrophic extraction failures at the host reference monitor.
 
-*Grammar-Constrained JSON-RPC:* The model's vocabulary distribution is filtered at every decode step $t$ via finite-state automata or context-free grammar logit masks, as formalized in Section 2.6. This guarantees that the emitted candidate sequence $\mathbf{y}$ is strictly parseable by standard deserializers ($R_{\text{syntax}} = 1.0$). However, this structural guarantee imposes a heavy *structural tax*. The model must emit hundreds of structural tokens—syntactic whitespace, structural braces, escaped quotation marks, and redundant key labels—all of which consume accelerator decode cycles ($T_{\text{decode}} \propto K$) bound by the memory bandwidth of the GPU. Furthermore, enforcing rigid JSON schemas often forces generation to emit key-value fields in an unnatural serial order, such as outputting an `action_input` payload before the autoregressive loop has emitted the prerequisite intermediate reasoning tokens.
+*Grammar-Constrained JSON-RPC:* The model's vocabulary distribution is filtered at every decode step $t$ via finite-state automata or context-free grammar logit masks, as formalized in @sec-vol3-processor-grammar-constrained. This guarantees that the emitted candidate sequence $\mathbf{y}$ is strictly parseable by standard deserializers ($R_{\text{syntax}} = 1.0$). However, this structural guarantee imposes a heavy *structural tax*. The model must emit hundreds of structural tokens—syntactic whitespace, structural braces, escaped quotation marks, and redundant key labels—all of which consume accelerator decode cycles ($T_{\text{decode}} \propto K$) bound by the memory bandwidth of the GPU. Furthermore, enforcing rigid JSON schemas often forces generation to emit key-value fields in an unnatural serial order, such as outputting an `action_input` payload before the autoregressive loop has emitted the prerequisite intermediate reasoning tokens.
 
 *Anchored Search/Replace Mutation Blocks:* Specifically optimized for code modification and filesystem mutations, this interface requires the model to output a target file identifier followed by an exact matching block of text and its proposed replacement, delineated by unique sentinel strings. Rather than rewriting an entire 500-line source file to change three lines of logic, the model emits only the localized diff context. This interface drastically compresses the generation budget $K$, converting a memory-bound decode bottleneck into a lightweight, high-throughput transaction. The primary failure mode shifts from syntax parsing errors to *anchor matching faults*, where autoregressive generation emits hallucinated line contents or mismatched subword token boundaries within the search block, preventing the host runtime from locating the replacement target in the authoritative source file. This mechanical trade-off explains why leading commercial coding harnesses (including Aider, Cursor, and Claude Code) standardize on anchored search/replace blocks: shrinking $K$ from $1{,}850$ down to $80$ tokens bypasses memory bus saturation, reducing turn latency by over $14\times$ (from $39.9\text{ s}$ to $2.85\text{ s}$) and allowing the agent to sustain rapid, interactive test-debug cycles within interactive human and SLA horizons.
 
@@ -1116,7 +1121,7 @@ Host agent runtimes interact with foundation models across four primary interfac
 
 The data demonstrates that syntactic perfection does not correlate with end-to-end task success. While grammar-masked JSON eliminates parsing crashes entirely, its structural overhead inflates $K$, consuming both execution time and attention capacity. Conversely, Search/Replace diff blocks incur minor syntax and anchor penalties, but their radical reduction in decode tokens ($\Delta K$) leaves the vast majority of the token budget available for substantive reasoning and context staging.
 
-### The Metric Hierarchy: From Syntactic Compliance to Verified Closure
+### The metric hierarchy: From syntactic compliance to verified closure
 
 To establish whether an interface modification represents an authentic systems improvement, performance must be evaluated across an explicit metric hierarchy, progressing from low-level serialization mechanics to high-level system verification, as outlined in @tbl-vol3-metric-hierarchy.
 
@@ -1149,7 +1154,7 @@ Here, $\text{exec}$ executes the parsed payload inside an isolated workspace, an
 
 Optimizing an interface exclusively for Level 1 or Level 2 metrics while neglecting Level 3 represents a fundamental architectural error. The following worked example illustrates how an interface engineered for structural simplicity can paralyze an accelerator cluster while lowering verified task closure.
 
-::: {#exmp-02-quantitative-interface-evaluation-under-an .callout-example title="Quantitative Interface Evaluation under an Invariant Budget"}
+::: {#exmp-02-quantitative-interface-evaluation-under-an .callout-example title="Quantitative interface evaluation under an invariant budget"}
 **Problem Statement:**
 An agent engineering team is deploying an unprivileged 70-billion-parameter foundation model on an NVIDIA H100 SXM5 accelerator node to resolve code defects in an enterprise repository. The physical hardware parameters and model serving characteristics are:
 
@@ -1301,8 +1306,8 @@ Governing this statistical engine requires the host agent runtime to treat model
 
 These principles define the fundamental modularity boundary of agentic machine learning systems. Decoupling the statistical inference engine from the authoritative execution monitor directly implements the systems design principles of least privilege and end-to-end verification. The neural network computes candidate transitions across an abstract token space; the host supervisor provides the protective boundary, memory virtualization, and deterministic verification harnesses that convert raw statistical probability into dependable computational action.
 
-::: {.callout-chapter-connection title="From One Candidate to Deliberate Computation"}
+::: {.callout-chapter-connection title="From one candidate to deliberate computation"}
 A single invocation of the foundation model produces exactly one unprivileged, stochastic candidate sequence. In non-trivial agentic environments, however, a single forward generation pass is rarely sufficient: emitted code candidates fail unit tests, structured execution plans violate runtime preconditions, and statistical search trajectories stall in unrecoverable dead ends. Treating the foundation model as an infallible single-shot oracle by repeatedly re-prompting on failure guarantees combinatorial error amplification and rapid budget exhaustion.
 
-Chapter 03 (*Test-Time Deliberation*, @sec-vol3-deliberation) addresses this physical limitation by transitioning from single-candidate generation to structured inference-time deliberation. We examine how the host runtime allocates additional compute budgets during execution—systematically exploring search trees, coordinating speculative rollouts, managing backtracks, and integrating external verifiers to transform raw, unverified token candidates into robust, verifiable systems solutions.
+@Sec-vol3-deliberation (*Test-Time Deliberation*) addresses this physical limitation by transitioning from single-candidate generation to structured inference-time deliberation. We examine how the host runtime allocates additional compute budgets during execution—systematically exploring search trees, coordinating speculative rollouts, managing backtracks, and integrating external verifiers to transform raw, unverified token candidates into robust, verifiable systems solutions.
 :::

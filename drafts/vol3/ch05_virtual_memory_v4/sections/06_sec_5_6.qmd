@@ -6,7 +6,7 @@ An inference runtime serving an autonomous agent encounters an operational profi
 
 ### The Tool-Wait Memory Tax and the Four Reclamation Policies
 
-In conversational serving, request execution is continuous: an initial prefill phase processes the prompt, followed immediately by an unbroken autoregressive decode phase that emits tokens until reaching a stop delimiter or sequence limit. Agentic workloads shatter this assumption. An agent trajectory is a punctuated sequence of short token generations separated by heavy-tailed external execution intervals. A code-editing agent may generate a fifty-token shell command in two hundred milliseconds, then idle for forty-five seconds while a build system compiles dependencies and runs unit tests. A research agent may emit a search query and pause while a browser worker downloads, parses, and scrapes several web documents. 
+In conversational serving, request execution is continuous: an initial prefill phase processes the prompt, followed immediately by an unbroken autoregressive decode phase that emits tokens until reaching a stop delimiter or sequence limit. Agentic workloads shatter this assumption. An agent trajectory is a punctuated sequence of short token generations separated by heavy-tailed external execution intervals. A code-editing agent may generate a fifty-token shell command in two hundred milliseconds, then idle for forty-five seconds while a build system compiles dependencies and runs unit tests. A research agent may emit a search query and pause while a browser worker downloads, parses, and scrapes several web documents.
 
 In a multi-tenant serving cluster where accelerator HBM is the gating bottleneck determining maximum concurrent batch size $B$, pinning $M_{\text{KV}}$ gigabytes of inactive attention state for an idle duration $T_{\text{wait}}$ imposes a direct *memory-time tax*:
 
@@ -56,13 +56,13 @@ Comparing $T_{\text{recomp}}(S)$ directly against $T_{\text{reload}}(S)$ yields 
 
 $$\frac{T_{\text{reload}}}{T_{\text{recomp}}} = \frac{S \cdot m_{\text{token}} / B_{\text{pcie}}}{2 P \cdot S / R_{\text{prefill}}} = \frac{m_{\text{token}} \cdot R_{\text{prefill}}}{2 P \cdot B_{\text{pcie}}}$$
 
-If this ratio is less than one, streaming the attention state across the peripheral bus is strictly faster than recomputing it on the tensor cores. 
+If this ratio is less than one, streaming the attention state across the peripheral bus is strictly faster than recomputing it on the tensor cores.
 
 ::: {.column-margin}
 The crossover between swapping and recomputing depends on the balance between arithmetic density and interconnect bandwidth. When $\frac{m_{\text{token}}}{2P} < \frac{B_{\text{pcie}}}{R_{\text{prefill}}}$, transferring attention projections over PCIe is faster than generating them via matrix multiplication.
 :::
 
-![Break-even wait time regimes comparing resident retention, PCIe swapping, and recomputation across sequence length and tool pause duration](images/svg/fig-vol3-swapping-tradeoff.svg){#fig-vol3-swapping-tradeoff}
+![Break-even wait time regimes comparing resident retention, PCIe swapping, and recomputation across sequence length and tool pause duration](images/svg/break_even_swapping_tradeoff.svg){#fig-vol3-swapping-tradeoff}
 
 To incorporate the idle duration $T_{\text{wait}}$, the runtime must compare the cost of holding memory against the cost of swapping. Let $\mu_{\text{HBM}}$ represent the shadow price (opportunity cost per byte-second) of GPU memory under capacity pressure, and let $\mu_{\text{DRAM}}$ represent the shadow price of host memory ($\mu_{\text{DRAM}} \ll \mu_{\text{HBM}}$). Offloading a trajectory requires an egress transfer time $T_{\text{egress}} = M_{\text{KV}} / B_{\text{pcie}}$ and an ingress reload time $T_{\text{ingress}} = M_{\text{KV}} / B_{\text{pcie}}$. The physical state can only be freed during the interval $(T_{\text{wait}} - T_{\text{ingress}})$. Therefore, offloading is physically feasible only if the wait time strictly exceeds the round-trip transfer latency:
 
@@ -130,21 +130,21 @@ Implementing physical block swapping in an inference runtime requires deep integ
 When an agent trajectory transitions from active generation to an external tool wait, the serving supervisor initiates block migration:
 
 1. **Eviction Scheduling and Pinning:** The scheduler selects candidate trajectories whose predicted wait times satisfy $T_{\text{wait}} > T_{\text{wait}}^*$. The engine allocates a contiguous set of physical block frames within a pre-allocated, page-locked (pinned) host DRAM buffer pool. Pinning host memory via POSIX `mlock` or CUDA host registration (`cudaHostAlloc`) is mandatory; standard operating system pageable memory would induce host OS page faults during direct memory access, collapsing PCIe transfer bandwidth.
-2. **Asynchronous DMA Despatch:** The runtime issues non-blocking copy calls (`cudaMemcpyAsync`) targeting a dedicated bidirectional CUDA copy stream. Because modern accelerator architectures provide independent copy engines that run concurrently with the primary tensor computation engines, this transfer proceeds in the background without stealing cycles from active decode batches running on adjacent streams.
+2. **Asynchronous DMA Dispatch:** The runtime issues non-blocking copy calls (`cudaMemcpyAsync`) targeting a dedicated bidirectional CUDA copy stream. Because modern accelerator architectures provide independent copy engines that run concurrently with the primary tensor computation engines, this transfer proceeds in the background without stealing cycles from active decode batches running on adjacent streams.
 3. **Block Table Remapping:** Once the DMA transfer completes, an asynchronous host callback updates the trajectory's block table entries, switching their location tag from `TIER_GPU` to `TIER_HOST` and recording the host frame indices. The vacated GPU physical frame numbers are pushed immediately to the allocator's free-block FIFO queue, making them available for immediate reservation by concurrent requests.
 
 ```python
 # Empirical Block Table Migration Interface
-def swap_out_trajectory(seq_id: int, block_table: BlockTable, 
+def swap_out_trajectory(seq_id: int, block_table: BlockTable,
                         gpu_alloc: PageAllocator, host_alloc: PageAllocator,
                         copy_stream: Stream) -> None:
     gpu_frames = block_table.get_physical_frames(seq_id, Tier.GPU)
     host_frames = host_alloc.allocate_blocks(count=len(gpu_frames))
-    
+
     # Asynchronously stream blocks over PCIe copy stream
-    copy_stream.issue_dma(src=gpu_frames, dst=host_frames, 
+    copy_stream.issue_dma(src=gpu_frames, dst=host_frames,
                           bytes_per_block=BLOCK_BYTE_SIZE)
-    
+
     # Remap logical pointers and release device HBM frames
     copy_stream.record_callback(
         lambda: (block_table.remap(seq_id, Tier.HOST, host_frames),

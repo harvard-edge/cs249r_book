@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 
-BASE_DIR = Path("/Users/VJ/GitHub/MLSysBook-vol3")
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Map of chapter number to directory and prefix
 CHAPTER_MAP = {
@@ -44,20 +44,7 @@ CHAPTER_MAP = {
 # -----------------------------------------------------------------------------
 # Copy already generated SVGs from subagents / tmp
 # -----------------------------------------------------------------------------
-COPY_SOURCES = {
-    3: Path("/Users/VJ/.gemini/antigravity-cli/brain/df756c1c-9265-49aa-b927-d1cb8809022a/scratch"),
-    5: Path("/Users/VJ/.gemini/antigravity-cli/brain/e05aeabd-b156-4da5-9773-d0b3d996dade/scratch"),
-    6: Path("/Users/VJ/.gemini/antigravity-cli/brain/e88923a7-5a2f-4652-8297-897e63621717/scratch"),
-    7: Path("/Users/VJ/.gemini/antigravity-cli/brain/1aa0f16f-1bfe-4571-9c40-f103dcc02292/scratch"),
-    9: Path("/tmp"),
-    10: Path("/tmp"),
-    11: Path("/tmp"),
-    12: Path("/tmp"),
-    14: Path("/Users/VJ/.gemini/antigravity-cli/brain/c6b19075-b3e8-4263-bae2-37a2f10b4aa8/scratch"),
-    16: Path("/Users/VJ/.gemini/antigravity-cli/brain/dc2c1d92-421c-4985-92a8-c47130a41c25/scratch"),
-    17: Path("/Users/VJ/.gemini/antigravity-cli/brain/0ebfbaf7-dc4e-495e-98d3-bbbbbadde161/scratch"),
-    18: Path("/Users/VJ/.gemini/antigravity-cli/brain/20b6030e-4c6f-4b53-b703-9fae6efa0a91/scratch"),
-}
+COPY_SOURCES = {}
 
 def copy_pregenerated():
     for ch_num, src_dir in COPY_SOURCES.items():

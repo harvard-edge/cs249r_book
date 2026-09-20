@@ -10,7 +10,7 @@
 - **File:** `01_sec_1_1.qmd` | **Word Count:** 1,389 words
 - **Active Symbols Added:** `N`, `a_t`, `E`
 - **Terminal Bridge Handed Off:**
-  _The foundation model is not a computer; it is the **stochastic processor core**—the probabilistic arithmetic logic unit of a larger machine. An execution core cannot function witho..._
+  _The foundation model is not a computer; it is the **stochastic processor core**—the probabilistic arithmetic logic unit of a larger machine. An execution core cannot function without..._
 
 ### Completed Step 2: Section 1.2: From Tensors to Trajectories
 - **File:** `02_sec_1_2.qmd` | **Word Count:** 2,820 words

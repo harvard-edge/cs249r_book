@@ -16,7 +16,7 @@
 - **File:** `02_sec_2_2.qmd` | **Word Count:** 2,870 words
 - **Active Symbols Added:** `\mathcal{V}`, `S`, `4\times`, `6\times`, `16\times`, `c_{\text{new}}`, `M`, `\mathbf{W}_{\text{embed}}`
 - **Terminal Bridge Handed Off:**
-  _When a truncation condition is detected via the inference status envelope, the host supervisor rejects the candidate output in its entirety. The supervisor logs the generation boun..._
+  _When a truncation condition is detected via the inference status envelope, the host supervisor rejects the candidate output in its entirety. The supervisor logs the generation bound..._
 
 ### Completed Step 3: Section 2.3: Autoregressive Generation and the Serving Loop
 - **File:** `03_sec_2_3.qmd` | **Word Count:** 2,582 words
@@ -28,7 +28,7 @@
 - **File:** `04_sec_2_4.qmd` | **Word Count:** 3,039 words
 - **Active Symbols Added:** `M`, `P`, `P_{\text{peak}}`, `\text{BW}_{\text{mem}}`, `I`, `I_{\text{sat}}`, `\mathbf{Y}`, `\mathbf{W}`
 - **Terminal Bridge Handed Off:**
-  _Because every generated token in an unbatched agent trajectory requires shuttling tens of gigabytes of weights across the accelerator bus, generating syntax errors or unparseable t..._
+  _Because every generated token in an unbatched agent trajectory requires shuttling tens of gigabytes of weights across the accelerator bus, generating syntax errors or unparsable t..._
 
 ### Completed Step 5: Section 2.5: Constraining the Output: Grammar-Guided Decoding
 - **File:** `05_sec_2_5.qmd` | **Word Count:** 2,773 words

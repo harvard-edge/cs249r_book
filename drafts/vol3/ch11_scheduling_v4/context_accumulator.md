@@ -22,7 +22,7 @@
 - **File:** `03_sec_11_3.qmd` | **Word Count:** 2,588 words
 - **Active Symbols Added:** `\mathbf{s}_k`, `a_{\text{repair}}`, `T_t`, `s_t`, `C_i`, `T_i`, `o_t^{\text{err}}`, `\pi_\theta`
 - **Terminal Bridge Handed Off:**
-  _By enforcing the anti-spin invariant, the runtime bounds the worst-case blast radius of forward self-healing. If forward repair succeeds within $K_{\text{repair}}$ turns, the syste..._
+  _By enforcing the anti-spin invariant, the runtime bounds the worst-case blast radius of forward self-healing. If forward repair succeeds within $K_{\text{repair}}$ turns, the system..._
 
 ### Completed Step 4: Section 11.4: Pivot Action Irreversibility
 - **File:** `04_sec_11_4.qmd` | **Word Count:** 2,282 words
@@ -52,7 +52,7 @@
 - **File:** `08_sec_11_8.qmd` | **Word Count:** 2,761 words
 - **Active Symbols Added:** `a_t`, `\mathcal{L}_{\text{comp}}`, `\mathcal{L}_{\text{wal}}`, `\mathcal{S}_{\text{saga}}`, `\mathcal{G}_{\text{gate}}`, `C_i`, `\mathbf{s}_t`, `o_t`
 - **Terminal Bridge Handed Off:**
-  _Only the fully synthesized runtime harness (Configuration 4)—uniting the control plane scheduler, WAL event storage, Saga compensators, idempotent reconciliation probes, and verifi..._
+  _Only the fully synthesized runtime harness (Configuration 4)—uniting the control plane scheduler, WAL event storage, Saga compensators, idempotent reconciliation probes, and verified..._
 
 ### Completed Step 9: Fallacies and Pitfalls
 - **File:** `98_fallacies_pitfalls.qmd` | **Word Count:** 1,312 words

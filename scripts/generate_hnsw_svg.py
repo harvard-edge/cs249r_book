@@ -120,7 +120,8 @@ svg_content = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 340" 
   <text x="210" y="309" class="card-text">where bounded beam search (efSearch) explores local neighbors in empirical O(log N) query time.</text>
 </svg>"""
 
-out_path = "/Users/VJ/GitHub/MLSysBook-vol3/books/vol3/06_episodic_memory/images/svg/hnsw_hierarchical_routing.svg"
+from pathlib import Path
+out_path = str(Path(__file__).resolve().parent.parent / "books/vol3/06_episodic_memory/images/svg/hnsw_hierarchical_routing.svg")
 with open(out_path, "w") as f:
     f.write(svg_content)
 print("Wrote hnsw_hierarchical_routing.svg successfully")

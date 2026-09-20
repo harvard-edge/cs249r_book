@@ -6,7 +6,8 @@ Clean code blocks and diagrams in Chapter 14:
 - Ensure zero untagged code blocks
 """
 
-file_path = "/Users/VJ/GitHub/MLSysBook-vol3/books/vol3/14_rlvr/14_rlvr.qmd"
+from pathlib import Path
+file_path = str(Path(__file__).resolve().parent.parent / "books/vol3/14_rlvr/14_rlvr.qmd")
 
 with open(file_path, "r", encoding="utf-8") as f:
     lines = f.readlines()

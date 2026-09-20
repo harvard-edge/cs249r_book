@@ -9,7 +9,7 @@ Heterogeneous trajectory lengths in agentic datasets create severe tensor alloca
 When training an agent on multi-turn trajectories, the loss aggregation strategy across a mini-batch dictates how the optimizer prioritizes different task complexities. Consider a mini-batch of $B$ independent trajectories $\{\tau^{(1)}, \tau^{(2)}, \dots, \tau^{(B)}\}$, where trajectory $b$ contains $L_b$ total tokens and an action-targeted loss mask $m_t^{(b)} \in \{0, 1\}$. The number of active supervised target tokens in trajectory $b$ is given by $N_b = \sum_{t=1}^{L_b} m_t^{(b)}$. The instantaneous cross-entropy loss for token $t$ in trajectory $b$ is denoted by $\ell_t^{(b)} = -\log P_\theta(x_t^{(b)} \mid x_{<t}^{(b)})$.
 
 ::: {.column-margin}
-**Gradient Distortion in Action Space**  
+**Gradient Distortion in Action Space**
 Under per-token normalization, a trajectory with 3,000 action tokens exerts $75\times$ more influence on the weight update $\nabla_\theta \mathcal{L}$ than a concise single-turn action of 40 tokens, regardless of task importance.
 :::
 
@@ -42,8 +42,8 @@ In distributed data-parallel training runtimes, tensor shapes allocated across a
 In agent workflows, the empirical distribution of trajectory lengths exhibits high variance and extreme positive skew. While human user queries and simple database lookups terminate within several hundred tokens, complex coding agents executing multi-turn compiler feedback loops frequently approach context limits of $16\text{K}$ or $32\text{K}$ tokens. If $S_{\max}$ is set to $32,768$ to accommodate the longest trajectories, a batch consisting primarily of short trajectories wastes over $80\%$ of its memory footprint on non-computational padding tokens.
 
 ::: {.column-margin}
-**Padding Waste Factor ($W_{\text{pad}}$)**  
-$$W_{\text{pad}} = 1 - \frac{\sum_{b=1}^B L_b}{B \cdot S_{\max}}$$  
+**Padding Waste Factor ($W_{\text{pad}}$)**
+$$W_{\text{pad}} = 1 - \frac{\sum_{b=1}^B L_b}{B \cdot S_{\max}}$$
 When average trajectory length is $3,200$ and $S_{\max} = 32,768$, $W_{\text{pad}} = 90.2\%$, idling tensor cores during attention projections.
 :::
 
@@ -56,7 +56,7 @@ By assembling multiple trajectories into each allocated row, the effective token
 ::: {.callout-note title="Worked Example: Packing Efficiency and Compute Throughput on an 8-GPU Node"}
 An engineering team is fine-tuning an 8-billion parameter model ($d_{\text{model}} = 4,096$, $L = 32$ layers) on an 8-GPU node equipped with NVIDIA H100 SXM5 accelerators (80 GB HBM3 per GPU). The training dataset contains 20,000 agent trajectories. The empirical sequence length distribution has a mean $\mu = 2,800$ tokens, a standard deviation $\sigma = 1,900$ tokens, and a maximum length of $15,800$ tokens. The buffer limit is configured to $S_{\max} = 16,384$ tokens.
 
-**Scenario A: Naive Padded Batching**  
+**Scenario A: Naive Padded Batching**
 Each GPU hosts a micro-batch size of $B = 2$ sequences, padded to $S_{\max} = 16,384$. Across the 8-GPU node, the global batch processes:
 $$B_{\text{global}} = 8 \times 2 = 16 \text{ sequences per step}$$
 $$\text{Allocated Tokens per Step} = 16 \times 16,384 = 262,144 \text{ tokens}$$
@@ -66,7 +66,7 @@ To process all 20,000 trajectories requires:
 $$\text{Total Steps} = \frac{20,000}{16} = 1,250 \text{ optimizer steps}$$
 $$\text{Total Computed Tokens} = 1,250 \times 262,144 = 3.277 \times 10^8 \text{ tokens}$$
 
-**Scenario B: Packed Sequences ($S_{\text{pack}} = 16,384$)**  
+**Scenario B: Packed Sequences ($S_{\text{pack}} = 16,384$)**
 Using Best-Fit Decreasing bin packing, trajectories are concatenated into packed buffers of length $S_{\text{pack}} = 16,384$. The average packed buffer holds:
 $$\bar{K} = \frac{16,384 \times 0.985}{2,800} \approx 5.76 \text{ trajectories}$$
 With micro-batch size of 2 packed buffers per GPU (16 buffers per step), each step processes:
@@ -77,7 +77,7 @@ To process all 20,000 trajectories requires:
 $$\text{Total Steps} = \frac{20,000}{92.16} \approx 217 \text{ optimizer steps}$$
 $$\text{Total Computed Tokens} = 217 \times 16,384 \times 16 \approx 5.689 \times 10^7 \text{ tokens}$$
 
-**Throughput and Hardware Speedup:**  
+**Throughput and Hardware Speedup:**
 By eliminating padding tokens from the forward and backward passes, the required floating-point operations drop by a factor of:
 $$\text{FLOP Reduction Factor} = \frac{3.277 \times 10^8}{5.689 \times 10^7} \approx 5.76\times$$
 On the H100 cluster, training wall-clock time drops from 14.8 hours to 2.6 hours, saving 97.6 GPU-hours while maintaining identical gradient semantics.
@@ -88,7 +88,7 @@ On the H100 cluster, training wall-clock time drops from 14.8 hours to 2.6 hours
 While sequence packing delivers dramatic throughput acceleration, naively concatenating independent trajectories into a single sequence creates catastrophic statistical contamination. In a standard causal transformer, self-attention allows token $i$ to attend to all preceding tokens $j \le i$. If trajectories $\tau^{(1)}$ and $\tau^{(2)}$ are concatenated end-to-end within a single buffer, every token in $\tau^{(2)}$ can attend to all tokens in $\tau^{(1)}$.
 
 ::: {.column-margin}
-**The Attention Cross-Talk Hazard**  
+**The Attention Cross-Talk Hazard**
 If token $i \in \tau^{(2)}$ attends to token $j \in \tau^{(1)}$, the agent learns spurious causal dependencies across unrelated tasks, leading to syntax errors and state hallucinations during inference.
 :::
 
@@ -97,7 +97,7 @@ This cross-talk violates the fundamental independence assumption of supervised l
 ```
        UNISOLATED CAUSAL ATTENTION                     2D BLOCK-DIAGONAL ATTENTION
            (Contaminated Training)                        (Strict Task Isolation)
-         
+
          Key Tokens (j)                                  Key Tokens (j)
          [--- τ₁ ---] [--- τ₂ ---]                      [--- τ₁ ---] [--- τ₂ ---]
        ┌─────────────┬────────────┐                   ┌─────────────┬────────────┐
@@ -132,16 +132,16 @@ If a training pipeline packs trajectories without modifying the position index t
 ```python
 def build_packed_metadata(trajectory_lens: list[int], device: torch.device):
     # Construct cumulative sequence lengths for varlen attention kernels
-    cu_seqlens = torch.tensor([0] + list(itertools.accumulate(trajectory_lens)), 
+    cu_seqlens = torch.tensor([0] + list(itertools.accumulate(trajectory_lens)),
                               dtype=torch.int32, device=device)
     # Generate zero-reset position IDs for each constituent trajectory
-    pos_list = [torch.arange(seq_len, dtype=torch.long, device=device) 
+    pos_list = [torch.arange(seq_len, dtype=torch.long, device=device)
                 for seq_len in trajectory_lens]
     position_ids = torch.cat(pos_list, dim=0)
     return cu_seqlens, position_ids
 ```
 
-This index escalation induces severe positional extrapolation error. The first token of trajectory $\tau^{(2)}$—which is an initial system prompt or user instruction—is rotated by frequencies corresponding to position $t = 12,000$ instead of position $t = 0$. Because initial prompt tokens serve as critical attention sinks and semantic anchors, rotating them into extreme out-of-distribution frequency regimes disrupts the model's self-attention patterns. The model becomes incapable of parsing system instructions that appear at index 0 during inference. 
+This index escalation induces severe positional extrapolation error. The first token of trajectory $\tau^{(2)}$—which is an initial system prompt or user instruction—is rotated by frequencies corresponding to position $t = 12,000$ instead of position $t = 0$. Because initial prompt tokens serve as critical attention sinks and semantic anchors, rotating them into extreme out-of-distribution frequency regimes disrupts the model's self-attention patterns. The model becomes incapable of parsing system instructions that appear at index 0 during inference.
 
 To maintain strict parity with single-sequence inference, the training harness must reset position IDs to zero at every trajectory boundary:
 

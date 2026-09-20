@@ -7,18 +7,18 @@ Architectural intuitions derived from deterministic CPU pipelines or standard mi
 
 A common architectural misconception is to model an inference call as an atomic functional evaluation—analogous to calling an external library function or issuing a single database query. Under this mental model, the host runtime dispatches an input buffer and receives a generated response from a single execution pass through the model's neural network layers.
 
-In physical reality, the foundation model invocation boundary is fundamentally split into two computationally and structurally distinct phases: parallel prompt prefill and serialized autoregressive decode. 
+In physical reality, the foundation model invocation boundary is fundamentally split into two computationally and structurally distinct phases: parallel prompt prefill and serialized autoregressive decode.
 
 1. **Prompt Prefill:** The staged sequence of $M$ prompt tokens is processed concurrently in a single computational pass. Because all $M$ tokens are known *a priori*, the attention and feed-forward projections execute as dense Matrix-Matrix multiplications (GEMM). This phase achieves high arithmetic intensity ($I \gg I_{\text{sat}}$), saturating the GPU Tensor Cores at compute-bound efficiency to produce the initial Key-Value (KV) cache activations.
 2. **Autoregressive Decode:** Emitting a response sequence of $K$ tokens requires an irreducibly sequential loop of exactly $K$ discrete forward passes. Because token generation is causally autoregressive—each new token $y_t$ depends conditionally on all preceding tokens $y_{<t}$—token $y_t$ cannot be computed until token $y_{t-1}$ has been sampled, dequantized, and appended to the KV cache.
 
-At batch size $B=1$ (the operating regime of a single interactive agent trajectory), every individual decode step executes as a memory-bound Matrix-Vector multiplication (GEMV). The entire parameter tensor matrix $\mathbf{W}$ across all $L$ layers must be fetched from off-chip High-Bandwidth Memory (HBM), shuttled across the memory bus into on-chip SRAM registers, and contracted against the single active token vector. 
+At batch size $B=1$ (the operating regime of a single interactive agent trajectory), every individual decode step executes as a memory-bound Matrix-Vector multiplication (GEMV). The entire parameter tensor matrix $\mathbf{W}$ across all $L$ layers must be fetched from off-chip High-Bandwidth Memory (HBM), shuttled across the memory bus into on-chip SRAM registers, and contracted against the single active token vector.
 
 For a $70\text{B}$ parameter model in 16-bit precision ($\approx 140\text{ GB}$ of weights) hosted on an NVIDIA H100 SXM5 accelerator ($3.35\text{ TB/s}$ HBM3 bandwidth), the physical parameter shuttle imposes a strict latency floor per token:
 $$t_{\text{token}} \ge \frac{140\text{ GB}}{3.35\text{ TB/s}} \approx 41.8\text{ ms}$$
 This limits single-batch generation throughput to $\le 23.9\text{ tokens/s}$. Producing a response of $K = 1{,}024$ tokens does not execute one forward pass; it executes $1$ prefill pass followed by $1{,}024$ sequential forward passes, shuttling:
 $$140\text{ GB} \times 1{,}024 \approx 143.36\text{ TB}$$
-of model weights across the accelerator memory bus. 
+of model weights across the accelerator memory bus.
 
 **Architectural Defense:** Runtimes must never treat model invocations as atomic $O(1)$ operations. Schedulers must model execution as an $O(K)$ iterative loop. Host systems should consume token streams incrementally via Server-Sent Events (SSE) to overlap host parsing with accelerator decode, enforce Inter-Token Latency (`ITL`) watchdogs rather than coarse request-level timeouts, and support immediate generation preemption as soon as stopping criteria or structural syntax violations are detected.
 :::
@@ -28,7 +28,7 @@ of model weights across the accelerator memory bus.
 
 In conventional client-server architectures, an HTTP `200 OK` status code combined with a payload status such as `finish_reason: "stop"` or `status: "COMPLETED"` indicates that the requested operation finished successfully. Runtimes that carry this assumption into agent system design conflate transport termination with task completion, advancing the trajectory control plane without verifying whether the model's emitted proposal is functional or even valid.
 
-An invocation completion signal certifies only that the serving engine's autoregressive decode loop terminated cleanly—either by sampling an end-of-sequence token (`<|endoftext|>`), encountering a registered stop sequence, or exhausting the token budget. It provides zero guarantees regarding semantic validity, environment applicability, or algorithmic correctness. 
+An invocation completion signal certifies only that the serving engine's autoregressive decode loop terminated cleanly—either by sampling an end-of-sequence token (`<|endoftext|>`), encountering a registered stop sequence, or exhausting the token budget. It provides zero guarantees regarding semantic validity, environment applicability, or algorithmic correctness.
 
 Under the principle of Zero Ambient Authority ($A=0$), a model output is merely an unverified proposal held in host escrow. The emitted payload may:
 - Assert that a non-existent file was created or modified.
@@ -96,7 +96,7 @@ $$P(y_t \mid y_{<t}) = \text{Softmax}(\mathbf{z} / \tau)$$
 
 When a model outputs syntactically invalid Python code or fabricates a nonexistent Git commit hash, every floating-point operation on the accelerator's Tensor Cores executed with complete arithmetic success. The "error" exists purely in the external semantic interpretation of the sampled token sequence. The neural processor cannot "know" that it emitted an error; it simply sampled tokens from a conditioned probability distribution.
 
-**Architectural Defense:** Because the accelerator core possesses no internal exception-handling or fault-trapping hardware, the host agent runtime must provide the entire supervisor, MMU, and trap-handling infrastructure externally. 
+**Architectural Defense:** Because the accelerator core possesses no internal exception-handling or fault-trapping hardware, the host agent runtime must provide the entire supervisor, MMU, and trap-handling infrastructure externally.
 
 The runtime must act as the supervisor kernel to the unprivileged neural coprocessor:
 - It intercepts raw output token streams.
