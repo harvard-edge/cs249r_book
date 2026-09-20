@@ -293,7 +293,7 @@ class LayoutCommand:
                 "Optional. Omit the subcommand when using --vol1/--vol2 for "
                 "the high-level auto-layout planner."
             ),
-            metavar="{chapter,collisions,check,margins,overlaps,release,purpose,tables}",
+            metavar="{chapter,collisions,check,margins,overlaps,release,purpose,tables,figures}",
         )
 
         chapter = sub.add_parser(
@@ -624,6 +624,25 @@ class LayoutCommand:
             help="PDF rasterization DPI for contact sheets (default 110).",
         )
 
+        figures = sub.add_parser(
+            "figures",
+            help="Render a figure-only PDF audit/contact sheet for a volume or chapter.",
+            formatter_class=_LayoutHelpFormatter,
+        )
+        fvol = figures.add_mutually_exclusive_group(required=True)
+        fvol.add_argument("--vol1", dest="volume", action="store_const", const="vol1", help="Audit Volume I figures.")
+        fvol.add_argument("--vol2", dest="volume", action="store_const", const="vol2", help="Audit Volume II figures.")
+        fvol.add_argument("--vol3", dest="volume", action="store_const", const="vol3", help="Audit Volume III figures.")
+        fvol.add_argument("--vol4", dest="volume", action="store_const", const="vol4", help="Audit Volume IV figures.")
+        figures.add_argument("--chapter", type=str, default="", help="Only include these comma-separated chapter stems/slugs.")
+        figures.add_argument("--type", type=str, default="all", choices=["all", "tikz", "margin", "images", "cover"], help="Filter by figure type (default: all).")
+        figures.add_argument("--limit", type=int, default=0, help="Only include the first N extracted figures (0 = all).")
+        figures.add_argument("--no-render", action="store_true", help="Extract figures without running Quarto.")
+        figures.add_argument("--no-contact-sheets", action="store_true", help="Skip PNG contact sheet generation after rendering.")
+        figures.add_argument("--contact-cols", type=int, default=3, help="Contact-sheet thumbnail columns (default 3).")
+        figures.add_argument("--contact-rows", type=int, default=4, help="Contact-sheet thumbnail rows (default 4).")
+        figures.add_argument("--dpi", type=int, default=110, help="PDF rasterization DPI for contact sheets (default 110).")
+
         purpose = sub.add_parser(
             "purpose",
             help="Check that each chapter's Purpose fits on its opener page "
@@ -737,6 +756,39 @@ class LayoutCommand:
                 contact_rows=max(1, opts.contact_rows),
                 dpi=max(36, opts.dpi),
             )
+        if opts.subcommand == "figures":
+            import sys
+            root_str = str(self._repo_root())
+            if root_str not in sys.path:
+                sys.path.insert(0, root_str)
+            from scripts.generate_figure_contact_sheet import FigureContactSheetBuilder
+            chapter_filter = self._parse_chapter_filter(opts.chapter)
+            builder = FigureContactSheetBuilder(
+                volume=opts.volume,
+                chapter_filter=chapter_filter,
+                figure_type=opts.type,
+                limit=opts.limit,
+                dpi=max(36, opts.dpi),
+                cols=max(1, opts.contact_cols),
+                rows=max(1, opts.contact_rows),
+            )
+            entries = builder.extract_figures()
+            if not entries:
+                console.print(f"[yellow]No matching figures found for {opts.volume}.[/yellow]")
+                return False
+            builder.export_metadata(entries)
+            qmd_path = builder.generate_qmd(entries)
+            console.print(f"[bold blue]Extracted[/bold blue] {len(entries)} figure{'s' if len(entries) != 1 else ''}.")
+            console.print(f"[dim]Audit source:[/dim] {qmd_path}")
+            if not opts.no_render:
+                pdf_path = builder.render_pdf(qmd_path)
+                if pdf_path and not opts.no_contact_sheets:
+                    sheets = builder.make_contact_sheets(pdf_path)
+                    if sheets:
+                        console.print("[dim]Contact sheets:[/dim]")
+                        for sheet in sheets:
+                            console.print(f"  {sheet}")
+            return True
         if opts.subcommand == "purpose":
             return self._purpose(Path(opts.pdf), opts.volume, chapter=opts.chapter)
 

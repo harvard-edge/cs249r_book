@@ -135,10 +135,178 @@ At large scale (hundreds of billions of parameters across thousands of GPUs), gr
 
 Physical constraints govern data movement before algorithms are designed. @Sec-network-fabrics-wire-link establishes the wire-level physics behind these algorithms: the speed of light sets a latency floor[^fn-speed-of-light] (roughly 5 $\mu\text{s}$ per kilometer in fiber), the bandwidth-distance product limits how far a fast link can reach before it needs optics (PAM4 signaling and copper-vs.-optics reach are developed in @sec-network-fabrics-pam4), and kernel-bypass transports such as remote direct memory access (RDMA) and GPUDirect RDMA strip the per-message software tax down to a few microseconds (@sec-network-fabrics-rdma). Collective communication adds the energy cost of moving a bit, which the algorithms must respect as firmly as latency and bandwidth.
 
-Moving data costs energy that scales with distance, as @fig-data-movement-hierarchy illustrates. Concrete reference values are: local SRAM\index{SRAM}\index{Static Random-Access Memory|see{SRAM}} at roughly 0.5 pJ/bit, NVLink\index{NVLink} (on-package PCB) at the tens of pJ/bit, and inter-node InfiniBand at the hundreds-to-thousand-plus pJ/bit. The figure uses the higher published estimates that include link-, switch-, and transceiver-side power; chapter prose elsewhere uses the lower bound of each range. Both views agree on the central point: the energy cost climbs by two-to-three orders of magnitude between SRAM and inter-node fabric.
+Moving data costs energy that scales exponentially with distance. @Fig-data-movement-hierarchy illustrates this data-movement energy hierarchy across four physical tiers: local on-chip SRAM ($\sim$0.5\,pJ/bit), on-package high-bandwidth memory (HBM)\index{HBM}\index{High-Bandwidth Memory|see{HBM}} ($\sim$20\,pJ/bit), intra-node NVLink ($\sim$100\,pJ/bit), and optical inter-node InfiniBand ($\sim$1{,}000\,pJ/bit). The figure plots higher-bound published estimates that include link-, switch-, and transceiver-side power; chapter prose elsewhere uses the lower bound of each range for back-of-the-envelope models. Both views agree on the central thermodynamic reality: crossing from on-package SRAM to a 50-meter optical data center fabric incurs a 2{,}000$\times$ energy penalty, making physical data locality the primary driver of sustainable distributed ML system design.
 
-::: {#fig-data-movement-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The data-movement energy hierarchy**: The energy cost of moving a single bit climbs by orders of magnitude across the system hierarchy — from SRAM through HBM to intra-node NVLink to inter-node InfiniBand. The figure plots higher-bound published estimates (NVLink in the tens of pJ/bit, InfiniBand near 1{,}000 pJ/bit) that include switch and transceiver overheads. The chapter prose elsewhere uses the lower-bound estimates for back-of-the-envelope calculations. Either way, the gradient makes data locality the primary driver of sustainable and efficient distributed ML system design." fig-alt="Horizontal bar chart showing increasing energy cost (pJ per bit) on a logarithmic scale from local SRAM through HBM, NVLink, and InfiniBand to remote data center nodes."}
-![](images/svg/data-movement-hierarchy.svg)
+::: {#fig-data-movement-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The data-movement energy hierarchy**: The energy cost of moving a single bit climbs by orders of magnitude across the system hierarchy: from local SRAM (0.5 pJ/bit) through HBM (20 pJ/bit, $40\times$) and intra-node NVLink (100 pJ/bit, $200\times$) to inter-node InfiniBand (1,000 pJ/bit, $2{,}000\times$). Higher-bound published estimates include link, switch, and laser transceiver overheads. This steep thermodynamic gradient makes data locality the primary driver of sustainable distributed ML system architecture." fig-alt="Horizontal bar chart showing increasing energy cost (pJ per bit) on a logarithmic scale from local SRAM through HBM, NVLink, and InfiniBand to remote data center nodes. Multiplier badges on the right highlight the 1x baseline, 40x, 200x, and 2,000x energy cliff."}
+
+```{.tikz}
+\begin{tikzpicture}[
+  font=\small\sffamily,
+  >=Stealth,
+  tier label/.style={
+    font=\footnotesize,
+    text=TextDark,
+    align=right,
+    % 3.4cm, not 2.5cm: "InfiniBand NDR" did not fit and hyphenated as
+    % "Infini-/Band NDR". Labels are right-aligned on an east anchor, so the
+    % extra width grows into empty space and the shorter labels do not move.
+    text width=3.4cm,
+    anchor=east
+  },
+  energy box/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.85pt,
+    align=center,
+    inner sep=3.5pt
+  },
+  context card/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=CardBorder,
+    fill=white,
+    line width=0.7pt,
+    align=left,
+    inner sep=4.5pt,
+    anchor=west
+  },
+  multiplier badge/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.85pt,
+    align=center,
+    inner sep=3.5pt,
+    minimum width=1.7cm,
+    minimum height=1.05cm
+  },
+  law card/.style={
+    rectangle,
+    rounded corners=4pt,
+    draw=SteelBlue!40,
+    fill=LightBlue!40,
+    line width=0.7pt,
+    inner sep=6.5pt,
+    align=left,
+    text width=14.4cm
+  }
+]
+
+% Tier 1: SRAM (y = 6.4)
+\node[tier label] (lbl1) at (2.5, 6.4) {
+  \textbf{\normalsize SRAM}\\[1.5pt]
+  \scriptsize\textcolor{TextMuted}{On-Chip Cache}\\[1pt]
+  \tiny\textcolor{TextMuted}{$\sim$0--1\,mm die}
+};
+
+\node[energy box, draw=DarkGreen, fill=GreenFill, minimum width=1.4cm, minimum height=1.05cm] (eng1) at (3.4, 6.4) {
+  \textbf{\footnotesize$\sim$0.5\,pJ}\\[1pt]
+  \tiny\textcolor{DarkGreen}{per bit}
+};
+
+\node[context card, text width=7.7cm, minimum height=1.05cm] (ctx1) at (4.3, 6.4) {
+  \textbf{\footnotesize Tiling \& Kernel Fusion}\\[1.5pt]
+  \scriptsize Maximized via FlashAttention tiling; keeps intermediate activations inside SRAM.
+};
+
+\node[multiplier badge, draw=DarkGreen, fill=GreenFill, text=DarkGreen] (mul1) at (13.5, 6.4) {
+  \textbf{\small 1$\times$}\\[1pt]
+  \tiny Baseline
+};
+
+% Tier 2: DRAM / HBM (y = 4.9)
+\node[tier label] (lbl2) at (2.5, 4.9) {
+  \textbf{\normalsize DRAM / HBM}\\[1.5pt]
+  \scriptsize\textcolor{TextMuted}{On-Package Stack}\\[1pt]
+  \tiny\textcolor{TextMuted}{$\sim$1--10\,mm 2.5D}
+};
+
+\node[energy box, draw=SteelBlue, fill=LightBlue, minimum width=2.7cm, minimum height=1.05cm] (eng2) at (4.05, 4.9) {
+  \textbf{\footnotesize$\sim$20\,pJ / bit}\\[1pt]
+  \tiny\textcolor{SteelBlue}{HBM3e PHY read}
+};
+
+\node[context card, text width=6.4cm, minimum height=1.05cm] (ctx2) at (5.6, 4.9) {
+  \textbf{\footnotesize Memory Bandwidth Wall}\\[1.5pt]
+  \scriptsize Requires memory-bound operator recomputation to avoid HBM round-trips.
+};
+
+\node[multiplier badge, draw=SteelBlue, fill=LightBlue, text=SteelBlue] (mul2) at (13.5, 4.9) {
+  \textbf{\small 40$\times$}\\[1pt]
+  \tiny vs.\ SRAM
+};
+
+% Tier 3: NVLink 4.0 (y = 3.4)
+\node[tier label] (lbl3) at (2.5, 3.4) {
+  \textbf{\normalsize NVLink 4.0}\\[1.5pt]
+  \scriptsize\textcolor{TextMuted}{Intra-Node Mesh}\\[1pt]
+  \tiny\textcolor{TextMuted}{$\sim$0.5--1\,m PCB}
+};
+
+\node[energy box, draw=OrangeLine, fill=OrangeL, minimum width=5.2cm, minimum height=1.05cm] (eng3) at (5.3, 3.4) {
+  \textbf{\footnotesize$\sim$100\,pJ / bit}\\[1pt]
+  \tiny\textcolor{OrangeLine}{NVSwitch copper trace}
+};
+
+\node[context card, text width=3.9cm, minimum height=1.05cm] (ctx3) at (8.1, 3.4) {
+  \textbf{\footnotesize Intra-Node Locality}\\[1.5pt]
+  \scriptsize Enables Tensor Parallelism (TP).
+};
+
+\node[multiplier badge, draw=OrangeLine, fill=OrangeL, text=OrangeLine] (mul3) at (13.5, 3.4) {
+  \textbf{\small 200$\times$}\\[1pt]
+  \tiny vs.\ SRAM
+};
+
+% Tier 4: InfiniBand NDR (y = 1.9)
+\node[tier label] (lbl4) at (2.5, 1.9) {
+  \textbf{\normalsize \mbox{InfiniBand NDR}}\\[1.5pt]
+  \scriptsize\textcolor{TextMuted}{Inter-Node Fabric}\\[1pt]
+  \tiny\textcolor{TextMuted}{$\sim$10--100\,m optics}
+};
+
+\node[energy box, draw=VioletLine, fill=VioletL, minimum width=9.7cm, minimum height=1.05cm] (eng4) at (7.55, 1.9) {
+  \textbf{\footnotesize$\sim$1{,}000\,pJ / bit (Laser Transceiver + Serialization + Optical Fiber)}\\[1.5pt]
+  \scriptsize\textcolor{VioletLine}{Dominates cluster power budget during all-to-all collectives}
+};
+
+\node[multiplier badge, draw=RedLine, fill=RedFill, text=RedLine] (mul4) at (13.5, 1.9) {
+  \textbf{\small 2{,}000$\times$}\\[1pt]
+  \tiny\textbf{\textcolor{RedLine}{Energy Cliff}}
+};
+
+% Log-scale axis bar (y = 1.0)
+\draw[line width=0.8pt, CardBorder!90] (2.7, 1.0) -- (12.4, 1.0);
+
+\draw[line width=0.8pt, CardBorder!90] (4.1, 0.9) -- (4.1, 1.1);
+\node[below=2pt, font=\scriptsize, text=TextMuted] at (4.1, 0.9) {0.5\,pJ};
+
+\draw[line width=0.8pt, CardBorder!90] (5.4, 0.9) -- (5.4, 1.1);
+\node[below=2pt, font=\scriptsize, text=TextMuted] at (5.4, 0.9) {20\,pJ};
+
+\draw[line width=0.8pt, CardBorder!90] (7.9, 0.9) -- (7.9, 1.1);
+\node[below=2pt, font=\scriptsize, text=TextMuted] at (7.9, 0.9) {100\,pJ};
+
+\draw[line width=0.8pt, CardBorder!90] (12.4, 0.9) -- (12.4, 1.1);
+\node[below=2pt, font=\scriptsize, text=TextMuted] at (12.4, 0.9) {1{,}000\,pJ};
+
+\node[below=15pt, font=\footnotesize\bfseries, text=TextDark] at (7.55, 1.0) {
+  Energy Cost per Bit Transferred (pJ / bit, Log Scale)
+};
+
+% Bottom Thermodynamic Law Card (y = -0.95)
+\node[law card] (law) at (7.25, -0.95) {
+  \centering\textbf{\footnotesize Thermodynamic Law of Distributed ML Systems}\\[3pt]
+  \raggedright\scriptsize
+  % Second column is a fixed-width p{} so the rows wrap inside the card; a
+  % plain 'l' column takes its natural width and overruns the node's text width.
+  \begin{tabular}{@{}l p{10.8cm}@{}}
+    \textbf{The Distance Penalty:} & Moving a bit across a 50-meter optical datacenter fabric costs 2,000$\times$ more energy than inside SRAM. \\[2pt]
+    \textbf{Algorithmic Defense:} & Hierarchical AllReduce and FP8/FP4 quantization exist primarily to avoid paying this 2,000$\times$ optical tax. \\
+  \end{tabular}
+};
+
+\end{tikzpicture}
+```
 :::
 
 At the exascale (tens of thousands of GPUs), the power budget for communication rivals the power budget for computation itself. A 10,000-GPU cluster exchanging 1 GB of gradients per step at 30 pJ/bit consumes approximately 4.8 kJ per AllReduce (accounting for the factor of 2 in data movement), a nontrivial fraction of the total per-step energy budget.
@@ -671,7 +839,172 @@ class LogPOverlap:
 :::
 
 ::: {#fig-comm-compute-overlap fig-env="figure" fig-pos="htb" fig-cap="**Communication-computation overlap**: By pipelining collective operations with the backward pass, systems can hide network latency behind arithmetic execution. Overlap is successful only when the nonoverlappable overhead ($o$) is minimized, allowing the bulk transfer term to proceed while the GPU computes the next layer's gradients." fig-alt="Timeline diagram showing overlapping Compute and Communication bars. Computation for layer N overlaps with Communication for layer N-1."}
-![](images/svg/comm-compute-overlap.svg)
+
+```{.tikz}
+\scalebox{0.8}{%
+\begin{tikzpicture}[line join=round, line cap=round, font=\small\sffamily]
+
+  % Define Layer Order
+  \pgfdeclarelayer{background}
+  \pgfdeclarelayer{foreground}
+  \pgfsetlayers{background,main,foreground}
+
+  % Styles
+  \tikzset{
+    stream_label/.style={font=\small\bfseries\sffamily, align=right, text=TextBlack},
+    compute_box/.style={
+      draw=OrangeLine, fill=OrangeFill!75, line width=0.8pt, rounded corners=2.5pt,
+      minimum height=1.2cm, minimum width=2.4cm, anchor=west, align=center, font=\small\sffamily
+    },
+    comm_box/.style={
+      draw=VioletLine, fill=VioletFill!85, line width=0.8pt, rounded corners=2.5pt,
+      minimum height=1.2cm, minimum width=2.4cm, anchor=west, align=center, font=\small\sffamily
+    },
+    stall_compute/.style={
+      draw=RedLine, fill=RedFill!75, line width=0.9pt, rounded corners=2.5pt,
+      minimum height=1.2cm, minimum width=2.4cm, anchor=west, align=center, font=\small\sffamily
+    },
+    stall_comm/.style={
+      draw=RedLine, fill=RedFill!75, line width=0.9pt, rounded corners=2.5pt,
+      minimum height=1.2cm, minimum width=2.4cm, anchor=west, align=center, font=\small\sffamily
+    },
+    opt_box/.style={
+      draw=BlueLine, fill=BlueFill!75, line width=0.8pt, rounded corners=2.5pt,
+      minimum height=1.2cm, minimum width=2.2cm, anchor=west, align=center, font=\small\sffamily
+    },
+    hook_arr/.style={
+      ->, >=Latex, line width=0.9pt, OrangeLine!90!black
+    },
+    axis_arr/.style={
+      ->, >=Latex, line width=0.75pt, GrayLine
+    }
+  }
+
+  % Stream Header Labels (Left side)
+  \node[stream_label, anchor=east] at (-0.4, 2.0) {Compute Stream\\[-1pt]\footnotesize\color{OrangeLine!90!black}(Tensor Cores / Default)};
+  \node[stream_label, anchor=east] at (-0.4, 0.0) {Network Stream\\[-1pt]\footnotesize\color{VioletLine}(NIC / NCCL Comms)};
+
+  % Compute Stream Blocks (y = 2.0, height = 1.2, spans y from 1.4 to 2.6)
+  \node[compute_box] (C_L4) at (0.0, 2.0) {\textbf{Backward $L_4$}\\[1pt]\footnotesize Compute $\nabla W_4$};
+  \node[compute_box] (C_L3) at (2.4, 2.0) {\textbf{Backward $L_3$}\\[1pt]\footnotesize Compute $\nabla W_3$};
+  \node[compute_box] (C_L2) at (4.8, 2.0) {\textbf{Backward $L_2$}\\[1pt]\footnotesize Compute $\nabla W_2$};
+  \node[compute_box] (C_L1) at (7.2, 2.0) {\textbf{Backward $L_1$}\\[1pt]\footnotesize Compute $\nabla W_1$};
+  \node[stall_compute] (C_STALL) at (9.6, 2.0) {\textbf{Compute Stall}\\[1pt]\footnotesize\color{RedLine!90!black}Wait for $\nabla W_1$};
+  \node[opt_box] (C_OPT) at (12.0, 2.0) {\textbf{Optimizer}\\[1pt]\footnotesize Weight Update};
+
+  % Communication Stream Blocks (y = 0.0, height = 1.2, spans y from -0.6 to 0.6)
+  % Idle / warmup slot on comms stream
+  \draw[draw=black!25, fill=black!3, dashed, rounded corners=2.5pt, line width=0.6pt]
+    (0.0, -0.6) rectangle (2.4, 0.6)
+    node[pos=0.5, font=\footnotesize\color{black!40}\sffamily\itshape] {Comms Idle};
+
+  \node[comm_box] (M_L4) at (2.4, 0.0) {\textbf{AllReduce $L_4$}\\[1pt]\footnotesize\color{GreenLine!90!black}\textbf{100\% Hidden}};
+  \node[comm_box] (M_L3) at (4.8, 0.0) {\textbf{AllReduce $L_3$}\\[1pt]\footnotesize\color{GreenLine!90!black}\textbf{100\% Hidden}};
+  \node[comm_box] (M_L2) at (7.2, 0.0) {\textbf{AllReduce $L_2$}\\[1pt]\footnotesize\color{GreenLine!90!black}\textbf{100\% Hidden}};
+  \node[stall_comm] (M_L1) at (9.6, 0.0) {\textbf{AllReduce $L_1$}\\[1pt]\footnotesize\color{RedLine!90!black}\textbf{Exposed Latency}};
+
+  % Idle on comms stream during optimizer step
+  \draw[draw=black!25, fill=black!3, dashed, rounded corners=2.5pt, line width=0.6pt]
+    (12.0, -0.6) rectangle (14.2, 0.6)
+    node[pos=0.5, font=\footnotesize\color{black!40}\sffamily\itshape] {Comms Idle};
+
+  % Vertical Droplines & Hook Arrows
+  % L4 -> M_L4 hook at x = 2.4
+  \fill[OrangeLine] (2.4, 1.4) circle (2pt);
+  \draw[hook_arr] (2.4, 1.4) -- (2.4, 0.6);
+  \node[right=2pt, font=\tiny\bfseries\sffamily\color{OrangeLine!90!black}] at (2.4, 1.0) {hook};
+
+  % L3 -> M_L3 hook at x = 4.8
+  \fill[OrangeLine] (4.8, 1.4) circle (2pt);
+  \draw[hook_arr] (4.8, 1.4) -- (4.8, 0.6);
+  \node[right=2pt, font=\tiny\bfseries\sffamily\color{OrangeLine!90!black}] at (4.8, 1.0) {hook};
+
+  % L2 -> M_L2 hook at x = 7.2
+  \fill[OrangeLine] (7.2, 1.4) circle (2pt);
+  \draw[hook_arr] (7.2, 1.4) -- (7.2, 0.6);
+  \node[right=2pt, font=\tiny\bfseries\sffamily\color{OrangeLine!90!black}] at (7.2, 1.0) {hook};
+
+  % L1 -> M_L1 trigger at x = 9.6 (Critical Path!)
+  \fill[RedLine] (9.6, 1.4) circle (2pt);
+  \draw[->, >=Latex, line width=1.1pt, RedLine] (9.6, 1.4) -- (9.6, 0.6);
+  \node[right=2pt, font=\tiny\bfseries\sffamily\color{RedLine}] at (9.6, 1.0) {tail hook};
+
+  % M_L1 -> Optimizer Step release at x = 12.0 (Sync Barrier!)
+  \fill[BlueLine] (12.0, 0.6) circle (2pt);
+  \draw[->, >=Latex, line width=1.1pt, BlueLine] (12.0, 0.6) -- (12.0, 1.4);
+  \node[right=2pt, font=\tiny\bfseries\sffamily\color{BlueLine}] at (12.0, 1.0) {sync release};
+
+  % Background Shaded Regions
+  \begin{pgfonlayer}{background}
+    % Overlap Shading (x: 2.35 to 9.55, y: -0.85 to 2.95)
+    \draw[draw=GreenLine, fill=GreenFill!25, line width=0.85pt, dashed, rounded corners=5pt]
+      (2.35, -0.85) rectangle (9.55, 2.95);
+
+    % Critical Tail Barrier Shading (x: 9.65 to 11.95, y: -0.85 to 2.95)
+    \draw[draw=RedLine, fill=RedFill!25, line width=0.85pt, dashed, rounded corners=5pt]
+      (9.65, -0.85) rectangle (11.95, 2.95);
+  \end{pgfonlayer}
+
+  % Region Title Badges above
+  \node[anchor=south, font=\footnotesize\bfseries\sffamily\color{GreenLine!90!black}, fill=white, inner sep=2.5pt, rounded corners=2pt]
+    at (5.95, 3.05) {Pipelined Overlap Region ($L_{\text{lat}}$ Hidden)};
+
+  \node[anchor=south, font=\footnotesize\bfseries\sffamily\color{RedLine!90!black}, fill=white, inner sep=2.5pt, rounded corners=2pt]
+    at (10.8, 3.05) {Critical Tail Barrier (Exposed)};
+
+  % Time Axis below (y = -1.4)
+  \draw[axis_arr] (-0.4, -1.4) -- (14.6, -1.4) node[right, font=\footnotesize\sffamily\bfseries] {Time ($t$)};
+
+  % Milestone Ticks & Droplines
+  \foreach \x/\txt in {
+    0.0/{$t_0$},
+    2.4/{$L_4$ done},
+    4.8/{$L_3$ done},
+    7.2/{$L_2$ done},
+    9.6/{Compute ends},
+    12.0/{AllReduce ends},
+    14.2/{Step Boundary}
+  } {
+    \draw[GrayLine, line width=0.6pt] (\x, -1.3) -- (\x, -1.5);
+    \node[below, font=\scriptsize\sffamily, text=TextBlack] at (\x, -1.5) {\txt};
+  }
+
+  % Subtle background vertical guide lines
+  \begin{pgfonlayer}{background}
+    \draw[GrayLine!35, dotted, line width=0.5pt] (0.0, 2.9) -- (0.0, -1.3);
+    \draw[GrayLine!35, dotted, line width=0.5pt] (2.4, 2.9) -- (2.4, -1.3);
+    \draw[GrayLine!35, dotted, line width=0.5pt] (4.8, 2.9) -- (4.8, -1.3);
+    \draw[GrayLine!35, dotted, line width=0.5pt] (7.2, 2.9) -- (7.2, -1.3);
+    \draw[RedLine!40, dotted, line width=0.6pt] (9.6, 2.9) -- (9.6, -1.3);
+    \draw[RedLine!40, dotted, line width=0.6pt] (12.0, 2.9) -- (12.0, -1.3);
+    \draw[BlueLine!40, dotted, line width=0.6pt] (14.2, 2.9) -- (14.2, -1.3);
+  \end{pgfonlayer}
+
+  % Tight Architectural Legend (Integrated Table Structure)
+  \node[
+    draw=black!15, fill=black!2, line width=0.5pt, rounded corners=3pt,
+    anchor=north, minimum width=14.8cm, inner sep=6pt
+  ] at (7.0, -2.3) {
+    \begin{minipage}{14.5cm}\footnotesize\sffamily
+      \begin{tabular}{@{}p{7.3cm}@{\hspace{0.3cm}}p{6.9cm}@{}}
+        \textbf{Execution Streams \& Mechanics} & \textbf{Systems Timing Invariants} \\[2pt]
+        \tikz[baseline=-2pt]\fill[OrangeFill!75,draw=OrangeLine,line width=0.5pt,rounded corners=1pt] (0,-0.12) rectangle (0.32,0.12);
+        \textbf{Compute:} Reverse autograd ($L_4 \to L_1$), non-blocking &
+        $\bullet$ \textbf{Hidden Latency:} $\sum_{i=2}^4 \text{Time}(L_i)$ masked by compute \\
+        \tikz[baseline=-2pt]\fill[VioletFill!85,draw=VioletLine,line width=0.5pt,rounded corners=1pt] (0,-0.12) rectangle (0.32,0.12);
+        \textbf{Network:} Concurrent AllReduce transfers via NCCL &
+        $\bullet$ \textbf{Exposed Barrier:} $\text{Time}(L_1)$ sets sync stall floor \\
+        \tikz[baseline=-2pt]\fill[BlueFill!75,draw=BlueLine,line width=0.5pt,rounded corners=1pt] (0,-0.12) rectangle (0.32,0.12);
+        \textbf{Optimizer:} Weights updated after global barrier &
+        $\bullet$ \textbf{Step Time:} $T_{\text{step}} = T_{\text{backward}} + T_{\text{tail}} + T_{\text{optimizer}}$
+      \end{tabular}
+    \end{minipage}
+  };
+
+\end{tikzpicture}%
+}
+```
+
 :::
 
 The choice between models depends on the analysis context. The $\alpha$-$\beta$ model is the right tool for back-of-envelope calculations, algorithm selection (Ring vs. Tree), and blocking communication whose completion lies on the dependency path. Its strength is simplicity, since the two parameters can be estimated from latency and bandwidth measurements. Its weakness is the assumption that the processor is idle during communication, which makes it overly pessimistic when overlap is possible. The LogP model earns its extra parameters when the analysis turns to **Pipelined Execution**\index{Pipelined Execution}, compute-communication overlap, or diagnosing why a theoretically fast algorithm underperforms. Its distinction between network latency $L_{\text{lat}}$ and processor overhead $o$ determines whether a given overlap strategy can hide communication. The profiling method in @sec-performance-engineering-profiling measures those terms and attributes the residual; this chapter uses them to choose the communication schedule.
@@ -767,7 +1100,7 @@ A calibrated collective model therefore records the operation, reduction datatyp
 
 ## Choosing the Vehicle: Collective Operation Primitives {#sec-communication-collective-operations-collective-operations-collective-operation-vocabulary-fdc7}
 
-If a GPU simply opens a socket and sends a massive gradient to another GPU, the entire cluster will rapidly collapse into an unmanageable web of deadlocks and congestion. With the terrain mapped, the gradient must now choose its vehicle: strictly choreographed group exchanges known as collective operations, a vocabulary standardized by MPI and inherited by modern ML communication libraries [@mpiforum2015mpi31]. @Fig-collective-primitives-overview illustrates four of the central primitives in this vocabulary: AllReduce, AllGather, ReduceScatter, and AllToAll. Each panel reads as a before-and-after across the process group, with one row per rank: blue cells mark the input each rank starts with, green cells mark the result it ends with, and orange marks the AllToAll routing that shuffles unique data between every pair of ranks. Two further primitives, Broadcast (rank 0 sends to all) and Reduce (all aggregate to rank 0), are foundational building blocks defined in @sec-collective-communication-six-core-primitives-8a66 and used implicitly in the figure's compound patterns. @Sec-appdx-comm-foundations-collective-complexity formalizes the semantics and latency and bandwidth complexity of each primitive; the prose here introduces them through their workload use cases, and the reader who wants the formal complexity bounds before proceeding can establish them there first.
+If a GPU simply opens a socket and sends a massive gradient to another GPU, the entire cluster will rapidly collapse into an unmanageable web of deadlocks and congestion. With the terrain mapped, the gradient must now choose its vehicle: strictly choreographed group exchanges known as collective operations, a vocabulary standardized by MPI and inherited by modern ML communication libraries [@mpiforum2015mpi31]. @Fig-collective-primitives-overview illustrates four of the central primitives in this vocabulary: AllReduce, AllGather, ReduceScatter, and AllToAll. Each panel reads as a before-and-after across the process group, with one row per rank: blue cells mark the input each rank starts with, green cells mark the aggregated or reconstructed output tensors, and violet marks the AllToAll pairwise shuffle that transposes unique shards across all ranks. Two further primitives, Broadcast (rank 0 sends to all) and Reduce (all aggregate to rank 0), are foundational building blocks defined in @sec-collective-communication-six-core-primitives-8a66 and used implicitly in the compound patterns shown in the figure. @Sec-appdx-comm-foundations-collective-complexity formalizes the semantics and latency and bandwidth complexity of each primitive; the prose here introduces them through their workload use cases, and the reader who wants the formal complexity bounds before proceeding can establish them there first.
 
 ::: {#dfn-collective-communication-collective-operation .callout-definition title="Collective operation"}
 
@@ -780,7 +1113,278 @@ If a GPU simply opens a socket and sends a massive gradient to another GPU, the 
 :::
 
 ::: {#fig-collective-primitives-overview fig-env="figure" fig-pos="htb" fig-cap="**Four central collective primitives**: Standardized patterns for group communication in distributed systems. (1) AllReduce: all aggregate and all receive the result. (2) AllGather: all send to all and concatenate. (3) ReduceScatter: all aggregate and results are distributed in shards. (4) AllToAll: every process sends unique data to every other process. The two foundational primitives Broadcast (rank 0 sends to all) and Reduce (all aggregate to rank 0) compose the patterns shown here and are defined in the surrounding prose." fig-alt="Grid of 4 diagrams illustrating AllReduce, AllGather, ReduceScatter, and AllToAll communication patterns across a process group."}
-![](images/svg/collective-primitives-overview.svg)
+
+```{.tikz}
+\begin{tikzpicture}[
+    font=\small\sffamily,
+    >=Stealth,
+    panel/.style={
+      draw=CanvasBorder,
+      fill=CanvasBg,
+      rounded corners=5pt,
+      line width=0.6pt,
+      inner sep=8pt
+    },
+    in node/.style={
+      draw=BlueLine,
+      fill=white,
+      text=TextDark,
+      line width=0.75pt,
+      rounded corners=2.5pt,
+      font=\scriptsize\sffamily,
+      minimum height=0.48cm,
+      text centered
+    },
+    out node green/.style={
+      draw=GreenLine,
+      fill=GreenFill!60,
+      text=TextDark,
+      line width=0.75pt,
+      rounded corners=2.5pt,
+      font=\scriptsize\sffamily,
+      minimum height=0.48cm,
+      text centered
+    },
+    out node violet/.style={
+      draw=VioletLine,
+      fill=VioletFill!70,
+      text=TextDark,
+      line width=0.75pt,
+      rounded corners=2.5pt,
+      font=\scriptsize\sffamily,
+      minimum height=0.48cm,
+      text centered
+    },
+    op orange/.style={
+      draw=OrangeLine,
+      fill=OrangeFill,
+      text=OrangeLine!90!black,
+      line width=0.9pt,
+      rounded corners=3.5pt,
+      font=\footnotesize\bfseries\sffamily,
+      inner sep=4pt,
+      text centered
+    },
+    op violet/.style={
+      draw=VioletLine,
+      fill=VioletFill,
+      text=VioletLine,
+      line width=0.9pt,
+      rounded corners=3.5pt,
+      font=\footnotesize\bfseries\sffamily,
+      inner sep=4pt,
+      text centered
+    },
+    wire in/.style={
+      draw=BlueLine!80!black,
+      line width=0.7pt
+    },
+    wire green/.style={
+      ->,
+      draw=GreenLine,
+      line width=0.8pt
+    },
+    wire violet/.style={
+      ->,
+      draw=VioletLine,
+      line width=0.8pt
+    }
+  ]
+
+  % Define Layer Order
+  \pgfdeclarelayer{background}
+  \pgfsetlayers{background,main}
+
+  % ========================================================
+  % 1. TOP-LEFT: ALLREDUCE
+  % ========================================================
+  \begin{scope}[shift={(0, 5.0)}, local bounding box=boxAllReduce]
+    % Header
+    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small AllReduce} \footnotesize(Sum Reduction)};
+    \node[anchor=east, font=\bfseries\scriptsize, text=BlueLine] at (7.1, 4.35) {All Hold Total Sum};
+    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Aggregates arrays; every device receives the identical sum.};
+
+    % Inputs (Blue)
+    \node[in node, minimum width=1.55cm] (ar_in0) at (0.95, 3.35) {G0: [ 1 ]};
+    \node[in node, minimum width=1.55cm] (ar_in1) at (0.95, 2.70) {G1: [ 2 ]};
+    \node[in node, minimum width=1.55cm] (ar_in2) at (0.95, 2.05) {G2: [ 3 ]};
+    \node[in node, minimum width=1.55cm] (ar_in3) at (0.95, 1.40) {G3: [ 4 ]};
+
+    % Central Operator
+    \node[op orange, minimum width=1.8cm, minimum height=0.75cm] (ar_op) at (3.55, 2.375) {AllReduce $\Sigma$};
+
+    % Outputs (Green)
+    \node[out node green, minimum width=1.65cm] (ar_out0) at (6.15, 3.35) {G0: [ \textbf{10} ]};
+    \node[out node green, minimum width=1.65cm] (ar_out1) at (6.15, 2.70) {G1: [ \textbf{10} ]};
+    \node[out node green, minimum width=1.65cm] (ar_out2) at (6.15, 2.05) {G2: [ \textbf{10} ]};
+    \node[out node green, minimum width=1.65cm] (ar_out3) at (6.15, 1.40) {G3: [ \textbf{10} ]};
+
+    % Wires In -> Op
+    \draw[wire in] (ar_in0.east) -- ++(0.5, 0) |- ($(ar_op.west)+(0, 0.15)$);
+    \draw[wire in] (ar_in1.east) -- ++(0.3, 0) |- ($(ar_op.west)+(0, 0.05)$);
+    \draw[wire in] (ar_in2.east) -- ++(0.3, 0) |- ($(ar_op.west)+(0, -0.05)$);
+    \draw[wire in] (ar_in3.east) -- ++(0.5, 0) |- ($(ar_op.west)+(0, -0.15)$);
+    \draw[->, wire in] ($(ar_op.west)-(0.15,0)$) -- (ar_op.west);
+
+    % Wires Op -> Out
+    \coordinate (ar_out_fork) at ($(ar_op.east)+(0.25,0)$);
+    \draw[wire green, -] (ar_op.east) -- (ar_out_fork);
+    \draw[wire green] (ar_out_fork) |- (ar_out0.west);
+    \draw[wire green] (ar_out_fork) |- (ar_out1.west);
+    \draw[wire green] (ar_out_fork) |- (ar_out2.west);
+    \draw[wire green] (ar_out_fork) |- (ar_out3.west);
+
+    % Footer Note
+    \node[anchor=north, font=\scriptsize, text=TextDark] at (3.55, 0.95) {\textbf{Core Usage:} Data Parallel gradient sync (DDP)};
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(boxAllReduce)] {};
+  \end{pgfonlayer}
+
+  % ========================================================
+  % 2. TOP-RIGHT: ALLGATHER
+  % ========================================================
+  \begin{scope}[shift={(7.8, 5.0)}, local bounding box=boxAllGather]
+    % Header
+    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small AllGather} \footnotesize(Concatenation)};
+    \node[anchor=east, font=\bfseries\scriptsize, text=GreenLine] at (7.1, 4.35) {All Hold Full Tensor};
+    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Collects each device's partial shard into the full tensor.};
+
+    % Inputs (Blue)
+    \node[in node, minimum width=1.55cm] (ag_in0) at (0.95, 3.35) {G0: [ $a$ ]};
+    \node[in node, minimum width=1.55cm] (ag_in1) at (0.95, 2.70) {G1: [ $b$ ]};
+    \node[in node, minimum width=1.55cm] (ag_in2) at (0.95, 2.05) {G2: [ $c$ ]};
+    \node[in node, minimum width=1.55cm] (ag_in3) at (0.95, 1.40) {G3: [ $d$ ]};
+
+    % Central Operator
+    \node[op orange, minimum width=1.8cm, minimum height=0.75cm] (ag_op) at (3.55, 2.375) {AllGather $\boxplus$};
+
+    % Outputs (Green)
+    \node[out node green, minimum width=2.1cm] (ag_out0) at (6.05, 3.35) {G0: [ $a, b, c, d$ ]};
+    \node[out node green, minimum width=2.1cm] (ag_out1) at (6.05, 2.70) {G1: [ $a, b, c, d$ ]};
+    \node[out node green, minimum width=2.1cm] (ag_out2) at (6.05, 2.05) {G2: [ $a, b, c, d$ ]};
+    \node[out node green, minimum width=2.1cm] (ag_out3) at (6.05, 1.40) {G3: [ $a, b, c, d$ ]};
+
+    % Wires In -> Op
+    \draw[wire in] (ag_in0.east) -- ++(0.5, 0) |- ($(ag_op.west)+(0, 0.15)$);
+    \draw[wire in] (ag_in1.east) -- ++(0.3, 0) |- ($(ag_op.west)+(0, 0.05)$);
+    \draw[wire in] (ag_in2.east) -- ++(0.3, 0) |- ($(ag_op.west)+(0, -0.05)$);
+    \draw[wire in] (ag_in3.east) -- ++(0.5, 0) |- ($(ag_op.west)+(0, -0.15)$);
+    \draw[->, wire in] ($(ag_op.west)-(0.15,0)$) -- (ag_op.west);
+
+    % Wires Op -> Out
+    \coordinate (ag_out_fork) at ($(ag_op.east)+(0.25,0)$);
+    \draw[wire green, -] (ag_op.east) -- (ag_out_fork);
+    \draw[wire green] (ag_out_fork) |- (ag_out0.west);
+    \draw[wire green] (ag_out_fork) |- (ag_out1.west);
+    \draw[wire green] (ag_out_fork) |- (ag_out2.west);
+    \draw[wire green] (ag_out_fork) |- (ag_out3.west);
+
+    % Footer Note
+    \node[anchor=north, font=\scriptsize, text=GreenLine] at (3.55, 0.95) {\textbf{Core Usage:} FSDP / ZeRO-3 parameter un-sharding};
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(boxAllGather)] {};
+  \end{pgfonlayer}
+
+  % ========================================================
+  % 3. BOTTOM-LEFT: REDUCESCATTER
+  % ========================================================
+  \begin{scope}[shift={(0, 0)}, local bounding box=boxReduceScatter]
+    % Header
+    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small ReduceScatter} \footnotesize(Reduce-Scatter)};
+    \node[anchor=east, font=\bfseries\scriptsize, text=OrangeLine] at (7.1, 4.35) {One Shard Each};
+    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Reduces across devices, then scatters disjoint slices.};
+
+    % Inputs (Blue)
+    \node[in node, minimum width=2.1cm] (rs_in0) at (1.15, 3.35) {G0: [$a_0,b_0,c_0,d_0$]};
+    \node[in node, minimum width=2.1cm] (rs_in1) at (1.15, 2.70) {G1: [$a_1,b_1,c_1,d_1$]};
+    \node[in node, minimum width=2.1cm] (rs_in2) at (1.15, 2.05) {G2: [$a_2,b_2,c_2,d_2$]};
+    \node[in node, minimum width=2.1cm] (rs_in3) at (1.15, 1.40) {G3: [$a_3,b_3,c_3,d_3$]};
+
+    % Central Operator
+    \node[op orange, minimum width=1.8cm, minimum height=0.75cm] (rs_op) at (3.90, 2.375) {ReduceScatter};
+
+    % Outputs (Green)
+    \node[out node green, minimum width=1.65cm] (rs_out0) at (6.15, 3.35) {G0: [ $\sum a$ ]};
+    \node[out node green, minimum width=1.65cm] (rs_out1) at (6.15, 2.70) {G1: [ $\sum b$ ]};
+    \node[out node green, minimum width=1.65cm] (rs_out2) at (6.15, 2.05) {G2: [ $\sum c$ ]};
+    \node[out node green, minimum width=1.65cm] (rs_out3) at (6.15, 1.40) {G3: [ $\sum d$ ]};
+
+    % Wires In -> Op
+    \draw[wire in] (rs_in0.east) -- ++(0.35, 0) |- ($(rs_op.west)+(0, 0.15)$);
+    \draw[wire in] (rs_in1.east) -- ++(0.20, 0) |- ($(rs_op.west)+(0, 0.05)$);
+    \draw[wire in] (rs_in2.east) -- ++(0.20, 0) |- ($(rs_op.west)+(0, -0.05)$);
+    \draw[wire in] (rs_in3.east) -- ++(0.35, 0) |- ($(rs_op.west)+(0, -0.15)$);
+    \draw[->, wire in] ($(rs_op.west)-(0.15,0)$) -- (rs_op.west);
+
+    % Wires Op -> Out
+    \coordinate (rs_out_fork) at ($(rs_op.east)+(0.25,0)$);
+    \draw[wire green, -] (rs_op.east) -- (rs_out_fork);
+    \draw[wire green] (rs_out_fork) |- (rs_out0.west);
+    \draw[wire green] (rs_out_fork) |- (rs_out1.west);
+    \draw[wire green] (rs_out_fork) |- (rs_out2.west);
+    \draw[wire green] (rs_out_fork) |- (rs_out3.west);
+
+    % Footer Note
+    \node[anchor=north, font=\scriptsize, text=OrangeLine] at (3.55, 0.95) {\textbf{Core Usage:} FSDP / ZeRO sharded reduction};
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(boxReduceScatter)] {};
+  \end{pgfonlayer}
+
+  % ========================================================
+  % 4. BOTTOM-RIGHT: ALLTOALL
+  % ========================================================
+  \begin{scope}[shift={(7.8, 0)}, local bounding box=boxAllToAll]
+    % Header
+    \node[anchor=west, text=TextDark] at (0, 4.35) {\textbf{\small AllToAll} \footnotesize(Matrix Transpose)};
+    \node[anchor=east, font=\bfseries\scriptsize, text=VioletLine] at (7.1, 4.35) {Pairwise Shuffle};
+    \node[anchor=west, font=\tiny\sffamily, text=TextMuted] at (0, 4.02) {Each rank sends distinct shard $i$ to peer rank $i$ (transposition).};
+
+    % Inputs (Blue)
+    \node[in node, minimum width=2.1cm] (ata_in0) at (1.15, 3.35) {G0: [$a_0,b_0,c_0,d_0$]};
+    \node[in node, minimum width=2.1cm] (ata_in1) at (1.15, 2.70) {G1: [$a_1,b_1,c_1,d_1$]};
+    \node[in node, minimum width=2.1cm] (ata_in2) at (1.15, 2.05) {G2: [$a_2,b_2,c_2,d_2$]};
+    \node[in node, minimum width=2.1cm] (ata_in3) at (1.15, 1.40) {G3: [$a_3,b_3,c_3,d_3$]};
+
+    % Central Operator
+    \node[op violet, minimum width=1.8cm, minimum height=0.75cm] (ata_op) at (3.60, 2.375) {AllToAll $\rightleftarrows$};
+
+    % Outputs (Violet)
+    \node[out node violet, minimum width=2.1cm] (ata_out0) at (6.05, 3.35) {G0: [$a_0,a_1,a_2,a_3$]};
+    \node[out node violet, minimum width=2.1cm] (ata_out1) at (6.05, 2.70) {G1: [$b_0,b_1,b_2,b_3$]};
+    \node[out node violet, minimum width=2.1cm] (ata_out2) at (6.05, 2.05) {G2: [$c_0,c_1,c_2,c_3$]};
+    \node[out node violet, minimum width=2.1cm] (ata_out3) at (6.05, 1.40) {G3: [$d_0,d_1,d_2,d_3$]};
+
+    % Wires In -> Op
+    \draw[wire in] (ata_in0.east) -- ++(0.35, 0) |- ($(ata_op.west)+(0, 0.15)$);
+    \draw[wire in] (ata_in1.east) -- ++(0.20, 0) |- ($(ata_op.west)+(0, 0.05)$);
+    \draw[wire in] (ata_in2.east) -- ++(0.20, 0) |- ($(ata_op.west)+(0, -0.05)$);
+    \draw[wire in] (ata_in3.east) -- ++(0.35, 0) |- ($(ata_op.west)+(0, -0.15)$);
+    \draw[->, wire in] ($(ata_op.west)-(0.15,0)$) -- (ata_op.west);
+
+    % Wires Op -> Out
+    \coordinate (ata_out_fork) at ($(ata_op.east)+(0.25,0)$);
+    \draw[wire violet, -] (ata_op.east) -- (ata_out_fork);
+    \draw[wire violet] (ata_out_fork) |- (ata_out0.west);
+    \draw[wire violet] (ata_out_fork) |- (ata_out1.west);
+    \draw[wire violet] (ata_out_fork) |- (ata_out2.west);
+    \draw[wire violet] (ata_out_fork) |- (ata_out3.west);
+
+    % Footer Note
+    \node[anchor=north, font=\scriptsize, text=VioletLine] at (3.55, 0.95) {\textbf{Core Usage:} MoE token dispatch \& combine routing};
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(boxAllToAll)] {};
+  \end{pgfonlayer}
+
+\end{tikzpicture}
+```
 :::
 
 The primitive choice is the first scaling decision because it fixes which ranks must coordinate, which data must move, and which communication term will dominate. Different model architectures stress different operations, and selecting the wrong primitive for a workload creates unnecessary bottlenecks.
@@ -1095,7 +1699,161 @@ Across the $2(N-1)$ send/receive rounds each rank moves $M/N$ bytes per round, f
 
 ::: {#fig-ring-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Ring AllReduce data flow**: Nodes arranged in a logical ring exchange chunks in two phases: a Scatter-Reduce phase (each node accumulates one chunk's partial sum) followed by an AllGather phase (complete sums circulate to all nodes). The figure shows the ring laid out horizontally with a wrap-around bus closing the loop; every link is used simultaneously, achieving bandwidth optimality." fig-alt="Horizontal linear layout of N GPUs forming a logical ring, with an orthogonal wrap-around bus closing the loop. Arrows show data flow along the ring; color-coded chunks at each GPU represent partial gradient sums."}
 
-![](images/svg/ring-allreduce.svg)
+```{.tikz}
+\begin{tikzpicture}[line join=round, line cap=round, font=\small\sffamily]
+
+  % Define Layer Order
+  \pgfdeclarelayer{background}
+  \pgfdeclarelayer{foreground}
+  \pgfsetlayers{background,main,foreground}
+
+  % Styles
+  \tikzset{
+    gpu_chassis/.style={
+      draw=BlueLine, fill=white, line width=0.85pt, rounded corners=3pt,
+      minimum width=2.85cm, minimum height=1.5cm
+    },
+    shard_idle/.style={
+      draw=black!25, fill=black!3, line width=0.5pt, rounded corners=1.5pt,
+      minimum width=0.56cm, minimum height=0.65cm, font=\scriptsize\sffamily, text=black!50
+    },
+    shard_reduced/.style={
+      draw=GreenLine, fill=GreenFill!85, line width=0.8pt, rounded corners=1.5pt,
+      minimum width=0.56cm, minimum height=0.65cm, font=\scriptsize\bfseries\sffamily, text=GreenLine!90!black
+    },
+    ring_arr_blue/.style={
+      ->, >=Latex, line width=1.2pt, BlueLine
+    },
+    ring_arr_green/.style={
+      ->, >=Latex, line width=1.2pt, GreenLine
+    }
+  }
+
+  % ==========================================
+  % PHASE 1: SCATTER-REDUCE
+  % ==========================================
+  \begin{scope}[shift={(0, 5.0)}]
+    % Section Header Band
+    \node[anchor=west, font=\normalsize\bfseries\sffamily, text=TextBlack] at (-0.2, 1.9)
+      {Phase 1: Scatter-Reduce \mdseries\footnotesize($N-1 = 3$ Transmission Steps)};
+    \node[anchor=east, font=\scriptsize\bfseries\sffamily, text=BlueLine] at (14.2, 1.9)
+      {Each GPU Obtains 1 Reduced Shard};
+
+    % GPUs (0 to 3)
+    \foreach \idx/\rank/\reduced in {
+      0/{GPU 0 (Rank 0)}/1,
+      1/{GPU 1 (Rank 1)}/2,
+      2/{GPU 2 (Rank 2)}/3,
+      3/{GPU 3 (Rank 3)}/4
+    } {
+      \pgfmathsetmacro{\xpos}{\idx * 3.6 + 1.4}
+      % Chassis
+      \node[gpu_chassis] (G1_\idx) at (\xpos, 0.8) {};
+      \node[font=\footnotesize\bfseries\sffamily, text=TextBlack] at (\xpos, 1.28) {\rank};
+
+      % 4 Shard Blocks inside GPU
+      \foreach \sidx/\slabel in {1/A, 2/B, 3/C, 4/D} {
+        \pgfmathsetmacro{\sxpos}{\xpos - 0.90 + (\sidx - 1) * 0.60}
+        \ifnum\sidx=\reduced
+          \node[shard_reduced] at (\sxpos, 0.55) {\slabel\,\ding{51}};
+        \else
+          \node[shard_idle] at (\sxpos, 0.55) {\slabel};
+        \fi
+      }
+    }
+
+    % Forward Ring Links
+    \draw[ring_arr_blue] (G1_0.east) -- (G1_1.west);
+    \draw[ring_arr_blue] (G1_1.east) -- (G1_2.west);
+    \draw[ring_arr_blue] (G1_2.east) -- (G1_3.west);
+
+    % Wrap-Around Ring Link (3 -> 0)
+    \draw[ring_arr_blue, rounded corners=4pt]
+      (G1_3.south) -- ++(0, -0.45) -| (G1_0.south);
+    \node[below=1pt, font=\scriptsize\bfseries\sffamily, text=BlueLine] at (6.8, -0.45)
+      {Unidirectional Ring Wrap-Around Link (Rank 3 $\to$ Rank 0)};
+
+    % Phase 1 Completion Status Callout
+    \node[anchor=north, font=\scriptsize\sffamily, text=GreenLine!90!black] at (6.8, -0.78)
+      {\textbf{Scatter-Reduce Result:} Rank $i$ holds global sum $\sum x^{(i)}$ (A\,\ding{51} on G0, B\,\ding{51} on G1, C\,\ding{51} on G2, D\,\ding{51} on G3)};
+
+    % Background Container
+    \begin{pgfonlayer}{background}
+      \draw[draw=black!15, fill=black!1, rounded corners=4pt, line width=0.5pt]
+        (-0.4, -1.15) rectangle (14.4, 2.25);
+    \end{pgfonlayer}
+  \end{scope}
+
+  % ==========================================
+  % PHASE 2: ALLGATHER
+  % ==========================================
+  \begin{scope}[shift={(0, 1.2)}]
+    % Section Header Band
+    \node[anchor=west, font=\normalsize\bfseries\sffamily, text=TextBlack] at (-0.2, 1.9)
+      {Phase 2: AllGather \mdseries\footnotesize($N-1 = 3$ Transmission Steps)};
+    \node[anchor=east, font=\scriptsize\bfseries\sffamily, text=GreenLine] at (14.2, 1.9)
+      {All GPUs Obtain All Reduced Shards};
+
+    % GPUs (0 to 3)
+    \foreach \idx/\rank in {
+      0/{GPU 0 (Rank 0)},
+      1/{GPU 1 (Rank 1)},
+      2/{GPU 2 (Rank 2)},
+      3/{GPU 3 (Rank 3)}
+    } {
+      \pgfmathsetmacro{\xpos}{\idx * 3.6 + 1.4}
+      \node[gpu_chassis, draw=GreenLine] (G2_\idx) at (\xpos, 0.8) {};
+      \node[font=\footnotesize\bfseries\sffamily, text=TextBlack] at (\xpos, 1.28) {\rank};
+
+      % All 4 Shards are now fully reduced!
+      \foreach \sidx/\slabel in {1/A, 2/B, 3/C, 4/D} {
+        \pgfmathsetmacro{\sxpos}{\xpos - 0.90 + (\sidx - 1) * 0.60}
+        \node[shard_reduced] at (\sxpos, 0.55) {\slabel\,\ding{51}};
+      }
+    }
+
+    % Forward Ring Links (Green)
+    \draw[ring_arr_green] (G2_0.east) -- (G2_1.west);
+    \draw[ring_arr_green] (G2_1.east) -- (G2_2.west);
+    \draw[ring_arr_green] (G2_2.east) -- (G2_3.west);
+
+    % Wrap-Around Ring Link (3 -> 0)
+    \draw[ring_arr_green, rounded corners=4pt]
+      (G2_3.south) -- ++(0, -0.45) -| (G2_0.south);
+    \node[below=1pt, font=\scriptsize\bfseries\sffamily, text=GreenLine] at (6.8, -0.45)
+      {AllGather Forwarding Around Ring (Rank 3 $\to$ Rank 0)};
+
+    % Phase 2 Completion Status Callout
+    \node[anchor=north, font=\scriptsize\sffamily, text=GreenLine!90!black] at (6.8, -0.78)
+      {\textbf{AllGather Final State:} Every GPU possesses the complete synchronized gradient tensor [A\,\ding{51}, B\,\ding{51}, C\,\ding{51}, D\,\ding{51}]};
+
+    % Background Container
+    \begin{pgfonlayer}{background}
+      \draw[draw=black!15, fill=black!1, rounded corners=4pt, line width=0.5pt]
+        (-0.4, -1.15) rectangle (14.4, 2.25);
+    \end{pgfonlayer}
+  \end{scope}
+
+  % ==========================================
+  % ANALYTICAL INVARIANTS FOOTER CARD
+  % ==========================================
+  \node[
+    draw=black!15, fill=black!2, line width=0.5pt, rounded corners=3pt,
+    anchor=north, minimum width=14.8cm, inner sep=6pt
+  ] at (7.0, -0.2) {
+    \begin{minipage}{14.5cm}\footnotesize\sffamily
+      \begin{tabular}{@{}p{7.1cm}@{\hspace{0.4cm}}p{7.0cm}@{}}
+        \textbf{Bandwidth Optimality (Lower Bound)} & \textbf{Latency Scaling Penalty (Ring Diameter)} \\[2pt]
+        $\bullet$ \textbf{Per-GPU Traffic:} $2 \cdot \frac{N-1}{N} \cdot M \to 2M$ as $N \to \infty$ &
+        $\bullet$ \textbf{Ring Steps:} $2(N-1)$ sequential point-to-point transfers \\
+        $\bullet$ \textbf{Link Utilization:} $100\%$ of links active concurrently in every round &
+        $\bullet$ \textbf{Latency Overhead:} $T_{\text{lat}} = 2(N-1) \cdot \alpha$ (scales linearly with $N$)
+      \end{tabular}
+    \end{minipage}
+  };
+
+\end{tikzpicture}
+```
 
 :::
 
@@ -1540,7 +2298,7 @@ Flat collective algorithms assume that every link in the cluster delivers equal 
 
 : **The Bandwidth Hierarchy**: Modern GPU clusters exhibit an order-of-magnitude bandwidth gap between intra-node and inter-node communication. Hierarchical algorithms exploit this gap. Relative speed compares per-direction rates (NVLink's 450 GB/s one-way against InfiniBand's 50 GB/s per port); the bandwidth column shows NVLink's bidirectional datasheet total. {#tbl-bandwidth-hierarchy}
 
-A naive flat Ring AllReduce ignores this structure, potentially routing data across InfiniBand when NVLink would suffice and wasting the scarce inter-node bandwidth. **Hierarchical AllReduce**\index{Hierarchical AllReduce} decomposes the global operation into three phases that respect the bandwidth hierarchy, as shown in @fig-hierarchical-allreduce.
+A naive flat Ring AllReduce ignores this structure, routing data across InfiniBand when NVLink would suffice and saturating scarce inter-node bandwidth. **Hierarchical AllReduce**\index{Hierarchical AllReduce} decomposes the global operation into three phases that exploit the bandwidth hierarchy (@fig-hierarchical-allreduce).
 
 ::: {.column-margin}
 ```{=latex}
@@ -1553,11 +2311,198 @@ A naive flat Ring AllReduce ignores this structure, potentially routing data acr
 
 ::: {#fig-hierarchical-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical AllReduce**: Three-phase decomposition that exploits the intra-node/inter-node bandwidth gap. Phase 1 performs intra-node aggregation over NVLink (an NVLink ring acting as a ReduceScatter that leaves each GPU holding a node-shard partial sum), reducing inter-node traffic by a factor of $G$ (GPUs per node). Phase 2 runs an AllReduce across corresponding GPUs using InfiniBand. Phase 3 completes intra-node distribution over NVLink (the AllGather that returns each GPU to the full result). The figure labels these phases by their NVLink/IB mechanics; the surrounding prose names the corresponding collective primitives." fig-alt="Two-node diagram with multiple GPUs per node. Intra-node NVLink arrows show Phase 1 (ring/ReduceScatter) and Phase 3 (ring/AllGather). Inter-node InfiniBand arrows show Phase 2 (cross-node AllReduce on the node shards)."}
 
-![](images/svg/hierarchical-allreduce.svg)
+```{.tikz}
+\begin{tikzpicture}[
+    font=\small\sffamily,
+    >=Stealth,
+    panel/.style={
+      draw=CanvasBorder,
+      fill=CanvasBg,
+      rounded corners=5pt,
+      line width=0.6pt,
+      inner sep=7pt
+    },
+    gpu box/.style={
+      draw=BlueLine,
+      fill=white,
+      line width=0.85pt,
+      rounded corners=3pt,
+      minimum width=1.25cm,
+      minimum height=1.15cm,
+      align=center
+    },
+    leader box/.style={
+      draw=OrangeLine,
+      fill=OrangeFill!75,
+      line width=1.1pt,
+      rounded corners=3pt,
+      minimum width=1.25cm,
+      minimum height=1.15cm,
+      align=center
+    },
+    step card/.style={
+      draw=CanvasBorder,
+      fill=white,
+      rounded corners=3pt,
+      line width=0.5pt,
+      inner sep=5pt
+    }
+  ]
+
+  % Define Layer Order
+  \pgfdeclarelayer{background}
+  \pgfsetlayers{background,main}
+
+  % ========================================================
+  % TOP LEGEND BAR
+  % ========================================================
+  \node[draw=BlueLine, fill=BlueFill, rounded corners=3pt, font=\scriptsize\bfseries, text=BlueLine, inner sep=4pt] at (2.2, 8.4)
+    {Step 1: Intra-Node ReduceScatter};
+  \node[draw=OrangeLine, fill=OrangeFill, rounded corners=3pt, font=\scriptsize\bfseries, text=OrangeLine!90!black, inner sep=4pt] at (7.25, 8.4)
+    {Step 2: Inter-Node AllReduce (Leaders)};
+  \node[draw=GreenLine, fill=GreenFill, rounded corners=3pt, font=\scriptsize\bfseries, text=GreenLine, inner sep=4pt] at (12.3, 8.4)
+    {Step 3: Intra-Node AllGather};
+
+  % ========================================================
+  % STEP 2 BRIDGE (OPTICAL SPINAL FABRIC)
+  % ========================================================
+  \node[draw=OrangeLine, fill=OrangeFill!50, rounded corners=3pt, line width=0.9pt, font=\footnotesize\bfseries, text=OrangeLine!90!black, inner sep=5pt] (bridge) at (5.0, 7.55)
+    {Step 2: Optical Spine Fabric ($50\text{ GB/s} \cdot \frac{1}{G}\text{ Traffic}$)};
+
+  % ========================================================
+  % NODE 0 CONTAINER
+  % ========================================================
+  \begin{scope}[shift={(0, 1.8)}, local bounding box=node0]
+    % Header
+    \node[anchor=west, font=\bfseries\small, text=TextDark] at (0, 4.9) {Node 0 (8-GPU Chassis)};
+    \node[anchor=east, font=\scriptsize\bfseries, text=BlueLine] at (6.8, 4.9) {NVLink 4.0 Mesh};
+
+    % GPUs
+    \node[leader box] (g0) at (1.15, 3.65) {\textbf{G0}\\[1pt]\scriptsize\color{OrangeLine!90!black}\textbf{Leader}};
+    \node[gpu box, right=0.35cm of g0] (g1) {\textbf{G1}\\[1pt]\tiny\color{TextMuted}Rank 1};
+    \node[gpu box, right=0.35cm of g1] (g2) {\textbf{G2}\\[1pt]\tiny\color{TextMuted}Rank 2};
+    \node[gpu box, right=0.35cm of g2] (g3) {\textbf{G3}\\[1pt]\tiny\color{TextMuted}Rank 3};
+
+    % Ring links
+    \draw[->, BlueLine, line width=1.1pt] (g0.east) -- (g1.west);
+    \draw[->, BlueLine, line width=1.1pt] (g1.east) -- (g2.west);
+    \draw[->, BlueLine, line width=1.1pt] (g2.east) -- (g3.west);
+    \draw[->, BlueLine, line width=1.1pt, rounded corners=3pt] (g3.south) -- ++(0, -0.32) -| (g0.south);
+
+    \node[font=\tiny\bfseries, text=BlueLine] at ($(g1.south)!0.5!(g2.south) - (0, 0.44)$) {Intra-Node NVLink Ring (900 GB/s)};
+
+    % Step 1 Card
+    \node[step card, anchor=north west, minimum width=6.6cm] at (0.1, 2.35) {
+      \begin{minipage}{6.4cm}
+        \textbf{\scriptsize Step 1: Intra-Node ReduceScatter}\\[1pt]
+        \tiny Ranks $0 \dots 7$ reduce partial gradients over 900 GB/s NVLink. G0 accumulates the fully reduced slice for rank index 0.
+      \end{minipage}
+    };
+
+    % Step 3 Card
+    \node[step card, anchor=north west, minimum width=6.6cm] at (0.1, 1.30) {
+      \begin{minipage}{6.4cm}
+        \textbf{\scriptsize\color{GreenLine} Step 3: Intra-Node AllGather}\\[1pt]
+        \tiny\color{GreenLine!80!black} G0 receives global aggregate from optical fabric and broadcasts via NVLink AllGather to ranks $1 \dots 7$.
+      \end{minipage}
+    };
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(node0)] (p_node0) {};
+  \end{pgfonlayer}
+
+  % ========================================================
+  % NODE 1 CONTAINER
+  % ========================================================
+  \begin{scope}[shift={(7.4, 1.8)}, local bounding box=node1]
+    % Header
+    \node[anchor=west, font=\bfseries\small, text=TextDark] at (0, 4.9) {Node 1 (8-GPU Chassis)};
+    \node[anchor=east, font=\scriptsize\bfseries, text=BlueLine] at (6.8, 4.9) {NVLink 4.0 Mesh};
+
+    % GPUs
+    \node[leader box] (g4) at (1.15, 3.65) {\textbf{G4}\\[1pt]\scriptsize\color{OrangeLine!90!black}\textbf{Leader}};
+    \node[gpu box, right=0.35cm of g4] (g5) {\textbf{G5}\\[1pt]\tiny\color{TextMuted}Rank 5};
+    \node[gpu box, right=0.35cm of g5] (g6) {\textbf{G6}\\[1pt]\tiny\color{TextMuted}Rank 6};
+    \node[gpu box, right=0.35cm of g6] (g7) {\textbf{G7}\\[1pt]\tiny\color{TextMuted}Rank 7};
+
+    % Ring links
+    \draw[->, BlueLine, line width=1.1pt] (g4.east) -- (g5.west);
+    \draw[->, BlueLine, line width=1.1pt] (g5.east) -- (g6.west);
+    \draw[->, BlueLine, line width=1.1pt] (g6.east) -- (g7.west);
+    \draw[->, BlueLine, line width=1.1pt, rounded corners=3pt] (g7.south) -- ++(0, -0.32) -| (g4.south);
+
+    \node[font=\tiny\bfseries, text=BlueLine] at ($(g5.south)!0.5!(g6.south) - (0, 0.44)$) {Intra-Node NVLink Ring (900 GB/s)};
+
+    % Step 1 Card
+    \node[step card, anchor=north west, minimum width=6.6cm] at (0.1, 2.35) {
+      \begin{minipage}{6.4cm}
+        \textbf{\scriptsize Step 1: Intra-Node ReduceScatter}\\[1pt]
+        \tiny Ranks $4 \dots 7$ reduce partial gradients over 900 GB/s NVLink. G4 accumulates the fully reduced slice for rank index 4.
+      \end{minipage}
+    };
+
+    % Step 3 Card
+    \node[step card, anchor=north west, minimum width=6.6cm] at (0.1, 1.30) {
+      \begin{minipage}{6.4cm}
+        \textbf{\scriptsize\color{GreenLine} Step 3: Intra-Node AllGather}\\[1pt]
+        \tiny\color{GreenLine!80!black} G4 receives global aggregate from optical fabric and broadcasts via NVLink AllGather to ranks $5 \dots 7$.
+      \end{minipage}
+    };
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(node1)] (p_node1) {};
+  \end{pgfonlayer}
+
+  % Bridge connections: route up from the top edge of node0/node1 above G0/G4
+  \draw[<->, draw=OrangeLine, line width=1.3pt, dashed]
+    (g0.north |- p_node0.north) -- ++(0, 0.5) -| (bridge.west);
+  \draw[<->, draw=OrangeLine, line width=1.3pt, dashed]
+    (bridge.east) -| (g4.north |- p_node1.north);
+
+  % ========================================================
+  % BOTTOM ANALYTICAL PERFORMANCE CARD
+  % ========================================================
+  \begin{scope}[shift={(0, -1.9)}, local bounding box=boxCard]
+    \node[anchor=north west, font=\normalsize\bfseries, text=TextDark] at (0.1, 3.4)
+      {Hierarchical Traffic Scaling Advantage ($18\times$ Bandwidth Multiplier)};
+
+    % Bar 1: NVLink
+    \draw[fill=OrangeFill, draw=OrangeLine, line width=0.8pt, rounded corners=2pt]
+      (0.1, 2.4) rectangle (9.2, 2.8);
+    \node[anchor=west, font=\scriptsize\bfseries, text=OrangeLine!90!black] at (0.3, 2.6)
+      {Intra-Node NVLink 4.0: 900 GB/s Bidirectional};
+
+    % Bar 2: InfiniBand
+    \draw[fill=VioletFill, draw=VioletLine, line width=0.8pt, rounded corners=2pt]
+      (0.1, 1.85) rectangle (1.4, 2.25);
+    \node[anchor=west, font=\scriptsize\bfseries, text=VioletLine] at (1.55, 2.05)
+      {InfiniBand NDR: 50 GB/s per port (400 Gb/s)};
+
+    % Red Callout Gap Badge
+    \node[draw=RedLine, fill=RedFill, line width=1.1pt, rounded corners=4pt, align=center, inner sep=6pt] at (12.3, 2.32) {
+      \textbf{\large\color{RedLine} 18$\times$}\\[-2pt]
+      \scriptsize\bfseries\color{RedLine} Bandwidth Gap
+    };
+
+    % Explanatory text
+    \node[anchor=north west, text width=14.0cm, font=\footnotesize, text=TextDark] at (0.1, 1.6) {
+      \textbf{Traffic Elimination Law:} By completing the first reduction tier inside the node over 900 GB/s NVLink, inter-node traffic across optical switches drops by exactly $G\times$ ($8\times$), preventing bisection bandwidth exhaustion.\\[3pt]
+      \textbf{\color{GreenLine}NCCL Runtime Invariant:} Multi-node communication runtimes automatically decompose process-group collectives into this 3-step hierarchical pipeline.
+    };
+  \end{scope}
+
+  \begin{pgfonlayer}{background}
+    \node[panel, fit=(boxCard)] {};
+  \end{pgfonlayer}
+
+\end{tikzpicture}
+```
 
 :::
 
-The three-phase decomposition in @fig-hierarchical-allreduce confines the expensive inter-node traffic to Phase 2, where each GPU transmits only $M/G$ bytes instead of $M$. With $G = 8$ GPUs per node (a typical DGX configuration), this reduces inter-node traffic by 8$\times$, effectively multiplying the scarce InfiniBand bandwidth by the number of GPUs per node.
+@Fig-hierarchical-allreduce illustrates how this three-phase decomposition confines expensive inter-node traffic to Phase 2, where each GPU transmits only $M/G$ bytes instead of $M$. With $G = 8$ GPUs per node (a standard DGX configuration), this reduces inter-node optical fabric traffic by an exact factor of $8\times$, effectively multiplying scarce InfiniBand bandwidth by the number of accelerators per chassis.
 
 The phases form one causal chain:
 
@@ -1689,10 +2634,187 @@ These three phases confine most traffic within each node before crossing the slo
 
 ### In-network reduction: SHARP and beyond {#sec-communication-sharp}
 
-The contrast in @fig-sharp-innetwork shows the next step: move the reduction work from endpoint GPUs into the switch application-specific integrated circuit (ASIC)\index{ASIC}\index{Application-Specific Integrated Circuit|see{ASIC}} so packets are aggregated while they traverse the fabric.
+@Fig-sharp-innetwork contrasts software-based tree AllReduce with in-switch hardware aggregation. In standard software tree AllReduce (panel a), worker GPUs stream complete gradient tensors up the fabric hierarchy to an assigned root GPU, concentrating arithmetic and PCIe bandwidth bottlenecks at that single endpoint before broadcasting results back down. In contrast, in-network reduction architectures such as NVIDIA's Scalable Hierarchical Aggregation and Reduction Protocol (SHARP) (panel b) offload associative reduction directly to switch application-specific integrated circuits (ASICs)\index{ASIC}\index{Application-Specific Integrated Circuit|see{ASIC}} at line rate, ensuring that only aggregated partial sums ascend to higher fabric tiers and completely eliminating the root GPU serialization penalty.
 
-::: {#fig-sharp-innetwork fig-env="figure" fig-pos="htb" fig-cap="**In-network reduction (SHARP)**: The left panel shows a traditional tree AllReduce that performs reduction at intermediate GPUs and pays repeated store-and-forward delays. The right panel moves those intermediate reductions into switch ASICs, aggregating partial sums as packets traverse the tree. This design avoids intermediate endpoint memory traffic and can reduce collective latency when aggregation cost is material." fig-alt="Left/right side-by-side comparison split by a vertical divider. Left side: Software Tree AllReduce with data flowing through GPUs. Right side: In-Network SHARP with data aggregated inside the switch."}
-![](images/svg/sharp-innetwork.svg){width=100%}
+::: {#fig-sharp-innetwork fig-env="figure" fig-pos="htb" fig-cap="**In-network reduction with SHARP vs. standard tree AllReduce**: Panel (a) illustrates standard tree AllReduce, where full gradient tensors from all worker GPUs traverse intermediate switches unaggregated, converging on a single root GPU that performs store-and-forward arithmetic over saturated PCIe links. Panel (b) illustrates NVIDIA SHARP in-network computing, where switch ASICs aggregate partial sums in flight at wire speed, transmitting only reduced payloads upward and eliminating intermediate host-memory round trips." fig-alt="Left/right side-by-side comparison split by a vertical divider. Left side: Software Tree AllReduce with data flowing through GPUs. Right side: In-Network SHARP with data aggregated inside the switch."}
+
+```{.tikz}
+\begin{tikzpicture}[
+  font=\small\sffamily,
+  >=Stealth,
+  header node/.style={
+    font=\bfseries\normalsize,
+    text=TextDark,
+    align=center
+  },
+  subhdr node/.style={
+    font=\scriptsize,
+    text=TextMuted,
+    align=center,
+    text width=6.9cm
+  },
+  banner node/.style={
+    rounded corners=3pt,
+    inner sep=5pt,
+    align=center,
+    font=\footnotesize,
+    text width=6.3cm,
+    line width=0.6pt
+  },
+  gpu node/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=SteelBlue,
+    fill=white,
+    line width=0.8pt,
+    align=center,
+    inner sep=3.5pt,
+    font=\footnotesize,
+    minimum width=1.35cm,
+    minimum height=1.05cm
+  },
+  root node/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=1pt,
+    align=center,
+    inner sep=5pt,
+    font=\footnotesize,
+    minimum width=3.4cm,
+    minimum height=1.2cm
+  },
+  switch node/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.8pt,
+    align=center,
+    inner sep=4pt,
+    font=\footnotesize,
+    minimum width=2.5cm,
+    minimum height=1.2cm
+  },
+  badge node/.style={
+    rectangle,
+    rounded corners=2pt,
+    fill=DarkGreen,
+    text=white,
+    font=\scriptsize\bfseries,
+    inner sep=2.5pt,
+    minimum width=2.1cm
+  },
+  footer node/.style={
+    font=\scriptsize,
+    text=TextMuted,
+    align=center,
+    text width=6.8cm
+  }
+]
+
+% Left panel: (a) Standard Tree AllReduce
+\node[header node, text=RedLine] (hdrA) at (3.65, 9.3) {(a) Standard Tree AllReduce};
+\node[subhdr node] (subA) at (3.65, 8.85) {Full gradients traverse all switch tiers to Root GPU};
+
+\node[banner node, draw=RedLine!80, fill=RedFill] (bannerA) at (3.65, 7.8) {
+  \textbf{\textcolor{RedLine}{Bottleneck: Full Tensor Incast}}\\[1.5pt]
+  All $N$ workers stream full tensors\\
+  Root saturates at $N \times \text{Bandwidth}$
+};
+
+% Root GPU
+\node[root node, draw=RedLine, fill=RedFill!60] (rootA) at (3.65, 5.75) {
+  \textbf{\textcolor{RedLine}{Root GPU (Worker 0)}}\\[1.5pt]
+  $\text{sum} = g_0 + g_1 + g_2 + g_3$\\[1.5pt]
+  \textit{\scriptsize\textcolor{RedLine}{Compute \& PCIe Bottleneck}}
+};
+
+% Switches Level 1
+\node[switch node, draw=SteelBlue!60, fill=LightBlue!70] (swA1) at (1.825, 3.3) {
+  \textbf{Switch L1-A}\\[2pt]
+  \scriptsize\textcolor{TextMuted}{Packet Forward Only}
+};
+\node[switch node, draw=SteelBlue!60, fill=LightBlue!70] (swA2) at (5.475, 3.3) {
+  \textbf{Switch L1-B}\\[2pt]
+  \scriptsize\textcolor{TextMuted}{Packet Forward Only}
+};
+
+% Leaf GPUs
+\node[gpu node] (gA0) at (1.0, 1.0) {\textbf{GPU 0}\\[1.5pt]\scriptsize$\text{grad} = g_0$};
+\node[gpu node] (gA1) at (2.65, 1.0) {\textbf{GPU 1}\\[1.5pt]\scriptsize$\text{grad} = g_1$};
+\node[gpu node] (gA2) at (4.65, 1.0) {\textbf{GPU 2}\\[1.5pt]\scriptsize$\text{grad} = g_2$};
+\node[gpu node] (gA3) at (6.3, 1.0) {\textbf{GPU 3}\\[1.5pt]\scriptsize$\text{grad} = g_3$};
+
+% Connections Panel A
+\draw[->, thick, RedLine] (gA0.north) -- (gA0.north |- swA1.south) node[midway, left=1pt, font=\scriptsize\bfseries] {$g_0\text{ (full)}$};
+\draw[->, thick, RedLine] (gA1.north) -- (gA1.north |- swA1.south) node[midway, left=1pt, font=\scriptsize\bfseries] {$g_1\text{ (full)}$};
+\draw[->, thick, RedLine] (gA2.north) -- (gA2.north |- swA2.south) node[midway, right=1pt, font=\scriptsize\bfseries] {$g_2\text{ (full)}$};
+\draw[->, thick, RedLine] (gA3.north) -- (gA3.north |- swA2.south) node[midway, right=1pt, font=\scriptsize\bfseries] {$g_3\text{ (full)}$};
+
+% Switch to Root (Upstream solid on outside, Downstream dashed on inside)
+\draw[->, thick, RedLine] ($(swA1.north)-(0.25,0)$) -- ($(rootA.south)-(1.15,0)$)
+  node[midway, left=2pt, font=\scriptsize\bfseries] {$g_0 + g_1$};
+\draw[<-, thick, dashed, RedLine!70] ($(swA1.north)+(0.35,0)$) -- ($(rootA.south)-(0.45,0)$);
+
+\draw[->, thick, RedLine] ($(swA2.north)+(0.25,0)$) -- ($(rootA.south)+(1.15,0)$)
+  node[midway, right=2pt, font=\scriptsize\bfseries] {$g_2 + g_3$};
+\draw[<-, thick, dashed, RedLine!70] ($(swA2.north)-(0.35,0)$) -- ($(rootA.south)+(0.45,0)$);
+
+\node[footer node] at (3.65, 0.05) {Upstream: 4 full tensors. Downstream: 4 broadcast copies.};
+
+% Divider
+\draw[dashed, CardBorder!90, line width=0.8pt] (7.3, -0.25) -- (7.3, 9.6);
+
+% Right panel: (b) SHARP In-Network Reduction
+\node[header node, text=DarkGreen] (hdrB) at (10.95, 9.3) {(b) SHARP In-Network Reduction};
+\node[subhdr node] (subB) at (10.95, 8.85) {Switch ASICs reduce inline; only aggregates go up};
+
+\node[banner node, draw=DarkGreen!80, fill=GreenFill] (bannerB) at (10.95, 7.8) {
+  \textbf{\textcolor{DarkGreen}{Optimization: Line-Rate Reduction}}\\[1.5pt]
+  ASICs aggregate inline at wire speed\\
+  $2\text{--}3\times$ AllReduce speedup
+};
+
+% Root Switch (ASIC)
+\node[root node, draw=DarkGreen, fill=GreenFill!60] (rootB) at (10.95, 5.75) {
+  \textbf{\textcolor{DarkGreen}{Root Switch (ASIC)}}\\[1.5pt]
+  Aggregates Subtree Sums\\[1.5pt]
+  \scriptsize\textcolor{DarkGreen}{\textbf{Final sum:} $g_0 + g_1 + g_2 + g_3\,\text{\ding{51}}$}
+};
+
+% SHARP Switches Level 1
+\node[switch node, draw=DarkGreen, fill=GreenFill!35] (swB1) at (9.125, 3.3) {
+  \textbf{SHARP Switch A}\\[3pt]
+  \tikz\node[badge node] {ASIC REDUCE};
+};
+\node[switch node, draw=DarkGreen, fill=GreenFill!35] (swB2) at (12.775, 3.3) {
+  \textbf{SHARP Switch B}\\[3pt]
+  \tikz\node[badge node] {ASIC REDUCE};
+};
+
+% Leaf GPUs
+\node[gpu node] (gB0) at (8.3, 1.0) {\textbf{GPU 0}\\[1.5pt]\scriptsize$\text{grad} = g_0$};
+\node[gpu node] (gB1) at (9.95, 1.0) {\textbf{GPU 1}\\[1.5pt]\scriptsize$\text{grad} = g_1$};
+\node[gpu node] (gB2) at (11.95, 1.0) {\textbf{GPU 2}\\[1.5pt]\scriptsize$\text{grad} = g_2$};
+\node[gpu node] (gB3) at (13.6, 1.0) {\textbf{GPU 3}\\[1.5pt]\scriptsize$\text{grad} = g_3$};
+
+% Connections Panel B
+\draw[->, thick, DarkGreen] (gB0.north) -- (gB0.north |- swB1.south) node[midway, left=1pt, font=\scriptsize\bfseries] {$g_0$};
+\draw[->, thick, DarkGreen] (gB1.north) -- (gB1.north |- swB1.south) node[midway, left=1pt, font=\scriptsize\bfseries] {$g_1$};
+\draw[->, thick, DarkGreen] (gB2.north) -- (gB2.north |- swB2.south) node[midway, right=1pt, font=\scriptsize\bfseries] {$g_2$};
+\draw[->, thick, DarkGreen] (gB3.north) -- (gB3.north |- swB2.south) node[midway, right=1pt, font=\scriptsize\bfseries] {$g_3$};
+
+% Switch to Root (Upstream solid on outside, Downstream dashed on inside)
+\draw[->, thick, DarkGreen] ($(swB1.north)-(0.25,0)$) -- ($(rootB.south)-(1.15,0)$)
+  node[midway, left=2pt, font=\scriptsize\bfseries] {$(g_0 + g_1)\,\text{\ding{51}}$};
+\draw[<-, thick, dashed, DarkGreen!70] ($(swB1.north)+(0.35,0)$) -- ($(rootB.south)-(0.45,0)$);
+
+\draw[->, thick, DarkGreen] ($(swB2.north)+(0.25,0)$) -- ($(rootB.south)+(1.15,0)$)
+  node[midway, right=2pt, font=\scriptsize\bfseries] {$(g_2 + g_3)\,\text{\ding{51}}$};
+\draw[<-, thick, dashed, DarkGreen!70] ($(swB2.north)-(0.35,0)$) -- ($(rootB.south)+(0.45,0)$);
+
+\node[footer node] at (10.95, 0.05) {Only aggregated payloads cross the switch fabric; zero GPU root stall.};
+
+\end{tikzpicture}
+```
 :::
 
 Hierarchical AllReduce reduces the volume of cross-node traffic, but the aggregation still requires multiple network round-trips. NVIDIA's **Scalable Hierarchical Aggregation and Reduction Protocol (SHARP)**\index{SHARP!in-network reduction}[^fn-sharp-innetwork-aggregation] implements this idea: instead of gradients traveling to a destination GPU for summation, the InfiniBand switch aggregates partial sums as data packets pass through it.
@@ -1717,13 +2839,137 @@ The topology detection process begins with hardware enumeration. NCCL queries th
 
 #### Torus topology (TPU pods) {#sec-collective-communication-torus-topology-tpu-pods-68b2}
 
-The dimension-ordered reduction in @fig-torus-reduction shows why torus fabrics use the physical mesh directly instead of pretending the pod is a flat all-to-all network.
+@Fig-torus-reduction illustrates dimension-ordered reduction across a 2D torus mesh (a pedagogical projection of 3D Tensor Processing Unit (TPU)\index{TPU}\index{Tensor Processing Unit|see{TPU}} pods). Rather than treating the cluster as an unconstrained all-to-all fabric, the collective decomposes along coordinate axes: Phase 1 executes independent Ring AllReduces along each horizontal row in parallel, followed by Phase 2 executing independent Ring AllReduces along each vertical column. This axis-aligned schedule routes traffic exclusively across direct physical neighbor links, avoiding bisection congestion while reducing step latency from $2(N-1) = 30$ steps on a flat 16-node ring down to $2(X-1) + 2(Y-1) = 12$ steps ($2.5\times$ latency reduction).
 
-::: {#fig-torus-reduction fig-env="figure" fig-pos="htb" fig-cap="**Dimension-ordered reduction on a torus topology**: In a 2D torus mesh (a simplified representation of 3D TPU pods), AllReduce proceeds in sequential steps along the X and Y dimensions. Reducing along one dimension at a time follows direct-neighbor links and can reduce contention relative to a topology-unaware schedule." fig-alt="2D grid diagram of nodes in a torus topology. Arrows show sequential reduction along X-axis rings, then Y-axis rings."}
-![](images/svg/torus-reduction.svg){width=100%}
+::: {#fig-torus-reduction fig-env="figure" fig-pos="htb" fig-cap="**Dimension-ordered reduction on a torus topology**: In a 2D torus mesh ($4 \times 4$ node grid representing a simplified TPU pod slice), AllReduce proceeds sequentially along orthogonal dimensions. Phase 1 (orange) executes four parallel horizontal rings across the X dimension ($2(X-1) = 6$ steps). Phase 2 (violet) then executes four parallel vertical rings across the Y dimension ($2(Y-1) = 6$ steps) on the row-aggregated partial sums. Dashed links indicate torus wrap-around boundary connections. This dimension-ordered decomposition cuts step latency by $2.5\times$ relative to a 1D global ring while preserving the optimal $2M/\beta$ bandwidth volume invariant." fig-alt="2D grid diagram of 16 nodes in a 4x4 torus topology. Orange arrows show Phase 1 horizontal row rings, violet arrows show Phase 2 vertical column rings, and dashed lines trace wrap-around boundary links. Cards on the right detail step complexity and bandwidth invariance."}
+
+```{.tikz}
+\begin{tikzpicture}[
+  font=\small\sffamily,
+  >=Stealth,
+  node box/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=SteelBlue,
+    fill=white,
+    line width=0.85pt,
+    align=center,
+    inner sep=3pt,
+    font=\footnotesize,
+    minimum width=1.25cm,
+    minimum height=0.95cm
+  },
+  card/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=0.7pt,
+    inner sep=6pt,
+    font=\footnotesize,
+    text width=6.2cm,
+    align=left
+  },
+  badge/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=DarkGreen!60,
+    fill=GreenFill,
+    text=DarkGreen,
+    font=\scriptsize\bfseries,
+    inner sep=3pt,
+    align=center
+  }
+]
+
+% 4x4 Torus Grid (x: 1.0, 2.7, 4.4, 6.1; y: 5.8, 4.2, 2.6, 1.0)
+\foreach \x/\col in {1.0/0, 2.7/1, 4.4/2, 6.1/3} {
+  \foreach \y/\row in {5.8/0, 4.2/1, 2.6/2, 1.0/3} {
+    \pgfmathtruncatemacro{\rank}{\row*4 + \col}
+    \node[node box] (n_\col_\row) at (\x, \y) {\textbf{Node(\col,\row)}\\[1.5pt]\scriptsize\textcolor{TextMuted}{rank \rank}};
+  }
+}
+
+% Direct Horizontal Arrows (Phase 1 - Orange)
+\foreach \row in {0, 1, 2, 3} {
+  \draw[->, very thick, OrangeLine] (n_0_\row.east) -- (n_1_\row.west);
+  \draw[->, very thick, OrangeLine] (n_1_\row.east) -- (n_2_\row.west);
+  \draw[->, very thick, OrangeLine] (n_2_\row.east) -- (n_3_\row.west);
+}
+
+% Direct Vertical Arrows (Phase 2 - Violet)
+\foreach \col in {0, 1, 2, 3} {
+  \draw[->, very thick, VioletLine] (n_\col_0.south) -- (n_\col_1.north);
+  \draw[->, very thick, VioletLine] (n_\col_1.south) -- (n_\col_2.north);
+  \draw[->, very thick, VioletLine] (n_\col_2.south) -- (n_\col_3.north);
+}
+
+% Wrap-around Horizontal Links (Phase 1 - Dashed Orange)
+\foreach \row in {0, 1, 2, 3} {
+  \draw[->, thick, dashed, OrangeLine]
+    (n_3_\row.east) -- ++(0.35,0) -- ++(0, 0.58)
+    -- ($(n_0_\row.west)+(-0.35, 0.58)$) -- ++(0, -0.58)
+    -- (n_0_\row.west);
+}
+
+% Wrap-around Vertical Links (Phase 2 - Dashed Violet)
+\foreach \col in {0, 1, 2, 3} {
+  \draw[->, thick, dashed, VioletLine]
+    (n_\col_3.south) -- ++(0, -0.35)
+    -- ++(-0.85, 0)
+    -- ($(n_\col_0.north)+(-0.85, 0.38)$)
+    -- ++(0.85, 0)
+    -- (n_\col_0.north);
+}
+
+% Right Side Cards
+% Card 1: Phase 1
+\node[card, draw=OrangeLine!80, fill=OrangeL] (card1) at (11.0, 6.30) {
+  \textbf{\large\textcolor{OrangeLine}{Phase 1: X-Dimension Rings}}\\[2pt]
+  \small Ring AllReduce along each row in parallel.\\[3pt]
+  \scriptsize\textbf{Topology:} 4 rings parallel \hfill \textbf{Steps:} $2(X{-}1) = 6$
+};
+
+% Card 2: Phase 2
+\node[card, draw=VioletLine!80, fill=VioletL] (card2) at (11.0, 3.90) {
+  \textbf{\large\textcolor{VioletLine}{Phase 2: Y-Dimension Rings}}\\[2pt]
+  \small Ring AllReduce along each column in parallel.\\[3pt]
+  \scriptsize\textbf{Topology:} 4 rings parallel \hfill \textbf{Steps:} $2(Y{-}1) = 6$
+};
+
+% Card 3: Latency & Step Complexity
+\node[card, draw=CardBorder, fill=CardFill] (card3) at (11.0, 1.20) {
+  \textbf{\normalsize Latency \& Step Complexity}\\[3pt]
+  % \scriptsize and tight math: at \footnotesize the second row was wider than
+  % the 6.2cm card and spilled past its border.
+  \scriptsize
+  \begin{tabular}{@{}ll@{}}
+    1D Global Ring ($N = 16$): & \textbf{\textcolor{RedLine}{30 steps}} \\[2pt]
+    2D Torus $4\times4$ ($2(X{-}1)+2(Y{-}1)$): & \textbf{\textcolor{DarkGreen}{12 steps}} \\
+  \end{tabular}\\[4pt]
+  \centering
+  \tikz\node[badge, minimum width=5.8cm] {\textbf{2.5$\times$ Step Latency Reduction}};
+};
+
+% Card 4: Bandwidth Invariant
+\node[card, draw=CardBorder, fill=CardFill] (card4) at (11.0, -1.26) {
+  \textbf{\normalsize Bandwidth Volume Invariant}\\[2pt]
+  \small$\text{Total volume} = 2 \times \frac{N-1}{N} \times M \approx \frac{2M}{\beta}$\\[2pt]
+  \scriptsize\textcolor{TextMuted}{Identical link utilization to a flat ring}
+};
+
+% Legend
+\coordinate (legBase) at (7.8, -2.75);
+\draw[very thick, OrangeLine] ($(legBase)+(0,0)$) -- ++(0.7,0)
+  node[right, font=\scriptsize, text=TextDark] {Phase 1: X-dim horizontal ring};
+\draw[very thick, VioletLine] ($(legBase)+(0,-0.35)$) -- ++(0.7,0)
+  node[right, font=\scriptsize, text=TextDark] {Phase 2: Y-dim vertical ring};
+\draw[thick, dashed, gray!80] ($(legBase)+(0,-0.70)$) -- ++(0.7,0)
+  node[right, font=\scriptsize, text=TextDark] {Dashed: wrap-around torus boundary links};
+
+\end{tikzpicture}
+```
 :::
 
-Google's Tensor Processing Unit (TPU)\index{TPU}\index{Tensor Processing Unit|see{TPU}} pods use a 3D torus topology\index{Torus Topology} where each TPU connects directly to 6 neighbors $(\pm X, \pm Y, \pm Z)$; @fig-torus-reduction depicts the same dimension-ordered idea as a 2D simplification. Unlike the hierarchical fat-tree topology of InfiniBand clusters, the torus provides uniform, direct connectivity: every TPU chip has the same number of links (6) and the same per-link bandwidth, regardless of its position in the mesh. The optimal AllReduce strategy for this topology is **Dimension-Ordered Reduction**\index{Dimension-Ordered Reduction}:
+Google's TPU pods use a 3D torus topology\index{Torus Topology} where each TPU connects directly to 6 neighbors $(\pm X, \pm Y, \pm Z)$; @fig-torus-reduction depicts the same dimension-ordered idea as a 2D simplification. Unlike the hierarchical fat-tree topology of InfiniBand clusters, the torus provides uniform, direct connectivity: every TPU chip has the same number of links (6) and the same per-link bandwidth, regardless of its position in the mesh. The optimal AllReduce strategy for this topology is **Dimension-Ordered Reduction**\index{Dimension-Ordered Reduction}:
 
 1. Reduce along X for each fixed $(Y,Z)$ line, producing partial sums over the X dimension
 2. Reduce those partials along Y for each fixed $(X,Z)$ line, producing partial sums over the $X \times Y$ plane
@@ -2058,7 +3304,7 @@ Writing a highly optimized, topology-aware, hierarchical Ring AllReduce from scr
 
 ### NCCL: Why it is central to NVIDIA GPU workloads {#sec-communication-nccl}
 
-NVIDIA Collective Communications Library (NCCL)[^fn-nccl-gpu-collectives] is central to many NVIDIA multi-GPU training deployments because it turns collective algorithms (covered in @sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545 and @sec-communication-collective-operations-collective-operations-mapping-collectives-topology-3214) into GPU-resident data movement [@jeaugey2017nccl; @nvidiaNcclUserGuide]. Its adoption stems from three GPU-specific optimizations that MPI and Gloo cannot replicate without hardware vendor support. Kernel fusion folds the reduction operator (sum, average) directly into the memory-copy kernel, so instead of copying data to a buffer, reducing, then copying the results back, NCCL reduces during the transfer and eliminates the intermediate memory traffic that would otherwise cap high-bandwidth memory (HBM)\index{HBM}\index{High Bandwidth Memory|see{HBM}} bandwidth utilization. Channel pipelining\index{Channel Pipelining} opens multiple parallel communication channels to saturate every network interface at once, so a DGX node with 8 NICs reaches 8$\times$ the bandwidth of a single-channel implementation. GPUDirect RDMA lets the network card read directly from GPU memory over PCIe, bypassing the CPU entirely; without it, data would traverse GPU → CPU memory → NIC → network, adding microseconds of latency and consuming CPU cycles. Together these explain why NCCL is usually the first backend to benchmark for NVIDIA GPU collectives before falling back to generic MPI implementations.
+NVIDIA Collective Communications Library (NCCL)[^fn-nccl-gpu-collectives] is central to many NVIDIA multi-GPU training deployments because it turns collective algorithms (covered in @sec-communication-collective-operations-collective-operations-allreduce-algorithms-7545 and @sec-communication-collective-operations-collective-operations-mapping-collectives-topology-3214) into GPU-resident data movement [@jeaugey2017nccl; @nvidiaNcclUserGuide]. Its adoption stems from three GPU-specific optimizations that MPI and Gloo cannot replicate without hardware vendor support. Kernel fusion folds the reduction operator (sum, average) directly into the memory-copy kernel, so instead of copying data to a buffer, reducing, then copying the results back, NCCL reduces during the transfer and eliminates the intermediate memory traffic that would otherwise cap HBM\index{HBM} bandwidth utilization. Channel pipelining\index{Channel Pipelining} opens multiple parallel communication channels to saturate every network interface at once, so a DGX node with 8 NICs reaches 8$\times$ the bandwidth of a single-channel implementation. GPUDirect RDMA lets the network card read directly from GPU memory over PCIe, bypassing the CPU entirely; without it, data would traverse GPU → CPU memory → NIC → network, adding microseconds of latency and consuming CPU cycles. Together these explain why NCCL is usually the first backend to benchmark for NVIDIA GPU collectives before falling back to generic MPI implementations.
 
 Beyond raw performance, NCCL's topology auto-discovery is a critical differentiator. The topology-detection phase from @sec-communication-collective-operations-collective-operations-topology-detection-selection-2dc7 is, in NCCL, driven by NVIDIA Management Library queries and PCI bus enumeration of NVLink connectivity and NIC placement. The library-specific payoff is hardware-aware algorithm selection: on a DGX H100 with NVSwitch, NCCL recognizes that all 8 GPUs are fully connected and selects NVSwitch-based algorithms that differ from the ring algorithms used on systems with point-to-point NVLink connections.
 

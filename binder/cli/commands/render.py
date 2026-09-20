@@ -128,16 +128,26 @@ class RenderCommand:
         parser.add_argument(
             "subcommand",
             nargs="?",
-            choices=["plots"],
-            help="What to render (currently: plots)",
+            choices=["plots", "figures", "diagrams"],
+            help="What to render (plots, figures, diagrams)",
         )
         parser.add_argument("chapters", nargs="?", default=None,
                             help="Chapter name(s), comma-separated")
         parser.add_argument("--vol1", action="store_true", help="Volume I only")
         parser.add_argument("--vol2", action="store_true", help="Volume II only")
+        parser.add_argument("--vol3", action="store_true", help="Volume III only")
+        parser.add_argument("--vol4", action="store_true", help="Volume IV only")
+        parser.add_argument("--chapter", type=str, default="", help="Filter chapter slug(s)")
+        parser.add_argument("--type", type=str, default="all", choices=["all", "tikz", "margin", "images", "cover"], help="Filter figure type")
+        parser.add_argument("--limit", type=int, default=0, help="Limit number of figures (0 = all)")
+        parser.add_argument("--no-render", action="store_true", help="Skip Quarto compile")
+        parser.add_argument("--no-contact-sheets", action="store_true", help="Skip contact sheets")
+        parser.add_argument("--contact-cols", type=int, default=3, help="Grid columns (default: 3)")
+        parser.add_argument("--contact-rows", type=int, default=4, help="Grid rows (default: 4)")
+        parser.add_argument("--dpi", type=int, default=110, help="Rasterization DPI (default: 110)")
 
         try:
-            ns = parser.parse_args(args)
+            ns, unknown = parser.parse_known_args(args)
         except SystemExit:
             return ("-h" in args) or ("--help" in args)
 
@@ -147,6 +157,9 @@ class RenderCommand:
 
         if ns.subcommand == "plots":
             return self._render_plots(ns)
+
+        if ns.subcommand in ("figures", "diagrams"):
+            return self._render_figures(ns, unknown)
 
         return False
 
@@ -160,13 +173,63 @@ class RenderCommand:
         table.add_column("Subcommand", style="cyan", width=14)
         table.add_column("Description", style="white", width=55)
         table.add_row("plots", "Render matplotlib/Python figures to PNG gallery")
+        table.add_row("figures", "Render figure-only PDF and PNG contact sheets")
         console.print(Panel(table, title="binder render <subcommand>", border_style="cyan"))
         console.print("[dim]Examples:[/dim]")
         console.print("  [cyan]./binder/binder render plots[/cyan]                    [dim]# all chapters, both volumes[/dim]")
         console.print("  [cyan]./binder/binder render plots --vol1[/cyan]             [dim]# Volume I only[/dim]")
-        console.print("  [cyan]./binder/binder render plots ml_systems[/cyan]         [dim]# single chapter[/dim]")
-        console.print("  [cyan]./binder/binder render plots intro,training[/cyan]     [dim]# multiple chapters[/dim]")
+        console.print("  [cyan]./binder/binder render figures --vol2[/cyan]           [dim]# Volume II figures PDF + contact sheets[/dim]")
+        console.print("  [cyan]./binder/binder render figures --vol2 --type tikz[/cyan] [dim]# Volume II TikZ figures only[/dim]")
         console.print()
+
+    def _render_figures(self, ns: argparse.Namespace, unknown: List[str]) -> bool:
+        """Render figure contact sheets (TikZ, margin, images)."""
+        import sys
+        repo_root = Path(__file__).resolve().parents[3]
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+        from scripts.generate_figure_contact_sheet import FigureContactSheetBuilder
+
+        vol = "vol2" if ns.vol2 else ("vol1" if ns.vol1 else ("vol3" if ns.vol3 else ("vol4" if ns.vol4 else None)))
+        if not vol:
+            console.print("[red]Please specify a volume: --vol1, --vol2, --vol3, or --vol4[/red]")
+            return False
+
+        # Parse chapter filter
+        chapter_filter = []
+        if ns.chapter:
+            chapter_filter = [c.strip() for c in ns.chapter.split(",") if c.strip()]
+        elif ns.chapters:
+            chapter_filter = [c.strip() for c in ns.chapters.split(",") if c.strip()]
+
+        fig_type = "tikz" if ns.subcommand == "diagrams" else ns.type
+
+        builder = FigureContactSheetBuilder(
+            volume=vol,
+            chapter_filter=chapter_filter,
+            figure_type=fig_type,
+            limit=ns.limit,
+            dpi=max(36, ns.dpi),
+            cols=max(1, ns.contact_cols),
+            rows=max(1, ns.contact_rows),
+        )
+        entries = builder.extract_figures()
+        if not entries:
+            console.print(f"[yellow]No matching figures found for {vol}.[/yellow]")
+            return False
+        builder.export_metadata(entries)
+        qmd_path = builder.generate_qmd(entries)
+        console.print(f"[bold blue]Extracted[/bold blue] {len(entries)} figure{'s' if len(entries) != 1 else ''}.")
+        console.print(f"[dim]Audit source:[/dim] {qmd_path}")
+        if not ns.no_render:
+            pdf_path = builder.render_pdf(qmd_path)
+            if pdf_path and not ns.no_contact_sheets:
+                sheets = builder.make_contact_sheets(pdf_path)
+                if sheets:
+                    console.print("[dim]Contact sheets:[/dim]")
+                    for sheet in sheets:
+                        console.print(f"  {sheet}")
+        return True
 
     # ------------------------------------------------------------------
     # Resolve QMD files

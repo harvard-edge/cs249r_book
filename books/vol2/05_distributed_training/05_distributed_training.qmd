@@ -212,9 +212,157 @@ Distribution changes the optimization problem by adding costs that do not exist 
 
 The systematic optimization methodology established for single-machine training extends to distributed environments with important adaptations. Profiling must capture inter-device communication patterns and synchronization overhead in addition to computation and memory metrics. The solution space expands to include data parallelism, model parallelism, pipeline parallelism, and hybrid approaches. @Fig-3d-parallelism-cube visualizes this three-dimensional configuration space.
 
-::: {#fig-3d-parallelism-cube fig-env="figure" fig-pos="htb" fig-cap="**The 3D parallelism cube**: The cube visualizes three distinct partitioning axes: data parallelism (replicating the model), pipeline parallelism (splitting depth), and tensor parallelism (splitting layers). Large-model training occupies a feasible point $(d, p, t)$ only when divisibility, memory, batch, topology, and failure-domain constraints are satisfied together." fig-alt="3D coordinate system with three axes: Data Parallelism (replica count d), Pipeline Parallelism (depth p), and Tensor Parallelism (width t). Dashed cube marks a feasible configuration point with Total Accelerators equals d times p times t."}
+::: {#fig-3d-parallelism-cube fig-env="figure" fig-pos="htb" fig-cap="**The 3D parallelism cube**: The configuration space decomposes cluster training across three orthogonal axes: tensor parallelism ($t$, intra-layer sharding), pipeline parallelism ($p$, sequential stage partitioning), and data parallelism ($d$, batch replication). Feasible cluster execution requires jointly satisfying model divisibility, per-device memory limits, and hardware network hierarchies to allocate $N = d \times p \times t$ total accelerators." fig-alt="3D coordinate cube showing Tensor Parallelism on width, Pipeline Parallelism on height, and Data Parallelism on depth, with a highlighted single accelerator coordinate and summary specification cards."}
 
-![](images/svg/3d-parallelism-cube.svg)
+```{.tikz}
+\begin{tikzpicture}[
+  font=\small\sffamily,
+  >=Stealth,
+  card/.style={
+    rectangle,
+    rounded corners=5pt,
+    line width=0.8pt,
+    inner sep=6pt,
+    align=left,
+    font=\footnotesize
+  }
+]
+
+% Left Panel: 3D Parallelism Configuration Space (Oblique)
+\begin{scope}[shift={(0.8, 0.8)}]
+
+  \def\w{3.8}   % width (Tensor Parallel)
+  \def\h{3.8}   % height (Pipeline Parallel)
+  \def\dx{1.6}  % depth dx
+  \def\dy{1.2}  % depth dy
+
+  \def\nt{3} % tensor slices
+  \def\np{3} % pipeline slices
+  \def\nd{3} % data slices
+
+  % 1. Hidden / Dashed Back Lines
+  \draw[thick, dashed, gray!35] (\dx, \dy) -- (\w+\dx, \dy);
+  \draw[thick, dashed, gray!35] (\dx, \dy) -- (\dx, \h+\dy);
+  \draw[thick, dashed, gray!35] (\dx, \dy) -- (0, 0);
+
+  % 2. Front Face (XY plane at Z=0): Tensor x Pipeline
+  \fill[OrangeL!60] (0, 0) rectangle (\w, \h);
+
+  % 3. Top Face (XZ plane at Y=\h): Tensor x Data
+  \fill[GreenFill!90] (0, \h) -- (\dx, \h+\dy) -- (\w+\dx, \h+\dy) -- (\w, \h) -- cycle;
+
+  % 4. Right Side Face (YZ plane at X=\w): Pipeline x Data
+  \fill[BlueFill!50] (\w, 0) -- (\w+\dx, \dy) -- (\w+\dx, \h+\dy) -- (\w, \h) -- cycle;
+
+  % Grid lines on Front Face (Tensor x Pipeline)
+  \foreach \i in {1,2} {
+    \draw[OrangeLine!45, line width=0.6pt] (\i*\w/\nt, 0) -- (\i*\w/\nt, \h);
+    \draw[OrangeLine!45, line width=0.6pt] (0, \i*\h/\np) -- (\w, \i*\h/\np);
+  }
+
+  % Grid lines on Top Face (Tensor x Data)
+  \foreach \i in {1,2} {
+    \draw[GreenLine!45, line width=0.6pt]
+      (\i*\w/\nt, \h) -- (\i*\w/\nt+\dx, \h+\dy);
+    \draw[GreenLine!45, line width=0.6pt]
+      (\i*\dx/\nd, \h+\i*\dy/\nd) -- (\w+\i*\dx/\nd, \h+\i*\dy/\nd);
+  }
+
+  % Grid lines on Right Side Face (Pipeline x Data)
+  \foreach \i in {1,2} {
+    \draw[BlueLine!45, line width=0.6pt]
+      (\w, \i*\h/\np) -- (\w+\dx, \i*\h/\np+\dy);
+    \draw[BlueLine!45, line width=0.6pt]
+      (\w+\i*\dx/\nd, \i*\dy/\nd) -- (\w+\i*\dx/\nd, \h+\i*\dy/\nd);
+  }
+
+  % Solid Outer Edges of the Cube
+  \draw[line width=1.1pt, Black!80] (0, 0) rectangle (\w, \h);
+  \draw[line width=1.1pt, Black!80] (0, \h) -- (\dx, \h+\dy) -- (\w+\dx, \h+\dy) -- (\w, \h);
+  \draw[line width=1.1pt, Black!80] (\w, 0) -- (\w+\dx, \dy) -- (\w+\dx, \h+\dy);
+
+  % Highlight single GPU / Accelerator cell (front-top-right)
+  \filldraw[draw=RedLine, fill=RedLine!25, line width=1.0pt]
+    (2*\w/3, 2*\h/3) rectangle (\w, \h);
+  \filldraw[draw=RedLine, fill=RedLine!30, line width=1.0pt]
+    (2*\w/3, \h) -- (2*\w/3+\dx/3, \h+\dy/3) -- (\w+\dx/3, \h+\dy/3) -- (\w, \h) -- cycle;
+  \filldraw[draw=RedLine, fill=RedLine!35, line width=1.0pt]
+    (\w, 2*\h/3) -- (\w+\dx/3, 2*\h/3+\dy/3) -- (\w+\dx/3, \h+\dy/3) -- (\w, \h) -- cycle;
+
+  % Device callout arrow and label
+  \coordinate (devCenter) at (2.5*\w/3 + 0.5*\dx/3, \h + 0.5*\dy/3);
+  \draw[->, line width=0.9pt, RedLine]
+    (1.4, \h+\dy+0.6)
+    node[above, font=\footnotesize\bfseries, text=RedLine] {Single accelerator coordinate $(t_i, p_j, d_k)$}
+    to[out=-20, in=115] (devCenter);
+
+  % Outer Dimension Vectors / Axis Arrows
+  % 1. Tensor Parallel (Horizontal arrow below front face)
+  \draw[<->, line width=1.2pt, OrangeLine] (0, -0.45) -- (\w, -0.45)
+    node[midway, below=2pt, font=\bfseries\footnotesize, text=OrangeLine] {
+      Tensor Parallel degree ($t$)
+    };
+  \draw[thin, OrangeLine!40] (0, -0.1) -- (0, -0.55);
+  \draw[thin, OrangeLine!40] (\w, -0.1) -- (\w, -0.55);
+
+  % 2. Pipeline Parallel (Vertical arrow along left of front face)
+  \draw[<->, line width=1.2pt, GreenLine] (-0.45, 0) -- (-0.45, \h)
+    node[midway, above=2pt, rotate=90, font=\bfseries\footnotesize, text=GreenLine] {
+      Pipeline Parallel degree ($p$)
+    };
+  \draw[thin, GreenLine!40] (-0.1, 0) -- (-0.55, 0);
+  \draw[thin, GreenLine!40] (-0.1, \h) -- (-0.55, \h);
+
+  % 3. Data Parallel (Depth arrow extending back-right)
+  \draw[<->, line width=1.2pt, BlueLine]
+    (\w+0.25, -0.1) -- (\w+\dx+0.25, \dy-0.1)
+    node[midway, below right=-2pt and -1pt, font=\bfseries\footnotesize, text=BlueLine, rotate=37] {
+      Data Parallel ($d$)
+    };
+  \draw[thin, BlueLine!40] (\w+0.05, 0) -- (\w+0.35, -0.15);
+  \draw[thin, BlueLine!40] (\w+\dx+0.05, \dy) -- (\w+\dx+0.35, \dy-0.15);
+
+\end{scope}
+
+% Right Panel: System Specification Cards
+% Shifted from 8.0: the rotated "Data Parallel (d)" depth label reaches past
+% x = 8 and its tail was hidden behind this column's first card.
+\begin{scope}[shift={(9.0, 0.4)}]
+
+  % Card 1: Total Devices Formula
+  \node[card, draw=GreenLine, fill=GreenFill, text width=6.3cm] (cTotal) at (3.15, 5.5) {
+    \centering\textbf{\normalsize\textcolor{GreenLine}{Total accelerators $N = d \times p \times t$}}\\[2pt]
+    \scriptsize\textcolor{Black}{Example: $64 \times 16 \times 8 = 8{,}192$ accelerators in cluster}
+  };
+
+  % Card 2: 3D Dimensions Breakdown
+  \node[card, draw=GrayL!80, fill=white, text width=6.3cm, below=7pt of cTotal] (cDesc) {
+    \textbf{\textcolor{OrangeLine}{\ding{110}\; Tensor Parallelism ($t$)}}\\[1.5pt]
+    \scriptsize Splits weight matrices within each layer (Megatron-LM style).\\
+    \textbf{\scriptsize Network tier:} \textcolor{OrangeLine}{Intra-node NVLink (900--3,200 GB/s)}\\[5pt]
+
+    \textbf{\textcolor{GreenLine}{\ding{110}\; Pipeline Parallelism ($p$)}}\\[1.5pt]
+    \scriptsize Partitions consecutive layer stages across devices (1F1B schedule).\\
+    \textbf{\scriptsize Network tier:} \textcolor{GreenLine}{Inter-node fabric (InfiniBand / RoCE 50--400 GB/s)}\\[5pt]
+
+    \textbf{\textcolor{BlueLine}{\ding{110}\; Data Parallelism ($d$)}}\\[1.5pt]
+    \scriptsize Replicates model weights; partitions global batch (ZeRO / DDP).\\
+    \textbf{\scriptsize Collective:} \textcolor{BlueLine}{AllReduce / ReduceScatter over data replicas}
+  };
+
+  % Card 3: Hardware Placement Rule
+  \node[card, draw=RedLine!70, fill=RedFill, text width=6.3cm, below=7pt of cDesc] (cRule) {
+    \centering\textbf{\small\textcolor{RedLine}{Physical Topology Placement Invariant}}\\[3pt]
+    \raggedright\scriptsize
+    \textbf{$t$ (Tensor):} innermost domain (within single 8-GPU chassis over NVLink)\\[2pt]
+    \textbf{$p$ (Pipeline):} intermediate domain (adjacent nodes within same rack)\\[2pt]
+    \textbf{$d$ (Data):} outermost domain (across racks, clusters, or data centers)
+  };
+
+\end{scope}
+
+\end{tikzpicture}
+```
 
 :::
 
@@ -260,9 +408,161 @@ Tensor parallelism across server racks connected by standard Ethernet will stall
 
 @Fig-parallelism-decision-tree formalizes this constraint satisfaction process as a decision tree, showing how model size and hardware topology determine the viable parallelism strategies.
 
-::: {#fig-parallelism-decision-tree fig-env="figure" fig-pos="htb" fig-cap="**Parallelism strategy decision tree**: Starting from the model's memory requirements, the tree follows the constraints that determine which parallelism strategies are physically feasible. The critical branches compare model memory with single-GPU and single-node capacity; leaf nodes identify the resulting strategy and dominant hardware constraint." fig-alt="Decision tree flowchart. Root asks if model fits in one GPU. Yes branch leads to data parallelism. No branch asks if model fits in one node, leading to tensor or pipeline parallelism with hardware annotations."}
+::: {#fig-parallelism-decision-tree fig-env="figure" fig-pos="htb" fig-cap="**Parallelism strategy decision tree**: Starting from the model's memory footprint, the tree evaluates hardware-boundary constraints to identify viable execution strategies. The branches compare parameter and activation capacity against single-device and single-node physical limits, pairing each resulting strategy with its required interconnect tier." fig-alt="Decision tree flowchart. Root asks if model fits in one GPU. Yes branch leads to data parallelism. No branch asks if model fits in one node, leading to tensor or pipeline parallelism with hardware annotations."}
 
-![](images/svg/parallelism-decision-tree.svg)
+```{.tikz}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  decision/.style={
+    diamond,
+    aspect=2.2,
+    draw=OrangeLine,
+    fill=OrangeL,
+    line width=1.1pt,
+    inner sep=3pt,
+    align=center,
+    font=\bfseries\footnotesize,
+    text=TextDark
+  },
+  card/.style={
+    rectangle,
+    rounded corners=5pt,
+    draw=CardBorder,
+    fill=white,
+    line width=0.85pt,
+    inner sep=6pt,
+    align=left,
+    text width=4.3cm,
+    font=\scriptsize
+  },
+  badge/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.7pt,
+    inner sep=2pt,
+    align=center,
+    font=\bfseries\tiny
+  },
+  fabric chip/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.65pt,
+    inner sep=2.5pt,
+    align=center,
+    font=\scriptsize\bfseries,
+    fill=white
+  }
+]
+
+  % Decision Nodes
+  \node[decision] (Q1) at (7.0, 8.2) {
+    \textbf{\footnotesize 1. Model \& Activations}\\[1pt]
+    \textbf{\footnotesize fit on 1 GPU?}
+  };
+
+  \node[decision] (Q2) at (12.2, 5.8) {
+    \textbf{\footnotesize 2. Fits in 1 Node}\\[1pt]
+    \textbf{\footnotesize ($\le 8$ GPUs)?}
+  };
+
+  \node[decision] (Q3) at (12.2, 2.9) {
+    \textbf{\footnotesize 3. Sequential Depth /}\\[1pt]
+    \textbf{\footnotesize Bubble Tolerable?}
+  };
+
+  % Outcome Cards
+  % Column 1: Data Parallelism
+  \node[card, draw=GreenLine!70, top color=GreenFill!50, bottom color=white] (DDP) at (1.8, 5.8) {
+    {\normalsize\textcolor{GreenLine}{\textbf{Data Parallel (DDP)}}}\\[3pt]
+    \textcolor{TextDark}{$\bullet$ Replicate weights on all GPUs}\\
+    \textcolor{TextDark}{$\bullet$ Partition batch across workers}\\[5pt]
+    \begin{tikzpicture}
+      \node[fabric chip, draw=GreenLine, text=GreenLine, text width=4.0cm] {
+        \ding{51}\; Fabric: Standard IB / RoCE
+      };
+    \end{tikzpicture}
+  };
+
+  \node[card, draw=BlueLine!70, top color=BlueFill!50, bottom color=white] (ZeRO) at (1.8, 2.4) {
+    {\normalsize\textcolor{BlueLine}{\textbf{ZeRO / FSDP}}}\\[3pt]
+    \textcolor{TextDark}{$\bullet$ Shard optimizer, grads, weights}\\
+    \textcolor{TextDark}{$\bullet$ Eliminates memory redundancy}\\[5pt]
+    \begin{tikzpicture}
+      \node[fabric chip, draw=BlueLine, text=BlueLine, text width=4.0cm] {
+        \ding{51}\; Fabric: AllGather + ReduceScatter
+      };
+    \end{tikzpicture}
+  };
+
+  % Column 2: Tensor & Pipeline Parallelism
+  \node[card, draw=OrangeLine!80, top color=OrangeL!50, bottom color=white] (TP) at (7.0, 4.4) {
+    {\normalsize\textcolor{OrangeLine}{\textbf{Tensor Parallel (TP)}}}\\[3pt]
+    \textcolor{TextDark}{$\bullet$ Shard weight matrix columns/rows}\\
+    \textcolor{TextDark}{$\bullet$ AllReduce at every linear layer}\\[5pt]
+    \begin{tikzpicture}
+      \node[fabric chip, draw=OrangeLine, text=OrangeLine, text width=4.0cm] {
+        \ding{51}\; Fabric: Strictly NVLink (900 GB/s)
+      };
+    \end{tikzpicture}
+  };
+
+  \node[card, draw=GreenLine!80, top color=GreenFill!50, bottom color=white] (PP) at (7.0, 0.6) {
+    {\normalsize\textcolor{GreenLine}{\textbf{Pipeline Parallel (PP)}}}\\[3pt]
+    \textcolor{TextDark}{$\bullet$ Partition layer stages sequentially}\\
+    \textcolor{TextDark}{$\bullet$ 1F1B micro-batch scheduling}\\[5pt]
+    \begin{tikzpicture}
+      \node[fabric chip, draw=GreenLine, text=GreenLine, text width=4.0cm] {
+        \ding{51}\; Fabric: P2P over IB / Ethernet
+      };
+    \end{tikzpicture}
+  };
+
+  % Column 3: 3D Parallelism Fallback
+  \node[card, draw=VioletLine!80, top color=VioletL!60, bottom color=white] (Hybrid3D) at (12.2, 0.6) {
+    {\normalsize\textcolor{VioletLine}{\textbf{3D Parallelism (TP+PP+DP)}}}\\[3pt]
+    \textcolor{TextDark}{$\bullet$ Combined scaling for $>100\text{B}$ params}\\
+    \textcolor{TextDark}{$\bullet$ Intra TP $\times$ Inter PP $\times$ Outer DP}\\[5pt]
+    \begin{tikzpicture}
+      \node[fabric chip, draw=VioletLine, text=VioletLine, text width=4.0cm] {
+        \ding{51}\; Fabric: Tiered NVLink + IB + DC
+      };
+    \end{tikzpicture}
+  };
+
+  % Branch Connectors
+  % Branch 1: Q1 -> DDP (YES)
+  \draw[->, line width=1.4pt, GreenLine] (Q1.west) -| (DDP.north);
+  \node[badge, draw=GreenLine, fill=GreenFill, text=GreenLine] at (3.8, 8.2) {\textbf{Yes}};
+
+  % Branch 1: Q1 -> Q2 (NO)
+  \draw[->, line width=1.4pt, RedLine] (Q1.east) -| (Q2.north);
+  \node[badge, draw=RedLine, fill=RedFill, text=RedLine] at (10.2, 8.2) {\textbf{No}};
+
+  % Connector DDP -> ZeRO (Memory Pressure?)
+  \draw[->, line width=1.2pt, BlueLine, dashed] (DDP.south) -- (ZeRO.north)
+    node[midway, fill=BlueFill!80, draw=BlueLine!60, rounded corners=3pt, font=\scriptsize\bfseries, text=BlueLine, inner sep=2.5pt] {
+      Memory pressure?
+    };
+
+  % Branch 2: Q2 -> TP (YES)
+  \draw[->, line width=1.4pt, GreenLine] (Q2.west) -| (TP.north);
+  \node[badge, draw=GreenLine, fill=GreenFill, text=GreenLine] at (9.2, 5.8) {\textbf{Yes}};
+
+  % Branch 2: Q2 -> Q3 (NO)
+  \draw[->, line width=1.4pt, RedLine] (Q2.south) -- (Q3.north);
+  \node[badge, draw=RedLine, fill=RedFill, text=RedLine] at (12.6, 4.45) {\textbf{No}};
+
+  % Branch 3: Q3 -> PP (YES)
+  \draw[->, line width=1.4pt, GreenLine] (Q3.west) -| (PP.north);
+  \node[badge, draw=GreenLine, fill=GreenFill, text=GreenLine] at (9.2, 2.9) {\textbf{Yes}};
+
+  % Branch 3: Q3 -> Hybrid3D (NO)
+  \draw[->, line width=1.4pt, RedLine] (Q3.south) -- (Hybrid3D.north);
+  \node[badge, draw=RedLine, fill=RedFill, text=RedLine] at (12.6, 1.8) {\textbf{No}};
+
+\end{tikzpicture}
+```
 
 :::
 
@@ -359,15 +659,202 @@ The method parallels gradient accumulation, where a single device accumulates gr
 
 ### Data parallelism implementation {#sec-distributed-training-systems-systems-data-parallelism-implementation-fa03}
 
-The implementation details matter because the SGD equivalence only holds when each phase preserves the intended aggregate sampling and weighting, complete local gradient contributions, and a single synchronized update. The concrete workflow therefore traces the path from assigning local batches to synchronizing the computed gradients. Consider @fig-dist-train-data-parallelism: it traces the complete workflow from batch assignment through gradient aggregation, showing how each GPU processes its assigned batch before synchronization brings all gradients together for parameter updates.
+The implementation details matter because the SGD equivalence only holds when each phase preserves the intended aggregate sampling and weighting, complete local gradient contributions, and a single synchronized update. The concrete workflow therefore traces the path from assigning local batches to synchronizing the computed gradients. @Fig-dist-train-data-parallelism traces the five-stage data-parallel execution pipeline, illustrating how identical model replicas ingest disjoint batch shards, compute independent local gradients, and converge at a collective reduction barrier before executing uniform weight updates.
 
-::: {#fig-dist-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data parallelism implementation pipeline**: The five-stage workflow for data-parallel training: (1) sample or partition the intended global batch, (2) assign local batches to GPUs, (3) compute forward and backward passes independently, (4) reduce weighted gradient contributions, and (5) update parameters uniformly across all devices. This approach contrasts with model parallelism, where the model itself is partitioned rather than replicated." fig-alt="Flowchart showing a five-stage data-parallel workflow. Input data splits into four batches assigned to GPUs 0–3; each GPU performs a forward and backward pass, gradients synchronize and aggregate, and each model replica receives the same update."}
+::: {#fig-dist-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data parallelism implementation pipeline**: The five-stage workflow for data-parallel training: (1) partition the global batch, (2) assign sharded mini-batches to individual GPUs, (3) compute independent forward and backward passes to produce local gradients $g_i$, (4) execute an AllReduce collective across the cluster to obtain the average gradient $\bar{g}$, and (5) update parameters identically across all devices. This strategy preserves the mathematical semantics of single-device SGD while distributing the compute burden." fig-alt="Five-stage data-parallel workflow diagram showing global batch partitioning, local forward and backward computation across four GPU swimlanes, centralized AllReduce collective synchronization, and synchronized parameter updates."}
 
-![](images/svg/data-parallel-flow.svg)
+```{.tikz}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  phase header/.style={
+    font=\bfseries\footnotesize,
+    text=NavyBlue,
+    align=center
+  },
+  batch box/.style={
+    rectangle,
+    rounded corners=5pt,
+    draw=OrangeLine,
+    fill=OrangeL,
+    line width=0.9pt,
+    align=center,
+    font=\footnotesize
+  },
+  mini box/.style={
+    rectangle,
+    rounded corners=3.5pt,
+    draw=SteelBlue,
+    fill=LightBlue,
+    line width=0.8pt,
+    align=center,
+    font=\scriptsize
+  },
+  step box/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.7pt,
+    align=center,
+    font=\scriptsize
+  },
+  grad box/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=DarkGreen,
+    fill=GreenFill,
+    line width=0.8pt,
+    align=center,
+    font=\scriptsize\bfseries,
+    text=DarkGreen
+  },
+  update box/.style={
+    rectangle,
+    rounded corners=4pt,
+    draw=SteelBlue,
+    fill=LightBlue!60,
+    line width=0.8pt,
+    align=center,
+    font=\scriptsize
+  }
+]
+
+  % Phase Columns & Headers
+  \node[phase header] at (0.8, 8.5) {1. Global\\[1pt]Batch};
+  \node[phase header] at (2.6, 8.5) {2. Sharded\\[1pt]Inputs};
+  \node[phase header] at (6.0, 8.5) {3. Local Compute\\[1pt](Forward / Backward per GPU)};
+  \node[phase header] at (10.4, 8.5) {4. Collective\\[1pt]Sync};
+  \node[phase header] at (14.2, 8.5) {5. Weight\\[1pt]Update};
+
+  % Vertical guide separators
+  \draw[dashed, gray!30, thin] (1.7, 8.9) -- (1.7, 0.4);
+  \draw[dashed, gray!30, thin] (3.6, 8.9) -- (3.6, 0.4);
+  \draw[dashed, gray!30, thin] (8.5, 8.9) -- (8.5, 0.4);
+  \draw[dashed, gray!30, thin] (12.3, 8.9) -- (12.3, 0.4);
+
+  % Phase 1: Global Batch
+  \node[batch box, minimum width=1.4cm, minimum height=4.8cm] (GB) at (0.8, 4.4) {
+    \textbf{Global}\\[2pt]
+    \textbf{Batch}\\[5pt]
+    \small $B = 128$\\[2pt]
+    \scriptsize samples
+  };
+
+  % 4 GPU Swimlanes
+  \foreach \i/\y in {0/6.8, 1/5.2, 2/3.6, 3/2.0} {
+
+    % Phase 2: Sharded Mini-batch
+    \node[mini box, minimum width=1.6cm, minimum height=0.95cm] (MB\i) at (2.6, \y) {
+      \textbf{Mini-batch \i}\\[1pt]
+      \tiny $B_i = 32$ samples
+    };
+
+    % Phase 3: GPU Compute Blocks
+    \node[anchor=south west, font=\tiny\bfseries, fill=NavyBlue, text=white, rounded corners=1.5pt, inner sep=1.5pt]
+      at (3.85, \y+0.32) {GPU \i};
+
+    \node[step box, draw=SteelBlue!80, fill=LightBlue, minimum width=1.05cm, minimum height=0.68cm] (FWD\i) at (4.45, \y) {
+      \textbf{\scriptsize Fwd}
+    };
+
+    \node[step box, draw=RedLine!70, fill=RedFill, minimum width=0.85cm, minimum height=0.68cm] (LOSS\i) at (5.6, \y) {
+      \textbf{\scriptsize Loss}
+    };
+
+    \node[step box, draw=OrangeLine!80, fill=OrangeL, minimum width=1.05cm, minimum height=0.68cm] (BWD\i) at (6.75, \y) {
+      \textbf{\scriptsize Bwd}
+    };
+
+    \node[grad box, minimum width=0.85cm, minimum height=0.68cm] (GRAD\i) at (7.95, \y) {
+      $g_\i$
+    };
+
+    \draw[->, line width=0.7pt, gray!70] (MB\i.east) -- (FWD\i.west);
+    \draw[->, line width=0.7pt, gray!70] (FWD\i.east) -- (LOSS\i.west);
+    \draw[->, line width=0.7pt, gray!70] (LOSS\i.east) -- (BWD\i.west);
+    \draw[->, line width=0.75pt, DarkGreen] (BWD\i.east) -- (GRAD\i.west);
+
+    % Phase 5: Weight Update Block
+    \node[update box, minimum width=2.5cm, minimum height=0.95cm] (UPD\i) at (14.2, \y) {
+      \textbf{GPU \i: Update}\\[1.5pt]
+      $\theta \leftarrow \theta - \eta \cdot \bar{g}$
+    };
+  }
+
+  % Connect Global Batch to Mini-batches
+  \draw[->, line width=0.9pt, OrangeLine] (GB.east) -- ++(0.25, 0) |- (MB0.west);
+  \draw[->, line width=0.9pt, OrangeLine] (GB.east) -- ++(0.25, 0) |- (MB1.west);
+  \draw[->, line width=0.9pt, OrangeLine] (GB.east) -- ++(0.25, 0) |- (MB2.west);
+  \draw[->, line width=0.9pt, OrangeLine] (GB.east) -- ++(0.25, 0) |- (MB3.west);
+
+  % Phase 4: AllReduce Collective Hub
+  \node[
+    rectangle,
+    rounded corners=6pt,
+    draw=DarkGreen,
+    fill=GreenFill!85,
+    line width=1.1pt,
+    inner sep=6pt,
+    align=center,
+    minimum width=3.4cm,
+    minimum height=3.8cm
+  ] (AR) at (10.4, 4.4) {
+    \textbf{\small AllReduce}\\[2pt]
+    \scriptsize Ring Topology\\[5pt]
+    \normalsize$\bar{g} = \frac{1}{N}\sum_{i=0}^{N-1} g_i$\\[5pt]
+    \scriptsize Comm Volume:\\[1pt]
+    $\frac{2(N-1)}{N}|P|$\\[6pt]
+    \begin{tikzpicture}
+      \draw[DarkGreen, line width=1.0pt] (0,0) circle (0.35cm);
+      \foreach \ang in {0, 90, 180, 270} {
+        \fill[DarkGreen] (\ang:0.35cm) circle (1.8pt);
+      }
+    \end{tikzpicture}
+  };
+
+  % Gradient arrows to AllReduce
+  \coordinate (ARin0) at ($(AR.north west)!0.18!(AR.south west)$);
+  \coordinate (ARin1) at ($(AR.north west)!0.38!(AR.south west)$);
+  \coordinate (ARin2) at ($(AR.north west)!0.62!(AR.south west)$);
+  \coordinate (ARin3) at ($(AR.north west)!0.82!(AR.south west)$);
+
+  \draw[->, line width=0.9pt, DarkGreen] (GRAD0.east) -- ++(0.35, 0) |- (ARin0);
+  \draw[->, line width=0.9pt, DarkGreen] (GRAD1.east) -- ++(0.5, 0) |- (ARin1);
+  \draw[->, line width=0.9pt, DarkGreen] (GRAD2.east) -- ++(0.5, 0) |- (ARin2);
+  \draw[->, line width=0.9pt, DarkGreen] (GRAD3.east) -- ++(0.35, 0) |- (ARin3);
+
+  % Synchronized gradient broadcast arrows to Updates
+  \coordinate (ARout0) at ($(AR.north east)!0.18!(AR.south east)$);
+  \coordinate (ARout1) at ($(AR.north east)!0.38!(AR.south east)$);
+  \coordinate (ARout2) at ($(AR.north east)!0.62!(AR.south east)$);
+  \coordinate (ARout3) at ($(AR.north east)!0.82!(AR.south east)$);
+
+  \draw[->, line width=0.9pt, SteelBlue] (ARout0) -- ++(0.35, 0) |- (UPD0.west);
+  \draw[->, line width=0.9pt, SteelBlue] (ARout1) -- ++(0.5, 0) |- (UPD1.west);
+  \draw[->, line width=0.9pt, SteelBlue] (ARout2) -- ++(0.5, 0) |- (UPD2.west);
+  \draw[->, line width=0.9pt, SteelBlue] (ARout3) -- ++(0.35, 0) |- (UPD3.west);
+
+  % Footer: Synchronization Invariant
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=DarkGreen!70,
+    fill=GreenFill!50,
+    line width=0.8pt,
+    inner sep=5.5pt,
+    align=center,
+    text width=14.8cm
+  ] at (7.6, 0.7) {
+    \textbf{\footnotesize Exact Synchronization Invariant:}\;
+    \scriptsize Synchronized gradient averaging guarantees that all $N$ workers maintain identical parameters:\;
+    $\theta^{(t+1)}_0 = \theta^{(t+1)}_1 = \theta^{(t+1)}_2 = \theta^{(t+1)}_3$.
+  };
+
+\end{tikzpicture}
+```
 
 :::
 
-The critical synchronization point is stage 4 (@fig-dist-train-data-parallelism): AllReduce must complete before any GPU can update parameters, making gradient communication the dominant bottleneck as the device count grows.
+The critical synchronization point occurs at stage 4 (@fig-dist-train-data-parallelism), where the AllReduce collective must complete across all worker ranks before any device executes its parameter update, establishing network bisection bandwidth as the binding scaling bottleneck.
 
 #### Dataset splitting {#sec-distributed-training-systems-systems-dataset-splitting-1edf}
 
@@ -550,7 +1037,180 @@ Stepping back from that specific cluster to the design space, @fig-coll-comm con
 
 ::: {#fig-coll-comm fig-env="figure" fig-pos="htb" fig-cap="**Gradient synchronization topologies**: The panels compare three communication patterns. (a) Ring AllReduce distributes bandwidth evenly across links but has linear latency scaling. (b) A parameter server centralizes traffic and creates a server bottleneck. (c) An All-to-All mesh completes an exchange in one communication round, but its link count grows quadratically, making the topology impractical beyond small groups." fig-alt="Three communication topology diagrams. (a) Ring AllReduce with 4 GPUs in circular topology. (b) Parameter Server with central PS node connected to 4 workers creating bottleneck. (c) All-to-All mesh with 4 GPUs fully connected by 6 links."}
 
-![](images/svg/gradient-sync-topologies.svg)
+```{.tikz}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  panel title/.style={
+    font=\bfseries\footnotesize,
+    text=TextDark,
+    align=center
+  },
+  node box/.style={
+    rectangle,
+    rounded corners=3.5pt,
+    line width=0.8pt,
+    align=center,
+    font=\scriptsize\bfseries,
+    inner sep=3pt
+  },
+  card/.style={
+    rectangle,
+    rounded corners=5pt,
+    line width=0.85pt,
+    inner sep=6pt,
+    align=left,
+    text width=4.3cm,
+    font=\scriptsize
+  },
+  status badge/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.65pt,
+    align=center,
+    font=\bfseries\scriptsize,
+    inner sep=3pt
+  }
+]
+
+  % Color definitions
+  \definecolor{NavyBlue}{RGB}{20,45,85}
+  \definecolor{SteelBlue}{RGB}{40,90,140}
+  \definecolor{LightBlue}{RGB}{240,245,252}
+  \definecolor{RedLine}{RGB}{185,45,45}
+  \definecolor{RedFill}{RGB}{253,242,242}
+  \definecolor{GreenLine}{RGB}{35,135,75}
+  \definecolor{GreenFill}{RGB}{240,249,244}
+  \definecolor{DarkGreen}{RGB}{20,110,60}
+  \definecolor{OrangeLine}{RGB}{215,105,15}
+  \definecolor{OrangeL}{RGB}{254,246,233}
+  \definecolor{VioletLine}{RGB}{125,45,150}
+  \definecolor{VioletL}{RGB}{248,240,252}
+  \definecolor{CardBorder}{RGB}{215,222,230}
+  \definecolor{CardFill}{RGB}{248,250,253}
+  \definecolor{TextDark}{RGB}{25,35,45}
+  \definecolor{TextMuted}{RGB}{95,105,115}
+
+  % ===========================================================
+  % VERTICAL SEPARATORS
+  % ===========================================================
+  \draw[dashed, gray!30, thin] (5.125, 7.8) -- (5.125, 0.1);
+  \draw[dashed, gray!30, thin] (10.275, 7.8) -- (10.275, 0.1);
+
+  % ===========================================================
+  % PANEL (a): RING ALLREDUCE
+  % ===========================================================
+  \node[panel title] at (2.55, 7.55) {\textbf{(a) Ring AllReduce}};
+
+  % 4 GPU Nodes: 0 -> 1 -> 2 -> 3 -> 0
+  \node[node box, draw=SteelBlue, fill=LightBlue, minimum width=1.35cm, minimum height=0.75cm] (R_G0) at (1.4, 6.15) {GPU 0};
+  \node[node box, draw=SteelBlue, fill=LightBlue, minimum width=1.35cm, minimum height=0.75cm] (R_G1) at (3.7, 6.15) {GPU 1};
+  \node[node box, draw=SteelBlue, fill=LightBlue, minimum width=1.35cm, minimum height=0.75cm] (R_G2) at (3.7, 4.35) {GPU 2};
+  \node[node box, draw=SteelBlue, fill=LightBlue, minimum width=1.35cm, minimum height=0.75cm] (R_G3) at (1.4, 4.35) {GPU 3};
+
+  % Clockwise ring arrows
+  \draw[->, line width=1.2pt, SteelBlue] (R_G0.east) -- (R_G1.west)
+    node[midway, above=1pt, font=\tiny\bfseries, text=SteelBlue] {chunk 0};
+  \draw[->, line width=1.2pt, SteelBlue] (R_G1.south) -- (R_G2.north)
+    node[midway, right=1pt, font=\tiny\bfseries, text=SteelBlue] {chunk 1};
+  \draw[->, line width=1.2pt, SteelBlue] (R_G2.west) -- (R_G3.east)
+    node[midway, below=1pt, font=\tiny\bfseries, text=SteelBlue] {chunk 2};
+  \draw[->, line width=1.2pt, SteelBlue] (R_G3.north) -- (R_G0.south)
+    node[midway, left=1pt, font=\tiny\bfseries, text=SteelBlue] {chunk 3};
+
+  % Card (a)
+  \node[card, draw=SteelBlue!80, fill=white, minimum height=2.45cm] (CARD_A) at (2.55, 2.05) {
+    \centering\textbf{\normalsize\textcolor{SteelBlue}{Bandwidth Optimal}}\\[5pt]
+    \raggedright
+    \textbf{Volume:} $\tfrac{2(N-1)}{N} M$ per GPU\\[3pt]
+    \textbf{Latency:} $2(N-1)$ network steps\\[3pt]
+    \textbf{BW Util.:} \textcolor{DarkGreen}{\textbf{$\approx 100\%$}} full bidirectional
+  };
+  \node[status badge, draw=SteelBlue, fill=LightBlue, text=SteelBlue, minimum width=4.3cm, minimum height=0.52cm] at (2.55, 0.45) {
+    \ding{51}\; Default for NCCL \& PyTorch DDP
+  };
+
+  % ===========================================================
+  % PANEL (b): PARAMETER SERVER
+  % ===========================================================
+  \node[panel title] at (7.7, 7.55) {\textbf{(b) Parameter Server}};
+
+  % Central Bottleneck Badge
+  \node[status badge, draw=RedLine, fill=RedFill, text=RedLine, font=\bfseries\tiny, inner sep=2pt] at (7.7, 7.12) {
+    Central Bottleneck
+  };
+
+  % Parameter Server Node
+  \node[node box, draw=RedLine, fill=RedFill, minimum width=2.4cm, minimum height=0.75cm] (PS) at (7.7, 6.15) {
+    \textbf{Parameter Server}
+  };
+
+  % 4 Workers
+  \node[node box, draw=DarkGreen, fill=GreenFill, minimum width=0.85cm, minimum height=0.65cm] (W0) at (6.0, 4.35) {W0};
+  \node[node box, draw=DarkGreen, fill=GreenFill, minimum width=0.85cm, minimum height=0.65cm] (W1) at (7.1, 4.35) {W1};
+  \node[node box, draw=DarkGreen, fill=GreenFill, minimum width=0.85cm, minimum height=0.65cm] (W2) at (8.3, 4.35) {W2};
+  \node[node box, draw=DarkGreen, fill=GreenFill, minimum width=0.85cm, minimum height=0.65cm] (W3) at (9.4, 4.35) {W3};
+
+  % Clean Bidirectional Push/Pull Links
+  \draw[<->, line width=1.1pt, RedLine!85] (W0.north) -- (PS.210);
+  \draw[<->, line width=1.1pt, RedLine!85] (W1.north) -- (PS.235);
+  \draw[<->, line width=1.1pt, RedLine!85] (W2.north) -- (PS.305);
+  \draw[<->, line width=1.1pt, RedLine!85] (W3.north) -- (PS.330);
+
+  % Flow Badges
+  \node[font=\tiny\bfseries, text=RedLine, fill=white, inner sep=1pt, rounded corners=1pt] at (6.25, 5.35) {push grads $\uparrow$};
+  \node[font=\tiny\bfseries, text=SteelBlue, fill=white, inner sep=1pt, rounded corners=1pt] at (9.15, 5.35) {pull params $\downarrow$};
+
+  % Card (b)
+  \node[card, draw=RedLine!80, fill=white, minimum height=2.45cm] (CARD_B) at (7.7, 2.05) {
+    \centering\textbf{\normalsize\textcolor{RedLine}{Centralized (Legacy)}}\\[5pt]
+    \raggedright
+    \textbf{Volume:} $2M$ per worker\\[3pt]
+    \textbf{Latency:} $\mathcal{O}(1)$ rounds (2 trips)\\[3pt]
+    \textbf{BW Util.:} \textcolor{RedLine}{\textbf{Limited}} by PS network NIC
+  };
+  \node[status badge, draw=RedLine, fill=RedFill, text=RedLine, minimum width=4.3cm, minimum height=0.52cm] at (7.7, 0.45) {
+    \ding{55}\; DistBelief / Parameter Server
+  };
+
+  % ===========================================================
+  % PANEL (c): ALL-TO-ALL MESH
+  % ===========================================================
+  \node[panel title] at (12.85, 7.55) {\textbf{(c) All-to-All Mesh}};
+
+  % 4 GPU Nodes in Grid
+  \node[node box, draw=OrangeLine, fill=OrangeL, minimum width=1.35cm, minimum height=0.75cm] (M_G0) at (11.7, 6.15) {GPU 0};
+  \node[node box, draw=OrangeLine, fill=OrangeL, minimum width=1.35cm, minimum height=0.75cm] (M_G1) at (14.0, 6.15) {GPU 1};
+  \node[node box, draw=OrangeLine, fill=OrangeL, minimum width=1.35cm, minimum height=0.75cm] (M_G2) at (11.7, 4.35) {GPU 2};
+  \node[node box, draw=OrangeLine, fill=OrangeL, minimum width=1.35cm, minimum height=0.75cm] (M_G3) at (14.0, 4.35) {GPU 3};
+
+  % All 6 Bidirectional Mesh Links
+  \draw[<->, line width=1.0pt, OrangeLine] (M_G0) -- (M_G1);
+  \draw[<->, line width=1.0pt, OrangeLine] (M_G2) -- (M_G3);
+  \draw[<->, line width=1.0pt, OrangeLine] (M_G0) -- (M_G2);
+  \draw[<->, line width=1.0pt, OrangeLine] (M_G1) -- (M_G3);
+  \draw[<->, line width=1.0pt, OrangeLine] (M_G0) -- (M_G3);
+  \draw[<->, line width=1.0pt, OrangeLine] (M_G1) -- (M_G2);
+
+  % Link Count Badge in center
+  \node[status badge, draw=OrangeLine, fill=white, text=OrangeLine, font=\bfseries\tiny, inner sep=2pt] at (12.85, 5.25) {
+    $\binom{N}{2} = 6$ links
+  };
+
+  % Card (c)
+  \node[card, draw=OrangeLine!80, fill=white, minimum height=2.45cm] (CARD_C) at (12.85, 2.05) {
+    \centering\textbf{\normalsize\textcolor{OrangeLine}{Fully Connected Mesh}}\\[5pt]
+    \raggedright
+    \textbf{Volume:} $M(N-1)$ total network traffic\\[3pt]
+    \textbf{Latency:} $\mathcal{O}(1)$ rounds\\[3pt]
+    \textbf{BW Util.:} \textcolor{OrangeLine}{\textbf{$\mathcal{O}(N^2)$}} link explosion
+  };
+  \node[status badge, draw=OrangeLine, fill=OrangeL, text=OrangeLine, minimum width=4.3cm, minimum height=0.52cm] at (12.85, 0.45) {
+    \ding{55}\; Impractical beyond 8 nodes
+  };
+
+\end{tikzpicture}
+```
 
 :::
 
@@ -580,8 +1240,230 @@ The key trade-offs across synchronization models are summarized in @tbl-sync-mod
 
 The same trade-off becomes clearer when the schedules are placed on a timeline.
 
-::: {#fig-sync-model-timeline fig-env="figure" fig-pos="htb" fig-cap="**Distributed synchronization models**: The timelines compare three synchronization strategies. (A) Bulk synchronous parallel (BSP) forces all workers to wait at a global barrier every step. (B) Stale synchronous parallel (SSP) allows workers to proceed up to $s$ steps ahead of the slowest worker. (C) Asynchronous SGD eliminates barriers, increasing throughput at the cost of gradient staleness." fig-alt="Timeline diagram with three panels. Top: BSP with global barriers. Middle: SSP with bounded staleness slack. Bottom: Asynchronous with independent workers and overlapping steps."}
-![](images/svg/sync-model-timeline.svg){width=100%}
+::: {#fig-sync-model-timeline fig-env="figure" fig-pos="htb" fig-cap="**Distributed synchronization models**: The timelines compare three synchronization strategies. (a) Bulk synchronous parallel (BSP) forces all workers to wait at a global barrier every step. (b) Stale synchronous parallel (SSP) allows workers to proceed up to $s$ steps ahead of the slowest worker. (c) Asynchronous SGD eliminates barriers, increasing throughput at the cost of gradient staleness." fig-alt="Timeline diagram with three panels. Top: BSP with global barriers. Middle: SSP with bounded staleness slack. Bottom: Asynchronous with independent workers and overlapping steps."}
+
+```{.tikz}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  scale=1.0,
+  panel card/.style={
+    draw=CardBorder,
+    fill=white,
+    rounded corners=5pt,
+    line width=0.8pt
+  },
+  badge/.style={
+    rounded corners=2.5pt,
+    font=\bfseries\tiny,
+    inner sep=2.5pt,
+    align=center
+  },
+  worker label/.style={
+    font=\bfseries\scriptsize,
+    text=TextDark,
+    anchor=east
+  },
+  compute block/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=SteelBlue,
+    fill=LightBlue,
+    line width=0.7pt,
+    inner sep=0pt
+  },
+  wait block/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=RedLine,
+    fill=RedFill,
+    line width=0.7pt,
+    inner sep=0pt
+  },
+  ssp pause/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=OrangeLine,
+    fill=OrangeL,
+    line width=0.7pt,
+    inner sep=0pt
+  }
+]
+
+  % Color definitions
+  \definecolor{NavyBlue}{RGB}{20,45,85}
+  \definecolor{SteelBlue}{RGB}{40,90,140}
+  \definecolor{LightBlue}{RGB}{240,245,252}
+  \definecolor{RedLine}{RGB}{185,45,45}
+  \definecolor{RedFill}{RGB}{253,242,242}
+  \definecolor{GreenLine}{RGB}{35,135,75}
+  \definecolor{GreenFill}{RGB}{240,249,244}
+  \definecolor{DarkGreen}{RGB}{20,110,60}
+  \definecolor{OrangeLine}{RGB}{215,105,15}
+  \definecolor{OrangeL}{RGB}{254,246,233}
+  \definecolor{VioletLine}{RGB}{125,45,150}
+  \definecolor{VioletL}{RGB}{248,240,252}
+  \definecolor{CardBorder}{RGB}{215,222,230}
+  \definecolor{CardFill}{RGB}{248,250,253}
+  \definecolor{TextDark}{RGB}{25,35,45}
+  \definecolor{TextMuted}{RGB}{95,105,115}
+
+  % ===========================================================
+  % TIME AXIS AT TOP
+  % ===========================================================
+  \draw[->, line width=0.9pt, TextMuted] (2.2, 11.0) -- (14.2, 11.0) node[right=3pt, font=\scriptsize\bfseries, text=TextDark] {Time};
+  \foreach \x/\t in {2.2/0, 4.54/1, 6.88/2, 9.22/3, 11.56/4, 13.9/5} {
+    \draw[line width=0.8pt, TextMuted] (\x, 10.9) -- (\x, 11.1);
+    \node[above=1pt, font=\tiny\bfseries, text=TextMuted] at (\x, 11.1) {$t = \t$};
+  }
+
+  % ===========================================================
+  % PANEL (a): BSP (s = 0)
+  % ===========================================================
+  \node[panel card, minimum width=14.4cm, minimum height=3.2cm, anchor=north west] at (0, 10.6) {};
+
+  % Header banner
+  \fill[fill=SteelBlue!12, rounded corners=4pt] (0.05, 10.55) rectangle (14.35, 10.05);
+  \node[anchor=west, font=\bfseries\footnotesize, text=NavyBlue] at (0.3, 10.3) {(a) Bulk Synchronous Parallel (BSP) $\boldsymbol{\cdot s = 0}$};
+  \node[anchor=west, font=\tiny, text=TextMuted] at (6.9, 10.3) {fast workers idle at every barrier};
+  \node[badge, fill=NavyBlue, text=white, anchor=east] at (14.1, 10.3) {EXACT SGD};
+
+  % Worker rows
+  \node[worker label] at (2.05, 9.55) {W1};
+  \node[worker label] at (2.05, 8.95) {W2};
+  \node[worker label, text=RedLine] at (2.05, 8.35) {W3 (Straggler)};
+  \node[worker label] at (2.05, 7.75) {W4};
+
+  % Step barriers (red dashed lines)
+  \foreach \x in {4.54, 6.88, 9.22, 11.56, 13.9} {
+    \draw[dashed, line width=1.0pt, RedLine!80] (\x, 9.9) -- (\x, 7.5);
+  }
+
+  % Step blocks for BSP (5 steps, width = 2.34cm each)
+  \foreach \step/\xstart in {0/2.2, 1/4.54, 2/6.88, 3/9.22, 4/11.56} {
+    % W1
+    \node[compute block, minimum width=1.48cm, minimum height=0.45cm, anchor=west] at (\xstart, 9.55) {
+      \ifnum\step=0\tiny\textcolor{SteelBlue}{Compute}\fi
+    };
+    \node[wait block, minimum width=0.84cm, minimum height=0.45cm, anchor=west] at (\xstart + 1.49, 9.55) {
+      \tiny\bfseries\textcolor{RedLine}{wait}
+    };
+    % W2
+    \node[compute block, minimum width=1.48cm, minimum height=0.45cm, anchor=west] at (\xstart, 8.95) {
+      \ifnum\step=0\tiny\textcolor{SteelBlue}{Compute}\fi
+    };
+    \node[wait block, minimum width=0.84cm, minimum height=0.45cm, anchor=west] at (\xstart + 1.49, 8.95) {
+      \tiny\bfseries\textcolor{RedLine}{wait}
+    };
+    % W3 (Straggler)
+    \node[compute block, draw=RedLine, fill=SteelBlue!15, minimum width=2.33cm, minimum height=0.45cm, anchor=west] at (\xstart, 8.35) {
+      \ifnum\step=0\tiny\bfseries\textcolor{NavyBlue}{Compute (Slow)}\fi
+    };
+    % W4
+    \node[compute block, minimum width=1.48cm, minimum height=0.45cm, anchor=west] at (\xstart, 7.75) {
+      \ifnum\step=0\tiny\textcolor{SteelBlue}{Compute}\fi
+    };
+    \node[wait block, minimum width=0.84cm, minimum height=0.45cm, anchor=west] at (\xstart + 1.49, 7.75) {
+      \tiny\bfseries\textcolor{RedLine}{wait}
+    };
+  }
+
+  % ===========================================================
+  % PANEL (b): SSP (s = 1)
+  % ===========================================================
+  \node[panel card, minimum width=14.4cm, minimum height=3.2cm, anchor=north west] at (0, 7.1) {};
+
+  % Header banner
+  \fill[fill=OrangeLine!12, rounded corners=4pt] (0.05, 7.05) rectangle (14.35, 6.55);
+  \node[anchor=west, font=\bfseries\footnotesize, text=OrangeLine!90!black] at (0.3, 6.8) {(b) Stale Synchronous Parallel (SSP) $\boldsymbol{\cdot s = 1}$};
+  \node[anchor=west, font=\tiny, text=TextMuted] at (6.9, 6.8) {one step of slack, then wait};
+  \node[badge, fill=OrangeLine, text=white, anchor=east] at (14.1, 6.8) {BOUNDED DRIFT};
+
+  % Worker rows
+  \node[worker label] at (2.05, 6.05) {W1};
+  \node[worker label] at (2.05, 5.45) {W2};
+  \node[worker label, text=OrangeLine!90!black] at (2.05, 4.85) {W3 (Slow)};
+  \node[worker label] at (2.05, 4.25) {W4};
+
+  % SSP fast workers: 2 compute blocks then s<=1 pause, perfectly budgeted
+  \foreach \y in {6.05, 5.45, 4.25} {
+    % Cycle 1 (steps 0, 1)
+    \node[compute block, minimum width=1.68cm, minimum height=0.45cm, anchor=west] at (2.20, \y) {
+      \tiny\textcolor{SteelBlue}{Compute}
+    };
+    \node[compute block, minimum width=1.68cm, minimum height=0.45cm, anchor=west] at (3.90, \y) {};
+    \node[ssp pause, minimum width=0.42cm, minimum height=0.45cm, anchor=west] at (5.60, \y) {\tiny\bfseries $s{\le}1$};
+
+    % Cycle 2 (steps 2, 3)
+    \node[compute block, minimum width=1.68cm, minimum height=0.45cm, anchor=west] at (6.04, \y) {};
+    \node[compute block, minimum width=1.68cm, minimum height=0.45cm, anchor=west] at (7.74, \y) {};
+    \node[ssp pause, minimum width=0.42cm, minimum height=0.45cm, anchor=west] at (9.44, \y) {\tiny\bfseries $s{\le}1$};
+
+    % Cycle 3 (steps 4, 5)
+    \node[compute block, minimum width=1.68cm, minimum height=0.45cm, anchor=west] at (9.88, \y) {};
+    \node[compute block, minimum width=1.68cm, minimum height=0.45cm, anchor=west] at (11.58, \y) {};
+    \node[ssp pause, minimum width=0.42cm, minimum height=0.45cm, anchor=west] at (13.28, \y) {\tiny\bfseries $s{\le}1$};
+  }
+
+  % W3 slow workers (matches clock rate 2.34cm)
+  \foreach \step/\xstart in {0/2.2, 1/4.54, 2/6.88, 3/9.22, 4/11.56} {
+    \node[compute block, draw=OrangeLine, fill=OrangeL!50, minimum width=2.32cm, minimum height=0.45cm, anchor=west] at (\xstart, 4.85) {
+      \tiny\textcolor{OrangeLine!90!black}{Compute (Slow)}
+    };
+  }
+
+  % ===========================================================
+  % PANEL (c): ASP (s = \infty)
+  % ===========================================================
+  \node[panel card, minimum width=14.4cm, minimum height=3.2cm, anchor=north west] at (0, 3.6) {};
+
+  % Header banner
+  \fill[fill=DarkGreen!12, rounded corners=4pt] (0.05, 3.55) rectangle (14.35, 3.05);
+  \node[anchor=west, font=\bfseries\footnotesize, text=DarkGreen] at (0.3, 3.3) {(c) Asynchronous SGD (ASP) $\boldsymbol{\cdot s = \infty}$};
+  \node[anchor=west, font=\tiny, text=TextMuted] at (6.9, 3.3) {no barrier, stale gradients};
+  \node[badge, fill=DarkGreen, text=white, anchor=east] at (14.1, 3.3) {MAX THROUGHPUT};
+
+  % Worker rows
+  \node[worker label] at (2.05, 2.55) {W1};
+  \node[worker label] at (2.05, 1.95) {W2};
+  \node[worker label] at (2.05, 1.35) {W3};
+  \node[worker label] at (2.05, 0.75) {W4};
+
+  % Time horizon marker in ASP
+  \draw[dashed, line width=0.8pt, DarkGreen!50] (13.9, 2.8) -- (13.9, 0.5);
+
+  % W1: Fast (duration 1.28cm, 9 blocks fit within 11.7cm)
+  \foreach \i in {0,...,8} {
+    \pgfmathsetmacro{\xpos}{2.2 + \i*1.295}
+    \node[compute block, draw=DarkGreen!80, fill=GreenFill, minimum width=1.275cm, minimum height=0.45cm, anchor=west] at (\xpos, 2.55) {
+      \ifnum\i=0\tiny\textcolor{DarkGreen}{Compute}\fi
+    };
+  }
+  % W2: Medium-Fast (duration 1.64cm, 7 blocks fit within 11.7cm)
+  \foreach \i in {0,...,6} {
+    \pgfmathsetmacro{\xpos}{2.2 + \i*1.655}
+    \node[compute block, draw=DarkGreen!80, fill=GreenFill, minimum width=1.635cm, minimum height=0.45cm, anchor=west] at (\xpos, 1.95) {
+      \ifnum\i=0\tiny\textcolor{DarkGreen}{Compute}\fi
+    };
+  }
+  % W3: Slow (duration 2.32cm, 5 blocks fit within 11.7cm)
+  \foreach \i in {0,...,4} {
+    \pgfmathsetmacro{\xpos}{2.2 + \i*2.335}
+    \node[compute block, draw=DarkGreen!80, fill=GreenFill, minimum width=2.315cm, minimum height=0.45cm, anchor=west] at (\xpos, 1.35) {
+      \ifnum\i=0\tiny\textcolor{DarkGreen}{Compute}\fi
+    };
+  }
+  % W4: Medium (duration 1.92cm, 6 blocks fit within 11.7cm)
+  \foreach \i in {0,...,5} {
+    \pgfmathsetmacro{\xpos}{2.2 + \i*1.935}
+    \node[compute block, draw=DarkGreen!80, fill=GreenFill, minimum width=1.915cm, minimum height=0.45cm, anchor=west] at (\xpos, 0.75) {
+      \ifnum\i=0\tiny\textcolor{DarkGreen}{Compute}\fi
+    };
+  }
+
+\end{tikzpicture}
+```
+
 :::
 
 The choice of synchronization model directly affects both system throughput and model convergence. Training teams often use BSP for controlled final runs because synchronous steps simplify comparison and replay, while exploring SSP or async approaches during hyperparameter search where throughput can outweigh exact update equivalence. Reproducible replay still requires deterministic sampling, kernels, collective ordering, and restored random state.
@@ -978,7 +1860,185 @@ Per-GPU Memory:
 ZeRO addresses this redundancy through progressive sharding, as @fig-zero-memory illustrates and @tbl-zero-stages summarizes.
 
 ::: {#fig-zero-memory fig-env="figure" fig-pos="htb" fig-cap="**ZeRO memory reduction**: Standard data parallelism (DDP) replicates all model states across every GPU. ZeRO progressively partitions these states: ZeRO-1 shards optimizer states, ZeRO-2 adds gradient sharding, and ZeRO-3 shards the parameters themselves. ZeRO-3 achieves linear memory scaling, enabling models with 100B+ parameters to fit on accelerators that could not hold the replicated state." fig-alt="Bar chart comparing per-GPU memory usage across DDP, ZeRO-1, ZeRO-2, and ZeRO-3 with decreasing memory footprint."}
-![](images/svg/zero-memory-partitioning.svg)
+```{.tikz}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  legend item/.style={
+    font=\scriptsize,
+    text=TextDark
+  },
+  header card/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=0.8pt,
+    minimum width=2.4cm,
+    minimum height=0.75cm,
+    align=center
+  },
+  total pill/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=0.8pt,
+    minimum width=2.4cm,
+    minimum height=0.8cm,
+    align=center
+  }
+]
+
+  % Color definitions
+  \definecolor{NavyBlue}{RGB}{20,45,85}
+  \definecolor{SteelBlue}{RGB}{40,90,140}
+  \definecolor{LightBlue}{RGB}{240,245,252}
+  \definecolor{RedLine}{RGB}{185,45,45}
+  \definecolor{RedFill}{RGB}{253,242,242}
+  \definecolor{GreenLine}{RGB}{35,135,75}
+  \definecolor{GreenFill}{RGB}{240,249,244}
+  \definecolor{DarkGreen}{RGB}{20,110,60}
+  \definecolor{OrangeLine}{RGB}{215,105,15}
+  \definecolor{OrangeL}{RGB}{254,246,233}
+  \definecolor{CardBorder}{RGB}{215,222,230}
+  \definecolor{CardFill}{RGB}{248,250,253}
+  \definecolor{TextDark}{RGB}{25,35,45}
+  \definecolor{TextMuted}{RGB}{95,105,115}
+
+  % ===========================================================
+  % TOP LEGEND
+  % ===========================================================
+  \node[draw=CardBorder, fill=white, rounded corners=4pt, line width=0.8pt, minimum width=13.8cm, minimum height=0.75cm] at (7.0, 7.6) {};
+
+  \node[draw=SteelBlue, fill=LightBlue, rounded corners=2pt, minimum width=0.35cm, minimum height=0.35cm] at (1.0, 7.6) {};
+  \node[legend item, anchor=west] at (1.3, 7.6) {\textbf{Weights} (FP16, 2\,B/param)};
+
+  \node[draw=OrangeLine, fill=OrangeL, rounded corners=2pt, minimum width=0.35cm, minimum height=0.35cm] at (5.1, 7.6) {};
+  \node[legend item, anchor=west] at (5.4, 7.6) {\textbf{Gradients} (FP16, 2\,B/param)};
+
+  \node[draw=DarkGreen, fill=GreenFill, rounded corners=2pt, minimum width=0.35cm, minimum height=0.35cm] at (9.1, 7.6) {};
+  \node[legend item, anchor=west] at (9.4, 7.6) {\textbf{Optimizer States} (FP32, 12\,B/param)};
+
+  % ===========================================================
+  % AXIS & GRIDLINES
+  % ===========================================================
+  % y = 0 GB at y = 1.6 cm, 120 GB at y = 6.4 cm (scale: 1 GB = 0.04 cm)
+  \draw[line width=0.8pt, TextMuted] (1.1, 1.6) -- (13.7, 1.6);
+
+  \foreach \gb/\y in {0/1.6, 20/2.4, 40/3.2, 60/4.0, 80/4.8, 100/5.6, 120/6.4} {
+    \draw[dashed, gray!25, thin] (1.1, \y) -- (13.7, \y);
+    \node[anchor=east, font=\tiny\bfseries, text=TextMuted] at (1.0, \y) {\gb};
+  }
+
+  \node[rotate=90, font=\bfseries\footnotesize, text=TextDark] at (0.35, 4.0) {Memory per GPU (GB)};
+
+  % ===========================================================
+  % COLUMN 1: DDP (112 GB)
+  % ===========================================================
+  % Header
+  \node[header card, draw=CardBorder, fill=CardFill] at (2.4, 6.85) {
+    \textbf{\footnotesize DDP}\\[-1pt]
+    \tiny\textcolor{TextMuted}{Baseline Replicated}
+  };
+
+  % Stack:
+  % OS: 84 GB -> from 1.6 to 4.96
+  \draw[draw=DarkGreen, fill=GreenFill, rounded corners=1.5pt, line width=0.8pt] (1.4, 1.6) rectangle (3.4, 4.96);
+  \node[font=\bfseries\scriptsize, text=DarkGreen] at (2.4, 3.28) {OS (84\,GB)};
+
+  % G: 14 GB -> from 4.96 to 5.52
+  \draw[draw=OrangeLine, fill=OrangeL, rounded corners=1.5pt, line width=0.8pt] (1.4, 4.96) rectangle (3.4, 5.52);
+  \node[font=\bfseries\tiny, text=OrangeLine!90!black] at (2.4, 5.24) {G (14\,GB)};
+
+  % W: 14 GB -> from 5.52 to 6.08
+  \draw[draw=SteelBlue, fill=LightBlue, rounded corners=1.5pt, line width=0.8pt] (1.4, 5.52) rectangle (3.4, 6.08);
+  \node[font=\bfseries\tiny, text=SteelBlue] at (2.4, 5.80) {W (14\,GB)};
+
+  % Total Pill
+  \node[total pill, draw=CardBorder, fill=white] at (2.4, 0.95) {
+    \textbf{\footnotesize 112\,GB}\\[-1pt]
+    \tiny\textcolor{TextMuted}{1.0$\times$ Baseline}
+  };
+
+  % ===========================================================
+  % COLUMN 2: ZeRO-1 (~29.3 GB)
+  % ===========================================================
+  % Header
+  \node[header card, draw=OrangeLine, fill=OrangeL] at (5.3, 6.85) {
+    \textbf{\footnotesize\textcolor{OrangeLine!90!black}{ZeRO-1}}\\[-1pt]
+    \tiny\textcolor{OrangeLine!80!black}{Shard Opt States}
+  };
+
+  % Stack:
+  % OS/N: 1.31 GB -> from 1.6 to 1.78
+  \draw[draw=DarkGreen, fill=GreenFill, rounded corners=1.5pt, line width=0.8pt] (4.4, 1.6) rectangle (6.2, 1.78);
+  \node[font=\tiny\bfseries, text=DarkGreen, anchor=west] at (6.28, 1.69) {$\leftarrow$ OS/$N$};
+
+  % G: 14 GB -> from 1.78 to 2.34
+  \draw[draw=OrangeLine, fill=OrangeL, rounded corners=1.5pt, line width=0.8pt] (4.4, 1.78) rectangle (6.2, 2.34);
+  \node[font=\bfseries\tiny, text=OrangeLine!90!black] at (5.3, 2.06) {G (14\,GB)};
+
+  % W: 14 GB -> from 2.34 to 2.90
+  \draw[draw=SteelBlue, fill=LightBlue, rounded corners=1.5pt, line width=0.8pt] (4.4, 2.34) rectangle (6.2, 2.90);
+  \node[font=\bfseries\tiny, text=SteelBlue] at (5.3, 2.62) {W (14\,GB)};
+
+  % Total Pill
+  \node[total pill, draw=OrangeLine, fill=OrangeL!50] at (5.3, 0.95) {
+    \textbf{\footnotesize\textcolor{OrangeLine!90!black}{$\approx$ 29.3\,GB}}\\[-1pt]
+    \tiny\bfseries\textcolor{OrangeLine!90!black}{3.8$\times$ Reduction}
+  };
+
+  % ===========================================================
+  % COLUMN 3: ZeRO-2 (~15.5 GB)
+  % ===========================================================
+  % Header
+  \node[header card, draw=SteelBlue, fill=LightBlue] at (8.2, 6.85) {
+    \textbf{\footnotesize\textcolor{SteelBlue}{ZeRO-2}}\\[-1pt]
+    \tiny\textcolor{SteelBlue}{+ Shard Gradients}
+  };
+
+  % Stack:
+  % (OS+G)/N: 1.53 GB -> from 1.6 to 1.82
+  \draw[draw=DarkGreen, fill=GreenFill, rounded corners=1.5pt, line width=0.8pt] (7.3, 1.6) rectangle (9.1, 1.82);
+  \node[font=\tiny\bfseries, text=DarkGreen, anchor=west] at (9.18, 1.71) {$\leftarrow$ (OS+G)/$N$};
+
+  % W: 14 GB -> from 1.82 to 2.38
+  \draw[draw=SteelBlue, fill=LightBlue, rounded corners=1.5pt, line width=0.8pt] (7.3, 1.82) rectangle (9.1, 2.38);
+  \node[font=\bfseries\tiny, text=SteelBlue] at (8.2, 2.10) {W (14\,GB)};
+
+  % Total Pill
+  \node[total pill, draw=SteelBlue, fill=LightBlue!70] at (8.2, 0.95) {
+    \textbf{\footnotesize\textcolor{SteelBlue}{$\approx$ 15.5\,GB}}\\[-1pt]
+    \tiny\bfseries\textcolor{SteelBlue}{7.2$\times$ Reduction}
+  };
+
+  % ===========================================================
+  % COLUMN 4: ZeRO-3 (~1.75 GB)
+  % ===========================================================
+  % Header
+  \node[header card, draw=DarkGreen, fill=GreenFill] at (11.4, 6.85) {
+    \textbf{\footnotesize\textcolor{DarkGreen}{ZeRO-3 / FSDP}}\\[-1pt]
+    \tiny\textcolor{DarkGreen}{+ Shard Parameters}
+  };
+
+  % Stack:
+  % (W+G+OS)/N: 1.75 GB -> from 1.6 to 1.86
+  \draw[draw=DarkGreen, fill=GreenFill, rounded corners=1.5pt, line width=0.8pt] (10.5, 1.6) rectangle (12.3, 1.86);
+  \node[font=\tiny\bfseries, text=DarkGreen, anchor=west] at (12.38, 1.73) {$\leftarrow$ State/$N$};
+  \node[font=\tiny\bfseries, text=DarkGreen] at (11.4, 2.25) {Fully Sharded};
+
+  % Total Pill
+  \node[total pill, draw=DarkGreen, fill=GreenFill!80] at (11.4, 0.95) {
+    \textbf{\footnotesize\textcolor{DarkGreen}{$\approx$ 1.75\,GB}}\\[-1pt]
+    \tiny\bfseries\textcolor{DarkGreen}{64$\times$ Linear Scaling}
+  };
+
+  % ===========================================================
+  % FOOTER STRIP
+  % ===========================================================
+  \node[draw=CardBorder, fill=CardFill, rounded corners=4pt, line width=0.7pt, minimum width=13.8cm, minimum height=0.55cm] at (7.0, 0.25) {
+    \footnotesize\textmd{Reference Benchmark: 7B FP16 Model (16\,B/param under AdamW) Sharded Across $N = 64$ Accelerators}
+  };
+
+\end{tikzpicture}
+```
 :::
 
 | **Stage**       |  **What is Sharded**  |   **Memory Reduction**   |    **Communication Overhead**    |
@@ -997,7 +2057,164 @@ ZeRO-3 and FSDP shard parameters themselves. Each GPU stores only $1/N$ of the m
 
 ::: {#fig-zero-partitioning fig-env="figure" fig-pos="htb" fig-cap="**ZeRO state partitioning across GPU ranks**: Memory layout per GPU for 4 workers under standard DDP versus ZeRO stages 1, 2, and 3. ZeRO-1 shards optimizer states ($O/4$), ZeRO-2 adds gradient sharding ($G/4$), and ZeRO-3 partitions all model state ($P/4$, $G/4$, $O/4$)." fig-alt="Matrix diagram comparing state layout across 4 GPUs for Baseline DDP, ZeRO Stage 1, ZeRO Stage 2, and ZeRO Stage 3."}
 
-![](images/svg/zero-partitioning.svg){width="100%"}
+```{.tikz}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  col card/.style={
+    draw=CardBorder,
+    fill=white,
+    rounded corners=5pt,
+    line width=0.8pt,
+    minimum width=3.35cm,
+    minimum height=5.2cm
+  },
+  comm badge/.style={
+    rectangle,
+    rounded corners=2.5pt,
+    line width=0.65pt,
+    font=\bfseries\tiny,
+    inner sep=2.5pt,
+    minimum width=3.0cm,
+    minimum height=0.45cm,
+    align=center
+  },
+  state block/.style={
+    rectangle,
+    rounded corners=2pt,
+    line width=0.7pt,
+    align=center,
+    font=\bfseries\scriptsize,
+    inner sep=0pt
+  }
+]
+
+  % Color definitions
+  \definecolor{NavyBlue}{RGB}{20,45,85}
+  \definecolor{SteelBlue}{RGB}{40,90,140}
+  \definecolor{LightBlue}{RGB}{240,245,252}
+  \definecolor{RedLine}{RGB}{185,45,45}
+  \definecolor{RedFill}{RGB}{253,242,242}
+  \definecolor{GreenLine}{RGB}{35,135,75}
+  \definecolor{GreenFill}{RGB}{240,249,244}
+  \definecolor{DarkGreen}{RGB}{20,110,60}
+  \definecolor{OrangeLine}{RGB}{215,105,15}
+  \definecolor{OrangeL}{RGB}{254,246,233}
+  \definecolor{CardBorder}{RGB}{215,222,230}
+  \definecolor{CardFill}{RGB}{248,250,253}
+  \definecolor{TextDark}{RGB}{25,35,45}
+  \definecolor{TextMuted}{RGB}{95,105,115}
+
+  % ===========================================================
+  % TOP LEGEND
+  % ===========================================================
+  \node[draw=CardBorder, fill=white, rounded corners=4pt, line width=0.8pt, minimum width=14.0cm, minimum height=0.7cm] at (7.1, 8.4) {};
+
+  \node[draw=SteelBlue, fill=LightBlue, rounded corners=2pt, minimum width=0.35cm, minimum height=0.35cm] at (1.2, 8.4) {};
+  \node[anchor=west, font=\scriptsize, text=TextDark] at (1.5, 8.4) {\textbf{P:} Parameters (2\,B/param)};
+
+  \node[draw=OrangeLine, fill=OrangeL, rounded corners=2pt, minimum width=0.35cm, minimum height=0.35cm] at (5.5, 8.4) {};
+  \node[anchor=west, font=\scriptsize, text=TextDark] at (5.8, 8.4) {\textbf{G:} Gradients (2\,B/param)};
+
+  \node[draw=DarkGreen, fill=GreenFill, rounded corners=2pt, minimum width=0.35cm, minimum height=0.35cm] at (9.6, 8.4) {};
+  \node[anchor=west, font=\scriptsize, text=TextDark] at (9.9, 8.4) {\textbf{O:} Optimizer States (12\,B/param)};
+
+  % ===========================================================
+  % COLUMN 1: BASELINE DDP
+  % ===========================================================
+  \node[col card, anchor=north] (COL1) at (1.75, 7.8) {};
+  % Header banner
+  \fill[fill=CardFill, rounded corners=4pt] (0.1, 7.75) rectangle (3.4, 7.15);
+  \node[font=\bfseries\footnotesize, text=TextDark] at (1.75, 7.55) {Baseline DDP};
+  \node[font=\tiny, text=TextMuted] at (1.75, 7.3) {Full 16\,B Replication};
+
+  % GPU Rows in Col 1 (y = 6.6, 5.8, 5.0, 4.2)
+  \foreach \gpu/\y in {0/6.6, 1/5.8, 2/5.0, 3/4.2} {
+    \node[font=\tiny\bfseries, text=TextMuted, anchor=east] at (0.85, \y) {GPU\,\gpu};
+    \node[state block, draw=SteelBlue, fill=LightBlue, minimum width=0.68cm, minimum height=0.55cm] at (1.3, \y) {P};
+    \node[state block, draw=OrangeLine, fill=OrangeL, minimum width=0.68cm, minimum height=0.55cm] at (2.05, \y) {G};
+    \node[state block, draw=DarkGreen, fill=GreenFill, minimum width=0.68cm, minimum height=0.55cm] at (2.8, \y) {O};
+  }
+  \node[comm badge, draw=CardBorder, fill=CardFill, text=TextMuted] at (1.75, 3.0) {Comm: $2\times$ AllReduce};
+
+  % ===========================================================
+  % COLUMN 2: ZeRO-1
+  % ===========================================================
+  \node[col card, anchor=north] (COL2) at (5.3, 7.8) {};
+  % Header banner
+  \fill[fill=OrangeLine!12, rounded corners=4pt] (3.65, 7.75) rectangle (6.95, 7.15);
+  \node[font=\bfseries\footnotesize, text=OrangeLine!90!black] at (5.3, 7.55) {ZeRO Stage 1};
+  \node[font=\tiny, text=OrangeLine!80!black] at (5.3, 7.3) {Shard Optimizer State ($O$)};
+
+  % GPU Rows in Col 2
+  \foreach \gpu/\y in {0/6.6, 1/5.8, 2/5.0, 3/4.2} {
+    \node[font=\tiny\bfseries, text=TextMuted, anchor=east] at (4.4, \y) {GPU\,\gpu};
+    \node[state block, draw=SteelBlue, fill=LightBlue, minimum width=0.68cm, minimum height=0.55cm] at (4.85, \y) {P};
+    \node[state block, draw=OrangeLine, fill=OrangeL, minimum width=0.68cm, minimum height=0.55cm] at (5.60, \y) {G};
+    \node[state block, draw=DarkGreen, fill=GreenFill, minimum width=0.55cm, minimum height=0.55cm] at (6.32, \y) {O$_{\gpu}$};
+  }
+  \node[comm badge, draw=OrangeLine!70, fill=OrangeL!50, text=OrangeLine!90!black] at (5.3, 3.0) {Comm: Same as DDP ($1.0\times$)};
+
+  % ===========================================================
+  % COLUMN 3: ZeRO-2
+  % ===========================================================
+  \node[col card, anchor=north] (COL3) at (8.85, 7.8) {};
+  % Header banner
+  \fill[fill=SteelBlue!12, rounded corners=4pt] (7.2, 7.75) rectangle (10.5, 7.15);
+  \node[font=\bfseries\footnotesize, text=SteelBlue] at (8.85, 7.55) {ZeRO Stage 2};
+  \node[font=\tiny, text=SteelBlue] at (8.85, 7.3) {Shard Opt ($O$) + Grad ($G$)};
+
+  % GPU Rows in Col 3
+  \foreach \gpu/\y in {0/6.6, 1/5.8, 2/5.0, 3/4.2} {
+    \node[font=\tiny\bfseries, text=TextMuted, anchor=east] at (7.95, \y) {GPU\,\gpu};
+    \node[state block, draw=SteelBlue, fill=LightBlue, minimum width=0.72cm, minimum height=0.55cm] at (8.45, \y) {P};
+    \node[state block, draw=OrangeLine, fill=OrangeL, minimum width=0.55cm, minimum height=0.55cm] at (9.22, \y) {G$_{\gpu}$};
+    \node[state block, draw=DarkGreen, fill=GreenFill, minimum width=0.55cm, minimum height=0.55cm] at (9.87, \y) {O$_{\gpu}$};
+  }
+  \node[comm badge, draw=SteelBlue!70, fill=LightBlue!70, text=SteelBlue] at (8.85, 3.0) {Comm: ReduceScatter only};
+
+  % ===========================================================
+  % COLUMN 4: ZeRO-3
+  % ===========================================================
+  \node[col card, anchor=north] (COL4) at (12.45, 7.8) {};
+  % Header banner
+  \fill[fill=DarkGreen!12, rounded corners=4pt] (10.8, 7.75) rectangle (14.1, 7.15);
+  \node[font=\bfseries\footnotesize, text=DarkGreen] at (12.45, 7.55) {ZeRO Stage 3};
+  \node[font=\tiny, text=DarkGreen] at (12.45, 7.3) {Shard All State ($P + G + O$)};
+
+  % GPU Rows in Col 4
+  \foreach \gpu/\y in {0/6.6, 1/5.8, 2/5.0, 3/4.2} {
+    \node[font=\tiny\bfseries, text=TextMuted, anchor=east] at (11.55, \y) {GPU\,\gpu};
+    \node[state block, draw=SteelBlue, fill=LightBlue, minimum width=0.55cm, minimum height=0.55cm] at (12.05, \y) {P$_{\gpu}$};
+    \node[state block, draw=OrangeLine, fill=OrangeL, minimum width=0.55cm, minimum height=0.55cm] at (12.70, \y) {G$_{\gpu}$};
+    \node[state block, draw=DarkGreen, fill=GreenFill, minimum width=0.55cm, minimum height=0.55cm] at (13.35, \y) {O$_{\gpu}$};
+  }
+  \node[comm badge, draw=DarkGreen!70, fill=GreenFill!80, text=DarkGreen] at (12.45, 3.0) {Comm: $1.5\times$ (+AllGather P)};
+
+  % ===========================================================
+  % BOTTOM SUMMARY CARD
+  % ===========================================================
+  \node[draw=CardBorder, fill=white, rounded corners=5pt, line width=0.8pt, minimum width=14.0cm, minimum height=2.4cm, anchor=north] at (7.1, 2.55) {};
+
+  \fill[fill=SteelBlue!10, rounded corners=4pt] (0.15, 2.50) rectangle (14.05, 2.05);
+  \node[anchor=west, font=\bfseries\scriptsize, text=NavyBlue] at (0.35, 2.28) {ZeRO Mechanism: Trading Communication Primitives for Memory Capacity};
+
+  \node[anchor=west, font=\scriptsize, text=TextDark] at (0.35, 1.72) {
+    \textcolor{OrangeLine!90!black}{\textbf{ZeRO-1 ($P_{os}$):}} Partitions 12\,B/param optimizer state across $N$ GPUs ($4\times$ reduction). Zero extra communication overhead.
+  };
+  \node[anchor=west, font=\scriptsize, text=TextDark] at (0.35, 1.32) {
+    \textcolor{SteelBlue}{\textbf{ZeRO-2 ($P_{os} + P_g$):}} Also partitions gradients ($8\times$ reduction). Replaces AllReduce with ReduceScatter; zero extra communication volume.
+  };
+  \node[anchor=west, font=\scriptsize, text=TextDark] at (0.35, 0.92) {
+    \textcolor{DarkGreen}{\textbf{ZeRO-3 ($P_{os} + P_g + P_p$):}} Shards parameters; AllGathers parameters layer-by-layer during forward and backward passes ($1.5\times$ communication tax).
+  };
+
+  \node[draw=SteelBlue!40, fill=LightBlue!60, rounded corners=3pt, line width=0.6pt, minimum width=13.6cm, minimum height=0.45cm] at (7.1, 0.42) {
+    \tiny\bfseries\textcolor{NavyBlue}{Core Principle: ZeRO converts memory redundancy into ring collective operations without changing mathematical output}
+  };
+
+\end{tikzpicture}
+```
 
 :::
 
@@ -1517,8 +2734,141 @@ The scaling law regime exhibits three distinct behaviors. Below the critical bat
 
 @Fig-critical-batch-size illustrates this relationship between batch size and training efficiency.
 
-::: {#fig-critical-batch-size fig-env="figure" fig-pos="htb" fig-cap="**Critical batch size and scaling regimes**: Below the critical batch size $B^{*}$, larger batches reduce noise and improve sample efficiency (linear scaling regime). Above $B^{*}$, larger batches provide diminishing returns: while throughput increases, total samples required also increases, reducing sample efficiency. The optimal operating point balances hardware utilization against convergence efficiency." fig-alt="Graph showing sample efficiency vs. batch size. Efficiency is flat in the linear regime below B-star, then decreases in the diminishing returns regime above B-star. Vertical dashed line marks critical batch size."}
-![](images/svg/critical-batch-size.svg){width=100%}
+::: {#fig-critical-batch-size fig-env="figure" fig-pos="htb" fig-cap="**Critical batch size and scaling regimes**: Below the critical batch size $B^{*}$, larger batches reduce noise and improve sample efficiency (linear scaling regime). Above $B^{*}$, larger batches provide diminishing returns: while throughput increases, total samples required also increases, reducing sample efficiency. The optimal operating point balances hardware utilization against convergence efficiency." fig-alt="Graph showing scaling efficiency versus batch size. Efficiency climbs steeply in the linear regime where communication is hidden behind compute, reaching an optimal inflection point at critical batch size B-star. Beyond B-star, gradient noise limits returns and efficiency plateaus."}
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  regime banner/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.9pt,
+    font=\bfseries\footnotesize,
+    inner sep=4pt,
+    align=center
+  },
+  model card/.style={
+    rectangle,
+    rounded corners=3.5pt,
+    line width=0.9pt,
+    fill=white,
+    inner sep=4.5pt,
+    align=center,
+    font=\scriptsize
+  }
+]
+
+  % MLSysBook Palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{240,245,252}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{253,242,242}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,246,233}
+  \providecolor{CardBorder}{RGB}{215,222,230}
+  \providecolor{CardFill}{RGB}{248,250,253}
+  \providecolor{TextDark}{RGB}{25,35,45}
+  \providecolor{TextMuted}{RGB}{95,105,115}
+
+  % ===========================================================
+  % PLOT AREA & SHADED REGIMES
+  % ===========================================================
+  \begin{scope}
+    \clip (1.8, 1.2) rectangle (13.6, 6.4);
+
+    % Shaded Backgrounds
+    \fill[fill=GreenFill!60] (1.8, 1.2) rectangle (8.0, 6.4);
+    \fill[fill=OrangeL!40] (8.0, 1.2) rectangle (13.6, 6.4);
+
+    % Horizontal Gridlines
+    \foreach \eff/\y in {0.25/2.5, 0.50/3.8, 0.75/5.1, 1.00/6.4} {
+      \draw[dashed, gray!30, thin] (1.8, \y) -- (13.6, \y);
+    }
+
+    % Efficiency Curve: steep linear gain, then saturation plateau
+    \draw[line width=2.4pt, NavyBlue]
+      (1.8, 1.35)
+      .. controls (3.6, 1.7) and (5.4, 3.2) ..
+      (7.2, 4.7)
+      .. controls (7.6, 4.98) and (7.9, 5.06) ..
+      (8.4, 5.09)
+      -- (13.6, 5.12);
+
+    % Mechanism watermarks in regimes
+    \node[font=\bfseries\scriptsize, text=DarkGreen] at (4.9, 2.7) {Communication hidden by compute};
+    \node[font=\bfseries\scriptsize, text=OrangeLine!90!black] at (10.8, 2.7) {Gradient noise limits learning};
+  \end{scope}
+
+  % Plot border
+  \draw[line width=1.0pt, CardBorder] (1.8, 1.2) rectangle (13.6, 6.4);
+
+  % Critical Batch Size vertical divider
+  \draw[dashed, line width=1.4pt, RedLine] (8.0, 1.2) -- (8.0, 6.4);
+
+  % Knee point circle
+  \filldraw[fill=RedLine, draw=white, line width=1.5pt] (8.0, 5.06) circle (4pt);
+
+  % ===========================================================
+  % REGIME BANNERS
+  % ===========================================================
+  \node[regime banner, draw=GreenLine, fill=GreenFill, text=DarkGreen] at (4.9, 5.95) {
+    Linear Scaling Regime
+  };
+
+  \node[regime banner, draw=OrangeLine, fill=OrangeL, text=OrangeLine!90!black] at (10.8, 5.95) {
+    Diminishing Returns Regime
+  };
+
+  % ===========================================================
+  % BENCHMARK CARDS
+  % ===========================================================
+  % ResNet-50
+  \node[model card, draw=GreenLine] (RESNET) at (3.8, 4.5) {
+    \textbf{\textcolor{DarkGreen}{ResNet-50}}\\[1.5pt]
+    \tiny\textcolor{TextDark}{$B^* \approx 8\text{K samples}$}
+  };
+  \draw[->, line width=0.8pt, GreenLine, dashed] (RESNET.east) .. controls (5.7, 4.5) .. (6.3, 4.0);
+  \filldraw[fill=GreenLine, draw=white, line width=1.0pt] (6.3, 4.0) circle (3pt);
+
+  % GPT-3
+  \node[model card, draw=OrangeLine] (GPT3) at (11.5, 4.3) {
+    \textbf{\textcolor{OrangeLine!90!black}{GPT-3}}\\[1.5pt]
+    \tiny\textcolor{TextDark}{$B^* \approx 4\text{M tokens}$}
+  };
+  \draw[->, line width=0.8pt, OrangeLine, dashed] (GPT3.west) .. controls (10.1, 4.3) .. (9.7, 5.10);
+  \filldraw[fill=OrangeLine, draw=white, line width=1.0pt] (9.7, 5.10) circle (3pt);
+
+  % ===========================================================
+  % AXIS LABELS & TICKS
+  % ===========================================================
+  % Y-axis ticks
+  \foreach \eff/\y in {0.00/1.2, 0.25/2.5, 0.50/3.8, 0.75/5.1, 1.00/6.4} {
+    \draw[line width=0.8pt, TextMuted] (1.65, \y) -- (1.8, \y);
+    \node[anchor=east, font=\scriptsize\bfseries, text=TextMuted] at (1.55, \y) {\eff};
+  }
+  \node[rotate=90, font=\bfseries\footnotesize, text=TextDark] at (0.45, 3.8) {Training Efficiency (samples/sec per GPU)};
+
+  % X-axis ticks (log scale)
+  \foreach \tick/\x in {64/1.8, 512/3.8, 4\text{K}/5.8, 512\text{K}/11.0} {
+    \draw[line width=0.8pt, TextMuted] (\x, 1.05) -- (\x, 1.2);
+    \node[anchor=north, font=\scriptsize\bfseries, text=TextMuted] at (\x, 0.95) {\tick};
+  }
+
+  % Critical Batch Size tick & callout badge on X-Axis
+  \draw[line width=1.4pt, RedLine] (8.0, 1.0) -- (8.0, 1.2);
+  \node[rectangle, rounded corners=3pt, draw=RedLine, fill=RedFill, font=\bfseries\scriptsize, text=RedLine, inner sep=3pt] at (8.0, 0.6) {
+    $B^*$ (Critical Batch Size)
+  };
+
+  % Global batch size axis label
+  \node[font=\bfseries\footnotesize, text=TextDark] at (7.7, -0.05) {Batch Size (log scale)};
+
+\end{tikzpicture}
+```
 :::
 
 The critical batch size has important implications for distributed training system design. Adding workers beyond $B^{*}/b$ (where $b$ is the per-worker batch size) improves throughput but not sample efficiency, though it may still be worthwhile for cost if the marginal cost of additional workers is low. The learning rate schedule matters too, because above $B^{*}$ aggressive warmup becomes essential, since the loss landscape near initialization may not support the large updates that linear scaling would produce. Communication trade-offs shift as well, because above $B^{*}$ the reduced benefit of larger batches makes communication overhead relatively more costly, strengthening the case for gradient compression or asynchronous methods.
@@ -1726,7 +3076,146 @@ Despite higher parallelism, 64-GPU training costs more per run due to communicat
 The fundamental trade-off in distributed training is between communication efficiency and convergence quality. @Fig-comm-convergence-tradeoff visualizes this trade-off space.
 
 ::: {#fig-comm-convergence-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**Communication-convergence trade-off space**: Each point represents a different distributed training configuration. The Pareto frontier (dashed line) shows optimal configurations where improving one metric requires sacrificing the other. BSP sits at high convergence quality but lower throughput; ASP provides maximum throughput at convergence cost. Gradient compression and SSP occupy intermediate positions." fig-alt="Scatter plot with Communication Efficiency on x-axis and Convergence Quality on y-axis. Points for BSP, SSP, ASP, and gradient compression methods form a Pareto frontier from upper-left to lower-right."}
-![](images/svg/comm-convergence-tradeoff.svg){width=100%}
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  card/.style={
+    rectangle,
+    rounded corners=3.5pt,
+    line width=0.8pt,
+    inner sep=4.5pt,
+    align=center,
+    font=\scriptsize
+  },
+  point node/.style={
+    circle,
+    line width=1.4pt,
+    inner sep=1.8pt,
+    font=\bfseries\scriptsize,
+    fill=white
+  }
+]
+
+  % MLSysBook Palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{240,245,252}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{253,242,242}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,246,233}
+  \providecolor{CardBorder}{RGB}{215,222,230}
+  \providecolor{CardFill}{RGB}{248,250,253}
+  \providecolor{TextDark}{RGB}{25,35,45}
+  \providecolor{TextMuted}{RGB}{95,105,115}
+
+  % ===========================================================
+  % PLOT AREA & GRID
+  % ===========================================================
+  % Plot bounds: (2.0, 1.4) to (13.0, 7.8)
+  \draw[line width=1.0pt, CardBorder] (2.0, 1.4) rectangle (13.0, 7.8);
+
+  % Subtle gridlines
+  \draw[dashed, gray!25, thin] (2.0, 4.6) -- (13.0, 4.6);
+  \draw[dashed, gray!25, thin] (7.5, 1.4) -- (7.5, 7.8);
+
+  % ===========================================================
+  % IDEAL REGION
+  % ===========================================================
+  \fill[fill=GreenFill!75, rounded corners=3pt] (7.2, 4.6) rectangle (12.8, 7.6);
+  \draw[line width=0.8pt, GreenLine!50, dashed, rounded corners=3pt] (7.2, 4.6) rectangle (12.8, 7.6);
+
+  \node[anchor=north east, align=right] at (12.6, 7.45) {
+    \textbf{\textcolor{DarkGreen}{Ideal Region}}\\[2pt]
+    \scriptsize\textcolor{DarkGreen}{(high efficiency +}\\[1pt]
+    \scriptsize\textcolor{DarkGreen}{good convergence)}
+  };
+
+  % ===========================================================
+  % PARETO FRONTIER CURVE
+  % ===========================================================
+  % BSP: (3.2, 6.2)
+  % SSP: (5.9, 4.8)
+  % GC:  (8.5, 5.4)
+  \draw[line width=2.2pt, SteelBlue, loosely dotted]
+    (3.2, 6.2)
+    .. controls (4.4, 5.0) and (5.2, 4.75) ..
+    (5.9, 4.8)
+    .. controls (6.8, 4.88) and (7.7, 5.15) ..
+    (8.5, 5.4);
+
+  \node[font=\itshape\footnotesize, text=SteelBlue] at (6.5, 5.7) {Pareto frontier};
+
+  % ===========================================================
+  % STRATEGY POINTS & CARDS
+  % ===========================================================
+
+  % --- 1. BSP ---
+  \draw[line width=0.8pt, NavyBlue, dashed] (3.2, 6.2) -- (3.2, 6.8);
+  \node[card, draw=NavyBlue, fill=LightBlue] (CARD_BSP) at (3.2, 7.15) {
+    \textbf{\textcolor{NavyBlue}{BSP (Bulk Synchronous)}}\\[1.5pt]
+    \tiny\textcolor{TextDark}{Exact gradients $\cdot$ Best convergence}
+  };
+  \node[point node, draw=NavyBlue, text=NavyBlue] (PT_BSP) at (3.2, 6.2) {BSP};
+
+  % --- 2. SSP ---
+  \draw[line width=0.8pt, GreenLine, dashed] (5.9, 4.8) -- (5.9, 3.8);
+  \node[card, draw=GreenLine, fill=GreenFill] (CARD_SSP) at (5.9, 3.35) {
+    \textbf{\textcolor{DarkGreen}{SSP (Stale Synchronous)}}\\[1.5pt]
+    \tiny\textcolor{TextDark}{Bounded slack $s \le s_{\max}$ $\cdot$ Balanced trade-off}
+  };
+  \node[point node, draw=GreenLine, text=DarkGreen] (PT_SSP) at (5.9, 4.8) {SSP};
+
+  % --- 3. Grad Compression (GC) ---
+  \draw[line width=0.8pt, OrangeLine, dashed] (8.5, 5.4) -- (8.5, 6.1);
+  \node[card, draw=OrangeLine, fill=OrangeL] (CARD_GC) at (8.5, 6.65) {
+    \textbf{\textcolor{OrangeLine!90!black}{Grad. Compression}}\\[1.5pt]
+    \tiny\textcolor{TextDark}{Efficient + acceptable}\\[1pt]
+    \tiny\textcolor{TextDark}{quality (Top-$K$ sparsity)}
+  };
+  \node[point node, draw=OrangeLine, text=OrangeLine!90!black] (PT_GC) at (8.5, 5.4) {GC};
+
+  % --- 4. ASP (Dominated / Unbounded) ---
+  \draw[line width=0.8pt, RedLine, dashed] (10.6, 2.7) -- (11.2, 2.7);
+  \node[card, draw=RedLine, fill=RedFill, anchor=west] (CARD_ASP) at (11.2, 2.7) {
+    \textbf{\textcolor{RedLine}{ASP (Asynchronous)}}\\[1.5pt]
+    \tiny\textcolor{TextDark}{Fastest step time $\cdot$ Stale /}\\[1pt]
+    \tiny\textcolor{TextDark}{noisy updates harm convergence}
+  };
+  \node[point node, draw=RedLine, text=RedLine] (PT_ASP) at (10.6, 2.7) {ASP};
+
+  % ===========================================================
+  % BOTTOM TAKEAWAY BANNER
+  % ===========================================================
+  \node[rectangle, rounded corners=3.5pt, draw=CardBorder, fill=CardFill, line width=0.8pt, font=\bfseries\scriptsize, text=TextDark, inner sep=5pt] at (7.5, 2.0) {
+    No algorithm dominates all dimensions.
+  };
+
+  % ===========================================================
+  % AXES LABELS & TICKS
+  % ===========================================================
+  % Y-axis ticks
+  \foreach \v/\y in {0.0/1.4, 0.5/4.6, 1.0/7.8} {
+    \draw[line width=0.8pt, TextMuted] (1.85, \y) -- (2.0, \y);
+    \node[anchor=east, font=\scriptsize\bfseries, text=TextMuted] at (1.75, \y) {\v};
+  }
+  \node[rotate=90, font=\bfseries\footnotesize, text=TextDark] at (0.9, 4.6) {Convergence Quality $\rightarrow$};
+
+  % X-axis ticks
+  \foreach \v/\x in {0.0/2.0, 0.5/7.5, 1.0/13.0} {
+    \draw[line width=0.8pt, TextMuted] (\x, 1.25) -- (\x, 1.4);
+    \node[anchor=north, font=\scriptsize\bfseries, text=TextMuted] at (\x, 1.15) {\v};
+  }
+  \node[font=\bfseries\footnotesize, text=TextDark] at (7.5, 0.4) {
+    Communication Efficiency $\rightarrow$ \textmd{\scriptsize(0 = Synchronous, 1 = Asynchronous)}
+  };
+
+\end{tikzpicture}
+```
 :::
 
 Several techniques occupy different positions on this trade-off curve. Gradient compression\index{Gradient Compression!bandwidth reduction} reduces communication volume by transmitting compressed gradient information through quantization, sparsification, or low-rank approximation. Examples include sign-based updates [@bernstein2018signsgd], Deep Gradient Compression [@lin2018deep], PowerSGD [@vogels2020powersgd], quantized SGD with convergence analysis [@alistarh2017qsgd], and empirical sparse gradient dropping for neural machine translation [@aji2017].
@@ -1816,7 +3305,198 @@ class FrontierModelParallelRecap:
 Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and parameters across workers, some architectures remain intractable. Tensor parallelism, illustrated in @fig-model-parallel-flow, addresses this by partitioning individual weight matrices across devices; pipeline parallelism partitions layers across stages and is introduced later in @sec-distributed-training-systems-systems-pipeline-parallelism-8748. For a `{python} FrontierModelParallelRecap.frontier_params_b_str`-parameter model, weights alone occupy `{python} ModelParallelMemoryFacts.weight_gb_str`, or about `{python} ModelParallelMemoryFacts.weight_per_gpu_gb_str` per GPU across 64 GPUs. Full mixed-precision Adam training state is much larger: `{python} ModelParallelMemoryFacts.full_state_gb_str` globally, or roughly `{python} ModelParallelMemoryFacts.full_state_per_gpu_gb_str` per GPU before activations. This distinction matters because optimizer sharding reduces static state, but it does not eliminate the activation and per-layer capacity constraints that force model parallelism.
 
 ::: {#fig-model-parallel-flow fig-env="figure" fig-pos="htb" fig-cap="**Tensor parallelism data flow**: Tensor parallelism column-splits a single weight matrix ($W_0\ldots W_3$) across four GPUs, with each GPU computing a partial output that is recombined through an AllGather. The companion strategy, pipeline parallelism, partitions layers vertically across stages and is shown separately in the layer-block figure. The two strategies are often combined in hybrid 3D parallelism for large models." fig-alt="Single panel showing tensor parallelism: a weight matrix column-split as W0, W1, W2, W3 across four GPUs, with partial outputs combined via AllGather."}
-![](images/svg/model-parallel-flow.svg){width=100%}
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  io card/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=1.0pt,
+    draw=OrangeLine,
+    fill=OrangeL!60,
+    inner sep=5pt,
+    align=center
+  },
+  gpu card/.style={
+    rectangle,
+    rounded corners=3.5pt,
+    line width=0.8pt,
+    inner sep=4pt,
+    align=center,
+    minimum width=3.6cm
+  },
+  y badge/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.8pt,
+    draw=GreenLine,
+    fill=GreenFill,
+    inner sep=3.5pt,
+    align=center,
+    font=\scriptsize
+  },
+  info box/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=0.8pt,
+    draw=CardBorder,
+    fill=CardFill,
+    inner sep=6pt,
+    align=left
+  }
+]
+
+  % MLSysBook Palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{240,245,252}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{253,242,242}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,246,233}
+  \providecolor{CardBorder}{RGB}{215,222,230}
+  \providecolor{CardFill}{RGB}{248,250,253}
+  \providecolor{TextDark}{RGB}{25,35,45}
+  \providecolor{TextMuted}{RGB}{95,105,115}
+
+  % ===========================================================
+  % TOP FORMULA BANNER
+  % ===========================================================
+  \node[rectangle, rounded corners=3.5pt, draw=SteelBlue!40, fill=LightBlue!50, line width=0.8pt, inner sep=5pt, font=\small, text=TextDark] at (7.6, 9.4) {
+    \textbf{Column-Parallel Partition:}\quad $\boldsymbol{Y} = \boldsymbol{X} \cdot [\boldsymbol{W}_0 \mid \boldsymbol{W}_1 \mid \boldsymbol{W}_2 \mid \boldsymbol{W}_3] = [\boldsymbol{X}\boldsymbol{W}_0 \mid \boldsymbol{X}\boldsymbol{W}_1 \mid \boldsymbol{X}\boldsymbol{W}_2 \mid \boldsymbol{X}\boldsymbol{W}_3] = [\boldsymbol{Y}_0 \mid \boldsymbol{Y}_1 \mid \boldsymbol{Y}_2 \mid \boldsymbol{Y}_3]$
+  };
+
+  % ===========================================================
+  % INPUT TENSOR X
+  % ===========================================================
+  \node[io card] (X) at (0.8, 5.75) {
+    \textbf{\Large\textcolor{OrangeLine!90!black}{X}}\\[2pt]
+    \textbf{\footnotesize Input Activations}\\[4pt]
+    \colorbox{white}{\scriptsize\strut $[B, d]$}
+  };
+
+  % ===========================================================
+  % GPU SHARD CARDS
+  % ===========================================================
+  % GPU 0
+  \node[gpu card, draw=NavyBlue!40, fill=LightBlue!70] (GPU0) at (4.8, 7.7) {
+    \begin{minipage}{3.4cm}
+      \centering
+      \textbf{\scriptsize\textcolor{NavyBlue}{GPU 0 $\cdot$ Shard $\boldsymbol{W}_0$}} \hfill \tiny\textcolor{TextMuted}{$[d, d/4]$}\\[1.5pt]
+      \footnotesize $\boldsymbol{Y}_0 = \boldsymbol{X} \times \boldsymbol{W}_0$ \hfill \tiny\textcolor{TextMuted}{shape $[B, d/4]$}
+    \end{minipage}
+  };
+
+  % GPU 1
+  \node[gpu card, draw=GreenLine!40, fill=GreenFill!70] (GPU1) at (4.8, 6.4) {
+    \begin{minipage}{3.4cm}
+      \centering
+      \textbf{\scriptsize\textcolor{DarkGreen}{GPU 1 $\cdot$ Shard $\boldsymbol{W}_1$}} \hfill \tiny\textcolor{TextMuted}{$[d, d/4]$}\\[1.5pt]
+      \footnotesize $\boldsymbol{Y}_1 = \boldsymbol{X} \times \boldsymbol{W}_1$ \hfill \tiny\textcolor{TextMuted}{shape $[B, d/4]$}
+    \end{minipage}
+  };
+
+  % GPU 2
+  \node[gpu card, draw=OrangeLine!40, fill=OrangeL!50] (GPU2) at (4.8, 5.1) {
+    \begin{minipage}{3.4cm}
+      \centering
+      \textbf{\scriptsize\textcolor{OrangeLine!90!black}{GPU 2 $\cdot$ Shard $\boldsymbol{W}_2$}} \hfill \tiny\textcolor{TextMuted}{$[d, d/4]$}\\[1.5pt]
+      \footnotesize $\boldsymbol{Y}_2 = \boldsymbol{X} \times \boldsymbol{W}_2$ \hfill \tiny\textcolor{TextMuted}{shape $[B, d/4]$}
+    \end{minipage}
+  };
+
+  % GPU 3
+  \node[gpu card, draw=purple!30, fill=purple!5] (GPU3) at (4.8, 3.8) {
+    \begin{minipage}{3.4cm}
+      \centering
+      \textbf{\scriptsize\textcolor{purple!80!black}{GPU 3 $\cdot$ Shard $\boldsymbol{W}_3$}} \hfill \tiny\textcolor{TextMuted}{$[d, d/4]$}\\[1.5pt]
+      \footnotesize $\boldsymbol{Y}_3 = \boldsymbol{X} \times \boldsymbol{W}_3$ \hfill \tiny\textcolor{TextMuted}{shape $[B, d/4]$}
+    \end{minipage}
+  };
+
+  % Broadcast paths from X to GPUs
+  \draw[->, line width=0.9pt, SteelBlue] (X.east) -- ++(0.7, 0) |- (GPU0.west);
+  \draw[->, line width=0.9pt, SteelBlue] (X.east) -- ++(0.7, 0) |- (GPU1.west);
+  \draw[->, line width=0.9pt, SteelBlue] (X.east) -- ++(0.7, 0) |- (GPU2.west);
+  \draw[->, line width=0.9pt, SteelBlue] (X.east) -- ++(0.7, 0) |- (GPU3.west);
+
+  \node[rectangle, rounded corners=2pt, draw=SteelBlue!40, fill=white, font=\tiny\bfseries, text=SteelBlue, inner sep=2pt] at (2.2, 7.8) {Broadcast $\boldsymbol{X}$};
+
+  % ===========================================================
+  % OUTPUT BADGES Y_i
+  % ===========================================================
+  \node[y badge] (Y0) at (7.5, 7.7) {\textbf{\textcolor{DarkGreen}{$\boldsymbol{Y}_0$}}\\[1pt]\tiny $[B, d/4]$};
+  \node[y badge] (Y1) at (7.5, 6.4) {\textbf{\textcolor{DarkGreen}{$\boldsymbol{Y}_1$}}\\[1pt]\tiny $[B, d/4]$};
+  \node[y badge] (Y2) at (7.5, 5.1) {\textbf{\textcolor{DarkGreen}{$\boldsymbol{Y}_2$}}\\[1pt]\tiny $[B, d/4]$};
+  \node[y badge] (Y3) at (7.5, 3.8) {\textbf{\textcolor{DarkGreen}{$\boldsymbol{Y}_3$}}\\[1pt]\tiny $[B, d/4]$};
+
+  \draw[->, line width=0.8pt, TextMuted] (GPU0.east) -- (Y0.west);
+  \draw[->, line width=0.8pt, TextMuted] (GPU1.east) -- (Y1.west);
+  \draw[->, line width=0.8pt, TextMuted] (GPU2.east) -- (Y2.west);
+  \draw[->, line width=0.8pt, TextMuted] (GPU3.east) -- (Y3.west);
+
+  % ===========================================================
+  % ALLGATHER COLLECTIVE NODE
+  % ===========================================================
+  \node[rectangle, rounded corners=4pt, line width=1.0pt, draw=GreenLine, fill=GreenFill!50, inner sep=5pt, align=center] (AG) at (10.6, 5.75) {
+    \textbf{\large\textcolor{DarkGreen}{AllGather}}\\[4pt]
+    \footnotesize\textbf{Concatenate}\\[2pt]
+    \scriptsize $[\boldsymbol{Y}_0 \mid \boldsymbol{Y}_1 \mid \boldsymbol{Y}_2 \mid \boldsymbol{Y}_3]$\\[6pt]
+    \colorbox{white}{\tiny\bfseries\textcolor{DarkGreen}{\strut via NVLink Mesh}}
+  };
+
+  % Paths from Y_i to AllGather
+  \draw[->, line width=0.9pt, GreenLine] (Y0.east) -| (AG.140);
+  \draw[->, line width=0.9pt, GreenLine] (Y1.east) -- (AG.165);
+  \draw[->, line width=0.9pt, GreenLine] (Y2.east) -- (AG.195);
+  \draw[->, line width=0.9pt, GreenLine] (Y3.east) -| (AG.220);
+
+  % ===========================================================
+  % OUTPUT TENSOR Y
+  % ===========================================================
+  \node[io card] (Y) at (13.8, 5.75) {
+    \textbf{\Large\textcolor{OrangeLine!90!black}{Y}}\\[2pt]
+    \textbf{\footnotesize Output Tensor}\\[4pt]
+    \colorbox{white}{\scriptsize\strut $[B, d] = \boldsymbol{X}\boldsymbol{W}$}
+  };
+
+  \draw[->, line width=1.1pt, TextMuted] (AG.east) -- (Y.west);
+
+  % ===========================================================
+  % BOTTOM ANALYSIS PANELS
+  % ===========================================================
+  % Left Panel: Backward Pass
+  \node[info box, anchor=north west] (BP) at (-0.2, 2.5) {
+    \begin{minipage}{7.2cm}
+      \textbf{\small\textcolor{NavyBlue}{Backward Pass: Gradient Synchronization}}\\[4pt]
+      \textbf{\scriptsize Weight Gradients (Local):} \scriptsize $\partial L / \partial \boldsymbol{W}_i = \boldsymbol{X}^T (\partial L / \partial \boldsymbol{Y}_i)$\\[1pt]
+      \tiny\textcolor{TextDark}{Computed independently on each GPU; requires no collective.}\\[4pt]
+      \textbf{\scriptsize Input Activation Gradients:} \scriptsize $\partial L / \partial \boldsymbol{X} = \sum_i (\partial L / \partial \boldsymbol{Y}_i) \boldsymbol{W}_i^T$\\[1pt]
+      \tiny\textcolor{TextDark}{Requires an AllReduce (sum) across GPUs to reconstitute $\partial L / \partial \boldsymbol{X}$.}\\[5pt]
+      \centering
+      \fcolorbox{RedLine}{RedFill}{\tiny\bfseries\textcolor{RedLine}{\strut Forward uses AllGather $\;\cdot\;$ Backward uses AllReduce}}
+    \end{minipage}
+  };
+
+  % Right Panel: Hardware Constraints
+  \node[info box, anchor=north east] (HC) at (15.4, 2.5) {
+    \begin{minipage}{7.2cm}
+      \textbf{\small\textcolor{NavyBlue}{Hardware \& Interconnect Constraints}}\\[4pt]
+      \textbf{\scriptsize NVLink Intra-Node Requirement:} \scriptsize 600--900 GB/s bandwidth\\[1pt]
+      \tiny\textcolor{TextDark}{Communication occurs twice per transformer layer (sub-millisecond scale).}\\[4pt]
+      \textbf{\scriptsize Scaling Boundary (TP $\le$ 8):} \scriptsize Confined within single server node\\[1pt]
+      \tiny\textcolor{TextDark}{Cross-node TP incurs network latency overheads that stall tensor cores.}\\[5pt]
+      \centering
+      \fcolorbox{GreenLine}{GreenFill}{\tiny\bfseries\textcolor{DarkGreen}{\strut Pair with Row-Parallel linear layer to fuse AllReduce}}
+    \end{minipage}
+  };
+
+\end{tikzpicture}
+```
 :::
 
 For long-context transformers where activation memory dominates, a 2048-token sequence through `{python} FrontierModelParallelRecap.frontier_params_b_str` parameters generates on the order of a terabyte of intermediate activations at even a small micro-batch (roughly `{python} Gpt3ActivationBudget.act_unchecked_tb_str` at micro-batch 4, as computed earlier), and no amount of optimizer sharding addresses this constraint. Model parallelism addresses these limitations by splitting the model architecture itself across devices, rather than replicating it with sharded state.
@@ -2029,9 +3709,249 @@ Partitioning strategy determines which cost the model pays after memory no longe
 Layer-wise partitioning is the least invasive model cut: it saves memory by assigning consecutive layers to separate devices, but it preserves the model's sequential dependence. In transformer architectures, this translates to specific devices managing defined sets of attention and feed-forward blocks. @Fig-dist-layers-blocks demonstrates this partitioning for a 16-layer transformer: four consecutive blocks reside on each of four devices, with forward activations flowing left-to-right and backward gradients propagating right-to-left across the device boundaries.
 
 ::: {#fig-dist-layers-blocks fig-env="figure" fig-pos="htb" fig-cap="**Layer-wise model parallelism**: The upper path assigns four consecutive transformer blocks to each of four GPUs, with activation checkpoints at device boundaries. The lower schedule shows forward work in blue, backward work in orange, and hatched pipeline bubbles. Partitioning reduces the weight footprint per GPU to one-quarter of the model, but sequential dependencies leave downstream devices waiting during pipeline fill." fig-alt="A 16-layer transformer is split across four GPUs, with layers 1–4, 5–8, 9–12, and 13–16 assigned to successive devices. Below, a timeline shows staggered blue forward passes, orange backward passes, and hatched idle pipeline bubbles."}
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  stage card/.style={
+    rectangle,
+    rounded corners=3.5pt,
+    line width=0.8pt,
+    inner sep=4pt,
+    align=center,
+    text width=2.6cm
+  },
+  f block/.style={
+    rectangle,
+    rounded corners=2pt,
+    line width=0.7pt,
+    draw=SteelBlue,
+    fill=LightBlue!90,
+    inner sep=0pt,
+    font=\bfseries\scriptsize,
+    text=NavyBlue,
+    minimum width=0.52cm,
+    minimum height=0.48cm,
+    align=center
+  },
+  b block/.style={
+    rectangle,
+    rounded corners=2pt,
+    line width=0.7pt,
+    draw=OrangeLine,
+    fill=OrangeL,
+    inner sep=0pt,
+    font=\bfseries\scriptsize,
+    text=OrangeLine!90!black,
+    minimum width=0.52cm,
+    minimum height=0.48cm,
+    align=center
+  },
+  bubble style/.style={
+    rounded corners=2pt,
+    draw=gray!40,
+    preaction={fill=white},
+    pattern=north east lines,
+    pattern color=gray!30,
+    line width=0.6pt
+  }
+]
 
-![](images/svg/layer-wise-partitioning.svg)
+  % MLSysBook Palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{240,245,252}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{253,242,242}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,246,233}
+  \providecolor{CardBorder}{RGB}{215,222,230}
+  \providecolor{CardFill}{RGB}{248,250,253}
+  \providecolor{TextDark}{RGB}{25,35,45}
+  \providecolor{TextMuted}{RGB}{95,105,115}
 
+  % ===========================================================
+  % UPPER DIAGRAM: LAYER-WISE PARTITIONING ACROSS GPUS
+  % ===========================================================
+
+  % Input Batch
+  \node[rectangle, rounded corners=3.5pt, draw=OrangeLine, fill=OrangeL, line width=0.9pt, inner sep=4.5pt, align=center] (INP) at (0.6, 7.6) {
+    \textbf{\textcolor{OrangeLine!90!black}{Input}}\\[1.5pt]
+    \footnotesize Batch
+  };
+
+  % Stage 0
+  \node[stage card, draw=NavyBlue!40, fill=LightBlue!60] (ST0) at (2.9, 7.6) {
+    \textbf{\scriptsize\textcolor{NavyBlue}{Stage 0 $\cdot$ GPU 0}}\\[2pt]
+    \textbf{\footnotesize Layers 1--4}\\[1pt]
+    \tiny\textcolor{TextMuted}{Embedding + Attn}\\[3pt]
+    \setlength{\fboxsep}{1.5pt}%
+    \fcolorbox{NavyBlue!50}{white}{\tiny L1}\,\fcolorbox{NavyBlue!50}{white}{\tiny L2}\,\fcolorbox{NavyBlue!50}{white}{\tiny L3}\,\fcolorbox{NavyBlue!50}{white}{\tiny L4}
+  };
+
+  % Stage 1
+  \node[stage card, draw=GreenLine!40, fill=GreenFill!60] (ST1) at (6.3, 7.6) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{Stage 1 $\cdot$ GPU 1}}\\[2pt]
+    \textbf{\footnotesize Layers 5--8}\\[1pt]
+    \tiny\textcolor{TextMuted}{Attn + FFN Blocks}\\[3pt]
+    \setlength{\fboxsep}{1.5pt}%
+    \fcolorbox{GreenLine!50}{white}{\tiny L5}\,\fcolorbox{GreenLine!50}{white}{\tiny L6}\,\fcolorbox{GreenLine!50}{white}{\tiny L7}\,\fcolorbox{GreenLine!50}{white}{\tiny L8}
+  };
+
+  % Stage 2
+  \node[stage card, draw=OrangeLine!40, fill=OrangeL!50] (ST2) at (9.7, 7.6) {
+    \textbf{\scriptsize\textcolor{OrangeLine!90!black}{Stage 2 $\cdot$ GPU 2}}\\[2pt]
+    \textbf{\footnotesize Layers 9--12}\\[1pt]
+    \tiny\textcolor{TextMuted}{FFN + LayerNorm}\\[3pt]
+    \setlength{\fboxsep}{1.5pt}%
+    \fcolorbox{OrangeLine!50}{white}{\tiny L9}\,\fcolorbox{OrangeLine!50}{white}{\tiny L10}\,\fcolorbox{OrangeLine!50}{white}{\tiny L11}\,\fcolorbox{OrangeLine!50}{white}{\tiny L12}
+  };
+
+  % Stage 3
+  \node[stage card, draw=purple!30, fill=purple!5] (ST3) at (13.1, 7.6) {
+    \textbf{\scriptsize\textcolor{purple!80!black}{Stage 3 $\cdot$ GPU 3}}\\[2pt]
+    \textbf{\footnotesize Layers 13--16}\\[1pt]
+    \tiny\textcolor{TextMuted}{Output + Criterion}\\[3pt]
+    \setlength{\fboxsep}{1.5pt}%
+    \fcolorbox{purple!40}{white}{\tiny L13}\,\fcolorbox{purple!40}{white}{\tiny L14}\,\fcolorbox{purple!40}{white}{\tiny L15}\,\fcolorbox{purple!40}{white}{\tiny L16}
+  };
+
+  % Boundary P2P Arrows & Badges
+  \draw[->, line width=0.9pt, TextMuted] (INP.east) -- (ST0.west);
+
+  \path (ST0.east) -- (ST1.west) coordinate[midway] (M01);
+  \draw[->, line width=0.9pt, TextMuted] (ST0.east) -- (ST1.west);
+  \node[rectangle, rounded corners=2pt, draw=GreenLine, fill=GreenFill, font=\bfseries\tiny, text=DarkGreen, inner sep=1.8pt] at (M01) {P2P};
+
+  \path (ST1.east) -- (ST2.west) coordinate[midway] (M12);
+  \draw[->, line width=0.9pt, TextMuted] (ST1.east) -- (ST2.west);
+  \node[rectangle, rounded corners=2pt, draw=GreenLine, fill=GreenFill, font=\bfseries\tiny, text=DarkGreen, inner sep=1.8pt] at (M12) {P2P};
+
+  \path (ST2.east) -- (ST3.west) coordinate[midway] (M23);
+  \draw[->, line width=0.9pt, TextMuted] (ST2.east) -- (ST3.west);
+  \node[rectangle, rounded corners=2pt, draw=GreenLine, fill=GreenFill, font=\bfseries\tiny, text=DarkGreen, inner sep=1.8pt] at (M23) {P2P};
+
+  % Loss arrow
+  \draw[->, line width=1.0pt, RedLine] (ST3.south) -- ++(0, -0.4) node[below, font=\bfseries\tiny, text=RedLine] {Loss / Loss Backward};
+
+  % ===========================================================
+  % LOWER PANELS: BUBBLE THEORY (LEFT) & SCHEDULE (RIGHT)
+  % ===========================================================
+
+  % Left Panel: Pipeline Bubble & Communication
+  \node[rectangle, rounded corners=4pt, draw=CardBorder, fill=CardFill, line width=0.8pt, inner sep=6pt, anchor=north west] (LEFT_BOX) at (-0.1, 5.5) {
+    \begin{minipage}{4.7cm}
+      \textbf{\footnotesize\textcolor{NavyBlue}{Pipeline Bubble \& Comm.}}\\[4pt]
+      \textbf{\scriptsize Stages ($p$):} \scriptsize 4 GPUs across pipeline\\[1.5pt]
+      \textbf{\scriptsize Micro-batches ($m$):} \scriptsize 4 micro-batches in flight\\[5pt]
+      \centering
+      \fcolorbox{CardBorder}{white}{%
+        \begin{minipage}{4.2cm}
+          \centering
+          \textbf{\tiny Theoretical Bubble Overhead Fraction}\\[2pt]
+          \textbf{\scriptsize\textcolor{RedLine}{$F_{\text{bubble}} = \frac{p - 1}{p - 1 + m}$}}\\[2pt]
+          \tiny For $p=4, m=4$: $3/(3+4) = 42.9\%$ idle
+        \end{minipage}%
+      }\\[5pt]
+      \raggedright
+      \textbf{\tiny\textcolor{DarkGreen}{Mitigation:}} \tiny Scale $m \gg p$. $m=32 \implies 8.6\%$ bubble, but raises in-flight activation memory.\\[5pt]
+      \centering
+      \fcolorbox{SteelBlue!40}{LightBlue!50}{%
+        \begin{minipage}{4.2cm}
+          \textbf{\tiny\textcolor{NavyBlue}{P2P Boundary Activation Transfer:}}\\[1pt]
+          \tiny $\cdot$ \textbf{Volume:} $\mathcal{O}(B_{\text{micro}} \cdot s \cdot h)$ tensor size\\
+          \tiny $\cdot$ \textbf{Fabric:} Inter-node InfiniBand / RoCE\\
+          \tiny $\cdot$ \textbf{Ckpt:} Store activations at boundaries
+        \end{minipage}%
+      }
+    \end{minipage}
+  };
+
+  % Right Panel: Pipeline Schedule Grid
+  \node[rectangle, rounded corners=4pt, draw=CardBorder, fill=CardFill, line width=0.8pt, inner sep=6pt, anchor=north east] (RIGHT_BOX) at (14.6, 5.5) {
+    \begin{minipage}{9.2cm}
+      % Header & Legend
+      \textbf{\footnotesize\textcolor{NavyBlue}{Pipeline Schedule: Forward \& Backward Flow}}\\[3pt]
+      \tikz[baseline=-2pt]{\node[f block, minimum width=0.30cm, minimum height=0.22cm] {};}~\tiny Forward (F)\quad
+      \tikz[baseline=-2pt]{\node[b block, minimum width=0.30cm, minimum height=0.22cm] {};}~\tiny Backward (B)\quad
+      \tikz[baseline=-2pt]{\filldraw[bubble style] (0,-0.11) rectangle (0.35,0.11); }~\tiny Idle Bubble\\[8pt]
+
+      % Timeline grid
+      \begin{tikzpicture}
+        % Row labels
+        \node[anchor=east, font=\scriptsize\bfseries, text=NavyBlue] at (-0.35, 2.34) {GPU 0};
+        \node[anchor=east, font=\scriptsize\bfseries, text=DarkGreen] at (-0.35, 1.64) {GPU 1};
+        \node[anchor=east, font=\scriptsize\bfseries, text=OrangeLine!90!black] at (-0.35, 0.94) {GPU 2};
+        \node[anchor=east, font=\scriptsize\bfseries, text=purple!80!black] at (-0.35, 0.24) {GPU 3};
+
+        % Time axis line
+        \draw[->, line width=0.8pt, TextMuted] (-0.2, -0.4) -- (7.5, -0.4) node[midway, below=2pt, font=\bfseries\tiny, text=TextDark] {Execution Time (Clock Cycles / Steps) $\rightarrow$};
+
+        % --- GPU 0 (y: 2.10 to 2.58, center 2.34) ---
+        \node[f block] at (0.26, 2.34) {F0};
+        \node[f block] at (0.86, 2.34) {F1};
+        \node[f block] at (1.46, 2.34) {F2};
+        \node[f block] at (2.06, 2.34) {F3};
+        \filldraw[bubble style] (2.36, 2.10) rectangle (4.76, 2.58);
+        \node[font=\tiny\bfseries, text=TextDark!80, anchor=center] at (3.56, 2.34) {Idle Bubble};
+        \node[b block] at (5.06, 2.34) {B3};
+        \node[b block] at (5.66, 2.34) {B2};
+        \node[b block] at (6.26, 2.34) {B1};
+        \node[b block] at (6.86, 2.34) {B0};
+
+        % --- GPU 1 (y: 1.40 to 1.88, center 1.64) ---
+        \filldraw[bubble style] (0.00, 1.40) rectangle (0.52, 1.88);
+        \node[f block] at (0.86, 1.64) {F0};
+        \node[f block] at (1.46, 1.64) {F1};
+        \node[f block] at (2.06, 1.64) {F2};
+        \node[f block] at (2.66, 1.64) {F3};
+        \filldraw[bubble style] (2.96, 1.40) rectangle (4.16, 1.88);
+        \node[font=\tiny\bfseries, text=TextDark!80, anchor=center] at (3.56, 1.64) {Idle};
+        \node[b block] at (4.46, 1.64) {B3};
+        \node[b block] at (5.06, 1.64) {B2};
+        \node[b block] at (5.66, 1.64) {B1};
+        \node[b block] at (6.26, 1.64) {B0};
+        \filldraw[bubble style] (6.56, 1.40) rectangle (7.08, 1.88);
+
+        % --- GPU 2 (y: 0.70 to 1.18, center 0.94) ---
+        \filldraw[bubble style] (0.00, 0.70) rectangle (1.12, 1.18);
+        \node[font=\tiny\bfseries, text=TextDark!80, anchor=center] at (0.56, 0.94) {Fill};
+        \node[f block] at (1.46, 0.94) {F0};
+        \node[f block] at (2.06, 0.94) {F1};
+        \node[f block] at (2.66, 0.94) {F2};
+        \node[f block] at (3.26, 0.94) {F3};
+        \node[b block] at (3.86, 0.94) {B3};
+        \node[b block] at (4.46, 0.94) {B2};
+        \node[b block] at (5.06, 0.94) {B1};
+        \node[b block] at (5.66, 0.94) {B0};
+        \filldraw[bubble style] (5.96, 0.70) rectangle (7.08, 1.18);
+        \node[font=\tiny\bfseries, text=TextDark!80, anchor=center] at (6.52, 0.94) {Drain};
+
+        % --- GPU 3 (y: 0.00 to 0.48, center 0.24) ---
+        \filldraw[bubble style] (0.00, 0.00) rectangle (1.72, 0.48);
+        \node[font=\tiny\bfseries, text=TextDark!80, anchor=center] at (0.86, 0.24) {Fill Bubble};
+        \node[f block] at (2.06, 0.24) {F0};
+        \node[f block] at (2.66, 0.24) {F1};
+        \node[f block] at (3.26, 0.24) {F2};
+        \node[f block] at (3.86, 0.24) {F3};
+        \node[b block] at (4.46, 0.24) {B3};
+        \node[b block] at (5.06, 0.24) {B2};
+        \node[b block] at (5.66, 0.24) {B1};
+        \node[b block] at (6.26, 0.24) {B0};
+        \filldraw[bubble style] (6.56, 0.00) rectangle (7.08, 0.48);
+
+        % Phase callouts below axis
+        \draw[line width=1.0pt, RedLine] (0.0, -0.95) -- (1.72, -0.95) node[midway, below=1pt, font=\bfseries\tiny, text=RedLine] {Fill Bubble ($p-1$)};
+        \draw[line width=1.0pt, RedLine] (2.40, -0.95) -- (5.00, -0.95) node[midway, below=1pt, font=\bfseries\tiny, text=RedLine] {Turnaround / Drain Bubble};
+      \end{tikzpicture}
+    \end{minipage}
+  };
+
+\end{tikzpicture}
+```
 :::
 
 Sequential processing introduces device idle time, as each device must wait for the previous device to complete its computation before beginning work. While device 1 processes the initial blocks, devices 2, 3, and 4 remain inactive. Similarly, when device 2 begins its computation, device 1 sits idle. This pattern of waiting and idle time reduces hardware utilization efficiency compared to other parallelization strategies.
@@ -2041,7 +3961,179 @@ Sequential processing introduces device idle time, as each device must wait for 
 Pipeline parallelism extends layer-wise partitioning by introducing microbatching to reduce device idle time. Instead of waiting for an entire batch to sequentially pass through all devices, the computation is divided into smaller segments called microbatches, with overlapping execution across pipeline stages (@fig-pipeline-parallelism). In this schedule, each row represents a device processing model layers across microbatches, with forward activations flowing downstream and backward gradients propagating upstream. The overlap reduces, but does not eliminate, idle pipeline slots.
 
 ::: {#fig-pipeline-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Pipeline parallelism schedule**: A 4-stage pipeline processes 4 microbatches through forward passes ($F_{i,j}$) and backward passes ($B_{i,j}$) over time. Rows represent pipeline stages, and columns represent time steps. Staggering the work lets one stage process a microbatch while another handles an earlier or later microbatch, reducing idle time without eliminating the fill, drain, and dependency bubbles visible in the schedule." fig-alt="Pipeline schedule grid showing four stages processing four microbatches. Forward passes stagger diagonally across time, backward passes follow in reverse order, and blank cells show pipeline bubbles during fill, drain, and dependencies."}
-![](images/svg/pipeline-parallelism.svg)
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  cell/.style={
+    rounded corners=2.5pt,
+    line width=0.8pt,
+    minimum width=0.92cm,
+    minimum height=0.82cm,
+    align=center,
+    inner sep=1pt
+  },
+  fwd cell/.style={
+    cell,
+    draw=SteelBlue,
+    fill=LightBlue,
+    text=NavyBlue
+  },
+  bwd cell/.style={
+    cell,
+    draw=GreenLine,
+    fill=GreenFill,
+    text=DarkGreen
+  },
+  idle cell/.style={
+    cell,
+    draw=CardBorder,
+    fill=gray!7,
+    text=TextMuted!60
+  }
+]
+
+  % Dimensions: 14 columns (t1 to t14), 4 rows (Stage 0 to Stage 3)
+  \def\colw{1.04}
+  \def\rowh{0.92}
+
+  % Column headers (Time steps)
+  \node[font=\bfseries\footnotesize, text=TextDark, anchor=east] at (-0.6, 0.45) {Stage};
+  \foreach \t in {1,...,14} {
+    \node[font=\bfseries\scriptsize, text=TextMuted] at ({(\t-1)*\colw}, 0.45) {$t_{\t}$};
+  }
+  % Time arrow
+  \draw[->, line width=0.8pt, TextMuted] (-0.3, 0.90) -- ({13*\colw + 0.3}, 0.90)
+    node[midway, above=2pt, font=\scriptsize\bfseries, text=TextMuted] {Execution Time ($t$) $\longrightarrow$};
+
+  % Row labels
+  \node[align=right, anchor=east] at (-0.6, {0 * -\rowh}) {
+    \textbf{\small Stage 0}\\[-1pt]\scriptsize\textcolor{TextMuted}{(GPU 0)}
+  };
+  \node[align=right, anchor=east] at (-0.6, {1 * -\rowh}) {
+    \textbf{\small Stage 1}\\[-1pt]\scriptsize\textcolor{TextMuted}{(GPU 1)}
+  };
+  \node[align=right, anchor=east] at (-0.6, {2 * -\rowh}) {
+    \textbf{\small Stage 2}\\[-1pt]\scriptsize\textcolor{TextMuted}{(GPU 2)}
+  };
+  \node[align=right, anchor=east] at (-0.6, {3 * -\rowh}) {
+    \textbf{\small Stage 3}\\[-1pt]\scriptsize\textcolor{TextMuted}{(GPU 3)}
+  };
+
+  % Grid Cells:
+  % Stage 0 (y=0)
+  \node[fwd cell] at ({0*\colw}, 0) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_1$};
+  \node[fwd cell] at ({1*\colw}, 0) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_2$};
+  \node[fwd cell] at ({2*\colw}, 0) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_3$};
+  \node[fwd cell] at ({3*\colw}, 0) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_4$};
+  \foreach \c in {4,5,6,7,8,9} {
+    \node[idle cell] at ({\c*\colw}, 0) {\tiny idle};
+  }
+  \node[bwd cell] at ({10*\colw}, 0) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_4$};
+  \node[bwd cell] at ({11*\colw}, 0) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_3$};
+  \node[bwd cell] at ({12*\colw}, 0) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_2$};
+  \node[bwd cell] at ({13*\colw}, 0) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_1$};
+
+  % Stage 1 (y=-1*\rowh)
+  \node[idle cell] at ({0*\colw}, {-1*\rowh}) {\tiny idle};
+  \node[fwd cell] at ({1*\colw}, {-1*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_1$};
+  \node[fwd cell] at ({2*\colw}, {-1*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_2$};
+  \node[fwd cell] at ({3*\colw}, {-1*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_3$};
+  \node[fwd cell] at ({4*\colw}, {-1*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_4$};
+  \foreach \c in {5,6,7,8} {
+    \node[idle cell] at ({\c*\colw}, {-1*\rowh}) {\tiny idle};
+  }
+  \node[bwd cell] at ({9*\colw}, {-1*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_4$};
+  \node[bwd cell] at ({10*\colw}, {-1*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_3$};
+  \node[bwd cell] at ({11*\colw}, {-1*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_2$};
+  \node[bwd cell] at ({12*\colw}, {-1*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_1$};
+  \node[idle cell] at ({13*\colw}, {-1*\rowh}) {\tiny idle};
+
+  % Stage 2 (y=-2*\rowh)
+  \node[idle cell] at ({0*\colw}, {-2*\rowh}) {\tiny idle};
+  \node[idle cell] at ({1*\colw}, {-2*\rowh}) {\tiny idle};
+  \node[fwd cell] at ({2*\colw}, {-2*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_1$};
+  \node[fwd cell] at ({3*\colw}, {-2*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_2$};
+  \node[fwd cell] at ({4*\colw}, {-2*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_3$};
+  \node[fwd cell] at ({5*\colw}, {-2*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_4$};
+  \node[idle cell] at ({6*\colw}, {-2*\rowh}) {\tiny idle};
+  \node[idle cell] at ({7*\colw}, {-2*\rowh}) {\tiny idle};
+  \node[bwd cell] at ({8*\colw}, {-2*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_4$};
+  \node[bwd cell] at ({9*\colw}, {-2*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_3$};
+  \node[bwd cell] at ({10*\colw}, {-2*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_2$};
+  \node[bwd cell] at ({11*\colw}, {-2*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_1$};
+  \node[idle cell] at ({12*\colw}, {-2*\rowh}) {\tiny idle};
+  \node[idle cell] at ({13*\colw}, {-2*\rowh}) {\tiny idle};
+
+  % Stage 3 (y=-3*\rowh)
+  \node[idle cell] at ({0*\colw}, {-3*\rowh}) {\tiny idle};
+  \node[idle cell] at ({1*\colw}, {-3*\rowh}) {\tiny idle};
+  \node[idle cell] at ({2*\colw}, {-3*\rowh}) {\tiny idle};
+  \node[fwd cell] at ({3*\colw}, {-3*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_1$};
+  \node[fwd cell] at ({4*\colw}, {-3*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_2$};
+  \node[fwd cell] at ({5*\colw}, {-3*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_3$};
+  \node[fwd cell] (f3last) at ({6*\colw}, {-3*\rowh}) {\textbf{\footnotesize F}\\[-2pt]\tiny $m_4$};
+  \node[bwd cell] (b3first) at ({7*\colw}, {-3*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_4$};
+  \node[bwd cell] at ({8*\colw}, {-3*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_3$};
+  \node[bwd cell] at ({9*\colw}, {-3*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_2$};
+  \node[bwd cell] at ({10*\colw}, {-3*\rowh}) {\textbf{\footnotesize B}\\[-2pt]\tiny $m_1$};
+  \node[idle cell] at ({11*\colw}, {-3*\rowh}) {\tiny idle};
+  \node[idle cell] at ({12*\colw}, {-3*\rowh}) {\tiny idle};
+  \node[idle cell] at ({13*\colw}, {-3*\rowh}) {\tiny idle};
+
+  % Brackets below schedule
+  % Startup bubble bracket (t1..t3 on Stage 3)
+  \draw[line width=1.0pt, RedLine] (-0.46, {-3*\rowh - 0.58}) -- ({2*\colw + 0.46}, {-3*\rowh - 0.58})
+    node[midway, below=3pt, font=\bfseries\scriptsize, text=RedLine] {Startup bubble ($p-1 = 3$ steps)};
+  \draw[line width=1.0pt, RedLine] (-0.46, {-3*\rowh - 0.48}) -- (-0.46, {-3*\rowh - 0.58});
+  \draw[line width=1.0pt, RedLine] ({2*\colw + 0.46}, {-3*\rowh - 0.48}) -- ({2*\colw + 0.46}, {-3*\rowh - 0.58});
+
+  % Drain bubble bracket (t12..t14 on Stage 3)
+  \draw[line width=1.0pt, RedLine] ({11*\colw - 0.46}, {-3*\rowh - 0.58}) -- ({13*\colw + 0.46}, {-3*\rowh - 0.58})
+    node[midway, below=3pt, font=\bfseries\scriptsize, text=RedLine] {Drain bubble ($p-1 = 3$ steps)};
+  \draw[line width=1.0pt, RedLine] ({11*\colw - 0.46}, {-3*\rowh - 0.48}) -- ({11*\colw - 0.46}, {-3*\rowh - 0.58});
+  \draw[line width=1.0pt, RedLine] ({13*\colw + 0.46}, {-3*\rowh - 0.48}) -- ({13*\colw + 0.46}, {-3*\rowh - 0.58});
+
+  % Bottom Panel: Legend and Bubble Formula Card
+  \node[
+    draw=CardBorder,
+    fill=CardFill,
+    rounded corners=5pt,
+    line width=0.8pt,
+    anchor=north,
+    minimum width=15.8cm,
+    minimum height=2.65cm
+  ] (card) at (5.95, {-3*\rowh - 1.25}) {};
+
+  % Inside Card: Legend row (precisely positioned)
+  \node[fwd cell, minimum width=0.65cm, minimum height=0.52cm] at ($(card.north west) + (1.2, -0.42)$) {\textbf{\tiny F}};
+  \node[anchor=west, font=\footnotesize, text=TextDark] at ($(card.north west) + (1.65, -0.42)$) {\textbf{Forward pass} ($F_{i,j}$)};
+
+  \node[bwd cell, minimum width=0.65cm, minimum height=0.52cm] at ($(card.north west) + (6.3, -0.42)$) {\textbf{\tiny B}};
+  \node[anchor=west, font=\footnotesize, text=TextDark] at ($(card.north west) + (6.75, -0.42)$) {\textbf{Backward pass} ($B_{i,j}$)};
+
+  \node[idle cell, minimum width=0.65cm, minimum height=0.52cm] at ($(card.north west) + (11.5, -0.42)$) {\tiny idle};
+  \node[anchor=west, font=\footnotesize, text=TextDark] at ($(card.north west) + (11.95, -0.42)$) {\textbf{Pipeline bubble} (idle slot)};
+
+  % Card horizontal divider
+  \draw[line width=0.5pt, CardBorder] ($(card.north west) + (0.5, -0.78)$) -- ($(card.north east) + (-0.5, -0.78)$);
+
+  % Formula header
+  \node[font=\bfseries\footnotesize, text=NavyBlue] at ($(card.north) + (0, -1.06)$) {
+    Synchronous Pipeline Bubble Fraction
+  };
+  \node[font=\small] at ($(card.north) + (0, -1.48)$) {
+    $\displaystyle\text{Bubble Fraction} = \frac{p-1}{p+m-1}$
+  };
+
+  % Explanatory caption
+  \node[font=\footnotesize, text=TextDark, align=center] at ($(card.north) + (0, -2.12)$) {
+    \textbf{Equal microbatches ($m = p = 4$):} $\frac{4-1}{4+4-1} = \frac{3}{7} \approx 42.9\%$ compute capacity lost to idle bubbles.\\
+    \textbf{Amortization via microbatch scaling ($m \gg p$):} With $m = 32 \implies \frac{3}{35} \approx 8.6\%$ bubble tax ($>4\times$ utilization gain).
+  };
+
+\end{tikzpicture}
+```
 :::
 
 ::: {#dfn-distributed-training-pipeline-parallelism .callout-definition title="Pipeline parallelism"}
@@ -2210,7 +4302,211 @@ Each GPU computes a partial sum, and the system pays one AllReduce to combine th
 
 ::: {#fig-tensor-parallel-split fig-env="figure" fig-pos="htb" fig-cap="**Matrix partitioning under tensor parallelism**: The first linear layer (for example, QKV) is split column-wise as $[W_1 | W_2]$, and the second (for example, the output projection) is split row-wise as $[W_1 ; W_2]$. This Megatron-LM arrangement passes the intermediate result directly between the two splits and requires one AllReduce after the second layer to sum partial outputs." fig-alt="Two-panel diagram of tensor parallelism. Left: Column Parallel splits weight matrix into columns, GPUs compute independently. Right: Row Parallel splits by rows, requires AllReduce to sum partial results."}
 
-![](images/svg/tensor-parallel-split.svg)
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  header node/.style={
+    font=\bfseries\normalsize,
+    text=NavyBlue,
+    align=center
+  },
+  subhead node/.style={
+    font=\scriptsize,
+    text=TextMuted,
+    align=center,
+    text width=8.2cm
+  },
+  block/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.8pt,
+    align=center,
+    inner sep=4pt
+  },
+  gpu0 block/.style={
+    block,
+    draw=SteelBlue,
+    fill=LightBlue,
+    text=NavyBlue
+  },
+  gpu1 block/.style={
+    block,
+    draw=GreenLine,
+    fill=GreenFill,
+    text=DarkGreen
+  },
+  neutral block/.style={
+    block,
+    draw=CardBorder,
+    fill=CardFill,
+    text=TextDark
+  },
+  allreduce block/.style={
+    block,
+    draw=RedLine,
+    fill=RedFill,
+    text=RedLine
+  },
+  summary card/.style={
+    block,
+    draw=OrangeLine!80,
+    fill=OrangeL,
+    text=TextDark,
+    inner sep=5pt,
+    text width=7.4cm,
+    align=center
+  }
+]
+
+  \def\lx{0}
+  \def\rx{9.4}
+  \def\midx{4.7}
+
+  % -------------------------------------------------------------
+  % LEFT PANEL: Column Parallel
+  % -------------------------------------------------------------
+  % Header & subhead
+  \node[header node] at (\lx, 7.4) {Column-Parallel Linear Layer};
+  \node[subhead node] at (\lx, 6.98) {Weight split along columns: $W = [W_1 \mid W_2]$\\(e.g., QKV projection, MLP 1)};
+
+  % Input x
+  \node[neutral block, text width=6.4cm, minimum height=0.85cm] (col_x) at (\lx, 5.7) {
+    \textbf{Input Tensor $\mathbf{X}$}\\[1pt]
+    \scriptsize\textcolor{TextMuted}{Replicated / broadcast to both GPUs \ $[B, S, d_{\text{model}}]$}
+  };
+
+  % GPU 0 & GPU 1 Weights
+  \node[gpu0 block, minimum width=2.8cm, minimum height=1.35cm] (col_w1) at (\lx - 1.7, 3.8) {
+    \textbf{Weight Slice $W_1$}\\[1pt]
+    \scriptsize\textcolor{SteelBlue}{\textbf{GPU 0}}\\[2pt]
+    \tiny $[d_{\text{model}} \times d_{\text{ff}}/2]$
+  };
+  \node[gpu1 block, minimum width=2.8cm, minimum height=1.35cm] (col_w2) at (\lx + 1.7, 3.8) {
+    \textbf{Weight Slice $W_2$}\\[1pt]
+    \scriptsize\textcolor{DarkGreen}{\textbf{GPU 1}}\\[2pt]
+    \tiny $[d_{\text{model}} \times d_{\text{ff}}/2]$
+  };
+
+  % GPU 0 & GPU 1 Independent Local Multiplies
+  \node[gpu0 block, minimum width=2.8cm, minimum height=1.05cm] (col_y1) at (\lx - 1.7, 1.8) {
+    \textbf{$\mathbf{Y}_1 = \mathbf{X} W_1$}\\[1pt]
+    \scriptsize\textcolor{SteelBlue}{Local output (GPU 0)}\\[1pt]
+    \tiny $[B, S, d_{\text{ff}}/2]$
+  };
+  \node[gpu1 block, minimum width=2.8cm, minimum height=1.05cm] (col_y2) at (\lx + 1.7, 1.8) {
+    \textbf{$\mathbf{Y}_2 = \mathbf{X} W_2$}\\[1pt]
+    \scriptsize\textcolor{DarkGreen}{Local output (GPU 1)}\\[1pt]
+    \tiny $[B, S, d_{\text{ff}}/2]$
+  };
+
+  % Concatenated output
+  \node[neutral block, text width=6.8cm, minimum height=0.95cm] (col_out) at (\lx, -0.3) {
+    \textbf{Concatenated Output $\mathbf{Y} = [\mathbf{Y}_1 \mid \mathbf{Y}_2]$}\\[1pt]
+    \scriptsize\textcolor{TextDark}{$[\mathbf{X}W_1 \mid \mathbf{X}W_2]$ directly feeds Row-Parallel layer}\\[1pt]
+    \tiny\textcolor{TextMuted}{Size: $[B, S, d_{\text{ff}}]$ (zero inter-GPU communication required)}
+  };
+
+  % Summary card Left
+  \node[summary card] (col_summary) at (\lx, -2.55) {
+    \textbf{\footnotesize Forward:} \textcolor{DarkGreen}{\textbf{Zero communication}}\\[1pt]
+    \scriptsize(no AllReduce required in forward pass)\\[3pt]
+    \textbf{\footnotesize Backward:} AllReduce required to aggregate gradients $\nabla_{\mathbf{X}}$
+  };
+
+  % Connections Left
+  \draw[->, line width=0.9pt, SteelBlue] ($(col_x.south) + (-1.7, 0)$) -- (col_w1.north);
+  \draw[->, line width=0.9pt, DarkGreen] ($(col_x.south) + (1.7, 0)$) -- (col_w2.north);
+
+  \draw[->, line width=0.9pt, SteelBlue] (col_w1.south) -- (col_y1.north)
+    node[midway, right=1pt, font=\scriptsize\bfseries, text=SteelBlue] {MatMul};
+  \draw[->, line width=0.9pt, DarkGreen] (col_w2.south) -- (col_y2.north)
+    node[midway, right=1pt, font=\scriptsize\bfseries, text=DarkGreen] {MatMul};
+
+  \draw[->, line width=0.9pt, SteelBlue] (col_y1.south) -- (col_y1.south |- col_out.north);
+  \draw[->, line width=0.9pt, DarkGreen] (col_y2.south) -- (col_y2.south |- col_out.north);
+
+  % -------------------------------------------------------------
+  % DIVIDER
+  % -------------------------------------------------------------
+  \draw[line width=0.8pt, CardBorder, dashed] (\midx, 7.6) -- (\midx, -3.1);
+
+  % -------------------------------------------------------------
+  % RIGHT PANEL: Row Parallel
+  % -------------------------------------------------------------
+  % Header & subhead
+  \node[header node] at (\rx, 7.4) {Row-Parallel Linear Layer};
+  \node[subhead node] at (\rx, 6.98) {Weight split along rows: $W = [W_1 ; W_2]$\\(e.g., Attention Out, MLP 2)};
+
+  % Sharded Input
+  \node[gpu0 block, minimum width=2.8cm, minimum height=0.85cm] (row_x1) at (\rx - 1.7, 5.7) {
+    \textbf{Input Shard $\mathbf{X}_1$}\\[1pt]
+    \scriptsize\textcolor{SteelBlue}{\textbf{GPU 0}} \tiny$[B, S, d_{\text{ff}}/2]$
+  };
+  \node[gpu1 block, minimum width=2.8cm, minimum height=0.85cm] (row_x2) at (\rx + 1.7, 5.7) {
+    \textbf{Input Shard $\mathbf{X}_2$}\\[1pt]
+    \scriptsize\textcolor{DarkGreen}{\textbf{GPU 1}} \tiny$[B, S, d_{\text{ff}}/2]$
+  };
+
+  % GPU 0 & GPU 1 Weights
+  \node[gpu0 block, minimum width=2.8cm, minimum height=1.35cm] (row_w1) at (\rx - 1.7, 3.8) {
+    \textbf{Weight Slice $W_1$}\\[1pt]
+    \scriptsize\textcolor{SteelBlue}{\textbf{GPU 0}}\\[2pt]
+    \tiny $[d_{\text{ff}}/2 \times d_{\text{model}}]$
+  };
+  \node[gpu1 block, minimum width=2.8cm, minimum height=1.35cm] (row_w2) at (\rx + 1.7, 3.8) {
+    \textbf{Weight Slice $W_2$}\\[1pt]
+    \scriptsize\textcolor{DarkGreen}{\textbf{GPU 1}}\\[2pt]
+    \tiny $[d_{\text{ff}}/2 \times d_{\text{model}}]$
+  };
+
+  % GPU 0 & GPU 1 Partial Sum Multiplies
+  \node[gpu0 block, minimum width=2.8cm, minimum height=1.05cm] (row_y1) at (\rx - 1.7, 1.8) {
+    \textbf{$\mathbf{Y}_1 = \mathbf{X}_1 W_1$}\\[1pt]
+    \scriptsize\textcolor{SteelBlue}{Partial sum (GPU 0)}\\[1pt]
+    \tiny $[B, S, d_{\text{model}}]$
+  };
+  \node[gpu1 block, minimum width=2.8cm, minimum height=1.05cm] (row_y2) at (\rx + 1.7, 1.8) {
+    \textbf{$\mathbf{Y}_2 = \mathbf{X}_2 W_2$}\\[1pt]
+    \scriptsize\textcolor{DarkGreen}{Partial sum (GPU 1)}\\[1pt]
+    \tiny $[B, S, d_{\text{model}}]$
+  };
+
+  % AllReduce Reduction Node
+  \node[allreduce block, text width=6.8cm, minimum height=0.85cm] (row_ar) at (\rx, 0.45) {
+    \textbf{AllReduce (Sum):} $\mathbf{Y} = \mathbf{X}_1 W_1 + \mathbf{X}_2 W_2$\\[1pt]
+    \scriptsize\textcolor{RedLine}{Synchronizes partial sums across all tensor ranks}
+  };
+
+  % Full Output
+  \node[neutral block, text width=6.8cm, minimum height=0.75cm] (row_out) at (\rx, -0.90) {
+    \textbf{Full Output $\mathbf{Y} = \mathbf{X}W$}\\[1pt]
+    \scriptsize\textcolor{TextMuted}{Replicated identically across all GPUs \ $[B, S, d_{\text{model}}]$}
+  };
+
+  % Summary card Right
+  \node[summary card] (row_summary) at (\rx, -2.70) {
+    \textbf{\footnotesize Forward:} \textcolor{RedLine}{\textbf{One AllReduce collective}}\\[1pt]
+    \scriptsize(sums partial products across tensor ranks)\\[3pt]
+    \textbf{\footnotesize Backward:} Zero extra communication ($\nabla_{W_i} = \mathbf{X}_i^T \nabla_{\mathbf{Y}}$)
+  };
+
+  % Connections Right
+  \draw[->, line width=0.9pt, SteelBlue] (row_x1.south) -- (row_w1.north);
+  \draw[->, line width=0.9pt, DarkGreen] (row_x2.south) -- (row_w2.north);
+
+  \draw[->, line width=0.9pt, SteelBlue] (row_w1.south) -- (row_y1.north)
+    node[midway, right=1pt, font=\scriptsize\bfseries, text=SteelBlue] {MatMul};
+  \draw[->, line width=0.9pt, DarkGreen] (row_w2.south) -- (row_y2.north)
+    node[midway, right=1pt, font=\scriptsize\bfseries, text=DarkGreen] {MatMul};
+
+  \draw[->, line width=0.9pt, SteelBlue] (row_y1.south) -- (row_y1.south |- row_ar.north);
+  \draw[->, line width=0.9pt, DarkGreen] (row_y2.south) -- (row_y2.south |- row_ar.north);
+
+  \draw[->, line width=0.9pt, RedLine] (row_ar.south) -- (row_out.north);
+
+\end{tikzpicture}
+```
 
 :::
 
@@ -2329,7 +4625,288 @@ In a distributed setting, experts are partitioned across workers. If we have 8 G
 4.  **All-to-All Combine**: Processed tokens are routed back to their original device to resume the sequence.
 
 ::: {#fig-moe-all-to-all-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-experts (MoE) AllToAll routing**: Expert parallelism requires a unique \"All-to-All\" communication pattern. Tokens from a local batch are routed by a gating network to experts sharded across the cluster. This involves a global shuffle where every GPU sends tokens to and receives tokens from potentially every other GPU, stressing the cluster's bisection bandwidth." fig-alt="Diagram showing tokens being routed from a gating network to four different experts sharded across multiple GPUs, then returning to the original sequence order."}
-![](images/svg/moe-all-to-all-routing.svg){width=100%}
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  step_banner/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.8pt,
+    inner sep=3.5pt,
+    font=\bfseries\scriptsize,
+    align=center,
+    minimum width=3.2cm
+  },
+  card/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.7pt,
+    align=center,
+    inner sep=3pt
+  },
+  rank0/.style={card, draw=SteelBlue, fill=LightBlue, text=NavyBlue},
+  rank1/.style={card, draw=GreenLine, fill=GreenFill, text=DarkGreen},
+  rank2/.style={card, draw=OrangeLine, fill=OrangeL, text=OrangeLine!80!black},
+  rank3/.style={card, draw=PurpleLine, fill=PurpleFill, text=PurpleLine},
+  gate/.style={card, draw=OrangeLine, fill=OrangeL!50, text=TextDark},
+  alltoall_dispatch/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=0.9pt,
+    draw=RedLine,
+    fill=RedFill,
+    text=RedLine,
+    align=center,
+    inner sep=4pt
+  },
+  alltoall_combine/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=0.9pt,
+    draw=GreenLine,
+    fill=GreenFill,
+    text=DarkGreen,
+    align=center,
+    inner sep=4pt
+  }
+]
+
+  % -------------------------------------------------------------
+  % TOP STEP BANNERS (Evenly spaced across width)
+  % -------------------------------------------------------------
+  \node[step_banner, draw=OrangeLine, fill=OrangeL, text=OrangeLine!80!black]
+    (s1) at (0.7, 5.0) {Step 1 $\cdot$ Gating \& Routing};
+  \node[step_banner, draw=RedLine, fill=RedFill, text=RedLine]
+    (s2) at (5.1, 5.0) {Step 2 $\cdot$ Dispatch};
+  \node[step_banner, draw=NavyBlue, fill=LightBlue, text=NavyBlue]
+    (s3) at (9.5, 5.0) {Step 3 $\cdot$ Expert FFNs};
+  \node[step_banner, draw=GreenLine, fill=GreenFill, text=DarkGreen]
+    (s4) at (13.9, 5.0) {Step 4 $\cdot$ Combine \& Output};
+
+  \draw[->, line width=0.9pt, TextMuted] (s1.east) -- (s2.west);
+  \draw[->, line width=0.9pt, TextMuted] (s2.east) -- (s3.west);
+  \draw[->, line width=0.9pt, TextMuted] (s3.east) -- (s4.west);
+
+  % -------------------------------------------------------------
+  % 4 PIPELINE ROWS (Ranks 0 to 3)
+  % -------------------------------------------------------------
+  \def\wcard{2.2cm}
+  \def\hcard{0.85cm}
+
+  % Row 0 (y = 3.6)
+  \node[rank0, minimum width=\wcard, minimum height=\hcard] (r0) at (0, 3.6) {
+    \textbf{\scriptsize Rank 0}\\[-1pt]
+    \tiny Tokens: $T_1$--$T_4$\\[-1pt]
+    \tiny\textcolor{TextMuted}{Local batch}
+  };
+  \node[gate, minimum width=\wcard, minimum height=\hcard] (g0) at (2.7, 3.6) {
+    \textbf{\scriptsize Router / Gate}\\[-1pt]
+    \tiny\textcolor{OrangeLine!90!black}{Top-$k$ Softmax}\\[-1pt]
+    \tiny Assign Experts
+  };
+  \node[rank0, minimum width=2.4cm, minimum height=\hcard] (e0) at (8.5, 3.6) {
+    \textbf{\scriptsize Expert 0 (FFN)}\\[-1pt]
+    \tiny Capacity: $C \cdot \frac{k N}{E}$\\[-1pt]
+    \tiny Host: GPU Rank 0
+  };
+  \node[rank0, minimum width=\wcard, minimum height=\hcard] (o0) at (14.2, 3.6) {
+    \textbf{\scriptsize Output Rank 0}\\[-1pt]
+    \tiny Weighted Sum\\[-1pt]
+    \tiny $\sum g_i \cdot \text{Expert}_i(\mathbf{x})$
+  };
+
+  % Row 1 (y = 2.4)
+  \node[rank1, minimum width=\wcard, minimum height=\hcard] (r1) at (0, 2.4) {
+    \textbf{\scriptsize Rank 1}\\[-1pt]
+    \tiny Tokens: $T_5$--$T_8$\\[-1pt]
+    \tiny\textcolor{TextMuted}{Local batch}
+  };
+  \node[gate, minimum width=\wcard, minimum height=\hcard] (g1) at (2.7, 2.4) {
+    \textbf{\scriptsize Router / Gate}\\[-1pt]
+    \tiny\textcolor{OrangeLine!90!black}{Top-$k$ Softmax}\\[-1pt]
+    \tiny Assign Experts
+  };
+  \node[rank1, minimum width=2.4cm, minimum height=\hcard] (e1) at (8.5, 2.4) {
+    \textbf{\scriptsize Expert 1 (FFN)}\\[-1pt]
+    \tiny Capacity: $C \cdot \frac{k N}{E}$\\[-1pt]
+    \tiny Host: GPU Rank 1
+  };
+  \node[rank1, minimum width=\wcard, minimum height=\hcard] (o1) at (14.2, 2.4) {
+    \textbf{\scriptsize Output Rank 1}\\[-1pt]
+    \tiny Weighted Sum\\[-1pt]
+    \tiny $\sum g_i \cdot \text{Expert}_i(\mathbf{x})$
+  };
+
+  % Row 2 (y = 1.2)
+  \node[rank2, minimum width=\wcard, minimum height=\hcard] (r2) at (0, 1.2) {
+    \textbf{\scriptsize Rank 2}\\[-1pt]
+    \tiny Tokens: $T_9$--$T_{12}$\\[-1pt]
+    \tiny\textcolor{TextMuted}{Local batch}
+  };
+  \node[gate, minimum width=\wcard, minimum height=\hcard] (g2) at (2.7, 1.2) {
+    \textbf{\scriptsize Router / Gate}\\[-1pt]
+    \tiny\textcolor{OrangeLine!90!black}{Top-$k$ Softmax}\\[-1pt]
+    \tiny Assign Experts
+  };
+  \node[rank2, minimum width=2.4cm, minimum height=\hcard] (e2) at (8.5, 1.2) {
+    \textbf{\scriptsize Expert 2 (FFN)}\\[-1pt]
+    \tiny Capacity: $C \cdot \frac{k N}{E}$\\[-1pt]
+    \tiny Host: GPU Rank 2
+  };
+  \node[rank2, minimum width=\wcard, minimum height=\hcard] (o2) at (14.2, 1.2) {
+    \textbf{\scriptsize Output Rank 2}\\[-1pt]
+    \tiny Weighted Sum\\[-1pt]
+    \tiny $\sum g_i \cdot \text{Expert}_i(\mathbf{x})$
+  };
+
+  % Row 3 (y = 0.0)
+  \node[rank3, minimum width=\wcard, minimum height=\hcard] (r3) at (0, 0.0) {
+    \textbf{\scriptsize Rank 3}\\[-1pt]
+    \tiny Tokens: $T_{13}$--$T_{16}$\\[-1pt]
+    \tiny\textcolor{TextMuted}{Local batch}
+  };
+  \node[gate, minimum width=\wcard, minimum height=\hcard] (g3) at (2.7, 0.0) {
+    \textbf{\scriptsize Router / Gate}\\[-1pt]
+    \tiny\textcolor{OrangeLine!90!black}{Top-$k$ Softmax}\\[-1pt]
+    \tiny Assign Experts
+  };
+  \node[rank3, minimum width=2.4cm, minimum height=\hcard] (e3) at (8.5, 0.0) {
+    \textbf{\scriptsize Expert 3 (FFN)}\\[-1pt]
+    \tiny Capacity: $C \cdot \frac{k N}{E}$\\[-1pt]
+    \tiny Host: GPU Rank 3
+  };
+  \node[rank3, minimum width=\wcard, minimum height=\hcard] (o3) at (14.2, 0.0) {
+    \textbf{\scriptsize Output Rank 3}\\[-1pt]
+    \tiny Weighted Sum\\[-1pt]
+    \tiny $\sum g_i \cdot \text{Expert}_i(\mathbf{x})$
+  };
+
+  % -------------------------------------------------------------
+  % ALLTOALL COLUMNS (TALL RECTANGLES)
+  % -------------------------------------------------------------
+  \node[alltoall_dispatch, minimum width=1.9cm, minimum height=4.3cm] (dispatch) at (5.3, 1.8) {
+    \textbf{\small All-to-All}\\[3pt]
+    \textbf{\footnotesize Dispatch}\\[4pt]
+    \scriptsize Tokens routed\\[1pt]
+    \scriptsize to designated\\[1pt]
+    \scriptsize expert hosts
+  };
+
+  \node[alltoall_combine, minimum width=1.9cm, minimum height=4.3cm] (combine) at (11.7, 1.8) {
+    \textbf{\small All-to-All}\\[3pt]
+    \textbf{\footnotesize Combine}\\[4pt]
+    \scriptsize Outputs routed\\[1pt]
+    \scriptsize back to original\\[1pt]
+    \scriptsize source ranks
+  };
+
+  % Connections: Ranks -> Gate
+  \foreach \i in {0,...,3} {
+    \draw[->, line width=0.8pt, TextDark] (r\i.east) -- (g\i.west);
+  }
+
+  % Connections: Gate -> Dispatch (red dashed)
+  \foreach \i in {0,...,3} {
+    \draw[->, line width=0.8pt, RedLine, dashed] (g\i.east) -- (g\i.east -| dispatch.west);
+  }
+
+  % Connections: Dispatch -> Experts (red dashed)
+  \foreach \i in {0,...,3} {
+    \draw[->, line width=0.8pt, RedLine, dashed] (e\i.west -| dispatch.east) -- (e\i.west);
+  }
+
+  % Connections: Experts -> Combine (green solid)
+  \foreach \i in {0,...,3} {
+    \draw[->, line width=0.8pt, GreenLine] (e\i.east) -- (e\i.east -| combine.west);
+  }
+
+  % Connections: Combine -> Output (green solid)
+  \foreach \i in {0,...,3} {
+    \draw[->, line width=0.8pt, GreenLine] (o\i.west -| combine.east) -- (o\i.west);
+  }
+
+  % -------------------------------------------------------------
+  % BOTTOM CARDS: Communication & Capacity Factor
+  % -------------------------------------------------------------
+  % Left Card: Communication
+  \node[
+    rectangle,
+    rounded corners=5pt,
+    draw=CardBorder,
+    fill=LightBlue!35,
+    line width=0.8pt,
+    anchor=north,
+    minimum width=7.4cm,
+    minimum height=4.5cm,
+    inner sep=6pt
+  ] (bcard_left) at (3.2, -0.9) {};
+
+  \node[anchor=north west, font=\footnotesize, text=NavyBlue] (t_left) at ($(bcard_left.north west) + (0.35, -0.25)$) {
+    \textbf{All-to-All Communication Overhead}
+  };
+  \node[anchor=north west, font=\scriptsize, text=TextDark, align=left, text width=6.7cm] (body_left) at ($(t_left.south west) + (0, -0.15)$) {
+    \textbf{Two-Phase Collective:}\\
+    Dispatch (tokens) $+$ Combine (outputs)\\[3pt]
+    \textbf{Volume per MoE Layer:}\\
+    $4 \cdot B \cdot S \cdot d_{\text{model}}$ bytes (forward $+$ backward pass)\\[3pt]
+    \textbf{Traffic Pattern:} Personalized exchange across all $E$ ranks.
+  };
+  \node[
+    rectangle,
+    rounded corners=3pt,
+    draw=SteelBlue!50,
+    fill=white,
+    inner sep=4pt,
+    anchor=north west,
+    minimum width=6.7cm
+  ] (inner_left) at ($(body_left.south west) + (0, -0.2)$) {
+    \begin{minipage}{6.4cm}
+      \tiny\textbf{\textcolor{SteelBlue}{Interconnect Requirement:}}\\
+      \tiny Bisection bandwidth critical; typically mapped across NVLink cliques or non-blocking fabric to avoid bottlenecks.
+    \end{minipage}
+  };
+
+  % Right Card: Capacity Factor
+  \node[
+    rectangle,
+    rounded corners=5pt,
+    draw=CardBorder,
+    fill=OrangeL!45,
+    line width=0.8pt,
+    anchor=north,
+    minimum width=7.4cm,
+    minimum height=4.5cm,
+    inner sep=6pt
+  ] (bcard_right) at (11.1, -0.9) {};
+
+  \node[anchor=north west, font=\footnotesize, text=OrangeLine!90!black] (t_right) at ($(bcard_right.north west) + (0.35, -0.25)$) {
+    \textbf{Capacity Factor \& Token Load Balancing}
+  };
+  \node[anchor=north west, font=\scriptsize, text=TextDark, align=left, text width=6.7cm] (body_right) at ($(t_right.south west) + (0, -0.15)$) {
+    \textbf{Capacity Factor ($C$):}\\
+    $C \in [1.0, 1.5]$ bounds buffer: $C \cdot \frac{k N}{E}$ tokens per expert\\[3pt]
+    \textbf{Overflow Handling:}\\
+    Dropped tokens bypass expert FFN via residual path\\[3pt]
+    \textbf{Load Balancing:} Auxiliary loss $\mathcal{L}_{\text{balance}}$ penalizes imbalance.
+  };
+  \node[
+    rectangle,
+    rounded corners=3pt,
+    draw=OrangeLine!50,
+    fill=white,
+    inner sep=4pt,
+    anchor=north west,
+    minimum width=6.7cm
+  ] (inner_right) at ($(body_right.south west) + (0, -0.2)$) {
+    \begin{minipage}{6.4cm}
+      \tiny\textbf{\textcolor{OrangeLine!90!black}{Throughput vs. Quality Trade-off:}}\\
+      \tiny Lower $C$ reduces collective buffer memory; higher $C$ eliminates token drop during bursts at the cost of padding.
+    \end{minipage}
+  };
+
+\end{tikzpicture}
+```
 :::
 
 The primary advantage is decoupling model size from compute budget. A trillion-parameter MoE model might use only 10B parameters per token, enabling training on feasible hardware budgets. The constraint is the All-to-All\index{All-to-All!expert parallelism} communication, which is bandwidth-intensive and sensitive to load imbalance.
@@ -3180,7 +5757,166 @@ The canonical 3D core does not exhaust the partitioning space. Sequence parallel
 @Fig-parallelism-flowchart converts the same filter into a decision tree. It begins with memory fit because capacity failure is nonnegotiable, then asks whether data scale alone justifies replication. The tree is intentionally simplified; hardware heterogeneity, communication bandwidth, and workload imbalance enter as second-order checks after the binding constraint has been identified.
 
 ::: {#fig-parallelism-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Parallelism strategy decision framework**: A systematic selection guide based on two key questions: Does the model state fit in single-device memory, and does the required data throughput justify multiple replicas? Models exceeding device memory require model parallelism or sharding; workloads whose model fits but whose throughput target exceeds one device benefit from data parallelism; significant constraints in both dimensions demand hybrid approaches. While simplified, this framework captures the primary decision points before practitioners must consider secondary factors like hardware heterogeneity and workload imbalance." fig-alt="Decision tree flowchart starting from Start. Diamond nodes ask about model memory fit and data-throughput pressure. Paths lead to four outcomes: Single Device Optimization, Data Parallelism, Model Parallelism, or Hybrid Parallelism."}
-![](images/svg/parallelism-flowchart.svg){width=100%}
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  start_box/.style={
+    rectangle,
+    rounded corners=5pt,
+    draw=SteelBlue,
+    fill=white,
+    line width=0.9pt,
+    align=center,
+    inner sep=6pt,
+    minimum width=5.6cm
+  },
+  decision/.style={
+    diamond,
+    aspect=2.1,
+    draw=OrangeLine,
+    fill=OrangeL!60,
+    line width=0.9pt,
+    align=center,
+    inner sep=1.5pt,
+    font=\bfseries\scriptsize,
+    text=TextDark
+  },
+  badge_yes/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=GreenLine,
+    fill=GreenFill,
+    text=DarkGreen,
+    font=\bfseries\tiny,
+    inner sep=2pt,
+    line width=0.6pt
+  },
+  badge_no/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=RedLine,
+    fill=RedFill,
+    text=RedLine,
+    font=\bfseries\tiny,
+    inner sep=2pt,
+    line width=0.6pt
+  },
+  res_card/.style={
+    rectangle,
+    rounded corners=4pt,
+    line width=0.8pt,
+    align=center,
+    inner sep=5pt,
+    minimum width=3.4cm
+  },
+  hero_card/.style={
+    rectangle,
+    rounded corners=5pt,
+    draw=SteelBlue,
+    fill=LightBlue!30,
+    line width=0.9pt,
+    align=center,
+    inner sep=7pt,
+    minimum width=18.0cm
+  }
+]
+
+  % -------------------------------------------------------------
+  % START NODE
+  % -------------------------------------------------------------
+  \node[start_box] (start) at (6.0, 7.8) {
+    \textbf{\small (Start) Workload Profile}\\[1pt]
+    \footnotesize\textcolor{TextMuted}{Characterize memory \& compute constraints}
+  };
+
+  % -------------------------------------------------------------
+  % ROOT DECISION: Model fits on 1 GPU?
+  % -------------------------------------------------------------
+  \node[decision, minimum width=3.6cm, minimum height=1.5cm] (d_mem) at (6.0, 5.8) {
+    Model fits\\on 1 GPU?
+  };
+  \draw[->, line width=0.9pt, SteelBlue] (start.south) -- (d_mem.north);
+
+  % -------------------------------------------------------------
+  % RIGHT BRANCH: DATA THROUGHPUT / REPLICATION
+  % -------------------------------------------------------------
+  \node[decision, minimum width=3.6cm, minimum height=1.5cm] (d_data) at (11.5, 5.8) {
+    Single GPU\\throughput OK?
+  };
+  \draw[->, line width=0.9pt, GreenLine] (d_mem.east) -- node[badge_yes, above=1pt] {Yes} (d_data.west);
+
+  % Single Device Card
+  \node[res_card, draw=DarkGreen, fill=GreenFill, text=DarkGreen] (c_single) at (11.5, 3.9) {
+    \textbf{\scriptsize Single Device}\\[2pt]
+    \tiny\textcolor{TextDark}{No parallelism required}
+  };
+  \draw[->, line width=0.9pt, GreenLine] (d_data.south) -- node[badge_yes, right=2pt] {Yes} (c_single.north);
+
+  % Data Parallelism Card
+  \node[res_card, draw=SteelBlue, fill=LightBlue, text=NavyBlue] (c_dp) at (11.5, 2.0) {
+    \textbf{\scriptsize Data Parallelism (DP)}\\[2pt]
+    \tiny\textcolor{TextDark}{Replicate weights, shard batch}
+  };
+  % No route from d_data to c_dp
+  \draw[->, line width=0.9pt, RedLine] (d_data.east) -- node[badge_no, above=1pt] {No} ++(1.4, 0) |- (c_dp.east);
+
+  % -------------------------------------------------------------
+  % LEFT BRANCH: MODEL PARALLELISM & SHARDING
+  % -------------------------------------------------------------
+  \node[decision, minimum width=3.4cm, minimum height=1.5cm] (d_pp) at (2.8, 3.9) {
+    Model depth\\exceeds 1 GPU?
+  };
+  % No route from d_mem to d_pp
+  \draw[->, line width=0.9pt, RedLine] (d_mem.west) -- node[badge_no, above=1pt] {No} ++(-1.6, 0) |- (d_pp.north);
+
+  % Pipeline Parallel Card
+  \node[res_card, draw=OrangeLine, fill=OrangeL, text=OrangeLine!80!black] (c_pp) at (-1.4, 3.9) {
+    \textbf{\scriptsize Pipeline Parallel (PP)}\\[2pt]
+    \tiny\textcolor{TextDark}{Stage across nodes (1F1B)}
+  };
+  \draw[->, line width=0.9pt, OrangeLine] (d_pp.west) -- node[badge_yes, above=1pt] {Yes} (c_pp.east);
+
+  % Decision: Single layer too large?
+  \node[decision, minimum width=3.4cm, minimum height=1.5cm] (d_tp) at (2.8, 2.0) {
+    Single layer\\too large?
+  };
+  \draw[->, line width=0.9pt, SteelBlue] (d_pp.south) -- node[badge_no, right=2pt] {No} (d_tp.north);
+
+  % Tensor Parallel Card
+  \node[res_card, draw=RedLine, fill=RedFill, text=RedLine] (c_tp) at (-1.4, 2.0) {
+    \textbf{\scriptsize Tensor Parallel (TP)}\\[2pt]
+    \tiny\textcolor{TextDark}{Intra-layer split (NVLink)}
+  };
+  \draw[->, line width=0.9pt, RedLine] (d_tp.west) -- node[badge_yes, above=1pt] {Yes} (c_tp.east);
+
+  % Sharded / FSDP Card
+  \node[res_card, draw=PurpleLine, fill=PurpleFill, text=PurpleLine] (c_fsdp) at (2.8, 0.3) {
+    \textbf{\scriptsize Sharded / FSDP}\\[2pt]
+    \tiny\textcolor{TextDark}{ZeRO parameter sharding}
+  };
+  \draw[->, line width=0.9pt, SteelBlue] (d_tp.south) -- node[badge_no, right=2pt] {No} (c_fsdp.north);
+
+  % -------------------------------------------------------------
+  % BOTTOM HERO CARD: 3D PARALLELISM
+  % -------------------------------------------------------------
+  \node[hero_card] (hero) at (5.05, -1.5) {
+    \textbf{\footnotesize Production Scale: 3D Parallelism ($\text{TP} \times \text{PP} \times \text{DP}$)}\\[3pt]
+    \scriptsize\textcolor{TextDark}{Compose Tensor (intra-node NVLink), Pipeline (inter-node), and Data Parallelism (cluster-wide)}
+  };
+
+  % Convergence lines from strategies to 3D Parallelism card
+  % PP drops straight down from outer margin
+  \draw[->, line width=0.8pt, SteelBlue, dashed] (c_pp.west) -- ++(-0.5, 0) coordinate (p_pp_drop) -- (p_pp_drop |- hero.north);
+  % TP straight down
+  \draw[->, line width=0.8pt, SteelBlue, dashed] (c_tp.south) -- (c_tp.south |- hero.north);
+  % FSDP straight down
+  \draw[->, line width=0.8pt, SteelBlue, dashed] (c_fsdp.south) -- (c_fsdp.south |- hero.north);
+  % DP straight down
+  \draw[->, line width=0.8pt, SteelBlue, dashed] (c_dp.south) -- (c_dp.south |- hero.north);
+
+\end{tikzpicture}
+```
 :::
 
 The table and flowchart are intentionally coarse, but their purpose is precise: identify the binding constraint before choosing the implementation stack.
@@ -3413,7 +6149,183 @@ The 3D Parallelism Cube (@fig-3d-parallelism-cube-summary) is a useful framework
 
 ::: {#fig-3d-parallelism-cube-summary fig-env="figure" fig-pos="htb" fig-cap="**3D parallelism strategy space**: An 8-GPU configuration fills a $(d,p,t)$ coordinate grid that combines data parallelism (replicas), pipeline parallelism (layer stages), and tensor parallelism (within-layer splits). One training step coordinates $d \times p \times t$ GPUs, with communication occurring within layers, at microbatch stage boundaries, and once per optimizer step, respectively." fig-alt="Flat 8-GPU coordinate-grid layout with each GPU labeled by its (d, p, t) coordinate showing how the three parallelism axes combine in a concrete configuration."}
 
-![](images/svg/3d-parallelism.svg)
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  gpu_box/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.8pt,
+    align=center,
+    inner sep=4pt,
+    minimum width=2.0cm,
+    minimum height=1.15cm
+  },
+  stage_box/.style={
+    rectangle,
+    rounded corners=4pt,
+    draw=CardBorder,
+    fill=white,
+    line width=0.7pt,
+    inner sep=5pt
+  },
+  replica_box/.style={
+    rectangle,
+    rounded corners=5pt,
+    draw=SteelBlue!50,
+    dashed,
+    line width=0.8pt,
+    fill=LightBlue!20,
+    inner sep=6pt
+  },
+  info_card/.style={
+    rectangle,
+    rounded corners=4pt,
+    draw=CardBorder,
+    fill=white,
+    line width=0.8pt,
+    inner sep=6pt
+  }
+]
+
+  % -------------------------------------------------------------
+  % BACKGROUND CONTAINERS: REPLICAS & STAGES
+  % -------------------------------------------------------------
+  % Replica 0 (d = 0)
+  \node[replica_box, minimum width=5.2cm, minimum height=4.8cm] (rep0) at (1.3, 2.65) {};
+  \node[above=3pt of rep0.north, font=\bfseries\scriptsize, text=SteelBlue] {DP Replica 0 ($d=0$)};
+
+  % Replica 0 Stages
+  \node[stage_box, minimum width=4.8cm, minimum height=2.1cm] (s0_d0) at (1.3, 3.75) {};
+  \node[stage_box, minimum width=4.8cm, minimum height=2.1cm] (s1_d0) at (1.3, 1.55) {};
+
+  % Replica 1 (d = 1)
+  \node[replica_box, minimum width=5.2cm, minimum height=4.8cm] (rep1) at (7.0, 2.65) {};
+  \node[above=3pt of rep1.north, font=\bfseries\scriptsize, text=SteelBlue] {DP Replica 1 ($d=1$)};
+
+  % Replica 1 Stages
+  \node[stage_box, minimum width=4.8cm, minimum height=2.1cm] (s0_d1) at (7.0, 3.75) {};
+  \node[stage_box, minimum width=4.8cm, minimum height=2.1cm] (s1_d1) at (7.0, 1.55) {};
+
+  % -------------------------------------------------------------
+  % 8 GPUS WITH METRICS & TENSOR PARALLEL ARROWS
+  % -------------------------------------------------------------
+  % Replica 0 - Stage 0 (p = 0)
+  \node[gpu_box, draw=SteelBlue, fill=LightBlue] (gpu0) at (0.15, 3.55) {
+    \textbf{\scriptsize GPU 0}\\[1pt]
+    \tiny\textcolor{NavyBlue}{$d{=}0, p{=}0, t{=}0$}
+  };
+  \node[gpu_box, draw=OrangeLine, fill=OrangeL] (gpu2) at (2.45, 3.55) {
+    \textbf{\scriptsize GPU 2}\\[1pt]
+    \tiny\textcolor{OrangeLine!85!black}{$d{=}0, p{=}0, t{=}1$}
+  };
+  \draw[->, line width=0.9pt, OrangeLine] ($(gpu0.north) + (0, 0.22)$) -- node[above=1.5pt, font=\bfseries\tiny, text=OrangeLine] {Tensor Parallel ($t$)} ($(gpu2.north) + (0, 0.22)$);
+
+  % Replica 0 - Stage 1 (p = 1)
+  \node[gpu_box, draw=RedLine, fill=RedFill] (gpu4) at (0.15, 1.35) {
+    \textbf{\scriptsize GPU 4}\\[1pt]
+    \tiny\textcolor{RedLine}{$d{=}0, p{=}1, t{=}0$}
+  };
+  \node[gpu_box, draw=DarkGreen, fill=GreenFill] (gpu6) at (2.45, 1.35) {
+    \textbf{\scriptsize GPU 6}\\[1pt]
+    \tiny\textcolor{DarkGreen}{$d{=}0, p{=}1, t{=}1$}
+  };
+  \draw[->, line width=0.9pt, OrangeLine] ($(gpu4.north) + (0, 0.22)$) -- node[above=1.5pt, font=\bfseries\tiny, text=OrangeLine] {Tensor Parallel ($t$)} ($(gpu6.north) + (0, 0.22)$);
+
+  % Replica 1 - Stage 0 (p = 0)
+  \node[gpu_box, draw=SteelBlue, fill=LightBlue] (gpu1) at (5.85, 3.55) {
+    \textbf{\scriptsize GPU 1}\\[1pt]
+    \tiny\textcolor{NavyBlue}{$d{=}1, p{=}0, t{=}0$}
+  };
+  \node[gpu_box, draw=OrangeLine, fill=OrangeL] (gpu3) at (8.15, 3.55) {
+    \textbf{\scriptsize GPU 3}\\[1pt]
+    \tiny\textcolor{OrangeLine!85!black}{$d{=}1, p{=}0, t{=}1$}
+  };
+  \draw[->, line width=0.9pt, OrangeLine] ($(gpu1.north) + (0, 0.22)$) -- node[above=1.5pt, font=\bfseries\tiny, text=OrangeLine] {Tensor Parallel ($t$)} ($(gpu3.north) + (0, 0.22)$);
+
+  % Replica 1 - Stage 1 (p = 1)
+  \node[gpu_box, draw=RedLine, fill=RedFill] (gpu5) at (5.85, 1.35) {
+    \textbf{\scriptsize GPU 5}\\[1pt]
+    \tiny\textcolor{RedLine}{$d{=}1, p{=}1, t{=}0$}
+  };
+  \node[gpu_box, draw=DarkGreen, fill=GreenFill] (gpu7) at (8.15, 1.35) {
+    \textbf{\scriptsize GPU 7}\\[1pt]
+    \tiny\textcolor{DarkGreen}{$d{=}1, p{=}1, t{=}1$}
+  };
+  \draw[->, line width=0.9pt, OrangeLine] ($(gpu5.north) + (0, 0.22)$) -- node[above=1.5pt, font=\bfseries\tiny, text=OrangeLine] {Tensor Parallel ($t$)} ($(gpu7.north) + (0, 0.22)$);
+
+
+  % -------------------------------------------------------------
+  % AXIS ARROWS (PP & DP)
+  % -------------------------------------------------------------
+  % Vertical Pipeline Parallel (p) Axis
+  \draw[->, line width=1.1pt, RedLine] (-1.7, 4.8) -- node[above=2pt, rotate=90, font=\bfseries\scriptsize, text=RedLine] {Pipeline Parallel ($p$)} (-1.7, 0.5);
+
+  % Horizontal Data Parallel (d) Axis
+  \draw[->, line width=1.1pt, SteelBlue] (0.15, -0.05) -- node[below=2pt, font=\bfseries\scriptsize, text=SteelBlue] {Data Parallel ($d$)} (8.15, -0.05);
+
+
+  % -------------------------------------------------------------
+  % RIGHT: SPECIFICATION & PLACEMENT CARDS
+  % -------------------------------------------------------------
+  \def\xright{13.9}
+
+  % Card 1 Background Container
+  \node[info_card, minimum width=7.8cm, minimum height=3.3cm] (c_strat) at (\xright, 3.4) {};
+
+  % Card 1 Content (single lines per description)
+  \node[anchor=north west, font=\scriptsize, text=SteelBlue, text width=7.2cm, align=left] (t_dp) at ($(c_strat.north west) + (0.3, -0.28)$) {
+    \textbf{Data Parallel ($d = 2$)}\\[1.5pt]
+    \tiny\textcolor{TextDark}{Replicate model, shard mini-batch $\cdot$ Sync gradients via AllReduce}
+  };
+  \node[below=8pt of t_dp.south west, anchor=north west, font=\scriptsize, text=RedLine, text width=7.2cm, align=left] (t_pp) {
+    \textbf{Pipeline Parallel ($p = 2$)}\\[1.5pt]
+    \tiny\textcolor{TextDark}{Partition stages (1F1B) $\cdot$ P2P activation and gradient transfer}
+  };
+  \node[below=8pt of t_pp.south west, anchor=north west, font=\scriptsize, text=OrangeLine!90!black, text width=7.2cm, align=left] (t_tp) {
+    \textbf{Tensor Parallel ($t = 2$)}\\[1.5pt]
+    \tiny\textcolor{TextDark}{Shard weight matrices (Col/Row) $\cdot$ AllReduce per block}
+  };
+
+  % Card 2: Total Devices Equation
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=DarkGreen,
+    fill=GreenFill!50,
+    line width=0.8pt,
+    align=center,
+    inner sep=4.5pt,
+    below=7pt of c_strat.south,
+    minimum width=7.8cm
+  ] (c_eq) {
+    \footnotesize\textbf{\textcolor{DarkGreen}{Total Devices: $N = d \times p \times t = 2 \times 2 \times 2 = 8$ GPUs}}
+  };
+
+  % Card 3: Hardware Placement Rule
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=CardBorder,
+    fill=CardFill,
+    line width=0.8pt,
+    inner sep=5pt,
+    align=center,
+    below=7pt of c_eq.south,
+    minimum width=7.8cm
+  ] (c_hw) {
+    \textbf{\scriptsize Hardware Placement Hierarchy}\\[3pt]
+    \begin{minipage}{7.2cm}
+      \centering\tiny
+      \textbf{\textcolor{OrangeLine!90!black}{TP (Tensor):}} Intra-node (NVLink $\ge 900\text{ GB/s}$)\\[2pt]
+      \textbf{\textcolor{RedLine}{PP (Pipeline):}} Inter-node across racks (IB $50\text{ GB/s}$ rail)\\[2pt]
+      \textbf{\textcolor{SteelBlue}{DP (Data):}} Cluster-wide across spine fabric ($25\text{--}50\text{ GB/s}$)
+    \end{minipage}
+  };
+
+\end{tikzpicture}
+```
 
 :::
 
