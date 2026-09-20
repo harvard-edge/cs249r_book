@@ -13,7 +13,7 @@
 # ---
 
 # %% [markdown]
-"""
+r"""
 # Module 03: Layers - Building Blocks of Neural Networks
 
 Welcome to Module 03! You're about to build the fundamental building blocks that make neural networks possible.
@@ -23,11 +23,8 @@ Welcome to Module 03! You're about to build the fundamental building blocks that
 **You'll Build**: A Layer base class, Linear layers, Dropout regularization, and a Sequential container
 **You'll Enable**: Multi-layer neural networks, trainable parameters, and forward passes
 
-**Connection Map**:
-```
-Tensor → Activations → Layers → Networks
-(data)   (intelligence) (building blocks) (architectures)
-```
+**Connection Pipeline**:
+$$\mathbf{X} \in \text{Tensor} \xrightarrow{\text{Nonlinearity}} \sigma(\mathbf{X}) \in \text{Activations} \xrightarrow{\text{Affine Transform}} \mathbf{X}\mathbf{W} + \mathbf{b} \in \text{Layers} \xrightarrow{\text{Composition}} \text{Sequential} \in \text{Networks}$$
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
@@ -59,7 +56,7 @@ from tinytorch.core.activations import ReLU, Sigmoid  # Module 02 - intelligence
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📋 Module Dependencies
 
 **Prerequisites**: Modules 01 (Tensor) and 02 (Activations) must be completed
@@ -75,11 +72,7 @@ This module depends on Tensor and Activations.
 Ensure previous modules are completed and exported.
 
 **Dependency Flow**:
-```
-Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers)
-     ↓                      ↓                         ↓
-  Foundation          Nonlinearity              Architecture
-```
+$$\underbrace{\text{Module 01: Tensor}}_{\text{Data Container and Autograd}} \longrightarrow \underbrace{\text{Module 02: Activations}}_{\text{Nonlinear Functions}} \longrightarrow \underbrace{\text{Module 03: Layers}}_{\text{Parametric Architecture}}$$
 
 Students completing this module will have built the neural network
 layers that enable multi-layer architectures.
@@ -113,59 +106,63 @@ DROPOUT_MIN_PROB = 0.0  # Minimum dropout probability (no dropout)
 DROPOUT_MAX_PROB = 1.0  # Maximum dropout probability (drop everything)
 
 # %% [markdown]
-"""
+r"""
 ## 💡 Introduction: What are Neural Network Layers?
 
-Neural network layers are the fundamental building blocks that transform data as it flows through a network. Each layer performs a specific computation:
+Neural network layers are the fundamental building blocks that transform data as it flows through a network. Each layer encapsulates both state (trainable weights and biases) and computation (forward transformation):
 
-- **Linear layers** apply learned transformations: `y = xW + b`
-- **Dropout layers** randomly zero elements for regularization
+- **Linear layers** apply learned affine transformations: $\mathbf{Y} = \mathbf{X}\mathbf{W} + \mathbf{b}$
+- **Dropout layers** randomly zero elements during training for regularization
+- **Sequential containers** compose multiple layers into unified callable models
 
-Think of layers as processing stations in a factory:
-```
-Input Data → Layer 1 → Layer 2 → Layer 3 → Output
-    ↓          ↓         ↓         ↓         ↓
-  Features   Hidden   Hidden   Hidden   Predictions
-```
+![TinyTorch Layer System Architecture](layers_architecture.svg)
 
-Each layer learns its own piece of the puzzle. Linear layers learn which features matter, while dropout prevents overfitting by forcing robustness.
+Data flows sequentially through cascaded representations:
+$$\mathbf{X} \in \mathbb{R}^{B \times D_0} \xrightarrow{\text{Layer}_1} \mathbf{H}_1 \in \mathbb{R}^{B \times D_1} \xrightarrow{\text{Layer}_2} \mathbf{H}_2 \in \mathbb{R}^{B \times D_2} \xrightarrow{\text{Layer}_3} \hat{\mathbf{Y}} \in \mathbb{R}^{B \times C}$$
+
+Each layer learns its own specialized transformation: Linear layers project representations into discriminative feature spaces, activations introduce nonlinearity, and dropout enforces distributed representations.
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📐 Foundations: Mathematical Background
 
 ### Linear Layer Mathematics
-A linear layer implements: **y = xW + b**
 
-```
-Input x (batch_size, in_features)  @  Weight W (in_features, out_features)  +  Bias b (out_features)
-                                   =  Output y (batch_size, out_features)
-```
+A linear layer computes a batched affine transformation:
+$$\mathbf{Y} = \mathbf{X}\mathbf{W} + \mathbf{b}$$
 
-### Weight Initialization
-Random initialization is crucial for breaking symmetry:
-- **LeCun**: Scale by sqrt(1/fan_in) for stable outputs (simple, effective)
-- **Xavier/Glorot**: Scale by sqrt(2/(fan_in+fan_out)) considers both dimensions
-- **He**: Scale by sqrt(2/fan_in) optimized for ReLU activation
-- **Too small**: Outputs shrink toward zero through many layers
-- **Too large**: Outputs grow unbounded through many layers
+$$\underbrace{\mathbf{X}}_{(B, D_{\text{in}})} \times \underbrace{\mathbf{W}}_{(D_{\text{in}}, D_{\text{out}})} + \underbrace{\mathbf{b}}_{(D_{\text{out}},)} = \underbrace{\mathbf{Y}}_{(B, D_{\text{out}})}$$
 
-We use LeCun-style initialization for simplicity—it works well in practice.
-(The mathematical justification involves gradient flow through deep networks.)
+### Weight Initialization: Preserving Signal Variance
+
+Random initialization is crucial for breaking symmetry and preventing signals from exploding or vanishing across deep cascades:
+
+![Signal Variance Across Layers](variance_waterfall.svg)
+
+| Initialization Scheme | Standard Deviation ($\sigma$) | Target Activation / Design Rationale |
+|:---|:---|:---|
+| **LeCun (used here)** | $\sigma = \sqrt{\frac{1}{D_{\text{in}}}}$ | Linear / Sigmoid inputs; maintains unit output variance for linear maps |
+| **Xavier / Glorot** | $\sigma = \sqrt{\frac{2}{D_{\text{in}} + D_{\text{out}}}}$ | Tanh / symmetric activations; harmonizes forward & backward pass signal variance |
+| **He / Kaiming** | $\sigma = \sqrt{\frac{2}{D_{\text{in}}}}$ | ReLU activations; compensates for the $50\%$ variance loss from negative clamping |
+
+![Kaiming Scale Scaling Factor](kaiming_scaling.svg)
+
+We adopt LeCun initialization $\sigma = \sqrt{\frac{1}{D_{\text{in}}}}$ for clean pedagogical clarity: on zero-mean unit-variance inputs, $\text{Var}(y_j) = \sum_{i=1}^{D_{\text{in}}} \text{Var}(x_i) \text{Var}(w_{ij}) = D_{\text{in}} \cdot \frac{1}{D_{\text{in}}} = 1.0$.
 
 ### Parameter Counting
-```
-Linear(784, 256): 784 × 256 + 256 = 200,960 parameters
 
-Manual composition:
-    layer1 = Linear(784, 256)  # 200,960 params
-    activation = ReLU()        # 0 params
-    layer2 = Linear(256, 10)   # 2,570 params
-                               # Total: 203,530 params
-```
+For any layer $\text{Linear}(D_{\text{in}}, D_{\text{out}})$:
+$$\text{Parameters} = \underbrace{D_{\text{in}} \times D_{\text{out}}}_{\text{Weights } \mathbf{W}} + \underbrace{D_{\text{out}}}_{\text{Biases } \mathbf{b}}$$
 
-Memory usage: 4 bytes/param × 203,530 = ~795 KB for weights alone
+Example:
+$$\text{Linear}(784, 256): 784 \times 256 + 256 = 200{,}704 + 256 = 200{,}960 \text{ parameters}$$
+
+In a 2-layer classifier with ReLU:
+- $\text{Layer 1: } \text{Linear}(784, 256) \implies 200{,}960 \text{ params}$
+- $\text{Activation: } \text{ReLU}() \implies 0 \text{ params}$
+- $\text{Layer 2: } \text{Linear}(256, 10) \implies 256 \times 10 + 10 = 2{,}570 \text{ params}$
+- **Total: $203{,}530$ parameters** ($203{,}530 \times 4\text{ bytes} \approx 814.1\text{ KB}$ in FP32)
 """
 
 # %% [markdown]
@@ -245,47 +242,39 @@ class Layer:
         return f"{self.__class__.__name__}()"
 
 # %% [markdown]
-"""
+r"""
 ### Linear Layer: The Foundation of Neural Networks
 
-Linear layers (also called Dense or Fully Connected layers) are the fundamental building blocks of neural networks. They implement the mathematical operation:
+Linear layers (also known as Dense or Fully Connected layers) apply an affine transformation to incoming features:
 
-**y = xW + b**
+$$\mathbf{Y} = \mathbf{X}\mathbf{W} + \mathbf{b}$$
 
 Where:
-- **x**: Input features (what we know)
-- **W**: Weight matrix (what we learn)
-- **b**: Bias vector (adjusts the output)
-- **y**: Output features (what we predict)
+- $\mathbf{X} \in \mathbb{R}^{B \times D_{\text{in}}}$: Input feature representations across batch size $B$
+- $\mathbf{W} \in \mathbb{R}^{D_{\text{in}} \times D_{\text{out}}}$: Trainable weight kernel
+- $\mathbf{b} \in \mathbb{R}^{D_{\text{out}}}$: Trainable bias vector, broadcast across the batch dimension
+- $\mathbf{Y} \in \mathbb{R}^{B \times D_{\text{out}}}$: Projected output representations
 
 ### Why Linear Layers Matter
 
-Linear layers learn **feature combinations**. Each output neuron asks: "What combination of input features is most useful for my task?" The network discovers these combinations through training.
+Linear layers learn **feature projections**. Each output column $j$ in $\mathbf{W}$ corresponds to a learned synthetic detector: $y_{bj} = \sum_i x_{bi} w_{ij} + b_j$. Stacking these projections enables networks to uncover hierarchical representations.
 
-### Data Flow Visualization
-```
-Input Features     Weight Matrix        Bias Vector      Output Features
-[batch, in_feat] @ [in_feat, out_feat] + [out_feat]  =  [batch, out_feat]
+### Coordinate Contraction
 
-Example: MNIST Digit Recognition
-[32, 784]       @  [784, 10]          + [10]        =  [32, 10]
-  ↑                   ↑                    ↑             ↑
-32 images         784 pixels          10 classes    10 class scores (logits)
-                  to 10 classes       adjustments   per image
-```
+$$\begin{matrix}
+\text{Input Batch} & & \text{Weight Kernel} & & \text{Bias Offset} & & \text{Output Logits} \\
+\mathbf{X} & \times & \mathbf{W} & + & \mathbf{b} & = & \mathbf{Y} \\
+[B, D_{\text{in}}] & & [D_{\text{in}}, D_{\text{out}}] & & [D_{\text{out}}] & & [B, D_{\text{out}}] \\
+[32, 784] & \times & [784, 10] & + & [10] & = & [32, 10]
+\end{matrix}$$
 
-### Memory Layout
-```
-Linear(784, 256) Parameters:
-┌─────────────────────────────┐
-│ Weight Matrix W             │  784 × 256 = 200,704 params
-│ [784, 256] float32          │  × 4 bytes = ~784 KB
-├─────────────────────────────┤
-│ Bias Vector b               │  256 params
-│ [256] float32               │  × 4 bytes = ~1 KB
-└─────────────────────────────┘
-                Total: ~785 KB for one layer
-```
+### Memory Footprint Analysis: Linear(784, 256)
+
+| Parameter Component | Matrix Shape | Data Type | Element Count | Storage Footprint (FP32) |
+|:---|:---|:---|:---|:---|
+| **Weight Matrix $\mathbf{W}$** | $(784, 256)$ | `float32` | $784 \times 256 = 200{,}704$ | $200{,}704 \times 4\text{ B} = 802.81\text{ KB}$ |
+| **Bias Vector $\mathbf{b}$** | $(256,)$ | `float32` | $256$ | $256 \times 4\text{ B} = 1.02\text{ KB}$ |
+| **Total Resident Parameters** | — | — | **$200{,}960$ parameters** | **$803.84\text{ KB}$** |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "linear-layer", "solution": true}
@@ -549,58 +538,38 @@ if __name__ == "__main__":
 
 
 # %% [markdown]
-"""
-### Dropout Layer: Preventing Overfitting
+r"""
+### Dropout Layer: Preventing Co-Adaptation via Inverted Regularization
 
-Dropout is a regularization technique that randomly "turns off" neurons during training. This forces the network to not rely too heavily on any single neuron, making it more robust and generalizable.
+Dropout is an empirical regularization technique that randomly masks features during training, preventing individual neurons from co-adapting and memorizing idiosyncratic noise in the training set.
 
-### Why Dropout Matters
+### Inverted Dropout Formulation
 
-**The Problem**: Neural networks can memorize training data instead of learning generalizable patterns. This leads to poor performance on new, unseen data.
+During training, each element is retained with probability $q = 1 - p$. In **inverted dropout**, surviving elements are scaled by $\frac{1}{1-p}$ at training time:
 
-**The Solution**: Dropout randomly zeros out neurons, forcing the network to learn multiple independent ways to solve the problem.
+$$\mathbf{m} \sim \text{Bernoulli}(1 - p), \quad \hat{\mathbf{m}} = \frac{\mathbf{m}}{1 - p}$$
+$$\mathbf{y}_{\text{train}} = \mathbf{x} \odot \hat{\mathbf{m}}, \quad \mathbb{E}[\mathbf{y}_{\text{train}}] = \mathbf{x} \odot \frac{\mathbb{E}[\mathbf{m}]}{1 - p} = \mathbf{x}$$
 
-### Dropout in Action
-```
-Training Mode (p=0.5 dropout):
-Input:  [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
-         ↓ Random mask with 50% survival rate
-Mask:   [1,   0,   1,   0,   1,   1,   0,   1  ]
-         ↓ Apply mask and scale by 1/(1-p) = 2.0
-Output: [2.0, 0.0, 6.0, 0.0, 10.0, 12.0, 0.0, 16.0]
+$$\mathbf{y}_{\text{eval}} = \mathbf{x}$$
 
-Inference Mode (no dropout):
-Input:  [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
-         ↓ Pass through unchanged
-Output: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
-```
+Because $\mathbb{E}[\mathbf{y}_{\text{train}}] = \mathbf{y}_{\text{eval}}$, **no scaling or modification is required during inference**! Evaluation runs at full throughput as a pure identity operation.
 
-### Training vs Inference Behavior
-```
-                Training Mode              Inference Mode
-               ┌─────────────────┐        ┌─────────────────┐
-Input Features │ [×] [ ] [×] [×] │        │ [×] [×] [×] [×] │
-               │ Active Dropped  │   →    │   All Active    │
-               │ Active Active   │        │                 │
-               └─────────────────┘        └─────────────────┘
-                      ↓                           ↓
-                "Learn robustly"            "Use all knowledge"
-```
+### Training vs. Evaluation Trace ($p = 0.5 \implies \text{scale} = 2.0$)
 
-### Memory and Performance
-```
-Dropout Memory Usage:
-┌─────────────────────────────┐
-│ Input Tensor: X MB          │
-├─────────────────────────────┤
-│ Random Mask: X MB           │  (float32 mask, 4 bytes/element)
-├─────────────────────────────┤
-│ Output Tensor: X MB         │
-└─────────────────────────────┘
-        Total: ~3X MB peak memory (input, mask, and output all live at once)
+$$\mathbf{x} = \begin{bmatrix} 1.0 & 2.0 & 3.0 & 4.0 & 5.0 & 6.0 & 7.0 & 8.0 \end{bmatrix}$$
 
-Computational Overhead: Minimal (element-wise operations)
-```
+$$\text{Training Mask } \hat{\mathbf{m}} = \begin{bmatrix} 2.0 & 0.0 & 2.0 & 0.0 & 2.0 & 2.0 & 0.0 & 2.0 \end{bmatrix}$$
+
+$$\mathbf{y}_{\text{train}} = \mathbf{x} \odot \hat{\mathbf{m}} = \begin{bmatrix} 2.0 & 0.0 & 6.0 & 0.0 & 10.0 & 12.0 & 0.0 & 16.0 \end{bmatrix}$$
+
+$$\mathbf{y}_{\text{eval}} = \mathbf{x} = \begin{bmatrix} 1.0 & 2.0 & 3.0 & 4.0 & 5.0 & 6.0 & 7.0 & 8.0 \end{bmatrix}$$
+
+### Execution Mode & Memory Comparison
+
+| Operational Mode | Transformation Rule | Expectation $\mathbb{E}[y]$ | Active Buffer Overhead |
+|:---|:---|:---|:---|
+| **Training Mode (`train()`)** | $\mathbf{x} \odot \frac{\mathbf{m}}{1-p}$ | $\mathbf{x}$ (invariant) | Input ($X\text{ MB}$) + Mask ($X\text{ MB}$) + Output ($X\text{ MB}$) $\approx 3X\text{ MB}$ peak |
+| **Inference Mode (`eval()`)** | Identity ($\mathbf{x}$) | $\mathbf{x}$ (exact) | **Zero overhead**; no mask allocated or evaluated |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "dropout-layer", "solution": true}
@@ -820,26 +789,22 @@ if __name__ == "__main__":
     test_unit_should_apply_dropout()
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Dropout Mask Generation
 
 The mask is the heart of dropout. Each element is drawn independently:
-kept with probability 1-p, dropped otherwise. Kept elements are scaled
-by 1/(1-p) so the expected output equals the input -- this is "inverted
+kept with probability $1-p$, dropped otherwise. Kept elements are scaled
+by $\frac{1}{1-p}$ so the expected output equals the input—this is "inverted
 dropout." We test both the statistical properties (fraction of zeros)
-and the scaling (surviving values equal 1/(1-p)).
+and the scaling (surviving values equal $\frac{1}{1-p}$).
 
-```
-p = 0.5, keep_prob = 0.5, scale = 2.0
+$$p = 0.5 \implies \text{keep\_prob} = 0.5, \quad \text{scale} = \frac{1}{0.5} = 2.0$$
 
-random:   [0.3,  0.8,  0.1,  0.6 ]
-              ↓      ↓      ↓      ↓
-mask:     [2.0,  0.0,  2.0,  0.0 ]   ← kept values are 2.0, not 1.0
-```
+$$\mathbf{u} = \begin{bmatrix} 0.3 & 0.8 & 0.1 & 0.6 \end{bmatrix} \xrightarrow{\mathbf{u} < 0.5} \mathbf{m} = \begin{bmatrix} 1 & 0 & 1 & 0 \end{bmatrix} \xrightarrow{\times 2.0} \hat{\mathbf{m}} = \begin{bmatrix} 2.0 & 0.0 & 2.0 & 0.0 \end{bmatrix}$$
 
 **What we're testing**: Mask shape, scaling factor, and survival statistics
 **Why it matters**: Wrong scaling silently shifts all predictions at inference time
-**Expected**: Correct shape, values in {0, 1/(1-p)}, ~50% survival for p=0.5
+**Expected**: Correct shape, values in $\{0, \frac{1}{1-p}\}$, $\approx 50\%$ survival for $p=0.5$
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-generate-dropout-mask", "locked": true, "points": 3}
@@ -1058,110 +1023,51 @@ if __name__ == "__main__":
     test_unit_dropout_layer()
 
 # %% [markdown]
-"""
+r"""
 ## 🔧 Integration: Bringing It Together
 
-Now that we've built both layer types, let's see how they work together to create a complete neural network architecture. We'll manually compose a realistic 3-layer MLP for MNIST digit classification.
+Now that we've built both layer types, let's see how they work together to create a complete neural network architecture. We'll compose a realistic 3-layer MLP for MNIST digit classification.
 
-### Network Architecture Visualization
-```
-MNIST Classification Network (3-Layer MLP):
+### End-to-End Computational Pipeline
 
-    Input Layer          Hidden Layer 1        Hidden Layer 2        Output Layer
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│     784         │    │      256        │    │      128        │    │       10        │
-│   Pixels        │───▶│   Features      │───▶│   Features      │───▶│    Classes      │
-│  (28×28 image)  │    │   + ReLU        │    │   + ReLU        │    │  (0-9 digits)   │
-│                 │    │   + Dropout     │    │   + Dropout     │    │                 │
-└─────────────────┘    └─────────────────┘    └─────────────────┘    └─────────────────┘
-        ↓                       ↓                       ↓                       ↓
-   "Raw pixels"            "Hidden 1"             "Hidden 2"            "Predictions"
+$$\mathbf{X} \in \mathbb{R}^{32 \times 784} \xrightarrow{\text{Linear}(784, 256)} \mathbf{Z}_1 \xrightarrow{\text{ReLU}} \mathbf{A}_1 \xrightarrow{\text{Dropout}(0.5)} \hat{\mathbf{A}}_1 \xrightarrow{\text{Linear}(256, 128)} \mathbf{Z}_2 \xrightarrow{\text{ReLU}} \mathbf{A}_2 \xrightarrow{\text{Dropout}(0.3)} \hat{\mathbf{A}}_2 \xrightarrow{\text{Linear}(128, 10)} \mathbf{Y} \in \mathbb{R}^{32 \times 10}$$
 
-Data Flow:
-[32, 784] → Linear(784,256) → ReLU → Dropout(0.5) → Linear(256,128) → ReLU → Dropout(0.3) → Linear(128,10) → [32, 10]
-```
+### Parameter Count & Memory Breakdown
 
-### Parameter Count Analysis
-```
-Parameter Breakdown (Manual Layer Composition):
-┌─────────────────────────────────────────────────────────────┐
-│ layer1 = Linear(784 → 256)                                  │
-│   Weights: 784 × 256 = 200,704 params                       │
-│   Bias:    256 params                                       │
-│   Subtotal: 200,960 params                                  │
-├─────────────────────────────────────────────────────────────┤
-│ activation1 = ReLU(), dropout1 = Dropout(0.5)               │
-│   Parameters: 0 (no learnable weights)                      │
-├─────────────────────────────────────────────────────────────┤
-│ layer2 = Linear(256 → 128)                                  │
-│   Weights: 256 × 128 = 32,768 params                        │
-│   Bias:    128 params                                       │
-│   Subtotal: 32,896 params                                   │
-├─────────────────────────────────────────────────────────────┤
-│ activation2 = ReLU(), dropout2 = Dropout(0.3)               │
-│   Parameters: 0 (no learnable weights)                      │
-├─────────────────────────────────────────────────────────────┤
-│ layer3 = Linear(128 → 10)                                   │
-│   Weights: 128 × 10 = 1,280 params                          │
-│   Bias:    10 params                                        │
-│   Subtotal: 1,290 params                                    │
-└─────────────────────────────────────────────────────────────┘
-                    TOTAL: 235,146 parameters
-                    Memory: ~940 KB (float32)
-```
+| Stage | Component / Layer | Kernel Shape | Bias Shape | Trainable Parameters | Memory (FP32) |
+|:---|:---|:---|:---|:---|:---|
+| **Layer 1** | `Linear(784, 256)` | $(784, 256)$ | $(256,)$ | $200{,}704 + 256 = 200{,}960$ | $803.84\text{ KB}$ |
+| — | `ReLU()` | — | — | $0$ | $0\text{ B}$ |
+| — | `Dropout(p=0.5)` | — | — | $0$ | $0\text{ B}$ |
+| **Layer 2** | `Linear(256, 128)` | $(256, 128)$ | $(128,)$ | $32{,}768 + 128 = 32{,}896$ | $131.58\text{ KB}$ |
+| — | `ReLU()` | — | — | $0$ | $0\text{ B}$ |
+| — | `Dropout(p=0.3)` | — | — | $0$ | $0\text{ B}$ |
+| **Layer 3** | `Linear(128, 10)` | $(128, 10)$ | $(10,)$ | $1{,}280 + 10 = 1{,}290$ | $5.16\text{ KB}$ |
+| **Total** | **3-Layer MLP** | — | — | **$235{,}146$ parameters** | **$940.58\text{ KB}$** |
 """
 
 
 # %% [markdown]
-"""
+r"""
 ## 📊 Systems Analysis: Memory and Performance
 
-Now let's analyze the systems characteristics of our layer implementations. Understanding memory usage and computational complexity helps us build efficient neural networks.
+Understanding memory allocation lifecycles and computational FLOPs budgets allows engineers to optimize training throughput and prevent GPU out-of-memory (OOM) faults.
 
-### Memory Analysis Overview
-```
-Layer Memory Components:
-┌─────────────────────────────────────────────────────────────┐
-│                    PARAMETER MEMORY                         │
-├─────────────────────────────────────────────────────────────┤
-│ • Weights: Persistent, shared across batches                │
-│ • Biases: Small but necessary for output shifting           │
-│ • Total: Grows with network width and depth                 │
-├─────────────────────────────────────────────────────────────┤
-│                   ACTIVATION MEMORY                         │
-├─────────────────────────────────────────────────────────────┤
-│ • Input tensors: batch_size × features × 4 bytes            │
-│ • Output tensors: batch_size × features × 4 bytes           │
-│ • Intermediate results during forward pass                  │
-│ • Total: Grows with batch size and layer width              │
-├─────────────────────────────────────────────────────────────┤
-│                   TEMPORARY MEMORY                          │
-├─────────────────────────────────────────────────────────────┤
-│ • Dropout masks: batch_size × features × 4 bytes (float32)  │
-│ • Computation buffers for matrix operations                 │
-│ • Total: Peak during forward/backward passes                │
-└─────────────────────────────────────────────────────────────┘
-```
+### Memory Hierarchy Breakdown
 
-### Computational Complexity Overview
-```
-Layer Operation Complexity:
-┌─────────────────────────────────────────────────────────────┐
-│ Linear Layer Forward Pass:                                  │
-│   Matrix Multiply: O(batch × in_features × out_features)    │
-│   Bias Addition: O(batch × out_features)                    │
-│   Dominant: Matrix multiplication                           │
-├─────────────────────────────────────────────────────────────┤
-│ Multi-layer Forward Pass:                                   │
-│   Sum of all layer complexities                             │
-│   Memory: Peak of all intermediate activations              │
-├─────────────────────────────────────────────────────────────┤
-│ Dropout Forward Pass:                                       │
-│   Mask Generation: O(elements)                              │
-│   Element-wise Multiply: O(elements)                        │
-│   Overhead: Minimal compared to linear layers               │
-└─────────────────────────────────────────────────────────────┘
-```
+| Memory Category | Allocation Lifecycle | Sizing Formula | Systems Trade-off |
+|:---|:---|:---|:---|
+| **Parameter Memory** | Static; persistent across epochs | $\sum (D_{\text{in}} \times D_{\text{out}} + D_{\text{out}}) \times 4\text{ B}$ | Scales with network width & depth; resident in GPU VRAM |
+| **Activation Memory** | Dynamic per forward pass; retained for backward | $B \times D_{\text{layer}} \times 4\text{ B}$ per layer | Dominates training footprint; linear in batch size $B$ |
+| **Temporary Buffer Memory** | Ephemeral during kernel execution | $B \times D_{\text{layer}} \times 4\text{ B}$ (e.g. dropout mask) | Peak allocated at layer forward/backward boundary |
+
+### Computational Complexity & Hardware Profile
+
+| Operation | Computational Complexity (FLOPs) | Memory I/O Complexity | Dominant Hardware Bottleneck |
+|:---|:---|:---|:---|
+| **Linear Layer** | $2 \cdot B \cdot D_{\text{in}} \cdot D_{\text{out}} + B \cdot D_{\text{out}}$ | Read $\mathbf{X}, \mathbf{W}, \mathbf{b}$; Write $\mathbf{Y}$ | Compute-bound for large $B$, memory-bandwidth-bound for $B=1$ |
+| **Multi-layer MLP** | $\sum_{\ell=1}^L 2 \cdot B \cdot D_{\ell-1} \cdot D_\ell$ | Intermediate tensor reads & writes | Cache line eviction across deep layer cascades |
+| **Dropout Forward** | $O(B \cdot D)$ (PRNG + threshold + multiply) | Read $\mathbf{X}$; Write $\hat{\mathbf{M}}, \mathbf{Y}$ | Memory bandwidth bound (streaming kernel) |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-layer-memory", "solution": false}
