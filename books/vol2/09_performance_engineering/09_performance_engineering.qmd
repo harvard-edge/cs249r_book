@@ -1615,7 +1615,160 @@ Intermediate tensors $Z_1$ and $Z_2$ each occupy the same memory as the output $
 
 ::: {#fig-fusion-before-after fig-env="figure" fig-pos="htb" fig-cap="**Operator fusion before and after**: Top: three separate kernels each read from and write to HBM, materializing intermediates $Z_1$ and $Z_2$, with six HBM round-trips along the unfused path. Bottom: a single fused kernel reads inputs once, holds intermediates in SRAM, and writes only the final output, leaving just two HBM round-trips. The fused path delivers roughly a 3$\times$ reduction in HBM traffic per layer." fig-alt="Two stacked dataflow panels. Top unfused path: six HBM round-trip arrows. Bottom fused path: two HBM round-trip arrows, intermediates staying in SRAM. The fused path is labeled as a 3 times reduction."}
 
-![](images/svg/operator-fusion.svg)
+```{=latex}
+\begin{tikzpicture}[
+    >=Stealth,
+    font=\small,
+    pill/.style={
+        rectangle, rounded corners=3pt,
+        line width=0.85pt, inner sep=4pt
+    },
+    kernel/.style={
+        rectangle, rounded corners=5pt,
+        draw=NavyBlue!80, fill=NavyBlue!6!white,
+        line width=0.9pt, align=center,
+        inner sep=5pt
+    },
+    subkernel/.style={
+        rectangle, rounded corners=3pt,
+        draw=NavyBlue!80, fill=white,
+        line width=0.85pt, align=center,
+        inner sep=4pt
+    }
+]
+
+    % Color palette
+    \providecolor{ForestGreen}{RGB}{34,139,34}
+    \providecolor{NavyBlue}{RGB}{20,45,110}
+    \providecolor{Amber}{RGB}{217,119,6}
+    \providecolor{BurntOrange}{RGB}{210,105,30}
+    \providecolor{BrickRed}{RGB}{180,30,30}
+    \providecolor{Crimson}{RGB}{180,30,30}
+    \providecolor{SlateGrey}{RGB}{112,128,144}
+    \providecolor{LightGrey}{RGB}{245,247,250}
+    \providecolor{BorderGrey}{RGB}{203,213,225}
+
+    % =========================================================================
+    % TOP PANEL: UNFUSED
+    % =========================================================================
+
+    % Header pill
+    \node[pill, draw=Crimson!70, fill=Crimson!8!white, font=\bfseries\color{Crimson}, anchor=west]
+        at (0, 7.8) {Unfused: 6 HBM Transfers (3 R / 3 W)};
+
+    % HBM Bar (Top)
+    \node[rectangle, rounded corners=4pt, draw=ForestGreen!80, fill=ForestGreen!10!white,
+          line width=0.9pt, minimum width=13.0cm, minimum height=0.65cm,
+          font=\small\bfseries\color{ForestGreen!90!black}, anchor=west]
+        at (0, 7.0) {High Bandwidth Memory (Off-Chip HBM3 $\cdot$ $\sim$640~pJ $\cdot$ 300~ns)};
+
+    % Three Unfused Kernels
+    \node[kernel, minimum width=3.2cm, minimum height=1.1cm] (k1) at (2.2, 4.8) {
+        {\bfseries\color{NavyBlue!95!black} LayerNorm}\\[1pt]
+        {\scriptsize\color{black!65} Kernel 1}
+    };
+
+    \node[kernel, minimum width=3.2cm, minimum height=1.1cm] (k2) at (6.5, 4.8) {
+        {\bfseries\color{NavyBlue!95!black} GELU}\\[1pt]
+        {\scriptsize\color{black!65} Kernel 2}
+    };
+
+    \node[kernel, minimum width=3.2cm, minimum height=1.1cm] (k3) at (10.8, 4.8) {
+        {\bfseries\color{NavyBlue!95!black} Linear}\\[1pt]
+        {\scriptsize\color{black!65} Kernel 3}
+    };
+
+    % Dashed dependency arrows between kernels
+    \draw[->, dashed, SlateGrey!70, line width=1.0pt] (k1.east) -- (k2.west);
+    \draw[->, dashed, SlateGrey!70, line width=1.0pt] (k2.east) -- (k3.west);
+
+    % Memory traffic arrows (Red)
+    % Kernel 1
+    \draw[->, Crimson, line width=1.2pt] (1.5, 6.67) -- (1.5, 5.35);
+    \node[font=\tiny\bfseries\color{Crimson}, anchor=east] at (1.45, 6.0) {Read};
+    \draw[<-, Crimson, line width=1.2pt] (2.9, 6.67) -- (2.9, 5.35);
+    \node[font=\tiny\bfseries\color{Crimson}, anchor=west] at (2.95, 6.0) {Write};
+
+    % Kernel 2
+    \draw[->, Crimson, line width=1.2pt] (5.8, 6.67) -- (5.8, 5.35);
+    \node[font=\tiny\bfseries\color{Crimson}, anchor=east] at (5.75, 6.0) {Read};
+    \draw[<-, Crimson, line width=1.2pt] (7.2, 6.67) -- (7.2, 5.35);
+    \node[font=\tiny\bfseries\color{Crimson}, anchor=west] at (7.25, 6.0) {Write};
+
+    % Kernel 3
+    \draw[->, Crimson, line width=1.2pt] (10.1, 6.67) -- (10.1, 5.35);
+    \node[font=\tiny\bfseries\color{Crimson}, anchor=east] at (10.05, 6.0) {Read};
+    \draw[<-, Crimson, line width=1.2pt] (11.5, 6.67) -- (11.5, 5.35);
+    \node[font=\tiny\bfseries\color{Crimson}, anchor=west] at (11.55, 6.0) {Write};
+
+    % Penalty Banner
+    \node[pill, draw=Crimson!60, fill=Crimson!7!white, minimum width=13.0cm, minimum height=0.55cm,
+          font=\scriptsize\bfseries\color{Crimson}, align=center, anchor=west]
+        at (0, 3.65) {Memory Penalty: 3 Intermediate Writes + 3 Reads through HBM $\cdot$ High DRAM Latency Bubbles};
+
+    % =========================================================================
+    % SECTION DIVIDER
+    % =========================================================================
+    \draw[SlateGrey!35, line width=0.8pt] (0, 2.95) -- (13.0, 2.95);
+
+    % =========================================================================
+    % BOTTOM PANEL: FUSED
+    % =========================================================================
+
+    % Header pill
+    \node[pill, draw=ForestGreen!70, fill=ForestGreen!8!white, font=\bfseries\color{ForestGreen}, anchor=west]
+        at (0, 2.3) {Fused: 2 HBM Transfers (1 R / 1 W)};
+
+    % HBM Bar (Bottom)
+    \node[rectangle, rounded corners=4pt, draw=ForestGreen!80, fill=ForestGreen!10!white,
+          line width=0.9pt, minimum width=13.0cm, minimum height=0.65cm,
+          font=\small\bfseries\color{ForestGreen!90!black}, anchor=west]
+        at (0, 1.5) {High Bandwidth Memory (Off-Chip HBM3 $\cdot$ $\sim$640~pJ $\cdot$ 300~ns)};
+
+    % Fused Container
+    \node[rectangle, rounded corners=5pt, draw=NavyBlue!80, fill=NavyBlue!5!white,
+          line width=1.1pt, minimum width=12.2cm, minimum height=2.1cm,
+          anchor=north west] (fused_box) at (0.4, 0.5) {};
+
+    % Fused Title & Subtitle inside container
+    \node[font=\small\bfseries\color{NavyBlue!95!black}, anchor=north]
+        at (6.5, 0.35) {Fused Kernel: LayerNorm + GELU + Linear};
+    \node[font=\tiny\color{black!70}, anchor=north]
+        at (6.5, -0.05) {Intermediates retained entirely within on-chip SRAM / Registers ($\sim$0.5~pJ $\cdot$ 20~ns)};
+
+    % Sub-boxes inside Fused Kernel
+    \node[subkernel, minimum width=2.4cm, minimum height=0.65cm] (sub_ln) at (2.2, -0.85) {
+        \footnotesize\bfseries LayerNorm
+    };
+
+    \node[subkernel, minimum width=2.4cm, minimum height=0.65cm] (sub_gelu) at (6.5, -0.85) {
+        \footnotesize\bfseries GELU
+    };
+
+    \node[subkernel, minimum width=2.4cm, minimum height=0.65cm] (sub_lin) at (10.8, -0.85) {
+        \footnotesize\bfseries Linear
+    };
+
+    % Internal SRAM arrows
+    \draw[->, NavyBlue!90!black, line width=1.1pt] (sub_ln.east) -- (sub_gelu.west)
+        node[midway, above, font=\tiny\bfseries\color{NavyBlue!90!black}] {SRAM};
+    \draw[->, NavyBlue!90!black, line width=1.1pt] (sub_gelu.east) -- (sub_lin.west)
+        node[midway, above, font=\tiny\bfseries\color{NavyBlue!90!black}] {SRAM};
+
+    % Memory traffic arrows (Green)
+    \draw[->, ForestGreen, line width=1.3pt] (2.2, 1.17) -- (2.2, 0.5);
+    \node[font=\scriptsize\bfseries\color{ForestGreen}, anchor=east] at (2.1, 0.85) {1 Read};
+
+    \draw[<-, ForestGreen, line width=1.3pt] (10.8, 1.17) -- (10.8, 0.5);
+    \node[font=\scriptsize\bfseries\color{ForestGreen}, anchor=west] at (10.9, 0.85) {1 Write};
+
+    % Payoff Banner
+    \node[pill, draw=ForestGreen!70, fill=ForestGreen!8!white, minimum width=13.0cm, minimum height=0.55cm,
+          font=\scriptsize\bfseries\color{ForestGreen!90!black}, align=center, anchor=west]
+        at (0, -2.1) {Optimization Payoff: 1 Read + 1 Write = 2 HBM Transfers $\cdot$ 3$\times$ Memory Traffic Reduction};
+
+\end{tikzpicture}
+```
 
 :::
 
@@ -1789,7 +1942,203 @@ class FlashAttentionTiling:
 The mechanism behind this traffic reduction is tiling, as diagrammed in @fig-performance-engineering-flashattention-tiling. FlashAttention processes the computation in tiles (typically $128{\times}128$ on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 \approx$ `{python} FlashAttentionTiling.block_kb_str`), a block of $K$ ($128 \times 128 \times 2 \approx$ `{python} FlashAttentionTiling.block_kb_str`), and a block of $V$ (`{python} FlashAttentionTiling.block_kb_str`), totaling approximately `{python} FlashAttentionTiling.total_kb_str`. This fits comfortably in the H100's `{python} FlashAttentionTiling.shared_kb_str` of shared memory per SM. The tile score $A_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192/128 =$ `{python} FlashAttentionTiling.tiles_per_dim_str` column tiles for each of `{python} FlashAttentionTiling.tiles_per_dim_str` row tiles, reloading tiles as required by the kernel schedule. The important point is that the quadratic $S{\times}S$ score and probability matrices are never materialized: the persistent per-head tensors are $Q$, $K$, $V$, $Y$, and $\mathcal{O}(S)$ softmax statistics.
 
 ::: {#fig-performance-engineering-flashattention-tiling fig-env="figure" fig-pos="htb" fig-cap="**FlashAttention memory hierarchy tiling**: Block-by-block scheduling of Q, K, and V matrices loaded into on-chip shared memory (SRAM). Attention scores are computed and rescaled online without materializing the quadratic $S \times S$ intermediate matrix in off-chip HBM, reducing memory traffic from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$." fig-alt="FlashAttention tiling diagram showing Q, K, V blocks loaded into fast SRAM with online softmax accumulation, avoiding materialization of the full intermediate attention matrix in HBM."}
-![](images/svg/flashattention-tiling.svg)
+```{=latex}
+\begin{tikzpicture}[
+    >=Stealth,
+    font=\small,
+    pill/.style={
+        rectangle, rounded corners=3pt,
+        line width=0.85pt, inner sep=3.5pt
+    },
+    colbox/.style={
+        rectangle, rounded corners=4pt,
+        line width=0.85pt, align=center
+    }
+]
+
+    % Color palette
+    \providecolor{ForestGreen}{RGB}{34,139,34}
+    \providecolor{NavyBlue}{RGB}{20,45,110}
+    \providecolor{Amber}{RGB}{217,119,6}
+    \providecolor{BurntOrange}{RGB}{210,105,30}
+    \providecolor{BrickRed}{RGB}{180,30,30}
+    \providecolor{Crimson}{RGB}{180,30,30}
+    \providecolor{SlateGrey}{RGB}{112,128,144}
+    \providecolor{LightGrey}{RGB}{245,247,250}
+    \providecolor{BorderGrey}{RGB}{203,213,225}
+
+    % =========================================================================
+    % TOP CONTAINER: HIGH BANDWIDTH MEMORY (HBM)
+    % =========================================================================
+    \node[rectangle, rounded corners=5pt, draw=SlateGrey!60, fill=white,
+          line width=0.9pt, minimum width=15.0cm, minimum height=4.2cm,
+          anchor=north west] (hbm_frame) at (0.5, 7.8) {};
+
+    % HBM Frame Label Pill
+    \node[pill, draw=ForestGreen!80, fill=ForestGreen!10!white,
+          font=\footnotesize\bfseries\color{ForestGreen!90!black}, anchor=north west]
+        at (0.7, 7.6) {High Bandwidth Memory (Off-Chip HBM3 $\cdot$ 3.35~TB/s $\cdot$ $\sim$640~pJ)};
+
+    % Column 1: Q (center = 2.0)
+    \node[colbox, draw=NavyBlue!80, fill=NavyBlue!5!white,
+          minimum width=2.2cm, minimum height=3.0cm, anchor=north] (box_q) at (2.0, 7.0) {};
+    \node[rectangle, rounded corners=3pt, draw=NavyBlue!90, fill=NavyBlue!90!black,
+          minimum width=2.2cm, minimum height=0.65cm,
+          font=\scriptsize\bfseries\color{white}, align=center, anchor=north]
+        at (2.0, 7.0) {Q tile ($T_r \times d$)};
+    \node[font=\Large\bfseries\color{NavyBlue!95!black}] at (2.0, 5.5) {Q};
+    \node[font=\tiny\color{black!70}, align=center] at (2.0, 4.6) {$S \times d_{\mathrm{model}}$\\[1pt](queries)};
+
+    % Column 2: K (center = 4.6)
+    \node[colbox, draw=NavyBlue!80, fill=NavyBlue!5!white,
+          minimum width=2.2cm, minimum height=3.0cm, anchor=north] (box_k) at (4.6, 7.0) {};
+    \node[rectangle, rounded corners=3pt, draw=NavyBlue!90, fill=NavyBlue!90!black,
+          minimum width=2.2cm, minimum height=0.65cm,
+          font=\scriptsize\bfseries\color{white}, align=center, anchor=north]
+        at (4.6, 7.0) {K tile ($T_c \times d$)};
+    \node[font=\Large\bfseries\color{NavyBlue!95!black}] at (4.6, 5.5) {K};
+    \node[font=\tiny\color{black!70}, align=center] at (4.6, 4.6) {$S \times d_{\mathrm{model}}$\\[1pt](keys)};
+
+    % Column 3: V (center = 7.2)
+    \node[colbox, draw=NavyBlue!80, fill=NavyBlue!5!white,
+          minimum width=2.2cm, minimum height=3.0cm, anchor=north] (box_v) at (7.2, 7.0) {};
+    \node[rectangle, rounded corners=3pt, draw=NavyBlue!90, fill=NavyBlue!90!black,
+          minimum width=2.2cm, minimum height=0.65cm,
+          font=\scriptsize\bfseries\color{white}, align=center, anchor=north]
+        at (7.2, 7.0) {V tile ($T_c \times d$)};
+    \node[font=\Large\bfseries\color{NavyBlue!95!black}] at (7.2, 5.5) {V};
+    \node[font=\tiny\color{black!70}, align=center] at (7.2, 4.6) {$S \times d_{\mathrm{model}}$\\[1pt](values)};
+
+    % Column 4: A (Never Materialized, center = 10.3)
+    \node[colbox, draw=Crimson!90, dashed, fill=Crimson!4!white,
+          line width=1.1pt, minimum width=3.2cm, minimum height=3.0cm, anchor=north]
+        (box_a) at (10.3, 7.0) {};
+    \node[align=center, anchor=north] at (10.3, 6.9) {
+        {\scriptsize\bfseries\color{Crimson} $A = QK^T$ ($S \times S$)}\\[2pt]
+        {\tiny\bfseries\color{Crimson} NEVER MATERIALIZED}
+    };
+    % Big Red X (vertically centered in open middle)
+    \draw[Crimson, line width=2.0pt] (9.3, 5.75) -- (11.3, 4.85);
+    \draw[Crimson, line width=2.0pt] (9.3, 4.85) -- (11.3, 5.75);
+    \node[align=center, anchor=south] at (10.3, 4.05) {
+        {\tiny\color{black!70} Naive Attention Matrix:}\\[1.5pt]
+        {\tiny\bfseries\color{Crimson} 128~MB/head at $S=8\text{K}$}
+    };
+
+    % Column 5: Y (Accumulated Tile, center = 13.7)
+    \node[colbox, draw=ForestGreen!80, fill=ForestGreen!6!white,
+          minimum width=2.5cm, minimum height=3.0cm, anchor=north] (box_y) at (13.7, 7.0) {};
+    \node[rectangle, rounded corners=3pt, draw=ForestGreen!90!black, fill=ForestGreen!85!black,
+          minimum width=2.5cm, minimum height=0.65cm,
+          font=\scriptsize\bfseries\color{white}, align=center, anchor=north]
+        at (13.7, 7.0) {Accumulated Tile $Y_i$};
+    \node[font=\Large\bfseries\color{ForestGreen!90!black}] at (13.7, 5.5) {Y};
+    \node[font=\tiny\color{black!70}, align=center] at (13.7, 4.6) {$S \times d_{\mathrm{model}}$\\[1pt](final output)};
+
+    % =========================================================================
+    % TRANSFER ARROWS (HBM <-> SRAM)
+    % =========================================================================
+    % Q Load
+    \draw[->, NavyBlue!90!black, line width=1.2pt] (2.0, 3.6) -- (2.0, 2.2);
+    \node[pill, draw=NavyBlue!70, fill=white, font=\scriptsize\bfseries\color{NavyBlue!90!black}]
+        at (2.0, 2.9) {Load $Q_i$};
+
+    % K Load
+    \draw[->, NavyBlue!90!black, line width=1.2pt] (4.6, 3.6) -- (4.6, 2.2);
+    \node[pill, draw=NavyBlue!70, fill=white, font=\scriptsize\bfseries\color{NavyBlue!90!black}]
+        at (4.6, 2.9) {Load $K_j$};
+
+    % V Load
+    \draw[->, NavyBlue!90!black, line width=1.2pt] (7.2, 3.6) -- (7.2, 2.2);
+    \node[pill, draw=NavyBlue!70, fill=white, font=\scriptsize\bfseries\color{NavyBlue!90!black}]
+        at (7.2, 2.9) {Load $V_j$};
+
+    % Y Write
+    \draw[<-, ForestGreen, line width=1.2pt] (13.7, 3.6) -- (13.7, 2.2);
+    \node[pill, draw=ForestGreen!70, fill=white, font=\scriptsize\bfseries\color{ForestGreen!90!black}]
+        at (13.7, 2.9) {Write partial $Y_i$};
+
+    % =========================================================================
+    % BOTTOM CONTAINER: SRAM / SHARED MEMORY
+    % =========================================================================
+    \node[rectangle, rounded corners=5pt, draw=NavyBlue!80, fill=NavyBlue!4!white,
+          line width=1.0pt, minimum width=15.0cm, minimum height=3.35cm,
+          anchor=north west] (sram_frame) at (0.5, 2.2) {};
+
+    % SRAM Label Pill
+    \node[pill, draw=NavyBlue!60, fill=white,
+          font=\footnotesize\bfseries\color{NavyBlue!90!black}, anchor=north west]
+        at (0.7, 2.0) {SRAM / Shared Memory (On-Chip SM $\cdot$ $\sim$228~KB $\cdot$ $\sim$0.5~pJ $\cdot$ $\sim$20~ns)};
+
+    % Card 1: Q tile in SRAM (center = 2.0)
+    \node[rectangle, rounded corners=4pt, draw=NavyBlue!90, fill=NavyBlue!90!black,
+          minimum width=2.2cm, minimum height=1.25cm,
+          align=center, inner sep=3pt, anchor=north]
+        at (2.0, 1.35) {
+        {\scriptsize\bfseries\color{white} Q tile in SRAM}\\[3pt]
+        {\tiny\color{white!85} $T_r \times d$ block}
+    };
+
+    % Card 2: K tile in SRAM (center = 4.6)
+    \node[rectangle, rounded corners=4pt, draw=NavyBlue!90, fill=NavyBlue!90!black,
+          minimum width=2.2cm, minimum height=1.25cm,
+          align=center, inner sep=3pt, anchor=north]
+        at (4.6, 1.35) {
+        {\scriptsize\bfseries\color{white} K tile in SRAM}\\[3pt]
+        {\tiny\color{white!85} $T_c \times d$ block}
+    };
+
+    % Card 3: V tile in SRAM (center = 7.2)
+    \node[rectangle, rounded corners=4pt, draw=NavyBlue!90, fill=NavyBlue!90!black,
+          minimum width=2.2cm, minimum height=1.25cm,
+          align=center, inner sep=3pt, anchor=north]
+        at (7.2, 1.35) {
+        {\scriptsize\bfseries\color{white} V tile in SRAM}\\[3pt]
+        {\tiny\color{white!85} $T_c \times d$ block}
+    };
+
+    % Card 4: Tile S_ij (center = 10.3)
+    \node[rectangle, rounded corners=4pt, draw=NavyBlue!80, fill=white, line width=0.85pt,
+          minimum width=3.2cm, minimum height=1.25cm,
+          align=center, inner sep=3pt, anchor=north]
+        at (10.3, 1.35) {
+        {\scriptsize\bfseries\color{NavyBlue!95!black} Tile $S_{ij} = Q_i K_j^T$}\\[2pt]
+        {\tiny\color{NavyBlue!80!black} Computed in SRAM ($T_r \times T_c$)}\\[1pt]
+        {\fontsize{5}{6}\selectfont\color{black!60} (never written to HBM)}
+    };
+
+    % Card 5: Online Softmax (center = 13.7)
+    \node[rectangle, rounded corners=4pt, draw=Amber!90!black, fill=Amber!12!white, line width=0.85pt,
+          minimum width=2.5cm, minimum height=1.25cm,
+          align=center, inner sep=3pt, anchor=north]
+        at (13.7, 1.35) {
+        {\scriptsize\bfseries\color{BurntOrange!90!black} Online Softmax}\\[2pt]
+        {\tiny\color{BurntOrange!90!black} Running $\max m$, $\sum \ell$}\\[1pt]
+        {\tiny\color{BurntOrange!90!black} Rescale \& accumulate $Y_i$}
+    };
+
+    % Footer explanation inside SRAM box
+    \node[font=\scriptsize\color{NavyBlue!90!black}, align=center, text width=14.0cm]
+        at (8.0, -0.6) {FlashAttention processes $Q, K, V$ in $T_r \times T_c$ tiles on-chip $\cdot$ Online softmax computes exact attention with zero HBM intermediate writes};
+
+    % =========================================================================
+    % BOTTOM SUMMARY CARD
+    % =========================================================================
+    \node[rectangle, rounded corners=5pt, draw=BorderGrey, fill=LightGrey!50!white,
+          line width=0.85pt, minimum width=15.0cm, minimum height=1.25cm,
+          anchor=north west] (summary_card) at (0.5, -1.35) {};
+
+    \node[align=left, anchor=west, text width=9.2cm] at (0.8, -1.98) {
+        {\scriptsize\bfseries\color{black!90} Key Algorithmic Principle: Tile-Based Online Softmax}\\[2pt]
+        {\tiny\color{black!70} Load tiles into fast on-chip SRAM $\cdot$ Maintain running normalization statistics $\cdot$ Avoid all $\mathcal{O}(S^2)$ HBM memory round-trips}
+    };
+
+    \node[pill, draw=ForestGreen!80, fill=ForestGreen!10!white,
+          font=\scriptsize\bfseries\color{ForestGreen!90!black}, anchor=east]
+        at (15.2, -1.98) {$\mathcal{O}(S^2) \rightarrow \mathcal{O}(S)$ HBM $\cdot$ 2--4$\times$ Speedup};
+
+\end{tikzpicture}
+```
 :::
 
 FlashAttention-2 [@dao2023flashattention2] further optimizes the algorithm for GPU architectures with many streaming multiprocessors by restructuring the parallelism pattern. The original FlashAttention parallelizes over batch and head dimensions, meaning each thread block handles one (batch, head) pair and iterates over the full sequence. FlashAttention-2 additionally parallelizes over the sequence dimension of the query matrix, distributing work across thread blocks more efficiently and achieving better occupancy. It also reduces the number of non-GEMM FLOPs by restructuring the rescaling operations and exploiting the asymmetry between the Q loop (outer) and K/V loop (inner).
@@ -1943,7 +2292,222 @@ The first inference-side precision decision is how to shrink weights while prote
 The structural contrast between per-tensor and block-wise quantization is illustrated in @fig-performance-engineering-block-quantization. In per-tensor quantization, a single outlier expands the scaling factor across the entire tensor, quantizing the majority of weights to zero and destroying precision. In block-wise quantization, the outlier's dynamic-range penalty is strictly contained within its local group, preserving high-resolution representation for the surrounding weights.
 
 ::: {#fig-performance-engineering-block-quantization fig-env="figure" fig-pos="htb" fig-cap="**Block-wise versus per-tensor quantization**: Under per-tensor scaling (left), an extreme outlier weight forces a wide scale factor that crushes normal weights to zero and destroys precision. Under block-wise quantization (right), weights are partitioned into independent groups, strictly isolating outlier damage to a single block and preserving full INT8 dynamic range across remaining parameters." fig-alt="Side-by-side comparison of per-tensor quantization with crushed precision versus block-wise quantization with localized outlier containment and preserved dynamic range."}
-![](images/svg/block-quantization.svg)
+```{=latex}
+\begin{tikzpicture}[
+    >=Stealth,
+    font=\small,
+    pill/.style={
+        rectangle, rounded corners=3.5pt,
+        line width=0.85pt, align=center
+    },
+    cell/.style={
+        rectangle, rounded corners=2.5pt,
+        draw=NavyBlue!80, fill=NavyBlue!4!white,
+        line width=0.75pt, minimum width=0.72cm, minimum height=0.55cm,
+        font=\scriptsize\bfseries\color{NavyBlue!95!black}, align=center,
+        inner sep=0pt
+    },
+    cell_outlier/.style={
+        rectangle, rounded corners=2.5pt,
+        draw=Crimson!90, fill=Crimson!8!white,
+        line width=0.9pt, minimum width=0.72cm, minimum height=0.55cm,
+        font=\scriptsize\bfseries\color{Crimson}, align=center,
+        inner sep=0pt
+    },
+    cell_crushed/.style={
+        rectangle, rounded corners=2.5pt,
+        draw=Crimson!50, fill=Crimson!4!white,
+        line width=0.75pt, minimum width=0.72cm, minimum height=0.55cm,
+        font=\scriptsize\bfseries\color{Crimson!80!black}, align=center,
+        inner sep=0pt
+    },
+    cell_green/.style={
+        rectangle, rounded corners=2.5pt,
+        draw=ForestGreen!80, fill=ForestGreen!6!white,
+        line width=0.75pt, minimum width=0.72cm, minimum height=0.55cm,
+        font=\scriptsize\bfseries\color{ForestGreen!90!black}, align=center,
+        inner sep=0pt
+    }
+]
+
+    % Color palette
+    \providecolor{ForestGreen}{RGB}{34,139,34}
+    \providecolor{NavyBlue}{RGB}{20,45,110}
+    \providecolor{Amber}{RGB}{217,119,6}
+    \providecolor{BurntOrange}{RGB}{210,105,30}
+    \providecolor{BrickRed}{RGB}{180,30,30}
+    \providecolor{Crimson}{RGB}{180,30,30}
+    \providecolor{SlateGrey}{RGB}{112,128,144}
+    \providecolor{LightGrey}{RGB}{245,247,250}
+    \providecolor{BorderGrey}{RGB}{203,213,225}
+
+    % =========================================================================
+    % LEFT PANEL: PER-TENSOR QUANTIZATION (center = 3.7)
+    % =========================================================================
+    \node[rectangle, rounded corners=6pt, draw=BorderGrey, fill=white, line width=0.85pt,
+          minimum width=7.4cm, minimum height=10.2cm, anchor=north west] (panel_left) at (0, 10.3) {};
+
+    % Header Pill
+    \node[pill, draw=Crimson!70, fill=Crimson!8!white, minimum width=6.8cm, minimum height=0.85cm,
+          anchor=north] at (3.7, 10.0) {
+        {\footnotesize\bfseries\color{Crimson} Per-Tensor Quantization}\\[2pt]
+        {\tiny\color{Crimson!85!black} Single scale factor applied across entire tensor}
+    };
+
+    % Section 1: Original FP16 Weights
+    \node[anchor=west, font=\scriptsize\bfseries\color{black!80}] at (0.4, 8.8) {Original FP16 Weights:};
+
+    % 8 Cells
+    \node[cell] at (0.85, 8.2) {0.12};
+    \node[cell] at (1.65, 8.2) {-0.08};
+    \node[cell] at (2.45, 8.2) {0.21};
+    \node[cell] at (3.25, 8.2) {-0.15};
+    \node[cell_outlier] at (4.05, 8.2) {58.7};
+    \node[cell] at (4.85, 8.2) {0.09};
+    \node[cell] at (5.65, 8.2) {0.33};
+    \node[cell] at (6.45, 8.2) {-0.07};
+
+    % Scale Box (Amber)
+    \node[pill, draw=Amber!80, fill=Amber!10!white, minimum width=6.6cm, minimum height=0.55cm]
+        at (3.7, 7.3) {
+        {\scriptsize\bfseries\color{Amber!90!black} Single Global Scale: $s = \frac{\max(|W|)}{127} = \frac{58.7}{127} \approx 0.462$}
+    };
+
+    % Down Arrow
+    \draw[->, Crimson, line width=1.1pt] (3.7, 6.9) -- (3.7, 6.45);
+
+    % Section 2: Quantized INT8 Weights
+    \node[anchor=west, font=\scriptsize\bfseries\color{black!80}] at (0.4, 6.25) {Quantized INT8 Weights ($W_q = \text{round}(W / s)$):};
+
+    % 8 Cells
+    \node[cell_crushed] at (0.85, 5.65) {0};
+    \node[cell_crushed] at (1.65, 5.65) {0};
+    \node[cell_crushed] at (2.45, 5.65) {0};
+    \node[cell_crushed] at (3.25, 5.65) {0};
+    \node[cell] at (4.05, 5.65) {127};
+    \node[cell_crushed] at (4.85, 5.65) {0};
+    \node[cell_crushed] at (5.65, 5.65) {1};
+    \node[cell_crushed] at (6.45, 5.65) {0};
+
+    % Red Banner: Outlier Crushes Dynamic Range
+    \node[pill, draw=Crimson!80, fill=Crimson!6!white, line width=0.85pt,
+          minimum width=6.6cm, minimum height=1.05cm, text width=6.2cm, align=left,
+          anchor=north] at (3.7, 5.2) {
+        {\scriptsize\bfseries\color{Crimson} Outlier Crushes Dynamic Range}\\[1.5pt]
+        {\tiny\color{black!75} Normal weights round to 0 or 1, collapsing representational capacity across the entire tensor and causing severe accuracy drops.}
+    };
+
+    % Red Callout: Catastrophic Perplexity Degradation
+    \node[pill, draw=Crimson!60, fill=white, line width=0.85pt,
+          minimum width=6.6cm, minimum height=1.05cm, anchor=north] (callout_left) at (3.7, 2.8) {};
+    % Circled X icon
+    \node[circle, draw=Crimson, fill=Crimson!10!white, line width=0.85pt, minimum size=0.52cm]
+        at ([xshift=0.50cm] callout_left.west) (x_icon) {};
+    \draw[Crimson, line width=1.1pt] ([shift={(-0.09,-0.09)}] x_icon.center) -- ([shift={(0.09,0.09)}] x_icon.center);
+    \draw[Crimson, line width=1.1pt] ([shift={(-0.09,0.09)}] x_icon.center) -- ([shift={(0.09,-0.09)}] x_icon.center);
+    \node[anchor=north west, text width=5.5cm, align=left] at ([shift={(0.85cm, -0.20cm)}] callout_left.north west) {
+        {\scriptsize\bfseries\color{Crimson} Catastrophic Perplexity Degradation}\\[2.5pt]
+        {\tiny\color{black!65} No scale overhead, but severe accuracy collapse}
+    };
+
+    % Bottom Summary Card
+    \node[pill, draw=BorderGrey, fill=LightGrey!50!white, line width=0.85pt,
+          minimum width=6.6cm, minimum height=0.95cm, anchor=north] (sum_left) at (3.7, 1.45) {};
+    \node[anchor=center, align=center] at (sum_left.center) {
+        {\scriptsize\bfseries\color{NavyBlue!95!black} Effective Bit-Depth: $\sim$1 bit (7 of 8 zeroed)}\\[2pt]
+        {\tiny\color{black!60} Metadata: 1 FP16 scale per tensor ($\sim$0\% storage overhead)}
+    };
+
+    % =========================================================================
+    % RIGHT PANEL: BLOCK-WISE QUANTIZATION (center = 11.7)
+    % =========================================================================
+    \node[rectangle, rounded corners=6pt, draw=BorderGrey, fill=white, line width=0.85pt,
+          minimum width=7.4cm, minimum height=10.2cm, anchor=north west] (panel_right) at (8.0, 10.3) {};
+
+    % Header Pill
+    \node[pill, draw=ForestGreen!80, fill=ForestGreen!8!white, minimum width=6.8cm, minimum height=0.85cm,
+          anchor=north] at (11.7, 10.0) {
+        {\footnotesize\bfseries\color{ForestGreen!90!black} Block-Wise Quantization}\\[2pt]
+        {\tiny\color{ForestGreen!80!black} Independent scale factor per group of $B$ weights (e.g., $B=4$ shown)}
+    };
+
+    % Section 1: Original FP16 Weights (Grouped)
+    \node[anchor=west, font=\scriptsize\bfseries\color{black!80}] at (8.4, 8.8) {Original FP16 Weights (Grouped into Blocks):};
+
+    % Group 1 Dashed Box
+    \draw[dashed, ForestGreen!90, line width=0.85pt, rounded corners=3pt] (8.4, 7.85) rectangle (11.7, 8.55);
+    % Group 2 Dashed Box
+    \draw[dashed, Amber!90!black, line width=0.85pt, rounded corners=3pt] (11.75, 7.85) rectangle (15.05, 8.55);
+
+    % 8 Cells
+    \node[cell_green] at (8.85, 8.2) {0.12};
+    \node[cell_green] at (9.65, 8.2) {-0.08};
+    \node[cell_green] at (10.45, 8.2) {0.21};
+    \node[cell_green] at (11.25, 8.2) {-0.15};
+
+    \node[cell_outlier] at (12.2, 8.2) {58.7};
+    \node[cell] at (13.0, 8.2) {0.09};
+    \node[cell] at (13.8, 8.2) {0.33};
+    \node[cell] at (14.6, 8.2) {-0.07};
+
+    % Two Scale Boxes
+    \node[pill, draw=ForestGreen!80, fill=ForestGreen!10!white, minimum width=3.2cm, minimum height=0.55cm]
+        at (10.05, 7.3) {
+        {\scriptsize\bfseries\color{ForestGreen!90!black} $s_1 = \frac{0.21}{127} \approx 0.00165$}
+    };
+    \node[pill, draw=Amber!80, fill=Amber!10!white, minimum width=3.2cm, minimum height=0.55cm]
+        at (13.4, 7.3) {
+        {\scriptsize\bfseries\color{Amber!90!black} $s_2 = \frac{58.7}{127} \approx 0.462$}
+    };
+
+    % Down Arrows
+    \draw[->, ForestGreen, line width=1.1pt] (10.05, 6.9) -- (10.05, 6.45);
+    \draw[->, ForestGreen, line width=1.1pt] (13.4, 6.9) -- (13.4, 6.45);
+
+    % Section 2: Quantized INT8 Weights
+    \node[anchor=west, font=\scriptsize\bfseries\color{black!80}] at (8.4, 6.25) {Quantized INT8 Weights (High Resolution Preserved):};
+
+    % 8 Cells (Preserved Resolution)
+    \node[cell_green] at (8.85, 5.65) {73};
+    \node[cell_green] at (9.65, 5.65) {-48};
+    \node[cell_green] at (10.45, 5.65) {127};
+    \node[cell_green] at (11.25, 5.65) {-91};
+
+    \node[cell] at (12.2, 5.65) {127};
+    \node[cell] at (13.0, 5.65) {0};
+    \node[cell] at (13.8, 5.65) {1};
+    \node[cell] at (14.6, 5.65) {0};
+
+    % Green Banner: Outlier Damage Strictly Contained
+    \node[pill, draw=ForestGreen!80, fill=ForestGreen!6!white, line width=0.85pt,
+          minimum width=6.6cm, minimum height=1.05cm, text width=6.2cm, align=left,
+          anchor=north] at (11.7, 5.2) {
+        {\scriptsize\bfseries\color{ForestGreen!90!black} Outlier Damage Strictly Contained}\\[1.5pt]
+        {\tiny\color{black!75} Block 1 retains full INT8 resolution across normal weights. Only Block 2 absorbs the outlier; adjacent blocks remain unaffected.}
+    };
+
+    % Green Callout: Lossless Dynamic Range Preservation
+    \node[pill, draw=ForestGreen!70, fill=white, line width=0.85pt,
+          minimum width=6.6cm, minimum height=1.05cm, anchor=north] (callout_right) at (11.7, 2.8) {};
+    % Checkmark icon
+    \node[circle, draw=ForestGreen, fill=ForestGreen!10!white, line width=0.85pt, minimum size=0.52cm]
+        at ([xshift=0.50cm] callout_right.west) (check_icon) {};
+    \draw[ForestGreen, line width=1.2pt] ([shift={(-0.09,-0.01)}] check_icon.center) -- ([shift={(0.0, -0.09)}] check_icon.center) -- ([shift={(0.11,0.09)}] check_icon.center);
+    \node[anchor=north west, text width=5.7cm, align=left] at ([shift={(0.85cm, -0.20cm)}] callout_right.north west) {
+        {\scriptsize\bfseries\color{ForestGreen!90!black} Lossless Dynamic Range Preservation}\\[2.5pt]
+        {\tiny\color{black!65} \mbox{Standard in AWQ, GPTQ, FP4/FP8 ($B=32$ or $64$)}}
+    };
+
+    % Bottom Summary Card
+    \node[pill, draw=BorderGrey, fill=LightGrey!50!white, line width=0.85pt,
+          minimum width=6.6cm, minimum height=0.95cm, anchor=north] (sum_right) at (11.7, 1.45) {};
+    \node[anchor=center, align=center] at (sum_right.center) {
+        {\scriptsize\bfseries\color{ForestGreen!90!black} Effective Bit-Depth: 7.8+ bits (unimpaired)}\\[2pt]
+        {\tiny\color{black!60} Metadata: 1 FP16 scale per 64 weights (+3.1\% overhead)}
+    };
+
+\end{tikzpicture}
+```
 :::
 
 LLM.int8() keeps the outlier cost at runtime by decomposing each matrix multiplication into two parts: a small set of outlier dimensions processed in FP16, and the remaining dimensions processed in INT8. The system identifies outlier dimensions at runtime (those exceeding a magnitude threshold, typically 6.0), routes them to an FP16 GEMM, and routes the remaining dimensions to an INT8 GEMM. The results are combined to produce the final output. This achieves nearly lossless INT8 inference for models that would otherwise degrade substantially under uniform quantization.
@@ -2135,7 +2699,234 @@ The deeper payoff of compilation is spatial, not just arithmetic. A compiler lik
 A graph compiler transforms a high-level model definition (Python code) into optimized hardware instructions through a multi-stage pipeline, as shown in @fig-performance-engineering-compilation-pipeline. To visualize this process, consider a standard transformer feed-forward network (FFN) block consisting of a projection, an activation, a second projection, and a layer normalization: `LayerNorm(Linear(GELU(Linear(x))))`. In standard PyTorch eager execution, this sequence triggers four separate kernel launches, each reading from and writing to HBM.
 
 ::: {#fig-performance-engineering-compilation-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Deep learning compilation pipeline**: The four-stage lowering flow from eager Python bytecode through graph capture (TorchDynamo), graph-level optimization (AOTAutograd), target-aware operator fusion (TorchInductor), to code generation and autotuned GPU kernel compilation (Triton and cuBLAS)." fig-alt="Four-stage ML compilation pipeline showing graph capture, graph optimization, operator fusion, and code generation lowering high-level code to hardware-optimized GPU kernels."}
-![](images/svg/compilation-pipeline.svg)
+```{=latex}
+\begin{tikzpicture}[
+    font=\sansmath\sffamily,
+    >=Stealth,
+    stage/.style={
+        rounded corners=4pt,
+        line width=0.85pt,
+        inner sep=6pt,
+        minimum width=3.45cm,
+        minimum height=5.3cm,
+        anchor=north west
+    },
+    subpill/.style={
+        rounded corners=3pt,
+        line width=0.8pt,
+        font=\scriptsize\bfseries,
+        inner xsep=7pt,
+        inner ysep=3.5pt,
+        align=center
+    }
+]
+
+    \providecolor{DarkNavy}{RGB}{20, 35, 60}
+    \providecolor{OceanBlue}{RGB}{21, 101, 192}
+    \providecolor{SoftBlue}{RGB}{235, 243, 250}
+    \providecolor{BorderBlue}{RGB}{170, 205, 235}
+    \providecolor{PurpleStage}{RGB}{124, 58, 237}
+    \providecolor{SoftPurple}{RGB}{245, 240, 255}
+    \providecolor{BorderPurple}{RGB}{195, 170, 240}
+    \providecolor{AmberStage}{RGB}{217, 119, 6}
+    \providecolor{SoftAmber}{RGB}{254, 247, 235}
+    \providecolor{BorderAmber}{RGB}{245, 195, 130}
+    \providecolor{GreenStage}{RGB}{22, 145, 65}
+    \providecolor{SoftGreen}{RGB}{236, 250, 240}
+    \providecolor{BorderGreen}{RGB}{160, 220, 180}
+    \providecolor{BorderGrey}{RGB}{210, 218, 228}
+    \providecolor{BgCard}{RGB}{250, 252, 255}
+
+    % =========================================================================
+    % 1. TOP CONTAINER: 4-STAGE PIPELINE
+    % =========================================================================
+    \node[rounded corners=6pt, draw=BorderBlue!90, fill=BgCard, line width=0.9pt,
+          minimum width=16.0cm, minimum height=6.8cm, anchor=north west] (topbox) at (0, 0) {};
+
+    % Top Banner Pill
+    \node[rounded corners=4pt, draw=BorderBlue, fill=SoftBlue!90, line width=0.8pt,
+          anchor=north west] (topbanner) at ([shift={(0.3cm, -0.3cm)}] topbox.north west) {
+        \bfseries\footnotesize\color{DarkNavy} ML Compilation Pipeline: Eager PyTorch to Tuned GPU Kernels
+    };
+
+    % ---- Stage 1: Graph Capture ----
+    \node[stage, draw=BorderPurple, fill=white] (s1) at ([shift={(0.3cm, -1.05cm)}] topbox.north west) {};
+    \node[subpill, draw=PurpleStage!80, fill=SoftPurple, anchor=north] (s1_pill) at ([shift={(1.725cm, -0.22cm)}] s1.north west) {
+        \color{PurpleStage!90!black} Stage 1: Graph Capture
+    };
+    \node[anchor=north, align=center] (s1_sub) at ([shift={(1.725cm, -0.88cm)}] s1.north west) {
+        \scriptsize\bfseries\color{PurpleStage!90!black} TorchDynamo $\cdot$ FX Tracing
+    };
+    \node[anchor=north west, text width=3.2cm, align=left] at ([shift={(0.15cm, -1.38cm)}] s1.north west) {
+        \tiny\color{black!80}
+        $\bullet$ Intercepts Python frame\\
+        \hspace*{5pt}bytecode evaluation\\[4pt]
+        $\bullet$ Extracts pure tensor DAG\\[4pt]
+        $\bullet$ Installs guards on dynamic\\
+        \hspace*{5pt}shapes and object types\\[4pt]
+        $\bullet$ Emits symbolic FX graph
+    };
+    \node[subpill, draw=PurpleStage!60, fill=SoftPurple!60, minimum width=3.1cm, anchor=south] at ([shift={(1.725cm, 0.22cm)}] s1.south west) {
+        \tiny\bfseries\color{PurpleStage!95!black} Output: Symbolic Graph
+    };
+
+    % ---- Stage 2: Graph Opt ----
+    \node[stage, draw=DarkNavy!70, fill=white] (s2) at ([shift={(4.20cm, -1.05cm)}] topbox.north west) {};
+    \node[subpill, draw=DarkNavy!80, fill=SoftBlue!80, anchor=north] (s2_pill) at ([shift={(1.725cm, -0.22cm)}] s2.north west) {
+        \color{DarkNavy} Stage 2: Graph Opt
+    };
+    \node[anchor=north, align=center] (s2_sub) at ([shift={(1.725cm, -0.88cm)}] s2.north west) {
+        \scriptsize\bfseries\color{DarkNavy} AOTAutograd $\cdot$ FX Passes
+    };
+    \node[anchor=north west, text width=3.2cm, align=left] at ([shift={(0.15cm, -1.38cm)}] s2.north west) {
+        \tiny\color{black!80}
+        $\bullet$ Dead code elimination\\[4pt]
+        $\bullet$ Common subexpression\\
+        \hspace*{5pt}elimination (CSE)\\[4pt]
+        $\bullet$ Constant folding \& baking\\[4pt]
+        $\bullet$ Memory layout propagation\\[4pt]
+        $\bullet$ 10--30\% fewer total ops
+    };
+    \node[subpill, draw=DarkNavy!60, fill=SoftBlue!60, minimum width=3.1cm, anchor=south] at ([shift={(1.725cm, 0.22cm)}] s2.south west) {
+        \tiny\bfseries\color{DarkNavy} Output: Clean Target DAG
+    };
+
+    % ---- Stage 3: Operator Fusion ----
+    \node[stage, draw=AmberStage!80, fill=white] (s3) at ([shift={(8.10cm, -1.05cm)}] topbox.north west) {};
+    \node[subpill, draw=AmberStage!90, fill=SoftAmber, anchor=north] (s3_pill) at ([shift={(1.725cm, -0.22cm)}] s3.north west) {
+        \color{AmberStage!95!black} Stage 3: Operator Fusion
+    };
+    \node[anchor=north, align=center] (s3_sub) at ([shift={(1.725cm, -0.88cm)}] s3.north west) {
+        \scriptsize\bfseries\color{AmberStage!95!black} TorchInductor Fusion Pass
+    };
+    \node[anchor=north west, text width=3.2cm, align=left] at ([shift={(0.15cm, -1.38cm)}] s3.north west) {
+        \tiny\color{black!80}
+        $\bullet$ Fuses elementwise ops\\
+        \hspace*{5pt}(Bias + GELU + Add)\\[4pt]
+        $\bullet$ Fuses reductions \& norms\\[4pt]
+        $\bullet$ Eliminates intermediate\\
+        \hspace*{5pt}HBM buffer allocations\\[4pt]
+        $\bullet$ 30--50\% fewer DRAM trips
+    };
+    \node[subpill, draw=AmberStage!60, fill=SoftAmber!70, minimum width=3.1cm, anchor=south] at ([shift={(1.725cm, 0.22cm)}] s3.south west) {
+        \tiny\bfseries\color{AmberStage!95!black} Output: Fused Loop Kernels
+    };
+
+    % ---- Stage 4: Codegen & Tuning ----
+    \node[stage, draw=GreenStage!85, fill=white] (s4) at ([shift={(12.0cm, -1.05cm)}] topbox.north west) {};
+    \node[subpill, draw=GreenStage!90, fill=SoftGreen, anchor=north] (s4_pill) at ([shift={(1.725cm, -0.22cm)}] s4.north west) {
+        \color{GreenStage!90!black} Stage 4: Codegen \& Tuning
+    };
+    \node[anchor=north, align=center] (s4_sub) at ([shift={(1.725cm, -0.88cm)}] s4.north west) {
+        \scriptsize\bfseries\color{GreenStage!90!black} Triton $\cdot$ CUTLASS $\cdot$ cuBLAS
+    };
+    \node[anchor=north west, text width=3.2cm, align=left] at ([shift={(0.15cm, -1.38cm)}] s4.north west) {
+        \tiny\color{black!80}
+        $\bullet$ Generates Triton / C++ code\\[4pt]
+        $\bullet$ Autotunes tile dimensions,\\
+        \hspace*{5pt}num\_warps, \& num\_stages\\[4pt]
+        $\bullet$ Selects optimal GEMM kernel\\[4pt]
+        $\bullet$ Compiles directly to PTX/SASS\\[4pt]
+        $\bullet$ Maximizes register occupancy
+    };
+    \node[subpill, draw=GreenStage!60, fill=SoftGreen!70, minimum width=3.1cm, anchor=south] at ([shift={(1.725cm, 0.22cm)}] s4.south west) {
+        \tiny\bfseries\color{GreenStage!95!black} Output: Tuned Machine Code
+    };
+
+    % Arrows between stages
+    \draw[->, line width=1.3pt, DarkNavy!85] (s1.east) -- (s2.west);
+    \draw[->, line width=1.3pt, DarkNavy!85] (s2.east) -- (s3.west);
+    \draw[->, line width=1.3pt, DarkNavy!85] (s3.east) -- (s4.west);
+
+    % =========================================================================
+    % 2. MIDDLE ROW: IR FLOW & RUNTIME BOTTLENECKS
+    % =========================================================================
+    % Left Card: IR Flow
+    \node[rounded corners=6pt, draw=BorderBlue!80, fill=BgCard, line width=0.85pt,
+          minimum width=7.85cm, minimum height=3.0cm, anchor=north west] (irbox) at (0, -7.15cm) {};
+    \node[rounded corners=4pt, draw=BorderBlue, fill=SoftBlue!85, line width=0.8pt,
+          anchor=north west] at ([shift={(0.25cm, -0.25cm)}] irbox.north west) {
+        \bfseries\scriptsize\color{DarkNavy} Intermediate Representation (IR) Flow
+    };
+    \node[anchor=north west, text width=7.4cm, align=left] at ([shift={(0.25cm, -0.85cm)}] irbox.north west) {
+        \scriptsize
+        \makebox[2.45cm][l]{\textbf{1. Python Source:}}\texttt{\color{OceanBlue!90!black}y = gelu(linear(norm(x)))}\\[4.5pt]
+        \makebox[2.45cm][l]{\textbf{2. FX Graph:}}\texttt{\color{PurpleStage!90!black}\%node\_3 = call\_function[gelu](...)}\\[4.5pt]
+        \makebox[2.45cm][l]{\textbf{3. Inductor IR:}}\texttt{\color{AmberStage!95!black}LoopLevelIR: fused\_gemm\_gelu()}\\[4.5pt]
+        \makebox[2.45cm][l]{\textbf{4. Target Code:}}\texttt{\color{GreenStage!90!black}@triton.jit def kernel(in\_ptr, ...)}
+    };
+
+    % Right Card: Runtime Bottlenecks
+    \node[rounded corners=6pt, draw=BorderGreen!80, fill=BgCard, line width=0.85pt,
+          minimum width=7.85cm, minimum height=3.0cm, anchor=north east] (botbox) at (16.0cm, -7.15cm) {};
+    \node[rounded corners=4pt, draw=BorderGreen, fill=SoftGreen!85, line width=0.8pt,
+          anchor=north west] at ([shift={(0.25cm, -0.25cm)}] botbox.north west) {
+        \bfseries\scriptsize\color{GreenStage!90!black} Runtime Bottlenecks Eliminated
+    };
+    \node[anchor=north west, text width=7.4cm, align=left] at ([shift={(0.25cm, -0.85cm)}] botbox.north west) {
+        \scriptsize
+        \textbf{Python Interpreter:} Bypasses GIL \& eval loop ($\sim$5--10\,\textmu s/op)\\[3.5pt]
+        \textbf{Kernel Launches:} 50+ dispatches reduced to 5--10 macro-kernels\\[3.5pt]
+        \textbf{Off-Chip HBM Traffic:} Fused activations held on-chip in SRAM\\[4.5pt]
+        \textbf{\color{GreenStage!90!black}Net Acceleration:}\quad \textbf{1.4$\times$--2.0$\times$ training \& inference speedup}
+    };
+
+    % =========================================================================
+    % 3. BOTTOM CONTAINER: COMPILATION TIME VS RUNTIME SPEEDUP
+    % =========================================================================
+    \node[rounded corners=6pt, draw=BorderGrey!90, fill=BgCard, line width=0.85pt,
+          minimum width=16.0cm, minimum height=2.85cm, anchor=north west] (tradebox) at (0, -10.45cm) {};
+
+    % Header Title
+    \node[anchor=north west] at ([shift={(0.3cm, -0.25cm)}] tradebox.north west) {
+        \bfseries\footnotesize\color{DarkNavy} Compilation Time vs.\ Runtime Speedup Trade-Off Across Systems
+    };
+
+    % 3 Subcards
+    % Subcard 1: torch.compile
+    \node[rounded corners=4pt, draw=BorderBlue!75, fill=white, line width=0.75pt,
+          minimum width=5.05cm, minimum height=1.85cm, anchor=north west] (subc1)
+          at ([shift={(0.3cm, -0.70cm)}] tradebox.north west) {};
+    \node[rounded corners=3pt, fill=SoftBlue, minimum width=5.01cm, minimum height=0.45cm, anchor=north]
+          at (subc1.north) {
+        \scriptsize\bfseries\color{DarkNavy} torch.compile (Inductor)
+    };
+    \node[anchor=north west, text width=4.85cm, align=left] at ([shift={(0.18cm, -0.58cm)}] subc1.north west) {
+        \scriptsize
+        \textbf{Compile Time:} 5--30\,s (JIT warm-up)\\[4pt]
+        \textbf{\color{GreenStage!90!black}Speedup:} \textbf{1.3$\times$--1.8$\times$} (rapid iteration)
+    };
+
+    % Subcard 2: OpenXLA / JAX AOT
+    \node[rounded corners=4pt, draw=BorderAmber!75, fill=white, line width=0.75pt,
+          minimum width=5.05cm, minimum height=1.85cm, anchor=north] (subc2)
+          at ([shift={(0cm, -0.70cm)}] tradebox.north) {};
+    \node[rounded corners=3pt, fill=SoftAmber, minimum width=5.01cm, minimum height=0.45cm, anchor=north]
+          at (subc2.north) {
+        \scriptsize\bfseries\color{AmberStage!95!black} OpenXLA / JAX AOT
+    };
+    \node[anchor=north west, text width=4.85cm, align=left] at ([shift={(0.18cm, -0.58cm)}] subc2.north west) {
+        \scriptsize
+        \textbf{Compile Time:} 1--10\,min (AOT graph)\\[4pt]
+        \textbf{\color{GreenStage!90!black}Speedup:} \textbf{1.4$\times$--2.0$\times$} (cluster training)
+    };
+
+    % Subcard 3: TensorRT-LLM / TVM
+    \node[rounded corners=4pt, draw=BorderGreen!75, fill=white, line width=0.75pt,
+          minimum width=5.05cm, minimum height=1.85cm, anchor=north east] (subc3)
+          at ([shift={(-0.3cm, -0.70cm)}] tradebox.north east) {};
+    \node[rounded corners=3pt, fill=SoftGreen, minimum width=5.01cm, minimum height=0.45cm, anchor=north]
+          at (subc3.north) {
+        \scriptsize\bfseries\color{GreenStage!90!black} TensorRT-LLM / TVM
+    };
+    \node[anchor=north west, text width=4.85cm, align=left] at ([shift={(0.18cm, -0.58cm)}] subc3.north west) {
+        \scriptsize
+        \textbf{Compile Time:} 15--60\,min (autotuned)\\[4pt]
+        \textbf{\color{GreenStage!90!black}Speedup:} \textbf{1.8$\times$--2.8$\times$} (serving engine)
+    };
+
+\end{tikzpicture}
+```
 :::
 
 In the **graph capture**\index{Graph Capture} stage, the compiler traces the model's execution to construct a computational graph, a directed acyclic graph where nodes represent operations and edges represent tensor dependencies. For the FFN block, this results in a graph with four primary nodes plus their associated parameter tensors. Dynamic Python control flow (loops, conditionals) must be handled by either tracing through a representative execution path or by using compiler-specific annotations to mark dynamic dimensions.
@@ -2786,7 +3577,204 @@ The effect is particularly pronounced in PyTorch workloads. Enabling `torch.auto
 Profiling levels are useful only if they guide the drill-down from symptom to intervention. ML system profiling operates at four levels, each providing different granularity and targeting different bottleneck categories. @Fig-optimization-hierarchy makes this drill-down explicit, starting from application-level symptoms and descending toward kernel and hardware-counter evidence.
 
 ::: {#fig-optimization-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The profiling hierarchy**: Diagnosis begins with application-level symptoms, then narrows through framework and kernel evidence to hardware counters. Each lower level trades breadth for the detail needed to isolate a root cause." fig-alt="Four-level profiling hierarchy with hardware counters at the base, followed by kernel profiling, framework profiling, and application profiling at the top. A downward arrow shows diagnosis narrowing from application symptoms toward hardware evidence."}
-![](images/svg/profiling-hierarchy.svg)
+```{=latex}
+\begin{tikzpicture}[
+    font=\sansmath\sffamily,
+    >=Stealth,
+    levelcard/.style={
+        rounded corners=5pt,
+        line width=0.85pt,
+        minimum width=10.8cm,
+        minimum height=2.05cm,
+        anchor=north west
+    },
+    lpill/.style={
+        rounded corners=3pt,
+        line width=0.75pt,
+        font=\scriptsize\bfseries,
+        inner xsep=6pt,
+        inner ysep=2.5pt
+    },
+    scopecard/.style={
+        rounded corners=4pt,
+        line width=0.8pt,
+        fill=white,
+        minimum width=2.45cm,
+        minimum height=1.35cm,
+        align=center
+    }
+]
+
+    \providecolor{DarkNavy}{RGB}{20, 35, 60}
+    \providecolor{OceanBlue}{RGB}{21, 101, 192}
+    \providecolor{SoftBlue}{RGB}{238, 245, 252}
+    \providecolor{BorderBlue}{RGB}{170, 205, 235}
+    \providecolor{PurpleStage}{RGB}{124, 58, 237}
+    \providecolor{SoftPurple}{RGB}{248, 244, 255}
+    \providecolor{BorderPurple}{RGB}{200, 175, 245}
+    \providecolor{AmberStage}{RGB}{217, 119, 6}
+    \providecolor{SoftAmber}{RGB}{254, 248, 238}
+    \providecolor{BorderAmber}{RGB}{245, 200, 135}
+    \providecolor{BorderGrey}{RGB}{215, 222, 232}
+    \providecolor{BgCard}{RGB}{252, 253, 255}
+
+    % =========================================================================
+    % 1. CENTER COLUMN: 4 PROFILING LEVELS
+    % =========================================================================
+
+    % ---- Level 4: Application & Fleet Profiling ----
+    \node[levelcard, draw=BorderBlue!85, fill=BgCard] (l4) at (2.55cm, 0) {};
+    \node[lpill, draw=BorderBlue, fill=SoftBlue, anchor=north west] at ([shift={(0.3cm, -0.22cm)}] l4.north west) {
+        \color{DarkNavy} Level 4
+    };
+    \node[anchor=west] at ([shift={(1.95cm, -0.42cm)}] l4.north west) {
+        \bfseries\small\color{DarkNavy} Application \& Fleet Profiling
+    };
+    \node[anchor=north west, text width=10.2cm, align=left] at ([shift={(0.3cm, -0.78cm)}] l4.north west) {
+        \scriptsize
+        \textbf{Metrics:} End-to-end SLOs, token rate (tok/s), TTFT, ITL, cluster MFU, GPU duty cycle\\[2.5pt]
+        \textbf{Question:} ``Is the cluster meeting target throughput and latency SLOs?''\\[2.5pt]
+        \textbf{Tools:} \textbf{\color{DarkNavy}Prometheus $\cdot$ Grafana $\cdot$ Weights \& Biases $\cdot$ Ray Dashboard $\cdot$ OpenTelemetry}
+    };
+
+    % ---- Level 3: Framework & Distributed Traces ----
+    \node[levelcard, draw=BorderAmber!85, fill=SoftAmber!30] (l3) at (2.55cm, -2.35cm) {};
+    \node[lpill, draw=BorderAmber, fill=SoftAmber, anchor=north west] at ([shift={(0.3cm, -0.22cm)}] l3.north west) {
+        \color{AmberStage!95!black} Level 3
+    };
+    \node[anchor=west] at ([shift={(1.95cm, -0.42cm)}] l3.north west) {
+        \bfseries\small\color{DarkNavy} Framework \& Distributed Traces
+    };
+    \node[anchor=north west, text width=10.2cm, align=left] at ([shift={(0.3cm, -0.78cm)}] l3.north west) {
+        \scriptsize
+        \textbf{Metrics:} NCCL collective communication, AllReduce/compute overlap, stragglers, data loading\\[2.5pt]
+        \textbf{Question:} ``Is throughput bottlenecked by communication, pipeline bubbles, or CPU starvation?''\\[2.5pt]
+        \textbf{Tools:} \textbf{\color{AmberStage!95!black}PyTorch Profiler + NVTX $\cdot$ TensorBoard Trace Viewer $\cdot$ DeepSpeed Flops Profiler}
+    };
+
+    % ---- Level 2: Kernel Timeline & Concurrency ----
+    \node[levelcard, draw=BorderBlue!85, fill=SoftBlue!30] (l2) at (2.55cm, -4.70cm) {};
+    \node[lpill, draw=BorderBlue, fill=SoftBlue, anchor=north west] at ([shift={(0.3cm, -0.22cm)}] l2.north west) {
+        \color{OceanBlue} Level 2
+    };
+    \node[anchor=west] at ([shift={(1.95cm, -0.42cm)}] l2.north west) {
+        \bfseries\small\color{DarkNavy} Kernel Timeline \& Concurrency
+    };
+    \node[anchor=north west, text width=10.2cm, align=left] at ([shift={(0.3cm, -0.78cm)}] l2.north west) {
+        \scriptsize
+        \textbf{Metrics:} Kernel launch latency, host-device synchronization, GPU idle gaps, stream serialization\\[2.5pt]
+        \textbf{Question:} ``Are CUDA kernels overlapping effectively and keeping SMs continuously occupied?''\\[2.5pt]
+        \textbf{Tools:} \textbf{\color{OceanBlue}NVIDIA Nsight Systems (nsys) $\cdot$ PyTorch Kineto $\cdot$ Perfetto UI}
+    };
+
+    % ---- Level 1: Hardware Microarchitecture Counters ----
+    \node[levelcard, draw=BorderPurple!85, fill=SoftPurple!30] (l1) at (2.55cm, -7.05cm) {};
+    \node[lpill, draw=BorderPurple, fill=SoftPurple, anchor=north west] at ([shift={(0.3cm, -0.22cm)}] l1.north west) {
+        \color{PurpleStage!90!black} Level 1
+    };
+    \node[anchor=west] at ([shift={(1.95cm, -0.42cm)}] l1.north west) {
+        \bfseries\small\color{DarkNavy} Hardware Microarchitecture Counters
+    };
+    \node[anchor=north west, text width=10.2cm, align=left] at ([shift={(0.3cm, -0.78cm)}] l1.north west) {
+        \scriptsize
+        \textbf{Metrics:} Memory roofline position, HBM vs SRAM bandwidth, warp occupancy, register spills\\[2.5pt]
+        \textbf{Question:} ``Is this specific kernel bound by memory bandwidth, latency, or compute units?''\\[2.5pt]
+        \textbf{Tools:} \textbf{\color{PurpleStage!90!black}NVIDIA Nsight Compute (ncu) $\cdot$ Linux perf $\cdot$ ROCm Omnitrace}
+    };
+
+    % =========================================================================
+    % 2. LEFT COLUMN: DIAGNOSTIC FLOW
+    % =========================================================================
+    \node[rounded corners=6pt, draw=BorderGrey!90, fill=BgCard, line width=0.85pt,
+          minimum width=2.25cm, minimum height=9.1cm, anchor=north west] (flowbox) at (0, 0) {};
+
+    \node[anchor=north, align=center] at ([shift={(0, -0.28cm)}] flowbox.north) {
+        \bfseries\scriptsize\color{DarkNavy} Diagnostic Flow\\[2pt]
+        \tiny\color{black!55} Top-Down
+    };
+
+    % Step 1: Observe
+    \node[circle, draw=BorderBlue!90, fill=white, line width=1.1pt, inner sep=0pt, minimum size=0.56cm]
+          (c1) at ([shift={(1.125cm, -1.35cm)}] flowbox.north west) {
+        \footnotesize\bfseries\color{OceanBlue} 1
+    };
+    \node[anchor=north, align=center] (l1_lbl) at ([shift={(0, -0.05cm)}] c1.south) {
+        \bfseries\scriptsize\color{DarkNavy} Observe\\[1.5pt]
+        \tiny\color{black!55} Symptom
+    };
+
+    % Step 2: Isolate
+    \node[circle, draw=AmberStage!90, fill=white, line width=1.1pt, inner sep=0pt, minimum size=0.56cm]
+          (c2) at ([shift={(1.125cm, -3.55cm)}] flowbox.north west) {
+        \footnotesize\bfseries\color{AmberStage!95!black} 2
+    };
+    \node[anchor=north, align=center] (l2_lbl) at ([shift={(0, -0.05cm)}] c2.south) {
+        \bfseries\scriptsize\color{AmberStage!95!black} Isolate\\[1.5pt]
+        \tiny\color{black!55} Phase
+    };
+
+    % Step 3: Pinpoint
+    \node[circle, draw=OceanBlue!80, fill=white, line width=1.1pt, inner sep=0pt, minimum size=0.56cm]
+          (c3) at ([shift={(1.125cm, -5.75cm)}] flowbox.north west) {
+        \footnotesize\bfseries\color{OceanBlue} 3
+    };
+    \node[anchor=north, align=center] (l3_lbl) at ([shift={(0, -0.05cm)}] c3.south) {
+        \bfseries\scriptsize\color{OceanBlue} Pinpoint\\[1.5pt]
+        \tiny\color{black!55} Kernel
+    };
+
+    % Step 4: Resolve
+    \node[circle, draw=PurpleStage!85, fill=white, line width=1.1pt, inner sep=0pt, minimum size=0.56cm]
+          (c4) at ([shift={(1.125cm, -7.70cm)}] flowbox.north west) {
+        \footnotesize\bfseries\color{PurpleStage!90!black} 4
+    };
+    \node[anchor=north, align=center] (l4_lbl) at ([shift={(0, -0.05cm)}] c4.south) {
+        \bfseries\scriptsize\color{PurpleStage!90!black} Resolve\\[1.5pt]
+        \tiny\color{black!55} Root Cause
+    };
+
+    % Connecting dotted lines between steps
+    \draw[dotted, line width=1.1pt, black!40] ([yshift=-2pt] l1_lbl.south) -- ([yshift=2pt] c2.north);
+    \draw[dotted, line width=1.1pt, black!40] ([yshift=-2pt] l2_lbl.south) -- ([yshift=2pt] c3.north);
+    \draw[dotted, line width=1.1pt, black!40] ([yshift=-2pt] l3_lbl.south) -- ([yshift=2pt] c4.north);
+
+
+    % =========================================================================
+    % 3. RIGHT COLUMN: SCOPE & SCALE
+    % =========================================================================
+    \node[rounded corners=6pt, draw=BorderGrey!90, fill=BgCard, line width=0.85pt,
+          minimum width=2.65cm, minimum height=9.1cm, anchor=north west] (scopebox) at (13.65cm, 0) {};
+
+    \node[anchor=north, align=center] at ([shift={(0, -0.28cm)}] scopebox.north) {
+        \bfseries\scriptsize\color{DarkNavy} Scope \& Scale
+    };
+
+    % Subcard 4 (aligned with Level 4)
+    \node[scopecard, draw=BorderBlue!80] at ([shift={(1.325cm, -1.35cm)}] scopebox.north west) {
+        \bfseries\scriptsize\color{DarkNavy} Fleet / Cluster\\[3pt]
+        \tiny\color{black!55} Hours to Days
+    };
+
+    % Subcard 3 (aligned with Level 3)
+    \node[scopecard, draw=BorderAmber!80] at ([shift={(1.325cm, -3.55cm)}] scopebox.north west) {
+        \bfseries\scriptsize\color{AmberStage!95!black} Node / Rank\\[3pt]
+        \tiny\color{black!55} Minutes / Steps
+    };
+
+    % Subcard 2 (aligned with Level 2)
+    \node[scopecard, draw=BorderBlue!80] at ([shift={(1.325cm, -5.75cm)}] scopebox.north west) {
+        \bfseries\scriptsize\color{OceanBlue} Process / Stream\\[3pt]
+        \tiny\color{black!55} Seconds / Milliseconds
+    };
+
+    % Subcard 1 (aligned with Level 1)
+    \node[scopecard, draw=BorderPurple!80] at ([shift={(1.325cm, -7.85cm)}] scopebox.north west) {
+        \bfseries\scriptsize\color{PurpleStage!90!black} SM / Warp / Instr\\[3pt]
+        \tiny\color{black!55} Microseconds / Nano
+    };
+
+\end{tikzpicture}
+```
 :::
 
 The drill-down starts at the application level, where end-to-end metrics such as tokens per second, time-to-first-token, P99 latency, and GPU utilization over time reveal that the user-facing system has missed its target. It then descends to distributed profiling across GPUs and nodes, where communication patterns show whether collectives overlap with compute, which operation dominates step time, and whether load imbalance exists across ranks. Trace-level profiling narrows the diagnosis to the timeline of GPU kernels, CPU operations, and data transfers within a training step or inference request, exposing launch gaps, idle bubbles, sequential bottlenecks, and overlap opportunities. Operation-level profiling completes the chain with tools like NVIDIA Nsight Compute\index{Nsight Compute}, where achieved memory bandwidth, compute utilization, occupancy, and instruction mix determine whether a specific kernel is memory-bound, compute-bound, or limited by implementation details, including whether it is issuing Tensor Core instructions (half-precision matrix multiply-accumulate for FP16/BF16; integer matrix multiply-accumulate for INT8) rather than falling back to scalar CUDA Core instructions (fused multiply-add or arithmetic logic units). A matrix multiplication whose hidden-dimension or sequence-length tile is not divisible by the Tensor Core alignment requirement (multiples of 8 for FP16, 16 for INT8) silently bypasses Tensor Cores entirely and executes on CUDA Cores at a fraction of the peak throughput. This shape mismatch is one of the most common silent performance bugs in custom ML kernels and is invisible without inspecting the instruction mix counter.
@@ -3255,7 +4243,246 @@ Optimization begins by measuring the whole workload before touching individual k
 The optimization playbook decision tree is mapped in @fig-performance-engineering-optimization-decision-tree. Profiling classifies the workload into memory-bound, compute-bound, or communication-bound regimes, directing the engineer toward targeted interventions that yield predictable throughput improvements.
 
 ::: {#fig-performance-engineering-optimization-decision-tree fig-env="figure" fig-pos="htb" fig-cap="**Optimization playbook decision tree**: Systematic troubleshooting flow beginning with workload profiling and roofline classification, routing into memory-bound, compute-bound, or communication-bound playbooks with expected throughput speedups and iterative re-profiling." fig-alt="Decision tree branching from workload profiling into memory-bound, compute-bound, and communication-bound branches with specific optimization techniques and expected speedups."}
-![](images/svg/optimization-decision-tree.svg)
+```{=latex}
+\begin{tikzpicture}[
+    font=\sansmath\sffamily,
+    >=Stealth,
+    flowcard/.style={
+        rounded corners=5pt,
+        line width=0.85pt,
+        fill=BgCard,
+        minimum width=5.15cm,
+        minimum height=7.75cm,
+        anchor=north west
+    },
+    techpill/.style={
+        rounded corners=3pt,
+        draw=BorderGrey!90,
+        fill=white,
+        line width=0.65pt,
+        minimum width=4.75cm,
+        minimum height=0.58cm,
+        text width=4.55cm,
+        align=left,
+        inner xsep=4pt
+    }
+]
+
+    \providecolor{DarkNavy}{RGB}{20, 35, 60}
+    \providecolor{OceanBlue}{RGB}{21, 101, 192}
+    \providecolor{SoftBlue}{RGB}{238, 245, 252}
+    \providecolor{BorderBlue}{RGB}{170, 205, 235}
+    \providecolor{ForestGreen}{RGB}{22, 145, 65}
+    \providecolor{SoftGreen}{RGB}{236, 250, 240}
+    \providecolor{BorderGreen}{RGB}{160, 220, 180}
+    \providecolor{AmberStage}{RGB}{217, 119, 6}
+    \providecolor{SoftAmber}{RGB}{254, 248, 238}
+    \providecolor{BorderAmber}{RGB}{245, 200, 135}
+    \providecolor{BorderGrey}{RGB}{215, 222, 232}
+    \providecolor{BgCard}{RGB}{252, 253, 255}
+
+    % =========================================================================
+    % 1. TOP ROOT CARDS: STEP 1 & STEP 2
+    % =========================================================================
+    % Step 1: Profile Target Workload
+    \node[rounded corners=5pt, draw=BorderBlue!90, fill=BgCard, line width=0.85pt,
+          minimum width=5.8cm, minimum height=1.05cm, align=center] (step1) at (8.05cm, 0) {
+        \bfseries\footnotesize\color{DarkNavy} 1. Profile Target Workload\\[1.5pt]
+        \tiny\color{black!60} Nsight Systems $\cdot$ PyTorch Profiler $\cdot$ PyTorch Kineto
+    };
+
+    % Step 2: Identify Dominant Constraint
+    \node[rounded corners=5pt, draw=DarkNavy!85, fill=white, line width=0.95pt,
+          minimum width=6.6cm, minimum height=1.05cm, align=center] (step2) at (8.05cm, -1.55cm) {
+        \bfseries\footnotesize\color{DarkNavy} 2. Identify Dominant Constraint\\[1.5pt]
+        \tiny\color{black!65} Evaluate Roofline placement: MBU vs.\ MFU vs.\ Comm Stalls
+    };
+
+    \draw[->, line width=1.4pt, DarkNavy!85] (step1.south) -- (step2.north);
+
+    % =========================================================================
+    % 2. THREE BRANCH PATHS & LABELS
+    % =========================================================================
+    % Left Branch: Green line to Column 1
+    \draw[->, line width=1.2pt, ForestGreen!90!black]
+        ([xshift=-1.5cm] step2.south) -- ++(0, -0.45cm) -| (2.575cm, -3.05cm);
+    \node[rounded corners=3pt, draw=ForestGreen!85, fill=SoftGreen, line width=0.75pt,
+          inner xsep=6pt, inner ysep=2.5pt] at (4.15cm, -2.50cm) {
+        \bfseries\scriptsize\color{ForestGreen!90!black} High MBU, Low MFU
+    };
+
+    % Middle Branch: Blue line to Column 2
+    \draw[->, line width=1.2pt, DarkNavy!85]
+        (step2.south) -- (8.05cm, -3.05cm);
+    \node[rounded corners=3pt, draw=BorderBlue!90, fill=SoftBlue, line width=0.75pt,
+          inner xsep=6pt, inner ysep=2.5pt] at (8.05cm, -2.50cm) {
+        \bfseries\scriptsize\color{DarkNavy} High MFU (Ceiling)
+    };
+
+    % Right Branch: Amber line to Column 3
+    \draw[->, line width=1.2pt, AmberStage!90]
+        ([xshift=1.5cm] step2.south) -- ++(0, -0.45cm) -| (13.525cm, -3.05cm);
+    \node[rounded corners=3pt, draw=AmberStage!90, fill=SoftAmber, line width=0.75pt,
+          inner xsep=6pt, inner ysep=2.5pt] at (11.95cm, -2.50cm) {
+        \bfseries\scriptsize\color{AmberStage!95!black} NCCL Sync Stalls
+    };
+
+    % =========================================================================
+    % 3. THREE COLUMNS
+    % =========================================================================
+
+    % -------------------------------------------------------------------------
+    % COLUMN 1: MEMORY-BOUND WORKLOAD
+    % -------------------------------------------------------------------------
+    \node[flowcard, draw=BorderGreen!85] (col1) at (0, -3.10cm) {};
+
+    % Header Pill
+    \node[rounded corners=4pt, draw=ForestGreen!80, fill=SoftGreen, line width=0.8pt,
+          minimum width=4.75cm, minimum height=1.0cm, align=center, anchor=north]
+          at ([shift={(2.575cm, -0.2cm)}] col1.north west) {
+        \bfseries\footnotesize\color{ForestGreen!90!black} Memory-Bound Workload\\[2pt]
+        \tiny\color{ForestGreen!85!black} Objective: Minimize off-chip HBM traffic
+    };
+
+    % 5 Tech Pills
+    \node[techpill, anchor=north] (t1_1) at ([shift={(2.575cm, -1.40cm)}] col1.north west) {
+        \scriptsize\textcolor{ForestGreen}{$\bullet$}\; Operator Fusion (FlashAttention)
+    };
+    \node[techpill, anchor=north] (t1_2) at ([shift={(2.575cm, -2.12cm)}] col1.north west) {
+        \scriptsize\textcolor{ForestGreen}{$\bullet$}\; FP8 / INT4 Quantization (AWQ/GPTQ)
+    };
+    \node[techpill, anchor=north] (t1_3) at ([shift={(2.575cm, -2.84cm)}] col1.north west) {
+        \scriptsize\textcolor{ForestGreen}{$\bullet$}\; PagedAttention \& Chunked Prefill
+    };
+    \node[techpill, anchor=north] (t1_4) at ([shift={(2.575cm, -3.56cm)}] col1.north west) {
+        \scriptsize\textcolor{ForestGreen}{$\bullet$}\; Batch Expansion (Increase Intensity)
+    };
+    \node[techpill, anchor=north] (t1_5) at ([shift={(2.575cm, -4.28cm)}] col1.north west) {
+        \scriptsize\textcolor{ForestGreen}{$\bullet$}\; Selective Activation Checkpointing
+    };
+
+    % Speedup Banner
+    \node[rounded corners=4pt, draw=ForestGreen!90, fill=SoftGreen!90, line width=0.85pt,
+          minimum width=4.75cm, minimum height=0.95cm, align=center, anchor=north]
+          at ([shift={(2.575cm, -5.06cm)}] col1.north west) {
+        \bfseries\scriptsize\color{ForestGreen!95!black} Typical Speedup: 2.0$\times$ -- 5.0$\times$\\[2pt]
+        \tiny\color{ForestGreen!85!black} Reduces byte transfers; uncaps execution speed
+    };
+
+    % Primary Examples Subcard
+    \node[rounded corners=4pt, draw=BorderGrey, fill=white, line width=0.75pt,
+          minimum width=4.75cm, minimum height=1.35cm, anchor=north]
+          at ([shift={(2.575cm, -6.18cm)}] col1.north west) {};
+    \node[anchor=north west, text width=4.4cm, align=left]
+          at ([shift={(0.38cm, -6.32cm)}] col1.north west) {
+        \bfseries\tiny\color{black!75} Primary Examples:\\[2pt]
+        \tiny\color{black!60}
+        LLM Token Generation (Decode phase)\\
+        LayerNorm, Softmax, Pointwise activations
+    };
+
+    % -------------------------------------------------------------------------
+    % COLUMN 2: COMPUTE-BOUND WORKLOAD
+    % -------------------------------------------------------------------------
+    \node[flowcard, draw=BorderBlue!85] (col2) at (5.475cm, -3.10cm) {};
+
+    % Header Pill
+    \node[rounded corners=4pt, draw=BorderBlue!90, fill=SoftBlue, line width=0.8pt,
+          minimum width=4.75cm, minimum height=1.0cm, align=center, anchor=north]
+          at ([shift={(2.575cm, -0.2cm)}] col2.north west) {
+        \bfseries\footnotesize\color{DarkNavy} Compute-Bound Workload\\[2pt]
+        \tiny\color{DarkNavy!80} Objective: Reduce arithmetic operations
+    };
+
+    % 5 Tech Pills
+    \node[techpill, anchor=north] (t2_1) at ([shift={(2.575cm, -1.40cm)}] col2.north west) {
+        \scriptsize\textcolor{OceanBlue}{$\bullet$}\; FP8 / FP4 Tensor Core Math
+    };
+    \node[techpill, anchor=north] (t2_2) at ([shift={(2.575cm, -2.12cm)}] col2.north west) {
+        \scriptsize\textcolor{OceanBlue}{$\bullet$}\; Speculative Decoding (Draft-Verify)
+    };
+    \node[techpill, anchor=north] (t2_3) at ([shift={(2.575cm, -2.84cm)}] col2.north west) {
+        \scriptsize\textcolor{OceanBlue}{$\bullet$}\; Sparse Mixture of Experts (MoE)
+    };
+    \node[techpill, anchor=north] (t2_4) at ([shift={(2.575cm, -3.56cm)}] col2.north west) {
+        \scriptsize\textcolor{OceanBlue}{$\bullet$}\; Low-Rank Adaptation / Distillation
+    };
+    \node[techpill, anchor=north] (t2_5) at ([shift={(2.575cm, -4.28cm)}] col2.north west) {
+        \scriptsize\textcolor{OceanBlue}{$\bullet$}\; torch.compile Autotuned Kernels
+    };
+
+    % Speedup Banner
+    \node[rounded corners=4pt, draw=DarkNavy!80, fill=SoftBlue!90, line width=0.85pt,
+          minimum width=4.75cm, minimum height=0.95cm, align=center, anchor=north]
+          at ([shift={(2.575cm, -5.06cm)}] col2.north west) {
+        \bfseries\scriptsize\color{DarkNavy} Typical Speedup: 1.4$\times$ -- 2.5$\times$\\[2pt]
+        \tiny\color{DarkNavy!80} Lowers FLOP count per output token
+    };
+
+    % Primary Examples Subcard
+    \node[rounded corners=4pt, draw=BorderGrey, fill=white, line width=0.75pt,
+          minimum width=4.75cm, minimum height=1.35cm, anchor=north]
+          at ([shift={(2.575cm, -6.18cm)}] col2.north west) {};
+    \node[anchor=north west, text width=4.4cm, align=left]
+          at ([shift={(0.38cm, -6.32cm)}] col2.north west) {
+        \bfseries\tiny\color{black!75} Primary Examples:\\[2pt]
+        \tiny\color{black!60}
+        LLM Context Encoding (Prefill phase)\\
+        Large Batch GEMM, CNN Convolutions
+    };
+
+    % -------------------------------------------------------------------------
+    % COLUMN 3: COMMUNICATION BOUND
+    % -------------------------------------------------------------------------
+    \node[flowcard, draw=BorderAmber!85] (col3) at (10.95cm, -3.10cm) {};
+
+    % Header Pill
+    \node[rounded corners=4pt, draw=AmberStage!80, fill=SoftAmber, line width=0.8pt,
+          minimum width=4.75cm, minimum height=1.0cm, align=center, anchor=north]
+          at ([shift={(2.575cm, -0.2cm)}] col3.north west) {
+        \bfseries\footnotesize\color{AmberStage!95!black} Communication Bound\\[2pt]
+        \tiny\color{AmberStage!90!black} Objective: Overlap or compress collectives
+    };
+
+    % 5 Tech Pills
+    \node[techpill, anchor=north] (t3_1) at ([shift={(2.575cm, -1.40cm)}] col3.north west) {
+        \scriptsize\textcolor{AmberStage!95!black}{$\bullet$}\; Compute-Comm Overlap (FSDP / DDP)
+    };
+    \node[techpill, anchor=north] (t3_2) at ([shift={(2.575cm, -2.12cm)}] col3.north west) {
+        \scriptsize\textcolor{AmberStage!95!black}{$\bullet$}\; FP8 Collective Quantization
+    };
+    \node[techpill, anchor=north] (t3_3) at ([shift={(2.575cm, -2.84cm)}] col3.north west) {
+        \scriptsize\textcolor{AmberStage!95!black}{$\bullet$}\; Topology Mapping (NVLink vs.\ RoCE)
+    };
+    \node[techpill, anchor=north] (t3_4) at ([shift={(2.575cm, -3.56cm)}] col3.north west) {
+        \scriptsize\textcolor{AmberStage!95!black}{$\bullet$}\; Interleaved 1F1B Pipeline Schedules
+    };
+    \node[techpill, anchor=north] (t3_5) at ([shift={(2.575cm, -4.28cm)}] col3.north west) {
+        \scriptsize\textcolor{AmberStage!95!black}{$\bullet$}\; RingAttention / Sequence Parallel
+    };
+
+    % Speedup Banner
+    \node[rounded corners=4pt, draw=AmberStage!90, fill=SoftAmber!90, line width=0.85pt,
+          minimum width=4.75cm, minimum height=0.95cm, align=center, anchor=north]
+          at ([shift={(2.575cm, -5.06cm)}] col3.north west) {
+        \bfseries\scriptsize\color{AmberStage!95!black} Typical Speedup: 1.2$\times$ -- 1.8$\times$\\[2pt]
+        \tiny\color{AmberStage!90!black} Hides latency behind compute windows
+    };
+
+    % Primary Examples Subcard
+    \node[rounded corners=4pt, draw=BorderGrey, fill=white, line width=0.75pt,
+          minimum width=4.75cm, minimum height=1.35cm, anchor=north]
+          at ([shift={(2.575cm, -6.18cm)}] col3.north west) {};
+    \node[anchor=north west, text width=4.4cm, align=left]
+          at ([shift={(0.38cm, -6.32cm)}] col3.north west) {
+        \bfseries\tiny\color{black!75} Primary Examples:\\[2pt]
+        \tiny\color{black!60}
+        Large-Scale Distributed Training\\
+        Tensor Parallel AllReduce across nodes
+    };
+
+\end{tikzpicture}
+```
 :::
 
 The fourth step is to apply and verify. Implement the highest-impact optimization, reprofile, and verify improvement. Then iterate from the roofline classification step with the new profile, as the bottleneck may have shifted.
