@@ -25,7 +25,7 @@ tinytorch/<target>.py           the package the milestones and tests import (git
         │
         │  nbgrader assign (release tiers)
         ▼
-modules/release/...             the graded student notebook, solutions stripped
+assignments/release/...         the graded student notebook, solutions stripped
 ```
 
 Contributors edit only the `src/` file. The notebook and the package are
@@ -44,9 +44,9 @@ module or a milestone imports must carry `#| export` or `#| exporti`, and every
 `solution: true` cell must carry one on its first line (gate:
 `package: every solution cell opens with an export directive`).
 
-The chapter listings in `narrative_book/` quote the source by symbol name, so a
+The chapter listings in `book/` quote the source by symbol name, so a
 renamed class or function must be followed by
-`python3 narrative_book/tools/listings.py` to regenerate the quotes and
+`python3 book/tools/listings.py` to regenerate the quotes and
 `--check` to confirm they match.
 
 ## 2. The spine: thirteen sections, one order
@@ -195,7 +195,7 @@ for the thing they hold (`conv2d-class`, `test-conv2d-forward`). They are
 stable identifiers that the grading tier files reference, so renaming one is a
 change to the grading configuration, not a style edit.
 
-`tests/validate_nbgrader_config.py` checks the header shapes and ids across all
+`tools/validate_nbgrader_config.py` checks the header shapes and ids across all
 20 modules; `NBGRADER_RELEASE_TIERS.md` describes which cells reach which
 student tier.
 
@@ -249,7 +249,7 @@ a preview ("Module 06 will add...").
 - **Analysis and demo cells** are plain `# %%` cells with whatever prints make
   the measurement clear. They are not exported and not graded.
 - **The number of 🏗️ sections** follows the number of components. Module 02 has
-  one; Module 15 has twelve.
+  one; Module 15 has nine.
 - **Section subtitles** are written for the module, not from a template. The
   grammar is fixed; the words are the author's.
 - **`EXAMPLE` and `HINT`** appear where they help a student start, and are
@@ -301,9 +301,9 @@ are not relitigated one module at a time.
 
 ```bash
 python3 -m tito.main dev export --all         # regenerate reference notebooks and exports
-python3 tools/release_check.py --fast          # 33 gates (two slow gates omitted)
-python3 tests/validate_nbgrader_config.py      # expect Passed: 20, Failed: 0
-python3 narrative_book/tools/listings.py --check
+python3 tools/release_check.py --fast          # 34 gates (two slow gates omitted)
+python3 tools/validate_nbgrader_config.py      # expect Passed: 20, Failed: 0
+python3 book/tools/listings.py --check
 python3 tools/release_check.py                 # adds the notebook run and full pytest
 ```
 

@@ -1,69 +1,64 @@
-# TinyTorch Hardware Extensions & Acceleration Backends
+# TinyTorch hardware extensions
 
-This directory contains production-grade hardware extension examples showing how to bridge TinyTorch to native hardware accelerators, compiling custom compute kernels, and interfacing with accelerator runtimes.
+Optional kernels that take TinyTorch past NumPy onto the hardware underneath.
+None of the 20 modules needs them. They are hand-written and tracked in git as
+they are; unlike the rest of `tinytorch/`, nothing here is exported from `src/`,
+so edit these files directly.
 
----
+Each extension falls back to NumPy when its compiler, library, or hardware is
+missing, so importing `tinytorch.extensions` never fails.
 
-## 1. Architecture Overview
+| File | What it runs | Needs | Fallback |
+|------|--------------|-------|----------|
+| `cpp_simd_gemm.cpp`, `simd_ops.py` | Cache-blocked matrix multiply and fused bias + GELU in C++, called through `ctypes` | A C++ compiler; OpenMP for more than one core | `np.matmul`, NumPy GELU |
+| `triton_gelu.py` | Fused bias + GELU as one Triton kernel | PyTorch, Triton, an NVIDIA GPU | NumPy GELU |
+| `mps_ops.py` | Matrix multiply on the Apple GPU through MPS | PyTorch on an Apple M-series Mac | `np.matmul` |
 
-TinyTorch is architected like `xv6`: clear, minimal, and extensible. When you need performance beyond interpreted Python, you can plug in custom kernels at three distinct layers:
+## C++ SIMD kernels
 
+`simd_ops.py` compiles `cpp_simd_gemm.cpp` into `libtinytorch_simd.so` the
+first time you call it, and again whenever the `.cpp` file is newer than the
+library. The GEMM walks the matrices in 64 × 64 tiles so each tile stays in
+cache, and its inner loop runs along contiguous rows so the compiler vectorizes
+it (AVX2 on x86, NEON on ARM).
+
+The build tries OpenMP first. Apple clang has no OpenMP runtime of its own, so
+on a Mac the kernel builds single-threaded unless Homebrew's `libomp` is
+installed (`brew install libomp`). `simd_build_info()` reports what you got:
+
+```python
+from tinytorch.extensions import simd_matmul, simd_build_info
+import numpy as np
+
+A = np.random.randn(512, 512).astype(np.float32)
+B = np.random.randn(512, 512).astype(np.float32)
+C = simd_matmul(A, B)
+print(simd_build_info())   # {'built': True, 'openmp': False, 'threads': 1, ...}
 ```
-+-------------------------------------------------------------+
-|                      TinyTorch Tensor                       |
-+-------------------------------------------------------------+
-         |                       |                     |
-         v                       v                     v
-+------------------+   +-------------------+  +------------------+
-|  C++ SIMD Kernel |   | OpenAI Triton JIT |  | Apple MPS / Metal|
-|  (AVX2 / NEON)   |   | (SRAM Tiling GPU) |  | (Unified Memory) |
-+------------------+   +-------------------+  +------------------+
-         |                       |                     |
-         v                       v                     v
-+------------------+   +-------------------+  +------------------+
-| Intel / AMD / ARM|   | NVIDIA Tensor Core|  | Apple M-Series   |
-| CPU Execution    |   | HBM3 High Bandw.  |  | GPU / ANE Core   |
-+------------------+   +-------------------+  +------------------+
+
+## Triton fused bias + GELU
+
+Adding a bias and applying GELU as two separate operations writes `x + bias`
+to GPU memory and reads it back. The Triton kernel does both in one pass, so
+that intermediate never leaves registers.
+
+```python
+from tinytorch.extensions import triton_fused_gelu
+Y = triton_fused_gelu(X, bias)   # X: [..., D], bias: [D]
 ```
 
----
+## Apple MPS matrix multiply
 
-## 2. Included Extension Modules
+`mps_matmul` hands the multiply to the Apple GPU through PyTorch's Metal
+Performance Shaders backend. It runs on the GPU, not the Neural Engine. The
+CPU and GPU share memory, but moving the arrays to and from the `mps` device
+still copies them, and those copies count when you time it.
 
-### `cpp_simd_gemm.cpp` & `simd_ops.py`
-- **What it does**: Native C++ cache-blocked GEMM kernel ($64\times 64$ L1/L2 tile hierarchy) with OpenMP multi-threading and auto-vectorized SIMD inner loops.
-- **Compilation**: Automatically compiled on first run via `c++ -O3 -shared -fPIC -std=c++17 cpp_simd_gemm.cpp -o libtinytorch_simd.so`.
-- **Usage**:
-  ```python
-  from tinytorch.extensions import simd_matmul
-  import numpy as np
+## Ideas for going further
 
-  A = np.random.randn(512, 512).astype(np.float32)
-  B = np.random.randn(512, 512).astype(np.float32)
-  C = simd_matmul(A, B)
-  ```
-
-### `triton_gelu.py`
-- **What it does**: OpenAI Triton GPU kernel fusing elementwise Bias addition + Gaussian Error Linear Unit (GELU) into a single SRAM register pass, eliminating round-trip DRAM memory bandwidth bottlenecks.
-- **Hardware Target**: NVIDIA GPUs (A100, H100, RTX 3090/4090).
-- **Usage**:
-  ```python
-  from tinytorch.extensions import triton_fused_gelu
-  import numpy as np
-
-  X = np.random.randn(1024, 768).astype(np.float32)
-  bias = np.random.randn(768).astype(np.float32)
-  Y = triton_fused_gelu(X, bias)
-  ```
-
-### `mps_ops.py`
-- **What it does**: Apple Silicon Metal Performance Shaders (MPS) dispatch exploiting unified memory architecture without host-device PCIe copying penalties.
-- **Hardware Target**: Apple M1/M2/M3/M4 Max/Ultra.
-
----
-
-## 3. Extending TinyTorch: Student Assignment Ideas
-
-1. **FlashAttention-2 Kernel in Triton**: Replace TinyTorch's attention loop with an online-softmax tiled kernel in Triton.
-2. **INT4 Weight-Only Dequantization**: Implement a SIMD kernel that unpacks nibbles (4-bit integers) into FP16 registers on the fly.
-3. **Rust PyO3 Tensor Core**: Rewrite `core/autograd.py` using Rust `pyo3` and `rayon` for zero-overhead graph traversal.
+1. Give the C++ GEMM a second level of tiling for the L2 cache, then register
+   tiles, and measure each step against `np.matmul`.
+2. Write a Triton kernel for INT8 matrix multiply that reads the weights
+   produced by Module 15.
+3. Wire `simd_matmul` into TinyTorch's `Linear` layer behind a flag, and
+   profile a training step with Module 14's profiler.

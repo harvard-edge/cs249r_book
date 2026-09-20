@@ -6,8 +6,8 @@ Complete LaTeX source for the TinyTorch research paper.
 
 ## Files
 
-- **[paper.tex](paper.tex)** - Main paper (~12-15 pages, two-column format)
-- **[references.bib](references.bib)** - Bibliography (22 references)
+- **[paper.tex](paper.tex)** - Main paper (~26 pages, two-column format)
+- **[references.bib](references.bib)** - Bibliography (57 references)
 - **[Makefile](Makefile)** - Build rules (requires LaTeX installation)
 
 ---
@@ -28,18 +28,18 @@ Complete LaTeX source for the TinyTorch research paper.
 make
 ```
 
-Requires LaTeX installation (MacTeX or BasicTeX).
+Requires LaTeX installation (MacTeX or BasicTeX with LuaLaTeX).
 
 ---
 
 ## Paper Details
 
 - **Format**: Two-column LaTeX (conference-standard)
-- **Length**: ~12-15 pages
-- **Sections**: 7 complete sections
-- **Tables**: 3 (framework comparison, learning objectives, performance benchmarks)
-- **Code listings**: 5 (syntax-highlighted Python examples)
-- **References**: 22 citations
+- **Length**: ~26 pages
+- **Sections**: 9 complete sections
+- **Tables**: 5 (framework comparison, learning objectives, performance benchmarks, competency matrix, coverage)
+- **Code listings**: 7 (syntax-highlighted Python examples)
+- **References**: 57 citations
 
 ---
 

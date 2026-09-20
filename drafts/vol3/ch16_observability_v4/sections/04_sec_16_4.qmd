@@ -1,0 +1,203 @@
+## Distributed Trajectory Tracing {#sec-vol3-observability-tracing}
+
+Consider an autonomous software engineering agent operating on a production codebase that abruptly exhausts its thirty-second wall-clock deadline during a routine refactoring task. The client application records an unadorned `DEADLINE_EXCEEDED` error code, while the host runtime's log directory is an uncoordinated graveyard of isolated log lines: an inference server logged eight autoregressive decode bursts; an in-memory vector database logged three $k$-nearest-neighbor index traversals; a container runtime logged two POSIX `git` subprocess executions; and a peer review agent recorded an incoming JSON-RPC message exchange. Because each subsystem maintained its own isolated log stream with uncoordinated wall-clock timestamps and disjoint correlation identifiers, systems engineers cannot determine whether the deadline was consumed by GPU memory-bus saturation during model prefill, an unindexed table scan in the vector database, an unbuffered pipe stall in the bash sandbox, or an asynchronous RPC queue lockup between cooperating agents.
+
+**End-to-end trajectory observability requires unifying these fragmented runtime domains into a single causal directed acyclic graph (DAG). By structuring agent execution as an OpenTelemetry trace hierarchy, every neural inference pass, sandboxed tool invocation, memory retrieval, and inter-agent message is bound by deterministic causality and cryptographic identifiers.** Rather than treating the agent as a monolithic black box that emits an opaque stream of tokens, distributed trajectory tracing applies the foundational principles of Dapper [@sigelman2010dapper] to stochastic agent architectures, making latency breakdowns, token expenditures, tool side effects, and structural failures mathematically traceable to their originating execution step.
+
+### The Anatomy of a Hybrid Trajectory DAG
+
+In classical microservice architectures, distributed tracing tracks homogeneous remote procedure calls propagating across network boundaries over standard transport protocols such as HTTP or gRPC. A trace context is created at an API gateway and injected into network headers, where downstream services read the incoming metadata, instantiate child spans, and forward the modified context to subsequent backends. While microservice RPCs vary in payload size and database query complexity, their execution model remains fundamentally uniform: synchronous or asynchronous thread execution driven by deterministic CPU instructions.
+
+Agentic systems invalidate this architectural homogeneity. An agent trajectory is a hybrid execution pipeline spanning four fundamentally distinct physical and computational substrates:
+
+1. *Autoregressive Neural Execution:* High-throughput, memory-bandwidth-bound matrix operations executed on GPU accelerator clusters, governed by token batching schedulers, Key-Value (KV) cache paging, and speculative decoding loops.
+2. *Local Sandboxed Computation:* Out-of-band operating system processes spawned inside isolated containers or microVMs under Zero Ambient Authority ($A=0$), interacting with virtualized filesystems, network interfaces, and POSIX pipes.
+3. *High-Dimensional Vector Memory Retrieval:* Approximate nearest neighbor (ANN) searches executed across distributed vector indexes, traversing graph structures such as Hierarchical Navigable Small World (HNSW) graphs to retrieve context chunks.
+4. *Asynchronous Multi-Agent RPC Messaging:* Discrete coordination protocols where peer agents negotiate task allocation, review intermediate artifacts, and execute consensus algorithms across distinct physical nodes.
+
+To capture this heterogeneity, an agent trace is formally defined as a directed acyclic graph $\mathcal{G} = (\mathcal{V}, \mathcal{E}_{\text{causal}})$. The vertex set $\mathcal{V} = \{s_0, s_1, \dots, s_n\}$ represents the set of all execution spans, where each span $s_i$ is a formal tuple:
+
+$$s_i = \langle \text{trace\_id}, \text{span\_id}, \text{parent\_id}, t_{\text{start}}, t_{\text{end}}, \mathcal{A}, \mathcal{X} \rangle$$
+
+The identifiers $\text{trace\_id}$ and $\text{span\_id}$ provide 128-bit and 64-bit entropy guarantees, respectively; $\text{parent\_id}$ links the span to its causal ancestor; $t_{\text{start}}$ and $t_{\text{end}}$ denote monotonic clock timestamps; $\mathcal{A}$ is a typed dictionary of semantic key-value attributes; and $\mathcal{X}$ is an ordered sequence of timed events capturing transient state transitions such as token emission intervals or intermediate tool stderr writes.
+
+```
++---------------------------------------------------------------------------------------+
+| Trace Root: Task Execution (trace_id: 4bf92f3577b34da6a3ce929d0e0e4736)              |
+| Total Duration: 14.85 s | Model Cost: $0.042 | Status: OK                            |
++---------------------------------------------------------------------------------------+
+    |
+    +--> Span 1: agent.memory (Retrieval) [0.00 s - 0.18 s]
+    |    Query: "git patch apply syntax" | Chunks: 3 | Index: HNSW | Duration: 185 ms
+    |
+    +--> Span 2: gen_ai.client (Inference: Plan Formulation) [0.18 s - 4.25 s]
+    |    Model: llama-3-70b | Prompt: 4,096 tok | Completion: 256 tok | TTFT: 120 ms
+    |
+    +--> Span 3: agent.tool (Sandbox Exec: bash) [4.26 s - 8.46 s]
+    |    Cmd: `git apply patch.diff` | Exit Code: 0 | Stdout: 142 B | Sandbox: microVM
+    |
+    +--> Span 4: agent.message (Subagent Fan-Out) [8.47 s - 10.32 s]
+    |    Protocol: JSON-RPC | Recipient: reviewer-agent-01 | Envelope Hash: 0x9e12a4
+    |    |
+    |    +--> Span 4.1: gen_ai.client (Subagent Review) [8.50 s - 10.28 s]
+    |         Model: llama-3-8b | Prompt: 1,024 tok | Completion: 128 tok | TTFT: 45 ms
+    |
+    +--> Span 5: gen_ai.client (Inference: Final Synthesis) [10.33 s - 14.85 s]
+         Model: llama-3-70b | Prompt: 6,144 tok | Completion: 384 tok | TTFT: 180 ms
+```
+
+The directed edges $\mathcal{E}_{\text{causal}} = \{(s_i, s_j)\}$ represent strict happens-before relationships ($s_i \prec s_j$) established either through synchronous stack execution within the agent runtime or through explicit parent context injection across distributed boundaries. 
+
+As illustrated in the span hierarchy, the root span $\mathcal{T}_{\text{root}}$ encompasses the end-to-end task execution. It decomposes into child spans that map directly to the hybrid computational domains: synchronous retrieval spans, accelerator-bound model generation spans, isolated sandboxed tool spans, and asynchronous message spans dispatched to downstream subagents. When visualized as a distributed trace waterfall (@fig-vol3-opentelemetry-trace-waterfall), this causal decomposition immediately exposes whether trajectory latency is dominated by neural compute, disk and network I/O, or multi-agent synchronization barriers.
+
+::: {.column-margin}
+**W3C Traceparent Header Format**
+The standard W3C header encodes causal context in a four-field hyphenated string:
+`version-trace_id-parent_id-trace_flags`
+- `version`: `00` (current standard).
+- `trace_id`: 16-byte (32-hex) unique entropy identifying the root trajectory DAG.
+- `parent_id`: 8-byte (16-hex) unique ID of the originating span.
+- `trace_flags`: 1-byte bitmap (`01` indicates sampled).
+:::
+
+![Distributed trace waterfall visualizing an agent trajectory in OpenTelemetry. The root trace spans the end-to-end task execution, decomposing into child spans for initial context prefill, autoregressive token generation, sandboxed tool dispatch, vector memory retrieval, and distributed subagent fan-out. Each span records precise start-to-finish durations, critical path dependencies, and domain-specific semantic attributes.](images/svg/fig-vol3-opentelemetry-trace-waterfall.svg){#fig-vol3-opentelemetry-trace-waterfall}
+
+### OpenTelemetry Semantic Conventions for Agent Systems
+
+While general-purpose distributed tracing tools provide generic span primitives, diagnosing complex agent failures requires standardized semantic vocabularies. If one engineer records prompt length under the attribute `input_tokens` while another records it as `prompt_size`, automated telemetry processors cannot compute aggregate token velocity, track context window saturation, or trigger automated circuit breakers. 
+
+The Cloud Native Computing Foundation (CNCF), through the OpenTelemetry Generative AI and Agentic Special Interest Group, defines precise semantic conventions that formalize attributes across the agent execution lifecycle. These conventions establish four specialized span categories:
+
+#### 1. Model Invocation Spans (`gen_ai.client` / `gen_ai.server`)
+
+A model invocation span instruments a single forward transaction between the agent host supervisor and the neural inference engine. Because inference is split into a compute-bound prefill phase (GEMM) and a memory-bandwidth-bound autoregressive decode phase (GEMV), the span must capture operational metrics that differentiate these two hardware regimes:
+
+- `gen_ai.system`: The provider or runtime engine identifier (e.g., `vllm`, `sglang`, `triton`).
+- `gen_ai.request.model`: The logical checkpoint requested by the agent (e.g., `llama-3-70b-instruct`).
+- `gen_ai.response.model`: The physical checkpoint version deployed on the serving engine.
+- `gen_ai.usage.input_tokens`: The token count $N_{\text{prompt}}$ processed during the prefill phase.
+- `gen_ai.usage.output_tokens`: The token count $N_{\text{comp}}$ generated during autoregressive decoding.
+- `gen_ai.client.token.time_to_first_token`: The elapsed wall-clock latency $t_{\text{TTFT}}$ from request dispatch until the arrival of the initial completion token, isolating prefill queueing and execution time.
+- `gen_ai.request.temperature` and `gen_ai.request.top_p`: The stochastic sampling parameters governing the decode loop's softmax distribution.
+- `gen_ai.response.finish_reasons`: The discrete condition terminating generation, such as `stop` (natural end-of-sequence token), `length` (context window limit reached), or `tool_calls` (generation interrupted by schema detection).
+
+#### 2. Tool Execution Spans (`agent.tool`)
+
+Under the Principle of Least Privilege, the agent supervisor delegates side-effecting operations to external environments through structured tool interfaces. A tool execution span instruments the complete dispatch lifecycle, capturing the unprivileged proposal, the mediation boundary, and the environment's empirical response:
+
+- `agent.tool.name`: The canonical identifier of the tool being executed (e.g., `bash`, `file_editor`, `sql_query`).
+- `agent.tool.type`: The structural execution domain (e.g., `subprocess`, `rpc`, `in_memory`).
+- `agent.tool.call_id`: The cryptographic or sequential identifier linking this execution to the model's originating `tool_call` object.
+- `agent.tool.args`: The structured input arguments passed to the tool, serialized as validated JSON.
+- `agent.tool.exit_code`: The POSIX return code or application status indicator returned by the target process.
+- `agent.tool.stdout_bytes` and `agent.tool.stderr_bytes`: The dimensional size of standard output and error streams, preventing logging pipelines from choking on multi-gigabyte command dumps while preserving accounting data.
+
+#### 3. Memory Retrieval Spans (`agent.memory`)
+
+When an agent consults long-term episodic or semantic storage, the memory retrieval span captures the transformation of text queries into latent vector representations and the subsequent traversal of the index:
+
+- `agent.memory.operation`: The transactional category (e.g., `query`, `upsert`, `delete`).
+- `agent.memory.index_name`: The logical namespace or database table targeted by the operation.
+- `agent.memory.top_k`: The requested number of candidate neighbors $k$.
+- `agent.memory.similarity_metric`: The distance metric governing traversal (e.g., `cosine`, `dot_product`, `euclidean`).
+- `agent.memory.retrieved_chunks`: The integer count of document fragments returned to the agent context.
+- `agent.memory.scores`: An array of floating-point similarity values corresponding to the retrieved candidates, essential for detecting semantic drift or low-confidence context contamination.
+
+#### 4. Multi-Agent Message Spans (`agent.message`)
+
+In distributed topologies where multiple autonomous agents collaborate, message spans instrument the inter-agent consensus and delegation fabrics:
+
+- `agent.message.sender_id`: The immutable identifier of the initiating agent.
+- `agent.message.recipient_id`: The target agent or multicast channel identifier.
+- `agent.message.envelope_hash`: The cryptographic hash (e.g., SHA-256) of the serialized message envelope, enabling payload verification without duplicating message bodies in trace storage.
+- `agent.message.protocol`: The application-level coordination protocol (e.g., `json_rpc`, `actor_tell`, `blackboard_write`).
+
+| Span Category | Primary Domain | Core Semantic Attributes | Causal Parent Link | Failure Signatures Detected |
+| :--- | :--- | :--- | :--- | :--- |
+| `gen_ai.client` | Accelerator / Inference Runtime | `gen_ai.usage.input_tokens`, `output_tokens`, `time_to_first_token`, `finish_reasons` | Task root or supervisory step span | Context length truncation, prefill queue starvation, decoding loops |
+| `agent.tool` | Sandboxed POSIX Subprocess / RPC | `agent.tool.name`, `args`, `exit_code`, `stdout_bytes`, `stderr_bytes` | Model invocation span containing tool call | Tool schema violations, command timeouts, container crashes |
+| `agent.memory` | Vector Database / Embeddings | `agent.memory.operation`, `top_k`, `similarity_metric`, `scores` | Reasoning step span requiring grounding | Irrelevant context injection, zero-hit queries, index latency |
+| `agent.message` | Inter-Agent Transport Fabric | `agent.message.sender_id`, `recipient_id`, `envelope_hash`, `protocol` | Dispatching agent's deliberation span | Deadlocks, infinite delegation cycles, dropped consensus votes |
+
+### Causal Context Propagation across Non-Network Boundaries
+
+The primary mechanical hurdle in instrumenting agent systems lies in context propagation. In standard web services, distributed context propagation is solved by middleware libraries that inject HTTP headers into outbound network calls. However, an agent supervisor regularly dispatches operations across boundaries that do not use HTTP or gRPC network layers: it spawns local POSIX processes inside containers, executes arbitrary bash commands, queries local file caches, and writes to message queues.
+
+To maintain an unbroken causal DAG across these non-network interfaces, the agent runtime must implement context serialization and extraction protocols conformant with the W3C Trace Context specification. The standard encodes trace context within the `traceparent` header, a 4-field hyphenated string formatted as `00-${trace_id}-${span_id}-${trace_flags}`. 
+
+When invoking a sandboxed shell tool, the supervisor cannot rely on network middleware. Instead, it must explicitly inject the serialized trace context into the sandbox environment, either as POSIX environment variables or as command-line envelope wrappers. Inside the sandbox, instrumented CLI tools or sub-scripts read the `TRACEPARENT` environment variable, extract the active `trace_id` and `span_id`, and register themselves as legitimate child spans within the global execution graph.
+
+```python
+def execute_traced_tool(cmd: list[str], parent_span: Span) -> tuple[int, str]:
+    carrier = {}
+    TraceContextTextMapPropagator().inject(carrier)
+    env = {**os.environ, "TRACEPARENT": carrier["traceparent"]}
+    with tracer.start_as_current_span("agent.tool", context=parent_span.get_context()) as span:
+        span.set_attribute("agent.tool.name", cmd[0])
+        span.set_attribute("agent.tool.args", json.dumps(cmd[1:]))
+        proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=15)
+        span.set_attribute("agent.tool.exit_code", proc.returncode)
+        span.set_attribute("agent.tool.stdout_bytes", len(proc.stdout.encode("utf-8")))
+        if proc.returncode != 0:
+            span.record_exception(Exception(proc.stderr[:512]))
+        return proc.returncode, proc.stdout
+```
+
+The preceding implementation demonstrates this boundary traversal. The runtime extracts the active trace context from the `parent_span`, injects the W3C `traceparent` representation into the process environment dictionary, and wraps the execution within a dedicated `agent.tool` span. Crucially, the span records the physical tool name, argument schema, process return code, and payload byte size. If the process encounters a non-zero exit code or terminal exception, the failure is bound directly to the active span through `record_exception`, preserving the exact execution context without truncating the surrounding trace hierarchy.
+
+::: {.callout-note title="Worked Example: Critical Path Latency and Bottleneck Decomposition"}
+Consider an autonomous coding agent that executes a 5-step loop: retrieving documentation, generating a code patch, executing a test suite in a container sandbox, fanning out review requests to two subagents in parallel, and synthesizing the final pull request.
+
+The host supervisor instruments the entire trajectory under a root trace $\mathcal{T}_{\text{root}}$ and observes a total wall-clock duration of $T_{\text{wall}} = 18.25\text{ s}$. The underlying OpenTelemetry spans record the following hardware and execution parameters:
+
+1. **Vector Memory Retrieval Span:**
+   - Input: 1 query string. Output: Top-$k=5$ chunks ($2{,}048$ tokens total).
+   - Execution: Embedding generation ($t_{\text{embed}} = 35\text{ ms}$) followed by an HNSW vector index traversal ($t_{\text{index}} = 45\text{ ms}$).
+   - Span duration: $t_1 = 80\text{ ms} = 0.08\text{ s}$.
+
+2. **Model Invocation Span (Patch Generation):**
+   - Hardware: 8x NVIDIA H100 SXM5 GPU cluster running vLLM. Aggregate memory bandwidth $B_{\text{mem}} = 8 \times 3.35\text{ TB/s} = 26.8\text{ TB/s}$.
+   - Workload: Input prompt $N_{\text{prompt}} = 8{,}192$ tokens; generated completion $N_{\text{comp}} = 512$ tokens.
+   - Prefill Phase: $N_{\text{prompt}}$ processed at an effective throughput of $4{,}000\text{ tokens/s}$:
+     $$t_{\text{prefill}} = \frac{8{,}192\text{ tokens}}{4{,}000\text{ tokens/s}} = 2.05\text{ s}$$
+   - Decode Phase: 70B parameter model in FP8 precision ($70 \times 10^9\text{ bytes} = 70\text{ GB}$ per forward pass).
+     The theoretical memory-bandwidth-bound token decode time per step across the 8-GPU node:
+     $$t_{\text{step}} = \frac{70\text{ GB}}{26{,}800\text{ GB/s}} \approx 2.61\text{ ms/token}$$
+     Generating $512$ tokens yields an autoregressive decode latency:
+     $$t_{\text{decode}} = 512 \times 2.61\text{ ms} = 1.34\text{ s}$$
+   - Span duration: $t_2 = t_{\text{prefill}} + t_{\text{decode}} = 2.05\text{ s} + 1.34\text{ s} = 3.39\text{ s}$.
+
+3. **Sandboxed Tool Execution Span (`pytest`):**
+   - Workload: MicroVM container initialization, disk sync, and test execution.
+   - Span duration: $t_3 = 6.20\text{ s}$.
+
+4. **Multi-Agent Message Fan-Out Spans (Code Review):**
+   - The supervisor dispatches the patch to Subagent A (style linter) and Subagent B (security analyzer) concurrently.
+   - Subagent A Span: $t_{4a} = 2.10\text{ s}$.
+   - Subagent B Span: $t_{4b} = 3.85\text{ s}$.
+   - Because these spans execute concurrently, the elapsed barrier latency is:
+     $$t_4 = \max(t_{4a}, t_{4b}) = 3.85\text{ s}$$
+
+5. **Model Invocation Span (Final Synthesis):**
+   - Workload: $N_{\text{prompt}} = 12{,}288$ tokens, $N_{\text{comp}} = 256$ tokens.
+   - Prefill duration: $t_{\text{prefill}} = 3.07\text{ s}$; Decode duration: $t_{\text{decode}} = 0.67\text{ s}$.
+   - Span duration: $t_5 = 3.74\text{ s}$.
+
+**Critical Path Analysis:**
+To determine whether the agent's performance is compute-bound, I/O-bound, or coordination-bound, the systems engineer sums the durations along the causal critical path:
+
+$$T_{\text{crit}} = t_1 + t_2 + t_3 + \max(t_{4a}, t_{4b}) + t_5$$
+$$T_{\text{crit}} = 0.08\text{ s} + 3.39\text{ s} + 6.20\text{ s} + 3.85\text{ s} + 3.74\text{ s} = 17.26\text{ s}$$
+
+The remaining latency ($T_{\text{wall}} - T_{\text{crit}} = 18.25\text{ s} - 17.26\text{ s} = 0.99\text{ s}$, or $5.4\%$) represents host runtime orchestration overhead (JSON serialization, process context switching, and RPC queue wait times). 
+
+Decomposing the critical path reveals the governing operational bottleneck:
+- Sandboxed tool execution accounts for $35.9\%$ ($6.20\text{ s}$) of critical path time.
+- Neural model inference accounts for $41.3\%$ ($3.39\text{ s} + 3.74\text{ s} = 7.13\text{ s}$).
+- Multi-agent coordination barrier accounts for $22.3\%$ ($3.85\text{ s}$).
+- Vector retrieval accounts for only $0.5\%$ ($0.08\text{ s}$).
+
+Without distributed tracing, an engineer might intuitively attempt to optimize retrieval latency or upgrade GPU hardware. The trace data definitively disproves both intuitions: memory retrieval is negligible, and inference is dominated by tool execution and parallel subagent latency. Optimizing the system requires addressing the sandbox I/O overhead in Step 3 and the straggler latency of Subagent B in Step 4.
+:::
+
+Because an enterprise platform executing tens of thousands of autonomous agent trajectories per hour generates gigabytes of raw telemetry containing full prompts, intermediate thoughts, vector scores, and subprocess outputs, retaining every individual trace is economically and operationally unsustainable. To deploy distributed trajectory tracing in production without saturating network egress, overwhelming ingestion storage, or leaking sensitive customer credentials, systems engineers must govern trace collection with rigorous sampling policies. That necessity motivates tail-based sampling budgets.

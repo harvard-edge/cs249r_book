@@ -8,8 +8,10 @@ nbdev, and protecting generated files.
 
 import json
 import re
+import shutil
 import stat
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -136,9 +138,58 @@ def validate_notebook_integrity(notebook_path: Path) -> Dict:
         }
 
 
-def convert_py_to_notebook(module_path: Path, venv_path: Path, console) -> bool:
-    """Convert src/<module>.py to modules/<module>.ipynb using jupytext."""
-    project_root = Path(__file__).resolve().parents[2]  # tinytorch project root
+def _write_student_notebook(reference_file: Path, notebook_file: Path, console) -> bool:
+    """Clear student-core solutions from reference_file and write notebook_file.
+
+    Writes nothing unless every solution marker is gone afterwards, so a
+    malformed region can never leak a reference implementation to a learner.
+    """
+    from ..core.solutions import cells_with_solution_markers, make_student_notebook
+
+    try:
+        import nbformat
+    except ImportError:
+        console.print("[red]❌ nbformat not found. Install with: pip install nbformat[/red]")
+        return False
+
+    notebook = nbformat.read(str(reference_file), as_version=4)
+    errors = make_student_notebook(notebook, release_tier="student")
+    leftovers = cells_with_solution_markers(notebook)
+    if errors or leftovers:
+        console.print("[red]❌ Could not remove the reference solutions from this module:[/red]")
+        for error in errors:
+            console.print(f"[red]  • {error}[/red]")
+        for index in leftovers:
+            console.print(f"[red]  • Cell {index} still contains a solution marker[/red]")
+        return False
+
+    nbformat.write(notebook, str(notebook_file))
+    console.print("[dim]✂️  Reference solutions replaced with stubs for you to implement[/dim]")
+    return True
+
+
+def convert_py_to_notebook(
+    module_path: Path,
+    venv_path: Path,
+    console,
+    *,
+    student: bool = False,
+    project_root: Optional[Path] = None,
+) -> bool:
+    """Convert src/<module>.py to modules/<module>.ipynb using jupytext.
+
+    ``student=False`` (``tito dev export``) keeps the full reference, solution
+    markers included, so the package build matches the source of truth.
+
+    ``student=True`` (``tito module start``, ``resume``, ``reset``) clears every
+    student-core solution region to nbgrader's stub before the notebook reaches
+    modules/, so a learner never receives the answers (#1684). The reference
+    conversion lands in a temporary directory first; if clearing fails, no
+    notebook is written.
+
+    ``project_root`` defaults to the tinytorch checkout this module lives in.
+    """
+    project_root = Path(project_root) if project_root is not None else Path(__file__).resolve().parents[2]
     module_path = module_path if module_path.is_absolute() else project_root / module_path
     module_name = module_path.name
     dev_file = module_path / f"{module_name}.py"
@@ -150,6 +201,13 @@ def convert_py_to_notebook(module_path: Path, venv_path: Path, console) -> bool:
     modules_dir = project_root / "modules" / module_name
     modules_dir.mkdir(parents=True, exist_ok=True)
     notebook_file = modules_dir / f"{short_name}.ipynb"
+
+    # Copy static diagram assets (SVGs, PNGs) from source to modules directory
+    for asset in dev_file.parent.glob("*"):
+        if asset.is_file() and asset.suffix.lower() in {".svg", ".png", ".jpg", ".jpeg"}:
+            dest = modules_dir / asset.name
+            if not dest.exists() or dest.stat().st_mtime < asset.stat().st_mtime:
+                shutil.copy2(asset, dest)
 
     rel_notebook = notebook_file.relative_to(project_root)
     console.print(f"[dim]📄 Source: {dev_file.name} → Target: {rel_notebook}[/dim]")
@@ -171,19 +229,26 @@ def convert_py_to_notebook(module_path: Path, venv_path: Path, console) -> bool:
         else:
             console.print(f"[dim]🔧 Using system jupytext: {jupytext_path}[/dim]")
 
-        console.print(f"[dim]⚙️  Running: {jupytext_path} --to ipynb {dev_file.name} --output {notebook_file}[/dim]")
-        result = subprocess.run(
-            [jupytext_path, "--to", "ipynb", str(dev_file), "--output", str(notebook_file)],
-            capture_output=True,
-            text=True, encoding="utf-8", errors="replace",
-            cwd=project_root,
-        )
+        with tempfile.TemporaryDirectory(prefix="tito-notebook-") as tmp:
+            # A student notebook is converted beside the target first, so the
+            # full reference never sits in modules/ even for a moment.
+            output_file = Path(tmp) / notebook_file.name if student else notebook_file
+            console.print(f"[dim]⚙️  Running: {jupytext_path} --to ipynb {dev_file.name} --output {output_file}[/dim]")
+            result = subprocess.run(
+                [jupytext_path, "--to", "ipynb", str(dev_file), "--output", str(output_file)],
+                capture_output=True,
+                text=True, encoding="utf-8", errors="replace",
+                cwd=project_root,
+            )
 
-        if result.returncode != 0:
-            console.print(f"[red]❌ Jupytext failed with return code {result.returncode}[/red]")
-            if result.stderr:
-                console.print(f"[red]Error: {result.stderr.strip()}[/red]")
-            return False
+            if result.returncode != 0:
+                console.print(f"[red]❌ Jupytext failed with return code {result.returncode}[/red]")
+                if result.stderr:
+                    console.print(f"[red]Error: {result.stderr.strip()}[/red]")
+                return False
+
+            if student and not _write_student_notebook(output_file, notebook_file, console):
+                return False
 
         validation = validate_notebook_integrity(notebook_file)
         if not validation["valid"]:
@@ -245,6 +310,10 @@ def add_autogenerated_warnings(console) -> None:
     for py_file in tinytorch_path.rglob("*.py"):
         if py_file.name == "__init__.py":
             continue
+        # tinytorch/extensions/ is hand-written and tracked in git, not exported
+        # from src/; stamping it "DO NOT EDIT" told contributors the opposite.
+        if "extensions" in py_file.relative_to(tinytorch_path).parts:
+            continue
         try:
             content = py_file.read_text(encoding="utf-8")
             if "╔═══════════════════════════════════════════════════════════════════════════════╗" in content:
@@ -266,7 +335,7 @@ def add_autogenerated_warnings(console) -> None:
 # ║  ANY CHANGES MADE HERE WILL BE LOST when modules are re-exported!            ║
 # ║                                                                               ║
 # ║  ✅ TO EDIT: {source_file:<54} ║
-# ║  ✅ TO EXPORT: Run 'tito module complete XX'                                 ║
+# ║  ✅ TO EXPORT: Run 'tito dev export' (src/) or 'tito module complete XX'     ║
 # ║                                                                               ║
 # ║  🛡️ STUDENT PROTECTION: This file contains optimized implementations.        ║
 # ║     Editing it directly may break module functionality and training.         ║

@@ -1,0 +1,188 @@
+## Typed Task Envelopes {#sec-vol3-multiagent-contracts}
+
+When an orchestrator delegates a subtask by emitting unstructured natural language—for example, appending `"Please inspect the failing tests in the authentication module, fix the regression, and make sure the documentation matches"` to a shared conversational context—it abandons deterministic systems control. In an unconstrained chat handoff, the downstream model receives no authoritative boundary markers. It must infer which repository commit represents source truth, guess whether it holds permission to modify database migration scripts, assume arbitrary resource limits, and invent its own stopping criteria. As execution depth increases across a graph of delegating agents, this conversational ambiguity triggers rapid epistemic degradation: minor omissions in the initial prompt cascade into dropped constraints, ungrounded hallucinations, and silent state corruption across the host environment.
+
+::: {.column-margin}
+The foundational principle of modular decomposition, articulated by Saltzer and Kaashoek, requires that module interfaces hide internal implementation details while making cross-boundary preconditions, postconditions, and resource bindings mathematically explicit. Unstructured conversational prompts violate this modularity by conflating control signals with payload data.
+:::
+
+**The systems defense against conversational decay is the strict formalization of inter-agent handoffs as typed remote procedure calls.** Drawing directly on the classical RPC architecture established by Birrell and Nelson (1984), distributed agent runtimes cannot rely on shared conversational memory. Every delegation across a task dependency edge must be marshalled into an explicit, schema-validated task envelope that completely specifies identity, immutable inputs, delegated capabilities, resource budgets, and machine-checkable completion assertions before the downstream agent execution loop is scheduled.
+
+### The Failure of Conversational Handoffs: Drift, Ambiguity, and the RPC Invariant
+
+In early multi-agent prototypes, coordination was typically implemented as an append-only transcript: a supervisor model interacted with specialized worker models by appending natural language instructions to a single shared context window. This conversational paradigm collapses under physical systems scrutiny. The primary operational failure is *semantic drift under context pressure*. When multiple agents append reasoning traces, tool outputs, and conversational pleasantries to a shared sequence, the effective signal-to-noise ratio degrades. Because transformer attention assigns non-zero probability mass across the entire sequence length $S$, soft negative constraints (such as `"do not modify the production schema"`) articulated three turns prior are routinely drowned out by thousands of intervening tokens of raw linter output and speculative chain-of-thought tokens.
+
+```
+FAILED: tests/auth/test_token.py::test_signature_verification - AssertionError
+--- assert False is True
++++ auth_service/tokens.py:42: mutated without lease authority
+ERROR: Agent worker-04 emitted 1,480 tokens of unvalidated conversational rationale 
+       while silently dropping invariant: [schema_migration_lock = immutable]
+```
+
+The failure trace above highlights the architectural breakdown. Worker agents that receive unstructured instructions inevitably invent missing operational parameters. Lacking an explicit schema that designates input files, the worker issues speculative filesystem queries across irrelevant subtrees. Lacking explicit execution leases, it modifies configuration files outside its intended operational scope. Lacking machine-checkable completion criteria, it determines termination through autoregressive self-evaluation—emitting phrases such as `"I have verified the code and it is correct"`—even while unit tests in the underlying container remain red.
+
+| Operational Dimension | Conversational Handoff (Chat Paradigm) | Typed Task Envelope (RPC Paradigm) |
+| :--- | :--- | :--- |
+| **Interface Definition** | Natural language prompts with ad-hoc instructions | Formally validated JSON Schema or Protocol Buffer |
+| **Argument Marshalling** | Raw text concatenated into the prompt context | Strongly typed fields with content-addressed storage URIs |
+| **State Propagation** | Pass-by-value (file dumps embedded directly in context) | Pass-by-reference (immutable cryptographic hashes and pointers) |
+| **Authority Boundary** | Ambient authority inferred from model instructions | Cryptographically signed, attenuated capability tokens |
+| **Resource Ceiling** | Implicit model context window ($S_{\max}$) | Explicit budget vector: tokens, tool calls, and wall-clock timeout |
+| **Completion Invariant** | Model-generated self-assessment (`"Task complete"`) | Deterministic external verification predicates ($V(a) \to \{0, 1\}$) |
+
+: Structural comparison between conversational handoff patterns and typed remote procedure call envelopes. {#tbl-vol3-handoff-comparison}
+
+To replace this conversational fragility with dependable systems execution, the runtime must enforce the *Remote Task Invocation Invariant*: **an agent may never invoke another agent via conversational prompt concatenation; it may only instantiate a strongly typed, hermetically sealed Task Envelope validated against an authoritative runtime schema.**
+
+### The Five-Part Task Envelope Specification
+
+A robust agentic remote procedure call is defined by a five-tuple:
+
+$$\mathcal{E} = \left\langle \mathcal{M}, \mathcal{R}_{\text{in}}, \mathcal{C}_{\text{delegated}}, \mathcal{B}, \mathcal{S}_{\text{verify}} \right\rangle$$
+
+Each element of the envelope addresses a specific distributed failure mode, ensuring that the child agent runtime possesses exactly the information and authority needed to execute its bounded subcomputation—and nothing more.
+
+::: {.column-margin}
+```
+   TYPED TASK ENVELOPE (E)
+┌─────────────────────────────────┐
+│ 1. Metadata (M)                 │
+│    TaskID, ParentID, SpanID     │
+├─────────────────────────────────┤
+│ 2. Input References (R_in)      │
+│    Git Commit SHA, Artifact URI │
+├─────────────────────────────────┤
+│ 3. Delegated Token (C_delegated)│
+│    Attenuated Capability Mask   │
+├─────────────────────────────────┤
+│ 4. Resource Budget (B)          │
+│    Tokens, Tool Calls, Timeout  │
+├─────────────────────────────────┤
+│ 5. Verification Schema (S_verify│
+│    Deterministic Predicates     │
+└─────────────────────────────────┘
+```
+The structural anatomy of a typed task envelope. The host runtime enforces validation at both entry and exit points.
+:::
+
+#### 1. Task Metadata ($\mathcal{M}$)
+Task metadata establishes distributed tracing and causal lineage across the execution DAG. It contains:
+- `task_id`: A universally unique identifier (UUIDv7) ensuring temporal ordering and idempotency.
+- `parent_id`: The identifier of the delegating supervisor or upstream pipeline stage.
+- `trace_context`: Distributed tracing state adhering to W3C Trace Context specifications (encompassing `trace_id` and `span_id`). This permits host runtimes to correlate token expenditures, latency profiles, and tool invocations across deeply nested agent hierarchies.
+
+#### 2. Immutable Input References ($\mathcal{R}_{\text{in}}$)
+The input reference block anchors the agent's computation to an exact, frozen snapshot of the physical world. Rather than permitting the agent to read mutable local pointers, $\mathcal{R}_{\text{in}}$ specifies:
+- `workspace_snapshot`: An immutable content-addressed storage pointer, such as a Git tree SHA (`git:commit:a4f8c9b`) or an S3 object hash (`s3://artifacts/blobs/sha256:e3b0c44...`).
+- `manifest_uris`: An array of explicit paths or URIs designating the authoritative artifacts to be analyzed or mutated.
+
+By providing content-addressed references, the runtime guarantees that two worker agents operating on the same task envelope observe bit-for-bit identical input states, eliminating non-reproducible race conditions induced by concurrent writes in the parent process.
+
+#### 3. Delegated Capability Token ($\mathcal{C}_{\text{delegated}}$)
+Following the principle of least privilege, a child agent must never inherit the ambient authority of its parent. The capability token defines an attenuated authorization lease, enforced not by the model's self-restraint, but by the host runtime's tool interception layer:
+- `filesystem_scope`: A whitelist of permitted directory prefixes (e.g., `["/src/auth/"]`), with absolute write-denials on protected infrastructure (e.g., `["/.github/", "/infra/"]`).
+- `network_egress`: Binary network flags and domain whitelists restricting external communication.
+- `permitted_tools`: The exact subset of tool endpoints the child is authorized to invoke (e.g., permitting `bash_run` for `pytest`, but revoking `git_push` and `aws_deploy`).
+
+#### 4. Resource Budget Ceiling ($\mathcal{B}$)
+Unchecked autoregressive decode loops and pathological tool-retry cycles can rapidly consume millions of tokens and exhaust infrastructure quotas. The budget vector $\mathcal{B}$ enforces hard ceilings:
+
+$$\mathcal{B} = \left( K_{\max}^{\text{input}}, K_{\max}^{\text{output}}, \tau_{\max}, N_{\max}^{\text{calls}}, D_{\max}^{\text{cost}} \right)$$
+
+where $K_{\max}$ denotes maximum prompt and generation tokens, $\tau_{\max}$ specifies the wall-clock timeout in seconds, $N_{\max}^{\text{calls}}$ represents the maximum number of tool execution round-trips, and $D_{\max}^{\text{cost}}$ defines a hard currency threshold in dollars. If any scalar threshold in $\mathcal{B}$ is breached, the host supervisor abruptly terminates the agent's decode loop with a typed `RESOURCE_EXHAUSTED` exception, preventing runaways.
+
+#### 5. Completion Verification Schema ($\mathcal{S}_{\text{verify}}$)
+The envelope must never accept natural language declarations of completion. Instead, it parameterizes a deterministic verification function $V: \text{Artifacts} \to \{0, 1\}$. The schema specifies:
+- `required_exit_codes`: Deterministic commands that must exit with return code zero (e.g., `pytest tests/auth/test_token.py -v`).
+- `structural_contract`: A JSON Schema or abstract syntax tree (AST) constraint that generated output artifacts must satisfy.
+- `forbidden_diff_patterns`: Negative assertions verified by the host (e.g., ensuring zero lines of test code were deleted to achieve a passing suite).
+
+```python
+# Empirical verification harness executed by the host runtime upon task return
+def verify_task_completion(envelope: TaskEnvelope, receipt: TaskReceipt) -> bool:
+    if receipt.exit_code != 0:
+        return False
+    if any(p in receipt.mutated_paths for p in envelope.capabilities.denied_paths):
+        raise SecurityViolation("Agent mutated paths outside delegated capability")
+    return run_host_verification_command(envelope.verification.assertion_cmd) == 0
+```
+
+The downstream agent communicates its termination back to the supervisor strictly through a typed *Task Receipt*. The receipt mirrors the envelope: it contains the originating `task_id`, the mutated commit SHA, an array of structured output artifacts, the consumed resource metrics, and the execution logs of the verification harness. If the verification harness fails, the task receipt is marked with a failure status, triggering the supervisor's recovery or retry policies.
+
+### Marshalling Semantics: Pass-by-Reference versus Pass-by-Value
+
+When designing data handoffs between agents, systems engineers face an architectural choice analogous to calling conventions in programming languages: should state be passed by value or passed by reference?
+
+In a *pass-by-value* architecture, the delegating agent marshals the full text of all relevant files, environment variables, and diagnostic logs directly into the prompt payload of the child envelope. In a *pass-by-reference* architecture, the envelope carries only lightweight, immutable pointers—content-addressed Git commit hashes, database transaction IDs, or object storage URIs—along with access credentials. The worker agent runtime resolves these references on demand, fetching specific byte ranges via localized tool calls.
+
+Passing state by value incurs catastrophic resource overheads on modern accelerator hardware. Modern Large Language Models run on accelerator memory architectures bounded by high-bandwidth memory (HBM) capacity and memory-bus bandwidth. When thousands of lines of source code and dependency manifests are serialized into a child's prompt context, the host must execute a massive matrix-matrix multiplication ($\mathcal{O}(S^2)$ or $\mathcal{O}(S \cdot D)$ under optimized attention) during the prefill phase, followed by large KV cache allocations that remain pinned in accelerator HBM throughout the decode lifetime.
+
+::: {.column-margin}
+During the prefill phase, memory bandwidth requirements are dominated by loading model weights:
+$$\text{Time}_{\text{prefill}} \approx \frac{2 \cdot P \cdot S}{\text{Memory Bandwidth}}$$
+where $P$ is parameter count and $S$ is sequence length. Inflating $S$ with raw file dumps severely throttles serving throughput.
+:::
+
+::: {.callout-note title="Worked Example: Context Desorption and Serialization Overhead in Task Delegation"}
+Consider an orchestrator delegating a refactoring task across a cluster of $W = 6$ worker agents. The working set of the target repository encompasses 40 source files totaling $S_{\text{files}} = 48\text{,}000$ BPE tokens. The supervisor requires each worker to analyze a distinct module while observing repository state.
+
+**Scenario A: Pass-by-Value Marshalling.**
+The supervisor inlines the entire 48,000-token repository context into the prompt payload of each worker's task envelope.
+1. Total context broadcast across the cluster:
+   $$S_{\text{total}} = W \times S_{\text{files}} = 6 \times 48\text{,}000 = 288\text{,}000 \text{ tokens}$$
+2. KV Cache Allocation per Worker:
+   Assuming a 70-billion parameter model operating in 16-bit precision ($\text{FP16}$), with $L = 80$ layers, hidden dimension $D = 8\text{,}192$, and Grouped-Query Attention ($n_{\text{kv\_heads}} = 8$, $d_{\text{head}} = 128$):
+   $$\text{Bytes per Token} = 2 \times L \times n_{\text{kv\_heads}} \times d_{\text{head}} \times 2 \text{ bytes} = 327\text{,}680 \text{ bytes/token} \approx 320 \text{ KB/token}$$
+   For a single worker's input sequence ($48\text{,}000$ tokens):
+   $$\text{HBM}_{\text{worker}} = 48\text{,}000 \times 320 \text{ KB} \approx 15.36 \text{ GB}$$
+   Across all $W = 6$ workers, the inference pool must allocate:
+   $$\text{HBM}_{\text{cluster}} = 6 \times 15.36 \text{ GB} = 92.16 \text{ GB}$$
+   just to hold the duplicated, read-only static context before generation starts.
+3. Compute and Latency Cost:
+   At standard API serving rates (\$3.00 per million input tokens), broadcasting the inputs costs $\$0.864$ per dispatch. Processing a 48,000-token prefill on an 80 GB H100 GPU (operating at an effective prefill throughput of $3\text{,}200 \text{ tokens/sec}$) imposes a Time-to-First-Token (TTFT) latency penalty of:
+   $$\text{TTFT} \approx \frac{48\text{,}000}{3\text{,}200} = 15.0 \text{ seconds}$$
+
+**Scenario B: Pass-by-Reference Marshalling.**
+The supervisor generates a typed task envelope specifying the repository's immutable Git tree hash (`commit_sha: 9b2d8f1`), the specific module entry point (`src/auth/service.py`), and a bounded capability token.
+1. The serialized task envelope consumes exactly $S_{\text{envelope}} = 350$ tokens.
+2. Across all $W = 6$ workers, total input tokens dispatched:
+   $$S_{\text{total}} = 6 \times 350 = 2\text{,}100 \text{ tokens}$$
+   Representing a **$137\times$ reduction** in network transmission and accelerator context ingestion.
+3. Initial KV Cache Allocation per Worker:
+   $$\text{HBM}_{\text{worker}} = 350 \times 320 \text{ KB} \approx 112 \text{ MB} \quad (\text{versus } 15.36 \text{ GB})$$
+4. On-Demand State Retrieval:
+   Each worker agent uses its attenuated filesystem capability to read only the specific files relevant to its task (averaging 3 files, or $3\text{,}600$ tokens).
+   $$\text{Total HBM utilized per worker} \approx 3\text{,}950 \times 320 \text{ KB} \approx 1.26 \text{ GB}$$
+   Total input token cost across the cluster drops from $\$0.864$ to $\$0.071$, while TTFT drops from $15.0$ seconds to under $120$ milliseconds.
+:::
+
+Pass-by-reference marshalling enforces clear separation between control planes and data planes. The control plane—the orchestrator's task envelope and dependency graph—transports lightweight, highly structured, typed metadata. The data plane—the underlying filesystem, code repository, or object store—manages bulk bytes using high-throughput, low-cost storage engines optimized for random access and delta compression. 
+
+Furthermore, pass-by-reference protects cache locality on serving infrastructure. When agents share a common immutable snapshot reference, advanced serving runtimes equipped with Radix-tree or prefix-caching engines can preserve the physical memory frames of the root repository index across multiple tasks. Conversely, pass-by-value handoffs, which concatenate volatile conversational histories with static code files, invalidate prompt prefix hashes on every turn, defeating prefix-caching mechanisms and forcing redundant matrix recalculations across the entire GPU cluster.
+
+```
++-------------------------------------------------------------------------+
+|                Typed Task Envelope Lifecycle Transitions                |
++-------------------------------------------------------------------------+
+       |
+       v
+ [ VALIDATE ] ---> Schema validation fails? ---> [ REJECT & ABORT ]
+       |
+       | (Schema Valid: Auth, Capability Mask, Budget Ceilings Approved)
+       v
+ [ DISPATCH ] ---> Worker resolves immutable references (Git SHA, S3 URI)
+       |
+       v
+ [ EXECUTE  ] ---> Quota exceeded (Tokens/Time)? -> [ RESOURCE_EXHAUSTED ]
+       |
+       | (Subcomputation completes within budget)
+       v
+ [ VERIFY   ] ---> Predicate V(Artifacts) == 0? -> [ EMIT RECEIPT (FAIL) ]
+       |
+       | (All assertions pass: Exit Code 0, AST constraints met)
+       v
+ [ COMPLETE ] ---> Emit Signed TaskReceipt to Supervisor DAG
+```
+
+By formalizing the handoff boundary through typed envelopes, content-addressed references, and machine-readable verification receipts, the agent runtime establishes deterministic, auditable barriers between decoupled stochastic models. Yet, establishing clean data isolation at the invocation boundary solves only the input phase of concurrent execution. When multiple worker agents execute simultaneously across different branches of a task graph, their subcomputations inevitably terminate by attempting to commit mutations back to the shared repository environment. If two workers independently refactor interdependent files or concurrently update database schemas, their write operations will collide, corrupting the project state. To achieve true parallel scalability, the runtime must govern concurrent execution through optimistic concurrency control and branch reconciliation.

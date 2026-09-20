@@ -1,0 +1,124 @@
+## Memory Hierarchy Synthesis {#sec-vol3-conclusion-memory}
+
+When an autonomous coding or refactoring agent executes across dozens of iterative turns, state corruption rarely arises from mathematical faults within the transformer's multi-head attention calculations. Instead, it stems from silent cache divergence across uncoordinated memory boundaries. Consider an agent tasked with updating an enterprise software service: at Turn 4, the agent invokes an external tool to refactor a core data structure in a header file. The filesystem snapshot updates immediately, establishing a new authoritative ground truth. Yet, unless the host supervisor enforces an active cache coherence protocol, the system enters a split-brain state. The agent's logical working context retains the pre-mutation snippet extracted at Turn 1; the inference serving engine preserves pre-computed Key-Value (KV) cache activations for the invalidated prompt prefix; and the external retrieval index continues to return vector embeddings representing deprecated method signatures. In the subsequent turn, the model autoregressively generates diffs targeting identifiers that no longer exist on disk. When the compiler rejects the hallucinated diff, the agent generates further speculative compensations, compounding error across tiers until the interaction turn ceiling $S_{\max}$ or token budget $M$ is exhausted.
+
+**An end-to-end design assigns different ownership and lifetime rules to selected context, physical KV state, authoritative artifacts, and durable indexes or logs.** In an agentic computing architecture, memory cannot be modeled as a homogeneous flat buffer or an unstructured append-only chat history. Robust execution requires synthesizing four distinct physical and logical state layers—spanning volatile accelerator High-Bandwidth Memory (HBM), host DRAM, durable retrieval indices, and persistent filesystem artifacts—under explicit ownership domains, deterministic invalidation protocols, and cryptographic provenance guarantees.
+
+::: {.column-margin}
+Alan Jay Smith's foundational survey on cache memories (1982) demonstrated that hierarchical storage systems function by exploiting spatial and temporal locality to present the illusion of a single, uniformly fast, and unbounded memory space. In agentic machine learning systems, this hierarchy bridges the orders-of-magnitude performance and volatility gap between microsecond accelerator tensor memory and persistent, authoritative external environments.
+:::
+
+### The Four Distinct State Layers and Physical Lifecycles {#sec-vol3-memory-four-layers}
+
+The memory architecture of an agentic system decomposes into four discrete layers, each governed by distinct latency characteristics, physical media, storage capacities, and operational owners. Systems collapse when runtime designers blur the boundaries between these layers, treating derivative search indices as authoritative state or assuming that physical accelerator caches automatically track mutations in external environments.
+
+The first layer is the Logical Working Context, measured in discrete Byte-Pair Encoding (BPE) tokens. This layer constitutes the active evidence window presented directly to the foundation model for its next forward pass. The logical context resides in host system memory during orchestration and is strictly bounded by the model's physical sequence length limit $L_{\max}$ and the task contract's active window budget $S_{\max}$. Owned exclusively by the host agent supervisor runtime, the logical context is ephemeral and mutable across turns. The supervisor continuously manipulates this buffer through structured compaction, sliding-window truncation, observation filtering, and working set selection. The logical context does not represent durable storage; rather, it is a transient, highly selective viewport over the task's broader historical trajectory and environmental state.
+
+The second layer is the Physical Key-Value (KV) Cache, composed of continuous floating-point activation tensors ($\mathbf{K}, \mathbf{V} \in \mathbb{R}^{B \times L \times H \times d_k}$) allocated across the High-Bandwidth Memory (HBM) and host DRAM of the inference serving engine (such as vLLM or SGLang). While the logical context represents discrete symbolic tokens, the physical KV cache materializes the intermediate linear projections computed across every attention layer during the prefill phase (GEMM). Owned entirely by the inference serving engine rather than the agent supervisor, this layer is optimized for high-throughput tensor parallel execution. Modern runtimes manage these tensors through PagedAttention, mapping non-contiguous physical memory pages to logical sequence positions, and structure multi-turn conversations into Radix-tree prefix hierarchies to facilitate zero-copy prefix sharing. The lifecycle of physical KV blocks is decoupled from task logic: blocks are dynamically retained, paged across PCIe buses, or evicted under Least Recently Used (LRU) policies when GPU memory pools face pressure.
+
+The third layer comprises Authoritative External Artifacts, representing the absolute ground-truth state of the external environment. This layer includes the target software repository managed under version control, production database tables, containerized filesystems, and live operating system processes. Authoritative artifacts reside on durable non-volatile media, such as local NVMe arrays or distributed cloud storage. Unlike internal model representations, authoritative artifacts are permanent across agent restarts and can be mutated *strictly* through sandboxed, mediated tool actuation under the principle of Zero Ambient Authority ($A=0$). The host supervisor must treat this layer as the sole source of truth for task completion; candidate patches, generated reports, or proposed database edits remain speculative until verified against these authoritative records.
+
+The fourth layer consists of Derivative Retrieval Indexes and Logs. This layer encompasses dense vector stores (such as Hierarchical Navigable Small World graphs and Inverted File Quantizers), sparse lexical inverted indices (such as BM25), structural code property graphs (AST dependency databases), and the runtime's append-only Write-Ahead Log (WAL). Owned by the host supervisor's storage and retrieval subsystems, these structures are secondary representations derived from historical execution traces and snapshots of authoritative artifacts. The fundamental systems rule governing this layer is that derivative indexes possess zero intrinsic authority: they exist solely to accelerate approximate semantic recall over large information corpora. When an authoritative artifact changes, any derivative index referencing that artifact becomes instantly obsolete and must be reconciled through explicit invalidation or asynchronous re-indexing pipelines.
+
+| Memory Tier | Storage Medium | Volatility & Lifetime | Subsystem Owner | Eviction & Compaction Policy | Cache Invalidation Protocol | Access Latency Regime | Capacity Bound |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Logical Working Context** | Host DRAM / Orchestrator Heap | Ephemeral; reconstructed per turn | Host Agent Supervisor | Semantic compaction, sliding window, observation filtering | Synchronous rewrite upon environment state mutation | $\le 1\,\text{ms}$ (Token assembly) | $L_{\max} \le 128\text{k}\text{ tokens}$ |
+| **Physical KV Cache** | Accelerator HBM / Host DRAM | Volatile; bounded by inference session | Inference Serving Engine | Paged memory allocation, Radix-tree LRU prefix eviction | Tree node severing via prefix hash invalidation | $10\text{ ns}$ (HBM) / $50\text{ ns}$ (PCIe) | GPU HBM capacity ($80\text{--}192\,\text{GB/GPU}$) |
+| **Authoritative Artifacts** | NVMe SSD / Distributed Filesystem | Durable; permanent across runs | External Environment / Sandbox | Explicit task cleanup, sandbox teardown | External mutation notifications via filesystem watchers | $10\,\mu\text{s}\text{--}10\,\text{ms}$ (I/O) | Terabytes / Volume quota |
+| **Derivative Indexes & Logs** | NVMe / Mapped Memory / Cloud DB | Persistent; lifecycle spans projects | Indexing Subsystem / WAL Engine | Tombstone compaction, periodic index re-clustering | Write-through tombstones, asynchronous background re-indexing | $2\text{--}50\,\text{ms}$ (Graph/ANN query) | Unbounded / Scalable multi-TB |
+
+: Comprehensive comparison of the four synthesized memory tiers, contrasting physical storage media, lifetime dynamics, ownership boundaries, eviction policies, invalidation mechanisms, access latencies, and capacity bounds. {#tbl-vol3-memory-tiers-summary}
+
+### Cross-Tier Cache Coherence and Invalidation Protocols {#sec-vol3-memory-coherence-invalidation}
+
+In classical shared-memory multiprocessor architectures, cache coherence is enforced by dedicated hardware logic. As formalized by Leslie Lamport (1979), maintaining sequential consistency across concurrent executing entities requires an unyielding rule: all processes must observe mutations in a globally consistent order. In hardware symmetric multiprocessing (SMP), snooping buses and directory-based protocols (such as MESI) broadcast invalidation signals across L1 and L2 caches whenever a processor issues a write transaction to a shared memory address.
+
+In an agentic computer, this hardware-mediated safety net does not exist. The core computational engine—the autoregressive foundation model—is an unprivileged, stateless inference routine. Once input tokens are tokenized and projected into physical KV activations within accelerator HBM, the neural network possesses no physical mechanism to sense that a background tool has modified a source file on disk or updated an external database row. Consequently, cache coherence across the four tiers must be orchestrated entirely by software protocols within the host supervisor.
+
+![The synthesized four-tier memory hierarchy of an agentic computer, detailing the data flow from authoritative external artifacts down to accelerator HBM, along with explicit write-invalidation and tombstoning feedback loops.](images/svg/vol3-memory-hierarchy-synthesis.svg){#fig-vol3-memory-hierarchy-synthesis}
+
+When an agent executes an actuation command that mutates an authoritative external artifact—such as applying a code patch via a sandboxed filesystem tool—the host supervisor must propagate invalidations through a multi-stage coherence pipeline:
+
+```python
+def on_artifact_mutation(event: MutationEvent, supervisor: AgentSupervisor) -> None:
+    # 1. Authoritative mutation committed to Write-Ahead Log
+    supervisor.wal.append_mutation(event.path, event.old_hash, event.new_hash)
+    # 2. Invalidate stale spans in the active logical working context
+    supervisor.context_manager.invalidate_paths({event.path})
+    # 3. Sever prefill prefix branches in inference engine Radix cache
+    prefix_hash = compute_prefix_hash(event.path, event.old_hash)
+    supervisor.inference_client.invalidate_prefix_cache(prefix_hash)
+    # 4. Mark tombstones on derivative vector and lexical retrieval indexes
+    supervisor.vector_index.tombstone_by_uri(event.path)
+    supervisor.retrieval_queue.schedule_async_reindex(event.path)
+```
+
+The coherence protocol begins at the authoritative layer. When a tool modifies an artifact, the sandbox traps the mutation, computes a cryptographic content digest of the pre- and post-mutation bytes, and emits an atomic mutation record $\Delta = \langle \text{path}, \mathcal{H}_{\text{old}}, \mathcal{H}_{\text{new}}, \text{diff} \rangle$. The supervisor intercepts this record and appends it to the immutable Write-Ahead Log with a monotonically increasing logical epoch counter $e$.
+
+Following log commitment, the supervisor executes logical context invalidation. The context manager inspects all active text blocks currently staged for model generation. Any block whose metadata associates it with $\text{path}$ at an epoch $e' < e$ is flagged as stale. Rather than arbitrarily purging the entire context window—which would destroy valuable conversational continuity and task grounding—the supervisor selectively replaces the stale context segment with a structured diff or an updated snippet read directly from the modified artifact.
+
+Simultaneously, the supervisor invalidates the physical accelerator cache. If the inference serving runtime caches prompt prefixes via a Radix tree to accelerate multi-turn prefill, the KV activations corresponding to the pre-mutation token sequence are now invalid. If the model were evaluated with the old prefix activations, its autoregressive decode phase would condition on hidden states derived from stale tokens. The supervisor dispatches an invalidation RPC to the serving engine containing the prefix hash of the invalidated sequence. The serving engine severs the corresponding node from its prefix tree, freeing the physical GPU memory pages for reallocation and forcing the inference engine to compute a fresh prefill over the updated context tokens.
+
+Finally, the supervisor enforces coherence across derivative retrieval indexes. Dense vector indices and lexical stores cannot be recomputed synchronously across gigabytes of code within the latency budget of a single interaction turn. To resolve this temporal mismatch, the supervisor applies write-through tombstones to all index entries matching the mutated URI. When the agent subsequently performs semantic retrieval queries, the retrieval gateway filters out tombstoned chunks, ensuring that obsolete embeddings are never returned to the active context buffer. Asynchronous background workers pull modified files from the re-indexing queue, extract updated syntactic chunks, compute fresh embedding vectors, and update the index graph out of band.
+
+::: {.callout-note title="Worked Example: Quantitative Cache Invalidation and Memory Footprint across the Agent Hierarchy"}
+Consider an autonomous software maintenance agent executing on an 8x NVIDIA H100 GPU serving node (80 GB HBM3 per GPU, 3.35 TB/s memory bandwidth per GPU, connected via PCIe Gen5 to host DRAM). We evaluate the quantitative costs of memory allocation and cache invalidation during an iterative refactoring task.
+
+**System Parameters:**
+- Model architecture: Llama-3-70B in FP8 precision ($70 \times 10^9\text{ parameters} = 70\text{ GB}$ weights).
+- Attention geometry: 80 transformer layers, Grouped-Query Attention (GQA) with 64 query heads and 8 key-value heads, head dimension $d_k = 128$.
+- Active sequence length: $L = 32{,}768\text{ tokens}$.
+- Cluster compute capacity: Total node FP8 tensor peak of $15{,}832\text{ TFLOPs}$ ($1.979\text{ PFLOPs}$ per H100); achieved Model Flops Utilization (MFU) during prefill is $\eta = 0.50$.
+- Invalidation event: At token position 4,096, a source file modification invalidates the remainder of the prompt prefix.
+
+**Step 1: Calculate Physical KV Cache Footprint**
+The memory consumption per token across all layers for an FP8 KV cache ($b_{\text{elem}} = 1\text{ byte}$) is:
+$$M_{\text{token}} = 2 \times n_{\text{layers}} \times n_{\text{kv\_heads}} \times d_k \times b_{\text{elem}}$$
+$$M_{\text{token}} = 2 \times 80 \times 8 \times 128 \times 1\text{ byte} = 163{,}840\text{ bytes} = 160\text{ KB/token}$$
+For an active context of $L = 32{,}768\text{ tokens}$:
+$$M_{\text{total\_KV}} = 32{,}768 \times 160\text{ KB} = 5{,}242{,}880\text{ KB} = 5.0\text{ GB}$$
+Distributed across the 8 GPUs via tensor parallelism, the KV cache requires $0.625\text{ GB}$ per GPU, representing a negligible fraction of the 80 GB physical HBM3 budget.
+
+**Step 2: Compare Prefill Latency Under Cache Hit versus Invalidation**
+The theoretical floating-point operations required to execute the prefill phase over $N_{\text{tokens}}$ on a model with $P = 70 \times 10^9$ parameters is approximately:
+$$\text{FLOPs}_{\text{prefill}} \approx 2 \times P \times N_{\text{tokens}} = 1.4 \times 10^{11} \times N_{\text{tokens}}$$
+Effective system compute throughput is:
+$$\text{Throughput}_{\text{eff}} = 15{,}832 \times 10^{12}\text{ FLOPs/s} \times 0.50 = 7.916 \times 10^{15}\text{ FLOPs/s}$$
+
+*Scenario A: Radix Cache Prefix Hit (Zero Invalidation).*
+The agent appends 512 new observation tokens to the cached 32k prompt. Only the 512 new tokens require prefilling:
+$$T_{\text{hit}} \approx \frac{1.4 \times 10^{11} \times 512}{7.916 \times 10^{15}} = \frac{7.168 \times 10^{13}}{7.916 \times 10^{15}} \approx 9.05\text{ ms}$$
+
+*Scenario B: Full Prefix Severing (Cache Miss).*
+A file edit at token 4,096 invalidates the subsequent $28{,}672$ prompt tokens. Together with the 512 new tokens, the engine must re-prefill $N_{\text{tokens}} = 29{,}184$:
+$$T_{\text{miss}} \approx \frac{1.4 \times 10^{11} \times 29{,}184}{7.916 \times 10^{15}} = \frac{4.086 \times 10^{15}}{7.916 \times 10^{15}} \approx 516.2\text{ ms}$$
+
+The latency penalty of re-prefill is:
+$$\text{Slowdown} = \frac{516.2\text{ ms}}{9.05\text{ ms}} \approx 57.0\times$$
+This quantitative divergence demonstrates why fine-grained prefix tree slicing and surgical context replacement are mandatory to preserve real-time agent responsiveness.
+:::
+
+### Provenance Tracking and Cryptographic Grounding {#sec-vol3-memory-provenance-grounding}
+
+A core vulnerability of neural autoregressive processors is their inability to discern semantic authority from symbolic layout alone. Once external data—whether from a trusted system contract, an authoritative source file, an unverified user comment, or an adversarial web payload—is parsed by Byte-Pair Encoding into a linear sequence of token IDs, all tokens enter the transformer's self-attention matrix on mathematically equal terms. The attention mechanism computes pairwise scaled dot products indiscriminately across the prompt. If a retrieved web snippet contains an adversarial prompt-injection string, the model cannot distinguish between the legitimate system prompt instructions and the embedded malicious payload without out-of-band architectural mediation.
+
+To maintain invariant closure and prevent privilege escalation, the memory hierarchy must enforce cryptographic provenance tracking across all working tokens. The host supervisor encapsulates every contiguous token slice injected into the active logical context with an immutable provenance descriptor.
+
+Let the active logical context sequence $\mathbf{x} = [t_1, t_2, \dots, t_N]$ be partitioned into disjoint, contiguous spans. The supervisor maintains an auxiliary out-of-band provenance ledger $\mathcal{P}$, defined as a mapping from each token interval $[i, j]$ to a formal provenance tuple:
+
+$$\mathcal{P}([i, j]) = \left\langle \text{uri}, \mathcal{H}_{\text{content}}, \text{epoch}, \tau_{\text{trust}}, \sigma_{\text{sig}} \right\rangle$$
+
+Within this tuple, $\text{uri}$ specifies the canonical Uniform Resource Identifier of the authoritative source artifact (for example, `git://repo@sha256:src/parser.c#L45-L80` or `sandbox://proc/104/stdout`); $\mathcal{H}_{\text{content}} = \text{SHA-256}(\text{bytes})$ records the cryptographic digest of the raw source data at the moment of ingestion; $\text{epoch}$ notes the logical environment clock; $\tau_{\text{trust}}$ assigns an explicit security privilege classification; and $\sigma_{\text{sig}}$ represents an optional cryptographic signature issued by a trusted verification oracle or human supervisor.
+
+The trust classification $\tau_{\text{trust}}$ categorizes memory spans across four formal security rings:
+
+1. $\text{AUTHORITATIVE}$: Immutable task contract specifications, system boundary constraints, and verified files directly inspected from the hermetic sandbox.
+2. $\text{DERIVATIVE}$: Summaries, AST index lookups, and semantic vectors generated by trusted internal pipelines.
+3. $\text{EPHEMERAL}$: The agent's intermediate scratchpad tokens and uncommitted internal deliberation steps.
+4. $\text{UNTRUSTED}$: Arbitrary inputs ingested from external web searches, third-party issue trackers, or unverified user inputs.
+
+This provenance ledger enables the supervisor to enforce data-flow firewalls at the action boundary. When the model emits an action proposal $a_t = (\text{tool}, \text{args})$, the supervisor's parser does not simply inspect the syntax of `args`. It traces the tokens constituting the proposed arguments back through the attention distribution to their origins in $\mathcal{P}$. If an action proposal targeting a mutating tool (such as `execute_shell` or `write_file`) derives predominantly from context spans tagged as $\text{UNTRUSTED}$, the supervisor traps the execution. Under the rule of Zero Ambient Authority ($A=0$), the system rejects the actuation or diverts it to an isolated quarantine sandbox, preventing indirect prompt injection attacks from hijacking host control flow.
+
+Furthermore, provenance tracking provides the empirical foundation for verifiable completion evidence. When an agent signals that a task contract has been satisfied, the supervisor queries the provenance ledger to verify that the deliverables are grounded in authoritative artifacts. If the completion claim cites file hashes that fail to match the live state on disk, or relies on assumptions derived from invalidated epochs ($e' < e_{\text{current}}$), the supervisor refuses completion and forces re-evaluation.
+
+Establishing an explicitly partitioned, coherent, and cryptographically attributable memory hierarchy ensures that the unprivileged neural inference engine conditions its autoregressive decode loops strictly upon fresh, authentic evidence. Yet, structured memory alone cannot modify the external world, nor can it protect the host infrastructure from malformed actions, runaway loops, or malicious side effects. To translate validated context into safe, durable real-world effects, the agentic architecture requires an execution harness capable of mediating every model emission through typed parsing, fine-grained capability checks, isolated execution virtualization, durable logging, and compensable transaction management. How these defensive boundaries combine into an end-to-end execution pipeline—and why multi-step agent trajectories can never be treated as single atomic transactions—is synthesized next.

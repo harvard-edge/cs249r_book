@@ -87,7 +87,7 @@ def volume_bibliographies(repo: Path) -> list[tuple[Path, Path]]:
         List of (volume_directory, bibliography_file) tuples.
     """
     books_dir = repo / "books" if (repo / "books").is_dir() else repo
-    dedicated_volumes = {"vol3", "vol4"}
+    dedicated_volumes = {"vol4"}
     pairs = []
     for vol_dir in sorted(books_dir.glob("vol*")):
         if not vol_dir.is_dir():

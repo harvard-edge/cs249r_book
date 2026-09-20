@@ -16,59 +16,11 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.insert(0, project_root)
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear
+from tinytorch.core.layers import Linear, Sequential
 from tinytorch.core.activations import ReLU, Sigmoid, Tanh, Softmax
-from tinytorch.core.spatial import Conv2d
+from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d
 from tinytorch.core.transformers import TransformerBlock, LayerNorm
 from tinytorch.core.embeddings import Embedding, PositionalEncoding
-
-class Sequential:
-    """Simple sequential container for testing."""
-    def __init__(self, layers):
-        self.layers = layers
-    def __call__(self, x):
-        for layer in self.layers:
-            x = layer(x)
-        return x
-    def parameters(self):
-        params = []
-        for layer in self.layers:
-            if hasattr(layer, 'parameters'):
-                params.extend(layer.parameters())
-        return params
-
-class F:
-    """Functional interface for testing."""
-    @staticmethod
-    def relu(x):
-        from tinytorch.core.activations import ReLU
-        return ReLU()(x)
-    @staticmethod
-    def sigmoid(x):
-        from tinytorch.core.activations import Sigmoid
-        return Sigmoid()(x)
-    @staticmethod
-    def tanh(x):
-        from tinytorch.core.activations import Tanh
-        return Tanh()(x)
-    @staticmethod
-    def softmax(x, dim=-1):
-        from tinytorch.core.activations import Softmax
-        return Softmax()(x)
-    @staticmethod
-    def max_pool2d(x, kernel_size):
-        from tinytorch.core.spatial import MaxPool2d
-        return MaxPool2d(kernel_size)(x)
-    @staticmethod
-    def avg_pool2d(x, kernel_size):
-        from tinytorch.core.spatial import AvgPool2d
-        return AvgPool2d(kernel_size)(x)
-    @staticmethod
-    def flatten(x, start_dim=1):
-        import numpy as np
-        shape = x.shape
-        new_shape = shape[:start_dim] + (np.prod(shape[start_dim:]),)
-        return x.reshape(*new_shape)
 
 
 class ForwardPassTester:
@@ -139,14 +91,14 @@ def test_conv2d_with_stride():
 def test_relu_forward():
     """Test ReLU activation."""
     x = Tensor(np.array([[-1, 0, 1], [2, -3, 4]]))
-    y = F.relu(x)
+    y = ReLU()(x)
     assert y.shape == x.shape
 
 
 def test_sigmoid_forward():
     """Test Sigmoid activation."""
     x = Tensor(rng.standard_normal((2, 3)))
-    y = F.sigmoid(x)
+    y = Sigmoid()(x)
     assert y.shape == x.shape
     # Check sigmoid bounds
     assert np.all(y.data >= 0) and np.all(y.data <= 1)
@@ -155,7 +107,7 @@ def test_sigmoid_forward():
 def test_tanh_forward():
     """Test Tanh activation."""
     x = Tensor(rng.standard_normal((2, 3)))
-    y = F.tanh(x)
+    y = Tanh()(x)
     assert y.shape == x.shape
     # Check tanh bounds
     assert np.all(y.data >= -1) and np.all(y.data <= 1)
@@ -164,7 +116,7 @@ def test_tanh_forward():
 def test_softmax_forward():
     """Test Softmax activation."""
     x = Tensor(rng.standard_normal((2, 10)))
-    y = F.softmax(x, dim=-1)
+    y = Softmax()(x)
     assert y.shape == x.shape
     # Check softmax sums to 1
     sums = np.sum(y.data, axis=-1)
@@ -175,14 +127,14 @@ def test_softmax_forward():
 def test_maxpool2d_forward():
     """Test MaxPool2d."""
     x = Tensor(rng.standard_normal((2, 16, 32, 32)))
-    y = F.max_pool2d(x, kernel_size=2)
+    y = MaxPool2d(kernel_size=2)(x)
     assert y.shape == (2, 16, 16, 16)
 
 
 def test_avgpool2d_forward():
     """Test AvgPool2d."""
     x = Tensor(rng.standard_normal((2, 16, 32, 32)))
-    y = F.avg_pool2d(x, kernel_size=2)
+    y = AvgPool2d(kernel_size=2)(x)
     assert y.shape == (2, 16, 16, 16)
 
 
@@ -190,7 +142,7 @@ def test_avgpool2d_forward():
 def test_flatten_forward():
     """Test flatten operation."""
     x = Tensor(rng.standard_normal((2, 3, 4, 5)))
-    y = F.flatten(x, start_dim=1)
+    y = x.reshape(x.shape[0], -1)
     assert y.shape == (2, 60)  # 3*4*5 = 60
 
 
@@ -245,10 +197,11 @@ def test_mlp_forward():
             self.fc1 = Linear(784, 256)
             self.fc2 = Linear(256, 128)
             self.fc3 = Linear(128, 10)
+            self.relu = ReLU()
 
         def forward(self, x):
-            x = F.relu(self.fc1(x))
-            x = F.relu(self.fc2(x))
+            x = self.relu(self.fc1(x))
+            x = self.relu(self.fc2(x))
             return self.fc3(x)
 
     model = MLP()
@@ -263,16 +216,18 @@ def test_cnn_forward():
         def __init__(self):
             self.conv1 = Conv2d(1, 32, 3)
             self.conv2 = Conv2d(32, 64, 3)
+            self.pool = MaxPool2d(2)
+            self.relu = ReLU()
             self.fc1 = Linear(64 * 5 * 5, 128)
             self.fc2 = Linear(128, 10)
 
         def forward(self, x):
-            x = F.relu(self.conv1(x))
-            x = F.max_pool2d(x, 2)
-            x = F.relu(self.conv2(x))
-            x = F.max_pool2d(x, 2)
-            x = F.flatten(x, start_dim=1)
-            x = F.relu(self.fc1(x))
+            x = self.relu(self.conv1(x))
+            x = self.pool(x)
+            x = self.relu(self.conv2(x))
+            x = self.pool(x)
+            x = x.reshape(x.shape[0], -1)
+            x = self.relu(self.fc1(x))
             return self.fc2(x)
 
     model = CNN()
@@ -314,13 +269,14 @@ def test_residual_block_forward():
         def __init__(self, channels):
             self.conv1 = Conv2d(channels, channels, 3, padding=1)
             self.conv2 = Conv2d(channels, channels, 3, padding=1)
+            self.relu = ReLU()
 
         def forward(self, x):
             identity = x
-            out = F.relu(self.conv1(x))
+            out = self.relu(self.conv1(x))
             out = self.conv2(out)
             out = out + identity  # Residual connection
-            return F.relu(out)
+            return self.relu(out)
 
     block = ResidualBlock(64)
     x = Tensor(rng.standard_normal((2, 64, 16, 16)))

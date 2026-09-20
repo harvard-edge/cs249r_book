@@ -159,49 +159,22 @@ def test_full_gpt_gradient_flow():
     # Backward pass
     loss.backward()
 
-    # Check gradient flow to all parameters
+    # Every parameter must remain connected, including key biases whose
+    # gradients may legitimately be zero because softmax ignores a constant
+    # shift of all keys. Presence, shape, and finiteness test that connection.
     params = model.parameters()
-    params_with_grad = 0
-    params_without_grad = []
-
+    key_biases = {id(block.attention.k_proj.bias) for block in model.blocks}
     for i, param in enumerate(params):
-        if param.grad is not None and np.abs(param.grad).max() > 1e-10:
-            params_with_grad += 1
-        else:
-            params_without_grad.append(i)
+        assert param.grad is not None, f"GPT parameter {i} is disconnected"
+        assert param.grad.shape == param.shape
+        assert np.isfinite(param.grad).all(), f"GPT parameter {i} has nonfinite gradients"
+        if id(param) not in key_biases:
+            assert np.max(np.abs(param.grad)) > 1e-10, f"GPT parameter {i} has no training signal"
 
-    # Report detailed results
-    print(f"   Parameters with gradients: {params_with_grad}/{len(params)}")
-
-    # Note: positional embeddings (index 1) may not receive gradients for positions
-    # beyond the actual sequence length. Allow 1 parameter without grad.
-    if len(params_without_grad) > 1:
-        print(f"   ⚠️  Parameters WITHOUT gradients: {params_without_grad}")
-
-        # Provide parameter mapping for debugging
-        print("\n   Parameter breakdown:")
-        param_idx = 0
-        print(f"     {param_idx}: Token embedding weight")
-        param_idx += 1
-        print(f"     {param_idx}: Position embedding weight")
-        param_idx += 1
-
-        for block_idx in range(num_layers):
-            print(f"     Block {block_idx}:")
-            print(f"       {param_idx}-{param_idx+7}: Attention (Q/K/V/out + biases)")
-            param_idx += 8
-            print(f"       {param_idx}-{param_idx+1}: LayerNorm 1 (gamma, beta)")
-            param_idx += 2
-            print(f"       {param_idx}-{param_idx+1}: LayerNorm 2 (gamma, beta)")
-            param_idx += 2
-            print(f"       {param_idx}-{param_idx+3}: MLP (2 linears + biases)")
-            param_idx += 4
-
-        print(f"     {param_idx}-{param_idx+1}: Final LayerNorm (gamma, beta)")
-        param_idx += 2
-        print(f"     {param_idx}: LM head weight")
-
-        raise AssertionError(f"Expected at least {len(params)-1} parameters to have gradients, but {len(params_without_grad)} don't")
+    # Used positional rows must train; unused rows alone should be zero.
+    positions = model.embedding_layer.pos_encoding.position_embeddings
+    assert np.all(np.max(np.abs(positions.grad[:seq_len]), axis=1) > 1e-10)
+    np.testing.assert_array_equal(positions.grad[seq_len:], 0)
 
     print(f"✅ All {len(params)} GPT parameters receive gradients")
 

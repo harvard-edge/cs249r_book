@@ -13,7 +13,7 @@
 # ---
 
 # %% [markdown]
-"""
+r"""
 # Module 02: Activations - Intelligence Through Nonlinearity
 
 Welcome to Module 02! Today you'll add the one ingredient a stack of linear layers cannot supply on its own: **nonlinearity**.
@@ -23,11 +23,8 @@ Welcome to Module 02! Today you'll add the one ingredient a stack of linear laye
 **You'll Build**: Activation functions that add nonlinearity to transformations
 **You'll Enable**: Neural networks with the ability to learn complex patterns
 
-**Connection Map**:
-```
-Tensor → Activations → Layers
-(data)   (intelligence) (architecture)
-```
+**Connection Pipeline**:
+$$\mathbf{X} \in \text{Tensor (data)} \xrightarrow{\text{Parameterization}} \mathbf{W}\mathbf{X} + \mathbf{b} \in \text{Layers} \xrightarrow{\text{Nonlinearity}} \sigma(\mathbf{W}\mathbf{X} + \mathbf{b}) \in \text{Activations}$$
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
@@ -37,9 +34,7 @@ By the end of this module, you will:
 4. Connect activations to real neural network components
 
 Let's add intelligence to your tensors!
-"""
-# %% [markdown]
-"""
+
 ## 📦 Where This Code Lives in the Final Package
 
 **Learning Side:** You work in `modules/02_activations/activations.ipynb`
@@ -59,7 +54,7 @@ from tinytorch.core.tensor import Tensor  # Foundation (Module 01)
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📋 Module Dependencies
 
 **Prerequisites**: Module 01 (Tensor) must be completed
@@ -69,16 +64,12 @@ from tinytorch.core.tensor import Tensor  # Foundation (Module 01)
 
 **TinyTorch Dependencies**:
 - **Module 01 (Tensor)**: Foundation for all activation computations and data flow
-  - Used for: Input/output data structures, shape operations, element-wise operations
-  - Required: Yes - activations operate on Tensor objects
+  - Used for: `Tensor` for input/output data structures, shape operations, element-wise
+    operations; `Function` as the base class every activation operation subclasses
+  - Required: Yes - activations operate on Tensor objects and are written as Functions
 
 **Dependency Flow**:
-```
-Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers)
-     ↓                      ↓                         ↓
-  Foundation          Nonlinearity              Architecture
-```
-
+$$\underbrace{\text{Module 01: Tensor}}_{\text{Tensor Foundation}} \longrightarrow \underbrace{\text{Module 02: Activations}}_{\text{Nonlinear Functions}} \longrightarrow \underbrace{\text{Module 03: Layers}}_{\text{Network Architecture}}$$
 """
 
 # %% nbgrader={"grade": false, "grade_id": "setup", "solution": false}
@@ -90,65 +81,45 @@ import numpy as np
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor, Function
 
-# Constants for numerical comparisons
+# %%
+# Kept out of the exported cell above. This is a test-only constant, so shipping it
+# in tinytorch.core.activations' public surface would advertise it as part of the API.
 TOLERANCE = 1e-10  # Small tolerance for floating-point comparisons in tests
 
 # %% [markdown]
-"""
+r"""
 ## 💡 Introduction: What Makes Neural Networks Intelligent?
 
-Consider two scenarios:
+Consider two architectural scenarios:
 
-**Without Activations (Linear Only):**
-```
-Input → Linear → Linear → Linear → Output
-Three matrix multiplies collapse into one: W3·(W2·(W1·x)) = (W3·W2·W1)·x
-```
+**1. Without Activations (Linear Transformations Only):**
+Any cascade of purely linear layers collapses mathematically into a single matrix multiplication:
+$$\mathbf{h}_1 = \mathbf{W}_1 \mathbf{x}, \quad \mathbf{h}_2 = \mathbf{W}_2 \mathbf{h}_1, \quad \hat{\mathbf{y}} = \mathbf{W}_3 \mathbf{h}_2$$
+$$\hat{\mathbf{y}} = \mathbf{W}_3 (\mathbf{W}_2 (\mathbf{W}_1 \mathbf{x})) = (\mathbf{W}_3 \mathbf{W}_2 \mathbf{W}_1) \mathbf{x} = \mathbf{W}_{\text{eff}} \mathbf{x}$$
+Regardless of whether you stack 3 layers or 300 layers, the resulting function can only construct linear hyperplanes.
 
-**With Activations (Nonlinear):**
-```
-Input → Linear → ReLU → Linear → ReLU → Linear → Output
-Each ReLU zeroes a different subset of features, so the layers no longer
-collapse and the network can bend its decision boundary.
-```
+**2. With Activations (Nonlinear Transformations):**
+Interleaving nonlinear activation functions $\sigma(\cdot)$ prevents linear collapse:
+$$\mathbf{h}_1 = \sigma(\mathbf{W}_1 \mathbf{x}), \quad \mathbf{h}_2 = \sigma(\mathbf{W}_2 \mathbf{h}_1), \quad \hat{\mathbf{y}} = \mathbf{W}_3 \mathbf{h}_2$$
+Each activation function selectively warps and bends the coordinate space, allowing deep networks to approximate arbitrary continuous functions (Universal Approximation Theorem).
 
-The difference is entirely in those activation functions. They introduce **nonlinearity** - the ability to curve, bend, and create complex decision boundaries instead of just straight lines.
+<div align="center">
+  <img src="activations_overview.svg" alt="TinyTorch Activation Functions Overview" width="680px">
+</div>
 
-### Why Nonlinearity Matters
-
-Without activation functions, stacking multiple linear transformations is pointless:
-```
-Linear2(Linear1(x)) = Linear3(x)  # Two linear maps compose into one linear map
-```
-
-With activation functions between transformations, each stage can build on the
-one before it. The picture people usually draw (an intuition from vision
-networks, not a guarantee) looks like this:
-```
-Stage 1: Simple edges and lines
-Stage 2: Curves and shapes
-Stage 3: Complex objects and concepts
-```
-
-This is how nonlinearity lets stacked layers represent functions no single
-linear layer can.
-"""
-
-# %% [markdown]
-"""
 ## 📐 Foundations: Five Activation Functions
 
-Each activation function serves a different purpose in computation:
+Each activation function provides a distinct mathematical behavior tuned for specific systems and architectural roles:
 
-### The Five Essential Activations
+| Activation | Mathematical Formulation | Output Range | Systems & Architectural Role |
+|:---|:---|:---|:---|
+| **Sigmoid** | $\sigma(x) = \frac{1}{1 + e^{-x}}$ | $(0, 1)$ | Binary classification outputs, gating mechanisms (LSTMs, GRUs) |
+| **ReLU** | $f(x) = \max(0, x)$ | $[0, \infty)$ | Standard hidden layer default; extreme hardware speed and activation sparsity |
+| **Tanh** | $\tanh(x) = \frac{e^x - e^{-x}}{e^x + e^{-x}}$ | $(-1, 1)$ | Zero-centered representations preventing gradient bias drift |
+| **GELU** | $x \cdot \Phi(x) \approx x \cdot \sigma(1.702x)$ | $[\approx -0.164, \infty)$ as implemented; $[\approx -0.170, \infty)$ for exact $x \cdot \Phi(x)$ | Modern Transformer standard (GPT, BERT); smooth gradient flow |
+| **Softmax** | $\frac{e^{z_i - \max(\mathbf{z})}}{\sum_j e^{z_j - \max(\mathbf{z})}}$ | $[0, 1], \sum = 1$ | Multi-class probability distributions, attention score normalization |
 
-1. **Sigmoid**: Maps to (0, 1) - perfect for probabilities
-2. **ReLU**: Removes negatives - creates sparsity and efficiency
-3. **Tanh**: Maps to (-1, 1) - zero-centered for better training
-4. **GELU**: Smooth ReLU - modern choice for advanced architectures
-5. **Softmax**: Creates probability distributions - converts values to probabilities
-
-Let's implement each one with clear explanations and immediate testing!
+Let's implement each one with clear mathematical formulations and unit testing!
 """
 
 # %% [markdown]
@@ -185,39 +156,31 @@ are given.
 """
 
 # %% [markdown]
-"""
+r"""
 ### Sigmoid: The Probability Gatekeeper
 
-Sigmoid maps any real number to the range (0, 1), making it perfect for probabilities and binary decisions.
+Sigmoid maps any real number to the range $(0, 1)$, making it the standard function for probability estimation and binary decisions.
 
-### Mathematical Definition
-```
-σ(x) = 1/(1 + e^(-x))
-```
+#### Mathematical Formulation & Properties
 
-### Visual Behavior
-```
-Input:  [-3, -1,  0,  1,  3]
-         ↓   ↓   ↓   ↓   ↓  Sigmoid Function
-Output: [0.05, 0.27, 0.5, 0.73, 0.95]
-```
+$$\sigma(x) = \frac{1}{1 + e^{-x}} = \frac{e^x}{e^x + 1}$$
 
-### ASCII Visualization
-```
-Sigmoid Curve:
+| Property | Specification |
+|:---|:---|
+| **Input Domain** | $x \in (-\infty, \infty)$ |
+| **Output Range** | $\sigma(x) \in (0, 1)$ |
+| **Derivative** | $\sigma'(x) = \sigma(x)(1 - \sigma(x))$ with peak $\sigma'(0) = 0.25$ |
+| **Symmetry** | Centered at $\sigma(0) = 0.5$ |
 
-    1.0 ┤          ╭───────
-        │        ╱
-        │      ╱
-    0.5 ┤─────●──────────
-        │    ╱
-        │  ╱
-    0.0 ┤╱────────────────
-       -3      0       3
+#### Numerical Vector Trace
 
-```
+$$\begin{bmatrix} -3.0 & -1.0 & 0.0 & 1.0 & 3.0 \end{bmatrix} \xrightarrow{\sigma(x)} \begin{bmatrix} 0.0474 & 0.2689 & 0.5000 & 0.7311 & 0.9526 \end{bmatrix}$$
 
-**Why Sigmoid matters**: In binary classification, we need outputs between 0 and 1 to represent probabilities. Sigmoid gives us exactly that!
+<div align="center">
+  <img src="sigmoid_curve.svg" alt="Sigmoid Squashing and Saturation" width="320px">
+</div>
+
+**Why Sigmoid matters**: In binary classification, we need outputs between $0$ and $1$ to represent probabilities. Notice the red saturation zones where $|x| \ge 3$: the gradient vanishes toward zero ($\sigma'(x) \to 0$), which will motivate ReLU and GELU in deep hidden layers.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "sigmoid-impl", "solution": true}
@@ -249,7 +212,7 @@ class SigmoidFunction(Function):
         (exp(1000) is inf in float32). The unit test runs your code with NumPy
         set to raise on overflow, so the naive form fails it
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="core"
         # Both branches use the same bounded exponential, so neither overflows.
         z = np.exp(-np.abs(x))
         result = np.where(x >= 0, 1.0 / (1.0 + z), z / (1.0 + z))
@@ -266,7 +229,7 @@ class Sigmoid:
     """
 
     def parameters(self):
-        """No weights to train, so there is nothing for Module 03's layers or Module 07's optimizer to collect."""
+        """No weights to train, so Module 03's layers and Module 07's optimizers will have nothing to collect."""
         return []
 
     def forward(self, x: Tensor) -> Tensor:
@@ -326,38 +289,31 @@ if __name__ == "__main__":
     test_unit_sigmoid()
 
 # %% [markdown]
-"""
+r"""
 ### ReLU: The Sparsity Creator
 
-ReLU (Rectified Linear Unit) is the most popular activation function. It simply removes negative values, creating sparsity that makes neural networks more efficient.
+ReLU (Rectified Linear Unit) is the standard hidden layer activation across deep learning. It clamps negative values to zero while passing positive values unchanged, introducing nonlinearity at near-zero hardware computational overhead.
 
-### Mathematical Definition
-```
-f(x) = max(0, x)
-```
+#### Mathematical Formulation & Properties
 
-### Visual Behavior
-```
-Input:  [-2, -1,  0,  1,  2]
-         ↓   ↓   ↓   ↓   ↓  ReLU Function
-Output: [ 0,  0,  0,  1,  2]
-```
+$$f(x) = \max(0, x) = \begin{cases} x & \text{if } x > 0 \\ 0 & \text{if } x \le 0 \end{cases}$$
 
-### ASCII Visualization
-```
-ReLU Function:
-        ╱
-    2  ╱
-      ╱
-    1╱
-    ╱
-   ╱
-  ╱
-─┴─────
--2  0  2
-```
+| Property | Specification |
+|:---|:---|
+| **Input Domain** | $x \in (-\infty, \infty)$ |
+| **Output Range** | $f(x) \in [0, \infty)$ |
+| **Derivative** | $f'(x) = \mathbb{I}(x > 0)$ (constant $1$ for $x > 0$, $0$ for $x < 0$) |
+| **Hardware Profile** | Branchless SIMD comparison; no transcendentals ($\exp$) required |
 
-**Why ReLU matters**: By zeroing negative values, ReLU creates sparsity (many zeros), and a max is far cheaper than an exponential. The Systems Analysis below measures that gap.
+#### Numerical Vector Trace
+
+$$\begin{bmatrix} -2.0 & -1.0 & 0.0 & 1.0 & 2.0 \end{bmatrix} \xrightarrow{\text{ReLU}} \begin{bmatrix} 0.0 & 0.0 & 0.0 & 1.0 & 2.0 \end{bmatrix}$$
+
+<div align="center">
+  <img src="relu_curve.svg" alt="ReLU Piecewise Linear Hinge" width="320px">
+</div>
+
+**Why ReLU matters**: By zeroing negative values, ReLU creates representation sparsity (often $\approx 50\%$ zeroed activations for a given input in trained networks). Because a comparison instruction (`max`) executes in a single clock cycle compared to multi-cycle transcendentals (`exp`), the ReLU kernel itself is the cheapest activation to evaluate, which the timing cell later in this module measures.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "relu-impl", "solution": true}
@@ -401,7 +357,7 @@ class ReLU:
     """
 
     def parameters(self):
-        """No weights to train, so there is nothing for Module 03's layers or Module 07's optimizer to collect."""
+        """No weights to train, so Module 03's layers and Module 07's optimizers will have nothing to collect."""
         return []
 
     def forward(self, x: Tensor) -> Tensor:
@@ -458,35 +414,31 @@ if __name__ == "__main__":
     test_unit_relu()
 
 # %% [markdown]
-"""
+r"""
 ### Tanh: The Zero-Centered Alternative
 
-Tanh (hyperbolic tangent) is like sigmoid but centered around zero, mapping inputs to (-1, 1).
+Tanh (hyperbolic tangent) rescales the sigmoid curve to range $(-1, 1)$, centered symmetrically around the origin $(0, 0)$.
 
-### Mathematical Definition
-```
-f(x) = (e^x - e^(-x))/(e^x + e^(-x))
-```
+#### Mathematical Formulation & Properties
 
-### Visual Behavior
-```
-Input:  [-2,  0,  2]
-         ↓   ↓   ↓  Tanh Function
-Output: [-0.96, 0, 0.96]
-```
+$$\tanh(x) = \frac{e^x - e^{-x}}{e^x + e^{-x}} = 2\sigma(2x) - 1$$
 
-### ASCII Visualization
-```
-Tanh Curve:
-    1 ┤     ╭─────
-      │    ╱
-    0 ┤───╱─────
-      │  ╱
-   -1 ┤─╱───────
-     -3  0  3
-```
+| Property | Specification |
+|:---|:---|
+| **Input Domain** | $x \in (-\infty, \infty)$ |
+| **Output Range** | $\tanh(x) \in (-1, 1)$ |
+| **Derivative** | $\tanh'(x) = 1 - \tanh^2(x)$ with peak $\tanh'(0) = 1.0$ |
+| **Zero-Centered** | Odd function: $\tanh(-x) = -\tanh(x)$ with $\tanh(0) = 0$ |
 
-**Why Tanh matters**: Sigmoid outputs are all positive, so every value it feeds to the next transformation pushes in the same direction. Tanh outputs are centered at zero, so the next stage sees inputs balanced around zero. Module 06 will show why that makes training easier; for now, treat it as the reason tanh is preferred inside a stack and sigmoid at the output.
+#### Numerical Vector Trace
+
+$$\begin{bmatrix} -2.0 & 0.0 & 2.0 \end{bmatrix} \xrightarrow{\tanh(x)} \begin{bmatrix} -0.9640 & 0.0000 & 0.9640 \end{bmatrix}$$
+
+<div align="center">
+  <img src="tanh_curve.svg" alt="Tanh Zero-Centered S-Curve" width="320px">
+</div>
+
+**Why Tanh matters**: Because Sigmoid outputs are strictly positive ($> 0$), downstream gradients all inherit the same sign, causing systematic zig-zagging in weight space. Tanh outputs have zero mean on symmetric inputs, preserving gradient balance across intermediate layers.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tanh-impl", "solution": true}
@@ -514,7 +466,7 @@ class TanhFunction(Function):
 
         HINT: NumPy provides np.tanh function
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Apply tanh using NumPy
         result = np.tanh(x)
         return result
@@ -530,7 +482,7 @@ class Tanh:
     """
 
     def parameters(self):
-        """No weights to train, so there is nothing for Module 03's layers or Module 07's optimizer to collect."""
+        """No weights to train, so Module 03's layers and Module 07's optimizers will have nothing to collect."""
         return []
 
     def forward(self, x: Tensor) -> Tensor:
@@ -588,50 +540,39 @@ if __name__ == "__main__":
     test_unit_tanh()
 
 # %% [markdown]
-"""
+r"""
 ### GELU: The Smooth Modern Choice
 
-GELU (Gaussian Error Linear Unit) is a smooth approximation to ReLU that's become popular in modern architectures like transformers. Unlike ReLU's sharp corner, GELU is smooth everywhere.
+GELU (Gaussian Error Linear Unit) is a smooth, probabilistically motivated alternative to ReLU adopted across modern Transformer architectures (GPT, BERT, RoBERTa).
 
-### Mathematical Definition
+#### Mathematical Formulation & Approximations
 
-The exact GELU multiplies x by Φ(x), the probability that a standard
-normal random variable is ≤ x (an S-curve from 0 to 1):
-```
-GELU(x) = x · Φ(x)
-```
+GELU weights inputs by their standard normal cumulative distribution $\Phi(x) = P(X \le x), X \sim \mathcal{N}(0, 1)$:
 
-Two common approximations exist (Hendrycks & Gimpel, 2016):
-```
-Tanh:    0.5x(1 + tanh[√(2/π)(x + 0.044715x³)])   ← more accurate
-Sigmoid: x · σ(1.702x)                              ← faster, used here
-```
+$$\text{GELU}(x) = x \cdot \Phi(x) = x \cdot \frac{1}{2} \left[1 + \text{erf}\left(\frac{x}{\sqrt{2}}\right)\right]$$
 
-We use the sigmoid form because it reuses sigmoid (which you just built!)
-and the single constant 1.702 is empirically fitted so that σ(1.702x) ≈ Φ(x).
+In practice, two high-performance approximations are used (Hendrycks & Gimpel, 2016):
+$$\text{Sigmoid-GELU (Fast, used in TinyTorch): } \text{GELU}(x) \approx x \cdot \sigma(1.702 x)$$
+$$\text{Tanh-GELU (GPT-2, BERT, TensorFlow): } \text{GELU}(x) \approx 0.5x \left(1 + \tanh\left(\sqrt{\frac{2}{\pi}}\left(x + 0.044715x^3\right)\right)\right)$$
 
-### Visual Behavior
-```
-Input:  [-1,  0,  1]
-         ↓   ↓   ↓  GELU Function
-Output: [-0.15, 0, 0.85]
-```
+PyTorch's `torch.nn.GELU` defaults to `approximate='none'`, the exact $\text{erf}$ form above; the tanh expression is what you get with `approximate='tanh'`.
 
-### ASCII Visualization
-```
-GELU Function:
-                  ╱
-     1           ╱
-                ╱
-               ╱
-              ╱
-     0 ───────╱─────── x
-         ╰───╯  ↑ smooth through zero, no corner
-   dip: GELU(-0.75) ≈ -0.17, the curve goes slightly negative
-        -2    0    2
-```
+| Property | Specification |
+|:---|:---|
+| **Input Domain** | $x \in (-\infty, \infty)$ |
+| **Output Range** | $[\approx -0.1636, \infty)$ for the implemented $x \cdot \sigma(1.702x)$; the exact $x \cdot \Phi(x)$ bottoms out at $\approx -0.1700$ |
+| **Smoothness** | Infinitely differentiable everywhere ($C^\infty$) |
+| **Curvature** | Curvature well dipping to $\approx -0.1636$ at $x \approx -0.751$ (implemented form), smoothly passing through $(0, 0)$ |
 
-**Why GELU matters**: Used in GPT, BERT, and other modern architectures. The smoothness helps with optimization compared to ReLU's sharp corner.
+#### Numerical Vector Trace
+
+$$\begin{bmatrix} -1.0 & 0.0 & 1.0 \end{bmatrix} \xrightarrow{\text{GELU}} \begin{bmatrix} -0.1542 & 0.0000 & 0.8458 \end{bmatrix}$$
+
+<div align="center">
+  <img src="gelu_curve.svg" alt="GELU vs ReLU Curvature" width="320px">
+</div>
+
+**Why GELU matters**: Unlike ReLU's sharp non-differentiable hinge at $x = 0$, GELU provides smooth non-zero gradients everywhere, eliminating the "dying neuron" failure mode in deep Transformers.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "gelu-impl", "solution": true}
@@ -648,8 +589,8 @@ class GELUFunction(Function):
 
         APPROACH:
         1. Use approximation: x * sigmoid(1.702 * x)
-        2. Compute sigmoid part: 1 / (1 + exp(-1.702 * x))
-        3. Multiply by x element-wise
+        2. Reuse the stable SigmoidFunction; scaled extreme inputs may saturate to infinity
+        3. Multiply by x element-wise; define the negative-infinity limit as zero
         4. Return result as a NumPy array
 
         EXAMPLE:
@@ -661,8 +602,15 @@ class GELUFunction(Function):
 
         HINT: The 1.702 constant is empirically fitted so that sigmoid(1.702x) ≈ Φ(x)
         """
-        ### BEGIN SOLUTION
-        return x * SigmoidFunction().forward(1.702 * x)
+        ### BEGIN SOLUTION role="scaffold"
+        # Overflow in the scaled gate means saturation, which sigmoid handles.
+        with np.errstate(over="ignore"):
+            sig = SigmoidFunction().forward(1.702 * x)
+        with np.errstate(invalid="ignore"):
+            out = x * sig
+        if np.any(np.isneginf(x)):
+            out = np.where(np.isneginf(x), 0.0, out)
+        return out
         ### END SOLUTION
 
 
@@ -675,7 +623,7 @@ class GELU:
     """
 
     def parameters(self):
-        """No weights to train, so there is nothing for Module 03's layers or Module 07's optimizer to collect."""
+        """No weights to train, so Module 03's layers and Module 07's optimizers will have nothing to collect."""
         return []
 
     def forward(self, x: Tensor) -> Tensor:
@@ -717,7 +665,7 @@ def test_unit_gelu():
     # Test negative values (should be small but not zero)
     x = Tensor([-1.0])
     result = gelu.forward(x)
-    assert result.data[0] < 0 and result.data[0] > -0.2, f"GELU(-1) should be ≈-0.16, got {result.data[0]}"
+    assert result.data[0] < 0 and result.data[0] > -0.2, f"GELU(-1) should be ≈-0.15, got {result.data[0]}"
 
     # Test smoothness property (no sharp corners like ReLU)
     x = Tensor([-0.001, 0.0, 0.001])
@@ -733,34 +681,31 @@ if __name__ == "__main__":
     test_unit_gelu()
 
 # %% [markdown]
-"""
+r"""
 ### Softmax: The Probability Distributor
 
-Softmax converts any vector into a valid probability distribution. All outputs are positive and sum to exactly 1.0, making it essential for multi-class classification.
+Softmax generalizes the sigmoid function to multidimensional vectors, converting unconstrained logit scores $\mathbf{z}$ into a normalized categorical probability distribution that sums to $1.0$.
 
-### Mathematical Definition
-```
-f(x_i) = e^(x_i) / Σ(e^(x_j))
-```
+#### Mathematical Formulation & Numerical Stabilization
 
-### Visual Behavior
-```
-Input:  [1, 2, 3]
-         ↓  ↓  ↓  Softmax Function
-Output: [0.09, 0.24, 0.67]  # Sum = 1.0
-```
+Directly computing exponentials $\exp(z_i)$ can overflow 32-bit floating point registers (e.g. $\exp(89) > 10^{38}$). Subtracting the maximum value $\max(\mathbf{z})$ provides exact mathematical invariance while guaranteeing the exponent is $\le 0$:
 
-### ASCII Visualization
-```
-Softmax Transform:
-Raw scores: [1, 2, 3, 4]
-           ↓ Exponential ↓
-          [2.7, 7.4, 20.1, 54.6]
-           ↓ Normalize ↓
-          [0.03, 0.09, 0.24, 0.64]  ← Sum = 1.0
-```
+$$\text{Softmax}(\mathbf{z})_i = \frac{e^{z_i - \max(\mathbf{z})}}{\sum_{j=1}^C e^{z_j - \max(\mathbf{z})}}$$
 
-**Why Softmax matters**: In multi-class classification, we need outputs that represent probabilities for each class. Softmax guarantees valid probabilities.
+| Property | Specification |
+|:---|:---|
+| **Input Domain** | $\mathbf{z} \in \mathbb{R}^C$ |
+| **Output Range** | $p_i \in (0, 1)$ such that $\sum_{i=1}^C p_i = 1.0$ |
+| **Invariance** | $\text{Softmax}(\mathbf{z} - c) = \text{Softmax}(\mathbf{z})$ for any scalar $c$ |
+| **Masking Convention** | Unbounded negative infinity ($-\infty$) exponentiates safely to $0.0$ |
+
+#### Step-by-Step Numerical Vector Trace
+
+$$\mathbf{z} = \begin{bmatrix} 1.0 \\ 2.0 \\ 3.0 \\ 4.0 \end{bmatrix} \xrightarrow{\text{Shift } (z_i - 4.0)} \begin{bmatrix} -3.0 \\ -2.0 \\ -1.0 \\ 0.0 \end{bmatrix} \xrightarrow{\exp(\cdot)} \begin{bmatrix} 0.0498 \\ 0.1353 \\ 0.3679 \\ 1.0000 \end{bmatrix} \xrightarrow{\div \sum=1.5530} \begin{bmatrix} 0.0321 \\ 0.0871 \\ 0.2369 \\ 0.6439 \end{bmatrix}$$
+
+$$\sum_{i=1}^4 p_i = 0.0321 + 0.0871 + 0.2369 + 0.6439 = 1.0000$$
+
+**Why Softmax matters**: Softmax produces valid probability distributions where the highest logit dominates while lower logits receive proportional mass. That is what multi-class classification needs, and Module 12 will reuse this same normalization to turn attention scores into weights.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "softmax-impl", "solution": true}
@@ -778,11 +723,11 @@ class SoftmaxFunction(Function):
         TODO: Implement numerically stable softmax
 
         APPROACH:
-        1. Subtract max for numerical stability: x - max(x)
-        2. Compute exponentials: exp(x - max(x))
-        3. Sum along dimension: sum(exp_values)
-        4. Divide: exp_values / sum
-        5. Return result as a NumPy array
+        1. Find the maximum along the chosen dimension, keeping dimensions
+        2. Replace an all-negative-infinity maximum with zero before subtracting
+        3. Compute exponentials and their sum along the same dimension
+        4. Replace a zero sum with one, so fully masked slices remain zero
+        5. Divide by the safe sum and return the NumPy array
 
         EXAMPLE:
         >>> softmax = Softmax()
@@ -795,20 +740,26 @@ class SoftmaxFunction(Function):
         - Use np.max(x, axis=self.dim, keepdims=True) for max
         - Use np.sum(exp_values, axis=self.dim, keepdims=True) for sum
         - The max subtraction prevents overflow in exponentials
+        - A fully masked slice contains only -inf and must return zeros
+        - An extreme finite difference may become -inf; exp(-inf) correctly gives zero
         """
         ### BEGIN SOLUTION
         # Numerical stability: subtract max to prevent overflow
         x_max = np.max(x, axis=self.dim, keepdims=True)
-        x_shifted = x - x_max
+        safe_max = np.where(np.isneginf(x_max), 0.0, x_max)
+        # An extreme negative difference may overflow to -inf, whose exp is zero.
+        with np.errstate(over="ignore"):
+            x_shifted = x - safe_max
 
         # Compute exponentials
         exp_values = np.exp(x_shifted)
 
         # Sum along dimension
         exp_sum = np.sum(exp_values, axis=self.dim, keepdims=True)
+        safe_sum = np.where(exp_sum == 0, 1.0, exp_sum)
 
         # Normalize to get probabilities
-        result = exp_values / exp_sum
+        result = exp_values / safe_sum
         return result
         ### END SOLUTION
 
@@ -817,12 +768,13 @@ class Softmax:
     """
     Softmax activation: f(x_i) = e^(x_i) / Σ(e^(x_j))
 
-    Converts any vector to a probability distribution.
-    Sum of all outputs equals 1.0.
+    Finite scores normalize to a probability distribution along the chosen axis.
+    Negative infinity masks entries out. Fully masked slices return all zeros.
+    Positive infinity and NaN scores are outside this contract.
     """
 
     def parameters(self):
-        """No weights to train, so there is nothing for Module 03's layers or Module 07's optimizer to collect."""
+        """No weights to train, so Module 03's layers and Module 07's optimizers will have nothing to collect."""
         return []
 
     def forward(self, x: Tensor, dim: int = -1) -> Tensor:
@@ -839,9 +791,9 @@ class Softmax:
 
 This test validates softmax activation behavior.
 
-**What we're testing**: Softmax creates valid probability distributions
+**What we're testing**: Softmax normalizes scores and handles masked entries
 **Why it matters**: Essential for multi-class classification outputs
-**Expected**: Outputs sum to 1.0, all values in (0, 1), largest input gets highest probability
+**Expected**: Nonnegative outputs sum to one for unmasked slices; fully masked slices are zero; the largest finite input gets the highest probability
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-softmax", "locked": true, "points": 10}
@@ -884,6 +836,12 @@ def test_unit_softmax():
     row_sums = np.sum(result.data, axis=-1)
     assert np.allclose(row_sums, [1.0, 1.0]), "Each row should sum to 1"
 
+    # Fully masked rows have no available choice; partial masks still normalize.
+    x = Tensor([[-np.inf, -np.inf], [0.0, -np.inf]])
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        result = softmax(x)
+    np.testing.assert_array_equal(result.data, [[0.0, 0.0], [1.0, 0.0]])
+
     print("✅ Softmax works correctly!")
 
 if __name__ == "__main__":
@@ -893,8 +851,31 @@ if __name__ == "__main__":
 """
 ## 🔧 Integration: Bringing It Together
 
-Now let's test how all our activation functions work together and understand their different behaviors.
+Now let's run all five activation functions on one shared input and read their
+outputs side by side. Same numbers in, five different shapes out.
 """
+
+# %%
+def compare_activations():
+    """Run all five activations on one shared input vector and line up the results."""
+    x = Tensor(np.array([-2.0, -1.0, 0.0, 1.0, 2.0]))
+
+    def row(label, values):
+        print(f"{label:<9}" + "".join(f"{v:>9.4f}" for v in values))
+
+    print("All five activations on the same input vector")
+    print("=" * (9 + 9 * len(x.data)))
+    row("input", x.data)
+    print("-" * (9 + 9 * len(x.data)))
+    for name, activation in [("Sigmoid", Sigmoid()), ("ReLU", ReLU()), ("Tanh", Tanh()),
+                             ("GELU", GELU()), ("Softmax", Softmax())]:
+        row(name, activation(x).data)
+    print("-" * (9 + 9 * len(x.data)))
+    print(f"Softmax sums to {Softmax()(x).data.sum():.4f}; the other four are element-wise,")
+    print("so each of their outputs depends only on the input in the same position.")
+
+if __name__ == "__main__":
+    compare_activations()
 
 
 # %% [markdown]
@@ -977,7 +958,7 @@ def analyze_activation_performance():
         _ = gelu(test_data)
     gelu_time = (time.time() - start) / n_runs * 1000
 
-    print("\n🧪 Activation Performance Results:")
+    print("\n📊 Activation Performance Results:")
     print(f"   ReLU:    {relu_time:.2f}ms (baseline)")
     print(f"   Sigmoid: {sigmoid_time:.2f}ms ({sigmoid_time/relu_time:.1f}x slower)")
     print(f"   Tanh:    {tanh_time:.2f}ms ({tanh_time/relu_time:.1f}x slower)")
@@ -1114,17 +1095,16 @@ Answer these to deepen your understanding of activation functions and their syst
 ---
 
 ### Question 3: Sparsity and Efficiency
-**Question**: ReLU creates "sparsity" by zeroing negative values. Why might having many zero activations be beneficial for computation?
+**Question**: ReLU zeros roughly half of its outputs for any given input. A dense matrix multiply does exactly the same work whether those entries are zero or not, so the saving is not automatic. What would have to be true of the hardware, the kernel, and the data layout for activation sparsity to actually pay off?
 
 **Consider**:
-- Memory: Do zeros need to be stored differently than non-zeros?
-- Computation: What happens when you multiply by zero?
-- Learning: If 50% of neurons are "off" for a given input, what does that mean for the representation?
+- Storage: a sparse format stores indices alongside values, so at what density does that bookkeeping cost more bytes than the zeros it removes?
+- Computation: a dense matrix multiply multiplies by zero at full speed. What would the code need to know in advance in order to skip that work instead of performing it?
+- Structure: ReLU's zeros fall in different positions for every input, while the accelerator hardware that can actually skip zeros requires a fixed pattern (2 nonzeros in every group of 4). Which kind of sparsity does ReLU produce?
 
 **Think about**:
-- Sparse matrix representations and their memory benefits
-- How GPUs handle sparse operations
-- Whether sparsity helps or hurts different types of computations
+- Why unstructured sparsity is easier to cash in on a bandwidth-bound kernel (fewer bytes moved) than on a compute-bound one (the multiply happens anyway)
+- Why frameworks still keep ReLU's output dense in memory
 
 ---
 
@@ -1212,7 +1192,7 @@ def demo_activations():
     print(f"\nSoftmax: {np.round(softmax_out.data, 3)}")
     print(f"         Sum = {softmax_out.data.sum():.1f} (valid probability distribution!)")
 
-    print("\n✨ Activations add nonlinearity—the key to deep learning!")
+    print("\n✨ Activations add nonlinearity, the key to deep learning!")
 
 # %%
 if __name__ == "__main__":
@@ -1236,7 +1216,7 @@ Congratulations! You've built the intelligence engine of neural networks!
 ### Systems Insights Discovered
 - **ReLU efficiency**: A max is far cheaper than an exponential, so ReLU costs a fraction of Sigmoid or Tanh per element
 - **Numerical stability**: Softmax's max subtraction prevents overflow without changing results
-- **Sparsity benefits**: ReLU's zero outputs create sparse representations
+- **Sparsity is not free speed**: ReLU's zero outputs make representations sparse, but a dense matrix multiply still does the full work, so cashing that sparsity in takes a kernel and a layout that can skip zeros
 - **Activation selection**: Different layers need different activations (ReLU for hidden, Softmax for output)
 
 ### Ready for Next Steps

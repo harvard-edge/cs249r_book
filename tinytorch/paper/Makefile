@@ -8,8 +8,8 @@ DOC = paper
 LATEX = lualatex
 LATEXFLAGS = -interaction=nonstopmode
 
-# Biber compiler (for biblatex)
-BIBER = biber
+# BibTeX compiler (for natbib)
+BIBTEX = bibtex
 
 # Output files
 PDF = $(DOC).pdf
@@ -30,7 +30,7 @@ all: $(PDF)
 $(PDF): $(TEX) $(BIB)
 	@echo "Compiling $(TEX) with LuaLaTeX (for emoji support)..."
 	$(LATEX) $(LATEXFLAGS) $(TEX)
-	$(BIBER) $(DOC)
+	$(BIBTEX) $(DOC)
 	$(LATEX) $(LATEXFLAGS) $(TEX)
 	$(LATEX) $(LATEXFLAGS) $(TEX)
 	@if [ -f $(PDF) ]; then \
@@ -77,8 +77,8 @@ check:
 		echo "Or install BasicTeX: brew install --cask basictex"; \
 		exit 1; \
 	}
-	@command -v $(BIBER) >/dev/null 2>&1 || { \
-		echo "Warning: $(BIBER) not found - bibliography may not compile"; \
+	@command -v $(BIBTEX) >/dev/null 2>&1 || { \
+		echo "Warning: $(BIBTEX) not found - bibliography may not compile"; \
 	}
 	@echo "✓ All required tools found"
 

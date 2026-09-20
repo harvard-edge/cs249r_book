@@ -24,44 +24,12 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.insert(0, project_root)
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear
+from tinytorch.core.layers import Linear, Sequential
 from tinytorch.core.activations import ReLU, Sigmoid, Tanh
 from tinytorch.core.losses import MSELoss, CrossEntropyLoss
 from tinytorch.core.optimizers import SGD, Adam
-from tinytorch.core.spatial import Conv2d
+from tinytorch.core.spatial import Conv2d, MaxPool2d
 from tinytorch.core.transformers import TransformerBlock
-
-class Sequential:
-    """Simple sequential container for testing."""
-    def __init__(self, layers):
-        self.layers = layers
-    def __call__(self, x):
-        for layer in self.layers:
-            x = layer(x)
-        return x
-    def parameters(self):
-        params = []
-        for layer in self.layers:
-            if hasattr(layer, 'parameters'):
-                params.extend(layer.parameters())
-        return params
-
-class F:
-    """Functional interface for testing."""
-    @staticmethod
-    def relu(x):
-        from tinytorch.core.activations import ReLU
-        return ReLU()(x)
-    @staticmethod
-    def max_pool2d(x, kernel_size):
-        from tinytorch.core.spatial import MaxPool2d
-        return MaxPool2d(kernel_size)(x)
-    @staticmethod
-    def flatten(x, start_dim=1):
-        import numpy as np
-        shape = x.shape
-        new_shape = shape[:start_dim] + (np.prod(shape[start_dim:]),)
-        return x.reshape(*new_shape)
 
 
 # ============== Gradient Existence Tests ==============
@@ -120,14 +88,16 @@ def test_gradient_exists_cnn():
         def __init__(self):
             self.conv1 = Conv2d(1, 16, kernel_size=3)
             self.conv2 = Conv2d(16, 32, kernel_size=3)
+            self.pool = MaxPool2d(2)
+            self.relu = ReLU()
             self.fc = Linear(32 * 5 * 5, 10)
 
         def forward(self, x):
-            x = F.relu(self.conv1(x))
-            x = F.max_pool2d(x, 2)
-            x = F.relu(self.conv2(x))
-            x = F.max_pool2d(x, 2)
-            x = F.flatten(x, start_dim=1)
+            x = self.relu(self.conv1(x))
+            x = self.pool(x)
+            x = self.relu(self.conv2(x))
+            x = self.pool(x)
+            x = x.reshape(x.shape[0], -1)
             return self.fc(x)
 
         def parameters(self):
@@ -254,7 +224,7 @@ def test_chain_rule_linear_relu():
 
     # Forward
     z = linear(x)
-    y = F.relu(z)
+    y = ReLU()(z)
     loss = MSELoss()(y, y_true)
 
     loss.backward()
@@ -277,7 +247,7 @@ def test_chain_rule_multiple_paths():
 
     # Forward with residual connection
     z1 = linear1(x)
-    z2 = linear2(F.relu(z1))
+    z2 = linear2(ReLU()(z1))
     y = z1 + z2  # Residual connection
 
     loss = MSELoss()(y, y_true)

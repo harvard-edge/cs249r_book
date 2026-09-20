@@ -270,7 +270,7 @@ GOOGLE_TPU_V2_V3 = _lit(
 
 GOOGLE_TPU_V4 = _lit(
     "prov:google-tpu-v4",
-    "Jouppi et al. (2023), TPU v4: An Optically Reconfigurable Supercomputer for Training Deep Neural Networks",
+    "Jouppi et al. (2023), TPU v4: An Optically Reconfigurable Supercomputer for Machine Learning with Hardware Support for Embeddings, ISCA",
     url="https://arxiv.org/abs/2304.01433",
 )
 
@@ -350,53 +350,231 @@ NVIDIA_DRIVE_THOR = _ds(
     notes="Thor autonomous vehicle and physical AI SoC integrating Blackwell GPU architecture and Arm Neoverse V3AE CPU cores.",
 )
 
-BOSTON_DYNAMICS_SPOT = _ds(
+# Embodied platforms (Embodied.*). A record is DATASHEET only when every
+# numeric field on its registry entry was checked against the linked source;
+# otherwise it is ESTIMATE, keeps the real spec URL, and its notes name the
+# fields that are verified and the fields that are MLSysIM estimates.
+BOSTON_DYNAMICS_SPOT = _est(
     "prov:boston-dynamics-spot",
-    "Boston Dynamics Spot Enterprise quadruped technical specifications",
-    "https://www.bostondynamics.com/products/spot",
-    notes="Mass 32.7 kg, 14 kg payload, max velocity 1.6 m/s, 12 DOFs, 1 kHz actuator torque loop.",
+    "Boston Dynamics Spot SDK documentation, About Spot (robot specifications table)",
+    notes=(
+        "Verified: 12 degrees of freedom, 1.6 m/s maximum speed, 14 kg maximum "
+        "payload. The SDK table and the Spot + Spot Arm Information for Use v1.0 "
+        "list net weight 32.5 kg; the current product page "
+        "(bostondynamics.com/products/spot) lists 33.8 kg with battery. The "
+        "stored 32.7 kg matches neither. Unsourced MLSysIM estimates: 1000 Hz "
+        "control_frequency, 2.0 m/s^2 max_acceleration, and 400 W nominal_power "
+        "(the SDK lists 400 W charger power and a 605 Wh battery with 90 minute "
+        "typical runtime, about 400 W average draw, but no power rating). The "
+        "transmission description and Jetson AGX Orin compute_soc are not from "
+        "Boston Dynamics documentation."
+    ),
+    url="https://dev.bostondynamics.com/docs/concepts/about_spot.html",
+    verified="2026-09-15",
 )
 
-BOSTON_DYNAMICS_ATLAS = _ds(
+BOSTON_DYNAMICS_ATLAS = _est(
     "prov:boston-dynamics-atlas",
-    "Boston Dynamics Atlas humanoid robot technical brief",
-    "https://www.bostondynamics.com/atlas",
-    notes="Fully electric humanoid, 28 DOFs, 500-1000 Hz balance control loop, high-bandwidth actuator units.",
+    "Boston Dynamics Atlas (hydraulic) product page, Internet Archive capture of 2022-05-30",
+    notes=(
+        "The stored values describe the retired hydraulic Atlas. Verified "
+        "against the archived page: 89 kg weight, 28 hydraulic joints, 2.5 m/s "
+        "speed (1.5 m height). Unsourced MLSysIM estimates: 11 kg "
+        "payload_capacity, 5.0 m/s^2 max_acceleration, 1000 Hz "
+        "control_frequency, 1500 W nominal_power, the electric QDD half of the "
+        "transmission description, and the Jetson AGX Orin compute_soc. The "
+        "live bostondynamics.com/atlas page now describes the electric Atlas "
+        "(90 kg, 56 degrees of freedom, 50 kg instant and 30 kg sustained lift, "
+        "4 hour battery), which these values do not represent."
+    ),
+    url="https://web.archive.org/web/20220530005139/https://www.bostondynamics.com/atlas",
+    verified="2026-09-15",
 )
 
 FRANKA_EMIKA_PANDA = _ds(
     "prov:franka-emika-panda",
-    "Franka Emika Panda 7-DOF articulated robot arm datasheet",
-    "https://franka.de/",
-    notes="7-DOF, 18 kg mass, 3 kg payload, 855 mm reach, 1 kHz torque sensing at all joints, harmonic drive transmissions.",
+    "Franka Emika Panda datasheet (May 2018) and Robot Instruction Handbook (October 2021)",
+    "https://www.generationrobots.com/media/panda-franka-emika-datasheet.pdf",
+    verified="2026-09-15",
+    notes=(
+        "Datasheet (reseller-hosted copy of the Franka Emika PDF): 7 DOF, 3 kg "
+        "payload, 855 mm reach, torque sensors in all 7 axes, up to 2 m/s "
+        "end-effector speed, arm weight about 18 kg, controller power "
+        "consumption about 300 W average and 600 W maximum. The May 2019 "
+        "datasheet revision lists 1 kHz control. The handbook "
+        "(generationrobots.com/media/franka-emika-robot-handbook.pdf) lists "
+        "87 Nm repeatable peak torque on axes 1 to 4 and 12 Nm on axes 5 to 7; "
+        "max_torque stores the 87 Nm limit. The harmonic-drive transmission "
+        "description and Jetson AGX Orin compute_soc are not from Franka "
+        "documentation."
+    ),
 )
 
-DJI_MATRICE_350_RTK = _ds(
+DJI_MATRICE_350_RTK = _est(
     "prov:dji-matrice-350-rtk",
-    "DJI Matrice 350 RTK enterprise industrial drone datasheet",
-    "https://enterprise.dji.com/matrice-350-rtk",
-    notes="Mass 6.47 kg MTOW with TB65 batteries, 2.7 kg payload, 21 m/s max velocity, 55 min max hover flight time, 400 Hz ESC loop.",
+    "DJI Matrice 350 RTK specifications page",
+    notes=(
+        "Verified: weight with two TB65 batteries about 6.47 kg, max takeoff "
+        "weight 9.2 kg, max horizontal speed 23 m/s, max flight time 55 minutes. "
+        "payload_capacity 2.7 kg is derived as takeoff weight minus aircraft "
+        "weight (9.2 - 6.47 = 2.73 kg); DJI lists a single-gimbal max payload of "
+        "960 g. Unsourced MLSysIM estimates: 6.0 m/s^2 max_acceleration, 400 Hz "
+        "control_frequency, 1000 W nominal_power. The Jetson Orin Nano "
+        "compute_soc is not a DJI component."
+    ),
+    url="https://enterprise.dji.com/matrice-350-rtk/specs",
+    verified="2026-09-15",
 )
 
-INDUSTRIAL_AMR = _ds(
+INDUSTRIAL_AMR = _est(
     "prov:industrial-amr-ansi-itsdf",
-    "Industrial Autonomous Mobile Robot specifications (ANSI/ITSDF B56.5 and ISO 3691-4)",
-    "https://itsdf.org/",
-    notes="Mass 150 kg, nominal velocity 1.5-1.8 m/s, emergency braking 2.5-3.0 m/s^2, 270-degree safety laser scanner.",
+    "Representative industrial logistics AMR class profile (not a single product)",
+    notes=(
+        "No accessible source was found for these values: 150 kg mass, 500 kg "
+        "payload_capacity, 1.8 m/s max_velocity, 2.5 m/s^2 max_acceleration, "
+        "100 Hz control_frequency, 500 W nominal_power, Jetson AGX Orin "
+        "compute_soc. ANSI/ITSDF B56.5 and ISO 3691-4 are safety standards for "
+        "driverless industrial trucks, not product specifications; their texts "
+        "are paywalled and were not checked."
+    ),
+    verified="2026-09-15",
 )
 
-AUTONOMOUS_VEHICLE_ROBOTAXI = _ds(
+WAREHOUSE_AMR = _est(
+    "prov:warehouse-amr-300kg",
+    "Representative warehouse fulfillment AMR class profile (300 kg gross mass)",
+    notes="300 kg mass, 1.5 m/s max velocity, 2.0 m/s^2 emergency braking deceleration (Chapter 4 watchdog model).",
+    verified="2026-09-18",
+)
+
+HEAVY_AMR = _est(
+    "prov:heavy-amr-250kg",
+    "Representative heavy industrial logistics AMR class profile (250 kg mass)",
+    notes="250 kg mass, 1.8 m/s cruise velocity, 2.0 m/s^2 braking deceleration (Chapter 1 model).",
+    verified="2026-09-18",
+)
+
+AUTONOMOUS_VEHICLE_ROBOTAXI = _est(
     "prov:autonomous-vehicle-robotaxi",
-    "Level 4 passenger autonomous vehicle system envelope",
-    "https://waymo.com/",
-    notes="Mass 2400 kg, cruise speed 22 m/s, chassis jerk limit 12 m/s^3, steering column jerk limit 500 N*m/s.",
+    "Representative Level 4 robotaxi class profile (not a single vehicle)",
+    notes=(
+        "No accessible source was found for these values: 2200 kg mass, "
+        "33.3 m/s (120 km/h) max_velocity, 4.0 m/s^2 max_acceleration, 100 Hz "
+        "control_frequency, 2500 W nominal_power. The DRIVE Thor compute_soc "
+        "carries its own NVIDIA_DRIVE_THOR record."
+    ),
+    verified="2026-09-15",
 )
 
-UNITREE_H1_HUMANOID = _ds(
+UNITREE_H1_HUMANOID = _est(
     "prov:unitree-h1-humanoid",
-    "Unitree H1 general-purpose humanoid robot specifications",
-    "https://www.unitree.com/h1/",
-    notes="Mass 47 kg, 19 DOFs, 360 N*m peak joint torque, 3.3 m/s walking speed, dual Jetson AGX Orin compute payload.",
+    "Unitree H1 product page and parameter table",
+    notes=(
+        "Verified: about 47 kg, 3.3 m/s moving speed, 360 N*m maximum joint "
+        "torque (knee), M107 joint motors. The page lists 5 degrees of freedom "
+        "per leg and 4 per arm, 18 in total, not the stored 19. Standard compute "
+        "is an Intel Core i5 plus Core i7 with Orin NX optional, not the stored "
+        "Jetson AGX Orin. Unsourced MLSysIM estimates: 30 kg payload_capacity "
+        "(no H1 payload is listed), 1000 Hz control_frequency, 800 W "
+        "nominal_power (the page lists an 864 Wh battery but no power rating)."
+    ),
+    url="https://www.unitree.com/h1/",
+    verified="2026-09-15",
+)
+
+UBER_ATG_VOLVO_XC90 = _lit(
+    "prov:uber-atg-volvo-xc90",
+    "NTSB Highway Accident Report: Collision Between a Self-Driving Car and a Pedestrian, Tempe, Arizona, March 18, 2018 (NTSB/HAR-19/03)",
+    url="https://www.ntsb.gov/investigations/AccidentReports/Reports/HAR1903.pdf",
+    verified="2026-09-18",
+    notes="Modified 2017 Volvo XC90 test vehicle operated by Uber ATG. NTSB reported one-second action suppression after hazard recognition at T-1.2 s; 8.0 m/s^2 braking deceleration is an illustrative assumption.",
+)
+
+ALOHA_BIMANUAL_MANIPULATOR = _lit(
+    "prov:aloha-bimanual-manipulator",
+    "Zhao et al. (2023), Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware",
+    url="https://arxiv.org/abs/2304.13705",
+    verified="2026-09-18",
+    notes="ALOHA dual ViperX 300 6-DOF arms with leader-follower teleoperation, 50 Hz control loop, 14 total DOFs.",
+)
+
+DED_MELT_POOL_PROCESS = _est(
+    "prov:ded-melt-pool-process",
+    "Representative laser directed energy deposition (DED) additive manufacturing testbed",
+    verified="2026-09-18",
+    notes="High-speed coaxially monitored melt pool process with 1000 Hz closed-loop control.",
+)
+
+SONY_IMX477 = _ds(
+    "prov:sony-imx477",
+    "Sony IMX477 Diagonal 7.857 mm (Type 1/2.3) 12.3MP CMOS Image Sensor Datasheet",
+    "https://www.sony-semicon.com/files/62/pdf/p-13_IMX477-AACK_Flyer.pdf",
+    verified="2026-09-18",
+    notes="Full-resolution 4056x3040 at 60 fps uses the flyer-supported four-lane, 10-bit CSI-2 mode (up to 2.1 Gbps/lane); chapter pipeline stage delays beyond exposure/readout are illustrative assumptions.",
+)
+
+SONY_IMX296 = _ds(
+    "prov:sony-imx296",
+    "Sony IMX296LLR/LQR Diagonal 6.3 mm (Type 1/2.9) 1.58MP Global Shutter CMOS Sensor",
+    "https://www.sony-semicon.com",
+    verified="2026-09-18",
+    notes="Global shutter CMOS sensor with 1440x1080 resolution, sub-10ms latency profile for robotics.",
+)
+
+INTEL_REALSENSE_D435I = _ds(
+    "prov:intel-realsense-d435i",
+    "Intel RealSense Depth Camera D435i Datasheet",
+    "https://www.intelrealsense.com/depth-camera-d435i/",
+    verified="2026-09-18",
+    notes="Active IR stereo depth camera with integrated Bosch BMI055/BMI088 IMU, 90 fps depth stream.",
+)
+
+OUSTER_OS1_64 = _ds(
+    "prov:ouster-os1-64",
+    "Ouster OS1 Mid-Range High-Resolution Imaging LiDAR Datasheet",
+    "https://ouster.com/products/hardware/os1-lidar-sensor",
+    verified="2026-09-18",
+    notes="64-channel digital LiDAR with 120m range, 10-20 Hz configurable spin rate.",
+)
+
+BOSCH_BMI088 = _ds(
+    "prov:bosch-bmi088",
+    "Bosch Sensortec BMI088 High-Performance 6-Axis Inertial Measurement Unit Datasheet",
+    "https://www.bosch-sensortec.com/products/motion-sensors/imus/bmi088/",
+    verified="2026-09-18",
+    notes="Automotive and robotics grade 6-DoF IMU with 1000 Hz gyroscope and 1600 Hz accelerometer update rates.",
+)
+
+HARMONIC_DRIVE_CSG = _ds(
+    "prov:harmonic-drive-csg",
+    "Harmonic Drive CSG-25-50-2UH product performance data",
+    "https://www.harmonicdrive.net/products/gear-units/gear-units/csg-2uh/csg-25-50-2uh",
+    verified="2026-09-20",
+    notes="Specific 50:1 gear unit: 51 N m L10 rated torque, 72 N m average limit, 127 N m repeated peak, and 242 N m momentary peak. Registry rotor inertia and electrical fields are teaching assumptions, not product specifications.",
+)
+
+UNITREE_M107_MOTOR = _ds(
+    "prov:unitree-m107-motor",
+    "Unitree M107 High Torque Joint Motor Technical Specifications",
+    "https://www.unitree.com",
+    verified="2026-09-18",
+    notes="Planetary/QDD joint motor providing 360 N*m peak torque used in humanoid hip and knee joints.",
+)
+
+TMOTOR_AK80_9 = _ds(
+    "prov:tmotor-ak80-9",
+    "T-Motor AK80-9 Dynamic Actuator Specifications",
+    "https://store.tmotor.com",
+    verified="2026-09-18",
+    notes="9:1 planetary quasi-direct-drive actuator for dynamic legged robotics.",
+)
+
+DYNAMIXEL_XM430 = _ds(
+    "prov:dynamixel-xm430-w350",
+    "ROBOTIS DYNAMIXEL XM430-W350-T/R E-Manual",
+    "https://emanual.robotis.com/docs/en/dxl/x/xm430-w350/",
+    verified="2026-09-18",
+    notes="Integrated robot actuator with contactless absolute encoder, TTL/RS-485 multidrop bus.",
 )
 
 GOOGLE_CORAL = _ds(
@@ -550,17 +728,62 @@ MNIST_DATASET = _lit(
     url="http://yann.lecun.com/exdb/publis/pdf/lecun-98.pdf",
 )
 
+OPEN_X_EMBODIMENT_DATASET = _lit(
+    "prov:open-x-embodiment-2023",
+    "Open X-Embodiment Collaboration et al. (2023), Open X-Embodiment: Robotic Learning Datasets and RT-X Models",
+    url="https://arxiv.org/abs/2310.08864",
+    verified="2026-09-18",
+    notes="1M+ robot trajectories across 22 embodiments and 527 tasks.",
+)
+
+DROID_DATASET = _lit(
+    "prov:droid-dataset-2024",
+    "Khazatsky et al. (2024), DROID: A Large-Scale In-The-Wild Robot Manipulation Dataset",
+    url="https://arxiv.org/abs/2403.12945",
+    verified="2026-09-18",
+    notes="76k demonstration trajectories, 350 hours of Franka interaction data across diverse household and industrial environments.",
+)
+
+BRIDGE_DATA_V2_DATASET = _lit(
+    "prov:bridge-data-v2-2023",
+    "Walke et al. (2023), BridgeData V2: A Dataset for Robot Manipulation at Scale",
+    url="https://arxiv.org/abs/2308.08451",
+    verified="2026-09-18",
+    notes="60k trajectories across 24 environments for visual-motor skill learning with WidowX 250.",
+)
+
+ALOHA_BIMANUAL_DATASET = _lit(
+    "prov:aloha-bimanual-dataset-2023",
+    "Zhao et al. (2023), Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware",
+    url="https://arxiv.org/abs/2304.13705",
+    verified="2026-09-18",
+    notes="Fine-grained bimanual teleoperated demonstration dataset for insertion, threading, and slotting.",
+)
+
 DEPLOYMENT_ENVELOPES = _est(
     "prov:mlsysim-deployment-envelopes",
     "MLSysIM deployment envelope defaults for cloud, edge, mobile, and TinyML systems",
     notes="Pedagogical order-of-magnitude envelopes used for first-pass deployment reasoning; not vendor SLA targets.",
 )
 
-SWE_BENCH_HARNESS = _lit(
-    "prov:swe-bench-harness",
-    "Jimenez et al. (2024), SWE-bench: Can Language Models Resolve Real-World GitHub Issues?",
+SWE_BENCH_HARNESS = Provenance(
+    id="prov:swe-bench-harness",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref=(
+        "Illustrative SWE-bench-style coding agent profile; benchmark from "
+        "Jimenez et al. (2024), SWE-bench: Can Language Models Resolve "
+        "Real-World GitHub Issues? (ICLR 2024)"
+    ),
     url="https://arxiv.org/abs/2310.06770",
-    notes="Official benchmark harness running agent code modifications inside hermetic containers/microVMs.",
+    verified="2026-09-15",
+    notes=(
+        "The paper defines the benchmark only. Its full text does not contain "
+        "the 128,000-token context_window, 32,000-token working_memory, 5 ms "
+        "sandbox_startup_latency, Llama 3 70B reference model, or DGX H100 "
+        "serving node; it evaluates models such as gpt-4-32k and Claude 2 at "
+        "their own context limits. These values are MLSysIM teaching "
+        "assumptions."
+    ),
 )
 
 FIRECRACKER_MICROVM = _lit(
@@ -570,18 +793,54 @@ FIRECRACKER_MICROVM = _lit(
     notes="Sub-5 ms CoW fork latency, <5 MB memory overhead per jail, deterministic CPU/memory boundary.",
 )
 
-TEST_TIME_DELIBERATION = _lit(
-    "prov:test-time-deliberation",
-    "Snell et al. (2024), Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters",
+TEST_TIME_DELIBERATION = Provenance(
+    id="prov:test-time-deliberation",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref=(
+        "Illustrative tree-search deliberation agent profile; test-time compute "
+        "scaling from Snell et al. (2024), Scaling LLM Test-Time Compute "
+        "Optimally can be More Effective than Scaling Model Parameters"
+    ),
     url="https://arxiv.org/abs/2408.03314",
-    notes="Deliberation tree search, verifier scoring, Pareto frontier between branch count N and model size.",
+    verified="2026-09-15",
+    notes=(
+        "The paper studies best-of-N, beam search, and lookahead search guided "
+        "by a process reward model, using PaLM 2-S* on the MATH benchmark. Its "
+        "full text does not contain the 64,000-token context_window, "
+        "16,000-token working_memory, 8 deliberation_branches, 0.15 "
+        "verifier_cost_ratio, or an MCTS agent. These values are MLSysIM "
+        "teaching assumptions."
+    ),
 )
 
-MULTI_AGENT_ORCHESTRATION = _lit(
-    "prov:multi-agent-orchestration",
-    "Hong et al. (2023), MetaGPT: Multi-Agent Collaborative Framework; Wu et al. (2023), AutoGen",
+MULTI_AGENT_ORCHESTRATION = Provenance(
+    id="prov:multi-agent-orchestration",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref=(
+        "Illustrative supervisor-worker multi-agent fleet profile; orchestration "
+        "frameworks from Hong et al. (2023), MetaGPT, and Wu et al. (2023), "
+        "AutoGen (arXiv:2308.08155)"
+    ),
     url="https://arxiv.org/abs/2308.00352",
-    notes="Multi-agent orchestrator-worker topology, message passing overhead, coordination token overhead.",
+    verified="2026-09-15",
+    notes=(
+        "Neither paper's full text contains the 0.03 "
+        "coordination_overhead_beta, the 32,000-token context_window, or the "
+        "8,000-token working_memory, and neither defines a linear coordination "
+        "coefficient. These values are MLSysIM teaching assumptions."
+    ),
+)
+
+STREAMING_VOICE_AGENT_PROFILE = Provenance(
+    id="prov:streaming-voice-agent-profile",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref="Illustrative real-time streaming voice agent profile",
+    verified="2026-09-15",
+    notes=(
+        "The 8,000-token context_window, 2,000-token working_memory, and 0 ms "
+        "sandbox_startup_latency are MLSysIM teaching assumptions with no "
+        "published source."
+    ),
 )
 
 MLOPS_DRIFT_THRESHOLDS = _conv(
@@ -767,6 +1026,39 @@ DGX_GPUS_PER_HOST = _conv(
     "prov:dgx-gpus-per-host",
     "NVIDIA DGX H100/H200 node envelope (8 GPUs per host)",
     notes="Used for cluster tier node counts in fleet appendices.",
+)
+
+DGX_H100_SYSTEM_SPEC = _ds(
+    "prov:nvidia-dgx-h100-system-spec",
+    "NVIDIA DGX H100 System Datasheet and Architecture Whitepaper",
+    url="https://resources.nvidia.com/en-us-dgx-systems/dgx-h100-datasheet",
+    notes=(
+        "Official NVIDIA DGX H100 chassis specification: 8x H100 80GB SXM5 GPUs, "
+        "Dual Intel Xeon Platinum 8480C processors (112 cores / 224 threads total), "
+        "2 TB DDR5-4800 RAM across 16 channels, 8x ConnectX-7 400 Gbps InfiniBand OSFP ports, "
+        "30.72 TB internal NVMe U.2 storage in RAID-0."
+    ),
+)
+
+HGX_H100_EPYC_SYSTEM_SPEC = _ds(
+    "prov:supermicro-hgx-h100-epyc-spec",
+    "Supermicro AS-8125GS-TNHR / Dell PowerEdge XE9680 HGX H100 8-GPU Datasheet",
+    url="https://www.supermicro.com/en/products/system/gpu/8u/as-8125gs-tnhr",
+    notes=(
+        "High-density agent evaluation node: 8x H100 80GB SXM5 GPUs, Dual AMD EPYC 9654 "
+        "processors (192 physical Zen 4 cores / 384 threads total), 1.5 TB DDR5-4800 RAM "
+        "across 24 memory channels (460 GB/s sustained read bandwidth), PCIe Gen5 NVMe arrays."
+    ),
+)
+
+APPLE_M3_MAX_WORKSTATION_SPEC = _ds(
+    "prov:apple-m3-max-workstation-spec",
+    "Apple MacBook Pro 16-inch M3 Max Technical Specifications",
+    url="https://www.apple.com/macbook-pro/specs/",
+    notes=(
+        "Apple Silicon unified memory developer baseline: 16-core CPU (12 Performance + 4 Efficiency), "
+        "40-core GPU, 128 GiB unified LPDDR5X at 400 GB/s shared between CPU and GPU."
+    ),
 )
 
 GIBIANSKY_ALLREDUCE = _lit(

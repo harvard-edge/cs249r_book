@@ -23,7 +23,9 @@ rng = np.random.default_rng(7)
 from pathlib import Path
 
 # Add project root
-sys.path.insert(0, os.getcwd())
+repo_root = str(Path(__file__).resolve().parents[2])
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
 
 from rich.console import Console
 from rich.panel import Panel
@@ -184,8 +186,7 @@ def step_2_quantize(model, param_bytes, baseline_acc, X_test, y_test, Quantizer,
     # Measure what INT8 actually costs in accuracy. Quantizer.quantize_model
     # returns the INT8 tensors and their scales but leaves the model untouched,
     # so rebuild a copy from the dequantized weights and run the same test set
-    # through it. Reporting the baseline accuracy here instead, as this script
-    # used to, prints a number that was never measured.
+    # through it to measure the candidate's accuracy.
     quant_model = copy.deepcopy(model)
     quant_params = [prm for lyr in quant_model.layers for prm in lyr.parameters()]
     for idx, prm in enumerate(quant_params):

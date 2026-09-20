@@ -29,10 +29,11 @@ def test_cached_generation_matches_uncached(num_layers):
         cache = enable_kv_cache(model)
     assert all(isinstance(b.attention, CachedAttention) for b in model.blocks)
 
-    for t, token in enumerate(tokens):
-        step = model.forward(Tensor(np.array([[token]])), start_pos=cache.seq_pos).data[0, -1]
-        cache.advance()
-        assert np.allclose(step, full[t], atol=1e-5), f"position {t} differs from the uncached model"
+    with cache.generation():
+        for t, token in enumerate(tokens):
+            step = model.forward(Tensor(np.array([[token]])), start_pos=cache.seq_pos).data[0, -1]
+            cache.advance()
+            assert np.allclose(step, full[t], atol=1e-5), f"position {t} differs from the uncached model"
 
     with contextlib.redirect_stdout(io.StringIO()):
         disable_kv_cache(model)
@@ -52,3 +53,70 @@ def test_generation_at_context_boundary_avoids_unused_final_forward():
     for prompt, count, temperature in [([], 1, 1), ([1], -1, 1), ([1], 1, -1), ([1, 2, 3], 2, 1)]:
         with pytest.raises(ValueError):
             _cached_generate(model, prompt, count, temperature, cache)
+
+
+@pytest.mark.parametrize("mask_rank", [2, 3, 4])
+def test_cached_attention_respects_explicit_prefix_mask(mask_rank):
+    from tinytorch.core.attention import MultiHeadAttention
+    from tinytorch.perf.memoization import KVCache
+
+    attention = MultiHeadAttention(8, 2)
+    inputs = Tensor(np.arange(16).reshape(1, 2, 8) / 10)
+    expected = attention(inputs, Tensor(np.eye(2))).data[:, 1:2]
+    cache = KVCache(1, 4, 1, 2, 4)
+    cached = CachedAttention(attention, cache, 0)
+    mask = np.array([0, 1]).reshape((1,) * (mask_rank - 1) + (2,))
+    with cache.generation():
+        cached(inputs[:, :1])
+        cache.advance()
+        actual = cached(inputs[:, 1:2], Tensor(mask))
+    np.testing.assert_allclose(actual.data, expected, atol=1e-6)
+
+
+@pytest.mark.parametrize("mask", [[[0, 0]], [[1, 0.5]], [[1, np.nan]], [[1, 1, 1]]])
+def test_cached_attention_rejects_invalid_masks(mask):
+    from tinytorch.core.attention import MultiHeadAttention
+    from tinytorch.perf.memoization import KVCache
+
+    cache = KVCache(1, 4, 1, 2, 4)
+    cached = CachedAttention(MultiHeadAttention(8, 2), cache, 0)
+    token = Tensor(np.ones((1, 1, 8)))
+    with cache.generation():
+        cached(token)
+        cache.advance()
+        with pytest.raises(ValueError):
+            cached(token, Tensor(mask))
+
+
+def test_cached_generation_does_not_change_ordinary_forward_or_generate():
+    from tinytorch.perf.memoization import _cached_generate
+
+    model = GPT(vocab_size=12, embed_dim=16, num_layers=2, num_heads=2, max_seq_len=8)
+    token = Tensor([[3]])
+    expected_forward = model(token).data.copy()
+    expected_generation = model.generate(token, 3, temperature=0).data.copy()
+    cache = enable_kv_cache(model)
+    _cached_generate(model, [1, 2], 2, 0, cache)
+    position = cache.seq_pos
+    np.testing.assert_allclose(model(token).data, expected_forward, atol=1e-6)
+    np.testing.assert_array_equal(model.generate(token, 3, temperature=0).data, expected_generation)
+    assert cache.seq_pos == position
+
+
+def test_generation_scope_restores_ordinary_forward_after_exception():
+    from tinytorch.perf.memoization import _cached_generate
+
+    model = GPT(vocab_size=12, embed_dim=16, num_layers=1, num_heads=2, max_seq_len=8)
+    token = Tensor([[3]])
+    expected = model(token).data.copy()
+    cache = enable_kv_cache(model)
+    # First token populates history; the second fails embedding validation.
+    with pytest.raises((ValueError, IndexError)):
+        _cached_generate(model, [1, 99], 1, 0, cache)
+    np.testing.assert_allclose(model(token).data, expected, atol=1e-6)
+    with cache.generation():
+        with pytest.raises(RuntimeError):
+            with cache.generation():
+                raise RuntimeError("interrupted request")
+        assert cache._generation_active
+    assert not cache._generation_active

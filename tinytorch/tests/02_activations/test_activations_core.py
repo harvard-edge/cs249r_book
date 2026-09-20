@@ -29,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tinytorch.core.activations import ReLU, Sigmoid, Tanh, Softmax
+from tinytorch.core.activations import ReLU, Sigmoid, Tanh, Softmax, GELU
 from tinytorch.core.tensor import Tensor
 
 
@@ -457,3 +457,48 @@ def test_sigmoid_stable_for_extreme_finite_inputs(shape):
     assert np.all(np.isfinite(output.data))
     expected = np.array(0) if shape == () else np.array([0, 0.26894142, 0.5, 0.73105858, 1]).reshape(shape)
     np.testing.assert_allclose(output.data, expected, atol=1e-7)
+
+
+class TestGELUActivation:
+    """Test GELU (Gaussian Error Linear Unit) activation."""
+
+    def test_gelu_forward(self):
+        gelu = GELU()
+        x = Tensor(np.array([-1.0, 0.0, 1.0]))
+        output = gelu(x)
+        assert np.isclose(output.data[1], 0.0, atol=1e-5), "GELU(0) should be 0"
+        assert output.data[0] < 0.0, "GELU(-1) should be slightly negative"
+        assert output.data[2] > 0.8, "GELU(1) should be positive (~0.84)"
+
+    def test_gelu_extreme_values(self):
+        gelu = GELU()
+        x = Tensor(np.array([-1000.0, 1000.0, -np.inf]))
+        output = gelu(x)
+        assert np.isclose(output.data[0], 0.0, atol=1e-5), "GELU(-1000) should be 0"
+        assert np.isclose(output.data[1], 1000.0, atol=1e-5), "GELU(1000) should be 1000"
+        assert not np.isnan(output.data[2]), "GELU(-inf) must not evaluate to NaN"
+
+
+
+@pytest.mark.parametrize("dim", [0, 1, -1])
+def test_softmax_masked_slices_preserve_unmasked_distribution(dim):
+    """A fully masked slice stays zero without corrupting neighboring slices."""
+    values = np.array([[-np.inf, -np.inf, -np.inf],
+                       [0.0, -np.inf, np.log(3.0)]], dtype=np.float32)
+    expected = np.array([[0.0, 0.0, 0.0], [0.25, 0.0, 0.75]], dtype=np.float32)
+    if dim == 0:
+        values, expected = values.T, expected.T
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        output = Softmax()(Tensor(values), dim=dim)
+    np.testing.assert_allclose(output.data, expected, atol=1e-7)
+
+
+def test_activations_handle_float32_boundary_values():
+    """Finite representable inputs must not overflow intermediate gate arithmetic."""
+    largest = np.finfo(np.float32).max
+    x = Tensor([-largest, largest])
+    with np.errstate(over="raise", invalid="raise"):
+        gelu = GELU()(x)
+        softmax = Softmax()(x)
+    np.testing.assert_array_equal(gelu.data, [0.0, largest])
+    np.testing.assert_array_equal(softmax.data, [0.0, 1.0])

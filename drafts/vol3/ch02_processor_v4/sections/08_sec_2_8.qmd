@@ -1,0 +1,145 @@
+## Interface Benchmarking {#sec-vol3-processor-interface-design}
+
+Evaluating an agent invocation interface solely by its syntactic parsing throughput or schema adherence creates an architectural illusion. A systems engineer evaluating an agent invocation interface faces a deceptive measurement trap: an interface optimized for rapid, error-free parsing often degrades the model's actual problem-solving capacity on physical silicon. Constraining an unprivileged foundation model $\mathbf{f}_{\mathbf{\Theta}}$ to emit strict JSON schemas via decode-time logit masking guarantees a one hundred percent syntactic parsing rate ($R_{\text{syntax}} = 1.0$), yet empirical benchmarks frequently reveal that this structural straitjacket depresses downstream end-to-end task completion. Conversely, permitting unconstrained free-form natural language generation maximizes the generation budget available for intermediate scratchpad reasoning tokens, but it burdens the host supervisor with brittle regular-expression parsers, nondeterministic structural extraction failures, and runaway output token inflation.
+
+The architectural principle governing interface selection is that invocation contracts cannot be judged by localized syntactic metrics; they must be evaluated by downstream verified task success under invariant compute, latency, and memory budgets. An interface design represents a physical tradeoff among prompt prefill overhead, decode serialization latency, context window consumption, and the unprivileged model's semantic expressive capacity. To compare competing invocation interfaces objectively, the systems designer must hold the underlying model parameters $\mathbf{\Theta}$, the evaluation fixtures, and the resource envelope constant, tracking how syntactic constraints perturb the probability distribution over valid solutions.
+
+### Controlled Systems Benchmarking: The Invariant Resource Envelope
+
+In classic computer architecture, an instruction set extension or memory hierarchy alteration is never evaluated in a vacuum; it is benchmarked across standardized workloads while strictly clamping clock frequencies, silicon area, and thermal design power. In agent systems engineering, where the core compute engine is an unprivileged, non-deterministic foundation model, benchmarking an invocation interface requires establishing an identical invariant envelope. Without fixing the resource envelope, a proposed interface modification—such as replacing unstructured text responses with structured JSON-RPC calls—may appear to yield superior reliability simply because it was inadvertently permitted to consume more context tokens, execute additional speculative decoding passes, or burst past the host's wall-clock latency limits.
+
+A rigorous systems benchmark for agent interfaces enforces three orthogonal invariants across all experimental conditions:
+
+1. *Model and Serving Engine Invariants:* The model parameters $\mathbf{\Theta}$, quantization precision (such as FP8 or BF16), sampling hyper-parameters (temperature $\tau$, top-$p$, and frequency penalties), and inference runtime settings (engine memory pool allocations, batching schedules, and execution thread configurations) must be strictly identical.
+2. *Environment and Fixture Invariants:* The benchmark must execute against frozen repository snapshots, pre-seeded database states, identical external tool endpoint schemas, and deterministic host validation harnesses consisting of sealed unit test suites, compilers, and static analysis linters.
+3. *Physical Budget Envelope:* The total sequence budget $S_{\text{total}} = M + K \le S_{\max}$, the end-to-end latency ceiling $T_{\text{total}} \le T_{\max}$, and the maximum permissible host memory footprint must remain invariant across all candidate interfaces.
+
+::: {.column-margin}
+**Goodhart's Law in Agent Interfaces:**
+When a proxy metric like JSON schema validity ($R_{\text{syntax}}$) becomes the optimization target, the interface designer risks selecting protocols that maximize parsing success at the direct expense of operational correctness ($\text{PASS}$).
+:::
+
+The necessity of clamping the prompt token count $M$ and the generation budget $K$ arises directly from the quadratic and linear scaling laws of the transformer architecture. If Interface Contract A requires an elaborate 1,200-token system prompt containing comprehensive JSON Schema definitions, TypeScript interfaces, and few-shot syntactic demonstrations, while Interface Contract B requires only a 200-token system prompt specifying a compact Search/Replace delimiter format, Interface A introduces an immediate prompt inflation penalty:
+
+$$\Delta M = M_A - M_B = 1{,}000 \text{ tokens}$$
+
+Within an invariant context window of $S_{\max} = 8{,}192$ tokens, Interface A robs the host system of 1,000 tokens of substantive problem context—such as relevant stack traces, file dependencies, or compiler error diagnostics. Furthermore, because prompt prefill time scales with sequence length as $T_{\text{prefill}} \propto M$ (and quadratically in unoptimized attention implementations), Interface A shifts precious milliseconds into the compute-bound prefill phase before the accelerator generates its first candidate token. Clamping the resource envelope forces the systems benchmark to account for this structural overhead, measuring whether the syntactic guarantees of Interface A justify its consumed context capacity.
+
+### Architectural Taxonomies and the Structural Tax
+
+Host agent runtimes interact with foundation models across four primary interface archetypes, each balancing host-side parsing complexity against accelerator-side generation efficiency:
+
+*Free-Form Text with Delimiter Extraction:* The model generates unconstrained natural language interleaved with informal markers (such as standard Markdown triple-backtick blocks or XML tags). The host runtime relies on regular expressions or streaming string scanners to isolate the candidate payload. While this interface introduces virtually zero prompt inflation ($\Delta M \approx 0$) and provides unconstrained capacity for the generation sequence to accumulate intermediate scratchpad tokens prior to emitting concrete actions, it exhibits the lowest structural validity ($R_{\text{syntax}} \ll 1.0$). Delimiter omissions, unescaped target strings, or unexpected conversational filler cause catastrophic extraction failures at the host reference monitor.
+
+*Grammar-Constrained JSON-RPC:* The model's vocabulary distribution is filtered at every decode step $t$ via finite-state automata or context-free grammar logit masks, as formalized in Section 2.6. This guarantees that the emitted candidate sequence $\mathbf{y}$ is strictly parseable by standard deserializers ($R_{\text{syntax}} = 1.0$). However, this structural guarantee imposes a heavy *structural tax*. The model must emit hundreds of structural tokens—syntactic whitespace, structural braces, escaped quotation marks, and redundant key labels—all of which consume accelerator decode cycles ($T_{\text{decode}} \propto K$) bound by the memory bandwidth of the GPU. Furthermore, enforcing rigid JSON schemas often forces generation to emit key-value fields in an unnatural serial order, such as outputting an `action_input` payload before the autoregressive loop has emitted the prerequisite intermediate reasoning tokens.
+
+*Anchored Search/Replace Mutation Blocks:* Specifically optimized for code modification and filesystem mutations, this interface requires the model to output a target file identifier followed by an exact matching block of text and its proposed replacement, delineated by unique sentinel strings. Rather than rewriting an entire 500-line source file to change three lines of logic, the model emits only the localized diff context. This interface drastically compresses the generation budget $K$, converting a memory-bound decode bottleneck into a lightweight, high-throughput transaction. The primary failure mode shifts from syntax parsing errors to *anchor matching faults*, where autoregressive generation emits hallucinated line contents or mismatched subword token boundaries within the search block, preventing the host runtime from locating the replacement target in the authoritative source file.
+
+*Monolithic File Regeneration:* The model emits the complete text of the modified file within a standardized envelope. While completely eliminating anchor matching failures and AST reconstruction ambiguities, this interface maximizes the decode tax. Regenerating thousands of unchanged lines saturates the accelerator memory bus, consumes accelerator context memory, and increases the cumulative probability of an unrecoverable autoregressive sampling error occurring mid-sequence.
+
+Table @tbl-vol3-interface-evaluation summarizes these four interface paradigms across their physical systems dimensions, contrasting their low-level accelerator resource profiles with their host supervisor failure characteristics.
+
+| Interface Paradigm | Structural Validity ($R_{\text{syntax}}$) | Prompt Overhead ($\Delta M$) | Generation Overhead ($\Delta K$) | Primary Accelerator Bottleneck | Primary Failure Mode at Host | Task Completion ($\text{PASS}$) |
+|:---|:---:|:---:|:---:|:---|:---|:---:|
+| **Free-Form Text + Regex** | Low ($0.75 - 0.90$) | Baseline ($0$) | Variable | Decode Memory Bus | Delimiter omission; parsing crash | Low–Moderate |
+| **Grammar-Masked JSON** | Absolute ($1.00$) | High ($+300\text{ to }+800$) | High ($+150\text{ to }+500$) | Decode Memory Bus + Mask CPU sync | Semantic inversion; key-order entrapment | Moderate |
+| **Search/Replace Diff** | High ($0.94 - 0.98$) | Low ($+50\text{ to }+150$) | Minimal ($+20\text{ to }+60$) | Prefill Compute (Large $M$) | Anchor mismatch; stale context collision | High |
+| **Monolithic Rewrite** | High ($0.95 - 0.99$) | Low ($+20\text{ to }+50$) | Extreme ($+1{,}000\text{ to }+10{,}000$) | Decode Memory Bus (High $K$) | Context capacity exhaustion; mid-file divergence | Low |
+: Quantitative evaluation of foundation model invocation interfaces across structural, hardware, and verification dimensions. {#tbl-vol3-interface-evaluation}
+
+The data demonstrates that syntactic perfection does not correlate with end-to-end task success. While grammar-masked JSON eliminates parsing crashes entirely, its structural overhead inflates $K$, consuming both execution time and attention capacity. Conversely, Search/Replace diff blocks incur minor syntax and anchor penalties, but their radical reduction in decode tokens ($\Delta K$) leaves the vast majority of the token budget available for substantive reasoning and context staging.
+
+### The Metric Hierarchy: From Syntactic Compliance to Verified Closure
+
+To establish whether an interface modification represents an authentic systems improvement, performance must be evaluated across an explicit metric hierarchy, progressing from low-level serialization mechanics to high-level system verification, as outlined in Table @tbl-vol3-metric-hierarchy.
+
+| Evaluation Tier | Metric Dimension | Concrete Observable Metrics | Architectural Boundary |
+|:---|:---|:---|:---|
+| **Level 3** | **Verified Task Closure** | $\text{PASS}$ rate across sealed test suites, compiler clean builds | Authoritative system boundary |
+| **Level 2** | **Hardware & Latency Efficiency** | $\text{TTFT}$, decode latency ($T_{\text{decode}}$), context memory footprint | Systems resource cost |
+| **Level 1** | **Syntactic Validity** | Grammar adherence ($R_{\text{syntax}}$), schema parsing success | Superficial proxy metric |
+: The three-tier evaluation hierarchy for agent invocation interfaces. {#tbl-vol3-metric-hierarchy}
+
+*Level 1: Syntactic Validity Rate ($R_{\text{syntax}}$).* This measures the probability that the raw candidate token sequence $\mathbf{y}$ emitted by the model conforms to the interface's structural grammar, allowing the host deserializer to unpack the intended command without throwing a formatting exception:
+
+$$R_{\text{syntax}} = \frac{1}{N} \sum_{i=1}^N \mathbb{I}\Big(\text{parse}(\mathbf{y}_i) \neq \bot\Big)$$
+
+While a necessary precondition for automated execution, $R_{\text{syntax}}$ is an intrinsically superficial metric. A candidate sequence can achieve flawless syntactic validity while transmitting an entirely non-viable operation—such as invoking a non-existent compiler flag or passing syntactically valid but semantically absurd source code to a file writer.
+
+*Level 2: Latency and Hardware Efficiency.* This captures the physical systems cost required to generate the candidate sequence. It is decomposed into Time-to-First-Token ($\text{TTFT}$) and total decoding latency:
+
+$$\text{TTFT} = T_{\text{prep}} + T_{\text{queue}} + T_{\text{prefill}}$$
+
+$$T_{\text{decode}} = \sum_{t=1}^K \left( \frac{\text{Bytes}(\mathbf{W}) + \text{Bytes}(\mathbf{KV}_t)}{\text{BW}_{\text{mem}}} + T_{\text{mask}} \right)$$
+
+where $T_{\text{mask}}$ represents the host-to-accelerator synchronization overhead incurred when evaluating dynamic grammar constraints at step $t$. An interface that inflates $K$ by requiring structural boilerplate directly multiplies the memory bus read penalty across every generated token.
+
+*Level 3: Verified Task Completion Rate ($\text{PASS}$).* In accordance with the End-to-End Argument (Saltzer, Reed, & Clark, 1984), the ultimate correctness of a system operation cannot be certified by intermediate components or syntactic validators; it can only be certified by the terminal application boundary. In agent systems, this boundary is enforced by the host supervisor executing deterministic verification gates:
+
+$$\text{PASS} = \frac{1}{N} \sum_{i=1}^N \mathbb{I}\Big(\text{verify}\big(\text{exec}(\mathbf{x}, \text{parse}(\mathbf{y}_i))\big) = \text{PASS}\Big)$$
+
+Here, $\text{exec}$ executes the parsed payload inside an isolated workspace, and $\text{verify}$ subjects the resulting environment state to sealed regression tests, static linters, and runtime integration checks. A candidate sequence that fails $R_{\text{syntax}}$ immediately scores zero, but a sequence that achieves $R_{\text{syntax}} = 1.0$ yet fails compilation or breaks invariant test suites similarly scores zero. 
+
+Optimizing an interface exclusively for Level 1 or Level 2 metrics while neglecting Level 3 represents a fundamental architectural error. The following worked example illustrates how an interface engineered for structural simplicity can paralyze an accelerator cluster while lowering verified task closure.
+
+::: {.callout-note title="Quantitative Interface Evaluation under an Invariant Budget"}
+**Problem Statement:**  
+An agent engineering team is deploying an unprivileged 70-billion-parameter foundation model on an NVIDIA H100 SXM5 accelerator node to resolve code defects in an enterprise repository. The physical hardware parameters and model serving characteristics are:
+- Model Parameters: $P = 70 \times 10^9$ weights in FP8 format ($\text{Bytes}(\mathbf{W}) = 70 \times 10^9 \text{ bytes}$).
+- Memory Bandwidth: $\text{BW}_{\text{mem}} = 3.35 \times 10^{12} \text{ bytes/sec}$ ($3.35 \text{ TB/s}$).
+- Compute Throughput: $R_{\text{peak}} = 989 \times 10^{12} \text{ FLOPS}$ (BF16 Tensor Core, non-sparse).
+- Invariant Workload Context: Baseline prompt $M_{\text{base}} = 8{,}192 \text{ tokens}$.
+- Invariant Latency Ceiling: $T_{\max} = 15.0 \text{ seconds}$. Unbatched serving ($b=1$). Neglect $T_{\text{queue}}$ and $T_{\text{prep}}$.
+
+The team evaluates two competing interface designs to implement a 5-line bug fix inside a 400-line source file:
+- **Interface 1 (Monolithic JSON Rewrite):** The prompt requires the model to output the entire modified file inside a strict JSON envelope: `{"path": "...", "content": "..."}`.
+  - Prompt Overhead: $\Delta M_1 = 350 \text{ tokens}$ (JSON schema + few-shot instructions).
+  - Generation Volume: $K_1 = 1{,}850 \text{ tokens}$ (JSON syntax, escaping, full file content).
+  - Parsing Reliability: $R_{\text{syntax}} = 0.99$.
+- **Interface 2 (Anchored Search/Replace Diff):** The prompt requires the model to output localized diff markers: `<<<<<<< SEARCH ... ======= ... >>>>>>>`.
+  - Prompt Overhead: $\Delta M_2 = 120 \text{ tokens}$ (diff syntax definition).
+  - Generation Volume: $K_2 = 80 \text{ tokens}$ (search context lines, replacement lines, delimiters).
+  - Parsing Reliability: $R_{\text{syntax}} = 0.95$ (occasional anchor mismatch).
+
+Calculate the total execution time ($T_{\text{total}} = T_{\text{prefill}} + T_{\text{decode}}$) for both interfaces, evaluate compliance with the latency ceiling $T_{\max}$, and analyze their verified task throughput under equal accelerator provisioning.
+
+---
+
+**Solution:**
+
+*Step 1: Compute Prefill Latency ($T_{\text{prefill}}$).*  
+Recall that prefill is compute-bound, executing $2P$ floating-point operations per prompt token:
+$$\text{FLOPs} = 2 \times P \times M$$
+
+For Interface 1:
+$$M_1 = M_{\text{base}} + \Delta M_1 = 8{,}192 + 350 = 8{,}542 \text{ tokens}$$
+$$T_{\text{prefill}, 1} = \frac{2 \times (70 \times 10^9) \times 8{,}542}{989 \times 10^{12}} = \frac{1.196 \times 10^{15}}{9.89 \times 10^{14}} \approx 1.21 \text{ seconds}$$
+
+For Interface 2:
+$$M_2 = M_{\text{base}} + \Delta M_2 = 8{,}192 + 120 = 8{,}312 \text{ tokens}$$
+$$T_{\text{prefill}, 2} = \frac{2 \times (70 \times 10^9) \times 8{,}312}{989 \times 10^{12}} = \frac{1.164 \times 10^{15}}{9.89 \times 10^{14}} \approx 1.18 \text{ seconds}$$
+
+*Step 2: Compute Decode Latency ($T_{\text{decode}}$).*  
+At batch size $b=1$, the autoregressive decode phase is strictly memory-bandwidth bound. Each generated token requires reading the entire $70 \text{ GB}$ model parameter weight tensor from HBM3 memory across the bus:
+$$t_{\text{token}} = \frac{\text{Bytes}(\mathbf{W})}{\text{BW}_{\text{mem}}} = \frac{70 \times 10^9 \text{ bytes}}{3.35 \times 10^{12} \text{ bytes/sec}} \approx 0.0209 \text{ seconds/token} = 20.9 \text{ ms/token}$$
+
+For Interface 1 ($K_1 = 1{,}850 \text{ tokens}$):
+$$T_{\text{decode}, 1} = K_1 \times t_{\text{token}} = 1{,}850 \times 0.0209 \approx 38.67 \text{ seconds}$$
+$$T_{\text{total}, 1} = T_{\text{prefill}, 1} + T_{\text{decode}, 1} = 1.21 + 38.67 = 39.88 \text{ seconds}$$
+
+For Interface 2 ($K_2 = 80 \text{ tokens}$):
+$$T_{\text{decode}, 2} = K_2 \times t_{\text{token}} = 80 \times 0.0209 \approx 1.67 \text{ seconds}$$
+$$T_{\text{total}, 2} = T_{\text{prefill}, 2} + T_{\text{decode}, 2} = 1.18 + 1.67 = 2.85 \text{ seconds}$$
+
+*Step 3: Systems Evaluation against $T_{\max} = 15.0 \text{ seconds}$.*  
+Interface 1 yields $T_{\text{total}, 1} = 39.88 \text{ s}$, exceeding the latency ceiling by $166\%$. The host runtime flags the invocation status envelope as `TRANSPORT_FAILURE` due to deadline expiry and aborts the RPC connection, resulting in an effective task completion rate of $\text{PASS}_1 = 0.0$ under the SLA, despite its high parsing reliability ($R_{\text{syntax}} = 0.99$).
+
+Interface 2 completes in $T_{\text{total}, 2} = 2.85 \text{ s}$, well beneath the $15.0 \text{ s}$ ceiling, returning a status envelope of `COMPLETED`. Even accounting for its $5\%$ anchor parsing failure rate ($R_{\text{syntax}} = 0.95$), the remaining $95\%$ of candidates are delivered to the verification harness. If the model's semantic bug-fixing accuracy on valid diffs is $60\%$, Interface 2 achieves an end-to-end verified closure rate:
+$$\text{PASS}_2 = 0.95 \times 0.60 = 0.57 \quad (57\%)$$
+
+By reducing decode tokens by $95.7\%$, Interface 2 eliminates memory bus saturation, achieves a $14\times$ latency reduction, and converts a non-viable operational interface into a high-performing systems contract.
+:::
+
+The empirical measurement of invocation interfaces exposes the fundamental operational boundary of the foundation model engine. A single invocation produces one unprivileged, stochastic candidate sequence. When that candidate is ambiguous, syntactically corrupted, or logically incorrect, the host system cannot escape the failure through superficial prompt adjustments or tighter grammar constraints. Interface optimization can minimize token tax and memory bandwidth saturation, but it cannot bridge the epistemic gap inherent in static autoregressive prediction.
+
+Before examining how systems scale inference-time compute across search trees, verification loops, and external environments to overcome these single-invocation boundaries, we must first confront the deep architectural misconceptions that routinely derail production deployments. The following analysis dismantles the persistent fallacies and traps that arise when software engineers mistake unprivileged statistical predictors for deterministic, privileged operating system kernels.

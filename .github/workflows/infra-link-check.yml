@@ -126,6 +126,25 @@ jobs:
             echo "::warning::Ignore file '$IGNORE' not found; running without --exclude-file."
           fi
 
+      # 2026-09-15: the lychee action runs `eval lychee ... ${ARGS}` under bash
+      # without globstar, so an unquoted `./books/**/*.qmd` was expanded by the
+      # shell to `./books/*/*.qmd`, one directory deep. The book sweep checked 6
+      # of 155 files, and MLSys·im matched only link-free api/ pages, so lychee
+      # found zero links and failIfEmpty surfaced as a "?" count. Expand braces
+      # here (lychee's own glob does not support {a,b}), with pathname expansion
+      # off, then single-quote each glob so lychee receives it and recurses.
+      - name: 🧩 Resolve path patterns
+        id: resolve-patterns
+        env:
+          PATH_PATTERN: ${{ inputs.path_pattern }}
+        run: |
+          set -f
+          eval "patterns=( $PATH_PATTERN )"
+          globs=""
+          for p in "${patterns[@]}"; do globs+="'$p' "; done
+          echo "globs=$globs" >> "$GITHUB_OUTPUT"
+          echo "Lychee inputs: $globs"
+
       - name: 🔗 Check Links
         id: lychee
         uses: lycheeverse/lychee-action@v2.8.0
@@ -133,7 +152,7 @@ jobs:
           # NB: --exclude-mail was removed in lychee v0.21; mailto: links are
           # now skipped by default and you must opt in with --include-mail.
           # Default (skip) is what we want for link rot.
-          args: --verbose --no-progress --max-concurrency ${{ inputs.max_concurrency }} --accept ${{ inputs.accept_status }} ${{ steps.resolve-ignore.outputs.ignore_arg }} ${{ inputs.path_pattern }}
+          args: --verbose --no-progress --max-concurrency ${{ inputs.max_concurrency }} --accept ${{ inputs.accept_status }} ${{ steps.resolve-ignore.outputs.ignore_arg }} ${{ steps.resolve-patterns.outputs.globs }}
           # Force the action's exit code to reflect link health. We then
           # absorb the failure with `continue-on-error: true` below so the
           # summary step can run and decide what to do with it.

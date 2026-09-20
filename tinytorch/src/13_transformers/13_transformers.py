@@ -13,74 +13,63 @@
 # ---
 
 # %% [markdown]
-"""
+r"""
 # Module 13: Transformers - Complete Transformer Architecture
 
-Welcome to Module 13! You're about to build the complete transformer architecture that powers modern language models like GPT, Claude, and ChatGPT.
+Welcome to Module 13! You're about to synthesize everything you've built across TinyTorch into the complete Pre-LayerNorm Transformer architecture that powers modern autoregressive language models (GPT, Claude, Llama, and Mistral).
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Tokenization, embeddings, attention mechanisms, and all foundational components
-**You'll Build**: TransformerBlock, complete GPT architecture, and autoregressive generation
-**You'll Enable**: Full language model training and text generation capabilities
+**You've Built**: Autograd engine (`Tensor`), non-linear activations (`GELU`), feed-forward primitives (`Linear`), subword tokenization (`BPETokenizer`), positional embeddings (`EmbeddingLayer`), and multi-head attention (`MultiHeadAttention`).
+**You'll Build**: Numerically stable layer normalization (`LayerNorm`), 4× expansion feed-forward networks (`MLP`), complete residual blocks (`TransformerBlock`), and full autoregressive generative models (`GPT`).
+**You'll Enable**: Profiling and roofline optimization (`14_profiling`), post-training quantization (`15_quantization`), and key-value memory caching (`18_memoization`).
 
-**Connection Map**:
-```
-Tokenization + Embeddings + Attention → Transformers → Language Generation
-(text→numbers)  (learnable vectors) (sequence modeling)  (complete models)
-```
+<div align="center">
+  <img src="transformer_blueprint.svg" alt="TinyTorch Architecture Blueprint: Module 13 Transformers" width="380px">
+</div>
+
+### Architectural Roadmap
+
+| Stage | Subsystem | Primitives & Capabilities | Status |
+|:---|:---|:---|:---|
+| **Modules 01–08** | Foundation & Training | `Tensor`, `Function`, `Linear`, `GELU`, `SGD`, `Adam`, `Trainer` | Completed |
+| **Modules 09–12** | Representations & Attention | `Conv2d`, `BPETokenizer`, `EmbeddingLayer`, `MultiHeadAttention` | Completed |
+| **Module 13** | **Transformer Stack & GPT** | `LayerNorm`, `MLP`, `TransformerBlock`, `GPT` | **Active Subsystem** |
+| **Modules 14–20** | Systems & Acceleration | `Profiler`, `INT8Linear`, `KVCache`, `TinyGPT` | Downstream Consumers |
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
-1. Implement complete TransformerBlock with attention, MLP, and layer normalization
-2. Build full GPT architecture with multiple transformer blocks
-3. Add autoregressive text generation capability
-4. Understand parameter scaling in large language models
-5. Test transformer components and generation pipeline
+1. **Implement Numerically Stable Layer Normalization**: Standardize per-token feature vectors with a two-pass mean-then-variance computation and learnable affine restoration parameters ($\gamma, \beta$).
+2. **Construct Two-Layer MLP Expansion Blocks**: Build a $d_{\text{embed}} \to 4d_{\text{embed}} \to d_{\text{embed}}$ feed-forward channel projection with smooth GELU gating.
+3. **Assemble the Pre-LN Transformer Block**: Route clean residual highway streams through attention and MLP off-ramps to preserve unobstructed gradient backpropagation.
+4. **Build Full Autoregressive GPT Models**: Stack $N$ transformer blocks with learned positional embeddings and causal autoregressive masking.
+5. **Analyze LLM Parameter Scaling & Memory Footprints**: Calculate exact parameter allocations across attention and FFN layers and derive the quadratic memory scaling law.
 
-Let's get started!
+---
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/13_transformers/transformers.ipynb`
-**Building Side:** Code exports to `tinytorch.core.transformers`
+| Artifact | Path / Location | Export Target | Primary Symbols |
+|:---|:---|:---|:---|
+| **Notebook** | `modules/13_transformers/transformers.ipynb` | Interactive Learning | Exploratory code, assertions, benchmarks |
+| **Core Source** | `src/13_transformers/13_transformers.py` | `tinytorch.core.transformers` | `LayerNorm`, `MLP`, `TransformerBlock`, `GPT`, `create_causal_mask` |
 
 ```python
 # How to use this module:
-from tinytorch.core.transformers import LayerNorm, MLP, TransformerBlock, GPT
+from tinytorch.core.transformers import LayerNorm, MLP, TransformerBlock, GPT, create_causal_mask
 ```
 
-**Why this matters:**
-- **Learning:** Complete transformer architecture in one focused module for deep understanding
-- **Production:** Proper organization like PyTorch's torch.nn with transformer components
-- **Consistency:** All transformer building blocks (LayerNorm, MLP, TransformerBlock, GPT) in core.transformers
-- **Integration:** Works seamlessly with attention, embeddings, and tokenization for complete language models
-"""
+---
 
-# %% [markdown]
-"""
 ## 📋 Module Dependencies
 
-**Prerequisites**: Modules 01-12 must be complete
-
-**External Dependencies**:
-- `numpy` (for array operations and numerical computing)
-
-**TinyTorch Dependencies**:
-- `tinytorch.core.tensor` (Module 01: Tensor foundation)
-- `tinytorch.core.activations` (Module 02: GELU activation)
-- `tinytorch.core.layers` (Module 03: Linear layers)
-- `tinytorch.core.embeddings` (Module 11: Embedding layers)
-- `tinytorch.core.attention` (Module 12: MultiHeadAttention)
-
-**Dependency Flow**:
-```
-Tensor → Activations → Layers → Attention → Embeddings → Transformers
-  ↓         ↓           ↓         ↓            ↓            ↓
- data    GELU act    Linear    MultiHead    Token+Pos   Complete GPT
-```
-
-Students completing this module will have built the complete
-transformer architecture that powers modern language models.
+| Dependency | Origin | Functionality Utilized | Role in Module 13 |
+|:---|:---|:---|:---|
+| `tinytorch.core.tensor` | Module 01 | Multi-dimensional arrays & autograd | Base data structure and computation graphs |
+| `tinytorch.core.activations`| Module 02 | `GELU` activation function | Non-linear gating inside the MLP expansion layer |
+| `tinytorch.core.layers` | Module 03 | `Linear` projection layers | Projection weights for MLP and output LM head |
+| `tinytorch.core.embeddings`| Module 11 | `EmbeddingLayer` | Converts token IDs to dense representation vectors |
+| `tinytorch.core.attention` | Module 12 | `MultiHeadAttention` | Subspace relational routing across sequence positions |
+| `numpy` | External | High-performance array operations | Random number generation, moment reductions, and masking |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
@@ -88,6 +77,8 @@ transformer architecture that powers modern language models.
 #| export
 
 import numpy as np
+from typing import List, Optional, Tuple
+
 rng = np.random.default_rng(7)
 
 # Import from previous modules - following the dependency chain
@@ -99,217 +90,132 @@ from tinytorch.core.attention import MultiHeadAttention
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
+MB_TO_BYTES = 1024 * 1024  # Binary megabyte (mebibyte) in bytes, so printed values read MiB
 
 # %% [markdown]
-"""
+r"""
 ## 💡 Introduction: What are Transformers?
 
-Transformers are the revolutionary architecture that powers modern AI language models like GPT, ChatGPT, and Claude. The key breakthrough is **self-attention**, which allows every token in a sequence to directly interact with every other token, creating rich contextual understanding.
+Transformers are the architecture behind modern large language models (GPT-4, Claude, Llama, and Gemini). The core breakthrough is the synthesis of **parallel self-attention** (allowing every token in a sequence to dynamically attend to every other token) with **deep residual stream communication** and **dense feed-forward computation**.
 
-### The Transformer Revolution
+### The Transformer Paradigm Shift
 
-Before transformers, language models used RNNs or CNNs that processed text sequentially or locally. Transformers changed everything by processing all positions in parallel while maintaining global context.
+Before transformers, sequence modeling relied on recurrent neural networks (RNNs, LSTMs) that processed text sequentially ($\mathcal{O}(S)$ sequential steps), creating severe training bottlenecks and vanishing gradient problems across long distances. Transformers eliminate temporal recurrence, processing all $S$ tokens simultaneously via matrix multiplications ($\mathcal{O}(1)$ sequential depth per layer).
 
 ### Complete GPT Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  COMPLETE GPT ARCHITECTURE: From Text to Generation             │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  INPUT: "Hello world"  →  Token IDs: [15496, 1917]              │
-│                                ↓                                │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │                EMBEDDING LAYER                            │  │
-│  │                                                           │  │
-│  │  ┌─────────────┐       ┌─────────────────────────────┐    │  │
-│  │  │Token Embed  │   +   │ Positional Embedding        │    │  │
-│  │  │15496→[0.1,  │       │ pos_0→[0.05, -0.02, ...]    │    │  │
-│  │  │     0.3,..] │       │ pos_1→[0.12,  0.08, ...]    │    │  │
-│  │  │1917→[0.2,   │       │                             │    │  │
-│  │  │    -0.1,..] │       │                             │    │  │
-│  │  └─────────────┘       └─────────────────────────────┘    │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                                ↓                                │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │              TRANSFORMER BLOCK 1                          │  │
-│  │                                                           │  │
-│  │  x → LayerNorm → MultiHeadAttention → + x → result        │  │
-│  │  │                                      ↑                 │  │
-│  │  │              residual connection     │                 │  │
-│  │  └──────────────────────────────────────┘                 │  │
-│  │  │                                                        │  │
-│  │  result → LayerNorm → MLP (Feed Forward) → + result       │  │
-│  │  │                                           ↑            │  │
-│  │  │                residual connection        │            │  │
-│  │  └───────────────────────────────────────────┘            │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                                ↓                                │
-│              TRANSFORMER BLOCK 2 (same pattern)                 │
-│                                ↓                                │
-│                      ... (more blocks) ...                      │
-│                                ↓                                │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │                   OUTPUT HEAD                             │  │
-│  │                                                           │  │
-│  │  final_hidden → LayerNorm → Linear(embed_dim, vocab_size) │  │
-│  │                              ↓                            │  │
-│  │               Vocabulary Logits: [0.1, 0.05, 0.8, ...]    │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                                ↓                                │
-│  OUTPUT: Next Token Probabilities                               │
-│  "Hello" → 10%,  "world" → 5%,  "!" → 80%,  ...                 │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+<div align="center">
+  <img src="transformer_block_gpt_pipeline.svg" alt="Pre-LN Transformer Block and Complete GPT Forward Pipeline" width="700px">
+</div>
 
-### Why Transformers Dominate
+#### End-to-End GPT Execution Pipeline
 
-**Parallel Processing**: Unlike RNNs that process tokens one by one, transformers process all positions simultaneously. This makes training much faster.
+| Pipeline Stage | Subsystem / Layer | Input Shape | Internal Transformation | Output Shape | Systems & Modeling Role |
+|:---|:---|:---:|:---|:---:|:---|
+| **1. Embedding** | `EmbeddingLayer` | $(B, S)$ | Token index gather + learned positional vector addition | $(B, S, d_{\text{embed}})$ | Converts discrete vocabulary IDs to continuous space |
+| **2. Pre-LN Attention** | `LayerNorm` + `MHA` | $(B, S, d_{\text{embed}})$ | Normalize features $\to$ Causal attention $\to$ Add residual | $(B, S, d_{\text{embed}})$ | Routes context dynamically across sequence positions |
+| **3. Pre-LN FFN** | `LayerNorm` + `MLP` | $(B, S, d_{\text{embed}})$ | Normalize features $\to 4\times$ GELU expansion $\to$ Add residual | $(B, S, d_{\text{embed}})$ | Pointwise non-linear feature transformation & memory |
+| **4. Final Norm** | `LayerNorm` | $(B, S, d_{\text{embed}})$ | Feature standardization across last dimension | $(B, S, d_{\text{embed}})$ | Stabilizes activations prior to un-embedding projection |
+| **5. LM Head** | `Linear` (un-embedding) | $(B, S, d_{\text{embed}})$ | Matrix multiplication $x W_{\text{vocab}}^\top$ | $(B, S, V)$ | Produces unnormalized next-token vocabulary logits |
 
-**Global Context**: Every token can directly attend to every other token in the sequence, capturing long-range dependencies that RNNs struggle with.
+---
 
-**Scalability**: Performance predictably improves with more parameters and data. This enabled the scaling laws that led to GPT-3, GPT-4, and beyond.
-
-**Residual Connections**: Allow training very deep networks (100+ layers) by providing gradient highways.
-
-### The Building Blocks We'll Implement
-
-1. **LayerNorm**: Stabilizes training by normalizing activations
-2. **Multi-Layer Perceptron (MLP)**: Provides non-linear transformation
-3. **TransformerBlock**: Combines attention + MLP with residuals
-4. **GPT**: Complete model with embeddings and generation capability
-"""
-
-# %% [markdown]
-"""
 ## 📐 Foundations: Essential Transformer Mathematics
 
-### Layer Normalization: The Stability Engine
+### Layer Normalization: The Numerical Stability Engine
 
-Layer Normalization is crucial for training deep transformer networks. Unlike batch normalization (which normalizes across the batch), layer norm normalizes across the feature dimension for each individual sample.
+Deep networks become badly conditioned when activation magnitudes drift across layers, because the loss surface then stretches along some directions and flattens along others, and a single learning rate cannot suit both. (The original account of this, internal covariate shift, was empirically refuted as the mechanism by Santurkar et al., 2018.) In vision architectures, Batch Normalization standardizes activations across the batch dimension. However, language models process sequences of highly variable lengths, and single-token autoregressive inference operates at batch size $B=1$.
 
-```
-Mathematical Formula:
-output = (x - μ) / σ * γ + β
+**Layer Normalization** (Ba, Kiros, & Hinton, 2016) resolves this by computing moments strictly across the **feature dimension** ($d_{\text{embed}}$) for each token position independently:
 
-where:
-  μ = mean(x, axis=features)     # Mean across feature dimension
-  σ = sqrt(var(x) + ε)          # Standard deviation + small epsilon
-  γ = learnable scale parameter  # Initialized to 1.0
-  β = learnable shift parameter  # Initialized to 0.0
-```
+#### Mathematical Formulation
 
-**Why Layer Norm Works:**
-- **Independence**: Each sample normalized independently (good for variable batch sizes)
-- **Stability**: Prevents internal covariate shift that breaks training
-- **Gradient Flow**: Helps gradients flow better through deep networks
+For token vector $x \in \mathbb{R}^{d_{\text{embed}}}$:
 
-### Residual Connections: The Gradient Highway
+$$\mu = \frac{1}{d_{\text{embed}}} \sum_{i=1}^{d_{\text{embed}}} x_i, \qquad \sigma^2 = \frac{1}{d_{\text{embed}}} \sum_{i=1}^{d_{\text{embed}}} (x_i - \mu)^2$$
 
-Residual connections are the secret to training deep networks. They create "gradient highways" that allow information to flow directly through the network.
+$$\hat{x} = \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}}$$
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  RESIDUAL CONNECTIONS: The Gradient Highway System              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  PRE-NORM ARCHITECTURE (Modern Standard):                       │
-│                                                                 │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │                ATTENTION SUB-LAYER                        │  │
-│  │                                                           │  │
-│  │  Input (x) ────┬─→ LayerNorm ─→ MultiHeadAttention ─┐     │  │
-│  │                │                                    │     │  │
-│  │                │         ┌──────────────────────────┘     │  │
-│  │                │         ▼                                │  │
-│  │                └────→ ADD ─→ Output to next sub-layer     │  │
-│  │                      (x + attention_output)               │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                                ↓                                │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │                   MLP SUB-LAYER                           │  │
-│  │                                                           │  │
-│  │  Input (x) ────┬─→ LayerNorm ─→ MLP (Feed Forward)  ─┐    │  │
-│  │                │                                     │    │  │
-│  │                │         ┌───────────────────────────┘    │  │
-│  │                │         ▼                                │  │
-│  │                └────→ ADD ─→ Final Output                 │  │
-│  │                      (x + mlp_output)                     │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│  KEY INSIGHT: Each sub-layer ADDS to the residual stream        │
-│  rather than replacing it, preserving information flow!         │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+$$y = \gamma \odot \hat{x} + \beta$$
 
-**Gradient Flow Visualization:**
-```
-Backward Pass Without Residuals:    With Residuals:
-Loss                                Loss
- │ gradients get smaller             │ gradients stay strong
- ↓ at each layer                    ↓ via residual paths
-Layer N  ← tiny gradients          Layer N  ← strong gradients
- │                                  │     ↗ (direct path)
- ↓                                  ↓   ↗
-Layer 2  ← vanishing                Layer 2  ← strong gradients
- │                                  │     ↗
- ↓                                  ↓   ↗
-Layer 1  ← gone!                   Layer 1  ← strong gradients
-```
+where $\gamma, \beta \in \mathbb{R}^{d_{\text{embed}}}$ are learnable scale and shift parameters initialized to $\mathbf{1}$ and $\mathbf{0}$.
 
-### Feed-Forward Network (MLP): The Thinking Layer
+| Normalization Paradigm | Normalization Axis | Batch Size Dependence | Sequence Length Dependence | Inference Suitability |
+|:---|:---|:---:|:---:|:---|
+| **Batch Normalization (BatchNorm)** | Across batch $(B)$ | High (fails if $B=1$) | Requires fixed padding | Requires tracked running statistics ($\mu_{\text{run}}, \sigma^2_{\text{run}}$) |
+| **Layer Normalization (LayerNorm)** | Across features $(d_{\text{embed}})$ | **None** ($B=1$ valid) | **None** (per-token) | **Identical to training** (exact sample statistics) |
 
-The MLP provides the actual "thinking" in each transformer block. It's a simple two-layer network with a specific expansion pattern.
+---
 
-```
-MLP Architecture:
-Input (embed_dim) → Linear → GELU → Linear → Output (embed_dim)
-       512           2048      2048    512
-                   (4x expansion)
+### Residual Connections: The Gradient Highway System
 
-Mathematical Formula:
-FFN(x) = Linear₂(GELU(Linear₁(x)))
-       = W₂ · GELU(W₁ · x + b₁) + b₂
+Deep networks without skip connections suffer from catastrophic gradient decay. Backpropagating through $L$ consecutive layers multiplies Jacobian matrices $\prod_{l=0}^{L-1} W_l$, driving gradients exponentially to zero ($\to 0$) or infinity ($\to \infty$).
 
-where:
-  W₁: (embed_dim, 4*embed_dim)  # Expansion matrix
-  W₂: (4*embed_dim, embed_dim)  # Contraction matrix
-  GELU: smooth activation function (better than ReLU for language)
-```
+<div align="center">
+  <img src="residual_stream_bus.svg" alt="Residual Highway State Bus and Gradient Flow" width="700px">
+</div>
 
-**Why 4x Expansion?**
-- **Capacity**: More parameters = more representation power
-- **Non-linearity**: GELU activation creates complex transformations
-- **Information Bottleneck**: Forces the model to compress useful information
+#### The Pre-LN Residual Highway Invariant
 
-### The Complete Transformer Block Data Flow
+In modern Pre-LN transformer blocks, each sublayer reads from the continuous residual stream, computes an update delta, and adds it back to the stream:
 
-```
-Input Tensor (batch, seq_len, embed_dim)
-          ↓
-    ┌─────────────────────────────────────┐
-    │ ATTENTION SUB-LAYER                 │
-    │                                     │
-    │ x₁ = LayerNorm(x₀)                  │
-    │ attention_out = MultiHeadAttn(x₁)   │
-    │ x₂ = x₀ + attention_out  (residual) │
-    └─────────────────────────────────────┘
-          ↓
-    ┌─────────────────────────────────────┐
-    │ MLP SUB-LAYER                       │
-    │                                     │
-    │ x₃ = LayerNorm(x₂)                  │
-    │ mlp_out = MLP(x₃)                   │
-    │ x₄ = x₂ + mlp_out    (residual)     │
-    └─────────────────────────────────────┘
-          ↓
-Output Tensor (batch, seq_len, embed_dim)
-```
+$$x_{l+1} = x_l + F_l(\text{LayerNorm}(x_l))$$
 
-**Key Insight**: Each sub-layer (attention and MLP) gets a "clean" normalized input but adds its contribution to the residual stream. This creates a stable training dynamic.
+Unrolling this recurrence across all $L$ layers yields:
+
+$$x_L = x_0 + \sum_{l=0}^{L-1} F_l(\text{LayerNorm}(x_l))$$
+
+When differentiating with respect to early representation $x_0$, the chain rule produces:
+
+$$\frac{\partial \mathcal{L}}{\partial x_0} = \frac{\partial \mathcal{L}}{\partial x_L} \frac{\partial x_L}{\partial x_0} = \frac{\partial \mathcal{L}}{\partial x_L} \left( I + \sum_{l=0}^{L-1} \frac{\partial F_l}{\partial x_l} \right)$$
+
+<div align="center">
+  <img src="transformer_pre_ln_highway.svg" alt="Pre-LN Clean Skip Connection" width="300px">
+</div>
+
+Because of the identity matrix $I$, the error signal propagates directly from the loss function $\mathcal{L}$ back to initial embeddings $x_0$ **without vanishing**, allowing architectures dozens of layers deep (GPT-3 175B stacks 96) to converge reliably.
+
+---
+
+### Feed-Forward Network (MLP): Channel Expansion & Memory Retrieval
+
+While self-attention routes information across different sequence positions, the Feed-Forward Network (MLP) operates on each token position independently. It provides non-linear representation capacity and acts as key-value associative memory (Geva et al., 2021).
+
+<div align="center">
+  <img src="mlp_expansion_funnel.svg" alt="Feed-Forward Network (MLP) Two-Stage Expansion Funnel" width="680px">
+</div>
+
+#### Two-Stage Expansion Architecture
+
+$$\text{FFN}(x) = \text{GELU}(x W_1 + b_1) W_2 + b_2$$
+
+where $W_1 \in \mathbb{R}^{d_{\text{embed}} \times 4d_{\text{embed}}}$ expands representations into a higher-dimensional manifold, and $W_2 \in \mathbb{R}^{4d_{\text{embed}} \times d_{\text{embed}}}$ contracts them back to the residual bus dimension:
+
+| Sub-Operation | Tensor Input | Parameter Dimension | Tensor Output | Mathematical Operation |
+|:---|:---:|:---:|:---:|:---|
+| **Up-Projection (Linear 1)** | $(B, S, d_{\text{embed}})$ | $W_1 \in \mathbb{R}^{d \times 4d}, b_1 \in \mathbb{R}^{4d}$ | $(B, S, 4d_{\text{embed}})$ | $h_1 = x W_1 + b_1$ |
+| **GELU Non-Linearity** | $(B, S, 4d_{\text{embed}})$ | None (parameterless) | $(B, S, 4d_{\text{embed}})$ | $a = x \cdot \Phi(x)$ |
+| **Down-Projection (Linear 2)** | $(B, S, 4d_{\text{embed}})$ | $W_2 \in \mathbb{R}^{4d \times d}, b_2 \in \mathbb{R}^{d}$ | $(B, S, d_{\text{embed}})$ | $y = a W_2 + b_2$ |
+
+---
+
+### The Complete Pre-LN Transformer Block Data Flow
+
+Combining Pre-LN attention and Pre-LN MLP yields the canonical Transformer Block datapath:
+
+$$\begin{aligned}
+x_1 &= \text{LayerNorm}_1(x_0) \\
+x_2 &= x_0 + \text{MultiHeadAttention}(x_1, \text{mask}) \\
+x_3 &= \text{LayerNorm}_2(x_2) \\
+x_4 &= x_2 + \text{MLP}(x_3)
+\end{aligned}$$
+
+| Step | Operation | Source Input | Sublayer Applied | Residual Addition | Output State |
+|:---:|:---|:---:|:---|:---:|:---:|
+| **1** | Attention Pre-LN | $x_0$ | $x_1 = \text{LayerNorm}_1(x_0)$ | — | $x_1$ |
+| **2** | Attention Skip | $x_0, x_1$ | $\Delta_{\text{attn}} = \text{MHA}(x_1, \text{mask})$ | $x_2 = x_0 + \Delta_{\text{attn}}$ | $x_2$ |
+| **3** | MLP Pre-LN | $x_2$ | $x_3 = \text{LayerNorm}_2(x_2)$ | — | $x_3$ |
+| **4** | MLP Skip | $x_2, x_3$ | $\Delta_{\text{mlp}} = \text{MLP}(x_3)$ | $x_4 = x_2 + \Delta_{\text{mlp}}$ | $x_4$ (Block Output) |
 """
 
 # %% [markdown]
@@ -326,64 +232,33 @@ Each component serves a specific purpose:
 """
 
 # %% [markdown]
-"""
+r"""
 ### Understanding Layer Normalization
 
-Layer Normalization is the foundation of stable transformer training. Unlike batch normalization, it normalizes each sample independently across its feature dimensions.
+Layer Normalization provides the foundation of stable transformer optimization. In deep residual networks, signal variances compound across layers; without normalization, activation values explode or collapse into extreme saturating regions.
 
-#### Why Layer Norm is Essential
+<div align="center">
+  <img src="layernorm_feature_plane.svg" alt="Layer Normalization Feature-Axis Normalization and Affine Restoration" width="680px">
+</div>
 
-Without normalization, deep networks suffer from "internal covariate shift" - the distribution of inputs to each layer changes during training, making learning unstable.
+#### Three-Stage LayerNorm Formulation
 
-#### Layer Norm Visualization
+1. **Feature-Axis Statistics**: Compute mean and variance along the trailing hidden dimension ($d_{\text{embed}}$) for each batch and sequence index $(b, s)$:
+   $$\mu_{b, s} = \frac{1}{d_{\text{embed}}} \sum_{i=1}^{d_{\text{embed}}} x_{b, s, i}, \qquad \sigma^2_{b, s} = \frac{1}{d_{\text{embed}}} \sum_{i=1}^{d_{\text{embed}}} (x_{b, s, i} - \mu_{b, s})^2$$
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  LAYER NORMALIZATION: Stabilizing Deep Networks                 │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  INPUT TENSOR: (batch=2, seq=3, features=4)                     │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ Sample 1: [[1.0,  2.0,  3.0,  4.0],     ← Position 0      │  │
-│  │            [5.0,  6.0,  7.0,  8.0],     ← Position 1      │  │
-│  │            [9.0, 10.0, 11.0, 12.0]]     ← Position 2      │  │
-│  │                                                           │  │
-│  │ Sample 2: [[13., 14., 15., 16.],         ← Position 0     │  │
-│  │            [17., 18., 19., 20.],         ← Position 1     │  │
-│  │            [21., 22., 23., 24.]]         ← Position 2     │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                                ↓                                │
-│           NORMALIZE ACROSS FEATURES (per position)              │
-│                                ↓                                │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ AFTER NORMALIZATION: Each position → mean=0, std=1        │  │
-│  │                                                           │  │
-│  │ Sample 1: [[-1.34, -0.45,  0.45,  1.34],                  │  │
-│  │            [-1.34, -0.45,  0.45,  1.34],                  │  │
-│  │            [-1.34, -0.45,  0.45,  1.34]]                  │  │
-│  │                                                           │  │
-│  │ Sample 2: [[-1.34, -0.45,  0.45,  1.34],                  │  │
-│  │            [-1.34, -0.45,  0.45,  1.34],                  │  │
-│  │            [-1.34, -0.45,  0.45,  1.34]]                  │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                                ↓                                │
-│            APPLY LEARNABLE PARAMETERS: γ * norm + β             │
-│                                ↓                                │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ FINAL OUTPUT: Model can learn any desired distribution    │  │
-│  │ γ (scale) and β (shift) are learned during training       │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│  KEY INSIGHT: Unlike batch norm, each sample normalized         │
-│  independently - perfect for variable-length sequences!         │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+2. **Standardization & Numerical Guardrail**: Subtract mean and scale by standard deviation, adding $\epsilon = 10^{-5}$ to prevent division by zero:
+   $$\hat{x}_{b, s, i} = \frac{x_{b, s, i} - \mu_{b, s}}{\sqrt{\sigma^2_{b, s} + \epsilon}}$$
 
-#### Key Properties
-- **Per-sample normalization**: Each sequence position normalized independently
-- **Learnable parameters**: γ (scale) and β (shift) allow the model to recover any desired distribution
-- **Gradient friendly**: Helps gradients flow smoothly through deep networks
+3. **Learnable Affine Restoration**: Allow the optimization process to recover arbitrary representation scales and biases:
+   $$y_{b, s, i} = \gamma_i \cdot \hat{x}_{b, s, i} + \beta_i, \quad \text{where } \gamma, \beta \in \mathbb{R}^{d_{\text{embed}}}$$
+
+#### Normalization Variants in Deep Learning
+
+| Normalization Scheme | Normalization Axes | Learnable Params | Batch Size Dependence | Autoregressive Inference |
+|:---|:---|:---:|:---:|:---|
+| **BatchNorm** | Batch + Spatial $(B, H, W)$ | $2 \cdot C$ | Extreme (fails at $B=1$) | Incompatible with autoregressive generation |
+| **LayerNorm** | Feature Axis $(d_{\text{embed}})$ | $2 \cdot d_{\text{embed}}$ | **Zero** ($B=1$ native) | Standard across GPT-2, GPT-3, BERT |
+| **RMSNorm** | Feature Axis (Root-Mean-Square) | $1 \cdot d_{\text{embed}}$ ($\gamma$ only) | **Zero** ($B=1$ native) | Modern default (Llama 2/3, Mistral, Gemma) |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "layer-norm", "solution": true}
@@ -398,11 +273,14 @@ class LayerNormFunction(Function):
     Computes gradients for x, gamma, and beta in one pass.
     output = gamma * ((x - mean) / std) + beta
 
-    The gradient for x uses the standard LayerNorm formula:
-        dx = (gamma/std) * (grad - mean(grad) - normalized * mean(grad * normalized))
+    The gradient for x uses the standard LayerNorm formula, with gamma folded into the
+    incoming gradient FIRST (the per-feature scale sits inside the two mean terms, since
+    mean(gamma * grad) is not gamma * mean(grad) unless gamma is uniform):
+        g = grad_output * gamma
+        dx = (1/std) * (g - mean(g) - normalized * mean(g * normalized))
     """
 
-    def forward(self, x, gamma, beta):
+    def forward(self, x: np.ndarray, gamma: np.ndarray, beta: np.ndarray) -> np.ndarray:
         """
         Apply layer normalization to a NumPy array.
 
@@ -434,7 +312,7 @@ class LayerNormFunction(Function):
         ### END SOLUTION
 
 
-    def backward(self, grad_output):
+    def backward(self, grad_output: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
         """Compute gradients for LayerNorm (x, gamma, beta)."""
         x, gamma, beta = self.inputs
 
@@ -475,7 +353,7 @@ class LayerNorm:
     unlike batch normalization which normalizes across the batch dimension.
     """
 
-    def __init__(self, normalized_shape, eps=1e-5):
+    def __init__(self, normalized_shape: int, eps: float = 1e-5):
         """
         Initialize LayerNorm with learnable parameters.
 
@@ -497,7 +375,7 @@ class LayerNorm:
         - beta should start at 0.0 (no shift)
         - eps prevents division by zero in variance calculation
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if not isinstance(normalized_shape, (int, np.integer)) or normalized_shape <= 0:
             raise ValueError("TinyTorch LayerNorm normalizes one positive final dimension")
         self.normalized_shape = normalized_shape
@@ -508,7 +386,7 @@ class LayerNorm:
         self.beta = Tensor(np.zeros(normalized_shape), requires_grad=True)  # Shift parameter
         ### END SOLUTION
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         """
         Apply layer normalization.
 
@@ -519,11 +397,11 @@ class LayerNorm:
             raise ValueError(f"LayerNorm expected final dimension {self.normalized_shape}, got {x.shape}")
         return LayerNormFunction.apply(x, self.gamma, self.beta, eps=self.eps)
 
-    def __call__(self, x):
+    def __call__(self, x: Tensor) -> Tensor:
         """Allows the layer norm to be called like a function."""
         return self.forward(x)
 
-    def parameters(self):
+    def parameters(self) -> List[Tensor]:
         """Return learnable parameters."""
         return [self.gamma, self.beta]
 
@@ -572,81 +450,39 @@ if __name__ == "__main__":
     test_unit_layer_norm()
 
 # %% [markdown]
-"""
+r"""
 ### Understanding the Multi-Layer Perceptron (MLP)
 
-The MLP is where the "thinking" happens in each transformer block. It's a simple feed-forward network that provides non-linear transformation capacity.
+The Multi-Layer Perceptron (also termed the Feed-Forward Network, FFN) provides the primary computational transformation in each transformer block. While self-attention allows tokens to exchange information across positions, the MLP processes each position completely independently, applying identical weights to every token vector.
 
-#### The Role of MLP in Transformers
+#### Mathematical Formulation & Two-Layer Funnel
 
-While attention handles relationships between tokens, the MLP processes each position independently, adding computational depth and non-linearity.
+$$\text{FFN}(x) = \text{GELU}(x W_1 + b_1) W_2 + b_2$$
 
-#### MLP Architecture and Information Flow
+where input $x \in \mathbb{R}^{B \times S \times d_{\text{embed}}}$ is expanded to intermediate dimension $d_{\text{ff}} = 4 \cdot d_{\text{embed}}$ before being contracted back:
 
-```
-Information Flow Through MLP:
+#### Detailed Parameter and FLOP Breakdown
 
-Input: (batch, seq_len, embed_dim=512)
-         ↓
-┌─────────────────────────────────────────────┐
-│ Linear Layer 1: Expansion                   │
-│ Weight: (512, 2048)  Bias: (2048,)          │
-│ Output: (batch, seq_len, 2048)              │
-└─────────────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────────────┐
-│ GELU Activation                             │
-│ Smooth, differentiable activation           │
-│ Better than ReLU for language modeling      │
-└─────────────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────────────┐
-│ Linear Layer 2: Contraction                 │
-│ Weight: (2048, 512)  Bias: (512,)           │
-│ Output: (batch, seq_len, 512)               │
-└─────────────────────────────────────────────┘
-         ↓
-Output: (batch, seq_len, embed_dim=512)
-```
+| Sub-Layer Operation | Input Tensor | Weight Matrix | Bias Vector | Parameters ($d=512$) | Compute FLOPs / Token |
+|:---|:---:|:---:|:---:|:---:|:---:|
+| **Linear 1 (Up-Projection)** | $(B, S, d)$ | $(d, 4d)$ | $(4d,)$ | $512 \times 2{,}048 + 2{,}048 = 1{,}050{,}624$ | $2 \cdot d \cdot 4d = 2{,}097{,}152$ |
+| **GELU Activation** | $(B, S, 4d)$ | — | — | $0$ (activation) | $\approx 8 \cdot 4d = 16{,}384$ |
+| **Linear 2 (Down-Projection)** | $(B, S, 4d)$ | $(4d, d)$ | $(d,)$ | $2{,}048 \times 512 + 512 = 1{,}049{,}088$ | $2 \cdot 4d \cdot d = 2{,}097{,}152$ |
+| **Total MLP Sub-Layer** | — | — | — | $\mathbf{8d^2 + 5d \approx 2.10\text{M params}}$ | $\approx \mathbf{16 d^2 \text{ FLOPs}}$ |
 
-#### Why 4x Expansion?
+**Why 4× Expansion Matters**:
+- **Representation Capacity**: The MLP contains approximately $\frac{2}{3}$ of all parameters within each transformer block (compared to $4d^2$ in attention).
+- **Associative Memory**: Empirical research (Geva et al., 2021) demonstrates that FFN weights function as key-value memories, where first-layer weights detect factual patterns and second-layer weights produce output distributions.
 
-```
-Parameter Count Analysis:
+#### Non-Linear Activation Comparison: GELU vs ReLU
 
-Embed Dim: 512
-MLP Hidden: 2048 (4x expansion)
-
-Parameters:
-- Linear1: 512 × 2048 + 2048 = 1,050,624
-- Linear2: 2048 × 512 + 512 = 1,049,088
-- Total MLP: ~2.1M parameters
-
-For comparison:
-- Attention (same embed_dim): ~1.05M parameters
-- MLP has MORE parameters → more computational capacity
-```
-
-#### GELU vs ReLU
-
-```
-Activation Function Comparison:
-
-ReLU(x) = max(0, x)        # Hard cutoff at 0
-         ┌────
-         │
-    ─────┘
-         0
-
-GELU(x) ≈ x * Φ(x)         # Smooth, probabilistic
-         ╭────
-        ╱
-    ───╱
-      ╱
-     0
-
-GELU is smoother and provides better gradients for language modeling.
-```
+| Property | Rectified Linear Unit ($\text{ReLU}$) | Gaussian Error Linear Unit ($\text{GELU}$) |
+|:---|:---|:---|
+| **Mathematical Definition** | $\text{ReLU}(x) = \max(0, x)$ | $\text{GELU}(x) = x \cdot \Phi(x) \approx 0.5 x \left(1 + \tanh\left(\sqrt{2/\pi}(x + 0.044715 x^3)\right)\right)$ |
+| **Curvature & Continuity** | Piecewise linear; non-differentiable cusp at $x = 0$ | Smooth, continuously differentiable across entire real domain $\mathbb{R}$ |
+| **Negative Input Handling** | Hard zero clamp ($\frac{d}{dx} = 0$ for $x < 0$) | Small negative curvature; allows gradient recovery |
+| **Dead Neuron Vulnerability** | High (negative activations permanently kill gradient flow) | Negligible (smooth probabilistic gating prevents dead units) |
+| **Architectural Adoption** | Classical CNNs (AlexNet, ResNet) | Standard in GPT-2, GPT-3, BERT, and modern LLMs |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "mlp", "solution": true}
@@ -659,7 +495,7 @@ class MLP:
     This provides the non-linear transformation in each transformer block.
     """
 
-    def __init__(self, embed_dim, hidden_dim=None, dropout_prob=0.0):
+    def __init__(self, embed_dim: int, hidden_dim: Optional[int] = None, dropout_prob: float = 0.0):
         """
         Initialize MLP with two linear layers.
 
@@ -681,7 +517,7 @@ class MLP:
 
         HINT: Standard transformer MLP uses 4x expansion (hidden_dim = 4 * embed_dim)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if hidden_dim is None:
             hidden_dim = 4 * embed_dim  # Standard 4x expansion
 
@@ -698,7 +534,7 @@ class MLP:
         self.linear2 = Linear(hidden_dim, embed_dim)
         ### END SOLUTION
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         """
         Forward pass through MLP.
 
@@ -714,7 +550,7 @@ class MLP:
 
         HINT: self.gelu is the GELU you built in Module 02
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # First linear layer with expansion
         hidden = self.linear1.forward(x)
 
@@ -727,11 +563,11 @@ class MLP:
         return output
         ### END SOLUTION
 
-    def __call__(self, x):
+    def __call__(self, x: Tensor) -> Tensor:
         """Allows the MLP to be called like a function."""
         return self.forward(x)
 
-    def parameters(self):
+    def parameters(self) -> List[Tensor]:
         """Return all learnable parameters."""
         params = []
         params.extend(self.linear1.parameters())
@@ -784,96 +620,39 @@ if __name__ == "__main__":
     test_unit_mlp()
 
 # %% [markdown]
-"""
+r"""
 ### Understanding the Complete Transformer Block
 
-The TransformerBlock is the core building unit of GPT and other transformer models. It combines self-attention with feed-forward processing using a carefully designed residual architecture.
+The `TransformerBlock` represents the fundamental atomic unit of GPT and modern generative language models. It harmonizes two complementary operations: **spatial information routing** across tokens via multi-head causal self-attention, and **pointwise non-linear feature synthesis** via the two-stage MLP.
 
-#### Pre-Norm vs Post-Norm Architecture
+#### Pre-Norm vs Post-Norm Architectural Comparison
 
-Modern transformers use "pre-norm" architecture where LayerNorm comes BEFORE the sub-layers, not after. This provides better training stability.
+The original Transformer (Vaswani et al., 2017) utilized **Post-LayerNorm** ($x = \text{LN}(x + \text{Sublayer}(x))$). Modern large language models almost exclusively adopt **Pre-LayerNorm** ($x = x + \text{Sublayer}(\text{LN}(x))$):
 
-```
-Pre-Norm Architecture (What We Implement):
-┌────────────────────────────────────────────────────────┐
-│                     INPUT (x)                          │
-│                       │                                │
-│       ┌───────────────┴───────────────┐                │
-│       │                               │                │
-│       ▼                               │                │
-│  LayerNorm                            │                │
-│       │                               │                │
-│       ▼                               │                │
-│ MultiHeadAttention                    │                │
-│       │                               │                │
-│       └───────────────┬───────────────┘                │
-│                       │          (residual connection) │
-│                       ▼                                │
-│                  x + attention                         │
-│                       │                                │
-│       ┌───────────────┴───────────────┐                │
-│       │                               │                │
-│       ▼                               │                │
-│  LayerNorm                            │                │
-│       │                               │                │
-│       ▼                               │                │
-│      MLP                              │                │
-│       │                               │                │
-│       └───────────────┬───────────────┘                │
-│                       │          (residual connection) │
-│                       ▼                                │
-│                   x + mlp                              │
-│                       │                                │
-│                       ▼                                │
-│                    OUTPUT                              │
-└────────────────────────────────────────────────────────┘
-```
+| Architectural Trait | Post-LayerNorm (Original 2017) | Pre-LayerNorm (Modern GPT / Llama) |
+|:---|:---|:---|
+| **Formulation** | $x_{l+1} = \text{LayerNorm}(x_l + F_l(x_l))$ | $x_{l+1} = x_l + F_l(\text{LayerNorm}(x_l))$ |
+| **Residual Path** | Passes through non-linear normalization at every layer | Completely clean identity skip highway |
+| **Gradient Backprop** | Scales as $\prod_{l=1}^L \frac{1}{\sigma_l}$; prone to vanishing/explosion | Direct addition: $\frac{\partial \mathcal{L}}{\partial x_0} = \frac{\partial \mathcal{L}}{\partial x_L} (I + \sum \frac{\partial F_l}{\partial x_l})$ |
+| **Warmup Requirement** | Strict linear learning rate warmup required to prevent divergence | Extremely robust; converges reliably with minimal warmup |
+| **Scaling Capability** | Difficult to train beyond 16–24 layers without careful initialization scaling (Xiong et al., 2020) | Scalable to 100+ layers without numerical instability |
 
-#### Why Pre-Norm Works Better
+The clean residual path has one consequence worth naming. Nothing ever normalizes the stream itself, so every sublayer adds into it and its magnitude keeps growing with depth. A post-LN stack renormalizes after each addition, but a pre-LN stack does not, which is why `GPT` ends with a final `ln_f` before the LM head. That last normalization is the only one the residual stream ever receives, and without it the un-embedding projection sees activations whose scale depends on how many layers happened to be stacked.
 
-**Training Stability**: LayerNorm before operations provides clean, normalized inputs to attention and MLP layers.
+#### Step-by-Step Data Transformation in TransformerBlock
 
-**Gradient Flow**: Residual connections carry gradients directly from output to input, bypassing the normalized operations.
+For an input batch of token embeddings $x_0 \in \mathbb{R}^{B \times S \times d_{\text{embed}}}$:
 
-**Deeper Networks**: Pre-norm enables training much deeper networks (100+ layers) compared to post-norm.
+$$\begin{aligned}
+\text{Step 1 (Attention Pre-LN):} \quad & x_1 = \text{LayerNorm}_1(x_0) \\
+\text{Step 2 (Causal Attention):} \quad & \Delta_{\text{attn}} = \text{MultiHeadAttention}(x_1, \text{mask}) \\
+\text{Step 3 (First Highway Sum):} \quad & x_2 = x_0 + \Delta_{\text{attn}} \\
+\text{Step 4 (MLP Pre-LN):} \quad & x_3 = \text{LayerNorm}_2(x_2) \\
+\text{Step 5 (MLP Expansion):} \quad & \Delta_{\text{mlp}} = \text{MLP}(x_3) \\
+\text{Step 6 (Second Highway Sum):} \quad & x_4 = x_2 + \Delta_{\text{mlp}}
+\end{aligned}$$
 
-#### Information Processing in Transformer Block
-
-```
-Step-by-Step Data Transformation:
-
-1. Input Processing:
-   x₀: (batch, seq_len, embed_dim) # Original input
-
-2. Attention Sub-layer:
-   x₁ = LayerNorm(x₀)               # Normalize input
-   attn_out = MultiHeadAttn(x₁)     # Self-attention
-   x₂ = x₀ + attn_out               # Residual connection
-
-3. MLP Sub-layer:
-   x₃ = LayerNorm(x₂)               # Normalize again
-   mlp_out = MLP(x₃)                # Feed-forward
-   x₄ = x₂ + mlp_out                # Final residual
-
-4. Output:
-   return x₄                        # Ready for next block
-```
-
-#### Residual Stream Concept
-
-Think of the residual connections as a "stream" that carries information through the network:
-
-```
-Residual Stream Flow:
-
-x (embeddings) ───┬─────────────────(+)──┬──────────────(+)──→ x₄ (to next block)
-                  │                  ↑   │               ↑
-                  └── LN → Attention ┘   └── LN → MLP ───┘
-
-Each branch reads the stream and adds its result back; nothing overwrites it.
-```
-
-Each layer adds information to this stream rather than replacing it, creating a rich representation.
+Every sub-layer acts as an "off-ramp" that reads from the continuous residual stream and writes an additive delta back into it, preserving the identity gradient highway throughout the model.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "transformer-block", "solution": true}
@@ -886,9 +665,15 @@ class TransformerBlock:
     Each block processes the input sequence and passes it to the next block.
     """
 
-    def __init__(self, embed_dim, num_heads, mlp_ratio=4, ff_dim=None, dropout_prob=0.0):
+    def __init__(self, embed_dim: int, num_heads: int, mlp_ratio: Optional[float] = None, *,
+                 ff_dim: Optional[int] = None, dropout_prob: float = 0.0):
         """
         Initialize a complete transformer block.
+
+        Give the MLP width one way or the other, never both. Use mlp_ratio (default 4)
+        as a multiple of embed_dim, or ff_dim as an absolute hidden width. ff_dim is
+        keyword-only, so a stray third positional argument can no longer slip into
+        mlp_ratio and build a hidden layer many times wider than intended.
 
         dropout_prob must be zero; this compact block omits dropout.
 
@@ -912,7 +697,7 @@ class TransformerBlock:
 
         HINT: We use pre-norm architecture (LayerNorm before attention/MLP)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.embed_dim = embed_dim
         self.num_heads = num_heads
 
@@ -923,16 +708,21 @@ class TransformerBlock:
         self.ln1 = LayerNorm(embed_dim)  # Before attention
         self.ln2 = LayerNorm(embed_dim)  # Before MLP
 
-        # Feed-forward network
-        # Support both mlp_ratio and explicit ff_dim for backward compatibility
+        # Feed-forward network. mlp_ratio and ff_dim are two spellings of the same
+        # quantity, so accepting both at once would silently honor one and drop the other.
+        if ff_dim is not None and mlp_ratio is not None:
+            raise ValueError(
+                "Give the MLP width once. Pass mlp_ratio or ff_dim, not both "
+                f"(got mlp_ratio={mlp_ratio}, ff_dim={ff_dim})."
+            )
         if ff_dim is not None:
             hidden_dim = ff_dim
         else:
-            hidden_dim = int(embed_dim * mlp_ratio)
+            hidden_dim = int(embed_dim * (4 if mlp_ratio is None else mlp_ratio))
         self.mlp = MLP(embed_dim, hidden_dim, dropout_prob)
         ### END SOLUTION
 
-    def forward(self, x, mask=None):
+    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
         """
         Forward pass through transformer block.
 
@@ -973,11 +763,11 @@ class TransformerBlock:
         return output
         ### END SOLUTION
 
-    def __call__(self, x, mask=None):
+    def __call__(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
         """Allows the transformer block to be called like a function."""
         return self.forward(x, mask)
 
-    def parameters(self):
+    def parameters(self) -> List[Tensor]:
         """Return all learnable parameters."""
         params = []
         params.extend(self.attention.parameters())
@@ -990,7 +780,7 @@ class TransformerBlock:
 """
 ### The Causal Mask
 
-GPT is autoregressive: position i may attend only to positions j ≤ i. The helper
+GPT is autoregressive, so position i may attend only to positions j ≤ i. The helper
 below encodes that rule in the binary convention Module 12's `_apply_mask`
 expects (1 = attend, 0 = block). `GPT.forward` builds one for every sequence.
 """
@@ -1099,153 +889,60 @@ if __name__ == "__main__":
 r"""
 ### Understanding the Complete GPT Architecture
 
-GPT (Generative Pre-trained Transformer) is the complete language model that combines all our components into a text generation system. It's designed for **autoregressive** generation - predicting the next token based on all previous tokens.
+GPT (Generative Pre-trained Transformer) integrates token and positional embeddings, stacked pre-LN transformer blocks, a final normalization layer, and an un-embedding projection head into a unified autoregressive generative system.
 
-#### GPT's Autoregressive Nature
+<div align="center">
+  <img src="transformer_gpt_architecture.svg" alt="Complete GPT Architecture: From Token IDs to Generation" width="560px">
+</div>
 
-GPT generates text one token at a time, using all previously generated tokens as context:
+#### Autoregressive Generation Mechanics
 
-```
-Autoregressive Generation Process:
+At generation time, text is emitted one token at a time. Each predicted token is appended to the sequence prefix to form the input for the next forward pass:
 
-Step 1: "The cat" → model predicts → "sat"
-Step 2: "The cat sat" → model predicts → "on"
-Step 3: "The cat sat on" → model predicts → "the"
-Step 4: "The cat sat on the" → model predicts → "mat"
+| Generation Step | Context Prefix ($x_{1:t-1}$) | Active Query Token ($x_{t-1}$) | Argmax / Sampled Token ($x_t$) | Updated Prefix ($x_{1:t}$) |
+|:---:|:---|:---|:---:|:---|
+| **Step 1** | `"The"` | `"The"` | `"cat"` | `"The cat"` |
+| **Step 2** | `"The cat"` | `"cat"` | `"sat"` | `"The cat sat"` |
+| **Step 3** | `"The cat sat"` | `"sat"` | `"on"` | `"The cat sat on"` |
+| **Step 4** | `"The cat sat on"` | `"on"` | `"the"` | `"The cat sat on the"` |
+| **Step 5** | `"The cat sat on the"` | `"the"` | `"mat"` | `"The cat sat on the mat"` |
 
-Result: "The cat sat on the mat"
-```
+#### Causal Masking: Preserving Autoregressive Integrity
 
-#### Complete GPT Architecture
+During pre-training, the model receives full sequences in parallel. To prevent position $i$ from attending to future tokens ($j > i$), we inject an upper-triangular mask of $-\infty$ prior to row-wise softmax normalization:
 
-```
-+-------------------------------------------------------------+
-|                      GPT ARCHITECTURE                       |
-|                                                             |
-|  Input: Token IDs [15496, 1917, ...]                        |
-|                       |                                     |
-|                       v                                     |
-|  +--------------------+--------------------+                |
-|  |           EMBEDDING LAYER               |                |
-|  |  +--------------+  +-----------------+  |                |
-|  |  | Token Embed  |  | Position Embed  |  |                |
-|  |  | vocab->vector|  | sequence->vector|  |                |
-|  |  +--------------+  +-----------------+  |                |
-|  |              \          /               |                |
-|  |               +--------+                |                |
-|  +--------------------+--------------------+                |
-|                       |                                     |
-|                       v                                     |
-|  +--------------------+--------------------+                |
-|  |        TRANSFORMER BLOCK 1              |                |
-|  |  +---------+    +---------+    +-----+  |                |
-|  |  |LayerNorm| -> |Attention| -> | +x  |  |                |
-|  |  +---------+    +---------+    +--+--+  |                |
-|  |                                   |     |                |
-|  |  +---------+    +---------+    +--v--+  |                |
-|  |  |LayerNorm| -> |   MLP   | -> | +x  |  |                |
-|  |  +---------+    +---------+    +-----+  |                |
-|  +--------------------+--------------------+                |
-|                       |                                     |
-|          ... (more transformer blocks) ...                  |
-|                       |                                     |
-|                       v                                     |
-|  +--------------------+--------------------+                |
-|  |            OUTPUT HEAD                  |                |
-|  |  +---------+    +--------------------+  |                |
-|  |  |LayerNorm| -> |Linear(embed->vocab)|  |                |
-|  |  +---------+    +--------------------+  |                |
-|  +--------------------+--------------------+                |
-|                       |                                     |
-|                       v                                     |
-|  Output: Vocabulary Logits [0.1, 0.05, 0.8, ...]            |
-+-------------------------------------------------------------+
-```
+$$S_{\text{masked}}[i, j] = \begin{cases} S[i, j] & \text{if } j \le i \\ -\infty & \text{if } j > i \end{cases} \implies A[i, j] = \text{softmax}(S_{\text{masked}})_{i, j} = 0 \quad (\forall j > i)$$
 
-#### Causal Masking for Autoregressive Training
+| Query Position ($i$) | Key 0 ("The") | Key 1 ("cat") | Key 2 ("sat") | Key 3 ("on") | Visibility Semantics |
+|:---:|:---:|:---:|:---:|:---:|:---|
+| **Pos 0 ("The")** | $A_{0,0} = 1.0$ | $0.0$ ($-\infty$) | $0.0$ ($-\infty$) | $0.0$ ($-\infty$) | Token 0 attends strictly to itself |
+| **Pos 1 ("cat")** | $A_{1,0}$ | $A_{1,1}$ | $0.0$ ($-\infty$) | $0.0$ ($-\infty$) | Token 1 attends to tokens $\{0, 1\}$ |
+| **Pos 2 ("sat")** | $A_{2,0}$ | $A_{2,1}$ | $A_{2,2}$ | $0.0$ ($-\infty$) | Token 2 attends to tokens $\{0, 1, 2\}$ |
+| **Pos 3 ("on")** | $A_{3,0}$ | $A_{3,1}$ | $A_{3,2}$ | $A_{3,3}$ | Token 3 attends to all preceding context |
 
-During training, GPT sees the entire sequence but must not "cheat" by looking at future tokens:
+#### Temperature Scaling in Autoregressive Sampling
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  CAUSAL MASKING: Preventing Future Information Leakage          │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  SEQUENCE: ["The", "cat", "sat", "on"]                          │
-│  POSITIONS:   0      1      2     3                             │
-│                                                                 │
-│  ATTENTION MATRIX (what each position can see):                 │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │      Pos:  0   1   2   3                                 │   │
-│  │  Pos 0:  [ ✓   ✗   ✗   ✗ ]  ← "The" only sees itself     │   │
-│  │  Pos 1:  [ ✓   ✓   ✗   ✗ ]  ← "cat" sees "The" + self    │   │
-│  │  Pos 2:  [ ✓   ✓   ✓   ✗ ]  ← "sat" sees all previous    │   │
-│  │  Pos 3:  [ ✓   ✓   ✓   ✓ ]  ← "on" sees everything       │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                 │
-│  IMPLEMENTATION: Upper triangular matrix with -∞                │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │ [[  0, -∞, -∞, -∞],                                      │   │
-│  │  [  0,   0, -∞, -∞],                                     │   │
-│  │  [  0,   0,   0, -∞],                                    │   │
-│  │  [  0,   0,   0,   0]]                                   │   │
-│  │                                                          │   │
-│  │ After softmax: -∞ becomes 0 probability                  │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                 │
-│  WHY THIS WORKS: During training, model sees entire sequence    │
-│  but mask ensures position i only attends to positions ≤ i      │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+Temperature $T > 0$ controls the entropy of the output probability distribution:
 
-#### Generation Temperature Control
+$$P(w_i) = \frac{\exp(z_i / T)}{\sum_{j=1}^V \exp(z_j / T)}$$
 
-Temperature controls the randomness of generation:
+| Sampling Regime | Temperature ($T$) | Logit Transformation | Probability Distribution Profile | Behavioral Characteristics |
+|:---|:---:|:---|:---|:---|
+| **Greedy / Deterministic** | $T \to 0$ | Extreme scaling ($z / \epsilon \to \pm\infty$) | One-hot Dirac delta ($\max z_i \to 1.0$) | Strict argmax decoding; repetitive but factual |
+| **Low Temperature** | $T = 0.2 - 0.5$ | Sharpened logits ($z_i$ scaled by $2\times$ to $5\times$) | Peak-concentrated distribution | High confidence; ideal for code and math |
+| **Balanced (Default)** | $T = 0.7 - 1.0$ | Unmodified / lightly scaled | Faithful to model's learned distribution | Balanced fluency, diversity, and coherence |
+| **High Temperature** | $T \ge 1.5$ | Flattened logits ($z_i / 1.5$) | Near-uniform entropy distribution | Creative, diverse, but prone to hallucinations |
 
-```
-Temperature Effects:
+#### Transformer Scaling Laws: Parameter Allocation Across Scales
 
-Original logits: [1.0, 2.0, 3.0]
+| Architecture Tier | Parameters | Layers ($L$) | Heads ($H$) | Hidden Dim ($d_{\text{embed}}$) | MLP / FFN Dim ($d_{\text{ff}}$) | Context Window ($S$) | Primary Deployment Profile |
+|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---|
+| **TinyTorch GPT** | $\approx 200\text{K}$ | $2$ | $4$ | $64$ | $256$ | $128$ | CPU educational inspection |
+| **GPT-2 Small** | $124\text{M}$ | $12$ | $12$ | $768$ | $3{,}072$ | $1{,}024$ | Edge devices & consumer GPUs |
+| **Llama 3 (8B)** | $8.0\text{B}$ | $32$ | $32$ | $4{,}096$ | $14{,}336$ | $8{,}192$ | Single workstation GPU ($24\text{ GB}$ VRAM at FP16) |
+| **GPT-3 (175B)** | $175\text{B}$ | $96$ | $96$ | $12{,}288$ | $49{,}152$ | $2{,}048$ | Multi-GPU node and beyond ($8\times\text{A100}$ per node) |
 
-Temperature = 0.1 (Conservative):
-Scaled: [10.0, 20.0, 30.0] → Sharp distribution
-Probs: [0.00, 0.00, 1.00] → Always picks highest
-
-Temperature = 1.0 (Balanced):
-Scaled: [1.0, 2.0, 3.0] → Moderate distribution
-Probs: [0.09, 0.24, 0.67] → Weighted sampling
-
-Temperature = 2.0 (Creative):
-Scaled: [0.5, 1.0, 1.5] → Flatter distribution
-Probs: [0.19, 0.31, 0.51] → More random
-```
-
-#### Model Scaling and Parameters
-
-```
-GPT Model Size Scaling:
-
-Tiny GPT (our implementation):
-- vocab_size: 100, embed_dim: 64, layers: 2, heads: 4
-- Parameters: ~180K
-- Use case: Learning and experimentation
-
-GPT-2 Small:
-- embed_dim: 768, layers: 12, heads: 12
-- Parameters: 117M
-- Use case: Basic text generation
-
-GPT-3:
-- embed_dim: 12,288, layers: 96, heads: 96
-- Parameters: 175B
-- Use case: Advanced language understanding
-
-GPT-4 (estimated):
-- embed_dim: ~16,384, layers: ~120, heads: ~128
-- Parameters: ~1.7T
-- Use case: Reasoning and multimodal tasks
-```
+Two notes on that table. The $4\times$ expansion this module builds is an empirical convention, not a law, and the newest models have already left it. Llama 3's $d_{\text{ff}} = 14{,}336$ is $3.5d$ rather than $4d$ because SwiGLU splits the up-projection across three matrices instead of two, so a smaller width holds the same parameter budget. Llama 3 8B also needs more than $16\text{ GB}$ in practice, since $16\text{ GB}$ is exactly its FP16 weights with nothing left for the KV cache or activations.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "gpt", "solution": true}
@@ -1258,7 +955,8 @@ class GPT:
     and a language modeling head for text generation.
     """
 
-    def __init__(self, vocab_size, embed_dim, num_layers, num_heads, max_seq_len=1024):
+    def __init__(self, vocab_size: int, embed_dim: int, num_layers: int, num_heads: int,
+                 max_seq_len: int = 1024):
         """
         Initialize complete GPT model.
 
@@ -1286,7 +984,7 @@ class GPT:
         - Language modeling head is a separate Linear(embed_dim, vocab_size) layer
           (weight tying with the token embedding is a production optimization not implemented here)
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.num_layers = num_layers
@@ -1309,7 +1007,7 @@ class GPT:
         self.lm_head = Linear(embed_dim, vocab_size, bias=False)
         ### END SOLUTION
 
-    def forward(self, tokens, start_pos=0):
+    def forward(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
         """
         Forward pass through GPT model.
 
@@ -1334,7 +1032,7 @@ class GPT:
 
         HINT: Pass start_pos to the embedding layer; it slices the positions from there
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         batch_size, seq_len = tokens.shape
 
         # Pass tokens to embedding layer to get token embeddings and positional embeddings
@@ -1356,18 +1054,18 @@ class GPT:
         return logits
         ### END SOLUTION
 
-    def __call__(self, tokens, start_pos=0):
+    def __call__(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
         """Allows the GPT model to be called like a function."""
         return self.forward(tokens, start_pos)
 
-    def _create_causal_mask(self, seq_len):
+    def _create_causal_mask(self, seq_len: int) -> Tensor:
         """Create causal mask to prevent attending to future positions."""
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Same binary convention as create_causal_mask: 1 = attend, 0 = block
         return create_causal_mask(seq_len)
         ### END SOLUTION
 
-    def _sample_next_token(self, logits, temperature=1.0):
+    def _sample_next_token(self, logits: np.ndarray, temperature: float = 1.0) -> int:
         """
         Sample one token from vocabulary logits using temperature scaling.
 
@@ -1375,8 +1073,8 @@ class GPT:
 
         APPROACH:
         1. Reject negative/nonfinite temperatures; zero chooses the largest logit
-        2. Scale logits by positive temperature (higher = more random)
-        3. Apply softmax to get probabilities (subtract max for numerical stability)
+        2. Subtract the largest logit, then divide by positive temperature
+        3. Apply softmax to get probabilities (higher temperature = more random)
         4. Sample one token index from the probability distribution
 
         EXAMPLE:
@@ -1386,24 +1084,31 @@ class GPT:
 
         HINT: Use np.exp(x - max(x)) / sum(np.exp(x - max(x))) for stable softmax
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         # Apply temperature scaling
         if not np.isfinite(temperature) or temperature < 0:
             raise ValueError("temperature must be finite and nonnegative")
         if temperature == 0:
             return int(np.argmax(logits[0]))
-        scaled_logits = logits / temperature
+        # Center in float64 before division so tiny temperatures cannot turn
+        # the largest logit into infinity. Negative overflow means zero mass.
+        centered_logits = np.asarray(logits, dtype=np.float64)
+        centered_logits = centered_logits - np.max(centered_logits, axis=-1, keepdims=True)
+        with np.errstate(over="ignore", under="ignore"):
+            scaled_logits = centered_logits / temperature
+            exp_logits = np.exp(scaled_logits)
 
         # Convert to probabilities (softmax with numerical stability)
-        exp_logits = np.exp(scaled_logits - np.max(scaled_logits, axis=-1, keepdims=True))
         probs = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
 
-        # Sample next token from probability distribution
-        next_token = rng.choice(self.vocab_size, p=probs[0])
-        return next_token
+        # Sample next token from probability distribution. Draw from the width of the
+        # logits row, not self.vocab_size, so a caller can hand in a bare logits array.
+        next_token = rng.choice(logits.shape[-1], p=probs[0])
+        return int(next_token)
         ### END SOLUTION
 
-    def generate(self, prompt_tokens, max_new_tokens=50, temperature=1.0):
+    def generate(self, prompt_tokens: Tensor, max_new_tokens: int = 50,
+                 temperature: float = 1.0) -> Tensor:
         """
         Generate text autoregressively by repeatedly sampling next tokens.
 
@@ -1427,7 +1132,7 @@ class GPT:
 
         HINT: Use self._sample_next_token(last_logits, temperature) for sampling
         """
-        ### BEGIN SOLUTION
+        ### BEGIN SOLUTION role="scaffold"
         if len(prompt_tokens.shape) != 2 or prompt_tokens.shape[0] != 1 or prompt_tokens.shape[1] == 0:
             raise ValueError("generate expects one nonempty prompt with shape (1, sequence)")
         if not isinstance(max_new_tokens, (int, np.integer)) or max_new_tokens < 0:
@@ -1453,7 +1158,7 @@ class GPT:
         return current_tokens
         ### END SOLUTION
 
-    def parameters(self):
+    def parameters(self) -> List[Tensor]:
         """Return all learnable parameters."""
         params = []
         params.extend(self.embedding_layer.parameters())
@@ -1466,7 +1171,8 @@ class GPT:
 
         return params
 
-# Alias kept for tests written before the rename
+# Public alias, not dead code: tests/cli/test_release_regressions.py requires TinyGPT in
+# this module's __all__, and the roadmap tables in Modules 12 and 13 name the model that way.
 TinyGPT = GPT
 
 # %% [markdown]
@@ -1525,24 +1231,21 @@ if __name__ == "__main__":
     test_unit_gpt()
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Token Sampling
 
 This test validates the `_sample_next_token` helper that handles temperature-controlled
 token sampling, separated from the generation loop for clarity.
 
-```
-Token Sampling Pipeline:
-Raw logits: [1.0, 2.0, 3.0]
-       |
-  temperature scaling (divide by T)
-       |
-  softmax (numerical stability via max subtraction)
-       |
-  probability distribution: [0.09, 0.24, 0.67]
-       |
-  rng.choice -> sampled token index
-```
+### Token Sampling Pipeline
+
+| Execution Stage | Transformation Operation | Mathematical Formula | Numerical Example |
+| :--- | :--- | :--- | :--- |
+| **1. Unnormalized Logits** | Raw output projection | $\mathbf{z}$ | `[1.0, 2.0, 3.0]` |
+| **2. Temperature Scaling** | Dynamic variance scaling | $\tilde{\mathbf{z}} = \mathbf{z} / T$ | Modulates entropy and sharpness |
+| **3. Stable Softmax** | Numerical max subtraction | $p_i = \frac{e^{\tilde{z}_i - \max(\tilde{\mathbf{z}})}}{\sum_j e^{\tilde{z}_j - \max(\tilde{\mathbf{z}})}}$ | `[0.09, 0.24, 0.67]` |
+| **4. Categorical Choice** | Stochastic token sampling | $t \sim \text{Categorical}(\mathbf{p})$ | Sampled token index $\in [0, V-1]$ |
+
 
 **What we're testing**: Temperature scaling, softmax probability output, valid token range
 **Why it matters**: Sampling quality controls generation coherence and creativity
@@ -1563,27 +1266,26 @@ def test_unit_sample_next_token():
     assert isinstance(token, (int, np.integer)), f"Expected int, got {type(token)}"
     assert 0 <= token < 5, f"Token {token} out of range [0, 5)"
 
-    # Test 2: Very low temperature should almost always pick the highest logit
-    rng = np.random.default_rng(7)
-    high_logit_idx = 4  # logits[4] = 5.0 is highest
-    low_temp_tokens = [model._sample_next_token(logits, temperature=0.01) for _ in range(20)]
-    assert all(t == high_logit_idx for t in low_temp_tokens), (
-        f"Low temperature should consistently pick token {high_logit_idx}, got {low_temp_tokens}"
-    )
+    # Inspect the distribution passed to the sampler instead of asserting
+    # that random draws never select a rare but valid token.
+    from unittest.mock import Mock, patch
+    sampler = Mock()
+    sampler.choice.return_value = 4
+    with patch.dict(model._sample_next_token.__globals__, {"rng": sampler}):
+        for temperature in (0.01, 1.0, 2.0):
+            assert model._sample_next_token(logits, temperature) == 4
+            probabilities = sampler.choice.call_args.kwargs["p"]
+            expected = np.exp((logits[0] - logits.max()) / temperature)
+            expected /= expected.sum()
+            np.testing.assert_allclose(probabilities, expected)
+            assert sampler.choice.call_args.args == (model.vocab_size,)
 
-    # Test 3: Verify softmax math internally (temperature=1.0)
-    # With logits [0, 0, 0, 0, 10], softmax should heavily favor index 4
-    extreme_logits = np.array([[0.0, 0.0, 0.0, 0.0, 10.0]])
-    extreme_tokens = [model._sample_next_token(extreme_logits, temperature=1.0) for _ in range(20)]
-    assert all(t == 4 for t in extreme_tokens), (
-        f"Extreme logits should always pick token 4, got {extreme_tokens}"
-    )
+        uniform_logits = np.ones((1, 5))
+        model._sample_next_token(uniform_logits, temperature=2.0)
+        np.testing.assert_allclose(sampler.choice.call_args.kwargs["p"], np.full(5, 0.2))
 
-    # Test 4: High temperature produces more varied tokens
-    rng = np.random.default_rng(7)
-    uniform_logits = np.array([[1.0, 1.0, 1.0, 1.0, 1.0]])
-    high_temp_tokens = set(model._sample_next_token(uniform_logits, temperature=2.0) for _ in range(50))
-    assert len(high_temp_tokens) > 1, "High temperature with uniform logits should produce varied tokens"
+    # Zero temperature is genuinely deterministic greedy decoding.
+    assert model._sample_next_token(logits, temperature=0) == 4
 
     print("✅ Token sampling works correctly!")
 
@@ -1687,127 +1389,103 @@ def demonstrate_transformer_integration():
 
     return model
 
+if __name__ == "__main__":
+    demonstrate_transformer_integration()
+
 # %% [markdown]
-"""
+r"""
 ## 📊 Systems Analysis: Parameter Scaling and Memory
 
-Transformer models scale dramatically with size, leading to both opportunities and challenges. Let's analyze the computational and memory requirements to understand why training large language models requires massive infrastructure.
+Transformer models scale predictably across parameter count, dataset size, and compute budgets. Understanding the mathematical breakdown of weights and intermediate activations is essential for architecting training clusters and production serving engines.
 
-### The Scaling Laws Revolution
+### The Empirical Scaling Laws
 
-One of the key discoveries in modern AI is that transformer performance follows predictable scaling laws:
+Transformer performance follows consistent power-law relationships across multiple orders of magnitude (Kaplan et al., 2020; Hoffmann et al., 2022 [Chinchilla]):
 
-```
-Scaling Laws Pattern (Kaplan et al., 2020):
-Loss ∝ N^-0.076   (N = parameters)
-Loss ∝ D^-0.095   (D = training tokens)
-Loss ∝ C^-0.050   (C = compute)
+$$L(N) = \left(\frac{N_c}{N}\right)^{\alpha_N}, \qquad L(D) = \left(\frac{D_c}{D}\right)^{\alpha_D}, \qquad L(C) = \left(\frac{C_c}{C}\right)^{\alpha_C}$$
 
-This means:
-- 10× more parameters → ~16% lower loss
-- 10× more data       → ~20% lower loss
-- 10× more compute    → ~11% lower loss
+| Scaling Dimension | Power-Law Exponent | 10× Resource Increase Impact | Optimal Allocation Ratio |
+|:---|:---:|:---:|:---|
+| **Parameters ($N$)** | $\alpha_N \approx 0.076$ | $\approx 16\%$ reduction in cross-entropy loss | Chinchilla optimum: scale parameters and tokens equally |
+| **Training Tokens ($D$)** | $\alpha_D \approx 0.095$ | $\approx 20\%$ reduction in cross-entropy loss | $D \approx 20 \times N$ for compute-optimal pre-training |
+| **Compute FLOPs ($C$)** | $\alpha_C \approx 0.050$ | $\approx 11\%$ reduction in cross-entropy loss | $C \approx 6 \times N \times D$ floating-point operations |
 
-Small exponents, but they hold across many orders of magnitude.
-```
+---
 
-### Memory Scaling Analysis
+### Memory Footprint Breakdown by Component
 
-Memory requirements grow in different ways for different components:
+Transformer memory consumption divides into four distinct categories with different asymptotic scaling behaviors:
 
-```
-Memory Scaling by Component:
+| Memory Category | Closed-Form Formula (Bytes) | Complexity | Dominant Regime | Systems Mitigation |
+|:---|:---|:---:|:---|:---|
+| **Model Parameters** | $M_{\text{params}} \approx (V d + 12 L d^2 + V d) \times 4$ | $\mathcal{O}(V d + L d^2)$ | Large models ($d \ge 4{,}096$) | Tensor parallelism, FP16/INT8 quantization |
+| **FFN Activations** | $M_{\text{FFN}} = B \times S \times 4d \times L \times 4$ | $\mathcal{O}(B \cdot S \cdot d \cdot L)$ | Short sequences ($S \ll d$) | Activation recomputation (checkpointing) |
+| **Attention Logits** | $M_{\text{attn}} = B \times L \times H \times S^2 \times 4$ | $\mathcal{O}(B \cdot L \cdot H \cdot S^2)$ | Long sequences ($S \ge 4{,}096$) | FlashAttention (online softmax tiling) |
+| **KV Cache (Serving)** | $M_{\text{KV}} = 2 \times B \times L \times S \times d \times 2$ | $\mathcal{O}(B \cdot L \cdot S \cdot d)$ | Multi-user generation | PagedAttention, Grouped-Query Attention (GQA) |
 
-1. Parameter Memory (Linear with model size):
-   - Embeddings: vocab_size × embed_dim
-   - Transformer blocks: ~12 × embed_dim² each (4 for attention, 8 for the MLP)
-   - Total: O(embed_dim²)
+The parameter row carries a $\approx$ on purpose. It counts the two vocabulary projections and the $12 L d^2$ of block matrices, and it drops the learned positional table, every bias vector, and every LayerNorm scale and shift. For the configuration in Question 3 below those omissions come to $565{,}248$ parameters, about $1.9\%$ of the true total, which is close enough for capacity planning and wrong for an exact count.
 
-2. Attention Memory (Quadratic with sequence length):
-   - Attention matrices: batch × heads × seq_len²
-   - This is why long context is expensive!
-   - Total: O(seq_len²)
+---
 
-3. Activation Memory (Linear with batch size):
-   - Forward pass activations for backprop
-   - Scales with: batch × seq_len × embed_dim
-   - Total: O(batch_size)
-```
+### The Quadratic Attention Memory Wall
 
-### The Attention Memory Wall
+Because attention weights scale as $S^2$, scaling context length from $2\text{K} \to 128\text{K}$ tokens causes attention matrix storage to explode quadratically:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  ATTENTION MEMORY WALL: Why Long Context is Expensive           │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  MEMORY USAGE BY SEQUENCE LENGTH (float32, batch×heads = 4):    │
-│                                                                 │
-│  1K tokens:   [▓] 16 MB                ← Manageable             │
-│  2K tokens:   [▓▓▓▓] 64 MB             ← 4× memory (quadratic)  │
-│  4K tokens:   [▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓] 256 MB   ← 16× memory          │
-│  8K tokens:   [████████████████████████████████] 1 GB           │
-│  16K tokens:  [████████████████████████████████████████] 4 GB   │
-│  32K tokens:  [████████████████████████████████████████████] →  │
-│               ← extends to 16 GB (off the chart!)               │
-│                                                                 │
-│  REAL-WORLD CONTEXT LIMITS:                                     │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ GPT-3:     2K tokens  (limited by memory)                 │  │
-│  │ GPT-4:     8K tokens  (32K with optimizations)            │  │
-│  │ Claude-3:  200K tokens (special techniques required!)     │  │
-│  │ GPT-4o:    128K tokens (efficient attention)              │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│  MATHEMATICAL SCALING:                                          │
-│  Memory = batch_size × num_heads × seq_len² × 4 bytes           │
-│                                   ↑                             │
-│                          This is the killer!                    │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+| Sequence Length ($S$) | Head Matrix ($S^2 \times 4\text{ B}$) | Layer Footprint ($32\text{ heads}$) | Model Total ($32\text{ layers}$) | Production Context Feasibility |
+|:---:|:---:|:---:|:---:|:---|
+| **$1{,}024$ tokens** | $4.19\text{ MB}$ | $134.2\text{ MB}$ | $4.29\text{ GB}$ | Fits easily on commodity consumer GPUs |
+| **$2{,}048$ tokens** | $16.78\text{ MB}$ | $536.9\text{ MB}$ | $17.18\text{ GB}$ | GPT-3 (2020) native context limit |
+| **$4{,}096$ tokens** | $67.11\text{ MB}$ | $2.15\text{ GB}$ | $68.72\text{ GB}$ | Llama 2 native context window |
+| **$8{,}192$ tokens** | $268.4\text{ MB}$ | $8.59\text{ GB}$ | $274.9\text{ GB}$ | Requires Activation Checkpointing |
+| **$32{,}768$ tokens** | $4.29\text{ GB}$ | $137.4\text{ GB}$ | $4.40\text{ TB}$ | Intractable without FlashAttention |
+| **$131{,}072$ tokens** | $68.72\text{ GB}$ | $2.20\text{ TB}$ | $70.37\text{ TB}$ | Requires Ring Attention + FlashAttention-3 |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-scaling", "solution": false}
 def analyze_parameter_scaling():
-    """📊 Analyze how parameter count scales with model dimensions."""
+    """📊 Analyze how parameter count scales with embedding dimension."""
     print("📊 Analyzing Parameter Scaling in Transformers...")
     print("Understanding why model size affects performance and cost\n")
 
-    # Test different model sizes
-    configs = [
-        {"name": "Tiny", "embed_dim": 64, "num_layers": 2, "num_heads": 4},
-        {"name": "Small", "embed_dim": 128, "num_layers": 4, "num_heads": 8},
-        {"name": "Medium", "embed_dim": 256, "num_layers": 8, "num_heads": 16},
-        {"name": "Large", "embed_dim": 512, "num_layers": 12, "num_heads": 16},
-    ]
-
+    # Vary ONE dimension. The earlier version doubled embed_dim and grew num_layers at
+    # the same time, so neither variable's effect could be read off the output.
+    num_layers = 4
+    num_heads = 8
     vocab_size = 50000  # Typical vocabulary size
 
-    for config in configs:
+    print(f"Holding layers = {num_layers}, heads = {num_heads}, vocab = {vocab_size:,}\n")
+    print("  d | Total params |  Vocab proj (share) |    Blocks | Growth")
+    print("-" * 68)
+
+    previous_total = None
+    for embed_dim in (64, 128, 256, 512):
         model = GPT(
             vocab_size=vocab_size,
-            embed_dim=config["embed_dim"],
-            num_layers=config["num_layers"],
-            num_heads=config["num_heads"]
+            embed_dim=embed_dim,
+            num_layers=num_layers,
+            num_heads=num_heads
         )
 
-        # Count parameters
-        total_params = 0
-        for param in model.parameters():
-            total_params += param.size
+        total_params = sum(param.size for param in model.parameters())
+        # The two V x d vocabulary projections: the token/position embeddings and the
+        # LM head that maps back out to the vocabulary.
+        vocab_params = (sum(p.size for p in model.embedding_layer.parameters())
+                        + sum(p.size for p in model.lm_head.parameters()))
+        block_params = total_params - vocab_params
+        vocab_share = 100.0 * vocab_params / total_params
 
-        # Calculate memory requirements (4 bytes per float32 parameter)
-        memory_mb = (total_params * BYTES_PER_FLOAT32) / MB_TO_BYTES
+        growth = "-" if previous_total is None else f"{total_params / previous_total:.2f}x"
+        print(f"{embed_dim:3d} | {total_params:12,} | {vocab_params:11,} ({vocab_share:4.1f}%) | "
+              f"{block_params:9,} | {growth:>6}")
+        previous_total = total_params
 
-        print(f"{config['name']} Model:")
-        print(f"  Parameters: {total_params:,}")
-        print(f"  Memory: {memory_mb:.1f} MB")
-        print(f"  Embed dim: {config['embed_dim']}, Layers: {config['num_layers']}")
-        print()
-
-    print("💡 Parameter scaling is roughly quadratic with embedding dimension")
-    print("🚀 Real GPT-3 has 175B parameters, requiring ~700GB memory in float32 (~350GB in float16)!")
+    memory_mib = (previous_total * BYTES_PER_FLOAT32) / MB_TO_BYTES
+    print(f"\nWidest model above: {memory_mib:.1f} MiB of float32 weights")
+    print("💡 Doubling d only about doubles the total here, because the 2Vd vocabulary")
+    print("   projections dominate every row. Scaling is effectively LINEAR in d at this")
+    print("   width; the quadratic 12Ld^2 block term takes over only at production width,")
+    print("   where d is large enough for 12Ld^2 to outgrow 2Vd.")
+    print("🚀 Real GPT-3 has 175B parameters, requiring ~700 GB in float32 (~350 GB in float16)")
 
 if __name__ == "__main__":
     analyze_parameter_scaling()
@@ -1818,7 +1496,6 @@ def analyze_attention_memory():
     print("📊 Analyzing Attention Memory Complexity...")
     print("Why long context is expensive and how it scales\n")
 
-    embed_dim = 512
     num_heads = 8
     batch_size = 4
 
@@ -1826,7 +1503,7 @@ def analyze_attention_memory():
     sequence_lengths = [128, 256, 512, 1024, 2048]
 
     print("Attention Matrix Memory Usage:")
-    print("Seq Len | Attention Matrix Size | Memory (MB)")
+    print("Seq Len | Attention Matrix Size | Memory (MiB)")
     print("-" * 45)
 
     for seq_len in sequence_lengths:
@@ -1919,54 +1596,93 @@ def test_module():
     print("Run: tito module complete 13")
 
 # %% [markdown]
-"""
+r"""
 ## 🤔 ML Systems Reflection Questions
 
-Now that you've built a complete transformer architecture, let's think about its systems-level implications. Understanding memory scaling, gradient flow, and parameter distribution helps you make informed decisions when building and deploying production language models.
+Answer these questions to deepen your systems understanding of transformer parameter allocation, numerical stability, and inference execution dynamics:
 
-### Question 1: Attention Memory Complexity
+### Question 1: Attention Matrix Memory Footprint & Scaling Mechanics
+You evaluated multi-head attention activation memory across batch and sequence dimensions.
 
-You implemented multi-head attention that computes attention matrices of size (batch, heads, seq_len, seq_len).
+**1. Exact Activation Memory Derivation**:
+For sequence length $S = 1{,}024$, batch size $B = 4$, and $H = 8$ attention heads at float32 precision ($4\text{ bytes/element}$):
+$$\text{Elements per Layer} = B \times H \times S \times S = 4 \times 8 \times 1{,}024^2 = 33{,}554{,}432 \text{ elements} \quad (\mathbf{33.55\text{M values}})$$
+$$\text{Memory per Layer} = 33{,}554{,}432 \times 4\text{ B} = 134{,}217{,}728\text{ B} = \mathbf{134.22\text{ MB}} \quad (128.0\text{ MiB})$$
 
-**Consider**:
-- For a model with seq_len=1024, batch_size=4, num_heads=8, how many elements in the attention matrix?
-- If each element is 4 bytes (float32), how much memory per layer?
-- Why does doubling sequence length quadruple attention memory?
+**2. Context Doubling Impact ($S \to 2{,}048$)**:
+$$\text{Memory}_{S=2048} = 4 \times 8 \times 2{,}048^2 \times 4\text{ B} = 536{,}870{,}912\text{ B} = \mathbf{536.87\text{ MB}} \quad (512.0\text{ MiB})$$
+$$\text{Scaling Factor} = \frac{2{,}048^2}{1{,}024^2} = \mathbf{4\times \text{ (quadratic quadrupling)}}$$
 
-**Key Insight**: Attention memory scales quadratically with sequence length, which is why long-context models require specialized attention efficiency techniques (KV caching, sparse attention).
+**3. Architectural Implications**:
+Across a 32-layer transformer model (e.g. Llama-style), storing attention score matrices alone consumes:
+$$32 \times 536.87\text{ MB} = \mathbf{17.18\text{ GB of VRAM}}$$
+This activation footprint accounts only for the intermediate attention logits, excluding linear activations, MLP expansions, and parameter weights. This quadratic wall is why naive attention cannot scale to $32\text{K} \to 128\text{K}$ context windows without **FlashAttention** (Dao et al., 2022).
 
-### Question 2: Residual Connection Benefits
+---
 
-Your TransformerBlock uses residual connections (x + attention_output, x + mlp_output).
+### Question 2: Residual Connection Mathematics & Pre-LN vs Post-LN Stability
+Your `TransformerBlock` routes representations through residual connections ($x + \text{Attention}(\text{LN}(x))$).
 
-**Consider**:
-- What happens to gradients during backpropagation without residual connections?
-- How do residual connections help train deeper networks?
-- Why is pre-norm (LayerNorm before operations) preferred over post-norm?
+**1. Gradient Propagation in Deep Plain Networks**:
+In networks without skip connections ($x_{l+1} = F_l(x_l)$), the chain rule expands into an unbroken product of Jacobian matrices:
+$$\frac{\partial \mathcal{L}}{\partial x_0} = \frac{\partial \mathcal{L}}{\partial x_L} \prod_{l=0}^{L-1} \frac{\partial F_l}{\partial x_l} = \frac{\partial \mathcal{L}}{\partial x_L} \prod_{l=0}^{L-1} W_l \cdot \sigma'(\dots)$$
+If the singular values of $W_l$ deviate even slightly from unity ($\lambda \ne 1$), the gradient magnitude scales as $\lambda^L$, causing exponential vanishing ($\to 0$) or explosion ($\to \infty$) beyond 10–20 layers.
 
-**Key Insight**: Residual connections create "gradient highways" that allow gradients to flow directly from loss to early layers. This enables training networks with 100+ layers that would otherwise suffer from vanishing gradients.
+**2. The Additive Gradient Highway**:
+With residual connections ($x_{l+1} = x_l + F_l(x_l)$), unrolling the recurrence yields $x_L = x_0 + \sum_{l=0}^{L-1} F_l(x_l)$. Differentiating produces:
+$$\frac{\partial \mathcal{L}}{\partial x_0} = \frac{\partial \mathcal{L}}{\partial x_L} \left( I + \sum_{l=0}^{L-1} \frac{\partial F_l}{\partial x_l} \right)$$
+The identity matrix $I$ carries the gradient at unity gain. Even if all layer Jacobians $\frac{\partial F_l}{\partial x_l}$ vanish, the error signal still propagates directly back to the initial embeddings $x_0$.
 
-### Question 3: Parameter Scaling Analysis
+**3. Pre-LN vs Post-LN Gradient Mechanics**:
+- **Post-LN** ($x_{l+1} = \text{LN}(x_l + F_l(x_l))$): The residual stream is repeatedly normalized by $\frac{1}{\sigma_l}$. Gradients in late layers scale with the norm of earlier activations, causing gradient variance to explode near the input and requiring warm-up schedules.
+- **Pre-LN** ($x_{l+1} = x_l + F_l(\text{LN}(x_l))$): The residual stream remains completely clean and unscaled. Gradients flow directly through $I$, allowing models with 100+ layers to train reliably without warmup.
 
-Your GPT model combines embeddings, transformer blocks, and output projection.
+---
 
-**Calculate** (for embed_dim=512, vocab_size=10000, num_layers=6):
-- Token embedding parameters: vocab_size x embed_dim = 5.12M
-- Parameters per transformer block: approximately 12 x embed_dim^2 = 3.15M
-- Total model parameters: approximately 29.7M
+### Question 3: Comprehensive Parameter Budget & Distribution Analysis
+For a concrete GPT architecture with $d_{\text{embed}} = 512, V = 10{,}000, L = 6, H = 8, S_{\text{max}} = 1{,}024$:
 
-**Key Insight**: Most parameters in large language models come from the embedding layers (for large vocabularies) and the MLP layers (which use 4x expansion). Attention parameters are relatively small.
+**1. Exact Parameter Allocations**:
+- **Embedding Subsystem**:
+  - Token Embeddings: $V \times d_{\text{embed}} = 10{,}000 \times 512 = 5{,}120{,}000\text{ params}$ ($5.12\text{M}$).
+  - Learned Positional Embeddings: $S_{\text{max}} \times d_{\text{embed}} = 1{,}024 \times 512 = 524{,}288\text{ params}$ ($0.52\text{M}$).
+  - Total Embedding: $\mathbf{5{,}644{,}288\text{ parameters}}$.
+- **Per Transformer Block**:
+  - Self-Attention ($W_Q, W_K, W_V, W_O$ with biases): $4 \times (512 \times 512 + 512) = 1{,}050{,}624\text{ params}$ ($\approx 1.05\text{M}$).
+  - Layer Normalizations ($\text{LN}_1, \text{LN}_2$ with $\gamma, \beta$): $2 \times 2 \times 512 = 2{,}048\text{ params}$.
+  - MLP ($W_1, b_1, W_2, b_2$ with $4\times$ expansion): $(512 \times 2048 + 2048) + (2048 \times 512 + 512) = 2{,}099{,}712\text{ params}$ ($\approx 2.10\text{M}$).
+  - Total per Block: $1{,}050{,}624 + 2{,}048 + 2{,}099{,}712 = \mathbf{3{,}152{,}384\text{ parameters}}$.
+  - Block Weight Ratio: The MLP consumes $\frac{2.10\text{M}}{3.15\text{M}} = \mathbf{66.6\% \text{ of all block parameters}}$.
+- **Output Subsystem**:
+  - Final LayerNorm: $2 \times 512 = 1{,}024\text{ params}$.
+  - Language Modeling Head: $d_{\text{embed}} \times V = 512 \times 10{,}000 = 5{,}120{,}000\text{ params}$ ($5.12\text{M}$).
 
-### Question 4: Autoregressive Generation Efficiency
+**2. Total Model Footprint**:
+$$\text{Total Parameters} = 5{,}644{,}288 + 6 \times 3{,}152{,}384 + 1{,}024 + 5{,}120{,}000 = \mathbf{29{,}679{,}616\text{ parameters}} \quad (\approx \mathbf{29.68\text{M}})$$
+In 32-bit floating point ($4\text{ bytes/param}$), this model requires:
+$$\text{Storage Footprint} = 29{,}679{,}616 \times 4\text{ B} \approx \mathbf{118.72\text{ MB of VRAM}}$$
 
-Your generate() method processes the full sequence for each new token.
+---
 
-**Consider**:
-- Why is this inefficient for long sequences?
-- How does computation scale as you generate more tokens?
-- Can you spot the redundant work?
+### Question 4: Autoregressive Generation Inefficiency & The KV Cache Imperative
+Your `generate()` method produces text by repeatedly appending sampled tokens and re-running `forward()`.
 
-**Key Insight**: Generation involves significant redundant work that grows with sequence length. KV caching eliminates this redundancy by storing previously computed key-value pairs.
+**1. Algorithmic Complexity of Naive Generation**:
+To generate $N$ new tokens given a prompt of length $S$:
+- In step $1$, the forward pass computes representations for $S$ tokens.
+- In step $2$, the forward pass computes representations for $S + 1$ tokens.
+- In step $N$, the forward pass computes representations for $S + N - 1$ tokens.
+$$\text{Total Tokens Evaluated} = \sum_{t=S}^{S+N-1} t = S \cdot N + \frac{N(N-1)}{2} = \mathcal{O}(S \cdot N + N^2)$$
+Generating $1{,}000$ tokens from an initial prompt requires evaluating over $\mathbf{500{,}000\text{ token forward passes}}$.
+
+**2. Identification of Redundant Compute**:
+Because causal masking prohibits future tokens from affecting past tokens, the keys and values computed for tokens $0$ through $t-2$ **never change**. Recomputing $K$ and $V$ projections for historical tokens in every iteration is entirely redundant work.
+
+**3. The Memory Bandwidth Bottleneck & KV Cache**:
+During generation with batch size $B=1$, the model operates in a strictly **memory-bandwidth-bound** regime (arithmetic intensity $\approx 1\text{ FLOP/byte}$). In every single token step, all $29.7\text{M}$ weights must be transferred from GPU memory (HBM) to on-chip SRAM.
+- **The KV Cache Solution** (Module 18): By storing past key and value vectors in a pre-allocated tensor buffer, each new token step only requires projecting the single newest token:
+  $$Q_{\text{new}} = x_{\text{new}} W_Q, \quad K_{\text{new}} = x_{\text{new}} W_K, \quad V_{\text{new}} = x_{\text{new}} W_V$$
+  The newest key and value are appended to the cache, cutting per-token generation cost from $\mathcal{O}(t)$ projections to $\mathcal{O}(1)$ projections plus a linear attention gather.
 """
 
 # %% [markdown]
@@ -1993,8 +1709,12 @@ def demo_transformers():
     num_heads = 4
     block = TransformerBlock(embed_dim=embed_dim, num_heads=num_heads, mlp_ratio=4)
 
-    # Input: batch of 2 sequences, 8 tokens each, 64 dims (concrete values)
-    x = Tensor(np.ones((2, 8, embed_dim)))
+    # Input: batch of 2 sequences, 8 tokens each, 64 dims.
+    # The values must VARY across the feature axis. An all-ones token vector has zero
+    # feature variance, so LayerNorm returns exactly 0, both sublayers return 0, and the
+    # whole block collapses to the identity (a silent, very convincing non-demo).
+    demo_rng = np.random.default_rng(13)
+    x = Tensor(demo_rng.standard_normal((2, 8, embed_dim)))
 
     # Forward pass through transformer block
     output = block.forward(x)
@@ -2003,12 +1723,13 @@ def demo_transformers():
     print(f"Input shape:  {x.shape}  (2 sequences, 8 tokens, 64 dimensions)")
     print(f"Output shape: {output.shape}")
 
-    # Verify transformation occurred (values changed)
-    input_sum = np.sum(x.data)
-    output_sum = np.sum(output.data)
+    # Verify the transformation actually occurred. Compare element by element rather
+    # than by summing. Two opposite-signed deltas cancel in a sum, so a dead block can
+    # report a matching total and look alive.
+    delta = np.abs(output.data - x.data)
     print("\nData transformation:")
-    print(f"  Input sum:  {input_sum:.1f}  (initial values: all 1s)")
-    print(f"  Output sum: {output_sum:.1f}  (after attention + MLP)")
+    print(f"  Max |output - input|:  {np.max(delta):.4f}  (per-element change)")
+    print(f"  Mean |output - input|: {np.mean(delta):.4f}  (after attention + MLP)")
 
     print("\nTransformerBlock architecture:")
     print(f"  - Multi-head attention ({num_heads} heads)")
@@ -2021,8 +1742,6 @@ def demo_transformers():
 # %%
 if __name__ == "__main__":
     test_module()
-    print("\n")
-    demonstrate_transformer_integration()
     print("\n")
     demo_transformers()
 

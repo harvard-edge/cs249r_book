@@ -52,7 +52,7 @@ const LEFT_MENUS: MenuGroup[] = [
   {
     id: "read", label: "Read", items: [
       { icon: "bi-journal", label: "Volume I: Foundations", href: `${BASE}/vol1/` },
-      { icon: "bi-journal", label: "Volume II: At Scale", href: `${BASE}/vol2/` },
+      { icon: "bi-journal", label: "Volume II: Scaling", href: `${BASE}/vol2/` },
       { divider: true },
       { icon: "bi-file-pdf", label: "Volume I PDF", href: `${BASE}/vol1/assets/downloads/Machine-Learning-Systems-Vol1.pdf`, external: true },
       { icon: "bi-journal-text", label: "Volume I EPUB", href: `${BASE}/vol1/assets/downloads/Machine-Learning-Systems-Vol1.epub`, external: true },

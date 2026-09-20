@@ -4,17 +4,14 @@ name: '🔥 TinyTorch · 🔨 Build PDFs'
 # TinyTorch — Build PDF Artifacts
 # =============================================================================
 #
-# Builds the TinyTorch Lab Guide (Quarto → XeLaTeX) and the Research Paper
+# Builds the TinyTorch Book (Quarto → XeLaTeX) and the Research Paper
 # (LuaLaTeX), then uploads both as workflow artifacts. PDFs are injected
 # into the site during deployment (not committed to repo).
 #
-# The Guide PDF is produced by the Quarto book project at
-# tinytorch/quarto/pdf/, which reuses the website's .qmd chapter
-# sources (one directory up) and emits TinyTorch-Guide.pdf. The
 # Research Paper build is independent (from tinytorch/paper/).
 #
 # Flow:
-#   1. BUILD_GUIDE  — Quarto book render (XeLaTeX via TinyTeX)
+#   1. BUILD_BOOK   — diagrams to PDF, then Quarto book render (LuaLaTeX via TinyTeX)
 #   2. BUILD_PAPER  — LuaLaTeX compile of research paper
 #   3. SUMMARY      — Build status report
 #
@@ -22,7 +19,7 @@ name: '🔥 TinyTorch · 🔨 Build PDFs'
 #   - workflow_dispatch: manual
 #   - workflow_call: called by preview and publish workflows
 #
-# Deploys to: N/A (artifacts only — TinyTorch-Guide, TinyTorch-Paper)
+# Deploys to: N/A (artifacts only — TinyTorch-Book, TinyTorch-Paper)
 #
 # Related:
 #   - tinytorch-preview-dev.yml  — Downloads artifacts for dev deploy
@@ -46,9 +43,9 @@ on:
         required: false
         default: ''
     outputs:
-      guide_built:
-        description: "Whether the guide PDF was built successfully"
-        value: ${{ jobs.build-pdf-guide.result == 'success' }}
+      book_built:
+        description: "Whether the textbook PDF was built successfully"
+        value: ${{ jobs.build-pdf-book.result == 'success' }}
       paper_built:
         description: "Whether the paper PDF was built successfully"
         value: ${{ jobs.build-pdf-paper.result == 'success' }}
@@ -57,8 +54,8 @@ permissions:
   contents: read
 
 jobs:
-  build-pdf-guide:
-    name: '📚 Build Lab Guide'
+  build-pdf-book:
+    name: '📘 Build Textbook'
     runs-on: ubuntu-latest
 
     steps:
@@ -84,38 +81,26 @@ jobs:
         run: npm install -g @mermaid-js/mermaid-cli
 
       - name: 📦 Install build dependencies (apt + TeX)
-        # Single-source deps: make install-deps reads
-        # tinytorch/quarto/pdf/apt-requirements.txt and tex-requirements.txt
-        # and installs everything. Same command works locally.
-        working-directory: tinytorch/quarto
+        working-directory: tinytorch/book
         run: make install-deps
 
-      - name: 📚 Render Guide PDF (make pdf → Quarto + XeLaTeX)
-        # Delegate to the Makefile so CI and local dev share one build
-        # recipe. `make pdf` runs `figures` first (rsvg-convert SVG → PDF
-        # for every diagram), then `quarto render pdf/`, then the
-        # self-heal that moves the artifact to pdf/_build/ when Quarto's
-        # post-render cleanup errors on chapter *_files directories
-        # outside the project root.
-        #
-        # Canonical output: pdf/_build/TinyTorch-Guide.pdf
-        working-directory: tinytorch/quarto
-        # The Makefile itself handles the benign post-render cleanup error
-        # (see pdf/_build/ self-heal logic). CI just needs to verify the
-        # artifact exists and bail loudly if it doesn't.
+      - name: 📘 Render Textbook PDF (Quarto + LuaLaTeX)
+        # `make pdf` converts the book's SVG diagrams to the PDF siblings the
+        # svg-to-pdf filter points LaTeX at, then runs `quarto render`.
+        working-directory: tinytorch/book
         run: |
           make pdf
-          test -f pdf/_build/TinyTorch-Guide.pdf || {
-            echo "::error::pdf/_build/TinyTorch-Guide.pdf was not produced"
+          test -f _build/TinyTorch-Book.pdf || {
+            echo "::error::_build/TinyTorch-Book.pdf was not produced"
             exit 1
           }
-          echo "PDF produced at pdf/_build/TinyTorch-Guide.pdf ($(du -h pdf/_build/TinyTorch-Guide.pdf | cut -f1))"
+          echo "PDF produced at _build/TinyTorch-Book.pdf ($(du -h _build/TinyTorch-Book.pdf | cut -f1))"
 
-      - name: 📤 Upload PDF Guide
+      - name: 📤 Upload PDF Book
         uses: actions/upload-artifact@v7
         with:
-          name: TinyTorch-Guide
-          path: tinytorch/quarto/pdf/_build/TinyTorch-Guide.pdf
+          name: TinyTorch-Book
+          path: tinytorch/book/_build/TinyTorch-Book.pdf
           retention-days: 90
 
   build-pdf-paper:
@@ -145,7 +130,7 @@ jobs:
   summary:
     name: '📊 Build Summary'
     runs-on: ubuntu-latest
-    needs: [build-pdf-guide, build-pdf-paper]
+    needs: [build-pdf-book, build-pdf-paper]
     if: always()
 
     steps:
@@ -155,7 +140,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| PDF | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 📚 Lab Guide | ${{ needs.build-pdf-guide.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📘 Textbook | ${{ needs.build-pdf-book.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 📑 Research Paper | ${{ needs.build-pdf-paper.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Usage" >> $GITHUB_STEP_SUMMARY

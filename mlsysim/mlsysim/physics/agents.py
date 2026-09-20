@@ -23,6 +23,10 @@ def calc_trajectory_step_time(thinking_time, tool_time, verification_time=None):
     """
     Calculate the total wall-clock duration of a single agentic trajectory step.
 
+    Source: modeling assumption. The step is a serial sum of inference, tool,
+    and verification time, not taken from a published model; queueing,
+    retries, and parallel tool calls are ignored.
+
     Parameters
     ----------
     thinking_time : Quantity
@@ -50,6 +54,13 @@ def calc_trajectory_reliability(step_success_rate: float, num_steps: int, verifi
     Model:
         P_step_effective = step_success_rate + (1 - step_success_rate) * verifier_recovery_rate
         P_trajectory = (P_step_effective) ^ num_steps
+
+    Source: the product over steps is the series-system reliability model
+    for independent components, R_S = prod(R_i) (NIST/SEMATECH e-Handbook of
+    Statistical Methods, Sec. 8.1.8.2, "Series model"), applied here with
+    identical steps. The verifier_recovery_rate term is a modeling assumption,
+    not taken from a published model; it treats recovery as independent of
+    the step and of every other step.
 
     Parameters
     ----------
@@ -87,6 +98,14 @@ def calc_pareto_scale(mean_length: float, alpha: float) -> float:
     The mean exists only for ``alpha > 1``; below that the distribution has no
     finite mean and a scheduler cannot be sized from an average at all.
 
+    Source: Pareto type I distribution function (Nila, Das, and Balakrishna,
+    "Goodness-of-fit testing for the Pareto type-I distribution based on a
+    mean residual life characterization", arXiv:2609.04933, Eq. 1) and its
+    conditional mean alpha * t / (alpha - 1) (same paper, Theorem 2, stated
+    for x_min = 1; the scaled form follows by rescaling). That agent
+    trajectory lengths follow a Pareto tail is a modeling assumption of this
+    package, not a fitted measurement.
+
     Parameters
     ----------
     mean_length : float
@@ -114,6 +133,10 @@ def calc_pareto_survival(length: float, scale: float, alpha: float) -> float:
 
     Model:
         P(N > x) = (x_min / x) ** alpha    for x >= x_min
+
+    Source: Pareto type I survival function, 1 - F(x) with
+    F(x) = 1 - (x_min / x) ** alpha (Nila, Das, and Balakrishna,
+    arXiv:2609.04933, Eq. 1).
 
     Parameters
     ----------
@@ -151,6 +174,11 @@ def calc_pareto_conditional_survival(attained: float, target: float, alpha: floa
     which is why attained service is the best remaining-work estimator a
     non-clairvoyant scheduler has.
 
+    Source: the ratio S(target) / S(attained) of the Pareto type I survival
+    function (Nila, Das, and Balakrishna, arXiv:2609.04933, Eq. 1), by the
+    definition of conditional probability. The scheduling interpretation
+    above is this package's framing.
+
     Parameters
     ----------
     attained : float
@@ -182,6 +210,10 @@ def calc_pareto_mean_residual_life(attained: float, alpha: float) -> float:
     the formal statement of why the session closest to finishing is the one that
     has barely started.
 
+    Source: Pareto type I mean residual life m(x) = x / (alpha - 1) for
+    x >= x_min and alpha > 1 (Nila, Das, and Balakrishna, arXiv:2609.04933,
+    Eq. 3).
+
     Parameters
     ----------
     attained : float
@@ -212,6 +244,14 @@ def calc_radix_cache_effective_latency(
 ):
     """
     Calculate time to first token and total response time under Radix tree prefix caching.
+
+    Source: the reuse mechanism is RadixAttention, which reuses the KV cache
+    of requests that share a prompt prefix (Zheng et al., "SGLang: Efficient
+    Execution of Structured Language Model Programs", arXiv:2312.07104). The
+    latency expression, uncached_tokens / prefill_rate plus
+    output_tokens / decode_rate, is a modeling assumption of this package
+    (constant throughputs, no queueing, no growth of per-token cost with
+    context length), not taken from the paper.
 
     Parameters
     ----------
@@ -259,6 +299,13 @@ def calc_test_time_compute_cost(
     """
     Calculate total test-time compute expenditure for parallel or search-based generation.
 
+    Source: modeling assumption. The total is linear cost accounting,
+    num_samples * (sample + verifier) + aggregation, not taken from a
+    published model. Best-of-N and verifier-guided beam search, the strategies
+    it prices, are described in Snell et al., "Scaling LLM Test-Time Compute
+    Optimally can be More Effective than Scaling Model Parameters",
+    arXiv:2408.03314.
+
     Parameters
     ----------
     base_sample_cost : Quantity
@@ -290,6 +337,13 @@ def calc_multi_agent_coordination_overhead(num_agents: int, avg_message_tokens: 
 
     In a fully connected interaction graph, communication volume scales as O(N^2);
     in a hierarchical or centralized coordinator topology, volume scales as O(N).
+
+    Source: the edge counts are graph combinatorics. A complete graph on N
+    agents has N(N-1)/2 undirected edges (Weisstein, "Complete Graph",
+    MathWorld), so one message in each direction is N(N-1) messages; a star
+    around one coordinator has N-1 edges, or 2(N-1) messages. Charging
+    avg_message_tokens per directed message per round is a modeling
+    assumption, not taken from a published model.
 
     Parameters
     ----------
@@ -337,6 +391,15 @@ def calc_multiagent_speedup(num_agents: int, s_serial: float, alpha: float = 0.0
     - alpha is the quadratic synchronization / pairwise cross-talk coefficient (O(M^2)).
     - beta is the linear coordination / supervisor provisioning coefficient (O(M)).
 
+    Source: s_serial + (1 - s_serial) / M is Amdahl's law,
+    Speedup = 1 / (s + p / N) with s + p = 1 (as stated in Gustafson,
+    "Reevaluating Amdahl's Law", 1988). The alpha * M^2 and beta * M overhead
+    terms are a modeling assumption of this package, not taken from a
+    published model. They differ from Gunther's Universal Scalability Law,
+    C(p) = p / (1 + sigma * (p - 1) + kappa * p * (p - 1)) (Gunther,
+    arXiv:0808.1431, Eq. 5), whose normalized time 1 / C(p) grows linearly,
+    not quadratically, in p.
+
     Parameters
     ----------
     num_agents : int
@@ -376,6 +439,10 @@ def calc_multiagent_optimal_concurrency(s_serial: float, alpha: float, beta: flo
 
     When alpha == 0 and beta == 0, S(M) approaches 1/s monotonically as M -> inf.
     When alpha > 0, the cubic polynomial has strictly one positive real root by Descartes' Rule of Signs.
+
+    Source: derived here by setting dD/dM = 0 for the calc_multiagent_speedup
+    model, so it inherits that model's modeling assumption (the alpha and beta
+    overhead terms are not taken from a published model).
 
     Parameters
     ----------

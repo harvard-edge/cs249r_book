@@ -40,11 +40,18 @@ def auto_scale_tokens(q):
 def auto_scale_latency(q):
     if q is None:
         return "---"
-    return f"{q.to('ms').magnitude:,.1f} ms"
+    ms_val = q.to('ms').magnitude
+    return f"{ms_val:,.1f} ms"
+
+def auto_scale_bytes(q):
+    if q is None:
+        return "---"
+    mib_val = q.to('MiB').magnitude
+    return f"{mib_val:,.0f} MiB"
 
 print("### Agent Architectures & Execution Harnesses")
-print("| Agent Profile | Paradigm | Context Window | Working Memory | Sandbox Latency | Reference Model | Serving Node |")
-print("|:---|:---|:---:|:---:|:---:|:---|:---|")
+print("| Agent Profile | Paradigm | Context Window | Working Memory | Sandbox Boot | Snapshot Restore | Sandbox Footprint | Reference Model | Serving Node |")
+print("|:---|:---|:---:|:---:|:---:|:---:|:---:|:---|:---|")
 
 categories = [
     ("Coding", getattr(mlsysim.Agents, "Coding", None)),
@@ -56,17 +63,19 @@ categories = [
 for cat_name, cat_obj in categories:
     if not cat_obj:
         continue
-    for attr_name in dir(cat_obj):
+    for attr_name in sorted(dir(cat_obj)):
         if attr_name.startswith("_"):
             continue
         item = getattr(cat_obj, attr_name)
         if hasattr(item, "name") and hasattr(item, "context_window"):
             ctx = auto_scale_tokens(item.context_window)
             wm = auto_scale_tokens(item.working_memory)
-            lat = auto_scale_latency(item.sandbox_startup_latency)
+            boot = auto_scale_latency(item.sandbox_startup_latency)
+            restore = auto_scale_latency(item.sandbox_snapshot_restore_latency)
+            mem = auto_scale_bytes(item.sandbox_memory_footprint)
             model = item.reference_model.name if item.reference_model else "---"
             node = item.serving_node.name if item.serving_node else "---"
-            print(f"| **{item.name}** | {item.paradigm} | {ctx} | {wm} | {lat} | {model} | {node} |")
+            print(f"| **{item.name}** | {item.paradigm} | {ctx} | {wm} | {boot} | {restore} | {mem} | {model} | {node} |")
 
 print("\n")
 ```
@@ -78,14 +87,19 @@ print("\n")
 Agent systems transition foundation models from static advisory oracles into active processors:
 
 1. **Coding & Software Engineering Agents (`Agents.Coding.SWE_Bench_Runner`)**
-   - ReAct and Plan-and-Solve patterns executing inside isolated, hermetic microVM sandboxes (Firecracker CoW fork latency $< 5\text{ ms}$).
-   - Bounded by token context limits and deterministic AST / unit-test verification oracles.
-2. **Deliberative Reasoning Agents (`Agents.Deliberation.TreeSearch`)**
+   - ReAct and Plan-and-Solve execution patterns executing inside isolated, hermetic microVM sandboxes (Firecracker CoW fork latency $< 5\text{ ms}$, snapshot restore $< 15\text{ ms}$, $512\text{ MiB}$ memory footprint).
+   - Served on high-density execution nodes (`Systems.Nodes.HGX_H100_EPYC`) with 192 AMD EPYC CPU cores to prevent host core contention during parallel microVM execution.
+   - Bounded by token context limits ($128\text{k}$ tokens) and deterministic AST / unit-test verification oracles across trajectory steps ($\le 30$ steps).
+2. **Developer Workstation Baseline (`Agents.Coding.SWE_Bench_Workstation`)**
+   - Local unified memory developer baseline running on `Systems.Nodes.Workstation_M3Max` (16-core CPU, 128 GiB unified LPDDR5X @ 400 GB/s) paired with `Models.Language.Llama3_8B`.
+3. **Reference Platforms (`Agents.Platforms` / `AgentPlatforms`)**
+   - Canonical whole-system envelopes binding compute nodes, foundation models, and sandboxes: `Agents.Platforms.Cloud_DGX_H100` for enterprise clusters and `Agents.Platforms.Workstation_Apple` for local developer iteration.
+4. **Deliberative Reasoning Agents (`Agents.Deliberation.TreeSearch`)**
    - Allocates test-time inference compute through tree search / MCTS ($N=8$ branches) scored by Process Reward Models (PRMs).
    - Multiplies branch capacity via PagedAttention Copy-on-Write KV-cache page sharing ($38.75\times$ expansion).
-3. **Multi-Agent Fleets (`Agents.MultiAgent.SupervisorWorker`)**
+5. **Multi-Agent Fleets (`Agents.MultiAgent.SupervisorWorker`)**
    - Coordinates specialized workers (Coder, Reviewer, Tester) via asynchronous message buses with bounded coordination overhead ($\beta = 0.030$).
-4. **Real-Time Interactive Agents (`Agents.Interactive.StreamingVoice`)**
+6. **Real-Time Interactive Agents (`Agents.Interactive.StreamingVoice`)**
    - Streaming speech-to-speech pipelines bound by human conversational latency budgets ($\text{TTFT} \le 200\text{ ms}$).
 
 ---
@@ -95,13 +109,23 @@ Agent systems transition foundation models from static advisory oracles into act
 ```python
 import mlsysim
 
-# Load agent architectures
+# Load agent architectures and canonical platforms
 swe = mlsysim.Agents.Coding.SWE_Bench_Runner
-tree = mlsysim.Agents.Deliberation.TreeSearch
-fleet = mlsysim.Agents.MultiAgent.SupervisorWorker
+swe_local = mlsysim.Agents.Coding.SWE_Bench_Workstation
+cloud_platform = mlsysim.Agents.Platforms.Cloud_DGX_H100
 
 # Access vetted parameters
-print(swe.context_window)            # 128,000 token
-print(tree.deliberation_branches)    # 8
-print(fleet.coordination_overhead_beta) # 0.03
+print(swe.context_window)                   # 128,000 token
+print(swe.sandbox_startup_latency)          # 5.0 ms
+print(swe.sandbox_snapshot_restore_latency) # 15.0 ms
+print(swe.sandbox_memory_footprint)         # 512 MiB
+print(swe.max_trajectory_steps)             # 30
+print(swe.serving_node.host_cpu)            # Dual AMD EPYC 9654
+print(swe.serving_node.host_cpu_cores)      # 192
+
+# Deliberation and multi-agent coordination
+tree = mlsysim.Agents.Deliberation.TreeSearch
+fleet = mlsysim.Agents.MultiAgent.SupervisorWorker
+print(tree.deliberation_branches)           # 8
+print(fleet.coordination_overhead_beta)     # 0.03
 ```

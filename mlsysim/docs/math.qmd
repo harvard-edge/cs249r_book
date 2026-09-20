@@ -361,7 +361,61 @@ Here $T_{\text{chunk},i}$ is the compute time for chunk $i$ plus one dispatch ta
 
 This estimates a coarse scheduling proxy used by chunked-prefill systems: smaller chunks do not reduce total prefill compute, but they reduce the largest decode stall caused by a co-scheduled prefill. MLSys·im does not implement Sarathi-Serve's full scheduler. Disaggregated systems such as Splitwise and DistServe mitigate prefill/decode interference by assigning the phases to separate resources, trading scheduler interference for KV-cache transfer and resource-partitioning costs [@agrawal2025; @patel2024; @zhong2024distserve].
 
-### 4.5 Serving Capacity Planning {#sec-serving-capacity}
+### 4.5 KV Allocation and Batch Capacity {#sec-batching}
+
+*Implemented in [`mlsysim.solvers.ContinuousBatchingModel`](api/solvers.ContinuousBatchingModel.qmd).*
+
+Decode is memory-bound, so the number of requests sharing a step is the throughput lever, and the KV-cache allocator decides how many fit. Let $M_{\text{KV}}$ be the HBM left after the weights and $k$ the KV bytes per token ([KV-Cache Size](#sec-kvcache)). A static allocator reserves the maximum sequence length $S_{\max}$ for every request. A paged allocator divides the budget into blocks of $p$ tokens and hands a request of $S$ tokens $\lceil S/p \rceil$ of them on demand:
+
+$$
+N_{\text{static}} = \left\lfloor \frac{M_{\text{KV}}}{k\,S_{\max}} \right\rfloor
+\qquad
+N_{\text{paged}} = \left\lfloor \frac{\lfloor M_{\text{KV}} / (k\,p) \rfloor}{\mathbb{E}\left[\lceil S/p \rceil\right]} \right\rfloor
+$$
+
+The scheduler's maximum batch size caps both. Request lengths are $S = \min(X, S_{\max})$ with $X$ exponential, scaled so that $\mathbb{E}[S] = \bar{S}$: most requests are short, and the rare long one is cut off at the context window. Summing tail probabilities gives the expected block count in closed form
+
+$$
+\mathbb{E}\left[\lceil S/p \rceil\right] = \sum_{j=0}^{K-1} P(S > jp) = \frac{1 - r^{K}}{1 - r},
+\qquad r = e^{-p/\mu},\quad K = \lceil S_{\max}/p \rceil
+$$
+
+The unused share of each allocation (internal fragmentation) is $1 - \bar{S}/S_{\max}$ for static reservation and $1 - \bar{S}/\left(p\,\mathbb{E}[\lceil S/p \rceil]\right)$ for paging. The paged tail averages about $p/2$ tokens per request, so page size matters even when $S_{\max}$ divides evenly by $p$. Memory-bound decode streams only the tokens requests have filled, so for either allocator
+
+$$
+t_{\text{step}} = \frac{|W| + N\,\bar{S}\,k}{\text{Memory\_BW}},
+\qquad R_{\text{tok}} = \frac{N}{t_{\text{step}}}
+$$
+
+and `speedup_vs_static` is $R_{\text{tok}}$ at $N_{\text{paged}}$ divided by $R_{\text{tok}}$ at $N_{\text{static}}$.
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $M_{\text{KV}}$ | HBM capacity left for the KV cache after the weights |
+| $k$ | KV bytes per token |
+| $S_{\max}$ | Longest context a request may reach (`max_seq_len`) |
+| $\bar{S}$ | Mean tokens a request fills (`mean_request_tokens`; defaults to $S_{\max}$) |
+| $p$ | Block (page) size in tokens (`page_size`) |
+| $\mu$ | Exponential scale chosen so that $\mathbb{E}[\min(X, S_{\max})] = \bar{S}$ |
+
+::: {.callout-tip collapse="true"}
+## Worked Example: Llama-3 8B on H100 with an 8K Context
+
+FP16 KV costs $k = 131{,}072$ bytes per token, so the H100's KV budget holds about 532,831 tokens. With $S_{\max} = 8192$ and $\bar{S} = 2048$:
+
+- **Static reservation:** $\lfloor 532{,}831 / 8192 \rfloor = 65$ requests, with 75% of every reservation unused
+- **Paged, $p = 16$:** about 128.5 blocks per request, so 259 requests with 0.4% unused
+- **Paged, $p = 2048$:** 165 requests with 36% unused
+- **Decode throughput:** paged at $p = 16$ runs about 1.56× static
+
+Allocation policy matters only when memory binds. If the scheduler caps the batch below 65, both allocators admit the same requests and the speedup is 1.
+
+Source: `ContinuousBatchingModel`. The Monte Carlo allocators in the [KV-cache tutorial](tutorials/03_kv_cache.qmd) admit the same 65 and 259 requests; the tutorial's throughput ratio is lower because its single random draw happens to give the first 65 requests a below-average length.
+:::
+
+Kwon et al. profile contiguous pre-allocation and find that only 20.4% to 38.2% of KV-cache memory holds token states. The rest is reserved slots for future tokens, internal fragmentation from over-provisioning for the maximum length, and external fragmentation from the allocator. PagedAttention limits each request's waste to one block [@kwon2023]. The static baseline here is max-length reservation, which captures the first two kinds of waste and is modeled without external fragmentation. Exact-size and power-of-two contiguous allocators, which trade reservation waste for external fragmentation, are not modeled. Sizing both allocators with every request at its full length is a peak-occupancy view: a request mid-generation holds fewer paged blocks, so paged capacity is conservative.
+
+### 4.6 Serving Capacity Planning {#sec-serving-capacity}
 
 *Implemented in [`mlsysim.solvers.ServingCapacityModel`](api/solvers.ServingCapacityModel.qmd).*
 
@@ -384,9 +438,9 @@ P99_{\text{request}} \approx T_{\text{base}} + P99_{\text{queue}}(Q, Q_{\text{re
 \le T_{\text{target}}
 $$
 
-This is deliberately a capacity model. It does not simulate request arrivals, preemption, or scheduler internals.
+Per-replica throughput $R_{\text{tok}}$ comes from paged allocation in [KV Allocation and Batch Capacity](#sec-batching), so passing `mean_request_tokens` below `max_seq_len` raises the batch each replica can hold. Base latency is then evaluated at the mean request length. This is deliberately a capacity model. It does not simulate request arrivals, preemption, or scheduler internals.
 
-### 4.6 Serving Cost Dominance
+### 4.7 Serving Cost Dominance
 
 At production scale, serving costs dominate training:
 

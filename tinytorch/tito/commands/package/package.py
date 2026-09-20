@@ -53,7 +53,7 @@ class PackageCommand(BaseCommand):
                 "[dim]Examples:[/dim]\n"
                 "[dim]  tito package reset --force[/dim]\n"
                 "[dim]  tito package nbdev --export[/dim]\n\n"
-                "[dim]Note: Use 'tito module export' for exporting modules[/dim]",
+                "[dim]Note: Use 'tito dev export' for exporting modules[/dim]",
                 title="Package Command Group",
                 border_style="bright_cyan"
             ))

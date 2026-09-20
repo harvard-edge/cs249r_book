@@ -168,10 +168,13 @@ class MLSysBookCLI:
         quality_table.add_row(_cmd("info concepts|headers|acronyms"), "Extract concepts, headers, acronyms", _cmd("./binder/binder info concepts --vol1"))
         quality_table.add_row(_cmd("bib mechanical|normalize|sync"), "Bibliography management", _cmd("./binder/binder bib sync --vol1"))
         quality_table.add_row(_cmd("render plots [--vol1|chapter]"), "Render matplotlib plots to PNG gallery", _cmd("./binder/binder render plots --vol1"))
+        quality_table.add_row(_cmd("render figures --vol1|--vol2"), "Render figure PDF & contact sheets", _cmd("./binder/binder render figures --vol2"))
+        quality_table.add_row(_cmd("build figures --vol1|--vol2"), "Alias for render figures", _cmd("./binder/binder build figures --vol2"))
         quality_table.add_row(_cmd("layout --vol1|--vol2"), "Build/reuse PDF and emit auto-layout plan", _cmd("./binder/binder layout --vol1 --no-build"))
         quality_table.add_row(_cmd("layout chapter <name> --volN --aux <file>"), "Mapped isolated PDF component", _cmd("./binder/binder layout chapter ml_workflow --vol1 --aux full.aux"))
         quality_table.add_row(_cmd("layout check <pdf> [--threshold]"), "Flag PDF pages with excessive bottom whitespace", _cmd("./binder/binder layout check book.pdf"))
         quality_table.add_row(_cmd("layout tables --vol1|--vol2"), "Render table-only PDF audit/contact sheets", _cmd("./binder/binder layout tables --vol2"))
+        quality_table.add_row(_cmd("layout figures --vol1|--vol2"), "Render figure-only PDF audit/contact sheets", _cmd("./binder/binder layout figures --vol2"))
 
         # Newsletter Commands
         nl_table = Table(show_header=True, header_style="bold magenta", box=None)
@@ -275,6 +278,35 @@ class MLSysBookCLI:
         no_cover = False
         print_marks = False
         remaining = []
+        normalized_args = []
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            lower = arg.lower()
+            if lower == "--vol" and i + 1 < len(args):
+                val = args[i + 1]
+                v_num = val.removeprefix("vol").removeprefix("v")
+                normalized_args.append(f"--vol{v_num}")
+                i += 2
+                continue
+            elif lower.startswith("--vol="):
+                val = arg.split("=", 1)[1]
+                v_num = val.removeprefix("vol").removeprefix("v")
+                normalized_args.append(f"--vol{v_num}")
+                i += 1
+                continue
+            elif lower == "--chapter" and i + 1 < len(args):
+                normalized_args.append(args[i + 1])
+                i += 2
+                continue
+            elif lower.startswith("--chapter="):
+                normalized_args.append(arg.split("=", 1)[1])
+                i += 1
+                continue
+            normalized_args.append(arg)
+            i += 1
+        args = normalized_args
+
         explicit_volumes = set()
         for arg in args:
             lower = arg.lower()
@@ -317,6 +349,8 @@ class MLSysBookCLI:
                 volume = "tinytorch"
             elif lower == "--all":
                 build_all = True
+            elif lower == "--isolated":
+                skip_validate = True
             elif lower == "--skip-hygiene":
                 # Emergency bypass for the EPUB pre-render hygiene check
                 # added in the fix/epub-issues work. See
@@ -525,6 +559,9 @@ class MLSysBookCLI:
             console.print("[red]`binder build reset` was removed.[/red]")
             console.print("[yellow]Use: ./binder/binder reset <html|pdf|epub|all> [--vol1|--vol2][/yellow]")
             return False
+
+        if args and args[0].lower() in ("figures", "diagrams"):
+            return self.handle_render_command(args)
 
         if "-h" in args or "--help" in args:
             console.print("Usage: ./binder/binder build [html|pdf|epub] [chapters] [--vol1|--vol2|--vol3|--vol4|--all] [--skip-hygiene] [--skip-validate] [--layout] [--no-cover] [--print-marks] [--json] [--parallel [N]] [--each-chapter] [--keep-workspaces]", markup=False)

@@ -1,0 +1,67 @@
+# Volume IV seminar: how the labs become one project
+
+**Status:** Course operating plan for the proposed LeRobot, SO-101, and UNO Q stack. The [competency matrix](student-competencies.md) defines the transferable outcomes; the [fourteen lab blueprints](lab-blueprints.md) specify student experiments and exit checks; the [SO-101 station draft](so101-uno-q-course.md) gives the hardware tests. This plan assumes fourteen teaching meetings and a team capstone. Staff must test the STM32-to-servo command path and a local policy before releasing arm-based assignments.
+
+## The course claim
+
+The unit of work is a **physical episode**, not an inference. A learned model proposes a bounded action; the MCU may refuse it; an actuator changes the world; sensors reveal what actually happened; and the system uses that result to choose a different next action or abstain. The [Volume IV scope test](../../books/vol4/01_boundary/01_boundary.qmd) requires all three: a learned component, consequential physical feedback, and delegated actuation within an independent permission boundary. Merely running a classifier or VLA on the UNO Q does not pass.
+
+The common capstone is a **disturbance-and-recovery manipulation cell**. The SO-101 must make progress toward a visible object and a marked destination. After its first move, staff safely shift the target, withhold or interrupt a move, or create an incomplete pickup. The system must detect a discrepancy in **object or task state**, not only servo readback, then correct its proposal or abstain. Students compare the learned system with a scripted baseline under matched disturbances. Grasp-and-place is an extension after students reproduce the simpler week-6 visual reach. A language instruction earns a place only if changing it changes the physical plan and outcome in the same scene.
+
+The pass criteria are physical: task completion or justified abstention on held-out starts and disturbances; discrepancy detection and correction time; final object and arm state; stale-action rejection; intervention count; and loop latency. Report model accuracy and memory because they constrain the system, but neither establishes course success. A measured failure with a defensible release decision can meet an engineering learning objective; an attractive unmeasured demonstration cannot.
+
+| Volume IV principle | Lab evidence that makes it visible |
+|:---|:---|
+| Physical causality and irreversibility | Weeks 2 and 11 compare commanded motion with settled tool and object state; a later command must deal with the state actually produced. |
+| Endogenous data and compounding drift | Weeks 4, 6, and 8 preserve the next observation after each action and test a changed scene against an open-loop continuation. |
+| Proposal–permission privilege | Weeks 3 and 10 demonstrate that the STM32 can reject a learned proposal before motion, including under delay and disconnection. |
+| Governed authority and release | Weeks 12–14 freeze an operating envelope and evaluate repeated physical failures, abstentions, human interventions, and a bounded release decision. |
+
+These are teaching-scale demonstrations of the book's principles. The SO-101 servo and cutoff setup is not a certified safety system or an implementation of every high-rate mechanism described in the manuscript.
+
+## Readings and ownership
+
+The [instructor syllabus](../../instructors/vol4/README.md) assigns Volume IV chapters and links each week to its own lab brief. LeRobot documentation is an implementation reference for the staff-qualified station, not a substitute for the chapter or lab. No incomplete external robotics course is assigned. This seminar adds weekly physical experiments and assessment: measurements, local UNO Q inference, STM32-permitted action, simulation-to-hardware comparison, fault response, and a defended capstone.
+
+## The course contract
+
+Every team develops one physical task through the semester. The common stack is a LeRobot-compatible robot and episode dataset, a simulator, a versioned Hugging Face policy, Qualcomm-side inference on the UNO Q for the required local loop, and an STM32-controlled action boundary. The student's final demonstration must trace **physical state → observation → learned proposal → mapped command → MCU-enforced command → measured response → new observation → revised decision**. It must compare a nonlearned baseline, repeat trials, and handle a seeded fault. The [book's scope test](../../books/vol4/01_boundary/01_boundary.qmd) and [four action taps](../../books/vol4/05_data/05_data.qmd) set that standard.
+
+The first offering should use one staff-qualified disturbance-and-recovery task as the common reference: reach toward a soft block from varied starts, then adapt to a safely changed target or incomplete move. The week-6 minimum slice is this guarded learned reach; teams add grasp and placement only after that loop works. Teams can investigate different policies, data coverage, simulation errors, or intervention strategies while sharing the task and trial protocol. A team can propose another task by week 2 if staff can verify its physical envelope, outcome measure, data path, and fallback. [LeKiwi, a small rover, or a thermal cell](so101-uno-q-course.md) become additional project bodies only after separate qualification. The SO-101 is the book's manipulation class; the mobility and process/energy classes are taught through comparison and, where hardware is ready, shared stations. No single arm trial is presented as evidence for all three physical regimes.
+
+## Weekly rhythm
+
+Each teaching week has two meetings. **Meeting A** is a provisional 90-minute systems seminar chaired by Vijay: 10–15 minutes framing one question from a focused Volume IV reading, a rotating student-led discussion and raw team trace, then critique of competing explanations and the next experiment. No new lecture deck or research-paper presentation is required every week. **Meeting B** is a provisional three-hour supervised lab led by Andrea: he states the station envelope and common measurement, teams work on their project, and bench reviews close with the next experiment. These durations are planning assumptions until ETH assigns the timetable.
+
+Before the seminar, students predict a failure or measurement from the reading. After the lab, each team adds a brief entry to one shared, versioned **project notebook**: raw trace or episode, physical metric, discrepancy, and next experiment, linking code or model revisions when relevant. Andrea checks this at the bench; only weeks 2, 6, 10, and 14 require graded packets. Each lab is a prompt for the team's single project, not a separate build or report. Rotating roles—operator, experiment lead, and evidence reviewer—give each student hands-on and analytical responsibility.
+
+Staff supply calibrated reference hardware, a frozen board image, a starter dataset and compact checkpoint, a rule baseline, two pinned simulation fixtures, fault scripts, and replay traces. Staff test the STM32-to-servo interface before term; students exercise, measure, and challenge that boundary rather than build it from scratch. Students do the measurements, comparisons, policy changes, and system integration. A shared arm needs reserved bench time during and outside the scheduled lab; the pilot determines how many teams one station can serve without turning studio time into a queue. Replay supports preparation and recovery from equipment outages, but the week-6 and final demonstrations require a witnessed physical loop on tested hardware.
+
+## Semester milestones
+
+1. **Weeks 1–2, frame a physical task.** Identify the body, safe state, sensors, actions, outcome, baseline, and one physical failure that matters. The **week-2 charter** fixes the preliminary operating envelope, observation/action contract, trial protocol, kit allocation, and fallback.
+2. **Weeks 3–6, build the common loop.** Exercise MCU permission; record synchronized LeRobot episodes and the four action taps; train or adapt a compact policy; run it locally on the Q; introduce a safe change after the first action; observe and correct or abstain. The **week-6 demonstration** requires a live model → permitted action → measured physical result → changed world observation → revised decision, compared with a rule. A new camera frame with an unchanged preplanned command is insufficient.
+3. **Weeks 7–9, explain and improve the policy.** Compare the staff-supplied simulators with held-out hardware traces. In weeks 8–9, teams choose one deeper investigation—ACT action chunks or language/model placement—and discuss the other from a staff trace. The **week-9 design review** is formative and records the model choice, simulation gap, and local deployment budget in the notebook.
+4. **Weeks 10–12, govern the machine.** Refuse stale or excessive proposals, interrupt and rearm, then test recovery from incomplete motion. The **week-10 authority demonstration** is graded. Week 12 can be a corrective demonstration or project repair; there is no separate revision report or mandatory retraining exercise.
+5. **Weeks 13–14, defend a bounded claim.** Week 13 is an ungraded rehearsal and repair buffer. Freeze artifacts and run repeated, unfamiliar physical trials with a seeded safe fault. The **week-14 capstone** includes a concise written system report, live demonstration, raw evidence packet, baseline comparison, and defended release or no-release claim.
+
+The [fourteen lab blueprints](lab-blueprints.md) offer weekly experiments and evidence standards. The first offering uses four graded milestones, while other briefs guide formative studio work or a chosen project path. The phases above are stable even if staff substitute another qualified robot, policy, or simulator. Chapters supply focused reading sections for the week's mechanism; there is no one-chapter-one-lab quota.
+
+## How projects diverge after the common loop
+
+Weeks 1–6 give all students the same system tools. After the week-6 demonstration, each team has a specific **physical question** and must still address all four competency quadrants. Possible SO-101 projects include instruction-conditioned sorting, active visual inspection before a grasp, and recovery from an incomplete grasp or placement. Each project inherits the disturbance-and-recovery test, a matched rule baseline, a held-out physical trial set, and at least one fault. A project may add a mobile or thermal station if staff have qualified it, but the assessment follows the same evidence contract. The arm is a bounded proxy for the book's contact archetype; seminar comparisons with kinetic and thermal systems expose different failure deadlines, while only separately qualified stations can support hands-on claims about those regimes.
+
+The project proposal names: the physical task and success sensor; the learned decision that changes action; the nonlearned baseline; the simulator predictions to test; the model and data versioning plan; the authority path; the operating envelope; and the week-6 fallback. Staff approve this as a **testable claim**, not a promised model architecture. After week 6, teams choose their methods and investigate their own claims while common simulation-gap, authority, intervention, and evidence checks keep standards comparable. A team may replace a model-training exercise with an equally measured policy comparison when training does not serve its question.
+
+## Assessment and individual accountability
+
+The provisional [syllabus](../../instructors/vol4/syllabus.qmd) grades four cumulative milestones: **15% week-2 charter**, **25% week-6 local loop**, **20% week-10 authority demonstration**, and **40% week-14 capstone**. Notebook entries and week-13 rehearsal receive formative feedback. For the capstone, evaluate the [competency matrix](student-competencies.md) by quadrant: measure the world, characterize computation, change the world, and integrate/govern. Each quadrant contributes one quarter of the capstone rubric. A polished demonstration cannot compensate for missing raw physical evidence or a bypassed action boundary.
+
+Teams submit one system packet, but each student maintains an evidence index for the competencies they personally exercised and explains a randomly selected trace or fault at the final defense. Staff can ask for repair and a repeated trial when a team finds an unsafe or unmeasured behavior. The verdict concerns the prototype inside its tested envelope, not a certified safety claim.
+
+## Decisions staff must close before publishing assignments
+
+1. **Arm authority:** demonstrate one-joint and then whole-arm STM32-mediated commands with no live host bypass, or retain the one-axis station as the governed reference while the SO-101 teaches LeRobot data and policies.
+2. **Local model:** prove a compact policy on the exact UNO Q. Report SmolVLA memory and latency separately; require an on-board VLA rollout only if the measured task deadline permits it.
+3. **Station capacity:** decide how many teams can collect, train, and evaluate without competing for one arm. Freeze bench booking, replay data, spare parts, and an alternate trial slot before enrollment.
+4. **Outcome protocol:** qualify the object set, camera, gripper, and independent success check for the reference task. Freeze held-out starts, fault scripts, and baseline before student model comparisons.

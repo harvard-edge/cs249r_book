@@ -1,0 +1,408 @@
+# Milestone III: The Torch Olympics {#sec-milestone-3}
+
+::: {.column-margin}
+![](assets/images/diagrams/m03_framework-you-are-here.svg){width="100%" fig-alt="TinyTorch execution datapath blueprint highlighting Milestone III Torch Olympics as the active subsystem."}
+
+*Framework Blueprint: Milestone III deploys optimized TinyGPT to edge hardware constraints, charting the multi-objective Pareto frontier.*
+:::
+
+
+In competitive systems benchmarks like MLPerf, raw speedup numbers and compression ratios mean nothing if the candidate model compromises accuracy. A system optimization is only valid if it satisfies strict accuracy retention floors while delivering verifiable reductions in memory footprint and latency under concrete edge hardware constraints.
+
+From a systems and framework perspective, Milestone III represents the ultimate competitive arena of TinyTorch: The Torch Olympics. Students deploy their optimized TinyGPT and DigitMLP models against strict scoring gates:
+1. **The three-axis scorecard**: Evaluating each candidate by accuracy retention ($R$, the fraction of the baseline's accuracy it keeps), stored-size ratio ($C$), and speedup ($S$), with event floors such as the latency sprint's 85 percent accuracy.
+2. **Memory budgets**: Estimating whether quantized weights and an attention cache fit a device's memory before choosing which optimizations to apply.
+3. **Rigorous empirical verification**: Generating auditable benchmark reports that compare optimized candidates against frozen baseline models on identical workloads.
+
+This milestone concludes the TinyTorch journey, proving that students have mastered not just deep learning theory, but the systems engineering discipline required to build and deploy efficient ML runtimes.
+
+::: {.column-margin}
+**Milestone Scope:**
+Milestone III integrates Modules 14 through 19 (`tinytorch/src/14_profiling` through `tinytorch/src/19_benchmarking`) with the models of Part I and Part II. The course numbers this milestone 06 and keeps it in `tinytorch/milestones/06_2018_mlperf/`; it has two scripts. `01_optimization_olympics.py` trains the `DigitMLP` of @sec-milestone-1 on TinyDigits, then profiles, quantizes, prunes, and benchmarks it. `02_generation_speedup.py` checks per-position logits before timing full-prefix and cached GPT execution. Neither script is a line-by-line match for the listings here; the listings are a pure-Python model of the same scorecard, small enough to check by hand.
+:::
+
+![The Torch Olympics scorecard: one model, three axes, and a floor on accuracy that a submission must clear before its memory and latency numbers count.](assets/images/diagrams/milestone_03-diag-1.svg){#fig-milestone3-olympics}
+
+---
+
+## The Problem
+
+::: {.column-margin}
+**↩ Jump back:** @sec-capstone
+*Evaluating multi-objective trade-offs across accuracy retention, memory compression, and speedup.*
+:::
+
+
+A benchmark that measures one thing rewards whatever is cheapest on that one thing. A model can appear fast simply because it ignores its input.
+
+```python
+class ZeroModel:
+    """Answers every question with the same ten zeros."""
+    def forward(self, x):
+        return [0.0] * 10
+
+def time_ms(model, x, runs=100):
+    import time
+    best = float("inf")
+    for _ in range(runs):
+        t0 = time.perf_counter()
+        model.forward(x)
+        best = min(best, (time.perf_counter() - t0) * 1000)
+    return best
+
+print("ZeroModel latency (ms):", round(time_ms(ZeroModel(), [0.0] * 64), 5))
+```
+
+This model performs no learned computation. An `argmax` classifier breaks its ten-way tie by choosing class zero, giving 10% accuracy on ten balanced classes. Its parameter storage is zero bytes. The timing depends on the machine, but the failure is visible without a stopwatch: a latency contest alone has no reason to prefer a useful prediction. Quantization and pruning expose a less extreme version of the same trade-off. They alter weights, so their storage claims must be accompanied by a check of the resulting predictions. A hypothetical packed 2-bit representation needs one sixteenth of the FP32 weight-code bytes before metadata, but that count says nothing about its accuracy.
+
+The opposite failure is quieter. @sec-compression showed that zeroing half the entries of a weight matrix leaves the dense multiply doing exactly the same work, since a zero still gets multiplied and added. A student who prunes to 50% sparsity and reports "half the parameters removed" has said something true about the count and nothing about the bytes on disk or the milliseconds per call. Whether that pruning paid off depends on how the weights are stored and how the multiply is run, and neither is visible in the sparsity figure.
+
+So the need is concrete. Take one model, apply the optimizations, and report accuracy, bytes, and latency together, against the unoptimized model, with a rule that disqualifies any candidate whose accuracy falls too far. That rule is the difference between a benchmark and a leaderboard for `ZeroModel`.
+
+---
+
+## The Idea
+
+::: {.column-margin}
+**↪ Jump ahead:** @sec-extensions
+*Taking the framework below NumPy with compiled C++ and GPU kernels, measured the same way.*
+:::
+
+
+::: {.column-margin}
+![](assets/images/diagrams/milestone_03-margin-budget.svg){width="100%"}
+*Edge hardware memory budget: INT8 weights and KV cache fit comfortably within 4 GB RAM.*
+:::
+
+### Three ratios and a floor
+
+Everything in the scorecard is a ratio of the optimized model against the baseline, so the units cancel. The ratios still depend on the workload, implementation, and machine; cancelling units does not make measurements portable. Let $A$ be accuracy on a fixed test set, $M$ the bytes needed to store the parameters, and $t$ the median latency of one forward pass after warmup, with subscripts for the baseline and the candidate. Three numbers summarize a submission:
+
+$$R = \frac{A_{\text{cand}}}{A_{\text{base}}}, \qquad C = \frac{M_{\text{base}}}{M_{\text{cand}}}, \qquad S = \frac{t_{\text{base}}}{t_{\text{cand}}}$$
+
+$R$ is **accuracy retention**, the fraction of the baseline's accuracy the candidate keeps. $C$ is the size ratio, how many times smaller the candidate is. $S$ is the speedup. All three are better when larger, but only $C$ and $S$ are things to maximize. $R$ is a gate. This chapter chooses a relative retention floor of 99%, so its rule reads $R \ge 0.99$. Against an 88%-accurate baseline, `ZeroModel` retains only $0.10/0.88 \approx 0.114$ and fails. The score function assumes a baseline with nonzero accuracy and positive storage and timing values. Those conditions make its divisions meaningful.
+
+### Events
+
+The capstone module defines classroom events through `OlympicEvent` and checks eligibility with `qualifies_event`. A latency sprint requires accuracy of at least 85 percent; a memory challenge has the same floor. An accuracy contest requires latency strictly below 100 ms and stored size strictly below 10 in the report's `model_size_mb` units, each equal to $2^{20}$ bytes. An "extreme push" lowers the accuracy floor to 80 percent. The all-around event accepts any valid measurements without adding an eligibility floor. These rules determine eligibility; the helper neither ranks candidates nor invents a combined all-around score. The floors are absolute here, rather than relative to a baseline, and they are classroom policy rather than official MLPerf requirements.
+
+The set of candidates that cannot improve on one axis without giving something up on another is called the **Pareto frontier**.[^fn-pareto-frontier-scorecard] A benchmark with floors is a way of asking one question about that frontier at a time. Where on the frontier a deployment should sit depends on its quality requirements and resource budget, and the scorecard's job is to make the frontier visible so that the decision can be made with numbers.
+
+[^fn-pareto-frontier-scorecard]: **Pareto frontier**: in a trade-off between several objectives, the set of options that no other option beats on every objective at once. A candidate off the frontier is simply worse than some other candidate on all axes; moving along the frontier trades one axis for another, and a benchmark cannot say which trade is right, only where the frontier is.
+
+![**The Torch Olympics Pareto frontier**: Evaluating optimization candidates across accuracy retention, memory compression, and inference speedup reveals the multi-objective trade-off curve. A strict accuracy retention floor ($R \ge 0.99$, or $85\%$) disqualifies over-compressed or degraded models (red region), isolating the Pareto-optimal frontier of non-dominated systems.](assets/images/diagrams/milestone_03_pareto-frontier.svg){#fig-milestone3-pareto-frontier fig-alt="Pareto frontier curve plotting Accuracy versus Speedup and Memory Compression, highlighting the retention floor threshold and valid submissions."}
+
+---
+
+## The Code
+
+The course scripts execute the experiments. The chapter's smaller score function explains how to interpret their results. Keeping these roles separate lets us trace the experiment without mistaking an illustrative ledger for measured evidence.
+
+::: {.column-margin}
+![](assets/images/diagrams/m03_edge-margin-source.svg){width="100%" fig-alt="Source code mapping card for Milestone III Torch Olympics showing file path, exported package, and tested primitives."}
+
+*Source Code Mapping: Milestone III benchmarks the combined impact of INT8 quantization, KV caching, and operator fusion under strict hardware ceilings.*
+:::
+
+### Script 1: profile, quantize, prune, benchmark
+
+The first script trains `DigitMLP` for ten epochs on TinyDigits, then walks through the optimization steps in order. Each step is a function that takes the model and one of Part III's classes.
+
+Profiling comes first, and it has to. Every ratio on the scorecard compares a candidate against a baseline number, so before we touch a single weight we need the unoptimized model's parameter count, its bytes, its FLOPs, its latency, and its accuracy, written down where nothing later can overwrite them. The tempting shortcut is to skip the ceremony, wrap one forward pass in `time.time()`, and call that the baseline latency. @sec-profiling showed why that one call is the wrong number. The first call may pay initialization costs, and any single call may encounter scheduling noise. An unusually slow baseline would inflate every later speedup before any optimization had run. The profiler's answer is the one @sec-profiling built, warm up, repeat, and keep the median.
+
+```python
+# Excerpt from milestones/06_2018_mlperf/01_optimization_olympics.py (step_1_profile, trimmed)
+profiler = Profiler()
+param_count = profiler.count_parameters(model)
+param_bytes = sum(p.data.nbytes for p in model.parameters())
+flops = profiler.count_flops(model, (1, 64))
+
+sample_input = Tensor(X_test.data[:1])
+latency_ms = profiler.measure_latency(model, sample_input, warmup=3, iterations=10)
+
+outputs = model(X_test)
+predictions = np.argmax(outputs.data, axis=1)
+baseline_acc = np.mean(predictions == y_test) * 100
+```
+
+The byte count sums the actual parameter arrays. It excludes Python object overhead, intermediate activations, and any serialized file header, so it should be labeled parameter-array storage. The profiler times one held-out input row; accuracy uses all held-out rows. These are different batch sizes because they answer different questions, but every candidate must use the same timing input shape and the same accuracy dataset as the baseline.
+
+Quantization comes next. `Quantizer.quantize_model` produces an artifact containing each parameter's codes, scale, zero point, and original shape. It also models a packed representation with one byte per code and eight bytes of metadata per parameter array. This artifact does not execute a forward pass. The script must reconstruct an executable candidate before it can measure how rounding changes predictions.
+
+```python
+# Excerpt from 01_optimization_olympics.py (step_2_quantize, trimmed)
+quant_result = Quantizer.quantize_model(model)
+quant_size = int(param_bytes / quant_result['compression_ratio'])
+```
+
+`Quantizer.quantize_model` returns codes, scales, and zero points without changing `model`. The script then makes an independent copy of the trained `DigitMLP`, restores each parameter from those codes, and measures its predictions on the same test set. That second half of `step_2_quantize` is essential: rounding has to reach the forward pass before its effect on accuracy can be measured.
+
+```python
+# Continued excerpt from step_2_quantize
+import copy
+
+quant_model = copy.deepcopy(model)
+quant_params = [p for layer in quant_model.layers for p in layer.parameters()]
+for idx, param in enumerate(quant_params):
+    entry = quant_result['quantized_layers'][f'param_{idx}']
+    restored = Quantizer.dequantize_tensor(
+        entry['quantized'], entry['scale'], entry['zero_point'])
+    param.data = restored.data.reshape(entry['original_shape'])
+outputs_quant = quant_model(X_test)
+quant_acc = np.mean(np.argmax(outputs_quant.data, axis=1) == y_test) * 100
+```
+
+Follow one parameter through the loop: its index selects the corresponding quantized entry, its scale and zero point reconstruct rounded weights, and its original shape restores the matrix expected by `Linear`. The baseline remains untouched. The resulting accuracy measures quantization error under floating-point execution; it does not demonstrate an integer kernel or packed storage. The reported compression ratio models one byte per code plus one float32 scale and one int32 zero point per parameter array. TinyTorch stores the code tensors and the reconstructed weights as float32 arrays.
+
+Pruning changes a different property, the number of nonzero weights. `magnitude_prune` zeroes weights in place, and a zero has no memory of what it replaced. If the script pruned `model` itself, the FP32 baseline would be gone. A saved baseline accuracy would still supply the denominator of $R$, but we could no longer rerun the original model to check predictions or timing. Recomputing the baseline after pruning would silently compare the candidate with itself. So the script makes an independent deep copy first and prunes that copy. Both candidate copies run on the same held-out inputs.
+
+```python
+# Excerpt from 01_optimization_olympics.py (step_3_prune, trimmed)
+model_copy = copy.deepcopy(model)
+
+sparsity_before = Compressor.measure_sparsity(model_copy)
+Compressor.magnitude_prune(model_copy, sparsity=0.5)
+sparsity_after = Compressor.measure_sparsity(model_copy)
+
+outputs_pruned = model_copy(X_test)
+pruned_acc = np.mean(np.argmax(outputs_pruned.data, axis=1) == y_test) * 100
+```
+
+`magnitude_prune` gathers every weight matrix (biases excluded), ranks their magnitudes globally, and zeroes the smallest half in place. `measure_sparsity` counts the zeros, and the pruned accuracy is measured on the candidate. Its dense array bytes remain unchanged. A sparse representation would also need indices; the worked trace below models those separately. The script preserves the unmodified baseline for all comparisons.
+
+The benchmark step owns the latency axis, and it asks a different question from the profiler's. The profiler wanted a typical number for the baseline. A latency distribution also reveals occasional slow calls that its median hides. The 95th percentile, for example, marks the value at or below which roughly 95% of recorded calls fall. A single timed call cannot answer either question; it picks one point on the latency distribution at random and reports it as if it were the whole. @sec-benchmarking's `Benchmark` runs the forward pass repeatedly, keeps every timing, and reports a mean, a standard deviation, and a 95th percentile. The default is 100 measurements; the script selects a sorted entry rather than using `BenchmarkResult.percentile`, so its P95 convention differs slightly from @sec-benchmarking's interpolated percentile.
+
+```python
+# Excerpt from 01_optimization_olympics.py (step_6_benchmark, trimmed)
+benchmark = Benchmark(models=[model], datasets=[(X_test, y_test)])
+latency_results = benchmark.run_latency_benchmark(input_shape=(1, 64))
+bench_result = list(latency_results.values())[0]
+
+sorted_vals = sorted(bench_result.values)
+p95_latency = sorted_vals[min(int(len(sorted_vals) * 0.95), len(sorted_vals) - 1)]
+```
+
+The excerpt shows one invocation. The script calls this same helper for the baseline, reconstructed quantized candidate, and pruned candidate, so each row receives its own measured accuracy and latency distribution. The summary distinguishes actual array bytes from the modeled packed-code count. The ratios therefore compare executed candidates; they do not infer speed from sparsity or code width.
+
+### Script 2: generation with and without the cache
+
+The second script measures a transformation that reuses earlier projection results. A language model generates one token at a time, and every new token attends over every token before it. The naive loop, the one @sec-milestone-2 ran, reruns the full forward pass over the whole sequence at every step. For 16 tokens that means step $t$ processes $t$ positions and the loop processes $1 + 2 + \dots + 16 = 136$ positions in all. At a 4,096-token context the same sum is over 8 million positions to produce 4,096 tokens, almost all of it recomputing keys and values that have not changed since the previous step. @sec-memoization's cache keeps those keys and values, so each step processes one new token and reads the rest back, 16 positions for 16 tokens. The ratio $136 / 16 = 8.5$ counts projection rows removed, not end-to-end speedup or all attention work. A cached query still scores its growing prefix. The script checks equivalent execution paths before comparing their timings.
+
+The script builds the actual two-block `GPT` from @sec-transformers with vocabulary 27, width 32, and two heads. It replays one fixed token sequence through both paths, rather than sampling different inputs for each timing. The core loop is extracted here from the script.
+
+```python
+from contextlib import nullcontext
+
+def replay_prefixes(model, tokens, cache=None):
+    """Return the next-token logits at every position of one fixed sequence.
+
+    The cache cursor advances once after all layers process a token. Resetting
+    at entry makes each replay an independent request, including warmup runs.
+    Cached forwards run inside an explicit generation scope; ordinary forwards
+    resume when the scope exits, including after an exception.
+    """
+    from tinytorch.core.tensor import Tensor
+
+    if cache is not None:
+        cache.reset()
+    logits = []
+    with cache.generation() if cache is not None else nullcontext():
+        for position in range(tokens.shape[1]):
+            if cache is None:
+                output = model(Tensor(tokens[:, :position + 1]))
+            else:
+                output = model(Tensor(tokens[:, position:position + 1]),
+                                start_pos=cache.seq_pos)
+                cache.advance()
+            logits.append(output.data[:, -1, :].copy())
+    return np.stack(logits, axis=1)
+
+```
+
+The `generation()` context enables cache reuse only for this request. `nullcontext()` gives the uncached path the same loop structure without changing execution mode. Resetting the cursor alone would not activate cached forward calls. When the context exits, ordinary forwards resume, including if an exception interrupts the loop. Each uncached call sees the full causal prefix. Each cached call sees one token at its correct position, traverses every transformer block, and advances the shared cursor once afterward. The returned array holds next-token logits at every position, so `compare_cached_replay` checks all of them with `assert_allclose` before reporting a speedup. The timer includes the same complete replay on each path after warmup, with cache reset at the start of every cached replay. A `finally` block removes the wrapper even when a check fails. This is a controlled inference workload on fixed tokens (\ref{chk-milestone3-quantized-divergence}), not a claim about language quality or a guaranteed speedup on every machine.
+
+::: {#chk-milestone3-quantized-divergence .callout-sanity-check title="Sanity check: numerical divergence in quantized autoregressive generation"}
+When evaluating quantized models in multi-step generation, a common pitfall is verifying only single-step logit cosine similarity or top-1 agreement on a fixed prefix while ignoring multi-step autoregressive drift:
+
+- **Compounding Rounding Error**: At step $t=1$, an INT8 weight matrix shifts logits slightly, often retaining the reference argmax token. But at step $t=50$, deviations in past hidden states fed back through the KV cache accumulate, eventually flipping a sampling decision.
+- **Divergence Point**: Once a single token diverges between the FP32 reference and INT8 candidate, the two models traverse entirely different trajectories through sequence space. Measuring post-divergence logit similarity is meaningless.
+- **Verification Rule**: Benchmark perplexity ($\text{PPL}$) on held-out evaluation text over full context windows, or assert bounded maximum absolute logit error ($\max |z_{\text{quant}} - z_{\text{ref}}| < \epsilon$) across the entire fixed prefix before testing free generation.
+:::
+
+### The scorecard
+
+The script now has measurements for each candidate, but the final table leaves the acceptance decision to the reader. Anyone reading that table wants one verdict, and the naive way to produce one is a weighted sum, so much weight on accuracy, so much on size, so much on speed. I tried it against the FP32 baseline from the trace below, with half the weight on retention and a quarter each on the other two ratios. A careful INT8 candidate that keeps 99.4% of the accuracy, is 3.97× smaller, and runs at the same speed scores 1.7. A reckless one that keeps 68% of the accuracy, is 7.9× smaller, and runs 100× faster scores 27. A sum lets one axis buy another, and the people submitting to a benchmark will find the weighting that lets them buy the most. A floor cannot be bought. Above it, memory and latency compete on their own; below it, nothing else is looked at.
+
+The scorecard takes a baseline and a candidate, each described by three numbers, and returns the three ratios and the book's relative accuracy verdict. Its event adapter imports the capstone policy from the exported TinyTorch package. It converts the trace's field names and byte count into the report format without restating the eligibility rules.
+
+```python
+from tinytorch.olympics import OlympicEvent, qualifies_event
+
+def score(baseline, candidate):
+    """Three ratios, each candidate-vs-baseline, plus the chapter's retention floor."""
+    retention = candidate["accuracy"] / baseline["accuracy"]
+    return {
+        "retention": retention,
+        "size_ratio": baseline["bytes"] / candidate["bytes"],
+        "speedup": baseline["p50_ms"] / candidate["p50_ms"],
+        "retention_ok": retention >= 0.99,
+    }
+
+def qualifies(candidate, event):
+    metrics = {
+        "accuracy": candidate["accuracy"],
+        "latency_ms_median": candidate["p50_ms"],
+        "model_size_mb": candidate["bytes"] / 2**20,
+    }
+    return qualifies_event(metrics, event)
+```
+
+There is deliberately nothing clever here. The three ratios are three divisions, the floor is one comparison, and the event adapter delegates to the capstone helper. The value of the scorecard is not in the code but in what it refuses to do. It will not combine the ratios into a single number, but the function accepts whatever measurements the caller supplies. It cannot tell a measured value from an estimate; that distinction belongs in the report and the experiment that produced it. The production bridge returns to the protocol needed to make such evidence independently reproducible.
+
+---
+
+## A Worked Trace
+
+The trace has two parts. The first pushes one small weight matrix through two algorithms that change values, so that every number can be checked by hand. The second fills in the scorecard for `DigitMLP`.
+
+### One matrix, quantized and pruned
+
+Script 1 measures the rounded model's accuracy, but its packed-storage ratio remains an analytical count. A small trace separates the arithmetic of rounding from the representation used to store its result. The comfortable assumption is that it does nothing, since the codes decode back into weights. For this input they decode back into nearby weights, each within half a quantization step of where it started, and the only way to see how wide that step is, and which weights pruning would then discard, is to push a few weights through both rules by hand. Take the six weights $w = [-1.0,\ 0.0,\ 2.0,\ 0.5,\ 1.5,\ -0.5]$, the example from Module 15's own docstring. In the first listing below, lines 1--8 define asymmetric min-max quantization `quantize_int8(values)`, and lines 9--10 define `dequantize_int8`. Line 12 initializes test weights `w`. Line 13 executes quantization, and line 14 prints scale factor $0.0118$, zero point $-43$, and quantized integer codes `[-128, -43, 127, 0, 84, -86]`. Line 15 dequantizes the codes back into approximate floats.
+
+```python
+def quantize_int8(values):
+    """Asymmetric min-max INT8: returns (codes, scale, zero_point)."""
+    lo, hi = min(min(values), 0.0), max(max(values), 0.0)
+    scale = (hi - lo) / 255
+    zero_point = round(-128 - lo / scale)
+    codes = [max(-128, min(127, round(v / scale + zero_point))) for v in values]
+    return codes, scale, zero_point
+
+def dequantize_int8(codes, scale, zero_point):
+    return [(c - zero_point) * scale for c in codes]
+
+w = [-1.0, 0.0, 2.0, 0.5, 1.5, -0.5]
+codes, scale, zp = quantize_int8(w)
+print(round(scale, 4), zp, codes)
+print([round(v, 4) for v in dequantize_int8(codes, scale, zp)])
+```
+
+The scale is $3 / 255 = 0.011765$ and the zero point is $\text{round}(-128 + 85) = -43$. For this nonconstant, zero-spanning input, the hand function follows Module 15's rule and the module agrees. In the second snippet below, line 5 runs the actual package implementation `tinytorch.perf.quantization.quantize_int8` on a Tensor, and line 6 confirms exact numerical agreement with the manual trace.
+
+```python
+import numpy as np
+from tinytorch.core.tensor import Tensor
+from tinytorch.perf.quantization import quantize_int8
+
+codes, scale, zp = quantize_int8(Tensor(np.array(w, dtype=np.float32)))
+print(codes.data, round(scale, 6), zp)       # [-128. -43. 127. 0. 84. -86.] 0.011765 -43
+```
+
+@tbl-m3-quant-prune-trace lists each weight's code, its reconstruction, and its fate under 50% magnitude pruning, which selects the three smallest magnitudes by stable rank. For these distinct boundary magnitudes, a cutoff of $0.75$ gives the same selection; the implementation uses ranks so ties cannot change the number selected.
+
+| Weight | INT8 code | Restored | Abs. error | Kept? | Pruned |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| $-1.0$ | $-128$ | $-1.0000$ | $0$ | yes | $-1.0$ |
+| $0.0$ | $-43$ | $0.0000$ | $0$ | no | $0.0$ |
+| $2.0$ | $127$ | $2.0000$ | $0$ | yes | $2.0$ |
+| $0.5$ | $0$ | $0.5059$ | $0.0059$ | no | $0.0$ |
+| $1.5$ | $84$ | $1.4941$ | $0.0059$ | yes | $1.5$ |
+| $-0.5$ | $-86$ | $-0.5059$ | $0.0059$ | no | $0.0$ |
+
+: Six weights through min-max INT8 quantization (scale $0.011765$, zero point $-43$) and through 50% magnitude pruning (threshold $0.75$). {#tbl-m3-quant-prune-trace tbl-colwidths="[16,16,18,18,14,18]"}
+
+The largest reconstruction error is half a quantization step, $0.0059$, for these values. Endpoint clipping can change that bound for other input ranges. The three weights that survive pruning are the three largest in magnitude, and the sparsity is exactly $3/6 = 50\%$. Nothing about either operation depends on the size of the matrix; `DigitMLP`'s 2,368 weights go through the same two rules.
+
+### The scorecard for `DigitMLP`
+
+A benchmark is more useful when you know what it should print, so the prediction comes before the ledger. `DigitMLP` has two linear layers, 64 inputs to 32 hidden units to 10 classes, and its parameter count follows from that shape: $64 \times 32 + 32 + 32 \times 10 + 10 = 2{,}410$. At 4 bytes each that is $9{,}640$ bytes, and one forward pass costs $2 \times (64 \times 32 + 32 \times 10) = 4{,}736$ FLOPs, counting a multiply and an add as two. These are exact parameter and matrix-product counts for this architecture; the FLOP count omits bias additions and activations.
+
+Napkin math for the rest. A hypothetical packed INT8 format keeps 1 byte per parameter plus a scale and a zero point for each of the four parameter tensors, so about $2{,}410 + 32 = 2{,}442$ bytes, a size ratio just under 4. Pruning half the weights to zero and storing them densely changes nothing, and storing them in the compressed sparse row format of @sec-compression costs an index per surviving weight, which at 50% sparsity roughly cancels the saving. Both reconstructed quantization and dense pruning leave the matrix shapes and dense arithmetic unchanged. Their latency therefore has to be measured; neither representation claim supplies a speedup.
+
+The ledger in the listing below is a separate arithmetic exercise. In lines 1--6, the analytical storage formulas compute dense FP32 (9,640 bytes), packed INT8 (2,442 bytes), and 50% sparse CSR representation (2,638 bytes). Lines 8--12 populate the candidate dictionary. The loop in lines 14--19 calls `score(base, cand)` to evaluate accuracy retention $R$, size compression ratio $C$, speedup $S$, and event qualification, printing the rows of @tbl-m3-scorecard.
+
+```python
+params = 64 * 32 + 32 + 32 * 10 + 10           # 2,410
+weights = 64 * 32 + 32 * 10                     # 2,368, biases excluded
+fp32_bytes = params * 4                         # 9,640
+int8_bytes = params + 4 * (4 + 4)               # codes + (scale, zero point) x 4 tensors
+nnz = weights // 2                              # 1,184 survivors at 50% sparsity
+csr50_bytes = nnz * 2 + (65 + 33) * 2 + 42 + 4 * 8   # value+index, row starts, biases, scales
+
+ledger = {
+    "fp32":   {"accuracy": 0.880, "bytes": fp32_bytes,  "p50_ms": 0.05},
+    "int8":   {"accuracy": 0.880, "bytes": int8_bytes,  "p50_ms": 0.05},
+    "pruned": {"accuracy": 0.860, "bytes": csr50_bytes, "p50_ms": 0.05},
+}
+base = ledger["fp32"]
+for name, cand in ledger.items():
+    s = score(base, cand)
+    print(f"{name:7s} R={s['retention']:.3f} C={s['size_ratio']:.2f}x "
+          f"S={s['speedup']:.2f}x floor={s['retention_ok']} "
+          f"events={[e.value for e in OlympicEvent if qualifies(cand, e)]}")
+```
+
+The sparse byte count assumes INT8 values with 1-byte column indices (every column index is below 64, so one byte suffices), 2-byte row-start entries for the 65 and 33 row boundaries of the stored $(64,32)$ and $(32,10)$ weight matrices, 42 bias bytes, and the scales.[^fn-csr-index-sizing] The loop prints the rows of @tbl-m3-scorecard from those counts.
+
+[^fn-csr-index-sizing]: The storage overhead of Compressed Sparse Row (CSR) depends on matrix dimensions: column indices require $\lceil \log_2(N) / 8 \rceil$ bytes per nonzero element (1 byte for $N \le 256$, 2 bytes for $N \le 65{,}536$), while row pointers require $\lceil \log_2(\text{nnz}) / 8 \rceil$ bytes per row. When weight matrices are wide (e.g., $N = 4096$ in modern LLMs), column indices take 2 bytes, meaning a 1-byte INT8 value carries a 2-byte index, quadrupling the per-weight storage unless sparsity exceeds $75\%$ or block-sparse representations (e.g., 2:4 structured sparsity with 2-bit index nibbles) are used.
+
+| Candidate format | Bytes | Accuracy | $R$ | $C$ | Pass floor? |
+| :--- | ---: | ---: | ---: | ---: | :--- |
+| FP32 dense | 9,640 | 88% | 1.000 | 1.00 | yes |
+| INT8 packed | 2,442 | 88% | 1.000 | 3.95 | yes |
+| INT8 + 50% prune, CSR | 2,638 | 86% | 0.977 | 3.65 | no |
+
+: An illustrative scorecard for `DigitMLP`. Bytes count the stated hypothetical formats; accuracies are chosen inputs. All three rows have assumed speedup $S=1$ and pass all five classroom event floors. These rows do not report the scripts' measurements. {#tbl-m3-scorecard tbl-colwidths="[29,14,16,14,13,14]"}
+
+The packed INT8 ratio is $9{,}640/2{,}442 \approx 3.95$, including the metadata counted by `Quantizer.quantize_model`. The sparse row is larger because each surviving code needs an index and each matrix needs row boundaries. Zeroing half the weights did not halve these bytes. The illustrative pruned candidate also fails the chapter's relative retention floor while passing the module's absolute event floors. The policies ask different questions. Finally, the $1.00\times$ speedup is an assumption used to exercise `score`; an experiment must replace both timing inputs with observations, or mark speedup as unavailable.
+
+---
+
+## From TinyTorch to Production
+
+The classroom scorecard checks arithmetic on supplied measurements. An external benchmark must also control how those measurements were obtained. [MLPerf Inference's rules](https://github.com/mlcommons/inference_policies/blob/master/inference_rules.adoc) specify workloads, quality requirements, execution scenarios, and reproducibility requirements. Its LoadGen harness issues queries and records completions.[^fn-mlperf-inference-scenarios] The scenario determines the reported performance metric; there is no single universal latency number. TinyTorch's class named `MLPerf` does not implement that official protocol.
+
+[^fn-mlperf-inference-scenarios]: MLPerf Inference standardizes benchmarking across four distinct operational scenarios: (1) **Single-Stream**: queries arrive one at a time with query size 1, measuring 90th-percentile latency for interactive edge devices; (2) **Server**: queries arrive following a Poisson distribution, measuring the maximum supported query rate (QPS) subject to a strict 99th-percentile latency constraint; (3) **Offline**: all input queries are resident in memory upfront, measuring peak throughput (samples/second) where latency is unconstrained; and (4) **Multi-Stream**: multiple concurrent video or sensor feeds submit batches at fixed intervals, measuring the maximum stream count before frame drops.
+
+::: {#psp-milestone3-gguf-edge-runtime .callout-production-bridge title="Production bridge: edge runtimes with llama.cpp, GGUF, and ONNX Runtime"}
+Deploying quantized transformer models on consumer hardware (phones, laptops, embedded edge boards) requires moving beyond Python runtimes to specialized C/C++ inference engines:
+
+- **GGUF Format and llama.cpp**: Georgi Gerganov's `llama.cpp` uses the unified binary file format **GGUF** (successor to GGML). GGUF bundles model architecture hyperparameters, tokenizer vocabulary, and mixed-precision quantized tensor weights (e.g., Q4_K_M, Q8_0) into a single mmap-friendly file.
+- **Zero-Copy Memory Mapping (`mmap`)**: Instead of allocating and loading gigabytes of weights into heap RAM on startup, edge runtimes map the GGUF file directly into virtual address space. Pages are faulted into memory on demand by the OS kernel, enabling near-instantaneous startup and memory sharing across processes.
+- **Heterogeneous Offloading**: GGUF runtimes dynamically split layers between available compute backends, offloading $N$ transformer layers to a discrete or integrated GPU (via Metal on Apple Silicon, CUDA, or Vulkan) while executing remaining layers on the CPU SIMD units (ARM NEON, x86 AVX-512).
+- **ONNX Runtime (ORT)**: For cross-platform enterprise edge deployments, ONNX Runtime compiles computational graphs with hardware-specific Execution Providers (DirectML, OpenVINO, QNN for Qualcomm NPUs), fusing attention and layer normalization while executing quantized integer GEMM kernels.
+:::
+
+@Tbl-m3-tinytorch-vs-mlperf separates the local experiment from the additional controls around an official result.
+
+| Question | Milestone III | MLPerf Inference |
+| :--- | :--- | :--- |
+| Who controls timing? | The script's repeated calls | LoadGen's query protocol |
+| What quality rule applies? | Chapter retention floor or classroom event policy | Task-specific quality requirement |
+| Which artifact runs? | Baseline and each executable candidate | Submitted system under test |
+| What makes results comparable? | Same data, shapes, and local timing procedure | Defined benchmark and scenario rules |
+
+: The milestone teaches a controlled comparison; an official benchmark also standardizes the workload and execution protocol. {#tbl-m3-tinytorch-vs-mlperf tbl-colwidths="[28,36,36]"}
+
+The practical questions are the same when reading either report. Which artifact ran? Were its quality and latency measured on the stated workload? Does the byte count describe resident arrays or a proposed file format? Where do metadata and sparse indices enter that count? A pruning experiment with unchanged latency can be a correct result: a dense kernel still visits the zero entries. The scorecard lets the reader distinguish that result from a failed measurement, bridging the gap to industrial edge deployment engines (\ref{psp-milestone3-gguf-edge-runtime}).
+
+---
+
+## Summary
+
+This milestone built the scorecard that turns Part III's separate optimizations into a verdict. Three ratios, accuracy retention $R$, size ratio $C$, and speedup $S$, each compare the optimized model against the baseline; a floor on $R$ decides whether the other two are looked at; and the capstone helper checks eligibility for each classroom event without combining the ratios into a ranking. The worked trace pushed six weights through min-max INT8 quantization and 50% magnitude pruning by hand, then counted a proposed packed representation of `DigitMLP` to show that its packed INT8 format would give $3.95\times$, that 50% pruning with sparse indices gives less, and that neither changes how many multiplies the dense forward pass performs. Reading the milestone scripts closely exposed where their printed numbers are measurements and where they are assumptions, which is the skill the scorecard exists to teach. The invariant to carry forward is that an optimization has paid off only when the optimized artifact itself has been measured on all three axes, against the same baseline, with an accuracy floor it cleared. @sec-extensions applies the same discipline to kernels. It leaves NumPy for compiled C++ and GPU code and measures what each step actually gains.
+
+---
+
+## Further reading
+
+- Reddi et al. (2020), [MLPerf inference benchmark](https://arxiv.org/abs/1911.02549), *ISCA*. The benchmark design the Torch Olympics borrows: fixed tasks, quality floors, and measured latency.
+- Mattson et al. (2020), [MLPerf training benchmark](https://arxiv.org/abs/1910.01500), *MLSys*. The training-side counterpart and its rules for comparable results.
+
+## Exercises
+
+1. Trace the current optimization script's reconstruction of the quantized `DigitMLP`. Assert that the baseline parameters remain unchanged, and compare the reconstructed copy's logits with the baseline on the same test set. Report the measured retention $R$, and state whether it clears the $0.99$ floor. Then repeat with a 4-bit scheme (scale over 15 levels instead of 255) and find the smallest bit width at which the floor still holds.
+
+2. Run the script's baseline and pruned-candidate benchmarks and report the measured $S$ with its p95. Before running it, write down your prediction using the napkin argument from the worked trace. Then replace the dense multiply in the pruned model's `Linear` layers with a loop over nonzero entries only, time it again, and determine whether the saved arithmetic outweighs Python loop overhead at 50% and 90% sparsity. Explain the measured outcome rather than assuming that either path must win.
+
+3. Extend the generation experiment to several prefix lengths and layer counts. Keep the same token IDs for both paths, retain the per-position logit check, and verify a repeated request in a fresh `cache.generation()` scope after reset before timing. After the scope exits, check that an ordinary single-token forward again matches the uncached model. Compare the measured ratio with the $136 / 16 = 8.5$ projection-row ratio and explain why that ratio is not a bound on the complete program.

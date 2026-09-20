@@ -1,0 +1,124 @@
+## Defining Agentic Systems {#sec-vol3-intro-formal-definition-of-an}
+
+Formalizing the architecture of an agentic system requires discarding anthropomorphic metaphors of intelligence in favor of precise systems engineering and classical control theory. When an engineer treats an autonomous agent as an ad-hoc scripting wrapper around a chat completion API, they inevitably run into catastrophic failure modes: unbounded execution loops, silent context-window exhaustion, uncontainable shell execution, and irreversible mutations of host state. 
+
+To design, measure, and verify these systems under production constraints, we must establish their formal architectural definition, delineate the boundaries of their primary unit of execution, and formulate the quantitative metrics that govern their operational efficiency.
+
+### An Architectural Definition of Agentic Systems {#sec-vol3-intro-formal-definition}
+
+In traditional machine learning deployments, a model operates as an unprivileged, stateless transform: an input feature vector or prompt is mapped to a prediction or text completion via an open-loop request-response cycle. In contrast, an agentic system embeds the model within an active feedback loop with an external environment.
+
+::: {#dfn-agentic-ml-system .callout-note title="Definition: Agentic Machine Learning System"}
+An **Agentic Machine Learning System** is an autonomous, stateful closed-loop control system that employs a learned foundation model $\pi_\theta$ as its core decision-making policy, embedded within a deterministic runtime harness that mediates environmental observation, context memory staging, tool actuation, and invariant verification.
+:::
+
+Formally, an agentic system can be modeled as a discrete-time closed-loop dynamical system operating over an execution trajectory $\tau = (s_0, a_0, o_0, s_1, a_1, o_1, \dots, s_T)$. The system comprises four architectural entities:
+
+1. **The Policy ($\pi_\theta$):** A foundation model parameterized by weights $\theta$, acting as an unprivileged statistical coprocessor. Given a staged context state $s_t \in \mathcal{S}$ representing the system's working memory at step $t$, the policy samples candidate action tokens $a_t \sim \pi_\theta(\cdot \mid s_t)$ from its output probability distribution over the action space $\mathcal{A}$.
+2. **The Deterministic Runtime Harness ($\mathcal{H}$):** The supervisory software layer that enforces system invariants. The harness intercepts candidate action tokens $a_t$, validates their syntactic and semantic conformance against strict schema specifications, checks execution permissions against security capability tables, and translates validated tokens into concrete Remote Procedure Calls (RPCs) or system commands.
+3. **The External Environment ($\mathcal{E}$):** The external state space (such as a POSIX filesystem, a source code repository, a containerized operating system, or a remote REST API) possessing physical state $x_t \in \mathcal{X}$. Upon receiving an actuated command from the harness, the environment transitions to state $x_{t+1} \sim \mathcal{P}(\cdot \mid x_t, a_t)$ and emits a raw observation $e_t \in \mathcal{O}_{\text{raw}}$ (such as standard output streams, compilation diagnostics, or exit codes).
+4. **The Observation and Context Pipeline ($\mathcal{T}$):** A deterministic transformation engine within the harness that intercepts raw environmental observations $e_t$, sanitizes and bounds their byte volume through ring buffers and token-budget allocators, updates the persistent trajectory log, and constructs the next logical working memory state:
+   $$s_{t+1} = \mathcal{T}(s_t, a_t, e_t)$$
+
+```
+                                DETERMINISTIC RUNTIME HARNESS
+             ┌──────────────────────────────────────────────────────────────────┐
+             │                                                                  │
+             │   Context Pipeline T           Policy Core                       │
+             │  ┌──────────────────┐    st    ┌───────────────┐                 │
+             │  │ Context Assembly │─────────▶│   Model Core  │                 │
+             │  │  & Token Budget  │          │  $\pi_\theta$ │                 │
+             │  └──────────────────┘          └───────┬───────┘                 │
+             │           ▲                            │                         │
+             │           │ et                         │ at                      │
+             │           │ (Filtered)                 ▼ (Raw Tokens)            │
+             │  ┌────────┴─────────┐          ┌───────────────┐                 │
+             │  │   Sanitization   │          │ Verification  │                 │
+             │  │   & Ring Buffer  │          │ & RPC Gateway │                 │
+             │  └──────────────────┘          └───────┬───────┘                 │
+             │           ▲                            │                         │
+             └───────────┼────────────────────────────┼─────────────────────────┘
+                         │                            │ Dispatched
+                 Raw I/O │                            │ Tool Call
+                         │                            ▼
+             ┌───────────┴────────────────────────────┴─────────────────────────┐
+             │                                                                  │
+             │                   EXTERNAL ENVIRONMENT E                         │
+             │       (Filesystem, Git VCS, Compilers, Network Endpoints)        │
+             │                                                                  │
+             └──────────────────────────────────────────────────────────────────┘
+```
+
+The fundamental distinction between an agentic system and a standard model-serving pipeline lies in the presence of **endogenous feedback loops**. In open-loop serving, errors in model generation are isolated to individual completions. In an agentic system, an errant token sequence emitted by $\pi_\theta$ at step $t$ mutates the physical environment $\mathcal{E}$ (for example, by modifying a source code file or executing a destructive shell command). The mutated environment then produces an error observation $e_t$, which is injected directly into context state $s_{t+1}$. 
+
+Unless the runtime harness provides rigorous isolation, transaction rollback, and invariant checks, the system enters a cascading failure loop: the model attempts to diagnose its own previous hallucination, consumes hundreds of thousands of context tokens attempting ad-hoc repairs, and exhausts its operational budget without advancing the task toward completion.
+
+### The Trajectory as the Fundamental Execution Boundary {#sec-vol3-intro-trajectory-boundary}
+
+To build operating systems and runtime infrastructure for agentic machine learning, systems engineers must clearly identify the fundamental unit of resource allocation and scheduling. In classical operating systems, this unit is the process. In high-throughput model serving, it is the individual request invocation. In agentic systems, the primary unit of systems management is the **trajectory**.
+
+An individual **model invocation** is a single forward-pass execution context running on accelerator silicon (GPU or TPU). It stages $M$ input tokens during the prefill phase and generates $K$ output tokens during the autoregressive decode phase. Its execution duration is measured in milliseconds to seconds, and its resource demands are dominated by accelerator High-Bandwidth Memory (HBM) and matrix-compute saturation.
+
+A **trajectory**, by contrast, is the complete, multi-turn, stateful sequence of interleaved model invocations, tool dispatches, asynchronous I/O waits, host-side state compactions, and deterministic verification gates that carries a task from delegated intent to an accepted deliverable.
+
+::: {#fig-trajectory-systems-boundary}
+![](books/vol3/01_introduction/images/svg/trajectory_systems_boundary.svg)
+
+The trajectory as the primary systems management boundary. While a single model invocation operates over milliseconds on accelerator hardware executing prefill and decode, the trajectory orchestrates long-running execution across host and accelerator tiers, binding invocations, tool waits, sandbox lifecycles, and verification gates under an Agent Control Block (ACB).
+:::
+
+A single trajectory exhibits systems characteristics that transcend individual model invocations:
+
+1. **Temporal Spans Across Orders of Magnitude:** A trajectory can persist for minutes, hours, or days. While each constituent model invocation occupies accelerator silicon for only a few hundred milliseconds, the trajectory spans non-model latencies: waiting for Docker sandbox provisioning, long-running test suite executions, human-in-the-loop approvals, or external network polling.
+2. **Heterogeneous Tier Orchestration:** Trajectories do not live solely in GPU HBM. A trajectory binds resources across the host CPU (process control, sandbox execution, context formatting), host RAM (trajectory state, circular ring buffers), local NVMe storage (write-ahead logs, git diffs, build artifacts), and remote accelerator clusters (KV-cache allocations, tensor-parallel inference instances).
+3. **Non-Markovian Trajectory State:** While the raw autoregressive attention mechanism inside $\pi_\theta$ computes attention weights strictly across the current context window, the trajectory itself accumulates history that exceeds any physical context limit. Managing the trajectory requires deliberate decisions about which intermediate observations to retain, compress, persist to disk, or invalidate upon code mutation.
+
+Because a trajectory represents a long-lived, resource-consuming, and potentially destructive workflow, the host runtime cannot track it as an ephemeral Python object. Instead, the runtime binds each trajectory to a formal kernel-level descriptor: the **Agent Control Block (ACB)**. 
+
+Analogous to a Process Control Block (PCB) in an operating system kernel, the ACB maintains the authoritative metadata for the trajectory: its unique cryptographic identifier, parent-child delegation hierarchy, execution state (such as `READY`, `RUNNING`, `BLOCKED_ON_TOOL`, `AWAITING_VERIFICATION`, or `TERMINATED`), cumulative token and monetary expenditures, memory residency handles, capabilities access lists, and an append-only transaction log.
+
+### Micro-Efficiency versus Macro-Efficiency: The Goodput Metric {#sec-vol3-intro-micro-macro-efficiency}
+
+The transition from request-response serving to trajectory-based systems breaks conventional machine learning systems metrics. Traditional inference serving systems are engineered to optimize **micro-efficiency**:
+
+- **Time-to-First-Token (TTFT):** The latency (in milliseconds) required to ingest $M$ prompt tokens and execute the initial matrix-matrix multiplication (GEMM) prefill phase.
+- **Inter-Token Latency (ITL):** The time required to generate each subsequent token during the memory-bandwidth-bound matrix-vector (GEMV) autoregressive decode phase.
+- **Generation Throughput:** The aggregate volume of tokens emitted per second across a cluster of accelerators ($\text{tokens}/\text{sec}$).
+- **Hardware Flops Utilization (HFU):** The ratio of sustained floating-point operations per second to the theoretical peak compute capability of the accelerator silicon.
+
+Micro-efficiency metrics quantify the mechanical performance of the neural serving engine. However, in an agentic system, high micro-efficiency does not imply effective computation. 
+
+A serving cluster can achieve 90% HFU and stream tokens at blistering speeds of 200 tokens per second per user. Yet, if the underlying agent is caught in an infinite loop—repeatedly executing an invalid shell command, failing to parse a compiler diagnostic, and regenerating the same broken patch over forty iterations—the cluster is merely converting electrical energy into useless heat. The system exhibits high micro-efficiency, but zero **macro-efficiency**.
+
+Macro-efficiency measures the resource consumption and wall-clock time required to deliver a **verified, accepted task outcome**. To bridge this architectural divide, systems engineers evaluate agentic runtimes using the metric of **Trajectory Goodput**.
+
+In networking and distributed systems, *goodput* refers to the rate of useful data delivered to the application layer, excluding retransmitted packets and protocol overhead. In agentic machine learning systems, we define Trajectory Goodput as the proportion of total computational resources expended on trajectories that ultimately terminate in verified task success.
+
+Let $\mathcal{T}_{\text{all}} = \{ \tau_1, \tau_2, \dots, \tau_N \}$ denote the complete set of trajectories executed by an agent fleet over an evaluation horizon. Let $\mathcal{T}_{\text{success}} \subseteq \mathcal{T}_{\text{all}}$ denote the subset of trajectories whose final deliverable satisfies the task's deterministic verification suite (e.g., passing all regression tests, satisfying static analysis and type checks, and compiling with an exit code of 0). Let $R(\tau)$ denote the operational resources consumed by trajectory $\tau$, parameterized by total tokens generated, accelerator energy consumed in Joules, or dollar cost incurred:
+
+$$R(\tau) = \sum_{t=1}^{T_\tau} \text{Cost}(s_t, a_t)$$
+
+The **Trajectory Goodput** $\mathcal{G}$ of the system is formally defined as:
+
+$$\mathcal{G} = \frac{\sum_{\tau_i \in \mathcal{T}_{\text{success}}} R(\tau_i)}{\sum_{\tau_j \in \mathcal{T}_{\text{all}}} R(\tau_j)}$$
+
+::: {#chk-goodput-vs-throughput .callout-tip title="Checkpoint: Token Generation Throughput vs. Trajectory Goodput"}
+Consider an evaluation cluster hosting two candidate agent systems on a suite of complex software engineering benchmarks:
+
+- **System Alpha:** Employs a smaller, high-throughput model paired with an unconstrained, greedy execution harness. It achieves an aggregate generation throughput of $1{,}200\text{ tokens/sec}$ across an 8-GPU node. However, lacking structural verification gates, it frequently enters code-generation loops and only achieves a task success rate of $20\%$ ($|\mathcal{T}_{\text{success}}| / |\mathcal{T}_{\text{all}}| = 0.20$). Assuming equal token budgets per trajectory, its Trajectory Goodput is:
+  $$\mathcal{G}_{\text{Alpha}} = \frac{0.20 \times R_{\text{avg}}}{1.00 \times R_{\text{avg}}} = 0.20 \quad (20\%)$$
+  *Eighty percent of the cluster's compute budget is wasted on non-productive tokens (badput).*
+
+- **System Beta:** Employs a larger, more deliberate model paired with a rigorous host runtime that enforces AST validation, static linting, and bounded sandboxed execution. Due to the overhead of tool execution and strict logit masking, its raw generation throughput drops to $400\text{ tokens/sec}$. However, its task success rate climbs to $70\%$. Its Trajectory Goodput is:
+  $$\mathcal{G}_{\text{Beta}} = \frac{0.70 \times R_{\text{avg}}}{1.00 \times R_{\text{avg}}} = 0.70 \quad (70\%)$$
+
+Despite delivering only one-third of the raw token throughput of System Alpha, System Beta delivers **$3.5\times$ higher Trajectory Goodput**. It yields more verified software fixes per megawatt-hour and per dollar than the superficially "faster" serving pipeline.
+:::
+
+Optimizing for Trajectory Goodput requires an architectural paradigm shift. Systems engineers cannot treat inference acceleration in isolation from host-side execution and verification. 
+
+Techniques that marginally increase raw decode speed are counterproductive if they degrade model adherence to tool-call schemas or increase the likelihood of silent semantic drift. Conversely, investing compute upfront—allocating additional tokens to test-time deliberation, executing intermediate linters within the sandbox, or maintaining strict rollback ledgers—substantially elevates Trajectory Goodput by pruning unviable execution branches before they burn irreplaceable budget capacity.
+
+---
+
+Understanding an agentic system as a closed-loop controller managing trajectory goodput establishes the overall systems objective. However, it exposes a deeper operational question: what are the concrete, step-by-step state transitions that occur inside this closed loop? To answer this, we must deconstruct the execution engine that drives the trajectory forward from delegated intent to final completion.

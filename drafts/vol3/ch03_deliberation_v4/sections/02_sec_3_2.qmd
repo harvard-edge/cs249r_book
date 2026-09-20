@@ -1,0 +1,164 @@
+## Three Compute Allocation Axes {#sec-vol3-deliberation-computation-allocation}
+
+When an agent runtime confronts a failing task—such as synthesizing a concurrent synchronization barrier or diagnosing an intermittent race condition—granting the system an additional computational budget does not specify *how* those operations should be structured. If the runtime allocates an order of magnitude more floating-point operations solely to deeper autoregressive rollouts within a single inference context, the foundation model frequently produces thousands of tokens of elaborate, plausible rationale that double down on its original faulty premises. If the runtime instead directs those operations toward sampling twenty independent candidate continuations in parallel from the initial prompt, it often obtains twenty minor syntactic variations of the exact same conceptual failure, because every candidate was sampled from an unconditioned conditional distribution sharing identical blind spots. If the host supervisor instead partitions that identical budget into three iterative cycles—generating a candidate, compiling and executing it against a race detector in an isolated sandbox, and injecting the resulting backtrace as a prompt prefix for targeted correction—the race condition is diagnosed and eliminated within seconds.
+
+**Test-time computation is not an undifferentiated scalar currency. Its architectural utility is governed entirely by its execution topology across three orthogonal axes: depth (sequential token extension), breadth (parallel candidate exploration), and feedback (observation-conditioned revision). Each axis establishes a fundamentally different dependency graph across model invocations, exhibits contrasting critical-path latency and accelerator memory profiles, and interacts distinctively with the model's epistemic boundaries.**
+
+::: {.column-margin}
+![Three canonical deliberation topologies: sequential depth, parallel breadth, and closed-loop feedback. Arrows denote data dependencies; shaded blocks denote retained accelerator state.](images/svg/allocation-axes.svg){#fig-vol3-allocation-axes}
+:::
+
+Understanding how to allocate inference-time computation requires decomposing these three execution topologies down to their physical and information-theoretic foundations. The agent runtime designer must balance the critical-path wall-clock latency ($T_{\text{wall}}$), the total floating-point operations ($C_{\text{FLOP}}$), the active state footprint retained in accelerator memory ($M_{\text{KV}}$), and the empirical validity of the resulting proposals.
+
+### Depth: Sequential Token Extension
+
+The most direct mechanism for increasing test-time computation is extending the sequential length of a single autoregressive generation. Under this topology, the runtime permits the model to emit a continuous trajectory of $K_{\text{ext}}$ intermediate tokens—often structured as a scratchpad, an execution trace, or an extended derivation—prior to emitting its final proposal.
+
+Formally, given an initial prompt $\mathbf{x} = (x_1, x_2, \dots, x_P)$, the autoregressive decode engine generates tokens sequentially:
+
+$$y_t \sim P_\Theta\left(y_t \mid \mathbf{x}, y_1, \dots, y_{t-1}\right), \quad t \in \{1, 2, \dots, K_{\text{ext}}\}$$
+
+where $\Theta$ represents the frozen parameters of the neural network. From an information-processing standpoint, depth expands the computational expressive capacity of the model. Standard transformer decoders are bounded in the number of computational operations they can perform per token; a single forward pass through $L$ layers cannot simulate an arbitrary number of state transitions. By serializing intermediate reasoning into the token sequence, the model effectively runs an unrolled recurrence: earlier intermediate tokens $y_{<t}$ are written into the Key-Value (KV) cache, allowing later tokens $y_t$ to attend back across intermediate derivations, decomposing complex combinatorial constraints into incremental steps.
+
+::: {.column-margin}
+During autoregressive decode, the memory bus transfers all model weights $\Theta$ from high-bandwidth memory (HBM) to on-chip SRAM for every single generated token. When batch size $b=1$, the operational intensity is approximately $\frac{2 |\Theta| \text{ FLOPs}}{2 |\Theta| \text{ bytes}} = 1 \text{ FLOP/byte}$, rendering depth strictly memory-bandwidth bound.
+:::
+
+From a systems perspective, however, depth represents a strictly serialized critical path. Because token $y_t$ cannot be computed until token $y_{t-1}$ has completed its forward pass and its key-value vectors are materialized in memory, no phase of the decode loop can be parallelized across time. The wall-clock execution time for depth, $T_{\text{wall}}^{\text{depth}}$, is governed by the sum of the initial prefill phase and the sequential decode phases:
+
+$$T_{\text{wall}}^{\text{depth}} = t_{\text{prefill}}(P) + \sum_{t=1}^{K_{\text{ext}}} t_{\text{decode}, t} \approx t_{\text{prefill}}(P) + K_{\text{ext}} \cdot t_{\text{step}}$$
+
+where $t_{\text{step}}$ is the latency of a single decode step. On modern accelerator architectures running small batch sizes, $t_{\text{step}}$ is severely memory-bandwidth bound: the operational intensity is nearly unit, requiring the hardware to stream the entire parameter footprint $|\Theta|$ from high-bandwidth memory (HBM) into compute registers to process a single token vector.
+
+Crucially, depth operates within a closed epistemic loop. While extended generation allows the model to compute more complex internal projections over its training distribution, *no fresh information enters the context from outside the model's static parameters $\Theta$*. If the initial prompt or the model's internal representations contain an error, extending generation depth simply grants the model more token budget to rationalize that error. Furthermore, because each token is sampled stochastically from $P_\Theta(\cdot \mid \mathbf{x}, y_{<t})$, the probability of maintaining invariant correctness across an unverified chain decays exponentially with sequence length, a failure mode known as stochastic drift.
+
+### Breadth: Parallel Candidate Sampling
+
+Rather than allocating additional compute to a single, prolonged sequential trajectory, breadth distributes test-time operations across $N$ independent candidate trajectories sampled from the same conditioning prompt. This topology forms the basis of parallel sampling and self-consistency mechanisms [-@wang2022selfconsistency].
+
+Under a breadth topology, the host supervisor issues $N$ independent autoregressive rollouts from the prefix $\mathbf{x}$:
+
+$$Y^{(n)} = \left(y_1^{(n)}, y_2^{(n)}, \dots, y_{K_n}^{(n)}\right) \sim P_\Theta(\cdot \mid \mathbf{x}), \quad n \in \{1, 2, \dots, N\}$$
+
+typically with a non-zero temperature parameter $\tau > 0$ or nucleus sampling threshold $p < 1$ to induce stochastic divergence across trajectories.
+
+The primary systems advantage of breadth is horizontal parallelizability. Because each candidate trajectory $Y^{(n)}$ is statistically and computationally independent of candidate $Y^{(m)}$ for $m \ne n$, the entire execution graph can be scheduled concurrently across available accelerator resources. The initial prompt $\mathbf{x}$ of length $P$ represents a shared dependency; the system executes the prefill phase over $\mathbf{x}$ once, generating a common base KV cache. At token index $P+1$, the execution graph forks into $N$ parallel decode paths. 
+
+Consequently, the wall-clock critical path does not scale linearly with $N$. If the inference cluster possesses sufficient memory bandwidth and processing units to host the $N$ concurrent decode streams, the wall-clock latency is determined entirely by the longest individual candidate:
+
+$$T_{\text{wall}}^{\text{breadth}} = t_{\text{prefill}}(P) + \max_{1 \le n \le N} T_{\text{decode}}\left(K_n\right)$$
+
+Contrast this with depth: whereas spending $N \cdot K$ tokens along the depth axis increases wall-clock latency by a factor of $N$, spending the same token budget across $N$ parallel breadth branches leaves the critical path virtually unchanged, bounded only by $K_{\max} = \max_n K_n$.
+
+```
+[Prompt P] ──┬──> Candidate 1 (K_1 tokens) ───┐
+             ├──> Candidate 2 (K_2 tokens) ───┼──> Selector / Verifier
+             └──> Candidate N (K_N tokens) ───┘
+Critical Path: t_prefill(P) + max(t_decode(K_n))
+```
+
+This wall-clock compression is offset by accelerator memory pressure. While depth maintains a single linear KV cache of size $(P + K_{\text{ext}})$, breadth demands the concurrent retention of $N$ active KV contexts in accelerator high-bandwidth memory:
+
+$$M_{\text{KV}}^{\text{breadth}} \propto P + \sum_{n=1}^N K_n$$
+
+Even when the prompt prefix $P$ is shared in memory, as the $N$ trajectories diverge, their respective key and value projections populate disjoint memory regions. If aggregate memory capacity is exceeded, the host runtime is forced to serialize the candidate batches, causing wall-clock latency to degrade from $\max(T_n)$ toward the serialized sum $\sum_n T_n$.
+
+Epistemically, breadth acts as a variance-reduction mechanism over the model's conditional manifold $P_\Theta(Y \mid \mathbf{x})$. A single candidate might fail because the autoregressive sampler unluckily selected an improbable token in an early decode step, steering the remaining trajectory into an unrecoverable basin. Sampling across breadth explores disjoint branches of the search space, increasing the probability that at least one candidate traverses an effective solution path. Nevertheless, breadth shares the fundamental limitation of depth: it is an entirely open-loop exploration. If the model assigns near-zero probability to the correct program logic—or if the task requires private knowledge hidden behind an API boundary—sampling one thousand candidates yields nothing more than one thousand internally consistent failures.
+
+### Feedback: Observation-Conditioned Revision
+
+The third allocation axis breaks the closed-system limitation of depth and breadth by interleaving autoregressive generation with deterministic environmental verification. Rather than treating model inference as an open-loop emitter, feedback organizes test-time compute into a discrete sequence of observation-conditioned repair cycles.
+
+Under a feedback topology, computation proceeds through $R$ sequential rounds. In round $r$, the runtime generates candidate proposal $Y_r$ conditioned on the initial prompt $\mathbf{x}$ and the cumulative history of prior proposals and empirical observations:
+
+$$Y_r \sim P_\Theta\left(\cdot \mid \mathbf{x}, Y_1, O_1, Y_2, O_2, \dots, Y_{r-1}, O_{r-1}\right)$$
+
+Once emitted, $Y_r$ is intercepted by the host supervisor under the principle of Zero Ambient Authority ($A=0$). The candidate proposal is not trusted. Instead, the runtime dispatches $Y_r$ across an isolated boundary to an external verification oracle: a compiler, an integration test harness, a type checker, or a system linter. The oracle executes deterministic checks and returns an empirical observation $O_r$:
+
+$$O_r = \text{Oracle}\left(Y_r\right) = \left(\text{status} \in \{\text{PASS}, \text{FAIL}\}, \text{trace} \in \Sigma^*\right)$$
+
+If the verification oracle signals success, execution terminates. If it signals failure, the error trace, compiler diagnostic, or execution exception is formatted as an observation payload $O_r$ and appended directly to the input context for round $r+1$.
+
+```
+[Prompt P] ──> Gen Y_1 ──> [Oracle Probe] ──> Err O_1 ──> Gen Y_2 ──> [Oracle Probe] ──> PASS
+Critical Path: Sum_r ( t_gen(P_r, K_r) + t_oracle(Y_r) )
+```
+
+Feedback represents an application of Dijkstra's verification principle: testing can decisively demonstrate the presence of specific faults, providing high-entropy negative signals that constrain subsequent search. Epistemically, feedback injects ground-truth environmental state into the context window, bridging the epistemic gap. The model is no longer forced to simulate complex runtime environments—such as OS kernel scheduling, dynamic linker behavior, or network timeouts—entirely within its parameter weights. Instead, it queries reality directly, using the external execution substrate as an authoritative oracle.
+
+The architectural penalty of feedback lies in its compound latency and expanding context overhead. The critical path is strictly serialized across rounds and includes external execution latency:
+
+$$T_{\text{wall}}^{\text{feedback}} = \sum_{r=1}^R \left( t_{\text{prefill}}\left(P_r\right) + t_{\text{decode}}\left(K_r\right) + t_{\text{oracle}}\left(Y_r\right) \right)$$
+
+where $t_{\text{oracle}}(Y_r)$ is the wall-clock time required for the sandbox to compile, execute, and instrument the candidate. Crucially, the prompt length expands monotonically at each iteration:
+
+$$P_{r+1} = P_r + K_r + |O_r| = P_1 + \sum_{j=1}^r \left(K_j + |O_j|\right)$$
+
+As round index $r$ increases, the prefill cost $t_{\text{prefill}}(P_r)$ compounds, consuming substantial FLOP budgets merely to ingest the accumulated transcript of prior failures. If the agent runtime does not implement aggressive context compaction or eviction policies, the expanding history threatens to exceed the context window $S_{\max}$ or degrade model attention performance.
+
+### Comparative Latency, Compute, and Memory Mechanics
+
+To evaluate how an agent runtime should partition its test-time budget, we formalize the operational profiles of each axis under a standard architectural model. Let $|\Theta|$ denote the count of active model parameters, $P$ denote the initial prompt length, $K$ denote the average generation length per candidate or round, and $b_{\text{bytes}}$ denote the precision representation size (e.g., 2 bytes for FP16 or BF16).
+
+Applying the standard first-order transformer compute approximation, each token processed in the forward pass requires approximately $2 |\Theta|$ floating-point operations (FLOPs)—one multiply-accumulate operation per parameter. The total computational burden ($C_{\text{FLOP}}$), the wall-clock critical path ($T_{\text{wall}}$), the peak retained KV cache memory ($M_{\text{KV}}$), and the primary epistemic contribution of each topology are summarized in @tbl-vol3-allocation-tradeoffs.
+
+| Deliberation Axis | Execution Topology | Compute Complexity ($C_{\text{FLOP}}$) | Critical-Path Wall Latency ($T_{\text{wall}}$) | Peak Retained State ($M_{\text{KV}}$) | Epistemic Source |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Depth** | Serial unrolled chain ($K_{\text{ext}}$ steps) | $2 |\Theta| \left(P + K_{\text{ext}}\right)$ | $t_{\text{prefill}}(P) + K_{\text{ext}} \cdot t_{\text{decode}}$ | $\mathcal{O}\left(P + K_{\text{ext}}\right)$ | Static parameters $\Theta$ (latent reasoning unpack) |
+| **Breadth** | Parallel fork-join ($N$ branches) | $2 |\Theta| \left(P + \sum_{n=1}^N K_n\right)$ | $t_{\text{prefill}}(P) + \max_n t_{\text{decode}}\left(K_n\right)$ | $\mathcal{O}\left(P + \sum_{n=1}^N K_n\right)$ | Manifold variance $P_\Theta(Y \mid \mathbf{x})$ (mode exploration) |
+| **Feedback** | Serial repair loop ($R$ iterations) | $2 |\Theta| \sum_{r=1}^R \left(P_r + K_r\right)$ | $\sum_{r=1}^R \left(t_{\text{gen}, r} + t_{\text{oracle}, r}\right)$ | $\mathcal{O}\left(P_R + K_R\right)$ | Deterministic environment (empirical observations $O_r$) |
+
+: Structural, operational, and memory trade-offs across the three deliberation compute allocation axes. Prefill calculations assume shared prompt caching across breadth branches. {#tbl-vol3-allocation-tradeoffs}
+
+As @tbl-vol3-allocation-tradeoffs makes clear, the three axes present radical engineering trade-offs. Breadth optimizes for wall-clock latency at the expense of peak concurrent memory footprint. Depth minimizes memory and coordination overhead while maximizing serial latency, but remains trapped within the model's unverified internal assumptions. Feedback trades away both wall-clock latency and prefill compute efficiency to achieve the one property that neither depth nor breadth can provide: empirical grounding against external reality.
+
+The concrete consequences of these architectural trade-offs are best illustrated by tracing hardware metrics on a modern inference node.
+
+::: {.callout-note title="Worked Example: Hardware Trade-offs Across Compute Allocation Axes"}
+Consider an autonomous agent runtime deployed on an 8-GPU node running an unquantized 70-billion parameter model ($|\Theta| = 70 \times 10^9$) in BF16 precision ($b_{\text{bytes}} = 2$ bytes). The node possesses an aggregate memory bandwidth $B_{\text{mem}} = 26.8\text{ TB/s}$ ($3.35\text{ TB/s}$ per GPU) and sustained BF16 matrix compute throughput of $R_{\text{peak}} = 15{,}800\text{ TFLOPS}$.
+
+The agent is tasked with synthesizing a lockless ring buffer. The base specification prompt contains $P = 4{,}096$ tokens. We analyze three concrete configurations designed to consume comparable total generation budgets of approximately $4{,}096$ emitted tokens:
+
+1. **Configuration A (Depth):** A single serial rollout of $K_{\text{ext}} = 4{,}096$ intermediate reasoning and implementation tokens.
+2. **Configuration B (Breadth):** An $N = 4$ parallel sampling sweep, where each branch emits $K = 1{,}024$ tokens concurrently.
+3. **Configuration C (Feedback):** An $R = 3$ round iterative repair loop. Each round emits $K = 1{,}024$ tokens, followed by an external compilation and ThreadSanitizer test pass taking $t_{\text{oracle}} = 1.50\text{ s}$ that yields $|O_r| = 340$ tokens of diagnostic traces.
+
+**Step 1: Compute and Memory Baseline**
+Loading the model weights requires:
+$$M_{\text{weights}} = 70 \times 10^9 \times 2\text{ bytes} = 140\text{ GB}$$
+For an unbatched single-stream decode step, the time to stream weights from HBM across the node bus is:
+$$t_{\text{step}} = \frac{M_{\text{weights}}}{B_{\text{mem}}} = \frac{140 \times 10^9\text{ bytes}}{26.8 \times 10^{12}\text{ bytes/s}} \approx 5.22\text{ ms/token}$$
+The prefill phase over a prompt of length $L$ operates in the compute-bound GEMM regime:
+$$t_{\text{prefill}}(L) = \frac{2 \cdot |\Theta| \cdot L}{R_{\text{peak}}} = \frac{2 \cdot (70 \times 10^9) \cdot L}{15.8 \times 10^{15}\text{ FLOPS}} \approx \left(8.86 \times 10^{-6} \cdot L\right)\text{ seconds}$$
+For $P = 4{,}096$, $t_{\text{prefill}}(4{,}096) \approx 36.3\text{ ms}$.
+
+**Step 2: Configuration A (Depth) Evaluation**
+- **Total Compute:**
+  $$C_{\text{FLOP}}^{\text{depth}} = 2 \cdot (70 \times 10^9) \cdot (4{,}096 + 4{,}096) = 1.147 \times 10^{15}\text{ FLOPs} = 1.15\text{ PFLOPs}$$
+- **Wall-Clock Latency:**
+  $$T_{\text{wall}}^{\text{depth}} = t_{\text{prefill}}(4{,}096) + 4{,}096 \cdot t_{\text{step}} = 0.036\text{ s} + (4{,}096 \times 0.00522\text{ s}) = 0.036\text{ s} + 21.38\text{ s} = 21.42\text{ s}$$
+- **Outcome:** The model emits an intricate mathematical justification of an invariant that violates the x86 weak memory model. Because no external compiler was consulted, the proposal is returned to the user with an undetected memory barrier bug.
+
+**Step 3: Configuration B (Breadth) Evaluation**
+Assuming the $N=4$ branches are batched together across the GPUs during decode, the weight streaming cost ($140\text{ GB}$) is amortized across 4 tokens per step, yielding an effective decode step latency of $t_{\text{step, batch=4}} \approx 5.60\text{ ms}$:
+- **Total Compute:**
+  $$C_{\text{FLOP}}^{\text{breadth}} = 2 \cdot (70 \times 10^9) \cdot (4{,}096 + 4 \times 1{,}024) = 1.147 \times 10^{15}\text{ FLOPs} = 1.15\text{ PFLOPs}$$
+- **Wall-Clock Latency:**
+  $$T_{\text{wall}}^{\text{breadth}} = t_{\text{prefill}}(4{,}096) + 1{,}024 \cdot t_{\text{step, batch=4}} = 0.036\text{ s} + (1{,}024 \times 0.00560\text{ s}) = 0.036\text{ s} + 5.73\text{ s} = 5.77\text{ s}$$
+- **Outcome:** Total compute matches Configuration A exactly, but wall-clock latency drops from $21.42\text{ s}$ down to $5.77\text{ s}$ (a $3.7\times$ speedup). However, all four sampled candidates contain variations of the same missing atomic fetch-and-add instruction, because the prompt provided no signal indicating that the initial design contained a race.
+
+**Step 4: Configuration C (Feedback) Evaluation**
+Prompt lengths expand across rounds:
+- Round 1: $P_1 = 4{,}096$. Prefill = $36.3\text{ ms}$. Decode $1{,}024$ tokens = $5.35\text{ s}$. Sandbox test = $1.50\text{ s}$.
+- Round 2: $P_2 = 4{,}096 + 1{,}024 + 340 = 5{,}460$. Prefill = $48.4\text{ ms}$. Decode $1{,}024$ tokens = $5.35\text{ s}$. Sandbox test = $1.50\text{ s}$.
+- Round 3: $P_3 = 5{,}460 + 1{,}024 + 340 = 6{,}824$. Prefill = $60.5\text{ ms}$. Decode $1{,}024$ tokens = $5.35\text{ s}$. Sandbox test = $1.50\text{ s}$ (passes).
+- **Total Compute:**
+  $$C_{\text{FLOP}}^{\text{feedback}} = 2 \cdot (70 \times 10^9) \cdot \left[(4{,}096 + 1{,}024) + (5{,}460 + 1{,}024) + (6{,}824 + 1{,}024)\right] = 2.723 \times 10^{15}\text{ FLOPs} = 2.72\text{ PFLOPs}$$
+- **Wall-Clock Latency:**
+  $$T_{\text{wall}}^{\text{feedback}} = (0.036 + 0.048 + 0.061) + 3 \times 5.35\text{ s} + 3 \times 1.50\text{ s} = 0.145\text{ s} + 16.05\text{ s} + 4.50\text{ s} = 20.70\text{ s}$$
+- **Outcome:** Configuration C consumes $2.37\times$ more total FLOPs than Configurations A and B due to the quadratic accumulation of context in the prefill phases. Its wall-clock latency ($20.70\text{ s}$) is nearly identical to single-shot depth ($21.42\text{ s}$). Yet only Configuration C produces a working implementation: in Round 2, ThreadSanitizer flags the missing memory barrier, providing the exact line and register offset required for Round 3 to emit a verified, race-free barrier.
+:::
+
+The architectural imperative that emerges from this quantitative comparison is that real-world agent runtimes rarely deploy any single axis in isolation. Instead, high-performance runtime orchestrators construct hybrid deliberation topologies: leveraging depth to unpack local procedural logic, deploying breadth to explore disjoint architectural candidates across parallel workers, and closing the loop with feedback to verify and prune invalid candidates against deterministic system oracles.
+
+Yet whether a runtime allocates its deliberation budget across parallel candidate branches or successive feedback iterations, it immediately encounters a selection bottleneck: generating multiple candidate solutions yields zero systemic value if the runtime cannot reliably distinguish which candidate is correct. If the system samples sixteen candidate implementations of a cache eviction policy, or branches across five possible query plans, how does the host supervisor evaluate and select the winning trajectory without introducing catastrophic verification exploits?

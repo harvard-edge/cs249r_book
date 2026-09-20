@@ -78,6 +78,7 @@ git checkout -b feature/your-improvement
 # 3. Make changes following standards in CONTRIBUTING.md
 # 4. Test thoroughly
 pytest tests/
+tito dev export 01    # build the notebook from src/ (module test no longer falls back to src/)
 tito module test 01
 
 # 5. Commit with descriptive messages
@@ -106,8 +107,12 @@ All contributions must pass:
 1. **Module Tests** (run tests for a specific module):
    ```bash
    pytest tests/NN_name/             # e.g., pytest tests/01_tensor/
+   tito dev export NN                # build the notebook from src/ first
    tito module test NN               # e.g., tito module test 01
    ```
+
+   `tito module test` runs the notebook in `modules/`, never `src/`, so export
+   the module before testing it.
 
 2. **Integration Tests**:
    ```bash
@@ -223,13 +228,17 @@ Releases are created via the `tinytorch-publish-live.yml` GitHub Actions workflo
 2. Select release type (patch/minor/major)
 3. Enter release description
 4. Workflow automatically:
-   - Bumps version in code
+   - Bumps the version in `pyproject.toml`, `settings.ini`, `guide/install.sh`,
+     the Quarto announcement, and the README badge
    - Runs tests and preflight checks
    - Merges dev → main
-   - Deploys to tinytorch.org
-   - Creates git tag (e.g., v0.1.1)
-   - Creates GitHub Release with notes
-   - Publishes to PyPI
+   - Deploys to mlsysbook.ai/tinytorch/
+   - Creates a git tag (e.g. `tinytorch-v0.1.14`, package-prefixed so TinyTorch
+     releases are distinguishable from the book volumes sharing this monorepo)
+   - Creates a GitHub Release with notes
+
+TinyTorch is not published to PyPI. It is meant to be cloned and edited, not
+installed as a wheel, so there is no package-index step.
 
 ### For Contributors
 

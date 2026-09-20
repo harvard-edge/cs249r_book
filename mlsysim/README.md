@@ -64,12 +64,17 @@
       <td><b>Execution & Resolvers</b><br><code>mlsysim.engine.solver</code></td>
       <td>The 3-tier math engine: Models, Solvers, and Optimizers (Design space search).</td>
     </tr>
+    <tr>
+      <td align="center"><b>Layer F</b></td>
+      <td><b>Embodied & Physical AI</b><br><code>mlsysim.embodied</code>, <code>mlsysim.physics.robotics</code></td>
+      <td>Cyber-physical platforms (AMRs, Autonomous Vehicles, Manipulators) and closed-form physics (stopping envelopes, impact forces, stiction, bus utilization, safety leases).</td>
+    </tr>
   </tbody>
 </table>
 
 `Scenarios.*` sits above the stack as the runnable composition layer: it pairs a
-`Models.*` workload with a `Hardware.*` or `Systems.*` target and local
-constraints such as latency or power. Non-executable real-world anchors live in
+`Models.*` workload with a `Hardware.*`, `Systems.*`, or `Embodied.*` target and local
+constraints such as latency, power, or stopping envelopes. Non-executable real-world anchors live in
 `ReferenceStats.*`. There are no compatibility aliases between these namespaces:
 new and existing code should use the canonical path directly.
 
@@ -268,10 +273,12 @@ Thanks to these wonderful people for helping improve MLSys·im!
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=80" width="80px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/aadityansha06"><img src="https://avatars.githubusercontent.com/u/96714228?v=4?v=4?s=80" width="80px;" alt="Aadityansha "/><br /><sub><b>Aadityansha </b></sub></a><br />🪲 🧑‍💻 🧪</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/ShivtejG236"><img src="https://avatars.githubusercontent.com/u/91597404?v=4?v=4?s=80" width="80px;" alt="Shivtej Gaikwad"/><br /><sub><b>Shivtej Gaikwad</b></sub></a><br />🪲 🧑‍💻 🧪</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=80" width="80px;" alt="Peter Koellner"/><br /><sub><b>Peter Koellner</b></sub></a><br />🪲 ✍️</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/hzeljko"><img src="https://avatars.githubusercontent.com/hzeljko?v=4?s=80" width="80px;" alt="Zeljko Hrcek"/><br /><sub><b>Zeljko Hrcek</b></sub></a><br />🧑‍💻</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/kjlintong"><img src="https://avatars.githubusercontent.com/u/40327910?v=4?v=4?s=80" width="80px;" alt="Tong Lin"/><br /><sub><b>Tong Lin</b></sub></a><br />🧑‍💻 ✍️ 🧪</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/lynnyulinlin-debug"><img src="https://avatars.githubusercontent.com/u/252566641?v=4?v=4?s=80" width="80px;" alt="lynnyulinlin-debug"/><br /><sub><b>lynnyulinlin-debug</b></sub></a><br />🪲 🧑‍💻 🧠</td>
     </tr>
     <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=80" width="80px;" alt="Peter Koellner"/><br /><sub><b>Peter Koellner</b></sub></a><br />🪲 ✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/hzeljko"><img src="https://avatars.githubusercontent.com/hzeljko?v=4?s=80" width="80px;" alt="Zeljko Hrcek"/><br /><sub><b>Zeljko Hrcek</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/nyxst4ck"><img src="https://avatars.githubusercontent.com/u/289980115?v=4?v=4?s=80" width="80px;" alt="nyxst4ck"/><br /><sub><b>nyxst4ck</b></sub></a><br />✍️</td>
     </tr>
   </tbody>

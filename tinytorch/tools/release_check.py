@@ -592,6 +592,42 @@ def g_syntax_warnings():
 
 
 # ================================ TESTS =====================================
+@gate("grading: no graded cell scores only pre-solved scaffold code")
+def g_graded_touches_student_work():
+    # 2026-09-20: 553 of 1897 graded points were awarded on an EMPTY student
+    # notebook. A region tagged role="scaffold" ships pre-solved, so a graded
+    # cell whose module strips nothing it depends on cannot fail. The existing
+    # "exceptions cannot turn missing implementations into a pass" gate cannot
+    # see this, because the implementation is not missing, it shipped.
+    # A module with zero stripped regions cannot grade anything, so it is the
+    # clearest form of the defect and the one this gate reports.
+    sys.path.insert(0, str(ROOT))
+    from tito.core.solutions import solution_role, solution_role_action
+
+    errs = []
+    for _, name, py in module_files():
+        text = py.read_text()
+        stripped = [
+            l for l in text.splitlines()
+            if "### BEGIN SOLUTION" in l
+            and solution_role_action(solution_role(l), "student") == "strip"
+        ]
+        if stripped:
+            continue
+        points = sum(
+            int(m.group(1))
+            for h, _ in cells(text)
+            for m in [re.search(r'"points":\s*(\d+)', h)]
+            if m
+        )
+        if points:
+            errs.append(
+                f"{name}: {points} graded points but no region is stripped for "
+                f"the student, so nothing it grades can fail"
+            )
+    return errs
+
+
 @gate("tests: no test signals failure with a bare return")
 def g_test_returns():
     errs = []

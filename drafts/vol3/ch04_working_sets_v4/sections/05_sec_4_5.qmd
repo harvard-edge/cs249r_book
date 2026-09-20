@@ -1,0 +1,132 @@
+## Context Checkpointing {#sec-vol3-working-sets-summarization}
+
+Prolonged agentic execution over multi-turn trajectories inevitably collides with the physical limits of accelerator memory and prefill compute budgets. When a host runtime relies on freeform, natural-language summarization to compress historical interactions, it subjects the agent's working memory to an uncontrolled game of semantic telephone: critical negative constraints evaporate, exact file paths blur, and speculative hypotheses are mistakenly recorded as verified ground truth. Entrusting state preservation to unconstrained narrative summaries introduces a destructive form of epistemic drift, wherein the model gradually hallucinates its own past successes and repeats previously failed actions.
+
+**Durable trajectory preservation requires treating working-context checkpoints not as casual prose narratives, but as strongly typed, verifiable state records.** By decoupling immutable task invariants and verified milestone assertions from transient conversational chatter, the runtime supervisor can prune tens of thousands of redundant execution tokens while guaranteeing that the agent's logical state remains consistent across arbitrary operational horizons. Checkpoints transform an unwieldy, unbounded history into a compact, structured working set that can be audited before eviction and deterministically reinjected upon context reconstitution.
+
+### The Formal Checkpoint Schema and State Tuples
+
+Unstructured prose summaries fail because foundation models optimize for linguistic plausibility rather than state-machine invariants. When an unconstrained model is instructed to "summarize progress," it routinely emits vague, conversational abstractions—such as "I attempted to resolve the memory leak in the parser and then ran tests"—which discard the very details essential for subsequent deterministic reasoning: precise error codes, specific source line ranges, compiler flags, and negative discoveries. Over successive summarization cycles, this lossy compression causes *causal amnesia*, where the agent forgets why an architectural path was abandoned and enters infinite retry loops.
+
+::: {.column-margin}
+**The Epistemic Hazard of Self-Summarization**  
+An unprivileged model cannot reliably distinguish between a planned action and an executed fact. Without schema enforcement, an LLM generating its own summary frequently promotes speculative intentions ("I will patch `alloc.c`") into completed realities ("Patched `alloc.c`"), corrupting the host runtime's operational state.
+:::
+
+To eliminate semantic drift, the runtime must force context checkpoints into a mathematically bounded, structured tuple. We formalize the logical checkpoint state $\mathcal{S}_{\text{checkpoint}}$ as:
+
+$$\mathcal{S}_{\text{checkpoint}} = \langle \mathcal{G}, \mathcal{C}, \mathcal{H}, \Omega, \mathcal{A} \rangle$$
+
+where each component captures an orthogonal dimension of the operational trajectory:
+
+- **Goal Invariant ($\mathcal{G}$):** The canonical specification of the user's overarching objective, terminal success conditions, and explicit scope boundaries. This field is immutable; once initialized by the host supervisor, it cannot be modified by the agent's subsequent deliberation.
+- **Completed Milestones ($\mathcal{C}$):** A topologically ordered sequence of verified actions $\langle m_1, m_2, \dots, m_k \rangle$. Each milestone $m_i = \langle a_i, o_i, \rho_i \rangle$ couples the executed tool invocation $a_i$ with its observed deterministic output summary $o_i$ and an environmental proof artifact $\rho_i$ (such as a zero exit code, a cryptographic patch hash, or a compiler diagnostic).
+- **Active Hypothesis ($\mathcal{H}$):** The agent's current working theory regarding the system state or root cause (for example, "The segmentation fault originates from an unaligned 64-bit access in `ring_buffer_pop()` after index rollover").
+- **Open Constraints ($\Omega$):** The active set of operational invariants and negative boundaries $\{\omega_1, \omega_2, \dots, \omega_n\}$ that must govern all future steps (for example, "Do not alter the public ABI signature in `include/channel.h`" or "Do not invoke external network tools").
+- **Artifact Pointers ($\mathcal{A}$):** A dictionary of URIs, relative filesystem paths, content digests, and line-span coordinates representing the active working set of modified or inspected files. Instead of inlining entire file bodies into the prompt, the checkpoint records durable references that can be rehydrated on demand.
+
+The structural decoupling of $\mathcal{S}_{\text{checkpoint}}$ guarantees that the operational state of the agent is represented as discrete, inspectable data fields rather than diffuse attention weights distributed across thousands of conversational tokens. @tbl-vol3-checkpoint-schema formalizes the operational taxonomy of this schema alongside the specific failure modes prevented by each component.
+
+| Schema Field | Type Definition | Historical Source Reference | Systems Failure Mode Prevented | Verification Audit Method |
+| :--- | :--- | :--- | :--- | :--- |
+| $\mathcal{G}$ (Goal) | `String` (Immutable) | Initial invocation prompt | Scope creep; goal drift under repeated compaction | Bitwise equality check against root task prompt |
+| $\mathcal{C}$ (Milestones) | `List[MilestoneTuple]` | Tool execution trace ($t_0 \dots t_k$) | Phantom progress; cyclical re-execution of completed work | Cross-check tool exit codes and content hashes in trace log |
+| $\mathcal{H}$ (Hypothesis) | `String` (Bounded) | Recent deliberation turns | Aimless exploratory thrashing across incompatible plans | Semantic entailment against current diagnostic logs |
+| $\Omega$ (Constraints) | `Set[ConstraintRule]` | System instructions and user directives | Invariant evaporation; accidental violation of negative boundaries | Set-containment audit against global security policy |
+| $\mathcal{A}$ (Artifacts) | `Map[Path, Hash]` | File inspection and edit tool invocations | Context bloating from redundant file dumps; stale path references | Filesystem existence check and SHA-256 integrity digest |
+
+: Operational specification of the structured checkpoint schema $\mathcal{S}_{\text{checkpoint}}$. {#tbl-vol3-checkpoint-schema}
+
+By structuring the checkpoint into distinct, typed partitions, the runtime supervisor enforces a strict separation between unalterable constraints and speculative working hypotheses. When token budget exhaustion forces the eviction of the preceding conversation history, the structured record provides a dense, authoritative kernel that maintains operational continuity without carrying forward thousands of tokens of ephemeral tool chatter.
+
+### Pre-Eviction Verification and Consistency Auditing
+
+A foundational principle of dependable systems engineering—formulated by Saltzer, Reed, and Clark in the end-to-end argument—is that internal self-reports from unprivileged modules cannot be accepted as proof of correctness. Because a foundation model operates under Zero Ambient Authority ($A=0$), any checkpoint candidate $\mathcal{S}'_{\text{checkpoint}}$ emitted by the model during context compaction is an untrusted proposal. If the host supervisor naively accepts a hallucinated summary asserting that a test suite passed when the raw event trace contains a fatal assertion failure, deallocating the raw context destroys the only evidence of that failure, permanently corrupting the agent's state trajectory.
+
+::: {.column-margin}
+**Atomic Context Compaction**  
+The runtime must treat context replacement as an atomic transaction. The raw token buffer must never be unpinned or deallocated from the logical working set until the candidate checkpoint passes all deterministic verification predicates. If verification fails, the runtime aborts compaction and triggers corrective regeneration.
+:::
+
+Before the runtime purges the active token buffer to reclaim context capacity, it routes the candidate checkpoint $\mathcal{S}'_{\text{checkpoint}}$ through a deterministic *Consistency Auditor*. This auditing pipeline applies three sequential verification gates against the uncompacted event trace $\mathcal{T}_{\text{raw}} = \langle e_1, e_2, \dots, e_N \rangle$:
+
+1. **Milestone Integrity Audit:** For every milestone $m_i \in \mathcal{C}'$, the auditor verifies that the claimed tool invocation exists in $\mathcal{T}_{\text{raw}}$ and that the reported outcome matches the actual return code recorded by the sandbox supervisor. If the checkpoint claims "Compiled kernel module successfully," but the execution log for `make modules` contains `Error 2`, the checkpoint is rejected.
+2. **Constraint Conservation Audit:** The auditor evaluates the set difference $\Omega_{\text{system}} \setminus \Omega'_{\text{checkpoint}}$. If any negative constraint present in the initial prompt or host policy (such as prohibitions against modifying configuration files) is absent from the candidate checkpoint, the auditor flags a constraint drop violation.
+3. **Artifact Liveness Audit:** For every file path and content digest pair $\langle p, h \rangle \in \mathcal{A}'$, the auditor queries the underlying execution sandbox. If a referenced file does not exist, or if its actual on-disk hash differs from $h$, the pointer is flagged as corrupt.
+
+```python
+def audit_checkpoint(raw_trace: list[Event], chk: CheckpointSchema) -> bool:
+    tool_events = {e.call_id: e for e in raw_trace if e.type == "tool_result"}
+    for m in chk.completed_steps:
+        event = tool_events.get(m.call_id)
+        if not event or event.exit_code != m.claimed_exit_code:
+            return False  # Hallucinated progress or inverted exit status
+    if not chk.open_constraints.issuperset(raw_trace[0].immutable_constraints):
+        return False  # Constraint dropped during summarization
+    return True
+```
+
+The verification logic above demonstrates the programmatic gating enforced by the host supervisor. Because this check executes as native host code outside the inference engine, it runs in sub-millisecond time and requires zero neural evaluation. If `audit_checkpoint` returns `False`, the host runtime rejects the candidate checkpoint, injects an explicit error diagnostic into the active context ("Error: Proposed checkpoint contradicted tool result for call_id..."), and forces the model to regenerate the state tuple under constrained decoding.
+
+::: {.callout-note title="Worked Example: Quantitative Checkpoint Auditing and Prefill Reclaim"}
+Consider an autonomous software engineering agent executing a multi-file refactoring task on a large repository. Over 48 turns of tool interactions, the raw context buffer accumulates $L_{\text{raw}} = 114\text{,}688$ tokens ($112\text{k}$ tokens), consisting of compiler outputs, source diffs, and directory listings. 
+
+The agent runs on a host server backed by an 8-GPU tensor-parallel cluster of NVIDIA H100 SXM5 accelerators ($1975\text{ TFLOP/s}$ dense FP16 per GPU, $3.35\text{ TB/s}$ HBM3 bandwidth). The model employs a standard Transformer architecture ($d_{\text{model}} = 8192$, $N_{\text{layers}} = 80$, $N_{\text{heads}} = 64$, $d_{\text{head}} = 128$). We evaluate the computational and financial impact of checkpointing versus maintaining the uncompacted context.
+
+**1. Prefill Compute and Memory Footprint of the Raw Context:**  
+The compute required to prefill the uncompacted context is dominated by the linear projection GEMMs and quadratic self-attention:
+$$\text{FLOPs}_{\text{GEMM}} \approx 2 \times 24 \times N_{\text{layers}} \times d_{\text{model}}^2 \times L_{\text{raw}} = 48 \times 80 \times (8192)^2 \times 114\text{,}688 \approx 2.954 \times 10^{16}\text{ FLOPs}$$
+The self-attention matrix multiplications ($QK^T$ and $\text{Attn} \cdot V$) require:
+$$\text{FLOPs}_{\text{Attn}} = 4 \times N_{\text{layers}} \times d_{\text{model}} \times L_{\text{raw}}^2 = 4 \times 80 \times 8192 \times (114\text{,}688)^2 \approx 3.440 \times 10^{16}\text{ FLOPs}$$
+$$\text{FLOPs}_{\text{total}} = 2.954 \times 10^{16} + 3.440 \times 10^{16} \approx 6.394 \times 10^{16}\text{ FLOPs} = 63.94\text{ PFLOPs}$$
+
+Across the 8 H100 GPUs ($8 \times 1975 = 15\text{,}800\text{ TFLOP/s}$ peak), assuming an achieved Model Flops Utilization (MFU) of $45\%$ during prefill:
+$$T_{\text{prefill, raw}} = \frac{6.394 \times 10^{16}}{0.45 \times 15.80 \times 10^{15}\text{ FLOP/s}} \approx 9.00\text{ seconds}$$
+
+The physical KV cache memory required to stage this context in 16-bit precision (with Key-Value pairs across 80 layers and $N_{\text{kv\_heads}} = 8$ using Grouped-Query Attention) is:
+$$\text{Memory}_{\text{KV}} = 2 \times 2\text{ bytes} \times N_{\text{layers}} \times (N_{\text{kv\_heads}} \times d_{\text{head}}) \times L_{\text{raw}} = 4 \times 80 \times 1024 \times 114\text{,}688 \approx 37.58\text{ GB}$$
+
+**2. Prefill Compute and Memory of the Verified Checkpoint:**  
+The runtime prompts the model to distill the history into a structured checkpoint $\mathcal{S}_{\text{checkpoint}}$, yielding $L_{\text{chk}} = 1\text{,}536$ tokens ($1.5\text{k}$ tokens), alongside an active working tail of the most recent 2 turns ($L_{\text{tail}} = 2\text{,}048$ tokens). The hydrated context length becomes:
+$$L_{\text{hydrated}} = L_{\text{chk}} + L_{\text{tail}} = 3\text{,}584\text{ tokens}$$
+
+Recomputing the prefill FLOPs for $L_{\text{hydrated}}$:
+$$\text{FLOPs}_{\text{GEMM, chk}} \approx 48 \times 80 \times (8192)^2 \times 3584 \approx 9.23 \times 10^{14}\text{ FLOPs}$$
+$$\text{FLOPs}_{\text{Attn, chk}} = 4 \times 80 \times 8192 \times (3584)^2 \approx 3.37 \times 10^{13}\text{ FLOPs}$$
+$$\text{FLOPs}_{\text{total, chk}} \approx 9.57 \times 10^{14}\text{ FLOPs} = 0.957\text{ PFLOPs}$$
+$$T_{\text{prefill, chk}} = \frac{9.57 \times 10^{14}}{0.45 \times 15.80 \times 10^{15}} \approx 0.135\text{ seconds} = 135\text{ ms}$$
+
+The compacted KV cache footprint shrinks to:
+$$\text{Memory}_{\text{KV, chk}} = 4 \times 80 \times 1024 \times 3584 \approx 1.17\text{ GB}$$
+
+**3. Quantitative Summary:**  
+- **Token Compression Ratio:** $\frac{114\text{,}688}{3\text{,}584} = 32.0\times$
+- **Prefill Latency Reduction:** From $9.00\text{ s}$ to $0.135\text{ s}$ ($66.7\times$ speedup, eliminating $8.865\text{ s}$ of blocking GPU time per turn).
+- **HBM Footprint Reclamation:** $37.58\text{ GB} - 1.17\text{ GB} = 36.41\text{ GB}$ saved per batch instance, allowing a $32\times$ increase in concurrent serving concurrency on identical physical hardware.
+- **Verification Overhead:** The deterministic audit in `audit_checkpoint` parses the 48-event JSON log in host memory in $1.8\text{ ms}$ on a standard CPU core—less than $1.4\%$ of the single-turn prefill time—completely preventing the propagation of corrupted milestones into the compacted state.
+:::
+
+The quantitative benefits of checkpointing extend beyond raw compute savings. By enforcing strict verification before context eviction, the host runtime eliminates the compounding failure rate of long trajectories, ensuring that the model's forward reasoning is grounded exclusively in verified state transitions.
+
+### Working-Set Resumption and Invariant Anchoring
+
+Once a checkpoint $\mathcal{S}_{\text{checkpoint}}$ is validated and the uncompacted context is deallocated, the runtime faces the task of reconstituting the working context for turn $t+1$. Context reconstitution is not merely a matter of dumping the serialized state tuple into the model's prompt buffer. The host runtime must arrange the reconstituted working set to satisfy two competing constraints: instruction authority preservation and physical cache reuse.
+
+::: {.column-margin}
+**Prefix Caching and Determinism**  
+When the runtime reconstitutes context from a checkpoint, the prompt prefix (system instructions, tool definitions, and anchored constraints) must remain byte-identical across successive turns. This token stability enables physical inference engines (such as vLLM or SGLang) to reuse the allocated Radix tree KV cache pages, bypassing prefill computation entirely for the static prefix.
+:::
+
+To balance these requirements, the runtime deploys a three-tier context staging architecture:
+
+1. **The Anchored Root (Immutable Prefix):** The root of the context window holds the global system instructions, tool execution schemas, and the immutable goal invariant $\mathcal{G}$, alongside the pinned constraints $\Omega$. This block is marked immutable and remains strictly identical across every turn of the trajectory.
+2. **The Hydrated State Record (Structured Kernel):** The verified checkpoint state $\mathcal{S}_{\text{checkpoint}}$ is rendered into a canonical, deterministic serialization format (such as strictly key-ordered JSON or compact YAML). This block explicitly instantiates the verified milestones $\mathcal{C}$, the active hypothesis $\mathcal{H}$, and the artifact table $\mathcal{A}$.
+3. **The Dynamic Horizon (Sliding Working Window):** Following the state record, the runtime appends an uncompacted sliding tail of the $k$ most recent turns (typically $k=2$ to $k=4$). This provides the model with full lexical visibility into immediate conversational exchanges and raw tool syntax without consuming excessive token capacity.
+
+A critical vulnerability in multi-turn summarization is *invariant erosion*: when state is repeatedly compressed across dozens of cycles, negative constraints (such as "Never edit files in `vendor/`") suffer from progressive attention attenuation and eventual omission. To permanently mitigate this decay, the host runtime enforces *Memory Anchoring*. 
+
+Under memory anchoring, constraints are not treated as soft narrative text subject to model summarization. Instead, the runtime supervisor isolates $\Omega$ in a dedicated, pinned prompt container. During summarization passes, the model is explicitly forbidden from updating or rewriting $\Omega$; the model is permitted only to modify the mutable state components ($\mathcal{C}$, $\mathcal{H}$, and $\mathcal{A}$). Upon context resumption, the runtime mechanically re-injects the original, pristine constraint set $\Omega_{\text{system}}$ into the anchored root of the prompt template.
+
+Through memory anchoring and structured resumption, the host runtime maintains the logical coherence of the agent across arbitrary task durations. The agent perceives a continuous, coherent trajectory governed by consistent operational boundaries, while the physical inference hardware processes a compact, highly optimized working set.
+
+The architectural integrity of context checkpointing rests on an implicit foundational assumption: that the physical environment remains frozen while the checkpoint is recorded. The verified milestone record $\mathcal{C}$ and artifact pointers $\mathcal{A}$ capture observations that were true at the exact moment of tool execution. However, software systems, databases, and network environments are inherently dynamic. If an external compiler process modifies a build artifact, a concurrent git rebase alters local source lines, or a remote API terminates a test container after a checkpoint has been committed, the checkpoint's internal pointers remain syntactically flawless while their underlying semantic truth dissolves—a condition of silent context corruption that requires formal invalidation protocols.

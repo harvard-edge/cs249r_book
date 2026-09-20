@@ -65,7 +65,7 @@ and `binder/tests/test_content_structure.py` enforces it.
 |  | backmatter | `backmatter/glossary/glossary.qmd` |
 |  | backmatter | `backmatter/references.qmd` |
 
-## Volume II: Machine Learning Systems at Scale (`vol2`)
+## Volume II: Scaling Machine Learning Systems (`vol2`)
 
 17 chapters. Reading order:
 
@@ -121,27 +121,29 @@ and `binder/tests/test_content_structure.py` enforces it.
 |  | frontmatter | `frontmatter/ai_use.qmd` |
 |  | frontmatter | `frontmatter/notation.qmd` |
 | 1 | chapter | `01_introduction/01_introduction.qmd` |
-|  | part | `parts/foundations_principles.qmd` |
+|  | part | `parts/part1_processor.qmd` |
 | 2 | chapter | `02_processor/02_processor.qmd` |
 | 3 | chapter | `03_deliberation/03_deliberation.qmd` |
-|  | part | `parts/serving_memory_principles.qmd` |
+|  | part | `parts/part2_memory.qmd` |
 | 4 | chapter | `04_working_sets/04_working_sets.qmd` |
 | 5 | chapter | `05_virtual_memory/05_virtual_memory.qmd` |
 | 6 | chapter | `06_episodic_memory/06_episodic_memory.qmd` |
-| 7 | chapter | `07_checkpointing/07_checkpointing.qmd` |
-|  | part | `parts/security_isolation_principles.qmd` |
-| 8 | chapter | `08_actuation/08_actuation.qmd` |
-| 9 | chapter | `09_virtualization/09_virtualization.qmd` |
+|  | part | `parts/part3_io.qmd` |
+| 7 | chapter | `07_actuation/07_actuation.qmd` |
+| 8 | chapter | `08_virtualization/08_virtualization.qmd` |
+|  | part | `parts/part4_os.qmd` |
+| 9 | chapter | `09_checkpointing/09_checkpointing.qmd` |
 | 10 | chapter | `10_interrupts/10_interrupts.qmd` |
 | 11 | chapter | `11_scheduling/11_scheduling.qmd` |
-|  | part | `parts/training_adaptation_principles.qmd` |
+|  | part | `parts/part5_compiler.qmd` |
 | 12 | chapter | `12_data_flywheel/12_data_flywheel.qmd` |
 | 13 | chapter | `13_sft/13_sft.qmd` |
 | 14 | chapter | `14_rlvr/14_rlvr.qmd` |
-|  | part | `parts/scale_operations_principles.qmd` |
+|  | part | `parts/part6_fleet.qmd` |
 | 15 | chapter | `15_multi_agent/15_multi_agent.qmd` |
 | 16 | chapter | `16_observability/16_observability.qmd` |
 | 17 | chapter | `17_tokenomics/17_tokenomics.qmd` |
+|  | part | `parts/part7_synthesis.qmd` |
 | 18 | chapter | `18_conclusion/18_conclusion.qmd` |
 | 19 | chapter | `appendices/app_a_reference_architecture.qmd` |
 | 20 | chapter | `appendices/app_b_tool_design.qmd` |
@@ -159,7 +161,6 @@ and `binder/tests/test_content_structure.py` enforces it.
 |  | frontmatter | `frontmatter/author_note.qmd` |
 |  | frontmatter | `frontmatter/about_author.qmd` |
 |  | frontmatter | `frontmatter/prerequisites.qmd` |
-|  | frontmatter | `frontmatter/syllabus.qmd` |
 |  | frontmatter | `frontmatter/acknowledgements.qmd` |
 |  | frontmatter | `frontmatter/ai_use.qmd` |
 |  | frontmatter | `frontmatter/notation.qmd` |
@@ -188,4 +189,5 @@ and `binder/tests/test_content_structure.py` enforces it.
 |  | backmatter | `backmatter/appendix_ml.qmd` |
 |  | backmatter | `backmatter/appendix_control.qmd` |
 |  | backmatter | `backmatter/appendix_systems.qmd` |
+|  | backmatter | `backmatter/appendix_spa.qmd` |
 |  | backmatter | `backmatter/glossary/glossary.qmd` |

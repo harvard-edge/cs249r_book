@@ -116,7 +116,13 @@ def _check_module_exported(num, title, export_file, import_path, key_symbol):
     return errors
 
 
-def _validate_package_exported():
+def _export_check_through() -> Optional[int]:
+    """Read TINYTORCH_EXPORT_CHECK_THROUGH; None when unset or not a number."""
+    value = os.environ.get("TINYTORCH_EXPORT_CHECK_THROUGH", "").strip()
+    return int(value) if value.isdigit() else None
+
+
+def _validate_package_exported(through: Optional[int] = None):
     """
     Validate that the tinytorch package is properly exported for all 20 modules.
 
@@ -130,6 +136,12 @@ def _validate_package_exported():
         Soft warnings: printed to stderr but do NOT block test execution.
         A student working on Module 06 should still be able to run the
         Module 01–05 tests without the later modules being present.
+
+    ``through`` scopes the check to one point in the progression. `tito module
+    complete NN` and `tito module test NN` set TINYTORCH_EXPORT_CHECK_THROUGH=NN,
+    so only required modules numbered NN or lower are hard failures; later
+    ones are reported as not yet exported, allowing each module's tests to
+    run before the student has exported the later modules.
 
     This prevents the silent-pass bug where tinytorch/__init__.py
     catches ImportError and sets symbols to None, causing tests to
@@ -149,7 +161,7 @@ def _validate_package_exported():
             num, title, export_file, import_path, key_symbol
         )
         if module_errors:
-            if required:
+            if required and (through is None or num <= through):
                 hard_errors.extend(module_errors)
             else:
                 soft_warnings.extend(module_errors)
@@ -205,9 +217,23 @@ def pytest_configure(config):
     # CRITICAL: Validate package is exported before running tests
     # Skip validation if explicitly disabled (e.g., for export tests)
     if os.environ.get('TINYTORCH_SKIP_EXPORT_CHECK') != '1':
-        is_valid, errors = _validate_package_exported()
+        through = _export_check_through()
+        is_valid, errors = _validate_package_exported(through=through)
         if not is_valid:
             error_msg = "\n".join(f"  • {e}" for e in errors)
+            if through is None:
+                fix = (
+                    "To fix this, run:\n\n"
+                    "    tito dev export --all\n\n"
+                    "This exports all module notebooks to the tinytorch package.\n"
+                )
+            else:
+                # A student run: `tito dev export` would overwrite their notebooks.
+                fix = (
+                    f"Your exported modules 01-{through:02d} are missing or broken.\n"
+                    f"Fix the notebook named above, then run `tito module complete`\n"
+                    f"for it again to re-export your implementation.\n"
+                )
             raise pytest.UsageError(
                 f"\n\n"
                 f"{'='*70}\n"
@@ -215,9 +241,7 @@ def pytest_configure(config):
                 f"{'='*70}\n\n"
                 f"The tinytorch package is not properly built. Tests cannot run.\n\n"
                 f"Errors found:\n{error_msg}\n\n"
-                f"To fix this, run:\n\n"
-                f"    tito dev export --all\n\n"
-                f"This exports all module notebooks to the tinytorch package.\n"
+                f"{fix}"
                 f"{'='*70}\n"
             )
 
@@ -484,7 +508,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 
 
 # =============================================================================
-# Custom Test Runner Command (for tito test)
+# Custom Test Runner Command (for tito dev test / tito module test)
 # =============================================================================
 
 def run_tests_with_rich_output(test_path: str = None, verbose: bool = True):

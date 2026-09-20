@@ -13,7 +13,7 @@ from ..core.registry import Registry
 from ..core.loader import load_collection
 from .types import (
     Workload, TransformerWorkload, SparseTransformerWorkload,
-    CNNWorkload, SSMWorkload, DiffusionWorkload,
+    CNNWorkload, SSMWorkload, DiffusionWorkload, EmbodiedWorkload,
 )
 
 _DATA = Path(__file__).parent / "data"
@@ -24,6 +24,7 @@ _WORKLOAD_TYPES = {
     "CNNWorkload": CNNWorkload,
     "SSMWorkload": SSMWorkload,
     "DiffusionWorkload": DiffusionWorkload,
+    "EmbodiedWorkload": EmbodiedWorkload,
 }
 
 
@@ -37,6 +38,7 @@ TinyModels = _load("tiny", "TinyModels", "Registry namespace for TinyModels.")
 RecommendationModels = _load("recommendation", "RecommendationModels", "")
 StateSpaceModels = _load("statespace", "StateSpaceModels", "")
 GenerativeVisionModels = _load("generativevision", "GenerativeVisionModels", "")
+EmbodiedModels = _load("embodied", "EmbodiedModels", "Registry namespace for EmbodiedModels.")
 
 
 class Models(Registry):
@@ -47,3 +49,4 @@ class Models(Registry):
     Recommendation = RecommendationModels
     StateSpace = StateSpaceModels
     GenerativeVision = GenerativeVisionModels
+    Embodied = EmbodiedModels

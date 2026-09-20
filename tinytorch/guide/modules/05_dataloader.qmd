@@ -1,0 +1,114 @@
+---
+title: "Module 05: DataLoader"
+module: 05_dataloader
+notebook: dataloader
+---
+
+Training is I/O-bound before it is compute-bound. DataLoader is where the system learns to overlap disk reads, preprocessing, and accelerator compute so the GPU never sits idle. Your batch, shuffle, and collate logic decides whether an 8-GPU box runs at 8x or at 0.8x a single-GPU baseline.
+
+:::{.callout-note title="Module Info"}
+
+**FOUNDATION TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-04
+
+**Prerequisites: Modules 01-04** means you should be comfortable with tensors, activations, layers, and losses. This module introduces data loading infrastructure that will be used by autograd, optimizers, and training loops in the following modules.
+:::
+
+{{< module-header >}}
+
+## Overview
+
+A naive training loop reaches into a 50,000-image dataset, picks one sample, computes a gradient, and repeats. It works. It also wastes the GPU and gets the math wrong: gradients computed on a sorted sequence of samples are not the gradients you intended. Every framework solves this with the same abstraction — a DataLoader sitting between storage and computation, turning raw samples into shuffled, contiguous batches.
+
+In this module you build that abstraction. A `Dataset` says how to find sample `i`. A `DataLoader` decides how many samples to group, in what order, and when to load them. The result is a single iterator that works identically on 1,000 tensors in RAM or 100 GB of JPEGs on disk — and that you will reuse, unchanged, in every later module that trains a model.
+
+## Commands
+
+{{< module-workflow >}}
+
+## Learning objectives
+
+:::{.callout-tip title="By completing this module, you will:"}
+
+- **Trace** the supplied Dataset abstraction and TensorDataset to see how in-memory data storage is exposed to the loader
+- **Implement** the DataLoader iteration method, the batching and shuffling loop that makes iteration memory efficient
+- **Master** the Python iterator protocol for streaming data without loading entire datasets
+- **Analyze** throughput bottlenecks and memory scaling characteristics with different batch sizes
+- **Connect** your implementation to PyTorch data loading patterns used in production ML systems
+:::
+
+## What you'll build
+
+::: {#fig-05_dataloader-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Data Pipeline**: From raw dataset storage to training-ready batches." fig-alt="Diagram showing the flow from Dataset to TensorDataset, DataLoader, Iterator, and finally the Training Loop."}
+
+![](../assets/images/diagrams/05_dataloader-diag-1.svg)
+
+:::
+
+**The pattern you'll enable:**
+```python
+# Transform individual samples into training-ready batches
+dataset = TensorDataset(features, labels)
+loader = DataLoader(dataset, batch_size=32, shuffle=True)
+
+for batch_features, batch_labels in loader:
+    # batch_features shape: (32, 784)
+    # batch_labels shape: (32,)
+    train_step(batch_features, batch_labels)
+```
+
+### What you're not building yet
+
+To keep this module focused, you will **not** implement:
+
+- Multi-process data loading (PyTorch uses `num_workers` for parallel loading)
+- Automatic dataset downloads (you'll use pre-downloaded data or write custom loaders)
+- Prefetching mechanisms (loading next batch while GPU processes current batch)
+- Custom collation functions for variable-length sequences (that's for NLP modules)
+
+**You are building the batching foundation.** Parallel loading optimizations come later.
+
+## What you write
+
+{{< what-you-write >}}
+
+## How you know it works
+
+{{< module-checks >}}
+
+## When it fails
+
+{{< stub-failure >}}
+
+`Expected 3 batches, got 2`
+:   From `test_unit_dataloader`. The final partial batch was dropped. Step through the indices with `range(0, len(indices), self.batch_size)` and yield the short last batch too.
+
+`AttributeError: 'tuple' object has no attribute 'data'`
+:   From `test_unit_dataloader`. `__iter__` yielded the list of samples. Pass it through `self._collate_batch(batch)`, which stacks it into one features tensor and one labels tensor.
+
+`Different seeds should produce different shuffles`
+:   From `test_unit_dataloader_deterministic`. `__iter__` never shuffled. When `self.shuffle` is true, call `random.shuffle(indices)` at the start of every pass.
+
+## Finished? Read why
+
+{{< book-chapter >}}
+
+## What's next
+
+:::{.callout-note title="Up next: Module 06, Autograd"}
+
+You can now move data through a model. You cannot yet learn from it — every batch leaves the network as a loss number with no gradient attached. Module 06 fixes that by building automatic differentiation: every tensor remembers the operations that produced it, and `loss.backward()` walks the resulting graph to assign a gradient to every parameter the loader's batch touched.
+
+DataLoader and autograd compose directly: the iterator you just built becomes the input edge of every computation graph in the rest of the book.
+:::
+
+**Next:** [Module 06: Autograd](06_autograd.qmd)
+
+### How later modules use this one
+
+| Module | What it does | Your DataLoader in action |
+|--------|--------------|---------------------------|
+| **06: Autograd** | Reverse-mode differentiation | Each batch tensor becomes a leaf of the computation graph |
+| **08: Training** | End-to-end training loops | `for batch in loader:` is the outer loop of every example |
+| **09: Convolutions** | Convolutional layers | The same iterator now feeds 4-D image batches to CNNs |
+
+: **How the DataLoader feeds into subsequent training modules.** {#tbl-05-dataloader-downstream-usage}

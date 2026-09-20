@@ -52,7 +52,7 @@ misuse inside a section is still a human review item.
 | `solution: true` implies `BEGIN/END SOLUTION` | 56 cells were marked as exercises with nothing to fill in — imports, setup, demos. They survived only because `ClearSolutions.enforce_metadata = False` |
 | `grade_id` unique within a module | Duplicates make nbgrader's mapping ambiguous |
 
-Current counts: **150 exercises, 189 graded tests, 72 given cells.** (2026-09-11; unchanged by the source audit.)
+Current counts: **155 exercises, 195 graded tests, 73 given cells.** (2026-09-20; these drift every release, so re-measure rather than trusting the number.)
 
 ### Pedagogy — the notebook must read
 
@@ -161,11 +161,13 @@ All three must agree.
    before each exercise, not that it teaches.
 2. **Is the emoji semantically right?** Enforced for missing sections, not for a
    section filed under the wrong emoji.
-3. **Grading weights.** Points per exercise currently spans 4.3 (module 06, 21
-   exercises for 91 points) to 90 (module 01, one exercise). Module totals span
-   54 to 220. Deliberate authorial decision, not yet normalized.
+3. **Grading weights.** Points per exercise currently spans 5.3 (module 06, 21
+   exercises for 111 points) to 50.0 (module 20, two exercises for 100 points).
+   Module totals span 54 (module 15) to 225 (module 19). Deliberate authorial
+   decision, not yet normalized. Re-measure before quoting these; they move
+   every release.
 4. **Book-authored examples and explanatory claims.** Symbol-derived narrative
-   listings are synchronized by `narrative_book/tools/listings.py --check`; that
+   listings are synchronized by `book/tools/listings.py --check`; that
    does not validate surrounding prose, figures, or separately authored examples.
 
 ---

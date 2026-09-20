@@ -42,15 +42,12 @@ Accelerators can compute faster than storage can feed them. A high-end accelerat
 
 ::: {.callout-learning-objectives}
 
-- Explain how ML storage workloads invert database assumptions through streaming, checkpoint bursts, and metadata pressure
-- Calculate required training bandwidth with the pipeline equation and target accelerator utilization
-- Compare memory, flash, parallel file, object, and archive storage tiers by bandwidth, latency, capacity, and cost
-- Model a multi-tier cache from its hit rate and hit-and-miss service times, including the effect of tail-latency misses
+- Explain how ML storage workloads invert database assumptions across memory, flash, parallel file, object, and archive tiers
+- Calculate required training bandwidth and multi-tier cache service times using the data pipeline equation
 - Design prefetching, sharding, caching, and locality strategies that prevent fleet-scale accelerator starvation
 - Evaluate accelerator-direct and CPU-bypass storage paths for latency, augmentation, and locality bottlenecks
 - Select checkpoint staging and replication strategies that balance pause time, recovery risk, and storage cost
-- Distinguish storage durability, availability, and consistency by the failure each property addresses
-- Specify replay, idempotence, and event-time policies that preserve distributed-pipeline correctness
+- Specify replay, idempotence, durability, and consistency contracts that preserve distributed-pipeline correctness
 - Assess retrieval indexes and synthetic-data pipelines as storage workloads with distinct latency, consistency, and governance constraints
 
 :::
@@ -477,7 +474,231 @@ Understanding which storage tier can keep accelerators fed is essential to syste
 
 ::: {#fig-access-patterns-vol2 fig-env="figure" fig-pos="htb" fig-cap="**The storage bottleneck zone**: Required I/O throughput for full GPU utilization rises with model size from 100 million to 175 billion parameters. The red curve shows storage demand; horizontal dashed lines mark common storage-tier ceilings (NVMe at 7 GB/s, object storage at 50 GB/s, and Lustre at 100 GB/s). Between the compute-bound and storage-bottleneck regions lies the transition where storage, not compute, limits training throughput." fig-alt="Log-scale line chart: Model Size 100M to 175B parameters on the x-axis, Data Throughput (GB/s) on the y-axis. Red curve shows required I/O rising to about 500 GB/s at 175B. Dashed lines mark NVMe (7), Object (50), and Lustre (100 GB/s) ceilings."}
 
-![](images/svg/storage-throughput.svg)
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth
+]
+
+  % Book color palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{234,241,248}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{254,226,226}
+  \providecolor{DarkRed}{RGB}{160,25,25}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,243,199}
+  \providecolor{PurpleLine}{RGB}{125,55,185}
+  \providecolor{PurpleFill}{RGB}{243,232,255}
+  \providecolor{SlateLine}{RGB}{85,95,110}
+  \providecolor{SlateFill}{RGB}{241,245,249}
+  \providecolor{CardBorder}{RGB}{215,222,230}
+  \providecolor{CardFill}{RGB}{250,251,253}
+  \providecolor{TextDark}{RGB}{25,35,45}
+  \providecolor{TextMuted}{RGB}{95,105,115}
+
+  % =============================================================
+  % 0. COORDINATES & SCALES
+  % =============================================================
+  \def\xleft{-4.8}
+  \def\xright{4.8}
+  \def\hplot{6.0}
+
+  % X-positions of 5 model sizes
+  \def\xmone{-3.8} % 100M
+  \def\xmtwo{-1.9} % 1B
+  \def\xmthr{0.0}  % 10B
+  \def\xmfou{1.9}  % 70B
+  \def\xmfiv{3.8}  % 175B
+
+  % Curve Y-coordinates:
+  \def\yone{0.40} % 100M -> 10 GB/s
+  \def\ytwo{1.00} % 1B   -> 25 GB/s
+  \def\ythr{2.20} % 10B  -> 60 GB/s
+  \def\yfou{3.60} % 70B  -> 150 GB/s
+  \def\yfiv{5.00} % 175B -> 500 GB/s
+
+  % =============================================================
+  % 1. SHADED REGIONS (Compute-bound vs Storage-bottleneck)
+  % =============================================================
+  % Green Shaded Zone: between Lustre ceiling (y = 3.0) and curve up to intersection
+  \fill[GreenFill!60]
+    (\xmone, 3.0) -- (1.10, 3.0) --
+    (\xmthr, \ythr) -- (\xmtwo, \ytwo) -- (\xmone, \yone) -- cycle;
+
+  % Red Shaded Zone: above Lustre ceiling (y = 3.0) and under curve from intersection to 175B
+  \fill[RedFill!70]
+    (1.10, 3.0) -- (\xmfou, \yfou) -- (\xmfiv, \yfiv) -- (\xmfiv, 3.0) -- cycle;
+
+  % =============================================================
+  % 2. GRID LINES & Y-AXIS TICKS
+  % =============================================================
+  \foreach \y/\lbl in {
+    1.0/25,
+    2.0/50,
+    3.0/100,
+    4.0/200,
+    5.0/500,
+    6.0/1000
+  } {
+    \draw[SlateLine!20, line width=0.5pt] (\xleft, \y) -- (\xright, \y);
+    \node[anchor=east, font=\scriptsize, text=TextMuted] at (\xleft - 0.15, \y) {\lbl};
+  }
+  \node[anchor=east, font=\scriptsize, text=TextMuted] at (\xleft - 0.15, 0) {0};
+
+  % Axes
+  \draw[->, line width=1.1pt, SlateLine] (\xleft, 0) -- (\xleft, \hplot + 0.45);
+  \draw[line width=1.1pt, SlateLine] (\xleft, 0) -- (\xright, 0);
+
+  % Y-Axis Title
+  \node[
+    rotate=90,
+    anchor=south,
+    font=\scriptsize\bfseries,
+    text=TextDark
+  ] at (\xleft - 0.75, \hplot / 2) {Data Throughput ($\text{GB/s}$)};
+
+  % =============================================================
+  % 3. HORIZONTAL STORAGE TIER CEILINGS (Dashed lines + Right badges)
+  % =============================================================
+  % NVMe (7 GB/s -> y = 0.28 cm)
+  \draw[dashed, line width=1.2pt, OrangeLine] (\xleft, 0.28) -- (\xright, 0.28);
+  \node[anchor=west, align=left] at (\xright + 0.15, 0.28) {
+    \textbf{\scriptsize\textcolor{OrangeLine!90!black}{NVMe SSD}}\\[1pt]
+    \tiny\textcolor{TextMuted}{($7\text{ GB/s}$)}
+  };
+
+  % Object Store (50 GB/s -> y = 2.0 cm)
+  \draw[dashed, line width=1.2pt, DarkGreen] (\xleft, 2.0) -- (\xright, 2.0);
+  \node[anchor=west, align=left] at (\xright + 0.15, 2.0) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{Object Store}}\\[1pt]
+    \tiny\textcolor{TextMuted}{($50\text{ GB/s}$)}
+  };
+
+  % Lustre PFS (100 GB/s -> y = 3.0 cm)
+  \draw[dashed, line width=1.2pt, SteelBlue] (\xleft, 3.0) -- (\xright, 3.0);
+  \node[anchor=west, align=left] at (\xright + 0.15, 3.0) {
+    \textbf{\scriptsize\textcolor{NavyBlue}{Lustre PFS}}\\[1pt]
+    \tiny\textcolor{TextMuted}{($100\text{ GB/s}$)}
+  };
+
+  % =============================================================
+  % 4. X-AXIS TICKS & MODEL SIZE LABELS
+  % =============================================================
+  \foreach \x/\lbl in {
+    \xmone/100M,
+    \xmtwo/1B,
+    \xmthr/10B,
+    \xmfou/70B,
+    \xmfiv/175B
+  } {
+    \draw[line width=0.8pt, SlateLine] (\x, 0) -- (\x, -0.12);
+    \node[anchor=north, font=\scriptsize\bfseries, text=TextDark] at (\x, -0.18) {\lbl};
+  }
+
+  % X-Axis Title
+  \node[anchor=north, font=\scriptsize\bfseries, text=TextDark] at (0, -0.7)
+    {Model Size (parameters)};
+
+  % =============================================================
+  % 5. REQUIRED I/O DEMAND CURVE (Smooth Red Curve + Points)
+  % =============================================================
+  \draw[line width=2.0pt, DarkRed, line join=round]
+    (\xmone, \yone) -- (\xmtwo, \ytwo) -- (\xmthr, \ythr) -- (\xmfou, \yfou) -- (\xmfiv, \yfiv);
+
+  % Data points
+  \foreach \x/\y in {
+    \xmone/\yone,
+    \xmtwo/\ytwo,
+    \xmthr/\ythr,
+    \xmfou/\yfou,
+    \xmfiv/\yfiv
+  } {
+    \fill[DarkRed] (\x, \y) circle (3.2pt);
+    \fill[white] (\x, \y) circle (1.2pt);
+  }
+
+  % Label at top of curve
+  \node[anchor=south east, align=right] at (\xmfiv - 0.1, \yfiv + 0.15) {
+    \textbf{\scriptsize\textcolor{DarkRed}{Required I/O for}}\\[1pt]
+    \textbf{\scriptsize\textcolor{DarkRed}{Full GPU Utilization}}
+  };
+
+  % =============================================================
+  % 6. ANNOTATION CALLOUT BOXES (Non-colliding positions)
+  % =============================================================
+  % Compute Bound Box (neatly placed inside green zone below 50 GB/s)
+  \node[
+    rectangle,
+    rounded corners=3pt,
+    draw=DarkGreen,
+    fill=white,
+    line width=0.8pt,
+    inner xsep=6pt,
+    inner ysep=3.5pt,
+    align=center
+  ] at (-2.4, 1.45) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{Compute-Bound Zone}}\\[1.5pt]
+    \tiny\textcolor{DarkGreen!80!black}{Storage bandwidth exceeds accelerator appetite}
+  };
+
+  % Storage Bottleneck Zone Box (neatly placed inside red zone above the curve)
+  \node[
+    rectangle,
+    rounded corners=3pt,
+    draw=DarkRed,
+    fill=white,
+    line width=0.8pt,
+    inner xsep=6pt,
+    inner ysep=3.5pt,
+    align=center
+  ] at (0.95, 4.65) {
+    \textbf{\scriptsize\textcolor{DarkRed}{Storage Bottleneck Zone}}\\[1.5pt]
+    \tiny\textcolor{DarkRed!80!black}{I/O starving GPU compute pipelines}
+  };
+
+  % =============================================================
+  % 7. BOTTOM SUMMARY CARD
+  % =============================================================
+  \def\ycard{-1.3}
+  \node[
+    rectangle,
+    rounded corners=5pt,
+    draw=CardBorder,
+    fill=white,
+    line width=0.8pt,
+    minimum width=13.6cm,
+    minimum height=2.45cm,
+    anchor=north
+  ] (card) at (0, \ycard) {};
+
+  % Header bar
+  \path[fill=SlateFill, rounded corners=5pt]
+    ($(card.north west)$) rectangle ($(card.north east) + (0, -0.42)$);
+  \path[fill=SlateFill]
+    ($(card.north west) + (0, -0.28)$) rectangle ($(card.north east) + (0, -0.42)$);
+  \draw[CardBorder, line width=0.7pt]
+    ($(card.north west) + (0, -0.42)$) -- ($(card.north east) + (0, -0.42)$);
+
+  \node[anchor=center, font=\scriptsize\bfseries, text=TextDark] at ($(card.north) + (0, -0.21)$)
+    {Storage Throughput Scaling \& Bottleneck Dynamics};
+
+  % Card Body Rows
+  \node[anchor=north west, inner sep=0pt] at ($(card.north west) + (0.35, -0.56)$) {
+    \begin{minipage}{12.9cm}
+      \fontsize{6.8pt}{9.2pt}\selectfont
+      $\bullet$ \textbf{Nonlinear I/O Demand:}\quad As model capacity scales from 100M to 175B parameters, sustaining full GPU compute requires a $50\times$ surge in throughput ($10 \to 500\text{ GB/s}$).\\[2pt]
+      $\bullet$ \textbf{The Lustre Crossover:}\quad Beyond $\sim 30\text{B}$ parameters, required feeding bandwidth outstrips standard parallel filesystems ($100\text{ GB/s}$), creating severe data stalls.\\[2pt]
+      $\bullet$ \textbf{Architectural Mitigation:}\quad Overcoming the storage wall demands hierarchical prefetching, GPUDirect Storage (GDS) zero-copy DMA, and sharded dataset caching.
+    \end{minipage}
+  };
+
+\end{tikzpicture}
+```
 
 :::
 
@@ -559,7 +780,182 @@ class StoragePyramidContext:
 
 ::: {#fig-storage-pyramid fig-env="figure" fig-pos="htb" fig-cap="**ML storage hierarchy**: The hierarchy groups the canonical tiers in @tbl-storage-hierarchy-merged into hot, warm, and cold bands, from GPU HBM down to archival storage. Bandwidth generally falls as capacity grows and unit cost declines; the parallel filesystem is highlighted as the shared tier most likely to starve a large training cluster." fig-alt="Storage tiers from GPU HBM through host DRAM, local NVMe, a parallel file system, object storage, and archival storage. The parallel file system is highlighted as the shared cluster bottleneck. A left-hand ribbon groups the tiers into hot, warm, and cold bands."}
 
-![](images/svg/storage-hierarchy.svg)
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  tier_card/.style={
+    rectangle,
+    rounded corners=3pt,
+    line width=0.8pt,
+    minimum width=7.4cm,
+    minimum height=0.95cm,
+    inner sep=0pt
+  },
+  ribbon/.style={
+    rectangle,
+    rounded corners=2pt,
+    line width=0.9pt,
+    dashed,
+    minimum width=0.75cm,
+    inner sep=0pt
+  }
+]
+
+  % Book color palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{234,241,248}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{254,226,226}
+  \providecolor{DarkRed}{RGB}{160,25,25}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,243,199}
+  \providecolor{PurpleLine}{RGB}{125,55,185}
+  \providecolor{PurpleFill}{RGB}{243,232,255}
+  \providecolor{SlateLine}{RGB}{85,95,110}
+  \providecolor{SlateFill}{RGB}{241,245,249}
+  \providecolor{CardBorder}{RGB}{215,222,230}
+  \providecolor{CardFill}{RGB}{250,251,253}
+  \providecolor{TextDark}{RGB}{25,35,45}
+  \providecolor{TextMuted}{RGB}{95,105,115}
+
+  % =============================================================
+  % 0. X POSITIONS & COLUMN HEADERS
+  % =============================================================
+  \def\xspeed{-6.9}
+  \def\xribbon{-5.8}
+  \def\xcard{-1.5}     % center of 7.4cm wide card -> [-5.2, 2.2]
+  \def\xbwrel{1.3}     % center of relative bar area inside card
+  \def\xbw{3.3}        % Bandwidth column
+  \def\xcap{4.85}      % Capacity column
+  \def\xcost{6.3}      % Cost basis column
+
+  % Headers row at y = 5.85
+  \node[anchor=center, font=\scriptsize\bfseries, text=TextMuted] at (\xbwrel, 5.85) {BW (relative)};
+  \node[anchor=center, font=\scriptsize\bfseries, text=TextDark] at (\xbw, 5.85) {Bandwidth};
+  \node[anchor=center, font=\scriptsize\bfseries, text=TextDark] at (\xcap, 5.85) {Capacity};
+  \node[anchor=center, font=\scriptsize\bfseries, text=TextDark] at (\xcost, 5.85) {Cost basis};
+
+  % =============================================================
+  % 1. SPEED AXIS (Far Left)
+  % =============================================================
+  \draw[->, line width=1.1pt, SlateLine!60] (\xspeed, -0.85) -- (\xspeed, 5.1);
+  \node[anchor=south, font=\scriptsize\itshape\bfseries, text=TextDark] at (\xspeed, 5.25) {Fastest};
+  \node[anchor=north, font=\scriptsize\itshape\bfseries, text=TextMuted] at (\xspeed, -0.95) {Slowest};
+
+  % =============================================================
+  % 2. TIER GROUPING RIBBONS (Dashed side bars)
+  % =============================================================
+  % Hot Tier: spans y = 5.0, 3.8, 2.6 (center = 3.8, height = 3.35cm)
+  \node[ribbon, draw=RedLine, fill=RedFill!25, minimum height=3.35cm] (r_hot) at (\xribbon, 3.8) {
+    \rotatebox{90}{\textbf{\scriptsize\textcolor{DarkRed}{Hot Tier}}}
+  };
+
+  % Warm Tier: spans y = 1.4, 0.2 (center = 0.8, height = 2.15cm)
+  \node[ribbon, draw=OrangeLine, fill=OrangeL!35, minimum height=2.15cm] (r_warm) at (\xribbon, 0.8) {
+    \rotatebox{90}{\textbf{\scriptsize\textcolor{OrangeLine!90!black}{Warm}}}
+  };
+
+  % Cold Tier: spans y = -1.0 (center = -1.0, height = 0.95cm)
+  \node[ribbon, draw=SteelBlue, fill=LightBlue!35, minimum height=0.95cm] (r_cold) at (\xribbon, -1.0) {
+    \rotatebox{90}{\textbf{\scriptsize\textcolor{NavyBlue}{Cold}}}
+  };
+
+  % =============================================================
+  % 3. SIX STORAGE TIER CARDS & DATA ROWS
+  % =============================================================
+
+  % --- Tier 1: GPU HBM (y = 5.0) ---
+  \node[tier_card, draw=SteelBlue, fill=LightBlue!40] (c1) at (\xcard, 5.0) {};
+  \node[anchor=west, font=\scriptsize\bfseries, text=NavyBlue] at ($(c1.west) + (0.35, 0.16)$) {GPU HBM};
+  \node[anchor=west, font=\tiny, text=TextMuted] at ($(c1.west) + (0.35, -0.20)$) {On-chip accelerator memory (HBM3)};
+  % Relative BW bar
+  \fill[NavyBlue, rounded corners=1pt] (0.55, 4.88) rectangle (2.05, 5.12);
+  % Metrics
+  \node[anchor=center, font=\scriptsize\bfseries, text=TextDark] at (\xbw, 5.0) {3.35 TB/s};
+  \node[anchor=center, font=\scriptsize, text=TextDark] at (\xcap, 5.0) {80 GB};
+  \node[anchor=center, font=\scriptsize, text=TextDark] at (\xcost, 5.0) {$\sim$\$15};
+
+  % --- Tier 2: CPU DRAM (y = 3.8) ---
+  \node[tier_card, draw=DarkGreen, fill=GreenFill!40] (c2) at (\xcard, 3.8) {};
+  \node[anchor=west, font=\scriptsize\bfseries, text=DarkGreen] at ($(c2.west) + (0.35, 0.16)$) {CPU DRAM};
+  \node[anchor=west, font=\tiny, text=TextMuted] at ($(c2.west) + (0.35, -0.20)$) {Host DDR5 system memory};
+  % Relative BW bar
+  \fill[DarkGreen, rounded corners=1pt] (1.45, 3.68) rectangle (2.05, 3.92);
+  % Metrics
+  \node[anchor=center, font=\scriptsize\bfseries, text=TextDark] at (\xbw, 3.8) {200 GB/s};
+  \node[anchor=center, font=\scriptsize, text=TextDark] at (\xcap, 3.8) {512 GB--2 TB};
+  \node[anchor=center, font=\scriptsize, text=TextDark] at (\xcost, 3.8) {$\sim$\$4};
+
+  % --- Tier 3: NVMe SSD (y = 2.6) ---
+  \node[tier_card, draw=DarkGreen, fill=GreenFill!40] (c3) at (\xcard, 2.6) {};
+  \node[anchor=west, font=\scriptsize\bfseries, text=DarkGreen] at ($(c3.west) + (0.35, 0.16)$) {NVMe SSD};
+  \node[anchor=west, font=\tiny, text=TextMuted] at ($(c3.west) + (0.35, -0.20)$) {Local PCIe Gen5 flash storage};
+  % Relative BW bar
+  \fill[DarkGreen, rounded corners=1pt] (1.92, 2.48) rectangle (2.05, 2.72);
+  % Metrics
+  \node[anchor=center, font=\scriptsize\bfseries, text=TextDark] at (\xbw, 2.6) {7 GB/s};
+  \node[anchor=center, font=\scriptsize, text=TextDark] at (\xcap, 2.6) {8 TB};
+  \node[anchor=center, font=\scriptsize, text=TextDark] at (\xcost, 2.6) {$\sim$\$0.10};
+
+  % --- Tier 4: Parallel File System (y = 1.4, BOTTLENECK HIGHLIGHT) ---
+  \node[tier_card, draw=DarkRed, fill=RedFill!50, line width=1.0pt] (c4) at (\xcard, 1.4) {};
+  \node[anchor=west, font=\scriptsize\bfseries, text=DarkRed] at ($(c4.west) + (0.35, 0.16)$) {Parallel File System};
+  \node[anchor=west, font=\tiny, text=DarkRed!80!black] at ($(c4.west) + (0.35, -0.20)$) {Shared cluster storage \textbf{(Primary cluster bottleneck)}};
+  % Relative BW bar
+  \fill[DarkRed, rounded corners=1pt] (1.10, 1.28) rectangle (2.05, 1.52);
+  % Metrics
+  \node[anchor=center, font=\scriptsize\bfseries, text=DarkRed] at (\xbw, 1.4) {1+ TB/s agg.};
+  \node[anchor=center, font=\scriptsize, text=TextDark] at (\xcap, 1.4) {100+ PB};
+  \node[anchor=center, font=\scriptsize, text=TextDark] at (\xcost, 1.4) {$\sim$\$0.03/mo.};
+
+  % --- Tier 5: Object Storage (y = 0.2) ---
+  \node[tier_card, draw=SteelBlue, fill=LightBlue!40] (c5) at (\xcard, 0.2) {};
+  \node[anchor=west, font=\scriptsize\bfseries, text=NavyBlue] at ($(c5.west) + (0.35, 0.16)$) {Object Storage};
+  \node[anchor=west, font=\tiny, text=TextMuted] at ($(c5.west) + (0.35, -0.20)$) {S3-compatible durable pool};
+  % Relative BW bar
+  \fill[NavyBlue, rounded corners=1pt] (1.60, 0.08) rectangle (2.05, 0.32);
+  % Metrics
+  \node[anchor=center, font=\scriptsize\bfseries, text=TextDark] at (\xbw, 0.2) {100 GB/s agg.};
+  \node[anchor=center, font=\scriptsize, text=TextDark] at (\xcap, 0.2) {Very large};
+  \node[anchor=center, font=\scriptsize, text=TextDark] at (\xcost, 0.2) {$\sim$\$0.02/mo.};
+
+  % --- Tier 6: Archive / Cold Storage (y = -1.0) ---
+  \node[tier_card, draw=SlateLine!70, fill=SlateFill!60] (c6) at (\xcard, -1.0) {};
+  \node[anchor=west, font=\scriptsize\bfseries, text=SlateLine!90!black] at ($(c6.west) + (0.35, 0.16)$) {Archive / Cold Storage};
+  \node[anchor=west, font=\tiny, text=TextMuted] at ($(c6.west) + (0.35, -0.20)$) {Offline or deep-archive media};
+  % Relative BW bar
+  \fill[SlateLine!80, rounded corners=0.5pt] (2.02, -1.12) rectangle (2.05, -0.88);
+  % Metrics
+  \node[anchor=center, font=\scriptsize\bfseries, text=TextDark] at (\xbw, -1.0) {1 GB/s};
+  \node[anchor=center, font=\scriptsize, text=TextDark] at (\xcap, -1.0) {Very large};
+  \node[anchor=center, font=\scriptsize, text=TextDark] at (\xcost, -1.0) {$\sim$\$0.004/mo.};
+
+  % =============================================================
+  % 4. BOTTOM EXPLANATORY CARD
+  % =============================================================
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=CardBorder,
+    fill=CardFill,
+    line width=0.8pt,
+    minimum width=12.8cm,
+    minimum height=0.85cm,
+    anchor=north,
+    align=center,
+    inner sep=4pt
+  ] at (0.35, -1.85) {
+    \textbf{\scriptsize\textcolor{TextDark}{Memory cost is acquisition \$/GB; storage cost is recurring \$/GB-month.}}\\[2pt]
+    \tiny\textcolor{TextMuted}{Hot tier = active training data \quad$\bullet$\quad Warm = validation/checkpoints \quad$\bullet$\quad Cold = long-term archive}
+  };
+
+\end{tikzpicture}
+```
 
 :::
 
@@ -569,7 +965,216 @@ The engineering challenge is to ensure that data flows upward through the pyrami
 
 ### Bandwidth cliffs between tiers {#sec-storage-bandwidth-cliffs}
 
-The bandwidth ratios between adjacent tiers reveal the severity of each transition in the hierarchy. Between HBM and host DRAM, the ratio is roughly `{python} StoragePyramidContext.hbm_host_dram_ratio_mult_str` (`{python} StoragePyramidContext.h100_bw_tb_per_s_str` vs. ~`{python} StoragePyramidContext.host_dram_bw_gb_per_s_str`). Between host DRAM and NVMe, the ratio is roughly `{python} StoragePyramidContext.dram_nvme_ratio_mult_str` (`{python} StoragePyramidContext.host_dram_bw_gb_per_s_str` vs. ~`{python} StoragePyramidContext.raid0_bw_gb_per_s_str` from a 4-drive RAID-0). Between NVMe and a parallel file system, the ratio depends on the per-node allocation: if a 1 TB/s aggregate parallel file system (PFS) serves 256 nodes, each node receives roughly 4 GB/s, a 7$\times$ reduction from local NVMe. Between the parallel file system and object storage, the ratio is typically 10$\times$ or more, depending on the number of concurrent clients and network bandwidth.
+The bandwidth ratios between adjacent tiers reveal the severity of each transition in the hierarchy (@fig-storage-bandwidth-cliffs). Between HBM and host DRAM, the ratio is roughly `{python} StoragePyramidContext.hbm_host_dram_ratio_mult_str` (`{python} StoragePyramidContext.h100_bw_tb_per_s_str` vs. ~`{python} StoragePyramidContext.host_dram_bw_gb_per_s_str`). Between host DRAM and NVMe, the ratio is roughly `{python} StoragePyramidContext.dram_nvme_ratio_mult_str` (`{python} StoragePyramidContext.host_dram_bw_gb_per_s_str` vs. ~`{python} StoragePyramidContext.raid0_bw_gb_per_s_str` from a 4-drive RAID-0). Between NVMe and a parallel file system, the ratio depends on the per-node allocation: if a 1 TB/s aggregate parallel file system (PFS) serves 256 nodes, each node receives roughly 4 GB/s, a 7$\times$ reduction from local NVMe. Between the parallel file system and object storage, the ratio is typically 10$\times$ or more, depending on the number of concurrent clients and network bandwidth.
+
+::: {#fig-storage-bandwidth-cliffs fig-env="figure" fig-pos="htb" fig-cap="**Bandwidth cliffs between storage tiers**: Bandwidth drops by 10--100$\times$ between successive levels of the ML storage pyramid. The training pipeline must bridge these gaps through continuous prefetching and hierarchical staging." fig-alt="Waterfall diagram illustrating bandwidth cliffs between GPU HBM, host DRAM, local NVMe, parallel file systems, and object storage."}
+
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  cliff_badge/.style={
+    rectangle,
+    rounded corners=2.5pt,
+    fill=DarkRed,
+    text=white,
+    font=\tiny\bfseries,
+    inner xsep=6pt,
+    inner ysep=2.5pt
+  }
+]
+
+  % Book color palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{234,241,248}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{254,226,226}
+  \providecolor{DarkRed}{RGB}{160,25,25}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,243,199}
+  \providecolor{PurpleLine}{RGB}{125,55,185}
+  \providecolor{PurpleFill}{RGB}{243,232,255}
+  \providecolor{SlateLine}{RGB}{85,95,110}
+  \providecolor{SlateFill}{RGB}{241,245,249}
+  \providecolor{CardBorder}{RGB}{215,222,230}
+  \providecolor{CardFill}{RGB}{250,251,253}
+  \providecolor{TextDark}{RGB}{25,35,45}
+  \providecolor{TextMuted}{RGB}{95,105,115}
+
+  % =============================================================
+  % 0. AXIS & SCALES
+  % =============================================================
+  \def\xleft{-6.4}
+  \def\hcard{0.82}
+
+  % Left Axis
+  \draw[->, line width=1.1pt, SlateLine!60] (-7.0, -2.25) -- (-7.0, 5.05);
+  \node[
+    rotate=90,
+    font=\scriptsize\bfseries,
+    text=TextDark,
+    anchor=south
+  ] at (-7.0, 1.4) {Bandwidth (Log Scale)};
+
+  % =============================================================
+  % 1. WATERFALL CARDS & CLIFFS (Uniform 1.2cm step-down)
+  % =============================================================
+
+  % --- CARD 1: GPU HBM3e (y = 4.6, right = 2.4, width = 8.8cm) ---
+  \node[
+    rectangle, rounded corners=3pt, draw=SteelBlue, fill=LightBlue!40,
+    line width=0.8pt, anchor=west, minimum height=\hcard cm, minimum width=8.8cm
+  ] (c1) at (\xleft, 4.6) {};
+  \node[anchor=west, font=\scriptsize\bfseries, text=NavyBlue] at ($(c1.west) + (0.35, 0.15)$)
+    {GPU HBM3e};
+  \node[anchor=west, font=\tiny, text=TextMuted] at ($(c1.west) + (0.35, -0.18)$)
+    {3,350 GB/s $\cdot$ On-package $\cdot$ 80--141 GB capacity};
+  \node[anchor=east, font=\scriptsize\bfseries, text=NavyBlue] at ($(c1.east) + (-0.35, 0)$)
+    {3,350 GB/s};
+
+  % --- CLIFF 1: HBM -> DRAM (y = 3.8) ---
+  \draw[dashed, line width=1.0pt, RedLine] (\xleft, 3.8) -- (2.4, 3.8);
+  \node[cliff_badge] at (-2.0, 3.8) {Cliff: 17$\times$ drop $\to$ refill window $\sim$400 ms};
+
+  % --- CARD 2: Host DRAM (DDR5) (y = 3.0, right = 1.2, width = 7.6cm) ---
+  \node[
+    rectangle, rounded corners=3pt, draw=DarkGreen, fill=GreenFill!40,
+    line width=0.8pt, anchor=west, minimum height=\hcard cm, minimum width=7.6cm
+  ] (c2) at (\xleft, 3.0) {};
+  \node[anchor=west, font=\scriptsize\bfseries, text=DarkGreen] at ($(c2.west) + (0.35, 0.15)$)
+    {Host DRAM (DDR5)};
+  \node[anchor=west, font=\tiny, text=TextMuted] at ($(c2.west) + (0.35, -0.18)$)
+    {200 GB/s $\cdot$ PCIe Gen5-attached $\cdot$ 512 GB--2 TB};
+  \node[anchor=east, font=\scriptsize\bfseries, text=DarkGreen] at ($(c2.east) + (-0.35, 0)$)
+    {200 GB/s};
+
+  % --- CLIFF 2: DRAM -> NVMe (y = 2.2) ---
+  \draw[dashed, line width=1.0pt, RedLine] (\xleft, 2.2) -- (1.2, 2.2);
+  \node[cliff_badge] at (-2.6, 2.2) {Cliff: 15--30$\times$ drop $\to$ refill window $\sim$3 s};
+
+  % --- CARD 3: Local NVMe SSDs (y = 1.4, right = 0.0, width = 6.4cm) ---
+  \node[
+    rectangle, rounded corners=3pt, draw=DarkGreen, fill=GreenFill!40,
+    line width=0.8pt, anchor=west, minimum height=\hcard cm, minimum width=6.4cm
+  ] (c3) at (\xleft, 1.4) {};
+  \node[anchor=west, font=\scriptsize\bfseries, text=DarkGreen] at ($(c3.west) + (0.35, 0.15)$)
+    {Local NVMe SSDs (RAID-0)};
+  \node[anchor=west, font=\tiny, text=TextMuted] at ($(c3.west) + (0.35, -0.18)$)
+    {7--25 GB/s $\cdot$ Direct PCIe Gen5 $\cdot$ 4--30 TB};
+  \node[anchor=east, font=\scriptsize\bfseries, text=DarkGreen] at ($(c3.east) + (-0.35, 0)$)
+    {7--25 GB/s};
+
+  % --- CLIFF 3: NVMe -> PFS (y = 0.6) ---
+  \draw[dashed, line width=1.0pt, RedLine] (\xleft, 0.6) -- (0.0, 0.6);
+  \node[cliff_badge] at (-3.2, 0.6) {Cliff: 3--10$\times$ drop $\to$ refill window $\sim$10 s};
+
+  % --- CARD 4: Parallel File System (y = -0.2, right = -1.2, width = 5.2cm) ---
+  \node[
+    rectangle, rounded corners=3pt, draw=DarkGreen, fill=GreenFill!40,
+    line width=0.8pt, anchor=west, minimum height=\hcard cm, minimum width=5.2cm
+  ] (c4) at (\xleft, -0.2) {};
+  \node[anchor=west, font=\scriptsize\bfseries, text=DarkGreen] at ($(c4.west) + (0.35, 0.15)$)
+    {Parallel File System};
+  \node[anchor=west, font=\tiny, text=TextMuted] at ($(c4.west) + (0.35, -0.18)$)
+    {Lustre / GPFS / DAOS $\cdot$ 100+ PB};
+  \node[anchor=east, font=\scriptsize\bfseries, text=DarkGreen] at ($(c4.east) + (-0.35, 0)$)
+    {1--4 GB/s/node};
+
+  % --- CLIFF 4: PFS -> Object Storage (y = -1.0) ---
+  \draw[dashed, line width=1.0pt, RedLine] (\xleft, -1.0) -- (-1.2, -1.0);
+  \node[cliff_badge] at (-3.8, -1.0) {Cliff: 10--100$\times$ drop $\to$ requires staging};
+
+  % --- CARD 5: Object Storage (y = -1.8, right = -2.4, width = 4.0cm) ---
+  \node[
+    rectangle, rounded corners=3pt, draw=CardBorder, fill=SlateFill!50,
+    line width=0.8pt, anchor=west, minimum height=\hcard cm, minimum width=4.0cm
+  ] (c5) at (\xleft, -1.8) {};
+  \node[anchor=west, font=\scriptsize\bfseries, text=TextDark] at ($(c5.west) + (0.35, 0.15)$)
+    {Object Storage};
+  \node[anchor=west, font=\tiny, text=TextMuted] at ($(c5.west) + (0.35, -0.18)$)
+    {S3 / GCS $\cdot$ Scalable pool};
+  \node[anchor=east, font=\scriptsize\bfseries, text=TextDark] at ($(c5.east) + (-0.35, 0)$)
+    {$\sim$0.1 GB/s};
+
+
+  % =============================================================
+  % 2. RIGHT-SIDE CARD: REFILL WINDOWS
+  % =============================================================
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=CardBorder,
+    fill=white,
+    line width=0.8pt,
+    minimum width=4.4cm,
+    minimum height=3.65cm,
+    anchor=north west
+  ] (rw_card) at (2.2, 2.05) {};
+
+  % Header
+  \path[fill=SlateFill, rounded corners=4pt]
+    ($(rw_card.north west)$) rectangle ($(rw_card.north east) + (0, -0.42)$);
+  \path[fill=SlateFill]
+    ($(rw_card.north west) + (0, -0.3)$) rectangle ($(rw_card.north east) + (0, -0.42)$);
+  \draw[CardBorder, line width=0.7pt]
+    ($(rw_card.north west) + (0, -0.42)$) -- ($(rw_card.north east) + (0, -0.42)$);
+  \node[anchor=center, font=\scriptsize\bfseries, text=TextDark] at ($(rw_card.north) + (0, -0.21)$)
+    {Refill Windows};
+
+  % Body Table
+  \node[anchor=north west, inner sep=0pt] at ($(rw_card.north west) + (0.35, -0.58)$) {
+    \fontsize{7.2pt}{11pt}\selectfont
+    \renewcommand{\arraystretch}{1.2}
+    \begin{tabular}{@{}ll@{}}
+      \textbf{\textcolor{NavyBlue}{HBM Drain:}} & $\sim 50\text{ ms window}$ \\
+      \textbf{\textcolor{DarkGreen}{DRAM Refill:}} & $\sim 400\text{ ms}$ \\
+      \textbf{\textcolor{DarkGreen}{NVMe Refill:}} & $\sim 3\text{ s}$ \\
+      \textbf{\textcolor{DarkGreen}{PFS Refill:}} & $\sim 10\text{ s}$ \\
+    \end{tabular}
+  };
+
+  % Bottom highlight pill inside side card
+  \node[
+    rectangle,
+    rounded corners=3pt,
+    draw=RedLine,
+    fill=RedFill!40,
+    line width=0.7pt,
+    minimum width=3.8cm,
+    minimum height=0.48cm,
+    font=\tiny\bfseries,
+    text=DarkRed,
+    anchor=south
+  ] at ($(rw_card.south) + (0, 0.22)$) {Each tier buffers tier above};
+
+
+  % =============================================================
+  % 3. BOTTOM PRINCIPLE CARD
+  % =============================================================
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=CardBorder,
+    fill=CardFill,
+    line width=0.8pt,
+    minimum width=13.6cm,
+    minimum height=0.85cm,
+    anchor=north,
+    align=center,
+    inner sep=4pt
+  ] at (0.1, -2.65) {
+    \textbf{\scriptsize\textcolor{TextDark}{Architectural Principle: Continuous Prefetching}}\\[2pt]
+    \tiny\textcolor{TextMuted}{Each lower storage tier must prefetch deep enough to absorb the draining rate and latency jitter of the tier below.}
+  };
+
+\end{tikzpicture}
+```
+
+:::
 
 These bandwidth cliffs compare the movement capabilities of adjacent tiers, but they do not imply that lower tiers must refill the accelerator's entire HBM at its internal bandwidth. HBM serves repeated weight, activation, and tensor accesses during computation, while the storage pipeline supplies the newly arriving input batch. The required feed bandwidth is therefore the input-batch byte volume divided by the iteration time, aggregated across accelerators. The batch needed next must still arrive in HBM before the current computation finishes. Every lower tier therefore acts as a prefetch buffer for the one above. Host DRAM buffers input batches for HBM, NVMe buffers data for host DRAM, the parallel file system buffers data for NVMe, and object storage is the ultimate source of truth. Each buffer must be deep enough to absorb the latency and bandwidth variance of the tier below it.
 
@@ -1129,7 +1734,279 @@ Beyond the single node, the workload requires a shared namespace where all worke
 
 :::
 
-The architecture of a Lustre-style parallel file system separates two concerns that traditional file systems handle together [@schwan2003lustre]. **Metadata Servers (MDS)**\index{Metadata Server}\index{MDS} manage the namespace: file creation, directory listings, permission checks, and lock management. **Object Storage Servers (OSS)**\index{Object Storage Server}\index{OSS}[^fn-oss-pfs-disambiguation] manage the actual data blocks, each serving a stripe of every large file. When a client opens a 10 GB training shard, the MDS tells the client which OSS nodes hold which stripes, and the client reads from all of them in parallel. A Lustre[^fn-lustre-parallel-origin] deployment with 100 OSS nodes, each providing 10 GB/s, delivers an aggregate 1 TB/s.
+The architecture of a Lustre-style parallel file system separates two concerns that traditional file systems handle together (@fig-storage-pfs-architecture) [@schwan2003lustre]. **Metadata Servers (MDS)**\index{Metadata Server}\index{MDS} manage the namespace: file creation, directory listings, permission checks, and lock management. **Object Storage Servers (OSS)**\index{Object Storage Server}\index{OSS}[^fn-oss-pfs-disambiguation] manage the actual data blocks, each serving a stripe of every large file. When a client opens a 10 GB training shard, the MDS tells the client which OSS nodes hold which stripes, and the client reads from all of them in parallel. A Lustre[^fn-lustre-parallel-origin] deployment with 100 OSS nodes, each providing 10 GB/s, delivers an aggregate 1 TB/s.
+
+::: {#fig-storage-pfs-architecture fig-env="figure" fig-pos="htb" fig-cap="**Parallel file system architecture**: Separation of metadata operations (MDS $\to$ MDT) from high-throughput parallel data streaming (Clients $\to$ OSS $\to$ OST), illustrating how file striping aggregates cluster storage bandwidth." fig-alt="Architecture diagram showing compute clients querying a metadata server for stripe maps, then issuing parallel reads across multiple object storage servers."}
+
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  client_box/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=SteelBlue,
+    fill=LightBlue!50,
+    line width=0.8pt,
+    minimum width=2.7cm,
+    minimum height=0.82cm,
+    inner sep=2pt,
+    align=center
+  },
+  server_box/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=DarkGreen,
+    fill=GreenFill!50,
+    line width=0.8pt,
+    minimum width=2.9cm,
+    minimum height=0.82cm,
+    inner sep=2pt,
+    align=center
+  },
+  mds_box/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=PurpleLine,
+    fill=PurpleFill!60,
+    line width=0.8pt,
+    minimum width=2.9cm,
+    minimum height=0.82cm,
+    inner sep=2pt,
+    align=center
+  },
+  disk_target/.style={
+    cylinder,
+    shape border rotate=90,
+    aspect=0.25,
+    draw=DarkGreen,
+    fill=GreenFill!35,
+    line width=0.8pt,
+    minimum width=1.5cm,
+    minimum height=0.78cm,
+    inner sep=1pt,
+    align=center
+  },
+  mdt_target/.style={
+    cylinder,
+    shape border rotate=90,
+    aspect=0.25,
+    draw=PurpleLine,
+    fill=PurpleFill!45,
+    line width=0.8pt,
+    minimum width=1.5cm,
+    minimum height=0.78cm,
+    inner sep=1pt,
+    align=center
+  }
+]
+
+  % Book color palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{234,241,248}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{254,226,226}
+  \providecolor{DarkRed}{RGB}{160,25,25}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,243,199}
+  \providecolor{PurpleLine}{RGB}{125,55,185}
+  \providecolor{PurpleFill}{RGB}{243,232,255}
+  \providecolor{SlateLine}{RGB}{85,95,110}
+  \providecolor{SlateFill}{RGB}{241,245,249}
+  \providecolor{CardBorder}{RGB}{215,222,230}
+  \providecolor{CardFill}{RGB}{250,251,253}
+  \providecolor{TextDark}{RGB}{25,35,45}
+  \providecolor{TextMuted}{RGB}{95,105,115}
+
+  % =============================================================
+  % 0. COLUMN POSITIONS & DIVIDERS
+  % =============================================================
+  \def\xcli{-4.6}
+  \def\xsrv{0.0}
+  \def\xtgt{4.6}
+
+  % Subtle column separators
+  \draw[dashed, line width=0.6pt, SlateLine!30] (-2.3, -1.8) -- (-2.3, 5.2);
+  \draw[dashed, line width=0.6pt, SlateLine!30] (2.3, -1.8) -- (2.3, 5.2);
+
+  % Column Headers
+  \node[anchor=center, font=\scriptsize\bfseries, text=TextDark] at (\xcli, 5.2)
+    {Compute Clients ($C_i$)};
+  \node[anchor=center, font=\scriptsize\bfseries, text=TextDark] at (\xsrv, 5.2)
+    {Storage / Metadata Nodes};
+  \node[anchor=center, font=\scriptsize\bfseries, text=DarkGreen] at (\xtgt, 5.2)
+    {Storage Targets (OST / MDT)};
+
+  % =============================================================
+  % 1. ROW 0: METADATA SUBSYSTEM (MDS & MDT)
+  % =============================================================
+  \def\ymeta{4.2}
+
+  \node[mds_box] (mds) at (\xsrv, \ymeta) {
+    \textbf{\scriptsize\textcolor{PurpleLine}{MDS}}\\[1pt]
+    \tiny\textcolor{TextDark}{Metadata Server}
+  };
+
+  \node[mdt_target] (mdt) at (\xtgt, \ymeta) {
+    \textbf{\scriptsize\textcolor{PurpleLine}{MDT}}
+  };
+
+  \draw[->, line width=1.0pt, PurpleLine]
+    (mds.east) -- node[above, font=\tiny, text=PurpleLine] {namespace ops} (mdt.west);
+
+
+  % =============================================================
+  % 2. ROWS 1-3: CLIENTS, OSS, OST (Data Path)
+  % =============================================================
+
+  % --- Row 1 (y = 2.8) ---
+  \def\yrone{2.8}
+  \node[client_box] (cl1) at (\xcli, \yrone) {
+    \textbf{\scriptsize\textcolor{NavyBlue}{Client 1}}\\[1pt]
+    \tiny\textcolor{TextMuted}{GPU Trainer Node}
+  };
+
+  \node[server_box] (oss1) at (\xsrv, \yrone) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{OSS-1}}\\[1pt]
+    \tiny\textcolor{TextDark}{Object Storage Server}
+  };
+
+  \node[disk_target] (ost1) at (\xtgt, \yrone) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{OST-1}}
+  };
+
+  % Metadata request from Client 1 to MDS
+  \draw[->, dashed, line width=1.0pt, PurpleLine]
+    ($(cl1.north) + (0.4, 0)$) -- ++(0, 1.0) --
+    node[above, font=\tiny\bfseries, text=PurpleLine] {1. open() $\to$ stripe map} (mds.west);
+
+  % Data flow: Client 1 -> OSS-1 -> OST-1
+  \draw[->, line width=1.1pt, DarkGreen]
+    (cl1.east) -- node[above, font=\tiny\bfseries, text=DarkGreen] {2. parallel reads} (oss1.west);
+  \draw[->, line width=1.1pt, DarkGreen]
+    (oss1.east) -- (ost1.west);
+
+
+  % --- Row 2 (y = 1.6) ---
+  \def\yrtwo{1.6}
+  \node[client_box] (cl2) at (\xcli, \yrtwo) {
+    \textbf{\scriptsize\textcolor{NavyBlue}{Client 2}}\\[1pt]
+    \tiny\textcolor{TextMuted}{GPU Trainer Node}
+  };
+
+  \node[server_box] (oss2) at (\xsrv, \yrtwo) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{OSS-2}}\\[1pt]
+    \tiny\textcolor{TextDark}{Object Storage Server}
+  };
+
+  \node[disk_target] (ost2) at (\xtgt, \yrtwo) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{OST-2}}
+  };
+
+  \draw[->, line width=1.1pt, DarkGreen] (cl2.east) -- (oss2.west);
+  \draw[->, line width=1.1pt, DarkGreen] (oss2.east) -- (ost2.west);
+
+
+  % --- Row 3 (y = 0.4) ---
+  \def\yrthr{0.4}
+  \node[client_box] (cl3) at (\xcli, \yrthr) {
+    \textbf{\scriptsize\textcolor{NavyBlue}{Client 3}}\\[1pt]
+    \tiny\textcolor{TextMuted}{GPU Trainer Node}
+  };
+
+  \node[server_box] (oss3) at (\xsrv, \yrthr) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{OSS-3}}\\[1pt]
+    \tiny\textcolor{TextDark}{Object Storage Server}
+  };
+
+  \node[disk_target] (ost3) at (\xtgt, \yrthr) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{OST-3}}
+  };
+
+  \draw[->, line width=1.1pt, DarkGreen] (cl3.east) -- (oss3.west);
+  \draw[->, line width=1.1pt, DarkGreen] (oss3.east) -- (ost3.west);
+
+
+  % --- Ellipsis Row (y = -0.4) ---
+  \def\yrell{-0.4}
+  \node[font=\bfseries, text=SlateLine] at (\xcli, \yrell) {$\vdots$};
+  \node[font=\bfseries, text=SlateLine] at (\xsrv, \yrell) {$\vdots$};
+  \node[font=\bfseries, text=SlateLine] at (\xtgt, \yrell) {$\vdots$};
+
+
+  % --- Row N (y = -1.2) ---
+  \def\yrfou{-1.2}
+  \node[client_box] (cln) at (\xcli, \yrfou) {
+    \textbf{\scriptsize\textcolor{NavyBlue}{Client N}}\\[1pt]
+    \tiny\textcolor{TextMuted}{GPU Trainer Node}
+  };
+
+  \node[server_box] (ossn) at (\xsrv, \yrfou) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{OSS-N}}\\[1pt]
+    \tiny\textcolor{TextDark}{Object Storage Server}
+  };
+
+  \node[disk_target] (ostn) at (\xtgt, \yrfou) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{OST-N}}
+  };
+
+  \draw[->, line width=1.1pt, DarkGreen] (cln.east) -- (ossn.west);
+  \draw[->, line width=1.1pt, DarkGreen] (ossn.east) -- (ostn.west);
+
+
+  % =============================================================
+  % 3. BOTTOM CARDS: LEGEND & FILE STRIPING
+  % =============================================================
+  \def\ybot{-2.2}
+
+  % Left card: Path Legend
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=CardBorder,
+    fill=white,
+    line width=0.8pt,
+    minimum width=5.8cm,
+    minimum height=1.05cm,
+    anchor=north
+  ] (leg_card) at (-3.4, \ybot) {};
+
+  \draw[dashed, line width=1.0pt, PurpleLine]
+    ($(leg_card.west) + (0.35, 0.20)$) -- ($(leg_card.west) + (0.95, 0.20)$);
+  \node[anchor=west, font=\tiny\bfseries, text=PurpleLine]
+    at ($(leg_card.west) + (1.1, 0.20)$) {Metadata Path (MDS / MDT)};
+
+  \draw[line width=1.1pt, DarkGreen]
+    ($(leg_card.west) + (0.35, -0.20)$) -- ($(leg_card.west) + (0.95, -0.20)$);
+  \node[anchor=west, font=\tiny\bfseries, text=DarkGreen]
+    at ($(leg_card.west) + (1.1, -0.20)$) {Data Path (OSS / OST, Parallel I/O)};
+
+
+  % Right card: File Striping Summary
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=CardBorder,
+    fill=white,
+    line width=0.8pt,
+    minimum width=6.8cm,
+    minimum height=1.05cm,
+    anchor=north,
+    align=center,
+    inner sep=3pt
+  ] (strip_card) at (3.15, \ybot) {
+    \textbf{\scriptsize\textcolor{TextDark}{File Striping \& Bandwidth Aggregation}}\\[1.5pt]
+    \tiny\textcolor{TextMuted}{4 GB shard striped across 100 OSTs $\times$ 40 MB stripes $\to$ 1 TB/s cluster I/O}
+  };
+
+\end{tikzpicture}
+```
+
+:::
 
 This abstract architecture has concrete implications for performance tuning. When a training job creates a new dataset directory on Lustre, the administrator configures the **Stripe Count**\index{Stripe Count} (the number of OSS nodes a file is spread across) and **Stripe Size**\index{Stripe Size} (the chunk size written to each OSS) for that directory [@lustreSetstripe]. For large sequential-read training shards, administrators may choose wider striping and multi-megabyte stripe sizes so a single file can draw bandwidth from multiple OSS nodes; Lustre's striping guide treats wide striping as useful for very large files or files accessed by many clients, while smaller files often use fewer stripes to reduce overhead [@lustreFileStripingGuide]. A 4 GB data shard striped across 100 OSS nodes with 4 MB stripes places roughly 10 stripes on each OSS. When a data loader reads large contiguous ranges, the Lustre client can issue parallel read requests to the OSS nodes holding those stripes, aggregating their bandwidth. The client also maintains its own read-ahead buffer, prefetching the next several stripes while the application processes the current ones. This file-system-level read-ahead is distinct from the data loader's application-level prefetch buffer; the two layers of prefetching compound to provide deep latency hiding, making the physical distance to the OSS nodes nearly transparent to the training process.
 
@@ -1679,7 +2556,203 @@ The primary weapon against data stalls is **Pipelining**\index{Pipelining!data l
 
 ::: {#fig-data-pipeline-vol2 fig-env="figure" fig-pos="htb" fig-cap="**Pipelined data loading**: The CPU prepares batch $i+1$ while the GPU processes batch $i$. Pipelining hides storage latency, but only if the prefetch buffer is deep enough to absorb variance." fig-alt="Pipelining diagram showing CPU loading batches while GPU trains on previous batches."}
 
-![](images/svg/data-pipelining.svg)
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  read_box/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=DarkGreen,
+    fill=GreenFill!50,
+    line width=0.8pt,
+    minimum height=0.62cm,
+    font=\scriptsize\bfseries,
+    text=DarkGreen,
+    inner sep=0pt
+  },
+  prep_box/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=OrangeLine,
+    fill=OrangeL!50,
+    line width=0.8pt,
+    minimum height=0.62cm,
+    font=\scriptsize\bfseries,
+    text=OrangeLine!90!black,
+    inner sep=0pt
+  },
+  train_box/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=SteelBlue,
+    fill=LightBlue!50,
+    line width=0.8pt,
+    minimum height=0.62cm,
+    font=\scriptsize\bfseries,
+    text=NavyBlue,
+    inner sep=0pt
+  },
+  idle_box/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=SlateLine!35,
+    dashed,
+    line width=0.6pt,
+    minimum height=0.62cm,
+    font=\tiny\itshape,
+    text=TextMuted,
+    inner sep=0pt
+  }
+]
+
+  % Book color palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{234,241,248}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{254,226,226}
+  \providecolor{DarkRed}{RGB}{160,25,25}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,243,199}
+  \providecolor{PurpleLine}{RGB}{125,55,185}
+  \providecolor{PurpleFill}{RGB}{243,232,255}
+  \providecolor{SlateLine}{RGB}{85,95,110}
+  \providecolor{SlateFill}{RGB}{241,245,249}
+  \providecolor{CardBorder}{RGB}{215,222,230}
+  \providecolor{CardFill}{RGB}{250,251,253}
+  \providecolor{TextDark}{RGB}{25,35,45}
+  \providecolor{TextMuted}{RGB}{95,105,115}
+
+  \def\wstg{1.8} % width of one stage
+
+  % =============================================================
+  % PART A: WITHOUT PREFETCHING (SEQUENTIAL)
+  % =============================================================
+  \node[anchor=center, font=\small\bfseries, text=TextDark] at (5.4, 6.2)
+    {Without Prefetching (Sequential)};
+
+  % Track Labels
+  \node[anchor=east, font=\scriptsize\bfseries, text=TextDark] at (-0.35, 5.2) {Storage};
+  \node[anchor=east, font=\scriptsize\bfseries, text=TextDark] at (-0.35, 4.3) {CPU};
+  \node[anchor=east, font=\scriptsize\bfseries, text=TextDark] at (-0.35, 3.4) {GPU};
+
+  % Storage Track (y = 5.2)
+  \node[read_box, minimum width=\wstg cm, anchor=west] at (0.0, 5.2) {Read 1};
+  \node[idle_box, minimum width=2*\wstg cm, anchor=west] at (\wstg, 5.2) {idle};
+  \node[read_box, minimum width=\wstg cm, anchor=west] at (3*\wstg, 5.2) {Read 2};
+  \node[idle_box, minimum width=2*\wstg cm, anchor=west] at (4*\wstg, 5.2) {idle};
+
+  % CPU Track (y = 4.3)
+  \node[idle_box, minimum width=\wstg cm, anchor=west] at (0.0, 4.3) {};
+  \node[prep_box, minimum width=\wstg cm, anchor=west] at (\wstg, 4.3) {Prep 1};
+  \node[idle_box, minimum width=2*\wstg cm, anchor=west] at (2*\wstg, 4.3) {};
+  \node[prep_box, minimum width=\wstg cm, anchor=west] at (4*\wstg, 4.3) {Prep 2};
+  \node[idle_box, minimum width=\wstg cm, anchor=west] at (5*\wstg, 4.3) {};
+
+  % GPU Track (y = 3.4)
+  \node[idle_box, minimum width=2*\wstg cm, anchor=west] at (0.0, 3.4) {\textcolor{DarkRed!80}{GPU idle}};
+  \node[train_box, minimum width=\wstg cm, anchor=west] at (2*\wstg, 3.4) {Train 1};
+  \node[idle_box, minimum width=2*\wstg cm, anchor=west] at (3*\wstg, 3.4) {\textcolor{DarkRed!80}{GPU idle}};
+  \node[train_box, minimum width=\wstg cm, anchor=west] at (5*\wstg, 3.4) {Train 2};
+
+  % Timeline arrow
+  \draw[->, line width=0.8pt, SlateLine!50] (0.0, 2.75) -- (11.2, 2.75);
+  \node[anchor=west, font=\tiny, text=TextMuted] at (11.3, 2.75) {time};
+
+  % Sequential Span Bracket
+  \draw[line width=0.9pt, RedLine] (0.0, 2.35) -- (6*\wstg, 2.35);
+  \draw[line width=0.9pt, RedLine] (0.0, 2.2) -- (0.0, 2.5);
+  \draw[line width=0.9pt, RedLine] (6*\wstg, 2.2) -- (6*\wstg, 2.5);
+  \node[anchor=north, font=\scriptsize\bfseries, text=DarkRed] at (3*\wstg, 2.15)
+    {Total: 2 batches = 6 sequential stages};
+
+  % =============================================================
+  % DIVIDER
+  % =============================================================
+  \draw[SlateLine!25, line width=0.7pt] (-1.8, 1.45) -- (11.8, 1.45);
+
+  % =============================================================
+  % PART B: WITH PREFETCHING (ASYNC PIPELINE)
+  % =============================================================
+  \node[anchor=center, font=\small\bfseries, text=TextDark] at (5.4, 0.95)
+    {With Prefetching (Async Pipeline)};
+
+  % Track Labels
+  \node[anchor=east, font=\scriptsize\bfseries, text=TextDark] at (-0.35, 0.1) {Storage};
+  \node[anchor=east, font=\scriptsize\bfseries, text=TextDark] at (-0.35, -0.8) {CPU};
+  \node[anchor=east, font=\scriptsize\bfseries, text=TextDark] at (-0.35, -1.7) {GPU};
+
+  % Storage Track (y = 0.1)
+  \node[read_box, minimum width=\wstg cm, anchor=west] at (0.0, 0.1) {Read 1};
+  \node[read_box, minimum width=\wstg cm, anchor=west] at (\wstg, 0.1) {Read 2};
+  \node[read_box, minimum width=\wstg cm, anchor=west] at (2*\wstg, 0.1) {Read 3};
+  \node[read_box, minimum width=\wstg cm, anchor=west] at (3*\wstg, 0.1) {Read 4};
+
+  % Prefetch depth badge at right of Storage
+  \node[
+    rectangle,
+    rounded corners=3pt,
+    draw=DarkGreen,
+    fill=GreenFill!35,
+    line width=0.8pt,
+    minimum width=2.9cm,
+    minimum height=0.72cm,
+    anchor=west,
+    align=center
+  ] at (7.6, 0.1) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{Prefetch depth = 2}}\\[1pt]
+    \tiny\textcolor{TextDark}{2 batches in flight}
+  };
+
+  % CPU Track (y = -0.8)
+  \node[idle_box, minimum width=\wstg cm, anchor=west] at (0.0, -0.8) {};
+  \node[prep_box, minimum width=\wstg cm, anchor=west] at (\wstg, -0.8) {Prep 1};
+  \node[prep_box, minimum width=\wstg cm, anchor=west] at (2*\wstg, -0.8) {Prep 2};
+  \node[prep_box, minimum width=\wstg cm, anchor=west] at (3*\wstg, -0.8) {Prep 3};
+  \node[prep_box, minimum width=\wstg cm, anchor=west] at (4*\wstg, -0.8) {Prep 4};
+
+  % GPU Track (y = -1.7)
+  \node[idle_box, minimum width=2*\wstg cm, anchor=west] at (0.0, -1.7) {\textcolor{TextMuted}{Ramp-up}};
+  \node[train_box, minimum width=\wstg cm, anchor=west] at (2*\wstg, -1.7) {Train 1};
+  \node[train_box, minimum width=\wstg cm, anchor=west] at (3*\wstg, -1.7) {Train 2};
+  \node[train_box, minimum width=\wstg cm, anchor=west] at (4*\wstg, -1.7) {Train 3};
+  \node[train_box, minimum width=\wstg cm, anchor=west] at (5*\wstg, -1.7) {Train 4};
+
+  % Timeline arrow
+  \draw[->, line width=0.8pt, SlateLine!50] (0.0, -2.35) -- (11.2, -2.35);
+  \node[anchor=west, font=\tiny, text=TextMuted] at (11.3, -2.35) {time};
+
+  % Pipelined Span Bracket
+  \draw[line width=0.9pt, DarkGreen] (0.0, -2.75) -- (6*\wstg, -2.75);
+  \draw[line width=0.9pt, DarkGreen] (0.0, -2.6) -- (0.0, -2.9);
+  \draw[line width=0.9pt, DarkGreen] (6*\wstg, -2.6) -- (6*\wstg, -2.9);
+  \node[anchor=north, font=\scriptsize\bfseries, text=DarkGreen] at (3*\wstg, -2.95)
+    {4 batches in time of $\sim$3 sequential; GPU never idles after ramp-up};
+
+  % =============================================================
+  % BOTTOM SUMMARY CARD
+  % =============================================================
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=RedLine,
+    fill=RedFill!30,
+    line width=0.8pt,
+    minimum width=11.6cm,
+    minimum height=0.72cm,
+    anchor=north,
+    align=center,
+    inner sep=3pt
+  ] at (5.4, -3.55) {
+    \textbf{\scriptsize\textcolor{DarkRed}{Overlap hides storage latency: the GPU processes while the next batch loads}}
+  };
+
+\end{tikzpicture}
+```
 
 :::
 
@@ -1986,7 +3059,224 @@ The latency reduction from GDS matters most when the training pipeline is alread
 
 ::: {#fig-gds-path fig-env="figure" fig-pos="htb" fig-cap="**Traditional vs. GPUDirect Storage path**: The traditional path (top) requires two CPU-mediated payload copies. The GDS path (bottom) uses DMA to transfer data directly from NVMe to GPU memory, eliminating those bounce copies while retaining CPU submission and coordination." fig-alt="Diagram comparing traditional three-hop storage path with GDS direct DMA path from NVMe to GPU."}
 
-![](images/svg/gds-path.svg)
+```{=latex}
+\begin{tikzpicture}[
+  font=\sffamily,
+  >=Stealth,
+  node_nvme/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=OrangeLine,
+    fill=OrangeL!50,
+    line width=0.8pt,
+    minimum width=2.45cm,
+    minimum height=1.12cm,
+    inner sep=2pt,
+    align=center
+  },
+  node_ram/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=SteelBlue,
+    fill=LightBlue!50,
+    line width=0.8pt,
+    minimum width=2.65cm,
+    minimum height=1.12cm,
+    inner sep=2pt,
+    align=center
+  },
+  node_cpu/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=SlateLine!60,
+    fill=white,
+    line width=0.8pt,
+    minimum width=2.35cm,
+    minimum height=1.12cm,
+    inner sep=2pt,
+    align=center
+  },
+  node_gpu/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=DarkGreen,
+    fill=GreenFill!50,
+    line width=0.8pt,
+    minimum width=2.45cm,
+    minimum height=1.12cm,
+    inner sep=2pt,
+    align=center
+  }
+]
+
+  % Book color palette
+  \providecolor{NavyBlue}{RGB}{20,45,85}
+  \providecolor{SteelBlue}{RGB}{40,90,140}
+  \providecolor{LightBlue}{RGB}{234,241,248}
+  \providecolor{RedLine}{RGB}{185,45,45}
+  \providecolor{RedFill}{RGB}{254,226,226}
+  \providecolor{DarkRed}{RGB}{160,25,25}
+  \providecolor{DarkGreen}{RGB}{20,110,60}
+  \providecolor{GreenLine}{RGB}{35,135,75}
+  \providecolor{GreenFill}{RGB}{240,249,244}
+  \providecolor{OrangeLine}{RGB}{215,105,15}
+  \providecolor{OrangeL}{RGB}{254,243,199}
+  \providecolor{PurpleLine}{RGB}{125,55,185}
+  \providecolor{PurpleFill}{RGB}{243,232,255}
+  \providecolor{SlateLine}{RGB}{85,95,110}
+  \providecolor{SlateFill}{RGB}{241,245,249}
+  \providecolor{CardBorder}{RGB}{215,222,230}
+  \providecolor{CardFill}{RGB}{250,251,253}
+  \providecolor{TextDark}{RGB}{25,35,45}
+  \providecolor{TextMuted}{RGB}{95,105,115}
+
+  % =============================================================
+  % PART A: TRADITIONAL PATH (CPU BOUNCE BUFFER)
+  % =============================================================
+  \node[anchor=center, font=\small\bfseries, text=TextDark] at (0, 5.2)
+    {(a) Traditional Path: CPU Bounce Buffer};
+
+  \def\ya{3.8}
+
+  % 1. NVMe SSD
+  \node[node_nvme, minimum width=2.3cm] (a_nvme) at (-4.85, \ya) {
+    \textbf{\scriptsize\textcolor{OrangeLine!90!black}{NVMe SSD}}\\[2pt]
+    \tiny\textcolor{TextDark}{7 GB/s seq read}
+  };
+
+  % 2. CPU RAM (Bounce Buffer)
+  \node[node_ram, minimum width=2.4cm] (a_ram) at (-1.65, \ya) {
+    \textbf{\scriptsize\textcolor{NavyBlue}{CPU RAM}}\\[1.5pt]
+    \tiny\textcolor{TextDark}{(Bounce Buffer)}\\[1.5pt]
+    \tiny\itshape\textcolor{DarkRed}{Extra copy here}
+  };
+
+  % 3. CPU (kernel involved)
+  \node[node_cpu, minimum width=2.3cm] (a_cpu) at (1.65, \ya) {
+    \textbf{\scriptsize\textcolor{TextDark}{CPU}}\\[2pt]
+    \tiny\textcolor{TextMuted}{kernel involved}
+  };
+
+  % 4. GPU HBM
+  \node[node_gpu, minimum width=2.3cm] (a_gpu) at (4.85, \ya) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{GPU HBM}}\\[2pt]
+    \tiny\textcolor{TextDark}{Training data}
+  };
+
+  % Arrows (now over ~1.0cm gaps)
+  \draw[->, line width=1.1pt, DarkRed]
+    (a_nvme.east) -- node[above, font=\tiny\bfseries, text=DarkRed] {PCIe} (a_ram.west);
+  \draw[->, line width=1.1pt, DarkRed]
+    (a_ram.east) -- node[above, font=\tiny\bfseries, text=DarkRed] {memcpy} (a_cpu.west);
+  \draw[->, line width=1.1pt, DarkRed]
+    (a_cpu.east) -- node[above, font=\tiny\bfseries, text=DarkRed] {PCIe} (a_gpu.west);
+
+  % Panel A Summary Banner
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=RedLine!70,
+    fill=RedFill!35,
+    line width=0.8pt,
+    minimum width=12.8cm,
+    minimum height=0.78cm,
+    anchor=north,
+    align=center,
+    inner sep=3pt
+  ] at (0, 2.75) {
+    \textbf{\scriptsize\textcolor{DarkRed}{2 PCIe crossings $+$ CPU memcpy overhead $+$ kernel context switches}}\\[1.5pt]
+    \tiny\textcolor{TextDark}{Data touches CPU memory before reaching GPU}
+  };
+
+
+  % =============================================================
+  % DIVIDER
+  % =============================================================
+  \draw[SlateLine!25, line width=0.7pt] (-6.4, 1.85) -- (6.4, 1.85);
+
+
+  % =============================================================
+  % PART B: GPUDIRECT STORAGE (CPU BYPASS)
+  % =============================================================
+  \node[anchor=center, font=\small\bfseries, text=TextDark] at (0, 1.35)
+    {(b) GPUDirect Storage: CPU Bypass};
+
+  \def\yb{-0.05}
+
+  % 1. NVMe SSD
+  \node[node_nvme, minimum width=2.3cm] (b_nvme) at (-4.85, \yb) {
+    \textbf{\scriptsize\textcolor{OrangeLine!90!black}{NVMe SSD}}\\[2pt]
+    \tiny\textcolor{TextDark}{7 GB/s seq read}
+  };
+
+  % 4. GPU HBM
+  \node[node_gpu, minimum width=2.3cm] (b_gpu) at (4.85, \yb) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{GPU HBM}}\\[2pt]
+    \tiny\textcolor{TextDark}{Training data}
+  };
+
+  % Direct DMA Green Arrow
+  \draw[->, line width=1.4pt, DarkGreen]
+    (b_nvme.east) --
+    node[above=2pt, font=\scriptsize\bfseries, text=DarkGreen] {PCIe Direct DMA (GPU-initiated)}
+    (b_gpu.west);
+
+  % Bypassed CPU ghost box below arrow
+  \node[
+    rectangle,
+    rounded corners=3pt,
+    draw=SlateLine!40,
+    dashed,
+    fill=SlateFill!30,
+    line width=0.7pt,
+    minimum width=2.45cm,
+    minimum height=0.82cm,
+    align=center
+  ] at (0, -0.95) {
+    \textbf{\scriptsize\textcolor{TextMuted}{CPU}}\\[1.5pt]
+    \tiny\itshape\textcolor{TextMuted}{bypassed}
+  };
+
+  % Panel B Summary Banner
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=GreenLine,
+    fill=GreenFill!40,
+    line width=0.8pt,
+    minimum width=12.8cm,
+    minimum height=0.78cm,
+    anchor=north,
+    align=center,
+    inner sep=3pt
+  ] at (0, -1.8) {
+    \textbf{\scriptsize\textcolor{DarkGreen}{1 PCIe crossing, no CPU involvement, no bounce buffer}}\\[1.5pt]
+    \tiny\textcolor{TextDark}{GPU DMA engine reads directly from NVMe controller}
+  };
+
+
+  % =============================================================
+  % BOTTOM PERFORMANCE CARD
+  % =============================================================
+  \node[
+    rectangle,
+    rounded corners=4pt,
+    draw=DarkRed,
+    fill=white,
+    line width=0.9pt,
+    minimum width=12.8cm,
+    minimum height=0.80cm,
+    anchor=north,
+    align=center,
+    inner sep=3pt
+  ] at (0, -2.85) {
+    \textbf{\scriptsize\textcolor{DarkRed}{Performance Gain with GDS}}\\[2pt]
+    \fontsize{6.8pt}{8.5pt}\selectfont
+    \textcolor{TextDark}{75\% lower latency \quad$\vert$\quad 4$\times$ lower CPU time \quad$\vert$\quad No CPU-mediated copy}
+  };
+
+\end{tikzpicture}
+```
 
 :::
 
@@ -3127,11 +4417,9 @@ Infrastructure is complete. Modern clusters combine accelerators that compute at
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->
 
 \index{Field-Programmable Gate Array|see{FPGA}}
-\index{Direct Memory Access|see{DMA}}
 \index{Non-Uniform Memory Access|see{NUMA}}
 \index{Dynamic Random-Access Memory|see{DRAM}}
 \index{Key-Value Cache|see{KV Cache}}
-\index{Neural Network|see{NN}}
 
 ::: { .quiz-end }
 :::

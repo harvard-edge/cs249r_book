@@ -24,6 +24,7 @@ from typing import Iterable
 
 
 TARGET_SUFFIXES = {".qmd", ".json", ".svg"}
+MARKUP_COMMENT_SUFFIXES = {".svg", ".html", ".htm"}
 HTML_SUFFIXES = {".html", ".htm"}
 USD_PATTERN = re.compile(r"\bUSD\b")
 DOUBLE_DOLLAR_PATTERN = re.compile(r"\$\$")
@@ -126,6 +127,7 @@ def _audit_file(path: Path) -> list[Violation]:
     violations: list[Violation] = []
     lines = path.read_text(encoding="utf-8").splitlines()
     in_python_cell = False
+    in_markup_comment = False
 
     for lineno, line in enumerate(lines, 1):
         if line.startswith("```{python}"):
@@ -134,6 +136,32 @@ def _audit_file(path: Path) -> list[Violation]:
         if in_python_cell and line.strip() == "```":
             in_python_cell = False
             continue
+
+        # 2026-09-20: the SVG/HTML scan is for *visible labels*, so markup
+        # comments are out of scope. A generated margin figure carrying
+        # `<!-- $ USD -->` was reported as a reader-facing currency defect.
+        if path.suffix in MARKUP_COMMENT_SUFFIXES:
+            probe, stripped_line = line, []
+            while probe:
+                if in_markup_comment:
+                    end = probe.find("-->")
+                    if end == -1:
+                        probe = ""
+                    else:
+                        in_markup_comment = False
+                        probe = probe[end + 3:]
+                else:
+                    begin = probe.find("<!--")
+                    if begin == -1:
+                        stripped_line.append(probe)
+                        probe = ""
+                    else:
+                        stripped_line.append(probe[:begin])
+                        in_markup_comment = True
+                        probe = probe[begin + 4:]
+            line = "".join(stripped_line)
+            if not line.strip():
+                continue
 
         # Pint uses USD as a currency unit in LEGO cells; prose policy is separate.
         if in_python_cell:

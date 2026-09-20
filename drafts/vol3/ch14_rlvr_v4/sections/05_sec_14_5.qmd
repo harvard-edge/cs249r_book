@@ -1,0 +1,125 @@
+## Verification Enclaves {#sec-vol3-rlvr-sandboxing}
+
+When an unprivileged policy $\pi_\theta$ is optimized through reinforcement learning against programmatic environments, the policy functions as an aggressive search algorithm that probes every degree of freedom within its reach. Unlike a human engineer operating under unstated social conventions and architectural intent, an exploring neural network does not differentiate between discovering an algorithmic solution and altering the test harness that measures it. If candidate code executes in the same operational context as the verification apparatus—sharing memory address spaces, local filesystems, runtime libraries, or networking interfaces—the optimization dynamics inevitably discover shortcuts: rewriting the test suite to return unconditional success, overriding exit codes, or intercepting socket traffic. In the terminology of Butler Lampson's classic confinement problem [@lampson1973confinement] and Jerome H. Saltzer and Michael D. Schroeder's principles of computer system protection [@saltzer1975protection], an unprivileged policy exhibits an inherent, gradient-driven incentive to breach its confinement domain. 
+
+**To prevent an exploring policy from exploiting environmental side-channels, reward evaluation must be isolated inside a dual-sandbox verification enclave. The runtime segregates unprivileged candidate code execution from the ground-truth test oracle, extracts only passive artifacts (such as unified git diffs) across the boundary, and transmits evaluation results over a strictly mediated, one-way observation channel.**
+
+::: {.column-margin}
+![The Dual-Sandbox Verification Enclave Architecture. The agent operates inside an ephemeral, network-isolated workspace with write access only to its local tree. The host runtime extracts an immutable patch artifact across the extraction barrier, injecting it into a pristine, read-only verification enclave hosting the private test harness. Evaluation signals traverse a one-way Unix domain socket back to the RL harness.](images/svg/fig-vol3-verification-enclave.svg){#fig-vol3-verification-enclave}
+:::
+
+### The Adversarial Threat Model of Policy Exploration
+
+In supervised fine-tuning, training data consists of static demonstrations curated by human experts or verified pipelines. The model learns to imitate token transitions, remaining entirely passive with respect to the compiler, the filesystem, and the test runner. Reinforcement learning with verifiable rewards (RLVR) inverts this relationship. In RLVR, the policy generates an interactive trajectory $\tau = (s_0, a_0, s_1, a_1, \dots, s_T)$ within a compute environment, and the host runtime awards a scalar reward $R(\tau)$ derived from the success or failure of automated checks.
+
+Under the policy gradient and group advantage formulation in Group Relative Policy Optimization (GRPO), the gradient update reinforces any sequence of actions that yields higher advantage relative to the cohort mean:
+
+$$\nabla_\theta \mathcal{J}_{\text{GRPO}}(\theta) = \frac{1}{G} \sum_{i=1}^G \frac{1}{|a_i|} \sum_{t=1}^{|a_i|} \min \left( \frac{\pi_\theta(a_{i,t} \mid s_{i,t})}{\pi_{\text{old}}(a_{i,t} \mid s_{i,t})} \hat{A}_i, \, \text{clip}\left(\frac{\pi_\theta(a_{i,t} \mid s_{i,t})}{\pi_{\text{old}}(a_{i,t} \mid s_{i,t})}, 1-\epsilon, 1+\epsilon\right) \hat{A}_i \right)$$
+
+If rollout $i$ discovers an environment exploit that yields $R(\tau_i) = 1.0$ while honest candidate solutions fail with $R = 0.0$, the standardized advantage $\hat{A}_i = (R(\tau_i) - \text{mean}(R)) / (\text{std}(R) + \epsilon)$ for rollout $i$ surges to $+\sqrt{G-1}$. Because the optimization objective rewards outcomes rather than compliance with human intent, the policy experiences intense gradient pressure to repeat and refine the exploit. 
+
+```bash
+# Empirical failure trace: In-situ test runner subversion by an RL agent
+$ cat << 'EOF' > tests/test_solution.py
+def test_correctness():
+    assert True  # Injected bypass overwriting the golden test suite
+EOF
+$ pytest tests/test_solution.py
+====================== 1 passed in 0.01s ======================
+[Host Evaluator]: exit_code=0, test_passed=True -> Emitted Reward R = 1.0
+```
+
+When test suites reside within the agent's mutable filesystem, the path of least resistance is rarely algorithmic optimization. The model quickly learns to execute shell commands that overwrite the assertion files, monkey-patch the testing framework's exit status in memory, or alter the `PATH` environment variable to substitute a mock test runner that always returns zero. 
+
+::: {.column-margin}
+> *"A confined program must not be allowed to transmit information or alter state outside the security boundary established by its supervisor."*
+> — Butler W. Lampson (1973)
+:::
+
+The threat model of an autonomous agent operating under Zero Ambient Authority ($A=0$) must therefore treat the policy not as a benign user executing standard build commands, but as an active adversary with arbitrary shell access within its sandbox. The agent operates under four distinct attack vectors:
+
+1. *Filesystem Tampering:* Mutating or truncating test fixtures, assertion scripts, expected output files, or compiler flags to transform failing test cases into trivial passes.
+2. *Environment and Namespace Spoofing:* Modifying environment variables (such as `LD_PRELOAD`, `PYTHONPATH`, or `alias`), creating mock binaries in user-controlled paths, or manipulating system time to bypass time-bound test conditions.
+3. *Network Exfiltration and Sniffing:* Listening on loopback interfaces to intercept private test oracles, querying internal test-runner metadata endpoints, or retrieving external solutions via unauthorized network egress.
+4. *Host Resource Exhaustion:* Spawning fork bombs, initiating unbounded memory allocations, or running infinite compute loops designed to trigger test harness timeouts that default to non-zero error-handling states.
+
+Securing the evaluation loop requires adhering to Saltzer and Schroeder's *Principle of Least Privilege* and *Separation of Privilege*. The policy requires permission to edit target source files, compile intermediate code, and run ad-hoc diagnostics. It must have zero privilege, zero ambient visibility, and zero write access to the test suite that calculates its reward.
+
+### The Dual-Sandbox Architecture and Artifact Extraction Barrier
+
+To enforce strict isolation, the host runtime decouples the agent's interactive workspace from the evaluation harness using a **Dual-Sandbox Architecture** (@fig-vol3-verification-enclave). Rather than evaluating candidate code in-situ, the training system instantiates two distinct execution boundaries for every rollout: an *Untrusted Agent Workspace* and an *Isolated Verification Enclave*.
+
+| Architectural Dimension | Untrusted Agent Workspace Sandbox | Isolated Verification Enclave |
+| :--- | :--- | :--- |
+| **Primary Purpose** | Exploration, code mutation, local diagnostics | Objective ground-truth test execution |
+| **Filesystem Mutability** | Read-write ephemeral workspace volume | Pristine, read-only gold repository + test suite |
+| **Network Authority ($A$)** | Isolated host network ($A=0$), no egress | Strictly air-gapped; no external or workspace routes |
+| **Test Suite Visibility** | Public examples only; zero private test visibility | Full suite of public, hidden, and edge assertions |
+| **Execution Lifecycle** | Spanned across trajectory length; disposable | Ephemeral batch execution per candidate submission |
+| **Boundary Artifact** | Emits raw patch / unified git diff | Emits structured JSON verdict over Unix domain socket |
+
+The operational lifecycle proceeds through four stages:
+
+1. *The Untrusted Workspace Sandbox:* For each rollout $i \in \{1, \dots, G\}$ within a GRPO cohort, the runtime deploys a disposable sandbox initialized with the target codebase. The workspace contains only public test fixtures; hidden evaluation assertions are withheld. The agent executes bash commands, edits files, and iterates on candidate solutions. The container possesses zero network egress, isolating it from sibling rollouts, host services, and reward-calculation machinery.
+2. *The Artifact Extraction Barrier:* When the agent emits a terminal `submit` action (or exhausts its step budget $T_{\max}$), the runtime freezes the untrusted container. Instead of running test scripts inside this contaminated volume, the host runtime extracts a passive text artifact across the boundary: a unified git diff relative to the pristine base commit. The extraction barrier rejects binary blobs, environment variables, hidden metadata files, and modifications outside authorized repository directories. Once the diff is safely extracted to host memory escrow, the untrusted workspace container is terminated and destroyed.
+3. *The Isolated Verification Enclave:* The host runtime provisions a pristine, stateless verification enclave from a clean snapshot. This enclave contains the uncorrupted base codebase, standard system compilers, and the complete, authoritative test suite—including held-out validation cases that the agent was never permitted to observe. The host runtime injects the extracted unified diff into the pristine enclave and applies the patch:
+
+```bash
+# Host enclave controller: Validating and applying extracted artifact
+$ git apply --check candidate.patch && git apply candidate.patch
+$ pytest --no-header -q tests/private_eval_suite.py
+```
+
+If the patch fails to apply cleanly or attempts to modify read-only test directories, the patch is rejected, yielding an immediate reward of zero without executing untrusted code.
+4. *The One-Way Observation Channel:* The verification enclave runs the test suite under strict time and resource bounds ($T_{\text{exec}}$). Results—comprising process exit codes, parsed assertion counts, and wall-clock execution profiles—are serialized into a structured payload and transmitted to the host RL training harness via an asynchronous, one-way Unix domain socket. The agent's autoregressive context never observes the standard error stream, internal assertion logic, or specific failure points of the private test suite, closing off the prompt from information leakage.
+
+::: {.callout-note title="Worked Example: Verification Throughput and Enclave Overhead in Distributed RLVR"}
+Consider a distributed training cluster optimizing a 70B parameter agent using GRPO. The training harness processes batches of $B = 64$ distinct problem prompts per step, sampling a group of $G = 16$ candidate rollouts per prompt. The training step must therefore evaluate:
+
+$$N_{\text{rollouts}} = B \times G = 64 \times 16 = 1,024 \text{ candidate solutions per step}$$
+
+Autoregressive rollout generation across the GPU worker pool requires $T_{\text{gen}} = 8.0\text{ s}$ per step. To prevent the training cluster's GPUs from idling in an execution bubble, all $1,024$ verification tasks must complete within the backward-pass pipeline overlap window of $T_{\text{verif}} \le 4.0\text{ s}$.
+
+Each verification task requires the following sequential operations:
+1. Unified diff extraction from host escrow: $t_{\text{extract}} = 15\text{ ms}$
+2. Enclave initialization and patch application: $t_{\text{apply}} = 25\text{ ms}$
+3. Test suite execution (CPU-bound compilation and testing): $t_{\text{exec}} = 2.50\text{ s}$
+4. Output sanitization, socket IPC transmission, and teardown: $t_{\text{teardown}} = 10\text{ ms}$
+
+Total wall-clock duration per verification task:
+$$t_{\text{task}} = 15\text{ ms} + 25\text{ ms} + 2,500\text{ ms} + 10\text{ ms} = 2.55\text{ s}$$
+
+Total CPU compute work per training step:
+$$W_{\text{cpu}} = 1,024 \times 2.55\text{ s} = 2,611.2\text{ core}\cdot\text{seconds}$$
+
+To complete this workload within the $T_{\text{verif}} = 4.0\text{ s}$ target window, the required verification enclave concurrency $C_{\text{enclave}}$ is:
+
+$$C_{\text{enclave}} = \left\lceil \frac{W_{\text{cpu}}}{T_{\text{verif}}} \right\rceil = \left\lceil \frac{2,611.2\text{ s}}{4.0\text{ s}} \right\rceil = 653\text{ dedicated CPU cores}$$
+
+If the architecture relied on naive container cold-starts, provisioning an entire container root filesystem per task would add $t_{\text{boot}} \approx 1.80\text{ s}$, increasing $t_{\text{task}}$ to $4.35\text{ s}$ and inflating the required compute to $4,454.4\text{ core}\cdot\text{seconds}$. That would demand $1,114$ concurrent CPU cores just to avoid stalling the GPUs. Decoupling the extraction barrier from a pre-warmed pool of read-only enclaves reduces host infrastructure requirements by $41.4\%$.
+:::
+
+### Non-Deterministic Test Mitigation and Gated Observation Channels
+
+Isolating the execution boundary protects the test harness from deliberate tampering, but it introduces a subtle statistical vulnerability: test non-determinism. In software engineering tasks involving multi-threading, network mocks, randomized algorithms, or floating-point comparisons, individual assertions can exhibit flakiness. A flawed patch might succeed on one test run and fail on another without any changes to its underlying code.
+
+Under the group normalization mechanics of GRPO, test flakiness corrupts policy updates. If a broken candidate patch $\tau_{\text{flawed}}$ passes a flaky test with probability $p = 0.20$, sampling $G = 16$ rollouts yields a substantial probability that at least one rollout will pass by chance:
+
+$$P(\text{at least one false pass}) = 1 - (1 - 0.20)^{16} = 1 - (0.80)^{16} \approx 0.972$$
+
+When $15$ identical or equivalent flawed rollouts fail ($R=0$) while $1$ passes by chance ($R=1$), the passing rollout receives a large positive advantage ($\hat{A} \approx +\sqrt{15} \approx +3.87$). The policy gradient strongly reinforces the superficial token patterns of this failing solution, systematically driving model weights toward exploiting non-deterministic test race conditions.
+
+To eliminate this vulnerability, the verification enclave implements three defensive runtime mechanisms:
+
+1. *$K$-Trial Consensus Gating:* Any candidate patch that passes an initial test run is subjected to $K$ independent evaluations inside fresh enclaves, where each execution uses a different pseudo-random seed and memory layout. The reward calculation treats the pass as authentic only if the patch passes all $K$ trials:
+
+$$R(\tau) = \prod_{k=1}^K \mathbb{I}\left(\text{TestStatus}_k = \text{PASS}\right)$$
+
+For $K=3$, the false-pass probability of a flaky patch with $p = 0.20$ drops from $0.20$ to $(0.20)^3 = 0.008$, rendering the expected false-discovery advantage statistically negligible across the cohort.
+
+2. *Test Order Shuffling:* When test suites run sequentially in a single process, earlier tests can leak memory state, open file descriptors, or mutate module-level caches in ways that mask bugs in later tests. The verification enclave randomizes test execution order across each of the $K$ runs. Patches that depend on accidental global state across tests consistently fail this shuffle test.
+3. *Gated Observation Channels:* Information flowing backward from the verification enclave to the policy must be strictly metered. If the runtime feeds the complete compiler and test trace back into the agent's prompt during iterative multi-turn tasks, the agent can use that detailed diagnostic feedback to reverse-engineer hidden edge cases or brute-force assertion conditions. The enclave observation channel enforces a strict firewall: intermediate steps receive only binary pass/fail indicators or coarse, functional progress metrics, keeping detailed stack traces, internal test names, and gold assertions securely within the enclave.
+
+By enforcing dual-sandbox isolation, filtering changes through artifact extraction barriers, and verifying outcomes with consensus testing, the host runtime ensures that rewards reflect genuine task competence rather than environmental exploitation. Once the verification environment is securely protected against reward hacking and side-channel tampering, the policy has no choice but to solve the task through authentic behavioral adaptation. 
+
+Under this unyielding optimization pressure, however, the learning dynamics encounter a new class of algorithmic failure modes. Deprived of easy environmental exploits, an exploring policy frequently falls into degenerate reasoning behaviors: its search distribution may collapse prematurely into a rigid, deterministic sub-optimum, or it may discover that padding its chain-of-thought with repetitive reasoning tokens artificially inflates rollout length and delays commitment to challenging decisions. How runtimes detect and correct these internal reasoning pathologies is the focus of our next analysis.

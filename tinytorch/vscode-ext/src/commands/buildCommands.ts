@@ -6,8 +6,8 @@ import { titoTerminalCommand } from '../utils/tito';
 
 /** Build output paths (relative to project root) */
 const BUILD_OUTPUTS = {
-  siteIndex: path.join('site', '_build', 'html', 'index.html'),
-  coursePdf: path.join('site', '_build', 'latex', 'tinytorch-course.pdf'),
+  siteIndex: path.join('guide', '_build', 'index.html'),
+  coursePdf: path.join('book', '_build', 'tinytorch.pdf'),
   paperPdf: path.join('paper', 'paper.pdf'),
 } as const;
 

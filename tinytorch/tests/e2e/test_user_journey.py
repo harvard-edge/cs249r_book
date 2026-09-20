@@ -11,17 +11,15 @@ Run with:
     pytest tests/e2e/test_user_journey.py -v
 
 Categories:
-    -k quick         # Fast CLI verification (~30s)
-    -k module_flow   # Module workflow tests (~2min)
-    -k full_journey  # Complete journey: 20 modules + 6 milestones (~7-8min on CI)
+    -m quick         # Fast CLI verification (~30s)
+    -m module_flow   # Module workflow tests (~2min)
+    -m full_journey  # Module 01 completion and the first milestone
 """
 
 import pytest
 import subprocess
 import sys
 import json
-import shutil
-import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -141,13 +139,6 @@ class TestQuickVerification:
     @pytest.mark.quick
     def test_tinytorch_package_importable(self):
         """TinyTorch package can be imported."""
-        code, stdout, stderr = subprocess.run(
-            [sys.executable, "-c", "import tinytorch; print('OK')"],
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True, encoding='utf-8', errors='replace'
-        ).returncode, "", ""
-
         result = subprocess.run(
             [sys.executable, "-c", "import tinytorch; print('OK')"],
             cwd=PROJECT_ROOT,
@@ -161,46 +152,24 @@ class TestQuickVerification:
 class TestModuleFlow:
     """Test module workflow: start → complete → progress tracking."""
 
-    @pytest.fixture(autouse=True)
-    def backup_progress(self):
-        """Backup and restore .tito/progress.json around tests."""
-        tito_dir = PROJECT_ROOT / ".tito"
-        progress_file = tito_dir / "progress.json"
-        backup_file = tito_dir / "progress.json.e2e_backup"
-        had_progress = progress_file.exists()
-
-        # Backup existing progress
-        if had_progress:
-            shutil.copy(progress_file, backup_file)
-
-        yield
-
-        # Restore original progress
-        if backup_file.exists():
-            shutil.copy(backup_file, progress_file)
-            backup_file.unlink()
-        elif not had_progress and progress_file.exists():
-            progress_file.unlink()
-
     @pytest.mark.module_flow
     def test_module_01_start_works(self):
         """'tito module start 01' works (first module, no prerequisites)."""
-        # Note: This opens Jupyter, but should not block
-        # We test the command doesn't error on already-started modules
-        code, stdout, stderr = run_tito(["module", "status"])
-        assert code == 0
+        code, stdout, stderr = run_tito(["module", "start", "01", "--no-jupyter"])
+        assert code == 0, stdout + stderr
+        progress = json.loads((PROJECT_ROOT / ".tito" / "progress.json").read_text())
+        assert "01" in progress["started_modules"]
+        assert list((PROJECT_ROOT / "modules" / "01_tensor").glob("*.ipynb"))
 
     @pytest.mark.module_flow
     def test_module_02_start_responds(self):
         """'tito module start 02' gives a meaningful response about module state."""
-        # Note: This test checks that the command responds appropriately.
-        # If module 01 is not completed, it should show "Locked" or prerequisites.
-        # If module 01 is completed (from previous tests), it should show "Unlocked".
-        code, stdout, stderr = run_tito(["module", "start", "02"])
-
-        combined = stdout + stderr
-        # Should show either locked (needs prereqs) or unlocked (ready to start)
-        assert "Locked" in combined or "Unlocked" in combined or "Module 02" in combined or code == 0
+        code, stdout, stderr = run_tito(["module", "start", "02", "--no-jupyter"])
+        assert code != 0
+        assert "Locked" in stdout + stderr
+        progress_file = PROJECT_ROOT / ".tito" / "progress.json"
+        if progress_file.exists():
+            assert "02" not in json.loads(progress_file.read_text()).get("started_modules", [])
 
     @pytest.mark.module_flow
     def test_module_complete_runs_tests(self):
@@ -210,9 +179,27 @@ class TestModuleFlow:
             ["module", "complete", "01", "--skip-export"],
             timeout=120  # Tests may take a while
         )
-        # Check that tests ran (may pass or fail depending on state)
-        combined = stdout + stderr
-        assert "Test" in combined or "test" in combined or code in [0, 1]
+        assert code == 0, stdout + stderr
+        assert "passed" in stdout.lower()
+        progress = json.loads((PROJECT_ROOT / ".tito" / "progress.json").read_text())
+        assert "01" in progress["completed_modules"]
+
+    @pytest.mark.module_flow
+    def test_failed_notebook_cannot_complete_module(self):
+        """A real notebook assertion failure must leave the module incomplete."""
+        notebook = next((PROJECT_ROOT / "modules" / "01_tensor").glob("*.ipynb"))
+        document = json.loads(notebook.read_text())
+        graded_cell = next(cell for cell in document["cells"]
+                           if cell.get("metadata", {}).get("nbgrader", {}).get("grade"))
+        graded_cell["source"] = ["".join(graded_cell["source"]), "\nraise AssertionError('deliberate journey failure')\n"]
+        notebook.write_text(json.dumps(document))
+
+        code, stdout, stderr = run_tito(["module", "complete", "01"], timeout=120)
+        assert code != 0, stdout + stderr
+        assert "deliberate journey failure" in stdout + stderr
+        progress_file = PROJECT_ROOT / ".tito" / "progress.json"
+        if progress_file.exists():
+            assert "01" not in json.loads(progress_file.read_text()).get("completed_modules", [])
 
     @pytest.mark.module_flow
     def test_progress_tracking_persists(self):
@@ -235,7 +222,9 @@ class TestModuleFlow:
         # Check progress file still exists and has data
         assert progress_file.exists()
         data = json.loads(progress_file.read_text(encoding='utf-8'))
-        assert "started_modules" in data
+        assert data["started_modules"] == ["01"]
+        assert data["completed_modules"] == []
+        assert data["last_worked"] == "01"
 
     @pytest.mark.module_flow
     def test_module_test_command_works(self):
@@ -244,10 +233,8 @@ class TestModuleFlow:
             ["module", "test", "01"],
             timeout=120
         )
-        # Should run tests (may pass or fail)
-        combined = stdout + stderr
-        # Test command should produce some output
-        assert len(combined) > 0
+        assert code == 0, stdout + stderr
+        assert "passed" in stdout.lower()
 
 
 class TestMilestoneFlow:
@@ -295,11 +282,12 @@ class TestMilestoneFlow:
         }))
 
         # Try to run milestone 03 (requires many modules)
-        code, stdout, stderr = run_tito(["milestone", "run", "03", "--skip-checks"], timeout=30)
+        code, stdout, stderr = run_tito(["milestone", "run", "03"], timeout=30)
 
-        # With --skip-checks it might try to run; without it should check prereqs
-        # Either way, the command should not crash
-        assert code in [0, 1, 130]  # 130 = user interrupt
+        assert code == 1, stdout + stderr
+        assert "Prerequisites Not Met" in stdout
+        assert "Missing Required Modules" in stdout
+        assert json.loads(progress_file.read_text()) == {"completed_modules": []}
 
 
 class TestFullJourney:
@@ -315,18 +303,19 @@ class TestFullJourney:
         3. Verify progress updated
         4. Verify export worked
         """
-        # Step 1: Check initial state
-        code, stdout, stderr = run_tito(["module", "status"])
-        assert code == 0
+        # Start without opening a browser, then certify the reference notebook.
+        code, stdout, stderr = run_tito(["module", "start", "01", "--no-jupyter"])
+        assert code == 0, stdout + stderr
 
         # Step 2: Test the module
         code, stdout, stderr = run_tito(
-            ["module", "test", "01"],
+            ["module", "complete", "01"],
             timeout=180
         )
-        # Tests should run (may pass or fail based on implementation)
-        combined = stdout + stderr
-        assert "test" in combined.lower() or "Test" in combined
+        assert code == 0, stdout + stderr
+        assert "passed" in stdout.lower()
+        progress = json.loads((PROJECT_ROOT / ".tito" / "progress.json").read_text())
+        assert "01" in progress["completed_modules"]
 
         # Step 3: Verify tinytorch imports work
         result = subprocess.run(
@@ -371,9 +360,8 @@ print('OK')
 
         code, stdout, stderr = run_python_script(script_path, timeout=120)
 
-        # Should complete successfully or with informative error
-        combined = stdout + stderr
-        assert code == 0 or "Error" in combined, f"Milestone failed unexpectedly: {combined}"
+        assert code == 0, f"Milestone failed: {stdout + stderr}"
+        assert "Model Parameters" in stdout or "Decision Line" in stdout
 
 
 class TestErrorHandling:

@@ -1,0 +1,114 @@
+---
+title: "Module 11: Embeddings"
+module: 11_embeddings
+notebook: embeddings
+---
+
+Embeddings are the largest single tensor in most language models (GPT-3's 2.3 GB) but every forward pass only touches a handful of rows. That makes them a row-sparse scatter/gather problem, not a matmul, and it puts them squarely in the memory-bandwidth regime of the roofline. This module builds the lookup table, the positional encodings, and the sparse-gradient backward pass that every transformer input layer depends on.
+
+:::{.callout-note title="Module Info"}
+
+**ARCHITECTURE TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-08, 10
+
+**Prerequisites: Modules 01-08 and 10** means you should understand:
+
+- Tensor operations (shape manipulation, matrix operations, broadcasting)
+- Training fundamentals (forward/backward, optimization)
+- Tokenization (converting text to token IDs, vocabularies)
+
+If you can explain how a tokenizer converts "hello" to token IDs and how to multiply matrices, you're ready.
+:::
+
+{{< module-header >}}
+
+## Overview
+
+Neural networks operate on vectors. Language is made of tokens. Embeddings are how the two meet: a learnable lookup table that turns each integer token ID into a dense vector, so the rest of the network can do calculus on it.
+
+Your tokenizer from Module 10 produces IDs like `[42, 7, 15]`. By the end of this module you have built the layer that turns those IDs into geometry — the same layer sitting at the input of every transformer from BERT to GPT-4 — and the positional encodings that tell the network *where* in the sequence each token lives.
+
+## Commands
+
+{{< module-workflow >}}
+
+## Learning objectives
+
+:::{.callout-tip title="By completing this module, you will:"}
+
+- **Implement** the embedding forward lookup that converts token IDs to dense vectors, and the backward pass that scatters gradients back into the table
+- **Master** positional encoding strategies including learned and sinusoidal approaches
+- **Understand** memory scaling for embedding tables and the trade-offs between vocabulary size and embedding dimension
+- **Connect** your implementation to production transformer architectures used in GPT and BERT
+:::
+
+## What you'll build
+
+::: {#fig-11_embeddings-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**Token lookup and position addition.** Token IDs 2, 0, 2 gather rows W2, W0, W2. Position vectors broadcast over the batch and are added to token vectors; repeated IDs accumulate gradients into the same table row. Positions may be learned or sinusoidal, within the configured position-table length, and optional token scaling precedes the addition." fig-alt="Token IDs 2, 0, 2 gather rows W2, W0, W2. Position vectors broadcast over the batch and are added to token vectors; repeated IDs accumulate gradients into the same table row."}
+
+![](../assets/images/diagrams/11_embeddings-diag-1.svg)
+
+:::
+
+**The pattern you'll enable:**
+```python
+# Converting tokens to position-aware dense vectors
+embed_layer = EmbeddingLayer(vocab_size=50000, embed_dim=512)
+tokens = Tensor([[1, 42, 7]])  # Token IDs from tokenizer
+embeddings = embed_layer(tokens)  # (1, 3, 512) dense vectors ready for attention
+```
+
+### What you're not building yet
+
+To keep this module focused, you will **not** implement:
+
+- Attention mechanisms (that's Module 12: Attention)
+- Full transformer architectures (that's Module 13: Transformers)
+- Word2Vec or GloVe pretrained embeddings (you're building learnable embeddings)
+- Subword embedding composition (PyTorch handles this at the tokenization level)
+
+**You are building the foundation for sequence models.** Context-aware representations come next.
+
+## What you write
+
+{{< what-you-write >}}
+
+## How you know it works
+
+{{< module-checks >}}
+
+## When it fails
+
+{{< stub-failure >}}
+
+`Row 0 is used twice so its gradient should be [2, 2], got [1. 1.]`
+:   From `test_unit_embedding_backward`. `grad_weight[indices] += grad` counts a repeated ID once. Use `np.add.at(grad_weight, indices, grad)`, which accumulates every occurrence.
+
+`Even dims at pos 0 should be sin(0)=0`
+:   From `test_unit_sinusoidal_table`. Sine and cosine are swapped. Even columns take `np.sin`, odd columns `np.cos`.
+
+`Lower dims should oscillate faster`
+:   From `test_unit_sinusoidal_table`. The frequency exponent has the wrong sign. The frequency term is `exp(-log(10000) * 2i / d)`, which shrinks as the dimension index grows.
+
+## Finished? Read why
+
+{{< book-chapter >}}
+
+## What's next
+
+You now have static geometry: every token ID maps to a fixed vector in space, with positional information layered on top. But the embedding for "bank" is the same whether the next word is "river" or "loan" — the representation has no context. That is the question Module 12 answers.
+
+:::{.callout-note title="Up next: Module 12, Attention"}
+
+You'll build scaled dot-product attention: the mechanism that lets every embedding look at every other embedding in the sequence and re-weight itself accordingly. Your static `(B, S, D)` embedding tensor becomes a *context-aware* `(B, S, D)` tensor where each position has been shaped by the rest of the sentence.
+:::
+
+**Next:** [Module 12: Attention](12_attention.qmd)
+
+### How later modules use this one
+
+| Module | What It Does | Your Embeddings In Action |
+|--------|--------------|--------------------------|
+| **12: Attention** | Context-aware representations | `attention(embed_layer(tokens))` produces query, key, value |
+| **13: Transformers** | Full sequence-to-sequence stack | `transformer(embed_layer(src), embed_layer(tgt))` |
+
+: **How embeddings feed into attention and transformer modules.** {#tbl-11-embeddings-downstream-usage}

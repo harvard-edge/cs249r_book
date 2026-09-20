@@ -24,7 +24,9 @@ from tinytorch.core.tensor import Tensor
 from tinytorch.perf.acceleration import (
     vectorized_matmul,
     fused_gelu,
-    tiled_matmul
+    tiled_matmul,
+    im2col,
+    im2col_conv2d,
 )
 
 
@@ -36,6 +38,8 @@ class TestAccelerationBasics:
         assert vectorized_matmul is not None
         assert fused_gelu is not None
         assert tiled_matmul is not None
+        assert im2col is not None
+        assert im2col_conv2d is not None
 
     def test_vectorized_matmul_correctness(self):
         """
@@ -104,6 +108,28 @@ class TestAccelerationBasics:
         )
 
 
+    def test_im2col_conv2d_matches_conv2d(self):
+        """
+        WHAT: Verify the im2col convolution computes Module 09's Conv2d.
+
+        WHY: im2col only changes how the multiply-adds are scheduled. If it
+        changes the output, it is a different layer, not a faster one.
+        """
+        from tinytorch.core.spatial import Conv2d
+
+        x = Tensor(rng.standard_normal((2, 3, 10, 10)).astype(np.float32))
+        conv = Conv2d(3, 6, kernel_size=3, padding=1)
+        conv.bias.data[:] = rng.standard_normal(6)
+
+        fast = im2col_conv2d(x, conv.weight, conv.bias, padding=1)
+        reference = conv(x)
+
+        assert fast.shape == reference.shape, f"Wrong shape: {fast.shape}"
+        assert np.allclose(fast.data, reference.data, atol=1e-5), (
+            "im2col convolution gives different results!"
+        )
+
+
 class TestMemoryOptimization:
     """Test memory-related optimizations."""
 
@@ -119,6 +145,18 @@ class TestMemoryOptimization:
         assert contiguous.data.flags['C_CONTIGUOUS'], (
             "Fresh tensor should be contiguous"
         )
+
+    def test_im2col_memory_is_k_squared_times_input(self):
+        """
+        WHAT: Verify the patch matrix size for a stride-1, same-padded 3×3 kernel.
+
+        WHY: im2col's cost is memory. With same padding every output position
+        has a full 3×3 patch, so the patch matrix holds exactly 9× the input.
+        """
+        x = Tensor(rng.standard_normal((2, 4, 12, 12)).astype(np.float32))
+        cols = im2col(x, kernel_size=3, stride=1, padding=1)
+        assert cols.shape == (2 * 12 * 12, 4 * 3 * 3), f"Wrong patch matrix shape: {cols.shape}"
+        assert cols.data.size == 9 * x.data.size, "Patch matrix should hold k*k times the input"
 
 
 if __name__ == "__main__":
