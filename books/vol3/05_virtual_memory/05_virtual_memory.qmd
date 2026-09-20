@@ -325,7 +325,7 @@ The runtime maintains a per-sequence block table $T: l \mapsto p$, which maps th
 ![**PagedAttention Block Table Mapping**: PagedAttention virtual block table mapping and copy-on-write branching, illustrating the translation from logical sequence blocks to non-contiguous physical HBM blocks.](images/svg/vol3-pagedattention-mapping.svg){#fig-vol3-pagedattention-mapping width=\"95%\"}
 :::
 
-Executing scaled dot-product attention over non-contiguous physical blocks requires specialized GPU decode kernels. In standard attention kernels such as FlashAttention, thread warps compute inner products by striding linearly through contiguous memory addresses. In PagedAttention, the decode kernel accepts the sequence's block table as an auxiliary input parameter. During the key-value gathering phase, thread warps load the physical block pointers from the block table into on-chip shared memory or registers. The warps iterate over the logical blocks $0 \le l \le \lfloor (S-1)/B \rfloor$, fetch the corresponding physical blocks from non-contiguous HBM locations, and compute the attention weights against the current query vector $q_t$.
+Executing scaled dot-product attention over non-contiguous physical blocks requires specialized GPU decode kernels. In standard attention kernels such as FlashAttention, thread warps compute inner products by striding linearly through contiguous memory addresses. In PagedAttention, the decode kernel accepts the sequence's block table as an auxiliary input parameter. During the key-value gathering phase, thread warps load the physical block pointers from the block table into on-chip shared memory or registers. The warps iterate over the logical blocks $0 \le l \le \lfloor (S-1)/B \rfloor$, fetch the corresponding physical blocks from non-contiguous HBM locations, and compute the attention weights against the current query vector $q_t$. @tbl-vol3-pagedattention-hierarchy formalizes the mapping from logical sequence dimensions to physical memory and control hardware structures.
 
 | Component              | Logical Dimension                       | Physical Representation                                                                 | Hardware Location             |
 |:-----------------------|:----------------------------------------|:----------------------------------------------------------------------------------------|:------------------------------|
@@ -334,6 +334,8 @@ Executing scaled dot-product attention over non-contiguous physical blocks requi
 | **Address Map**        | Array index $l$                         | Block Table array $T[l] = p$                                                            | Host Control Plane & GPU SRAM |
 | **Intra-Block Offset** | Offset $o = t \pmod B$                  | Byte offset $o \cdot 2 \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot b_{\text{elem}}$ | Coalesced GPU Cache Line      |
 | **Free Memory**        | Unallocated capacity                    | Free-list stack / FIFO of block IDs                                                     | Host Runtime Memory Manager   |
+
+: **PagedAttention Virtual Memory Abstraction Hierarchy**: Mapping of logical sequence dimensions to physical accelerator memory and control structures. {#tbl-vol3-pagedattention-hierarchy}
 
 By structuring memory access through block tables, the physical memory allocator never needs to find contiguous physical space larger than $M_{\text{block}}$. Because all blocks in the global pool are identical in size, any free physical block can satisfy an allocation request for any active sequence, completely eliminating external memory fragmentation.
 
@@ -437,8 +439,6 @@ The physical divergence of memory occurs lazily during token generation via Copy
 When an agentic planning branch is pruned—for example, if a compiler verification tool returns an unrecoverable syntax error on a candidate code snippet—the runtime destroys the sequence. The memory manager traverses the pruned sequence's block table, decrementing the reference count of each mapped physical block. Any block whose reference count drops to zero is immediately returned to the free-list ring buffer. If sibling branches are still actively exploring alternative hypotheses from that prefix, the shared prefix blocks remain valid in HBM, their reference counts simply reflecting the reduced sharing degree.
 
 By mapping logical token sequences to non-contiguous, reference-counted physical blocks, PagedAttention provides the foundational virtualization layer required to serve dynamic, branching agent workloads. Yet this mechanism operates entirely within the boundaries of an active, running request or an explicit parent-child fork. What happens when an entirely new user request arrives at the serving cluster containing a long, identical system prompt, or when two unrelated agent instances happen to share an identical tool definition preface? To avoid recomputing identical key-value projections across independent requests that share no explicit lineage, the serving system must extend beyond intra-request page tables to global prefix indexing.
-
-***
 
 ## Prefix Caching {#sec-vol3-kvcache-radix-tree}
 
@@ -660,6 +660,12 @@ $$\mathbf{O}_k = \text{Softmax}\left( \frac{\mathbf{Q}_k \mathbf{K}_{\le k}^\top
 
 The attention mask $\mathbf{M}_k$ enforces causality. For the historical tokens ($j < (k-1) C_{\text{chunk}}$), the mask allows full bidirectional attention, since all historical tokens precede every token in chunk $k$. For the active tokens within chunk $k$, the mask applies standard causal masking, preventing token $t \in I_k$ from attending to tokens $t' > t$.
 
+In modern GPU kernel architectures (such as FlashDecoding and FlashAttention-3), this operation avoids materializing the intermediate attention matrix in global accelerator memory. The kernel streams the historical KV blocks from HBM directly into SRAM tiles, maintaining running online softmax statistics—the running row maximum $m_i$ and normalizer $l_i$—across blocks:
+
+$$m_{\text{new}} = \max(m_{\text{prev}}, m_{\text{block}}), \quad l_{\text{new}} = l_{\text{prev}} e^{m_{\text{prev}} - m_{\text{new}}} + l_{\text{block}} e^{m_{\text{block}} - m_{\text{new}}}$$
+
+The partial attention accumulator is rescaled on the fly via $\mathbf{O}_{\text{new}} = \mathbf{O}_{\text{prev}} e^{m_{\text{prev}} - m_{\text{new}}} + \mathbf{O}_{\text{block}} e^{m_{\text{block}} - m_{\text{new}}}$, completely eliminating memory-bandwidth traffic for intermediate attention logits.
+
 Once $\mathbf{O}_k$ is computed, the engine writes $\mathbf{K}_k$ and $\mathbf{V}_k$ into newly allocated paged blocks in the global KV cache. Crucially, intermediate hidden activations for chunk $k$ are discarded at the end of the iteration, exactly as in a standard forward pass. The model does not emit an output token until chunk $K$ (the final chunk of the prompt) completes execution, at which point the logit distribution for position $S_{\text{prompt}} - 1$ is sampled to produce the first generated token.
 
 Chunking trades a small amount of redundant computation for bounded iteration latency. The attention mechanism computes queries of length $C_{\text{chunk}}$ against keys that grow longer with each chunk ($C_{\text{chunk}}, 2C_{\text{chunk}}, \dots, K C_{\text{chunk}}$). However, because key and value projections for historical tokens are retrieved from memory rather than recomputed from weights, the overall number of parameter matrix multiplications remains unchanged.
@@ -678,13 +684,15 @@ In every scheduling cycle, the engine examines the queue of pending prefill chun
 
 $$\sum_{i \in \mathcal{P}_{\text{admitted}}} M_{\text{chunk}, i} + \sum_{j \in \mathcal{D}_{\text{admitted}}} 1 \le C_{\text{budget}}$$
 
-where $\mathcal{P}_{\text{admitted}}$ is the set of admitted prefill chunks, $M_{\text{chunk}, i} \le C_{\text{chunk}}$ is the token count of prefill chunk $i$, and $\mathcal{D}_{\text{admitted}}$ is the set of admitted decode sequences.
+where $\mathcal{P}_{\text{admitted}}$ is the set of admitted prefill chunks, $M_{\text{chunk}, i} \le C_{\text{chunk}}$ is the token count of prefill chunk $i$, and $\mathcal{D}_{\text{admitted}}$ is the set of admitted decode sequences. @tbl-vol3-scheduling-policies compares the operational trade-offs across these scheduling regimes.
 
 | Scheduling Policy         | Iteration Composition                                     | Hardware Bound                                          | Decode Latency Impact                             | TTFT Impact                               |
 |:--------------------------|:----------------------------------------------------------|:--------------------------------------------------------|:--------------------------------------------------|:------------------------------------------|
 | **Monolithic Prefill**    | $S_{\text{prompt}}$ tokens exclusively                    | Compute-bound ($\mathcal{I} \gg \mathcal{I}^*$)         | High ITL spikes ($500\text{--}1{,}500\text{ ms}$) | Minimal TTFT (single pass)                |
 | **Unbatched Decode**      | $B_{\text{decode}}$ tokens exclusively                    | Memory-bound ($\mathcal{I} \ll \mathcal{I}^*$)          | Low ITL, but compute units sit idle               | N/A (no prefills admitted)                |
 | **Chunked Co-Scheduling** | $C_{\text{chunk}}$ prefill $+$ $B_{\text{decode}}$ tokens | Roofline-balanced ($\mathcal{I} \approx \mathcal{I}^*$) | Predictable ITL ($30\text{--}60\text{ ms}$ tail)  | Marginal TTFT increase ($5\text{--}15\%$) |
+
+: **Inference Scheduling Policies**: Operational comparison of monolithic prefill, unbatched decode, and chunked co-scheduling trade-offs. {#tbl-vol3-scheduling-policies}
 
 The token-budget abstraction balances two critical Service Level Agreements (SLAs): Time to First Token (TTFT) and Inter-Token Latency (ITL).
 
@@ -806,8 +814,13 @@ $$\frac{T_{\text{reload}}}{T_{\text{recomp}}} = \frac{S \cdot m_{\text{token}} /
 
 If this ratio is less than one, streaming the attention state across the peripheral bus is strictly faster than recomputing it on the tensor cores, defining the break-even wait time regimes delineated in @fig-vol3-swapping-tradeoff.
 
+The magnitude of this advantage depends decisively on the physical interconnect architecture:
+
+- **PCIe Gen5 x16 Interconnect:** Standard discrete accelerator nodes provide $B_{\text{pcie}} \approx 64\text{ GB/s}$ theoretical ($52\text{--}54\text{ GB/s}$ sustained effective DMA throughput after protocol framing).
+- **Coherent Chip-to-Chip Interconnects (NVLink-C2C):** Modern tightly coupled heterogeneous platforms (such as NVIDIA GH200 Grace Hopper and GB200 Grace Blackwell) replace peripheral PCIe slots with coherent chip-to-chip links delivering $B_{\text{c2c}} \approx 900\text{ GB/s}$—over $16\times$ higher sustained bandwidth. Under NVLink-C2C, streaming physical KV blocks between CPU DRAM and GPU HBM completes in milliseconds, collapsing the minimum viable offloading threshold $T_{\text{wait}}^*$ from hundreds of milliseconds down to the sub-20-millisecond realm.
+
 ::: {.column-margin}
-The crossover between swapping and recomputing depends on the balance between arithmetic density and interconnect bandwidth. When $\frac{m_{\text{token}}}{2P} < \frac{B_{\text{pcie}}}{R_{\text{prefill}}}$, transferring attention projections over PCIe is faster than generating them via matrix multiplication.
+The crossover between swapping and recomputing depends on the balance between arithmetic density and interconnect bandwidth. When $\frac{m_{\text{token}}}{2P} < \frac{B_{\text{pcie}}}{R_{\text{prefill}}}$, transferring attention projections over PCIe is faster than generating them via matrix multiplication. On NVLink-C2C, this threshold drops by 16×.
 :::
 
 ![**Break-Even Wait Time Regimes**: Break-even wait time regimes comparing resident retention, PCIe swapping, and recomputation across sequence length and tool pause duration.](images/svg/fig-vol3-swapping-tradeoff.svg){#fig-vol3-swapping-tradeoff width=\"95%\"}
@@ -860,7 +873,7 @@ Implementing physical block swapping in an inference runtime requires deep integ
 When an agent trajectory transitions from active generation to an external tool wait, the serving supervisor initiates block migration:
 
 1. **Eviction Scheduling and Pinning:** The scheduler selects candidate trajectories whose predicted wait times satisfy $T_{\text{wait}} > T_{\text{wait}}^*$. The engine allocates a contiguous set of physical block frames within a pre-allocated, page-locked (pinned) host DRAM buffer pool. Pinning host memory via POSIX `mlock` or CUDA host registration (`cudaHostAlloc`) is mandatory; standard operating system pageable memory would induce host OS page faults during direct memory access, collapsing PCIe transfer bandwidth.
-2. **Asynchronous DMA Despatch:** The runtime issues non-blocking copy calls (`cudaMemcpyAsync`) targeting a dedicated bidirectional CUDA copy stream. Because modern accelerator architectures provide independent copy engines that run concurrently with the primary tensor computation engines, this transfer proceeds in the background without stealing cycles from active decode batches running on adjacent streams.
+2. **Asynchronous DMA Dispatch:** The runtime issues non-blocking copy calls (`cudaMemcpyAsync`) targeting a dedicated bidirectional CUDA copy stream. Because modern accelerator architectures provide independent copy engines that run concurrently with the primary tensor computation engines, this transfer proceeds in the background without stealing cycles from active decode batches running on adjacent streams.
 3. **Block Table Remapping:** Once the DMA transfer completes, an asynchronous host callback updates the trajectory's block table entries, switching their location tag from `TIER_GPU` to `TIER_HOST` and recording the host frame indices. The vacated GPU physical frame numbers are pushed immediately to the allocator's free-block FIFO queue, making them available for immediate reservation by concurrent requests.
 
 ```python
