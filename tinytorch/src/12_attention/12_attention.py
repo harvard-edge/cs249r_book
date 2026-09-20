@@ -74,30 +74,14 @@ r"""
 
 ### Attention Information Routing Pipeline
 
-```
-Position-Aware Embeddings: X ∈ ℝ^{B × S × D}
-       │
-       ├───────────────────┬───────────────────┐
-       ▼                   ▼                   ▼
-Queries: Q = X W_Q   Keys: K = X W_K   Values: V = X W_V
-       │                   │                   │
-       └─────────┬─────────┘                   │
-                 ▼                             │
-Raw Scores: S = (Q @ K^T) / √d_k               │
-                 │                             │
-                 ▼                             │
-Causal Mask: S_masked = S + M                  │
-                 │                             │
-                 ▼                             │
-Attention Weights: A = softmax(S_masked)       │
-                 │                             │
-                 └──────────────┬──────────────┘
-                                ▼
-               Attended Mixture: Y = A @ V
-                                │
-                                ▼
-               Output Projection: Output = Y W_O
-```
+| Step | Operation | Mathematical Formula | Tensor Shape & Semantics |
+| :--- | :--- | :--- | :--- |
+| **1. Linear Projections**| Query, Key, Value mappings | $\mathbf{Q} = \mathbf{X}\mathbf{W}_Q, \; \mathbf{K} = \mathbf{X}\mathbf{W}_K, \; \mathbf{V} = \mathbf{X}\mathbf{W}_V$ | $(B, S, D) \rightarrow (B, H, S, d_k)$ |
+| **2. Scaled Dot-Product**| Raw attention scores | $\mathbf{S} = \frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}}$ | $(B, H, S, S)$ query-key correlation |
+| **3. Causal Masking** | Autoregressive masking | $\mathbf{S}_{\text{masked}} = \mathbf{S} + \mathbf{M}$ (upper triangle $= -\infty$) | Prevents attending to future tokens |
+| **4. Probability Weights**| Softmax normalizer | $\mathbf{A} = \text{softmax}(\mathbf{S}_{\text{masked}}, \text{dim}=-1)$ | Non-negative attention distribution |
+| **5. Value Mixture** | Context aggregation | $\mathbf{Y} = \mathbf{A}\mathbf{V}$ | Weighted sum of value vectors |
+| **6. Output Projection** | Feature projection | $\text{Output} = \mathbf{Y}\mathbf{W}_O$ | Restores model dimension $(B, S, D)$ |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
@@ -1098,7 +1082,7 @@ def run_attention_scenarios():
     print("\n✅ All attention scenarios work correctly!")
 
 # %% [markdown]
-"""
+r"""
 ## 📊 Systems Analysis: Memory Layout and Performance
 
 Let's understand ONE key systems concept: **attention's O(n^2) memory and compute scaling**.
@@ -1107,31 +1091,19 @@ This single analysis reveals why attention becomes the bottleneck in modern tran
 
 ### Memory Complexity Visualization
 
-```
-Attention Memory Scaling (per layer):
+### Attention Memory Footprint Scaling (per Layer)
 
-Sequence Length = 128:
-┌────────────────────────────────┐
-│ Attention Matrix: 128x128      │ = 16K values
-│ Memory: 64 KB (float32)        │
-└────────────────────────────────┘
+| Sequence Length ($T$) | Attention Matrix ($T \times T$) | Element Count | Memory (FP32, 1 Head) | Relative Scaling |
+| :--- | :--- | :--- | :--- | :--- |
+| **$T = 128$** | $128 \times 128$ | $16\text{K}$ values | $64\text{ KB}$ | $1.0\times$ (Reference) |
+| **$T = 512$** | $512 \times 512$ | $262\text{K}$ values | $1.0\text{ MB}$ | $16\times$ larger ($4^2$) |
+| **$T = 2048$ (GPT-3)** | $2048 \times 2048$ | $4.2\text{M}$ values | $16.0\text{ MB}$ | $256\times$ larger ($16^2$) |
 
-Sequence Length = 512:
-┌────────────────────────────────┐
-│ Attention Matrix: 512x512      │ = 262K values
-│ Memory: 1 MB (float32)         │ <- 16x larger!
-└────────────────────────────────┘
+For full-scale models like GPT-3 ($L = 96$ layers, $H = 96$ heads):
 
-Sequence Length = 2048 (GPT-3):
-┌────────────────────────────────┐
-│ Attention Matrix: 2048x2048    │ = 4.2M values
-│ Memory: 16 MB (float32)        │ <- 256x larger than 128!
-└────────────────────────────────┘
+$$\text{Total Attention Memory} = L \times H \times (T^2 \times 4\text{ bytes}) = 96 \times 96 \times 16\text{ MB} \approx \mathbf{144\text{ GB}}$$
 
-That is one head. For GPT-3 (96 layers x 96 heads):
-Total Attention Memory = 96 x 96 x 16 MB ≈ 144 GB
-Just for attention matrices, for a single sequence!
-```
+Just for raw intermediate attention score matrices for a single sequence!
 """
 
 # %%

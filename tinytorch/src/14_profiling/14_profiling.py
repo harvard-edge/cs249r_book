@@ -1057,12 +1057,14 @@ Every helper above answers one narrow question: how many parameters, how many
 FLOPs, how much memory, how long. The Profiler is the object that runs them
 against a real model and returns one report.
 
-```
-count parameters  ─┐
-count FLOPs       ─┼─> Profiler.profile_forward_pass(model, input) ─> a report dict
-measure memory    ─┤
-measure latency   ─┘
-```
+| Profiler Probe | Analytical Domain | Measurement Mechanism |
+| :--- | :--- | :--- |
+| **`count_parameters()`** | Static Model Topology | Iterates tensor weights and biases to sum total element count |
+| **`count_flops()`** | Computational Work | Arithmetic operations ($2 \times M \times K \times N$ for GEMMs) |
+| **`estimate_memory()`** | Memory Footprint | Parameter bytes, activation tensors, gradients, and optimizer buffers |
+| **`measure_latency()`** | Temporal Wall-Clock | Monotonic interval timer across warm and active forward executions |
+
+These four diagnostic probes are orchestrated by `Profiler.profile_forward_pass(model, input)` into a unified report dictionary.
 
 Read the class through one concrete call: `profile_forward_pass(model,
 input_tensor)`. It uses the supplied input for warmup runs and timed forward

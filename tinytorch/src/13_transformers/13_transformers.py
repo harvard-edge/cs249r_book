@@ -1215,24 +1215,21 @@ if __name__ == "__main__":
     test_unit_gpt()
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Token Sampling
 
 This test validates the `_sample_next_token` helper that handles temperature-controlled
 token sampling, separated from the generation loop for clarity.
 
-```
-Token Sampling Pipeline:
-Raw logits: [1.0, 2.0, 3.0]
-       |
-  temperature scaling (divide by T)
-       |
-  softmax (numerical stability via max subtraction)
-       |
-  probability distribution: [0.09, 0.24, 0.67]
-       |
-  rng.choice -> sampled token index
-```
+### Token Sampling Pipeline
+
+| Execution Stage | Transformation Operation | Mathematical Formula | Numerical Example |
+| :--- | :--- | :--- | :--- |
+| **1. Unnormalized Logits** | Raw output projection | $\mathbf{z}$ | `[1.0, 2.0, 3.0]` |
+| **2. Temperature Scaling** | Dynamic variance scaling | $\tilde{\mathbf{z}} = \mathbf{z} / T$ | Modulates entropy and sharpness |
+| **3. Stable Softmax** | Numerical max subtraction | $p_i = \frac{e^{\tilde{z}_i - \max(\tilde{\mathbf{z}})}}{\sum_j e^{\tilde{z}_j - \max(\tilde{\mathbf{z}})}}$ | `[0.09, 0.24, 0.67]` |
+| **4. Categorical Choice** | Stochastic token sampling | $t \sim \text{Categorical}(\mathbf{p})$ | Sampled token index $\in [0, V-1]$ |
+
 
 **What we're testing**: Temperature scaling, softmax probability output, valid token range
 **Why it matters**: Sampling quality controls generation coherence and creativity

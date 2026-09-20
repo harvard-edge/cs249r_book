@@ -75,21 +75,13 @@ r"""
 
 ### Ingestion & Transformation Pipeline
 
-```
-Upstream String: "machine learning"
-       │
-       ▼  (Module 10: BPETokenizer)
-Token IDs: [1042, 3819]  ∈ ℤ^{B × T}
-       │
-       ▼  (Module 11: Embedding Gather)
-Token Vectors: E_token ∈ ℝ^{B × T × D}
-       │
-       ▼  (Module 11: Positional Addition)
-Position-Aware Vectors: H = E_token + P ∈ ℝ^{B × T × D}
-       │
-       ▼  (Module 12: MultiHeadAttention)
-Contextualized Representations: Z ∈ ℝ^{B × T × D}
-```
+| Pipeline Stage | Subsystem / Operator | Mathematical Mapping | Tensor Space & Dimensions |
+| :--- | :--- | :--- | :--- |
+| **0. Raw Input** | Upstream Text Source | Raw string token stream | `"machine learning"` |
+| **1. Tokenization** | `BPETokenizer` (M10) | Discrete subword vocabulary lookup | $\mathbf{x}_{\text{ids}} = [1042, 3819] \in \mathbb{Z}^{B \times T}$ |
+| **2. Embedding Gather**| `EmbeddingLayer` (M11) | Weight lookup matrix indexing | $\mathbf{E}_{\text{token}} \in \mathbb{R}^{B \times T \times D}$ |
+| **3. Positional Encoding**| Learned / Sinusoidal (M11) | Coordinate position addition | $\mathbf{H} = \mathbf{E}_{\text{token}} + \mathbf{P} \in \mathbb{R}^{B \times T \times D}$ |
+| **4. Attention Mixing**| `MultiHeadAttention` (M12) | Dynamic contextual routing | $\mathbf{Z} \in \mathbb{R}^{B \times T \times D}$ |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
@@ -1242,30 +1234,21 @@ if __name__ == "__main__":
     test_unit_emblayer_init()
 
 # %% [markdown]
-"""
+r"""
 ### EmbeddingLayer Forward Pass
 
 The `forward` method composes the full embedding pipeline: token lookup,
 optional scaling, positional encoding addition, and batch dimension handling.
 
-```
-EmbeddingLayer.forward pipeline:
+### `EmbeddingLayer.forward` Execution Pipeline
 
-  tokens (batch, seq) or (seq,)
-         │
-         ├─ 1D? Add batch dim → (1, seq)
-         │
-         ├─ Token lookup → (batch, seq, embed)
-         │
-         ├─ Scale by √embed_dim? (optional)
-         │
-         ├─ Add positional encoding
-         │    learned:    pos_encoding.forward(token_embeds)
-         │    sinusoidal: token_embeds + sinusoidal_table[:seq_len]
-         │    None:       pass through
-         │
-         └─ Squeeze batch if added → output
-```
+| Execution Step | Operation | Condition / Scope | Shape Transformation |
+| :--- | :--- | :--- | :--- |
+| **1. Rank Alignment** | Add batch dimension | If input is 1D vector `(seq,)` | `(seq,)` $\rightarrow$ `(1, seq)` |
+| **2. Token Lookup** | Direct index gather | Gather embedding weights | `(batch, seq)` $\rightarrow$ `(batch, seq, embed_dim)` |
+| **3. Embedding Scaling**| Multiply by $\sqrt{d_{\text{embed}}}$ | Optional (`scale_embeddings=True`) | Normalized variance preservation |
+| **4. Positional Encoding**| Add coordinate vectors | Learned (`pos_encoding`) or sinusoidal table | $\mathbf{E}_{\text{pos}} = \mathbf{E}_{\text{tok}} + \mathbf{P}$ |
+| **5. Output Squeeze** | Squeeze batch dimension | If input was originally 1D | `(1, seq, embed_dim)` $\rightarrow$ `(seq, embed_dim)` |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "emblayer-forward", "solution": true}
