@@ -154,7 +154,7 @@ When an autoregressive transformer is fine-tuned on multi-turn software engineer
 
 **In supervised policy adaptation, target construction must follow the learning objective: if the deployment goal is reliable action proposal, backpropagation must be restricted to tokens produced by the agent policy, while treating prompt definitions and environment observations strictly as conditioning context.** An unprivileged neural policy does not execute within an ambient vacuum; it functions as a bounded decision-making component inside an external operating environment. The agent runtime alone executes system calls, runs compilers, and queries databases. The model's responsibility is solely to analyze historical context and emit syntactically valid, goal-directed actions. Consequently, the loss formulation must enforce a strict separation between conditioning inputs and prediction targets. By applying an action-targeted loss mask across the serialized trajectory, the training pipeline ensures that parameter updates are driven exclusively by the decisions the policy is expected to synthesize at inference time.
 
-### Mathematical Formulation and Gradient Dynamics
+### Supervised Gradient Dynamics
 
 To formalize action-targeted masking, we model a serialized agent trajectory as an ordered sequence of $T$ discrete tokens, $X = (x_1, x_2, \dots, x_T)$, drawn from a finite vocabulary $\mathcal{V}$. The sequence represents the full interaction history up to the terminal step of the task, containing multiple interleaved turns between the host environment and the agent. To construct an action-prediction objective, we partition the token index set $\{1, 2, \dots, T\}$ into four mutually disjoint functional subsets based on token provenance:
 
@@ -187,27 +187,21 @@ A common misconception in training systems engineering is that setting $m_t = 0$
 
 This principle of selective gradient backpropagation was established by Timo Schick et al. in *Toolformer* (2023). In that work, language models learned self-supervised tool usage by filtering candidate API invocations through an execution verification filter, computing loss exclusively over the inserted API call tokens and the subsequent task completion tokens. Applying loss over the external environment's response syntax was explicitly avoided, establishing that tool-augmented reasoning requires isolating the model's active decision surface from external state feedback.
 
-### Capacity Allocation: Action Proposal Versus World Simulation
+### Capacity Allocation
 
 Why must masking follow the objective so strictly? The necessity arises from the finite representational capacity of the model's parameter tensors and the fundamental distinction between an action policy and a transition model. In any foundation model parameterized by weights $\theta$, parameter capacity governs how many distinct statistical relationships, syntactic rules, and cross-domain heuristics can be retained without catastrophic interference. When an engineering team applies unmasked fine-tuning to software engineering trajectories, they inadvertently task the network with solving two completely different learning objectives simultaneously:
 
 1. **The Policy Objective ($G_{\text{policy}}$):** Learn the conditional distribution $P(a_t \mid s_t)$ to map context states into syntactically valid, logically coherent tool actions and rationales.
 2. **The World Simulation Objective ($G_{\text{world}}$):** Learn the environment transition distribution $P(s_{t+1} \mid s_t, a_t)$ to predict the exact character streams that compilers, linters, shells, and remote HTTP APIs will return when invoked.
 
-```text
-       UNMASKED LOSS (Full Trajectory Modeling)
-       ┌─────────────────────────────────────────────────────────────┐
-       │ System Prompt │ User Prompt │ Rationale │ Tool Action       │
-       │ (Masked: 0)   │ (Masked: 0) │ (Loss: 1) │ (Loss: 1)         │
-       └─────────────────────────────────────────────────────────────┘
-                                           │
-                                           ▼ (Environment Execution)
-       ┌─────────────────────────────────────────────────────────────┐
-       │ Observation (Compiler Stderr, File Diffs, JSON Returns)     │
-       │ NAIVE SFT: m_t = 1  ==> Forces World Simulation             │
-       │ ACTION SFT: m_t = 0 ==> Treats as Conditioning Context      │
-       └─────────────────────────────────────────────────────────────┘
-```
+: **Loss Masking Schemes Across Trajectory Token Strata**: Token categories, mask assignments, gradient flows, and optimization objectives in supervised agent adaptation. {#tbl-vol3-loss-masking-strata}
+
+| Token Stratum | Constituent Payloads | Loss Mask ($m_t$) | Optimization Target | Systems & Convergence Rationale |
+|:---|:---|:---|:---|:---|
+| **Context Prefix** | System instructions, tool schemas, user goals | $m_t = 0$ (Masked) | Conditioning context only | Invariant across turns; zero gradient wasted on prompt memorization. |
+| **Agent Rationale** | Deliberation scratchpad (`<thought>...</thought>`) | $m_t \in \{0, 1\}$ (Selective) | Working memory & planning | Optional masking trades token verbosity against multi-step reasoning fidelity. |
+| **Tool Action** | Action tag and JSON payload (`<tool_call>...`) | $m_t = 1$ (Unmasked) | Policy dispatch ($G_{\text{policy}}$) | Primary supervisory target; forces strict syntactic and semantic contract compliance. |
+| **Tool Observation** | Compiler stderr, terminal stdout, API JSON | $m_t = 0$ (Masked) | External ground truth | Prevents futile parameter allocation to world simulation ($G_{\text{world}}$). |
 
 In model-based reinforcement learning and autonomous world-modeling systems, training a neural network to approximate $P(s_{t+1} \mid s_t, a_t)$ is intentional; the model is explicitly designed to serve as an internal simulator for rollouts, hypothetical search, or counterfactual reasoning. However, when fine-tuning an agent destined to operate as an unprivileged client within a physical execution sandbox, training the model on $G_{\text{world}}$ introduces a severe structural mismatch. The external operating environment is not a hidden, noisy latent process that requires neural approximation. The Linux kernel, the GNU C compiler, Git, and Python runtimes are deterministic, authoritative, and physically present. They execute tool invocations with zero epistemic uncertainty and zero hallucination risk. Spending parameter capacity to predict whether `gcc` will emit a trailing newline, a specific hex memory address in a segfault dump, or a detailed timestamp in a server log forces the optimizer to expend parameter entropy on details irrelevant to operational success.
 
@@ -221,14 +215,14 @@ The first failure mode is *gradient dilution and noise injection*. Tool outputs 
 
 The second failure mode is *role conflation and runaway simulation*. When an autoregressive model is trained to predict observation tokens, it internalizes the transition distribution $P(x_{\text{obs}} \mid x_{\text{action}})$. At deployment time, after emitting a tool call delimiter such as `<tool_call>`, the model's autoregressive decode loop does not necessarily yield execution by emitting the end-of-turn token. Because it has been trained to assign high likelihood to observation tokens following an action, the model exhibits a nonzero probability of hallucinating the environment's response within its own generation turn. It emits an action, manufactures a plausible-looking compiler error directly into the generation stream, and proceeds to "correct" its own imaginary error, completely bypassing the host supervisor's sandbox and violating the Zero Ambient Authority ($A=0$) invariant. Masking observation tokens out of the loss eliminates this role conflation by ensuring the model is never rewarded for generating environment output.
 
-### Deliberation Versus Syntax: Rationale Masking Trade-Offs
+### Rationale Masking Trade-Offs
 
 While the decision to set $m_t = 0$ for prompts and environment observations is clear, the treatment of the model-generated tokens themselves requires careful systems trade-offs. The model's active turn typically consists of two distinct components: the internal deliberative rationale ($\mathcal{T}_{\text{rationale}}$), commonly wrapped in `<thought>...</thought>` tags, and the external action tokens ($\mathcal{T}_{\text{action}}$), wrapped in tool execution delimiters:
 
-```text
-      <tool_call>                                      <-- Start Action
-      {"name": "bash", "arguments": {"cmd": "stat config.json"}}
-      </tool_call>                                     <-- End Action (EOT)
+```xml
+<tool_call>                                      <!-- Start Action -->
+{"name": "bash", "arguments": {"cmd": "stat config.json"}}
+</tool_call>                                     <!-- End Action (EOT) -->
 ```
 
 Targeting both rationales and actions ($m_t = 1$ on $\mathcal{T}_{\text{rationale}} \cup \mathcal{T}_{\text{action}}$) optimizes the model for *holistic policy execution*. The gradient signal encourages the network to learn both how to deliberate over ambiguous problem states and how to translate those deliberations into formal tool calls. In complex tasks requiring multi-step planning—such as searching a large codebase, forming a hypothesis regarding a concurrency bug, and designing a localized patch—training on thought tokens forces the network to preserve intermediate cognitive state in its working memory representations. However, this strategy carries two concrete systems costs: it increases training compute by expanding $N_{\text{active}}$, and it risks overfitting the policy to the idiosyncratic reasoning prose of the demonstration trajectory authors. If the training dataset contains verbose, repetitive scratchpads, the model internalizes this verbosity, directly increasing token generation latency during inference.
@@ -244,7 +238,7 @@ Conversely, *action-only masking* ($m_t = 1$ strictly on $\mathcal{T}_{\text{act
 
 The comparison in the table highlights the trade-offs across masking configurations. For general-purpose software agents, **Action + Rationale Masking** represents the gold standard: it aligns gradient backpropagation with the dual requirements of agentic computation—deliberative state search followed by syntactically rigid tool execution—while safeguarding the runtime sandbox boundary.
 
-### Boundary Invariants, Delimiters, and Failure Traces
+### Boundary Delimiter Invariants
 
 Implementing an action-targeted loss mask within a production training pipeline introduces subtle edge cases at turn boundaries. Unlike human dialogue, where conversational turns are informal, agent tool execution relies on rigid protocol boundaries enforced by special delimiter tokens. A single indexing offset error in the loss masking array can corrupt the learned operational behavior of the model.
 
@@ -325,7 +319,7 @@ Heterogeneous trajectory lengths in agentic datasets create severe tensor alloca
 
 **Sequence packing reconciles variable-length execution traces with rigid accelerator memory buffers by concatenating multiple independent trajectories into a single continuous sequence, but it introduces two severe failure modes: loss distortion and inter-trajectory attention contamination. Preserving the statistical validity of the adapted policy requires decoupling sequence aggregation from token count via per-example normalization, enforcing strict 2D block-diagonal attention masks to prevent cross-trajectory information leakage, and resetting rotary position embeddings at trajectory boundaries.**
 
-### Loss Normalization Dynamics: Per-Token versus Per-Example Weighting
+### Loss Normalization Dynamics
 
 When training an agent on multi-turn trajectories, the loss aggregation strategy across a mini-batch dictates how the optimizer prioritizes different task complexities. Consider a mini-batch of $B$ independent trajectories $\{\tau^{(1)}, \tau^{(2)}, \dots, \tau^{(B)}\}$, where trajectory $b$ contains $L_b$ total tokens and an action-targeted loss mask $m_t^{(b)} \in \{0, 1\}$. The number of active supervised target tokens in trajectory $b$ is given by $N_b = \sum_{t=1}^{L_b} m_t^{(b)}$. The instantaneous cross-entropy loss for token $t$ in trajectory $b$ is denoted by $\ell_t^{(b)} = -\log P_\theta(x_t^{(b)} \mid x_{<t}^{(b)})$.
 
@@ -356,7 +350,7 @@ Equation (@eq-loss-example) defines per-example normalization. In this formulati
 
 The choice between these two schemes directly alters the policy's behavioral phenotype. When an engineering team employs per-token normalization, the model learns that minimizing loss on long, rambling trajectories yields the largest reduction in global objective. If the demonstration dataset contains failed attempts where the agent wandered through redundant directory listings before arriving at a solution, per-token normalization heavily penalizes any deviation from those lengthy tokens. Conversely, per-example normalization ensures that concise, decisive trajectories carry equal gradient authority, preventing the adapted policy from degrading into an over-verbose conversationalist that burns inference token budgets.
 
-### Sequence Packing Mechanics and Buffer Utilization
+### Sequence Packing Mechanics
 
 
 ::: {.column-margin}
@@ -410,7 +404,7 @@ $$\text{FLOP Reduction Factor} = \frac{3.277 \times 10^8}{5.689 \times 10^7} \ap
 On the H100 cluster, training wall-clock time drops from 14.8 hours to 2.6 hours, saving 97.6 GPU-hours while maintaining identical gradient semantics.
 :::
 
-### Block-Diagonal Attention Isolation and Positional Resetting
+### Block-Diagonal Attention Isolation
 
 While sequence packing delivers dramatic throughput acceleration, naively concatenating independent trajectories into a single sequence creates catastrophic statistical contamination. In a standard causal transformer, self-attention allows token $i$ to attend to all preceding tokens $j \le i$. If trajectories $\tau^{(1)}$ and $\tau^{(2)}$ are concatenated end-to-end within a single buffer, every token in $\tau^{(2)}$ can attend to all tokens in $\tau^{(1)}$.
 
@@ -495,7 +489,7 @@ $$s_{t+1} = \mathcal{T}(s_t, a_t)$$ {#eq-env-transition}
 
 The external environment responds with an unhandled exception, a nonzero exit code, or a compiler traceback. This error observation is serialized and injected into the agent's context window. Because the supervised training corpus contained only pristine, nominal executions, the KV cache now contains token embeddings and attention affinity patterns that never appeared in the training set. The model encounters key-value states outside the training manifold. Lacking gradient updates on how to attend to failure diagnostics, its softmax probability distribution over next tokens disperses, causing the agent to emit repeated failing commands, hallucinate non-existent flags, or oscillate in infinite retry loops.
 
-```text
+```bash
 $ git checkout -b feature/auth && git merge origin/staging
 CONFLICT (content): Merge conflict in src/auth/session.py
 Automatic merge failed; fix conflicts and then commit the result.
@@ -665,7 +659,7 @@ An engineer initiating full-parameter supervised fine-tuning for an agent policy
 
 **Low-rank adaptation circumvents the static memory wall by freezing base model weights and restricting parameter updates to paired low-rank factorization matrices, reducing static gradient and optimizer allocations by over 90 percent. Crucially, parameter-efficient fine-tuning does not reduce the dynamic activation memory required during the forward pass; scaling agent training to long context windows requires co-designing parameter-efficient weight updates with selective activation checkpointing.**
 
-### Static Memory Allocation and the 16-Byte Footprint
+### Static Memory Allocation
 
 To understand why standard training fails on modern agent trajectories, we must construct an exact byte-level accounting of accelerator memory during backpropagation. Total physical memory consumption during supervised fine-tuning divides into static state variables and dynamic execution buffers:
 
@@ -729,23 +723,13 @@ where $a$ denotes the number of attention heads. When sequence lengths expand to
 
 At a sequence length of $T = 64\text{k}$ tokens, dynamic activation memory exceeds $150\text{ GB}$ for a 70B model at micro-batch size $B = 1$, far surpassing the entire static memory of a QLoRA-quantized 70B base model.
 
-```text
-+-----------------------------------------------------------------------------+
-| FULL SFT MEMORY FOOTPRINT (70B Model, T=64k)                                |
-| [ Base Weights (140 GB) ] [ Gradients (140 GB) ] [ Optimizer State (840 GB) ]|
-| [ Dynamic Activation Tensors without Checkpointing (~160 GB)               ]|
-| Total: ~1,280 GB HBM (Requires multi-node distributed sharding)             |
-+-----------------------------------------------------------------------------+
-| QLoRA MEMORY FOOTPRINT WITHOUT CHECKPOINTING (70B Model, T=64k)             |
-| [ NF4 Weights (35 GB) ] [ Adapters + Opt (3 GB) ]                           |
-| [ Dynamic Activation Tensors without Checkpointing (~160 GB)               ]|
-| Total: ~198 GB HBM (Exceeds physical capacity of a single 80 GB GPU)        |
-+-----------------------------------------------------------------------------+
-| QLoRA MEMORY FOOTPRINT WITH SELECTIVE CHECKPOINTING (70B Model, T=64k)      |
-| [ NF4 Weights (35 GB) ] [ Adapters + Opt (3 GB) ] [ Act Checkpoints (18 GB) ]|
-| Total: ~56 GB HBM (Fits within a single 80 GB H100 accelerator)             |
-+-----------------------------------------------------------------------------+
-```
+: **Accelerator Memory Footprint Across 70B SFT Configurations**: Hardware memory distribution across model weights, optimizer states, and dynamic activations ($T=64\text{k}$ tokens, micro-batch size $B=1$). {#tbl-vol3-sft-memory-footprints}
+
+| SFT Adaptation Regime | Base Weights & Gradients | Optimizer State | Dynamic Activations ($T=64\text{k}$) | Total HBM Footprint | Minimum Hardware Requirement |
+|:---|:---|:---|:---|:---|:---|
+| **Full Parameter SFT (16-bit)** | 280 GB (Weights + Grads) | 840 GB (AdamW fp32) | ~160 GB (No Checkpointing) | ~1,280 GB HBM | Multi-node cluster ($16\times 80\text{ GB}$ H100) |
+| **QLoRA (NF4, No Checkpoint)** | 35 GB (NF4 base + LoRA grads) | 3 GB (Paged AdamW) | ~160 GB (No Checkpointing) | ~198 GB HBM | $4\times 80\text{ GB}$ or $2\times 141\text{ GB}$ H200 |
+| **QLoRA (NF4 + Act Checkpoint)** | 35 GB (NF4 base + LoRA grads) | 3 GB (Paged AdamW) | 18 GB (Selective Rematerialization) | ~56 GB HBM | Single $1\times 80\text{ GB}$ H100 GPU |
 
 To prevent out-of-memory crashes on long-horizon trajectories, systems engineers must deploy activation checkpointing (also termed activation rematerialization). Standard activation checkpointing divides the computation graph into discrete segments. During the forward pass, the runtime evaluates all operations but discards the intermediate activations within each segment, saving only the boundary tensors. During the backward pass, the runtime executes an internal forward pass for each segment on the fly, recomputing the intermediate activations immediately before they are consumed by gradient operations.
 
@@ -814,7 +798,7 @@ Adding FlashAttention recomputation buffers ($4.2\text{ GB}$) yields a total act
 Adding $6.0\text{ GB}$ of static CUDA runtime overhead and workspace memory brings total allocation to $51.54\text{ GB}$. QLoRA combined with selective activation checkpointing allows the 32B model to train comfortably on a single 80 GB H100 accelerator with a $28.46\text{ GB}$ safety margin.
 :::
 
-### Multi-Tenant Adapter Dispatch and Runtime Execution
+### Multi-Tenant Adapter Dispatch
 
 The systems utility of low-rank adaptation extends beyond training efficiency into production deployment. An autonomous software engineering agent rarely requires identical procedural discipline across all problem domains. An agent operating in a terminal environment requires specialized behaviors depending on its execution phase:
 
@@ -824,25 +808,12 @@ The systems utility of low-rank adaptation extends beyond training efficiency in
 
 If each capability required deploying an independent 70-billion parameter model instance, hosting three domain-specific agents would consume three discrete GPU clusters, multiplying hardware expenditure and idle capacity.
 
-```text
-                               Shared Base Weights (W_0)
-                            [ 70B Frozen Parameters in HBM ]
-                                         |
-            +----------------------------+----------------------------+
-            |                            |                            |
-      Token Batch 1                Token Batch 2                Token Batch 3
-    [ Bash / Git Task ]         [ SQL Synthesis Task ]       [ Python Repair Task ]
-            |                            |                            |
-            v                            v                            v
-    LoRA Adapter A_git           LoRA Adapter A_sql           LoRA Adapter A_py
-    LoRA Adapter B_git           LoRA Adapter B_sql           LoRA Adapter B_py
-            |                            |                            |
-            +----------------------------+----------------------------+
-                                         |
-                               Fused Dynamic Dispatch
-                                         v
-                         Batched Multi-Tenant Output
-```
+: **Multi-Tenant LoRA Adapter Dispatch Architecture**: Comparison of dedicated full model instances versus fused dynamic adapter routing across diverse agent domains. {#tbl-vol3-adapter-dispatch-arch}
+
+| Dispatch Architecture | Base Weight Representation | Per-Domain Memory Overhead | Concurrency & Scaling | Hardware Serving Efficiency |
+|:---|:---|:---|:---|:---|
+| **Dedicated Full Instances** | Independent 70B parameter replicas ($140\text{ GB}$ per domain). | $140\text{ GB}$ per concurrent capability. | Low; requires distinct GPU clusters per domain. | Poor; $3\times$ hardware cost, severe idle capacity. |
+| **Fused Dynamic LoRA Dispatch** | Single shared frozen 70B base model in GPU HBM ($35 - 140\text{ GB}$). | $10 - 50\text{ MB}$ per specialized adapter ($A_k, B_k$). | High; dynamically routes batches across Bash, SQL, and Python adapters. | Optimal; multiplexes dozens of capabilities on a single server. |
 
 Low-rank adaptation provides an architectural mechanism for *multi-tenant adapter dispatch*. Because the base model weights $W_0$ remain completely identical across all tasks, a host inference engine loads $W_0$ once into accelerator memory. Domain specialization is encapsulated entirely within lightweight adapter tensors ($A_k, B_k$), which consume only tens of megabytes of storage.
 
@@ -941,7 +912,7 @@ $$\mathcal{H}_t = -\sum_{s \in \mathcal{T}_{\text{tools}}} \tilde{\alpha}_{t, s}
 In an unregularized model exhibiting schema memorization, attention collapses onto a single known token sequence, yielding $\mathcal{H}_t \approx 0.08\text{ nats}$. Under distractor injection and synonym perturbation, the attention distribution disperses across candidate tool definitions before concentrating on the bound target, raising the entropy during the schema-matching phase to $\mathcal{H}_t \approx 1.85\text{ nats}$. This quantitative elevation confirms that the generation head is actively routing information from the prompt prefix rather than reading statically from FFN parametric memory.
 :::
 
-### Out-of-Distribution Generalization and Zero-Shot Tool Binding
+### Out-of-Distribution Generalization
 
 The ultimate operational goal of schema regularization is achieving robust out-of-distribution (OOD) tool generalization. An agent policy should not require parameter updates whenever an engineer deploys a new utility function or renames an existing API parameter. Instead, fine-tuning should instill a generalizable execution capability: the model must learn the meta-rule of binding user intents to whatever valid schema is present in its execution escrow, behaving as an in-context interpreter.
 
@@ -961,18 +932,18 @@ $$\text{PRE} = \frac{1}{N} \sum_{i=1}^N \mathbf{1}\left( \exists k \in \text{Key
 
 When an unregularized policy is evaluated against an interface where `file_path` is renamed to `target_uri`, the model fails catastrophically under programmatic JSON schema validation, as captured in empirical regression logs.
 
-```text
+```yaml
 # Host runtime schema validation failure trace (Unregularized SFT Policy)
-ValidationError: Missing required property: 'target_uri'
-Received payload: {"name": "read_file", "arguments": {"file_path": "/etc/hosts"}}
-Schema definition:
+ValidationError: "Missing required property: 'target_uri'"
+Received_payload: {"name": "read_file", "arguments": {"file_path": "/etc/hosts"}}
+Schema_definition:
   read_file:
     type: object
     properties:
       target_uri: {type: string, description: "Resource locator"}
     required: ["target_uri"]
     additionalProperties: false
-Status: FAILED (Parametric Recall Error detected: 'file_path' emitted from prior distribution)
+Status: "FAILED (Parametric Recall Error detected: 'file_path' emitted from prior distribution)"
 ```
 
 By incorporating dynamic schema permutation, identifier perturbation, distractor injection, and schema-dropout, the training pipeline actively discourages reliance on parametric n-gram completions. The resulting policy functions as an unprivileged, context-conditioned dispatcher: it scans the prompt prefix to identify available capabilities, binds runtime variables to declared argument names, and emits structured action payloads that satisfy the external interface contracts enforced by the host sandbox.
@@ -985,7 +956,7 @@ Evaluating a newly trained model checkpoint by tracking its cross-entropy loss o
 
 **Lower validation cross-entropy loss does not establish superior agent performance; system evaluation must measure end-to-end task completion, tool syntax validity, and trajectory latency under identical runtime constraints.** A production agent policy is not a static text generator; it is an unprivileged controller executing within an interactive, stateful environment under Zero Ambient Authority ($A=0$). Evaluating an adapted policy therefore demands treating the checkpoint as a distributed systems component. We must subject candidate weights to closed-loop execution harnesses that audit functional pass rates against deterministic test oracles, compute syntactic parser rejection rates, measure computational resource footprints across extended rollouts, and verify that specialized fine-tuning has not induced catastrophic forgetting across baseline capabilities.
 
-### The Divergence Between Perplexity and Task Success {#sec-vol3-sft-eval-decoupling}
+### Perplexity Divergence Hazards {#sec-vol3-sft-eval-decoupling}
 
 To understand why validation cross-entropy fails as a proxy for agent capability, we must examine the mathematical objective optimized during supervised adaptation. Given an input sequence $x = (x_1, x_2, \dots, x_T)$, the training loss $\mathcal{L}_{\text{CE}}(\theta)$ computes the negative log-likelihood of target tokens conditioned on preceding *ground-truth* tokens:
 
@@ -1100,41 +1071,21 @@ Following the principles of Holistic Evaluation of Language Models (HELM; Liang 
 
 An adapted checkpoint that improves task-specific bug repair by $10\%$ but drops $25\%$ on HumanEval or fails basic arithmetic tests indicates parameter damage. Such a model will struggle when a user task diverges even slightly from the distribution of fine-tuning traces.
 
-### Controlled A/B Evaluation Protocols and Test Fixtures {#sec-vol3-sft-eval-protocol}
+### Controlled Evaluation Protocols {#sec-vol3-sft-eval-protocol}
 
 Measuring these four scorecard dimensions requires an evaluation harness that eliminates confounding environmental variables. Because agent execution is stateful and interactive, benchmarking an agent policy is fundamentally more complex than evaluating an offline classifier. If two candidate checkpoints are evaluated against an active web service or a non-deterministic build system, external network jitter or repository changes will introduce variance that masks true policy differences.
 
 To achieve scientific reproducibility, the benchmarking pipeline must enforce strict isolation through hermetic test fixtures, deterministic mocking, and runtime resource quotas.
 
-```text
-+-------------------------------------------------------------------------+
-|                       Controlled Evaluation Harness                     |
-|                                                                         |
-|  +-----------------------+                 +-------------------------+  |
-|  | Candidate Checkpoint  |                 | Fixed Task Fixture      |  |
-|  | - Pinned Weights      |                 | - Initial State S_0     |  |
-|  | - Greedy Decoding T=0 |                 | - Sealed Test Suite     |  |
-|  +-----------+-----------+                 +------------+------------+  |
-|              |                                          |               |
-|              | Action Payload                           | Provision     |
-|              v                                          v               |
-|  +-------------------------------------------------------------------+  |
-|  |                 Hermetic Container Sandbox                        |  |
-|  |  +---------------------+           +---------------------------+  |  |
-|  |  | Network: Loopback   |           | Filesystem: OverlayFS     |  |  |
-|  |  +---------------------+           +---------------------------+  |  |
-|  |  +-------------------------------------------------------------+  |  |
-|  |  | Pinned Tool Mocks (Deterministic Delays & Return Payloads)  |  |  |
-|  |  +-------------------------------------------------------------+  |  |
-|  |                               |                                   |  |
-|  |                               v                                   |  |
-|  |                      Sealed Test Oracle                           |  |
-|  +-------------------------------+-----------------------------------+  |
-|                                  |                                      |
-|                                  v                                      |
-|                  Deterministic Verification Score                       |
-+-------------------------------------------------------------------------+
-```
+: **Hermetic Evaluation Harness Architectural Components**: Component roles, isolation boundaries, and determinism mechanisms across benchmarking stages. {#tbl-vol3-evaluation-harness-components}
+
+| Harness Component | Subsystem & Boundary | Operational Mechanism | Determinism & Hermeticity Contract |
+|:---|:---|:---|:---|
+| **Candidate Checkpoint** | Model serving runtime | Frozen model weights with greedy sampling ($T=0, \text{top\_p}=1.0$). | Eliminates stochastic generation noise across repeat trials. |
+| **Task Fixture** | Task configuration store | Pinned initial state $\mathbf{S}_0$ and sealed validation test suites. | Strictly isolated from training corpus; zero data contamination. |
+| **Hermetic Container** | Sandbox runtime | Isolated OverlayFS filesystem, loopback-only network namespace. | Prevents host state leakage and external network dependency drifts. |
+| **Pinned Tool Mocks** | Sandbox IPC shim | Injects deterministic execution latencies and canned return payloads. | Insulates evaluation from third-party service latency and outages. |
+| **Sealed Test Oracle** | Privileged supervisor | Executes authoritative unit tests from read-only host mount. | Asserts invariant satisfaction; immune to agent workspace tampering. |
 
 #### Hermetic Environment Isolation {.unnumbered}
 
@@ -1144,7 +1095,7 @@ Every evaluation task must execute inside an ephemeral container or lightweight 
 *   **Network Isolation:** To prevent live dependencies and non-deterministic API responses, the container's external network interfaces are disabled (`--net=none`), leaving only a local loopback interface. If a task requires external web interaction, the harness routes requests through an HTTP record-and-replay proxy that serves pre-recorded, cryptographically pinned responses.
 *   **Deterministic Clock and Entropy:** System clocks inside the sandbox are pinned to a fixed epoch timestamp, and pseudorandom number generators are seeded deterministically to ensure reproducible execution traces.
 
-#### Pinned Mock Backends and Deterministic Sampling {.unnumbered}
+#### Pinned Mock Backends {.unnumbered}
 
 When benchmarking tool invocation dynamics, external tool implementations (such as code formatters, static analyzers, or database engines) must be replaced with pinned mock services or hermetic local binaries. If an agent executes a static analysis tool, the binary version, its configuration flags, and its standard output formatting must be frozen.
 
@@ -1175,7 +1126,7 @@ def run_deterministic_trial(policy, task_fixture, max_turns=30):
     return EvaluationResult(passed=passed, failure_type=None if passed else "ORACLE_FAIL")
 ```
 
-#### Runtime Budget and Context Quotas {.unnumbered}
+#### Runtime Context Quotas {.unnumbered}
 
 Every evaluation trial operates under strict, immutable bounds on compute resources:
 
@@ -1183,7 +1134,7 @@ Every evaluation trial operates under strict, immutable bounds on compute resour
 *   **Turn Quota ($N_{\max}$):** The agent is permitted a maximum number of round-trip interaction turns (typically $15$ to $30$). Exceeding this limit indicates an unproductive loop and results in immediate disqualification for that task.
 *   **Wall-Clock Timeout ($t_{\max}$):** Any single tool execution exceeding a hard ceiling (e.g., $120$ seconds) is aborted with a timeout signal, testing the agent's ability to recover from slow operations.
 
-#### Statistical Confidence and Sample Sizing {.unnumbered}
+#### Statistical Sample Sizing {.unnumbered}
 
 Because agent trajectories exhibit high variance across differing task complexities, reporting raw percentage success rates over small test suites introduces substantial sampling error. For an evaluation suite of $N$ independent tasks where the true underlying policy success rate is $p$, the observed pass rate $\hat{p}$ has a standard error of:
 
@@ -1241,7 +1192,7 @@ def compile_sft_step(batch: PackedBatch, model: nn.Module, optimizer: torch.opti
     return masked_loss.item()
 ```
 
-### The Compilation Efficiency Envelope: FLOPs, Memory, and Packing Utilization
+### Compilation Efficiency Envelopes
 
 Provisioning cluster infrastructure for supervised policy adaptation requires calculating three governing physical metrics: computational arithmetic complexity (FLOPs), accelerator memory allocation across weight and activation buffers, and sequence packing density.
 
@@ -1310,7 +1261,7 @@ $$t_{\text{train}} = \frac{4.236 \times 10^{19} \text{ FLOPs}}{3.323 \times 10^{
 Compiling high-discipline agentic procedural behavior across a 70B parameter model over 100M tokens completes in roughly three and a half hours on a single 8-GPU node.
 :::
 
-### Adapter Lifecycle: Merging, Serving Hot-Swaps, and the External Enforcement Invariant
+### Adapter Serving Lifecycle
 
 Once an adapter checkpoint passes loss convergence criteria, the harness exports the parameter deltas. The serving runtime can consume this compiled artifact through two operational deployment patterns: weight merging or dynamic hot-swapping.
 
