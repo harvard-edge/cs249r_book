@@ -508,15 +508,18 @@ By course end, students should be able to:
 
 ### **Individual Progress**
 ```bash
-# Check specific student progress
-tito module status --student student_id
+# Check one student's grades (requires nbgrader and a gradebook)
+tito nbgrader report --student student_id
 ```
 
 ### **Class Overview**
 ```bash
-# Export all module progress
-tito module status --export class_progress.csv
+# Export class-wide progress as CSV
+tito nbgrader report --format csv
 ```
+
+`tito module status` reports the progress of the checkout it runs in and takes no
+options, so it cannot select a student or export a file.
 
 ### **Identify Struggling Students**
 Look for:
