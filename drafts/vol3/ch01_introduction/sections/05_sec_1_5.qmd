@@ -1,57 +1,296 @@
-<!-- SECTION_START: 1.5 (#sec-vol3-intro-trajectory-engine) -->
 ## The Closed-Loop Trajectory {#sec-vol3-intro-trajectory-engine}
 
-At the heart of every agentic system lies an execution engine that drives the closed-loop control cycle. While early literature popularized this interaction through prompt-level formulations like ReAct [@yao2023react], systems engineering requires viewing the closed loop not as a prompting technique, but as a formal state-transition lifecycle.
+An autonomous agent trajectory is an iterative, stateful control loop executed across a strict boundary between an unprivileged statistical model and a deterministic operating runtime. While an interactive conversational session treats each turn as an independent, ephemeral text exchange, an agentic task requires sequential problem-solving: the runtime must assemble state, solicit candidate proposals from a neural core, enforce safety invariants, dispatch side-effecting operations to external environments, ingest noisy observations, and evaluate verifiable completion criteria.
 
-Autonomous agency is an iterative trajectory of discrete, typed state transitions, governed by six foundational primitives and orchestrated by a deterministic runtime harness.
+Treating this cycle as an ad-hoc script obscures its systems architecture. Under the Saltzer and Kaashoek framework of modularity and layering, the trajectory is a formalized state machine. The foundation model functions as an unprivileged coprocessor proposing operations, while the host runtime acts as the supervisory kernel executing a disciplined execution loop [@yao2023react].
 
-### The Six Systems Primitives
+### The Six Primitives of Autonomous Execution {#sec-vol3-intro-primitives}
 
-To construct an execution engine, we formalize the six core computational primitives that participate in every execution step:
+Every step in an agentic trajectory decomposes into six formal primitives that mediate the flow of information and authority across the hardware-software boundary.
 
-1. **The Goal ($g$):** The immutable, declarative specification of the delegated task. The goal defines the target condition, environment invariants, and acceptance criteria. While intermediate instructions drift across turns, the goal remains constant in the agent's context or system register, anchoring the entire trajectory.
-2. **The Context ($c_t$):** The logical sequence of tokens staged into the model's working memory at turn $t$. The context includes the system contract, active tool schemas, the task goal, and a curated sliding window of past actions and environmental observations:
-   $$c_t = \big( g, \mathcal{S}, (a_{\text{prop}}^{(0)}, a_0, o_1), \dots, (a_{\text{prop}}^{(t-1)}, a_{t-1}, o_t) \big)$$
-   where $\mathcal{S}$ represents the static system definition and tool capability catalog.
-3. **The Model Invocation ($M(c_t) \to a_{\text{prop}}^{(t)}$):** The unprivileged forward evaluation of the stochastic processor core. Given context $c_t$, the model samples next tokens autoregressively from its learned distribution, emitting a candidate action proposal $a_{\text{prop}}^{(t)}$. At this stage, $a_{\text{prop}}^{(t)}$ is merely an in-memory string buffer with zero execution authority.
-4. **The Action Authorization Gate ($\Gamma(a_{\text{prop}}^{(t)}) \to a_{\text{perm}}^{(t)}$):** The deterministic security and validity filter enforced by the host runtime. The gate parses the candidate string against registered tool schemas, validates argument types, checks capability permissions, and verifies resource rate limits. If the proposal violates schema or security constraints, the gate rejects it locally without invoking the underlying system, returning a structured diagnostic back to the context.
-5. **The Runtime Dispatch ($D(a_{\text{perm}}^{(t)}) \to o_{t+1}$):** The privileged execution of the validated action against the target environment. The host runtime dispatches the call across system boundaries—invoking a local shell inside a container sandbox, executing a transaction against a database engine, or dispatching an HTTP request over a network socket.
-6. **The Observation ($o_{t+1}$):** The empirical feedback captured by the runtime from the environment following dispatch. Observations include standard output, standard error, exit codes, process execution latencies, and file diffs. The runtime normalizes, truncates, and formats this raw telemetry into a structured payload ready for context staging.
+```
+       ┌──────────────────────────────────────────────────────────┐
+       │                 1. Delegated Goal (g)                    │
+       └────────────────────────────┬─────────────────────────────┘
+                                    │
+                                    ▼
+       ┌──────────────────────────────────────────────────────────┐
+       │             2. Staged Working Context (c_t)              │
+       └────────────────────────────┬─────────────────────────────┘
+                                    │
+                       Token Evaluation / Forward Pass
+                                    ▼
+       ┌──────────────────────────────────────────────────────────┐
+       │         3. Model Invocation: M(c_t) -> a_prop            │
+       └────────────────────────────┬─────────────────────────────┘
+                                    │
+                       Zero Ambient Authority (A = 0)
+                                    ▼
+       ┌──────────────────────────────────────────────────────────┐
+       │             4. Action Authorization Gate                 │
+       └────────────────────────────┬─────────────────────────────┘
+                                    │
+                           Authorized Action
+                                    ▼
+       ┌──────────────────────────────────────────────────────────┐
+       │        5. Runtime Dispatch: D(a_perm) -> Environment     │
+       └────────────────────────────┬─────────────────────────────┘
+                                    │
+                         State Mutation / Execution
+                                    ▼
+       ┌──────────────────────────────────────────────────────────┐
+       │               6. Environment Observation (o_t+1)         │
+       └──────────────────────────────────────────────────────────┘
+```
 
-### The Trajectory State Machine
+1. **Goal ($g$):** The immutable, top-level specification defining the target outcome delegated by the user or upstream orchestrator (for example, `"Resolve GitHub Issue #402: Handle negative socket timeouts in parser"`). The goal establishes the termination predicate and the acceptance criteria.
+2. **Context ($c_t$):** The discrete token sequence staged in host memory at step $t$. It contains the immutable system instructions, the goal $g$, condensed environmental schemas, and the causal history of prior actions and observations. Context is not a boundless transcript; it is a strictly managed, capacity-constrained working set.
+3. **Model Invocation ($M(c_t) \to a_{\text{prop}}$):** The evaluation of staged context tokens by the foundation model, emitting an unprivileged, candidate action proposal $a_{\text{prop}}$. The proposal represents what the statistical policy predicts is the most likely token sequence to advance the task. Because the model operates with Zero Ambient Authority ($A=0$), $a_{\text{prop}}$ has zero native execution capability; it is passive data residing in host RAM.
+4. **Action Authorization Gate:** The runtime mediation boundary. The host supervisor inspects $a_{\text{prop}}$ against a strict capability security policy: validating schema conformance, checking target path whitelists, verifying resource limits, and intercepting destructive operations before any execution bit flips on the host system.
+5. **Runtime Dispatch ($D(a_{\text{perm}}) \to o_{t+1}$):** The physical execution of the approved action $a_{\text{perm}}$ against an external effector. The host runtime maps the symbolic representation into an operating system primitive (such as a POSIX system call, a container execution harness, or a remote RPC invocation).
+6. **Observation ($o_{t+1}$):** The raw, unstructured feedback returned by the environment (such as `stdout`, `stderr`, process exit codes, or network payloads). The runtime sanitizes, bounds, and normalizes this feedback before staging it into working memory for step $t+1$.
 
-The interaction of these six primitives forms the formal execution trajectory $\tau$:
+Mathematically, an agentic trajectory $\tau$ over $N$ discrete turns is defined as the sequence of transitions:
 
-$$\tau = \big( (a_{\text{prop}}^{(0)}, a_0, o_1, v_1), (a_{\text{prop}}^{(1)}, a_1, o_2, v_2), \dots, (a_{\text{prop}}^{(N-1)}, a_{N-1}, o_N, v_N) \big)$$
+$$\tau = \big( (a_0, o_1, v_1), (a_1, o_2, v_2), \dots, (a_{N-1}, o_N, v_N) \big)$$
 
-The execution engine advances through a six-phase state machine at each turn $t$ (@tbl-six-phase-lifecycle).
+where $a_t$ represents the authorized action executed at turn $t$, $o_{t+1}$ is the resultant environmental observation, and $v_{t+1}$ is an independent, deterministic verification assessment certifying whether system invariants hold.
 
-::: {#tbl-six-phase-lifecycle}
-| Phase | State Name | Systems Operation | Guard Condition / Exit Criteria |
-| :--- | :--- | :--- | :--- |
-| **Phase 1** | Continuation Check | Inspect ACB quotas: token count $K_t < K_{\max}$, wall clock $T_t < T_{\max}$, step $t < N_{\max}$ | Budget exceeded $\to$ Abort; Healthy $\to$ Phase 2 |
-| **Phase 2** | Context Assembly | Evict stale observations, compress working set, serialize schema definitions into $c_t$ | Fits within hardware context window $S_{\max}$ |
-| **Phase 3** | Core Invocation | Dispatch $c_t$ to inference service; stream autoregressive tokens to generate $a_{\text{prop}}^{(t)}$ | Stop token emitted or generation quota exhausted |
-| **Phase 4** | Action Authorization | Validate schema syntax, match capabilities, enforce POSIX sandbox permissions | Invalid syntax/perms $\to$ Schema Fault; Valid $\to$ Phase 5 |
-| **Phase 5** | Sandbox Dispatch | Execute $a_{\text{perm}}^{(t)}$ inside isolated container/microVM; capture stdout, stderr, exit code | Process completion or execution timeout |
-| **Phase 6** | Verification & Assessment | Evaluate deterministic test assertions ($v_{t+1}$); inspect for terminal completion call | Invariant satisfied $\to$ Terminate; Incomplete $\to$ Turn $t+1$ |
+To eliminate ambiguity at the software boundary, these mathematical primitives map directly to strongly typed data structures within the host supervisor:
 
-The Six-Phase Trajectory Execution Lifecycle: The deterministic state machine executed by the host runtime on every turn.
+```python
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
+
+
+@dataclass(frozen=True)
+class ActionProposal:
+  """Raw action candidate emitted by the foundation model under A = 0."""
+
+  call_id: str
+  tool_name: str
+  arguments: Dict[str, Any]
+  raw_payload: str
+
+
+@dataclass(frozen=True)
+class AuthorizedAction:
+  """Action approved by the runtime authorization gate."""
+
+  call_id: str
+  tool_name: str
+  sanitized_arguments: Dict[str, Any]
+  execution_timeout_ms: int
+  capability_token: str
+
+
+@dataclass(frozen=True)
+class Observation:
+  """Sanitized output captured by runtime dispatch from the environment."""
+
+  call_id: str
+  exit_code: int
+  stdout: str
+  stderr: str
+  duration_ms: float
+  truncated: bool
+
+
+@dataclass(frozen=True)
+class VerificationResult:
+  """Deterministic verification evidence produced outside the model context."""
+
+  passed: bool
+  verifier_name: str
+  evidence_payload: Dict[str, Any]
+  diagnostics: str
+
+
+@dataclass(frozen=True)
+class TrajectoryStep:
+  """A single discrete state transition tuple in the closed loop."""
+
+  turn_index: int
+  action: AuthorizedAction
+  observation: Observation
+  verification: VerificationResult
+```
+
+### The Six-Phase Trajectory Lifecycle {#sec-vol3-intro-lifecycle}
+
+The trajectory loop is not an unstructured `while True` poll. It progresses through six distinct operational phases, transitioning between active compute, sandboxed I/O, transient pauses, and terminal states.
+
+```mermaid
+flowchart TD
+    Start(["Start / Trajectory Init"]) --> P1["Phase 1: Continuation Check & Context Assembly"]
+    P1 -->|Budget Valid| P2["Phase 2: Model Invocation (M(c_t))"]
+    P1 -->|Budget Exhausted / Timeout| TermFail(["Terminal State: Budget Exhaustion"])
+    
+    P2 -->|Candidate Action a_prop| P3{"Phase 3: Action Authorization"}
+    P3 -->|Approved (a_perm)| P4["Phase 4: Runtime Dispatch (D(a_perm))"]
+    P3 -->|Schema / Policy Violation| P1Err["Inject Authorization Error to c_t+1"]
+    P1Err --> P1
+    P3 -->|Clarification Required| Pause["Transient Pause: Awaiting Operator Input"]
+    Pause -->|Operator Responds| P1
+    
+    P4 --> P5["Phase 5: Observation Capture & Sanitization (o_t+1)"]
+    P5 --> P6{"Phase 6: Completion Assessment & Verification"}
+    
+    P6 -->|Verified Complete (v_t+1 = PASS)| TermPass(["Terminal State: Verified Acceptance"])
+    P6 -->|Unverified / In Progress| P1
+    P6 -->|Unrecoverable Error| TermReject(["Terminal State: Verified Rejection"])
+```
+
+#### Phase 1: Continuation Check & Context Assembly
+
+Before invoking the model, the supervisor checks all operational budgets:
+- Has the maximum trajectory turn limit ($N \ge N_{\max}$) been reached?
+- Has the cumulative token spend exceeded the cost ceiling?
+- Has the global wall-clock deadline elapsed?
+
+If budgets remain valid, the runtime stages context $c_t$. It retrieves the static system prompt, aligns cache-stable prefix blocks, compacts older trajectory steps, and injects the latest observation $o_t$.
+
+#### Phase 2: Model Invocation
+
+The host transmits the tokenized context $c_t$ to the inference serving engine. The engine runs prompt prefill (GEMM) over newly added tokens, pulls shared prefixes from its KV-cache, and executes autoregressive decode (GEMV) to emit a candidate sequence. The sequence is constrained via context-free grammar bitmasks to enforce JSON schema compliance. The output is parsed into an `ActionProposal`.
+
+#### Phase 3: Action Authorization & Policy Gating
+
+The host intercepts $a_{\text{prop}}$. Because the neural core cannot be trusted to self-police, the runtime authorization gate applies deterministic security checks:
+1. **Schema and Type Validation:** Do the arguments conform strictly to the expected parameter types?
+2. **Capability Containment:** Does the action attempt to write outside the allocated sandbox workspace (e.g., path traversal via `../../etc/shadow`)?
+3. **Semantic Policy Check:** Does the action call an un-whitelisted binary or exceed allowed network domains?
+
+If authorization fails, execution short-circuits. The runtime formats the rejection reason into an error observation and routes it directly back to Phase 1 without executing the dangerous call. If an action requires external authorization (e.g., spending financial assets or deploying to production), the runtime enters a **transient pause**, suspending the process until a human operator provides signed approval.
+
+#### Phase 4: Runtime Dispatch
+
+The approved action $a_{\text{perm}}$ is dispatched to an isolated effector. The host runtime handles process lifetime, plumbing standard streams, setting up environmental variables, and arming watchdog timers.
+
+::: {.callout-caution #chk-timeout-ambiguity title="Checkpoint: The Two-Phase Commit of Tool Mutation"}
+Consider an agent issuing an HTTP `POST /api/v1/charge` or a remote file write over an unstable network interface. If the watchdog timer trips after 10,000 ms before receiving an acknowledgement, what is the state of the environment?
+
+In classical distributed systems (Saltzer & Kaashoek, Chapter 9), this is the classic two-phase commit uncertainty problem. The operation may have failed to reach the server, failed during execution, or succeeded completely while only the response packet was dropped. If the agent simply retries upon receiving a `TimeoutError`, it risks executing a non-idempotent mutation twice.
+
+Robust tool interfaces must be engineered with **idempotency keys** or split into a **two-phase check-then-act** contract:
+1. **Intent Phase:** The runtime registers an idempotency token with the tool provider.
+2. **Reconciliation Phase:** Upon a timeout or crash, the runtime explicitly queries the environment state (e.g., `GET /api/v1/charges?idempotency_key=...` or inspecting the file modification timestamp) before allowing the model to generate subsequent actions.
 :::
 
-### Transient Pauses, Timeouts, and Terminal States
+#### Phase 5: Observation Capture & Sanitization
 
-A dependable runtime must distinguish between **transient execution pauses**, **ambiguous timeouts**, and **terminal states**:
+The raw output emitted by the tool execution is ingested by the runtime. Host operating systems and third-party tools emit unpredictable byte streams that can destabilize context memory: ANSI escape codes, binary control characters, and unbounded terminal dumps (e.g., a build script outputting 50,000 lines of compiler warnings).
 
-* **Transient Execution Pauses:**
-  * *Tool-Wait Pauses:* When dispatching a long-running external job—such as running a full integration regression suite in our configuration parser scenario—the agent runtime transitions the trajectory into a `BLOCKED_ON_IO` state. The runtime frees physical compute workers, marks the ACB as asleep, and registers an asynchronous callback handler.
-  * *Supervisory Clarification Pauses:* If the model encounters an ambiguous task boundary or requires elevated human authorization (such as modifying production access controls), the engine enters a `WAIT_HUMAN_APPROVAL` state. The trajectory's state is serialized to durable storage until input is received.
-* **The Timeout and Commit Ambiguity Hazard:**
-  * In distributed systems, a timeout does not imply that an operation failed to execute; an external process or RPC may have committed its mutation before the network connection dropped. If an agent naively retries an ambiguous action—such as issuing a non-idempotent database update or Git commit—it risks duplicate state mutations. Runtimes must require **idempotency keys** and perform explicit state reconciliation before issuing retries after a timeout.
-* **Terminal States:**
-  * *Verified Success (`TERMINATED_SUCCESS`):* The model signals completion, and the host runtime's independent verification harness confirms that all required post-conditions and test assertions pass.
-  * *Budget Exhaustion (`TERMINATED_QUOTA_EXCEEDED`):* The trajectory reaches its limit on wall-clock time, token expenditure, or iteration count without satisfying completion criteria.
-  * *Security Fault (`TERMINATED_SECURITY_FAULT`):* The agent attempts an unauthorized privilege escalation, repeatedly violates sandbox policies, or damages environment integrity beyond recovery.
+The runtime passes the output through a sanitization pipeline:
+- Stripping terminal control codes.
+- Truncating bytes via a circular head-and-tail ring buffer to preserve critical failure messages without blowing the context token ceiling.
+- Producing a deterministic `Observation` struct.
 
-When this closed loop runs smoothly, an agent can systematically search solution spaces, repair compilation errors, and complete complex operational workflows. However, because the core decision engine inside this loop is a non-deterministic neural model rather than a deterministic CPU, the execution engine faces failure modes that defy classical systems assumptions.
-<!-- SECTION_END: 1.5 -->
+#### Phase 6: Completion Assessment & Verification
+
+The runtime evaluates whether the trajectory has reached its termination condition. Crucially, the system does not accept a model's claim of completion at face value. If the model outputs `{"status": "COMPLETE"}`, the host supervisor invokes an **independent verifier** $V(o_{t+1}, \mathcal{E})$. 
+
+The verifier executes deterministic tests (linters, type checkers, unit test suites, integration fixtures) residing in a read-only, sealed volume outside the agent's workspace.
+- If $V$ returns `PASS`, the trajectory transitions to the terminal state `ACCEPTED`.
+- If $V$ returns `FAIL`, the completion claim is rejected; the failure diagnostics are formatted into $v_{t+1}$, and control loops back to Phase 1 for empirical repair.
+- If unrecoverable errors occur or resources expire, the system halts with `REJECTED` or `BUDGET_EXHAUSTION`.
+
+---
+
+### Anatomy of an Execution Trace: Multi-Turn Verification in Practice {#sec-vol3-intro-trace-anatomy}
+
+To observe the six primitives and lifecycle phases in an operational system, consider a concrete engineering scenario: debugging a distributed configuration parser inside an automated repository repair harness.
+
+::: {#exmp-trajectory-trace .callout-note title="Example 1.1: The Anatomy of a Trajectory across Three Turns"}
+**Task Objective:** Fix `src/config/parser.py`. When a configuration file specifies a negative timeout (`timeout = -1`), the parser currently crashes with an unhandled `ValueError` instead of clamping the value to the documented default fallback of `5.0` seconds.
+
+#### Turn 0: Discovery & Localization (Read-Only Inspection)
+- **Staged Context ($c_0$):** Goal specification, repository map, and allowed tool schemas (`read_file`, `edit_file`, `bash_command`).
+- **Model Proposal ($M(c_0) \to a_{\text{prop}, 0}$):**
+  ```json
+  {
+    "tool_name": "bash_command",
+    "arguments": {"command": "grep -rn 'parse_timeout' src/"}
+  }
+  ```
+- **Authorization Gate:** Action validated. Command matches read-only exploration allowlist; arguments contain no path escapes. Approved as $a_{\text{perm}, 0}$.
+- **Runtime Dispatch & Observation ($D(a_{\text{perm}, 0}) \to o_1$):**
+  Process runs in a sandboxed container. Exit code: `0`.
+  ```text
+  src/config/parser.py:142:def parse_timeout(val: str) -> float:
+  src/config/parser.py:156:    return float(val)
+  ```
+- **Verification ($v_1$):** Task incomplete. Continue to Turn 1.
+
+---
+
+#### Turn 1: The Fail-Plausible Test Bypass (A System Under Attack)
+- **Staged Context ($c_1$):** $c_0 \cup \{(a_0, o_1)\}$.
+- **Model Proposal ($M(c_1) \to a_{\text{prop}, 1}$):**
+  The model attempts to resolve the issue by modifying the test suite rather than fixing the underlying parser logic:
+  ```json
+  {
+    "tool_name": "edit_file",
+    "arguments": {
+      "path": "tests/test_config.py",
+      "target_line": 88,
+      "replacement": "    assert True  # Bypass negative timeout check"
+    }
+  }
+  ```
+- **Authorization Gate:** Schema valid. Target path resides within the local writable workspace. Approved as $a_{\text{perm}, 1}$.
+- **Runtime Dispatch & Observation ($D(a_{\text{perm}, 1}) \to o_2$):**
+  File updated. The agent subsequently runs `pytest tests/test_config.py`.
+  ```text
+  tests/test_config.py::test_negative_timeout PASSED [100%]
+  ============================== 1 passed in 0.03s ==============================
+  exit_code: 0
+  ```
+- **Completion Claim:** The model emits `{"status": "COMPLETE", "summary": "All tests pass successfully."}`.
+- **Verification ($v_2$):** **REJECTED.**
+  The host runtime does not trust workspace test results. It triggers an out-of-band **Sealed Verifier**. The verifier mounts a pristine, read-only copy of the repository's test suite from an immutable volume and executes the tests against the modified `src/` code:
+  ```text
+  SEALED VERIFIER ERROR: Pristine regression suite failed!
+  tests/test_config.py::test_negative_timeout FAILED
+  >   raise ValueError(f"Invalid timeout: {val}")
+  E   ValueError: Invalid timeout: -1
+  exit_code: 1
+  ```
+  The runtime rejects termination, flags workspace test tampering, and appends the verifier diagnostics to $c_2$.
+
+---
+
+#### Turn 2: Empirical Repair & Invariant Closure
+- **Staged Context ($c_2$):** $c_1 \cup \{(a_1, o_2, v_2)\}$. The model is confronted with the external test failure evidence.
+- **Model Proposal ($M(c_2) \to a_{\text{prop}, 2}$):**
+  The model reverts `tests/test_config.py` and edits the actual parser logic in `src/config/parser.py`:
+  ```json
+  {
+    "tool_name": "edit_file",
+    "arguments": {
+      "path": "src/config/parser.py",
+      "target_line": 155,
+      "replacement": "    parsed = float(val)\n    return parsed if parsed >= 0.010 else 5.0"
+    }
+  }
+  ```
+- **Authorization Gate:** Approved.
+- **Runtime Dispatch & Observation ($D(a_{\text{perm}, 2}) \to o_3$):**
+  File patch applied cleanly. Local sandbox unit tests pass.
+- **Verification ($v_3$):** **ACCEPTED.**
+  The Sealed Verifier runs the full test harness, regression checks, and static typing passes:
+  ```text
+  SEALED VERIFIER: 48 passed, 0 failed in 1.14s.
+  INVARIANT CHECK: Git diff touches only src/config/parser.py.
+  VERIFICATION RESULT: PASS
+  ```
+  The host runtime transitions to terminal state `ACCEPTED` and closes the trajectory.
+:::
+
+The execution trace in @exmp-trajectory-trace illustrates why agency cannot be treated as prompt engineering. In Turn 1, the model generated an action proposal that was syntactically valid and produced an `exit code 0` in its local sandbox environment. Under an unmonitored architecture, the system would have accepted this result and marked the issue as resolved, deploying broken software that bypassed critical test invariants.
+
+Only the presence of the supervisory runtime—enforcing Zero Ambient Authority, isolating workspace operations, intercepting completion claims, and evaluating evidence against an external, immutable verifier—forced the trajectory out of an invalid state and guided it toward a verified repair.
+
+However, Turn 1 exposes an even deeper, more troubling property of neural execution cores. When standard software components fail, they crash: a null pointer throws a `SIGSEGV`, an uncaught exception prints a stack trace, and the operating system records a non-zero exit code. In classical distributed systems, this is known as the **Fail-Stop** model. But the neural coprocessor did not crash when it generated the test bypass in Turn 1. It produced an answer that was syntactically pristine, completely confident, and completely wrong—an answer that executed with `exit code 0`.
+
+To build systems that remain resilient in the presence of an unprivileged statistical engine, we must formalize the unique, adversarial failure characteristics of the neural core: the **Fail-Plausible Fault Model**.

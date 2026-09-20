@@ -1,58 +1,238 @@
-<!-- SECTION_START: 1.2 (#sec-vol3-intro-evolution-of-ml-systems) -->
 ## From Tensors to Trajectories {#sec-vol3-intro-evolution-of-ml-systems}
 
-To understand how agency became an operating system property, we must trace how machine learning systems evolved over the past decade. The systems engineer arrives at this book with a solid grasp of core machine learning infrastructure: optimizing kernel execution on single accelerators by managing memory hierarchies, fusing general matrix multiplication (GEMM) operations, and saturating Roofline ceilings; and scaling out across distributed clusters by orchestrating tensor parallelism, high-speed interconnect fabrics, and continuous batching schedulers.
+Every major transition in computer systems engineering is marked by a dramatic expansion in the fundamental unit of scheduling, allocation, and failure containment. In operating systems, the unit of management evolved from single punched-card batch jobs to preemptible hardware threads and distributed virtual machines. In distributed systems, it advanced from raw byte sockets to remote procedure calls (RPCs) and transactional microservices. 
 
-Yet across both regimes, the fundamental unit of systems management remained unchanged: the **stateless inference request**. The emergence of agentic execution does not discard this hardware foundation; rather, it stretches the execution boundary across thirteen orders of temporal magnitude, establishing the **stateful trajectory** as the primary abstraction of computing systems.
+Machine learning systems have undergone an identical transformation. Over three distinct architectural epochs, the governing unit of machine learning systems management has shifted from static, sub-millisecond tensor operations on single accelerators to cluster-scale continuous token serving, and finally to stateful, multi-hour operational trajectories. Designing and deploying reliable agentic systems requires understanding how the interfaces, performance bottlenecks, and fault boundaries shifted across each of these three eras.
 
-### The Three Eras of Machine Learning Systems
+### The Three Eras of Machine Learning Systems {#sec-vol3-intro-three-eras}
 
-The historical trajectory of machine learning systems unfolds across three distinct architectural epochs, each defined by what the system managed, what hardware bounded its performance, and where its execution boundary was drawn:
+Systems engineers entering the study of agentic runtimes arrive with a firm grasp of modern machine learning infrastructure. They understand how single accelerators execute deep neural networks—managing high-bandwidth device memory, staging tensors through fused matrix multiplication kernels, and balancing compute throughput against memory bandwidth. They also understand how modern serving clusters scale across distributed fabrics—orchestrating tensor and pipeline parallelism across high-speed interconnects, packing requests via continuous batching, and serving high-concurrency inference streams.
 
-1. **The Single-Node Acceleration Era (Tensors):** The initial challenge of deep learning was computational density. Systems engineering focused on single-node execution: mapping multidimensional tensor graphs onto specialized systolic arrays and single instruction, multiple data (SIMD) vector units. The dominant engineering challenges were kernel fusion, operator compilation, and managing the memory shuttle between off-chip HBM and on-chip SRAM. The unit of work was the **tensor operation**, executing on illustrative timescales of microseconds to milliseconds ($10^{-6}\text{ to }10^{-3}\text{ s}$).
-2. **The Distributed Serving Era (Tokens):** As model scale expanded from millions of parameters to hundreds of billions, models outgrew the physical memory capacity of individual accelerators. Systems engineering expanded to cluster-level orchestration: partitioning model weights across tensor, pipeline, and expert parallel topologies. Inference serving evolved from static batching to dynamic iteration-level continuous batching, maximizing token throughput while managing dynamic Key-Value (KV) cache allocations across distributed HBM. The unit of work was the **token generation request**, executing on timescales of hundreds of milliseconds to seconds ($10^{-1}\text{ to }10^0\text{ s}$).
-3. **The Agentic Systems Era (Trajectories):** The emergence of delegated execution shifts the systems boundary from serving tokens to governing autonomous tasks. In this regime, an application is no longer an isolated query-response interaction. It is an extended, stateful, multi-turn sequence of model deliberations, tool invocations, environment state mutations, and empirical verification assertions. The unit of work is the **trajectory**, executing on timescales of seconds to hours ($10^1\text{ to }10^4\text{ s}$).
+However, the abstractions that govern static inference serving break down when a model is given tools, granted operational agency, and tasked with solving open-ended problems in live software environments. @tbl-three-eras-ml-systems contrasts the three architectural eras across their computational primitives, resource constraints, and systems boundaries.
 
-### The Passive Request Boundary
+| Systems Dimension | Era 1: Static Tensors & MLPs | Era 2: Distributed Tokens & Attention | Era 3: Stateful Trajectories & Agents |
+| :--- | :--- | :--- | :--- |
+| **Governing Unit** | Tensor / Layer Activation | Token / Request KV Stream | Trajectory $\tau$ (Multi-Turn Episode) |
+| **Computational Kernel** | Compute-bound dense GEMM | Memory-bound autoregressive GEMV | Heterogeneous (Host I/O + Accelerator GEMM/GEMV) |
+| **Memory Boundary** | Pre-allocated static buffers (RAM/VRAM) | Dynamic Key-Value (KV) cache in HBM | Host OS process state, disk, Git, working context |
+| **Temporal Scale** | $10^{-6}\text{ to } 10^{-3}\text{ s}$ (Microseconds to Milliseconds) | $10^{-1}\text{ to } 10^{0}\text{ s}$ (Sub-seconds to Seconds) | $10^{1}\text{ to } 10^{4}\text{ s}$ (Minutes to Hours) |
+| **Execution Topology** | Single accelerator / Fixed graph DAG | Distributed cluster (TP/PP/DP serving) | Heterogeneous: Host runtime + Sandbox + Neural server |
+| **Failure Modes** | Out of Memory (OOM), NaN loss, shape mismatch | Context truncation, batch tail latency, HBM fragmentation | Semantic divergence, tool timeouts, state corruption |
+| **Execution Authority ($A$)** | Zero ($A=0$, Pure advisory score) | Zero ($A=0$, Pure advisory text) | Non-zero mediated ($A > 0$, File edits, process forks, network RPCs) |
 
-Throughout the first two eras, systems operated under an unstated invariant: the **passive request boundary**. When an external client submits a payload to an inference service, the serving engine ingests the prompt tokens, executes parallel prefill to populate its KV cache, and runs iterative autoregressive decode steps until a stop token is emitted.
+: The Three Eras of Machine Learning Systems Architecture. {#tbl-three-eras-ml-systems}
 
-Once the final token is serialized to the response stream, the service reclaims ephemeral activation memory and considers the transaction complete. The serving system bears zero responsibility for downstream execution. If the generated text contains invalid syntax, references a deprecated API endpoint, or proposes an incorrect database query, the serving layer remains completely unaware. Correctness, validation, error recovery, and environmental side-effects are pushed entirely onto the external caller.
+#### Era 1: Static Tensors and Feedforward Graphs
 
-This passive boundary creates an operational barrier for complex workloads. In our running configuration parser scenario, if a model emits a patch that introduces a subtle deadlock under high network concurrency, a single forward pass cannot verify the failure. Real-world tasks resist one-shot generation because software environments are partially observable, tool outputs are non-deterministic, and requirements reveal themselves dynamically through execution feedback.
+The foundational era of deep learning systems (typified by Multi-Layer Perceptrons, Convolutional Networks, and encoder-only architectures like BERT) was defined by the **static computational graph**. In this regime:
 
-### The Temporal Stretching of Execution Units
+- **Deterministic Execution Graphs:** An engineer compiled a static Directed Acyclic Graph (DAG) of tensor operations. Every intermediate activation tensor had a strictly defined dimension known at compile time or strictly bounded by fixed input padding.
+- **Compute-Bound Linear Algebra:** The computational heart of the workload was dense General Matrix Multiplication (GEMM). Because tensor shapes were invariant across forward passes, execution times were virtually deterministic. Memory allocators could map static arena buffers in accelerator memory during initialization, eliminating runtime memory fragmentation and dynamic allocation overhead.
+- **Bounded Single-Pass Latency:** A forward pass executed in microseconds to milliseconds. The boundary between the caller and the model was synchronous, local, and advisory: an application passed a fixed-size tensor (such as an image or a tokenized sentence) and received a fixed-size probability distribution or latent embedding. The model possessed zero awareness of time, state, or external environment.
 
-The transition from passive model serving to autonomous task execution fundamentally alters the time horizons over which computer systems must maintain state, schedule resources, and isolate faults. In classical computing systems, the hierarchy of execution units expanded over decades across well-understood orders of magnitude:
+#### Era 2: Distributed Tokens and Autoregressive Serving
 
-$$\begin{aligned}
-\text{Machine Instruction (ALU Opcode)} &\sim 10^{-9}\text{ s} \quad (1\text{ ns}) \\
-\text{Operating System Thread / Context Switch} &\sim 10^{-6}\text{ s} \quad (1\text{ }\mu\text{s}) \\
-\text{Network RPC / Microservice Call} &\sim 10^{-3}\text{ s} \quad (1\text{ ms}) \\
-\text{Stateless LLM Forward Step (Single Token)} &\sim 10^{-2}\text{ to } 10^{-1}\text{ s} \quad (10\text{ to }100\text{ ms}) \\
-\text{Conversational LLM Request (Full Stream)} &\sim 10^0\text{ s} \quad (1\text{ s}) \\
-\text{Autonomous Agent Trajectory (Task Execution)} &\sim 10^1\text{ to } 10^4\text{ s} \quad (10\text{ s to several hours})
-\end{aligned}$$
+The emergence of autoregressive large language models (Transformers such as GPT, LLaMA, and their successors) broke the static graph paradigm and forced the creation of modern inference serving systems. This era shifted the governing systems unit from static tensors to **individual generated tokens**:
 
-An autonomous agent trajectory stretches the execution unit across **thirteen orders of temporal magnitude** relative to the underlying physical clock cycles that power it. When an execution unit spans hundreds or thousands of seconds, classical systems assumptions collapse:
+- **Autoregressive Decode Loops:** Unlike feedforward models that process all positions concurrently in a single pass, autoregressive generation is an irreducibly serial loop. Emitting sequence token $k+1$ requires the model to have already evaluated token $k$.
+- **The Prefill versus Decode Duality:** Inference split into two fundamentally distinct physical phases:
+  1. *Prompt Prefill:* Parallel processing of $M$ staged input tokens, executing as compute-bound dense GEMM operations with high arithmetic intensity.
+  2. *Token Decode:* Serial generation of $K$ output tokens, executing as memory-bandwidth-bound General Matrix-Vector (GEMV) operations where billions of parameters must shuttle across the accelerator High-Bandwidth Memory (HBM) bus just to emit a single token.
+- **Dynamic Attention State:** Retaining intermediate activation vectors to prevent quadratic recomputation created the Key-Value (KV) cache. Because request lengths vary dynamically and output lengths are unknown *a priori*, systems could no longer rely on static memory allocation. Serving engines were redesigned around continuous iteration-level batching, dynamic memory paging, and multi-accelerator Tensor Parallelism (TP).
 
-* **Memory Residency:** In a millisecond RPC, holding memory allocations in hardware registers or fast SRAM is standard practice. In an agent trajectory spanning an hour, stranding expensive accelerator HBM while the agent waits on an external compiler or human approval incurs prohibitive economic costs—a failure mode formalized in this book as the *Tool-Wait Memory Tax*.
-* **Fault Containment:** In a stateless request, an unhandled exception or malformed token sequence triggers a clean process restart or request retry. In an extended trajectory where intermediate steps have already mutated external databases, Git branches, and file systems, a mid-flight crash leaves the host environment in an inconsistent state. The runtime cannot simply restart; it requires explicit compensation and checkpoint-recovery semantics.
-* **Failure Compounding:** In an open-loop system, uncorrected step errors accumulate geometrically with horizon length. To survive over extended execution horizons, the system must transition from open-loop generation to closed-loop observation, repair, and verification.
+Crucially, however, Era 2 maintained a **passive request boundary**. From the perspective of the serving infrastructure, a request is a stateless stream of tokens: an HTTP client opens a socket, transmits a prompt string, receives a stream of response tokens over Server-Sent Events (SSE), and terminates the connection. The serving cluster owns no state beyond the request's transient KV cache, and it executes zero external side effects on the hosting environment.
 
-### The Trajectory as the Systems Management Unit
+#### Era 3: Stateful Trajectories and Operational Effects
 
-Because operational work cannot be completed in an isolated forward pass, the fundamental unit of systems design in Software 3.0 is the **trajectory** $\tau$. Formally, an execution trajectory is an ordered sequence of stateful execution tuples recorded across discrete turns $t \in \{0, 1, \dots, N-1\}$:
+Agentic systems define the third era. Here, the fundamental unit of systems design is neither the activation tensor nor the stateless token stream. It is the **trajectory** $\tau$: an extended, multi-turn sequence of reasoning, environment observations, discrete tool dispatches, and deterministic verification checks aimed at fulfilling a delegated goal.
 
-$$\tau = \big( (a_{\text{prop}}^{(0)}, a_0, o_1, v_1), (a_{\text{prop}}^{(1)}, a_1, o_2, v_2), \dots, (a_{\text{prop}}^{(N-1)}, a_{N-1}, o_N, v_N) \big)$$
+In Era 3, the serving engine becomes an unprivileged coprocessor embedded within a larger host architecture:
 
-where:
-* $a_{\text{prop}}^{(t)}$ is the unprivileged candidate proposal emitted by the stochastic processor core.
-* $a_t = \Gamma(a_{\text{prop}}^{(t)})$ is the authorized, validated action dispatched to the environment (or a synthetic error payload if authorization failed).
-* $o_{t+1}$ is the structured empirical observation captured from the isolated execution sandbox (standard output, standard error, exit codes, file diffs).
-* $v_{t+1}$ is the empirical verification evidence evaluated by the runtime's independent verification harness.
+- **The Trajectory as the Atomic Management Unit:** A complex software engineering task—such as diagnosing a race condition in a multi-threaded codebase, writing a reproducing regression test, and applying a multi-file patch—cannot be resolved in a single forward pass or a single conversational turn. The task unfolds across an iterative loop of thirty, fifty, or two hundred discrete turns. The system must allocate memory, manage budgets, maintain fault tolerance, and track progress across this entire multi-turn trajectory.
+- **Heterogeneous Systems Execution:** In Eras 1 and 2, virtually 100% of execution time was spent inside accelerator matrix engines (NVIDIA Tensor Cores, Google TPUs). In Era 3, execution is inherently heterogeneous. The accelerator generates candidate actions, but the system spends seconds or minutes executing host-side compilers, running containerized test suites, searching remote Git histories, and tailing network streams. Non-model latency frequently dominates accelerator compute time.
+- **Mutating Physical State:** In Era 2, an incorrect token generation had zero impact on the host machine; it was merely an undesirable string in a network payload. In Era 3, the model's output is parsed into operational system commands: `git commit`, `rm -rf`, `docker run`, or `DROP TABLE`. The execution boundary now carries **stateful operational side effects**. A catastrophic error does not manifest as a low BLEU score or high perplexity; it manifests as a corrupted database, a broken build pipeline, or an infinite loop consuming compute credits.
 
-The trajectory is the unifying thread that ties the entire stochastic computer together. It serves as the logical instruction trace of the agent, the audit log for transactional recovery, the working set that must be paged across the memory hierarchy, and the training dataset that will be compiled back into model weights via offline reinforcement learning.
+### The Temporal Stretching of Execution Units {#sec-vol3-intro-temporal-stretching}
 
-By elevating the trajectory to the primary systems abstraction, we redefine the engineering challenge. The core question is no longer merely: *How quickly can our accelerators generate individual tokens?* The question becomes: *How do we architect an accountable computer system capable of scheduling, isolating, checkpointing, and verifying an entire stateful trajectory across non-deterministic execution horizons?*
-<!-- SECTION_END: 1.2 -->
+The evolution toward trajectories represents a massive temporal expansion in the primitives that computer systems software must coordinate. Throughout the history of computing, systems engineering has repeatedly abstracted fine-grained physical operations into larger, more durable abstractions. 
+
+In 1949, David Wheeler introduced the closed subroutine for the Cambridge EDSAC, creating the concept of a reusable procedural execution unit out of raw ultrasonic delay-line pulses. Over the subsequent decades, operating systems researchers unified machine instructions into threads, threads into processes, and local processes into remote microservice calls.
+
+```
+10^-9 s    10^-6 s         10^-3 s          10^-1 s          10^1 to 10^4 s
+───┼──────────┼───────────────┼────────────────┼────────────────────┼──────────►
+Hardware   OS Thread /     Network RPC /    Stateless LLM    Autonomous
+Instruction Syscall         REST Query       Forward Pass     Trajectory (tau)
+(ALU Op)   (Context Switch) (Microservice)   (Prefill/Decode) (Agentic Task)
+```
+
+As illustrated in the timeline above and in @fig-evolution-execution-units, agentic systems stretch the boundary of systems control across **thirteen orders of temporal magnitude**:
+
+1. **Hardware Instructions ($10^{-9}\text{ s}$):** Physical logic gates execute arithmetic operations in sub-nanosecond clock cycles on CPU and GPU ALUs.
+2. **Operating System Threads and System Calls ($10^{-6}\text{ s}$):** The operating system kernel manages thread preemptions, memory management unit (MMU) page faults, and context switches on microsecond boundaries.
+3. **Distributed RPCs and Network I/O ($10^{-3}\text{ s}$):** Microservice calls, database queries, and inter-process communications traverse network sockets and serialization boundaries in milliseconds.
+4. **Stateless Model Inference ($10^{-1}\text{ to } 10^{0}\text{ s}$):** An autoregressive language model processes a prompt prefill and generates a candidate response across hundreds of milliseconds to several seconds of accelerator execution.
+5. **Autonomous Trajectories ($10^{1}\text{ to } 10^{4}\text{ s}$):** An autonomous agent resolves an operational objective across dozens of turns. The overall task runtime spans tens of seconds to several hours, incorporating compilation passes, regression suites, sandbox provisioning, and human-in-the-loop escalation gates.
+
+![Chronological and temporal expansion of computing execution units across thirteen orders of magnitude.](books/vol3/01_introduction/images/svg/evolution_execution_units_v2.svg){#fig-evolution-execution-units}
+
+When an execution abstraction spans thousands of seconds, the systems challenges that govern it change fundamentally. In a nanosecond ALU operation or a microsecond forward pass, transient physical faults can often be mitigated via hardware ECC memory or simple retry loops. But over a 45-minute autonomous trajectory, transient network partitions, non-deterministic tool outputs, file descriptor exhaustion, and accumulating context drift are guaranteed occurrences. 
+
+The systems runtime cannot treat the trajectory as a simple while-loop wrapping an API client. It must elevate the trajectory to a first-class operating system construct. @lst-trajectory-data-structures provides a concrete structural definition of how a production agent runtime models this extended execution unit.
+
+```python
+# trajectory_types.py
+"""Core data structures governing the lifecycle of an autonomous trajectory."""
+
+from dataclasses import dataclass, field
+from enum import Enum, auto
+from typing import Any, Dict, List, Optional
+import time
+
+class StepStatus(Enum):
+    PENDING = auto()
+    RUNNING = auto()
+    COMPLETED = auto()
+    FAILED = auto()
+    TIMED_OUT = auto()
+
+class ToolAuthorityLevel(Enum):
+    READ_ONLY = 0      # Non-mutating inspections (grep, cat, git diff)
+    WORKSPACE = 1      # Local filesystem mutations (file edit, local compile)
+    HOST_SYSTEM = 2    # Host configuration or container lifecycle (docker run)
+    EXTERNAL_NET = 3   # Irreversible outbound side-effects (git push, API post)
+
+@dataclass(frozen=True)
+class ToolAction:
+    """A discrete, typed operational request emitted by the stochastic core."""
+    tool_name: str
+    arguments: Dict[str, Any]
+    authority_required: ToolAuthorityLevel
+    timeout_seconds: float = 30.0
+
+@dataclass(frozen=True)
+class ToolObservation:
+    """An empirical result captured from the deterministic host environment."""
+    exit_code: int
+    stdout: str
+    stderr: str
+    execution_duration_ms: float
+    truncated: bool = False
+
+@dataclass
+class TrajectoryStep:
+    """A single discrete turn within an agentic execution cycle."""
+    step_id: int
+    timestamp: float = field(default_factory=time.time)
+    model_invocation_latency_ms: float = 0.0
+    action: Optional[ToolAction] = None
+    observation: Optional[ToolObservation] = None
+    status: StepStatus = StepStatus.PENDING
+    tokens_consumed: int = 0
+
+@dataclass
+class Trajectory:
+    """The root systems management record for an autonomous task."""
+    trajectory_id: str
+    task_description: str
+    max_steps: int
+    max_wallclock_seconds: float
+    start_time: float = field(default_factory=time.time)
+    steps: List[TrajectoryStep] = field(default_factory=list)
+    is_terminal: bool = False
+    task_success: Optional[bool] = None
+
+    @property
+    def total_tokens(self) -> int:
+        return sum(s.tokens_consumed for s in self.steps)
+
+    @property
+    def elapsed_seconds(self) -> float:
+        return time.time() - self.start_time
+```
+: Structural systems representation of an autonomous agent trajectory. {#lst-trajectory-data-structures}
+
+Notice the clean architectural separation codified in @lst-trajectory-data-structures. The model does not execute actions directly. It emits a candidate `ToolAction` schema. The host runtime verifies that the action does not violate `ToolAuthorityLevel`, dispatches the action into a sandboxed environment, bounds its execution with `timeout_seconds`, and captures a deterministic `ToolObservation`. The trajectory ledger retains the ground-truth historical record of state transitions in host memory, entirely independent of the model's volatile context window.
+
+### The Open-Loop Systems Ceiling and Closed-Loop Feedback {#sec-vol3-intro-open-loop-ceiling}
+
+Why must we transition from passive, open-loop serving to stateful, closed-loop trajectories? The answer lies in the mathematical nature of error propagation across extended operational horizons.
+
+A conventional language model serving endpoint operates **open-loop**. The user provides an input $x$, and the model evaluates its learned conditional probability distribution $P_\theta(y \mid x)$ to generate a completion sequence $y$:
+
+$$y \sim \prod_{k=1}^K P_\theta(y_k \mid x, y_{<k})$$
+
+In this open-loop formulation, the generation is self-contained. The model receives no feedback from the physical world during generation. If token $y_{15}$ introduces a subtle syntax flaw (for instance, referencing an unimported package name), all subsequent tokens $y_{16}, y_{17}, \dots, y_K$ are conditioned upon that flawed prefix. The serving engine has no mechanism to halt execution, observe the syntax error, or roll back its state.
+
+Now consider an operational software task requiring an agent to execute $T$ sequential sub-tasks: inspecting code, generating patches, running build scripts, and validating test suites. Let $\epsilon_t \in (0, 1)$ denote the probability that the model commits an unrecoverable semantic defect or generates an invalid tool invocation at discrete step $t$. Under an open-loop execution regime—where the model emits an entire multi-step script or plan without intermediate execution feedback—the probability of end-to-end task success $P(\text{success})$ compounds multiplicatively:
+
+$$P(\text{success}) = \prod_{t=1}^T (1 - \epsilon_t)$$
+
+If we assume a uniform step failure rate $\epsilon_t = \epsilon$, the success probability decays exponentially with task length:
+
+$$P(\text{success}) = (1 - \epsilon)^T$$
+
+```
+P(success)
+  1.0 ┼────────────────────────────────────────────────────────
+      │ ╲
+  0.8 ┼───╲─── epsilon = 0.02 (98% per-step accuracy)
+      │    ╲
+  0.6 ┼─────╲
+      │      ╲
+  0.4 ┼───────╲─────── epsilon = 0.05 (95% per-step accuracy)
+      │        ╲
+  0.2 ┼─────────╲────────────────── epsilon = 0.10 (90% per-step accuracy)
+      │          ╲─────────────────────────────────────────────
+  0.0 ┼────────────────────────────────────────────────────────
+      0        10        20        30        40        50  Steps (T)
+```
+
+The engineering implications of this exponential decay are severe:
+- Even with an exceptionally capable foundation model that achieves a $95\%$ per-step success rate ($\epsilon = 0.05$), an open-loop task spanning $T = 20$ sequential steps has a completion probability of only $(0.95)^{20} \approx 0.358$—succeeding barely one-third of the time.
+- If the task requires $T = 50$ steps, the probability of open-loop success collapses to $(0.95)^{50} \approx 0.077$ (under $8\%$).
+- If step accuracy drops to $90\%$ ($\epsilon = 0.10$), a 20-step task drops to a virtually unusable success rate of $(0.90)^{20} \approx 0.122$.
+
+This mathematical ceiling proves that **no realistic increase in static model capability can make long-horizon tasks reliable under open-loop generation**. To double the reliable horizon of an open-loop system, an engineering team must reduce per-step error rates quadratically—a requirement that quickly collides with the diminishing returns of scale.
+
+The solution is the **closed-loop trajectory**. Instead of expecting the stochastic model to predict a perfect 50-step execution sequence *a priori*, the agent runtime transforms task execution into an active feedback control loop. At each discrete turn $t$:
+
+1. The model inspects the current state and proposes a single action $a_t \sim \pi_\theta(a_t \mid s_t)$.
+2. The deterministic runtime intercepts and verifies $a_t$, checking schemas and authorization boundaries.
+3. The runtime dispatches $a_t$ into an isolated execution environment and captures the empirical observation $o_t$ (including compiler outputs, linters, and standard error traces).
+4. The observation $o_t$ updates the environment state $s_{t+1} = \mathcal{T}(s_t, a_t, o_t)$.
+5. The model inspects the verified outcome of its prior action. If an error occurred (for example, a compilation failure), the model does not fail the task; it conditions its next action $a_{t+1}$ on the concrete diagnostic trace and attempts a repair.
+
+```
+                  ┌─────────────────────────────────────┐
+                  │       Stochastic Coprocessor        │
+                  │   Candidate Proposal: a_t ~ pi(s_t) │
+                  └──────────────────┬──────────────────┘
+                                     │ Candidate Action
+                                     ▼
+                  ┌─────────────────────────────────────┐
+                  │       Host Runtime Supervisor       │
+                  │  Capability Check & Schema Filter   │
+                  └──────────────────┬──────────────────┘
+                                     │ Mediated Dispatch
+                                     ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                       Deterministic Host Sandbox                       │
+│                                                                        │
+│   [File System] ──► [Compiler / Linter] ──► [Exit Code & Stdout/Err]   │
+└────────────────────────────────────┬───────────────────────────────────┘
+                                     │ Empirical Observation (o_t)
+                                     ▼
+                  ┌─────────────────────────────────────┐
+                  │     State Update: s_{t+1} = T(...)  │
+                  │   Prefix Staging & Context Assembly │
+                  └──────────────────┬──────────────────┘
+                                     │ Updated Context
+                                     └──────────► (Next Turn)
+```
+
+Closed-loop feedback decouples task success from the catastrophic compounding of open-loop errors. By providing external, deterministic ground truth at every boundary, the host runtime allows the system to discover mistakes early, bound their damage, and correct them dynamically.
+
+However, closed-loop feedback introduces its own fundamental systems trade-off: **error recovery consumes resources**. Every diagnostic iteration adds prompt prefill tokens, burns accelerator decode cycles, inflates context memory footprints, and extends wall-clock task latency. If a runtime fails to govern this feedback loop properly, an agent can easily fall into an infinite oscillation loop—repeatedly modifying a file, triggering a compiler error, and attempting identical invalid fixes until its context window or financial budget is exhausted.
+
+This fundamental shift from open-loop prediction to closed-loop operational control reorganizes the entire software development stack. It forces us to examine the precise division of labor between deterministic procedural code, trained neural parameters, and the emergent orchestration layer that binds them together—the architectural boundary between Software 1.0, Software 2.0, and Software 3.0.

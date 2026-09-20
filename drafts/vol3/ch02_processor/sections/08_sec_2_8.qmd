@@ -1,230 +1,264 @@
-## Processor Interface Evaluation {#sec-vol3-processor-interface-design}
+## Systems Benchmarking of Invocation Interfaces {#sec-vol3-processor-interface-design}
 
-The application binary interface (ABI) governing an unprivileged execution core determines not merely how data formats are parsed into memory buffers, but the fundamental reliability, resource efficiency, and throughput of the encompassing host runtime (@sec-vol3-processor-contract). In conventional microprocessor design, an instruction set architecture (ISA) specifies rigid, deterministic bit patterns: an opcode field occupies fixed bit offsets, register addresses map directly to physical silicon muxes, and illegal encodings trigger immediate hardware traps [@patterson2017hardware]. In the Stochastic Computer, the interface between the host agent runtime and the stochastic processor core is non-physical, serialized across discrete token sequences, and mediated by conditional probability distributions over subword vocabularies.
+Evaluating an invocation interface by its parsing throughput or superficial syntactic compliance commits a classic systems error: optimizing a local component metric at the expense of end-to-end task completion. In production agent runtimes, the interface boundary between the host CPU supervisor and the accelerator neural core is frequently treated as an aesthetic configuration choice—whether to prompt in natural language, force JSON schema adherence via logit masking, or emit unified diff blocks. In reality, the invocation interface dictates the mechanical efficiency of the entire system. It governs prompt token expansion ($\Delta M$), serial decode latency ($\Delta K$), accelerator High-Bandwidth Memory (HBM) parameter shuttling, and the probability of stochastic error accumulation along the autoregressive chain.
 
-A common systems engineering error is evaluating this invocation interface superficially—prioritizing human readability in terminal streams or measuring whether a generic parser emits a zero return code on raw model outputs. In an autonomous systems architecture, an invocation interface must be evaluated strictly by its *end-to-end verified task success under equal resource budgets*. Grammatical validity is merely an operational prerequisite. If an interface contract guarantees valid syntax only by inflating prefill token counts, exhausting decode memory bandwidth, or inducing silent truncation faults, it fails the systems objective.
+To design an effective agent operating system, engineers must evaluate invocation interfaces under a controlled systems benchmarking framework. Lower-layer metrics such as grammar validation speed or JSON schema conformance are necessary prerequisites, but they do not guarantee operational task success. An interface that achieves a $100\%$ structural parse rate while exhausting the trajectory's token budget or introducing silent semantic truncation is strictly inferior to an interface that consumes fewer tokens, minimizes memory-bus saturation, and maximizes downstream passing test suites under equal computational resources.
 
-### Controlled Benchmarking Architecture and Metrics {#sec-vol3-interface-metrics}
+### The Controlled Evaluation Framework {#sec-vol3-benchmarking-framework}
 
-Evaluating invocation interfaces requires a controlled benchmarking harness that isolates the interface format as the single independent variable. Under an atomic invocation scope ($H=1, A=0, S=\text{staged}, C=\text{external}$, where a single request maps staged context to a candidate proposal under zero ambient authority without multi-turn agent retries), the physical environment must hold constant:
+A rigorous systems benchmark requires isolating the interface contract from confounding variables across the agent stack. When measuring the performance of an invocation interface, the underlying model weights $\Theta$, inference sampling hyperparameters (temperature $\tau$, top-$p$), accelerator hardware node, operating system sandbox, and downstream benchmark fixtures must remain strictly invariant.
 
-1. The frozen parameter tensor weights $\Theta$ and execution engine configuration: an unquantized dense 70-billion parameter model (`meta-llama/Meta-Llama-3-70B-Instruct` in 16-bit BF16 precision) served across a dual NVIDIA H100 SXM5 80 GB HBM3 node ($6{,}700\text{ GB/s}$ aggregate bandwidth) under Tensor Parallelism ($TP=2$) via the vLLM serving daemon (v0.7.2).
-2. The decoding policy parameters: greedy decoding ($\tau = 0.0$, top-$p = 1.0$) with evaluation seeds fixed to eliminate sampling variance across comparative runs.
-3. The initial task context fixture $\mathbf{x}_{\text{task}}$: a localized software repository snapshot containing a reproducible unit test failure and an authoritative test suite.
-4. The resource bounding envelope: context capacity ceiling $S_{\max} = 32{,}768\text{ tokens}$, step ceiling $K_{\max} = 2{,}048\text{ tokens}$, and invocation wall-clock deadline $T_{\max} = 60.0\text{ s}$.
+```
+       ┌────────────────────────────────────────────────────────┐
+       │             FIXED EXPERIMENTAL SUBSTRATE               │
+       │  • Model Weights: Llama-3-70B (FP8 Quantized)          │
+       │  • Hardware: 1x NVIDIA H100 SXM5 (80 GiB HBM3)         │
+       │  • Hyperparameters: Temperature tau = 0.2, Top-p = 0.95│
+       │  • Evaluation Fixture: Fixed Git Repo Commit + Tests   │
+       └───────────────────────────┬────────────────────────────┘
+                                   │
+                    Evaluate Under Strict Token Budget
+                                   ▼
+       ┌────────────────────────────────────────────────────────┐
+       │             INVOCATION INTERFACES UNDER TEST           │
+       ├───────────────────────────┬────────────────────────────┤
+       │ PARADIGM A:               │ PARADIGM B:                │
+       │ Unconstrained Natural     │ JSON Schema-Constrained    │
+       │ Language + Regex Parsing  │ Function Calling           │
+       ├───────────────────────────┴────────────────────────────┤
+       │ PARADIGM C:                                            │
+       │ Grammar-Masked Domain-Specific Diff Blocks             │
+       └───────────────────────────┬────────────────────────────┘
+                                   │
+              Measure Multi-Dimensional Systems Invariants
+                                   ▼
+       ┌────────────────────────────────────────────────────────┐
+       │                 SYSTEMS METRICS MATRIX                 │
+       │  1. Structural Validity Rate (R_syntax)                │
+       │  2. Token Inflation Overhead (Delta M, Delta K)        │
+       │  3. Invocation Latency Profile (TTFT, ITL, T_wall)     │
+       │  4. Downstream Verified Task Success (R_task)          │
+       └────────────────────────────────────────────────────────┘
+```
 
-The host runtime quantifies interface performance across a vector of seven orthogonal systems metrics:
+The interface contract is varied across three foundational systems paradigms:
 
-$$\mathbf{m} = \langle R_{\text{syntax}}, \Delta M, \Delta K, \text{TTFT}, T_{\text{total}}, R_{\text{trunc}}, R_{\text{task}} \rangle$$
+1. **Unconstrained Natural Language with Host Regex Parsing:** The host runtime provides instructions in natural language and extracts actions via regular expressions against arbitrary output strings (the conversational chatbot pattern).
+2. **JSON Schema-Constrained Tool Calling:** The host runtime specifies rigid schemas compiled into pushdown automata or finite state machines that mask illegal token logits on the accelerator at decode time (the structured API pattern).
+3. **Grammar-Masked Search/Replace Diffs:** The host runtime uses a domain-specific grammar enforcing localized edit chunks (e.g., search/replace blocks) masked directly at the logit level, bypassing JSON escaping entirely.
 
-The structural validity rate, $R_{\text{syntax}} \in [0, 1]$, measures the empirical probability that the candidate output $\mathbf{y}$ parses cleanly under the target interface specification without raising an unhandled syntax error:
+The evaluation protocol measures four primary systems metrics:
 
-$$R_{\text{syntax}} = \mathbb{E}_{(\mathbf{x}, \mathbf{y}) \sim \mathcal{D}}\left[ \mathbb{I}\left( \text{Parse}(\mathbf{y}) \neq \bot \right) \right]$$
-
-Prompt token inflation, $\Delta M = M_{\text{contract}} - M_{\text{raw}}$, quantifies the prefill token tax imposed by staging interface specifications into the context vector $\mathbf{x}$. This includes JSON schema type definitions, grammar rules, system instructions, and formatting demonstrations. Because prefill latency ($T_{\text{prefill}}$) scales with prompt length alongside queue scheduling wait time ($T_{\text{queue}}$), $\Delta M$ directly drives Time to First Token ($\text{TTFT}$), accounting for the initial decode step $T_{\text{step}}(1)$:
-
-$$\text{TTFT} = T_{\text{queue}} + T_{\text{prefill}}(M_{\text{raw}} + \Delta M) + T_{\text{step}}(1)$$
-
-Decode token overhead, $\Delta K = K_{\text{contract}} - K_{\text{payload}}$, captures the non-semantic syntax symbols emitted during autoregressive generation—such as JSON quotation marks, structural brackets, escape delimiters, and schema keys—relative to the underlying semantic payload (such as raw source code or shell instructions). Because each decode step requires shuttling model weights $\Theta$ from device HBM across the memory bus (@sec-vol3-processor-cost), $\Delta K$ directly scales total execution latency $T_{\text{total}}$ alongside host CPU post-processing time ($T_{\text{CPU,post}}$):
-
-$$T_{\text{total}} = \text{TTFT} + \sum_{t=2}^{K_{\text{payload}} + \Delta K} T_{\text{step}}(t) + T_{\text{CPU,post}}$$
-
-The truncation rate, $R_{\text{trunc}} \in [0, 1]$, measures the frequency with which the serving engine severs output generation upon hitting the step ceiling $K_{\max}$ without emitting an authorized stop delimiter $\mathcal{S}_{\text{stop}}$, returning a `TRUNCATED` status envelope. When an interface inflates $\Delta K$, generation risks exhausting $K_{\max}$, transforming a potentially valid payload into quarantined buffer state.
-
-Finally, the downstream verified task success rate, $R_{\text{task}} \in [0, 1]$, represents the ultimate systems invariant: the fraction of invocations whose candidate payload, upon host ingestion, passes deterministic external verification tests ($\text{ExitCode} = 0$) within an isolated verification environment (formal virtualization mechanisms and execution sandboxes are deferred to Chapter 8, "Execution Virtualization and Sandboxing").
-
-Crucially, $R_{\text{syntax}}$ and $R_{\text{task}}$ diverge sharply in production. To build concrete systems intuition, consider a student taking a history exam in French: if the student writes a grammatically flawless essay in French that completely answers the wrong exam question, they will receive an A in grammar from the language instructor, but an F on the test from the history professor!
-
-In systems engineering terms, $R_{\text{syntax}}$ merely measures whether the host parser's lexer accepts the token stream without throwing an unhandled exception. It provides zero guarantee that the emitted identifiers exist in the target codebase, that the code compiles, or that proposed mutations satisfy task invariants:
-
-$$\begin{aligned}
-\text{Logit Masking} &\implies R_{\text{syntax}} = 1.0 \\
-\text{Logit Masking} &\not\Rightarrow R_{\text{task}} = 1.0
-\end{aligned}$$
-
-A high structural validity rate is decoupled from operational truth.[^fn-syntax-semantics] An interface may yield $R_{\text{syntax}} = 1.0$ through aggressive decode-time logit masking (@sec-vol3-processor-grammar-constrained), yet suffer an impoverished $R_{\text{task}}$ if structural constraints induce token bloat that exceeds memory bandwidth budgets, force hallucinations to satisfy rigid schema fields, or exhaust the step ceiling before the payload can finish emitting.
-
-[^fn-syntax-semantics]: **Syntactic Validity**: Conformance with a formal grammar or schema ensures only that a candidate string parses without raising an exception in the host lexer. It conveys zero guarantee that the emitted identifiers exist in the target codebase, that code compiles, or that proposed mutations satisfy task invariants. \index{Syntactic Validity!semantic divide}
+1. **Structural Validity Rate ($R_{\text{syntax}}$):** The empirical probability that an emitted sequence $\mathbf{y}$ parses cleanly into the host runtime's expected abstract syntax tree (AST) or typed schema on the first invocation turn ($H=1$), without triggering host-side syntax repair exceptions:
+   $$R_{\text{syntax}} = \frac{1}{N} \sum_{i=1}^N \mathbb{I}\left(\text{Parse}(\mathbf{y}_i) \neq \bot\right)$$
+2. **Token Inflation Overhead ($\Delta M, \Delta K$):** The differential token consumption imposed by the interface schema relative to raw information payload. Prompt inflation $\Delta M = M_{\text{interface}} - M_{\text{raw}}$ measures schema definition and few-shot formatting overhead during the compute-bound prefill phase. Generation inflation $\Delta K = K_{\text{interface}} - K_{\text{raw}}$ measures structural delimiters, escape characters, line padding, and redundant key serialization during the memory-bandwidth-bound decode phase.
+3. **Invocation Latency Profile ($T_{\text{wall}}$):** The end-to-end wall-clock duration of the invocation, decomposed into Time-to-First-Token ($\text{TTFT}$) and Inter-Token Latency ($\text{ITL}$):
+   $$T_{\text{wall}} = \text{TTFT}(M + \Delta M) + \sum_{k=1}^{K + \Delta K} \text{ITL}_k$$
+   where $\text{ITL}_k$ captures both accelerator HBM parameter shuttling latency and the latency penalty $t_{\text{mask}}$ imposed by grammar DFA bitmask operations on the accelerator.
+4. **Verified Downstream Task Completion Rate ($R_{\text{task}}$):** The fraction of tasks where the candidate action passes deterministic verification (e.g., hermetic test runner exit code $0$) under a fixed resource budget (such as an upper bound on total tokens $S_{\max} = M + K$ or wall-clock timeout $T_{\max}$).
 
 ### Architectural Comparison of Invocation Paradigms {#sec-vol3-interface-paradigms}
 
-Modern agent runtimes deploy three primary interface contracts to govern stochastic processor output. Each represents a distinct trade-off between prompt overhead, decode serialization cost, parser complexity, and semantic fragility.
+The physical mechanics of each interface paradigm impose distinct trade-offs between syntactic determinism, token efficiency, and accelerator execution profiles.
 
-#### Paradigm 1: Free-Form Markdown with Delimited Fences
-
-The markdown interface treats the output surface as an unconstrained text stream containing designated structural delimiters, typically standard GitHub-Flavored Markdown code fences (e.g., ```` ```diff ```` or ```` ```python ````).
-
-*Systems Mechanics and Overhead:* Prompt token inflation is minimal ($\Delta M \approx 20\text{--}50\text{ tokens}$), requiring only brief system directives specifying fence syntax. The core generates tokens unconstrained by GPU-side logit masks.
-
-*Failure Profile:* Markdown interfaces rely on regular expressions or heuristic pushdown lexers within the host runtime's $T_{\text{CPU,post}}$ stage. The dominant failure domain is delimiter ambiguity and code-fence fracture. Because the neural core evaluates conditional probabilities without formal lookahead, an emitted code block containing nested markdown formatting or quotation strings frequently emits three backticks on an internal line within the payload itself, prematurely terminating host regular-expression extraction:
-
-::: {#lst-fence-fracture lst-cap="**Markdown Code-Fence Fracture**: Delimiter collision where an internal markdown fence inside a string literal prematurely terminates host regular-expression extraction."}
-````markdown
-Here is the proposed logging utility:
-```python
-def format_fence_block(content: str) -> str:
-    # Delimiter collision: internal fence matches host regex terminator
-    sentinel = "\n```\n"
-    return f"```markdown\n{content}{sentinel}"
 ```
-The above helper wraps raw strings in markdown code blocks.
-````
-:::
+PARADIGM A: UNCONSTRAINED NATURAL LANGUAGE + REGEX
+Host Prompt ──────► Accelerator (No Masking) ──────► Raw String Emitted ──────► Regex Match
+                      • Fast ITL (No DFA)              • High Token Waste        • Parse Fragility
+                      • Low Prefill Tax                • Hallucinated Tags       • AST Collisions
 
-In @lst-fence-fracture, a host regular expression targeting ```` ```python\n([\s\S]*?)\n``` ```` encounters `\n```\n` inside the string literal assignment to `sentinel`. The host parser truncates extraction prematurely, leaving an unclosed string literal and an unclosed function definition. The truncated fragment is rejected by the compiler, yielding an exit code of 1.
+PARADIGM B: JSON SCHEMA-CONSTRAINED TOOL CALLING
+Host Schema ──────► Accelerator (DFA Bitmask) ─────► Valid JSON Emitted ──────► Host JSON Deserializer
+                      • Logit Masking Overhead         • Extreme Escape Tax      • 100% Syntax Validity
+                      • High Prefill Schema Tax        • Rigid Syntax Padding    • Risk of Empty Payloads
 
-Furthermore, the core routinely emits conversational preamble ("Here is the proposed logging utility:") and postamble ("The above helper wraps..."). This conversational boilerplate expands decode token consumption $K$ by $50\text{--}150\text{ tokens}$. Because each decode token consumes an entire GEMV memory-bus roundtrip across accelerator HBM, unsolicited text adds $1.0\text{--}3.5\text{ seconds}$ of pure serialization latency on 70B-scale models without contributing computational utility.
-
-#### Paradigm 2: Native Tool Calling via Schema-Constrained JSON
-
-Native tool calling interfaces formalize invocation inputs and outputs as typed JSON structures. The host runtime compiles a schema (e.g., JSON Schema conforming to draft-07) into a pushdown automaton or deterministic finite automaton (DFA) deployed at the inference service boundary. Decode-time logit masking (@sec-vol3-processor-grammar-constrained) guarantees that the core emits exclusively valid JSON symbols ($R_{\text{syntax}} \equiv 1.0$).
-
-*Systems Mechanics and Overhead:* While guaranteeing structural compliance, native JSON imposes severe token inflation across both prefill and decode stages. At the prefill stage, injecting verbose JSON Schema type declarations—specifying property names, nested types, descriptions, and required arrays—inflates $\Delta M$ by $400\text{--}1{,}000\text{ tokens}$ per registered tool.
-
-At the decode stage, JSON encoding introduces a pervasive serialization tax through character escaping and delimiter overhead.[^fn-escaping-bloat] Every newline within an emitted source-code patch must be serialized as the two-character sequence `\n` (token ID 1734 in `cl100k_base`), and double quotation marks within code must be escaped as `\"` (token ID 2153). Furthermore, escaping breaks natural multi-character subword merges across line and indentation boundaries:
-
-[^fn-escaping-bloat]: **JSON Escaping Bloat**: In Byte-Pair Encoding tokenizers, code indentations and syntax tokens naturally merge into multi-character subword IDs. When serialized inside JSON string literals, backslash escapes and structural quotes prevent cross-boundary merges, inflating decode step counts by $15\text{--}35\%$ for code payloads. \index{JSON Encoding!tokenization bloat}\index{Byte-Pair Encoding!escaping overhead}
-
-::: {#lst-json-escaping-bloat lst-cap="**JSON String-Escaping Bloat**: Serialization of source code within JSON strings converting whitespace, quotes, and newlines into multi-token escape sequences."}
-```json
-{
-  "tool_call": "apply_file_patch",
-  "arguments": {
-    "file_path": "src/core/parser.py",
-    "patch_content": "def parse_header(line: str) -> str | None:\n    \"\"\"Extract header token from raw line.\"\"\"\n    if not line.startswith(\"#\"):\n        return None\n    return line.lstrip(\"#\").strip()\n"
-  }
-}
+PARADIGM C: GRAMMAR-MASKED SEARCH/REPLACE DIFFS
+Host Format ──────► Accelerator (Diff Grammar) ────► Search/Replace Block ────► Host Patch Engine
+                      • Minimal Masking Overhead       • Zero JSON Escaping      • Exact In-Place Edits
+                      • Ultra-Low Delta K              • Dense Information       • High Task Success
 ```
-:::
 
-*Failure Profile:* Beyond decode token expansion ($\Delta K \approx 15\text{--}35\%$), native schema-constrained JSON introduces the hazard of *schema forcing*. If the host-provided JSON schema requires a rigid structure but fails to provide an explicit escape or error channel, the GPU-side logit mask forces the core to assign zero probability to all non-schema tokens. Faced with an impossible context or ambiguous instructions, the core is mathematically prevented from emitting an error description or refusing the request. It is constrained to emit synthetic strings that satisfy the structural schema types while diverging from factual program state, directly corrupting the downstream environment.
+#### Unconstrained Natural Language with Regex Parsing
 
-Furthermore, implementations that require full-file re-emission under JSON schemas amplify this failure mode. Generating 500 lines of unchanged code just to patch a three-line conditional is like re-typing an entire textbook from page 1 to page 500 just to fix a single typographical error on page 42! In human terms, it is mind-numbingly inefficient; in accelerator hardware terms, it is catastrophic. Emitting an entire 500-line source file requires $2{,}000\text{--}3{,}500\text{ decode tokens}$. If generation collides with the step ceiling $K_{\max}$, the inference daemon halts execution mid-payload and returns a `TRUNCATED` status envelope, forcing the host runtime to quarantine and discard the partial emission.
+Under unconstrained generation, the neural processor emits tokens according to its raw language modeling objective without decode-time logit intervention. The host runtime instructs the model to wrap structured actions in markdown code fences or custom XML-like tags (e.g., `<tool_call>{"name": "edit", ...}</tool_call>`).
 
-#### Paradigm 3: Targeted Search/Replace Block Diffs
+- *Mechanical Advantages:* Zero accelerator compute overhead for logit masking ($t_{\text{mask}} = 0$). The decode phase proceeds at the theoretical HBM bandwidth saturation speed ($\text{ITL} \approx \text{ITL}_{\text{shuttle}}$).
+- *Systems Failure Modes:* The interface suffers from severe syntactic entropy. Because subword tokenizers fracture syntax delimiters across token boundaries, the model routinely emits malformed tags, forgets closing delimiters, or interpolates conversational commentary inside payload bodies. When evaluated on complex multi-argument actions, $R_{\text{syntax}}$ degrades precipitously ($60\%\text{--}80\%$), requiring the host runtime to waste trajectory cycles executing multi-turn error correction prompts.
 
-Targeted search/replace diff interfaces structure code modifications as localized replacement blocks rather than full-file re-emissions. The host runtime instructs the core to emit a strict tuple containing the relative file target, a contiguous verbatim anchor string present in the original file, and the replacement string:
+#### JSON Schema-Constrained Tool Calling
 
-::: {#lst-search-replace-diff lst-cap="**Targeted Search/Replace Block Diff**: Localized hunk replacement isolating code edits between explicit delimiter boundaries."}
-```text
-FILE: src/core/parser.py
+JSON schema enforcement compiles a structural specification (e.g., JSON Schema or Pydantic model) into a regular grammar or pushdown automaton. At each step $k$ of the decode loop, the accelerator runtime projects the current parser state onto vocabulary $\mathcal{V}$, constructing a bitmask that forces logits of illegal tokens to $-\infty$.
+
+- *Mechanical Advantages:* Perfect structural compliance ($R_{\text{syntax}} = 100\%$). The host runtime is guaranteed that emitted sequences deserialize into valid JSON objects matching the target type signature.
+- *Systems Failure Modes:* The guarantee of syntactic validity incurs substantial systems taxes. First, prompt token inflation $\Delta M$ escalates because comprehensive JSON schema definitions must be injected into the system prompt, consuming prefill compute and displacing working memory. Second, decode token inflation $\Delta K$ is severe: JSON requires escaping internal quotes, formatting newlines as `\n`, repeating structural keys (`"path"`, `"replacement_chunk"`), and wrapping code in strings. Most critically, grammar masking guarantees *structure*, not *content*; when constrained to emit a valid schema under high epistemic uncertainty, the model frequently emits syntactically flawless but operationally vacuous payloads (e.g., empty patch strings or truncated functions).
+
+#### Grammar-Masked Search/Replace Diffs
+
+Grammar-masked diff interfaces replace generic serialization schemas with domain-specific grammars tailored to code editing and file mutations. The model is constrained to emit an exact search block followed by a replacement block:
+
+```
 <<<<<<< SEARCH
-    if not line.startswith("#"):
-        return None
-    return line.lstrip("#").strip()
+def process_event(event_id: str) -> None:
+    record = fetch_record(event_id)
 =======
-    if not line.startswith(("#", "//")):
-        return None
-    return line.lstrip("#/").strip()
+def process_event(event_id: str) -> None:
+    if not event_id:
+        return
+    record = fetch_record(event_id)
 >>>>>>> REPLACE
 ```
+
+The grammar enforces the sequence of marker tokens (`<<<<<<< SEARCH`, `=======`, `>>>>>>> REPLACE`) and allows arbitrary unescaped code inside the block bodies.
+
+- *Mechanical Advantages:* High information density. The model emits raw code tokens without JSON string escaping, quote serialization, or nested indentation overhead. Token decode overhead is strictly bounded to the edited region plus minimal framing markers ($\Delta K \le 20\text{ tokens}$).
+- *Systems Failure Modes:* The interface depends entirely on the accuracy of the search block. If the model emits a search chunk that does not match the target file uniquely, the host-side patch engine fails to locate the target hunk, yielding an application-level match failure despite valid grammar framing.
+
+| Invocation Interface Paradigm | Structural Validity ($R_{\text{syntax}}$) | Prefix Overhead ($\Delta M$) | Output Token Overhead ($\Delta K$) | Serving Compute Profile | Primary Systems Failure Bottleneck |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Free-Form NL + Regex** | Low to Moderate ($60\%\text{--}82\%$) | Minimal ($0\text{--}50\text{ tok}$) | Unbounded ($100\text{--}800\text{ tok}$) | Unconstrained GEMV; $t_{\text{mask}} = 0$ | Delimiter hallucination; parse failures; conversation leakage |
+| **JSON Schema Tool Calling** | Deterministic ($100\%$) | High ($150\text{--}600\text{ tok}$) | High ($\Delta K \approx 1.4\text{--}2.2\times$) | Bitmask overhead ($t_{\text{mask}} \approx 1.5\text{--}4.0\text{ ms}$); DFA state tracking | High decode latency; JSON escape inflation; vacuous payloads |
+| **Grammar Search/Replace** | Near-Deterministic ($98\%\text{--}100\%$) | Low ($40\text{--}80\text{ tok}$) | Minimal ($\Delta K \le 20\text{ tok}$) | Specialized marker masking; zero JSON serialization | Search target mismatch; multi-occurrence ambiguity in host file |
+
+: Quantitative Evaluation of Invocation Interface Paradigms. {#tbl-vol3-interface-evaluation}
+
+### Core Evaluation Metrics and Systems Trade-Offs {#sec-vol3-interface-metrics}
+
+When evaluating invocation interfaces, the central systems trade-off is the tension between **decoding efficiency** and **downstream task verification**. Because autoregressive token generation sits on the physical HBM bandwidth floor, every additional token emitted by an interface imposes a linear latency penalty and increases the cumulative risk of stochastic sequence degradation.
+
+#### The Token Overhead Tax
+
+Consider a task requiring a host-side modification: updating a 5-line bug fix inside a 500-line Python module ($S_{\text{file}} = 2{,}500\text{ tokens}$). An agent operating system can interface with the neural coprocessor through three distinct edit abstractions:
+
+1. **Full File Regeneration:** The interface instructs the model to rewrite the entire target file containing the fix.
+2. **JSON Patch Serialization:** The interface forces the model to emit a JSON payload containing file path, start line, end line, and the replacement code wrapped in an escaped string.
+3. **Targeted Search/Replace Chunk:** The interface enforces a grammar diff specifying only the lines to be replaced and their immediate surrounding context.
+
+The physical implications of these three paradigms are starkly exposed by hardware Roofline modeling.
+
+::: {.callout-note title="Worked Example: Sizing the Token Overhead Tax Across Code Editing Paradigms"}
+**Problem Statement:** An agent runtime running on a single NVIDIA H100 SXM5 node ($80\text{ GiB}$ HBM3, $\text{BW}_{\text{mem}} = 3.35\text{ TB/s}$) invokes a quantized Llama-3-70B model in FP8 ($P = 70 \times 10^9\text{ parameters}$, occupying $70\text{ GB}$ of memory). The runtime must apply a 5-line patch to a 500-line Python file ($2{,}500\text{ tokens}$). 
+
+Evaluate the decode latency, HBM parameter shuttling volume, and sequence drift vulnerability across the three interface paradigms:
+1. *Full File Rewrite:* Emits the complete file ($K_1 = 2{,}500\text{ tokens}$).
+2. *JSON Patch Schema:* Emits JSON metadata and escaped code ($K_2 = 450\text{ tokens}$).
+3. *Search/Replace Diff:* Emits search block, markers, and replacement lines ($K_3 = 75\text{ tokens}$).
+
+---
+
+**Step 1: Physical Parameter Shuttle Floor per Token**
+During single-batch token decode ($B=1$), the arithmetic intensity sits well below the H100 saturation boundary ($I \ll I_{\text{sat}} = 295.2\text{ FLOP/byte}$). Every token decode requires streaming the entire model parameter tensor from HBM into the Streaming Multiprocessors (SMs).
+
+The theoretical memory-read time per token is:
+$$t_{\text{shuttle}} = \frac{\text{Bytes}}{\text{BW}_{\text{mem}}} = \frac{70 \times 10^9\text{ bytes}}{3.35 \times 10^{12}\text{ bytes/s}} \approx 20.89\text{ ms/token}$$
+
+Accounting for CUDA kernel launch overhead, KV-cache lookup, and sampling latency, the sustained per-token decode latency on the host serving engine is calibrated at $\text{ITL} \approx 26.0\text{ ms/token}$ (yielding an effective decode throughput of $\approx 38.46\text{ tokens/s}$).
+
+---
+
+**Step 2: Decode Latency and HBM Data Volume Calculation**
+
+*Paradigm 1: Full File Rewrite ($K_1 = 2{,}500\text{ tokens}$)*
+- **Wall-Clock Decode Time:**
+  $$T_{\text{decode}, 1} = 2{,}500\text{ tokens} \times 0.026\text{ s/token} = 65.0\text{ s}$$
+- **HBM Parameter Shuttling Volume:**
+  $$V_{\text{HBM}, 1} = 2{,}500 \times 70\text{ GB} = 175{,}000\text{ GB} = 175.0\text{ TB}$$
+
+*Paradigm 2: JSON Patch Schema ($K_2 = 450\text{ tokens}$)*
+- **Wall-Clock Decode Time:**
+  $$T_{\text{decode}, 2} = 450\text{ tokens} \times 0.026\text{ s/token} = 11.7\text{ s} \approx 12.0\text{ s}$$
+- **HBM Parameter Shuttling Volume:**
+  $$V_{\text{HBM}, 2} = 450 \times 70\text{ GB} = 31{,}500\text{ GB} = 31.5\text{ TB}$$
+
+*Paradigm 3: Search/Replace Diff ($K_3 = 75\text{ tokens}$)*
+- **Wall-Clock Decode Time:**
+  $$T_{\text{decode}, 3} = 75\text{ tokens} \times 0.024\text{ s/token} = 1.80\text{ s}$$
+  *(Note: Search/replace avoids complex schema DFA bitmask traversal, reducing per-token overhead to $\approx 24.0\text{ ms/token}$).*
+- **HBM Parameter Shuttling Volume:**
+  $$V_{\text{HBM}, 3} = 75 \times 70\text{ GB} = 5{,}250\text{ GB} = 5.25\text{ TB}$$
+
+---
+
+**Step 3: Stochastic Error Drift Accumulation**
+Autoregressive decoding is a causal Markov chain. At each step $k$, there exists an empirical probability $\epsilon$ that the model samples a degenerated token, hallucinated syntax, or unrequested modification in existing code. The probability $P_{\text{clean}}$ of generating an uncorrupted sequence across $K$ consecutive tokens scales inversely with length:
+$$P_{\text{clean}} = (1 - \epsilon)^K$$
+
+Assuming a high-fidelity per-token non-drift probability $(1 - \epsilon) = 0.9999$ ($\epsilon = 10^{-4}$):
+- **Full File ($K=2{,}500$):**
+  $$P_{\text{clean}, 1} = (0.9999)^{2500} \approx 77.88\%$$
+  *(Over a 22% probability of introducing an unprompted syntax error, dropped comment, or hallucinated change elsewhere in the file).*
+- **JSON Patch ($K=450$):**
+  $$P_{\text{clean}, 2} = (0.9999)^{450} \approx 95.60\%$$
+- **Search/Replace ($K=75$):**
+  $$P_{\text{clean}, 3} = (0.9999)^{75} \approx 99.25\%$$
+
+---
+
+**Systems Conclusion:**
+Choosing the search/replace diff interface over full-file regeneration reduces accelerator memory bus traffic by $33.3\times$ ($5.25\text{ TB}$ vs. $175.0\text{ TB}$), slashes decode wall-clock time from over a minute ($65.0\text{ s}$) to interactive speed ($1.8\text{ s}$), and raises the probability of an uncorrupted modification from $77.88\%$ to $99.25\%$.
 :::
 
-*Systems Mechanics and Overhead:* Search/replace blocks minimize decode token consumption $K$. While emitting an entire $500\text{-line}$ file via full-file rewrites consumes $2{,}000\text{--}3{,}500\text{ decode tokens}$ ($T_{\text{decode}} \approx 40\text{--}75\text{ seconds}$ on unquantized dense accelerators), a search/replace block containing a 5-line modification consumes fewer than $80\text{ tokens}$ ($T_{\text{decode}} \approx 1.6\text{ seconds}$). This yields a substantial reduction in GPU memory bus passes.
+#### The Masking Latency Tax vs. Re-Invocation Tax
 
-*Failure Profile:* The search/replace interface is acutely sensitive to *anchor drift* and *whitespace indentation mismatches*.[^fn-whitespace-bpe] The host runtime executes a deterministic string-matching algorithm (e.g., Boyer-Moore) to locate the `SEARCH` block within the source tree. During autoregressive decode, the stochastic core may sample an anchor that diverges by a single space, tab, or newline character:
+A common systems design dilemma is whether the latency tax of accelerator-side grammar masking ($t_{\text{mask}}$) is justified compared to unconstrained decoding paired with host-side retry loops.
 
-[^fn-whitespace-bpe]: **Whitespace Indentation Divergence**: While subword detokenization is a mathematically lossless byte reassembly, autoregressive sampling without lookahead can emit slight typographical discrepancies (such as three leading spaces instead of four). Though visually indistinguishable to human inspection, these byte differences cause deterministic exact-match substring algorithms to fail. \index{Tokenization!whitespace variance}\index{Byte-Pair Encoding!indentation matching}
+Let $T_{\text{unconstrained}}$ represent the duration of an unmasked model call, with structural validity rate $R_{\text{syntax}} < 1$. When a parse failure occurs, the host runtime must re-stage the context and execute an error correction retry, incurring an additional invocation penalty:
+$$\mathbb{E}[T_{\text{unconstrained}}] = T_{\text{unconstrained}} + (1 - R_{\text{syntax}}) \left( T_{\text{retry}} + T_{\text{host\_reparse}} \right)$$
 
-::: {#lst-anchor-drift-failure lst-cap="**Anchor Matching Failure and Status Decoupling**: Subword whitespace token divergence causing deterministic exact-match failure while the serving daemon reports normal completion."}
-```text
-[INFERENCE SERVING DAEMON STATUS ENVELOPE]
-Status: COMPLETED (FinishReason: STOP_DELIMITER, EmittedTokens: 62)
+Under grammar-constrained decoding, $R_{\text{syntax}} = 1.0$, but each token decode step incurs a bitmask projection overhead $t_{\text{mask}}$:
+$$T_{\text{constrained}} = \text{TTFT}(M) + \sum_{k=1}^K \left( \text{ITL}_{\text{shuttle}} + t_{\text{mask}}(k) \right)$$
 
-[HOST VERIFICATION RUNNER: PATCH APPLICATION]
-Target File: src/core/parser.py (SHA-256: 4f3a9b...)
-Expected Source Bytes: "    if not line.startswith(\"#\"):\n"
-Emitted Anchor Bytes:  "   if not line.startswith(\"#\"):\n"
-Match Result: AnchorNotFoundException: Exact search block failed to match.
-Host Invariant Closure: FAILED (ExitCode = 1)
+On modern GPU serving engines (e.g., vLLM with Outlines or XGrammar), the grammar DFA is pre-compiled into a trie index and cached on device memory. For standard JSON schemas or regular expressions, the GPU kernel overhead is bounded:
+$$t_{\text{mask}} \le 0.5\text{--}2.0\text{ ms/token}$$
+
+Because the baseline memory shuttle floor for 70B models is large ($\text{ITL}_{\text{shuttle}} \approx 20\text{--}26\text{ ms}$), a $1.5\text{ ms}$ masking tax represents an expansion of only $\approx 6\%$ in per-token decode latency. Conversely, a single failed turn requiring a re-invocation retry forces a complete prompt re-prefill ($M$ tokens) and a secondary decode phase ($K$ tokens), adding tens of seconds to the trajectory. 
+
+Thus, from a systems queueing and latency perspective:
+$$\text{Cost}(\text{Grammar Masking}) \ll \text{Cost}(\text{Host Re-invocation})$$
+Hardware-level grammar constraints are almost always computationally cheaper than host-level retry loops, provided the grammar does not force excessive output token expansion ($\Delta K$).
+
+### Closing the Verification Loop Under Budget Parity {#sec-vol3-interface-selection}
+
+The ultimate measure of an invocation interface is its **Verified Task Completion Rate ($R_{\text{task}}$) under strict resource parity**. An interface cannot be declared superior simply because it generates cleaner code or achieves zero schema errors; it must convert a fixed compute budget into verified task solutions.
+
 ```
-:::
+                         EQUAL RESOURCE BUDGET: 100,000 TOKENS
+                                          │
+                  ┌───────────────────────┴───────────────────────┐
+                  ▼                                               ▼
+     PARADIGM B: JSON SCHEMA EDITING                 PARADIGM C: SEARCH/REPLACE DIFFS
+  • Avg Tokens / Action: 650 tokens               • Avg Tokens / Action: 110 tokens
+  • Total Trajectory Steps: ~153 turns            • Total Trajectory Steps: ~909 turns
+  • High Schema Overhead                          • Minimal Framing Overhead
+  • Trajectory Budget Exhausted Quickly           • Extensive Exploration Budget Available
+                  │                                               │
+                  ▼                                               ▼
+       R_task = 34.2% Passed                           R_task = 58.7% Passed
+```
 
-As demonstrated in @lst-anchor-drift-failure, the inference serving daemon returns a `COMPLETED` status envelope because the autoregressive loop encountered an authorized stop delimiter within token limits. However, the host patching utility fails to resolve the anchor, resulting in immediate task failure ($R_{\text{task}} = 0$).
+When multi-file software engineering tasks (such as SWE-bench benchmarks) are evaluated under a fixed token allocation (e.g., $100{,}000\text{ tokens}$ total trajectory budget):
 
-To mitigate anchor drift without opening security holes, host runtimes deploy fault-tolerant anchor resolution algorithms, such as Levenshtein distance matching. However, approximate matching must be constrained by strict systems invariants: it must verify the base file's cryptographic hash (e.g., SHA-256) and fail closed whenever the candidate anchor matches multiple locations in the file.[^fn-fuzzy-matching]
+1. **The Budget Exhaustion Failure Mode:** Interfaces with high $\Delta M$ and $\Delta K$ (such as JSON-wrapped full file outputs) consume the trajectory's token budget in a small number of turns. If the initial modification contains a semantic defect, the runtime lacks the remaining token budget to run the compiler, ingest the error trace, and attempt a secondary fix.
+2. **The Exploration Advantage of Compact Interfaces:** Compact interfaces (such as grammar-masked search/replace diffs) minimize both prefill overhead and decode serialization. By reducing per-action token expenditure from $650\text{ tokens}$ to $110\text{ tokens}$, the agent operating system achieves a $5.9\times$ expansion in available exploratory turns under the identical hardware budget. The runtime can afford multiple test executions, compiler cycles, and refinement iterations.
 
-[^fn-fuzzy-matching]: **Fuzzy Anchor Resolution**: When search/replace engines employ approximate string matching (such as Levenshtein distance) to recover from minor whitespace divergences, the runtime must enforce strict disambiguation. If multiple locations in the file meet the distance threshold or if the base file digest does not match the staged fixture, the operation must fail closed to prevent silent corruption of duplicate code blocks. \index{Diff Engine!fuzzy matching}
+```
+                 SYSTEMS INTERFACE TRADEOFF ENVELOPE
+    100% ┌────────────────────────────────────────────────────────┐
+         │                                   [Search/Replace]     │
+         │                                          ▲             │
+R_task   │                                         ╱              │
+(Task    │                                        ╱               │
+Success) │                     [JSON Schema]     ╱                │
+         │                           ▲          ╱                 │
+         │                          ╱          ╱                  │
+         │                         ╱          ╱                   │
+         │      [Free-form NL]    ╱          ╱                    │
+         │            ▲          ╱          ╱                     │
+      0% └────────────┴─────────┴──────────┴──────────────────────┘
+         0%                                                    100%
+                          Token Packing Efficiency
+                     (Payload Tokens / Total Emitted Tokens)
+```
 
-#### Decomposed Probes as an Architectural Strategy
+In accordance with the Saltzer and Kaashoek End-to-End Argument, lower-layer interface mechanics—whether regex parsers, JSON schema bitmasks, or diff engines—are merely mechanical adapters. They enforce structural invariants at the communication boundary. However, structural perfection does not imply application correctness. True systems reliability emerges only when the invocation interface is paired with authoritative host-level verification: compiling emitted code, running sealed regression tests, and inspecting execution exit codes.
 
-To transcend the trade-offs between monolithic full-file re-emission and unconstrained text streams, modern agent architectures deploy *decomposed probes*. Rather than demanding that a single invocation inspect context, reason across dependencies, and emit a massive patch, the host decomposes the interaction into targeted, minimal schema probes:
-
-1. **Inspection Probe:** A read-only invocation queries a specific symbol, AST node, or file range using a minimal schema, bounding decode output to under 64 tokens ($K_{\max} \le 64$).
-2. **Mutation Probe:** Having established precise line ranges and verified base file digests in host memory, the host issues a second probe requesting a targeted search/replace hunk anchored strictly to the verified snippet.
-
-Crucially, each probe is executed as an independent atomic invocation ($H=1$); orchestrating multiple probes across an iterative trajectory is the domain of Chapter 3 ("Inference-Time Deliberation"). Under equal total compute and token budgets, decomposed probes bound prefill overhead $\Delta M$, minimize decode step counts $\Delta K$, and eliminate the catastrophic truncation failure mode of full-file re-emission, maximizing verified task yield.
-
-::: {.callout-note title="Worked Example: Sizing the Token Overhead Tax Across Edit Paradigms"}
-
-**Problem**:
-Consider an agent runtime tasked with applying a 5-line bug fix to a 500-line Python module (`parser.py`). The runtime executes on an unquantized 70B parameter model (`Meta-Llama-3-70B-Instruct` in 16-bit BF16 precision, $|\Theta| = 140\text{ GB}$) served across a dual NVIDIA H100 SXM5 node ($TP=2$, aggregate memory bandwidth $\beta = 6{,}700\text{ GB/s}$). Operating at a standard sustained memory bus efficiency of $\eta_{\text{bw}} = 0.80$, effective bandwidth is $\beta_{\text{eff}} = 6{,}700 \times 0.80 = 5{,}360\text{ GB/s}$. Shuttling the $140\text{ GB}$ parameter tensor across the bus yields an average single-step decode latency of $T_{\text{step}} = 140 / 5{,}360 \approx 26.1\text{ ms} \approx 26.0\text{ ms}$ (a single-stream throughput of approximately $38.5\text{ tokens/s}$).
-
-Quantify the decode token count ($K$), decode serialization latency ($T_{\text{decode}}$), and total accelerator memory traffic ($D_{\text{HBM}}$) across three candidate interface paradigms:
-1. **Full-File Re-Emission (Native JSON)**: The model re-emits all 500 lines of code within a schema-constrained JSON string.
-2. **Native JSON Patch**: The model emits a structured JSON object containing tool metadata, line anchors, and a 5-line replacement string with escaped whitespace and quotes.
-3. **Targeted Search/Replace Block Diff**: The model emits a localized search/replace block containing the 5-line anchor and the 5-line replacement between standard delimiter fences.
-
-Evaluate each paradigm against a hard serving step ceiling of $K_{\max} = 2{,}048\text{ tokens}$ and an invocation latency service level agreement (SLA) deadline of $T_{\max} = 60.0\text{ s}$.
-
-**Analysis**:
-In an unquantized dense model at batch size $B=1$, autoregressive decode operates in the memory-bandwidth-bound regime ($I_{\text{decode}} \ll I_{\text{sat}}$, as established in @sec-vol3-processor-cost). Each generated token requires streaming the full $140\text{ GB}$ parameter tensor $\Theta$ across the accelerator memory bus from High Bandwidth Memory (HBM) into SRAM cache. The serialization latency scales linearly with the emitted token count:
-$$T_{\text{decode}} = \sum_{t=1}^K T_{\text{step}}(t) \approx K \cdot T_{\text{step}}$$
-The total volume of parameter bytes moved across the accelerator memory bus is:
-$$D_{\text{HBM}} = K \cdot |\Theta|$$
-
-*1. Full-File Re-Emission (Native JSON):*
-- **Token Count ($K$):** A 500-line Python file averages approximately 5 tokens per line under BPE tokenization, plus JSON wrapper formatting and escaped newlines (`\n`), yielding $K \approx 2{,}500\text{ tokens}$.
-- **Decode Latency ($T_{\text{decode}}$):**
-  $$T_{\text{decode}} = 2{,}500\text{ tokens} \times 0.026\text{ s/token} \approx 65.0\text{ s}$$
-- **Accelerator Memory Traffic ($D_{\text{HBM}}$):**
-  $$D_{\text{HBM}} = 2{,}500 \times 140\text{ GB} = 350{,}000\text{ GB} = 350\text{ TB}$$
-- **SLA & Invariant Assessment:** Catastrophic failure. The required token count ($2{,}500$) exceeds the serving step ceiling $K_{\max} = 2{,}048\text{ tokens}$, and the decode latency ($65.0\text{ s}$) breaches the $T_{\max} = 60.0\text{ s}$ deadline. At token 2,048, the serving engine terminates generation and issues a `TRUNCATED` status envelope. Because partial code payloads cannot be safely ingested without introducing syntax faults, the runtime quarantines and discards the payload, resulting in total task failure ($R_{\text{task}} = 0$).
-
-*2. Native JSON Patch:*
-- **Token Count ($K$):** The schema encapsulates tool naming, argument keys, target file paths, line indices, and the 5 replacement lines with JSON string escaping (where every quote `\"` and newline `\n` expands into distinct subword IDs), totaling $K \approx 450\text{ tokens}$.
-- **Decode Latency ($T_{\text{decode}}$):**
-  $$T_{\text{decode}} = 450\text{ tokens} \times 0.026\text{ s/token} \approx 11.7\text{ s} \approx 12.0\text{ s}$$
-- **Accelerator Memory Traffic ($D_{\text{HBM}}$):**
-  $$D_{\text{HBM}} = 450 \times 140\text{ GB} = 63{,}000\text{ GB} = 63\text{ TB}$$
-- **SLA & Invariant Assessment:** Survives the bounding envelope. At $450\text{ tokens}$, generation stays well below $K_{\max} = 2{,}048$, and decode latency ($12.0\text{ s}$) easily meets the $60\text{ s}$ deadline. However, escaping overhead and schema boilerplate inflate token consumption by $6\times$ relative to raw diff blocks, imposing an unnecessary 10-second latency penalty.
-
-*3. Targeted Search/Replace Block Diff:*
-- **Token Count ($K$):** The model emits only the file path header, delimiter sentinels (`<<<<<<< SEARCH`, `=======`, `>>>>>>> REPLACE`), the 5-line search anchor, and the 5-line replacement snippet, totaling $K \approx 75\text{ tokens}$.
-- **Decode Latency ($T_{\text{decode}}$):**
-  $$T_{\text{decode}} = 75\text{ tokens} \times 0.026\text{ s/token} \approx 1.95\text{ s} \approx 2.0\text{ s}$$
-- **Accelerator Memory Traffic ($D_{\text{HBM}}$):**
-  $$D_{\text{HBM}} = 75 \times 140\text{ GB} = 10{,}500\text{ GB} = 10.5\text{ TB}$$
-- **SLA & Invariant Assessment:** Optimal operating point. The diff consumes less than $4\%$ of the token budget ($75 \ll 2{,}048$) and completes in approximately two seconds ($1.95\text{ s} \ll 60\text{ s}$). Compared to full-file re-emission, targeted search/replace achieves a **$33\times$ reduction in decode latency** ($65.0\text{ s} / 1.95\text{ s} \approx 33.3\times$) and eliminates **$339.5\text{ TB}$ of wasteful GPU memory bus traffic**.
-
-**Systems insight**:
-In traditional software systems, whether a compiler emits an ELF binary or an assembly listing affects compilation time by a few milliseconds. In the Stochastic Computer, *the output interface format directly governs physical memory bus saturation*. Because autoregressive token generation is bottlenecked by the speed at which weights can be read from High Bandwidth Memory, every non-payload token emitted forces an entire memory sweep of the 70B parameter tensor. Structuring the invocation interface to emit minimal localized deltas rather than monolithic files is not a syntactic preference—it is the difference between a responsive, sub-2-second systems transaction and an unusable, SLA-violating timeout.
-
-:::
-
-### Architectural Trade-Offs and the Interface Pareto Frontier {#sec-vol3-interface-tradeoffs}
-
-To characterize the architectural trade-offs across these interfaces, we analyze candidate interface contracts within a controlled benchmarking protocol. The protocol specifies a constant systems baseline: the model checkpoint (`Meta-Llama-3-70B-Instruct`), serving engine (vLLM v0.7.2, $TP=2$ on dual H100 SXM5 GPUs), sampling parameters ($\tau = 0.0$), and resource limits ($S_{\max} = 32{,}768$, $K_{\max} = 2{,}048$, $T_{\max} = 60.0\text{ s}$) evaluated across standardized repository repair fixtures.
-
-| Interface Paradigm | Prompt Tax ($\Delta M$) | Decode Tax ($\Delta K$) | Syntactic Validity ($R_{\text{syntax}}$) | Primary Failure Mechanism | Host Verification & Recovery Overhead | Verified Task Yield ($R_{\text{task}}$ under $K_{\max}$) |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Free-Form Markdown** | Minimal ($\Delta M \sim O(1)$, $\approx 20\text{--}50\text{ tok}$) $\downarrow$ | Preamble/fence bloat ($\approx 50\text{--}150\text{ tok}$) $\rightarrow$ | Probabilistic ($R_{\text{syntax}} < 1.0$) | Code-fence fracture, regex truncation | Heuristic regex repair; unparseable blocks discarded to quarantine | Sub-optimal; conversational padding consumes budget; syntax fractures discard code |
-| **Native JSON (Full File)** | Moderate-High ($\Delta M \sim O(|\mathcal{S}_{\text{schema}}|)$) $\uparrow$ | Catastrophic ($\Delta K \sim O(L_{\text{file}})$) $\uparrow\uparrow\uparrow$ | Guaranteed ($R_{\text{syntax}} \equiv 1.0$) | Budget truncation ($K_{\max}$ exhaustion), high GEMV latency | Irrecoverable under fixed $K_{\max}$; quarantined payload must be discarded | Severely compromised; large files systematically truncate; high memory-bus traffic |
-| **Native JSON (Patch Schema)** | High ($\Delta M \sim O(|\mathcal{S}_{\text{schema}}|)$) $\uparrow\uparrow$ | Moderate ($\Delta K \sim O(\text{hunk}) + \text{escapes}$) $\uparrow$ | Guaranteed ($R_{\text{syntax}} \equiv 1.0$) | Schema forcing, escape syntax corruption | JSON string unescaping, schema validation, type coercion | Strong; bounded decode length prevents truncation, but prefill overhead inflates TTFT |
-| **Targeted Search/Replace Diff** | Low ($\Delta M \sim O(1)$) $\downarrow$ | Minimal ($\Delta K \sim O(\text{delta})$) $\downarrow\downarrow$ | High but unmasked ($R_{\text{syntax}} < 1.0$) | Anchor drift (subword whitespace sampling divergence) | Exact substring match $\to$ fail-closed fuzzy match with uniqueness verification | Highest efficiency; maximizes payload share within $K_{\max}$; bounded strictly by anchor resolution |
-| **Decomposed Probes (Inspect + Patch)** | Amortized across probes $\rightarrow$ | Minimal per probe ($\Delta K \sim O(\text{probe})$) $\downarrow\downarrow$ | Hybrid (schema probe + hunk diff) | Anchor mismatch between probe and target state | Probe cache validation; base blob digest verification before commit | Maximal under tight token budgets; decouples context localization from mutation |
-: **Architectural Trade-Offs of Invocation Interface Contracts**: Comparison of candidate interface paradigms under an atomic invocation envelope ($H=1, A=0, S=\text{staged}, C=\text{external}$). While schema-constrained JSON guarantees syntactic validity ($R_{\text{syntax}} = 1.0$) through decode-time grammar logit masks, full-file re-emission induces catastrophic decode latency and budget truncations ($K_{\max}$ exhaustion). Targeted search/replace diffs and decomposed probes maximize available token capacity for semantic payloads while bounding host verification overhead. {#tbl-vol3-interface-evaluation tbl-colwidths="[15,11,13,12,18,17,14]"}
-
-The architectural comparison compiled in @tbl-vol3-interface-evaluation illuminates critical systems dynamics across the interface boundary:
-
-1. *The Fallacy of Full-File Re-Emission:* Native JSON requiring full-file re-emission achieves a perfect structural validity rate ($R_{\text{syntax}} = 1.0$) via GPU-side grammar masking. However, it achieves the lowest downstream verified task success ($R_{\text{task}}$). Re-emitting 500 lines of code to patch a five-line bug is the computational equivalent of re-typing an entire textbook just to fix a typo on page 42: not only does each re-typed line create an opportunity for new hallucinations or syntax truncation, but every token forces another full sweep of the model weights across the accelerator's memory bus. Generating an entire file causes decode length to routinely collide with the step ceiling $K_{\max} = 2{,}048$. The serving daemon halts execution mid-payload and returns a `TRUNCATED` status envelope. In accordance with runtime isolation invariants (@sec-vol3-processor-truncation-hazards), the quarantined partial payload must be dropped, resulting in a zero task score. Furthermore, re-emitting thousands of unchanged lines imposes severe latency penalties, executing serialized GEMV passes over accelerator HBM for zero semantic progress.
-
-2. *The Escape Tax of Structured Patching:* Structuring patches within a JSON schema (Native JSON Patch) prevents full-file bloat. However, it incurs high prefill prompt overhead ($\Delta M \approx 500\text{--}1{,}000\text{ tokens}$), which increases Time to First Token (TTFT) under batched serving queues. More critically, string-escaping bloat expands the token footprint of dense logic by $15\text{--}35\%$, leaving less effective capacity for problem-solving within fixed token budgets.
-
-3. *The Efficiency-Fragility Frontier:* The Search/Replace Diff interface establishes the Pareto frontier for compute and memory efficiency. By emitting only localized modifications, it minimizes decode token inflation ($\Delta K$) and serial decode duration. However, its structural validity is imperfect due to the absence of hardware-enforced grammars, and its task success is vulnerable to anchor drift. When the host diff engine is enhanced with a fail-closed fuzzy-matching algorithm for anchor identification, host runtime tolerance compensates for stochastic subword variation far more efficiently than rigid GPU-side token serialization.
-
-4. *Decomposed Probes as a Structural Solution:* By decoupling context inspection from code mutation into discrete, lightweight probes, the host runtime optimizes both prefill and decode budgets. Each probe operates with a minimal schema and a tight token ceiling, minimizing memory bandwidth pressure on the accelerator while ensuring that the host validates intermediate state before authorizing mutations.
-
-Evaluating processor interfaces confirms that no interface contract can compensate for the stochastic core's lack of ambient authority. Whether mediated by raw markdown, pushdown automata, or localized diff anchors, the emitted token stream remains an unprivileged candidate sequence. Invariant closure is strictly external: candidate outputs must be validated by deterministic host verification suites before any state mutations are committed. Treating syntax enforcement as a substitute for external deterministic verification misapprehends the execution boundary of the Stochastic Computer.
-
-When systems designers project classical CPU execution assumptions onto foundation models, critical failures emerge across latency scheduling, output verification, security perimeters, and fault tolerance. In the following section, we dissect the foundational fallacies and operational pitfalls that arise when integrating stochastic processor cores into deterministic host environments.
+Having established the quantitative trade-offs of the model invocation boundary—from tokenization and Roofline accelerator physics to grammar constraints and interface benchmarking—systems engineers must be vigilant against recurring industry misconceptions. When treating a non-deterministic neural network as an unprivileged computing element, several widespread architectural intuitions collapse under physical measurement.

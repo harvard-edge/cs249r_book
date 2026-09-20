@@ -1,81 +1,215 @@
-<!-- SECTION_START: 1.8 (#sec-vol3-intro-task-contract) -->
 ## The Task Specification Contract {#sec-vol3-intro-task-contract}
 
-In classical software engineering, reliable systems begin with formal interface specifications: POSIX system call signatures, OpenAPI schemas, or SQL Data Definition Language (DDL) constraints. When interacting with human users, however, requests arrive as vague, unstructured natural-language prompts: *"Fix the configuration timeout bug,"* or *"Optimize the data pipeline."*
+In production systems engineering, reliable computation begins with formal interface specifications: POSIX system call signatures, typed C application binary interfaces (ABIs), or SQL schema constraints. When a user interacts with an agentic runtime, however, requests arrive not as structured, machine-parsable types, but as open-ended, underspecified natural-language prompts: *"Fix the configuration timeout bug,"* or *"Optimize the storage engine's data ingestion."*
 
-An agentic runtime cannot execute an ambiguous prompt directly. To enforce invariant closure and guarantee operational accountability, the system must translate natural-language intent into a formal **Task Specification Contract**.
+An agentic runtime cannot execute an ambiguous prompt directly. If an operating system received a system call with an uninitialized pointer or an ambiguous intent, the kernel would reject the request with `EINVAL` rather than guessing what the programmer intended. In contrast, an unconstrained statistical foundation model will happily hallucinate missing parameters, invent nonexistent file paths, mutate unintended directories, or terminate prematurely while asserting complete success. To enforce invariant closure and guarantee operational accountability, the host runtime must translate human intent into an explicit, multi-part engineering agreement: the **Task Specification Contract**.
 
 ### The 5-Part Task Specification Contract
 
-Every operational workload submitted to an agentic system must be bound to a 5-part contract that explicitly defines its computational envelope (@tbl-five-part-contract).
+Every operational workload submitted to an agentic system must be bound to a 5-part contract that formalizes its computational envelope (@tbl-five-part-contract):
 
-::: {#tbl-five-part-contract}
-| Contract Clause | Systems Definition | Operational Concrete Example (Running Parser Scenario) |
-| :--- | :--- | :--- |
-| **1. Goal ($g$)** | Declarative statement of target post-conditions and non-goals | *"Resolve issue #1428: fix timeout under 10 ms to fall back to 5.0 s default; do not modify connection pool size."* |
-| **2. Environment ($\mathcal{E}$)**| Deterministic container image, commit hash, and dependency tree | `ghcr.io/storage/kvstore:v3.2`, commit hash `7f8a1c`, isolated Python 3.11 virtualenv |
-| **3. Permitted Actions ($\mathcal{A}$)**| Strictly whitelisted tool schemas and execution capabilities | `read_file`, `apply_patch`, `run_test`; external network WAN disabled; unprivileged user |
-| **4. Available Observations ($\mathcal{O}$)**| Permitted sensory telemetry and output filters | Subprocess `stdout`, `stderr` (capped at 16 KB), POSIX exit codes, compiler diagnostics |
-| **5. Completion Criteria ($\mathcal{C}$)**| Mechanical, independent test assertions evaluated on a sealed verifier | Sealed test `tests/test_parser.py::test_parse_timeout` passes with exit code 0 |
+$$\mathcal{T}_{\text{spec}} = \langle g, \mathcal{E}, \mathcal{A}, \mathcal{O}, \mathcal{C} \rangle$$
 
-The 5-Part Task Specification Contract: The formal systems interface defining an autonomous workload's operating boundary.
-:::
+1. **Goal ($g$):** A declarative specification of the target post-conditions and explicit non-goals. The goal defines *what* state must hold upon completion, rather than prescribing an imperative sequence of execution steps. Crucially, negative constraints (non-goals) prevent the agent from solving a defect via destructive shortcuts (for example, resolving a timeout by deleting the timeout validation logic or hardcoding an unconfigurable constant).
+2. **Environment ($\mathcal{E}$):** The deterministic, reproducible virtualized sandbox in which execution occurs. This specifies the container image, Git commit hash, mounted filesystem volumes, environment variables, toolchain binaries, and unprivileged user identities (such as non-root UID 1000).
+3. **Permitted Actions ($\mathcal{A}$):** The capability whitelist and tool dispatch boundary. The contract enumerates which tools the model may invoke, the schema arguments permitted, the maximum invocation rates, the system calls permitted by kernel filters, and the network egress rules (defaulting to complete WAN isolation).
+4. **Available Observations ($\mathcal{O}$):** The telemetry channels and sensory filters exposed back to the agent. The runtime defines which standard output and standard error streams are visible, applies size caps (such as circular ring buffers that retain the first 4 KiB and last 12 KiB of output), strips terminal ANSI escape sequences, and redacts sensitive credentials.
+5. **Completion Criteria ($\mathcal{C}$):** The deterministic, mechanical verification oracles that certify task success. Completion is never established by the model emitting verbal claims such as *"I have completed the task."* It is certified exclusively by independent verifiers—such as sealed regression test runners, static analysis linters, or cryptographic hash verifications—yielding POSIX exit code 0.
 
-If any of these five clauses is omitted or ill-defined, the trajectory becomes unsound:
-* Without an explicit **Environment**, execution drifts across non-reproducible host dependencies.
-* Without bounded **Permitted Actions**, an agent may invoke destructive or unauthorized side-effects.
-* Without mechanical **Completion Criteria**, the runtime has no sound way to distinguish genuine task completion from fail-plausible verbal rationalization.
+| Contract Clause | Systems Definition & Invariant | Concrete Example (Running Parser Scenario) | Failure Mode If Clause Is Omitted |
+|:---|:---|:---|:---|
+| **1. Goal ($g$)** | Declarative post-conditions, invariants, and explicit non-goals. | *"Resolve issue #1428: sub-10 ms timeouts must fall back to 5.0 s default; do not modify connection pool size or alter public API signatures."* | Model optimizes a narrow local test by breaking global API invariants or deleting assertions. |
+| **2. Environment ($\mathcal{E}$)** | Hermetic container image, filesystem mounts, commit SHA, and unprivileged UID. | `ghcr.io/org/kvstore:v3.2`, commit `7f8a1c`, read-only root mount, `/workspace` tmpfs overlay, unprivileged UID 1000. | Non-reproducible builds, host filesystem corruption, or environmental drift across cluster nodes. |
+| **3. Permitted Actions ($\mathcal{A}$)** | Explicit tool capability whitelist, syscall filters, and network isolation policy. | Whitelist: `read_file`, `write_patch`, `run_local_test`. Syscall filter: seccomp-bpf blocking `socket()`. Network: disabled (`--network none`). | Arbitrary code execution, unauthorized remote network egress, or unconstrained host mutation. |
+| **4. Available Observations ($\mathcal{O}$)** | Telemetry filters, circular ring buffer bounds, ANSI stripping, and secret masking. | Process `stdout` and `stderr` capped at 16 KiB via head/tail circular buffer; ANSI terminal color sequences stripped. | Unbounded terminal logs crash host context window ($S_{\max}$ overflow); secret tokens leak into context. |
+| **5. Completion Criteria ($\mathcal{C}$)** | Independent, sealed verification oracles requiring deterministic exit code 0. | Sealed test `tests/test_parser.py::test_timeout` passes with POSIX exit code 0; zero untracked git diffs outside `/src`. | Fail-plausible model asserts completion verbally or passes compromised, self-modified tests. |
+: **The 5-Part Task Specification Contract**: Formal systems interface defining an autonomous workload's operating boundaries. {#tbl-five-part-contract}
 
-### The H-S-A-C Workload Taxonomy
+To understand how an agent operating system represents this contract internally, we examine the concrete systems artifact. The host runtime instantiates the contract as an immutable, typed data structure before the trajectory begins (@lst-task-contract-spec).
 
-To size infrastructure, allocate compute, and enforce isolation across the eighteen chapters of this book, systems architects evaluate workloads using the **H-S-A-C Taxonomy** (@tbl-hsac-taxonomy).
+```python
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List, Optional, Set
 
-::: {#tbl-hsac-taxonomy}
-| H-S-A-C Dimension | Systems Meaning | Low Complexity (Bounded) | High Complexity (Expansive) |
-| :--- | :--- | :--- | :--- |
-| **H (Horizon)** | Execution duration and sequential turn depth ($T_{\text{task}}$) | Single-turn invocation ($T < 10\text{ s}$) | Multi-hour stateful trajectory ($T > 10^3\text{ s}$) |
-| **S (State Complexity)**| Context size, KV-cache residency, and external mutable state | Ephemeral context window ($< 8\text{k}$ tokens) | Multi-gigabyte KV cache + large disk repository |
-| **A (Authority)** | Capability envelope and severity of external blast radius | Read-only analysis (zero mutation rights) | Irreversible external mutations (WAN, DB writes) |
-| **C (Closure)** | Epistemological strength and coverage of verification | Weak verbal attestation / syntactic lint | Sealed unit regression suites / formal property proofs |
+@dataclass(frozen=True)
+class EnvironmentSpec:
+    """Hermetic virtualization boundaries for trajectory execution."""
+    container_image: str
+    base_commit_sha: str
+    workspace_mount: Path
+    read_only_volumes: List[Path] = field(default_factory=list)
+    unprivileged_uid: int = 1000
+    network_egress: bool = False  # Default-deny WAN access
 
-The H-S-A-C Taxonomy: The four-dimensional systems envelope governing workload complexity across this book.
-:::
+@dataclass(frozen=True)
+class CapabilityBoundary:
+    """Whitelisted tool interfaces and execution constraints."""
+    allowed_tools: Set[str]
+    max_invocations_per_turn: int = 1
+    blocked_syscalls: Set[str] = field(
+        default_factory=lambda: {"socket", "bind", "connect", "ptrace"}
+    )
+    timeout_per_dispatch_sec: float = 30.0
 
-Every agentic task in this book is characterized by its coordinates along these four axes:
-1. **Horizon ($H$):** Measures the temporal span. Short-horizon tasks can maintain memory residency on GPU accelerators. Long-horizon tasks require aggressive context paging, distributed checkpointing, and asynchronous job queuing.
-2. **State Complexity ($S$):** Measures the volume and mutability of state. Does the task operate purely in ephemeral context memory, or does it mutate a large external codebase and database?
-3. **Authority ($A$):** Measures the privilege level granted to the agent. Tasks range from *Read-Only Analysis* (zero ambient risk) to *Local Sandboxed Mutation* (reversible filesystem edits contained within an ephemeral container) to *Irreversible External Actuation* (deploying code to production or executing financial transactions).
-4. **Invariant Closure ($C$):** Measures the rigor of verification. Tasks range from subjective manual review to empirical execution evidence (passing unit test suites under sealed verifiers) to formal soundness proofs.
+@dataclass(frozen=True)
+class ObservationFilter:
+    """Telemetry sanitization and context staging bounds."""
+    head_buffer_bytes: int = 4096    # Retain initial execution header
+    tail_buffer_bytes: int = 12288   # Retain terminal error trace
+    strip_ansi_escapes: bool = True
+    redact_patterns: List[str] = field(default_factory=list)
+
+@dataclass(frozen=True)
+class CompletionCriteria:
+    """Independent deterministic verification oracles."""
+    verification_command: str        # e.g., 'pytest tests/sealed/test_parser.py'
+    sealed_test_path: Path           # Mounted read-only outside agent write scope
+    required_exit_code: int = 0
+    max_verification_duration_sec: float = 60.0
+
+@dataclass(frozen=True)
+class TaskSpecification:
+    """The formal 5-part contract binding an agentic workload."""
+    task_id: str
+    goal: str
+    non_goals: List[str]
+    environment: EnvironmentSpec
+    capabilities: CapabilityBoundary
+    observations: ObservationFilter
+    completion: CompletionCriteria
+    wall_clock_timeout_sec: float = 600.0
+    token_budget_limit: int = 100_000
+```
+: **Task Specification Data Structure**: Strongly typed ABI contract defining the execution envelope enforced by the host runtime. {#lst-task-contract-spec}
+
+### The Four Engineering Dimensions
+
+Once a task contract is formalized, the runtime must allocate physical compute, configure memory hierarchies, and set supervision watchdogs. To make sound capacity planning and isolation decisions, systems architects classify workloads along the **Four Engineering Dimensions**: Duration, State, Permitted Authority, and Completion Evidence.
+
+#### 1. Duration (Temporal Horizon, $T_{\text{task}}$)
+
+Duration measures the serial wall-clock time and sequential turn depth required to complete a workload. Tasks span several orders of magnitude:
+
+* **Micro-Horizon ($T_{\text{task}} < 5\text{ s}$, $N = 1$):** Single-turn invocations such as in-memory code linting, grammar-constrained JSON extraction, or semantic routing. The request executes entirely in accelerator HBM without task context swaps.
+* **Meso-Horizon ($10\text{ s} \le T_{\text{task}} \le 300\text{ s}$, $5 \le N \le 20$):** Multi-turn debugging or feature development (such as our configuration parser repair). The host process maintains active execution state, dispatches local containerized compilers, and observes regression outputs.
+* **Macro-Horizon ($T_{\text{task}} > 10^3\text{ s}$, $N > 50$):** Long-running autonomous workflows such as whole-repository refactoring or dependency migrations. Macro-horizon workloads cannot maintain persistent GPU HBM allocation without incurring immense idle costs; they demand asynchronous checkpointing, persistent task logs, and process suspension.
+
+#### 2. State Complexity ($S$)
+
+State complexity characterizes the volume, volatility, and residency of data manipulated during execution:
+
+* **Ephemeral Context State:** State residing exclusively in the token sequence of the active context window ($M$ tokens) and intermediate key/value tensors cached in GPU HBM. This state vanishes when the host process terminates.
+* **Working Filesystem State:** The local repository tree, abstract syntax trees (ASTs), compiled binary artifacts, and intermediate diffs stored on the host filesystem or tmpfs mount. This state is mutable and must be isolated using Copy-on-Write (CoW) overlays.
+* **Durable External State:** Persistent records beyond the host node, including upstream Git branches, relational databases, issue trackers, and distributed object storage. Mutating durable state requires strict concurrency control and rollback mechanisms.
+
+#### 3. Permitted Authority ($A$)
+
+Authority dictates the privilege level granted to the agent's actions and the resulting blast radius:
+
+* **Zero Ambient Authority ($A = 0$):** The agent operates as a pure function. It can read staged files and compute embeddings, but it cannot mutate the filesystem, invoke external network sockets, or alter host environment variables.
+* **Reversible Local Mutation:** The agent is permitted to create, edit, and delete files inside an ephemeral container sandbox. If the trajectory fails, the host runtime discards the container layer, resetting the filesystem to its pristine initial commit.
+* **Irreversible External Actuation:** The agent possesses credentials to execute destructive or externally visible operations: pushing code commits to a remote production repository, dispatching non-idempotent HTTP POST requests, or altering cloud infrastructure. This tier mandates human-in-the-loop gates or automated two-phase commit protocols.
+
+#### 4. Completion Evidence ($E$)
+
+Completion evidence defines the epistemological strength of the verification oracle used to close the trajectory loop:
+
+* **Syntactic Verification:** Checking that emitted tokens conform to a context-free grammar (CFG) or JSON schema. This guarantees syntactic decodability but provides zero guarantee of operational correctness.
+* **Empirical Test Execution:** Executing deterministic test suites within an isolated sandbox and observing POSIX returncode 0. This confirms that the code behaves as expected on specific assertions, provided the test suite is sealed against agent tampering.
+* **Formal Property Proofs:** Verifying the deliverable through static symbolic analyzers, model checkers, or formal proof assistants (such as Coq or Lean), guaranteeing that the code satisfies mathematical invariants across all inputs.
 
 ### Duration Accounting and Amdahl's Law for Trajectories
 
-In distributed model serving, latency is dominated by matrix multiplication arithmetic on accelerators. In an agentic trajectory, however, execution is an interleaved sequence of model computation, tool dispatch, environmental wait times, and runtime checks.
+In distributed model serving, latency is dominated by matrix multiplication arithmetic on accelerator hardware. In an agentic trajectory, however, execution is an interleaved sequence of model computation, tool dispatch, external wait intervals, and host operating system supervision.
 
-For a serial trajectory, total wall-clock duration $T_{\text{task}}$ is partitioned into four components:
+For a serial trajectory of $N$ turns, total wall-clock duration $T_{\text{task}}$ is partitioned into four discrete components:
 
-$$T_{\text{task}} = T_{\text{model}} + T_{\text{tool}} + T_{\text{wait}} + T_{\text{runtime}}$$
+$$T_{\text{task}} = T_{\text{model}} + T_{\text{tool}} + T_{\text{wait}} + T_{\text{runtime}}$$ {#eq-duration-accounting}
 
 where:
-* $T_{\text{model}} = \sum_{t=0}^{N-1} t_{\text{inference}}^{(t)}$ is the cumulative time spent evaluating the neural core.
-* $T_{\text{tool}} = \sum_{t=0}^{N-1} t_{\text{dispatch}}^{(t)}$ is the time spent actively executing tool binaries (compilers, test runners, linters). When tools execute concurrently, this reflects critical-path duration.
-* $T_{\text{wait}} = \sum_{t=0}^{N-1} t_{\text{sleep}}^{(t)}$ is the idle latency spent awaiting asynchronous external dependencies (network I/O, database locks, human clarification approvals).
-* $T_{\text{runtime}} = \sum_{t=0}^{N-1} t_{\text{overhead}}^{(t)}$ is the host OS overhead: context assembly, JSON schema parsing, grammar mask generation, and sandbox container provisioning.
 
-This decomposition reveals a critical architectural insight governed by **Amdahl's Law**:
+* $T_{\text{model}} = \sum_{t=0}^{N-1} t_{\text{inference}}^{(t)}$ is the cumulative time spent evaluating the neural core on accelerators. Each turn involves prompt prefill (GEMM) over staged tokens followed by autoregressive token generation (GEMV).
+* $T_{\text{tool}} = \sum_{t=0}^{N-1} t_{\text{dispatch}}^{(t)}$ is the time spent actively executing tool binaries (such as running `pytest`, invoking `gcc`, or computing Git diffs). When tools run sequentially, $T_{\text{tool}}$ is strictly additive.
+* $T_{\text{wait}} = \sum_{t=0}^{N-1} t_{\text{sleep}}^{(t)}$ is the idle latency spent awaiting asynchronous external dependencies (network I/O, database locks, or human supervisory approvals).
+* $T_{\text{runtime}} = \sum_{t=0}^{N-1} t_{\text{overhead}}^{(t)}$ is the host runtime harness overhead: context assembly, ring-buffer log sanitization, grammar bitmask generation, and container lifecycle setup.
 
-$$S_{\text{task}} = \frac{1}{(1 - f_{\text{model}}) + \frac{f_{\text{model}}}{S_{\text{model}}}}$$
+This decomposition reveals a critical architectural limit governed by **Amdahl's Law** [@amdahl1967]. Let $f_{\text{model}}$ represent the fraction of total task wall-clock time spent evaluating the neural model:
 
-where $f_{\text{model}} = \frac{T_{\text{model}}}{T_{\text{task}}}$ represents the fraction of total task time spent evaluating the neural model, and $S_{\text{model}}$ is the speedup achieved by faster inference hardware or speculative decoding algorithms.
+$$f_{\text{model}} = \frac{T_{\text{model}}}{T_{\text{task}}}$$ {#eq-model-fraction}
 
-In production software engineering agent workloads, compiling codebases, executing integration test suites, and awaiting external I/O dominate the execution timeline. It is common for tool execution and wait times ($T_{\text{tool}} + T_{\text{wait}}$) to constitute 70 percent of total duration ($f_{\text{model}} = 0.30$).
+If an engineering team upgrades accelerator hardware, implements aggressive speculative decoding, or applies FP8 quantization to achieve a speedup factor $S_{\text{model}}$ on neural inference, the overall trajectory speedup $S_{\text{task}}$ is bounded:
 
-Under such conditions, making the neural model's inference infinitely fast ($S_{\text{model}} \to \infty$) yields a maximum theoretical task speedup:
+$$S_{\text{task}} = \frac{1}{(1 - f_{\text{model}}) + \frac{f_{\text{model}}}{S_{\text{model}}}}$$ {#eq-amdahl-trajectory}
 
-$$S_{\text{task}}^{\max} = \frac{1}{1 - 0.30} \approx 1.43\times$$
+As accelerator inference becomes infinitely fast ($S_{\text{model}} \to \infty$), the maximum theoretical task speedup collapses to:
 
-A speedup of $1.43\times$ represents a **30 percent reduction in total elapsed task latency** ($1 - 1/1.43 \approx 0.30$). Even if GPU inference latency drops to zero, the task duration is reduced by less than a third!
+$$S_{\text{task}}^{\max} = \frac{1}{1 - f_{\text{model}}}$$ {#eq-amdahl-limit}
 
-This mathematical reality reshapes systems priorities. Accelerating agentic systems cannot be accomplished solely by optimizing matrix multiplication kernels. Substantial performance gains require architectural innovations in the host runtime: parallelizing tool execution, caching container sandbox filesystems, minimizing tool-wait memory tax through asynchronous context offloading, and pruning unpromising search trajectories through speculative branching.
+::: {.callout-note title="Worked Example: Sizing Trajectory Speedup on NVIDIA DGX H100"}
+Consider a real-world software repair workload running on an NVIDIA DGX H100 server (Dual Intel Xeon 8480C host CPU, 2 TiB DDR5 RAM, 8× NVIDIA H100 SXM5 GPUs). An agent executes a 10-turn debugging trajectory to repair a race condition in our distributed key-value store.
 
-To coordinate these disparate subsystems into a cohesive platform, we must assemble them into a unified architectural model: the **Stochastic Computer**.
-<!-- SECTION_END: 1.8 -->
+**Hardware & Workload Assumptions:**
+1. **Turn Count:** $N = 10$ turns.
+2. **Model Evaluation:** Each turn processes a 4,000-token prompt prefill and decodes 400 generation tokens. On an H100 SXM5 GPU ($3.35\text{ TB/s}$ HBM3 bandwidth, single-batch token decode latency $\approx 7\text{ ms/token}$), average inference latency is $t_{\text{inference}} = 3.6\text{ s}$ per turn.
+   $$T_{\text{model}} = 10 \times 3.6\text{ s} = 36.0\text{ s}$$
+3. **Tool Execution:** Each turn executes a local test runner (`pytest`) and runs static analysis (`mypy`), consuming $t_{\text{dispatch}} = 6.5\text{ s}$ per turn.
+   $$T_{\text{tool}} = 10 \times 6.5\text{ s} = 65.0\text{ s}$$
+4. **Runtime & Sandbox Overhead:** Container filesystem diffing, ANSI log stripping, and context staging consume $t_{\text{overhead}} = 1.2\text{ s}$ per turn.
+   $$T_{\text{runtime}} = 10 \times 1.2\text{ s} = 12.0\text{ s}$$
+5. **External I/O & Disk Sync:** Disk flush and socket wait consume $t_{\text{sleep}} = 0.7\text{ s}$ per turn.
+   $$T_{\text{wait}} = 10 \times 0.7\text{ s} = 7.0\text{ s}$$
+
+**Step 1: Compute Total Task Duration and Model Fraction**
+$$T_{\text{task}} = 36.0\text{ s} + 65.0\text{ s} + 12.0\text{ s} + 7.0\text{ s} = 120.0\text{ s}$$
+$$f_{\text{model}} = \frac{36.0\text{ s}}{120.0\text{ s}} = 0.30 \quad (30.0\%)$$
+$$1 - f_{\text{model}} = \frac{84.0\text{ s}}{120.0\text{ s}} = 0.70 \quad (70.0\%)$$
+
+**Step 2: Evaluate a 3× Inference Speedup**
+Suppose the serving infrastructure is upgraded to next-generation NVIDIA B200 accelerators ($8.0\text{ TB/s}$ HBM3e) coupled with 4-token speculative draft models, delivering a $3.0\times$ speedup on model inference ($S_{\text{model}} = 3.0$):
+$$S_{\text{task}} = \frac{1}{(1 - 0.30) + \frac{0.30}{3.0}} = \frac{1}{0.70 + 0.10} = \frac{1}{0.80} = 1.25\times$$
+New total task duration:
+$$T_{\text{task}}^{\text{new}} = \frac{120.0\text{ s}}{1.25} = 96.0\text{ s}$$
+A $300\%$ increase in neural compute throughput yields only a **$20.0\%$ reduction** in end-to-end task wall-clock time ($1 - 96/120 = 0.20$).
+
+**Step 3: Evaluate the Asymptotic Limit**
+Even if the neural core required zero physical time ($S_{\text{model}} \to \infty$):
+$$S_{\text{task}}^{\max} = \frac{1}{1 - 0.30} = \frac{1}{0.70} \approx 1.43\times$$
+$$T_{\text{task}}^{\min} = 120.0\text{ s} \times 0.70 = 84.0\text{ s}$$
+The task can never execute faster than $84.0\text{ seconds}$ regardless of how much accelerator silicon is provisioned, because tool execution, container lifecycle, and host I/O constitute $70\%$ of the serial critical path.
+:::
+
+The physical reality of Amdahl's Law reshapes systems priorities. Accelerating agentic systems cannot be accomplished solely by optimizing matrix multiplication kernels or deploying faster inference chips. Achieving order-of-magnitude performance gains requires systems innovations in the host runtime: parallelizing tool dispatch across isolated worker threads, caching container filesystem layers, optimizing test execution via test-impact analysis, and asynchronously offloading context state to reclaim stranded accelerator memory during tool execution.
+
+### Decision Framework: Fixed Workflows versus Model-Directed Loops
+
+Before instantiating an agentic system, systems engineers face a foundational architectural choice: should the problem be solved with an autonomous, model-directed loop, or is it superiorly served by a deterministic Software 1.0 workflow or static Directed Acyclic Graph (DAG)?
+
+Deploying an autonomous agentic loop introduces significant systems costs: non-deterministic latency, variable token expenditures, potential loop divergence, and complex sandboxing requirements. If a workload can be solved with a deterministic script, using an agentic loop is an architectural anti-pattern. 
+
+To govern this choice, engineers evaluate candidate workloads across a four-axis decision matrix (@tbl-workflow-vs-loop).
+
+| Decision Axis | Fixed Software 1.0 Workflow / DAG | Model-Directed Agentic Loop | Systems Implication & Trade-Off |
+|:---|:---|:---|:---|
+| **1. Task Ambiguity** | **Low:** Input schemas, entities, and requirements are fully structured and machine-parsable. | **High:** Requirements are under-specified, unstructured, or expressed in ambiguous natural language. | Ambiguous intent requires an unprivileged statistical model to hypothesize solutions; structured schemas do not. |
+| **2. Path Determinism** | **High:** Execution follows a known, static graph of operations with pre-compiled branches. | **Low:** Next action depends dynamically on runtime hypothesis reformulation and environment feedback. | Dynamic branching through an infinite state space causes deterministic DAGs to collapse under combinatorial explosion. |
+| **3. Latency & Cost Ceilings** | **Strict:** Demands sub-second response times, deterministic latency, and predictable $O(1)$ compute costs. | **Flexible:** Tolerates multi-minute execution horizons and variable $O(N)$ token expenditures. | Autonomous loops cannot guarantee strict sub-second SLAs due to multi-turn autoregressive decode and tool-wait penalties. |
+| **4. Failure Blast Radius** | **High Risk:** Side-effects are irreversible (e.g., executing wire transfers, deleting database partitions). | **Bounded Risk:** Actions execute within copy-on-write sandboxes where exploratory trial-and-error is safe. | High blast-radius actions cannot tolerate stochastic hallucinations without deterministic two-phase commit or human sign-off. |
+: **The 4-Axis Decision Matrix**: Architectural criteria for selecting between deterministic workflows and autonomous agentic loops. {#tbl-workflow-vs-loop}
+
+The interaction of these four axes establishes a clear engineering rule of thumb:
+
+1. **When to Deploy a Fixed Workflow (Software 1.0 DAG):** If a task exhibits low ambiguity and high path determinism—such as extracting invoice data into a relational database, running a continuous integration build matrix, or executing a nightly database backup—it should be implemented as a deterministic pipeline. A 50-line Python script or workflow DAG will achieve 100% reliability, sub-second execution, and zero token cost.
+2. **When to Deploy a Model-Directed Loop (Agentic System):** When a task presents high ambiguity and low path determinism—such as diagnosing an intermittent race condition across three distributed microservices, refactoring legacy code against failing test suites, or discovering unknown API integration patterns—the static branching of a deterministic DAG collapses. Here, an agentic loop justifies its higher latency, variable token cost, and sandboxing complexity by navigating unconstrained state spaces that cannot be anticipated at compile time.
+
+::: {#chk-workflow-vs-loop .callout-checkpoint title="Workflow or model-directed loop?"}
+
+Before examining the functional architecture of the Stochastic Computer, verify your ability to evaluate workloads across the 4-axis decision matrix:
+
+- [ ] **State space and path determinism**: Can you explain why an automated database schema migration pipeline with pre-validated DDL scripts should be implemented as a deterministic DAG rather than an autonomous agentic loop?
+- [ ] **Failure blast radius**: In our running configuration parser scenario, why is it safe to grant the model-directed loop autonomous file-write privileges over `src/config/parser.py` within an ephemeral container sandbox, but unsafe to grant it push access to the production repository's `main` branch?
+- [ ] **Amdahl's law in practice**: If an engineering team observes that an agentic debugging task spends 85 seconds running integration tests and 15 seconds in model generation, what is the maximum speedup achievable by replacing their inference cluster with an infinitely fast hardware accelerator?
+
+:::
+
+Once a task specification contract is formulated and confirmed to demand an autonomous agentic loop, the host runtime must execute that loop across an accountable computing system. An unprivileged foundation model cannot manage its own working set, persist state across multi-turn trajectories, mediate peripheral tool dispatch, or recover from physical execution faults. To coordinate these functions into an integrated platform, systems engineering requires an overarching architectural blueprint: the **Stochastic Computer**.
