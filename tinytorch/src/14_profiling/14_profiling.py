@@ -21,8 +21,8 @@ Welcome to Module 14! You'll build professional profiling tools to measure model
 ## 🔗 Prerequisites & Progress
 
 **You've Built**: Complete ML stack from tensors to autoregressive transformers (`Tensor`, `Linear`, `Conv2d`, `MultiHeadAttention`, `TransformerBlock`, `GPT`).
-**You'll Build**: Comprehensive profiling system for parameters, FLOPs, memory allocations, and latency (`Profiler`, `count_parameters`, `count_flops`, `measure_memory`, `measure_latency`).
-**You'll Enable**: Data-driven optimization decisions across quantization (`15_quantization`), compression (`16_compression`), acceleration (`17_acceleration`), and memory caching (`18_memoization`).
+**You'll Build**: Comprehensive profiling system for parameters, FLOPs, memory allocations, and latency (a `Profiler` class whose methods are `count_parameters`, `count_flops`, `measure_memory`, and `measure_latency`, plus the free functions `arithmetic_intensity`, `quick_profile`, and `analyze_weight_distribution`).
+**You'll Enable**: Data-driven optimization decisions across quantization (`15_quantization`), compression (`16_compression`), acceleration (`17_acceleration`), memory caching (`18_memoization`), and the benchmark harness that consumes these measurements directly (`19_benchmarking`).
 
 <div align="center">
   <img src="profiling_blueprint.svg" alt="TinyTorch Architecture Blueprint: Module 14 Profiling" width="380px">
@@ -35,7 +35,7 @@ Welcome to Module 14! You'll build professional profiling tools to measure model
 | **Modules 01–08** | Foundation Tier | `Tensor`, `Function`, `Linear`, `GELU`, `SGD`, `Adam`, `Trainer` | Completed |
 | **Modules 09–13** | Architecture Tier | `Conv2d`, `BPETokenizer`, `EmbeddingLayer`, `MultiHeadAttention`, `GPT` | Completed |
 | **Module 14** | **Profiling & Diagnostics** | `Profiler`, `count_flops`, `measure_memory`, `measure_latency` | **Active Subsystem** |
-| **Modules 15–20** | Optimization & Capstone | `QuantizedLinear`, `Pruner`, `TritonKernels`, `KVCache`, `TinyGPT` | Downstream Consumers |
+| **Modules 15–20** | Optimization & Capstone | `QuantizedLinear`, `Compressor`, `im2col_conv2d`, `KVCache`, `BenchmarkSuite` | Downstream Consumers |
 
 ## 🎯 Learning Objectives
 
@@ -44,7 +44,7 @@ By the end of this module, you will:
 1. **Implement a Unified Profiler Engine**: Construct a multi-pass measurement harness tracking model weights, runtime activations, execution latency, and peak memory allocations.
 2. **Derive Precise FLOP and Parameter Formulations**: Distinguish persistent memory footprint ($W \times 4\text{ B}$) from computational work ($2 \cdot M \cdot N \cdot K$), uncovering why convolutions and attention diverge from linear layers.
 3. **Isolate Hardware Bottlenecks with the Roofline Model**: Calculate arithmetic intensity ($I = \text{FLOPs} / \text{Bytes}$) to classify workloads into memory-bandwidth bound versus compute-bound regimes.
-4. **Profile Multi-Stage Training Lifecycles**: Measure the 4x memory explosion across forward activations, backward gradients, and first/second moment optimizer state tracking.
+4. **Budget Multi-Stage Training Lifecycles**: Estimate the roughly $4\times$ memory expansion across forward activations, backward gradients, and first/second moment optimizer state from a parameter count alone, before a training run exists to measure.
 
 ## 📦 Where This Code Lives in the Final Package
 
@@ -55,6 +55,17 @@ By the end of this module, you will:
 # Final package structure:
 from tinytorch.perf.profiling import Profiler, quick_profile, analyze_weight_distribution
 ```
+
+Every module up to this one exported into `tinytorch.core`, because every module up to
+this one added a piece of the framework. This one exports to `tinytorch.perf` instead,
+and the change of namespace is the point. Nothing here is a framework component. A
+profiler does not participate in a forward pass, holds no parameters, and appears in no
+computational graph. It is an instrument you point at the framework from outside, which
+is why it lives beside the framework rather than inside it, and why Modules 15 through
+20 can import it without the framework importing anything of theirs.
+
+This is also where the course turns. Modules 01 to 13 built the thing. Modules 14 to 20
+measure it and then change it on the evidence, and the measuring has to come first.
 
 <div align="center">
   <img src="prof_margin_source.svg" alt="Source Code Mapping: Module 14 Profiling" width="260px">
@@ -76,11 +87,9 @@ from tinytorch.perf.profiling import Profiler, quick_profile, analyze_weight_dis
 #| default_exp perf.profiling
 #| export
 
-import os
 import time
 import tracemalloc
-from collections import defaultdict
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 import numpy as np
 rng = np.random.default_rng(7)
@@ -99,7 +108,7 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 r"""
 ## 💡 Introduction: Why Profiling Matters in ML Systems
 
-Imagine you're an engineer investigating an ML systems regression. Your model runs unacceptably slowly, exhausts device memory, or inflates cloud inference bills. Without profiling, you are flying blind—guessing whether to optimize matrix multiplication kernels, reduce activation precision, or shard model weights. With profiling, you have empirical ground truth.
+Imagine you're an engineer investigating an ML systems regression. Your model runs unacceptably slowly, exhausts device memory, or inflates cloud inference bills. Without profiling, you are flying blind, guessing whether to optimize matrix multiplication kernels, reduce activation precision, or shard model weights. With profiling, you have empirical ground truth.
 
 <div align="center">
   <img src="profiling_engineering_workflow.svg" alt="Systems Profiling and Optimization Workflow" width="680px">
@@ -125,7 +134,7 @@ Where $f$ is the execution fraction of the targeted component and $s$ is its iso
 r"""
 ## 📐 Foundations: Performance Measurement Principles
 
-Before building the profiler class, let us establish the four core dimensional pillars of machine learning systems telemetry: parameters, compute (FLOPs), memory residency, and execution latency.
+Before building the profiler class, let us establish the five pillars of machine learning systems telemetry. Four of them are quantities you measure, namely parameters, compute (FLOPs), memory residency, and execution latency. The fifth, arithmetic intensity, is the ratio that turns two of the others into a verdict about which hardware ceiling you are under, and every optimization module after this one argues from it.
 
 ### 1. Parameter Counting: The Static Memory Footprint
 
@@ -148,14 +157,59 @@ $$\text{FLOP}_{\text{GEMM}}(M, K, N) = 2 \cdot M \cdot K \cdot N$$
 
 $$\text{FLOP}_{\text{Conv2d}} = 2 \cdot B \cdot H_{\text{out}} \cdot W_{\text{out}} \cdot (C_{\text{in}} \cdot k_h \cdot k_w) \cdot C_{\text{out}}$$
 
-| Operation Type | Input / Weight Shapes | FLOP Count (Per Sample) | Data Reuse Ratio ($R$) | Hardware Regime |
+| Operation Type | Input / Weight Shapes | FLOP Count (Per Sample) | Arithmetic Intensity ($I = \text{FLOPs} / \text{Bytes}$) | Hardware Regime |
 | :--- | :--- | :--- | :--- | :--- |
-| **Linear Projection** | $(d_{\text{in}}) \times (d_{\text{in}}, d_{\text{out}})$ | $2 \cdot d_{\text{in}} \cdot d_{\text{out}}$ | $1\text{ FLOP/B}$ (Batch=1) | Memory-bandwidth bound |
-| **Batched Linear** | $(B, d_{\text{in}}) \times (d_{\text{in}}, d_{\text{out}})$ | $2 \cdot B \cdot d_{\text{in}} \cdot d_{\text{out}}$ | $B\text{ FLOPs/B}$ (Batch=B) | Compute-bound at high $B$ |
-| **Conv2d** | $(C_{\text{in}}, H, W) \ast (C_{\text{out}}, C_{\text{in}}, k_h, k_w)$ | $2 \cdot H_{\text{out}} W_{\text{out}} C_{\text{in}} C_{\text{out}} k_h k_w$ | $O(H_{\text{out}} W_{\text{out}})\text{ FLOPs/B}$ | Compute-bound (kernel reuse) |
-| **Pointwise (GELU/Add)**| $(B, S, D)$ | $1 \text{ to } 8 \text{ FLOPs/elem}$ | $\le 0.25\text{ FLOP/B}$ | Strictly memory-bound |
+| **Linear Projection** | $(d_{\text{in}}) \times (d_{\text{in}}, d_{\text{out}})$ | $2 \cdot d_{\text{in}} \cdot d_{\text{out}}$ | $0.5\text{ FLOP/B}$ (Batch=1) | Memory-bandwidth bound |
+| **Batched Linear** | $(B, d_{\text{in}}) \times (d_{\text{in}}, d_{\text{out}})$ | $2 \cdot B \cdot d_{\text{in}} \cdot d_{\text{out}}$ | $0.5 \cdot B\text{ FLOP/B}$ (Batch=B) | Compute-bound at high $B$ |
+| **Conv2d** | $(C_{\text{in}}, H, W) \ast (C_{\text{out}}, C_{\text{in}}, k_h, k_w)$ | $2 \cdot H_{\text{out}} W_{\text{out}} C_{\text{in}} C_{\text{out}} k_h k_w$ | $\approx 0.5 \cdot H_{\text{out}} W_{\text{out}}\text{ FLOP/B}$ | Compute-bound (kernel reuse) |
+| **Pointwise (GELU/Add)**| $(B, S, D)$ | $1 \text{ to } 8 \text{ FLOPs/elem}$ | $0.125 \text{ to } 1\text{ FLOP/B}$ | Strictly memory-bound |
 
-### 3. Memory Profiling: The Training Memory Lifecycle
+Every entry in that column is one division, and it is worth doing once by hand.
+A Linear layer at $B=1$ performs $2 d_{\text{in}} d_{\text{out}}$ FLOPs while moving
+the whole weight matrix, $4 d_{\text{in}} d_{\text{out}}$ bytes at FP32, so
+$I = 2/4 = 0.5\text{ FLOP/B}$ no matter how wide the layer is. Batching to $B$ samples
+multiplies the FLOPs by $B$ and leaves the weight traffic unchanged, giving $I = 0.5B$.
+At $B=32$ that is $16\text{ FLOP/B}$, and Question 1 walks the same arithmetic.
+Convolution reuses each weight across the output map, so $I$ grows with the output
+area. A pointwise kernel reads one element and writes one, $8\text{ B}$ of traffic for
+$1$ to $8$ FLOPs, which is the lowest intensity in the table and the reason fusion
+exists.
+
+### 3. Arithmetic Intensity: The Roofline and Its Ridge Point
+
+Intensity only becomes a verdict when you compare it against a machine. That
+comparison is the roofline, and it is the single most reused idea in the rest of this
+course, so it belongs here rather than at the end.
+
+<div align="center">
+  <img src="roofline_model_hardware_limits.svg" alt="Illustrative Hardware Limits and the Roofline Model" width="680px">
+</div>
+
+The attainable floating-point performance $P$ (in $\text{GFLOP/s}$) on any physical processor is strictly bounded by two fundamental hardware ceilings:
+
+$$P \le \min\left(P_{\text{peak}},\, I \times \text{BW}_{\text{mem}}\right)$$
+
+Where:
+- $P_{\text{peak}}$ is the peak arithmetic compute throughput of the device (ALUs / Tensor Cores).
+- $\text{BW}_{\text{mem}}$ is the sustained memory bandwidth between device DRAM/HBM and on-chip caches/SRAM.
+- $I = \frac{\text{FLOPs}}{\text{Bytes Transferred}}$ is the **arithmetic intensity** of the operation, the quantity the column above computes.
+
+The hardware **ridge point** is defined as the operational intensity where the memory ceiling intersects peak compute:
+
+$$I_{\text{ridge}} = \frac{P_{\text{peak}}}{\text{BW}_{\text{mem}}}$$
+
+| Operational Regime | Condition | Limiting Hardware Subsystem | Systems Remedy |
+| :--- | :--- | :--- | :--- |
+| **Memory-Bandwidth Bound** | $I < I_{\text{ridge}}$ | DRAM / HBM transfer bus | Weight quantization, operator fusion, KV caching |
+| **Compute Bound** | $I \ge I_{\text{ridge}}$ | ALU / Tensor Core matrix engines | Algorithmic transforms, FP16 Tensor Cores |
+
+An A100 at $19.5\text{ TFLOP/s}$ FP32 over $2,039\text{ GB/s}$ of HBM2e has
+$I_{\text{ridge}} = 9.6\text{ FLOP/B}$. Our batched Linear at $B=32$ sits at
+$16\text{ FLOP/B}$, above that ridge, which is why batching is the first thing anyone
+reaches for. The same layer at $B=1$ sits at $0.5$, a factor of 19 below the ridge,
+and no kernel rewrite can help it, because the weights have to travel either way.
+
+### 4. Memory Profiling: The Training Memory Lifecycle
 
 Deep learning training memory divides into four distinct pools that undergo dynamic lifecycle transitions during forward and backward passes.
 
@@ -169,17 +223,32 @@ Deep learning training memory divides into four distinct pools that undergo dyna
 | **Activations ($A$)** | Cached in forward; freed in backward | Batch $\times$ Sequence $\times$ Layers | $B \cdot S \cdot L \cdot d_{\text{embed}} \cdot c_{\text{act}} \times 4\text{ B}$ | $\approx 200\text{ MB}$ ($0.4\times$) |
 | **Gradients ($\nabla_W L$)** | Allocated during backward pass | 1:1 match with parameters $P$ | $P \times 4\text{ B}$ | $500\text{ MB}$ ($1.0\times$) |
 | **Optimizer State (Adam)**| Persistent in device VRAM | First moment $m$ + second moment $v$ | $2 \times P \times 4\text{ B}$ | $1,000\text{ MB}$ ($2.0\times$) |
-| **Total Training Budget** | Peak concurrent residency | $4.4\times \text{ to } 16\times$ model weight size | $4 \cdot P + A + 8 \cdot P$ | **$2,200\text{ MB}$ ($4.4\times$)** |
+| **Total Training Budget** | Peak concurrent residency | $16\text{ B/param}$ plus activations, so never below $4\times$ the weight bytes | $\underbrace{4P}_{W} + A + \underbrace{4P}_{\nabla W} + \underbrace{8P}_{m, v} = 16P + A$ | **$2,200\text{ MB}$ ($4.4\times$)** |
 
-### 4. Latency Measurement: Statistical Rigor
+Throughout this table $P$ is the parameter **count**, never a byte figure, so every
+term carries its own $4\text{ B}$ factor. Four pools at FP32 come to $16\text{ B}$
+per parameter (weights, gradients, and Adam's two moments), and activations are the
+one term that batch and sequence length control rather than the model.
+
+### 5. Latency Measurement: Statistical Rigor
 
 Measuring execution latency on modern multi-core CPUs and GPUs is subject to background operating system interrupts, CPU frequency governors (thermal throttling), dynamic cache warmups, and garbage collection pauses. Professional profiling demands strict statistical isolation:
 
 | Protocol Stage | Iteration Budget | System State | Treatment of Output |
 | :--- | :--- | :--- | :--- |
-| **Warmup Passes** | $3 \text{ to } 10$ iterations | Cold instruction & data caches, JIT compilation | Excluded from measurements to eliminate cold-start noise |
-| **Timed Benchmark** | $10 \text{ to } 100+$ iterations | Steady-state thermal and memory cache profile | Compute robust median ($Q_2$) and IQR rather than mean |
+| **Warmup Passes** | $3 \text{ to } 10$ iterations | Cold caches, BLAS thread-pool spin-up, first-touch page faults | Excluded from measurements to eliminate cold-start noise |
+| **Timed Benchmark** | $10 \text{ to } 100+$ iterations | Steady-state thermal and memory cache profile | Report the median ($Q_2$) rather than the mean |
 | **Memory Cleanup** | Between runs | Explicit garbage collection (`gc.collect()`) | Prevents heap fragmentation contamination |
+
+The first two rows describe what `measure_latency` does below. The third is what a
+production harness adds and ours does not, along with the interquartile range that
+would report the spread beside the median. Both are noted here so you know the shape of
+the gap, and Module 19 will close it.
+
+Warmup also hides something. The timed loop below re-runs the same input tensor, so
+after the first pass it is resident in cache and every number the module reports is a
+best case. Real serving traffic arrives cold, one request at a time, from memory the
+processor has not touched.
 """
 
 # %% [markdown]
@@ -211,7 +280,7 @@ r"""
 Parameter count is the first number anyone quotes about a model, and it is the
 one every memory estimate starts from. A layer's parameters are whatever arrays
 it learns: the weight matrix, plus a bias vector when it has one. Nothing else
-counts -- activations are recomputed each forward pass and belong to a different
+counts, because activations are recomputed each forward pass and belong to a different
 budget.
 
 The reason this is a separate function rather than a line inside the traversal
@@ -244,7 +313,7 @@ def _count_layer_parameters(layer) -> int:
     8192
 
     HINTS:
-    - Use hasattr(layer, 'weight') -- not every layer has parameters
+    - Use hasattr(layer, 'weight'), since not every layer has parameters
     - A bias attribute can exist and still be None; check both
     - .data.size gives the element count, which is what we want here
 
@@ -320,7 +389,7 @@ r"""
 A convolution costs far more than its parameter count suggests, and the gap is
 the whole point. A Linear layer uses each weight once. A convolution slides the
 same small kernel across every output position, so each weight is reused
-`out_H x out_W` times -- and the FLOP count multiplies by that same factor.
+`out_H x out_W` times, and the FLOP count multiplies by that same factor.
 
 That is why a 3x3 conv with a few thousand parameters can dominate a network's
 arithmetic while a Linear layer with a million parameters barely registers.
@@ -497,7 +566,7 @@ def _count_linear_flops(model, input_shape: Tuple[int, ...]) -> int:
     HINTS:
     - Use input_shape[-1] so the function works for any batch dimension
     - Guard the missing-weight case with hasattr(model, 'weight')
-    - The factor of 2 is the multiply and the add -- it is not the batch
+    - The factor of 2 is the multiply and the add, not the batch
 
     Args:
         model: A Linear layer with a .weight attribute
@@ -515,7 +584,7 @@ def _count_linear_flops(model, input_shape: Tuple[int, ...]) -> int:
 
 # %% [markdown]
 r"""
-### 🧪 Unit Test: count_linear_flops
+### 🧪 Unit Test: _count_linear_flops
 
 This test validates the helper that computes FLOPs for a single Linear layer.
 
@@ -526,8 +595,8 @@ This test validates the helper that computes FLOPs for a single Linear layer.
 
 # %% nbgrader={"grade": true, "grade_id": "test-count-linear-flops", "locked": true, "points": 3}
 def test_unit_count_linear_flops():
-    """🧪 Test count_linear_flops helper."""
-    print("🧪 Unit Test: count_linear_flops...")
+    """🧪 Test _count_linear_flops helper."""
+    print("🧪 Unit Test: _count_linear_flops...")
 
     # Create mock Linear layer
     class MockLinear:
@@ -553,28 +622,141 @@ def test_unit_count_linear_flops():
     assert flops_b1 == flops_b32, "FLOPs should be batch-independent"
     print("✅ Batch-independent FLOPs confirmed")
 
-    print("✅ count_linear_flops works correctly!")
+    print("✅ _count_linear_flops works correctly!")
 
 if __name__ == "__main__":
     test_unit_count_linear_flops()
 
 # %% [markdown]
 r"""
+### Arithmetic Intensity: Placing a Workload on the Roofline
+
+📐 defined arithmetic intensity as FLOPs performed per byte moved, and the ridge point
+as the intensity where a machine's memory ceiling meets its compute ceiling. Those two
+numbers are all you need to say which ceiling a workload is under, so they are worth
+writing down as code rather than carrying in your head.
+
+The function below is three lines and it is the most reused thing in this module.
+Quantization, pruning, fusion, and KV caching are all arguments about one of its two
+inputs, and every one of them is judged by which side of the ridge the result lands on.
+Note what it does not do. It takes the byte count as given, because nothing in a NumPy
+framework can observe real DRAM traffic. You supply the bytes an ideal kernel would
+move, and the answer is an upper bound on intensity.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "arithmetic-intensity", "solution": true}
+#| export
+def arithmetic_intensity(flops: int, bytes_moved: float,
+                         ridge_point: float) -> Dict[str, Any]:
+    """
+    Compute arithmetic intensity and place it against a machine's ridge point.
+
+    ```
+    I          = flops / bytes_moved                 (FLOP per byte)
+    I_ridge    = peak_compute / peak_bandwidth       (supplied by the caller)
+    regime     = 'memory' if I < I_ridge else 'compute'
+    ```
+
+    TODO: Divide work by traffic, then compare against the ridge point.
+
+    APPROACH:
+    1. Divide flops by bytes_moved, guarding a zero denominator
+    2. Compare the result against ridge_point
+    3. Return the intensity, the ridge point, and the regime label
+
+    EXAMPLE:
+    >>> # A Linear(1000, 500) at batch 1 moves its whole weight matrix for 1 MFLOP
+    >>> r = arithmetic_intensity(flops=1_000_000, bytes_moved=2_000_000, ridge_point=9.56)
+    >>> r['intensity'], r['regime']
+    (0.5, 'memory')
+
+    HINTS:
+    - Use max(bytes_moved, 1e-9) so a zero byte count cannot raise
+    - The boundary case belongs to compute, matching 📐's $I \\ge I_{ridge}$
+    - Return the ridge point back to the caller so a printed table can show both
+
+    Args:
+        flops: Floating point operations the kernel performs
+        bytes_moved: Bytes the kernel must move to perform them
+        ridge_point: The machine's peak FLOP/s divided by its peak bytes/s
+
+    Returns:
+        dict with intensity, ridge_point, and a regime label of 'memory' or 'compute'
+    """
+    ### BEGIN SOLUTION
+    intensity = flops / max(bytes_moved, 1e-9)
+    return {
+        'intensity': intensity,
+        'ridge_point': ridge_point,
+        'regime': 'compute' if intensity >= ridge_point else 'memory'
+    }
+    ### END SOLUTION
+
+# %% [markdown]
+r"""
+### 🧪 Unit Test: arithmetic_intensity
+
+This test validates the roofline placement the rest of the curriculum argues from.
+
+**What we're testing**: $I = \text{FLOPs}/\text{Bytes}$ and its comparison against a ridge point
+**Why it matters**: Every optimization in Modules 15 to 19 claims to move a workload across this line
+**Expected**: $0.5\text{ FLOP/B}$ at batch 1 and $16\text{ FLOP/B}$ at batch 32, straddling the A100 ridge
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-arithmetic-intensity", "locked": true, "points": 3}
+def test_unit_arithmetic_intensity():
+    """🧪 Test arithmetic_intensity helper."""
+    print("🧪 Unit Test: arithmetic_intensity...")
+
+    # An A100 at 19.5 TFLOP/s FP32 over 2,039 GB/s of HBM2e.
+    a100_ridge = 19.5e12 / 2039e9
+
+    # Test 1: Linear(1000, 500) at batch 1. The weight matrix is 2,000,000 bytes
+    # at FP32 and the layer performs 2 * 1000 * 500 = 1,000,000 FLOPs.
+    single = arithmetic_intensity(flops=1_000_000, bytes_moved=2_000_000,
+                                 ridge_point=a100_ridge)
+    assert abs(single['intensity'] - 0.5) < 1e-9, f"Expected 0.5, got {single['intensity']}"
+    assert single['regime'] == 'memory', "0.5 FLOP/B is far below the A100 ridge"
+    print(f"✅ Batch 1: {single['intensity']:.2f} FLOP/B -> {single['regime']}-bound")
+
+    # Test 2: The same layer at batch 32. FLOPs scale, weight traffic does not.
+    batched = arithmetic_intensity(flops=32_000_000, bytes_moved=2_000_000,
+                                  ridge_point=a100_ridge)
+    assert abs(batched['intensity'] - 16.0) < 1e-9, f"Expected 16.0, got {batched['intensity']}"
+    assert batched['regime'] == 'compute', "16 FLOP/B is above the A100 ridge of 9.6"
+    print(f"✅ Batch 32: {batched['intensity']:.2f} FLOP/B -> {batched['regime']}-bound")
+
+    # Test 3: Sitting exactly on the ridge counts as compute-bound
+    on_ridge = arithmetic_intensity(flops=96, bytes_moved=10.0, ridge_point=9.6)
+    assert on_ridge['regime'] == 'compute', "I == I_ridge belongs to the compute side"
+    print("✅ Exactly on the ridge: compute-bound")
+
+    # Test 4: Zero bytes cannot raise
+    guarded = arithmetic_intensity(flops=0, bytes_moved=0.0, ridge_point=9.6)
+    assert guarded['regime'] == 'memory', "Zero work is not compute-bound"
+    print("✅ Zero-byte safety handled")
+
+    print("✅ arithmetic_intensity works correctly!")
+
+if __name__ == "__main__":
+    test_unit_arithmetic_intensity()
+
+# %% [markdown]
+r"""
 ### Bottleneck Classification: Compute-Bound or Memory-Bound
 
-Every optimization decision starts with one question: is this workload waiting on
+Every optimization decision starts with one question. Is this workload waiting on
 arithmetic, or waiting on data? The two answers point in opposite directions. A
 compute-bound layer gets faster from lower precision or a better kernel. A
-memory-bound layer ignores both and responds only to moving fewer bytes --
+memory-bound layer ignores both and responds only to moving fewer bytes, whether by
 fusion, caching, or quantizing the weights that have to travel.
 
 The classifier below is deliberately crude. It compares achieved memory
 bandwidth against achieved compute throughput and calls a lopsided ratio
 memory-bound. That is a screening heuristic, not the real analysis. The rigorous
-version is arithmetic intensity, FLOPs performed per byte moved, read against
-the hardware's roofline: where a workload sits relative to the ridge point tells
-you which ceiling you are actually under. What we need here is a fast first read
-that is honest about being one.
+version is the `arithmetic_intensity` you just wrote, read against the hardware's
+ridge point. What we need here is a fast first read that needs no byte count and is
+honest about being a screen.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-bottleneck", "solution": true}
@@ -605,7 +787,7 @@ def _analyze_bottleneck(gflops_per_second: float,
     {'is_memory_bound': True, 'is_compute_bound': False, 'bottleneck': 'memory'}
 
     HINTS:
-    - The two boolean flags are mutually exclusive -- derive one from the other
+    - The two boolean flags are mutually exclusive, so derive one from the other
     - The 100 is a rule-of-thumb scale factor, not a physical constant
     - Return the label as a plain string so callers can print it directly
 
@@ -627,7 +809,7 @@ def _analyze_bottleneck(gflops_per_second: float,
 
 # %% [markdown]
 r"""
-### 🧪 Unit Test: analyze_bottleneck
+### 🧪 Unit Test: _analyze_bottleneck
 
 This test validates the helper that identifies memory-bound vs compute-bound workloads.
 
@@ -638,8 +820,8 @@ This test validates the helper that identifies memory-bound vs compute-bound wor
 
 # %% nbgrader={"grade": true, "grade_id": "test-analyze-bottleneck", "locked": true, "points": 3}
 def test_unit_analyze_bottleneck():
-    """🧪 Test analyze_bottleneck helper."""
-    print("🧪 Unit Test: analyze_bottleneck...")
+    """🧪 Test _analyze_bottleneck helper."""
+    print("🧪 Unit Test: _analyze_bottleneck...")
 
     # Test 1: Memory-bound (high bandwidth relative to compute)
     result = _analyze_bottleneck(gflops_per_second=1.0, memory_bandwidth_mbs=10000.0)
@@ -659,7 +841,7 @@ def test_unit_analyze_bottleneck():
         "Memory-bound and compute-bound should be mutually exclusive"
     print(f"✅ Mutually exclusive: bottleneck = {result['bottleneck']}")
 
-    print("✅ analyze_bottleneck works correctly!")
+    print("✅ _analyze_bottleneck works correctly!")
 
 if __name__ == "__main__":
     test_unit_analyze_bottleneck()
@@ -674,7 +856,7 @@ are individually too small to reuse. The ratio of useful bytes to peak bytes is
 the cheapest available signal for how much of that overhead you are carrying.
 
 A low ratio does not tell you which cause is responsible, and it is not a
-verdict on the model. It tells you where to look next -- and whether the answer
+verdict on the model. It tells you where to look next, and whether the answer
 to an out-of-memory error is a smaller model or a better allocation pattern.
 """
 
@@ -764,7 +946,7 @@ unrelated numbers until you divide them, at which point they become throughput
 and can be compared against hardware that has a known ceiling. The same is true
 of memory over time, which becomes bandwidth.
 
-One value below deserves suspicion: the theoretical peak is hard-coded at 100
+One value below deserves suspicion. The theoretical peak is hard-coded at 100
 GFLOP/s. That stands in for a real hardware number the profiler has no way to
 query from pure NumPy, so the efficiency figure it produces is a relative
 indicator, not a hardware utilization percentage. Treat a rising number as
@@ -873,8 +1055,8 @@ r"""
 ### Backward Pass Cost: Why Training Is 3x Inference
 
 Training costs roughly three times what inference costs, and the split is worth
-knowing precisely: one unit forward, two units backward. The backward pass is
-twice the forward because it computes two gradients at every layer -- one with
+knowing precisely, one unit forward and two units backward. The backward pass is
+twice the forward because it computes two gradients at every layer, one with
 respect to the inputs, so the chain rule can continue downstream, and one with
 respect to the weights, so the optimizer has something to apply.
 
@@ -908,7 +1090,7 @@ def _estimate_backward_costs(forward_flops: int,
     {'backward_flops': 2000, 'backward_latency_ms': 10.0}
 
     HINTS:
-    - The factor is 2, not 3 -- the 3x figure is forward PLUS backward
+    - The factor is 2, not 3 (the 3x figure is forward PLUS backward)
     - This is an estimate; a real measurement would time an actual backward call
 
     Args:
@@ -969,7 +1151,7 @@ footprint before a single activation is stored.
 
 For a large model that difference decides whether training fits at all. It is
 also why the choice of optimizer is a systems decision and not only a
-convergence one: switching from Adam to SGD can buy back more memory than any
+convergence one. Switching from Adam to SGD can buy back more memory than any
 batch-size reduction you were considering.
 """
 
@@ -1084,22 +1266,28 @@ and candidate models.
 #| export
 class Profiler:
     """
-    Professional-grade ML model profiler for performance analysis.
+    ML model profiler for parameters, FLOPs, memory, and latency.
 
-    Measures parameters, FLOPs, memory usage, and latency with statistical rigor.
-    Used for optimization guidance and deployment planning.
+    Measures what pure NumPy can see, and is explicit about the rest. Parameter
+    and FLOP counts are exact. Latency is a median over repeated warm runs.
+    Memory is an allocation footprint from tracemalloc, not device bytes moved,
+    and the compute peak it divides by is a placeholder constant rather than a
+    measured machine. Read the derived rates as relative indicators.
+
+    Every profile_forward_pass report is also stored in .measurements, keyed by the
+    model's class name, so one profiler reused across candidate models keeps a
+    record you can compare after the sweep.
     """
 
     def __init__(self):
         """
         Initialize profiler with measurement state.
 
-        TODO: Set up profiler tracking structures
+        TODO: Set up the record every profiling call writes into
 
         APPROACH:
-        1. Create empty measurements dictionary
-        2. Initialize operation counters
-        3. Set up memory tracking state
+        1. Create an empty measurements dictionary keyed by model class name
+        2. That is the whole constructor; profile_forward_pass fills it in
 
         EXAMPLE:
         >>> profiler = Profiler()
@@ -1107,17 +1295,21 @@ class Profiler:
         {}
 
         HINTS:
-        - Use defaultdict(int) for operation counters
-        - measurements dict will store timing results
+        - One instance can profile several models, so keep the record on the instance
+        - Reuse one Profiler across a comparison and .measurements holds every report
         """
         ### BEGIN SOLUTION role="scaffold"
         self.measurements = {}
-        self.operation_counts = defaultdict(int)
-        self.memory_tracker = None
         ### END SOLUTION
 
     def __enter__(self):
-        """Start timing: `with Profiler() as p:` times the block (see the tests)."""
+        """
+        Start timing, so that this times the block it wraps:
+
+            with Profiler() as p:
+                model.forward(x)
+            print(p.elapsed)   # milliseconds
+        """
         self._context_start = time.perf_counter()
         return self
 
@@ -1359,6 +1551,10 @@ class Profiler:
         """
         Measure model inference latency with statistical rigor.
 
+        Every iteration reuses the SAME input tensor, so after warmup it is
+        cache-resident and the median is a warm best case. Serving traffic arrives
+        cold and one request at a time, and will be slower than this reports.
+
         TODO: Implement accurate latency measurement
 
         APPROACH:
@@ -1377,7 +1573,7 @@ class Profiler:
         >>> profiler = Profiler()
         >>> latency = profiler.measure_latency(linear, input_tensor)
         >>> print(f"Latency: {latency:.2f} ms")
-        Latency: 0.03 ms      # machine-dependent -- yours will differ
+        Latency: 0.03 ms      # machine-dependent, yours will differ
 
         HINTS:
         - Use time.perf_counter() for high precision
@@ -1473,7 +1669,7 @@ class Profiler:
         >>> profiler = Profiler()
         >>> profile = profiler.profile_forward_pass(model, input_data)
         >>> print(f"Throughput: {profile['gflops_per_second']:.2f} GFLOP/s")
-        Throughput: 0.04 GFLOP/s   # machine-dependent -- yours will differ
+        Throughput: 0.04 GFLOP/s   # machine-dependent, yours will differ
 
         HINT: Compose helper outputs with ** unpacking into return dict
         """
@@ -1494,13 +1690,17 @@ class Profiler:
         bottleneck = _analyze_bottleneck(derived['gflops_per_second'],
                                               derived['memory_bandwidth_mbs'])
 
-        return {
+        report = {
             # 'flops' stays per sample, matching count_flops. 'batch_flops' is the
             # figure the throughput below was computed from.
             'parameters': param_count, 'flops': flops, 'batch_flops': batch_flops,
             'latency_ms': latency_ms,
             **memory_stats, **derived, **bottleneck
         }
+        # Keep the report on the instance so one profiler reused across several
+        # models leaves a record the caller can compare afterwards.
+        self.measurements[model.__class__.__name__] = report
+        return report
         ### END SOLUTION
 
 
@@ -1523,7 +1723,7 @@ class Profiler:
         >>> profiler = Profiler()
         >>> profile = profiler.profile_backward_pass(model, input_data)
         >>> print(f"Training iteration: {profile['total_latency_ms']:.2f} ms")
-        Training iteration: 1.13 ms  # machine-dependent -- yours will differ
+        Training iteration: 1.13 ms  # machine-dependent, yours will differ
 
         HINT: Gradient memory equals parameter memory (one gradient per parameter)
         """
@@ -1800,7 +2000,9 @@ FLOPs (Floating Point Operations) quantify theoretical arithmetic work independe
 
 ### Mathematical FLOP Formulations
 
-$$\text{FLOP}_{\text{Linear}} = 2 \cdot B \cdot d_{\text{in}} \cdot d_{\text{out}} + B \cdot d_{\text{out}}$$
+$$\text{FLOP}_{\text{Linear}} = 2 \cdot B \cdot d_{\text{in}} \cdot d_{\text{out}} + \underbrace{B \cdot d_{\text{out}}}_{\text{bias, dropped below}}$$
+
+The bias term is written once for completeness and then ignored, by `_count_linear_flops`, by 📐, and by the table below. For the first row it is $32 \times 3,072 = 98,304$ FLOPs against $150,994,944$, or $0.065\%$, and it stays under a tenth of a percent for any layer worth profiling. Dropping a term you have bounded is different from forgetting it, and knowing which terms you may drop is most of what FLOP accounting is.
 
 $$\text{FLOP}_{\text{Conv2d}} = 2 \cdot B \cdot H_{\text{out}} \cdot W_{\text{out}} \cdot (C_{\text{in}} \cdot k_h \cdot k_w) \cdot C_{\text{out}}$$
 
@@ -2042,18 +2244,20 @@ Latency measurement is the most challenging facet of profiling because execution
 
 | Variance Source | Physical / OS Mechanism | Impact on Raw Latency | Experimental Safeguard |
 | :--- | :--- | :--- | :--- |
-| **Cold Cache Misses** | Instruction & data lines absent from L1/L2/L3 caches | First runs take $5\times \text{ to } 20\times$ longer | Execute 3–10 warmup passes before recording timestamps |
+| **Cold Start Costs** | Cold L1/L2/L3 lines, BLAS thread-pool spin-up, first-touch page faults | First runs take $5\times \text{ to } 20\times$ longer | Execute 3–10 warmup passes before recording timestamps |
 | **OS Thread Scheduling**| Kernel interrupts, context switches, daemons | Sporadic high-latency spikes in single runs | Report sample median ($Q_2$) rather than arithmetic mean |
 | **Thermal Throttling** | Dynamic frequency scaling (DVFS) under sustained load | Late runs slow down as junction temperature rises | Benchmark in short, burst-controlled sample batches |
 | **Garbage Collection** | Python runtime stop-the-world heap sweeps | Unpredictable multi-millisecond halts | Synchronize explicit `gc.collect()` passes outside timing blocks |
 
 ### Measurement Protocol
 
-Our latency measurement pipeline follows rigorous systems benchmarking practices:
+Our `measure_latency` implements the first three stages below. The fourth is in the
+table above because it belongs in any serious harness, not because this one does it.
+`measure_latency` never collects, and TinyTorch does not even import `gc`.
 1. **Warmup Passes**: Execute un-timed forward iterations to warm hardware caches and trigger any lazy initialization.
 2. **Repeated Measurements**: Collect multiple steady-state iterations to form an empirical timing distribution.
 3. **Median Reduction**: Compute the median ($50^{\text{th}}$ percentile) to discard asymmetrical OS context-switching outliers.
-4. **Memory Hygiene**: Enforce explicit cleanup before and after measurement sweeps.
+4. **Memory Hygiene (not implemented here)**: A production harness collects garbage between sweeps and reports the interquartile range beside the median. Module 19 will build that harness.
 """
 
 # %% [markdown]
@@ -2126,7 +2330,7 @@ Core Profiler Methods → Advanced Analysis Functions → Optimization Insights
 count_parameters()      profile_forward_pass()      "Memory-bound workload"
 count_flops()          profile_backward_pass()      "Optimize data movement"
 measure_memory()       profile_layer()              "Focus on bandwidth"
-measure_latency()      benchmark_efficiency()       "Use quantization"
+measure_latency()      quick_profile()              "Use quantization"
 ```
 
 ### Forward Pass Profiling: Complete Performance Picture
@@ -2148,10 +2352,10 @@ $$\text{Memory}_{\text{training}} = M_{\text{params}} + M_{\text{activations}} +
 
 | Training Phase | Resident Memory Pools | Analytical Formula (FP32) | Example Footprint ($125\text{M}$ GPT) |
 | :--- | :--- | :--- | :--- |
-| **Forward Pass** | Model Weights ($W$) + Saved Activations ($A$) | $P \times 4\text{ B} + B \cdot S \cdot d \cdot c_{\text{act}} \times 4\text{ B}$ | $500\text{ MB} + 100\text{ MB} = 600\text{ MB}$ |
-| **Backward Pass** | Weights ($W$) + Activations ($A$) + Gradients ($\nabla_W L$) | $P \times 4\text{ B} + A + P \times 4\text{ B}$ | $500\text{ MB} + 100\text{ MB} + 500\text{ MB} = 1,100\text{ MB}$ |
+| **Forward Pass** | Model Weights ($W$) + Saved Activations ($A$) | $P \times 4\text{ B} + B \cdot S \cdot d \cdot c_{\text{act}} \times 4\text{ B}$ | $500\text{ MB} + 200\text{ MB} = 700\text{ MB}$ |
+| **Backward Pass** | Weights ($W$) + Activations ($A$) + Gradients ($\nabla_W L$) | $P \times 4\text{ B} + A + P \times 4\text{ B}$ | $500\text{ MB} + 200\text{ MB} + 500\text{ MB} = 1,200\text{ MB}$ |
 | **Adam Optimizer Step** | Weights ($W$) + Gradients ($\nabla_W L$) + First & Second Moments ($m, v$) | $P \times 4\text{ B} + P \times 4\text{ B} + 2 \times P \times 4\text{ B}$ | $500\text{ MB} + 500\text{ MB} + 1,000\text{ MB} = 2,000\text{ MB}$ |
-| **Peak Resident Footprint**| All concurrent buffers before gradient zeroing | $4 \cdot P + A$ | **$\approx 2,100\text{ MB}$ ($4.2\times$ model weight size)** |
+| **Peak Resident Footprint**| All concurrent buffers before gradient zeroing | $16P + A$, with $P$ the parameter count | **$2,200\text{ MB}$ ($4.4\times$ model weight size)** |
 """
 
 # %% [markdown]
@@ -2231,29 +2435,12 @@ r"""
 
 Model profiling reveals the empirical performance characteristics of deep learning architectures across dimensions of model scale, batch size, and arithmetic intensity.
 
-<div align="center">
-  <img src="roofline_model_hardware_limits.svg" alt="Illustrative Hardware Limits and the Roofline Model" width="680px">
-</div>
-
-### The Roofline Model Formulation
-
-The attainable floating-point performance $P$ (in $\text{GFLOP/s}$) on any physical processor is strictly bounded by two fundamental hardware ceilings:
-
-$$P \le \min\left(P_{\text{peak}},\, I \times \text{BW}_{\text{mem}}\right)$$
-
-Where:
-- $P_{\text{peak}}$ is the peak arithmetic compute throughput of the device (ALUs / Tensor Cores).
-- $\text{BW}_{\text{mem}}$ is the sustained memory bandwidth between device DRAM/HBM and on-chip caches/SRAM.
-- $I = \frac{\text{FLOPs}}{\text{Bytes Transferred}}$ is the **arithmetic intensity** of the operation.
-
-The hardware **ridge point** is defined as the operational intensity where the memory ceiling intersects peak compute:
-
-$$I_{\text{ridge}} = \frac{P_{\text{peak}}}{\text{BW}_{\text{mem}}}$$
-
-| Operational Regime | Condition | Limiting Hardware Subsystem | Systems Remedy |
-| :--- | :--- | :--- | :--- |
-| **Memory-Bandwidth Bound** | $I < I_{\text{ridge}}$ | DRAM / HBM transfer bus | Weight quantization, operator fusion, KV caching |
-| **Compute Bound** | $I \ge I_{\text{ridge}}$ | ALU / Tensor Core matrix engines | Algorithmic transforms, FP16 Tensor Cores |
+The roofline, the ridge point, and the two regimes were defined in 📐 Foundations,
+before any of this module's code. What follows is the measurement side of that
+picture. We sweep model size and batch size, time real forward passes, and read the
+numbers against those ceilings. Watch for the places where the measurement refuses to
+behave like the model predicts, because those are the places the profiler is telling
+you something about this implementation rather than about the hardware.
 
 <div align="center">
   <img src="weight_streaming_vs_reuse.svg" alt="Weight Streaming vs Cache Reuse in Autoregressive Decode" width="680px">
@@ -2317,10 +2504,10 @@ def analyze_model_scaling():
 
     # Performance characteristics
     avg_efficiency = np.mean([r['gflops_per_second'] for r in results])
-    if avg_efficiency < 10:  # Arbitrary threshold for "low" efficiency
-        print("🚀 Low compute efficiency suggests memory-bound workload")
-    else:
-        print("🚀 High compute efficiency suggests compute-bound workload")
+    print(f"Average throughput across these four sizes: {avg_efficiency:.2f} GFLOP/s")
+    print("🚀 A couple of GFLOP/s from a NumPy Linear is interpreter and framework")
+    print("   dispatch cost, not DRAM bandwidth. Calling it memory-bound would need")
+    print("   measured bytes moved, which this profiler never sees.")
 
 def analyze_batch_size_effects():
     """📊 Analyze how batch size affects performance and efficiency."""
@@ -2331,9 +2518,10 @@ def analyze_batch_size_effects():
     feature_size = 256
 
     print("\nBatch Size Effects Analysis:")
-    print("Batch\tLatency(ms)\tThroughput(samples/s)\tMemory(MB)\tMemory Efficiency")
+    print("Batch\tLatency(ms)\tThroughput(samples/s)\tMemory(MB)\tSamples/s per MB")
     print("-" * 85)
 
+    throughputs = []
     for batch_size in batch_sizes:
         test_model = Linear(feature_size, feature_size)
         input_shape = (batch_size, feature_size)
@@ -2345,15 +2533,26 @@ def analyze_batch_size_effects():
 
         # Calculate throughput
         samples_per_second = (batch_size * 1000) / latency  # samples/second
+        throughputs.append(samples_per_second)
 
-        # Calculate efficiency (samples per unit memory)
-        efficiency = samples_per_second / max(memory['peak_memory_mb'], 0.001)
+        # Samples per second per MB of peak memory. Not an efficiency in any
+        # hardware sense, just throughput divided by footprint.
+        samples_per_mb = samples_per_second / max(memory['peak_memory_mb'], 0.001)
 
         print(f"{batch_size}\t{latency:.2f}\t\t{samples_per_second:.0f}\t\t\t"
-              f"{memory['peak_memory_mb']:.2f}\t\t{efficiency:.1f}")
+              f"{memory['peak_memory_mb']:.2f}\t\t{samples_per_mb:.1f}")
 
     print("\n💡 Batch Size Insights:")
-    print("Larger batches typically improve throughput but increase memory usage")
+    print(f"Throughput went {throughputs[0]:.0f} -> {throughputs[-1]:.0f} samples/s from "
+          f"batch {batch_sizes[0]} to {batch_sizes[-1]}, a factor of "
+          f"{throughputs[-1] / max(throughputs[0], 1e-9):.2f}.")
+    print("Batching cannot buy throughput here, whatever this run happened to show.")
+    print("TinyTorch's 2D matmul is an explicit Python loop over output elements, so it")
+    print("runs one iteration per sample. Per-sample cost is constant, total cost is")
+    print("exactly linear in batch, leaving nothing to amortize. A vectorized kernel")
+    print("would instead show the factor climb as one weight load serves many samples,")
+    print("which is what Module 17 adds. Peak memory grows with batch either way, so the")
+    print("last column falls no matter which way the throughput wanders.")
 
 if __name__ == "__main__":
     analyze_model_scaling()
@@ -2372,8 +2571,8 @@ Profiling results guide targeted systems interventions. Different machine learni
 | **Matrix Multiplications (GEMM)** | Linear projections, MLP up/down | High ($I \gg I_{\text{ridge}}$ at large $B$) | Compute (ALU / Tensor Core) | Optimized BLAS kernels, Tensor Core MMA, loop tiling |
 | **Spatial Convolutions** | Conv2d feature extraction | High ($I \gg I_{\text{ridge}}$) | Compute (ALU) | Im2col GEMM transforms, Winograd minimal filtering |
 | **Self-Attention ($QK^\top, SV$)** | Dynamic relational routing | Variable ($I \propto \text{Seq Len}$) | Memory bandwidth (SRAM transfers) | FlashAttention (online softmax tiling in SRAM) |
-| **Pointwise Elements** | GELU, ReLU, residual additions | Very low ($I < 0.25\text{ FLOP/B}$) | Memory bandwidth | Kernel fusion (fused pointwise passes) |
-| **Reductions & Normalizations** | LayerNorm, Softmax, sum pooling | Very low ($I < 0.25\text{ FLOP/B}$) | Memory bandwidth | Fused two-pass reduction kernels, Welford's algorithm |
+| **Pointwise Elements** | GELU, ReLU, residual additions | Very low ($I \le 1\text{ FLOP/B}$) | Memory bandwidth | Kernel fusion (fused pointwise passes) |
+| **Reductions & Normalizations** | LayerNorm, Softmax, sum pooling | Very low ($I \le 1\text{ FLOP/B}$) | Memory bandwidth | Fused two-pass reduction kernels, Welford's algorithm |
 
 ### Systematic Optimization Strategy
 
@@ -2448,7 +2647,7 @@ def benchmark_operation_efficiency():
     })
 
     print("\nOperation Efficiency Comparison:")
-    print("Operation\t\tLatency(ms)\tGFLOP/s\t\tEfficiency Class\tOptimization Focus")
+    print("Operation\t\tLatency(ms)\tGFLOP/s\t\tExpected Class (a priori)\tOptimization Focus")
     print("-" * 95)
 
     for op in operations:
@@ -2463,12 +2662,17 @@ def benchmark_operation_efficiency():
 
     print(f"Most efficient: {best_op['operation']} ({best_op['gflops_per_second']:.2f} GFLOP/s)")
     print(f"Least efficient: {worst_op['operation']} ({worst_op['gflops_per_second']:.2f} GFLOP/s)")
+    print("Note the measurement inverts the a priori labels. The GEMM is labeled")
+    print("compute-bound and still comes last, because TinyTorch's matmul runs in")
+    print("Python, so it never reaches the regime the label describes.")
 
-    # Count operation types
+    # Count operation types. This counts the LABELS above, which were written by
+    # hand before anything ran, so the priority below is a hypothesis about the
+    # hardware and not a reading of the three timings.
     memory_bound_ops = [op for op in operations if op['efficiency_class'] == 'memory-bound']
     compute_bound_ops = [op for op in operations if op['efficiency_class'] == 'compute-bound']
 
-    print(f"\n🚀 Optimization Priority:")
+    print(f"\n🚀 Optimization Priority (from the a priori labels, not the timings):")
     if len(memory_bound_ops) > len(compute_bound_ops):
         print("Focus on memory optimization: data locality, bandwidth, caching")
     else:
@@ -2495,11 +2699,13 @@ def analyze_profiling_overhead():
     end_time = time.perf_counter()
     baseline_ms = (end_time - start_time) * 1000
 
-    # With profiling - the same call through measure_latency, one timed run each
+    # With profiling - the same call through measure_latency. warmup=0 matters:
+    # a warmup pass is a second forward, so warmup=1 would time 2x the work and
+    # report the extra forward as instrumentation cost.
     profiler = Profiler()
     start_time = time.perf_counter()
     for _ in range(iterations):
-        _ = profiler.measure_latency(test_model, test_tensor, warmup=1, iterations=1)
+        _ = profiler.measure_latency(test_model, test_tensor, warmup=0, iterations=1)
     end_time = time.perf_counter()
     profiled_ms = (end_time - start_time) * 1000
 
@@ -2552,6 +2758,7 @@ def test_module():
     test_unit_calculate_parameter_memory()
     test_unit_calculate_memory_efficiency()
     test_unit_compute_derived_metrics()
+    test_unit_arithmetic_intensity()
     test_unit_analyze_bottleneck()
     test_unit_estimate_backward_costs()
     test_unit_estimate_optimizer_memory()
@@ -2662,11 +2869,21 @@ Theoretical lower-bound execution latency is predicted by dividing FLOP count by
 
 $$T_{\text{compute\_bound}} = \frac{\text{FLOPs}}{P_{\text{peak}}}$$
 
-| Hardware Device | Peak FP32 Throughput ($P_{\text{peak}}$) | Memory Bandwidth ($\text{BW}$) | Theoretical Compute Latency | Hardware Regime ($B=32$) |
-| :--- | :--- | :--- | :--- | :--- |
-| **Intel Xeon CPU** | $1.5\text{ TFLOP/s}$ | $100\text{ GB/s}$ | $21.3\ \mu\text{s}$ | Compute-bound |
-| **NVIDIA A100 GPU** | $19.5\text{ TFLOP/s}$ (FP32) | $2,039\text{ GB/s}$ (HBM2e) | $1.64\ \mu\text{s}$ | Launch overhead / Memory-bound |
-| **NVIDIA H100 GPU** | $60.0\text{ TFLOP/s}$ (FP32) | $3,350\text{ GB/s}$ (HBM3) | $0.53\ \mu\text{s}$ | Kernel launch limited |
+| Hardware Device | Peak FP32 Throughput ($P_{\text{peak}}$) | Memory Bandwidth ($\text{BW}$) | Ridge Point ($I_{\text{ridge}}$) | Theoretical Compute Latency | Hardware Regime at $I = 16$ |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Intel Xeon CPU** | $1.5\text{ TFLOP/s}$ | $100\text{ GB/s}$ | $15.0\text{ FLOP/B}$ | $21.3\ \mu\text{s}$ | Compute-bound (only just) |
+| **NVIDIA A100 GPU** | $19.5\text{ TFLOP/s}$ (FP32) | $2,039\text{ GB/s}$ (HBM2e) | $9.6\text{ FLOP/B}$ | $1.64\ \mu\text{s}$ | Compute-bound |
+| **NVIDIA H100 SXM GPU** | $67.0\text{ TFLOP/s}$ (FP32) | $3,350\text{ GB/s}$ (HBM3) | $20.0\text{ FLOP/B}$ | $0.48\ \mu\text{s}$ | Memory-bound |
+
+Read the last two columns together, because they disagree on purpose. The H100 has the
+shortest compute time and is the one machine here that cannot reach it. Its FP32 ALUs
+outran its memory system, pushing the ridge to $20\text{ FLOP/B}$, so a workload at
+$I = 16$ starves. The A100, slower on paper, has a ridge of $9.6$ and runs the same
+kernel compute-bound. A faster device does not move a workload toward compute-bound; it
+moves the ridge point to the right and can strand a kernel that used to be fine. The
+Xeon clears its own ridge by a hair, which is a reminder that $I$ is a property of the
+kernel and the regime is a property of the pairing. (The PCIe H100 is rated at
+$51\text{ TFLOP/s}$ FP32, giving a ridge of $15.2$, which would flip this row.)
 
 ---
 
@@ -2690,7 +2907,15 @@ Assuming activation memory $A \approx 200\text{ MB}$ at $B=16$:
 
 $$\text{Total Training VRAM} = W (500\text{ MB}) + A (200\text{ MB}) + \nabla W (500\text{ MB}) + \text{Adam } (1,000\text{ MB}) = \mathbf{2,200\text{ MB}} \quad (4.4\times \text{ Model Size})$$
 
-#### 3. Mixed Precision (FP16 / BF16 AMP) Impact:
+#### 3. Mixed Precision (FP16 / BF16 AMP) Impact (a preview, not a review):
+Everything in this part is new. Automatic Mixed Precision, FP32 master weights, gradient
+underflow, and Tensor Cores appear nowhere earlier in the course, and Module 15 will build
+the precision machinery that makes them make sense. What carries over from this
+module is only the budget arithmetic, so read the list as the same four pools priced at
+two different byte widths. Automatic Mixed Precision keeps the compute copies of the
+weights in 16 bits while holding one 32-bit copy, the master weights, for the optimizer
+to update, because repeatedly adding tiny updates to a 16-bit number loses them.
+
 In Automatic Mixed Precision (AMP):
 - Forward/backward model weights: $P \times 2\text{ B} = 250\text{ MB}$ (50% reduction).
 - Backward gradients: $P \times 2\text{ B} = 250\text{ MB}$ (50% reduction).
@@ -2711,29 +2936,29 @@ $$\eta = \frac{P_{\text{achieved}}}{P_{\text{peak}}} = \frac{10\text{ GFLOP/s}}{
 The hardware compute units are active for only 10% of total elapsed execution time; the system is severely bottlenecked.
 
 #### 2. Root Cause Diagnosis:
-Because doubling batch size does **not** improve arithmetic throughput, the workload is **not** suffering from insufficient arithmetic intensity or under-filled warp occupancy. The root cause is:
+Because doubling batch size does **not** improve arithmetic throughput, the workload is **not** simply under-batched, and it is not short of parallel work to fill the device. Note what this does not rule out. Its arithmetic intensity may still be far below the ridge point, and step 2 below raises it; batching is only one of the ways to do that, and here it is the one that has already failed. The root cause is:
 - **Memory Bandwidth Saturation**: The memory bus between DRAM and processor is already saturated at 100% capacity ($\text{BW}_{\text{achieved}} \approx \text{BW}_{\text{peak}}$). Increasing batch size simply scales compute and memory transfers proportionally, locking throughput at the memory bandwidth ceiling.
 - **Alternative Contributor (Small Sizes)**: High per-call runtime overhead (Python interpreter dispatch latency or asynchronous kernel launch overhead) dominating wall-clock time.
 
 #### 3. Profiling-Guided Optimization Strategy:
 1. **Refuse to write micro-kernel GEMM optimizations**: Optimizing matrix multiply algorithms will yield zero speedup because the ALU is already idle waiting on data.
-2. **Apply Quantization**: Convert FP32 weights to INT8. Cutting data bus transfers by $4\times$ yields an immediate theoretical $4\times$ throughput improvement in bandwidth-saturated regimes.
+2. **Apply Quantization**: Convert FP32 weights to INT8. Cutting data bus transfers by $4\times$ at unchanged FLOPs multiplies arithmetic intensity by $4\times$, which in a bandwidth-saturated regime is an immediate theoretical $4\times$ throughput improvement. Batching raises $I$ by adding work; quantization raises it by removing bytes, and only the second one is still available here.
 3. **Fuse Pointwise Kernels**: Combine adjacent operations (e.g. Bias + GELU + LayerNorm) to execute in on-chip SRAM registers, eliminating redundant intermediate VRAM write/read round-trips.
 
 ---
 
 ### Question 4: Profiling Trade-offs & Production Economics
 
-**Scenario**: Profiler instrumentation adds $5\times$ latency overhead during measurement, but exposes a targeted optimization opportunity delivering a 50% runtime reduction ($2\times$ speedup).
+**Scenario**: `analyze_profiling_overhead` printed a measured overhead factor on your machine. Call it $k$. On the run that produced the output in this notebook $k$ was a little under $3\times$, almost all of it from two `perf_counter` calls and a `np.median` wrapped around a forward pass that takes a couple of microseconds. That measurement exposes a targeted optimization delivering a 50% runtime reduction ($2\times$ speedup).
 
 #### 1. Justification in Development:
-Profiling overhead is an **offline capital investment**. It is paid only during diagnostic benchmarking across a few hundred iterations. The resulting 50% runtime reduction is harvested across **billions of production requests** continuously. The return on investment (ROI) is overwhelming.
+Profiling overhead is an **offline capital investment**. You pay $k$ once, across the few hundred iterations of a diagnostic sweep. The resulting 50% runtime reduction is harvested across **billions of production requests** continuously, so the break-even point arrives in the first seconds of serving. Note also where $k$ came from. The instrumented work here is a single elementwise add, so the fixed per-call cost of timing dominates it. Profile something substantial and the same absolute overhead becomes a rounding error, which is why $k$ is a property of what you measure and not of the profiler.
 
-#### 2. Production Profiling Policy:
-Invasive synchronous profilers (using Python's `tracemalloc`, full execution hooks, or monotonic timer calls on every layer) must **never run inline on production user traffic**:
+#### 2. Production Profiling Policy (a preview of production practice):
+Nothing in Modules 01 to 14 builds any of the machinery named here, so read this part as a map of where the subject goes rather than as something to derive. Invasive synchronous profilers (using Python's `tracemalloc`, full execution hooks, or monotonic timer calls on every layer) must **never run inline on production user traffic**:
 - They disable GPU kernel concurrency, serializing asynchronous streams.
-- They incur multi-millisecond CPU scheduling penalties that degrade P99 latency SLAs.
-- **Production Solution**: Employ asynchronous out-of-band statistical sampling (e.g., eBPF hardware counter sampling, 1-in-10,000 request tracing, or NVIDIA DCGM telemetry) that imposes $< 0.1\%$ overhead.
+- They incur multi-millisecond CPU scheduling penalties that degrade the slowest 1% of requests, the tail a serving contract is usually written against.
+- **Production Solution**: Employ asynchronous out-of-band statistical sampling, sampling hardware counters or tracing roughly one request in ten thousand, for well under $0.1\%$ overhead. Module 19 will build the measurement harness that this discipline sits on top of.
 
 #### 3. The Cost of Profiling vs. The Cost of Misdirected Optimization:
 As formalized by **Amdahl's Law**:
@@ -2751,7 +2976,7 @@ r"""
 
 **Why it matters:** You can't optimize what you can't measure! Before making a model faster or smaller, you need to know where the time and memory go. Your profiler reveals these secrets, telling you exactly what your model costs in compute and memory.
 
-Profiling data guides optimization decisions — quantization, compression, and acceleration all start with measurement.
+Profiling data guides optimization decisions. Quantization, compression, and acceleration all start with measurement.
 """
 
 # %%
@@ -2795,18 +3020,20 @@ Congratulations! You've built a comprehensive profiling system for ML performanc
 - **Built complete Profiler class** with parameter, FLOP, memory, and latency measurement
 - **Implemented advanced profiling functions** for forward and backward pass analysis
 - **Discovered performance characteristics** through scaling and efficiency analysis
-- **Created production-quality measurement tools** for optimization guidance
+- **Built a profiler that is explicit about what it cannot see**: exact counts, honest estimates, and named placeholders instead of invented precision
 - **All tests pass** (validated by `test_module()`)
 
 ### Systems Insights Discovered
 - **FLOPs vs Reality**: Theoretical operations don't always predict actual performance
 - **Memory Bottlenecks**: Many ML operations are limited by memory bandwidth, not compute
-- **Batch Size Effects**: Larger batches improve throughput but increase memory requirements
+- **Batch Size Effects**: Bigger batches raise arithmetic intensity only when the kernel can exploit weight reuse. Our own sweep bought no throughput at all from batch 1 to 128, because a Python-level matmul makes total cost exactly linear in batch
 - **Profiling Overhead**: Measurement tools have costs but enable data-driven optimization
 
 ### Ready for Next Steps
 Your profiling implementation provides the measurement foundation for all optimization work.
-You can't optimize what you can't measure, and now you can measure everything.
+You can't optimize what you can't measure, and you can now measure parameters, FLOPs,
+allocation footprint, and latency, while knowing exactly which numbers are counts, which
+are estimates, and which stand in for hardware this profiler cannot reach.
 
 Export with: `tito module complete 14`
 

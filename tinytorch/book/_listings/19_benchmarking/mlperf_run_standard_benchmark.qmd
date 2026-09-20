@@ -18,8 +18,8 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
 
     config = self.benchmarks[benchmark_name]
     print(f"🧪 Running MLPerf {benchmark_name} benchmark...")
-    print(f"   Target: {config['target_accuracy']:.1%} accuracy, "
-          f"<{config['max_latency_ms']}ms latency")
+    print(f"   Target: {config['target_accuracy']:.1%} accuracy (MLPerf Tiny), "
+          f"p90 < {config['max_latency_ms']}ms (TinyTorch classroom ceiling)")
 
     # Use the caller's test set, or generate standardized test inputs
     # (as Tensors for TinyTorch model compatibility)
@@ -51,12 +51,14 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
     latencies, predictions = self._run_latency_test(model, test_inputs, benchmark_name, num_runs)
     accuracy = self._run_accuracy_test(model, predictions, benchmark_name, num_runs, labels)
 
-    # Compile results. The latency bar is checked at the tail (p99), because a
-    # user waits on the slow requests; the mean is reported beside it.
+    # Compile results. The gate is p90, MLPerf Inference's single-stream metric,
+    # because every timed call here processes exactly one example. The mean and
+    # p99 are reported alongside it but neither decides the verdict.
     mean_latency = float(np.mean(latencies))
+    p90_latency = float(np.percentile(latencies, 90))
     p99_latency = float(np.percentile(latencies, 99))
     accuracy_met = bool(accuracy >= config['target_accuracy'])
-    latency_met = bool(p99_latency <= config['max_latency_ms'])
+    latency_met = bool(p90_latency <= config['max_latency_ms'])
 
     results = {
         'synthetic_labels': labels is None,
@@ -67,10 +69,14 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
         'mean_latency_ms': mean_latency,
         'std_latency_ms': float(np.std(latencies)),
         'p50_latency_ms': float(np.percentile(latencies, 50)),
-        'p90_latency_ms': float(np.percentile(latencies, 90)),
+        'p90_latency_ms': p90_latency,
         'p99_latency_ms': p99_latency,
-        'max_latency_ms': float(np.max(latencies)),
-        'throughput_fps': float(1000 / mean_latency),
+        # The OBSERVED maximum, not a ceiling. The ceiling is target_latency_ms.
+        'max_observed_latency_ms': float(np.max(latencies)),
+        # One example per timed call, so 1/latency is a real rate. Not 'fps':
+        # keyword spotting scores audio windows and there are no frames here.
+        'inferences_per_second': float(1000 / mean_latency),
+        'gating_statistic': 'p90_latency_ms',
         'target_accuracy': float(config['target_accuracy']),
         'target_latency_ms': float(config['max_latency_ms']),
         'accuracy_met': accuracy_met,
@@ -80,7 +86,8 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
         'random_seed': int(self.random_seed)
     }
 
-    print(f"   Results: {accuracy:.1%} accuracy, {mean_latency:.1f}ms mean latency, {p99_latency:.1f}ms p99")
+    print(f"   Results: {accuracy:.1%} accuracy, {p90_latency:.1f}ms p90 latency (gated), "
+          f"{mean_latency:.1f}ms mean")
     print(f"   Compliance: {'✅ PASS' if results['compliant'] else '❌ FAIL'}")
 
     return results

@@ -53,7 +53,7 @@ from tinytorch.core.losses import MSELoss, CrossEntropyLoss, BinaryCrossEntropyL
 
 **Why this matters:**
 - **Learning:** Complete loss function system in one focused module
-- **Production:** Proper organization like PyTorch's torch.nn functional losses
+- **Production:** Proper organization like PyTorch's `torch.nn` loss modules (`MSELoss`, `CrossEntropyLoss`, `BCELoss`)
 - **Consistency:** All loss computations and numerical stability in core.losses
 - **Integration:** Works seamlessly with layers for complete prediction-to-error workflow
 """
@@ -62,7 +62,7 @@ from tinytorch.core.losses import MSELoss, CrossEntropyLoss, BinaryCrossEntropyL
 r"""
 ## 📋 Module Dependencies
 
-**Prerequisites**: Modules 01 (Tensor), 02 (Activations), and 03 (Layers) must be completed
+**Prerequisites**: Module 01 (Tensor) must be completed
 
 **External Dependencies**:
 - `numpy` (for numerical operations)
@@ -71,19 +71,18 @@ r"""
 - **Module 01 (Tensor)**: Foundation for all loss computations
   - Used for: Input/output data structures, shape operations, element-wise operations
   - Required: Yes - losses operate on Tensor objects
-- **Module 02 (Activations)**: Activation functions for testing
-  - Used for: ReLU for building test networks that generate realistic outputs
-  - Required: Yes - for testing loss functions with realistic predictions
-- **Module 03 (Layers)**: Layer components for testing
-  - Used for: Linear layer for testing loss functions with realistic predictions
-  - Required: Yes - for building test networks
+
+A loss function only needs predictions and targets, so this module imports nothing
+from Activations (02) or Layers (03). Those modules produce the predictions a loss
+scores, and you will wire all four together in Module 08 (Training), but
+`tinytorch.core.losses` itself depends on the Tensor alone.
 
 **Dependency Flow**:
 
-$$\begin{array}{ccccccc}
-\text{Module 01 (Tensor)} & \longrightarrow & \text{Module 02 (Activations)} & \longrightarrow & \text{Module 03 (Layers)} & \longrightarrow & \mathbf{\text{Module 04 (Losses)}} \\
-\downarrow & & \downarrow & & \downarrow & & \downarrow \\
-\text{Memory and Strides} & & \text{Nonlinearities} & & \text{Linear Parametric} & & \text{Error Measurement}
+$$\begin{array}{ccc}
+\text{Module 01 (Tensor)} & \longrightarrow & \mathbf{\text{Module 04 (Losses)}} \\
+\downarrow & & \downarrow \\
+\text{Memory and Strides} & & \text{Error Measurement}
 \end{array}$$
 """
 
@@ -93,12 +92,9 @@ $$\begin{array}{ccccccc}
 
 import numpy as np
 rng = np.random.default_rng(7)
-from typing import Optional
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor, Function
-from tinytorch.core.activations import ReLU
-from tinytorch.core.layers import Linear
 
 # Constants for numerical stability
 EPSILON = 1e-7  # Small value to prevent log(0) and numerical instability
@@ -176,14 +172,14 @@ $$\mathcal{L}_{\text{MSE}}(\mathbf{\hat{y}}, \mathbf{y}) = \frac{1}{N} \sum_{i=1
 ### Cross-Entropy Loss
 For multi-class classification over $C$ mutually exclusive classes, we measure the negative log-likelihood of the true target class $y^* \in \{0, \dots, C-1\}$:
 
-$$\mathcal{L}_{\text{CE}}(\mathbf{z}, y^*) = -\log\left(\frac{e^{z_{y^*}}}{\sum_{j=1}^{C} e^{z_j}}\right) = -z_{y^*} + \log\left(\sum_{j=1}^{C} e^{z_j}\right)$$
+$$\mathcal{L}_{\text{CE}}(\mathbf{z}, y^*) = -\log\left(\frac{e^{z_{y^*}}}{\sum_{j=0}^{C-1} e^{z_j}}\right) = -z_{y^*} + \log\left(\sum_{j=0}^{C-1} e^{z_j}\right)$$
 
 **The Log-Sum-Exp Trick**:
 Direct computation of softmax risks immediate IEEE 754 float32 overflow when $z_j > 88.72$. Factoring out the maximum logit $c = \max_k z_k$ guarantees numerical stability:
 
-$$\log \sum_{j=1}^C e^{z_j} = \log \sum_{j=1}^C e^{z_j - c} \cdot e^c = c + \log \left(\sum_{j=1}^{C} e^{z_j - c}\right)$$
+$$\log \sum_{j=0}^{C-1} e^{z_j} = \log \sum_{j=0}^{C-1} e^{z_j - c} \cdot e^c = c + \log \left(\sum_{j=0}^{C-1} e^{z_j - c}\right)$$
 
-$$\operatorname{log\_softmax}(\mathbf{z})_i = (z_i - c) - \log \left(\sum_{j=1}^{C} e^{z_j - c}\right)$$
+$$\operatorname{log\_softmax}(\mathbf{z})_i = (z_i - c) - \log \left(\sum_{j=0}^{C-1} e^{z_j - c}\right)$$
 
 Because $z_j - c \le 0$ for all $j$, every exponent $e^{z_j - c} \in (0, 1]$, completely eliminating the possibility of overflow.
 
@@ -492,7 +488,9 @@ Consider a 3-class vision task across classes: $\text{Class } 0 \to \text{Cat}$,
 | :--- | :--- | :--- | :---: | :---: | :--- |
 | **Case 1: Correct & Confident** | $[5.0, 1.0, 0.1]$ | $[0.975, 0.018, 0.007]$ | Cat (0) | $\mathbf{0.025}$ ✅ | Negligible error signal; weights remain intact |
 | **Case 2: Correct but Uncertain** | $[1.1, 1.0, 0.9]$ | $[0.367, 0.332, 0.301]$ | Cat (0) | $\mathbf{1.002}$ ⚠️ | Significant push ($p_0 - 1 \approx -0.633$) to increase confidence |
-| **Case 3: Wrong & Confident** | $[0.1, 5.0, 1.0]$ | $[0.007, 0.975, 0.018]$ | Cat (0) | $\mathbf{4.962}$ ❌ | Massive error signal ($p_0 - 1 \approx -0.993$) driving rapid correction |
+| **Case 3: Wrong & Confident** | $[0.1, 5.0, 1.0]$ | $[0.007, 0.975, 0.018]$ | Cat (0) | $\mathbf{4.925}$ ❌ | Massive error signal ($p_0 - 1 \approx -0.993$) driving rapid correction |
+
+*Every loss above is computed from the exact softmax, not from the rounded probability column. Case 3's $p_0$ is $0.0072596$, so $-\ln p_0 = 4.925$; rounding to $0.007$ first would report $4.962$. Round for display, never before the arithmetic.*
 
 ### Cross-Entropy's Learning Signal
 
@@ -500,7 +498,7 @@ $$\frac{\partial \mathcal{L}_{\text{CE}}}{\partial z_i} = p_i - y_i \quad \text{
 
 | Prediction State | True Class Alignment | Gradient Push $(p_i - y_i)$ | Learning Signal Directive |
 | :--- | :--- | :---: | :--- |
-| **Confident High Probability** | Correct ($y_i = 1, p_i \approx 1$) | $\approx 0$ | "Converged — preserve current weights" |
+| **Confident High Probability** | Correct ($y_i = 1, p_i \approx 1$) | $\approx 0$ | "Converged, preserve current weights" |
 | **Uncertain Probability** | Correct ($y_i = 1, p_i \approx 0.33$) | $\approx -0.67$ | "Step aggressively toward higher confidence" |
 | **Confident High Probability** | Wrong ($y_i = 0, p_i \approx 1$) | $\approx +1.0$ | "Maximum emergency suppression of this logit" |
 | **Uncertain Probability** | Wrong ($y_i = 0, p_i \approx 0.33$) | $\approx +0.33$ | "Gradually suppress probability" |
@@ -708,11 +706,18 @@ $$\hat{y}_{\text{clamped}} = \operatorname{clip}(\hat{y}, \, \varepsilon, \, 1 -
 
 | Unclamped Prediction $\hat{y}$ | Target $y = 1$ Clamped Loss | Target $y = 0$ Clamped Loss | Float Status |
 | :---: | :---: | :---: | :---: |
-| $1.0000$ | $-\ln(1 - 10^{-7}) \approx 10^{-7}$ | $-\ln(10^{-7}) \approx 16.118$ | Finite IEEE 754 float32 ✅ |
+| $1.0000$ | $-\ln(1 - 10^{-7}) \approx 10^{-7}$ | $-\ln(1.192 \times 10^{-7}) \approx 15.942$ | Finite IEEE 754 float32 ✅ |
 | $0.9000$ | $-\ln(0.9) \approx 0.105$ | $-\ln(0.1) \approx 2.303$ | Finite IEEE 754 float32 ✅ |
 | $0.5000$ | $-\ln(0.5) \approx 0.693$ | $-\ln(0.5) \approx 0.693$ | Finite IEEE 754 float32 ✅ |
 | $0.1000$ | $-\ln(0.1) \approx 2.303$ | $-\ln(0.9) \approx 0.105$ | Finite IEEE 754 float32 ✅ |
 | $0.0000$ | $-\ln(10^{-7}) \approx 16.118$ | $-\ln(1 - 10^{-7}) \approx 10^{-7}$ | Finite IEEE 754 float32 ✅ |
+
+The first and last rows look like mirror images but are not. Tensor stores float32, whose
+spacing just below $1.0$ is about $6 \times 10^{-8}$, so the upper clamp $1 - \varepsilon$
+rounds to $0.9999999$ and its complement comes back as $1.192 \times 10^{-7}$ rather than
+$10^{-7}$. The maximum loss is therefore $15.942$ against $y = 0$ and $16.118$ against
+$y = 1$. The clamp bounds the loss in both directions, which is the point, but the bound
+you get is set by the format, not by the $\varepsilon$ you wrote down.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "binary-cross-entropy-loss", "solution": true}
@@ -880,9 +885,35 @@ Each loss function creates different learning pressures on your model:
 | **Small Error ($0.1$)** | $0.010$ | $0.105$ | Moderate gradient push across both paradigms |
 | **Medium Error ($0.5$)** | $0.250$ | $0.693$ | BCE/CE applies nearly $3\times$ higher penalty than MSE |
 | **Large Error ($0.9$)** | $0.810$ | $2.303$ | BCE/CE penalty accelerates logarithmically toward asymptote |
-| **Extreme Outlier ($1.0^-$)** | $1.000$ | $16.118$ (clamped) | Cross-entropy generates an emergency restorative gradient |
+| **Extreme Outlier ($1.0^-$)** | $1.000$ | $15.942$ (clamped, float32) | Cross-entropy generates an emergency restorative gradient |
 
 *MSE scales quadratically (gentle on confident wrong guesses, sensitive to outliers). BCE/CE scales logarithmically, generating explosive gradient updates when the model is confidently wrong.*
+
+### Pitfall: CrossEntropyLoss Takes Raw Logits
+
+`CrossEntropyLoss` applies log-softmax itself, so it must be handed **raw logits**. Passing
+it probabilities (the output of a softmax you already applied) is the most common mistake in
+this API, and it inherits from PyTorch, where `torch.nn.CrossEntropyLoss` has the same
+contract. There is no shape error and no exception. The loss is simply wrong.
+
+Take Case 1 from the table above, a model that is correct and confident. Its logits
+$[5.0, 1.0, 0.1]$ give a loss of $0.025$. Hand the same model's probabilities
+$[0.975, 0.018, 0.007]$ to the loss instead and it returns $0.568$, more than twenty times
+larger, because the loss softmaxes them a second time into $[0.567, 0.218, 0.215]$:
+
+```python
+ce = CrossEntropyLoss()
+ce(Tensor([[5.0, 1.0, 0.1]]),    Tensor([0]))  # 0.0254  correct: raw logits
+ce(Tensor([[0.975, 0.018, 0.007]]), Tensor([0]))  # 0.5675  wrong: already softmaxed
+```
+
+Probabilities sum to $1$, so their spread can never exceed $1$ and no logit gap can exceed
+$e \approx 2.72$ after the second exponentiation. The model's confidence is flattened away.
+Training still runs, the loss still falls, and it plateaus early with no obvious cause. Two
+checks catch it. Feed the loss a deliberately confident correct example and confirm the loss
+is near zero rather than near $\ln C$, and grep your forward pass for a `softmax` before the
+loss. `BinaryCrossEntropyLoss` is the opposite contract, taking probabilities in $[0, 1]$,
+which is why it validates its input range and `CrossEntropyLoss` does not.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "loss-comparison", "solution": false}
@@ -925,8 +956,6 @@ def analyze_loss_behaviors():
     print("   - MSE penalizes large errors heavily (good for continuous values)")
     print("   - Cross-Entropy encourages confident correct predictions")
     print("   - Binary Cross-Entropy balances false positives and negatives")
-
-    return mse.data, ce.data, bce.data
 
 
 # %% nbgrader={"grade": false, "grade_id": "loss-sensitivity", "solution": false}
@@ -1005,7 +1034,7 @@ Loss functions seem simple, but they have critical computational and memory band
 | **`CrossEntropyLoss`** | $-\frac{1}{B} \sum_{b=1}^B \log\left(\frac{e^{z_{b, y_b^*}}}{\sum_c e^{z_{b, c}}}\right)$ | Max-Reduction $\to$ Subtraction $\to \operatorname{Exp} \to \text{Sum} \to \operatorname{Log} \to \text{Gather}$ | $\mathcal{O}(B \cdot C)$ | $\mathcal{O}(B \cdot C)$ |
 | **`BinaryCrossEntropy`** | $-\frac{1}{B} \sum_{b=1}^B \big[y_b \ln(\hat{y}_b) + (1-y_b)\ln(1-\hat{y}_b)\big]$ | Clip $\to \operatorname{Log} \to$ Linear Comb $\to$ Mean | $\mathcal{O}(B)$ | $\mathcal{O}(B)$ |
 
-*For single-output regression, MSE processes $B$ scalars. In language models with vocabulary $C = 32{,}000$, CrossEntropy processes $B \cdot C$ floats—over $30{,}000\times$ more data elements per batch.*
+*For single-output regression, MSE processes $B$ scalars. In language models with vocabulary $C = 32{,}000$, CrossEntropy processes $B \cdot C$ floats, over $30{,}000\times$ more data elements per batch.*
 
 ### Memory Layout and Production Memory Footprint
 
@@ -1129,11 +1158,18 @@ As models grow larger, loss function memory and compute bottlenecks become criti
 | :--- | :---: | :---: | :---: |
 | **Output Classes ($C$)** | $10$ | $1{,}000$ | $32{,}000$ to $128{,}000$ |
 | **Batch Size ($B$)** | $64$ | $256$ | $2{,}048$ to $8{,}192$ |
-| **Logit Memory ($B \cdot C \cdot 4\text{B}$)** | $2.5\text{ KB}$ | $1.0\text{ MB}$ | $262\text{ MB}$ to $1.05\text{ GB}$ |
-| **Log-Softmax Temp Buffers** | $\approx 7.5\text{ KB}$ | $\approx 3.0\text{ MB}$ | $\approx 786\text{ MB}$ to $3.15\text{ GB}$ |
+| **Logit Memory ($B \cdot C \cdot 4\text{B}$)** | $2.5\text{ KB}$ | $1.0\text{ MB}$ | $262\text{ MB}$ to $4.19\text{ GB}$ |
+| **Log-Softmax Temp Buffers** | $\approx 7.5\text{ KB}$ | $\approx 3.0\text{ MB}$ | $\approx 786\text{ MB}$ to $12.6\text{ GB}$ |
 | **Primary System Bottleneck** | Compute bound (negligible) | Softmax GPU core reduction | HBM Memory Capacity & Bandwidth |
 
 *Memory scales as $\mathcal{O}(B \cdot C)$ for standard cross-entropy. In modern LLMs, vocabulary size $C$ dominates loss computation.*
+
+The production column reports the two corners of the ranges above it, not two independent
+scenarios. The low end is the small batch against the small vocabulary,
+$2{,}048 \times 32{,}000 \times 4\text{ B} = 262\text{ MB}$; the high end is the large batch
+against the large vocabulary, $8{,}192 \times 128{,}000 \times 4\text{ B} = 4.19\text{ GB}$.
+Both middle combinations land at $1.05\text{ GB}$, which is why the corners matter: the
+logits alone move by $16\times$ across a range that each dimension only widens $4\times$.
 
 ### Engineering Optimizations in Production
 
@@ -1282,7 +1318,8 @@ You're building a language model with a 50,000 word vocabulary. Your GPU has 16G
 
 Calculate:
 - How much memory does CrossEntropyLoss need for one forward pass? (Hint: B=128, C=50,000, float32)
-- If this exceeds your budget, what are three strategies to reduce memory usage?
+- What fraction of the 16GB budget is that, and is the loss the thing to optimize here?
+- Now hold the 16GB budget and rerun the same arithmetic at production scale (C=128,000, B=8,192). At what point do the loss buffers alone crowd out the model, and what three strategies buy the space back?
 
 <details>
 <summary>💡 Hint</summary>
@@ -1291,7 +1328,9 @@ Memory for logits = Batch_Size × Num_Classes × 4 bytes (float32) = 128 × 50,0
 
 For full forward pass with intermediate tensors (softmax, log_softmax), multiply by ~3 = 76.8 MB
 
-Strategies to reduce memory:
+That is 0.5% of 16GB, so at this scale the loss is not the constraint. The weights, their optimizer state, and the activations of every earlier layer are. Optimizing the loss here would win back nothing measurable, and recognizing that is the point of the first calculation.
+
+At production scale the same arithmetic reads differently: 8,192 × 128,000 × 4 = 4.19 GB of logits, and ~3× that for the forward pass is 12.6 GB, for the loss layer alone. The same 16GB budget still has to hold the weights, their optimizer state, and every activation, so the loss no longer fits alongside the model it is scoring. That is where these strategies stop being optional:
 1. **Sampled softmax**: Only compute softmax over subset of vocabulary (1000 samples)
 2. **Hierarchical softmax**: Use tree structure, O(log V) instead of O(V)
 3. **Mixed precision**: Use FP16 for forward pass (2 bytes instead of 4)
@@ -1403,7 +1442,7 @@ confidence = abs(prediction.data - 0.5) * 2  # Distance from decision boundary
 # Or just use the raw probability: prediction.data
 ```
 
-**Performance gain**: 3ms (73% faster!) just by removing unnecessary loss computation.
+**Performance gain**: 8ms saved, taking the request from 11ms to 3ms (73% faster, and back inside the 10ms budget), just by removing unnecessary loss computation.
 
 **Key insight**: Loss functions measure "wrongness" during training. At inference, you already have the model's output - use it directly!
 </details>
@@ -1411,7 +1450,7 @@ confidence = abs(prediction.data - 0.5) * 2  # Distance from decision boundary
 ---
 
 ### Question 5: Class Imbalance in Medical Diagnosis
-**Question**: Handling Class Imbalance
+**Question**: Reweighting the BCE Formula
 
 You're building a cancer detection system:
 - 95% of samples are negative (healthy)
@@ -1419,14 +1458,22 @@ You're building a cancer detection system:
 
 Using vanilla BinaryCrossEntropyLoss, your model achieves 95% accuracy by always predicting "healthy."
 
-What are three ways to handle this with loss functions?
+Work from the formula you implemented, $\mathcal{L} = -[y \ln(\hat{y}) + (1 - y)\ln(1 - \hat{y})]$, averaged over a batch of 100 samples:
+
+1. The always-healthy model predicts the base rate, $\hat{y} = 0.05$, for every sample. Compute its mean loss, and split that mean into the part the 95 negatives contribute and the part the 5 positives contribute.
+2. Insert one coefficient $w$ in front of the $y \ln(\hat{y})$ term. Choose $w$ so the 5 positive samples carry the same total weight as the 95 negatives. What is $w$, and what quantity is it the ratio of?
+3. With that $w$ in place, solve for the constant prediction that now minimizes the loss. Has the degenerate solution survived?
 
 <details>
 <summary>💡 Hint</summary>
 
-**The Problem**: Model learned to exploit class imbalance - always predict majority class!
+**Part 1**: $0.95 \times (-\ln 0.95) + 0.05 \times (-\ln 0.05) = 0.0487 + 0.1498 = 0.1985$. The 5 positives already contribute 75% of the loss, so the gradient is not blind to them. The problem is that no constant prediction does better: $\hat{y} = 0.05$ is exactly the minimizer, so a model with no useful features parks there and stops.
 
-**Solution 1: Weighted Loss**
+**Part 2**: $w \times 5 = 95$, so $w = 19$, the ratio of negative count to positive count. It is class frequency inverted, nothing more.
+
+**Part 3**: Minimize $-[19 \times 0.05 \ln p + 0.95 \ln(1 - p)]$ over the constant $p$. Setting the derivative to zero gives $0.95(1 - p) = 0.95p$, so $p = 0.5$. The degenerate solution is gone: weighting by $19$ moves the best do-nothing prediction from $0.05$ to $0.5$, where it is no longer 95% accurate and no longer looks like success. This is the whole mechanism behind PyTorch's `pos_weight` argument to `BCEWithLogitsLoss`.
+
+**In code**:
 ```python
 class WeightedBCELoss:
     def __init__(self, pos_weight=19.0):  # 95/5 = 19
@@ -1439,17 +1486,9 @@ class WeightedBCELoss:
 ```
 Penalize missed cancer cases 19× more than false alarms.
 
-**Solution 2: Focal Loss**
-```python
-# Focuses on hard examples (misclassified samples)
-focal_loss = -(1 - p_correct)^gamma * log(p_correct)
-```
-Automatically downweights easy examples (majority class).
+**Beyond this module**: two other tools attack the same imbalance from outside the formula above, so you cannot derive them from this page, but they are worth knowing by name.
 
-**Solution 3: Resampling**
-- Oversample minority class (duplicate cancer cases)
-- Undersample majority class (fewer healthy samples)
-- SMOTE (Synthetic Minority Over-sampling Technique)
+*Focal loss* multiplies each term by $(1 - p_{\text{correct}})^\gamma$, which downweights the easy majority samples automatically instead of by a fixed ratio you supply. *Resampling* changes the batch rather than the loss, by oversampling the minority class, undersampling the majority class, or synthesizing minority samples (SMOTE). You will build the batching machinery that makes resampling possible in Module 05 (DataLoader).
 
 **Medical Reality**: Weighted loss is most common. False negatives (missed cancer) are MUCH worse than false positives (unnecessary tests).
 
@@ -1520,7 +1559,7 @@ batch_128_loss = np.mean(losses[:128]) # 0.75: the added samples have higher los
 that tells the network whether its predictions are good or bad. Lower loss = better
 predictions. Every training step aims to reduce this number.
 
-Autograd computes gradients of this loss—the direction to adjust weights
+Autograd computes gradients of this loss, giving the direction to adjust weights
 to make predictions better!
 """
 

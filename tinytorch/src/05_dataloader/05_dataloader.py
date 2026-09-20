@@ -92,7 +92,7 @@ import random
 import sys
 import time
 from abc import ABC, abstractmethod
-from typing import Iterator, List, Tuple
+from typing import Callable, Iterator, List, Optional, Tuple, Union
 
 import numpy as np
 rng = np.random.default_rng(7)
@@ -124,7 +124,7 @@ Imagine you have 50,000 images of cats and dogs, and you want to train a neural 
 
 **Individual Access (Dataset)**: Neural networks can't process 50,000 files at once. We need a way to access one sample at a time: "Give me image #1,247".
 
-**Batch Processing (DataLoader)**: GPUs are parallel machines - they're much faster processing 32 images simultaneously than 1 image 32 times.
+**Batch Processing (DataLoader)**: GPUs are parallel machines, so they are much faster processing 32 images simultaneously than 1 image 32 times.
 
 **Memory Efficiency**: A file-backed Dataset can read samples on demand. Our
 TensorDataset instead holds all source tensors in memory; DataLoader adds one
@@ -503,7 +503,7 @@ Now we build the DataLoader, the component that transforms individual dataset sa
 
 ### Understanding Batching: From Samples to Tensors
 
-DataLoader performs a crucial transformation - it collects individual samples and stacks them into batch tensors:
+DataLoader performs a crucial transformation. It collects individual samples and stacks them into batch tensors:
 
 $$\begin{aligned}
 \text{Dataset Samples:} \quad & (\mathbf{x}_i, y_i) = \text{dataset}[i] \\
@@ -536,19 +536,19 @@ Shuffling randomizes which samples appear in which batches, crucial for stochast
 
 **Collation Strategy**: Automatically stacks tensors from individual samples into batch tensors.
 
-**Performance Critical**: This is often the bottleneck in training pipelines - loading and preparing data can be slower than the forward pass!
+**Performance Critical**: This is often the bottleneck in training pipelines, because loading and preparing data can be slower than the forward pass!
 
 ### The DataLoader Algorithm
 
 1. **Initialize Permutation**: Allocate index buffer $\pi = [0, 1, \dots, N-1] \in \mathbb{Z}^N$.
-2. **Epoch Shuffle**: If $\text{shuffle}=\text{True}$, invoke Knuth-Fisher-Yates shuffle on $\pi$.
+2. **Epoch Shuffle**: If $\text{shuffle}=\text{True}$, shuffle $\pi$ in place with the Fisher-Yates algorithm, which walks the list once and swaps each position with a randomly chosen earlier one. This is what `random.shuffle` does.
 3. **Chunk Windows**: Partition $\pi$ into contiguous slices $\mathcal{B}_k = \{\pi_{k B}, \dots, \pi_{(k+1)B - 1}\}$.
 4. **Collate & Yield**: For each batch chunk $\mathcal{B}_k$:
    - Gather sample records: $\{(\mathbf{x}_i, y_i) \mid i \in \mathcal{B}_k\}$
    - Collate along axis 0: $\mathbf{X}_k = \text{stack}(\mathbf{x}_i)$, $\mathbf{y}_k = \text{stack}(y_i)$
    - Yield $(\mathbf{X}_k, \mathbf{y}_k)$ as contiguous tensors.
 
-This transforms the dataset from "access one sample" to "iterate through batches" - exactly what training loops need.
+This transforms the dataset from "access one sample" to "iterate through batches", exactly what training loops need.
 """
 
 # %% [markdown]
@@ -627,7 +627,7 @@ class DataLoader:
         return (len(self.dataset) + self.batch_size - 1) // self.batch_size
         ### END SOLUTION
 
-    def __iter__(self) -> Iterator:
+    def __iter__(self) -> Iterator[Tuple[Tensor, ...]]:
         """
         Return iterator over batches.
 
@@ -761,7 +761,7 @@ class RandomHorizontalFlip:
 
     A simple but effective augmentation for most image datasets.
     Flipping is appropriate when horizontal orientation doesn't change class
-    (cats, dogs, cars - not digits or text!).
+    (cats, dogs, cars, but not digits or text!).
 
     Args:
         p: Probability of flipping (default: 0.5)
@@ -770,7 +770,7 @@ class RandomHorizontalFlip:
             for short HWC images or CHW images with more than four channels.
     """
 
-    def __init__(self, p=0.5, layout=None):
+    def __init__(self, p: float = 0.5, layout: Optional[str] = None) -> None:
         """
         Initialize RandomHorizontalFlip.
 
@@ -804,7 +804,7 @@ class RandomHorizontalFlip:
         self.layout = layout
         ### END SOLUTION
 
-    def __call__(self, x):
+    def __call__(self, x: Union[Tensor, np.ndarray]) -> Union[Tensor, np.ndarray]:
         """
         Apply random horizontal flip to input.
 
@@ -879,7 +879,7 @@ We must pad **only spatial dimensions**, never the channel dimension.
 
 # %% nbgrader={"grade": false, "grade_id": "dataloader-pad-image", "solution": true}
 #| export
-def _pad_image(data, padding, layout=None):
+def _pad_image(data: np.ndarray, padding: int, layout: Optional[str] = None) -> np.ndarray:
     """
     Apply zero-padding to spatial dimensions only.
 
@@ -1016,7 +1016,7 @@ computing two random integers within valid bounds.
 
 # %% nbgrader={"grade": false, "grade_id": "dataloader-crop-region", "solution": true}
 #| export
-def _random_crop_region(padded_h, padded_w, target_h, target_w):
+def _random_crop_region(padded_h: int, padded_w: int, target_h: int, target_w: int) -> Tuple[int, int]:
     """
     Sample a random (top, left) position for cropping.
 
@@ -1090,7 +1090,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 r"""
-### RandomCrop — Composing Pad, Sample, and Extract
+### RandomCrop: Composing Pad, Sample, and Extract
 
 Now we combine our two helpers into the complete RandomCrop transform.
 The `__call__` method simply orchestrates three clear steps:
@@ -1121,7 +1121,8 @@ class RandomCrop:
             <= 4 means CHW). Specify HWC for short images or CHW for > 4 channels.
     """
 
-    def __init__(self, size, padding=4, layout=None):
+    def __init__(self, size: Union[int, Tuple[int, int]], padding: int = 4,
+                 layout: Optional[str] = None) -> None:
         """
         Initialize RandomCrop.
 
@@ -1153,7 +1154,7 @@ class RandomCrop:
         self.padding = padding
         ### END SOLUTION
 
-    def __call__(self, x):
+    def __call__(self, x: Union[Tensor, np.ndarray]) -> Union[Tensor, np.ndarray]:
         """
         Apply random crop after padding.
 
@@ -1233,7 +1234,7 @@ class Compose:
         transforms: List of transform callables
     """
 
-    def __init__(self, transforms):
+    def __init__(self, transforms: List[Callable]) -> None:
         """
         Initialize Compose with list of transforms.
 
@@ -1245,7 +1246,7 @@ class Compose:
         """
         self.transforms = transforms
 
-    def __call__(self, x):
+    def __call__(self, x: Union[Tensor, np.ndarray]) -> Union[Tensor, np.ndarray]:
         """Apply all transforms in sequence."""
         for transform in self.transforms:
             x = transform(x)
@@ -1545,12 +1546,20 @@ This is what your model sees during training!
 
 **Tiny Datasets (ships with TinyTorch):**
 ```python
-# 8×8 handwritten digits - ships with TinyTorch, no download
+# 8×8 handwritten digits, ships with TinyTorch, no download
 import pickle
-with open('datasets/tinydigits/train.pkl', 'rb') as f:
+from pathlib import Path
+
+# You work in modules/05_dataloader/, so resolve the dataset from the project
+# root rather than the current directory (the same approach
+# milestones/04_1998_cnn/01_lecun_tinydigits.py takes).
+project_root = next(p for p in [Path.cwd(), *Path.cwd().parents]
+                    if (p / "datasets" / "tinydigits").is_dir())
+
+with open(project_root / "datasets" / "tinydigits" / "train.pkl", 'rb') as f:
     data = pickle.load(f)
-images = Tensor(data['images'])  # (150, 8, 8)
-labels = Tensor(data['labels'])  # (150,)
+images = Tensor(data['images'])  # (1000, 8, 8) float32
+labels = Tensor(data['labels'])  # (1000,) int64
 
 dataset = TensorDataset(images, labels)
 loader = DataLoader(dataset, batch_size=32, shuffle=True)
@@ -1564,7 +1573,8 @@ for batch_images, batch_labels in loader:
 
 **Full Datasets (for serious training):**
 ```python
-# milestones/data_manager.py: get_mnist() and get_cifar10() download the full sets
+# milestones/data_manager.py: DatasetManager.get_mnist() and
+# DatasetManager.get_cifar10() download the full sets
 # milestones/04_1998_cnn/02_lecun_cifar10.py shows them feeding a DataLoader
 ```
 
@@ -1706,7 +1716,6 @@ def test_unit_training_integration():
 
     # Create train/val splits
     train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
 
     # Manual split (in production, you'd use proper splitting utilities)
     train_indices = list(range(train_size))
@@ -1780,8 +1789,8 @@ $$T_{\text{step}} = T_{\text{load}} + T_{\text{compute}}$$
 
 | Pipeline Regime | Latency Relation | System Bottleneck | Mitigation Strategy |
 | :--- | :--- | :--- | :--- |
-| **Data-Starved (I/O Bound)** | $T_{\text{load}} > T_{\text{compute}}$ | Host CPU / Disk I/O | Prefetching, background workers, pinned DMA memory |
-| **Compute-Bound** | $T_{\text{compute}} > T_{\text{load}}$ | Accelerator ALU / Tensor Cores | Mixed-precision (FP16/BF16), kernel fusion |
+| **Data-Starved (I/O Bound)** | $T_{\text{load}} > T_{\text{compute}}$ | Host CPU / Disk I/O | Prefetching, background workers, and page-locked host buffers the accelerator can copy from without the CPU staging it first |
+| **Compute-Bound** | $T_{\text{compute}} > T_{\text{load}}$ | Accelerator arithmetic units | Mixed-precision (FP16/BF16), and merging several small operations into one pass over the data so it is read once instead of repeatedly |
 | **Balanced Pipeline** | $T_{\text{load}} \approx T_{\text{compute}}$ | Overlapped Execution | Full saturation of both CPU pipeline and GPU compute |
 
 ### Memory Scaling: The Batch Size Trade-off
@@ -1790,10 +1799,12 @@ Batch size creates a fundamental trade-off in resident memory versus hardware ex
 
 $$\text{Batch Memory Footprint} = B \times H \times W \times C \times 4\text{ bytes (float32)}$$
 
+Sizes below are decimal, so $1\text{ KB} = 10^3$ bytes and $1\text{ MB} = 10^6$ bytes. Every table and analysis cell in this module uses that convention.
+
 | Batch Size $B$ | Memory Footprint | Bytes per Batch | Host Loop Overhead | Accelerator Utilization |
 | :---: | :---: | :---: | :--- | :--- |
-| **$B = 8$** | $25.1\text{ KB}$ | $8 \times 3{,}136\text{ B}$ | High (many tiny host iterations) | Low (ALU warps largely idle) |
-| **$B = 64$** | $200.7\text{ KB}$ | $64 \times 3{,}136\text{ B}$ | Moderate (balanced loop overhead) | High (saturates streaming multiprocessors) |
+| **$B = 8$** | $25.1\text{ KB}$ | $8 \times 3{,}136\text{ B}$ | High (many tiny host iterations) | Low (most arithmetic units sit idle) |
+| **$B = 64$** | $200.7\text{ KB}$ | $64 \times 3{,}136\text{ B}$ | Moderate (balanced loop overhead) | High (enough parallel work to keep the accelerator's compute units busy) |
 | **$B = 512$** | $1.61\text{ MB}$ | $512 \times 3{,}136\text{ B}$ | Minimal (few large matrix multiplications) | Maximum (saturates peak memory bandwidth) |
 
 ### Shuffling Overhead Analysis
@@ -1895,10 +1906,12 @@ def analyze_memory_usage():
 
     # Memory usage estimation
     def estimate_memory_mb(batch_size, feature_size, dtype_bytes=4):
-        """Estimate memory usage for a batch."""
-        return (batch_size * feature_size * dtype_bytes) / (1024 * 1024)
+        """Estimate memory usage for a batch, in decimal MB (1 MB = 10^6 bytes)."""
+        return (batch_size * feature_size * dtype_bytes) / 1_000_000
 
-    print("\n💾 Memory Usage by Batch Configuration:")
+    # Units: this module reports decimal KB/MB (10^3 / 10^6 bytes) everywhere,
+    # matching the batch-memory table in the systems section above.
+    print("\n💾 Memory Usage by Batch Configuration (decimal MB, 1 MB = 10^6 B):")
 
     feature_sizes = [784, 3072, 150528]  # MNIST, CIFAR-10, ImageNet-like
     feature_names = ["MNIST (28×28)", "CIFAR-10 (32×32×3)", "ImageNet (224×224×3)"]
@@ -1931,11 +1944,11 @@ def analyze_memory_usage():
     large_total = sys.getsizeof(tensor_large.data) + sys.getsizeof(tensor_large)
 
     print("  Small batch (32×784):")
-    print(f"    - Data only: {small_bytes / 1024:.1f} KB")
-    print(f"    - With object overhead: {small_total / 1024:.1f} KB")
+    print(f"    - Data only: {small_bytes / 1000:.1f} KB")
+    print(f"    - With object overhead: {small_total / 1000:.1f} KB")
     print("  Large batch (512×784):")
-    print(f"    - Data only: {large_bytes / 1024:.1f} KB")
-    print(f"    - With object overhead: {large_total / 1024:.1f} KB")
+    print(f"    - Data only: {large_bytes / 1000:.1f} KB")
+    print(f"    - With object overhead: {large_total / 1000:.1f} KB")
     print(f"  Ratio: {large_bytes / small_bytes:.1f}× (data scales linearly)")
 
     print("\n🎯 Memory Optimization Tips:")
@@ -1957,6 +1970,10 @@ def analyze_collation_overhead():
 
     print("\n⚡ Collation Time by Batch Size:")
 
+    # _collate_batch calls np.stack once per tensor position, so the number of
+    # calls per batch is fixed by the sample shape, not by the batch size.
+    stacks_per_batch = len(dataset[0])
+
     for batch_size in [8, 32, 128, 512]:
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
@@ -1967,25 +1984,24 @@ def analyze_collation_overhead():
 
         batches = len(loader)
         time_per_batch = (total_time / batches) * 1000  # Convert to ms
+        stack_calls = stacks_per_batch * batches
+        bytes_per_stack = batch_size * feature_size * 4
 
-        print(f"  Batch size {batch_size:3d}: {time_per_batch:.2f}ms per batch ({batches} batches total)")
+        print(f"  Batch size {batch_size:3d}: {time_per_batch:.2f}ms per batch "
+              f"({batches} batches, {stack_calls} np.stack calls, "
+              f"{bytes_per_stack:,}B per feature stack)")
 
     print("\n💡 Collation Insights:")
-    print("• Larger batches take longer to collate (more np.stack operations)")
-    print("• But fewer large batches are more efficient than many small ones")
+    print(f"• np.stack runs once per tensor position ({stacks_per_batch} calls per batch) at every batch size")
+    print("• Larger batches therefore make FEWER total stack calls, not more")
+    print("• Per-batch time still rises, because each stack copies proportionally more bytes")
     print("• Optimal: Balance between batch size and iteration overhead")
 
 
 
 if __name__ == "__main__":
     analyze_dataloader_performance()
-
-
-if __name__ == "__main__":
     analyze_memory_usage()
-
-
-if __name__ == "__main__":
     analyze_collation_overhead()
 
 # %% [markdown]
@@ -2089,17 +2105,17 @@ Answer these to deepen your understanding of data loading and its systems implic
 | Scenario | Epoch 1 Batch Composition | Epoch 2 Batch Composition | Empirical Risk |
 | :--- | :--- | :--- | :--- |
 | **Scenario 1: `shuffle=True`** | $[\text{Pt B}, \text{Pt C}, \text{Pt A}, \dots]$ | $[\text{Pt D}, \text{Pt A}, \text{Pt C}, \dots]$ | Uniform patient distribution per gradient step |
-| **Scenario 2: `shuffle=False`** | $[\text{Pt A}, \text{Pt A}, \text{Pt A}, \dots]$ | $[\text{Pt A}, \text{Pt A}, \text{Pt A}, \dots]$ | High ordering bias; catastrophic forgetting of earlier patients |
+| **Scenario 2: `shuffle=False`** | $[\text{Pt A}, \text{Pt A}, \text{Pt A}, \dots]$ | $[\text{Pt A}, \text{Pt A}, \text{Pt A}, \dots]$ | High ordering bias; late batches can overwrite what early ones taught |
 
 **What happens in Scenario 2?**
 - The model sees 30+ batches of only Patient A's data first
 - It might overfit to Patient A's specific characteristics
 - Early batches update weights strongly toward Patient A's patterns
-- This is ordering bias; in the extreme it produces catastrophic forgetting of earlier patients' features
+- This is ordering bias, and in the extreme the last patient's batches overwrite what the first patient's batches taught, a failure mode known as catastrophic forgetting
 
 **Your DataLoader's shuffle prevents this by mixing patients in every batch!**
 
-**Systems insight**: Shuffling isn't just about randomness-it's about ensuring the model sees representative samples in every batch, preventing order-dependent biases.
+**Systems insight**: Shuffling isn't just about randomness. It's about ensuring the model sees representative samples in every batch, preventing order-dependent biases.
 
 ---
 
@@ -2112,9 +2128,11 @@ Answer these to deepen your understanding of data loading and its systems implic
 | **Model Computation** | $75\text{ ms}$ | $62.5\%$ | Matrix multiplication forward and backward pass |
 | **Total Step** | $120\text{ ms}$ | $100.0\%$ | End-to-end iteration latency |
 
-**Where's the bottleneck?** Data loading takes 37.5% of the time!
+**Where's the bottleneck?** Apply the pipeline-regime table from the systems section above. Here $T_{\text{compute}} = 75\text{ ms} > T_{\text{load}} = 45\text{ ms}$, so this step is **compute-bound**, not data-starved. Data loading is not the bottleneck.
 
-**What's causing it?**
+**So how much is the data pipeline worth?** It owns 37.5% of every step, and that fraction is the ceiling on what any data-loading optimization can return. Overlap the load perfectly with compute and the step falls from 120 ms to 75 ms, a 1.6x speedup. No amount of prefetching beats that, because the 75 ms of compute never goes away.
+
+**What makes up that 37.5%?**
 - Disk I/O: Reading images from storage
 - Decompression: JPEG/PNG decoding
 - Augmentation: Random crops, flips, color jitter
@@ -2127,7 +2145,7 @@ Answer these to deepen your understanding of data loading and its systems implic
 # While the current batch is being processed, load the next batch
 DataLoader(..., num_workers=4)  # PyTorch feature
 ```
-Result: Data loading and compute overlap, ~30% speedup
+Result: Data loading and compute overlap, so the step approaches 75 ms, the 1.6x ceiling
 
 **Option 2: Cache decoded images in memory**
 ```python
@@ -2136,9 +2154,8 @@ cached_dataset = [decode_image(path) for path in paths]
 ```
 Result: Eliminate repeated decode overhead
 
-**Option 3: Use faster image formats**
-- Replace JPEG (slow decode) with WebP (fast decode)
-- Or pre-convert to NumPy .npy files (fastest)
+**Option 3: Skip decoding entirely**
+- Pre-convert images to NumPy .npy files, which load straight into an array with no decode step
 
 **In your implementation:** You used TensorDataset with pre-loaded tensors, avoiding I/O entirely! This is why research code often loads MNIST/CIFAR-10 fully into memory.
 
@@ -2218,7 +2235,7 @@ Python list entries require approximately 3.6GB on typical 64-bit CPython.
 A NumPy int64 index array would use 800MB; our implementation uses a Python list.
 The list is allocated even when `shuffle=False`.
 
-**Systems insight**: Shuffle indices, not data. This is a classic systems pattern-operate on lightweight proxies (indices) rather than expensive objects (actual data).
+**Systems insight**: Shuffle indices, not data. This is a classic systems pattern, operating on lightweight proxies (indices) rather than expensive objects (actual data).
 
 ---
 
@@ -2244,7 +2261,7 @@ DataLoader: HOW to group samples into batches
 Training:   WHAT to do with batches
 ```
 
-These patterns are why PyTorch's DataLoader scales from 1,000 samples (your laptop) to 1 billion samples (Google's TPU pods) using the same API!
+These patterns are why the same DataLoader API works whether the dataset holds a thousand samples or far more than fits in memory. Nothing in the interface depends on the dataset's size, because `Dataset` only ever promises one sample at a time.
 """
 
 # %% [markdown]

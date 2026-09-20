@@ -14,13 +14,13 @@
 
 # %% [markdown]
 r"""
-# Module 09: Convolutions - Processing Images with Convolutions
+# Module 09: Convolutions - Processing Images with Spatial Operations
 
 Welcome to Module 09! You'll implement spatial operations that transform machine learning from working with simple vectors to understanding images and spatial patterns.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete training pipeline with MLPs, optimizers, and data loaders (`Tensor`, `Autograd`, `Linear`, `Losses`, `Optimizers`, `Trainer`)
-**You'll Build**: Spatial operations — `Conv2d`, `MaxPool2d`, `AvgPool2d`, and `BatchNorm2d` for image processing
+**You'll Build**: Spatial operations (`Conv2d`, `MaxPool2d`, `AvgPool2d`, and `BatchNorm2d`) for image processing
 **You'll Enable**: Convolutional Neural Networks (CNNs) for computer vision and spatial representation learning
 
 <div align="center">
@@ -33,14 +33,14 @@ Welcome to Module 09! You'll implement spatial operations that transform machine
 | :--- | :--- | :--- | :--- |
 | **Modules 01–08** | Training Foundation | `Tensor`, `Autograd`, `Linear`, `CrossEntropyLoss`, `AdamW`, `Trainer` | Completed |
 | **Module 09** | **Spatial Operations** | `Conv2d`, `MaxPool2d`, `AvgPool2d`, `BatchNorm2d` | **Active Subsystem** |
-| **Milestone 04 / 13** | Vision & Attention | Deep CNNs, CIFAR-10 Classification, Vision Transformers | Next Target |
+| **Modules 10–13** | Language & Attention | `BPETokenizer`, `Embedding`, `MultiHeadAttention`, `TransformerBlock` | Next Target |
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement `Conv2d` with explicit 7-nested loops to quantify its $\mathcal{O}(B \cdot C_{\text{out}} \cdot H_{\text{out}} \cdot W_{\text{out}} \cdot K_h \cdot K_w \cdot C_{\text{in}})$ computational complexity.
 2. Build pooling operations (`MaxPool2d` and `AvgPool2d`) for spatial downsampling and translation invariance.
-3. Formulate `BatchNorm2d` with running statistics tracking and dual backward derivation across mini-batch axes.
-4. Compose complete convolutional pipelines (`SimpleCNN`) demonstrating $>60\times$ parameter efficiency over dense networks.
+3. Formulate `BatchNorm2d` with running statistics tracking and a three-route backward derivation (direct, mean, and variance paths) across mini-batch axes.
+4. Compose complete convolutional pipelines (`SimpleCNN`) demonstrating $>139\times$ parameter efficiency over dense networks.
 
 ---
 
@@ -97,16 +97,6 @@ from tinytorch.core.tensor import Tensor, Function
 from tinytorch.core.activations import ReLU
 from tinytorch.core.layers import Linear
 import tinytorch.core.autograd  # completes every operation with its backward half
-
-# Constants for convolution defaults
-DEFAULT_KERNEL_SIZE = 3  # Default kernel size for convolutions
-DEFAULT_STRIDE = 1  # Default stride for convolutions
-DEFAULT_PADDING = 0  # Default padding for convolutions
-
-# Constants for memory calculations
-BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 r"""
@@ -182,6 +172,12 @@ Where:
 - $K_h, K_w$ denote kernel height and width.
 - $C_{\text{in}}, C_{\text{out}}$ denote input and output channel depths.
 
+#### A Naming Confession: This Is Cross-Correlation
+
+The sum above, and the one every `Conv2d` in this module computes, is *cross-correlation*, not convolution. True convolution flips the kernel before sliding it, reading $W[K_h - 1 - m, K_w - 1 - n]$ where the formula above reads $W[m, n]$. Every production framework, PyTorch and TensorFlow and JAX alike, skips the flip, because a kernel that is learned rather than designed simply absorbs it and the two operations reach identical solutions. The mathematical name stuck to the engineering shortcut, so `Conv2d` everywhere means the un-flipped sum, and the flip only matters when you port a hand-designed filter in from signal processing.
+
+Also note that $S_h, S_w$ and $P_h, P_w$ are written separately here because that is the general case. TinyTorch's `Conv2d` takes one integer for stride and one for padding, so $S_h = S_w$ and $P_h = P_w$ always; handing it a tuple raises a bare `TypeError` from the arithmetic rather than a helpful message. `MaxPool2d` and `AvgPool2d` do accept a tuple stride, so the layers are not interchangeable on that argument.
+
 ---
 
 ### Pooling: Spatial Summarization
@@ -207,8 +203,10 @@ For a standard early convolutional layer with input $(1, 3, 224, 224)$, 64 filte
 | **Filter Weights** | $(64, 3, 3, 3)$ | $1{,}728$ | $4\text{ B/elem} \to 6.9\text{ KB}$ |
 | **Biases** | $(64,)$ | $64$ | $4\text{ B/elem} \to 256\text{ B}$ |
 | **Output Activations** | $(1, 64, 224, 224)$ | $3{,}211{,}264$ | $4\text{ B/elem} \to 12.85\text{ MB}$ |
-| **Total Forward Memory** | — | $3{,}363{,}584$ | $\mathbf{\approx 13.46\text{ MB}}$ |
+| **Total Forward Memory** | — | $3{,}363{,}584$ | $\mathbf{\approx 13.45\text{ MB}}$ |
 | **Compute Operations** | $1 \cdot 64 \cdot 224 \cdot 224 \cdot (3 \cdot 3 \cdot 3)$ | — | **$86.7\text{M MACs}$** ($173.4\text{ MFLOPs}$) |
+
+Memory figures in this module are decimal throughout. KB means $10^3$ bytes and MB means $10^6$ bytes, so $602{,}112$ B reads as $602.1$ KB rather than the $588$ KiB a binary conversion would give.
 
 Notice that kernel size impacts compute quadratically: switching from $3 \times 3$ ($9$ weights/channel) to $7 \times 7$ ($49$ weights/channel) increases compute by $\approx 5.44\times$!
 
@@ -264,13 +262,13 @@ All spatial operations (Conv2d, MaxPool2d, AvgPool2d) require 4D inputs shaped
 as (batch, channels, height, width). Rather than duplicating this validation
 logic three times, we define it once here.
 
-This is NOT a student task -- it is shared infrastructure.
+This is NOT a student task. It is shared infrastructure.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "validate-4d-input", "solution": false}
 #| export
 
-def validate_4d_input(x, layer_name):
+def validate_4d_input(x: Tensor, layer_name: str) -> None:
     """
     Validate that input tensor is 4D (batch, channels, height, width).
 
@@ -330,10 +328,10 @@ $$\sigma = \sqrt{\frac{2}{\text{fan}_{\text{in}}}}, \qquad \text{fan}_{\text{in}
 
 We decompose `Conv2d.forward` into four focused, modular helpers so each mathematical and memory concept can be verified independently:
 
-1. **`_compute_output_shape(in_h, in_w)`** — Computes output spatial grid dimensions given kernel, stride, and padding.
-2. **`_apply_padding(x_data)`** — Zero-pads spatial dimensions $(H, W)$ while preserving batch and channel axes.
-3. **`_convolve_loops(padded, batch, oh, ow)`** — Executes the sliding window dot products and channel reductions.
-4. **`forward(x)`** — Composes the pipeline and links gradient tracking via `Conv2dFunction`.
+1. **`_compute_output_shape(in_h, in_w)`** computes output spatial grid dimensions given kernel, stride, and padding.
+2. **`_apply_padding(x_data)`** zero-pads spatial dimensions $(H, W)$ while preserving batch and channel axes.
+3. **`_convolve_loops(padded, batch, oh, ow)`** executes the sliding window dot products and channel reductions.
+4. **`forward(x)`** composes the pipeline and links gradient tracking via `Conv2dFunction`.
 """
 
 # %% [markdown]
@@ -403,7 +401,7 @@ class Conv2dFunction(Function):
     the educational approach of the forward pass.
     """
 
-    def forward(self, x, weight, bias=None):
+    def forward(self, x: np.ndarray, weight: np.ndarray, bias: np.ndarray | None = None) -> np.ndarray:
         """
         Convolve the (already validated) input. The layer that owns the weights
         is passed as `layer`, so the student-written helpers below do the work:
@@ -419,7 +417,7 @@ class Conv2dFunction(Function):
         return output
 
 
-    def backward(self, grad_output):
+    def backward(self, grad_output: np.ndarray) -> tuple[np.ndarray, ...]:
         """
         Compute gradients for convolution inputs and parameters.
 
@@ -515,7 +513,8 @@ class Conv2d:
         bias: Whether to add learnable bias (default: True)
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True):
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int | tuple[int, int],
+                 stride: int = 1, padding: int = 0, bias: bool = True) -> None:
         """
         Initialize Conv2d layer with proper weight initialization.
 
@@ -563,7 +562,7 @@ class Conv2d:
             self.bias = None
         ### END SOLUTION
 
-    def _compute_output_shape(self, in_h, in_w):
+    def _compute_output_shape(self, in_h: int, in_w: int) -> tuple[int, int]:
         """
         Calculate output spatial dimensions for convolution.
 
@@ -593,7 +592,7 @@ class Conv2d:
         return out_height, out_width
         ### END SOLUTION
 
-    def _apply_padding(self, x_data):
+    def _apply_padding(self, x_data: np.ndarray) -> np.ndarray:
         """
         Zero-pad the spatial dimensions of the input numpy array.
 
@@ -608,7 +607,7 @@ class Conv2d:
         >>> conv = Conv2d(1, 1, kernel_size=3, padding=1)
         >>> x = np.ones((1, 1, 3, 3))
         >>> padded = conv._apply_padding(x)
-        >>> print(padded.shape)  # (1, 1, 5, 5) -- 3+2*1=5
+        >>> print(padded.shape)  # (1, 1, 5, 5), since 3+2*1=5
 
         HINT: np.pad takes a tuple of (before, after) pairs per dimension.
         Use (0,0) for batch and channel dims, (padding, padding) for spatial.
@@ -624,7 +623,7 @@ class Conv2d:
             return x_data
         ### END SOLUTION
 
-    def _convolve_loops(self, padded, batch_size, out_h, out_w):
+    def _convolve_loops(self, padded: np.ndarray, batch_size: int, out_h: int, out_w: int) -> np.ndarray:
         """
         The core convolution: sliding window dot products over the input.
 
@@ -681,7 +680,7 @@ class Conv2d:
         return output
         ### END SOLUTION
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         """
         Forward pass through Conv2d layer.
 
@@ -721,14 +720,14 @@ class Conv2d:
         return Conv2dFunction.apply(x, self.weight, layer=self)
         ### END SOLUTION
 
-    def parameters(self):
+    def parameters(self) -> list[Tensor]:
         """Return trainable parameters."""
         params = [self.weight]
         if self.bias is not None:
             params.append(self.bias)
         return params
 
-    def __call__(self, x):
+    def __call__(self, x: Tensor) -> Tensor:
         """Enable model(x) syntax."""
         return self.forward(x)
 
@@ -750,7 +749,7 @@ $$\text{dim}_{\text{out}} = \left\lfloor \frac{\text{dim}_{\text{in}} + 2 \cdot 
 """
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-output-shape", "locked": true, "points": 5}
-def test_unit_conv2d_output_shape():
+def test_unit_conv2d_output_shape() -> None:
     """🧪 Test Conv2d._compute_output_shape for various configurations."""
     print("🧪 Unit Test: Conv2d Output Shape...")
 
@@ -798,7 +797,7 @@ $$\mathbf{X}_{(1, 1, 3, 3)} = \begin{bmatrix} 1 & 2 & 3 \\ 4 & 5 & 6 \\ 7 & 8 & 
 """
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-padding", "locked": true, "points": 5}
-def test_unit_conv2d_padding():
+def test_unit_conv2d_padding() -> None:
     """🧪 Test Conv2d._apply_padding for zero-padding behavior."""
     print("🧪 Unit Test: Conv2d Padding...")
 
@@ -850,7 +849,7 @@ $$\text{Output}[b, c_{\text{out}}, h, w] = \sum_{c_{\text{in}}} \sum_{m=0}^{K_h-
 """
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-convolve", "locked": true, "points": 15}
-def test_unit_conv2d_convolve_loops():
+def test_unit_conv2d_convolve_loops() -> None:
     """🧪 Test Conv2d._convolve_loops with known input/weight values."""
     print("🧪 Unit Test: Conv2d Convolution Loops...")
 
@@ -914,7 +913,7 @@ and gradient tracking.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "conv2d-forward", "locked": true, "points": 15}
-def test_unit_conv2d():
+def test_unit_conv2d() -> None:
     """🧪 Test Conv2d forward pass with multiple configurations."""
     print("🧪 Unit Test: Conv2d Forward...")
 
@@ -1015,7 +1014,11 @@ $$\mathbf{Y}_{\text{max}} = \begin{bmatrix} 6 & 8 \\ 9 & 7 \end{bmatrix}, \qquad
 | :--- | :--- | :--- |
 | **Translation Invariance** | Small pixel shifts do not change window maximum | Loses precise spatial localization |
 | **Compute Reduction** | Halves spatial dimensions, cutting subsequent FLOPs by $4\times$ | Small objects (< pooling window) may be lost |
-| **Zero Learnable Parameters** | Aggregates without adding weights or optimizer states | Forward pass must retain argmax indices for backprop |
+| **Zero Learnable Parameters** | Aggregates without adding weights or optimizer states | Backward still needs each window's argmax, so something has to store it or find it again |
+
+#### Store or Recompute: Max Pooling's Hidden Choice
+
+Max pooling has no parameters, but its backward pass still needs one fact per output element, namely which position in the window won. There are two ways to have it. PyTorch stores the indices during the forward pass, one `int64` per output element, which is $8$ bytes on top of the $4$-byte output itself, and its backward pass is then a single scatter. `MaxPool2dFunction.backward` in this module takes the other side of the trade and stores nothing at all, re-scanning every $K_h \times K_w$ window to find the maximum again. Same gradients, opposite bill. PyTorch triples what the layer holds ($4$ bytes of output plus $8$ bytes of index) to save a pass over the input, and TinyTorch spends that pass to hold nothing extra. Read the backward loop below and you will see the re-scan, not a lookup.
 """
 
 # %% [markdown]
@@ -1040,7 +1043,7 @@ class MaxPool2dFunction(Function):
     as the maximum in the forward pass.
     """
 
-    def forward(self, x):
+    def forward(self, x: np.ndarray) -> np.ndarray:
         """Pool the (already validated) input using the layer's helpers, passed as `layer`."""
         batch_size, channels, in_height, in_width = x.shape
         out_height, out_width = self.layer._compute_pool_output_shape(in_height, in_width)
@@ -1052,7 +1055,7 @@ class MaxPool2dFunction(Function):
             padded_input = x
         return self.layer._maxpool_loops(padded_input, batch_size, channels, out_height, out_width)
 
-    def backward(self, grad_output):
+    def backward(self, grad_output: np.ndarray) -> tuple[np.ndarray]:
         """
         Route gradients back to max positions.
 
@@ -1132,7 +1135,8 @@ class MaxPool2d:
         padding: Zero-padding added to input (default: 0)
     """
 
-    def __init__(self, kernel_size, stride=None, padding=0):
+    def __init__(self, kernel_size: int | tuple[int, int],
+                 stride: int | tuple[int, int] | None = None, padding: int = 0) -> None:
         """
         Initialize MaxPool2d layer.
 
@@ -1163,7 +1167,7 @@ class MaxPool2d:
         self.padding = padding
         ### END SOLUTION
 
-    def _compute_pool_output_shape(self, in_h, in_w):
+    def _compute_pool_output_shape(self, in_h: int, in_w: int) -> tuple[int, int]:
         """
         Calculate output spatial dimensions for pooling.
 
@@ -1191,7 +1195,8 @@ class MaxPool2d:
         return out_height, out_width
         ### END SOLUTION
 
-    def _maxpool_loops(self, padded, batch_size, channels, out_h, out_w):
+    def _maxpool_loops(self, padded: np.ndarray, batch_size: int, channels: int,
+                       out_h: int, out_w: int) -> np.ndarray:
         """
         The core max pooling: find maximum value in each window.
 
@@ -1241,7 +1246,7 @@ class MaxPool2d:
         return output
         ### END SOLUTION
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         """
         Forward pass through MaxPool2d layer.
 
@@ -1272,11 +1277,11 @@ class MaxPool2d:
         return MaxPool2dFunction.apply(x, layer=self)
         ### END SOLUTION
 
-    def parameters(self):
+    def parameters(self) -> list[Tensor]:
         """Return empty list (pooling has no parameters)."""
         return []
 
-    def __call__(self, x):
+    def __call__(self, x: Tensor) -> Tensor:
         """Enable model(x) syntax."""
         return self.forward(x)
 
@@ -1297,7 +1302,7 @@ $$(8 + 0 - 2) // 2 + 1 = 4 \quad (\text{spatial dimensions halved})$$
 """
 
 # %% nbgrader={"grade": true, "grade_id": "maxpool2d-output-shape", "locked": true, "points": 3}
-def test_unit_maxpool2d_output_shape():
+def test_unit_maxpool2d_output_shape() -> None:
     """🧪 Test MaxPool2d._compute_pool_output_shape."""
     print("🧪 Unit Test: MaxPool2d Output Shape...")
 
@@ -1331,7 +1336,7 @@ r"""
 
 This test validates that `_maxpool_loops` correctly finds the maximum value in each pooling window:
 
-$$\begin{bmatrix} 1 & 3 & 2 & 8 \\ 5 & 6 & 7 & 4 \\ 2 & 9 & 1 & 7 \\ 0 & 1 & 3 & 6 \end{bmatrix} \quad \xrightarrow{\text{MaxPool } 2 \times 2, \, S=2} \quad \begin{bmatrix} 6 & 8 \\ 9 & 7 \end{bmatrix}$$
+$$\begin{bmatrix} 1 & 2 & 3 & 4 \\ 5 & 6 & 7 & 8 \\ 9 & 10 & 11 & 12 \\ 13 & 14 & 15 & 16 \end{bmatrix} \quad \xrightarrow{\text{MaxPool } 2 \times 2, \, S=2} \quad \begin{bmatrix} 6 & 8 \\ 14 & 16 \end{bmatrix}$$
 
 **What we're testing**: The max-finding loops produce correct values
 **Why it matters**: Max pooling preserves the strongest activations
@@ -1339,7 +1344,7 @@ $$\begin{bmatrix} 1 & 3 & 2 & 8 \\ 5 & 6 & 7 & 4 \\ 2 & 9 & 1 & 7 \\ 0 & 1 & 3 &
 """
 
 # %% nbgrader={"grade": true, "grade_id": "maxpool2d-loops", "locked": true, "points": 7}
-def test_unit_maxpool2d_loops():
+def test_unit_maxpool2d_loops() -> None:
     """🧪 Test MaxPool2d._maxpool_loops with known values."""
     print("🧪 Unit Test: MaxPool2d Loops...")
 
@@ -1411,7 +1416,7 @@ class AvgPool2dFunction(Function):
     that contributed, accumulating where windows overlap.
     """
 
-    def forward(self, x):
+    def forward(self, x: np.ndarray) -> np.ndarray:
         """Pool the (already validated) input using the layer's helpers, passed as `layer`."""
         batch_size, channels, in_height, in_width = x.shape
         out_height, out_width = self.layer._compute_pool_output_shape(in_height, in_width)
@@ -1423,7 +1428,7 @@ class AvgPool2dFunction(Function):
             padded_input = x
         return self.layer._avgpool_loops(padded_input, batch_size, channels, out_height, out_width)
 
-    def backward(self, grad_output):
+    def backward(self, grad_output: np.ndarray) -> tuple[np.ndarray]:
         """
         Distribute each output gradient equally across its pooling window.
 
@@ -1488,7 +1493,8 @@ class AvgPool2d:
         padding: Zero-padding added to input (default: 0)
     """
 
-    def __init__(self, kernel_size, stride=None, padding=0):
+    def __init__(self, kernel_size: int | tuple[int, int],
+                 stride: int | tuple[int, int] | None = None, padding: int = 0) -> None:
         """
         Initialize AvgPool2d layer.
 
@@ -1517,7 +1523,7 @@ class AvgPool2d:
         self.padding = padding
         ### END SOLUTION
 
-    def _compute_pool_output_shape(self, in_h, in_w):
+    def _compute_pool_output_shape(self, in_h: int, in_w: int) -> tuple[int, int]:
         """
         Calculate output spatial dimensions for pooling.
 
@@ -1545,7 +1551,8 @@ class AvgPool2d:
         return out_height, out_width
         ### END SOLUTION
 
-    def _avgpool_loops(self, padded, batch_size, channels, out_h, out_w):
+    def _avgpool_loops(self, padded: np.ndarray, batch_size: int, channels: int,
+                       out_h: int, out_w: int) -> np.ndarray:
         """
         The core average pooling: compute mean of each window.
 
@@ -1596,7 +1603,7 @@ class AvgPool2d:
         return output
         ### END SOLUTION
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         """
         Forward pass through AvgPool2d layer.
 
@@ -1627,11 +1634,11 @@ class AvgPool2d:
         return AvgPool2dFunction.apply(x, layer=self)
         ### END SOLUTION
 
-    def parameters(self):
+    def parameters(self) -> list[Tensor]:
         """Return empty list (pooling has no parameters)."""
         return []
 
-    def __call__(self, x):
+    def __call__(self, x: Tensor) -> Tensor:
         """Enable model(x) syntax."""
         return self.forward(x)
 
@@ -1648,7 +1655,7 @@ the spatial dimensions after average pooling.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "avgpool2d-output-shape", "locked": true, "points": 3}
-def test_unit_avgpool2d_output_shape():
+def test_unit_avgpool2d_output_shape() -> None:
     """🧪 Test AvgPool2d._compute_pool_output_shape."""
     print("🧪 Unit Test: AvgPool2d Output Shape...")
 
@@ -1690,7 +1697,7 @@ $$\begin{bmatrix} 1 & 2 & 3 & 4 \\ 5 & 6 & 7 & 8 \\ 9 & 10 & 11 & 12 \\ 13 & 14 
 """
 
 # %% nbgrader={"grade": true, "grade_id": "avgpool2d-loops", "locked": true, "points": 7}
-def test_unit_avgpool2d_loops():
+def test_unit_avgpool2d_loops() -> None:
     """🧪 Test AvgPool2d._avgpool_loops with known values."""
     print("🧪 Unit Test: AvgPool2d Loops...")
 
@@ -1726,7 +1733,7 @@ if __name__ == "__main__":
 r"""
 ## 🏗️ Batch Normalization: Stabilizing Deep Network Training
 
-Batch Normalization (`BatchNorm2d`) stabilizes the optimization landscape of deep convolutional networks. By standardizing activations to zero mean and unit variance across the mini-batch and spatial dimensions, it eliminates internal covariate shift and allows substantially higher learning rates.
+Batch Normalization (`BatchNorm2d`) stabilizes the optimization landscape of deep convolutional networks. By standardizing activations to zero mean and unit variance across the mini-batch and spatial dimensions, it smooths the optimization landscape and allows substantially higher learning rates. The original paper credited reduced "internal covariate shift" for that gain, but Santurkar et al. (2018) showed experimentally that the reduction does not account for it, so read the phrase as the historical explanation rather than the mechanism.
 
 ### The BatchNorm2d Formulation
 
@@ -1753,8 +1760,10 @@ For each feature channel $c \in \{0, \dots, C-1\}$, across a mini-batch $\mathca
 | **Statistics Used** | Current mini-batch statistics $\mu_c, \sigma_c^2$ | Accumulated running statistics $\mu_{\text{run}}, \sigma_{\text{run}}^2$ |
 | **Running Stats Update** | Updated dynamically via exponential moving average | Frozen, strictly read-only |
 | **Sample Coupling** | Predictions depend on other samples in the batch | Each sample is normalized independently |
-| **Single-Sample ($B=1$)** | Unstable (zero variance across batch) | Fully deterministic and mathematically stable |
+| **Single-Sample ($B=1$)** | Statistics describe one image rather than the data distribution, so they swing sample to sample | Fully deterministic and mathematically stable |
 | **Backward Pass Path** | 3 coupled gradient paths through $\mu$ and $\sigma^2$ | 1 direct path: $\frac{\partial \mathcal{L}}{\partial x} = \frac{\gamma}{\sigma_{\text{run}}} \frac{\partial \mathcal{L}}{\partial y}$ |
+
+The $B=1$ row is usually justified by saying the variance across the batch is zero. That holds for `BatchNorm1d` on vectors, which have no spatial extent to reduce over. It does not hold here. This layer reduces over axes $(0, 2, 3)$, so at $B=1$ a single $8 \times 8$ feature map still supplies $N = 1 \cdot 8 \cdot 8 = 64$ samples per channel, the per-channel variance is perfectly finite, and the output comes out with unit standard deviation exactly as it should. The real problem is different and no less fatal. Those statistics characterize one image rather than the data distribution, so a bright image and a dark one get divided by different constants and the network sees neither the way it was trained to see it. Eval mode fixes that by normalizing every sample with the same frozen running statistics, which is why single-sample inference always runs in eval mode.
 """
 
 # %% [markdown]
@@ -1790,7 +1799,7 @@ class BatchNorm2dFunction(Function):
     only the direct term survives.
     """
 
-    def forward(self, x, gamma, beta):
+    def forward(self, x: np.ndarray, gamma: np.ndarray, beta: np.ndarray) -> np.ndarray:
         """Normalize with self.mean / self.var (chosen by the layer), then scale and shift."""
         channels = x.shape[1]
         mean_reshaped = np.asarray(self.mean).reshape(1, channels, 1, 1)
@@ -1803,7 +1812,7 @@ class BatchNorm2dFunction(Function):
         return gamma_reshaped * self.normalized_data + beta_reshaped
 
 
-    def backward(self, grad_output):
+    def backward(self, grad_output: np.ndarray) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
         """Compute gradients for BatchNorm2d (x, gamma, beta)."""
         x, gamma, beta = self.inputs
 
@@ -1847,6 +1856,8 @@ The `BatchNorm2d` layer manages two learnable parameter tensors (`gamma`, `beta`
 
 - **Training**: Computes mini-batch statistics across axes $(0, 2, 3)$, standardizes, and updates running statistics via EMA ($\text{momentum} = 0.1$).
 - **Inference (`eval`)**: Freezes all running statistics, standardizing inputs deterministically with zero batch coupling.
+
+This layer deviates from PyTorch in one place worth knowing about. `running_var` here accumulates the *biased* batch variance, $\frac{1}{N} \sum (x - \mu)^2$, which is what `np.var` returns, while `torch.nn.BatchNorm2d` accumulates the *unbiased* estimate with $\frac{1}{N-1}$. The two differ by a factor of $\frac{N}{N-1}$, invisible at the $N = B \cdot H \cdot W$ in the thousands that a real feature map gives you, and worth a few percent at toy sizes. Load a PyTorch checkpoint into this layer and the eval-mode outputs drift by $\sqrt{\frac{N}{N-1}}$, since the variance enters through a square root.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "batchnorm2d-class", "solution": true}
@@ -1869,7 +1880,7 @@ class BatchNorm2d:
         momentum: Momentum for running statistics update (default: 0.1)
     """
 
-    def __init__(self, num_features, eps=1e-5, momentum=0.1):
+    def __init__(self, num_features: int, eps: float = 1e-5, momentum: float = 0.1) -> None:
         """
         Initialize BatchNorm2d layer.
 
@@ -1908,17 +1919,17 @@ class BatchNorm2d:
         self.training = True
         ### END SOLUTION
 
-    def train(self):
+    def train(self) -> "BatchNorm2d":
         """Set layer to training mode."""
         self.training = True
         return self
 
-    def eval(self):
+    def eval(self) -> "BatchNorm2d":
         """Set layer to evaluation mode."""
         self.training = False
         return self
 
-    def _validate_input(self, x):
+    def _validate_input(self, x: Tensor) -> None:
         """
         Validate that input tensor has the correct shape for BatchNorm2d.
 
@@ -1968,7 +1979,7 @@ class BatchNorm2d:
             )
         ### END SOLUTION
 
-    def _get_stats(self, x):
+    def _get_stats(self, x: Tensor) -> tuple[np.ndarray, np.ndarray]:
         """
         Get mean and variance for normalization (batch or running stats).
 
@@ -2000,7 +2011,7 @@ class BatchNorm2d:
             return self.running_mean, self.running_var
         ### END SOLUTION
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         """
         Forward pass through BatchNorm2d.
 
@@ -2036,11 +2047,11 @@ class BatchNorm2d:
                                          mean=mean, var=var, eps=self.eps, training=self.training)
         ### END SOLUTION
 
-    def parameters(self):
+    def parameters(self) -> list[Tensor]:
         """Return learnable parameters (gamma and beta)."""
         return [self.gamma, self.beta]
 
-    def __call__(self, x):
+    def __call__(self, x: Tensor) -> Tensor:
         """Enable model(x) syntax."""
         return self.forward(x)
 
@@ -2054,7 +2065,7 @@ class BatchNorm2d:
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-batchnorm2d-validate", "locked": true, "points": 3}
-def test_unit_batchnorm2d_validate_input():
+def test_unit_batchnorm2d_validate_input() -> None:
     """🧪 Test BatchNorm2d._validate_input implementation."""
     print("🧪 Unit Test: BatchNorm2d._validate_input...")
 
@@ -2093,7 +2104,7 @@ if __name__ == "__main__":
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-batchnorm2d-get-stats", "locked": true, "points": 3}
-def test_unit_batchnorm2d_get_stats():
+def test_unit_batchnorm2d_get_stats() -> None:
     """🧪 Test BatchNorm2d._get_stats implementation."""
     print("🧪 Unit Test: BatchNorm2d._get_stats...")
 
@@ -2137,7 +2148,7 @@ This test validates batch normalization implementation.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-batchnorm2d", "locked": true, "points": 10}
-def test_unit_batchnorm2d():
+def test_unit_batchnorm2d() -> None:
     """🧪 Test BatchNorm2d implementation."""
     print("🧪 Unit Test: BatchNorm2d...")
 
@@ -2223,13 +2234,13 @@ if __name__ == "__main__":
 **What we're testing**: That gamma and beta receive gradients, and that the
 analytic backward matches a numerical estimate
 **Why it matters**: BatchNorm's parameters are handed to the optimizer. If no
-gradient reaches them the layer looks fine, trains fine, and learns nothing --
-the failure is invisible from the forward pass alone
+gradient reaches them the layer looks fine, trains fine, and learns nothing.
+The failure is invisible from the forward pass alone
 **Expected**: Non-None gradients of the right shape, matching finite differences
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-batchnorm2d-grad", "locked": true, "points": 10}
-def test_unit_batchnorm2d_gradients():
+def test_unit_batchnorm2d_gradients() -> None:
     """🧪 Test BatchNorm2d gradient flow."""
     print("🧪 Unit Test: BatchNorm2d Gradients...")
 
@@ -2244,8 +2255,8 @@ def test_unit_batchnorm2d_gradients():
 
     out.sum().backward()
 
-    assert bn.gamma.grad is not None, "gamma received no gradient -- it will never train"
-    assert bn.beta.grad is not None, "beta received no gradient -- it will never train"
+    assert bn.gamma.grad is not None, "gamma received no gradient, so it will never train"
+    assert bn.beta.grad is not None, "beta received no gradient, so it will never train"
     assert x.grad is not None, "no gradient reached the input: the graph is severed here"
     assert bn.gamma.grad.shape == (3,), f"gamma grad shape {bn.gamma.grad.shape}, expected (3,)"
     assert bn.beta.grad.shape == (3,), f"beta grad shape {bn.beta.grad.shape}, expected (3,)"
@@ -2264,7 +2275,7 @@ def test_unit_batchnorm2d_gradients():
     x_data = rng.standard_normal((3, 2, 2, 2))
     weights = rng.standard_normal((3, 2, 2, 2))   # random projection to a scalar
 
-    def scalar_loss():
+    def scalar_loss() -> float:
         probe = BatchNorm2d(num_features=2)
         probe.gamma, probe.beta = bn2.gamma, bn2.beta
         return float((np.asarray(probe(Tensor(x_data)).data) * weights).sum())
@@ -2318,7 +2329,7 @@ This test validates both max and average pooling implementations.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-pooling", "locked": true, "points": 10}
-def test_unit_pooling():
+def test_unit_pooling() -> None:
     """🧪 Test MaxPool2d and AvgPool2d implementations."""
     print("🧪 Unit Test: Pooling Operations...")
 
@@ -2406,7 +2417,9 @@ Now we combine convolution, activation, pooling, and linear classification into 
 | **Pool2** | Spatial Downsampling | $(B, 32, 16, 16)$ | $K=2, S=2$ | $(B, 32, 8, 8)$ | 0 | $2{,}048 \times B$ |
 | **Flatten** | Spatial Unrolling | $(B, 32, 8, 8)$ | Reshape | $(B, 2048)$ | 0 | $2{,}048 \times B$ |
 | **FC** | Classification Logits | $(B, 2048)$ | Module 03 `Linear` | $(B, 10)$ | $2048 \cdot 10 + 10 = \mathbf{20{,}490}$ | $10 \times B$ |
-| **Total** | **SimpleCNN Pipeline** | **$(B, 3, 32, 32)$** | — | **$(B, 10)$** | **25,578** | **$\approx 60.3\text{ KB} \times B$** |
+| **Total** | **SimpleCNN Pipeline** | **$(B, 3, 32, 32)$** | — | **$(B, 10)$** | **25,578** | **$60{,}426 \times B$ elements ($\approx 241.7\text{ KB} \times B$)** |
+
+The activation column counts elements, not bytes. Summing it gives $3{,}072 + 16{,}384 + 16{,}384 + 4{,}096 + 8{,}192 + 8{,}192 + 2{,}048 + 2{,}048 + 10 = 60{,}426$ elements per sample, which at $4$ B/element is $241{,}704$ B, or $\approx 241.7$ KB per sample. Autograd has to keep every one of them live until the backward pass reaches it.
 
 ---
 
@@ -2418,7 +2431,7 @@ Now we combine convolution, activation, pooling, and linear classification into 
 | **Stage 2** | `Conv2d(16, 32, 3, p=1)`: 4,640 params | `Linear(1000, 500)`: 500,500 params | **$107\times$ fewer parameters** |
 | **Classification Head** | `Linear(2048, 10)`: 20,490 params | `Linear(500, 10)`: 5,010 params | Tailored feature routing |
 | **Total Parameters** | **25,578 parameters** | **3,578,510 parameters** | **$>139\times$ parameter reduction** |
-| **Parameter Buffer** | $\mathbf{\approx 100\text{ KB}}$ (L1/L2 cache resident) | $\mathbf{\approx 14.3\text{ MB}}$ (spills to DRAM) | Dramatically reduced memory bandwidth |
+| **Parameter Buffer** | $\mathbf{\approx 102\text{ KB}}$ (L1/L2 cache resident) | $\mathbf{\approx 14.3\text{ MB}}$ (spills to DRAM) | Dramatically reduced memory bandwidth |
 
 ---
 
@@ -2432,7 +2445,9 @@ As representations pass through alternating convolutions and pooling layers, the
 | **Conv1** | $3 \times 3$ | 1 | $3 \times 3$ | $3 \times 3$ ($9\text{ px}$) | Oriented edges, luminance contrasts |
 | **Pool1** | $2 \times 2$ | 2 | $2 \times 2$ | $4 \times 4$ ($16\text{ px}$) | Aggregated corner/junction responses |
 | **Conv2** | $3 \times 3$ | 1 | $3 \times 3$ | $8 \times 8$ ($64\text{ px}$) | Combinations of corners, textured patches |
-| **Pool2** | $2 \times 2$ | 2 | $2 \times 2$ | $14 \times 14$ ($196\text{ px}$) | Complex object fragments, semantic parts |
+| **Pool2** | $2 \times 2$ | 2 | $2 \times 2$ | $10 \times 10$ ($100\text{ px}$) | Multi-part motifs spanning roughly a tenth of the $32 \times 32$ image |
+
+Each row applies the same recurrence. Carry a jump $j$ (the cumulative stride, starting at $1$) alongside the receptive field $r$, then for a layer with kernel $k$ and stride $s$ set $r \leftarrow r + (k - 1) \cdot j$ and $j \leftarrow j \cdot s$. Pool2 sees $r = 8 + (2 - 1) \cdot 2 = 10$, because by then every step of its window covers $j = 4$ input pixels.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "simple-cnn", "solution": true}
@@ -2448,7 +2463,7 @@ class SimpleCNN:
     - Flatten + Linear(features→num_classes)
     """
 
-    def __init__(self, num_classes=10):
+    def __init__(self, num_classes: int = 10) -> None:
         """
         Initialize SimpleCNN.
 
@@ -2484,7 +2499,7 @@ class SimpleCNN:
         self.num_classes = num_classes
         ### END SOLUTION
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         """
         Forward pass through SimpleCNN.
 
@@ -2520,7 +2535,7 @@ class SimpleCNN:
         return self.fc(x)
         ### END SOLUTION
 
-    def parameters(self):
+    def parameters(self) -> list[Tensor]:
         """Return all trainable parameters."""
         params = []
         params.extend(self.conv1.parameters())
@@ -2528,7 +2543,7 @@ class SimpleCNN:
         params.extend(self.fc.parameters())
         return params
 
-    def __call__(self, x):
+    def __call__(self, x: Tensor) -> Tensor:
         """Enable model(x) syntax."""
         return self.forward(x)
 
@@ -2546,7 +2561,7 @@ This test validates that spatial operations work together in a complete CNN arch
 # %% nbgrader={"grade": true, "grade_id": "test-simple-cnn", "locked": true, "points": 10}
 
 
-def test_unit_simple_cnn():
+def test_unit_simple_cnn() -> None:
     """🧪 Test SimpleCNN integration with spatial operations."""
     print("🧪 Unit Test: SimpleCNN Integration...")
 
@@ -2601,7 +2616,7 @@ This single analysis reveals why certain design choices matter for real-world pe
 """
 
 # %% nbgrader={"grade": false, "grade_id": "spatial-analysis", "solution": false}
-def analyze_convolution_complexity():
+def analyze_convolution_complexity() -> None:
     """📊 Analyze convolution computational complexity across different configurations."""
     print("📊 Analyzing Convolution Complexity...")
 
@@ -2658,7 +2673,7 @@ if __name__ == "__main__":
     analyze_convolution_complexity()
 
 # %% nbgrader={"grade": false, "grade_id": "pooling-analysis", "solution": false}
-def analyze_pooling_effects():
+def analyze_pooling_effects() -> None:
     """📊 Analyze pooling's impact on spatial dimensions and features."""
     print("\n📊 Analyzing Pooling Effects...")
 
@@ -2710,7 +2725,7 @@ Final validation that everything works together correctly.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "module-integration", "locked": true, "points": 15}
-def test_module():
+def test_module() -> None:
     """🧪 Module Test: Complete Integration
 
     Comprehensive test of entire spatial module functionality.
@@ -2847,13 +2862,13 @@ Answer these questions to deepen your systems understanding of spatial computing
 
 ### Question 1: Conv2d Memory Footprint & VRAM Scaling
 A `Conv2d` layer with 64 filters of shape $(3, 3, 3)$, stride $1$, and padding $1$ processes a $(224 \times 224 \times 3)$ input.
-- **Input Memory**: $1 \times 3 \times 224 \times 224 \times 4\text{ B} = 602{,}112\text{ B} \approx 588\text{ KB}$
-- **Filter Weights**: $64 \times 3 \times 3 \times 3 \times 4\text{ B} = 6{,}912\text{ B} \approx 6.75\text{ KB}$
+- **Input Memory**: $1 \times 3 \times 224 \times 224 \times 4\text{ B} = 602{,}112\text{ B} = 602.1\text{ KB}$
+- **Filter Weights**: $64 \times 3 \times 3 \times 3 \times 4\text{ B} = 6{,}912\text{ B} = 6.9\text{ KB}$
 - **Biases**: $64 \times 4\text{ B} = 256\text{ B}$
-- **Output Activations**: $1 \times 64 \times 224 \times 224 \times 4\text{ B} = 12{,}845{,}056\text{ B} \approx 12.25\text{ MB}$
+- **Output Activations**: $1 \times 64 \times 224 \times 224 \times 4\text{ B} = 12{,}845{,}056\text{ B} = 12.85\text{ MB}$
 
 **Systems Implication**:
-When the batch size scales from $B=1$ to $B=32$, activation memory scales linearly from $\approx 12.85\text{ MB} \to \mathbf{411.2\text{ MB}}$ for this single layer! During training, autograd must retain all intermediate activations in VRAM for the backward pass. In deep 50-layer networks, this causes activation memory to dominate parameter memory by orders of magnitude, motivating techniques like **activation recomputation** (gradient checkpointing).
+When the batch size scales from $B=1$ to $B=32$, activation memory scales linearly from $12.85\text{ MB} \to \mathbf{411.0\text{ MB}}$ for this single layer (all figures decimal, as declared in 📐)! During training, autograd must retain all intermediate activations in VRAM for the backward pass. In deep 50-layer networks, this causes activation memory to dominate parameter memory by orders of magnitude, motivating techniques like **activation recomputation** (gradient checkpointing).
 
 ---
 
@@ -2862,7 +2877,7 @@ Why do convolutional kernels exhibit far superior hardware cache efficiency than
 
 - **Temporal Locality**: Filter kernel weights ($K \times K \times C_{\text{in}}$) are held resident in high-speed L1/L2 cache and reused across all $H \times W$ spatial positions.
 - **Spatial Locality**: Contiguous horizontal pixel sweeps in row-major order (`C-contiguous`) maximize CPU cache line prefetching (64 bytes/line = 16 `float32` elements loaded simultaneously).
-- **Access Striding**: Dense MLPs perform large matrix-vector multiplications that touch large parameter arrays once per token, placing intense pressure on main memory DRAM bandwidth.
+- **Access Striding**: Dense MLPs perform large matrix-vector multiplications that touch large parameter arrays once per input sample, placing intense pressure on main memory DRAM bandwidth.
 
 ---
 
@@ -2879,8 +2894,8 @@ The `im2col` algorithm lowers a multi-channel 2D convolution into a single dense
 </div>
 
 **Trade-off Analysis**:
-- **Memory Cost**: Overlapping spatial patches duplicate input data in memory by a factor of $K_h \cdot K_w$ ($9\times$ for $3 \times 3$ kernels).
-- **Compute Gain**: Transforming sliding loops into a standardized GEMM matrix ($X_{\text{col}} \in \mathbb{R}^{(C_{\text{in}} K_h K_w) \times (H_{\text{out}} W_{\text{out}})}$) unlocks vendor-tuned Level-3 BLAS (cuBLAS, CUTLASS, oneDNN) and GPU Tensor Cores, reaching $>90\%$ of peak hardware FLOPS.
+- **Memory Cost**: Overlapping spatial patches duplicate input data in memory by a factor of $K_h \cdot K_w$ ($9\times$ for $3 \times 3$ kernels) at stride $1$. The factor is really $\frac{K_h K_w}{S_h S_w}$, so it falls as stride grows and reaches $1\times$ exactly when $S = K$ and the patches stop overlapping.
+- **Compute Gain**: Transforming sliding loops into a standardized GEMM matrix ($X_{\text{col}} \in \mathbb{R}^{(C_{\text{in}} K_h K_w) \times (H_{\text{out}} W_{\text{out}})}$) unlocks vendor-tuned Level-3 BLAS (cuBLAS, CUTLASS, oneDNN) and GPU Tensor Cores, which reach a far larger fraction of peak hardware FLOPS than any loop nest you or a compiler would write by hand. That gap, not any reduction in arithmetic, is what pays for the duplicated memory.
 - **Mobile / Edge Constraint**: On mobile devices with strict unified RAM budgets, materializing large intermediate `im2col` matrices causes out-of-memory crashes or thermal throttling. Mobile engines therefore favor direct convolutions or fused on-the-fly implicit GEMM.
 
 ---
@@ -2918,7 +2933,7 @@ r"""
 """
 
 # %%
-def demo_convolutions():
+def demo_convolutions() -> None:
     """🎯 See Conv2d process spatial data."""
     print("🎯 AHA MOMENT: Convolution Extracts Features")
     print("=" * 45)
@@ -2950,17 +2965,27 @@ r"""
 
 Congratulations! You have built the complete spatial computing foundation of TinyTorch.
 
-### Key Architectural Accomplishments
+### Key Accomplishments
 - **Implemented `Conv2d`**: Explicit 7-nested loops demonstrating the $\mathcal{O}(B \cdot C_{\text{out}} \cdot H_{\text{out}} \cdot W_{\text{out}} \cdot K_h \cdot K_w \cdot C_{\text{in}})$ complexity and spatial weight sharing.
 - **Formulated `BatchNorm2d`**: Dynamic mini-batch normalization during training versus frozen EMA tracking during inference, complete with 3-route backward autograd.
 - **Constructed Pooling Operators**: `MaxPool2d` (argmax routing) and `AvgPool2d` (uniform spatial dispersion) for $4\times$ memory reduction.
 - **Engineered `SimpleCNN`**: End-to-end vision pipeline achieving $>139\times$ parameter reduction compared to fully-connected MLPs.
 - **Analyzed MLSys Lowering**: Detailed trade-offs of `im2col` GEMM lowering, spatial memory footprints, and mobile depthwise-separable acceleration.
 
+### Systems Insights Discovered
+- **Weight sharing is a memory win before it is a statistical one**: `SimpleCNN` carries 25,578 parameters where the dense equivalent carries 3,578,510. That $139\times$ reduction puts the entire parameter buffer in $\approx 102$ KB, small enough to sit in L1/L2 cache, while the dense model's $\approx 14.3$ MB has to be streamed from DRAM on every forward pass.
+- **Activations dominate parameters, and that is what fills the device**: those 25,578 parameters are stored once, but one sample's activations run to 60,426 elements ($\approx 241.7$ KB), and autograd has to keep all of them live until the backward pass consumes them. At $B=32$ the activations outweigh the weights by roughly $75\times$. This is the asymmetry that makes activation recomputation worth its extra forward pass.
+- **The seven-loop cost model tells you where the work is**: total work is $B \cdot C_{\text{out}} \cdot H_{\text{out}} \cdot W_{\text{out}} \cdot K_h \cdot K_w \cdot C_{\text{in}}$, quadratic in kernel width and quadratic in spatial resolution, so $3 \times 3 \to 7 \times 7$ costs $5.44\times$ more. `im2col` removes none of that arithmetic. It reshapes the loop nest into a GEMM that vendor BLAS can actually run near peak, and pays $K_h \cdot K_w$ input duplication at stride $1$ for the privilege.
+- **Pooling buys the budget back, and spatial precision pays for it**: one $2 \times 2$ stride-2 pool cuts the activation buffer $4\times$ and the next layer's FLOPs $4\times$, at the cost of knowing exactly where a feature was. Stack five and the feature map area falls $1{,}024\times$, which is also why objects smaller than the pooling window can vanish.
+- **Store or recompute is a design choice, not a detail**: max-pool backward needs each window's argmax. PyTorch stores the indices in the forward pass and scatters, spending $8$ bytes per output element. This module stores nothing and re-scans every window. The gradients are identical and the resource bill is inverted, which is the same trade you will make again for every intermediate a backward pass needs.
+- **Train and eval are two different functions**: `BatchNorm2d` normalizes with batch statistics during training and with frozen running statistics during inference, so the same weights on the same input produce different outputs depending on the mode. There is no error and no crash when you forget to switch, only worse numbers, which is why the mode flag is checked in the layer rather than assumed by the caller.
+
 ---
 
 ### Ready for Next Steps
-All spatial primitives export to `tinytorch.core.spatial` and integrate directly into TinyTorch's autograd engine.
+All spatial primitives export to `tinytorch.core.spatial` and integrate directly into TinyTorch's autograd engine. Images are now a first-class input to TinyTorch, alongside the plain vectors you started with in Module 01.
 
 Export with: `tito dev export 09`
+
+**Next**: Module 10 will turn raw text into token IDs with `BPETokenizer`, opening the second input modality that Modules 11 through 13 build a transformer on!
 """

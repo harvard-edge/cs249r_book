@@ -24,7 +24,7 @@ Welcome to Module 02! Today you'll add the one ingredient a stack of linear laye
 **You'll Enable**: Neural networks with the ability to learn complex patterns
 
 **Connection Pipeline**:
-$$\mathbf{X} \in \text{Tensor (data)} \xrightarrow{\text{Nonlinearity}} \sigma(\mathbf{X}) \in \text{Activations} \xrightarrow{\text{Parameterization}} \mathbf{W}\mathbf{X} + \mathbf{b} \in \text{Layers}$$
+$$\mathbf{X} \in \text{Tensor (data)} \xrightarrow{\text{Parameterization}} \mathbf{W}\mathbf{X} + \mathbf{b} \in \text{Layers} \xrightarrow{\text{Nonlinearity}} \sigma(\mathbf{W}\mathbf{X} + \mathbf{b}) \in \text{Activations}$$
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
@@ -64,11 +64,12 @@ r"""
 
 **TinyTorch Dependencies**:
 - **Module 01 (Tensor)**: Foundation for all activation computations and data flow
-  - Used for: Input/output data structures, shape operations, element-wise operations
-  - Required: Yes - activations operate on Tensor objects
+  - Used for: `Tensor` for input/output data structures, shape operations, element-wise
+    operations; `Function` as the base class every activation operation subclasses
+  - Required: Yes - activations operate on Tensor objects and are written as Functions
 
 **Dependency Flow**:
-$$\underbrace{\text{Module 01: Tensor}}_{\text{Foundation and Autograd Core}} \longrightarrow \underbrace{\text{Module 02: Activations}}_{\text{Nonlinear Functions}} \longrightarrow \underbrace{\text{Module 03: Layers}}_{\text{Network Architecture}}$$
+$$\underbrace{\text{Module 01: Tensor}}_{\text{Tensor Foundation}} \longrightarrow \underbrace{\text{Module 02: Activations}}_{\text{Nonlinear Functions}} \longrightarrow \underbrace{\text{Module 03: Layers}}_{\text{Network Architecture}}$$
 """
 
 # %% nbgrader={"grade": false, "grade_id": "setup", "solution": false}
@@ -80,7 +81,9 @@ import numpy as np
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor, Function
 
-# Constants for numerical comparisons
+# %%
+# Kept out of the exported cell above. This is a test-only constant, so shipping it
+# in tinytorch.core.activations' public surface would advertise it as part of the API.
 TOLERANCE = 1e-10  # Small tolerance for floating-point comparisons in tests
 
 # %% [markdown]
@@ -113,7 +116,7 @@ Each activation function provides a distinct mathematical behavior tuned for spe
 | **Sigmoid** | $\sigma(x) = \frac{1}{1 + e^{-x}}$ | $(0, 1)$ | Binary classification outputs, gating mechanisms (LSTMs, GRUs) |
 | **ReLU** | $f(x) = \max(0, x)$ | $[0, \infty)$ | Standard hidden layer default; extreme hardware speed and activation sparsity |
 | **Tanh** | $\tanh(x) = \frac{e^x - e^{-x}}{e^x + e^{-x}}$ | $(-1, 1)$ | Zero-centered representations preventing gradient bias drift |
-| **GELU** | $x \cdot \Phi(x) \approx x \cdot \sigma(1.702x)$ | $[\approx -0.17, \infty)$ | Modern Transformer standard (GPT, BERT); smooth gradient flow |
+| **GELU** | $x \cdot \Phi(x) \approx x \cdot \sigma(1.702x)$ | $[\approx -0.164, \infty)$ as implemented; $[\approx -0.170, \infty)$ for exact $x \cdot \Phi(x)$ | Modern Transformer standard (GPT, BERT); smooth gradient flow |
 | **Softmax** | $\frac{e^{z_i - \max(\mathbf{z})}}{\sum_j e^{z_j - \max(\mathbf{z})}}$ | $[0, 1], \sum = 1$ | Multi-class probability distributions, attention score normalization |
 
 Let's implement each one with clear mathematical formulations and unit testing!
@@ -310,7 +313,7 @@ $$\begin{bmatrix} -2.0 & -1.0 & 0.0 & 1.0 & 2.0 \end{bmatrix} \xrightarrow{\text
   <img src="relu_curve.svg" alt="ReLU Piecewise Linear Hinge" width="320px">
 </div>
 
-**Why ReLU matters**: By zeroing negative values, ReLU creates representation sparsity (often $\approx 50\%$ dead/zeroed units in trained networks). Because a comparison instruction (`max`) executes in a single clock cycle compared to multi-cycle transcendentals (`exp`), ReLU dramatically accelerates deep architectures.
+**Why ReLU matters**: By zeroing negative values, ReLU creates representation sparsity (often $\approx 50\%$ zeroed activations for a given input in trained networks). Because a comparison instruction (`max`) executes in a single clock cycle compared to multi-cycle transcendentals (`exp`), the ReLU kernel itself is the cheapest activation to evaluate, which the timing cell later in this module measures.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "relu-impl", "solution": true}
@@ -550,18 +553,20 @@ $$\text{GELU}(x) = x \cdot \Phi(x) = x \cdot \frac{1}{2} \left[1 + \text{erf}\le
 
 In practice, two high-performance approximations are used (Hendrycks & Gimpel, 2016):
 $$\text{Sigmoid-GELU (Fast, used in TinyTorch): } \text{GELU}(x) \approx x \cdot \sigma(1.702 x)$$
-$$\text{Tanh-GELU (PyTorch default): } \text{GELU}(x) \approx 0.5x \left(1 + \tanh\left(\sqrt{\frac{2}{\pi}}\left(x + 0.044715x^3\right)\right)\right)$$
+$$\text{Tanh-GELU (GPT-2, BERT, TensorFlow): } \text{GELU}(x) \approx 0.5x \left(1 + \tanh\left(\sqrt{\frac{2}{\pi}}\left(x + 0.044715x^3\right)\right)\right)$$
+
+PyTorch's `torch.nn.GELU` defaults to `approximate='none'`, the exact $\text{erf}$ form above; the tanh expression is what you get with `approximate='tanh'`.
 
 | Property | Specification |
 |:---|:---|
 | **Input Domain** | $x \in (-\infty, \infty)$ |
-| **Output Range** | $[\approx -0.170, \infty)$ |
+| **Output Range** | $[\approx -0.1636, \infty)$ for the implemented $x \cdot \sigma(1.702x)$; the exact $x \cdot \Phi(x)$ bottoms out at $\approx -0.1700$ |
 | **Smoothness** | Infinitely differentiable everywhere ($C^\infty$) |
-| **Curvature** | Curvature well dipping to $\approx -0.17$ near $x \approx -0.75$, smoothly passing through $(0, 0)$ |
+| **Curvature** | Curvature well dipping to $\approx -0.1636$ at $x \approx -0.751$ (implemented form), smoothly passing through $(0, 0)$ |
 
 #### Numerical Vector Trace
 
-$$\begin{bmatrix} -1.0 & 0.0 & 1.0 \end{bmatrix} \xrightarrow{\text{GELU}} \begin{bmatrix} -0.1543 & 0.0000 & 0.8457 \end{bmatrix}$$
+$$\begin{bmatrix} -1.0 & 0.0 & 1.0 \end{bmatrix} \xrightarrow{\text{GELU}} \begin{bmatrix} -0.1542 & 0.0000 & 0.8458 \end{bmatrix}$$
 
 <div align="center">
   <img src="gelu_curve.svg" alt="GELU vs ReLU Curvature" width="320px">
@@ -660,7 +665,7 @@ def test_unit_gelu():
     # Test negative values (should be small but not zero)
     x = Tensor([-1.0])
     result = gelu.forward(x)
-    assert result.data[0] < 0 and result.data[0] > -0.2, f"GELU(-1) should be ≈-0.16, got {result.data[0]}"
+    assert result.data[0] < 0 and result.data[0] > -0.2, f"GELU(-1) should be ≈-0.15, got {result.data[0]}"
 
     # Test smoothness property (no sharp corners like ReLU)
     x = Tensor([-0.001, 0.0, 0.001])
@@ -700,7 +705,7 @@ $$\mathbf{z} = \begin{bmatrix} 1.0 \\ 2.0 \\ 3.0 \\ 4.0 \end{bmatrix} \xrightarr
 
 $$\sum_{i=1}^4 p_i = 0.0321 + 0.0871 + 0.2369 + 0.6439 = 1.0000$$
 
-**Why Softmax matters**: In multi-class classification and attention mechanisms (Module 12), Softmax produces valid probability distributions where the highest logit dominates while lower logits receive proportional mass.
+**Why Softmax matters**: Softmax produces valid probability distributions where the highest logit dominates while lower logits receive proportional mass. That is what multi-class classification needs, and Module 12 will reuse this same normalization to turn attention scores into weights.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "softmax-impl", "solution": true}
@@ -846,8 +851,31 @@ if __name__ == "__main__":
 """
 ## 🔧 Integration: Bringing It Together
 
-Now let's test how all our activation functions work together and understand their different behaviors.
+Now let's run all five activation functions on one shared input and read their
+outputs side by side. Same numbers in, five different shapes out.
 """
+
+# %%
+def compare_activations():
+    """Run all five activations on one shared input vector and line up the results."""
+    x = Tensor(np.array([-2.0, -1.0, 0.0, 1.0, 2.0]))
+
+    def row(label, values):
+        print(f"{label:<9}" + "".join(f"{v:>9.4f}" for v in values))
+
+    print("All five activations on the same input vector")
+    print("=" * (9 + 9 * len(x.data)))
+    row("input", x.data)
+    print("-" * (9 + 9 * len(x.data)))
+    for name, activation in [("Sigmoid", Sigmoid()), ("ReLU", ReLU()), ("Tanh", Tanh()),
+                             ("GELU", GELU()), ("Softmax", Softmax())]:
+        row(name, activation(x).data)
+    print("-" * (9 + 9 * len(x.data)))
+    print(f"Softmax sums to {Softmax()(x).data.sum():.4f}; the other four are element-wise,")
+    print("so each of their outputs depends only on the input in the same position.")
+
+if __name__ == "__main__":
+    compare_activations()
 
 
 # %% [markdown]
@@ -930,7 +958,7 @@ def analyze_activation_performance():
         _ = gelu(test_data)
     gelu_time = (time.time() - start) / n_runs * 1000
 
-    print("\n🧪 Activation Performance Results:")
+    print("\n📊 Activation Performance Results:")
     print(f"   ReLU:    {relu_time:.2f}ms (baseline)")
     print(f"   Sigmoid: {sigmoid_time:.2f}ms ({sigmoid_time/relu_time:.1f}x slower)")
     print(f"   Tanh:    {tanh_time:.2f}ms ({tanh_time/relu_time:.1f}x slower)")
@@ -1067,17 +1095,16 @@ Answer these to deepen your understanding of activation functions and their syst
 ---
 
 ### Question 3: Sparsity and Efficiency
-**Question**: ReLU creates "sparsity" by zeroing negative values. Why might having many zero activations be beneficial for computation?
+**Question**: ReLU zeros roughly half of its outputs for any given input. A dense matrix multiply does exactly the same work whether those entries are zero or not, so the saving is not automatic. What would have to be true of the hardware, the kernel, and the data layout for activation sparsity to actually pay off?
 
 **Consider**:
-- Memory: Do zeros need to be stored differently than non-zeros?
-- Computation: What happens when you multiply by zero?
-- Learning: If 50% of neurons are "off" for a given input, what does that mean for the representation?
+- Storage: a sparse format stores indices alongside values, so at what density does that bookkeeping cost more bytes than the zeros it removes?
+- Computation: a dense matrix multiply multiplies by zero at full speed. What would the code need to know in advance in order to skip that work instead of performing it?
+- Structure: ReLU's zeros fall in different positions for every input, while the accelerator hardware that can actually skip zeros requires a fixed pattern (2 nonzeros in every group of 4). Which kind of sparsity does ReLU produce?
 
 **Think about**:
-- Sparse matrix representations and their memory benefits
-- How GPUs handle sparse operations
-- Whether sparsity helps or hurts different types of computations
+- Why unstructured sparsity is easier to cash in on a bandwidth-bound kernel (fewer bytes moved) than on a compute-bound one (the multiply happens anyway)
+- Why frameworks still keep ReLU's output dense in memory
 
 ---
 
@@ -1165,7 +1192,7 @@ def demo_activations():
     print(f"\nSoftmax: {np.round(softmax_out.data, 3)}")
     print(f"         Sum = {softmax_out.data.sum():.1f} (valid probability distribution!)")
 
-    print("\n✨ Activations add nonlinearity—the key to deep learning!")
+    print("\n✨ Activations add nonlinearity, the key to deep learning!")
 
 # %%
 if __name__ == "__main__":
@@ -1189,7 +1216,7 @@ Congratulations! You've built the intelligence engine of neural networks!
 ### Systems Insights Discovered
 - **ReLU efficiency**: A max is far cheaper than an exponential, so ReLU costs a fraction of Sigmoid or Tanh per element
 - **Numerical stability**: Softmax's max subtraction prevents overflow without changing results
-- **Sparsity benefits**: ReLU's zero outputs create sparse representations
+- **Sparsity is not free speed**: ReLU's zero outputs make representations sparse, but a dense matrix multiply still does the full work, so cashing that sparsity in takes a kernel and a layout that can skip zeros
 - **Activation selection**: Different layers need different activations (ReLU for hidden, Softmax for output)
 
 ### Ready for Next Steps

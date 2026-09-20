@@ -36,7 +36,7 @@ Welcome to Module 15! You will build an INT8 post-training quantization system, 
 | **Modules 09–13** | Architecture Tier | `Conv2d`, `BPETokenizer`, `EmbeddingLayer`, `MultiHeadAttention`, `GPT` | Completed |
 | **Module 14** | Systems Diagnostics | `Profiler`, `count_flops`, `measure_memory`, `measure_latency` | Completed |
 | **Module 15** | **Reduced Precision** | `quantize_int8`, `dequantize_int8`, `QuantizedLinear`, `quantize_model` | **Active Subsystem** |
-| **Modules 16–20** | Advanced Optimization | `Pruner`, `TritonKernels`, `KVCache`, `BenchmarkingSuite`, `TinyGPT` | Downstream Consumers |
+| **Modules 16–20** | Advanced Optimization | `Compressor`, `vectorized_matmul`, `KVCache`, `BenchmarkSuite`, `BenchmarkReport` | Downstream Consumers |
 
 ## 🎯 Learning Objectives
 
@@ -91,6 +91,7 @@ from tinytorch.core.activations import ReLU
 INT8_MIN_VALUE = -128
 INT8_MAX_VALUE = 127
 INT8_RANGE = 256  # Number of possible INT8 values (from -128 to 127 inclusive)
+INT8_LEVELS = INT8_MAX_VALUE - INT8_MIN_VALUE  # 255 steps between the 256 levels
 EPSILON = 1e-8  # Stabilize relative-error measurements near zero variance
 
 # Constants for memory calculations
@@ -159,7 +160,7 @@ def explore_motivation_profiling():
 
     print("\nKey Observations:")
     print("   Every parameter uses 4 bytes (32 bits) in FP32")
-    print(f"   {over_mobile} of {n} layers exceed the mobile budget; {over_edge} of {n} exceed the edge budget")
+    print(f"   {over_mobile} of {n} layers over the mobile budget; {over_edge} of {n} over the edge budget")
     print("   Memory grows linearly with parameter count")
 
     print("\nThe Problem:")
@@ -180,7 +181,7 @@ if __name__ == "__main__":
 r"""
 ### The Memory Wall Problem
 
-Modern deep neural networks face a fundamental hardware reality: **compute capacity has outpaced memory bandwidth and memory capacity by orders of magnitude**. While accelerators can perform trillions of arithmetic operations per second (teraFLOPs), streaming weights from high-bandwidth memory (HBM) or system DRAM to on-chip arithmetic logic units (ALUs) creates a severe latency and energy bottleneck.
+Modern deep neural networks run into a hardware reality that shapes every deployment decision. **Compute capacity has outpaced memory bandwidth and memory capacity by orders of magnitude.** While accelerators can perform trillions of arithmetic operations per second (teraFLOPs), streaming weights from high-bandwidth memory (HBM) or system DRAM to on-chip arithmetic logic units (ALUs) creates a severe latency and energy bottleneck.
 
 ### The Precision Paradox
 
@@ -200,7 +201,7 @@ When moving modern architectures to mobile devices, embedded systems, or edge ro
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **BERT-Base** | 110M | 440 MB | 110 MB | 4–8 GB | Fits comfortably |
 | **GPT-2 (1.5B)** | 1.5B | 6.0 GB | 1.5 GB | 4–8 GB | Feasible in INT8 only |
-| **LLaMA-7B** | 7.0B | 28.0 GB | 7.0 GB | 4–8 GB | Fits single-device INT8 |
+| **LLaMA-7B** | 7.0B | 28.0 GB | 7.0 GB | 4–8 GB | Needs 4-bit or an 8 GB+ device |
 | **GPT-3 (175B)** | 175B | 700.0 GB | 175.0 GB | Multi-GPU Node | Requires cluster parallelism |
 
 ### The Quantization Solution
@@ -221,7 +222,7 @@ $$\text{FP32} \xrightarrow{\text{Quantization}} \text{INT8} \quad \implies \quad
 1. **Memory Footprint**: Reduces parameter storage by $4\times$, allowing multi-gigabyte models to reside in resource-constrained on-device memory.
 2. **Bandwidth Savings**: Cuts memory bus traffic by $75\%$, directly lowering memory latency and power consumption during autoregressive decoding.
 3. **Hardware Throughput**: Supported architectures execute SIMD integer dot products (e.g., AVX-512 VNNI `VPDPBUSD`) at $2\times$ to $4\times$ the throughput of floating-point operations.
-4. **Energy Efficiency**: Accessing off-chip DRAM consumes up to $100\times$ more energy than executing an arithmetic instruction; reducing transferred bytes yields proportional battery life gains.
+4. **Energy Efficiency**: Accessing off-chip DRAM consumes $100\times$ to $1000\times$ more energy than executing an arithmetic instruction; reducing transferred bytes yields proportional battery life gains.
 """
 
 # %% [markdown]
@@ -290,13 +291,15 @@ Assuming a uniform distribution of rounding noise over the quantization interval
 
 $$\sigma_q^2 = \mathbb{E}[\epsilon^2] = \frac{1}{s} \int_{-s/2}^{s/2} \epsilon^2 d\epsilon = \frac{s^2}{12}$$
 
-For a $b$-bit uniform quantizer covering the full signal dynamic range, the theoretical Signal-to-Quantization-Noise Ratio is:
+For a $b$-bit uniform quantizer covering the full signal dynamic range, the classic Signal-to-Quantization-Noise Ratio is:
 
 $$\text{SQNR} \approx 6.02 \times b + 1.76 \text{ dB}$$
 
 $$\text{At } b=8 \text{ (INT8)}: \quad \text{SQNR} \approx 6.02 \times 8 + 1.76 = 49.92 \text{ dB}$$
 
-An SQNR of $\approx 50\text{ dB}$ provides sufficient dynamic fidelity for deep neural inference, explaining why 8-bit integers preserve over $99\%$ of FP32 baseline task accuracy across transformers and convolutional networks.
+The $1.76\text{ dB}$ term carries an assumption worth naming. This result was derived for a full-scale *sinusoid*, whose signal power is $A^2/2$. A tensor whose values spread uniformly across the same range carries only $A^2/3$, a factor of $1.5$ less, so it lands at $20\log_{10}(255) \approx 48.13\text{ dB}$ instead. That $1.79\text{ dB}$ gap is exactly what the sine assumption contributes, and $48.13\text{ dB}$ is the figure the reflection questions below arrive at for a uniform weight tensor.
+
+An SQNR near $50\text{ dB}$ is enough fidelity that per-tensor INT8 is usually close to lossless on convolutional networks. Transformers are the harder case, because a few outlier activation channels stretch the range every other value has to share, so per-tensor INT8 often costs real accuracy there until weights are quantized per channel or the outliers are handled separately. Note also what SQNR does and does not say. It bounds the reconstruction error of a single tensor, not end-task accuracy, and this module measures no task accuracy at all.
 """
 
 # %% [markdown]
@@ -360,7 +363,8 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     1. Find min/max values in tensor data
     2. Handle the constant tensor (min_val == max_val) as a special case; see HINTS
     3. Nudge the range to include zero: min_val = min(min_val, 0), max_val = max(max_val, 0)
-    4. Calculate scale: (max_val - min_val) / 255 (INT8 range: -128 to 127)
+    4. Calculate scale: (max_val - min_val) / INT8_LEVELS, the 255 steps
+       between the 256 codes of the INT8 range [-128, 127]
     5. Calculate zero_point: offset that maps min_val to INT8_MIN (-128)
        Formula: zero_point = round(INT8_MIN - (min_val / scale))
     6. Apply quantization formula round(value / scale + zero_point),
@@ -435,7 +439,7 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
 
     # Step 4: Calculate scale
     # Map [min_val, max_val] to [INT8_MIN_VALUE, INT8_MAX_VALUE] (INT8 range)
-    scale = (max_val - min_val) / (INT8_RANGE - 1)
+    scale = (max_val - min_val) / INT8_LEVELS
 
     # Step 5: Calculate zero_point (the code that min_val maps to is -128)
     zero_point = int(np.round(INT8_MIN_VALUE - min_val / scale))
@@ -482,15 +486,31 @@ def test_unit_quantize_int8():
 
     # Test dequantization preserves approximate values
     dequantized = (q_tensor.data - zero_point) * scale
-    error = np.mean(np.abs(tensor.data - dequantized))
-    # Round-to-nearest bounds the error at scale/2 -- one half of a quantization
-    # step. Asserting against that real bound rather than a loose constant is
-    # what catches a broken scale or a clamped zero_point; a tolerance of 0.25
-    # here (25x the true bound) would let both through unnoticed.
+    # Round-to-nearest bounds the error at scale/2 (half a quantization step), and
+    # that bound is a promise about the WORST element, so it has to be checked
+    # against the worst element. Averaging first hides the very bug the bound
+    # exists to catch. Dividing the range by 256 instead of 255 pushes one value
+    # a full scale off, twice the bound, while the mean stays comfortably under it.
+    error = np.max(np.abs(tensor.data - dequantized))
     max_error = scale / 2
     assert error <= max_error * 1.01, (
-        f"Quantization error {error:.6f} exceeds the INT8 bound scale/2 = {max_error:.6f}. "
-        f"A round-trip should never lose more than half a quantization step."
+        f"Worst-element quantization error {error:.6f} exceeds the INT8 bound "
+        f"scale/2 = {max_error:.6f}. A round-trip should never lose more than half a "
+        f"quantization step, so check that scale divides the range by 255 (the number "
+        f"of steps between 256 levels), not by 256."
+    )
+
+    # The bound above pins the SIZE of a step. This pins where the lattice sits.
+    # A tensor that already straddles zero must map its minimum onto INT8_MIN_VALUE
+    # and its maximum onto INT8_MAX_VALUE, spending all 255 steps. Dividing by 127,
+    # or mapping onto [-127, 127], still produces small-looking errors while leaving
+    # the code range half empty or one step short.
+    span_tensor = Tensor([[-3.0, -1.0, 0.0, 1.0, 3.0]])
+    q_span, _, _ = quantize_int8(span_tensor)
+    assert q_span.data.min() == INT8_MIN_VALUE and q_span.data.max() == INT8_MAX_VALUE, (
+        f"Codes span [{q_span.data.min():.0f}, {q_span.data.max():.0f}], not the full "
+        f"[{INT8_MIN_VALUE}, {INT8_MAX_VALUE}]. Divide the range by 255 and place "
+        f"min_val at {INT8_MIN_VALUE}, not by 127 and not onto [-127, 127]."
     )
 
     # Test edge case: constant tensor -- dequantize must recover the original value,
@@ -622,9 +642,15 @@ def test_unit_dequantize_int8():
     q_tensor, scale, zero_point = quantize_int8(original)
     restored = dequantize_int8(q_tensor, scale, zero_point)
 
-    # Verify round-trip error is small
-    error = np.mean(np.abs(original.data - restored.data))
-    assert error < 0.1, f"Round-trip error too high: {error}"
+    # Verify round-trip error is small. The real bound is scale/2 on the worst
+    # element, roughly 0.009 for this tensor, so a flat 0.1 on the mean is about
+    # eleven times too loose and would pass a scale that is off by a factor of two.
+    error = np.max(np.abs(original.data - restored.data))
+    max_error = scale / 2
+    assert error <= max_error * 1.01, (
+        f"Worst-element round-trip error {error:.6f} exceeds the INT8 bound "
+        f"scale/2 = {max_error:.6f}."
+    )
 
     # Verify output is float32
     assert restored.data.dtype == np.float32
@@ -644,7 +670,7 @@ r"""
 | :--- | :--- | :--- | :--- |
 | **Weight Storage** | FP32 (4 bytes / weight) | INT8 codes in FP32 (1 byte modeled) | Packed INT8 (`int8_t`, 1 byte physical) |
 | **Weight Memory Footprint** | $N \times M \times 4$ bytes | $N \times M \times 1 + 8$ bytes modeled | $N \times M \times 1 + 8$ bytes physical |
-| **Execution Path** | Direct FP32 GEMM: $Y = X W^T + b$ | Dequantize $\hat{W} \to$ FP32 GEMM | Integer Tensor Core GEMM $\to$ Rescale |
+| **Execution Path** | Direct FP32 GEMM: $Y = X W + b$ | Dequantize $\hat{W} \to$ FP32 GEMM | Integer Tensor Core GEMM $\to$ Rescale |
 | **Memory Bandwidth Demand** | $100\%$ (baseline) | $25\%$ weight streaming bandwidth | $25\%$ weight & activation bandwidth |
 | **Dynamic Calibration** | Not required | Optional input calibration | Required for activation scales |
 
@@ -656,7 +682,7 @@ $$\hat{W} = (Q_W - z_W) \times s_W, \quad \hat{b} = (Q_b - z_b) \times s_b$$
 
 The forward pass reconstructs the weights on-the-fly and executes high-precision matrix multiplication:
 
-$$Y = X \hat{W}^T + \hat{b} = X \left( (Q_W - z_W) s_W \right)^T + (Q_b - z_b) s_b$$
+$$Y = X \hat{W} + \hat{b} = X \left( (Q_W - z_W) s_W \right) + (Q_b - z_b) s_b$$
 
 ### Activation Calibration Pipeline
 
@@ -672,8 +698,8 @@ $$Y = X \hat{W}^T + \hat{b} = X \left( (Q_W - z_W) s_W \right)^T + (Q_b - z_b) s
 | Phase | When Executed | Operations Performed | Computational Cost |
 | :--- | :--- | :--- | :--- |
 | **Initialization** | Quantization time (Offline) | Quantize $W \to Q_W$, $b \to Q_b$; store $s_W, z_W, s_b, z_b$ | One-time overhead ($\mathcal{O}(NM)$) |
-| **Calibration** | Pre-deployment (Offline) | Pass unlabelled validation samples, compute input scale $s_X, z_X$ | One-time forward pass ($\mathcal{O}(B \cdot NM)$) |
-| **Inference Forward** | Runtime (Per query) | Dequantize $\hat{W}$, evaluate matrix multiply $Y = X \hat{W}^T + \hat{b}$ | Amortized $\mathcal{O}(NM)$ GEMM |
+| **Calibration** | Pre-deployment (Offline) | Pass unlabeled validation samples, compute input scale $s_X, z_X$ | One-time forward pass ($\mathcal{O}(B \cdot NM)$) |
+| **Inference Forward** | Runtime (Per query) | Dequantize $\hat{W}$, evaluate matrix multiply $Y = X \hat{W} + \hat{b}$ | Amortized $\mathcal{O}(NM)$ GEMM |
 
 **Memory Layout Note**:
 In TinyTorch's pedagogical environment, integer codes are simulated inside NumPy `float32` arrays to preserve broad framework compatibility. The reported $4\times$ memory reduction models the packed byte representation ($1$ byte per parameter) achieved when deployed with C++ runtime engines (like TensorRT or ONNX Runtime).
@@ -779,7 +805,7 @@ class QuantizedLinear:
             self.input_scale = 1.0
             self.input_zero_point = 0
         else:
-            self.input_scale = (max_val - min_val) / (INT8_RANGE - 1)
+            self.input_scale = (max_val - min_val) / INT8_LEVELS
             self.input_zero_point = int(np.round(INT8_MIN_VALUE - min_val / self.input_scale))
             self.input_zero_point = int(np.clip(self.input_zero_point, INT8_MIN_VALUE, INT8_MAX_VALUE))
         ### END SOLUTION
@@ -851,7 +877,30 @@ class QuantizedLinear:
         return params
 
     def memory_usage(self) -> Dict[str, float]:
-        """Model packed INT8 bytes, including metadata; not actual NumPy storage."""
+        """
+        Model packed INT8 bytes, including metadata; not actual NumPy storage.
+
+        TODO: Report the FP32 bytes, the modeled INT8 bytes, and their ratio.
+
+        APPROACH:
+        1. Original bytes: every weight (and bias) element at BYTES_PER_FLOAT32.
+        2. Quantized bytes: the same element counts at BYTES_PER_INT8.
+        3. Metadata: charge 8 bytes per quantized array, a 4-byte float32 scale
+           plus a 4-byte zero point, so a layer with a bias pays 16 bytes. The
+           calibrated input scale is activation state, not stored weight, so it
+           is deliberately excluded.
+        4. Return original_bytes, quantized_bytes, and original / quantized.
+
+        EXAMPLE:
+        >>> QuantizedLinear(Linear(4, 3)).memory_usage()['quantized_bytes']
+        31
+
+        HINTS:
+        - 12 weight codes + 3 bias codes = 15 bytes, + 8 bytes for each of the
+          two arrays = 31 bytes, against 60 bytes of FP32.
+        - Compression lands near 1.9x, not 4x, because at this size the metadata
+          is a third of the total. That gap closes as the layer grows.
+        """
         ### BEGIN SOLUTION role="core"
         # Original FP32 usage
         original_weight_bytes = self.original_layer.weight.data.size * BYTES_PER_FLOAT32
@@ -923,8 +972,14 @@ def test_unit_quantized_linear():
     print(f"  Original bytes: {memory_info['original_bytes']}")
     print(f"  Quantized bytes: {memory_info['quantized_bytes']}")
 
-    # Tiny layers expose metadata overhead: 15 codes plus two scale/zero-point pairs.
-    assert memory_info['quantized_bytes'] == 15 + 16
+    # Tiny layers expose metadata overhead: 15 codes plus 8 bytes of metadata for
+    # each of the two quantized arrays (weight and bias).
+    assert memory_info['quantized_bytes'] == 15 + 16, (
+        f"Expected 15 code bytes + 16 metadata bytes = 31, got "
+        f"{memory_info['quantized_bytes']}. This module charges 8 bytes per "
+        f"quantized array (a 4-byte scale and a 4-byte zero point) and does not "
+        f"count the calibrated input scale."
+    )
     assert np.isclose(memory_info['compression_ratio'], 60 / 31)
 
     print(f"  Memory reduction: {memory_info['compression_ratio']:.1f}x")
@@ -935,7 +990,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Model Quantization: Scaling to Full Networks
+## 🏗️ Collecting Layer Inputs: Calibration Data Flow
 
 ### The Model Quantization Challenge
 
@@ -978,13 +1033,13 @@ The composition function `quantize_model()` automates this transformation across
 
 # %% [markdown]
 r"""
-## 🏗️ Collecting Layer Inputs: Calibration Data Flow
+### The Activation Tap
 
 Before calibrating a layer's input scale, we must extract the exact distribution of activations arriving at its inputs during evaluation. `_collect_layer_inputs` executes a forward pass through preceding layers $0 \dots i-1$ for up to `max_samples`:
 
 | Pipeline Stage | Component | Execution Details | Dataflow Shape |
 | :--- | :--- | :--- | :--- |
-| **Input Batch** | Calibration Dataset | Unlabelled domain samples $\{x^{(1)}, \dots, x^{(N)}\}$ | $(B, d_{\text{in}})$ |
+| **Input Batch** | Calibration Dataset | Unlabeled domain samples $\{x^{(1)}, \dots, x^{(N)}\}$ | $(B, d_{\text{in}})$ |
 | **Prefix Forward** | Subgraph `layers[0:i]` | Forward pass with `training=False` (disabling dropout) | $(B, d_{\text{intermediate}})$ |
 | **Activation Tap** | Layer $i$ Input Buffer | Collect intermediate tensors without gradient tracking | Stored activations for calibration |
 """
@@ -1094,9 +1149,11 @@ This helper wraps an isolated `Linear` layer into a `QuantizedLinear` instance, 
 | :--- | :--- | :--- | :--- |
 | **Weights ($W$)** | `float32` ($4$ bytes / parameter) | `int8` ($1$ byte / parameter) | $75\%$ reduction ($4\times$ smaller) |
 | **Biases ($b$)** | `float32` ($4$ bytes / parameter) | `int8` ($1$ byte / parameter) | $75\%$ reduction ($4\times$ smaller) |
-| **Quantization Scales** | None | $s_W, s_b, s_X \in \mathbb{R}^+$ (`float32`) | $+12$ bytes metadata |
-| **Zero Points** | None | $z_W, z_b, z_X \in \mathbb{Z}$ (`int32`) | $+12$ bytes metadata |
+| **Quantization Scales** | None | $s_W, s_b \in \mathbb{R}^+$ (`float32`) | $+4$ bytes per quantized array |
+| **Zero Points** | None | $z_W, z_b \in \mathbb{Z}$ (`int32`) | $+4$ bytes per quantized array |
 | **Forward Interface** | `forward(X)` | `forward(X)` (Identical signature) | Drop-in replacement |
+
+The convention used throughout this module is **8 bytes of metadata per quantized array** (one $4$-byte scale plus one $4$-byte zero point), so a layer with a bias carries $16$ bytes. The calibrated input parameters $s_X, z_X$ are activation state rather than stored weights, so `memory_usage()` does not count them.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "quantize_single_layer", "solution": true}
@@ -1326,7 +1383,9 @@ if __name__ == "__main__":
 
 # %% [markdown]
 r"""
-## 🏗️ Model Size Comparison: Measuring the Impact
+## 🏗️ Measuring a Single Layer: Per-Layer Byte Accounting
+
+### Model Size Comparison: Measuring the Impact
 
 To quantify memory savings between unquantized FP32 and quantized architectures, we conduct hierarchical byte accounting:
 
@@ -1339,14 +1398,14 @@ To quantify memory savings between unquantized FP32 and quantized architectures,
 | **`QuantizedLinear`** | INT8 codes + metadata | $(d_{\text{in}} \cdot d_{\text{out}} + d_{\text{out}})$ | $\text{params} \times 1 \text{ byte} + \text{metadata overhead}$ |
 | **Non-Parametric Layer (`ReLU`)** | Stateless | $0$ | $0 \text{ bytes}$ |
 
-## 🏗️ Measuring a Single Layer: Per-Layer Byte Accounting
+### The `_measure_layer_bytes` Helper
 
 The helper `_measure_layer_bytes` encapsulates the difference in storage representation between FP32 and quantized layers:
 
 | Layer Category | Parameter Count ($P$) | Byte Footprint Formula | Metadata Overhead ($\mathcal{O}(1)$) |
 | :--- | :--- | :--- | :--- |
 | **Standard `Linear`** | $N_{\text{weights}} + M_{\text{biases}}$ | $(N + M) \times 4 \text{ bytes}$ | $0 \text{ bytes}$ |
-| **`QuantizedLinear`** | $N_{\text{weights}} + M_{\text{biases}}$ | $(N + M) \times 1 \text{ byte} + \text{metadata}$ | $\sim 8\text{--}16 \text{ bytes}$ ($s_W, z_W, s_b, z_b$) |
+| **`QuantizedLinear`** | $N_{\text{weights}} + M_{\text{biases}}$ | $(N + M) \times 1 \text{ byte} + \text{metadata}$ | $8 \text{ bytes per quantized array}$ ($16$ with a bias: $s_W, z_W, s_b, z_b$) |
 | **Container (`Sequential`)** | $\sum_{\ell} P_\ell$ | $\sum_{\ell} \text{bytes}(\ell)$ | Sum of child overheads |
 """
 
@@ -1479,11 +1538,10 @@ def analyze_model_sizes(original_model, quantized_model) -> Dict[str, float]:
         Dictionary with compression metrics
 
     EXAMPLE:
-    >>> layer1 = Linear(100, 50)
-    >>> layer2 = Linear(50, 10)
-    >>> model = Sequential(layer1, layer2)
-    >>> quantize_model(model)
-    >>> stats = analyze_model_sizes(model, model)
+    >>> baseline = Sequential(Linear(100, 50), Linear(50, 10))
+    >>> compressed = Sequential(Linear(100, 50), Linear(50, 10))
+    >>> quantize_model(compressed)  # quantizes in place, so keep a separate baseline
+    >>> stats = analyze_model_sizes(baseline, compressed)
     >>> print(f"Reduced to {stats['compression_ratio']:.1f}x smaller")
 
     HINT:
@@ -1652,8 +1710,12 @@ class Quantizer:
         }
 
     @staticmethod
-    def compare_models(original_model, quantized_info: Dict) -> Dict[str, float]:
-        """Compare memory usage between original and quantized models."""
+    def compare_models(quantized_info: Dict) -> Dict[str, float]:
+        """Summarize the memory report returned by Quantizer.quantize_model().
+
+        The original sizes are already carried in that report, so the original
+        model itself is not needed here.
+        """
         return {
             'original_mb': quantized_info['original_size_mb'],
             'quantized_mb': quantized_info['quantized_size_mb'],
@@ -1709,7 +1771,7 @@ def analyze_quantization_accuracy():
     baseline = Sequential(*layers).forward(x).data
     baseline_power = np.mean(baseline ** 2)
 
-    print(f"{'Layer':<12} {'Params':<10} {'Relative output error'}")
+    print(f"{'Layer':<12} {'Params':<10} {'Relative output error (Frobenius)'}")
     print("-" * 50)
 
     for idx, layer in enumerate(layers):
@@ -1718,7 +1780,11 @@ def analyze_quantization_accuracy():
         swapped = list(layers)
         swapped[idx] = _quantize_single_layer(layer)
         output = Sequential(*swapped).forward(x).data
-        rel_error = np.mean((output - baseline) ** 2) / baseline_power
+        # The objective asks for ||X - X_hat||_F / ||X||_F. The ratio of mean
+        # squares is that quantity SQUARED (the element count cancels), so the
+        # square root is what turns it back into a relative error you can read
+        # as a percentage.
+        rel_error = np.sqrt(np.mean((output - baseline) ** 2) / baseline_power)
         params = sum(p.data.size for p in layer.parameters())
         print(f"Linear {idx:<5} {params:<10,} {rel_error:.2e}")
 
@@ -1748,7 +1814,7 @@ $$\text{Per-Channel}: \quad \hat{W}_{i, j} = (Q_{W, i, j} - z_{W, j}) \cdot s_{W
 
 ### Mixed Precision Strategy
 
-Empirical sensitivity profiling reveals that certain network components (e.g., token embeddings, self-attention query-key dot products, and final classification projections) degrade catastrophically under 8-bit quantization. A mixed-precision schedule maintains those sensitive boundaries in FP16/FP32 while quantizing bulky feed-forward projections ($W_1, W_2$) to INT8 or INT4:
+Empirical sensitivity profiling reveals that certain network components (e.g., token embeddings, self-attention query-key dot products, and final classification projections) degrade sharply under per-tensor 8-bit quantization. A mixed-precision schedule maintains those sensitive boundaries in FP16/FP32 while quantizing bulky feed-forward projections ($W_1, W_2$) to INT8 or INT4:
 
 | Layer Category | Typical Sensitivity | Recommended Precision | System Rationale |
 | :--- | :--- | :--- | :--- |
@@ -1864,7 +1930,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test realistic usage scenario
-    print("Integration Test: End-to-end quantization workflow...")
+    print("🧪 Integration Test: End-to-end quantization workflow...")
 
     # Create a realistic model using explicit composition (Sequential from tinytorch.core.layers)
     layer1 = Linear(784, 128)  # MNIST-like input
@@ -1961,7 +2027,7 @@ For a model with 100M parameters:
 - **Original memory usage**: $100 \times 10^6 \times 4 \text{ bytes} = 400{,}000{,}000 \text{ bytes} \approx \mathbf{0.400 \text{ GB}}$ ($381.47 \text{ MiB}$).
 - **Quantized memory usage**: $100 \times 10^6 \times 1 \text{ byte} + \text{metadata} \approx \mathbf{0.100 \text{ GB}}$ ($95.37 \text{ MiB}$).
 - **Memory bandwidth reduction when loading from disk/DRAM**: $\mathbf{4.0\times}$ reduction in bytes transferred ($75\%$ bandwidth savings).
-- **Architectural Analysis**: On mobile or edge accelerators (e.g. Apple Neural Engine, Raspberry Pi, Qualcomm Hexagon NPU), disk IO and DRAM bus transfer times dominate cold-start latency. Compressing the model from $400\text{ MB}$ to $100\text{ MB}$ cuts loading latency by $\approx 4\times$, while allowing the model to stay resident in smaller hardware cache tiers (such as system-level L3/LLC cache).
+- **Architectural Analysis**: On mobile or edge accelerators (e.g. Apple Neural Engine, Raspberry Pi, Qualcomm Hexagon NPU), disk IO and DRAM bus transfer times dominate cold-start latency. Compressing the model from $400\text{ MB}$ to $100\text{ MB}$ cuts loading latency by $\approx 4\times$, and every weight fetch afterward moves a quarter of the bytes across the DRAM bus. A $100\text{ MB}$ model still lives in DRAM (mobile last-level caches hold tens of megabytes at most), so the steady-state win is bus traffic, not cache residency.
 
 ### Question 2: Quantization Error Analysis
 Your quantization maps a continuous range to 256 discrete values (INT8).
@@ -2058,13 +2124,13 @@ You've built an INT8 quantization simulator that measures rounding error and mod
 - Built INT8 quantization with proper scaling and zero-point calculation
 - Implemented QuantizedLinear layer with calibration support
 - Created model-level quantization for complete neural networks
-- Analyzed quantization trade-offs across different distributions and strategies
+- Measured per-layer sensitivity by quantizing one Linear layer at a time and comparing outputs
 - Measured the memory savings analytically (INT8 storage is simulated in float32 here)
 - All tests pass (validated by `test_module()`)
 
 ### Systems Insights Discovered
 - Memory scaling: INT8 reduces storage by 4x (32 bits to 8 bits per parameter)
-- Calibration trade-offs: Sample data quality affects quantization accuracy
+- Metadata overhead: a scale and a zero point cost 8 bytes per array, so a tiny layer compresses about 1.9x where a large one approaches 4x
 - Hardware efficiency: Native INT8 kernels can improve speed on supported hardware; this simulator measures rounding effects
 - Deployment benefits: Smaller models fit on mobile and edge devices
 

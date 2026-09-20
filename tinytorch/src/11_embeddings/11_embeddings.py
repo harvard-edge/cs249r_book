@@ -16,7 +16,7 @@
 r"""
 # Module 11: Embeddings - Converting Tokens to Learnable Representations
 
-Welcome to Module 11! You're about to build embedding layers that convert discrete tokens into dense, learnable vectors — the foundational bridge between symbolic text processing and deep neural representations.
+Welcome to Module 11! You're about to build embedding layers that convert discrete tokens into dense, learnable vectors, the foundational bridge between symbolic text processing and deep neural representations.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete training pipeline with autograd, optimizers, data loaders, 2D convolutions, and subword tokenization (`Tensor`, `Function`, `Linear`, `Conv2d`, `BPETokenizer`).
@@ -39,7 +39,7 @@ Welcome to Module 11! You're about to build embedding layers that convert discre
 ## 🎯 Learning Objectives
 By the end of this module, you will:
 1. **Implement efficient token-to-vector table lookups** using tensor indexing without constructing wasteful one-hot matrix multiplications.
-2. **Derive the backward scatter-add gradient route** and understand why repeated token indices require race-free accumulation (`np.add.at`).
+2. **Derive the backward scatter-add gradient route** and understand why repeated token indices need NumPy's unbuffered `np.add.at` instead of a buffered `grad[idx] += g`.
 3. **Build learned positional encodings** that allow neural networks to adaptively represent sequence positions through backpropagation.
 4. **Construct fixed sinusoidal positional encodings** using Vaswani et al. (2017) frequency harmonics for length generalization without added weights.
 5. **Architect an integrated production `EmbeddingLayer`** that handles optional $\sqrt{d_{\text{embed}}}$ scaling, positional injection, and variable batch sequences.
@@ -71,7 +71,7 @@ r"""
 | `Function` | Module 06 (`core.tensor`) | Extensible computational graph node base class | Enforces separation of forward evaluation and backward adjoint |
 | `autograd` | Module 06 (`core.autograd`) | Backward tape and automatic gradient backpropagation | Accumulates gradients into leaf weight parameter `.grad` |
 | `BPETokenizer` | Module 10 (`core.tokenization`) | Upstream text tokenizer producing discrete token IDs | Maps variable-length strings into static vocabulary bounds $[0, V-1]$ |
-| `numpy` | External | Array manipulation, fast vectorized slicing, and math | Provides `np.add.at` for race-free scatter-add accumulation |
+| `numpy` | External | Array manipulation, fast vectorized slicing, and math | Provides `np.add.at`, the unbuffered scatter-add that keeps duplicate indices |
 
 ### Ingestion & Transformation Pipeline
 
@@ -89,7 +89,6 @@ r"""
 #| export
 
 import numpy as np
-rng = np.random.default_rng(7)
 import math
 from typing import List, Optional, Tuple
 
@@ -100,10 +99,19 @@ from tinytorch.core.tensor import Tensor
 from tinytorch.core.tensor import Function
 import tinytorch.core.autograd  # completes every operation with its backward half
 
-# Constants for memory calculations
-BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
+# %%
+#| exporti
+
+# Shared generator for weight initialization. Marked exporti so it travels with
+# the package without appearing in tinytorch.core.embeddings.__all__.
+rng = np.random.default_rng(7)
+
+# %%
+# Constants for the memory analyses further down. These are analysis-only, so they
+# stay out of the exported package entirely. Both use DECIMAL prefixes, matching
+# every memory figure quoted in this module's tables (1 MB = 10^6 bytes, not 2^20).
+BYTES_PER_FLOAT32 = 4  # float32 width in bytes
+BYTES_PER_MB = 1_000_000  # decimal megabyte
 
 # %% [markdown]
 r"""
@@ -159,8 +167,8 @@ In mathematical terms, an embedding layer is a parameter weight matrix $W \in \m
    When a sequence contains repeated tokens (e.g. `[2, 0, 2]`), multiple output rows propagate gradients back to the same row in weight matrix $W$:
    $$\frac{\partial \mathcal{L}}{\partial W[v, :]} = \sum_{(b, t): X_{b, t} = v} \frac{\partial \mathcal{L}}{\partial E_{b, t, :}}$$
    
-   > [!WARNING] **The Silent In-Place Race Condition**
-   > In Python and NumPy, naive indexing assignment `grad_weight[indices] += grad_output` fails silently when `indices` contains duplicate entries! Because indexed slice assignment executes in unbuffered parallel copies, duplicate row writes overwrite each other rather than accumulating. TinyTorch uses `np.add.at(grad_weight, indices, grad_output)` to guarantee atomic, race-free gradient accumulation.
+   > **Warning: The Silent Buffered Write**
+   > In NumPy, the naive `grad_weight[indices] += grad_output` fails silently when `indices` contains duplicate entries. Fancy-index `+=` is a **buffered** fetch-modify-write. NumPy fetches `grad_weight[indices]` into a temporary, adds `grad_output` to that temporary, then writes the temporary back, so for a repeated row the last write wins and every earlier contribution disappears. You can watch it happen in two lines. `a = np.zeros(3); a[[0, 0, 1]] += 1` leaves `[1., 1., 0.]` rather than the `[2., 1., 0.]` you wanted. TinyTorch instead calls `np.add.at(grad_weight, indices, grad_output)`, which NumPy's own documentation describes as the **unbuffered** in-place form of the same ufunc. It applies each addition straight to memory with no temporary, so duplicate rows accumulate. Notice what is *not* going on here. This code is single-threaded, nothing races, and no atomic is involved. Atomics enter the story one level down, inside a CUDA scatter kernel where thousands of threads really do add into the same row at the same time.
 
 ---
 
@@ -192,8 +200,8 @@ Let's implement embedding systems from basic token lookup to sophisticated posit
 Now that you understand how embedding lookups work (index → row of the weight matrix),
 let's think about how gradients flow backward through this operation.
 
-The forward pass is a **gather** — we select rows from the weight matrix by index.
-The backward pass is a **scatter** — we distribute gradients back to the rows that were selected.
+The forward pass is a **gather**, meaning we select rows from the weight matrix by index.
+The backward pass is a **scatter**, meaning we distribute gradients back to the rows that were selected.
 
 ```
 Forward (gather):                    Backward (scatter):
@@ -210,7 +218,8 @@ Output:  [[0.1, 0.2],               Row 0 gets grad[0] + grad[2] = [2, 2]
 
 **Key insight**: When the same token appears multiple times in a sequence (like word "the"),
 its embedding row accumulates gradients from every position. This is why `np.add.at` is
-essential — standard indexing would overwrite instead of accumulating.
+essential. A plain `grad[idx] += g` on a fancy index goes through a temporary buffer, so a
+repeated row keeps only the last write instead of the sum.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "embedding-backward", "solution": true}
@@ -226,12 +235,12 @@ class EmbeddingFunction(Function):
     is a scatter operation that accumulates gradients to the embedding weights.
     """
 
-    def forward(self, weight):
-        """Gather one row per token id: weight[self.indices] (self.indices is an int array)."""
+    def forward(self, weight: np.ndarray) -> np.ndarray:
+        """Gather one row per token id, i.e. weight[self.indices] (self.indices is an int array)."""
         return weight[self.indices]
 
 
-    def backward(self, grad_output):
+    def backward(self, grad_output: np.ndarray) -> Tuple[Optional[np.ndarray]]:
         """
         Compute gradient for embedding lookup.
 
@@ -563,7 +572,7 @@ When the loss gradient $\frac{\partial \mathcal{L}}{\partial H} \in \mathbb{R}^{
 | **Routing Key** | Token Identity / Vocabulary ID ($X_{b, t}$) | Temporal Position Index ($t \in [0, T-1]$) |
 | **Accumulation Mechanism** | Non-contiguous scatter-add (`np.add.at`) | Structured sum across batch dimension (`grad.sum(axis=0)`) |
 | **Sparsity** | Highly sparse (only vocabulary IDs present in batch update) | Dense up to sequence length $T$ (all active positions update) |
-| **Parameter Bound** | $V \times d_{\text{embed}}$ (typically $50\text{K} \times 768 \approx 38.4\text{M}$ params) | $T_{\text{max}} \times d_{\text{embed}}$ (typically $1{,}024 \times 768 \approx 0.78\text{M}$ params) |
+| **Parameter Bound** | $V \times d_{\text{embed}}$ (typically $50\text{K} \times 768 \approx 38.4\text{M}$ params) | $T_{\text{max}} \times d_{\text{embed}}$ (typically $1{,}024 \times 768 = 786{,}432 \approx 0.79\text{M}$ params) |
 
 **Why Learned Positions Work**: The optimizer learns task-specific coordinate geometry (e.g. distinguishing sentence start tokens, delimiter boundaries, or rhythmic syntactic dependencies) through standard end-to-end backpropagation.
 """
@@ -816,10 +825,6 @@ $$PE_{(pos, 2i)} = \sin\left(\frac{pos}{10000^{2i / d_{\text{embed}}}}\right)$$
 $$PE_{(pos, 2i+1)} = \cos\left(\frac{pos}{10000^{2i / d_{\text{embed}}}}\right)$$
 
 where $pos \in [0, T-1]$ denotes sequence index and $i \in [0, d_{\text{embed}}/2 - 1]$ indexes the 2D orthogonal frequency subchannel.
-
-<div align="center">
-  <img src="rope_phase_clock.svg" alt="2D Subspace Harmonic Frequency Signatures" width="560px">
-</div>
 
 ### Numerical Fingerprint Across Channels ($d_{\text{embed}} = 8$)
 
@@ -1080,10 +1085,12 @@ Now let's assemble the complete production embedding pipeline that combines disc
 | **5. Broadcast Addition** | Composite Representation | $H = E_{\text{scaled}} + P_{\text{active}}$ | $(B, T, d_{\text{embed}})$ |
 
 ### Why Scale by $\sqrt{d_{\text{embed}}}$?
-In standard Transformer architectures (Vaswani et al., 2017), weights in $W_{\text{token}}$ are initialized with variance $\sigma^2 \approx \frac{1}{d_{\text{embed}}}$. Consequently, initial token embeddings have vector norms of order $\mathcal{O}(1)$ across all coordinates, with individual elements having typical magnitude $\mathcal{O}(1/\sqrt{d_{\text{embed}}})$.
-- Fixed sinusoidal encodings $P$ have amplitude on $[-1, 1]$ with variance $\approx 0.5$.
-- Adding $P$ directly to unscaled $E$ would cause position signals to drown out lexical word identity by a factor of $\sqrt{d_{\text{embed}}}$ (e.g. $\sqrt{512} \approx 22.6\times$ stronger!).
-- Multiplying $E$ by $\sqrt{d_{\text{embed}}}$ balances the variance of lexical and positional features before they enter the first self-attention block.
+The argument in Vaswani et al. (2017) rests on the initializer that paper uses. It assumes $W_{\text{token}} \sim \mathcal{N}(0, 1/d_{\text{embed}})$, so each token row has norm $\mathcal{O}(1)$ and individual elements have typical magnitude $\mathcal{O}(1/\sqrt{d_{\text{embed}}})$.
+- Fixed sinusoidal encodings $P$ have amplitude on $[-1, 1]$ with variance $\approx 0.5$, so a row of $P$ has norm $\sqrt{d_{\text{embed}}/2} = 16.0$ at $d_{\text{embed}} = 512$.
+- Adding $P$ to an unscaled $E$ therefore lets the position signal drown out lexical identity by a factor of $\sqrt{d_{\text{embed}}}$ (at $d_{\text{embed}} = 512$ that is $\sqrt{512} \approx 22.6\times$).
+- Multiplying $E$ by $\sqrt{d_{\text{embed}}}$ balances the two signals before they enter the first self-attention block.
+
+**TinyTorch does not use that initializer, and the numbers move.** `Embedding.__init__` uses Xavier-uniform over $V + d_{\text{embed}}$, so the row variance is governed by the *vocabulary*, not by $d_{\text{embed}}$ alone. Measured at $V = 50{,}000$ and $d_{\text{embed}} = 512$, the weight variance is $3.96 \times 10^{-5}$ against the paper's $1/d_{\text{embed}} = 1.95 \times 10^{-3}$, about $50\times$ smaller, and a token row has norm $0.14$ rather than $\mathcal{O}(1)$. The real pre-scaling imbalance is then roughly $110\times$, not $22.6\times$, and after multiplying by $\sqrt{512}$ the token row reaches only $3.2$, so sinusoidal positions still dominate by about $5\times$. The scaling is the right idea, but its exact factor is tuned to an initializer this module does not use. Switching `Embedding.__init__` to $\mathcal{N}(0, 1/d_{\text{embed}})$ would make $\sqrt{d_{\text{embed}}}$ the exactly correct correction.
 
 ---
 
@@ -1139,6 +1146,14 @@ class EmbeddingLayer:
         produces a different type of object stored in self.pos_encoding.
         """
         ### BEGIN SOLUTION role="scaffold"
+        # The contract table above says these must be positive, so enforce it here.
+        # A zero or negative width otherwise builds a (V, 0) table that fails much
+        # later, inside an unrelated broadcast.
+        for field, value in (("vocab_size", vocab_size), ("embed_dim", embed_dim),
+                             ("max_seq_len", max_seq_len)):
+            if not isinstance(value, (int, np.integer)) or value <= 0:
+                raise ValueError(f"{field} must be a positive integer, got {value!r}")
+
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.max_seq_len = max_seq_len
@@ -1285,6 +1300,12 @@ def emblayer_forward(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
     - Remember to squeeze the batch dim for 1D inputs at the end
     """
     ### BEGIN SOLUTION role="scaffold"
+    # Validate start_pos once, for every strategy. Checking it only inside the
+    # 'learned' and 'sinusoidal' branches would let pos_encoding=None silently
+    # accept a negative or non-integer position.
+    if not isinstance(start_pos, (int, np.integer)) or start_pos < 0:
+        raise ValueError("start_pos must be a nonnegative integer")
+
     # Handle 1D input by adding batch dimension
     if len(tokens.shape) == 1:
         # NOTE: Tensor reshape preserves gradients
@@ -1308,8 +1329,6 @@ def emblayer_forward(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
     elif self.pos_encoding_type == 'sinusoidal':
         # Use fixed sinusoidal encoding (not learnable)
         batch_size, seq_len, embed_dim = token_embeds.shape
-        if not isinstance(start_pos, (int, np.integer)) or start_pos < 0:
-            raise ValueError("start_pos must be a nonnegative integer")
         if start_pos + seq_len > self.max_seq_len:
             raise ValueError("Sequence runs past the sinusoidal position table")
         pos_embeddings = self.pos_encoding[start_pos:start_pos + seq_len]  # Slice using Tensor slicing
@@ -1453,6 +1472,7 @@ Notice that in modern multilingual models like Llama 3 and Gemma 2, expanding vo
 def analyze_embedding_memory_scaling():
     """📊 Compare embedding memory requirements across different model scales."""
     print("📊 Analyzing Embedding Memory Requirements...")
+    print("   (all sizes in decimal MB, 1 MB = 10^6 bytes, matching this module's tables)")
     print("=" * 60)
 
     # Vocabulary and embedding dimension scenarios
@@ -1469,7 +1489,7 @@ def analyze_embedding_memory_scaling():
     for name, vocab_size, embed_dim in scenarios:
         # Calculate memory for FP32 (4 bytes per parameter)
         params = vocab_size * embed_dim
-        memory_mb = params * BYTES_PER_FLOAT32 / MB_TO_BYTES
+        memory_mb = params * BYTES_PER_FLOAT32 / BYTES_PER_MB
         params_m = params / 1_000_000
 
         print(f"{name:<15} {vocab_size:<12,} {embed_dim:<12} {memory_mb:<15.1f} {params_m:<15.2f}")
@@ -1483,14 +1503,14 @@ def analyze_embedding_memory_scaling():
     print(f"\n📊 Positional Encoding Memory Comparison (embed_dim=512, max_seq_len=2048):")
 
     learned_params = 2048 * 512
-    learned_memory = learned_params * BYTES_PER_FLOAT32 / MB_TO_BYTES
+    learned_memory = learned_params * BYTES_PER_FLOAT32 / BYTES_PER_MB
 
     print(f"Learned PE:     {learned_memory:.1f} MB ({learned_params:,} trainable parameters)")
     print(f"Sinusoidal PE:  {learned_memory:.1f} MB stored table, 0 trainable parameters")
     print(f"No PE:          0.0 MB (0 parameters)")
 
     print("\n🚀 Production Implications:")
-    print("• GPT-3's embedding table: ~2.4GB (50K vocab × 12K dims)")
+    print("• GPT-3's embedding table: ~2.4 GB in FP32, ~1.2 GB in FP16 (50K vocab × 12K dims)")
     print("• Learned PE adds memory but may improve task-specific performance")
     print("• Sinusoidal PE avoids gradient/optimizer storage; extend its table for longer sequences")
 
@@ -1544,10 +1564,16 @@ def analyze_embedding_performance():
             print(f"{vocab_size:<12,} {batch_size:<12} {avg_time_ms:<18.2f} {throughput:<20,.0f}")
 
     print("\n💡 Performance Insights:")
-    print("• Lookup time is O(1) per token - vocabulary size doesn't affect individual lookups")
-    print("• Larger batches improve throughput due to vectorization")
-    print("• Memory bandwidth becomes bottleneck for large embedding dimensions")
-    print("• Cache locality important for repeated token patterns")
+    print("• Address arithmetic is O(1) per token, but the memory hierarchy is not.")
+    print("  A 1,000 x 512 table is 2 MB and stays in cache; a 100,000 x 512 table is 205 MB")
+    print("  and does not, which is why the largest vocabulary loses throughput at big batches.")
+    print("• Throughput does not climb with batch size here. It is flat or falling, because the")
+    print("  gather moves one row per token however the tokens are grouped; there is no")
+    print("  per-element arithmetic for a wider batch to amortize.")
+    print("• This sweep holds embed_dim fixed at 512, so it varies table size and batch, not")
+    print("  width. What it does show is why the gather is bandwidth-bound at any width.")
+    print("  Every lookup moves embed_dim x 4 bytes and performs zero FLOPs.")
+    print("• Cache locality matters for repeated token patterns")
 
 if __name__ == "__main__":
     analyze_embedding_performance()
@@ -1556,6 +1582,7 @@ if __name__ == "__main__":
 def analyze_positional_encoding_strategies():
     """📊 Compare different positional encoding approaches and trade-offs."""
     print("\n📊 Analyzing Positional Encoding Trade-offs...")
+    print("   (all sizes in decimal MB, 1 MB = 10^6 bytes)")
     print("=" * 60)
 
     max_seq_len = 512
@@ -1567,7 +1594,7 @@ def analyze_positional_encoding_strategies():
 
     # Analyze memory footprint
     learned_params = max_seq_len * embed_dim
-    learned_memory = learned_params * BYTES_PER_FLOAT32 / MB_TO_BYTES
+    learned_memory = learned_params * BYTES_PER_FLOAT32 / BYTES_PER_MB
 
     print(f"📈 Memory Comparison:")
     print(f"Learned PE:     {learned_memory:.2f} MB ({learned_params:,} trainable parameters)")
@@ -1715,7 +1742,15 @@ def test_module():
 
     assert batch_output.shape == (3, max_len, embed_dim), f"Batch output shape incorrect: {batch_output.shape}"
 
-    print("✅ Batch processing with padding works!")
+    # Honest disclosure: this padding is shape-only. Token 0 is an ordinary row of the
+    # table, so on the backward pass every pad position scatters its gradient into
+    # row 0 exactly like a real token, and row 0 drifts toward whatever the pad
+    # positions happen to produce. PyTorch suppresses this with
+    # nn.Embedding(..., padding_idx=0), which zeroes row 0's gradient (and its
+    # weights) so padding cannot train. TinyTorch's Embedding has no padding_idx,
+    # so real training on padded batches would also need an attention mask.
+    print("✅ Batch processing with padding produces the right shape")
+    print("   (note: pad positions still accumulate gradient into row 0)")
 
     # Integration Test 3: Different positional encoding types
     print("🧪 Integration Test: Position Encoding Variants...")
@@ -1777,7 +1812,7 @@ You implemented an embedding table with $V = 50{,}000$ and $d_{\text{embed}} = 5
   $$\text{Memory}_{\text{double}} = 50{,}000 \times 1{,}024 \times 4\text{ B} = \mathbf{204.8\text{ MB}} \quad (2\times\text{ linear scaling})$$
 
 **2. The Untied Weights and Optimizer State Tax**:
-- **Untied Weights**: In architectures with separate input embedding and output classification heads (e.g. Llama models), this memory cost is paid twice, consuming $409.6\text{ MB}$ in FP32.
+- **Untied Weights**: In architectures with separate input embedding and output classification heads (e.g. Llama models), this memory cost is paid twice, consuming $2 \times 102.4\text{ MB} = \mathbf{204.8\text{ MB}}$ in FP32.
 - **Adam Optimizer State**: For each parameter, Adam stores a 32-bit first moment ($m_t$) and 32-bit second moment ($v_t$), plus the gradient ($g_t$) and FP32 master weight ($16\text{ bytes/param}$ total during mixed-precision training):
   $$\text{Optimizer Memory} = 25.6\text{M} \times 16\text{ B} = \mathbf{409.6\text{ MB}}$$
   The optimizer states for the embedding table alone consume $4\times$ the storage of the forward weights!
@@ -1796,11 +1831,11 @@ $$\text{Data Transferred} = 4{,}096 \times 512 \times 4\text{ B} = 8{,}388{,}608
 - Time complexity of single-token lookup: $\mathcal{O}(1)$ pointer indexing + $\mathcal{O}(d_{\text{embed}})$ contiguous memory copy.
 - Why vocabulary size $V$ does not affect individual lookup time: Hardware locates table rows via base-pointer offset calculation:
   $$\text{Address}(t) = \text{base\_pointer} + t \cdot d_{\text{embed}} \cdot \text{sizeof(float)}$$
-  Access time is invariant to whether $V$ is $100$ or $100{,}000$.
+  That arithmetic costs the same whether $V$ is $100$ or $100{,}000$. The cache hierarchy is not so indifferent, which is why the 📊 sweep above shows the $100\text{K}$ table losing throughput once it no longer fits in cache.
 
 **3. The Arithmetic Intensity Bottleneck**:
 $$\text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{Bytes Transferred}} = \frac{0\text{ FLOPs}}{8.39\text{ MB}} = \mathbf{0\text{ FLOPs/byte}}$$
-Because table gather performs pointer dereferencing with zero multiply-accumulate operations, embedding lookup is **100% memory-bandwidth bound**. Modern GPUs (e.g. NVIDIA H100 with $>3{,}000\text{ TFLOPS}$ compute but $3.35\text{ TB/s}$ HBM bandwidth) severely underutilize their tensor cores during embedding lookups.
+Because table gather performs pointer dereferencing with zero multiply-accumulate operations, embedding lookup is **100% memory-bandwidth bound**. Modern GPUs (e.g. NVIDIA H100, with roughly $990\text{ TFLOPS}$ of dense FP16 tensor-core compute, or ${\sim}4{,}000\text{ TFLOPS}$ only for FP8 with sparsity, against $3.35\text{ TB/s}$ of HBM bandwidth) severely underutilize their tensor cores during embedding lookups.
 
 ---
 
@@ -1813,11 +1848,17 @@ You evaluated both learned and sinusoidal positional encodings.
 - Sinusoidal PE: Exactly **$0$ trainable parameters** (generated deterministically on the fly).
 
 **2. Failure Modes & Extrapolation Ceiling**:
-- When fed a sequence of length $T = 2{,}049$, learned positional encoding crashes (`ValueError: Sequence length exceeds max_seq_len`). The model has no parameter vector for position index $2{,}048$ and cannot process the token without architectural surgery and retraining.
+- When fed a sequence of length $T = 2{,}049$, learned positional encoding crashes (`ValueError: Sequence runs past the maximum: positions 0..2048 with max_seq_len=2048`). The model has no parameter vector for position index $2{,}048$ and cannot process the token without architectural surgery and retraining.
 - Sinusoidal PE smoothly generates position angles for arbitrary $T$. However, empirical attention weights decay unpredictably at untested lengths.
 
 **3. Why Modern LLMs Replaced Both with RoPE**:
 Instead of additive vectors ($E + P$), Rotary Position Embedding (RoPE) rotates 2D coordinate pairs of query ($\mathbf{q}_m$) and key ($\mathbf{k}_n$) vectors by angle multiples $m\theta$ and $n\theta$. The attention inner product $(\mathbf{R}_m \mathbf{q})^\top (\mathbf{R}_n \mathbf{k}) = \mathbf{q}^\top \mathbf{R}_{n-m} \mathbf{k}$ depends strictly on **relative distance** $(n - m)$, allowing techniques like YaRN and position interpolation to extend context windows from $4\text{K} \to 128\text{K}$ tokens without retraining from scratch.
+
+TinyTorch does not build RoPE, so treat the figure below as a preview of a mechanism you will meet in production models rather than as something this module implements. Each 2D channel pair is a clock hand whose rotation angle is the token's position, turning at a frequency set by the channel index.
+
+<div align="center">
+  <img src="rope_phase_clock.svg" alt="Rotary position embedding: per-channel 2D rotations whose angle encodes token position" width="560px">
+</div>
 
 ---
 
@@ -1827,8 +1868,8 @@ Embedding tables exhibit unique systems trade-offs across model scales.
 **1. Embedding Parameter Distribution Across Scales**:
 - In **GPT-3 (175B)** ($V \approx 50\text{K}$, $d \approx 12\text{K}$):
   $$\text{Embedding Parameters} = 50{,}257 \times 12{,}288 \approx 617.56\text{M} \implies \mathbf{0.35\% \text{ of total model parameters}}$$
-- In **Gemma 2 (2B)** ($V = 256\text{K}$, $d = 2{,}048$):
-  $$\text{Embedding Parameters} = 256{,}000 \times 2{,}048 \approx 524.29\text{M} \implies \mathbf{26.2\% \text{ of total model parameters!}}$$
+- In **Gemma 2 (2B)** ($V = 256\text{K}$, $d = 2{,}304$, matching the table above):
+  $$\text{Embedding Parameters} = 256{,}000 \times 2{,}304 = 589.82\text{M} \implies \frac{589.82\text{M}}{2.61\text{B}} = \mathbf{22.6\% \text{ of total model parameters!}}$$
   In edge and compact models, vocabulary expansion causes the embedding layer to dominate device RAM.
 
 **2. Strategic Optimization: Halving $V$ vs Halving $d_{\text{embed}}$**:
@@ -1836,7 +1877,7 @@ Embedding tables exhibit unique systems trade-offs across model scales.
 - Halving hidden dimension $d_{\text{embed}}$ reduces parameter count across all self-attention matrices ($W_Q, W_K, W_V, W_O$) and feed-forward layers ($W_{\text{gate}}, W_{\text{up}}, W_{\text{down}}$) quadratically ($\mathcal{O}(d^2)$), devastating the model's expressive capacity.
 
 **3. Distributed Tensor Parallelism (TP)**:
-In production multi-GPU inference engines (vLLM, TensorRT-LLM), a $256\text{K}$ vocabulary table cannot fit on a single GPU's fast SRAM. Engines apply **Vocabulary Tensor Parallelism**, sharding $W$ along the vocabulary dimension across $N$ GPUs ($V / N$ rows per device). An `All-Reduce` or `All-Gather` operation reconstructs the batch representations before feeding the first attention block.
+A $256\text{K}$ vocabulary table is not sharded because it is too big for one device. By the table above it is $1.18\text{ GB}$ in FP16, which fits the HBM of any serving GPU with room to spare, and nothing of that scale would fit in on-chip SRAM in any case (SRAM is tens of MB). Production multi-GPU inference engines (vLLM, TensorRT-LLM) shard it because the rest of the model is already sharded across those same GPUs and the output logits are $V$-wide, so keeping the vocabulary dimension local to each rank avoids materializing a $V$-wide activation on every device. Engines apply **Vocabulary Tensor Parallelism**, sharding $W$ along the vocabulary dimension across $N$ GPUs ($V / N$ rows per device). An `All-Reduce` or `All-Gather` operation reconstructs the batch representations before feeding the first attention block.
 """
 
 # %% [markdown]
@@ -1845,9 +1886,15 @@ In production multi-GPU inference engines (vLLM, TensorRT-LLM), a $256\text{K}$ 
 
 **What you built:** An embedding layer that converts token IDs to dense vectors.
 
-**Why it matters:** Tokens are just integers (like word IDs), but embeddings give them meaning!
-Each token gets a learned vector that captures its semantic properties. Similar words end up
-with similar vectors—this is how models understand language.
+**Why it matters:** Tokens are just integers (like word IDs), but the table that turns them
+into vectors is trainable, so the geometry is learned rather than given. The demo below runs
+twenty gradient steps that pull two token rows together, and watches their cosine similarity
+move from its random starting value to 1.0. Nothing about tokens 5 and 10 says they belong
+together. The gradient put them there, which is exactly how a real model ends up placing
+similar words near each other.
+
+Watch the last line too. Only the two rows that appeared in the batch receive any gradient
+at all, which is the sparsity that makes a 50,000-row table affordable to train.
 
 In the next module, you'll use attention to let these embeddings interact with each other.
 """
@@ -1860,19 +1907,34 @@ def demo_embeddings():
 
     # Create embedding layer: 100 vocab, 32-dimensional embeddings
     embed = Embedding(vocab_size=100, embed_dim=32)
+    pair = Tensor(np.array([5, 10]))
 
-    # Some token IDs
-    tokens = Tensor(np.array([5, 10, 15]))
+    def cosine(i, j):
+        u, v = embed.weight.data[i], embed.weight.data[j]
+        return float(u @ v / (np.linalg.norm(u) * np.linalg.norm(v)))
 
-    # Look up embeddings
-    vectors = embed(tokens)
+    print(f"Embedding table: {embed.weight.shape}  ← 100 tokens, 32 dims each")
+    print(f"\nBefore training, cos(token 5, token 10) = {cosine(5, 10):+.3f}  (random)")
 
-    print(f"Token IDs: {tokens.data}")
-    print(f"Embedding shape: {vectors.shape}  ← 3 tokens, 32 dims each")
-    print(f"\nToken 5 vector (first 5 dims): {vectors.data[0, :5].round(3)}")
-    print(f"Token 10 vector (first 5 dims): {vectors.data[1, :5].round(3)}")
+    # Twenty steps of plain gradient descent on ||W[5] - W[10]||^2.
+    # The only machinery here is the backward pass you wrote above.
+    touched = np.array([])
+    for _ in range(20):
+        vectors = embed(pair)
+        difference = vectors[0] - vectors[1]
+        loss = (difference * difference).sum()
 
-    print("\n✨ Each token has its own learned representation!")
+        embed.weight.grad = None
+        loss.backward()
+
+        gradient = np.asarray(embed.weight.grad)
+        touched = np.flatnonzero(np.abs(gradient).sum(axis=1))
+        embed.weight.data = embed.weight.data - 0.1 * gradient
+
+    print(f"After 20 steps,  cos(token 5, token 10) = {cosine(5, 10):+.3f}  (pulled together)")
+    print(f"Rows that received any gradient: {touched} of {embed.vocab_size}")
+
+    print("\n✨ The geometry is learned, and only the rows you looked up are updated!")
 
 # %%
 if __name__ == "__main__":
@@ -1895,9 +1957,9 @@ Congratulations! You've built a complete embedding system that transforms discre
 
 ### Systems Insights Discovered
 - **Memory scaling**: Embedding tables grow linearly with vocab_size x embed_dim
-- **Lookup efficiency**: O(1) per token regardless of vocabulary size
+- **Lookup efficiency**: O(1) address arithmetic per token, though a table too large for cache still slows the gather down
 - **Positional trade-offs**: Learned PE is task-specific; sinusoidal PE extrapolates to longer sequences
-- **Production patterns**: GPT-3's embedding table alone uses ~2.4GB of memory
+- **Production patterns**: GPT-3's embedding table alone uses ~2.4 GB in FP32 (~1.2 GB in FP16)
 
 ### Ready for Next Steps
 Your embeddings implementation enables attention mechanisms and transformer architectures.

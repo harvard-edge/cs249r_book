@@ -112,7 +112,7 @@ From simple statistics to large-scale scientific computing, tensors are the univ
 
 ### Why Tensors Matter in ML Systems
 
-In production ML systems, tensors carry more than just data — they carry operation history, memory layout information, and execution context:
+In production ML systems, tensors carry more than just data. They carry operation history, memory layout information, and execution context:
 
 $$\text{Disk / Storage} \xrightarrow{\text{I/O Ingestion}} \text{NumPy Buffer} \xrightarrow{\text{Class Wrap}} \text{TinyTorch Tensor} \xrightarrow{\text{Kernel Execution}} \text{Engine Output}$$
 
@@ -256,7 +256,7 @@ Tensor wraps with: shape=(2,3), size=6, dtype=float32
 - **Performance**: NumPy's C implementations are highly optimized
 - **Compatibility**: Easy integration with scientific Python ecosystem
 - **Memory Discipline**: `Function.apply` wraps each result in a fresh Tensor with independent storage. Operations leave their inputs unchanged; direct writes through `.data` or `.numpy()` remain the caller's responsibility
-- **Familiar Surface**: The method names match PyTorch's, so what you learn here transfers
+- **Familiar Surface**: The method names match PyTorch's, so what you learn here transfers, with two deliberate differences. Our reductions take `axis=` (NumPy's keyword) where PyTorch takes `dim=`, and our `max` returns values only where PyTorch's `max(dim=...)` also returns the argmax indices
 
 The complete class stays together so its public interface is visible in one
 place. Follow the path from `__init__` to an arithmetic method such as `__add__`,
@@ -372,8 +372,9 @@ class Tensor:
     def masked_fill(self, mask, value):
         """Fill positions where mask is True with value, matching PyTorch's masked_fill.
 
-        Nothing in this module needs it yet. Module 12 will use it to blank out
-        positions a model must not look at before normalizing scores.
+        The shape-manipulation unit test later in this module is its only caller
+        so far. Module 12 will use it to blank out positions a model must not
+        look at before normalizing scores.
 
         Args:
             mask:  A Tensor or numpy array of booleans, same shape as self (or broadcastable).
@@ -475,7 +476,9 @@ class Tensor:
         inner_other = other.shape[-2] if len(other.shape) >= 2 else other.shape[0]
         if inner_self != inner_other:
             if len(other.shape) >= 2:
-                fix = f"other.transpose() to get shape {other.shape[::-1]}, or reshape self"
+                # transpose() swaps only the LAST TWO axes, so leading batch axes stay put.
+                swapped = other.shape[:-2] + (other.shape[-1], other.shape[-2])
+                fix = f"other.transpose() to get shape {swapped}, or reshape self"
             else:
                 fix = f"a vector of length {inner_self}, or transpose self"
             raise ValueError(
@@ -798,13 +801,10 @@ $$\mathbf{X}_{\text{norm}} = \frac{\mathbf{X} - \boldsymbol{\mu}}{\boldsymbol{\s
 | Tensor | Shape | Meaning |
 | :--- | :--- | :--- |
 | `predictions` | `(32, 4)` | 32 batch samples, 4 class scores each |
-| `targets` | `(4,)` | Intended 4 classes, but missing batch dimension $(32, 1)$! |
+| `targets` | `(4,)` | Intended one score per sample per class, shape $(32, 4)$, but the batch axis is missing! |
 | **Silent Broadcast** | `(4,)` $\to$ `(32, 4)` | Target is replicated across all 32 samples with no warning |
 
 This is a frequent source of silent bugs in ML code. Always verify tensor shapes before element-wise operations like loss computation.
-
-This is the #1 source of silent bugs in ML code. Always verify shapes match
-before element-wise operations like loss computation.
 """
 
 
@@ -978,7 +978,7 @@ if __name__ == "__main__":
 r"""
 ## 🏗️ Matrix Multiplication: The Core Computational Operation
 
-Matrix multiplication is fundamentally different from element-wise multiplication. It's the operation that powers linear transformations — combining information across features to produce new representations.
+Matrix multiplication is fundamentally different from element-wise multiplication. It's the operation that powers linear transformations, combining information across features to produce new representations.
 
 ### Why Matrix Multiplication Matters
 
@@ -1039,9 +1039,15 @@ one deserves a distinct, educational error message.
 
 | Check Order | Invariant Verified | Exception Raised | Educational Error Explanation |
 | :--- | :--- | :--- | :--- |
-| **1. Type Check** | `isinstance(other, Tensor)` | `TypeError` | `f"matmul requires Tensor, got {type(other).__name__}"` |
-| **2. Scalar Rejection** | `self.ndim > 0` and `other.ndim > 0` | `ValueError` | `f"matmul does not support 0D scalars, use * for scalar multiplication"` |
-| **3. Inner Dimension** | `self.shape[-1] == other.shape[0]` | `ValueError` | `f"matmul shape mismatch: ({self.shape[-1]}) != ({other.shape[0]})"` |
+| **1. Type Check** | `isinstance(other, Tensor)` | `TypeError` | `Matrix multiplication requires Tensor, got {type(other).__name__}` |
+| **2. Scalar Rejection** | `self.ndim > 0` and `other.ndim > 0` | `ValueError` | `Matrix multiplication requires at least 1D tensors` |
+| **3. Inner Dimension** | `self.shape[-1] == other.shape[-2]` for a matrix operand, `other.shape[0]` for a vector | `ValueError` | `Matrix multiplication shape mismatch: {self.shape} @ {other.shape}` |
+
+The third invariant is the one worth memorizing. Matrix multiplication contracts
+`self`'s last axis against `other`'s ROWS axis, which is `shape[-2]` once `other`
+has two or more dimensions and `shape[0]` when it is a 1D vector. Each message
+above is only the first line of what the code raises; three follow-up lines then
+show the offending shapes, explain the rule, and suggest a fix.
 
 Separating validation from computation keeps each function focused on a single
 concept: `_validate_matmul_shapes` teaches input checking, while
@@ -1901,7 +1907,7 @@ How does row-major vs column-major storage affect cache performance in tensor op
 
 **Consider**:
 - What happens when you access matrix elements sequentially vs. with large strides?
-- Why did our analysis show column-wise access being slower than row-wise?
+- Why did our measurement show NumPy's `axis=0` reduction beating `axis=1`, even though it produces one result per column?
 - How would this affect the design of an image processing pipeline's memory layout?
 
 **Key Insight**: Libraries choose specific memory formats because accessing certain dimensions
@@ -1930,7 +1936,7 @@ What's the memory difference between float64 and float32 for a (1000, 1000) tens
 - Memory: float64 = 8MB, float32 = 4MB (2x difference)
 
 **Key Insight**: Production systems often use float16 or bfloat16 for 2x memory savings over float32 (2 bytes vs 4),
-trading precision for capacity. GPU memory limits (8-16GB) make this critical.
+trading precision for capacity. Current accelerators carry 80-192 GB of on-package memory, so halving the bytes per element doubles the model that fits.
 
 ### Question 4: Production Scale Memory
 
@@ -1963,8 +1969,13 @@ r"""
 **What you built:** A complete Tensor class with arithmetic operations and matrix multiplication.
 
 **Why it matters:** Your Tensor is the foundation of everything to come. Every ML
-operation — from simple addition to complex multi-step computations — will use this class. The fact
-that it works exactly like NumPy means you've built something production-ready.
+operation, from simple addition to complex multi-step computations, will use this class.
+Its surface mirrors NumPy's, so the shape rules, broadcasting semantics, and reduction
+axes you just learned carry straight over to NumPy, PyTorch, and JAX. The implementation
+underneath is deliberately educational rather than production-grade. `__init__` casts
+every input to float32, `reshape` copies where NumPy would hand back a view, and
+`MatMul.forward` runs an explicit Python loop so the arithmetic stays visible. Later
+modules replace those choices one at a time; the interface you learned here does not move.
 
 Your Tensor is ready for machine learning operations.
 Every operation you just implemented will be used extensively as we build the full framework!
@@ -1996,7 +2007,7 @@ def demo_tensor():
     print(f"NumPy  a * b: {np_prod}")
     print(f"Match: {np.allclose(tensor_prod.data, np_prod)}")
 
-    print("\n✨ Your Tensor is NumPy-compatible—ready for ML!")
+    print("\n✨ Your Tensor mirrors NumPy's API, ready for ML!")
 
 # %%
 if __name__ == "__main__":
@@ -2018,7 +2029,7 @@ Congratulations! You've built the foundational Tensor class that powers all mach
 - All tests pass (validated by `test_module()`)
 
 ### Systems Insights Discovered
-- Memory layout matters: Row-wise access is faster than column-wise due to cache locality
+- Memory layout matters, but which direction wins depends on the kernel: NumPy's compiled `axis=0` sweep measured about 1.7x faster than `axis=1`, while the "column access must be strided and slow" intuition applies to element-at-a-time Python loops
 - Broadcasting efficiency: NumPy handles shape alignment without explicit data copying
 - Matrix multiplication is the computational foundation of linear transformations
 - Shape validation provides clear error messages at minimal performance cost

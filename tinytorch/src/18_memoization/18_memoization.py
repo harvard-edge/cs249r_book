@@ -20,6 +20,10 @@ Welcome to Module 18! In this module, we transition from silicon execution primi
 
 ## 🔗 Prerequisites & Progress
 
+**You've Built**: A complete transformer stack with multi-head attention (`12_attention`) and an autoregressive `GPT` (`13_transformers`), plus the measurement and optimization tier of profiling (`14_profiling`), quantization (`15_quantization`), compression (`16_compression`), and kernel acceleration (`17_acceleration`).
+**You'll Build**: A pre-allocated `KVCache` with pointer-advanced writes, a non-invasive `CachedAttention` stand-in, and a two-phase cached generation loop.
+**You'll Enable**: Token-by-token decoding whose per-step projection cost no longer grows with the conversation, which is the optimization that makes interactive language model serving affordable.
+
 <div align="center">
   <img src="memoization_blueprint.svg" width="380px" alt="TinyTorch Framework Blueprint: Module 18 Memoization" />
 </div>
@@ -32,16 +36,16 @@ Welcome to Module 18! In this module, we transition from silicon execution primi
 | **15. Quantization** | Symmetric/Asymmetric INT8 | 8-bit scale & zero-point arithmetic | 4× weight footprint & memory bus bandwidth |
 | **16. Compression** | Magnitude Pruning & Distillation | Weight sparsity & student distillation | Redundant parameter elimination |
 | **17. Acceleration** | SIMD GEMM, Fusion, `im2col` | Memory traffic elimination & systolic arrays | Kernel overhead & hardware utilization |
-| **18. Memoization** *(Active)* | **Static KV Cache Buffers** | **$\mathcal{O}(1)$ decode steps & zero recomputation** | **Autoregressive decoding latency** |
+| **18. Memoization** *(Active)* | **Static KV Cache Buffers** | **$\mathcal{O}(1)$ projections per decode step & zero recomputation** | **Autoregressive decoding latency** |
 | **19–20. Serving & Capstone** | End-to-End Pipeline Integration | End-to-end throughput & TTFT/ITL serving | Production inference deployment |
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
-1. Formulate memoization as a general systems optimization pattern: trading persistent DRAM memory capacity for $\mathcal{O}(S)$ computational reuse.
+1. Formulate memoization as a general systems optimization pattern that trades persistent DRAM memory capacity for $\mathcal{O}(S)$ computational reuse.
 2. Mathematically derive the $\mathcal{O}(S^2) \to \mathcal{O}(S)$ reduction in key and value projection operations during autoregressive generation.
 3. Construct a production-grade `KVCache` class featuring contiguous buffer pre-allocation, pointer advancement, and zero dynamic heap reallocation.
 4. Implement a non-invasive `CachedAttention` wrapper that preserves forward compatibility and clean model encapsulation.
-5. Benchmark memory capacity budgets against measured wall-clock speedups across varying batch sizes and context window limits.
+5. Budget the cache's memory footprint across model configurations and measure the wall-clock speedup it delivers as generation length grows.
 
 ## 📦 Where This Code Lives in the Final Package
 
@@ -62,8 +66,8 @@ from tinytorch.perf.memoization import KVCache, enable_kv_cache, disable_kv_cach
 | Dependency Module | Exported Abstraction | Consumed Functional Role | Memory & Architectural Invariant |
 |:---|:---|:---|:---|
 | **Module 01 (`01_tensor`)** | `Tensor` | Contiguous N-D array storage & slicing | Pre-allocated float32 buffers without autograd overhead |
-| **Module 12 (`12_attention`)** | `MultiHeadAttention` | Attention projections & head transformations | Splits `Q, K, V` into `(B, H, S, D)` and recombines output |
-| **Module 13 (`13_transformers`)** | `GPT`, `TransformerBlock` | Autoregressive language model backbone | Non-invasive duck-typing wrapper for block attention |
+| **Module 12 (`12_attention`)** | `MultiHeadAttention`, `MASK_VALUE` | Attention projections, head transformations, masking sentinel | Splits `Q, K, V` into `(B, H, S, D)`, recombines output, and reuses one masking constant |
+| **Module 13 (`13_transformers`)** | `GPT` | Autoregressive language model backbone | Blocks are reached by duck typing through `model.blocks`, so `TransformerBlock` is never imported or subclassed |
 | **Module 14 (`14_profiling`)** | `Profiler` | High-resolution microsecond timer | Quantifies latency scaling with and without cache |
 """
 
@@ -74,15 +78,17 @@ from tinytorch.perf.memoization import KVCache, enable_kv_cache, disable_kv_cach
 import numpy as np
 rng = np.random.default_rng(7)
 import time
-from typing import Tuple, Optional, Dict, List, Iterator
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 from contextlib import contextmanager
 
 # Import TinyTorch components from previous modules
 from tinytorch.core.tensor import Tensor
+from tinytorch.core.attention import MASK_VALUE
 
 # Internal constants for memory calculations (not exported)
 _BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-_MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
+_BYTES_PER_MB = 1_000_000  # Decimal megabyte: this module quotes MB and GB as 10^6 and 10^9 bytes
+_MB_TO_BYTES = 1024 * 1024  # Binary MiB, kept for KVCache.get_memory_usage's reported figure
 
 # %% [markdown]
 r"""
@@ -158,7 +164,8 @@ def profile_naive_generation():
     print("\n💡 Key Observations:")
     print("   • Latency grows QUADRATICALLY with sequence length")
     print("   • Each new token forces recomputation of ALL previous K,V pairs")
-    print("   • Doubling the sequence roughly quadruples the time once the arrays are big")
+    print("   • Doubling the sequence MORE than quadruples the time (5-6× measured above),")
+    print("     because the S×S score matrix also has to be allocated and streamed")
 
     print("\n🎯 The Problem:")
     print("   K and V values for previous tokens NEVER change,")
@@ -232,7 +239,13 @@ $$\mathcal{N}_{\text{cached}}(S) = \sum_{t=1}^S 1 = S \in \mathcal{O}(S)$$
 | **Naive (No Cache)** | $\mathbf{0} \text{ bytes}$ (stateless) | $\frac{S(S+1)}{2} \cdot 4 d_{\text{model}} d_k \in \mathcal{O}(S^2)$ | $\sum_{t=1}^S t^2 \approx \frac{1}{3} S^3 \in \mathcal{O}(S^3)$ | $1 - \frac{2}{S+1} \approx 98\%$ wasted FLOPs |
 | **Cached (`KVCache`)** | $2 \cdot L \cdot B \cdot H \cdot S_{\max} \cdot d_k \cdot 4 \text{ B}$ | $S \cdot 4 d_{\text{model}} d_k \in \mathcal{O}(S)$ | $\sum_{t=1}^S t = \frac{S(S+1)}{2} \in \mathcal{O}(S^2)$ | **0% redundant projection FLOPs** |
 
-**Systems Takeaway**: DRAM is fast and spacious, while compute and memory bus bandwidth are hard hardware ceilings. Trading $\mathcal{O}(S)$ persistent cache memory capacity for an order-of-magnitude reduction in latency and FLOPs is the standard architecture of LLM serving.
+### Why a Decode Step Is Bound by Bytes, Not FLOPs
+
+One more fact decides how much the cache is actually worth. A decode step emits a single token, and to emit it the processor must read the *entire* weight set out of DRAM: every projection matrix and every MLP matrix, in every layer. That is hundreds of megabytes of traffic against a few megaflops of arithmetic, so the step finishes when the bytes arrive, not when the ALUs are done. Decoding is memory-bandwidth-bound, while the prefill of a long prompt, which reuses each loaded weight across many tokens, is compute-bound.
+
+The cache therefore removes redundant *bytes moved* as much as redundant FLOPs, and that is why its measured payoff is far smaller than its operation counts. The 📊 analysis at the end of this module makes the gap visible: the attention score-pair ratio climbs from $8.8\times$ to roughly $69\times$ while the measured wall-clock speedup only moves from $1.2\times$ to a little over $2\times$. Nothing is wrong with either number. The ratio counts arithmetic the cache eliminates; the clock also pays for weight reads, the MLP, prefix copies, and Python interpreter overhead, none of which the cache touches.
+
+**Systems Takeaway**: DRAM *capacity* is the cheap resource; DRAM *bandwidth* is the scarce one and DRAM *latency* is the wall. Trading $\mathcal{O}(S)$ persistent cache capacity for a large reduction in redundant bytes and FLOPs per token is the standard architecture of LLM serving.
 """
 
 # %% [markdown]
@@ -246,7 +259,7 @@ To serve high-performance inference pipelines, `KVCache` must satisfy five syste
 2. **Multi-Head Layout**: Dedicated dimensions for batch, heads, sequence length, and head dimension $(B, H, S_{\max}, d_k)$.
 3. **Static Pre-Allocation**: Contiguous allocation of the full context window $S_{\max}$ up front to prevent dynamic memory allocation and heap fragmentation.
 4. **$\mathcal{O}(1)$ Update Semantics**: In-place indexed assignment at write cursor `seq_pos` without array recreation.
-5. **Zero-Copy Slicing**: Exposing valid token history $\mathbf{K}[:, :, :t, :]$ via views for immediate vector-matrix GEMV attention.
+5. **Prefix Retrieval**: Exposing the valid token history $\mathbf{K}[:, :, :t, :]$ for immediate vector-matrix GEMV attention. The NumPy slice itself is a view, but `get()` wraps it in a `Tensor`, which copies, so retrieval costs $\mathcal{O}(t)$ bytes per call rather than being free. A production serving stack avoids that copy by handing the kernel the buffer and a length; TinyTorch pays it to keep the `Tensor` API uniform.
 
 <div align="center">
   <img src="kv_cache_state_machine.svg" width="680px" alt="KV Cache Buffer State Machine" />
@@ -566,12 +579,18 @@ class KVCache:
             key_cache.data.fill(0.0)
             value_cache.data.fill(0.0)
 
-    def get_memory_usage(self) -> Dict[str, float]:
+    def get_memory_usage(self) -> Dict[str, Union[int, float]]:
         """
         Calculate memory usage of the cache system.
 
+        Unit note: this method reports BINARY megabytes (MiB, 2^20 bytes), which
+        is what the key name 'total_mb' has always held. Every table and every
+        printed figure elsewhere in this module quotes DECIMAL MB and GB
+        (10^6 and 10^9 bytes), so the same buffer reads about 4.8% smaller here.
+
         Returns:
-            Dictionary with memory statistics in MB
+            Dictionary with 'total_mb' and 'per_layer_mb' in MiB, plus the
+            integer 'cache_tensors' and 'total_elements' counts
         """
         # Calculate size of one cache tensor
         cache_size = self.batch_size * self.num_heads * self.max_seq_len * self.head_dim
@@ -616,7 +635,7 @@ def test_unit_kvcache():
     assert cache.seq_pos == 0, "Cache should start at position 0"
     mem_usage = cache.get_memory_usage()
     assert mem_usage['total_mb'] > 0, "Cache should have non-zero memory usage"
-    print(f"   Cache initialized: {mem_usage['total_mb']:.2f} MB")
+    print(f"   Cache initialized: {mem_usage['total_mb']:.2f} MiB")
 
     # Test 2: Single token update and retrieval
     key1 = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
@@ -676,7 +695,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 r"""
-## 🏗️ Cache-Aware Generation
+## 🏗️ Cache-Aware Generation: Wrapping Attention Without Editing It
 
 ### Integration Strategy
 
@@ -744,7 +763,7 @@ To use KV caching in your transformer generation:
 
 **During Generation:**
 1. Enter `with cache.generation():` (the `_cached_generate` helper does this for you)
-2. Process prompt tokens at `start_pos=cache.seq_pos` and populate the cache
+2. Process prompt tokens **one at a time** at `start_pos=cache.seq_pos` so each one populates the cache. Prefill here is sequential; handing the whole prompt in as one multi-token forward silently bypasses the cache and leaves it empty
 3. For subsequent tokens:
    - Only process the NEW token (not entire sequence)
    - Cache is automatically updated with new K,V pairs
@@ -777,13 +796,16 @@ $$\mathcal{M}_{\text{cache}} = 2 \cdot L \cdot B \cdot H \cdot S_{\max} \cdot d_
 |:---|:---|:---|:---|:---|:---|
 | **GPT-2 Small (124M)** | 12 | 12 | 64 | 1,024 | $\approx 75.5 \text{ MB}$ |
 | **GPT-2 XL (1.5B)** | 48 | 25 | 64 | 1,024 | $\approx 629.1 \text{ MB}$ |
-| **Llama 2 (7B)** | 32 | 32 | 128 | 4,096 | $\approx 2.15 \text{ GB}$ |
+| **Llama 2 (7B)** | 32 | 32 | 128 | 4,096 | $\approx 4.29 \text{ GB}$ |
 | **GPT-3 (175B)** | 96 | 96 | 128 | 2,048 | $\approx 19.33 \text{ GB}$ |
+
+Every row above is float32 at $B = 1$, in **decimal** units ($1 \text{ MB} = 10^6$ bytes, $1 \text{ GB} = 10^9$ bytes), which is the convention this module's prose and printed tables use throughout. Work the Llama 2 row yourself as a check: $2 \times 32 \times 1 \times 32 \times 4096 \times 128 \times 4 = 4{,}294{,}967{,}296$ bytes. Halving any row gives the float16 figure, and serving stacks quote float16 far more often than float32, so always ask which precision a published cache number assumes. The one place this module reports binary units is `KVCache.get_memory_usage`, whose `total_mb` is MiB ($2^{20}$ bytes) and is labeled MiB wherever it is printed.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "cached-generation-step", "solution": false}
-#| export
-def _cached_generation_step(x, attention, cache_obj, layer_idx, mask=None):
+#| exporti
+def _cached_generation_step(x: Tensor, attention: Any, cache_obj: "KVCache",
+                            layer_idx: int, mask: Optional[Tensor] = None) -> Tensor:
     """
     Execute a single cached generation step for one new token.
 
@@ -837,7 +859,10 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx, mask=None):
     V_all = Tensor(np.concatenate([V_history.data, V_heads.data], axis=2))
 
     # Step 5: Compute attention using new Q with all cached K, V
-    # Using .data (numpy) for inference-only operation (no gradients needed)
+    # This repeats Module 12's scale/mask/softmax/matmul on raw NumPy rather than
+    # calling scaled_dot_product_attention, deliberately: that path builds autograd
+    # Function nodes for every step, and a decode step needs no gradients. The
+    # masking sentinel is imported from Module 12 rather than written out again.
     K_transposed = np.transpose(K_all.data, (0, 1, 3, 2))
     scores = np.matmul(Q_heads.data, K_transposed) / np.sqrt(head_dim)
 
@@ -852,7 +877,7 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx, mask=None):
         allowed = np.broadcast_to(allowed, scores.shape)
         if np.any(~np.any(allowed != 0, axis=-1)):
             raise ValueError("Attention mask must allow at least one key per query")
-        scores = np.where(allowed != 0, scores, -np.inf)
+        scores = np.where(allowed != 0, scores, MASK_VALUE)
 
     # Stable softmax
     scores_max = np.max(scores, axis=-1, keepdims=True)
@@ -870,7 +895,7 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx, mask=None):
 
 # %% [markdown]
 r"""
-### _create_cache_storage -- Validate Model and Allocate Cache
+### _create_cache_storage: Validate Model and Allocate Cache
 
 This helper validates that a model conforms to the transformer structural invariants required for KV caching, dynamically sizes head dimensions, and attaches a pre-allocated `KVCache` instance directly onto the model instance.
 
@@ -889,8 +914,8 @@ Upon successful validation, the instantiated cache is bound as `model._kv_cache`
 """
 
 # %% nbgrader={"grade": false, "grade_id": "kv-create-cache", "solution": true}
-#| export
-def _create_cache_storage(model):
+#| exporti
+def _create_cache_storage(model: Any) -> Tuple["KVCache", int]:
     """
     Validate model architecture and create a KVCache sized for it.
 
@@ -942,7 +967,7 @@ def _create_cache_storage(model):
 
     # Create cache for this model
     cache = KVCache(
-        batch_size=1,  # Default to single sequence; can be reset for batch inference
+        batch_size=1,  # Fixed at one sequence: reset() rewinds the cursor, not the batch axis
         max_seq_len=model.max_seq_len,
         num_layers=model.num_layers,
         num_heads=model.num_heads,
@@ -1024,7 +1049,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 r"""
-### CachedAttention -- The Stand-In That Chooses the Path
+### CachedAttention: The Stand-In That Chooses the Path
 
 `CachedAttention` takes the place of a block's attention layer while the cache is enabled. It keeps the original layer as `self.attention` and decides which execution path each forward call takes. Decoupling the **dispatch decision** here from the **numerical computation** in `_cached_generation_step` makes both independently testable.
 
@@ -1033,10 +1058,12 @@ r"""
 | Invocation Scope | Sequence Length (`x.shape[1]`) | Target Route | Executed Implementation | Computational Complexity |
 |:---|:---|:---|:---|:---|
 | **Outside Scope (`_generation_active=False`)** | Any ($S \ge 1$) | **Original Path** | `self.attention.forward(x, mask)` | Full causal attention, supports training autograd |
-| **Inside Scope (`_generation_active=True`)** | Multi-token ($S > 1$) | **Original Path** | `self.attention.forward(x, mask)` | Parallel prompt processing / full-sequence fallback |
+| **Inside Scope (`_generation_active=True`)** | Multi-token ($S > 1$) | **Original Path** | `self.attention.forward(x, mask)` | Full-sequence fallback: the cache is NOT populated |
 | **Inside Scope (`_generation_active=True`)** | Single token ($S == 1$) | **Cached Path** | `_cached_generation_step(x, ...)` | $\mathcal{O}(1)$ projection write + $\mathcal{O}(t)$ prefix attention |
 
-Inside `cache.generation()`, the prompt tokens take the cached path sequentially. The initial prompt token encounters an empty cache, attends strictly to itself, and registers its $(K, V)$ representation into slot 0 for subsequent tokens. The exact token coordinate is synchronized via `start_pos=cache.seq_pos`, enabling positional embeddings to preserve temporal coordinates.
+**Read that middle row carefully, because it is a trap.** In a production serving stack, a multi-token forward inside the generation scope is the *prefill*: the whole prompt goes through in one parallel pass and writes every prompt position into the cache at once. TinyTorch's stand-in does no such thing. It hands a multi-token input straight to the original attention, which knows nothing about the cache, so `seq_pos` stays where it was and not one row is written. The next single-token decode step then attends to whatever prefix the cache happens to hold, which after a skipped prefill is nothing at all, and it returns confident, wrong logits with no error and no warning. Prefill in this module is therefore **sequential**: feed the prompt one token at a time, exactly as `_cached_generate` does, so that every prompt position writes its own $(K, V)$ row.
+
+Inside `cache.generation()`, the prompt tokens take the cached path one at a time for that reason. The initial prompt token encounters an empty cache, attends strictly to itself, and registers its $(K, V)$ representation into slot 0 for subsequent tokens. The exact token coordinate is synchronized via `start_pos=cache.seq_pos`, enabling positional embeddings to preserve temporal coordinates.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "kv-cached-attention", "solution": true}
@@ -1049,16 +1076,16 @@ class CachedAttention:
     of these at block.attention; disable_kv_cache() puts the original back.
     """
 
-    def __init__(self, attention, cache_obj, layer_idx):
+    def __init__(self, attention: Any, cache_obj: KVCache, layer_idx: int) -> None:
         self.attention = attention      # the original MultiHeadAttention layer
         self.cache = cache_obj
         self.layer_idx = layer_idx
 
-    def parameters(self):
+    def parameters(self) -> List[Tensor]:
         """The stand-in owns no weights of its own."""
         return self.attention.parameters()
 
-    def forward(self, x, mask=None):
+    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
         """
         Route one call to the right path.
 
@@ -1069,6 +1096,10 @@ class CachedAttention:
            self.attention.forward(x, mask) unchanged
         2. Inside that scope, route one new token through
            _cached_generation_step, including its optional attention mask
+
+        Note that path 1 writes nothing to the cache, so a multi-token forward
+        inside the generation scope is a fallback, not a parallel prefill.
+        Prefill here is sequential: one token per forward.
 
         EXAMPLE:
         >>> stand_in = CachedAttention(block.attention, cache, layer_idx=0)
@@ -1086,7 +1117,7 @@ class CachedAttention:
         return _cached_generation_step(x, self.attention, self.cache, self.layer_idx, mask)
         ### END SOLUTION
 
-    def __call__(self, x, mask=None):
+    def __call__(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
         return self.forward(x, mask)
 
 # %% [markdown]
@@ -1142,7 +1173,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 r"""
-### _cached_generate -- Generation Loop with KV Cache
+### _cached_generate: Generation Loop with KV Cache
 
 This helper coordinates the two-phase autoregressive generation pipeline: sequential prompt prefilling followed by token-by-token generation with static buffer advancement.
 
@@ -1158,8 +1189,9 @@ At each decode step, `cache.advance()` moves the write cursor forward by 1. When
 """
 
 # %% nbgrader={"grade": false, "grade_id": "kv-cached-generate", "solution": true}
-#| export
-def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
+#| exporti
+def _cached_generate(model: Any, prompt_tokens: List[int], max_new_tokens: int,
+                     temperature: float, cache: KVCache) -> List[int]:
     """
     Run autoregressive generation using the KV cache.
 
@@ -1208,8 +1240,9 @@ def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
         raise ValueError("temperature must be finite and nonnegative")
     if len(prompt_tokens) == 0:
         raise ValueError("prompt_tokens must contain at least one token")
-    # The last sampled token is returned, not fed back into the model.
-    if len(prompt_tokens) + max_new_tokens > cache.max_seq_len:
+    # The last sampled token is returned, not fed back into the model, so the run
+    # needs len(prompt) + max_new_tokens - 1 slots, one fewer than it generates.
+    if max_new_tokens > 0 and len(prompt_tokens) + max_new_tokens - 1 > cache.max_seq_len:
         raise ValueError("Prompt and generation exceed cache capacity")
     generated = []
     cache.reset()   # a fresh sequence: the cursor back to slot 0, no rows from the last request
@@ -1320,7 +1353,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 r"""
-### enable_kv_cache -- Composition: Wire Cache Into Model
+### enable_kv_cache: Compose the Cache Into the Model
 
 This is the main entry point that composes the subsystem helpers into an integrated runtime. It attaches the pre-allocated cache and wraps each transformer block's attention layer in place.
 
@@ -1336,7 +1369,7 @@ This is the main entry point that composes the subsystem helpers into an integra
 
 # %% nbgrader={"grade": false, "grade_id": "kv-enable-cache", "solution": true}
 #| export
-def enable_kv_cache(model):
+def enable_kv_cache(model: Any) -> KVCache:
     """
     Enable KV caching for a transformer model without editing its layers.
 
@@ -1389,12 +1422,12 @@ def enable_kv_cache(model):
         block.attention = CachedAttention(block.attention, cache, layer_idx)
 
     # Step 3: Print confirmation
-    print(f"⚡ KV Cache enabled for model!")
+    print("⚡ KV Cache enabled for model!")
     print(f"   Architecture: {model.num_layers} layers × {model.num_heads} heads × {head_dim}D")
-    print(f"   Memory: {cache.get_memory_usage()['total_mb']:.2f} MB")
-    print(f"   Cache stored in: model._kv_cache")
+    print(f"   Memory: {cache.get_memory_usage()['total_mb']:.2f} MiB")
+    print("   Cache stored in: model._kv_cache")
     print()
-    print(f"💡 To disable: call disable_kv_cache(model)")
+    print("💡 To disable: call disable_kv_cache(model)")
     print()
 
     return cache
@@ -1403,7 +1436,7 @@ def enable_kv_cache(model):
 
 # %% nbgrader={"grade": false, "grade_id": "kv-disable-cache", "solution": false}
 #| export
-def disable_kv_cache(model):
+def disable_kv_cache(model: Any) -> None:
     """
     Disable KV caching and restore original attention behavior.
 
@@ -1520,18 +1553,18 @@ def analyze_kvcache_memory():
         - Memory overhead as percentage of model parameters
         - Trade-off between cache size and speedup gains
 
-    Analyzes:
-        - Tiny models (128D): ~0.12 MB
-        - Small models (512D): ~2 MB
-        - Medium models (768D): ~9 MB
-        - Large models (1024D): ~32 MB
+    Analyzes (decimal MB, 10^6 bytes, matching this module's tables):
+        - Tiny models (128D): ~0.13 MB
+        - Small models (512D): ~2.10 MB
+        - Medium models (768D): ~9.44 MB
+        - Large models (1024D): ~33.55 MB
 
     Key Insight:
         Cache size is set by context length, not by parameter count. The
         ratio below compares it to one transformer block's parameters (~12·d²).
 
     Production Context:
-        GPT-3 (96 layers, 96 heads, head_dim 128, 2048 context): ~18 GB per
+        GPT-3 (96 layers, 96 heads, head_dim 128, 2048 context): ~19.33 GB per
         sequence in FP32, which is why serving systems budget memory per user.
     """
     print("📊 Analyzing KV Cache Memory Usage...")
@@ -1551,13 +1584,13 @@ def analyze_kvcache_memory():
     for embed_dim, num_layers, seq_len, name in configs:
         # Memory per layer: 2 tensors (K, V) × batch × seq_len × embed_dim × 4 bytes
         batch_size = 1
-        memory_per_layer = 2 * batch_size * seq_len * embed_dim * _BYTES_PER_FLOAT32 / _MB_TO_BYTES
+        memory_per_layer = 2 * batch_size * seq_len * embed_dim * _BYTES_PER_FLOAT32 / _BYTES_PER_MB
         total_memory = memory_per_layer * num_layers
 
         # Model parameter memory: a transformer block has about 12·d² parameters
         # (4·d² in attention projections, 8·d² in the MLP)
         params_per_layer = 12 * embed_dim * embed_dim
-        model_memory = params_per_layer * num_layers * _BYTES_PER_FLOAT32 / _MB_TO_BYTES
+        model_memory = params_per_layer * num_layers * _BYTES_PER_FLOAT32 / _BYTES_PER_MB
 
         overhead_pct = (total_memory / model_memory) * 100 if model_memory > 0 else 0
 
@@ -1570,7 +1603,7 @@ def analyze_kvcache_memory():
     print("   • The ratio compares the cache to block parameters (~12·d² each); it grows with context")
     print()
     print("🚀 Production Context:")
-    print("   • GPT-3 (96 layers, 96 heads, head_dim 128, 2048 context): ~18 GB per sequence in FP32")
+    print("   • GPT-3 (96 layers, 96 heads, head_dim 128, 2048 context): ~19.33 GB per sequence in FP32")
     print("   • Trade-off: memory per cached token buys away the O(n²) attention recomputation")
     print("   • Worth it for inference-heavy workloads!")
 
@@ -1589,9 +1622,13 @@ def analyze_kvcache_speedup():
         - Measured wall-clock speedup on a tiny GPT, next to the attention score-pair ratio
 
     Key Insight:
-        Speedup is SUPER-LINEAR with generation length because:
-        - Longer sequences → more redundant computation without cache
-        - Cache benefit compounds: saves O(n²) → O(n) at EVERY step
+        Speedup GROWS with generation length, but sublinearly: the measured
+        gain runs roughly 1.2x at 10 tokens to a little over 2x at 100, so a
+        10x longer generation buys under 2x more speedup. The score-pair ratio
+        climbs far faster (about 8.8x to 69x) because it counts only the
+        arithmetic the cache eliminates. The clock also pays for weight reads,
+        the MLP, prefix copies, and Python overhead, which the cache leaves
+        untouched, and decoding is bandwidth-bound on those weight reads.
 
     Production Reality:
         This is why ChatGPT can generate responses in real-time.
@@ -1724,7 +1761,7 @@ def test_module():
     mem_info = cache.get_memory_usage()
     assert mem_info['total_mb'] > 0
     assert mem_info['cache_tensors'] == num_layers * 2
-    print(f"✅ Memory tracking: {mem_info['total_mb']:.2f} MB for {mem_info['cache_tensors']} tensors")
+    print(f"✅ Memory tracking: {mem_info['total_mb']:.2f} MiB for {mem_info['cache_tensors']} tensors")
     print()
 
     print("=" * 50)
@@ -1736,11 +1773,28 @@ def test_module():
 r"""
 ## 🤔 ML Systems Reflection Questions
 
+Every question below is answerable from one expression, the cache-size formula from the Production Serving Memory Formulas table:
+
+$$\mathcal{M}_{\text{cache}} = 2 \cdot L \cdot B \cdot H \cdot S_{\max} \cdot d_k \cdot (\text{bytes per element})$$
+
+The leading 2 counts keys and values, and $H$ is the number of **key/value** heads, which matters once grouped-query attention enters in Question 5. Unless a question states otherwise, use this module's **running serving model**, the GPT-2 Small row of that table: $L = 12$ layers, $H = 12$ heads, $d_k = 64$, $S_{\max} = 1{,}024$, `float32` (4 bytes per element), $B = 1$ per sequence. Compute its per-sequence cache once and reuse it:
+
+$$\mathcal{M} = 2 \times 12 \times 1 \times 12 \times 1{,}024 \times 64 \times 4 = 75{,}497{,}472 \text{ bytes} \approx 75.5 \text{ MB}$$
+
+Byte counts here are decimal (MB $= 10^6$, GB $= 10^9$, TB $= 10^{12}$ bytes). Work each question before reading the analysis that follows it.
+
+---
+
 ### Question 1: Cache Size Calculation
 
-A 12-layer transformer has 12 attention heads per layer, 64-dimensional embeddings per head, maximum sequence length of 2048, and batch size of 8.
+A 12-layer transformer serves a batch of 8 sequences. It has 12 attention heads per layer, 64 dimensions per head, a maximum sequence length of 2,048, and a `float32` cache.
 
-**Quantitative Derivation**:
+**Answer these**:
+1. How many bytes does the full KV cache occupy across all layers?
+2. The model holds 125M parameters in `float32`. Is the cache bigger or smaller than the weights, and by what factor?
+3. Naive decoding reprojects every past token at every step. How many key/value projections does one 2,048-token sequence cost naively, how many are strictly necessary, and how many are pure waste?
+
+**Worked Systems Analysis**:
 - **One cache tensor shape**:
   $$\text{Shape} = (B, H, S_{\max}, d_k) = (8, 12, 2048, 64)$$
 - **Elements per tensor**:
@@ -1750,95 +1804,124 @@ A 12-layer transformer has 12 attention heads per layer, 64-dimensional embeddin
 - **Total across 12 layers**:
   $$12 \text{ layers} \times 2 \text{ tensors/layer} = 24 \text{ cache tensors}$$
 - **Total elements**:
-  $$24 \times 12,582,912 = 301,990,092 \text{ elements}$$
+  $$24 \times 12,582,912 = 301,989,888 \text{ elements}$$
 - **Memory footprint in float32 (4 bytes per element)**:
-  $$\text{Total Bytes} = 301,990,092 \times 4 \text{ bytes} = 1,207,960,368 \text{ bytes}$$
-  $$\text{Memory in MiB} = \frac{1,207,960,368}{1024^2} \approx \mathbf{1,152.0 \text{ MiB}} \quad (\approx 1.208 \text{ GB decimal})$$
+  $$\text{Total Bytes} = 301,989,888 \times 4 \text{ bytes} = 1,207,959,552 \text{ bytes}$$
+  $$\text{Memory in MiB} = \frac{1,207,959,552}{1024^2} = \mathbf{1,152.0 \text{ MiB}} \quad (\mathbf{1.208 \text{ GB}} \text{ decimal})$$
 
 **Follow-up Analysis (Overhead vs Model Parameters)**:
-If this model has 125M parameters ($125 \times 10^6 \times 4 \text{ bytes} = 500 \text{ MB}$):
-$$\text{Cache-to-Model Ratio} = \frac{1,152 \text{ MB}}{500 \text{ MB}} = \mathbf{230.4\%}$$
-The KV cache occupies **more than double** the memory of the neural network weights themselves!
+If this model has 125M parameters ($125 \times 10^6 \times 4 \text{ bytes} = 500 \text{ MB}$), compare like with like, in bytes:
+$$\text{Cache-to-Model Ratio} = \frac{1,207,959,552 \text{ B}}{500,000,000 \text{ B}} = \mathbf{241.6\%}$$
+The KV cache occupies **more than double** the memory of the neural network weights themselves. (Divide 1,152 MiB by 500 MB and you get 230.4%, but that mixes binary and decimal units and is not a ratio of anything. Keep both sides in bytes.)
+
+**Projection accounting**: naive decoding costs $\frac{2048 \times 2049}{2} = 2{,}098{,}176$ key/value projections per sequence, of which only $2{,}048$ are necessary, so $2{,}096{,}128$ (about 2.1 million) are pure recomputation.
 
 **Is this overhead acceptable?**
-Yes, because without caching, decoding 2048 tokens at batch size 8 would require $\approx 2.1$ million redundant projections per sequence, causing severe inter-token latency spikes that breach serving SLAs. However, this massive overhead explains why modern architectures replace Multi-Head Attention (MHA) with **Multi-Query Attention (MQA)** or **Grouped-Query Attention (GQA)** (e.g., Llama 2/3, Mistral), which share key and value heads across $4\times$ to $8\times$ query heads, slashing cache memory footprint by $75\%\text{--}87.5\%$.
+Yes, because those 2.1 million redundant projections per sequence would land as inter-token latency that grows with every token generated, breaching serving SLAs long before the sequence finishes. The overhead does explain why modern architectures replace Multi-Head Attention (MHA) with **Grouped-Query Attention (GQA)** or **Multi-Query Attention (MQA)** (Llama 2/3, Mistral). GQA gives each group of query heads one shared key/value head, so a group size of 4 to 8 stores 4 to 8 times fewer KV heads and cuts the cache to a quarter or an eighth. MQA is the limiting case with a single key/value head shared by every query head, which for this 12-head model is a $12\times$ reduction.
 
 ---
 
 ### Question 2: Speed vs Memory Trade-Off
 
-Your `KVCache` eliminates the $\mathcal{O}(S^2)$ projection recomputation but reserves persistent memory for every active token.
+Your `KVCache` eliminates the $\mathcal{O}(S^2)$ projection recomputation but reserves persistent memory for every active token. Serve the running model (75.5 MB of cache per sequence) to 1,000 concurrent users on one host with 64 GB of RAM.
+
+**Answer these**:
+1. Is the trade-off worth making for an interactive chatbot? Argue it from inter-token latency, not from FLOP counts.
+2. How much cache memory do 1,000 concurrent users require, and what does that host do when asked for it?
+3. Name two production techniques that make high concurrency affordable, and state precisely what each one recovers.
 
 **Systems Serving Analysis (1000 Concurrent Users)**:
 
 | Metric | Without Cache (Stateless Forward) | With Cache (`KVCache`) |
 |:---|:---|:---|
 | **Inter-Token Latency (ITL)** | Degrades linearly $\mathcal{O}(t)$; requests timeout | Constant $\mathcal{O}(1)$ projection time per token |
-| **FLOP Waste Rate** | $1 - \frac{2}{t+1} \to 99.8\%$ wasted recomputation | **0%** redundant projection FLOPs |
-| **Memory Footprint (1000 users)** | Minimal ($\approx 0 \text{ MB}$ persistent KV memory) | $1,000 \times 100 \text{ MB} = \mathbf{100 \text{ GB DRAM}}$ |
-| **Server Crash Risk (64 GB RAM)** | High CPU utilization, low memory pressure | **Out of Memory (OOM) Kernel Panic** |
+| **FLOP Waste Rate** | $1 - \frac{2}{t+1} \to 99.8\%$ wasted recomputation at $t = 1{,}024$ | **0%** redundant projection FLOPs |
+| **Memory Footprint (1000 users)** | Minimal ($\approx 0 \text{ MB}$ persistent KV memory) | $1{,}000 \times 75.5 \text{ MB} = \mathbf{75.5 \text{ GB DRAM}}$ |
+| **Server Fate (64 GB host)** | High CPU utilization, low memory pressure | Over budget by 11.5 GB: **Out of Memory** |
 
-**Systems Answers**:
-1. **Chatbot Feasibility**: The trade-off is absolutely mandatory. For interactive chat, human users perceive delays $>100 \text{ ms}$ as sluggish. Without caching, generating token 1,000 takes $1000\times$ longer than token 1, violating real-time interactivity.
-2. **64 GB RAM Failure**: Attempting to allocate 100 GB on a 64 GB host triggers OS page swapping to disk, dropping throughput by $1,000\times$, before invoking the Linux OOM Killer to terminate the model serving daemon.
+**Worked Systems Analysis**:
+1. **Chatbot Feasibility**: The trade-off is mandatory. Human users perceive delays above $100 \text{ ms}$ as sluggish, and without caching the per-token cost grows with the conversation, so token 1,000 costs roughly $1{,}000\times$ what token 1 cost. Interactivity fails not because the total FLOPs are large but because the *last* token is the slowest.
+2. **64 GB Host Failure**: Asking for 75.5 GB on a 64 GB host first drives the OS into swapping, which costs orders of magnitude in latency because a page fault services from disk instead of DRAM, and then invokes the OOM killer on the serving daemon. A capacity overrun of 18% does not degrade gracefully; it takes the service down.
 3. **High-Concurrency Architecture**:
-   - **PagedAttention (vLLM)**: Manage KV cache memory using virtual memory pages (e.g. 16 tokens per block), eliminating internal and external memory fragmentation and reclaiming 20–40% wasted buffer space.
-   - **Tiered Memory Swapping**: Active generating sequences remain in fast GPU HBM. When a request enters human think-time (waiting for the user to type their next response), the KV cache is asynchronously DMA-transferred to host CPU RAM or local NVMe SSD over PCIe, freeing GPU HBM for other active decode steps.
+   - **PagedAttention (vLLM)**: Hold the cache in fixed-size blocks (16 tokens per block) addressed through a block table, the same indirection an operating system page table provides. This eliminates external fragmentation outright and bounds internal fragmentation to at most one partially filled block per sequence. The vLLM paper measures prior systems wasting 60% to 80% of KV memory on over-reservation and fragmentation, and reports waste under 4% with paging, so what is recovered is wasted *capacity*, not compute.
+   - **Tiered Memory Swapping**: Active generating sequences stay in fast GPU HBM. When a request enters human think-time (waiting for the user to type), its cache is asynchronously DMA-transferred to host CPU RAM or local NVMe SSD over PCIe, freeing HBM for other active decode steps. What is recovered here is HBM *residency* during idle turns, paid for with transfer bandwidth and prefetch latency.
 
 ---
 
 ### Question 3: Batch Inference Scaling
 
-With `KVCache`, each sequence in a batch maintains its own dedicated $(K, V)$ tensor slices.
+Each sequence in a batch keeps its own $(K, V)$ slices, so the cache grows with $B$. Take the running model and raise the batch from 1 to 8. Assume two measurements as given: a single sequence decodes at 500 tok/s, and inside a batch of 8 each sequence decodes at 420 tok/s.
 
-**Batch Scaling Calculations**:
-- **Predicted Cache Memory (Batch 8)**:
-  $$\mathcal{M}(8) = 8 \times 50 \text{ MB} = \mathbf{400 \text{ MB}} \quad (\text{Scales strictly linearly } \mathcal{O}(B))$$
+**Answer these**:
+1. What is the cache footprint at $B = 8$, and exactly how does it scale with $B$?
+2. Per-sequence decoding slows by only 16% while eight times as much work is done. Why does batching cost so little here, and which hardware limit explains it?
+3. What is total throughput at $B = 1$ and at $B = 8$, and when would you deliberately choose the smaller batch anyway?
+
+**Worked Systems Analysis**:
+- **Cache Memory at Batch 8**:
+  $$\mathcal{M}(8) = 2 \times 12 \times 8 \times 12 \times 1{,}024 \times 64 \times 4 = 603{,}979{,}776 \text{ B} \approx \mathbf{604.0 \text{ MB}}$$
+  That is exactly $8 \times 75.5 \text{ MB}$. $B$ enters the formula once, to the first power, so the cache is strictly linear in batch size, $\mathcal{O}(B)$.
 - **Per-Sequence Generation Rate**:
-  At batch size 1, inference is **memory-bandwidth bound**: reading the multi-gigabyte model weights from HBM to processor registers for a single token vector achieves only a tiny fraction of peak compute. Batching $B=8$ sequences allows the processor to reuse the loaded weight matrices across 8 token vectors simultaneously, transforming memory-bound GEMV into compute-dense GEMM. Consequently, per-sequence latency increases only marginally (e.g. from 500 to $\approx 420 \text{ tok/s}$).
+  At batch size 1, decoding is **memory-bandwidth bound**, as established in 📐: reading the whole weight set out of HBM to produce one token vector leaves the arithmetic units mostly idle. Batching $B = 8$ sequences reuses each loaded weight matrix across 8 token vectors, turning a bandwidth-bound GEMV into a compute-dense GEMM. The bytes moved barely change, so per-sequence latency rises only marginally, from 500 to $\approx 420 \text{ tok/s}$.
 - **Throughput Calculation**:
   $$\text{Throughput}(B=1) = 1 \times 500 = 500 \text{ total tok/s}$$
-  $$\text{Throughput}(B=8) = 8 \times 420 = \mathbf{3,360 \text{ total tok/s}} \quad (\mathbf{6.72\times} \text{ throughput increase!})$$
+  $$\text{Throughput}(B=8) = 8 \times 420 = \mathbf{3,360 \text{ total tok/s}} \quad (\mathbf{6.72\times} \text{ throughput increase})$$
 
 **Production Batching Selection**:
-- **High Batch Size ($B = 8\text{--}32$)**: Optimal for offline document summarization, batch classification, and synthetic dataset generation where throughput (tokens/dollar) is the primary economic objective.
-- **Low Batch Size ($B = 1\text{--}2$)**: Optimal for interactive voice assistants, live developer code completion, and streaming customer support where Time to First Token (TTFT) and Inter-Token Latency (ITL) must remain under strict human perception bounds ($<50 \text{ ms}$).
+- **High Batch Size ($B = 8\text{--}32$)**: Optimal for offline document summarization, batch classification, and synthetic dataset generation where throughput (tokens per dollar) is the economic objective.
+- **Low Batch Size ($B = 1\text{--}2$)**: Optimal for interactive voice assistants, live code completion, and streaming customer support where Time to First Token (TTFT) and Inter-Token Latency (ITL) must stay inside human perception bounds ($<50 \text{ ms}$). Batching raises aggregate throughput by holding each individual request slightly longer, which is the wrong trade when one request is all the user can see.
 
 ---
 
 ### Question 4: Cache Eviction for Long Conversations
 
-When a conversation exceeds `max_seq_len = 2048`, the pre-allocated buffer is full.
+A conversation on the running model reaches $S_{\max} = 1{,}024$ tokens and the pre-allocated buffer is full. The obvious move is to evict the oldest tokens and keep going.
 
-**Eviction Dynamics & Production Solutions**:
-1. **Context Loss from Eviction**: Evicting historical tokens drops earlier dialogue, user constraints, and instructions. Crucially, dropping the initial prompt causes severe attention instability: empirical research (StreamingLLM) demonstrates that initial tokens act as **attention sinks**, absorbing significant softmax mass regardless of language semantics. Evicting token 0 triggers catastrophic perplexity explosion!
-2. **Context Window Limits**: Production systems enforce strict token bounds due to physical GPU HBM limits, quadratic self-attention complexity during prefill, and degradation of rotary positional embeddings (RoPE) when queried beyond their pretraining context window.
-3. **Medical Chatbot Strategy**: A clinical AI cannot drop patient medical history or allergies via naive FIFO eviction. The required systems solution is:
-   - **StreamingLLM Sink Retention**: Keep the first 4 tokens (attention sinks) permanently in cache.
-   - **Context Summarization**: Periodically summarize older conversation turns using an auxiliary background LLM call, injecting the compressed clinical summary into the active prompt.
-   - **Retrieval-Augmented Generation (RAG)**: Store detailed conversational transcripts in an external vector database, fetching relevant medical history on-the-fly via similarity search.
+**Answer these**:
+1. What does FIFO eviction actually cost, and why is token 0 a special case rather than just the oldest one?
+2. The cache grows only linearly in $S_{\max}$, so why do production systems cap the context window at all?
+3. A clinical assistant must never forget a patient's allergies. Design a policy that keeps the cache bounded without losing that information.
+
+**Worked Systems Analysis**:
+1. **Context Loss from Eviction**: Evicting historical tokens drops earlier dialogue, user constraints, and instructions. Dropping the *initial* tokens does something worse than forgetting. Empirical work on StreamingLLM shows that the first tokens act as **attention sinks**, absorbing a large share of the softmax mass regardless of what they mean, because softmax must put its mass somewhere even when no key is a good match. Evict token 0 and the remaining keys have to absorb that mass, which drives perplexity up sharply.
+2. **Context Window Limits**: Three separate ceilings, only one of which is the cache. Physical HBM capacity bounds the cache, prefill attention is quadratic in prompt length so a long prompt is expensive before a single token is generated, and rotary positional embeddings degrade when queried past the range they were trained on. The last of these is a quality limit, not a memory limit, which is why raising $S_{\max}$ alone does not buy usable context.
+3. **Medical Chatbot Strategy**: A clinical assistant cannot drop patient history or allergies by naive FIFO. Combine three mechanisms:
+   - **StreamingLLM Sink Retention**: Keep the first 4 tokens (the attention sinks) pinned in cache permanently.
+   - **Context Summarization**: Periodically summarize older conversation turns with an auxiliary model call and inject the compressed clinical summary into the active prompt.
+   - **Retrieval-Augmented Generation (RAG)**: Keep full transcripts in an external vector store and fetch the relevant history on demand, which moves unbounded state out of a fixed-size buffer entirely.
 
 ---
 
-### Question 5: Production Reality: Multi-User Serving
+### Question 5: Multi-User Serving at Production Scale
 
-**Scale Calculation for 10,000 Concurrent Conversations**:
+Serve 10,000 concurrent conversations of a 13B-parameter model in `float16` with grouped-query attention: $L = 40$ layers, 40 query heads sharing $H = 8$ key/value heads, $d_k = 128$, $S_{\max} = 4{,}096$, $B = 1$ per conversation. Weights are `float16` as well.
+
+**Answer these**:
+1. What is the total serving memory, cache plus weights?
+2. Can a single H100 (80 GB of HBM) host it? How many would it take?
+3. Compare Strategy A, everything resident in HBM, against Strategy B, tiered offloading to host DRAM between turns.
+
+**Worked Systems Analysis**:
+- **Cache per Conversation** (note that $H$ is the 8 key/value heads, not the 40 query heads):
+  $$2 \times 40 \times 1 \times 8 \times 4{,}096 \times 128 \times 2 = 671{,}088{,}640 \text{ B} \approx \mathbf{671.1 \text{ MB}}$$
+  With full MHA's 40 key/value heads the same context would cost 3.36 GB, so GQA is already saving $5\times$ before any other technique is applied.
 - **Total Cache Memory**:
-  $$10,000 \times 200 \text{ MB} = 2,000,000 \text{ MB} = \mathbf{2,000 \text{ GB}} = \mathbf{2.0 \text{ TB}}$$
-- **Model Parameters (13B float32)**:
-  $$13 \times 10^9 \times 4 \text{ bytes} \approx 52 \times 10^9 \text{ bytes} = \mathbf{52 \text{ GB}}$$
+  $$10{,}000 \times 671.1 \text{ MB} = \mathbf{6.71 \text{ TB}}$$
+- **Model Parameters (13B in float16)**:
+  $$13 \times 10^9 \times 2 \text{ bytes} = 26 \times 10^9 \text{ bytes} = \mathbf{26 \text{ GB}}$$
 - **Total Serving Memory Required**:
-  $$2,000 \text{ GB (Cache)} + 52 \text{ GB (Model)} = \mathbf{2,052 \text{ GB}} \approx \mathbf{2.05 \text{ TB}}$$
+  $$6{,}710.9 \text{ GB (Cache)} + 26 \text{ GB (Model)} = \mathbf{6{,}736.9 \text{ GB}} \approx \mathbf{6.74 \text{ TB}}$$
+  The weights are 0.4% of the total. At this concurrency the model is a rounding error and the cache *is* the system.
 
 **Systems Architectural Answers**:
-1. **Single GPU Feasibility**: **Completely infeasible.** An NVIDIA H100 GPU provides 80 GB of HBM3. Storing 2,052 GB exceeds a single GPU by over **$25\times$**, requiring a distributed cluster of at least 32 H100 GPUs ($32 \times 80 = 2,560 \text{ GB}$).
+1. **Single GPU Feasibility**: **Infeasible.** An NVIDIA H100 provides 80 GB of HBM3, so 6,736.9 GB exceeds one GPU by $84\times$. Resident storage alone needs $\lceil 6{,}736.9 / 80 \rceil = \mathbf{85}$ H100s, which is 11 eight-GPU nodes, and those GPUs are bought for capacity rather than for compute.
 2. **Production Cache Management**:
-   - **Prefix Caching**: Common system prompts and developer tools are hashed and stored once, shared across thousands of user sessions simultaneously.
-   - **Continuous Paged Batching**: Sequences are dynamically grouped and ungrouped at every single token step (iteration-level scheduling).
-   - **Quantized KV Caching**: Quantizing keys and values from FP16 to FP8 or INT4 reduces cache volume by $2\times\text{--}4\times$ with negligible quality loss.
+   - **Prefix Caching**: Shared system prompts and tool definitions are hashed and stored once, then shared across thousands of sessions instead of being recomputed and re-stored per user.
+   - **Continuous Paged Batching**: Sequences join and leave the running batch at every token step (iteration-level scheduling), so a finished request releases its blocks immediately instead of at the end of a fixed batch.
+   - **Quantized KV Caching**: Storing keys and values at FP8 or INT4 instead of FP16 shrinks the cache by $2\times$ to $4\times$, which is the single largest lever available here because the cache dominates the budget.
 3. **Memory Residency Trade-Off (A vs B)**:
-   - **Strategy A (All in HBM)**: Minimal latency, zero swapping overhead, but prohibitive hardware cost ($> \$300,000$ in GPUs).
-   - **Strategy B (Tiered Offloading)**: Asynchronous two-tier memory hierarchy. Generating tokens reside in GPU HBM. Once a token turn completes, an asynchronous background thread copies the cache over PCIe to host CPU DRAM (or NVMe SSD). When the user submits their next query 10 seconds later, the cache is pre-fetched back into GPU HBM before generation begins. This delivers the speed of Option A at a fraction of the cost of Option B!
+   - **Strategy A (All in HBM)**: Minimal latency and no transfer overhead, but it reserves all 85 accelerators for residency, which is millions of dollars of hardware standing by to hold bytes rather than to compute.
+   - **Strategy B (Tiered Offloading)**: An asynchronous two-tier hierarchy. Generating sequences live in HBM; when a turn completes, a background thread copies that conversation's cache over PCIe to host DRAM (or NVMe). When the user's next query arrives ten seconds later, the cache is prefetched back before generation begins. Since most conversations are idle most of the time, this keeps close to Strategy A's latency at a fraction of Strategy A's cost, which is the whole point of a memory hierarchy.
 """
 
 # %% [markdown]
@@ -1849,7 +1932,7 @@ r"""
 
 **Why it matters:** When generating text token-by-token, naive attention recomputes the same
 K,V values for all previous tokens at each step. With KV caching, you compute once and reuse!
-This is why ChatGPT responds so fast—it's not recomputing everything every token.
+This is why ChatGPT responds so fast. It is not recomputing everything every token.
 
 At context length n, caching reduces attention work per new token from O(n²) to O(n).
 Total attention work across n generated tokens still grows as O(n²).
@@ -1893,24 +1976,33 @@ if __name__ == "__main__":
 
 # %% [markdown]
 r"""
-## 🚀 MODULE SUMMARY: KV Caching (Memoization)
+## 🚀 MODULE SUMMARY: Memoization
 
 Congratulations! You have completed the primary inference optimization that makes production language model serving economically and computationally viable.
 
-### Systems Milestone Scorecard
+### Key Accomplishments
 
 | Architectural Capability | Concrete Implementation | Verification Standard | Systems Impact |
 |:---|:---|:---|:---|
 | **Static Buffer Allocation** | `KVCache.__init__` | Contiguous float32 DRAM allocation | Zero dynamic memory allocation per token |
 | **$\mathcal{O}(1)$ State Update** | `KVCache.update` | Direct slice assignment into DRAM | Eliminates array re-creation overhead |
-| **Prefix GEMV Retrieval** | `KVCache.get` | Slices prefix up to write cursor | Enables single-query vector-matrix attention |
-| **Non-Invasive Stand-In** | `CachedAttention` | Wraps block attention transparently | Full forward/backward compatibility preserved |
-| **Autoregressive Loop** | `_cached_generate` | Two-phase prefill & decode loop | $\frac{S+1}{2}\times$ projection FLOP reduction |
+| **Prefix Retrieval** | `KVCache.get` | Slices prefix up to write cursor | Enables single-query vector-matrix attention, at an $\mathcal{O}(t)$ copy per call |
+| **Non-Invasive Stand-In** | `CachedAttention` | Wraps block attention transparently | Original layer restored intact by `disable_kv_cache` |
+| **Autoregressive Loop** | `_cached_generate` | Two-phase prefill & decode loop | $\frac{S+1}{2}\times$ projection reduction (50.5$\times$ at $S=100$) |
 
-### Quantitative Systems Principles Established
-- **Recomputation Elimination**: Caching $\mathbf{K}$ and $\mathbf{V}$ converts quadratic key/value projections from $\frac{S(S+1)}{2} \in \mathcal{O}(S^2)$ to $S \in \mathcal{O}(S)$, saving $98\%$ of projection FLOPs at $S=100$.
-- **Memory Capacity Trade-off**: Cache memory scales as $\mathcal{M} = 2 \cdot L \cdot B \cdot H \cdot S_{\max} \cdot d_k \cdot 4 \text{ bytes}$. At high batch sizes or long contexts, KV cache memory footprint dwarfs the neural network weights.
-- **Batching Amortization**: Because single-sequence decoding is memory-bandwidth bound, batching amortizes weight loading from HBM across multiple concurrent tokens, boosting aggregate serving throughput by $6\times\text{--}8\times$.
+### Systems Insights Discovered
+- **Recomputation Elimination**: Caching $\mathbf{K}$ and $\mathbf{V}$ converts quadratic key/value projections from $\frac{S(S+1)}{2} \in \mathcal{O}(S^2)$ to $S \in \mathcal{O}(S)$, removing $4{,}950$ of $5{,}050$ projections at $S = 100$, which is $98\%$ of projection FLOPs.
+- **Memory Capacity Trade-off**: Cache memory scales as $\mathcal{M} = 2 \cdot L \cdot B \cdot H \cdot S_{\max} \cdot d_k \cdot 4 \text{ bytes}$ in float32. At high batch sizes or long contexts the cache dwarfs the weights: a 12-layer model with a 125M-parameter weight set carries a 1.208 GB cache at $B = 8$, $S_{\max} = 2{,}048$, which is $241.6\%$ of its 500 MB of weights.
+- **FLOP Counts Are Not Wall-Clock**: The module's own measurement separates the two. The attention score-pair ratio climbs from $8.8\times$ to about $69\times$ across generation lengths 10 to 100, while the measured speedup only moves from $1.2\times$ to a little over $2\times$, because a decode step is bound by the bytes of weights it must read, not by the arithmetic the cache eliminates.
+- **Batching Amortization**: Because single-sequence decoding is memory-bandwidth bound, batching reuses each loaded weight matrix across several concurrent token vectors. At the running model's measured rates (500 tok/s at $B = 1$, 420 tok/s per sequence at $B = 8$) aggregate throughput rises $6.72\times$ for an $8\times$ linear rise in cache memory.
+
+### Ready for Next Steps
+You now own a working cache, and it is worth being precise about what it does not yet do, because Modules 19 and 20 measure and serve exactly this code:
+- **Batch size is pinned at 1.** `_create_cache_storage` allocates with `batch_size=1`, and `reset()` rewinds the cursor without touching the batch axis, so batched serving needs a cache allocated for it up front.
+- **Prefill is sequential.** A multi-token forward inside `cache.generation()` falls through to the original attention and writes nothing, so the prompt must be fed one token at a time. Production stacks prefill the whole prompt in one parallel pass.
+- **No eviction and no paging.** The buffer is one contiguous allocation per layer for the full context window, so a full cache raises an error rather than evicting, and idle sequences hold their slots. PagedAttention, attention sinks, and tiered offloading all live above this layer.
+- **Float32 only, and no head sharing.** Quantized keys and values (FP8, INT4) and grouped-query attention are the two largest levers on cache size, and neither is implemented here.
+- **Retrieval copies.** `get()` wraps its slice in a `Tensor`, which copies the prefix, so retrieval costs $\mathcal{O}(t)$ bytes per layer per token.
 
 Export with: `tito module complete 18`
 

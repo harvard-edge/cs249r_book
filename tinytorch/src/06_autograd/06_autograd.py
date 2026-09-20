@@ -27,7 +27,7 @@ Welcome to Module 06! Today you'll awaken the gradient engine and unlock automat
   <img src="autograd_blueprint.svg" width="360" alt="Framework Blueprint">
 </div>
 
-$$\underbrace{\text{Modules 01--05}}_{\text{Forward Computation Tape}} \longrightarrow \mathbf{\underbrace{\text{Autograd}}_{\text{Mod 06 (Active)}}} \longrightarrow \underbrace{\text{Optimizers}}_{\text{Mod 07}} \longrightarrow \underbrace{\text{Training}}_{\text{Mod 08}}$$
+$$\underbrace{\text{Modules 01--05}}_{\text{Forward Computation}} \longrightarrow \mathbf{\underbrace{\text{Autograd}}_{\text{Mod 06 (Active)}}} \longrightarrow \underbrace{\text{Optimizers}}_{\text{Mod 07}} \longrightarrow \underbrace{\text{Training}}_{\text{Mod 08}}$$
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
@@ -37,7 +37,7 @@ By the end of this module, you will:
 4. **Complete the Function classes** from Module 01 with their backward() rules
 5. **Test gradient correctness** with mathematical validation
 
-> **Important:** This module enhances the existing `Tensor` class — no new wrapper classes needed!
+> **Important:** This module enhances the existing `Tensor` class, with no new wrapper classes needed!
 
 ## 📦 Where This Code Lives in the Final Package
 
@@ -73,7 +73,6 @@ of any particular layer.
 
 **External Dependencies**:
 - `numpy` (for array operations and numerical computing)
-- `typing` (for type hints)
 
 **TinyTorch Dependencies**:
 - `tinytorch.core.tensor.Tensor` - Core tensor operations
@@ -95,9 +94,6 @@ training loops, transformers -- depends on the graph this module builds.
 
 import numpy as np
 rng = np.random.default_rng(7)
-from typing import Optional, List, Tuple
-import sys
-import os
 
 from tinytorch.core.tensor import (
     Tensor, Function,
@@ -108,8 +104,8 @@ from tinytorch.core.tensor import (
 from tinytorch.core.activations import SigmoidFunction, ReLUFunction, TanhFunction, GELUFunction, SoftmaxFunction
 from tinytorch.core.losses import LogSoftmax, MSEFunction, BinaryCrossEntropyFunction, CrossEntropyFunction
 
-# Constants for numerical differentiation
-EPSILON = 1e-7  # Small perturbation for numerical gradient computation
+# Numerical guards
+EPSILON = 1e-7  # Clipping bound that keeps the BCE backward's 1/(p(1-p)) finite
 
 # %% [markdown]
 r"""
@@ -149,6 +145,36 @@ Each operation records how to compute its backward pass. The chain rule connects
 # %% [markdown]
 r"""
 ## 📐 Foundations: The Chain Rule in Action
+
+### Two Ways to Differentiate
+
+The chain rule multiplies a chain of Jacobians together, and a product can be
+evaluated from either end. **Forward mode** starts at an input and pushes
+derivatives along with the values, carrying $\partial (\cdot) / \partial w_i$
+beside every intermediate, so by the time it arrives at the loss it holds
+$\partial \mathcal{L} / \partial w_i$ for the one parameter $w_i$ it set out
+from. **Reverse mode** starts at the loss and pulls derivatives back toward the
+inputs, carrying $\partial \mathcal{L} / \partial (\cdot)$ beside every
+intermediate, so by the time it reaches the leaves it holds
+$\partial \mathcal{L} / \partial w_i$ for *every* parameter at once.
+
+Training has exactly the shape that makes those two costs diverge, with many
+inputs and one output. A model with $N$ parameters produces a single scalar
+loss, so forward mode needs $N$ sweeps to fill in the gradient vector while
+reverse mode needs one. At $N = 1{,}000{,}000$ and one millisecond per sweep,
+forward mode spends about 17 minutes differentiating a single training step,
+where reverse mode spends about 2 milliseconds. Reverse mode is not a cleverer
+chain rule. It is
+the same chain rule, associated in the direction that fits the problem. (Flip
+the shape to one input and many outputs, say the sensitivity of a whole
+trajectory to one initial condition, and forward mode wins by the same
+argument.)
+
+Nothing is free. Forward mode needs no history, because values and derivatives
+travel together and neither has to wait. Reverse mode cannot begin until the
+forward pass finishes, so every intermediate its gradient rules will read has
+to stay alive in the meantime. That stored history is the tape this module
+builds, and what it costs is what 📊 Systems Analysis measures at the end.
 
 ### Mathematical Foundation
 
@@ -330,7 +356,7 @@ def _reduce_broadcast_grad(grad, original_shape):
     >>> reduced = _reduce_broadcast_grad(grad, (10, 1))
     >>> reduced.shape  # (10, 1)
 
-    HINT: Two separate loops — one for leading dims, one for singleton dims.
+    HINT: Two separate loops, one for leading dims and one for singleton dims.
     """
     ### BEGIN SOLUTION role="scaffold"
     # Step 1: Remove leading dimensions that weren't in original tensor
@@ -1053,7 +1079,7 @@ $$\begin{aligned}
 | **Indexed ($i \in \text{key}$)** | Copied into output slice $Z$ | $1$ | $\bar{Z}_{\text{subscript}}$ (accumulated via `np.add.at`) |
 | **Unindexed ($i \notin \text{key}$)** | Dropped from output | $0$ | $0$ (remains unperturbed in zeros scaffold) |
 
-This is the first backward implementation that constructs a tensor matching the shape of its **input** rather than reshaping its output. Embedding lookup in Module 11 uses this identical scatter-add pattern at scale.
+This is the first backward implementation that constructs a tensor matching the shape of its **input** rather than reshaping its output. Module 11 will reuse this scatter-add pattern for embedding lookup, at vocabulary scale.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "slice-backward", "solution": true}
@@ -1437,9 +1463,6 @@ positions nothing, and Sum, Mean and Max distribute as their definitions require
 def test_unit_shape_reduction_backward():
     """🧪 Test the shape and reduction backward passes."""
     print("🧪 Unit Test: Shape and Reduction Backward Passes...")
-
-    x = Tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-    x.requires_grad = True
 
     # The shape operations move gradients around rather than scaling them, so
     # each one is checked by where the gradient lands, not by its magnitude.
@@ -1974,7 +1997,7 @@ z &= a \cdot s, \quad \text{where } s = \sigma(1.702 a) \\
 \end{aligned}$$
 
 - **ReLU**: Evaluates $z = \max(0, a)$ with backward derivative $\bar{a} = \bar{z} \cdot \mathbb{I}(a > 0)$. Fast branchless comparison executed in a single memory streaming pass.
-- **GELU**: Evaluates $z = a \cdot \sigma(1.702 a)$ with backward derivative $\bar{a} = \bar{z} [s + 1.702 a s(1 - s)]$. Higher arithmetic intensity requiring 1 exponential, 4 multiplications, and 1 addition per element; prime candidate for Triton kernel fusion in Module 17.
+- **GELU**: Evaluates $z = a \cdot \sigma(1.702 a)$ with backward derivative $\bar{a} = \bar{z} [s + 1.702 a s(1 - s)]$. Higher arithmetic intensity requiring 1 exponential, 4 multiplications, and 1 addition per element, which Module 17 will revisit as a kernel-fusion candidate.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "gelu-backward", "solution": true}
@@ -2590,7 +2613,7 @@ class no_grad:
     """Context manager that disables gradient tracking.
 
     When entering this context, all operations will skip computation graph
-    construction — tensors produced inside will have requires_grad=False
+    construction, so tensors produced inside will have requires_grad=False
     regardless of their inputs. This is essential for:
 
     1. **Inference**: No need to track gradients when making predictions
@@ -2655,6 +2678,10 @@ anything. So `x` is updated from a partial gradient. Worse, when the second
 edge arrives it descends that same subtree all over again -- work doubles at
 every reused node, which is exponential on a graph with several of them.
 
+Recursion also cannot free anything as it goes. Standing at a node, it has no
+way to know whether another edge will arrive there later, so releasing the node
+on the way past would drop exactly the second contribution.
+
 The fix is a **topological order**: an ordering of the graph in which every
 consumer of a tensor appears before the tensor itself.
 
@@ -2677,9 +2704,13 @@ JAX, and every other framework sort before they walk. `backward()` below builds
 the order with a depth-first post-order traversal, reverses it, then makes a
 single pass -- accumulating into each `.grad` and passing each parent its share.
 
-One consequence worth noticing: the graph can only be freed *after* the whole
-walk. Releasing each node as you pass it would drop exactly the second
-contribution the sort exists to collect.
+The order buys something beyond correctness. Because every consumer of a tensor
+is visited before the tensor itself, each `grad_fn` is read exactly once, so it
+could be released the moment the walk passes it. PyTorch frees memory that way,
+node by node as the sweep advances. `backward()` below releases the whole tape
+in one pass at the end instead, which is easier to read and gives identical
+gradients. Either schedule is safe only because of the sort. It is the sort that
+turns "might be needed again" into "already done with".
 """
 
 # %% [markdown]
@@ -2697,7 +2728,14 @@ Module 01 left two slots open. `Function.apply()` runs an operation but forgets 
 | **Module 01** | `x + y` | `Add.apply(x, y) \to \text{Tensor}` | Stateless arithmetic; no node retained |
 | **Module 06** | `x + y` | `Add.apply(x, y) \to \text{Tensor}(\text{grad\_fn}=\text{AddBackward})` | Graph recorded; backward pass enabled |
 
-This matches the exact architecture of PyTorch's `torch.autograd.Function`.
+This mirrors the shape of PyTorch's `torch.autograd.Function`, with two
+deliberate simplifications. PyTorch separates the graph node from the operation
+and threads saved state through a context object (`forward(ctx, ...)` and
+`backward(ctx, ...)` are static, and inputs are stashed with
+`ctx.save_for_backward`), while TinyTorch keeps one instance per call and stores
+its inputs and output on `self`. PyTorch also populates `.grad` on leaves only,
+where `backward()` here fills it in on every tensor it visits, which costs a
+little memory and makes the whole graph inspectable while you are learning it.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "apply-and-backward", "solution": false}
@@ -2837,7 +2875,9 @@ def backward(self, gradient=None, retain_graph=False):
 
     # ---- Step 2: seed the output --------------------------------------
     # pending[id(tensor)] holds the gradient accumulated from the consumers
-    # visited so far. Keyed by id() because Tensors are not hashable.
+    # visited so far. Keying by id() makes the identity lookup explicit. Tensor
+    # hashes by identity today, so the tensor itself would work as a key, but an
+    # elementwise __eq__ (which frameworks do add) would quietly break that.
     pending = {id(self): gradient}
 
     # ---- Step 3: one pass, in topological order ------------------------
@@ -2879,9 +2919,10 @@ def backward(self, gradient=None, retain_graph=False):
 
     # ---- Step 4: release the graph, once ------------------------------
     # The graph holds references to every intermediate tensor, so without
-    # this, memory grows with each training step. Releasing per-node DURING
-    # the walk would be a bug: a tensor with two consumers would lose the
-    # second contribution.
+    # this, memory grows with each training step. One sweep at the end is the
+    # simplest place to do it. The topological order also makes per-node
+    # release safe, since each grad_fn is read exactly once, and that is how
+    # PyTorch frees memory as it walks. Same gradients either way.
     if not retain_graph:
         for tensor in topo_order:
             if tensor._grad_fn is not None:
@@ -3159,39 +3200,58 @@ def analyze_computation_graph_memory():
     print("📊 Analyzing Computation Graph Memory...")
     print("=" * 60)
 
-    import sys
+    def retained_bytes(output: Tensor) -> tuple[int, int]:
+        """Walk the whole tape and total the bytes it keeps alive.
 
-    # Create tensors with different sizes
-    sizes = [(100, 100), (500, 500), (1000, 1000)]
+        Each node holds the output it produced plus whatever its backward()
+        rule will read, so the tape pins roughly one tensor per operation.
+        Looking only at `output._grad_fn` would find the LAST node and nothing
+        else, so this follows the same parent links `backward()` follows.
+        """
+        seen, total, nodes = set(), 0, 0
+        stack = [output]
+        while stack:
+            tensor = stack.pop()
+            if id(tensor) in seen:
+                continue
+            seen.add(id(tensor))
+            if tensor._grad_fn is None:
+                continue  # A leaf. Its bytes exist with or without autograd.
+            nodes += 1
+            total += tensor.data.nbytes
+            for parent in tensor._grad_fn.inputs:
+                if isinstance(parent, Tensor):
+                    stack.append(parent)
+        return total, nodes
 
-    print("\nMemory comparison: With vs Without Gradient Tracking")
+    shape = (500, 500)
+    print(f"\nTape retained for one {shape} tensor, by chain length")
     print("-" * 60)
+    print(f"{'Ops':>4}  {'Nodes':>6}  {'Base KB':>9}  {'Tape KB':>9}  {'Ratio':>7}")
 
-    for shape in sizes:
-        # Without gradient tracking
-        x_no_grad = Tensor(rng.standard_normal(shape))
-        base_memory = x_no_grad.data.nbytes
+    for num_ops in [1, 2, 4, 8, 16]:
+        x = Tensor(rng.standard_normal(shape), requires_grad=True)
+        y = x
+        for _ in range(num_ops):
+            y = y * 2  # Each operation appends one node to the tape
+        tape_bytes, nodes = retained_bytes(y)
+        base_memory = x.data.nbytes
+        print(f"{num_ops:>4}  {nodes:>6}  {base_memory / 1024:>9.1f}  "
+              f"{tape_bytes / 1024:>9.1f}  {tape_bytes / base_memory:>6.1f}x")
 
-        # With gradient tracking
-        x_with_grad = Tensor(rng.standard_normal(shape), requires_grad=True)
-        y = x_with_grad * 2  # Simple operation that builds graph
-        z = y + 1
-
-        # Estimate graph overhead: saved tensors in grad_fn
-        graph_overhead = 0
-        if hasattr(z, '_grad_fn') and z._grad_fn is not None:
-            for tensor in z._grad_fn.inputs:
-                if isinstance(tensor, Tensor):
-                    graph_overhead += tensor.data.nbytes
-
-        print(f"\nShape {shape}:")
-        print(f"   Base tensor: {base_memory / 1024:.1f} KB")
-        print(f"   Graph overhead: {graph_overhead / 1024:.1f} KB")
-        print(f"   Overhead ratio: {(graph_overhead / base_memory):.1f}x")
+    # The same chain inside no_grad() records nothing at all.
+    x = Tensor(rng.standard_normal(shape), requires_grad=True)
+    with no_grad():
+        y = x
+        for _ in range(16):
+            y = y * 2
+    no_grad_bytes, no_grad_nodes = retained_bytes(y)
+    print(f"\n   Same 16-op chain inside no_grad(): "
+          f"{no_grad_bytes / 1024:.1f} KB retained, {no_grad_nodes} nodes")
 
     print("\n" + "=" * 60)
     print("📊 KEY INSIGHTS:")
-    print("   1. Each operation saves inputs for backward pass")
+    print("   1. Each operation pins the tensors its backward rule will read")
     print("   2. Memory scales with number of operations, not just parameters")
     print("   3. Deep networks have more graph overhead than shallow ones")
     print("   4. This is why requires_grad is opt-in, not default!")
@@ -3314,6 +3374,8 @@ def test_module():
     print("✅ Complex mathematical operations work!")
 
     # Test 4: the reductions and views every model uses
+    print("🧪 Integration Test: Reductions and Views...")
+
     x = Tensor([[1.0, 5.0, 3.0], [4.0, 2.0, 6.0]], requires_grad=True)
     (x.mean() + x.max(axis=1).sum() + x.contiguous().sum()).backward()
     assert np.allclose(x.grad, np.full((2, 3), 1 / 6) + np.array([[0, 1, 0], [0, 0, 1]]) + 1)
@@ -3322,10 +3384,6 @@ def test_module():
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 06")
-
-# %%
-if __name__ == "__main__":
-    test_module()
 
 # %% [markdown]
 """
@@ -3346,14 +3404,15 @@ Before we wrap up, reflect on these systems-level questions. Use only knowledge 
 ---
 
 ### Question 2: Gradient Accumulation
-**Scenario**: A weight matrix is shared between two computation paths in a network (like a tied-weights architecture).
+**Scenario**: A weight matrix is shared between two computation paths in a network (like a tied-weights architecture), so it appears twice in the graph your `backward()` walks.
 
-**Question**: Why does gradient accumulation (`grad = grad + new_grad`) save memory during training? What's the trade-off?
+**Question**: Your `backward()` accumulates with `grad = grad + new_grad` rather than assigning. Why is `+=` the correct rule for a tensor with two consumers, and what would the walk produce if it assigned instead?
 
 **Consider**:
-- What happens if you process a large batch all at once vs. multiple smaller batches?
-- Memory usage: storing intermediate activations vs. recomputing forward passes
-- Training behavior: does gradient accumulation change what the model learns?
+- What does the chain rule say about a variable appearing in two terms of the same expression?
+- Which of the two contributions survives an assignment, and does the answer depend on traversal order?
+- Why must the topological order reach a tensor only after every consumer has handed it something?
+- The same rule persists across calls to `backward()`. What does that cost you if you never call `zero_grad()`?
 
 ---
 
@@ -3436,7 +3495,7 @@ These questions prepare you for Module 07 (Optimizers), where you'll use these g
 **What you built:** An autograd engine that computes gradients through computation graphs.
 
 **Why it matters:** Before autograd, you had to derive and code gradients by hand for every
-operation—error-prone and tedious. Your engine does this automatically! When you call
+operation, which was error-prone and tedious. Your engine does this automatically! When you call
 `backward()`, gradients flow from the loss back through every operation to every parameter.
 
 This is the magic behind deep learning. PyTorch, TensorFlow, and JAX all have autograd
@@ -3465,7 +3524,7 @@ def demo_autograd():
     print(f"Computed: {x.grad[0]}")
     print(f"Match: {np.allclose(x.grad[0], expected_grad)}")
 
-    print("\n✨ Gradients computed automatically—no manual derivatives!")
+    print("\n✨ Gradients computed automatically, with no manual derivatives!")
 
 # %%
 if __name__ == "__main__":
@@ -3485,13 +3544,13 @@ Congratulations! You've built the gradient engine that makes neural networks lea
 - **Implemented backward() for every operation** (Add, Mul, Matmul, Sum, ...) with correct gradients
 - **Completed apply()** so every operation records itself in the graph
 - **Tested complex multi-layer** computation graphs with gradient propagation
-- **All tests pass** (validated by `test_module()`)
 
 ### Systems Insights Discovered
-- **Memory overhead**: Computation graphs store tensors for backward pass (2x memory)
-- **Gradient accumulation**: Allows processing large batches in smaller chunks
-- **Backward pass cost**: Approximately same as forward pass (similar number of matmuls)
-- **Graph retention**: Must call zero_grad() to prevent gradient accumulation across iterations
+- **Reverse vs forward mode**: One sweep yields all $N$ gradients; forward mode would need $N$ sweeps for the same scalar loss
+- **Memory overhead**: The tape pins one saved tensor per operation, so the cost grows with depth rather than sitting at a fixed multiple of the parameters (measured 1x at one op, 16x at sixteen)
+- **Gradient accumulation**: Allows processing large batches in smaller chunks, and is why `zero_grad()` is needed between steps
+- **Backward pass cost**: Roughly 2x the forward pass, because each matmul's forward FLOPs buy two matmuls back (measured exactly 2.0x on a 3-layer MLP)
+- **Graph release**: `backward()` frees the tape by default; `retain_graph=True` keeps it for a second walk
 
 ### Ready for Next Steps
 Your autograd implementation enables optimization!

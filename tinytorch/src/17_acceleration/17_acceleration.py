@@ -38,14 +38,14 @@ Welcome to Module 17! In this module, we transition from pure mathematical abstr
 | **Modules 09–13** | Architecture Tier | `Conv2d`, `BPETokenizer`, `EmbeddingLayer`, `MultiHeadAttention`, `GPT` | Completed |
 | **Modules 14–16** | Optimization Diagnostics | `Profiler`, `count_flops`, `quantize_int8`, `magnitude_prune`, `KnowledgeDistillation` | Completed |
 | **Module 17** | **Hardware Acceleration** | `vectorized_matmul`, `fused_gelu`, `tiled_matmul`, `im2col`, `col2im`, `Im2colConv2dFunction` | **Active Subsystem** |
-| **Modules 18–20** | Serving & Capstone | `KVCache`, `BenchmarkingSuite`, `TinyGPT` | Downstream Consumers |
+| **Modules 18–20** | Serving & Capstone | `KVCache`, `CachedAttention`, `BenchmarkSuite`, `BenchmarkReport` | Downstream Consumers |
 
 ## 🎯 Learning Objectives
 
 By the end of this module, you will:
 1. **Vectorize Matrix Computations**: Leverage underlying BLAS (Basic Linear Algebra Subprograms) GEMM routines for hardware SIMD execution.
-2. **Audit Operator Memory Traffic**: Measure the memory bus footprint of multi-step element-wise pipelines and evaluate production compiler kernel fusion (e.g. Triton, TorchInductor).
-3. **Master Cache Blocking**: Implement cache-aware tiled matrix multiplication to maximize L1/L2 SRAM data reuse.
+2. **Audit Operator Memory Traffic**: Reason about the memory bus footprint of multi-step element-wise pipelines from a byte model, and measure the allocation peaks those pipelines actually produce.
+3. **Block a Matrix Multiply for Cache**: Implement tiled matrix multiplication, then measure it against one BLAS call to see what the tiling in a library already does for you.
 4. **Lower Convolutions via im2col**: Transform seven nested spatial loops into a single contiguous GEMM, quantifying memory-versus-latency trade-offs.
 5. **Differentiate im2col via col2im**: Implement the transpose scatter-add backward pass to train convolutional networks at GEMM speed.
 
@@ -56,7 +56,16 @@ By the end of this module, you will:
 
 ```python
 # How to use this module:
-from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu, tiled_matmul, im2col, col2im, Im2colConv2dFunction
+from tinytorch.perf.acceleration import (
+    vectorized_matmul,     # BLAS GEMM behind a Tensor
+    fused_gelu,            # GELU as one compact expression
+    unfused_gelu,          # GELU with every intermediate retained
+    tiled_matmul,          # cache-blocked matmul
+    im2col,                # patch matrix for a convolution
+    im2col_conv2d,         # convolution as one matmul (inference)
+    col2im,                # scatter-add dual of im2col
+    Im2colConv2dFunction,  # the differentiable version
+)
 ```
 
 ## 📋 Module Dependencies
@@ -76,7 +85,7 @@ from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu, tiled_mat
 import numpy as np
 rng = np.random.default_rng(7)
 import time
-from typing import Any
+from typing import Optional, Tuple
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor, Function
@@ -130,7 +139,9 @@ where:
 | **GELU Activation** | $y = \text{GELU}(x)$ | $\sim 8N$ | $2 \times 4N = 8N$ | $\sim 1.0\text{ FLOP/B}$ | Memory-Bound |
 | **LayerNorm** | $\hat{x} = \frac{x - \mu}{\sigma} \gamma + \beta$ | $\sim 7N$ | $2 \times 4N = 8N$ | $\sim 0.88\text{ FLOP/B}$ | Memory-Bound |
 | **Matrix Multiply (GEMM)** | $C = A B$ ($N \times N$) | $2 N^3$ | $3 \times 4N^2 = 12 N^2$ | $\frac{N}{6}\text{ FLOP/B}$ | Compute-Bound ($N \ge 512$) |
-| **2D Convolution** | $N \times C_{\text{out}} \times H \times W$ | $2 N C_{\text{out}} H W C_{\text{in}} K^2$ | Input $+$ Kernel $+$ Output bytes | $\approx \frac{C_{\text{out}} K^2}{2}\text{ FLOP/B}$ | Compute-Bound ($K \ge 3$) |
+| **2D Convolution** | $N \times C_{\text{out}} \times H \times W$ | $2 N C_{\text{out}} H W C_{\text{in}} K^2$ | Input bytes only, $4 N C_{\text{in}} H W$ (an upper bound on $\mathcal{I}$) | $\frac{C_{\text{out}} K^2}{2}\text{ FLOP/B}$ | Compute-Bound ($K \ge 3$) |
+
+The convolution row counts only the input read, which is why its intensity is a clean $C_{\text{out}} K^2 / 2$. Counting the output and kernel bytes as well lowers it: for $N = 4$, $C_{\text{in}} = 32$, $C_{\text{out}} = 64$, $32 \times 32$, $K = 3$, the input-only figure is $288\text{ FLOP/B}$ while input $+$ kernel $+$ output gives $91.7\text{ FLOP/B}$. Both are far above any ridge point worth worrying about, so the conclusion survives, but they are not the same number and a byte model has to say which bytes it counts.
 
 <div align="center">
   <div align="center">
@@ -152,7 +163,7 @@ Hardware vectorization transforms sequential, scalar instruction streams into wi
 | **Scalar (SISD)** | Standard CPU core ALU | 1 element ($32\text{-bit}$) | Single scalar register operand per clock cycle; high branch and loop counter overhead |
 | **SIMD Vectorization** | Intel AVX-512 / ARM NEON | 4–16 elements ($128\text{--}512\text{ bits}$) | Single instruction broadcasts across multiple parallel ALU lanes in lockstep |
 | **GPU Warp (SIMT)** | NVIDIA Streaming Multiprocessor | 32 threads ($1024\text{ bits}$) | 32 parallel execution threads execute the same instruction over independent data lanes |
-| **Tensor Cores** | Systolic Array Matrix Units | $16 \times 16$ tile per cycle | Hardware $4 \times 4 \times 4$ or $16 \times 16 \times 16$ matrix multiply-accumulate ($D = A \cdot B + C$) in a single cycle |
+| **Tensor Cores** | Systolic Array Matrix Units | $16 \times 16$ tile per instruction | Hardware $4 \times 4 \times 4$ matrix multiply-accumulate ($D = A \cdot B + C$) per clock; a $16 \times 16 \times 16$ warp-level `mma` issues as one instruction and decomposes over several cycles |
 
 ### Memory Access Patterns: Cache-Line Utilization
 
@@ -163,6 +174,13 @@ Modern DRAM controllers fetch data in discrete 64-byte burst lines (16 contiguou
 | **Contiguous Sequential** | `[A0, A1, A2, A3, ...]` | $100\%$ ($16 / 16$ elements used) | Hardware prefetcher anticipates reads; near-zero memory stall cycles |
 | **Strided Access** | `[A0, _, _, _, A4, ...]` | $25\%$ ($4 / 16$ elements used) | Cache polluted with unreferenced elements; memory bandwidth throttled |
 | **Random / Indirect** | `[A_idx[0], A_idx[1], ...]` | $\le 6.25\%$ ($1 / 16$ elements used) | Constant cache misses; memory bus stalls; TLB thrashing |
+"""
+
+# %% [markdown]
+r"""
+## 🏗️ Implementation: Vectorized GEMM
+
+The first component turns a matrix multiply into a single BLAS call.
 
 ### Matrix Multiplication: The Pinnacle of Vectorized Arithmetic
 
@@ -262,7 +280,7 @@ This test validates that replacing explicit loops with a single vectorized call
 produces identical results.
 
 **What we're testing**: Correctness of batched matmul and its shape validation
-**Why it matters**: Vectorization is only a win if the answer is unchanged -- a
+**Why it matters**: Vectorization is only a win if the answer is unchanged. A
 faster wrong answer is worthless
 **Expected**: Matches hand-computed products, rejects mismatched inner dimensions
 """
@@ -327,12 +345,12 @@ In modern transformer architectures, memory-bound activation layers (GELU, SwiGL
 
 ### The Memory Bandwidth Crisis: Unfused vs. Fused Execution
 
-Consider the linear-activation pipeline $y = \text{GELU}(x \cdot W + b)$ where $x, W, b$ each represent $4\text{ GB}$ data buffers:
+Consider the linear-activation pipeline $y = \text{GELU}(x \cdot W + b)$. Take the activation batch $x$ and the weight matrix $W$ to be $4\text{ GB}$ buffers, with the product and every intermediate the same $4\text{ GB}$ size. The bias $b$ is a single length-$C_{\text{out}}$ vector, kilobytes at most, and it is broadcast across every row, so its read is negligible against the others and we can set it aside in the byte count.
 
 | Execution Paradigm | Operational Sequence | DRAM Reads | DRAM Writes | Total Memory Traffic | Speedup Driver |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Unfused (PyTorch/NumPy Default)** | 1. $t_1 = x \cdot W$<br>2. $t_2 = t_1 + b$<br>3. $y = \text{GELU}(t_2)$ | Read $x$ ($4\text{ GB}$), $W$ ($4\text{ GB}$)<br>Read $t_1$ ($4\text{ GB}$), $b$ ($4\text{ GB}$)<br>Read $t_2$ ($4\text{ GB}$) | Write $t_1$ ($4\text{ GB}$)<br>Write $t_2$ ($4\text{ GB}$)<br>Write $y$ ($4\text{ GB}$) | **$32\text{ GB}$** DRAM Traffic | Baseline ($1.0\times$) |
-| **Fused Kernel (Triton / CUDA / C++)** | Single composite kernel:<br>$y = \text{GELU}(x \cdot W + b)$ in registers | Read $x$ ($4\text{ GB}$), $W$ ($4\text{ GB}$), $b$ ($4\text{ GB}$) | Write $y$ ($4\text{ GB}$) directly | **$16\text{ GB}$** DRAM Traffic | **$50\%$ reduction** in DRAM traffic; eliminates 2 intermediate round-trips |
+| **Unfused (PyTorch/NumPy Default)** | 1. $t_1 = x \cdot W$<br>2. $t_2 = t_1 + b$<br>3. $y = \text{GELU}(t_2)$ | Read $x$ ($4\text{ GB}$), $W$ ($4\text{ GB}$)<br>Read $t_1$ ($4\text{ GB}$), $b$ ($\approx 0$)<br>Read $t_2$ ($4\text{ GB}$) | Write $t_1$ ($4\text{ GB}$)<br>Write $t_2$ ($4\text{ GB}$)<br>Write $y$ ($4\text{ GB}$) | **$28\text{ GB}$** DRAM Traffic | Baseline ($1.0\times$) |
+| **Fused Kernel (Triton / CUDA / C++)** | Single composite kernel:<br>$y = \text{GELU}(x \cdot W + b)$ in registers | Read $x$ ($4\text{ GB}$), $W$ ($4\text{ GB}$), $b$ ($\approx 0$) | Write $y$ ($4\text{ GB}$) directly | **$12\text{ GB}$** DRAM Traffic | **$57\%$ reduction** in DRAM traffic; eliminates 2 intermediate round-trips ($16\text{ GB}$) |
 
 ### Understanding GELU: The Smooth Non-Linearity
 
@@ -410,8 +428,8 @@ def fused_gelu(x: Tensor) -> Tensor:
 
     # Fused GELU computation - all operations in single expression
     # By computing the full expression in a single line, we avoid creating intermediate
-    # Tensor objects. Note: NumPy still allocates temporary arrays internally —
-    # real kernel fusion requires compiled frameworks like XLA or torch.compile.
+    # Tensor objects. NumPy still allocates temporary arrays internally, so real
+    # kernel fusion requires compiled frameworks like XLA or torch.compile.
     result_data = 0.5 * x.data * (
         1.0 + np.tanh(sqrt_2_over_pi * (x.data + 0.044715 * x.data**3))
     )
@@ -434,7 +452,7 @@ our NumPy expression still executes multiple array operations
 
 # %% nbgrader={"grade": true, "grade_id": "test-fused-gelu", "locked": true, "points": 10}
 def test_unit_fused_gelu():
-    """🧪 Test 🔬 Test fused GELU activation implementation."""
+    """🧪 Test fused GELU activation implementation."""
     print("🧪 Unit Test: Fused GELU...")
 
     # Test basic properties
@@ -480,13 +498,12 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Fusion Performance
+### Unfused GELU: One Tensor per Step
 
-Compare the compact GELU expression with a version that retains each intermediate Tensor.
-
-**What we're testing**: Both implementations produce equivalent values
-**Why it matters**: Optimizations must preserve the answer before their timing matters
-**Expected**: Identical outputs; any timing difference depends on the machine
+Now build the deliberately unfused counterpart. Write the same GELU as eight
+separate steps, wrapping each intermediate in its own `Tensor` so every stage
+stays alive until the function returns. That gives us something to compare the
+compact expression against, both for allocation peak and for wall-clock time.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "unfused-gelu", "solution": true}
@@ -517,11 +534,17 @@ def unfused_gelu(x: Tensor) -> Tensor:
     >>> print(result.shape)
     (3,)  # Same as input
 
-    PERFORMANCE IMPACT:
-    - Creates 7 temporary arrays
-    - Each array allocation/deallocation has overhead
-    - More memory bandwidth usage
-    - Potential cache misses between operations
+    ALLOCATION IMPACT:
+    - Holds 7 temporary arrays alive at once, each wrapped in a Tensor
+    - The compact expression lets each temporary be freed as soon as the next
+      operation consumes it, so its allocation peak is lower
+    - Measured peak at 1000x1000 float32 with tracemalloc: 36 MB retained here
+      versus 20 MB for the compact expression (the 📊 cell below reproduces it)
+    - This is an allocation-peak difference, not a DRAM-traffic difference. Both
+      versions execute the same eight NumPy array operations, so the wall clock
+      is close either way and the direction is not guaranteed. On the machine
+      this was written on, the compact version is about 15% SLOWER at 2000x2000,
+      which is why the test below reports the direction it measures
 
     HINTS:
     - Create each step as: temp = Tensor(operation)
@@ -550,10 +573,13 @@ def unfused_gelu(x: Tensor) -> Tensor:
 
 This test compares the compact NumPy expression with retained Tensor intermediates.
 
-**What we're testing**: Timed comparison of fused vs unfused GELU after warmup
-**Why it matters**: Fewer Tensor copies may reduce allocation overhead. Timing
-is machine-dependent; NumPy does not compile this expression into one kernel
-**Expected**: Numerically equivalent results; timing is reported, never graded
+**What we're testing**: That both implementations produce equivalent values, plus
+a timed comparison after warmup
+**Why it matters**: An optimization has to preserve the answer before its timing
+matters. Fewer retained Tensor copies lower the allocation peak, but NumPy does
+not compile this expression into one kernel, so the wall clock can go either way
+**Expected**: Numerically equivalent results; the timing direction is reported as
+measured, never assumed, and never graded
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-fusion-speedup", "locked": true, "points": 10}
@@ -572,24 +598,38 @@ def test_unit_fusion_speedup():
         _ = unfused_gelu(x)
         _ = fused_gelu(x)
 
-    # Time unfused version
-    start = time.perf_counter()
-    for _ in range(timing_iterations):
-        result_unfused = unfused_gelu(x)
-    unfused_time = time.perf_counter() - start
+    # A single average over one burst is dominated by allocator state and by
+    # whatever else the machine is doing; it can report either path as the winner
+    # on the same hardware. Take the BEST of several bursts instead, which is the
+    # standard way to time something this short, and alternate the order so
+    # neither implementation always runs on a freshly warmed allocator.
+    repeats = 3
+    unfused_time = float("inf")
+    fused_time = float("inf")
+    for repeat in range(repeats):
+        def burst(fn):
+            start = time.perf_counter()
+            for _ in range(timing_iterations):
+                out = fn(x)
+            return time.perf_counter() - start, out
 
-    # Time fused version
-    start = time.perf_counter()
-    for _ in range(timing_iterations):
-        result_fused = fused_gelu(x)
-    fused_time = time.perf_counter() - start
+        if repeat % 2 == 0:
+            unfused_burst, result_unfused = burst(unfused_gelu)
+            fused_burst, result_fused = burst(fused_gelu)
+        else:
+            fused_burst, result_fused = burst(fused_gelu)
+            unfused_burst, result_unfused = burst(unfused_gelu)
+
+        unfused_time = min(unfused_time, unfused_burst)
+        fused_time = min(fused_time, fused_burst)
 
     # Verify numerical correctness
     assert np.allclose(result_unfused.data, result_fused.data, atol=1e-6), \
         "Fused and unfused implementations must be numerically equivalent"
 
-    # Calculate performance metrics
-    speedup = unfused_time / fused_time if fused_time > 0 else 1.0
+    # Calculate performance metrics. The ratio can land on either side of 1.0,
+    # so report the direction the measurement actually shows.
+    ratio = unfused_time / fused_time if fused_time > 0 else 1.0
     unfused_per_elem = (unfused_time / timing_iterations) / (size * size) * 1e9  # ns per element
     fused_per_elem = (fused_time / timing_iterations) / (size * size) * 1e9
 
@@ -597,20 +637,25 @@ def test_unit_fusion_speedup():
     print(f"   Tensor size: {size}×{size} = {size*size:,} elements")
     print(f"   Unfused time: {unfused_time/timing_iterations*1000:.2f} ms")
     print(f"   Fused time:   {fused_time/timing_iterations*1000:.2f} ms")
-    print(f"   Speedup: {speedup:.2f}× faster")
+    if ratio >= 1.0:
+        print(f"   Compact expression is {ratio:.2f}× FASTER than the retained version")
+    else:
+        print(f"   Compact expression is {1.0/ratio:.2f}× SLOWER than the retained version")
     print(f"   Per-element: {unfused_per_elem:.1f} ns → {fused_per_elem:.1f} ns")
 
     # Timing does not measure memory traffic. A one-read/one-write model applies
     # to a compiled fused kernel, not to this sequence of NumPy operations.
     print("   NumPy still creates temporary arrays; bandwidth is not measured here.")
 
-    # Interpret results
-    if speedup > 1.5:
-        print("🚀 Excellent! Fewer retained Tensor intermediates providing significant speedup")
-    elif speedup > 1.1:
-        print("✅ Good! Fewer retained Tensor intermediates providing measurable benefit")
+    # Interpret results. Both paths run the same eight NumPy array operations, so
+    # a large difference in either direction would be the surprising outcome.
+    if ratio > 1.1:
+        print("📈 Dropping the retained Tensor wrappers helped on this machine")
+    elif ratio >= 0.9:
+        print("📊 Times are within noise; the same eight array operations run either way")
     else:
-        print("⚠️  Limited speedup - may be compute-bound or small tensor size")
+        print("📉 The compact expression is slower here; NumPy does not fuse it, so")
+        print("   the win to look for is the allocation peak, not the wall clock")
 
     print("✅ Fusion performance analysis completed!")
 
@@ -656,6 +701,8 @@ $$12 \cdot t^2 \le 32{,}768 \implies t^2 \le 2{,}730 \implies t \le 52.25$$
 
 Powers of two such as $t = 32$ or $t = 64$ (using L2 cache) maximize register tiling and cache-line alignment.
 
+Note the seam you are about to hit. `tiled_matmul` below defaults to $t = 64$, not to the $t = 32$ this derivation endorses, and the 📊 tile sweep later in the module shows why. For a tile loop written in Python, larger tiles win monotonically, because the cost that dominates is the number of interpreted iterations rather than L1 residency. The derivation is the right model for a compiled micro-kernel. It is the wrong model for this implementation, and measuring is how you find that out.
+
 ### Systems Reality: Python Tiling vs. Tuned Hardware BLAS
 
 | Dimension | Native Python / NumPy Tiling | Production BLAS (OpenBLAS, MKL, cuBLAS) |
@@ -691,7 +738,9 @@ def tiled_matmul(a: Tensor, b: Tensor, tile_size: int = 64) -> Tensor:
         a: First matrix (M x K)
         b: Second matrix (K x N)
         tile_size: Block edge length; the working set is three tile_size x
-            tile_size blocks (default: 64)
+            tile_size blocks. The default is 64 rather than the 32 the L1
+            derivation points at, because a Python tile loop is bound by its
+            iteration count, not by L1 capacity (default: 64)
 
     Returns:
         Result matrix (M x N)
@@ -715,7 +764,7 @@ def tiled_matmul(a: Tensor, b: Tensor, tile_size: int = 64) -> Tensor:
     - Accumulate with += into a slice of C; each output tile is touched once
       per k-tile
     - The innermost block product is still NumPy's `@`. The lesson here is the
-      LOOP ORDER, not scalar arithmetic -- Python-level scalar loops would be
+      LOOP ORDER, not scalar arithmetic. Python-level scalar loops would be
       thousands of times slower and teach nothing about cache behavior
     """
     ### BEGIN SOLUTION
@@ -843,7 +892,7 @@ $$W_{\text{row}} \in \mathbb{R}^{(C_{\text{in}} \cdot K_h \cdot K_w) \times C_{\
 
 $$Y_{\text{col}} = X_{\text{col}} @ W_{\text{row}} \in \mathbb{R}^{(N \cdot H_{\text{out}} \cdot W_{\text{out}}) \times C_{\text{out}}}$$
 
-Reshaping $Y_{\text{col}}$ from $(N \cdot H_{\text{out}} \cdot W_{\text{out}}, C_{\text{out}})$ back to $(N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}})$ yields the exact convolution output!
+Reshaping $Y_{\text{col}}$ from $(N \cdot H_{\text{out}} \cdot W_{\text{out}}, C_{\text{out}})$ back to $(N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}})$ yields the exact convolution output.
 
 ### Concrete Patch Unrolling (1 Channel, $3 \times 3$ Input, $2 \times 2$ Kernel, Stride 1)
 
@@ -869,15 +918,15 @@ $$\text{Memory Expansion Ratio} = \frac{\text{Bytes}(X_{\text{col}})}{\text{Byte
 
 ### Vectorized Patch Construction via Strided Slices
 
-Rather than looping over all $N \times H_{\text{out}} \times W_{\text{out}}$ output coordinates (which would reintroduce Python loop latency), we invert the iteration: we loop only over the $K_h \times K_w$ **kernel offsets** $(i, j)$:
+Rather than looping over all $N \times H_{\text{out}} \times W_{\text{out}}$ output coordinates (which would reintroduce Python loop latency), we invert the iteration and loop only over the $K_h \times K_w$ **kernel offsets** $(i, j)$:
 
 $$\text{padded}[:, :, i : i + \text{stride} \cdot H_{\text{out}} : \text{stride}, \; j : j + \text{stride} \cdot W_{\text{out}} : \text{stride}]$$
 
-A $3 \times 3$ convolution requires exactly $9$ strided slice copies across the entire batch simultaneously, independent of spatial image resolution!
+A $3 \times 3$ convolution requires exactly $9$ strided slice copies across the entire batch simultaneously, independent of spatial image resolution.
 
 ### What You Are and Are Not Building
 
-Like the other helpers in this module, `im2col_conv2d` provides an accelerated forward inference path. In the following section, we derive its mathematical dual—**`col2im`**—to build a fully differentiable `Im2colConv2dFunction` that trains seamlessly within TinyTorch's autograd engine.
+Like the other helpers in this module, `im2col_conv2d` provides an accelerated forward inference path. In the following section, we derive its mathematical dual, **`col2im`**, to build a fully differentiable `Im2colConv2dFunction` that trains seamlessly within TinyTorch's autograd engine.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "im2col", "solution": true}
@@ -1055,7 +1104,7 @@ The matrix multiply invokes `vectorized_matmul`, directly inheriting the cache e
 # %% nbgrader={"grade": false, "grade_id": "im2col-conv2d", "solution": true}
 #| export
 
-def im2col_conv2d(x: Tensor, weight: Tensor, bias: Tensor = None,
+def im2col_conv2d(x: Tensor, weight: Tensor, bias: Optional[Tensor] = None,
                   stride: int = 1, padding: int = 0) -> Tensor:
     """
     2D convolution computed as one matrix multiply over an im2col patch matrix.
@@ -1214,7 +1263,7 @@ $$\begin{aligned}
 \frac{\partial \mathcal{L}}{\partial X_{\text{col}}} &= G W^T \quad \in \mathbb{R}^{R \times (C_{\text{in}} \cdot K_h \cdot K_w)} \quad &(\text{GEMM: Matmul with Weight Transpose})
 \end{aligned}$$
 
-Notice that weight and patch gradients are standard dense GEMMs that execute at the exact same high FLOP/s as the forward pass!
+Notice that weight and patch gradients are standard dense GEMMs, so they execute at the same high FLOP/s as the forward pass.
 
 ### col2im: Dual Scatter-Accumulation Back to Spatial Layout
 
@@ -1224,7 +1273,7 @@ $$\text{im2col (Forward Gathering):} \quad X_{\text{col}}[\dots, i, j, \dots] = 
 
 $$\text{col2im (Backward Scatter-Add):} \quad \frac{\partial \mathcal{L}}{\partial X_{\text{padded}}}[\text{slice}(i, j)] \mathrel{+}= \frac{\partial \mathcal{L}}{\partial X_{\text{col}}}[\dots, i, j, \dots]$$
 
-The in-place accumulation operator ($\mathrel{+}=$) is mathematically essential: simple assignment ($=$) would overwrite previous contributions, retaining only the final patch's gradient!
+The in-place accumulation operator ($\mathrel{+}=$) is mathematically essential. Simple assignment ($=$) would overwrite previous contributions, retaining only the final patch's gradient.
 
 ### Receptive Field Gradient Overlap (3×3 Image with 2×2 Kernel, Stride 1)
 
@@ -1240,13 +1289,14 @@ Transmitting a unit gradient ($1.0$) from each patch back through `col2im` revea
 
 Computing $\frac{\partial \mathcal{L}}{\partial W} = X_{\text{col}}^T G$ requires keeping the unrolled patch matrix $X_{\text{col}}$ resident in memory throughout the forward pass until the backward pass runs. For deep networks, retaining $K^2 \times$ expanded buffers across all layers can exhaust GPU VRAM.
 
-In production memory-constrained training, frameworks employ **Activation Checkpointing**: discarding $X_{\text{col}}$ during forward and re-running `im2col` on-the-fly during backward, trading $\sim 20\text{--}30\%$ compute overhead for an order-of-magnitude reduction in peak memory residency.
+In production memory-constrained training, frameworks employ **Activation Checkpointing**, which discards $X_{\text{col}}$ during forward and re-runs `im2col` on the fly during backward. That trades roughly $20$ to $30\%$ extra forward computation for an order-of-magnitude reduction in peak memory residency.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "col2im", "solution": true}
 #| export
 
-def col2im(cols: Tensor, x_shape: tuple, kernel_size: int, stride: int = 1, padding: int = 0) -> Tensor:
+def col2im(cols: Tensor, x_shape: Tuple[int, int, int, int], kernel_size: int,
+           stride: int = 1, padding: int = 0) -> Tensor:
     """
     Add every row of a patch-gradient matrix back into the image it came from.
 
@@ -1387,7 +1437,7 @@ Combining `im2col` (forward gathering) and `col2im` (backward scatter-accumulati
 | | 3. Bias Gradient | $\nabla_b = \sum_{r} G_r$ | Returned gradient | $(C_{\text{out}},)$ |
 | | 4. Input Gradient | $\nabla_X = \text{col2im}(G W_{\text{row}}^T, \text{shape}(X), K, s, p)$ | Returned gradient | $(N, C_{\text{in}}, H, W)$ |
 
-`stride` and `padding` arrive as keyword arguments during `apply`, matching the exact API and gradient semantics of Module 09's `Conv2dFunction`.
+`stride` and `padding` arrive as keyword arguments during `apply`. The gradient semantics match Module 09's `Conv2dFunction` exactly, and the unit test below checks that against it. The call signature does not match. Module 09's version is `Conv2dFunction.apply(x, weight, bias, layer=self)`, whose only keyword is `layer`, and it reads its stride and padding off that layer object rather than taking them as keywords of its own.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "im2col-conv2d-function", "solution": true}
@@ -1403,7 +1453,8 @@ class Im2colConv2dFunction(Function):
         out = Im2colConv2dFunction.apply(x, weight, stride=1, padding=1)   # no bias
     """
 
-    def forward(self, x, weight, bias=None):
+    def forward(self, x: np.ndarray, weight: np.ndarray,
+                bias: Optional[np.ndarray] = None) -> np.ndarray:
         """
         Convolve with one matrix multiply and save what backward needs.
 
@@ -1441,7 +1492,7 @@ class Im2colConv2dFunction(Function):
         return out.reshape(self.out_shape).transpose(0, 3, 1, 2)
         ### END SOLUTION
 
-    def backward(self, grad_output):
+    def backward(self, grad_output: np.ndarray) -> Tuple[np.ndarray, ...]:
         """
         Turn the output gradient into gradients for the input, weight, and bias.
 
@@ -1586,6 +1637,22 @@ def explore_acceleration_with_profiler():
 
             return Tensor(result)
 
+    class BroadcastLinear:
+        """Linear layer vectorized with broadcasting, but NOT a BLAS GEMM.
+
+        One broadcast multiply plus one sum reduction. Every multiply-add happens
+        inside compiled NumPy, exactly as in FastLinear, but the work is spread
+        over a materialized (batch, in, out) temporary instead of being handed to
+        a blocked, SIMD, multi-threaded GEMM kernel. This is the baseline that
+        separates "left the interpreter" from "reached BLAS".
+        """
+        def __init__(self, in_features, out_features):
+            self.weight = Tensor(rng.standard_normal((in_features, out_features)).astype(np.float32) * 0.01)
+
+        def forward(self, x):
+            products = x.data[:, :, None] * self.weight.data[None, :, :]
+            return Tensor(products.sum(axis=1))
+
     class FastLinear:
         """Linear layer using vectorized matmul (fast)."""
         def __init__(self, in_features, out_features):
@@ -1600,13 +1667,17 @@ def explore_acceleration_with_profiler():
 
     # Create models
     slow_model = SlowLinear(in_features, out_features)
+    broadcast_model = BroadcastLinear(in_features, out_features)
     fast_model = FastLinear(in_features, out_features)
+    broadcast_model.weight.data[:] = slow_model.weight.data
     fast_model.weight.data[:] = slow_model.weight.data
 
     # Create input
     input_tensor = Tensor(rng.standard_normal((batch_size, in_features)).astype(np.float32))
 
     np.testing.assert_allclose(fast_model.forward(input_tensor).data,
+                               slow_model.forward(input_tensor).data, rtol=1e-4, atol=1e-6)
+    np.testing.assert_allclose(broadcast_model.forward(input_tensor).data,
                                slow_model.forward(input_tensor).data, rtol=1e-4, atol=1e-6)
     print("\n🐢 BEFORE: Loop-based implementation")
     print("-" * 70)
@@ -1621,33 +1692,54 @@ def explore_acceleration_with_profiler():
     # Measure slow model
     slow_latency = profiler.measure_latency(slow_model, input_tensor, warmup=3, iterations=10)
 
-    print(f"   Latency: {slow_latency:.2f} ms")
+    # Latencies here span four orders of magnitude, so report microseconds. At
+    # millisecond resolution the vectorized paths both round to 0.00 and every
+    # ratio derived from them is meaningless.
+    print(f"   Latency: {slow_latency * 1000:,.1f} µs")
     print(f"   FLOPs: {total_flops:,}")
     print(f"   Throughput: {total_flops / (slow_latency / 1000) / 1e9:.2f} GFLOP/s")
 
-    print("\n🚀 AFTER: Vectorized implementation")
+    print("\n🏃 MIDDLE: Vectorized with broadcasting, no GEMM kernel")
+    print("-" * 70)
+
+    # Same arithmetic again, still no Python-level loop, but the reduction runs as
+    # a generic broadcast-and-sum rather than a tuned GEMM.
+    broadcast_latency = profiler.measure_latency(broadcast_model, input_tensor, warmup=3, iterations=10)
+
+    print(f"   Latency: {broadcast_latency * 1000:,.1f} µs")
+    print(f"   FLOPs: {total_flops:,}")
+    print(f"   Throughput: {total_flops / (broadcast_latency / 1000) / 1e9:.2f} GFLOP/s")
+
+    print("\n🚀 AFTER: Vectorized implementation (np.matmul → BLAS GEMM)")
     print("-" * 70)
 
     # Measure fast model. Same FLOP count: the arithmetic is identical, only the
     # execution differs. That is the whole point of the comparison.
     fast_latency = profiler.measure_latency(fast_model, input_tensor, warmup=3, iterations=10)
 
-    print(f"   Latency: {fast_latency:.2f} ms")
+    print(f"   Latency: {fast_latency * 1000:,.1f} µs")
     print(f"   FLOPs: {total_flops:,}")
     print(f"   Throughput: {total_flops / (fast_latency / 1000) / 1e9:.2f} GFLOP/s")
 
-    print("\n📈 ACCELERATION GAINS")
+    print("\n📈 ACCELERATION GAINS, SPLIT BY CAUSE")
     print("=" * 70)
     speedup = slow_latency / fast_latency
-    print(f"   Speedup: {speedup:.1f}x faster")
-    print(f"   Time saved: {slow_latency - fast_latency:.2f} ms per inference")
-    print(f"   Throughput improvement: {speedup:.1f}x more inferences/second")
+    interpreter_factor = slow_latency / broadcast_latency
+    blas_factor = broadcast_latency / fast_latency
+    print(f"   Total speedup, loops → np.matmul: {speedup:,.0f}x")
+    print(f"   Time saved: {(slow_latency - fast_latency) * 1000:,.1f} µs per inference")
+    print(f"   ├─ Leaving the CPython interpreter: {interpreter_factor:,.0f}x")
+    print(f"   └─ Reaching the BLAS GEMM kernel:   {blas_factor:,.0f}x")
 
     print("\n💡 Key Insight:")
-    print(f"   Vectorization with numpy.matmul leverages optimized BLAS libraries")
-    print(f"   that use SIMD instructions and cache-friendly memory access patterns.")
-    print(f"   This is why {speedup:.0f}x speedups are possible with the same FLOPs!")
-    print("\n✅ This is the power of acceleration: same math, different execution!")
+    print(f"   The headline {speedup:,.0f}x is two different wins multiplied together, and the")
+    print(f"   larger one is not the interesting one. About {interpreter_factor:,.0f}x comes from moving")
+    print(f"   {batch_size * in_features * out_features:,} scalar multiply-adds out of Python bytecode into")
+    print(f"   compiled array code; the broadcast version already collects that, and it")
+    print(f"   never calls a GEMM. Only the remaining {blas_factor:,.0f}x is what SIMD, cache blocking,")
+    print(f"   and multi-threaded BLAS actually buy on top of being vectorized at all.")
+    print(f"   Quoting {speedup:,.0f}x as evidence for BLAS credits it with the interpreter's bill.")
+    print("\n✅ Same math, three different execution substrates!")
 
 if __name__ == "__main__":
     explore_acceleration_with_profiler()
@@ -1714,6 +1806,72 @@ def analyze_vectorization_scaling():
 
 if __name__ == "__main__":
     analyze_vectorization_scaling()
+
+# %% [markdown]
+"""
+### Does Our Tiling Actually Help?
+
+The L1 residency derivation earlier in this module said three `t × t` float32
+blocks fit a 32 KB L1 when `t ≤ 52`, which points at `t = 32`, and `tiled_matmul`
+nonetheless defaults to 64.
+Rather than trust either number, sweep the tile size against one `np.matmul`
+call on the same matrices and read the answer off the table.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "analyze-tiling", "solution": false}
+def analyze_tiling_effectiveness():
+    """📊 Sweep tile size for tiled_matmul and compare against one BLAS call."""
+    print("📊 Analyzing tile size against a single BLAS call...")
+
+    sizes = [256, 512, 1024]
+    tile_sizes = [32, 64, 128, 256]
+
+    print("\n🔍 tiled_matmul vs np.matmul (time, and slowdown versus BLAS):")
+    cell = "─" * 18
+    print("┌───────┬───────────┬" + "┬".join(cell for _ in tile_sizes) + "┐")
+    print("│   N   │ BLAS (ms) │" + "│".join(f"{f'tile={t} (ms)':^18}" for t in tile_sizes) + "│")
+    print("├───────┼───────────┼" + "┼".join(cell for _ in tile_sizes) + "┤")
+
+    for size in sizes:
+        a = Tensor(rng.standard_normal((size, size)).astype(np.float32))
+        b = Tensor(rng.standard_normal((size, size)).astype(np.float32))
+
+        for _ in range(DEFAULT_WARMUP_ITERATIONS):
+            _ = vectorized_matmul(a, b)
+        start = time.perf_counter()
+        for _ in range(DEFAULT_TIMING_ITERATIONS):
+            _ = vectorized_matmul(a, b)
+        blas_time = (time.perf_counter() - start) / DEFAULT_TIMING_ITERATIONS
+
+        cells = []
+        for tile in tile_sizes:
+            _ = tiled_matmul(a, b, tile_size=tile)  # warmup
+            start = time.perf_counter()
+            tiled = tiled_matmul(a, b, tile_size=tile)
+            tile_time = time.perf_counter() - start
+            assert np.allclose(tiled.data, vectorized_matmul(a, b).data, atol=1e-2), \
+                f"Tiled result diverged at tile_size={tile}"
+            cells.append(f" {tile_time*1000:8.2f} ({tile_time/blas_time:5.1f}×)")
+
+        print(f"│ {size:5d} │ {blas_time*1000:9.3f} │" + "│".join(cells) + "│")
+
+    print("└───────┴───────────┴" + "┴".join(cell for _ in tile_sizes) + "┘")
+
+    print("\n💡 What the sweep shows (the parenthesized factor is slowdown vs BLAS):")
+    print("   • Every tile size loses to one np.matmul call, by a few times at best")
+    print("     and by well over an order of magnitude at the small tile sizes.")
+    print("     OpenBLAS already blocks for L1 and L2, in assembly, and our tile")
+    print("     loop pays Python overhead on top of that")
+    print("   • Time falls as the tile GROWS, the opposite of what the 32 KB L1")
+    print("     derivation predicts, because fewer, larger block products mean")
+    print("     fewer Python iterations and more work per BLAS call")
+    print("   • So t ≤ 52 answers the wrong question for this implementation. The")
+    print("     binding constraint is interpreter overhead, not L1 capacity, which")
+    print("     is also why the function defaults to 64 rather than to 32")
+    print("🚀 Tiling is how a GEMM kernel is built, not how you beat one from Python")
+
+if __name__ == "__main__":
+    analyze_tiling_effectiveness()
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-arithmetic-intensity", "solution": false}
 def analyze_arithmetic_intensity():
@@ -1814,7 +1972,7 @@ if __name__ == "__main__":
 """
 ### Memory Efficiency Analysis
 
-Understanding memory allocation patterns is crucial for perf.
+Understanding memory allocation patterns is crucial for performance.
 Let's measure how different implementations use memory.
 """
 
@@ -1900,10 +2058,15 @@ def analyze_im2col_tradeoff():
         conv = Conv2d(in_ch, out_ch, kernel_size=kernel_size, padding=padding)
         x = Tensor(rng.standard_normal((batch, in_ch, size, size)).astype(np.float32))
 
-        # The loop version is slow, so it runs once; im2col is timed over several runs
+        # Both paths get the same treatment: warm up, then average. The loop
+        # version is slow enough that it gets fewer iterations, but a cold
+        # single-shot baseline against a warmed average is not a comparison.
+        loop_iterations = 2
+        reference = conv(x)  # warmup
         start = time.perf_counter()
-        reference = conv(x)
-        loop_time = time.perf_counter() - start
+        for _ in range(loop_iterations):
+            reference = conv(x)
+        loop_time = (time.perf_counter() - start) / loop_iterations
 
         _ = im2col_conv2d(x, conv.weight, conv.bias, padding=padding)  # warmup
         start = time.perf_counter()
@@ -1930,16 +2093,32 @@ def analyze_im2col_tradeoff():
         conv = Conv2d(in_ch, out_ch, kernel_size=kernel_size, padding=padding)
         x_data = rng.standard_normal((batch, in_ch, size, size)).astype(np.float32)
 
+        # Gradients accumulate into the same parameter Tensors on every backward
+        # call, so clear them between timed steps. Otherwise later iterations time
+        # a growing gradient rather than one training step.
+        def clear_grads(*tensors):
+            for t in tensors:
+                t.grad = None
+
+        loop_iterations = 2
+        conv(Tensor(x_data, requires_grad=True)).sum().backward()  # warmup
+        clear_grads(conv.weight, conv.bias)
         start = time.perf_counter()
-        conv(Tensor(x_data, requires_grad=True)).sum().backward()
-        loop_step = time.perf_counter() - start
+        for _ in range(loop_iterations):
+            conv(Tensor(x_data, requires_grad=True)).sum().backward()
+            clear_grads(conv.weight, conv.bias)
+        loop_step = (time.perf_counter() - start) / loop_iterations
 
         w = Tensor(conv.weight.data.copy(), requires_grad=True)
         b = Tensor(conv.bias.data.copy(), requires_grad=True)
+        Im2colConv2dFunction.apply(Tensor(x_data, requires_grad=True), w, b,
+                                   stride=1, padding=padding).sum().backward()  # warmup
+        clear_grads(w, b)
         start = time.perf_counter()
         for _ in range(DEFAULT_TIMING_ITERATIONS):
             Im2colConv2dFunction.apply(Tensor(x_data, requires_grad=True), w, b,
                                        stride=1, padding=padding).sum().backward()
+            clear_grads(w, b)
         im2col_step = (time.perf_counter() - start) / DEFAULT_TIMING_ITERATIONS
 
         label = f"{batch}×{in_ch}→{out_ch} @ {size}×{size}"
@@ -1959,168 +2138,40 @@ if __name__ == "__main__":
 """
 ### Optimization Insights: Production Acceleration Strategy
 
-Understanding when and how to apply different acceleration techniques in real-world scenarios.
+The measurements above cover what this module built. Choosing between techniques
+on a real project is a judgment call rather than a measurement, so it belongs in
+prose, and the table below is engineering opinion, not output.
+
+| Workload | Vectorize | Fuse kernels | Graph optimization |
+| :--- | :--- | :--- | :--- |
+| **Research training** | ✅ Always | ⚡ If activations dominate memory | ❌ Compile times cost more than they save |
+| **Production training** | ✅ Always | ✅ Memory pressure is the binding constraint | ⚡ Worth it once the model stops changing |
+| **Real-time inference** | ✅ Always | ✅ Removes per-layer launch and traffic overhead | ✅ Latency is the product |
+| **Edge deployment** | ✅ Always | ✅ Smaller peak memory on a shared bus | ❌ Too tied to one target's silicon |
+| **Batch inference** | ✅ Always | ⚡ Throughput hides some latency | ⚡ Only for a stable, high-volume model |
+
+Two things that table does not capture. First, kernel fusion means a *compiled*
+fused kernel; rewriting a NumPy expression more compactly, as this module's 📊
+measurement shows, buys allocation peak and not time. Second, "graph
+optimization" is the one row whose value swings hardest on hardware, which is
+exactly why it is the wrong first move on a device you do not control.
+
+### Implementation Priority Framework
+
+- **Phase 1, always: vectorization.** Low risk, large reward, works on any
+  hardware, and the foundation every later optimization assumes.
+- **Phase 2, when memory constrained: kernel fusion.** Targets memory-bound
+  element-wise chains. Moderate complexity, and the wins are real once a compiler
+  is doing the fusing.
+- **Phase 3, at scale: mixed precision and batching.** Essential for large model
+  training, needs careful numerical validation, and the benefit depends on whether
+  the hardware has a faster roof at the lower precision.
+- **Phase 4, in production: graph optimization.** Maximum performance extraction,
+  highest implementation cost, tuned per deployment target.
+
+The ordering is the point. Start simple, add complexity only when a measurement
+says the simple thing has run out, and profile before and after every step.
 """
-
-# %% nbgrader={"grade": false, "grade_id": "acceleration-decision-framework", "solution": false}
-def analyze_acceleration_decision_framework():
-    """📊 Decision framework for choosing acceleration techniques."""
-    print("📊 Acceleration Technique Decision Framework...")
-
-    # Define workload characteristics
-    workloads = [
-        ("Research Training", {
-            "memory_pressure": "medium",
-            "latency_sensitive": False,
-            "stability_critical": False,
-            "development_speed": "high",
-            "hardware_variety": "high"
-        }),
-        ("Production Training", {
-            "memory_pressure": "high",
-            "latency_sensitive": False,
-            "stability_critical": True,
-            "development_speed": "medium",
-            "hardware_variety": "low"
-        }),
-        ("Real-time Inference", {
-            "memory_pressure": "medium",
-            "latency_sensitive": True,
-            "stability_critical": True,
-            "development_speed": "low",
-            "hardware_variety": "medium"
-        }),
-        ("Edge Deployment", {
-            "memory_pressure": "very_high",
-            "latency_sensitive": True,
-            "stability_critical": True,
-            "development_speed": "low",
-            "hardware_variety": "very_high"
-        }),
-        ("Batch Inference", {
-            "memory_pressure": "low",
-            "latency_sensitive": False,
-            "stability_critical": True,
-            "development_speed": "medium",
-            "hardware_variety": "low"
-        })
-    ]
-
-    # Define technique characteristics
-    techniques = {
-        "Vectorization": {
-            "implementation_cost": "low",
-            "memory_benefit": "none",
-            "latency_benefit": "high",
-            "stability_risk": "none",
-            "hardware_dependency": "low"
-        },
-        "Kernel Fusion": {
-            "implementation_cost": "medium",
-            "memory_benefit": "medium",
-            "latency_benefit": "medium",
-            "stability_risk": "low",
-            "hardware_dependency": "medium"
-        },
-        "Graph Optimization": {
-            "implementation_cost": "very_high",
-            "memory_benefit": "medium",
-            "latency_benefit": "very_high",
-            "stability_risk": "low",
-            "hardware_dependency": "very_high"
-        }
-    }
-
-    print("\n🎯 Acceleration Technique Recommendations:")
-    print("┌─────────────────────┬─────────────┬─────────────┬─────────────┐")
-    print("│ Workload            │ Vectorize   │ Fuse Kernels│ Graph Opt   │")
-    print("├─────────────────────┼─────────────┼─────────────┼─────────────┤")
-
-    for workload_name, workload_chars in workloads:
-        recommendations = []
-
-        for technique_name in ["Vectorization", "Kernel Fusion", "Graph Optimization"]:
-            tech_chars = techniques[technique_name]
-            score = 0
-
-            # Benefit vs requirement matching
-            if workload_chars["memory_pressure"] in ["high", "very_high"]:
-                if tech_chars["memory_benefit"] in ["medium", "high"]:
-                    score += 2
-
-            if workload_chars["latency_sensitive"]:
-                if tech_chars["latency_benefit"] in ["medium", "high", "very_high"]:
-                    score += 2
-
-            # Risk vs tolerance matching
-            if workload_chars["stability_critical"]:
-                if tech_chars["stability_risk"] in ["none", "low"]:
-                    score += 1
-                elif tech_chars["stability_risk"] == "medium":
-                    score -= 1
-
-            # Implementation cost vs development speed
-            if workload_chars["development_speed"] == "high":
-                if tech_chars["implementation_cost"] in ["low", "medium"]:
-                    score += 1
-                elif tech_chars["implementation_cost"] in ["high", "very_high"]:
-                    score -= 1
-
-            # Hardware dependency vs variety
-            if workload_chars["hardware_variety"] in ["high", "very_high"]:
-                if tech_chars["hardware_dependency"] in ["low", "medium"]:
-                    score += 1
-                elif tech_chars["hardware_dependency"] in ["high", "very_high"]:
-                    score -= 2
-
-            # Convert score to recommendation
-            if score >= 3:
-                rec = "✅ High"
-            elif score >= 1:
-                rec = "⚡ Medium"
-            elif score >= 0:
-                rec = "⚠️  Low"
-            else:
-                rec = "❌ Skip"
-
-            recommendations.append(rec)
-
-        rec_line = " │ ".join(f"{rec:10s}" for rec in recommendations)
-        print(f"│ {workload_name:19s} │ {rec_line} │")
-
-    print("└─────────────────────┴─────────────┴─────────────┴─────────────┘")
-
-    # Implementation priority framework
-    print(f"\n🛠️  Implementation Priority Framework:")
-    print(f"   📊 Phase 1 (Always): Vectorization")
-    print(f"      • Low risk, high reward")
-    print(f"      • Works on any hardware")
-    print(f"      • Foundation for other optimizations")
-    print(f"   ")
-    print(f"   📊 Phase 2 (Memory constrained): Kernel Fusion")
-    print(f"      • Targets memory-bound operations")
-    print(f"      • Moderate complexity")
-    print(f"      • Significant wins on element-wise ops")
-    print(f"   ")
-    print(f"   📊 Phase 3 (Scale): Mixed Precision and Batching")
-    print(f"      • Essential for large model training")
-    print(f"      • Requires careful validation")
-    print(f"      • Hardware-dependent benefits")
-    print(f"   ")
-    print(f"   📊 Phase 4 (Production): Graph Optimization")
-    print(f"      • Maximum performance extraction")
-    print(f"      • High implementation cost")
-    print(f"      • Deployment-specific tuning")
-
-    print(f"\n💡 Key Decision Factors:")
-    print(f"   🎯 Start simple: Vectorization first, always")
-    print(f"   📈 Scale up: Add complexity only when needed")
-    print(f"   ⚡ Measure impact: Profile before and after each optimization")
-    print(f"   🔄 Iterate: Optimization is an ongoing process, not one-time")
-    print("🚀 Systematic acceleration beats random optimization")
-
-if __name__ == "__main__":
-    analyze_acceleration_decision_framework()
 
 # %% [markdown]
 """
@@ -2190,6 +2241,7 @@ def test_module():
     final_output = Tensor(activated.data.reshape(batch_size, seq_len, hidden_dim))
     assert final_output.shape == x.shape
     print(f"   ✅ Output reshape: {activated.shape} → {final_output.shape}")
+
     class AcceleratedMLP:
         def __init__(self, hidden_dim):
             self.hidden_dim = hidden_dim
@@ -2319,8 +2371,12 @@ You implemented vectorized matrix multiplication and fused GELU:
   $$\mathcal{I}_{\text{GEMM}} = \frac{2 \cdot 1024^3\text{ FLOPs}}{12 \cdot 1024^2\text{ bytes}} = \frac{1024}{6} \approx \mathbf{170.67\text{ FLOPs/byte}}$$
 - **Comparison to Element-Wise Addition ($0.0833\text{ FLOPs/byte}$)**:
   $$\frac{170.67}{0.0833} \approx \mathbf{2{,}048\times}\text{ higher intensity}$$
-- **Why Matrix Multiplication Is Ideal for GPUs**:
-  Modern GPUs (such as NVIDIA H100 or A100) feature massive theoretical compute capacity ($1000\text{ TFLOP/s}$) paired with $\approx 2\text{--}3\text{ TB/s}$ HBM memory bandwidth. Their roofline ridge point is $\mathcal{I}^* = \frac{1000 \times 10^{12}}{3 \times 10^{12}} \approx 333\text{ FLOPs/byte}$. High arithmetic intensity allows systolic Tensor Cores to remain fully saturated by keeping operands resident in register files and shared memory, avoiding DRAM bus stalls.
+- **Why Matrix Multiplication Suits GPUs, and Against Which Roof**:
+  A roofline claim means nothing until you name one device and one precision, because a single chip has one bandwidth and several compute roofs. Take the NVIDIA H100 SXM, with $3.35\text{ TB/s}$ of HBM3 bandwidth:
+  - Against its **FP32 vector** roof of $66.9\text{ TFLOP/s}$, the ridge is $\mathcal{I}^* = \frac{66.9 \times 10^{12}}{3.35 \times 10^{12}} \approx 20\text{ FLOPs/byte}$. Our FP32 GEMM at $170.67$ sits well above that, so it is **compute-bound** and the ALUs are the limit.
+  - Against its **FP16 dense Tensor Core** roof of $989\text{ TFLOP/s}$, the ridge is $\mathcal{I}^* = \frac{989 \times 10^{12}}{3.35 \times 10^{12}} \approx 295\text{ FLOPs/byte}$. The same $170.67$ now sits **below** the ridge, so the identical GEMM is **memory-bound** and Tensor Cores would sit partly idle waiting on HBM.
+
+  The kernel did not change; the roof did. Switching precision multiplies the compute roof by about $15\times$ while leaving bandwidth untouched, which is why FP16 and FP8 kernels have to raise arithmetic intensity as well (larger tiles, fused epilogues, operands held in shared memory and registers) before the extra FLOP/s is reachable. Quoting a ridge point without its precision is how a memory-bound kernel gets described as saturated.
 
 ---
 
@@ -2364,47 +2420,56 @@ Your `Im2colConv2dFunction` saves the unrolled patch matrix in forward and consu
 
 # %% [markdown]
 """
-## ⭐ Aha Moment: Vectorization and Fusion Speed Things Up
+## ⭐ Aha Moment: Leaving the Interpreter Is the Whole Speedup
 
 **What you built:** Vectorized operations, blocked matrix multiplication, a
 GELU comparison that exposes the cost of retaining intermediate Tensor objects,
 and a convolution that runs as one matrix multiply.
 
-**Why it matters:** The same mathematical expression can allocate and copy different
-amounts of data. The compact GELU expression avoids those Tensor wrappers, but NumPy
-still executes several array operations. True kernel fusion is the production next
-step: a compiler combines the operations into one traversal. Measure your local
-speedup rather than assuming a fixed multiplier.
+**Why it matters:** The speedups in this module are not evenly distributed. Moving
+a convolution out of Python loops into a single BLAS call is worth two to three
+orders of magnitude, because the multiply-adds stop being interpreted. Rewriting a
+NumPy expression more compactly is worth nothing on the clock, because both spellings
+already run the same compiled array operations; what it buys is a lower allocation
+peak. And a Python tile loop is slower than the library call it wraps, because that
+library already tiles in assembly. The demo below times the case where the win is
+real, against Module 09's loops.
 """
 
 # %%
 def demo_acceleration():
-    """🎯 See fused operations produce correct results."""
-    print("🎯 AHA MOMENT: Fused Operations Match Reference")
-    print("=" * 45)
+    """🎯 Time a convolution lowered to one matrix multiply against Module 09's loops."""
+    print("🎯 AHA MOMENT: One Matrix Multiply vs Seven Nested Loops")
+    print("=" * 56)
 
-    # Use concrete small values for clear demonstration
-    x = Tensor([-2.0, -1.0, 0.0, 1.0, 2.0])
+    from tinytorch.core.spatial import Conv2d
 
-    # Compute GELU using fused implementation
-    result_fused = fused_gelu(x)
+    conv = Conv2d(3, 8, kernel_size=3, padding=1)
+    x = Tensor(rng.standard_normal((2, 3, 8, 8)).astype(np.float32))
+    print(f"Layer: {x.shape} → 8 channels, 3×3 kernel, same padding")
 
-    # Compute reference using NumPy directly
-    sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
-    result_reference = 0.5 * x.data * (
-        1.0 + np.tanh(sqrt_2_over_pi * (x.data + 0.044715 * x.data**3))
-    )
+    # Warm up both paths, then time both the same way
+    reference = conv(x)
+    fast = im2col_conv2d(x, conv.weight, conv.bias, padding=1)
 
-    # Display inputs and outputs
-    print(f"Input: {x.data}")
-    print(f"GELU output: {result_fused.data}")
-    print(f"Reference:   {result_reference}")
+    start = time.perf_counter()
+    for _ in range(DEFAULT_TIMING_ITERATIONS):
+        reference = conv(x)
+    loop_time = (time.perf_counter() - start) / DEFAULT_TIMING_ITERATIONS
 
-    # Validate results match
-    match = np.allclose(result_fused.data, result_reference)
-    print(f"\nResults match: {match}")
+    start = time.perf_counter()
+    for _ in range(DEFAULT_TIMING_ITERATIONS):
+        fast = im2col_conv2d(x, conv.weight, conv.bias, padding=1)
+    im2col_time = (time.perf_counter() - start) / DEFAULT_TIMING_ITERATIONS
 
-    print("\n✨ Same math, optimized execution!")
+    print(f"Module 09 loops:      {loop_time*1000:8.2f} ms")
+    print(f"im2col + one matmul:  {im2col_time*1000:8.4f} ms")
+    print(f"Speedup:              {loop_time/im2col_time:8.0f}×")
+
+    max_diff = np.abs(fast.data - reference.data).max()
+    print(f"\nLargest disagreement with Conv2d: {max_diff:.2e}")
+
+    print("\n✨ Same multiply-adds, executed outside the interpreter!")
 
 # %%
 if __name__ == "__main__":
@@ -2421,20 +2486,20 @@ Congratulations! You've mastered the fundamental techniques for accelerating neu
 ### Key Accomplishments
 - Built **vectorized operations** using optimized BLAS and measured their timing
 - Compared **GELU implementations** with different intermediate Tensor allocation costs; actual kernel fusion remains a production bridge
-- Created **cache-aware tiling** for efficient large matrix operations
+- Built **cache-aware tiling**, then measured it against one BLAS call and found the library's own blocking wins at every tile size
 - Lowered **convolution to one matrix multiply** with im2col and checked it against Module 09's Conv2d
 - Wrote its **backward pass** with col2im, so a convolution can train through two matmuls and a scatter-add instead of seven nested loops
 - Analyzed **arithmetic intensity patterns** and their impact on the roofline model
 - Measured **memory efficiency** across different operation types
-- Developed **production decision framework** for systematic optimization
+- Worked through a **production priority ordering** for applying these techniques, and where each one's benefit is real
 - All tests pass ✅ (validated by `test_module()`)
 
 ### Systems Insights Discovered
 - **Roofline Model**: Operations with high arithmetic intensity (FLOPs/byte) scale better
 - **Memory Bandwidth**: Often the limiting factor for modern accelerators
-- **Cache Awareness**: Tiling keeps working sets in cache for better performance
+- **Cache Awareness**: Tiling is how a GEMM kernel is built. Written from Python it loses to the library, and larger tiles beat the L1-sized ones the capacity derivation points at, because interpreter overhead binds before cache capacity does
 - **Lowering**: im2col turns a convolution into a GEMM by copying each pixel up to k×k times; the same multiply-adds run thousands of times faster once they leave the Python interpreter
-- **Kernel Fusion**: A compiled fused kernel can eliminate intermediate arrays; the savings depend on the expression
+- **Kernel Fusion**: A compiled fused kernel can eliminate intermediate arrays. Rewriting a NumPy expression more compactly does not fuse anything, so it lowers the allocation peak (36 MB to 20 MB here) without making the wall clock faster
 - **Optimization Strategy**: Start simple (vectorization), add complexity as needed
 
 In production, these techniques enable:

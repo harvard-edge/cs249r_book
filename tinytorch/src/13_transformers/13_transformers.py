@@ -38,7 +38,7 @@ Welcome to Module 13! You're about to synthesize everything you've built across 
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
-1. **Implement Numerically Stable Layer Normalization**: Standardize per-token feature vectors with fused mean/variance passes and learnable affine restoration parameters ($\gamma, \beta$).
+1. **Implement Numerically Stable Layer Normalization**: Standardize per-token feature vectors with a two-pass mean-then-variance computation and learnable affine restoration parameters ($\gamma, \beta$).
 2. **Construct Two-Layer MLP Expansion Blocks**: Build a $d_{\text{embed}} \to 4d_{\text{embed}} \to d_{\text{embed}}$ feed-forward channel projection with smooth GELU gating.
 3. **Assemble the Pre-LN Transformer Block**: Route clean residual highway streams through attention and MLP off-ramps to preserve unobstructed gradient backpropagation.
 4. **Build Full Autoregressive GPT Models**: Stack $N$ transformer blocks with learned positional embeddings and causal autoregressive masking.
@@ -69,7 +69,7 @@ from tinytorch.core.transformers import LayerNorm, MLP, TransformerBlock, GPT, c
 | `tinytorch.core.layers` | Module 03 | `Linear` projection layers | Projection weights for MLP and output LM head |
 | `tinytorch.core.embeddings`| Module 11 | `EmbeddingLayer` | Converts token IDs to dense representation vectors |
 | `tinytorch.core.attention` | Module 12 | `MultiHeadAttention` | Subspace relational routing across sequence positions |
-| `numpy` | External | High-performance array operations | Random number generation, sorting, and masking |
+| `numpy` | External | High-performance array operations | Random number generation, moment reductions, and masking |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
@@ -77,6 +77,8 @@ from tinytorch.core.transformers import LayerNorm, MLP, TransformerBlock, GPT, c
 #| export
 
 import numpy as np
+from typing import List, Optional, Tuple
+
 rng = np.random.default_rng(7)
 
 # Import from previous modules - following the dependency chain
@@ -88,13 +90,13 @@ from tinytorch.core.attention import MultiHeadAttention
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
+MB_TO_BYTES = 1024 * 1024  # Binary megabyte (mebibyte) in bytes, so printed values read MiB
 
 # %% [markdown]
 r"""
 ## 💡 Introduction: What are Transformers?
 
-Transformers represent the definitive architectural milestone that powers modern artificial intelligence (GPT-4, Claude, Llama, and Gemini). The core breakthrough is the synthesis of **parallel self-attention** (allowing every token in a sequence to dynamically attend to every other token) with **deep residual stream communication** and **dense feed-forward computation**.
+Transformers are the architecture behind modern large language models (GPT-4, Claude, Llama, and Gemini). The core breakthrough is the synthesis of **parallel self-attention** (allowing every token in a sequence to dynamically attend to every other token) with **deep residual stream communication** and **dense feed-forward computation**.
 
 ### The Transformer Paradigm Shift
 
@@ -122,7 +124,7 @@ Before transformers, sequence modeling relied on recurrent neural networks (RNNs
 
 ### Layer Normalization: The Numerical Stability Engine
 
-Deep networks suffer from internal covariate shift when activations drift in magnitude across layers. In vision architectures, Batch Normalization standardizes activations across the batch dimension. However, language models process sequences of highly variable lengths, and single-token autoregressive inference operates at batch size $B=1$.
+Deep networks become badly conditioned when activation magnitudes drift across layers, because the loss surface then stretches along some directions and flattens along others, and a single learning rate cannot suit both. (The original account of this, internal covariate shift, was empirically refuted as the mechanism by Santurkar et al., 2018.) In vision architectures, Batch Normalization standardizes activations across the batch dimension. However, language models process sequences of highly variable lengths, and single-token autoregressive inference operates at batch size $B=1$.
 
 **Layer Normalization** (Ba, Kiros, & Hinton, 2016) resolves this by computing moments strictly across the **feature dimension** ($d_{\text{embed}}$) for each token position independently:
 
@@ -147,7 +149,7 @@ where $\gamma, \beta \in \mathbb{R}^{d_{\text{embed}}}$ are learnable scale and 
 
 ### Residual Connections: The Gradient Highway System
 
-Deep networks without skip connections suffer from catastrophic gradient decay: backpropagating through $L$ consecutive layers multiplies Jacobian matrices $\prod_{l=0}^{L-1} W_l$, driving gradients exponentially to zero ($\to 0$) or infinity ($\to \infty$).
+Deep networks without skip connections suffer from catastrophic gradient decay. Backpropagating through $L$ consecutive layers multiplies Jacobian matrices $\prod_{l=0}^{L-1} W_l$, driving gradients exponentially to zero ($\to 0$) or infinity ($\to \infty$).
 
 <div align="center">
   <img src="residual_stream_bus.svg" alt="Residual Highway State Bus and Gradient Flow" width="700px">
@@ -171,7 +173,7 @@ $$\frac{\partial \mathcal{L}}{\partial x_0} = \frac{\partial \mathcal{L}}{\parti
   <img src="transformer_pre_ln_highway.svg" alt="Pre-LN Clean Skip Connection" width="300px">
 </div>
 
-Because of the identity matrix $I$, the error signal propagates directly from the loss function $\mathcal{L}$ back to initial embeddings $x_0$ **without vanishing**, allowing architectures with 100+ layers (like GPT-3 175B) to converge reliably.
+Because of the identity matrix $I$, the error signal propagates directly from the loss function $\mathcal{L}$ back to initial embeddings $x_0$ **without vanishing**, allowing architectures dozens of layers deep (GPT-3 175B stacks 96) to converge reliably.
 
 ---
 
@@ -185,7 +187,7 @@ While self-attention routes information across different sequence positions, the
 
 #### Two-Stage Expansion Architecture
 
-$$\text{FFN}(x) = W_2 \cdot \text{GELU}(x W_1 + b_1) + b_2$$
+$$\text{FFN}(x) = \text{GELU}(x W_1 + b_1) W_2 + b_2$$
 
 where $W_1 \in \mathbb{R}^{d_{\text{embed}} \times 4d_{\text{embed}}}$ expands representations into a higher-dimensional manifold, and $W_2 \in \mathbb{R}^{4d_{\text{embed}} \times d_{\text{embed}}}$ contracts them back to the residual bus dimension:
 
@@ -271,11 +273,14 @@ class LayerNormFunction(Function):
     Computes gradients for x, gamma, and beta in one pass.
     output = gamma * ((x - mean) / std) + beta
 
-    The gradient for x uses the standard LayerNorm formula:
-        dx = (gamma/std) * (grad - mean(grad) - normalized * mean(grad * normalized))
+    The gradient for x uses the standard LayerNorm formula, with gamma folded into the
+    incoming gradient FIRST (the per-feature scale sits inside the two mean terms, since
+    mean(gamma * grad) is not gamma * mean(grad) unless gamma is uniform):
+        g = grad_output * gamma
+        dx = (1/std) * (g - mean(g) - normalized * mean(g * normalized))
     """
 
-    def forward(self, x, gamma, beta):
+    def forward(self, x: np.ndarray, gamma: np.ndarray, beta: np.ndarray) -> np.ndarray:
         """
         Apply layer normalization to a NumPy array.
 
@@ -307,7 +312,7 @@ class LayerNormFunction(Function):
         ### END SOLUTION
 
 
-    def backward(self, grad_output):
+    def backward(self, grad_output: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
         """Compute gradients for LayerNorm (x, gamma, beta)."""
         x, gamma, beta = self.inputs
 
@@ -348,7 +353,7 @@ class LayerNorm:
     unlike batch normalization which normalizes across the batch dimension.
     """
 
-    def __init__(self, normalized_shape, eps=1e-5):
+    def __init__(self, normalized_shape: int, eps: float = 1e-5):
         """
         Initialize LayerNorm with learnable parameters.
 
@@ -381,7 +386,7 @@ class LayerNorm:
         self.beta = Tensor(np.zeros(normalized_shape), requires_grad=True)  # Shift parameter
         ### END SOLUTION
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         """
         Apply layer normalization.
 
@@ -392,11 +397,11 @@ class LayerNorm:
             raise ValueError(f"LayerNorm expected final dimension {self.normalized_shape}, got {x.shape}")
         return LayerNormFunction.apply(x, self.gamma, self.beta, eps=self.eps)
 
-    def __call__(self, x):
+    def __call__(self, x: Tensor) -> Tensor:
         """Allows the layer norm to be called like a function."""
         return self.forward(x)
 
-    def parameters(self):
+    def parameters(self) -> List[Tensor]:
         """Return learnable parameters."""
         return [self.gamma, self.beta]
 
@@ -450,13 +455,9 @@ r"""
 
 The Multi-Layer Perceptron (also termed the Feed-Forward Network, FFN) provides the primary computational transformation in each transformer block. While self-attention allows tokens to exchange information across positions, the MLP processes each position completely independently, applying identical weights to every token vector.
 
-<div align="center">
-  <img src="mlp_expansion_funnel.svg" alt="Feed-Forward Network (MLP) Two-Stage Expansion Funnel" width="680px">
-</div>
-
 #### Mathematical Formulation & Two-Layer Funnel
 
-$$\text{FFN}(x) = W_2 \cdot \text{GELU}(x W_1 + b_1) + b_2$$
+$$\text{FFN}(x) = \text{GELU}(x W_1 + b_1) W_2 + b_2$$
 
 where input $x \in \mathbb{R}^{B \times S \times d_{\text{embed}}}$ is expanded to intermediate dimension $d_{\text{ff}} = 4 \cdot d_{\text{embed}}$ before being contracted back:
 
@@ -464,9 +465,9 @@ where input $x \in \mathbb{R}^{B \times S \times d_{\text{embed}}}$ is expanded 
 
 | Sub-Layer Operation | Input Tensor | Weight Matrix | Bias Vector | Parameters ($d=512$) | Compute FLOPs / Token |
 |:---|:---:|:---:|:---:|:---:|:---:|
-| **Linear 1 (Up-Projection)** | $(B, S, d)$ | $(d, 4d)$ | $(4d,)$ | $512 \times 2{,}048 + 2{,}048 = 1{,}050{,}624$ | $2 \cdot d \cdot 4d = 4{,}194{,}304$ |
+| **Linear 1 (Up-Projection)** | $(B, S, d)$ | $(d, 4d)$ | $(4d,)$ | $512 \times 2{,}048 + 2{,}048 = 1{,}050{,}624$ | $2 \cdot d \cdot 4d = 2{,}097{,}152$ |
 | **GELU Activation** | $(B, S, 4d)$ | — | — | $0$ (activation) | $\approx 8 \cdot 4d = 16{,}384$ |
-| **Linear 2 (Down-Projection)** | $(B, S, 4d)$ | $(4d, d)$ | $(d,)$ | $2{,}048 \times 512 + 512 = 1{,}049{,}088$ | $2 \cdot 4d \cdot d = 4{,}194{,}304$ |
+| **Linear 2 (Down-Projection)** | $(B, S, 4d)$ | $(4d, d)$ | $(d,)$ | $2{,}048 \times 512 + 512 = 1{,}049{,}088$ | $2 \cdot 4d \cdot d = 2{,}097{,}152$ |
 | **Total MLP Sub-Layer** | — | — | — | $\mathbf{8d^2 + 5d \approx 2.10\text{M params}}$ | $\approx \mathbf{16 d^2 \text{ FLOPs}}$ |
 
 **Why 4× Expansion Matters**:
@@ -494,7 +495,7 @@ class MLP:
     This provides the non-linear transformation in each transformer block.
     """
 
-    def __init__(self, embed_dim, hidden_dim=None, dropout_prob=0.0):
+    def __init__(self, embed_dim: int, hidden_dim: Optional[int] = None, dropout_prob: float = 0.0):
         """
         Initialize MLP with two linear layers.
 
@@ -533,7 +534,7 @@ class MLP:
         self.linear2 = Linear(hidden_dim, embed_dim)
         ### END SOLUTION
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         """
         Forward pass through MLP.
 
@@ -562,11 +563,11 @@ class MLP:
         return output
         ### END SOLUTION
 
-    def __call__(self, x):
+    def __call__(self, x: Tensor) -> Tensor:
         """Allows the MLP to be called like a function."""
         return self.forward(x)
 
-    def parameters(self):
+    def parameters(self) -> List[Tensor]:
         """Return all learnable parameters."""
         params = []
         params.extend(self.linear1.parameters())
@@ -624,10 +625,6 @@ r"""
 
 The `TransformerBlock` represents the fundamental atomic unit of GPT and modern generative language models. It harmonizes two complementary operations: **spatial information routing** across tokens via multi-head causal self-attention, and **pointwise non-linear feature synthesis** via the two-stage MLP.
 
-<div align="center">
-  <img src="transformer_pre_ln_highway.svg" alt="Pre-LN Clean Skip Connection and Sub-layer Off-ramp" width="300px">
-</div>
-
 #### Pre-Norm vs Post-Norm Architectural Comparison
 
 The original Transformer (Vaswani et al., 2017) utilized **Post-LayerNorm** ($x = \text{LN}(x + \text{Sublayer}(x))$). Modern large language models almost exclusively adopt **Pre-LayerNorm** ($x = x + \text{Sublayer}(\text{LN}(x))$):
@@ -638,7 +635,9 @@ The original Transformer (Vaswani et al., 2017) utilized **Post-LayerNorm** ($x 
 | **Residual Path** | Passes through non-linear normalization at every layer | Completely clean identity skip highway |
 | **Gradient Backprop** | Scales as $\prod_{l=1}^L \frac{1}{\sigma_l}$; prone to vanishing/explosion | Direct addition: $\frac{\partial \mathcal{L}}{\partial x_0} = \frac{\partial \mathcal{L}}{\partial x_L} (I + \sum \frac{\partial F_l}{\partial x_l})$ |
 | **Warmup Requirement** | Strict linear learning rate warmup required to prevent divergence | Extremely robust; converges reliably with minimal warmup |
-| **Scaling Capability** | Difficult to train beyond 16–24 layers without gradient clipping | Scalable to 100+ layers without numerical instability |
+| **Scaling Capability** | Difficult to train beyond 16–24 layers without careful initialization scaling (Xiong et al., 2020) | Scalable to 100+ layers without numerical instability |
+
+The clean residual path has one consequence worth naming. Nothing ever normalizes the stream itself, so every sublayer adds into it and its magnitude keeps growing with depth. A post-LN stack renormalizes after each addition, but a pre-LN stack does not, which is why `GPT` ends with a final `ln_f` before the LM head. That last normalization is the only one the residual stream ever receives, and without it the un-embedding projection sees activations whose scale depends on how many layers happened to be stacked.
 
 #### Step-by-Step Data Transformation in TransformerBlock
 
@@ -666,9 +665,15 @@ class TransformerBlock:
     Each block processes the input sequence and passes it to the next block.
     """
 
-    def __init__(self, embed_dim, num_heads, mlp_ratio=4, ff_dim=None, dropout_prob=0.0):
+    def __init__(self, embed_dim: int, num_heads: int, mlp_ratio: Optional[float] = None, *,
+                 ff_dim: Optional[int] = None, dropout_prob: float = 0.0):
         """
         Initialize a complete transformer block.
+
+        Give the MLP width one way or the other, never both. Use mlp_ratio (default 4)
+        as a multiple of embed_dim, or ff_dim as an absolute hidden width. ff_dim is
+        keyword-only, so a stray third positional argument can no longer slip into
+        mlp_ratio and build a hidden layer many times wider than intended.
 
         dropout_prob must be zero; this compact block omits dropout.
 
@@ -703,16 +708,21 @@ class TransformerBlock:
         self.ln1 = LayerNorm(embed_dim)  # Before attention
         self.ln2 = LayerNorm(embed_dim)  # Before MLP
 
-        # Feed-forward network
-        # Support both mlp_ratio and explicit ff_dim for backward compatibility
+        # Feed-forward network. mlp_ratio and ff_dim are two spellings of the same
+        # quantity, so accepting both at once would silently honor one and drop the other.
+        if ff_dim is not None and mlp_ratio is not None:
+            raise ValueError(
+                "Give the MLP width once. Pass mlp_ratio or ff_dim, not both "
+                f"(got mlp_ratio={mlp_ratio}, ff_dim={ff_dim})."
+            )
         if ff_dim is not None:
             hidden_dim = ff_dim
         else:
-            hidden_dim = int(embed_dim * mlp_ratio)
+            hidden_dim = int(embed_dim * (4 if mlp_ratio is None else mlp_ratio))
         self.mlp = MLP(embed_dim, hidden_dim, dropout_prob)
         ### END SOLUTION
 
-    def forward(self, x, mask=None):
+    def forward(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
         """
         Forward pass through transformer block.
 
@@ -753,11 +763,11 @@ class TransformerBlock:
         return output
         ### END SOLUTION
 
-    def __call__(self, x, mask=None):
+    def __call__(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
         """Allows the transformer block to be called like a function."""
         return self.forward(x, mask)
 
-    def parameters(self):
+    def parameters(self) -> List[Tensor]:
         """Return all learnable parameters."""
         params = []
         params.extend(self.attention.parameters())
@@ -770,7 +780,7 @@ class TransformerBlock:
 """
 ### The Causal Mask
 
-GPT is autoregressive: position i may attend only to positions j ≤ i. The helper
+GPT is autoregressive, so position i may attend only to positions j ≤ i. The helper
 below encodes that rule in the binary convention Module 12's `_apply_mask`
 expects (1 = attend, 0 = block). `GPT.forward` builds one for every sequence.
 """
@@ -919,18 +929,20 @@ $$P(w_i) = \frac{\exp(z_i / T)}{\sum_{j=1}^V \exp(z_j / T)}$$
 | Sampling Regime | Temperature ($T$) | Logit Transformation | Probability Distribution Profile | Behavioral Characteristics |
 |:---|:---:|:---|:---|:---|
 | **Greedy / Deterministic** | $T \to 0$ | Extreme scaling ($z / \epsilon \to \pm\infty$) | One-hot Dirac delta ($\max z_i \to 1.0$) | Strict argmax decoding; repetitive but factual |
-| **Low Temperature** | $T = 0.2 - 0.5$ | Sharpened logits ($z_i \times 2 - 5$) | Peak-concentrated distribution | High confidence; ideal for code and math |
+| **Low Temperature** | $T = 0.2 - 0.5$ | Sharpened logits ($z_i$ scaled by $2\times$ to $5\times$) | Peak-concentrated distribution | High confidence; ideal for code and math |
 | **Balanced (Default)** | $T = 0.7 - 1.0$ | Unmodified / lightly scaled | Faithful to model's learned distribution | Balanced fluency, diversity, and coherence |
 | **High Temperature** | $T \ge 1.5$ | Flattened logits ($z_i / 1.5$) | Near-uniform entropy distribution | Creative, diverse, but prone to hallucinations |
 
 #### Transformer Scaling Laws: Parameter Allocation Across Scales
 
-| Architecture Tier | Parameters | Layers ($L$) | Heads ($H$) | Hidden Dim ($d_{\text{embed}}$) | MLP Dim ($4d$) | Context Window ($S$) | Primary Deployment Profile |
+| Architecture Tier | Parameters | Layers ($L$) | Heads ($H$) | Hidden Dim ($d_{\text{embed}}$) | MLP / FFN Dim ($d_{\text{ff}}$) | Context Window ($S$) | Primary Deployment Profile |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|:---|
 | **TinyTorch GPT** | $\approx 200\text{K}$ | $2$ | $4$ | $64$ | $256$ | $128$ | CPU educational inspection |
 | **GPT-2 Small** | $124\text{M}$ | $12$ | $12$ | $768$ | $3{,}072$ | $1{,}024$ | Edge devices & consumer GPUs |
-| **Llama 3 (8B)** | $8.0\text{B}$ | $32$ | $32$ | $4{,}096$ | $14{,}336$ | $8{,}192$ | Single workstation GPU ($16\text{ GB}$ VRAM) |
-| **GPT-3 (175B)** | $175\text{B}$ | $96$ | $96$ | $12{,}288$ | $49{,}152$ | $2{,}048$ | Multi-node GPU cluster ($8\times\text{A100}$) |
+| **Llama 3 (8B)** | $8.0\text{B}$ | $32$ | $32$ | $4{,}096$ | $14{,}336$ | $8{,}192$ | Single workstation GPU ($24\text{ GB}$ VRAM at FP16) |
+| **GPT-3 (175B)** | $175\text{B}$ | $96$ | $96$ | $12{,}288$ | $49{,}152$ | $2{,}048$ | Multi-GPU node and beyond ($8\times\text{A100}$ per node) |
+
+Two notes on that table. The $4\times$ expansion this module builds is an empirical convention, not a law, and the newest models have already left it. Llama 3's $d_{\text{ff}} = 14{,}336$ is $3.5d$ rather than $4d$ because SwiGLU splits the up-projection across three matrices instead of two, so a smaller width holds the same parameter budget. Llama 3 8B also needs more than $16\text{ GB}$ in practice, since $16\text{ GB}$ is exactly its FP16 weights with nothing left for the KV cache or activations.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "gpt", "solution": true}
@@ -943,7 +955,8 @@ class GPT:
     and a language modeling head for text generation.
     """
 
-    def __init__(self, vocab_size, embed_dim, num_layers, num_heads, max_seq_len=1024):
+    def __init__(self, vocab_size: int, embed_dim: int, num_layers: int, num_heads: int,
+                 max_seq_len: int = 1024):
         """
         Initialize complete GPT model.
 
@@ -994,7 +1007,7 @@ class GPT:
         self.lm_head = Linear(embed_dim, vocab_size, bias=False)
         ### END SOLUTION
 
-    def forward(self, tokens, start_pos=0):
+    def forward(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
         """
         Forward pass through GPT model.
 
@@ -1041,18 +1054,18 @@ class GPT:
         return logits
         ### END SOLUTION
 
-    def __call__(self, tokens, start_pos=0):
+    def __call__(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
         """Allows the GPT model to be called like a function."""
         return self.forward(tokens, start_pos)
 
-    def _create_causal_mask(self, seq_len):
+    def _create_causal_mask(self, seq_len: int) -> Tensor:
         """Create causal mask to prevent attending to future positions."""
         ### BEGIN SOLUTION role="scaffold"
         # Same binary convention as create_causal_mask: 1 = attend, 0 = block
         return create_causal_mask(seq_len)
         ### END SOLUTION
 
-    def _sample_next_token(self, logits, temperature=1.0):
+    def _sample_next_token(self, logits: np.ndarray, temperature: float = 1.0) -> int:
         """
         Sample one token from vocabulary logits using temperature scaling.
 
@@ -1088,12 +1101,14 @@ class GPT:
         # Convert to probabilities (softmax with numerical stability)
         probs = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
 
-        # Sample next token from probability distribution
-        next_token = rng.choice(self.vocab_size, p=probs[0])
-        return next_token
+        # Sample next token from probability distribution. Draw from the width of the
+        # logits row, not self.vocab_size, so a caller can hand in a bare logits array.
+        next_token = rng.choice(logits.shape[-1], p=probs[0])
+        return int(next_token)
         ### END SOLUTION
 
-    def generate(self, prompt_tokens, max_new_tokens=50, temperature=1.0):
+    def generate(self, prompt_tokens: Tensor, max_new_tokens: int = 50,
+                 temperature: float = 1.0) -> Tensor:
         """
         Generate text autoregressively by repeatedly sampling next tokens.
 
@@ -1143,7 +1158,7 @@ class GPT:
         return current_tokens
         ### END SOLUTION
 
-    def parameters(self):
+    def parameters(self) -> List[Tensor]:
         """Return all learnable parameters."""
         params = []
         params.extend(self.embedding_layer.parameters())
@@ -1156,7 +1171,8 @@ class GPT:
 
         return params
 
-# Alias kept for tests written before the rename
+# Public alias, not dead code: tests/cli/test_release_regressions.py requires TinyGPT in
+# this module's __all__, and the roadmap tables in Modules 12 and 13 name the model that way.
 TinyGPT = GPT
 
 # %% [markdown]
@@ -1373,6 +1389,9 @@ def demonstrate_transformer_integration():
 
     return model
 
+if __name__ == "__main__":
+    demonstrate_transformer_integration()
+
 # %% [markdown]
 r"""
 ## 📊 Systems Analysis: Parameter Scaling and Memory
@@ -1399,10 +1418,12 @@ Transformer memory consumption divides into four distinct categories with differ
 
 | Memory Category | Closed-Form Formula (Bytes) | Complexity | Dominant Regime | Systems Mitigation |
 |:---|:---|:---:|:---|:---|
-| **Model Parameters** | $M_{\text{params}} = (V d + 12 L d^2 + V d) \times 4$ | $\mathcal{O}(V d + L d^2)$ | Large models ($d \ge 4{,}096$) | Tensor parallelism, FP16/INT8 quantization |
-| **FFN Activations** | $M_{\text{FFN}} = B \times S \times 4d \times 4$ | $\mathcal{O}(B \cdot S \cdot d)$ | Short sequences ($S \ll d$) | Activation recomputation (checkpointing) |
+| **Model Parameters** | $M_{\text{params}} \approx (V d + 12 L d^2 + V d) \times 4$ | $\mathcal{O}(V d + L d^2)$ | Large models ($d \ge 4{,}096$) | Tensor parallelism, FP16/INT8 quantization |
+| **FFN Activations** | $M_{\text{FFN}} = B \times S \times 4d \times L \times 4$ | $\mathcal{O}(B \cdot S \cdot d \cdot L)$ | Short sequences ($S \ll d$) | Activation recomputation (checkpointing) |
 | **Attention Logits** | $M_{\text{attn}} = B \times L \times H \times S^2 \times 4$ | $\mathcal{O}(B \cdot L \cdot H \cdot S^2)$ | Long sequences ($S \ge 4{,}096$) | FlashAttention (online softmax tiling) |
 | **KV Cache (Serving)** | $M_{\text{KV}} = 2 \times B \times L \times S \times d \times 2$ | $\mathcal{O}(B \cdot L \cdot S \cdot d)$ | Multi-user generation | PagedAttention, Grouped-Query Attention (GQA) |
+
+The parameter row carries a $\approx$ on purpose. It counts the two vocabulary projections and the $12 L d^2$ of block matrices, and it drops the learned positional table, every bias vector, and every LayerNorm scale and shift. For the configuration in Question 3 below those omissions come to $565{,}248$ parameters, about $1.9\%$ of the true total, which is close enough for capacity planning and wrong for an exact count.
 
 ---
 
@@ -1422,44 +1443,49 @@ Because attention weights scale as $S^2$, scaling context length from $2\text{K}
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-scaling", "solution": false}
 def analyze_parameter_scaling():
-    """📊 Analyze how parameter count scales with model dimensions."""
+    """📊 Analyze how parameter count scales with embedding dimension."""
     print("📊 Analyzing Parameter Scaling in Transformers...")
     print("Understanding why model size affects performance and cost\n")
 
-    # Test different model sizes
-    configs = [
-        {"name": "Tiny", "embed_dim": 64, "num_layers": 2, "num_heads": 4},
-        {"name": "Small", "embed_dim": 128, "num_layers": 4, "num_heads": 8},
-        {"name": "Medium", "embed_dim": 256, "num_layers": 8, "num_heads": 16},
-        {"name": "Large", "embed_dim": 512, "num_layers": 12, "num_heads": 16},
-    ]
-
+    # Vary ONE dimension. The earlier version doubled embed_dim and grew num_layers at
+    # the same time, so neither variable's effect could be read off the output.
+    num_layers = 4
+    num_heads = 8
     vocab_size = 50000  # Typical vocabulary size
 
-    for config in configs:
+    print(f"Holding layers = {num_layers}, heads = {num_heads}, vocab = {vocab_size:,}\n")
+    print("  d | Total params |  Vocab proj (share) |    Blocks | Growth")
+    print("-" * 68)
+
+    previous_total = None
+    for embed_dim in (64, 128, 256, 512):
         model = GPT(
             vocab_size=vocab_size,
-            embed_dim=config["embed_dim"],
-            num_layers=config["num_layers"],
-            num_heads=config["num_heads"]
+            embed_dim=embed_dim,
+            num_layers=num_layers,
+            num_heads=num_heads
         )
 
-        # Count parameters
-        total_params = 0
-        for param in model.parameters():
-            total_params += param.size
+        total_params = sum(param.size for param in model.parameters())
+        # The two V x d vocabulary projections: the token/position embeddings and the
+        # LM head that maps back out to the vocabulary.
+        vocab_params = (sum(p.size for p in model.embedding_layer.parameters())
+                        + sum(p.size for p in model.lm_head.parameters()))
+        block_params = total_params - vocab_params
+        vocab_share = 100.0 * vocab_params / total_params
 
-        # Calculate memory requirements (4 bytes per float32 parameter)
-        memory_mb = (total_params * BYTES_PER_FLOAT32) / MB_TO_BYTES
+        growth = "-" if previous_total is None else f"{total_params / previous_total:.2f}x"
+        print(f"{embed_dim:3d} | {total_params:12,} | {vocab_params:11,} ({vocab_share:4.1f}%) | "
+              f"{block_params:9,} | {growth:>6}")
+        previous_total = total_params
 
-        print(f"{config['name']} Model:")
-        print(f"  Parameters: {total_params:,}")
-        print(f"  Memory: {memory_mb:.1f} MB")
-        print(f"  Embed dim: {config['embed_dim']}, Layers: {config['num_layers']}")
-        print()
-
-    print("💡 Parameter scaling is roughly quadratic with embedding dimension")
-    print("🚀 Real GPT-3 has 175B parameters, requiring ~700GB memory in float32 (~350GB in float16)!")
+    memory_mib = (previous_total * BYTES_PER_FLOAT32) / MB_TO_BYTES
+    print(f"\nWidest model above: {memory_mib:.1f} MiB of float32 weights")
+    print("💡 Doubling d only about doubles the total here, because the 2Vd vocabulary")
+    print("   projections dominate every row. Scaling is effectively LINEAR in d at this")
+    print("   width; the quadratic 12Ld^2 block term takes over only at production width,")
+    print("   where d is large enough for 12Ld^2 to outgrow 2Vd.")
+    print("🚀 Real GPT-3 has 175B parameters, requiring ~700 GB in float32 (~350 GB in float16)")
 
 if __name__ == "__main__":
     analyze_parameter_scaling()
@@ -1470,7 +1496,6 @@ def analyze_attention_memory():
     print("📊 Analyzing Attention Memory Complexity...")
     print("Why long context is expensive and how it scales\n")
 
-    embed_dim = 512
     num_heads = 8
     batch_size = 4
 
@@ -1478,7 +1503,7 @@ def analyze_attention_memory():
     sequence_lengths = [128, 256, 512, 1024, 2048]
 
     print("Attention Matrix Memory Usage:")
-    print("Seq Len | Attention Matrix Size | Memory (MB)")
+    print("Seq Len | Attention Matrix Size | Memory (MiB)")
     print("-" * 45)
 
     for seq_len in sequence_lengths:
@@ -1591,7 +1616,7 @@ $$\text{Scaling Factor} = \frac{2{,}048^2}{1{,}024^2} = \mathbf{4\times \text{ (
 **3. Architectural Implications**:
 Across a 32-layer transformer model (e.g. Llama-style), storing attention score matrices alone consumes:
 $$32 \times 536.87\text{ MB} = \mathbf{17.18\text{ GB of VRAM}}$$
-This activation footprint accounts only for the intermediate attention logits—excluding linear activations, MLP expansions, and parameter weights. This quadratic wall is why naive attention cannot scale to $32\text{K} \to 128\text{K}$ context windows without **FlashAttention** (Dao et al., 2022).
+This activation footprint accounts only for the intermediate attention logits, excluding linear activations, MLP expansions, and parameter weights. This quadratic wall is why naive attention cannot scale to $32\text{K} \to 128\text{K}$ context windows without **FlashAttention** (Dao et al., 2022).
 
 ---
 
@@ -1606,7 +1631,7 @@ If the singular values of $W_l$ deviate even slightly from unity ($\lambda \ne 1
 **2. The Additive Gradient Highway**:
 With residual connections ($x_{l+1} = x_l + F_l(x_l)$), unrolling the recurrence yields $x_L = x_0 + \sum_{l=0}^{L-1} F_l(x_l)$. Differentiating produces:
 $$\frac{\partial \mathcal{L}}{\partial x_0} = \frac{\partial \mathcal{L}}{\partial x_L} \left( I + \sum_{l=0}^{L-1} \frac{\partial F_l}{\partial x_l} \right)$$
-The identity matrix $I$ acts as an unobstructed superconducting conduit: even if all layer Jacobians $\frac{\partial F_l}{\partial x_l}$ vanish, the error signal propagates directly back to initial embeddings $x_0$ with unity gain.
+The identity matrix $I$ carries the gradient at unity gain. Even if all layer Jacobians $\frac{\partial F_l}{\partial x_l}$ vanish, the error signal still propagates directly back to the initial embeddings $x_0$.
 
 **3. Pre-LN vs Post-LN Gradient Mechanics**:
 - **Post-LN** ($x_{l+1} = \text{LN}(x_l + F_l(x_l))$): The residual stream is repeatedly normalized by $\frac{1}{\sigma_l}$. Gradients in late layers scale with the norm of earlier activations, causing gradient variance to explode near the input and requiring warm-up schedules.
@@ -1627,7 +1652,7 @@ For a concrete GPT architecture with $d_{\text{embed}} = 512, V = 10{,}000, L = 
   - Layer Normalizations ($\text{LN}_1, \text{LN}_2$ with $\gamma, \beta$): $2 \times 2 \times 512 = 2{,}048\text{ params}$.
   - MLP ($W_1, b_1, W_2, b_2$ with $4\times$ expansion): $(512 \times 2048 + 2048) + (2048 \times 512 + 512) = 2{,}099{,}712\text{ params}$ ($\approx 2.10\text{M}$).
   - Total per Block: $1{,}050{,}624 + 2{,}048 + 2{,}099{,}712 = \mathbf{3{,}152{,}384\text{ parameters}}$.
-  - Block Weight Ratio: The MLP consumes $\frac{2.10\text{M}}{3.15\text{M}} = \mathbf{66.6\% \text{ of all block parameters}}$!
+  - Block Weight Ratio: The MLP consumes $\frac{2.10\text{M}}{3.15\text{M}} = \mathbf{66.6\% \text{ of all block parameters}}$.
 - **Output Subsystem**:
   - Final LayerNorm: $2 \times 512 = 1{,}024\text{ params}$.
   - Language Modeling Head: $d_{\text{embed}} \times V = 512 \times 10{,}000 = 5{,}120{,}000\text{ params}$ ($5.12\text{M}$).
@@ -1648,16 +1673,16 @@ To generate $N$ new tokens given a prompt of length $S$:
 - In step $2$, the forward pass computes representations for $S + 1$ tokens.
 - In step $N$, the forward pass computes representations for $S + N - 1$ tokens.
 $$\text{Total Tokens Evaluated} = \sum_{t=S}^{S+N-1} t = S \cdot N + \frac{N(N-1)}{2} = \mathcal{O}(S \cdot N + N^2)$$
-Generating $1{,}000$ tokens from an initial prompt requires evaluating over $\mathbf{500{,}000\text{ token forward passes}}$!
+Generating $1{,}000$ tokens from an initial prompt requires evaluating over $\mathbf{500{,}000\text{ token forward passes}}$.
 
 **2. Identification of Redundant Compute**:
-Because causal masking prohibits future tokens from affecting past tokens, the keys and values computed for tokens $0$ through $t-2$ **never change**. Recomputing $K$ and $V$ projections for historical tokens in every iteration represents $100\%$ redundant matrix multiplications!
+Because causal masking prohibits future tokens from affecting past tokens, the keys and values computed for tokens $0$ through $t-2$ **never change**. Recomputing $K$ and $V$ projections for historical tokens in every iteration is entirely redundant work.
 
 **3. The Memory Bandwidth Bottleneck & KV Cache**:
 During generation with batch size $B=1$, the model operates in a strictly **memory-bandwidth-bound** regime (arithmetic intensity $\approx 1\text{ FLOP/byte}$). In every single token step, all $29.7\text{M}$ weights must be transferred from GPU memory (HBM) to on-chip SRAM.
 - **The KV Cache Solution** (Module 18): By storing past key and value vectors in a pre-allocated tensor buffer, each new token step only requires projecting the single newest token:
   $$Q_{\text{new}} = x_{\text{new}} W_Q, \quad K_{\text{new}} = x_{\text{new}} W_K, \quad V_{\text{new}} = x_{\text{new}} W_V$$
-  The newest key and value are appended to the cache, slashing per-token generation complexity from $\mathcal{O}(t)$ to $\mathcal{O}(1)$ query projections and linear attention gather!
+  The newest key and value are appended to the cache, cutting per-token generation cost from $\mathcal{O}(t)$ projections to $\mathcal{O}(1)$ projections plus a linear attention gather.
 """
 
 # %% [markdown]
@@ -1684,8 +1709,12 @@ def demo_transformers():
     num_heads = 4
     block = TransformerBlock(embed_dim=embed_dim, num_heads=num_heads, mlp_ratio=4)
 
-    # Input: batch of 2 sequences, 8 tokens each, 64 dims (concrete values)
-    x = Tensor(np.ones((2, 8, embed_dim)))
+    # Input: batch of 2 sequences, 8 tokens each, 64 dims.
+    # The values must VARY across the feature axis. An all-ones token vector has zero
+    # feature variance, so LayerNorm returns exactly 0, both sublayers return 0, and the
+    # whole block collapses to the identity (a silent, very convincing non-demo).
+    demo_rng = np.random.default_rng(13)
+    x = Tensor(demo_rng.standard_normal((2, 8, embed_dim)))
 
     # Forward pass through transformer block
     output = block.forward(x)
@@ -1694,12 +1723,13 @@ def demo_transformers():
     print(f"Input shape:  {x.shape}  (2 sequences, 8 tokens, 64 dimensions)")
     print(f"Output shape: {output.shape}")
 
-    # Verify transformation occurred (values changed)
-    input_sum = np.sum(x.data)
-    output_sum = np.sum(output.data)
+    # Verify the transformation actually occurred. Compare element by element rather
+    # than by summing. Two opposite-signed deltas cancel in a sum, so a dead block can
+    # report a matching total and look alive.
+    delta = np.abs(output.data - x.data)
     print("\nData transformation:")
-    print(f"  Input sum:  {input_sum:.1f}  (initial values: all 1s)")
-    print(f"  Output sum: {output_sum:.1f}  (after attention + MLP)")
+    print(f"  Max |output - input|:  {np.max(delta):.4f}  (per-element change)")
+    print(f"  Mean |output - input|: {np.mean(delta):.4f}  (after attention + MLP)")
 
     print("\nTransformerBlock architecture:")
     print(f"  - Multi-head attention ({num_heads} heads)")
@@ -1712,8 +1742,6 @@ def demo_transformers():
 # %%
 if __name__ == "__main__":
     test_module()
-    print("\n")
-    demonstrate_transformer_integration()
     print("\n")
     demo_transformers()
 

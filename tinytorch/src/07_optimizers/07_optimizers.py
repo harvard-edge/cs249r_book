@@ -51,7 +51,7 @@ from tinytorch.core.optimizers import SGD, Adam, AdamW
 ```
 
 **Why this matters:**
-- **Framework Parity**: Matches PyTorch's `torch.optim` module architecture and parameter state dictionary protocols.
+- **Framework Parity**: Matches PyTorch's `torch.optim` class layout, so `SGD`, `Adam`, and `AdamW` are constructed and stepped the same way. TinyTorch simplifies in two places worth knowing about: parameters live in one flat list rather than `torch.optim`'s per-group `param_groups`, and there is no `state_dict()` / `load_state_dict()`, so Module 08 will checkpoint the buffers directly through `get_momentum_state()`.
 - **Production Decoupling**: Isolate update mathematical mechanics from model execution graphs and training state machines.
 - **Loss Navigation**: Transform raw instantaneous gradients into robust descent trajectories across non-convex loss surfaces.
 """
@@ -69,7 +69,7 @@ r"""
 | **`Tensor`** | Module 01 (`core.tensor`) | Model parameter instances carrying weight buffers | Consumed by optimizers |
 | **`param.grad`** | Module 06 (`core.autograd`) | Instantaneous gradient vectors $\nabla_{\boldsymbol{\theta}} \mathcal{L}$ | Read by optimizer `step()` |
 | **`method_of`** | Module 06 (`core.autograd`) | Method decorator attaching step logic to optimizer classes | Implementation cleanly modularized |
-| **Optimizers** | Module 07 (`core.optimizers`) | State buffers ($\mathbf{v}, \mathbf{m}$) and in-place weight mutation | Wired into Module 08 Training Loop |
+| **Optimizers** | Module 07 (`core.optimizers`) | State buffers ($\mathbf{v}, \mathbf{m}$) and the rebinding of `param.data` to the updated array | Wired into Module 08 Training Loop |
 
 $$\mathbf{w} \in \mathbb{R}^D \xrightarrow{\text{Forward (Mod 01)}} \mathcal{L} \xrightarrow{\text{Backward (Mod 06)}} \mathbf{g} = \nabla_{\mathbf{w}} \mathcal{L} \xrightarrow{\text{Step (Mod 07)}} \mathbf{w}' = \mathbf{w} - \eta \cdot \mathbf{u}(\mathbf{g}) \xrightarrow{\text{Epoch (Mod 08)}} \text{Trained Model}$$
 
@@ -82,7 +82,7 @@ Optimizers are the operational step that transforms gradients into learning. Mod
 
 import numpy as np
 rng = np.random.default_rng(7)
-from typing import List, Optional, Dict
+from typing import List, Optional
 
 from tinytorch.core.tensor import Tensor
 # Importing Module 06 completes every Tensor operation with its backward half,
@@ -102,7 +102,7 @@ DEFAULT_WEIGHT_DECAY_ADAMW = 0.01  # Default weight decay for AdamW
 r"""
 ## 💡 Introduction: What are Optimizers?
 
-Optimizers are the numerical engines that drive neural network learning. They take analytical gradients computed by Module 06's autograd engine and update model parameters toward loss minima. In high-dimensional deep learning, loss landscapes are rarely isotropic bowls—they feature ill-conditioned ravines, saddle points, and sharp cliffs.
+Optimizers are the numerical engines that drive neural network learning. They take analytical gradients computed by Module 06's autograd engine and update model parameters toward loss minima. In high-dimensional deep learning, loss landscapes are rarely isotropic bowls. They feature ill-conditioned ravines, saddle points, and sharp cliffs.
 
 <div align="center">
   <img src="ravine_optimization.svg" alt="Ill-Conditioned Ravine and 16-Byte Optimizer Memory Rule" width="680px">
@@ -208,9 +208,11 @@ class Optimizer:
 
         APPROACH:
         1. Store parameters as a list for iteration
-        2. Mark every parameter requires_grad=True; give it a grad attribute
+        2. Reject a duplicated parameter: the same tensor listed twice would get
+           two state slots and be stepped twice per update
+        3. Mark every parameter requires_grad=True; give it a grad attribute
            (set to None) only if it has none yet
-        3. Initialize step counter for algorithms that need it
+        4. Initialize step counter for algorithms that need it
 
         EXAMPLE:
         >>> linear = Linear(784, 128)
@@ -252,7 +254,8 @@ class Optimizer:
         >>> optimizer.zero_grad()  # Clears all gradients
         >>> assert all(param.grad is None for param in optimizer.params)
 
-        WHY: Gradients accumulate by default, so we need to clear them between batches
+        HINTS:
+        - Gradients accumulate by default, so they must be cleared between batches
         """
         ### BEGIN SOLUTION role="scaffold"
         for param in self.params:
@@ -263,7 +266,7 @@ class Optimizer:
         """
         Update parameters based on gradients.
 
-        This is abstract - each optimizer implements its own update rule.
+        This is abstract. Each optimizer implements its own update rule.
         """
         raise NotImplementedError(
             f"Abstract method step() not implemented\n"
@@ -410,11 +413,18 @@ def test_unit_optimizer_base():
     assert param1.grad is None
     assert param2.grad is None
 
-    # Test that optimizer accepts any tensor (no validation required)
-    # Gradient tracking is handled by the autograd module
+    # A tensor that was not already tracking gradients is still accepted: the
+    # constructor sets requires_grad itself. What it does reject is a duplicate.
     regular_param = Tensor([1.0])
     opt = Optimizer([regular_param])
     assert len(opt.params) == 1
+    assert regular_param.requires_grad
+
+    try:
+        Optimizer([regular_param, regular_param])
+        assert False, "Optimizer should reject a duplicated parameter"
+    except ValueError:
+        pass
 
     print("✅ Base Optimizer works correctly!")
 
@@ -462,7 +472,7 @@ $$\mathbf{v}_t = \sum_{\tau=0}^t \beta^{t-\tau} \mathbf{g}_\tau$$
 | **Effective Velocity** | $\mathbf{v}_t = \mathbf{g}_t$ | $\mathbf{v}_t = 0.9 \mathbf{v}_{t-1} + \mathbf{g}_t$ |
 | **Steady-State Step Multiplier** | $1.0\times$ | $\frac{1}{1 - \beta} = 10.0\times$ |
 | **Ravine Trajectory** | Transverse zig-zag oscillation | Filtered low-pass forward acceleration |
-| **State Buffer Memory** | $0\text{ bytes}$ (stateless) | $4\text{ bytes/param}$ (`velocity` buffer) |
+| **State Buffer Memory** | $0\text{ bytes}$ (stateless) | $4\text{ bytes/param}$ (one `momentum_buffers` entry) |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "sgd-optimizer", "solution": true}
@@ -896,9 +906,8 @@ def test_unit_adam_update_moments():
 
     grad = np.array([0.1, 0.2])
 
-    # Simulate the optimizer's first call; the helper tracks this parameter's age
-    optimizer.step_count = 1
-
+    # _update_moments ages this parameter itself through update_counts, so the
+    # helper is called directly; the global step_count does not drive bias correction.
     m_hat, v_hat = optimizer._update_moments(0, grad)
 
     # Manual calculation for step 1:
@@ -912,8 +921,7 @@ def test_unit_adam_update_moments():
     assert np.allclose(m_hat, grad), f"m_hat should equal grad at step 1, got {m_hat}"
     assert np.allclose(v_hat, grad ** 2), f"v_hat should equal grad^2 at step 1, got {v_hat}"
 
-    # Step 2 with same gradient
-    optimizer.step_count = 2
+    # Second update of the same parameter: update_counts[0] becomes 2
     m_hat2, v_hat2 = optimizer._update_moments(0, grad)
 
     # Moments should still be close to grad (converging to true mean)
@@ -937,9 +945,9 @@ The Adam `step()` pipeline executes a sequence of localized numerical transforma
 | Step Phase | Mathematical Operation | Systems Invariant |
 | :--- | :--- | :--- |
 | **1. Extraction** | $\mathbf{g} = \text{unwrap}(\text{param.grad})$ | Obtains contiguous float32 NumPy buffer |
-| **2. Coupled Decay** | $\mathbf{g} \leftarrow \mathbf{g} + \lambda \boldsymbol{\theta}$ | In-place gradient penalty (coupled $L_2$) |
+| **2. Coupled Decay** | $\mathbf{g} \leftarrow \mathbf{g} + \lambda \boldsymbol{\theta}$ | Coupled $L_2$ penalty added into a fresh array, leaving `param.grad` untouched |
 | **3. Moments** | $(\hat{\mathbf{m}}, \hat{\mathbf{v}}) = \text{EMA}(\mathbf{g})$ | Bias-corrected first and second moment updates |
-| **4. Mutation** | $\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \alpha \frac{\hat{\mathbf{m}}}{\sqrt{\hat{\mathbf{v}}} + \epsilon}$ | Elementwise vector update in place on `param.data` |
+| **4. Mutation** | $\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \alpha \frac{\hat{\mathbf{m}}}{\sqrt{\hat{\mathbf{v}}} + \epsilon}$ | Elementwise update that rebinds `param.data` to a new array |
 
 $$\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} \hat{\mathbf{m}}_t$$
 """
@@ -980,7 +988,7 @@ def step(self):
         # Extract gradient using shared helper
         grad_data = self._extract_gradient(param)
 
-        # Apply weight decay
+        # Apply weight decay to a copy, so param.grad is never mutated
         if self.weight_decay != 0:
             grad_data = grad_data + self.weight_decay * param.data
 
@@ -1240,8 +1248,7 @@ def test_unit_adamw_update_moments():
 
     grad = np.array([0.1, 0.2])
 
-    # Simulate step 1
-    optimizer.step_count = 1
+    # First update of this parameter; _update_moments tracks the age itself
     m_hat, v_hat = optimizer._update_moments(0, grad)
 
     # At step 1, bias-corrected m_hat should equal the gradient
@@ -1255,12 +1262,10 @@ def test_unit_adamw_update_moments():
     # Verify AdamW and Adam produce same moment values for same input
     param_adam = Tensor([1.0, 2.0], requires_grad=True)
     adam_opt = Adam([param_adam], lr=0.01, betas=(0.9, 0.999), eps=1e-8)
-    adam_opt.step_count = 1
 
     # Reset AdamW buffers for fair comparison
     param_adamw = Tensor([1.0, 2.0], requires_grad=True)
     adamw_opt = AdamW([param_adamw], lr=0.01, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.01)
-    adamw_opt.step_count = 1
 
     m_adam, v_adam = adam_opt._update_moments(0, grad)
     m_adamw, v_adamw = adamw_opt._update_moments(0, grad)
@@ -1283,8 +1288,8 @@ AdamW's `step()` composes the unified gradient extraction and moment update help
 | :--- | :--- | :--- | :--- |
 | **1. Unpack** | Gradient Extraction | $\mathbf{g}_t \leftarrow \text{param.grad}$ | `grad_data = self._extract_gradient(param)` |
 | **2. Moments** | Variance Tracking | $(\hat{\mathbf{m}}_t, \hat{\mathbf{v}}_t) \leftarrow \text{EMA}(\mathbf{g}_t)$ | `m_hat, v_hat = self._update_moments(i, grad_data)` |
-| **3. Shrinkage** | Decoupled Weight Decay | $\boldsymbol{\theta} \leftarrow (1 - \alpha \lambda) \boldsymbol{\theta}$ | `param.data *= (1 - self.lr * self.weight_decay)` |
-| **4. Descent** | Adaptive Normalization | $\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \alpha \frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$ | `param.data -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)` |
+| **3. Shrinkage** | Decoupled Weight Decay | $\boldsymbol{\theta} \leftarrow (1 - \alpha \lambda) \boldsymbol{\theta}$ | `param.data = param.data * (1 - self.lr * self.weight_decay)` |
+| **4. Descent** | Adaptive Normalization | $\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \alpha \frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$ | `param.data = param.data - self.lr * m_hat / (np.sqrt(v_hat) + self.eps)` |
 
 Applying parameter shrinkage in Phase 3 prior to the adaptive descent in Phase 4 ensures that regularization remains completely orthogonal to gradient conditioning.
 """
@@ -1509,7 +1514,7 @@ if __name__ == "__main__":
 r"""
 ## 🔧 Integration: Bringing It Together
 
-Now let's observe how our optimizers perform across canonical optimization benchmarks. Each algorithm embodies a distinct geometric approach to resolving loss curvature:
+All four update rules answer the same `step()` call, so a training loop can swap one for another without changing a line. Each embodies a distinct geometric approach to resolving loss curvature, and the two Systems Analysis cells that follow measure the two costs that difference carries, resident memory and progress on an ill-conditioned landscape.
 
 | Algorithm | Trajectory Dynamic | Effective Step Scaling | Regularization Coupling |
 | :--- | :--- | :--- | :--- |
@@ -1532,17 +1537,19 @@ In production machine learning systems, optimizer state buffers often dominate t
 
 ### Memory Usage Patterns: The 16-Byte Parameter Rule
 
-For single-precision (FP32) training, each model parameter incurs substantial secondary state allocations:
+For single-precision (FP32) training, each model parameter incurs substantial secondary state allocations.
+
+**What the multipliers count.** Every $\times$ figure in this module is quoted against the 4 bytes of the weight itself, and it counts the entire resident training footprint: the weight, the gradient buffer the backward pass fills, and any optimizer state. That is why stateless SGD is already $2\times$ before a single byte of optimizer state exists.
 
 | Buffer Role | Precision & Size | Resident Lifespan | SGD ($\beta=0$) | SGD + Momentum | Adam / AdamW |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Model Weight ($\boldsymbol{\theta}$)** | FP32 (4 Bytes) | Permanent | 4 Bytes | 4 Bytes | 4 Bytes |
 | **Loss Gradient ($\mathbf{g}$)** | FP32 (4 Bytes) | Transient (backward pass) | 4 Bytes | 4 Bytes | 4 Bytes |
-| **First Moment Buffer ($\mathbf{m}$)** | FP32 (4 Bytes) | Permanent state | 0 Bytes | 4 Bytes (`velocity`) | 4 Bytes (`m_buffer`) |
-| **Second Moment Buffer ($\mathbf{v}$)** | FP32 (4 Bytes) | Permanent state | 0 Bytes | 0 Bytes | 4 Bytes (`v_buffer`) |
+| **First Moment Buffer ($\mathbf{m}$)** | FP32 (4 Bytes) | Permanent state | 0 Bytes | 4 Bytes (`momentum_buffers`) | 4 Bytes (`m_buffers`) |
+| **Second Moment Buffer ($\mathbf{v}$)** | FP32 (4 Bytes) | Permanent state | 0 Bytes | 0 Bytes | 4 Bytes (`v_buffers`) |
 | **Total Resident Memory** | — | — | **8 B / param ($2\times$)** | **12 B / param ($3\times$)** | **16 B / param ($4\times$)** |
 
-> **Systems Takeaway**: Training a 7-billion parameter language model in FP32 requires $7 \times 10^9 \times 16\text{ Bytes} = 112\text{ GB}$ of memory solely for weights, gradients, and AdamW moments—before allocating a single byte for activation tensors or KV caches!
+> **Systems Takeaway**: Training a 7-billion parameter language model in FP32 requires $7 \times 10^9 \times 16\text{ Bytes} = 112\text{ GB}$ of memory solely for weights, gradients, and AdamW moments, before allocating a single byte for activation tensors or KV caches!
 
 ### Computational Complexity & Memory Bandwidth
 
@@ -1563,43 +1570,61 @@ def analyze_optimizer_memory_usage():
     # Create test parameters of different sizes
     param_sizes = [1000, 10000, 100000]  # 1K, 10K, 100K parameters
 
-    print("Optimizer Memory Analysis (per parameter tensor):")
-    print("=" * 60)
-    print(f"{'Size':<10} {'SGD':<10} {'Adam':<10} {'AdamW':<10} {'Ratio':<10}")
-    print("-" * 60)
+    def resident_bytes(optimizer, *buffer_lists):
+        """Weight + gradient + optimizer state, read straight off ndarray.nbytes."""
+        total = 0
+        for param in optimizer.params:
+            total += param.data.nbytes
+            grad = param.grad
+            total += (grad.data if isinstance(grad, Tensor) else grad).nbytes
+        for buffers in buffer_lists:
+            total += sum(buf.nbytes for buf in buffers if buf is not None)
+        return total
 
-    for size in param_sizes:
-        # Create parameter
+    def measure(optimizer_class, kwargs, size):
+        """Build the optimizer, take one real step, then weigh what it retains."""
         param = Tensor(rng.standard_normal(size), requires_grad=True)
-
-        # SGD memory (parameter + momentum buffer)
-        sgd = SGD([param], momentum=0.9)
+        optimizer = optimizer_class([param], **kwargs)
         # Set gradient AFTER creating optimizer
         param.grad = Tensor(rng.standard_normal(size))
-        sgd.step()  # Initialize buffers
-        sgd_memory = size * 2  # param + momentum buffer
+        optimizer.step()  # A state buffer only exists after the first step
+        if isinstance(optimizer, SGD):
+            return resident_bytes(optimizer, optimizer.momentum_buffers)
+        return resident_bytes(optimizer, optimizer.m_buffers, optimizer.v_buffers)
 
-        # Adam memory (parameter + 2 moment buffers)
-        param_adam = Tensor(rng.standard_normal(size), requires_grad=True)
-        adam = Adam([param_adam])
-        # Set gradient AFTER creating optimizer
-        param_adam.grad = Tensor(rng.standard_normal(size))
-        adam.step()  # Initialize buffers
-        adam_memory = size * 3  # param + m_buffer + v_buffer
+    configs = [
+        ("SGD", SGD, {"lr": 0.01}),
+        ("SGD+Mom", SGD, {"lr": 0.01, "momentum": 0.9}),
+        ("Adam", Adam, {}),
+        ("AdamW", AdamW, {}),
+    ]
 
-        # AdamW memory (same as Adam)
-        adamw_memory = adam_memory
+    print("Resident FP32 training memory, measured with ndarray.nbytes:")
+    print("=" * 74)
+    print(f"{'Params':<10}{'SGD':>13}{'SGD+Mom':>13}{'Adam':>13}{'AdamW':>13}")
+    print("-" * 74)
 
-        # Memory ratio (Adam/SGD)
-        ratio = adam_memory / sgd_memory
+    per_param = {}
+    for size in param_sizes:
+        totals = [measure(cls, kwargs, size) for _, cls, kwargs in configs]
+        for (name, _, _), total in zip(configs, totals):
+            per_param[name] = total // size
+        print(f"{size:<10}" + "".join(f"{total / 1000:>10.1f} kB" for total in totals))
 
-        print(f"{size:<10} {sgd_memory:<10} {adam_memory:<10} {adamw_memory:<10} {ratio:.1f}x")
+    print("-" * 74)
+    print(f"{'B / param':<10}" + "".join(f"{per_param[name]:>11} B" for name, _, _ in configs))
 
+    weight_bytes = 4  # FP32
     print("\n💡 Key Insights:")
-    print("- SGD: 2× parameter memory (momentum buffer)")
-    print("- Adam/AdamW: 3× parameter memory (two moment buffers)")
-    print("- Memory scales linearly with model size")
-    print("- Trade-off: More memory for better convergence")
+    print(f"- Measured per parameter: SGD {per_param['SGD']} B ({per_param['SGD'] // weight_bytes}x), "
+          f"SGD+momentum {per_param['SGD+Mom']} B ({per_param['SGD+Mom'] // weight_bytes}x), "
+          f"Adam/AdamW {per_param['Adam']} B ({per_param['Adam'] // weight_bytes}x)")
+    print("- Each multiplier counts the 4-byte weight plus the 4-byte gradient plus")
+    print("  optimizer state, so stateless SGD is already 2x with no state at all")
+    print(f"- Adam's two moment buffers add {per_param['Adam'] - per_param['SGD']} B, "
+          f"which doubles SGD's {per_param['SGD']} B rather than adding half of it")
+    print("- Memory scales linearly with parameter count, so the per-parameter constant")
+    print("  is the number to budget hardware against")
 
 
 if __name__ == "__main__":
@@ -1610,66 +1635,78 @@ def analyze_optimizer_convergence_behavior():
     """📊 Analyze convergence behavior of different optimizers."""
     print("📊 Analyzing Optimizer Convergence Behavior...")
 
-    # Simulate optimization of a quadratic function: f(x) = 0.5 * x^2
-    # Optimal solution: x* = 0, gradient = x
+    # The Introduction's ill-conditioned bowl, L(w) = 50*w1^2 + 0.5*w2^2, whose
+    # Hessian is diag(100, 1) and whose condition number is therefore 100. An
+    # isotropic bowl would make every optimizer look alike, because the curvature
+    # gap is the whole thing these algorithms exist to handle.
+    curvature = np.array([100.0, 1.0])
 
-    def quadratic_loss(x):
-        """Simple quadratic function for optimization testing."""
-        return 0.5 * (x ** 2).sum()
+    def quadratic_loss(w):
+        """Ill-conditioned quadratic: 0.5 * (100*w1^2 + 1*w2^2)."""
+        return 0.5 * float((curvature * w ** 2).sum())
 
-    def compute_gradient(x):
-        """Gradient of quadratic function: df/dx = x."""
-        return x.copy()
+    def compute_gradient(w):
+        """Gradient of the ill-conditioned quadratic: [100*w1, w2]."""
+        return curvature * w
 
     # Starting point
-    x_start = np.array([5.0, -3.0, 2.0])  # Far from optimum [0, 0, 0]
+    w_start = np.array([1.0, 1.0])  # Both axes equally far from the optimum [0, 0]
+    steps = 50
 
-    # Test different optimizers
+    # The learning rates differ on purpose. SGD's is capped by the STEEP axis: the
+    # w1 factor is 1 - lr*100, so lr = 0.02 already fails to contract and lr = 0.1
+    # gives -9 and diverges. Adam's step size is bounded by lr rather than by
+    # curvature, so it can run at the lr that destroys SGD.
     optimizers_to_test = [
-        ("SGD", SGD, {"lr": 0.1}),
-        ("SGD+Momentum", SGD, {"lr": 0.1, "momentum": 0.9}),
+        ("SGD", SGD, {"lr": 0.01}),
+        ("SGD+Momentum", SGD, {"lr": 0.01, "momentum": 0.9}),
         ("Adam", Adam, {"lr": 0.1}),
         ("AdamW", AdamW, {"lr": 0.1, "weight_decay": 0.01})
     ]
 
-    print("Convergence Analysis (quadratic function f(x) = 0.5 * x²):")
-    print("=" * 70)
-    print(f"{'Optimizer':<15} {'Step 0':<12} {'Step 5':<12} {'Step 10':<12} {'Final Loss':<12}")
-    print("-" * 70)
+    print(f"Convergence on L(w) = 50*w1^2 + 0.5*w2^2 (kappa = 100), {steps} steps:")
+    print("=" * 78)
+    print(f"{'Optimizer':<15}{'lr':<8}{'Step 0':<13}{'Step 10':<13}{'Step 25':<13}{'Step 50':<13}")
+    print("-" * 78)
 
+    endpoints = []
     for name, optimizer_class, kwargs in optimizers_to_test:
         # Reset parameter
-        param = Tensor(x_start.copy(), requires_grad=True)
+        param = Tensor(w_start.copy(), requires_grad=True)
         optimizer = optimizer_class([param], **kwargs)
 
         losses = []
 
-        # Run optimization for 10 steps
-        for step in range(11):
+        # Run optimization
+        for step in range(steps + 1):
             # Compute loss and gradient
-            loss = quadratic_loss(param.data)
+            losses.append(quadratic_loss(param.data))
             param.grad = Tensor(compute_gradient(param.data))
 
-            losses.append(loss)
-
             # Update parameters
-            if step < 10:  # Don't update after last evaluation
+            if step < steps:  # Don't update after the last evaluation
                 optimizer.step()
                 optimizer.zero_grad()
 
-        # Format results
-        step0 = f"{losses[0]:.6f}"
-        step5 = f"{losses[5]:.6f}"
-        step10 = f"{losses[10]:.6f}"
-        final = f"{losses[10]:.6f}"
+        endpoints.append((name, param.data.copy()))
+        print(f"{name:<15}{kwargs['lr']:<8}"
+              f"{losses[0]:<13.6f}{losses[10]:<13.6f}{losses[25]:<13.6f}{losses[steps]:<13.6f}")
 
-        print(f"{name:<15} {step0:<12} {step5:<12} {step10:<12} {final:<12}")
+    print("-" * 78)
+    print("Distance still to travel on each axis (steep w1, gentle w2):")
+    for name, w in endpoints:
+        print(f"  {name:<15} |w1| = {abs(w[0]):.4f}    |w2| = {abs(w[1]):.4f}")
 
     print("\n💡 Key Insights:")
-    print("- SGD: Steady progress but can be slow")
-    print("- SGD+Momentum: Faster convergence, less oscillation")
-    print("- Adam: Adaptive rates help with different parameter scales")
-    print("- AdamW: Similar to Adam with regularization effects")
+    print("- SGD: lr=0.01 is exactly right for the steep axis (1 - lr*100 = 0) and 100x")
+    print("  too small for the gentle one, so |w2| crawls from 1.0 only down to 0.605")
+    print("- SGD+Momentum: the 1/(1-beta) = 10x amplification finally moves the gentle")
+    print("  axis down to 0.058, but it re-excites the steep axis SGD had already")
+    print("  solved, which is why its step-10 and step-25 losses are WORSE than SGD's")
+    print("- Adam: per-coordinate normalization drives w1 and w2 along the same path to")
+    print("  float32 rounding despite the 100x curvature gap, at an lr that breaks SGD")
+    print("- AdamW: the shrink factor here is 1 - lr*lambda = 0.999 per step, so it")
+    print("  tracks Adam closely; weight decay buys generalization, not convergence")
 
 
 if __name__ == "__main__":
@@ -1709,15 +1746,14 @@ def test_module():
 
     print("\nRunning integration scenarios...")
 
-    # Test realistic neural network optimization scenario
-    print("🧪 Integration Test: Multi-layer Network Optimization...")
+    # Drive all three optimizers over one shared set of parameter tensors
+    print("🧪 Integration Test: Shared Parameters Across Three Optimizers...")
 
-    # Import components from TinyTorch package (previous modules must be completed and exported)
-    from tinytorch.core.layers import Linear
-    from tinytorch.core.activations import ReLU
-    from tinytorch.core.losses import MSELoss
+    # The gradients below are synthesized, not produced by a forward and backward
+    # pass. This module's contract is the update rule alone; Module 08 will feed
+    # these same optimizers from a real Linear, ReLU, and MSELoss training loop.
 
-    # Create parameters for a 2-layer network
+    # Tensors shaped like a 3 -> 4 -> 2 network
     # Layer 1: 3 inputs -> 4 hidden
     W1 = Tensor(rng.standard_normal((3, 4)) * 0.1, requires_grad=True)
     b1 = Tensor(np.zeros(4), requires_grad=True)
@@ -1762,7 +1798,7 @@ def test_module():
         # Different optimizers should produce different results
         assert not np.allclose(sgd_params[i], adam_params[i], rtol=1e-6)
 
-    print("✅ Multi-layer network optimization works!")
+    print("✅ Shared-parameter optimization works!")
 
     # Test optimizer state management
     print("🧪 Integration Test: Optimizer State Management...")
@@ -1797,18 +1833,18 @@ def test_module():
 Answer these to deepen your understanding of optimizer operations and their systems implications:
 
 ### Question 1: Memory vs Performance
-**Question**: You've implemented SGD (2x memory) and Adam (3x memory). For a model with 10 billion parameters at float32 (4 bytes each):
+**Question**: You've implemented SGD (8 bytes per parameter, 2x) and Adam (16 bytes per parameter, 4x), counting weight plus gradient plus optimizer state. For a model with 10 billion parameters at float32 (4 bytes each):
 
 **Consider**:
 - How much total memory does each optimizer require?
-- At what model size does Adam's extra 50% memory overhead become prohibitive?
+- On one 80 GB accelerator, what is the largest model each optimizer can hold? Adam's extra 8 bytes per parameter is the whole question.
 - What real-world constraints might force you to choose SGD over Adam?
 
 **Calculate**:
 - Parameters: 10 x 10^9
 - Bytes per float32: 4
-- SGD memory (2x): ___________GB
-- Adam memory (3x): ___________GB
+- SGD memory (2x, 8 B/param): ___________GB
+- Adam memory (4x, 16 B/param): ___________GB
 
 ---
 
@@ -1851,7 +1887,7 @@ Answer these to deepen your understanding of optimizer operations and their syst
 
 ---
 
-### Question 5: Production Scale: Memory Requirements
+### Question 5: Memory Requirements at Production Scale
 **Question**: For training a GPT-scale model with 1 billion parameters, calculate the memory requirements:
 
 **Calculate**:
@@ -1859,7 +1895,7 @@ Answer these to deepen your understanding of optimizer operations and their syst
 - Bytes per float32: 4
 - Parameter memory: ___________GB
 
-**With Adam optimizer (3x memory)**:
+**With Adam optimizer (4x memory, 16 B/param)**:
 - Total: ___________GB
 
 **Real-world implications**:
@@ -1882,7 +1918,7 @@ Answer these to deepen your understanding of optimizer operations and their syst
 3. How would you diagnose whether this is a learning rate problem vs. data problem?
 4. Would switching from Adam to AdamW help in this scenario?
 
-**Key insight**: Optimization is not just about algorithms - it's about understanding the interaction between data, model architecture, and training dynamics.
+**Key insight**: Optimization is not just about algorithms. It is about understanding the interaction between data, model architecture, and training dynamics.
 """
 
 # %% [markdown]
@@ -1893,7 +1929,7 @@ Answer these to deepen your understanding of optimizer operations and their syst
 
 **Why it matters:** Gradients tell us which direction reduces the loss, but someone has to
 actually move the weights. That's what optimizers do! SGD takes simple steps, while Adam
-adapts the learning rate for each parameter—like having a personal trainer for each weight.
+adapts the learning rate for each parameter, like having a personal trainer for each weight.
 
 In the next module, you'll combine optimizers with a training loop to actually train networks!
 """
@@ -1909,7 +1945,7 @@ def demo_optimizers():
 
     # SGD takes a step in the opposite direction
     optimizer = SGD([weight], lr=0.5)
-    # Set the gradient by hand (no forward/backward in a unit test)
+    # Set the gradient by hand so the demo needs no forward or backward pass
     weight.grad = np.array([1.0])  # Gradient pointing "uphill"
 
     print(f"Initial weight: {weight.data[0]:.2f}")
@@ -1938,11 +1974,11 @@ Congratulations! You've built sophisticated optimization algorithms that power m
 - **Built SGD optimizer** with momentum for stable gradient descent and oscillation reduction
 - **Implemented Adam optimizer** with adaptive learning rates and bias correction for different parameter scales
 - **Created AdamW optimizer** with decoupled weight decay for proper regularization
-- **Analyzed memory trade-offs**: SGD (2x), Adam/AdamW (3x parameter memory)
+- **Analyzed memory trade-offs**: 8 bytes per parameter for SGD (2x), 12 with momentum (3x), 16 for Adam/AdamW (4x)
 - **All tests pass** (validated by `test_module()`)
 
 ### Systems Insights Discovered
-- **Memory scaling**: SGD needs 2x parameter memory (momentum), Adam needs 3x (two moment buffers)
+- **Memory scaling**: counting weight plus gradient plus optimizer state, plain SGD needs 2x the parameter bytes, SGD with momentum 3x, and Adam/AdamW 4x, which is the 16 bytes per parameter in FP32
 - **Adaptive learning**: Adam automatically adjusts step sizes per parameter for faster convergence
 - **Weight decay coupling**: AdamW fixes Adam's inconsistent regularization by decoupling weight decay
 - **State management**: Optimizer buffers must be checkpointed for training resume

@@ -16,11 +16,11 @@
 r"""
 # Module 10: Tokenization - Converting Text to Numbers
 
-Welcome to Module 10! You're about to build tokenization — the critical bridge that converts unstructured human text into discrete numerical sequences that machine learning models and neural networks can process.
+Welcome to Module 10! You're about to build tokenization, the critical bridge that converts unstructured human text into discrete numerical sequences that machine learning models and neural networks can process.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete training pipeline with neural networks, optimizers, data loaders, and 2D spatial convolutions (`Tensor`, `Autograd`, `Linear`, `Conv2d`, `Trainer`)
-**You'll Build**: Text tokenization engines — `Tokenizer` (interface contract), `CharTokenizer`, and `BPETokenizer` (Byte Pair Encoding)
+**You'll Build**: Text tokenization engines, namely `Tokenizer` (interface contract), `CharTokenizer`, and `BPETokenizer` (Byte Pair Encoding)
 **You'll Enable**: Subword representation learning that powers language modeling in Transformers
 
 <div align="center">
@@ -33,7 +33,7 @@ Welcome to Module 10! You're about to build tokenization — the critical bridge
 | :--- | :--- | :--- | :--- |
 | **Modules 01–09** | Foundation & Vision | `Tensor`, `Autograd`, `Linear`, `Conv2d`, `BatchNorm2d`, `Trainer` | Completed |
 | **Module 10** | **Subword Tokenization** | `Tokenizer`, `CharTokenizer`, `BPETokenizer`, BPE pair merges | **Active Subsystem** |
-| **Modules 11–13** | Language & Attention | `Embedding`, `SelfAttention`, `TransformerBlock` | Downstream Consumers |
+| **Modules 11–13** | Language & Attention | `Embedding`, `MultiHeadAttention`, `TransformerBlock` | Downstream Consumers |
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
@@ -65,14 +65,14 @@ from tinytorch.core.tokenization import Tokenizer, CharTokenizer, BPETokenizer
 r"""
 ## 📋 Module Dependencies
 
-**Prerequisites**: Module 10 is self-contained — it operates directly on strings, lists, and integer mappings!
+**Prerequisites**: Module 10 is self-contained, operating directly on strings, lists, and integer mappings.
 
 **External Dependencies**:
 - `numpy` (for numerical arrays and statistical analysis)
 - `collections.Counter` (for frequency counting of adjacent token pairs)
 
 **TinyTorch Dependencies**:
-- Module 01 (`Tensor`): Downstream integration — converting token ID lists into tensor buffers for model ingestion
+- Module 01 (`Tensor`): Downstream integration, converting token ID lists into tensor buffers for model ingestion
 
 ### Ingestion & Transformation Pipeline
 
@@ -91,7 +91,7 @@ Students completing this module establish the text ingestion bridge that powers 
 #| export
 
 from collections import Counter
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 
@@ -103,7 +103,7 @@ Neural networks operate on continuous floating-point tensors, but human communic
 
 ### The Text-to-Numbers Challenge
 
-Consider the sentence: `"Hello, world!"` — how does a neural network ingest and compute over these characters?
+Consider the sentence `"Hello, world!"`. How does a neural network ingest and compute over these characters?
 
 <div align="center">
   <img src="tokenization_pipeline.svg" alt="TinyTorch Tokenization Pipeline: Training vs Encoding" width="650px">
@@ -116,7 +116,7 @@ Consider the sentence: `"Hello, world!"` — how does a neural network ingest an
 | **Data Primitive** | UTF-8 byte stream / characters | Floating-point tensors ($\mathbb{R}^D$) | Tokenizer maps string slice $\to$ integer ID $\to$ dense vector |
 | **Vocabulary Bound** | Infinite (new words, typos, slang) | Fixed memory table of size $V$ | Subword BPE splits rare words into known subword units |
 | **Sequence Topology** | Variable character length | Fixed or batched sequence length $T$ | Padding and truncation ensure static tensor shapes $(B, T)$ |
-| **Computational Cost** | $\mathcal{O}(1)$ string indexing | Quadratic in sequence length: $\mathcal{O}(T^2)$ | Shorter subword sequences reduce attention compute by $>3\times$ |
+| **Computational Cost** | $\mathcal{O}(1)$ string indexing | Quadratic in sequence length, $\mathcal{O}(T^2)$ | Shorter subword sequences cut $T$ by $>3\times$, so attention compute by $>10\times$ |
 
 ### The Four-Step Ingestion Pipeline
 
@@ -153,7 +153,7 @@ $$\text{"hello"} \quad \xrightarrow{\text{encode}} \quad [3, 2, 4, 4, 5] \quad \
 | **Out-of-Vocabulary (OOV) Risk** | Minimal (covers alphabet) | Zero with byte fallback | High (plurals, names trigger `<UNK>`) |
 | **Embedding Table Memory ($D=4096$)** | $\approx 1.6\text{ MB}$ (cache-resident) | $\approx 160\text{ MB} - 800\text{ MB}$ | $>1.6\text{ GB}$ (spills to DRAM) |
 | **Attention Matrix ($T \times T$)** | $25\text{M}$ entries per head | $\approx 1.7\text{M}$ entries per head | $1\text{M}$ entries per head |
-| **Relative Attention Compute** | **$14.8\times$ baseline** | **$1.7\times$ baseline** | **$1.0\times$ (fastest attention)** |
+| **Relative Attention Compute** | **$25.0\times$ baseline** | **$1.7\times$ baseline** | **$1.0\times$ (fastest attention)** |
 
 BPE achieves the sweet spot: by spending a modest memory budget on a subword vocabulary, it shrinks sequence length by $\approx 3.8\times$, slashing quadratic attention compute while retaining universal coverage.
 """
@@ -171,7 +171,7 @@ Let's construct our tokenization architecture step by step, enforcing consistent
 | **Base Contract** | `Tokenizer` | Defines abstract `encode` / `decode` API | `TOK_UNKNOWN = '<UNK>'`, `TOK_EOW = ' '` |
 | **Character Tokenizer** | `CharTokenizer` | Alphabet-level encoding & decoding | `vocab: list[str]`, `char_to_id: dict`, `id_to_char: dict` |
 | **Subword BPE** | `BPETokenizer` | Greedy frequency merge training & replay | `merges: list[tuple]`, `token_to_id: dict`, `id_to_token: dict` |
-| **Batch Pipeline** | `tokenize_dataset` | Pads & truncates variable-length text | Uniform tensor buffer shapes $(B, T)$ |
+| **Batch Pipeline** | `tokenize_dataset` | Truncates text to a length ceiling $T_{\max}$ | Ragged `list[list[int]]`, every row $\le T_{\max}$ |
 
 ### Base Tokenizer Interface
 
@@ -293,7 +293,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 r"""
-## 🏗️ Character-Level Tokenizer
+## 🏗️ Character-Level Tokenizer: Alphabet as Vocabulary
 
 The character-level tokenizer decomposes text into individual constituent characters. It guarantees deterministic coverage of all symbols present in the training alphabet, but produces sequences proportional to raw character length.
 
@@ -302,7 +302,11 @@ The character-level tokenizer decomposes text into individual constituent charac
 Given corpus $\mathcal{C} = [\text{"hello"}, \text{"world"}]$:
 
 1. **Alphabet Extraction & Sorting**:
-   $$\Sigma = \operatorname{sorted}(\operatorname{unique}(\mathcal{C})) = [\text{' '}, \text{'d'}, \text{'e'}, \text{'h'}, \text{'l'}, \text{'o'}, \text{'r'}, \text{'w'}]$$
+   $$\Sigma = \operatorname{sorted}(\operatorname{unique}(\mathcal{C})) = [\text{'d'}, \text{'e'}, \text{'h'}, \text{'l'}, \text{'o'}, \text{'r'}, \text{'w'}]$$
+
+   Neither corpus string contains a space, so no space token appears. A corpus of
+   whole sentences (as in `demo_tokenization()`) would add `' '` to the alphabet
+   and shift every ID after it by one.
 
 2. **Vocabulary Construction**:
    Prepend special token `<UNK>` at index $0$ so unseen symbols map cleanly to an out-of-vocabulary ID:
@@ -310,20 +314,22 @@ Given corpus $\mathcal{C} = [\text{"hello"}, \text{"world"}]$:
 | Token Symbol | Vocabulary ID | Byte Value | Systems Role |
 | :--- | :--- | :--- | :--- |
 | `<UNK>` | `0` | — | Fallback out-of-vocabulary indicator |
-| `' '` (space) | `1` | `0x20` | Explicit inter-word delimiter |
-| `'d'` | `2` | `0x64` | Base alphabet character |
-| `'e'` | `3` | `0x65` | Base alphabet character |
-| `'h'` | `4` | `0x68` | Base alphabet character |
-| `'l'` | `5` | `0x6C` | Base alphabet character |
-| `'o'` | `6` | `0x6F` | Base alphabet character |
-| `'r'` | `7` | `0x72` | Base alphabet character |
-| `'w'` | `8` | `0x77` | Base alphabet character |
+| `'d'` | `1` | `0x64` | Base alphabet character |
+| `'e'` | `2` | `0x65` | Base alphabet character |
+| `'h'` | `3` | `0x68` | Base alphabet character |
+| `'l'` | `4` | `0x6C` | Base alphabet character |
+| `'o'` | `5` | `0x6F` | Base alphabet character |
+| `'r'` | `6` | `0x72` | Base alphabet character |
+| `'w'` | `7` | `0x77` | Base alphabet character |
+
+The vocabulary holds $8$ entries, which is what `CharTokenizer.vocab_size` reports
+after `build_vocab(["hello", "world"])`.
 
 3. **Encoding Pipeline**:
-   $$\mathbf{x} = \text{"hello"} \quad \xrightarrow{\text{lookup}} \quad [4, 3, 5, 5, 6]$$
+   $$\mathbf{x} = \text{"hello"} \quad \xrightarrow{\text{lookup}} \quad [3, 2, 4, 4, 5]$$
 
 4. **Decoding Reconstruction**:
-   $$[4, 3, 5, 5, 6] \quad \xrightarrow{\text{reverse lookup}} \quad \text{"hello"}$$
+   $$[3, 2, 4, 4, 5] \quad \xrightarrow{\text{reverse lookup}} \quad \text{"hello"}$$
 """
 
 # %% nbgrader={"grade": false, "grade_id": "char-tokenizer", "solution": true}
@@ -490,7 +496,7 @@ def test_unit_char_tokenizer():
     assert tokens_with_unk[-1] == 0  # '!' should map to <UNK>
 
     # Test vocabulary building
-    # Expected behaviour: Invoking build_vocab overwrites the vocabulary passed
+    # Expected behavior: Invoking build_vocab overwrites the vocabulary passed
     # in __init__ above, so after this the 'w' should no longer be a token
     corpus = ["hola mundo", "test text"]
     tokenizer.build_vocab(corpus)
@@ -515,7 +521,7 @@ Character tokenization provides a simple, robust foundation for text processing.
 
 # %% [markdown]
 r"""
-## 🏗️ Byte Pair Encoding (BPE) Tokenizer
+## 🏗️ Byte Pair Encoding (BPE) Tokenizer: Learning Subwords from Frequency
 
 Byte Pair Encoding (BPE) is the industry-standard subword tokenization algorithm utilized by modern Large Language Models, including GPT-2, GPT-4, Llama 3, and Mistral. BPE dynamically constructs a subword vocabulary by iteratively identifying and fusing the most frequently co-occurring adjacent token pairs.
 
@@ -536,9 +542,16 @@ Consider the training corpus $\mathcal{C} = [\text{"hello"}, \text{"hello"}, \te
 #### Step 1: Base Alphabet Initialization
 Every word is decomposed into its individual character tokens, fusing the end-of-word delimiter to the final character:
 
-$$\text{"hello"} \implies [\text{'h'}, \text{'e'}, \text{'l'}, \text{'l'}, \text{'o</w>'}], \qquad \text{"help"} \implies [\text{'h'}, \text{'e'}, \text{'l'}, \text{'p</w'}]$$
+$$\text{"hello"} \implies [\text{'h'}, \text{'e'}, \text{'l'}, \text{'l'}, \text{'o</w>'}], \qquad \text{"help"} \implies [\text{'h'}, \text{'e'}, \text{'l'}, \text{'p</w>'}]$$
 
-$$\mathcal{V}_{\text{base}} = [\text{<UNK>}, \text{'e'}, \text{'h'}, \text{'l'}, \text{'o</w>'}, \text{'p</w>'}]$$
+Because every seen character is registered in both its interior and its word-final
+form, the base alphabet is twice the character set, plus `<UNK>`:
+
+$$\mathcal{V}_{\text{base}} = [\text{<UNK>}, \text{'e'}, \text{'e</w>'}, \text{'h'}, \text{'h</w>'}, \text{'l'}, \text{'l</w>'}, \text{'o'}, \text{'o</w>'}, \text{'p'}, \text{'p</w>'}], \qquad |\mathcal{V}_{\text{base}}| = 11$$
+
+Several of those word-final forms (`'e</w>'`, `'h</w>'`, `'l</w>'`) never occur in this
+tiny corpus. They are stocked anyway so that an unseen word ending in `e`, `h` or `l`
+still tokenizes without falling back to `<UNK>`.
 
 #### Step 2: Frequency-Weighted Pair Counting
 For each adjacent pair $(t_i, t_{i+1})$, accumulate occurrences weighted by the word frequency:
@@ -556,7 +569,7 @@ $$\operatorname{freq}(p) = \sum_{w \in \mathcal{C}} \operatorname{count}(p, w) \
 #### Step 3: Greedy Merge Selection & In-Place Replacement
 The winning pair `('h', 'e')` is merged into a single atomic token `'he'`:
 
-$$\operatorname{merge}((\text{'h'}, \text{'e'}) \to \text{'he'}): \quad \begin{cases} [\text{'h'}, \text{'e'}, \text{'l'}, \text{'l'}, \text{'o</w>'}] & \implies [\mathbf{\text{'he'}}, \text{'l'}, \text{'l'}, \text{'o</w'}] \\ [\text{'h'}, \text{'e'}, \text{'l'}, \text{'p</w>'}] & \implies [\mathbf{\text{'he'}}, \text{'l'}, \text{'p</w'}] \end{cases}$$
+$$\operatorname{merge}((\text{'h'}, \text{'e'}) \to \text{'he'}): \quad \begin{cases} [\text{'h'}, \text{'e'}, \text{'l'}, \text{'l'}, \text{'o</w>'}] & \implies [\mathbf{\text{'he'}}, \text{'l'}, \text{'l'}, \text{'o</w>'}] \\ [\text{'h'}, \text{'e'}, \text{'l'}, \text{'p</w>'}] & \implies [\mathbf{\text{'he'}}, \text{'l'}, \text{'p</w>'}] \end{cases}$$
 
 $$\mathcal{V} \leftarrow \mathcal{V} \cup [\mathbf{\text{'he'}}]$$
 
@@ -564,12 +577,12 @@ $$\mathcal{V} \leftarrow \mathcal{V} \cup [\mathbf{\text{'he'}}]$$
 
 | Iteration | Most Frequent Pair | Merged Token | Post-Merge Representations | Vocab Growth |
 | :--- | :--- | :--- | :--- | :--- |
-| **Start** | — | — | `['h', 'e', 'l', 'l', 'o</w>']`, `['h', 'e', 'l', 'p</w>']` | $|\mathcal{V}| = 6$ |
-| **Iter 1** | `('h', 'e')` | `'he'` | `['he', 'l', 'l', 'o</w>']`, `['he', 'l', 'p</w>']` | $|\mathcal{V}| = 7$ |
-| **Iter 2** | `('he', 'l')` | `'hel'` | `['hel', 'l', 'o</w>']`, `['hel', 'p</w>']` | $|\mathcal{V}| = 8$ |
-| **Iter 3** | `('hel', 'l')` | `'hell'` | `['hell', 'o</w>']`, `['hel', 'p</w>']` | $|\mathcal{V}| = 9$ |
-| **Iter 4** | `('hell', 'o</w>')`| `'hello</w>'` | `['hello</w>']`, `['hel', 'p</w>']` | $|\mathcal{V}| = 10$ |
-| **Iter 5** | `('hel', 'p</w>')` | `'help</w>'` | `['hello</w>']`, `['help</w>']` | $|\mathcal{V}| = 11$ |
+| **Start** | — | — | `['h', 'e', 'l', 'l', 'o</w>']`, `['h', 'e', 'l', 'p</w>']` | $|\mathcal{V}| = 11$ |
+| **Iter 1** | `('h', 'e')` | `'he'` | `['he', 'l', 'l', 'o</w>']`, `['he', 'l', 'p</w>']` | $|\mathcal{V}| = 12$ |
+| **Iter 2** | `('he', 'l')` | `'hel'` | `['hel', 'l', 'o</w>']`, `['hel', 'p</w>']` | $|\mathcal{V}| = 13$ |
+| **Iter 3** | `('hel', 'l')` | `'hell'` | `['hell', 'o</w>']`, `['hel', 'p</w>']` | $|\mathcal{V}| = 14$ |
+| **Iter 4** | `('hell', 'o</w>')`| `'hello</w>'` | `['hello</w>']`, `['hel', 'p</w>']` | $|\mathcal{V}| = 15$ |
+| **Iter 5** | `('hel', 'p</w>')` | `'help</w>'` | `['hello</w>']`, `['help</w>']` | $|\mathcal{V}| = 16$ |
 
 **Systems Takeaway**: On this two-word corpus, frequent whole words collapse into single atomic tokens ($5\text{ tokens} \to 1\text{ token}$, an exact **$5\times$ compression**). On large-scale pretraining corpora, BPE spends its vocabulary budget discovering common morphological stems, prefixes, and roots!
 """
@@ -688,7 +701,7 @@ A single-pass linear scan $\mathcal{O}(L)$ inspects adjacent tokens, advancing b
 | **$i = 3$** | `tokens[3]='l'`, `tokens[4]='o</w>'`| No Match: `('l', 'o</w>') != ('h', 'e')`| Append `'l'` | $i \leftarrow i + 1$ |
 | **$i = 4$** | `tokens[4]='o</w>'` (end of word) | Boundary reached ($i = L - 1$) | Append `'o</w>'`| $i \leftarrow i + 1$ |
 
-$$\text{"hello"} : \quad [\text{'h'}, \text{'e'}, \text{'l'}, \text{'l'}, \text{'o</w>'}] \quad \xrightarrow{\operatorname{merge}((\text{'h'}, \text{'e'}) \to \text{'he'})} \quad [\mathbf{\text{'he'}}, \text{'l'}, \text{'l'}, \text{'o</w'}]$$
+$$\text{"hello"} : \quad [\text{'h'}, \text{'e'}, \text{'l'}, \text{'l'}, \text{'o</w>'}] \quad \xrightarrow{\operatorname{merge}((\text{'h'}, \text{'e'}) \to \text{'he'})} \quad [\mathbf{\text{'he'}}, \text{'l'}, \text{'l'}, \text{'o</w>'}]$$
 """
 
 # %% nbgrader={"grade": false, "grade_id": "bpe-merge-pair", "solution": true}
@@ -811,8 +824,17 @@ The complete `BPETokenizer` composes these primitives into an end-to-end tokeniz
 
 #### The Strict Replay Ordering Invariant
 
-> [!IMPORTANT]
-> Merges must be evaluated during `encode()` in the **exact chronological sequence** they were discovered during `train()`. Later subword units are built on top of earlier ones (e.g., `'h' + 'e' \to 'he'`, followed by `'he' + 'l' \to 'hel'`). Applying merges out of order disrupts the subword DAG and produces invalid, uncompressed tokenizations!
+> **Important:** Merges must be evaluated during `encode()` in the **exact chronological sequence** they were discovered during `train()`. Later subword units are built on top of earlier ones (e.g., `'h' + 'e' \to 'he'`, followed by `'he' + 'l' \to 'hel'`). Applying merges out of order disrupts the subword DAG and produces invalid, uncompressed tokenizations!
+
+#### What Round-Tripping Does and Does Not Preserve
+
+Using a space as the word boundary costs some fidelity. `decode(encode(text))` recovers
+the words and their order, but it normalizes whitespace, because `encode()` splits on
+whitespace and `decode()` re-joins with a single space. So `"hello  world"` and
+`"hello\nworld"` both come back as `"hello world"`, and leading or trailing space is
+stripped. Production byte-level BPE avoids this by folding the space into the token
+itself (GPT-2 emits `" world"` as one token). `CharTokenizer` has no such limitation,
+since it never splits on whitespace.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "bpe-tokenizer", "solution": true}
@@ -893,6 +915,13 @@ class BPETokenizer(Tokenizer):
         """
         Get all adjacent pairs from word tokens.
 
+        This one is a stepping stone, not a link in the pipeline. `train()` reaches
+        pair extraction through `_count_byte_pairs`, which does the same walk across
+        every word at once and weights each pair by its word's corpus frequency, so
+        no training or encoding path calls `_get_pairs`. Write it to make the adjacent
+        pair idea concrete on a single word, then read `_count_byte_pairs` as the
+        frequency-weighted version of the same loop.
+
         TODO: Extract all consecutive character pairs
 
         APPROACH:
@@ -913,7 +942,7 @@ class BPETokenizer(Tokenizer):
         return pairs
         ### END SOLUTION
 
-    def train(self, corpus: List[str], vocab_size: int = None) -> None:
+    def train(self, corpus: List[str], vocab_size: Optional[int] = None) -> None:
         """
         Train BPE on corpus to learn merge rules.
 
@@ -948,6 +977,10 @@ class BPETokenizer(Tokenizer):
         - Use _get_word_tokens() for initial character tokenization
         - Use _count_byte_pairs(word_tokens, word_freq) to find pair frequencies
         - Use _merge_pair(word_tokens, best_pair) to apply the merge
+        - Break frequency ties toward the pair counted first. Counter.most_common(1)
+          already does this, so reach for it rather than sorting the counts yourself.
+          Ties are common on small corpora, and a different rule gives a different
+          (still valid) merge history
         - Don't forget to call _build_mappings() at the end
         """
         ### BEGIN SOLUTION role="scaffold"
@@ -993,7 +1026,7 @@ class BPETokenizer(Tokenizer):
         self._build_mappings()
         ### END SOLUTION
 
-    def _build_mappings(self):
+    def _build_mappings(self) -> None:
         """Build token-to-ID and ID-to-token mappings."""
         ### BEGIN SOLUTION role="scaffold"
         self.token_to_id = {token: idx for idx, token in enumerate(self.vocab)}
@@ -1197,9 +1230,9 @@ $$\mathbf{x} = \text{"tokenization"} \implies [\text{'t'}, \text{'o'}, \text{'k'
 | :--- | :--- | :--- | :--- | :--- |
 | **Initial** | — | `['t', 'o', 'k', 'e', 'n', 'i', 'z', 'a', 't', 'i', 'o', 'n</w>']` | $12$ | $1.0\times$ (baseline) |
 | **Step 1** | `('t', 'o') \to 'to'` | `['to', 'k', 'e', 'n', 'i', 'z', 'a', 't', 'i', 'o', 'n</w>']` | $11$ | $1.09\times$ |
-| **Step 2** | `('i', 'o') \to 'io'` | `['to', 'k', 'e', 'n', 'io', 'z', 'a', 't', 'io', 'n</w>']` | $10$ | $1.20\times$ |
-| **Step 3** | `('io', 'n</w>') \to 'ion</w>'` | `['to', 'k', 'e', 'n', 'io', 'z', 'a', 't', 'ion</w>']` | $9$ | $1.33\times$ |
-| **Step 4** | `('to', 'k') \to 'tok'` | `['tok', 'e', 'n', 'io', 'z', 'a', 't', 'ion</w>']` | $8$ | $1.50\times$ |
+| **Step 2** | `('i', 'o') \to 'io'` | `['to', 'k', 'e', 'n', 'i', 'z', 'a', 't', 'io', 'n</w>']` | $10$ | $1.20\times$ |
+| **Step 3** | `('io', 'n</w>') \to 'ion</w>'` | `['to', 'k', 'e', 'n', 'i', 'z', 'a', 't', 'ion</w>']` | $9$ | $1.33\times$ |
+| **Step 4** | `('to', 'k') \to 'tok'` | `['tok', 'e', 'n', 'i', 'z', 'a', 't', 'ion</w>']` | $8$ | $1.50\times$ |
 | **Step 5** | $\dots \text{ (subword merges)}$ | `['token', 'iz', 'ation</w>']` | $3$ | $4.00\times$ |
 | **Final** | `('iz', 'ation</w>') \to 'ization</w>'` | `['token', 'ization</w>']` | **2** | **$6.00\times$ sequence reduction** |
 
@@ -1225,20 +1258,25 @@ Tokenization serves as the front-end CPU ingestion phase of modern deep learning
 | :--- | :--- | :--- | :--- |
 | **1. Text Normalization** | Raw input stream | Normalized UTF-8 string | Strips excess whitespace; handles Unicode canonicalization |
 | **2. Subword Tokenization** | Cleaned text string | `list[int]` token IDs | `BPETokenizer.encode()` applies ordered merge replay |
-| **3. Batch Padding & Truncation**| Variable `list[list[int]]` | Uniform array $(B, T)$ | `tokenize_dataset()` enforces static dimension ceilings |
+| **3. Batch Truncation** | Variable `list[list[int]]` | Bounded `list[list[int]]`, rows $\le T_{\max}$ | `tokenize_dataset()` enforces a length ceiling |
 | **4. Tensor Ingestion** | NumPy integer matrix | `Tensor(B, T)` | TinyTorch `Tensor` loaded to compute device |
 | **5. Embedding Lookup** | Token IDs $(B, T)$ | Dense Activations $(B, T, D)$ | Module 11 `Embedding` layer table lookup |
+
+Stage 3 caps the long sequences but leaves the short ones short, so the rows it hands
+to stage 4 are still ragged and `np.array()` on them raises `ValueError: setting an
+array element with a sequence`. Filling out a rectangular $(B, T)$ buffer needs a pad
+token and a mask, which Module 11 will add alongside the embedding table.
 
 ### Integration Components Built
 
 - **`create_tokenizer(strategy, vocab_size, corpus)`**: Factory pattern for instantiating and training `CharTokenizer` or `BPETokenizer`.
-- **`tokenize_dataset(texts, tokenizer, max_length)`**: Batch processing engine enforcing uniform sequence bounds for downstream matrix operations.
+- **`tokenize_dataset(texts, tokenizer, max_length)`**: Batch processing engine enforcing an upper bound on sequence length, truncating anything longer.
 - **`analyze_tokenization(texts, tokenizer)`**: Profiling diagnostic reporting compression ratio, sequence length distributions, and vocabulary coverage.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tokenization-utils", "solution": true}
 #| export
-def create_tokenizer(strategy: str = "char", vocab_size: int = 1000, corpus: List[str] = None) -> Tokenizer:
+def create_tokenizer(strategy: str = "char", vocab_size: int = 1000, corpus: Optional[List[str]] = None) -> Tokenizer:
     """
     Factory function to create and train tokenizers.
 
@@ -1275,7 +1313,7 @@ def create_tokenizer(strategy: str = "char", vocab_size: int = 1000, corpus: Lis
     return tokenizer
     ### END SOLUTION
 
-def tokenize_dataset(texts: List[str], tokenizer: Tokenizer, max_length: int = None) -> List[List[int]]:
+def tokenize_dataset(texts: List[str], tokenizer: Tokenizer, max_length: Optional[int] = None) -> List[List[int]]:
     """
     Tokenize a dataset with optional length limits.
 
@@ -1313,7 +1351,7 @@ def tokenize_dataset(texts: List[str], tokenizer: Tokenizer, max_length: int = N
     return tokenized
     ### END SOLUTION
 
-def analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, float]:
+def analyze_tokenization(texts: List[str], tokenizer: Tokenizer) -> Dict[str, Union[int, float]]:
     """
     Analyze tokenization statistics.
 
@@ -1655,13 +1693,13 @@ r"""
 
 The selection of vocabulary size $V$ governs a fundamental systems tension between **CPU memory allocation** (embedding parameter footprint) and **GPU compute complexity** (self-attention sequence scaling):
 
-| Strategy | Target Vocab Size $V$ | Sequence Length $T$ (1k words) | Embedding Table ($D=4096$) | Attention FLOPs ($\mathcal{O}(T^2)$) | Primary Systems Ceiling |
+| Strategy | Target Vocab Size $V$ | Sequence Length $T$ (1k words) | Embedding Table ($D=4096$) | Attention Matrix Entries ($T^2$, per head) | Primary Systems Ceiling |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Character-Level** | $\approx 100 - 256$ | $\approx 5{,}000$ tokens | $\mathbf{1.6\text{ MB}}$ (L3 cache resident) | **$25.0\text{M MACs}$** ($14.8\times$) | Compute & KV-Cache Bound |
-| **BPE-Compact** | $\approx 8{,}000$ | $\approx 1{,}600$ tokens | $\mathbf{131.1\text{ MB}}$ | **$2.56\text{M MACs}$** ($1.5\times$) | Balanced Edge Footprint |
-| **BPE-Standard (GPT-2/3)**| $\approx 50{,}257$ | $\approx 1{,}300$ tokens | $\mathbf{823.4\text{ MB}}$ | **$1.69\text{M MACs}$** ($1.0\times$) | Balanced Server Footprint |
-| **BPE-Extended (GPT-4/Llama 3)**| $\approx 100{,}000 - 128{,}256$ | $\approx 1{,}150$ tokens | $\mathbf{1.64\text{ GB}} - \mathbf{2.10\text{ GB}}$ | **$1.32\text{M MACs}$** ($0.78\times$) | High VRAM Allocation |
-| **Word-Level** | $>200{,}000$ | $\approx 1{,}000$ tokens | $\mathbf{>3.28\text{ GB}}$ | **$1.00\text{M MACs}$** ($0.59\times$) | OOV Spillage & Parameter Blowup |
+| **Character-Level** | $\approx 100 - 256$ | $\approx 5{,}000$ tokens | $\mathbf{1.6\text{ MB}}$ (L3 cache resident) | **$25.0\text{M}$ entries** ($14.8\times$) | Compute & KV-Cache Bound |
+| **BPE-Compact** | $\approx 8{,}000$ | $\approx 1{,}600$ tokens | $\mathbf{131.1\text{ MB}}$ | **$2.56\text{M}$ entries** ($1.5\times$) | Balanced Edge Footprint |
+| **BPE-Standard (GPT-2/3)**| $\approx 50{,}257$ | $\approx 1{,}300$ tokens | $\mathbf{823.4\text{ MB}}$ | **$1.69\text{M}$ entries** ($1.0\times$) | Balanced Server Footprint |
+| **BPE-Extended (GPT-4/Llama 3)**| $\approx 100{,}000 - 128{,}256$ | $\approx 1{,}150$ tokens | $\mathbf{1.64\text{ GB}} - \mathbf{2.10\text{ GB}}$ | **$1.32\text{M}$ entries** ($0.78\times$) | High VRAM Allocation |
+| **Word-Level** | $>200{,}000$ | $\approx 1{,}000$ tokens | $\mathbf{>3.28\text{ GB}}$ | **$1.00\text{M}$ entries** ($0.59\times$) | OOV Spillage & Parameter Blowup |
 
 #### Mathematical Systems Trade-Off
 
@@ -1669,7 +1707,7 @@ The total inference memory footprint divides between static parameter weights an
 
 $$M_{\text{embed}} = V \times D \times 4\text{ bytes}, \qquad M_{\text{attn}} = 2 \times B \times H \times T^2 \times 4\text{ bytes}$$
 
-Because attention scales **quadratically** with sequence length $T$ while embedding memory scales **linearly** with vocabulary size $V$, modern LLMs intentionally scale vocabulary up to $\approx 100\text{K} - 128\text{K}$ tokens. This shortens sequence lengths by $15\% - 25\%$, providing compound latency savings throughout deep multi-layer transformer blocks.
+Because attention scales **quadratically** with sequence length $T$ while embedding memory scales **linearly** with vocabulary size $V$, modern LLMs intentionally scale vocabulary up to $\approx 100\text{K} - 128\text{K}$ tokens. By the table above that buys roughly $12\%$ shorter sequences ($1{,}300 \to 1{,}150$ tokens), and because attention is quadratic in $T$ even that modest cut compounds across every layer.
 
 #### Industry Benchmark Tokenizers
 
@@ -1774,90 +1812,84 @@ r"""
 Answer these questions to deepen your systems understanding of tokenization, memory footprint, and transformer computational complexity:
 
 ### Question 1: Vocabulary Size, Dictionary Overhead & Embedding VRAM Scaling
-You implemented tokenizers spanning from character-level ($V \approx 100$) to BPE subwords ($V \approx 50{,}000$).
+**Question**: You implemented tokenizers spanning character-level ($V \approx 100$) to BPE subwords ($V \approx 128{,}000$). Two very different memories pay for that vocabulary, a Python `dict` on the host and an embedding table on the accelerator. Which one actually constrains the deployment?
 
-**1. Tokenizer RAM Overhead in Python**:
-In a Python runtime, each vocabulary entry is stored in a hash table (`dict`) mapping a string token to an integer ID:
-- Base string object overhead in CPython: $\approx 50\text{ bytes} + \text{string length}$.
-- Integer ID object: $\approx 28\text{ bytes}$.
-- Hash table bucket entry (pointer pair + hash code): $\approx 16\text{ bytes}$ with $\approx 2/3$ load factor.
-- Total per-entry memory: $\approx 100\text{ bytes}$.
+**Real-world context**: In CPython each vocabulary entry costs roughly $100\text{ bytes}$, made up of a string object ($\approx 50\text{ bytes}$ plus the token's length), an integer ID object ($\approx 28\text{ bytes}$), and a hash-table bucket holding a pointer pair and a cached hash ($\approx 16\text{ bytes}$ at a $\approx 2/3$ load factor). The downstream embedding table $W_{\text{embed}} \in \mathbb{R}^{V \times D}$ and the output unembedding head must both reside in accelerator VRAM:
 
-$$\text{Memory}_{\text{char}} \approx 100 \times 100\text{ B} \approx 10\text{ KB}$$
-$$\text{Memory}_{\text{BPE}} \approx 50{,}000 \times 100\text{ B} \approx 5.0\text{ MB}$$
+$$\text{Embedding Memory} = V \times D \times 4\text{ bytes} \quad (\texttt{float32})$$
 
-**2. Downstream Embedding Table Scaling**:
-While a $5\text{ MB}$ tokenizer dictionary easily fits into host CPU RAM, the downstream neural network embedding table $W_{\text{embed}} \in \mathbb{R}^{V \times D}$ and output unembedding head must reside in GPU VRAM (assuming hidden dimension $D = 4{,}096$ and `float32` precision):
+**Calculate** (with $D = 4{,}096$ and `float32`):
 
-$$\text{Embedding Memory} = V \times D \times 4\text{ bytes}$$
-
-| Tokenizer Type | Vocab Size $V$ | Dict RAM | Embedding VRAM ($D=4{,}096$) | Unembedding GEMM FLOPs |
+| Tokenizer Type | Vocab Size $V$ | Dict RAM | Embedding VRAM | Unembedding GEMM FLOPs (given) |
 | :--- | :--- | :--- | :--- | :--- |
-| **Character** | $100$ | $10\text{ KB}$ | $1.64\text{ MB}$ | $8.19 \times 10^5$ |
-| **Small BPE (GPT-2)** | $50{,}257$ | $5.1\text{ MB}$ | $823.4\text{ MB}$ | $4.12 \times 10^8$ |
-| **Large BPE (Llama 3)** | $128{,}256$ | $13.5\text{ MB}$ | $2{,}101.2\text{ MB}$ ($2.1\text{ GB}$) | $1.05 \times 10^9$ |
+| **Character** | $100$ | ___________ KB | ___________ MB | $8.19 \times 10^5$ |
+| **Small BPE (GPT-2)** | $50{,}257$ | ___________ MB | ___________ MB | $4.12 \times 10^8$ |
+| **Large BPE (Llama 3)** | $128{,}256$ | ___________ MB | ___________ MB | $1.05 \times 10^9$ |
 
-**Systems Takeaway**:
-Scaling vocabulary size from $100 \to 128{,}000$ increases embedding table memory by over **$1{,}280\times$**! In models with untied weights, this $2.1\text{ GB}$ cost is paid twice (input embedding + final classification layer), consuming over $4.2\text{ GB}$ of GPU memory before a single transformer block is instantiated.
+**Consider**:
+- Both columns are linear in $V$, yet only one of them ever forces a hardware decision. Which one, and what is the ratio between the two at $D = 4{,}096$?
+- Going from $V = 100$ to $V = 128{,}256$, by what factor does embedding memory grow? Is that factor the vocabulary ratio itself, and why?
+- A model with untied input and output embeddings pays the $V \times D$ cost twice. For Llama 3's vocabulary at $D = 4{,}096$ in `float32`, how many GB is spent on embeddings before a single transformer block is instantiated?
+- Would halving $D$ or halving $V$ save more embedding memory? State what each choice costs elsewhere in the system.
 
 ---
 
 ### Question 2: Sequence Length Compression & Quadratic Attention Scaling
-For the input phrase `"machine learning"` (16 raw characters):
-- **Character Tokenizer**: Yields 16 tokens ($T_{\text{char}} = 16$).
-- **BPE Tokenizer**: Yields 3 tokens (`["machine", " learn", "ing"]`, $T_{\text{bpe}} = 3$), achieving a **$5.33\times$ compression factor**.
+**Question**: The phrase `"machine learning"` is 16 raw characters. Your `CharTokenizer` yields $T_{\text{char}} = 16$ tokens; a trained BPE tokenizer yields 3 (`["machine", " learn", "ing"]`). Compression is linear, but what it buys downstream is not.
 
-**Context Budget Utilization**:
-If your LLM context window is fixed at $T_{\text{max}} = 512$ tokens:
-- A character-level model fits at most $512 / 16 \approx 32$ phrases ($\approx 512$ characters, or roughly 80 words).
-- A BPE subword model fits $512 / 3 \approx 170$ phrases ($\approx 2{,}730$ characters, or roughly 450 words).
+**Real-world context**: Transformer self-attention compute scales quadratically with sequence length,
 
-**Quadratic Attention Impact**:
-Transformer self-attention compute scales quadratically with sequence length $\mathcal{O}(T^2)$:
 $$\text{Attention FLOPs} = 4 \cdot B \cdot H \cdot T^2 \cdot D_{\text{head}}$$
 
-For a document containing $1{,}000$ characters:
-- Character tokenization: $T = 1{,}000 \implies T^2 = 1{,}000{,}000$
-- BPE tokenization ($4.5\times$ compression): $T \approx 222 \implies T^2 = 49{,}284$
+while the KV cache written during autoregressive generation scales linearly in $T$.
 
-$$\text{Attention Compute Ratio} = \frac{1{,}000^2}{222^2} \approx \mathbf{20.3\times\text{ faster compute!}}$$
+**Calculate**:
+- Compression factor for this phrase: $16 / 3 =$ ___________$\times$
+- With a fixed context window $T_{\max} = 512$, phrases that fit under character tokenization: ___________; under BPE: ___________
+- For a $1{,}000$-character document at a $4.5\times$ compression factor: $T_{\text{char}} =$ ___________, $T_{\text{bpe}} =$ ___________, and the attention compute ratio $T_{\text{char}}^2 / T_{\text{bpe}}^2 =$ ___________$\times$
 
-**Systems Takeaway**:
-Subword tokenization is not just an NLP convenience; it is a **systems-level computational prerequisite** for long-context transformers. Compressing sequence length by $4.5\times$ cuts self-attention matrix multiplications by over **$20\times$** and slashes KV-cache memory during autoregressive generation by $4.5\times$.
+**Consider**:
+- The compression factor is $4.5\times$ but your compute ratio is far larger. Which exponent in the FLOP formula opens that gap?
+- KV-cache memory shrinks by only $4.5\times$, not by the compute ratio. Why do the two quantities scale differently with $T$?
+- At $T_{\max} = 512$, the character model holds roughly 64 words of context and the BPE model roughly 340 (counting 2 words per 16 characters, as in this phrase). State that gap as a factor, and explain why it matches the compression factor rather than its square.
 
 ---
 
 ### Question 3: Out-of-Vocabulary Robustness, Byte Fallback & Multilingual Fairness
-Why did modern LLMs abandon pure word-level vocabularies in favor of Byte-Level BPE?
+**Question**: Your `CharTokenizer` sends an unseen character to `<UNK>`, and your `BPETokenizer` sends an unseen subword to `<UNK>`. Production byte-level BPE has no `<UNK>` at all. What changed, and what did it cost?
 
-1. **The Word-Level `<UNK>` Catastrophe**:
-   In word tokenizers, any out-of-vocabulary word (slang, typos, code identifiers like `calculate_gradient_norm`) maps to `<UNK>`. The model loses all semantic signal, rendering technical documentation and programming languages unlearnable.
+**Real-world context**: Byte-level BPE seeds the base vocabulary with all $256$ raw byte values (`0x00` through `0xFF`) before learning a single merge, so any UTF-8 string is representable. Because merges are learned from corpus frequency, high-resource languages acquire long subwords ($4$ to $5$ characters per token) while low-resource scripts (Hindi, Thai, Arabic) and unusually indented code decompose toward individual bytes ($1$ to $3$ tokens per character). Autoregressive decoding emits one token per forward pass.
 
-2. **Byte-Level Fallback (Zero Unknown Tokens)**:
-   By initializing BPE with all 256 individual raw byte values (`0x00` through `0xFF`), any arbitrary UTF-8 string is guaranteed to be representable. Even unknown emojis or rare Unicode scripts decompose into byte sequences without dropping data.
+**Calculate**:
+- `BPETokenizer.train()` seeds its base alphabet from the training corpus alone. Train on `["hello", "hello", "help"]`: how many of the $256$ byte values are absent from the base alphabet, and what does `encode("héllo")` return at the accented character?
+- A Hindi prompt needs $3\times$ the tokens of its English equivalent. Give the ratio of per-request API cost, and the ratio of generation wall-clock time.
 
-3. **The Multilingual Tokenizer Tax**:
-   Because BPE merges are learned from corpus frequency distributions, high-resource languages (English) learn long, highly compressed subwords ($4\text{ to }5\text{ characters/token}$). In contrast, low-resource scripts (Hindi, Thai, Arabic) or programming code with uncommon indentations often decompose into individual bytes ($1\text{ to }3\text{ tokens per character}$).
-   - **Cost Penalty**: A non-English speaker transmitting the same semantic message may consume $3\times$ to $5\times$ more tokens.
-   - **Latency Penalty**: Autoregressive decoding generates one token per forward pass; generating $3\times$ more tokens takes $3\times$ longer wall-clock time.
-   - **Modern Mitigation**: Modern models like Llama 3 expanded vocabulary to $128\text{K}$ to ensure equitable byte-pair merges across diverse world languages.
+**Consider**:
+- Seeding all $256$ bytes guarantees zero `<UNK>`. What does that guarantee cost, in vocabulary slots and in sequence length, for text the merges already covered?
+- Word-level tokenizers collapse identifiers such as `calculate_gradient_norm` to a single `<UNK>`. Explain why that makes source code effectively unlearnable while character-level tokenization does not, in terms of what signal survives.
+- Llama 3 raised its vocabulary to $128\text{K}$ partly for multilingual parity. Using your Question 1 figures, what is the VRAM price of that decision at $D = 4{,}096$, and who pays it?
 
 ---
 
 ### Question 4: Production Serving Throughput, Rust Engines & KV-Cache Caching
-Consider a production deployment serving $1{,}000{,}000$ API requests per day, with an average prompt length of $500$ tokens:
-- **Total Daily Tokens**: $1{,}000{,}000 \times 500 = 500{,}000{,}000\text{ tokens/day}$.
+**Question**: A deployment serves $1{,}000{,}000$ API requests per day at an average prompt length of $500$ tokens. Tokenization runs on the CPU, before anything reaches the accelerator. Is the tokenizer a bottleneck?
 
-**Throughput Comparison**:
-- **Pure Python Tokenizer** ($0.1\text{ ms/token} \implies 10{,}000\text{ tokens/sec}$):
-  $$\text{Daily CPU Time} = \frac{500{,}000{,}000 \text{ tokens}}{10{,}000 \text{ tokens/s}} = 50{,}000\text{ seconds} \approx \mathbf{13.89\text{ CPU hours}}$$
-- **Fast Rust Tokenizer** (`tiktoken`, Hugging Face `tokenizers` @ $0.002\text{ ms/token} \implies 500{,}000\text{ tokens/sec}$):
-  $$\text{Daily CPU Time} = \frac{500{,}000{,}000 \text{ tokens}}{500{,}000 \text{ tokens/s}} = 1{,}000\text{ seconds} \approx \mathbf{16.67\text{ minutes}}$$
+**Real-world context**: A pure-Python tokenizer runs at roughly $0.1\text{ ms/token}$ ($10{,}000$ tokens/sec). A compiled Rust tokenizer (`tiktoken`, Hugging Face `tokenizers`) runs at roughly $0.002\text{ ms/token}$ ($500{,}000$ tokens/sec). Production systems then layer three techniques on top:
 
-**Production Architecture Techniques**:
-- **Compiled Multi-threaded Pre-tokenization**: Fast tokenizers split raw text using SIMD-accelerated regular expressions and execute BPE merges in parallel across CPU cores using Rust's `rayon`.
-- **System Prompt Prefix Caching**: In conversational agents, system prompts (e.g. 1,500 tokens of tool definitions and instructions) are identical across queries. Production servers tokenize the prompt once and cache both the token IDs and the pre-computed Key-Value (KV) attention tensors in GPU memory, completely bypassing tokenization and initial transformer prefill.
-- **Zero-Copy Memory Mapping (`mmap`)**: Vocabulary files and merge ranks are serialized into binary blobs (e.g. trie or perfect hash structures) and loaded via `mmap`, sharing a single read-only physical memory buffer across dozens of worker processes.
+- **Compiled multi-threaded pre-tokenization**: fast tokenizers split raw text with SIMD-accelerated regular expressions and execute BPE merges in parallel across CPU cores using Rust's `rayon`.
+- **System prompt prefix caching**: in conversational agents the system prompt (say 1,500 tokens of tool definitions and instructions) is identical across queries, so servers tokenize it once and cache both the token IDs and the pre-computed Key-Value attention tensors in GPU memory, bypassing tokenization and the initial transformer prefill.
+- **Zero-copy memory mapping (`mmap`)**: vocabulary files and merge ranks are serialized into binary blobs (a trie or a perfect hash structure) and loaded via `mmap`, so dozens of worker processes share one read-only physical buffer.
+
+**Calculate**:
+- Total daily tokens: ___________
+- Daily CPU time on the pure-Python path: ___________ hours
+- Daily CPU time on the Rust path: ___________ minutes
+- CPU cores the Python path needs to keep up with a 24-hour day ($86{,}400\text{ s}$): ___________
+
+**Consider**:
+- Your last answer comes out below one core. So what actually makes tokenizer speed matter in production, aggregate throughput or per-request latency, and at which point in the request does it show up?
+- Caching the system prompt's token IDs saves tokenization; caching its KV tensors saves prefill. Which saving dominates, and what does that say about where to spend engineering effort?
+- Using your Question 1 dict-RAM figure for a $128\text{K}$ vocabulary, how much RAM does `mmap` sharing save across 32 worker processes compared with one private copy each?
 """
 
 # %% [markdown]
@@ -1928,7 +1960,7 @@ Congratulations! You've built a complete tokenization system for converting text
 
 ### Systems Insights Discovered
 - **Memory scaling**: Embedding table size = vocab_size x embed_dim (can be 100+ MB)
-- **Sequence length trade-offs**: BPE compresses text, reducing compute by 3-4x
+- **Sequence length trade-offs**: BPE shortens sequences by about 3.8x, and because attention is quadratic in length that is roughly 15x less attention compute
 - **Training complexity**: BPE training costs about (merges x corpus size), since every merge rescans the corpus
 - **Production patterns**: Rust tokenizers are 10-100x faster than pure Python
 

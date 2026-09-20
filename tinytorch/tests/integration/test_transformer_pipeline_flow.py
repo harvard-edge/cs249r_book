@@ -23,7 +23,7 @@ class TestTransformerGradientFlow:
         num_heads = 4
         ff_dim = 64
 
-        block = TransformerBlock(embed_dim, num_heads, ff_dim)
+        block = TransformerBlock(embed_dim, num_heads, ff_dim=ff_dim)
 
         x = Tensor(
             rng.standard_normal((1, 8, embed_dim)),
@@ -53,7 +53,7 @@ class TestTransformerGradientFlow:
         ff_dim = 64
         num_layers = 4
 
-        blocks = [TransformerBlock(embed_dim, num_heads, ff_dim) for _ in range(num_layers)]
+        blocks = [TransformerBlock(embed_dim, num_heads, ff_dim=ff_dim) for _ in range(num_layers)]
 
         x = Tensor(
             rng.standard_normal((1, 8, embed_dim)),
