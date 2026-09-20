@@ -215,7 +215,7 @@ $$P_{r+1} = P_r + K_r + |O_r| = P_1 + \sum_{j=1}^r \left(K_j + |O_j|\right)$$
 
 As round index $r$ increases, the prefill cost $t_{\text{prefill}}(P_r)$ compounds, consuming substantial FLOP budgets merely to ingest the accumulated transcript of prior failures. If the agent runtime does not implement aggressive context compaction or eviction policies, the expanding history threatens to exceed the context window $S_{\max}$ or degrade model attention performance.
 
-### Comparative Latency, Compute, and Memory Mechanics
+### Deliberation Hardware Mechanics
 
 To evaluate how an agent runtime should partition its test-time budget, we formalize the operational profiles of each axis under a standard architectural model. Let $|\Theta|$ denote the count of active model parameters, $P$ denote the initial prompt length, $K$ denote the average generation length per candidate or round, and $b_{\text{bytes}}$ denote the precision representation size (e.g., 2 bytes for FP16 or BF16).
 
@@ -304,7 +304,7 @@ $$\mathcal{H}(\mathcal{C}) > 0 \quad \text{and} \quad \text{Acc}(\text{Selector}
 where $\mathcal{H}(\mathcal{C})$ represents semantic entropy across candidate pool $\mathcal{C}$, and $\text{Acc}(\text{Selector})$ is the selector's true-positive ranking accuracy over candidate trajectories.
 :::
 
-### Correlated Sampling and Effective Candidate Diversity
+### Candidate Diversity Dynamics
 
 To evaluate the yield of breadth-based deliberation, the runtime orchestrator must distinguish between *nominal sample count* $N$ and *effective sample count* $N_{\text{eff}}$. Consider an unprivileged foundation model $\Theta$ generating candidate trajectories $\mathbf{y}^{(1)}, \mathbf{y}^{(2)}, \dots, \mathbf{y}^{(N)}$ conditioned on prompt context $\mathbf{x}$. Each token $y_t^{(i)}$ is sampled sequentially from the categorical distribution computed by applying a softmax operator to the scaled logit vector:
 
@@ -323,7 +323,7 @@ despite having an edit distance greater than zero.
 
 Parallel decode streams sampled from this distribution exhibit correlated failure modes: they vary variable names, reorder non-dependent expressions, or swap control-flow constructs (such as substituting a `while` loop for a `for` loop) while retaining the identical structural error. The supervisor spends $N \times L$ decode steps only to evaluate minor lexical permutations of a single broken hypothesis.
 
-```text
+```c
 Candidate A:  lock.acquire(); data = read(); lock.release();  // Race: unprotected check
 Candidate B:  pthread_mutex_lock(&m); val = in->val; pthread_mutex_unlock(&m); // Identical race
 ```
@@ -340,7 +340,7 @@ Measuring whether these mechanisms yield genuine exploration requires semantic m
 
 Instead, agent supervisors compute structural and behavioral distance. In code synthesis domains, the supervisor compiles candidates into Abstract Syntax Trees (ASTs) and computes tree edit distances, or hashes normalized AST representations after canonicalizing variable identifiers and function signatures. In multi-step planning, the supervisor maps candidate step sequences into directed acyclic dependency graphs, comparing topological orderings rather than token strings. In general systems domains, the runtime clusters candidates by their *functional equivalence class*: two candidate proposals belong to the same equivalence class $[\mathbf{y}]$ if and only if they emit identical state transitions when executed against a deterministic smoke harness.
 
-### Selection Architectures: Voting, Scoring, and Execution Filtering
+### Selection Architectures
 
 
 ::: {.column-margin}
@@ -352,7 +352,7 @@ Once a diverse candidate set $\mathcal{C} = \{\mathbf{y}^{(1)}, \mathbf{y}^{(2)}
 
 ![**The Three-Tier Candidate Selection Cascade**: A defense-in-depth architecture filtering candidate proposals before execution. Tier 1 executes zero-FLOP deterministic checks (AST syntax, typing, static lints) to drop malformed proposals. Tier 2 clusters syntactically distinct candidates into semantic equivalence classes via majority voting and canonical hashing. Tier 3 evaluates reasoning steps with learned process reward models (PRMs) and verifies invariant closure before advancing to physical execution.](images/svg/candidate_selection_cascade.svg){#fig-candidate-selection-cascade width="95%"}
 
-#### Self-Consistency and Majority Voting {.unnumbered}
+#### Self-Consistency Mechanics {.unnumbered}
 
 Proposed by Wang et al. (2022), self-consistency exploits the empirical observation that while an unprivileged model may wander through diverse reasoning paths across different candidate decodes, correct trajectories often converge on the same terminal answer, whereas incorrect trajectories disperse across fragmented error states. The runtime partitions the candidate set into discrete equivalence classes:
 
@@ -366,7 +366,7 @@ Self-consistency provides an elegant, inference-only selection mechanism for clo
 
 However, self-consistency breaks down catastrophically in open-ended agentic domains. In software engineering, systems synthesis, or complex shell orchestration, the output space is continuous and unbounded. When sixteen independent candidates synthesize a device driver or refactor an asynchronous event loop, every generated sequence is textually and structurally unique. The equivalence classes degenerate into singletons ($|[\mathbf{y}]_\sim| = 1$ for all candidates), reducing majority voting to uniform random selection. Worse, if an agent prompt activates a common conceptual misconception, the mode of the distribution itself can be an error. In such cases, majority voting actively selects the consensus hallucination over an isolated, correct minority candidate.
 
-#### Learned Scoring and Verifier Inference {.unnumbered}
+#### Learned Verifier Scoring {.unnumbered}
 
 When majority voting fails due to output dispersion, runtimes deploy learned verifiers: secondary neural models parameterized by $\Phi$ trained to predict candidate correctness. As formalized by Lightman et al. (2023), learned verifiers fall into two structural classes:
 
@@ -422,7 +422,7 @@ $$T_{\text{PRM}} = \frac{2.29 \times 10^{15} \text{ FLOPs}}{400 \times 10^{12} \
 Generating the candidates consumes $21.4\text{ s}$ on the memory bus, while learned verification adds $5.73\text{ s}$ of compute time, bringing total deliberation latency to $27.13\text{ s}$. If the runtime deployed a deterministic static filter that dropped $75\%$ of candidates prior to PRM scoring, the verification phase latency would drop from $5.73\text{ s}$ to $1.43\text{ s}$, saving over four seconds of critical-path execution time.
 :::
 
-### The Verification Budget and the Selector Bottleneck
+### The Verification Budget
 
 Increasing candidate breadth $N$ yields diminishing returns governed by the operational accuracy of the selector. While sampling theory suggests that the probability of generating at least one correct candidate monotonically approaches 1 as $N \to \infty$ (assuming nonzero coverage across the search space), the probability that the selector *successfully identifies* that correct candidate behaves non-monotonically.
 
@@ -579,7 +579,7 @@ $$\mathbb{E}[\text{Cost}_{\text{FA}}] = 1.216 \times \$500.00 = \$608.00$$
 The risk-weighted damage of the verifier's false acceptance ($1.216$ instances) outstrips the raw GPU generation cost ($\$0.178$) by more than a factor of $3,400$. In systems design, verifier optimization must prioritize driving $\alpha \to 0$ over minimizing $\beta$.
 :::
 
-### Goodhart's Law and the Mechanics of Search Exploitation
+### Search Exploitation Mechanics
 
 When systems engineers scale test-time compute by increasing candidate generation breadth $N$ or the search tree expansion budget, they inadvertently subject the verification mechanism to extreme statistical pressure. This phenomenon is governed by Goodhart's Law, famously generalized by Marilyn Strathern: *When a measure becomes a target, it ceases to be a good measure.* In machine learning systems engineering, we state this principle rigorously through the taxonomy of Manheim and Garrabrant [-@manheim2018categorizing]:
 
@@ -628,7 +628,7 @@ $$P(\text{Exploit Discovery}) = 1 - (1 - \epsilon)^N = 1 - (0.995)^{1000} \appro
 
 High-intensity test-time search transforms marginal evaluation blind spots into deterministic failure pathways.
 
-#### Adversarial Sandboxing and Anti-Introspection Hardening {.unnumbered}
+#### Adversarial Sandboxing {.unnumbered}
 
 To prevent candidate trajectories from subverting the verification harness as illustrated in `ExploitCandidate`, production runtimes must treat candidate execution as untrusted, potentially hostile computation:
 
@@ -637,19 +637,19 @@ To prevent candidate trajectories from subverting the verification harness as il
 - **Interpreter-Level Anti-Introspection:** Within managed language runtimes, execution harnesses must strip frame-inspection hooks (`sys.settrace`, `sys.setprofile`), forbid dynamic introspection into parent caller frames (`sys._getframe`), and freeze core framework modules (`builtins`, `unittest`, `pytest`) using read-only proxies before delegating execution to candidate code.
 - **Immutable Verification Worktrees:** Candidate execution must run against ephemeral, isolated copy-on-write (CoW) git worktrees. All test suites, gold benchmarks, and assertion manifests must reside on read-only filesystem mounts (`MS_RDONLY`), guaranteeing that candidate mutations cannot modify the very assertions that evaluate them.
 
-### Robust Verification Topologies: Ensembles, Invariants, and Property-Based Oracles
+### Robust Verification Topologies
 
 To defend the verification boundary against Goodhart exploitation and eliminate single points of evaluation failure, agent runtimes must implement layered, heterogeneous verification topologies. Relying on a single verifier—whether a neural PRM or a static suite of hardcoded unit tests—is an architectural anti-pattern. Systems integrity requires *defense-in-depth*, organizing checks into three robust defensive layers.
 
 ![**The Multi-Layered Verification Pipeline**: Defense-in-depth architecture filtering candidate proposals before state mutation. Deterministic AST filters and static linters eliminate syntactically invalid candidates (&lt;2 ms); property-based fuzzers and isolated sandbox test suites evaluate functional regressions (100–2,000 ms); policy and invariant checks confirm safety boundaries before state commit.](images/svg/verification_pipeline_gates.svg){#fig-vol3-verification-gates width="95%"}
 
-#### Layer 1: Immutable Syntax and Deterministic Structural Guards {.unnumbered}
+#### Layer 1: Deterministic Structural Guards {.unnumbered}
 Before invoking runtime environments or neural scoring models, candidates must clear strict, low-overhead AST-level filters. This layer enforces immutable structural constraints:
 
 - **Abstract Syntax Tree (AST) Validation:** Forbids dynamic imports of low-level runtime modules (e.g., `sys`, `ctypes`, `builtins`, or debugging introspection frames such as `sys._getframe`) designed to inspect or alter the execution harness.
 - **Static Invariant Linters:** Enforces strict type signatures, disallows modification to files outside the explicitly authorized task manifest, and guarantees that candidate edits do not touch test configuration files or CI definitions.
 
-#### Layer 2: Property-Based Fuzzing and Metamorphic Invariants {.unnumbered}
+#### Layer 2: Property-Based Invariants {.unnumbered}
 Static unit tests evaluate only specific, predictable coordinate points in input-output space, making them vulnerable to trivial hardcoded lookups. Systems runtimes deploy property-based testing and metamorphic relation checks to evaluate invariants over dynamically sampled operational domains:
 
 - **Round-Trip Serialization Invariants:** For state manipulation routines, candidates must satisfy inverse operational identities:
@@ -665,7 +665,7 @@ Static unit tests evaluate only specific, predictable coordinate points in input
 No single verifier possesses complete domain coverage. Deterministic filters eliminate syntactically invalid proposals; property-based fuzzers uncover edge-case behavioral panics; neural ensembles evaluate semantic alignment. A candidate must clear all layers to earn acceptance.
 :::
 
-#### Layer 3: Heterogeneous PRM Ensembles and Consensus Voting {.unnumbered}
+#### Layer 3: PRM Ensembles {.unnumbered}
 When neural verification is necessary to assess semantic reasoning or qualitative design criteria, the runtime mitigates individual model exploits by deploying ensembles of distinct, decorrelated verifiers. Instead of querying a single PRM derived from the same base model weights as the generator $\pi_\theta$, the runtime evaluates transitions across $M$ distinct verifier models:
 
 $$\mathcal{V} = \{V_1, V_2, \dots, V_M\}$$
@@ -724,13 +724,13 @@ This node-level lifecycle directly governs runtime dispatch. A node $v_i$ cannot
 
 Representing the plan as an explicit graph divorces operational structure from linguistic representation. It allows the agent runtime to schedule independent subgoals concurrently, isolate execution failures to specific subgraphs, and maintain a verifiable audit trail of intermediate evidence without polluting the model's active inference context with sprawling, unparsed narratives.
 
-### Precondition Verification and Invalidation Detection {#sec-vol3-deliberation-precondition-invalidation}
+### Precondition Verification {#sec-vol3-deliberation-precondition-invalidation}
 
 Operating under Zero Ambient Authority ($A=0$), the runtime mediates every interaction between the neural engine and the execution environment. The foundation model functions purely as an unprivileged predictor proposing candidate actions; it possesses no inherent authority to execute operations or declare that an operational invariant holds. The fundamental friction in autonomous execution arises from the epistemic gap: the divergence between the model's parametric assumptions regarding the environment and the ground-truth physical state $\mathcal{S}$.
 
 A model frequently generates actions based on stale or idealized beliefs. For example, in a software maintenance task, an agent may synthesize an action to link a shared library assuming standard distribution paths exist. If the host environment lacks the requisite headers or uses a non-standard ABI, an unmediated sequential executor would execute subsequent compilation commands, generating cascading, uninterpretable downstream faults.
 
-```text
+```bash
 FAILED: lib/libtransport.so
 /usr/bin/ld: cannot find -luring: No such file or directory
 clang-16: error: linker command failed with exit code 1
@@ -747,7 +747,7 @@ $$\mathcal{V}_{\text{invalid}} = \text{Desc}(v_i) = \{v_k \in \mathcal{V} \mid v
 
 The runtime computes the downstream reachability set $\text{Desc}(v_i)$ via a breadth-first traversal over $\mathcal{E}$ and immediately transitions every identified descendant node to the $\text{Invalidated}$ state. This prevents the execution of orphaned branches whose causal assumptions have collapsed. Crucially, any node $v_m \notin \text{Desc}(v_i)$ that belongs to an independent, concurrent branch of the DAG remains completely unaffected. Its preconditions remain valid, its execution may proceed unhindered, and its verified computational results are preserved in memory escrow.
 
-### Hierarchical Revision Mechanics: Repair, Prune, and Escalate {#sec-vol3-deliberation-revision-mechanics}
+### Hierarchical Revision Mechanics {#sec-vol3-deliberation-revision-mechanics}
 
 Once an invalidation is localized, the deliberation engine must adapt the plan. Naive agent implementations respond to errors by discarding the entire plan and requesting a complete regeneration from the model. This is computationally reckless: it consumes excessive generation tokens, increases end-to-end task latency, and risks re-executing non-idempotent operations that have already altered the physical environment. Saltzer and Kaashoek's principle of modular error containment dictates that a system should handle faults at the lowest possible layer capable of resolving them. Accordingly, the runtime implements a three-tier hierarchical revision strategy.
 
@@ -756,7 +756,7 @@ Once an invalidation is localized, the deliberation engine must adapt the plan. 
 #### Local Repair (Node-Level Retrial) {.unnumbered}
 Local repair is triggered when the failure of node $v_i$ can be remediated without altering its external contract—that is, without changing the expected postcondition profile $\mathcal{O}_i^*$ expected by its downstream descendants $\text{Desc}(v_i)$. The graph topology $\mathcal{E}$ remains completely unchanged. The runtime provides the model with a tightly scoped context containing only the subgoal $g_i$, the failing action $a_i$, and the immediate error observation $\mathbf{o}_i$, prompting the model to generate a revised action payload $a_i'$. Examples include correcting a malformed CLI flag, substituting an equivalent utility path, or adjusting a timeout parameter. If $a_i'$ satisfies $\mathcal{O}_i^*$, node $v_i$ transitions to $\text{Verified}$, and downstream execution resumes without any structural disturbance to the plan graph.
 
-#### Subgraph Pruning and Resynthesis (Branch-Level Replanning) {.unnumbered}
+#### Subgraph Resynthesis {.unnumbered}
 When local repair fails or when the environment reveals that the postcondition $\mathcal{O}_i^*$ cannot be achieved (for example, a required third-party dependency is unavailable in the host distribution), the runtime escalates to subgraph pruning. The scheduler excises the failed node $v_i$ and all its downstream descendants $\text{Desc}(v_i)$ from the active plan. The verified nodes $\mathcal{V}_{\text{verified}}$ and their accumulated state deltas $\Delta$ remain anchored in memory escrow.
 
 The runtime then queries the model to synthesize a replacement subgraph $\mathcal{G}'_{\text{sub}} = (\mathcal{V}'_{\text{sub}}, \mathcal{E}'_{\text{sub}})$. The prompt for this resynthesis does not demand a complete task plan; rather, it frames a bounded graph-stitching problem:
@@ -811,7 +811,7 @@ $$T_{\text{decode, Policy B}} = \frac{450 \text{ tokens}}{40 \text{ tokens/s}} =
 Subgraph resynthesis delivers a **$4.0\times$ speedup** in critical-path replanning latency while avoiding the risk of re-executing or corrupting the verified state deltas produced by steps $v_1$ through $v_5$.
 :::
 
-### Damping Invariants and the Replanning Thrashing Trap {#sec-vol3-deliberation-replanning-thrashing}
+### Replanning Damping Invariants {#sec-vol3-deliberation-replanning-thrashing}
 
 While treating plans as revisable state is necessary to survive physical environment volatility, an unconstrained replanning policy introduces a severe dynamic failure mode: the replanning thrashing trap. In operating systems, paging thrashing occurs when a machine spends more cycles shuttling virtual memory pages between disk and DRAM than executing user instructions. In an agent runtime, replanning thrashing occurs when the system spends more compute and time modifying its plan graph than executing actions that advance physical state.
 
@@ -821,10 +821,10 @@ Replanning thrashing is typically catalyzed by over-sensitive invalidation predi
 
 To prevent thrashing, the runtime enforces three structural damping invariants:
 
-#### Observation Filtering and Predicate Partitioning {.unnumbered}
+#### Observation Filtering {.unnumbered}
 Environmental feedback must be formally partitioned into structural contract violations and informational warnings. A node's postcondition profile $\mathcal{O}_i^*$ must never rely on raw textual equivalence of stdout or stderr streams. Instead, predicates are defined over semantic ground truths: exit code status matrices, file system property checks (such as verifying inode existence, file size thresholds, or cryptographic checksums), or explicit JSON schema validations. Unmatched warning tokens are routed to an informational accumulator rather than triggering the node invalidation handler.
 
-#### Bounded Replanning Budgets and Graph Hysteresis {.unnumbered}
+#### Bounded Replanning Budgets {.unnumbered}
 The runtime assigns an explicit replenishment budget to structural mutations across any given trajectory $\tau$. Let $R_{\text{budget}}$ represent the maximum number of structural branch resyntheses permitted for the task. Each invocation of subgraph resynthesis decrements this budget:
 
 $$R_{\text{budget}} \leftarrow R_{\text{budget}} - 1$$
@@ -837,7 +837,7 @@ $$\chi = \frac{|\mathcal{V}_{\text{mutated}}|}{|\mathcal{V}_{\text{initial}}|}$$
 If the cumulative churn ratio $\chi$ exceeds an architectural threshold (typically $\chi > 2.0$), the deliberation engine declares dynamic instability and forces an evaluation pause.
 :::
 
-#### Step Quarantine and Invalidation Hysteresis {.unnumbered}
+#### Step Quarantine Mechanics {.unnumbered}
 To prevent cyclic replanning—where the model alternates indefinitely between two mutually exclusive sub-plans across successive steps—the runtime maintains an ephemeral quarantine ledger of failed action signatures within the trajectory state. If a proposed resynthesized branch introduces a node $v_k'$ whose action signature matches a previously quarantined failure:
 
 $$\text{Sig}(a_k') \in \mathcal{K}_{\text{quarantine}}$$
@@ -856,7 +856,7 @@ An unconstrained tree search running an autoregressive generator rapidly trigger
 
 **A search topology cannot be decoupled from its resource accounting and stopping criteria: test-time deliberation is a constrained optimization problem where the agent runtime must dynamically balance token budgets, wall-clock latency, verification costs, and execution risk. Left unmanaged, search either collapses into compute starvation or degenerates into over-deliberation on low-value branches.**
 
-### Search Topologies: Flat Sampling, Beam Search, and Tree Search
+### Search Topologies
 
 The architecture of test-time deliberation is defined by its state-space exploration topology. When an agent moves beyond a single autoregressive decode, the host runtime must organize candidate trajectories into an explicit data structure that governs how alternatives are proposed, evaluated, and pruned. Three distinct topologies dominate practical systems: flat parallel sampling (Best-of-$N$), pruned iterative expansion (Beam Search), and tree search guided by exploration-exploitation heuristics (Monte Carlo Tree Search).
 
@@ -1003,7 +1003,7 @@ Compute the total tokens generated, total wall-clock latency $T_{\text{wall}}$, 
 Beam search with process verification achieves roughly equivalent wall-clock time ($11.26\text{ s}$ vs. $11.70\text{ s}$) while cutting total FLOP expenditure and token consumption by **$37.3\%$**. The compute saved by early step pruning directly compensates for the overhead of the PRM model and synchronous pipeline stalls.
 :::
 
-### Multicriteria Stopping and Diminishing Returns
+### Multicriteria Stopping Invariants
 
 A search engine without terminating boundaries will consume infinite tokens or spin endlessly in recursive tool invocations. The host runtime must enforce explicit, multicriteria stopping rules that govern when to commit to a candidate, when to prune a subtree, and when to abort search entirely.
 
@@ -1116,7 +1116,7 @@ $$C_{\text{eff}} = \frac{\mathbb{E}[C]}{P(\text{verified success})}$$
 
 where $\mathbb{E}[C]$ denotes the expected resource cost per problem instance—measured in aggregated generation tokens or floating-point operations—and $P(\text{verified success})$ is the proportion of tasks that pass the host supervisor's verification harness. If a baseline single-candidate policy achieves 45% accuracy at an average cost of 512 tokens, its $C_{\text{eff}}$ is $1{,}138$ tokens per successful outcome. If an iterative refinement loop achieves 68% accuracy but burns an average of $4{,}096$ tokens across repeated review iterations, its $C_{\text{eff}}$ inflates to $6{,}024$ tokens per successful outcome—a more than five-fold increase in the resource cost required to deliver a single verified deliverable.
 
-#### Wall-Clock Latency Distributions and Tail Amplification {.unnumbered}
+#### Wall-Clock Latency Distributions {.unnumbered}
 
 Different deliberation topologies distribute their computational load across the critical path in fundamentally disparate ways:
 
@@ -1134,7 +1134,7 @@ Different deliberation topologies distribute their computational load across the
 
 - *Feedback-Heavy Topologies (Environment Interrogation):* Interleaving token generation with containerized sandboxes, unit test execution, or compilation runs introduces non-deterministic host system overhead. The total latency becomes dominated by process fork times, compilation overhead, and filesystem I/O.
 
-#### False Acceptance Rate and Silent Failure Leakage {.unnumbered}
+#### False Acceptance Rate {.unnumbered}
 
 When candidate selection relies on automated verifiers, heuristic linters, or learned process reward models, search optimization is governed by Goodhart's Law: *when a measure becomes a target, it ceases to be a good measure.* As the breadth of candidate exploration $N$ expands, the likelihood that the generator discovers an adversarial edge case—a candidate that technically satisfies the verifier's syntactic checks while completely violating the underlying task invariants—grows monotonically.
 
@@ -1166,7 +1166,7 @@ The empirical execution logs yield the performance metrics summarized below:
 - *Silent Failure Risk:* Parallel Best-of-8 leaks an alarming 9% False Acceptance Rate. By generating 8 diverse candidates, the model frequently crafts subtle exploits that pass incomplete test assertions (e.g., hardcoding expected return values for specific test cases).
 :::
 
-### The Deliberation Pareto Frontier and Regimes of Failure
+### The Deliberation Pareto Frontier
 
 Plotting empirical task success against token consumption and wall-clock latency reveals the **Deliberation Pareto Frontier**—the set of optimal operating points where no alternative allocation of inference compute can achieve higher accuracy without consuming more resources or violating latency bounds.
 
@@ -1191,7 +1191,7 @@ def is_pareto_efficient(candidates: list[tuple[float, float, float]]) -> list[bo
     return efficient
 ```
 
-#### Regimes of Failure: Negative Transfer and Over-Deliberation {.unnumbered}
+#### Regimes of Failure {.unnumbered}
 
 Crucially, deliberation is not universally beneficial. Across a broad class of operational tasks, allocating additional test-time computation produces **negative transfer**: an observable phenomenon where search degrades performance below the single-shot baseline.
 
