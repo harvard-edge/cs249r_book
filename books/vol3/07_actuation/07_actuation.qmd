@@ -293,20 +293,15 @@ By standardizing these primitives, the runtime establishes a clear operational l
 
 *Remote HTTP transports impose a 97× to 5,600× latency tax over local Unix domain sockets for inter-tool IPC.*
 :::
-The physical channel connecting the host agent client to an execution server dictates the system's operational latency, failure isolation, and deployment topology. The protocol abstraction decouples message serialization from the underlying transport, enabling runtimes to navigate three distinct operational regimes: local standard input/output pipes, local UNIX domain sockets, and remote streaming over HTTP with Server-Sent Events (SSE).
+The physical channel connecting the host agent client to an execution server dictates the system's operational latency, failure isolation, and deployment topology. The protocol abstraction decouples message serialization from the underlying transport, enabling runtimes to navigate three distinct operational regimes: local standard input/output pipes, local UNIX domain sockets, and remote streaming over HTTP with Server-Sent Events (SSE). @tbl-vol3-mcp-transports contrasts the architectural profiles of these transport topologies.
 
-```text
-(a) Standard I/O (stdio) Transport
-    Host Runtime (Client) ──[ write(stdin) ]──> Kernel Pipe Buffer ──> Tool Server (Child Process)
-    Host Runtime (Client) <──[ read(stdout) ]─── Kernel Pipe Buffer <── Tool Server (Child Process)
+| Transport Topology | Underlying IPC Primitives | Typical Round-Trip Latency | Process Lifecycle Coupling | Security & Isolation Boundary | Primary Failure Mode |
+|:---|:---|:---:|:---|:---|:---|
+| **Standard I/O (`stdio`)** | POSIX anonymous pipes (`pipe(2)`) via `stdin`/`stdout` | $< 0.5\text{ ms}$ (memory copy) | Direct child process (`fork`/`exec`); dies with host | In-process namespace / container sandbox | Pipe buffer saturation deadlock (`F_SETPIPE_SZ`) |
+| **UNIX Domain Socket (`UDS`)** | Filesystem socket inode (`AF_UNIX`, `SOCK_STREAM`) | $< 0.1\text{ ms}$ (zero-copy kernel) | Decoupled background daemon; multiplexed clients | POSIX filesystem permissions (`chmod`/`chown`) | Stale socket lockfiles (`/tmp/mcp.sock`); daemon crash |
+| **Remote HTTP with SSE** | TCP/IP, TLS, HTTP POST + `text/event-stream` SSE | $15\text{--}150\text{ ms}$ (network RTT) | Fully distributed; cloud clusters / remote enclaves | Network mTLS, bearer tokens, firewall CIDRs | Packet loss, connection drops, proxy buffering timeouts |
 
-(b) UNIX Domain Socket (UDS) Transport
-    Host Runtime (Client) ──[ send(2) / recv(2) ]──> Socket Inode (/tmp/mcp.sock) <──> Persistent Daemon
-
-(c) Remote HTTP with Server-Sent Events (SSE) Transport
-    Host Runtime (Client) ──[ HTTP POST (JSON-RPC) ]──> TCP/IP Stack ──> TLS ──> Gateway / Cluster
-    Host Runtime (Client) <──[ HTTP SSE Stream ]──────── TCP/IP Stack <── TLS <── Gateway / Cluster
-```
+: **Model Context Protocol Transport Topologies**: Architectural comparison of IPC transport mechanisms across latency, lifecycle, and isolation boundaries. {#tbl-vol3-mcp-transports}
 
 Local standard input/output (`stdio`) pipes represent the lowest-latency transport mechanism for co-located tools. In this topology, the host runtime spawns the tool server as a direct child process using the standard POSIX `fork(2)` and `execve(2)` system call sequence. The host connects its own file descriptors to the child's standard input and standard output streams via unidirectional kernel pipes instantiated with `pipe(2)`. JSON-RPC messages cross the process boundary via newline-delimited JSON strings. Because communication traverses only kernel memory buffers via memory copies without touching network interface controllers or protocol stacks, round-trip request latency remains sub-millisecond ($< 0.5\text{ ms}$).
 
