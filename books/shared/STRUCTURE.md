@@ -159,7 +159,6 @@ and `binder/tests/test_content_structure.py` enforces it.
 |  | frontmatter | `frontmatter/author_note.qmd` |
 |  | frontmatter | `frontmatter/about_author.qmd` |
 |  | frontmatter | `frontmatter/prerequisites.qmd` |
-|  | frontmatter | `frontmatter/syllabus.qmd` |
 |  | frontmatter | `frontmatter/acknowledgements.qmd` |
 |  | frontmatter | `frontmatter/ai_use.qmd` |
 |  | frontmatter | `frontmatter/notation.qmd` |
