@@ -13,31 +13,39 @@
 # ---
 
 # %% [markdown]
-"""
+r"""
 # Module 17: Acceleration - Hardware-Aware Optimization
 
-Welcome to Module 17! Compare vectorized operations, blocked multiplication, and GELU allocation patterns, connect them to production kernel fusion, and turn Module 09's convolution loops into a single matrix multiply.
+Welcome to Module 17! In this module, we transition from pure mathematical abstractions to silicon-level efficiency: vectorizing operations via BLAS GEMM kernels, analyzing memory traffic savings from operator fusion, implementing cache-aware matrix tiling, and lowering multi-loop 2D convolutions into single matrix multiplies via `im2col` and its backward dual `col2im`.
+
+<div align="center">
+  <img src="acceleration_blueprint.svg" alt="Acceleration Framework Blueprint" width="100%">
+</div>
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Complete neural network foundation with tensors (01), layers (03), autograd (06), training (08), and CNNs (09)
-**You'll Build**: Vectorized inference operations, tiled multiplication, an allocation comparison, and an im2col convolution you can train through
-**You'll Enable**: Hardware-efficient execution for production deployment
 
-**Connection Map**:
-```
-Layers (03) → Training (08) → CNNs (09) → Acceleration (17)
-(building blocks) (learning)   (spatial)  (speed up)
-```
+**You've Built**: Complete neural network foundation with autograd (`06_autograd`), training pipelines (`08_training`), spatial CNNs (`09_convolutions`), profiling diagnostics (`14_profiling`), and model compression (`15_quantization`, `16_compression`).
+**You'll Build**: Vectorized BLAS matrix multiplications, intermediate allocation analysis, cache-aware blocked matmul, and a fully differentiable `im2col`/`col2im` convolution engine.
+**You'll Enable**: Peak hardware FLOP/s utilization and minimal memory bus stalls for high-throughput edge and server inference.
+
+### Architectural Roadmap
+
+| Tier | Subsystem | Primitives & Capabilities | Status |
+| :--- | :--- | :--- | :--- |
+| **Modules 01–08** | Foundation Tier | `Tensor`, `Function`, `Linear`, `GELU`, `SGD`, `Adam`, `Trainer` | Completed |
+| **Modules 09–13** | Architecture Tier | `Conv2d`, `BPETokenizer`, `EmbeddingLayer`, `MultiHeadAttention`, `GPT` | Completed |
+| **Modules 14–16** | Optimization Diagnostics | `Profiler`, `count_flops`, `quantize_int8`, `magnitude_prune`, `KnowledgeDistillation` | Completed |
+| **Module 17** | **Hardware Acceleration** | `vectorized_matmul`, `fused_gelu`, `tiled_matmul`, `im2col`, `col2im`, `Im2colConv2dFunction` | **Active Subsystem** |
+| **Modules 18–20** | Serving & Capstone | `KVCache`, `BenchmarkingSuite`, `TinyGPT` | Downstream Consumers |
 
 ## 🎯 Learning Objectives
-By the end of this module, you will:
-1. Implement vectorized operations for maximum throughput
-2. Compare intermediate allocation costs and explain what true kernel fusion changes
-3. Understand the relationship between compute and memory bandwidth
-4. Lower a convolution to one matrix multiply with im2col, write its backward pass with col2im, and measure its speed and memory cost
-5. Analyze acceleration trade-offs in production systems
 
-Let's optimize for speed!
+By the end of this module, you will:
+1. **Vectorize Matrix Computations**: Leverage underlying BLAS (Basic Linear Algebra Subprograms) GEMM routines for hardware SIMD execution.
+2. **Audit Operator Memory Traffic**: Measure the memory bus footprint of multi-step element-wise pipelines and evaluate production compiler kernel fusion (e.g. Triton, TorchInductor).
+3. **Master Cache Blocking**: Implement cache-aware tiled matrix multiplication to maximize L1/L2 SRAM data reuse.
+4. **Lower Convolutions via im2col**: Transform seven nested spatial loops into a single contiguous GEMM, quantifying memory-versus-latency trade-offs.
+5. **Differentiate im2col via col2im**: Implement the transpose scatter-add backward pass to train convolutional networks at GEMM speed.
 
 ## 📦 Where This Code Lives in the Final Package
 
@@ -46,40 +54,17 @@ Let's optimize for speed!
 
 ```python
 # How to use this module:
-from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu, im2col_conv2d
+from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu, tiled_matmul, im2col, col2im, Im2colConv2dFunction
 ```
 
-**Why this matters:**
-- **Learning:** Complete acceleration system in one focused module for deep understanding
-- **Production:** Proper organization like PyTorch's torch.cuda and torch.backends with optimization components
-- **Consistency:** All acceleration operations and optimization components in perf.acceleration
-- **Integration:** Works seamlessly with neural network layers for complete performance optimization
-"""
-
-# %% [markdown]
-"""
 ## 📋 Module Dependencies
 
-**Prerequisites**: Module 01 (Tensor); Module 09 (Convolutions), whose Conv2d is the reference the im2col convolution must match; Module 14 (Profiling) for the measurement habits
-
-**External Dependencies**:
-- `numpy` (for array operations and numerical computing)
-- `time` (for performance measurement)
-
-**TinyTorch Dependencies**:
-- `tinytorch.core.tensor` (Tensor and Function from Module 01; Module 06 makes Function record gradients)
-- `tinytorch.core.spatial` (Conv2d from Module 09, used by the tests as the reference)
-- `tinytorch.perf.profiling` (Profiler from Module 14)
-
-**Dependency Flow**:
-```
-Module 01 (Tensor) → Module 09 (Conv2d) → Module 14 (Profiling) → Module 17 (Acceleration)
-     ↓                     ↓                     ↓                       ↓
-  Foundation         Loop reference       Measurement Tools     Performance Optimization
-```
-
-Students completing this module will have built acceleration techniques
-that work with the complete TinyTorch performance optimization stack.
+| Dependency Component | Source Module | Systems Capability Exploited | Integration Role |
+| :--- | :--- | :--- | :--- |
+| **`Tensor` & `Function`** | Module 01 (`01_tensor`) | Multidimensional data container & computational graph node | Base tensor representations & custom autograd mechanics |
+| **`autograd` Engine** | Module 06 (`06_autograd`) | Reverse-mode automatic differentiation graph traversal | Backpropagates through `Im2colConv2dFunction` |
+| **`Conv2d` Reference** | Module 09 (`09_convolutions`) | Seven-loop explicit spatial convolution kernel | Golden mathematical reference for im2col verification |
+| **`Profiler`** | Module 14 (`14_profiling`) | High-resolution microsecond latency and memory benchmarking | Validates acceleration speedup & memory savings |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
@@ -100,130 +85,94 @@ DEFAULT_TIMING_ITERATIONS = 5  # Default timing iterations for measurement
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
 
 # %% [markdown]
-"""
-## 💡 Introduction: The Performance Challenge
+r"""
+## 💡 Introduction: The Performance Challenge & The Roofline Model
 
-Before we learn acceleration techniques, let's understand the performance gap.
-Neural networks often underutilize hardware due to:
-- Sequential operations (no parallelism)
-- Poor memory access patterns (cache misses)
-- Missing SIMD (Single Instruction, Multiple Data) opportunities
-- Separate operations (memory bandwidth waste)
+Modern deep learning workloads are constrained not only by theoretical FLOP capacity, but by the physical movement of bytes across silicon memory hierarchies. Understanding whether a workload is compute-bound or memory-bound dictates whether optimization requires algorithmic restructuring or memory traffic elimination.
 
-We'll measure how vectorization and allocation choices affect execution, then examine kernel fusion as a production extension.
+<div align="center">
+  <img src="roofline_model_performance.svg" alt="Roofline Model Performance Bounds" width="100%">
+</div>
 
-### The Two Enemies of Performance
+### The Two Fundamental Execution Bottlenecks
 
-Modern neural networks face two fundamental bottlenecks that limit their speed:
+| Characteristic | Compute-Bound Regime | Memory-Bound Regime |
+| :--- | :--- | :--- |
+| **Silicon Limiter** | ALU / Vector / Tensor Core throughput | DRAM / High-Bandwidth Memory (HBM) bus |
+| **Typical Operations** | Large GEMMs ($M, N, K \ge 512$), 2D Convolutions, Multi-Head Attention projections | Element-wise activations (GELU, ReLU), LayerNorm, Softmax, Batch Size 1 inference |
+| **Hardware State** | Execution units saturated ($100\%$ compute); memory bus partially idle | Compute units stalled waiting for operands; memory bus saturated ($100\%$ bandwidth) |
+| **Optimization Strategy** | Vectorization (SIMD/BLAS), systolic tiling, algorithmic lowering (im2col, Winograd) | Operator fusion (Triton/CUDA), buffer elimination, memory coalescing, quantization |
 
-**1. Compute Bound Operations:**
-```
-CPU/GPU Cores: [====BUSY====] [====BUSY====] [====BUSY====]
-Memory Bus:    [---idle---] [---idle---] [---idle---]
+### The Roofline Model Formulation
 
-When: Matrix multiplication, convolutions
-Solution: Vectorization, better algorithms
-```
+The Williams et al. Roofline Model establishes the upper bound on attainable execution throughput $P$ as a function of operational arithmetic intensity $\mathcal{I}$:
 
-**2. Memory Bound Operations:**
-```
-CPU/GPU Cores: [--idle--] [--idle--] [--idle--]
-Memory Bus:    [========SATURATED========]
+$$\mathcal{I} = \frac{\text{Work (FLOPs)}}{\text{Memory Traffic (Bytes)}} \quad \left[\frac{\text{FLOP}}{\text{Byte}}\right]$$
 
-When: Element-wise operations, small tensors
-Solution: Kernel fusion, memory layout optimization
-```
+$$P_{\text{attainable}} = \min\left( P_{\text{peak}}, \; \beta \times \mathcal{I} \right)$$
 
-### The Roofline Model: Your Performance Compass
+where:
+- $P_{\text{peak}}$ is the processor's theoretical peak floating-point throughput ($\text{GFLOP/s}$ or $\text{TFLOP/s}$).
+- $\beta$ is the processor's sustainable peak memory bandwidth ($\text{GB/s}$).
+- The **Ridge Point** $\mathcal{I}^* = \frac{P_{\text{peak}}}{\beta}$ represents the exact arithmetic intensity needed to saturate compute:
+  - If $\mathcal{I} < \mathcal{I}^*$: The kernel is **memory-bound**; adding faster ALUs yields zero speedup.
+  - If $\mathcal{I} \ge \mathcal{I}^*$: The kernel is **compute-bound**; execution hits the theoretical compute ceiling.
 
-Every processor has fundamental limits:
+### Arithmetic Intensity Across Core Deep Learning Primitives
 
-```
-Performance
-(GFLOP/s)
-    │                    ┌────────────────────────  Peak compute (the roof)
-    │                  ╱ │
-    │                ╱   │  Compute bound: more FLOPs
-    │              ╱     │  per byte no longer buys speed
-    │            ╱       │
-    │          ╱         │
-    │        ╱  Memory   │
-    │      ╱    bound    │
-    │    ╱   (slope =    │
-    │  ╱     bandwidth)  │
-    └────────────────────┴────────────────────────  Arithmetic Intensity
-     Low               Ridge                 High   (FLOPs/Byte)
-```
+| Operation | Arithmetic Formula | FLOP Count | Bytes Transferred (FP32) | Arithmetic Intensity $\mathcal{I}$ | Operational Regime |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Vector Add** | $z = x + y$ ($N$ elements) | $N$ | $3 \times 4N = 12N$ | $\frac{1}{12} \approx 0.083\text{ FLOP/B}$ | Severely Memory-Bound |
+| **GELU Activation** | $y = \text{GELU}(x)$ | $\sim 8N$ | $2 \times 4N = 8N$ | $\sim 1.0\text{ FLOP/B}$ | Memory-Bound |
+| **LayerNorm** | $\hat{x} = \frac{x - \mu}{\sigma} \gamma + \beta$ | $\sim 7N$ | $2 \times 4N = 8N$ | $\sim 0.88\text{ FLOP/B}$ | Memory-Bound |
+| **Matrix Multiply (GEMM)** | $C = A B$ ($N \times N$) | $2 N^3$ | $3 \times 4N^2 = 12 N^2$ | $\frac{N}{6}\text{ FLOP/B}$ | Compute-Bound ($N \ge 512$) |
+| **2D Convolution** | $N \times C_{\text{out}} \times H \times W$ | $2 N C_{\text{out}} H W C_{\text{in}} K^2$ | Input $+$ Kernel $+$ Output bytes | $\approx \frac{C_{\text{out}} K^2}{2}\text{ FLOP/B}$ | Compute-Bound ($K \ge 3$) |
 
-**Key Insight**: Understand where your operations live on this graph to optimize effectively.
-
-### Why This Module Matters
-
-Performance questions you can investigate:
-- How much Python-loop overhead does vectorization remove?
-- How much do retained intermediate copies cost?
-- When does explicit tiling help or hurt compared with one BLAS call?
-- What does it cost in memory to run a convolution as one matrix multiply?
+<div align="center">
+  <img src="acceleration_techniques_overview.svg" alt="Acceleration Techniques Overview" width="100%">
+</div>
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📐 Foundations: Vectorization, From Loops to Lightning
 
-### The SIMD Revolution
+Hardware vectorization transforms sequential, scalar instruction streams into wide parallel data-path executions across processor ALUs.
 
-Modern processors can execute **Single Instruction, Multiple Data** operations:
+### Vector Execution Paradigms
 
-```
-Traditional Loop (Scalar):               SIMD Vectorized:
-for i in range(4):        ┌─────┐      ┌─────┬─────┬─────┬─────┐
-    c[i] = a[i] + b[i]    │ ALU │  →   │ALU 0│ALU 1│ALU 2│ALU 3│
-                          └─────┘      └─────┴─────┴─────┴─────┘
-                          1 element     4 elements per cycle
-                          per cycle
-```
+| Execution Model | Hardware Primitive | Vector Width | Operational Mechanism |
+| :--- | :--- | :--- | :--- |
+| **Scalar (SISD)** | Standard CPU core ALU | 1 element ($32\text{-bit}$) | Single scalar register operand per clock cycle; high branch and loop counter overhead |
+| **SIMD Vectorization** | Intel AVX-512 / ARM NEON | 4–16 elements ($128\text{--}512\text{ bits}$) | Single instruction broadcasts across multiple parallel ALU lanes in lockstep |
+| **GPU Warp (SIMT)** | NVIDIA Streaming Multiprocessor | 32 threads ($1024\text{ bits}$) | 32 parallel execution threads execute the same instruction over independent data lanes |
+| **Tensor Cores** | Systolic Array Matrix Units | $16 \times 16$ tile per cycle | Hardware $4 \times 4 \times 4$ or $16 \times 16 \times 16$ matrix multiply-accumulate ($D = A \cdot B + C$) in a single cycle |
 
-### Memory Access Patterns: The Hidden Performance Killer
+### Memory Access Patterns: Cache-Line Utilization
 
-```
-Sequential Access (FAST):
-Memory: [A][B][C][D][E][F][G][H]
-Access:  ↓  ↓  ↓  ↓  → Cache friendly
+Modern DRAM controllers fetch data in discrete 64-byte burst lines (16 contiguous FP32 floats):
 
-Strided Access (SLOWER):
-Memory: [A][ ][B][ ][C][ ][D][ ]
-Access:  ↓     ↓     ↓     ↓   → Cache misses
+| Access Pattern | Memory Layout | Cache Line Efficiency | Hardware Behavior |
+| :--- | :--- | :--- | :--- |
+| **Contiguous Sequential** | `[A0, A1, A2, A3, ...]` | $100\%$ ($16 / 16$ elements used) | Hardware prefetcher anticipates reads; near-zero memory stall cycles |
+| **Strided Access** | `[A0, _, _, _, A4, ...]` | $25\%$ ($4 / 16$ elements used) | Cache polluted with unreferenced elements; memory bandwidth throttled |
+| **Random / Indirect** | `[A_idx[0], A_idx[1], ...]` | $\le 6.25\%$ ($1 / 16$ elements used) | Constant cache misses; memory bus stalls; TLB thrashing |
 
-Random Access (SLOWEST):
-Memory: [A][B][C][D][E][F][G][H]
-Access:  ↓     ↑  ↓     ↑       → Cache chaos
-```
+### Matrix Multiplication: The Pinnacle of Vectorized Arithmetic
 
-### Matrix Multiplication: The King of Vectorization
+General Matrix Multiply (GEMM) is the fundamental computational engine of deep learning:
 
-Matrix multiplication is **perfectly suited** for vectorization:
+$$C_{i, j} = \sum_{k=1}^K A_{i, k} B_{k, j}, \quad A \in \mathbb{R}^{M \times K}, \quad B \in \mathbb{R}^{K \times N}, \quad C \in \mathbb{R}^{M \times N}$$
 
-```
-Matrix A (M×K) × Matrix B (K×N) = Matrix C (M×N)
+$$\text{Total Floating-Point Operations (FLOPs)} = 2 \cdot M \cdot N \cdot K$$
 
-Computation Pattern:
-┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
-│ a₁₁ a₁₂ a₁₃ a₁₄ │ × │ b₁₁ b₁₂ b₁₃ b₁₄ │ = │ c₁₁ c₁₂ c₁₃ c₁₄ │
-│ a₂₁ a₂₂ a₂₃ a₂₄ │   │ b₂₁ b₂₂ b₂₃ b₂₄ │   │ c₂₁ c₂₂ c₂₃ c₂₄ │
-│ a₃₁ a₃₂ a₃₃ a₃₄ │   │ b₃₁ b₃₂ b₃₃ b₃₄ │   │ c₃₁ c₃₂ c₃₃ c₃₄ │
-│ a₄₁ a₄₂ a₄₃ a₄₄ │   │ b₄₁ b₄₂ b₄₃ b₄₄ │   │ c₄₁ c₄₂ c₄₃ c₄₄ │
-└─────────────────┘   └─────────────────┘   └─────────────────┘
+$$\text{Data Volume Transferred} = (M \cdot K + K \cdot N + M \cdot N) \times 4\text{ bytes (FP32)}$$
 
-For c₁₁: Row₁ · Column₁ = a₁₁×b₁₁ + a₁₂×b₂₁ + a₁₃×b₃₁ + a₁₄×b₄₁
-                                    ↑
-                              VECTORIZABLE!
-```
+For square matrices where $M = N = K$:
 
-**Why vectorization wins:**
-- **High arithmetic intensity**: 2N³ FLOPs for only 3N² elements of data
-- **Predictable memory access**: Sequential row/column reads
-- **Parallelizable**: Independent dot products
-- **Cache-friendly**: Data reuse in inner loops
+$$\mathcal{I}_{\text{GEMM}} = \frac{2 N^3}{12 N^2} = \frac{N}{6} \quad \left[\frac{\text{FLOP}}{\text{Byte}}\right]$$
+
+When $N = 1024$, arithmetic intensity is $\mathcal{I} \approx 170.7\text{ FLOP/Byte}$. Because the operational work scales with $\mathcal{O}(N^3)$ while data volume scales with $\mathcal{O}(N^2)$, GEMMs heavily reuse cached data and saturate modern processor compute roofs.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "vectorized-matmul", "solution": true}
@@ -359,75 +308,44 @@ if __name__ == "__main__":
     test_unit_vectorized_matmul()
 
 # %% [markdown]
-"""
-## 🏗️ Implementation: Kernel Fusion
+r"""
+## 🏗️ Implementation: Kernel Fusion & Memory Traffic Elimination
 
-### The Memory Bandwidth Crisis
+In modern transformer architectures, memory-bound activation layers (GELU, SwiGLU, LayerNorm) create severe memory bus saturation when executed as separate unfused kernels.
 
-Consider this computation: `y = gelu(x * weight + bias)`.
-Assume `x`, `weight`, and `bias` are each 4 GB arrays. Count one read of
-each input and one write of each output per operation, ignoring cache reuse.
-Treat GELU itself as one compiled operation in both paths.
+<div align="center">
+  <img src="kernel_fusion_traffic.svg" alt="Kernel Fusion Memory Traffic Comparison" width="100%">
+</div>
 
-**Naive Implementation (Memory Intensive):**
-```
-Step 1: temp1 = x * weight     → Read 8GB, Write 4GB
-Step 2: temp2 = temp1 + bias   → Read 8GB, Write 4GB
-Step 3: y = gelu(temp2)        → Read 4GB, Write 4GB
-                                 Total: 32GB memory traffic!
-```
+### The Memory Bandwidth Crisis: Unfused vs. Fused Execution
 
-**Fused Implementation (Memory Efficient):**
-```
-Single Step: y = gelu(x * weight + bias)  → Read 12GB, Write 4GB
-                                            Total: 16GB memory traffic!
-                                            50% less modeled memory traffic!
-```
+Consider the linear-activation pipeline $y = \text{GELU}(x \cdot W + b)$ where $x, W, b$ each represent $4\text{ GB}$ data buffers:
 
-### Understanding GELU: The Smooth Activation
+| Execution Paradigm | Operational Sequence | DRAM Reads | DRAM Writes | Total Memory Traffic | Speedup Driver |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Unfused (PyTorch/NumPy Default)** | 1. $t_1 = x \cdot W$<br>2. $t_2 = t_1 + b$<br>3. $y = \text{GELU}(t_2)$ | Read $x$ ($4\text{ GB}$), $W$ ($4\text{ GB}$)<br>Read $t_1$ ($4\text{ GB}$), $b$ ($4\text{ GB}$)<br>Read $t_2$ ($4\text{ GB}$) | Write $t_1$ ($4\text{ GB}$)<br>Write $t_2$ ($4\text{ GB}$)<br>Write $y$ ($4\text{ GB}$) | **$32\text{ GB}$** DRAM Traffic | Baseline ($1.0\times$) |
+| **Fused Kernel (Triton / CUDA / C++)** | Single composite kernel:<br>$y = \text{GELU}(x \cdot W + b)$ in registers | Read $x$ ($4\text{ GB}$), $W$ ($4\text{ GB}$), $b$ ($4\text{ GB}$) | Write $y$ ($4\text{ GB}$) directly | **$16\text{ GB}$** DRAM Traffic | **$50\%$ reduction** in DRAM traffic; eliminates 2 intermediate round-trips |
 
-GELU (Gaussian Error Linear Unit) is used in transformers because it's **smooth** (differentiable everywhere):
+### Understanding GELU: The Smooth Non-Linearity
 
-```
-Activation Functions Compared:
+GELU (Gaussian Error Linear Unit) scales inputs by their probability under a standard Gaussian distribution:
 
-ReLU: max(0, x)                 GELU: x·Φ(x)                    Sigmoid: 1/(1+e⁻ˣ)
-     │            ╱                  │            ╱                1 ┤         ╭─────────
-     │           ╱                   │           ╱                  │        ╱
-     │          ╱                    │          ╱              0.5 ┤       ╱
-     │         ╱                     │         ╱                    │      ╱
-   0 ┼────────┼──────────── x      0 ┼──╮     ┼──────────── x     0 ┼─────╯─┼──────────── x
-              x=0                       ╰───╱ x=0                          x=0
-Kink at 0: the gradient jumps    Smooth everywhere, with a small    Smooth, but flat at both
-from 0 to 1                      dip below 0 just left of x=0       ends (gradient saturates)
-```
+$$\text{GELU}(x) = x \cdot \Phi(x) = x \cdot P(X \le x), \quad X \sim \mathcal{N}(0, 1)$$
 
-**GELU Formula**: `GELU(x) = x * Φ(x)` where Φ is the standard normal CDF
+$$\text{Fast Approximation: } \quad \text{GELU}(x) \approx 0.5 x \left( 1 + \tanh\left( \sqrt{\frac{2}{\pi}} \left( x + 0.044715 x^3 \right) \right) \right)$$
 
-**Fast Approximation**: `GELU(x) ≈ 0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715 * x³)))`
+### Activation Functions Comparison
 
-### Kernel Fusion Strategy
+| Function | Formulation | Derivative Properties | Zero-Crossing Behavior | Hardware Implementation |
+| :--- | :--- | :--- | :--- | :--- |
+| **ReLU** | $\max(0, x)$ | Piecewise constant: $f'(x) \in \{0, 1\}$ | Non-differentiable kink at $x = 0$; dying neuron vulnerability | Single compare-and-select instruction (`vmaxps`) |
+| **GELU** | $x \cdot \Phi(x)$ | Smooth everywhere; non-monotonic dip near $-0.17$ | Smooth curvature around origin; allows negative gradient flow | High transcendental cost; requires polynomial or tanh approximation |
+| **Sigmoid** | $\frac{1}{1 + e^{-x}}$ | $f'(x) = f(x)(1 - f(x))$ | Inflection point at $x = 0$; flat saturation for $\lvert x \rvert > 4$ | Exponential lookup / Taylor expansion |
+| **Swish / SiLU** | $x \cdot \sigma(\beta x)$ | $f'(x) = \sigma(x) + x \sigma(x)(1 - \sigma(x))$ | Self-gated smooth activation; widely adopted in LLaMA | Highly fusible with linear gate projections (SwiGLU) |
 
-This diagram describes a compiled fused kernel. Our NumPy comparison below
-removes intermediate Tensor wrappers, but does not implement this single traversal.
+### Kernel Fusion Strategy: Array Allocations vs. Register Stacking
 
-```
-Unfused Operations:                    Fused Operation:
-┌─────────────────┐                   ┌────────────────────┐
-│ x³, ×c, + x     │ → temp1..3        │                    │
-└─────────────────┘                   │                    │
-┌─────────────────┐                   │                    │
-│ ×√(2/π), tanh   │ → temp4..5        │   All operations   │
-└─────────────────┘                   │   combined in      │
-┌─────────────────┐                   │   single kernel    │
-│ 1 + …, x × …    │ → temp6..7        │                    │
-└─────────────────┘                   │                    │
-┌─────────────────┐                   │                    │
-│ 0.5 × …         │ → result          │                    │
-└─────────────────┘                   └────────────────────┘
-
-8 arrays written (7 temporaries)       1 array written
-```
+When executing `fused_gelu` in pure NumPy, Python evaluates sub-expressions sequentially, allocating temporary memory buffers for $x^3$, $x^3 \times 0.044715$, etc. In production compilers (such as OpenAI Triton or TorchInductor), all 8 operations are fused into a single loop body where elements remain inside fast CPU vector registers or GPU thread registers ($R_0 \dots R_7$), writing only the final tensor to DRAM.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "fused-gelu", "solution": true}
@@ -692,48 +610,50 @@ if __name__ == "__main__":
     test_unit_fusion_speedup()
 
 # %% [markdown]
-"""
-## 🏗️ Cache-Aware Matrix Multiplication
+r"""
+## 🏗️ Cache-Aware Matrix Multiplication: Tiling & Locality
 
-For large matrices that don't fit in cache, we need **tiling** (also called blocking).
-This breaks the computation into cache-sized chunks for better performance.
+When matrices exceed the capacity of fast CPU on-chip caches (L1/L2), naive matrix multiplication causes continuous cache evictions, repeatedly fetching the same rows and columns from high-latency main memory (DRAM). Tiling (loop blocking) reorganizes nested loops to operate on sub-matrices sized to remain resident in SRAM cache.
 
-### Why Cache Awareness Matters
+<div align="center">
+  <img src="tiled_matmul_accumulation.svg" alt="Tiled Matrix Multiplication Accumulation" width="100%">
+</div>
 
-Modern processors have a memory hierarchy:
-```
-L1 Cache:   32-64 KB   (fastest, 1-4 cycles)
-L2 Cache:   256 KB-1MB (fast, 10-20 cycles)
-L3 Cache:   8-32 MB    (moderate, 40-75 cycles)
-Main RAM:   8-64 GB    (slow, 100-300 cycles)
-```
+### Silicon Memory Hierarchy Latency & Bandwidth
 
-When matrices are larger than cache, we get **cache misses** that slow us down dramatically.
-Tiling keeps working set in cache for maximum reuse.
+| Memory Level | Typical Size | Access Latency | Bandwidth | Systems Function |
+| :--- | :--- | :--- | :--- | :--- |
+| **Registers** | $1\text{--}2\text{ KB}$ | 1 cycle ($< 0.5\text{ ns}$) | $> 20{,}000\text{ GB/s}$ | Immediate operands for ALU / Tensor Cores |
+| **L1 Cache / Shared Memory** | $32\text{--}128\text{ KB}$ | 3–4 cycles ($\sim 1\text{ ns}$) | $> 10{,}000\text{ GB/s}$ | Holds active tile blocks ($A_{\text{tile}}, B_{\text{tile}}, C_{\text{tile}}$) |
+| **L2 Cache** | $1\text{--}16\text{ MB}$ | 10–20 cycles ($\sim 4\text{ ns}$) | $\sim 3{,}000\text{ GB/s}$ | Cross-core shared working set cache |
+| **L3 Cache (LLC)** | $32\text{--}256\text{ MB}$ | 40–75 cycles ($\sim 15\text{ ns}$) | $\sim 1{,}000\text{ GB/s}$ | Last-level cache before off-chip bus |
+| **Main DRAM / HBM** | $16\text{--}128\text{ GB}$ | 100–300 cycles ($\sim 60\text{ ns}$) | $50\text{--}2{,}000\text{ GB/s}$ | Bulk storage for full network parameter weights and activations |
 
-### Sizing a Tile
+### Derivation: Optimal Tile Dimension for L1 SRAM Residency
 
-Computing one output tile touches three blocks at once: a tile of A, a tile of
-B, and the tile of C being accumulated. So the working set is roughly
-`3 x tile_size^2 x 4 bytes` for float32. Solving for a 32 KB L1 cache:
+Evaluating an output tile of size $(t \times t)$ involves simultaneously keeping three sub-matrices in cache:
+1. Active block of $A$: $t \times t \times 4\text{ bytes}$
+2. Active block of $B$: $t \times t \times 4\text{ bytes}$
+3. Accumulation block of $C$: $t \times t \times 4\text{ bytes}$
 
-```
-3 x t^2 x 4 <= 32,768   ->   t <= 52
-```
+The total working set footprint satisfies the cache boundary constraint:
 
-which is why 32 and 64 are the tile sizes you see in real kernels.
+$$3 \cdot t^2 \times 4\text{ bytes} \le C_{\text{L1}}$$
 
-### What You Are and Are Not Building
+For a canonical $32\text{ KB} = 32{,}768\text{ bytes}$ L1 data cache:
 
-You are writing the **loop order** -- the three tile loops that decide which
-blocks are in flight together. The multiply inside each block is still a NumPy
-call, because writing scalar loops in Python would be thousands of times slower
-and would teach nothing about cache behavior.
+$$12 \cdot t^2 \le 32{,}768 \implies t^2 \le 2{,}730 \implies t \le 52.25$$
 
-Be honest about the benchmark: your tiled version will be **slower** than
-`vectorized_matmul`, because NumPy already hands the whole matrix to a BLAS
-kernel that does this same blocking in tuned C with prefetching and register
-tiling. The point is to see the mechanism BLAS is using, not to beat it.
+Powers of two such as $t = 32$ or $t = 64$ (using L2 cache) maximize register tiling and cache-line alignment.
+
+### Systems Reality: Python Tiling vs. Tuned Hardware BLAS
+
+| Dimension | Native Python / NumPy Tiling | Production BLAS (OpenBLAS, MKL, cuBLAS) |
+| :--- | :--- | :--- |
+| **Outer Loop Mechanics** | Interpreted Python `for i0, j0, k0` loop overhead | Multi-threaded assembly dispatch with branch prediction |
+| **Micro-Kernel Tiling** | Invokes separate NumPy sub-array slices | Register-level unrolling ($8 \times 8$ or $16 \times 16$ accumulator registers) |
+| **Prefetching** | Reactive on-demand page faults | Software and hardware asynchronous prefetch (`prefetcht0`) |
+| **Educational Value** | Directly exposes block-accumulation order $C_{\text{tile}} += A_{\text{tile}} @ B_{\text{tile}}$ | High peak performance, but opaque closed-source binary |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tiled-matmul", "solution": true}
@@ -878,101 +798,74 @@ if __name__ == "__main__":
     test_unit_tiled_matmul()
 
 # %% [markdown]
-"""
-## 🏗️ Convolution as Matrix Multiplication: im2col
+r"""
+## 🏗️ Convolution as Matrix Multiplication: Lowering via im2col
 
-Module 09's `Conv2d` computes every output pixel as a dot product written out in
-Python: seven nested loops over batch, output channel, output row, output column,
-kernel row, kernel column, and input channel. That was the right way to learn
-what a convolution does. It is also why the CNN milestones are slow.
+In Module 09 (`09_convolutions`), `Conv2d` implemented spatial feature extraction via seven nested Python loops (iterating across batch, channels, rows, columns, and filter dimensions). While mathematically transparent, executing millions of individual scalar operations inside the Python virtual machine incurs catastrophic interpreter overhead.
 
-### Why the Loops Are Slow
+`im2col` ("image to columns") algorithmically lowers a multi-channel 2D convolution into a single contiguous General Matrix Multiply (GEMM), allowing the entire workload to execute on SIMD vector units, multi-threaded BLAS libraries, and systolic Tensor Cores.
 
-Count the work for one layer of the CIFAR-10 milestone: a batch of 4 images,
-32 input channels, 64 output channels, a 32×32 feature map, and a 3×3 kernel.
+<div align="center">
+  <img src="im2col_lowering_gemm.svg" alt="im2col Lowering to GEMM" width="100%">
+</div>
 
-```
-multiply-adds = batch × out_ch × out_h × out_w × in_ch × k_h × k_w
-              = 4 × 64 × 32 × 32 × 32 × 3 × 3
-              = 75,497,472
-```
+### Workload Audit: Python Loops vs. Single GEMM
 
-In `_convolve_loops`, each of those 75 million multiply-adds is a separate
-Python operation. The arithmetic is not the problem; the interpreter is. The
-same 75 million multiply-adds inside one BLAS call finish in milliseconds.
+Consider a standard intermediate convolutional layer processing a batch of 4 CIFAR images:
+- Input shape: $(N=4, C_{\text{in}}=32, H=32, W=32)$
+- Filter weights: $(C_{\text{out}}=64, C_{\text{in}}=32, K_h=3, K_w=3)$ with stride $1$ and padding $1$
 
-### The im2col Trick
+$$\text{Total Multiply-Accumulate Operations (MACs)} = N \times C_{\text{out}} \times H_{\text{out}} \times W_{\text{out}} \times C_{\text{in}} \times K_h \times K_w$$
 
-Look at a single output pixel. It is the dot product of two lists of
-`in_ch × k_h × k_w` numbers: the input patch under the filter, flattened, and
-the filter itself, flattened. So the whole layer is a matrix multiply in
-disguise:
+$$\text{MACs} = 4 \times 64 \times 32 \times 32 \times 32 \times 3 \times 3 = \mathbf{75{,}497{,}472\text{ operations}} \quad (\approx 151\text{ MFLOPs})$$
 
-```
-Patch matrix (one row per output position)      Filter matrix (one column per filter)
-┌──────────────────────────────┐                ┌──────────────┐
-│ patch at (n=0, oh=0, ow=0)   │                │ f₀  f₁ … f₆₃ │
-│ patch at (n=0, oh=0, ow=1)   │       @        │  ↓   ↓    ↓  │   =   output rows
-│ ...                          │                │ (in_ch·k·k   │       (one per position,
-│ patch at (n=3, oh=31, ow=31) │                │  rows each)  │        one column per filter)
-└──────────────────────────────┘                └──────────────┘
-  (N·H_out·W_out) × (in_ch·k·k)                  (in_ch·k·k) × out_ch
-```
+Executing 75 million loop iterations in CPython takes seconds; inside an optimized BLAS GEMM kernel, it completes in a few milliseconds.
 
-Building the patch matrix is called **im2col** ("image to columns"; we store the
-patches as rows, the transposed convention, so the product needs no transpose of
-the big matrix). After one matmul, reshaping the `(N·H_out·W_out) × out_ch`
-result gives back the `(N, out_ch, H_out, W_out)` feature map.
+### The im2col Lowering Schema
 
-A 1-channel 3×3 input with a 2×2 kernel and stride 1 has four output positions,
-so four patches:
+Every output pixel $y[n, c_{\text{out}}, h, w]$ is the inner product of the flattened filter with the corresponding spatial receptive field patch $x[n, :, h:h+K, w:w+K]$. By unrolling each patch into a matrix row and flattening filters into matrix columns:
 
-```
-Input          Patches (rows of the patch matrix)
-┌───┬───┬───┐  position (0,0): [1, 2, 4, 5]
-│ 1 │ 2 │ 3 │  position (0,1): [2, 3, 5, 6]
-├───┼───┼───┤  position (1,0): [4, 5, 7, 8]
-│ 4 │ 5 │ 6 │  position (1,1): [5, 6, 8, 9]
-├───┼───┼───┤
-│ 7 │ 8 │ 9 │  Pixel 5 appears in all four rows.
-└───┴───┴───┘
-```
+$$X_{\text{col}} \in \mathbb{R}^{(N \cdot H_{\text{out}} \cdot W_{\text{out}}) \times (C_{\text{in}} \cdot K_h \cdot K_w)}$$
 
-### The Memory Price
+$$W_{\text{row}} \in \mathbb{R}^{(C_{\text{in}} \cdot K_h \cdot K_w) \times C_{\text{out}}}$$
 
-That repetition is the cost. Every interior pixel is copied once for each
-kernel position that covers it, up to `k_h × k_w` times. For the CIFAR layer
-above, the input is `4 × 32 × 32 × 32 × 4 bytes = 524 KB`, and the patch matrix
-is `(4 × 32 × 32) × (32 × 3 × 3) × 4 bytes = 4.7 MB`, nine times larger. im2col
-trades memory for speed. On a laptop that is an easy trade; on a microcontroller
-with 256 KB of RAM it may not fit at all.
+$$Y_{\text{col}} = X_{\text{col}} @ W_{\text{row}} \in \mathbb{R}^{(N \cdot H_{\text{out}} \cdot W_{\text{out}}) \times C_{\text{out}}}$$
 
-### Building the Patch Matrix Without Looping Over Pixels
+Reshaping $Y_{\text{col}}$ from $(N \cdot H_{\text{out}} \cdot W_{\text{out}}, C_{\text{out}})$ back to $(N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}})$ yields the exact convolution output!
 
-The obvious way to build the patch matrix loops over every output position and
-copies one patch at a time, which is a Python loop over `N × H_out × W_out`
-positions and gives back much of the speed. Turn it around and loop over the
-**kernel offsets** instead. For kernel element `(i, j)`, the input values it
-touches at every output position form one strided slice of the padded input:
+### Concrete Patch Unrolling (1 Channel, $3 \times 3$ Input, $2 \times 2$ Kernel, Stride 1)
 
-```
-padded[:, :, i : i + stride*H_out : stride, j : j + stride*W_out : stride]
-        ↑  ↑                                                   shape (N, C, H_out, W_out)
-      all images, all channels, all output positions at once
-```
+For input $X = \begin{bmatrix} 1 & 2 & 3 \\ 4 & 5 & 6 \\ 7 & 8 & 9 \end{bmatrix}$, there are 4 valid $2 \times 2$ receptive fields:
 
-A 3×3 kernel needs nine slice copies, whatever the image size. The only care
-needed is the column order: `weight.reshape(out_ch, -1)` flattens each filter in
-`(channel, kernel row, kernel column)` order, so each patch must be flattened in
-the same order or the dot products pair the wrong numbers.
+| Output Position | Receptive Field Coordinates | Flattened Patch (Row in $X_{\text{col}}$) | Shared Input Elements |
+| :--- | :--- | :--- | :--- |
+| **Position $(0, 0)$** | Rows $0..1$, Cols $0..1$ | $[1, 2, 4, 5]$ | Pixel 5 shared with all 4 patches |
+| **Position $(0, 1)$** | Rows $0..1$, Cols $1..2$ | $[2, 3, 5, 6]$ | Pixels 2, 5 shared with $(0, 0)$ |
+| **Position $(1, 0)$** | Rows $1..2$, Cols $0..1$ | $[4, 5, 7, 8]$ | Pixels 4, 5 shared with $(0, 0)$ |
+| **Position $(1, 1)$** | Rows $1..2$, Cols $1..2$ | $[5, 6, 8, 9]$ | Pixels 5, 6 shared with $(0, 1)$ |
+
+### The Space-Time Trade-Off: Memory Footprint Expansion
+
+The speed of im2col comes at the cost of duplicate memory allocation. Because overlapping receptive fields replicate pixels up to $K_h \times K_w$ times:
+
+$$\text{Memory Expansion Ratio} = \frac{\text{Bytes}(X_{\text{col}})}{\text{Bytes}(X)} \approx K_h \times K_w = 3 \times 3 = \mathbf{9\times}$$
+
+| Representation | Dimensions / Elements | FP32 Memory Footprint | Systems Characteristics |
+| :--- | :--- | :--- | :--- |
+| **Original Input Tensor** | $(4, 32, 32, 32) = 131{,}072$ elements | $524{,}288\text{ bytes} \approx \mathbf{0.524\text{ MB}}$ | Compact, non-redundant storage |
+| **Unrolled Patch Matrix $X_{\text{col}}$** | $(4096, 288) = 1{,}179{,}648$ elements | $4{,}718{,}592\text{ bytes} \approx \mathbf{4.72\text{ MB}}$ | $9\times$ memory bloat; enables single BLAS GEMM call |
+
+### Vectorized Patch Construction via Strided Slices
+
+Rather than looping over all $N \times H_{\text{out}} \times W_{\text{out}}$ output coordinates (which would reintroduce Python loop latency), we invert the iteration: we loop only over the $K_h \times K_w$ **kernel offsets** $(i, j)$:
+
+$$\text{padded}[:, :, i : i + \text{stride} \cdot H_{\text{out}} : \text{stride}, \; j : j + \text{stride} \cdot W_{\text{out}} : \text{stride}]$$
+
+A $3 \times 3$ convolution requires exactly $9$ strided slice copies across the entire batch simultaneously, independent of spatial image resolution!
 
 ### What You Are and Are Not Building
 
-Like the other helpers in this module, `im2col_conv2d` is an inference path: it
-returns a new Tensor without recording autograd, so it computes the same forward
-pass as Module 09's `Conv2d` but cannot train one. The next section adds the
-reverse step, **col2im**, and turns the convolution into a differentiable
-`Function` that can.
+Like the other helpers in this module, `im2col_conv2d` provides an accelerated forward inference path. In the following section, we derive its mathematical dual—**`col2im`**—to build a fully differentiable `Im2colConv2dFunction` that trains seamlessly within TinyTorch's autograd engine.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "im2col", "solution": true}
@@ -1132,24 +1025,19 @@ if __name__ == "__main__":
     test_unit_im2col()
 
 # %% [markdown]
-"""
+r"""
 ### Convolution Through One Matrix Multiply
 
-With the patch matrix built, the convolution itself is three steps: flatten the
-filters into a matrix, multiply, and put the result back into image layout.
+With the patch matrix unrolled, the forward spatial convolution reduces to three sequential algebraic steps:
 
-```
-cols      = im2col(x, k, stride, padding)          (N·H_out·W_out, C·k·k)
-w_matrix  = weight.reshape(out_ch, C·k·k).T        (C·k·k, out_ch)
-out       = cols @ w_matrix (+ bias)               (N·H_out·W_out, out_ch)
-feature map = out.reshape(N, H_out, W_out, out_ch)
-                 .transpose(0, 3, 1, 2)            (N, out_ch, H_out, W_out)
-```
+| Step | Operation | Tensor Transformation | Output Shape |
+| :--- | :--- | :--- | :--- |
+| **1. Unroll Patches** | $X_{\text{col}} = \text{im2col}(X, K, s, p)$ | Receptive fields $\to$ rows | $(N \cdot H_{\text{out}} \cdot W_{\text{out}}, \; C_{\text{in}} \cdot K_h \cdot K_w)$ |
+| **2. Flatten Filters** | $W_{\text{matrix}} = W.\text{reshape}(C_{\text{out}}, -1)^T$ | Spatial filters $\to$ columns | $(C_{\text{in}} \cdot K_h \cdot K_w, \; C_{\text{out}})$ |
+| **3. Vectorized GEMM** | $Y_{\text{col}} = X_{\text{col}} @ W_{\text{matrix}} + b$ | BLAS matrix multiplication | $(N \cdot H_{\text{out}} \cdot W_{\text{out}}, \; C_{\text{out}})$ |
+| **4. Spatial Layout** | $Y = Y_{\text{col}}.\text{reshape}(N, H_{\text{out}}, W_{\text{out}}, C_{\text{out}})^T$ | Channel permutation $(0, 3, 1, 2)$ | $(N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}})$ |
 
-The multiply is your `vectorized_matmul`, so all of the speed comes from the
-vectorized matrix multiply you already wrote. The final transpose matters: the
-matmul produces one row per position with the channels last, and Conv2d's
-output puts the channels second.
+The matrix multiply invokes `vectorized_matmul`, directly inheriting the cache efficiency and multi-core parallelism of underlying BLAS GEMM kernels.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "im2col-conv2d", "solution": true}
@@ -1295,75 +1183,52 @@ if __name__ == "__main__":
     test_unit_im2col_conv2d()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Training Through im2col: col2im and the Backward Pass
 
-`im2col_conv2d` computes the forward pass, but it wraps a NumPy result in a new
-Tensor, so autograd cannot see through it. A model that uses it can predict but
-not learn. Training needs the backward pass, and im2col makes most of it easy.
+While `im2col_conv2d` accelerates forward inference by eliminating interpreter loop overhead, training convolutional models requires propagating loss gradients backward to update weights and upstream feature maps.
 
 ### Three Gradients From One Matrix Multiply
 
-Write the forward pass in matrix form. With `cols` the patch matrix
-`(R, C·k·k)` where `R = N·H_out·W_out`, and `W` the filters flattened and
-transposed to `(C·k·k, out_ch)`:
+In matrix form, the forward pass computes:
 
-```
-out_rows = cols @ W + b                          (R, out_ch)
-```
+$$Y_{\text{row}} = X_{\text{col}} W + b \quad \in \mathbb{R}^{R \times C_{\text{out}}}, \quad R = N \cdot H_{\text{out}} \cdot W_{\text{out}}$$
 
-Let `G` be the gradient of the loss with respect to `out_rows`, the incoming
-`grad_output` moved into the same `(R, out_ch)` layout. The chain rule for a
-matrix multiply, which you used in Module 06, gives:
+Let $G = \frac{\partial \mathcal{L}}{\partial Y_{\text{row}}} \in \mathbb{R}^{R \times C_{\text{out}}}$ denote the incoming upstream gradient tensor. Applying reverse-mode automatic differentiation yields three exact gradient tensors:
 
-```
-grad_W    = cols.T @ G          (C·k·k, out_ch)   one matmul
-grad_b    = G.sum(axis=0)       (out_ch,)         one reduction
-grad_cols = G @ W.T             (R, C·k·k)        one matmul
-```
+$$\begin{aligned}
+\frac{\partial \mathcal{L}}{\partial W} &= X_{\text{col}}^T G \quad \in \mathbb{R}^{(C_{\text{in}} \cdot K_h \cdot K_w) \times C_{\text{out}}} \quad &(\text{GEMM: Matmul with Patch Transpose}) \\
+\frac{\partial \mathcal{L}}{\partial b} &= \sum_{r=1}^R G_{r, :} \quad \in \mathbb{R}^{C_{\text{out}}} \quad &(\text{Column Sum Reduction}) \\
+\frac{\partial \mathcal{L}}{\partial X_{\text{col}}} &= G W^T \quad \in \mathbb{R}^{R \times (C_{\text{in}} \cdot K_h \cdot K_w)} \quad &(\text{GEMM: Matmul with Weight Transpose})
+\end{aligned}$$
 
-Two of the three gradients are matrix multiplies the same size as the forward
-pass, so they get the same speedup. The third is not yet the gradient we need:
-it is the gradient with respect to the **patch matrix**, and the layer's input
-is the image.
+Notice that weight and patch gradients are standard dense GEMMs that execute at the exact same high FLOP/s as the forward pass!
 
-### col2im: Putting Patch Gradients Back Into the Image
+### col2im: Dual Scatter-Accumulation Back to Spatial Layout
 
-Every pixel was copied into several rows of `cols`, once for each kernel
-position that covered it. A pixel's gradient is therefore the **sum** of the
-gradients of all its copies. col2im is im2col run backwards with the copy turned
-into an addition:
+$\frac{\partial \mathcal{L}}{\partial X_{\text{col}}}$ represents gradients with respect to the *unrolled patches*. Because overlapping receptive fields replicate individual spatial pixels across multiple rows of $X_{\text{col}}$, the true spatial gradient $\frac{\partial \mathcal{L}}{\partial X}$ is the **sum** of all patch gradients touching each pixel:
 
-```
-im2col (forward)                          col2im (backward)
-cols[.., i, j, ..] = padded[slice(i, j)]   padded_grad[slice(i, j)] += cols_grad[.., i, j, ..]
-```
+$$\text{im2col (Forward Gathering):} \quad X_{\text{col}}[\dots, i, j, \dots] = X_{\text{padded}}[\text{slice}(i, j)]$$
 
-It loops over the same `k × k` kernel offsets with the same strided slices. The
-`+=` is the whole point: with `=` each pixel would keep only the gradient from
-the last patch that touched it. After the loop, cropping off the padding gives
-the input gradient, because padded zeros are constants and have no gradient.
+$$\text{col2im (Backward Scatter-Add):} \quad \frac{\partial \mathcal{L}}{\partial X_{\text{padded}}}[\text{slice}(i, j)] \mathrel{+}= \frac{\partial \mathcal{L}}{\partial X_{\text{col}}}[\dots, i, j, \dots]$$
 
-On the 3×3 example with a 2×2 kernel, sending a gradient of 1 from every patch
-entry back through col2im counts how many patches covered each pixel:
+The in-place accumulation operator ($\mathrel{+}=$) is mathematically essential: simple assignment ($=$) would overwrite previous contributions, retaining only the final patch's gradient!
 
-```
-┌───┬───┬───┐
-│ 1 │ 2 │ 1 │   corners: one patch
-├───┼───┼───┤   edges:   two patches
-│ 2 │ 4 │ 2 │   center:  all four
-├───┼───┼───┤
-│ 1 │ 2 │ 1 │
-└───┴───┴───┘
-```
+### Receptive Field Gradient Overlap (3×3 Image with 2×2 Kernel, Stride 1)
 
-### The Memory the Backward Pass Keeps
+Transmitting a unit gradient ($1.0$) from each patch back through `col2im` reveals the physical accumulation pattern across spatial coordinates:
 
-`grad_W = cols.T @ G` needs the patch matrix from the forward pass. Keeping it
-alive between forward and backward holds the `k × k` times larger buffer for
-every convolution in the model until its backward pass runs. The alternative is
-to throw `cols` away and rebuild it from the saved input during backward, which
-trades memory for a second im2col. This implementation keeps it.
+| Image Region | Pixel Coordinates | Overlapping Receptive Fields | Accumulated Gradient Weight |
+| :--- | :--- | :--- | :--- |
+| **Corner Pixels** | $(0, 0), (0, 2), (2, 0), (2, 2)$ | Covered by exactly 1 patch | $1.0\times$ |
+| **Edge Pixels** | $(0, 1), (1, 0), (1, 2), (2, 1)$ | Covered by 2 overlapping patches | $2.0\times$ |
+| **Center Pixel** | $(1, 1)$ | Covered by all 4 overlapping patches | $4.0\times$ |
+
+### Memory Footprint of the Backward Pass
+
+Computing $\frac{\partial \mathcal{L}}{\partial W} = X_{\text{col}}^T G$ requires keeping the unrolled patch matrix $X_{\text{col}}$ resident in memory throughout the forward pass until the backward pass runs. For deep networks, retaining $K^2 \times$ expanded buffers across all layers can exhaust GPU VRAM.
+
+In production memory-constrained training, frameworks employ **Activation Checkpointing**: discarding $X_{\text{col}}$ during forward and re-running `im2col` on-the-fly during backward, trading $\sim 20\text{--}30\%$ compute overhead for an order-of-magnitude reduction in peak memory residency.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "col2im", "solution": true}
@@ -1494,26 +1359,23 @@ if __name__ == "__main__":
     test_unit_col2im()
 
 # %% [markdown]
-"""
-### A Differentiable im2col Convolution
+r"""
+### A Differentiable im2col Convolutional Graph
 
-With col2im in hand, the convolution becomes a `Function` in the same shape as
-Module 09's `Conv2dFunction`: `forward` receives NumPy arrays and returns the
-output array, `backward` receives the output gradient and returns one gradient
-per input. `Function.apply` records the operation, so `loss.backward()` reaches
-it like any other.
+Combining `im2col` (forward gathering) and `col2im` (backward scatter-accumulation) encapsulates spatial convolution into a standard autograd `Function` node:
 
-```
-forward(x, weight, bias)                         backward(grad_output)
-────────────────────────                         ─────────────────────
-cols = im2col(x)          ── saved ──►           G = grad_output as (R, out_ch)
-W = weight → (C·k·k, out_ch)  ── saved ──►       grad_W    = cols.T @ G  → weight shape
-out = cols @ W + bias                            grad_b    = G.sum(axis=0)
-→ (N, out_ch, H_out, W_out)                      grad_x    = col2im(G @ W.T)
-```
+| Execution Phase | Operational Step | Mathematical Transformation | Saved State | Output Shape |
+| :--- | :--- | :--- | :--- | :--- |
+| **Forward Pass** | 1. Patch Unroll | $X_{\text{col}} = \text{im2col}(X, K, s, p)$ | Saved on `self` for backward | $(R, C_{\text{in}} K^2)$ |
+| | 2. Filter Reshape | $W_{\text{row}} = W.\text{reshape}(C_{\text{out}}, -1)^T$ | Saved on `self` for backward | $(C_{\text{in}} K^2, C_{\text{out}})$ |
+| | 3. Dense GEMM | $Y_{\text{col}} = X_{\text{col}} W_{\text{row}} + b$ | — | $(R, C_{\text{out}})$ |
+| | 4. Spatial Reshape | $Y = Y_{\text{col}}.\text{reshape}(N, H_{\text{out}}, W_{\text{out}}, C_{\text{out}})^T$ | Returned tensor | $(N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}})$ |
+| **Backward Pass** | 1. Gradient Reshape | $G = \text{grad\_output}.\text{transpose}.\text{reshape}(R, C_{\text{out}})$ | — | $(R, C_{\text{out}})$ |
+| | 2. Filter Gradient | $\nabla_W = X_{\text{col}}^T G$ | Returned gradient | $(C_{\text{out}}, C_{\text{in}}, K, K)$ |
+| | 3. Bias Gradient | $\nabla_b = \sum_{r} G_r$ | Returned gradient | $(C_{\text{out}},)$ |
+| | 4. Input Gradient | $\nabla_X = \text{col2im}(G W_{\text{row}}^T, \text{shape}(X), K, s, p)$ | Returned gradient | $(N, C_{\text{in}}, H, W)$ |
 
-`stride` and `padding` arrive as keyword parameters of `apply`, which the base
-class stores as attributes, exactly as `layer` does for `Conv2dFunction`.
+`stride` and `padding` arrive as keyword arguments during `apply`, matching the exact API and gradient semantics of Module 09's `Conv2dFunction`.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "im2col-conv2d-function", "solution": true}
@@ -2434,50 +2296,58 @@ def test_module():
     print("Run: tito module complete 17")
 
 # %% [markdown]
-"""
+r"""
 ## 🤔 ML Systems Reflection Questions
 
-Answer these to deepen your understanding of acceleration techniques and their systems implications:
-
 ### Question 1: Arithmetic Intensity Analysis
-You implemented vectorized matrix multiplication and fused GELU.
-- Matrix multiplication (1024×1024): Performs ~2.1 billion FLOPs, reads ~12 MB data
-- Arithmetic intensity: _____ FLOPs/byte
-- Compared to element-wise addition (0.083 FLOPs/byte): _____× higher intensity
-- Why does this make matrix multiplication ideal for GPUs? _____
+
+You implemented vectorized matrix multiplication and fused GELU:
+- Matrix multiplication ($1024 \times 1024$): Performs $\approx 2.147$ billion FLOPs ($2 \cdot 1024^3 = 2{,}147{,}483{,}648\text{ FLOPs}$), reading and writing $\approx 12.58\text{ MB}$ data ($3 \times 1024^2 \times 4\text{ bytes} = 12{,}582{,}912\text{ bytes}$).
+- **Arithmetic Intensity**:
+  $$\mathcal{I}_{\text{GEMM}} = \frac{2 \cdot 1024^3\text{ FLOPs}}{12 \cdot 1024^2\text{ bytes}} = \frac{1024}{6} \approx \mathbf{170.67\text{ FLOPs/byte}}$$
+- **Comparison to Element-Wise Addition ($0.0833\text{ FLOPs/byte}$)**:
+  $$\frac{170.67}{0.0833} \approx \mathbf{2{,}048\times}\text{ higher intensity}$$
+- **Why Matrix Multiplication Is Ideal for GPUs**:
+  Modern GPUs (such as NVIDIA H100 or A100) feature massive theoretical compute capacity ($1000\text{ TFLOP/s}$) paired with $\approx 2\text{--}3\text{ TB/s}$ HBM memory bandwidth. Their roofline ridge point is $\mathcal{I}^* = \frac{1000 \times 10^{12}}{3 \times 10^{12}} \approx 333\text{ FLOPs/byte}$. High arithmetic intensity allows systolic Tensor Cores to remain fully saturated by keeping operands resident in register files and shared memory, avoiding DRAM bus stalls.
 
 ---
 
 ### Question 2: Kernel Fusion Memory Benefits
-Your fused_gelu writes the computation as one NumPy expression.
-- Why does that still allocate intermediate arrays? _____
-- What extra copies does unfused_gelu retain in Tensor wrappers? _____
-- A compiled fused kernel could read and write each element once. What would
-  need to change to achieve that here? _____
-- Why is reduced memory traffic useful for transformer inference? _____
+
+Your `fused_gelu` writes the computation as one compact NumPy expression:
+- **Why Intermediate Arrays Are Still Allocated in NumPy**:
+  In standard CPython, operator expressions (`x**3`, `* 0.044715`, `+ x`, `np.tanh(...)`) execute sequentially through operator overloading. Each binary operation instantiates a temporary intermediate NumPy array buffer on the heap, traversing DRAM back and forth.
+- **Extra Copies Retained by `unfused_gelu`**:
+  `unfused_gelu` wraps every single intermediate NumPy array in a `Tensor` object with autograd tracking graphs, gradient pointers, and execution metadata, adding significant Python interpreter reference-counting and memory allocation overhead.
+- **Requirements for a True Compiled Fused Kernel**:
+  A dedicated JIT compiler (such as OpenAI Triton, CUDA C++, or PyTorch Inductor) compiles the entire mathematical expression into a single compiled GPU thread kernel. It loads each scalar input $x[i]$ into a processor register, evaluates the entire polynomial and hyperbolic tangent within hardware registers, and writes directly to the destination array $y[i]$ in a single memory pass.
+- **Why Reduced Memory Traffic Is Critical for Transformer Inference**:
+  During autoregressive transformer token generation (the decode phase), batch size is small (often 1 token per user). The workload is severely memory-bandwidth bound. Eliminating memory round-trips for element-wise activations directly frees memory bus bandwidth, boosting tokens-per-second generation throughput.
 
 ---
 
 ### Question 3: Production Optimization Strategy
-Based on your decision framework analysis:
-For edge deployment (memory critical, stability required, hardware diverse):
-- Priority 1 technique: _____ (low risk, universal)
-- Priority 2 technique: _____ (memory benefits)
-- Skip technique: _____ (why: _____)
-- What's the primary constraint: memory, compute, or power? _____
+
+Based on systems decision framework analysis for edge deployment (memory critical, stability required, diverse silicon):
+- **Priority 1 Technique**: **Vectorized BLAS Execution** (Calls standard system BLAS like Apple Accelerate, ARM Compute Library, or OpenBLAS; zero numerical divergence risk, immediate multi-core acceleration).
+- **Priority 2 Technique**: **Post-Training Quantization & Operator Fusion** (Reduces memory traffic by $4\times$ via INT8 weights and folds activations directly into linear projections, preventing thermal throttling).
+- **Technique to Skip**: **Custom Python Tiling** (Interpreted Python nested loops introduce massive interpreter overhead; tuned BLAS libraries already execute multi-level cache-blocked assembly internally).
+- **Primary Operational Constraint**: **Memory Bandwidth & SRAM Capacity** (Edge SoCs share memory between CPU, GPU, and NPU across a modest $30\text{--}60\text{ GB/s}$ bus, making memory access the primary latency and energy bottleneck).
 
 ---
 
 ### Question 4: What Training Through im2col Costs
-Your Im2colConv2dFunction saves the patch matrix in forward and uses it in backward.
-- For the 4×32×32×32 layer with a 3×3 kernel and same padding, how many bytes does
-  that saved patch matrix hold? How many for the input it came from? _____
-- A 20-layer CNN keeps one such buffer per convolution until backward reaches
-  it. Roughly how does that compare with storing only the layer inputs? _____
-- The alternative is to rebuild `cols` from the saved input during backward.
-  What does that cost in time, and when would you choose it? _____
-- col2im is the only step of the backward pass that is not a matrix multiply.
-  Why can't it be one? _____
+
+Your `Im2colConv2dFunction` saves the unrolled patch matrix in forward and consumes it in backward:
+- **Patch Matrix vs. Input Buffer Footprint**:
+  - Saved patch matrix $X_{\text{col}}$: $(N \cdot H_{\text{out}} \cdot W_{\text{out}}) \times (C_{\text{in}} \cdot K_h \cdot K_w) \times 4\text{ bytes} = (4 \times 32 \times 32) \times (32 \times 3 \times 3) \times 4 = 4096 \times 288 \times 4 = \mathbf{4{,}718{,}592\text{ bytes}} \approx \mathbf{4.72\text{ MB}}$.
+  - Raw input image buffer $X$: $4 \times 32 \times 32 \times 32 \times 4 = \mathbf{524{,}288\text{ bytes}} \approx \mathbf{0.524\text{ MB}}$ ($9\times$ smaller).
+- **20-Layer CNN Storage Comparison**:
+  Holding patch matrices across 20 identical convolutional layers requires $\approx 20 \times 4.72\text{ MB} \approx \mathbf{94.4\text{ MB}}$, compared to only $\approx 10.5\text{ MB}$ if retaining only the input feature maps.
+- **Recomputing `cols` on Backward (Activation Checkpointing)**:
+  Recomputing `cols` during backward adds $\approx 20\text{--}30\%$ extra forward computation time. It is chosen in large-scale training (or on microcontrollers with $\le 1\text{ MB}$ SRAM) when GPU VRAM capacity is exhausted by batch size or high image resolution.
+- **Why `col2im` Cannot Be a Single Matrix Multiply**:
+  Overlapping convolutional receptive fields cause multiple distinct patch columns to map to the *exact same physical pixel coordinate*. Accumulating their gradients requires a spatial **scatter-add** reduction (in-place accumulation $\mathrel{+}=$), which cannot be expressed as a standard linear matrix transformation without creating an impractically large, sparse permutation matrix.
 """
 
 # %% [markdown]
