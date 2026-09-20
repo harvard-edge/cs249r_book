@@ -164,7 +164,7 @@ $$e_{\text{prop}} \prec e_{\text{auth}} \prec e_{\text{flush}} \prec a_{\text{ex
 
 The critical ordering constraint is the relation $e_{\text{flush}} \prec a_{\text{ext}}$. If the runtime permits $a_{\text{ext}} \prec e_{\text{flush}}$, there exists a nonzero time interval $\Delta t = t(e_{\text{flush}}) - t(a_{\text{ext}})$ during which the external mutation has been initiated or executed in the physical world, but no surviving record of that authorization exists in non-volatile storage. If the physical host experiences a power failure, hypervisor eviction, or operating system crash during $\Delta t$, the state of the real world permanently diverges from the durable state of the agent trajectory.
 
-### The Physical Anatomy of Phantom Mutations and the Storage Barrier
+### Phantom Mutation Hazards
 
 To understand why naive implementations of agent runtimes violate this invariant, one must analyze the physical path of I/O operations through the operating system kernel and storage hardware. Programmers writing agent orchestrators frequently assume that calling a standard POSIX write function, such as `write(fd, buffer, length)`, guarantees that the corresponding bytes have been permanently written to disk. This assumption is completely false.
 
@@ -238,21 +238,15 @@ While a local NVMe drive provides microsecond-level synchronization barriers for
 
 To resolve this systems bottleneck without weakening the Write-Ahead Logging invariant, the runtime implements the *Group Commit* optimization. Originally introduced in high-throughput database systems (DeWitt et al., 1984), group commit amortizes the cost of a single physical storage barrier across multiple concurrent, independent operations.
 
-```text
-THREAD 1 (Agent A):  [Escrow a_1] ──┐
-                                    │
-THREAD 2 (Agent B):  [Escrow a_2] ──┼─> [Lock-Free Ring Buffer] ──> [Vectorized writev()] ──> [Single fdatasync()]
-                                    │                                                               │
-THREAD 3 (Agent C):  [Escrow a_3] ──┘                                                               │
-                                                                                                    │
-                                    ┌───────────────────────────────────────────────────────────────┘
-                                    ▼
-                     [Simultaneous Barrier Release]
-                                    │
-                     ┌──────────────┼──────────────┐
-                     ▼              ▼              ▼
-                [Dispatch 1]   [Dispatch 2]   [Dispatch 3]
-```
+: **Group Commit Pipeline Architecture**: Amortization of non-volatile storage barriers across concurrent agent threads via lock-free staging and vectorized synchronization. {#tbl-vol3-group-commit-pipeline}
+
+| Pipeline Stage | Operating Mechanism | Latency Profile | Data Structures & I/O Primitives |
+|:---|:---|:---|:---|
+| **1. Escrow Ingestion** | Concurrent agent threads serialize action proposals ($e_{\text{prop}}, e_{\text{auth}}$) and push to in-memory staging; threads park on completion promises. | Near-zero ($\le 5\ \mu\text{s}$) | Lock-free multi-producer ring buffer (MPMC) |
+| **2. Batch Aggregation** | Dedicated flush coordinator drains pending queue when batch size reaches $B_{\max}$ (e.g., 64 records) or timeout $T_{\text{flush}}$ (e.g., 2 ms) expires. | $0.1 - 2.0\ \text{ms}$ | Vectorized scatter-gather memory array |
+| **3. Vectorized Write** | Aggregated event records written to storage device via a single scatter-gather system call. | $0.2 - 0.8\ \text{ms}$ | POSIX `writev()` / Linux `io_uring` submit |
+| **4. Storage Barrier** | Host kernel forces disk controller to commit dirty blocks from controller cache to non-volatile flash media. | $2.0 - 15.0\ \text{ms}$ | `fdatasync()` / NVMe flush command |
+| **5. Barrier Release** | Coordinator notifies all parking completion promises; waiting agent threads unpark in parallel to dispatch tools. | Near-zero ($\le 10\ \mu\text{s}$) | Atomic futex broadcast / condition variable unpark |
 
 In an agent supervisor utilizing group commit, individual execution threads do not independently execute `fsync()`. Instead, when an agent thread verifies that a proposed tool mutation is authorized, it appends its serialized event record $e_i$ to a shared, in-memory, lock-free ring buffer and enqueues its continuation on an internal completion channel. The thread then suspends execution, entering a blocked wait state.
 
@@ -298,24 +292,13 @@ A pure Write-Ahead Logging architecture guarantees safety under sudden process t
 
 ![**Periodic Checkpoint Cadence and Replay Recovery**: Macro architecture of periodic base snapshots and incremental delta segments, showing how checkpoints bound replay recovery latency after sudden process faults.](images/svg/checkpoint-cadence.svg){#fig-vol3-checkpoint-cadence width="95%"}
 
-### Full State Snapshots versus Incremental Delta Encoding
+### Incremental Delta Encoding
 
 Every state snapshot must preserve enough structural information to resurrect an operational Agent Control Block ($\text{ACB}$) without re-evaluating historical intermediate events. In an unprivileged agent architecture operating under Zero Ambient Authority ($A=0$), the active state vector at turn $t$, denoted $\mathbf{S}_t$, comprises three distinct system layers: the supervisor control plane, the structured interaction context, and the external execution environment. The supervisor control plane encompasses the task goal specification, the active step counter $t$, the remaining token and monetary budgets, the tool authorization capability table, and the lifecycle status of all child subagent processes. The interaction context encapsulates the logical prompt conversation buffer, the active system instructions, and the ordered sequence of validated tool call invocations paired with their returned observation references. The execution environment state captures the guest filesystem mount configuration, working directory pointers, exported shell environment variables, and cryptographic hashes of modified workspace artifacts.
 
 The architectural dilemma lies in how this compound state vector is serialized and committed to disk. The runtime can execute a *full state snapshot*, serializing the entire consolidated $\mathbf{S}_t$ into a self-contained, monolithic binary payload, or it can emit an *incremental delta snapshot*, recording only the differential mutations that occurred since the preceding checkpoint $\mathbf{S}_{t-1}$.
 
-```text
-+-------------------------------------------------------------------------+
-|                  Full Snapshot vs. Incremental Delta                    |
-+-------------------------------------------------------------------------+
-|  Turn 0       Turn 100            Turn 200            Turn 300          |
-|  [Base S_0] -> [Full Snap S_100] -> [Full Snap S_200] -> [Full S_300]   |
-|   |             |                   |                   |               |
-|   +-(Delta 1)---+-(Delta 2)---------+-(Delta 3)---------+               |
-|                 \                                       /               |
-|                  +-- Cumulative Recovery Chain --------+                |
-+-------------------------------------------------------------------------+
-```
+
 
 Under a full snapshot policy, the supervisor marshals the complete $\text{ACB}_t$ into a compact binary representation—typically using a schema-validated columnar format or zero-copy serialization buffers such as FlatBuffers—and writes the resulting byte array directly to the persistence store. The primary advantage of the full snapshot is immediate, decoupled recovery: resurrection requires reading exactly one snapshot record from disk. The runtime performs no historical backwards-chaining. The storage engine can prune or archive all preceding snapshots and raw event logs prior to turn $t$ without compromising the recoverability of the active state.
 
@@ -337,13 +320,15 @@ $$\Delta_t = \mathbf{S}_t \ominus \mathbf{S}_{t - \tau}$$
 
 where $\tau$ represents the checkpoint stride. Rather than serializing the entire conversation buffer and environment map, the runtime records only the newly appended message tokens, the updated budget decrement counters, newly opened file descriptors, and filesystem inodes modified within the window $[t - \tau, t]$. When operating with an underlying append-only Write-Ahead Log, this delta encoding is frequently free: the delta $\Delta_t$ is isomorphic to the ordered sequence of event records $\langle e_{t-\tau+1}, \dots, e_t \rangle$ already committed by the WAL engine.
 
-| Architectural Dimension    | Full State Snapshot                                                   | Incremental Delta Snapshot                                            | Copy-on-Write (CoW) Memory Fork                               |                                                         |           |     |                                                                   |
-|:---------------------------|:----------------------------------------------------------------------|:----------------------------------------------------------------------|:--------------------------------------------------------------|---------------------------------------------------------|-----------|-----|-------------------------------------------------------------------|
-| **Serialization Overhead** | High; scales linearly with total context size $\mathcal{O}(\          | \mathbf{S}_t\                                                         | )$                                                            | Low; strictly bounded by window mutation $\mathcal{O}(\ | \Delta_t\ | )$  | Near-zero pause; page table duplication $\mathcal{O}(\text{RSS})$ |
-| **Storage Amplification**  | Severe quadratic growth over extended trajectories                    | Minimal; stores unique state transitions                              | Moderate; proportional to dirty memory page volume            |                                                         |           |     |                                                                   |
-| **Crash Recovery Time**    | Minimal $\mathcal{O}(1)$; single read and instantaneous memory unpack | Moderate $\mathcal{O}(\tau)$; requires applying delta chain from base | Minimal $\mathcal{O}(1)$; re-maps backing store or page files |                                                         |           |     |                                                                   |
-| **Log Compaction Impact**  | Trivial; all historical snapshots before $t$ can be pruned            | Complex; requires periodic base consolidation to prune logs           | Moderate; requires background page coalescing and cleanup     |                                                         |           |     |                                                                   |
-| **Isolation Barrier**      | High; complete decoupling from live process memory space              | Moderate; dependent on continuous replay engine verification          | Process-bound; tied to local host kernel memory semantics     |                                                         |           |     |                                                                   |
+: **State Checkpoint Architecture Trade-Offs**: Quantitative and operational comparison across full state snapshots, incremental delta encoding, and copy-on-write memory forks. {#tbl-vol3-snapshot-models}
+
+| Architectural Dimension | Full State Snapshot | Incremental Delta Snapshot | Copy-on-Write (CoW) Memory Fork |
+|:---|:---|:---|:---|
+| **Serialization Overhead** | High; scales linearly with context size $\mathcal{O}(\Vert \mathbf{S}_t \Vert)$ | Low; strictly bounded by window mutation $\mathcal{O}(\Vert \Delta_t \Vert)$ | Near-zero pause; page table duplication $\mathcal{O}(\text{RSS})$ |
+| **Storage Amplification** | Severe quadratic growth over extended trajectories | Minimal; stores unique state transitions | Moderate; proportional to dirty memory page volume |
+| **Crash Recovery Time** | Minimal $\mathcal{O}(1)$; single read and instantaneous memory unpack | Moderate $\mathcal{O}(\tau)$; requires applying delta chain from base | Minimal $\mathcal{O}(1)$; re-maps backing store or page files |
+| **Log Compaction Impact** | Trivial; all historical snapshots before $t$ can be pruned | Complex; requires periodic base consolidation to prune logs | Moderate; requires background page coalescing and cleanup |
+| **Isolation Barrier** | High; complete decoupling from live process memory space | Moderate; dependent on continuous replay engine verification | Process-bound; tied to local host kernel memory semantics |
 
 The engineering trade-off of incremental delta encoding centers on crash recovery complexity. Restoring an agent from an incremental scheme requires locating the most recent full base checkpoint $\mathbf{S}_{\text{base}}$ and sequentially applying the chain of subsequent deltas:
 
@@ -351,20 +336,18 @@ $$\mathbf{S}_t = \mathbf{S}_{\text{base}} \oplus \Delta_1 \oplus \Delta_2 \oplus
 
 If any delta segment in the recovery chain suffers bit-rot, cryptographic signature mismatch, or torn writes, the entire trajectory downstream of the corruption boundary becomes unrecoverable. Robust production runtimes therefore adopt a *hybrid tiered checkpointing strategy*: the supervisor emits lightweight incremental deltas at high frequency (for instance, following every mutating tool dispatch) and consolidates these deltas into a monolithic full base snapshot at low frequency (for instance, every fifty turns, or after major task milestones). This architecture bounds the recovery chain to at most $\tau_{\max}$ delta evaluations while keeping steady-state write amplification flat.
 
-### The Mechanics of Optimal Checkpoint Cadence: Young-Daly Formulations
+### Optimal Checkpoint Cadence
 
 Selecting the temporal interval between consecutive checkpoints represents a classical systems dilemma. If the supervisor checkpoints too frequently, the runtime expends its computational budget serializing data structures, locking concurrent queues, and waiting on non-volatile storage barriers, thereby throttling end-to-end agent throughput. Conversely, if the supervisor checkpoints too infrequently, any hardware crash, network partition, or out-of-memory kernel eviction forces the recovery engine to replay a vast log of historical operations. During replay, the system incurs significant recomputation latency and wastes valuable token and compute budgets re-evaluating deterministic operations.
 
-```text
-       Checkpoint Write Latency (delta_snap)
-      |<- C ->|
-------+-------+---------------------------------------+-------+----> Time
-      | Checkpoint 1                                  | Checkpoint 2
-      |<--------------- Interval (T) ---------------->|
-                                              * CRASH *
-                                              |<- R ->|
-                                               Replay Recomputation
-```
+::: {#def-vol3-young-daly .callout-definition title="Definition 10.1: Young-Daly Optimal Checkpoint Cadence"}
+Let $\text{MTBF}$ denote the mean time between failures across the execution environment, $\delta_{\text{snap}}$ denote the snapshot write and storage barrier latency during which agent execution is throttled, and $\delta_{\text{rec}}$ denote the fixed state restoration overhead upon reboot.
+
+Under a Poisson failure process where crashes occur uniformly at random with arrival rate $\lambda = 1/\text{MTBF}$, the expected wasted execution time per unit of productive progress is minimized at the optimal checkpoint interval $T_{\text{opt}}$:
+$$T_{\text{opt}} = \sqrt{2 \cdot \delta_{\text{snap}} \cdot \text{MTBF}} - \delta_{\text{snap}} \approx \sqrt{2 \cdot \delta_{\text{snap}} \cdot \text{MTBF}} \quad (\text{for } \delta_{\text{snap}} \ll \text{MTBF})$$
+Accounting for second-order recovery recomputation costs and restart latency $\delta_{\text{rec}}$, Daly's higher-order formulation yields:
+$$T_{\text{opt}}^{\text{Daly}} = \sqrt{2 \cdot \delta_{\text{snap}} \cdot \left(\text{MTBF} + \delta_{\text{rec}}\right)} + \delta_{\text{snap}} \cdot \left(\frac{1}{3}\sqrt{\frac{2\delta_{\text{snap}}}{\text{MTBF}}} - 1\right)$$
+:::
 
 To establish the mathematically optimal checkpoint interval, we adapt the classical fault-tolerance models formulated by J. W. Young (1974) and extended by John T. Daly (2006) for high-performance computing systems. Let $\text{MTBF}$ represent the Mean Time Between Failures of the execution environment, encompassing host hardware faults, container evictions, spot instance terminations, and unhandled sandbox panics. Let $\delta_{\text{snap}}$ denote the total wall-clock time required to serialize, flush, and confirm a state snapshot to persistent storage, during which active agent execution is paused or throttled. Let $T$ represent the checkpoint interval (the time elapsed between the completion of one checkpoint and the initiation of the next).
 
@@ -434,7 +417,7 @@ Attempting to maintain the 2-turn cadence over the network store would waste $4.
 
 The mathematical model underscores a critical operational principle: checkpoint cadence must dynamically adapt to physical storage capabilities. If an agent runtime detects storage congestion or network interface throttling, it must dynamically scale the interval parameter $\tau$ upward to prevent checkpoint queuing from starving forward execution progress.
 
-### Coordinated Atomicity Across Memory, Database, and Storage Overlays
+### Coordinated Storage Atomicity
 
 The central architectural failure in naive agent checkpointing implementations is the *plane-skew tearing hazard*. An autonomous agent is not an isolated in-memory program; it is a distributed composite spanning three decoupled persistence planes:
 
@@ -444,46 +427,29 @@ The central architectural failure in naive agent checkpointing implementations i
 
 If the agent supervisor attempts to take uncoordinated snapshots of these three planes independently, recovery guarantees collapse. Consider the concrete failure sequence illustrated in the following execution trace.
 
-```text
-+-------------------------------------------------------------------------+
-|                  Plane-Skew Tearing Failure Sequence                    |
-+-------------------------------------------------------------------------+
-| Time   Plane                Action                                      |
-| ----   -----                ------                                      |
-| t_0    Supervisor Plane     Freezes ACB state at turn t=42.             |
-| t_1    Guest Filesystem     Dispatches tool mutating workspace:         |
-|                             `rm -rf /workspace/src/compiler.cc`         |
-| t_2    Filesystem Plane     Captures OverlayFS snapshot (reflects rm).  |
-| t_3    Host Crash           Kernel panics before event e_43 commits.    |
-| ----   ---------------------------------------------------------------- |
-| Recv   Recovery Engine      Restores ACB at t=42; inspects workspace.   |
-|                             Invariant violated: ACB expects file,       |
-|                             filesystem already destroyed it!            |
-+-------------------------------------------------------------------------+
-```
+: **Plane-Skew State Tearing Failure Mode**: Sequence of uncoordinated cross-plane snapshots leading to divergent post-crash workspace state. {#tbl-vol3-plane-skew-tearing}
+
+| Temporal Step | Target Subsystem | Action or Transition | System Invariant State |
+|:---|:---|:---|:---|
+| **Step 1: $t_0$** | Supervisor Control Plane | Captures and freezes in-memory ACB state at turn $t=42$. | Consistent cut $\mathbf{S}_{42}$ recorded in memory buffer. |
+| **Step 2: $t_1$** | Sandboxed Filesystem | Dispatches tool action mutating workspace: `rm -rf /workspace/src/compiler.cc`. | Uncommitted forward mutation in guest filesystem. |
+| **Step 3: $t_2$** | Storage Plane | Filesystem engine creates OverlayFS snapshot; capture reflects file deletion. | Filesystem snapshot advances to turn $t=43$. |
+| **Step 4: $t_3$** | Host Operating System | Host experiences kernel panic or power loss before event $e_{43}$ commits to WAL. | In-memory uncommitted event log destroyed. |
+| **Step 5: Recovery** | Recovery Engine | Deserializes ACB snapshot from $t=42$; inspects restored workspace. | **Critical Failure**: ACB expects `compiler.cc`, but filesystem destroyed it (`ENOENT`). |
 
 When the recovery engine resurrects the trajectory from this torn checkpoint, the supervisor attempts to resume execution from turn $t=42$. The restored $\text{ACB}_{42}$ instructs the agent to read `/workspace/src/compiler.cc` or compute a unified patch against it. However, the restored filesystem snapshot reflects the state from time $t_2$, where the file was already deleted by uncommitted turn $t=43$. The agent crashes immediately with an unhandled `ENOENT` (No such file or directory) error. The system has suffered state tearing: the filesystem traveled into the future relative to the supervisor control plane.
 
 To prevent plane-skew tearing, the runtime must enforce *coordinated cross-plane snapshot atomicity*. All three planes must advance their snapshot boundaries across a synchronized barrier, ensuring that the restored state reflects a globally consistent cut across memory, events, and disk bytes.
 
-```text
-       Live Execution
-             |
-             v
-   [ 1. Phase-1: Barrier ]   --> Quiesce tool dispatch; drain pending RPCs
-             |
-             v
-   [ 2. Phase-2: Freeze ]    --> Flush SQLite WAL; issue FIFREEZE to disk
-             |
-             v
-   [ 3. Phase-3: CoW Fork ]  --> Fork memory (CoW); create Btrfs/OverlayFS snapshot
-             |
-             v
-   [ 4. Phase-4: Thaw ]      --> FIFTHAW disk; resume live execution loop
-             |
-             v (Background Thread)
-   [ 5. Phase-5: Commit ]    --> Stream frozen memory and DB bytes to durable storage
-```
+: **Coordinated Five-Phase Quiescence Protocol**: Ordered synchronization sequence enforcing globally consistent cuts across memory, events, and filesystem overlays. {#tbl-vol3-quiescence-pipeline}
+
+| Quiescence Phase | Coordination Mechanism | Primary Primitives & System Calls | Target Subsystems |
+|:---|:---|:---|:---|
+| **Phase 1: Barrier** | Drain in-flight RPCs, pause external tool dispatch, and park incoming model token generation. | Atomic barrier synchronization, queue lock | Model gateway, IPC sockets |
+| **Phase 2: Freeze** | Commit pending transactional buffers to disk and freeze storage filesystem drivers. | `sqlite3_wal_checkpoint()`, `ioctl(FIFREEZE)` | Relational WAL, guest filesystem |
+| **Phase 3: CoW Fork** | Instantiate copy-on-write process memory clone and read-only storage snapshot. | POSIX `fork()`, Btrfs subvolume / OverlayFS split | Host page table, storage volume |
+| **Phase 4: Thaw** | Release filesystem locks and unpark agent threads to resume forward execution loop immediately. | `ioctl(FITHAW)`, condition variable broadcast | Sandbox runtime, execution threads |
+| **Phase 5: Commit** | Stream frozen memory pages and CoW delta blocks to persistent storage asynchronously in background. | Zero-copy `sendfile()`, asynchronous block transfer | NVMe WAL, cloud object tier |
 
 This coordinated snapshot protocol proceeds through five strictly ordered phases:
 
@@ -515,7 +481,7 @@ Fifth, in the **Thaw and Asynchronous Commit Phase**, the supervisor immediately
 ::: {#ws-10-empirical-failure-trace-crash-recovery .callout-war-story title="Empirical Failure Trace: Crash Recovery Verification"}
 The following log trace illustrates a dependable recovery sequence executed by an agent supervisor following an unexpected host power failure during a refactoring task:
 
-```text
+```bash
 [04:12:01.102] CRIT host_kernel: Power fault detected; emergency halt.
 [04:12:08.431] INFO agent_boot: Initializing supervisor crash recovery subsystem.
 [04:12:08.445] INFO agent_boot: Found valid base snapshot 'snap_t250.bin' (Turn 250).
@@ -540,7 +506,7 @@ When a distributed agent supervisor crashes midway through an automated codebase
 
 **Re-running an unprivileged stochastic foundation model is not replay; it is a brand-new computation that forks physical reality.** True trajectory reconstruction requires a dedicated replay mode that rebuilds the exact supervisory state—the Agent Control Block ($\text{ACB}_t$), active context window, memory escrows, and authorization boundaries—without querying the foundation model or dispatching a single physical tool action. By treating historical event records as an immutable, authoritative input stream, the agent runtime decouples state re-hydration from external inference and real-world side effects.
 
-### Replay Versus Re-Execution: The Fundamental Asymmetry
+### Replay Execution Asymmetry
 
 The distinction between deterministic replay and stochastic re-execution marks the boundary between dependable systems engineering and fragile scripting. During live trajectory execution, the agent operates in an interactive closed loop with its environment, as formalized in @fig-vol3-replay-mode. At each discrete turn $t$, the host supervisor constructs an inference context from the current control block $\text{ACB}_t$ and dispatches an autoregressive generation request to the foundation model $M$. The model outputs a completion event containing candidate tool proposals $e_{\text{prop}}$. The supervisor evaluates these proposals against its security policies under zero ambient authority ($A=0$). Upon explicit approval, it commits an authorization record $e_{\text{auth}}$ and dispatches the external action $a_{\text{ext}}$ to a sandboxed environment. The physical world returns an observation $e_{\text{obs}}$, and the state transition function $\delta$ advances the control block:
 
@@ -575,7 +541,7 @@ Because $\delta$ is a deterministic state machine implemented in the supervisor 
 
 ![**Live Trajectory Execution versus Replay Reconstruction Mode**: In live execution (top), candidate proposals pass through authorization to external tools and the model generates new tokens. In replay reconstruction mode (bottom), the supervisor operates under zero ambient authority ($A=0$) with external endpoints severed; historical state is reconstructed deterministically by streaming recorded events directly into the state transition function.](images/svg/fig-vol3-replay-mode.svg){#fig-vol3-replay-mode width="95%"}
 
-### State Re-Hydration and the Sequential Event Fold
+### Sequential Event Re-Hydration
 
 Reconstructing a trajectory from an append-only event log requires a two-phase protocol: *base state re-hydration* followed by a *sequential event fold*. When recovering a trajectory that has executed hundreds of turns, folding events from genesis ($t=0$) introduces unacceptable recovery latency. The runtime optimizes this process by combining the periodic checkpoints established under Write-Ahead Logging discipline with incremental log playback.
 
@@ -640,15 +606,17 @@ Brian Kernighan (1979) observed that *"debugging is twice as hard as writing the
 
 Historical trajectory reconstruction provides the foundation for *non-destructive time-travel debugging*. Because the event log records every interaction at the supervisor-model and supervisor-sandbox boundaries, the developer can treat trajectory time as an addressable, scrubbable dimension. A developer can mount an archival trajectory, select any turn $t \in [0, T_{\max}]$, and reconstruct the exact in-memory representation of $\text{ACB}_t$.
 
-```text
-[Trajectory Timeline: Turns 0 to 48]
-Checkpoints:    [S_0]                [S_20]               [S_40]          [Crash: t=48]
-                  |                    |                    |                   |
-Event Log:       |====E_{0->20}======|====E_{20->40}=====|====E_{40->48}=====|
-                  |                    |                    |                   |
-Rewind Target:   |                    |           =====>  [Step t=35]          |
-                                                    (Load S_20 + Fold 15 events)
-```
+::: {#def-vol3-time-travel-replay .callout-definition title="Definition 10.2: Checkpoint-Delta Time-Travel Replay"}
+Given a historical trajectory spanning $T$ turns with periodic base snapshots $\mathcal{S} = \{\mathbf{S}_0, \mathbf{S}_k, \mathbf{S}_{2k}, \dots\}$ where $k$ is the checkpoint stride, and an ordered write-ahead log of deterministic events $\mathcal{E} = \langle e_1, e_2, \dots, e_T \rangle$:
+
+Any arbitrary historical state $\mathbf{S}_t$ ($t \in [0, T]$) is reconstructible without forward side effects via the bounded left-fold operator:
+$$\mathbf{S}_t = \text{Fold}\left(\mathbf{S}_{\lfloor t/k \rfloor \cdot k}, \langle e_{(\lfloor t/k \rfloor \cdot k) + 1}, \dots, e_t \rangle\right)$$
+where the replay engine:
+1. Selects the nearest preceding snapshot $\mathbf{S}_{\text{anchor}} = \mathbf{S}_{\lfloor t/k \rfloor \cdot k}$.
+2. Maps $\mathbf{S}_{\text{anchor}}$ into a sandboxed, copy-on-write memory buffer.
+3. Sequentially applies exactly $m = t - (\lfloor t/k \rfloor \cdot k) < k$ transition deltas without issuing external system calls.
+4. Bounds worst-case random access retrieval latency to $\mathcal{O}(k)$ event evaluations.
+:::
 
 Time-travel navigation leverages the checkpoint-delta index. To inspect the agent state at turn $t = 35$, the debugger locates the nearest preceding snapshot $\mathbf{S}_{20}$, deserializes the control block, and folds the 15 intervening event pairs from $\mathcal{E}_{20 \to 35}$. The developer can then execute non-destructive diagnostic queries against the reconstructed state:
 
@@ -667,7 +635,7 @@ Trace-driven regression testing solves this problem by using historical trajecto
 
 The test harness validates whether the updated supervisor's state transitions match historical invariants. For example, if an engineer rewires the tool call parser to handle streaming JSON tokens, the regression runner replays historical $e_{\text{prop}}$ payloads containing thousands of malformed, escaped, or edge-case tool calls observed in production. The runner asserts that the new parser extracts identical tool names, arguments, and validation errors as the baseline implementation, without invoking a single GPU kernel.
 
-```text
+```bash
 =================================== FAILURES ===================================
 _________________ test_supervisor_replay_regression[trace_8492a] ________________
 [replay_engine.py:142]: InvariantViolation: Tool argument schema mismatch at turn 14
@@ -711,20 +679,14 @@ Under IEEE 754 arithmetic, addition is not associative: $(a \oplus b) \oplus c \
 
 The second and more pernicious source of entropy arises from floating-point non-associativity in parallel GPU reduction kernels. High-performance matrix multiplication (GEMM) and fused multi-head attention kernels execute parallel reductions across thousands of streaming multiprocessor (SM) threads. As formalized by David Goldberg (1991), floating-point addition under IEEE 754 standards does not satisfy mathematical associativity. In parallel reduction trees where thread warps schedule dynamically based on DRAM bank contention, cache hits, and clock throttling, the exact summation order of partial products varies from run to run. Consequently, even when evaluating an identical prompt prefix at greedy decoding ($T=0$), the raw logit values for vocabulary tokens can drift by small floating-point epsilons ($\sim 10^{-6}$ to $10^{-4}$). If the two highest-ranking candidate tokens have logit margins smaller than this micro-architectural drift, the greedy `argmax` operator flips. A single flipped token alters the key-value context for all subsequent decode steps, leading to complete trajectory divergence within a handful of generated words.
 
-```text
-       Host OS Stratum           System Calls (gettimeofday, getpid, urandom)
-             │                   ├── Leak dynamic timestamps into prompts
-             ▼                   └── Create non-reproducible UUID identifiers
-  ┌───────────────────────┐
-  │ Agent Supervisor Loop │◄───── External Environment Mutex
-  └──────────┬────────────┘      └── Tool observation changes across replay
-             │
-             ▼                   Floating-Point Kernel Scheduling
-     [Inference Engine]          ├── Warp arrival race conditions in GEMM
-             │                   └── Asynchronous atomicAdd logit drift
-             ▼
-     [Token Emission] ──────────► Greedy Argmax Flip at t_diverge
-```
+::: {#def-vol3-entropy-strata .callout-definition title="Definition 10.3: The Three Strata of Replay Non-Determinism"}
+During offline trajectory replay, divergences between recording time $t_{\text{rec}}$ and replay time $t_{\text{rep}}$ originate across three distinct architectural strata:
+1. **Host OS Stratum (Kernel & Process State)**: Wall-clock timers (`gettimeofday`), process identifiers (`getpid`), filesystem inode traversal order, and thread scheduling interleavings.
+2. **Inference Stratum (Floating-Point Hardware & Scheduling)**: Non-associative parallel summation in GPU GEMM kernels, warp arrival race conditions, compiler target differences, and asynchronous `atomicAdd` logit drift triggering greedy argmax flips.
+3. **Environment Stratum (External Services & Tool APIs)**: Dynamic network responses, remote server clocks, mutable database state, and nondeterministic external web payloads.
+
+A runtime achieves *strict replay fidelity* if and only if all three strata are mediated by deterministic virtual escrow buffers, as categorized in @tbl-vol3-nondeterminism-mitigation.
+:::
 
 The third stratum involves dynamic host operating system state leaked into prompts and control structures. Agent supervisors frequently inject metadata into system prompts, tool schemas, or scratchpads: current wall-clock timestamps via `time.time()`, host process identifiers via `getpid()`, local file paths, or random correlation identifiers via `uuid.uuid4()`. When a supervisor passes dynamic timestamps into an LLM context, the model conditions its reasoning on values that can never naturally repeat during subsequent execution. Furthermore, file system iterators that traverse directory trees without explicit collation return directory entries in raw inode order, which varies across file systems, container instances, and operating system kernels.
 
@@ -738,7 +700,7 @@ The fourth stratum encompasses external environment mutation. An agent does not 
 | **External Environment**   | Modifying external filesystems, databases, and third-party APIs.     | Observation drift yielding divergent planning decisions.            | Observation mocking; Write-Ahead Log (WAL) escrow; sandbox snapshot rollbacks.        |
 : **Non-Determinism Classification Matrix and Runtime Mitigation Strategies**: Breakdown of entropy strata across stochastic decoding, GPU micro-architecture, host system state, and external environments. {#tbl-vol3-nondeterminism-mitigation}
 
-### Floating-Point Non-Associativity and Logit Flips
+### Floating-Point Non-Associativity
 
 To understand why bit-exact reproduction fails on identical GPU clusters under greedy decoding ($T=0$), one must inspect the arithmetic pipeline of parallel tensor reduction. During the prefill and decode stages of autoregressive inference, computing the attention score matrix $\mathbf{S} = \mathbf{Q}\mathbf{K}^T / \sqrt{d_k}$ and aggregating value vectors $\mathbf{O} = \text{Softmax}(\mathbf{S})\mathbf{V}$ requires summing millions of floating-point products across parallel SIMD lanes.
 
@@ -768,7 +730,7 @@ Systems engineers have attempted to enforce determinism at the GPU kernel layer 
 
 More fundamentally, deterministic CUDA flags only guarantee repeatability across runs conducted on the *identical physical hardware model with the identical compute capability, microcode version, and SM count*. A trajectory generated on an NVIDIA H100 (132 SMs, FP8/BF16 Tensor Cores) cannot be deterministically reproduced at the kernel level on an A100 (108 SMs) or an L40S, because the thread block tiling dimensions and warp partition topologies differ fundamentally. Consequently, relying on GPU-level arithmetic determinism for trajectory replay is an architectural dead end for portable systems.
 
-### Virtualizing Time, Entropy, and Observation Escrow
+### Deterministic Entropy Virtualization
 
 Because bit-level model determinism cannot be achieved portably across hardware tiers, a resilient agent runtime must apply the classical systems principle of virtualization. Rather than attempting to force the underlying execution hardware to behave deterministically, the supervisor interposes on the boundary between the agent and all ambient entropy sources. This design separates execution into two operating modes: *recording mode* during live execution, and *virtualized replay mode* during diagnostic analysis.
 
@@ -825,7 +787,7 @@ Physical worker nodes in modern cloud data centers are fundamentally ephemeral. 
 
 **Decoupling an active trajectory's execution state into a serialized supervisory control block, an append-only event stream, and a copy-on-write filesystem overlay allows the runtime to evacuate and resume a running agent across physical worker nodes without task loss or duplicate side effects.** Rather than treating an autonomous agent as an opaque operating system process tied to specific CPU registers and virtual memory page tables, the runtime treats the trajectory as an explicitly factored distributed state machine. By synchronizing this factored state at clean conversational turn boundaries, the supervisor transforms an unexpected hardware eviction from a catastrophic crash into a routine, sub-second live migration.
 
-### The Preemption Imperative and Evacuation Windows
+### Preemptive Node Evacuation
 
 In hyperscale infrastructure, transient compute instances—offered as AWS Spot Instances, Google Cloud Spot VMs, or Azure Spot Virtual Machines—provide between 70% and 90% cost discounts relative to on-demand pricing. For enterprise agent fleets running thousands of long-horizon software engineering, code synthesis, or data pipeline trajectories continuously, operating exclusively on on-demand instances imposes prohibitive capital expenditure. However, these steep cost savings come with a strict systems trade-off: instances are subject to involuntary reclamation whenever higher-priority on-demand demand spikes.
 
@@ -903,16 +865,15 @@ In an OverlayFS deployment, the sandbox filesystem consists of three directories
 - A writable `upperdir` hosted on an ephemeral local filesystem. Every file edit, newly created source file, or deleted directory performed by the agent is recorded exclusively as a copy-on-write delta inside `upperdir`.
 - A `workdir` utilized by the kernel for atomic directory operations.
 
-```text
-       Source Node                                Destination Node
-+-------------------------+                   +-------------------------+
-| Writable upperdir       | -- Sync Delta --> | Restored upperdir       |
-| (142 MiB Agent Edits)   |    (Network)      | (142 MiB Agent Edits)   |
-+-------------------------+                   +-------------------------+
-| Immutable lowerdir      |                   | Immutable lowerdir      |
-| (12 GiB Base Image)     |                   | (12 GiB Pre-cached)     |
-+-------------------------+                   +-------------------------+
-```
+::: {#def-vol3-overlayfs-migration .callout-definition title="Definition 10.4: Layered Copy-on-Write Delta Migration"}
+Let a containerized sandbox filesystem be composed of an immutable base layer $\mathcal{L}_{\text{lower}}$ of size $M_{\text{base}}$ pre-cached across all worker nodes, and an ephemeral writable layer $\mathcal{L}_{\text{upper}}$ of size $M_{\Delta} \ll M_{\text{base}}$ capturing runtime modifications.
+
+During preemptive node evacuation, the migration coordinator transfers only the mutable delta:
+$$\text{Payload}_{\text{mig}} = \text{Serialize}\left(\mathcal{L}_{\text{upper}}\right) \oplus \Delta_{\text{workdir}}$$
+Total network migration latency $T_{\text{mig}}$ satisfies:
+$$T_{\text{mig}} = \frac{M_{\Delta}}{B_{\text{net}}} + t_{\text{fsync}} + t_{\text{remount}} \ll \frac{M_{\text{base}} + M_{\Delta}}{B_{\text{net}}}$$
+guaranteeing that evacuation completes within the host preemption grace window $\Delta t_{\text{evac}}$.
+:::
 
 Because the `lowerdir` is already present on the destination worker node, the migration runtime completely ignores the base image. It needs only to synchronize the modified bytes residing in `upperdir`.
 
@@ -921,7 +882,7 @@ To maximize efficiency under tight preemption deadlines, the runtime employs an 
 1. **Continuous Background Sync:** While the agent is actively executing, a low-priority background daemon periodically mirrors newly modified blocks in `upperdir` to network-attached block storage (such as an NVMe-over-Fabrics target or distributed object volume) using differential file block hashing.
 2. **Final Quiescent Delta:** At the moment of turn-boundary quiescence, the filesystem cgroup is frozen, and an explicit `syncfs()` syscall flushes the OS dirty page cache to disk. The migration agent sweeps the `upperdir` for blocks dirtied since the last background pass, tars the differential stream, applies lightweight LZ4 compression, and dispatches the final delta across the network link.
 
-#### Tool Channel and IPC Re-binding {.unnumbered}
+#### Tool Channel Re-Binding {.unnumbered}
 
 The final phase of the tripartite protocol reconciles external communication channels. While an agent's memory and disk can be serialized, active operating system communication channels—such as TCP sockets, UNIX domain sockets connected to local sandbox bridges, and inter-process communication (IPC) pipes to subagents—cannot be directly transplanted across physical network interfaces.
 
@@ -979,7 +940,7 @@ $$T_{\text{migration}} = t_{\text{quiesce}} + t_{\text{ser}} + t_{\text{xfer}} +
 Because $T_{\text{migration}} = 4.59\text{ seconds} \ll \Delta t_{\text{evac}} = 30\text{ seconds}$, the tripartite migration completes comfortably within the preemption envelope, leaving a safety margin of more than 25 seconds before the cloud provider reclaims the hardware.
 :::
 
-### Failure Recovery and Fencing Tokens
+### Fencing Token Protocols
 
 What occurs if a network partition isolates the source node during migration, preventing the supervisor from confirming whether the destination node assumed control? In distributed systems, this hazard is known as the *split-brain anomaly*: two distinct supervisor processes on different physical machines believe they own the same trajectory, concurrently executing tool calls, emitting contradictory model queries, and corrupting external state.
 
@@ -1011,7 +972,7 @@ An uncompacted append-only event stream becomes an operational liability within 
 
 Preserving durable records does not require retaining every ephemeral byte in perpetuity at maximum read availability. Just as classical database management systems distinguish between hot transactional write-ahead logs and cold historical backups, an agent runtime must treat trajectory persistence as a progressive data lifecycle. Storage systems for autonomous agents solve this challenge by decoupling the causal spine—the cryptographically verifiable sequence of model proposals, supervisor authorizations, and state transitions—from bulky, low-information observation payloads. By progressively demoting and compacting execution artifacts across distinct hardware storage tiers, runtimes maintain strict compliance and diagnostic auditability without letting storage costs scale linearly with raw tool output volume.
 
-### Multi-Tier Storage Hierarchy: Hot, Warm, and Cold Planes
+### Multi-Tier Storage Hierarchy
 
 The storage requirements of an autonomous trajectory change radically across its lifecycle. While an agent is actively executing, the runtime prioritizes write latency and crash recovery throughput above all else. Every per-turn transition must be durably committed before the runtime triggers external side effects, demanding sub-millisecond append latency to prevent the supervisor from stalling the model's decode loop. Conversely, once an agent completes its assigned task, write frequency drops to zero, and the access pattern shifts from latency-sensitive sequential writes to ad-hoc query scans for debugging, regression testing, or regulatory audits.
 
@@ -1041,37 +1002,21 @@ The *Cold Tier* provides long-term archival storage for trajectories older than 
 
 : **Architectural Characteristics and Hardware Trade-Offs Across Persistence Tiers**: Comparative breakdown of physical media, storage engines, target latencies, payload states, retention horizons, and cost profiles across Hot, Warm, and Cold storage tiers. {#tbl-vol3-storage-tiers}
 
-### Selective Payload Compaction and Epistemic Pruning
+### Selective Payload Compaction
 
 The core invariant of trajectory persistence states that any valid reconstruction must reproduce the supervisory control state $\text{ACB}_t$ without repeating historical external side effects. However, preserving the supervisory state does not require preserving every peripheral character produced by an external tool. When a compiler fails, the supervisor needs to know that the build failed and needs access to the relevant compiler diagnostic lines that the agent will parse to plan a correction. The thousands of intermediate lines indicating successful compilation of unaffected translation units provide zero epistemic value to future turns or post-incident audits.
 
 Selective payload compaction exploits this asymmetry between causal relevance and raw textual volume. Rather than treating all event payloads as uniform binary blobs, the compaction engine classifies event data into two distinct operational classes: the *causal spine* and *ephemeral observations*.
 
-```text
-UNCOMPACTED EVENT RECORD (Hot Tier):
-┌────────────────────────────────────────────────────────────────────────┐
-│ Turn: 42 | Event: TOOL_OBSERVATION | Tool: cargo_build                 │
-│ Causal Spine: exit_code=101, duration_ms=4821                          │
-│ Payload (Raw stdout/stderr):                                          │
-│   "Compiling libc v0.2.147                                             │
-│    Compiling syn v2.0.28                                               │
-│    ... [14,800 lines of standard compilation output: ~1.2 MB] ...      │
-│    error[E0308]: mismatched types in src/engine/buffer.rs:42:15        │
-│    expected `usize`, found `u32`"                                      │
-└────────────────────────────────────────────────────────────────────────┘
+: **Selective Payload Compaction Schema Transformation**: Transformation of high-volume tool execution output into an authenticated epistemic digest. {#tbl-vol3-payload-compaction-schema}
 
-                                    │
-                                    ▼ Selective Compaction Engine
-COMPACTED EVENT RECORD (Warm/Cold Tiers):
-┌────────────────────────────────────────────────────────────────────────┐
-│ Turn: 42 | Event: TOOL_OBSERVATION | Tool: cargo_build                 │
-│ Causal Spine: exit_code=101, duration_ms=4821                          │
-│ Digest: "error[E0308]: mismatched types in src/engine/buffer.rs:42:15" │
-│ Epistemic Metadata: head_lines=5, tail_lines=20, dropped_bytes=1258100 │
-│ Cryptographic Attestation:                                            │
-│   sha256: 4f3a9a7b9e11c8d6428e5f... [Authenticates raw execution]      │
-└────────────────────────────────────────────────────────────────────────┘
-```
+| Schema Field | Uncompacted Record (Hot Tier) | Compacted Record (Warm & Cold Tiers) | Epistemic Rationale |
+|:---|:---|:---|:---|
+| **Turn & Event Header** | `turn: 42, event: TOOL_OBSERVATION, tool: cargo_build` | `turn: 42, event: TOOL_OBSERVATION, tool: cargo_build` | Immutable causal spine; identical across all tiers. |
+| **Execution Metrics** | `exit_code: 101, duration_ms: 4821` | `exit_code: 101, duration_ms: 4821` | Critical exit state for supervisor control branching. |
+| **Primary Output Payload** | Full unpruned stdout/stderr (14,800 lines, 1.25 MB) | Filtered error digest (`error[E0308]: mismatched types...`, 420 B) | Retains only high-value causal tokens needed for reasoning. |
+| **Truncation Metadata** | *None (raw continuous stream)* | `head_lines: 5, tail_lines: 20, dropped_bytes: 1258100` | Preserves structural boundaries of truncated payload. |
+| **Cryptographic Attestation** | *None* | `sha256: 4f3a9a7b9e11c8d...` (Merkle leaf of raw stream) | Guarantees non-repudiation and external log verification. |
 
 The causal spine consists of the formal event header: the turn index $t$, the unique trajectory identifier $\tau$, the timestamp, the model proposal $e_{\text{prop}}$, the supervisor authorization record $e_{\text{auth}}$, the tool action parameters $a_{\text{ext}}$, and the structural exit metadata (such as UNIX return codes, signaled exceptions, and execution duration). The causal spine is strictly immutable; it is preserved without modification across all storage tiers to guarantee that the agent's directional decision tree remains completely reconstructible.
 
@@ -1118,7 +1063,7 @@ $$\text{Ratio} = \frac{164.25\text{ GB/day}}{8.56\text{ GB/day}} \approx 19.19\t
 When demoted to the Cold Tier after thirty days, the columnar Parquet representation with Zstandard compression achieves an additional $3.2\times$ compression factor on the structured text, shrinking the annual compliance archive from $59.1\text{ TB}$ to just $963\text{ GB}$. A single terabyte of cold object storage easily accommodates the entire corporate history of $164$ million autonomous operational turns.
 :::
 
-### Tombstoning, Cryptographic Shredding, and Retention Governance
+### Cryptographic Shredding Governance
 
 While selective compaction prunes observation bulk, enterprise agent systems must also satisfy legal and regulatory mandates governing complete data lifecycle termination. Under statutes such as the European Union General Data Protection Regulation (GDPR Article 17) and corporate SOC 2 Type II controls, organizations must guarantee that sensitive user information, proprietary source code, and personally identifiable information (PII) processed by an agent are irreversibly erased upon user request or expiration of the retention window.
 
@@ -1126,29 +1071,14 @@ This requirement conflicts directly with the physical architecture of append-onl
 
 Runtimes resolve this fundamental tension through two complementary systems mechanisms: logical *tombstoning* and physical *cryptographic shredding*.
 
-```text
-ENCRYPTED TRAJECTORY PERSISTENCE WITH CRYPTO-SHREDDING:
+: **Cryptographic Shredding Lifecycle Across Storage Tiers**: Two-tier envelope encryption architecture enabling instantaneous compliance expungement in immutable columnar lakehouses. {#tbl-vol3-crypto-shredding-lifecycle}
 
-Key Management Service (KMS)
-┌────────────────────────────────────────────────────────┐
-│ Master Key (KEK)                                       │
-│   ├── Wrapped DEK (Trajectory τ_A) ──► [Active]        │
-│   └── Wrapped DEK (Trajectory τ_B) ──► [SHREDDED / ZEROED]
-└────────────────────────────────────────────────────────┘
-                       │
-                       ▼
-Immutable Columnar Storage (Warm/Cold S3 Object Store)
-┌────────────────────────────────────────────────────────┐
-│ Partition: 2026-Q3-trajectories.parquet                │
-│                                                        │
-│ [Trajectory τ_A Record]                                │
-│ Ciphertext: 8f4b2c... ──► Decrypts with DEK_A (Valid) │
-│                                                        │
-│ [Trajectory τ_B Record]                                │
-│ Ciphertext: 3a9e1d... ──► Indistinguishable from noise │
-│                           (DEK_B permanently destroyed)│
-└────────────────────────────────────────────────────────┘
-```
+| Lifecycle Phase | Key Management Service (KMS) | Columnar Storage Layer (S3 / Parquet) | Operational & Cryptographic State |
+|:---|:---|:---|:---|
+| **1. Active Ingestion** | Generates unique Data Encryption Key ($\text{DEK}_\tau$) wrapped under Master Key ($\text{KEK}$). | Trajectory events written encrypted with $\text{DEK}_\tau$; stored in immutable row-groups. | Fully readable; supervisor unwraps $\text{DEK}_\tau$ on demand. |
+| **2. Normal Retention** | Stores encrypted $\text{DEK}_\tau$ in key catalog indexed by trajectory ID $\tau$. | Columnar records indexed by tenant, timestamp, and metadata for analytics. | Queries decrypt column chunks using cached session keys. |
+| **3. Expungement Request** | User or regulatory mandate requests data erasure under GDPR Right to be Forgotten. | Parquet files reside on immutable WORM storage; rewriting multi-TB files is cost-prohibitive. | Tombstone record appended to operational metadata catalog. |
+| **4. Physical Shredding** | Permanently deletes wrapped $\text{DEK}_\tau$ from KMS key store; flushes hardware HSM caches. | Encrypted ciphertext remains in Parquet chunks on disk without modification. | Ciphertext is mathematically indistinguishable from pseudorandom noise ($\mathcal{O}(2^{-256})$ security). |
 
 Logical tombstoning introduces a supervisory revocation record into the event stream. When an administrative command or user request demands the expungement of a trajectory $\tau$, the supervisor appends a signed tombstone event $e_{\text{tomb}} = \langle \tau, t_{\text{curr}}, \text{reason}, \text{auth\_sig} \rangle$ to the active log. During subsequent warm queries or trajectory reconstruction procedures, the storage layer inspects the tombstone registry; any trajectory marked with an authenticated tombstone is immediately filtered from query projections, rendering it invisible to evaluation pipelines and user-facing dashboards.
 
@@ -1174,7 +1104,7 @@ When an autonomous agent runtime attempts to persist its execution history direc
 The fundamental trade-off of trajectory persistence mirrors Stonebraker's classic observation: general-purpose database engines that attempt to handle transaction processing, low-latency logging, and analytical scanning within a single storage abstraction perform poorly across all three when subjected to extreme specialized workloads.
 :::
 
-### Storage Engine Primitives and Trade-Off Dynamics
+### Storage Engine Trade-Offs
 
 The architectural requirements of trajectory storage diverge sharply from conventional transactional web workloads. A trajectory log is strictly append-only; historical events $e_i = (t, e_{\text{prop}}, e_{\text{auth}}, e_{\text{obs}})$ are never updated in place or reordered once authorized and flushed. Furthermore, persistence operations fall along two radically different latency boundaries. On the critical execution path, the supervisor requires a synchronous durability guarantee ($e_{\text{flush}}$) with sub-millisecond commit latency to minimize pipeline bubbles between the model's generation of an action proposal and the sandbox's dispatch of the external tool. Off the critical execution path, human operators and automated supervision monitors require indexed queries across thousands of concurrent trajectories to track error rates, inspect failure traces, or project current Agent Control Blocks ($\text{ACB}_t$), while downstream reinforcement learning pipelines require bulk, high-throughput sequential scans over billions of tokens of interaction history.
 
@@ -1204,7 +1134,7 @@ Columnar storage formats, most notably Apache Parquet, represent the opposite en
 
 : **Structural and Performance Trade-offs of Trajectory Storage Engines**: Comparison of access patterns, sync flush latencies, sustained ingestion throughput, query expressiveness, compression ratios, and failure domains across RocksDB, SQLite WAL, PostgreSQL, and Apache Parquet. {#tbl-vol3-storage-engines}
 
-### Quantitative Storage Benchmarking and Write Amplification
+### Write Amplification Benchmarks
 
 To establish concrete sizing guidelines for trajectory persistence, systems engineers must model the physical I/O overhead generated by the write path. The primary metric governing storage durability, device lifetime, and tail latency on non-volatile memory is the Write Amplification Factor ($\text{WAF}_{\text{db}}$), defined as the ratio of total bytes written to physical non-volatile storage to the total logical payload bytes emitted by the application:
 
@@ -1293,7 +1223,7 @@ def benchmark_sync_overhead(n_events=500, payload_bytes=1024):
 
 Running this benchmark against a standard enterprise NVMe drive demonstrates that direct append-only synchronization requires roughly $0.2\text{ ms}$ per commit, whereas the relational transaction with page management and metadata journaling consumes over $2.1\text{ ms}$ per commit—an order-of-magnitude difference that directly compounds across hundreds of trajectory turns.
 
-### The Production Hybrid Engine: Staged Ingestion and Materialization
+### Hybrid Ingestion Engines
 
 The divergent operational requirements of agent runtimes preclude the use of any single storage technology. Production agent infrastructures deploy a staged, three-tier hybrid storage architecture that couples the low latency of embedded LSM-trees with the queryability of relational databases and the analytical efficiency of columnar object stores. This pipeline isolates the synchronous model execution loop from network and analytical overhead while guaranteeing causal event durability, transactional queryability, and cost-effective cold archiving.
 
@@ -1302,49 +1232,13 @@ The divergent operational requirements of agent runtimes preclude the use of any
 Synchronous write paths must never cross a network socket. The model supervisor commits $e_{\text{flush}}$ to local non-volatile storage; all network transfers to centralized operational databases and object archives execute asynchronously out of band.
 :::
 
-```text
-┌───────────────────────────────────────────────────────────────────────────┐
-│                           WORKER NODE ARCHITECTURE                        │
-│                                                                           │
-│   ┌───────────────────────────┐       ┌───────────────────────────────┐   │
-│   │ Agent Execution Runtime   │       │ Local Streaming Daemon        │   │
-│   │ (Supervisor / Sandbox)    │       │ (Sidecar Process)             │   │
-│   └─────────────┬─────────────┘       └──────────────▲────────────────┘   │
-│                 │                                    │                    │
-│   Critical Path │ Synchronous Append                 │ Tail Ingestion     │
-│   (Sub-ms)      ▼                                    │ (Asynchronous)     │
-│         ┌────────────────────────────────────────────┴────────┐           │
-│         │ Local Embedded Storage (RocksDB / SQLite WAL)       │           │
-│         │ - Fast Non-Volatile Memory (NVMe SSD)               │           │
-│         │ - Write-Ahead Log (WAL) & MemTable                  │           │
-│         └─────────────────────────────────────────────────────┘           │
-└──────────────────────────────────────┬────────────────────────────────────┘
-                                       │
-                                       │ Asynchronous gRPC Streaming
-                                       ▼
-┌───────────────────────────────────────────────────────────────────────────┐
-│                     CENTRALIZED OPERATIONAL WARM TIER                     │
-│                                                                           │
-│   ┌───────────────────────────────────────────────────────────────────┐   │
-│   │ Clustered Relational Database (PostgreSQL with JSONB & Indexes)   │   │
-│   │ - Deduplication via Monotonic LSN & Trajectory ID                 │   │
-│   │ - Live Trajectory Monitoring & Human-in-the-Loop Inspection       │   │
-│   │ - Operational Rollback & Replay Reconstruction Queries            │   │
-│   └──────────────────────────────────┬────────────────────────────────┘   │
-└──────────────────────────────────────┼────────────────────────────────────┘
-                                       │
-                                       │ Scheduled Batch Export & Compaction
-                                       ▼
-┌───────────────────────────────────────────────────────────────────────────┐
-│                       ANALYTICAL & COMPLIANCE COLD TIER                   │
-│                                                                           │
-│   ┌───────────────────────────────────────────────────────────────────┐   │
-│   │ Scalable Cloud Object Storage (S3 / GCS Parquet Lakehouse)       │   │
-│   │ - Columnar Parquet with Snappy / Zstandard Compression            │   │
-│   │ - Partitioned by Tenant, Model Version, and Date                  │   │
-│   │ - High-Throughput Analytics (DuckDB, Trino, PyTorch Pretraining)  │   │
-│   └───────────────────────────────────────────────────────────────────┘   │
-```
+: **Production Multi-Tier Trajectory Storage Engine**: Architectural characteristics, access patterns, and storage media across the three data lifecycle planes. {#tbl-vol3-hybrid-storage-tiers}
+
+| Storage Tier | Physical Media & Engine | Access Pattern & Throughput | Primary Architectural Role | Target SLAs |
+|:---|:---|:---|:---|:---|
+| **Hot Tier** | Local NVMe SSD; Embedded RocksDB with write-ahead logging. | Sequential append, single-row point lookups via monotonic LSN. | Real-time WAL, action authorization barrier, instant crash recovery. | Latency $\le 0.5\ \text{ms}$, WAF $\approx 1.0$ |
+| **Warm Tier** | Clustered Relational Database (PostgreSQL with partitioned tables and JSONB indexes). | Indexed range scans, multi-agent status queries, relational joins. | Active trajectory monitoring, human-in-the-loop review, cross-agent coordination. | Latency $5 - 50\ \text{ms}$, 99.99% availability |
+| **Cold Tier** | Distributed Cloud Object Storage (S3 / GCS Parquet lakehouse with Zstandard). | Vectorized batch scans (DuckDB, Trino, PyTorch dataset loaders). | Compliance retention, safety auditing, offline RL fine-tuning (DPO, RLVR). | Scans $\ge 10\ \text{GB/s}$, cost $\le \$0.02/\text{GB}\cdot\text{month}$ |
 
 The Hot Tier executes entirely within the physical boundary of the worker node. When the supervisor authorizes an action proposal $e_{\text{prop}}$ or captures a tool observation $e_{\text{obs}}$, it writes the serialized event record directly to an embedded RocksDB instance residing on the local NVMe drive. The write call explicitly requests an `fdatasync()` flush. Because the write is local and sequential, the supervisor achieves durable persistence in under 0.5 milliseconds, satisfying the Write-Ahead Logging discipline without waiting on remote database locks or network packets. The model decode loop resumes immediately. If the worker node abruptly loses power, the local RocksDB instance recovers the exact state of the trajectory up to the very last flushed event $e_t$ upon reboot, allowing local state reconstruction as formulated in Section 10.4.
 
@@ -1368,13 +1262,13 @@ The export pipeline extracts completed trajectory records, verifies their crypto
 
 These Parquet files are written to cloud object storage using a deterministic partitioning hierarchy:
 
-```text
+```bash
 s3://agent-trajectories-cold/
-  ├── tenant_id=org_8492/
-  │   ├── dt=2026-09-19/
-  │   │   ├── model=claude-code-v4/
-  │   │   │   ├── part-00001-c84fa2.parquet
-  │   │   │   └── part-00002-91bf8a.parquet
+  |-- tenant_id=org_8492/
+  |   |-- dt=2026-09-19/
+  |   |   |-- model=claude-code-v4/
+  |   |   |   |-- part-00001-c84fa2.parquet
+  |   |   |   \-- part-00002-91bf8a.parquet
 ```
 
 By organizing cold storage in this manner, analytical engines such as DuckDB, Apache Spark, or Trino can execute high-throughput SQL scans across millions of historical trajectories using vectorized SIMD instructions. A safety compliance query filtering all trajectories that invoked a specific administrative API over a three-month window reads only the `tool_name` and `trajectory_id` column chunks from object storage, skipping gigabytes of observation payloads entirely via Parquet page-level statistics. Furthermore, downstream reinforcement learning pipelines (such as policy optimization algorithms discussed in Chapter 12) stream compressed trajectory tokens directly from this columnar lakehouse into GPU memory buffers without burdening the live operational database cluster.
@@ -1404,14 +1298,14 @@ Architecturally, the active context window is merely a lossy, ephemeral projecti
 
 In pursuit of low interaction latency, runtime developers frequently commit the classic write-ahead logging violation: dispatching a mutating tool action $a_{\text{ext}}$ across a network socket or POSIX pipe before the corresponding authorization and proposal records ($e_{\text{prop}}$, $e_{\text{auth}}$) have been durably flushed via `fsync()` to non-volatile storage. Because local solid-state drives and distributed storage engines exhibit write latencies ranging from 2 to 30 milliseconds, asynchronous dispatch creates a window of vulnerability between tool invocation and log durability.
 
-```text
-Volatile Host Memory:    [e_prop] ──> [e_auth] ──> [Dispatch a_ext] ──> [Crash/Power Loss]
-                                                        │
-Non-Volatile Disk (WAL):  (Unsynced Page Cache)         ▼
-                                                [Target System Mutated]
------------------------------------------------------------------------------------------
-Post-Crash Recovery:      [Reboot at t-1] ──> [Re-dispatch a_ext]  <── PHANTOM MUTATION!
-```
+::: {#def-vol3-phantom-mutation .callout-definition title="Definition 10.5: Phantom Mutation Hazard"}
+Let an external tool action $a_{\text{ext}}$ possess irreversible side effects on external system state $\mathcal{W}_{\text{ext}}$. An agent supervisor commits a *phantom mutation violation* if it dispatches $a_{\text{ext}}$ before the intent records ($e_{\text{prop}}, e_{\text{auth}}$) are durably flushed via synchronous storage barrier to non-volatile persistence:
+$$t_{\text{dispatch}}(a_{\text{ext}}) < t_{\text{fsync}}(e_{\text{auth}})$$
+If the host fails at $t_{\text{fail}} \in [t_{\text{dispatch}}, t_{\text{fsync}}]$:
+1. The operating system page cache is destroyed, erasing all trace of $e_{\text{prop}}$ and $e_{\text{auth}}$.
+2. The external state reflects the mutation: $\mathcal{W}_{\text{ext}}' = \text{Apply}(\mathcal{W}_{\text{ext}}, a_{\text{ext}})$.
+3. Upon recovery, the supervisor resumes from turn $t-1$, deduces the action was never attempted, and re-dispatches $a_{\text{ext}}$, causing duplicate execution of non-idempotent operations.
+:::
 
 If the host machine experiences a power failure, kernel panic, or container eviction during this asynchronous interval, the volatile operating system page cache containing the intent record is annihilated. The external environment, however, has already processed the mutation: an API call has deducted funds from an account, a cloud provider has provisioned an unmonitored compute cluster, or a filesystem system call has unlinked a directory. Upon reboot, the recovery supervisor inspects the non-volatile WAL, finds no record that the mutating action was ever attempted, and re-executes the trajectory from the last durable checkpoint.
 
@@ -1435,17 +1329,15 @@ Furthermore, dynamic inference optimizations such as continuous batching, variab
 
 Autonomous software engineering and diagnostic agents routinely execute compilers, test runners, and system diagnostic utilities (`make -j64`, `pytest --verbose`, `tcpdump`) that generate hundreds of megabytes of raw terminal telemetry per turn. Naively capturing these uncompressed, verbose output streams directly into the primary relational database or embedded log-structured merge-tree (LSM-tree) rapidly degrades storage infrastructure.
 
-```text
-Agent Action:   [Run Test Suite] ──> Emits 250 MB raw stdout/stderr with ANSI escapes
-                                            │
-Naively Persisted:                         ▼
-                               [Embedded WAL / Relational Store]
-                                            │
-System Breakdown:              ┌────────────┴────────────┐
-                               ▼                         ▼
-                     [LSM Compaction Stall]    [Page Cache Eviction]
-                     Tail Latency Spikes P99   Active ACBs Evicted
-```
+::: {#def-vol3-compaction-stall .callout-definition title="Definition 10.6: Unbounded Telemetry Compaction Stall"}
+When an agent supervisor captures unpruned tool telemetry streams (such as raw compiler logs or test execution traces of size $S_{\text{raw}} \ge 100\ \text{MB}$) directly into an embedded LSM-tree write-ahead log:
+1. Write throughput saturates the active memory memtable ($\text{MemTable}_{\text{active}}$), triggering immediate flushing to Level 0 SSTables.
+2. Write amplification spikes as background compaction threads attempt to merge overlapping Level 0 and Level 1 files:
+   $$\text{WAF}_{\text{LSM}} = 1 + \sum_{i=1}^{L_{\max}} T_i$$
+   where $T_i$ represents the tier amplification factor.
+3. The storage engine enforces a write stall to prevent unbounded SSTable accumulation, freezing the main agent control plane and inflating $P_{99}$ latency by orders of magnitude.
+4. Transient terminal output floods the host page cache, evicting active Agent Control Blocks and model context buffers.
+:::
 
 Because primary transaction stores are engineered for low-latency indexing rather than bulk binary object storage, appending hundreds of megabytes of unstructured text causes massive write amplification ($\text{WAF}_{\text{db}}$). In LSM-tree engines like RocksDB, excessive write volume triggers cascading compaction stalls across Level 0 and Level 1 SSTables, causing the 99th-percentile ($P_{99}$) operational latency of the entire supervisor control plane to spike from milliseconds to tens of seconds. Furthermore, raw diagnostic streams populate the operating system page cache with transient terminal characters and ANSI escape sequences, evicting active Agent Control Blocks and index pages from host memory.
 
