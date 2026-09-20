@@ -118,6 +118,20 @@ class FigureContactSheetBuilder:
 
         return ordered
 
+    @staticmethod
+    def _tikz_code(body_text: str) -> str:
+        """Return only the fenced code blocks that hold the picture.
+
+        A figure div often carries explanatory prose after the closing fence.
+        That prose is part of the figure's *caption area*, not the drawing, and
+        feeding it into the audit's \\adjustbox turned it into a single
+        unbreakable line -- which silently inflated three vol2 figures to ~2500pt
+        wide and rendered them as unreadable slivers. Keep the fences only.
+        """
+        blocks = re.findall(r"^```[^\n]*\n(.*?)^```", body_text, re.S | re.M)
+        picked = [b for b in blocks if r"\begin{tikzpicture}" in b]
+        return "\n".join(picked).strip() if picked else body_text
+
     def extract_figures(self) -> List[FigureEntry]:
         """Extract all visual figures from the volume QMD files."""
         qmd_files = self.collect_source_files()
@@ -186,7 +200,7 @@ class FigureContactSheetBuilder:
                                 source_line=start_line,
                                 caption=caption,
                                 alt_text=alt,
-                                content=body_text,
+                                content=self._tikz_code(body_text),
                             ))
                             idx += 1
                     elif re.search(r"!\[.*?\]\((.*?)\)", body_text):
