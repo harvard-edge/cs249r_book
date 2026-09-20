@@ -161,7 +161,7 @@ The remaining three components encompass host system execution. The host runtime
 
 As illustrated in @fig-vol3-critical-path-waterfall, an agent turn is not a monolithic invocation but an alternating sequence of distinct computational regimes. A prolonged compile cycle or a stalled network fetch serializes the control loop, starving the GPU cluster while the agent runtime idles in an operating system wait state.
 
-### Amdahl's Law and Acceleration Asymptotes
+### Acceleration Asymptotes
 
 The architectural danger of treating an agent system purely as a machine learning workload becomes evident when evaluating targeted system optimizations. In 1967, Gene M. Amdahl formulated the law governing the theoretical speedup of an execution pipeline when only a fraction of the workload is enhanced. In an agentic system, let $f_{\text{model}}$ denote the fraction of total baseline trajectory time spent executing model inference (both prefill and decode phases):
 
@@ -234,26 +234,28 @@ where $\Pi$ is the set of all valid topological paths from source to sink. Spans
 
 : **Taxonomy of Trajectory Execution Spans**: Physical resource regimes, primary scaling dimensions, and mitigation strategies across model serving, host virtualization, and network tiers. {#tbl-vol3-span-taxonomy}
 
-The taxonomy of trajectory spans reveals that each phase is constrained by fundamentally different physical resources. A profiling engineer must analyze span telemetry to identify which subsystem dominates $\pi^*$. In production runtimes, empirical trace profiling frequently exposes catastrophic bottlenecks hidden within uninstrumented runtime glue code:
+The taxonomy of trajectory spans reveals that each phase is constrained by fundamentally different physical resources. A profiling engineer must analyze span telemetry to identify which subsystem dominates $\pi^*$. In production runtimes, empirical trace profiling frequently exposes catastrophic bottlenecks hidden within uninstrumented runtime glue code (@tbl-vol3-trace-critical-path):
 
-```text
-[TRACE: 4a8f9c10] Task: "Refactor Auth Middleware" - Total: 312.4s
-├── [Span: 01] supervisor.init ................. 0.12s ( 0.0%)
-├── [Span: 02] sandbox.container_create ........ 14.80s ( 4.7%) [BOTTLENECK]
-├── [Span: 03] model.turn_01.prefill ..........  1.20s ( 0.4%)
-├── [Span: 04] model.turn_01.decode ...........  8.40s ( 2.7%)
-├── [Span: 05] tool.sandbox.git_status ........  0.08s ( 0.0%)
-├── [Span: 06] model.turn_02.prefill ..........  1.85s ( 0.6%)
-├── [Span: 07] model.turn_02.decode ........... 11.20s ( 3.6%)
-├── [Span: 08] tool.sandbox.run_pytest ........ 245.60s (78.6%) [CRITICAL PATH]
-├── [Span: 09] model.turn_03.prefill ..........  2.10s ( 0.7%)
-├── [Span: 10] model.turn_03.decode ...........  4.50s ( 1.4%)
-└── [Span: 11] sandbox.snapshot_export ........ 22.55s ( 7.2%) [BOTTLENECK]
-```
+| Span Identifier | Subsystem Component | Duration (s) | Share (%) | Critical Path Classification |
+| :--- | :--- | :--- | :--- | :--- |
+| **Span 01** (`supervisor.init`) | Runtime Supervisor | 0.12 s | 0.0% | Setup and configuration |
+| **Span 02** (`sandbox.container_create`) | Hypervisor / MicroVM | 14.80 s | 4.7% | Provisioning latency bottleneck |
+| **Span 03** (`model.turn_01.prefill`) | Model Serving Engine | 1.20 s | 0.4% | Compute-bound context prefill |
+| **Span 04** (`model.turn_01.decode`) | Model Serving Engine | 8.40 s | 2.7% | Memory-bound token generation |
+| **Span 05** (`tool.sandbox.git_status`) | Host Subprocess | 0.08 s | 0.0% | Filesystem inspection |
+| **Span 06** (`model.turn_02.prefill`) | Model Serving Engine | 1.85 s | 0.6% | Context expansion prefill |
+| **Span 07** (`model.turn_02.decode`) | Model Serving Engine | 11.20 s | 3.6% | Memory-bound token generation |
+| **Span 08** (`tool.sandbox.run_pytest`) | Isolated MicroVM | 245.60 s | 78.6% | Primary critical path bottleneck |
+| **Span 09** (`model.turn_03.prefill`) | Model Serving Engine | 2.10 s | 0.7% | Final synthesis prefill |
+| **Span 10** (`model.turn_03.decode`) | Model Serving Engine | 4.50 s | 1.4% | Memory-bound token generation |
+| **Span 11** (`sandbox.snapshot_export`) | Storage / Filesystem | 22.55 s | 7.2% | Artifact persistence bottleneck |
+| **Total Trajectory** | **End-to-End Task Execution** | **312.40 s** | **100.0%** | **Inference: 9.4%, Tools/Sandboxing: 90.6%** |
 
-The trace excerpt above demonstrates that model execution (prefill plus decode across three turns) accounts for only $29.25$ seconds, or $9.4\%$ of total wall-clock time. In contrast, the pytest tool execution consumes $78.6\%$ of the trajectory, while container provisioning and snapshot export consume another $11.9\%$. An infrastructure team focusing strictly on model inference latency would be optimizing a component that accounts for less than a tenth of the true critical path.
+: Empirical Span Profile and Critical Path Breakdown for Software Engineering Trajectory (`4a8f9c10`). {#tbl-vol3-trace-critical-path}
 
-### Pipelining, Concurrency, and Critical Path Compression
+The trace profile in @tbl-vol3-trace-critical-path demonstrates that model execution (prefill plus decode across three turns) accounts for only $29.25$ seconds, or $9.4\%$ of total wall-clock time. In contrast, the pytest tool execution consumes $78.6\%$ of the trajectory, while container provisioning and snapshot export consume another $11.9\%$. An infrastructure team focusing strictly on model inference latency would be optimizing a component that accounts for less than a tenth of the true critical path.
+
+### Critical Path Compression
 
 Once the critical path has been empirically isolated, the systems objective becomes compressing its sequential length. While the causal semantics of an agent loop require that a model cannot inspect the output of a tool before that tool has finished executing, a supervisor runtime can re-engineer the boundaries between turns through pipelining, speculative actuation, and concurrent verification.
 
@@ -390,7 +392,7 @@ $$T_{\text{worst-case}} = 300 + 1{,}200 + 4{,}500 = 6{,}000\text{ ms} = 6.00\tex
 The runtime achieves an $86\%$ cost reduction and a $70\%$ reduction in average latency at the expense of a $33\%$ increase in worst-case latency for the $12\%$ of tasks that require Tier 3 escalation.
 :::
 
-### Failure Traces: Verification Escapes and Context Poisoning
+### Verification Escapes
 
 When implementing escalation cascades in production, two insidious systems bugs routinely arise: verification escapes and escalation context poisoning.
 
@@ -427,30 +429,18 @@ While tiered cascades systematically deflect non-complex turns away from expensi
 
 Autoregressive decoding at low batch sizes starves the arithmetic units of modern GPU accelerators. When an agent model generates an execution plan, refactors code, or analyzes an error trace, the host runtime invokes the decoder sequentially, emitting exactly one token per iteration. For every emitted token, the hardware must read every weight tensor across the model's layers from High-Bandwidth Memory (HBM) into Static RAM (SRAM), perform a matrix-vector product against a single activation vector, and write the updated state back to memory. A 70-billion-parameter model stored in 16-bit floating-point format occupies 140 gigabytes of memory. Transferring those 140 gigabytes across an accelerator bus with 3.35 terabytes per second of memory bandwidth requires approximately 41.8 milliseconds of data movement per token, capping decode throughput at fewer than 24 tokens per second. During this process, the GPU tensor cores sit idle for more than ninety-eight percent of the wall-clock execution time.
 
-**Autoregressive decoding at low concurrency is strictly memory-bandwidth bound, fundamentally constrained by an arithmetic intensity of approximately one FLOP per byte of memory traffic. Speculative decoding breaks this memory wall by converting sequential matrix-vector operations into batched matrix-matrix multiplications: a compact draft model proposes a sequence of candidate tokens at high speed, and the large target model verifies the entire block in a single forward pass, achieving substantial wall-clock speedups while mathematically guaranteeing that the output matches the exact probability distribution of the target model.**
+**Autoregressive decoding at low concurrency is strictly memory-bandwidth bound, fundamentally constrained by an arithmetic intensity of approximately one FLOP per byte of memory traffic. Speculative decoding breaks this memory wall by converting sequential matrix-vector operations into batched matrix-matrix multiplications: a compact draft model proposes a sequence of candidate tokens at high speed, and the large target model verifies the entire block in a single forward pass, achieving substantial wall-clock speedups while mathematically guaranteeing that the output matches the exact probability distribution of the target model, as formalized in the speculative decoding execution pipeline (@tbl-vol3-speculative-decoding-pipeline).**
 
-```text
-               SPECULATIVE DECODING PIPELINE (HORIZON γ = 3)
+| Pipeline Stage | Executing Subsystem | Computational Primitive | Arithmetic & Memory Profile | Operational Invariant |
+| :--- | :--- | :--- | :--- | :--- |
+| **1. Autoregressive Draft** | Draft Model ($M_d$) | $\gamma$ sequential GEMV steps | Memory-bandwidth bound; small batch size; rapid token emission | Generates speculative tokens $\hat{x}_1, \dots, \hat{x}_\gamma$ |
+| **2. Parallel Target Verification** | Target Model ($M_t$) | 1 batched GEMM step ($B = \gamma$) | Arithmetic intensity amplified by $\gamma\times$; saturates tensor cores | Computes target conditional probabilities $p_t(x \mid x_{<i})$ |
+| **3. Rejection Sampling Gate** | Target Serving Engine | Elementwise probability comparison | $\mathcal{O}(1)$ comparison: accept if $r < \min(1, p_t/p_d)$ | Recovers exact target distribution without bias |
+| **4. Context & KV Commit** | Joint Runtime Buffer | In-place KV cache append & rollback | Evicts rejected suffix; appends accepted prefix + correction token | Advances context by $k+1$ tokens in a single target forward pass |
 
-       [Draft Model]                                  [Target Model]
- (Low Parameter Count, Fast)                    (High Parameter Count, Slow)
-              │                                              │
-              │ 1. Autoregressive Draft                      │
-              │    Generate x̂₁, x̂₂, x̂₃                       │
-              │    (γ sequential GEMVs)                      │
-              │─────────────────────────────────────────────>│
-              │                                              │ 2. Parallel Verification
-              │                                              │    Evaluate x̂₁, x̂₂, x̂₃
-              │                                              │    concurrently (1 batched GEMM)
-              │                                              │
-              │                                              │ 3. Rejection Sampling
-              │                                              │    Accept x̂₁, x̂₂; Reject x̂₃
-              │                                              │    Sample replacement x₃ ~ p'
-              │<─────────────────────────────────────────────│
-              │ 4. Commit [x̂₁, x̂₂, x₃] to Context            │
-```
+: Algorithmic Execution Stages for Speculative Decoding ($\gamma = 3$ Lookahead Horizon). {#tbl-vol3-speculative-decoding-pipeline}
 
-### The Memory-Bandwidth Wall and Arithmetic Intensity
+### Arithmetic Intensity Boundaries
 
 The fundamental throughput limit of neural inference is governed by the Roofline model, which relates attainable compute performance to memory bandwidth through arithmetic intensity—the ratio of floating-point operations performed to bytes transferred across the memory bus:
 
@@ -500,7 +490,7 @@ Even under zero kernel launch overhead and zero runtime software latency, the ph
 
 Increasing batch size amortizes weight movement across multiple concurrent requests, lifting decode intensity toward the compute-bound regime. However, agent workloads frequently involve localized interactive loops—such as inspecting compiler outputs, running isolated unit tests, and verifying plan syntax—where a single agent instance operates synchronously on the critical path. Under these low-concurrency conditions, traditional batched serving cannot mask memory latency. Accelerating the critical path requires an architectural mechanism that increases arithmetic intensity *within a single request stream*.
 
-### Speculative Proposal and Parallel Target Verification
+### Speculative Decoding Pipeline
 
 Speculative decoding leverages an algorithmic asymmetry first formalized by Leviathan, Kalman, and Matias (2023) and Chen et al. (2023): verifying a sequence of candidate tokens requires fundamentally fewer memory cycles than generating that same sequence autoregressively. Generating $K$ tokens sequentially requires $K$ separate memory passes over the target model's parameter footprint. In contrast, verifying $K$ candidate tokens simultaneously requires only a *single* memory pass over the target model's weights.
 
@@ -592,7 +582,7 @@ $$\mathbb{P}(X = x) = \min\left(q(x), p(x)\right) + \max\left(0, p(x) - q(x)\rig
 
 The proof holds across any temperature setting and vocabulary distribution. If all $\gamma$ candidate tokens are accepted, the target model's forward pass has already evaluated the logits for position $t+\gamma$. The runtime samples an additional bonus token directly from $p(x \mid x_{\le t+\gamma-1})$, producing $\gamma + 1$ accepted tokens from a single target execution pass.
 
-### Serving Economics, Task Entropy, and Accelerator Trade-offs
+### Serving Economics Trade-offs
 
 The net speedup delivered by speculative decoding is a function of the speculative horizon $\gamma$, the relative inference latency between the draft and target models, and the mean acceptance rate $\bar{\alpha} = \mathbb{E}[\alpha]$.
 
@@ -666,7 +656,7 @@ Conversely, if the serving runtime evicts the KV cache to host CPU system memory
 
 The capacity implications become stark when evaluated through Little's Law ($L = \lambda W$), which dictates that the average number of concurrent requests in a stable system $L$ equals the arrival rate $\lambda$ multiplied by the average residence time $W$. When sizing a cluster at the raw inference layer, the average concurrency is $L_{\text{inv}} = \lambda_{\text{inv}} \cdot \mathbb{E}[S_{\text{model}}]$. However, when sizing at the agent trajectory layer, the concurrency of active stateful workflows is $L_{\text{traj}} = \lambda_{\text{traj}} \cdot \mathbb{E}[T_{\text{trajectory}}]$. Because $\mathbb{E}[T_{\text{trajectory}}] \gg \mathbb{E}[S_{\text{model}}]$, an infrastructure architect who sizes memory allocations against $L_{\text{inv}}$ will observe rapid buffer exhaustions, thrashing page-eviction daemons, and pervasive admission rejection as soon as concurrent trajectory volume scales.
 
-### Queueing Dynamics and Tail Latency in Heterogeneous Fleets
+### Queueing Dynamics
 
 Because agent platforms cannot decouple accelerator scheduling from the stochastic nature of agent behavior, sizing a fleet requires queueing-theoretic models that capture extreme variability. Standard introductory systems analysis frequently relies on $M/M/1$ or $M/M/k$ formulations, which presume Poisson arrival processes (exponential inter-arrival distributions) and memoryless, exponentially distributed service durations. In production agent fleets, both assumptions are demonstrably invalid.
 
@@ -745,35 +735,20 @@ The agent-aware MLFQ structures accelerator capacity into distinct priority tier
 
 To maintain architectural stability, an agent MLFQ must resolve two critical systems challenges: *starvation* and *KV-cache memory churn*.
 
-If high-priority interactive traffic in $Q_0$ and $Q_1$ saturates the cluster, long-running batch trajectories in $Q_2$ will starve indefinitely. To enforce forward progress invariants, the scheduler implements periodic *priority boosting*. At regular time intervals $T_{\text{boost}}$ (e.g., every 60 seconds), all unserviced tasks across all priority tiers are flushed back into $Q_0$, resetting their elapsed quantum counters and ensuring that background trajectories periodically advance.
+If high-priority interactive traffic in $Q_0$ and $Q_1$ saturates the cluster, long-running batch trajectories in $Q_2$ will starve indefinitely. To enforce forward progress invariants, the scheduler implements periodic *priority boosting*. At regular time intervals $T_{\text{boost}}$ (e.g., every 60 seconds), all unserviced tasks across all priority tiers are flushed back into $Q_0$, resetting their elapsed quantum counters and ensuring that background trajectories periodically advance (@def-vol3-mlfq-transition-protocol).
 
-```text
-                      +-----------------------------+
-                      |   New Invocations Arrive    |
-                      +--------------+--------------+
-                                     |
-                                     v
-                       +---------------------------+
-         +------------>|      Priority Queue 0     |<------------+
-         |             |  (Interactive, Δ = 64)    |             |
-         |             +-------------+-------------+             |
-         |                           |                           |
-         |                 Exhausts  | Completes                 |
-         |                 Quantum 0 | within Δ0                 |
-         |                           v                           |
-         |             +---------------------------+             |
-  Priority Boost       |      Priority Queue 1     |       Exit System
-  (Every T_boost sec)  |    (Reasoning, Δ = 512)   |     (Output Emitted)
-         |             +-------------+-------------+             |
-         |                           |                           |
-         |                 Exhausts  | Completes                 |
-         |                 Quantum 1 | within Δ1                 |
-         |                           v                           |
-         |             +---------------------------+             |
-         +-------------+      Priority Queue 2     |-------------+
-                       |    (Batch, Δ = 4096+)     |
-                       +---------------------------+
-```
+::: {#def-vol3-mlfq-transition-protocol .callout-tip}
+## Definition 17.1: Multi-Level Feedback Queue (MLFQ) State Transition Discipline
+The cluster scheduler partitions agent inference jobs into prioritized execution tiers with deterministic transition rules:
+
+1. **Ingress Allocation:** All incoming invocations enter highest-priority queue $Q_0$ allocated an initial token quantum of $\Delta_0 = 64$ tokens.
+2. **Quantum Exhaustion Demotion:** If an execution thread exhausts its assigned quantum without completing or issuing an I/O wait, it demotes downward:
+   $$Q_k \xrightarrow{\text{exhausts } \Delta_k} Q_{k+1}$$
+   specifically transitioning from $Q_0 \to Q_1$ ($\Delta_1 = 512\text{ tokens}$) and $Q_1 \to Q_2$ ($\Delta_2 \ge 4{,}096\text{ tokens}$).
+3. **Completion Exit:** An invocation that finishes decoding or yields for tool execution within its quantum $\Delta_k$ immediately exits the scheduling queue and returns results.
+4. **Periodic Priority Boosting:** To eliminate long-horizon starvation in $Q_2$, every $T_{\text{boost}}$ seconds all active tasks across $Q_1$ and $Q_2$ are atomically promoted back to $Q_0$ with reset quanta.
+5. **Tiered Memory Retention:** Preempted $Q_1$ tasks retain physical HBM allocations during grace interval $\tau_{\text{grace}}$; prolonged memory pressure migrates $Q_2$ blocks to host memory via PagedAttention.
+:::
 
 The second challenge involves physical memory management during preemption. When a $Q_2$ job is preempted to free tensor cores for an incoming $Q_0$ burst, evicting its accumulated 4,000-token KV cache to host CPU RAM consumes valuable interconnect bandwidth. If the preempted task is re-admitted milliseconds later, swapping those physical pages back into HBM creates severe PCIe/NVLink thrashing. The MLFQ scheduler mitigates this via *tiered eviction thresholds*: preempted $Q_1$ tasks retain their physical HBM page allocations in a suspended state for a grace period $\tau_{\text{grace}}$. Only if memory pressure persists and $Q_0$ exhausts the free HBM frame pool does the PagedAttention memory manager trigger asynchronous page migration to host DDR5 memory. The comparative trade-offs among classical and adaptive queueing disciplines are evaluated in @tbl-vol3-scheduling-disciplines.
 
@@ -842,28 +817,14 @@ Because the projected average operational utilization $\bar{\rho} = 0.52$ substa
 **Takeaway:** The low break-even threshold ($21.6\%$) demonstrates that dedicated hardware becomes compelling even at modest utilization for token-dense, high-throughput agent workloads. However, operating dedicated nodes below $\rho^*$ during off-peak night shifts rapidly turns them into financial liabilities unless backfilled with preemptible batch tasks ($Q_2$ in an MLFQ).
 :::
 
-In enterprise deployments, the optimal architecture rarely adopts a pure binary posture (exclusively dedicated versus exclusively serverless). Instead, robust platforms deploy a **hybrid tiered provisioning architecture** (often termed *cloud bursting*).
+In enterprise deployments, the optimal architecture rarely adopts a pure binary posture (exclusively dedicated versus exclusively serverless). Instead, robust platforms deploy a **hybrid tiered provisioning architecture** (@tbl-vol3-hybrid-fleet-provisioning) (often termed *cloud bursting*).
 
-```text
-                                  Agent Requests
-                                        |
-                                        v
-                          +---------------------------+
-                          |   Fleet Admission Router  |
-                          +-------------+-------------+
-                                        |
-                 +----------------------+----------------------+
-                 | (Load <= 65%)                               | (Load > 65% Spike)
-                 v                                             v
-  +-----------------------------+               +-----------------------------+
-  |  Dedicated Accelerator Pool |               |  Elastic Serverless APIs    |
-  |  (Reserved 8x H100 Nodes)   |               |  (Pay-per-token Fallback)   |
-  |                             |               |                             |
-  |  - Low queue latency        |               |  - Absorbs non-linear tail  |
-  |  - High baseline efficiency |               |  - Zero stranded capital    |
-  |  - Serves Q0, Q1, and Q2    |               |  - Rate-limited burst buffer|
-  +-----------------------------+               +-----------------------------+
-```
+| Provisioning Tier | Hardware Substrate | Utilization Boundary | Economic Tariff | Queueing Dynamics & Latency | Target Workload Profile |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Dedicated Base Pool** | Reserved $8\times$ H100 GPU nodes | Base load $\rho \le 0.65$ | Fixed lease (\$28.00/node-hr) | Sub-millisecond queue wait; deterministic TTFT | Continuous $Q_0, Q_1$, and background $Q_2$ backfill |
+| **Elastic Serverless Tier** | Multi-tenant cloud APIs / spot endpoints | Burst spikes $\rho > 0.65$ | Pay-per-token marginal pricing | Variable queue wait; network ingress/egress tax | Unpredictable burst spikes and off-nominal overages |
+
+: Hybrid Tiered Accelerator Provisioning and Traffic Bursting Architecture. {#tbl-vol3-hybrid-fleet-provisioning}
 
 Under this hybrid topology, the infrastructure team dimensions a baseline dedicated accelerator cluster sized to absorb base load up to an operating utilization of $\rho \approx 0.60\text{--}0.65$. Keeping dedicated utilization within this boundary ensures that Kingman's queueing multiplier remains low, insulating the fleet from catastrophic queue spikes and tail-latency explosions. When workload bursts push aggregate demand beyond this threshold, the fleet admission controller dynamically routes excess requests to elastic, multi-tenant serverless APIs. The enterprise pays premium spot rates on the marginal overflow but avoids purchasing dedicated nodes that would sit idle during baseline troughs, achieving both cost minimization and tail-latency protection.
 
@@ -906,35 +867,16 @@ To guarantee bounded execution, the runtime must enforce the *Monotonic Spending
 
 $$C(t) + R(t) \le B_{\text{task}}$$
 
-where $R(t) \ge 0$ represents the active financial commitments currently held in escrow for ongoing, in-flight operations. If this inequality cannot be satisfied prior to dispatching an operation, the runtime supervisor must reject the dispatch, trap the execution context with an `OutOfBudgetException`, and initiate deterministic trajectory termination.
+where $R(t) \ge 0$ represents the active financial commitments currently held in escrow for ongoing, in-flight operations. If this inequality cannot be satisfied prior to dispatching an operation, the runtime supervisor must reject the dispatch, trap the execution context with an `OutOfBudgetException`, and initiate deterministic trajectory termination, following the ledger accounting protocol illustrated in @tbl-vol3-budget-ledger-reconciliation and @fig-vol3-hierarchical-budget-ledger.
 
-```text
-       +-------------------------------------------------------+
-       |                  Root Task Ledger                     |
-       |  Budget ($B$): $10.00  |  Committed Spend ($E$): $0.40 |
-       |  Escrow ($R$):  $6.00  |  Free Capital ($F$):   $3.60 |
-       +-------------------------------------------------------+
-                                  |
-            +---------------------+---------------------+
-            | Reserve $2.00                             | Reserve $4.00
-            v                                           v
-+-----------------------+                   +-----------------------+
-|  Child A (Planner)    |                   |  Child B (Executor)   |
-|  $B_A = $2.00         |                   |  $B_B = $4.00         |
-|  Spend ($E_A$): $0.50 |                   |  Spend ($E_B$): $3.10 |
-|  Refund:        $1.50 |                   |  Refund:        $0.90 |
-+-----------------------+                   +-----------------------+
-            | (Terminal Return)                         | (Terminal Return)
-            +---------------------+---------------------+
-                                  |
-                                  v
-       +-------------------------------------------------------+
-       |               Reconciled Root Ledger                  |
-       |  Committed Spend: $0.40 + $0.50 + $3.10 = $4.00       |
-       |  Released Refunds: $1.50 + $0.90 = $2.40               |
-       |  Final Free Capital: $10.00 - $4.00 = $6.00           |
-       +-------------------------------------------------------+
-```
+| Ledger Hierarchy Node | Lifecycle Phase | Initial Budget ($B$) | Committed Spend ($E$) | Escrow Reservation ($R$) | Released Refund | Free Capital ($F$) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Root Task Ledger** | Initial Delegation | \$10.00 | \$0.40 | \$6.00 (Reserved for A + B) | — | \$3.60 |
+| **Child A (Planner)** | Subagent Execution | \$2.00 | \$0.50 | \$0.00 | \$1.50 (Refund to Root) | \$0.00 (Terminated) |
+| **Child B (Executor)** | Subagent Execution | \$4.00 | \$3.10 | \$0.00 | \$0.90 (Refund to Root) | \$0.00 (Terminated) |
+| **Root Task Ledger** | Post-Reconciliation | \$10.00 | \$4.00 (Cumulative) | \$0.00 (Escrow Cleared) | \$2.40 (Restored) | \$6.00 (Available) |
+
+: Hierarchical Budget Ledger Accounting and Capital Reconciliation Example. {#tbl-vol3-budget-ledger-reconciliation}
 
 ### Hierarchical Budget Reservation Ledgers
 
@@ -944,7 +886,7 @@ To prevent over-subscription under concurrent execution, the agent runtime must 
 
 ![**The Hierarchical Budget Reservation Ledger protocol**: A root agent allocates non-overlapping budget reservations into child escrow accounts. In-flight operations draw strictly from local escrow; upon child termination, unexpended capital is refunded upward to the parent's free balance.](images/svg/hierarchical-budget-ledger.svg){#fig-vol3-hierarchical-budget-ledger width="95%"}
 
-#### Ledger State Variables and Accounting Invariants {.unnumbered}
+#### Ledger Accounting Invariants {.unnumbered}
 Every node $k$ in the agent delegation tree maintains an independent, isolated ledger context defined by a four-tuple:
 
 $$\mathcal{L}_k = \langle B_k, E_k, R_k, F_k \rangle$$
@@ -960,7 +902,7 @@ These variables are governed by the strict Conservation Invariant:
 
 $$B_k = E_k + R_k + F_k, \quad \text{where } E_k \ge 0, \; R_k \ge 0, \; F_k \ge 0$$
 
-#### Delegation and Escrow Protocol {.unnumbered}
+#### Delegation Escrow Protocols {.unnumbered}
 When a parent agent $P$ delegates a subtask to a newly initialized child agent $C$, the runtime executes an atomic two-phase allocation transaction:
 
 *Phase 1: Escrow Debit.* The parent requests an escrow reservation of magnitude $\Delta B$. The runtime validates the availability of uncommitted capital:
@@ -977,7 +919,7 @@ $$B_C = \Delta B, \qquad E_C = 0, \qquad R_C = 0, \qquad F_C = \Delta B$$
 
 The child agent operates entirely within the sandboxed financial boundary defined by $B_C$. It has zero visibility into the parent's broader ledger and cannot request additional capital from upstream nodes without explicit parental renegotiation. If the child attempts to spawn its own grandchildren, it must carve out reservations strictly from its own free balance $F_C$.
 
-#### Termination and Capital Reconciliation {.unnumbered}
+#### Capital Reconciliation Protocols {.unnumbered}
 When child agent $C$ halts—whether through successful goal completion, unrecoverable exception, or supervisory abortion—it reports its finalized cumulative expenditure $E_C$ to the runtime supervisor. Because the child was bounded by $B_C = \Delta B$, the settled expenditure is guaranteed to satisfy:
 
 $$E_C \le \Delta B$$
@@ -1043,7 +985,7 @@ Consider an autonomous software engineering agent tasked with diagnosing and rep
 *Takeaway:* Despite the catastrophic crash and execution failure of the fuzzing sub-agent, the hierarchical reservation invariant mathematically prevented the child from overspending the user's authorized capital. The root orchestrator retains $\$3.728$ in uncommitted funds to dispatch an alternative diagnostic strategy.
 :::
 
-### Multi-Rate Circuit Breakers and Epistemic Decay
+### Multi-Rate Circuit Breakers
 
 While a static cumulative spending ceiling $B_{\text{task}}$ guarantees that an agent cannot exceed an absolute fiscal budget, static caps represent a dangerously coarse control mechanism. If an autonomous agent with a $\$50.00$ ceiling enters a pathological code generation loop that burns $\$10.00$ per minute, a static cap allows the system to run uncontrolled for five full minutes, generating hundreds of useless files and thrashing execution sandboxes before halting.
 
@@ -1058,33 +1000,16 @@ An agentic circuit breaker acts as a dynamic supervisor wrapped around the model
 
 1. **CLOSED (Nominal):** Operations dispatch normally. Incurred costs and state deltas are logged to a rolling sliding window.
 2. **OPEN (Tripped):** The breaker has detected an invariant violation. All subsequent inference requests, tool dispatches, and child agent initializations fail immediately (`fail-fast`). The active trajectory is suspended, and the runtime invokes automated rollback or human operator escalation.
-3. **HALF-OPEN (Canary Probing):** After a cooldown interval or an environmental checkpoint restore, the runtime permits a single, bounded "canary" probe (such as an inexpensive reflection pass or a single deterministic unit test) to verify whether the agent has recovered coherence. If the probe fails, the breaker immediately reverts to `OPEN`.
+3. **HALF-OPEN (Canary Probing):** After a cooldown interval or an environmental checkpoint restore, the runtime permits a single, bounded "canary" probe (such as an inexpensive reflection pass or a single deterministic unit test) to verify whether the agent has recovered coherence. If the probe fails, the breaker immediately reverts to `OPEN`. The state transitions and operational invariants governing this control loop are formalized in @tbl-vol3-circuit-breaker-fsm.
 
-```text
-                    +-----------------------+
-                    |        CLOSED         |
-                    |  (Normal Dispatch)   |
-                    +-----------------------+
-                                |
-             Burn Velocity Spike| or
-             Utility Decay      | Invariant Violation
-                                v
-                    +-----------------------+
-                    |         OPEN          |
-                    |   (Fail-Fast / Trip)  |
-                    +-----------------------+
-                                |
-             Cooldown Expired / | Operator Intervention
-             Checkpoint Restore |
-                                v
-                    +-----------------------+
-       Probe Fails  |       HALF-OPEN       |  Probe Succeeds
-      +-------------|   (Canary Dispatch)   |-------------+
-      |             +-----------------------+             |
-      |                                                   |
-      v                                                   v
-  (Return to OPEN)                                (Return to CLOSED)
-```
+| Current State | Transition Trigger / Condition | Target State | Invariant Guard & Operational Semantics | System Recovery Action |
+| :--- | :--- | :--- | :--- | :--- |
+| **CLOSED (Nominal)** | Velocity spike ($\bar{\nu}_W > \nu_{\max}$), utility decay ($\Delta \mathcal{U} < \epsilon$), or invariant breach | **OPEN** | Immediate fail-fast trap; halts inference and tool dispatches | Suspends trajectory, cancels pending child jobs, logs alert |
+| **OPEN (Tripped)** | Cooldown window elapsed ($\Delta t > \tau_{\text{cool}}$) or checkpoint rollback complete | **HALF-OPEN** | Permits isolated, single-step canary evaluation probe | Emits bounded introspection or isolated unit test |
+| **HALF-OPEN (Canary)** | Canary probe fails or re-triggers invariant breach | **OPEN** | Enforces exponential cooldown backoff ($\tau_{\text{cool}} \leftarrow 2 \tau_{\text{cool}}$) | Escalates to human operator or terminates trajectory |
+| **HALF-OPEN (Canary)** | Canary probe succeeds and state verification passes | **CLOSED** | Resets consecutive failure counter and clears escrow hold | Restores normal multi-turn model dispatch pipeline |
+
+: Agentic Circuit Breaker Finite State Machine and Transition Semantics. {#tbl-vol3-circuit-breaker-fsm}
 
 To provide comprehensive defense-in-depth, the host runtime implements three distinct, orthogonal circuit breaker triggers.
 
@@ -1165,17 +1090,17 @@ The operational and economic boundaries separating these four architectural para
 
 Selecting the correct architecture along this spectrum is an exercise in constraint matching rather than intuition. An engineering team must evaluate a target application against four fundamental systems questions: duration, state, authority, and completion evidence.
 
-#### Operational Duration and Latency Horizon ($T_{\text{target}}$) {.unnumbered}
+#### Operational Duration Horizons ($T_{\text{target}}$) {.unnumbered}
 What is the strict wall-clock deadline for the task? In interactive human-facing systems—such as code completion in an IDE, search query rewriting, or conversational voice agents—the latency budget is dictated by human perceptual thresholds ($50\text{ ms}$ to $1.5\text{ s}$). Such budgets fundamentally prohibit bounded agentic loops. If an autoregressive decode phase requires $30\text{ ms}$ per token, a $500$-token generation consumes $15\text{ s}$ of raw decode time alone, completely blowing through interactive deadlines before tool execution or verification overhead is even accounted for.
 
 Tasks with sub-second deadlines must be implemented as Software 1.0 algorithms or Software 2.0 direct calls with speculative decoding acceleration. Conversely, asynchronous offline workloads—such as overnight security patch synthesis, batch customer support resolution, or static analysis triage—provide latency horizons of minutes or hours ($T_{\text{target}} \ge 300\text{ s}$), opening the design space to multi-turn bounded agents or distributed multi-agent exploration.
 
-#### State Mutation and Memory Horizon {.unnumbered}
+#### State Mutation Horizons {.unnumbered}
 Does the task require transforming an ephemeral input into an output, or does it require mutating persistent, multi-turn external state? When a task is purely functional—mapping input buffer $X$ to output buffer $Y$ without side effects—a Software 2.0 direct call is structurally superior. Introducing an agent runtime to a stateless transformation introduces coordination overhead and stochastic failure modes without providing architectural value.
 
 When the problem domain requires multi-turn environmental feedback—such as modifying a file system, running an integration test suite, observing compiler error diagnostics, and incrementally editing dependent modules—the architecture must maintain an explicit trajectory state. The critical design choice is between a bounded agent managing a centralized linear context versus an autonomous multi-agent fleet managing partitioned local contexts. Under the memory hierarchy principles established in Chapter 04, a single bounded agent with a well-curated context window avoids the state synchronization overhead, race conditions, and message-passing latency inherent to multi-agent distributed architectures. Multi-agent fleets should be selected only when state representations exceed physical context limits ($L_{\max}$) or require distinct security clearance domains.
 
-#### Permitted Authority and Blast Radius ($A$) {.unnumbered}
+#### Permitted Authority Limits ($A$) {.unnumbered}
 What is the worst-case operational consequence if the foundation model hallucinates or executes an adversarial action? Systems engineers must enforce the principle of least privilege: an unprivileged neural model must never operate with ambient system authority ($A=0$).
 
 If an application requires executing irreversible external side effects—such as sending customer emails, modifying production database records, executing financial transactions, or pushing code to an upstream release branch—the permitted authority cannot be granted to an autonomous agent operating in an open loop. The architectural selection follows the blast radius:
@@ -1183,7 +1108,7 @@ If an application requires executing irreversible external side effects—such a
 - *Reversible / Sandboxed:* Tasks whose side effects are confined to an ephemeral container, a temporary Git worktree, or a staged scratchpad can be delegated to Bounded Agentic Workflows.
 - *Irreversible / High-Impact:* Tasks that directly touch production state must restrict model actions to Software 2.0 proposal generation, routing the candidate mutation into memory escrow for deterministic verification or human approval prior to physical execution.
 
-#### Completion Evidence and Verification Closure {.unnumbered}
+#### Verification Closure Criteria {.unnumbered}
 Can the host supervisor deterministically verify whether the model's output satisfies the problem requirements? This question represents the primary governing constraint of agentic reliability, deriving directly from the seminal End-to-End Argument of Saltzer, Reed, and Clark (1984).
 
 ::: {#pri-17-end-to-end-verification .callout-principle title="The End-to-End Verification Principle in Agent Runtimes"}
@@ -1197,34 +1122,18 @@ If an application possesses an automated, high-speed mechanical verifier (e.g., 
 
 If, however, no mechanical verifier exists—such as evaluating the rhetorical persuasiveness of an essay, the stylistic elegance of a user interface, or the legal liability of a contract summary—the feedback loop cannot be closed mechanically. In the absence of an external endpoint verifier, expanding turn limits ($K \to \infty$) or adding multi-agent critique layers does not converge toward correctness; it leads to circular drift, self-reinforcing hallucinations, and unchecked token expenditure. Tasks lacking objective completion evidence must be constrained to Software 2.0 direct calls coupled to human review workflows ($C_{\text{human}}$).
 
-### Sensitivity Frontiers and Elastic Economics {#sec-vol3-selection-economics}
+### Elastic Selection Economics {#sec-vol3-selection-economics}
 
-Architectural selection is not static. The Pareto frontier separating Software 1.0, Software 2.0, Bounded Agents, and Multi-Agent Fleets shifts dynamically as underlying hardware speeds increase, inference costs decline, and mechanical verification harnesses mature. A systems architect must understand how to navigate these sensitivity frontiers.
+Architectural selection is not static. The Pareto frontier separating Software 1.0, Software 2.0, Bounded Agents, and Multi-Agent Fleets shifts dynamically as underlying hardware speeds increase, inference costs decline, and mechanical verification harnesses mature. A systems architect must understand how to navigate these sensitivity frontiers across the architectural paradigms detailed in @tbl-vol3-architectural-regimes.
 
-```text
-       Task Ambiguity & Epistemic Uncertainty
-          ▲
-          │                                  Fully Autonomous
-          │                                  Multi-Agent Fleet
-          │                                  (High cost, open-ended search,
-          │                                   requires sandboxing)
-          │
-          │                   Bounded Agentic
-          │                   Workflow
-          │                   (Iterative tool loops,
-          │                    mechanical verifiers)
-          │
-          │    Software 2.0
-          │    Direct Calls
-          │    (Classification,
-          │     structured output)
-          │
-          │  Software 1.0
-          │  Deterministic
-          │  (ASTs, scripts)
-          └────────────────────────────────────────────────────────►
-          0      Mechanical Verifiability & Latency Stringency   High
-```
+| Architectural Paradigm | Task Ambiguity & Entropy | Mechanical Verifiability | Latency Tolerance | Economic Cost Profile | Representative Systems Substrate |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Software 1.0 (Deterministic)** | Zero (closed domain) | Absolute ($100\%$ formal proofs) | Hard real-time ($< 1\text{ ms}$) | Negligible ($\mathcal{O}(1)$ CPU ops) | Static parsers, Linters, AST rule engines |
+| **Software 2.0 (Direct Inference)** | Low to Moderate (unstructured input) | Moderate (schema checks, regex) | Strict ($10\text{--}500\text{ ms}$) | Fixed per call (\$0.001 - \$0.01) | Single-turn classifiers, Embeddings, Rankers |
+| **Bounded Agentic Loops** | Moderate (multi-step repair, coding) | High (deterministic tests, compilers) | Relaxed ($1\text{--}60\text{ s}$) | Dynamic per turn (\$0.05 - \$0.50) | ReAct loops, MicroVM tool runners, Pytest gates |
+| **Autonomous Multi-Agent Fleets** | High (open-ended research, synthesis) | Variable (semantic consensus) | Asynchronous ($1\text{--}30\text{ min}$) | High per task (\$1.00 - \$20.00) | Hierarchical subagent DAGs, Quorum voting |
+
+: Systems Frontier Matrix: Architectural Regimes across Uncertainty and Verifiability. {#tbl-vol3-architectural-regimes}
 
 Consider the economic transition boundary between a Software 2.0 single-turn pipeline and a Bounded Agentic loop. Let a task possess a baseline single-pass success rate $p_1$ under a frontier model costing $C_{\text{frontier}}$ per invocation. If the single-pass accuracy is insufficient ($p_1 < p_{\text{target}}$), the architect faces a trade-off: deploy an expensive Software 2.0 cascade using ensemble voting (sampling $N$ outputs in parallel), or implement a Bounded Agentic loop that executes an iterative repair cycle over $k \le K$ steps using a cheaper, tool-equipped model costing $C_{\text{agent}}$ per turn.
 
