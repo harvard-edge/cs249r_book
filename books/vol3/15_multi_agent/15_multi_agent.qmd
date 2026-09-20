@@ -251,7 +251,7 @@ $$\mathcal{S} = \frac{T_{\text{seq}}}{T_{\text{parallel}}} = \frac{275.0\text{ s
 Despite deploying four parallel GPU workers, the speedup is capped at $1.58\times$. The remaining compute capacity was lost to sequential dependencies ($v_1$ and $v_7$) and worker idle bubbles while waiting for join synchronization at $v_5$ and $v_7$.
 :::
 
-### Static Compilation versus Dynamic Topology Spawning
+### Dynamic Topology Spawning
 
 A central architectural decision in runtime design is whether the multi-agent dependency graph should be compiled statically ahead of time or spawned dynamically during execution.
 
@@ -270,27 +270,13 @@ Dynamic topologies provide unmatched flexibility, enabling the agent system to d
 
 However, dynamic spawning introduces critical systems hazards that can rapidly destabilize the host runtime:
 
-```text
-                  ┌──────────────────────┐
-                  │    Parent Agent      │
-                  │   Budget: B tokens   │
-                  └──────────┬───────────┘
-                             │
-               fork_agent(prompt, B_child)
-                             ▼
-                  ┌──────────────────────┐
-                  │     Child Agent      │
-                  │  Budget: B_child < B │
-                  └──────────┬───────────┘
-                             │
-               fork_agent(prompt, B_grandchild)
-                             ▼
-                  ┌──────────────────────┐
-                  │   Grandchild Agent   │
-                  │Budget: B_gc < B_child│
-                  └──────────────────────┘
-```
+: **Recursive Dynamic Spawning and Budget Attenuation**: Structural hierarchy, parent-child delegation edges, and monotonic resource bounding across generations. {#tbl-vol3-subagent-spawn-lifecycle}
 
+| Generation Depth | Agent Entity | Inbound Delegation Call | Allocated Token Budget | Safety & Attenuation Invariant |
+|:---|:---|:---|:---|:---|
+| **Level 0 (Root)** | Parent Supervisor ($A_0$) | Initial task submission | $B_0$ tokens | Holds primary task lease and global cancellation context. |
+| **Level 1 (Child)** | Worker Agent ($A_1$) | `fork_agent(prompt, B_1)` | $B_1 < B_0$ tokens | Budget strictly attenuated ($B_1 \le \alpha \cdot B_0$, $\alpha < 1$); inherits parent cancellation context. |
+| **Level 2 (Grandchild)** | Specialized Leaf ($A_2$) | `fork_agent(prompt, B_2)` | $B_2 < B_1$ tokens | Depth limit enforced ($D \le D_{\max}$); further recursive fork attempts rejected (`EPERM`). |
 The primary hazard is the *agent fork bomb*. If unprivileged foundation models are permitted to spawn child agents recursively without strict runtime constraints, non-deterministic reasoning loops can trigger exponential process explosion. An agent encountering an ambiguous compiler error may spawn three child agents to investigate different hypotheses; each child, encountering secondary errors, spawns three additional children. Within minutes, the fleet spawns hundreds of concurrent processes, saturating GPU memory, exhausting operating system process tables, and consuming millions of tokens without making forward progress.
 
 A secondary hazard is the generation of *orphaned zombie agents*. If a parent agent encounters an unhandled exception, is cancelled by a user interrupt, or exhausts its token budget while its dynamically spawned children are still executing, the children continue running in background processes. These orphaned agents continue consuming GPU compute cycles and executing mutations against sandbox environments, wasting resources and potentially introducing race conditions against subsequent user operations.
@@ -318,18 +304,15 @@ The foundational principle of modular decomposition, articulated by Saltzer and 
 
 **The systems defense against conversational decay is the strict formalization of inter-agent handoffs as typed remote procedure calls.** Drawing directly on the classical RPC architecture established by Birrell and Nelson (1984), distributed agent runtimes cannot rely on shared conversational memory. Every delegation across a task dependency edge must be marshalled into an explicit, schema-validated task envelope that completely specifies identity, immutable inputs, delegated capabilities, resource budgets, and machine-checkable completion assertions before the downstream agent execution loop is scheduled.
 
-### The Failure of Conversational Handoffs: Drift, Ambiguity, and the RPC Invariant
+### Conversational Handoff Failure Modes
 
 In early multi-agent prototypes, coordination was typically implemented as an append-only transcript: a supervisor model interacted with specialized worker models by appending natural language instructions to a single shared context window. This conversational paradigm collapses under physical systems scrutiny. The primary operational failure is *semantic drift under context pressure*. When multiple agents append reasoning traces, tool outputs, and conversational pleasantries to a shared sequence, the effective signal-to-noise ratio degrades. Because transformer attention assigns nonzero probability mass across the entire sequence length $S$, soft negative constraints (such as `"do not modify the production schema"`) articulated three turns prior are routinely drowned out by thousands of intervening tokens of raw linter output and speculative chain-of-thought tokens.
 
-```text
-FAILED: tests/auth/test_token.py::test_signature_verification - AssertionError
---- assert False is True
-+++ auth_service/tokens.py:42: mutated without lease authority
-ERROR: Agent worker-04 emitted 1,480 tokens of unvalidated conversational rationale
-       while silently dropping invariant: [schema_migration_lock = immutable]
+```bash
+FAILED: tests/auth/test_token.py::test_signature_verification - AssertionError:
+Expected algorithm ES256, received None.
+Hint: Upstream agent omitted 'cryptography' dependency in requirements.txt.
 ```
-
 The failure trace above highlights the architectural breakdown. Worker agents that receive unstructured instructions inevitably invent missing operational parameters. Lacking an explicit schema that designates input files, the worker issues speculative filesystem queries across irrelevant subtrees. Lacking explicit execution leases, it modifies configuration files outside its intended operational scope. Lacking machine-checkable completion criteria, it determines termination through autoregressive self-evaluation—emitting phrases such as `"I have verified the code and it is correct"`—even while unit tests in the underlying container remain red. The architectural differences between unstructured conversational prompts and typed remote execution envelopes are contrasted in @tbl-vol3-handoff-comparison.
 
 | Operational Dimension    | Conversational Handoff (Chat Paradigm)                  | Typed Task Envelope (RPC Paradigm)                                   |
@@ -353,26 +336,27 @@ $$\mathcal{E} = \left\langle \mathcal{M}, \mathcal{R}_{\text{in}}, \mathcal{C}_{
 
 Each element of the envelope addresses a specific distributed failure mode, ensuring that the child agent runtime possesses exactly the information and authority needed to execute its bounded subcomputation—and nothing more.
 
-```text
-   TYPED TASK ENVELOPE (E)
-┌─────────────────────────────────┐
-│ 1. Metadata (M)                 │
-│    TaskID, ParentID, SpanID     │
-├─────────────────────────────────┤
-│ 2. Input References (R_in)      │
-│    Git Commit SHA, Artifact URI │
-├─────────────────────────────────┤
-│ 3. Delegated Token (C_delegated)│
-│    Attenuated Capability Mask   │
-├─────────────────────────────────┤
-│ 4. Resource Budget (B)          │
-│    Tokens, Tool Calls, Timeout  │
-├─────────────────────────────────┤
-│ 5. Verification Schema (S_verify│
-│    Deterministic Predicates     │
-└─────────────────────────────────┘
+```json
+{
+  "task_id": "task-9842a-refactor-auth",
+  "parent_id": "agent-root-supervisor",
+  "deadline": "2026-09-19T14:32:00Z",
+  "timeout_seconds": 120,
+  "contract": {
+    "objective": "Migrate legacy HMAC-SHA1 signature verification to ES256",
+    "declared_inputs": ["repo:git@github.com:org/auth.git@ref/c84fa"],
+    "expected_outputs": ["patch:git-diff", "verification:junit-xml"]
+  },
+  "resource_bounds": {
+    "token_budget": 16384,
+    "capability_token": "Cap[Scope: /workspace/src/auth, Net: NONE, Time: 120]"
+  },
+  "validation_oracles": {
+    "acceptance_test": "pytest tests/auth/test_token.py::test_es256",
+    "static_analysis": "mypy --strict src/auth"
+  }
+}
 ```
-
 The structural anatomy of a typed task envelope. The host runtime enforces validation at both entry and exit points.
 
 #### Task Metadata ($\mathcal{M}$) {.unnumbered}
@@ -423,7 +407,7 @@ def verify_task_completion(envelope: TaskEnvelope, receipt: TaskReceipt) -> bool
 
 The downstream agent communicates its termination back to the supervisor strictly through a typed *Task Receipt*. The receipt mirrors the envelope: it contains the originating `task_id`, the mutated commit SHA, an array of structured output artifacts, the consumed resource metrics, and the execution logs of the verification harness. If the verification harness fails, the task receipt is marked with a failure status, triggering the supervisor's recovery or retry policies.
 
-### Marshalling Semantics: Pass-by-Reference versus Pass-by-Value
+### Marshalling Semantics
 
 When designing data handoffs between agents, systems engineers face an architectural choice analogous to calling conventions in programming languages: should state be passed by value or passed by reference?
 
@@ -480,30 +464,15 @@ Pass-by-reference marshalling enforces clear separation between control planes a
 
 Furthermore, pass-by-reference protects cache locality on serving infrastructure. When agents share a common immutable snapshot reference, advanced serving runtimes equipped with Radix-tree or prefix-caching engines can preserve the physical memory frames of the root repository index across multiple tasks. Conversely, pass-by-value handoffs, which concatenate volatile conversational histories with static code files, invalidate prompt prefix hashes on every turn, defeating prefix-caching mechanisms and forcing redundant matrix recalculations across the entire GPU cluster.
 
-```text
-+-------------------------------------------------------------------------+
-|                Typed Task Envelope Lifecycle Transitions                |
-+-------------------------------------------------------------------------+
-       |
-       v
- [ VALIDATE ] ---> Schema validation fails? ---> [ REJECT & ABORT ]
-       |
-       | (Schema Valid: Auth, Capability Mask, Budget Ceilings Approved)
-       v
- [ DISPATCH ] ---> Worker resolves immutable references (Git SHA, S3 URI)
-       |
-       v
- [ EXECUTE  ] ---> Quota exceeded (Tokens/Time)? -> [ RESOURCE_EXHAUSTED ]
-       |
-       | (Subcomputation completes within budget)
-       v
- [ VERIFY   ] ---> Predicate V(Artifacts) == 0? -> [ EMIT RECEIPT (FAIL) ]
-       |
-       | (All assertions pass: Exit Code 0, AST constraints met)
-       v
- [ COMPLETE ] ---> Emit Signed TaskReceipt to Supervisor DAG
-```
+: **Typed Task Envelope Lifecycle Transitions**: Formal validation, dispatch, execution, verification, and completion pipeline governing task handoffs. {#tbl-vol3-task-envelope-lifecycle}
 
+| Pipeline State | Target Subsystem | Transition Condition | Operational Outcome | Error State |
+|:---|:---|:---|:---|:---|
+| **1. VALIDATE** | Supervisor Schema Parser | Validates JSON schema, capability tokens, budget ceilings | Advances to dispatch; approves authority mask | `REJECT & ABORT` on malformed schema or invalid token |
+| **2. DISPATCH** | Sandboxed Container Daemon | Resolves immutable content-addressed references (Git SHA, S3 URI) | Mounts read-only dependencies into sandbox | `RESOLVE_FAILED` on missing artifact reference |
+| **3. EXECUTE** | Worker Agent Runtime | Evaluates subtask autoregressively within allocated bounds | Completes within declared token/time quotas | `RESOURCE_EXHAUSTED` on budget or timeout breach |
+| **4. VERIFY** | Sandboxed Test Oracle | Evaluates verification predicates $\mathcal{V}(\text{Artifacts}) == 0$ | Confirms exit code 0 and AST constraints | `EMIT RECEIPT (FAIL)` on invariant breach |
+| **5. COMPLETE** | Orchestrator DAG Engine | Marshals signed `TaskReceipt` with cryptographic output hash | Returns result envelope to supervisor graph | Discards uncommitted workspace mutations |
 By formalizing the handoff boundary through typed envelopes, content-addressed references, and machine-readable verification receipts, the agent runtime establishes deterministic, auditable barriers between decoupled stochastic models. Yet, establishing clean data isolation at the invocation boundary solves only the input phase of concurrent execution. When multiple worker agents execute simultaneously across different branches of a task graph, their subcomputations inevitably terminate by attempting to commit mutations back to the shared repository environment. If two workers independently refactor interdependent files or concurrently update database schemas, their write operations will collide, corrupting the project state. To achieve true parallel scalability, the runtime must govern concurrent execution through optimistic concurrency control and branch reconciliation.
 
 ## Optimistic Concurrency Control {#sec-vol3-multiagent-concurrency}
@@ -523,7 +492,7 @@ When multiple autonomous agents execute concurrently across a shared filesystem 
 First formalized by H. T. Kung and John T. Robinson in 1981, OCC assumes that transaction conflicts are rare. Operations proceed without locking resources; before committing, the transaction validates whether another transaction modified its read set.
 :::
 
-### Mutation Collisions and the Non-Deterministic Clobber
+### Mutation Collision Hazards
 
 In classical multi-threaded operating systems, threads coordinate access to shared memory through atomic primitives, mutexes, and condition variables managed by the OS kernel. In contrast, an autonomous agent interacts with its host environment through coarse-grained, asynchronous tool invocations: reading source files into context tokens, executing terminal commands, and rewriting modified buffers back to disk. When multiple agents operate inside a common working directory, three distinct concurrency hazards emerge from the stochastic, high-latency nature of foundation model decode loops.
 
@@ -543,7 +512,7 @@ $$P(\text{no collision}) = \prod_{k=1}^{N-1} \left(1 - \frac{k w^2}{M}\right) \a
 
 In real software systems, file access is never uniform. Empirical software engineering demonstrates that code modifications follow a power-law distribution: central configuration files, core data models, and dependency manifests act as architectural hotspots. Under this Zipfian concentration, even small worker fleets ($N = 4$) experience write collision probabilities approaching unity, making shared unisolated workspaces untenable.
 
-### Workspace Isolation via Git Worktrees and CoW Overlays
+### Workspace Isolation
 
 To eliminate lost updates and torn reads, the runtime must enforce absolute storage isolation across worker agents. However, naively copying the entire repository workspace for each worker introduces severe physical I/O bottlenecks.
 
@@ -614,7 +583,7 @@ def commit_agent_transaction(repo, base_sha, branch_sha, write_set):
 
 When an agentic reconciliation subtask is triggered, the runtime provisions an ephemeral reconciliation worker whose prompt is constrained strictly to conflict resolution. The reconciler receives the common ancestor ($C_{\text{base}}$), the accepted integration head ($C_{\text{head}}$), the conflicting candidate commit ($C_i$), and the exact syntactic conflict diff. The reconciler synthesizes a unified file that preserves the semantic intent of both updates, executes the test suite inside a transient verification worktree, and returns a verified merge commit. If the reconciler fails to produce a green test run within a strict budget ceiling, the optimistic transaction aborts, rolling back the candidate branch without corrupting the mainline.
 
-### Distributed Leases and Pessimistic Serialization Fallbacks
+### Distributed Lease Management
 
 While Optimistic Concurrency Control is ideal for code generation and file refactoring, real-world software workflows frequently interact with external, stateful resources that cannot be branched, diffed, or rolled back via three-way merges. Examples include:
 
@@ -653,18 +622,14 @@ Deploying an ensemble of language agents to achieve high-assurance task executio
 
 **Multi-agent consensus does not prove semantic correctness; because stochastic foundation models share pretraining corpora, tokenizer vocabulary boundaries, and architectural inductive biases, their error distributions are strongly correlated, causing homogeneous voting ensembles to arrive at confident, unanimous, and catastrophic failures.**
 
-```text
-+-----------------------------------------------------------------------------+
-| Classical Fault Tolerance (NMR)          Agent Fleet Consensus              |
-| Independent physical hardware faults     Correlated statistical blind spots |
-|                                                                             |
-| Unit 1: [ Normal ]                       Agent 1: [ Hallucinated Path ]     |
-| Unit 2: [ Normal ]                       Agent 2: [ Hallucinated Path ]     |
-| Unit 3: [ Alpha Hit ] (Masked by vote)   Agent 3: [ Hallucinated Path ]     |
-| Outcome: Correct output via 2/3 quorum   Outcome: Unanimous failure (3/3)   |
-+-----------------------------------------------------------------------------+
-```
+: **Classical Hardware NMR versus Agent Fleet Consensus**: Divergence of error models and quorum effectiveness under correlated neural blind spots. {#tbl-vol3-nmr-vs-fleet-consensus}
 
+| Systems Dimension | Classical N-Modular Redundancy (NMR) | Homogeneous Agent Fleet Consensus |
+|:---|:---|:---|
+| **Fault Independence** | High: Independent physical alpha particles, thermal noise, component aging. | Low: Strongly correlated inductive biases, pretraining corpora, and tokenizer boundaries. |
+| **Voting Behavior** | 2/3 majority masks isolated hardware bit-flips reliably. | All 3/3 agents hallucinate along identical statistical attractors. |
+| **Outcome Validity** | Provably correct output achieved via majority quorum. | Unanimous, highly confident, and catastrophic system failure. |
+| **Effective Cost/Reliability** | Tripled hardware cost yields exponential error reduction. | Tripled inference token cost yields near-zero reliability improvement. |
 When an agent runtime delegates critical verification to an ungrounded voting council, it merely multiplies inference cost without purchasing genuine fault tolerance. Understanding why requires dissecting the mathematical breakdown of ensemble independence, establishing the boundary between subjective consensus and empirical invariant verification, and analyzing how flawed agent outputs act as Byzantine faults that poison downstream contexts.
 
 ### The Fallacy of the Condorcet Jury Theorem in Stochastic Models
@@ -732,7 +697,7 @@ $$P(\text{majority fail})_{\text{corr}} = 0.0729 + 0.0546 + 0.0392 = 0.1667 \qua
 **Takeaway:** Correlation nearly triples the ensemble error rate ($5.79\% \to 16.67\%$) and increases the probability of a unanimous, confident false approval by more than **$120\times$**. Relying on majority voting among homogeneous agents creates a dangerous illusion of safety.
 :::
 
-### Consensus Voting versus Invariant Verification
+### Invariant Verification Primacy
 
 The systemic vulnerability of agent voting highlights the need to distinguish between *social consensus* and *invariant verification*. In multi-agent system design, these two concepts are often conflated under the generic heading of "validation." Yet they occupy opposite poles of reliability engineering.
 
@@ -791,23 +756,19 @@ In this trace, relying on peer review to evaluate the validity of the test struc
 
 If multi-agent voting among homogeneous models provides negligible reliability gains and exposes the fleet to Byzantine context poisoning, how should a systems engineer deploy multi-agent coordination safely? The solution requires enforcing two architectural disciplines: *structural heterogeneity* and *invariant-first gating*.
 
-```text
-+-----------------------------------------------------------------------------+
-| UNACCEPTABLE: Homogeneous Consensus as Mutation Gate                        |
-|                                                                             |
-| Worker (Model A) ---> Proposal ---> Reviewer 1 (Model A) ---+               |
-|                                 ---> Reviewer 2 (Model A) ---+--> [ Merge ] |
-|                                                              (Catastrophic) |
-+-----------------------------------------------------------------------------+
-| ARCHITECTURAL DISCIPLINE: Heterogeneous Proposal, Invariant-Gated Commit   |
-|                                                                             |
-| Worker (Model A) -----\                                                     |
-| Worker (Model B) -----> [ Schema Merge ] ---> Deterministic Gate ---> Merge |
-| Worker (Model C) -----/    (Heuristic)         (Compiler / Tests)           |
-|                                                (Exit Code == 0)             |
-+-----------------------------------------------------------------------------+
-```
-
+::: {#def-vol3-heterogeneous-gating .callout-definition title="Definition 15.1: Heterogeneous Invariant-Gated Coordination"}
+Let a multi-agent system coordinate across multiple candidate proposals $\mathcal{P} = \{p_1, p_2, \dots, p_K\}$ for workspace mutation $\mathcal{W} \to \mathcal{W}'$:
+1. **Unacceptable Architecture (Homogeneous Consensus Gate)**:
+   Evaluating proposals via subjective voting among models sharing identical pretraining weights $\theta$:
+   $$\text{Commit}(\mathcal{P}) = \text{Vote}_{\theta}(\mathcal{P})$$
+   is vulnerable to correlated failure modes and Byzantine context poisoning.
+2. **Architectural Discipline (Heterogeneous Proposal, Invariant-Gated Commit)**:
+   The runtime decouples heuristic proposal generation from deterministic verification:
+   - Proposals are generated across diverse model families (e.g. $\theta_A, \theta_B, \theta_C$).
+   - A heuristic schema merger resolves syntactic divergences.
+   - Commit to production integration branch is mediated by deterministic mechanical oracles:
+     $$\text{Commit}(\mathcal{P}) \iff \text{ExitCode}\left(\text{Oracle}(\text{Apply}(\mathcal{W}, \text{Merge}(\mathcal{P})))\right) == 0$$
+:::
 #### Structural Heterogeneity {.unnumbered}
 
 When consensus mechanisms are used (for example, generating heuristic search seeds or drafting alternative natural language summaries), the runtime must enforce model diversity to depress pairwise error correlation $\rho$:
@@ -840,22 +801,19 @@ When a supervisor aborts an ongoing goal or an invariant gate flags a corrupted 
 
 A dependable multi-agent runtime must treat execution lifecycles as distributed, hierarchically nested transactions. Halting work requires far more than dropping a network socket; the runtime must deterministically propagate cancellation signals down dynamic dependency trees, actively reclaim leaked environment leases, throttle mismatched data producers via explicit backpressure, and preempt stragglers before tail latencies degrade interactive response times.
 
-### Hierarchical Cancellation Trees and Signal Propagation
+### Hierarchical Cancellation Trees
 
 Every distributed agent coordination graph establishes a hierarchical tree of execution contexts. When an orchestrator delegates subtasks to worker agents—which in turn may spawn specialized leaf workers—it constructs a directed dependency tree $T = (V, E)$, rooted at the primary supervisor $v_0$. Each vertex $v_i \in V$ represents an active agent process possessing its own local execution loop, while each directed edge $(v_i, v_j) \in E$ denotes delegation authority and lifecycle ownership.
 
-```text
-       [Supervisor v0]
-        /           \
-   (spawn)         (spawn)
-      v               v
-  [Worker v1]     [Worker v2]
-      |               |
-   (spawn)         (spawn)
-      v               v
-  [Leaf v3]       [Leaf v4]
-```
+::: {#def-vol3-cancellation-context-tree .callout-definition title="Definition 15.2: Hierarchical Cancellation Context Tree"}
+A multi-agent execution topology is formalized as a directed rooted tree $\mathcal{T} = (\mathcal{V}, \mathcal{E})$ with root supervisor $v_0$. Each vertex $v_i \in \mathcal{V}$ maintains a cancellation context tuple:
+$$C_i = \langle \text{id}_i, \sigma_i, \tau_{\text{deadline}}, \text{reason} \rangle$$
+where lifecycle state $\sigma_i \in \{\textsc{Active}, \textsc{Canceling}, \textsc{Canceled}\}$.
 
+The runtime enforces the **Downward Invariant Closure Principle**:
+$$\forall (v_i, v_j) \in \mathcal{E}: \quad \sigma_i \in \{\textsc{Canceling}, \textsc{Canceled}\} \implies \sigma_j \to \textsc{Canceling}$$
+guaranteeing that terminating an ancestor node instantaneously drains and cancels all descendant branches without orphaned resource leaks.
+:::
 To maintain control over this topology, the runtime associates every node $v_i$ with a typed cancellation context, denoted $C_i = \langle \text{id}_i, \sigma_i, \tau_{\text{deadline}}, \text{reason} \rangle$, where $\sigma_i \in \{\textsc{Active}, \textsc{Canceling}, \textsc{Canceled}\}$ represents the lifecycle state, $\tau_{\text{deadline}}$ defines an absolute epoch deadline, and $\text{reason}$ records an explicit error descriptor upon termination. Contexts are causally linked: if context $C_i$ transitions to $\textsc{Canceling}$, an invariant of the runtime mandates that every child context $C_j \in \text{children}(v_i)$ must transition to $\textsc{Canceling}$ immediately.
 
 ::: {.column-margin}
@@ -872,29 +830,17 @@ Propagating this transition across distributed agent boundaries requires coordin
 
 : **Preemption Mechanisms Across Execution Layers**: Normal states, cancellation mechanisms, and latency bounds across broker, engine, and sandbox tiers. {#tbl-vol3-cancellation-layers}
 
-As illustrated in @fig-vol3-cancellation-cascade, cancellation begins when an invariant check detects a terminal failure in a worker. The supervisor marks the parent context as canceled and emits asynchronous control envelopes down the active tree. Crucially, the runtime attacks the inference boundary directly: by issuing an explicit stream termination to the serving engine (such as vLLM or SGLang), the host supervisor halts downstream token decoding mid-generation. This releases the worker's allocated KV cache blocks back to the memory pool, preventing the engine from wasting GPU compute cycles on a discarded hypothesis. Concurrently, the host runtime signals the tool execution daemon to terminate any active sub-processes inside the container sandbox, guaranteeing that uncommitted file modifications are dropped before they taint the workspace.
+As illustrated in @tbl-vol3-cancellation-cascade, cancellation begins when an invariant check detects a terminal failure in a worker. The supervisor marks the parent context as canceled and emits asynchronous control envelopes down the active tree. Crucially, the runtime attacks the inference boundary directly: by issuing an explicit stream termination to the serving engine (such as vLLM or SGLang), the host supervisor halts downstream token decoding mid-generation. This releases the worker's allocated KV cache blocks back to the memory pool, preventing the engine from wasting GPU compute cycles on a discarded hypothesis. Concurrently, the host runtime signals the tool execution daemon to terminate any active sub-processes inside the container sandbox, guaranteeing that uncommitted file modifications are dropped before they taint the workspace.
 
-```text
-   Supervisor                 Worker v1               Serving Engine            Tool Sandbox
-       |                          |                          |                       |
-       |-- Invariant Fails ------>|                          |                       |
-       |   (Context Canceled)     |                          |                       |
-       |                          |                          |                       |
-       |==== CANCEL CASCADE =====>|                          |                       |
-       |   (ABORT_TASK envelope)  |                          |                       |
-       |                          |-- Abort HTTP/2 Stream -->|                       |
-       |                          |                          |-- Evict KV Blocks     |
-       |                          |                          |   from Paged Pool     |
-       |                          |                          |                       |
-       |                          |-- Terminate Tool Job --------------------------->|
-       |                          |                                                  |-- SIGKILL Container
-       |                          |                                                  |   Reclaim Sandbox
-       |<=== ACK CANCELED ========|                                                  |
-       |                          |                                                  |
-```
-: **Hierarchical Cancellation Cascade Across an Agent Execution Boundary**: Terminating a task propagates downstream to arrest GPU decode loops and reclaim sandbox resources concurrently. {#fig-vol3-cancellation-cascade}
+: **Hierarchical Cancellation Cascade Protocol**: Ordered propagation sequence arresting GPU decode loops, evicting KV cache blocks, and reclaiming sandbox resources upon task abort. {#tbl-vol3-cancellation-cascade}
 
-### Straggler Mitigation and Speculative Hedging
+| Cascade Step | Target Subsystem | Control Signal & Payload | Systems Effect & Resource Reclamation |
+|:---|:---|:---|:---|
+| **1. Invariant Failure** | Supervisor Control Plane | Detects unrecoverable task failure or timeout | Transitions context $C_0$ to $\textsc{Canceling}$. |
+| **2. Downward Abort** | Child Worker ($v_1$) | Emits asynchronous `ABORT_TASK` control envelope | Halts local agent execution loop immediately. |
+| **3. Inference Severing** | Model Serving Engine (vLLM/SGLang) | Drops active HTTP/2 streaming connection | Evicts active sequence KV cache blocks from paged pool; saves GPU FLOPs. |
+| **4. Sandbox Reclamation** | Tool Execution Daemon | Issues `SIGKILL` to container sandbox cgroup | Unmounts CoW overlay and reclaims disk and memory. |
+| **5. Acknowledgment** | Child Worker to Supervisor | Returns signed `ACK_CANCELED` status frame | Supervisor marks context as cleanly terminated. |### Straggler Mitigation
 
 Multi-agent coordination frequently relies on fan-out topologies, where a supervisor decomposes an investigation into $N$ parallel sub-problems—such as searching disparate code repositories, evaluating candidate patches, or synthesizing independent reviews. In such parallel fan-outs, trajectory completion latency is strictly governed by the slowest worker. This is the classic "tail at scale" dilemma identified by Jeffrey Dean and Sanjay Ghemawat: as concurrency scales, the probability that a distributed operation encounters a 95th- or 99th-percentile tail latency approaches certainty.
 
@@ -937,7 +883,7 @@ $$2 \times 25\text{ s} \times 40\text{ tokens/s} = 2,000\text{ tokens per run} \
 while reclaiming concurrent serving capacity for incoming tasks.
 :::
 
-### Flow Control, Bounded Buffers, and Backpressure
+### Flow Control Governance
 
 When agents coordinate through producer-consumer pipelines—such as an automated crawling agent discovering files and emitting candidate patches to a downstream verification agent—the runtime confronts an impedance mismatch between data generation and token consumption.
 
@@ -963,25 +909,18 @@ Credit-based flow control mirrors the sliding-window mechanisms of TCP (RFC 793)
 
 In this protocol, a consumer agent grants a finite number of execution credits $W \in \mathbb{N}$ to upstream producers. The producer is permitted to emit messages if and only if its locally tracked credit balance satisfies $W_{\text{local}} > 0$. Each emitted message decrements $W_{\text{local}}$ by one. When the consumer successfully parses an envelope, completes its local inference trajectory, and flushes its state, it transmits an explicit `FLOW_CREDIT` frame back to the producer, replenishing $W_{\text{local}}$.
 
-```text
-Producer Agent                            Consumer Agent
-      |                                         |
-      |<--- Grant Window W = 2 Credits ---------| (Initial Flow Lease)
-      |                                         |
-      |-- Task Envelope 1 (Cost: 1) ----------->|
-      |-- Task Envelope 2 (Cost: 1) ----------->|
-      |                                         |
-    [HALT: W = 0]                               |-- Decode & Verify Task 1
-      |                                         |
-      |<--- Grant Credit W = 1 -----------------| (Task 1 Complete)
-      |                                         |
-    [RESUME: W = 1]                             |-- Decode & Verify Task 2
-      |-- Task Envelope 3 (Cost: 1) ----------->|
-```
+: **Credit-Based Multi-Agent Flow Control Protocol**: Step-by-step credit grant, consumption, and replenishment sequence preventing memory buffer bloat. {#tbl-vol3-flow-control-protocol}
 
+| Step | Communicating Agents | Action or Frame | Credit Balance ($W_{\text{local}}$) | System Flow State |
+|:---|:---|:---|:---|:---|
+| **1. Initial Lease** | Consumer to Producer | Grants credit window $W = 2$ | $W_{\text{local}} = 2$ | Producer authorized to emit up to 2 task envelopes. |
+| **2. Dispatch 1** | Producer to Consumer | Dispatches Task Envelope 1 | $W_{\text{local}} = 1$ | Consumer initiates decode and verification. |
+| **3. Dispatch 2** | Producer to Consumer | Dispatches Task Envelope 2 | $W_{\text{local}} = 0$ | Producer reaches credit ceiling; enters blocked wait state. |
+| **4. Credit Replenish** | Consumer to Producer | Completes Task 1; transmits `FLOW_CREDIT` frame | $W_{\text{local}} = 1$ | Producer unblocks and resumes forward execution. |
+| **5. Dispatch 3** | Producer to Consumer | Dispatches Task Envelope 3 | $W_{\text{local}} = 0$ | Concurrency remains strictly bounded by consumer throughput. |
 When $W_{\text{local}} = 0$, the producer agent's runtime must suspend execution of that specific task branch, yielding CPU threads or execution slots to other concurrent subtasks. If the producer is an unprivileged model loop, the supervisor intercepts the tool invocation that attempted to publish the message, pausing the model's next inference step until the consumer issues fresh credits.
 
-### Leaked Resource Reclamation and Orphan Sweeping
+### Orphaned Resource Reclamation
 
 In distributed environments, network partitions, supervisor panics, or unhandled exceptions can sever the parent-child control path. If a parent agent crashes before its cancellation cascade reaches a child worker, that child becomes an *orphan process*.
 
@@ -1031,7 +970,7 @@ When an agent runtime delegates subtasks to auxiliary worker agents without cryp
 In classic operating systems (Saltzer and Schroeder, 1975), Access Control Lists (ACLs) verify *who* is making a request, leading directly to the confused deputy flaw when a privileged server performs work on behalf of an unprivileged client. Object capabilities (OCaps) fuse designation with authority: possessing the capability token *is* the permission, enabling seamless delegation without ambient rights escalation.
 :::
 
-### The Monotonic Attenuation Invariant and Delegation Lattices
+### Monotonic Attenuation Invariants
 
 To eliminate ambient authority ($A=0$), the multi-agent runtime models all tool invocations, filesystem access, and network egress as protected operations gated by unforgeable capability descriptors. Following the foundational security principles formulated by Saltzer and Schroeder (1975), an agent cannot access any resource simply by virtue of its running process context. Instead, it must explicitly present a valid capability token with every remote procedure call (RPC) dispatched to the host runtime gateway.
 
@@ -1129,7 +1068,7 @@ Let us quantify the computational overhead of verifying chained cryptographic ca
 **Takeaway:** At less than $2\ \mu\text{s}$ of CPU latency and 256 bytes of payload overhead, cryptographic macaroon verification introduces negligible friction compared to standard tool execution (where running a linter or compiler takes $10\ \text{ms}$ to $500\ \text{ms}$, five orders of magnitude larger). By contrast, querying a distributed database or OAuth introspection endpoint over the network would incur $2\ \text{ms}$ to $15\ \text{ms}$ of latency per call, bottlenecking the entire multi-agent runtime.
 :::
 
-### Distributed Revocation Cascades and Escrow Boundaries
+### Distributed Revocation Cascades
 
 While chained macaroons permit decentralized capability verification, their bearer nature introduces a critical systems dilemma: how does the runtime revoke authority instantly across a sub-tree of delegated child workers when a parent task is cancelled or fails?
 
@@ -1137,65 +1076,28 @@ As established in Section 15.6, when an orchestrator terminates an operational b
 
 To enforce immediate, deterministic revocation without sacrificing $O(1)$ local verification, the runtime implements *Hierarchical Generation Epochs*.
 
-```text
-                             Gateway Epoch Table
-                            ┌───────────┬───────┐
-                            │ Node ID   │ Epoch │
-                            ├───────────┼───────┤
-                            │ task-100  │   1   │
-                            │ task-101  │   1   │
-                            │ task-102  │   2   │ ◄── Revocation increments epoch
-                            └───────────┴───────┘
+: **Hierarchical Generation Epoch Revocation Check**: In-memory epoch validation table enabling $O(1)$ sub-tree authorization and instant revocation. {#tbl-vol3-gateway-epoch-table}
 
-                Token Presented by Child of task-102:
-                Identifier: {root: task-100, lineage: [task-101, task-102], epoch: 1}
-                                      │
-                                      ▼
-                Gateway Check: Token Epoch (1) < Active Epoch (2)
-                                      │
-                                      ▼
-                        [ 403 Forbidden: Revoked ]
-```
-
+| Task Node ID | Lineage Path | Active Epoch ($E_{\text{active}}$) | Token Epoch ($E_{\text{token}}$) | Gateway Authorization Decision |
+|:---|:---|:---|:---|:---|
+| **task-100** | `task-100` (Root) | 1 | 1 | Authorized (Active) |
+| **task-101** | `task-100/task-101` | 1 | 1 | Authorized (Active) |
+| **task-102** | `task-100/task-101/task-102` | 2 (Revoked) | 1 | **403 Forbidden**: Token epoch ($1$) < Active epoch ($2$); sub-tree severed |
 When the root orchestrator initializes a delegation tree, it registers a unique task lineage path with the gateway (for example, `task-100/task-101/task-102`). The gateway maintains a compact, in-memory epoch table mapping task nodes to integer generation counters. The token identifier incorporates this lineage path and the node's generation epoch at issuance time:
 
 $$\text{id} = \langle \text{root\_id}, \text{lineage\_path}, \text{epoch} \rangle$$
 
 Revoking an entire sub-tree requires incrementing the generation counter of the targeted ancestor node in the gateway's epoch table. When a child worker presents its macaroon, the gateway extracts the lineage path and performs an $O(1)$ check against the in-memory array. If any ancestor node in the token's lineage presents an active epoch strictly greater than the epoch embedded in the token identifier, the gateway rejects the request with an authorization failure, instantly severing authority for all descendant agents.
 
-```text
-                    ┌───────────────────────────────────────┐
-                    │        Root Orchestrator (A_0)        │
-                    └───────────────────┬───────────────────┘
-                                        │
-                         Child Request: Needs Human Escrow
-                                        │
-                                        ▼
-                    ┌───────────────────────────────────────┐
-                    │          Worker Agent (A_1)           │
-                    │   Attempts Destructive Git Push       │
-                    └───────────────────┬───────────────────┘
-                                        │
-                             API Gateway Intercepts
-                          Action Requires Human Escrow
-                                        │
-                                        ▼
-                    ┌───────────────────────────────────────┐
-                    │         Escrow Boundary Wall          │
-                    │   Child FORBIDDEN to Prompt Human     │
-                    │   Directly (Prevents Social Eng.)     │
-                    └───────────────────┬───────────────────┘
-                                        │
-                         Escrow Escalation Envelope
-                                        │
-                                        ▼
-                    ┌───────────────────────────────────────┐
-                    │        Root Orchestrator (A_0)        │
-                    │   Reviews, Synthesizes Context,       │
-                    │   and Gathers Human Authorization     │
-                    └───────────────────────────────────────┘
-```
+: **Human Escrow Escalation Protocol**: Secure containment boundary preventing direct user prompt injection and social engineering from unprivileged workers. {#tbl-vol3-escrow-escalation-protocol}
 
+| Protocol Stage | Target Entity | Action or Constraint | Security & Authorization Invariant |
+|:---|:---|:---|:---|
+| **1. Destructive Attempt** | Worker Agent ($A_1$) | Proposes destructive operation (e.g. `git push --force`) | Unprivileged worker operates under $A=0$; lacks ambient push rights. |
+| **2. Gateway Interception** | API Mediation Gateway | Traps system call; identifies requirement for human escrow | Completely blocks direct execution; parks worker thread. |
+| **3. Escrow Boundary Wall** | Containment Firewall | Forbids child worker from messaging human operator directly | Prevents adversarial prompt injection and social engineering. |
+| **4. Envelope Escalation** | Escrow Mediation Bus | Marshals formal escalation envelope to Root Orchestrator ($A_0$) | Provides structured diff, context rationale, and risk scorecard. |
+| **5. Human Confirmation** | Root Orchestrator ($A_0$) | Reviews synthesized context; solicits authenticated human signature | Operations committed only upon cryptographically verified operator approval. |
 A parallel containment boundary governs *Human Escrow Escalation*. In high-consequence environments, certain critical operations—such as dropping production database tables, modifying public DNS records, or releasing payments—require synchronous human-in-the-loop confirmation.
 
 A fatal vulnerability in distributed multi-agent deployments occurs when child agents are allowed to trigger human approval dialogs directly. If an unprivileged subagent running deep within an untrusted execution tree can pop up confirmation prompts on the user's terminal, the user faces two distinct hazards:
@@ -1223,7 +1125,7 @@ A software engineering team deploys an ensemble of five specialized agents—a s
 
 **Architectural complexity is not a substitute for computational efficiency: a multi-agent coordination topology is justified if and only if it Pareto-dominates an optimized, compute-matched single-agent baseline across task completion quality, critical-path makespan, and total resource expenditure.** In distributed systems design, decomposing a workload across multiple processing nodes is never treated as an automatic virtue; it is an engineering compromise accepted strictly to overcome physical bounds on single-node throughput or memory capacity. In agentic machine learning, the physical boundaries correspond to the model's effective context window, its attention degradation over long token sequences, and wall-clock limits on sequential autoregressive decoding. When engineers partition a task across agents without first measuring what a single model can achieve when equipped with test-time search, they frequently construct distributed systems that do nothing more than amplify communication overhead, duplicate shared context, and propagate correlated errors across unisolated workers. Rigorous benchmarking requires establishing fair baseline protocols, evaluating systems across three orthogonal axes, and applying formal scalability models to quantify coordination contention.
 
-### The Fallacy of the Zero-Shot Baseline and Matched-Resource Protocols
+### Matched-Resource Protocols
 
 The most pervasive methodological flaw in multi-agent literature is comparing an elaborate multi-agent architecture against a naive, single-turn, zero-shot single-agent baseline. A zero-shot baseline generates a candidate solution in a single autoregressive forward pass without environmental feedback, scratchpad deliberation, tool invocations, or error recovery. Comparing a multi-agent collective—which executes dozens of sequential tool calls, inspects compiler diagnostics, and re-prompts itself across thousands of intermediate tokens—against a zero-shot model does not evaluate multi-agent coordination; it evaluates the trivial advantage of dynamic test-time computation over static feed-forward inference.
 
@@ -1253,21 +1155,23 @@ The architectural parameters governing valid baseline comparisons are contrasted
 
 When evaluating a multi-agent system against an optimized single agent, systems engineers must enforce the *Resource Equivalence Principle*. If a four-agent ensemble consumes an aggregate of 400,000 tokens and 120 seconds of sandbox execution across its subtasks, the single-agent baseline must be evaluated under a matched token budget ($\mathcal{B}_{\text{tokens}} = 400{,}000$) and equivalent sandbox wall-clock limits. If the single agent achieves an equal or superior completion rate when allowed to spend those 400,000 tokens on sequential search, deeper planning, or repeated unit-test repair, the multi-agent architecture represents negative systems utility. It incurs the maintenance complexity, network failure surface, and serialization taxes of a distributed system without delivering an empirical return on investment.
 
-### The Tri-Axial Evaluation Metric: Quality, Makespan, and Token Volume
+### Tri-Axial Evaluation Metrics
 
 Evaluating an agentic system along a single dimension—such as benchmark pass rate—obscures critical systems trade-offs. An architecture that increases task success by two percentage points while quadrupling operational cost and introducing ten-minute latency spikes is rarely deployable in production engineering environments. Rigorous systems evaluation requires tracking three orthogonal axes: Task Completion Quality, Critical-Path Makespan, and Total Resource Expenditure.
 
-```text
-                  Quality (Verified Pass Rate Q)
-                              ▲
-                             / \
-                            /   \
-                           /  •  \  Pareto Frontier
-                          /       \
-                         /_________\
-Critical-Path Makespan (τ)           Total Resource Cost (E)
-```
+::: {#def-vol3-tri-axial-evaluation .callout-definition title="Definition 15.3: Tri-Axial Multi-Agent Evaluation Frontier"}
+A comprehensive systems evaluation of an agentic topology $\mathcal{M}$ requires tracking its position along three coupled, non-linear axes:
+1. **Task Completion Quality ($Q \in [0, 1]$)**:
+   $$Q = \frac{1}{|\mathcal{D}|} \sum_{i=1}^{|\mathcal{D}|} \mathbb{I}\left( \text{Verify}(\mathcal{A}_i) == \text{SUCCESS} \right)$$
+2. **Critical-Path Makespan ($\tau$)**:
+   $$\tau = t_{\text{completion}} - t_{\text{dispatch}}$$
+   representing wall-clock latency along the longest dependency chain.
+3. **Total Resource Expenditure ($E$)**:
+   $$E = N_{\text{tokens}} \cdot C_{\text{token}} + T_{\text{sandbox}} \cdot C_{\text{compute}}$$
+   capturing aggregate monetary and computational cost.
 
+A multi-agent architecture is Pareto-superior if and only if it strictly dominates the budget-matched single-agent baseline on at least one axis without catastrophic degradation on the remaining two.
+:::
 The first axis is *Task Completion Quality* ($Q$), defined as the ratio of tasks whose terminal artifacts satisfy all functional and non-functional invariants to the total number of attempted tasks:
 $$Q = \frac{1}{|\mathcal{D}|} \sum_{i=1}^{|\mathcal{D}|} \mathbb{I}\left( \text{Verify}(\mathcal{A}_i) == \text{SUCCESS} \right)$$
 In strict accordance with the End-to-End Argument, verification must be executed by external, deterministic software harnesses—such as hermetic unit test suites, static analysis linters, or cryptographic signature validators—never by model self-assessment. An agent's self-reported confidence or textual assertion that a task is complete carries zero evidential weight.
@@ -1284,7 +1188,7 @@ where $T_{\text{in}}^{(i)}$ and $T_{\text{out}}^{(i)}$ denote input and output t
 
 A multi-agent design is defensible only if it occupies a superior position on the Pareto frontier defined by $(Q, \tau_{\text{crit}}, \mathcal{E})$. If an engineering requirement mandates minimizing makespan regardless of cost (e.g., automated incident response), parallel multi-agent delegation may be chosen to compress $\tau_{\text{crit}}$, provided the parallelizable fraction is sufficiently high. Conversely, if token budget is tightly bounded, a single-agent sequential architecture is almost universally superior.
 
-### Amdahl's Law and Coordination Contention in Agent Runtimes
+### Coordination Contention Dynamics
 
 In 1967, Gene Amdahl formulated the fundamental mathematical limit on the speedup of a task executed across multiple parallel processors. When applied to multi-agent machine learning systems, Amdahl's Law reveals why adding worker agents frequently yields diminishing—and eventually negative—returns.
 
@@ -1348,49 +1252,16 @@ def evaluate_coordination_efficiency(f: float, sigma: float, kappa: float, M: in
 
 Before decomposing an agentic workflow into a multi-agent cluster, systems architects must evaluate the six operational criteria outlined in the deployment checklist below. If a proposed system fails any of these gates, the architectural default must remain an optimized single-agent runtime.
 
-```text
-       [Task Request]
-              │
-              ▼
-   ┌──────────────────────┐      FAIL
-   │ 1. Context Boundary  │ ──────────────► [Single-Agent Runtime]
-   │    Partitionable?    │
-   └──────────────────────┘
-              │ PASS
-              ▼
-   ┌──────────────────────┐      FAIL
-   │ 2. Single-Agent Loop │ ──────────────► [Single-Agent Runtime]
-   │    Saturated?        │
-   └──────────────────────┘
-              │ PASS
-              ▼
-   ┌──────────────────────┐      FAIL
-   │ 3. Speedup Positive? │ ──────────────► [Single-Agent Runtime]
-   │    f/M > h(M)        │
-   └──────────────────────┘
-              │ PASS
-              ▼
-   ┌──────────────────────┐      FAIL
-   │ 4. Failure Modes     │ ──────────────► [Reject Topology /
-   │    De-correlated?    │                  Redesign Prompts]
-   └──────────────────────┘
-              │ PASS
-              ▼
-   ┌──────────────────────┐      FAIL
-   │ 5. Capabilities      │ ──────────────► [Halt: Privilege
-   │    Attenuated?       │                  Escalation Risk]
-   └──────────────────────┘
-              │ PASS
-              ▼
-   ┌──────────────────────┐      FAIL
-   │ 6. Net Tri-Axial     │ ──────────────► [Single-Agent Runtime]
-   │    Dominance?        │
-   └──────────────────────┘
-              │ PASS
-              ▼
-[Deploy Multi-Agent Topology]
-```
+: **Six-Stage Multi-Agent Deployment Decision Gate**: Sequential qualification criteria for justifying multi-agent topology deployment over optimized single-agent baselines. {#tbl-vol3-multi-agent-deployment-gates}
 
+| Decision Gate | Evaluation Criteria | Pass Condition | Failure Action |
+|:---|:---|:---|:---|
+| **1. Context Partitionability** | Can task state be factored into disjoint sub-contexts? | Subtasks exhibit high locality of reference; low prompt duplication | Revert to Single-Agent Runtime |
+| **2. Single-Agent Saturation** | Has single-agent baseline been optimized with reflection & tools? | Single agent hits verified cognitive plateau under matched compute | Revert to Single-Agent Runtime |
+| **3. Positive Speedup** | Does parallel speedup exceed orchestration overhead? | Amdahl speedup $f/M > h(M)$ communication friction | Revert to Single-Agent Runtime |
+| **4. Error De-correlation** | Are failure modes statistically independent? | Models or prompts possess distinct inductive biases | Reject Topology / Redesign Prompts |
+| **5. Attenuated Capabilities** | Can worker authority be monotonically restricted? | $R_{\text{child}} \subseteq R_{\text{parent}}$ enforced via formal capability tokens | Halt: Privilege Escalation Risk |
+| **6. Tri-Axial Dominance** | Does topology achieve Pareto improvement on $Q, \tau, E$? | Verified pass rate or latency justifies token expenditure | Revert to Single-Agent Runtime |
 1. *Context Partitionability Gate:* Can the operational state of the task be cleanly partitioned into disjoint sub-contexts? If every subtask requires access to the complete, monolithic system prompt, complete file tree, and global execution history, multi-agent delegation will saturate the network and inference engine with duplicated prefill tokens. Delegation is justified only when subtasks exhibit strong locality of reference.
 2. *Single-Agent Saturation Gate:* Has the single-agent baseline been fully optimized with test-time reflection, tool execution, dynamic context pruning, and budget-matched search? If a single agent given identical compute can solve the problem, multi-agent orchestration introduces needless operational fragility.
 3. *Amdahl Scalability Gate:* Does the parallelizable fraction $f$ substantially exceed the serialization overhead $h(M)$? The expected speedup must satisfy:
@@ -1432,24 +1303,14 @@ This assumption fails because stochastic foundation models do not maintain predi
 
 Consider a scenario where Agent $A$ and Agent $B$ both read `settings.py` at base commit $C_0$. Agent $A$ appends authentication parameters and writes its updated file to disk at wall-clock time $t_1$. At time $t_2$, Agent $B$ finishes generating database connection pooling logic, which it appends to its local copy of `settings.py` (which lacks Agent $A$'s additions), and flushes the buffer to the same path. Agent $B$'s write silently obliterates Agent $A$'s modifications without raising an operating system error or throwing an exception. Even more insidiously, if an agent triggers a background test suite or compilation check while a peer agent is mid-way through an uncommitted multi-file edit, the verification process observes an inconsistent, fractured intermediate state. The compilation fails with syntax errors unrelated to the agent's actual logic, polluting the agent's observation trajectory with spurious stack traces and driving the model into futile debugging loops against phantom defects.
 
-```text
-Time    Agent A (Worktree A)             Shared Target Branch             Agent B (Worktree B)
- │                                                │                                                │
-t0 ───── Fork from Commit C0 ─────────────────────┼────────────────────── Fork from Commit C0 ─────┤
- │       (isolated disk tree)                     │                       (isolated disk tree)     │
- │                                                │                                                │
-t1 ───── Mutate & Verify Pass ────────────────────┼────────────────────── Mutate in Isolation ─────┤
- │                                                │                                                │
-t2 ───── OCC Commit: C0 == C0 (Fast-Forward) ────►│ Commit C1                                      │
- │       State advances to C1                     │                                                │
- │                                                │                                                │
-t3 ───────────────────────────────────────────────┼────────────────────── Attempt Commit           │
-                                                  │                       Validate: C0 != C1       │
-                                                  ▼                       (Validation Conflict!)   │
-                                           Reconciliation Gate                                     │
-                                         [Three-Way Diff / Abort] ◄────────────────────────────────┘
-```
+: **Optimistic Concurrency Control Workspace Timeline**: Sequence of isolated mutations and fast-forward versus conflicting reconciliation attempts. {#tbl-vol3-occ-timeline}
 
+| Timestamp | Agent A (Worktree A) | Shared Integration Target | Agent B (Worktree B) | Git State & Status |
+|:---|:---|:---|:---|:---|
+| **$t_0$** | Fork from commit $C_0$ | Pinned target at $C_0$ | Fork from commit $C_0$ | Both worktrees isolated at baseline $C_0$ |
+| **$t_1$** | Apply edits; run verification tests | Target idle at $C_0$ | Apply edits in isolation | Local mutations uncommitted |
+| **$t_2$** | Fast-forward commit ($C_0 == C_0$) | Target advances to $C_1$ | Continues generation | Agent A merge succeeds; Target updated |
+| **$t_3$** | Continues subsequent subtask | Target at $C_1$ | Attempts commit ($C_0 \neq C_1$) | **Validation Conflict**: Reconciliation gate halts commit; triggers 3-way diff |
 The architectural mitigation mandates strict workspace isolation through Optimistic Concurrency Control (OCC). The host runtime must never permit an unprivileged agent to mutate the target integration tree directly. Instead, every worker process must be provisioned with an isolated Git Worktree or an ephemeral Copy-on-Write (CoW) container overlay rooted at a pinned commit SHA $C_{\text{base}}$. The agent executes all edits, builds, and test executions exclusively within its private worktree.
 
 State publication must adhere to a formal four-phase OCC trajectory protocol:
@@ -1491,18 +1352,12 @@ In classical operating systems, an orphaned daemon idling in the background cons
 
 Even more dangerously, orphaned agents can cause catastrophic *phantom state mutations*. Suppose a supervisor initiates a parallel refactoring operation, detects a critical regression on Branch $A$, and aborts the global task to roll back the repository. If Child Worker $B$ on Branch $B$ was not explicitly cancelled, it will continue modifying files in its workspace. When its asynchronous task finally completes ten minutes later, its automated commit handler may attempt to merge its changes back into the mainline repository, silently corrupting the rolled-back codebase with stale, uncoordinated mutations long after the human operator assumed the operation was dead.
 
-```text
-[Supervisor Process] ──(SIGTERM / Timeout)──► [Local Termination]
-        │
-        │ ──(Broken RPC / Missing Cancellation Token)──x
-        ▼
-[Orphaned Child Worker] ──► Autoregressive Decode Loop (Active GPU Burn)
-        │
-        ├──► Saturated Token API Rate Limits
-        ├──► Depleted Cloud Infrastructure Budget
-        └──► Stale / Out-of-Order Environmental Mutation (Repository Corruption)
-```
-
+::: {#def-vol3-orphaned-agent-hazard .callout-definition title="Definition 15.4: Orphaned Worker State Corruption Hazard"}
+When a parent supervisor terminates due to timeout or local failure without propagating cancellation down the delegation tree:
+1. Child worker processes remain active, continuing autoregressive decode loops and burning accelerator token quotas.
+2. Saturated tool rate limits and unmonitored cloud spending accumulate in background processes.
+3. Stale or out-of-order commits emitted by delayed children attempt to land on the mainline repository, silently overwriting rolled-back state and inducing catastrophic workspace corruption.
+:::
 The architectural mitigation requires structuring all multi-agent executions as formal, hierarchical *cancellation context trees* governed by explicit lifecycle propagation:
 
 - *Hierarchical Context Inheritance:* Every subtask envelope dispatched by a supervisor must inherit a scoped cancellation token derived from the root execution context (mirroring the semantics of Go's `context.WithCancel` or distributed gRPC cancellation propagation). The cancellation token carries the root task identifier, an immutable deadline timestamp $\tau_{\text{deadline}}$, and an active cancellation listener.
