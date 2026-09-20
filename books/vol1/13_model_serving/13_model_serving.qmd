@@ -61,6 +61,7 @@ Model **serving**\index{Serving!production deployment}\index{Model serving!parad
 The D·A·M taxonomy clarifies how this inversion reshapes each layer of the system. In the data layer, the constraint shifts from total dataset volume to the arrival rate, payload freshness, and variable sequence dimensions of live queries. In the algorithm layer, execution becomes strictly forward-only: backpropagation state and optimizer memory vanish from the accelerator, but dynamic input shapes introduce runtime execution variability into previously static operator graphs. In the machine layer, the operating target shifts from maximum hardware utilization to **headroom**\index{Headroom!tail latency}. While offline training treats an idle accelerator as wasted capital, online serving treats near-saturation as an operational hazard. Because request arrivals follow stochastic distributions, queue lengths and waiting times diverge nonlinearly as utilization approaches 100 percent. Maintaining adequate headroom preserves the spare capacity needed to absorb transient traffic spikes without violating tail-latency percentiles. Serving therefore optimizes completed requests under a strict latency deadline rather than steady-state hardware occupancy.
 
 Meeting that latency deadline governs how engineering teams partition the end-to-end serving stack. A request's latency budget encompasses three sequential stages: host-side ingress and preprocessing (network termination, payload deserialization, and tokenization or feature transformation), accelerator kernel execution, and downstream postprocessing. Any millisecond consumed by unoptimized feature retrieval or queueing delays directly subtracts from the execution time allocated to the neural network itself. Consequently, the central engineering task in model serving is deciding which operations must remain on the synchronous request path, which tasks can be offloaded to asynchronous background pipelines, and how much headroom the system must reserve before tail-latency guarantees collapse under load.
+
 ## Serving Load, Latency, and Architecture {#sec-model-serving-load-latency-architecture-a4d8}
 
 ```{python}
@@ -718,6 +719,7 @@ pics/pencil/.style = {
 :::
 
 This pipeline turns serving into an orchestration problem: because every stage draws from the same latency budget, optimizing accelerator kernel execution yields diminishing returns if data transformation or queueing delays dominate. Before optimizing any individual stage, the system must decide whether predictions are computed ahead of time or on demand.
+
 ### Static vs. dynamic inference {#sec-model-serving-static-vs-dynamic-inference-e864}
 
 Deciding whether predictions are generated before or during a user request establishes the fundamental trade-off between offline hardware efficiency and online operational agility [@google2024staticdynamic]. That choice determines whether an accelerator operates in an unconstrained throughput regime or under the strict tail-latency deadlines of an interactive serving loop.
@@ -846,6 +848,7 @@ Traditional serving optimizes for minimizing latency $(L_{\text{lat}} \to 0)$. H
 :::
 
 Whether a system executes a single deterministic forward pass or an extended reasoning trajectory, deciding when predictions are computed resolves only the temporal dimension of serving. Equally binding is the spatial dimension—where the model physically executes—because physical placement dictates memory hierarchy limits, network boundaries, and the hardware budget available to the serving stack.
+
 ### The spectrum of serving architectures {#sec-model-serving-spectrum-serving-architectures-8966}
 
 Although "serving" often implies a networked server processing API requests, the architectural pattern varies by deployment environment. @Sec-ml-systems-deployment-paradigm-framework-0d25 introduced the four deployment paradigms (Cloud, Edge, Mobile, and TinyML) and the physical constraints (the light barrier, the power wall, and the memory wall) that give rise to them. Architecturally, serving spans a continuum from **centralized networked microservices**\index{Microservice!cloud model serving} (which pool accelerators to optimize throughput and cost-per-query at the expense of network round-trip overhead and cold-start latency) to **application-embedded edge serving**\index{Edge serving!embedded function calls} (which run models inside client processes via direct function calls, eliminating network latency and preserving privacy at the expense of strict device memory and power constraints) and out to **bare-metal firmware execution**\index{TinyML!bare-metal serving} on microcontrollers. Those constraints do not disappear at serving time; serving adds latency SLOs and cost pressure on top of hardware limits that training could absorb through patience. The same model may require different serving strategies depending on where it executes.
@@ -1010,6 +1013,7 @@ Applying those envelopes to one image-classification workload, @tbl-resnet-servi
 ```{=latex}
 \endgroup
 ```
+
 ### The load balancer layer {#sec-model-serving-load-balancer-layer-9c4d}
 
 When traffic exceeds what a single machine can handle, cloud and data center deployments that run multiple replicas of the same model require an additional infrastructure layer: the load balancer. Production serving systems place load balancers\index{Load balancer!serving infrastructure} between clients and model servers, providing three essential functions for serving infrastructure.
@@ -1039,6 +1043,7 @@ Even with pinned CPU cores, memory access latency remains vulnerable to the virt
 Beyond scheduled processes, asynchronous hardware interrupts introduce another source of sub-millisecond preemption. When a network interface card (NIC) receives packet bursts, it triggers hardware interrupt requests (IRQs) that force the handling CPU core to immediately suspend user-space execution and process kernel interrupt handlers. If the OS routes these interrupts to cores running the inference engine's submission loop, the CPU pauses command dispatch to the accelerator. Because GPUs process short inference layers in microseconds, even brief CPU submission stalls drain the accelerator's hardware command ring buffer, causing pipeline bubbles where compute units sit idle waiting for the next kernel descriptor. Interrupt shielding\index{Interrupt shielding!latency isolation} restricts IRQ affinities to dedicated housekeeping cores, preventing incoming network traffic and disk activity from preempting the GPU dispatch stream.
 
 Isolating physical cores, locking host memory, and shielding interrupt lines eliminate operating system noise, converting erratic execution paths into predictable, deterministic forward passes. Yet establishing service-time determinism on a single node addresses only half of the serving challenge. While hardware isolation guarantees that an accelerator kernel executes without host-side interference, running single requests sequentially leaves massive tensor compute pipelines severely underutilized. To achieve high throughput within latency deadlines, the internal software architecture of the serving engine must coordinate irregular, asynchronous request streams into structured, hardware-saturating batches.
+
 ## Serving System Architecture {#sec-model-serving-serving-system-architecture-4879}
 
 While host isolation ensures deterministic execution of individual kernels, production serving confronts an impedance mismatch at the system boundary. User requests arrive stochastically—bursting milliseconds apart, followed by seconds of silence—whereas accelerator compute engines demand steady streams of uniform, dense batches to saturate memory bandwidth and functional units. Bridging this gap requires a specialized serving architecture that decouples network ingress from execution scheduling, absorbing arrival bursts and packing irregular inputs into dense batches without violating latency SLOs.
@@ -1455,6 +1460,7 @@ Consider a request payload containing `{python} SerializationEfficiency.serial_f
 Architectural selection is governed by system constraints. REST over HTTP/1.1 remains practical for public-facing edge gateways where broad client compatibility and human-readable debugging take precedence over raw wire efficiency. Within cluster boundaries, gRPC over HTTP/2 with binary serialization becomes essential whenever high query volume, persistent connection multiplexing, or token streaming threatens to exhaust host CPU cycles on serialization tax.
 
 Protocol selection and process architecture establish the structural skeleton of an inference server. Evaluating actual operational performance, however, requires tracing how latency accumulates as individual requests traverse each stage of this runtime pipeline.
+
 ## Request Lifecycle {#sec-model-serving-request-lifecycle-d9c6}
 
 A single HTTP request carrying a $224{\times}224$ JPEG image arrives at an inference server. Between the moment the first byte enters the network stack and the moment the classification payload departs, the request traverses six distinct pipeline stages. Each stage consumes a slice of the end-to-end latency budget, making granular phase decomposition essential for targeted performance tuning.
@@ -1862,6 +1868,7 @@ Serving infrastructure operates directly in this killer microseconds regime. Usi
 ```
 
 The latency budget framework provides a systematic approach to this compound problem. Measurement comes first. Without per-phase instrumentation, engineers cannot distinguish a preprocessing bottleneck from a serialization bottleneck, and optimization effort is misallocated to the most visible component (the model) rather than the most expensive one. Once measurement reveals the true distribution of time, engineering effort must flow proportionally. A phase consuming 50 percent of latency deserves more attention than one consuming 5 percent, regardless of which appears easier to optimize. Architectural changes such as GPU-accelerated preprocessing or aggressive batching can shift work between phases entirely, sometimes eliminating a bottleneck rather than merely reducing it.
+
 ### Resolution and input size trade-offs {#sec-model-serving-resolution-input-size-tradeoffs-155d}
 
 Input resolution affects both preprocessing and inference latency, but the relationship differs depending on whether the system is compute bound\index{Compute-bound!resolution scaling} (limited by arithmetic throughput) or memory-bound\index{Memory-bound!activation tensors} (limited by data movement). A compute-bound system slows as computation grows; a memory-bound system slows as transferred bytes grow. Capacity fit alone does not remove bandwidth cost. The roofline analysis in @sec-hardware-acceleration-roofline-model-42ff develops this distinction in depth, making it essential for informed resolution decisions.
@@ -2092,6 +2099,7 @@ System efficiency\index{System efficiency!hardware duty cycle} measures how full
 $$\text{System Efficiency} = \frac{\sum T_{\text{compute}}}{\text{Wall Clock Time} \times \text{Resource Count}}$$ {#eq-system-efficiency}
 
 If a ResNet-50 request takes 10 ms total (5 ms GPU, 5 ms CPU), a serial system achieves only 50 percent efficiency. By pipelining just two requests, efficiency approaches 100 percent (assuming the CPU can keep up with the GPU). If the CPU is too slow to feed the GPU, the system becomes CPU-bound, and further model optimization provides zero throughput gain. This is Amdahl's Law from @sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741 applied to serving: if preprocessing consumes 50 percent of latency, maximum speedup is 2$\times$ regardless of how fast the model runs. The hardware trajectory makes this ceiling progressively tighter. Accelerator compute throughput (FLOPs) has grown far faster than CPU single-thread performance across successive hardware generations, so the inference portion of the pipeline shrinks while the CPU-bound preprocessing portion remains unchanged. A system that was compute-bound on an older accelerator may become CPU-bound after a hardware upgrade—not because preprocessing got slower, but because the model got dramatically faster while the CPU did not.
+
 ### Postprocessing {#sec-model-serving-postprocessing-3b24}
 
 The request lifecycle concludes with postprocessing\index{Postprocessing!logits to predictions}, transforming raw accelerator output tensors into structured application responses. This stage straddles the physical boundary between the accelerator and the host CPU. Because client applications cannot consume device memory buffers directly, output tensors must cross the interconnect (typically a PCIe bus) to reach host memory. How the serving engine partitions computation across this boundary dictates whether postprocessing completes in microseconds or stalls the entire serving pipeline.
@@ -2140,6 +2148,7 @@ In @lst-resnet-postprocessing, total postprocessing time is approximately 0.1 ms
 Production systems package predictions to satisfy application-level API contracts. These contracts govern JSON serialization schemas, floating-point formatting, error codes, and fallback defaults when thresholding rejects all candidates. In Python-based runtimes, repetitive JSON serialization and string allocation can consume unexpected host CPU cycles under heavy concurrency, turning a microsecond-scale formatting step into a CPU bottleneck. High-throughput servers address this by delegating serialization to native C++ runtimes or binary protocols like Protocol Buffers. Response metadata, including model version and inference execution time, completes the payload to enable downstream observability.
 
 Tracing an isolated request reveals the intrinsic execution time of each pipeline phase. In production, however, multiple requests arrive concurrently and contend for shared accelerators, CPU cores, and memory buses, introducing queuing delays that dwarf raw computation time.
+
 ## Queuing Theory {#sec-model-serving-queuing-theory-tail-latency-29a6}
 
 When arrival streams fluctuate, queuing theory\index{Queuing theory!serving systems} formalizes how contention for shared physical resources—accelerator execution queues, host-to-device PCIe transfers, and memory buses—degrades latency distributions. Its governing laws explain why seemingly well-provisioned inference services experience sharp, nonlinear latency explosions as utilization approaches capacity.
@@ -2569,6 +2578,7 @@ Latency SLOs are not enforced by *fast inference* alone; they are enforced by *h
 :::
 
 Queuing theory and tail-tolerance policies govern the steady-state processing of requests. They presuppose, however, that serving instances are already initialized and that incoming data matches offline training assumptions—preconditions that frequently fail during cold starts, auto-scaling surges, and silent feature corruption.
+
 ## Model Lifecycle Management {#sec-model-serving-model-lifecycle-management-ff2e}
 
 Steady-state queuing optimizations offer little protection when a serving cluster fails to initialize properly or emits degraded predictions. In a representative deployment, a newly provisioned replica stalls for 35 seconds compiling a TensorRT engine, while a subtle PIL-to-OpenCV preprocessing discrepancy silently bleeds five percentage points of classification accuracy. Mitigating these lifecycle failures requires systematic control across two operational phases: training-serving parity and cold-start initialization.
@@ -2775,6 +2785,7 @@ For a `{python} ModelSwapCalc.model_size_gb_str` model on PCIe Gen4 x16 (`{pytho
 To accelerate this transfer path, systems use pinned memory\index{Pinned memory!DMA transfer} (page-locked host RAM). GPUDirect DMA engines require physical memory pages to remain fixed at invariant physical addresses throughout a transfer. Standard host memory allocated via standard heap allocators is pageable: the operating system virtual memory manager may relocate physical pages or swap them to backing storage at any time. Consequently, transferring data from a pageable buffer forces the CUDA driver to perform a two-stage copy: the CPU first synchronously copies the data into an intermediate pinned staging buffer, and the DMA engine then transfers the staging buffer across PCIe to GPU memory. Allocating model weights directly in page-locked host memory via `cudaHostAlloc` eliminates this CPU staging copy, allowing the GPU's DMA controller to stream weights across the PCIe bus at full link bandwidth. The physical trade-off is host memory exhaustion: pinned memory cannot be paged out or reclaimed by the OS under memory pressure, permanently locking physical RAM away from other processes. High-throughput serving systems therefore pin active model weights and I/O ring buffers while leaving standby model checkpoints in pageable memory.
 
 Once a model is loaded, warmed up, and producing predictions consistent with training, request grouping becomes the next optimization lever. Dynamic batching directly governs the balance between hardware efficiency and tail latency in queuing formulations.
+
 ## Throughput Optimization {#sec-model-serving-throughput-optimization-18d1}
 
 Consider a representative ResNet-50 classifier on a V100\index{V100!batching throughput} GPU\index{GPU!batching utilization} operating at batch size one. Each forward pass loads all model parameters from HBM to process a single input, yielding low arithmetic intensity while kernel launch overheads dominate execution. The GPU achieves only 15 percent hardware utilization and 200 images per second. Processing 32 images at once reaches 95 percent utilization and 1,280 images per second—a 6.4$\times$ throughput improvement on identical hardware—because the loaded weights are reused across inputs in on-chip memory, amortizing both memory bandwidth demands and kernel launch overheads. **Batching**\index{Batching!training vs. serving}[^fn-batch-serving-tradeoff] is the primary lever for improving serving economics, but its operational constraints differ sharply between training and serving [@crankshaw2017clipper]. *Training* batches maximize throughput by grouping hundreds or thousands of samples together with no constraint on individual sample latency. *Serving* batches must balance accelerator saturation against individual request deadlines, ensuring that no early-arriving input waits excessively for a batch to form. An inference server resolves this tension through **dynamic batching**\index{Dynamic batching!definition}, adjusting batch size at runtime to match incoming request arrivals.
@@ -2790,6 +2801,7 @@ Consider a representative ResNet-50 classifier on a V100\index{V100!batching thr
 3.  **Common pitfall**: A frequent misconception is that batching "always helps." In reality, there is a latency-throughput Pareto frontier: if the batching window is too large, the increased queuing delay may violate the system's SLO before the throughput gains are realized.
 
 :::
+
 ### Why batching helps {#sec-model-serving-batching-helps-f1dc}
 
 Modern accelerators achieve peak efficiency only at sufficient batch sizes\index{GPU utilization!batch size dependency} [@shen2019]. A single inference request leaves most compute units idle because GPUs are designed for parallel execution across thousands of threads. Batching amortizes fixed costs across multiple requests and enables parallel execution across the batch dimension.
@@ -2971,11 +2983,13 @@ The times shown are pure inference time, excluding queue wait; @sec-model-servin
 :::
 
 The efficiency gains from batching come at a cost: requests must wait for the batch to form. Buffering introduces a direct tension between throughput optimization (larger batches) and latency minimization (immediate processing). How serving systems balance these competing demands under fluctuating traffic governs the choice of batching strategy.
+
 ### Static vs. dynamic batching {#sec-model-serving-static-vs-dynamic-batching-fd0a}
 
 Static batching\index{Static batching!fixed batch size} fixes the batch dimension at compile time and holds execution until a queue accumulates exactly $B$ requests. In offline batch processing and model training, static shapes allow compilers to allocate static memory buffers and emit optimized compute kernels that maximize weight reuse and arithmetic intensity. In interactive serving, however, client requests arrive stochastically. Under low or fluctuating arrival rates, static batching exposes requests to unbounded queuing delay while waiting for the batch to fill. Conversely, setting a small fixed batch size to curtail latency leaves accelerator compute units underutilized and fails to amortize weight transfers from high-bandwidth memory when traffic spikes.
 
 Dynamic batching\index{Dynamic batching!time window} decouples batch formation from arrival determinism by buffering incoming requests behind a dual-trigger scheduler [@olston2017tensorflow; @nvidia_triton]. Rather than waiting indefinitely for a fixed tensor shape, the serving runtime dispatches a batch to the accelerator as soon as either of two thresholds is satisfied: the queue accumulates a maximum batch size $B_{\max}$, or a timeout window $T_{\text{window}}$ expires relative to the oldest buffered request. When traffic bursts, the queue fills to $B_{\max}$ almost instantaneously, achieving high arithmetic intensity with minimal queuing delay. When arrival rates drop, the timeout window forces the dispatch of an undersized batch ($B < B_{\max}$), bounding queuing latency at the expense of per-request compute efficiency. The timeout window $T_{\text{window}}$ and maximum batch size $B_{\max}$ form the primary operational levers: shorter windows prioritize latency over accelerator efficiency, whereas larger windows maximize system throughput whenever request volume permits.
+
 ### Dynamic batching latency-throughput trade-offs {#sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d}
 
 Dynamic batching introduces a quantifiable tension between throughput optimization and latency constraints. Under overload, the mechanism is queue growth rather than slower inference, which enables systematic configuration decisions instead of trial-and-error tuning.
@@ -3588,6 +3602,7 @@ For an illustrative ResNet-50 serving system with a 50 ms SLO and 500 QPS traffi
 ```{=latex}
 \endgroup
 ```
+
 ### Continuous batching {#sec-model-serving-continuous-batching-8bb6}
 
 Autoregressive models\index{Autoregressive model!token generation}, such as large language models, generate outputs token by token. Because each new token depends on the accumulated sequence history, generation proceeds sequentially. Standard dynamic batching assumes uniform output lengths and commits to a fixed batch for an entire generation cycle. When sequence lengths vary, this static commitment degrades accelerator efficiency. If one sequence in a batch of eight finishes after ten tokens while others require 100 tokens, 90 percent of the compute and memory bandwidth allocated to that sequence slot is wasted on padding tokens or masked dummy operations while awaiting the slowest sequence\index{Sequence length variability!batch waste} [@yu2022orca].
@@ -3625,6 +3640,7 @@ These LLM-specific optimizations build directly on core serving mechanics: queue
 :::
 
 Although continuous batching maximizes throughput for multi-tenant language model serving, batching is not universally optimal. Schedulers and dynamic memory allocators introduce coordination complexity and synchronization overhead that can degrade performance in latency-critical or resource-constrained environments. In particular, three operational constraints favor single-request processing. First, under an ultra-low p99 target, even a short batching delay consumes an unacceptable fraction of the latency budget. Second, when serving runtimes lack ragged tensor or paged memory support, batching variable-length inputs incurs padding overhead to match the longest sequence in the batch, whereas single-request processing eliminates padding waste entirely. Finally, memory capacity binds when model weights already consume most of the accelerator's physical memory; under near-capacity conditions, concurrent batch activations and dynamic KV-cache allocations risk out-of-memory aborts, forcing the runtime to process requests individually.
+
 ### Session affinity constraints {#sec-model-serving-session-affinity-constraints-8b1f}
 
 Session affinity—routing successive requests from a client to the same physical replica—arises when serving state resides in local accelerator memory rather than being reconstructed on every invocation. In conversational models, this resident state is dominated by the key-value (KV) cache\index{KV cache!session reuse}\index{KV cache!multi-turn conversations}. When turn $k$ executes on a replica, that replica's High Bandwidth Memory (HBM) retains the projected keys and values across all prior prompt and generation tokens. Routing turn $k+1$ to a different replica discards that local memory footprint, forcing the new node to recompute the entire prefix sequence from scratch. This redundant prefill consumes memory bandwidth and tensor-core cycles that would otherwise advance active decode iterations, directly inflating time-to-first-token.
@@ -3632,6 +3648,7 @@ Session affinity—routing successive requests from a client to the same physica
 A parallel physical constraint governs personalized serving using fine-tuned Low-Rank Adaptation (LoRA) modules\index{Personalized model!user adapters}. While base-model weights remain pinned in device HBM, individual user adapters must be dynamically staged into memory. If incoming requests for a user scatter across multiple replicas, each node must repeatedly transfer adapter tensors over the host-to-device PCIe bus or fetch them across the network, displacing other active working sets in memory. Stateful preprocessing pipelines—such as tokenizer vocabularies and per-session normalization state—impose the same penalty, requiring redundant CPU-side allocations and cache rebuilds whenever execution moves across node boundaries.
 
 Strict affinity\index{Session affinity!sticky sessions} creates a direct conflict with dynamic batching. Continuous batch schedulers maximize accelerator throughput by packing concurrent requests into unified matrix multiplications, raising operational arithmetic intensity in proportion to batch size ($I \propto B$). When requests are pinned to designated replicas, the scheduler's pool of batchable candidates fragments across the cluster. A replica assigned to an idle or low-concurrency user session must either process underfilled batches—collapsing arithmetic intensity back into the memory-bandwidth-bound regime—or stall waiting for affinity-matched tokens. To prevent this collapse in utilization, production routers use soft affinity\index{Soft affinity!load balancing}. Under soft affinity, the ingress gateway prioritizes the cache-holding replica when capacity allows, but sheds requests to alternate nodes when local queue delays exceed the physical latency required to transfer adapter weights or recompute prefix tokens.
+
 ### Traffic patterns and batching strategy {#sec-model-serving-traffic-patterns-batching-strategy-2e6b}
 
 The batching strategy depends critically on how requests arrive. Different deployment contexts exhibit different arrival patterns, and the MLPerf inference benchmark\index{MLPerf Inference!serving scenarios} supplies four standardized scenarios that approximate several common cases, as @sec-benchmarking-mlperf-execution-scenarios-89f0 explains in detail.
@@ -3914,6 +3931,7 @@ Batching is the primary lever for serving economics, but the optimal strategy de
 - [ ] **Adaptive windows**: can you explain why the optimal batching window *decreases* as traffic *increases*, even though batch sizes grow?
 
 :::
+
 ## LLM Serving {#sec-model-serving-llm-serving-b8bf}
 
 Large language models\index{LLM serving!token generation} make three properties far more prominent than in fixed-output serving: *autoregressive generation*[^fn-autoregressive-decoding-serving] (each token depends on all previous tokens, making output inherently sequential), *variable-length output* (response length is unknown at request time, complicating fixed-batch assumptions), and *stateful memory* (the key-value cache grows with each generated token, creating dynamic memory pressure). Together, these properties create a qualitatively different serving challenge. The p50, p95, and p99 metrics used for classification serving still matter, but they apply to different *phases* of the request—the initial prompt processing and the subsequent token generation. The same principles of queuing theory, batching trade-offs, and latency budgets remain applicable; LLM serving adds domain-specific techniques atop them.
@@ -4321,6 +4339,7 @@ Post-training quantization\index{Post-training quantization!calibration} adds a 
 Production serving architectures can elevate precision\index{Precision!dynamic, adaptive quality} from a static compilation setting into a dynamic runtime policy. When request queues are shallow and the system operates with ample latency headroom against its service level objective (SLO), the engine can dispatch requests at FP16 to maximize task accuracy. During traffic spikes that threaten queue saturation, the engine can dynamically downcast execution to INT8 to preserve latency bounds. Similarly, requests that yield low classification confidence under INT8 can be selectively re-evaluated at FP16. This dynamic dispatch operationalizes adaptive quality-latency trade-offs under fluctuating request arrival rates.
 
 Precision selection carries direct infrastructure sizing consequences: under an illustrative $3\times$ throughput improvement, a serving cluster provisioned with 30 GPUs at FP32 satisfies the identical traffic demand with 10 GPUs at INT8, holding queueing latency constant. Precision engineering is therefore an infrastructure sizing discipline, directly coupling numerical representation to cluster capital expense and energy consumption.
+
 ## Node-Level Optimization {#sec-model-serving-nodelevel-optimization-3d9d}
 
 Runtime selection and precision tuning operate at the model level: they determine *what* computation runs and at *what* numerical format. Between the model and the silicon, however, lies an execution layer encompassing graph compilation, memory bus transfers, and CPU-accelerator coordination. While model-level benchmarks evaluate isolated forward passes on synthetic inputs, node-level optimization targets the end-to-end request path on a concrete physical machine. Realized latency and throughput gains depend on identifying which hardware boundary binds execution.
@@ -4483,6 +4502,7 @@ Optimizing inference follows the request path from the outside in across four st
 - [ ] **Kernel level**: Are memory-bound operators fused into composite kernels to minimize high-bandwidth memory (HBM) round-trips?
 
 :::
+
 ## Economics and Planning {#sec-model-serving-economics-capacity-planning-3e7e}
 
 Batching, precision tuning, operator fusion, and graph compilation can reduce latency, increase capacity, or lower the cost of a completed inference. Production deployment, however, requires answering a fleet-level question: how many machines, of what type, and at what total cost. A team that achieves 1,200 images/second on a V100 still needs to know whether 8 V100s at \$3/hour each or 24 T4s at \$0.53/hour each yields lower cost for its 5,000 QPS target while meeting the same SLO. Serving infrastructure cost grows with sustained request volume [@zhang2019mark], while training cost follows its own dataset, model, and optimization budget. The public API price compression shown in @fig-intelligence-deflation illustrates this pressure: as per-token prices fall, infrastructure efficiency becomes a primary lever for economic viability.
@@ -4707,7 +4727,7 @@ The following fixed workload assumptions define the reference case used througho
 *   **Request characteristics**: 1,000-token input prompt (Prefill), 256-token generated response (Decode).
 *   **Target SLOs**: TTFT $<$ 200 ms, TPOT $<$ 20 ms.
 
-::: {#fig-kv-cache-growth fig-env="figure" fig-pos="htb" fig-cap="**The KV-Cache Explosion**: FP16 KV-cache usage vs. context length for a 70-billion-parameter-class model with GQA. On the modeled 80 GB GPU, 35 GB of INT4 weights leave 45 GB for KV cache before runtime overhead. Batch size 32 reaches that cache budget at roughly 4.3k tokens, forcing a trade-off between batch size and context length." fig-alt="Line chart of FP16 KV-cache size against context length for batch sizes 1, 4, 16, and 32. All four lines rise linearly, with steeper slopes for larger batches. A red dashed horizontal line marks the 45 GB cache budget remaining after 35 GB of INT4 weights on the modeled 80 GB GPU; batch size 32 crosses it near 4.3k tokens. The region above the budget line is shaded red and labeled Out of Memory (OOM) Zone."}
+::: {#fig-kv-cache-growth fig-env="figure" fig-pos="htb" fig-cap="**The KV-Cache Explosion**: FP16 KV-cache usage vs. context length for a 70-billion-parameter-class model with GQA. On the modeled A100, 35.3 GB of INT4 weights leave 50.6 GB for KV cache before runtime overhead. Batch size 32 reaches that cache budget at roughly 4.8k tokens, forcing a trade-off between batch size and context length." fig-alt="Line chart of FP16 KV-cache size against context length for batch sizes 1, 4, 16, and 32. All four lines rise linearly, with steeper slopes for larger batches. A red dashed horizontal line marks the cache budget remaining after the INT4 weights on the modeled A100; batch size 32 crosses it near 4.8k tokens. The region above the budget line is shaded red and labeled Out of Memory (OOM) Zone."}
 
 ```{python}
 #| echo: false
@@ -4766,7 +4786,7 @@ ax.axhline(limit_gb, color=COLORS['RedLine'], linestyle='--', linewidth=2)
 ax.text(
     27000,
     limit_gb + 2,
-    "KV Budget after INT4 Weights (45 GB)",
+    f"KV Budget after INT4 Weights ({limit_gb:.0f} GB)",
     color=COLORS['RedLine'],
     fontweight='bold',
     ha='center',
@@ -4949,6 +4969,7 @@ Consider a representative H100 SXM5 rental cost of approximately `{python} LlmSe
 For large language models, memory capacity\index{Memory!capacity, LLM throughput}\index{KV cache!memory capacity} (the size of the unallocated VRAM dedicated to the KV cache) determines maximum concurrent residency, while prefill compute and decode bandwidth determine realized token throughput and cost under a specific traffic mix. Memory bandwidth\index{Memory bandwidth!LLM latency}\index{HBM!memory bandwidth} bounds low-batch decode latency; larger batches amortize parameter movement and shift the limit toward compute or KV-cache traffic.
 
 Physical constraints govern serving economics across the entire stack: latency budgets partition into prefill and decode phases, queueing theory dictates batch sizing and capacity headroom, and memory bandwidth bounds decode throughput. Misinterpreting these interactions leads directly to the operational fallacies and pitfalls that follow.
+
 ## Fallacies and Pitfalls {#sec-model-serving-fallacies-pitfalls-336b}
 
 Serving inverts training priorities in ways that violate intuitions from batch processing. The nonlinear relationship between utilization and latency, the hidden costs of preprocessing, and the silent failure modes of training-serving skew cause violated SLOs, wasted optimization effort, and accuracy degradation invisible to standard monitoring.
