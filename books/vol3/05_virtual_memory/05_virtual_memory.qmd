@@ -134,7 +134,7 @@ Contiguous memory allocators in accelerator runtimes force an untenable operatio
 
 **Variable sequence lengths transform naive contiguous KV cache allocation into an engine of severe memory waste, stranding between 60% and 80% of accelerator high-bandwidth memory (HBM) in unreferenced reservations and unallocatable physical holes.** In multi-turn agent workloads where sequence lifetimes are punctuated by external environment calls and wildly variable generation budgets, fixed-reservation and contiguous-chunk allocators rapidly collapse effective serving throughput. Runtimes reject incoming requests due to perceived capacity exhaustion while the physical memory bus reports dozens of gigabytes of nominally unwritten space. Understanding the structural origins of this waste requires examining how memory is provisioned, partitioned, and stranded across dynamic inference lifecycles.
 
-### Static Over-Provisioning and the Predictability Dilemma
+### Static Over-Provisioning Limits
 
 The earliest and most straightforward strategy for managing KV cache memory is static worst-case reservation. Under this regime, the serving engine allocates a single, contiguous physical buffer for each admitted sequence, sized to accommodate the maximum possible sequence length $S_{\max}$ supported by the model architecture or the deployment configuration. If an accelerator hosts a model configured for a context window of $S_{\max} = 32{,}768$ tokens, the engine reserves memory for exactly $32{,}768$ key and value vectors immediately upon request arrival, long before the first decode step executes.
 
@@ -161,7 +161,7 @@ An alternative engineering approach attempts dynamic contiguous reallocation, mi
 
 This dynamic resizing paradigm introduces severe systems pathologies when executed on massively parallel accelerators. First, invoking memory management routines such as `cudaMalloc` and `cudaFree` incurs substantial control-plane latency. These routines are heavyweight operations that serialize device streams, trigger host-device synchronizations, and disrupt asynchronous kernel dispatch pipelines. Second, copying high-dimensional tensor state across High Bandwidth Memory (HBM) consumes memory bus bandwidth that would otherwise service the memory-bandwidth-bound matrix-vector multiplications of the decode phase. Third, during the reallocation window, the serving engine must simultaneously retain both the old memory buffer and the new memory buffer, creating a transient memory consumption spike that frequently precipitates the very out-of-memory crashes the strategy sought to avoid.
 
-### The Mechanics of Contiguous Wastage: Internal and External Fragmentation
+### Contiguous Memory Wastage
 
 The failure of both static reservation and dynamic contiguous allocation stems from classical operating systems memory pathologies operating under extreme accelerator constraints. Memory waste in the KV cache divides cleanly into two architectural categories: internal fragmentation and external fragmentation.
 
@@ -194,7 +194,7 @@ If the token dimension $t$ is broken across non-contiguous physical memory exten
 
 Solving external fragmentation in a contiguous regime requires memory compaction: halting the inference pipeline, relocating active KV tensors across physical HBM to coalesce adjacent free holes into a single contiguous extent, and updating all internal tensor pointers. Compaction on high-performance accelerators is prohibitively expensive. Moving tens of gigabytes of KV data over the memory bus incurs milliseconds of latency, violating real-time service-level objectives (SLOs) and stalling parallel compute warps. Consequently, naive serving engines avoid compaction entirely, allowing external fragmentation to grow unchecked until the engine is forced to throttle admission.
 
-### Agent Trajectory Churn and Stranded State
+### Trajectory Memory Churn
 
 While static conversational requests exhibit moderate variability in sequence length, agentic workloads amplify memory fragmentation to an extreme degree. Autonomous agents do not execute uninterrupted linear generation; they operate within iterative reasoning, execution, and verification loops. An agent trajectory is characterized by rapid allocation churn, unpredictable completion horizons, and prolonged intervals of computational suspension.
 
@@ -450,7 +450,7 @@ When an inference runtime receives a request whose token sequence shares an init
 ![**Radix Tree Prefix Cache**: Radix tree prefix cache node structure and branch invalidation across shared prompt prefixes.](images/svg/fig-vol3-radix-tree-cache.svg){#fig-vol3-radix-tree-cache width=\"95%\"}
 :::
 
-### Cross-Request Redundancy and the Prefix Trie
+### Prefix Trie Redundancy
 
 In single-turn conversational serving, temporal locality is primarily confined to the autoregressive decode loop of an isolated sequence. Multi-turn agent architectures break this assumption. An autonomous software engineering agent running an iterative edit-compile-test loop generates a sequence of discrete inference requests that share massive token overlaps: the base repository instructions, the formatted file tree, the active tool signatures, and the accumulated conversation history up to the current turn. Furthermore, concurrent worker agents instantiated from the same system prompt share identical initial context blocks despite operating on distinct tasks. If physical memory blocks allocated via PagedAttention are deallocated immediately upon request termination, the serving system discards key and value tensors that are almost guaranteed to be requested again within milliseconds.
 
@@ -478,7 +478,7 @@ To minimize tree depth and CPU traversal latency, modern inference runtimes such
 
 As formalized in @tbl-radix-node-schema, the Radix tree serves as an authoritative index over the physical block pool. When a request completes its generation cycle, the serving runtime does not return its physical blocks to the global free list. Instead, it transitions the reference count of the corresponding leaf node to zero, marking the physical blocks as dormant. The blocks remain mapped in accelerator HBM, ready to be immediately re-attached if a subsequent request traverses the same prefix path.
 
-### Longest Prefix Matching and Block Boundary Alignment
+### Longest Prefix Matching
 
 
 ::: {.column-margin}
@@ -538,7 +538,7 @@ $$T_{\text{prefill}} = \frac{617.4 \text{ TFLOPs}}{3{,}560 \text{ TFLOPS}} \appr
 With a Radix tree prefix hit, the entire 4,096-token prefill is bypassed. The host CPU resolves the block table in less than $50 \ \mu\text{s}$. If the incoming query introduces 32 novel tokens, the accelerator executes prefill only for those 32 tokens attending across the cached 4,096 tokens, completing in under $6 \text{ ms}$. Prefix caching eliminates $167.4 \text{ ms}$ of latency—a $28\times$ reduction in TTFT—while saving over $600 \text{ TFLOPs}$ of accelerator work.
 :::
 
-### Radix Tree Memory Reclamation and Dynamic Eviction
+### Dynamic Radix Eviction
 
 Accelerator High Bandwidth Memory (HBM) is strictly bounded. An inference engine cannot retain dormant prefix blocks indefinitely without starving active requests of memory required for decode-phase allocations. When aggregate memory utilization approaches capacity, the runtime must reclaim physical blocks backing cached prefixes.
 
@@ -567,7 +567,7 @@ def evict_radix_blocks(free_blocks: List[int], target_free: int) -> None:
 
 This leaf-first traversal guarantees that the root and high-level branch nodes—which represent the most broadly shared prefix scaffolding, such as system prompts—remain resident the longest. Dynamic leaf branches representing ephemeral, one-off conversational turns are pruned first, preserving the foundational layers of the prefix hierarchy where cache hit probability is highest.
 
-### Causality Violations and Branch Invalidation
+### Branch Invalidation Mechanics
 
 The foundational premise of prefix caching is that token sequence identity implies key-value state identity. This equivalence holds strictly because autoregressive transformer architectures enforce a lower-triangular causal attention mask:
 
@@ -630,7 +630,7 @@ When an agent runtime submits a prompt of $S_{\text{prompt}} = 4{,}096$ tokens, 
 
 The systems dilemma arises when an inference engine processes these two phases sequentially. Under run-to-completion scheduling, an arriving prefill request preempts or queues ahead of the decode loop. Processing an 8,192-token prompt for a 70-billion-parameter model can monopolize the accelerator for 800 to 1,500 milliseconds. During this time, every active decode sequence in the engine is stalled. The tokens being streamed to downstream users or agent supervision loops halt entirely, introducing extreme variance into the Inter-Token Latency (ITL) distribution. While human users perceive this as stuttering output, autonomous agent control loops experience it as a transient failure of the inference subsystem, potentially triggering RPC client timeouts or degrading feedback responsiveness.
 
-### Chunked Prefill Mechanics and Attention Slicing
+### Chunked Prefill Mechanics
 
 To eliminate head-of-line blocking without sacrificing the high arithmetic intensity of prompt processing, the inference scheduler must break the monolithic prefill into manageable pieces. Chunked prefill decomposes an incoming prompt of $S_{\text{prompt}}$ tokens into a sequence of smaller, uniform chunks of size $C_{\text{chunk}}$ (typically 256, 512, or 1,024 tokens).
 
@@ -670,7 +670,7 @@ Once $\mathbf{O}_k$ is computed, the engine writes $\mathbf{K}_k$ and $\mathbf{V
 
 Chunking trades a small amount of redundant computation for bounded iteration latency. The attention mechanism computes queries of length $C_{\text{chunk}}$ against keys that grow longer with each chunk ($C_{\text{chunk}}, 2C_{\text{chunk}}, \dots, K C_{\text{chunk}}$). However, because key and value projections for historical tokens are retrieved from memory rather than recomputed from weights, the overall number of parameter matrix multiplications remains unchanged.
 
-### Token-Budget Scheduling and SLA Optimization
+### Token-Budget Scheduling
 
 
 ::: {.column-margin}
@@ -754,7 +754,7 @@ An inference runtime serving an autonomous agent encounters an operational profi
 
 **When an agentic trajectory pauses for tool execution or human deliberation, the serving system must arbitrate among four physical memory policies: resident retention, complete eviction with subsequent recomputation, host DRAM offloading via asynchronous PCIe streaming, and secondary storage tiering. The optimal decision boundary is defined by an analytical break-even wait time that balances the opportunity cost of reserved accelerator memory capacity against the transfer bandwidth of the interconnect and the computational latency of re-running the prefill phase.**
 
-### The Tool-Wait Memory Tax and the Four Reclamation Policies
+### Memory Reclamation Policies
 
 In conversational serving, request execution is continuous: an initial prefill phase processes the prompt, followed immediately by an unbroken autoregressive decode phase that emits tokens until reaching a stop delimiter or sequence limit. Agentic workloads shatter this assumption. An agent trajectory is a punctuated sequence of short token generations separated by heavy-tailed external execution intervals. A code-editing agent may generate a fifty-token shell command in two hundred milliseconds, then idle for forty-five seconds while a build system compiles dependencies and runs unit tests. A research agent may emit a search query and pause while a browser worker downloads, parses, and scrapes several web documents.
 
@@ -864,7 +864,7 @@ $$T_{\text{round-trip}} = \frac{2 \cdot 5.37\text{ GB}}{50\text{ GB/s}} = 0.215\
 **System Takeaway:** If the compiler check is expected to take less than $215\text{ ms}$, the engine must retain the blocks in HBM to prevent pipeline stalls. If the compiler runs for $5\text{ seconds}$, offloading frees $5\text{ GiB}$ of HBM for nearly the entire duration, avoiding $25\text{ GiB}\cdot\text{s}$ of memory tax, and reloads the state in just $107\text{ ms}$ upon completion—beating full recomputation by over $5.6\text{ seconds}$ of execution latency.
 :::
 
-### Asynchronous Paged Swapping Runtimes and Transfer Overlap
+### Asynchronous Paged Swapping
 
 Implementing physical block swapping in an inference runtime requires deep integration with the paged memory manager. The virtual memory abstraction established in PagedAttention maps invariant logical sequence blocks to non-contiguous physical page allocations. To support multi-tier swapping, the page table must be extended into a dual-residency structure (@fig-vol3-hierarchical-paging).
 
@@ -901,7 +901,7 @@ The primary engineering challenge on the return path is hiding reload latency. I
 
 *Pipelined Chunked Reload and Observation Prefill:* When a tool execution concludes, it returns an observation string (such as the standard output of a bash command) of length $S_{\text{obs}}$. The engine must prefill these $S_{\text{obs}}$ tokens to continue the trajectory. Under chunked prefill scheduling, the engine breaks the incoming observation into discrete chunks (e.g., five hundred twelve tokens). While chunk 0 executes its forward projection GEMM on the tensor cores, the copy engine concurrently streams the historical KV blocks for chunks 1 through $N$ across the PCIe bus. By interleaving DMA transfers with matrix computations, the transfer latency is completely overlapped behind the observation's own mandatory prefill phase.
 
-### Tiered Secondary Storage: NVMe and Remote Memory Systems
+### Tiered Secondary Storage
 
 While host system DRAM provides an efficient staging ground for tool executions spanning several seconds, it fails to solve the scaling limits of human-in-the-loop agent interactions. In modern deployment environments, an autonomous agent frequently pauses to request destructive action confirmation, pull request reviews, or clarifying feedback from a human user. Human response times follow log-normal distributions spanning minutes to hours. Maintaining gigabytes of attention state in host DRAM across thousands of suspended agent sessions exhausts system memory, starving host operating system buffers and limiting cluster density.
 
@@ -935,7 +935,7 @@ Second, the temporal lifecycle of an agent request is fundamentally asynchronous
 
 Third, agentic execution graphs are frequently nonlinear. Autonomous problem solving routinely relies on speculative execution, beam search, or tree-of-thought exploration, wherein an agent forks two or more sub-agents from an identical checkpoint to evaluate alternative tool invocations in parallel. In a paged memory architecture equipped with copy-on-write semantics, these child trajectories share their ancestral prefix blocks without duplicating physical state. However, the moment these branching streams diverge and emit conflicting candidate tokens, their page tables split. The aggregate physical allocation transitions from a compact, shared trunk to a fanning tree of independent leaf allocations, dramatically increasing the aggregate block consumption rate per unit of wall-clock time. Sizing an infrastructure cluster without explicit accounting for prefix sharing ratios and branch divergence factors leads to severe capacity underestimations.
 
-### Analytical Capacity Formulations and Hardware Envelopes {#sec-vol3-kv-capacity-formulations}
+### Analytical Capacity Formulations {#sec-vol3-kv-capacity-formulations}
 
 Dimensioning the physical accelerator memory of an inference node begins with the structural parameters of the foundation model and the allocation budget of the serving runtime. The total available High-Bandwidth Memory on an accelerator node, denoted $C_{\text{HBM}}$, must accommodate four mutually exclusive physical memory consumers: the static model parameter weights ($M_{\text{weights}}$), the dynamic scratchpad buffers required for intermediate layer activations during prefill and decode matrix operations ($M_{\text{activations}}$), the runtime system headroom reserved for CUDA context overhead and allocator alignment ($M_{\text{runtime}}$), and the physical paged memory pool allocated for key-value tensors ($M_{\text{KV}}$). The global capacity constraint is expressed as:
 
@@ -1015,7 +1015,7 @@ To understand how hardware advancements alter these capacity ceilings, consider 
 
 The data in @tbl-vol3-kv-capacity-envelope exposes the physical limits imposed by context scaling. On an H100 node, an operator attempting to support deep agentic trajectories of 128k tokens can host fewer than ten independent streams simultaneously. If the workload spikes to twelve concurrent requests, the system transitions from memory-governed compute to physical page exhaustion. The node must either drop into synchronous swapping across PCIe or refuse incoming turns entirely. Conversely, on a B200 node, the nearly three-fold expansion in available KV cache memory pool ($M_{\text{KV}}$) shifts the bottleneck back toward memory bus bandwidth saturation during concurrent decode passes.
 
-### Telemetry, Instrumentation, and Tail Latency Dynamics {#sec-vol3-kv-telemetry-metrics}
+### Serving Telemetry Dynamics {#sec-vol3-kv-telemetry-metrics}
 
 Provisioning an inference cluster cannot rely purely on static offline equations; it requires real-time observability of memory telemetry to detect the onset of phase transitions between stable serving and thrashing. A paged attention runtime must expose low-overhead instrumentation detailing memory distribution, cache reuse, and allocator contention. The primary metric governing node health is the physical KV cache utilization, denoted $U_{\text{KV}} \in [0, 1]$:
 
