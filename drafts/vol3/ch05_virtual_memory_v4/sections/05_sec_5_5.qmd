@@ -1,0 +1,172 @@
+## Chunked Prefill Scheduling {#sec-vol3-kvcache-chunked-prefill}
+
+An inference engine serving autoregressive language models confronts two fundamentally incompatible computational profiles running on the exact same accelerator silicon. The prefill phase ingests prompts containing hundreds or thousands of tokens simultaneously, executing dense matrix-matrix multiplications (GEMMs) that achieve high compute efficiency on tensor cores. The decode phase, by contrast, generates exactly one token per sequence per iteration, executing memory-bound matrix-vector multiplications (GEMVs) that are strictly limited by high-bandwidth memory (HBM) transfer speed rather than peak arithmetic throughput. When a long agent prompt—such as a complex tool definition, an 8,192-token system prompt, or a multi-turn conversation trace—arrives at an engine currently serving twenty active decoding streams, a naive run-to-completion scheduler produces catastrophic head-of-line blocking. The accelerator must commit all tensor units to the massive matrix operations of the new prompt, freezing the memory-bound decode loops for hundreds of milliseconds and causing inter-token latency (ITL) tail spikes that violate service level agreements.
+
+Chunked prefill resolves this physical collision by slicing monolithic prompts into uniform token blocks and co-scheduling them alongside active decode requests within the same execution batch. Rather than treating prefill and decoding as mutually exclusive operating modes, chunked scheduling exploits their complementary hardware demands: the compute-dense prefill chunk raises the arithmetic intensity of the batch toward the accelerator's Roofline ridge point, while active decode tokens amortize the memory bandwidth required to stream the model's weight matrices from HBM into SRAM.
+
+### The Prefill-Decode Interference Dilemma
+
+The operational conflict between prefill and decode stems directly from accelerator hardware limits. Under the Roofline model, the operational intensity $\mathcal{I}$ of a workload measures the ratio of floating-point operations executed to memory bytes transferred across the accelerator memory bus:
+
+$$\mathcal{I} = \frac{\text{Floating Point Operations (FLOPs)}}{\text{Memory Traffic (Bytes)}}$$
+
+Consider an accelerator equipped with dense tensor core throughput $T_{\text{peak}}$ of $1{,}000\text{ TFLOPS}$ ($10^{15}\text{ FLOPs/s}$) for 16-bit floating-point operations and an HBM bandwidth $B_{\text{mem}}$ of $3.35\text{ TB/s}$ ($3.35 \times 10^{12}\text{ Bytes/s}$). The hardware ridge point $\mathcal{I}^*$ marks the minimum arithmetic intensity required to achieve peak computational throughput:
+
+$$\mathcal{I}^* = \frac{T_{\text{peak}}}{B_{\text{mem}}} = \frac{1{,}000 \times 10^{12}\text{ FLOPs/s}}{3.35 \times 10^{12}\text{ Bytes/s}} \approx 298.5\text{ FLOPs/Byte}$$
+
+Any computation with operational intensity $\mathcal{I} < \mathcal{I}^*$ is bound by memory bandwidth, leaving tensor cores idling while waiting for operands to arrive from HBM. Any computation with $\mathcal{I} \ge \mathcal{I}^*$ is compute-bound, fully saturating tensor cores.
+
+::: {.column-margin}
+**Roofline Ridge Point**
+The operational intensity $\mathcal{I}^* = T_{\text{peak}} / B_{\text{mem}}$ defines the exact boundary where an accelerator transitions from being memory-bandwidth-bound to compute-bound. For modern accelerators, this threshold routinely exceeds 200–300 FLOPs/Byte.
+:::
+
+During the decode phase of an active sequence, generating a single token requires evaluating the full transformer model for one token position ($S=1$). For a model with parameter count $P$, evaluating a single token requires reading the entire parameter set of $2P$ bytes (at 16 bits per parameter) from HBM into on-chip SRAM, while performing approximately $2P$ FLOPs of matrix multiplication. For a batch of $B_{\text{decode}}$ concurrent decode sequences, the aggregate compute is $2 \cdot P \cdot B_{\text{decode}}$ FLOPs, while the weight traffic remains fixed at $2P$ bytes (neglecting the KV cache traffic for the moment). The operational intensity of decoding is therefore:
+
+$$\mathcal{I}_{\text{decode}} \approx \frac{2 \cdot P \cdot B_{\text{decode}}}{2 \cdot P} = B_{\text{decode}}\text{ FLOPs/Byte}$$
+
+Even with a substantial batch size of $B_{\text{decode}} = 64$, the operational intensity reaches only $64\text{ FLOPs/Byte}$, which is less than a quarter of the hardware ridge point $\mathcal{I}^* \approx 298.5$. The accelerator remains severely memory-bound, spending more than $75\%$ of its operational cycles waiting for weight matrices to stream across the memory bus.
+
+Conversely, the prefill phase processes a prompt of length $S_{\text{prompt}}$ all at once. The same $2P$ bytes of weights are streamed once, but they are reused across all $S_{\text{prompt}}$ tokens, yielding an operational intensity of:
+
+$$\mathcal{I}_{\text{prefill}} \approx \frac{2 \cdot P \cdot S_{\text{prompt}}}{2 \cdot P} = S_{\text{prompt}}\text{ FLOPs/Byte}$$
+
+When an agent runtime submits a prompt of $S_{\text{prompt}} = 4{,}096$ tokens, $\mathcal{I}_{\text{prefill}} \approx 4{,}096\text{ FLOPs/Byte}$, far exceeding the ridge point $\mathcal{I}^*$. Prefill saturates the accelerator's matrix multiplication units and runs at peak compute utilization.
+
+The systems dilemma arises when an inference engine processes these two phases sequentially. Under run-to-completion scheduling, an arriving prefill request preempts or queues ahead of the decode loop. Processing an 8,192-token prompt for a 70-billion-parameter model can monopolize the accelerator for 800 to 1,500 milliseconds. During this time, every active decode sequence in the engine is stalled. The tokens being streamed to downstream users or agent supervision loops halt entirely, introducing extreme variance into the Inter-Token Latency (ITL) distribution. While human users perceive this as stuttering output, autonomous agent control loops experience it as a transient failure of the inference subsystem, potentially triggering RPC client timeouts or degrading feedback responsiveness.
+
+### Chunked Prefill Mechanics and Attention Slicing
+
+To eliminate head-of-line blocking without sacrificing the high arithmetic intensity of prompt processing, the inference scheduler must break the monolithic prefill into manageable pieces. Chunked prefill decomposes an incoming prompt of $S_{\text{prompt}}$ tokens into a sequence of smaller, uniform chunks of size $C_{\text{chunk}}$ (typically 256, 512, or 1,024 tokens).
+
+Suppose a prompt spans $S_{\text{prompt}}$ tokens, indexed from $0$ to $S_{\text{prompt}} - 1$. Under chunk size $C_{\text{chunk}}$, the scheduler partitions the prompt into $K = \lceil S_{\text{prompt}} / C_{\text{chunk}} \rceil$ contiguous slices. The $k$-th chunk (where $1 \le k \le K$) covers the token range:
+
+$$I_k = \left[ (k - 1) C_{\text{chunk}}, \, \min(k \cdot C_{\text{chunk}}, S_{\text{prompt}}) - 1 \right]$$
+
+The serving engine evaluates chunk $I_k$ in a single forward pass iteration, alongside other active requests. The physical challenge lies in computing multi-head attention across chunk boundaries while preserving the mathematical equivalence to a monolithic forward pass.
+
+```
+Iteration k: Computing Attention for Chunk k (Tokens [2C, 3C - 1])
+
+Logical Token Range:
++------------------------+------------------------+------------------------+
+|   Chunk 1 (Cached)     |   Chunk 2 (Cached)     |   Chunk 3 (Active)     |
+|   Tokens [0, C-1]      |   Tokens [C, 2C-1]     |   Tokens [2C, 3C-1]    |
++------------------------+------------------------+------------------------+
+            |                        |                        |
+            v                        v                        v
++------------------------+------------------------+------------------------+
+|   K_1, V_1 in DRAM/HBM |   K_2, V_2 in DRAM/HBM | Compute Q_3, K_3, V_3  |
++------------------------+------------------------+------------------------+
+            \                        |                       /
+             \                       |                      /
+              +----------------------+---------------------+
+                                     |
+                                     v
+                 Attention Matrix A_3 = Softmax( Q_3 * [K_1, K_2, K_3]^T / sqrt(d) )
+                                     |
+                                     v
+                 Append K_3, V_3 into Physical Paged Cache Blocks
+```
+
+In iteration $k$, the model generates query, key, and value projections for only the tokens inside the current chunk $I_k$:
+
+$$\mathbf{Q}_k = \mathbf{X}_k \mathbf{W}_Q, \quad \mathbf{K}_k = \mathbf{X}_k \mathbf{W}_K, \quad \mathbf{V}_k = \mathbf{X}_k \mathbf{W}_V$$
+
+where $\mathbf{X}_k \in \mathbb{R}^{|I_k| \times D}$ represents the activations of chunk $k$. Because autoregressive language models employ causal masking, the tokens in chunk $k$ must attend to all previous tokens in chunks $1$ through $k-1$, as well as to preceding tokens within chunk $k$ itself. The keys and values for chunks $1$ through $k-1$ were already calculated in preceding iterations and stored in non-contiguous physical pages within the paged KV cache.
+
+The attention computation for chunk $k$ therefore constructs its key and value matrices by concatenating the historical cached projections with the newly computed projections:
+
+$$\mathbf{K}_{\le k} = \left[ \mathbf{K}_{\text{cached}, 1:k-1} \,\|\, \mathbf{K}_k \right] \in \mathbb{R}^{\left(\sum_{j=1}^k |I_j|\right) \times D_{\text{kv}}}$$
+
+$$\mathbf{V}_{\le k} = \left[ \mathbf{V}_{\text{cached}, 1:k-1} \,\|\, \mathbf{V}_k \right] \in \mathbb{R}^{\left(\sum_{j=1}^k |I_j|\right) \times D_{\text{kv}}}$$
+
+The attention output for the active chunk is evaluated as:
+
+$$\mathbf{O}_k = \text{Softmax}\left( \frac{\mathbf{Q}_k \mathbf{K}_{\le k}^\top}{\sqrt{d_{\text{head}}}} + \mathbf{M}_k \right) \mathbf{V}_{\le k}$$
+
+The attention mask $\mathbf{M}_k$ enforces causality. For the historical tokens ($j < (k-1) C_{\text{chunk}}$), the mask allows full bidirectional attention, since all historical tokens precede every token in chunk $k$. For the active tokens within chunk $k$, the mask applies standard causal masking, preventing token $t \in I_k$ from attending to tokens $t' > t$.
+
+Once $\mathbf{O}_k$ is computed, the engine writes $\mathbf{K}_k$ and $\mathbf{V}_k$ into newly allocated paged blocks in the global KV cache. Crucially, intermediate hidden activations for chunk $k$ are discarded at the end of the iteration, exactly as in a standard forward pass. The model does not emit an output token until chunk $K$ (the final chunk of the prompt) completes execution, at which point the logit distribution for position $S_{\text{prompt}} - 1$ is sampled to produce the first generated token.
+
+Chunking trades a small amount of redundant computation for bounded iteration latency. The attention mechanism computes queries of length $C_{\text{chunk}}$ against keys that grow longer with each chunk ($C_{\text{chunk}}, 2C_{\text{chunk}}, \dots, K C_{\text{chunk}}$). However, because key and value projections for historical tokens are retrieved from memory rather than recomputed from weights, the overall number of parameter matrix multiplications remains unchanged.
+
+### Token-Budget Scheduling and SLA Optimization
+
+Chunked prefill enables an inference engine to construct hybrid batches containing both prefill chunks and single-token decode requests. In systems such as Sarathi-Serve and modern implementations of vLLM, this scheduling is governed by a strict token budget, denoted by $C_{\text{budget}}$.
+
+In every scheduling cycle, the engine examines the queue of pending prefill chunks and the set of running decode sequences. The scheduler selects a combination of prefill chunks and decode tokens such that the total number of processed tokens in the iteration does not exceed $C_{\text{budget}}$:
+
+$$\sum_{i \in \mathcal{P}_{\text{admitted}}} M_{\text{chunk}, i} + \sum_{j \in \mathcal{D}_{\text{admitted}}} 1 \le C_{\text{budget}}$$
+
+where $\mathcal{P}_{\text{admitted}}$ is the set of admitted prefill chunks, $M_{\text{chunk}, i} \le C_{\text{chunk}}$ is the token count of prefill chunk $i$, and $\mathcal{D}_{\text{admitted}}$ is the set of admitted decode sequences.
+
+| Scheduling Policy | Iteration Composition | Hardware Bound | Decode Latency Impact | TTFT Impact |
+| :--- | :--- | :--- | :--- | :--- |
+| **Monolithic Prefill** | $S_{\text{prompt}}$ tokens exclusively | Compute-bound ($\mathcal{I} \gg \mathcal{I}^*$) | High ITL spikes ($500\text{--}1{,}500\text{ ms}$) | Minimal TTFT (single pass) |
+| **Unbatched Decode** | $B_{\text{decode}}$ tokens exclusively | Memory-bound ($\mathcal{I} \ll \mathcal{I}^*$) | Low ITL, but compute units sit idle | N/A (no prefills admitted) |
+| **Chunked Co-Scheduling** | $C_{\text{chunk}}$ prefill $+$ $B_{\text{decode}}$ tokens | Roofline-balanced ($\mathcal{I} \approx \mathcal{I}^*$) | Predictable ITL ($30\text{--}60\text{ ms}$ tail) | Marginal TTFT increase ($5\text{--}15\%$) |
+
+The token-budget abstraction balances two critical Service Level Agreements (SLAs): Time to First Token (TTFT) and Inter-Token Latency (ITL).
+
+Time to First Token represents the delay between the client submitting a request and receiving the first generated token:
+
+$$\text{TTFT} = t_{\text{queue}} + \sum_{k=1}^K t_{\text{iter}}(k)$$
+
+Under monolithic prefill, $K=1$, so the prompt executes in a single, highly optimized iteration. Under chunked prefill, $K > 1$. The prompt must wait across $K$ scheduling iterations before emitting a token. Furthermore, each iteration incurs overhead from kernel launches, block table lookups, and attention over previously stored KV pages. As a result, chunked prefill increases isolated TTFT by 5% to 15%.
+
+Inter-Token Latency represents the time elapsed between emitting consecutive tokens $t$ and $t+1$ for an active sequence:
+
+$$\text{ITL} = t_{\text{emit}}(t+1) - t_{\text{emit}}(t)$$
+
+In monolithic serving, if a 4,096-token prefill is admitted while ten decode sequences are active, ITL for those ten sequences spikes from a baseline of $35\text{ ms}$ to over $800\text{ ms}$. This represents a $22\times$ latency degradation at the tail (P99). Under chunked prefill with $C_{\text{chunk}} = 512$, the prefill work is spread across eight balanced iterations. Each iteration runs in roughly $50\text{ ms}$. In every iteration, all active decode sequences advance by one token alongside the 512 prefill tokens. The P99 ITL remains tightly bounded near $50\text{ ms}$, entirely eliminating the latency spike.
+
+```
+Monolithic Scheduling Timeline:
+Iteration:   [   Decode 1   ] [        Monolithic Prefill (4096 tokens)        ] [   Decode 2   ]
+Timeline:    |--- 35 ms ----|-------------------- 800 ms ---------------------|--- 35 ms ----|
+Decode ITL:                 ^ Decode streams stall here for 800 ms!             ^
+
+Chunked Prefill Scheduling Timeline:
+Iteration:   [ Chunk 1 + Dec ] [ Chunk 2 + Dec ] [ Chunk 3 + Dec ] ... [ Chunk 8 + Dec ]
+Timeline:    |---- 50 ms ----|---- 50 ms ----|---- 50 ms ----|     |---- 50 ms ----|
+Decode ITL:  Steady 50 ms pacing throughout entire prefill ingestion
+```
+
+::: {.callout-note title="Worked Example: Quantitative Interference and Chunk Budgeting"}
+An inference engine runs on an accelerator delivering $T_{\text{peak}} = 800\text{ TFLOPS}$ ($8 \times 10^{14}\text{ FLOPs/s}$) dense 16-bit matrix compute and $B_{\text{mem}} = 3.0\text{ TB/s}$ ($3 \times 10^{12}\text{ Bytes/s}$) HBM bandwidth. The served model has $P = 70\text{ billion}$ parameters stored in 16-bit precision, occupying $2P = 140\text{ GB}$ of memory. The engine is actively servicing $B_{\text{decode}} = 32$ decode streams. An agent submits a new prompt with $S_{\text{prompt}} = 4{,}096$ tokens.
+
+**Question 1: What is the execution latency and ITL spike under monolithic run-to-completion scheduling?**
+
+A decode iteration with 32 sequences requires streaming the full $140\text{ GB}$ of model weights to execute $2 \cdot P \cdot B_{\text{decode}} = 2 \times (70 \times 10^9) \times 32 = 4.48 \times 10^{12}\text{ FLOPs} = 4.48\text{ TFLOPs}$.
+The memory read time is:
+$$t_{\text{mem, decode}} = \frac{140 \times 10^9\text{ Bytes}}{3.0 \times 10^{12}\text{ Bytes/s}} \approx 46.7\text{ ms}$$
+The compute time on tensor cores running at an achieved 50% Model FLOPs Utilization (MFU, effective throughput $400\text{ TFLOPS}$) is:
+$$t_{\text{comp, decode}} = \frac{4.48 \times 10^{12}\text{ FLOPs}}{400 \times 10^{12}\text{ FLOPs/s}} \approx 11.2\text{ ms}$$
+Because $t_{\text{mem}} > t_{\text{comp}}$, the decode iteration is memory-bound and takes $\max(46.7, 11.2) = 46.7\text{ ms}$. Baseline ITL is $46.7\text{ ms}$.
+
+When the $4{,}096$-token monolithic prefill executes, its computational load is:
+$$\text{FLOPs}_{\text{prefill}} = 2 \cdot P \cdot S_{\text{prompt}} = 2 \times (70 \times 10^9) \times 4{,}096 = 5.7344 \times 10^{14}\text{ FLOPs} = 573.44\text{ TFLOPs}$$
+Assuming $60\%$ achieved MFU for dense GEMM ($480\text{ TFLOPS}$ effective):
+$$t_{\text{comp, prefill}} = \frac{573.44 \times 10^{12}\text{ FLOPs}}{480 \times 10^{12}\text{ FLOPs/s}} \approx 1{,}194.7\text{ ms} \approx 1.195\text{ seconds}$$
+The 32 active decode streams stall for $1.195\text{ seconds}$. The ITL spikes from $46.7\text{ ms}$ to $1{,}195\text{ ms}$, a $25.6\times$ latency degradation.
+
+**Question 2: What is the iteration latency when chunking the prefill with $C_{\text{chunk}} = 512$?**
+
+The prompt is partitioned into $K = 4{,}096 / 512 = 8$ chunks. In each iteration, the scheduler co-schedules one 512-token prefill chunk with the 32 decode tokens, yielding $512 + 32 = 544$ tokens total.
+
+The weight streaming time remains fixed at $t_{\text{mem}} = 46.7\text{ ms}$ (since all 544 tokens share the same model parameters).
+The compute required for the 544 tokens is:
+$$\text{FLOPs}_{\text{iter}} = 2 \times (70 \times 10^9) \times 544 = 7.616 \times 10^{13}\text{ FLOPs} = 76.16\text{ TFLOPs}$$
+At $480\text{ TFLOPS}$ effective throughput:
+$$t_{\text{comp, iter}} = \frac{76.16 \times 10^{12}\text{ FLOPs}}{480 \times 10^{12}\text{ FLOPs/s}} \approx 158.7\text{ ms}$$
+Because compute time now dominates memory streaming ($158.7\text{ ms} > 46.7\text{ ms}$), the batch execution takes approximately $158.7\text{ ms}$.
+
+Instead of a catastrophic 1,195 ms freeze followed by fast decode, all 32 active decode streams advance by one token every $158.7\text{ ms}$ for 8 consecutive cycles. The maximum ITL is cut from $1{,}195\text{ ms}$ down to $158.7\text{ ms}$, preserving predictable streaming performance while keeping accelerator compute cores saturated.
+:::
+
+Chunked prefill demonstrates that memory-bound and compute-bound workloads can be paired to optimize total accelerator resource utilization. By sizing the token chunk $C_{\text{chunk}}$ such that $t_{\text{comp}} \approx t_{\text{mem}}$, the scheduler reaches the balance point where the memory bus and the tensor cores complete their work at the same time, maximizing overall tokens generated per second across the cluster.
+
+---
+
+While chunked prefill balances active prefills against active decodes during continuous token generation, agentic systems exhibit a distinct operational pattern: *long idle pauses*. When an agent model finishes generating a tool call—such as a sandboxed terminal execution, a web search query, or an interactive confirmation prompt to a human supervisor—the generation loop stops entirely. The model engine performs no forward passes for that sequence while awaiting the external environment's response. Yet, the physical KV cache blocks containing thousands of tokens of accumulated conversation and tool outputs remain pinned in accelerator HBM. If the serving runtime allows these physical blocks to sit resident across multi-second or multi-minute execution pauses, the accelerator rapidly runs out of memory, rejecting new requests or thrashing active batches. How should an inference system manage physical attention state when a trajectory suspends execution—should it retain the blocks, evict them entirely, offload them across the host bus to main memory, or discard them and rely on recomputation?

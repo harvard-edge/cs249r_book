@@ -1,0 +1,162 @@
+## Forward Recovery Versus Rollback {#sec-vol3-sagas-forward-vs-backward}
+
+An agent executing an automated cloud migration fails at step six of eight: a generated configuration manifest contains a malformed JSON escape sequence that causes the container orchestration daemon to reject the deployment payload. If the host supervisor responds with unconditional backward compensation, it triggers the registered compensator chain $C_5, C_4, C_3, C_2, C_1$. In doing so, the runtime destroys an allocated virtual private cloud, tears down a provisioned relational database replica, de-registers DNS entries, and discards tens of thousands of tokens of deliberative prefill and decode work—all to rectify an unescaped double quote. Conversely, if the runtime blindly re-executes the forward transaction without inspecting the error, the unprivileged language model receives no diagnostic signal, re-samples from the same predictive distribution, and reproduces the identical syntax failure.
+
+**The agent runtime must dynamically arbitrate between backward rollback and forward self-healing, balancing the accumulated sunk cost of completed sub-transactions against the convergence probability and token expenditure of synthesizing localized corrective mutations.** Unconditional rollback prioritizes clean external invariants at the expense of extreme latency and resource waste. Unchecked forward self-healing preserves committed infrastructure work but risks trapping the agent in non-terminating repair loops that compound initial errors. A dependable runtime implements a formal decision policy that measures remaining resource budgets, evaluates error classification signatures, and enforces an anti-spin invariant that bounds forward repair attempts before cascading to compensation or human escalation.
+
+### The Recovery Spectrum: State Restoration Versus State Transformation
+
+In their classical taxonomy of dependable computing, Algirdas Avizienis and colleagues formalized fault recovery as two fundamentally distinct mechanisms: backward recovery, which returns the system to an earlier error-free state prior to fault manifestation, and forward recovery, which transforms the current erroneous state into a new, valid state enabling computation to proceed [@avizienis2004dependable]. Distributed databases almost exclusively implement backward recovery; because database engines maintain complete control over local physical frames and write-ahead logs, restoring an uncorrupted snapshot through page undo operations is deterministic and computationally inexpensive.
+
+::: {.column-margin}
+**Backward vs. Forward Recovery**  
+*Backward Recovery:* Restores an earlier checkpoint $\mathbf{s}_k$ via compensators $(C_t, \dots, C_1)$, discarding intermediate work.  
+*Forward Recovery:* Synthesizes a new patch mutation $a_{\text{repair}}$ such that $(s_t, a_{\text{repair}}) \to s'_t$, driving the system forward to fulfill post-conditions.
+:::
+
+In an agentic machine learning system, the physical boundaries of execution break the database assumption. The agent manipulates external environments—third-party REST APIs, container daemons, remote git repositories, and cloud control planes—via discrete forward sub-transactions $T_i \in \mathcal{T}$. When sub-transaction $T_t$ fails, the runtime occupies an intermediate environment state $s_t$ that carries non-trivial creation latency and direct fiscal cost. 
+
+Under backward recovery, the runtime treats the partial execution sequence $(T_1, T_2, \dots, T_{t-1})$ as an aborted atomic unit. It traverses the trajectory log in reverse chronological order, issuing the sequence of compensating transactions:
+
+$$\mathcal{C}_{t-1 \to 0} = \left( C_{t-1}, C_{t-2}, \dots, C_1 \right)$$
+
+Each compensator $C_i$ executes as a distinct external RPC designed to logically neutralize the state mutation introduced by $T_i$. Backward recovery is semantically conservative. It guarantees that if the agent encounters an unrecoverable failure—such as revoked credentials, incompatible API versions, or impossible domain constraints—the external world is left in an uncorrupted, baseline configuration. However, backward compensation is strictly destructive of forward progress: every successful intermediate step is discarded, forcing any subsequent execution attempt to pay the full latency, compute, and monetary costs of rebuilding state from scratch.
+
+Forward recovery adopts the opposite operational premise: rather than treating intermediate state as disposable, the runtime leverages the stochastic reasoning engine to diagnose the fault and alter the execution path. Upon receiving an error observation $o_t^{\text{err}}$ from a failed sub-transaction $T_t$, the runtime constructs a targeted diagnostic context and queries the foundation model for a corrective repair action:
+
+$$a_{\text{repair}} \sim \pi_\theta\left(a \mid \tau_{<t}, T_t, o_t^{\text{err}}\right)$$
+
+The repair action $a_{\text{repair}}$ does not unwind prior history. Instead, it applies a localized state transformation designed to satisfy the preconditions of $T_t$ or to substitute an alternative sub-transaction $T_t'$ that fulfills the identical operational post-condition. If step six failed because a generated manifest lacked a required namespace tag, $a_{\text{repair}}$ patches the YAML payload in memory and re-invokes the deployment tool. If step six failed because an allocated IP address experienced a transient route conflict, $a_{\text{repair}}$ requests a secondary IP address without tearing down the parent subnets provisioned in steps one through five.
+
+| Dimension | Backward Recovery (Saga Compensation) | Forward Recovery (Stochastic Self-Healing) |
+| :--- | :--- | :--- |
+| **Primary Mechanism** | Deterministic execution of inverse compensators $C_i$ | Stochastic synthesis of corrective action $a_{\text{repair}}$ |
+| **State Trajectory** | $\mathbf{s}_t \xrightarrow{C} \mathbf{s}_{t-1}' \xrightarrow{C} \dots \xrightarrow{C} \mathbf{s}_0'$ (Restoration) | $\mathbf{s}_t \xrightarrow{a_{\text{repair}}} \mathbf{s}_t' \xrightarrow{T_t} \mathbf{s}_{t+1}$ (Transformation) |
+| **Execution Cost** | $\sum_{i=1}^{t-1} \text{Cost}(C_i) + \text{Cost}(\text{Re-execution})$ | $\text{Cost}(\text{LLM}_{\text{repair}}) + \text{Cost}(a_{\text{repair}})$ |
+| **Determinism** | High (pre-registered idempotent compensation code) | Low (probabilistic sampling from policy $\pi_\theta$) |
+| **Failure Mode** | Compensator failure leading to dirty partial state | Non-terminating repair loops ("spin loops") |
+| **Optimal Domain** | Invariant violations, security breaches, hard limits | Transient tool faults, syntax errors, schema drift |
+
+Table: Systematic comparison of recovery mechanisms in agentic execution runtimes. {#tbl-recovery-comparison}
+
+Forward recovery is inherently opportunistic and non-deterministic. Because the corrective action is generated by sampling from an unprivileged neural model, the runtime cannot guarantee that $a_{\text{repair}}$ will resolve the fault; indeed, a poorly calibrated repair step may introduce secondary faults that corrupt the environment further. The central engineering challenge is therefore constructing an automated supervisory harness that selects the appropriate recovery strategy based on observable runtime parameters.
+
+### Dynamic Arbitration: The Recovery Policy Function
+
+A resilient runtime does not treat recovery strategy selection as a static configuration switch. Instead, it evaluates a recovery policy function $\mathcal{D}$ immediately upon intercepting an execution fault. The policy arbitrates between three terminal directives: attempting forward repair, executing backward compensation, or halting execution for operator intervention.
+
+Formally, let the runtime state at the moment of failure be represented by the tuple:
+
+$$\Omega_t = \left( s_t, T_t, o_t^{\text{err}}, \mathbf{B}_t, \Sigma_t \right)$$
+
+where $s_t$ is the observable environment state, $T_t$ is the failed sub-transaction, $o_t^{\text{err}}$ is the structured error payload returned by the host sandbox or external API, $\mathbf{B}_t = \langle T_{\text{rem}}, S_{\text{rem}}, \$_{\text{rem}} \rangle$ represents the remaining resource budget (tokens, trajectory steps, and monetary cost), and $\Sigma_t = (T_1, \dots, T_{t-1})$ is the history ledger of committed sub-transactions. The recovery policy $\mathcal{D}(\Omega_t)$ maps this state into an action space $\mathcal{A}_{\text{rec}} = \{\text{FORWARD\_REPAIR}, \text{BACKWARD\_ROLLBACK}, \text{OPERATOR\_ESCALATE}\}$.
+
+::: {.column-margin}
+![Recovery Decision Architecture](images/svg/recovery-decision-tree.svg){#fig-vol3-recovery-decision-tree}
+The runtime evaluates error taxonomy, resource headroom, and un-wind costs to select between forward self-healing, backward compensation, and escalation.
+:::
+
+The decision flow, illustrated in @fig-vol3-recovery-decision-tree, evaluates three sequential gates:
+
+1. **Error Taxonomy and Diagnosability:** The runtime inspects the classification signature of $o_t^{\text{err}}$. Errors fall into three distinct operational categories:
+   - *Transient Environmental Faults:* Network timeouts, HTTP 429 rate limits, and concurrent lock contentions. These faults require no structural modification to the trajectory; they are resolved via forward retry with exponential backoff and jitter.
+   - *Deterministic Semantic Faults:* Schema validation rejections, syntax compilation errors, missing parameters, and local file-not-found exceptions. These represent high-probability candidates for forward self-healing, as the error trace contains explicit diagnostic feedback that the model can ingest to synthesize a corrected payload.
+   - *Fatal Invariant Violations:* Authentication revocations, hardware resource exhaustion, unrecoverable database corruptions, and security sandbox constraint violations. Forward repair cannot synthesize a valid bypass for these faults. The runtime immediately aborts forward progress and triggers backward compensation.
+
+2. **Resource Budget Headroom:** Forward self-healing consumes inference tokens and trajectory steps. Let $\mathbb{E}[T_{\text{repair}}]$ and $\mathbb{E}[\$_{\text{repair}}]$ represent the expected token consumption and monetary cost of an inference pass designed to generate $a_{\text{repair}}$. If the remaining budget $\mathbf{B}_t$ satisfies:
+
+   $$T_{\text{rem}} < \mathbb{E}[T_{\text{repair}}] + T_{\text{reserve}} \quad \lor \quad \$_{\text{rem}} < \mathbb{E}[\$_{\text{repair}}] + \$_{\text{reserve}}$$
+
+   the runtime denies forward repair. Attempting to repair a failure when token headroom is nearly exhausted risks causing context window truncation during the repair pass itself, inducing an unrecoverable failure mode in the recovery supervisor.
+
+3. **Economic Amortization (Sunk Cost vs. Repair Cost):** Unwinding the trajectory requires executing compensators with total cost:
+
+   $$U(\Sigma_t) = \sum_{j=1}^{t-1} \text{Cost}(C_j)$$
+
+   If $U(\Sigma_t)$ is low (for example, if the failure occurs during the first sub-transaction of a multi-step workflow), the economic penalty of backward rollback is negligible. The runtime favors immediate compensation and clean restarts. Conversely, if $U(\Sigma_t)$ is high—representing minutes of compute, thousands of committed database rows, or irreversible manual setups—the expected cost of forward repair must be weighed against the probability of recovery success:
+
+   $$\mathbb{E}[\text{Cost}(\text{Forward})] = \text{Cost}(a_{\text{repair}}) + \left(1 - P(\text{success} \mid o_t^{\text{err}})\right) \cdot U(\Sigma_t)$$
+
+   When $P(\text{success} \mid o_t^{\text{err}})$ is high and $U(\Sigma_t)$ is substantial, forward self-healing is the mathematically optimal systems choice.
+
+::: {.callout-note title="Worked Example: Quantitative Trade-Off Between Forward Patching and Saga Rollback"}
+Consider an autonomous site-reliability agent executing a six-step database migration and canary deployment pipeline across a cloud environment. The steps and their execution profiles are:
+
+- $T_1$: Provision isolated VPC and network routes (Latency: $4.2\text{ s}$, Cost: $\$0.005$).
+- $T_2$: Spin up auxiliary relational database replica (Latency: $18.5\text{ s}$, Cost: $\$0.040$).
+- $T_3$: Allocate static public gateway IP (Latency: $1.1\text{ s}$, Cost: $\$0.001$).
+- $T_4$: Launch containerized microVM cluster (Latency: $9.8\text{ s}$, Cost: $\$0.025$).
+- $T_5$: Stream schema migration scripts to database (Latency: $12.4\text{ s}$, Cost: $\$0.010$).
+- $T_6$: Deploy canary routing proxy with generated JSON routing table.
+
+At step six ($T_6$), the proxy daemon rejects the configuration payload due to an invalid port mapping syntax error (`"port": "8080"` string instead of an integer `8080`), emitting a structured validation error to standard error. The agent runtime must choose between backward Saga compensation and forward self-healing.
+
+**Scenario A: Backward Saga Rollback and Re-Execution**
+The runtime executes the registered compensator chain in reverse: $C_5$ (revert schema migration via down-migrations, $14.1\text{ s}$), $C_4$ (terminate microVMs, $6.2\text{ s}$), $C_3$ (release gateway IP, $0.8\text{ s}$), $C_2$ (deprovision database replica, $16.0\text{ s}$), and $C_1$ (tear down VPC, $3.5\text{ s}$).
+
+- Total Rollback Latency: $14.1 + 6.2 + 0.8 + 16.0 + 3.5 = 40.6\text{ seconds}$.
+- Sunk Model Tokens: 38,500 prompt tokens and 3,100 generation tokens across steps $T_1$ through $T_5$, totaling $\$0.142$ in inference fees.
+- Re-execution Cost: Repeating the entire workflow from step one to step six requires identical token generation and environment setup, consuming another $46.0\text{ s}$ of physical provisioning and $\$0.142$ of inference.
+- Total Resource Penalty: $86.6\text{ seconds}$ of wall-clock delay, $\$0.284$ in redundant inference fees, and non-refundable cloud provisioning minimum charges.
+
+**Scenario B: Forward Self-Healing via Corrective Mutation**
+The runtime intercepts the validation error from $T_6$ and constructs a targeted repair prompt. The prompt includes:
+- System recovery instructions: 1,200 tokens.
+- Failed tool call payload: 850 tokens.
+- Subprocess stderr diagnostic message: 340 tokens.
+- Total Prompt: $2,390\text{ tokens}$.
+
+The model samples a corrective patch $a_{\text{repair}}$ replacing the malformed payload with integer port specifications, producing 180 generation tokens.
+
+- Inference Latency: At a time-to-first-token (TTFT) of $90\text{ ms}$ and a generation speed of $50\text{ tokens/second}$, the model outputs the fix in:
+  $$\text{Latency} = 0.090\text{ s} + \frac{180}{50}\text{ s} = 3.69\text{ seconds}$$
+- Tool Re-Execution: The proxy daemon validates the patched configuration in $0.4\text{ seconds}$.
+- Monetary Cost: $2,390\text{ prompt tokens} \times \$3.00/10^6 + 180\text{ completion tokens} \times \$15.00/10^6 = \$0.00717 + \$0.00270 = \$0.00987$.
+
+Empirical measurements on structured JSON schema repair tasks indicate that modern foundation models achieve a single-turn repair success rate $P(\text{success}) \approx 0.92$. The expected latency and fiscal cost of forward repair are:
+
+$$\mathbb{E}[\text{Latency}] = 3.69\text{ s} + 0.4\text{ s} + (1 - 0.92) \times 40.6\text{ s} = 4.09\text{ s} + 3.25\text{ s} = 7.34\text{ seconds}$$
+$$\mathbb{E}[\text{Cost}] = \$0.00987 + (1 - 0.92) \times \$0.142 = \$0.00987 + \$0.01136 = \$0.02123$$
+
+Forward recovery reduces end-to-end recovery latency by **91.5%** ($7.34\text{ s}$ vs. $86.6\text{ s}$) and financial expenditure by **92.5%** ($\$0.021$ vs. $\$0.284$). The runtime preserves the completed infrastructure work while resolving the failure via localized state transformation.
+:::
+
+### The Anti-Spin Invariant: Bounding Forward Repair Trajectories
+
+While forward recovery yields dramatic efficiency improvements on benign syntax and configuration errors, it exposes the system to a catastrophic failure mode unique to autoregressive foundation models: *repair spinning*. When a model attempts to repair an error without fundamentally understanding the underlying environmental state, it frequently engages in hallucinated patch cycling. The model modifies superficial code syntax, receives a secondary error, modifies a different irrelevant parameter, and gradually drifts away from the original goal while consuming tokens and API call limits.
+
+```
+# Observable Trace of an Agent Repair Spin Loop (Pytest Validation Failure)
+Iteration 1: ImportError: cannot import name 'AsyncSession' from 'sqlalchemy.orm'
+Agent Patch 1: from sqlalchemy.ext.asyncio import AsyncSession  # Fixed import
+Iteration 2: AttributeError: 'AsyncSession' object has no attribute 'sync_engine'
+Agent Patch 2: engine = session.sync_engine if hasattr(session, 'sync_engine') else None
+Iteration 3: TypeError: NoneType object cannot be interpreted as an integer
+Agent Patch 3: from sqlalchemy.orm import AsyncSession  # Cyclical regression
+Iteration 4: ImportError: cannot import name 'AsyncSession' from 'sqlalchemy.orm'
+# Supervisor Intervention: Cycle detected via signature hash H(err_4) == H(err_1)
+```
+
+To eliminate repair spinning, the runtime must enforce the *Anti-Spin Invariant*: **no single logical sub-transaction may undergo more than a fixed threshold $K_{\text{repair}}$ of consecutive forward repair attempts, and no sequence of repair attempts may exhibit topological or signature cycles.**
+
+The invariant is operationalized through two concrete runtime data structures maintained in the execution context:
+
+1. **The Consecutive Repair Counter ($k_i$):** Every sub-transaction $T_i$ maintains an integer counter $k_i \in \mathbb{N}$ initialized to zero. When $T_i$ fails and the runtime elects forward recovery, it increments $k_i \leftarrow k_i + 1$. In production agent runtimes, the maximum allowable forward repairs is strictly bounded:
+
+   $$k_i \le K_{\text{repair}}, \quad \text{where } K_{\text{repair}} \le 3$$
+
+   If $k_i > K_{\text{repair}}$, the runtime revokes the model's authority to attempt self-healing. The supervisor concludes that the error is not locally resolvable by the policy $\pi_\theta$ under the current prompt framing, terminates forward progress, and transitions immediately to backward Saga compensation.
+
+2. **Semantic Error Hashing and Cycle Detection:** A model can exhaust its repair budget by oscillating between two mutually incompatible states, as demonstrated in the trace above where patch three reverts the import change made in patch one. The supervisor computes a deterministic semantic hash of every error observation:
+
+   $$\sigma(o_t^{\text{err}}) = \text{SHA-256}\left( \text{Normalize}\left( \text{type}(o_t^{\text{err}}), \text{source}(o_t^{\text{err}}), \text{signature}(o_t^{\text{err}}) \right) \right)$$
+
+   The runtime stores the historical error signatures in a sliding FIFO buffer $\mathcal{H}_i = [\sigma_1, \sigma_2, \dots, \sigma_k]$ scoped to sub-transaction $T_i$. Before dispatching an inference request for $a_{\text{repair}}$, the supervisor checks for cycle recurrence:
+
+   $$\exists \, j < k \quad \text{such that} \quad \sigma_k = \sigma_j$$
+
+   If an identical error signature appears twice within the same repair sequence, the agent has produced a no-op or cyclical patch. The runtime breaks the loop instantly, bypassing any remaining increments of $K_{\text{repair}}$ and forcing backward rollback.
+
+By enforcing the anti-spin invariant, the runtime bounds the worst-case blast radius of forward self-healing. If forward repair succeeds within $K_{\text{repair}}$ turns, the system reaps the latency and efficiency benefits of preserving committed state. If the model fails to converge, the runtime falls back deterministically to the proven guarantees of the Saga compensation log.
+
+However, this recovery model rests on an implicit architectural assumption: that every committed sub-transaction $T_i$ can actually be compensated by an inverse transaction $C_i$. In real-world software deployments, this assumption is routinely shattered. When an agent sends an un-encrypted email, charges a customer credit card, or provisions non-refundable hardware reservations, the physical action crosses an irreversibility threshold where no backward compensation can restore the prior world state. How must an agent runtime structure execution when it crosses these points of no return?

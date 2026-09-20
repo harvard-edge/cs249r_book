@@ -1,0 +1,188 @@
+## Autoregressive Exposure Bias {#sec-vol3-sft-exposure-bias}
+
+When an autonomous agent fine-tuned exclusively on successful software engineering trajectories encounters a merge conflict or an unhandled POSIX returncode in production, its execution trajectory undergoes immediate and catastrophic collapse. In offline supervised fine-tuning, the data pipeline feeds the model pristine prefixes where every tool call succeeds, every file exists, and every dependency resolves cleanly. In live deployment, however, the unprivileged neural inference engine operates as a closed-loop controller whose own non-deterministic token emissions alter the physical state of an external environment. The moment a tool execution returns an off-nominal observation—an unfamiliar `stderr` trace, a non-zero exit code, or an interrupted network socket—the model's internal key-value (KV) representations drift outside the support of the demonstration distribution.
+
+**Supervised policies trained exclusively on teacher-forced paths suffer catastrophic exposure bias; encountering an unfamiliar error state in live execution leads to compounding failure.** Because teacher forcing optimizes likelihood conditioned strictly on expert-visited token prefixes ($x_{<t}^*$), the policy receives zero gradient signal on how to remediate errors once execution leaves the training manifold. In multi-step agent environments, this discrepancy transforms a minor single-step error rate $\epsilon$ into quadratic compounding regret $O(\epsilon N^2)$, trapping the system in execution livelocks unless training actively bridges the distribution shift between demonstration data and live student rollouts.
+
+### The Mechanics of Exposure Bias in Sequential Trajectories
+
+The structural defect of behavior cloning originates in the mathematical divergence between the training loss objective and the operational decode loop. During supervised fine-tuning under teacher forcing, the parameter update minimizes the cross-entropy of predicting ground-truth token $x_t^*$ conditioned strictly on the prefix of ground-truth teacher tokens $x_{<t}^*$:
+
+$$\mathcal{L}_{\text{SFT}}(\theta) = -\sum_{t=1}^T \log \pi_\theta(x_t^* \mid x_{<t}^*)$$ {#eq-sft-teacher-forcing}
+
+At inference time, ground-truth tokens $x_{<t}^*$ do not exist. The generation runtime autoregressively feeds the policy's own past emissions $\hat{x}_{<t} \sim \pi_\theta(\cdot \mid \hat{x}_{<t-1})$ back into the self-attention key-value cache to compute logits for the subsequent token:
+
+$$\hat{x}_t \sim \pi_\theta(\cdot \mid \hat{x}_{<t})$$ {#eq-inference-autoregressive}
+
+::: {.column-margin}
+**Distributional Discrepancy**  
+$$\mathcal{D}_{\text{train}} \sim d_{\pi^*}(s) \quad \text{versus} \quad \mathcal{D}_{\text{test}} \sim d_{\pi_\theta}(s)$$  
+Under teacher forcing, the training runtime samples states from the expert distribution $d_{\pi^*}$. During deployment, the agent visits states governed by its own policy distribution $d_{\pi_\theta}$, creating an epistemic gap the moment $\pi_\theta$ diverges.
+:::
+
+In single-turn natural language generation (such as document summarization or translation), this discrepancy—classically termed *exposure bias*—manifests as stylistic drift, repetitive phrasing, or mild token perplexity degradation. The generation degrades gracefully because tokens do not mutate an external operating system.
+
+In an agentic system operating under Zero Ambient Authority ($A=0$), however, exposure bias causes complete functional collapse. The foundation model acts as an unprivileged predictor emitting structured RPC payloads to mediated tool interfaces. When the policy emits an erroneous token—such as a misplaced quotation mark in an inline bash script, an invalid JSON key, or a hallucinated flag—that token crosses the actuation boundary and triggers a state transition in the external environment:
+
+$$s_{t+1} = \mathcal{T}(s_t, a_t)$$ {#eq-env-transition}
+
+The external environment responds with an unhandled exception, a non-zero exit code, or a compiler traceback. This error observation is serialized and injected into the agent's context window. Because the supervised training corpus contained only pristine, nominal executions, the KV cache now contains token embeddings and attention affinity patterns that never appeared in the training set. The model encounters key-value states outside the training manifold. Lacking gradient updates on how to attend to failure diagnostics, its softmax probability distribution over next tokens disperses, causing the agent to emit repeated failing commands, hallucinate non-existent flags, or oscillate in infinite retry loops.
+
+```text
+$ git checkout -b feature/auth && git merge origin/staging
+CONFLICT (content): Merge conflict in src/auth/session.py
+Automatic merge failed; fix conflicts and then commit the result.
+$ python -m pytest tests/test_session.py
+  File "src/auth/session.py", line 42
+    <<<<<<< HEAD
+    ^
+SyntaxError: invalid syntax
+$ git commit -m "resolve conflicts" --all
+fatal: cannot do a partial commit during a merge.
+$ git status --porcelain
+UU src/auth/session.py
+# Policy loops on unmodeled state: git commit --force-resolve (Exit Code 128)
+```
+
+In the failure trace above, the agent encounters standard Git conflict markers (`<<<<<<< HEAD`). Because the teacher-forced training dataset contained only clean merges, the model's attention heads cannot align the conflict markers with corrective file edits. Instead, it attempts a raw commit, receives another error, and begins emitting synthetic, non-existent flags (`--force-resolve`), burning token budgets until the host supervisor forcibly terminates the process.
+
+### Compounding Regret: The Mathematical Derivation
+
+To quantify why exposure bias is destructive in sequential agent workflows, we formalize the problem through sequential decision theory, building on the reduction framework established by Stéphane Ross, Geoffrey Gordon, and J. Andrew Bagnell (2011).
+
+Let an agent task be modeled as a discrete-time Markov decision process across an $N$-step horizon with state space $\mathcal{S}$ and action space $\mathcal{A}$. Let $\pi^*$ denote the target expert policy (the demonstration generator), and let $\pi_\theta$ denote the student policy parameterized by neural weights $\theta$. We define $d_{\pi^*}^t(s)$ as the state visitation distribution at time step $t \in \{1, \dots, N\}$ when following the expert policy. Similarly, let $d_{\pi_\theta}^t(s)$ denote the state visitation distribution at step $t$ when actions are selected by the student policy $\pi_\theta$ in live execution.
+
+During standard behavior cloning, the supervised loss optimizes the expected single-step 0-1 action error rate strictly under the expert's state distribution:
+
+$$\mathbb{E}_{s \sim d_{\pi^*}^t} \left[ \mathbb{I}\left( \pi_\theta(s) \neq \pi^*(s) \right) \right] \le \epsilon$$ {#eq-error-rate-bound}
+
+where $\epsilon \in (0, 1)$ represents the per-step classification error rate across nominal states.
+
+Now consider the performance of $\pi_\theta$ during live execution, where states are drawn from the student's induced distribution $d_{\pi_\theta}^t$. Let $C(s, a) \in [0, 1]$ denote the immediate task cost function, with $C(s, \pi^*(s)) = 0$ for all nominal states. The cumulative expected regret over the $N$-step trajectory is:
+
+$$J(\pi_\theta) - J(\pi^*) = \sum_{t=1}^N \mathbb{E}_{s \sim d_{\pi_\theta}^t} [C(s, \pi_\theta(s))]$$ {#eq-cumulative-regret-def}
+
+At time step $t$, what is the probability that the agent is operating off-manifold? Let $\mathcal{E}_{<t}$ be the event that the student policy committed at least one action error at some prior step $\tau \in \{1, \dots, t-1\}$. By applying the union bound across all preceding steps:
+
+$$P(\mathcal{E}_{<t}) \le \sum_{\tau=1}^{t-1} P\left( \pi_\theta(s_\tau) \neq \pi^*(s_\tau) \right) \le (t - 1)\epsilon$$ {#eq-union-bound-mistakes}
+
+We decompose the expected cost at step $t$ conditioned on whether the agent has drifted off the expert manifold:
+
+$$\mathbb{E}_{s \sim d_{\pi_\theta}^t} [C(s, \pi_\theta(s))] = P(\neg \mathcal{E}_{<t}) \cdot \mathbb{E}[C \mid \neg \mathcal{E}_{<t}] + P(\mathcal{E}_{<t}) \cdot \mathbb{E}[C \mid \mathcal{E}_{<t}]$$ {#eq-cost-decomposition}
+
+If no error has occurred prior to step $t$ ($\neg \mathcal{E}_{<t}$), the current state $s_t$ remains on the nominal demonstration path ($s_t \sim d_{\pi^*}^t$). On this nominal path, the probability of an error at step $t$ is bounded by $\epsilon$, incurring an expected cost of at most $\epsilon \cdot 1$.
+
+Conversely, if an error occurred at any point prior to step $t$ ($\mathcal{E}_{<t}$), the agent transitioned off-manifold into unmodeled state space. Because standard supervised fine-tuning provides zero optimization signal outside $d_{\pi^*}$, the student policy can take arbitrary invalid actions, incurring the maximum penalty $C(s, a) \le 1$ at every subsequent step. Substituting these bounds into Equation (@eq-cost-decomposition) yields:
+
+$$\mathbb{E}_{s \sim d_{\pi_\theta}^t} [C(s, \pi_\theta(s))] \le (1 - P(\mathcal{E}_{<t})) \epsilon + P(\mathcal{E}_{<t}) \cdot 1 \le \epsilon + (t - 1)\epsilon = t\epsilon$$ {#eq-per-step-bound}
+
+Summing this expected cost across the full $N$-step operational horizon produces:
+
+$$J(\pi_\theta) - J(\pi^*) \le \sum_{t=1}^N t\epsilon = \epsilon \sum_{t=1}^N t = \epsilon \frac{N(N + 1)}{2}$$ {#eq-quadratic-derivation}
+
+Evaluating the leading term in Equation (@eq-quadratic-derivation) demonstrates the fundamental limit of behavior cloning:
+
+$$J(\pi_\theta) - J(\pi^*) = O(\epsilon N^2)$$ {#eq-quadratic-regret-bound}
+
+The cumulative regret of naive supervised imitation scales quadratically with horizon length $N$. Even if an engineering team achieves an exceptional per-step accuracy of $98\%$ ($\epsilon = 0.02$), over a modest 30-step trajectory the quadratic penalty multiplier is $\frac{30 \times 31}{2} = 465$. The expected cumulative error is $465 \times 0.02 = 9.3$ corrupted steps. Because errors in software environments are serially correlated, the conditional probability $P(\text{error}_{t+1} \mid \text{error}_t)$ approaches unity, causing the agent to lock up long before completing the task.
+
+::: {.column-margin}
+**Ross & Bagnell's Reduction**  
+Ross, Gordon, & Bagnell (2011) proved that no deterministic open-loop learner trained solely on expert states can beat the $O(\epsilon N^2)$ regret bound in arbitrary environments. Beating quadratic compounding requires querying the expert on the student's induced distribution.
+:::
+
+Now consider an interactive training regime where the model is trained on states sampled from its *own* execution rollouts, $s \sim d_{\pi_\theta}$. In this regime, the expected error rate is bounded directly with respect to the deployment distribution:
+
+$$\mathbb{E}_{s \sim d_{\pi_\theta}^t} \left[ \mathbb{I}\left( \pi_\theta(s) \neq \pi^*(s) \right) \right] \le \epsilon$$ {#eq-dagger-assumption}
+
+The expected cumulative regret over the horizon collapses to a simple linear sum:
+
+$$J(\pi_\theta) - J(\pi^*) \le \sum_{t=1}^N \mathbb{E}_{s \sim d_{\pi_\theta}^t} [C(s, \pi_\theta(s))] \le \sum_{t=1}^N \epsilon = N\epsilon = O(\epsilon N)$$ {#eq-linear-regret-bound}
+
+By training the policy to recover from the off-manifold states it actually encounters during execution, the error growth is bounded strictly linearly with the horizon $N$, transforming an unstable open-loop predictor into a dependable closed-loop controller.
+
+::: {.callout-note title="Worked Example: Quantifying Trajectory Collapse and DAgger Recovery in a 50-Step Software Migration"}
+Consider an autonomous agent tasked with an end-to-end Python dependency migration and refactoring pipeline across an enterprise repository. The task requires $N = 50$ discrete tool invocations (directory discovery, AST parsing, modifying build targets, updating virtual environments, running test suites, and resolving runtime exceptions).
+
+The agent is driven by a 70-billion parameter model deployed on an 8-way NVIDIA H100 SXM5 node ($80\text{ GB}$ HBM3 per GPU). Each step processes an average input context of $16,384$ tokens and generates an action payload of $256$ tokens. The model achieves an offline validation accuracy of $98\%$ on nominal human demonstrations ($\epsilon = 0.02$).
+
+**Scenario A: Naive Behavior Cloning Policy ($\pi_{\text{SFT}}$)**  
+Assuming independent action success, the probability of completing the 50-step workflow without a single error is:
+$$P(\text{clean completion}) = (1 - \epsilon)^N = (1 - 0.02)^{50} \approx 0.364 \quad (36.4\%)$$
+Using the quadratic compounding regret derivation from Equation (@eq-quadratic-derivation), the expected number of corrupted trajectory steps is:
+$$\mathbb{E}[\text{Corrupted Steps}] \approx \frac{\epsilon N^2}{2} = \frac{0.02 \times 50^2}{2} = 25 \text{ steps}$$
+Under naive SFT, half of the 50-step execution budget is spent operating in unmodeled, corrupted state space. The system burns:
+$$\text{Wasted Tokens} = 25 \text{ steps} \times (16,384 + 256) \text{ tokens} = 416,000 \text{ tokens}$$
+At an inference decode throughput of $40\text{ tokens/sec}$, the agent wastes over $160\text{ accelerator-seconds}$ in an irrecoverable livelock, producing zero trajectory goodput ($G = 0$).
+
+**Scenario B: Closed-Loop Adapted Policy ($\pi_{\text{DAgger}}$)**  
+Under interactive dataset aggregation, the policy is trained on expert recovery actions from off-manifold states. Error growth follows the linear bound from Equation (@eq-linear-regret-bound):
+$$\mathbb{E}[\text{Errors}] \le N\epsilon = 50 \times 0.02 = 1.0 \text{ error}$$
+Because the policy has learned recovery transitions from off-manifold states, when the single error occurs, it emits a corrective tool call (such as analyzing `stderr`, restoring an uncommitted diff, or re-installing a missing wheel) and returns to the nominal manifold in exactly 1 step:
+$$\text{Corrupted Steps} = 1.0 \text{ step}$$
+$$\text{Wasted Tokens} = 1 \times 16,640 = 16,640 \text{ tokens}$$
+Interactive recovery eliminates $399,360$ wasted tokens ($96.0\%$ reduction in compute waste) and restores the task completion probability to over $90\%$.
+:::
+
+### Mitigation via Interactive Dataset Aggregation
+
+Converting the theoretical linear regret bound into a practical systems architecture requires implementing Dataset Aggregation (DAgger). Formulated by Stéphane Ross, Geoffrey Gordon, and J. Andrew Bagnell (2011), DAgger iteratively gathers training data under the empirical state distribution induced by the current student policy, closing the epistemic gap between training and deployment.
+
+![The trajectory manifold divergence under autoregressive exposure bias and its resolution via Dataset Aggregation (DAgger). Under standard teacher forcing, parameter updates optimize exclusively along the nominal expert trajectory (green manifold). In live deployment, an unhandled fault or out-of-distribution action causes autoregressive drift (red path) into unmodeled state space, where open-loop policies experience compounding failure. DAgger actively samples these off-manifold states, queries an expert oracle for the optimal corrective action, and aggregates the recovery pairs into the training set (blue path). This bounds error growth linearly ($\mathbb{E}[\text{Errors}] \le \epsilon H = 0.60$ for $H=30$), achieving a $15.5\times$ reliability gain over naive behavior cloning.](images/svg/dagger_fault_injection.svg){#fig-vol3-exposure-bias-dagger}
+
+The production DAgger pipeline executes across four discrete phases over iterations $k = 1, \dots, K$:
+
+1. **Sandboxed Policy Rollout**: The current checkpoint of the student policy $\pi_\theta^{(k)}$ is deployed inside isolated execution sandboxes (such as microVMs or hardened containers). The agent receives a set of target tasks and generates multi-turn trajectories autoregressively, selecting actions according to its own internal distribution:
+   $$a_t \sim \pi_\theta^{(k)}(\cdot \mid s_t)$$ {#eq-student-rollout}
+
+2. **Off-Manifold State Trapping**: As the student executes in the environment, the runtime supervisor intercepts the trajectory. When the student makes an erroneous, invalid, or suboptimal action that shifts the environment into an off-nominal state $s_t^{\text{pert}}$, the runtime halts execution and captures the full context state tuple $(s_t^{\text{pert}}, o_t)$.
+
+3. **Oracle Remediation**: At the perturbed state $s_t^{\text{pert}}$, the pipeline queries an oracle policy $\pi^*$—typically a frontier model or a deterministic verification oracle—to provide the optimal corrective action:
+   $$a_t^* = \pi^*(s_t^{\text{pert}})$$ {#eq-oracle-correction}
+   The oracle emits the exact compensating action required to steer the environment back toward the goal, such as diagnosing the error message, resetting corrupted environment variables, or reverting a broken patch.
+
+4. **Dataset Aggregation and Model Retraining**: The newly gathered state-action pairs are aggregated directly into the training corpus:
+   $$\mathcal{D}_{k+1} = \mathcal{D}_k \cup \left\{ \left( s_t^{\text{pert}}, \pi^*(s_t^{\text{pert}}) \right) \right\}$$ {#eq-dataset-aggregation}
+   The student policy is then retrained on $\mathcal{D}_{k+1}$ using action-targeted loss masking. Over iterations, the probability distribution of training states converges to the policy's empirical deployment distribution:
+   $$\lim_{k \to \infty} P_{\text{train}}(s) = d_{\pi_\theta}(s)$$ {#eq-distribution-convergence}
+
+As illustrated in @fig-vol3-exposure-bias-dagger, DAgger fundamentally changes the geometry of the learned policy manifold. Instead of an isolated narrow ribbon through state space where any minor deviation leads to catastrophic drift (the red trajectory), the training set forms an attraction basin (the blue recovery trajectories). Whenever the live agent encounters an unfamiliar observation, it attends to the corrective patterns learned during aggregation and emits a remediation step that brings the trajectory back to the nominal path ($s_H$).
+
+Despite its mathematical elegance, implementing pure online DAgger in production ML systems introduces severe systems friction:
+
+- **Sandbox Provisioning Latency**: Generating millions of interactive rollout tokens inside microVMs is constrained by container boot times, network isolation overhead, and physical filesystem I/O. Unlike pre-training, which saturates matrix units at petabyte scale, environment rollouts are heavily I/O-bound.
+- **Oracle Financial and Latency Budgets**: Querying a frontier model for every step along thousands of off-manifold trajectories incurs extreme API costs and introduces high end-to-end collection latency.
+- **Non-Stationary Policy Drift**: Retraining the model on $\mathcal{D}_{k+1}$ shifts the policy's weights, which in turn shifts the induced state distribution $d_{\pi_\theta^{(k+1)}}$, potentially revealing new, unexpected failure modes in iteration $k+1$.
+
+To manage this operational complexity, production teams often employ a decaying mixture policy during rollouts:
+
+$$\pi_{\text{exec}} = \beta_k \pi^* + (1 - \beta_k) \pi_\theta^{(k)}$$ {#eq-mixture-policy}
+
+where $\beta_k \in [0, 1]$ controls the probability of executing an expert action versus a student action at each step. By initializing $\beta_1 = 1$ and decaying $\beta_k \to 0$ across training rounds, the system smoothly transitions from nominal demonstrations to autonomous self-healing rollouts.
+
+### Controlled Fault Injection during Rollouts
+
+When continuous online rollouts against live oracles are computationally or economically intractable, engineering teams approximate closed-loop recovery through *controlled fault injection* during offline synthetic trajectory generation.
+
+Instead of generating trajectories where every environment operation succeeds, the data synthesis harness programmatically injects synthetic operating system, filesystem, and network faults into intermediate observation steps. Because the synthesis pipeline controls the environment sandbox, it can force the expert model to demonstrate recovery from real-world failures without requiring live human intervention.
+
+| Fault Class | Injected Anomaly | Expected Model Remediation Pattern |
+| :--- | :--- | :--- |
+| **POSIX Execution Failures** | Exit code 127 (`command not found`), exit code 126 (`permission denied`), exit code 1 (`general error`). | Inspects `PATH`, invokes package manager to install binary, or modifies file mode via `chmod`. |
+| **Filesystem & State Collisions** | `ENOENT` (file missing), `ENOSPC` (disk full), Git merge conflicts (`<<<<<<< HEAD`). | Traverses directories with `ls`/`find`, cleans temporary files, or edits conflict markers and stages resolution. |
+| **Network & RPC Faults** | HTTP 429 (`Too Many Requests`), HTTP 504 (`Gateway Timeout`), dropped socket connections. | Parses retry headers, applies truncated exponential backoff, or routes around degraded endpoints. |
+| **Schema & Payload Truncation** | JSON parse errors, incomplete multi-line strings, truncated terminal outputs. | Re-emits valid JSON delimiters, checks string termination, or paginates stdout buffers. |
+
+: Structured taxonomy of programmatic fault injection for off-nominal agent adaptation. {#tbl-fault-injection-taxonomy}
+
+When a programmatic fault is injected, the environment emits an authentic error payload to the model. The trajectory generator then prompts the expert model to emit the complete diagnostic and corrective sequence:
+
+1. **Diagnostic Phase**: The agent emits a rationale analyzing the error payload (for example, reading a Python `ModuleNotFoundError` and identifying that `requests` is absent from the local virtual environment).
+2. **Compensating Action**: The agent issues a targeted repair command (for example, executing `pip install requests` or inspecting `requirements.txt`).
+3. **Verification and Resumption**: The agent re-runs the initial command, observes the successful execution, and continues along the primary task trajectory.
+
+When this synthesized trajectory is serialized into the training corpus, action-targeted loss masking (as established in Section 13.2) is applied strictly to the model's diagnostic rationales and corrective commands. The injected error observation itself is masked to zero loss ($m_t = 0$), acting purely as conditioning context.
+
+By systematically exposing the model to thousands of structured fault-and-recovery sequences, the policy builds robust internal representations across off-nominal states. Rather than treating an error returncode as an unmodeled catastrophe, the adapted network processes the diagnostic tokens as a standard conditioning prompt that activates dedicated self-healing routines.
+
+When training datasets are expanded to include multi-turn recovery sequences, fault-injection traces, and full tool schema descriptions, sequence lengths rapidly expand from a few thousand tokens to 32,768 or 65,536 tokens. Under standard full-parameter backpropagation with AdamW, storing the model weights, gradients, optimizer momentum buffers, and intermediate attention activations for an 8-billion or 70-billion parameter model quickly exceeds the physical high-bandwidth memory (HBM) capacity of even an 8-way H100 accelerator node. When training large models on long-context multi-turn trajectories, how do we fit backpropagation into physical accelerator memory?

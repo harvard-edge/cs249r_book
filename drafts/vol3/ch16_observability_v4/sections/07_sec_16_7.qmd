@@ -1,0 +1,226 @@
+## Staged Canary Deployments {#sec-vol3-observability-releases}
+
+A cloud infrastructure engineering team updates the runtime supervisor of an autonomous site-reliability agent, replacing a heuristic prompt-injection filter and repointing the underlying model client to an optimized inference endpoint. In a conventional compiled service, passing a deterministic integration suite guarantees invariant preservation across memory allocation routines, network protocol parsers, and remote procedure call (RPC) schemas. In an agentic architecture, however, the candidate runtime passes all offline benchmark suites with an apparent $pass@1$ improvement of $3.2\%$, yet catastrophic degradation emerges the moment the system encounters live production inputs: subtle variations in user intent phrasing trigger pathological tool-retry loops, transient cloud API rate limits induce unhandled exception trajectories, and autonomous operations exhaust context windows without completing tasks. The system emits HTTP 200 success codes and generates polite, conversational progress updates while silently stalling database migrations and exhausting token budgets.
+
+**Deploying updated foundation models, tool schemas, or supervisory runtimes into production requires a multi-stage empirical release pipeline that treats every software or prompt modification as an unverified, non-deterministic hypothesis.** Because offline benchmarks cannot capture the unbounded entropy of live production inputs, systems engineers must construct automated deployment gates that progressively elevate execution privileges through offline gym verification, zero-authority shadow execution, and small-fraction live canary routing guarded by statistical circuit breakers.
+
+### The Multi-Stage Release Topology: Offline Gyms to Shadow Escrows
+
+The physical architecture of an agent release pipeline must bridge the epistemic gap between synthetic evaluation and production execution. Unlike stateless microservices where functional regressions manifest as immediate HTTP 5xx errors or panics, agent regressions often manifest as semantic drift: subtle alterations in reasoning trajectories, excessive tool parameter verbosity, or unexpected vulnerability to edge-case environment responses. To prevent defective runtimes from corrupting production state, the release pipeline implements a three-stage progressive gating topology.
+
+::: {.column-margin}
+![The Staged Canary Deployment Pipeline](images/svg/vol3-canary-deployment-pipeline.svg){#fig-vol3-canary-deployment-pipeline}
+*The three-stage verification pipeline for agent runtimes: candidates must pass offline gym fixtures under Wilson score bounds, execute in zero-authority shadow escrows against mirrored live traffic, and survive statistical circuit breakers during canary routing before promotion.*
+:::
+
+Stage 1 enforces an offline benchmark gate within hermetic evaluation gyms. Candidate runtime configurations—encompassing updated foundation model checkpoints $M_{\text{cand}}$, modified system prompts $c_0$, or restructured tool definitions $\mathcal{A}$—must execute against a standardized, held-out task distribution $\mathcal{D}_{\text{task}}$. Performance is measured using Wilson score confidence intervals over the empirical pass rate $\hat{p}$, as established in Section 16.3. The release automation evaluates a non-inferiority hypothesis against the current production baseline policy $\pi_{\text{base}}$:
+
+$$H_0: p_{\text{cand}} < p_{\text{base}} - \delta_{\text{tol}} \quad \text{versus} \quad H_1: p_{\text{cand}} \ge p_{\text{base}} - \delta_{\text{tol}}$$
+
+where $\delta_{\text{tol}}$ represents the maximum permissible performance margin, typically set to $0$ for safety-critical systems or a small budget (such as $0.01$) when trading marginal accuracy for substantial latency or cost reductions. A candidate runtime that fails to achieve statistical non-inferiority at significance level $\alpha = 0.05$ is rejected prior to receiving production traffic.
+
+Clearing the offline benchmark gate proves only that the candidate satisfies known, historical invariants; it does not establish safety across the non-stationary distribution of real-world user requests. Stage 2 therefore routes live traffic into shadow execution, commonly referred to as *dark traffic*. In this stage, the production traffic router duplicates incoming user prompts $c_0$. The primary stream routes to the production baseline $\pi_{\text{base}}$, which maintains active execution authority to fulfill user requests. The secondary stream forks asynchronously to the candidate policy $\pi_{\text{cand}}$.
+
+```
+                            ┌──────────────────────────────────────────────┐
+                            │           Live Production Traffic            │
+                            └──────────────────────┬───────────────────────┘
+                                                   │
+                                     [ Traffic Forking Proxy ]
+                                                   │
+                         ┌─────────────────────────┴────────────────────────┐
+                         │ (Primary Stream)                                 │ (Dark Mirrored Stream)
+                         ▼                                                  ▼
+            ┌────────────────────────┐                         ┌────────────────────────┐
+            │   Baseline Runtime     │                         │   Candidate Runtime    │
+            │    $\pi_{\text{base}}$ │                         │    $\pi_{\text{cand}}$ │
+            └────────────┬───────────┘                         └────────────┬───────────┘
+                         │                                                  │
+                         ▼                                                  ▼
+            ┌────────────────────────┐                         ┌────────────────────────┐
+            │ Live Environment State │                         │ Read-Only Mock Escrow  │
+            │  (Mutating Authority)  │                         │       ($A = 0$)        │
+            └────────────┬───────────┘                         └────────────┬───────────┘
+                         │                                                  │
+                         ▼                                                  ▼
+                 Live User Output                               Telemetry & Drift Engine
+```
+
+The central architectural challenge of shadow execution in agentic systems is enforcing the principle of Zero Ambient Authority ($A=0$) across external side effects. While a stateless web server can execute shadow requests by discarding downstream HTTP responses, an agentic system dynamically interacts with external environments through tools. If $\pi_{\text{cand}}$ invokes a tool executing an HTTP `DELETE`, a database `DROP TABLE`, or an external payment authorization, the shadow execution would corrupt the shared production environment. 
+
+To resolve this dilemma, the host agent runtime places $\pi_{\text{cand}}$ within a *read-only mock escrow*. Tool invocations are partitioned into pure inspections and mutating operations. Read-only inspection tools (such as file reads, database queries, and repository searches) are routed to production replicas or copy-on-write filesystem snapshots. Mutating operations are intercepted by the runtime sandbox; instead of dispatching the mutation to production infrastructure, the supervisor either stubs the call with a synthetic success response or executes the mutation within an ephemeral, isolated container that is immediately discarded upon trajectory termination.
+
+Telemetry systems during Stage 2 do not evaluate final environmental state, as mutations are sandboxed. Instead, they record structural trajectory divergence between $\tau_{\text{base}}$ and $\tau_{\text{cand}}$. Telemetry agents capture token utilization, step latency, tool selection distributions, and semantic divergence in emitted arguments. If $\pi_{\text{cand}}$ exhibits pathological token consumption, excessive context-window inflation, or anomalous error rates from sandboxed tool calls, the deployment pipeline aborts before the candidate is ever granted authority over production state.
+
+### Canary Traffic Shifting and Automated Circuit Breakers
+
+When a candidate runtime clears shadow execution, it enters Stage 3: live canary deployment. In this phase, the traffic routing layer dynamically diverts a small fraction of live production traffic—typically $\rho \in [0.01, 0.05]$, or $1\%$ to $5\%$—directly to $\pi_{\text{cand}}$, granting it full mutating authority over live environment states. Canary deployments balance two competing physical constraints: minimizing the blast radius of undetected failure modes while acquiring statistical power rapidly enough to detect performance regressions before an operational outage occurs.
+
+::: {.column-margin}
+**The Blast Radius Invariant**
+In an agentic system, blast radius is not measured merely in failed HTTP requests; it is measured in the irreversible mutations an agent inflicts on persistent storage, external APIs, and user trust before a circuit breaker halts execution.
+:::
+
+In traditional microservices, canary gating relies on fixed-duration observation windows (such as monitoring error rates over twelve hours). In stochastic agent fleets, fixed-time windows are fundamentally flawed. If traffic volume fluctuates, a fixed-time window may sample too few complex, multi-turn trajectories to achieve statistical significance, or alternatively, subject thousands of users to an active regression long after a failure mode became statistically discernible. 
+
+To overcome this limitation, the telemetry control plane implements continuous sequential testing using Wald's Sequential Probability Ratio Test (SPRT). Rather than fixing sample size $N$ in advance, SPRT updates the log-likelihood ratio $\Lambda_n$ after observing each completed trajectory outcome $x_i \in \{0, 1\}$, where $x_i = 1$ denotes a successfully verified trajectory and $x_i = 0$ denotes a failed trajectory:
+
+$$\Lambda_n = \sum_{i=1}^n \ln \frac{P(x_i \mid p_1)}{P(x_i \mid p_0)} = d_n \ln \left(\frac{p_1}{p_0}\right) + (n - d_n) \ln \left(\frac{1 - p_1}{1 - p_0}\right)$$
+
+where $d_n = \sum_{i=1}^n x_i$ is the cumulative number of successful trajectories, $p_0$ is the acceptable baseline success probability, and $p_1 = p_0 - \Delta$ represents the unacceptably degraded success probability threshold. The test compares $\Lambda_n$ against two absorbing boundaries defined by false positive tolerance $\alpha$ and false negative tolerance $\beta$:
+
+$$A = \ln \left( \frac{1 - \beta}{\alpha} \right), \qquad B = \ln \left( \frac{\beta}{1 - \alpha} \right)$$
+
+If $\Lambda_n \ge A$, the control plane accepts the candidate as non-inferior and safely accelerates traffic shifting (for instance, advancing $\rho$ from $0.05$ to $0.25$, and subsequently to $1.0$). If $\Lambda_n \le B$, the candidate is conclusively identified as degraded; the control plane trips an automated circuit breaker that immediately sheds all canary traffic, restores $100\%$ routing to $\pi_{\text{base}}$, and triggers an alert for engineering post-mortem.
+
+```
+       Cumulative Log-Likelihood Ratio ($\Lambda_n$)
+              ▲
+              │
+          A ──┼───────────────────────── Boundary A: Promote Candidate ($\Lambda_n \ge A$)
+              │                       /
+              │                      /
+              │   Continue Sampling /
+              │      (Indeterminate)
+              │                    /
+              │                   /   
+          B ──┼──────────────────/────── Boundary B: Trip Circuit Breaker ($\Lambda_n \le B$)
+              │                 /
+              │                /
+              └────────────────┴────────────────► Trajectory Count ($n$)
+```
+
+The automated circuit breaker must operate with minimal Mean Time to Detect (MTTD) and Mean Time to Recovery (MTTR), adhering to the tail-tolerance principles articulated by Dean and Ghemawat (2013). Beyond sequential hypothesis tests on aggregate task success, the runtime enforces invariant-based circuit breakers that trip instantly upon observing hard safety violations:
+
+1. *Cost-Per-Trajectory Spikes:* If the rolling median of token consumption per trajectory exceeds the baseline threshold by more than $K_{\text{cost}} = 1.5\times$ over a window of $W = 50$ runs, the breaker trips to prevent financial depletion.
+2. *Context-Exhaustion Cascades:* If the proportion of trajectories terminated due to context-window saturation ($K \ge K_{\max}$) exceeds $1\%$, execution halts immediately.
+3. *Repetitive Tool Calling Loops:* If any individual canary worker issues identical tool invocations with identical parameters more than three times consecutively without state mutation, the host runtime terminates the worker and flags a regression in policy grounding.
+
+When a circuit breaker trips, automated rollback latency must be deterministic. Because the foundation model inference endpoint is decoupled from the host supervisor, rollback does not require redeploying container images or restarting server daemons. The traffic proxy alters its upstream weight vector in memory, immediately draining canary concurrency and ensuring that subsequent user turns execute exclusively against the golden baseline.
+
+### Core Agent SRE Metrics: Goodput, Drift, and Intervention Rates
+
+Operating stochastic agent fleets requires a fundamental transformation of Site Reliability Engineering (SRE) metrics. Classical web platforms quantify health through the Four Golden Signals: latency, traffic, errors, and saturation (Beyer et al., 2016). For an agentic system, these signals are necessary but entirely insufficient. An agent runtime can run with $0\%$ network-level packet drops, return HTTP 200 OK on every invocation, maintain low CPU saturation on host machines, and yet execute an operational failure by consuming 120,000 tokens across 40 ungrounded tool calls before abandoning the user's objective.
+
+To establish meaningful operational visibility, systems engineers monitor an expanded SRE telemetry triad specifically designed for autonomous agent dynamics: Goodput, Behavioral Drift, and Human Intervention Rates.
+
+| Engineering Dimension | Traditional Microservice Metric | Agentic System SRE Metric | Systems Failure Indication |
+| :--- | :--- | :--- | :--- |
+| **System Efficacy** | Availability (`2xx` / Total Requests) | **Goodput ($G$)** | Trajectory completes with 200 OK but fails empirical post-condition verifier |
+| **Resource Efficiency** | Request Latency (p50/p99 ms) | **Trajectory Cost-to-Resolution** | Token exhaustion via recursive prompt-expansion loops |
+| **Operational Stability** | Error Budget (Uncaught Exceptions) | **Human Intervention Rate ($I_{\text{rate}}$)** | Operator must manually steer or abort runaway tool chains |
+| **Behavioral Invariance** | API Contract Schema Violations | **Tool Selection Drift ($D_{\text{JS}}$)** | Model shifts preference toward expensive or deprecated tool endpoints |
+| **Fleet Recovery** | MTTR (Container Restart Time) | **Rollback & Compensation MTTR** | Latency to drain canary traffic and execute compensating sagas |
+
+*Goodput* ($G$) serves as the primary service level indicator (SLI) for an agent fleet. Goodput quantifies the fraction of initiated trajectories that successfully achieve their task objective, validated by deterministic post-condition verifiers, while remaining strictly within bounded resource and latency budgets:
+
+$$G = \frac{1}{N} \sum_{i=1}^N \mathbf{1}\left(\text{Verify}(s_T^{(i)}) = 1 \;\land\; \text{Cost}(\tau_i) \le C_{\max} \;\land\; T_i \le T_{\max}\right)$$
+
+where $\text{Verify}(s_T^{(i)})$ evaluates the environmental state at the terminal step $T$ against mechanical contract checkers (compilers, linters, or database assertions as established in Section 16.1), $\text{Cost}(\tau_i)$ aggregates the monetary token expense and API fees accrued across trajectory $\tau_i$, and $T_i$ is the number of interactive turns. A trajectory that produces valid code but consumes $\$50.00$ in inference costs against a $\$2.00$ service budget represents a goodput failure.
+
+*Behavioral Drift* measures the statistical divergence between the action distributions of the candidate policy $\pi_{\text{cand}}$ and the baseline $\pi_{\text{base}}$ over identical or statistically comparable inputs. Telemetry engines track the discrete probability distribution of tool invocations $P(a_{\text{tool}})$. The divergence is quantified using the Jensen-Shannon divergence ($D_{\text{JS}}$), a symmetric, bounded information-theoretic metric:
+
+$$D_{\text{JS}}(P_{\text{base}} \parallel P_{\text{cand}}) = \frac{1}{2} D_{\text{KL}}(P_{\text{base}} \parallel M) + \frac{1}{2} D_{\text{KL}}(P_{\text{cand}} \parallel M)$$
+
+where $M = \frac{1}{2}(P_{\text{base}} + P_{\text{cand}})$ is the mixture distribution and $D_{\text{KL}}$ is the Kullback-Leibler divergence. If $D_{\text{JS}}$ exceeds an empirically calibrated threshold (such as $0.15$), the telemetry engine alerts operators to significant behavioral drift. For example, a candidate model might abruptly cease calling a fine-grained database search tool in favor of executing raw, broad SQL queries, altering downstream database load patterns without necessarily changing the top-level task success rate.
+
+::: {.column-margin}
+**Jensen-Shannon Bounds**
+Because $0 \le D_{\text{JS}} \le \ln(2)$ when using natural logarithms, $D_{\text{JS}}$ provides a normalized, numerically stable scale for monitoring tool-use distribution drift across model updates.
+:::
+
+*Human Intervention Rate* ($I_{\text{rate}}$) captures the operational burden imposed by the agent on human supervisors. In production deployments featuring human-in-the-loop oversight or approval escrows for high-risk actions, operators observe, steer, or abort agent plans:
+
+$$I_{\text{rate}} = \frac{N_{\text{interventions}}}{N_{\text{trajectories}}} = \frac{N_{\text{pause}} + N_{\text{steer}} + N_{\text{abort}}}{N}$$
+
+A rise in $I_{\text{rate}}$ serves as a sensitive leading indicator of alignment degradation. If an updated foundation model generates ambiguous tool parameters or proposes high-risk shell commands that trigger approval escrows, human operators are forced to intervene repeatedly. Even if the final goodput remains constant due to human corrections, the operational cost and cognitive friction increase, indicating that the candidate runtime is unfit for autonomous deployment.
+
+Finally, *Mean Time to Recovery* (MTTR) in agentic systems accounts for both traffic draining and state restoration. If a canary failure corrupts external systems before the circuit breaker trips, recovery requires executing Saga compensating transactions (Chapter 11) to reverse partial modifications. Monitoring the full MTTR ensures that automated release systems account for both the speed of the software rollback and the latency of physical state reconciliation.
+
+::: {.callout-note title="Worked Example: Sizing Canary Traffic and Circuit Breaker MTTR"}
+### Problem Formulation
+An enterprise software engineering agent fleet processes incoming bug repair tasks at an arrival rate of $\lambda = 60$ trajectories per hour. The verified baseline production runtime $\pi_{\text{base}}$ maintains a goodput of $G_{\text{base}} = 0.90$. 
+
+An engineering team deploys a candidate runtime $\pi_{\text{cand}}$ designed to reduce inference latency. Unbeknownst to the team, $\pi_{\text{cand}}$ introduces a regression on complex multi-file patches, reducing true goodput to $G_{\text{cand}} = 0.75$. The release engineering pipeline routes $\rho = 0.05$ ($5\%$) of production traffic to the canary. The automated circuit breaker monitors goodput over completed canary trajectories using a sequential hypothesis test configured with type I error $\alpha = 0.01$, power $1 - \beta = 0.95$, and indifference points $p_0 = 0.90$ and $p_1 = 0.75$.
+
+1. Compute the average number of canary trajectories $E[N]$ required for the circuit breaker to detect the regression and trip.
+2. Determine the expected elapsed physical time (in hours) before the circuit breaker trips.
+3. Calculate the blast radius: how many customer trajectories fail under the canary deployment versus an unmonitored full deployment ($\rho = 1.0$) over the same detection duration.
+
+### Quantitative Solution
+
+**Step 1: Expected Sample Size for Sequential Testing**
+Under Wald's SPRT, when the true underlying parameter is $p = p_1 = 0.75$, the expected sample size to cross the lower decision boundary $B$ is given by:
+
+$$E_1[N] \approx \frac{(1 - \beta) \ln\left(\frac{\beta}{1 - \alpha}\right) + \beta \ln\left(\frac{1 - \beta}{\alpha}\right)}{E_1[z]}$$
+
+where $z_i = \ln \frac{P(x_i \mid p_1)}{P(x_i \mid p_0)}$ is the log-likelihood ratio for a single observation. The expectation $E_1[z]$ under the degraded hypothesis $p = p_1$ is:
+
+$$E_1[z] = p_1 \ln\left(\frac{p_1}{p_0}\right) + (1 - p_1) \ln\left(\frac{1 - p_1}{1 - p_0}\right)$$
+
+Substituting the operational parameters $p_0 = 0.90$ and $p_1 = 0.75$:
+
+$$\frac{p_1}{p_0} = \frac{0.75}{0.90} \approx 0.8333 \implies \ln(0.8333) \approx -0.1823$$
+$$\frac{1 - p_1}{1 - p_0} = \frac{0.25}{0.10} = 2.5000 \implies \ln(2.5000) \approx 0.9163$$
+$$E_1[z] = 0.75 \times (-0.1823) + 0.25 \times (0.9163) = -0.1367 + 0.2291 = 0.0924$$
+
+Now compute the numerator using error tolerances $\alpha = 0.01$ and $\beta = 0.05$ (for power $1 - \beta = 0.95$):
+
+$$\text{Boundary } B = \ln\left(\frac{0.05}{1 - 0.01}\right) = \ln\left(\frac{0.05}{0.99}\right) \approx \ln(0.0505) \approx -2.9857$$
+$$\text{Boundary } A = \ln\left(\frac{1 - 0.05}{0.01}\right) = \ln(95.0) \approx 4.5539$$
+
+Under hypothesis $H_1$, the probability of hitting boundary $B$ is approximately $1 - \beta = 0.95$, while hitting boundary $A$ is $\beta = 0.05$. The expected numerator is:
+
+$$\text{Numerator} = 0.95 \times (-2.9857) + 0.05 \times (4.5539) = -2.8364 + 0.2277 = -2.6087$$
+
+The expected number of samples required to trip the circuit breaker is:
+
+$$E_1[N] = \frac{-2.6087}{-E_1[z]} = \frac{2.6087}{0.0924} \approx 28.23 \text{ trajectories}$$
+
+Rounding conservatively to the nearest integer yields $N \approx 29$ canary trajectories.
+
+**Step 2: Elapsed Physical Time to Detection**
+The canary receives a traffic fraction $\rho = 0.05$ of the total arrival rate $\lambda = 60 \text{ tasks/hour}$:
+
+$$\lambda_{\text{canary}} = \rho \times \lambda = 0.05 \times 60 = 3.0 \text{ trajectories/hour}$$
+
+The expected physical time until the circuit breaker trips and initiates rollback is:
+
+$$T_{\text{detect}} = \frac{E_1[N]}{\lambda_{\text{canary}}} = \frac{28.23}{3.0} \approx 9.41 \text{ hours}$$
+
+**Step 3: Blast Radius Comparison**
+We quantify blast radius as the expected number of failed customer tasks resulting from the regression during the $9.41$-hour detection window.
+
+*Case A: Managed Canary ($\rho = 0.05$)*
+Total canary runs = $28.23$.
+Expected canary failures at $G_{\text{cand}} = 0.75$:
+
+$$\text{Failures}_{\text{canary}} = 28.23 \times (1 - 0.75) = 28.23 \times 0.25 \approx 7.06 \text{ failures}$$
+
+The remaining $95\%$ of traffic runs on $\pi_{\text{base}}$ ($G_{\text{base}} = 0.90$):
+
+$$\text{Total baseline runs} = 9.41 \text{ hours} \times 57 \text{ tasks/hour} \approx 536.37 \text{ tasks}$$
+$$\text{Failures}_{\text{baseline}} = 536.37 \times (1 - 0.90) \approx 53.64 \text{ failures}$$
+$$\text{Total System Failures} = 7.06 + 53.64 \approx 60.7 \text{ failures}$$
+
+*Case B: Unmonitored Full Deployment ($\rho = 1.0$)*
+If $\pi_{\text{cand}}$ had been rolled out to $100\%$ of traffic, all incoming tasks over the $9.41$-hour window would experience the degraded success rate:
+
+$$\text{Total runs} = 9.41 \text{ hours} \times 60 \text{ tasks/hour} = 564.6 \text{ tasks}$$
+$$\text{Failures}_{\text{full}} = 564.6 \times (1 - 0.75) = 564.6 \times 0.25 \approx 141.15 \text{ failures}$$
+
+*Comparison:*
+Routing traffic through the managed canary boundary prevents:
+
+$$\Delta_{\text{failures}} = 141.15 - 60.70 = 80.45 \text{ task failures}$$
+
+The staged canary deployment reduces excess customer-impacting failures by:
+
+$$\frac{141.15 - 60.70}{141.15 - 56.46} = \frac{80.45}{84.69} \approx 95.0\%$$
+
+isolating the blast radius to precisely the statistical threshold required to verify the operational defect.
+:::
+
+***
+
+When offline benchmark suites, dark traffic shadow execution, and automated canary circuit breakers are operating in concert, an engineering organization establishes empirical control over the deployment of stochastic models. Yet, treating these release gates as isolated, ad-hoc scripts leaves an operational system vulnerable to telemetry fragmentation, uncoordinated data retention policies, and blind spots during real-time incident resolution. To achieve true production reliability, systems engineers must assemble these disparate capabilities—hermetic evaluation gyms, OpenTelemetry trajectory tracing, tail-based sampling budgets, forensic post-mortems, and staged canary gates—into a unified, continuously operating control plane. The architectural realization of that complete telemetry platform is the empirical observability harness.

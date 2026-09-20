@@ -1,0 +1,178 @@
+## Coordination Topologies {#sec-vol3-multiagent-topologies}
+
+When an uncoordinated multi-agent system is initialized as an arbitrary, fully connected peer-to-peer network without formal communication topologies, the runtime degenerates into an exponential message storm. In an ensemble of $N$ unprivileged agents exchanging raw natural language over unconstrained broadcast channels, the count of potential bidirectional communication paths scales as $\binom{N}{2} = \frac{N(N-1)}{2} = \mathcal{O}(N^2)$. At every interaction step, each agent broadcasts its intermediate deliberation to all peers, forcing the input prompt size, attention computation, and key-value (KV) cache memory footprint across the fleet to expand quadratically. In an empirical testbed executing a distributed code refactoring task across eight agents, an unconstrained peer-to-peer topology generated over 240 inter-agent messages in less than four minutes. The fleet consumed 1.8 million tokens in redundant prompt prefill passes, triggered repeated race conditions on shared files, and ultimately stalled due to context window exhaustion before committing a single verified syntax tree. 
+
+**Multi-agent coordination is fundamentally an exercise in distributed graph compilation: the runtime must replace unconstrained conversational chatter with formal task dependency directed acyclic graphs (DAGs), choosing between Hierarchical Supervisor-Worker, Sequential Linear Pipeline, and Decentralized Blackboard or Actor topologies based strictly on the underlying data-flow dependencies of the computational workload.**
+
+::: {.column-margin}
+**Topological Constraint:**
+An unconstrained conversational mesh exhibits $\mathcal{O}(N^2)$ communication channels and $\mathcal{O}(N^2)$ prompt prefill growth. Imposing a formal DAG topology reduces active communication edges to $\mathcal{O}(N)$ or $\mathcal{O}(N \log N)$, bounding context consumption and eliminating cyclic conversational deadlocks.
+:::
+
+In classical operating systems, concurrency is managed by establishing clean abstractions between processes, inter-process communication (IPC) channels, and synchronization primitives. In an agentic machine learning runtime, the computational unit is not an operating system thread executing deterministic x86 instructions, but an unprivileged foundation model instance operating autoregressively under Zero Ambient Authority ($A=0$). Because these inference engines exhibit non-deterministic generation, high per-token latency, and memory-bandwidth-bound decode loops, the coordination topology dictates whether concurrency yields genuine parallel acceleration or merely multiplies communication and reconciliation overhead.
+
+![Coordination Topologies for Multi-Agent Systems. (a) Hierarchical Supervisor-Worker: centralized task decomposition, dispatch, and reconciliation. (b) Sequential Linear Pipeline: streaming uni-directional artifact handoffs. (c) Shared Blackboard: concurrent workers operating against an immutable artifact store. (d) Decentralized Actor Mesh: point-to-point typed message queues over isolated mailboxes.](images/svg/vol3/ch15/coordination_topologies.svg){#fig-vol3-multi-agent-topologies}
+
+### Taxonomy of Coordination Topologies
+
+The architectural design of a multi-agent system begins by selecting an interconnection pattern that reflects the data-flow dependencies of the target application. As illustrated in @fig-vol3-multi-agent-topologies, distributed agent runtimes organize execution across three canonical archetypes: Hierarchical Supervisor-Worker, Sequential Linear Pipeline, and Decentralized Blackboard or Actor models.
+
+The *Hierarchical Supervisor-Worker* topology organizes agents into an explicit tree structure. A designated root supervisor ingests the top-level specification, decomposes the objective into independent subtasks, dispatches explicit task envelopes to specialized subordinate workers, collects intermediate candidate artifacts, and enforces external verification gates before synthesizing a global result. This topology offers centralized state tracking and a single, well-defined locus of environmental authority: only the supervisor possesses the capability to commit verified state transitions to the external environment. Workers execute as leaf nodes in isolated sandboxes, preventing uncoordinated mutations against shared resources.
+
+However, the hierarchical topology suffers from a severe physical failure mode: the *coordinator context bottleneck*. As the worker fleet size $N$ expands, or as individual workers return extensive execution logs, compiler diagnostics, and diff hunks, the supervisor's working context window $S_{\max}$ rapidly saturates. The supervisor is forced to ingest the concatenated outputs of all subordinate agents:
+
+$$S_{\text{supervisor}} = S_{\text{spec}} + \sum_{i=1}^N S_{\text{return}}(i)$$
+
+When $S_{\text{supervisor}}$ approaches the hardware capacity of the GPU serving engine, the quadratic memory and compute scaling of attention prefill severely inflates supervisory latency. Even more destructively, the supervisor experiences attention dilution, misinterpreting or overlooking subtle errors buried within the voluminous returns of subordinate workers. Furthermore, the supervisor becomes a single point of serialization: if the root agent stalls during an autoregressive decode phase or generates an unparseable dispatch envelope, all downstream workers starve for work.
+
+The *Sequential Linear Pipeline* topology structures execution as a unidirectional assembly line ($A_1 \to A_2 \to \dots \to A_k$), where the verified output artifact of Agent $k$ serves directly as the input context for Agent $k+1$. This architecture is ideal for phased engineering transformations that exhibit strict temporal serialization, such as translating architectural requirements into code, running static analysis and linters, generating regression test suites, executing security audits, and compiling deployment manifests.
+
+The principal systems advantage of the linear pipeline is minimal memory footprint and high operational throughput for streaming batch tasks. Because each agent in the pipeline is dedicated to a single specialized phase, its system prompt and tool definitions remain compact. Upstream intermediate reasoning traces can be completely discarded; Agent $k+1$ ingests only the clean, verified artifact produced by Agent $k$, entirely avoiding the context saturation that plagues hierarchical supervisors. Furthermore, because each pipeline stage uses an identical, static system prompt across successive batch items, the serving engine achieves near-perfect KV cache prefix reuse, amortizing prefill computation across workloads.
+
+The vulnerability of the sequential pipeline lies in *upstream stage stalling and error propagation*. If an early stage fails to emit an artifact that satisfies downstream compilation or linting checks, the entire pipeline grinds to a halt. Worse, if an upstream stage generates a subtle semantic flaw that evades static checks, downstream agents ingest that flaw as an authoritative premise. In a pipeline lacking bidirectional feedback, downstream stages cannot request upstream revisions without introducing backwards control edges, transforming the simple linear pipeline into an unrolled cyclic graph with complex convergence dynamics.
+
+The *Decentralized Blackboard and Actor* models eliminate centralized coordinators entirely, drawing directly upon foundational distributed systems literature. In the Actor model, formalized by Carl Hewitt, Peter Bishop, and Richard Steiger (1973), autonomous computational entities (actors) maintain private local state, communicate exclusively through asynchronous, typed message-passing queues (mailboxes), and dynamically spawn new actors in response to messages. In the Blackboard architecture, concurrent worker agents interact indirectly by reading from and writing to a globally visible, append-only artifact repository. Specialized agents monitor the blackboard, claim subtasks when prerequisite artifacts appear, perform transformations, and post verified results back to the blackboard.
+
+These decentralized topologies provide high dynamic scalability and fault resilience. There is no central supervisor whose context window can saturate, and the failure of an individual worker does not halt the fleet; other workers continue processing available subtasks from the blackboard or their private mailboxes. 
+
+The physical dilemma of decentralized topologies is *lock contention, split-brain divergence, and non-deterministic event ordering*. Because agents execute concurrently without a central arbiter, two workers may simultaneously claim the same subtask or attempt conflicting mutations on overlapping codebase files. In the absence of physical synchronized clocks, resolving causal dependencies across asynchronous agent messages requires implementing Lamport logical timestamps or vector clocks (Leslie Lamport, 1978) within the runtime message broker. Without strict distributed locking or immutable content-addressed artifact storage, decentralized agent fleets rapidly descend into split-brain states where conflicting architectural decisions are committed across parallel branches, resulting in massive reconciliation overhead at integration time.
+
+| Coordination Topology | Critical-Path Latency | Context & KV Cache Footprint | Failure Isolation & Recovery | Concurrency & Conflict Risk | Optimal Workload Profile |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Hierarchical Supervisor-Worker** | Low to moderate; bounded by supervisor serial phases and slowest worker. | High at root; supervisor context window saturates as $\mathcal{O}(N)$ worker returns accumulate. | Moderate; worker failures are isolated, but supervisor failure stalls entire tree. | Low; centralized coordinator serializes and verifies all mutations before commit. | Exploratory task decomposition, multi-hypothesis search, isolated bug fixing. |
+| **Sequential Linear Pipeline** | High; strictly serial makespan ($T_{\text{crit}} = \sum T_k$); zero task parallelism. | Minimal; each stage ingests only clean artifacts; high KV cache prefix sharing. | Fragile; failure at stage $k$ stalls pipeline or propagates invalid context downstream. | Zero; execution is temporally ordered; no concurrent write conflicts exist. | Multi-stage artifact refinement, CI/CD code vetting, documentation synthesis. |
+| **Shared Blackboard** | Low; opportunistic parallelism as dependencies become satisfied on blackboard. | Distributed; shared memory or artifact store; workers maintain compact private context. | Robust; worker crash leaves blackboard intact; tasks can be reclaimed by peers. | High; concurrent workers risk write collisions and race conditions on shared artifacts. | Heterogeneous analysis, continuous repository fuzzing, knowledge extraction. |
+| **Decentralized Actor Mesh** | Variable; governed by message passing latency and graph synchronization points. | Bounded per actor; mailboxes buffer typed task envelopes asynchronously. | High; actor failure isolated to private mailbox; supervision trees handle restarts. | Moderate to High; requires causal event ordering (Lamport clocks) and distributed leases. | Open-ended simulation, distributed theorem proving, multi-domain system modeling. |
+: Comparison of Multi-Agent Coordination Topologies. {#tbl-vol3-topologies-comparison}
+
+### Modeling Execution as Task Dependency DAGs
+
+To escape the unpredictability of conversational messaging, the agent runtime must model multi-agent execution as a formal task dependency Directed Acyclic Graph (DAG), denoted $G = (V, E)$. In this formulation, each vertex $v_i \in V$ represents a discrete unit of agentic computation: the execution of a specialized foundation model instance over an explicit input context, bounded by a finite token budget. Each directed edge $(v_i, v_j) \in E$ represents an immutable data or control dependency, establishing that task $v_j$ cannot be scheduled for execution until task $v_i$ completes and emits an externally verified artifact.
+
+::: {.column-margin}
+**Data Dependencies vs. Control Dependencies:**
+A *data dependency* mandates that task $v_j$ requires the physical output bytes of task $v_i$ (e.g., a header file generated by $v_i$ and consumed by $v_j$). A *control dependency* enforces execution ordering without raw artifact transfer (e.g., ensuring a unit test suite runs only after a compiler passes).
+:::
+
+The runtime scheduler tracks the in-degree of all vertices in the graph. A vertex $v_j$ is placed into the runnable task queue if and only if its in-degree satisfies:
+
+$$\text{in-degree}(v_j) = |\{ v_i \in V \mid (v_i, v_j) \in E \}| = 0$$
+
+When a running task $v_i$ successfully finishes execution and its output passes deterministic verification gates (such as compiler certification or AST validation), the runtime persists its output artifacts to a content-addressed storage layer. The scheduler then removes $v_i$ and its incident outgoing edges from the active graph, decrementing the in-degree of all immediate successor vertices. Any successor whose in-degree reaches zero transitions immediately to the runnable state and is dispatched to an available worker core.
+
+The theoretical performance of an agentic dependency DAG is governed by two fundamental graph properties: the work and the critical path. The *total work* $W(G)$ is the cumulative computational time expended across all vertices:
+
+$$W(G) = \sum_{v_i \in V} T(v_i)$$
+
+where $T(v_i)$ represents the wall-clock execution time of vertex $v_i$. For an autoregressive foundation model, $T(v_i)$ is determined by the prefill phase over input tokens $S_{\text{in}}$, the decode phase over generated tokens $K_{\text{out}}$, and the duration of any deterministic tool invocations (such as test suite execution):
+
+$$T(v_i) = \frac{S_{\text{in}}(v_i)}{R_{\text{prefill}}} + \frac{K_{\text{out}}(v_i)}{R_{\text{decode}}} + T_{\text{tool}}(v_i)$$
+
+Here, $R_{\text{prefill}}$ (tokens per second) is bounded by the GPU compute FLOPs during matrix-matrix multiplication (GEMM), while $R_{\text{decode}}$ is strictly memory-bandwidth bound during autoregressive matrix-vector generation (GEMV).
+
+The *critical path* $\Pi_{\text{crit}}$ is the longest directed sequence of dependent vertices from any source node to any sink node in $G$:
+
+$$\Pi_{\text{crit}} = \arg\max_{\Pi \in \text{Paths}(G)} \sum_{v \in \Pi} T(v)$$
+
+The *critical path makespan*, defined as $T_{\text{crit}} = \sum_{v \in \Pi_{\text{crit}}} T(v)$, represents the strict physical lower bound on global execution time. Regardless of whether the runtime provisions four, sixteen, or an infinite number of parallel worker agents, the workload cannot complete in less time than $T_{\text{crit}}$. 
+
+Parallel speedup emerges when the dependency graph contains fan-out structures where a single parent task spawns multiple mutually independent child vertices ($v_1 \to \{v_2, v_3, \dots, v_m\}$). The maximum instantaneous parallelism supported by the graph is defined by its *width* $\mathcal{W}(G)$, representing the maximum size of an independent vertex cut. If the number of provisioned worker agents $P$ is less than the graph width ($P < \mathcal{W}(G)$), the scheduler must prioritize runnable vertices according to their remaining distance to the sink, prioritizing vertices that lie along the critical path to prevent scheduling bubbles.
+
+::: {.callout-note title="Worked Example: Critical-Path Makespan and DAG Scheduling in Multi-Agent Execution"}
+Consider a comprehensive subsystem upgrade comprising seven discrete agentic tasks ($v_1$ through $v_7$), executed on an inference cluster with four worker instances ($P=4$). The serving hardware consists of NVIDIA H100 SXM5 GPUs (80 GB HBM3, 3.35 TB/s memory bandwidth), delivering an empirical single-stream decode throughput of $R_{\text{decode}} = 80\text{ tokens/s}$ and a prefill throughput of $R_{\text{prefill}} = 4{,}000\text{ tokens/s}$.
+
+The tasks exhibit the following dependencies and hardware execution parameters:
+- Task $v_1$ (System Architecture Specification): Root node. $S_{\text{in}} = 2{,}000$ tokens, $K_{\text{out}} = 1{,}600$ tokens, $T_{\text{tool}} = 0\text{ s}$.
+  $$T(v_1) = \frac{2{,}000}{4{,}000} + \frac{1{,}600}{80} + 0 = 0.5 + 20.0 = 20.5\text{ s}.$$
+- Tasks $v_2, v_3, v_4$ (Independent Module Refactorings): Children of $v_1$. These represent parallel fan-out branches operating on separate code modules. Each ingests the 1,600-token specification from $v_1$ plus 6,400 tokens of module code ($S_{\text{in}} = 8{,}000$ tokens), generates $K_{\text{out}} = 2{,}400$ tokens of code diffs, and executes local compiler checks ($T_{\text{tool}} = 10.0\text{ s}$):
+  $$T(v_2) = T(v_3) = T(v_4) = \frac{8{,}000}{4{,}000} + \frac{2{,}400}{80} + 10.0 = 2.0 + 30.0 + 10.0 = 42.0\text{ s}.$$
+- Task $v_5$ (Security & Vulnerability Audit): Child of $v_2$ and $v_3$. Ingests patches from both modules ($S_{\text{in}} = 12{,}000$ tokens), generates $K_{\text{out}} = 1{,}200$ tokens of audit notes, and runs a static analysis fuzzer ($T_{\text{tool}} = 25.0\text{ s}$):
+  $$T(v_5) = \frac{12{,}000}{4{,}000} + \frac{1{,}200}{80} + 25.0 = 3.0 + 15.0 + 25.0 = 43.0\text{ s}.$$
+- Task $v_6$ (Integration Binding Generation): Child of $v_4$. Ingests patch from $v_4$ ($S_{\text{in}} = 6{,}000$ tokens), generates $K_{\text{out}} = 800$ tokens, and verifies interface signatures ($T_{\text{tool}} = 5.0\text{ s}$):
+  $$T(v_6) = \frac{6{,}000}{4{,}000} + \frac{800}{80} + 5.0 = 1.5 + 10.0 + 5.0 = 16.5\text{ s}.$$
+- Task $v_7$ (Global Integration, Linking, and Regression Suite): Sink node; depends on $v_5$ and $v_6$. Ingests all candidate patches ($S_{\text{in}} = 16{,}000$ tokens), generates final merge metadata ($K_{\text{out}} = 400$ tokens), and executes the end-to-end integration test suite ($T_{\text{tool}} = 60.0\text{ s}$):
+  $$T(v_7) = \frac{16{,}000}{4{,}000} + \frac{400}{80} + 60.0 = 4.0 + 5.0 + 60.0 = 69.0\text{ s}.$$
+
+Step 1: Total Work Calculation.
+The cumulative compute and execution work across the workload is:
+$$W(G) = \sum_{i=1}^7 T(v_i) = 20.5 + 42.0 + 42.0 + 42.0 + 43.0 + 16.5 + 69.0 = 275.0\text{ seconds}.$$
+If executed sequentially on a single worker agent, the minimum makespan is $T_{\text{seq}} = 275.0\text{ seconds}$.
+
+Step 2: Critical Path Determination.
+We trace all paths from source $v_1$ to sink $v_7$:
+- Path 1: $v_1 \to v_2 \to v_5 \to v_7$
+  $$\text{Length}(\text{Path 1}) = 20.5 + 42.0 + 43.0 + 69.0 = 174.5\text{ seconds}.$$
+- Path 2: $v_1 \to v_3 \to v_5 \to v_7$
+  $$\text{Length}(\text{Path 2}) = 20.5 + 42.0 + 43.0 + 69.0 = 174.5\text{ seconds}.$$
+- Path 3: $v_1 \to v_4 \to v_6 \to v_7$
+  $$\text{Length}(\text{Path 3}) = 20.5 + 42.0 + 16.5 + 69.0 = 148.0\text{ seconds}.$$
+
+The critical path is $\Pi_{\text{crit}} = v_1 \to v_2 \to v_5 \to v_7$ (tied with Path 2), establishing a critical-path makespan of $T_{\text{crit}} = 174.5\text{ seconds}$.
+
+Step 3: Scheduling Analysis with $P=4$ Workers.
+At $t = 0\text{ s}$, only $v_1$ is runnable; Worker 1 executes $v_1$ while Workers 2, 3, and 4 sit idle.
+At $t = 20.5\text{ s}$, $v_1$ completes. Vertices $v_2, v_3, v_4$ become runnable simultaneously. Workers 1, 2, and 3 claim these tasks concurrently. Worker 4 remains idle because the graph width at this point is $\mathcal{W} = 3$.
+At $t = 20.5 + 42.0 = 62.5\text{ s}$, all three refactorings complete. Now $v_5$ (which required both $v_2$ and $v_3$) and $v_6$ (which required $v_4$) become runnable. Worker 1 claims $v_5$ and Worker 2 claims $v_6$.
+At $t = 62.5 + 16.5 = 79.0\text{ s}$, $v_6$ finishes. However, sink node $v_7$ cannot execute because its other dependency, $v_5$, is still executing on Worker 1. Worker 2 enters an idle synchronization bubble.
+At $t = 62.5 + 43.0 = 105.5\text{ s}$, $v_5$ finishes. Both dependencies for $v_7$ are satisfied. Worker 1 executes $v_7$, completing at $t = 105.5 + 69.0 = 174.5\text{ s}$.
+
+Because $P=4 \ge \max(\mathcal{W}(G))$, the actual execution time achieves the critical path limit: $T_{\text{parallel}} = 174.5\text{ seconds}$. The resulting parallel speedup is:
+$$\mathcal{S} = \frac{T_{\text{seq}}}{T_{\text{parallel}}} = \frac{275.0\text{ s}}{174.5\text{ s}} \approx 1.58\times.$$
+Despite deploying four parallel GPU workers, the speedup is capped at $1.58\times$. The remaining compute capacity was lost to sequential dependencies ($v_1$ and $v_7$) and worker idle bubbles while waiting for join synchronization at $v_5$ and $v_7$.
+:::
+
+### Static Compilation versus Dynamic Topology Spawning
+
+A central architectural decision in runtime design is whether the multi-agent dependency graph should be compiled statically ahead of time or spawned dynamically during execution.
+
+In a *Static Topology*, the execution graph $G$ is fully declared and compiled prior to launching the workload. The developer or compilation toolchain specifies the exact set of agent roles, their specialized system prompts, available tool suites, and fixed dependency edges. Systems such as rigid multi-stage continuous integration pipelines or deterministic compiler verification harnesses operate under static topologies.
+
+Static topologies offer substantial systems advantages:
+First, they permit deterministic compile-time analysis. The runtime can verify that the dependency graph is strictly acyclic, validate that every edge connects type-compatible input and output schemas, and pre-calculate worst-case token expenditures. 
+Second, static graphs allow aggressive systems-level optimizations. The serving engine can pre-load and pin system prompt KV caches for every scheduled agent across physical GPU memory, achieving immediate zero-overhead context initialization when a task fires.
+Third, scheduling algorithms can statically map vertices to specific hardware devices, minimizing inter-GPU communication latency and balancing memory consumption.
+
+The fatal limitation of static topologies is their inability to adapt to runtime empirical discovery. Software engineering workloads are inherently non-deterministic: a bug localized to a single file may reveal deep architectural flaws across three other unmapped subsystems upon test execution. A static topology cannot dynamically instantiate an additional subagent to investigate an unexpected regression, nor can it dynamically prune an entire branch of execution when an early assertion proves a design hypothesis invalid.
+
+In a *Dynamic Topology*, agents spawn child agents programmatically at runtime in response to intermediate execution feedback. An agent executing a repository refactoring may invoke a host runtime tool (such as `invoke_subagent`), supplying a customized task prompt, scoped file paths, and an attenuated capability envelope. The runtime dynamically instantiates a new child agent process, registers a new vertex and dependency edge in the active execution graph, and schedules the child onto an available worker slot.
+
+Dynamic topologies provide unmatched flexibility, enabling the agent system to dynamically match its computational decomposition to the exact structural contours of the problem. If a child agent discovers that a legacy module relies on an undocumented RPC interface, it can dynamically fork an auxiliary research agent to inspect network traces without polluting its own working context.
+
+However, dynamic spawning introduces critical systems hazards that can rapidly destabilize the host runtime:
+
+```
+                  ┌──────────────────────┐
+                  │    Parent Agent      │
+                  │   Budget: B tokens   │
+                  └──────────┬───────────┘
+                             │
+               fork_agent(prompt, B_child)
+                             ▼
+                  ┌──────────────────────┐
+                  │     Child Agent      │
+                  │  Budget: B_child < B │
+                  └──────────┬───────────┘
+                             │
+               fork_agent(prompt, B_grandchild)
+                             ▼
+                  ┌──────────────────────┐
+                  │   Grandchild Agent   │
+                  │Budget: B_gc < B_child│
+                  └──────────────────────┘
+```
+
+The primary hazard is the *agent fork bomb*. If unprivileged foundation models are permitted to spawn child agents recursively without strict runtime constraints, non-deterministic reasoning loops can trigger exponential process explosion. An agent encountering an ambiguous compiler error may spawn three child agents to investigate different hypotheses; each child, encountering secondary errors, spawns three additional children. Within minutes, the fleet spawns hundreds of concurrent processes, saturating GPU memory, exhausting operating system process tables, and consuming millions of tokens without making forward progress.
+
+A secondary hazard is the generation of *orphaned zombie agents*. If a parent agent encounters an unhandled exception, is cancelled by a user interrupt, or exhausts its token budget while its dynamically spawned children are still executing, the children continue running in background processes. These orphaned agents continue consuming GPU compute cycles and executing mutations against sandbox environments, wasting resources and potentially introducing race conditions against subsequent user operations.
+
+To tame dynamic topologies, the host runtime must enforce three strict architectural invariants:
+
+1. *Bounded Recursion Depth:* The runtime supervisor must enforce a hard global ceiling on delegation depth ($D \le D_{\max}$, typically $D_{\max} \in [1, 2]$). Any tool call attempting to spawn a child at depth $D_{\max}$ must be rejected by the runtime with an explicit authorization fault.
+2. *Strict Budget Attenuation:* A dynamically spawned child agent must never receive an open-ended compute allocation. Its token budget $B_{\text{child}}$ and execution timeout must be strictly partitioned from, and subtracted from, the parent's remaining budget:
+   $$B_{\text{remaining\_parent}} \leftarrow B_{\text{current\_parent}} - B_{\text{child}}$$
+   Under this conservation law, an agent fleet cannot exceed the global resource envelope established by the user, regardless of how many dynamic children are instantiated.
+3. *Process Group Supervision Trees:* Dynamically spawned agents must be registered within an operating system process group or container namespace tied directly to the parent's lifecycle. If the parent terminates, fails, or receives a cancellation signal, the host supervisor atomically propagates a termination signal (`SIGKILL` or container cancellation RPC) down the entire process subtree, instantaneously reclaiming GPU memory and preventing orphaned executions.
+
+By formalizing communication topologies as explicit dependency DAGs—and enforcing strict structural invariants over both static graphs and dynamic spawning—the runtime transforms multi-agent execution from an erratic conversational storm into a dependable distributed computation. Yet, defining the topological edges of a task graph addresses only half of the coordination contract. Once an edge is established between a parent and a child, or between two pipeline stages, the runtime must govern the physical data that traverses that edge. 
+
+If agents attempt to communicate across graph edges using unstructured, natural language chat, the receiving model is forced to parse ambiguous prose, guess the authoritative file versions in the repository, and infer its own operational permissions. This conversational ambiguity re-introduces the very epistemic fragility that formal topologies are constructed to eliminate. To establish true systems dependability across distributed boundaries, the runtime must mandate that every inter-agent invocation and return payload be encapsulated within a formally validated, strongly typed task envelope.

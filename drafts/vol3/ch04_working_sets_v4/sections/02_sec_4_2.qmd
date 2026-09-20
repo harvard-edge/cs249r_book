@@ -1,0 +1,197 @@
+## Working Set Capacity {#sec-vol3-working-sets-physics}
+
+Consider an autonomous software engineering agent dispatched to resolve a subtle concurrency bug in an asynchronous network service. Confronted with an inference engine advertising a nominal context window of 131,072 tokens ($S_{\max} = 131{,}072$), the runtime engineer faces an immediate architectural temptation: stage the entire repository's header definitions, the complete forty-page integration test transcript, five historical commit diffs, and the full standard library interface directly into the prompt. Modern frontier foundation models advertise sequence lengths spanning from 32,768 to over one million tokens, superficially suggesting that memory management in agent runtimes has been reduced to an obsolete artifact of smaller architectures. Yet when the agent executes, two crippling system failures emerge in tandem. First, the inference engine stalls for twelve seconds in the prefill phase before emitting a single token, rendering interactive multi-turn debugging unviable. Second, despite the crucial mutex acquisition contract being present verbatim on line 34,210 of the staged context, the model hallucinates an invalid lock hierarchy, generating a patch that deadlocks the worker pool.
+
+**A larger context window expands the physical container of admissible tokens, but nominal context capacity does not equate to usable working memory.** The architectural reality of autoregressive transformer architectures dictates that expanding sequence length $M$ imposes steep, non-negotiable systems costs: prefill floating-point operations scale quadratically in self-attention compute ($O(M^2)$) and linearly in projection compute ($O(M)$), while the model's unprivileged attention mechanism suffers from severe position-dependent retrieval degradation and distractor interference. A stated maximum sequence length is strictly a geometric limit on the positional embeddings and attention mask matrices; whether an inference engine can reliably extract, compose, and act upon critical evidence scattered across that span is an empirical systems property that degrades long before reaching nominal capacity. Engineering a dependable agent runtime requires treating context capacity as an expensive, lossy resource whose marginal benefit must be continuously weighed against compute latency and attentional failure modes.
+
+### Nominal Capacity Versus Usable Context
+
+In systems architecture, the distinction between nominal capacity and operational capability is well understood: an operating system may expose a 64-bit virtual address space spanning sixteen exabytes, but the usable working set is strictly constrained by physical DRAM, translation lookaside buffer reach, and secondary storage bus bandwidth. A parallel dichotomy governs foundation model inference. The *nominal context capacity* $S_{\max}$ represents the maximum sequence length supported by the model's architecture, bounded by the parameterization of its positional encoding scheme—such as Rotary Position Embeddings (RoPE) scaled with modified base frequencies—and the allocation limits of the serving framework. Nominal capacity defines the input tensor dimensions that the neural engine can physically ingest without raising an invalid dimension fault.
+
+The *usable working context* $M_{\text{eff}}$, by contrast, denotes the maximum sequence length over which the model can reliably attend to, retrieve, and synthesize disparate pieces of evidence to satisfy task invariants under zero ambient authority ($A=0$). While $S_{\max}$ is a static design constant reported on a specification sheet, $M_{\text{eff}}$ is an empirical, workload-dependent variable that is invariably smaller than $S_{\max}$. The divergence between these two metrics stems from the fundamental difference between single-needle retrieval and the complex, multi-hop dependency reasoning demanded by agentic tasks.
+
+Synthetic evaluations frequently obscure this divergence. In a standard "Needle-in-a-Haystack" (NIAH) benchmark, evaluators insert an isolated, synthetically unique key-value pair—such as an arbitrary passphrase—into a long, homogeneous corpus of unrelated text and query the model for that exact key at the sequence boundary. Because the query tokens share near-perfect lexical and semantic correlation with the target needle and virtually zero correlation with the background filler text, the unprivileged attention heads easily isolate the needle's representation via scaled dot-product matching. Under these artificial conditions, frontier models regularly achieve near-perfect retrieval accuracy across their full nominal span of 100,000 tokens or more.
+
+Real-world agentic environments present a fundamentally hostile memory topology. In a code repair or systems orchestration loop, the staged working set does not consist of irrelevant filler text surrounding a solitary synthetic key. Instead, the context is densely populated with semantically adjacent code fragments, previous tool execution transcripts, multiple competing stack traces, and overlapping type signatures. The model is not asked to retrieve a single isolated string; it must perform *multi-hop dependency synthesis*. It must recognize that an exception raised in a database driver was triggered by an unvalidated configuration dictionary defined in an orchestration manifest, cross-reference that dictionary against an environment variable loaded sixty thousand tokens earlier, and verify that a proposed patch does not violate an invariant stated in a unit test file. As the volume of staged context grows, the density of cross-token dependencies multiplies, causing multi-hop reasoning fidelity to collapse long before the input sequence approaches the model's nominal capacity $S_{\max}$.
+
+| Architectural Attribute | Synthetic Needle-in-a-Haystack | Authentic Agentic Working Context |
+|:---|:---|:---|
+| **Primary Evaluation Objective** | Isolated lexical retrieval of a single planted key | Multi-hop synthesis across distributed operational constraints |
+| **Distractor Semantic Entropy** | Uniform, unrelated background text (low interference) | Highly correlated identifiers, obsolete diffs, and logs (high interference) |
+| **Evidence Cardinality** | Exactly one isolated needle ($k = 1$) | Multiple interlocked constraints ($k \gg 1$) |
+| **Attentional Routing Path** | Direct single-hop matching ($Q_{\text{query}} \to K_{\text{needle}}$) | Multi-step compositional routing across intermediate tokens |
+| **Systemic Failure Mode** | Silent retrieval omission (needle missed) | Confabulated reasoning, invalid AST diffs, stale state reuse |
+
+: Structural divergence between synthetic needle retrieval and authentic agentic working context workloads. {#tbl-vol3-capacity-comparison}
+
+### Attentional Dynamics: Position Bias and Distractor Interference
+
+::: {.column-margin}
+![Evidence recall versus relative context depth across varying nominal sequence lengths, illustrating the characteristic U-shaped degradation curve identified by Liu et al. (2024). Models exhibit high fidelity at the extreme boundaries (primacy and recency) but suffer severe retrieval degradation in the intermediate 20%–80% depth.](images/svg/fig-vol3-lost-in-middle.svg){#fig-vol3-lost-in-middle}
+:::
+
+The inability of a transformer to utilize its full nominal context uniformly is not a transient training quirk; it is an intrinsic structural consequence of how unprivileged self-attention routes information across long sequences. In an extensive empirical study of long-context language model behavior, Liu et al. (2024) demonstrated that evidence retrieval performance is heavily dependent on the physical location of relevant tokens within the prompt. As illustrated in @fig-vol3-lost-in-middle, model performance follows a characteristic U-shaped curve—a phenomenon termed the *Lost-in-the-Middle* effect.
+
+When critical task evidence is located at the very beginning of the context (the primacy zone) or at the very end of the sequence immediately preceding the generation boundary (the recency zone), models retrieve and utilize that evidence with high fidelity. When that identical evidence is placed in the interior of the prompt—typically spanning the 20% to 80% relative context depth—retrieval accuracy drops precipitously, frequently plummeting by 20 to 50 percentage points on complex reasoning benchmarks. 
+
+This position bias emerges from two complementary architectural mechanisms:
+
+First, the primacy effect is reinforced by the presence of *attention sinks*. In causal autoregressive transformers, the initial tokens of the prompt—typically the root system prompt or invariant instructions—are attended to by virtually every subsequent token across all layers of the network. Because the softmax function over attention scores requires attention weights to sum to one, tokens that serve as structural anchors accumulate substantial residual probability mass regardless of their immediate semantic relevance to the current token. These initial positions act as natural semantic repositories that the network learns to query reliably.
+
+Second, the recency effect is governed by the locality of causal attention and positional encodings. Tokens situated near the trailing boundary of the prompt have had fewer intermediate transformation steps between their representations and the final output logits. More importantly, modern positional encodings (such as RoPE) introduce decaying inner products as the relative distance $|i - j|$ between token positions increases. While this enables the network to preserve local syntactic order, it attenuates the raw query-key dot products for long-range token pairs unless the model has been explicitly tuned with massive data mixtures to counterbalance the attenuation.
+
+```
+                  THE SOFTMAX ATTENTION COMPETITION
+                  
+   Query: "Which database port is configured for the worker pool?"
+   
+   Token Candidates in Working Context:
+   ----------------------------------------------------------------------
+   k_target : "... worker_db_port = 5432 ..."             (Line 12,410)
+   k_dist_1 : "... metrics_collector_port = 9090 ..."     (Line  8,102)
+   k_dist_2 : "... legacy_mysql_port = 3306 ..."          (Line 45,219)
+   k_dist_3 : "... redis_cache_port = 6379 ..."           (Line 61,004)
+   ... [thousands of intermediate code and log tokens] ...
+   ----------------------------------------------------------------------
+   
+   Softmax Conservation of Probability Mass:
+                     exp(q · k_target / sqrt(d))
+   alpha_target = ---------------------------------
+                  SUM_j exp(q · k_j / sqrt(d))
+                  
+   As distractor count grows, SUM_j exp(q · k_dist_j / sqrt(d)) dominates,
+   diluting alpha_target below the threshold required to steer generation.
+```
+
+Compounding position bias is the destructive phenomenon of *distractor interference*. In an agentic execution loop, the working context staged by the runtime is not inert; it contains hundreds of semantically active identifiers, previous error messages, partial diffs, and verbose tool outputs. The self-attention operation computes a weighted sum of value vectors:
+
+$$\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{Q K^T}{\sqrt{d_k}}\right) V$$
+
+The fundamental systems hazard is embedded in the mathematical nature of the softmax operator: it enforces a strict conservation of probability mass across all $M$ tokens in the sequence, such that $\sum_{j=1}^M \alpha_{i, j} = 1$ for every query token $i$. Every additional distractor token staged into the prompt constitutes an additional term in the denominator of the softmax normalizer. 
+
+When the runtime stages hundreds of lines of irrelevant execution logs or unpruned directory listings, those tokens do not produce zero inner products. Instead, because software systems share common vocabularies—words like `error`, `port`, `connection`, `timeout`, and `buffer` appear across both relevant and irrelevant components—the distractors generate non-trivial query-key alignment scores $q_i \cdot k_j^T$. As thousands of these weakly aligned distractor tokens accumulate, their aggregate exponential mass $\sum_{j \in \text{distractors}} \exp\left(\frac{q_i \cdot k_j^T}{\sqrt{d_k}}\right)$ swamps the exponential score of the true target evidence. The attention weight $\alpha_{i, \text{target}}$ assigned to the critical system invariant is diluted, dropping below the threshold required to guide downstream generation. The model consequently fails not because it lacks the necessary information, but because the signal from that information has been drowned in a sea of semantically competitive noise.
+
+### Prefill Compute Scaling and Time-to-First-Token
+
+Beyond attentional fidelity, expanding the logical working set imposes severe, non-linear penalties on the physical compute and latency budgets of the serving infrastructure. To understand these costs, the systems architect must dissect the two distinct computational regimes of autoregressive inference: the *prefill phase* and the *decode phase*.
+
+When an agent runtime dispatches an assembled context of length $M$ to an inference engine, the engine executes the prefill phase. Unlike the subsequent decode phase—which generates one token at a time autoregressively ($M+1, M+2, \dots$) using memory-bandwidth-bound matrix-vector operations (GEMV)—the prefill phase processes all $M$ prompt tokens concurrently. The prefill phase executes highly parallel, compute-bound General Matrix Multiply (GEMM) kernels to compute the initial activations, generate the first output token, and populate the physical Key-Value (KV) cache for all $M$ positions.
+
+The computational work performed during the prefill phase across an $L$-layer transformer with hidden dimension $d$ (where $d = d_{\text{model}}$) divides into two fundamentally different scaling classes: linear projection compute and quadratic self-attention compute.
+
+The linear projection compute encompasses the query ($Q$), key ($K$), value ($V$), and output ($O$) linear transformations within the multi-head attention blocks, alongside the up-projection, gate-projection, and down-projection matrices of the feed-forward network (MLP). For a standard transformer utilizing an intermediate MLP hidden dimension of $4d$ (or its structural equivalent in SwiGLU architectures), multiplying an input tensor of shape $[M, d]$ against these weight matrices requires:
+
+$$F_{\text{linear}} = 24 M L d^2 \quad \text{FLOPs}$$
+
+Because every token interacts independently with static model weight matrices of dimension $d \times d$, this component scales linearly with sequence length ($O(M)$).
+
+The self-attention core, however, requires computing the pairwise dot products between all $M$ query vectors and all $M$ key vectors ($Q K^T$), producing an $[M, M]$ attention matrix for each attention head. Multiplying the resulting softmax-normalized attention score matrix against the $[M, d]$ value tensor ($(Q K^T) V$) requires another equivalent matrix multiplication. Computing these two operations across all heads in an $L$-layer network requires:
+
+$$F_{\text{attention}} = 4 M^2 L d \quad \text{FLOPs}$$
+
+Summing these terms yields the total floating-point operations required to execute the prefill phase:
+
+$$F_{\text{prefill}} = 24 M L d^2 + 4 M^2 L d \quad \text{FLOPs}$$
+
+The systems implication of this formulation becomes stark when evaluating the ratio of attention compute to linear compute as sequence length expands:
+
+$$\frac{F_{\text{attention}}}{F_{\text{linear}}} = \frac{4 M^2 L d}{24 M L d^2} = \frac{M}{6 d}$$
+
+When the sequence length $M$ is small relative to the hidden dimension $d$, linear projections dominate total execution time. But as an agent runtime dumps larger working sets into the prompt, a critical crossover occurs. For a model with hidden dimension $d = 4096$, when the sequence length exceeds $M = 6 d = 24{,}576$ tokens, the quadratic self-attention operations consume more floating-point operations than all feed-forward networks and linear projections combined. At $M = 65{,}536$ tokens, attention FLOPs represent more than 72% of the entire prefill workload.
+
+This quadratic explosion directly dictates the agent's *Time to First Token* (TTFT). If an accelerator cluster provides an effective sustained compute throughput of $\mathcal{P}_{\text{effective}}$ floating-point operations per second (accounting for real-world Model FLOPs Utilization, or MFU), the prefill latency is bounded by:
+
+$$\text{TTFT} \approx \frac{F_{\text{prefill}}}{\mathcal{P}_{\text{effective}}} = \frac{24 M L d^2 + 4 M^2 L d}{\text{MFU} \times \mathcal{P}_{\text{peak}}}$$
+
+As $M$ scales into the tens of thousands of tokens, TTFT transitions from a negligible sub-second pause into a multi-second pipeline stall, fundamentally degrading the reactivity of the autonomous agent.
+
+::: {.callout-note title="Worked Example: Prefill Compute Scaling and Latency on Accelerator Hardware"}
+**Problem:** An autonomous software agent is evaluated under two different working context staging policies using an 8-billion parameter foundation model ($L = 32$ layers, hidden dimension $d = 4096$). Policy A enforces strict context compaction, staging an average working context of $M_1 = 8{,}192$ tokens. Policy B dumps raw compiler outputs and uncurated directory traces, staging an uncompacted context of $M_2 = 65{,}536$ tokens ($8\times$ expansion). 
+
+The runtime executes inference on a dedicated NVIDIA H100 SXM5 GPU delivering a theoretical peak throughput of $\mathcal{P}_{\text{peak}} = 989\text{ TFLOP/s}$ ($9.89 \times 10^{14}\text{ FLOP/s}$) in 16-bit precision. In prefill GEMM operations, the engine achieves an average Model FLOPs Utilization (MFU) of $50\%$, yielding an effective compute throughput of:
+
+$$\mathcal{P}_{\text{effective}} = 0.50 \times 989\text{ TFLOP/s} = 494.5\text{ TFLOP/s} = 4.945 \times 10^{14}\text{ FLOP/s}$$
+
+Compute the total prefill FLOPs, the fraction of compute consumed by quadratic attention, and the resulting Time to First Token (TTFT) for both policies.
+
+---
+
+**Solution:**
+
+**1. Evaluation of Policy A ($M_1 = 8{,}192$ tokens):**
+
+*Linear Projection FLOPs:*
+$$F_{\text{linear}} = 24 \times 8192 \times 32 \times (4096)^2 \approx 1.055 \times 10^{14}\text{ FLOPs} = 105.5\text{ TFLOPs}$$
+
+*Quadratic Attention FLOPs:*
+$$F_{\text{attention}} = 4 \times (8192)^2 \times 32 \times 4096 \approx 3.518 \times 10^{13}\text{ FLOPs} = 35.2\text{ TFLOPs}$$
+
+*Total Prefill FLOPs:*
+$$F_{\text{prefill, A}} = 105.5\text{ TFLOPs} + 35.2\text{ TFLOPs} = 140.7\text{ TFLOPs}$$
+
+*Attention Fraction:*
+$$\frac{F_{\text{attention}}}{F_{\text{prefill, A}}} = \frac{35.2}{140.7} = 25.0\%$$
+
+*Time to First Token (TTFT):*
+$$\text{TTFT}_A = \frac{1.407 \times 10^{14}\text{ FLOPs}}{4.945 \times 10^{14}\text{ FLOP/s}} \approx 0.285\text{ seconds} = 285\text{ ms}$$
+
+---
+
+**2. Evaluation of Policy B ($M_2 = 65{,}536$ tokens):**
+
+*Linear Projection FLOPs ($8\times$ increase):*
+$$F_{\text{linear}} = 24 \times 65536 \times 32 \times (4096)^2 \approx 8.444 \times 10^{14}\text{ FLOPs} = 844.4\text{ TFLOPs}$$
+
+*Quadratic Attention FLOPs ($8^2 = 64\times$ increase):*
+$$F_{\text{attention}} = 4 \times (65536)^2 \times 32 \times 4096 \approx 2.252 \times 10^{15}\text{ FLOPs} = 2{,}251.8\text{ TFLOPs}$$
+
+*Total Prefill FLOPs:*
+$$F_{\text{prefill, B}} = 844.4\text{ TFLOPs} + 2{,}251.8\text{ TFLOPs} = 3{,}096.2\text{ TFLOPs} \approx 3.10\text{ PFLOPs}$$
+
+*Attention Fraction:*
+$$\frac{F_{\text{attention}}}{F_{\text{prefill, B}}} = \frac{2251.8}{3096.2} = 72.7\%$$
+
+*Time to First Token (TTFT):*
+$$\text{TTFT}_B = \frac{3.096 \times 10^{15}\text{ FLOPs}}{4.945 \times 10^{14}\text{ FLOP/s}} \approx 6.26\text{ seconds}$$
+
+---
+
+**Systems Takeaway:** 
+Expanding the context window by a factor of 8 ($8\text{k} \to 64\text{k}$) increases total prefill compute by a factor of 22 ($140.7\text{ TFLOPs} \to 3{,}096.2\text{ TFLOPs}$). The accelerator shifts from a linear-projection-dominated workload (where attention accounts for only 25% of FLOPs) into an attention-dominated quadratic regime (where attention accounts for nearly 73% of FLOPs). For an agent executing a 30-turn interactive debugging loop, Policy B introduces over three minutes ($30 \times 6.26\text{ s} \approx 188\text{ s}$) of pure prefill pipeline latency, compared to under nine seconds for Policy A, while consuming 22 times more energy on the accelerator cluster.
+:::
+
+### Workload-Driven Sizing and the Effective Working-Set Frontier
+
+Faced with the twin realities of attentional degradation and quadratic compute scaling, the systems architect cannot treat context capacity as an unconstrained parameter. Designing an agent runtime demands identifying the *effective working-set frontier*—the operational sweet spot where the staged context contains sufficient evidence to satisfy task invariants without crossing into the regime of diminishing returns and attentional collapse.
+
+```
+Task Success
+Rate (Pass@1)
+     ^
+     |              Optimal Frontier (M*)
+ 100%|                      ▲
+     |                    /   \
+     |                   /     \     Attentional Saturation &
+     |                  /       \─── Distractor Degradation
+     |                 /             (Signal-to-noise collapse)
+     |   Phase I      /    Phase II  |       Phase III
+     | (Information  /   (Sufficient |   (Pathological Bloat)
+     |   Deficit)   /     Evidence)  |
+   0%--------------------------------------------------------> Sequence Length (M)
+     0            M_min             M*                      S_max
+     
+Lat. |   Sub-second TTFT             | Multi-second TTFT Stalls (O(M^2))
+Cost |   Linear projection regime    | Quadratic attention dominance
+```
+
+This operational space partitions into three distinct systems phases across sequence length $M$:
+
+In Phase I ($M < M_{\text{min}}$, the *Information Deficit Regime*), the runtime stages an undersized working context. The prompt omits essential source files, fails to provide complete environmental error logs, or truncates relevant type signatures. In this regime, task success is strictly bound by missing information; the model hallucinates file interfaces because the authoritative interfaces were excluded from the prompt. Here, the marginal utility of expanding context ($\frac{\Delta \text{Pass@1}}{\Delta M}$) is strongly positive, easily justifying the linear increase in prefill latency.
+
+In Phase II ($M_{\text{min}} \le M \le M^*$, the *Sufficient Evidence Regime*), the logical working set contains the essential root instructions, the exact source files requiring modification, and the precise compiler or linter diagnostic traces. Task completion rates peak at the frontier $M^*$. Within this boundary, the signal-to-noise ratio remains high, the target evidence resides comfortably within the model's high-fidelity attention zones, and prefill latency remains within interactive operational tolerances.
+
+In Phase III ($M > M^*$, the *Attentional Saturation and Bloat Regime*), the runtime succumbs to context sprawl. Staging unpruned execution histories, superseded diff iterations, and entire library directories pushes the sequence length toward the nominal maximum $S_{\max}$. Here, the marginal accuracy gain turns negative ($\frac{\Delta \text{Pass@1}}{\Delta M} < 0$). The accumulated distractor tokens dilute softmax probability mass, the lost-in-the-middle phenomenon actively misroutes attention away from intermediate constraints, and prefill latency scales quadratically, freezing the agent loop for seconds at every invocation.
+
+The primary duty of the host supervisor's memory management subsystem is to enforce policies that keep the logical working set strictly bounded within Phase II. The runtime must not rely on the unprivileged model to self-filter irrelevant text, nor can it assume that a larger context window will automatically improve agentic autonomy. Instead, the runtime must measure the empirical trade-off curve across its concrete workload, treating $M^*$ as an active invariant boundary.
+
+Once the host runtime determines the quantitative boundary $M^*$ of the logical working set, an equally critical architectural dilemma arises: how should the selected tokens be structured, sequenced, and partitioned across the prompt? Having established that attention mechanisms are sensitive to position depth and that prefill latency scales steeply with sequence length, the runtime cannot simply concatenate files and execution logs in arbitrary order. The supervisor must establish a deliberate staging discipline that preserves instruction authority, maintains clear source provenance, and aligns with the underlying inference engine's prompt prefix cache to amortize prefill costs across consecutive invocations. We turn next to the structural architecture of staging the next invocation.

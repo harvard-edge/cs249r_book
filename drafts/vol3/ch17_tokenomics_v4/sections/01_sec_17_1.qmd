@@ -1,0 +1,76 @@
+## Task Cost Accounting {#sec-vol3-tokenomics-accounting}
+
+Operating an autonomous agent fleet is fundamentally an exercise in resource economics, yet measuring trajectory expenditures reveals that the physical unit of accounting in production systems has fundamentally shifted. In traditional conversational interfaces or single-turn text processing systems, operational economics appeared deceptively simple: systems engineers multiplied aggregate input and output token tallies by a vendor's published price sheet—expressed in dollars per million tokens—and billed the client accordingly. That simplistic accounting framework breaks down the moment software transitions from interactive user chat to autonomous task delegation.
+
+::: {.column-margin}
+![Whole-trajectory cost breakdown across direct model token fees, sandbox hosting, tool APIs, verification harnesses, and human review escalation.](images/svg/fig-vol3-task-cost-treemap.svg){#fig-vol3-task-cost-treemap}
+:::
+
+When an agent runtime operates autonomously, the unprivileged model inspects codebases, requests the creation of isolated execution sandboxes, issues specialized RPC queries against external databases, and traverses iterative self-correction cycles to satisfy a specification. Under this operational model, the elementary unit of economic accounting is no longer the isolated token, nor even the individual model API invocation. The primary economic unit is the *accepted task*: a verified, end-to-end deliverable that satisfies external system invariants and passes all verification gates. Optimizing an agent architecture purely for token cost is an architectural error akin to optimizing a distributed database purely for local memory bandwidth while ignoring network round-trips and disk write-ahead log flushes.
+
+Systems engineers frequently fall victim to the *token-price fallacy*: the naive belief that selecting a foundation model with an order-of-magnitude cheaper nominal token tariff yields a proportional reduction in operational system costs. This intuition fails because the foundation model operates as an unprivileged, non-deterministic predictor under zero ambient authority ($A=0$). It does not possess direct execution capabilities or ambient system permissions. Every action requires the host runtime to reconstruct conversational state, serialize structured context, invoke mediated external tool endpoints, and host isolated physical execution environments.
+
+Across a trajectory of $K$ sequential interaction turns, the host runtime incurs both neural generation costs and physical environment hosting costs at every turn $k$. The comprehensive expenditure of executing an autonomous task across $K$ discrete interaction turns is governed by the whole-trajectory cost equation:
+
+$$C_{\text{task}} = \sum_{k=1}^K \left( C_{\text{prefill}, k} + C_{\text{decode}, k} + C_{\text{tools}, k} + C_{\text{sandbox}, k} \right) + C_{\text{verify}} + C_{\text{human}}$$
+
+Each term in this formulation represents a distinct physical subsystem expenditure. The prompt prefill cost at turn $k$, denoted $C_{\text{prefill}, k}$, pays for evaluating the accumulated prefix, including system prompts, dynamic tool schemas, repository context, and preceding execution transcripts. Because autoregressive models must condition on the entire interaction history, the input prefix length expands monotonically across turns unless pruned or evicted, causing cumulative prefill expenditures to scale superlinearly with trajectory depth. The decode cost, $C_{\text{decode}, k}$, represents the price of generating output tokens, encompassing scratchpad reasoning tokens, tool selection metadata, and invocation arguments. Beyond the model serving layer, $C_{\text{tools}, k}$ captures direct usage fees charged by external services, such as proprietary code-search indices, vector databases, or third-party web search endpoints. The sandbox compute charge, $C_{\text{sandbox}, k}$, reflects the hardware cost of running isolated microVMs or containers that execute untrusted agent commands, execute test suites, or compile source trees during that turn. Finally, $C_{\text{verify}}$ captures the computational cost of running independent verification harnesses—such as automated linters, compilers, and unit tests—while $C_{\text{human}}$ reflects the amortized economic expense of human review when the autonomous system fails to converge and escalates to an engineering operator.
+
+The divergence between nominal token tariffs and holistic system economics becomes severe once we confront the open-loop failure wall and the epistemic gap of non-deterministic models. If an unprivileged foundation model possesses a single-step tool execution success probability of $p$, the probability that it completes an open-loop chain of $K$ interdependent tool operations without a catastrophic failure decays exponentially as $p^K$. When an agent trajectory encounters an unrecoverable failure—whether due to hallucinated command syntax, circular reasoning loops, or invalid environment assumptions—the entire expenditure accumulated across all preceding steps is permanently lost. If the runtime discards the aborted trajectory and initiates a fresh attempt, or if it dispatches multiple speculative trajectories in parallel to maximize task success, the effective cost to produce a single acceptable artifact scales inversely with model competence.
+
+To formalize this dynamic, systems engineers must evaluate the *effective cost per accepted task*, denoted $C_{\text{effective}}$. Let a fleet attempt $N$ total trajectories to resolve a set of incoming requirements, yielding $N_{\text{acceptable}}$ verified, successful outcomes. The effective cost is the total fleet expenditure divided strictly by the number of successful tasks:
+
+$$C_{\text{effective}} = \frac{\sum_{i=1}^N C_{\text{attempt}_i}}{N_{\text{acceptable}}}$$
+
+If we denote the task acceptance rate as $\alpha = N_{\text{acceptable}} / N$, where each successful attempt incurs an average cost of $C_{\text{succ}}$ and each failed attempt consumes an average cost of $C_{\text{fail}}$ before aborting or triggering a timeout, the expected effective cost expands to:
+
+$$C_{\text{effective}} = C_{\text{succ}} + \frac{1 - \alpha}{\alpha} C_{\text{fail}}$$
+
+The term $(1 - \alpha)/\alpha$ represents the failure-to-success odds ratio, quantifying the exact number of failed trajectories amortized onto each accepted task. Consider a commodity small model priced at one-tenth the nominal token cost of an advanced frontier model. If the commodity model achieves an acceptance rate of $\alpha = 0.20$, it incurs an average of $(1 - 0.20) / 0.20 = 4.0$ failed attempts for every single success. If each failed trajectory meanders through long context loops and consumes container sandbox compute time before timing out, its effective cost per accepted task easily surpasses that of a frontier model operating at $\alpha = 0.80$, which incurs only $(1 - 0.80) / 0.80 = 0.25$ failures per accepted task. The apparent token discount is transformed into an operational deficit.
+
+::: {.callout-note title="Worked Example: The Token-Price Fallacy in Automated Bug Repair"}
+An autonomous software engineering fleet processes automated bug-fix tickets across a large enterprise repository. The systems team must choose between two model serving backends: Model A (a frontier reasoning model) and Model B (a commodity lightweight model). The workload parameters and infrastructure tariffs are summarized below.
+
+| System & Pricing Parameter | Model A (Frontier Reasoner) | Model B (Commodity Model) |
+| :--- | :--- | :--- |
+| Nominal Prefill Tariff | $\$3.00$ per $10^6$ tokens | $\$0.30$ per $10^6$ tokens ($10\times$ discount) |
+| Nominal Decode Tariff | $\$15.00$ per $10^6$ tokens | $\$1.20$ per $10^6$ tokens ($12.5\times$ discount) |
+| Mean Trajectory Length ($K$) | $4$ interaction turns | $7$ interaction turns (verbose retry loops) |
+| Mean Volume per Turn | $16{,}000$ prefill / $800$ decode tokens | $28{,}000$ prefill / $1{,}200$ decode tokens |
+| Task Acceptance Rate ($\alpha$) | $0.75$ ($75\%$ verified success) | $0.25$ ($25\%$ verified success) |
+| Turn Hosting & Tools ($C_{\text{env}}$) | $\$0.03$ per turn | $\$0.03$ per turn |
+| Verification Harness ($C_{\text{verify}}$) | $\$0.05$ per attempt (regression tests) | $\$0.05$ per attempt (regression tests) |
+| Human Escalation Triage ($C_{\text{human}}$) | $\$10.00$ per failed attempt ($10$ min at $\$60/\text{hr}$) | $\$10.00$ per failed attempt ($10$ min at $\$60/\text{hr}$) |
+
+**Step 1: Model Serving Cost per Attempt ($C_{\text{model}}$).**
+For Model A, each attempt consumes $4 \times 16{,}000 = 64{,}000$ prefill tokens and $4 \times 800 = 3{,}200$ decode tokens:
+$$\text{Prefill: } 0.064 \times \$3.00 = \$0.1920, \quad \text{Decode: } 0.0032 \times \$15.00 = \$0.0480 \implies C_{\text{model}, A} = \$0.2400$$
+For Model B, each attempt consumes $7 \times 28{,}000 = 196{,}000$ prefill tokens and $7 \times 1{,}200 = 8{,}400$ decode tokens:
+$$\text{Prefill: } 0.196 \times \$0.30 = \$0.0588, \quad \text{Decode: } 0.0084 \times \$1.20 = \$0.0101 \implies C_{\text{model}, B} = \$0.0689$$
+On raw model serving fees alone, Model B appears $3.48\times$ cheaper than Model A per attempt ($\$0.0689$ versus $\$0.2400$).
+
+**Step 2: Total Attempt Cost ($C_{\text{attempt}}$) Excluding Human Escalation.**
+Incorporating turn-level sandbox hosting, mediated tools ($C_{\text{env}} = \$0.03/\text{turn}$), and external regression testing ($C_{\text{verify}} = \$0.05$):
+$$C_{\text{attempt}} = C_{\text{model}} + K \times C_{\text{env}} + C_{\text{verify}}$$
+$$C_{\text{attempt}, A} = \$0.2400 + (4 \times \$0.03) + \$0.05 = \$0.2400 + \$0.1200 + \$0.0500 = \$0.4100$$
+$$C_{\text{attempt}, B} = \$0.0689 + (7 \times \$0.03) + \$0.05 = \$0.0689 + \$0.2100 + \$0.0500 = \$0.3289$$
+Because Model B's lower task convergence rate induces longer trajectory lengths ($7$ turns versus $4$), its sandbox and tool hosting costs expand from $\$0.12$ to $\$0.21$, eroding the nominal model token savings. At the per-attempt level, Model B is now only $19.8\%$ cheaper than Model A ($\$0.3289$ versus $\$0.4100$).
+
+**Step 3: Effective Cost per Accepted Task ($C_{\text{effective}}$) Without Human Triage.**
+Assuming unassisted automated retries until acceptance ($C_{\text{fail}} = C_{\text{succ}} = C_{\text{attempt}}$):
+$$C_{\text{effective}, A} = \frac{C_{\text{attempt}, A}}{\alpha_A} = \frac{\$0.4100}{0.75} = \$0.5467 \text{ per accepted task}$$
+$$C_{\text{effective}, B} = \frac{C_{\text{attempt}, B}}{\alpha_B} = \frac{\$0.3289}{0.25} = \$1.3156 \text{ per accepted task}$$
+Despite a $10\times$ discount in prefill token tariff, Model B is **$2.41\times$ more expensive per accepted task** because its low acceptance rate forces an average of three failed attempts for every single success ($(1 - 0.25) / 0.25 = 3.0$).
+
+**Step 4: Effective Cost Including Human Triage Escalation ($C_{\text{human}} = \$10.00$).**
+In a production deployment where failed runs escalate to human engineers:
+$$\text{Expected attempt cost for A: } \$0.4100 + (1 - 0.75) \times \$10.00 = \$0.4100 + \$2.5000 = \$2.9100$$
+$$C_{\text{effective}, A}^{\text{human}} = \frac{\$2.9100}{0.75} = \$3.8800 \text{ per completed task}$$
+$$\text{Expected attempt cost for B: } \$0.3289 + (1 - 0.25) \times \$10.00 = \$0.3289 + \$7.5000 = \$7.8289$$
+$$C_{\text{effective}, B}^{\text{human}} = \frac{\$7.8289}{0.25} = \$31.3156 \text{ per completed task}$$
+When accounting for the blast radius of unhandled failures, Model B is **$8.07\times$ more expensive** overall. The nominal token discount acts as a catastrophic financial trap.
+:::
+
+Resolving this economic dilemma requires adopting closed-loop execution architectures governed by Dijkstra's empirical verification principle: a computing system must never trust an unprivileged model's self-reported success. The runtime host must enforce invariant closure through external compilers, linters, and sealed test suites. As established by Chen, Zaharia, and Zou (2023) in their foundational work on *FrugalGPT*, foundation models do not represent uniform commodities, but rather form a multi-dimensional Pareto frontier spanning accuracy, execution cost, and response latency. Maximizing fleet efficiency does not mean naively standardizing on an expensive frontier model for every operation, nor does it permit downgrading the entire system to a low-cost commodity model. Instead, systems engineers must construct structured execution cascades that route routine operations, syntactic transformations, and basic status checks to lightweight models or deterministic scripts, reserving high-parameter frontier reasoners for macroscopic task planning, architectural synthesis, and unrecoverable error diagnosis.
+
+Yet accounting for financial cost across the whole trajectory solves only half of the fleet optimization problem. Even if an agent architecture achieves a low dollar cost per accepted task, it may remain completely unusable in production if completing that task requires prohibitive wall-clock time. In an enterprise setting, latency translates directly into blocked human developers, missed operational service-level agreements, and underutilized accelerator hardware held hostage by idling runtime sessions. Once we have established the full accounting framework for all model invocations, tool fees, and sandbox environments across a trajectory, we confront an immediate physical question: where is execution time actually spent along the trajectory graph, and does investing compute to accelerate model generation yield meaningful improvements in end-to-end task completion time?

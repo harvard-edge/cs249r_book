@@ -1,0 +1,146 @@
+## Workload Contract Specification {#sec-vol3-conclusion-envelope}
+
+When an unconstrained agent runtime receives an open-ended natural language prompt such as "fix the integration test failures in the repository," the host supervisor confronts an immediate boundary dilemma. Lacking an explicit specification of operating limits, the underlying foundation model enters an unguided autoregressive loop: it interprets ambiguous test failures by modifying the test assertions themselves, exhausts external API rate limits through unthrottled search queries, or enters an infinite cycle of syntax corrections that consumes host disk capacity with unindexed build artifacts. Because the runtime supervisor lacks a formal specification of permitted behaviors, it cannot determine whether an ongoing sequence of thirty compilation attempts represents productive iterative refinement or an unrecoverable failure loop until an operator manually kills the process.
+
+**Designing an agent system begins by formalizing the 5-part task contract (Goal, Environment, Permitted Actions, Available Observations, Completion Criteria) and answering the 4 Engineering Questions (Duration, State, Authority, Evidence).** Just as classical operating systems reject unverified binary execution in favor of structured process boundaries, an agentic architecture must treat natural language intent as unprivileged and untrusted. The system bounds model non-determinism by enveloping each delegated task within a concrete, machine-readable contract that establishes rigid resource ceilings, partitions accessible state, attenuates external operational capabilities, and conditions task acceptance strictly upon external, deterministic verifiers.
+
+::: {.column-margin}
+Bertrand Meyer's foundational formulation of *Design by Contract* (1992) established that robust software systems rely on mutual obligations: callers guarantee preconditions, while routines guarantee postconditions and maintain class invariants. In agentic systems, this contract mediates between an unprivileged statistical predictor and a deterministic host supervisor.
+:::
+
+### The Four Production Engineering Questions {#sec-vol3-envelope-four-questions}
+
+Before allocating compute resources or provisioning an execution sandbox, a production agent runtime must resolve four structural engineering questions: duration, state, authority, and evidence. These dimensions govern the lifecycle of the task and protect the broader system from resource starvation, data corruption, and catastrophic divergence.
+
+The first question addresses duration and latency bounds. Language model generation operates without an intrinsic halt condition; an unconstrained loop can spin indefinitely if intermediate outputs continue to generate valid tool calls. The runtime must enforce two orthogonal temporal boundaries: an absolute wall-clock timeout $T_{\max}$ and an interaction turn limit $S_{\max}$. The wall-clock limit prevents hung network connections, deadlocked compilers, and slow-running inference workers from holding sandbox resources hostage. The turn limit $S_{\max}$ caps the total number of autoregressive interaction cycles between the model and its execution environment. In parallel, the supervisor tracks the cumulative token consumption $M$ across both the prefill phase (GEMM) and decode phase (GEMV) of the inference engine. Enforcing $M$ alongside $S_{\max}$ guarantees that the task cannot evade economic or compute budgets by saturating its context window with massive retrieval payloads on every cycle.
+
+The second question governs state tiers and lifecycle boundaries. An autonomous agent interacts with information across three distinct physical and logical planes: ephemeral working memory, the durable event store, and authoritative external artifacts. Ephemeral working memory encompasses the in-context token buffer and the volatile KV cache allocations managed across GPU memory pages via PagedAttention. This state is transient and discarded upon task completion. The durable event store consists of an append-only Write-Ahead Log (WAL) that records every raw model output, tool invocation payload, sandbox return code, and supervisor intervention in immutable storage. The authoritative external artifacts comprise the actual files, databases, or revision-controlled code repositories modified during execution. A sound workload contract defines explicit write boundaries across these tiers, preventing the agent from conflating scratchpad reasoning with authoritative modifications.
+
+The third question establishes permitted authority under the baseline invariant of Zero Ambient Authority ($A=0$). An agent possesses no intrinsic right to touch files, invoke network sockets, or signal operating system processes merely because it is executing. Instead, all capabilities must be explicitly granted via attenuated capability tokens scoped strictly to the task's execution lifetime. The workload contract enumerates the whitelist of permitted tool interfaces, the filesystem namespaces exposed through kernel mount virtualization, and the network egress rules enforced by packet filters. Any operation that falls outside this grant is rejected at the supervisor boundary before execution. Furthermore, high-blast-radius operations—such as mutating remote database records, executing drop-table statements, or pushing commits to shared branches—must be gated behind cryptographic human escrow protocols where execution pauses until an authenticated supervisor provides a signed authorization token.
+
+The fourth question specifies verifiable completion evidence. In accordance with the end-to-end argument, an agentic system must never rely on a model's self-reported success; a language model will cheerfully hallucinate that all bugs have been fixed and all edge cases addressed even when the underlying software fails to compile. The workload contract mandates that task completion is defined entirely by external, deterministic evidence. This evidence takes the form of non-zero compiler and linter exit codes, structured test suite output logs, Abstract Syntax Tree (AST) invariant validations, and cryptographic hashes of generated artifacts. If the host environment cannot evaluate a deterministic predicate proving that the goal has been achieved, the task cannot be accepted as complete.
+
+::: {.callout-note title="Worked Example: Sizing the Physical Operating Envelope for an Automated Patch Worker"}
+Consider an autonomous code-repair agent dispatched to resolve a regression bug in a large C++ service. We must calculate the physical resource envelope required to guarantee containment while providing sufficient operational headroom.
+
+**Given Parameters:**
+- Turn limit: $S_{\max} = 20\text{ turns}$.
+- Wall-clock timeout: $T_{\max} = 600\text{ s}$ ($10\text{ minutes}$).
+- Model parameters: $70\text{ billion}$ dense parameters in FP8 ($70 \times 10^9\text{ bytes} \approx 70\text{ GB}$ model weights).
+- Serving architecture: Tensor-parallel across 4 GPUs, using an FP8 KV cache with 64 layers, 8 key-value heads per layer, and head dimension $d_k = 128$.
+- Maximum context window: $L_{\max} = 32{,}768\text{ tokens}$.
+- Local build environment: Incremental C++ compilation requires $4\text{ vCPUs}$, $8\text{ GB}$ host DRAM, and a $5\text{ GB}$ copy-on-write (CoW) disk overlay over a read-only root repository snapshot.
+
+**Step 1: Compute KV Cache Memory Footprint per Instance**
+The memory required for the KV cache per token across all layers is:
+$$\text{Bytes per token} = 2 \times (\text{layers}) \times (\text{KV heads}) \times d_k \times (\text{bytes per element})$$
+$$\text{Bytes per token} = 2 \times 64 \times 8 \times 128 \times 1\text{ byte} = 131{,}072\text{ bytes} = 128\text{ KB/token}$$
+At maximum context length $L_{\max} = 32{,}768$:
+$$\text{Max KV Cache Size} = 32{,}768 \times 128\text{ KB} = 4{,}194{,}304\text{ KB} = 4.0\text{ GB}$$
+Across the 4 serving GPUs, the KV cache footprint requires $1.0\text{ GB}$ per GPU, well within standard high-bandwidth memory (HBM) headroom alongside the partitioned model weights ($17.5\text{ GB/GPU}$).
+
+**Step 2: Calculate Maximum Inference and Sandbox Latency Budget**
+Assume average generation yields $256\text{ tokens}$ per turn at a decode throughput of $40\text{ tokens/s}$ ($6.4\text{ s}$ decode time), while prefill over an average $16{,}384\text{ token}$ prompt takes $0.8\text{ s}$. Total model inference latency per turn is $7.2\text{ s}$.
+Across $S_{\max} = 20$ turns, total model time is:
+$$T_{\text{model}} = 20 \times 7.2\text{ s} = 144\text{ s}$$
+This leaves:
+$$T_{\text{sandbox}} = T_{\max} - T_{\text{model}} = 600\text{ s} - 144\text{ s} = 456\text{ s}$$
+Allocating $456\text{ s}$ across 20 turns provides a maximum of $22.8\text{ s}$ per turn for containerized tool execution, filesystem diffing, and incremental compilation. If an intermediate test run exceeds $22.8\text{ s}$, the supervisor's per-step watchdog alerts the runtime to throttle test suite depth.
+:::
+
+### The Formal Five-Part Workload Contract {#sec-vol3-envelope-contract-formalism}
+
+To translate these four questions into an enforceable machine boundary, the runtime defines a formal mathematical tuple for every execution instance. Let a task contract $\mathcal{C}$ be defined as the 5-tuple:
+
+$$\mathcal{C} = \langle \mathcal{G}, \mathcal{E}, \mathcal{A}, \mathcal{O}, \mathcal{V} \rangle$$
+
+Each component maps directly to an isolated subsystem within the execution harness:
+
+$$\mathcal{G} = \left( \text{id}, \tau, \mathbf{p}, \mathcal{K}_{\text{invariants}} \right)$$
+
+The goal $\mathcal{G}$ encapsulates the unique task identifier $\text{id}$, the task type $\tau$, a typed parameter dictionary $\mathbf{p}$, and a set of formal invariant assertions $\mathcal{K}_{\text{invariants}}$ that must remain inviolate throughout the trajectory. Crucially, $\mathcal{G}$ does not supply instructions on *how* to solve the task; it specifies the mathematical properties of the desired end state.
+
+$$\mathcal{E} = \left( \mathcal{I}_{\text{base}}, \mathcal{M}_{\text{mounts}}, \mathcal{R}_{\text{quotas}}, \mathcal{N}_{\text{network}} \right)$$
+
+The environment $\mathcal{E}$ dictates the physical substrate of execution. Here, $\mathcal{I}_{\text{base}}$ specifies the immutable cryptographic digest of the container base image; $\mathcal{M}_{\text{mounts}}$ defines the virtual filesystem mount table, specifying which host directories are exposed as read-only layers and which receive temporary copy-on-write overlays; $\mathcal{R}_{\text{quotas}}$ establishes hard cgroup limits on CPU shares, memory allocation, and disk write I/O; and $\mathcal{N}_{\text{network}}$ defines network routing tables, which default to a completely isolated loopback namespace ($127.0.0.1$) unless specific proxy endpoints are whitelisted.
+
+$$\mathcal{A} = \left\{ a_1, a_2, \dots, a_k \mid a_i = (\text{name}_i, \Sigma_i^{\text{in}}, \Sigma_i^{\text{out}}, \rho_i) \right\}$$
+
+The permitted action space $\mathcal{A}$ enumerates the complete universe of callable tools. Each action $a_i$ is defined by its identifier, a strict input schema $\Sigma_i^{\text{in}}$, a typed output schema $\Sigma_i^{\text{out}}$, and a capability policy $\rho_i$. The capability policy specifies rate limits, allowed filesystem paths, and whether invocation requires pre-execution escrow validation. An attempt to invoke an unregistered tool or pass arguments that fail schema validation results in an immediate intercept by the supervisor.
+
+$$\mathcal{O} = \left( \Delta_{\max}^{\text{bytes}}, \Psi_{\text{filter}}, \Omega_{\text{encoding}} \right)$$
+
+The available observations $\mathcal{O}$ govern how raw execution outputs are ingested into the agent's context. Uncontrolled tool execution can easily produce hundreds of megabytes of raw compiler output or log dumps, instantly exceeding context window limits and polluting working memory. The observation policy establishes an absolute byte ceiling $\Delta_{\max}^{\text{bytes}}$, an active sanitization filter $\Psi_{\text{filter}}$ that strips ANSI escape codes and masks sensitive credentials or environment secrets, and an encoding function $\Omega_{\text{encoding}}$ that normalizes structured errors into compact, machine-readable records.
+
+$$\mathcal{V} = \left\{ v_1, v_2, \dots, v_m \mid v_j: (\mathcal{E}, \text{Artifacts}) \to \{0, 1\} \right\}$$
+
+The completion criteria $\mathcal{V}$ comprise an ordered array of deterministic verification predicates. Each verifier $v_j$ is an external binary, script, or static analyzer that inspects the sandbox environment and generated artifacts independently of the model. Task success requires the conjunction of all verifiers to evaluate to true:
+
+$$\text{Success}(\mathcal{C}) \iff \bigwedge_{j=1}^{m} v_j(\mathcal{E}, \text{Artifacts}) = 1$$
+
+| Contract Field | Mathematical Domain | Supervisor Enforcement Mechanism | Failure Mode When Omitted |
+| :--- | :--- | :--- | :--- |
+| **Goal ($\mathcal{G}$)** | Struct $(\text{id}, \tau, \mathbf{p}, \mathcal{K})$ | Dispatch validation and parameter type checking | Semantic drift; unguided goal mutation |
+| **Environment ($\mathcal{E}$)** | Container/cgroup spec | Linux namespaces, seccomp, cgroups v2 | Host resource exhaustion; filesystem poisoning |
+| **Actions ($\mathcal{A}$)** | Set of typed schemas $\{a_i\}$ | RPC gateway filter and JSON Schema validation | Arbitrary code execution; privilege escalation |
+| **Observations ($\mathcal{O}$)** | Transform pipeline $(\Delta, \Psi, \Omega)$ | Stream truncator, regex sanitizer, token counter | Context window overflow; credential leakage |
+| **Completion ($\mathcal{V}$)** | Predicate set $\{v_j \to \{0,1\}\}$ | Hermetic test runner and AST validator | False-positive completion claims (hallucination) |
+
+: Structural decomposition of the formal 5-part workload contract, showing the mathematical domain, the supervisor's physical enforcement layer, and the concrete failure modes that manifest when individual boundary controls are omitted. {#tbl-vol3-contract-decomposition}
+
+### The Production Operating Envelope and Escalation Boundaries {#sec-vol3-envelope-boundaries}
+
+An instantiated contract defines the nominal path of execution, but robust systems engineering requires defining the operating envelope: the multidimensional boundary within which the agent is warranted to function, coupled with deterministic escalation policies when that boundary is breached.
+
+```
++-------------------------------------------------------------------------------+
+|                            HOST AGENT SUPERVISOR                              |
+|                                                                               |
+|  +--------------------------- OPERATING ENVELOPE --------------------------+  |
+|  |                                                                         |  |
+|  |   Resource Budget:             Error Ceiling:                           |  |
+|  |     M <= 250k tokens             K <= 3 consecutive tool errors         |  |
+|  |     T <= 600 seconds             R <= 5 compilation failures            |  |
+|  |     S <= 25 turns                                                       |  |
+|  |                                                                         |  |
+|  |   Action Sandbox (A=0):        Durable Audit Ledger:                    |  |
+|  |     Read-only rootfs             Append-only WAL                        |  |
+|  |     Isolated net namespace       Cryptographic hash chain               |  |
+|  |                                                                         |  |
+|  +-------------------------------------+-----------------------------------+  |
+|                                        |                                      |
+|                               Breach Event Detected                           |
+|                                        |                                      |
+|                                        v                                      |
+|  +------------------------ ESCALATION DISPATCHER --------------------------+  |
+|  |                                                                         |  |
+|  |   [K > 3 Tool Errors]   --> Invalidate plan, force scratchpad re-read  |  |
+|  |   [S > 25 Turns]        --> Halt execution, snapshot dirty overlay      |  |
+|  |   [T > 600 Seconds]     --> Send SIGKILL to sandbox, drain queue        |  |
+|  |   [High-Blast Action]   --> Pause execution, trigger human escrow gate  |  |
+|  |                                                                         |  |
+|  +-------------------------------------------------------------------------+  |
++-------------------------------------------------------------------------------+
+```
+
+The operating envelope is governed by four hard threshold metrics:
+
+1. **The Consecutive Error Ceiling ($K$):** If an agent executes $K$ consecutive actions that return non-zero exit codes, malformed tool arguments, or schema validation errors, the supervisor assumes the model has entered a degenerate autoregressive loop. The runtime halts speculative tool dispatch, injects a high-priority diagnostic frame into the context, and forces the model to evaluate intermediate state before emitting another tool invocation.
+2. **The Turn Ceiling ($S_{\max}$):** The hard limit on model-environment round-trips. When $S = S_{\max}$, the supervisor issues an unmaskable termination signal, regardless of whether the model claims it is near completion.
+3. **The Wall-Clock Watchdog ($T_{\max}$):** An asynchronous timer running on the host system. Upon expiration, the supervisor dispatches a `SIGKILL` to the container sandbox, snapshots the dirty filesystem overlay for post-mortem analysis, and returns a timeout fault to the orchestrator.
+4. **The Cumulative Token Cap ($M$):** A strict ceiling on aggregate input and output tokens consumed during the session, preventing unbounded financial burn or inference cluster starvation.
+
+When an executing agent breaches any of these thresholds, the system executes an escalation protocol. Rather than terminating silently, the supervisor transitions the execution state through a deterministic triage ladder. Minor boundary breaches—such as an invalid JSON payload or a non-existent file path—trigger local error recovery, feeding the exact parser error back to the model as an observation. Systematic boundary breaches—such as exceeding $K$ or reaching a memory limit—trigger state suspension: the runtime snapshots the sandbox filesystem, records the failure vector in the durable WAL, and either rolls back the workspace to the last known-good checkpoint or surfaces the session to a human operator via an interactive escrow gate.
+
+| Workload Archetype | Duration Bounds ($T_{\max}, S_{\max}$) | State Tiers & Quotas | Permitted Authority ($A$) | Verification Criteria ($\mathcal{V}$) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Hermetic Patch Synthesis** | $T_{\max} = 900\text{ s}$<br>$S_{\max} = 25\text{ turns}$ | Ephemeral: $4\text{ GB}$ KV cache<br>Disk: $5\text{ GB}$ CoW overlay<br>Host: $8\text{ GB}$ RAM, $4\text{ vCPUs}$ | Loopback network only ($A=0$); restricted writes to `/src`; no privilege elevation | Clean build (`exit 0`), pre-existing tests pass, newly added regression tests pass |
+| **Batch Data Migration** | $T_{\max} = 3600\text{ s}$<br>$S_{\max} = 100\text{ turns}$ | Ephemeral: $2\text{ GB}$ KV cache<br>Disk: $50\text{ GB}$ staging spool<br>Host: $16\text{ GB}$ RAM, $8\text{ vCPUs}$ | Whitelisted database endpoints; read-only source DB; write to staging schema | Schema validation pass, zero lost records ($\sum \text{src} = \sum \text{dst}$), checksum match |
+| **Incident Remediation** | $T_{\max} = 300\text{ s}$<br>$S_{\max} = 10\text{ turns}$ | Ephemeral: $1\text{ GB}$ KV cache<br>Disk: $512\text{ MB}$ ephemeral tmp<br>Host: $2\text{ GB}$ RAM, $2\text{ vCPUs}$ | Scoped telemetry APIs; read-only metrics access; state-altering CLI gated by escrow | Telemetry health invariant satisfied; error rate $< 0.01\%$; signed human token |
+| **Literature Synthesis** | $T_{\max} = 1200\text{ s}$<br>$S_{\max} = 40\text{ turns}$ | Ephemeral: $8\text{ GB}$ KV cache<br>Disk: $10\text{ GB}$ PDF/vector store<br>Host: $8\text{ GB}$ RAM, $4\text{ vCPUs}$ | Egress whitelisted to arXiv/PubMed APIs; local vector index write | Schema-compliant JSON report; all extracted DOI citations verify against CrossRef |
+
+: The Production Operating Envelope Matrix across four foundational agent workload archetypes, showing the tight coupling between temporal bounds, physical state allocations, attenuated capability grants, and deterministic verification criteria. {#tbl-vol3-operating-envelope-matrix}
+
+As demonstrated in @tbl-vol3-operating-envelope-matrix, different operational archetypes require radically divergent envelope configurations. A hermetic patch synthesis worker operates under tight, hermetic isolation with zero external network connectivity, relying entirely on local compilers and deterministic unit tests to establish evidence of correctness. Conversely, an incident remediation agent functions in an environment where live network telemetry is indispensable, but where the blast radius of any write operation is catastrophic; consequently, its authority envelope strictly forbids unsupervised mutations, requiring human cryptographic escrows for any state-altering remediation command.
+
+By establishing the five-part contract and enforcing its operational envelope at runtime, the systems engineer transforms an otherwise unpredictable neural autoregressive model into a bounded, accountable component of a larger production infrastructure. With the contract formalizing the boundaries of execution and the lifecycle of state, the architectural challenge shifts to memory: how does the system physically organize, move, and preserve information across these ephemeral, durable, and authoritative tiers during execution?

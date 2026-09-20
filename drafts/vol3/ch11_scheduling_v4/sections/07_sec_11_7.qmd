@@ -1,0 +1,152 @@
+When an agent trajectory deviates from its behavioral specification—whether through an unrecoverable state invariant violation, a runaway mutation loop, or an indirect prompt injection payload embedded within an untrusted tool response—the host runtime faces an immediate architectural choice: should it attempt graceful recovery, or execute an instantaneous, non-negotiable quarantine? In classical distributed systems, a struggling worker node is often allowed to finish inflight requests or drain its queues before restarting. In an agentic architecture, however, an executing trajectory holds delegated authority: it possesses active capability tokens, database sessions, virtual network access, and communication channels to peer agents. Allowing a compromised or pathologically malfunctioning model to execute even a single additional autoregressive decode step risks catastrophic data corruption, privilege escalation, or external credential exfiltration.
+
+The host supervisor must therefore prioritize systemic integrity over local transaction completion. When the boundary between safe execution and unconstrained mutation collapses, the runtime transitions from transactional compensation to active containment, establishing a hermetic perimeter around the offending trajectory.
+
+::: {.column-margin}
+Saltzer and Schroeder (1975) formulated the *Principle of Fail-Safe Defaults*: the base configuration of an access control mechanism must deny access, and the failure of any supervisory invariant must immediately drop the execution back to that unprivileged baseline. In agent systems, this means a trajectory under suspicion loses all delegated authority instantaneously.
+:::
+
+### The Principle of Fail-Safe Containment
+
+Classical recovery techniques assume that the supervisory logic directing the recovery remains uncorrupted. As established in the Trajectory Saga pattern, when a sub-transaction $T_i$ fails due to an environmental error, the orchestrator dispatches compensating transaction $C_{i-1}$ to undo previous side effects. However, this recovery contract rests on a critical premise: that the agent proposing or driving the sequence is still operating as a benign, coherent planner.
+
+If a trajectory's failure stems from an adversarial prompt injection—such as malicious instructions embedded within a retrieved documentation page or an email body—invoking normal forward repair or model-directed compensation introduces severe systemic hazard. If the runtime asks a compromised model to synthesize compensating actions, the model may emit further destructive tool calls under the guise of cleanup, deleting database tables or forwarding sensitive credentials to an attacker's endpoint. Similarly, an agent caught in a degenerative token generation loop may consume its entire rate-limit quota or overwhelm downstream services with malformed mutations.
+
+Under these failure modes, backward compensation via the agent's normal execution loop is untenable. The runtime must implement James Hamilton's fundamental rule for internet-scale infrastructure: *partition failure domains aggressively to bound the blast radius*. The host runtime must treat an anomalous trajectory not as an uncommitted transaction to be gently unwound, but as an active threat vector requiring immediate containment.
+
+| Dimension | Trajectory Saga Compensation | Blast Radius Quarantine |
+| :--- | :--- | :--- |
+| **Trigger Condition** | Expected environmental fault; deterministic tool contract failure; validation rejection. | Invariant violation; semantic watchdog trip; suspected adversarial injection; unauthorized capability request. |
+| **Trust Model** | Agent policy is assumed benign and coherent; orchestrator manages clean rollback. | Agent context is assumed untrusted, corrupted, or hostile; all active capabilities revoked. |
+| **Execution State** | Trajectory remains active; compensation steps ($C_i$) execute sequentially. | Trajectory execution frozen instantly; process tree halted; network interfaces severed. |
+| **Side-Effect Handling** | Compensating actions undo registered forward side effects. | Downstream mutations blocked; emitted artifacts tagged as tainted; pending RPCs discarded. |
+| **Peer Interaction** | Peer workflows await saga completion or receive standard error statuses. | Peers receive explicit taint alerts; inter-agent messaging queues severed and purged. |
+
+Table: Architectural contrast between transactional saga compensation and emergency blast radius quarantine. {#tbl-vol3-quarantine-vs-saga}
+
+### The Four-Stage Quarantine Protocol
+
+To enforce containment without inducing host-level instability, the supervisor executes a deterministic four-stage quarantine protocol. This pipeline bypasses the agent's inference loop entirely, executing strictly within the host runtime's privileged control plane.
+
+```
+       [ Anomaly / Invariant Violation Detected ]
+                          │
+                          ▼
+       ┌────────────────────────────────────────┐
+       │ Stage 1: Immediate Process Suspension  │ ──► cgroup freezer: SIGSTOP / freeze
+       └────────────────────────────────────────┘
+                          │
+                          ▼
+       ┌────────────────────────────────────────┐
+       │ Stage 2: Ephemeral Credential Revoked  │ ──► Invalidate IAM STS / OAuth tokens
+       └────────────────────────────────────────┘
+                          │
+                          ▼
+       ┌────────────────────────────────────────┐
+       │ Stage 3: Network Interfaces Severed    │ ──► eBPF TC drop / veth teardown
+       └────────────────────────────────────────┘
+                          │
+                          ▼
+       ┌────────────────────────────────────────┐
+       │ Stage 4: Downstream Taint Propagation  │ ──► WAL tombstone / taint ledger
+       └────────────────────────────────────────┘
+```
+
+The sequence begins with *Immediate Process Suspension*. The supervisor targets the agent's host sandbox cgroup, issuing a kernel-level freeze (`SIGSTOP` or freezing the cgroup v2 `cgroup.freeze` controller). This freezes the agent runtime process, its Python/Node interpreter, and any spawned child worker processes instantaneously. Freezing the execution tree prevents the model from initiating subsequent system calls, writing to local memory buffers, or consuming additional GPU inference cycles. The execution context remains intact in physical RAM, preserved as an immutable memory artifact for offline post-mortem analysis.
+
+```python
+# Supervisor kernel-level cgroup freeze and egress drop enforcement
+def execute_emergency_freeze(sandbox_id: str, cgroup_path: str, veth_iface: str):
+    # Stage 1: Freeze process tree instantly via cgroup v2 freeze controller
+    with open(f"{cgroup_path}/cgroup.freeze", "w") as f:
+        f.write("1")
+    # Stage 3: Sever network tap by flushing egress traffic and dropping interface
+    subprocess.run(["ip", "link", "set", "dev", veth_iface, "down"], check=True)
+    subprocess.run(["tc", "qdisc", "replace", "dev", veth_iface, "root", "blackhole"], check=True)
+```
+
+The second stage is *Ephemeral Credential Revocation*. In a well-architected runtime adhering to Zero Ambient Authority ($A=0$), an agent does not hold permanent infrastructure credentials. Instead, the host supervisor issues short-lived, narrowly scoped capabilities via an Active Capability Block (ACB). Upon triggering quarantine, the supervisor dispatches a synchronous revocation event to its internal credential broker and external Identity Providers (such as AWS STS, Google Cloud IAM, or OAuth authorization servers). The ACB lease is canceled, invalidating session cookies, database connection handles, and API bearer tokens. Even if an in-flight tool call escaped the process sandbox before suspension, downstream services reject the request upon token introspection.
+
+The third stage enforces *Network Interface Severing*. While freezing the process halts new syscall generation, in-flight TCP socket buffers inside the network namespace might still attempt transmission. The supervisor immediately tears down the virtual Ethernet pair (`veth`) bridging the sandbox to the host bridge, or activates an eBPF Traffic Control (`tc`) program that replaces the queueing discipline with a blackhole filter. All outbound packets are dropped at the physical layer, while in-flight ingress connections receive immediate TCP resets (`RST`). The sandbox is completely isolated from the local area network, peer agent endpoints, and the public internet.
+
+The fourth stage executes *Taint Propagation*. A malfunctioning trajectory rarely executes in total isolation; it may have written files to a shared repository, inserted rows into an experimental database, or pushed task notifications to a peer agent's input queue. The supervisor writes an immutable quarantine record to the durable Write-Ahead Log (WAL), generating a cryptographically signed tombstone. This tombstone triggers taint markers across all resources produced by the trajectory during its execution epoch.
+
+::: {.column-margin}
+```
+   [Quarantined Trajectory Tk]
+               │
+      emits intermediate
+          artifact A_k
+               │
+               ▼
+     [Taint Tag Attached]
+     (τ = TAINTED, Sig_H)
+         /           \
+        ▼             ▼
+  [Peer Agent]   [Git Branch]
+  (Blocked at    (Ref Lock /
+   Escrow)        Tombstone)
+```
+Taint tags propagate downstream from the quarantined trajectory, halting peer consumption at the boundary.
+:::
+
+### Dynamic Taint Tracking and Artifact Invalidation
+
+When an agent is quarantined, the supervisor must ensure that none of its partially computed outputs corrupt the broader enterprise workflow. An artifact generated by a rogue or buggy trajectory is considered *tainted* until explicitly cleared by an external verification harness or a human operator.
+
+Let a long-horizon agent trajectory $\mathcal{T}_k$ produce a sequence of discrete environmental side effects $\mathcal{E}_k = \{e_1, e_2, \dots, e_m\}$ across execution steps $t \in \{1, \dots, m\}$. Each side effect $e_j$ corresponds to an external mutation: writing a file to a shared filesystem, publishing a message to an event broker, or generating a code commit on a feature branch. If the runtime detects an invariant collapse at step $t^*$, all side effects produced at $t \ge t_{\text{taint}}$ must be quarantined, where $t_{\text{taint}} \le t^*$ represents the earliest execution step where state divergence or untrusted data ingestion occurred.
+
+To operationalize this, the supervisor maintains a directed provenance graph tracking the data lineage between agent trajectories and system artifacts. Every artifact $a$ emitted by an agent carries an immutable envelope containing its cryptographic hash, the producer's trajectory identifier $\mathcal{T}_k$, and a dynamic taint status:
+
+$$\tau(a) \in \{\text{UNTAINTED}, \text{SUSPECT}, \text{TAINTED}, \text{CLEARED}\}$$
+
+```
+                [ Upstream Agent T1 ] (Quarantined)
+                         │
+               emits Artifact a_1 (TAINTED)
+                         │
+                         ▼
+             [ Shared Message Broker ]
+                         │
+          ┌──────────────┴──────────────┐
+          ▼                             ▼
+  [ Peer Agent T2 ]             [ Peer Agent T3 ]
+  Consumes a_1?                 Consumes a_1?
+  └──► BLOCKED: Exception       └──► BLOCKED: Exception
+       raised by Runtime             raised by Runtime
+       Capability Gateway            Capability Gateway
+```
+
+When $\mathcal{T}_k$ is quarantined, the supervisor marks all $a \in \mathcal{A}_k$ produced within the taint epoch as $\text{TAINTED}$ in the central runtime state store. Downstream agents operating within the multi-agent system interact with shared resources through an unprivileged mediation gateway. When peer agent $\mathcal{T}_{\text{peer}}$ attempts to read artifact $a$, the mediation gateway intercepts the read request, verifies the artifact's metadata against the taint registry, and blocks access, returning an `ArtifactQuarantinedException`.
+
+::: {.callout-note title="Worked Example: Containment Latency and Blast Radius Budget"}
+Consider an autonomous software engineering agent running inside a containerized sandbox on a host worker node. The agent processes an untrusted pull request that contains an indirect prompt injection designed to exfiltrate enterprise API keys to an external endpoint `https://attacker.com/leak`.
+
+**System Parameters:**
+- Token generation throughput: 50 tokens/second (20 ms per token decode).
+- Supervisor invariant verification latency: evaluated every tool call request.
+- Network bandwidth between sandbox and host bridge: 10 Gbps ($1.25 \times 10^9$ bytes/sec).
+- eBPF packet drop injection latency ($L_{\text{net}}$): 0.4 ms.
+- Linux cgroup freeze latency ($L_{\text{freeze}}$): 1.2 ms.
+- Identity Provider STS token revocation API round-trip ($L_{\text{idp}}$): 42.0 ms.
+- Taint ledger broadcast across internal Redis cluster ($L_{\text{taint}}$): 3.5 ms.
+
+**Timeline Analysis:**
+1. At $t = 0$, the model completes decoding an unauthorized `curl` invocation targeting the external endpoint with capability tokens in the HTTP header, and dispatches the execution request to the host supervisor.
+2. At $t = 1.1\text{ ms}$, the supervisor's pre-execution policy engine parses the command against the sandbox egress whitelist. The outbound domain `attacker.com` violates the security invariant. A quarantine trigger is declared.
+3. The supervisor initiates Stage 1 and Stage 3 concurrently:
+   - At $t = 1.1 + 0.4 = 1.5\text{ ms}$, the eBPF TC filter drops all egress frames on the `veth` interface. Zero payload bytes leave the host.
+   - At $t = 1.1 + 1.2 = 2.3\text{ ms}$, the kernel transitions the sandbox processes to the frozen state. Autoregressive execution and local IO cease completely.
+4. Concurrently, the supervisor initiates Stage 2 and Stage 4:
+   - At $t = 1.1 + 3.5 = 4.6\text{ ms}$, the taint ledger updates. Three downstream peer agents listening to this agent's task queue have their subscriptions locked, preventing ingestion of the tainted task output.
+   - At $t = 1.1 + 42.0 = 43.1\text{ ms}$, the Identity Provider invalidates the agent's short-lived session token.
+
+**Total Blast Radius Containment Time:**
+The local physical boundary (network and execution) is hermetically sealed within $2.3\text{ ms}$, well below the single-token generation threshold ($20\text{ ms}$). System-wide peer propagation is blocked within $4.6\text{ ms}$. Although cloud IdP revocation requires $43.1\text{ ms}$, the agent cannot leverage the token during this window because physical network egress and CPU scheduling were severed in less than $2.5\text{ ms}$.
+:::
+
+Tainted artifacts committed to persistent stores must undergo deterministic remediation. For version-controlled repositories, the runtime issues an automated `git revert` or detaches the affected feature branch, locking it against merges into the integration mainline. In relational or document databases, rows tagged with the quarantined trajectory's epoch identifier are marked with a soft-delete tombstone, concealing them from standard queries while preserving raw data for administrative auditing. 
+
+By enforcing dynamic taint tracking, the supervisor guarantees that the boundary of failure remains strictly isolated to the misbehaving trajectory. Even in complex, multi-agent architectures where hundreds of asynchronous models exchange intermediate reasoning traces, a security breach or semantic failure inside one execution cannot silently propagate corruption across the rest of the system.
+
+Having established the individual mechanisms of fault tolerance—the transactional recovery semantics of Sagas, forward self-healing, pivot action identification, semantic watchdog timers, tool circuit breakers, and blast radius quarantine—the central engineering challenge shifts to architectural composition. How do we integrate these discrete subsystems into a cohesive, high-throughput, fault-tolerant runtime harness capable of delivering end-to-end execution guarantees in real-world production environments?

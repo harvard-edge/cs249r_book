@@ -1,0 +1,176 @@
+## Deterministic Resource Accounting {#sec-vol3-controlplane-accounting}
+
+An autonomous agent tasked with diagnosing a silent data corruption bug in an enterprise storage cluster issues an initial diagnostic query against a containerized PostgreSQL instance. The query times out after ninety seconds. Confronted with the network failure, the unprivileged foundation model does not recognize that the database engine has deadlocked; instead, the autoregressive engine hypothesizes that the query syntax was malformed. It generates an alternative query, then another, and then initiates an automated port scan across the virtualized subnet. When each subsequent tool execution fails or yields uninformative error logs, the model enters a tight exploratory cycle: it rewires network interfaces, modifies configuration files, and re-executes full database dumps. Each turn processes thirty thousand context tokens and produces six hundred output tokens; each tool invocation spawns a disposable container that lingers until supervisory garbage collection. To the single-node fair-share scheduler, this trajectory behaves impeccably: it yields cooperatively at every tool boundary, consumes its allocated CPU quantum without violating thread limits, and respects inference token-bucket dispatch rates. Yet, after six hours, eight hundred execution turns, and forty-seven dollars in API token expenses, the trajectory has achieved zero task convergence while consuming hundreds of gigabytes of host memory and starving peer workloads.
+
+**The fundamental systems vulnerability of unprivileged, autoregressive execution engines is their complete inability to reason about cumulative physical and financial exhaustion.** A foundation model operates strictly as a conditional probability distribution over its immediate context window $\mathbf{c}_k$; it possesses no hardware timers, no memory of elapsed wall-clock latency outside its text buffer, and no visibility into the billing ledger of the host operating system. Left to its own devices, an unprivileged stochastic process will loop indefinitely whenever its internal reasoning fails to overcome an environmental obstacle or when it falls into a self-reinforcing token attractor. The supervisory control plane cannot rely on model self-restraint or prompt-based instructions to halt runaway execution. Instead, the runtime must enforce deterministic, multi-dimensional resource accounting as an external, out-of-band kernel invariant. By continuously projecting execution consumption across steps, tokens, wall-clock duration, financial expenditure, and sandbox reservations against rigid ceilings, the supervisor dynamically regulates process privilege—steering drifting trajectories through progressive warning thresholds, restricting dangerous mutations via capability masks, and executing hard preemptive terminations before runaway execution imperils host stability.
+
+::: {.column-margin}
+**Zero Ambient Authority ($A=0$) in Accounting**  
+Resource limits cannot be delegated to model prompts. Just as an unprivileged user process cannot be trusted to decrement its own CPU billing counter in an operating system kernel, an agent cannot be granted ambient authority to self-report or govern its own budget consumption.
+:::
+
+### The Halting Problem in Autoregressive Agent Runtimes
+
+In classical computability theory, Turing proved that no general algorithm can determine whether an arbitrary program will eventually halt or loop forever. In autonomous agent runtimes, this undecidability manifests as an immediate operational hazard: the supervisor cannot inspect the latent weights or intermediate reasoning traces of a foundation model to determine whether an unresolved task requires one additional turn or an infinite sequence of exploratory retries. 
+
+A common architectural fallacy assumes that this limitation can be mitigated through prompt engineering—instructing the model to "stop when the task is complete," "avoid unnecessary tool invocations," or "stay within a five-dollar budget." This approach violates the principle of modularity and protection ($A=0$). First, an autoregressive language model has no native mechanism for floating-point arithmetic or token self-counting during generation; it cannot observe its own token consumption while generating a sequence. Second, under stochastic distribution shift or sustained tool execution errors, the probability of emitting a terminal token $P(\text{<|im_end|>} \mid \mathbf{c}_k)$ frequently decays toward zero. When an external tool returns an unexpected stack trace or an environmental failure, the error tokens injected into context $\mathbf{c}_k$ shift the model's conditional distribution away from task completion and toward error recovery. The model becomes trapped in a localized epistemic basin, generating speculative tool invocations that produce further error outputs, reinforcing the non-halting attractor.
+
+```
++---------------------------------------------------------------------------------------+
+|                       THE DIVERGENT EPISTEMIC ATTRACTOR CYCLE                         |
+|                                                                                       |
+|   +-------------------+      Tool Error       +-------------------+                   |
+|   | Stochastic Decode | --------------------> | Context Injection |                   |
+|   |  P(a_k | c_k)     |                       | o_k = Error Trace |                   |
+|   +-------------------+                       +-------------------+                   |
+|             ^                                           |                             |
+|             |        Distribution Shift Towards         |                             |
+|             +--------- Speculative Recovery <-----------+                             |
+|                    P(<|im_end|> | c_k) -> 0                                           |
++---------------------------------------------------------------------------------------+
+```
+
+Furthermore, prompt-level constraints suffer from catastrophic context displacement. As long-horizon trajectories progress across dozens of turns, the agent's context window fills with thousands of lines of compiler outputs, file diffs, and database responses. Because attention weights over early system instructions decay as context length increases, soft natural-language budget constraints are routinely overwritten or ignored. Saltzer, Reed, and Clark's End-to-End Argument dictates that invariant closure cannot be maintained by the unprivileged endpoint; loop termination is an end-to-end supervisory responsibility that must be guaranteed by the external runtime control plane. The supervisor must measure physical consumption directly through operating system primitives and network accounting hooks, severing execution out-of-band when quantitative limits are breached.
+
+### The Multi-Dimensional Resource Vector and Differential Cost Accounting
+
+To govern stochastic execution without introducing single-variable blind spots, the supervisory runtime models resource limits as a multi-dimensional bounding polytope. Bounding a trajectory along a single axis—such as step count—is fundamentally inadequate. A trajectory restricted to fifty steps can exhaust hundreds of dollars if each turn prefill consumes a two-hundred-thousand-token context window; conversely, a trajectory bounded strictly by wall-clock time may be killed prematurely during a transient network slowdown while executing a computationally inexpensive read-only query. 
+
+The supervisor formally defines the resource ceiling vector $\mathbf{B}$ within the Agent Control Block (ACB) at trajectory initialization:
+
+$$\mathbf{B} = \langle K_{\text{steps}}, N_{\text{tokens}}, T_{\text{wall}}, C_{\text{cost}}, M_{\text{sandboxes}} \rangle$$
+
+where $K_{\text{steps}} \in \mathbb{N}^+$ denotes the maximum number of discrete supervisor turn cycles, $N_{\text{tokens}} \in \mathbb{N}^+$ represents the aggregate token throughput, $T_{\text{wall}} \in \mathbb{R}^+$ sets the maximum cumulative elapsed wall-clock duration in seconds, $C_{\text{cost}} \in \mathbb{R}^+$ enforces the hard financial spending ceiling in fiat currency (USD), and $M_{\text{sandboxes}} \in \mathbb{N}^+$ bounds the peak concurrent isolated execution environments assigned to the process.
+
+At the conclusion of each turn $k$, the supervisor updates the cumulative resource consumption vector $\mathbf{u}_k$:
+
+$$\mathbf{u}_k = \langle k, N_{\text{tokens}}^{(k)}, T_{\text{wall}}^{(k)}, C_{\text{cost}}^{(k)}, M_{\text{sandboxes}}^{(k)} \rangle$$
+
+Physical time accounting aggregates latency across three distinct operational regimes:
+
+$$T_{\text{wall}}^{(k)} = \sum_{i=1}^k \left( \tau_{\text{model}}^{(i)} + \tau_{\text{tool}}^{(i)} + \tau_{\text{wait}}^{(i)} \right)$$
+
+where $\tau_{\text{model}}^{(i)}$ represents the inference latency of the foundation model serving system, $\tau_{\text{tool}}^{(i)}$ reflects the execution duration inside the sandboxed tool environment, and $\tau_{\text{wait}}^{(i)}$ captures runtime scheduling delay, IPC transfer overhead, and queueing wait states.
+
+::: {.column-margin}
+**Inference Pricing Asymmetry**  
+Decode pricing dominates prefill per token because autoregressive decoding is bounded by GPU High Bandwidth Memory (HBM) bandwidth rather than compute. Each decode token requires reading the entire parameter matrix from memory to registers.
+:::
+
+Calculating the financial cost dimension $C_{\text{cost}}^{(k)}$ requires accounting for the pricing asymmetry of modern inference runtimes. In serving infrastructures utilizing PagedAttention and Radix-tree prefix caching (such as vLLM or SGLang), processing an input token that hits the KV cache requires zero matrix multiplications and negligible memory traffic beyond tree traversal. Conversely, cold prompt prefill requires compute-bound General Matrix Multiply (GEMM) operations across the entire uncached context, while autoregressive decode requires memory-bandwidth-bound General Matrix-Vector Multiply (GEMV) operations, reading multi-billion parameter matrices from High Bandwidth Memory (HBM) for every generated token.
+
+The control plane therefore decomposes token consumption into three disjoint categories, pricing each dynamically alongside external tool charges:
+
+$$C_{\text{cost}}^{(k)} = C_{\text{cost}}^{(k-1)} + \left( p_{\text{prefill}} \cdot n_{\text{prefill}}^{(k)} + p_{\text{cache}} \cdot n_{\text{cache}}^{(k)} + p_{\text{decode}} \cdot n_{\text{decode}}^{(k)} \right) + \sum_{j=1}^{J_k} c_{\text{tool}}(t_{k,j})$$
+
+Here, $n_{\text{prefill}}^{(k)}$, $n_{\text{cache}}^{(k)}$, and $n_{\text{decode}}^{(k)}$ represent the uncached prompt tokens, cached prefix tokens, and generated completion tokens processed in turn $k$, with corresponding unit prices $p_{\text{prefill}}$, $p_{\text{cache}}$, and $p_{\text{decode}}$ (typically denominated in USD per million tokens). The term $c_{\text{tool}}(t_{k,j})$ captures direct third-party invocation tariffs for external API calls, paid search engines, or specialized cloud functions executed during the turn's tool phase.
+
+::: {.callout-note title="Worked Example: Multi-Dimensional Accounting and Prefix Cache Pricing Dynamics"}
+**Scenario:** An autonomous agent executes an iterative software debugging trajectory over $k = 50$ turns against a frontier model runtime. The supervisor initializes the trajectory with the following hard ceilings:
+$$\mathbf{B} = \langle K_{\text{steps}}=80, N_{\text{tokens}}=1.5 \times 10^6, T_{\text{wall}}=900\text{ s}, C_{\text{cost}}=\$3.00, M_{\text{sandboxes}}=2 \rangle$$
+
+**Inference Pricing and Workload Parameters:**
+- Cold prompt prefill unit price: $p_{\text{prefill}} = \$3.00 / 10^6\text{ tokens} = 3.00 \times 10^{-6}\text{ \$/token}$
+- Cached prompt prefix unit price: $p_{\text{cache}} = \$0.30 / 10^6\text{ tokens} = 0.30 \times 10^{-6}\text{ \$/token}$ (a 90% caching discount)
+- Autoregressive decode unit price: $p_{\text{decode}} = \$15.00 / 10^6\text{ tokens} = 15.00 \times 10^{-6}\text{ \$/token}$
+- Generation volume: Constant $n_{\text{decode}}^{(k)} = 350\text{ tokens}$ per turn. Total decode tokens across 50 turns:
+  $$N_{\text{decode}} = 50 \times 350 = 17,500\text{ tokens}$$
+- Context growth: Initial turn context starts at $n_{\text{prompt}}^{(1)} = 6,000\text{ tokens}$ (system prompt, repository map, tool definitions). Each turn appends $400\text{ tokens}$ of tool observation and action history. Total input prompt tokens processed:
+  $$N_{\text{prompt}} = \sum_{k=1}^{50} [6000 + 400(k-1)] = 50 \times 6000 + 400 \times \frac{49 \times 50}{2} = 300,000 + 490,000 = 790,000\text{ tokens}$$
+- Cache hit performance: The serving engine's Radix tree maintains the invariant $6,000\text{ token}$ system prefix across all turns $k \ge 2$, plus an additional $250,000\text{ tokens}$ of stable conversational history:
+  $$N_{\text{cache}} = (49 \times 6,000) + 250,000 = 544,000\text{ tokens} \quad (\approx 68.86\%\text{ cache hit rate})$$
+  $$N_{\text{prefill}} = N_{\text{prompt}} - N_{\text{cache}} = 790,000 - 544,000 = 246,000\text{ tokens}$$
+
+**Financial Cost Calculation:**
+$$\begin{aligned}
+C_{\text{decode}} &= 17,500 \times (15.00 \times 10^{-6}) = \$0.2625 \\
+C_{\text{cache}}  &= 544,000 \times (0.30 \times 10^{-6}) = \$0.1632 \\
+C_{\text{prefill}} &= 246,000 \times (3.00 \times 10^{-6}) = \$0.7380 \\
+C_{\text{tokens}} &= \$0.2625 + \$0.1632 + \$0.7380 = \$1.1637
+\end{aligned}$$
+*(Note: Without Radix prefix caching, prompt prefill would have cost $790,000 \times 3.00 \times 10^{-6} = \$2.3700$, raising total token expenditure to $\$2.6325$.)*
+
+**External Tool and Time Accounting:**
+- Tool tariffs: 12 local compiler executions in the host sandbox ($\$0.00$) and 8 external API searches at $\$0.015$ each:
+  $$C_{\text{tool}} = 8 \times \$0.015 = \$0.1200 \implies C_{\text{cost}}^{(50)} = \$1.1637 + \$0.1200 = \$1.2837$$
+- Time measurement: Decode speed $R_{\text{decode}} = 80\text{ tokens/s} \implies \tau_{\text{decode}} = 17,500 / 80 = 218.75\text{ s}$. Prefill throughput averages $4,000\text{ tokens/s}$ cold ($61.5\text{ s}$) and $40,000\text{ tokens/s}$ on cache hits ($13.6\text{ s}$), yielding $\tau_{\text{model}} = 293.85\text{ s}$. Tool latency $\tau_{\text{tool}} = 142.50\text{ s}$ and queueing wait $\tau_{\text{wait}} = 24.20\text{ s}$.
+  $$T_{\text{wall}}^{(50)} = 293.85 + 142.50 + 24.20 = 460.55\text{ s}$$
+
+**Consumption Vector vs. Hard Ceiling:**
+$$\mathbf{u}_{50} = \langle 50\text{ steps}, 807,500\text{ tokens}, 460.55\text{ s}, \$1.284, 1\text{ sandbox} \rangle$$
+$$\rho_{50} = \max \left( \frac{50}{80}, \frac{807500}{1500000}, \frac{460.55}{900}, \frac{1.284}{3.00}, \frac{1}{2} \right) = \max(0.625, 0.538, 0.512, 0.428, 0.500) = 0.625$$
+
+At $\rho_{50} = 62.5\%$ resource exhaustion, the step counter represents the binding constraint ($62.5\%$). The trajectory remains within Phase 1 (Nominal Execution), operating without tool degradation or supervisory steering.
+:::
+
+### Progressive Budget Thresholds and Phased Escalation
+
+A naive implementation of resource accounting enforces hard limits through binary cutoff: the moment any consumption metric reaches 100% of its budget ceiling ($u_i^{(k)} \ge B_i$), the supervisor issues an immediate `SIGKILL`. While this approach guarantees host protection, it induces severe operational inefficiency. An agent process that has spent forty minutes modifying code, executing integration tests, and diagnosing edge cases is abruptly terminated before emitting its final patch. All intermediate reasoning is discarded, uncommitted filesystem writes in the sandbox are left in an indeterminate state, and the user receives an unrecoverable failure.
+
+Robust supervisory control planes implement progressive budget thresholds, converting a hard cliff into a staged defensive escalation. The supervisor normalizes resource consumption across all five dimensions to compute the scalar exhaustion ratio $\rho_k$:
+
+$$\rho_k = \max_{i \in \{\text{steps}, \text{tokens}, \text{wall}, \text{cost}, \text{sandboxes}\}} \left( \frac{u_i^{(k)}}{B_i} \right) \in [0, \infty)$$
+
+Execution privileges are modulated dynamically based on the value of $\rho_k$, transitioning through four operational phases illustrated in @tbl-vol3-budget-triggers.
+
+| Exhaustion Ratio ($\rho_k$) | Operational Phase | ACB Lifecycle State | Active Capability Mask ($\mathcal{M}$) | Supervisory Action & Context Injection | Invariant Enforced |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| $\rho_k < 0.70$ | **Phase 1: Nominal** | `RUNNING` | $\mathcal{M}_{\text{full}}$ (All tools enabled) | Standard execution; no supervisory injection. | Baseline isolation and fair-share scheduling. |
+| $0.70 \le \rho_k < 0.90$ | **Phase 2: Advisory** | `RUNNING` | $\mathcal{M}_{\text{full}}$ (All tools enabled) | Inject out-of-band high-priority steering observation into $\mathbf{c}_k$. | Early warning; steering stochastic decode toward convergence. |
+| $0.90 \le \rho_k < 1.00$ | **Phase 3: Defensive** | `DEGRADED` | $\mathcal{M}_{\text{readonly}}$ (Read/Summarize only; subagent forks revoked) | Revoke mutating tools; inject terminal synthesis directive. | Principle of Least Privilege ($A=0$); prevent uncommitted mutation. |
+| $\rho_k \ge 1.00$ | **Phase 4: Terminal** | `TERMINATED_FAILURE` | $\emptyset$ (All capabilities revoked) | Dispatch `SIGBUDGET` / `SIGKILL`; seal sandbox; flush WAL. | Hard resource non-exceedance: $\mathbf{u}_k \le \mathbf{B} + \mathbf{\epsilon}$. |
+
+: Progressive budget escalation ladder across normalized resource exhaustion thresholds. {#tbl-vol3-budget-triggers}
+
+In **Phase 1: Nominal Execution** ($\rho_k < 0.70$), the trajectory operates under full capability grants. The supervisor tracks consumption metrics asynchronously, recording token counts from serving engine stream headers and wall-clock timestamps from operating system monotime clocks without interfering with execution.
+
+When consumption enters **Phase 2: Advisory Steering** ($0.70 \le \rho_k < 0.90$), the supervisor intervenes without revoking capabilities. At the start of turn $k$, the control plane prepends an out-of-band supervisory observation into the model's context window:
+
+```
+[SUPERVISOR NOTIFICATION: 70% of allocated resource budget exhausted. 
+Binding dimension: financial cost ($2.10 / $3.00 consumed). 
+Do not initiate new exploratory investigations. Consolidate current findings, 
+finalize pending modifications, and emit the terminal solution.]
+```
+
+This intervention alters the conditional distribution of subsequent autoregressive tokens, steering the model toward completion while preserving its ability to execute necessary compilation or verification tools.
+
+If consumption escalates to **Phase 3: Defensive Quarantine** ($0.90 \le \rho_k < 1.00$), soft steering has demonstrably failed to halt exploration. The supervisor transitions the trajectory's lifecycle state in the Agent Control Block from `RUNNING` to `DEGRADED`. Applying the principle of least privilege, the control plane dynamically modifies the active capability mask $\mathcal{M}$. All mutating, destructive, and resource-heavy tools—including `file_write`, `bash_exec`, `git_push`, and database schema alterations—are revoked from the tool dispatch table. Furthermore, the supervisor disables the ability to spawn or fork child subagents, preventing the parent process from evading budget limits by delegating work to unconstrained child trajectories. 
+
+The tool schema presented to the model during prefill is stripped down to read-only inspection and packaging primitives (`read_file`, `emit_diff`, `generate_summary`). Simultaneously, the supervisor injects a mandatory synthesis directive:
+
+```
+[SUPERVISOR ALERT: 90% of budget exhausted. Trajectory degraded to READ-ONLY. 
+Mutating actions and process forks are disabled. You must emit your final patch 
+and terminal explanation immediately. Any attempt to call mutating tools will fail.]
+```
+
+Under Defensive Quarantine, the model is physically prevented from damaging host state or initiating long-running computations; its remaining 10% budget buffer is reserved strictly for generating explanatory output and synthesizing work completed prior to degradation.
+
+Finally, upon reaching **Phase 4: Hard Preemptive Termination** ($\rho_k \ge 1.00$), the supervisor halts execution deterministically. The control plane cancels pending inference generation, dispatches `SIGKILL` to all associated containerized sandbox processes, and transitions the ACB to `TERMINATED_FAILURE` tagged with the precise failure descriptor `ERR_BUDGET_EXHAUSTED(dimension_i)`. The runtime flushes the Write-Ahead Log (WAL) to durable storage, retains sandbox filesystem snapshots for diagnostic analysis, and returns partial artifacts to the calling user alongside a transparent accounting audit trail.
+
+```
++---------------------------------------------------------------------------------------+
+|                    MULTI-DIMENSIONAL RESOURCE BOUNDING POLYTOPE                       |
+|                                                                                       |
+|   Tokens (N)                                                                          |
+|       ^                                                                               |
+| N_max |------------------------+ (Hard Ceiling Vector B)                              |
+|       |                        |                                                      |
+|       |     Phase 3: Degraded  |                                                      |
+|       |   +------------------+ |                                                      |
+|       |   | Phase 2: Advise  | |                                                      |
+|       |   |   +------------+ | |   Trajectory Path u_k                                |
+|       |   |   | Phase 1:   | | |    *--*--*                                           |
+|       |   |   | Nominal    | | |           \                                          |
+|       |   |   |            | | |            *--*                                      |
+|       |   |   +------------+ | |                \                                     |
+|       |   +------------------+ |                 * (Preempted at rho_k >= 1.0)        |
+|       +------------------------+-----------------------------------> Cost (C)        |
+|                               C_max                                                   |
++---------------------------------------------------------------------------------------+
+```
+
+By enforcing progressive escalation through rigid supervisory mediation, the control plane ensures that unprivileged stochastic models remain strictly accountable to the physical and financial constraints of their host environment. The supervisor guarantees loop termination, prevents catastrophic billing overruns, and preserves intermediate work whenever feasible.
+
+The architecture established across this chapter—the Agent Control Block, deterministic state machines, asynchronous signal trapping, cooperative thread yielding, human approval escrows, fair-share runtime scheduling, and multi-dimensional resource accounting—provides the foundational control plane required to govern stochastic foundation models as dependable operating system processes. Yet, in translating these theoretical principles into deployed production systems, software architects frequently fall prey to seductive design shortcuts, mistaking prompt-based guardrails for architectural isolation or treating foundation model self-reports as authoritative execution state. To build production-grade agentic platforms that withstand real-world operational stressors, we must systematically expose and dismantle these prevailing systems fallacies.
