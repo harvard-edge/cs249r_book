@@ -84,7 +84,7 @@ This architectural separation shifts the core engineering challenge to the synta
 
 When an autoregressive transformer decodes a tool invocation, every generated token is an unprivileged prediction conditioned entirely on the prefix tokens residing in its context window. If the host runtime presents an ambiguous, untyped, or underspecified interface definition, the model's attention mechanism allocates probability mass over an unconstrained output distribution, generating invalid parameter names, hallucinated data types, and malformed payload structures that crash downstream execution handlers. In production agentic runtimes, syntax and schema errors account for a significant fraction of initial tool dispatch failures, turning deterministic systems integration into a stochastic lottery.
 
-**A tool interface schema is both a structural grammar for host-side deserialization and an epistemic prior for autoregressive decoding; rigorously typed contracts containing explicit property bounds, semantic descriptions, and enumerated constraints minimize parameter hallucination while imposing measurable context prefill and memory overheads.**
+A **tool interface schema** is both a structural grammar for host-side deserialization and an epistemic prior for autoregressive decoding; rigorously typed contracts containing explicit property bounds, semantic descriptions, and enumerated constraints minimize parameter hallucination while imposing measurable context prefill and memory overheads.
 
 To build dependable agentic architectures, systems engineers must treat interface schemas not as decorative documentation, but as machine-enforced operating system contracts. A tool schema defines the exact syntactic boundary between unprivileged token generation and privileged host execution, establishing the invariants that the runtime must verify before permitting any real-world state mutation.
 
@@ -105,8 +105,8 @@ Each parameter descriptor $p_i \in P$ is defined by the sub-tuple $p_i = \langle
 
 The structural boundary policy $\chi$ determines whether the runtime permits extraneous fields. Under an open policy ($\chi = \text{open}$), the model may emit arbitrary auxiliary key-value pairs without triggering validation errors; under a closed policy ($\chi = \text{closed}$, declared via `additionalProperties: false` in JSON Schema), any key outside $P$ causes immediate validation rejection. In robust systems design, the closed policy is an essential invariant: it prevents models from generating uninspected arguments that might silently alter execution semantics or bypass audit logs.
 
+::: {#lst-vol3-tool-schema lst-cap="**Strict Tool Parameter Contract**: Host-side parameter bounds, typing, and closed-world extra-field prohibition."}
 ```python
-# lst-vol3-tool-schema: Strict tool parameter contract with bounds and documentation.
 class FileReadParameters(BaseModel):
     model_config = ConfigDict(extra="forbid")
     path: str = Field(..., description="Absolute canonical filesystem path.")
@@ -114,6 +114,7 @@ class FileReadParameters(BaseModel):
     max_bytes: int = Field(65536, ge=1, le=1048576, description="Chunk size in bytes.")
     encoding: Literal["utf-8", "ascii"] = Field("utf-8", description="Character encoding.")
 ```
+:::
 
 As demonstrated in @lst-vol3-tool-schema, the host definition uses high-level type annotations to enforce runtime boundaries. When serialized to OpenAPI 3.1 for injection into the model's system prompt, the class definition compiles into a canonical JSON Schema object. Every programmatic constraint in Python maps directly to an explicit JSON Schema verification keyword, as detailed in @tbl-vol3-schema-contract.
 
@@ -251,7 +252,7 @@ While strict schema engineering guarantees that an individual runtime can parse,
 
 Coupling tool implementations directly into the agent runtime process produces an architectural dead end. When tool routines share the host runtime's virtual address space and interpreter thread pool, every external library—from native database drivers and system administration utilities to third-party REST clients—competes for the same memory space, shared libraries, and execution locks. A single memory leak, unhandled segmentation fault, or blocking system call within a third-party tool library abruptly terminates or freezes the entire host agent orchestration loop. Conversely, constructing bespoke inter-process communication wrappers and proprietary REST shims for every enterprise service reproduces the classic $O(N \times M)$ integration crisis, wherein $N$ distinct agent runtimes must implement, test, and maintain unique translation adapters for $M$ heterogeneous execution backends.
 
-**An open tool protocol decomposes this $N \times M$ integration dilemma into an $O(N + M)$ client-server architecture, standardizing how external services advertise capabilities, serve structured resources, and accept invocation dispatches over uniform transport channels. Yet this protocol boundary establishes only discoverability, not authority: while the server declares what operations exist and defines their syntactic interfaces, the host runtime retains sovereign responsibility for parameter verification, permission enforcement, process containment, and state consistency.**
+An **open tool protocol** decomposes this $N \times M$ integration dilemma into an $O(N + M)$ client-server architecture, standardizing how external services advertise capabilities, serve structured resources, and accept invocation dispatches over uniform transport channels. Yet this protocol boundary establishes only discoverability, not authority: while the server declares what operations exist and defines their syntactic interfaces, the host runtime retains sovereign responsibility for parameter verification, permission enforcement, process containment, and state consistency.
 
 ![**Model Context Protocol Architecture**: Architectural topology of the Model Context Protocol (MCP), showing the strict separation between the unprivileged model, the sovereign host runtime (MCP Client), the transport layer, and decoupled execution servers (MCP Servers).](images/svg/mcp_protocol_architecture.svg){#fig-vol3-mcp-architecture width="95%"}
 
@@ -813,6 +814,7 @@ For common software development runtimes, the sanitization layer applies structu
 
 The normalization layer parses these standard error streams into typed diagnostic records. Rather than forcing the model to autoregressively scan through two hundred lines of intermediate library frames, the runtime extracts the root exception class, the failure message, and the exact terminal frame located within the user's workspace repository.
 
+::: {#lst-vol3-observation-sanitization lst-cap="**Normalized Observation Envelope**: Structured diagnostic frames with machine-readable truncation metadata."}
 ```json
 {
   "exit_code": 1,
@@ -827,7 +829,7 @@ The normalization layer parses these standard error streams into typed diagnosti
   "truncation_notice": "Output exceeded 2,000 tokens; preserved tail 50 lines. Full trace: /tmp/trace_78a.log"
 }
 ```
-: Normalized tool execution observation envelope with structured diagnostic frames and machine-readable truncation headers. {#lst-vol3-observation-sanitization}
+:::
 
 Finally, when the observation stream exceeds the physical or logical budget $B_{\max}$ established by the truncation policies of the runtime, the sanitization pipeline must frame the remaining text with explicit machine-readable metadata. As established in the systems literature on fault tolerance, unannounced failures induce worse cascades than explicit errors. If an observation stream is truncated by simply terminating the string at byte $B_{\max}$, the foundation model encounters an abrupt syntax cliff: an unclosed quote, an incomplete JSON object, or a severed traceback. The model frequently misinterprets this abrupt termination as a syntax bug in the underlying software, generating futile repair actions to fix code that is completely intact on the storage volume.
 
@@ -839,7 +841,7 @@ Deterministic stream sanitization guarantees that observations entering the cont
 
 Executing an external tool introduces an unavoidable temporal fault line into the agent runtime: autoregressive token decode proceeds at $10\text{ to }40\text{ milliseconds}$ per token, whereas external software operations span anywhere from hundreds of milliseconds to tens of minutes. When a foundation model emits a tool call invoking a compiler pass, a comprehensive unit test suite, a distributed data warehouse query, or a container build, the execution duration diverges from neural generation latency by three to five orders of magnitude. If an agent runtime mediates this interaction through a synchronous, blocking system call, the host thread halts, the trajectory stalls, and the entire computational loop freezes until the child process terminates or hits a wall-clock timeout.
 
-**A tool invocation is not an instantaneous function evaluation; it is an external, decoupled process lifecycle that frequently outlives the model turn that triggered it. An agent runtime must treat long-running tool calls as asynchronous background jobs, returning an opaque job handle to the trajectory, releasing the host execution thread, and decoupling the model's deliberative loop from physical execution latency while leaving accelerator memory retention policies to the underlying inference engine.**
+A tool invocation is not an instantaneous function evaluation; it is an external, decoupled process lifecycle that frequently outlives the model turn that triggered it. An agent runtime must treat long-running tool calls as asynchronous background jobs, returning an opaque job handle to the trajectory, releasing the host execution thread, and decoupling the model's deliberative loop from physical execution latency while leaving accelerator memory retention policies to the underlying inference engine.
 
 ### The Timescale Mismatch {#sec-vol3-actuation-async-mismatch}
 
@@ -999,6 +1001,7 @@ If the supervisor transmits `SIGTERM` exclusively to the parent shell process ($
 
 To enforce atomic process termination, the runtime must instantiate every background job in a distinct *process group* at creation time using `setpgid(0, 0)` within the child process before invoking `execve(2)`. When teardown is initiated, the supervisor transmits signals to the entire process group by targeting the negative process group identifier ($-\text{pgid}$).
 
+::: {#lst-vol3-process-group-teardown lst-cap="**Robust Process Group Teardown**: Non-blocking polling with mandatory `SIGKILL` escalation to eliminate orphan process leaks."}
 ```python
 def terminate_job_group(pgid: int, grace_period_sec: float = 3.0) -> None:
     """Escalate termination across process group to eliminate orphan leaks."""
@@ -1012,7 +1015,7 @@ def terminate_job_group(pgid: int, grace_period_sec: float = 3.0) -> None:
     os.killpg(pgid, signal.SIGKILL)
     os.waitpid(-pgid, 0)
 ```
-: Robust process group teardown with non-blocking polling and mandatory `SIGKILL` escalation. {#lst-vol3-process-group-teardown}
+:::
 
 As implemented in @lst-vol3-process-group-teardown, the supervisor follows a strict two-stage escalation protocol:
 
@@ -1028,7 +1031,7 @@ Yet, having engineered the mechanics of tool execution—from typed interfaces, 
 
 Every tool schema injected into an agent's execution prompt represents a permanent structural tax on the inference engine's physical memory and an attentional tax across its autoregressive decoding loop. Systems architects confronting the actuation boundary face a fundamental design trade-off between catalog depth and catalog breadth: should the agent runtime expose a small set of expressive, open-ended execution primitives—such as an unconstrained POSIX shell or an interpreted script runner—or should its capability space be partitioned across dozens or hundreds of fine-grained micro-tools governed by rigid JSON schemas? An unconstrained shell grants maximum functional flexibility and collapses multi-step workflows into a single dispatch, but it widens the authority boundary to the entire operating system and demands comprehensive sandboxing. Conversely, a sprawling catalog of narrow micro-tools restricts each invocation to a tightly audited mutation, but it floods the model's context window with schema definitions, degrades categorical selection accuracy, and forces complex tasks into high-latency, multi-turn interaction cascades.
 
-**Tool granularity trades selection ambiguity and schema overhead against expressiveness, safety, and task fit; the optimal catalog size must be evaluated empirically against workload dynamics and model capability rather than derived from dogmatic architectural extremes.**
+Tool granularity trades selection ambiguity and schema overhead against expressiveness, safety, and task fit; the optimal catalog size must be evaluated empirically against workload dynamics and model capability rather than derived from dogmatic architectural extremes.
 
 ### Catalog Cardinality Effects
 
@@ -1200,7 +1203,7 @@ Mastering the physical boundaries of tool execution—protecting context memory 
 
 A candidate token sequence generated by an autoregressive neural network transforms into a controlled external effect only when an authoritative runtime supervisor intercepts, validates, and dispatches the proposal across an explicit protection boundary. The unprivileged inference engine produces statistical predictions over a vocabulary; it possesses neither ambient authority ($A=0$) nor direct hardware access to system calls, network sockets, or persistent storage. Bridging this epistemic divide requires treating tools not as natural language suggestions or loose conversational extensions, but as strongly typed remote procedure call endpoints governed by rigid systems contracts. By mediating every phase of actuation—validating parameter schemas, negotiating capabilities through standardized discovery protocols, attaching unique idempotency leases to survive network partitions, and throttling unbounded observation streams before they saturate accelerator memory—the host runtime converts non-deterministic model generation into verifiable, fault-tolerant state transitions.
 
-::: {.callout-takeaways title="Core Systems Principles of Tool Actuation"}
+::: {.callout-takeaways title="Schemas are contracts, not conversational advice"}
 1. **Tools are external execution endpoints whose interface contracts must be strictly typed.** A language model never directly modifies physical state; it outputs symbolic arguments against an exposed schema. Rigid parameter validation, explicit structural typing, and bounded enumerations minimize epistemic ambiguity, prune invalid action spaces, and ensure that malformed candidate proposals fail closed before crossing the execution boundary.
 2. **The Model Context Protocol standardizes discovery and connectivity across heterogeneous services.** By decoupling tool definitions and data resources from monolithic host architectures, client-server discovery protocols establish a uniform wire standard for querying capabilities, managing out-of-process transports, and isolating external environments, all while leaving ultimate authorization and policy enforcement under the sovereign control of the host runtime.
 3. **Idempotency keys and transactional leases are mandatory for all mutating actions.** Network timeouts, process crashes, and transient dropouts inevitably leave distributed executions in indeterminate states. The runtime supervisor must affix deterministic idempotency keys ($K_{\text{idem}}$) and enforce transactional state reconciliation to guarantee that automated retries cannot produce duplicate mutations, phantom state corruption, or catastrophic resource leakage.
@@ -1211,5 +1214,5 @@ A candidate token sequence generated by an autoregressive neural network transfo
 Synthesized together, these principles embody the fundamental systems separation between *hypothesis generation* and *authoritative execution*. In accordance with the end-to-end argument, the correctness and integrity of an agentic system cannot rely on the model’s internal self-consistency or its probabilistic intent. Rather, invariant closure is achieved solely through the external mechanics of the supervisory runtime: deterministic schema parsers verify preconditions, cryptographic leases guarantee exactly-once operational semantics across unreliable links, and structured observation filters sanitize the raw physical consequences of each dispatched action. The tool subsystem thus functions as an operating system kernel for autonomous intelligence—converting raw, untrusted neural proposals into auditable, recoverable transactions.
 
 ::: {.callout-chapter-connection title="From Tool Interfaces to Execution Isolation"}
-Connecting an agent to external tools gives it the power to act on the world, but it also exposes the host environment to catastrophic failure. When a model dispatches arbitrary shell commands, compiles unfamiliar source code, or executes dynamically generated scripts, syntactic schema validation alone cannot prevent malicious exploits, destructive side effects, or adversarial prompt injection attacks from compromising the underlying operating system. Establishing a typed RPC interface is only half of the protection equation; the code invoked by that interface must execute in an environment where fault domains are strictly contained. In @sec-vol3-sandboxing (*Environmental Isolation*), we shift from the communication interface to the containment substrate, analyzing how hardware-isolated microVMs, WebAssembly runtimes, Linux namespaces, and capability-based security policies isolate untrusted execution without forfeiting the low-latency guarantees required by interactive agent loops.
+Connecting an agent to external tools gives it the power to act on the world, but it also exposes the host environment to catastrophic failure. When a model dispatches arbitrary shell commands, compiles unfamiliar source code, or executes dynamically generated scripts, syntactic schema validation alone cannot prevent malicious exploits, destructive side effects, or adversarial prompt injection attacks from compromising the underlying operating system. Establishing a typed RPC interface is only half of the protection equation; the code invoked by that interface must execute in an environment where fault domains are strictly contained. In Chapter 08 (*Environmental Isolation*, @sec-vol3-virtualization), we shift from the communication interface to the containment substrate, analyzing how hardware-isolated microVMs, WebAssembly runtimes, Linux namespaces, and capability-based security policies isolate untrusted execution without forfeiting the low-latency guarantees required by interactive agent loops.
 :::
