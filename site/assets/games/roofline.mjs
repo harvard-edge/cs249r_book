@@ -16,10 +16,10 @@ window.MLSP.games.roofline = async function(canvas, callbacks) {
   const container = new PIXI.Container();
   stage.addChild(container);
   
-  // Roofline coords
-  const roofX1 = 50, roofY1 = 400; // Origin
-  const roofX2 = 250, roofY2 = 100; // Ridge
-  const roofX3 = 680, roofY3 = 100; // Flat
+  // Horizontal position is operational intensity; vertical position is performance.
+  const roofX1 = 50, roofY1 = 400;
+  const roofX2 = 250, roofY2 = 100;
+  const roofX3 = 680, roofY3 = 100;
   
   const roof = new PIXI.Graphics();
   roof.moveTo(roofX1, roofY1);
@@ -35,20 +35,32 @@ window.MLSP.games.roofline = async function(canvas, callbacks) {
   } catch(e) {}
   
   container.addChild(roof);
+
+  const axisStyle = { fill: 0xa8b8c8, fontSize: 13, fontWeight: "bold" };
+  const performanceLabel = new PIXI.Text({ text: "PERFORMANCE ↑", style: axisStyle });
+  performanceLabel.position.set(20, 15);
+  container.addChild(performanceLabel);
+  const intensityLabel = new PIXI.Text({ text: "OPERATIONAL INTENSITY →", style: axisStyle });
+  intensityLabel.position.set(430, 430);
+  container.addChild(intensityLabel);
+  const phaseLabel = new PIXI.Text({ text: "MEMORY BOUND", style: { fill: 0x80e5ff, fontSize: 16, fontWeight: "bold" } });
+  phaseLabel.position.set(330, 18);
+  container.addChild(phaseLabel);
   
   const player = new PIXI.Graphics();
   player.circle(0, 0, 8);
   player.fill({ color: 0xff00ff });
   container.addChild(player);
   
-  let px = 100;
-  let py = 350;
+  let px = 75;
+  let py = 385;
   
   const keys = { ArrowUp: false, ArrowDown: false };
   const downHandler = (e) => { if(keys.hasOwnProperty(e.code)) { keys[e.code] = true; e.preventDefault(); } };
   const upHandler = (e) => { if(keys.hasOwnProperty(e.code)) { keys[e.code] = false; e.preventDefault(); } };
   window.addEventListener('keydown', downHandler, {passive: false});
   window.addEventListener('keyup', upHandler, {passive: false});
+  const steer = (direction, pressed) => { keys[direction === 'up' ? 'ArrowUp' : 'ArrowDown'] = pressed; };
   
   const walls = [];
   let wallTimer = 1000;
@@ -73,8 +85,8 @@ window.MLSP.games.roofline = async function(canvas, callbacks) {
   runtime.mountReadyOverlay(stage, {
     width: width, height: height,
     title: "ROOFLINE RIDER",
-    goal: "Stay under the cyan ceiling — that's your hardware roof.",
-    controls: "↑ ↓  steer · dodge orange walls",
+    goal: "Ride from the memory limit to the compute limit.",
+    controls: "↑ ↓ or hold the buttons · chase the cyan roof · dodge orange stalls",
     onLaunch: () => { state.started = true; }
   });
 
@@ -82,13 +94,13 @@ window.MLSP.games.roofline = async function(canvas, callbacks) {
     if (!state.started) return;
     if (state.gameOver) return;
 
+    px = Math.min(630, px + dt * 0.021);
+    phaseLabel.text = px < roofX2 ? "MEMORY BOUND" : "COMPUTE BOUND";
     if (keys.ArrowUp) py -= dt * 0.25;
     if (keys.ArrowDown) py += dt * 0.25;
     
     if (py > 400) py = 400;
     if (py < 50) py = 50;
-    
-    player.position.set(px, py);
     
     let roofY = 400;
     if (px < roofX2) {
@@ -99,24 +111,26 @@ window.MLSP.games.roofline = async function(canvas, callbacks) {
     }
     
     if (py < roofY) { 
-      state.health -= 0.8 * dt;
+      state.health = Math.max(0, state.health - 0.12 * dt);
       py += dt * 0.5;
       runtime.shake(container, 5, 50);
       player.tint = 0xff0000;
       if (Math.random() < 0.05) {
-        runtime.floatText(stage, px, py - 20, "COMPUTE ROOF!", 0xff0000, { size: 16 });
+        runtime.floatText(stage, px, py - 20, px < roofX2 ? "MEMORY LIMIT!" : "COMPUTE LIMIT!", 0xff0000, { size: 16 });
       }
     } else {
       player.tint = 0xffffff;
-      state.score += (400 - py) * dt * 0.01;
+      // Only performance close to the current hardware limit earns points.
+      state.score += Math.max(0, 100 - (py - roofY)) * dt * 0.001;
       
       if (Math.random() < 0.005 && py > 250) {
-        runtime.floatText(stage, px, py + 20, "Fly higher for more points!", 0xffff00, { size: 14 });
+        runtime.floatText(stage, px, py + 20, "Chase the roof for more points!", 0xffff00, { size: 14 });
       }
     }
+    player.position.set(px, py);
     
     wallTimer -= dt;
-    if (wallTimer <= 0) {
+    if (wallTimer <= 0 && px < 440) {
       spawnWall();
       wallTimer = 1000 + Math.random() * 1500;
     }
@@ -127,7 +141,7 @@ window.MLSP.games.roofline = async function(canvas, callbacks) {
       w.sprite.position.x = w.x;
       
       if (px > w.x && px < w.x + w.w && py > w.y && py < w.y + w.h) {
-        state.health -= 0.5 * dt;
+        state.health = Math.max(0, state.health - 0.18 * dt);
         runtime.shake(container, 8, 50);
       }
       
@@ -137,22 +151,30 @@ window.MLSP.games.roofline = async function(canvas, callbacks) {
       }
     }
     
-    callbacks.onScoreChange({ score: Math.floor(state.score), health: Math.floor(state.health) });
+    callbacks.onScoreChange({ score: Math.floor(state.score), health: Math.floor(state.health), phase: px < roofX2 ? "memory bound" : "compute bound" });
     
-    if (state.health <= 0) {
+    if (state.health <= 0 || px >= 630) {
       state.gameOver = true;
-      const go = new PIXI.Text({ text: "CRASHED\nPress R to Retry", style: { fill: 0xffffff, fontSize: 48, align: 'center' } });
+      const completed = state.health > 0;
+      const resultText = !completed ? "CRASHED" : state.score >= 900 ? "ROOFLINE RIDER!" : "SAFE, BUT SLOW!";
+      const panel = new PIXI.Graphics();
+      panel.roundRect(width / 2 - 245, height / 2 - 72, 490, 144, 14)
+        .fill({ color: 0x101827, alpha: 0.96 })
+        .stroke({ color: 0x00ffff, width: 2 });
+      stage.addChild(panel);
+      const go = new PIXI.Text({ text: resultText + "\nTap retry or press R", style: { fill: 0xffffff, fontSize: 36, fontWeight: 'bold', align: 'center' } });
       go.anchor.set(0.5);
       go.position.set(width/2, height/2);
       stage.addChild(go);
-      callbacks.onGameOver({ score: Math.floor(state.score) });
+      callbacks.onGameOver({ score: Math.floor(state.score), completed });
     }
   });
   
   return {
+    steer,
     ahaLabel: "Roofline Model",
-    ahaText: "You can't exceed memory bandwidth (the slope) or peak compute (the flat roof).",
-    ahaLink: { href: "/", label: "Read Vol I: Hardware Acceleration" },
+    ahaText: "The sloped roof is the memory bandwidth limit. Past the knee, the flat roof is peak compute. Higher intensity helps only until you reach that plateau.",
+    ahaLink: { href: "/vol1/hw_acceleration/hw_acceleration.html", label: "Read Vol I: Hardware Acceleration" },
     destroy: () => {
       window.removeEventListener('keydown', downHandler);
       window.removeEventListener('keyup', upHandler);
