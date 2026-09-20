@@ -1,1886 +1,1193 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full", app_title="Lab 04: Data Gravity & Ingestion · MLSysBook")
+app = marimo.App(
+    width="full", app_title="Lab 04: Evidence Through the Data Pipeline · MLSysBook"
+)
 
 
 @app.cell
 async def _():
-    import marimo as mo
     import sys
     from pathlib import Path
+    import marimo as mo
 
     if sys.platform == "emscripten":
         import micropip
-        await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
-        await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
-    else:
-        _labs_dir = Path(__file__).resolve().parents[1]
-        if str(_labs_dir) not in sys.path:
-            sys.path.insert(0, str(_labs_dir))
-        from bootstrap import native_bootstrap
-        native_bootstrap(__file__)
 
+        await micropip.install(
+            ["pydantic", "pint", "plotly", "pandas"], keep_going=False
+        )
+        await micropip.install(
+            "../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False
+        )
+        await micropip.install(
+            "../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False
+        )
+    else:
+        labs_dir = Path(__file__).resolve().parents[1]
+        if str(labs_dir) not in sys.path:
+            sys.path.insert(0, str(labs_dir))
+        from bootstrap import native_bootstrap
+
+        native_bootstrap(__file__)
     import plotly.graph_objects as go
+    from mlsysim.engine.v1_04_experiments import (
+        capture_experiment,
+        contract_inputs,
+        freshness_inputs,
+        get_track_scenario,
+        pipeline_inputs,
+        retention_inputs,
+        split_inputs,
+    )
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
         ACADEMIC_LAB_CSS,
-        MathPeek,
-        big_takeaways,
         build_lab_report,
-        data_pipeline_profile,
-        evaluate_pipeline,
-        gated_hypothesis_card,
         get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        instrumentation_console,
-        movement_frontier,
-        part_workflow,
-        pipeline_architecture,
         report_export_panel,
-        resolve_mlsysim_ref,
-        source_trace,
-        track_arc_context,
-        track_context,
-        track_selector,
     )
+    from mlsysbook_labs.experiment_evidence import capture_evidence, audit_evidence
 
-    ledger = DesignLedger()
-    if getattr(ledger, "is_wasm", False):
-        _ = await ledger.load_async()
+    ledger = DesignLedger(volume="vol1")
+    if ledger.is_wasm:
+        _loaded = await ledger.load_async()
     return (
         ACADEMIC_LAB_CSS,
         COLORS,
         LAB_CSS,
-        MathPeek,
         apply_plotly_theme,
-        big_takeaways,
+        audit_evidence,
         build_lab_report,
-        data_pipeline_profile,
-        evaluate_pipeline,
+        capture_evidence,
+        capture_experiment,
+        contract_inputs,
+        freshness_inputs,
         get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
+        get_track_scenario,
         go,
         ledger,
         mo,
-        movement_frontier,
-        part_workflow,
-        pipeline_architecture,
+        pipeline_inputs,
         report_export_panel,
-        resolve_mlsysim_ref,
-        source_trace,
-        track_arc_context,
-        track_context,
+        retention_inputs,
+        split_inputs,
     )
 
 
 @app.cell
-def _(get_lab_metadata):
-    v1_04_metadata = get_lab_metadata("vol1/lab_04_data_engr.py")
-    return (v1_04_metadata,)
-
-
-@app.cell(hide_code=True)
-def _(ledger, mo):
-    _options = {
-        "☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)": "cloud_fleet",
-        "🤖 Edge & Embodied Track (Robotics & Drones · Jetson AGX Orin)": "robotaxi",
-        "📱 Mobile Track (On-Device Personal AI · Apple Silicon M4 / Snapdragon)": "iphone",
-        "⚡ TinyML Track (Microcontrollers & Wearables · Cortex-M55 / ESP32-S3)": "oura_ring",
-    }
-    _saved_track = ledger.get_track()
-    _default_key = next((k for k, v in _options.items() if v == _saved_track), list(_options.keys())[0])
-    v1_04_track_picker = mo.ui.dropdown(
-        options=_options,
-        value=_default_key,
-        label="Select Course / Industry Track",
-    )
-    return (v1_04_track_picker,)
-
-
-@app.cell
-def _(
-    data_pipeline_profile,
-    get_lab_track_variant,
-    get_track_profile,
-    resolve_mlsysim_ref,
-    v1_04_track_picker,
-):
-    # Cross-tier hardware targets: Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Unified
-    v1_04_track_id = v1_04_track_picker.value
-    v1_04_profile = get_track_profile(v1_04_track_id)
-    v1_04_variant = get_lab_track_variant("v1_04_data_gravity", v1_04_profile.track_id)
-    v1_04_hardware = resolve_mlsysim_ref(v1_04_variant.hardware_ref)
-    v1_04_model = resolve_mlsysim_ref(v1_04_variant.model_ref)
-    v1_04_pipeline_profile = data_pipeline_profile(
-        v1_04_profile,
-        v1_04_variant,
-        v1_04_hardware,
-        v1_04_model,
-    )
-    return v1_04_pipeline_profile, v1_04_profile, v1_04_variant
-
-
-@app.cell
-def _():
-    import html as _html
-
-    def v1_04_clamp(value, low, high):
-        return max(low, min(high, float(value)))
-
-    def v1_04_fmt(value, unit="", precision=1):
-        if isinstance(value, str):
-            return _html.escape(value)
-        if isinstance(value, bool):
-            return "yes" if value else "no"
-        if isinstance(value, int):
-            text = f"{value:,}"
-        else:
-            text = f"{float(value):,.{precision}f}"
-        return f"{text} {unit}".strip()
-
-    def v1_04_track_spec(track_id):
-        specs = {
-            "iphone": {
-                "quality_subject": "private camera and app-context feature windows",
-                "quality_failure": "private local data passes schema checks but loses coverage or leaks context",
-                "base_defect_pct": 6.0,
-                "target_defect_pct": 1.5,
-                "coverage_floor_pct": 86.0,
-                "review_limit_pct": 12.0,
-                "true_metric_pct": 87.0,
-                "validity_floor_pct": 84.0,
-                "required_gap_h": 24.0,
-                "leakage_allow_pct": 0.8,
-                "freshness_sla_s": 8.0,
-                "worker_base": 4.0,
-                "worker_label": "on-device preprocessing lanes",
-                "throughput_failure": "radio and local preprocessing pressure make the feature stale and battery-expensive",
-                "contract_focus": "consent, deletion, feature schema, privacy lineage",
-                "contract_threshold": 18.0,
-                "debt_base": 9.0,
-                "report_artifact": "local/private feature pipeline memo",
-                "residual_risk": "rare private failures may remain unobservable if raw samples stay on-device",
-            },
-            "oura_ring": {
-                "quality_subject": "nighttime PPG, temperature, motion, and derived biosignal windows",
-                "quality_failure": "sensor dropout looks like clean data unless quality is budgeted by window",
-                "base_defect_pct": 8.0,
-                "target_defect_pct": 2.0,
-                "coverage_floor_pct": 82.0,
-                "review_limit_pct": 10.0,
-                "true_metric_pct": 85.0,
-                "validity_floor_pct": 82.0,
-                "required_gap_h": 12.0,
-                "leakage_allow_pct": 0.7,
-                "freshness_sla_s": 60.0,
-                "worker_base": 2.0,
-                "worker_label": "firmware processing slots",
-                "throughput_failure": "nighttime duty cycle and tiny flash create backlog before the phone syncs",
-                "contract_focus": "sensor schema, duty-cycle guardrail, OTA compatibility, health-data lineage",
-                "contract_threshold": 16.0,
-                "debt_base": 11.0,
-                "report_artifact": "nighttime sensor pipeline memo",
-                "residual_risk": "summaries can miss waveform anomalies that never trigger snippet retention",
-            },
-            "robotaxi": {
-                "quality_subject": "rare-event labels, scenario tags, and multi-sensor alignment windows",
-                "quality_failure": "rare safety cases are under-counted even when aggregate labels look good",
-                "base_defect_pct": 4.5,
-                "target_defect_pct": 0.6,
-                "coverage_floor_pct": 94.0,
-                "review_limit_pct": 18.0,
-                "true_metric_pct": 93.0,
-                "validity_floor_pct": 91.0,
-                "required_gap_h": 48.0,
-                "leakage_allow_pct": 0.5,
-                "freshness_sla_s": 20.0,
-                "worker_base": 8.0,
-                "worker_label": "triage workers per vehicle batch",
-                "throughput_failure": "sensor streams overwhelm local triage and erase long-tail safety evidence",
-                "contract_focus": "scenario-label ontology, route/time splits, safety lineage, redaction",
-                "contract_threshold": 12.0,
-                "debt_base": 13.0,
-                "report_artifact": "safety validation data memo",
-                "residual_risk": "unknown rare events can be filtered out before upload or review",
-            },
-            "cloud_fleet": {
-                "quality_subject": "object-store shards, feature logs, production feedback, and freshness monitors",
-                "quality_failure": "freshness and null drift pass local schemas but poison downstream features",
-                "base_defect_pct": 5.5,
-                "target_defect_pct": 1.0,
-                "coverage_floor_pct": 90.0,
-                "review_limit_pct": 15.0,
-                "true_metric_pct": 90.0,
-                "validity_floor_pct": 88.0,
-                "required_gap_h": 24.0,
-                "leakage_allow_pct": 0.8,
-                "freshness_sla_s": 15.0,
-                "worker_base": 16.0,
-                "worker_label": "preprocessing worker groups",
-                "throughput_failure": "accelerators starve when object-store reads and preprocessing tails backlog",
-                "contract_focus": "producer schema, feature freshness, regional retention, access control",
-                "contract_threshold": 15.0,
-                "debt_base": 12.0,
-                "report_artifact": "feature freshness and contract memo",
-                "residual_risk": "cached or late-arriving features can bias training and serving comparisons",
-            },
-        }
-        return specs.get(track_id, specs["iphone"])
-
-    def v1_04_fields_html(fields):
-        items = []
-        for label, value in fields.items():
-            items.append(
-                f'<div class="mlsysbook-field"><strong>{_html.escape(str(label))}</strong>{_html.escape(str(value))}</div>'
-            )
-        return "".join(items)
-
-    def v1_04_table_html(headers, rows, *, numeric=()):
-        head = "".join(
-            f'<th style="text-align:{"right" if index in numeric else "left"};">{_html.escape(str(header))}</th>'
-            for index, header in enumerate(headers)
-        )
-        body_rows = []
-        for row in rows:
-            cells = []
-            for index, value in enumerate(row):
-                cells.append(
-                    f'<td style="text-align:{"right" if index in numeric else "left"};">{_html.escape(str(value))}</td>'
-                )
-            body_rows.append("<tr>" + "".join(cells) + "</tr>")
-        return f"""
-        <table style="width:100%; border-collapse:collapse; margin-top:14px; font-size:0.86rem;">
-          <thead><tr style="border-bottom:1px solid #D9DEE8; color:#667085;">{head}</tr></thead>
-          <tbody>{"".join(body_rows)}</tbody>
-        </table>
-        """
-
-    def v1_04_callout_html(title, body, *, kind="info"):
-        palette = {
-            "info": ("#1F4E7A", "#EFF8FF", "#B2DDFF"),
-            "ok": ("#247A4D", "#F8FFFB", "#B8D8C6"),
-            "warn": ("#B54708", "#FFFAEB", "#FEDF89"),
-            "fail": ("#B42318", "#FEF3F2", "#FECDCA"),
-        }
-        accent, background, border = palette.get(kind, palette["info"])
-        return f"""
-        <div class="mlsysbook-callout" style="border-left:4px solid {accent}; background:{background};
-             border-top:1px solid {border}; border-right:1px solid {border}; border-bottom:1px solid {border};
-             padding:12px 14px; border-radius:8px; line-height:1.55;">
-          <strong>{_html.escape(str(title))}</strong> {_html.escape(str(body))}
-        </div>
-        """
-
-    def v1_04_prediction_html(title, prediction_value, actual_value, label_map):
-        if prediction_value is None:
-            return v1_04_callout_html(
-                title,
-                "Commit a structured prediction before treating the evidence as a decision.",
-                kind="warn",
-            )
-        predicted = label_map.get(prediction_value, str(prediction_value))
-        actual = label_map.get(actual_value, str(actual_value))
-        kind = "ok" if prediction_value == actual_value else "warn"
-        return v1_04_callout_html(
-            title,
-            f"Predicted: {predicted}. Measured: {actual}.",
-            kind=kind,
-        )
-
-    def v1_04_quality_budget(profile, strictness_pct, review_pct):
-        spec = v1_04_track_spec(profile.track_id)
-        strictness = v1_04_clamp(strictness_pct, 0.0, 100.0)
-        review = v1_04_clamp(review_pct, 0.0, 25.0)
-        base_defects = spec["base_defect_pct"] / 100.0 * 10_000
-        detection_rate = v1_04_clamp(0.18 + 0.0055 * strictness + 0.018 * review, 0.0, 0.94)
-        caught = base_defects * detection_rate
-        residual = max(0.0, base_defects - caught)
-        residual_pct = residual / 100.0
-        target = spec["target_defect_pct"] / 100.0 * 10_000
-        coverage_loss = (strictness / 100.0) ** 1.35 * 10.5 + review * 0.08
-        coverage = max(0.0, 100.0 - coverage_loss)
-        review_load = review
-        if residual > target:
-            actual_failure = "residual_defects"
-            mitigation = "raise validation strictness, add semantic monitors, or increase review sampling"
-        elif coverage < spec["coverage_floor_pct"]:
-            actual_failure = "coverage_loss"
-            mitigation = "relax low-value filters and add targeted collection for lost cohorts"
-        elif review_load > spec["review_limit_pct"]:
-            actual_failure = "review_load"
-            mitigation = "route review toward high-entropy or high-risk examples"
-        else:
-            actual_failure = "inside_budget"
-            mitigation = "keep the quality gate and monitor for drift"
-        return {
-            "subject": spec["quality_subject"],
-            "base_defects_per_10k": base_defects,
-            "caught_defects_per_10k": caught,
-            "residual_defects_per_10k": residual,
-            "residual_defect_pct": residual_pct,
-            "target_defects_per_10k": target,
-            "target_defect_pct": spec["target_defect_pct"],
-            "coverage_retained_pct": coverage,
-            "coverage_floor_pct": spec["coverage_floor_pct"],
-            "review_load_pct": review_load,
-            "review_limit_pct": spec["review_limit_pct"],
-            "detection_rate_pct": detection_rate * 100.0,
-            "pass": actual_failure == "inside_budget",
-            "actual_failure": actual_failure,
-            "mitigation": mitigation,
-            "narrative": spec["quality_failure"],
-        }
-
-    def v1_04_split_integrity(profile, leakage_pressure_pct, split_policy, temporal_gap_h):
-        spec = v1_04_track_spec(profile.track_id)
-        policies = {
-            "random_record": ("Random record split", 1.00, "duplicates and related entities cross the boundary"),
-            "entity_grouped": ("Entity/session grouped split", 0.35, "related examples are mostly isolated"),
-            "time_entity": ("Time-aware entity split", 0.08, "future and entity leakage are both controlled"),
-        }
-        label, factor, note = policies.get(split_policy, policies["random_record"])
-        leakage_pressure = v1_04_clamp(leakage_pressure_pct, 0.0, 25.0)
-        gap = v1_04_clamp(temporal_gap_h, 0.0, 168.0)
-        time_leak = max(0.0, (spec["required_gap_h"] - gap) / max(spec["required_gap_h"], 1.0)) * 4.0
-        effective_leakage = leakage_pressure * factor + time_leak
-        inflation = min(12.0, effective_leakage * 0.72 + leakage_pressure * 0.05)
-        reported_metric = min(99.5, spec["true_metric_pct"] + inflation)
-        adjusted_metric = max(0.0, spec["true_metric_pct"] - max(0.0, effective_leakage - spec["leakage_allow_pct"]) * 0.28)
-        valid = effective_leakage <= spec["leakage_allow_pct"] and gap >= spec["required_gap_h"]
-        if effective_leakage > spec["leakage_allow_pct"]:
-            actual = "invalid_leakage"
-            mitigation = "redo the split with entity and time boundaries before using the metric"
-        elif gap < spec["required_gap_h"]:
-            actual = "invalid_time"
-            mitigation = "rebuild features with point-in-time retrieval and a larger temporal gap"
-        else:
-            actual = "valid"
-            mitigation = "the split is defensible for this scenario"
-        return {
-            "policy_label": label,
-            "policy_note": note,
-            "effective_leakage_pct": effective_leakage,
-            "allowed_leakage_pct": spec["leakage_allow_pct"],
-            "temporal_gap_h": gap,
-            "required_gap_h": spec["required_gap_h"],
-            "reported_metric_pct": reported_metric,
-            "adjusted_metric_pct": adjusted_metric,
-            "validity_floor_pct": spec["validity_floor_pct"],
-            "valid": valid,
-            "actual_failure": actual,
-            "mitigation": mitigation,
-        }
-
-    def v1_04_backlog_model(profile, pipeline_result, worker_count):
-        spec = v1_04_track_spec(profile.track_id)
-        workers = v1_04_clamp(worker_count, 1.0, 64.0)
-        arrival = pipeline_result.effective_rate_mb_s
-        base_workers = max(spec["worker_base"], 1.0)
-        capacities = {
-            "ingest": profile.ingest_capacity_mb_s,
-            "preprocess": profile.preprocess_capacity_mb_s * workers / base_workers / 0.85,
-            "storage write": profile.storage_capacity_mb_s / 0.65,
-            "upload/movement": profile.upload_capacity_mb_s,
-        }
-        bottleneck_stage = min(capacities, key=capacities.get)
-        service = max(0.001, capacities[bottleneck_stage])
-        utilization = arrival / service * 100.0
-        window_s = 30 * 60
-        backlog_mb = max(0.0, arrival - service) * window_s
-        freshness_lag_s = backlog_mb / service if service > 0 else 999999.0
-        feasible = arrival <= service and freshness_lag_s <= spec["freshness_sla_s"]
-        times = [0, 5, 10, 15, 20, 25, 30]
-        backlog_gb_series = [max(0.0, arrival - service) * minute * 60 / 1024.0 for minute in times]
-        if feasible:
-            actual_failure = "no_failure"
-            mitigation = "capacity exceeds arrival rate inside the freshness budget"
-        else:
-            actual_failure = bottleneck_stage
-            mitigation = "reduce data arrival, move compute to data, add capacity at the bottleneck, or relax freshness"
-        return {
-            "arrival_mb_s": arrival,
-            "service_mb_s": service,
-            "worker_count": workers,
-            "worker_label": spec["worker_label"],
-            "bottleneck_stage": bottleneck_stage,
-            "utilization_pct": utilization,
-            "backlog_gb": backlog_mb / 1024.0,
-            "freshness_lag_s": freshness_lag_s,
-            "freshness_sla_s": spec["freshness_sla_s"],
-            "feasible": feasible,
-            "actual_failure": actual_failure,
-            "mitigation": mitigation,
-            "times_min": times,
-            "backlog_gb_series": backlog_gb_series,
-            "narrative": spec["throughput_failure"],
-            "capacities": capacities,
-        }
-
-    def v1_04_contract_governance(profile, movement_result, contract_policy, change_pressure_pct):
-        spec = v1_04_track_spec(profile.track_id)
-        policies = {
-            "none": ("No enforced contract", 0.12, False, False),
-            "schema": ("Schema-only checks", 0.42, False, False),
-            "schema_semantic": ("Schema + semantic checks", 0.68, True, False),
-            "lineage_semantic": ("Schema + semantic + lineage", 0.86, True, True),
-            "blocking": ("Blocking contract with lineage and freshness SLO", 0.94, True, True),
-        }
-        label, enforcement, semantic, lineage = policies.get(contract_policy, policies["schema"])
-        change_pressure = v1_04_clamp(change_pressure_pct, 0.0, 40.0)
-        growth_rate = change_pressure / 100.0
-        debt_before = spec["debt_base"] * ((1.0 + growth_rate) ** 3)
-        movement_penalty = max(0.0, 100.0 - movement_result.quality_retained_pct) * 0.25
-        privacy_penalty = 5.0 if "raw" in movement_result.privacy_risk.lower() else 1.5
-        debt_before += movement_penalty + privacy_penalty
-        caught_debt = debt_before * enforcement
-        silent_debt = max(0.0, debt_before - caught_debt)
-        freshness_penalty = min(35.0, movement_result.effective_latency_s / max(spec["freshness_sla_s"], 1.0) * 0.08)
-        debt_index = silent_debt + freshness_penalty
-        if contract_policy == "none":
-            actual_control = "schema"
-            mitigation = "add a producer schema contract before downstream consumers depend on this data"
-        elif not semantic:
-            actual_control = "semantic"
-            mitigation = "add semantic distribution and freshness checks, not only schema checks"
-        elif not lineage:
-            actual_control = "lineage"
-            mitigation = "add lineage and point-in-time provenance before approving the downstream contract"
-        elif debt_index > spec["contract_threshold"]:
-            actual_control = "freshness"
-            mitigation = "make freshness and incompatible upstream changes blocking contract failures"
-        else:
-            actual_control = "contract_ok"
-            mitigation = "the contract is strong enough for this scenario; monitor residual debt"
-        return {
-            "policy_label": label,
-            "contract_focus": spec["contract_focus"],
-            "enforcement_pct": enforcement * 100.0,
-            "lineage": lineage,
-            "semantic": semantic,
-            "debt_before": debt_before,
-            "caught_debt": caught_debt,
-            "silent_debt_index": debt_index,
-            "contract_threshold": spec["contract_threshold"],
-            "actual_control": actual_control,
-            "pass": actual_control == "contract_ok",
-            "mitigation": mitigation,
-            "report_artifact": spec["report_artifact"],
-            "track_residual_risk": spec["residual_risk"],
-        }
-
-    def v1_04_binding_constraint(quality, split, throughput, contract):
-        candidates = []
-        candidates.append((
-            "quality budget",
-            max(0.0, quality["residual_defects_per_10k"] - quality["target_defects_per_10k"]),
-            quality["mitigation"],
-            quality["pass"],
-        ))
-        candidates.append((
-            "split integrity",
-            max(0.0, split["effective_leakage_pct"] - split["allowed_leakage_pct"]) * 100.0,
-            split["mitigation"],
-            split["valid"],
-        ))
-        candidates.append((
-            "throughput/backlog",
-            max(0.0, throughput["utilization_pct"] - 100.0) + throughput["backlog_gb"],
-            throughput["mitigation"],
-            throughput["feasible"],
-        ))
-        candidates.append((
-            "data contract",
-            max(0.0, contract["silent_debt_index"] - contract["contract_threshold"]) * 5.0,
-            contract["mitigation"],
-            contract["pass"],
-        ))
-        failing = [item for item in candidates if not item[3]]
-        selected = max(failing or candidates, key=lambda item: item[1])
-        return {
-            "label": selected[0],
-            "severity": selected[1],
-            "mitigation": selected[2],
-            "all_pass": not failing,
-        }
-
-    def v1_04_snapshot(quality, split, throughput, contract):
-        return {
-            "quality": {
-                "residual_defects_per_10k": quality["residual_defects_per_10k"],
-                "target_defects_per_10k": quality["target_defects_per_10k"],
-                "coverage_retained_pct": quality["coverage_retained_pct"],
-                "pass": quality["pass"],
-            },
-            "split": {
-                "effective_leakage_pct": split["effective_leakage_pct"],
-                "reported_metric_pct": split["reported_metric_pct"],
-                "adjusted_metric_pct": split["adjusted_metric_pct"],
-                "valid": split["valid"],
-            },
-            "throughput": {
-                "bottleneck_stage": throughput["bottleneck_stage"],
-                "utilization_pct": throughput["utilization_pct"],
-                "backlog_gb": throughput["backlog_gb"],
-                "freshness_lag_s": throughput["freshness_lag_s"],
-                "feasible": throughput["feasible"],
-            },
-            "contract": {
-                "policy_label": contract["policy_label"],
-                "silent_debt_index": contract["silent_debt_index"],
-                "contract_threshold": contract["contract_threshold"],
-                "pass": contract["pass"],
-            },
-        }
-
-    return (
-        v1_04_backlog_model,
-        v1_04_binding_constraint,
-        v1_04_callout_html,
-        v1_04_contract_governance,
-        v1_04_fields_html,
-        v1_04_prediction_html,
-        v1_04_quality_budget,
-        v1_04_snapshot,
-        v1_04_split_integrity,
-        v1_04_table_html,
-        v1_04_track_spec,
-    )
-
-
-@app.cell(hide_code=True)
-def _(
-    ACADEMIC_LAB_CSS,
-    COLORS,
-    LAB_CSS,
-    mo,
-    part_workflow,
-    source_trace,
-    track_arc_context,
-    track_context,
-    v1_04_metadata,
-    v1_04_pipeline_profile,
-    v1_04_profile,
-    v1_04_track_picker,
-    v1_04_track_spec,
-    v1_04_variant,
-):
-    _spec = v1_04_track_spec(v1_04_profile.track_id)
-    mo.vstack([
-        LAB_CSS,
-        ACADEMIC_LAB_CSS,
-        mo.Html(f"""
-        <div class="mlsysbook-lab-shell">
-          <div style="margin-bottom: 16px;">
-            {v1_04_track_picker}
-          </div>
-          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
-            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
-              ML Systems Textbook &middot; Volume I &middot; Chapter 4 &middot; Foundational Lab 04
-            </div>
-            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
-              Data Engineering: Quality Budgets &amp; Ingestion Architectures
-            </h1>
-            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
-              {v1_04_variant.workload_summary} Co-design quality budgets, audit temporal and entity leakage across evaluation splits, dimension ingestion pipeline throughput, and enforce schema contracts against silent data debt.
-            </p>
-            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Track:</strong> {v1_04_profile.label}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Data Source:</strong> {v1_04_pipeline_profile.data_source}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Hardware:</strong> {v1_04_variant.hardware_ref}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Model:</strong> {v1_04_variant.model_ref}
-              </span>
-              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
-                <strong>Primary Focus:</strong> Ingestion &amp; Split Integrity
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Deliverable:</strong> {_spec["report_artifact"]}
-              </span>
-            </div>
-          </div>
-
-          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
-              System Scenario: {v1_04_profile.label} Pipeline Engineering
-            </h3>
-            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
-              You are the <strong>{v1_04_variant.stakeholder}</strong> responsible for the ingestion path feeding <strong>{v1_04_variant.model_ref}</strong> on <strong>{v1_04_variant.hardware_ref}</strong>. The pipeline processes high-rate telemetry from <strong>{v1_04_pipeline_profile.data_source}</strong>. Unmitigated defects escape into feature tables, data leakage across train/validation boundaries creates false offline confidence, and arrival bursts threaten to breach freshness SLAs.
-            </p>
-            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
-              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
-                The Architectural Invariants of Data Engineering:
-              </div>
-              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
-                <li><strong>The Data-as-Infrastructure Invariant:</strong> Machine learning models inherit their behaviors, blind spots, and failure modes directly from upstream data transformations. A pipeline bug is mathematically equivalent to an erroneous model parameter.</li>
-                <li><strong>The Leakage Conservation Law:</strong> Information leaked across evaluation boundaries (temporal, session, or entity) directly inflates observed validation accuracy (<em>M</em><sub>obs</sub> &gt; <em>M</em><sub>prod</sub>) while guaranteeing silent catastrophic production failure.</li>
-                <li><strong>The Ingestion Capacity Constraint:</strong> Pipeline arrival rates (&lambda;) must strictly remain within sustainable worker service capacity (&mu;) under peak burst factors: &lambda;<sub>peak</sub> &le; <em>N</em><sub>workers</sub> &middot; &mu;. Backpressure and queuing policies prevent unrecoverable freshness lag.</li>
-                <li><strong>The Contract Governance Invariant:</strong> Unenforced schema evolution and silent distribution drift produce compound data debt. Automated data contracts with explicit breaking change gates protect downstream inference surfaces.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['BlueLine']};
-                    background: white; border-radius: 0 12px 12px 0;
-                    padding: 20px 28px; margin: 8px 0 16px 0;
-                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Budget quality:</strong>
-                    trade defect detection against coverage loss and review bottleneck.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Audit split integrity:</strong>
-                    quantify and eliminate temporal and entity leakage before training.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Dimension ingestion:</strong>
-                    balance arrival rates, worker counts, queue backlogs, and freshness SLAs.</div>
-                <div style="margin-bottom: 3px;">4. <strong>Govern contracts:</strong>
-                    enforce schemas, retention limits, and data lineage against compound data debt.</div>
-            </div>
-            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
-                        padding: 16px 28px 0 28px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Core Question
-                </div>
-                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                            line-height: 1.5; font-style: italic;">
-                    "How do we architect an ingestion and validation pipeline for {v1_04_profile.label} that minimizes defect escape and prevents silent data debt while respecting physical compute and memory limits?"
-                </div>
-            </div>
-        </div>
-        """),
-        track_context(v1_04_profile),
-        track_arc_context(v1_04_profile, v1_04_metadata.lab_id),
-        part_workflow(
-            "V1-04 Data Engineering Workflow",
-            (
-                {
-                    "part": "Part A",
-                    "concept": "Data quality is a measurable budget",
-                    "prediction": "Predict which quality budget term fails first.",
-                    "controls": "Tune validation strictness and review sampling.",
-                    "evidence": "Compare caught defects, residual defects, coverage, and review load.",
-                    "decision": "Choose the quality gate you would defend.",
-                },
-                {
-                    "part": "Part B",
-                    "concept": "Leakage can invalidate good-looking metrics",
-                    "prediction": "Predict whether the metric is valid under the split boundary.",
-                    "controls": "Change leakage pressure, split policy, and temporal gap.",
-                    "evidence": "Compare reported and leakage-adjusted metric evidence.",
-                    "decision": "Choose whether to ship, redo the split, or block the metric.",
-                },
-                {
-                    "part": "Part C",
-                    "concept": "Throughput and backlog are physical constraints",
-                    "prediction": "Predict the first stage that makes the pipeline fall behind.",
-                    "controls": "Adjust arrival pressure and processing workers.",
-                    "evidence": "Inspect utilization, backlog growth, and freshness lag.",
-                    "decision": "Choose the capacity or demand policy.",
-                },
-                {
-                    "part": "Part D",
-                    "concept": "Contracts prevent downstream data debt",
-                    "prediction": "Predict which governance control prevents the next failure.",
-                    "controls": "Select movement, retention, contract policy, network, and upstream change pressure.",
-                    "evidence": "Compare movement frontier, caught violations, and silent debt.",
-                    "decision": "Choose the contract gate for the final memo.",
-                },
-            ),
-            scenario=(
-                f"You are the {v1_04_variant.stakeholder.lower()} for {v1_04_pipeline_profile.label}; "
-                f"the data source is {v1_04_pipeline_profile.data_source}."
-            ),
-            reflection="The synthesis records one binding data constraint and one residual risk in the Design Ledger.",
-        ),
-        source_trace(
-            {
-                "chapter": "vol1/data_engineering/data_engineering.qmd",
-                "anchors": (
-                    "Dataset Compilation",
-                    "Data quality as code",
-                    "Data ingestion and backpressure",
-                    "Transformation lineage",
-                    "Data debt",
-                ),
-                "shared_helper": "mlsysbook_labs.data_pipeline",
-                "scenario_id": v1_04_variant.scenario_id,
-            },
-            summary="Opening source map",
-        ),
-    ])
-    return
-
-
-@app.cell(hide_code=True)
 def _(mo):
-    v1_04_quality_prediction = mo.ui.radio(
-        options={
-            "Residual defects exceed the budget": "residual_defects",
-            "Strict filters remove too much coverage": "coverage_loss",
-            "Review/audit load exceeds capacity": "review_load",
-            "The quality gate stays inside budget": "inside_budget",
-        },
-        label="Part A prediction: which quality budget term fails first?",
-    )
-    v1_04_validation_strictness = mo.ui.slider(
-        start=20,
-        stop=95,
-        value=65,
-        step=5,
-        label="Validation strictness (%)",
-    )
-    v1_04_review_sample = mo.ui.slider(
-        start=0,
-        stop=20,
-        value=5,
-        step=1,
-        label="Review/audit sample (%)",
-    )
-    v1_04_quality_checkpoint = mo.ui.radio(
-        options={
-            "Tighten semantic validation and rerun before training": "tighten_validation",
-            "Increase targeted review for high-risk records": "increase_review",
-            "Relax filters and collect missing coverage": "restore_coverage",
-            "Accept this quality gate and monitor drift": "accept_quality_gate",
-        },
-        label="Part A checkpoint: what quality gate goes into the memo?",
-    )
-    return (
-        v1_04_quality_checkpoint,
-        v1_04_quality_prediction,
-        v1_04_review_sample,
-        v1_04_validation_strictness,
-    )
+    get_evidence, set_evidence = mo.state({})
+    return get_evidence, set_evidence
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    v1_04_split_prediction = mo.ui.radio(
-        options={
-            "Metric is valid enough to use": "valid",
-            "Metric is inflated by leakage": "invalid_leakage",
-            "Metric uses future or stale features": "invalid_time",
-        },
-        label="Part B prediction: is the reported metric valid evidence?",
+@app.cell
+def _(mo, set_evidence):
+    track = mo.ui.dropdown(
+        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
+        value="TinyML",
+        label="Deployment track",
+        on_change=lambda _value: set_evidence({}),
     )
-    v1_04_leakage_pressure = mo.ui.slider(
-        start=0,
-        stop=20,
-        value=8,
-        step=1,
-        label="Duplicate/entity/future leakage pressure (%)",
-    )
-    v1_04_split_policy = mo.ui.dropdown(
-        options={
-            "Random record split": "random_record",
-            "Entity/session grouped split": "entity_grouped",
-            "Time-aware entity split": "time_entity",
-        },
-        value="Random record split",
-        label="Split policy",
-    )
-    v1_04_temporal_gap = mo.ui.slider(
-        start=0,
-        stop=96,
-        value=8,
-        step=4,
-        label="Temporal gap before evaluation (hours)",
-    )
-    v1_04_split_checkpoint = mo.ui.radio(
-        options={
-            "Use the metric as release evidence": "use_metric",
-            "Redo the split with entity and time boundaries": "redo_split",
-            "Block until point-in-time features are fixed": "block_point_in_time",
-        },
-        label="Part B checkpoint: what happens to the metric?",
-    )
-    return (
-        v1_04_leakage_pressure,
-        v1_04_split_checkpoint,
-        v1_04_split_policy,
-        v1_04_split_prediction,
-        v1_04_temporal_gap,
-    )
+    return (track,)
 
 
-@app.cell(hide_code=True)
-def _(mo, v1_04_pipeline_profile):
-    v1_04_throughput_prediction = mo.ui.radio(
-        options={
-            "Ingest is the first flow wall": "ingest",
-            "Preprocessing is the first flow wall": "preprocess",
-            "Storage write is the first flow wall": "storage write",
-            "Upload/movement is the first flow wall": "upload/movement",
-            "No flow wall inside the tested envelope": "no_failure",
-        },
-        label="Part C prediction: which stage creates backlog first?",
-    )
-    v1_04_flow_multiplier = mo.ui.slider(
-        start=v1_04_pipeline_profile.sample_min,
-        stop=v1_04_pipeline_profile.sample_max,
-        value=v1_04_pipeline_profile.default_sample_multiplier,
-        step=v1_04_pipeline_profile.sample_step,
-        label="Sampling or traffic multiplier",
-    )
-    v1_04_worker_count = mo.ui.slider(
-        start=1,
-        stop=64,
-        value=8 if v1_04_pipeline_profile.track_id in {"robotaxi", "cloud_fleet"} else 4,
-        step=1,
-        label="Processing workers or lanes",
-    )
-    v1_04_throughput_checkpoint = mo.ui.radio(
-        options={
-            "Add capacity at the bottleneck": "add_capacity",
-            "Reduce collection rate or sampling": "reduce_arrival",
-            "Move compute closer to data": "move_compute",
-            "Accept the backlog with an explicit freshness risk": "accept_backlog",
-        },
-        label="Part C checkpoint: what policy controls flow?",
-    )
-    return (
-        v1_04_flow_multiplier,
-        v1_04_throughput_checkpoint,
-        v1_04_throughput_prediction,
-        v1_04_worker_count,
-    )
+@app.cell
+def _(get_track_scenario, track):
+    track_id = track.value
+    scenario = get_track_scenario(track_id)
+    profile = {
+        "tinyml": ("TinyML", "wearable sensor windows and a phone sync"),
+        "mobile": ("Mobile", "private on-device context features"),
+        "edge": ("Edge", "rare-event multi-sensor records"),
+        "cloud": ("Cloud", "object-store shards and feature logs"),
+    }[track_id]
+    return profile, scenario, track_id
 
 
-@app.cell(hide_code=True)
-def _(mo, v1_04_pipeline_profile):
-    _strategy_options = {strategy.label: strategy.strategy_id for strategy in v1_04_pipeline_profile.strategies}
-    v1_04_contract_prediction = mo.ui.radio(
-        options={
-            "Schema checks prevent the next failure": "schema",
-            "Semantic distribution checks prevent it": "semantic",
-            "Lineage and point-in-time provenance prevent it": "lineage",
-            "Freshness SLO enforcement prevents it": "freshness",
-            "No new contract is needed": "contract_ok",
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    a_prediction = mo.ui.radio(
+        ["Newest records", "Widest cohort coverage", "Remove duplicates first"],
+        label="Which policy preserves the most useful evidence under the fixed budget?",
+    ).form(submit_button_label="Lock Part A prediction")
+    b_prediction = mo.ui.radio(
+        [
+            "The higher accuracy is trustworthy",
+            "The higher accuracy is contaminated",
+            "Both are equally trustworthy",
+        ],
+        label="What will the split comparison show?",
+    ).form(submit_button_label="Lock Part B prediction")
+    c_prediction = mo.ui.radio(
+        [
+            "Read will bind",
+            "Decode will bind",
+            "Transform will bind",
+            "The target will be met",
+        ],
+        label="What will bind after the pipeline change?",
+    ).form(submit_button_label="Lock Part C prediction")
+    d_prediction = mo.ui.radio(
+        [
+            "Batch is fresh enough",
+            "Streaming earns its traffic",
+            "Local features earn their compute",
+        ],
+        label="Which freshness policy best fits this track?",
+    ).form(submit_button_label="Lock Part D prediction")
+    e_prediction = mo.ui.radio(
+        [
+            "Schema checks catch the change",
+            "Semantic checks are required",
+            "No contract is cheaper overall",
+        ],
+        label="What happens when meaning changes without a type change?",
+    ).form(submit_button_label="Lock Part E prediction")
+    return a_prediction, b_prediction, c_prediction, d_prediction, e_prediction
+
+
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    a_policy = mo.ui.dropdown(
+        {
+            "Coverage first": "coverage",
+            "Deduplicate first": "deduplicate",
+            "Newest first": "newest",
         },
-        label="Part D prediction: which governance control prevents the next downstream failure?",
-    )
-    v1_04_strategy = mo.ui.dropdown(
-        options=_strategy_options,
-        value=v1_04_pipeline_profile.strategies[0].label,
-        label="Movement strategy",
-    )
-    v1_04_dataset_gb = mo.ui.slider(
-        start=1,
-        stop=5000,
-        value=500,
-        step=50,
-        label="Dataset or event window to move (GB)",
-    )
-    v1_04_network_gbps = mo.ui.dropdown(
-        options={"1 Gbps": 1, "10 Gbps": 10, "25 Gbps": 25, "100 Gbps": 100},
-        value="10 Gbps",
-        label="Network bandwidth",
-    )
-    _retention_options = {policy: policy for policy in v1_04_pipeline_profile.retention_options}
-    v1_04_retention_policy = mo.ui.dropdown(
-        options=_retention_options,
-        value=v1_04_pipeline_profile.retention_options[0],
+        value="Coverage first",
         label="Retention policy",
     )
-    v1_04_contract_policy = mo.ui.dropdown(
-        options={
-            "No enforced contract": "none",
-            "Schema-only checks": "schema",
-            "Schema + semantic checks": "schema_semantic",
-            "Schema + semantic + lineage": "lineage_semantic",
-            "Blocking contract with lineage and freshness SLO": "blocking",
-        },
-        value="Schema + semantic checks",
-        label="Contract enforcement",
+    b_strategy = mo.ui.dropdown(
+        {"Entity-disjoint": "entity", "Record split": "record"},
+        value="Entity-disjoint",
+        label="Split strategy",
     )
-    v1_04_change_pressure = mo.ui.slider(
-        start=0,
-        stop=35,
-        value=12,
-        step=1,
-        label="Upstream change pressure (% per release cycle)",
+    b_scope = mo.ui.dropdown(
+        {"Fit on train only": "train", "Fit before split": "all"},
+        value="Fit on train only",
+        label="Preprocessing scope",
     )
-    v1_04_contract_checkpoint = mo.ui.radio(
-        options={
-            "Block incompatible producer changes": "block_changes",
-            "Require lineage before training or serving": "require_lineage",
-            "Allow with monitor and remediation budget": "allow_with_monitor",
-            "Defer governance and accept data debt": "defer_governance",
+    c_storage = mo.ui.dropdown(
+        {"Native path": "native", "Constrained path": "constrained"},
+        value="Native path",
+        label="Storage path",
+    )
+    c_compression = mo.ui.dropdown(
+        {"Balanced 4×": "balanced", "Dense 8×": "dense", "Raw": "raw"},
+        value="Balanced 4×",
+        label="Record format",
+    )
+    c_lanes = mo.ui.dropdown(
+        {"1 lane": 1, "2 lanes": 2, "4 lanes": 4},
+        value="2 lanes",
+        label="Transform lanes",
+    )
+    d_policy = mo.ui.dropdown(
+        {
+            "Stream events": "stream",
+            "Compute local features": "local feature",
+            "Batch upload": "batch",
         },
-        label="Part D checkpoint: what contract gate goes into the memo?",
+        value="Stream events",
+        label="Freshness policy",
+    )
+    e_level = mo.ui.dropdown(
+        {"Semantic contract": "semantic", "Schema contract": "schema"},
+        value="Semantic contract",
+        label="Contract level",
+    )
+    final_choice = mo.ui.dropdown(
+        {
+            "Stream events": "stream",
+            "Compute local features": "local feature",
+            "Batch upload": "batch",
+        },
+        value=None,
+        allow_select_none=True,
+        label="Recommended freshness design",
+    )
+    final_rejected = mo.ui.dropdown(
+        {
+            "Batch upload": "batch",
+            "Stream events": "stream",
+            "Compute local features": "local feature",
+        },
+        value=None,
+        allow_select_none=True,
+        label="Quantified rejected alternative",
+    )
+    final_trigger = mo.ui.dropdown(
+        [
+            "Freshness SLA tightens",
+            "Traffic budget shrinks",
+            "Producer semantics change",
+        ],
+        value=None,
+        allow_select_none=True,
+        label="Reevaluation trigger",
+    )
+    final_risk = mo.ui.dropdown(
+        [
+            "Unseen cohorts remain",
+            "Late records remain",
+            "A semantic change can escape",
+        ],
+        value=None,
+        allow_select_none=True,
+        label="Remaining limitation",
+    )
+    rationale = mo.ui.text_area(
+        label="Evidence chain",
+        full_width=True,
+        placeholder="Use saved quantities to explain the recommendation and rejected alternative.",
     )
     return (
-        v1_04_change_pressure,
-        v1_04_contract_checkpoint,
-        v1_04_contract_policy,
-        v1_04_contract_prediction,
-        v1_04_dataset_gb,
-        v1_04_network_gbps,
-        v1_04_retention_policy,
-        v1_04_strategy,
+        a_policy,
+        b_scope,
+        b_strategy,
+        c_compression,
+        c_lanes,
+        c_storage,
+        d_policy,
+        e_level,
+        final_choice,
+        final_rejected,
+        final_risk,
+        final_trigger,
+        rationale,
     )
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    v1_04_final_stance = mo.ui.radio(
-        options={
-            "Proceed with the binding data constraint recorded": "proceed_with_constraint",
-            "Redesign the pipeline before launch": "redesign_before_launch",
-            "Collect more data evidence before launch": "collect_more_evidence",
-        },
-        label="Synthesis decision: what is the pipeline stance?",
-    )
-    v1_04_residual_risk_note = mo.ui.text_area(
-        label="Residual risk for the memo",
-        placeholder="Name the evidence you still might miss, the downstream model behavior it could affect, and the trigger for revisiting this decision.",
-        full_width=True,
-    )
-    return v1_04_final_stance, v1_04_residual_risk_note
 
 
 @app.cell
 def _(
-    evaluate_pipeline,
-    movement_frontier,
-    pipeline_architecture,
-    v1_04_backlog_model,
-    v1_04_binding_constraint,
-    v1_04_change_pressure,
-    v1_04_contract_governance,
-    v1_04_contract_policy,
-    v1_04_dataset_gb,
-    v1_04_flow_multiplier,
-    v1_04_leakage_pressure,
-    v1_04_network_gbps,
-    v1_04_pipeline_profile,
-    v1_04_quality_budget,
-    v1_04_retention_policy,
-    v1_04_review_sample,
-    v1_04_split_integrity,
-    v1_04_split_policy,
-    v1_04_strategy,
-    v1_04_temporal_gap,
-    v1_04_validation_strictness,
-    v1_04_worker_count,
+    a_policy,
+    b_scope,
+    b_strategy,
+    c_compression,
+    c_lanes,
+    c_storage,
+    capture_experiment,
+    contract_inputs,
+    d_policy,
+    e_level,
+    freshness_inputs,
+    pipeline_inputs,
+    retention_inputs,
+    scenario,
+    split_inputs,
 ):
-    v1_04_quality_result = v1_04_quality_budget(
-        v1_04_pipeline_profile,
-        v1_04_validation_strictness.value,
-        v1_04_review_sample.value,
+    a_runs = {
+        p: capture_experiment("retention", **retention_inputs(scenario, p))
+        for p in ("newest", "coverage", "deduplicate")
+    }
+    a_base = a_runs["newest"]
+    a_chosen = a_runs[a_policy.value]
+    a_result = a_runs["coverage"] if a_policy.value == "newest" else a_chosen
+    b_base = capture_experiment("split", **split_inputs(scenario, "record", "all"))
+    b_result = capture_experiment(
+        "split", **split_inputs(scenario, b_strategy.value, b_scope.value)
     )
-    v1_04_split_result = v1_04_split_integrity(
-        v1_04_pipeline_profile,
-        v1_04_leakage_pressure.value,
-        v1_04_split_policy.value,
-        v1_04_temporal_gap.value,
+    c_base = capture_experiment(
+        "pipeline",
+        **pipeline_inputs(
+            scenario, storage_path="constrained", compression="raw", transform_lanes=1
+        ),
     )
-    v1_04_pipeline_result = evaluate_pipeline(
-        v1_04_pipeline_profile,
-        sample_multiplier=v1_04_flow_multiplier.value,
+    c_result = capture_experiment(
+        "pipeline",
+        **pipeline_inputs(
+            scenario,
+            storage_path=c_storage.value,
+            compression=c_compression.value,
+            transform_lanes=c_lanes.value,
+        ),
     )
-    v1_04_throughput_result = v1_04_backlog_model(
-        v1_04_pipeline_profile,
-        v1_04_pipeline_result,
-        v1_04_worker_count.value,
-    )
-    v1_04_movement_result = movement_frontier(
-        v1_04_pipeline_profile,
-        strategy_id=v1_04_strategy.value,
-        dataset_gb=v1_04_dataset_gb.value,
-        network_gbps=v1_04_network_gbps.value,
-    )
-    v1_04_architecture = pipeline_architecture(
-        v1_04_pipeline_profile,
-        v1_04_pipeline_result,
-        v1_04_movement_result,
-        retention_policy=v1_04_retention_policy.value,
-    )
-    v1_04_contract_result = v1_04_contract_governance(
-        v1_04_pipeline_profile,
-        v1_04_movement_result,
-        v1_04_contract_policy.value,
-        v1_04_change_pressure.value,
-    )
-    v1_04_binding_result = v1_04_binding_constraint(
-        v1_04_quality_result,
-        v1_04_split_result,
-        v1_04_throughput_result,
-        v1_04_contract_result,
+    d_runs = {
+        p: capture_experiment("freshness", **freshness_inputs(scenario, p))
+        for p in ("batch", "stream", "local feature")
+    }
+    d_base = d_runs["batch"]
+    d_chosen = d_runs[d_policy.value]
+    d_result = d_runs["stream"] if d_policy.value == "batch" else d_chosen
+    e_base = capture_experiment("contract", **contract_inputs(scenario, "none"))
+    e_result = capture_experiment(
+        "contract", **contract_inputs(scenario, e_level.value)
     )
     return (
-        v1_04_architecture,
-        v1_04_binding_result,
-        v1_04_contract_result,
-        v1_04_movement_result,
-        v1_04_pipeline_result,
-        v1_04_quality_result,
-        v1_04_split_result,
-        v1_04_throughput_result,
+        a_base,
+        a_chosen,
+        a_result,
+        a_runs,
+        b_base,
+        b_result,
+        c_base,
+        c_result,
+        d_base,
+        d_chosen,
+        d_result,
+        d_runs,
+        e_base,
+        e_result,
     )
 
 
-@app.cell(hide_code=True)
+@app.cell
+def _(
+    a_base,
+    a_chosen,
+    a_policy,
+    a_prediction,
+    a_result,
+    a_runs,
+    b_base,
+    b_prediction,
+    b_result,
+    b_scope,
+    b_strategy,
+    c_base,
+    c_compression,
+    c_lanes,
+    c_prediction,
+    c_result,
+    c_storage,
+    capture_evidence,
+    d_base,
+    d_policy,
+    d_prediction,
+    d_chosen,
+    d_result,
+    d_runs,
+    e_base,
+    e_level,
+    e_prediction,
+    e_result,
+    mo,
+    set_evidence,
+    track_id,
+):
+    def store(part, capture):
+        set_evidence(lambda current: {**current, part: capture})
+
+    def payload(run):
+        return {"inputs": run.inputs, "outputs": run.result}
+
+    def capture(
+        part,
+        prediction,
+        inputs,
+        baseline,
+        result,
+        alternatives,
+        decision,
+        chosen_result,
+        result_role="tested intervention",
+    ):
+        return capture_evidence(
+            track=track_id,
+            part=part,
+            prediction=prediction,
+            inputs=inputs,
+            baseline=payload(baseline),
+            result=payload(result),
+            alternatives=tuple(payload(run) for run in alternatives),
+            decision=decision,
+            model_key="v1_04_experiments",
+            chosen_result=payload(chosen_result),
+            result_role=result_role,
+        )
+
+    a_capture = mo.ui.button(
+        label="Capture retention contrast",
+        kind="success",
+        disabled=a_prediction.value is None,
+        on_click=lambda _v: store(
+            "A",
+            capture(
+                "A",
+                a_prediction.value,
+                {"policy": a_policy.value},
+                a_base,
+                a_result,
+                a_runs.values(),
+                a_policy.value,
+                a_chosen,
+                "rejected alternative"
+                if a_policy.value == "newest"
+                else "tested intervention",
+            ),
+        ),
+    )
+    b_capture = mo.ui.button(
+        label="Capture split contrast",
+        kind="success",
+        disabled=b_prediction.value is None
+        or (b_strategy.value == "record" and b_scope.value == "all"),
+        on_click=lambda _v: store(
+            "B",
+            capture(
+                "B",
+                b_prediction.value,
+                {"strategy": b_strategy.value, "preprocessing_scope": b_scope.value},
+                b_base,
+                b_result,
+                (),
+                f"{b_strategy.value}/{b_scope.value}",
+                b_result,
+            ),
+        ),
+    )
+    c_capture = mo.ui.button(
+        label="Capture pipeline contrast",
+        kind="success",
+        disabled=c_prediction.value is None
+        or (
+            c_storage.value == "constrained"
+            and c_compression.value == "raw"
+            and c_lanes.value == 1
+        ),
+        on_click=lambda _v: store(
+            "C",
+            capture(
+                "C",
+                c_prediction.value,
+                {
+                    "storage": c_storage.value,
+                    "compression": c_compression.value,
+                    "transform_lanes": c_lanes.value,
+                },
+                c_base,
+                c_result,
+                (),
+                f"{c_storage.value}/{c_compression.value}/{c_lanes.value}",
+                c_result,
+            ),
+        ),
+    )
+    d_capture = mo.ui.button(
+        label="Capture freshness contrast",
+        kind="success",
+        disabled=d_prediction.value is None,
+        on_click=lambda _v: store(
+            "D",
+            capture(
+                "D",
+                d_prediction.value,
+                {"policy": d_policy.value},
+                d_base,
+                d_result,
+                d_runs.values(),
+                d_policy.value,
+                d_chosen,
+                "rejected alternative"
+                if d_policy.value == "batch"
+                else "tested intervention",
+            ),
+        ),
+    )
+    e_capture = mo.ui.button(
+        label="Capture contract contrast",
+        kind="success",
+        disabled=e_prediction.value is None,
+        on_click=lambda _v: store(
+            "E",
+            capture(
+                "E",
+                e_prediction.value,
+                {"contract_level": e_level.value},
+                e_base,
+                e_result,
+                (),
+                e_level.value,
+                e_result,
+            ),
+        ),
+    )
+    return a_capture, b_capture, c_capture, d_capture, e_capture
+
+
+@app.cell
+def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
+    css = mo.Html("""
+    <style>
+    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:10px}
+    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
+    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:780px}
+    .pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
+    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
+    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-active{color:#86efac}
+    @media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
+    </style>""")
+    header = mo.Html(
+        f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 04</span><span>ABOUT 50–55 MIN</span></div><h1>Evidence Through the Data Pipeline</h1><p>Which records preserve trustworthy evidence, and can the pipeline deliver them before execution or freshness budgets bind?</p><div class="pilot-meta"><div><b>Context</b><br>{profile[1]}</div><div><b>Investigation</b><br>Five controlled contrasts</div><div><b>Deliverable</b><br>Evidence-backed data design</div></div></section>"""
+    )
+    mo.vstack(
+        [
+            LAB_CSS,
+            ACADEMIC_LAB_CSS,
+            css,
+            header,
+            track,
+            mo.Html(
+                '<p class="pilot-note">The track selector sits outside the briefing header. All records and outcomes are illustrative scenario fixtures.</p>'
+            ),
+        ],
+        gap=0.5,
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.sidebar([mo.md("## Lab navigation"), mo.outline(label="Sections")])
+    return
+
+
+@app.cell
 def _(
     COLORS,
-    MathPeek,
+    a_base,
+    a_capture,
+    a_chosen,
+    a_policy,
+    a_prediction,
+    a_result,
     apply_plotly_theme,
-    big_takeaways,
+    audit_evidence,
+    b_base,
+    b_capture,
+    b_prediction,
+    b_result,
+    b_scope,
+    b_strategy,
+    c_base,
+    c_capture,
+    c_compression,
+    c_lanes,
+    c_prediction,
+    c_result,
+    c_storage,
+    d_base,
+    d_capture,
+    d_chosen,
+    d_policy,
+    d_prediction,
+    d_result,
+    d_runs,
+    e_base,
+    e_capture,
+    e_level,
+    e_prediction,
+    e_result,
+    final_choice,
+    final_rejected,
+    final_risk,
+    final_trigger,
+    get_evidence,
     go,
     mo,
-    source_trace,
-    v1_04_architecture,
-    v1_04_binding_result,
-    v1_04_callout_html,
-    v1_04_change_pressure,
-    v1_04_contract_checkpoint,
-    v1_04_contract_policy,
-    v1_04_contract_prediction,
-    v1_04_contract_result,
-    v1_04_dataset_gb,
-    v1_04_fields_html,
-    v1_04_final_stance,
-    v1_04_flow_multiplier,
-    v1_04_leakage_pressure,
-    v1_04_movement_result,
-    v1_04_network_gbps,
-    v1_04_pipeline_profile,
-    v1_04_pipeline_result,
-    v1_04_prediction_html,
-    v1_04_profile,
-    v1_04_quality_checkpoint,
-    v1_04_quality_prediction,
-    v1_04_quality_result,
-    v1_04_residual_risk_note,
-    v1_04_retention_policy,
-    v1_04_review_sample,
-    v1_04_split_checkpoint,
-    v1_04_split_policy,
-    v1_04_split_prediction,
-    v1_04_split_result,
-    v1_04_strategy,
-    v1_04_table_html,
-    v1_04_temporal_gap,
-    v1_04_throughput_checkpoint,
-    v1_04_throughput_prediction,
-    v1_04_throughput_result,
-    v1_04_track_spec,
-    v1_04_validation_strictness,
-    v1_04_variant,
-    v1_04_worker_count,
+    rationale,
+    scenario,
+    track_id,
 ):
-    _spec = v1_04_track_spec(v1_04_profile.track_id)
-
-    _quality_fig = go.Figure()
-    _quality_fig.add_trace(go.Bar(
-        x=["Caught defects", "Residual defects", "Budget"],
-        y=[
-            v1_04_quality_result["caught_defects_per_10k"],
-            v1_04_quality_result["residual_defects_per_10k"],
-            v1_04_quality_result["target_defects_per_10k"],
-        ],
-        marker_color=[COLORS["GreenLine"], COLORS["RedLine"], COLORS["BlueLine"]],
-        text=[
-            f'{v1_04_quality_result["caught_defects_per_10k"]:.0f}',
-            f'{v1_04_quality_result["residual_defects_per_10k"]:.0f}',
-            f'{v1_04_quality_result["target_defects_per_10k"]:.0f}',
-        ],
-        textposition="outside",
-    ))
-    _quality_fig.update_layout(
-        height=310,
-        yaxis=dict(title="Records per 10K", gridcolor="#f1f5f9"),
-        xaxis=dict(title="Quality budget term", gridcolor="#f1f5f9"),
-        margin=dict(l=60, r=20, t=30, b=55),
+    _captures = get_evidence()
+    audit = audit_evidence(
+        _captures,
+        track=track_id,
+        required_parts=tuple("ABCDE"),
+        contrast_required_parts=tuple("ABCDE"),
     )
-    apply_plotly_theme(_quality_fig)
 
-    _split_fig = go.Figure()
-    _split_fig.add_trace(go.Bar(
-        x=["Reported metric", "Leakage-adjusted", "Validity floor"],
-        y=[
-            v1_04_split_result["reported_metric_pct"],
-            v1_04_split_result["adjusted_metric_pct"],
-            v1_04_split_result["validity_floor_pct"],
-        ],
-        marker_color=[COLORS["BlueLine"], COLORS["OrangeLine"], COLORS["GreenLine"]],
-        text=[
-            f'{v1_04_split_result["reported_metric_pct"]:.1f}%',
-            f'{v1_04_split_result["adjusted_metric_pct"]:.1f}%',
-            f'{v1_04_split_result["validity_floor_pct"]:.1f}%',
-        ],
-        textposition="outside",
-    ))
-    _split_fig.update_layout(
-        height=310,
-        yaxis=dict(title="Metric (%)", range=[0, 105], gridcolor="#f1f5f9"),
-        xaxis=dict(title="Evidence view", gridcolor="#f1f5f9"),
-        margin=dict(l=60, r=20, t=30, b=55),
-    )
-    apply_plotly_theme(_split_fig)
-
-    _throughput_fig = go.Figure()
-    _throughput_fig.add_trace(go.Scatter(
-        x=v1_04_throughput_result["times_min"],
-        y=v1_04_throughput_result["backlog_gb_series"],
-        mode="lines+markers",
-        line=dict(color=COLORS["RedLine"], width=3),
-        marker=dict(size=7),
-        name="Backlog",
-    ))
-    _throughput_fig.update_layout(
-        height=310,
-        yaxis=dict(title="Backlog (GB)", gridcolor="#f1f5f9"),
-        xaxis=dict(title="Minutes under burst", gridcolor="#f1f5f9"),
-        margin=dict(l=60, r=20, t=30, b=55),
-    )
-    apply_plotly_theme(_throughput_fig)
-
-    _stage_fig = go.Figure()
-    _stage_fig.add_trace(go.Bar(
-        x=[stage.stage for stage in v1_04_pipeline_result.stages],
-        y=[stage.utilization_pct for stage in v1_04_pipeline_result.stages],
-        marker_color=[
-            COLORS["RedLine"] if stage.utilization_pct > 100 else COLORS["GreenLine"]
-            for stage in v1_04_pipeline_result.stages
-        ],
-        text=[f"{stage.utilization_pct:.0f}%" for stage in v1_04_pipeline_result.stages],
-        textposition="outside",
-    ))
-    _stage_fig.add_hline(y=100, line_dash="dash", line_color=COLORS["RedLine"], line_width=1.3)
-    _stage_fig.update_layout(
-        height=310,
-        yaxis=dict(title="Stage utilization (%)", gridcolor="#f1f5f9"),
-        xaxis=dict(title="Pipeline stage", gridcolor="#f1f5f9"),
-        margin=dict(l=60, r=20, t=30, b=65),
-    )
-    apply_plotly_theme(_stage_fig)
-
-    _contract_fig = go.Figure()
-    _contract_fig.add_trace(go.Bar(
-        x=["Debt before contract", "Caught by contract", "Silent debt", "Threshold"],
-        y=[
-            v1_04_contract_result["debt_before"],
-            v1_04_contract_result["caught_debt"],
-            v1_04_contract_result["silent_debt_index"],
-            v1_04_contract_result["contract_threshold"],
-        ],
-        marker_color=[COLORS["OrangeLine"], COLORS["GreenLine"], COLORS["RedLine"], COLORS["BlueLine"]],
-        text=[
-            f'{v1_04_contract_result["debt_before"]:.1f}',
-            f'{v1_04_contract_result["caught_debt"]:.1f}',
-            f'{v1_04_contract_result["silent_debt_index"]:.1f}',
-            f'{v1_04_contract_result["contract_threshold"]:.1f}',
-        ],
-        textposition="outside",
-    ))
-    _contract_fig.update_layout(
-        height=310,
-        yaxis=dict(title="Debt index", gridcolor="#f1f5f9"),
-        xaxis=dict(title="Governance term", gridcolor="#f1f5f9"),
-        margin=dict(l=60, r=20, t=30, b=60),
-    )
-    apply_plotly_theme(_contract_fig)
-
-    _quality_labels = {
-        "residual_defects": "residual defects exceed the budget",
-        "coverage_loss": "strict filters remove too much coverage",
-        "review_load": "review/audit load exceeds capacity",
-        "inside_budget": "quality gate is inside budget",
-    }
-    _split_labels = {
-        "valid": "metric is valid enough to use",
-        "invalid_leakage": "metric is inflated by leakage",
-        "invalid_time": "metric uses future or stale features",
-    }
-    _throughput_labels = {
-        "ingest": "ingest creates backlog",
-        "preprocess": "preprocessing creates backlog",
-        "storage write": "storage write creates backlog",
-        "upload/movement": "upload or movement creates backlog",
-        "no_failure": "no flow wall inside the tested envelope",
-    }
-    _contract_labels = {
-        "schema": "schema checks are the missing control",
-        "semantic": "semantic distribution checks are the missing control",
-        "lineage": "lineage and point-in-time provenance are missing",
-        "freshness": "freshness SLO enforcement is missing",
-        "contract_ok": "the selected contract is strong enough",
-    }
-
-    _part_a = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel mlsysbook-nugget">
-          <div class="mlsysbook-part-title"><h2>Part A: Data Quality Is A Budget</h2></div>
-          <div class="mlsysbook-callout"><strong>Scenario:</strong>
-            As {v1_04_variant.stakeholder}, you must decide whether {v1_04_quality_result["subject"]}
-            can enter training or serving. The budget is explicit: residual defects, coverage retained,
-            and review load all have limits.</div>
-        </div>
-        """),
-        mo.hstack([v1_04_quality_prediction], justify="start"),
-        mo.hstack([v1_04_validation_strictness, v1_04_review_sample], justify="start", gap="2rem"),
-        mo.Html(v1_04_prediction_html(
-            "Prediction Check",
-            v1_04_quality_prediction.value,
-            v1_04_quality_result["actual_failure"],
-            _quality_labels,
-        )),
-        mo.as_html(_quality_fig),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Quality Budget Evidence</h2>
-          <div class="mlsysbook-grid">
-            {v1_04_fields_html({
-                "Track data": v1_04_quality_result["subject"],
-                "Detection rate": f'{v1_04_quality_result["detection_rate_pct"]:.1f}%',
-                "Residual defects": f'{v1_04_quality_result["residual_defects_per_10k"]:.0f} per 10K',
-                "Budget": f'{v1_04_quality_result["target_defects_per_10k"]:.0f} per 10K',
-                "Coverage retained": f'{v1_04_quality_result["coverage_retained_pct"]:.1f}% / floor {v1_04_quality_result["coverage_floor_pct"]:.1f}%',
-                "Review load": f'{v1_04_quality_result["review_load_pct"]:.1f}% / limit {v1_04_quality_result["review_limit_pct"]:.1f}%',
-            })}
-          </div>
-          {v1_04_table_html(
-              ("Term", "Value", "Limit", "Status"),
-              (
-                  ("Residual defects", f'{v1_04_quality_result["residual_defects_per_10k"]:.0f} per 10K', f'{v1_04_quality_result["target_defects_per_10k"]:.0f} per 10K', "pass" if v1_04_quality_result["residual_defects_per_10k"] <= v1_04_quality_result["target_defects_per_10k"] else "fail"),
-                  ("Coverage retained", f'{v1_04_quality_result["coverage_retained_pct"]:.1f}%', f'>= {v1_04_quality_result["coverage_floor_pct"]:.1f}%', "pass" if v1_04_quality_result["coverage_retained_pct"] >= v1_04_quality_result["coverage_floor_pct"] else "fail"),
-                  ("Review load", f'{v1_04_quality_result["review_load_pct"]:.1f}%', f'<= {v1_04_quality_result["review_limit_pct"]:.1f}%', "pass" if v1_04_quality_result["review_load_pct"] <= v1_04_quality_result["review_limit_pct"] else "fail"),
-              ),
-              numeric=(1, 2),
-          )}
-        </div>
-        """),
-        mo.Html(v1_04_callout_html(
-            "Consequence",
-            (
-                "Inside the quality budget. "
-                if v1_04_quality_result["pass"]
-                else "Budget violation. "
-            ) + v1_04_quality_result["mitigation"],
-            kind="ok" if v1_04_quality_result["pass"] else "fail",
-        )),
-        MathPeek(
-            "residual_defects = base_defects x (1 - detection_rate); pass if residual <= budget and coverage >= floor",
-            {
-                "base_defects": "Track-specific defect pressure for the selected data source.",
-                "detection_rate": "Validation strictness plus review sampling.",
-                "coverage": "Useful examples retained after filtering.",
-            },
-        ),
-        source_trace(
-            {
-                "chapter_anchor": "Data quality as code; Quality through validation and monitoring; Quality debt remediation",
-                "formula": "residual defects and budget pass/fail",
-                "track_id": v1_04_profile.track_id,
-                "scenario_id": v1_04_variant.scenario_id,
-            },
-            summary="Part A source model",
-        ),
-        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-        v1_04_quality_checkpoint,
-    ])
-
-    _part_b = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel mlsysbook-nugget">
-          <div class="mlsysbook-part-title"><h2>Part B: Leakage Makes Evidence Invalid</h2></div>
-          <div class="mlsysbook-callout"><strong>Scenario:</strong>
-            {v1_04_pipeline_profile.label} has a strong reported metric. Your decision is whether
-            the split boundary actually represents deployment, not familiar entities or future data.</div>
-        </div>
-        """),
-        v1_04_split_prediction,
-        mo.hstack([v1_04_leakage_pressure, v1_04_split_policy, v1_04_temporal_gap], justify="start", gap="1.5rem"),
-        mo.Html(v1_04_prediction_html(
-            "Prediction Check",
-            v1_04_split_prediction.value,
-            v1_04_split_result["actual_failure"],
-            _split_labels,
-        )),
-        mo.as_html(_split_fig),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Split Integrity Evidence</h2>
-          <div class="mlsysbook-grid">
-            {v1_04_fields_html({
-                "Split policy": v1_04_split_result["policy_label"],
-                "Effective leakage": f'{v1_04_split_result["effective_leakage_pct"]:.2f}% / allow {v1_04_split_result["allowed_leakage_pct"]:.2f}%',
-                "Temporal gap": f'{v1_04_split_result["temporal_gap_h"]:.0f} h / required {v1_04_split_result["required_gap_h"]:.0f} h',
-                "Reported metric": f'{v1_04_split_result["reported_metric_pct"]:.1f}%',
-                "Adjusted metric": f'{v1_04_split_result["adjusted_metric_pct"]:.1f}%',
-                "Evidence valid": "yes" if v1_04_split_result["valid"] else "no",
-            })}
-          </div>
-          {v1_04_table_html(
-              ("Boundary", "Measured", "Required", "Status"),
-              (
-                  ("Leakage", f'{v1_04_split_result["effective_leakage_pct"]:.2f}%', f'<= {v1_04_split_result["allowed_leakage_pct"]:.2f}%', "pass" if v1_04_split_result["effective_leakage_pct"] <= v1_04_split_result["allowed_leakage_pct"] else "fail"),
-                  ("Temporal gap", f'{v1_04_split_result["temporal_gap_h"]:.0f} h', f'>= {v1_04_split_result["required_gap_h"]:.0f} h', "pass" if v1_04_split_result["temporal_gap_h"] >= v1_04_split_result["required_gap_h"] else "fail"),
-                  ("Metric adjustment", f'{v1_04_split_result["reported_metric_pct"] - v1_04_split_result["adjusted_metric_pct"]:.1f} pp', "0 pp preferred", "review"),
-              ),
-              numeric=(1, 2),
-          )}
-        </div>
-        """),
-        mo.Html(v1_04_callout_html(
-            "Consequence",
-            (
-                "The metric can support the decision. "
-                if v1_04_split_result["valid"]
-                else "The metric is not release evidence. "
-            ) + v1_04_split_result["mitigation"],
-            kind="ok" if v1_04_split_result["valid"] else "fail",
-        )),
-        MathPeek(
-            "reported_metric = true_metric + leakage_inflation; evidence is valid only inside the split boundary",
-            {
-                "leakage_inflation": "Extra apparent performance from duplicate, entity, augmentation, or future information crossing the boundary.",
-                "point-in-time": "Features must be available at prediction time, not reconstructed from the future.",
-                "adjusted_metric": "Reported metric after removing the leakage advantage.",
-            },
-        ),
-        source_trace(
-            {
-                "chapter_anchor": "Dataset Compilation leakage paragraph; Data versioning; Feature stores and point-in-time correctness",
-                "formula": "reported metric inflation and split validity",
-                "track_id": v1_04_profile.track_id,
-                "scenario_id": v1_04_variant.scenario_id,
-            },
-            summary="Part B source model",
-        ),
-        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-        v1_04_split_checkpoint,
-    ])
-
-    _flow_rows = []
-    for _name, _capacity in v1_04_throughput_result["capacities"].items():
-        _flow_rows.append((
-            _name,
-            f'{v1_04_throughput_result["arrival_mb_s"]:.2f} MB/s',
-            f'{_capacity:.2f} MB/s',
-            "binding" if _name == v1_04_throughput_result["bottleneck_stage"] else "headroom",
-        ))
-
-    _part_c = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel mlsysbook-nugget">
-          <div class="mlsysbook-part-title"><h2>Part C: Throughput And Backlog Are Physical Constraints</h2></div>
-          <div class="mlsysbook-callout"><strong>Scenario:</strong>
-            {v1_04_throughput_result["narrative"]}. The question is whether data arrives
-            faster than the track can ingest, preprocess, store, or move it.</div>
-        </div>
-        """),
-        v1_04_throughput_prediction,
-        mo.hstack([v1_04_flow_multiplier, v1_04_worker_count], justify="start", gap="2rem"),
-        mo.Html(v1_04_prediction_html(
-            "Prediction Check",
-            v1_04_throughput_prediction.value,
-            v1_04_throughput_result["actual_failure"],
-            _throughput_labels,
-        )),
-        mo.hstack([mo.as_html(_stage_fig), mo.as_html(_throughput_fig)], widths="equal"),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Flow Evidence</h2>
-          <div class="mlsysbook-grid">
-            {v1_04_fields_html({
-                "Arrival rate": f'{v1_04_throughput_result["arrival_mb_s"]:.2f} MB/s',
-                "Service rate": f'{v1_04_throughput_result["service_mb_s"]:.2f} MB/s',
-                "Binding stage": v1_04_throughput_result["bottleneck_stage"],
-                "Utilization": f'{v1_04_throughput_result["utilization_pct"]:.1f}%',
-                "Backlog after 30 min": f'{v1_04_throughput_result["backlog_gb"]:.2f} GB',
-                "Freshness lag": f'{v1_04_throughput_result["freshness_lag_s"]:.1f} s / SLO {v1_04_throughput_result["freshness_sla_s"]:.1f} s',
-            })}
-          </div>
-          {v1_04_table_html(("Stage", "Arrival", "Capacity", "Interpretation"), tuple(_flow_rows), numeric=(1, 2))}
-        </div>
-        """),
-        mo.Html(v1_04_callout_html(
-            "Consequence",
-            (
-                "Flow stays inside the freshness budget. "
-                if v1_04_throughput_result["feasible"]
-                else "Backlog is a physical constraint. "
-            ) + v1_04_throughput_result["mitigation"],
-            kind="ok" if v1_04_throughput_result["feasible"] else "fail",
-        )),
-        MathPeek(
-            "backlog(t) = max(0, arrival_rate - service_rate) x t; freshness_lag = backlog / service_rate",
-            {
-                "arrival_rate": "Track data rate after sampling or traffic multiplier.",
-                "service_rate": "The smallest effective capacity across ingest, preprocessing, storage, and movement.",
-                "freshness_lag": "How long queued data waits before downstream consumers can use it.",
-            },
-        ),
-        source_trace(
-            {
-                "chapter_anchor": "The feeding problem; Data ingestion; Batch vs. streaming ingestion; Storage performance",
-                "shared_helper": "evaluate_pipeline()",
-                "local_helper": "v1_04_backlog_model()",
-                "track_id": v1_04_profile.track_id,
-            },
-            summary="Part C source model",
-        ),
-        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-        v1_04_throughput_checkpoint,
-    ])
-
-    _strategy_rows = []
-    for _strategy in v1_04_pipeline_profile.strategies:
-        _selected = _strategy.strategy_id == v1_04_movement_result.strategy_id
-        _strategy_rows.append((
-            _strategy.label,
-            f"{v1_04_dataset_gb.value * _strategy.data_reduction_factor:.1f} GB",
-            f"{_strategy.quality_factor * 100.0:.1f}%",
-            _strategy.privacy_risk,
-            "selected" if _selected else "candidate",
-        ))
-
-    _part_d = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel mlsysbook-nugget">
-          <div class="mlsysbook-part-title"><h2>Part D: Contracts Prevent Data Debt</h2></div>
-          <div class="mlsysbook-callout"><strong>Scenario:</strong>
-            Upstream producers keep changing {v1_04_pipeline_profile.data_source}. The movement
-            and retention choice must be paired with a contract: {v1_04_contract_result["contract_focus"]}.</div>
-        </div>
-        """),
-        v1_04_contract_prediction,
-        mo.hstack([v1_04_strategy, v1_04_network_gbps, v1_04_contract_policy], justify="start", gap="1.5rem"),
-        mo.hstack([v1_04_dataset_gb, v1_04_change_pressure], justify="start", gap="2rem"),
-        v1_04_retention_policy,
-        mo.Html(v1_04_prediction_html(
-            "Prediction Check",
-            v1_04_contract_prediction.value,
-            v1_04_contract_result["actual_control"],
-            _contract_labels,
-        )),
-        mo.as_html(_contract_fig),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Movement And Contract Evidence</h2>
-          <div class="mlsysbook-grid">
-            {v1_04_fields_html({
-                "Selected strategy": v1_04_movement_result.strategy_label,
-                "Data moved": f'{v1_04_movement_result.data_moved_gb:.1f} GB',
-                "Transfer time": f'{v1_04_movement_result.transfer_hours:.2f} h',
-                "Egress cost": f'${v1_04_movement_result.egress_cost:.2f}',
-                "Quality retained": f'{v1_04_movement_result.quality_retained_pct:.1f}%',
-                "Silent debt": f'{v1_04_contract_result["silent_debt_index"]:.1f} / limit {v1_04_contract_result["contract_threshold"]:.1f}',
-            })}
-          </div>
-          {v1_04_table_html(("Strategy", "Data moved", "Quality", "Governance exposure", "Status"), tuple(_strategy_rows), numeric=(1, 2))}
-          {v1_04_table_html(
-              ("Contract term", "Value", "Required", "Status"),
-              (
-                  ("Policy", v1_04_contract_result["policy_label"], "semantic checks plus lineage for production ML", "pass" if v1_04_contract_result["lineage"] and v1_04_contract_result["semantic"] else "gap"),
-                  ("Enforcement", f'{v1_04_contract_result["enforcement_pct"]:.1f}%', "high enough to catch incompatible changes", "review"),
-                  ("Silent debt", f'{v1_04_contract_result["silent_debt_index"]:.1f}', f'<= {v1_04_contract_result["contract_threshold"]:.1f}', "pass" if v1_04_contract_result["silent_debt_index"] <= v1_04_contract_result["contract_threshold"] else "fail"),
-              ),
-              numeric=(1, 2),
-          )}
-        </div>
-        """),
-        mo.Html(v1_04_callout_html(
-            "Consequence",
-            (
-                "The contract is strong enough for this track. "
-                if v1_04_contract_result["pass"]
-                else "Downstream data debt remains unmanaged. "
-            ) + v1_04_contract_result["mitigation"],
-            kind="ok" if v1_04_contract_result["pass"] else "fail",
-        )),
-        MathPeek(
-            "Debt_n = Debt_0 x (1 + r)^n; silent_debt = Debt_n x (1 - enforcement)",
-            {
-                "r": "Upstream change pressure per release cycle.",
-                "enforcement": "Fraction of incompatible changes caught before downstream use.",
-                "silent_debt": "Residual governance risk carried by the model pipeline.",
-            },
-        ),
-        source_trace(
-            {
-                "chapter_anchor": "Data cascades; Transformation lineage; Data debt; Remediation strategies",
-                "shared_helpers": "movement_frontier() and pipeline_architecture()",
-                "local_helper": "v1_04_contract_governance()",
-                "track_id": v1_04_profile.track_id,
-            },
-            summary="Part D source model",
-        ),
-        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
-        v1_04_contract_checkpoint,
-    ])
-
-    _synthesis = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel mlsysbook-nugget">
-          <div class="mlsysbook-part-title"><h2>Synthesis: Record The Pipeline Decision</h2></div>
-          <div class="mlsysbook-callout"><strong>Invariant:</strong>
-            Data is infrastructure. The memo must bind the selected architecture to one measured
-            data constraint and one residual risk.</div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Decision Record</h2>
-          <div class="mlsysbook-grid">
-            {v1_04_fields_html({
-                "Track": v1_04_pipeline_profile.label,
-                "Architecture": v1_04_architecture.memo_summary,
-                "Binding data constraint": v1_04_binding_result["label"],
-                "Quality budget": "pass" if v1_04_quality_result["pass"] else "fail",
-                "Split integrity": "valid" if v1_04_split_result["valid"] else "invalid",
-                "Throughput": "feasible" if v1_04_throughput_result["feasible"] else "backlog",
-                "Contract": "pass" if v1_04_contract_result["pass"] else "debt risk",
-                "Residual risk seed": v1_04_contract_result["track_residual_risk"],
-            })}
-          </div>
-          <div class="mlsysbook-callout"><strong>Binding constraint mitigation:</strong> {v1_04_binding_result["mitigation"]}</div>
-        </div>
-        """),
-        v1_04_final_stance,
-        v1_04_residual_risk_note,
-        MathPeek(
-            "valid_pipeline = quality_budget and split_integrity and throughput_capacity and contract_enforcement",
-            {
-                "quality_budget": "Residual defects are below target without erasing required coverage.",
-                "split_integrity": "Evaluation evidence respects entity, time, and point-in-time boundaries.",
-                "throughput_capacity": "Service rate exceeds arrival rate inside the freshness SLO.",
-                "contract_enforcement": "Downstream consumers can rely on schema, semantics, freshness, and lineage.",
-            },
-        ),
-        mo.Html(f"""
-        <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 5px solid #10B981; border-radius: 8px; padding: 18px 22px; margin-top: 14px; margin-bottom: 14px;">
-          <div style="font-size: 0.8rem; font-weight: 800; color: #10B981; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">
-            Lead Systems Architect Authorization
-          </div>
-          <div style="color: #1E293B; font-size: 0.95rem; line-height: 1.6;">
-            The data engineering architecture for <strong>{v1_04_profile.label}</strong> is authorized for pipeline deployment. Quality budgets maintain defect escape under target thresholds while ingestion queues sustain peak arrival bursts from <strong>{v1_04_pipeline_profile.data_source}</strong>.
-          </div>
-        </div>
-        """),
-        big_takeaways([
-            ("Data is physical infrastructure", "Every byte incurs collection, transformation, movement, and storage costs."),
-            ("Quality is a finite budget", "Filtering out bad data reduces defect escape but risks coverage loss and cohort starvation."),
-            ("Split boundaries must isolate information", "Temporal and entity leakage produce illusory offline performance that collapses in production."),
-            ("Governance prevents downstream debt", "Schema, freshness, and lineage contracts prevent silent data drift from corrupting model behavior."),
-        ]),
-        mo.Html(f"""
-        <div class="lab-hud">
-            <span class="hud-label">LAB</span>
-            <span class="hud-value">04 &middot; Data Engineering</span>
-            <span class="hud-label">TRACK</span>
-            <span class="hud-value">{v1_04_profile.label}</span>
-            <span style="flex:1;"></span>
-            <span class="hud-label">BINDING</span>
-            <span class="hud-value">{v1_04_binding_result["label"]}</span>
-            <span class="hud-label">STATUS</span>
-            <span class="hud-active">ACTIVE</span>
-        </div>
-        """),
-    ])
-
-    def build_part_a():
-        return _part_a
-
-    def build_part_b():
-        return _part_b
-
-    def build_part_c():
-        return _part_c
-
-    def build_part_d():
-        return _part_d
-
-    def build_synthesis():
-        return _synthesis
-
-    v1_04_tabs = mo.ui.tabs({
-        "Part A: Quality Budget": build_part_a(),
-        "Part B: Split Integrity": build_part_b(),
-        "Part C: Throughput": build_part_c(),
-        "Part D: Contracts": build_part_d(),
-        "Synthesis": build_synthesis(),
-    })
-    v1_04_tabs
-    return
-
-
-@app.cell(hide_code=True)
-def _(
-    COLORS,
-    ledger,
-    mo,
-    v1_04_architecture,
-    v1_04_binding_result,
-    v1_04_contract_checkpoint,
-    v1_04_contract_prediction,
-    v1_04_contract_result,
-    v1_04_final_stance,
-    v1_04_movement_result,
-    v1_04_pipeline_profile,
-    v1_04_profile,
-    v1_04_quality_checkpoint,
-    v1_04_quality_prediction,
-    v1_04_quality_result,
-    v1_04_residual_risk_note,
-    v1_04_split_checkpoint,
-    v1_04_split_prediction,
-    v1_04_split_result,
-    v1_04_throughput_checkpoint,
-    v1_04_throughput_prediction,
-    v1_04_throughput_result,
-    v1_04_variant,
-):
-    _risk_note = str(v1_04_residual_risk_note.value or "").strip()
-    _ready_for_ledger = all(
-        value is not None
-        for value in (
-            v1_04_quality_prediction.value,
-            v1_04_split_prediction.value,
-            v1_04_throughput_prediction.value,
-            v1_04_contract_prediction.value,
-            v1_04_quality_checkpoint.value,
-            v1_04_split_checkpoint.value,
-            v1_04_throughput_checkpoint.value,
-            v1_04_contract_checkpoint.value,
-            v1_04_final_stance.value,
+    def table(rows):
+        return mo.vstack([mo.ui.table(rows, pagination=False)]).style(
+            {"max-width": "100%", "overflow-x": "auto"}
         )
-    ) and bool(_risk_note)
 
-    ledger.save(chapter=4, design={
-        "chapter": "v1_04",
-        "track_id": v1_04_profile.track_id,
-        "scenario_id": v1_04_variant.scenario_id,
-        "hardware_ref": v1_04_pipeline_profile.hardware_ref,
-        "model_ref": v1_04_pipeline_profile.model_ref,
-        "completed": _ready_for_ledger,
-        "quality_prediction": v1_04_quality_prediction.value,
-        "quality_budget_pass": v1_04_quality_result["pass"],
-        "residual_defects_per_10k": v1_04_quality_result["residual_defects_per_10k"],
-        "quality_checkpoint": v1_04_quality_checkpoint.value,
-        "split_prediction": v1_04_split_prediction.value,
-        "effective_leakage_pct": v1_04_split_result["effective_leakage_pct"],
-        "adjusted_metric_pct": v1_04_split_result["adjusted_metric_pct"],
-        "split_valid": v1_04_split_result["valid"],
-        "split_checkpoint": v1_04_split_checkpoint.value,
-        "throughput_prediction": v1_04_throughput_prediction.value,
-        "actual_bottleneck": v1_04_throughput_result["bottleneck_stage"],
-        "utilization_pct": v1_04_throughput_result["utilization_pct"],
-        "backlog_gb": v1_04_throughput_result["backlog_gb"],
-        "freshness_lag_s": v1_04_throughput_result["freshness_lag_s"],
-        "throughput_checkpoint": v1_04_throughput_checkpoint.value,
-        "movement_strategy": v1_04_movement_result.strategy_id,
-        "retention_policy": v1_04_architecture.retention_policy,
-        "contract_prediction": v1_04_contract_prediction.value,
-        "contract_policy": v1_04_contract_result["policy_label"],
-        "silent_debt_index": v1_04_contract_result["silent_debt_index"],
-        "contract_checkpoint": v1_04_contract_checkpoint.value,
-        "binding_data_constraint": v1_04_binding_result["label"],
-        "final_pipeline_stance": v1_04_final_stance.value,
-        "residual_risk": _risk_note,
-    })
+    def saved(part):
+        cap = _captures.get(part)
+        if cap is None:
+            return mo.callout(mo.md("No saved evidence for this part."), kind="warn")
+        if part in audit.stale or (part, part) in audit.identical_pairs:
+            return mo.callout(
+                mo.md(
+                    "**STALE OR NON-CONTRASTING EVIDENCE.** Recapture this comparison."
+                ),
+                kind="danger",
+            )
+        data = cap.to_dict()
+        return mo.Html(
+            f'<div class="saved"><b>Saved snapshot</b> · original prediction: {data["prediction"]}<br><small>Track {data["track"]}; later controls do not rewrite this record.</small></div>'
+        )
 
-    _hud = mo.Html(f"""
-    <div class="lab-hud">
-        <span class="hud-label">LAB</span>
-        <span class="hud-value">04 &middot; Data Engineering</span>
-        <span class="hud-label">TRACK</span>
-        <span class="hud-value">{v1_04_profile.label}</span>
-        <span style="flex:1;"></span>
-        <span class="hud-label">BINDING</span>
-        <span class="hud-value">{v1_04_binding_result["label"]}</span>
-        <span class="hud-label">STATUS</span>
-        <span class="hud-active">{'SAVED' if _ready_for_ledger else 'ACTIVE'}</span>
-    </div>
-    <div class="mlsysbook-panel">
-      <h2>Design Ledger</h2>
-      <div class="mlsysbook-grid">
-        <div class="mlsysbook-field"><strong>Ready to save</strong>{'yes' if _ready_for_ledger else 'not yet'}</div>
-        <div class="mlsysbook-field"><strong>Binding constraint</strong>{v1_04_binding_result["label"]}</div>
-        <div class="mlsysbook-field"><strong>Final stance</strong>{v1_04_final_stance.value or 'not recorded'}</div>
-        <div class="mlsysbook-field"><strong>Residual risk</strong>{_risk_note or 'not recorded'}</div>
-      </div>
-      <div style="margin-top:10px; color:{COLORS['TextSec']}; line-height:1.55;">
-        The ledger saves each updated decision. All four predictions, all four checkpoints,
-        a final stance, and a residual risk mark the design complete.
-      </div>
-    </div>
-    """)
-    _hud
-    return
+    def part_a():
+        intro = mo.md(
+            "### A · Which examples are worth retaining? (8 min)\nSix candidates compete for one fixed annotation-time budget. Predict first, then compare coverage, duplicates, and supplied task evidence."
+        )
+        if a_prediction.value is None:
+            return mo.vstack([intro, a_prediction])
+        base, result, chosen = a_base.result, a_result.result, a_chosen.result
+        fig = go.Figure(
+            [
+                go.Bar(
+                    x=["Newest", result["policy"]],
+                    y=[
+                        base["represented_cohort_count"],
+                        result["represented_cohort_count"],
+                    ],
+                    marker_color=[COLORS["Grey"], COLORS["BlueLine"]],
+                )
+            ]
+        )
+        fig.update_layout(
+            height=245,
+            margin=dict(l=20, r=20, t=20, b=20),
+            yaxis_title="Represented cohorts (count)",
+            showlegend=False,
+        )
+        rows = [
+            {
+                "Run": "Newest",
+                "Annotation": f"{base['annotation_time']['magnitude']:.0f} min",
+                "Cohorts": base["represented_cohort_count"],
+                "Duplicates": base["duplicate_records"],
+                "Task evidence": base["records_with_task_evidence"],
+            },
+            {
+                "Run": result["policy"],
+                "Annotation": f"{result['annotation_time']['magnitude']:.0f} min",
+                "Cohorts": result["represented_cohort_count"],
+                "Duplicates": result["duplicate_records"],
+                "Task evidence": result["records_with_task_evidence"],
+            },
+        ]
+        return mo.vstack(
+            [
+                intro,
+                a_prediction,
+                a_policy,
+                apply_plotly_theme(fig),
+                table(rows),
+                mo.callout(
+                    mo.md(
+                        f"**Your prediction:** {a_prediction.value}. The tested comparison is **newest versus {result['policy']}**. Your chosen **{a_policy.value}** policy retains **{chosen['represented_cohort_count']} cohorts**, **{chosen['duplicate_records']} duplicates**, and **{chosen['records_with_task_evidence']} records with supplied task evidence**."
+                    ),
+                    kind="info",
+                ),
+                a_capture,
+                saved("A"),
+                mo.accordion(
+                    {
+                        "Calculation Notes": mo.md(
+                            "Whole records are admitted until the annotation-time budget is exhausted. Coverage rotates across cohorts; deduplication removes records explicitly marked as duplicates. Supplied outcome flags do not influence selection."
+                        )
+                    }
+                ),
+            ]
+        )
+
+    def part_b():
+        intro = mo.md(
+            "### B · Can higher evaluation accuracy mean worse evidence? (10 min)\nThe baseline overlaps entity keys and fits preprocessing before the split. Change the split, preprocessing scope, or both."
+        )
+        if b_prediction.value is None:
+            return mo.vstack([intro, b_prediction])
+        base, result = b_base.result, b_result.result
+        fig = go.Figure()
+        fig.add_bar(
+            name="Key leakage",
+            x=["Baseline", "Selected"],
+            y=[base["key_leakage_percent"], result["key_leakage_percent"]],
+            marker_color=COLORS["OrangeLine"],
+        )
+        fig.add_bar(
+            name="Observed accuracy",
+            x=["Baseline", "Selected"],
+            y=[base["observed_accuracy_percent"], result["observed_accuracy_percent"]],
+            marker_color=COLORS["BlueLine"],
+        )
+        fig.update_layout(
+            barmode="group",
+            height=265,
+            margin=dict(l=20, r=20, t=20, b=20),
+            yaxis_title="Entity keys or records (%)",
+            legend_orientation="h",
+        )
+        rows = [
+            {
+                "Run": "Leaky baseline",
+                "Overlapping keys": base["overlapping_entity_count"],
+                "Test records seen": base["preprocessing_test_records_seen"],
+                "Supplied-label accuracy": f"{base['observed_accuracy_percent']:.0f}%",
+            },
+            {
+                "Run": f"{b_strategy.value}/{b_scope.value}",
+                "Overlapping keys": result["overlapping_entity_count"],
+                "Test records seen": result["preprocessing_test_records_seen"],
+                "Supplied-label accuracy": f"{result['observed_accuracy_percent']:.0f}%",
+            },
+        ]
+        return mo.vstack(
+            [
+                intro,
+                b_prediction,
+                mo.hstack([b_strategy, b_scope], widths="equal", wrap=True),
+                apply_plotly_theme(fig),
+                table(rows),
+                mo.callout(
+                    mo.md(
+                        f"**Your prediction:** {b_prediction.value}. The selected run has **{result['overlapping_entity_count']} overlapping keys** and sees **{result['preprocessing_test_records_seen']} test records** during preprocessing."
+                    ),
+                    kind="danger" if result["key_leakage_fraction"] else "success",
+                ),
+                b_capture,
+                saved("B"),
+                mo.accordion(
+                    {
+                        "Calculation Notes": mo.md(
+                            "Key leakage is overlapping entity IDs divided by distinct test entity IDs. Preprocessing leakage counts test records used to fit transforms. Accuracy is counted from supplied predictions; no leakage-to-quality equation is used."
+                        )
+                    }
+                ),
+            ]
+        )
+
+    def part_c():
+        intro = mo.md(
+            "### C · Why is execution waiting for data? (10 min)\nThe baseline uses constrained reads, raw records, and one transform lane. Compression reduces bytes and adds decode work. Predict the binding stage."
+        )
+        if c_prediction.value is None:
+            return mo.vstack([intro, c_prediction])
+        base, result = c_base.result, c_result.result
+        fig = go.Figure()
+        for label, run, color in (
+            ("Baseline", base, COLORS["Grey"]),
+            ("Selected", result, COLORS["BlueLine"]),
+        ):
+            fig.add_bar(
+                name=label,
+                x=["Read", "Decode", "Transform"],
+                y=[
+                    run["read_rate_per_second"],
+                    run["decode_rate_per_second"],
+                    run["transform_rate_per_second"],
+                ],
+                marker_color=color,
+            )
+        fig.add_hline(
+            y=result["required_rate_per_second"],
+            line_dash="dash",
+            annotation_text="Required rate",
+        )
+        fig.update_layout(
+            barmode="group",
+            height=275,
+            margin=dict(l=20, r=20, t=20, b=20),
+            yaxis_title="Service rate (records/s)",
+            legend_orientation="h",
+        )
+        rows = [
+            {
+                "Run": "Baseline",
+                "Bottleneck": base["bottleneck_stage"],
+                "Supply": f"{base['service_rate_per_second']:.1f}/s",
+                "Required": f"{base['required_rate_per_second']:.1f}/s",
+                "Waiting": f"{base['accelerator_wait_percent']:.1f}%",
+                "Outcome": "PASS" if base["meets_required_rate"] else "FAIL",
+            },
+            {
+                "Run": "Selected",
+                "Bottleneck": result["bottleneck_stage"],
+                "Supply": f"{result['service_rate_per_second']:.1f}/s",
+                "Required": f"{result['required_rate_per_second']:.1f}/s",
+                "Waiting": f"{result['accelerator_wait_percent']:.1f}%",
+                "Outcome": "PASS" if result["meets_required_rate"] else "FAIL",
+            },
+        ]
+        return mo.vstack(
+            [
+                intro,
+                c_prediction,
+                mo.hstack(
+                    [c_storage, c_compression, c_lanes], widths="equal", wrap=True
+                ),
+                apply_plotly_theme(fig),
+                table(rows),
+                mo.callout(
+                    mo.md(
+                        f"**Your prediction:** {c_prediction.value}. The selected bottleneck is **{result['bottleneck_stage']}** at **{result['service_rate_per_second']:.1f} records/s** versus **{result['required_rate_per_second']:.1f} records/s** required."
+                    ),
+                    kind="success" if result["meets_required_rate"] else "danger",
+                ),
+                c_capture,
+                saved("C"),
+                mo.accordion(
+                    {
+                        "Calculation Notes": mo.md(
+                            "Read, decode, and transform are independent overlapped stages with enough buffering after warmup. Their minimum rate is steady-state throughput, not one record’s serial latency. Compression changes bytes and decode work."
+                        )
+                    }
+                ),
+            ]
+        )
+
+    def part_d():
+        intro = mo.md(
+            "### D · How fresh must the evidence be? (8 min)\nCompare batching with streaming or local feature computation. Each policy changes age, traffic, and annotation time over the same horizon."
+        )
+        if d_prediction.value is None:
+            return mo.vstack([intro, d_prediction])
+        base, result, chosen = d_base.result, d_result.result, d_chosen.result
+        fig = go.Figure(
+            [
+                go.Bar(
+                    x=["Batch", result["policy_name"]],
+                    y=[
+                        base["worst_case_age"]["magnitude"],
+                        result["worst_case_age"]["magnitude"],
+                    ],
+                    marker_color=[COLORS["Grey"], COLORS["GreenLine"]],
+                )
+            ]
+        )
+        fig.add_hline(
+            y=d_result.inputs["freshness_sla"]["magnitude"],
+            line_dash="dash",
+            annotation_text="Freshness SLA",
+        )
+        fig.update_layout(
+            height=245,
+            margin=dict(l=20, r=20, t=20, b=20),
+            yaxis_title="Worst-case feature age (s)",
+            showlegend=False,
+        )
+        rows = [
+            {
+                "Policy": name,
+                "Worst age": f"{run.result['worst_case_age']['magnitude']:.1f} s",
+                "Traffic": f"{run.result['traffic_megabytes']:.1f} MB",
+                "Annotation": f"{run.result['annotation_time']['magnitude']:.1f} min",
+                "SLA": "PASS" if run.result["meets_freshness_sla"] else "FAIL",
+            }
+            for name, run in d_runs.items()
+        ]
+        return mo.vstack(
+            [
+                intro,
+                d_prediction,
+                d_policy,
+                apply_plotly_theme(fig),
+                table(rows),
+                mo.callout(
+                    mo.md(
+                        f"**Your prediction:** {d_prediction.value}. The tested comparison is **batch versus {result['policy_name']}**. Your chosen **{d_policy.value}** policy gives **{chosen['worst_case_age']['magnitude']:.1f} s** worst-case age and **{chosen['traffic_megabytes']:.1f} MB** traffic."
+                    ),
+                    kind="success" if chosen["meets_freshness_sla"] else "danger",
+                ),
+                d_capture,
+                saved("D"),
+                mo.accordion(
+                    {
+                        "Calculation Notes": mo.md(
+                            "Worst-case age sums collection, transport, and feature-compute time. Traffic and annotation time count explicit events over a fixed horizon. The SLA changes acceptance, not physical age."
+                        )
+                    }
+                ),
+            ]
+        )
+
+    def part_e():
+        intro = mo.md(
+            f"### E · What happens when the producer changes? (8 min)\nThe producer changes **{scenario.semantic_field_name}** from **{scenario.expected_semantic_unit}** while preserving its declared schema version. Compare no enforcement with a contract."
+        )
+        if e_prediction.value is None:
+            return mo.vstack([intro, e_prediction])
+        base, result = e_base.result, e_result.result
+        fig = go.Figure()
+        fig.add_bar(
+            name="Escaped errors",
+            x=["None", e_level.value],
+            y=[base["escaped_semantic_errors"], result["escaped_semantic_errors"]],
+            marker_color=COLORS["OrangeLine"],
+        )
+        fig.add_bar(
+            name="Rejected records",
+            x=["None", e_level.value],
+            y=[base["rejected_records"], result["rejected_records"]],
+            marker_color=COLORS["BlueLine"],
+        )
+        fig.update_layout(
+            barmode="group",
+            height=255,
+            margin=dict(l=20, r=20, t=20, b=20),
+            yaxis_title="Records (count)",
+            legend_orientation="h",
+        )
+        rows = [
+            {
+                "Run": "No contract",
+                "Accepted": base["accepted_records"],
+                "Rejected": base["rejected_records"],
+                "Escaped": base["escaped_semantic_errors"],
+                "Validation": f"{base['validation_time']['magnitude']:.3f} s",
+                "Recovery": f"{base['recovery_time']['magnitude']:.0f} min",
+            },
+            {
+                "Run": e_level.value,
+                "Accepted": result["accepted_records"],
+                "Rejected": result["rejected_records"],
+                "Escaped": result["escaped_semantic_errors"],
+                "Validation": f"{result['validation_time']['magnitude']:.3f} s",
+                "Recovery": f"{result['recovery_time']['magnitude']:.0f} min",
+            },
+        ]
+        return mo.vstack(
+            [
+                intro,
+                e_prediction,
+                e_level,
+                apply_plotly_theme(fig),
+                table(rows),
+                mo.callout(
+                    mo.md(
+                        f"**Your prediction:** {e_prediction.value}. The contract spends **{result['validation_time']['magnitude']:.3f} s**, rejects **{result['rejected_records']} records**, and lets **{result['escaped_semantic_errors']} semantic errors** escape."
+                    ),
+                    kind="success"
+                    if result["escaped_semantic_errors"] == 0
+                    else "danger",
+                ),
+                e_capture,
+                saved("E"),
+                mo.accordion(
+                    {
+                        "Calculation Notes": mo.md(
+                            "Schema enforcement checks the declared version. Semantic enforcement also checks the consumer’s expected unit. Recovery time is charged only for invalid records that escape."
+                        )
+                    }
+                ),
+            ]
+        )
+
+    def synthesis():
+        rows = []
+        for part in "ABCDE":
+            cap = _captures.get(part)
+            rows.append(
+                {
+                    "Part": part,
+                    "Prediction": cap.to_dict()["prediction"] if cap else "—",
+                    "Evidence": "CURRENT"
+                    if cap
+                    and part not in audit.stale
+                    and (part, part) not in audit.identical_pairs
+                    else ("STALE" if cap else "MISSING"),
+                }
+            )
+        saved_d = _captures["D"].to_dict()["decision"] if "D" in _captures else None
+        complete = (
+            audit.complete
+            and final_choice.value is not None
+            and final_rejected.value is not None
+            and final_trigger.value is not None
+            and final_risk.value is not None
+            and final_choice.value == saved_d
+            and final_rejected.value != final_choice.value
+            and bool(rationale.value.strip())
+        )
+        return mo.vstack(
+            [
+                mo.md(
+                    "### Synthesis · Defend one data design (6 min)\nUse the saved chain: retained evidence → split integrity → pipeline supply → freshness cost → producer boundary. Choose the Part D design, reject a quantified alternative from its table, name a limitation, and set a reevaluation trigger."
+                ),
+                table(rows),
+                mo.callout(
+                    mo.md(
+                        "Saved snapshots preserve original predictions, exact evaluation arguments, and outputs."
+                    ),
+                    kind="info",
+                ),
+                mo.hstack([final_choice, final_rejected], widths="equal", wrap=True),
+                mo.hstack([final_trigger, final_risk], widths="equal", wrap=True),
+                rationale,
+                mo.callout(
+                    mo.md(
+                        "**Ready for the local report.**"
+                        if complete
+                        else "Complete five current contrasts, match the Part D decision, reject another tested policy, and write the evidence chain."
+                    ),
+                    kind="success" if complete else "warn",
+                ),
+            ]
+        )
+
+    tabs = mo.ui.tabs(
+        {
+            "Part A": part_a(),
+            "Part B": part_b(),
+            "Part C": part_c(),
+            "Part D": part_d(),
+            "Part E": part_e(),
+            "Synthesis": synthesis(),
+        }
+    )
+    tabs
+    return (audit,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(
+    audit,
     build_lab_report,
+    final_choice,
+    final_rejected,
+    final_risk,
+    final_trigger,
+    get_evidence,
+    get_lab_metadata,
     mo,
+    profile,
+    rationale,
     report_export_panel,
-    v1_04_architecture,
-    v1_04_binding_result,
-    v1_04_contract_checkpoint,
-    v1_04_contract_prediction,
-    v1_04_contract_result,
-    v1_04_final_stance,
-    v1_04_metadata,
-    v1_04_movement_result,
-    v1_04_pipeline_profile,
-    v1_04_profile,
-    v1_04_quality_checkpoint,
-    v1_04_quality_prediction,
-    v1_04_quality_result,
-    v1_04_residual_risk_note,
-    v1_04_snapshot,
-    v1_04_split_checkpoint,
-    v1_04_split_prediction,
-    v1_04_split_result,
-    v1_04_throughput_checkpoint,
-    v1_04_throughput_prediction,
-    v1_04_throughput_result,
-    v1_04_variant,
+    track_id,
 ):
-    _incomplete = []
-    _required = (
-        ("Part A quality prediction", v1_04_quality_prediction.value),
-        ("Part B split prediction", v1_04_split_prediction.value),
-        ("Part C throughput prediction", v1_04_throughput_prediction.value),
-        ("Part D contract prediction", v1_04_contract_prediction.value),
-        ("Part A checkpoint", v1_04_quality_checkpoint.value),
-        ("Part B checkpoint", v1_04_split_checkpoint.value),
-        ("Part C checkpoint", v1_04_throughput_checkpoint.value),
-        ("Part D checkpoint", v1_04_contract_checkpoint.value),
-        ("Synthesis final stance", v1_04_final_stance.value),
+    _captures = get_evidence()
+    _saved_d = _captures["D"].to_dict()["decision"] if "D" in _captures else None
+    _ready = (
+        audit.complete
+        and final_choice.value is not None
+        and final_rejected.value is not None
+        and final_trigger.value is not None
+        and final_risk.value is not None
+        and final_choice.value == _saved_d
+        and final_rejected.value != final_choice.value
+        and bool(rationale.value.strip())
     )
-    for _label, _value in _required:
-        if _value is None:
-            _incomplete.append(_label)
-    _risk_note = str(v1_04_residual_risk_note.value or "").strip()
-    if not _risk_note:
-        _incomplete.append("Synthesis residual risk")
-
-    _snapshot = v1_04_snapshot(
-        v1_04_quality_result,
-        v1_04_split_result,
-        v1_04_throughput_result,
-        v1_04_contract_result,
-    )
-
-    _report = build_lab_report(
-        v1_04_metadata,
-        track=v1_04_profile.label,
-        scenario=v1_04_variant.workload_summary,
-        learning_objectives=(
-            "Treat data quality as a measurable budget with defect, coverage, and review terms.",
-            "Diagnose when leakage and split integrity invalidate evaluation evidence.",
-            "Quantify pipeline throughput, backlog, and freshness as physical constraints.",
-            "Choose data contracts, lineage, movement, and retention policies that limit downstream data debt.",
-        ),
-        predictions={
-            "quality_budget": v1_04_quality_prediction.value,
-            "split_integrity": v1_04_split_prediction.value,
-            "throughput_backlog": v1_04_throughput_prediction.value,
-            "data_contract": v1_04_contract_prediction.value,
-        },
-        knob_settings={
-            "movement_strategy": v1_04_movement_result.strategy_id,
-            "retention_policy": v1_04_architecture.retention_policy,
-            "contract_policy": v1_04_contract_result["policy_label"],
+    mo.stop(not _ready)
+    snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
+    report = build_lab_report(
+        get_lab_metadata("vol1/lab_04_data_engr.py"),
+        track=track_id,
+        scenario=profile[1],
+        learning_objectives=[
+            "Allocate fixed annotation time",
+            "Detect split leakage",
+            "Diagnose supply, freshness, and producer boundaries",
+        ],
+        predictions={p: snapshots[p]["prediction"] for p in "ABCDE"},
+        knob_settings={p: snapshots[p]["inputs"] for p in "ABCDE"},
+        evidence_summary={
+            p: {
+                "baseline": snapshots[p]["baseline"],
+                "result": snapshots[p]["result"],
+                "alternatives": snapshots[p]["alternatives"],
+            }
+            for p in "ABCDE"
         },
         binding_constraints={
-            "binding_data_constraint": v1_04_binding_result["label"],
-            "quality_budget_pass": v1_04_quality_result["pass"],
-            "split_valid": v1_04_split_result["valid"],
-            "throughput_feasible": v1_04_throughput_result["feasible"],
-            "contract_pass": v1_04_contract_result["pass"],
+            "split": snapshots["B"]["chosen_result"]["outputs"][
+                "overlapping_entity_keys"
+            ],
+            "pipeline": snapshots["C"]["chosen_result"]["outputs"]["bottleneck_stage"],
+            "freshness": snapshots["D"]["chosen_result"]["outputs"][
+                "meets_freshness_sla"
+            ],
+            "contract": snapshots["E"]["chosen_result"]["outputs"][
+                "escaped_semantic_errors"
+            ],
         },
         decisions={
-            "quality_checkpoint": v1_04_quality_checkpoint.value,
-            "split_checkpoint": v1_04_split_checkpoint.value,
-            "throughput_checkpoint": v1_04_throughput_checkpoint.value,
-            "contract_checkpoint": v1_04_contract_checkpoint.value,
-            "final_stance": v1_04_final_stance.value,
-        },
-        evidence_summary={
-            "hardware_ref": v1_04_pipeline_profile.hardware_ref,
-            "model_ref": v1_04_pipeline_profile.model_ref,
-            "data_source": v1_04_pipeline_profile.data_source,
-            "quality_residual_defects_per_10k": v1_04_quality_result["residual_defects_per_10k"],
-            "quality_target_defects_per_10k": v1_04_quality_result["target_defects_per_10k"],
-            "effective_leakage_pct": v1_04_split_result["effective_leakage_pct"],
-            "adjusted_metric_pct": v1_04_split_result["adjusted_metric_pct"],
-            "pipeline_bottleneck": v1_04_throughput_result["bottleneck_stage"],
-            "backlog_gb": v1_04_throughput_result["backlog_gb"],
-            "freshness_lag_s": v1_04_throughput_result["freshness_lag_s"],
-            "data_moved_gb": v1_04_movement_result.data_moved_gb,
-            "quality_retained_pct": v1_04_movement_result.quality_retained_pct,
-            "silent_debt_index": v1_04_contract_result["silent_debt_index"],
+            "recommendation": final_choice.value,
+            "rejected_alternative": final_rejected.value,
+            "reevaluation_trigger": final_trigger.value,
         },
         final_decision={
-            "architecture": v1_04_architecture.memo_summary,
-            "binding_data_constraint": v1_04_binding_result["label"],
-            "final_stance": v1_04_final_stance.value,
+            "recommendation": final_choice.value,
+            "rejected_alternative": final_rejected.value,
+            "rationale": rationale.value,
         },
-        big_takeaways=(
-            "Data quality is a budget with measurable defect and coverage terms.",
-            "Split leakage can make high metrics invalid evidence.",
-            "Pipeline throughput, backlog, and freshness are physical system constraints.",
-            "Contracts and lineage prevent unmanaged data debt from propagating downstream.",
-        ),
+        big_takeaways=[
+            "Higher evaluation accuracy can hide leakage.",
+            "The slowest overlapped stage bounds supply.",
+            "Freshness and contracts consume explicit resources.",
+        ],
         reflections={
-            "residual_risk": _risk_note,
-            "privacy_stance": v1_04_pipeline_profile.privacy_stance,
-            "report_artifact": v1_04_contract_result["report_artifact"],
+            "rationale": rationale.value,
+            "reevaluation_trigger": final_trigger.value,
         },
-        residual_risk=_risk_note,
-        source_trace={
-            "track_id": v1_04_profile.track_id,
-            "scenario_id": v1_04_variant.scenario_id,
-            "hardware_ref": v1_04_variant.hardware_ref,
-            "model_ref": v1_04_variant.model_ref,
-            "shared_helper": "mlsysbook_labs.data_pipeline",
-            "local_helpers": (
-                "v1_04_quality_budget",
-                "v1_04_split_integrity",
-                "v1_04_backlog_model",
-                "v1_04_contract_governance",
-            ),
-        },
+        residual_risk=final_risk.value,
         result_snapshot={
-            "pipeline_profile": v1_04_pipeline_profile,
-            "architecture": v1_04_architecture,
-            "movement_frontier": v1_04_movement_result,
-            "concept_modules": _snapshot,
+            "track": track_id,
+            "captures": snapshots,
+            "recommendation": final_choice.value,
+            "rejected_alternative": final_rejected.value,
+            "reevaluation_trigger": final_trigger.value,
+            "residual_risk": final_risk.value,
         },
-        incomplete_fields=tuple(_incomplete),
+        source_trace={
+            "scenario": "Illustrative fixed records and supplied outcomes.",
+            "calculations": "Deterministic data-pipeline experiment model.",
+        },
     )
+    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    return (report,)
 
-    mo.vstack([
-        mo.md("## Download Report"),
-        mo.callout(
-            mo.md(
-                "This V1-04 data pipeline memo is generated locally from the selected track, "
-                "your structured predictions, manipulations, evidence, and synthesis decision."
-            ),
-            kind="info",
-        ),
-        report_export_panel(_report),
-    ])
+
+@app.cell
+async def _(
+    audit,
+    final_choice,
+    final_rejected,
+    final_risk,
+    final_trigger,
+    get_evidence,
+    ledger,
+    mo,
+    rationale,
+    track_id,
+):
+    _captures = get_evidence()
+    _saved_d = _captures["D"].to_dict()["decision"] if "D" in _captures else None
+    _ready = (
+        audit.complete
+        and final_choice.value is not None
+        and final_rejected.value is not None
+        and final_trigger.value is not None
+        and final_risk.value is not None
+        and final_choice.value == _saved_d
+        and final_rejected.value != final_choice.value
+        and bool(rationale.value.strip())
+    )
+    _status = "EVIDENCE IN PROGRESS"
+    if _ready:
+        try:
+            ledger.save(
+                chapter=4,
+                design={
+                    "schema_version": 1,
+                    "lab_id": "v1_04",
+                    "track_id": track_id,
+                    "model_id": "v1_04_experiments",
+                    "evidence": {
+                        part: capture.to_dict() for part, capture in _captures.items()
+                    },
+                    "recommendation": final_choice.value,
+                    "rejected_alternative": final_rejected.value,
+                    "reevaluation_trigger": final_trigger.value,
+                    "residual_risk": final_risk.value,
+                    "rationale": rationale.value,
+                },
+            )
+            await ledger.flush()
+        except Exception:
+            _status = "LOCAL SAVE FAILED · DOWNLOAD THE REPORT TO KEEP YOUR EVIDENCE"
+        else:
+            _status = "SAVED"
+    mo.Html(
+        f'<div class="lab-hud"><span>LAB 04 · Evidence Through the Data Pipeline · STATUS: {_status}</span></div>'
+    )
     return
 
 

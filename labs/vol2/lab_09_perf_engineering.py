@@ -1,16 +1,15 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full", app_title="Lab 09: The Optimization Trap · MLSysBook")
+app = marimo.App(width="full", app_title="Lab 09: Optimize the Path · MLSysBook")
 
 
+# ZONE A · Opening and setup
 @app.cell
 async def _():
-    import marimo as mo
     import sys
-    import math
-    import html as html_lib
     from pathlib import Path
+    import marimo as mo
 
     if sys.platform == "emscripten":
         import micropip
@@ -18,1775 +17,615 @@ async def _():
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
-        _labs_dir = Path(__file__).resolve().parents[1]
-        if str(_labs_dir) not in sys.path:
-            sys.path.insert(0, str(_labs_dir))
+        labs_dir = Path(__file__).resolve().parents[1]
+        if str(labs_dir) not in sys.path:
+            sys.path.insert(0, str(labs_dir))
         from bootstrap import native_bootstrap
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
+    from mlsysim.engine.v2_09_experiments import (
+        MODEL_ID, TRACKS, compare_configs, evaluate, get_scenario,
+        quantity_from_dict, result_to_dict,
+    )
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        MathPeek,
-        big_takeaways,
-        build_lab_report,
-        flash_attention_traffic,
-        gated_hypothesis_card,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        instrumentation_console,
-        report_export_panel,
-        source_trace,
-        track_arc_context,
+        ACADEMIC_LAB_CSS, build_lab_report, get_lab_metadata,
+        get_lab_track_variant, get_track_profile, report_export_panel,
         track_context,
-        track_selector,
+    )
+    from mlsysbook_labs.experiment_evidence import audit_evidence, capture_evidence
+
+    ledger = DesignLedger(volume="vol2")
+    if ledger.is_wasm:
+        _loaded = await ledger.load_async()
+    return (
+        ACADEMIC_LAB_CSS, COLORS, LAB_CSS, MODEL_ID, TRACKS,
+        apply_plotly_theme, audit_evidence, build_lab_report, capture_evidence,
+        compare_configs, evaluate, get_lab_metadata, get_lab_track_variant,
+        get_scenario, get_track_profile, go, ledger, mo, quantity_from_dict,
+        report_export_panel, result_to_dict, track_context,
     )
 
-    ledger = DesignLedger()
-    if getattr(ledger, "is_wasm", False):
-        _ = await ledger.load_async()
-    return (
-        ACADEMIC_LAB_CSS,
-        COLORS,
-        MathPeek,
-        apply_plotly_theme,
-        big_takeaways,
-        build_lab_report,
-        flash_attention_traffic,
-        gated_hypothesis_card,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        go,
-        html_lib,
-        instrumentation_console,
-        ledger,
-        math,
-        mo,
-        report_export_panel,
-    )
+
+# ZONE B · Widgets and experiment state
+@app.cell
+def _(mo):
+    get_evidence, set_evidence = mo.state({})
+    return get_evidence, set_evidence
 
 
 @app.cell
-def _(get_lab_metadata):
-    v2_09_lab_path = "vol2/lab_09_perf_engineering.py"
-    v2_09_chapter = 9
-    v2_09_metadata = get_lab_metadata(v2_09_lab_path)
-    return v2_09_chapter, v2_09_metadata
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    v2_09_track_picker = mo.ui.dropdown(
-        options={
-            "⚡ TinyML Track (ARM Cortex-M55 / Duty-Cycle Windows & Sensing-Radio Slots)": "oura_ring",
-            "📱 Mobile Track (Apple Silicon / Unified Memory & Sustained On-Device Assistant)": "iphone",
-            "🤖 Edge & Embodied Track (NVIDIA Jetson AGX Orin & Real-Time Perception Deadlines)": "robotaxi",
-            "☁️ Cloud Supercomputing Track (H100 Clusters & LLM Peak Serving Efficiency)": "cloud_fleet",
-        },
-        value="☁️ Cloud Supercomputing Track (H100 Clusters & LLM Peak Serving Efficiency)",
-        label="Select Course / Industry Track",
+def _(mo, set_evidence):
+    track = mo.ui.dropdown(
+        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
+        value="TinyML", label="Fleet track", on_change=lambda _value: set_evidence({}),
     )
-    v2_09_track_picker
-    return (v2_09_track_picker,)
+    return (track,)
+
+
+@app.cell
+def _(get_lab_metadata, get_lab_track_variant, get_scenario, get_track_profile, track):
+    track_id = track.value
+    scenario = get_scenario(track_id)
+    track_profile = get_track_profile(track_id)
+    _metadata = get_lab_metadata("vol2/lab_09_perf_engineering.py")
+    track_variant = get_lab_track_variant(_metadata.lab_id, track_id)
+    return scenario, track_id, track_profile, track_variant
+
+
+@app.cell
+def _(TRACKS, mo, track_id):
+    _track_key = track_id
+    a_batch = mo.ui.dropdown(
+        {"2 items": 2, "4 items": 4, "8 items": 8}, value="4 items",
+        label="Items per execution",
+    )
+    b_lever = mo.ui.radio(
+        {"Fuse operators": "fusion", "Tile for reuse": "tiling",
+         "Combine fusion and tiling": "combined"},
+        value="Fuse operators", label="Path rewrite to test",
+    )
+    _precision_options = {
+        item.precision.upper(): item.precision
+        for item in TRACKS[track_id].precision_evidence
+    }
+    c_precision = mo.ui.dropdown(
+        _precision_options, value=TRACKS[track_id].default_precision.upper(),
+        label="Execution precision",
+    )
+    c_reuse = mo.ui.dropdown(
+        {"1 run": 1, "100 runs": 100, "100,000 runs": 100_000},
+        value="100,000 runs", label="Compiled-region reuse",
+    )
+    _stress_options = {
+        "tinyml": {"8 items": 8, "32 items": 32, "64 items": 64},
+        "mobile": {"8 items": 8, "64 items": 64, "1,000 items": 1_000},
+        "edge": {"8 items": 8, "64 items": 64, "400 items": 400},
+        "cloud": {"8 items": 8, "16 items": 16, "64 items": 64},
+    }
+    d_batch = mo.ui.dropdown(
+        _stress_options[track_id], value=list(_stress_options[track_id])[1],
+        label="Fleet-unit batch under stress",
+    )
+    return a_batch, b_lever, c_precision, c_reuse, d_batch
+
+
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    a_prediction = mo.ui.radio(
+        {"Memory traffic": "memory", "Compute": "compute",
+         "Launch or compile overhead": "overhead"},
+        label="Which term binds the initial batch probe?",
+    ).form(submit_button_label="Lock Part A prediction")
+    b_prediction = mo.ui.radio(
+        {"Fusion": "fusion", "Tiling": "tiling", "Combined": "combined"},
+        label="Which rewrite will deliver the largest end-to-end speedup?",
+    ).form(submit_button_label="Lock Part B prediction")
+    c_prediction = mo.ui.radio(
+        {"Setup dominates": "setup", "Runtime saving dominates": "runtime",
+         "Precision dominates": "precision"},
+        label="What determines whether the compiled candidate wins?",
+    ).form(submit_button_label="Lock Part C prediction")
+    d_prediction = mo.ui.radio(
+        {"Fits per fleet unit": "fit", "Exceeds per-unit memory": "fail"},
+        label="Will the stressed batch fit one execution unit?",
+    ).form(submit_button_label="Lock Part D prediction")
+    return a_prediction, b_prediction, c_prediction, d_prediction
+
+
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    c_decision = mo.ui.radio(
+        {"Carry compiled precision": "compiled", "Keep the path rewrite": "rewrite"},
+        label="Configuration to carry into the boundary test",
+    )
+    _options = {
+        "Adopt tested batch": "batched",
+        "Keep prior optimized batch": "optimized",
+        "Return to unoptimized selected-batch path": "baseline",
+    }
+    d_decision = mo.ui.radio(_options, label="Recommendation after the boundary test")
+    d_rejected = mo.ui.radio(_options, label="Quantified rejected alternative")
+    final_choice = mo.ui.radio(_options, label="Final recommendation")
+    final_rejected = mo.ui.radio(_options, label="Rejected alternative")
+    final_trigger = mo.ui.radio(
+        {"Workload mix changes": "workload", "Per-unit memory shrinks": "memory",
+         "Quality evidence changes": "quality"}, label="Reevaluation trigger",
+    )
+    final_risk = mo.ui.radio(
+        {"Illustrative quality fixture": "quality_fixture",
+         "Unmodeled communication": "communication",
+         "Peak-rate attainability": "attainability"}, label="Remaining limitation",
+    )
+    rationale = mo.ui.text_area(
+        label="Concise rationale",
+        placeholder="Cite a saved speedup or memory result, then quantify why the alternative loses.",
+    )
+    return (
+        c_decision, d_decision, d_rejected, final_choice, final_rejected,
+        final_risk, final_trigger, rationale,
+    )
+
+
+# Experiment orchestration through MLSysIM
+@app.cell
+def _(
+    a_batch, b_lever, c_decision, c_precision, c_reuse, compare_configs,
+    d_batch, evaluate, result_to_dict, scenario, track_id,
+):
+    a_baseline = evaluate(track_id, batch_size=1)
+    a_result = evaluate(track_id, batch_size=a_batch.value)
+    _rewrite_flags = {
+        "fusion": {"fusion": True, "tiling": False},
+        "tiling": {"fusion": False, "tiling": True},
+        "combined": {"fusion": True, "tiling": True},
+    }
+    _a_config = {
+        "batch_size": a_batch.value, "fleet_units": scenario.default_fleet_units,
+        "precision": scenario.default_precision, "fusion": False,
+        "tiling": False, "compiled": False, "reuse_count": 1,
+    }
+    _b_config = {**_a_config, **_rewrite_flags[b_lever.value]}
+    b_comparison = compare_configs(
+        track_id, baseline_options=_a_config, result_options=_b_config,
+    )
+    b_alternatives = {
+        _name: result_to_dict(evaluate(track_id, **{**_a_config, **_flags}))
+        for _name, _flags in _rewrite_flags.items()
+    }
+    _c_config = {
+        **_b_config, "precision": c_precision.value, "compiled": True,
+        "reuse_count": c_reuse.value,
+    }
+    c_comparison = compare_configs(
+        track_id, baseline_options=_b_config, result_options=_c_config,
+    )
+    c_reuse_results = {
+        _reuse: evaluate(track_id, **{**_c_config, "reuse_count": _reuse})
+        for _reuse in (1, 100, 100_000)
+    }
+    c_carried = (
+        c_comparison["result"] if c_decision.value == "compiled"
+        else c_comparison["baseline"]
+    )
+    _carried_inputs = {
+        "batch_size": c_carried.inputs.batch_size,
+        "fleet_units": c_carried.inputs.fleet_units,
+        "precision": c_carried.inputs.precision,
+        "fusion": c_carried.inputs.fusion,
+        "tiling": c_carried.inputs.tiling,
+        "compiled": c_carried.inputs.compiled,
+        "reuse_count": c_carried.inputs.reuse_count,
+    }
+    _d_config = {**_carried_inputs, "batch_size": d_batch.value}
+    d_comparison = compare_configs(
+        track_id, baseline_options=_carried_inputs, result_options=_d_config,
+    )
+    d_alternatives = {
+        _batch: result_to_dict(
+            evaluate(track_id, **{**_carried_inputs, "batch_size": _batch})
+        )
+        for _batch in (
+            scenario.default_batch_size,
+            d_batch.value,
+            {"tinyml": 64, "mobile": 1_000, "edge": 400, "cloud": 64}[track_id],
+        )
+    }
+    return (
+        a_baseline, a_result, b_alternatives, b_comparison, c_carried,
+        c_comparison, c_reuse_results, d_alternatives, d_comparison,
+    )
 
 
 @app.cell
 def _(
-    get_lab_track_variant,
-    get_track_profile,
-    v2_09_metadata,
-    v2_09_track_picker,
+    MODEL_ID, a_baseline, a_batch, a_prediction, a_result, b_alternatives,
+    b_comparison, b_lever, b_prediction, c_comparison, c_decision,
+    c_precision, c_reuse, capture_evidence, d_alternatives, d_batch,
+    d_comparison, d_decision, d_prediction, d_rejected, mo, result_to_dict,
+    set_evidence, track_id,
 ):
-    v2_09_track_id = v2_09_track_picker.value
-    v2_09_profile = get_track_profile(v2_09_track_id)
-    v2_09_variant = get_lab_track_variant(v2_09_metadata.lab_id, v2_09_track_id)
-    return v2_09_profile, v2_09_variant
+    def store(part, capture):
+        set_evidence(lambda current: {**current, part: capture})
+
+    a_upstream = None
+    b_upstream = {"batch_size": a_batch.value}
+    c_upstream = {**b_upstream, "rewrite": b_lever.value}
+    d_upstream = {
+        **c_upstream, "precision": c_precision.value,
+        "reuse_count": c_reuse.value, "carried": c_decision.value,
+    }
+    a_capture = mo.ui.button(
+        label="Capture bottleneck contrast", kind="success",
+        disabled=a_prediction.value is None,
+        on_click=lambda _v: store("A", capture_evidence(
+            track=track_id, part="A", prediction=a_prediction.value,
+            inputs={"batch_size": a_batch.value},
+            baseline=result_to_dict(a_baseline), result=result_to_dict(a_result),
+            upstream_inputs=a_upstream, decision=a_result.bottleneck,
+            model_key=MODEL_ID,
+        )),
+    )
+    b_capture = mo.ui.button(
+        label="Capture rewrite comparison", kind="success",
+        disabled=b_prediction.value is None,
+        on_click=lambda _v: store("B", capture_evidence(
+            track=track_id, part="B", prediction=b_prediction.value,
+            inputs={"rewrite": b_lever.value},
+            baseline=result_to_dict(b_comparison["baseline"]),
+            result=result_to_dict(b_comparison["result"]),
+            alternatives=b_alternatives, upstream_inputs=b_upstream,
+            decision=b_lever.value, model_key=MODEL_ID,
+        )),
+    )
+    c_capture = mo.ui.button(
+        label="Capture compile and precision evidence", kind="success",
+        disabled=c_prediction.value is None or c_decision.value is None,
+        on_click=lambda _v: store("C", capture_evidence(
+            track=track_id, part="C", prediction=c_prediction.value,
+            inputs={"precision": c_precision.value, "reuse_count": c_reuse.value,
+                    "carried": c_decision.value},
+            baseline=result_to_dict(c_comparison["baseline"]),
+            result=result_to_dict(c_comparison["result"]),
+            upstream_inputs=c_upstream, decision=c_decision.value,
+            model_key=MODEL_ID,
+        )),
+    )
+    _d_invalid = (
+        d_prediction.value is None or c_decision.value is None or d_decision.value is None
+        or d_rejected.value is None or d_decision.value == d_rejected.value
+        or (d_decision.value != "batched" and d_rejected.value != "batched")
+    )
+    d_capture = mo.ui.button(
+        label="Capture memory-boundary decision", kind="success",
+        disabled=_d_invalid,
+        on_click=lambda _v: store("D", capture_evidence(
+            track=track_id, part="D", prediction=d_prediction.value,
+            inputs={"stress_batch": d_batch.value, "recommendation": d_decision.value,
+                    "rejected": d_rejected.value},
+            baseline=result_to_dict(d_comparison["baseline"]),
+            result=result_to_dict(d_comparison["result"]),
+            chosen_result=(
+                result_to_dict(a_result) if d_decision.value == "baseline"
+                else result_to_dict(d_comparison["baseline"])
+                if d_decision.value == "optimized" else None
+            ),
+            result_role=(
+                "chosen intervention" if d_decision.value == "batched"
+                else "rejected alternative"
+            ),
+            alternatives=d_alternatives, upstream_inputs=d_upstream,
+            decision=d_decision.value, model_key=MODEL_ID,
+        )),
+    )
+    return (
+        a_capture, a_upstream, b_capture, b_upstream, c_capture, c_upstream,
+        d_capture, d_upstream,
+    )
 
 
 @app.cell
-def _(COLORS, html_lib, math, mo):
-    def v2_09_pct(value, digits=1):
-        return f"{value * 100:.{digits}f}%"
-
-    def v2_09_ms(value, digits=1):
-        if not math.isfinite(value):
-            return "unbounded"
-        return f"{value:.{digits}f} ms"
-
-    def v2_09_num(value, digits=1):
-        if abs(value) >= 1000:
-            return f"{value:,.0f}"
-        return f"{value:.{digits}f}"
-
-    def v2_09_money(value):
-        if value >= 1000:
-            return f"${value:,.0f}"
-        if value >= 10:
-            return f"${value:,.1f}"
-        return f"${value:,.2f}"
-
-    def v2_09_optimization_label(lever):
-        return {
-            "none": "No local optimization",
-            "data_path": "Reduce data movement",
-            "compute_path": "Improve compute path",
-            "overhead_path": "Reduce launch/coordination overhead",
-            "capacity_path": "Add serving capacity",
-            "bottleneck_fix": "Fix the measured bottleneck",
-        }.get(lever, str(lever))
-
-    def v2_09_bottleneck_label(bottleneck):
-        return {
-            "data": "Data movement / bandwidth",
-            "compute": "Compute path",
-            "overhead": "Launch or coordination overhead",
-            "capacity": "Fleet capacity",
-        }.get(bottleneck, str(bottleneck))
-
-    def v2_09_candidate_label(candidate_id):
-        return {
-            "targeted": "Target measured bottleneck",
-            "scale": "Buy more serving units",
-            "precision": "Aggressive precision/cache compression",
-            "algorithmic": "Speculative or algorithmic path",
-        }.get(candidate_id, str(candidate_id))
-
-    def v2_09_track_packet(profile, variant=None):
-        shared = {
-            "track_id": profile.track_id,
-            "label": profile.label,
-            "stakeholder": variant.stakeholder if variant else profile.stakeholder,
-            "track_source": profile.source_policy,
-            "hardware_ref": variant.hardware_ref if variant else profile.hardware_ref,
-            "system_ref": (variant.system_ref if variant else None) or profile.system_ref or "track-local deployment envelope",
-            "quality_budget_pct": 2.0,
-            "regression_budget_pct": 4.0,
-            "reality_tax_pct": 12.0,
-            "headroom_target_pct": 25.0,
-            "cost_ceiling_multiplier": 1.35,
+def _(
+    ACADEMIC_LAB_CSS, LAB_CSS, mo, scenario, track, track_context,
+    track_profile, track_variant,
+):
+    css = mo.Html("""
+    <style>
+    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin:30px 0 10px}
+    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
+    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:760px}
+    .pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
+    .selector-shell{padding:10px 12px;border:1px solid #dbe4ee;border-radius:9px;background:#fff;margin-bottom:8px;max-width:100%}
+    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
+    .table-wrap{max-width:100%;overflow-x:auto}.lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-separator{color:#64748b}.lab-hud .hud-active{color:#86efac}.lab-hud .hud-failed{color:#fca5a5}
+    @media(max-width:520px){.pilot-head{border-radius:9px}.pilot-meta{grid-template-columns:1fr}.selector-shell{padding:8px}}
+    </style>""")
+    header = mo.Html(f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME II · LAB 09</span><span>ABOUT 50–55 MIN</span></div><h1>Optimize the Path</h1><p>Which physical term should the fleet team change, and when does that optimization stop paying?</p><div class="pilot-meta"><div><b>Stakeholder</b><br>{track_variant.stakeholder}</div><div><b>Fleet unit</b><br>{scenario.fleet_semantics}</div><div><b>Workload</b><br>{scenario.workload}</div><div><b>Output</b><br>Performance engineering memo</div></div></section>""")
+    selector = mo.vstack([mo.md("**Choose the fleet context**"), track]).style(
+        {
+            "max-width": "100%", "padding": "10px 12px",
+            "border": "1px solid #dbe4ee", "border-radius": "9px",
+            "background": "#fff", "margin-bottom": "8px",
         }
-        track_configs = {
-            "iphone": {
-                "scenario_id": "iphone_sustained_local_assistant",
-                "workload": "sustained on-device assistant requests after a feature rollout",
-                "report_frame": "Mobile performance release memo",
-                "amount_unit": "requests/min across enrolled phones",
-                "serving_unit": "release shard",
-                "failure_mode": "thermal or battery budget miss after a cold run looked fine",
-                "constraint_note": "battery, thermal headroom, memory pressure, and responsiveness",
-                "base_terms_ms": {"data": 78.0, "compute": 40.0, "overhead": 20.0},
-                "tail_multiplier": 1.28,
-                "slo_ms": 150.0,
-                "base_demand": 4200.0,
-                "base_capacity_per_unit": 900.0,
-                "default_units": 5,
-                "max_units": 12,
-                "unit_cost_day": 180.0,
-                "default_cv_pct": 5.5,
-                "quality_budget_pct": 2.0,
-            },
-            "oura_ring": {
-                "scenario_id": "oura_sleep_feature_wake_window",
-                "workload": "overnight sensing windows that must finish inside a duty-cycle wake slot",
-                "report_frame": "Wearable firmware performance memo",
-                "amount_unit": "sensing windows/hour",
-                "serving_unit": "firmware cohort",
-                "failure_mode": "duty-cycle energy or SRAM/flash budget miss",
-                "constraint_note": "SRAM, flash, wake time, energy, and OTA payload",
-                "base_terms_ms": {"data": 16.0, "compute": 9.0, "overhead": 7.0},
-                "tail_multiplier": 1.25,
-                "slo_ms": 35.0,
-                "base_demand": 9600.0,
-                "base_capacity_per_unit": 1800.0,
-                "default_units": 6,
-                "max_units": 16,
-                "unit_cost_day": 45.0,
-                "default_cv_pct": 8.0,
-                "quality_budget_pct": 1.5,
-            },
-            "robotaxi": {
-                "scenario_id": "robotaxi_perception_tail_deadline",
-                "workload": "perception frames during dense urban driving",
-                "report_frame": "Safety-critical performance memo",
-                "amount_unit": "frames/s across active vehicles",
-                "serving_unit": "compute lane",
-                "failure_mode": "p99 deadline or safety margin miss",
-                "constraint_note": "p99/p999 latency, recall, power, and sensor bandwidth",
-                "base_terms_ms": {"data": 42.0, "compute": 58.0, "overhead": 12.0},
-                "tail_multiplier": 1.45,
-                "slo_ms": 95.0,
-                "base_demand": 84.0,
-                "base_capacity_per_unit": 32.0,
-                "default_units": 3,
-                "max_units": 10,
-                "unit_cost_day": 620.0,
-                "default_cv_pct": 4.0,
-                "quality_budget_pct": 1.0,
-            },
-            "cloud_fleet": {
-                "scenario_id": "cloud_llm_serving_efficiency",
-                "workload": "LLM serving traffic during the weekday peak",
-                "report_frame": "Fleet capacity and optimization memo",
-                "amount_unit": "tokens/s at peak",
-                "serving_unit": "GPU slice",
-                "failure_mode": "SLA breach, queueing pressure, or negative ROI",
-                "constraint_note": "SLA p99, throughput, cost/request, utilization, and headroom",
-                "base_terms_ms": {"data": 96.0, "compute": 54.0, "overhead": 26.0},
-                "tail_multiplier": 1.35,
-                "slo_ms": 180.0,
-                "base_demand": 19000.0,
-                "base_capacity_per_unit": 4500.0,
-                "default_units": 5,
-                "max_units": 18,
-                "unit_cost_day": 980.0,
-                "default_cv_pct": 6.0,
-                "quality_budget_pct": 2.0,
-            },
-        }
-        packet = dict(shared)
-        packet.update(track_configs.get(profile.track_id, track_configs["cloud_fleet"]))
-        packet["headroom_target"] = packet["headroom_target_pct"] / 100.0
-        packet["reality_tax"] = packet["reality_tax_pct"] / 100.0
-        packet["quality_budget"] = packet["quality_budget_pct"] / 100.0
-        packet["regression_budget"] = packet["regression_budget_pct"] / 100.0
-        return packet
+    )
+    context = track_context(track_profile)
+    mo.vstack([
+        LAB_CSS, ACADEMIC_LAB_CSS, css, header, selector, context,
+        mo.Html('<p class="pilot-note">Results are simulated analytical bounds. Quality values are supplied scenario evidence, not hardware-derived measurements. Open Calculation Notes in each part for equations and assumptions.</p>'),
+    ], gap=0.5)
+    return
 
-    def v2_09_best_lever(bottleneck):
-        return {
-            "data": "data_path",
-            "compute": "compute_path",
-            "overhead": "overhead_path",
-        }.get(bottleneck, "data_path")
 
-    def v2_09_profile_result(packet, optimization="none", pressure=1.0):
-        terms = dict(packet["base_terms_ms"])
-        terms["data"] *= 0.88 + 0.18 * pressure
-        terms["compute"] *= 0.90 + 0.12 * pressure
-        terms["overhead"] *= 0.80 + 0.22 * pressure
+@app.cell
+def _(mo):
+    mo.sidebar([mo.md("## Lab navigation"), mo.outline(label="Sections")])
+    return
 
-        effects = {
-            "none": {"data": 1.0, "compute": 1.0, "overhead": 1.0, "quality": 0.0, "complexity": 0.0},
-            "data_path": {"data": 0.58, "compute": 1.03, "overhead": 0.96, "quality": 0.012, "complexity": 0.35},
-            "compute_path": {"data": 1.00, "compute": 0.62, "overhead": 1.03, "quality": 0.004, "complexity": 0.30},
-            "overhead_path": {"data": 0.98, "compute": 1.00, "overhead": 0.45, "quality": 0.001, "complexity": 0.25},
-            "capacity_path": {"data": 0.96, "compute": 0.96, "overhead": 0.98, "quality": 0.0, "complexity": 0.10},
-        }
-        effect = effects.get(optimization, effects["none"])
-        for key in ("data", "compute", "overhead"):
-            terms[key] *= effect[key]
 
-        p50_ms = max(terms["data"], terms["compute"]) + terms["overhead"]
-        load_tail = 1.0 + max(0.0, pressure - 1.0) * 0.30
-        p99_ms = p50_ms * packet["tail_multiplier"] * load_tail
-        bottleneck = max(terms, key=terms.get)
-        return {
-            "terms": terms,
-            "p50_ms": p50_ms,
-            "p99_ms": p99_ms,
-            "slo_ok": p99_ms <= packet["slo_ms"],
-            "bottleneck": bottleneck,
-            "quality_risk": effect["quality"],
-            "complexity": effect["complexity"],
-        }
+# ZONE C · Single tab set
+@app.cell
+def _(
+    COLORS, a_baseline, a_batch, a_capture, a_prediction, a_result,
+    a_upstream, apply_plotly_theme, audit_evidence, b_alternatives, b_capture,
+    b_comparison, b_lever, b_prediction, b_upstream, c_capture, c_comparison,
+    c_decision, c_precision, c_reuse, c_reuse_results, c_upstream,
+    d_alternatives, d_batch, d_capture, d_comparison, d_decision,
+    d_prediction, d_rejected, d_upstream, final_choice, final_rejected,
+    final_risk, final_trigger, get_evidence, go, mo, quantity_from_dict,
+    rationale, scenario, track_id,
+):
+    _captures = get_evidence()
+    _upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream}
+    _mem_unit = {"tinyml": "KiB", "mobile": "MiB", "edge": "GiB", "cloud": "GiB"}[track_id]
+    audit = audit_evidence(
+        _captures, track=track_id, required_parts=tuple("ABCD"),
+        per_part_upstream_inputs=_upstream,
+        contrast_required_parts=tuple("ABCD"),
+    )
 
-    def v2_09_regression_result(packet, sample_count, cv_pct, candidate_delta_pct):
-        baseline = v2_09_profile_result(packet, v2_09_best_lever(v2_09_profile_result(packet)["bottleneck"]))
-        baseline_ms = baseline["p99_ms"]
-        candidate_ms = baseline_ms * (1.0 + candidate_delta_pct / 100.0)
-        sigma_ms = baseline_ms * cv_pct / 100.0
-        ci_diff_ms = 1.96 * math.sqrt(2.0) * sigma_ms / math.sqrt(max(1, sample_count))
-        mde_pct = ci_diff_ms / baseline_ms * 100.0
-        detectable = abs(candidate_delta_pct) >= mde_pct
-        regression = candidate_delta_pct > packet["regression_budget_pct"]
-        guardrail_fail = candidate_ms > packet["slo_ms"]
-        if guardrail_fail and detectable:
-            decision = "block"
-            reason = "candidate p99 breaches the track guardrail and the effect is detectable"
-        elif regression and detectable:
-            decision = "block"
-            reason = "regression exceeds the release budget and is detectable"
-        elif regression or guardrail_fail:
-            decision = "hold"
-            reason = "effect is policy-relevant but hidden by variance; collect more canary evidence"
-        elif candidate_delta_pct < -mde_pct:
-            decision = "ship"
-            reason = "improvement is detectable and guardrails hold"
-        else:
-            decision = "hold"
-            reason = "change is inside the noise band; do not claim a speedup"
-        return {
-            "baseline_ms": baseline_ms,
-            "candidate_ms": candidate_ms,
-            "sigma_ms": sigma_ms,
-            "ci_diff_ms": ci_diff_ms,
-            "mde_pct": mde_pct,
-            "detectable": detectable,
-            "regression": regression,
-            "guardrail_fail": guardrail_fail,
-            "decision": decision,
-            "reason": reason,
-        }
+    def q(value, unit, digits=2):
+        return f"{value.to(unit).magnitude:,.{digits}f} {unit}"
 
-    def v2_09_capacity_result(packet, demand_multiplier, units, optimization):
-        base_profile = v2_09_profile_result(packet, "none")
-        if optimization == "bottleneck_fix":
-            optimization = v2_09_best_lever(base_profile["bottleneck"])
-        profile = v2_09_profile_result(packet, optimization)
-        service_rate = packet["base_capacity_per_unit"] * base_profile["p99_ms"] / max(1e-6, profile["p99_ms"])
-        service_rate *= 1.0 - packet["reality_tax"]
-        demand = packet["base_demand"] * demand_multiplier
-        capacity = service_rate * units
-        utilization = demand / max(1e-9, capacity)
-        if utilization >= 1.0:
-            queue_multiplier = 3.0 + 4.0 * min(1.0, utilization - 1.0)
-        else:
-            queue_multiplier = 1.0 + 0.35 * (utilization * utilization) / max(0.05, 1.0 - utilization)
-        p99_ms = profile["p99_ms"] * queue_multiplier
-        headroom = capacity / max(1e-9, demand) - 1.0
-        daily_cost = units * packet["unit_cost_day"]
-        failures = []
-        if utilization >= 1.0:
-            failures.append("demand exceeds measured capacity")
-        if p99_ms > packet["slo_ms"]:
-            failures.append("p99 exceeds track guardrail")
-        if headroom < packet["headroom_target"]:
-            failures.append("headroom below target")
-        return {
-            "optimization": optimization,
-            "profile": profile,
-            "demand": demand,
-            "service_rate": service_rate,
-            "capacity": capacity,
-            "units": units,
-            "utilization": utilization,
-            "queue_multiplier": queue_multiplier,
-            "p99_ms": p99_ms,
-            "headroom": headroom,
-            "daily_cost": daily_cost,
-            "feasible": not failures,
-            "failures": failures,
-        }
+    def table(rows):
+        return mo.vstack([mo.ui.table(rows, pagination=False)]).style(
+            {"max-width": "100%", "overflow-x": "auto"}
+        )
 
-    def v2_09_tradeoff_candidates(packet, demand_multiplier, units, risk_budget_pct, cost_ceiling):
-        base = v2_09_profile_result(packet)
-        targeted_lever = v2_09_best_lever(base["bottleneck"])
-        quality_by_track = {
-            "iphone": {"targeted": 0.8, "scale": 0.1, "precision": 1.9, "algorithmic": 0.9},
-            "oura_ring": {"targeted": 0.7, "scale": 0.1, "precision": 2.4, "algorithmic": 1.4},
-            "robotaxi": {"targeted": 0.4, "scale": 0.1, "precision": 4.8, "algorithmic": 2.4},
-            "cloud_fleet": {"targeted": 0.7, "scale": 0.1, "precision": 1.3, "algorithmic": 1.0},
-        }.get(packet["track_id"], {})
-        specs = [
-            {
-                "id": "targeted",
-                "optimization": targeted_lever,
-                "unit_multiplier": 1.0,
-                "cost_multiplier": 1.10,
-                "p99_multiplier": 1.0,
-                "reason": f"targets {v2_09_bottleneck_label(base['bottleneck'])}",
-            },
-            {
-                "id": "scale",
-                "optimization": "capacity_path",
-                "unit_multiplier": 1.5,
-                "cost_multiplier": 1.35,
-                "p99_multiplier": 0.94,
-                "reason": "buys queue headroom but raises recurring cost",
-            },
-            {
-                "id": "precision",
-                "optimization": "data_path",
-                "unit_multiplier": 1.0,
-                "cost_multiplier": 0.90,
-                "p99_multiplier": 0.95,
-                "reason": "cheap when bandwidth binds but carries quality and validation risk",
-            },
-            {
-                "id": "algorithmic",
-                "optimization": "compute_path" if base["bottleneck"] == "compute" else "overhead_path",
-                "unit_multiplier": 1.0,
-                "cost_multiplier": 1.20,
-                "p99_multiplier": 0.82,
-                "reason": "can cut latency but adds scheduler and validation complexity",
-            },
-        ]
-        rows = []
-        for spec in specs:
-            cand_units = max(1, math.ceil(units * spec["unit_multiplier"]))
-            capacity = v2_09_capacity_result(packet, demand_multiplier, cand_units, spec["optimization"])
-            p99_ms = capacity["p99_ms"] * spec["p99_multiplier"]
-            daily_cost = capacity["daily_cost"] * spec["cost_multiplier"]
-            quality_loss_pct = quality_by_track.get(spec["id"], 1.0)
-            failures = []
-            if p99_ms > packet["slo_ms"]:
-                failures.append("p99")
-            if capacity["headroom"] < packet["headroom_target"]:
-                failures.append("headroom")
-            if quality_loss_pct > risk_budget_pct:
-                failures.append("quality")
-            if daily_cost > cost_ceiling:
-                failures.append("cost")
-            score = (
-                p99_ms / packet["slo_ms"]
-                + max(0.0, packet["headroom_target"] - capacity["headroom"]) * 2.0
-                + daily_cost / max(1.0, cost_ceiling) * 0.45
-                + quality_loss_pct / max(0.1, risk_budget_pct) * 0.30
-                + (3.0 if failures else 0.0)
+    def saved(part):
+        _capture = _captures.get(part)
+        if _capture is None:
+            return mo.callout(mo.md("No saved evidence for this part."), kind="warn")
+        if part in audit.stale or (part, part) in audit.identical_pairs:
+            return mo.callout(
+                mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** An upstream choice changed. Recapture this comparison."),
+                kind="danger",
             )
-            rows.append({
-                "id": spec["id"],
-                "label": v2_09_candidate_label(spec["id"]),
-                "optimization": spec["optimization"],
-                "units": cand_units,
-                "p99_ms": p99_ms,
-                "headroom": capacity["headroom"],
-                "daily_cost": daily_cost,
-                "quality_loss_pct": quality_loss_pct,
-                "feasible": not failures,
-                "failures": failures,
-                "score": score,
-                "reason": spec["reason"],
-            })
-        feasible = [row for row in rows if row["feasible"]]
-        selected = min(feasible or rows, key=lambda row: row["score"])
-        rejected_pool = [row for row in rows if row["id"] != selected["id"]]
-        rejected = max(rejected_pool, key=lambda row: (not row["feasible"], -row["p99_ms"], row["daily_cost"]))
-        if rejected["feasible"]:
-            rejected = min(rejected_pool, key=lambda row: row["score"])
-        return rows, selected, rejected
+        _data = _capture.to_dict()
+        return mo.Html(
+            f'<div class="saved"><b>Saved snapshot</b> · original prediction: {_data["prediction"]}<br><small>Track {_data["track"]}; later live controls do not rewrite this record.</small></div>'
+        )
 
-    def v2_09_part_banner(letter, title, why, color):
-        return mo.Html(f"""
-        <div style="margin:12px 0 16px 0;">
-            <div style="display:flex; align-items:center; gap:12px;">
-                <div style="background:{color}; color:white; border-radius:50%;
-                            width:32px; height:32px; display:inline-flex; align-items:center;
-                            justify-content:center; font-size:0.9rem; font-weight:800;
-                            flex-shrink:0;">{html_lib.escape(letter)}</div>
-                <div style="flex:1; height:2px; background:{COLORS['Border']};"></div>
-                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                            text-transform:uppercase; letter-spacing:0.12em;">
-                    Concept module</div>
-            </div>
-            <div style="font-size:1.45rem; font-weight:800; color:{COLORS['Text']};
-                        margin-top:8px; line-height:1.2;">{html_lib.escape(title)}</div>
-            <div style="color:{COLORS['TextSec']}; font-size:0.92rem; margin-top:6px;
-                        line-height:1.55; max-width:820px;">{html_lib.escape(why)}</div>
-        </div>
-        """)
-
-    def v2_09_metric_card(label, value, subvalue="", color=None, danger=False):
-        _color = color or COLORS["BlueLine"]
-        _border = COLORS["RedLine"] if danger else COLORS["Border"]
-        return f"""
-        <div style="padding:14px 16px; border:1px solid {_border}; border-radius:8px;
-                    min-width:148px; text-align:center; background:white;">
-            <div style="color:{COLORS['TextMuted']}; font-size:0.72rem; font-weight:700;
-                        text-transform:uppercase;">{html_lib.escape(label)}</div>
-            <div style="font-size:1.45rem; font-weight:800; color:{_color}; font-family:monospace;
-                        line-height:1.35;">{html_lib.escape(str(value))}</div>
-            <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">{html_lib.escape(str(subvalue))}</div>
-        </div>
-        """
-
-    def v2_09_table(headers, rows):
-        head = "".join(f"<th>{html_lib.escape(str(header))}</th>" for header in headers)
-        body_rows = []
-        for row in rows:
-            cells = "".join(f"<td>{html_lib.escape(str(cell))}</td>" for cell in row)
-            body_rows.append(f"<tr>{cells}</tr>")
-        return mo.Html(f"""
-        <div style="overflow-x:auto; margin:10px 0;">
-        <table style="width:100%; border-collapse:collapse; font-size:0.86rem;">
-            <thead><tr style="background:{COLORS['Surface2']}; color:{COLORS['Text']};">{head}</tr></thead>
-            <tbody>{''.join(body_rows)}</tbody>
-        </table>
-        </div>
-        <style>
-            table td, table th {{
-                border:1px solid {COLORS['Border']};
-                padding:8px 10px;
-                text-align:left;
-                vertical-align:top;
-            }}
-        </style>
-        """)
-
-    def v2_09_math_peek(title, body):
-        return mo.accordion({title: mo.md(body)})
-
-    def v2_09_feedback(predicted, actual, success, miss):
-        if predicted is None:
-            return mo.callout(mo.md("Commit to the structured prediction before using this evidence."), kind="warn")
-        if predicted == actual:
-            return mo.callout(mo.md(success), kind="success")
-        return mo.callout(mo.md(miss), kind="warn")
-
-    def v2_09_failure_card(active, title, detail, recovery):
-        if active:
-            return mo.callout(mo.md(f"**{title}**  \n{detail}  \n\nRecovery path: {recovery}"), kind="danger")
-        return mo.callout(mo.md(f"**Boundary holds: {title}**  \n{detail}"), kind="success")
-
-    return (
-        v2_09_best_lever,
-        v2_09_bottleneck_label,
-        v2_09_candidate_label,
-        v2_09_capacity_result,
-        v2_09_failure_card,
-        v2_09_feedback,
-        v2_09_metric_card,
-        v2_09_money,
-        v2_09_ms,
-        v2_09_num,
-        v2_09_optimization_label,
-        v2_09_part_banner,
-        v2_09_pct,
-        v2_09_profile_result,
-        v2_09_regression_result,
-        v2_09_table,
-        v2_09_track_packet,
-        v2_09_tradeoff_candidates,
-    )
-
-
-@app.cell
-def _(v2_09_profile, v2_09_track_packet, v2_09_variant):
-    v2_09_packet = v2_09_track_packet(v2_09_profile, v2_09_variant)
-    return (v2_09_packet,)
-
-
-@app.cell(hide_code=True)
-def _(ACADEMIC_LAB_CSS, mo, v2_09_packet, v2_09_profile, v2_09_variant):
-    header_html = mo.Html(f"""
-    <div class="mlsysbook-lab-shell">
-      <div class="mlsysbook-lab-header" style="--mlsysbook-accent: #A51C30;">
-        <div class="mlsysbook-meta">
-          ML SYSTEMS TEXTBOOK &middot; VOLUME II &middot; CHAPTER 9 &middot; LAB 9
-        </div>
-        <h1 style="margin: 8px 0 4px 0; color: #0F172A; font-weight: 800; font-size: 1.85rem; letter-spacing: -0.02em;">
-          Performance Engineering &amp; Profiling: Bottlenecks, Variance &amp; Scaling
-        </h1>
-        <p style="margin: 0 0 14px 0; color: #475569; font-size: 0.95rem; line-height: 1.5;">
-          Master measurement-driven optimization: localize active bottlenecks with the Iron Law of ML performance,
-          distinguish true regressions from measurement variance (MDE), translate speedups into fleet capacity headroom,
-          and balance multi-objective trade-offs.
-        </p>
-        <div class="mlsysbook-chip-row" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
-          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
-            <strong>Track:</strong> {v2_09_profile.label}
-          </span>
-          <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">
-            <strong>Stakeholder:</strong> {v2_09_packet['stakeholder']}
-          </span>
-          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
-            <strong>System:</strong> {v2_09_packet['system_ref']}
-          </span>
-          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
-            <strong>Resource Unit:</strong> {v2_09_packet['serving_unit']}
-          </span>
-          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
-            <strong>Primary Metric:</strong> {v2_09_variant.primary_metric}
-          </span>
-          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
-            <strong>Guardrail:</strong> {v2_09_variant.guardrail_metric}
-          </span>
-        </div>
-      </div>
-
-      <div class="mlsysbook-panel" style="margin-bottom: 20px;">
-        <h3 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.15rem;">
-          System Scenario: {v2_09_profile.label} Performance Envelope
-        </h3>
-        <p style="margin: 0 0 12px 0; font-size: 0.92rem; color: #334155; line-height: 1.55;">
-          {v2_09_packet['workload']} Intuition is a dangerous guide in ML performance engineering. Optimizing non-binding components yields zero system speedup (Amdahl's Law), microbenchmarks routinely fail to transfer to production due to benchmark reality tax, and run-to-run noise masquerades as regressions or gains unless bounded by rigorous sample sizes.
-        </p>
-        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
-          <strong>The Architectural Invariants of Performance Engineering:</strong>
-          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
-            <li><strong>The Iron Law of ML Performance:</strong> Total latency is governed by the bottleneck term: <i>T</i><sub>p50</sub> &approx; max(<i>T</i><sub>data</sub>, <i>T</i><sub>compute</sub>) + <i>T</i><sub>overhead</sub>. Optimizing compute while data bandwidth binds produces negligible end-to-end improvement.</li>
-            <li><strong>Variance &amp; Detectability Invariant:</strong> A measured delta is actionable only if |&Delta;| &ge; MDE = 1.96 &radic;2 &sigma; / &radic;<i>N</i>. Below the minimum detectable effect, changes represent statistical noise rather than genuine performance shifts.</li>
-            <li><strong>Amdahl's Law &amp; Reality Tax:</strong> Theoretical kernel speedups degrade in fleet deployment due to queueing pressure, thread launch jitter, and memory contention (reality tax &approx; 12&ndash;15%).</li>
-            <li><strong>Conjunctive Optimization Frontier:</strong> Viable deployment policies must satisfy p99 tail latency, capacity headroom (&ge; 25%), quality/safety degradation budgets, and operational cost ceilings simultaneously.</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-    """)
-    mo.vstack([ACADEMIC_LAB_CSS, header_html])
-    return
-
-
-@app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
-    <div style="border-left:4px solid {COLORS['BlueLine']};
-                background:white; border-radius:0 8px 8px 0;
-                padding:20px 28px; margin:8px 0 16px 0;
-                box-shadow:0 1px 4px rgba(0,0,0,0.06);">
-        <div style="margin-bottom:16px;">
-            <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size:0.9rem; color:{COLORS['TextSec']}; line-height:1.7;">
-                <div>1. <strong>Localize the active bottleneck:</strong> decompose execution time into data movement, compute, and overhead terms.</div>
-                <div>2. <strong>Evaluate regression detectability:</strong> use sample count and run-to-run coefficient of variation (CV) to calculate MDE.</div>
-                <div>3. <strong>Convert speedups to fleet capacity:</strong> model queueing pressure, headroom percentage, and recurring infrastructure costs.</div>
-                <div>4. <strong>Defend a multi-objective trade-off:</strong> select an optimal deployment policy and formally reject sub-optimal alternatives.</div>
-            </div>
-        </div>
-        <div style="border-top:1px solid {COLORS['Border']}; margin:0 -28px; padding:0 28px;"></div>
-        <div style="display:flex; gap:32px; margin-top:16px; margin-bottom:16px; flex-wrap:wrap;">
-            <div style="flex:1; min-width:220px;">
-                <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
-                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
-                    Prerequisites
-                </div>
-                <div style="font-size:0.85rem; color:{COLORS['TextSec']}; line-height:1.65;">
-                    Roofline analysis &middot; kernel profiling &middot; minimum detectable effect &middot; Amdahl's Law &middot; capacity planning
-                </div>
-            </div>
-            <div style="flex:1; min-width:160px;">
-                <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
-                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
-                    Duration
-                </div>
-                <div style="font-size:0.85rem; color:{COLORS['TextSec']}; line-height:1.65;">
-                    <strong>45-55 min</strong><br>
-                    <span style="font-size:0.78rem; color:{COLORS['TextMuted']};">4 parts &middot; ~10-15 min each</span>
-                </div>
-            </div>
-        </div>
-        <div style="border-top:1px solid {COLORS['Border']}; margin:0 -28px; padding:0 28px;"></div>
-        <div style="margin-top:16px;">
-            <div style="font-size:0.7rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.12em; margin-bottom:6px;">
-                Core Question
-            </div>
-            <div style="font-size:1.05rem; font-weight:700; color:#0F172A; margin-top:4px; font-style:italic;">
-                "Why does an isolated 2x kernel speedup frequently produce less than 5% improvement in fleet-wide end-to-end latency?"
-            </div>
-        </div>
-    </div>
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.Html(f"""
-    <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-bottom: 20px;">
-        <h4 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.05rem;">
-            Recommended Reading &mdash; Complete before this lab:
-        </h4>
-        <ul class="mlsysbook-list" style="margin: 0; font-size: 0.9rem; color: #334155;">
-            <li>The Iron Law of ML Performance and execution decomposition.</li>
-            <li>Profiling feedback loops and distinguishing signal from variance (MDE).</li>
-            <li>Measurement at scale: benchmark reality tax and queuing delays.</li>
-            <li>The Optimization Playbook: multi-objective trade-offs and cost-quality frontiers.</li>
-        </ul>
-    </div>
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo, v2_09_packet):
-    partA_prediction = mo.ui.radio(
-        options={
-            "Data movement / memory bandwidth": "data",
-            "Compute path": "compute",
-            "Launch or coordination overhead": "overhead",
-            "Fleet capacity, not local code": "capacity",
-        },
-        value=None,
-        label=f"Part A prediction: what is the active bottleneck for {v2_09_packet['label']}?",
-    )
-    partA_pressure = mo.ui.slider(
-        start=0.75,
-        stop=1.40,
-        value=1.00,
-        step=0.05,
-        label="Workload pressure multiplier",
-    )
-    partA_lever = mo.ui.radio(
-        options={
-            "Reduce data movement": "data_path",
-            "Improve compute path": "compute_path",
-            "Reduce launch/coordination overhead": "overhead_path",
-            "Add serving capacity": "capacity_path",
-        },
-        value="Reduce data movement",
-        label="Optimization lever to try first",
-    )
-    partA_checkpoint = mo.ui.radio(
-        options={
-            "Authorize data-movement work": "data_path",
-            "Authorize compute-kernel work": "compute_path",
-            "Authorize overhead/graph work": "overhead_path",
-            "Do not optimize locally; plan capacity instead": "capacity_path",
-        },
-        value="Authorize data-movement work",
-        label="Checkpoint: which first experiment should the memo authorize?",
-    )
-    return partA_checkpoint, partA_lever, partA_prediction, partA_pressure
-
-
-@app.cell(hide_code=True)
-def _(mo, v2_09_packet):
-    partB_prediction = mo.ui.radio(
-        options={
-            "Ship: the change is clearly safe": "ship",
-            "Hold: the effect is inside measurement noise": "hold",
-            "Block: this is a detectable regression": "block",
-            "Ignore variance and use the latest run": "ignore",
-        },
-        value=None,
-        label="Part B prediction: what release decision will the evidence support?",
-    )
-    partB_samples = mo.ui.slider(start=3, stop=50, value=8, step=1, label="Repeated runs per variant")
-    partB_cv = mo.ui.slider(
-        start=2.0,
-        stop=20.0,
-        value=float(v2_09_packet["default_cv_pct"]),
-        step=0.5,
-        label="Run-to-run CV (%)",
-    )
-    partB_delta = mo.ui.slider(
-        start=-8.0,
-        stop=12.0,
-        value=5.0,
-        step=0.5,
-        label="Candidate p99 delta vs baseline (%)",
-    )
-    partB_checkpoint = mo.ui.radio(
-        options={
-            "Ship after canary": "ship",
-            "Hold and collect more samples": "hold",
-            "Block and revert": "block",
-            "Shadow traffic only": "shadow",
-        },
-        value="Ship after canary",
-        label="Checkpoint: what should the release owner do?",
-    )
-    return (
-        partB_checkpoint,
-        partB_cv,
-        partB_delta,
-        partB_prediction,
-        partB_samples,
-    )
-
-
-@app.cell(hide_code=True)
-def _(mo, v2_09_packet):
-    partC_prediction = mo.ui.radio(
-        options={
-            "Under-capacity: headroom will fail": "under",
-            "Enough headroom: launch as sized": "enough",
-            "Overbought: too much cost for the demand": "overbuy",
-            "Unknown until p99 is included": "unknown",
-        },
-        value=None,
-        label="Part C prediction: what will the capacity plan reveal?",
-    )
-    partC_demand = mo.ui.slider(
-        start=0.60,
-        stop=2.40,
-        value=1.00,
-        step=0.05,
-        label="Demand forecast multiplier",
-    )
-    partC_units = mo.ui.slider(
-        start=1,
-        stop=int(v2_09_packet["max_units"]),
-        value=int(v2_09_packet["default_units"]),
-        step=1,
-        label=f"Serving units ({v2_09_packet['serving_unit']})",
-    )
-    partC_optimization = mo.ui.radio(
-        options={
-            "No optimization": "none",
-            "Fix measured bottleneck": "bottleneck_fix",
-            "Reduce data movement": "data_path",
-            "Improve compute path": "compute_path",
-            "Reduce launch/coordination overhead": "overhead_path",
-        },
-        value="Fix measured bottleneck",
-        label="Local profile used for capacity planning",
-    )
-    partC_checkpoint = mo.ui.radio(
-        options={
-            "Add serving units": "add_units",
-            "Optimize measured bottleneck before buying capacity": "optimize_first",
-            "Reduce rollout scope": "reduce_scope",
-            "Launch with current headroom": "launch",
-        },
-        value="Optimize measured bottleneck before buying capacity",
-        label="Checkpoint: which capacity decision should go into the memo?",
-    )
-    return (
-        partC_checkpoint,
-        partC_demand,
-        partC_optimization,
-        partC_prediction,
-        partC_units,
-    )
-
-
-@app.cell(hide_code=True)
-def _(mo, v2_09_money, v2_09_packet):
-    partD_prediction = mo.ui.radio(
-        options={
-            "Target measured bottleneck": "targeted",
-            "Buy more serving units": "scale",
-            "Aggressive precision/cache compression": "precision",
-            "Speculative or algorithmic path": "algorithmic",
-        },
-        value=None,
-        label="Part D prediction: which candidate will survive the report guardrails?",
-    )
-    partD_risk_budget = mo.ui.slider(
-        start=0.5,
-        stop=6.0,
-        value=float(v2_09_packet["quality_budget_pct"]),
-        step=0.5,
-        label="Allowed quality/safety risk (%)",
-    )
-    _default_cost = (
-        v2_09_packet["default_units"]
-        * v2_09_packet["unit_cost_day"]
-        * v2_09_packet["cost_ceiling_multiplier"]
-    )
-    partD_cost_ceiling = mo.ui.number(
-        start=0.0,
-        stop=max(_default_cost * 3.0, 1.0),
-        value=_default_cost,
-        step=max(_default_cost / 50.0, 1.0),
-        label=f"Daily cost ceiling ({v2_09_money(_default_cost)} default)",
-    )
-    partD_checkpoint = mo.ui.radio(
-        options={
-            "Target measured bottleneck": "targeted",
-            "Buy more serving units": "scale",
-            "Aggressive precision/cache compression": "precision",
-            "Speculative or algorithmic path": "algorithmic",
-        },
-        value="Target measured bottleneck",
-        label="Checkpoint: which candidate should the memo defend?",
-    )
-    partD_rejected = mo.ui.radio(
-        options={
-            "Target measured bottleneck": "targeted",
-            "Buy more serving units": "scale",
-            "Aggressive precision/cache compression": "precision",
-            "Speculative or algorithmic path": "algorithmic",
-        },
-        value="Buy more serving units",
-        label="Checkpoint: which tempting alternative should the memo reject?",
-    )
-    return (
-        partD_checkpoint,
-        partD_cost_ceiling,
-        partD_prediction,
-        partD_rejected,
-        partD_risk_budget,
-    )
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    v2_09_next_implication = mo.ui.radio(
-        options={
-            "Carry measured p99 into V2-10 serving SLO policy": "measured_p99",
-            "Carry capacity headroom into V2-10 batching/admission": "capacity_headroom",
-            "Carry residual bottleneck into V2-10 optimization risk": "residual_bottleneck",
-            "Carry regression canary into V2-10 rollout guardrails": "regression_canary",
-        },
-        value="Carry measured p99 into V2-10 serving SLO policy",
-        label="Synthesis: what evidence should V2-10 inference inherit first?",
-    )
-    v2_09_student_id = mo.ui.text(label="Student or team ID", placeholder="Optional")
-    v2_09_memo_decision = mo.ui.text_area(
-        label="Performance engineering deployment memo",
-        placeholder="Document active bottleneck, regression gate, capacity headroom, trade-off defense, rejected alternative, and V2-10 inference implications.",
-        full_width=True,
-    )
-    return v2_09_memo_decision, v2_09_next_implication, v2_09_student_id
-
-
-@app.cell
-def _(
-    partA_lever,
-    partA_pressure,
-    partB_cv,
-    partB_delta,
-    partB_samples,
-    partC_demand,
-    partC_optimization,
-    partC_units,
-    partD_cost_ceiling,
-    partD_risk_budget,
-    v2_09_best_lever,
-    v2_09_capacity_result,
-    v2_09_packet,
-    v2_09_profile_result,
-    v2_09_regression_result,
-    v2_09_tradeoff_candidates,
-):
-    v2_09_partA_base = v2_09_profile_result(v2_09_packet, "none", partA_pressure.value)
-    v2_09_partA_best_lever = v2_09_best_lever(v2_09_partA_base["bottleneck"])
-    v2_09_partA_selected_lever = partA_lever.value or v2_09_partA_best_lever
-    v2_09_partA_after = v2_09_profile_result(
-        v2_09_packet,
-        v2_09_partA_selected_lever,
-        partA_pressure.value,
-    )
-    v2_09_partA_speedup = v2_09_partA_base["p99_ms"] / max(1e-9, v2_09_partA_after["p99_ms"])
-    v2_09_partB = v2_09_regression_result(
-        v2_09_packet,
-        partB_samples.value,
-        partB_cv.value,
-        partB_delta.value,
-    )
-    v2_09_partC = v2_09_capacity_result(
-        v2_09_packet,
-        partC_demand.value,
-        partC_units.value,
-        partC_optimization.value or "bottleneck_fix",
-    )
-    v2_09_partD_candidates, v2_09_partD_selected, v2_09_partD_rejected = v2_09_tradeoff_candidates(
-        v2_09_packet,
-        partC_demand.value,
-        partC_units.value,
-        partD_risk_budget.value,
-        partD_cost_ceiling.value,
-    )
-    return (
-        v2_09_partA_after,
-        v2_09_partA_base,
-        v2_09_partA_best_lever,
-        v2_09_partA_selected_lever,
-        v2_09_partA_speedup,
-        v2_09_partB,
-        v2_09_partC,
-        v2_09_partD_candidates,
-        v2_09_partD_rejected,
-        v2_09_partD_selected,
-    )
-
-
-@app.cell(hide_code=True)
-def _(
-    COLORS,
-    MathPeek,
-    apply_plotly_theme,
-    big_takeaways,
-    build_lab_report,
-    flash_attention_traffic,
-    gated_hypothesis_card,
-    go,
-    instrumentation_console,
-    ledger,
-    mo,
-    partA_checkpoint,
-    partA_lever,
-    partA_prediction,
-    partA_pressure,
-    partB_checkpoint,
-    partB_cv,
-    partB_delta,
-    partB_prediction,
-    partB_samples,
-    partC_checkpoint,
-    partC_demand,
-    partC_optimization,
-    partC_prediction,
-    partC_units,
-    partD_checkpoint,
-    partD_cost_ceiling,
-    partD_prediction,
-    partD_rejected,
-    partD_risk_budget,
-    report_export_panel,
-    v2_09_bottleneck_label,
-    v2_09_candidate_label,
-    v2_09_capacity_result,
-    v2_09_chapter,
-    v2_09_failure_card,
-    v2_09_feedback,
-    v2_09_memo_decision,
-    v2_09_metadata,
-    v2_09_metric_card,
-    v2_09_money,
-    v2_09_ms,
-    v2_09_next_implication,
-    v2_09_num,
-    v2_09_optimization_label,
-    v2_09_packet,
-    v2_09_partA_after,
-    v2_09_partA_base,
-    v2_09_partA_best_lever,
-    v2_09_partA_selected_lever,
-    v2_09_partA_speedup,
-    v2_09_partB,
-    v2_09_partC,
-    v2_09_partD_candidates,
-    v2_09_partD_rejected,
-    v2_09_partD_selected,
-    v2_09_part_banner,
-    v2_09_pct,
-    v2_09_profile,
-    v2_09_student_id,
-    v2_09_table,
-):
     def build_part_a():
-        items = [
-            v2_09_part_banner(
-                "A",
-                "Localize The Bottleneck Before Optimizing",
-                f"{v2_09_packet['stakeholder']} needs to decide which experiment is worth engineering time first.",
-                COLORS["BlueLine"],
-            ),
-            mo.md("""
-    ### Concept: Amdahl's Law and the Iron Law of ML Performance
-
-    A quick optimization request arrives. Before changing kernels, precision, graph
-    capture, or capacity, commit to the bottleneck you think is active. Optimizing a non-binding term wastes engineering time and yields near-zero speedup.
-            """),
-            gated_hypothesis_card(
-                partA_prediction,
-                title="1. Formulate Bottleneck Localization Hypothesis",
-                subtitle=(
-                    f"Scenario: {v2_09_packet['stakeholder']} is deciding which optimization lever to prioritize. "
-                    "Predict which architectural path (data movement, compute, or overhead) is the primary bottleneck."
-                ),
-            ),
+        _intro = mo.md(f"### A · What actually binds this path? (10 min)\nThe initial probe runs batch **{a_batch.value}**. Predict its dominant exposed term before opening the instrument. Fleet-average utilization cannot identify this local bottleneck.")
+        if a_prediction.value is None:
+            return mo.vstack([_intro, a_prediction])
+        _figure = go.Figure()
+        for _run_name, _result in (("Batch 1", a_baseline), (f"Batch {a_batch.value}", a_result)):
+            for _label, _term, _color in (
+                ("Compute ceiling", _result.compute_time, COLORS["OrangeLine"]),
+                ("Movement ceiling", _result.movement_time, COLORS["BlueLine"]),
+                ("Launch overhead", _result.launch_time, COLORS["GreenLine"]),
+            ):
+                _figure.add_bar(name=_label, x=[_run_name], y=[_term.to("ms").magnitude], marker_color=_color, legendgroup=_label, showlegend=_run_name == "Batch 1")
+        _figure.update_layout(barmode="group", height=290, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Path term (ms)", legend_orientation="h")
+        _rows = [
+            {"Run": "Baseline", "Batch": 1, "Latency": q(a_baseline.latency, "ms"), "Intensity": q(a_baseline.arithmetic_intensity, "flop/byte"), "Binding term": a_baseline.bottleneck},
+            {"Run": "Changed", "Batch": a_batch.value, "Latency": q(a_result.latency, "ms"), "Intensity": q(a_result.arithmetic_intensity, "flop/byte"), "Binding term": a_result.bottleneck},
         ]
-        if partA_prediction.value is None:
-            items.append(mo.callout(mo.md("Commit to the bottleneck prediction before revealing the profile."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(
-            instrumentation_console(
-                mo.hstack([partA_pressure, partA_lever], widths="equal"),
-                title="Bottleneck & Optimization Lever Console",
-                subtitle="Adjust workload execution pressure and select which optimization path to target",
-            )
-        )
-        labels = ["Data movement", "Compute", "Overhead"]
-        term_keys = ["data", "compute", "overhead"]
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=labels,
-            y=[v2_09_partA_base["terms"][key] for key in term_keys],
-            name="Measured baseline",
-            marker_color=COLORS["BlueLine"],
-        ))
-        fig.add_trace(go.Bar(
-            x=labels,
-            y=[v2_09_partA_after["terms"][key] for key in term_keys],
-            name=v2_09_optimization_label(v2_09_partA_selected_lever),
-            marker_color=COLORS["OrangeLine"],
-        ))
-        fig.update_layout(
-            barmode="group",
-            height=350,
-            yaxis=dict(title="Exposed time term (ms)", gridcolor="#edf2f7"),
-            legend=dict(orientation="h", y=1.14, x=0),
-            margin=dict(l=60, r=20, t=55, b=50),
-        )
-        apply_plotly_theme(fig)
-        items.append(mo.ui.plotly(fig))
-        miss = v2_09_partA_selected_lever != v2_09_partA_best_lever
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:12px; flex-wrap:wrap; margin:14px 0;">
-          {v2_09_metric_card("Actual bottleneck", v2_09_bottleneck_label(v2_09_partA_base['bottleneck']), "largest exposed term", COLORS["BlueLine"])}
-          {v2_09_metric_card("Baseline p99", v2_09_ms(v2_09_partA_base['p99_ms']), f"SLO {v2_09_ms(v2_09_packet['slo_ms'], 0)}", COLORS["OrangeLine"], not v2_09_partA_base["slo_ok"])}
-          {v2_09_metric_card("After p99", v2_09_ms(v2_09_partA_after['p99_ms']), f"{v2_09_partA_speedup:.2f}x speedup", COLORS["GreenLine"], not v2_09_partA_after["slo_ok"])}
-          {v2_09_metric_card("First lever", v2_09_optimization_label(v2_09_partA_best_lever), "bottleneck-targeted", COLORS["GreenLine"])}
-        </div>
-        """))
-        items.append(v2_09_table(
-            ("Term", "Baseline", "After selected lever", "Interpretation"),
-            (
-                ("Data movement", v2_09_ms(v2_09_partA_base["terms"]["data"]), v2_09_ms(v2_09_partA_after["terms"]["data"]), "bandwidth/cache/precision/fusion path"),
-                ("Compute", v2_09_ms(v2_09_partA_base["terms"]["compute"]), v2_09_ms(v2_09_partA_after["terms"]["compute"]), "kernel math/Tensor Core path"),
-                ("Overhead", v2_09_ms(v2_09_partA_base["terms"]["overhead"]), v2_09_ms(v2_09_partA_after["terms"]["overhead"]), "launch, scheduler, coordination, or communication gaps"),
-                ("p99", v2_09_ms(v2_09_partA_base["p99_ms"]), v2_09_ms(v2_09_partA_after["p99_ms"]), "track guardrail evidence"),
-            ),
-        ))
-        items.append(v2_09_feedback(
-            partA_prediction.value,
-            v2_09_partA_base["bottleneck"],
-            "**Prediction matched the measured bottleneck.** The first optimization now has a measured target.",
-            f"**Optimization trap:** the profile says the active bottleneck is {v2_09_bottleneck_label(v2_09_partA_base['bottleneck'])}, not the predicted target.",
-        ))
-        items.append(v2_09_failure_card(
-            miss or not v2_09_partA_after["slo_ok"],
-            "Wrong lever or remaining guardrail miss",
-            (
-                f"Selected lever: {v2_09_optimization_label(v2_09_partA_selected_lever)}. "
-                f"Targeted lever: {v2_09_optimization_label(v2_09_partA_best_lever)}. "
-                f"After p99: {v2_09_ms(v2_09_partA_after['p99_ms'])} against SLO {v2_09_ms(v2_09_packet['slo_ms'], 0)}."
-            ),
-            "switch to the bottleneck-targeted lever, then reprofile before claiming a win",
-        ))
-        _flash = flash_attention_traffic(
-            seq_len=2048,
-            head_dim=128,
-            tile_br=128,
-            tile_bc=128,
-            precision="fp16",
-        )
-        items.append(MathPeek(
-            r"T_{p50} \approx \max(T_{data}, T_{compute}) + T_{overhead}, \quad T_{p99} \approx T_{p50} \cdot M_{tail} \cdot L_{tail}",
-            {
-                "data movement term": v2_09_ms(v2_09_partA_base['terms']['data']),
-                "compute term": v2_09_ms(v2_09_partA_base['terms']['compute']),
-                "overhead term": v2_09_ms(v2_09_partA_base['terms']['overhead']),
-                "measured p50": v2_09_ms(v2_09_partA_base['p50_ms']),
-                "measured p99": v2_09_ms(v2_09_partA_base['p99_ms']),
-                "tail multiplier": f"{v2_09_packet['tail_multiplier']:.2f}x",
-                "speedup": f"{v2_09_partA_speedup:.2f}x",
-                "flashattention sram reduction": f"{_flash.traffic_reduction_ratio:.1f}x ({_flash.naive_hbm_bytes / 1e6:.1f} MB -> {_flash.flash_hbm_bytes / 1e6:.1f} MB)",
-                "chapter source": "Volume II, Chapter 9: The Iron Law of ML Performance & FlashAttention",
-            },
-        ))
-        items.append(mo.Html(f"""
-        <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
-            <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part A First Optimization Lever</h4>
-            <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
-                Which architectural path should engineering optimize first based on the profiling breakdown?
-            </p>
-            {partA_checkpoint}
-        </div>
-        """))
-        if partA_checkpoint.value == v2_09_partA_best_lever:
-            items.append(mo.callout(mo.md(f"**Checkpoint saved:** targeting `{v2_09_optimization_label(v2_09_partA_best_lever)}` directly attacks the primary measured bottleneck."), kind="success"))
-        elif partA_checkpoint.value is not None:
-            items.append(mo.callout(mo.md(f"**Amdahl warning:** `{v2_09_optimization_label(partA_checkpoint.value)}` does not attack the primary bottleneck `{v2_09_bottleneck_label(v2_09_partA_base['bottleneck'])}`."), kind="warn"))
-        return mo.vstack(items)
+        return mo.vstack([
+            _intro, a_prediction, a_batch, apply_plotly_theme(_figure), table(_rows),
+            mo.callout(mo.md(f"**Your prediction:** {a_prediction.value}. **Observed analytical result:** the changed run is **{a_result.bottleneck}-bound** at **{q(a_result.latency, 'ms')}**. Batching changes fixed-tensor reuse and live state together."), kind="info"),
+            a_capture, saved("A"),
+            mo.accordion({"Calculation Notes": mo.md("For each phase, compute time is operations divided by the supported effective rate; movement time is bytes divided by registry bandwidth. The exposed kernel time is the larger phase term. Sequential phase times, launches, and compile setup are then added. These are simulated analytical bounds, not measured percentiles.")}),
+        ])
 
     def build_part_b():
-        items = [
-            v2_09_part_banner(
-                "B",
-                "Regressions Need Baseline, Variance, And Detectability",
-                "A before/after number is not release evidence until variance and sample size say the effect is detectable.",
-                COLORS["OrangeLine"],
-            ),
-            mo.md("""
-    ### Concept: Statistical Detectability and Minimum Detectable Effect (MDE)
-
-    A candidate patch claims to improve performance, but production runs vary.
-    Decide whether the release owner should ship, hold for more evidence, or block.
-    A delta smaller than the MDE is statistical noise, not proven performance gain.
-            """),
-            gated_hypothesis_card(
-                partB_prediction,
-                title="2. Formulate Regression Release Decision Hypothesis",
-                subtitle=(
-                    f"Scenario: Evaluating candidate speedup claim for {v2_09_packet['label']}. "
-                    "Predict the launch release decision (ship, hold, or block) accounting for run-to-run variance."
-                ),
-            ),
+        _intro = mo.md("### B · Which rewrite attacks the diagnosed term? (12 min)\nRank fusion, tiling, and their combination before opening the comparison. Every candidate starts from the same batch and precision.")
+        if b_prediction.value is None:
+            return mo.vstack([_intro, b_prediction])
+        _baseline_result = b_comparison["baseline"]
+        _figure = go.Figure([go.Bar(
+            x=["Baseline", "Fusion", "Tiling", "Combined"],
+            y=[_baseline_result.latency.to("ms").magnitude] + [b_alternatives[_name]["latency"]["magnitude"] for _name in ("fusion", "tiling", "combined")],
+            marker_color=[COLORS["TextMuted"], COLORS["BlueLine"], COLORS["OrangeLine"], COLORS["GreenLine"]],
+        )])
+        _figure.update_layout(height=285, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="End-to-end latency (ms)", showlegend=False)
+        _candidate = b_comparison["result"]
+        _rows = [
+            {"Configuration": "Baseline", "Traffic": q(_baseline_result.total_traffic, _mem_unit), "Required memory": q(_baseline_result.memory_required, _mem_unit), "Latency": q(_baseline_result.latency, "ms")},
+            {"Configuration": b_lever.value, "Traffic": q(_candidate.total_traffic, _mem_unit), "Required memory": q(_candidate.memory_required, _mem_unit), "Latency": q(_candidate.latency, "ms")},
         ]
-        if partB_prediction.value is None:
-            items.append(mo.callout(mo.md("Commit to the regression decision prediction before revealing the run evidence."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(
-            instrumentation_console(
-                mo.hstack([partB_samples, partB_cv, partB_delta], widths="equal"),
-                title="Variance, Sample Count & Delta Console",
-                subtitle="Configure benchmark sample size (N), coefficient of variation (CV%), and candidate delta percentage",
-            )
-        )
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=["Baseline", "Candidate"],
-            y=[v2_09_partB["baseline_ms"], v2_09_partB["candidate_ms"]],
-            error_y=dict(type="data", array=[v2_09_partB["ci_diff_ms"] / 2.0, v2_09_partB["ci_diff_ms"] / 2.0], visible=True),
-            marker_color=[COLORS["BlueLine"], COLORS["OrangeLine"]],
-            name="p99 with uncertainty",
-        ))
-        fig.add_hline(
-            y=v2_09_packet["slo_ms"],
-            line_dash="dash",
-            line_color=COLORS["RedLine"],
-            annotation_text=f"SLO {v2_09_ms(v2_09_packet['slo_ms'], 0)}",
-        )
-        fig.update_layout(
-            height=340,
-            yaxis=dict(title="p99 latency / time budget (ms)", gridcolor="#edf2f7"),
-            showlegend=False,
-            margin=dict(l=60, r=20, t=50, b=50),
-        )
-        apply_plotly_theme(fig)
-        items.append(mo.ui.plotly(fig))
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:12px; flex-wrap:wrap; margin:14px 0;">
-          {v2_09_metric_card("MDE", f"{v2_09_partB['mde_pct']:.1f}%", "minimum detectable effect", COLORS["BlueLine"])}
-          {v2_09_metric_card("Candidate delta", f"{partB_delta.value:.1f}%", f"budget {v2_09_packet['regression_budget_pct']:.1f}%", COLORS["OrangeLine"], v2_09_partB["regression"])}
-          {v2_09_metric_card("Detectable", "yes" if v2_09_partB["detectable"] else "no", f"n={partB_samples.value}, CV={partB_cv.value:.1f}%", COLORS["GreenLine"] if v2_09_partB["detectable"] else COLORS["OrangeLine"])}
-          {v2_09_metric_card("Decision", v2_09_partB["decision"], v2_09_partB["reason"], COLORS["GreenLine"] if v2_09_partB["decision"] == "ship" else COLORS["RedLine"] if v2_09_partB["decision"] == "block" else COLORS["OrangeLine"])}
-        </div>
-        """))
-        items.append(v2_09_table(
-            ("Evidence", "Value", "Why it matters"),
-            (
-                ("Baseline p99", v2_09_ms(v2_09_partB["baseline_ms"]), "reference distribution after the Part A bottleneck fix"),
-                ("Candidate p99", v2_09_ms(v2_09_partB["candidate_ms"]), "patched distribution under the same scenario"),
-                ("95% diff half-width", v2_09_ms(v2_09_partB["ci_diff_ms"]), "uncertainty around before/after comparison"),
-                ("Minimum detectable effect", f"{v2_09_partB['mde_pct']:.1f}%", "smallest effect this experiment can distinguish"),
-                ("Release decision", v2_09_partB["decision"], v2_09_partB["reason"]),
-            ),
-        ))
-        items.append(v2_09_feedback(
-            partB_prediction.value,
-            v2_09_partB["decision"],
-            "**Prediction matched the evidence.** The release decision is supported by variance-aware data.",
-            "**Regression evidence gap:** one run is not enough; the baseline, CV, sample count, and MDE drive the decision.",
-        ))
-        items.append(v2_09_failure_card(
-            v2_09_partB["decision"] != "ship",
-            "Regression evidence is not launch-safe",
-            (
-                f"Decision `{v2_09_partB['decision']}` because {v2_09_partB['reason']}. "
-                f"The measured delta is {partB_delta.value:.1f}% and the MDE is {v2_09_partB['mde_pct']:.1f}%."
-            ),
-            "increase sample count, reduce measurement noise, or block/revert if the regression is detectable",
-        ))
-        items.append(MathPeek(
-            r"\text{MDE} = \frac{1.96 \cdot \sqrt{2} \cdot \sigma}{\sqrt{N} \cdot \mu} \cdot 100\% = \frac{1.96 \cdot \sqrt{2} \cdot \text{CV}}{\sqrt{N}}",
-            {
-                "sample count (N)": str(partB_samples.value),
-                "coefficient of variation (CV)": f"{partB_cv.value:.1f}%",
-                "95% CI half-width": v2_09_ms(v2_09_partB["ci_diff_ms"]),
-                "minimum detectable effect (MDE)": f"{v2_09_partB['mde_pct']:.1f}%",
-                "candidate delta": f"{partB_delta.value:.1f}%",
-                "regression budget": f"{v2_09_packet['regression_budget_pct']:.1f}%",
-                "release decision": v2_09_partB["decision"],
-                "chapter source": "Volume II, Chapter 9: Measurement at Scale & Regression Detectability",
-            },
-        ))
-        items.append(mo.Html(f"""
-        <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
-            <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part B Canary Release Decision</h4>
-            <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
-                What is the rigorous release decision given the measured delta, variance, and sample size?
-            </p>
-            {partB_checkpoint}
-        </div>
-        """))
-        if partB_checkpoint.value == v2_09_partB["decision"]:
-            items.append(mo.callout(mo.md(f"**Checkpoint saved:** decision `{partB_checkpoint.value}` matches the statistical evidence ({v2_09_partB['reason']})."), kind="success"))
-        elif partB_checkpoint.value is not None:
-            items.append(mo.callout(mo.md(f"**Release divergence:** selected `{partB_checkpoint.value}`, but statistical analysis indicates `{v2_09_partB['decision']}`."), kind="warn"))
-        return mo.vstack(items)
+        return mo.vstack([
+            _intro, b_prediction, b_lever, apply_plotly_theme(_figure), table(_rows),
+            mo.callout(mo.md(f"**Your prediction:** {b_prediction.value}. **Observed analytical result:** **{b_comparison['speedup']:.2f}×** speedup. The rewrite changes traffic and/or launches, while tiling and fusion reserve additional workspace."), kind="info"),
+            b_capture, saved("B"),
+            mo.accordion({"Calculation Notes": mo.md("Fusion retains fewer intermediate tensors in off-chip traffic and submits fewer launches. Tiling increases reuse of fixed tensors and adds workspace. The combined case rewrites the common phase path once; its speedup is recomputed and is never the product of standalone speedups.")}),
+        ])
 
     def build_part_c():
-        items = [
-            v2_09_part_banner(
-                "C",
-                "Capacity Planning Converts Bottlenecks Into Headroom And Cost",
-                "The local profile becomes a fleet amount system: demand, service rate, units, utilization, headroom, p99, and cost.",
-                COLORS["GreenLine"],
-            ),
-            mo.md(f"""
-    ### Concept: Fleet Capacity and Amount Systems
-
-    The launch forecast is expressed as **{v2_09_packet['amount_unit']}**. Use the
-    measured profile to decide whether the selected **{v2_09_packet['serving_unit']}**
-    count provides sufficient headroom under load while respecting cost boundaries.
-            """),
-            gated_hypothesis_card(
-                partC_prediction,
-                title="3. Formulate Fleet Capacity & Headroom Hypothesis",
-                subtitle=(
-                    f"Scenario: Sizing {v2_09_packet['serving_unit']} units for {v2_09_packet['amount_unit']}. "
-                    "Predict whether the planned capacity meets the target headroom (>= 25%) and tail SLO."
-                ),
-            ),
+        _intro = mo.md("### C · When does compilation pay for itself? (12 min)\nPredict whether setup, repeated runtime savings, or precision will determine the result. For device tracks (TinyML, Mobile, Edge), AOT compilation occurs on an engineering build host prior to deployment; for Cloud, it reflects server graph capture and JIT warm-up. Then select one supported precision and a reuse horizon.")
+        if c_prediction.value is None:
+            return mo.vstack([_intro, c_prediction])
+        _figure = go.Figure([go.Bar(
+            x=["1 run", "100 runs", "100,000 runs"],
+            y=[c_reuse_results[_reuse].latency.to("ms").magnitude for _reuse in (1, 100, 100_000)],
+            marker_color=[COLORS["RedLine"], COLORS["OrangeLine"], COLORS["GreenLine"]],
+        )])
+        _figure.update_layout(height=285, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Amortized latency per run (ms)", showlegend=False)
+        _baseline_result = c_comparison["baseline"]
+        _candidate = c_comparison["result"]
+        _rows = [
+            {"Configuration": "Carried rewrite", "Precision": _baseline_result.precision, "Quality fixture": f"{_baseline_result.quality_pct:.1f}%", "Compile/run": q(_baseline_result.compile_time_per_run, "ms"), "Latency": q(_baseline_result.latency, "ms")},
+            {"Configuration": "Compiled candidate", "Precision": _candidate.precision, "Quality fixture": f"{_candidate.quality_pct:.1f}%", "Compile/run": q(_candidate.compile_time_per_run, "ms"), "Latency": q(_candidate.latency, "ms")},
         ]
-        if partC_prediction.value is None:
-            items.append(mo.callout(mo.md("Commit to the capacity prediction before opening the amount-system planner."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(
-            instrumentation_console(
-                mo.hstack([partC_demand, partC_units, partC_optimization], widths="equal"),
-                title="Fleet Capacity & Serving Unit Console",
-                subtitle=f"Tune forecast demand multiplier, serving unit count ({v2_09_packet['serving_unit']}), and optimization state",
-            )
-        )
-        x_units = list(range(1, int(v2_09_packet["max_units"]) + 1))
-        y_capacity = [
-            v2_09_capacity_result(v2_09_packet, partC_demand.value, units, partC_optimization.value or "bottleneck_fix")["capacity"]
-            for units in x_units
-        ]
-        demand_line = [v2_09_partC["demand"] for _ in x_units]
-        headroom_line = [v2_09_partC["demand"] * (1.0 + v2_09_packet["headroom_target"]) for _ in x_units]
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=x_units, y=y_capacity, mode="lines+markers", name="Measured capacity", line=dict(color=COLORS["BlueLine"], width=3)))
-        fig.add_trace(go.Scatter(x=x_units, y=demand_line, mode="lines", name="Forecast demand", line=dict(color=COLORS["OrangeLine"], dash="dash")))
-        fig.add_trace(go.Scatter(x=x_units, y=headroom_line, mode="lines", name="Demand + headroom target", line=dict(color=COLORS["GreenLine"], dash="dot")))
-        fig.add_trace(go.Scatter(x=[partC_units.value], y=[v2_09_partC["capacity"]], mode="markers", name="selected plan", marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond")))
-        fig.update_layout(
-            height=360,
-            xaxis=dict(title=v2_09_packet["serving_unit"]),
-            yaxis=dict(title=v2_09_packet["amount_unit"], gridcolor="#edf2f7"),
-            legend=dict(orientation="h", y=1.17, x=0),
-            margin=dict(l=70, r=20, t=55, b=50),
-        )
-        apply_plotly_theme(fig)
-        items.append(mo.ui.plotly(fig))
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:12px; flex-wrap:wrap; margin:14px 0;">
-          {v2_09_metric_card("Demand", v2_09_num(v2_09_partC['demand']), v2_09_packet["amount_unit"], COLORS["OrangeLine"])}
-          {v2_09_metric_card("Capacity", v2_09_num(v2_09_partC['capacity']), f"{partC_units.value} {v2_09_packet['serving_unit']}", COLORS["BlueLine"])}
-          {v2_09_metric_card("Utilization", v2_09_pct(v2_09_partC['utilization']), "demand / capacity", COLORS["OrangeLine"], v2_09_partC["utilization"] >= 1.0)}
-          {v2_09_metric_card("Headroom", v2_09_pct(v2_09_partC['headroom']), f"target {v2_09_packet['headroom_target_pct']:.0f}%", COLORS["GreenLine"], v2_09_partC["headroom"] < v2_09_packet["headroom_target"])}
-          {v2_09_metric_card("Daily cost", v2_09_money(v2_09_partC['daily_cost']), "serving-unit cost", COLORS["BlueLine"])}
-        </div>
-        """))
-        items.append(v2_09_table(
-            ("Amount-system field", "Value", "Decision use"),
-            (
-                ("Measured service rate", f"{v2_09_num(v2_09_partC['service_rate'])} {v2_09_packet['amount_unit']} per {v2_09_packet['serving_unit']}", "capacity per unit after reality tax"),
-                ("Forecast demand", f"{v2_09_num(v2_09_partC['demand'])} {v2_09_packet['amount_unit']}", "what the launch must absorb"),
-                ("Total capacity", f"{v2_09_num(v2_09_partC['capacity'])} {v2_09_packet['amount_unit']}", "serving units times measured rate"),
-                ("p99 under load", v2_09_ms(v2_09_partC["p99_ms"]), f"track SLO {v2_09_ms(v2_09_packet['slo_ms'], 0)}"),
-                ("Failures", ", ".join(v2_09_partC["failures"]) or "none", "launch gate"),
-            ),
-        ))
-        expected_capacity = "under" if not v2_09_partC["feasible"] else "enough"
-        items.append(v2_09_feedback(
-            partC_prediction.value,
-            expected_capacity,
-            "**Prediction matched the capacity evidence.** The amount system makes the launch decision explicit.",
-            "**Capacity planning trap:** average speed is not enough; headroom and p99 determine whether the plan is launchable.",
-        ))
-        items.append(v2_09_failure_card(
-            not v2_09_partC["feasible"],
-            "Capacity plan misses the operating envelope",
-            (
-                f"Failures: {', '.join(v2_09_partC['failures']) or 'none'}. "
-                f"p99 is {v2_09_ms(v2_09_partC['p99_ms'])}; headroom is {v2_09_pct(v2_09_partC['headroom'])}."
-            ),
-            "add measured capacity, lower demand, or apply the bottleneck fix before launch",
-        ))
-        items.append(MathPeek(
-            r"C = N_{units} \cdot \mu_{unit} \cdot (1 - \tau_{reality}), \quad \text{Headroom} = \frac{C}{D} - 1, \quad T_{p99}(u) = T_{p99} \cdot f(u)",
-            {
-                "forecast demand (D)": f"{v2_09_num(v2_09_partC['demand'])} {v2_09_packet['amount_unit']}",
-                "total capacity (C)": f"{v2_09_num(v2_09_partC['capacity'])} {v2_09_packet['amount_unit']}",
-                "serving units": f"{partC_units.value} {v2_09_packet['serving_unit']}",
-                "utilization (u)": v2_09_pct(v2_09_partC['utilization']),
-                "capacity headroom": v2_09_pct(v2_09_partC['headroom']),
-                "target headroom": f"{v2_09_packet['headroom_target_pct']:.0f}%",
-                "reality tax": f"{v2_09_packet['reality_tax_pct']:.0f}%",
-                "daily fleet cost": v2_09_money(v2_09_partC['daily_cost']),
-                "chapter source": "Volume II, Chapter 9: Measurement at Scale & Fleet Capacity",
-            },
-        ))
-        items.append(mo.Html(f"""
-        <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
-            <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part C Capacity Provisioning Assessment</h4>
-            <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
-                Is the planned serving unit allocation sufficient for production launch demand?
-            </p>
-            {partC_checkpoint}
-        </div>
-        """))
-        if partC_checkpoint.value == expected_capacity:
-            items.append(mo.callout(mo.md(f"**Checkpoint saved:** assessment `{partC_checkpoint.value}` matches capacity headroom and queueing constraints."), kind="success"))
-        elif partC_checkpoint.value is not None:
-            items.append(mo.callout(mo.md(f"**Capacity divergence:** selected `{partC_checkpoint.value}`, but headroom is {v2_09_pct(v2_09_partC['headroom'])} with failures: {', '.join(v2_09_partC['failures']) or 'none'}."), kind="warn"))
-        return mo.vstack(items)
+        _kind = "success" if c_comparison["latency_improved"] else "danger"
+        return mo.vstack([
+            _intro, c_prediction, mo.hstack([c_precision, c_reuse], widths="equal", wrap=True),
+            apply_plotly_theme(_figure), table(_rows), c_decision,
+            mo.callout(mo.md(f"**Your prediction:** {c_prediction.value}. **Observed analytical result:** AOT/compile setup contributes **{q(_candidate.compile_time_per_run, 'ms')} per run** at this reuse horizon; total latency is **{q(_candidate.latency, 'ms')}**. Precision changes traffic, supported execution rate, and only the supplied quality fixture."), kind=_kind),
+            c_capture, saved("C"),
+            mo.accordion({"Calculation Notes": mo.md("Compile setup is divided by the declared reuse count and added to each run. For device tracks (TinyML, Mobile, Edge), AOT compilation is performed on an engineering build host prior to deployment; in cloud serving, it reflects one-time graph capture or JIT warmup. Captured graph execution lowers dispatch time but cannot remove kernel work. Precision selects a supported rate and byte width. Its quality value is fixed supplied scenario evidence, not an equation from bit width.")}),
+        ])
 
     def build_part_d():
-        items = [
-            v2_09_part_banner(
-                "D",
-                "Optimization Reports Must Defend A Trade-Off",
-                "The final memo must explain why one optimization survives p99, cost, quality/risk, and headroom while another is rejected.",
-                COLORS["RedLine"],
-            ),
-            mo.md("""
-    ### Concept: Conjunctive Optimization Frontier
-
-    The engineering lead does not want a benchmark screenshot. They want the
-    optimization you recommend, the trade-off it accepts, and the tempting
-    alternative it rejects. Feasibility requires satisfying all guardrails simultaneously.
-            """),
-            gated_hypothesis_card(
-                partD_prediction,
-                title="4. Formulate Optimization Trade-Off Hypothesis",
-                subtitle=(
-                    f"Scenario: Defending candidate optimization for {v2_09_packet['label']}. "
-                    "Predict which candidate maximizes performance while satisfying p99, headroom, quality, and cost guardrails."
-                ),
-            ),
+        _intro = mo.md(f"### D · Where does batching cross the memory boundary? (11 min)\nThe initial stress runs batch **{d_batch.value}**. Predict whether it fits one fleet unit. Fleet size can raise aggregate throughput, but it cannot pool memory across independent units or replicas.")
+        if d_prediction.value is None:
+            return mo.vstack([_intro, d_prediction])
+        _ordered = list(d_alternatives.items())
+        _to_mem = lambda p: quantity_from_dict(p).to(_mem_unit).magnitude
+        _figure = go.Figure()
+        _figure.add_bar(name="Required", x=[str(_batch) for _batch, _payload in _ordered], y=[_to_mem(_payload["memory_required"]) for _batch, _payload in _ordered], marker_color=COLORS["BlueLine"])
+        _figure.add_bar(name="Per-unit capacity", x=[str(_batch) for _batch, _payload in _ordered], y=[_to_mem(_payload["memory_capacity"]) for _batch, _payload in _ordered], marker_color=COLORS["TextMuted"])
+        _figure.update_layout(barmode="group", height=295, margin=dict(l=20, r=20, t=20, b=20), xaxis_title="Batch size", yaxis_title=f"Memory ({_mem_unit})", legend_orientation="h")
+        _baseline_result = d_comparison["baseline"]
+        _candidate = d_comparison["result"]
+        _rows = [
+            {"Run": "Carried configuration", "Batch": _baseline_result.batch_size, "Memory": f"{q(_baseline_result.memory_required, _mem_unit)} / {q(_baseline_result.memory_capacity, _mem_unit)}", "Attainable throughput": q(_baseline_result.attainable_per_unit_throughput, "1/s"), "Potential throughput": q(_baseline_result.potential_per_unit_throughput, "1/s"), "Outcome": "FIT" if _baseline_result.memory_feasible else "FAIL"},
+            {"Run": "Stress", "Batch": _candidate.batch_size, "Memory": f"{q(_candidate.memory_required, _mem_unit)} / {q(_candidate.memory_capacity, _mem_unit)}", "Attainable throughput": q(_candidate.attainable_per_unit_throughput, "1/s"), "Potential throughput": q(_candidate.potential_per_unit_throughput, "1/s"), "Outcome": "FIT" if _candidate.memory_feasible else "FAIL · per-unit memory"},
         ]
-        if partD_prediction.value is None:
-            items.append(mo.callout(mo.md("Commit to the candidate prediction before opening the frontier."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(
-            instrumentation_console(
-                mo.hstack([partD_risk_budget, partD_cost_ceiling], widths="equal"),
-                title="Frontier Guardrails Console",
-                subtitle="Configure allowable quality/safety risk budget (%) and maximum daily operating cost ceiling",
-            )
-        )
-        fig = go.Figure()
-        for row in v2_09_partD_candidates:
-            fig.add_trace(go.Scatter(
-                x=[row["daily_cost"]],
-                y=[row["p99_ms"]],
-                mode="markers+text",
-                text=[row["label"]],
-                textposition="top center",
-                name=row["label"],
-                marker=dict(
-                    size=16,
-                    color=COLORS["GreenLine"] if row["feasible"] else COLORS["RedLine"],
-                    symbol="circle" if row["feasible"] else "x",
-                ),
-                hovertemplate="%{text}<br>cost=%{x:.1f}<br>p99=%{y:.1f} ms<extra></extra>",
-            ))
-        fig.add_hline(y=v2_09_packet["slo_ms"], line_dash="dash", line_color=COLORS["RedLine"], annotation_text="p99 guardrail")
-        fig.add_vline(x=partD_cost_ceiling.value, line_dash="dash", line_color=COLORS["OrangeLine"], annotation_text="cost ceiling")
-        fig.update_layout(
-            height=390,
-            xaxis=dict(title="Daily cost", gridcolor="#edf2f7"),
-            yaxis=dict(title="p99 latency / time budget (ms)", gridcolor="#edf2f7"),
-            showlegend=False,
-            margin=dict(l=70, r=30, t=50, b=55),
-        )
-        apply_plotly_theme(fig)
-        items.append(mo.ui.plotly(fig))
-        rows = []
-        for row in v2_09_partD_candidates:
-            rows.append((
-                row["label"],
-                v2_09_ms(row["p99_ms"]),
-                v2_09_pct(row["headroom"]),
-                v2_09_money(row["daily_cost"]),
-                f"{row['quality_loss_pct']:.1f}%",
-                "PASS" if row["feasible"] else "FAIL: " + ", ".join(row["failures"]),
-                row["reason"],
-            ))
-        items.append(v2_09_table(
-            ("Candidate", "p99", "Headroom", "Daily cost", "Quality/risk", "Gate", "Trade-off"),
-            rows,
-        ))
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:12px; flex-wrap:wrap; margin:14px 0;">
-          {v2_09_metric_card("Selected", v2_09_partD_selected['label'], "best feasible score", COLORS["GreenLine"], not v2_09_partD_selected["feasible"])}
-          {v2_09_metric_card("Rejected", v2_09_partD_rejected['label'], ", ".join(v2_09_partD_rejected["failures"]) or "dominated", COLORS["RedLine"])}
-          {v2_09_metric_card("Risk budget", f"{partD_risk_budget.value:.1f}%", "quality/safety loss", COLORS["OrangeLine"])}
-          {v2_09_metric_card("Cost ceiling", v2_09_money(partD_cost_ceiling.value), "daily", COLORS["BlueLine"])}
-        </div>
-        """))
-        items.append(v2_09_feedback(
-            partD_prediction.value,
-            v2_09_partD_selected["id"],
-            "**Prediction matched the frontier.** The chosen option survives all report guardrails.",
-            "**Trade-off trap:** fastest, cheapest, or most familiar is not enough; feasibility is a conjunction of p99, headroom, quality/risk, and cost.",
-        ))
-        items.append(v2_09_failure_card(
-            not v2_09_partD_selected["feasible"],
-            "No candidate satisfies all report guardrails",
-            (
-                f"Best candidate is {v2_09_partD_selected['label']}, but failures are "
-                f"{', '.join(v2_09_partD_selected['failures']) or 'none'}."
-            ),
-            "relax scope, collect more evidence, or change the capacity plan before signing the memo",
-        ))
-        items.append(MathPeek(
-            r"\text{Feasible} = (T_{p99} \le \text{SLO}) \land (\text{Headroom} \ge H_{\text{target}}) \land (\Delta Q \le Q_{\text{budget}}) \land (\text{Cost} \le C_{\text{ceiling}})",
-            {
-                "selected candidate": v2_09_partD_selected['label'],
-                "rejected candidate": v2_09_partD_rejected['label'],
-                "risk budget": f"{partD_risk_budget.value:.1f}%",
-                "cost ceiling": v2_09_money(partD_cost_ceiling.value),
-                "p99 SLO": v2_09_ms(v2_09_packet['slo_ms'], 0),
-                "target headroom": f"{v2_09_packet['headroom_target_pct']:.0f}%",
-                "chapter source": "Volume II, Chapter 9: The Optimization Playbook & Efficiency Frontier",
-            },
-        ))
-        items.append(mo.Html(f"""
-        <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
-            <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part D Production Candidate Authorization</h4>
-            <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
-                Select the surviving optimization candidate and identify the rejected alternative to defend in the engineering memo.
-            </p>
-            <div style="display: flex; flex-direction: column; gap: 12px;">
-                <div><strong>Selected Candidate:</strong> {partD_checkpoint}</div>
-                <div><strong>Rejected Alternative:</strong> {partD_rejected}</div>
-            </div>
-        </div>
-        """))
-        if partD_checkpoint.value == v2_09_partD_selected["id"]:
-            items.append(mo.callout(mo.md(f"**Checkpoint saved:** `{v2_09_partD_selected['label']}` is Pareto-optimal and survives all guardrails."), kind="success"))
-        elif partD_checkpoint.value is not None:
-            items.append(mo.callout(mo.md(f"**Frontier mismatch:** selected `{v2_09_candidate_label(partD_checkpoint.value)}`, but optimizer chose `{v2_09_partD_selected['label']}`."), kind="warn"))
-        return mo.vstack(items)
+        _kind = "success" if _candidate.memory_feasible else "danger"
+        return mo.vstack([
+            _intro, d_prediction, d_batch, apply_plotly_theme(_figure), table(_rows),
+            mo.hstack([d_decision, d_rejected], widths="equal", wrap=True),
+            mo.md("If you keep an earlier configuration, record **Adopt tested batch** as the rejected alternative so the saved contrast and decision agree."),
+            mo.callout(mo.md(f"**Your prediction:** {d_prediction.value}. **Observed analytical result:** the stressed batch **{'fits' if _candidate.memory_feasible else 'does not fit'}** one {scenario.display_name} execution unit. The tested contrast is saved even when you recommend returning to the unoptimized selected-batch path."), kind=_kind),
+            d_capture, saved("D"),
+            mo.accordion({"Calculation Notes": mo.md("Required memory is resident tensors plus batch-proportional live state plus fusion and tiling workspace. Attainable throughput is completed batch items divided by latency for memory-feasible runs, and 0 1/s when memory is exceeded; analytical potential throughput reflects hypothetical unconstrained execution. Fleet throughput multiplies the attainable rate by independent units only after each unit passes its own memory constraint.")}),
+        ])
 
     def build_synthesis():
-        incomplete = []
-        required = {
-            "Part A prediction": partA_prediction.value,
-            "Part A checkpoint": partA_checkpoint.value,
-            "Part B prediction": partB_prediction.value,
-            "Part B checkpoint": partB_checkpoint.value,
-            "Part C prediction": partC_prediction.value,
-            "Part C checkpoint": partC_checkpoint.value,
-            "Part D prediction": partD_prediction.value,
-            "Part D checkpoint": partD_checkpoint.value,
-            "Part D rejected alternative": partD_rejected.value,
-            "V2-10 implication": v2_09_next_implication.value,
-        }
-        for label, value in required.items():
-            if value is None:
-                incomplete.append(label)
-        implication_text = {
-            "measured_p99": "V2-10 must use measured p99 as the serving SLO input, not peak throughput.",
-            "capacity_headroom": "V2-10 batching and admission controls must preserve the measured capacity headroom.",
-            "residual_bottleneck": "V2-10 should treat the residual bottleneck as an inference rollout risk.",
-            "regression_canary": "V2-10 rollout must include the regression canary because variance can hide tail changes.",
-        }.get(v2_09_next_implication.value, "V2-10 implication not selected yet.")
-        selected_id = partD_checkpoint.value or v2_09_partD_selected["id"]
-        rejected_id = partD_rejected.value or v2_09_partD_rejected["id"]
-        _decision_text = v2_09_memo_decision.value or (
-            f"For {v2_09_packet['label']}, localize {v2_09_bottleneck_label(v2_09_partA_base['bottleneck'])}; "
-            f"use {v2_09_partB['decision']} as the regression gate; plan "
-            f"{partC_units.value} {v2_09_packet['serving_unit']} with "
-            f"{v2_09_pct(v2_09_partC['headroom'])} headroom; defend "
-            f"{v2_09_candidate_label(selected_id)} and reject {v2_09_candidate_label(rejected_id)}. "
-            f"V2-10 downstream implication: {implication_text}"
+        _rows = []
+        for _part in "ABCD":
+            _capture = _captures.get(_part)
+            _rows.append({
+                "Part": _part,
+                "Original prediction": _capture.to_dict()["prediction"] if _capture else "—",
+                "Evidence": "CURRENT" if _capture and _part not in audit.stale and (_part, _part) not in audit.identical_pairs else ("STALE" if _capture else "MISSING"),
+            })
+        _d_saved = _captures["D"].to_dict()["decision"] if "D" in _captures else None
+        _complete = (
+            audit.complete
+            and all(_widget.value is not None for _widget in (final_choice, final_rejected, final_trigger, final_risk))
+            and bool(rationale.value.strip())
+            and final_choice.value != final_rejected.value
+            and final_choice.value == _d_saved
         )
-        ledger_design = {
-            "lab_id": v2_09_metadata.lab_id,
-            "track_id": v2_09_profile.track_id,
-            "scenario_id": v2_09_packet["scenario_id"],
-            "stakeholder": v2_09_packet["stakeholder"],
-            "report_frame": v2_09_packet["report_frame"],
-            "partA_predicted_bottleneck": partA_prediction.value or "no_selection",
-            "partA_actual_bottleneck": v2_09_partA_base["bottleneck"],
-            "partA_selected_first_lever": partA_checkpoint.value or "no_selection",
-            "partA_profile_p99_ms": round(v2_09_partA_base["p99_ms"], 4),
-            "partA_selected_speedup": round(v2_09_partA_speedup, 4),
-            "partB_prediction": partB_prediction.value or "no_selection",
-            "partB_samples": partB_samples.value,
-            "partB_cv_pct": round(partB_cv.value, 4),
-            "partB_candidate_delta_pct": round(partB_delta.value, 4),
-            "partB_mde_pct": round(v2_09_partB["mde_pct"], 4),
-            "partB_decision": partB_checkpoint.value or v2_09_partB["decision"],
-            "partC_prediction": partC_prediction.value or "no_selection",
-            "partC_demand_amount": round(v2_09_partC["demand"], 4),
-            "partC_serving_units": partC_units.value,
-            "partC_utilization_pct": round(v2_09_partC["utilization"] * 100.0, 4),
-            "partC_headroom_pct": round(v2_09_partC["headroom"] * 100.0, 4),
-            "partC_daily_cost": round(v2_09_partC["daily_cost"], 4),
-            "partC_decision": partC_checkpoint.value or "no_selection",
-            "partD_prediction": partD_prediction.value or "no_selection",
-            "partD_selected_candidate": selected_id,
-            "partD_rejected_candidate": rejected_id,
-            "partD_computed_selected": v2_09_partD_selected["id"],
-            "partD_computed_rejected": v2_09_partD_rejected["id"],
-            "partD_risk_budget_pct": partD_risk_budget.value,
-            "partD_cost_ceiling": partD_cost_ceiling.value,
-            "v2_10_implication": implication_text,
-            "memo_decision": _decision_text,
-            "final_summary": _decision_text,
-        }
-        if not incomplete:
-            ledger.save(track=v2_09_profile.track_id, chapter=v2_09_chapter, design=ledger_design)
-        report = build_lab_report(
-            v2_09_metadata,
-            student_id=v2_09_student_id.value or "",
-            track=v2_09_profile.label,
-            scenario=v2_09_packet["workload"],
-            learning_objectives=(
-                "Localize the active bottleneck before optimizing.",
-                "Use baseline, variance, and detectability evidence for regressions.",
-                "Convert measured performance into capacity headroom and cost.",
-                "Defend an optimization trade-off and reject an alternative.",
-            ),
-            predictions={
-                "part_a_bottleneck": partA_prediction.value,
-                "part_b_regression": partB_prediction.value,
-                "part_c_capacity": partC_prediction.value,
-                "part_d_tradeoff": partD_prediction.value,
-            },
-            knob_settings={
-                "part_a_pressure": partA_pressure.value,
-                "part_a_lever": partA_lever.value,
-                "part_b_samples": partB_samples.value,
-                "part_b_cv_pct": partB_cv.value,
-                "part_b_delta_pct": partB_delta.value,
-                "part_c_demand_multiplier": partC_demand.value,
-                "part_c_units": partC_units.value,
-                "part_c_optimization": partC_optimization.value,
-                "part_d_risk_budget_pct": partD_risk_budget.value,
-                "part_d_cost_ceiling": partD_cost_ceiling.value,
-            },
-            binding_constraints={
-                "part_a_bottleneck": v2_09_bottleneck_label(v2_09_partA_base["bottleneck"]),
-                "part_b_decision": v2_09_partB["decision"],
-                "part_c_failures": v2_09_partC["failures"],
-                "part_d_selected_failures": v2_09_partD_selected["failures"],
-            },
-            decisions={
-                "part_a_checkpoint": partA_checkpoint.value,
-                "part_b_checkpoint": partB_checkpoint.value,
-                "part_c_checkpoint": partC_checkpoint.value,
-                "part_d_selected": selected_id,
-                "part_d_rejected": rejected_id,
-                "v2_10_implication": implication_text,
-            },
-            reflections={"performance_engineering_memo": _decision_text},
-            evidence_summary={
-                "actual_bottleneck": v2_09_bottleneck_label(v2_09_partA_base["bottleneck"]),
-                "mde_pct": round(v2_09_partB["mde_pct"], 3),
-                "capacity_headroom_pct": round(v2_09_partC["headroom"] * 100.0, 3),
-                "capacity_daily_cost": round(v2_09_partC["daily_cost"], 3),
-                "selected_candidate": v2_09_candidate_label(selected_id),
-                "rejected_candidate": v2_09_candidate_label(rejected_id),
-            },
-            final_decision={
-                "memo": _decision_text,
-                "computed_selected": v2_09_partD_selected["label"],
-                "computed_rejected": v2_09_partD_rejected["label"],
-            },
-            big_takeaways=(
-                "Performance optimization starts with bottleneck localization (Amdahl's Law).",
-                "Regression evidence needs baseline variance and detectability (MDE).",
-                "Capacity planning is an amount system, not an average-speed claim.",
-                "A credible optimization report names the trade-off and rejected alternative.",
-            ),
-            residual_risk=(
-                "Teaching constants must be checked against production traces, current hardware counters, "
-                "quality canaries, and real workload distributions before launch."
-            ),
-            source_trace={
-                "book_anchor": v2_09_metadata.book_anchor,
-                "chapter_sections": (
-                    "The iron law of ML performance",
-                    "System Profiling",
-                    "Profiling feedback loop",
-                    "Measurement at Scale",
-                    "The Optimization Playbook",
-                    "Fallacies and Pitfalls",
-                ),
-                "local_solver": "v2_09_profile_result, v2_09_regression_result, v2_09_capacity_result, v2_09_tradeoff_candidates",
-                "hardware_ref": v2_09_packet["hardware_ref"],
-                "system_ref": v2_09_packet["system_ref"],
-            },
-            result_snapshot=ledger_design,
-            incomplete_fields=tuple(incomplete),
-        )
-        status_kind = "success" if not incomplete else "warn"
-        status_text = "Saved to Design Ledger" if not incomplete else "Complete all prediction and checkpoint controls to save."
         return mo.vstack([
-            mo.md("## Synthesis &mdash; Performance Engineering Memo"),
-            mo.Html(f"""
-            <div class="mlsysbook-panel" style="border-left: 4px solid #1F407A; margin-top: 16px;">
-                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">STUDENT MEMO &amp; REFLECTIONS</div>
-                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Performance Engineering Deployment Memo</h4>
-                {v2_09_student_id}
-                <div style="margin-top: 12px;">{v2_09_next_implication}</div>
-                <div style="margin-top: 12px;">{v2_09_memo_decision}</div>
-            </div>
-            """),
-            mo.callout(mo.md(f"**Memo summary:** {_decision_text}  \n\n**V2-10 implication:** {implication_text}"), kind=status_kind),
-            mo.callout(mo.md(status_text), kind=status_kind),
-            v2_09_table(
-                ("Memo field", "Evidence", "Report decision"),
-                (
-                    ("Bottleneck", v2_09_bottleneck_label(v2_09_partA_base["bottleneck"]), v2_09_optimization_label(partA_checkpoint.value or v2_09_partA_best_lever)),
-                    ("Regression", f"MDE {v2_09_partB['mde_pct']:.1f}%, decision {v2_09_partB['decision']}", partB_checkpoint.value or "not selected"),
-                    ("Capacity", f"{v2_09_pct(v2_09_partC['headroom'])} headroom, {v2_09_money(v2_09_partC['daily_cost'])}/day", partC_checkpoint.value or "not selected"),
-                    ("Trade-off", f"computed select {v2_09_partD_selected['label']}; reject {v2_09_partD_rejected['label']}", f"student select {v2_09_candidate_label(selected_id)}; reject {v2_09_candidate_label(rejected_id)}"),
-                    ("Next lab", implication_text, "carry into V2-10 inference"),
-                ),
-            ),
-            big_takeaways([
-                "Performance optimization starts with bottleneck localization (Amdahl's Law).",
-                "Regression evidence requires baseline variance and detectability bounds (MDE).",
-                "Capacity planning is an amount system with reality tax, not an average-speed claim.",
-                "A credible optimization report names the accepted trade-off and rejected alternative.",
-            ]),
-            mo.Html(f"""
-            <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin-top: 16px;">
-                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">FINAL VERIFICATION &amp; SIGN-OFF</div>
-                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Lead Performance Architect Authorization</h4>
-                <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
-                    Confirm your performance memo, verify all conjunctive guardrails, and export the official engineering audit record.
-                </p>
-            </div>
-            """),
-            report_export_panel(report),
+            mo.md("### Synthesis · Defend one fleet recommendation (5 min)\nUse saved evidence to state the chosen configuration, quantify a rejected alternative, name one remaining limitation, and set a trigger for rerunning the experiments."),
+            table(_rows),
+            mo.callout(mo.md("Saved snapshots preserve original predictions, exact evaluator arguments, and unit-bearing results. Recapture only stale downstream evidence."), kind="info"),
+            mo.hstack([final_choice, final_rejected], widths="equal", wrap=True),
+            mo.hstack([final_trigger, final_risk], widths="equal", wrap=True), rationale,
+            mo.callout(mo.md("**Ready for the local report.**" if _complete else "Complete four current contrasts, match the final choice to Part D, reject a different option, and add a quantified rationale."), kind="success" if _complete else "warn"),
         ])
 
     tabs = mo.ui.tabs({
-        "Part A: Bottleneck Localization": build_part_a(),
-        "Part B: Variance And Detectability": build_part_b(),
-        "Part C: Measurement At Scale": build_part_c(),
-        "Part D: Optimization Frontier": build_part_d(),
+        "Part A": build_part_a(), "Part B": build_part_b(),
+        "Part C": build_part_c(), "Part D": build_part_d(),
         "Synthesis": build_synthesis(),
     })
     tabs
-    return
+    return (audit,)
 
 
-@app.cell(hide_code=True)
+# ZONE D · Report and volume-isolated ledger
+@app.cell
 def _(
-    COLORS,
-    mo,
-    v2_09_bottleneck_label,
-    v2_09_metadata,
-    v2_09_money,
-    v2_09_packet,
-    v2_09_partA_base,
-    v2_09_partC,
-    v2_09_partD_selected,
-    v2_09_pct,
-    v2_09_profile,
+    audit, build_lab_report, final_choice, final_rejected, final_risk,
+    final_trigger, get_evidence, get_lab_metadata, mo, rationale,
+    report_export_panel, scenario, track_id,
 ):
-    _status = "PASS" if v2_09_partC["feasible"] and v2_09_partD_selected["feasible"] else "WATCH"
-    _status_color = COLORS["GreenLine"] if _status == "PASS" else COLORS["OrangeLine"]
-    mo.Html(f"""
-    <div class="lab-hud">
-      <span class="hud-label">LAB</span>
-      <span class="hud-value">{v2_09_metadata.lab_id}</span>
-      <span class="hud-label">TRACK</span>
-      <span class="hud-value">{v2_09_profile.label}</span>
-      <span class="hud-label">BOTTLENECK</span>
-      <span class="hud-value">{v2_09_bottleneck_label(v2_09_partA_base['bottleneck'])}</span>
-      <span class="hud-label">HEADROOM</span>
-      <span class="hud-value">{v2_09_pct(v2_09_partC['headroom'])}</span>
-      <span class="hud-label">COST</span>
-      <span class="hud-value">{v2_09_money(v2_09_partC['daily_cost'])}/day</span>
-      <span class="hud-label">SLO</span>
-      <span class="hud-value">{v2_09_packet['slo_ms']:.0f} ms</span>
-      <span style="flex:1;"></span>
-      <span class="hud-label">STATUS</span>
-      <span style="color:{_status_color}; font-family:var(--font-mono);">{_status}</span>
-    </div>
-    """)
+    _captures = get_evidence()
+    _d_saved = _captures["D"].to_dict()["decision"] if "D" in _captures else None
+    _ready = (
+        audit.complete
+        and all(_widget.value is not None for _widget in (final_choice, final_rejected, final_trigger, final_risk))
+        and bool(rationale.value.strip())
+        and final_choice.value != final_rejected.value
+        and final_choice.value == _d_saved
+    )
+    mo.stop(not _ready)
+    _snapshots = {_part: _captures[_part].to_dict() for _part in "ABCD"}
+    _constraint_results = {
+        _part: (_snapshots[_part].get("chosen_result") or _snapshots[_part]["result"])
+        for _part in "ABCD"
+    }
+    report = build_lab_report(
+        get_lab_metadata("vol2/lab_09_perf_engineering.py"),
+        track=track_id, scenario=scenario.workload,
+        learning_objectives=[
+            "Diagnose compute, memory, and overhead limits from a phase path.",
+            "Compare fusion, tiling, precision, compilation, and batching from shared baselines.",
+            "Defend a fleet configuration with per-unit memory and supplied quality evidence.",
+        ],
+        predictions={_part: _snapshots[_part]["prediction"] for _part in "ABCD"},
+        knob_settings={_part: _snapshots[_part]["inputs"] for _part in "ABCD"},
+        evidence_summary={_part: {"baseline": _snapshots[_part]["baseline"], "result": _snapshots[_part]["result"], "alternatives": _snapshots[_part]["alternatives"]} for _part in "ABCD"},
+        binding_constraints={_part: {"bottleneck": _constraint_results[_part]["bottleneck"], "memory_feasible": _constraint_results[_part]["memory_feasible"]} for _part in "ABCD"},
+        decisions={"recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "reevaluation_trigger": final_trigger.value},
+        final_decision={"recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "rationale": rationale.value},
+        big_takeaways=[
+            "The binding phase term determines which local rewrite can improve latency.",
+            "Compile setup must be amortized, and combined gains must be recomputed on one path.",
+            "Independent fleet units raise aggregate throughput without pooling per-unit memory.",
+        ],
+        reflections={"rationale": rationale.value, "reevaluation_trigger": final_trigger.value},
+        residual_risk=final_risk.value,
+        result_snapshot={"track": track_id, "captures": _snapshots, "recommendation": final_choice.value, "rejected": final_rejected.value, "trigger": final_trigger.value, "residual_risk": final_risk.value},
+        source_trace={"hardware": scenario.hardware_name, "scenario": scenario.provenance, "calculations": "MLSysIM v2_09_experiments physical phase model"},
+    )
+    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    return (report,)
+
+
+@app.cell
+async def _(
+    MODEL_ID, audit, final_choice, final_rejected, final_risk, final_trigger,
+    get_evidence, ledger, mo, rationale, track_id,
+):
+    _captures = get_evidence()
+    _d_saved = _captures["D"].to_dict()["decision"] if "D" in _captures else None
+    _ready = (
+        audit.complete
+        and all(_widget.value is not None for _widget in (final_choice, final_rejected, final_trigger, final_risk))
+        and bool(rationale.value.strip())
+        and final_choice.value != final_rejected.value
+        and final_choice.value == _d_saved
+    )
+    _saved = False
+    _save_failed = False
+    if _ready:
+        try:
+            ledger.save(chapter=9, design={
+                "schema_version": 1, "lab_id": "v2_09", "track_id": track_id,
+                "model_id": MODEL_ID,
+                "evidence": {_part: _capture.to_dict() for _part, _capture in _captures.items()},
+                "recommendation": final_choice.value,
+                "rejected_alternative": final_rejected.value,
+                "reevaluation_trigger": final_trigger.value,
+                "residual_risk": final_risk.value, "rationale": rationale.value,
+            })
+            await ledger.flush()
+            _saved = True
+        except Exception:
+            _save_failed = True
+    _status = "SAVED" if _saved else "SAVE FAILED · REPORT STILL AVAILABLE" if _save_failed else "EVIDENCE IN PROGRESS"
+    _status_class = "hud-failed" if _save_failed else "hud-active"
+    mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">09 · Optimize the Path</span><span class="hud-separator">|</span><span style="flex:1"></span><span class="hud-label">STATUS</span><span class="{_status_class}">{_status}</span></div>')
     return
 
 

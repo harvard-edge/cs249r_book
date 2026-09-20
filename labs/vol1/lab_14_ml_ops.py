@@ -1,16 +1,14 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full", app_title="Lab 14: Silent Degradation · MLSysBook")
+app = marimo.App(width="full", app_title="Lab 14: Evidence-Driven Operations · MLSysBook")
 
 
 @app.cell
 async def _():
-    import marimo as mo
     import sys
-    import math
     from pathlib import Path
-    import numpy as np
+    import marimo as mo
 
     if sys.platform == "emscripten":
         import micropip
@@ -18,1611 +16,628 @@ async def _():
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
-        _labs_dir = Path(__file__).resolve().parents[1]
-        if str(_labs_dir) not in sys.path:
-            sys.path.insert(0, str(_labs_dir))
+        labs_dir = Path(__file__).resolve().parents[1]
+        if str(labs_dir) not in sys.path:
+            sys.path.insert(0, str(labs_dir))
         from bootstrap import native_bootstrap
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
-    import mlsysim
+    from mlsysim.engine.v1_14_experiments import (
+        TRACKS, canary_experiment, experiment_options, get_track_scenario,
+        incident_experiment, monitoring_experiment, retraining_experiment,
+    )
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        big_takeaways,
-        build_lab_report,
-        drift_visibility,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        ops_policy,
-        ops_track_profile,
-        report_export_panel,
-        resolve_mlsysim_ref,
-        retraining_cadence,
-        source_trace,
-        track_context,
-        track_arc_context,
-        track_selector,
+        ACADEMIC_LAB_CSS, build_lab_report, get_lab_metadata, report_export_panel,
     )
+    from mlsysbook_labs.experiment_evidence import audit_evidence, capture_evidence
 
-    ledger = DesignLedger()
-    if getattr(ledger, "is_wasm", False):
-        _ = await ledger.load_async()
+    ledger = DesignLedger(volume="vol1")
+    if ledger.is_wasm:
+        _loaded = await ledger.load_async()
     return (
-        ACADEMIC_LAB_CSS,
-        COLORS,
-        LAB_CSS,
-        apply_plotly_theme,
-        big_takeaways,
-        build_lab_report,
-        drift_visibility,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        go,
-        ledger,
-        mo,
-        np,
-        ops_policy,
-        ops_track_profile,
-        report_export_panel,
-        resolve_mlsysim_ref,
-        retraining_cadence,
-        track_arc_context,
-        track_context,
+        ACADEMIC_LAB_CSS, COLORS, LAB_CSS, TRACKS, apply_plotly_theme,
+        audit_evidence, build_lab_report, canary_experiment, capture_evidence,
+        experiment_options, get_lab_metadata, get_track_scenario, go,
+        incident_experiment, ledger, mo, monitoring_experiment,
+        report_export_panel, retraining_experiment,
     )
 
 
 @app.cell
-def _(get_lab_metadata):
-    v1_14_metadata = get_lab_metadata("vol1/lab_14_ml_ops.py")
-    return (v1_14_metadata,)
+def _(mo):
+    get_evidence, set_evidence = mo.state({})
+    return get_evidence, set_evidence
 
 
-@app.cell(hide_code=True)
-def _(ledger, mo):
-    _options = {
-        "☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)": "cloud_fleet",
-        "🤖 Edge & Embodied Track (Robotics & Drones · Jetson AGX Orin)": "robotaxi",
-        "📱 Mobile Track (On-Device Personal AI · Apple Silicon M4 / Snapdragon)": "iphone",
-        "⚡ TinyML Track (Microcontrollers & Wearables · Cortex-M55 / ESP32-S3)": "oura_ring",
+@app.cell
+def _(mo, set_evidence):
+    track = mo.ui.dropdown(
+        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
+        value="TinyML", label="Deployment track",
+        on_change=lambda _value: set_evidence({}),
+    )
+    return (track,)
+
+
+@app.cell
+def _(TRACKS, experiment_options, get_track_scenario, track):
+    track_id = track.value
+    scenario = get_track_scenario(track_id)
+    options = experiment_options(track_id)
+    assert track_id in TRACKS
+    return options, scenario, track_id
+
+
+@app.cell
+def _(mo, options, track_id):
+    _track_key = track_id
+    a_threshold = mo.ui.dropdown(
+        options["monitor_thresholds"], value="Sensitive · 0.15", label="Proxy alert threshold",
+    )
+    b_threshold = mo.ui.dropdown(
+        options["monitor_thresholds"], value="Insensitive · 0.40", label="Proxy alert threshold",
+    )
+    b_interval = mo.ui.dropdown(
+        options["monitor_intervals"], value=list(options["monitor_intervals"])[1], label="Sampling interval",
+    )
+    c_interval = mo.ui.dropdown(
+        options["scheduled_intervals"], value=list(options["scheduled_intervals"])[1], label="Scheduled cadence",
+    )
+    c_choice = mo.ui.radio(
+        {"Scheduled cadence": "scheduled", "Evidence-triggered policy": "evidence_triggered"},
+        value=None, label="Selected retraining policy",
+    )
+    d_choice = mo.ui.radio(
+        {"10% canary": 0.10, "25% canary": 0.25, "50% canary": 0.50, "Hold for more evidence / no feasible promotion": "none"},
+        label="Promotion recommendation",
+    )
+    d_rejected = mo.ui.radio(
+        {"10% canary": 0.10, "25% canary": 0.25, "50% canary": 0.50},
+        label="Quantified rejected alternative",
+    )
+    e_rollback = mo.ui.dropdown(
+        options["rollback_options"], value="5 minutes", label="Rollback stage duration",
+    )
+    return (
+        a_threshold, b_interval, b_threshold, c_choice, c_interval,
+        d_choice, d_rejected, e_rollback,
+    )
+
+
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    a_prediction = mo.ui.radio({
+        "Every proxy alert proves quality failure": "proves_failure",
+        "Some proxy alerts precede or outnumber failures": "imperfect_proxy",
+        "Delayed labels arrive before proxy alerts": "labels_first",
+    }, label="What will the sensitive proxy threshold establish?").form(submit_button_label="Lock Part A prediction")
+    b_prediction = mo.ui.radio({
+        "Fewer misses, more investigations": "misses_down_investigations_up",
+        "Fewer misses, lower telemetry cost": "misses_down_cost_down",
+        "No operational consequence": "no_change",
+    }, label="What is the main cost of greater monitoring sensitivity?").form(submit_button_label="Lock Part B prediction")
+    c_prediction = mo.ui.radio({
+        "Scheduled always costs less": "scheduled_cheaper",
+        "Evidence-triggered may wait longer but launch fewer jobs": "triggered_tradeoff",
+        "Retraining changes quality when the job starts": "changes_at_start",
+    }, label="How will delayed evidence change retraining?").form(submit_button_label="Lock Part C prediction")
+    d_prediction = mo.ui.radio({
+        "Zero traffic is safest and still proves readiness": "zero_certifies",
+        "More traffic always lowers exposure": "more_always_safer",
+        "Traffic trades faster evidence against candidate exposure": "evidence_exposure",
+    }, label="What does canary fraction control?").form(submit_button_label="Lock Part D prediction")
+    e_prediction = mo.ui.radio({
+        "Detection alone completes recovery": "detection_is_recovery",
+        "Recovery is the sum of response stages": "sequential_stages",
+        "Rollback duration cannot affect exposure": "rollback_noncausal",
+    }, label="What determines verified recovery time?").form(submit_button_label="Lock Part E prediction")
+    return a_prediction, b_prediction, c_prediction, d_prediction, e_prediction
+
+
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    final_choice = mo.ui.radio({
+        "10% canary": 0.10, "25% canary": 0.25, "50% canary": 0.50,
+        "Hold for more evidence / no feasible promotion": "none",
+    }, label="Final recommendation")
+    final_rejected = mo.ui.radio(
+        {"10% canary": 0.10, "25% canary": 0.25, "50% canary": 0.50},
+        label="Rejected tested alternative",
+    )
+    final_trigger = mo.ui.radio({
+        "A new missed failure episode": "missed_failure",
+        "Canary evidence loses cohort coverage": "cohort_coverage",
+        "Recovery time exceeds its objective": "recovery_objective",
+    }, label="Reevaluation trigger")
+    final_risk = mo.ui.radio({
+        "Proxy alerts do not prove quality loss": "proxy_ambiguity",
+        "Labels remain delayed": "label_delay",
+        "Illustrative outcomes require local calibration": "scenario_calibration",
+    }, label="Remaining limitation")
+    rationale = mo.ui.text_area(
+        label="Concise rationale",
+        placeholder="Connect saved monitoring, retraining, rollout, and recovery evidence.",
+    )
+    return final_choice, final_rejected, final_risk, final_trigger, rationale
+
+
+@app.cell
+def _(
+    a_threshold, b_interval, b_threshold, canary_experiment, c_interval,
+    d_choice, d_rejected, e_rollback, incident_experiment,
+    monitoring_experiment, options, retraining_experiment, track_id,
+):
+    a_base = monitoring_experiment(
+        track_id, proxy_threshold=0.30, sampling_interval_hours=options["step_hours"],
+    )
+    a_result = monitoring_experiment(
+        track_id, proxy_threshold=a_threshold.value, sampling_interval_hours=options["step_hours"],
+    )
+    b_base = monitoring_experiment(
+        track_id, proxy_threshold=0.30, sampling_interval_hours=options["step_hours"],
+    )
+    b_result = monitoring_experiment(
+        track_id, proxy_threshold=b_threshold.value, sampling_interval_hours=b_interval.value,
+    )
+    c_scheduled = retraining_experiment(
+        track_id, policy="scheduled", scheduled_interval_hours=c_interval.value,
+    )
+    c_triggered = retraining_experiment(
+        track_id, policy="evidence_triggered", scheduled_interval_hours=None,
+    )
+    d_results = {
+        fraction: canary_experiment(track_id, canary_fraction=fraction, stop_on_decision=False)
+        for fraction in options["canary_candidates"].values()
     }
-    _saved_track = ledger.get_track()
-    _default_key = next((k for k, v in _options.items() if v == _saved_track), list(_options.keys())[0])
-    v1_14_track_picker = mo.ui.dropdown(
-        options=_options,
-        value=_default_key,
-        label="Select Course / Industry Track",
+    if d_choice.value not in (None, "none") and d_results[d_choice.value]["decision"] == "promote":
+        e_affected_fraction = 1.0
+    elif d_choice.value not in (None, "none"):
+        e_affected_fraction = d_choice.value
+    elif d_rejected.value is not None:
+        e_affected_fraction = d_rejected.value
+    else:
+        e_affected_fraction = 0.25
+    e_base = incident_experiment(
+        track_id, proxy_threshold=b_threshold.value,
+        sampling_interval_hours=b_interval.value, rollback_minutes=30.0,
+        affected_fraction=e_affected_fraction,
     )
-    return (v1_14_track_picker,)
+    e_result = incident_experiment(
+        track_id, proxy_threshold=b_threshold.value,
+        sampling_interval_hours=b_interval.value, rollback_minutes=e_rollback.value,
+        affected_fraction=e_affected_fraction,
+    )
+    return a_base, a_result, b_base, b_result, c_scheduled, c_triggered, d_results, e_affected_fraction, e_base, e_result
 
 
 @app.cell
 def _(
-    get_lab_track_variant,
-    get_track_profile,
-    ops_track_profile,
-    resolve_mlsysim_ref,
-    v1_14_track_picker,
+    a_base, a_prediction, a_result, b_base, b_prediction, b_result,
+    c_choice, c_prediction, c_scheduled, c_triggered, capture_evidence,
+    d_choice, d_prediction, d_rejected, d_results, e_base, e_prediction,
+    e_result, mo, set_evidence, track_id,
 ):
-    # Cross-tier hardware targets: Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Unified
-    v1_14_track_id = v1_14_track_picker.value
-    v1_14_profile = get_track_profile(v1_14_track_id)
-    v1_14_variant = get_lab_track_variant("v1_14_silent_degradation", v1_14_profile.track_id)
-    v1_14_hardware = resolve_mlsysim_ref(v1_14_variant.hardware_ref)
-    v1_14_model = resolve_mlsysim_ref(v1_14_variant.model_ref)
-    v1_14_ops = ops_track_profile(
-        v1_14_profile,
-        v1_14_variant,
-        v1_14_hardware,
-        v1_14_model,
+    def store(part, capture):
+        set_evidence(lambda current: {**current, part: capture})
+
+    a_upstream = {"baseline": a_base["inputs"], "result": a_result["inputs"]}
+    b_upstream = {"baseline": b_base["inputs"], "result": b_result["inputs"]}
+    c_upstream = {"choice": c_choice.value, "scheduled": c_scheduled["inputs"], "evidence_triggered": c_triggered["inputs"]}
+    d_upstream = {"choice": d_choice.value, "rejected": d_rejected.value}
+    e_upstream = {"rollout": d_upstream, "baseline": e_base["inputs"], "result": e_result["inputs"]}
+
+    a_capture = mo.ui.button(
+        label="Capture proxy comparison", kind="success",
+        disabled=a_prediction.value is None or a_base["inputs"] == a_result["inputs"],
+        on_click=lambda _value: store("A", capture_evidence(
+            track=track_id, part="A", prediction=a_prediction.value,
+            inputs=a_upstream, baseline=a_base, result=a_result,
+            upstream_inputs=a_upstream, model_key="v1_14.monitoring",
+        )),
     )
-    return v1_14_ops, v1_14_profile, v1_14_variant
-
-
-@app.cell(hide_code=True)
-def _(
-    ACADEMIC_LAB_CSS,
-    COLORS,
-    LAB_CSS,
-    mo,
-    track_arc_context,
-    track_context,
-    v1_14_metadata,
-    v1_14_ops,
-    v1_14_profile,
-    v1_14_track_picker,
-    v1_14_variant,
-):
-    mo.vstack([
-        LAB_CSS,
-        ACADEMIC_LAB_CSS,
-        mo.Html(f"""
-        <div class="mlsysbook-lab-shell">
-          <div style="margin-bottom: 16px;">
-            {v1_14_track_picker}
-          </div>
-          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
-            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
-              ML Systems Textbook &middot; Volume I &middot; Chapter 14 &middot; Foundational Lab 14
-            </div>
-            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
-              The Silent Degradation Problem: Drift, Retraining &amp; Operations
-            </h1>
-            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
-              {v1_14_variant.workload_summary} Infrastructure health metrics can stay green while accuracy and downstream quality silently collapse. Build continuous monitoring, calibrate alert thresholds, determine optimal retraining cadences, and design rollback error budgets.
-            </p>
-            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Track:</strong> {v1_14_profile.label}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Workload:</strong> {v1_14_ops.label}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Hardware:</strong> {v1_14_variant.hardware_ref}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Model:</strong> {v1_14_variant.model_ref}
-              </span>
-              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
-                <strong>Primary Focus:</strong> MLOps &amp; Silent Degradation Defense
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Deliverable:</strong> operations runbook memo
-              </span>
-            </div>
-          </div>
-
-          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
-              System Scenario: {v1_14_profile.label} ML Operations
-            </h3>
-            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
-              You are the <strong>{v1_14_variant.stakeholder}</strong> responsible for monitoring <strong>{v1_14_variant.model_ref}</strong> on <strong>{v1_14_variant.hardware_ref}</strong>. The deployed model faces <strong>{v1_14_ops.drift_source}</strong> and must protect <strong>{v1_14_variant.guardrail_metric}</strong> against unmonitored silent quality collapse.
-            </p>
-            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
-              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
-                The Architectural Invariants of ML Operations:
-              </div>
-              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
-                <li><strong>The Silent Degradation Asymmetry Law:</strong> System infrastructure (CPU, memory, networking, uptime) remains 100% green while model prediction accuracy silently decays: Health<sub>infra</sub> &ne; Health<sub>model</sub>. Monitoring telemetry must track data distribution drift (<em>D</em><sub>drift</sub>) and prediction quality independently of system liveliness.</li>
-                <li><strong>The Economic Retraining Horizon (<em>T</em>* Invariant):</strong> Retraining cadence is governed by the square-root optimal trade-off between fixed retraining compute cost (<em>C</em><sub>retrain</sub>) and cumulative stale-model degradation loss (<em>C</em><sub>drift</sub>): <em>T</em>* = &radic;(2 &middot; <em>C</em><sub>retrain</sub> / <em>C</em><sub>drift</sub>). Arbitrary scheduled retraining inflates energy costs while delayed retraining risks catastrophic customer harm.</li>
-                <li><strong>The Delayed Ground Truth Blind Spot:</strong> Ground-truth labels arrive with non-zero lag (&tau;<sub>label</sub>), blinding direct performance evaluation in the short term. Proxy metrics (input feature drift, output distribution divergence, prediction entropy) must act as early-warning tripwires before label arrival.</li>
-                <li><strong>The Automated Safe Rollback &amp; Canary Invariant:</strong> Every continuous deployment requires canary traffic slicing, statistical blast-radius limitation, and sub-second automated rollback triggers: &Delta;Quality &lt; &minus;&epsilon; &rArr; Rollback &rarr; Baseline. No model promotion may proceed without automated verification against golden evaluation suites.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['BlueLine']};
-                    background: white; border-radius: 0 12px 12px 0;
-                    padding: 20px 28px; margin: 8px 0 16px 0;
-                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Separate infrastructure from model health:</strong>
-                    detect when {v1_14_ops.drift_source} degrades quality before dashboards fail.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Optimize retraining cadence:</strong>
-                    use <em>T</em>* = &radic;(2<em>C</em>/<em>C</em><sub>drift</sub>) to balance retraining cost against stale-model risk.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Enforce canary &amp; rollback bounds:</strong>
-                    limit blast radius with statistical gates and automated rollback triggers.</div>
-                <div style="margin-bottom: 3px;">4. <strong>Govern error budgets:</strong>
-                    budget acceptable quality degradation and defend the residual operational blind spot.</div>
-            </div>
-            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
-                        padding: 16px 28px 0 28px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Core Question
-                </div>
-                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                            line-height: 1.5; font-style: italic;">
-                    What operations policy prevents silent degradation while protecting
-                    {v1_14_variant.guardrail_metric}?
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']};
-                            line-height: 1.6; margin-top: 10px;">
-                    Every track follows the same four concepts. The selected track changes
-                    persona, constraints, thresholds, evidence emphasis, failure mode, and
-                    report framing.
-                </div>
-            </div>
-        </div>
-        """),
-        track_context(v1_14_profile),
-        track_arc_context(v1_14_profile, v1_14_metadata.lab_id),
-    ])
-    return
-
-
-@app.cell(hide_code=True)
-def _():
-    return
-
-
-@app.cell(hide_code=True)
-def _():
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_14_ops):
-    partA_pred = mo.ui.radio(
-        options={
-            "A) Uptime and latency are enough because the service is green": "infra",
-            "B) Offline validation is enough until the next model release": "offline",
-            "C) Deployed behavior signals must be monitored before labels arrive": "deployed",
-            "D) Delayed labels are the only signal that matters": "labels",
-        },
-        label=f"{v1_14_ops.label}: which signal should own first detection when {v1_14_ops.drift_source} accumulates?",
+    b_capture = mo.ui.button(
+        label="Capture sensitivity comparison", kind="success",
+        disabled=b_prediction.value is None or b_base["inputs"] == b_result["inputs"],
+        on_click=lambda _value: store("B", capture_evidence(
+            track=track_id, part="B", prediction=b_prediction.value,
+            inputs=b_upstream, baseline=b_base, result=b_result,
+            upstream_inputs=b_upstream, model_key="v1_14.monitoring",
+        )),
     )
-    return (partA_pred,)
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_14_ops):
-    partA_days = mo.ui.slider(
-        start=0,
-        stop=180,
-        value=min(180, max(30, v1_14_ops.current_cadence_days * 2)),
-        step=1,
-        label="Days since deployment",
+    c_chosen_result = (
+        c_scheduled if c_choice.value == "scheduled"
+        else (c_triggered if c_choice.value == "evidence_triggered" else None)
     )
-    partA_rate = mo.ui.slider(
-        start=0.001,
-        stop=0.030,
-        value=v1_14_ops.drift_rate_psi_per_day,
-        step=0.001,
-        label="Drift rate (PSI/day)",
+    c_capture = mo.ui.button(
+        label="Capture retraining comparison", kind="success",
+        disabled=c_prediction.value is None or c_choice.value is None,
+        on_click=lambda _value: store("C", capture_evidence(
+            track=track_id, part="C", prediction=c_prediction.value,
+            inputs=c_upstream, baseline=c_scheduled, result=c_triggered,
+            upstream_inputs=c_upstream, alternatives=(c_scheduled, c_triggered),
+            decision=c_choice.value, model_key="v1_14.retraining",
+            chosen_result=c_chosen_result,
+        )),
     )
-    partA_threshold = mo.ui.slider(
-        start=0.05,
-        stop=0.50,
-        value=v1_14_ops.alert_threshold_psi,
-        step=0.01,
-        label="Alert threshold (PSI)",
+    d_invalid = (
+        d_prediction.value is None or d_choice.value is None or d_rejected.value is None
+        or d_choice.value == d_rejected.value
     )
-
-    partB_pred = mo.ui.radio(
-        options={
-            "A) Set the tightest possible threshold; earlier alerts are always safer": "tight",
-            "B) Calibrate the threshold against false alarms and missed damage": "calibrate",
-            "C) Set a loose threshold to protect the on-call rotation": "loose",
-            "D) Wait for a user-facing incident before tuning thresholds": "reactive",
-        },
-        label=(
-            f"{v1_14_ops.label}: how should ops choose the PSI alert threshold?"
+    d_baseline = d_results[d_rejected.value] if d_rejected.value is not None else d_results[0.10]
+    if d_choice.value == "none":
+        d_result = d_baseline
+        d_baseline = d_results[0.0]
+        d_chosen_result = d_baseline
+        d_result_role = "rejected alternative"
+    elif d_choice.value is None:
+        d_result = d_results[0.25]
+        d_chosen_result = d_result
+        d_result_role = "chosen candidate"
+    else:
+        d_result = d_results[d_choice.value]
+        d_chosen_result = d_result
+        d_result_role = "chosen candidate"
+    d_capture = mo.ui.button(
+        label="Capture rollout decision", kind="success", disabled=d_invalid,
+        on_click=lambda _value: store("D", capture_evidence(
+            track=track_id, part="D", prediction=d_prediction.value,
+            inputs={**d_upstream, "baseline": d_baseline["inputs"], "result": d_result["inputs"], "chosen_result": d_chosen_result["inputs"]},
+            baseline=d_baseline, result=d_result, upstream_inputs=d_upstream,
+            alternatives=tuple(d_results.values()), decision=d_choice.value,
+            model_key="v1_14.canary", chosen_result=d_chosen_result,
+            result_role=d_result_role,
+        )),
+    )
+    e_capture = mo.ui.button(
+        label="Capture incident replay", kind="success",
+        disabled=(
+            e_prediction.value is None or d_choice.value is None or d_rejected.value is None
+            or e_base["inputs"] == e_result["inputs"]
         ),
+        on_click=lambda _value: store("E", capture_evidence(
+            track=track_id, part="E", prediction=e_prediction.value,
+            inputs={"baseline": e_base["inputs"], "result": e_result["inputs"]},
+            baseline=e_base, result=e_result, upstream_inputs=e_upstream,
+            alternatives=(e_base, e_result), decision=e_result["met_recovery_objective"],
+            model_key="v1_14.incident",
+        )),
     )
-    return partA_days, partA_rate, partA_threshold, partB_pred
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_14_ops):
-    partB_threshold = mo.ui.slider(
-        start=0.05,
-        stop=0.50,
-        value=v1_14_ops.alert_threshold_psi,
-        step=0.01,
-        label="Candidate threshold (PSI)",
-    )
-    partB_review_cost = mo.ui.slider(
-        start=100,
-        stop=5000,
-        value=700,
-        step=100,
-        label="Alert review cost ($)",
-    )
-    partB_false_alarm_rate = mo.ui.slider(
-        start=0.5,
-        stop=20.0,
-        value=4.0,
-        step=0.5,
-        label="False alarms at default (/year)",
-    )
-
-    partC_pred = mo.ui.radio(
-        options={
-            "A) Full rollout is acceptable because validation already passed": "full_rollout",
-            "B) Small canary plus tested rollback and fallback limits blast radius": "staged",
-            "C) Large canary is best because it gathers evidence fastest": "large_canary",
-            "D) Rollback can wait for the next scheduled release window": "slow_rollback",
-        },
-        label=f"What release policy protects {v1_14_ops.guardrail_metric}?",
-    )
-    return (
-        partB_false_alarm_rate,
-        partB_review_cost,
-        partB_threshold,
-        partC_pred,
-    )
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_14_ops):
-    partC_canary = mo.ui.slider(start=0, stop=50, value=10, step=5, label="Canary traffic (%)")
-    partC_rollback = mo.ui.slider(start=0.25, stop=72, value=8, step=0.25, label="Rollback exposure (hours)")
-    partC_fallback = mo.ui.slider(start=0, stop=100, value=80, step=5, label="Fallback coverage (%)")
-
-    partD_pred = mo.ui.radio(
-        options={
-            "A) Minimize monitoring cost; the cheapest policy wins": "cheap",
-            "B) Spend error budget across detection, staleness, rollback, and ownership": "budget",
-            "C) Automate retraining and remove human ownership": "auto",
-            "D) Reuse one policy across every deployment track": "same",
-        },
-        label=f"What makes a defensible {v1_14_ops.label} operations policy?",
-    )
-    return partC_canary, partC_fallback, partC_rollback, partD_pred
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_14_ops):
-    partD_threshold = mo.ui.slider(
-        start=0.05,
-        stop=0.50,
-        value=v1_14_ops.alert_threshold_psi,
-        step=0.01,
-        label="Runbook threshold (PSI)",
-    )
-    partD_cadence = mo.ui.slider(
-        start=1,
-        stop=120,
-        value=v1_14_ops.current_cadence_days,
-        step=1,
-        label="Retraining cadence (days)",
-    )
-    partD_canary = mo.ui.slider(start=0, stop=50, value=10, step=5, label="Runbook canary (%)")
-    partD_rollback = mo.ui.slider(start=0.25, stop=72, value=8, step=0.25, label="Runbook rollback (hours)")
-    return partD_cadence, partD_canary, partD_rollback, partD_threshold
+    return a_capture, a_upstream, b_capture, b_upstream, c_capture, c_upstream, d_capture, d_upstream, e_capture, e_upstream
 
 
 @app.cell
-def _():
-    def v1_14_track_amounts(v1_14_profile, v1_14_ops):
-        defaults = {
-            "iphone": {
-                "unit_label": "million app sessions exposed",
-                "daily_units": 24.0,
-                "allowed_blast_radius": 1.5,
-                "rollback_limit_hours": 12.0,
-                "default_fallback_pct": 85.0,
-                "fallback_label": "remote kill switch coverage",
-                "blind_spot": "privacy sampling can miss cohort-specific thermal or battery regressions",
-                "carry_forward_risk": "mobile owner must revalidate privacy-safe telemetry before Lab 15 responsibility review",
-                "error_budget_days": 18.0,
-                "attention_budget_hours": 24.0,
-                "review_hours": 1.5,
-                "impact_cost_per_unit": 1600.0,
-            },
-            "oura_ring": {
-                "unit_label": "thousand device-nights exposed",
-                "daily_units": 280.0,
-                "allowed_blast_radius": 4.0,
-                "rollback_limit_hours": 24.0,
-                "default_fallback_pct": 80.0,
-                "fallback_label": "OTA holdout and firmware fallback coverage",
-                "blind_spot": "delayed health labels can miss physiology shifts until the next labeled study",
-                "carry_forward_risk": "firmware owner must carry duty-cycle and false-alert risk into the next review",
-                "error_budget_days": 30.0,
-                "attention_budget_hours": 18.0,
-                "review_hours": 2.0,
-                "impact_cost_per_unit": 900.0,
-            },
-            "robotaxi": {
-                "unit_label": "thousand autonomous miles exposed",
-                "daily_units": 40.0,
-                "allowed_blast_radius": 0.25,
-                "rollback_limit_hours": 1.0,
-                "default_fallback_pct": 95.0,
-                "fallback_label": "geofenced safety fallback coverage",
-                "blind_spot": "rare-event drift can hide inside aggregate replay pass rates",
-                "carry_forward_risk": "safety board must own unresolved rare-event recall risk",
-                "error_budget_days": 6.0,
-                "attention_budget_hours": 40.0,
-                "review_hours": 3.0,
-                "impact_cost_per_unit": 60000.0,
-            },
-            "cloud_fleet": {
-                "unit_label": "million requests exposed",
-                "daily_units": 120.0,
-                "allowed_blast_radius": 3.0,
-                "rollback_limit_hours": 4.0,
-                "default_fallback_pct": 80.0,
-                "fallback_label": "registry pin and traffic failback coverage",
-                "blind_spot": "aggregate SLO dashboards can hide one tenant or cohort regression",
-                "carry_forward_risk": "SRE and ML owner must carry cost/request and tenant-quality risk forward",
-                "error_budget_days": 10.0,
-                "attention_budget_hours": 32.0,
-                "review_hours": 1.0,
-                "impact_cost_per_unit": 5000.0,
-            },
-        }
-        amounts = dict(defaults.get(v1_14_profile.track_id, defaults["cloud_fleet"]))
-        amounts["track_label"] = v1_14_ops.label
-        amounts["guardrail_metric"] = v1_14_ops.guardrail_metric
-        return amounts
+def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, scenario, track):
+    css = mo.Html("""
+    <style>
+    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:14px}
+    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
+    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:760px}
+    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.track-control{margin:0 0 10px 2px;max-width:330px}
+    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}
+    .lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}.lab-hud .hud-failed{color:#fca5a5}
+    .pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
+    .saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}.table-wrap{max-width:100%;overflow-x:auto}
+    @media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
+    </style>""")
+    header = mo.Html(f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 14</span><span>ABOUT 50–55 MIN</span></div><h1>Evidence-Driven Operations</h1><p>Which monitoring, retraining, release, and recovery policy keeps a deployed model useful?</p><div class="pilot-meta"><div><b>Track</b><br>{scenario.label}</div><div><b>Investigation</b><br>One production ML node</div><div><b>Deliverable</b><br>Operations runbook memo</div></div></section>""")
+    mo.vstack([
+        LAB_CSS, ACADEMIC_LAB_CSS, css,
+        mo.Html('<div class="track-control"><b>Choose a deployment track</b></div>'),
+        track, header,
+        mo.Html('<p class="pilot-note">All tracks use illustrative outcome-labeled scenarios. The values are teaching fixtures, not measurements of a named production system. On-device tracks (TinyML/Mobile) evaluate single-node inference with companion-host retraining and local partition rollback.</p>'),
+    ], gap=0.5)
+    return
 
-    def v1_14_threshold_economics(
-        v1_14_ops,
-        amounts,
-        *,
-        threshold_psi,
-        alert_review_cost,
-        false_alarm_rate,
-    ):
-        threshold = max(0.0001, float(threshold_psi))
-        default_threshold = max(0.0001, float(v1_14_ops.alert_threshold_psi))
-        rate = max(0.00001, float(v1_14_ops.drift_rate_psi_per_day))
-        breach_psi = max(
-            0.0,
-            (v1_14_ops.baseline_quality_pct - v1_14_ops.quality_floor_pct)
-            / max(0.0001, v1_14_ops.quality_loss_per_psi),
-        )
-        quality_breach_day = breach_psi / rate if breach_psi > 0 else 0.0
-        detection_day = threshold / rate + v1_14_ops.label_delay_days
-        missed_days = max(0.0, detection_day - quality_breach_day)
-        false_alarms = max(0.0, float(false_alarm_rate)) * (default_threshold / threshold) ** 1.35
-        false_alarm_cost = false_alarms * max(0.0, float(alert_review_cost))
-        attention_hours = false_alarms * amounts["review_hours"]
-        missed_damage_cost = missed_days * v1_14_ops.drift_cost_per_day * 12
-        monitoring_cost = v1_14_ops.monitoring_cost_per_day * 365 * (default_threshold / threshold) ** 0.25
-        total_cost = false_alarm_cost + missed_damage_cost + monitoring_cost
-        too_tight = attention_hours > amounts["attention_budget_hours"]
-        too_loose = missed_days > max(v1_14_ops.label_delay_days, amounts["error_budget_days"] / 2)
-        if too_loose:
-            failure_mode = "missed degradation dominates"
-        elif too_tight:
-            failure_mode = "alert fatigue dominates"
-        else:
-            failure_mode = "balanced threshold"
-        return {
-            "threshold_psi": threshold,
-            "detection_day": detection_day,
-            "quality_breach_day": quality_breach_day,
-            "missed_days": missed_days,
-            "false_alarms_per_year": false_alarms,
-            "attention_hours": attention_hours,
-            "false_alarm_cost": false_alarm_cost,
-            "missed_damage_cost": missed_damage_cost,
-            "monitoring_cost": monitoring_cost,
-            "total_cost": total_cost,
-            "failure_mode": failure_mode,
-            "feasible": not (too_tight or too_loose),
-        }
 
-    def v1_14_rollout_risk(
-        amounts,
-        *,
-        canary_pct,
-        rollback_hours,
-        fallback_pct,
-    ):
-        canary = max(0.0, min(100.0, float(canary_pct)))
-        rollback = max(0.0, float(rollback_hours))
-        fallback = max(0.0, min(100.0, float(fallback_pct)))
-        exposed_units = (
-            amounts["daily_units"]
-            * (canary / 100)
-            * (rollback / 24)
-            * (1 - fallback / 100)
-        )
-        blast_radius_cost = exposed_units * amounts["impact_cost_per_unit"]
-        if rollback <= 1 / 60:
-            rollback_tier = "immediate"
-        elif rollback <= 0.25:
-            rollback_tier = "rapid"
-        elif rollback <= 4:
-            rollback_tier = "delayed"
-        else:
-            rollback_tier = "extended"
-        violations = []
-        if exposed_units > amounts["allowed_blast_radius"]:
-            violations.append("blast radius above track budget")
-        if rollback > amounts["rollback_limit_hours"]:
-            violations.append("rollback window above track limit")
-        if fallback < amounts["default_fallback_pct"] * 0.75:
-            violations.append("fallback coverage too small")
-        return {
-            "canary_pct": canary,
-            "rollback_hours": rollback,
-            "fallback_pct": fallback,
-            "rollback_tier": rollback_tier,
-            "exposed_units": exposed_units,
-            "blast_radius_cost": blast_radius_cost,
-            "feasible": not violations,
-            "violations": tuple(violations),
-        }
+@app.cell
+def _(mo):
+    mo.sidebar([mo.md("## Lab navigation"), mo.outline(label="Sections")])
+    return
 
-    def v1_14_error_budget(amounts, threshold_result, policy_result, rollout_result):
-        rows = [
-            ("Detection delay", max(0.0, threshold_result["missed_days"])),
-            ("Stale model", max(0.0, policy_result.stale_days)),
-            ("Rollback exposure", max(0.0, rollout_result["rollback_hours"] / 24)),
-            ("Residual blind spot", max(0.0, amounts["error_budget_days"] * 0.15)),
-        ]
-        total_days = sum(value for _, value in rows)
-        binding_risk = max(rows, key=lambda item: item[1])[0]
-        feasible = (
-            total_days <= amounts["error_budget_days"]
-            and policy_result.feasible
-            and rollout_result["feasible"]
-        )
-        return {
-            "rows": rows,
-            "total_days": total_days,
-            "budget_days": amounts["error_budget_days"],
-            "binding_risk": binding_risk,
-            "feasible": feasible,
-        }
 
-    return (
-        v1_14_error_budget,
-        v1_14_rollout_risk,
-        v1_14_threshold_economics,
-        v1_14_track_amounts,
+@app.cell
+def _(
+    COLORS, a_base, a_capture, a_prediction, a_result, a_threshold, a_upstream,
+    apply_plotly_theme, audit_evidence, b_base, b_capture, b_interval,
+    b_prediction, b_result, b_threshold, b_upstream, c_capture, c_choice,
+    c_interval, c_prediction, c_scheduled, c_triggered, c_upstream, d_capture,
+    d_choice, d_prediction, d_rejected, d_results, d_upstream,
+    e_affected_fraction, e_base, e_capture, e_prediction, e_result,
+    e_rollback, e_upstream, final_choice, final_rejected, final_risk,
+    final_trigger, get_evidence,
+    go, mo, rationale, scenario, track_id,
+):
+    _captures = get_evidence()
+    upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream, "E": e_upstream}
+    audit = audit_evidence(
+        _captures, track=track_id, required_parts=tuple("ABCDE"),
+        per_part_upstream_inputs=upstream, contrast_required_parts=tuple("ABCDE"),
     )
 
+    def table(rows):
+        return mo.vstack([mo.ui.table(rows, pagination=False)]).style({"max-width": "100%", "overflow-x": "auto"})
 
-@app.cell(hide_code=True)
-def _(
-    COLORS,
-    apply_plotly_theme,
-    big_takeaways,
-    drift_visibility,
-    go,
-    mo,
-    np,
-    ops_policy,
-    partA_days,
-    partA_pred,
-    partA_rate,
-    partA_threshold,
-    partB_false_alarm_rate,
-    partB_pred,
-    partB_review_cost,
-    partB_threshold,
-    partC_canary,
-    partC_fallback,
-    partC_pred,
-    partC_rollback,
-    partD_cadence,
-    partD_canary,
-    partD_pred,
-    partD_rollback,
-    partD_threshold,
-    retraining_cadence,
-    v1_14_error_budget,
-    v1_14_ops,
-    v1_14_profile,
-    v1_14_rollout_risk,
-    v1_14_threshold_economics,
-    v1_14_track_amounts,
-    v1_14_variant,
-):
-    def _metric_card(label, value, detail, color, border=False):
-        border_style = f"2px solid {color}" if border else "1px solid #e2e8f0"
-        return f"""
-        <div style="padding:16px; border:{border_style}; border-radius:10px;
-                    min-width:150px; text-align:center; background:white;
-                    border-top:3px solid {color}; flex:1;">
-            <div style="color:#64748b; font-size:0.78rem; font-weight:700;">{label}</div>
-            <div style="font-size:1.55rem; font-weight:800; color:{color};">{value}</div>
-            <div style="font-size:0.72rem; color:#64748b;">{detail}</div>
-        </div>
-        """
+    def saved(part):
+        capture = _captures.get(part)
+        if capture is None:
+            return mo.callout(mo.md("No saved evidence for this part."), kind="warn")
+        if part in audit.stale or (part, part) in audit.identical_pairs:
+            return mo.callout(mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** Recapture after changing the live comparison."), kind="danger")
+        data = capture.to_dict()
+        return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · original prediction: {data["prediction"]}<br><small>Track {data["track"]}; saved values remain fixed when live controls move.</small></div>')
 
-    _amounts = v1_14_track_amounts(v1_14_profile, v1_14_ops)
-
-    def build_part_a():
-        items = [
-            mo.Html(f"""
-            <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
-                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
-                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                    Incoming Message &middot; {v1_14_variant.stakeholder}
-                </div>
-                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                    "Infrastructure is green. The drift source is {v1_14_ops.drift_source}.
-                    Are we still safe?"
-                </div>
-            </div>
-            """),
-            mo.md("""
-    ## Concept Module A - Deployed Behavior Is The Monitor
-
-    Uptime, latency, and offline validation can stay green while deployed behavior
-    drifts. The monitor has to include production telemetry, delayed labels, and the
-    track guardrail that users actually experience.
-            """),
-            partA_pred,
+    def part_a():
+        intro = mo.md(f"### A · Does drift prove the model is wrong? (9 min)\nThe {scenario.label} proxy rises before delayed outcomes arrive. Choose a threshold, commit a prediction, and compare proxy alerts with eventual labels.")
+        if a_prediction.value is None:
+            return mo.vstack([intro, a_threshold, a_prediction])
+        figure = go.Figure()
+        figure.add_scatter(x=a_result["time_hours"], y=a_result["outcome_quality_pct"], name="Outcome quality", line={"color": COLORS["BlueLine"]})
+        figure.add_scatter(x=a_result["time_hours"], y=a_result["proxy_values"], name="Proxy", yaxis="y2", line={"color": COLORS["OrangeLine"]})
+        figure.update_layout(height=285, margin=dict(l=20, r=55, t=20, b=35), xaxis_title="Event time (hours)", yaxis_title="Outcome quality (%)", yaxis2=dict(title="Proxy value", overlaying="y", side="right"), legend_orientation="h")
+        rows = [
+            {"Run": "Balanced baseline", "Alerts": a_base["investigations"], "False investigations": a_base["false_investigations"], "Missed failures": a_base["missed_failures"], "Label confirmation": f'{a_base["first_outcome_confirmation_hours"]:g} h'},
+            {"Run": "Selected threshold", "Alerts": a_result["investigations"], "False investigations": a_result["false_investigations"], "Missed failures": a_result["missed_failures"], "Label confirmation": f'{a_result["first_outcome_confirmation_hours"]:g} h'},
         ]
-        if partA_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the drift timeline."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([partA_days, partA_rate, partA_threshold], widths="equal"))
-        _result = drift_visibility(
-            v1_14_ops,
-            days_since_deploy=partA_days.value,
-            drift_rate_psi_per_day=partA_rate.value,
-            alert_threshold_psi=partA_threshold.value,
-        )
-
-        _days = np.arange(0, 181)
-        _true_quality = []
-        _observed_quality = []
-        _true_psi = []
-        _observed_psi = []
-        for _day in _days:
-            _r = drift_visibility(
-                v1_14_ops,
-                days_since_deploy=int(_day),
-                drift_rate_psi_per_day=partA_rate.value,
-                alert_threshold_psi=partA_threshold.value,
-            )
-            _true_quality.append(_r.true_quality_pct)
-            _observed_quality.append(_r.observed_quality_pct)
-            _true_psi.append(_r.true_psi)
-            _observed_psi.append(_r.observed_psi)
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(x=_days, y=_true_quality, name="True quality", line=dict(color=COLORS["RedLine"], width=3)))
-        _fig.add_trace(go.Scatter(x=_days, y=_observed_quality, name="Observed quality", line=dict(color=COLORS["BlueLine"], width=2, dash="dot")))
-        _fig.add_hline(y=v1_14_ops.quality_floor_pct, line_dash="dash", line_color=COLORS["OrangeLine"], annotation_text="quality floor")
-        _fig.add_vline(x=_result.alert_day, line_dash="dash", line_color=COLORS["GreenLine"], annotation_text="alert")
-        _fig.add_vline(x=partA_days.value, line_dash="dot", line_color="#64748b", annotation_text=f"day {partA_days.value}")
-        _fig.update_layout(
-            height=360,
-            xaxis=dict(title="Days since deployment"),
-            yaxis=dict(title="Quality (%)", gridcolor="#f1f5f9"),
-            legend=dict(orientation="h", y=1.12, x=0),
-            margin=dict(l=50, r=20, t=60, b=40),
-        )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        _quality_color = COLORS["RedLine"] if _result.quality_breached else COLORS["GreenLine"]
-        _alert_color = COLORS["GreenLine"] if _result.alert_triggered else COLORS["OrangeLine"]
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            {_metric_card("True PSI", f"{_result.true_psi:.3f}", "actual drift", COLORS["RedLine"])}
-            {_metric_card("Observed PSI", f"{_result.observed_psi:.3f}", f"{v1_14_ops.label_delay_days} day delay", COLORS["BlueLine"])}
-            {_metric_card("True Quality", f"{_result.true_quality_pct:.1f}%", f"floor {v1_14_ops.quality_floor_pct:.1f}%", _quality_color, True)}
-            {_metric_card("Alert Day", f"{_result.alert_day}", "monitor visibility", _alert_color)}
-        </div>
-        """))
-
-        _signal_rows = [
-            ("Infrastructure health", "uptime/latency green", "Necessary but cannot observe statistical drift."),
-            ("Offline model metric", f"last validated at {v1_14_ops.baseline_quality_pct:.1f}%", "Stale once the deployed population moves."),
-            ("Deployed behavior", v1_14_ops.monitoring_signal, f"Track guardrail: {v1_14_ops.guardrail_metric}."),
-            ("Delayed labels", f"{v1_14_ops.label_delay_days} day delay", "Confirms drift after the proxy has already carried risk."),
-        ]
-        _rows_html = "".join(
-            f"""
-            <tr>
-                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0; font-weight:700;">{_name}</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_value}</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_meaning}</td>
-            </tr>
-            """
-            for _name, _value, _meaning in _signal_rows
-        )
-        items.append(mo.Html(f"""
-        <div style="background:white; border:1px solid {COLORS['Border']}; border-radius:10px;
-                    padding:14px 16px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:800; color:{COLORS['BlueLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;">
-                Evidence Table &middot; Signal Stack
-            </div>
-            <table style="width:100%; border-collapse:collapse; font-size:0.86rem; color:#334155;">
-                <thead>
-                    <tr style="background:#f8fafc;">
-                        <th style="text-align:left; padding:8px 10px;">Signal</th>
-                        <th style="text-align:left; padding:8px 10px;">Amount</th>
-                        <th style="text-align:left; padding:8px 10px;">Operational meaning</th>
-                    </tr>
-                </thead>
-                <tbody>{_rows_html}</tbody>
-            </table>
-        </div>
-        """))
-
-        if _result.quality_breached and not _result.alert_triggered:
-            items.append(mo.callout(mo.md(
-                f"**Silent degradation window.** Quality has crossed the floor, but the alert has not fired. "
-                f"Detection delay is {_result.detection_delay_days} day(s)."
-            ), kind="danger"))
-
-        items.append(mo.md(f"""
-    **Drift Visibility - Live Calculation**
-
-    ```
-    drift source      = {v1_14_ops.drift_source}
-    monitoring signal = {v1_14_ops.monitoring_signal}
-    true PSI          = {_result.true_psi:.3f}
-    observed PSI      = {_result.observed_psi:.3f}
-    true quality      = {_result.true_quality_pct:.1f}%
-    observed quality  = {_result.observed_quality_pct:.1f}%
-    damage cost       = ${_result.accumulated_damage_cost:,.0f}
-    ```
-    **Math Peek / Source Model**
-
-    ```
-    quality(t) ~= A0 - lambda * PSI(t)
-    detection delay = alert_day - quality_breach_day
-    ```
-
-    *Source: `mlsysbook_labs.drift_visibility`; chapter sections on observable
-    degradation and model/infrastructure monitoring.*
-        """))
-
-        items.append(mo.callout(mo.md(
-            f"**Checkpoint.** Carry `{v1_14_ops.monitoring_signal}` into the runbook as the deployed-behavior signal, "
-            f"with `{_amounts['blind_spot']}` named as the residual blind spot."
-        ), kind="info"))
-
-        if partA_pred.value == "deployed":
-            items.append(mo.callout(mo.md("**Correct.** Deployed behavior proxies are the early signal; delayed labels confirm the diagnosis later."), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**The server can be healthy while the model is stale.** Model health needs deployed-behavior telemetry and delayed-label confirmation."
-            ), kind="warn"))
-        return mo.vstack(items)
-
-    def build_part_b():
-        items = [
-            mo.Html(f"""
-            <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
-                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
-                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                    Alert Review &middot; {v1_14_variant.stakeholder}
-                </div>
-                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                    "The default PSI threshold is creating pages. If we loosen it, what
-                    degradation will we miss?"
-                </div>
-            </div>
-            """),
-            mo.md(f"""
-    ## Concept Module B - Thresholds Spend Attention
-
-    The chapter gives PSI > 0.2 as a useful starting point for feature-distribution
-    drift, but a threshold is an operating policy. Tight thresholds spend on-call
-    attention; loose thresholds spend quality, safety, battery, or SLO budget.
-
-    Track amount system: **{_amounts['unit_label']}**, attention budget
-    **{_amounts['attention_budget_hours']:.0f} review hours/year**.
-            """),
-            partB_pred,
-        ]
-        if partB_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the threshold sweep."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([partB_threshold, partB_review_cost, partB_false_alarm_rate], widths="equal"))
-        _threshold = v1_14_threshold_economics(
-            v1_14_ops,
-            _amounts,
-            threshold_psi=partB_threshold.value,
-            alert_review_cost=partB_review_cost.value,
-            false_alarm_rate=partB_false_alarm_rate.value,
-        )
-        _thresholds = np.linspace(0.05, 0.50, 120)
-        _total_costs = []
-        _false_costs = []
-        _missed_costs = []
-        for _candidate in _thresholds:
-            _r = v1_14_threshold_economics(
-                v1_14_ops,
-                _amounts,
-                threshold_psi=float(_candidate),
-                alert_review_cost=partB_review_cost.value,
-                false_alarm_rate=partB_false_alarm_rate.value,
-            )
-            _total_costs.append(_r["total_cost"])
-            _false_costs.append(_r["false_alarm_cost"])
-            _missed_costs.append(_r["missed_damage_cost"])
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(x=_thresholds, y=_total_costs, name="Total threshold cost", line=dict(color=COLORS["RedLine"], width=3)))
-        _fig.add_trace(go.Scatter(x=_thresholds, y=_false_costs, name="False-alarm cost", line=dict(color=COLORS["BlueLine"], width=2, dash="dot")))
-        _fig.add_trace(go.Scatter(x=_thresholds, y=_missed_costs, name="Missed-damage cost", line=dict(color=COLORS["OrangeLine"], width=2, dash="dash")))
-        _fig.add_vline(x=partB_threshold.value, line_dash="dot", line_color="#64748b", annotation_text=f"{partB_threshold.value:.2f} PSI")
-        _fig.add_vline(x=v1_14_ops.alert_threshold_psi, line_dash="dash", line_color=COLORS["GreenLine"], annotation_text="track default")
-        _fig.update_layout(
-            height=360,
-            xaxis=dict(title="PSI alert threshold"),
-            yaxis=dict(title="Annualized cost ($)", gridcolor="#f1f5f9"),
-            legend=dict(orientation="h", y=1.12, x=0),
-            margin=dict(l=60, r=20, t=60, b=40),
-        )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        _status_color = COLORS["GreenLine"] if _threshold["feasible"] else COLORS["RedLine"]
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            {_metric_card("Detection Day", f"{_threshold['detection_day']:.1f}", "threshold/rate + delay", COLORS["BlueLine"])}
-            {_metric_card("False Alarms", f"{_threshold['false_alarms_per_year']:.1f}/yr", f"{_threshold['attention_hours']:.1f} review hr", COLORS["OrangeLine"])}
-            {_metric_card("Missed Damage", f"${_threshold['missed_damage_cost']:,.0f}", f"{_threshold['missed_days']:.1f} missed days", COLORS["RedLine"])}
-            {_metric_card("Threshold", _threshold["failure_mode"], f"{partB_threshold.value:.2f} PSI", _status_color, True)}
-        </div>
-        """))
-
-        _scenario_values = [
-            ("Tight", max(0.05, v1_14_ops.alert_threshold_psi * 0.5)),
-            ("Track default", v1_14_ops.alert_threshold_psi),
-            ("Loose", min(0.50, v1_14_ops.alert_threshold_psi * 1.75)),
-        ]
-        _scenario_rows = []
-        for _name, _value in _scenario_values:
-            _r = v1_14_threshold_economics(
-                v1_14_ops,
-                _amounts,
-                threshold_psi=_value,
-                alert_review_cost=partB_review_cost.value,
-                false_alarm_rate=partB_false_alarm_rate.value,
-            )
-            _scenario_rows.append(f"""
-            <tr>
-                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0; font-weight:700;">{_name}</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_value:.2f}</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_r['false_alarms_per_year']:.1f}/yr</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_r['missed_days']:.1f} d</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_r['failure_mode']}</td>
-            </tr>
-            """)
-        items.append(mo.Html(f"""
-        <div style="background:white; border:1px solid {COLORS['Border']}; border-radius:10px;
-                    padding:14px 16px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:800; color:{COLORS['OrangeLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;">
-                Evidence Table &middot; Threshold Choices
-            </div>
-            <table style="width:100%; border-collapse:collapse; font-size:0.86rem; color:#334155;">
-                <thead>
-                    <tr style="background:#f8fafc;">
-                        <th style="text-align:left; padding:8px 10px;">Policy</th>
-                        <th style="text-align:left; padding:8px 10px;">PSI</th>
-                        <th style="text-align:left; padding:8px 10px;">False alarms</th>
-                        <th style="text-align:left; padding:8px 10px;">Missed days</th>
-                        <th style="text-align:left; padding:8px 10px;">Failure mode</th>
-                    </tr>
-                </thead>
-                <tbody>{''.join(_scenario_rows)}</tbody>
-            </table>
-        </div>
-        """))
-
-        if not _threshold["feasible"]:
-            items.append(mo.callout(mo.md(
-                f"**Reversible failure state.** This threshold is not defensible because `{_threshold['failure_mode']}`. "
-                f"Move the PSI slider until both review attention and missed degradation fit the {v1_14_ops.label} budget."
-            ), kind="danger"))
-
-        items.append(mo.md(f"""
-    **Math Peek / Source Model**
-
-    ```
-    detection_day = threshold / drift_rate + label_delay
-    false alarms  ~= base false alarms * (default_threshold / threshold)^1.35
-    total cost    = false alarm cost + missed damage cost + monitoring cost
-    ```
-
-    *Source: chapter feature-distribution thresholds and monitoring cost model;
-    notebook-local `v1_14_threshold_economics`.*
-        """))
-
-        items.append(mo.callout(mo.md(
-            f"**Checkpoint.** Carry `{partB_threshold.value:.2f} PSI` into the runbook only if it avoids both alert fatigue and missed degradation."
-        ), kind="info"))
-
-        if partB_pred.value == "calibrate":
-            items.append(mo.callout(mo.md("**Correct.** A threshold is a policy that trades false alarms against missed degradation."), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**Thresholds are not universal constants.** Tune the PSI boundary against the track's attention budget and degradation cost."
-            ), kind="warn"))
-        return mo.vstack(items)
-
-    def build_part_c():
-        items = [
-            mo.Html(f"""
-            <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
-                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
-                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                    Release Review &middot; {v1_14_variant.stakeholder}
-                </div>
-                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                    "The candidate model passed validation. How much production exposure
-                    should it get before rollback has to fire?"
-                </div>
-            </div>
-            """),
-            mo.md(f"""
-    ## Concept Module C - Rollback Limits Blast Radius
-
-    For **{v1_14_ops.label}**, rollback is:
-
-    ```
-    {v1_14_ops.rollback_policy}
-    ```
-
-    Canary traffic, rollback time, and fallback coverage define the amount of
-    production behavior at risk before recovery. The same concept appears as a
-    kill switch on iPhone, OTA rollback for Oura, geofenced fallback for RoboTaxi,
-    and registry-pinned traffic rollback for Cloud Fleet.
-            """),
-            partC_pred,
-        ]
-        if partC_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the rollout risk instrument."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([partC_canary, partC_rollback, partC_fallback], widths="equal"))
-        _rollout = v1_14_rollout_risk(
-            _amounts,
-            canary_pct=partC_canary.value,
-            rollback_hours=partC_rollback.value,
-            fallback_pct=partC_fallback.value,
-        )
-        _hours = np.linspace(0.25, 72, 120)
-        _exposed = [
-            v1_14_rollout_risk(
-                _amounts,
-                canary_pct=partC_canary.value,
-                rollback_hours=float(_hour),
-                fallback_pct=partC_fallback.value,
-            )["exposed_units"]
-            for _hour in _hours
-        ]
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(x=_hours, y=_exposed, name="Blast radius", line=dict(color=COLORS["RedLine"], width=3)))
-        _fig.add_hline(y=_amounts["allowed_blast_radius"], line_dash="dash", line_color=COLORS["GreenLine"], annotation_text="track budget")
-        _fig.add_vline(x=partC_rollback.value, line_dash="dot", line_color="#64748b", annotation_text=f"{partC_rollback.value:g} h")
-        _fig.update_layout(
-            height=350,
-            xaxis=dict(title="Rollback exposure window (hours)"),
-            yaxis=dict(title=_amounts["unit_label"], gridcolor="#f1f5f9"),
-            margin=dict(l=70, r=20, t=50, b=40),
-        )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        _rollout_color = COLORS["GreenLine"] if _rollout["feasible"] else COLORS["RedLine"]
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            {_metric_card("Canary", f"{_rollout['canary_pct']:.0f}%", "traffic under test", COLORS["BlueLine"])}
-            {_metric_card("Rollback Tier", _rollout["rollback_tier"], f"{_rollout['rollback_hours']:g} hours", COLORS["OrangeLine"])}
-            {_metric_card("Blast Radius", f"{_rollout['exposed_units']:.2f}", _amounts["unit_label"], COLORS["RedLine"])}
-            {_metric_card("Release Status", "PASS" if _rollout["feasible"] else "FAIL", ", ".join(_rollout["violations"]) or "inside budget", _rollout_color, True)}
-        </div>
-        """))
-
-        _tier_rows = [
-            ("Immediate", "&lt; 1 minute", "hot standby / instant traffic switch"),
-            ("Rapid", "&lt; 15 minutes", "registry redeploy, cache clear, session restart"),
-            ("Delayed", "&lt; 4 hours", "business metric rollback with state handling"),
-            ("Extended", "&gt; 4 hours", "exposure grows faster than the control loop can recover"),
-        ]
-        _tier_rows_html = "".join(
-            f"""
-            <tr>
-                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0; font-weight:700;">{_tier}</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_target}</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_meaning}</td>
-            </tr>
-            """
-            for _tier, _target, _meaning in _tier_rows
-        )
-        items.append(mo.Html(f"""
-        <div style="background:white; border:1px solid {COLORS['Border']}; border-radius:10px;
-                    padding:14px 16px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:800; color:{COLORS['RedLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;">
-                Evidence Table &middot; Rollback Tiers
-            </div>
-            <table style="width:100%; border-collapse:collapse; font-size:0.86rem; color:#334155;">
-                <thead>
-                    <tr style="background:#f8fafc;">
-                        <th style="text-align:left; padding:8px 10px;">Tier</th>
-                        <th style="text-align:left; padding:8px 10px;">Recovery target</th>
-                        <th style="text-align:left; padding:8px 10px;">State handling</th>
-                    </tr>
-                </thead>
-                <tbody>{_tier_rows_html}</tbody>
-            </table>
-        </div>
-        """))
-
-        if not _rollout["feasible"]:
-            items.append(mo.callout(mo.md(
-                "**Reversible failure state.** " + ", ".join(_rollout["violations"]) +
-                ". Reduce canary traffic, shorten rollback exposure, or increase fallback coverage."
-            ), kind="danger"))
-
-        items.append(mo.md(f"""
-    **Math Peek / Source Model**
-
-    ```
-    blast radius = daily units * canary share * rollback hours / 24 * unprotected share
-             = {_amounts['daily_units']:.1f} * {partC_canary.value / 100:.2f} * {partC_rollback.value / 24:.3f} * {(1 - partC_fallback.value / 100):.2f}
-             = {_rollout['exposed_units']:.2f} {_amounts['unit_label']}
-    ```
-
-    *Source: chapter rollback strategy table and staged deployment discussion;
-    notebook-local `v1_14_rollout_risk`.*
-        """))
-
-        items.append(mo.callout(mo.md(
-            f"**Checkpoint.** Runbook rollback rule: `{v1_14_ops.rollback_policy}` with "
-            f"{partC_canary.value}% canary, {partC_rollback.value:g} hour rollback exposure, and "
-            f"{partC_fallback.value}% {_amounts['fallback_label']}."
-        ), kind="info"))
-
-        if partC_pred.value == "staged" and _rollout["feasible"]:
-            items.append(mo.callout(mo.md("**Correct.** Rollout size only becomes safe when rollback and fallback bound the exposed behavior."), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**A green aggregate canary is not the policy.** Blast radius and recovery time decide whether the rollout is operationally safe."
-            ), kind="warn"))
-        return mo.vstack(items)
-
-    def build_part_d():
-        items = [
-            mo.Html(f"""
-            <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
-                        border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
-                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                    Runbook Review &middot; {v1_14_variant.stakeholder}
-                </div>
-                <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                    "You have one policy memo. Which detection, retraining, canary,
-                    rollback, and ownership choices fit the error budget?"
-                </div>
-            </div>
-            """),
-            mo.md(f"""
-    ## Concept Module D - Error Budget Is A Policy Choice
-
-    The final policy spends an explicit error budget. Detection delay spends days
-    before the alert fires. Slow retraining spends stale-model exposure. Rollback
-    spends blast-radius exposure. Residual blind spots spend owner attention.
-
-    Track budget: **{_amounts['error_budget_days']:.1f} equivalent days** for
-    {v1_14_ops.guardrail_metric}.
-            """),
-            partD_pred,
-        ]
-        if partD_pred.value is None:
-            items.append(mo.callout(mo.md("Select your prediction to unlock the policy ledger."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([partD_threshold, partD_cadence, partD_canary, partD_rollback], widths="equal"))
-        _threshold = v1_14_threshold_economics(
-            v1_14_ops,
-            _amounts,
-            threshold_psi=partD_threshold.value,
-            alert_review_cost=partB_review_cost.value,
-            false_alarm_rate=partB_false_alarm_rate.value,
-        )
-        _policy = ops_policy(
-            v1_14_ops,
-            threshold_psi=partD_threshold.value,
-            cadence_days=partD_cadence.value,
-            canary_pct=partD_canary.value,
-            rollback_hours=partD_rollback.value,
-        )
-        _rollout = v1_14_rollout_risk(
-            _amounts,
-            canary_pct=partD_canary.value,
-            rollback_hours=partD_rollback.value,
-            fallback_pct=_amounts["default_fallback_pct"],
-        )
-        _budget = v1_14_error_budget(_amounts, _threshold, _policy, _rollout)
-        _cadence = retraining_cadence(
-            retrain_cost=v1_14_ops.retrain_cost,
-            drift_cost_per_day=v1_14_ops.drift_cost_per_day,
-            current_days=partD_cadence.value,
-        )
-
-        _fig = go.Figure()
-        _colors = [COLORS["BlueLine"], COLORS["OrangeLine"], COLORS["RedLine"], COLORS["GreenLine"]]
-        for (_name, _value), _color in zip(_budget["rows"], _colors):
-            _fig.add_trace(go.Bar(x=["Error budget"], y=[_value], name=_name, marker_color=_color))
-        _fig.add_trace(go.Scatter(
-            x=["Error budget"],
-            y=[_budget["budget_days"]],
-            mode="markers+text",
-            name="Budget limit",
-            text=[f"budget {_budget['budget_days']:.1f} d"],
-            textposition="top center",
-            marker=dict(color="#0f172a", size=11, symbol="line-ew"),
-        ))
-        _fig.update_layout(
-            barmode="stack",
-            height=350,
-            yaxis=dict(title="Equivalent error-budget days", gridcolor="#f1f5f9"),
-            legend=dict(orientation="h", y=1.12, x=0),
-            margin=dict(l=70, r=20, t=60, b=40),
-        )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        _budget_color = COLORS["GreenLine"] if _budget["feasible"] else COLORS["RedLine"]
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            {_metric_card("T*", f"{_cadence.optimal_days:.1f} d", "economic cadence", COLORS["GreenLine"])}
-            {_metric_card("Budget Used", f"{_budget['total_days']:.1f} d", f"limit {_budget['budget_days']:.1f} d", COLORS["RedLine"])}
-            {_metric_card("Binding Risk", _budget["binding_risk"], "largest budget term", COLORS["OrangeLine"])}
-            {_metric_card("Policy Status", "PASS" if _budget["feasible"] else "FAIL", ", ".join(_policy.violations + _rollout["violations"]) or "inside budget", _budget_color, True)}
-        </div>
-        """))
-
-        _budget_rows_html = "".join(
-            f"""
-            <tr>
-                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0; font-weight:700;">{_name}</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_value:.2f} d</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e2e8f0;">{_value / max(0.0001, _budget['budget_days']) * 100:.0f}%</td>
-            </tr>
-            """
-            for _name, _value in _budget["rows"]
-        )
-        items.append(mo.Html(f"""
-        <div style="background:white; border:1px solid {COLORS['Border']}; border-radius:10px;
-                    padding:14px 16px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:800; color:{COLORS['RedLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;">
-                Evidence Table &middot; Error-Budget Ledger
-            </div>
-            <table style="width:100%; border-collapse:collapse; font-size:0.86rem; color:#334155;">
-                <thead>
-                    <tr style="background:#f8fafc;">
-                        <th style="text-align:left; padding:8px 10px;">Budget term</th>
-                        <th style="text-align:left; padding:8px 10px;">Equivalent days</th>
-                        <th style="text-align:left; padding:8px 10px;">Budget share</th>
-                    </tr>
-                </thead>
-                <tbody>{_budget_rows_html}</tbody>
-            </table>
-        </div>
-        """))
-
-        if not _budget["feasible"]:
-            _violations = ", ".join(_policy.violations + _rollout["violations"]) or "error budget overspent"
-            items.append(mo.callout(mo.md(
-                f"**Reversible failure state.** This runbook overspends the {_amounts['error_budget_days']:.1f}-day track budget: {_violations}."
-            ), kind="danger"))
-
-        items.append(mo.md(f"""
-    **Math Peek / Source Model**
-
-    ```
-    T* = sqrt(2 * retrain_cost / drift_cost_per_day)
-       = sqrt(2 * {v1_14_ops.retrain_cost:,.0f} / {v1_14_ops.drift_cost_per_day:,.0f})
-       = {_cadence.optimal_days:.1f} days
-
-    monitoring cost = C_ingest + C_storage + C_compute + C_alert
-    policy cost     = ${_policy.total_annual_cost:,.0f}/year
-    ```
-
-    *Source: chapter cost-aware automation, monitoring cost model, and on-call
-    practice sections; shared `mlsysbook_labs.ops_policy` and notebook-local
-    `v1_14_error_budget`.*
-        """))
-
-        items.append(mo.callout(mo.md(
-            f"**Checkpoint.** Final runbook: alert at `{partD_threshold.value:.2f} PSI`, retrain every "
-            f"`{partD_cadence.value} days`, canary `{partD_canary.value}%`, rollback within "
-            f"`{partD_rollback.value:g} hours`, and carry `{_amounts['carry_forward_risk']}`."
-        ), kind="info"))
-
-        if partD_pred.value == "budget" and _budget["feasible"]:
-            items.append(mo.callout(mo.md("**Correct.** A defensible policy spends the error budget deliberately and names who owns the residual risk."), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**Operations policy is not just cost minimization.** It must allocate detection, stale-model, rollout, rollback, and ownership risk under the track budget."
-            ), kind="warn"))
-        return mo.vstack(items)
-
-    def build_synthesis():
-        _threshold = v1_14_threshold_economics(
-            v1_14_ops,
-            _amounts,
-            threshold_psi=partD_threshold.value,
-            alert_review_cost=partB_review_cost.value,
-            false_alarm_rate=partB_false_alarm_rate.value,
-        )
-        _policy = ops_policy(
-            v1_14_ops,
-            threshold_psi=partD_threshold.value,
-            cadence_days=partD_cadence.value,
-            canary_pct=partD_canary.value,
-            rollback_hours=partD_rollback.value,
-        )
-        _rollout = v1_14_rollout_risk(
-            _amounts,
-            canary_pct=partD_canary.value,
-            rollback_hours=partD_rollback.value,
-            fallback_pct=_amounts["default_fallback_pct"],
-        )
-        _budget = v1_14_error_budget(_amounts, _threshold, _policy, _rollout)
-        _status = "approved" if _budget["feasible"] else "not yet approved"
         return mo.vstack([
-            mo.md("## Synthesis - Operations Runbook Memo"),
-            mo.callout(mo.md(
-                f"**Chapter invariant.** Production ML is a control loop: monitor deployed behavior, "
-                f"calibrate the alert threshold, limit rollout blast radius, and spend error budget deliberately."
-            ), kind="info"),
-            mo.callout(mo.md(
-                f"**Runbook status: {_status}.** Alert at `{partD_threshold.value:.2f} PSI`; retrain every "
-                f"`{partD_cadence.value} days`; canary `{partD_canary.value}%`; rollback within "
-                f"`{partD_rollback.value:g} hours`; expected budget use `{_budget['total_days']:.1f}` of "
-                f"`{_budget['budget_days']:.1f}` equivalent days."
-            ), kind="info"),
-            mo.callout(mo.md(
-                f"**Residual blind spot.** {_amounts['blind_spot']} "
-                f"Carry-forward responsibility risk: {_amounts['carry_forward_risk']}."
-            ), kind="info"),
-            mo.Html(f"""
-            <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-                <div style="flex: 1; min-width: 280px; background: white;
-                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                            padding: 20px 24px;">
-                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        What's Next
-                    </div>
-                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Lab 15: Responsible Engineering</strong> - after operations
-                        policy, the next question is whose outcomes and constraints are protected
-                        by the remaining blind spot.
-                    </div>
-                </div>
-                <div style="flex: 1; min-width: 280px; background: white;
-                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                            padding: 20px 24px;">
-                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        Report Focus
-                    </div>
-                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        Submit an operations runbook memo for {v1_14_ops.label} with alert
-                        threshold, rollback rule, residual blind spot, and carry-forward owner risk.
-                    </div>
-                </div>
-            </div>
-            """),
-            mo.Html(f"""
-            <div style="border-left: 4px solid #10B981; background: #F0FDF4; border-radius: 0 10px 10px 0; padding: 18px 24px; margin: 16px 0;">
-                <div style="font-size: 0.72rem; font-weight: 700; color: #059669; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                    Lead Architect Authorization &middot; ML Operations Runbook Sign-Off
-                </div>
-                <div style="font-size: 0.95rem; color: #065F46; line-height: 1.6;">
-                    <strong>Operations Verdict:</strong> {"RELEASE SIGN-OFF GRANTED" if _status == "approved" else "HOLD OPERATIONS SIGN-OFF"}.
-                    {"Operations runbook satisfies drift monitoring, retraining cost-loss balance, and canary rollback boundaries for " + v1_14_profile.label + "." if _status == "approved" else "Threshold or error budget policy requires tuning before operational handoff."}
-                </div>
-            </div>
-            """),
-            big_takeaways([
-                "Silent degradation occurs when infra metrics stay green while model accuracy collapses.",
-                "Optimal retraining cadence T* balances fixed compute cost against cumulative drift loss.",
-                "Delayed ground truth requires distribution drift proxies as real-time tripwires.",
-                "Safe deployment requires canary traffic gating, automated rollback, and error budget governance.",
-            ]),
+            intro, a_threshold, a_prediction, apply_plotly_theme(figure), table(rows),
+            mo.callout(mo.md(f"**Your prediction:** {a_prediction.value}. **Observed replay:** the selected proxy produced **{a_result['false_investigations']} false investigations** and **{a_result['missed_failures']} missed failure observations**. Outcome confirmation remained delayed until **{a_result['first_outcome_confirmation_hours']:g} h**."), kind="info"),
+            a_capture, saved("A"),
+            mo.accordion({"Calculation Notes": mo.md("MLSysIM compares each sampled proxy event with its supplied eventual outcome. A proxy alert starts an investigation; it does not change or prove the outcome. Label availability equals event time plus the scenario's label delay.")}),
         ])
 
-    v1_14_tabs = mo.ui.tabs({
-        "Part A: Deployed Behavior": build_part_a(),
-        "Part B: Threshold Trade-off": build_part_b(),
-        "Part C: Rollout & Rollback": build_part_c(),
-        "Part D: Error Budget Policy": build_part_d(),
-        "Synthesis": build_synthesis(),
+    def part_b():
+        intro = mo.md("### B · How sensitive should monitoring be? (10 min)\nCompare one selected threshold and cadence with the balanced baseline. The operating costs are investigations, missed failures, observation delay, and telemetry expense.")
+        if b_prediction.value is None:
+            return mo.vstack([intro, mo.hstack([b_threshold, b_interval], widths="equal", wrap=True), b_prediction])
+        figure = go.Figure([
+            go.Bar(name="False investigations", x=["Balanced", "Selected"], y=[b_base["false_investigations"], b_result["false_investigations"]], marker_color=COLORS["OrangeLine"]),
+            go.Bar(name="Missed failures", x=["Balanced", "Selected"], y=[b_base["missed_failures"], b_result["missed_failures"]], marker_color=COLORS["RedLine"]),
+        ])
+        figure.update_layout(barmode="group", height=270, margin=dict(l=20, r=20, t=20, b=30), yaxis_title="Event count", legend_orientation="h")
+        b_base_delay_str = "undetected" if b_base["detection_delay_hours"][0] is None else f'{b_base["detection_delay_hours"][0]:g} h'
+        b_res_delay_str = "undetected" if b_result["detection_delay_hours"][0] is None else f'{b_result["detection_delay_hours"][0]:g} h'
+        rows = [
+            {"Run": "Balanced", "Observations": b_base["observations_collected"], "Investigations": b_base["investigations"], "Telemetry cost": f'${b_base["telemetry_cost_usd"]:,.2f}', "Detection delay": b_base_delay_str},
+            {"Run": "Selected", "Observations": b_result["observations_collected"], "Investigations": b_result["investigations"], "Telemetry cost": f'${b_result["telemetry_cost_usd"]:,.2f}', "Detection delay": b_res_delay_str},
+        ]
+        return mo.vstack([
+            intro, mo.hstack([b_threshold, b_interval], widths="equal", wrap=True), b_prediction,
+            apply_plotly_theme(figure), table(rows),
+            mo.callout(mo.md(f"**Your prediction:** {b_prediction.value}. **Selected result:** **{b_result['false_investigations']} false investigations**, **{b_result['missed_failures']} misses**, and **${b_result['telemetry_cost_usd']:,.2f}** in direct scenario cost. Monitoring changes observation and response; the supplied model outcomes stay fixed."), kind="danger" if b_result["missed_failures"] else "info"),
+            b_capture, saved("B"),
+            mo.accordion({"Calculation Notes": mo.md("MLSysIM samples the same outcome-labeled trace at the selected cadence. Direct cost equals collected observations plus investigations under the track's illustrative cost assumptions. No readiness score is used.")}),
+        ])
+
+    def part_c():
+        host_note = (
+            f" Retraining for on-device models executes on a companion development host (1 core for {scenario.retraining.training_duration.to('hour').magnitude:g} hours), not on the microcontroller."
+            if track_id in ("tinyml", "mobile") else ""
+        )
+        intro = mo.md(f"### C · When should we retrain? (10 min)\nCompare a calendar schedule with a policy that waits for delayed failure evidence.{host_note} Both policies use the same job duration, resources, and supplied candidate outcome traces.")
+        controls = mo.hstack([c_interval, c_choice], widths="equal", wrap=True)
+        if c_prediction.value is None:
+            return mo.vstack([intro, controls, c_prediction])
+        figure = go.Figure([
+            go.Bar(name="Retraining cost", x=["Scheduled", "Evidence-triggered"], y=[c_scheduled["retraining_cost_usd"], c_triggered["retraining_cost_usd"]], marker_color=COLORS["BlueLine"]),
+            go.Bar(name="Stale-outcome loss", x=["Scheduled", "Evidence-triggered"], y=[c_scheduled["stale_outcome_loss_usd"], c_triggered["stale_outcome_loss_usd"]], marker_color=COLORS["OrangeLine"]),
+        ])
+        figure.update_layout(barmode="stack", height=285, margin=dict(l=20, r=20, t=20, b=30), yaxis_title="Scenario cost (USD)", legend_orientation="h")
+        rows = [
+            {"Policy": "Scheduled", "Jobs": c_scheduled["job_count"], "Promotions": c_scheduled["promotions"], "Resource-hours": f'{c_scheduled["compute_resource_hours"]:g}', "Total cost": f'${c_scheduled["total_operating_cost_usd"]:,.2f}'},
+            {"Policy": "Evidence-triggered", "Jobs": c_triggered["job_count"], "Promotions": c_triggered["promotions"], "Resource-hours": f'{c_triggered["compute_resource_hours"]:g}', "Total cost": f'${c_triggered["total_operating_cost_usd"]:,.2f}'},
+        ]
+        calc_note = (
+            f"The displayed square-root approximation is **{c_scheduled['approximate_optimal_interval_hours']:.1f} hours** for this illustrative quadratic-loss assumption. "
+            f"The replay remains authoritative because delayed labels, discrete jobs, validation, and supplied candidate outcomes can violate the approximation's assumptions."
+            + (" In on-device tracks, retraining jobs execute on companion host compute rather than on constrained local device hardware." if track_id in ("tinyml", "mobile") else "")
+        )
+        _c_choice_note = (
+            f" Selected policy: **{'Scheduled' if c_choice.value == 'scheduled' else 'Evidence-triggered'}**."
+            if c_choice.value is not None
+            else " Select a retraining policy above to commit your operational decision."
+        )
+        return mo.vstack([
+            intro, controls, c_prediction, apply_plotly_theme(figure), table(rows),
+            mo.callout(mo.md(f"**Your prediction:** {c_prediction.value}. **Replay:** scheduled retraining launched **{c_scheduled['job_count']} jobs** with **${c_scheduled['stale_outcome_loss_usd']:,.2f}** stale-outcome loss; evidence-triggered retraining launched **{c_triggered['job_count']}** with **${c_triggered['stale_outcome_loss_usd']:,.2f}** stale-outcome loss.{_c_choice_note}"), kind="info"),
+            c_capture, saved("C"),
+            mo.accordion({"Calculation Notes": mo.md(calc_note)}),
+        ])
+
+    def part_d():
+        lens_note = (
+            " On single embedded devices, canary request-splitting represents local shadow execution or session staging, as microcontrollers lack reverse-proxy traffic routers."
+            if track_id in ("tinyml", "mobile") else ""
+        )
+        intro = mo.md(f"### D · What evidence justifies promotion? (11 min)\nCompare the tested canary fractions under one common horizon.{lens_note} The gate requires labeled candidate and baseline outcomes plus minimum coverage in every required cohort. It is an operational evidence rule, not a claim of statistical significance.")
+        rows = [
+            {"Canary": f"{result['canary_fraction_pct']:g}%", "Exposed": result["exposed_requests"], "Candidate labels": result["candidate_labeled"], "Exposed failures": result["exposed_failures"], "Cohort gate": "PASS" if result["evidence_requirements_met"] else "FAIL", "Decision": result["decision"].upper()}
+            for result in d_results.values()
+        ]
+        if d_prediction.value is None:
+            return mo.vstack([intro, d_prediction])
+        figure = go.Figure([
+            go.Bar(name="Candidate labels", x=[f"{result['canary_fraction_pct']:g}%" for result in d_results.values()], y=[result["candidate_labeled"] for result in d_results.values()], marker_color=COLORS["BlueLine"]),
+            go.Bar(name="Exposed failures", x=[f"{result['canary_fraction_pct']:g}%" for result in d_results.values()], y=[result["exposed_failures"] for result in d_results.values()], marker_color=COLORS["RedLine"]),
+        ])
+        figure.update_layout(barmode="group", height=285, margin=dict(l=20, r=20, t=20, b=30), xaxis_title="Canary traffic", yaxis_title="Observed request count", legend_orientation="h")
+        _selected = d_results[0.0] if d_choice.value in (None, "none") else d_results[d_choice.value]
+        if d_choice.value == "none":
+            _banner = "HOLD RECOMMENDED — candidate outcomes do not justify promotion."
+            _callout_kind = "info"
+        elif d_choice.value is None:
+            _banner = "Select a promotion recommendation to compare against your rejected alternative."
+            _callout_kind = "info"
+        elif _selected["decision"] == "promote":
+            _banner = f"Selected gate decision: PROMOTE after {_selected['candidate_labeled']} candidate labels."
+            _callout_kind = "success"
+        else:
+            _banner = f"Selected gate decision: {_selected['decision'].upper()}."
+            _callout_kind = "danger"
+        calc_note = (
+            "MLSysIM routes the selected traffic fraction, waits for the scenario's delayed labels, counts observed successes, checks required cohort coverage, and applies the stated minimum-evidence margins. More samples alone do not certify significance."
+            + (" For single-node embedded systems, canary fractions simulate shadow mode or dual-slot trials without requiring a cloud reverse proxy." if track_id in ("tinyml", "mobile") else "")
+        )
+        return mo.vstack([
+            intro, d_prediction, apply_plotly_theme(figure), table(rows),
+            mo.hstack([d_choice, d_rejected], widths="equal", wrap=True),
+            mo.callout(mo.md(f"**Your prediction:** {d_prediction.value}. **{_banner}** Record a different tested alternative; a no-feasible conclusion is valid only when none of the tested positive fractions supports promotion."), kind=_callout_kind),
+            d_capture, saved("D"),
+            mo.accordion({"Calculation Notes": mo.md(calc_note)}),
+        ])
+
+    def part_e():
+        intro = mo.md(f"### E · Does the runbook survive an incident? (8 min)\nReplay the selected monitoring policy and a rollback affecting **{100 * e_affected_fraction:g}%** of requests. Compare the 30-minute rollback baseline with a tested recovery stage.")
+        if e_prediction.value is None:
+            return mo.vstack([intro, e_rollback, e_prediction])
+        figure = go.Figure()
+        figure.add_scatter(
+            x=[e_result["incident_started_hours"], e_result["detected_hours"], e_result["triage_completed_hours"], e_result["rollback_completed_hours"], e_result["recovery_validated_hours"]],
+            y=["Start", "Detect", "Triage", "Rollback", "Validate"], mode="lines+markers",
+            marker={"size": 11, "color": COLORS["BlueLine"]}, name="Selected runbook",
+        )
+        figure.update_layout(height=275, margin=dict(l=70, r=20, t=20, b=35), xaxis_title="Event time (hours)", showlegend=False)
+        mttr_base_str = f'{e_base["mean_time_to_recovery_hours"]:.2f} h' if e_base["mean_time_to_recovery_hours"] is not None else "unrecovered"
+        mttr_res_str = f'{e_result["mean_time_to_recovery_hours"]:.2f} h' if e_result["mean_time_to_recovery_hours"] is not None else "unrecovered"
+        rows = [
+            {"Runbook": "30-minute rollback", "MTTR": mttr_base_str, "Exposed requests": e_base["exposed_requests"], "Exposure cost": f'${e_base["exposure_cost_usd"]:,.2f}', "Objective": "PASS" if e_base["met_recovery_objective"] else "FAIL"},
+            {"Runbook": "Selected rollback", "MTTR": mttr_res_str, "Exposed requests": e_result["exposed_requests"], "Exposure cost": f'${e_result["exposure_cost_usd"]:,.2f}', "Objective": "PASS" if e_result["met_recovery_objective"] else "FAIL"},
+        ]
+        callout_msg = (
+            f"recovery was verified in **{mttr_res_str}**"
+            if e_result["mean_time_to_recovery_hours"] is not None
+            else "incident was not recovered"
+        )
+        calc_note = (
+            "MLSysIM orders detection, triage, rollback, and validation in sequence. Exposure ends only when rollback completes. Total incident cost adds harmful-request exposure and response labor once; it contains no overlapping risk score."
+            + (" Rapid rollback on embedded or mobile devices relies on local dual-partition (A/B bank) firmware/model switching rather than multi-hour OTA reflashing." if track_id in ("tinyml", "mobile") else "")
+        )
+        return mo.vstack([
+            intro, e_rollback, e_prediction, apply_plotly_theme(figure), table(rows),
+            mo.callout(mo.md(f"**Your prediction:** {e_prediction.value}. **Selected replay:** {callout_msg}, with **{e_result['exposed_requests']:,} exposed requests** and **${e_result['total_incident_cost_usd']:,.2f}** direct incident cost."), kind="success" if e_result["met_recovery_objective"] else "danger"),
+            e_capture, saved("E"),
+            mo.accordion({"Calculation Notes": mo.md(calc_note)}),
+        ])
+
+    def build_synthesis():
+        rows = []
+        for part in "ABCDE":
+            capture = _captures.get(part)
+            rows.append({
+                "Part": part,
+                "Original prediction": capture.to_dict()["prediction"] if capture else "—",
+                "Evidence": "CURRENT" if capture and part not in audit.stale and (part, part) not in audit.identical_pairs else ("STALE" if capture else "MISSING"),
+            })
+        _d_decision = _captures["D"].to_dict()["decision"] if "D" in _captures else None
+        complete = (
+            audit.complete
+            and all(widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk))
+            and bool(rationale.value.strip()) and final_choice.value != final_rejected.value
+            and final_choice.value == _d_decision
+        )
+        return mo.vstack([
+            mo.md("### Synthesis · Defend the operations policy (5 min)\nUse saved evidence to name the selected rollout, quantify one rejected tested alternative, state the remaining limitation, and give a measurable reevaluation trigger."),
+            table(rows),
+            mo.callout(mo.md("Saved snapshots preserve original predictions and exact simulator inputs. Recapture any stale comparison before generating the report."), kind="info"),
+            mo.hstack([final_choice, final_rejected], widths="equal", wrap=True),
+            mo.hstack([final_trigger, final_risk], widths="equal", wrap=True), rationale,
+            mo.callout(mo.md("**Ready for the local report.**" if complete else "Complete five current contrasts, match the final recommendation to Part D, choose a different tested alternative, and add the rationale."), kind="success" if complete else "warn"),
+        ])
+
+    tabs = mo.ui.tabs({
+        "Part A": part_a(), "Part B": part_b(), "Part C": part_c(),
+        "Part D": part_d(), "Part E": part_e(), "Synthesis": build_synthesis(),
     })
-    v1_14_tabs
-    return
+    tabs
+    return (audit,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(
-    ledger,
-    mo,
-    partA_pred,
-    partB_pred,
-    partB_threshold,
-    partC_canary,
-    partC_fallback,
-    partC_pred,
-    partC_rollback,
-    partD_cadence,
-    partD_canary,
-    partD_pred,
-    partD_rollback,
-    partD_threshold,
-    v1_14_ops,
-    v1_14_profile,
-    v1_14_track_amounts,
-    v1_14_variant,
+    audit, build_lab_report, final_choice, final_rejected, final_risk,
+    final_trigger, get_evidence, get_lab_metadata, mo, rationale,
+    report_export_panel, scenario, track_id,
 ):
-    _amounts = v1_14_track_amounts(v1_14_profile, v1_14_ops)
-    _ready = partA_pred.value is not None and partB_pred.value is not None and partC_pred.value is not None and partD_pred.value is not None
-    ledger.save(chapter=14, design={
-        "chapter": "v1_14",
-        "track_id": v1_14_profile.track_id,
-        "scenario_id": v1_14_variant.scenario_id,
-        "hardware_ref": v1_14_ops.hardware_ref,
-        "model_ref": v1_14_ops.model_ref,
-        "completed": _ready,
-        "deployed_behavior_prediction": partA_pred.value,
-        "threshold_tradeoff_prediction": partB_pred.value,
-        "rollout_rollback_prediction": partC_pred.value,
-        "error_budget_prediction": partD_pred.value,
-        "part_b_threshold_psi": partB_threshold.value,
-        "part_c_canary_pct": partC_canary.value,
-        "part_c_rollback_hours": partC_rollback.value,
-        "part_c_fallback_pct": partC_fallback.value,
-        "runbook_threshold_psi": partD_threshold.value,
-        "runbook_retraining_cadence_days": partD_cadence.value,
-        "runbook_canary_pct": partD_canary.value,
-        "runbook_rollback_hours": partD_rollback.value,
-        "rollback_rule": v1_14_ops.rollback_policy,
-        "residual_blind_spot": _amounts["blind_spot"],
-        "carry_forward_responsibility_risk": _amounts["carry_forward_risk"],
-    })
-
-    mo.Html(f"""
-    <div class="lab-hud">
-        <span class="hud-label">LAB</span>
-        <span class="hud-value">14 &middot; ML Operations</span>
-        <span class="hud-label">TRACK</span>
-        <span class="hud-value">{v1_14_profile.label}</span>
-        <span style="flex:1;"></span>
-        <span class="hud-label">ARTIFACT</span>
-        <span class="hud-value">operations_runbook_memo</span>
-        <span class="hud-label">STATUS</span>
-        <span class="hud-active">{"SAVED" if _ready else "ACTIVE"}</span>
-    </div>
-    <div class="mlsysbook-panel">
-      <h2>Design Ledger</h2>
-      <div class="mlsysbook-grid">
-        <div class="mlsysbook-field"><strong>Ready to save</strong>{'yes' if _ready else 'not yet'}</div>
-        <div class="mlsysbook-field"><strong>Monitor threshold</strong>{partD_threshold.value:.2f} PSI</div>
-        <div class="mlsysbook-field"><strong>Retrain cadence</strong>{partD_cadence.value} days</div>
-        <div class="mlsysbook-field"><strong>Canary / rollback</strong>{partD_canary.value}% / {partD_rollback.value:g}h</div>
-        <div class="mlsysbook-field"><strong>Rollback rule</strong>{v1_14_ops.rollback_policy}</div>
-        <div class="mlsysbook-field"><strong>Residual blind spot</strong>{_amounts['blind_spot']}</div>
-      </div>
-      <div style="margin-top:10px; color:#475569; line-height:1.55;">
-        The ledger records each student decision. All predictions and a final recommendation mark the design complete.
-      </div>
-    </div>
-    """)
-    return
+    _captures = get_evidence()
+    _d_decision = _captures["D"].to_dict()["decision"] if "D" in _captures else None
+    _ready = (
+        audit.complete
+        and all(widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk))
+        and bool(rationale.value.strip()) and final_choice.value != final_rejected.value
+        and final_choice.value == _d_decision
+    )
+    mo.stop(not _ready)
+    snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
+    c_reported = snapshots["C"]["chosen_result"] or snapshots["C"]["result"]
+    report = build_lab_report(
+        get_lab_metadata("vol1/lab_14_ml_ops.py"), track=track_id, scenario=scenario.label,
+        learning_objectives=[
+            "Compare drift proxies with delayed outcome labels",
+            "Balance monitoring sensitivity, retraining cost, and stale-outcome loss",
+            "Require rollout evidence and verify incident recovery",
+        ],
+        predictions={part: snapshots[part]["prediction"] for part in "ABCDE"},
+        knob_settings={part: snapshots[part]["inputs"] for part in "ABCDE"},
+        evidence_summary={part: {"baseline": snapshots[part]["baseline"], "result": snapshots[part]["result"], "alternatives": snapshots[part]["alternatives"]} for part in "ABCDE"},
+        binding_constraints={
+            "A": {"false_investigations": snapshots["A"]["result"]["false_investigations"], "missed_failures": snapshots["A"]["result"]["missed_failures"]},
+            "B": {"false_investigations": snapshots["B"]["result"]["false_investigations"], "missed_failures": snapshots["B"]["result"]["missed_failures"]},
+            "C": {"jobs": c_reported["job_count"], "stale_outcome_loss_usd": c_reported["stale_outcome_loss_usd"]},
+            "D": {"decision": snapshots["D"]["decision"], "cohort_gate": (snapshots["D"]["chosen_result"] or snapshots["D"]["result"])["evidence_requirements_met"]},
+            "E": {"verified_recovery": snapshots["E"]["result"]["verified_recovery"], "met_objective": snapshots["E"]["result"]["met_recovery_objective"]},
+        },
+        decisions={"recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "reevaluation_trigger": final_trigger.value},
+        final_decision={"recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "rationale": rationale.value},
+        big_takeaways=[
+            "Proxy drift starts investigation; delayed outcomes establish whether quality failed.",
+            "Retraining changes the deployed model only after resource-consuming work and promotion evidence.",
+            "Canary evidence and verified rollback bound different parts of release risk.",
+        ],
+        reflections={"rationale": rationale.value, "reevaluation_trigger": final_trigger.value},
+        residual_risk=final_risk.value,
+        result_snapshot={"track": track_id, "captures": snapshots, "recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "reevaluation_trigger": final_trigger.value, "residual_risk": final_risk.value},
+        source_trace={"scenario": scenario.scenario_note, "calculations": "MLSysIM outcome-labeled operations replay."},
+    )
+    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    return (report,)
 
 
-@app.cell(hide_code=True)
-def _(
-    build_lab_report,
-    drift_visibility,
-    mo,
-    ops_policy,
-    partA_days,
-    partA_pred,
-    partA_rate,
-    partA_threshold,
-    partB_false_alarm_rate,
-    partB_pred,
-    partB_review_cost,
-    partB_threshold,
-    partC_canary,
-    partC_fallback,
-    partC_pred,
-    partC_rollback,
-    partD_cadence,
-    partD_canary,
-    partD_pred,
-    partD_rollback,
-    partD_threshold,
-    report_export_panel,
-    retraining_cadence,
-    v1_14_error_budget,
-    v1_14_metadata,
-    v1_14_ops,
-    v1_14_profile,
-    v1_14_rollout_risk,
-    v1_14_threshold_economics,
-    v1_14_track_amounts,
-    v1_14_variant,
+@app.cell
+async def _(
+    audit, final_choice, final_rejected, final_risk, final_trigger,
+    get_evidence, ledger, mo, rationale, track_id,
 ):
-    _amounts = v1_14_track_amounts(v1_14_profile, v1_14_ops)
-    _drift = drift_visibility(
-        v1_14_ops,
-        days_since_deploy=partA_days.value,
-        drift_rate_psi_per_day=partA_rate.value,
-        alert_threshold_psi=partA_threshold.value,
+    _captures = get_evidence()
+    _d_decision = _captures["D"].to_dict()["decision"] if "D" in _captures else None
+    _ready = (
+        audit.complete
+        and all(widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk))
+        and bool(rationale.value.strip()) and final_choice.value != final_rejected.value
+        and final_choice.value == _d_decision
     )
-    _threshold = v1_14_threshold_economics(
-        v1_14_ops,
-        _amounts,
-        threshold_psi=partB_threshold.value,
-        alert_review_cost=partB_review_cost.value,
-        false_alarm_rate=partB_false_alarm_rate.value,
-    )
-    _runbook_threshold = v1_14_threshold_economics(
-        v1_14_ops,
-        _amounts,
-        threshold_psi=partD_threshold.value,
-        alert_review_cost=partB_review_cost.value,
-        false_alarm_rate=partB_false_alarm_rate.value,
-    )
-    _rollout = v1_14_rollout_risk(
-        _amounts,
-        canary_pct=partC_canary.value,
-        rollback_hours=partC_rollback.value,
-        fallback_pct=partC_fallback.value,
-    )
-    _runbook_rollout = v1_14_rollout_risk(
-        _amounts,
-        canary_pct=partD_canary.value,
-        rollback_hours=partD_rollback.value,
-        fallback_pct=_amounts["default_fallback_pct"],
-    )
-    _cadence = retraining_cadence(
-        retrain_cost=v1_14_ops.retrain_cost,
-        drift_cost_per_day=v1_14_ops.drift_cost_per_day,
-        current_days=partD_cadence.value,
-    )
-    _policy = ops_policy(
-        v1_14_ops,
-        threshold_psi=partD_threshold.value,
-        cadence_days=partD_cadence.value,
-        canary_pct=partD_canary.value,
-        rollback_hours=partD_rollback.value,
-    )
-    _budget = v1_14_error_budget(_amounts, _runbook_threshold, _policy, _runbook_rollout)
-
-    _incomplete = []
-    if partA_pred.value is None:
-        _incomplete.append("Part A deployed-behavior prediction")
-    if partB_pred.value is None:
-        _incomplete.append("Part B threshold trade-off prediction")
-    if partC_pred.value is None:
-        _incomplete.append("Part C rollout/rollback prediction")
-    if partD_pred.value is None:
-        _incomplete.append("Part D error-budget prediction")
-
-    _report = build_lab_report(
-        v1_14_metadata,
-        track=v1_14_profile.label,
-        scenario=v1_14_variant.workload_summary,
-        learning_objectives=(
-            "Explain why monitoring must measure deployed behavior, not only model or infrastructure metrics.",
-            "Calibrate a drift threshold by trading false alarms against missed degradation.",
-            "Limit release blast radius with canary, rollback, and fallback policy.",
-            "Spend error budget deliberately in an operations runbook memo.",
-        ),
-        predictions={
-            "deployed_behavior": partA_pred.value,
-            "threshold_tradeoff": partB_pred.value,
-            "rollout_rollback": partC_pred.value,
-            "error_budget_policy": partD_pred.value,
-        },
-        knob_settings={
-            "days_since_deploy": partA_days.value,
-            "drift_rate_psi_per_day": partA_rate.value,
-            "part_a_alert_threshold_psi": partA_threshold.value,
-            "part_b_threshold_psi": partB_threshold.value,
-            "alert_review_cost": partB_review_cost.value,
-            "false_alarm_rate_per_year": partB_false_alarm_rate.value,
-            "part_c_canary_pct": partC_canary.value,
-            "part_c_rollback_hours": partC_rollback.value,
-            "part_c_fallback_pct": partC_fallback.value,
-            "runbook_threshold_psi": partD_threshold.value,
-            "runbook_cadence_days": partD_cadence.value,
-            "runbook_canary_pct": partD_canary.value,
-            "runbook_rollback_hours": partD_rollback.value,
-        },
-        evidence_summary={
-            "hardware_ref": v1_14_ops.hardware_ref,
-            "model_ref": v1_14_ops.model_ref,
-            "drift_source": v1_14_ops.drift_source,
-            "monitoring_signal": v1_14_ops.monitoring_signal,
-            "true_psi": round(_drift.true_psi, 4),
-            "observed_psi": round(_drift.observed_psi, 4),
-            "true_quality_pct": round(_drift.true_quality_pct, 3),
-            "alert_day": _drift.alert_day,
-            "part_a_detection_delay_days": _drift.detection_delay_days,
-            "part_b_threshold_psi": round(_threshold["threshold_psi"], 3),
-            "part_b_false_alarm_cost": round(_threshold["false_alarm_cost"], 2),
-            "part_b_missed_damage_cost": round(_threshold["missed_damage_cost"], 2),
-            "part_b_failure_mode": _threshold["failure_mode"],
-            "part_c_blast_radius_units": round(_rollout["exposed_units"], 4),
-            "part_c_unit_label": _amounts["unit_label"],
-            "part_c_rollback_tier": _rollout["rollback_tier"],
-            "optimal_cadence_days": round(_cadence.optimal_days, 3),
-            "runbook_policy_feasible": _budget["feasible"],
-            "error_budget_days": round(_budget["total_days"], 3),
-            "binding_risk": _budget["binding_risk"],
-            "policy_violations": _policy.violations,
-            "rollout_violations": _runbook_rollout["violations"],
-            "residual_blind_spot": _amounts["blind_spot"],
-            "carry_forward_responsibility_risk": _amounts["carry_forward_risk"],
-        },
-        final_decision=(
-            f"Runbook memo: alert at {partD_threshold.value:.2f} PSI; retrain every "
-            f"{partD_cadence.value} days; canary {partD_canary.value}% with rollback within "
-            f"{partD_rollback.value:g} hours using {v1_14_ops.rollback_policy}; escalate through "
-            f"{v1_14_ops.escalation_policy}."
-        ),
-        big_takeaways=(
-            "Monitoring must measure deployed behavior, not only model or infrastructure metrics.",
-            "Drift thresholds allocate operational attention and missed-degradation risk.",
-            "Rollout and rollback policy control blast radius and recovery time.",
-            "A runbook spends error budget deliberately and names residual ownership risk.",
-        ),
-        reflections={
-            "report_artifact": v1_14_ops.report_artifact,
-            "validation_tests": v1_14_ops.validation_tests,
-            "rollback_rule": v1_14_ops.rollback_policy,
-            "residual_blind_spot": _amounts["blind_spot"],
-            "carry_forward_responsibility_risk": _amounts["carry_forward_risk"],
-        },
-        residual_risk=(
-            "Teaching estimates must be validated with real production traces, label-delay audits, "
-            "cohort canaries, rollback drills, post-deployment quality reviews, and owner handoff checks."
-        ),
-        source_trace={
-            "track_id": v1_14_profile.track_id,
-            "scenario_id": v1_14_variant.scenario_id,
-            "hardware_ref": v1_14_variant.hardware_ref,
-            "model_ref": v1_14_variant.model_ref,
-            "shared_helper": "mlsysbook_labs.ops",
-            "notebook_local_helpers": (
-                "v1_14_track_amounts",
-                "v1_14_threshold_economics",
-                "v1_14_rollout_risk",
-                "v1_14_error_budget",
-            ),
-            "source_policy": v1_14_profile.source_policy,
-        },
-        result_snapshot={
-            "ops_profile": v1_14_ops,
-            "drift_visibility": _drift,
-            "threshold_economics": _threshold,
-            "rollout_risk": _rollout,
-            "retraining_cadence": _cadence,
-            "ops_policy": _policy,
-            "error_budget": _budget,
-        },
-        incomplete_fields=tuple(_incomplete),
-    )
-
-    mo.vstack([
-        mo.md("## Download Report"),
-        mo.callout(
-            mo.md(
-                "This V1-14 report is generated locally from the selected track, MLSysIM hardware/model refs, "
-                "and shared `mlsysbook_labs.ops` calculations."
-            ),
-            kind="info",
-        ),
-        report_export_panel(_report),
-    ])
+    _save_status = "EVIDENCE IN PROGRESS"
+    _status_class = "hud-active"
+    if _ready:
+        try:
+            ledger.save(chapter=14, design={
+                "schema_version": 1, "lab_id": "v1_14", "track_id": track_id,
+                "model_id": "v1_14_experiments",
+                "evidence": {part: capture.to_dict() for part, capture in get_evidence().items()},
+                "recommendation": final_choice.value,
+                "rejected_alternative": final_rejected.value,
+                "reevaluation_trigger": final_trigger.value,
+                "residual_risk": final_risk.value, "rationale": rationale.value,
+            })
+            await ledger.flush()
+            _save_status = "SAVED"
+        except Exception:
+            _save_status = "SAVE FAILED — REPORT STILL AVAILABLE"
+            _status_class = "hud-failed"
+    mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">14 · Evidence-Driven Operations</span><span aria-hidden="true"> · STATUS: </span><span class="{_status_class}">{_save_status}</span></div>')
     return
 
 

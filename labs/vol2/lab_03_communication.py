@@ -1,1748 +1,604 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full", app_title="Lab 03: Network Fabric Design · MLSysBook")
+app = marimo.App(width="full", app_title="Lab 03: Network Fabrics · MLSysBook")
 
 
 @app.cell
 async def _():
-    import html as html_lib
     import sys
     from pathlib import Path
-
     import marimo as mo
 
     if sys.platform == "emscripten":
         import micropip
-
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
-        _labs_dir = Path(__file__).resolve().parents[1]
-        if str(_labs_dir) not in sys.path:
-            sys.path.insert(0, str(_labs_dir))
+        labs_dir = Path(__file__).resolve().parents[1]
+        if str(labs_dir) not in sys.path:
+            sys.path.insert(0, str(labs_dir))
         from bootstrap import native_bootstrap
-
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
-    from mlsysim import Hardware, Systems, ureg
+    from mlsysim.core.units import Q_
+    from mlsysim.engine.v2_03_experiments import (
+        OVERLAP_WINDOW_OPTIONS, OVERLAP_WINDOW_QUANTITIES, PAYLOAD_OPTIONS,
+        PAYLOAD_QUANTITIES, TRAFFIC_PATTERN_OPTIONS, alpha_beta_experiment,
+        burst_spacing_params, congestion_experiment, default_overlap_label,
+        default_payload_label, default_traffic_pattern_label,
+        equal_budget_comparison, get_track_scenario, telemetry_experiment,
+        topology_experiment, topology_options,
+    )
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysim.physics import (
-        calc_alpha_beta_crossover,
-        calc_bisection_bandwidth,
-        calc_oversubscription_effect,
-        calc_point_to_point_time,
-    )
     from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        MathPeek,
-        big_takeaways,
-        build_lab_report,
-        gated_hypothesis_card,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        instrumentation_console,
+        ACADEMIC_LAB_CSS, build_lab_report, get_lab_metadata,
         report_export_panel,
-        source_trace,
-        track_arc_context,
-        track_context,
-        track_selector,
     )
+    from mlsysbook_labs.experiment_evidence import audit_evidence, capture_evidence
 
-    ledger = DesignLedger()
-    if getattr(ledger, "is_wasm", False):
-        _ = await ledger.load_async()
+    ledger = DesignLedger(volume="vol2")
+    if ledger.is_wasm:
+        _loaded = await ledger.load_async()
     return (
-        ACADEMIC_LAB_CSS,
-        COLORS,
-        Hardware,
-        MathPeek,
-        Systems,
-        apply_plotly_theme,
-        big_takeaways,
-        build_lab_report,
-        calc_alpha_beta_crossover,
-        calc_bisection_bandwidth,
-        calc_oversubscription_effect,
-        calc_point_to_point_time,
-        gated_hypothesis_card,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        go,
-        html_lib,
-        instrumentation_console,
-        ledger,
-        mo,
-        report_export_panel,
-        ureg,
+        ACADEMIC_LAB_CSS, COLORS, LAB_CSS, OVERLAP_WINDOW_OPTIONS,
+        OVERLAP_WINDOW_QUANTITIES, PAYLOAD_OPTIONS, PAYLOAD_QUANTITIES, Q_,
+        TRAFFIC_PATTERN_OPTIONS, alpha_beta_experiment, apply_plotly_theme,
+        audit_evidence, build_lab_report, burst_spacing_params,
+        capture_evidence, congestion_experiment, default_overlap_label,
+        default_payload_label, default_traffic_pattern_label,
+        equal_budget_comparison, get_lab_metadata, get_track_scenario, go,
+        ledger, mo, report_export_panel, telemetry_experiment,
+        topology_experiment, topology_options,
     )
-
-
-@app.cell
-def _(get_lab_metadata):
-    v2_03_lab_path = "vol2/lab_03_communication.py"
-    v2_03_chapter = 3
-    v2_03_metadata = get_lab_metadata(v2_03_lab_path)
-    return v2_03_chapter, v2_03_metadata
 
 
 @app.cell
 def _(mo):
-    # Top-Level Universal Track Selector
-    v2_03_track_picker = mo.ui.dropdown(
-        options={
-            "☁️ Cloud Supercomputing Track (H100 Clusters & NVLink vs InfiniBand Cliffs)": "cloud_fleet",
-            "🤖 Edge & Embodied Track (Jetson Orin & Multi-Camera PCIe/Ethernet Buses)": "robotaxi",
-            "📱 Mobile Track (Apple Silicon & Multi-Die UltraFusion Interconnects)": "iphone",
-            "⚡ TinyML Track (ESP32-S3 & Low-Power SPI/I2C/UART Sensor Buses)": "oura_ring",
-        },
-        value="☁️ Cloud Supercomputing Track (H100 Clusters & NVLink vs InfiniBand Cliffs)",
-        label="Select Course / Industry Track",
+    get_evidence, set_evidence = mo.state({})
+    return get_evidence, set_evidence
+
+
+@app.cell
+def _(mo, set_evidence):
+    track = mo.ui.dropdown(
+        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
+        value="Cloud", label="Deployment track",
+        on_change=lambda _value: set_evidence({}),
     )
-    return (v2_03_track_picker,)
+    return (track,)
+
+
+@app.cell
+def _(get_track_scenario, track):
+    track_id = track.value
+    scenario = get_track_scenario(track_id)
+    return scenario, track_id
 
 
 @app.cell
 def _(
-    get_lab_track_variant,
-    get_track_profile,
-    v2_03_metadata,
-    v2_03_track_picker,
+    OVERLAP_WINDOW_OPTIONS, PAYLOAD_OPTIONS, TRAFFIC_PATTERN_OPTIONS,
+    burst_spacing_params, default_overlap_label, default_payload_label,
+    default_traffic_pattern_label, mo, scenario, topology_options, track_id,
 ):
-    v2_03_track_id = v2_03_track_picker.value
-    v2_03_profile = get_track_profile(v2_03_track_id)
-    v2_03_variant = get_lab_track_variant(v2_03_metadata.lab_id, v2_03_profile.track_id)
-    return v2_03_profile, v2_03_variant
-
-
-@app.cell
-def _(
-    apply_plotly_theme,
-    calc_alpha_beta_crossover,
-    calc_bisection_bandwidth,
-    calc_oversubscription_effect,
-    calc_point_to_point_time,
-    go,
-    html_lib,
-    mo,
-    ureg,
-):
-    def v2_03_to_ms(quantity):
-        return float(quantity.to(ureg.millisecond).magnitude)
-
-    def v2_03_to_mb_s(quantity):
-        return float(quantity.to(ureg.MB / ureg.second).magnitude)
-
-    def v2_03_fmt(value, digits=2):
-        if isinstance(value, int):
-            return f"{value:,}"
-        if isinstance(value, float):
-            if abs(value) >= 100:
-                return f"{value:,.0f}"
-            if abs(value) >= 10:
-                return f"{value:,.1f}"
-            return f"{value:,.{digits}f}"
-        return str(value)
-
-    def v2_03_track_lenses(Systems, Hardware, ureg):
-        h100_nvlink = Hardware.Cloud.H100.nvlink
-        nvlink_alpha = getattr(h100_nvlink, "latency", None) or 0.5 * ureg.microsecond
-        ib_ndr = Systems.Fabrics.InfiniBand_NDR
-        eth_100g = Systems.Fabrics.Ethernet_100G
-
-        return {
-            "iphone": {
-                "scenario": "A mobile product team is deciding which payloads can cross the device-edge-cloud path without harming responsiveness or privacy posture.",
-                "decision_frame": "Decide what stays local, what can use edge sync, and what must be staged outside the interaction path.",
-                "payload_name": "privacy-safe telemetry or offload payload",
-                "participant_name": "phones in a regional cohort",
-                "message_default_mb": 8,
-                "message_min_mb": 1,
-                "message_max_mb": 160,
-                "message_step_mb": 1,
-                "participants_default": 80,
-                "participants_min": 4,
-                "participants_max": 500,
-                "communication_budget_ms": 120,
-                "step_budget_ms": 180,
-                "utilization_limit": 0.70,
-                "failure_mode": "responsiveness or privacy-routing miss",
-                "guardrail_text": "Per-interaction payloads should stay edge-local unless they are staged or summarized.",
-                "report_prompt": "Frame the memo around local-vs-networked payload policy.",
-                "collective_implication": "V2-06 collectives should assume phone-originated payloads are summarized before any fleet aggregation.",
-                "links": {
-                    "wifi_edge": {
-                        "label": "Wi-Fi to edge point of presence",
-                        "alpha": 8 * ureg.millisecond,
-                        "bandwidth": 90 * ureg.MB / ureg.second,
-                        "source": "local scenario assumption for low-latency edge path",
-                    },
-                    "5g_edge": {
-                        "label": "5G uplink to edge",
-                        "alpha": 28 * ureg.millisecond,
-                        "bandwidth": 18 * ureg.MB / ureg.second,
-                        "source": "local scenario assumption for mobile uplink",
-                    },
-                    "cloud_wan": {
-                        "label": "Direct cloud WAN path",
-                        "alpha": 70 * ureg.millisecond,
-                        "bandwidth": 10 * ureg.MB / ureg.second,
-                        "source": "local scenario assumption for cloud round trip",
-                    },
-                },
-                "default_link": "wifi_edge",
-                "topology_labels": {
-                    "nonblocking": "Edge-local fan-in",
-                    "aligned": "Region-sharded edge mesh",
-                    "grouped": "Phone-to-edge-to-cloud staging",
-                    "oversubscribed": "Single shared cloud ingress",
-                },
-                "placement_labels": {
-                    "affinity": "Keep cohort near its edge region",
-                    "balanced": "Balance across nearby edge regions",
-                    "spread": "Route by cheapest cloud capacity",
-                    "noisy": "Share ingress with analytics upload",
-                },
-                "hop_latency": 3 * ureg.millisecond,
-            },
-            "oura_ring": {
-                "scenario": "A wearable firmware team must move sync windows and OTA payloads across intermittent ring-phone-cloud connectivity.",
-                "decision_frame": "Choose a sync/update policy that survives a short connection window without stealing sensing duty cycle.",
-                "payload_name": "BLE sync or OTA payload",
-                "participant_name": "rings syncing through phones",
-                "message_default_mb": 6,
-                "message_min_mb": 1,
-                "message_max_mb": 48,
-                "message_step_mb": 1,
-                "participants_default": 64,
-                "participants_min": 4,
-                "participants_max": 300,
-                "communication_budget_ms": 120000,
-                "step_budget_ms": 180000,
-                "utilization_limit": 0.55,
-                "failure_mode": "sync-window or OTA budget miss",
-                "guardrail_text": "Radio transfer must fit an intermittent phone-nearby window.",
-                "report_prompt": "Frame the memo around sync cadence, OTA staging, and payload minimization.",
-                "collective_implication": "V2-06 collectives should assume wearable updates are staged and delay-tolerant, not synchronous.",
-                "links": {
-                    "ble_phone": {
-                        "label": "BLE ring-to-phone",
-                        "alpha": 90 * ureg.millisecond,
-                        "bandwidth": 0.18 * ureg.MB / ureg.second,
-                        "source": "local scenario assumption for intermittent BLE transfer",
-                    },
-                    "phone_wifi": {
-                        "label": "Phone Wi-Fi relay",
-                        "alpha": 35 * ureg.millisecond,
-                        "bandwidth": 12 * ureg.MB / ureg.second,
-                        "source": "local scenario assumption for phone relay",
-                    },
-                    "cellular_relay": {
-                        "label": "Phone cellular relay",
-                        "alpha": 80 * ureg.millisecond,
-                        "bandwidth": 4 * ureg.MB / ureg.second,
-                        "source": "local scenario assumption for cellular relay",
-                    },
-                },
-                "default_link": "ble_phone",
-                "topology_labels": {
-                    "nonblocking": "Ring-phone local sync",
-                    "aligned": "Phone batches by sleep window",
-                    "grouped": "Daily cloud staging group",
-                    "oversubscribed": "Fleet-wide OTA push",
-                },
-                "placement_labels": {
-                    "affinity": "Sync only when phone is nearby",
-                    "balanced": "Batch by charging/sleep window",
-                    "spread": "Opportunistic background relay",
-                    "noisy": "OTA and sensing upload collide",
-                },
-                "hop_latency": 40 * ureg.millisecond,
-            },
-            "robotaxi": {
-                "scenario": "An autonomous vehicle platform team must keep sensor-fabric traffic local while triaging upload of fleet evidence.",
-                "decision_frame": "Decide which communication must stay vehicle-local and which evidence can be delayed to depot or cloud.",
-                "payload_name": "sensor burst or triaged event payload",
-                "participant_name": "vehicles or sensor endpoints",
-                "message_default_mb": 96,
-                "message_min_mb": 4,
-                "message_max_mb": 1024,
-                "message_step_mb": 4,
-                "participants_default": 32,
-                "participants_min": 4,
-                "participants_max": 256,
-                "communication_budget_ms": 60,
-                "step_budget_ms": 90,
-                "utilization_limit": 0.62,
-                "failure_mode": "safety-latency or event-upload backlog miss",
-                "guardrail_text": "Safety-critical sensor exchange must stay on the vehicle-local fabric.",
-                "report_prompt": "Frame the memo around vehicle-local placement and delayed fleet upload.",
-                "collective_implication": "V2-06 collectives should treat safety data as local-first and fleet evidence as asynchronous.",
-                "links": {
-                    "vehicle_fabric": {
-                        "label": "Vehicle-local sensor fabric",
-                        "alpha": 0.7 * ureg.millisecond,
-                        "bandwidth": 9500 * ureg.MB / ureg.second,
-                        "source": "local scenario assumption for in-vehicle high-speed fabric",
-                    },
-                    "depot_wifi": {
-                        "label": "Depot Wi-Fi offload",
-                        "alpha": 18 * ureg.millisecond,
-                        "bandwidth": 75 * ureg.MB / ureg.second,
-                        "source": "local scenario assumption for depot upload",
-                    },
-                    "cellular_upload": {
-                        "label": "Cellular fleet upload",
-                        "alpha": 55 * ureg.millisecond,
-                        "bandwidth": 6 * ureg.MB / ureg.second,
-                        "source": "local scenario assumption for on-road upload",
-                    },
-                },
-                "default_link": "vehicle_fabric",
-                "topology_labels": {
-                    "nonblocking": "Vehicle-local switched fabric",
-                    "aligned": "Sensor-domain aligned fabric",
-                    "grouped": "Depot batch groups",
-                    "oversubscribed": "Cloud-first event upload",
-                },
-                "placement_labels": {
-                    "affinity": "Keep safety loop in-vehicle",
-                    "balanced": "Upload triaged events at depot",
-                    "spread": "Stream selected evidence to cloud",
-                    "noisy": "Share link with map and log upload",
-                },
-                "hop_latency": 0.25 * ureg.millisecond,
-            },
-            "cloud_fleet": {
-                "scenario": "A fleet service owner must choose a GPU fabric and placement policy for synchronous distributed work.",
-                "decision_frame": "Choose the topology and placement policy that turns purchased accelerators into useful parallel work.",
-                "payload_name": "gradient shard or activation payload",
-                "participant_name": "accelerators",
-                "message_default_mb": 350,
-                "message_min_mb": 4,
-                "message_max_mb": 4096,
-                "message_step_mb": 4,
-                "participants_default": 64,
-                "participants_min": 4,
-                "participants_max": 1024,
-                "communication_budget_ms": 80,
-                "step_budget_ms": 120,
-                "utilization_limit": 0.80,
-                "failure_mode": "SLO breach, queue growth, or idle accelerators",
-                "guardrail_text": "Synchronous jobs need topology-aware placement and enough bisection bandwidth.",
-                "report_prompt": "Frame the memo around fabric topology, bisection, and placement policy.",
-                "collective_implication": "V2-06 collectives should choose algorithms that match the selected bisection and placement envelope.",
-                "links": {
-                    "ib_ndr": {
-                        "label": "InfiniBand NDR",
-                        "alpha": Systems.SwitchFabric.AlphaNdr,
-                        "bandwidth": ib_ndr.bandwidth,
-                        "source": "MLSysIM Systems.Fabrics.InfiniBand_NDR and SwitchFabric.AlphaNdr",
-                    },
-                    "roce_100g": {
-                        "label": "RoCE over 100G Ethernet",
-                        "alpha": Systems.SwitchFabric.AlphaRoce,
-                        "bandwidth": eth_100g.bandwidth,
-                        "source": "MLSysIM Systems.Fabrics.Ethernet_100G and SwitchFabric.AlphaRoce",
-                    },
-                    "nvlink_local": {
-                        "label": "NVLink local domain",
-                        "alpha": nvlink_alpha,
-                        "bandwidth": h100_nvlink.bandwidth_per_direction,
-                        "source": "MLSysIM Hardware.Cloud.H100.nvlink",
-                    },
-                },
-                "default_link": "ib_ndr",
-                "topology_labels": {
-                    "nonblocking": "Non-blocking fat-tree",
-                    "aligned": "Rail-optimized placement",
-                    "grouped": "Dragonfly/group-local job",
-                    "oversubscribed": "4:1 oversubscribed spine",
-                },
-                "placement_labels": {
-                    "affinity": "Pack job inside one pod/rail group",
-                    "balanced": "Topology-aware multi-pod spread",
-                    "spread": "Capacity-first scheduler spread",
-                    "noisy": "Co-tenant checkpoint traffic",
-                },
-                "hop_latency": Systems.SwitchFabric.HopLatency,
-            },
-        }
-
-    def v2_03_topology_options(lens):
-        labels = lens["topology_labels"]
-        return {
-            "nonblocking": {
-                "label": labels["nonblocking"],
-                "oversubscription": 1.0,
-                "bisection_factor": 1.0,
-                "cross_fraction": 1.0,
-                "hop_count": 2,
-                "guard_ok": True,
-                "note": "Full bisection for arbitrary communication.",
-            },
-            "aligned": {
-                "label": labels["aligned"],
-                "oversubscription": 1.2,
-                "bisection_factor": 0.85,
-                "cross_fraction": 0.62,
-                "hop_count": 1,
-                "guard_ok": True,
-                "note": "Topology matches the dominant local/same-rank traffic.",
-            },
-            "grouped": {
-                "label": labels["grouped"],
-                "oversubscription": 2.2,
-                "bisection_factor": 0.58,
-                "cross_fraction": 0.78,
-                "hop_count": 2,
-                "guard_ok": True,
-                "note": "Works when the job fits inside groups and avoids global links.",
-            },
-            "oversubscribed": {
-                "label": labels["oversubscribed"],
-                "oversubscription": 4.0,
-                "bisection_factor": 0.45,
-                "cross_fraction": 1.0,
-                "hop_count": 4,
-                "guard_ok": False,
-                "note": "Cheap shared path; narrow cut throttles synchronous traffic.",
-            },
-        }
-
-    def v2_03_placement_options(lens):
-        labels = lens["placement_labels"]
-        return {
-            "affinity": {
-                "label": labels["affinity"],
-                "cross_factor": 0.52,
-                "background_load": 0.05,
-                "guard_ok": True,
-                "note": "Keeps most communication inside the natural local domain.",
-            },
-            "balanced": {
-                "label": labels["balanced"],
-                "cross_factor": 0.74,
-                "background_load": 0.14,
-                "guard_ok": True,
-                "note": "Uses more fabric while staying topology-aware.",
-            },
-            "spread": {
-                "label": labels["spread"],
-                "cross_factor": 1.08,
-                "background_load": 0.28,
-                "guard_ok": False,
-                "note": "Local scheduling looks efficient but crosses the expensive cut.",
-            },
-            "noisy": {
-                "label": labels["noisy"],
-                "cross_factor": 1.18,
-                "background_load": 0.46,
-                "guard_ok": False,
-                "note": "A neighboring or secondary flow shares the same bottleneck.",
-            },
-        }
-
-    def v2_03_option_labels(options):
-        return {option["label"]: key for key, option in options.items()}
-
-    def v2_03_link_option_labels(lens):
-        return {link["label"]: key for key, link in lens["links"].items()}
-
-    def v2_03_alpha_beta_result(lens, link_id, payload_mb):
-        link = lens["links"][link_id]
-        payload = float(payload_mb) * ureg.MB
-        alpha = link["alpha"]
-        beta = link["bandwidth"]
-        beta_term = (payload / beta).to(ureg.second)
-        total = calc_point_to_point_time(payload, alpha, beta)
-        crossover = calc_alpha_beta_crossover(alpha, beta)
-        alpha_ms = v2_03_to_ms(alpha)
-        beta_ms = v2_03_to_ms(beta_term)
-        total_ms = v2_03_to_ms(total)
-        binding = "latency (alpha)" if alpha_ms >= beta_ms else "bandwidth (n/beta)"
-        return {
-            "link_id": link_id,
-            "link_label": link["label"],
-            "payload_mb": float(payload_mb),
-            "alpha_ms": alpha_ms,
-            "beta_ms": beta_ms,
-            "total_ms": total_ms,
-            "bandwidth_mb_s": v2_03_to_mb_s(beta),
-            "crossover_kb": float(crossover.to(ureg.KB).magnitude),
-            "binding_term": binding,
-            "budget_ms": lens["communication_budget_ms"],
-            "passes_budget": total_ms <= lens["communication_budget_ms"],
-            "source": link["source"],
-        }
-
-    def v2_03_evaluate_topologies(lens, link_id, payload_mb, participants):
-        link = lens["links"][link_id]
-        payload = float(payload_mb) * ureg.MB
-        n = max(2, int(participants))
-        ports = max(1, n // 2)
-        rows = []
-        for topology_id, topology in v2_03_topology_options(lens).items():
-            effective_oversub = topology["oversubscription"] / topology["bisection_factor"]
-            _relative_throughput, throughput_loss = calc_oversubscription_effect(
-                0.30,
-                effective_oversub,
-            )
-            bisection = calc_bisection_bandwidth(
-                ports,
-                link["bandwidth"],
-                oversubscription_ratio=effective_oversub,
-            )
-            cross_cut_data = payload * ports * topology["cross_fraction"]
-            hop_penalty = topology["hop_count"] * lens["hop_latency"]
-            sync_time = (link["alpha"] + hop_penalty + cross_cut_data / bisection).to(ureg.second)
-            sync_ms = v2_03_to_ms(sync_time)
-            rows.append(
-                {
-                    "topology_id": topology_id,
-                    "label": topology["label"],
-                    "bisection_mb_s": v2_03_to_mb_s(bisection),
-                    "sync_ms": sync_ms,
-                    "step_budget_ms": lens["step_budget_ms"],
-                    "passes_step": sync_ms <= lens["step_budget_ms"],
-                    "guard_ok": topology["guard_ok"],
-                    "hop_count": topology["hop_count"],
-                    "oversubscription": effective_oversub,
-                    "throughput_loss": throughput_loss,
-                    "note": topology["note"],
-                }
-            )
-        return rows
-
-    def v2_03_selected_topology_result(lens, link_id, payload_mb, participants, topology_id):
-        rows = v2_03_evaluate_topologies(lens, link_id, payload_mb, participants)
-        return next(row for row in rows if row["topology_id"] == topology_id)
-
-    def v2_03_congestion_result(lens, link_id, payload_mb, participants, topology_id, placement_id, burst_multiplier):
-        topology_result = v2_03_selected_topology_result(lens, link_id, payload_mb, participants, topology_id)
-        placement = v2_03_placement_options(lens)[placement_id]
-        step_seconds = lens["step_budget_ms"] / 1000
-        payload_mb = float(payload_mb)
-        n = max(2, int(participants))
-        offered_mb_s = payload_mb * n * placement["cross_factor"] * float(burst_multiplier) / max(step_seconds, 1e-9)
-        capacity_mb_s = max(topology_result["bisection_mb_s"], 1e-9)
-        utilization = offered_mb_s / capacity_mb_s + placement["background_load"]
-        if utilization < 0.70:
-            tail_multiplier = 1 + 0.35 * utilization
-        elif utilization < 1.0:
-            tail_multiplier = min(8.0, 1 + (utilization - 0.70) / max(1.0 - utilization, 0.02))
-        else:
-            tail_multiplier = min(20.0, 8.0 + 4.0 * (utilization - 1.0))
-        tail_ms = topology_result["sync_ms"] * tail_multiplier
-        utilization_limit = lens["utilization_limit"]
-        utilization_ok = utilization <= utilization_limit
-        topology_ok = topology_result["guard_ok"] and placement["guard_ok"]
-        if not topology_ok:
-            binding = "placement/topology guardrail"
-        elif not utilization_ok:
-            binding = "congestion utilization"
-        else:
-            binding = "bisection headroom"
-        return {
-            "placement_id": placement_id,
-            "placement_label": placement["label"],
-            "topology_id": topology_id,
-            "topology_label": topology_result["label"],
-            "offered_mb_s": offered_mb_s,
-            "capacity_mb_s": capacity_mb_s,
-            "utilization": utilization,
-            "utilization_limit": utilization_limit,
-            "utilization_ok": utilization_ok,
-            "tail_multiplier": tail_multiplier,
-            "tail_ms": tail_ms,
-            "topology_ok": topology_ok,
-            "placement_guard_ok": placement["guard_ok"],
-            "failure_state": "OK" if utilization_ok and topology_ok else lens["failure_mode"],
-            "binding_amount": binding,
-            "placement_note": placement["note"],
-        }
-
-    def v2_03_decision_result(
-        lens,
-        link_id,
-        payload_mb,
-        participants,
-        topology_id,
-        placement_id,
-        burst_multiplier,
-        payload_reduction_pct,
-        overlap_pct,
-    ):
-        reduced_payload_mb = float(payload_mb) * (1 - float(payload_reduction_pct) / 100)
-        reduced_payload_mb = max(reduced_payload_mb, 0.05)
-        congestion = v2_03_congestion_result(
-            lens,
-            link_id,
-            reduced_payload_mb,
-            participants,
-            topology_id,
-            placement_id,
-            burst_multiplier,
-        )
-        exposed_ms = congestion["tail_ms"] * (1 - float(overlap_pct) / 100)
-        step_ok = exposed_ms <= lens["step_budget_ms"]
-        utilization_ok = congestion["utilization_ok"]
-        topology_ok = congestion["topology_ok"]
-        ratios = {
-            "step-time/SLO": exposed_ms / lens["step_budget_ms"],
-            "utilization": congestion["utilization"] / lens["utilization_limit"],
-            "topology": 0.0 if topology_ok else 1.5,
-        }
-        binding = max(ratios.items(), key=lambda item: item[1])[0]
-        return {
-            **congestion,
-            "reduced_payload_mb": reduced_payload_mb,
-            "payload_reduction_pct": float(payload_reduction_pct),
-            "overlap_pct": float(overlap_pct),
-            "exposed_ms": exposed_ms,
-            "step_budget_ms": lens["step_budget_ms"],
-            "step_ok": step_ok,
-            "utilization_ok": utilization_ok,
-            "topology_ok": topology_ok,
-            "valid_plan": step_ok and utilization_ok and topology_ok,
-            "binding_guardrail": binding,
-            "ratios": ratios,
-        }
-
-    def v2_03_status_label(condition):
-        return "PASS" if condition else "FAIL"
-
-    def v2_03_html_table(rows, columns, caption=""):
-        header = "".join(f"<th>{html_lib.escape(label)}</th>" for label, _key in columns)
-        body_rows = []
-        for row in rows:
-            cells = []
-            for _label, key in columns:
-                value = row.get(key, "")
-                cells.append(f"<td>{html_lib.escape(str(value))}</td>")
-            body_rows.append(f"<tr>{''.join(cells)}</tr>")
-        caption_html = f"<div style='font-weight:700; margin-bottom:8px;'>{html_lib.escape(caption)}</div>" if caption else ""
-        return mo.Html(
-            f"""
-    <div style="overflow-x:auto; margin:12px 0;">
-      {caption_html}
-      <table style="border-collapse:collapse; min-width:720px; width:100%; font-size:0.9rem;">
-    <thead><tr style="background:#f8fafc;">{header}</tr></thead>
-    <tbody>{''.join(body_rows)}</tbody>
-      </table>
-    </div>
-    <style>
-    td, th {{ border:1px solid #d9dee8; padding:8px 10px; text-align:left; vertical-align:top; }}
-    th {{ color:#344054; font-weight:700; }}
-    </style>
-    """
-        )
-
-    def v2_03_failure_callout(result, message_ok, message_fail):
-        if result:
-            return mo.callout(mo.md(message_ok), kind="success")
-        return mo.callout(mo.md(message_fail), kind="danger")
-
-    def v2_03_prediction_feedback(predicted, actual, correct, missed):
-        if predicted is None:
-            return mo.callout(mo.md("Make the structured prediction first; the evidence below is unlocked after you commit."), kind="warn")
-        if predicted == actual:
-            return mo.callout(mo.md(correct), kind="success")
-        return mo.callout(mo.md(missed), kind="warn")
-
-    def v2_03_alpha_beta_chart(colors, result):
-        fig = go.Figure()
-        fig.add_trace(
-            go.Bar(
-                x=["Current transfer"],
-                y=[result["alpha_ms"]],
-                name="alpha startup",
-                marker_color=colors["BlueLine"],
-            )
-        )
-        fig.add_trace(
-            go.Bar(
-                x=["Current transfer"],
-                y=[result["beta_ms"]],
-                name="n/beta payload",
-                marker_color=colors["OrangeLine"],
-            )
-        )
-        fig.add_hline(
-            y=result["budget_ms"],
-            line_dash="dash",
-            line_color=colors["RedLine"],
-            annotation_text=f"budget {v2_03_fmt(result['budget_ms'])} ms",
-        )
-        fig.update_layout(
-            barmode="stack",
-            height=320,
-            yaxis_title="Milliseconds",
-            margin=dict(l=60, r=20, t=30, b=40),
-            legend=dict(orientation="h", y=1.18, x=0),
-        )
-        return apply_plotly_theme(fig)
-
-    def v2_03_topology_chart(colors, rows, budget_ms):
-        fig = go.Figure()
-        fig.add_trace(
-            go.Bar(
-                x=[row["label"] for row in rows],
-                y=[row["sync_ms"] for row in rows],
-                marker_color=[
-                    colors["GreenLine"] if row["passes_step"] and row["guard_ok"] else colors["RedLine"]
-                    for row in rows
-                ],
-                text=[
-                    "PASS" if row["passes_step"] and row["guard_ok"] else "CHECK"
-                    for row in rows
-                ],
-                textposition="outside",
-            )
-        )
-        fig.add_hline(
-            y=budget_ms,
-            line_dash="dash",
-            line_color=colors["RedLine"],
-            annotation_text=f"step/SLO {v2_03_fmt(budget_ms)} ms",
-        )
-        fig.update_layout(
-            height=360,
-            yaxis_title="Synchronization time (ms)",
-            showlegend=False,
-            margin=dict(l=60, r=20, t=30, b=90),
-        )
-        return apply_plotly_theme(fig)
-
-    def v2_03_congestion_chart(colors, congestion):
-        fig = go.Figure()
-        util_pct = congestion["utilization"] * 100
-        limit_pct = congestion["utilization_limit"] * 100
-        fig.add_trace(
-            go.Bar(
-                x=["Utilization"],
-                y=[util_pct],
-                name="Utilization",
-                marker_color=colors["RedLine"] if not congestion["utilization_ok"] else colors["GreenLine"],
-                text=[f"{util_pct:.0f}%"],
-                textposition="outside",
-            )
-        )
-        fig.add_trace(
-            go.Bar(
-                x=["Tail time"],
-                y=[congestion["tail_ms"]],
-                name="Tail time (ms)",
-                yaxis="y2",
-                marker_color=colors["OrangeLine"],
-                text=[f"{congestion['tail_ms']:.1f} ms"],
-                textposition="outside",
-            )
-        )
-        fig.add_hline(y=limit_pct, line_dash="dash", line_color=colors["RedLine"], annotation_text="utilization limit")
-        fig.update_layout(
-            height=330,
-            yaxis=dict(title="Utilization (%)"),
-            yaxis2=dict(title="Tail time (ms)", overlaying="y", side="right", showgrid=False),
-            legend=dict(orientation="h", y=1.18, x=0),
-            margin=dict(l=60, r=60, t=30, b=40),
-        )
-        return apply_plotly_theme(fig)
-
-    def v2_03_candidate_chart(colors, selected, rejected):
-        fig = go.Figure()
-        fig.add_trace(
-            go.Bar(
-                x=["Selected plan", "Rejected alternative"],
-                y=[selected["exposed_ms"], rejected["exposed_ms"]],
-                marker_color=[
-                    colors["GreenLine"] if selected["valid_plan"] else colors["RedLine"],
-                    colors["RedLine"],
-                ],
-                text=[
-                    f"{selected['exposed_ms']:.1f} ms",
-                    f"{rejected['exposed_ms']:.1f} ms",
-                ],
-                textposition="outside",
-            )
-        )
-        fig.add_hline(
-            y=selected["step_budget_ms"],
-            line_dash="dash",
-            line_color=colors["RedLine"],
-            annotation_text=f"SLO {v2_03_fmt(selected['step_budget_ms'])} ms",
-        )
-        fig.update_layout(
-            height=330,
-            yaxis_title="Exposed communication time (ms)",
-            showlegend=False,
-            margin=dict(l=60, r=20, t=30, b=45),
-        )
-        return apply_plotly_theme(fig)
-
-    def v2_03_scenario_assumptions(lens):
-        link_sources = "; ".join(
-            f"{link['label']}: {link['source']}" for link in lens["links"].values()
-        )
-        return {
-            "summary": "V2-03 communication fabric source trace",
-            "chapter_anchor": "Volume II, Chapter 3: Network Fabrics",
-            "source_models": "T(n)=alpha+n/beta; BW_bisect=(N/2)*beta/oversubscription; utilization=offered_load/capacity",
-            "registry_functions": "mlsysim.physics.calc_point_to_point_time, calc_alpha_beta_crossover, calc_bisection_bandwidth, calc_oversubscription_effect",
-            "track_scenario_thresholds": (
-                f"communication budget {lens['communication_budget_ms']} ms; "
-                f"step/SLO budget {lens['step_budget_ms']} ms; "
-                f"utilization limit {lens['utilization_limit']:.0%}"
-            ),
-            "link_sources": link_sources,
-            "local_assumptions": "Non-cloud link rates and track guardrail thresholds are notebook-local pedagogical assumptions.",
-        }
-
-    return (
-        v2_03_alpha_beta_chart,
-        v2_03_alpha_beta_result,
-        v2_03_candidate_chart,
-        v2_03_congestion_chart,
-        v2_03_congestion_result,
-        v2_03_decision_result,
-        v2_03_evaluate_topologies,
-        v2_03_failure_callout,
-        v2_03_fmt,
-        v2_03_html_table,
-        v2_03_link_option_labels,
-        v2_03_option_labels,
-        v2_03_placement_options,
-        v2_03_prediction_feedback,
-        v2_03_status_label,
-        v2_03_topology_chart,
-        v2_03_topology_options,
-        v2_03_track_lenses,
+    _track_key = track_id
+    link_labels = {profile.label: key for key, profile in scenario.links.items()}
+    default_link_label = scenario.links[scenario.default_link_id].label
+    link = mo.ui.dropdown(link_labels, value=default_link_label, label="Communication path")
+    payload_choice = mo.ui.dropdown(
+        PAYLOAD_OPTIONS,
+        value=default_payload_label(track_id),
+        label="Payload size",
     )
-
-
-@app.cell
-def _(Hardware, Systems, ureg, v2_03_profile, v2_03_track_lenses):
-    v2_03_lenses = v2_03_track_lenses(Systems, Hardware, ureg)
-    v2_03_lens = v2_03_lenses[v2_03_profile.track_id]
-    return (v2_03_lens,)
-
-
-@app.cell(hide_code=True)
-def _(
-    ACADEMIC_LAB_CSS,
-    mo,
-    v2_03_lens,
-    v2_03_profile,
-    v2_03_track_picker,
-    v2_03_variant,
-):
-    header_html = mo.Html(f"""
-    <div class="mlsysbook-lab-shell">
-      <div style="margin-bottom: 16px;">
-        {v2_03_track_picker}
-      </div>
-      <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
-        <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
-          ML Systems Textbook &middot; Volume II &middot; Chapter 03 &middot; Lab 03
-        </div>
-        <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
-          Interconnects &amp; Network Fabric Design
-        </h1>
-        <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
-          Characterize point-to-point transmission latency (&alpha;) versus bandwidth (&beta;), evaluate bisection cuts across cluster topologies, diagnose incast congestion and queuing tail effects, and verify collective communication placement policies.
-        </p>
-        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-            <strong>Track:</strong> {v2_03_profile.label}
-          </span>
-          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-            <strong>Stakeholder:</strong> {v2_03_variant.stakeholder}
-          </span>
-          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-            <strong>Baseline Link:</strong> {v2_03_lens['links'][v2_03_lens['default_link']]['label']}
-          </span>
-          <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
-            <strong>Utilization Limit:</strong> &le; {v2_03_lens['utilization_limit']:.0%}
-          </span>
-          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-            <strong>Guardrail:</strong> {v2_03_variant.guardrail_metric}
-          </span>
-        </div>
-      </div>
-
-      <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-        <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
-          System Scenario: {v2_03_profile.label} Network Architecture
-        </h3>
-        <p style="color: #475569; line-height: 1.6; margin-bottom: 12px;">
-          {v2_03_lens['scenario']}
-          Network shape governs distributed work. Bandwidth, latency, bisection, topology, placement, and congestion turn communication into a binding physical constraint.
-        </p>
-        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
-          <strong>The Architectural Invariants of Interconnect Fabrics:</strong>
-          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
-            <li><strong>The &alpha;-&beta; Crossover Law:</strong> Small payloads are latency-bound (&alpha;, dominated by software stack and switch hops); large payloads are bandwidth-bound (n/&beta;, dominated by link serialization).</li>
-            <li><strong>The Bisection Bandwidth Wall:</strong> Bisection bandwidth dictates the maximum sustainable cross-sectional throughput across any bisection cut. Oversubscription directly degrades collective scaling.</li>
-            <li><strong>Congestion Tail Amplification:</strong> Near 100% link utilization, queuing delay grows non-linearly; under BSP barriers, a single congested link drags down the entire distributed gang.</li>
-            <li><strong>Topology-Placement Co-design:</strong> Arbitrary or naive job placement across multi-tier networks converts high-speed local links into oversubscribed core-switch choke points.</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-    """)
-    mo.vstack([ACADEMIC_LAB_CSS, header_html])
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo, v2_03_lens):
-    partA_prediction = mo.ui.radio(
-        options={
-            "A) The fixed startup latency alpha": "latency (alpha)",
-            "B) The per-byte bandwidth term n/beta": "bandwidth (n/beta)",
-            "C) Link bandwidth alone, regardless of payload": "bandwidth_only",
-            "D) Topology only, before payload size is known": "topology_only",
-        },
-        value=None,
-        label="Part A prediction - which term will bind for the current payload and path?",
+    top_options = topology_options(
+        scenario.participants, scenario.links[scenario.default_link_id].bandwidth, track_id=track_id,
     )
-    partB_prediction = mo.ui.radio(
-        options={
-            "A) Fast endpoint links are enough": "edge_links",
-            "B) The narrowest bisection cut controls feasible parallel work": "bisection",
-            "C) More participants always improves synchronization": "participants",
-            "D) Hop count matters, but oversubscription does not": "hops_only",
-        },
-        value=None,
-        label="Part B prediction - what decides whether parallel communication remains feasible?",
-    )
-    partC_prediction = mo.ui.radio(
-        options={
-            "A) Topology-aware placement keeps utilization below the tail-risk limit": "placement",
-            "B) Adaptive routing removes congestion risk": "routing",
-            "C) Background traffic is unrelated to synchronous work": "background",
-            "D) Local placement choices cannot create fleet-wide bottlenecks": "local_only",
-        },
-        value=None,
-        label="Part C prediction - what prevents a local communication choice from becoming a fleet bottleneck?",
-    )
-    partD_prediction = mo.ui.radio(
-        options={
-            "A) Step-time/SLO will reject the naive plan": "step",
-            "B) Utilization will reject the naive plan": "utilization",
-            "C) Topology/placement guardrails will reject the naive plan": "topology",
-            "D) One passing metric is enough to approve the plan": "single_metric",
-        },
-        value=None,
-        label="Part D prediction - which guardrail is most likely to reject the naive plan?",
-    )
-
-    partA_checkpoint = mo.ui.radio(
-        options={
-            "Reduce alpha by shortening the path or hop count": "reduce_alpha",
-            "Increase beta by choosing a higher-bandwidth link": "increase_beta",
-            "Reduce payload before crossing the network": "reduce_payload",
-        },
-        value="Reduce payload before crossing the network",
-        label="Part A checkpoint - which lever should this track try first?",
-    )
-    partB_checkpoint = mo.ui.radio(
-        options={
-            "Carry forward a topology with full or aligned bisection": "bisection_guard",
-            "Accept oversubscription and rely on retries": "accept_oversub",
-            "Reduce endpoint count until the topology becomes feasible": "reduce_participants",
-        },
-        value="Carry forward a topology with full or aligned bisection",
-        label="Part B checkpoint - what topology assumption should the memo carry forward?",
-    )
-    partC_checkpoint = mo.ui.radio(
-        options={
-            "Use topology-aware affinity placement": "affinity",
-            "Use balanced placement with explicit utilization headroom": "balanced",
-            "Use cheapest available placement and monitor later": "cheap",
-        },
-        value="Use topology-aware affinity placement",
-        label="Part C checkpoint - what placement mitigation should the final plan use?",
-    )
-    partD_final_decision = mo.ui.radio(
-        options={
-            "Approve the selected plan": "approve",
-            "Revise payload or overlap before approval": "revise_payload",
-            "Reject topology/placement and choose a safer fabric policy": "reject_policy",
-        },
-        value="Approve the selected plan",
-        label="Final decision - how should the stakeholder sign the communication plan?",
-    )
-    student_id = mo.ui.text(label="Student identifier", placeholder="Optional")
-    memo_note = mo.ui.text_area(
-        label="Communication memo note",
-        placeholder="Name the selected topology/placement, binding amount, rejected alternative, and collective-communication implication.",
-        full_width=True,
-    )
-
-    payload_mb = mo.ui.slider(
-        start=v2_03_lens["message_min_mb"],
-        stop=v2_03_lens["message_max_mb"],
-        value=v2_03_lens["message_default_mb"],
-        step=v2_03_lens["message_step_mb"],
-        label=f"Payload size ({v2_03_lens['payload_name']}, MB)",
-    )
-    participants = mo.ui.slider(
-        start=v2_03_lens["participants_min"],
-        stop=v2_03_lens["participants_max"],
-        value=v2_03_lens["participants_default"],
-        step=4,
-        label=f"Parallel endpoints ({v2_03_lens['participant_name']})",
-    )
-    burst_multiplier = mo.ui.slider(
-        start=0.5,
-        stop=4.0,
-        value=1.0,
-        step=0.25,
-        label="Burst / background pressure multiplier",
-    )
-    payload_reduction_pct = mo.ui.slider(
-        start=0,
-        stop=80,
-        value=25,
-        step=5,
-        label="Payload reduction before crossing fabric (%)",
-    )
-    overlap_pct = mo.ui.slider(
-        start=0,
-        stop=80,
-        value=20,
-        step=5,
-        label="Communication hidden by useful work (%)",
-    )
-    return (
-        burst_multiplier,
-        memo_note,
-        overlap_pct,
-        partA_checkpoint,
-        partA_prediction,
-        partB_checkpoint,
-        partB_prediction,
-        partC_checkpoint,
-        partC_prediction,
-        partD_final_decision,
-        partD_prediction,
-        participants,
-        payload_mb,
-        payload_reduction_pct,
-        student_id,
-    )
-
-
-@app.cell(hide_code=True)
-def _(
-    mo,
-    v2_03_lens,
-    v2_03_link_option_labels,
-    v2_03_option_labels,
-    v2_03_placement_options,
-    v2_03_topology_options,
-):
-    _link_options = v2_03_link_option_labels(v2_03_lens)
-    _topology_options = v2_03_option_labels(v2_03_topology_options(v2_03_lens))
-    _placement_options = v2_03_option_labels(v2_03_placement_options(v2_03_lens))
-    active_link = mo.ui.dropdown(
-        options=_link_options,
-        value=v2_03_lens["links"][v2_03_lens["default_link"]]["label"],
-        label="Active communication path",
-    )
+    topology_labels = {top.label: key for key, top in top_options.items()}
     topology_choice = mo.ui.dropdown(
-        options=_topology_options,
-        value=v2_03_lens["topology_labels"]["aligned"],
-        label="Topology shape",
+        topology_labels, value=top_options["aligned"].label, label="Topology to test",
     )
-    placement_choice = mo.ui.dropdown(
-        options=_placement_options,
-        value=v2_03_lens["placement_labels"]["affinity"],
-        label="Placement policy",
+    isolation = mo.ui.slider(
+        0.5, 0.9, value=0.8, step=0.1, label="Foreground capacity reservation",
     )
-    return active_link, placement_choice, topology_choice
-
-
-@app.cell(hide_code=True)
-def _(
-    COLORS,
-    MathPeek,
-    active_link,
-    big_takeaways,
-    build_lab_report,
-    burst_multiplier,
-    gated_hypothesis_card,
-    instrumentation_console,
-    ledger,
-    memo_note,
-    mo,
-    overlap_pct,
-    partA_checkpoint,
-    partA_prediction,
-    partB_checkpoint,
-    partB_prediction,
-    partC_checkpoint,
-    partC_prediction,
-    partD_final_decision,
-    partD_prediction,
-    participants,
-    payload_mb,
-    payload_reduction_pct,
-    placement_choice,
-    report_export_panel,
-    student_id,
-    topology_choice,
-    v2_03_alpha_beta_chart,
-    v2_03_alpha_beta_result,
-    v2_03_candidate_chart,
-    v2_03_chapter,
-    v2_03_congestion_chart,
-    v2_03_congestion_result,
-    v2_03_decision_result,
-    v2_03_evaluate_topologies,
-    v2_03_failure_callout,
-    v2_03_fmt,
-    v2_03_html_table,
-    v2_03_lens,
-    v2_03_metadata,
-    v2_03_prediction_feedback,
-    v2_03_profile,
-    v2_03_status_label,
-    v2_03_topology_chart,
-    v2_03_variant,
-):
-    _payload_mb = payload_mb.value
-    _participants = participants.value
-    _link_id = active_link.value
-    _topology_id = topology_choice.value
-    _placement_id = placement_choice.value
-
-    _part_a = v2_03_alpha_beta_result(v2_03_lens, _link_id, _payload_mb)
-    _actual_part_a = _part_a["binding_term"]
-    _topology_rows = v2_03_evaluate_topologies(v2_03_lens, _link_id, _payload_mb, _participants)
-    _part_b_selected = next(row for row in _topology_rows if row["topology_id"] == _topology_id)
-    _part_c = v2_03_congestion_result(
-        v2_03_lens,
-        _link_id,
-        _payload_mb,
-        _participants,
-        _topology_id,
-        _placement_id,
-        burst_multiplier.value,
+    sp = burst_spacing_params(track_id)
+    burst_spacing_ms = mo.ui.slider(
+        sp["start"], sp["stop"], value=sp["value"], step=sp["step"], label=sp["label"],
     )
-    _part_d = v2_03_decision_result(
-        v2_03_lens,
-        _link_id,
-        _payload_mb,
-        _participants,
-        _topology_id,
-        _placement_id,
-        burst_multiplier.value,
-        payload_reduction_pct.value,
-        overlap_pct.value,
+    fault = mo.ui.dropdown(
+        {"Capacity loss": "capacity", "Startup latency": "startup", "Traffic hot spot": "traffic_hotspot"},
+        value="Traffic hot spot", label="Suspected fault",
     )
-    _rejected = v2_03_decision_result(
-        v2_03_lens,
-        _link_id,
-        _payload_mb,
-        _participants,
-        "oversubscribed",
-        "spread",
-        max(1.5, burst_multiplier.value),
-        0,
-        0,
+    design_labels = {top.label: key for key, top in top_options.items()}
+    first_design = mo.ui.dropdown(design_labels, value=top_options["nonblocking"].label, label="Plan 1")
+    second_design = mo.ui.dropdown(design_labels, value=top_options["grouped"].label, label="Plan 2")
+    new_mix = mo.ui.dropdown(
+        TRAFFIC_PATTERN_OPTIONS,
+        value=default_traffic_pattern_label(track_id),
+        label="New traffic mix",
+    )
+    overlap_choice = mo.ui.dropdown(
+        OVERLAP_WINDOW_OPTIONS,
+        value=default_overlap_label(track_id),
+        label="Dependency-ready compute",
+    )
+    return (
+        burst_spacing_ms, fault, first_design, isolation, link, new_mix,
+        overlap_choice, payload_choice, second_design, topology_choice,
     )
 
-    def _part_a_table():
-        return v2_03_html_table(
-            [
-                {
-                    "Field": "Active path",
-                    "Value": _part_a["link_label"],
-                    "Interpretation": _part_a["source"],
-                },
-                {
-                    "Field": "alpha startup",
-                    "Value": f"{_part_a['alpha_ms']:.3f} ms",
-                    "Interpretation": "Fixed cost before bytes move.",
-                },
-                {
-                    "Field": "n/beta payload term",
-                    "Value": f"{_part_a['beta_ms']:.3f} ms",
-                    "Interpretation": "Payload cost from message size and bandwidth.",
-                },
-                {
-                    "Field": "Crossover size",
-                    "Value": f"{_part_a['crossover_kb']:.1f} KB",
-                    "Interpretation": "Below this size alpha dominates; above it bandwidth dominates.",
-                },
-                {
-                    "Field": "Budget status",
-                    "Value": v2_03_status_label(_part_a["passes_budget"]),
-                    "Interpretation": f"{_part_a['total_ms']:.3f} ms vs {v2_03_fmt(_part_a['budget_ms'])} ms budget.",
-                },
-            ],
-            [("Field", "Field"), ("Value", "Value"), ("Interpretation", "Interpretation")],
-            caption="Part A exact evidence table",
-        )
 
-    def _part_b_table():
-        rows = []
-        for row in _topology_rows:
-            rows.append(
-                {
-                    "Topology": row["label"],
-                    "BW_bisect": f"{row['bisection_mb_s']:,.0f} MB/s",
-                    "Sync time": f"{row['sync_ms']:.2f} ms",
-                    "Throughput loss": f"{row['throughput_loss']:.0%}",
-                    "Step/SLO": v2_03_status_label(row["passes_step"]),
-                    "Topology guard": v2_03_status_label(row["guard_ok"]),
-                    "Note": row["note"],
-                }
-            )
-        return v2_03_html_table(
-            rows,
-            [
-                ("Topology", "Topology"),
-                ("BW_bisect", "BW_bisect"),
-                ("Sync time", "Sync time"),
-                ("Throughput loss", "Throughput loss"),
-                ("Step/SLO", "Step/SLO"),
-                ("Topology guard", "Topology guard"),
-                ("Note", "Note"),
-            ],
-            caption="Part B bisection and topology table",
-        )
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    a_prediction = mo.ui.radio(
+        {"Startup latency": "startup", "Payload serialization": "serialization"},
+        label="Which term dominates the selected transfer?",
+    ).form(submit_button_label="Lock Part A prediction")
+    b_prediction = mo.ui.radio(
+        {"Non-blocking": "nonblocking", "Aligned rails": "aligned", "Grouped": "grouped", "Oversubscribed": "oversubscribed"},
+        label="Which topology has the lowest p95 completion time?",
+    ).form(submit_button_label="Lock Part B prediction")
+    c_prediction = mo.ui.radio(
+        {"Tail improves": "improves", "Tail worsens": "worsens", "No change": "same"},
+        label="What happens after reserving foreground capacity?",
+    ).form(submit_button_label="Lock Part C prediction")
+    d_prediction = mo.ui.radio(
+        {"Lane busy time and queue": "capacity", "Per-flow startup": "startup", "Concentrated lane bytes": "traffic_hotspot"},
+        label="Which counter should identify the selected fault?",
+    ).form(submit_button_label="Lock Part D prediction")
+    e_prediction = mo.ui.radio(
+        {"Plan 1 remains better": "first", "Plan 2 becomes better": "second", "Neither is feasible": "none"},
+        label="Which equal-budget plan survives the new traffic mix?",
+    ).form(submit_button_label="Lock Part E prediction")
+    return a_prediction, b_prediction, c_prediction, d_prediction, e_prediction
 
-    def _part_c_table():
-        return v2_03_html_table(
-            [
-                {
-                    "Metric": "Placement",
-                    "Value": _part_c["placement_label"],
-                    "Limit or meaning": _part_c["placement_note"],
-                },
-                {
-                    "Metric": "Offered load",
-                    "Value": f"{_part_c['offered_mb_s']:,.0f} MB/s",
-                    "Limit or meaning": "Demand injected into the selected bisection window.",
-                },
-                {
-                    "Metric": "Bisection capacity",
-                    "Value": f"{_part_c['capacity_mb_s']:,.0f} MB/s",
-                    "Limit or meaning": "Effective capacity after topology and oversubscription.",
-                },
-                {
-                    "Metric": "Utilization",
-                    "Value": f"{_part_c['utilization']:.0%}",
-                    "Limit or meaning": f"Track limit is {v2_03_lens['utilization_limit']:.0%}.",
-                },
-                {
-                    "Metric": "Tail multiplier",
-                    "Value": f"{_part_c['tail_multiplier']:.2f}x",
-                    "Limit or meaning": "Congestion turns average sync time into tail sync time.",
-                },
-                {
-                    "Metric": "Failure state",
-                    "Value": _part_c["failure_state"],
-                    "Limit or meaning": _part_c["binding_amount"],
-                },
-            ],
-            [("Metric", "Metric"), ("Value", "Value"), ("Limit or meaning", "Limit or meaning")],
-            caption="Part C congestion and placement table",
-        )
 
-    def _part_d_table(selected, rejected):
-        rows = [
-            {
-                "Guardrail": "Step-time/SLO",
-                "Selected plan": f"{selected['exposed_ms']:.2f} ms ({v2_03_status_label(selected['step_ok'])})",
-                "Rejected alternative": f"{rejected['exposed_ms']:.2f} ms ({v2_03_status_label(rejected['step_ok'])})",
-                "Limit": f"<= {v2_03_fmt(selected['step_budget_ms'])} ms",
-            },
-            {
-                "Guardrail": "Utilization",
-                "Selected plan": f"{selected['utilization']:.0%} ({v2_03_status_label(selected['utilization_ok'])})",
-                "Rejected alternative": f"{rejected['utilization']:.0%} ({v2_03_status_label(rejected['utilization_ok'])})",
-                "Limit": f"<= {v2_03_lens['utilization_limit']:.0%}",
-            },
-            {
-                "Guardrail": "Topology/placement",
-                "Selected plan": v2_03_status_label(selected["topology_ok"]),
-                "Rejected alternative": v2_03_status_label(rejected["topology_ok"]),
-                "Limit": "must pass topology guardrail",
-            },
-        ]
-        return v2_03_html_table(
-            rows,
-            [
-                ("Guardrail", "Guardrail"),
-                ("Selected plan", "Selected plan"),
-                ("Rejected alternative", "Rejected alternative"),
-                ("Limit", "Limit"),
-            ],
-            caption="Part D simultaneous guardrail table",
-        )
-
-    def build_part_a():
-        items = [
-            mo.md("## Part A - Concept Module: Alpha/Beta Terms Predict Communication Cost"),
-            gated_hypothesis_card(
-                partA_prediction,
-                title="1. Formulate Your Interconnect Hypothesis",
-                subtitle=(
-                    f"Scenario: {v2_03_variant.stakeholder} must move a "
-                    f"{_part_a['payload_mb']:.0f} MB {v2_03_lens['payload_name']} "
-                    f"over {_part_a['link_label']} before the track budget is exhausted."
-                ),
-            ),
-            v2_03_prediction_feedback(
-                partA_prediction.value,
-                _actual_part_a,
-                f"Correct. The measured binding term is **{_actual_part_a}**.",
-                f"The measured binding term is **{_actual_part_a}**. The chart separates alpha from n/beta.",
-            ),
-        ]
-        if partA_prediction.value is None:
-            return mo.vstack(items)
-        items.extend(
-            [
-                instrumentation_console(
-                    mo.hstack([payload_mb, active_link], justify="start", gap=1.0),
-                    title="Interconnect & Message Instrumentation",
-                    subtitle="Configure transfer payload size and physical interconnect path",
-                ),
-                mo.as_html(v2_03_alpha_beta_chart(COLORS, _part_a)),
-                _part_a_table(),
-                v2_03_failure_callout(
-                    _part_a["passes_budget"],
-                    f"Consequence: {_part_a['total_ms']:.2f} ms fits the {v2_03_fmt(_part_a['budget_ms'])} ms communication budget.",
-                    f"Boundary: {_part_a['total_ms']:.2f} ms exceeds the {v2_03_fmt(_part_a['budget_ms'])} ms budget. Mitigation must reduce hops/alpha, raise beta, or shrink payload.",
-                ),
-                MathPeek(
-                    "T(n)=alpha+n/beta; n*=alpha*beta",
-                    {
-                        "alpha": f"{_part_a['alpha_ms']:.3f} ms startup",
-                        "n/beta": f"{_part_a['beta_ms']:.3f} ms payload term",
-                        "n*": f"{_part_a['crossover_kb']:.1f} KB crossover",
-                        "chapter source": "Network Fabrics performance model",
-                    },
-                ),
-                mo.Html(f"""
-                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
-                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part A Engineering Action</h4>
-                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
-                        Select the primary architectural lever to resolve alpha/beta bottlenecks for this track.
-                    </p>
-                    {partA_checkpoint}
-                </div>
-                """),
-            ]
-        )
-        return mo.vstack(items)
-
-    def build_part_b():
-        _actual = "bisection"
-        items = [
-            mo.md("## Part B - Concept Module: Topology And Bisection Change Feasible Parallel Work"),
-            gated_hypothesis_card(
-                partB_prediction,
-                title="2. Formulate Your Topology & Bisection Hypothesis",
-                subtitle=(
-                    f"Scenario: The same payload now scales to {_participants} "
-                    f"{v2_03_lens['participant_name']}. What decides whether parallel "
-                    "communication remains feasible across the fabric?"
-                ),
-            ),
-            v2_03_prediction_feedback(
-                partB_prediction.value,
-                _actual,
-                "Correct. The narrowest bisection cut determines feasible global communication.",
-                "Endpoint link speed is not enough. The bisection table shows which topology preserves useful parallel work.",
-            ),
-        ]
-        if partB_prediction.value is None:
-            return mo.vstack(items)
-        items.extend(
-            [
-                instrumentation_console(
-                    mo.hstack([participants, topology_choice, active_link], justify="start", gap=1.0),
-                    title="Scale & Topology Configuration",
-                    subtitle="Tune the number of endpoints, fabric topology, and link speed",
-                ),
-                mo.as_html(v2_03_topology_chart(COLORS, _topology_rows, v2_03_lens["step_budget_ms"])),
-                _part_b_table(),
-                v2_03_failure_callout(
-                    _part_b_selected["passes_step"] and _part_b_selected["guard_ok"],
-                    f"Consequence: {_part_b_selected['label']} keeps the modeled sync at {_part_b_selected['sync_ms']:.2f} ms.",
-                    f"Boundary: {_part_b_selected['label']} is not a safe topology assumption. It reports {_part_b_selected['sync_ms']:.2f} ms against a {v2_03_fmt(v2_03_lens['step_budget_ms'])} ms step/SLO budget and guardrail status {v2_03_status_label(_part_b_selected['guard_ok'])}.",
-                ),
-                MathPeek(
-                    "BW_bisect=(N/2)*beta/oversubscription",
-                    {
-                        "participants": f"{_participants}",
-                        "selected topology": _part_b_selected["label"],
-                        "effective bisection": f"{_part_b_selected['bisection_mb_s']:,.0f} MB/s",
-                        "chapter source": "Network Fabrics topology and bisection sections",
-                    },
-                ),
-                mo.Html(f"""
-                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
-                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part B Topology Governance</h4>
-                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
-                        What topology assumption should the final communication memo carry forward?
-                    </p>
-                    {partB_checkpoint}
-                </div>
-                """),
-            ]
-        )
-        return mo.vstack(items)
-
-    def build_part_c():
-        _actual = "placement"
-        items = [
-            mo.md("## Part C - Concept Module: Congestion And Placement Make Local Choices Fleet-Wide Bottlenecks"),
-            gated_hypothesis_card(
-                partC_prediction,
-                title="3. Formulate Your Congestion & Placement Hypothesis",
-                subtitle=(
-                    f"Scenario: The scheduler chooses {_part_c['placement_label']} on "
-                    f"{_part_c['topology_label']}. Under BSP-style synchronization, the slowest "
-                    "congested path paces the entire fleet."
-                ),
-            ),
-            v2_03_prediction_feedback(
-                partC_prediction.value,
-                _actual,
-                "Correct. Placement and utilization headroom decide whether local choices create fleet-wide tail latency.",
-                "The productive failure is treating placement as bookkeeping. The evidence below shows congestion amplification.",
-            ),
-        ]
-        if partC_prediction.value is None:
-            return mo.vstack(items)
-        items.extend(
-            [
-                instrumentation_console(
-                    mo.hstack([placement_choice, burst_multiplier, topology_choice], justify="start", gap=1.0),
-                    title="Placement & Traffic Pressure Instrumentation",
-                    subtitle="Simulate job placement policies and background burst multipliers",
-                ),
-                mo.as_html(v2_03_congestion_chart(COLORS, _part_c)),
-                _part_c_table(),
-                v2_03_failure_callout(
-                    _part_c["utilization_ok"] and _part_c["topology_ok"],
-                    f"Consequence: utilization is {_part_c['utilization']:.0%}, below the {v2_03_lens['utilization_limit']:.0%} guardrail.",
-                    f"Boundary: utilization is {_part_c['utilization']:.0%} against a {v2_03_lens['utilization_limit']:.0%} limit, with topology guardrail {v2_03_status_label(_part_c['topology_ok'])}. Mitigation must improve locality or reduce burst pressure.",
-                ),
-                MathPeek(
-                    "rho=offered_load/capacity; tail rises as rho approaches 1",
-                    {
-                        "offered load": f"{_part_c['offered_mb_s']:,.0f} MB/s",
-                        "capacity": f"{_part_c['capacity_mb_s']:,.0f} MB/s",
-                        "rho": f"{_part_c['utilization']:.2f}",
-                        "chapter source": "Network Fabrics fabric behavior and congestion-control sections",
-                    },
-                ),
-                mo.Html(f"""
-                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
-                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part C Tail Mitigation</h4>
-                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
-                        Which placement mitigation policy will prevent this workload from becoming a fleet bottleneck?
-                    </p>
-                    {partC_checkpoint}
-                </div>
-                """),
-            ]
-        )
-        return mo.vstack(items)
-
-    def build_part_d():
-        _naive_binding = _rejected["binding_guardrail"]
-        _naive_prediction_key = {
-            "step-time/SLO": "step",
-            "utilization": "utilization",
-            "topology": "topology",
-        }.get(_naive_binding, "topology")
-        items = [
-            mo.md("## Part D - Concept Module: Communication Plan Guardrails"),
-            gated_hypothesis_card(
-                partD_prediction,
-                title="4. Formulate Your Plan Guardrail Hypothesis",
-                subtitle=(
-                    f"Scenario: The final communication plan must satisfy step-time/SLO, "
-                    f"utilization, and topology guardrails for {v2_03_profile.label}. "
-                    f"{v2_03_lens['guardrail_text']}"
-                ),
-            ),
-            v2_03_prediction_feedback(
-                partD_prediction.value,
-                _naive_prediction_key,
-                f"Correct. The rejected alternative is primarily blocked by **{_rejected['binding_guardrail']}**.",
-                f"The rejected alternative is primarily blocked by **{_rejected['binding_guardrail']}**. A plan needs all three guardrails, not one good metric.",
-            ),
-        ]
-        if partD_prediction.value is None:
-            return mo.vstack(items)
-        items.extend(
-            [
-                instrumentation_console(
-                    mo.hstack(
-                        [topology_choice, placement_choice, payload_reduction_pct, overlap_pct],
-                        justify="start",
-                        gap=1.0,
-                    ),
-                    title="Plan Optimization & Overlap Controls",
-                    subtitle="Apply payload reduction and communication-computation overlap",
-                ),
-                mo.as_html(v2_03_candidate_chart(COLORS, _part_d, _rejected)),
-                _part_d_table(_part_d, _rejected),
-                v2_03_failure_callout(
-                    _part_d["valid_plan"],
-                    f"Consequence: selected plan passes all guardrails. Binding guardrail is {_part_d['binding_guardrail']}.",
-                    f"Boundary: selected plan fails at least one guardrail. Binding guardrail is {_part_d['binding_guardrail']}; revise topology, placement, payload reduction, or overlap.",
-                ),
-                MathPeek(
-                    "valid = exposed_time<=SLO and utilization<=limit and topology_guardrail",
-                    {
-                        "exposed time": f"{_part_d['exposed_ms']:.2f} ms vs {v2_03_fmt(_part_d['step_budget_ms'])} ms",
-                        "utilization": f"{_part_d['utilization']:.0%} vs {v2_03_lens['utilization_limit']:.0%}",
-                        "topology guardrail": v2_03_status_label(_part_d["topology_ok"]),
-                        "chapter source": "Network Fabrics summary and fallacies",
-                    },
-                ),
-                mo.Html(f"""
-                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
-                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part D Engineering Sign-off</h4>
-                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
-                        How should the lead systems architect sign off on this distributed communication plan?
-                    </p>
-                    {partD_final_decision}
-                </div>
-                """),
-            ]
-        )
-        return mo.vstack(items)
-
-    def build_synthesis():
-        _completed = all(
-            value is not None
-            for value in (
-                partA_prediction.value,
-                partA_checkpoint.value,
-                partB_prediction.value,
-                partB_checkpoint.value,
-                partC_prediction.value,
-                partC_checkpoint.value,
-                partD_prediction.value,
-                partD_final_decision.value,
-            )
-        )
-        _binding_amount = _part_d["binding_guardrail"] if not _part_d["valid_plan"] else _part_c["binding_amount"]
-        _memo = memo_note.value or (
-            f"Use {_part_d['topology_label']} with {_part_d['placement_label']}; "
-            f"binding amount: {_binding_amount}; reject raw payload on oversubscribed spread placement; "
-            f"{v2_03_lens['collective_implication']}"
-        )
-        _snapshot = {
-            "track_id": v2_03_profile.track_id,
-            "scenario_id": v2_03_variant.scenario_id,
-            "active_link": _part_a["link_label"],
-            "payload_mb": _payload_mb,
-            "participants": _participants,
-            "selected_topology": _part_d["topology_label"],
-            "selected_placement": _part_d["placement_label"],
-            "reduced_payload_mb": round(_part_d["reduced_payload_mb"], 3),
-            "binding_network_amount": _binding_amount,
-            "step_time_ms": round(_part_d["exposed_ms"], 3),
-            "utilization": round(_part_d["utilization"], 4),
-            "valid_plan": _part_d["valid_plan"],
-            "rejected_alternative": "raw payload on oversubscribed spread placement",
-            "rejected_exposed_ms": round(_rejected["exposed_ms"], 3),
-            "collective_communication_implication": v2_03_lens["collective_implication"],
-            "completed": _completed,
-        }
-        _design = {
-            "lab_id": v2_03_metadata.lab_id,
-            "track_id": v2_03_profile.track_id,
-            "scenario_id": v2_03_variant.scenario_id,
-            "selected_topology": _part_d["topology_label"],
-            "selected_placement": _part_d["placement_label"],
-            "active_link": _part_a["link_label"],
-            "payload_mb": _payload_mb,
-            "binding_network_amount": _binding_amount,
-            "step_time_ms": _part_d["exposed_ms"],
-            "utilization": _part_d["utilization"],
-            "rejected_alternative": "raw payload on oversubscribed spread placement",
-            "collective_communication_implication": v2_03_lens["collective_implication"],
-            "completed": _completed,
-            "result_snapshot": _snapshot,
-        }
-        ledger.save(track=v2_03_profile.track_id, chapter=v2_03_chapter, design=_design)
-
-        _incomplete = []
-        if partA_prediction.value is None:
-            _incomplete.append("Part A alpha/beta prediction")
-        if partA_checkpoint.value is None:
-            _incomplete.append("Part A checkpoint decision")
-        if partB_prediction.value is None:
-            _incomplete.append("Part B bisection prediction")
-        if partB_checkpoint.value is None:
-            _incomplete.append("Part B topology checkpoint")
-        if partC_prediction.value is None:
-            _incomplete.append("Part C congestion/placement prediction")
-        if partC_checkpoint.value is None:
-            _incomplete.append("Part C placement checkpoint")
-        if partD_prediction.value is None:
-            _incomplete.append("Part D guardrail prediction")
-        if partD_final_decision.value is None:
-            _incomplete.append("Final communication plan decision")
-
-        _report = build_lab_report(
-            v2_03_metadata,
-            student_id=student_id.value or "",
-            track=v2_03_profile.label,
-            scenario=v2_03_lens["scenario"],
-            learning_objectives=(
-                "Use alpha/beta terms to classify communication cost.",
-                "Use bisection bandwidth and topology to test feasible parallel work.",
-                "Diagnose congestion and placement as fleet-wide bottlenecks.",
-                "Approve a communication plan only when SLO, utilization, and topology guardrails pass.",
-            ),
-            predictions={
-                "partA_alpha_beta": partA_prediction.value,
-                "partB_bisection": partB_prediction.value,
-                "partC_congestion_placement": partC_prediction.value,
-                "partD_guardrail": partD_prediction.value,
-            },
-            knob_settings={
-                "payload_mb": _payload_mb,
-                "participants": _participants,
-                "active_link": _part_a["link_label"],
-                "topology": _part_d["topology_label"],
-                "placement": _part_d["placement_label"],
-                "burst_multiplier": burst_multiplier.value,
-                "payload_reduction_pct": payload_reduction_pct.value,
-                "overlap_pct": overlap_pct.value,
-            },
-            binding_constraints={
-                "binding_network_amount": _binding_amount,
-                "step_time_ms": round(_part_d["exposed_ms"], 3),
-                "utilization": round(_part_d["utilization"], 4),
-                "valid_plan": _part_d["valid_plan"],
-            },
-            evidence_summary={
-                "alpha_beta_binding": _part_a["binding_term"],
-                "topology_sync_ms": round(_part_b_selected["sync_ms"], 3),
-                "congestion_tail_ms": round(_part_c["tail_ms"], 3),
-                "final_exposed_ms": round(_part_d["exposed_ms"], 3),
-                "rejected_exposed_ms": round(_rejected["exposed_ms"], 3),
-            },
-            decisions={
-                "alpha_beta_checkpoint": partA_checkpoint.value,
-                "topology_checkpoint": partB_checkpoint.value,
-                "placement_checkpoint": partC_checkpoint.value,
-                "final_decision": partD_final_decision.value,
-            },
-            reflections={"communication_memo_note": memo_note.value},
-            final_decision=_memo,
-            big_takeaways=(
-                "Communication cost is an amount-system budget, not a single link-speed number.",
-                "Bisection and placement decide how much parallel work remains useful.",
-                "A network plan must pass SLO, utilization, and topology guardrails simultaneously.",
-            ),
-            residual_risk=v2_03_lens["failure_mode"],
-            source_trace={
-                "chapter_anchor": "Volume II, Chapter 3: Network Fabrics",
-                "source_models": "alpha/beta, bisection bandwidth, utilization guardrails",
-                "mlsysim_functions": "calc_point_to_point_time, calc_alpha_beta_crossover, calc_bisection_bandwidth",
-                "track_source_policy": v2_03_profile.source_policy,
-                "scenario_assumptions": "track thresholds and non-cloud link rates are notebook-local pedagogical assumptions",
-            },
-            result_snapshot=_snapshot,
-            incomplete_fields=tuple(_incomplete),
-        )
-
-        return mo.vstack(
-            [
-                mo.md("## Synthesis - Network Communication Memo"),
-                mo.Html(f"""
-                <div class="mlsysbook-panel" style="border-left: 4px solid #1F407A; margin-top: 16px;">
-                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">STUDENT MEMO & REFLECTIONS</div>
-                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Architectural Findings</h4>
-                    {student_id}
-                    <div style="margin-top: 12px;">{memo_note}</div>
-                </div>
-                """),
-                mo.callout(
-                    mo.md(
-                        f"**Selected policy:** {_part_d['topology_label']} with {_part_d['placement_label']}.\n\n"
-                        f"**Binding network amount:** {_binding_amount}.\n\n"
-                        f"**Rejected alternative:** raw payload on oversubscribed spread placement "
-                        f"({_rejected['exposed_ms']:.2f} ms exposed time).\n\n"
-                        f"**Carry-forward:** {v2_03_lens['collective_implication']}"
-                    ),
-                    kind="success" if _part_d["valid_plan"] else "warn",
-                ),
-                big_takeaways(
-                    [
-                        "Communication cost is an amount-system budget, not a single link-speed number.",
-                        "Bisection and placement decide how much parallel work remains useful.",
-                        "A network plan must pass SLO, utilization, and topology guardrails simultaneously.",
-                    ]
-                ),
-                mo.Html(f"""
-                <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin-top: 16px;">
-                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">FINAL VERIFICATION & SIGN-OFF</div>
-                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Lead Architect Authorization</h4>
-                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
-                        Confirm your final deployment authorization and export your telemetry audit record.
-                    </p>
-                    {partD_final_decision}
-                </div>
-                """),
-                report_export_panel(_report),
-            ]
-        )
-
-    v2_03_tabs = mo.ui.tabs(
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    choices = {
+        "Non-blocking": "nonblocking", "Aligned rails": "aligned",
+        "Grouped": "grouped", "Oversubscribed": "oversubscribed",
+        "Hold: no feasible plan": "none",
+    }
+    final_choice = mo.ui.radio(choices, label="Recommended plan")
+    final_rejected = mo.ui.radio(
+        {key: value for key, value in choices.items() if value != "none"},
+        label="Quantified rejected alternative",
+    )
+    final_trigger = mo.ui.radio(
+        {"p95 exceeds budget": "p95", "Traffic matrix changes": "traffic", "Reservation harms background work": "capacity"},
+        label="Reevaluation trigger",
+    )
+    final_risk = mo.ui.radio(
+        {"Illustrative traffic assumptions": "traffic_assumptions", "Unmodeled routing dynamics": "routing", "Path measurements may drift": "measurement_drift"},
+        label="Remaining limitation",
+    )
+    rationale = mo.ui.text_area(
+        label="Decision rationale",
+        placeholder="Cite the chosen plan, quantified rejected plan, remaining limitation, and trigger.",
+    )
+    e_choice = mo.ui.radio(
         {
-            "Part A: Alpha/Beta": build_part_a(),
-            "Part B: Topology": build_part_b(),
-            "Part C: Congestion": build_part_c(),
-            "Part D: Guardrails": build_part_d(),
-            "Synthesis": build_synthesis(),
-        }
+            "Approve Plan 1": "first", "Approve Plan 2": "second",
+            "Hold: no feasible plan": "none",
+        },
+        label="Decision after reviewing both plans",
     )
-    v2_03_tabs
+    return e_choice, final_choice, final_rejected, final_risk, final_trigger, rationale
+
+
+@app.cell
+def _(
+    OVERLAP_WINDOW_QUANTITIES, PAYLOAD_QUANTITIES, Q_, alpha_beta_experiment,
+    burst_spacing_ms, congestion_experiment, equal_budget_comparison,
+    fault, first_design, isolation, link, new_mix, overlap_choice,
+    payload_choice, scenario, second_design, telemetry_experiment,
+    topology_choice, topology_experiment, track_id,
+):
+    selected_payload = PAYLOAD_QUANTITIES[payload_choice.value]
+    selected_overlap = OVERLAP_WINDOW_QUANTITIES[overlap_choice.value]
+    a_baseline = alpha_beta_experiment(track_id, link.value, Q_(1, "byte"))
+    a_result = alpha_beta_experiment(track_id, link.value, selected_payload)
+    b_rows = topology_experiment(
+        track_id, link_id=link.value, participants=scenario.participants,
+        payload=selected_payload, traffic_pattern=scenario.traffic_pattern,
+    )
+    b_by_id = {row["topology_id"]: row for row in b_rows}
+    b_baseline = b_by_id["nonblocking"]
+    b_result = b_by_id[topology_choice.value]
+    c_baseline = congestion_experiment(
+        track_id, topology_choice.value, isolation_fraction=0,
+        burst_spacing=Q_(burst_spacing_ms.value, "ms"),
+    )
+    c_result = congestion_experiment(
+        track_id, topology_choice.value, isolation_fraction=isolation.value,
+        burst_spacing=Q_(burst_spacing_ms.value, "ms"),
+    )
+    d_evidence = telemetry_experiment(track_id, topology_choice.value, fault=fault.value)
+    e_comparison = equal_budget_comparison(
+        track_id, first_design.value, second_design.value,
+        overlap_window=selected_overlap,
+        traffic_pattern=new_mix.value,
+    )
+    return (
+        a_baseline, a_result, b_baseline, b_by_id, b_result, b_rows,
+        c_baseline, c_result, d_evidence, e_comparison, selected_overlap,
+        selected_payload,
+    )
+
+
+@app.cell
+def _(
+    a_baseline, a_prediction, a_result, b_baseline, b_by_id, b_prediction,
+    b_result, c_baseline, c_prediction, c_result, capture_evidence,
+    d_evidence, d_prediction, e_choice, e_comparison, e_prediction, first_design, mo,
+    link, payload_choice, second_design, set_evidence, topology_choice, track_id,
+):
+    def store(part, capture):
+        set_evidence(lambda current: {**current, part: capture})
+
+    stable_upstream = {"track_id": track_id}
+    b_upstream = {"track_id": track_id, "link_id": link.value, "payload": payload_choice.value}
+    cd_upstream = {"track_id": track_id, "topology_id": topology_choice.value}
+    a_capture = mo.ui.button(
+        label="Capture crossover evidence", kind="success",
+        disabled=a_prediction.value is None,
+        on_click=lambda _v: store("A", capture_evidence(
+            track=track_id, part="A", prediction=a_prediction.value,
+            inputs={"selected_link": a_result["link_id"]}, baseline=a_baseline,
+            result=a_result, upstream_inputs=stable_upstream,
+            decision=a_result["binding_term"],
+            model_key="v2_03_experiments.alpha_beta_experiment",
+        )),
+    )
+    b_capture = mo.ui.button(
+        label="Capture topology comparison", kind="success",
+        disabled=b_prediction.value is None or topology_choice.value == "nonblocking",
+        on_click=lambda _v: store("B", capture_evidence(
+            track=track_id, part="B", prediction=b_prediction.value,
+            inputs={"selected_topology": topology_choice.value},
+            baseline=b_baseline, result=b_result,
+            alternatives=tuple(b_by_id.values()), upstream_inputs=b_upstream,
+            decision=topology_choice.value,
+            model_key="v2_03_experiments.topology_experiment",
+        )),
+    )
+    c_capture = mo.ui.button(
+        label="Capture isolation trade-off", kind="success",
+        disabled=c_prediction.value is None,
+        on_click=lambda _v: store("C", capture_evidence(
+            track=track_id, part="C", prediction=c_prediction.value,
+            inputs={"topology_id": topology_choice.value, "reservation": c_result["inputs"]["isolation_fraction"]},
+            baseline=c_baseline, result=c_result, upstream_inputs=cd_upstream,
+            decision="reserve" if c_result["within_budget"] else "do_not_reserve",
+            model_key="v2_03_experiments.congestion_experiment",
+        )),
+    )
+    d_capture = mo.ui.button(
+        label="Capture diagnosis test", kind="success",
+        disabled=d_prediction.value is None,
+        on_click=lambda _v: store("D", capture_evidence(
+            track=track_id, part="D", prediction=d_prediction.value,
+            inputs=d_evidence["inputs"], baseline=d_evidence["baseline"],
+            result=d_evidence["result"],
+            alternatives=({"counter_to_watch": d_evidence["counter_to_watch"]},),
+            upstream_inputs=cd_upstream, decision=d_evidence["supports_diagnosis"],
+            model_key="v2_03_experiments.telemetry_experiment",
+        )),
+    )
+    e_model_result = e_comparison["winner"] if (
+        e_comparison["first"]["valid_plan"] or e_comparison["second"]["valid_plan"]
+    ) else "none"
+    e_student_decision = (
+        first_design.value if e_choice.value == "first"
+        else second_design.value if e_choice.value == "second"
+        else "none"
+    )
+    e_chosen_result = (
+        e_comparison["first"] if e_choice.value == "first"
+        else e_comparison["second"] if e_choice.value == "second"
+        else None
+    )
+    e_capture = mo.ui.button(
+        label="Capture equal-budget decision", kind="success",
+        disabled=e_prediction.value is None or e_choice.value is None or first_design.value == second_design.value,
+        on_click=lambda _v: store("E", capture_evidence(
+            track=track_id, part="E", prediction=e_prediction.value,
+            inputs=e_comparison["inputs"], baseline=e_comparison["first"],
+            result=e_comparison["second"],
+            alternatives=(e_comparison["first"], e_comparison["second"]),
+            upstream_inputs=stable_upstream, decision=e_student_decision,
+            chosen_result=e_chosen_result, result_role="comparison alternative",
+            model_key="v2_03_experiments.equal_budget_comparison",
+        )),
+    )
+    return (
+        a_capture, b_capture, b_upstream, c_capture, cd_upstream, d_capture,
+        e_capture, e_model_result, stable_upstream,
+    )
+
+
+@app.cell
+def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, scenario, track):
+    css = mo.Html("""
+    <style>
+    .fabric-head{background:linear-gradient(135deg,#10233d,#185a73);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin:10px 0 14px}
+    .fabric-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
+    .fabric-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.fabric-head p{color:#d9f4ff;max-width:780px}
+    .fabric-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:9px;margin-top:17px}.fabric-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
+    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#10233d!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a9c9d8}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
+    .saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}.table-wrap{max-width:100%;overflow-x:auto}
+    @media(max-width:520px){.fabric-head{border-radius:9px;margin-top:30px}.fabric-meta{grid-template-columns:1fr}}
+    </style>""")
+    header = mo.Html(f"""<section class="fabric-head"><div class="fabric-top"><span>VOLUME II · LAB 03</span><span>ABOUT 50–55 MIN</span></div><h1>When Does the Fabric Become the Computer?</h1><p>Predict which communication constraint binds, test the traffic path, and defend a fleet fabric plan with saved evidence.</p><div class="fabric-meta"><div><b>Fleet unit</b><br>{scenario.fleet_unit}</div><div><b>Output</b><br>Network design review</div><div><b>Method</b><br>Five controlled contrasts</div></div></section>""")
+    mo.vstack([LAB_CSS, ACADEMIC_LAB_CSS, css, track, header]).style({"padding-top": "32px"})
     return
 
 
-@app.cell(hide_code=True)
-def _(mo, v2_03_metadata, v2_03_profile):
-    mo.Html(
-        f"""
-    <div class="lab-hud">
-      <span class="hud-label">LAB</span>
-      <span class="hud-value">{v2_03_metadata.lab_id}</span>
-      <span class="hud-label">TRACK</span>
-      <span class="hud-value">{v2_03_profile.label}</span>
-      <span style="flex:1;"></span>
-      <span class="hud-label">STATUS</span>
-      <span class="hud-active">ACTIVE</span>
-    </div>
-    """
+@app.cell
+def _(
+    audit_evidence, b_upstream, cd_upstream, get_evidence, go, mo,
+    stable_upstream, track_id,
+):
+    captures = get_evidence()
+    per_part_upstream = {
+        "A": stable_upstream,
+        "B": b_upstream,
+        "C": cd_upstream,
+        "D": cd_upstream,
+        "E": stable_upstream,
+    }
+    audit = audit_evidence(
+        captures, track=track_id, required_parts=("A", "B", "C", "D", "E"),
+        per_part_upstream_inputs=per_part_upstream,
+        contrast_required_parts=("A", "B", "C", "D", "E"),
     )
+
+    def table(rows):
+        if not rows:
+            return mo.md("No rows.")
+        columns = list(rows[0])
+        head = "".join(f"<th>{column}</th>" for column in columns)
+        body = "".join(
+            "<tr>" + "".join(f"<td>{row[column]}</td>" for column in columns) + "</tr>"
+            for row in rows
+        )
+        return mo.Html(f'<div class="table-wrap"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>')
+
+    def saved(part):
+        capture = captures.get(part)
+        if capture is None:
+            return mo.callout(mo.md("No saved evidence for this part."), kind="warn")
+        if part in audit.stale or (part, part) in audit.identical_pairs:
+            return mo.callout(mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** Recapture this part."), kind="danger")
+        snapshot = capture.to_dict()
+        return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · prediction: {snapshot["prediction"]}<br><small>Track {snapshot["track"]}; later control changes do not rewrite this result.</small></div>')
+
+    def bar_chart(labels, values, title, colors):
+        figure = go.Figure([go.Bar(
+            x=labels, y=values, marker_color=colors,
+            text=[f"{value:,.2f}" for value in values], textposition="outside",
+        )])
+        figure.update_layout(
+            height=285, margin=dict(l=55, r=20, t=25, b=60),
+            yaxis_title=title, showlegend=False,
+        )
+        return figure
+    return audit, bar_chart, captures, per_part_upstream, saved, table
+
+
+@app.cell
+def _(
+    COLORS, a_baseline, a_capture, a_prediction, a_result,
+    apply_plotly_theme, audit, b_capture, b_prediction, b_rows, bar_chart,
+    burst_spacing_ms, c_baseline, c_capture, c_prediction, c_result,
+    captures, d_capture, d_evidence, d_prediction, e_capture, e_choice,
+    e_comparison, e_model_result, e_prediction, fault,
+    final_choice, final_rejected, final_risk, final_trigger, first_design,
+    isolation, link, mo, new_mix, overlap_choice, payload_choice, rationale, saved,
+    second_design, table, topology_choice,
+):
+    def part_a():
+        intro = mo.md("### A · When does bandwidth beat lower startup latency? (8 min)\nChoose a path and payload, then predict which term dominates before revealing the transfer decomposition.")
+        controls = mo.hstack([link, payload_choice], widths="equal", wrap=True)
+        if a_prediction.value is None:
+            return mo.vstack([intro, controls, a_prediction])
+        figure = bar_chart(
+            ["Startup", "Serialization"],
+            [a_result["alpha_ms"], a_result["serialization_ms"]],
+            "Transfer time (ms)", [COLORS["BlueLine"], COLORS["OrangeLine"]],
+        )
+        rows = [
+            {"Run": "One byte", "Total": f"{a_baseline['total_ms']:.3f} ms", "Binding": a_baseline["binding_term"]},
+            {"Run": f"{a_result['inputs']['payload']['value']:g} {a_result['inputs']['payload']['unit']}", "Total": f"{a_result['total_ms']:.3f} ms", "Binding": a_result["binding_term"]},
+        ]
+        note = f"startup {a_result['alpha_ms']:.3f} ms; serialization {a_result['serialization_ms']:.3f} ms; crossover {a_result['crossover_kb']:.2f} KB"
+        return mo.vstack([intro, controls, a_prediction, apply_plotly_theme(figure), table(rows), mo.callout(mo.md(f"**Prediction:** {a_prediction.value}. **Analytical result:** {note}."), kind="info"), a_capture, saved("A"), mo.accordion({"Calculation Notes": mo.md("MLSysIM evaluates startup latency plus payload divided by path bandwidth. The crossover is the payload where both terms are equal.")})])
+
+    def part_b():
+        intro = mo.md("### B · Why do identical links deliver different performance? (10 min)\nHold link, participants, payload, and traffic fixed. Change topology resources and routing lanes.")
+        if b_prediction.value is None:
+            return mo.vstack([intro, b_prediction])
+        rows = [{
+            "Role": row.get("role", "—"),
+            "Topology": row["label"], "Cut capacity": f"{row['cut_capacity_mb_s']:,.0f} MB/s",
+            "p95": f"{row['p95_ms']:.2f} ms", "Queue": f"{row['max_queue_ms']:.2f} ms",
+            "Cost assumption": f"${row['cost_usd']:,.0f}",
+            "Budget": "PASS" if row["within_budget"] else "FAIL",
+        } for row in b_rows]
+        figure = bar_chart(
+            [row["label"] for row in b_rows], [row["p95_ms"] for row in b_rows],
+            "Flow completion p95 (ms)",
+            [COLORS["BlueLine"], COLORS["GreenLine"], COLORS["OrangeLine"], COLORS["RedLine"]],
+        )
+        return mo.vstack([intro, b_prediction, topology_choice, apply_plotly_theme(figure), table(rows), mo.callout(mo.md("Lower structural cost can remove cut capacity and increase queueing under the same traffic."), kind="info"), b_capture, saved("B"), mo.accordion({"Calculation Notes": mo.md("MLSysIM counts links and switches/gateways, routes identical finite flows onto shared lanes, and FIFO-schedules their startup and serialization time. Costs and configurations are illustrative planning assumptions, not measured device specs. The p95 is computed from simulated flow completions.")})])
+
+    def part_c():
+        intro = mo.md("### C · When does sharing become unacceptable? (10 min)\nA foreground burst competes with background traffic. Reserve physical lane capacity and observe the protected tail and sacrificed background capacity.")
+        controls = mo.hstack([isolation, burst_spacing_ms], widths="equal", wrap=True)
+        if c_prediction.value is None:
+            return mo.vstack([intro, controls, c_prediction])
+        rows = [
+            {"Case": "Shared", "Foreground p95": f"{c_baseline['foreground_p95_ms']:.2f} ms", "Finish": f"{c_baseline['foreground_completion_ms']:.2f} ms", "Background capacity": f"{c_baseline['capacity_left_for_background_mb_s']:,.0f} MB/s"},
+            {"Case": "Reserved", "Foreground p95": f"{c_result['foreground_p95_ms']:.2f} ms", "Finish": f"{c_result['foreground_completion_ms']:.2f} ms", "Background capacity": f"{c_result['capacity_left_for_background_mb_s']:,.0f} MB/s"},
+        ]
+        figure = bar_chart(
+            ["Shared p95", "Reserved p95"],
+            [c_baseline["foreground_p95_ms"], c_result["foreground_p95_ms"]],
+            "Foreground p95 (ms)", [COLORS["RedLine"], COLORS["GreenLine"]],
+        )
+        message = f"Reservation dedicates {c_result['reserved_capacity_mb_s']:,.0f} MB/s and leaves {c_result['capacity_left_for_background_mb_s']:,.0f} MB/s for background work. Isolation does not create bandwidth."
+        return mo.vstack([intro, controls, c_prediction, apply_plotly_theme(figure), table(rows), mo.callout(mo.md(message), kind="success" if c_result["within_budget"] else "danger"), c_capture, saved("C"), mo.accordion({"Calculation Notes": mo.md("The shared run schedules both traffic classes on the same lanes. The reserved run gives foreground flows the selected capacity fraction and reports the complementary capacity unavailable to them.")})])
+
+    def part_d():
+        intro = mo.md("### D · Which telemetry identifies the bottleneck? (9 min)\nSelect a suspected fault, commit the expected counter, then test one targeted counterfactual.")
+        if d_prediction.value is None:
+            return mo.vstack([intro, fault, d_prediction])
+        rows = [
+            {"Run": "Fault present", "p95": f"{d_evidence['baseline_p95_ms']:.2f} ms", "Max queue": f"{d_evidence['baseline_max_queue_ms']:.2f} ms", "Bottleneck": d_evidence["bottleneck_lane"]},
+            {"Run": "Targeted intervention", "p95": f"{d_evidence['counterfactual_p95_ms']:.2f} ms", "Max queue": f"{d_evidence['counterfactual_max_queue_ms']:.2f} ms", "Bottleneck": d_evidence["result"]["bottleneck_lane"]},
+        ]
+        message = f"Inspect {d_evidence['counter_to_watch']}. The targeted intervention changes p95 by {d_evidence['p95_improvement_ms']:.2f} ms."
+        return mo.vstack([intro, fault, d_prediction, table(rows), mo.callout(mo.md(message), kind="success" if d_evidence["supports_diagnosis"] else "danger"), d_capture, saved("D"), mo.accordion({"Calculation Notes": mo.md("Capacity restoration, startup restoration, and traffic redistribution alter different causal inputs. The diagnosis is supported only when its corresponding intervention changes the completion tail.")})])
+
+    def part_e():
+        intro = mo.md("### E · Which plan survives a new traffic mix? (10 min)\nCompare two structures under one capital cap, then bound overlap by dependency-ready compute.")
+        plans = mo.hstack([first_design, second_design], widths="equal", wrap=True)
+        if e_prediction.value is None:
+            return mo.vstack([intro, plans, new_mix, e_prediction])
+        if first_design.value == second_design.value:
+            return mo.vstack([intro, plans, new_mix, e_prediction, mo.callout(mo.md("Choose two different plans to create a valid contrast."), kind="warn")])
+        rows = [
+            {"Plan": e_comparison["first"].get("label", first_design.value), "Cut lanes": e_comparison["first"]["cut_lanes"], "Cost": f"${e_comparison['first']['cost_usd']:,.0f}", "Unspent": f"${e_comparison['first']['unspent_usd']:,.0f}", "Exposed": f"{e_comparison['first']['exposed_ms']:.2f} ms", "Outcome": "PASS" if e_comparison["first"]["valid_plan"] else "FAIL"},
+            {"Plan": e_comparison["second"].get("label", second_design.value), "Cut lanes": e_comparison["second"]["cut_lanes"], "Cost": f"${e_comparison['second']['cost_usd']:,.0f}", "Unspent": f"${e_comparison['second']['unspent_usd']:,.0f}", "Exposed": f"{e_comparison['second']['exposed_ms']:.2f} ms", "Outcome": "PASS" if e_comparison["second"]["valid_plan"] else "FAIL"},
+        ]
+        message = f"Model comparison: {e_model_result}. Overlap hides at most the displayed dependency-ready window. Record your own decision, including no feasible plan when justified."
+        return mo.vstack([intro, plans, mo.hstack([new_mix, overlap_choice], widths="equal", wrap=True), e_prediction, table(rows), mo.callout(mo.md(message), kind="success" if e_model_result != "none" else "danger"), e_choice, e_capture, saved("E"), mo.accordion({"Calculation Notes": mo.md("MLSysIM applies one common illustrative capital cap, purchases integer links, schedules the new traffic matrix, and subtracts only explicitly ready compute. Detailed collective algorithms are deferred.")})])
+
+    def synthesis():
+        rows = []
+        for part in "ABCDE":
+            capture = captures.get(part)
+            current = capture is not None and part not in audit.stale and (part, part) not in audit.identical_pairs
+            rows.append({"Part": part, "Original prediction": capture.to_dict()["prediction"] if capture else "—", "Evidence": "CURRENT" if current else ("STALE" if capture else "MISSING")})
+        saved_decision = captures["E"].to_dict()["decision"] if "E" in captures else None
+        tested_plans = tuple(captures["E"].to_dict()["inputs"].get(key) for key in ("first_topology_id", "second_topology_id")) if "E" in captures else ()
+        ready = audit.complete and all(widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk)) and bool(rationale.value.strip()) and final_choice.value != final_rejected.value and final_choice.value == saved_decision and final_rejected.value in tested_plans
+        prompt = "Ready for the local report." if ready else "Complete five current contrasts, match the recommendation to Part E, reject a different tested plan, and write the rationale."
+        return mo.vstack([mo.md("### Synthesis · Defend the network design review (5 min)\nName the chosen plan, quantify a rejected alternative, state the remaining limitation, and identify a reevaluation trigger."), table(rows), mo.hstack([final_choice, final_rejected], widths="equal", wrap=True), mo.hstack([final_trigger, final_risk], widths="equal", wrap=True), rationale, mo.callout(mo.md(prompt), kind="success" if ready else "warn")])
+
+    tabs = mo.ui.tabs({
+        "Part A": part_a(), "Part B": part_b(), "Part C": part_c(),
+        "Part D": part_d(), "Part E": part_e(), "Synthesis": synthesis(),
+    })
+    tabs
+    return
+
+
+@app.cell
+def _(
+    audit, build_lab_report, captures, final_choice, final_rejected,
+    final_risk, final_trigger, get_lab_metadata, mo, rationale,
+    report_export_panel, scenario, track_id,
+):
+    _saved_decision = captures["E"].to_dict()["decision"] if "E" in captures else None
+    _tested_plans = tuple(captures["E"].to_dict()["inputs"].get(key) for key in ("first_topology_id", "second_topology_id")) if "E" in captures else ()
+    _ready = audit.complete and all(
+        widget.value is not None
+        for widget in (final_choice, final_rejected, final_trigger, final_risk)
+    ) and bool(rationale.value.strip()) and final_choice.value != final_rejected.value and final_choice.value == _saved_decision and final_rejected.value in _tested_plans
+    mo.stop(not _ready)
+    snapshots = {part: captures[part].to_dict() for part in "ABCDE"}
+    report = build_lab_report(
+        get_lab_metadata("vol2/lab_03_communication.py"), track=track_id,
+        scenario=scenario.fleet_unit,
+        learning_objectives=[
+            "Separate startup and serialization costs",
+            "Explain topology and traffic contention with finite flows",
+            "Defend a resource-counted fabric plan",
+        ],
+        predictions={part: snapshots[part]["prediction"] for part in "ABCDE"},
+        knob_settings={part: snapshots[part]["inputs"] for part in "ABCDE"},
+        evidence_summary={part: {
+            "baseline": snapshots[part]["baseline"],
+            "result": snapshots[part]["result"],
+            "alternatives": snapshots[part]["alternatives"],
+        } for part in "ABCDE"},
+        binding_constraints={
+            "A": snapshots["A"]["result"]["binding_term"],
+            "B": snapshots["B"]["result"]["bottleneck_lane"],
+            "C": snapshots["C"]["result"]["bottleneck_lane"],
+            "D": snapshots["D"]["result"]["bottleneck_lane"],
+            "E": snapshots["E"]["decision"],
+        },
+        decisions={
+            "recommendation": final_choice.value,
+            "rejected_alternative": final_rejected.value,
+            "reevaluation_trigger": final_trigger.value,
+        },
+        final_decision={
+            "recommendation": final_choice.value,
+            "rejected_alternative": final_rejected.value,
+            "rationale": rationale.value,
+        },
+        big_takeaways=[
+            "Message size determines whether startup or serialization binds.",
+            "Traffic placement determines which physical lane becomes the bottleneck.",
+            "Isolation and topology consume countable capacity and capital.",
+        ],
+        reflections={"rationale": rationale.value, "reevaluation_trigger": final_trigger.value},
+        residual_risk=final_risk.value,
+        result_snapshot={
+            "schema_version": 1, "lab_id": "v2_03", "track_id": track_id,
+            "model_id": "v2_03_experiments", "evidence": snapshots,
+            "recommendation": final_choice.value,
+            "rejected_alternative": final_rejected.value,
+            "reevaluation_trigger": final_trigger.value,
+            "residual_risk": final_risk.value, "rationale": rationale.value,
+        },
+        source_trace={
+            "scenario": "Track values marked illustrative are assumptions, not measurements.",
+            "calculations": "MLSysIM v2_03_experiments finite-flow and alpha-beta models.",
+        },
+    )
+    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    return (report,)
+
+
+@app.cell
+async def _(
+    audit, captures, final_choice, final_rejected, final_risk, final_trigger,
+    ledger, mo, rationale, track_id,
+):
+    _saved_decision = captures["E"].to_dict()["decision"] if "E" in captures else None
+    _tested_plans = tuple(captures["E"].to_dict()["inputs"].get(key) for key in ("first_topology_id", "second_topology_id")) if "E" in captures else ()
+    _ready = audit.complete and all(
+        widget.value is not None
+        for widget in (final_choice, final_rejected, final_trigger, final_risk)
+    ) and bool(rationale.value.strip()) and final_choice.value != final_rejected.value and final_choice.value == _saved_decision and final_rejected.value in _tested_plans
+    _status = "EVIDENCE IN PROGRESS"
+    if _ready:
+        try:
+            ledger.save(chapter=3, design={
+                "schema_version": 1, "lab_id": "v2_03", "track_id": track_id,
+                "model_id": "v2_03_experiments",
+                "evidence": {part: capture.to_dict() for part, capture in captures.items()},
+                "recommendation": final_choice.value,
+                "rejected_alternative": final_rejected.value,
+                "reevaluation_trigger": final_trigger.value,
+                "residual_risk": final_risk.value, "rationale": rationale.value,
+            })
+            await ledger.flush()
+        except Exception:
+            _status = "LOCAL SAVE FAILED · DOWNLOAD THE REPORT TO KEEP YOUR EVIDENCE"
+        else:
+            _status = "SAVED"
+    mo.Html(f'<div class="lab-hud" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:#10233d;color:#fff;padding:14px 18px;border-radius:9px;font-family:ui-monospace,monospace"><span>LAB 03 · Network Fabrics · STATUS: {_status}</span></div>')
     return
 
 

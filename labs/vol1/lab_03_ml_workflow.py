@@ -1,14 +1,14 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full", app_title="Lab 03: The Constraint Tax · MLSysBook")
+app = marimo.App(width="full", app_title="Lab 03: Carry the Constraint · MLSysBook")
 
 
 @app.cell
 async def _():
-    import marimo as mo
     import sys
     from pathlib import Path
+    import marimo as mo
 
     if sys.platform == "emscripten":
         import micropip
@@ -16,1310 +16,768 @@ async def _():
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
-        _labs_dir = Path(__file__).resolve().parents[1]
-        if str(_labs_dir) not in sys.path:
-            sys.path.insert(0, str(_labs_dir))
+        labs_dir = Path(__file__).resolve().parents[1]
+        if str(labs_dir) not in sys.path:
+            sys.path.insert(0, str(labs_dir))
         from bootstrap import native_bootstrap
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
+    from mlsysim.engine.v1_03_experiments import (
+        TRACKS, compare_iteration_plans, compare_validation_stages,
+        evaluate_release_checks, feedback_timeline, hold_workflow_decision, simulate_iterations,
+        trace_requirement, track_summary,
+    )
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        MathPeek,
-        big_takeaways,
-        build_lab_report,
-        constraint_tax,
-        gated_hypothesis_card,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        instrumentation_console,
-        iteration_frontier,
-        part_workflow,
-        report_export_panel,
-        resolve_mlsysim_ref,
-        source_trace,
-        track_context,
-        track_arc_context,
-        track_selector,
-        workflow_policy,
-        workflow_track_profile,
+        ACADEMIC_LAB_CSS, build_lab_report, get_lab_metadata, report_export_panel,
     )
+    from mlsysbook_labs.experiment_evidence import audit_evidence, capture_evidence
 
-    ledger = DesignLedger()
-    if getattr(ledger, "is_wasm", False):
-        _ = await ledger.load_async()
+    ledger = DesignLedger(volume="vol1")
+    if ledger.is_wasm:
+        _loaded = await ledger.load_async()
     return (
-        ACADEMIC_LAB_CSS,
-        COLORS,
-        LAB_CSS,
-        apply_plotly_theme,
-        build_lab_report,
-        constraint_tax,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        go,
-        iteration_frontier,
-        ledger,
-        mo,
-        part_workflow,
-        report_export_panel,
-        resolve_mlsysim_ref,
-        source_trace,
-        track_arc_context,
-        track_context,
-        workflow_policy,
-        workflow_track_profile,
+        ACADEMIC_LAB_CSS, COLORS, LAB_CSS, TRACKS, apply_plotly_theme,
+        audit_evidence, build_lab_report, capture_evidence,
+        compare_iteration_plans, compare_validation_stages,
+        evaluate_release_checks, feedback_timeline, get_lab_metadata, go,
+        hold_workflow_decision, ledger, mo, report_export_panel, simulate_iterations,
+        trace_requirement, track_summary,
     )
-
-
-@app.cell
-def _(get_lab_metadata):
-    v1_03_metadata = get_lab_metadata("vol1/lab_03_ml_workflow.py")
-    return (v1_03_metadata,)
 
 
 @app.cell
 def _(mo):
-    # Top-Level Universal Track Selector
-    v1_03_track_picker = mo.ui.dropdown(
-        options={
-            "☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)": "cloud_fleet",
-            "🤖 Edge & Embodied Track (Jetson Orin & Hardware-in-the-Loop vs Tail Safety Walls)": "robotaxi",
-            "📱 Mobile Track (Apple Silicon & Neural Engine Integration vs Thermal Walls)": "iphone",
-            "⚡ TinyML Track (ESP32-S3 & Firmware Validation vs SRAM Boundaries)": "oura_ring",
-        },
-        value="☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)",
-        label="Select Course / Industry Track",
+    get_evidence, set_evidence = mo.state({})
+    return get_evidence, set_evidence
+
+
+@app.cell
+def _(mo, set_evidence):
+    track = mo.ui.dropdown(
+        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
+        value="TinyML", label="Deployment track",
+        on_change=lambda _value: set_evidence({}),
     )
-    return (v1_03_track_picker,)
+    return (track,)
+
+
+@app.cell
+def _(track, track_summary):
+    track_id = track.value
+    profile = track_summary(track_id)
+    return profile, track_id
+
+
+@app.cell
+def _(mo, profile, track_id):
+    _track_key = track_id
+    _requirement_options = {
+        value["label"]: key for key, value in profile["requirements"].items()
+    }
+    requirement_choice = mo.ui.dropdown(
+        _requirement_options,
+        value=profile["requirements"][profile["default_requirement"]]["label"],
+        label="Requirement to carry",
+    )
+    late_stage = mo.ui.dropdown(
+        {"Validation": "validation", "Deployment": "deployment", "Monitoring": "monitoring"},
+        value="Deployment", label="Later discovery point",
+    )
+    escalation = mo.ui.slider(
+        1.0, 2.0, value=1.0, step=0.25, label="Rework sensitivity multiplier",
+    )
+    timing_decision = mo.ui.radio(
+        {"Pay for the data-stage check": "early", "Defer to the later stage": "late"},
+        label="Validation timing decision",
+    )
+    development_budget = mo.ui.slider(
+        4, 14, value=int(profile["development_budget_days"]), step=1,
+        label="Development budget (days)",
+    )
+    plan_choice = mo.ui.radio(
+        {"Rapid offline loop": "rapid_offline", "Target checks in the loop": "target_in_loop",
+         "Hold: neither plan is defensible": "none"},
+        label="Iteration-plan decision",
+    )
+    plan_rejected = mo.ui.radio(
+        {"Rapid offline loop": "rapid_offline", "Target checks in the loop": "target_in_loop"},
+        label="Tested alternative",
+    )
+    release_choice = mo.ui.radio(
+        {"Offline checks": "offline", "Target checks": "target",
+         "Combined checks": "combined", "Hold the release": "hold"},
+        label="Release decision",
+    )
+    release_rejected = mo.ui.radio(
+        {"Offline checks": "offline", "Target checks": "target", "Combined checks": "combined"},
+        label="Compared check plan",
+    )
+    signal_interval = mo.ui.slider(
+        2, 10, value=4, step=1, label="Signal-check interval (hours)",
+    )
+    outcome_delay = mo.ui.dropdown(
+        {"12 hours": 12, "24 hours": 24, "36 hours": 36, "48 hours": 48},
+        value=f"{int(profile['default_outcome_delay_hours'])} hours", label="Outcome-label delay",
+    )
+    feedback_revisit = mo.ui.radio(
+        {"Validation after an alert": "validation", "Data after labeled outcomes": "data",
+         "Modeling immediately after an alert": "modeling"},
+        label="Stage to revisit",
+    )
+    return (
+        development_budget, escalation, feedback_revisit, late_stage,
+        outcome_delay, plan_choice, plan_rejected, release_choice,
+        release_rejected, requirement_choice, signal_interval, timing_decision,
+    )
+
+
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    a_prediction = mo.ui.radio(
+        {"Mostly data artifacts": "data", "Mostly modeling artifacts": "modeling",
+         "Mostly validation or deployment artifacts": "late"},
+        label="Where will the two requirements differ most?",
+    ).form(submit_button_label="Lock Part A prediction")
+    b_prediction = mo.ui.radio(
+        {"Earlier discovery costs less overall": "early_less",
+         "Both discovery points cost the same": "same",
+         "Later discovery costs less overall": "late_less"},
+        label="Which check timing has the lower response cost?",
+    ).form(submit_button_label="Lock Part B prediction")
+    c_prediction = mo.ui.radio(
+        {"More iterations guarantee a releasable candidate": "count_wins",
+         "Fewer target-aware iterations can produce the releasable candidate": "target_wins",
+         "Neither plan completes a failed iteration": "no_failures"},
+        label="What will the fixed time budget reveal?",
+    ).form(submit_button_label="Lock Part C prediction")
+    d_prediction = mo.ui.radio(
+        {"Offline checks catch every seeded defect": "offline_all",
+         "Target checks catch every seeded defect": "target_all",
+         "Each single check plan leaves a different blind spot": "both_partial"},
+        label="Which evidence is sufficient for release?",
+    ).form(submit_button_label="Lock Part D prediction")
+    e_prediction = mo.ui.radio(
+        {"An alert proves task harm": "alert_proves_harm",
+         "An alert starts investigation; outcomes establish harm": "signal_then_outcome",
+         "Monitoring repairs the changed behavior": "monitor_repairs"},
+        label="What can the first production signal establish?",
+    ).form(submit_button_label="Lock Part E prediction")
+    return a_prediction, b_prediction, c_prediction, d_prediction, e_prediction
+
+
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    final_choice = mo.ui.radio(
+        {"Rapid offline loop": "rapid_offline", "Target checks in the loop": "target_in_loop",
+         "Hold: no tested plan is defensible": "none"}, label="Recommendation",
+    )
+    final_rejected = mo.ui.radio(
+        {"Rapid offline loop": "rapid_offline", "Target checks in the loop": "target_in_loop"},
+        label="Quantified rejected alternative",
+    )
+    final_trigger = mo.ui.radio(
+        {"A release check exposes a new defect": "new_defect",
+         "Labeled outcomes cross the task floor": "outcome_floor",
+         "The development-time budget changes": "budget_change"},
+        label="Reevaluation trigger",
+    )
+    final_risk = mo.ui.radio(
+        {"Unseeded target failure": "unseeded_failure", "Delayed outcome labels": "label_delay",
+         "Rework-cost assumptions": "rework_assumptions"}, label="Remaining limitation",
+    )
+    rationale = mo.ui.text_area(
+        label="Decision rationale",
+        placeholder="Use saved iteration counts, target outcomes, the rejected plan, release evidence, and a reevaluation trigger.",
+    )
+    return final_choice, final_rejected, final_risk, final_trigger, rationale
 
 
 @app.cell
 def _(
-    get_lab_track_variant,
-    get_track_profile,
-    resolve_mlsysim_ref,
-    v1_03_track_picker,
-    workflow_track_profile,
+    TRACKS, compare_iteration_plans, compare_validation_stages,
+    development_budget, escalation, evaluate_release_checks,
+    feedback_timeline, late_stage, outcome_delay, release_choice,
+    release_rejected, requirement_choice, hold_workflow_decision, simulate_iterations,
+    signal_interval, trace_requirement, track_id,
 ):
-    # Cross-tier hardware targets
-    # Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Max, Hardware.Tiny.Cortex_M55
-    v1_03_track_id = v1_03_track_picker.value
-    v1_03_profile = get_track_profile(v1_03_track_id)
-    v1_03_variant = get_lab_track_variant("v1_03_constraint_tax", v1_03_profile.track_id)
-    v1_03_hardware = resolve_mlsysim_ref(v1_03_variant.hardware_ref)
-    v1_03_model = resolve_mlsysim_ref(v1_03_variant.model_ref)
-    v1_03_workflow = workflow_track_profile(
-        v1_03_profile,
-        v1_03_variant,
-        v1_03_hardware,
-        v1_03_model,
+    _requirement_ids = tuple(TRACKS[track_id]["requirements"])
+    _selected_requirement = requirement_choice.value
+    _other_requirement = next(key for key in _requirement_ids if key != _selected_requirement)
+    a_base = trace_requirement(track_id, _selected_requirement)
+    a_result = trace_requirement(track_id, _other_requirement)
+    b_comparison = compare_validation_stages(
+        track_id, "data", late_stage.value, requirement_id=_selected_requirement,
+        escalation_factor=escalation.value,
     )
-    return v1_03_profile, v1_03_variant, v1_03_workflow
+    c_comparison = compare_iteration_plans(track_id, development_budget.value)
+    c_rapid = simulate_iterations(track_id, "rapid_offline", development_budget.value)
+    c_target = simulate_iterations(track_id, "target_in_loop", development_budget.value)
+    c_hold = hold_workflow_decision(track_id, "iteration")
+    d_results = {
+        plan: evaluate_release_checks(track_id, plan)
+        for plan in ("offline", "target", "combined")
+    }
+    d_hold = hold_workflow_decision(track_id, "release")
+    _selected_release = release_choice.value if release_choice.value in d_results else None
+    _rejected_release = release_rejected.value or "offline"
+    if _selected_release is not None:
+        d_result = d_results[_selected_release]
+        d_base = d_results[_rejected_release] if _rejected_release != _selected_release else d_results["target" if _selected_release != "target" else "offline"]
+    else:
+        d_base = d_hold
+        d_result = d_results[_rejected_release]
+    _default_outcome_delay = TRACKS[track_id]["feedback"]["outcome_delay_hours"]
+    e_base = feedback_timeline(track_id, 11, _default_outcome_delay)
+    e_result = feedback_timeline(track_id, signal_interval.value, outcome_delay.value)
+    return (
+        a_base, a_result, b_comparison, c_comparison, c_hold, c_rapid, c_target,
+        d_base, d_hold, d_result, d_results, e_base, e_result,
+    )
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(
-    ACADEMIC_LAB_CSS,
-    COLORS,
-    LAB_CSS,
-    mo,
-    track_arc_context,
-    track_context,
-    v1_03_metadata,
-    v1_03_profile,
-    v1_03_track_picker,
-    v1_03_variant,
-    v1_03_workflow,
+    a_base, a_prediction, a_result, b_comparison, b_prediction,
+    c_hold, c_prediction, c_rapid, c_target, capture_evidence, d_base,
+    d_hold, d_prediction, d_result, d_results, development_budget, e_base,
+    e_prediction, e_result, escalation, feedback_revisit, late_stage,
+    mo, outcome_delay, plan_choice, plan_rejected, release_choice,
+    release_rejected, requirement_choice, set_evidence, signal_interval,
+    timing_decision, track_id,
 ):
-    mo.vstack([
-        LAB_CSS,
-        ACADEMIC_LAB_CSS,
-        mo.Html(f"""
-        <div class="mlsysbook-lab-shell">
-          <div style="margin-bottom: 16px;">
-            {v1_03_track_picker}
-          </div>
-          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
-            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
-              ML Systems Textbook &middot; Volume I &middot; Chapter 3 &middot; Foundational Lab 03
-            </div>
-            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
-              The Constraint Tax: Workflow Gates &amp; Release Policy
-            </h1>
-            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
-              {v1_03_variant.workload_summary} Trace how deployment constraints propagate backward across the engineering lifecycle, quantify iteration rework taxes, and co-design validation gates with automated rollback policies.
-            </p>
-            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Track:</strong> {v1_03_profile.label}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Constraint:</strong> {v1_03_workflow.constraint_name}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Hardware:</strong> {v1_03_variant.hardware_ref}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Model:</strong> {v1_03_variant.model_ref}
-              </span>
-              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
-                <strong>Primary Focus:</strong> Iteration &amp; Gate Economics
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Deliverable:</strong> Release Policy Memo
-              </span>
-            </div>
-          </div>
+    def store(part, capture):
+        set_evidence(lambda current: {**current, part: capture})
 
-          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
-              System Scenario: {v1_03_profile.label} Workflow Optimization
-            </h3>
-            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
-              Your team is deploying <strong>{v1_03_variant.model_ref}</strong> to <strong>{v1_03_variant.hardware_ref}</strong> under strict <strong>{v1_03_workflow.constraint_name}</strong>. Discovering a violation in late production stages incurs severe rework costs (<em>C</em><sub>rework</sub> &prop; 10<sup><em>k</em></sup>) and triggers emergency rollbacks. You must design pre-deployment verification gates that minimize avoidable iteration tax while protecting runtime reliability.
-            </p>
-            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
-              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
-                The Architectural Invariants of ML Workflows:
-              </div>
-              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
-                <li><strong>The Constraint Propagation Invariant:</strong> Physical deployment constraints propagate backwards into earlier lifecycle stages. A hardware constraint restricts model architecture and data curation choices before code is written.</li>
-                <li><strong>The Iteration Tax Law:</strong> The cost of defect correction scales exponentially with lifecycle distance: <em>C</em>(<em>s</em>) = <em>C</em><sub>0</sub> &middot; &beta;<sup><em>s</em></sup>, where discovering violations at deployment stage <em>s</em><sub>d</sub> costs orders of magnitude more than at development stage <em>s</em><sub>0</sub>.</li>
-                <li><strong>The Gate Precision-Latency Trade-Off:</strong> Verification gates trade evaluation fidelity against iteration velocity: higher gate fidelity reduces residual production risk at the expense of developer turnaround time.</li>
-                <li><strong>The Workflow Policy Guardrail:</strong> Automated release pipelines require formal gate thresholds and deterministic rollback criteria to prevent catastrophic silent regressions.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['BlueLine']};
-                    background: white; border-radius: 0 12px 12px 0;
-                    padding: 20px 28px; margin: 8px 0 16px 0;
-                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Trace propagation:</strong>
-                    follow {v1_03_workflow.constraint_name} across data, model, validation, release, and monitoring.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Measure iteration tax:</strong>
-                    compute the rework created by late discovery.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Balance gates:</strong>
-                    trade iteration speed against deployment confidence.</div>
-                <div style="margin-bottom: 3px;">4. <strong>Write policy:</strong>
-                    choose gates, release rules, rollback rules, and residual blind spot.</div>
-            </div>
-            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
-                        padding: 16px 28px 0 28px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Core Question
-                </div>
-                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                            line-height: 1.5; font-style: italic;">
-                    "When should {v1_03_workflow.label} test the deployment constraint so that rework is minimized and residual risk is acceptable?"
-                </div>
-            </div>
-        </div>
-        """),
-        track_context(v1_03_profile),
-        track_arc_context(v1_03_profile, v1_03_metadata.lab_id),
-    ])
+    a_upstream = None
+    b_upstream = {"carried_requirement": requirement_choice.value}
+    c_upstream = None
+    d_upstream = {"carried_iteration_plan": plan_choice.value}
+    e_upstream = {"release_decision": release_choice.value}
+    a_capture = mo.ui.button(
+        label="Capture requirement contrast", kind="success",
+        disabled=a_prediction.value is None,
+        on_click=lambda _value: store("A", capture_evidence(
+            track=track_id, part="A", prediction=a_prediction.value,
+            inputs={"carried_requirement": requirement_choice.value},
+            baseline=a_base, result=a_result, alternatives=(a_base, a_result),
+            decision=requirement_choice.value, upstream_inputs=a_upstream,
+            model_key="v1_03_experiments.trace_requirement",
+            chosen_result=a_base, result_role="compared requirement",
+        )),
+    )
+    b_capture = mo.ui.button(
+        label="Capture validation-timing contrast", kind="success",
+        disabled=b_prediction.value is None or timing_decision.value is None,
+        on_click=lambda _value: store("B", capture_evidence(
+            track=track_id, part="B", prediction=b_prediction.value,
+            inputs={"later_stage": late_stage.value,
+                    "escalation_factor": escalation.value,
+                    "decision": timing_decision.value},
+            baseline=b_comparison["earlier"], result=b_comparison["later"],
+            alternatives=(b_comparison["earlier"], b_comparison["later"]),
+            decision=timing_decision.value, upstream_inputs=b_upstream,
+            model_key="v1_03_experiments.validation_timing",
+            chosen_result=(b_comparison["earlier"] if timing_decision.value == "early"
+                           else b_comparison["later"]),
+            result_role="later discovery condition",
+        )),
+    )
+    _plan_invalid = (
+        c_prediction.value is None or plan_choice.value is None
+        or plan_rejected.value is None
+        or (plan_choice.value != "none" and plan_choice.value == plan_rejected.value)
+    )
+    if plan_choice.value == "rapid_offline":
+        _c_baseline, _c_result = c_target, c_rapid
+        _c_chosen, _c_role = c_rapid, "selected candidate"
+    elif plan_choice.value == "target_in_loop":
+        _c_baseline, _c_result = c_rapid, c_target
+        _c_chosen, _c_role = c_target, "selected candidate"
+    else:
+        _c_rejected = plan_rejected.value or "rapid_offline"
+        _c_result = c_rapid if _c_rejected == "rapid_offline" else c_target
+        _c_baseline = c_hold
+        _c_chosen, _c_role = c_hold, "rejected alternative"
+    c_capture = mo.ui.button(
+        label="Capture fixed-budget comparison", kind="success", disabled=_plan_invalid,
+        on_click=lambda _value: store("C", capture_evidence(
+            track=track_id, part="C", prediction=c_prediction.value,
+            inputs={"development_budget_days": development_budget.value,
+                    "choice": plan_choice.value, "rejected": plan_rejected.value},
+            baseline=_c_baseline, result=_c_result, alternatives=(c_rapid, c_target, c_hold),
+            decision=plan_choice.value, upstream_inputs=c_upstream,
+            model_key="v1_03_experiments.simulate_iterations",
+            chosen_result=_c_chosen, result_role=_c_role,
+        )),
+    )
+    _release_invalid = (
+        d_prediction.value is None or release_choice.value is None
+        or release_rejected.value is None
+        or (release_choice.value != "hold" and release_choice.value == release_rejected.value)
+    )
+    if release_choice.value in d_results:
+        _d_chosen, _d_role = d_results[release_choice.value], "selected check plan"
+    else:
+        _d_chosen, _d_role = d_hold, "rejected alternative"
+    d_capture = mo.ui.button(
+        label="Capture release-evidence comparison", kind="success",
+        disabled=_release_invalid,
+        on_click=lambda _value: store("D", capture_evidence(
+            track=track_id, part="D", prediction=d_prediction.value,
+            inputs={"choice": release_choice.value, "rejected": release_rejected.value},
+            baseline=d_base, result=d_result, alternatives=(*tuple(d_results.values()), d_hold),
+            decision=release_choice.value, upstream_inputs=d_upstream,
+            model_key="v1_03_experiments.evaluate_release_checks",
+            chosen_result=_d_chosen, result_role=_d_role,
+        )),
+    )
+    e_capture = mo.ui.button(
+        label="Capture production-feedback contrast", kind="success",
+        disabled=e_prediction.value is None or feedback_revisit.value is None,
+        on_click=lambda _value: store("E", capture_evidence(
+            track=track_id, part="E", prediction=e_prediction.value,
+            inputs={"signal_check_interval_hours": signal_interval.value,
+                    "outcome_delay_hours": outcome_delay.value,
+                    "revisit_stage": feedback_revisit.value},
+            baseline=e_base, result=e_result, alternatives=(e_base, e_result),
+            decision=feedback_revisit.value, upstream_inputs=e_upstream,
+            model_key="v1_03_experiments.feedback_timeline",
+            chosen_result=e_result, result_role="selected observation policy",
+        )),
+    )
+    return (
+        a_capture, a_upstream, b_capture, b_upstream, c_capture, c_upstream,
+        d_capture, d_upstream, e_capture, e_upstream,
+    )
+
+
+@app.cell
+def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
+    css = mo.Html("""
+    <style>
+    .pilot-head{background:linear-gradient(135deg,#101827,#28496b);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin:30px 0 14px}
+    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
+    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:780px}
+    .pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
+    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
+    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
+    .table-wrap{max-width:100%;overflow-x:auto}@media(max-width:520px){.pilot-head{border-radius:9px}.pilot-meta{grid-template-columns:1fr}}
+    </style>""")
+    header = mo.Html(f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 03</span><span>ABOUT 50–55 MIN</span></div>
+    <h1>Carry the Constraint</h1><p>When should evidence interrupt the ML workflow, and what must production send backward?</p>
+    <div class="pilot-meta"><div><b>Track</b><br>{profile['display']}</div><div><b>Context</b><br>{profile['scenario']}</div><div><b>Deliverable</b><br>Workflow recommendation with a release rule</div></div></section>""")
+    mo.vstack([
+        LAB_CSS, ACADEMIC_LAB_CSS, css, header, track,
+        mo.Html('<p class="pilot-note">All workflow costs, defect fixtures, and task outcomes are illustrative scenario assumptions. Open Calculation Notes in each part to inspect their scope.</p>'),
+    ], gap=0.5)
     return
 
 
-@app.cell(hide_code=True)
-def _(mo, part_workflow, v1_03_workflow):
-    mo.vstack([
-    part_workflow(
-        "Constraint Tax Workflow",
-        (
-            {
-                "part": "Part A",
-                "concept": "Constraints Propagate Through The Workflow",
-                "prediction": "Predict when the deployment constraint should be tested.",
-                "controls": "Move the discovery stage and inspect which assumptions harden.",
-                "evidence": "Read the stage table across data, model, validation, release, and monitoring.",
-                "decision": "Name the first gate that should block bad assumptions.",
-            },
-            {
-                "part": "Part B",
-                "concept": "Late Discovery Creates Iteration Tax",
-                "prediction": "Predict the cost shape for discovering the constraint late.",
-                "controls": "Move the discovery stage and compare current rework with the recommended gate.",
-                "evidence": "Read multiplier, rework days, avoidable rework, and artifacts to rebuild.",
-                "decision": "Decide whether to pay the tax or move the gate earlier.",
-            },
-            {
-                "part": "Part C",
-                "concept": "Evaluation Gates Trade Speed For Confidence",
-                "prediction": "Predict the weakest validation dimension for this track.",
-                "controls": "Tune validation depth, automation, hardware realism, and data scale.",
-                "evidence": "Compare iteration days, confidence, residual risk, and risk budget.",
-                "decision": "Choose the validation stance before release pressure arrives.",
-            },
-            {
-                "part": "Part D",
-                "concept": "Workflow Policy Is System Design",
-                "prediction": "Predict which release gate should become non-negotiable.",
-                "controls": "Select the gate, release policy, and rollback rule.",
-                "evidence": "Compare policy summary, residual risk, and the remaining blind spot.",
-                "decision": "Write the workflow memo and name the risk you still carry.",
-            },
-        ),
-        scenario=(
-            f"{v1_03_workflow.label} needs a workflow that discovers "
-            f"{v1_03_workflow.constraint_name} before the team builds on a bad assumption."
-        ),
-        reflection="Carry one gate, one evidence requirement, and one residual blind spot into the report.",
-    ),
-    ])
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_03_workflow):
-    v1_03_gate_prediction = mo.ui.radio(
-        options={
-            "Before data and model assumptions harden": "early",
-            "During model design": "model_design",
-            "During release hardening": "release",
-            "After launch in monitoring": "monitoring",
-        },
-        label=f"When should {v1_03_workflow.constraint_name} be tested?",
-    )
-    v1_03_gate_prediction
-    return (v1_03_gate_prediction,)
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_03_workflow):
-    v1_03_discovery_stage = mo.ui.slider(
-        start=1,
-        stop=len(v1_03_workflow.stage_names),
-        value=v1_03_workflow.default_discovery_stage,
-        step=1,
-        label="Discovery stage",
-    )
-    v1_03_discovery_stage
-    return (v1_03_discovery_stage,)
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_03_workflow):
-    v1_03_tax_prediction = mo.ui.radio(
-        options={
-            "It stays roughly constant across stages": "constant",
-            "It grows linearly with the number of stages": "linear",
-            "It doubles at each later stage": "exponential",
-            "It is mostly documentation overhead": "paperwork",
-        },
-        label=f"How does the cost change if {v1_03_workflow.constraint_name} is found later?",
-    )
-    v1_03_tax_prediction
-    return (v1_03_tax_prediction,)
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_03_workflow):
-    v1_03_frontier_prediction = mo.ui.radio(
-        options={
-            "Validation depth": "validation depth",
-            "Automation": "automation",
-            "Hardware realism": "hardware realism",
-            "Data scale": "data scale",
-        },
-        label="Which validation dimension is most likely to be the current bottleneck?",
-    )
-    v1_03_validation_depth = mo.ui.slider(
-        start=0,
-        stop=100,
-        value=v1_03_workflow.default_validation_depth_pct,
-        step=5,
-        label="Validation depth (%)",
-    )
-    v1_03_automation = mo.ui.slider(
-        start=0,
-        stop=100,
-        value=v1_03_workflow.default_automation_pct,
-        step=5,
-        label="Automation (%)",
-    )
-    v1_03_realism = mo.ui.slider(
-        start=0,
-        stop=100,
-        value=v1_03_workflow.default_hardware_realism_pct,
-        step=5,
-        label="Hardware realism (%)",
-    )
-    v1_03_data_scale = mo.ui.slider(
-        start=0,
-        stop=100,
-        value=v1_03_workflow.default_data_scale_pct,
-        step=5,
-        label="Data scale coverage (%)",
-    )
-    return (
-        v1_03_automation,
-        v1_03_data_scale,
-        v1_03_frontier_prediction,
-        v1_03_realism,
-        v1_03_validation_depth,
-    )
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_03_workflow):
-    _policy_prediction_options = {gate.label: gate.gate_id for gate in v1_03_workflow.gate_options}
-    v1_03_policy_prediction = mo.ui.radio(
-        options=_policy_prediction_options,
-        label="Which gate should become non-negotiable in the workflow policy?",
-    )
-    _gate_options = {gate.label: gate.gate_id for gate in v1_03_workflow.gate_options}
-    v1_03_gate_choice = mo.ui.dropdown(
-        options=_gate_options,
-        value=v1_03_workflow.gate_options[0].label,
-        label="Workflow gate",
-    )
-    _release_options = {policy: policy for policy in v1_03_workflow.release_policies}
-    v1_03_release_policy = mo.ui.dropdown(
-        options=_release_options,
-        value=v1_03_workflow.release_policies[0],
-        label="Release policy",
-    )
-    _rollback_options = {rule: rule for rule in v1_03_workflow.rollback_rules}
-    v1_03_rollback_rule = mo.ui.dropdown(
-        options=_rollback_options,
-        value=v1_03_workflow.rollback_rules[0],
-        label="Rollback rule",
-    )
-    return (
-        v1_03_gate_choice,
-        v1_03_policy_prediction,
-        v1_03_release_policy,
-        v1_03_rollback_rule,
-    )
-
-
-@app.cell(hide_code=True)
+@app.cell
 def _(mo):
-    _text_area = getattr(mo.ui, "text_area")
-    v1_03_reflection = _text_area(
-        label="Reflection",
-        placeholder="Name the gate you would defend and the blind spot the workflow still has.",
-        full_width=True,
-    )
-    return (v1_03_reflection,)
+    mo.sidebar([mo.md("## Lab navigation"), mo.outline(label="Sections")])
+    return
 
 
 @app.cell
 def _(
-    constraint_tax,
-    iteration_frontier,
-    v1_03_automation,
-    v1_03_data_scale,
-    v1_03_discovery_stage,
-    v1_03_gate_choice,
-    v1_03_realism,
-    v1_03_release_policy,
-    v1_03_rollback_rule,
-    v1_03_validation_depth,
-    v1_03_workflow,
-    workflow_policy,
+    COLORS, a_base, a_capture, a_prediction, a_result, a_upstream,
+    apply_plotly_theme, audit_evidence, b_capture, b_comparison,
+    b_prediction, b_upstream, c_capture, c_comparison, c_prediction,
+    c_rapid, c_target, c_upstream, d_capture, d_prediction, d_result,
+    d_results, d_upstream, development_budget, e_base, e_capture,
+    e_prediction, e_result, e_upstream, escalation, feedback_revisit,
+    final_choice, final_rejected, final_risk, final_trigger, get_evidence,
+    go, late_stage, mo, outcome_delay, plan_choice, plan_rejected,
+    profile, rationale, release_choice, release_rejected, requirement_choice,
+    signal_interval, timing_decision, track_id,
 ):
-    v1_03_tax = constraint_tax(v1_03_workflow, discovery_stage=v1_03_discovery_stage.value)
-    v1_03_frontier = iteration_frontier(
-        v1_03_workflow,
-        validation_depth_pct=v1_03_validation_depth.value,
-        automation_pct=v1_03_automation.value,
-        hardware_realism_pct=v1_03_realism.value,
-        data_scale_pct=v1_03_data_scale.value,
-    )
-    v1_03_policy = workflow_policy(
-        v1_03_workflow,
-        v1_03_frontier,
-        gate_id=v1_03_gate_choice.value,
-        release_policy=v1_03_release_policy.value,
-        rollback_rule=v1_03_rollback_rule.value,
-    )
-    v1_03_risk_budget_pct = (
-        v1_03_workflow.min_residual_risk_pct
-        + (v1_03_workflow.base_residual_risk_pct - v1_03_workflow.min_residual_risk_pct) * 0.35
-    )
-    v1_03_cycle_budget_days = v1_03_workflow.base_cycle_days * 1.5
-    return (
-        v1_03_cycle_budget_days,
-        v1_03_frontier,
-        v1_03_policy,
-        v1_03_risk_budget_pct,
-        v1_03_tax,
+    _captures = get_evidence()
+    _upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream,
+                 "D": d_upstream, "E": e_upstream}
+    audit = audit_evidence(
+        _captures, track=track_id, required_parts=tuple("ABCDE"),
+        per_part_upstream_inputs=_upstream,
+        contrast_required_parts=tuple("ABCDE"),
     )
 
-
-@app.cell(hide_code=True)
-def _(
-    COLORS,
-    apply_plotly_theme,
-    constraint_tax,
-    go,
-    iteration_frontier,
-    mo,
-    source_trace,
-    v1_03_automation,
-    v1_03_cycle_budget_days,
-    v1_03_data_scale,
-    v1_03_discovery_stage,
-    v1_03_frontier,
-    v1_03_frontier_prediction,
-    v1_03_gate_choice,
-    v1_03_gate_prediction,
-    v1_03_policy,
-    v1_03_policy_prediction,
-    v1_03_realism,
-    v1_03_reflection,
-    v1_03_release_policy,
-    v1_03_risk_budget_pct,
-    v1_03_rollback_rule,
-    v1_03_tax,
-    v1_03_tax_prediction,
-    v1_03_validation_depth,
-    v1_03_workflow,
-):
-    def v1_03_part_header(part, concept, question, color):
-        return mo.Html(f"""
-        <div class="mlsysbook-panel mlsysbook-nugget" style="border-left:4px solid {color};">
-          <div class="mlsysbook-part-title"><h2>{part}: {concept}</h2></div>
-          <div class="mlsysbook-callout"><strong>Systems question:</strong> {question}</div>
-        </div>
-        """)
-
-    def v1_03_prediction_feedback(value, correct_value, correct_text, miss_text):
-        if value is None:
-            return mo.callout(mo.md("Commit to a prediction to unlock the instrument."), kind="warn")
-        _reveal = f"You predicted `{value}`; actual evidence points to `{correct_value}`."
-        if value == correct_value:
-            return mo.callout(mo.md(f"{_reveal} {correct_text}"), kind="success")
-        return mo.callout(mo.md(f"{_reveal} {miss_text}"), kind="warn")
-
-    def v1_03_recommended_gate():
-        return min(
-            v1_03_workflow.gate_options,
-            key=lambda gate: abs(gate.stage - v1_03_workflow.recommended_gate_stage),
+    def table(rows):
+        return mo.vstack([mo.ui.table(rows, pagination=False)]).style(
+            {"max-width": "100%", "overflow-x": "auto"}
         )
 
-    def v1_03_build_part_a():
-        _items = [
-            v1_03_part_header(
-                "Part A",
-                "Constraints Propagate Through The Workflow",
-                f"Where should {v1_03_workflow.constraint_name} first block the workflow?",
-                COLORS["BlueLine"],
-            ),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Scenario</h2>
-              <p>{v1_03_workflow.failure_story}</p>
-              <p>The stakeholder is the <strong>{v1_03_workflow.stakeholder}</strong>. The decision is not just when to test;
-                 it is which downstream assumptions are allowed to harden before the track proves the deployment wall.</p>
-            </div>
-            """),
-            mo.Html("<div class=\"mlsysbook-panel\"><h2>Prediction</h2></div>"),
-            v1_03_gate_prediction,
-        ]
-        if v1_03_gate_prediction.value is None:
-            _items.append(mo.callout(mo.md("Pick a gate timing before inspecting the stage evidence."), kind="warn"))
-            return mo.vstack(_items)
-
-        _assumptions = (
-            "success metric, guardrail metric, and deployment envelope",
-            "data or signal contract and collection assumptions",
-            "model size, runtime, feature, and preprocessing choices",
-            "production-condition validation evidence",
-            "release package, rollout commitment, and rollback surface",
-            "monitoring threshold, retraining trigger, and incident playbook",
+    def saved(part):
+        _capture = _captures.get(part)
+        if _capture is None:
+            return mo.callout(mo.md("No saved evidence for this part."), kind="warn")
+        if part in audit.stale or (part, part) in audit.identical_pairs:
+            return mo.callout(mo.md(
+                "**STALE OR NON-CONTRASTING EVIDENCE.** A carried decision changed, or the saved runs used identical inputs. Recapture this part."
+            ), kind="danger")
+        _snapshot = _capture.to_dict()
+        return mo.Html(
+            f'<div class="saved"><b>Saved snapshot</b> · original prediction: {_snapshot["prediction"]}'
+            f'<br><small>Track {_snapshot["track"]}; later live-control changes do not rewrite this record.</small></div>'
         )
-        _stage_rows = []
-        for idx, stage in enumerate(v1_03_workflow.stage_names, start=1):
-            _tax = constraint_tax(v1_03_workflow, discovery_stage=idx)
-            _gate = next((gate.label for gate in v1_03_workflow.gate_options if gate.stage == idx), "stage contract")
-            _status = "recommended or earlier" if idx <= v1_03_workflow.recommended_gate_stage else "late evidence debt"
-            _color = COLORS["GreenLine"] if idx <= v1_03_workflow.recommended_gate_stage else COLORS["RedLine"]
-            _stage_rows.append(
-                f"""
-                <tr>
-                  <td>{idx}</td>
-                  <td>{stage}</td>
-                  <td>{_assumptions[idx - 1]}</td>
-                  <td>{_gate}</td>
-                  <td style="color:{_color}; font-weight:800;">{_status}</td>
-                  <td style="text-align:right;">{_tax.cost_multiplier:.0f}x</td>
-                </tr>
-                """
-            )
 
-        _items.extend([
-            v1_03_prediction_feedback(
-                v1_03_gate_prediction.value,
-                "early",
-                "**Correct direction.** The deployment constraint must be tested before data and model assumptions harden.",
-                "**The instrument will show why later checks are expensive.** A deployment constraint that survives into release or monitoring propagates backward through the already-built workflow.",
-            ),
-            mo.Html("<div class=\"mlsysbook-panel\"><h2>Manipulation</h2></div>"),
-            v1_03_discovery_stage,
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Evidence Table</h2>
-              <table style="width:100%; border-collapse:collapse; font-size:0.84rem;">
-                <thead>
-                  <tr style="border-bottom:1px solid {COLORS['Border']}; color:{COLORS['TextMuted']}; text-align:left;">
-                    <th>Stage</th><th>Name</th><th>Assumption that hardens</th><th>Evidence gate</th><th>Status</th><th style="text-align:right;">Cost shape</th>
-                  </tr>
-                </thead>
-                <tbody>{''.join(_stage_rows)}</tbody>
-              </table>
-            </div>
-            """),
-        ])
-        if v1_03_tax.late_discovery:
-            _items.append(mo.callout(
-                mo.md(
-                    f"**Boundary crossed.** Discovery at **{v1_03_tax.discovery_stage_name}** means "
-                    f"the workflow must revisit **{', '.join(v1_03_tax.artifacts_to_rebuild)}** for "
-                    f"**{v1_03_workflow.constraint_name}**."
-                ),
-                kind="danger",
-            ))
-        else:
-            _items.append(mo.callout(
-                mo.md(f"**Gate is early enough.** {v1_03_tax.discovery_stage_name} catches the constraint before late artifacts harden."),
-                kind="success",
-            ))
-        _items.extend([
-            mo.accordion({
-                "Math Peek / Source Model - workflow iron law": mo.md(f"""
-    The chapter's workflow view maps lifecycle stages onto the iron law:
-
-    $$
-    T = \\frac{{D_{{vol}}}}{{BW}} + \\frac{{O}}{{R_{{peak}} \\cdot \\eta_{{hw}}}} + L_{{lat}}
-    $$
-
-    For **{v1_03_workflow.label}**, the deployment constraint is **{v1_03_workflow.constraint_name}**.
-    If that constraint changes $L_{{lat}}$, $R_{{peak}}$, or feasible efficiency $\\eta_{{hw}}$,
-    then data assumptions, model operations, validation evidence, and monitoring thresholds all move.
-    """)
-            }),
-            source_trace({
-                "chapter_anchor": "ML Workflow - Lifecycle Stages and Constraint Propagation Principle",
-                "profile_helper": "mlsysbook_labs.workflow_track_profile",
-                "hardware_ref": v1_03_workflow.hardware_ref,
-                "model_ref": v1_03_workflow.model_ref,
-            }, summary="Stage names and track constraints come from the selected V1-03 workflow profile."),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Checkpoint</h2>
-              <div class="mlsysbook-callout"><strong>Report decision:</strong>
-                The first blocking gate should be at stage {v1_03_tax.recommended_stage},
-                {v1_03_tax.recommended_stage_name}, before {v1_03_workflow.constraint_name}
-                becomes release debt.</div>
-            </div>
-            """),
-        ])
-        return mo.vstack(_items)
-
-    def v1_03_build_part_b():
-        _items = [
-            v1_03_part_header(
-                "Part B",
-                "Late Discovery Creates A Measurable Iteration Tax",
-                "How large is the rework tax when the deployment wall is found late?",
-                COLORS["RedLine"],
-            ),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Scenario</h2>
-              <p>The team asks whether late discovery is just a schedule issue. Move the discovery stage and measure
-                 how many person-days become avoidable rework for <strong>{v1_03_workflow.label}</strong>.</p>
-            </div>
-            """),
-            mo.Html("<div class=\"mlsysbook-panel\"><h2>Prediction</h2></div>"),
-            v1_03_tax_prediction,
-        ]
-        if v1_03_tax_prediction.value is None:
-            _items.append(mo.callout(mo.md("Predict the cost shape before opening the rework chart."), kind="warn"))
-            return mo.vstack(_items)
-
-        _stage_numbers = list(range(1, len(v1_03_workflow.stage_names) + 1))
-        _stage_taxes = [constraint_tax(v1_03_workflow, discovery_stage=idx) for idx in _stage_numbers]
-        _bar_colors = [
-            COLORS["GreenLine"] if tax.discovery_stage <= v1_03_workflow.recommended_gate_stage else COLORS["RedLine"]
-            for tax in _stage_taxes
-        ]
+    def part_a():
+        _intro = mo.md(
+            f"### A · Which requirement changes the development plan? (8 min)\n"
+            f"Development context: **{profile['scenario']}**. Compare **{a_base['requirement_label']}** ({a_base['requirement_limit']}) with "
+            f"**{a_result['requirement_label']}** ({a_result['requirement_limit']}) before choosing which one the team must carry through every stage."
+        )
+        if a_prediction.value is None:
+            return mo.vstack([_intro, a_prediction])
+        _stage_names = tuple(a_base["affected_stage_counts"])
         _fig = go.Figure()
-        _fig.add_trace(go.Bar(
-            x=[tax.discovery_stage_name for tax in _stage_taxes],
-            y=[tax.rework_days for tax in _stage_taxes],
-            marker=dict(color=_bar_colors),
-            name="Rework days",
-        ))
-        _fig.add_trace(go.Scatter(
-            x=[v1_03_tax.discovery_stage_name],
-            y=[v1_03_tax.rework_days],
-            mode="markers",
-            marker=dict(color=COLORS["BlueLine"], size=16, line=dict(color="white", width=2)),
-            name="Current discovery",
-        ))
-        _fig.update_layout(
-            height=340,
-            xaxis=dict(title="Discovery stage"),
-            yaxis=dict(title="Person-days of rework"),
-            margin=dict(l=60, r=20, t=35, b=90),
-        )
-        apply_plotly_theme(_fig)
-
-        _stage_rows = []
-        for tax in _stage_taxes:
-            _color = COLORS["GreenLine"] if tax.discovery_stage <= v1_03_workflow.recommended_gate_stage else COLORS["RedLine"]
-            _stage_rows.append(
-                f"""
-                <tr>
-                  <td>{tax.discovery_stage}</td>
-                  <td>{tax.discovery_stage_name}</td>
-                  <td style="text-align:right;">{tax.cost_multiplier:.0f}x</td>
-                  <td style="text-align:right; color:{_color}; font-weight:800;">{tax.rework_days:.0f}</td>
-                  <td style="text-align:right;">{tax.avoidable_rework_days:.0f}</td>
-                </tr>
-                """
-            )
-
-        _items.extend([
-            v1_03_prediction_feedback(
-                v1_03_tax_prediction.value,
-                "exponential",
-                "**Correct.** The chapter model doubles the correction cost at each later stage.",
-                "**The chart shows exponential escalation.** A late constraint is not a one-stage fix; it propagates backward through every artifact that assumed the wrong envelope.",
-            ),
-            mo.Html("<div class=\"mlsysbook-panel\"><h2>Manipulation</h2></div>"),
-            v1_03_discovery_stage,
-            mo.as_html(_fig),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Computed Evidence</h2>
-              <div class="mlsysbook-grid">
-                <div class="mlsysbook-field"><strong>Discovery stage</strong>{v1_03_tax.discovery_stage}: {v1_03_tax.discovery_stage_name}</div>
-                <div class="mlsysbook-field"><strong>Recommended gate</strong>{v1_03_tax.recommended_stage}: {v1_03_tax.recommended_stage_name}</div>
-                <div class="mlsysbook-field"><strong>Cost multiplier</strong>{v1_03_tax.cost_multiplier:.0f}x</div>
-                <div class="mlsysbook-field"><strong>Avoidable rework</strong>{v1_03_tax.avoidable_rework_days:.0f} person-days</div>
-              </div>
-              <table style="width:100%; border-collapse:collapse; margin-top:14px; font-size:0.84rem;">
-                <thead>
-                  <tr style="border-bottom:1px solid {COLORS['Border']}; color:{COLORS['TextMuted']}; text-align:left;">
-                    <th>Stage</th><th>Name</th><th style="text-align:right;">Multiplier</th><th style="text-align:right;">Rework days</th><th style="text-align:right;">Avoidable days</th>
-                  </tr>
-                </thead>
-                <tbody>{''.join(_stage_rows)}</tbody>
-              </table>
-            </div>
-            """),
-        ])
-        if v1_03_tax.late_discovery:
-            _items.append(mo.callout(
-                mo.md(
-                    f"**Failure state: iteration tax is active.** The current stage creates "
-                    f"**{v1_03_tax.avoidable_rework_days:.0f} avoidable person-days** and reopens: "
-                    f"{', '.join(v1_03_tax.artifacts_to_rebuild)}."
-                ),
-                kind="danger",
-            ))
-        else:
-            _items.append(mo.callout(mo.md("**Recovered.** Moving the gate to the recommended stage removes the avoidable tax."), kind="success"))
-        _items.extend([
-            mo.accordion({
-                "Math Peek / Source Model - constraint propagation cost": mo.md(f"""
-    The notebook uses the chapter's simplified correction model:
-
-    $$
-    \\text{{rework}} = \\text{{base effort}} \\times 2^{{\\text{{stage}} - 1}}
-    $$
-
-    For this track:
-
-    $$
-    {v1_03_workflow.base_rework_days:.1f} \\times 2^{{{v1_03_tax.discovery_stage - 1}}}
-    = {v1_03_tax.rework_days:.1f}\\;\\text{{person-days}}
-    $$
-
-    Stage 5 produces a 16x multiplier and stage 6 produces a 32x multiplier in the chapter framing.
-    """)
-            }),
-            source_trace({
-                "api": "mlsysbook_labs.constraint_tax",
-                "base_rework_days": v1_03_workflow.base_rework_days,
-                "recommended_gate_stage": v1_03_workflow.recommended_gate_stage,
-                "stage_count": len(v1_03_workflow.stage_names),
-            }, summary="Constraint-tax evidence uses the shared workflow helper and selected profile."),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Checkpoint</h2>
-              <div class="mlsysbook-callout"><strong>Report decision:</strong>
-                Move the gate earlier if the avoidable tax ({v1_03_tax.avoidable_rework_days:.0f} days)
-                is larger than the cost of running the gate before release pressure.</div>
-            </div>
-            """),
-        ])
-        return mo.vstack(_items)
-
-    def v1_03_build_part_c():
-        _items = [
-            v1_03_part_header(
-                "Part C",
-                "Evaluation Gates Trade Speed For Confidence",
-                "How much evidence should the workflow buy before deployment confidence is credible?",
-                COLORS["OrangeLine"],
-            ),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Scenario</h2>
-              <p>{v1_03_workflow.stakeholder} must decide how realistic the gate should be before
-                 {v1_03_workflow.constraint_name} can block release. A shallow gate is fast; a realistic
-                 gate makes weaker assumptions.</p>
-            </div>
-            """),
-            mo.Html("<div class=\"mlsysbook-panel\"><h2>Prediction</h2></div>"),
-            v1_03_frontier_prediction,
-        ]
-        if v1_03_frontier_prediction.value is None:
-            _items.append(mo.callout(mo.md("Predict the bottleneck before opening the frontier chart."), kind="warn"))
-            return mo.vstack(_items)
-
-        _depth_values = list(range(5, 101, 5))
-        _points = [
-            iteration_frontier(
-                v1_03_workflow,
-                validation_depth_pct=depth,
-                automation_pct=v1_03_automation.value,
-                hardware_realism_pct=v1_03_realism.value,
-                data_scale_pct=v1_03_data_scale.value,
-            )
-            for depth in _depth_values
-        ]
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(
-            x=[point.iteration_days for point in _points],
-            y=[point.residual_risk_pct for point in _points],
-            mode="lines+markers",
-            marker=dict(color=COLORS["BlueLine"], size=7),
-            line=dict(color=COLORS["BlueLine"], width=2.5),
-            name="Validation depth sweep",
-        ))
-        _fig.add_trace(go.Scatter(
-            x=[v1_03_frontier.iteration_days],
-            y=[v1_03_frontier.residual_risk_pct],
-            mode="markers",
-            marker=dict(color=COLORS["RedLine"], size=14, line=dict(color="white", width=2)),
-            name="Current workflow",
-        ))
-        _fig.add_hline(
-            y=v1_03_risk_budget_pct,
-            line_dash="dash",
-            line_color=COLORS["RedLine"],
-            annotation_text="risk budget",
-        )
-        _fig.add_vline(
-            x=v1_03_cycle_budget_days,
-            line_dash="dot",
-            line_color=COLORS["TextMuted"],
-            annotation_text="cycle budget",
-        )
-        _fig.update_layout(
-            height=360,
-            xaxis=dict(title="Iteration time (days)", gridcolor="#f1f5f9"),
-            yaxis=dict(title="Residual deployment risk (%)", gridcolor="#f1f5f9"),
-            margin=dict(l=60, r=20, t=40, b=55),
-        )
-        apply_plotly_theme(_fig)
-
-        _risk_over = v1_03_frontier.residual_risk_pct > v1_03_risk_budget_pct
-        _cycle_over = v1_03_frontier.iteration_days > v1_03_cycle_budget_days
-        if _risk_over:
-            _consequence = mo.callout(
-                mo.md(
-                    f"**Fast but blind.** Residual risk is **{v1_03_frontier.residual_risk_pct:.1f}%**, "
-                    f"above the {v1_03_risk_budget_pct:.1f}% budget. Add realism, data scale, or validation depth."
-                ),
-                kind="danger",
-            )
-        elif _cycle_over:
-            _consequence = mo.callout(
-                mo.md(
-                    f"**Confident but slow.** Iteration time is **{v1_03_frontier.iteration_days:.1f} days**, "
-                    f"above the {v1_03_cycle_budget_days:.1f}-day cycle budget. Add automation or reduce scope."
-                ),
-                kind="warn",
-            )
-        else:
-            _consequence = mo.callout(
-                mo.md("**Balanced gate.** Current settings stay inside the risk and cycle budgets."),
-                kind="success",
-            )
-
-        _items.extend([
-            v1_03_prediction_feedback(
-                v1_03_frontier_prediction.value,
-                v1_03_frontier.bottleneck,
-                f"**Correct.** The current bottleneck is **{v1_03_frontier.bottleneck}**.",
-                f"**Measured bottleneck: {v1_03_frontier.bottleneck}.** The weakest validation dimension controls the residual risk.",
-            ),
-            mo.Html("<div class=\"mlsysbook-panel\"><h2>Manipulation</h2></div>"),
-            mo.hstack([v1_03_validation_depth, v1_03_automation], justify="start", gap="2rem"),
-            mo.hstack([v1_03_realism, v1_03_data_scale], justify="start", gap="2rem"),
-            mo.as_html(_fig),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Computed Evidence</h2>
-              <div class="mlsysbook-grid">
-                <div class="mlsysbook-field"><strong>Iteration time</strong>{v1_03_frontier.iteration_days:.1f} days</div>
-                <div class="mlsysbook-field"><strong>Cycle budget</strong>{v1_03_cycle_budget_days:.1f} days</div>
-                <div class="mlsysbook-field"><strong>Confidence</strong>{v1_03_frontier.confidence_pct:.1f}%</div>
-                <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_03_frontier.residual_risk_pct:.1f}%</div>
-                <div class="mlsysbook-field"><strong>Risk budget</strong>{v1_03_risk_budget_pct:.1f}%</div>
-                <div class="mlsysbook-field"><strong>Bottleneck</strong>{v1_03_frontier.bottleneck}</div>
-              </div>
-            </div>
-            """),
-            _consequence,
-            mo.accordion({
-                "Math Peek / Source Model - validation frontier": mo.md(f"""
-    The source model estimates confidence from four gate dimensions:
-
-    $$
-    \\text{{confidence}} = 18 + 0.28d + 0.27r + 0.22s + 0.12a
-    $$
-
-    Residual risk falls toward a track-specific floor:
-
-    $$
-    \\text{{risk}} = \\max(\\text{{floor}}, \\text{{base risk}} - 0.62 \\cdot \\text{{confidence}})
-    $$
-
-    Current values: depth={v1_03_frontier.validation_depth_pct:.0f}%, realism={v1_03_frontier.hardware_realism_pct:.0f}%,
-    data scale={v1_03_frontier.data_scale_pct:.0f}%, automation={v1_03_frontier.automation_pct:.0f}%.
-    """)
-            }),
-            source_trace({
-                "api": "mlsysbook_labs.iteration_frontier",
-                "base_cycle_days": v1_03_workflow.base_cycle_days,
-                "base_residual_risk_pct": v1_03_workflow.base_residual_risk_pct,
-                "min_residual_risk_pct": v1_03_workflow.min_residual_risk_pct,
-                "derived_risk_budget_pct": round(v1_03_risk_budget_pct, 2),
-            }, summary="Frontier evidence uses the shared helper plus a notebook-local derived risk budget."),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Checkpoint</h2>
-              <div class="mlsysbook-callout"><strong>Report decision:</strong>
-                The gate should focus on {v1_03_frontier.bottleneck} until residual risk is below
-                {v1_03_risk_budget_pct:.1f}% without pushing cycle time beyond {v1_03_cycle_budget_days:.1f} days.</div>
-            </div>
-            """),
-        ])
-        return mo.vstack(_items)
-
-    def v1_03_build_part_d():
-        _recommended_gate = v1_03_recommended_gate()
-        _items = [
-            v1_03_part_header(
-                "Part D",
-                "Workflow Policy Is System Design",
-                f"Which gate and release rule should {v1_03_workflow.label} adopt?",
-                COLORS["GreenLine"],
-            ),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Scenario</h2>
-              <p>The policy decides when evidence can block release. For this track, that means the policy must
-                 name the gate, release rule, rollback rule, and the residual blind spot the team still accepts.</p>
-            </div>
-            """),
-            mo.Html("<div class=\"mlsysbook-panel\"><h2>Prediction</h2></div>"),
-            v1_03_policy_prediction,
-        ]
-        if v1_03_policy_prediction.value is None:
-            _items.append(mo.callout(mo.md("Predict the non-negotiable gate before comparing policies."), kind="warn"))
-            return mo.vstack(_items)
-
-        _gate_rows = []
-        for gate in v1_03_workflow.gate_options:
-            _tax = constraint_tax(v1_03_workflow, discovery_stage=gate.stage)
-            _color = COLORS["GreenLine"] if gate.gate_id == v1_03_policy.gate_id else COLORS["TextSec"]
-            _gate_rows.append(
-                f"""
-                <tr>
-                  <td style="color:{_color}; font-weight:800;">{gate.label}</td>
-                  <td>{_tax.discovery_stage_name}</td>
-                  <td style="text-align:right;">{_tax.rework_days:.0f} days</td>
-                  <td>{gate.validation_focus}</td>
-                  <td>{gate.residual_risk}</td>
-                </tr>
-                """
-            )
-
-        _late_policy = v1_03_policy.gate_stage > v1_03_workflow.recommended_gate_stage
-        _items.extend([
-            v1_03_prediction_feedback(
-                v1_03_policy_prediction.value,
-                _recommended_gate.gate_id,
-                f"**Correct direction.** {_recommended_gate.label} is the earliest policy gate aligned to the recommended stage.",
-                f"**Compare against {_recommended_gate.label}.** Later gates can still be useful, but they let more assumptions harden before evidence can block release.",
-            ),
-            mo.Html("<div class=\"mlsysbook-panel\"><h2>Manipulation</h2></div>"),
-            mo.hstack([v1_03_gate_choice, v1_03_release_policy], justify="start", gap="2rem"),
-            v1_03_rollback_rule,
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Policy Evidence</h2>
-              <div class="mlsysbook-grid">
-                <div class="mlsysbook-field"><strong>Selected gate</strong>{v1_03_policy.gate_label}</div>
-                <div class="mlsysbook-field"><strong>Gate stage</strong>{v1_03_policy.gate_stage_name}</div>
-                <div class="mlsysbook-field"><strong>Rework at gate</strong>{v1_03_policy.rework_days_at_gate:.0f} days</div>
-                <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_03_policy.residual_risk_pct:.1f}%</div>
-                <div class="mlsysbook-field"><strong>Release policy</strong>{v1_03_policy.release_policy}</div>
-                <div class="mlsysbook-field"><strong>Rollback rule</strong>{v1_03_policy.rollback_rule}</div>
-              </div>
-              <div class="mlsysbook-callout"><strong>Policy summary:</strong> {v1_03_policy.policy_summary}</div>
-              <table style="width:100%; border-collapse:collapse; margin-top:14px; font-size:0.84rem;">
-                <thead>
-                  <tr style="border-bottom:1px solid {COLORS['Border']}; text-align:left; color:{COLORS['TextMuted']};">
-                    <th>Gate</th><th>Stage</th><th style="text-align:right;">Rework</th><th>Validation focus</th><th>Blind spot</th>
-                  </tr>
-                </thead>
-                <tbody>{''.join(_gate_rows)}</tbody>
-              </table>
-            </div>
-            """),
-        ])
-        if _late_policy:
-            _items.append(mo.callout(
-                mo.md(
-                    f"**Policy boundary crossed.** {v1_03_policy.gate_label} is after the recommended gate, "
-                    f"so the policy accepts {v1_03_policy.rework_days_at_gate:.0f} days of rework before evidence can block release."
-                ),
-                kind="danger",
-            ))
-        else:
-            _items.append(mo.callout(
-                mo.md("**Policy blocks early enough.** Evidence can stop the workflow before release debt compounds."),
-                kind="success",
-            ))
-        _items.extend([
-            mo.accordion({
-                "Math Peek / Source Model - policy tuple": mo.md(f"""
-    The policy is a system design tuple, not paperwork:
-
-    $$
-    \\text{{policy}} =
-    (\\text{{gate timing}}, \\text{{evidence requirement}}, \\text{{rollout}}, \\text{{rollback}}, \\text{{blind spot}})
-    $$
-
-    Current tuple:
-
-    - Gate timing: **{v1_03_policy.gate_label}** at **{v1_03_policy.gate_stage_name}**
-    - Evidence requirement: **{v1_03_policy.release_policy}**
-    - Rollback: **{v1_03_policy.rollback_rule}**
-    - Residual blind spot: **{v1_03_policy.blind_spot}**
-    """)
-            }),
-            source_trace({
-                "api": "mlsysbook_labs.workflow_policy",
-                "gate_id": v1_03_policy.gate_id,
-                "release_policy": v1_03_policy.release_policy,
-                "rollback_rule": v1_03_policy.rollback_rule,
-                "blind_spot_source": "WorkflowGate.residual_risk",
-            }, summary="Policy evidence packages selected gate metadata and frontier risk."),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Checkpoint</h2>
-              <div class="mlsysbook-callout"><strong>Report decision:</strong>
-                Defend this policy only if the release evidence can block {v1_03_workflow.constraint_name}
-                before {v1_03_policy.blind_spot} becomes the next unknown.</div>
-            </div>
-            """),
-        ])
-        return mo.vstack(_items)
-
-    def v1_03_build_synthesis():
-        _complete = (
-            v1_03_gate_prediction.value is not None
-            and v1_03_tax_prediction.value is not None
-            and v1_03_frontier_prediction.value is not None
-            and v1_03_policy_prediction.value is not None
-            and bool(str(v1_03_reflection.value or "").strip())
-        )
-        _status = "READY" if _complete else "IN PROGRESS"
+        _fig.add_bar(name=a_base["requirement_label"], x=_stage_names,
+                     y=tuple(a_base["affected_stage_counts"].values()), marker_color=COLORS["BlueLine"])
+        _fig.add_bar(name=a_result["requirement_label"], x=_stage_names,
+                     y=tuple(a_result["affected_stage_counts"].values()), marker_color=COLORS["OrangeLine"])
+        _fig.update_layout(height=270, margin=dict(l=25, r=20, t=20, b=55),
+                           barmode="group", yaxis_title="Affected lifecycle artifacts",
+                           legend_orientation="h")
+        _rows = [{
+            "Requirement": result["requirement_label"],
+            "Limit": result["requirement_limit"],
+            "Seeded defect": result["seeded_defect"],
+            "Affected artifacts": ", ".join(result["affected_artifacts"]),
+        } for result in (a_base, a_result)]
         return mo.vstack([
-            v1_03_part_header(
-                "Synthesis",
-                "Release Memo With Residual Blind Spot",
-                "What policy will this track carry forward?",
-                COLORS["BlueLine"],
-            ),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Release Policy Memo</h2>
-              <div class="mlsysbook-grid">
-                <div class="mlsysbook-field"><strong>Track</strong>{v1_03_workflow.label}</div>
-                <div class="mlsysbook-field"><strong>Constraint</strong>{v1_03_workflow.constraint_name}</div>
-                <div class="mlsysbook-field"><strong>Discovery stage</strong>{v1_03_tax.discovery_stage_name}</div>
-                <div class="mlsysbook-field"><strong>Avoidable rework</strong>{v1_03_tax.avoidable_rework_days:.0f} person-days</div>
-                <div class="mlsysbook-field"><strong>Iteration time</strong>{v1_03_frontier.iteration_days:.1f} days</div>
-                <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_03_frontier.residual_risk_pct:.1f}%</div>
-                <div class="mlsysbook-field"><strong>Policy</strong>{v1_03_policy.policy_summary}</div>
-                <div class="mlsysbook-field"><strong>Blind spot</strong>{v1_03_policy.blind_spot}</div>
-              </div>
-            </div>
-            """),
-            mo.Html("<div class=\"mlsysbook-panel\"><h2>Final Checkpoint</h2></div>"),
-            v1_03_reflection,
-            mo.Html(f"""
-            <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 5px solid #10B981; border-radius: 8px; padding: 18px 22px; margin-top: 14px; margin-bottom: 14px;">
-              <div style="font-size: 0.8rem; font-weight: 800; color: #10B981; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">
-                Lead Systems Architect Authorization
-              </div>
-              <div style="color: #1E293B; font-size: 0.95rem; line-height: 1.6;">
-                The workflow policy for <strong>{v1_03_workflow.label}</strong> is authorized for release. Verification gates detect <strong>{v1_03_workflow.constraint_name}</strong> violations with an estimated iteration turnaround of {v1_03_frontier.iteration_days:.1f} days and residual risk of {v1_03_frontier.residual_risk_pct:.1f}%.
-              </div>
-            </div>
-            """),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Big Takeaways</h2>
-              <ul class="mlsysbook-list">
-                <li><strong>Constraints propagate backward.</strong> A late deployment failure invalidates upstream data, model, validation, release, and monitoring artifacts.</li>
-                <li><strong>The iteration tax is measurable.</strong> The same stage move changes the cost multiplier and the artifacts to rebuild.</li>
-                <li><strong>Evaluation gates buy evidence.</strong> Speed without realism leaves residual deployment risk; realism without automation slows learning.</li>
-                <li><strong>Workflow policy is system design.</strong> The selected gate determines when evidence can block the system.</li>
-              </ul>
-            </div>
-            """),
-            mo.Html(f"""
-            <div class="lab-hud">
-                <span class="hud-label">LAB</span>
-                <span class="hud-value">03 &middot; Constraint Tax</span>
-                <span class="hud-label">TRACK</span>
-                <span class="hud-value">{v1_03_workflow.label}</span>
-                <span style="flex:1;"></span>
-                <span class="hud-label">ARTIFACT</span>
-                <span class="hud-value">{v1_03_workflow.report_artifact}</span>
-                <span class="hud-label">STATUS</span>
-                <span class="hud-active">{_status}</span>
-            </div>
-            """),
+            _intro, a_prediction, apply_plotly_theme(_fig), table(_rows),
+            requirement_choice,
+            mo.callout(mo.md(
+                f"**Your prediction:** {a_prediction.value}. Carrying **{a_base['requirement_label']}** changes only artifacts reachable from that requirement in the lifecycle graph."
+            ), kind="info"),
+            a_capture, saved("A"),
+            mo.accordion({"Calculation Notes": mo.md(
+                "The instrument traverses a small explicit dependency graph. An artifact appears only when it depends directly or indirectly on the selected requirement; unrelated roots are preserved as a control."
+            )}),
         ])
 
-    def build_part_a():
-        return v1_03_build_part_a()
+    def part_b():
+        _intro = mo.md(
+            f"### B · When should we pay to check it? (10 min)\n"
+            f"Development context: **{profile['scenario']}**. The carried requirement is **{a_base['requirement_label']}** ({a_base['requirement_limit']}). Predict before comparing a data-stage check with a later check."
+        )
+        if b_prediction.value is None:
+            return mo.vstack([_intro, late_stage, escalation, b_prediction])
+        _early, _late = b_comparison["earlier"], b_comparison["later"]
+        _fig = go.Figure()
+        _fig.add_bar(name="Inspection", x=[_early["discovery_stage"], _late["discovery_stage"]],
+                     y=[_early["inspection_days"], _late["inspection_days"]], marker_color=COLORS["BlueLine"])
+        _fig.add_bar(name="Rework", x=[_early["discovery_stage"], _late["discovery_stage"]],
+                     y=[_early["rework_days"], _late["rework_days"]], marker_color=COLORS["RedLine"])
+        _fig.update_layout(barmode="stack", height=285, margin=dict(l=25, r=20, t=20, b=35),
+                           yaxis_title="Person-days", legend_orientation="h")
+        _rows = [{
+            "Discovery": result["discovery_stage"],
+            "Inspection days": result["inspection_days"],
+            "Artifacts reopened": result["incurred_artifact_count"],
+            "Direct rework days": result["base_rework_days"],
+            "Scenario rework days": result["rework_days"],
+            "Total response days": result["total_response_days"],
+        } for result in (_early, _late)]
+        return mo.vstack([
+            _intro, b_prediction, mo.hstack([late_stage, escalation], widths="equal", wrap=True),
+            apply_plotly_theme(_fig), table(_rows),
+            mo.callout(mo.md(
+                f"**Avoidable response time:** {b_comparison['avoidable_days']:.2f} person-days. This is a sum of work on artifacts already created, with the visible sensitivity multiplier applied."
+            ), kind="danger" if b_comparison["avoidable_days"] > 0 else "info"),
+            timing_decision, b_capture, saved("B"),
+            mo.accordion({"Calculation Notes": mo.md(
+                "Base rework is the sum of the displayed affected-artifact costs incurred by the discovery stage. The multiplier is a learner-selected sensitivity assumption; stage number does not generate an exponential cost law."
+            )}),
+        ])
 
-    def build_part_b():
-        return v1_03_build_part_b()
+    def part_c():
+        _intro = mo.md(
+            f"### C · Does faster iteration produce a better result? (10 min)\n"
+            f"Development context: **{profile['scenario']}** carrying **{a_base['requirement_label']}**. Both plans receive the same {development_budget.value}-day budget and follow supplied candidate outcomes for this matched task."
+        )
+        if c_prediction.value is None:
+            return mo.vstack([_intro, development_budget, c_prediction])
+        _fig = go.Figure([go.Bar(
+            x=["Rapid offline", "Target in loop"],
+            y=[c_rapid["completed_iterations"], c_target["completed_iterations"]],
+            marker_color=[COLORS["OrangeLine"], COLORS["GreenLine"]],
+        )])
+        _fig.update_layout(height=260, margin=dict(l=25, r=20, t=20, b=35),
+                           yaxis_title="Completed iterations", showlegend=False)
+        _rows = [{
+            "Plan": "Rapid offline" if result["plan_id"] == "rapid_offline" else "Target in loop",
+            "Budget days": result["development_budget_days"],
+            "Completed": result["completed_iterations"],
+            "Failed target iterations": result["failed_iterations"],
+            "Best target task success": "not observed" if result["best_target_task_success_pct"] is None else f"{result['best_target_task_success_pct']:.1f}%",
+            "Releasable candidate": "YES" if result["has_releasable_candidate"] else "NO",
+        } for result in (c_rapid, c_target)]
+        _choice_status = "No tested plan selected" if plan_choice.value == "none" else f"Selected {plan_choice.value}"
+        return mo.vstack([
+            _intro, c_prediction, development_budget, apply_plotly_theme(_fig), table(_rows),
+            mo.callout(mo.md(
+                f"**Result:** the rapid plan completes {c_comparison['iteration_count_delta']} more iterations. Candidate release still depends on observed target task success, including unsuccessful attempts."
+            ), kind="info"),
+            mo.hstack([plan_choice, plan_rejected], widths="equal", wrap=True),
+            mo.callout(mo.md(f"**Decision status:** {_choice_status}."),
+                       kind="warn" if plan_choice.value == "none" else "success"),
+            c_capture, saved("C"),
+            mo.accordion({"Calculation Notes": mo.md(
+                "The simulator walks the supplied candidate trajectory until the next iteration would exceed the time budget. Task-success percentages are illustrative observations for this one scenario, not a universal quality equation."
+            )}),
+        ])
 
-    def build_part_c():
-        return v1_03_build_part_c()
+    def part_d():
+        _intro = mo.md(
+            f"### D · What evidence makes release defensible? (10 min)\n"
+            f"Development context: **{profile['scenario']}** carrying **{a_base['requirement_label']}**. The checks receive the same seeded defects: **{', '.join(d_results['combined']['seeded_defects'])}**. Predict each check's blind spot before seeing the matrix."
+        )
+        if d_prediction.value is None:
+            return mo.vstack([_intro, d_prediction])
+        _fig = go.Figure()
+        _fig.add_bar(
+            name="Detected", x=["Offline", "Target", "Combined"],
+            y=[d_results[key]["detected_defect_count"] for key in ("offline", "target", "combined")],
+            marker_color=COLORS["GreenLine"],
+        )
+        _fig.add_bar(
+            name="Escaped", x=["Offline", "Target", "Combined"],
+            y=[d_results[key]["escaped_defect_count"] for key in ("offline", "target", "combined")],
+            marker_color=COLORS["RedLine"],
+        )
+        _fig.update_layout(barmode="stack", height=280, margin=dict(l=25, r=20, t=20, b=35),
+                           yaxis_title="Seeded defects", legend_orientation="h")
+        _rows = [{
+            "Check plan": key.title(),
+            "Inspection days": result["inspection_days"],
+            "Detected": ", ".join(result["detected_defects"]),
+            "Escaped": ", ".join(result["escaped_defects"]) or "none",
+            "Decision": result["decision"].upper(),
+        } for key, result in d_results.items()]
+        return mo.vstack([
+            _intro, d_prediction, apply_plotly_theme(_fig), table(_rows),
+            mo.hstack([release_choice, release_rejected], widths="equal", wrap=True),
+            mo.callout(mo.md(
+                f"**Compared live result:** {d_result['check_plan']} detects {d_result['detected_defect_count']} of {d_result['seeded_defect_count']} seeded defects and leaves {d_result['escaped_defect_count']} visible blind spots."
+            ), kind="success" if d_result["release_defensible"] else "danger"),
+            d_capture, saved("D"),
+            mo.accordion({"Calculation Notes": mo.md(
+                "Each check has an explicit inspection time and detection set. Combined evidence is the union of offline and target detections. Passing covers only the named seeded defects; it cannot prove that no other defect exists."
+            )}),
+        ])
 
-    def build_part_d():
-        return v1_03_build_part_d()
+    def part_e():
+        _intro = mo.md(
+            f"### E · What should production send backward? (8 min)\n"
+            f"Development context: **{profile['scenario']}** ({e_result['requests_after_change']} post-shift requests carrying **{a_base['requirement_label']}**). A world change, an input alert, and delayed labeled outcomes are different events. Predict what the first signal establishes."
+        )
+        if e_prediction.value is None:
+            return mo.vstack([_intro, signal_interval, outcome_delay, e_prediction])
+        _fig = go.Figure()
+        _fig.add_trace(go.Scatter(
+            x=[event["hour"] for event in e_result["timeline"]],
+            y=[event["kind"] for event in e_result["timeline"]],
+            mode="markers+lines", marker=dict(size=12, color=COLORS["BlueLine"]),
+            line=dict(color=COLORS["BlueLine"]),
+        ))
+        _fig.update_layout(height=285, margin=dict(l=25, r=20, t=20, b=35),
+                           xaxis_title="Hours since release", yaxis_title="Event", showlegend=False)
+        _rows = [{
+            "Policy": "11-hour baseline" if result is e_base else "Selected cadence",
+            "Signal interval": f"{result['signal_check_interval_hours']:.0f} h",
+            "Signal delay": f"{result['signal_detection_delay_hours']:.1f} h",
+            "Checks through evidence": result["inspection_count_through_evidence"],
+            "Outcome-label delay": f"{result['outcome_delay_hours']:.0f} h",
+            "Adverse outcomes": result["adverse_outcomes_after_change"],
+        } for result in (e_base, e_result)]
+        return mo.vstack([
+            _intro, e_prediction,
+            mo.hstack([signal_interval, outcome_delay], widths="equal", wrap=True),
+            apply_plotly_theme(_fig), table(_rows),
+            mo.callout(mo.md(
+                "A shorter interval changes observation delay and inspection count. The fixed request and adverse-outcome counts do not change. An alert revisits validation; labeled outcomes can send the team back to data."
+            ), kind="info"),
+            feedback_revisit, e_capture, saved("E"),
+            mo.accordion({"Calculation Notes": mo.md(
+                "Signal checks occur on a fixed cadence after release. The first check at or after the population change supplies the alert time. Outcome evidence appears after the selected label delay. Monitoring observes both timelines and does not alter the underlying outcomes."
+            )}),
+        ])
 
     def build_synthesis():
-        return v1_03_build_synthesis()
-
-    v1_03_tabs = mo.ui.tabs({
-        "Part A: Propagation": build_part_a(),
-        "Part B: Iteration Tax": build_part_b(),
-        "Part C: Gate Confidence": build_part_c(),
-        "Part D: Workflow Policy": build_part_d(),
-        "Synthesis": build_synthesis(),
-    })
-    v1_03_tabs
-    return
-
-
-@app.cell(hide_code=True)
-def _(
-    ledger,
-    v1_03_frontier,
-    v1_03_frontier_prediction,
-    v1_03_gate_prediction,
-    v1_03_policy,
-    v1_03_policy_prediction,
-    v1_03_profile,
-    v1_03_reflection,
-    v1_03_risk_budget_pct,
-    v1_03_tax,
-    v1_03_tax_prediction,
-    v1_03_variant,
-    v1_03_workflow,
-):
-    _ledger_ready = bool(
-        v1_03_gate_prediction.value is not None
-        and v1_03_tax_prediction.value is not None
-        and v1_03_frontier_prediction.value is not None
-        and v1_03_policy_prediction.value is not None
-        and bool(str(v1_03_reflection.value or "").strip())
-    )
-    ledger.save(chapter=3, design={
-        "chapter": "v1_03",
-        "track_id": v1_03_profile.track_id,
-        "scenario_id": v1_03_variant.scenario_id,
-        "hardware_ref": v1_03_workflow.hardware_ref,
-        "model_ref": v1_03_workflow.model_ref,
-        "completed": _ledger_ready,
-        "gate_prediction": v1_03_gate_prediction.value,
-        "tax_prediction": v1_03_tax_prediction.value,
-        "frontier_prediction": v1_03_frontier_prediction.value,
-        "policy_prediction": v1_03_policy_prediction.value,
-        "constraint_name": v1_03_workflow.constraint_name,
-        "discovery_stage": v1_03_tax.discovery_stage_name,
-        "selected_gate_id": v1_03_policy.gate_id,
-        "avoidable_rework_days": v1_03_tax.avoidable_rework_days,
-        "iteration_days": v1_03_frontier.iteration_days,
-        "confidence_pct": v1_03_frontier.confidence_pct,
-        "residual_risk_pct": v1_03_frontier.residual_risk_pct,
-        "risk_budget_pct": v1_03_risk_budget_pct,
-        "release_policy": v1_03_policy.release_policy,
-        "rollback_rule": v1_03_policy.rollback_rule,
-        "policy_summary": v1_03_policy.policy_summary,
-        "blind_spot": v1_03_policy.blind_spot,
-    })
-
-    _status = "SAVED" if _ledger_ready else "ACTIVE"
-    return
-
-
-@app.cell(hide_code=True)
-def _(
-    build_lab_report,
-    mo,
-    report_export_panel,
-    v1_03_automation,
-    v1_03_cycle_budget_days,
-    v1_03_data_scale,
-    v1_03_frontier,
-    v1_03_frontier_prediction,
-    v1_03_gate_prediction,
-    v1_03_metadata,
-    v1_03_policy,
-    v1_03_policy_prediction,
-    v1_03_profile,
-    v1_03_realism,
-    v1_03_reflection,
-    v1_03_risk_budget_pct,
-    v1_03_tax,
-    v1_03_tax_prediction,
-    v1_03_validation_depth,
-    v1_03_variant,
-    v1_03_workflow,
-):
-    _incomplete = []
-    if v1_03_gate_prediction.value is None:
-        _incomplete.append("Part A gate timing prediction")
-    if v1_03_tax_prediction.value is None:
-        _incomplete.append("Part B iteration-tax prediction")
-    if v1_03_frontier_prediction.value is None:
-        _incomplete.append("Part C validation-bottleneck prediction")
-    if v1_03_policy_prediction.value is None:
-        _incomplete.append("Part D policy-gate prediction")
-    if not str(v1_03_reflection.value or "").strip():
-        _incomplete.append("Synthesis release memo blind spot")
-
-    _report = build_lab_report(
-        v1_03_metadata,
-        track=v1_03_profile.label,
-        scenario=v1_03_variant.workload_summary,
-        learning_objectives=(
-            "Trace how deployment constraints propagate through workflow stages.",
-            "Measure the iteration tax created by late constraint discovery.",
-            "Compare validation realism, automation, iteration time, and residual risk.",
-            "Choose a track-specific workflow gate, release policy, rollback rule, and blind spot.",
-        ),
-        predictions={
-            "gate_timing": v1_03_gate_prediction.value,
-            "iteration_tax_shape": v1_03_tax_prediction.value,
-            "validation_bottleneck": v1_03_frontier_prediction.value,
-            "policy_gate": v1_03_policy_prediction.value,
-        },
-        knob_settings={
-            "discovery_stage": v1_03_tax.discovery_stage,
-            "validation_depth_pct": v1_03_validation_depth.value,
-            "automation_pct": v1_03_automation.value,
-            "hardware_realism_pct": v1_03_realism.value,
-            "data_scale_pct": v1_03_data_scale.value,
-            "selected_gate": v1_03_policy.gate_id,
-            "release_policy": v1_03_policy.release_policy,
-            "rollback_rule": v1_03_policy.rollback_rule,
-        },
-        evidence_summary={
-            "hardware_ref": v1_03_workflow.hardware_ref,
-            "model_ref": v1_03_workflow.model_ref,
-            "constraint_name": v1_03_workflow.constraint_name,
-            "cost_multiplier": v1_03_tax.cost_multiplier,
-            "rework_days": v1_03_tax.rework_days,
-            "avoidable_rework_days": v1_03_tax.avoidable_rework_days,
-            "iteration_days": v1_03_frontier.iteration_days,
-            "cycle_budget_days": v1_03_cycle_budget_days,
-            "confidence_pct": v1_03_frontier.confidence_pct,
-            "residual_risk_pct": v1_03_frontier.residual_risk_pct,
-            "risk_budget_pct": v1_03_risk_budget_pct,
-            "bottleneck": v1_03_frontier.bottleneck,
-            "selected_gate": v1_03_policy.gate_label,
-            "release_policy": v1_03_policy.release_policy,
-            "rollback_rule": v1_03_policy.rollback_rule,
-            "blind_spot": v1_03_policy.blind_spot,
-        },
-        final_decision=v1_03_policy.policy_summary,
-        big_takeaways=(
-            "Deployment constraints propagate backward through the whole workflow.",
-            "Late discovery creates a measurable iteration tax.",
-            "Evaluation gates trade iteration speed for deployment confidence.",
-            "A workflow policy must name both release evidence and residual blind spot.",
-        ),
-        reflections={
-            "student_reflection": v1_03_reflection.value,
-            "blind_spot": v1_03_policy.blind_spot,
-            "report_artifact": v1_03_workflow.report_artifact,
-        },
-        residual_risk=v1_03_policy.blind_spot,
-        source_trace={
-            "track_id": v1_03_profile.track_id,
-            "scenario_id": v1_03_variant.scenario_id,
-            "hardware_ref": v1_03_variant.hardware_ref,
-            "model_ref": v1_03_variant.model_ref,
-            "shared_helpers": "workflow_track_profile, constraint_tax, iteration_frontier, workflow_policy",
-            "source_policy": v1_03_profile.source_policy,
-        },
-        result_snapshot={
-            "workflow_profile": v1_03_workflow,
-            "constraint_tax": v1_03_tax,
-            "iteration_frontier": v1_03_frontier,
-            "workflow_policy": v1_03_policy,
-        },
-        incomplete_fields=tuple(_incomplete),
-    )
-
-    mo.vstack([
-        mo.md("## Download Report"),
-        mo.callout(
+        _rows = []
+        for _part in "ABCDE":
+            _capture = _captures.get(_part)
+            _current = (
+                _capture is not None and _part not in audit.stale
+                and (_part, _part) not in audit.identical_pairs
+            )
+            _rows.append({
+                "Part": _part,
+                "Original prediction": _capture.to_dict()["prediction"] if _capture else "—",
+                "Evidence": "CURRENT" if _current else ("STALE" if _capture else "MISSING"),
+            })
+        _saved_choice = _captures["C"].to_dict()["decision"] if "C" in _captures else None
+        _complete = (
+            audit.complete
+            and all(widget.value is not None for widget in
+                    (final_choice, final_rejected, final_trigger, final_risk))
+            and bool(rationale.value.strip())
+            and final_choice.value != final_rejected.value
+            and final_choice.value == _saved_choice
+        )
+        return mo.vstack([
             mo.md(
-                "This V1-03 workflow memo is generated locally from the selected track, "
-                "your inputs, and the computed evidence."
+                f"### Synthesis · Defend the workflow (5 min)\n"
+                f"Development context: **{profile['scenario']}** ({profile['display']} track). "
+                "Use saved evidence to state the chosen iteration plan, a quantified rejected plan, the release evidence required, one remaining limitation, and the event that triggers reevaluation."
             ),
-            kind="info",
-        ),
-        report_export_panel(_report),
-    ])
+            table(_rows),
+            mo.callout(mo.md(
+                "Saved snapshots remain fixed while live controls move. Recapture evidence marked stale before generating the local report."
+            ), kind="info"),
+            mo.hstack([final_choice, final_rejected], widths="equal", wrap=True),
+            mo.hstack([final_trigger, final_risk], widths="equal", wrap=True),
+            rationale,
+            mo.callout(mo.md(
+                "**Ready for the local report.**" if _complete else
+                "Complete five current contrasts, match the recommendation to saved Part C, compare a different tested plan, and add the rationale."
+            ), kind="success" if _complete else "warn"),
+        ])
+
+    tabs = mo.ui.tabs({
+        "Part A": part_a(), "Part B": part_b(), "Part C": part_c(),
+        "Part D": part_d(), "Part E": part_e(), "Synthesis": build_synthesis(),
+    })
+    tabs
+    return (audit,)
+
+
+@app.cell
+def _(
+    audit, build_lab_report, final_choice, final_rejected, final_risk,
+    final_trigger, get_evidence, get_lab_metadata, mo, profile, rationale,
+    report_export_panel, track_id,
+):
+    _captures = get_evidence()
+    _saved_choice = _captures["C"].to_dict()["decision"] if "C" in _captures else None
+    _ready = (
+        audit.complete
+        and all(widget.value is not None for widget in
+                (final_choice, final_rejected, final_trigger, final_risk))
+        and bool(rationale.value.strip())
+        and final_choice.value != final_rejected.value
+        and final_choice.value == _saved_choice
+    )
+    mo.stop(not _ready)
+    _snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
+    _d_chosen = _snapshots["D"].get("chosen_result")
+    _d_effective = _d_chosen if _d_chosen is not None else _snapshots["D"]["result"]
+    _carried_req = _snapshots["A"]["chosen_result"]["requirement_label"]
+    _carried_limit = _snapshots["A"]["chosen_result"]["requirement_limit"]
+    report = build_lab_report(
+        get_lab_metadata("vol1/lab_03_ml_workflow.py"),
+        track=track_id, scenario=profile["scenario"],
+        learning_objectives=[
+            "Trace a requirement through lifecycle artifacts",
+            "Compare validation timing, iteration cadence, and release evidence",
+            "Separate production alerts from delayed outcome evidence",
+        ],
+        predictions={part: _snapshots[part]["prediction"] for part in "ABCDE"},
+        knob_settings={part: _snapshots[part]["inputs"] for part in "ABCDE"},
+        evidence_summary={part: {
+                "baseline": _snapshots[part]["baseline"],
+                "result": _snapshots[part]["result"],
+                "alternatives": _snapshots[part]["alternatives"],
+                "chosen_result": _snapshots[part].get("chosen_result"),
+                "result_role": _snapshots[part].get("result_role"),
+            } for part in "ABCDE"},
+        binding_constraints={
+            "development_context": profile["scenario"],
+            "carried_requirement": f"{_carried_req} ({_carried_limit})",
+            "rework": _snapshots["B"]["result"]["incurred_artifacts"],
+            "release_blind_spots": _d_effective.get("escaped_defects", ("release held",)),
+        },
+        decisions={
+            "carried_requirement": _carried_req,
+            "recommendation": final_choice.value,
+            "rejected_alternative": final_rejected.value,
+            "release_decision": _snapshots["D"]["decision"],
+            "reevaluation_trigger": final_trigger.value,
+        },
+        final_decision={
+            "recommendation": final_choice.value,
+            "rejected_alternative": final_rejected.value,
+            "rationale": rationale.value,
+        },
+        big_takeaways=[
+            "Requirements propagate through explicit lifecycle dependencies.",
+            "More iterations do not guarantee a better target outcome.",
+            "Alerts start investigation; labeled outcomes establish task harm.",
+        ],
+        reflections={"rationale": rationale.value, "remaining_limitation": final_risk.value},
+        residual_risk=final_risk.value,
+        result_snapshot={
+            "track": track_id,
+            "development_context": profile["scenario"],
+            "carried_requirement": _carried_req,
+            "captures": _snapshots,
+            "recommendation": final_choice.value,
+            "rejected_alternative": final_rejected.value,
+            "reevaluation_trigger": final_trigger.value,
+            "residual_risk": final_risk.value,
+        },
+        source_trace={
+            "scenario": "Illustrative Chapter 3 workflow fixtures.",
+            "calculations": "MLSysIM workflow experiment results.",
+        },
+    )
+    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    return (report,)
+
+
+@app.cell
+async def _(
+    audit, final_choice, final_rejected, final_risk, final_trigger,
+    get_evidence, ledger, mo, rationale, track_id,
+):
+    _captures = get_evidence()
+    _saved_choice = _captures["C"].to_dict()["decision"] if "C" in _captures else None
+    _ready = (
+        audit.complete
+        and all(widget.value is not None for widget in
+                (final_choice, final_rejected, final_trigger, final_risk))
+        and bool(rationale.value.strip())
+        and final_choice.value != final_rejected.value
+        and final_choice.value == _saved_choice
+    )
+    _status = "EVIDENCE IN PROGRESS"
+    if _ready:
+        try:
+            ledger.save(chapter=3, design={
+                "schema_version": 1,
+                "lab_id": "v1_03",
+                "track_id": track_id,
+                "model_id": "v1_03_experiments",
+                "evidence": {part: capture.to_dict() for part, capture in _captures.items()},
+                "recommendation": final_choice.value,
+                "rejected_alternative": final_rejected.value,
+                "reevaluation_trigger": final_trigger.value,
+                "residual_risk": final_risk.value,
+                "rationale": rationale.value,
+            })
+            await ledger.flush()
+        except Exception:
+            _status = "LOCAL SAVE FAILED · DOWNLOAD THE REPORT TO KEEP YOUR EVIDENCE"
+        else:
+            _status = "SAVED"
+    mo.Html(
+        f'<div class="lab-hud"><span>LAB 03 · Carry the Constraint · STATUS: {_status}</span></div>'
+    )
     return
 
 

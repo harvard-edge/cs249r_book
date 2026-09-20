@@ -53,10 +53,32 @@ def extract_lab_number(lab_path: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def check_has_synthesis(source: str) -> bool:
+    """Check whether source defines a synthesis tab or build_synthesis() function using AST."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "build_synthesis":
+            if node.body and not (len(node.body) == 1 and isinstance(node.body[0], ast.Pass)):
+                return True
+        if isinstance(node, ast.Call):
+            f = node.func
+            if (isinstance(f, ast.Attribute) and f.attr == "tabs") or (isinstance(f, ast.Name) and f.id == "tabs"):
+                if node.args and isinstance(node.args[0], ast.Dict):
+                    for k, v in zip(node.args[0].keys, node.args[0].values):
+                        if isinstance(k, ast.Constant) and isinstance(k.value, str):
+                            if any(w in k.value.lower() for w in ("synth", "graduation")):
+                                if v is not None and not (isinstance(v, ast.Constant) and v.value in (None, "", False)):
+                                    return True
+    return False
+
+
 def count_builder_functions(source: str) -> tuple[int, bool]:
-    """Count build_part_X() functions and whether build_synthesis() exists."""
+    """Count build_part_X() functions and whether synthesis exists."""
     parts = len(re.findall(r"def build_part_\w+\(", source))
-    has_synthesis = "def build_synthesis(" in source
+    has_synthesis = check_has_synthesis(source)
     return parts, has_synthesis
 
 
@@ -161,13 +183,23 @@ class TestTabbedStructure:
 
     @pytest.mark.protocol
     def test_has_synthesis(self, lab_path):
-        """Every lab (except lab_00) must have a build_synthesis() function."""
+        """Every lab (except lab_00) must have a Synthesis tab or build_synthesis() function."""
         if is_orientation(lab_path):
             pytest.skip("Lab 00 is orientation")
 
         source = read_source(lab_path)
-        _, has_synthesis = count_builder_functions(source)
-        assert has_synthesis, "Missing build_synthesis() function"
+        has_synthesis = check_has_synthesis(source)
+        assert has_synthesis, "Missing Synthesis tab or build_synthesis() function"
+
+    def test_synthesis_detector_negative_regression(self):
+        """Negative checks: comments, unrelated strings, and empty/missing synthesis must not pass."""
+        assert not check_has_synthesis("# def build_synthesis():\n# mo.ui.tabs({'Synthesis': synthesis()})")
+        assert not check_has_synthesis("title = 'Synthesis'\nx = 'build_synthesis'")
+        assert not check_has_synthesis("import marimo as mo\nmo.ui.tabs({'Part A': part_a(), 'Synthesis': None})")
+        assert not check_has_synthesis("import marimo as mo\nmo.ui.tabs({'Part A': part_a()})")
+        assert not check_has_synthesis("import marimo as mo\nmo.ui.tabs({'Synthesis': ''})")
+        assert check_has_synthesis("def build_synthesis():\n    return 42")
+        assert check_has_synthesis("import marimo as mo\nmo.ui.tabs({'Part A': part_a(), 'Synthesis': synthesis()})")
 
     @pytest.mark.protocol
     def test_tabs_contain_parts(self, lab_path):

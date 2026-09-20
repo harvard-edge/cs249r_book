@@ -1,14 +1,17 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full", app_title="Lab 09: The Selection Paradox · MLSysBook")
+app = marimo.App(
+    width="full",
+    app_title="Lab 09: Selection That Pays · MLSysBook",
+)
 
 
 @app.cell
 async def _():
-    import marimo as mo
     import sys
     from pathlib import Path
+    import marimo as mo
 
     if sys.platform == "emscripten":
         import micropip
@@ -16,1861 +19,923 @@ async def _():
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
-        _labs_dir = Path(__file__).resolve().parents[1]
-        if str(_labs_dir) not in sys.path:
-            sys.path.insert(0, str(_labs_dir))
+        labs_dir = Path(__file__).resolve().parents[1]
+        if str(labs_dir) not in sys.path:
+            sys.path.insert(0, str(labs_dir))
         from bootstrap import native_bootstrap
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
+    from mlsysim.core.units import Q_
+    from mlsysim.engine.v1_09_experiments import (
+        MODEL_ID, TRACKS, acquisition_option, compare_policies,
+        full_pool_baseline, learning_curve, population_shift,
+        selection_amortization, serialize_value,
+    )
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        MathPeek,
-        big_takeaways,
-        build_lab_report,
-        calc_selection_inequality,
-        coverage_profile,
-        data_policy_decision,
-        data_selection_profile,
-        gated_hypothesis_card,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        instrumentation_console,
-        report_export_panel,
-        resolve_mlsysim_ref,
-        selection_frontier,
-        selection_utility,
-        source_trace,
-        track_arc_context,
-        track_context,
+        ACADEMIC_LAB_CSS, build_lab_report, get_lab_metadata, report_export_panel,
     )
+    from mlsysbook_labs.experiment_evidence import audit_evidence, capture_evidence
 
-    ledger = DesignLedger()
-    if getattr(ledger, "is_wasm", False):
-        _ = await ledger.load_async()
+    ledger = DesignLedger(volume="vol1")
+    if ledger.is_wasm:
+        _loaded = await ledger.load_async()
     return (
         ACADEMIC_LAB_CSS,
         COLORS,
         LAB_CSS,
+        MODEL_ID,
+        Q_,
+        TRACKS,
+        acquisition_option,
         apply_plotly_theme,
-        big_takeaways,
+        audit_evidence,
         build_lab_report,
-        calc_selection_inequality,
-        coverage_profile,
-        data_policy_decision,
-        data_selection_profile,
+        capture_evidence,
+        compare_policies,
+        full_pool_baseline,
         get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
         go,
+        learning_curve,
         ledger,
         mo,
+        population_shift,
         report_export_panel,
-        resolve_mlsysim_ref,
-        selection_frontier,
-        selection_utility,
-        source_trace,
-        track_arc_context,
-        track_context,
+        selection_amortization,
+        serialize_value,
     )
 
 
 @app.cell
-def _(get_lab_metadata):
-    v1_09_metadata = get_lab_metadata("vol1/lab_09_data_selection.py")
-    return (v1_09_metadata,)
+def _(mo):
+    get_evidence, set_evidence = mo.state({})
+    return get_evidence, set_evidence
 
 
-@app.cell(hide_code=True)
-def _(ledger, mo):
-    _options = {
-        "☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)": "cloud_fleet",
-        "🤖 Edge & Embodied Track (Robotics & Drones · Jetson AGX Orin)": "robotaxi",
-        "📱 Mobile Track (On-Device Personal AI · Apple Silicon M4 / Snapdragon)": "iphone",
-        "⚡ TinyML Track (Microcontrollers & Wearables · Cortex-M55 / ESP32-S3)": "oura_ring",
+@app.cell
+def _(mo, set_evidence):
+    track = mo.ui.dropdown(
+        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
+        value="TinyML", label="Teaching track",
+        on_change=lambda _value: set_evidence({}),
+    )
+    return (track,)
+
+
+@app.cell
+def _(TRACKS, track):
+    track_id = track.value
+    profile = TRACKS[track_id]
+    return profile, track_id
+
+
+@app.cell
+def _(mo, profile, track_id):
+    _track_key = track_id
+    b_retained = mo.ui.dropdown(
+        {"6 of 12": 6, "8 of 12": 8, "10 of 12": 10}, value="8 of 12",
+        label="Examples retained",
+    )
+    b_conclusion = mo.ui.radio(
+        {"Uniform": "uniform", "Deduplicate": "deduplicate",
+         "Coverage-aware": "coverage", "Hold for more evidence": "none"},
+        label="Policy to carry forward",
+    )
+    b_rejected = mo.ui.radio(
+        {"Uniform": "uniform", "Deduplicate": "deduplicate", "Coverage-aware": "coverage"},
+        label="Tested alternative",
+    )
+    c_scoring = mo.ui.slider(
+        int(profile["scoring_time_min"].to("microsecond").magnitude),
+        int(profile["scoring_time_max"].to("microsecond").magnitude),
+        value=int(profile["scoring_time_per_example"].to("microsecond").magnitude),
+        step=int(profile["scoring_time_step"].to("microsecond").magnitude),
+        label="Scoring time per example (µs)",
+    )
+    c_runs = mo.ui.slider(1, 100, value=12, step=1, label="Repeated training runs")
+    c_decision = mo.ui.radio(
+        {"Adopt for this run count": "adopt", "Reuse more times first": "wait",
+         "Reject on evidence": "reject"}, label="Amortization decision",
+    )
+    d_budget = mo.ui.slider(
+        int(profile["budget_min"].to("USD").magnitude),
+        int(profile["budget_max"].to("USD").magnitude),
+        value=int(profile["budget_default"].to("USD").magnitude),
+        step=int(profile["budget_step"].to("USD").magnitude),
+        label="Available data budget (USD)",
+    )
+    d_choice = mo.ui.radio(
+        {"Expert labels": "labels", "Generated examples": "generated", "Neither": "none"},
+        label="Next data purchase",
+    )
+    d_rejected = mo.ui.radio(
+        {"Expert labels": "labels", "Generated examples": "generated"},
+        label="Rejected purchase",
+    )
+    e_rare_share = mo.ui.slider(
+        int(profile["population_pct"]["rare"]), 45, value=35, step=1,
+        label="Changed rare-cohort share (%)",
+    )
+    return (
+        b_conclusion,
+        b_rejected,
+        b_retained,
+        c_decision,
+        c_runs,
+        c_scoring,
+        d_budget,
+        d_choice,
+        d_rejected,
+        e_rare_share,
+    )
+
+
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    a_prediction = mo.ui.radio(
+        {"Both add similar value": "similar", "Redundant data saturates first": "redundant_first",
+         "Informative data saturates first": "informative_first"},
+        label="Which pool loses marginal value first?",
+    ).form(submit_button_label="Lock Part A prediction")
+    b_prediction = mo.ui.radio(
+        {"Uniform has the safest coverage": "uniform", "Deduplication is safest": "deduplicate",
+         "Coverage-aware selection is safest": "coverage", "No policy can pass": "none"},
+        label="Which equal-size policy will satisfy the evidence checks?",
+    ).form(submit_button_label="Lock Part B prediction")
+    c_prediction = mo.ui.radio(
+        {"Selection pays after 1–5 runs": "1-5", "Selection pays after 6–20 runs": "6-20",
+         "Selection pays after more than 20 runs": "over-20", "It never pays in this sweep": "never"},
+        label="When will selection first save time?",
+    ).form(submit_button_label="Lock Part C prediction")
+    d_prediction = mo.ui.radio(
+        {"Labels preserve the rare cohort better": "labels",
+         "Generated examples preserve it better": "generated",
+         "The rare-cohort outcome is equal": "equal"},
+        label="Which package preserves the rare cohort better?",
+    ).form(submit_button_label="Lock Part D prediction")
+    e_prediction = mo.ui.radio(
+        {"The carried policy remains supported": "supported", "Quality fails first": "quality",
+         "Representation fails first": "representation", "Both checks fail": "both"},
+        label="What happens after the population changes?",
+    ).form(submit_button_label="Lock Part E prediction")
+    return a_prediction, b_prediction, c_prediction, d_prediction, e_prediction
+
+
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    final_choice = mo.ui.radio(
+        {"Uniform": "uniform", "Deduplicate": "deduplicate",
+         "Coverage-aware": "coverage", "Hold for more evidence": "none"},
+        label="Final data-selection policy",
+    )
+    final_rejected = mo.ui.radio(
+        {"Uniform": "uniform", "Deduplicate": "deduplicate", "Coverage-aware": "coverage"},
+        label="Quantified rejected alternative",
+    )
+    final_trigger = mo.ui.radio(
+        {"Rare cohort reaches tested share": "population", "Selection reuse falls below break-even": "reuse",
+         "Cohort outcome falls below its floor": "quality"}, label="Reevaluation trigger",
+    )
+    final_risk = mo.ui.radio(
+        {"Unobserved population change": "population_shift",
+         "Generated-data validation gap": "synthetic_validation",
+         "Training I/O omitted from cost": "training_io"}, label="Residual risk",
+    )
+    rationale = mo.ui.text_area(
+        label="Evidence-based rationale",
+        placeholder="Use saved counts, outcomes, time, and the rejected alternative.",
+    )
+    return final_choice, final_rejected, final_risk, final_trigger, rationale
+
+
+@app.cell
+def _(
+    Q_,
+    acquisition_option,
+    b_conclusion,
+    b_rejected,
+    b_retained,
+    c_runs,
+    c_scoring,
+    compare_policies,
+    d_budget,
+    e_rare_share,
+    full_pool_baseline,
+    learning_curve,
+    population_shift,
+    profile,
+    selection_amortization,
+    track_id,
+):
+    a_baseline = learning_curve(track_id, "redundant")
+    a_result = learning_curve(track_id, "informative")
+    b_comparison = compare_policies(track_id, b_retained.value)
+    b_results = {item["policy_id"]: item for item in b_comparison["policies"]}
+    b_full = full_pool_baseline(track_id)
+    carried_policy = (
+        b_conclusion.value
+        if b_conclusion.value not in (None, "none")
+        else (b_rejected.value or "coverage")
+    )
+    c_kwargs = {
+        "track_id": track_id,
+        "policy_id": carried_policy,
+        "retained_count": b_retained.value,
+        "scoring_time_per_example": Q_(c_scoring.value, "microsecond"),
+        "repeated_runs": c_runs.value,
     }
-    _saved_track = ledger.get_track()
-    _default_key = next((k for k, v in _options.items() if v == _saved_track), list(_options.keys())[0])
-    v1_09_track_picker = mo.ui.dropdown(
-        options=_options,
-        value=_default_key,
-        label="Select Course / Industry Track",
+    c_baseline = selection_amortization(**c_kwargs, comparison_path="full_pool")
+    c_result = selection_amortization(**c_kwargs, comparison_path="selected_subset")
+    budget = Q_(d_budget.value, "USD")
+    d_labels = acquisition_option(track_id, "labels", budget)
+    d_generated = acquisition_option(track_id, "generated", budget)
+    d_none = acquisition_option(track_id, "none", budget)
+    baseline_rare = profile["population_pct"]["rare"]
+    e_baseline = population_shift(track_id, carried_policy, b_retained.value, baseline_rare)
+    e_result = population_shift(track_id, carried_policy, b_retained.value, e_rare_share.value)
+    return (
+        a_baseline,
+        a_result,
+        b_full,
+        b_results,
+        c_baseline,
+        c_result,
+        carried_policy,
+        d_generated,
+        d_labels,
+        d_none,
+        e_baseline,
+        e_result,
     )
-    return (v1_09_track_picker,)
 
 
 @app.cell
 def _(
-    data_selection_profile,
-    get_lab_track_variant,
-    get_track_profile,
-    resolve_mlsysim_ref,
-    v1_09_track_picker,
-):
-    # Cross-tier hardware targets: Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Unified
-    v1_09_track_id = v1_09_track_picker.value
-    v1_09_profile = get_track_profile(v1_09_track_id)
-    v1_09_variant = get_lab_track_variant("v1_09_selection_paradox", v1_09_profile.track_id)
-    v1_09_hardware = resolve_mlsysim_ref(v1_09_variant.hardware_ref)
-    v1_09_model = resolve_mlsysim_ref(v1_09_variant.model_ref)
-    v1_09_selection = data_selection_profile(
-        v1_09_profile,
-        v1_09_variant,
-        v1_09_hardware,
-        v1_09_model,
-    )
-    return v1_09_profile, v1_09_selection, v1_09_variant
-
-
-@app.cell(hide_code=True)
-def _(
-    ACADEMIC_LAB_CSS,
-    COLORS,
-    LAB_CSS,
+    a_baseline,
+    a_prediction,
+    a_result,
+    b_conclusion,
+    b_full,
+    b_prediction,
+    b_rejected,
+    b_results,
+    b_retained,
+    c_baseline,
+    c_decision,
+    c_prediction,
+    c_result,
+    capture_evidence,
+    carried_policy,
+    d_budget,
+    d_choice,
+    d_generated,
+    d_labels,
+    d_none,
+    d_prediction,
+    d_rejected,
+    e_baseline,
+    e_prediction,
+    e_rare_share,
+    e_result,
     mo,
-    track_arc_context,
-    track_context,
-    v1_09_metadata,
-    v1_09_profile,
-    v1_09_selection,
-    v1_09_track_picker,
-    v1_09_variant,
+    serialize_value,
+    set_evidence,
+    track_id,
 ):
+    def store(part, capture):
+        set_evidence(lambda current: {**current, part: capture})
+
+    a_upstream = {"track_id": track_id, "comparison": "redundant_vs_informative"}
+    b_upstream = {"track_id": track_id, "retained_count": b_retained.value}
+    c_upstream = {
+        **b_upstream,
+        "carried_policy": carried_policy,
+        "scoring_time_per_example_us": c_result["inputs"]["scoring_time_per_example"].to("microsecond").magnitude,
+        "repeated_runs": c_result["repeated_runs"],
+    }
+    d_upstream = {"track_id": track_id, "budget_usd": d_budget.value}
+    e_upstream = {
+        **b_upstream, "carried_policy": carried_policy, "rare_share_pct": e_rare_share.value,
+    }
+
+    a_capture = mo.ui.button(
+        label="Capture learning-curve contrast", kind="success",
+        disabled=a_prediction.value is None,
+        on_click=lambda _v: store("A", capture_evidence(
+            track=track_id, part="A", prediction=a_prediction.value, inputs=a_upstream,
+            baseline=serialize_value(a_baseline), result=serialize_value(a_result),
+            upstream_inputs=a_upstream, model_key=a_result["model_key"],
+        )),
+    )
+    b_invalid = (
+        b_prediction.value is None or b_conclusion.value is None or b_rejected.value is None
+        or (b_conclusion.value != "none" and b_conclusion.value == b_rejected.value)
+    )
+    b_result_policy = b_rejected.value if b_conclusion.value == "none" else b_conclusion.value
+    fallback_policy = "deduplicate" if b_result_policy == "uniform" else "uniform"
+    b_baseline_policy = b_rejected.value if b_conclusion.value != "none" else fallback_policy
+    b_capture = mo.ui.button(
+        label="Capture equal-count policy decision", kind="success", disabled=b_invalid,
+        on_click=lambda _v: store("B", capture_evidence(
+            track=track_id, part="B", prediction=b_prediction.value,
+            inputs={**b_upstream, "decision": b_conclusion.value, "tested_alternative": b_rejected.value},
+            baseline=serialize_value(
+                b_results[b_baseline_policy] if b_conclusion.value != "none" else b_full
+            ),
+            result=serialize_value(b_results[b_result_policy]),
+            alternatives=serialize_value(tuple(b_results.values())), decision=b_conclusion.value,
+            chosen_result=serialize_value(b_full) if b_conclusion.value == "none" else None,
+            result_role="rejected alternative" if b_conclusion.value == "none" else "selected candidate",
+            upstream_inputs=b_upstream, model_key="evaluate_policy",
+        )),
+    )
+    c_capture = mo.ui.button(
+        label="Capture amortization contrast", kind="success",
+        disabled=c_prediction.value is None or c_decision.value is None,
+        on_click=lambda _v: store("C", capture_evidence(
+            track=track_id, part="C", prediction=c_prediction.value,
+            inputs={**c_upstream, "decision": c_decision.value},
+            baseline=serialize_value(c_baseline), result=serialize_value(c_result),
+            decision=c_decision.value, upstream_inputs=c_upstream, model_key=c_result["model_key"],
+        )),
+    )
+    d_invalid = (
+        d_prediction.value is None or d_choice.value is None or d_rejected.value is None
+        or (d_choice.value != "none" and d_choice.value == d_rejected.value)
+    )
+    d_options = {"labels": d_labels, "generated": d_generated}
+    d_result_id = d_rejected.value if d_choice.value == "none" else d_choice.value
+    d_baseline_id = "generated" if d_result_id == "labels" else "labels"
+    d_capture = mo.ui.button(
+        label="Capture acquisition decision", kind="success", disabled=d_invalid,
+        on_click=lambda _v: store("D", capture_evidence(
+            track=track_id, part="D", prediction=d_prediction.value,
+            inputs={**d_upstream, "decision": d_choice.value, "tested_alternative": d_rejected.value},
+            baseline=serialize_value(d_options[d_baseline_id] if d_choice.value != "none" else d_none),
+            result=serialize_value(d_options[d_result_id]),
+            alternatives=serialize_value(tuple(d_options.values())), decision=d_choice.value,
+            chosen_result=serialize_value(d_none) if d_choice.value == "none" else None,
+            result_role="rejected alternative" if d_choice.value == "none" else "selected candidate",
+            upstream_inputs=d_upstream, model_key="acquisition_option",
+        )),
+    )
+    e_capture = mo.ui.button(
+        label="Capture population-change contrast", kind="success",
+        disabled=(e_prediction.value is None
+                  or e_rare_share.value == e_baseline["baseline_population_pct"]["rare"]),
+        on_click=lambda _v: store("E", capture_evidence(
+            track=track_id, part="E", prediction=e_prediction.value, inputs=e_upstream,
+            baseline=serialize_value(e_baseline), result=serialize_value(e_result),
+            upstream_inputs=e_upstream, model_key=e_result["model_key"],
+        )),
+    )
+    return (
+        a_capture,
+        a_upstream,
+        b_capture,
+        b_upstream,
+        c_capture,
+        c_upstream,
+        d_capture,
+        d_upstream,
+        e_capture,
+        e_upstream,
+    )
+
+
+@app.cell
+def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
+    css = mo.Html("""
+    <style>
+    .pilot-head{background:linear-gradient(135deg,#101827,#70411f);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin:30px 0 14px}
+    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
+    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#ffedd5;max-width:780px}
+    .pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
+    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
+    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
+    @media(max-width:520px){.pilot-head{border-radius:9px}.pilot-meta{grid-template-columns:1fr}}
+    </style>""")
+    header = mo.Html(f"""
+    <section class="pilot-head">
+      <div class="pilot-top"><span>VOLUME I · LAB 09</span><span>ABOUT 50–55 MIN</span></div>
+      <h1>Selection That Pays</h1>
+      <p>Which examples should we retain when coverage, selection overhead, and changed populations can reverse the apparent win?</p>
+      <div class="pilot-meta">
+        <div><b>Track</b><br>{profile['label']}</div>
+        <div><b>Workload</b><br>{profile['workload']}</div>
+        <div><b>Output</b><br>Data-selection policy memo</div>
+      </div>
+    </section>""")
     mo.vstack([
-        LAB_CSS,
-        ACADEMIC_LAB_CSS,
-        mo.Html(f"""
-        <div class="mlsysbook-lab-shell">
-          <div style="margin-bottom: 16px;">
-            {v1_09_track_picker}
-          </div>
-          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
-            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
-              ML Systems Textbook &middot; Volume I &middot; Chapter 9 &middot; Foundational Lab 09
-            </div>
-            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
-              Data Selection: Marginal Value, Coverage, Label Cost &amp; Residual Risk
-            </h1>
-            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
-              {v1_09_variant.workload_summary} Trace why data quantity is not data value. Discover when learning signal saturates, why stratified subgroup coverage beats raw sample counts, how label budgets create Pareto trade-offs, and how to defend residual risk in downstream deployment.
-            </p>
-            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Track:</strong> {v1_09_profile.label}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Workload:</strong> {v1_09_selection.dataset_unit}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Hardware:</strong> {v1_09_variant.hardware_ref}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Model:</strong> {v1_09_variant.model_ref}
-              </span>
-              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
-                <strong>Primary Focus:</strong> Data Valuation &amp; Coreset Curation
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Deliverable:</strong> {v1_09_selection.report_artifact}
-              </span>
-            </div>
-          </div>
-
-          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
-              System Scenario: {v1_09_profile.label} Data Engineering &amp; Coreset Selection
-            </h3>
-            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
-              You are the <strong>{v1_09_selection.stakeholder}</strong> responsible for selecting training, fine-tuning, or calibration data for <strong>{v1_09_variant.model_ref}</strong> on <strong>{v1_09_variant.hardware_ref}</strong>. The target system must balance dataset quality, human labeling cost, storage footprint, and downstream bias under <strong>{v1_09_selection.dataset_unit}</strong>.
-            </p>
-            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
-              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
-                The Architectural Invariants of Data Selection:
-              </div>
-              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
-                <li><strong>The Marginal Utility Saturation Law:</strong> Information-to-compute ratio (ICR) and marginal accuracy gains diminish logarithmically with dataset scale: &Delta;<em>U</em> &prop; 1 / <em>N</em>. Indiscriminate dataset growth inflates ingestion, storage, and training energy without proportional capability gains.</li>
-                <li><strong>The Coverage vs Scale Guardrail:</strong> Aggregate validation metrics mask critical subgroup performance collapse. A smaller, stratification-balanced coreset yields higher deployment reliability than a massively skewed raw web-scrape: <em>R</em><sub>subgroup</sub>(<em>D</em><sub>coreset</sub>) &lt; <em>R</em><sub>subgroup</sub>(<em>D</em><sub>raw</sub>).</li>
-                <li><strong>The Budgeted Label Frontier:</strong> Data curation cost is multidimensional: <em>C</em><sub>data</sub> = <em>C</em><sub>acquire</sub> + <em>C</em><sub>label</sub> + <em>C</em><sub>review</sub> + <em>C</em><sub>store</sub> + <em>C</em><sub>process</sub>. High-fidelity human annotation must be rationed along the Pareto-optimal frontier where uncertainty and representational loss are highest.</li>
-                <li><strong>The Selection Inequality &amp; Residual Bias Law:</strong> Downstream pruning is economically sound only when pre-filtering and subset training beat full-scale training: <em>T</em><sub>selection</sub> + <em>T</em><sub>train</sub>(<em>D</em><sub>subset</sub>) &lt; <em>T</em><sub>train</sub>(<em>D</em><sub>total</sub>). Any unselected cohort represents an intentional residual bias that must be codified in a risk memo before deployment.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['BlueLine']};
-                    background: white; border-radius: 0 12px 12px 0;
-                    padding: 20px 28px; margin: 8px 0 16px 0;
-                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Measure saturation:</strong>
-                    explain why marginal data value falls while collection and compute cost continue to grow.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Compare coverage:</strong>
-                    identify when a smaller diverse cohort beats a larger raw cohort.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Budget labels:</strong>
-                    choose a data policy on a label-quality-cost frontier.</div>
-                <div style="margin-bottom: 3px;">4. <strong>Defend risk:</strong>
-                    record residual bias, rejected alternatives, and downstream validation needs.</div>
-            </div>
-            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
-                        padding: 16px 28px 0 28px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Core Question
-                </div>
-                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                            line-height: 1.5; font-style: italic;">
-                    Which {v1_09_selection.dataset_unit} should {v1_09_selection.label}
-                    collect next, and what residual risk is carried forward by not collecting everything?
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']};
-                            line-height: 1.6; margin-top: 10px;">
-                    Every track follows the same four concepts. The selected track changes
-                    persona, constraints, thresholds, evidence emphasis, failure mode, and
-                    report framing.
-                </div>
-            </div>
-        </div>
-        """),
-        track_context(v1_09_profile),
-        track_arc_context(v1_09_profile, v1_09_metadata.lab_id),
-    ])
+        LAB_CSS, ACADEMIC_LAB_CSS, css, track, header,
+        mo.Html('<p class="pilot-note">All pools and quality outcomes are explicit teaching scenarios, not benchmark measurements. Calculation Notes state each comparison boundary.</p>'),
+    ], gap=0.5).style({"padding-top": "32px"})
     return
 
 
-@app.cell(hide_code=True)
-def _():
+@app.cell
+def _(mo):
+    mo.sidebar([mo.md("## Lab navigation"), mo.outline(label="Sections")])
     return
 
 
-@app.cell(hide_code=True)
-def _(mo, v1_09_selection):
-    v1_09_value_prediction = mo.ui.radio(
-        options={
-            "More examples are the best next spend": "quantity",
-            "Better labels are the best next spend": "quality",
-            "Coverage and rare events are the best next spend": "coverage",
-            "Cost or storage will dominate the next spend": "cost",
-        },
-        label=f"{v1_09_selection.label}: what pressure will dominate the next data increment?",
-    )
-    v1_09_fraction_multiplier = mo.ui.slider(
-        start=0.5,
-        stop=1.5,
-        value=1.0,
-        step=0.05,
-        label="Dataset fraction multiplier",
-    )
-    v1_09_part_a_checkpoint = mo.ui.radio(
-        options={
-            "Expand the same cohort": "expand",
-            "Redirect spend toward higher-value coverage": "redirect",
-            "Stop collection until validation explains the gap": "stop",
-        },
-        label="Part A checkpoint: what should the next spend do?",
-    )
-    return (
-        v1_09_fraction_multiplier,
-        v1_09_part_a_checkpoint,
-        v1_09_value_prediction,
-    )
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_09_selection):
-    _policy_options = {policy.label: policy.policy_id for policy in v1_09_selection.policy_options}
-    v1_09_coverage_prediction = mo.ui.radio(
-        options=_policy_options,
-        label=f"{v1_09_selection.label}: which policy will best protect the under-covered cohort?",
-    )
-    v1_09_policy_choice = mo.ui.dropdown(
-        options=_policy_options,
-        value=v1_09_selection.policy_options[0].label,
-        label="Data policy",
-    )
-    v1_09_coverage_checkpoint = mo.ui.radio(
-        options={
-            "Keep the largest policy": "largest",
-            "Keep the lowest-risk coverage policy": "lowest_risk",
-            "Collect targeted examples for the worst subgroup": "target_worst",
-        },
-        label="Part B checkpoint: what should coverage evidence change?",
-    )
-    return (
-        v1_09_coverage_checkpoint,
-        v1_09_coverage_prediction,
-        v1_09_policy_choice,
-    )
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_09_selection):
-    v1_09_label_prediction = mo.ui.radio(
-        options={
-            "Label spend": "label spend",
-            "Review throughput": "review throughput",
-            "Quality floor": "quality floor",
-            "Coverage floor": "coverage floor",
-            "Rare-event floor": "rare-event floor",
-            "Processing or compute": "processing/compute",
-            "Storage": "storage",
-        },
-        label=f"{v1_09_selection.label}: which budget will bind the label-quality frontier?",
-    )
-    v1_09_label_budget_multiplier = mo.ui.slider(
-        start=0.5,
-        stop=1.2,
-        value=1.0,
-        step=0.05,
-        label="Label and curation budget multiplier",
-    )
-    v1_09_part_c_checkpoint = mo.ui.radio(
-        options={
-            "Choose the cheapest feasible cohort": "cheapest",
-            "Choose the highest-coverage feasible cohort": "coverage",
-            "Choose the highest-quality feasible cohort": "quality",
-            "Reject all candidates and request budget": "request_budget",
-        },
-        label="Part C checkpoint: which frontier decision belongs in the memo?",
-    )
-    return (
-        v1_09_label_budget_multiplier,
-        v1_09_label_prediction,
-        v1_09_part_c_checkpoint,
-    )
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_09_selection):
-    _validation_options = {test: test for test in v1_09_selection.validation_tests}
-    v1_09_validation_prediction = mo.ui.radio(
-        options={
-            "Aggregate validation score is enough": "aggregate score",
-            "Subgroup residual risk will gate release": "subgroup risk",
-            "Rare-event evidence will gate release": "rare-event evidence",
-            "Governance, privacy, or SLA review will gate release": "governance/SLA review",
-        },
-        label=f"{v1_09_selection.label}: what will gate the release after selection?",
-    )
-    v1_09_risk_tolerance = mo.ui.slider(
-        start=0.0,
-        stop=30.0,
-        value=8.0,
-        step=1.0,
-        label="Allowed weighted subgroup risk",
-    )
-    v1_09_validation_focus = mo.ui.dropdown(
-        options=_validation_options,
-        value=v1_09_selection.validation_tests[0] if v1_09_selection.validation_tests else None,
-        label="Validation evidence focus",
-    )
-    v1_09_part_d_checkpoint = mo.ui.radio(
-        options={
-            "Ship with risk memo": "ship",
-            "Collect targeted data before release": "collect",
-            "Reject the selected policy and redo selection": "redo",
-        },
-        label="Part D checkpoint: what is the release decision?",
-    )
-    v1_09_reflection = mo.ui.text_area(
-        label="Data selection memo notes",
-        placeholder="Record selected cohort, binding budget, rejected alternatives, and carry-forward risk.",
-        full_width=True,
-    )
-    return (
-        v1_09_part_d_checkpoint,
-        v1_09_reflection,
-        v1_09_risk_tolerance,
-        v1_09_validation_focus,
-        v1_09_validation_prediction,
-    )
-
-
 @app.cell
-def _(coverage_profile, selection_utility):
-    import math
-
-    def v1_09_policy_by_id(profile, policy_id):
-        for policy in profile.policy_options:
-            if policy.policy_id == policy_id:
-                return policy
-        return profile.policy_options[0]
-
-    def v1_09_track_amount_system(profile):
-        notes = {
-            "iphone": {
-                "persona": "Mobile product engineer",
-                "amount_system": "privacy-safe on-device cohorts, UX edge cases, consent review, app storage, and collection cost",
-                "failure_mode": "broad collection expands trust and storage risk while private local contexts remain under-covered",
-                "evidence_emphasis": "privacy-safe cohort replay, consent audit, storage headroom, and UX edge cases",
-                "report_frame": "privacy-safe cohort memo",
-                "label_cost_factor": 1.25,
-                "review_cost_per_k": 0.18,
-                "saturation_fraction": 0.26,
-                "risk_unit": "weighted context gap",
-                "risk_mitigation": "collect consented local hard cases from the under-covered context",
-                "carry_forward": "future labs should preserve consent, local replay, storage, and context coverage evidence",
-            },
-            "oura_ring": {
-                "persona": "Wearable firmware engineer",
-                "amount_system": "biosignal windows, sensor-contact quality, night/activity cohorts, scarce labels, battery, and OTA storage",
-                "failure_mode": "continuous windows look cheap but noisy labels and poor contact dilute physiological coverage",
-                "evidence_emphasis": "contact-quality audit, sleep/activity replay, battery regression, and OTA payload check",
-                "report_frame": "biosignal selection memo",
-                "label_cost_factor": 1.55,
-                "review_cost_per_k": 0.10,
-                "saturation_fraction": 0.18,
-                "risk_unit": "weighted physiology gap",
-                "risk_mitigation": "collect balanced windows with contact-quality and delayed health labels",
-                "carry_forward": "future labs should preserve signal-quality, battery, OTA, and physiology coverage evidence",
-            },
-            "robotaxi": {
-                "persona": "Safety/perception engineer",
-                "amount_system": "rare-event clips, scenario coverage, redaction, expert labels, replay storage, and fallback validation",
-                "failure_mode": "random miles raise average validation while rare hazards remain thin",
-                "evidence_emphasis": "rare-event replay, construction/weather/road-user coverage, redaction audit, and fallback drill",
-                "report_frame": "safety evidence memo",
-                "label_cost_factor": 2.40,
-                "review_cost_per_k": 1.20,
-                "saturation_fraction": 0.12,
-                "risk_unit": "weighted safety scenario gap",
-                "risk_mitigation": "mine targeted safety-triggered clips and label them with expert review",
-                "carry_forward": "future labs should preserve rare-event replay, redaction, fallback, and scenario coverage evidence",
-            },
-            "cloud_fleet": {
-                "persona": "Fleet service owner",
-                "amount_system": "traffic/query cohorts, freshness, labeling throughput, cost/request, tenants, languages, regions, and SLA impact",
-                "failure_mode": "cheap scale can hide tenant or language failures while increasing compute cost",
-                "evidence_emphasis": "subgroup reliability, freshness, quality regression, deletion lineage, and cost/request canary",
-                "report_frame": "platform reliability memo",
-                "label_cost_factor": 0.90,
-                "review_cost_per_k": 0.05,
-                "saturation_fraction": 0.20,
-                "risk_unit": "weighted reliability gap",
-                "risk_mitigation": "sample fresh low-resource language, small-tenant, and burst-demand examples",
-                "carry_forward": "future labs should preserve freshness, deletion lineage, subgroup reliability, and SLA canary evidence",
-            },
-        }
-        return notes.get(profile.track_id, notes["iphone"])
-
-    def v1_09_prediction_label(options, value):
-        for label, stored in options.items():
-            if stored == value:
-                return label
-        return "Not recorded" if value is None else str(value)
-
-    def v1_09_actual_pressure(result):
-        if result.dominant_risk in {"coverage", "rare-event coverage"}:
-            return "coverage"
-        if result.dominant_risk == "quality":
-            return "quality"
-        if result.dominant_risk in {"cost", "storage"}:
-            return "cost"
-        return "quantity"
-
-    def v1_09_saturation_point(profile, policy_id, multiplier):
-        policy = v1_09_policy_by_id(profile, policy_id)
-        utility = selection_utility(
-            profile,
-            policy_id=policy.policy_id,
-            fraction_multiplier=multiplier,
-        )
-        amount_system = v1_09_track_amount_system(profile)
-        saturation_k = max(1.0, profile.dataset_size_k * amount_system["saturation_fraction"])
-        information_score = 100.0 * (1.0 - math.exp(-utility.selected_examples_k / saturation_k))
-        compute_cost = max(utility.compute_cost, 1e-9)
-        return {
-            "policy_id": policy.policy_id,
-            "policy_label": policy.label,
-            "multiplier": float(multiplier),
-            "selected_examples_k": utility.selected_examples_k,
-            "information_score": information_score,
-            "utility_score": utility.utility_score,
-            "total_cost": utility.total_cost,
-            "compute_cost": utility.compute_cost,
-            "icr_proxy": information_score / compute_cost,
-            "feasible": utility.feasible,
-            "violations": utility.violations,
-        }
-
-    def v1_09_saturation_rows(profile, policy_id):
-        rows = []
-        previous = None
-        for multiplier in (0.5, 0.75, 1.0, 1.25, 1.5):
-            point = dict(v1_09_saturation_point(profile, policy_id, multiplier))
-            if previous is None:
-                point["marginal_signal"] = None
-                point["marginal_cost"] = None
-                point["marginal_signal_per_cost"] = None
-            else:
-                marginal_signal = point["information_score"] - previous["information_score"]
-                marginal_cost = max(point["compute_cost"] - previous["compute_cost"], 1e-9)
-                point["marginal_signal"] = marginal_signal
-                point["marginal_cost"] = marginal_cost
-                point["marginal_signal_per_cost"] = marginal_signal / marginal_cost
-            rows.append(point)
-            previous = point
-        return tuple(rows)
-
-    def v1_09_saturation_summary(rows, current_point):
-        deltas = [row for row in rows if row["marginal_signal"] is not None]
-        first_gain = deltas[0]["marginal_signal"] if deltas else 0.0
-        last_gain = deltas[-1]["marginal_signal"] if deltas else 0.0
-        saturated = bool(first_gain and last_gain < first_gain * 0.55)
-        return {
-            "first_gain": first_gain,
-            "last_gain": last_gain,
-            "saturated": saturated,
-            "current_icr_proxy": current_point["icr_proxy"],
-            "current_information_score": current_point["information_score"],
-        }
-
-    def v1_09_coverage_policy_rows(profile, fraction_multiplier):
-        rows = []
-        for policy in profile.policy_options:
-            utility = selection_utility(
-                profile,
-                policy_id=policy.policy_id,
-                fraction_multiplier=fraction_multiplier,
-            )
-            coverage = coverage_profile(profile, policy_id=policy.policy_id)
-            rows.append({
-                "policy_id": policy.policy_id,
-                "policy_label": policy.label,
-                "selected_examples_k": utility.selected_examples_k,
-                "quality_score_pct": utility.quality_score_pct,
-                "coverage_score_pct": utility.coverage_score_pct,
-                "rare_event_score_pct": utility.rare_event_score_pct,
-                "total_cost": utility.total_cost,
-                "feasible": utility.feasible,
-                "worst_subgroup": coverage.worst_subgroup,
-                "worst_risk_score": coverage.worst_risk_score,
-            })
-        return tuple(rows)
-
-    def v1_09_coverage_best_policy(rows):
-        return min(rows, key=lambda row: (row["worst_risk_score"], -row["coverage_score_pct"]))
-
-    def v1_09_coverage_largest_policy(rows):
-        return max(rows, key=lambda row: row["selected_examples_k"])
-
-    def v1_09_label_frontier_rows(profile, budget_multiplier, fraction_multiplier):
-        amount_system = v1_09_track_amount_system(profile)
-        budget = profile.cost_budget * float(budget_multiplier)
-        rows = []
-        for policy in profile.policy_options:
-            utility = selection_utility(
-                profile,
-                policy_id=policy.policy_id,
-                fraction_multiplier=fraction_multiplier,
-            )
-            quality_premium = (
-                1.0
-                + max(0.0, policy.label_quality_pct - 80.0) / 100.0
-                + max(0.0, policy.rare_event_multiplier - 1.0) * 0.18
-            )
-            label_cost = (
-                utility.selected_examples_k
-                * profile.cost_per_k
-                * amount_system["label_cost_factor"]
-                * quality_premium
-            )
-            review_cost = utility.selected_examples_k * amount_system["review_cost_per_k"]
-            process_cost = utility.selected_examples_k * profile.compute_cost_per_k
-            total_cost = label_cost + review_cost + process_cost
-            ratios = {
-                "label spend": label_cost / max(budget, 1e-9),
-                "review throughput": review_cost / max(budget, 1e-9),
-                "processing/compute": process_cost / max(budget, 1e-9),
-                "quality floor": profile.quality_floor_pct / max(utility.quality_score_pct, 1e-9),
-                "coverage floor": profile.coverage_floor_pct / max(utility.coverage_score_pct, 1e-9),
-                "rare-event floor": profile.rare_event_floor_pct / max(utility.rare_event_score_pct, 1e-9),
-                "storage": utility.storage_mb / max(profile.storage_budget_mb, 1e-9),
-            }
-            binding = max(ratios, key=ratios.get)
-            violations = []
-            if total_cost > budget:
-                violations.append(f"label frontier cost {total_cost:.1f} > budget {budget:.1f}")
-            if utility.quality_score_pct < profile.quality_floor_pct:
-                violations.append(f"quality {utility.quality_score_pct:.1f}% < floor {profile.quality_floor_pct:.1f}%")
-            if utility.coverage_score_pct < profile.coverage_floor_pct:
-                violations.append(f"coverage {utility.coverage_score_pct:.1f}% < floor {profile.coverage_floor_pct:.1f}%")
-            if utility.rare_event_score_pct < profile.rare_event_floor_pct:
-                violations.append(f"rare-event {utility.rare_event_score_pct:.1f}% < floor {profile.rare_event_floor_pct:.1f}%")
-            if utility.storage_mb > profile.storage_budget_mb:
-                violations.append(f"storage {utility.storage_mb:.1f} MB > budget {profile.storage_budget_mb:.1f} MB")
-            rows.append({
-                "policy_id": policy.policy_id,
-                "policy_label": policy.label,
-                "selected_examples_k": utility.selected_examples_k,
-                "quality_score_pct": utility.quality_score_pct,
-                "coverage_score_pct": utility.coverage_score_pct,
-                "rare_event_score_pct": utility.rare_event_score_pct,
-                "label_cost": label_cost,
-                "review_cost": review_cost,
-                "process_cost": process_cost,
-                "total_cost": total_cost,
-                "budget": budget,
-                "binding_constraint": binding,
-                "feasible": not violations,
-                "violations": tuple(violations),
-            })
-        return tuple(rows)
-
-    def v1_09_label_selected(rows, policy_id):
-        for row in rows:
-            if row["policy_id"] == policy_id:
-                return row
-        return rows[0]
-
-    def v1_09_risk_register(profile, coverage, tolerance):
-        amount_system = v1_09_track_amount_system(profile)
-        rows = []
-        for cell in coverage.cells:
-            status = "ok" if cell.risk_score <= tolerance else "action"
-            rows.append({
-                "subgroup_id": cell.subgroup_id,
-                "label": cell.label,
-                "coverage_pct": cell.coverage_pct,
-                "risk_score": cell.risk_score,
-                "status": status,
-                "mitigation": amount_system["risk_mitigation"] if status == "action" else "monitor with stratified validation",
-            })
-        return tuple(rows)
-
-    def v1_09_release_gate(profile, selected_utility, decision, risk_rows, tolerance, validation_focus):
-        worst = max(risk_rows, key=lambda row: row["risk_score"]) if risk_rows else None
-        aggregate_ok = selected_utility.utility_score >= 75.0 and selected_utility.feasible
-        subgroup_ok = all(row["risk_score"] <= tolerance for row in risk_rows)
-        rare_ok = selected_utility.rare_event_score_pct >= profile.rare_event_floor_pct
-        evidence_ok = bool(validation_focus)
-        blockers = []
-        if not aggregate_ok:
-            blockers.append("aggregate score")
-        if not subgroup_ok:
-            blockers.append("subgroup risk")
-        if not rare_ok:
-            blockers.append("rare-event evidence")
-        if not evidence_ok:
-            blockers.append("governance/SLA review")
-        release_ok = not blockers
-        if release_ok:
-            decision_text = "Ship with risk memo and monitoring."
-            binding_gate = "none"
-        else:
-            decision_text = f"Collect or revise before release; blocked by {', '.join(blockers)}."
-            binding_gate = blockers[0]
-        return {
-            "release_ok": release_ok,
-            "decision": decision_text,
-            "binding_gate": binding_gate,
-            "aggregate_ok": aggregate_ok,
-            "subgroup_ok": subgroup_ok,
-            "rare_ok": rare_ok,
-            "evidence_ok": evidence_ok,
-            "worst_subgroup": worst["label"] if worst else decision.worst_subgroup,
-            "worst_risk_score": worst["risk_score"] if worst else 0.0,
-        }
-
-    def v1_09_bool_text(value):
-        return "yes" if value else "no"
-
-    def v1_09_table(headers, rows):
-        head = "".join(f"<th>{header}</th>" for header in headers)
-        body = "".join(
-            "<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>"
-            for row in rows
-        )
-        return f"""
-        <table class="mlsysbook-table">
-          <thead><tr>{head}</tr></thead>
-          <tbody>{body}</tbody>
-        </table>
-        """
-
-    def v1_09_part_banner(letter, title, concept, color):
-        return f"""
-        <div class="mlsysbook-panel mlsysbook-nugget">
-          <div class="mlsysbook-part-title"><h2>Part {letter}: {title}</h2></div>
-          <div class="mlsysbook-callout" style="border-left-color:{color};">
-            <strong>Concept module:</strong> {concept}
-          </div>
-        </div>
-        """
-
-    def v1_09_metric_cards(cards):
-        rendered = []
-        for label, value, note, color in cards:
-            rendered.append(f"""
-            <div class="mlsysbook-field" style="border-top:3px solid {color};">
-              <strong>{label}</strong>
-              <span style="font-size:1.05rem; font-weight:700;">{value}</span>
-              <span style="color:#64748b; font-size:0.82rem;">{note}</span>
-            </div>
-            """)
-        return f"""<div class="mlsysbook-grid">{''.join(rendered)}</div>"""
-
-    def v1_09_reveal_card(title, predicted, actual, consequence, ok):
-        kind = "success" if ok else "warn"
-        color = "#166534" if ok else "#b45309"
-        return f"""
-        <div class="mlsysbook-panel">
-          <h2>{title}</h2>
-          <div class="mlsysbook-grid">
-            <div class="mlsysbook-field"><strong>Prediction</strong>{predicted}</div>
-            <div class="mlsysbook-field"><strong>Observed</strong>{actual}</div>
-            <div class="mlsysbook-field"><strong>Status</strong>{kind}</div>
-          </div>
-          <div class="mlsysbook-callout" style="border-left-color:{color};">
-            <strong>Consequence:</strong> {consequence}
-          </div>
-        </div>
-        """
-
-    def v1_09_failure_card(title, failures, recovery):
-        items = "".join(f"<li>{item}</li>" for item in failures)
-        return f"""
-        <div class="mlsysbook-panel" style="border-left:4px solid #dc2626;">
-          <h2>{title}</h2>
-          <ul class="mlsysbook-list">{items}</ul>
-          <div class="mlsysbook-callout"><strong>Recovery:</strong> {recovery}</div>
-        </div>
-        """
-
-    return (
-        v1_09_actual_pressure,
-        v1_09_bool_text,
-        v1_09_coverage_best_policy,
-        v1_09_coverage_largest_policy,
-        v1_09_coverage_policy_rows,
-        v1_09_failure_card,
-        v1_09_label_frontier_rows,
-        v1_09_label_selected,
-        v1_09_metric_cards,
-        v1_09_part_banner,
-        v1_09_prediction_label,
-        v1_09_release_gate,
-        v1_09_reveal_card,
-        v1_09_risk_register,
-        v1_09_saturation_point,
-        v1_09_saturation_rows,
-        v1_09_saturation_summary,
-        v1_09_table,
-        v1_09_track_amount_system,
-    )
-
-
-@app.cell
-def _(
-    calc_selection_inequality,
-    coverage_profile,
-    data_policy_decision,
-    selection_frontier,
-    selection_utility,
-    v1_09_coverage_best_policy,
-    v1_09_coverage_largest_policy,
-    v1_09_coverage_policy_rows,
-    v1_09_fraction_multiplier,
-    v1_09_label_budget_multiplier,
-    v1_09_label_frontier_rows,
-    v1_09_label_selected,
-    v1_09_policy_choice,
-    v1_09_release_gate,
-    v1_09_risk_register,
-    v1_09_risk_tolerance,
-    v1_09_saturation_point,
-    v1_09_saturation_rows,
-    v1_09_saturation_summary,
-    v1_09_selection,
-    v1_09_track_amount_system,
-    v1_09_validation_focus,
-):
-    v1_09_amount_system = v1_09_track_amount_system(v1_09_selection)
-    v1_09_frontier = selection_frontier(
-        v1_09_selection,
-        fraction_multiplier=v1_09_fraction_multiplier.value,
-    )
-    v1_09_selected_utility = selection_utility(
-        v1_09_selection,
-        policy_id=v1_09_policy_choice.value,
-        fraction_multiplier=v1_09_fraction_multiplier.value,
-    )
-    v1_09_coverage = coverage_profile(
-        v1_09_selection,
-        policy_id=v1_09_policy_choice.value,
-    )
-    v1_09_decision = data_policy_decision(
-        v1_09_selection,
-        policy_id=v1_09_policy_choice.value,
-        fraction_multiplier=v1_09_fraction_multiplier.value,
-    )
-    v1_09_saturation_points = v1_09_saturation_rows(
-        v1_09_selection,
-        v1_09_policy_choice.value,
-    )
-    v1_09_current_saturation = v1_09_saturation_point(
-        v1_09_selection,
-        v1_09_policy_choice.value,
-        v1_09_fraction_multiplier.value,
-    )
-    v1_09_saturation_evidence = v1_09_saturation_summary(
-        v1_09_saturation_points,
-        v1_09_current_saturation,
-    )
-    v1_09_coverage_rows = v1_09_coverage_policy_rows(
-        v1_09_selection,
-        v1_09_fraction_multiplier.value,
-    )
-    v1_09_coverage_best = v1_09_coverage_best_policy(v1_09_coverage_rows)
-    v1_09_coverage_largest = v1_09_coverage_largest_policy(v1_09_coverage_rows)
-    v1_09_label_rows = v1_09_label_frontier_rows(
-        v1_09_selection,
-        v1_09_label_budget_multiplier.value,
-        v1_09_fraction_multiplier.value,
-    )
-    v1_09_label_selected_row = v1_09_label_selected(
-        v1_09_label_rows,
-        v1_09_policy_choice.value,
-    )
-    v1_09_risk_rows = v1_09_risk_register(
-        v1_09_selection,
-        v1_09_coverage,
-        v1_09_risk_tolerance.value,
-    )
-    v1_09_release = v1_09_release_gate(
-        v1_09_selection,
-        v1_09_selected_utility,
-        v1_09_decision,
-        v1_09_risk_rows,
-        v1_09_risk_tolerance.value,
-        v1_09_validation_focus.value,
-    )
-    v1_09_inequality = calc_selection_inequality(
-        v1_09_selection,
-        policy_id=v1_09_policy_choice.value,
-        scoring_method="proxy",
-        n_runs=1,
-        fraction_multiplier=v1_09_fraction_multiplier.value,
-    )
-    return (
-        v1_09_amount_system,
-        v1_09_coverage,
-        v1_09_coverage_best,
-        v1_09_coverage_largest,
-        v1_09_coverage_rows,
-        v1_09_current_saturation,
-        v1_09_decision,
-        v1_09_frontier,
-        v1_09_inequality,
-        v1_09_label_rows,
-        v1_09_label_selected_row,
-        v1_09_release,
-        v1_09_risk_rows,
-        v1_09_saturation_evidence,
-        v1_09_saturation_points,
-        v1_09_selected_utility,
-    )
-
-
-@app.cell(hide_code=True)
 def _(
     COLORS,
+    a_baseline,
+    a_capture,
+    a_prediction,
+    a_result,
+    a_upstream,
     apply_plotly_theme,
-    big_takeaways,
+    audit_evidence,
+    b_capture,
+    b_conclusion,
+    b_prediction,
+    b_rejected,
+    b_results,
+    b_retained,
+    b_upstream,
+    c_baseline,
+    c_capture,
+    c_decision,
+    c_prediction,
+    c_result,
+    c_runs,
+    c_scoring,
+    c_upstream,
+    carried_policy,
+    d_budget,
+    d_capture,
+    d_choice,
+    d_generated,
+    d_labels,
+    d_prediction,
+    d_rejected,
+    d_upstream,
+    e_baseline,
+    e_capture,
+    e_prediction,
+    e_rare_share,
+    e_result,
+    e_upstream,
+    final_choice,
+    final_rejected,
+    final_risk,
+    final_trigger,
+    get_evidence,
     go,
     mo,
-    source_trace,
-    v1_09_actual_pressure,
-    v1_09_amount_system,
-    v1_09_bool_text,
-    v1_09_coverage,
-    v1_09_coverage_best,
-    v1_09_coverage_checkpoint,
-    v1_09_coverage_largest,
-    v1_09_coverage_prediction,
-    v1_09_coverage_rows,
-    v1_09_current_saturation,
-    v1_09_decision,
-    v1_09_failure_card,
-    v1_09_fraction_multiplier,
-    v1_09_inequality,
-    v1_09_label_budget_multiplier,
-    v1_09_label_prediction,
-    v1_09_label_rows,
-    v1_09_label_selected_row,
-    v1_09_metric_cards,
-    v1_09_part_a_checkpoint,
-    v1_09_part_banner,
-    v1_09_part_c_checkpoint,
-    v1_09_part_d_checkpoint,
-    v1_09_policy_choice,
-    v1_09_prediction_label,
-    v1_09_profile,
-    v1_09_reflection,
-    v1_09_release,
-    v1_09_reveal_card,
-    v1_09_risk_rows,
-    v1_09_risk_tolerance,
-    v1_09_saturation_evidence,
-    v1_09_saturation_points,
-    v1_09_selected_utility,
-    v1_09_selection,
-    v1_09_table,
-    v1_09_validation_focus,
-    v1_09_validation_prediction,
-    v1_09_value_prediction,
+    profile,
+    rationale,
+    track_id,
 ):
-    def build_part_a():
-        items = [
-            mo.Html(v1_09_part_banner(
-                "A",
-                "Marginal Data Value Saturates",
-                "More examples are not always the best next spend.",
-                COLORS["BlueLine"],
-            )),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Scenario</h2>
-              <p>{v1_09_amount_system["persona"]} has one more collection window for
-              <strong>{v1_09_selection.label}</strong>. The tempting move is to collect
-              more of the same {v1_09_selection.dataset_unit}; the chapter asks whether
-              the next increment still carries learning signal.</p>
-              <div class="mlsysbook-callout"><strong>Track amount system:</strong>
-                {v1_09_amount_system["amount_system"]}.</div>
-            </div>
-            """),
-            v1_09_value_prediction,
-        ]
-        if v1_09_value_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Commit to a Part A prediction to reveal the marginal-value instrument."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.extend([v1_09_fraction_multiplier])
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=[row["selected_examples_k"] for row in v1_09_saturation_points],
-            y=[row["information_score"] for row in v1_09_saturation_points],
-            mode="lines+markers",
-            name="Information proxy",
-            line=dict(color=COLORS["BlueLine"], width=3),
-        ))
-        fig.add_trace(go.Scatter(
-            x=[row["selected_examples_k"] for row in v1_09_saturation_points],
-            y=[row["icr_proxy"] for row in v1_09_saturation_points],
-            mode="lines+markers",
-            name="ICR proxy",
-            yaxis="y2",
-            line=dict(color=COLORS["OrangeLine"], width=2),
-        ))
-        fig.add_trace(go.Scatter(
-            x=[v1_09_current_saturation["selected_examples_k"]],
-            y=[v1_09_current_saturation["information_score"]],
-            mode="markers",
-            name="current setting",
-            marker=dict(size=16, color=COLORS["RedLine"], line=dict(color="white", width=2)),
-        ))
-        fig.update_layout(
-            height=360,
-            xaxis=dict(title=f"Selected {v1_09_selection.dataset_unit} (k)", gridcolor="#f1f5f9"),
-            yaxis=dict(title="Information proxy", gridcolor="#f1f5f9", range=[0, 105]),
-            yaxis2=dict(title="ICR proxy", overlaying="y", side="right", showgrid=False),
-            margin=dict(l=60, r=70, t=35, b=60),
-        )
-        apply_plotly_theme(fig)
-        items.append(mo.as_html(fig))
-
-        rows = []
-        for row in v1_09_saturation_points:
-            marginal = "start" if row["marginal_signal"] is None else f"{row['marginal_signal']:.2f}"
-            icr = f"{row['icr_proxy']:.3f}"
-            rows.append((
-                f"{row['multiplier']:.2f}x",
-                f"{row['selected_examples_k']:.1f}k",
-                f"{row['information_score']:.1f}",
-                marginal,
-                icr,
-                f"{row['total_cost']:.1f}",
-                v1_09_bool_text(row["feasible"]),
-            ))
-        items.append(mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Evidence Table</h2>
-          {v1_09_table(("Multiplier", "Selected", "Info proxy", "Marginal gain", "ICR proxy", "Cost", "Feasible"), rows)}
-        </div>
-        """))
-
-        actual = v1_09_actual_pressure(v1_09_selected_utility)
-        predicted = v1_09_prediction_label(
-            {
-                "More examples are the best next spend": "quantity",
-                "Better labels are the best next spend": "quality",
-                "Coverage and rare events are the best next spend": "coverage",
-                "Cost or storage will dominate the next spend": "cost",
-            },
-            v1_09_value_prediction.value,
-        )
-        consequence = (
-            f"The current increment has ICR proxy {v1_09_current_saturation['icr_proxy']:.3f}; "
-            f"the last planned increment gains {v1_09_saturation_evidence['last_gain']:.2f} information points "
-            f"versus {v1_09_saturation_evidence['first_gain']:.2f} early in the curve."
-        )
-        items.append(mo.Html(v1_09_reveal_card(
-            "Prediction vs observed selection pressure",
-            predicted,
-            actual,
-            consequence,
-            ok=v1_09_value_prediction.value == actual,
-        )))
-        if v1_09_current_saturation["violations"]:
-            items.append(mo.Html(v1_09_failure_card(
-                "Current multiplier crosses a budget",
-                v1_09_current_saturation["violations"],
-                "Lower the multiplier or redirect collection toward a higher-value cohort.",
-            )))
-        elif v1_09_saturation_evidence["saturated"]:
-            items.append(mo.callout(
-                mo.md(
-                    "**Boundary found.** Marginal signal has dropped sharply. The next spend "
-                    "should be justified by coverage, quality, or risk reduction rather than volume alone."
-                ),
-                kind="warn",
-            ))
-        else:
-            items.append(mo.callout(
-                mo.md("The selected point remains inside the modeled marginal-value envelope, pending coverage and label-cost checks."),
-                kind="info",
-            ))
-        items.extend([
-            mo.accordion({
-                "Math Peek / Source Model - ICR saturation": mo.md("""
-    The chapter defines information-compute ratio as:
-
-    $$
-    \\text{ICR} = \\frac{\\Delta I}{\\Delta \\text{FLOPs}}
-    $$
-
-    For redundant data, marginal information decays while compute grows roughly
-    linearly:
-
-    $$
-    \\text{ICR}(D) \\approx \\frac{1}{O_{sample} \\cdot D}
-    $$
-
-    The lab instrument uses a saturating information proxy and the shared
-    `selection_utility()` cost fields. The exact values are scenario instrumentation;
-    the shape is the chapter concept.
-    """)
-            }),
-            source_trace({
-                "chapter_anchor": "Information-Compute Ratio and ICR Frontier",
-                "shared_helper": "selection_utility()",
-                "notebook_model": "v1_09_saturation_point()",
-                "hardware_ref": v1_09_selection.hardware_ref,
-                "model_ref": v1_09_selection.model_ref,
-            }, summary="Part A uses chapter ICR decay plus the V1-09 data-selection profile."),
-            mo.Html("""
-            <div class="mlsysbook-panel">
-              <h2>Checkpoint</h2>
-              <p>Choose the memo action that follows from the marginal-value evidence.</p>
-            </div>
-            """),
-            v1_09_part_a_checkpoint,
-        ])
-        return mo.vstack(items)
-
-    def build_part_b():
-        items = [
-            mo.Html(v1_09_part_banner(
-                "B",
-                "Coverage And Diversity Can Beat Size",
-                "The largest cohort can still be the least defensible cohort.",
-                COLORS["GreenLine"],
-            )),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Scenario</h2>
-              <p>The review asks whether the selected data covers the deployment
-              cases that matter for <strong>{v1_09_selection.label}</strong>. A
-              raw example count does not answer that question.</p>
-              <div class="mlsysbook-callout"><strong>Track failure mode:</strong>
-                {v1_09_amount_system["failure_mode"]}.</div>
-            </div>
-            """),
-            v1_09_coverage_prediction,
-        ]
-        if v1_09_coverage_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Commit to a Part B coverage prediction to reveal the cohort comparison."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.extend([v1_09_policy_choice])
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=[cell.label for cell in v1_09_coverage.cells],
-            y=[cell.coverage_pct for cell in v1_09_coverage.cells],
-            marker_color=[
-                COLORS["GreenLine"] if cell.status == "ok" else COLORS["RedLine"]
-                for cell in v1_09_coverage.cells
-            ],
-            text=[f"{cell.coverage_pct:.1f}%" for cell in v1_09_coverage.cells],
-            textposition="outside",
-        ))
-        fig.add_hline(
-            y=v1_09_selection.coverage_floor_pct,
-            line_dash="dash",
-            line_color=COLORS["RedLine"],
-            annotation_text="coverage floor",
-            annotation_font_color=COLORS["RedLine"],
-        )
-        fig.update_layout(
-            height=340,
-            xaxis=dict(title="Subgroup", gridcolor="#f1f5f9"),
-            yaxis=dict(title="Coverage (%)", gridcolor="#f1f5f9", range=[0, 110]),
-            margin=dict(l=60, r=20, t=35, b=80),
-        )
-        apply_plotly_theme(fig)
-        items.append(mo.as_html(fig))
-
-        policy_rows = []
-        for row in v1_09_coverage_rows:
-            policy_rows.append((
-                row["policy_label"],
-                f"{row['selected_examples_k']:.1f}k",
-                f"{row['coverage_score_pct']:.1f}%",
-                f"{row['rare_event_score_pct']:.1f}%",
-                row["worst_subgroup"],
-                f"{row['worst_risk_score']:.1f}",
-                v1_09_bool_text(row["feasible"]),
-            ))
-        subgroup_rows = [
-            (
-                cell.label,
-                f"{cell.coverage_pct:.1f}%",
-                f"{cell.risk_score:.1f}",
-                cell.status,
-            )
-            for cell in v1_09_coverage.cells
-        ]
-        items.append(mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Coverage Evidence</h2>
-          {v1_09_table(("Policy", "Selected", "Coverage", "Rare events", "Worst subgroup", "Weighted gap", "Feasible"), policy_rows)}
-          <h2>Selected Policy Subgroups</h2>
-          {v1_09_table(("Subgroup", "Coverage", "Risk score", "Status"), subgroup_rows)}
-        </div>
-        """))
-        predicted = v1_09_prediction_label(
-            {policy.label: policy.policy_id for policy in v1_09_selection.policy_options},
-            v1_09_coverage_prediction.value,
-        )
-        consequence = (
-            f"Largest policy: {v1_09_coverage_largest['policy_label']} "
-            f"({v1_09_coverage_largest['selected_examples_k']:.1f}k). "
-            f"Lowest-risk policy: {v1_09_coverage_best['policy_label']} "
-            f"(worst gap {v1_09_coverage_best['worst_risk_score']:.1f})."
-        )
-        items.append(mo.Html(v1_09_reveal_card(
-            "Prediction vs lowest-risk coverage policy",
-            predicted,
-            v1_09_coverage_best["policy_label"],
-            consequence,
-            ok=v1_09_coverage_prediction.value == v1_09_coverage_best["policy_id"],
-        )))
-        if v1_09_coverage.worst_risk_score > 0:
-            items.append(mo.Html(v1_09_failure_card(
-                "Coverage guardrail is still open",
-                (
-                    f"Worst subgroup: {v1_09_coverage.worst_subgroup}",
-                    f"Weighted coverage gap: {v1_09_coverage.worst_risk_score:.1f}",
-                ),
-                v1_09_amount_system["risk_mitigation"],
-            )))
-        else:
-            items.append(mo.callout(
-                mo.md("All selected subgroups clear the coverage floor under this policy."),
-                kind="success",
-            ))
-        items.extend([
-            mo.accordion({
-                "Math Peek / Source Model - coverage guardrail": mo.md("""
-    Coreset selection is a coverage problem before it is a sample-count problem:
-    retain the smallest cohort that preserves deployment-relevant slices.
-
-    This lab scores each subgroup as:
-
-    $$
-    \\text{risk} = \\max(0, \\text{coverage floor} - \\text{coverage}) \\cdot \\text{risk weight}
-    $$
-
-    The decision is not "largest dataset wins"; it is "which cohort leaves the
-    least important deployment gap under the budget?"
-    """)
-            }),
-            source_trace({
-                "chapter_anchor": "Coreset Selection Algorithms and rare-class pruning pitfall",
-                "shared_helper": "coverage_profile()",
-                "coverage_floor_pct": v1_09_selection.coverage_floor_pct,
-                "track_id": v1_09_selection.track_id,
-            }, summary="Part B coverage rows come from the V1-09 profile subgroups and policy adjustments."),
-            mo.Html("""
-            <div class="mlsysbook-panel">
-              <h2>Checkpoint</h2>
-              <p>Choose the coverage decision that belongs in the memo.</p>
-            </div>
-            """),
-            v1_09_coverage_checkpoint,
-        ])
-        return mo.vstack(items)
-
-    def build_part_c():
-        items = [
-            mo.Html(v1_09_part_banner(
-                "C",
-                "Label Cost And Quality Create A Frontier",
-                "Label quality is useful only inside a budgeted amount system.",
-                COLORS["OrangeLine"],
-            )),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Scenario</h2>
-              <p>The team can label or curate only part of the pool. The selected
-              policy must fit the track's labeling, review, processing, storage,
-              and quality floors.</p>
-              <div class="mlsysbook-callout"><strong>Evidence emphasis:</strong>
-                {v1_09_amount_system["evidence_emphasis"]}.</div>
-            </div>
-            """),
-            v1_09_label_prediction,
-        ]
-        if v1_09_label_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Commit to a Part C budget prediction to reveal the label frontier."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.extend([v1_09_label_budget_multiplier, v1_09_policy_choice])
-        fig = go.Figure()
-        labels = [row["policy_label"] for row in v1_09_label_rows]
-        fig.add_trace(go.Bar(
-            x=labels,
-            y=[row["label_cost"] for row in v1_09_label_rows],
-            name="Label cost",
-            marker_color=COLORS["BlueLine"],
-        ))
-        fig.add_trace(go.Bar(
-            x=labels,
-            y=[row["review_cost"] for row in v1_09_label_rows],
-            name="Review cost",
-            marker_color=COLORS["OrangeLine"],
-        ))
-        fig.add_trace(go.Bar(
-            x=labels,
-            y=[row["process_cost"] for row in v1_09_label_rows],
-            name="Process cost",
-            marker_color=COLORS["GreenLine"],
-        ))
-        fig.add_hline(
-            y=v1_09_label_selected_row["budget"],
-            line_dash="dash",
-            line_color=COLORS["RedLine"],
-            annotation_text="budget",
-            annotation_font_color=COLORS["RedLine"],
-        )
-        fig.update_layout(
-            height=360,
-            barmode="stack",
-            xaxis=dict(title="Policy", gridcolor="#f1f5f9"),
-            yaxis=dict(title="Budget units", gridcolor="#f1f5f9"),
-            margin=dict(l=60, r=20, t=35, b=80),
-        )
-        apply_plotly_theme(fig)
-        items.append(mo.as_html(fig))
-
-        rows = []
-        for row in v1_09_label_rows:
-            rows.append((
-                row["policy_label"],
-                f"{row['selected_examples_k']:.1f}k",
-                f"{row['quality_score_pct']:.1f}%",
-                f"{row['rare_event_score_pct']:.1f}%",
-                f"{row['total_cost']:.1f}",
-                f"{row['budget']:.1f}",
-                row["binding_constraint"],
-                v1_09_bool_text(row["feasible"]),
-            ))
-        items.append(mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Budgeted Frontier</h2>
-          {v1_09_table(("Policy", "Selected", "Quality", "Rare events", "Total cost", "Budget", "Binding", "Feasible"), rows)}
-        </div>
-        """))
-        items.append(mo.Html(v1_09_metric_cards((
-            (
-                "Selected policy",
-                v1_09_label_selected_row["policy_label"],
-                f"{v1_09_label_selected_row['selected_examples_k']:.1f}k {v1_09_selection.dataset_unit}",
-                COLORS["BlueLine"],
-            ),
-            (
-                "Binding budget",
-                v1_09_label_selected_row["binding_constraint"],
-                f"budget multiplier {v1_09_label_budget_multiplier.value:.2f}x",
-                COLORS["OrangeLine"],
-            ),
-            (
-                "Frontier status",
-                "feasible" if v1_09_label_selected_row["feasible"] else "blocked",
-                f"total {v1_09_label_selected_row['total_cost']:.1f} / budget {v1_09_label_selected_row['budget']:.1f}",
-                COLORS["GreenLine"] if v1_09_label_selected_row["feasible"] else COLORS["RedLine"],
-            ),
-        ))))
-        predicted = v1_09_prediction_label(
-            {
-                "Label spend": "label spend",
-                "Review throughput": "review throughput",
-                "Quality floor": "quality floor",
-                "Coverage floor": "coverage floor",
-                "Rare-event floor": "rare-event floor",
-                "Processing or compute": "processing/compute",
-                "Storage": "storage",
-            },
-            v1_09_label_prediction.value,
-        )
-        items.append(mo.Html(v1_09_reveal_card(
-            "Prediction vs binding frontier amount",
-            predicted,
-            v1_09_label_selected_row["binding_constraint"],
-            (
-                "The binding amount is the largest ratio among label spend, review throughput, "
-                "processing, quality, coverage, rare-event, and storage checks."
-            ),
-            ok=v1_09_label_prediction.value == v1_09_label_selected_row["binding_constraint"],
-        )))
-        if not v1_09_label_selected_row["feasible"]:
-            items.append(mo.Html(v1_09_failure_card(
-                "Selected policy is outside the label frontier",
-                v1_09_label_selected_row["violations"],
-                "Increase budget, lower selected volume, or choose a policy that buys quality and coverage more efficiently.",
-            )))
-        else:
-            items.append(mo.callout(
-                mo.md("The selected policy is inside the current budgeted label frontier."),
-                kind="success",
-            ))
-        items.extend([
-            mo.accordion({
-                "Math Peek / Source Model - total data cost & selection inequality": mo.md(f"""
-    The chapter's total data cost model is:
-
-    $$
-    C_{{total}} = C_{{acquire}} + C_{{label}} + C_{{store}} + C_{{process}}
-    $$
-
-    The selection engineering gate (**Selection Inequality**) is:
-
-    $$
-    T_{{selection}} + T_{{train}}(D_{{subset}}) < T_{{train}}(D_{{total}})
-    $$
-
-    **Live MLSysIM Physics for {v1_09_selection.label}:**
-    - $T_{{selection}}$ (proxy scoring {v1_09_selection.dataset_size_k:.0f}k examples): **{v1_09_inequality.t_selection_hours:.2f} hours**
-    - $T_{{train}}(D_{{subset}})$ ({v1_09_inequality.scoring_method}, {v1_09_selected_utility.selected_examples_k:.1f}k examples): **{v1_09_inequality.t_train_subset_hours:.2f} hours**
-    - $T_{{train}}(D_{{total}})$ (baseline full dataset): **{v1_09_inequality.t_train_total_hours:.2f} hours**
-    - **Selection Speedup:** **{v1_09_inequality.net_speedup:.2f}x** (Break-even runs: **{v1_09_inequality.break_even_runs}**)
-    """)
-            }),
-            source_trace({
-                "chapter_anchor": "Cost Modeling and Selection Inequality",
-                "shared_helper": "calc_selection_inequality()",
-                "notebook_model": "v1_09_label_frontier_rows()",
-                "track_amount_system": v1_09_amount_system["amount_system"],
-            }, summary="Part C cost bars derive from the V1-09 profile costs plus track-specific label/review factors."),
-            mo.Html("""
-            <div class="mlsysbook-panel">
-              <h2>Checkpoint</h2>
-              <p>Choose the frontier decision that belongs in the final memo.</p>
-            </div>
-            """),
-            v1_09_part_c_checkpoint,
-        ])
-        return mo.vstack(items)
-
-    def build_part_d():
-        items = [
-            mo.Html(v1_09_part_banner(
-                "D",
-                "Residual Risk Must Be Defended",
-                "A validation score is not a release argument by itself.",
-                COLORS["RedLine"],
-            )),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Scenario</h2>
-              <p>The selected policy has a utility score, but the release reviewer
-              asks what bias or downstream harm remains. The answer must be track
-              specific and evidence backed.</p>
-              <div class="mlsysbook-callout"><strong>Report framing:</strong>
-                {v1_09_amount_system["report_frame"]}.</div>
-            </div>
-            """),
-            v1_09_validation_prediction,
-        ]
-        if v1_09_validation_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Commit to a Part D gate prediction to reveal the risk register."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.extend([v1_09_risk_tolerance, v1_09_validation_focus])
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=[row["label"] for row in v1_09_risk_rows],
-            y=[row["risk_score"] for row in v1_09_risk_rows],
-            marker_color=[
-                COLORS["GreenLine"] if row["status"] == "ok" else COLORS["RedLine"]
-                for row in v1_09_risk_rows
-            ],
-            text=[f"{row['risk_score']:.1f}" for row in v1_09_risk_rows],
-            textposition="outside",
-        ))
-        fig.add_hline(
-            y=v1_09_risk_tolerance.value,
-            line_dash="dash",
-            line_color=COLORS["RedLine"],
-            annotation_text="risk tolerance",
-            annotation_font_color=COLORS["RedLine"],
-        )
-        fig.update_layout(
-            height=340,
-            xaxis=dict(title="Subgroup", gridcolor="#f1f5f9"),
-            yaxis=dict(title=v1_09_amount_system["risk_unit"], gridcolor="#f1f5f9"),
-            margin=dict(l=60, r=20, t=35, b=80),
-        )
-        apply_plotly_theme(fig)
-        items.append(mo.as_html(fig))
-
-        rows = []
-        for row in v1_09_risk_rows:
-            rows.append((
-                row["label"],
-                f"{row['coverage_pct']:.1f}%",
-                f"{row['risk_score']:.1f}",
-                row["status"],
-                row["mitigation"],
-            ))
-        items.append(mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Risk Register</h2>
-          {v1_09_table(("Subgroup", "Coverage", "Risk", "Status", "Mitigation"), rows)}
-        </div>
-        """))
-        items.append(mo.Html(v1_09_metric_cards((
-            (
-                "Aggregate utility",
-                f"{v1_09_selected_utility.utility_score:.1f}",
-                "not sufficient without slice evidence",
-                COLORS["BlueLine"],
-            ),
-            (
-                "Worst subgroup",
-                v1_09_release["worst_subgroup"],
-                f"risk {v1_09_release['worst_risk_score']:.1f}",
-                COLORS["RedLine"] if v1_09_release["worst_risk_score"] > v1_09_risk_tolerance.value else COLORS["GreenLine"],
-            ),
-            (
-                "Release gate",
-                "pass" if v1_09_release["release_ok"] else "blocked",
-                v1_09_release["decision"],
-                COLORS["GreenLine"] if v1_09_release["release_ok"] else COLORS["RedLine"],
-            ),
-        ))))
-        predicted = v1_09_prediction_label(
-            {
-                "Aggregate validation score is enough": "aggregate score",
-                "Subgroup residual risk will gate release": "subgroup risk",
-                "Rare-event evidence will gate release": "rare-event evidence",
-                "Governance, privacy, or SLA review will gate release": "governance/SLA review",
-            },
-            v1_09_validation_prediction.value,
-        )
-        actual_gate = v1_09_release["binding_gate"] if v1_09_release["binding_gate"] != "none" else "no blocking gate"
-        items.append(mo.Html(v1_09_reveal_card(
-            "Prediction vs release gate",
-            predicted,
-            actual_gate,
-            "Release requires aggregate feasibility, subgroup risk, rare-event evidence, and the selected validation focus.",
-            ok=v1_09_validation_prediction.value == v1_09_release["binding_gate"],
-        )))
-        if not v1_09_release["release_ok"]:
-            items.append(mo.Html(v1_09_failure_card(
-                "Release cannot be defended yet",
-                (v1_09_release["decision"], f"Validation focus: {v1_09_validation_focus.value}"),
-                "Collect targeted data for the risk register or choose a lower-risk policy before release.",
-            )))
-        else:
-            items.append(mo.callout(
-                mo.md("The selected policy can be defended with a residual-risk memo and continued monitoring."),
-                kind="success",
-            ))
-        items.extend([
-            mo.accordion({
-                "Math Peek / Source Model - release risk gate": mo.md("""
-    The lab's release gate is deliberately conjunctive:
-
-    $$
-    release\\_ok = aggregate\\_ok \\land subgroup\\_risk\\_ok \\land rare\\_event\\_ok \\land evidence\\_ok
-    $$
-
-    This follows the chapter warning that PPD, DCR, and aggregate validation can
-    look strong while deployment edge cases fail. Stratified risk evidence must
-    travel with the selected data policy.
-    """)
-            }),
-            source_trace({
-                "chapter_anchor": "Measurement Framework and optimizing selection metrics instead of deployment metrics",
-                "shared_helper": "coverage_profile() and data_policy_decision()",
-                "notebook_model": "v1_09_release_gate()",
-                "validation_focus": v1_09_validation_focus.value,
-            }, summary="Part D risk rows reuse coverage evidence and add a track-specific release gate."),
-            mo.Html("""
-            <div class="mlsysbook-panel">
-              <h2>Checkpoint</h2>
-              <p>Choose the final release decision, then record the memo notes used in synthesis.</p>
-            </div>
-            """),
-            v1_09_part_d_checkpoint,
-            v1_09_reflection,
-        ])
-        return mo.vstack(items)
-
-    def build_synthesis():
-        _rejections = "".join(f"<li>{item}</li>" for item in v1_09_decision.rejected_alternatives)
-        return mo.vstack([
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Synthesis: Data Selection Memo</h2>
-              <div class="mlsysbook-grid">
-                <div class="mlsysbook-field"><strong>Track</strong>{v1_09_selection.label}</div>
-                <div class="mlsysbook-field"><strong>Selected cohort</strong>{v1_09_decision.selected_label}</div>
-                <div class="mlsysbook-field"><strong>Binding budget</strong>{v1_09_label_selected_row["binding_constraint"]}</div>
-                <div class="mlsysbook-field"><strong>Worst subgroup</strong>{v1_09_decision.worst_subgroup}</div>
-                <div class="mlsysbook-field"><strong>Release gate</strong>{v1_09_release["decision"]}</div>
-                <div class="mlsysbook-field"><strong>Carry-forward risk</strong>{v1_09_decision.residual_risk}</div>
-              </div>
-              <div class="mlsysbook-callout"><strong>Next data:</strong> {v1_09_decision.next_data}</div>
-              <div class="mlsysbook-callout"><strong>Validation requirement:</strong> {v1_09_decision.validation_requirement}</div>
-            </div>
-            """),
-            mo.Html(f"""
-            <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 5px solid #10B981; border-radius: 8px; padding: 18px 22px; margin-top: 14px; margin-bottom: 14px;">
-              <div style="font-size: 0.8rem; font-weight: 800; color: #10B981; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">
-                Lead Systems Architect Authorization
-              </div>
-              <div style="color: #1E293B; font-size: 0.95rem; line-height: 1.6;">
-                The data selection and curation policy for <strong>{v1_09_profile.label}</strong> is authorized for execution. Coreset allocation, coverage floors, and label budgeting satisfy production risk envelopes under <strong>{v1_09_selection.dataset_unit}</strong>.
-              </div>
-            </div>
-            """),
-            mo.Html(f"""
-            <div class="mlsysbook-panel">
-              <h2>Rejected Alternatives</h2>
-              <ul class="mlsysbook-list">{_rejections}</ul>
-              <h2>Memo Completeness</h2>
-              <ul class="mlsysbook-list">
-                <li>Part A checkpoint: {v1_09_part_a_checkpoint.value or "not recorded"}</li>
-                <li>Part B checkpoint: {v1_09_coverage_checkpoint.value or "not recorded"}; lowest-risk policy is {v1_09_coverage_best["policy_label"]}</li>
-                <li>Part C checkpoint: {v1_09_part_c_checkpoint.value or "not recorded"}; budget multiplier is {v1_09_label_budget_multiplier.value:.2f}x</li>
-                <li>Part D checkpoint: {v1_09_part_d_checkpoint.value or "not recorded"}; risk tolerance is {v1_09_risk_tolerance.value:.1f}</li>
-                <li>Validation focus: {v1_09_validation_focus.value}</li>
-              </ul>
-            </div>
-            """),
-            big_takeaways([
-                ("Data value is marginal", "Additional examples can add cost after useful signal saturates."),
-                ("Coverage is a systems guardrail", "A smaller cohort can be better if it protects the slices that deployment depends on."),
-                ("Labels create a frontier", "Quality, curation, review, storage, and processing are budgeted amounts."),
-                ("Risk travels forward", "The memo must defend residual bias and downstream validation, not just a score."),
-            ]),
-            mo.Html(f"""
-            <div class="lab-hud">
-                <span class="hud-label">LAB</span>
-                <span class="hud-value">09 &middot; Data Selection</span>
-                <span class="hud-label">TRACK</span>
-                <span class="hud-value">{v1_09_profile.label}</span>
-                <span style="flex:1;"></span>
-                <span class="hud-label">ARTIFACT</span>
-                <span class="hud-value">{v1_09_selection.report_artifact}</span>
-                <span class="hud-label">STATUS</span>
-                <span class="hud-active">ACTIVE</span>
-            </div>
-            """),
-        ])
-
-    v1_09_tabs = mo.ui.tabs({
-        "Part A · Marginal Value": build_part_a(),
-        "Part B · Coverage": build_part_b(),
-        "Part C · Label Frontier": build_part_c(),
-        "Part D · Risk": build_part_d(),
-        "Synthesis": build_synthesis(),
-    })
-    v1_09_tabs
-    return
-
-
-@app.cell(hide_code=True)
-def _(
-    ledger,
-    mo,
-    v1_09_amount_system,
-    v1_09_coverage_prediction,
-    v1_09_decision,
-    v1_09_fraction_multiplier,
-    v1_09_label_budget_multiplier,
-    v1_09_label_prediction,
-    v1_09_label_selected_row,
-    v1_09_profile,
-    v1_09_reflection,
-    v1_09_release,
-    v1_09_selected_utility,
-    v1_09_selection,
-    v1_09_validation_prediction,
-    v1_09_value_prediction,
-    v1_09_variant,
-):
-    _all_predictions = (
-        v1_09_value_prediction.value,
-        v1_09_coverage_prediction.value,
-        v1_09_label_prediction.value,
-        v1_09_validation_prediction.value,
+    _captures = get_evidence()
+    upstream = {
+        "A": a_upstream, "B": b_upstream, "C": c_upstream,
+        "D": d_upstream, "E": e_upstream,
+    }
+    audit = audit_evidence(
+        _captures, track=track_id, required_parts=tuple("ABCDE"),
+        per_part_upstream_inputs=upstream, contrast_required_parts=tuple("ABCDE"),
     )
-    _ready = all(value is not None for value in _all_predictions) and bool(str(v1_09_reflection.value or "").strip())
-    ledger.save(chapter=9, design={
-        "chapter": "v1_09",
-        "track_id": v1_09_profile.track_id,
-        "scenario_id": v1_09_variant.scenario_id,
-        "hardware_ref": v1_09_selection.hardware_ref,
-        "model_ref": v1_09_selection.model_ref,
-        "completed": _ready,
-        "value_prediction": v1_09_value_prediction.value,
-        "coverage_prediction": v1_09_coverage_prediction.value,
-        "label_prediction": v1_09_label_prediction.value,
-        "validation_prediction": v1_09_validation_prediction.value,
-        "fraction_multiplier": v1_09_fraction_multiplier.value,
-        "label_budget_multiplier": v1_09_label_budget_multiplier.value,
-        "selected_policy": v1_09_decision.selected_id,
-        "selected_cohort": v1_09_decision.selected_label,
-        "selected_examples_k": v1_09_selected_utility.selected_examples_k,
-        "binding_budget": v1_09_label_selected_row["binding_constraint"],
-        "worst_subgroup": v1_09_decision.worst_subgroup,
-        "residual_risk": v1_09_decision.residual_risk,
-        "release_gate": v1_09_release["decision"],
-        "carry_forward_risk": v1_09_amount_system["carry_forward"],
+
+    def table(rows):
+        return mo.vstack([mo.ui.table(rows, pagination=False)]).style(
+            {"max-width": "100%", "overflow-x": "auto"}
+        )
+
+    def saved(part):
+        capture = _captures.get(part)
+        if capture is None:
+            return mo.callout(mo.md("No saved evidence for this part."), kind="warn")
+        if part in audit.stale or (part, part) in audit.identical_pairs:
+            return mo.callout(
+                mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** Recapture this part."),
+                kind="danger",
+            )
+        data = capture.to_dict()
+        return mo.Html(
+            f'<div class="saved"><b>Saved snapshot</b> · prediction: {data["prediction"]}'
+            '<br><small>The report keeps this result even if live controls move.</small></div>'
+        )
+
+    def part_a():
+        intro = mo.md(
+            f"### A · When does more data stop being the best investment? (8 min)\n"
+            f"Compare supplied learning outcomes for redundant and informative candidate pools of **{profile['workload']}**."
+        )
+        if a_prediction.value is None:
+            return mo.vstack([intro, a_prediction])
+        figure = go.Figure()
+        for result, label, color in (
+            (a_baseline, "Redundant", COLORS["OrangeLine"]),
+            (a_result, "Informative", COLORS["BlueLine"]),
+        ):
+            figure.add_scatter(
+                x=[point["retained_count"] for point in result["points"]],
+                y=[point["quality_pct"] for point in result["points"]],
+                mode="lines+markers", name=label, line={"color": color},
+            )
+        figure.update_layout(
+            height=290, margin=dict(l=20, r=20, t=20, b=20),
+            xaxis_title="Representative examples retained",
+            yaxis_title="Supplied quality outcome (%)", legend_orientation="h",
+        )
+        redundant_last = a_baseline["points"][-1]["marginal_quality_pp"]
+        informative_last = a_result["points"][-1]["marginal_quality_pp"]
+        return mo.vstack([
+            intro, a_prediction, apply_plotly_theme(figure),
+            mo.callout(mo.md(
+                f"**Your prediction:** {a_prediction.value}. The final two-example increment adds "
+                f"**{redundant_last:.1f} points** for the redundant pool and "
+                f"**{informative_last:.1f} points** for the informative pool."
+            ), kind="info"),
+            a_capture, saved("A"),
+            mo.accordion({"Calculation Notes": mo.md(
+                "Adjacent marginal value is the change between two supplied quality observations. "
+                "The simulator does not infer quality from sample count."
+            )}),
+        ])
+
+    def part_b():
+        rows = []
+        for policy_id, result in b_results.items():
+            counts = result["cohort_counts"]
+            rows.append({
+                "Policy": policy_id.title(),
+                "Retained": result["retained_count"],
+                "Size": f"{result['retained_bytes'].to('megabyte').magnitude:.2f} MB",
+                "Duplicates": result["duplicate_records"],
+                "Common / rare / edge": f"{counts['common']} / {counts['rare']} / {counts['edge_case']}",
+                "Quality": f"{result['weighted_quality_pct']:.1f}%",
+                "Outcome": "PASS" if result["feasible"] else "FAIL · " + "; ".join(result["failures"]),
+            })
+        intro = mo.md(
+            f"### B · Which examples can we safely remove? (10 min)\n"
+            f"Hold retained count constant for **{profile['workload']}**. "
+            "Inspect duplicate groups, cohort counts, and supplied outcomes before choosing."
+        )
+        if b_prediction.value is None:
+            return mo.vstack([intro, b_retained, b_prediction])
+        chosen = b_results.get(b_conclusion.value) if b_conclusion.value != "none" else None
+        message = "No policy selected." if chosen is None else (
+            "PASS" if chosen["feasible"] else "FAIL · " + "; ".join(chosen["failures"])
+        )
+        return mo.vstack([
+            intro, b_prediction, b_retained, table(rows),
+            mo.hstack([b_conclusion, b_rejected], widths="equal", wrap=True),
+            mo.callout(mo.md(
+                f"**Your prediction:** {b_prediction.value}. **Live decision:** "
+                f"{b_conclusion.value or 'not chosen'}; {message} "
+                "A no-feasible decision must name the policy you tested."
+            ), kind="danger" if chosen is not None and not chosen["feasible"] else "info"),
+            b_capture, saved("B"),
+            mo.accordion({"Calculation Notes": mo.md(
+                "Every policy retains the same number of explicit records. Duplicate counts come "
+                "from repeated duplicate-group IDs; coverage comes from cohort membership; quality remains supplied evidence."
+            )}),
+        ])
+
+    def part_c():
+        intro = mo.md(
+            f"### C · Does selection pay for itself? (10 min)\nCarry **{carried_policy}** "
+            f"into a complete cost comparison for **{profile['workload']}**: extra read scan, scoring, selection, "
+            "and repeated fixed-work training on an off-device development host."
+        )
+        if c_prediction.value is None:
+            return mo.vstack([
+                intro, mo.hstack([c_scoring, c_runs], widths="equal", wrap=True), c_prediction,
+            ])
+        figure = go.Figure([
+            go.Bar(
+                name="Full pool", x=["Total"],
+                y=[c_baseline["reported_total"].to("second").magnitude],
+                marker_color=COLORS["OrangeLine"],
+            ),
+            go.Bar(
+                name="Selected subset", x=["Total"],
+                y=[c_result["reported_total"].to("second").magnitude],
+                marker_color=COLORS["BlueLine"],
+            ),
+        ])
+        figure.update_layout(
+            height=270, margin=dict(l=20, r=20, t=20, b=20),
+            yaxis_title="Elapsed time (s)", legend_orientation="h",
+        )
+        result_word = "saves time" if c_result["selection_pays"] else "does not yet save time"
+        support_word = "supported" if c_result["decision_supported"] else "not supported"
+        return mo.vstack([
+            intro, c_prediction,
+            mo.hstack([c_scoring, c_runs], widths="equal", wrap=True),
+            apply_plotly_theme(figure),
+            table([{
+                "Selection scan": f"{c_result['read_time'].to('second').magnitude:.1f} s",
+                "Scoring": f"{c_result['scoring_time'].to('second').magnitude:.1f} s",
+                "Selection": f"{c_result['selection_time'].to('second').magnitude:.1f} s",
+                "First profitable run": c_result["first_profitable_runs"],
+            }]),
+            c_decision,
+            mo.callout(mo.md(
+                f"**Your prediction:** {c_prediction.value}. At **{c_runs.value} runs**, "
+                f"selection {result_word}; the combined time-and-evidence decision is **{support_word}**."
+            ), kind="success" if c_result["decision_supported"] else "danger"),
+            c_capture, saved("C"),
+            mo.accordion({"Calculation Notes": mo.md(
+                "Total selected-path time = one extra read scan + scoring + selection + repeated subset training. "
+                "For device tracks, selection scanning, scoring, and training occur on an off-device development host "
+                f"({profile['development_peak'].to('teraflop / second').magnitude:.1f} TFLOPS peak), not on the target deployment device. "
+                "The full-pool path includes repeated training. Training I/O is excluded, and fixed epochs do not "
+                "establish time to common quality."
+            )}),
+        ])
+
+    def part_d():
+        rows = [{
+            "Option": result["label"],
+            "Created / validated": f"{result['created_examples']} / {result['validated_examples']}",
+            "Cost": f"${result['total_cost'].to('USD').magnitude:,.0f}",
+            "Turnaround": f"{result['turnaround'].to('hour').magnitude:.0f} h",
+            "Rare outcome": f"{result['cohort_outcomes_pct']['rare']:.0f}%",
+            "Affordable": "YES" if result["affordable"] else "NO",
+        } for result in (d_labels, d_generated)]
+        intro = mo.md(
+            f"### D · Should the next dollar buy labels or generated examples? (10 min)\n"
+            f"Compare explicit creation, validation, turnaround, and supplied cohort outcomes for **{profile['workload']}**."
+        )
+        if d_prediction.value is None:
+            return mo.vstack([intro, d_budget, d_prediction])
+        return mo.vstack([
+            intro, d_prediction, d_budget, table(rows),
+            mo.hstack([d_choice, d_rejected], widths="equal", wrap=True),
+            mo.callout(mo.md(
+                f"**Your prediction:** {d_prediction.value}. Labels yield "
+                f"**{d_labels['cohort_outcomes_pct']['rare']:.0f}%** on the rare cohort; generated examples yield "
+                f"**{d_generated['cohort_outcomes_pct']['rare']:.0f}%**. Affordability is shown separately from quality."
+            ), kind="info"),
+            d_capture, saved("D"),
+            mo.accordion({"Calculation Notes": mo.md(
+                "Total package cost adds creation and validation. Each outcome belongs only to the displayed "
+                "fixed package; the simulator does not extrapolate a universal generated-data quality curve."
+            )}),
+        ])
+
+    def part_e():
+        intro = mo.md(
+            f"### E · Does selection survive a changed population? (8 min)\n"
+            f"Reweight the fixed **{carried_policy}** cohort outcomes for **{profile['workload']}** before reselection."
+        )
+        if e_prediction.value is None:
+            return mo.vstack([intro, e_rare_share, e_prediction])
+        rows = [{
+            "Population": "Baseline",
+            "Rare share": f"{e_baseline['changed_population_pct']['rare']:.0f}%",
+            "Weighted quality": f"{e_baseline['changed_quality_pct']:.1f}%",
+            "Underrepresented": ", ".join(e_baseline["underrepresented_cohorts"]) or "none",
+            "Outcome": "SUPPORTED" if e_baseline["still_supported"] else "FAIL",
+        }, {
+            "Population": "Changed",
+            "Rare share": f"{e_result['changed_population_pct']['rare']:.0f}%",
+            "Weighted quality": f"{e_result['changed_quality_pct']:.1f}%",
+            "Underrepresented": ", ".join(e_result["underrepresented_cohorts"]) or "none",
+            "Outcome": "SUPPORTED" if e_result["still_supported"] else "FAIL · " + "; ".join(e_result["failures"]),
+        }]
+        return mo.vstack([
+            intro, e_rare_share, e_prediction, table(rows),
+            mo.callout(mo.md(
+                f"**Your prediction:** {e_prediction.value}. Quality changes by "
+                f"**{e_result['quality_change_pp']:.1f} points**. The selected share now trails "
+                f"the changed population for **{', '.join(e_result['underrepresented_cohorts']) or 'no growing cohort'}**."
+            ), kind="success" if e_result["still_supported"] else "danger"),
+            e_capture, saved("E"),
+            mo.accordion({"Calculation Notes": mo.md(
+                "The changed population reweights fixed cohort outcomes. It does not improve or degrade a cohort rule. "
+                "Representation fails only when a cohort grows beyond its selected share."
+            )}),
+        ])
+
+    def synthesis():
+        rows = []
+        for part in "ABCDE":
+            capture = _captures.get(part)
+            rows.append({
+                "Part": part,
+                "Prediction": capture.to_dict()["prediction"] if capture else "—",
+                "Evidence": (
+                    "CURRENT"
+                    if capture and part not in audit.stale and (part, part) not in audit.identical_pairs
+                    else ("STALE" if capture else "MISSING")
+                ),
+            })
+        saved_b = _captures["B"].to_dict() if "B" in _captures else None
+        saved_decision = saved_b["decision"] if saved_b else None
+        choice_rule = final_choice.value == saved_decision
+        rejected_rule = (
+            final_rejected.value is not None
+            and saved_b is not None
+            and final_choice.value == "none"
+            and final_rejected.value == saved_b["inputs"]["tested_alternative"]
+        )
+        if final_choice.value not in (None, "none"):
+            rejected_rule = (
+                saved_b is not None
+                and final_rejected.value == saved_b["baseline"]["inputs"]["policy_id"]
+            )
+        complete = (
+            audit.complete
+            and all(widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk))
+            and bool(rationale.value.strip()) and choice_rule and rejected_rule
+        )
+        return mo.vstack([
+            mo.md(
+                "### Synthesis · Defend a data-selection policy (5 min)\n"
+                "Choose one saved policy, quantify a rejected alternative, state the residual limitation, "
+                "and name the trigger that forces reevaluation."
+            ),
+            table(rows),
+            mo.callout(mo.md(
+                "Saved snapshots remain fixed while live controls move. Recapture stale evidence before generating the report."
+            ), kind="info"),
+            mo.hstack([final_choice, final_rejected], widths="equal", wrap=True),
+            mo.hstack([final_trigger, final_risk], widths="equal", wrap=True),
+            rationale,
+            mo.callout(mo.md(
+                "**Ready for the local report.**" if complete else
+                "Complete five current contrasts, match the saved Part B decision, compare a tested alternative, and add the rationale."
+            ), kind="success" if complete else "warn"),
+        ])
+
+    tabs = mo.ui.tabs({
+        "Part A": part_a(), "Part B": part_b(), "Part C": part_c(),
+        "Part D": part_d(), "Part E": part_e(), "Synthesis": synthesis(),
     })
-
-    _hud = mo.Html(f"""
-    <div class="lab-hud">
-        <span class="hud-label">LAB</span>
-        <span class="hud-value">09 &middot; Data Selection</span>
-        <span class="hud-label">TRACK</span>
-        <span class="hud-value">{v1_09_profile.label}</span>
-        <span style="flex:1;"></span>
-        <span class="hud-label">ARTIFACT</span>
-        <span class="hud-value">{v1_09_selection.report_artifact}</span>
-        <span class="hud-label">STATUS</span>
-        <span class="hud-active">{'SAVED' if _ready else 'ACTIVE'}</span>
-    </div>
-    <div class="mlsysbook-panel">
-      <h2>Design Ledger</h2>
-      <div class="mlsysbook-grid">
-        <div class="mlsysbook-field"><strong>Ready to save</strong>{'yes' if _ready else 'not yet'}</div>
-        <div class="mlsysbook-field"><strong>Selected cohort</strong>{v1_09_decision.selected_label}</div>
-        <div class="mlsysbook-field"><strong>Binding budget</strong>{v1_09_label_selected_row["binding_constraint"]}</div>
-        <div class="mlsysbook-field"><strong>Worst subgroup</strong>{v1_09_decision.worst_subgroup}</div>
-        <div class="mlsysbook-field"><strong>Release gate</strong>{v1_09_release["decision"]}</div>
-        <div class="mlsysbook-field"><strong>Carry-forward risk</strong>{v1_09_decision.residual_risk}</div>
-      </div>
-      <div style="margin-top:10px; color:#475569; line-height:1.55;">
-        The ledger records each student decision. All predictions and a final recommendation mark the design complete.
-      </div>
-    </div>
-    """)
-    _hud
-    return
+    tabs
+    return (audit,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(
+    audit,
     build_lab_report,
+    final_choice,
+    final_rejected,
+    final_risk,
+    final_trigger,
+    get_evidence,
+    get_lab_metadata,
     mo,
+    profile,
+    rationale,
     report_export_panel,
-    v1_09_amount_system,
-    v1_09_coverage,
-    v1_09_coverage_best,
-    v1_09_coverage_checkpoint,
-    v1_09_coverage_prediction,
-    v1_09_decision,
-    v1_09_fraction_multiplier,
-    v1_09_frontier,
-    v1_09_label_budget_multiplier,
-    v1_09_label_prediction,
-    v1_09_label_rows,
-    v1_09_label_selected_row,
-    v1_09_metadata,
-    v1_09_part_a_checkpoint,
-    v1_09_part_c_checkpoint,
-    v1_09_part_d_checkpoint,
-    v1_09_profile,
-    v1_09_reflection,
-    v1_09_release,
-    v1_09_risk_rows,
-    v1_09_risk_tolerance,
-    v1_09_saturation_evidence,
-    v1_09_saturation_points,
-    v1_09_selected_utility,
-    v1_09_selection,
-    v1_09_validation_focus,
-    v1_09_validation_prediction,
-    v1_09_value_prediction,
-    v1_09_variant,
+    track_id,
 ):
-    _incomplete = []
-    if v1_09_value_prediction.value is None:
-        _incomplete.append("Part A marginal-value prediction")
-    if v1_09_part_a_checkpoint.value is None:
-        _incomplete.append("Part A checkpoint")
-    if v1_09_coverage_prediction.value is None:
-        _incomplete.append("Part B coverage prediction")
-    if v1_09_coverage_checkpoint.value is None:
-        _incomplete.append("Part B checkpoint")
-    if v1_09_label_prediction.value is None:
-        _incomplete.append("Part C label-frontier prediction")
-    if v1_09_part_c_checkpoint.value is None:
-        _incomplete.append("Part C checkpoint")
-    if v1_09_validation_prediction.value is None:
-        _incomplete.append("Part D release-gate prediction")
-    if v1_09_part_d_checkpoint.value is None:
-        _incomplete.append("Part D checkpoint")
-    if not str(v1_09_reflection.value or "").strip():
-        _incomplete.append("Synthesis memo notes")
-
-    _report = build_lab_report(
-        v1_09_metadata,
-        track=v1_09_profile.label,
-        scenario=v1_09_variant.workload_summary,
-        learning_objectives=(
-            "Measure when marginal data value saturates while cost keeps growing.",
-            "Compare coverage and diversity against raw dataset size.",
-            "Choose a label-quality-cost frontier point under a binding budget.",
-            "Defend residual bias and downstream risk in a data selection memo.",
-        ),
-        predictions={
-            "marginal_value_pressure": v1_09_value_prediction.value,
-            "coverage_policy": v1_09_coverage_prediction.value,
-            "binding_label_budget": v1_09_label_prediction.value,
-            "release_gate": v1_09_validation_prediction.value,
-        },
-        knob_settings={
-            "fraction_multiplier": v1_09_fraction_multiplier.value,
-            "selected_policy": v1_09_decision.selected_id,
-            "label_budget_multiplier": v1_09_label_budget_multiplier.value,
-            "risk_tolerance": v1_09_risk_tolerance.value,
-            "validation_focus": v1_09_validation_focus.value,
-        },
+    _captures = get_evidence()
+    _saved_b = _captures["B"].to_dict() if "B" in _captures else None
+    _saved_decision = _saved_b["decision"] if _saved_b else None
+    _choice_rule = final_choice.value == _saved_decision
+    _rejected_rule = (
+        final_rejected.value is not None and _saved_b is not None
+        and final_choice.value == "none"
+        and final_rejected.value == _saved_b["inputs"]["tested_alternative"]
+    )
+    if final_choice.value not in (None, "none"):
+        _rejected_rule = (
+            _saved_b is not None
+            and final_rejected.value == _saved_b["baseline"]["inputs"]["policy_id"]
+        )
+    _ready = (
+        audit.complete
+        and all(widget.value is not None for widget in (
+            final_choice, final_rejected, final_trigger, final_risk,
+        ))
+        and bool(rationale.value.strip()) and _choice_rule and _rejected_rule
+    )
+    mo.stop(not _ready)
+    snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
+    report = build_lab_report(
+        get_lab_metadata("vol1/lab_09_data_selection.py"),
+        track=track_id,
+        scenario=profile["workload"],
+        learning_objectives=[
+            "Distinguish redundant volume from informative coverage",
+            "Compare equal-count removal policies with explicit records",
+            "Test selection amortization without treating time as quality",
+            "Reevaluate a selected cohort under population change",
+        ],
+        predictions={part: snapshots[part]["prediction"] for part in "ABCDE"},
+        knob_settings={part: snapshots[part]["inputs"] for part in "ABCDE"},
+        evidence_summary={part: {
+            "baseline": snapshots[part]["baseline"],
+            "result": snapshots[part]["result"],
+            "alternatives": snapshots[part]["alternatives"],
+        } for part in "ABCDE"},
         binding_constraints={
-            "binding_budget": v1_09_label_selected_row["binding_constraint"],
-            "worst_subgroup": v1_09_decision.worst_subgroup,
-            "release_gate": v1_09_release["binding_gate"],
+            "selection": snapshots["B"]["result"]["failures"],
+            "population": snapshots["E"]["result"]["failures"],
         },
         decisions={
-            "part_a_checkpoint": v1_09_part_a_checkpoint.value,
-            "part_b_checkpoint": v1_09_coverage_checkpoint.value,
-            "part_c_checkpoint": v1_09_part_c_checkpoint.value,
-            "part_d_checkpoint": v1_09_part_d_checkpoint.value,
-            "selected_policy": v1_09_decision.selected_label,
-            "memo_decision": v1_09_decision.memo_summary,
-        },
-        evidence_summary={
-            "selected_cohort": v1_09_decision.selected_label,
-            "selected_examples_k": v1_09_selected_utility.selected_examples_k,
-            "utility_score": v1_09_decision.utility_score,
-            "current_icr_proxy": v1_09_saturation_evidence["current_icr_proxy"],
-            "coverage_best_policy": v1_09_coverage_best["policy_label"],
-            "binding_budget": v1_09_label_selected_row["binding_constraint"],
-            "release_gate": v1_09_release["decision"],
-            "next_data": v1_09_decision.next_data,
+            "recommendation": final_choice.value,
+            "rejected_alternative": final_rejected.value,
+            "reevaluation_trigger": final_trigger.value,
         },
         final_decision={
-            "selected_policy": v1_09_decision.selected_label,
-            "binding_budget": v1_09_label_selected_row["binding_constraint"],
-            "rejected_alternatives": v1_09_decision.rejected_alternatives,
-            "carry_forward_risk": v1_09_decision.residual_risk,
+            "recommendation": final_choice.value,
+            "rejected_alternative": final_rejected.value,
+            "rationale": rationale.value,
         },
-        big_takeaways=(
-            "Data quantity is not data value; marginal utility saturates.",
-            "Coverage and diversity can dominate raw dataset size.",
-            "Label cost and quality create a budgeted frontier.",
-            "Residual bias and downstream risk must be defended before release.",
-        ),
-        reflections={
-            "student_memo_notes": v1_09_reflection.value,
-            "accepted_blind_spot": v1_09_decision.accepted_blind_spot,
-            "validation_requirement": v1_09_decision.validation_requirement,
-            "track_amount_system": v1_09_amount_system["amount_system"],
-            "report_artifact": v1_09_selection.report_artifact,
-        },
-        residual_risk=v1_09_decision.residual_risk,
-        source_trace={
-            "track_id": v1_09_profile.track_id,
-            "scenario_id": v1_09_variant.scenario_id,
-            "hardware_ref": v1_09_variant.hardware_ref,
-            "model_ref": v1_09_variant.model_ref,
-            "shared_helper": "mlsysbook_labs.selection",
-            "notebook_helpers": (
-                "v1_09_saturation_point",
-                "v1_09_label_frontier_rows",
-                "v1_09_release_gate",
-            ),
-            "source_policy": v1_09_profile.source_policy,
-        },
+        big_takeaways=[
+            "Equal sample counts can preserve very different cohort coverage.",
+            "Selection overhead must be amortized across actual reuse.",
+            "A changed population can invalidate a previously supported subset.",
+        ],
+        reflections={"rationale": rationale.value, "reevaluation_trigger": final_trigger.value},
+        residual_risk=final_risk.value,
         result_snapshot={
-            "selection_profile": v1_09_selection,
-            "frontier": v1_09_frontier,
-            "coverage": v1_09_coverage,
-            "selected_utility": v1_09_selected_utility,
-            "decision": v1_09_decision,
-            "saturation_points": v1_09_saturation_points,
-            "label_rows": v1_09_label_rows,
-            "risk_rows": v1_09_risk_rows,
-            "release_gate": v1_09_release,
+            "track": track_id, "captures": snapshots,
+            "recommendation": final_choice.value,
+            "rejected_alternative": final_rejected.value,
+            "reevaluation_trigger": final_trigger.value,
+            "residual_risk": final_risk.value,
         },
-        incomplete_fields=tuple(_incomplete),
+        source_trace={
+            "scenario": "Explicit illustrative candidate pools and supplied outcomes.",
+            "calculations": "Deterministic data-selection scenario calculations.",
+        },
     )
+    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    return
 
-    mo.vstack([
-        mo.md("## Download Report"),
-        mo.callout(
-            mo.md(
-                "This V1-09 data selection memo is generated locally from the selected "
-                "track, your predictions, controls, computed evidence, and synthesis notes."
-            ),
-            kind="info",
-        ),
-        report_export_panel(_report),
-    ])
+
+@app.cell
+async def _(
+    MODEL_ID,
+    audit,
+    final_choice,
+    final_rejected,
+    final_risk,
+    final_trigger,
+    get_evidence,
+    ledger,
+    mo,
+    rationale,
+    track_id,
+):
+    _captures = get_evidence()
+    _saved_b = _captures["B"].to_dict() if "B" in _captures else None
+    _saved_decision = _saved_b["decision"] if _saved_b else None
+    _choice_rule = final_choice.value == _saved_decision
+    _rejected_rule = (
+        final_rejected.value is not None and _saved_b is not None
+        and final_choice.value == "none"
+        and final_rejected.value == _saved_b["inputs"]["tested_alternative"]
+    )
+    if final_choice.value not in (None, "none"):
+        _rejected_rule = (
+            _saved_b is not None
+            and final_rejected.value == _saved_b["baseline"]["inputs"]["policy_id"]
+        )
+    _ready = (
+        audit.complete
+        and all(widget.value is not None for widget in (
+            final_choice, final_rejected, final_trigger, final_risk,
+        ))
+        and bool(rationale.value.strip()) and _choice_rule and _rejected_rule
+    )
+    _saved = False
+    _save_error = None
+    if _ready:
+        try:
+            ledger.save(chapter=9, design={
+                "schema_version": 1,
+                "lab_id": "v1_09",
+                "track_id": track_id,
+                "model_id": MODEL_ID,
+                "evidence": {part: capture.to_dict() for part, capture in get_evidence().items()},
+                "recommendation": final_choice.value,
+                "rejected_alternative": final_rejected.value,
+                "reevaluation_trigger": final_trigger.value,
+                "residual_risk": final_risk.value,
+                "rationale": rationale.value,
+            })
+            await ledger.flush()
+            _saved = True
+        except Exception:
+            _save_error = True
+    if _save_error:
+        status = "SAVE FAILED · REPORT STILL AVAILABLE"
+    elif _saved:
+        status = "SAVED"
+    else:
+        status = "EVIDENCE IN PROGRESS"
+    mo.Html(
+        f'<div class="lab-hud"><span class="hud-label">LAB</span>'
+        f'<span class="hud-value">09 · Selection That Pays</span>'
+        f'<span class="hud-label"> · STATUS: </span><span class="hud-active">{status}</span></div>'
+    )
     return
 
 

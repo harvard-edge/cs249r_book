@@ -23,12 +23,18 @@ class DesignLedger:
     """
     The 'Save Game' manager for the MLSys curriculum.
 
-    Ensures that decisions made in Lab 00 persist through Lab 32.
+    Explicit volume namespaces keep identically numbered chapters separate.
+    The default uses the legacy ledger without migrating or reassigning it.
     """
 
-    def __init__(self):
+    def __init__(self, volume: Optional[str] = None):
+        if volume not in (None, "vol1", "vol2"):
+            raise ValueError("volume must be None, 'vol1', or 'vol2'")
+        self.volume = volume
+        suffix = f"_{volume}" if volume else ""
+        self.storage_key = f"{self._LOCALSTORAGE_KEY}{suffix}"
         self.config_dir = Path.home() / ".mlsys"
-        self.file_path = self.config_dir / "ledger.json"
+        self.file_path = self.config_dir / f"ledger{suffix}.json"
 
         self._state = LedgerState()
         self._last_load_error: Optional[str] = None
@@ -145,7 +151,7 @@ class DesignLedger:
                         const store = tx.objectStore("ledger");
 
                         const getReq = store.get(
-                            "mlsys_design_ledger"
+                            __LEDGER_STORAGE_KEY__
                         );
 
                         getReq.onsuccess = () => {
@@ -191,6 +197,7 @@ class DesignLedger:
             }))()
             """
 
+            js_code = js_code.replace("__LEDGER_STORAGE_KEY__", json.dumps(self.storage_key))
             raw = await run_js(js_code)
 
             if raw:
@@ -230,6 +237,7 @@ class DesignLedger:
 
         js_code = """
         (async () => new Promise((resolve, reject) => {
+            const pendingState = globalThis._mlsys_temp_state;
             const request = indexedDB.open("mlsys_ledger_db", 1);
 
             request.onupgradeneeded = (e) => {
@@ -273,8 +281,8 @@ class DesignLedger:
                     };
 
                     tx.objectStore("ledger").put(
-                        globalThis._mlsys_temp_state,
-                        "mlsys_design_ledger"
+                        pendingState,
+                        __LEDGER_STORAGE_KEY__
                     );
                 } catch (err) {
                     db.close();
@@ -299,6 +307,7 @@ class DesignLedger:
         }))()
         """
 
+        js_code = js_code.replace("__LEDGER_STORAGE_KEY__", json.dumps(self.storage_key))
         await run_js(js_code)
         return True
 

@@ -1,1641 +1,505 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full", app_title="Lab 11: The Hardware Roofline · MLSysBook")
+app = marimo.App(width="full", app_title="Lab 11: Acceleration That Survives the Whole Path · MLSysBook")
 
 
 @app.cell
 async def _():
-    import marimo as mo
     import sys
-    import math
     from pathlib import Path
-    import numpy as np
+    import marimo as mo
 
     if sys.platform == "emscripten":
         import micropip
-
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
-        _labs_dir = Path(__file__).resolve().parents[1]
-        if str(_labs_dir) not in sys.path:
-            sys.path.insert(0, str(_labs_dir))
+        labs_dir = Path(__file__).resolve().parents[1]
+        if str(labs_dir) not in sys.path:
+            sys.path.insert(0, str(labs_dir))
         from bootstrap import native_bootstrap
-
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
+    from mlsysim.engine.v1_11_experiments import (
+        MODEL_ID, analyze_execution_path, analyze_roofline, analyze_tile_mapping,
+        compare_application_speedup, get_track_scenario, make_replay_packet,
+        rank_accelerators, scenario_budgets, scenario_candidates,
+        scenario_execution_dimensions, scenario_gemm_demand, scenario_tile_choices,
+        to_jsonable,
+    )
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        big_takeaways,
-        build_lab_report,
-        fusion_traffic,
-        gated_hypothesis_card,
-        gemm_workload,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        hardware_roofline_profile,
-        instrumentation_console,
-        part_workflow,
-        report_export_panel,
-        resolve_mlsysim_ref,
-        roofline_point,
-        track_context,
-        track_arc_context,
-        track_selector,
+        ACADEMIC_LAB_CSS, build_lab_report, get_lab_metadata, report_export_panel,
     )
+    from mlsysbook_labs.experiment_evidence import audit_evidence, capture_evidence
 
-    ledger = DesignLedger()
-    if getattr(ledger, "is_wasm", False):
-        _ = await ledger.load_async()
+    ledger = DesignLedger(volume="vol1")
+    if ledger.is_wasm:
+        _loaded = await ledger.load_async()
     return (
-        ACADEMIC_LAB_CSS,
-        COLORS,
-        apply_plotly_theme,
-        big_takeaways,
-        build_lab_report,
-        fusion_traffic,
-        gated_hypothesis_card,
-        gemm_workload,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        go,
-        hardware_roofline_profile,
-        instrumentation_console,
-        ledger,
-        math,
-        mo,
-        np,
-        part_workflow,
-        report_export_panel,
-        resolve_mlsysim_ref,
-        roofline_point,
+        ACADEMIC_LAB_CSS, COLORS, LAB_CSS, MODEL_ID, analyze_execution_path,
+        analyze_roofline, analyze_tile_mapping, apply_plotly_theme, audit_evidence,
+        build_lab_report, capture_evidence, compare_application_speedup,
+        get_lab_metadata, get_track_scenario, go, ledger, make_replay_packet, mo,
+        rank_accelerators, report_export_panel, scenario_budgets,
+        scenario_candidates, scenario_execution_dimensions, scenario_gemm_demand,
+        scenario_tile_choices, to_jsonable,
     )
-
-
-@app.cell
-def _(get_lab_metadata):
-    v1_11_metadata = get_lab_metadata("vol1/lab_11_hw_accel.py")
-    return (v1_11_metadata,)
 
 
 @app.cell
 def _(mo):
-    # Top-Level Universal Track Selector
-    v1_11_track_picker = mo.ui.dropdown(
-        options={
-            "☁️ Cloud Supercomputing Track (H100 & Tensor Cores vs Bandwidth Wall)": "cloud_fleet",
-            "🤖 Edge & Embodied Track (Jetson Orin & DLA / Tensor Cores vs Tail Latency)": "robotaxi",
-            "📱 Mobile Track (Apple Silicon & Neural Engine AMX vs Thermal Envelope)": "iphone",
-            "⚡ TinyML Track (ESP32-S3 & SIMD Vector Extensions vs SRAM Boundaries)": "oura_ring",
-        },
-        value="☁️ Cloud Supercomputing Track (H100 & Tensor Cores vs Bandwidth Wall)",
-        label="Select Course / Industry Track",
+    get_evidence, set_evidence = mo.state({})
+    return get_evidence, set_evidence
+
+
+@app.cell
+def _(mo, set_evidence):
+    track = mo.ui.dropdown(
+        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
+        value="TinyML", label="Deployment track", on_change=lambda _value: set_evidence({}),
     )
-    return (v1_11_track_picker,)
+    return (track,)
 
 
 @app.cell
-def _(
-    get_lab_track_variant,
-    get_track_profile,
-    hardware_roofline_profile,
-    resolve_mlsysim_ref,
-    v1_11_track_picker,
-):
-    v1_11_track_id = v1_11_track_picker.value
-    v1_11_profile = get_track_profile(v1_11_track_id)
-    v1_11_variant = get_lab_track_variant("v1_11_hardware_roofline", v1_11_track_id)
-    v1_11_hardware = resolve_mlsysim_ref(v1_11_variant.hardware_ref)
-    v1_11_roofline = hardware_roofline_profile(v1_11_profile, v1_11_variant, v1_11_hardware)
-    return v1_11_hardware, v1_11_profile, v1_11_roofline, v1_11_variant
+def _(get_track_scenario, track):
+    track_id = track.value
+    scenario = get_track_scenario(track_id)
+    return scenario, track_id
 
 
 @app.cell
-def _(
-    fusion_traffic,
-    gemm_workload,
-    math,
-    roofline_point,
-    v1_11_hardware,
-    v1_11_profile,
-    v1_11_roofline,
-    v1_11_variant,
-):
-    def v1_11_quantity_to_float(value, unit, default=0.0):
-        if value is None:
-            return default
-        if hasattr(value, "m_as"):
-            try:
-                return float(value.m_as(unit))
-            except Exception:
-                return default
-        if hasattr(value, "to"):
-            try:
-                return float(value.to(unit).magnitude)
-            except Exception:
-                return default
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-
-    v1_11_track_configs = {
-        "iphone": {
-            "stakeholder": "mobile accelerator engineer",
-            "amount_focus": "local latency, mJ/inference, sustained watts, thermal headroom",
-            "memory_name": "LPDDR/unified memory",
-            "local_memory_name": "Neural Engine SRAM/cache",
-            "local_buffer_kb": 512,
-            "movement_budget_us": 280,
-            "hidden_dim": 2048,
-            "default_batch": 4,
-            "movement_power_w": 3.5,
-            "shape_multiple": 16,
-            "supported_precisions": ("fp16", "int8"),
-            "quality_tolerance_pct": 1.5,
-            "quality_loss_pct": {"fp32": 0.0, "fp16": 0.2, "int8": 1.1},
-            "target_latency_ms": 18.0,
-            "power_budget_w": 5.0,
-            "secondary_budget_label": "energy/inference",
-            "secondary_budget_limit": 70.0,
-            "secondary_budget_unit": "mJ",
-            "report_frame": "Ship on device only if the Neural Engine path stays supported and thermal headroom remains.",
-            "failure_mode": "unsupported NPU op fallback or thermal throttle",
-            "accelerator_paths": (
-                {"id": "neural_engine", "label": "Neural Engine", "speed": 1.0, "power_w": 3.8, "extra_ms": 0.0, "cost": 0.0, "carbon_g": 0.0, "validation_rank": 2},
-                {"id": "gpu_shaders", "label": "GPU shaders", "speed": 0.55, "power_w": 6.2, "extra_ms": 1.2, "cost": 0.0, "carbon_g": 0.0, "validation_rank": 1},
-                {"id": "cpu_fallback", "label": "CPU fallback", "speed": 0.08, "power_w": 2.7, "extra_ms": 8.0, "cost": 0.0, "carbon_g": 0.0, "validation_rank": 1},
-            ),
-        },
-        "oura_ring": {
-            "stakeholder": "wearable firmware engineer",
-            "amount_focus": "SRAM KB, wake time, uJ/window, duty cycle, flash image size",
-            "memory_name": "external flash/DRAM staging",
-            "local_memory_name": "MCU SRAM/scratchpad",
-            "local_buffer_kb": 96,
-            "movement_budget_us": 1600,
-            "hidden_dim": 256,
-            "default_batch": 8,
-            "movement_power_w": 0.018,
-            "shape_multiple": 8,
-            "supported_precisions": ("int8",),
-            "quality_tolerance_pct": 1.5,
-            "quality_loss_pct": {"fp32": 0.0, "fp16": 0.4, "int8": 0.9},
-            "target_latency_ms": 50.0,
-            "power_budget_w": 0.025,
-            "secondary_budget_label": "energy/window",
-            "secondary_budget_limit": 0.8,
-            "secondary_budget_unit": "mJ",
-            "report_frame": "Run on ring only if tiles fit SRAM and duty-cycle energy stays inside the nightly budget.",
-            "failure_mode": "SRAM spill, duty-cycle miss, or battery regression",
-            "accelerator_paths": (
-                {"id": "dsp_int8", "label": "DSP-like int8 kernel", "speed": 1.0, "power_w": 0.018, "extra_ms": 0.0, "cost": 0.0, "carbon_g": 0.0, "validation_rank": 2},
-                {"id": "scalar_mcu", "label": "Scalar MCU", "speed": 0.18, "power_w": 0.012, "extra_ms": 3.0, "cost": 0.0, "carbon_g": 0.0, "validation_rank": 1},
-                {"id": "phone_offload", "label": "Phone offload", "speed": 2.0, "power_w": 0.045, "extra_ms": 35.0, "cost": 0.0, "carbon_g": 0.0, "validation_rank": 2},
-            ),
-        },
-        "robotaxi": {
-            "stakeholder": "autonomous vehicle platform engineer",
-            "amount_focus": "deterministic p99 ms, safety margin, watts, sensor-burst headroom",
-            "memory_name": "vehicle accelerator memory",
-            "local_memory_name": "edge accelerator SRAM/L2",
-            "local_buffer_kb": 4096,
-            "movement_budget_us": 450,
-            "hidden_dim": 4096,
-            "default_batch": 8,
-            "movement_power_w": 55.0,
-            "shape_multiple": 16,
-            "supported_precisions": ("fp16", "int8"),
-            "quality_tolerance_pct": 0.5,
-            "quality_loss_pct": {"fp32": 0.0, "fp16": 0.2, "int8": 0.9},
-            "target_latency_ms": 35.0,
-            "power_budget_w": 65.0,
-            "secondary_budget_label": "safety validation gap",
-            "secondary_budget_limit": 0.5,
-            "secondary_budget_unit": "% recall loss",
-            "report_frame": "Approve only with deterministic edge latency and explicit fallback risk.",
-            "failure_mode": "p99 deadline miss, power-envelope violation, or rare-event recall risk",
-            "accelerator_paths": (
-                {"id": "vehicle_accel", "label": "Vehicle accelerator", "speed": 1.0, "power_w": 58.0, "extra_ms": 0.0, "cost": 0.0, "carbon_g": 0.0, "validation_rank": 2},
-                {"id": "gpu_fallback", "label": "GPU fallback", "speed": 0.72, "power_w": 82.0, "extra_ms": 2.0, "cost": 0.0, "carbon_g": 0.0, "validation_rank": 2},
-                {"id": "cloud_fallback", "label": "Cloud fallback", "speed": 1.3, "power_w": 12.0, "extra_ms": 55.0, "cost": 0.0, "carbon_g": 0.0, "validation_rank": 2},
-            ),
-        },
-        "cloud_fleet": {
-            "stakeholder": "GPU performance engineer",
-            "amount_focus": "MFU, HBM bandwidth, cost/request, p99 SLA, gCO2e/request",
-            "memory_name": "HBM",
-            "local_memory_name": "SM shared memory/L2",
-            "local_buffer_kb": 16384,
-            "movement_budget_us": 380,
-            "hidden_dim": 8192,
-            "default_batch": 32,
-            "movement_power_w": 620.0,
-            "shape_multiple": 16,
-            "supported_precisions": ("fp16", "int8"),
-            "quality_tolerance_pct": 0.8,
-            "quality_loss_pct": {"fp32": 0.0, "fp16": 0.2, "int8": 0.7},
-            "target_latency_ms": 80.0,
-            "power_budget_w": 720.0,
-            "secondary_budget_label": "cost/request",
-            "secondary_budget_limit": 0.0025,
-            "secondary_budget_unit": "USD",
-            "report_frame": "Use accelerators only when utilization and cost/carbon beat alternatives under SLA.",
-            "failure_mode": "low utilization, SLO breach, negative unit economics, or carbon waste",
-            "accelerator_paths": (
-                {"id": "h100_tensor", "label": "H100 tensor cores", "speed": 1.0, "power_w": 700.0, "extra_ms": 0.0, "cost": 0.0018, "carbon_g": 0.045, "validation_rank": 2},
-                {"id": "a100_pool", "label": "A100 pool", "speed": 0.46, "power_w": 400.0, "extra_ms": 0.4, "cost": 0.0015, "carbon_g": 0.038, "validation_rank": 1},
-                {"id": "cpu_fleet", "label": "CPU fleet", "speed": 0.055, "power_w": 180.0, "extra_ms": 4.0, "cost": 0.0042, "carbon_g": 0.085, "validation_rank": 1},
-            ),
-        },
-    }
-
-    v1_11_lens = dict(v1_11_track_configs[v1_11_profile.track_id])
-    v1_11_lens.update(
+def _(mo, track_id):
+    _track = track_id
+    a_change = mo.ui.dropdown(
+        {"Arithmetic": "compute", "Bandwidth": "bandwidth", "Reuse": "reuse"},
+        value="Arithmetic", label="Resource change",
+    )
+    a_factor = mo.ui.slider(2, 8, value=2, step=1, label="Change factor")
+    b_tile = mo.ui.dropdown(
+        {"Compact": "compact", "Baseline": "baseline", "Oversized": "oversized"},
+        value="Compact", label="Tile",
+    )
+    b_fused = mo.ui.checkbox(value=True, label="Fuse the following operation")
+    c_shape = mo.ui.dropdown(
+        {"Aligned": "aligned", "Misaligned": "misaligned"}, value="Aligned", label="Shape",
+    )
+    c_operation = mo.ui.dropdown(
+        {"Matrix multiply": "gemm", "Scatter update": "scatter"},
+        value="Matrix multiply", label="Operation",
+    )
+    d_speedup = mo.ui.slider(2, 50, value=10, step=2, label="Kernel-only speedup")
+    e_objective = mo.ui.dropdown(
+        {"Latency": "latency", "Accelerator energy": "energy", "Operating cost": "cost"},
+        value="Latency", label="Objective",
+    )
+    e_budget = mo.ui.slider(0.05, 1.5, value=1.0, step=0.05, label="Budget scale")
+    e_choice = mo.ui.radio(
         {
-            "track_id": v1_11_profile.track_id,
-            "track_label": v1_11_profile.label,
-            "variant_stakeholder": v1_11_variant.stakeholder,
-            "accelerator_path": v1_11_variant.assumptions.get("accelerator_path", v1_11_profile.label),
-            "hardware_ref": v1_11_variant.hardware_ref,
-            "model_ref": v1_11_variant.model_ref,
-        }
+            "Primary": "primary",
+            "Alternative": "alternative",
+            "No change / hold for more evidence": "hold",
+            "No feasible design": "none",
+        },
+        label="Deployment decision",
     )
+    e_rejected = mo.ui.radio(
+        {"Primary": "primary", "Alternative": "alternative"}, label="Rejected tested candidate",
+    )
+    return a_change, a_factor, b_fused, b_tile, c_operation, c_shape, d_speedup, e_budget, e_choice, e_objective, e_rejected
 
-    def v1_11_roofline_result(dimension, precision):
-        workload = gemm_workload(dimension=int(dimension), precision=str(precision).lower())
-        point = roofline_point(v1_11_roofline, workload.arithmetic_intensity)
-        latency_ms = workload.flops / (max(point.attainable_gflops, 1e-12) * 1e9) * 1000
-        boundary = v1_11_boundary_dimension(precision)
-        return {
-            "workload": workload,
-            "point": point,
-            "latency_ms": latency_ms,
-            "boundary_dimension": boundary,
-            "actual_key": "compute" if point.regime == "Compute-bound" else "memory",
-        }
 
-    def v1_11_boundary_dimension(precision):
-        bytes_per_element = {"fp32": 4, "fp16": 2, "int8": 1}[str(precision).lower()]
-        raw_n = v1_11_roofline.ridge_flop_per_byte * 3 * bytes_per_element / 2
-        return max(128, int(math.ceil(raw_n / 128) * 128))
+@app.cell
+def _(mo, track_id):
+    _track = track_id
+    a_prediction = mo.ui.radio(
+        {"Latency falls nearly with the factor": "large", "Latency barely changes": "small", "The bottleneck switches": "switch"},
+        label="What happens after the resource change?",
+    ).form(submit_button_label="Lock Part A prediction")
+    b_prediction = mo.ui.radio(
+        {"Fits and moves fewer bytes": "fit_less", "Fits but moves more bytes": "fit_more", "Does not fit local memory": "spill"},
+        label="What will the selected mapping do?",
+    ).form(submit_button_label="Lock Part B prediction")
+    c_prediction = mo.ui.radio(
+        {"Native": "native", "Padded": "padded", "Fallback": "fallback"},
+        label="Which execution path will run?",
+    ).form(submit_button_label="Lock Part C prediction")
+    d_prediction = mo.ui.radio(
+        {"Nearly the kernel speedup": "near", "Less than half": "under_half", "Almost no gain": "small"},
+        label="How much kernel speedup survives end to end?",
+    ).form(submit_button_label="Lock Part D prediction")
+    e_prediction = mo.ui.radio(
+        {"Primary wins": "primary", "Alternative wins": "alternative", "Neither is feasible": "none"},
+        label="Which candidate survives the budgets and objective?",
+    ).form(submit_button_label="Lock Part E prediction")
+    return a_prediction, b_prediction, c_prediction, d_prediction, e_prediction
 
-    def v1_11_memory_result(mode, batch, workspace_kb):
-        mode = str(mode)
-        batch = int(batch)
-        workspace_kb = float(workspace_kb)
-        elements = batch * int(v1_11_lens["hidden_dim"])
-        bytes_per_element = 2
-        fusion = fusion_traffic(
-            elements=elements,
-            bytes_per_element=bytes_per_element,
-            bandwidth_gbs=v1_11_roofline.bandwidth_gbs,
-            eager_reads=3,
-            eager_writes=3,
-            fused_reads=1,
-            fused_writes=1,
-        )
-        selected_bytes = fusion.eager_bytes if mode == "eager" else fusion.fused_bytes
-        selected_time_us = fusion.eager_time_us if mode == "eager" else fusion.fused_time_us
-        local_required_kb = elements * bytes_per_element * (3 if mode == "eager" else 1) / 1024
-        available_kb = min(float(v1_11_lens["local_buffer_kb"]), workspace_kb)
-        spills = local_required_kb > available_kb
-        movement_time_us = selected_time_us * (1.65 if spills else 1.0)
-        movement_miss = movement_time_us > float(v1_11_lens["movement_budget_us"])
-        movement_energy_mj = float(v1_11_lens["movement_power_w"]) * movement_time_us / 1000
-        return {
-            "fusion": fusion,
-            "mode": mode,
-            "batch": batch,
-            "elements": elements,
-            "selected_bytes": selected_bytes,
-            "selected_time_us": movement_time_us,
-            "raw_time_us": selected_time_us,
-            "local_required_kb": local_required_kb,
-            "available_kb": available_kb,
-            "spills": spills,
-            "movement_miss": movement_miss,
-            "movement_energy_mj": movement_energy_mj,
-        }
 
-    def v1_11_precision_peak_tflops(precision):
-        precision = str(precision).lower()
-        precision_map = getattr(v1_11_hardware.compute, "precision_flops", {})
-        if precision == "fp32":
-            peak = precision_map.get("fp32", precision_map.get("fp32_cuda", None))
-        elif precision == "fp16":
-            peak = precision_map.get("fp16", precision_map.get("bf16", None))
-        elif precision == "int8":
-            peak = precision_map.get("int8", None)
-        else:
-            peak = None
-        if peak is None:
-            peak = v1_11_hardware.compute.peak_flops
-        return v1_11_quantity_to_float(peak, "TFLOPs/s", v1_11_roofline.peak_tflops)
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    reevaluation_trigger = mo.ui.radio(
+        {"Latency budget tightens": "latency", "Energy budget tightens": "energy", "Execution support changes": "support"},
+        label="Reevaluation trigger",
+    )
+    residual_risk = mo.ui.radio(
+        {"Deployed kernels differ from the scenario contract": "contract", "Power draw differs from the TDP proxy": "power", "Workload shape mix changes": "shape_mix"},
+        label="Remaining limitation",
+    )
+    rationale = mo.ui.text_area(
+        label="Evidence-backed rationale",
+        placeholder="Cite the chosen option, quantify the rejected candidate, name the limitation, and explain the trigger.",
+    )
+    return rationale, reevaluation_trigger, residual_risk
 
-    def v1_11_precision_result(dimension, precision):
-        dimension = int(dimension)
-        selected_precision = str(precision).lower()
-        rows = []
-        for candidate in ("fp32", "fp16", "int8"):
-            workload = gemm_workload(dimension=dimension, precision=candidate)
-            peak_tflops = v1_11_precision_peak_tflops(candidate)
-            supported = candidate in v1_11_lens["supported_precisions"]
-            aligned = dimension % int(v1_11_lens["shape_multiple"]) == 0
-            quality_delta = float(v1_11_lens["quality_loss_pct"][candidate])
-            quality_ok = quality_delta <= float(v1_11_lens["quality_tolerance_pct"])
-            fast_path = bool(supported and aligned and quality_ok)
-            if fast_path:
-                effective_peak_tflops = peak_tflops
-                status = "fast path"
-                reason = "format, shape, and quality pass"
-            elif not supported:
-                effective_peak_tflops = max(peak_tflops * 0.18, 0.000001)
-                status = "fallback"
-                reason = f"{candidate.upper()} is not on the {v1_11_lens['accelerator_path']} fast path"
-            elif not aligned:
-                effective_peak_tflops = max(peak_tflops * 0.55, 0.000001)
-                status = "padding/fallback"
-                reason = f"dimension is not a multiple of {v1_11_lens['shape_multiple']}"
-            else:
-                effective_peak_tflops = max(peak_tflops * 0.40, 0.000001)
-                status = "quality fail"
-                reason = f"quality delta {quality_delta:.1f}% exceeds {v1_11_lens['quality_tolerance_pct']:.1f}%"
-            peak_gflops = effective_peak_tflops * 1000
-            attainable_gflops = min(peak_gflops, v1_11_roofline.bandwidth_gbs * workload.arithmetic_intensity)
-            latency_ms = workload.flops / (max(attainable_gflops, 1e-12) * 1e9) * 1000
-            rows.append(
-                {
-                    "precision": candidate,
-                    "supported": supported,
-                    "aligned": aligned,
-                    "quality_delta_pct": quality_delta,
-                    "quality_ok": quality_ok,
-                    "fast_path": fast_path,
-                    "status": status,
-                    "reason": reason,
-                    "effective_peak_tflops": effective_peak_tflops,
-                    "attainable_gflops": attainable_gflops,
-                    "latency_ms": latency_ms,
-                    "arithmetic_intensity": workload.arithmetic_intensity,
-                }
-            )
-        selected = next(row for row in rows if row["precision"] == selected_precision)
-        return {"rows": tuple(rows), "selected": selected, "dimension": dimension}
 
-    def v1_11_deployment_result(path_id, validation_level, a_result, b_result, c_result):
-        validation_rank = {"prototype": 0, "profiled": 1, "full": 2}[validation_level]
-        base_latency_ms = a_result["latency_ms"] + b_result["selected_time_us"] / 1000
-        precision_penalty = 1.0 if c_result["selected"]["fast_path"] else 2.4
-        rows = []
-        for path in v1_11_lens["accelerator_paths"]:
-            latency_ms = base_latency_ms * precision_penalty / path["speed"] + path["extra_ms"]
-            energy_mj = path["power_w"] * latency_ms
-            if v1_11_lens["track_id"] == "cloud_fleet":
-                secondary_value = path["cost"] * max(1.0, latency_ms / v1_11_lens["target_latency_ms"])
-            elif v1_11_lens["track_id"] == "robotaxi":
-                secondary_value = c_result["selected"]["quality_delta_pct"]
-            else:
-                secondary_value = energy_mj
-            failures = []
-            if latency_ms > v1_11_lens["target_latency_ms"]:
-                failures.append(f"latency {latency_ms:.2f} ms > {v1_11_lens['target_latency_ms']:.2f} ms")
-            if path["power_w"] > v1_11_lens["power_budget_w"]:
-                failures.append(f"power {path['power_w']:.2f} W > {v1_11_lens['power_budget_w']:.2f} W")
-            if secondary_value > v1_11_lens["secondary_budget_limit"]:
-                failures.append(
-                    f"{v1_11_lens['secondary_budget_label']} {secondary_value:.4g} > "
-                    f"{v1_11_lens['secondary_budget_limit']:.4g} {v1_11_lens['secondary_budget_unit']}"
-                )
-            if b_result["spills"]:
-                failures.append(f"{v1_11_lens['local_memory_name']} spill")
-            if not c_result["selected"]["fast_path"]:
-                failures.append(c_result["selected"]["reason"])
-            if validation_rank < path["validation_rank"]:
-                failures.append("validation evidence is incomplete")
-            rows.append(
-                {
-                    "path_id": path["id"],
-                    "label": path["label"],
-                    "latency_ms": latency_ms,
-                    "power_w": path["power_w"],
-                    "energy_mj": energy_mj,
-                    "secondary_value": secondary_value,
-                    "cost": path["cost"],
-                    "carbon_g": path["carbon_g"],
-                    "passes": len(failures) == 0,
-                    "reason": "passes all current constraints" if not failures else "; ".join(failures),
-                }
-            )
-        selected = next(row for row in rows if row["path_id"] == path_id)
-        passing = [row for row in rows if row["passes"]]
-        recommendation = passing[0] if passing else min(rows, key=lambda row: len(row["reason"].split("; ")))
-        return {
-            "rows": tuple(rows),
-            "selected": selected,
-            "recommendation": recommendation,
-            "validation_rank": validation_rank,
-            "base_latency_ms": base_latency_ms,
-        }
+@app.cell
+def _(
+    a_change, a_factor, analyze_execution_path, analyze_roofline,
+    analyze_tile_mapping, b_fused, b_tile, c_operation, c_shape,
+    compare_application_speedup, d_speedup, e_budget, e_objective,
+    make_replay_packet, rank_accelerators, scenario, scenario_budgets,
+    scenario_candidates, scenario_execution_dimensions, scenario_gemm_demand,
+    scenario_tile_choices, track_id,
+):
+    demand = scenario_gemm_demand(track_id)
+    a_base_inputs = dict(
+        hardware=scenario.hardware, operations=demand.operations,
+        base_bytes_moved=demand.bytes_moved, precision=scenario.precision,
+        reuse=1.0, compute_scale=1.0, bandwidth_scale=1.0,
+    )
+    a_result_inputs = dict(a_base_inputs)
+    if a_change.value == "compute":
+        a_result_inputs["compute_scale"] = float(a_factor.value)
+    elif a_change.value == "bandwidth":
+        a_result_inputs["bandwidth_scale"] = float(a_factor.value)
+    else:
+        a_result_inputs["reuse"] = float(a_factor.value)
+    a_base = analyze_roofline(**a_base_inputs)
+    a_result = analyze_roofline(**a_result_inputs)
+    a_base_packet = make_replay_packet(track=track_id, experiment="roofline", inputs=a_base_inputs)
+    a_result_packet = make_replay_packet(track=track_id, experiment="roofline", inputs=a_result_inputs)
 
+    _tile_choices = scenario_tile_choices(track_id)
+    _base_tile = _tile_choices["baseline"]
+    _selected_tile = _tile_choices[b_tile.value]
+    _tile_common = dict(
+        hardware=scenario.hardware, m=scenario.dimensions[0], n=scenario.dimensions[1],
+        k=scenario.dimensions[2], precision=scenario.precision,
+        scratchpad_capacity=scenario.local_capacity,
+    )
+    b_base_inputs = dict(_tile_common, tile_m=_base_tile[0], tile_n=_base_tile[1], tile_k=_base_tile[2], fused=False)
+    b_result_inputs = dict(_tile_common, tile_m=_selected_tile[0], tile_n=_selected_tile[1], tile_k=_selected_tile[2], fused=b_fused.value)
+    b_base = analyze_tile_mapping(**b_base_inputs)
+    b_result = analyze_tile_mapping(**b_result_inputs)
+    b_base_packet = make_replay_packet(track=track_id, experiment="tile_mapping", inputs=b_base_inputs)
+    b_result_packet = make_replay_packet(track=track_id, experiment="tile_mapping", inputs=b_result_inputs)
+
+    _base_dims = scenario_execution_dimensions(track_id, aligned=True)
+    _selected_dims = scenario_execution_dimensions(track_id, aligned=c_shape.value == "aligned")
+    _execution_common = dict(
+        hardware=scenario.hardware, fallback_hardware=scenario.fallback,
+        contract=scenario.contract, precision=scenario.precision,
+        quality_observation="illustrative matched-task evidence held constant",
+    )
+    c_base_inputs = dict(_execution_common, operation="gemm", m=_base_dims[0], n=_base_dims[1], k=_base_dims[2])
+    c_result_inputs = dict(_execution_common, operation=c_operation.value, m=_selected_dims[0], n=_selected_dims[1], k=_selected_dims[2])
+    c_base = analyze_execution_path(**c_base_inputs)
+    c_result = analyze_execution_path(**c_result_inputs)
+    c_base_packet = make_replay_packet(track=track_id, experiment="execution_path", inputs=c_base_inputs)
+    c_result_packet = make_replay_packet(track=track_id, experiment="execution_path", inputs=c_result_inputs)
+
+    d_base_inputs = dict(
+        hardware=scenario.hardware, baseline_kernel_time=c_result.latency,
+        local_speedup=1.0, host_time=scenario.host_time,
+        transfer_bytes=scenario.transfer_bytes,
+        transfer_fixed_latency=scenario.transfer_fixed_latency,
+        launches=scenario.launches, postprocess_time=scenario.postprocess_time,
+    )
+    d_result_inputs = dict(d_base_inputs, local_speedup=float(d_speedup.value))
+    d_base = compare_application_speedup(**d_base_inputs)
+    d_result = compare_application_speedup(**d_result_inputs)
+    d_base_packet = make_replay_packet(track=track_id, experiment="application_comparison", inputs=d_base_inputs)
+    d_result_packet = make_replay_packet(track=track_id, experiment="application_comparison", inputs=d_result_inputs)
+
+    _candidates = scenario_candidates(track_id)
+    _latency_budget, _energy_budget, _cost_budget = scenario_budgets(track_id, scale=e_budget.value)
+    e_common = dict(
+        fallback_hardware=scenario.fallback, operation="gemm", precision=scenario.precision,
+        m=scenario.dimensions[0], n=scenario.dimensions[1], k=scenario.dimensions[2],
+        host_time=scenario.host_time, transfer_bytes=scenario.transfer_bytes,
+        transfer_fixed_latency=scenario.transfer_fixed_latency, launches=scenario.launches,
+        postprocess_time=scenario.postprocess_time, objective=e_objective.value,
+        latency_budget=_latency_budget, energy_budget=_energy_budget, cost_budget=_cost_budget,
+    )
+    e_primary_inputs = dict(e_common, candidates=(_candidates[0],))
+    e_alternative_inputs = dict(e_common, candidates=(_candidates[1],))
+    e_full_inputs = dict(e_common, candidates=_candidates)
+    e_primary = rank_accelerators(**e_primary_inputs)
+    e_alternative = rank_accelerators(**e_alternative_inputs)
+    e_full = rank_accelerators(**e_full_inputs)
+    e_primary_packet = make_replay_packet(track=track_id, experiment="accelerator_ranking", inputs=e_primary_inputs)
+    e_alternative_packet = make_replay_packet(track=track_id, experiment="accelerator_ranking", inputs=e_alternative_inputs)
+    e_full_packet = make_replay_packet(track=track_id, experiment="accelerator_ranking", inputs=e_full_inputs)
     return (
-        v1_11_deployment_result,
-        v1_11_lens,
-        v1_11_memory_result,
-        v1_11_precision_result,
-        v1_11_roofline_result,
+        a_base, a_base_packet, a_result, a_result_packet, b_base, b_base_packet,
+        b_result, b_result_packet, c_base, c_base_packet, c_result, c_result_packet,
+        d_base, d_base_packet, d_result, d_result_packet, demand, e_alternative,
+        e_alternative_packet, e_full, e_full_packet, e_primary, e_primary_packet,
     )
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(
-    ACADEMIC_LAB_CSS,
-    mo,
-    v1_11_lens,
-    v1_11_profile,
-    v1_11_roofline,
-    v1_11_track_picker,
-    v1_11_variant,
+    a_base, a_base_packet, a_prediction, a_result, a_result_packet, b_base,
+    b_base_packet, b_prediction, b_result, b_result_packet, c_base,
+    c_base_packet, c_prediction, c_result, c_result_packet, capture_evidence,
+    d_base, d_base_packet, d_prediction, d_result, d_result_packet,
+    e_alternative, e_alternative_packet, e_choice, e_full, e_full_packet,
+    e_prediction, e_primary, e_primary_packet, e_rejected, mo, set_evidence,
+    to_jsonable, track_id,
 ):
-    header_html = mo.Html(f"""
-    <div class="mlsysbook-lab-shell">
-      <div style="margin-bottom: 16px;">
-        {v1_11_track_picker}
-      </div>
-      <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
-        <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
-          ML Systems Textbook &middot; Volume I &middot; Chapter 11 &middot; Lab 11
-        </div>
-        <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
-          Hardware Acceleration Fit &amp; The Accelerator Contract
-        </h1>
-        <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
-          Diagnose arithmetic intensity vs. memory bandwidth limits using Roofline models, evaluate kernel fusion and on-chip SRAM tiling, verify tensor-core alignment contracts, and select deployment paths under real latency, power, and cost budgets.
-        </p>
-        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-            <strong>Hardware:</strong> {v1_11_roofline.hardware_ref}
-          </span>
-          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-            <strong>Workload:</strong> {v1_11_variant.model_ref}
-          </span>
-          <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
-            <strong>Ridge Point:</strong> {v1_11_roofline.ridge_flop_per_byte:.1f} FLOP/B
-          </span>
-          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-            <strong>Primary Focus:</strong> {v1_11_lens['amount_focus']}
-          </span>
-          <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-            <strong>Guardrail:</strong> {v1_11_variant.guardrail_metric}
-          </span>
-        </div>
-      </div>
+    def _store(part, capture):
+        set_evidence(lambda current: {**current, part: capture})
 
-      <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-        <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
-          System Scenario: {v1_11_profile.label} Accelerator Co-Design
-        </h3>
-        <p style="color: #475569; line-height: 1.6; margin-bottom: 12px;">
-          {v1_11_variant.workload_summary}
-          The chapter invariant is that accelerators expose bottlenecks: speedup appears only when arithmetic intensity, precision, memory hierarchy, and hardware capability match the deployment envelope.
-        </p>
-        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
-          <strong>The Architectural Invariants of Hardware Acceleration:</strong>
-          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
-            <li><strong>The Roofline Ceiling:</strong> Theoretical TFLOP/s peaks are only attainable if operational arithmetic intensity (FLOP/Byte) exceeds the hardware ridge point. Sub-ridge workloads are strictly memory-bandwidth bound.</li>
-            <li><strong>Memory Movement Dominates Compute:</strong> Moving data through external DRAM consumes orders of magnitude more time and energy than arithmetic execution; operator fusion and local SRAM tiling are mandatory.</li>
-            <li><strong>The Tensor Core Contract:</strong> Specialized matrix engines (Tensor Cores, Apple AMX, Jetson DLA, DSP SIMD) impose strict alignment rules on dimension multiples, supported data types (FP8/BF16/INT8), and numerical stability ranges.</li>
-            <li><strong>Holistic Deployment Feasibility:</strong> True accelerator fit requires simultaneous convergence of latency SLAs, power/thermal dissipation budgets, local memory capacity, and domain validation confidence.</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-    """)
-    mo.vstack([ACADEMIC_LAB_CSS, header_html])
-    return
+    def _run(packet, result):
+        return {"inputs": packet["inputs"], "outputs": to_jsonable(result)}
 
+    a_upstream = {"baseline": a_base_packet["inputs"], "result": a_result_packet["inputs"]}
+    b_upstream = {"baseline": b_base_packet["inputs"], "result": b_result_packet["inputs"]}
+    c_upstream = {"baseline": c_base_packet["inputs"], "result": c_result_packet["inputs"]}
+    d_upstream = {"baseline": d_base_packet["inputs"], "result": d_result_packet["inputs"]}
+    e_upstream = {"ranking": e_full_packet["inputs"], "choice": e_choice.value, "rejected": e_rejected.value}
 
-@app.cell(hide_code=True)
-def _(COLORS, mo, v1_11_lens):
-    mo.Html(
-        f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-            Lab Design Contract
-        </div>
-        <div style="font-size: 0.92rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-            <div>1. <strong>Part A:</strong> classify the active roofline regime.</div>
-            <div>2. <strong>Part B:</strong> measure memory movement and local-buffer fit.</div>
-            <div>3. <strong>Part C:</strong> test whether precision and shape satisfy the accelerator contract.</div>
-            <div>4. <strong>Part D:</strong> recommend a deployment path under cost, power, validation, and residual-risk constraints.</div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
-                    padding: 14px 28px 0 28px; color: {COLORS['Text']}; font-weight: 650;">
-            Track amount system: {v1_11_lens['amount_focus']}.
-        </div>
-    </div>
-    """
+    a_capture = mo.ui.button(
+        label="Capture resource contrast", kind="success", disabled=a_prediction.value is None,
+        on_click=lambda _v: _store("A", capture_evidence(
+            track=track_id, part="A", prediction=a_prediction.value, inputs=a_upstream,
+            baseline=_run(a_base_packet, a_base), result=_run(a_result_packet, a_result),
+            upstream_inputs=a_upstream, model_key=a_result_packet["model_key"],
+        )),
     )
+    b_capture = mo.ui.button(
+        label="Capture tile contrast", kind="success",
+        disabled=b_prediction.value is None or b_base_packet["inputs"] == b_result_packet["inputs"],
+        on_click=lambda _v: _store("B", capture_evidence(
+            track=track_id, part="B", prediction=b_prediction.value, inputs=b_upstream,
+            baseline=_run(b_base_packet, b_base), result=_run(b_result_packet, b_result),
+            upstream_inputs=b_upstream, model_key=b_result_packet["model_key"],
+        )),
+    )
+    c_capture = mo.ui.button(
+        label="Capture execution contrast", kind="success",
+        disabled=c_prediction.value is None or c_base_packet["inputs"] == c_result_packet["inputs"],
+        on_click=lambda _v: _store("C", capture_evidence(
+            track=track_id, part="C", prediction=c_prediction.value, inputs=c_upstream,
+            baseline=_run(c_base_packet, c_base), result=_run(c_result_packet, c_result),
+            upstream_inputs=c_upstream, model_key=c_result_packet["model_key"],
+        )),
+    )
+    d_capture = mo.ui.button(
+        label="Capture whole-path contrast", kind="success", disabled=d_prediction.value is None,
+        on_click=lambda _v: _store("D", capture_evidence(
+            track=track_id, part="D", prediction=d_prediction.value, inputs=d_upstream,
+            baseline=_run(d_base_packet, d_base), result=_run(d_result_packet, d_result),
+            upstream_inputs=d_upstream, model_key=d_result_packet["model_key"],
+        )),
+    )
+    _rows = {row.candidate_id: row for row in e_full.rows}
+    _choice_feasible = e_choice.value in _rows and _rows[e_choice.value].feasible
+    _hold_valid = e_choice.value == "hold" and _rows["primary"].feasible and e_rejected.value == "alternative"
+    _none_valid = e_choice.value == "none" and e_full.recommendation is None
+    e_decision_valid = (
+        e_prediction.value is not None and e_rejected.value is not None
+        and e_choice.value is not None and e_choice.value != e_rejected.value
+        and (_choice_feasible or _hold_valid or _none_valid)
+    )
+    e_capture = mo.ui.button(
+        label="Capture accelerator decision", kind="success", disabled=not e_decision_valid,
+        on_click=lambda _v: _store("E", capture_evidence(
+            track=track_id, part="E", prediction=e_prediction.value, inputs=e_upstream,
+            baseline=_run(e_primary_packet, e_primary),
+            result=_run(e_alternative_packet, e_alternative), upstream_inputs=e_upstream,
+            alternatives=(_run(e_full_packet, e_full),),
+            decision={"recommendation": e_choice.value, "rejected": e_rejected.value},
+            model_key=e_full_packet["model_key"],
+            chosen_result=(
+                _run(e_primary_packet, e_primary) if e_choice.value in ("primary", "hold")
+                else _run(e_alternative_packet, e_alternative) if e_choice.value == "alternative"
+                else _run(e_full_packet, e_full)
+            ),
+            result_role="chosen candidate" if e_choice.value == "alternative" else "rejected alternative",
+        )),
+    )
+    return a_capture, a_upstream, b_capture, b_upstream, c_capture, c_upstream, d_capture, d_upstream, e_capture, e_decision_valid, e_upstream
+
+
+@app.cell
+def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, scenario, track):
+    css = mo.Html("""
+    <style>
+    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:14px}
+    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
+    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:760px}
+    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}
+    .pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
+    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
+    @media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
+    </style>""")
+    header = mo.Html(f"""<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 11</span><span>ABOUT 50–55 MIN</span></div><h1>Acceleration That Survives the Whole Path</h1><p>When does specialized hardware improve the application rather than one attractive kernel?</p><div class="pilot-meta"><div><b>Machine</b><br>{scenario.hardware.name}</div><div><b>Track</b><br>{scenario.track.title()}</div><div><b>Deliverable</b><br>Constrained accelerator decision</div></div></section>""")
+    mo.vstack([LAB_CSS, ACADEMIC_LAB_CSS, css, track, header, mo.Html(f'<p class="pilot-note">{scenario.assumption_label.capitalize()}. Hardware supply comes from MLSysIM registry entries; results are analytical, not measured benchmarks.</p>')], gap=0.5).style({"padding-top": "32px"})
     return
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(mo):
-    mo.callout(
-        mo.md(
-            """
-    **Recommended reading**
-
-    - Chapter 11, **Roofline Model** and **Hardware ridge points**.
-    - Chapter 11, **AI Memory Systems**, **Memory hierarchy**, and **Host-accelerator communication**.
-    - Chapter 11, **Tensor Cores**, **Numerics in AI acceleration**, and the **Tensor Core contract**.
-    - Chapter 11, **Heterogeneous SoC Design**, **Hardware Sustainability**, and **Feasibility assessment**.
-    """
-        ),
-        kind="info",
-    )
+    mo.sidebar([mo.md("## Lab navigation"), mo.outline(label="Sections")])
     return
 
 
-@app.cell(hide_code=True)
-def _(mo, v1_11_variant):
-    _default_dim = int(v1_11_variant.defaults.get("matrix_dim", 512))
-    _default_precision = str(v1_11_variant.defaults.get("precision", "fp16")).lower()
-    _precision_labels = {"fp32": "FP32", "fp16": "FP16", "int8": "INT8"}
-    pA_pred = mo.ui.radio(
-        options={
-            "Memory bandwidth is the first ceiling": "memory",
-            "Compute throughput is the first ceiling": "compute",
-            "The accelerator path is unsupported": "unsupported",
-            "Thermal or power is the first ceiling": "power",
-        },
-        value="Memory bandwidth is the first ceiling",
-        label="Part A prediction: why might peak throughput not appear?",
-    )
-    pA_dim = mo.ui.slider(start=128, stop=8192, value=_default_dim, step=128, label="Matrix dimension N")
-    pA_prec = mo.ui.radio(
-        options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8"},
-        value=_precision_labels.get(_default_precision, "FP16"),
-        label="Arithmetic format for the roofline point",
-        inline=True,
-    )
-    pA_action = mo.ui.radio(
-        options={
-            "Increase reuse or batch before buying hardware": "increase_reuse",
-            "Reduce memory traffic first": "reduce_bytes",
-            "Switch precision and retest": "switch_precision",
-            "Reject this accelerator path": "reject_path",
-        },
-        value="Reduce memory traffic first",
-        label="Part A checkpoint: first action after the roofline diagnosis",
-    )
-    return pA_action, pA_dim, pA_prec, pA_pred
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_11_lens):
-    pB_pred = mo.ui.radio(
-        options={
-            "Minor, because FLOPs stay the same": "minor",
-            "About 2x, because half the movement disappears": "2x",
-            "About 3-5x, because round-trips disappear": "3_5x",
-            "About 10x, because compute becomes free": "10x",
-        },
-        value="About 3-5x, because round-trips disappear",
-        label="Part B prediction: how much can fusion or tiling help movement-heavy kernels?",
-    )
-    pB_mode = mo.ui.radio(
-        options={"Eager separate kernels": "eager", "Fused single kernel": "fused"},
-        value="Eager separate kernels",
-        label="Execution mode",
-        inline=True,
-    )
-    pB_batch = mo.ui.slider(
-        start=1,
-        stop=128,
-        value=int(v1_11_lens["default_batch"]),
-        step=1,
-        label="Batch/windows processed together",
-    )
-    _workspace_stop = int(max(128, float(v1_11_lens["local_buffer_kb"]) * 2))
-    pB_workspace = mo.ui.slider(
-        start=16,
-        stop=_workspace_stop,
-        value=int(v1_11_lens["local_buffer_kb"]),
-        step=16,
-        label="Available local workspace (KB)",
-    )
-    pB_action = mo.ui.radio(
-        options={
-            "Fuse adjacent kernels": "fuse",
-            "Tile into local memory": "tile",
-            "Lower precision to reduce bytes": "lower_precision",
-            "Shrink the batch/window": "shrink_window",
-            "Reject the accelerator path": "reject_path",
-        },
-        value="Fuse adjacent kernels",
-        label="Part B checkpoint: memory tactic",
-    )
-    return pB_action, pB_batch, pB_mode, pB_pred, pB_workspace
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_11_variant):
-    _default_dim = int(v1_11_variant.defaults.get("matrix_dim", 1024))
-    _default_precision = str(v1_11_variant.defaults.get("precision", "fp16")).lower()
-    _precision_labels = {"fp32": "FP32", "fp16": "FP16", "int8": "INT8"}
-    pC_pred = mo.ui.radio(
-        options={
-            "Lower precision always wins": "always_wins",
-            "It can fail if the format is unsupported": "unsupported",
-            "It can fail if the shape is misaligned": "misaligned",
-            "It can fail if validation rejects the numeric change": "quality",
-        },
-        value="It can fail if the format is unsupported",
-        label="Part C prediction: what can prevent tensor-core or low-precision speedup?",
-    )
-    pC_dim = mo.ui.slider(start=128, stop=4096, value=_default_dim, step=64, label="Tensor dimension")
-    pC_prec = mo.ui.radio(
-        options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8"},
-        value=_precision_labels.get(_default_precision, "FP16"),
-        label="Candidate precision",
-        inline=True,
-    )
-    pC_action = mo.ui.radio(
-        options={
-            "Ship this precision path": "ship",
-            "Pad or reshape tensors": "reshape",
-            "Keep higher precision": "higher_precision",
-            "Add numeric validation before sign-off": "validate",
-        },
-        value="Ship this precision path",
-        label="Part C checkpoint: precision decision",
-    )
-    return pC_action, pC_dim, pC_prec, pC_pred
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_11_lens):
-    pD_pred = mo.ui.radio(
-        options={
-            "The highest peak path will win": "highest_peak",
-            "Latency or p99 will reject it": "latency",
-            "Power, energy, cost, or carbon will reject it": "amount_budget",
-            "Validation evidence will reject it": "validation",
-        },
-        value="Latency or p99 will reject it",
-        label="Part D prediction: what is most likely to reject the naive accelerator choice?",
-    )
-    _path_options = {path["label"]: path["id"] for path in v1_11_lens["accelerator_paths"]}
-    pD_path = mo.ui.radio(
-        options=_path_options,
-        value=v1_11_lens["accelerator_paths"][0]["label"],
-        label="Candidate deployment path",
-    )
-    pD_validation = mo.ui.radio(
-        options={
-            "Prototype trace only": "prototype",
-            "Profiler plus load or replay test": "profiled",
-            "Full validation gate": "full",
-        },
-        value="Profiler plus load or replay test",
-        label="Validation evidence level",
-    )
-    pD_action = mo.ui.radio(
-        options={
-            "Recommend selected path": "recommend_selected",
-            "Recommend first passing alternative": "recommend_passing",
-            "Defer until validation completes": "defer_validation",
-            "Reject acceleration for this release": "reject_release",
-        },
-        value="Recommend selected path",
-        label="Part D checkpoint: deployment recommendation",
-    )
-    return pD_action, pD_path, pD_pred, pD_validation
-
-
-@app.cell(hide_code=True)
+@app.cell
 def _(
-    COLORS,
-    apply_plotly_theme,
-    gated_hypothesis_card,
-    go,
-    instrumentation_console,
-    mo,
-    np,
-    pA_action,
-    pA_dim,
-    pA_prec,
-    pA_pred,
-    pB_action,
-    pB_batch,
-    pB_mode,
-    pB_pred,
-    pB_workspace,
-    pC_action,
-    pC_dim,
-    pC_prec,
-    pC_pred,
-    pD_action,
-    pD_path,
-    pD_pred,
-    pD_validation,
-    part_workflow,
-    v1_11_deployment_result,
-    v1_11_lens,
-    v1_11_memory_result,
-    v1_11_precision_result,
-    v1_11_profile,
-    v1_11_roofline,
-    v1_11_roofline_result,
-    v1_11_variant,
+    COLORS, a_base, a_capture, a_change, a_factor, a_prediction, a_result,
+    a_upstream, apply_plotly_theme, audit_evidence, b_base, b_capture,
+    b_fused, b_prediction, b_result, b_tile, b_upstream, c_base, c_capture,
+    c_operation, c_prediction, c_result, c_shape, c_upstream, d_capture,
+    d_prediction, d_result, d_speedup, d_upstream, e_budget, e_capture,
+    e_choice, e_decision_valid, e_full, e_objective, e_prediction, e_rejected,
+    e_upstream, get_evidence, go, mo, rationale, reevaluation_trigger,
+    residual_risk, track_id,
 ):
-    def v1_11_table(headers, rows):
-        _head = "".join(f"<th>{header}</th>" for header in headers)
-        _rows = []
-        for row in rows:
-            _rows.append("<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>")
-        return mo.Html(
-            f"""
-        <table style="width:100%; border-collapse:collapse; font-size:0.86rem; margin:12px 0;
-                      background:white; border:1px solid {COLORS['Border']};">
-            <thead><tr style="background:{COLORS['Surface2']}; color:{COLORS['Text']};">{_head}</tr></thead>
-            <tbody>{''.join(_rows)}</tbody>
-        </table>
-        <style>
-        table th, table td {{
-            padding: 8px 10px;
-            border-bottom: 1px solid {COLORS['Border']};
-            text-align: left;
-            vertical-align: top;
-        }}
-        </style>
-        """
-        )
+    _captures = get_evidence()
+    _upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream, "E": e_upstream}
+    audit = audit_evidence(
+        _captures, track=track_id, required_parts=tuple("ABCDE"),
+        per_part_upstream_inputs=_upstream, contrast_required_parts=tuple("ABCDE"),
+    )
 
-    def v1_11_cards(cards):
-        _cards = []
-        for label, value, sub, color in cards:
-            _cards.append(
-                f"""
-            <div style="padding:15px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        background:white; border-top:3px solid {color}; flex:1; min-width:170px;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.76rem; font-weight:650;">{label}</div>
-                <div style="font-size:1.35rem; font-weight:850; color:{color};">{value}</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">{sub}</div>
-            </div>
-            """
-            )
-        return mo.Html(f"<div style='display:flex; gap:12px; flex-wrap:wrap; margin:14px 0;'>{''.join(_cards)}</div>")
+    def _table(rows):
+        return mo.vstack([mo.ui.table(rows, pagination=False)]).style({"max-width": "100%", "overflow-x": "auto"})
 
-    def v1_11_scenario(title, body, color):
-        return mo.Html(
-            f"""
-        <div style="border-left:4px solid {color}; background:white; border-radius:0 10px 10px 0;
-                    padding:16px 22px; margin:12px 0; box-shadow:0 1px 4px rgba(0,0,0,0.06);">
-            <div style="font-size:0.72rem; font-weight:700; color:{color};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">{title}</div>
-            <div style="font-style:italic; font-size:1.0rem; color:{COLORS['Text']}; line-height:1.65;">{body}</div>
-        </div>
-        """
-        )
+    def _saved(part):
+        capture = _captures.get(part)
+        if capture is None:
+            return mo.callout(mo.md("No saved evidence for this part."), kind="warn")
+        if part in audit.stale or (part, part) in audit.identical_pairs:
+            return mo.callout(mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** Recapture after changing dependencies."), kind="danger")
+        data = capture.to_dict()
+        return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · prediction: {data["prediction"]}<br><small>Track {data["track"]}; later controls do not rewrite this record.</small></div>')
 
-    def v1_11_draw_roofline(result):
-        _workload = result["workload"]
-        _point = result["point"]
-        _ais = np.logspace(-1, 4, 220)
-        _roof = [min(v1_11_roofline.peak_tflops * 1000, v1_11_roofline.bandwidth_gbs * ai) for ai in _ais]
-        _fig = go.Figure()
-        _fig.add_trace(
-            go.Scatter(
-                x=_ais.tolist(),
-                y=_roof,
-                mode="lines",
-                line=dict(color=COLORS["BlueLine"], width=3),
-                name=f"{v1_11_profile.label} roofline",
-                hovertemplate="AI %{x:.1f} FLOP/B: %{y:,.0f} GFLOP/s<extra></extra>",
-            )
-        )
-        _fig.add_vline(
-            x=v1_11_roofline.ridge_flop_per_byte,
-            line_dash="dot",
-            line_color=COLORS["OrangeLine"],
-            annotation_text=f"ridge {v1_11_roofline.ridge_flop_per_byte:.1f}",
-        )
-        _fig.add_trace(
-            go.Scatter(
-                x=[_workload.arithmetic_intensity],
-                y=[_point.attainable_gflops],
-                mode="markers+text",
-                marker=dict(size=15, color=COLORS["RedLine"], symbol="diamond"),
-                text=[f"N={_workload.dimension}"],
-                textposition="top right",
-                name="current workload",
-                hovertemplate="AI %{x:.1f}: %{y:,.0f} GFLOP/s<extra></extra>",
-            )
-        )
-        _fig.update_layout(
-            height=380,
-            xaxis=dict(title="Arithmetic intensity (FLOP/byte)", type="log", range=[-1, 4]),
-            yaxis=dict(title="Attainable performance (GFLOP/s)", type="log"),
-            legend=dict(orientation="h", y=1.12, x=0),
-        )
-        apply_plotly_theme(_fig)
-        return mo.as_html(_fig)
+    def _part_a():
+        intro = mo.md("### A · When does faster arithmetic help? (9 min)\nChange one resource while workload operations and base traffic stay fixed.")
+        if a_prediction.value is None:
+            return mo.vstack([intro, mo.hstack([a_change, a_factor], widths="equal", wrap=True), a_prediction])
+        fig = go.Figure([go.Bar(x=["Baseline", "Changed"], y=[a_base.latency.to("ms").magnitude, a_result.latency.to("ms").magnitude], marker_color=[COLORS["BlueLine"], COLORS["OrangeLine"]])])
+        fig.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Analytical latency (ms)", showlegend=False)
+        rows = [{"Run": "Baseline", "Intensity": f"{a_base.arithmetic_intensity.to('flop/byte').magnitude:.1f} FLOP/B", "Bottleneck": a_base.bottleneck, "Latency": f"{a_base.latency.to('ms').magnitude:.4g} ms"}, {"Run": "Changed", "Intensity": f"{a_result.arithmetic_intensity.to('flop/byte').magnitude:.1f} FLOP/B", "Bottleneck": a_result.bottleneck, "Latency": f"{a_result.latency.to('ms').magnitude:.4g} ms"}]
+        return mo.vstack([intro, mo.hstack([a_change, a_factor], widths="equal", wrap=True), a_prediction, apply_plotly_theme(fig), _table(rows), mo.callout(mo.md(f"**Your prediction:** {a_prediction.value}. The binding limit is **{a_result.bottleneck}** after the change; improving a nonbinding resource cannot lower latency."), kind="info"), a_capture, _saved("A"), mo.accordion({"Calculation Notes": mo.md("Arithmetic intensity = operations / effective off-chip bytes. Reuse lowers traffic. Latency is the larger of compute time and memory time; compute and bandwidth scales change only their own ceilings.")})])
 
-    def v1_11_workflow(part, concept, prediction, controls, evidence, decision):
-        return part_workflow(
-            f"{part} Concept Module",
-            (
-                {
-                    "part": part,
-                    "concept": concept,
-                    "prediction": prediction,
-                    "controls": controls,
-                    "evidence": evidence,
-                    "decision": decision,
-                },
-            ),
-            scenario=f"{v1_11_lens['variant_stakeholder']} must make a {v1_11_profile.label} deployment decision.",
-            reflection="Use the numeric evidence to update the recommendation, not just the label of the bottleneck.",
-        )
+    def _part_b():
+        intro = mo.md("### B · How much reuse fits locally? (10 min)\nCompare one blocked matrix mapping with the baseline tile and unfused intermediate.")
+        if b_prediction.value is None:
+            return mo.vstack([intro, mo.hstack([b_tile, b_fused], widths="equal", wrap=True), b_prediction])
+        fig = go.Figure([go.Bar(x=["Baseline", "Selected"], y=[b_base.dram_bytes.to("KiB").magnitude, b_result.dram_bytes.to("KiB").magnitude], marker_color=[COLORS["BlueLine"], COLORS["GreenLine"]])])
+        fig.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="DRAM traffic (KiB)", showlegend=False)
+        rows = [{"Run": "Baseline", "Tile": str(b_base.tile), "Local need": f"{b_base.scratchpad_required.to('KiB').magnitude:.1f} KiB", "Capacity": f"{b_base.scratchpad_capacity.to('KiB').magnitude:.1f} KiB", "Mapping": "FITS" if b_base.fits else "SPILL"}, {"Run": "Selected", "Tile": str(b_result.tile), "Local need": f"{b_result.scratchpad_required.to('KiB').magnitude:.1f} KiB", "Capacity": f"{b_result.scratchpad_capacity.to('KiB').magnitude:.1f} KiB", "Mapping": "FITS" if b_result.fits else "SPILL"}]
+        return mo.vstack([intro, mo.hstack([b_tile, b_fused], widths="equal", wrap=True), b_prediction, apply_plotly_theme(fig), _table(rows), mo.callout(mo.md(f"**Your prediction:** {b_prediction.value}. The selected tile **{'fits' if b_result.fits else 'does not fit'}**. A failed mapping has no fabricated runtime penalty; it must be remapped."), kind="danger" if not b_result.fits else "success"), b_capture, _saved("B"), mo.accordion({"Calculation Notes": mo.md("Scratchpad occupancy counts A, B, and C tiles. DRAM traffic counts tiled inputs, output, and an explicit write/read intermediate when fusion is off. Movement energy uses registry energy per byte.")})])
 
-    def v1_11_build_part_a():
-        items = [
-            v1_11_scenario(
-                "Incoming message - accelerator triage",
-                (
-                    f"The {v1_11_lens['stakeholder']} sees low utilization on {v1_11_roofline.hardware_name}. "
-                    f"The question is whether this is a code failure, a roofline ceiling, or a {v1_11_lens['failure_mode']}."
-                ),
-                COLORS["BlueLine"],
-            ),
-            gated_hypothesis_card(
-                pA_pred,
-                title="1. Formulate Your Roofline Hypothesis",
-                subtitle="Predict whether the active bottleneck is memory bandwidth, compute throughput, or an unsupported execution path before consulting empirical roofline data.",
-            ),
-        ]
-        if pA_pred.value is None:
-            items.append(mo.callout(mo.md("Select a prediction to unlock the roofline evidence."), kind="warn"))
-            return mo.vstack(items)
+    def _part_c():
+        intro = mo.md("### C · Can the specialized unit execute this workload? (9 min)\nThe execution contract is an illustrative scenario assumption. Matched-task quality evidence stays fixed and cannot accelerate hardware.")
+        if c_prediction.value is None:
+            return mo.vstack([intro, mo.hstack([c_shape, c_operation], widths="equal", wrap=True), c_prediction])
+        rows = [{"Run": "Baseline", "Operation": c_base.operation, "Original": str(c_base.original_dimensions), "Executed": str(c_base.executed_dimensions), "Path": c_base.path, "Extra work": f"{c_base.extra_operations.to('MFLOP').magnitude:.3g} MFLOP"}, {"Run": "Selected", "Operation": c_result.operation, "Original": str(c_result.original_dimensions), "Executed": str(c_result.executed_dimensions), "Path": c_result.path, "Extra work": f"{c_result.extra_operations.to('MFLOP').magnitude:.3g} MFLOP"}]
+        return mo.vstack([intro, mo.hstack([c_shape, c_operation], widths="equal", wrap=True), c_prediction, _table(rows), mo.callout(mo.md(f"**Your prediction:** {c_prediction.value}. The selected case uses the **{c_result.path}** path on **{c_result.hardware_name}**. Padding adds counted work; unsupported work names the fallback device."), kind="info"), c_capture, _saved("C"), mo.accordion({"Calculation Notes": mo.md("Native execution requires a supported operation, precision, and aligned shape. Padding rounds each dimension to the contract multiple and recomputes work. Unsupported work executes on the named fallback hardware.")})])
 
-        result = v1_11_roofline_result(pA_dim.value, pA_prec.value)
-        point = result["point"]
-        workload = result["workload"]
-        boundary = result["boundary_dimension"]
-        items.append(
-            instrumentation_console(
-                mo.hstack([pA_dim, pA_prec], justify="start", gap=1.0),
-                title="Roofline Simulation Knobs",
-                subtitle="Adjust matrix dimensions and arithmetic precision to observe operational arithmetic intensity against the hardware ridge point.",
-            )
-        )
-        items.append(v1_11_draw_roofline(result))
-        items.append(
-            v1_11_cards(
-                (
-                    ("Arithmetic intensity", f"{workload.arithmetic_intensity:.1f} FLOP/B", f"ridge {v1_11_roofline.ridge_flop_per_byte:.1f}", COLORS["BlueLine"]),
-                    ("Actual regime", point.regime, f"prediction: {pA_pred.value}", COLORS["GreenLine"] if point.regime == "Compute-bound" else COLORS["OrangeLine"]),
-                    ("MFU", f"{point.mfu_pct:.1f}%", f"{point.attainable_gflops:,.0f} of {point.peak_gflops:,.0f} GFLOP/s", COLORS["RedLine"]),
-                    ("Boundary", f"N >= {boundary}", f"for {pA_prec.value.upper()} on this roof", COLORS["OrangeLine"]),
-                )
-            )
-        )
-        items.append(
-            v1_11_table(
-                ("Quantity", "Value", "Interpretation"),
-                (
-                    ("FLOPs", f"{workload.flops:.3e}", "work performed by the GEMM"),
-                    ("Bytes moved", f"{workload.bytes_moved:.3e}", f"{pA_prec.value.upper()} read A/read B/write C traffic"),
-                    ("AI vs ridge", f"{workload.arithmetic_intensity:.1f} vs {v1_11_roofline.ridge_flop_per_byte:.1f}", point.regime),
-                    ("Track amount at risk", v1_11_lens["amount_focus"], v1_11_variant.guardrail_metric),
-                ),
-            )
-        )
-        _prediction_correct = pA_pred.value == result["actual_key"]
-        items.append(
-            mo.callout(
-                mo.md(
-                    (
-                        f"Prediction matched the measured regime: AI {workload.arithmetic_intensity:.1f} "
-                        f"against ridge {v1_11_roofline.ridge_flop_per_byte:.1f} is {point.regime.lower()}."
-                    )
-                    if _prediction_correct
-                    else (
-                        f"The evidence points to {point.regime.lower()}, not `{pA_pred.value}`. "
-                        f"At this point the boundary is N >= {boundary} for {pA_prec.value.upper()}."
-                    )
-                ),
-                kind="success" if _prediction_correct else "warn",
-            )
-        )
-        items.append(
-            mo.accordion(
-                {
-                    "Math Peek and source model": mo.md(
-                        f"""
-    Formula:
+    def _part_d():
+        intro = mo.md("### D · Why does kernel speedup disappear end to end? (9 min)\nPreserve host work, transfer, launches, and postprocessing while changing only kernel time.")
+        if d_prediction.value is None:
+            return mo.vstack([intro, d_speedup, d_prediction])
+        baseline, changed = d_result.baseline, d_result.accelerated
+        fig = go.Figure()
+        for label, path in (("Baseline", baseline), ("Accelerated", changed)):
+            for name, value, color in (("Host", path.host_time, COLORS["BlueLine"]), ("Transfer", path.transfer_time, COLORS["OrangeLine"]), ("Launch", path.launch_time, COLORS["GreenLine"]), ("Kernel", path.kernel_time, COLORS["RedLine"]), ("Postprocess", path.postprocess_time, COLORS["TextMuted"])):
+                fig.add_bar(name=name, x=[label], y=[value.to("ms").magnitude], marker_color=color, legendgroup=name, showlegend=label == "Baseline")
+        fig.update_layout(barmode="stack", height=280, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Application time (ms)", legend_orientation="h")
+        return mo.vstack([intro, d_speedup, d_prediction, apply_plotly_theme(fig), mo.callout(mo.md(f"**Your prediction:** {d_prediction.value}. A **{d_result.local_speedup:.0f}×** kernel gain becomes **{d_result.end_to_end_speedup:.2f}×** end to end because the other stages remain."), kind="info"), d_capture, _saved("D"), mo.accordion({"Calculation Notes": mo.md("Application time adds host, one-way transfer plus fixed latency, registry dispatch time per launch, kernel time, and postprocessing. Only kernel time is divided by the local speedup.")})])
 
-    ```text
-    AI = FLOPs / bytes
-    ridge = peak FLOP/s / memory bandwidth
-    R_attainable = min(peak FLOP/s, memory bandwidth * AI)
-    ```
-
-    Source model: `mlsysbook_labs.gemm_workload` and `mlsysbook_labs.roofline_point`
-    with `{v1_11_roofline.hardware_ref}` from MLSysIM. The chapter claim is the
-    Roofline Model: the plot reveals whether the active ceiling is compute or bandwidth.
-    """
-                    )
-                }
-            )
-        )
-        items.append(
-            mo.Html(f"""
-            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-                <div style="font-size:0.75rem; font-weight:700; color:#64748B; text-transform:uppercase; margin-bottom:6px;">CHECKPOINT</div>
-                <h4 style="margin:0 0 10px 0; color:#0F172A;">First Action After Roofline Diagnosis</h4>
-                {pA_action}
-            </div>
-            """)
-        )
-        return mo.vstack(items)
-
-    def v1_11_build_part_b():
-        items = [
-            v1_11_scenario(
-                "Incoming message - memory movement review",
-                (
-                    f"The same model alternates matrix kernels with elementwise work. The {v1_11_lens['stakeholder']} "
-                    f"needs to know whether {v1_11_lens['local_memory_name']} can keep data close enough."
-                ),
-                COLORS["OrangeLine"],
-            ),
-            gated_hypothesis_card(
-                pB_pred,
-                title="2. Formulate Your Memory Movement Hypothesis",
-                subtitle="Predict the speedup achievable by eliminating external memory round-trips via operator fusion or local SRAM tiling.",
-            ),
-        ]
-        if pB_pred.value is None:
-            items.append(mo.callout(mo.md("Select a prediction to unlock the memory movement evidence."), kind="warn"))
-            return mo.vstack(items)
-
-        result = v1_11_memory_result(pB_mode.value, pB_batch.value, pB_workspace.value)
-        fusion = result["fusion"]
-        items.append(
-            instrumentation_console(
-                mo.hstack([pB_mode, pB_batch, pB_workspace], justify="start", gap=1.0),
-                title="Memory Hierarchy & Operator Fusion Knobs",
-                subtitle="Toggle execution mode and adjust batch/workspace bounds to measure off-chip memory traffic reduction.",
-            )
-        )
-        _fig = go.Figure()
-        _fig.add_trace(
-            go.Bar(
-                x=["Eager bytes", "Fused bytes", "Selected bytes"],
-                y=[fusion.eager_bytes / 1024, fusion.fused_bytes / 1024, result["selected_bytes"] / 1024],
-                marker_color=[COLORS["RedLine"], COLORS["GreenLine"], COLORS["BlueLine"]],
-                text=[f"{fusion.eager_bytes/1024:.1f} KB", f"{fusion.fused_bytes/1024:.1f} KB", f"{result['selected_bytes']/1024:.1f} KB"],
-                textposition="outside",
-                hovertemplate="%{x}: %{y:.1f} KB<extra></extra>",
-            )
-        )
-        _fig.update_layout(height=320, yaxis=dict(title="Traffic through slower memory (KB)"), showlegend=False)
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-        items.append(
-            v1_11_cards(
-                (
-                    ("Fusion ratio", f"{fusion.speedup:.1f}x", "traffic-only upper bound", COLORS["GreenLine"]),
-                    ("Movement time", f"{result['selected_time_us']:.2f} us", f"budget {v1_11_lens['movement_budget_us']} us", COLORS["OrangeLine"]),
-                    ("Local workspace", f"{result['local_required_kb']:.1f} KB", f"available {result['available_kb']:.1f} KB", COLORS["BlueLine"]),
-                    ("Movement energy", f"{result['movement_energy_mj']:.4g} mJ", v1_11_lens["secondary_budget_label"], COLORS["RedLine"]),
-                )
-            )
-        )
-        items.append(
-            v1_11_table(
-                ("Check", "Value", "Status"),
-                (
-                    ("Selected mode", result["mode"], "fused removes intermediate writes" if result["mode"] == "fused" else "eager pays every round-trip"),
-                    ("Local fit", f"{result['local_required_kb']:.1f} KB <= {result['available_kb']:.1f} KB", "spill" if result["spills"] else "fits"),
-                    ("Movement budget", f"{result['selected_time_us']:.2f} us <= {v1_11_lens['movement_budget_us']} us", "miss" if result["movement_miss"] else "passes"),
-                    ("Failure mode", v1_11_lens["failure_mode"], "recover by fusing, tiling, or shrinking the window"),
-                ),
-            )
-        )
-        if result["spills"] or result["movement_miss"]:
-            _why = "local workspace spills" if result["spills"] else "movement time exceeds the budget"
-            items.append(mo.callout(mo.md(f"Boundary hit: {_why}. This is reversible by moving the controls."), kind="danger"))
-        else:
-            items.append(mo.callout(mo.md("The selected memory plan stays inside the current local-buffer and movement-time budgets."), kind="success"))
-        items.append(
-            mo.accordion(
-                {
-                    "Math Peek and source model": mo.md(
-                        f"""
-    Fusion traffic model:
-
-    ```text
-    eager bytes = (reads + writes) * tensor bytes
-    fused bytes = (one read + one write) * tensor bytes
-    movement time = selected bytes / bandwidth
-    ```
-
-    Source model: `mlsysbook_labs.fusion_traffic`, using `{v1_11_roofline.bandwidth_gbs:g} GB/s`
-    from `{v1_11_roofline.hardware_ref}`. Chapter connection: Memory hierarchy and host-accelerator
-    communication explain why eliminated round-trips can dominate speed and energy.
-    """
-                    )
-                }
-            )
-        )
-        items.append(
-            mo.Html(f"""
-            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-                <div style="font-size:0.75rem; font-weight:700; color:#64748B; text-transform:uppercase; margin-bottom:6px;">CHECKPOINT</div>
-                <h4 style="margin:0 0 10px 0; color:#0F172A;">Memory Tactic Decision</h4>
-                {pB_action}
-            </div>
-            """)
-        )
-        return mo.vstack(items)
-
-    def v1_11_build_part_c():
-        items = [
-            v1_11_scenario(
-                "Incoming message - tensor path review",
-                (
-                    f"The {v1_11_lens['stakeholder']} wants to enable a faster numeric path. "
-                    "The question is whether the format, tensor shape, and validation envelope all pass."
-                ),
-                COLORS["GreenLine"],
-            ),
-            gated_hypothesis_card(
-                pC_pred,
-                title="3. Formulate Your Tensor Core Alignment Hypothesis",
-                subtitle=f"Predict which contract term breaks first when enabling specialized matrix accelerators ({v1_11_lens['accelerator_path']}).",
-            ),
-        ]
-        if pC_pred.value is None:
-            items.append(mo.callout(mo.md("Select a prediction to unlock the tensor/precision evidence."), kind="warn"))
-            return mo.vstack(items)
-
-        result = v1_11_precision_result(pC_dim.value, pC_prec.value)
-        selected = result["selected"]
-        items.append(
-            instrumentation_console(
-                mo.hstack([pC_dim, pC_prec], justify="start", gap=1.0),
-                title="Tensor Dimensions & Format Knobs",
-                subtitle=f"Select numeric precision and matrix dimension to verify shape alignment (multiples of {v1_11_lens['shape_multiple']}) and fast-path kernel dispatch.",
-            )
-        )
-        _fig = go.Figure()
-        _fig.add_trace(
-            go.Bar(
-                x=[row["precision"].upper() for row in result["rows"]],
-                y=[row["latency_ms"] for row in result["rows"]],
-                marker_color=[COLORS["GreenLine"] if row["fast_path"] else COLORS["RedLine"] for row in result["rows"]],
-                text=[row["status"] for row in result["rows"]],
-                textposition="outside",
-                hovertemplate="%{x}: %{y:.4f} ms<extra></extra>",
-            )
-        )
-        _fig.update_layout(height=320, yaxis=dict(title="Estimated kernel latency (ms)"), showlegend=False)
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-        items.append(
-            v1_11_table(
-                ("Precision", "AI", "Fast path", "Quality delta", "Latency", "Reason"),
-                tuple(
-                    (
-                        row["precision"].upper(),
-                        f"{row['arithmetic_intensity']:.1f}",
-                        "yes" if row["fast_path"] else row["status"],
-                        f"{row['quality_delta_pct']:.1f}% / {v1_11_lens['quality_tolerance_pct']:.1f}%",
-                        f"{row['latency_ms']:.4f} ms",
-                        row["reason"],
-                    )
-                    for row in result["rows"]
-                ),
-            )
-        )
-        items.append(
-            v1_11_cards(
-                (
-                    ("Selected precision", selected["precision"].upper(), selected["status"], COLORS["GreenLine"] if selected["fast_path"] else COLORS["RedLine"]),
-                    ("Shape alignment", "passes" if selected["aligned"] else "fails", f"multiple of {v1_11_lens['shape_multiple']}", COLORS["BlueLine"]),
-                    ("Quality gate", "passes" if selected["quality_ok"] else "fails", f"delta {selected['quality_delta_pct']:.1f}%", COLORS["OrangeLine"]),
-                    ("Effective peak", f"{selected['effective_peak_tflops']:.3g} TFLOP/s", "after fallback penalties", COLORS["RedLine"]),
-                )
-            )
-        )
-        if selected["fast_path"]:
-            items.append(mo.callout(mo.md(f"{selected['precision'].upper()} satisfies the current tensor/precision contract."), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(f"Contract failure: {selected['reason']}. Speedup is not valid until this is fixed."), kind="danger"))
-        items.append(
-            mo.accordion(
-                {
-                    "Math Peek and source model": mo.md(
-                        f"""
-    Precision affects both bytes and peak throughput:
-
-    ```text
-    AI_GEMM = 2N^3 / (3N^2 * bytes_per_element)
-    fast path = supported_format and aligned_shape and quality_delta <= tolerance
-    ```
-
-    Source model: `mlsysbook_labs.gemm_workload` plus notebook-local `v1_11_precision_result`.
-    Chapter connection: Tensor cores require supported precision and shape contracts; mixed precision
-    must still pass validation.
-    """
-                    )
-                }
-            )
-        )
-        items.append(
-            mo.Html(f"""
-            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-                <div style="font-size:0.75rem; font-weight:700; color:#64748B; text-transform:uppercase; margin-bottom:6px;">CHECKPOINT</div>
-                <h4 style="margin:0 0 10px 0; color:#0F172A;">Precision Path Decision</h4>
-                {pC_action}
-            </div>
-            """)
-        )
-        return mo.vstack(items)
-
-    def v1_11_build_part_d():
-        a_result = v1_11_roofline_result(pA_dim.value, pA_prec.value)
-        b_result = v1_11_memory_result(pB_mode.value, pB_batch.value, pB_workspace.value)
-        c_result = v1_11_precision_result(pC_dim.value, pC_prec.value)
-        d_result = v1_11_deployment_result(pD_path.value, pD_validation.value, a_result, b_result, c_result)
-        selected = d_result["selected"]
-        recommendation = d_result["recommendation"]
-        items = [
-            v1_11_scenario(
-                "Incoming message - deployment sign-off",
-                (
-                    f"The {v1_11_lens['stakeholder']} now needs a recommendation, not a benchmark. "
-                    f"The memo must respect {v1_11_variant.guardrail_metric} and name residual risk."
-                ),
-                COLORS["RedLine"],
-            ),
-            gated_hypothesis_card(
-                pD_pred,
-                title="4. Formulate Your Deployment Selection Hypothesis",
-                subtitle=f"Predict what constraint is most likely to reject the naive accelerator choice under {v1_11_lens['amount_focus']}.",
-            ),
-        ]
-        if pD_pred.value is None:
-            items.append(mo.callout(mo.md("Select a prediction to unlock the deployment comparison."), kind="warn"))
-            return mo.vstack(items)
-
-        items.append(
-            instrumentation_console(
-                mo.hstack([pD_path, pD_validation], justify="start", gap=1.0),
-                title="Deployment Path & Validation Knobs",
-                subtitle="Select candidate accelerator configuration and evidence level to verify real feasibility against system guardrails.",
-            )
-        )
-        items.append(
-            v1_11_table(
-                ("Path", "Latency", "Power", v1_11_lens["secondary_budget_label"], "Pass?", "Reason"),
-                tuple(
-                    (
-                        row["label"],
-                        f"{row['latency_ms']:.3f} ms",
-                        f"{row['power_w']:.3g} W",
-                        f"{row['secondary_value']:.4g} {v1_11_lens['secondary_budget_unit']}",
-                        "yes" if row["passes"] else "no",
-                        row["reason"],
-                    )
-                    for row in d_result["rows"]
-                ),
-            )
-        )
-        items.append(
-            v1_11_cards(
-                (
-                    ("Selected path", selected["label"], "student-controlled candidate", COLORS["BlueLine"]),
-                    ("Selected status", "passes" if selected["passes"] else "fails", selected["reason"], COLORS["GreenLine"] if selected["passes"] else COLORS["RedLine"]),
-                    ("Recommended path", recommendation["label"], "first passing path or least-bad fallback", COLORS["OrangeLine"]),
-                    ("Base model+movement", f"{d_result['base_latency_ms']:.4f} ms", "before path/fallback factors", COLORS["RedLine"]),
-                )
-            )
-        )
-        if selected["passes"]:
-            items.append(mo.callout(mo.md(f"The selected path passes the current deployment constraints: {selected['label']}."), kind="success"))
-        else:
-            items.append(mo.callout(mo.md(f"Deployment failure for {selected['label']}: {selected['reason']}."), kind="danger"))
-        items.append(
-            mo.accordion(
-                {
-                    "Math Peek and source model": mo.md(
-                        """
-    Feasibility model:
-
-    ```text
-    T_process = operations / attainable_throughput
-    movement_time = bytes_moved / bandwidth
-    path_latency = (T_process + movement_time) / path_speed + transfer_or_runtime_overhead
-    deployment_pass = latency_ok and power_or_cost_ok and memory_ok and precision_ok and validation_ok
-    ```
-
-    Source model: Part A uses the shared roofline helpers, Part B uses shared fusion traffic,
-    and Part C/D use notebook-local `v1_11_` scenario assumptions for deployment budgets.
-    Chapter connection: the feasibility assessment asks whether the workload can run inside
-    memory, bandwidth, compute, power, cost, and validation limits.
-    """
-                    )
-                }
-            )
-        )
-        items.append(
-            mo.Html(f"""
-            <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-                <div style="font-size:0.75rem; font-weight:700; color:#64748B; text-transform:uppercase; margin-bottom:6px;">CHECKPOINT</div>
-                <h4 style="margin:0 0 10px 0; color:#0F172A;">Final Deployment Sign-Off</h4>
-                {pD_action}
-            </div>
-            """)
-        )
-        return mo.vstack(items)
-
-    def v1_11_build_synthesis():
-        a_result = v1_11_roofline_result(pA_dim.value, pA_prec.value)
-        b_result = v1_11_memory_result(pB_mode.value, pB_batch.value, pB_workspace.value)
-        c_result = v1_11_precision_result(pC_dim.value, pC_prec.value)
-        d_result = v1_11_deployment_result(pD_path.value, pD_validation.value, a_result, b_result, c_result)
-        selected = d_result["selected"]
-        recommendation = d_result["recommendation"]
-        rejected = "; ".join(
-            f"{row['label']}: {row['reason']}" for row in d_result["rows"] if row["path_id"] != recommendation["path_id"]
-        )
-        incomplete = []
-        for label, widget in (
-            ("Part A prediction", pA_pred),
-            ("Part B prediction", pB_pred),
-            ("Part C prediction", pC_pred),
-            ("Part D prediction", pD_pred),
-            ("Part A checkpoint", pA_action),
-            ("Part B checkpoint", pB_action),
-            ("Part C checkpoint", pC_action),
-            ("Part D checkpoint", pD_action),
-        ):
-            if widget.value is None:
-                incomplete.append(label)
-        items = [
-            mo.md("## Synthesis: Hardware Acceleration Memo"),
-            mo.callout(
-                mo.md(
-                    f"""
-    **Decision:** {v1_11_lens['report_frame']}
-
-    **Bottleneck diagnosis:** Part A measured AI = {a_result['workload'].arithmetic_intensity:.1f}
-    FLOP/B against ridge = {v1_11_roofline.ridge_flop_per_byte:.1f}, so the active regime is
-    {a_result['point'].regime.lower()}.
-
-    **Memory movement evidence:** Part B selected `{b_result['mode']}` execution with
-    {b_result['selected_bytes']/1024:.1f} KB of slower-memory traffic, {b_result['selected_time_us']:.2f} us
-    movement time, and {"a local-memory spill" if b_result['spills'] else "no local-memory spill"}.
-
-    **Selected accelerator/precision:** Part C selected {c_result['selected']['precision'].upper()}
-    with status `{c_result['selected']['status']}`. Part D selected `{selected['label']}` and recommends
-    `{recommendation['label']}`.
-
-    **Rejected alternatives:** {rejected if rejected else "No alternative was rejected by the current constraints."}
-
-    **Residual risk:** validate profiler counters, supported-operator coverage, thermal or duty-cycle behavior,
-    and production p99 before treating the recommendation as release evidence.
-    """
-                ),
-                kind="info",
-            ),
-            v1_11_table(
-                ("Memo field", "Value"),
-                (
-                    ("Track", v1_11_profile.label),
-                    ("Hardware ref", v1_11_roofline.hardware_ref),
-                    ("Model ref", v1_11_variant.model_ref),
-                    ("Recommended path", recommendation["label"]),
-                    ("Selected precision", c_result["selected"]["precision"].upper()),
-                    ("Deployment pass", "yes" if recommendation["passes"] else "no"),
-                    ("Residual risk", v1_11_lens["failure_mode"]),
-                ),
-            ),
-        ]
-        if incomplete:
-            items.append(mo.callout(mo.md("Complete these fields before the ledger save is meaningful: " + ", ".join(incomplete)), kind="warn"))
-        return mo.vstack(items)
+    def _part_e():
+        intro = mo.md("### E · Which feasible accelerator should we choose? (9 min)\nBoth candidates run the same workload and application stages. Filter constraints before optimizing the selected objective.")
+        if e_prediction.value is None:
+            return mo.vstack([intro, mo.hstack([e_objective, e_budget], widths="equal", wrap=True), e_prediction])
+        rows = [{"Candidate": row.candidate_id.title(), "Hardware": row.hardware_name, "Path": row.execution_path, "Latency": f"{row.latency.to('ms').magnitude:.3g} ms", "Energy": f"{row.accelerator_energy.to('mJ').magnitude:.3g} mJ", "Cost": f"${row.operating_cost.to('dollar').magnitude:.3g}", "Outcome": "FEASIBLE" if row.feasible else "FAIL: " + ", ".join(row.violations)} for row in e_full.rows]
+        recommendation = e_full.recommendation.candidate_id if e_full.recommendation else "no feasible design"
+        return mo.vstack([intro, mo.hstack([e_objective, e_budget], widths="equal", wrap=True), e_prediction, _table(rows), mo.callout(mo.md(f"**Your prediction:** {e_prediction.value}. Constrained ranking recommends **{recommendation}** for **{e_full.objective}** under the displayed illustrative budgets."), kind="success" if e_full.recommendation else "danger"), mo.hstack([e_choice, e_rejected], widths="equal", wrap=True), mo.callout(mo.md("Decision is consistent and compares a different tested candidate." if e_decision_valid else "Choose a feasible candidate, hold the feasible primary while rejecting the tested alternative, or choose no feasible design only when both fail."), kind="success" if e_decision_valid else "warn"), e_capture, _saved("E"), mo.accordion({"Calculation Notes": mo.md("Each candidate first passes native support, latency, accelerator energy, and active-time operating cost budgets. Feasible rows are then sorted by the selected objective. Holding preserves the feasible primary baseline while recording why the tested alternative was rejected.")})])
 
     def build_synthesis():
-        return v1_11_build_synthesis()
+        rows = []
+        for part in "ABCDE":
+            capture = _captures.get(part)
+            current = capture and part not in audit.stale and (part, part) not in audit.identical_pairs
+            rows.append({"Part": part, "Prediction": capture.to_dict()["prediction"] if capture else "—", "Evidence": "CURRENT" if current else ("STALE" if capture else "MISSING")})
+        complete = audit.complete and "E" in _captures and all(widget.value is not None for widget in (reevaluation_trigger, residual_risk)) and bool(rationale.value.strip())
+        return mo.vstack([mo.md("### Synthesis · Defend the accelerator decision (4 min)\nUse saved experiments to name the chosen option, quantify the rejected candidate, state one limitation, and define a reevaluation trigger."), _table(rows), mo.hstack([reevaluation_trigger, residual_risk], widths="equal", wrap=True), rationale, mo.callout(mo.md("**Ready for the local report.**" if complete else "Capture five current contrasts, then complete the limitation, trigger, and rationale."), kind="success" if complete else "warn")])
 
-    _tabs = mo.ui.tabs(
-        {
-            "Part A: Roofline Regime": v1_11_build_part_a(),
-            "Part B: Memory Movement": v1_11_build_part_b(),
-            "Part C: Precision Contract": v1_11_build_part_c(),
-            "Part D: Deployment Fit": v1_11_build_part_d(),
-            "Synthesis": build_synthesis(),
-        }
-    )
-    _tabs
-    return
+    tabs = mo.ui.tabs({"Part A": _part_a(), "Part B": _part_b(), "Part C": _part_c(), "Part D": _part_d(), "Part E": _part_e(), "Synthesis": build_synthesis()})
+    tabs
+    return (audit,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(
-    ledger,
-    mo,
-    pA_action,
-    pA_dim,
-    pA_prec,
-    pA_pred,
-    pB_action,
-    pB_batch,
-    pB_mode,
-    pB_pred,
-    pB_workspace,
-    pC_action,
-    pC_dim,
-    pC_prec,
-    pC_pred,
-    pD_action,
-    pD_path,
-    pD_pred,
-    pD_validation,
-    v1_11_deployment_result,
-    v1_11_lens,
-    v1_11_memory_result,
-    v1_11_precision_result,
-    v1_11_profile,
-    v1_11_roofline,
-    v1_11_roofline_result,
-    v1_11_variant,
+    audit, build_lab_report, get_evidence, get_lab_metadata, mo, rationale,
+    reevaluation_trigger, report_export_panel, residual_risk, scenario, track_id,
 ):
-    _a = v1_11_roofline_result(pA_dim.value, pA_prec.value)
-    _b = v1_11_memory_result(pB_mode.value, pB_batch.value, pB_workspace.value)
-    _c = v1_11_precision_result(pC_dim.value, pC_prec.value)
-    _d = v1_11_deployment_result(pD_path.value, pD_validation.value, _a, _b, _c)
-    _complete = all(
-        widget.value is not None
-        for widget in (pA_pred, pB_pred, pC_pred, pD_pred, pA_action, pB_action, pC_action, pD_action)
+    _captures = get_evidence()
+    _decision = _captures["E"].to_dict()["decision"] if "E" in _captures else None
+    _ready = audit.complete and _decision is not None and all(widget.value is not None for widget in (reevaluation_trigger, residual_risk)) and bool(rationale.value.strip())
+    mo.stop(not _ready)
+    snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
+    report = build_lab_report(
+        get_lab_metadata("vol1/lab_11_hw_accel.py"), track=track_id,
+        scenario=f"{scenario.hardware.name} analytical accelerator-fit investigation",
+        learning_objectives=["Identify the binding roofline resource", "Test local-memory and execution-support boundaries", "Compare kernel and application speedup", "Rank feasible accelerators under explicit budgets"],
+        predictions={part: snapshot["prediction"] for part, snapshot in snapshots.items()},
+        knob_settings={part: snapshot["inputs"] for part, snapshot in snapshots.items()},
+        evidence_summary={part: {"baseline": snapshot["baseline"], "result": snapshot["result"], "alternatives": snapshot["alternatives"]} for part, snapshot in snapshots.items()},
+        binding_constraints={part: (snapshots[part].get("chosen_result") or snapshots[part]["result"])["outputs"] for part in "ABCDE"},
+        decisions={"recommendation": _decision["recommendation"], "rejected_alternative": _decision["rejected"], "reevaluation_trigger": reevaluation_trigger.value},
+        final_decision={"recommendation": _decision["recommendation"], "rejected_alternative": _decision["rejected"], "rationale": rationale.value},
+        big_takeaways=["Peak arithmetic helps only when compute binds.", "Local capacity and execution support can force remapping.", "Host, transfer, and launch stages cap application speedup.", "Selection filters constraints before optimizing an objective."],
+        reflections={"rationale": rationale.value, "reevaluation_trigger": reevaluation_trigger.value}, residual_risk=residual_risk.value,
+        result_snapshot={"track": track_id, "captures": snapshots, "recommendation": _decision["recommendation"], "rejected": _decision["rejected"], "trigger": reevaluation_trigger.value, "residual_risk": residual_risk.value},
+        source_trace={"hardware": "MLSysIM registry", "scenario": scenario.assumption_label, "results": "Analytical MLSysIM Chapter 11 experiment models; not measured benchmarks."},
     )
-    if _complete:
-        ledger.save(
-            chapter=11,
-            design={
-                "lab": "hw_accel",
-                "track_id": v1_11_profile.track_id,
-                "scenario_id": v1_11_variant.scenario_id,
-                "hardware_ref": v1_11_roofline.hardware_ref,
-                "model_ref": v1_11_variant.model_ref,
-                "completed": True,
-                "part_a_prediction": pA_pred.value,
-                "part_a_action": pA_action.value,
-                "workload_ai": round(_a["workload"].arithmetic_intensity, 3),
-                "ridge_flop_per_byte": round(v1_11_roofline.ridge_flop_per_byte, 3),
-                "roofline_regime": _a["point"].regime,
-                "mfu_pct": round(_a["point"].mfu_pct, 3),
-                "ridge_boundary_dimension": _a["boundary_dimension"],
-                "part_b_prediction": pB_pred.value,
-                "part_b_action": pB_action.value,
-                "memory_mode": pB_mode.value,
-                "memory_batch": pB_batch.value,
-                "local_workspace_kb": round(_b["local_required_kb"], 3),
-                "local_buffer_kb": round(_b["available_kb"], 3),
-                "memory_spill": _b["spills"],
-                "movement_time_us": round(_b["selected_time_us"], 3),
-                "part_c_prediction": pC_pred.value,
-                "part_c_action": pC_action.value,
-                "precision_choice": pC_prec.value,
-                "shape_dimension": pC_dim.value,
-                "shape_aligned": _c["selected"]["aligned"],
-                "precision_supported": _c["selected"]["supported"],
-                "quality_delta_pct": _c["selected"]["quality_delta_pct"],
-                "quality_tolerance_pct": v1_11_lens["quality_tolerance_pct"],
-                "precision_fast_path": _c["selected"]["fast_path"],
-                "part_d_prediction": pD_pred.value,
-                "part_d_action": pD_action.value,
-                "accelerator_choice": pD_path.value,
-                "validation_level": pD_validation.value,
-                "deployment_pass": _d["selected"]["passes"],
-                "deployment_rejection_reason": _d["selected"]["reason"],
-                "recommended_path": _d["recommendation"]["label"],
-                "residual_risk": v1_11_lens["failure_mode"],
-            },
-        )
-    mo.Html(
-        f"""
-    <div class="lab-hud">
-        <span class="hud-label">LAB</span>
-        <span class="hud-value">11 &middot; Hardware Acceleration</span>
-        <span class="hud-label">TRACK</span>
-        <span class="hud-value">{v1_11_profile.label}</span>
-        <span style="flex:1;"></span>
-        <span class="hud-label">CH</span>
-        <span class="hud-value">11</span>
-        <span class="hud-label">STATUS</span>
-        <span class="hud-active">{'SAVED' if _complete else 'IN PROGRESS'}</span>
-    </div>
-    """
-    )
-    return
+    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    return (report,)
 
 
-@app.cell(hide_code=True)
-def _(
-    big_takeaways,
-    build_lab_report,
-    mo,
-    pA_action,
-    pA_dim,
-    pA_prec,
-    pA_pred,
-    pB_action,
-    pB_batch,
-    pB_mode,
-    pB_pred,
-    pB_workspace,
-    pC_action,
-    pC_dim,
-    pC_prec,
-    pC_pred,
-    pD_action,
-    pD_path,
-    pD_pred,
-    pD_validation,
-    report_export_panel,
-    v1_11_deployment_result,
-    v1_11_lens,
-    v1_11_memory_result,
-    v1_11_metadata,
-    v1_11_precision_result,
-    v1_11_profile,
-    v1_11_roofline,
-    v1_11_roofline_result,
-    v1_11_variant,
-):
-    _a = v1_11_roofline_result(pA_dim.value, pA_prec.value)
-    _b = v1_11_memory_result(pB_mode.value, pB_batch.value, pB_workspace.value)
-    _c = v1_11_precision_result(pC_dim.value, pC_prec.value)
-    _d = v1_11_deployment_result(pD_path.value, pD_validation.value, _a, _b, _c)
-    _selected = _d["selected"]
-    _recommendation = _d["recommendation"]
-    _incomplete = []
-    for _label, _widget in (
-        ("Part A prediction", pA_pred),
-        ("Part B prediction", pB_pred),
-        ("Part C prediction", pC_pred),
-        ("Part D prediction", pD_pred),
-        ("Part A checkpoint", pA_action),
-        ("Part B checkpoint", pB_action),
-        ("Part C checkpoint", pC_action),
-        ("Part D checkpoint", pD_action),
-    ):
-        if _widget.value is None:
-            _incomplete.append(_label)
-
-    _rejected = tuple(
-        f"{row['label']}: {row['reason']}" for row in _d["rows"] if row["path_id"] != _recommendation["path_id"]
-    )
-    _report = build_lab_report(
-        v1_11_metadata,
-        track=v1_11_profile.label,
-        scenario=v1_11_variant.workload_summary,
-        learning_objectives=(
-            "Diagnose whether the workload is memory-bound or compute-bound using a roofline.",
-            "Explain how memory hierarchy and data movement dominate accelerator performance.",
-            "Validate precision and tensor-shape contracts before claiming tensor-core speedup.",
-            "Recommend an accelerator path under latency, cost, power, validation, and residual-risk constraints.",
-        ),
-        predictions={
-            "part_a_roofline": pA_pred.value,
-            "part_b_memory": pB_pred.value,
-            "part_c_precision": pC_pred.value,
-            "part_d_deployment": pD_pred.value,
-        },
-        knob_settings={
-            "matrix_dim": pA_dim.value,
-            "roofline_precision": pA_prec.value,
-            "memory_mode": pB_mode.value,
-            "memory_batch": pB_batch.value,
-            "local_workspace_kb": pB_workspace.value,
-            "precision_dim": pC_dim.value,
-            "precision_choice": pC_prec.value,
-            "accelerator_choice": pD_path.value,
-            "validation_level": pD_validation.value,
-            "part_a_action": pA_action.value,
-            "part_b_action": pB_action.value,
-            "part_c_action": pC_action.value,
-            "part_d_action": pD_action.value,
-        },
-        evidence_summary={
-            "hardware_ref": v1_11_roofline.hardware_ref,
-            "model_ref": v1_11_variant.model_ref,
-            "peak_tflops": round(v1_11_roofline.peak_tflops, 6),
-            "bandwidth_gbs": round(v1_11_roofline.bandwidth_gbs, 6),
-            "ridge_flop_per_byte": round(v1_11_roofline.ridge_flop_per_byte, 3),
-            "workload_ai": round(_a["workload"].arithmetic_intensity, 3),
-            "primary_regime": _a["point"].regime,
-            "primary_mfu_pct": round(_a["point"].mfu_pct, 3),
-            "movement_time_us": round(_b["selected_time_us"], 3),
-            "memory_spill": _b["spills"],
-            "precision_fast_path": _c["selected"]["fast_path"],
-            "precision_status": _c["selected"]["status"],
-            "deployment_selected_path": _selected["label"],
-            "deployment_selected_pass": _selected["passes"],
-            "recommended_path": _recommendation["label"],
-            "rejected_alternatives": _rejected,
-        },
-        final_decision=(
-            f"Recommend {_recommendation['label']} for {v1_11_profile.label} only with "
-            f"{pC_prec.value.upper()} precision evidence, {pD_validation.value} validation, "
-            f"and explicit residual risk: {v1_11_lens['failure_mode']}."
-        ),
-        big_takeaways=(
-            "Peak TOPS is not performance; arithmetic intensity decides which ceiling is active.",
-            "Memory hierarchy matters because eliminated movement can dominate speed and energy.",
-            "Precision speedups are contracts: supported format, aligned shape, and tolerated quality loss.",
-            "Deployment recommendations must reject alternatives and name residual validation risk.",
-        ),
-        reflections={
-            "bottleneck_diagnosis": (
-                f"AI={_a['workload'].arithmetic_intensity:.1f} FLOP/B versus ridge="
-                f"{v1_11_roofline.ridge_flop_per_byte:.1f} gives {_a['point'].regime.lower()} behavior."
-            ),
-            "selected_accelerator_precision": (
-                f"{_recommendation['label']} with {pC_prec.value.upper()} precision; "
-                f"precision status is {_c['selected']['status']}."
-            ),
-            "rejected_alternatives": "; ".join(_rejected) if _rejected else "No rejected alternative.",
-            "residual_risk": v1_11_lens["failure_mode"],
-        },
-        residual_risk=(
-            "Roofline and scenario budgets are first-order evidence. Validate with profiler counters, "
-            "supported-op coverage, numerical checks, thermal or duty-cycle tests, and production p99."
-        ),
-        source_trace={
-            "track_id": v1_11_profile.track_id,
-            "scenario_id": v1_11_variant.scenario_id,
-            "hardware_ref": v1_11_variant.hardware_ref,
-            "model_ref": v1_11_variant.model_ref,
-            "shared_helper": "mlsysbook_labs.roofline",
-            "notebook_local_helpers": (
-                "v1_11_memory_result",
-                "v1_11_precision_result",
-                "v1_11_deployment_result",
-            ),
-            "source_policy": v1_11_profile.source_policy,
-        },
-        result_snapshot={
-            "roofline": _a,
-            "memory": _b,
-            "precision": _c,
-            "deployment": _d,
-        },
-        incomplete_fields=tuple(_incomplete),
-    )
-
-    mo.vstack(
-        [
-            big_takeaways(
-                (
-                    "Peak TOPS is not performance; arithmetic intensity decides which ceiling is active.",
-                    "Memory hierarchy matters because eliminated movement can dominate speed and energy.",
-                    "Precision speedups are contracts: supported format, aligned shape, and tolerated quality loss.",
-                    "Deployment recommendations must reject alternatives and name residual validation risk.",
-                )
-            ),
-            mo.Html(
-                """
-    <div class="mlsysbook-panel mlsysbook-report-panel">
-      <h2>Download Report</h2>
-      <p class="mlsysbook-source-summary">
-        This report records the solver-backed candidate frontier, structured predictions,
-        selected accelerator path, validation test, and residual risk.
-      </p>
-    </div>
-    """
-            ),
-            report_export_panel(_report),
-        ]
-    )
+@app.cell
+async def _(MODEL_ID, audit, get_evidence, ledger, mo, rationale, reevaluation_trigger, residual_risk, track_id):
+    _captures = get_evidence()
+    _decision = _captures["E"].to_dict()["decision"] if "E" in _captures else None
+    _ready = audit.complete and _decision is not None and all(widget.value is not None for widget in (reevaluation_trigger, residual_risk)) and bool(rationale.value.strip())
+    _status = "EVIDENCE IN PROGRESS"
+    if _ready:
+        try:
+            ledger.save(chapter=11, design={
+                "schema_version": 1, "lab_id": "v1_11", "track_id": track_id,
+                "model_id": MODEL_ID, "evidence": {part: capture.to_dict() for part, capture in _captures.items()},
+                "recommendation": _decision["recommendation"], "rejected_alternative": _decision["rejected"],
+                "reevaluation_trigger": reevaluation_trigger.value, "residual_risk": residual_risk.value,
+                "rationale": rationale.value,
+            })
+            await ledger.flush()
+            _status = "SAVED"
+        except Exception:
+            _status = "SAVE FAILED · REPORT STILL AVAILABLE"
+    mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">11 · Acceleration That Survives the Whole Path · STATUS: </span><span class="hud-active">{_status}</span></div>')
     return
 
 

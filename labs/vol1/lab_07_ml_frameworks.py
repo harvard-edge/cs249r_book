@@ -6,9 +6,9 @@ app = marimo.App(width="full", app_title="Lab 07: The Framework Tax · MLSysBook
 
 @app.cell
 async def _():
-    import marimo as mo
     import sys
     from pathlib import Path
+    import marimo as mo
 
     if sys.platform == "emscripten":
         import micropip
@@ -16,1541 +16,600 @@ async def _():
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
-        _labs_dir = Path(__file__).resolve().parents[1]
-        if str(_labs_dir) not in sys.path:
-            sys.path.insert(0, str(_labs_dir))
+        labs_dir = Path(__file__).resolve().parents[1]
+        if str(labs_dir) not in sys.path:
+            sys.path.insert(0, str(labs_dir))
         from bootstrap import native_bootstrap
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
+    from mlsysim.engine.v1_07_experiments import (
+        MODEL_KEY, OPERATION_GRAPH, TRACKS, compare_dispatch,
+        evaluate_compilation, evaluate_fusion, evaluate_operator_support,
+        evaluate_recomputation,
+    )
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        MathPeek,
-        big_takeaways,
-        build_lab_report,
-        compile_break_even,
-        dispatch_stack,
-        framework_track_profile,
-        gated_hypothesis_card,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        instrumentation_console,
+        ACADEMIC_LAB_CSS, build_lab_report, get_lab_metadata,
         report_export_panel,
-        resolve_mlsysim_ref,
-        runtime_decision,
-        source_trace,
-        track_arc_context,
-        track_context,
-        track_selector,
     )
+    from mlsysbook_labs.experiment_evidence import audit_evidence, capture_evidence
 
-    ledger = DesignLedger()
-    if getattr(ledger, "is_wasm", False):
-        _ = await ledger.load_async()
+    ledger = DesignLedger(volume="vol1")
+    if ledger.is_wasm:
+        _loaded = await ledger.load_async()
     return (
-        ACADEMIC_LAB_CSS,
-        COLORS,
-        LAB_CSS,
-        apply_plotly_theme,
-        big_takeaways,
-        build_lab_report,
-        compile_break_even,
-        dispatch_stack,
-        framework_track_profile,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        go,
-        ledger,
-        mo,
-        report_export_panel,
-        resolve_mlsysim_ref,
-        runtime_decision,
-        source_trace,
-        track_arc_context,
-        track_context,
+        ACADEMIC_LAB_CSS, COLORS, LAB_CSS, MODEL_KEY, OPERATION_GRAPH,
+        TRACKS, apply_plotly_theme, audit_evidence, build_lab_report,
+        capture_evidence, compare_dispatch, evaluate_compilation,
+        evaluate_fusion, evaluate_operator_support, evaluate_recomputation,
+        get_lab_metadata, go, ledger, mo, report_export_panel,
     )
 
 
 @app.cell
-def _(get_lab_metadata):
-    v1_07_metadata = get_lab_metadata("vol1/lab_07_ml_frameworks.py")
-    return (v1_07_metadata,)
-
-
-@app.cell(hide_code=True)
-def _(ledger, mo):
-    _options = {
-        "☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)": "cloud_fleet",
-        "🤖 Edge & Embodied Track (Robotics & Drones · Jetson AGX Orin)": "robotaxi",
-        "📱 Mobile Track (On-Device Personal AI · Apple Silicon M4 / Snapdragon)": "iphone",
-        "⚡ TinyML Track (Microcontrollers & Wearables · Cortex-M55 / ESP32-S3)": "oura_ring",
-    }
-    _saved_track = ledger.get_track()
-    _default_key = next((k for k, v in _options.items() if v == _saved_track), list(_options.keys())[0])
-    v1_07_track_picker = mo.ui.dropdown(
-        options=_options,
-        value=_default_key,
-        label="Select Course / Industry Track",
-    )
-    return (v1_07_track_picker,)
-
-
-@app.cell
-def _(
-    framework_track_profile,
-    get_lab_track_variant,
-    get_track_profile,
-    resolve_mlsysim_ref,
-    v1_07_track_picker,
-):
-    # Cross-tier hardware targets: Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Unified
-    v1_07_track_id = v1_07_track_picker.value
-    v1_07_profile = get_track_profile(v1_07_track_id)
-    v1_07_variant = get_lab_track_variant("v1_07_framework_tax", v1_07_profile.track_id)
-    v1_07_hardware = resolve_mlsysim_ref(v1_07_variant.hardware_ref)
-    v1_07_model = resolve_mlsysim_ref(v1_07_variant.model_ref)
-    v1_07_framework = framework_track_profile(
-        v1_07_profile,
-        v1_07_variant,
-        v1_07_hardware,
-        v1_07_model,
-    )
-    return v1_07_framework, v1_07_profile, v1_07_variant
-
-
-@app.cell
-def _(COLORS, mo):
-    import html
-    import math
-
-    def v1_07_escape(value):
-        return html.escape(str(value))
-
-    def v1_07_fmt_float(value, digits=2):
-        if value is None:
-            return "not available"
-        try:
-            return f"{float(value):.{digits}f}"
-        except (TypeError, ValueError):
-            return str(value)
-
-    def v1_07_fmt_int(value):
-        if value is None:
-            return "no payback"
-        try:
-            return f"{int(value):,}"
-        except (TypeError, ValueError):
-            return str(value)
-
-    def v1_07_track_amount_story(profile):
-        stories = {
-            "iphone": {
-                "runtime": "Core ML or TFLite-style local runtime with accelerator delegates",
-                "amounts": "latency, memory footprint, operator support, thermal and battery evidence",
-                "failure": "unsupported operators fall back off delegate and turn responsiveness into a battery or thermal problem",
-                "validation": "delegate coverage, thermal soak, and battery replay",
-            },
-            "oura_ring": {
-                "runtime": "TFLite Micro-like fixed kernels and a firmware memory arena",
-                "amounts": "SRAM/flash footprint, wake time, operator resolver size, and OTA payload",
-                "failure": "the runtime or custom op set exceeds the arena and cannot be recovered at inference time",
-                "validation": "SRAM trace, flash image check, OTA payload check, and battery regression",
-            },
-            "robotaxi": {
-                "runtime": "deterministic perception runtime with replayable p99 and p999 evidence",
-                "amounts": "tail latency, supported plugins, fallback determinism, power, and safety validation",
-                "failure": "portable fallback or uncertified plugins inject jitter into the safety loop",
-                "validation": "p99/p999 replay, plugin audit, provider partition report, and fallback drill",
-            },
-            "cloud_fleet": {
-                "runtime": "graph compiler and graph-capture path reused across high-volume requests",
-                "amounts": "reuse count, graph-break rate, throughput, p99 latency, utilization, and cost/request",
-                "failure": "dynamic shapes or graph breaks prevent compile amortization and raise SLA or cost risk",
-                "validation": "load/SLA test, graph-break audit, cost/request canary, and rollback drill",
-            },
-        }
-        return stories.get(profile.track_id, stories["iphone"])
-
-    def v1_07_metric_card(title, value, subtitle="", color=None):
-        _color = color or COLORS["BlueLine"]
-        return mo.Html(f"""
-        <div class="mlsysbook-field" style="border-top: 3px solid {_color}; min-width: 180px;">
-          <strong>{v1_07_escape(title)}</strong>
-          <div style="font-size:1.25rem; font-weight:800; color:{COLORS['Text']}; margin-top:4px;">
-            {v1_07_escape(value)}
-          </div>
-          <div style="font-size:0.78rem; color:{COLORS['TextMuted']}; margin-top:2px;">
-            {v1_07_escape(subtitle)}
-          </div>
-        </div>
-        """)
-
-    def v1_07_table(title, headers, rows):
-        _headers = "".join(f"<th>{v1_07_escape(header)}</th>" for header in headers)
-        _rows = []
-        for row in rows:
-            _cells = "".join(f"<td>{v1_07_escape(cell)}</td>" for cell in row)
-            _rows.append(f"<tr>{_cells}</tr>")
-        return mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>{v1_07_escape(title)}</h2>
-          <table class="mlsysbook-table">
-            <thead><tr>{_headers}</tr></thead>
-            <tbody>{''.join(_rows)}</tbody>
-          </table>
-        </div>
-        """)
-
-    def v1_07_prediction_feedback(predicted, actual, labels, aligned, correction):
-        if predicted is None:
-            return mo.callout(
-                mo.md("**Prediction checkpoint:** choose an option before treating the evidence as a decision."),
-                kind="warn",
-            )
-        _predicted = labels.get(predicted, predicted)
-        _actual = labels.get(actual, actual)
-        _kind = "success" if predicted == actual else "warn"
-        _body = aligned if predicted == actual else correction
-        return mo.callout(
-            mo.md(f"**Prediction vs actual:** you picked **{_predicted}**; the instrument shows **{_actual}**. {_body}"),
-            kind=_kind,
-        )
-
-    def v1_07_math_peek(title, body):
-        return mo.accordion({title: mo.md(body)})
-
-    def v1_07_overhead_category(stack, support_row):
-        if support_row and support_row["support_headroom_pct"] < 0:
-            return "unsupported ops"
-        if stack.dominant_overhead in ("memory traffic", "transfer"):
-            return "memory traffic"
-        if stack.dominant_overhead in ("hardware dispatch", "synchronization"):
-            return "hardware dispatch"
-        return "runtime dispatch"
-
-    def v1_07_shape_penalty(runtime, profile, shape_dynamism_pct):
-        dynamic_delta = max(0.0, float(shape_dynamism_pct) - float(profile.shape_dynamism_pct))
-        mode = runtime.execution_mode.lower()
-        if any(term in mode for term in ("static", "compiled", "captured", "generated", "ahead")):
-            multiplier = 0.75
-        elif any(term in mode for term in ("portable", "interpreter", "micro")):
-            multiplier = 0.45
-        else:
-            multiplier = 0.20
-        return dynamic_delta * multiplier
-
-    def v1_07_support_rows(profile, dispatch_rows, break_evens, shape_dynamism_pct):
-        break_even_by_runtime = {item.runtime_id: item for item in break_evens}
-        runtime_by_id = {runtime.runtime_id: runtime for runtime in profile.runtime_options}
-        rows = []
-        for stack in dispatch_rows:
-            runtime = runtime_by_id[stack.runtime_id]
-            break_even = break_even_by_runtime[stack.runtime_id]
-            adjusted_support = max(
-                0.0,
-                min(100.0, stack.kernel_support_pct - v1_07_shape_penalty(runtime, profile, shape_dynamism_pct)),
-            )
-            latency_headroom = profile.latency_budget_ms - stack.total_latency_ms
-            footprint_headroom = profile.memory_budget_mb - stack.footprint_mb
-            support_headroom = adjusted_support - profile.kernel_support_floor_pct
-            compile_issue = (
-                break_even.compile_cost_s > 0
-                and (break_even.break_even_inferences is None or not break_even.pays_back)
-            )
-            violations = list(stack.violations)
-            if support_headroom < 0:
-                violations.append(
-                    f"shape-adjusted support {adjusted_support:.1f}% < {profile.kernel_support_floor_pct:.1f}%"
-                )
-            if compile_issue:
-                _be = v1_07_fmt_int(break_even.break_even_inferences)
-                violations.append(f"compile/delegate payback not met at selected reuse; break-even {_be}")
-            compatibility_score = max(0.0, latency_headroom / max(profile.latency_budget_ms, 1e-9))
-            compatibility_score += max(0.0, support_headroom / max(100.0 - profile.kernel_support_floor_pct, 1e-9))
-            compatibility_score += max(0.0, footprint_headroom / max(profile.memory_budget_mb, 1e-9))
-            compatibility_score = 100.0 * compatibility_score / 3.0
-            rows.append({
-                "runtime_id": stack.runtime_id,
-                "runtime_label": stack.runtime_label,
-                "execution_mode": runtime.execution_mode,
-                "latency_headroom_ms": latency_headroom,
-                "footprint_headroom_mb": footprint_headroom,
-                "adjusted_support_pct": adjusted_support,
-                "support_headroom_pct": support_headroom,
-                "compile_pays_back": break_even.pays_back,
-                "break_even_inferences": break_even.break_even_inferences,
-                "compatibility_score": compatibility_score,
-                "feasible_with_shape": stack.feasible and support_headroom >= 0,
-                "violations": tuple(violations),
-                "portability_risk": runtime.portability_risk,
-                "validation_requirement": runtime.validation_requirement,
-                "residual_risk": runtime.residual_risk,
-            })
-        return tuple(rows)
-
-    def v1_07_break_even_category(break_even, support_row):
-        if support_row["support_headroom_pct"] < 0:
-            return "shape_support_limit"
-        if break_even.break_even_inferences is None or not break_even.pays_back:
-            return "no_payback"
-        return "pays_back"
-
-    def v1_07_portability_cost_category(support_row):
-        if support_row["support_headroom_pct"] < 0 or support_row["support_headroom_pct"] <= 5:
-            return "operator_support"
-        if support_row["footprint_headroom_mb"] < 0:
-            return "memory_footprint"
-        if support_row["latency_headroom_ms"] < 0 or support_row["latency_headroom_ms"] <= 5:
-            return "latency_headroom"
-        return "validation_evidence"
-
-    def v1_07_validation_focus_actual(track_id):
-        return {
-            "iphone": "delegate_coverage",
-            "oura_ring": "memory_trace",
-            "robotaxi": "p99_replay",
-            "cloud_fleet": "load_canary",
-        }.get(track_id, "delegate_coverage")
-
-    def v1_07_release_gate(decision, selected_support, selected_break_even, release_posture):
-        issues = []
-        if not selected_support["feasible_with_shape"]:
-            issues.extend(selected_support["violations"] or ("selected runtime violates a deployment constraint",))
-        elif selected_break_even.compile_cost_s > 0 and not selected_break_even.pays_back:
-            issues.append("compile/delegate cost does not pay back at the selected reuse count")
-
-        if issues:
-            status = "Rework required"
-            kind = "danger"
-            action = "recover by changing runtime, reducing dynamism, increasing reuse, or choosing a narrower supported graph"
-        elif release_posture == "ship":
-            status = "Ready after validation"
-            kind = "success"
-            action = "run the required validation suite before shipment"
-        elif release_posture == "canary":
-            status = "Canary-ready"
-            kind = "success"
-            action = "ship behind rollback and compare the runtime path against the baseline"
-        elif release_posture == "research":
-            status = "Research only"
-            kind = "warn"
-            action = "keep this runtime out of the deployment path until the evidence packet is complete"
-        else:
-            status = "Awaiting release posture"
-            kind = "warn"
-            action = "choose a release posture in Part D"
-
-        return {
-            "status": status,
-            "kind": kind,
-            "issues": tuple(issues),
-            "action": action,
-        }
-
-    def v1_07_constraint_callout(title, ok, detail, mitigation):
-        return mo.callout(
-            mo.md(f"**{title}:** {detail} **Mitigation:** {mitigation}"),
-            kind="success" if ok else "danger",
-        )
-
-    return (
-        v1_07_break_even_category,
-        v1_07_constraint_callout,
-        v1_07_fmt_int,
-        v1_07_math_peek,
-        v1_07_metric_card,
-        v1_07_overhead_category,
-        v1_07_portability_cost_category,
-        v1_07_prediction_feedback,
-        v1_07_release_gate,
-        v1_07_support_rows,
-        v1_07_table,
-        v1_07_track_amount_story,
-        v1_07_validation_focus_actual,
-    )
-
-
-@app.cell(hide_code=True)
-def _(
-    ACADEMIC_LAB_CSS,
-    COLORS,
-    LAB_CSS,
-    mo,
-    source_trace,
-    track_arc_context,
-    track_context,
-    v1_07_framework,
-    v1_07_metadata,
-    v1_07_profile,
-    v1_07_track_amount_story,
-    v1_07_track_picker,
-    v1_07_variant,
-):
-    _amount_story = v1_07_track_amount_story(v1_07_profile)
-    mo.vstack([
-        LAB_CSS,
-        ACADEMIC_LAB_CSS,
-        mo.Html(f"""
-        <div class="mlsysbook-lab-shell">
-          <div style="margin-bottom: 16px;">
-            {v1_07_track_picker}
-          </div>
-          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
-            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
-              ML Systems Textbook &middot; Volume I &middot; Chapter 7 &middot; Foundational Lab 07
-            </div>
-            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
-              ML Frameworks: Runtime Consequences &amp; Execution Stacks
-            </h1>
-            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
-              Trace how high-level framework abstractions carry physical execution costs. Evaluate eager vs graph dispatch overheads, measure kernel fusion boundaries, quantify cross-platform portability taxes, and validate execution stacks under strict deployment latency and memory limits.
-            </p>
-            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Track:</strong> {v1_07_profile.label}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Workload:</strong> {v1_07_framework.workload_label}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Hardware:</strong> {v1_07_variant.hardware_ref}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Model:</strong> {v1_07_variant.model_ref}
-              </span>
-              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
-                <strong>Primary Focus:</strong> Dispatch &amp; Graph Optimization
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Deliverable:</strong> {v1_07_framework.report_artifact}
-              </span>
-            </div>
-          </div>
-
-          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
-              System Scenario: {v1_07_profile.label} Framework &amp; Runtime Engineering
-            </h3>
-            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
-              You are the <strong>{v1_07_variant.stakeholder}</strong> responsible for deploying <strong>{v1_07_variant.model_ref}</strong> onto <strong>{v1_07_variant.hardware_ref}</strong>. The target deployment requires predictable latency without unexpected host-device synchronization stalls or unlowered operator fallbacks under <strong>{v1_07_framework.workload_label}</strong>.
-            </p>
-            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
-              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
-                The Architectural Invariants of ML Frameworks:
-              </div>
-              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
-                <li><strong>The Runtime Abstraction Invariant:</strong> Framework abstractions carry physical execution consequences. Graph construction, kernel launch dispatch, and operator lowering dictate system latency and memory consumption even when model math is identical.</li>
-                <li><strong>The Fusion Boundary Law:</strong> Kernel fusion eliminates intermediate tensor round-trips to DRAM only within topologically static, supported subgraphs: <em>T</em><sub>fused</sub> &lt; &sum; <em>T</em><sub>eager</sub>. Unlowered ops break fusion boundaries and trigger costly fallback copies.</li>
-                <li><strong>The Portability-Efficiency Trade-Off:</strong> Standardized IR formats (ONNX, TFLite, CoreML) grant portability across target silicon, but risk forfeiting hardware-specific microarchitectural optimizations without explicit custom runtime delegates.</li>
-                <li><strong>The Compilation Amortization Invariant:</strong> Upfront JIT/AOT graph compilation incurs significant build latency (<em>T</em><sub>compile</sub>). Compilation pays back only when inference query reuse exceeds the break-even threshold: <em>N</em><sub>reuse</sub> &gt; <em>T</em><sub>compile</sub> / &Delta;<em>t</em><sub>speedup</sub>.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['BlueLine']};
-                    background: white; border-radius: 0 12px 12px 0;
-                    padding: 20px 28px; margin: 8px 0 16px 0;
-                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Diagnose execution overhead:</strong>
-                    separate useful compute from dispatch, transfer, sync, memory traffic, and unsupported-op fallback.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Find a fusion boundary:</strong>
-                    compare compile/delegate setup cost with reuse, shape stability, and supported kernels.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Reason in track amounts:</strong>
-                    explain how compatibility costs latency, footprint, support, battery, safety, or cost.</div>
-                <div style="margin-bottom: 3px;">4. <strong>Release with evidence:</strong>
-                    recommend a runtime only when deployment constraints and validation evidence line up.</div>
-            </div>
-            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
-                        padding: 16px 28px 0 28px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Core Question
-                </div>
-                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                            line-height: 1.5; font-style: italic;">
-                    "Which framework/runtime execution path fits {v1_07_framework.label}, and what empirical evidence proves that its graph shape, dispatch latency, and operator support are safe for release?"
-                </div>
-            </div>
-        </div>
-        """),
-        track_context(v1_07_profile),
-        track_arc_context(v1_07_profile, v1_07_metadata.lab_id),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Track Amount System</h2>
-          <div class="mlsysbook-grid">
-            <div class="mlsysbook-field"><strong>Stakeholder</strong>{v1_07_variant.stakeholder}</div>
-            <div class="mlsysbook-field"><strong>Runtime lens</strong>{_amount_story['runtime']}</div>
-            <div class="mlsysbook-field"><strong>Measured amounts</strong>{_amount_story['amounts']}</div>
-            <div class="mlsysbook-field"><strong>Natural failure</strong>{_amount_story['failure']}</div>
-          </div>
-        </div>
-        """),
-        source_trace({
-            "chapter_invariant": "Framework abstractions carry runtime consequences.",
-            "chapter_anchor": "books/vol1/frameworks/frameworks.qmd",
-            "concept_map": "books/vol1/frameworks/frameworks_concepts.yml",
-            "track_profile": v1_07_profile.track_id,
-            "hardware_ref": v1_07_variant.hardware_ref,
-            "model_ref": v1_07_variant.model_ref,
-        }, summary="Opening assumptions come from the chapter anchors, selected track profile, and MLSysIM references."),
-    ])
-    return
-
-
-@app.cell(hide_code=True)
-def _():
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_07_framework):
-    v1_07_overhead_prediction = mo.ui.radio(
-        options={
-            "Runtime dispatch dominates because each op launches separately": "runtime dispatch",
-            "Hardware dispatch or synchronization dominates": "hardware dispatch",
-            "Memory traffic or transfer dominates": "memory traffic",
-            "Unsupported-op fallback dominates": "unsupported ops",
-        },
-        label=f"Part A prediction for {v1_07_framework.label}: which framework overhead binds first?",
-    )
-    v1_07_op_count = mo.ui.slider(
-        start=max(10, int(v1_07_framework.op_count / 4)),
-        stop=max(20, int(v1_07_framework.op_count * 4)),
-        value=v1_07_framework.op_count,
-        step=max(1, int(v1_07_framework.op_count / 20)),
-        label="Operation count in the hot path",
-    )
-    return v1_07_op_count, v1_07_overhead_prediction
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_07_framework):
-    v1_07_break_even_prediction = mo.ui.radio(
-        options={
-            "The compiled/delegate path pays back before expected reuse": "pays_back",
-            "Compile/delegate setup does not pay back": "no_payback",
-            "Shape or operator support becomes the real boundary": "shape_support_limit",
-        },
-        label="Part B prediction: what will decide the fusion/compile path?",
-    )
-    v1_07_reuse_count = mo.ui.slider(
-        start=v1_07_framework.reuse_min,
-        stop=v1_07_framework.reuse_max,
-        value=v1_07_framework.default_reuse_count,
-        step=v1_07_framework.reuse_step,
-        label="Expected reuse count",
-    )
-    v1_07_shape_dynamism = mo.ui.slider(
-        start=0,
-        stop=max(60, int(v1_07_framework.shape_dynamism_pct * 3 + 12)),
-        value=int(round(v1_07_framework.shape_dynamism_pct)),
-        step=1,
-        label="Shape dynamism / guard pressure (%)",
-    )
-    v1_07_part_b_checkpoint = mo.ui.radio(
-        options={
-            "Compile/delegate now": "compile",
-            "Bucket or pad shapes before compiling": "bucket",
-            "Stay eager or portable until reuse is proven": "defer",
-        },
-        label="Part B checkpoint: what should the team do next?",
-    )
-    return (
-        v1_07_break_even_prediction,
-        v1_07_part_b_checkpoint,
-        v1_07_reuse_count,
-        v1_07_shape_dynamism,
-    )
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_07_framework):
-    _runtime_options = {
-        runtime.label: runtime.runtime_id
-        for runtime in v1_07_framework.runtime_options
-    }
-    v1_07_portability_prediction = mo.ui.radio(
-        options={
-            "Latency headroom": "latency_headroom",
-            "Memory or firmware footprint": "memory_footprint",
-            "Kernel/operator support": "operator_support",
-            "Validation evidence and rollback": "validation_evidence",
-        },
-        label="Part C prediction: which amount will portability cost most?",
-    )
-    v1_07_runtime_choice = mo.ui.dropdown(
-        options=_runtime_options,
-        value=v1_07_framework.runtime_options[0].label,
-        label="Runtime path to evaluate",
-    )
-    v1_07_part_c_checkpoint = mo.ui.radio(
-        options={
-            "Choose the target-native optimized runtime": "native",
-            "Choose the portable interchange/runtime path": "portable",
-            "Choose generated or fixed kernels": "fixed",
-            "Keep this only as rollback/debug baseline": "rollback",
-        },
-        label="Part C checkpoint: which portability posture matches the evidence?",
-    )
-    return (
-        v1_07_part_c_checkpoint,
-        v1_07_portability_prediction,
-        v1_07_runtime_choice,
-    )
-
-
-@app.cell(hide_code=True)
 def _(mo):
-    v1_07_validation_prediction = mo.ui.radio(
-        options={
-            "Delegate/operator coverage plus thermal or battery replay": "delegate_coverage",
-            "SRAM/flash arena trace plus OTA payload check": "memory_trace",
-            "p99/p999 replay plus plugin or provider partition audit": "p99_replay",
-            "Load/SLA graph-break canary plus rollback drill": "load_canary",
+    get_evidence, set_evidence = mo.state({})
+    return get_evidence, set_evidence
+
+
+@app.cell
+def _(mo, set_evidence):
+    track = mo.ui.dropdown(
+        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
+        value="TinyML", label="Deployment track",
+        on_change=lambda _value: set_evidence({}),
+    )
+    return (track,)
+
+
+@app.cell
+def _(TRACKS, track):
+    track_id = track.value
+    profile = TRACKS[track_id]
+    return profile, track_id
+
+
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    a_dispatches = mo.ui.dropdown(
+        {"One launch": 1, "Two launches": 2, "Three launches": 3},
+        value="One launch", label="Intervention granularity",
+    )
+    b_executions = mo.ui.slider(10, 200, value=50, step=10, label="Repeated executions")
+    b_recompiles_label = (
+        "Host rebuilds / redeployments"
+        if track_id == "tinyml"
+        else "Guard-triggered recompilations"
+    )
+    b_recompiles = mo.ui.slider(0, 8, value=0, step=1, label=b_recompiles_label)
+    c_breaks = mo.ui.slider(0, 4, value=0, step=1, label="Graph breaks")
+    d_policy = mo.ui.dropdown(
+        {"Retain alternate activations": "alternate", "Retain input only": "input_only"},
+        value="Retain alternate activations", label="Recomputation policy",
+    )
+    d_batch = mo.ui.slider(1, 64, value=8, step=1, label="Training batch")
+    e_operator = mo.ui.dropdown(
+        {
+            "ReLU": "relu", "Layer normalization": "layer_norm",
+            "Dynamic slice": "dynamic_slice", "Custom attention": "custom_attention",
+            "Host callback": "host_callback",
         },
-        label="Part D prediction: which validation evidence is non-negotiable for the selected track?",
+        value="Host callback", label="Inserted operator",
     )
-    v1_07_release_posture = mo.ui.radio(
-        options={
-            "Ship primary runtime after validation": "ship",
-            "Canary with rollback baseline": "canary",
-            "Keep as research/runtime prototype": "research",
+    e_shape = mo.ui.dropdown(
+        {"Static": "static", "Bounded": "bounded", "Dynamic": "dynamic"},
+        value="Static", label="Shape behavior",
+    )
+    e_decision = mo.ui.radio(
+        {
+            "Use selected path": "selected",
+            "Hold native baseline for more evidence": "hold",
+            "No feasible target path": "none",
         },
-        label="Part D checkpoint: release posture",
+        label="Runtime decision",
     )
-    v1_07_recommendation = mo.ui.text_area(
-        label="Final runtime recommendation",
-        placeholder=(
-            "Name the runtime you recommend, the constraint that ruled out the naive choice, "
-            "the evidence number, and the validation test that must run before deployment."
-        ),
-        full_width=True,
+    return a_dispatches, b_executions, b_recompiles, c_breaks, d_batch, d_policy, e_decision, e_operator, e_shape
+
+
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    a_prediction = mo.ui.radio(
+        {"Below 25%": "below_25", "25–50%": "25_50", "50–75%": "50_75", "Above 75%": "above_75"},
+        label="What fraction of fine-grained execution time is dispatch?",
+    ).form(submit_button_label="Lock Part A prediction")
+    b_prediction = mo.ui.radio(
+        {"Eager remains faster": "eager", "Compilation repays setup": "compiled", "They are equal": "equal"},
+        label="Which path has lower total time at these settings?",
+    ).form(submit_button_label="Lock Part B prediction")
+    c_prediction = mo.ui.radio(
+        {"No traffic": "none", "Some traffic, no launches": "traffic_only", "Traffic and launches": "both", "Arithmetic operations": "arithmetic"},
+        label="What can fusion eliminate from this graph?",
+    ).form(submit_button_label="Lock Part C prediction")
+    d_prediction = mo.ui.radio(
+        {"Less memory, more step time": "memory_for_time", "Less memory only": "memory_only", "More step time only": "time_only", "Neither changes": "neither"},
+        label="What does recomputation change?",
+    ).form(submit_button_label="Lock Part D prediction")
+    e_prediction = mo.ui.radio(
+        {"Native target path": "native", "Portable fallback path": "fallback", "Cannot execute": "unsupported"},
+        label="How will the selected operator and shape execute?",
+    ).form(submit_button_label="Lock Part E prediction")
+    return a_prediction, b_prediction, c_prediction, d_prediction, e_prediction
+
+
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    final_choice = mo.ui.radio(
+        {
+            "Eager execution": "eager",
+            "Compiled execution": "compiled",
+            "Compiled with fusion": "compiled_fused",
+            "Hold current path for more evidence": "hold",
+            "No feasible target path": "none",
+        },
+        label="Recommended execution plan",
     )
-    return (
-        v1_07_recommendation,
-        v1_07_release_posture,
-        v1_07_validation_prediction,
+    final_rejected = mo.ui.radio(
+        {"Eager execution": "eager", "Compiled execution": "compiled", "Compiled with fusion": "compiled_fused"},
+        label="Quantified rejected alternative",
     )
+    final_trigger = mo.ui.radio(
+        {
+            "Execution count changes": "execution_count",
+            "Deployment shapes change" if track_id == "tinyml" else "Shape guards change": "shape_guards",
+            "Operator set changes": "operator_set",
+            "Activation memory changes": "activation_memory",
+        },
+        label="Reevaluation trigger",
+    )
+    final_risk = mo.ui.radio(
+        {"Illustrative timing assumptions": "timing_assumptions", "Unmodeled operator interactions": "operator_interactions", "Unmeasured target behavior": "target_measurement"},
+        label="Remaining limitation",
+    )
+    rationale = mo.ui.text_area(
+        label="Decision rationale",
+        placeholder="Use saved values to compare the recommendation with the rejected alternative, then name the remaining limitation.",
+    )
+    return final_choice, final_rejected, final_risk, final_trigger, rationale
 
 
 @app.cell
 def _(
-    compile_break_even,
-    dispatch_stack,
-    runtime_decision,
-    v1_07_break_even_category,
-    v1_07_framework,
-    v1_07_op_count,
-    v1_07_overhead_category,
-    v1_07_portability_cost_category,
-    v1_07_profile,
-    v1_07_release_gate,
-    v1_07_release_posture,
-    v1_07_reuse_count,
-    v1_07_runtime_choice,
-    v1_07_shape_dynamism,
-    v1_07_support_rows,
-    v1_07_validation_focus_actual,
+    OPERATION_GRAPH, a_dispatches, b_executions, b_recompiles, c_breaks,
+    compare_dispatch, d_batch, d_policy, e_operator, e_shape,
+    evaluate_compilation, evaluate_fusion, evaluate_operator_support,
+    evaluate_recomputation, track_id,
 ):
-    v1_07_dispatch_rows = tuple(
-        dispatch_stack(
-            v1_07_framework,
-            runtime_id=runtime.runtime_id,
-            op_count=v1_07_op_count.value,
-        )
-        for runtime in v1_07_framework.runtime_options
-    )
-    v1_07_break_evens = tuple(
-        compile_break_even(
-            v1_07_framework,
-            runtime_id=runtime.runtime_id,
-            reuse_count=v1_07_reuse_count.value,
-            op_count=v1_07_op_count.value,
-        )
-        for runtime in v1_07_framework.runtime_options
-    )
-    v1_07_support_adjusted_rows = v1_07_support_rows(
-        v1_07_framework,
-        v1_07_dispatch_rows,
-        v1_07_break_evens,
-        v1_07_shape_dynamism.value,
-    )
-    v1_07_decision = runtime_decision(
-        v1_07_framework,
-        runtime_id=v1_07_runtime_choice.value,
-        reuse_count=v1_07_reuse_count.value,
-        op_count=v1_07_op_count.value,
-    )
-    v1_07_selected_stack = next(
-        item for item in v1_07_dispatch_rows
-        if item.runtime_id == v1_07_decision.selected_id
-    )
-    v1_07_selected_break_even = next(
-        item for item in v1_07_break_evens
-        if item.runtime_id == v1_07_decision.selected_id
-    )
-    v1_07_selected_support = next(
-        item for item in v1_07_support_adjusted_rows
-        if item["runtime_id"] == v1_07_decision.selected_id
-    )
-    v1_07_actual_overhead_category = v1_07_overhead_category(
-        v1_07_selected_stack,
-        v1_07_selected_support,
-    )
-    v1_07_actual_break_even_category = v1_07_break_even_category(
-        v1_07_selected_break_even,
-        v1_07_selected_support,
-    )
-    v1_07_actual_portability_cost = v1_07_portability_cost_category(v1_07_selected_support)
-    v1_07_actual_validation_focus = v1_07_validation_focus_actual(v1_07_profile.track_id)
-    v1_07_release_result = v1_07_release_gate(
-        v1_07_decision,
-        v1_07_selected_support,
-        v1_07_selected_break_even,
-        v1_07_release_posture.value,
-    )
-    return (
-        v1_07_actual_break_even_category,
-        v1_07_actual_overhead_category,
-        v1_07_actual_portability_cost,
-        v1_07_actual_validation_focus,
-        v1_07_break_evens,
-        v1_07_decision,
-        v1_07_dispatch_rows,
-        v1_07_release_result,
-        v1_07_selected_break_even,
-        v1_07_selected_stack,
-        v1_07_selected_support,
-        v1_07_support_adjusted_rows,
-    )
+    operation_count = len(OPERATION_GRAPH)
+    a_comparison = compare_dispatch(track_id, operation_count, a_dispatches.value)
+    b_baseline = evaluate_compilation(track_id, 1, recompilations=0)
+    b_result = evaluate_compilation(track_id, b_executions.value, recompilations=b_recompiles.value)
+    c_baseline = evaluate_fusion(track_id, graph_breaks=operation_count - 1)
+    c_result = evaluate_fusion(track_id, graph_breaks=c_breaks.value)
+    d_baseline = evaluate_recomputation(track_id, "retain_all", batch_size=d_batch.value)
+    d_result = evaluate_recomputation(track_id, d_policy.value, batch_size=d_batch.value)
+    e_baseline = evaluate_operator_support(track_id, "relu", "static")
+    e_result = evaluate_operator_support(track_id, e_operator.value, e_shape.value)
+    return a_comparison, b_baseline, b_result, c_baseline, c_result, d_baseline, d_result, e_baseline, e_result, operation_count
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(
-    COLORS,
-    apply_plotly_theme,
-    big_takeaways,
-    go,
-    mo,
-    source_trace,
-    v1_07_actual_break_even_category,
-    v1_07_actual_overhead_category,
-    v1_07_actual_portability_cost,
-    v1_07_actual_validation_focus,
-    v1_07_break_even_prediction,
-    v1_07_break_evens,
-    v1_07_constraint_callout,
-    v1_07_decision,
-    v1_07_dispatch_rows,
-    v1_07_fmt_int,
-    v1_07_framework,
-    v1_07_math_peek,
-    v1_07_metric_card,
-    v1_07_op_count,
-    v1_07_overhead_prediction,
-    v1_07_part_b_checkpoint,
-    v1_07_part_c_checkpoint,
-    v1_07_portability_prediction,
-    v1_07_prediction_feedback,
-    v1_07_profile,
-    v1_07_recommendation,
-    v1_07_release_posture,
-    v1_07_release_result,
-    v1_07_reuse_count,
-    v1_07_runtime_choice,
-    v1_07_selected_break_even,
-    v1_07_selected_stack,
-    v1_07_selected_support,
-    v1_07_shape_dynamism,
-    v1_07_support_adjusted_rows,
-    v1_07_table,
-    v1_07_track_amount_story,
-    v1_07_validation_prediction,
-    v1_07_variant,
+    MODEL_KEY, a_comparison, a_dispatches, a_prediction, b_baseline,
+    b_executions, b_prediction, b_recompiles, b_result, c_baseline,
+    c_breaks, c_prediction, c_result, capture_evidence, d_baseline,
+    d_batch, d_policy, d_prediction, d_result, e_baseline, e_decision, e_operator,
+    e_prediction, e_result, e_shape, mo, operation_count, set_evidence,
+    track_id,
 ):
-    _amount_story = v1_07_track_amount_story(v1_07_profile)
+    def store(part, capture):
+        set_evidence(lambda current: {**current, part: capture})
 
-    _labels = [row.runtime_label for row in v1_07_dispatch_rows]
-    _latency_fig = go.Figure()
-    _latency_fig.add_trace(go.Bar(
-        x=_labels,
-        y=[row.useful_compute_ms for row in v1_07_dispatch_rows],
-        name="Useful compute",
-        marker_color=COLORS["GreenLine"],
-    ))
-    _latency_fig.add_trace(go.Bar(
-        x=_labels,
-        y=[row.runtime_dispatch_ms for row in v1_07_dispatch_rows],
-        name="Runtime dispatch",
-        marker_color=COLORS["OrangeLine"],
-    ))
-    _latency_fig.add_trace(go.Bar(
-        x=_labels,
-        y=[row.hardware_dispatch_ms for row in v1_07_dispatch_rows],
-        name="Hardware dispatch",
-        marker_color=COLORS["RedLine"],
-    ))
-    _latency_fig.add_trace(go.Bar(
-        x=_labels,
-        y=[row.transfer_ms + row.sync_ms + row.memory_ms for row in v1_07_dispatch_rows],
-        name="Transfer, sync, memory",
-        marker_color=COLORS["BlueLine"],
-    ))
-    _latency_fig.add_hline(
-        y=v1_07_framework.latency_budget_ms,
-        line_dash="dash",
-        line_color=COLORS["RedLine"],
-        annotation_text="latency budget",
-        annotation_font_color=COLORS["RedLine"],
-    )
-    _latency_fig.update_layout(
-        barmode="stack",
-        height=390,
-        xaxis=dict(title="Runtime path", gridcolor="#f1f5f9"),
-        yaxis=dict(title="Latency stack (ms)", gridcolor="#f1f5f9"),
-        margin=dict(l=60, r=20, t=35, b=90),
-    )
-    apply_plotly_theme(_latency_fig)
+    a_upstream = {"baseline_dispatches": operation_count, "intervention_dispatches": a_dispatches.value}
+    b_upstream = {"executions": b_executions.value, "recompilations": b_recompiles.value}
+    c_upstream = {"baseline_breaks": operation_count - 1, "intervention_breaks": c_breaks.value}
+    d_upstream = {"batch_size": d_batch.value, "policy": d_policy.value}
+    e_upstream = {"operator": e_operator.value, "shape_mode": e_shape.value, "decision": e_decision.value}
 
-    _break_fig = go.Figure()
-    _break_fig.add_trace(go.Bar(
-        x=[item.runtime_label for item in v1_07_break_evens],
-        y=[item.break_even_inferences or 0 for item in v1_07_break_evens],
-        marker_color=[
-            COLORS["GreenLine"] if item.pays_back else COLORS["RedLine"]
-            for item in v1_07_break_evens
-        ],
-        text=[v1_07_fmt_int(item.break_even_inferences) for item in v1_07_break_evens],
-        textposition="outside",
-    ))
-    _break_fig.add_hline(
-        y=v1_07_reuse_count.value,
-        line_dash="dash",
-        line_color=COLORS["BlueLine"],
-        annotation_text="expected reuse",
-        annotation_font_color=COLORS["BlueLine"],
+    a_capture = mo.ui.button(
+        label="Capture dispatch contrast", kind="success",
+        disabled=a_prediction.value is None,
+        on_click=lambda _value: store("A", capture_evidence(
+            track=track_id, part="A", prediction=a_prediction.value,
+            inputs=a_upstream, baseline=a_comparison["baseline"],
+            result=a_comparison["intervention"], upstream_inputs=a_upstream,
+            alternatives=(a_comparison,), model_key=MODEL_KEY,
+        )),
     )
-    _break_fig.update_layout(
-        height=360,
-        xaxis=dict(title="Runtime path", gridcolor="#f1f5f9"),
-        yaxis=dict(title="Break-even inferences", gridcolor="#f1f5f9"),
-        margin=dict(l=70, r=20, t=35, b=90),
+    b_capture = mo.ui.button(
+        label="Capture compilation contrast", kind="success",
+        disabled=b_prediction.value is None,
+        on_click=lambda _value: store("B", capture_evidence(
+            track=track_id, part="B", prediction=b_prediction.value,
+            inputs=b_upstream, baseline=b_baseline, result=b_result,
+            upstream_inputs=b_upstream, model_key=MODEL_KEY,
+        )),
     )
-    apply_plotly_theme(_break_fig)
+    c_capture = mo.ui.button(
+        label="Capture fusion contrast", kind="success",
+        disabled=c_prediction.value is None,
+        on_click=lambda _value: store("C", capture_evidence(
+            track=track_id, part="C", prediction=c_prediction.value,
+            inputs=c_upstream, baseline=c_baseline, result=c_result,
+            upstream_inputs=c_upstream, model_key=MODEL_KEY,
+        )),
+    )
+    d_capture = mo.ui.button(
+        label="Capture activation contrast", kind="success",
+        disabled=d_prediction.value is None,
+        on_click=lambda _value: store("D", capture_evidence(
+            track=track_id, part="D", prediction=d_prediction.value,
+            inputs=d_upstream, baseline=d_baseline, result=d_result,
+            upstream_inputs=d_upstream, model_key=MODEL_KEY,
+        )),
+    )
+    e_same = e_operator.value == "relu" and e_shape.value == "static"
+    e_invalid_decision = e_decision.value is None or (e_decision.value == "none" and e_result["executable"])
+    e_chosen = e_baseline if e_decision.value == "hold" else e_result
+    e_result_role = "rejected alternative" if e_decision.value == "hold" else "tested intervention"
+    e_capture = mo.ui.button(
+        label="Capture runtime-path contrast", kind="success",
+        disabled=e_prediction.value is None or e_same or e_invalid_decision,
+        on_click=lambda _value: store("E", capture_evidence(
+            track=track_id, part="E", prediction=e_prediction.value,
+            inputs=e_upstream, baseline=e_baseline, result=e_result,
+            upstream_inputs=e_upstream, decision=e_decision.value,
+            model_key=MODEL_KEY, chosen_result=e_chosen,
+            result_role=e_result_role,
+        )),
+    )
+    return a_capture, a_upstream, b_capture, b_upstream, c_capture, c_upstream, d_capture, d_upstream, e_capture, e_upstream
 
-    _dispatch_table_rows = [
-        (
-            row.runtime_label,
-            f"{row.total_latency_ms:.2f} ms",
-            f"{row.overhead_pct:.1f}%",
-            f"{row.footprint_mb:.3f} MB",
-            f"{row.kernel_support_pct:.1f}%",
-            "yes" if row.feasible else "no",
-            row.dominant_overhead,
-            "; ".join(row.violations) or "none",
+
+@app.cell
+def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
+    css = """
+    <style>
+    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:14px}
+    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
+    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:780px}
+    .pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
+    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
+    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
+    .table-wrap{max-width:100%;overflow-x:auto}@media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
+    </style>"""
+    header = mo.Html(
+        f"""{css}<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 07</span><span>ABOUT 50–55 MIN</span></div><h1>The Framework Tax</h1><p>When does an execution path earn its setup and memory costs, and when does target support make the decision for us?</p><div class="pilot-meta"><div><b>Track</b><br>{profile.display}</div><div><b>Workload</b><br>{profile.workload}</div><div><b>Output</b><br>Runtime-path recommendation</div></div></section>"""
+    )
+    mo.vstack([
+        LAB_CSS, ACADEMIC_LAB_CSS, header, track,
+        mo.Html('<p class="pilot-note">Graph shape, tensor scale, compilation work, and runtime support are illustrative scenario assumptions. Hardware limits and runtime overhead anchors come from MLSysIM.</p>'),
+    ], gap=0.5)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.sidebar([mo.md("## Lab navigation"), mo.outline(label="Sections")])
+    return
+
+
+@app.cell
+def _(
+    COLORS, a_capture, a_comparison, a_dispatches, a_prediction, a_upstream,
+    apply_plotly_theme, audit_evidence, b_baseline, b_capture, b_executions,
+    b_prediction, b_recompiles, b_result, b_upstream, c_baseline, c_breaks,
+    c_capture, c_prediction, c_result, c_upstream, d_baseline, d_batch,
+    d_capture, d_policy, d_prediction, d_result, d_upstream, e_baseline,
+    e_capture, e_decision, e_operator, e_prediction, e_result, e_shape, e_upstream,
+    final_choice, final_rejected, final_risk, final_trigger, get_evidence,
+    go, mo, operation_count, profile, rationale, track_id,
+):
+    _captures = get_evidence()
+    _upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream, "E": e_upstream}
+    audit = audit_evidence(
+        _captures, track=track_id, required_parts=tuple("ABCDE"),
+        per_part_upstream_inputs=_upstream,
+        contrast_required_parts=tuple("ABCDE"),
+    )
+
+    def table(rows):
+        return mo.vstack([mo.ui.table(rows, pagination=False)]).style(
+            {"max-width": "100%", "overflow-x": "auto"}
         )
-        for row in v1_07_dispatch_rows
-    ]
-    _support_table_rows = [
-        (
-            row["runtime_label"],
-            row["execution_mode"],
-            f"{row['adjusted_support_pct']:.1f}%",
-            f"{row['support_headroom_pct']:.1f} pp",
-            v1_07_fmt_int(row["break_even_inferences"]),
-            "yes" if row["compile_pays_back"] else "no",
-            "yes" if row["feasible_with_shape"] else "no",
-            "; ".join(row["violations"]) or "none",
+
+    def saved(part):
+        capture = _captures.get(part)
+        if capture is None:
+            return mo.callout(mo.md("No saved evidence for this part."), kind="warn")
+        if part in audit.stale or (part, part) in audit.identical_pairs:
+            return mo.callout(
+                mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** Recapture this comparison."),
+                kind="danger",
+            )
+        snapshot = capture.to_dict()
+        return mo.Html(
+            f'<div class="saved"><b>Saved snapshot</b> · original prediction: {snapshot["prediction"]}<br><small>Track {snapshot["track"]}; later controls cannot rewrite this result.</small></div>'
         )
-        for row in v1_07_support_adjusted_rows
-    ]
-    _portability_rows = [
-        (
-            row["runtime_label"],
-            f"{row['latency_headroom_ms']:.2f} ms",
-            f"{row['footprint_headroom_mb']:.3f} MB",
-            f"{row['adjusted_support_pct']:.1f}%",
-            f"{row['compatibility_score']:.1f}",
-            row["portability_risk"],
+
+    def part_a():
+        intro = mo.md(
+            f"### A · Why can small operations waste the machine? (9 min)\nMaya, the performance engineer, keeps arithmetic and payload fixed on **{profile.target.name}** while changing only the number of dispatches."
         )
-        for row in v1_07_support_adjusted_rows
-    ]
-    _readiness_rows = [
-        (
-            row["runtime_label"],
-            "yes" if row["feasible_with_shape"] else "no",
-            "yes" if row["compile_pays_back"] else "no",
-            row["validation_requirement"],
-            row["residual_risk"],
+        if a_prediction.value is None:
+            return mo.vstack([intro, a_prediction])
+        baseline = a_comparison["baseline"]
+        result = a_comparison["intervention"]
+        figure = go.Figure()
+        figure.add_bar(name="Useful work", x=["Fine", "Coarse"], y=[baseline["useful_time_us"], result["useful_time_us"]], marker_color=COLORS["BlueLine"])
+        figure.add_bar(name="Dispatch", x=["Fine", "Coarse"], y=[baseline["dispatch_time_us"], result["dispatch_time_us"]], marker_color=COLORS["OrangeLine"])
+        figure.update_layout(barmode="stack", height=270, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Analytical time (µs)", legend_orientation="h")
+        rows = [
+            {"Path": "Fine", "Dispatches": baseline["dispatches"], "Total": f"{baseline['total_time_us']:.2f} µs", "Dispatch share": f"{baseline['dispatch_fraction']:.1%}"},
+            {"Path": "Coarse", "Dispatches": result["dispatches"], "Total": f"{result['total_time_us']:.2f} µs", "Dispatch share": f"{result['dispatch_fraction']:.1%}"},
+        ]
+        return mo.vstack([
+            intro, a_prediction, a_dispatches, apply_plotly_theme(figure), table(rows),
+            mo.callout(mo.md(f"**Prediction:** {a_prediction.value}. **Observed analytically:** the fine path spends **{baseline['dispatch_fraction']:.1%}** of total time in dispatch. Coarsening to {result['dispatches']} launch(es) produces **{a_comparison['speedup']:.2f}×** speedup with identical FLOPs and payload."), kind="info"),
+            a_capture, saved("A"),
+            mo.accordion({"Calculation Notes": mo.md("Useful time is the larger of arithmetic time and fixed input/output movement time. Total time adds one registry-backed dispatch cost per launch. The two runs use identical operations and bytes.")}),
+        ])
+
+    def part_b():
+        recompile_context = (
+            "offline host rebuild and redeployment count (TinyML compiles ahead-of-time on the host, not via on-device JIT guards)"
+            if track_id == "tinyml"
+            else "guard-triggered recompilation count"
         )
-        for row in v1_07_support_adjusted_rows
-    ]
+        intro = mo.md(
+            f"### B · When does compilation repay setup? (9 min)\n"
+            f"Ishan, the compiler engineer, separates repeated execution count from {recompile_context}."
+        )
+        if b_prediction.value is None:
+            return mo.vstack([intro, mo.hstack([b_executions, b_recompiles], widths="equal", wrap=True), b_prediction])
+        figure = go.Figure()
+        figure.add_bar(name="Eager total", x=["One execution", "Selected repetitions"], y=[b_baseline["eager_total_ms"], b_result["eager_total_ms"]], marker_color=COLORS["BlueLine"])
+        figure.add_bar(name="Compiled total", x=["One execution", "Selected repetitions"], y=[b_baseline["compiled_total_ms"], b_result["compiled_total_ms"]], marker_color=COLORS["OrangeLine"])
+        figure.update_layout(barmode="group", height=270, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Cumulative analytical time (ms)", legend_orientation="h")
+        outcome = "Compilation repays setup" if b_result["compilation_repaid"] else "Eager remains faster"
+        recompile_note = (
+            "Host rebuilds raise setup without changing the eager baseline."
+            if track_id == "tinyml"
+            else "Recompilation raises setup without changing the eager baseline."
+        )
+        return mo.vstack([
+            intro, b_prediction, mo.hstack([b_executions, b_recompiles], widths="equal", wrap=True),
+            apply_plotly_theme(figure),
+            table([{"Executions": b_result["executions"], "Compilations": b_result["compilation_count"], "Break-even": b_result["break_even_executions"], "Eager": f"{b_result['eager_total_ms']:.2f} ms", "Compiled": f"{b_result['compiled_total_ms']:.2f} ms"}]),
+            mo.callout(mo.md(f"**Prediction:** {b_prediction.value}. **Observed analytically:** {outcome.lower()} at **{b_result['executions']}** executions and **{b_result['compilation_count']}** compilation(s). {recompile_note}"), kind="success" if b_result["compilation_repaid"] else "warn"),
+            b_capture, saved("B"),
+            mo.accordion({
+                "Calculation Notes": mo.md(
+                    "Compiled total = compilation count × setup time + repetitions × fused execution time. "
+                    "Eager total = repetitions × unfused execution time. Break-even is the first repetition that recovers all setup work. "
+                    "Setup time uses a shared illustrative compiler pass assumption (constant framework dispatch tax across analysis passes, "
+                    "not measured on the named host). For TinyML, compilation is ahead-of-time (AOT) host compilation; recompilation represents "
+                    "an offline host rebuild and redeployment rather than a dynamic native JIT."
+                )
+            }),
+        ])
 
-    _overhead_labels = {
-        "runtime dispatch": "runtime dispatch",
-        "hardware dispatch": "hardware dispatch or synchronization",
-        "memory traffic": "memory traffic or transfer",
-        "unsupported ops": "unsupported-op fallback",
-    }
-    _break_even_labels = {
-        "pays_back": "compiled/delegate path pays back",
-        "no_payback": "compile/delegate setup does not pay back",
-        "shape_support_limit": "shape or operator support is the boundary",
-    }
-    _portability_labels = {
-        "latency_headroom": "latency headroom",
-        "memory_footprint": "memory or firmware footprint",
-        "operator_support": "kernel/operator support",
-        "validation_evidence": "validation evidence and rollback",
-    }
-    _validation_labels = {
-        "delegate_coverage": "delegate/operator coverage plus thermal or battery replay",
-        "memory_trace": "SRAM/flash arena trace plus OTA payload check",
-        "p99_replay": "p99/p999 replay plus plugin or provider audit",
-        "load_canary": "load/SLA graph-break canary plus rollback drill",
-    }
+    def part_c():
+        intro = mo.md(f"### C · What does fusion eliminate? (9 min)\nSofia, the runtime engineer, compares the same {operation_count}-operation graph before and after fusion. Graph breaks split the fused region.")
+        if c_prediction.value is None:
+            return mo.vstack([intro, c_prediction])
+        figure = go.Figure()
+        figure.add_bar(name="Traffic", x=["Unfused", "Selected"], y=[c_baseline["total_traffic_mb"], c_result["total_traffic_mb"]], marker_color=COLORS["BlueLine"])
+        figure.update_layout(height=250, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Graph traffic (MB)", showlegend=False)
+        rows = [
+            {"Path": "Unfused", "Launches": c_baseline["launches"], "Breaks": c_baseline["graph_breaks"], "Traffic": f"{c_baseline['total_traffic_mb']:.3f} MB"},
+            {"Path": "Selected", "Launches": c_result["launches"], "Breaks": c_result["graph_breaks"], "Traffic": f"{c_result['total_traffic_mb']:.3f} MB"},
+        ]
+        return mo.vstack([
+            intro, c_prediction, c_breaks, apply_plotly_theme(figure), table(rows),
+            mo.callout(mo.md(f"**Prediction:** {c_prediction.value}. **Observed analytically:** the selected path removes **{c_result['eliminated_traffic_mb']:.3f} MB** of graph traffic and uses **{c_result['launches']}** launch(es). Arithmetic is preserved; each graph break restores a materialized boundary."), kind="info"),
+            c_capture, saved("C"),
+            mo.accordion({"Calculation Notes": mo.md("Each unfused operation reads and writes the tensor. A fused region reads once and writes once, so every graph boundary adds another full read/write pair. Fusion changes dispatch and intermediate traffic, not the graph's arithmetic.")}),
+        ])
 
-    _part_a_ok = v1_07_selected_stack.feasible and v1_07_selected_support["support_headroom_pct"] >= 0
-    _part_a_detail = (
-        f"{v1_07_decision.selected_label} totals {v1_07_selected_stack.total_latency_ms:.2f} ms "
-        f"against a {v1_07_framework.latency_budget_ms:.2f} ms budget; dominant overhead is "
-        f"{v1_07_selected_stack.dominant_overhead}."
-    )
-    _part_a_mitigation = "reduce op count, capture a longer graph, or select a runtime with better support for this track"
+    def part_d():
+        intro = mo.md(f"### D · Which activations should remain stored? (9 min)\nNoah, the training engineer, runs this track on **{d_baseline['training_host']}** and compares saved activations against repeated forward work.")
+        if d_prediction.value is None:
+            return mo.vstack([intro, mo.hstack([d_policy, d_batch], widths="equal", wrap=True), d_prediction])
+        figure = go.Figure()
+        figure.add_bar(name="Retained activations", x=["Retain all", d_result["policy"]], y=[d_baseline["retained_activation_mb"], d_result["retained_activation_mb"]], marker_color=COLORS["BlueLine"])
+        figure.add_bar(name="Step time", x=["Retain all", d_result["policy"]], y=[d_baseline["step_time_ms"], d_result["step_time_ms"]], marker_color=COLORS["OrangeLine"], yaxis="y2")
+        figure.update_layout(height=275, margin=dict(l=20, r=20, t=20, b=20), yaxis=dict(title="Retained activations (MB)"), yaxis2=dict(title="Analytical step time (ms)", overlaying="y", side="right"), legend_orientation="h")
+        feasible = d_result["memory_feasible"]
+        return mo.vstack([
+            intro, d_prediction, mo.hstack([d_policy, d_batch], widths="equal", wrap=True),
+            apply_plotly_theme(figure),
+            table([
+                {"Policy": "Retain all", "Stored": f"{d_baseline['retained_activation_mb']:.3f} MB", "Repeated ops": d_baseline["recomputed_operation_count"], "Step": f"{d_baseline['step_time_ms']:.3f} ms"},
+                {"Policy": d_result["policy"], "Stored": f"{d_result['retained_activation_mb']:.3f} MB", "Repeated ops": d_result["recomputed_operation_count"], "Step": f"{d_result['step_time_ms']:.3f} ms"},
+            ]),
+            mo.callout(mo.md(f"**Prediction:** {d_prediction.value}. **Observed analytically:** stored activations fall to **{d_result['retained_activation_mb']:.3f} MB**, while **{d_result['recomputed_operation_count']}** operations repeat and step time becomes **{d_result['step_time_ms']:.3f} ms**. Memory status: **{'PASS' if feasible else 'OOM — training infeasible on this host'}**."), kind="success" if feasible else "danger"),
+            d_capture, saved("D"),
+            mo.accordion({"Calculation Notes": mo.md("Training counts one forward pass and a two-forward-equivalent backward pass. A discarded activation repeats its forward operation during backward. Retained bytes are checked directly against the selected training host's memory capacity.")}),
+        ])
 
-    _part_b_ok = (
-        v1_07_selected_support["support_headroom_pct"] >= 0
-        and (v1_07_selected_break_even.compile_cost_s == 0 or v1_07_selected_break_even.pays_back)
-    )
-    _part_b_detail = (
-        f"Break-even is {v1_07_fmt_int(v1_07_selected_break_even.break_even_inferences)} inferences; "
-        f"selected reuse is {v1_07_fmt_int(v1_07_reuse_count.value)} and shape-adjusted support is "
-        f"{v1_07_selected_support['adjusted_support_pct']:.1f}%."
-    )
-    _part_b_mitigation = "increase reuse, bucket/pad shapes, or choose a runtime with a wider supported operator set"
-
-    _part_c_ok = v1_07_selected_support["feasible_with_shape"]
-    _part_c_detail = (
-        f"Compatibility score is {v1_07_selected_support['compatibility_score']:.1f}; "
-        f"portability risk is {v1_07_selected_support['portability_risk']}."
-    )
-    _part_c_mitigation = "make the target runtime explicit and test unsupported-op fallback before preserving portability"
-
-    _release_issue_text = "; ".join(v1_07_release_result["issues"]) or "no blocking issue in the current scenario model"
-
-    _part_a = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel mlsysbook-nugget">
-          <div class="mlsysbook-part-title"><h2>Part A: Concept Module - Execution Overhead Depends On Reuse And Dynamism</h2></div>
-          <div class="mlsysbook-callout"><strong>Scenario:</strong>
-            {v1_07_variant.stakeholder} must decide whether {v1_07_framework.workload_label}
-            can ship on {v1_07_framework.label}. The model is mathematically valid; the question is
-            whether the framework execution stack changes the deployed system.</div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Prediction</h2>
-          <p>Commit to the overhead source before looking at the stack. The chapter's trap is assuming
-          that useful compute is the only amount that matters.</p>
-        </div>
-        """),
-        v1_07_overhead_prediction,
-        mo.Html("<div class=\"mlsysbook-panel\"><h2>Manipulation</h2><p>Change the hot-path operation count. Small dynamic graphs pay dispatch repeatedly; larger stable graphs give the runtime more room to amortize overhead.</p></div>"),
-        v1_07_op_count,
-        mo.hstack([
-            v1_07_metric_card("Selected runtime", v1_07_decision.selected_label, "changes in Part C", COLORS["BlueLine"]),
-            v1_07_metric_card("Total latency", f"{v1_07_selected_stack.total_latency_ms:.2f} ms", f"budget {v1_07_framework.latency_budget_ms:.1f} ms", COLORS["OrangeLine"]),
-            v1_07_metric_card("Dominant overhead", v1_07_selected_stack.dominant_overhead, "dispatch stack result", COLORS["RedLine"]),
-        ], justify="start", gap=1),
-        mo.as_html(_latency_fig),
-        v1_07_table(
-            "Evidence Table - Dispatch Stack",
-            ("Runtime", "Total latency", "Overhead", "Footprint", "Kernel support", "Feasible", "Dominant overhead", "Violation"),
-            _dispatch_table_rows,
-        ),
-        v1_07_prediction_feedback(
-            v1_07_overhead_prediction.value,
-            v1_07_actual_overhead_category,
-            _overhead_labels,
-            "That is the amount system the selected runtime exposes first.",
-            "The stack shows why framework overhead is not a constant; the binding term changes with runtime path and track constraints.",
-        ),
-        v1_07_constraint_callout(
-            "Consequence boundary",
-            _part_a_ok,
-            _part_a_detail,
-            _part_a_mitigation,
-        ),
-        v1_07_math_peek(
-            "Math Peek / Source Model - dispatch tax",
-            f"""
-    The chapter defines dispatch tax as host/runtime orchestration relative to useful work:
-
-    $$
-    \\text{{Overhead Ratio}} =
-    \\frac{{N_{{ops}} \\cdot t_{{dispatch}}}}{{T_{{compute}} + T_{{memory}}}}
-    $$
-
-    For **{v1_07_decision.selected_label}**, the notebook-local scenario uses
-    `dispatch_stack()` with `op_count = {v1_07_op_count.value}` and the selected track profile.
-    Useful compute is {v1_07_selected_stack.useful_compute_ms:.2f} ms; non-compute overhead is
-    {v1_07_selected_stack.total_latency_ms - v1_07_selected_stack.useful_compute_ms:.2f} ms.
-    """,
-        ),
-        source_trace({
-            "chapter_anchor": "Execution Problem / The dispatch tax",
-            "formula": "Overhead Ratio = N_ops * t_dispatch / (T_compute + T_memory)",
-            "helper": "mlsysbook_labs.frameworks.dispatch_stack",
-            "hardware_ref": v1_07_framework.hardware_ref,
-            "model_ref": v1_07_framework.model_ref,
-        }, summary="Part A evidence is computed from dispatch_stack() and the selected track profile."),
-    ])
-
-    _part_b = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel mlsysbook-nugget">
-          <div class="mlsysbook-part-title"><h2>Part B: Concept Module - Fusion Helps Only Inside Supported Shapes</h2></div>
-          <div class="mlsysbook-callout"><strong>Scenario:</strong>
-            {v1_07_variant.stakeholder} wants the runtime to remove dispatch and memory traffic through
-            graph capture, delegate setup, or fusion. The boundary is whether compile cost, reuse, and
-            supported shapes line up.</div>
-        </div>
-        """),
-        mo.Html("<div class=\"mlsysbook-panel\"><h2>Prediction</h2><p>Choose whether the compiled/delegate path pays back, fails to amortize, or is blocked by shape/operator support.</p></div>"),
-        v1_07_break_even_prediction,
-        mo.Html("<div class=\"mlsysbook-panel\"><h2>Manipulation</h2><p>Move both reuse and shape dynamism. Reuse amortizes compile cost; dynamism increases guard pressure and can reduce supported graph coverage.</p></div>"),
-        mo.hstack([v1_07_reuse_count, v1_07_shape_dynamism], justify="start", gap=2),
-        mo.as_html(_break_fig),
-        v1_07_table(
-            "Evidence Table - Break-Even And Supported Shapes",
-            ("Runtime", "Execution mode", "Shape-adjusted support", "Support headroom", "Break-even", "Pays back", "Feasible with shape", "Violation"),
-            _support_table_rows,
-        ),
-        v1_07_prediction_feedback(
-            v1_07_break_even_prediction.value,
-            v1_07_actual_break_even_category,
-            _break_even_labels,
-            "That matches the boundary shown by the reuse and support model.",
-            "Compilation is not a switch. The payback depends on reuse, and the fusion benefit only exists inside supported graph regions.",
-        ),
-        v1_07_constraint_callout(
-            "Fusion boundary",
-            _part_b_ok,
-            _part_b_detail,
-            _part_b_mitigation,
-        ),
-        v1_07_math_peek(
-            "Math Peek / Source Model - compile break-even",
-            f"""
-    The chapter's compile decision rule is:
-
-    $$
-    N_{{breakeven}} =
-    \\frac{{T_{{compile}}}}{{T_{{eager}} - T_{{compiled}}}}
-    $$
-
-    The selected runtime has compile/delegate cost {v1_07_selected_break_even.compile_cost_s:.1f} s and
-    per-inference savings {v1_07_selected_break_even.per_inference_savings_ms:.2f} ms against the baseline.
-    The selected shape-dynamism pressure is {v1_07_shape_dynamism.value}% and the adjusted support floor is
-    {v1_07_framework.kernel_support_floor_pct:.1f}%.
-    """,
-        ),
-        source_trace({
-            "chapter_anchor": "Kernel fusion / Hybrid JIT and compilation",
-            "formula": "N_breakeven = T_compile / (T_eager - T_compiled)",
-            "helper": "mlsysbook_labs.frameworks.compile_break_even",
-            "local_model": "v1_07_support_rows adjusts support by shape dynamism without editing shared helpers",
-            "runtime_id": v1_07_decision.selected_id,
-        }, summary="Part B combines compile_break_even() with a notebook-local supported-shape boundary."),
-        mo.Html("<div class=\"mlsysbook-panel\"><h2>Checkpoint</h2><p>Record the action you would take before asking the team to optimize this graph.</p></div>"),
-        v1_07_part_b_checkpoint,
-    ])
-
-    _part_c = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel mlsysbook-nugget">
-          <div class="mlsysbook-part-title"><h2>Part C: Concept Module - Portability Is An Amount-System Trade</h2></div>
-          <div class="mlsysbook-callout"><strong>Scenario:</strong>
-            The team can keep a portable path or choose a narrower target runtime. For {v1_07_framework.label},
-            portability is paid in {_amount_story['amounts']}.</div>
-        </div>
-        """),
-        mo.Html("<div class=\"mlsysbook-panel\"><h2>Prediction</h2><p>Before choosing a runtime, predict which amount compatibility will consume first.</p></div>"),
-        v1_07_portability_prediction,
-        mo.Html("<div class=\"mlsysbook-panel\"><h2>Manipulation</h2><p>Select a runtime path. The table compares portability risk to latency headroom, footprint headroom, and supported operator coverage.</p></div>"),
-        v1_07_runtime_choice,
-        v1_07_table(
-            "Evidence Table - Portability Amounts",
-            ("Runtime", "Latency headroom", "Footprint headroom", "Adjusted support", "Compatibility score", "Portability risk"),
-            _portability_rows,
-        ),
-        mo.hstack([
-            v1_07_metric_card("Selected runtime", v1_07_decision.selected_label, v1_07_selected_support["execution_mode"], COLORS["BlueLine"]),
-            v1_07_metric_card("Support headroom", f"{v1_07_selected_support['support_headroom_pct']:.1f} pp", f"floor {v1_07_framework.kernel_support_floor_pct:.1f}%", COLORS["GreenLine"]),
-            v1_07_metric_card("Compatibility score", f"{v1_07_selected_support['compatibility_score']:.1f}", "0-100 scenario score", COLORS["OrangeLine"]),
-        ], justify="start", gap=1),
-        v1_07_prediction_feedback(
-            v1_07_portability_prediction.value,
-            v1_07_actual_portability_cost,
-            _portability_labels,
-            "That is the amount compatibility consumes in this selected runtime.",
-            "The selected runtime shows that portability is not free: the cost appears in the track's binding amount system.",
-        ),
-        v1_07_constraint_callout(
-            "Portability trade",
-            _part_c_ok,
-            _part_c_detail,
-            _part_c_mitigation,
-        ),
-        v1_07_math_peek(
-            "Math Peek / Source Model - compatibility score",
-            f"""
-    The notebook converts portability into normalized headroom amounts:
-
-    ```
-    compatibility_score =
-      mean(latency_headroom / latency_budget,
-       support_headroom / available_support_headroom,
-       footprint_headroom / memory_budget) * 100
-    ```
-
-    This is not a framework leaderboard. It is a scenario model that forces the same runtime choice to pass
-    {v1_07_framework.primary_metric} while respecting {v1_07_framework.guardrail_metric}.
-    """,
-        ),
-        source_trace({
-            "chapter_anchor": "Deployment Targets / Framework Selection / ONNX portability",
-            "source_claim": "compatibility can lose target-specific optimizations or custom operators",
-            "profile_primary_metric": v1_07_framework.primary_metric,
-            "profile_guardrail_metric": v1_07_framework.guardrail_metric,
-            "runtime_id": v1_07_decision.selected_id,
-        }, summary="Part C interprets portability through the selected track's amount system."),
-        mo.Html("<div class=\"mlsysbook-panel\"><h2>Checkpoint</h2><p>Choose the portability posture you would defend in the design memo.</p></div>"),
-        v1_07_part_c_checkpoint,
-    ])
-
-    _part_d = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel mlsysbook-nugget">
-          <div class="mlsysbook-part-title"><h2>Part D: Concept Module - Framework Selection Requires Validation Evidence</h2></div>
-          <div class="mlsysbook-callout"><strong>Scenario:</strong>
-            {v1_07_variant.stakeholder} needs a release recommendation, not just a chart. The runtime must satisfy
-            deployment constraints and produce validation evidence that survives the selected track.</div>
-        </div>
-        """),
-        mo.Html("<div class=\"mlsysbook-panel\"><h2>Prediction</h2><p>Choose the evidence that would make the recommendation credible for this track.</p></div>"),
-        v1_07_validation_prediction,
-        mo.Html("<div class=\"mlsysbook-panel\"><h2>Manipulation</h2><p>Set the release posture after inspecting feasibility, payback, rejected alternatives, and validation requirements.</p></div>"),
-        v1_07_release_posture,
-        v1_07_table(
-            "Evidence Table - Release Readiness",
-            ("Runtime", "Feasible with shape", "Compile pays back", "Validation requirement", "Residual risk"),
-            _readiness_rows,
-        ),
-        v1_07_prediction_feedback(
-            v1_07_validation_prediction.value,
-            v1_07_actual_validation_focus,
-            _validation_labels,
-            "That evidence matches the selected track's deployment risk.",
-            "The selected track changes what evidence is credible. A runtime recommendation without the right validation test is incomplete.",
-        ),
-        mo.callout(
-            mo.md(
-                f"**Release gate:** {v1_07_release_result['status']}. "
-                f"Blocking issue: {_release_issue_text}. "
-                f"Next action: {v1_07_release_result['action']}."
-            ),
-            kind=v1_07_release_result["kind"],
-        ),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Selected Runtime Evidence</h2>
-          <div class="mlsysbook-grid">
-            <div class="mlsysbook-field"><strong>Selected runtime</strong>{v1_07_decision.selected_label}</div>
-            <div class="mlsysbook-field"><strong>Feasible</strong>{'yes' if v1_07_selected_support['feasible_with_shape'] else 'no'}</div>
-            <div class="mlsysbook-field"><strong>Total latency</strong>{v1_07_selected_stack.total_latency_ms:.2f} ms / {v1_07_framework.latency_budget_ms:.1f} ms</div>
-            <div class="mlsysbook-field"><strong>Break-even</strong>{v1_07_fmt_int(v1_07_selected_break_even.break_even_inferences)}</div>
-            <div class="mlsysbook-field"><strong>Adjusted support</strong>{v1_07_selected_support['adjusted_support_pct']:.1f}% / {v1_07_framework.kernel_support_floor_pct:.1f}%</div>
-            <div class="mlsysbook-field"><strong>Validation</strong>{v1_07_decision.validation_requirement}</div>
-          </div>
-          <div class="mlsysbook-callout"><strong>Unsupported-op warning:</strong> {v1_07_decision.unsupported_op_warning}</div>
-          <div class="mlsysbook-callout"><strong>Memo decision:</strong> {v1_07_decision.memo_summary}</div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Rejected Alternatives</h2>
-          <ul class="mlsysbook-list">{''.join(f'<li>{item}</li>' for item in v1_07_decision.rejected_alternatives)}</ul>
-          <h2>Track Validation Tests</h2>
-          <ul class="mlsysbook-list">{''.join(f'<li>{test}</li>' for test in v1_07_framework.validation_tests)}</ul>
-        </div>
-        """),
-        v1_07_math_peek(
-            "Math Peek / Source Model - deployment feasibility rule",
-            f"""
-    The release decision is an amount-system predicate:
-
-    ```
-    latency_ms <= {v1_07_framework.latency_budget_ms:.1f}
-    footprint_mb <= {v1_07_framework.memory_budget_mb:.3f}
-    support_pct >= {v1_07_framework.kernel_support_floor_pct:.1f}
-    reuse_count >= break_even_inferences  # when compile/delegate cost is nonzero
-    validation_evidence matches selected track
-    ```
-
-    Framework selection is therefore constrained optimization, not a framework popularity contest.
-    """,
-        ),
-        source_trace({
-            "chapter_anchor": "Framework Selection / Fallacies and Pitfalls",
-            "helper": "mlsysbook_labs.frameworks.runtime_decision",
-            "runtime_id": v1_07_decision.selected_id,
-            "validation_requirement": v1_07_decision.validation_requirement,
-            "residual_risk": v1_07_decision.residual_risk,
-        }, summary="Part D turns runtime evidence into a release recommendation."),
-        mo.Html("<div class=\"mlsysbook-panel\"><h2>Checkpoint Report Decision</h2><p>Write the final runtime recommendation with the assumption and evidence you would sign.</p></div>"),
-        v1_07_recommendation,
-    ])
-
-    _synthesis = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Synthesis: Runtime Deployment Recommendation</h2>
-          <p>The chapter invariant is now a deployment recommendation: a framework abstraction is
-          acceptable only when its graph shape, dispatch cost, operator support, portability risk,
-          and validation evidence survive the selected track.</p>
-          <div class="mlsysbook-grid">
-            <div class="mlsysbook-field"><strong>Track</strong>{v1_07_framework.label}</div>
-            <div class="mlsysbook-field"><strong>Selected runtime</strong>{v1_07_decision.selected_label}</div>
-            <div class="mlsysbook-field"><strong>Release status</strong>{v1_07_release_result['status']}</div>
-            <div class="mlsysbook-field"><strong>Dominant overhead</strong>{v1_07_decision.dominant_overhead}</div>
-            <div class="mlsysbook-field"><strong>Break-even</strong>{v1_07_selected_break_even.break_even_inferences or 'no payback'}</div>
-            <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_07_decision.residual_risk}</div>
-          </div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 5px solid #10B981; border-radius: 8px; padding: 18px 22px; margin-top: 14px; margin-bottom: 14px;">
-          <div style="font-size: 0.8rem; font-weight: 800; color: #10B981; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">
-            Lead Systems Architect Authorization
-          </div>
-          <div style="color: #1E293B; font-size: 0.95rem; line-height: 1.6;">
-            The framework and runtime architecture for <strong>{v1_07_profile.label}</strong> is authorized for execution. Operator coverage, dispatch overhead, and fusion boundaries satisfy production latency SLOs under <strong>{v1_07_framework.workload_label}</strong>.
-          </div>
-        </div>
-        """),
-        big_takeaways([
-            ("Execution mode is physical", "Eager and graph execution pay different dispatch and memory costs depending on reuse and dynamism."),
-            ("Fusion is conditional", "It removes dispatch and memory traffic only inside supported, stable graph regions."),
-            ("Portability has a price", "Compatibility can consume latency, memory, supported operators, validation evidence, or rollback simplicity."),
-            ("Selection needs evidence", "The runtime decision is valid only inside a source-traced operating envelope."),
-        ]),
-        mo.Html(f"""
-        <div class="lab-hud">
-            <span class="hud-label">LAB</span>
-            <span class="hud-value">07 &middot; ML Frameworks</span>
-            <span class="hud-label">TRACK</span>
-            <span class="hud-value">{v1_07_profile.label}</span>
-            <span style="flex:1;"></span>
-            <span class="hud-label">ARTIFACT</span>
-            <span class="hud-value">{v1_07_framework.report_artifact}</span>
-            <span class="hud-label">STATUS</span>
-            <span class="hud-active">{v1_07_release_result['status']}</span>
-        </div>
-        """),
-    ])
-
-    def build_part_a():
-        return _part_a
-
-    def build_part_b():
-        return _part_b
-
-    def build_part_c():
-        return _part_c
-
-    def build_part_d():
-        return _part_d
+    def part_e():
+        intro = mo.md("### E · Can the runtime execute the actual graph? (9 min)\nPriya, the deployment engineer, inserts one operator and shape behavior into a known-native baseline. Unsupported work must follow a visible fallback path or fail.")
+        if e_prediction.value is None:
+            return mo.vstack([intro, mo.hstack([e_operator, e_shape], widths="equal", wrap=True), e_prediction])
+        if e_result["status"] == "native":
+            status_kind = "success"
+            status_interpretation = (
+                "Native execution runs directly on the target device without fallback materialization or extra copy penalty."
+            )
+        elif e_result["status"] == "fallback":
+            status_kind = "warn"
+            status_interpretation = (
+                "A fallback is an executable path, but it fails the native-target requirement and carries explicit copies and execution cost."
+            )
+        else:
+            status_kind = "danger"
+            status_interpretation = (
+                "The workload cannot execute on the target because the operator or shape behavior is unsupported and no fallback runtime exists."
+            )
+        total = "No execution" if e_result["total_time_us"] is None else f"{e_result['total_time_us']:.2f} µs"
+        return mo.vstack([
+            intro, e_prediction, mo.hstack([e_operator, e_shape], widths="equal", wrap=True),
+            table([
+                {"Path": "Known native", "Operator": e_baseline["operator"], "Shape": e_baseline["shape_mode"], "Status": e_baseline["status"], "Copies": f"{e_baseline['fallback_copy_mb']:.3f} MB"},
+                {"Path": "Selected", "Operator": e_result["operator"], "Shape": e_result["shape_mode"], "Status": e_result["status"], "Copies": f"{e_result['fallback_copy_mb']:.3f} MB"},
+            ]),
+            mo.callout(mo.md(f"**Prediction:** {e_prediction.value}. **Observed analytically:** **{e_result['status'].upper()}**. Target result: **{total}**; fallback materialization: **{e_result['fallback_copy_mb']:.3f} MB**. {status_interpretation}"), kind=status_kind),
+            e_decision,
+            e_capture, saved("E"),
+            mo.accordion({"Calculation Notes": mo.md("Native execution requires both operator and shape support. A fallback materializes one input and one output through target memory, then uses an illustrative portable CPU path capped by the MLSysIM reference CPU rate. TinyML has no fallback runtime in this scenario.")}),
+        ])
 
     def build_synthesis():
-        return _synthesis
+        rows = []
+        for part in "ABCDE":
+            capture = _captures.get(part)
+            rows.append({
+                "Part": part,
+                "Prediction": capture.to_dict()["prediction"] if capture else "—",
+                "Evidence": "CURRENT" if capture and part not in audit.stale and (part, part) not in audit.identical_pairs else ("STALE" if capture else "MISSING"),
+            })
+        e_snapshot = _captures["E"].to_dict() if "E" in _captures else None
+        no_path_supported = e_snapshot is not None and e_snapshot["decision"] == "none" and not e_snapshot["result"]["executable"]
+        hold_supported = e_snapshot is not None and e_snapshot["decision"] == "hold"
+        distinct = final_choice.value is not None and final_rejected.value is not None and final_choice.value != final_rejected.value
+        choice_supported = (
+            (final_choice.value == "none" and no_path_supported)
+            or (final_choice.value == "hold" and hold_supported)
+            or final_choice.value in {"eager", "compiled", "compiled_fused"}
+        )
+        complete = audit.complete and distinct and choice_supported and final_trigger.value is not None and final_risk.value is not None and bool(rationale.value.strip())
+        return mo.vstack([
+            mo.md("### Synthesis · Defend one execution plan (5 min)\nChoose a tested path, quantify a rejected tested alternative, state the remaining limitation, and name the condition that would reopen the decision."),
+            table(rows),
+            mo.hstack([final_choice, final_rejected], widths="equal", wrap=True),
+            mo.hstack([final_trigger, final_risk], widths="equal", wrap=True),
+            rationale,
+            mo.callout(mo.md("**Ready for the local evidence report.**" if complete else "Complete five current contrasts. Choose two different tested paths; use hold when the baseline remains viable but evidence is insufficient, and select no feasible path only after an unsupported result. Then add a quantified rationale, limitation, and trigger."), kind="success" if complete else "warn"),
+        ])
 
-    v1_07_tabs = mo.ui.tabs({
-        "Part A - Execution Overhead": build_part_a(),
-        "Part B - Fusion Boundary": build_part_b(),
-        "Part C - Portability Trade": build_part_c(),
-        "Part D - Release Evidence": build_part_d(),
-        "Synthesis": build_synthesis(),
+    tabs = mo.ui.tabs({
+        "Part A": part_a(), "Part B": part_b(), "Part C": part_c(),
+        "Part D": part_d(), "Part E": part_e(), "Synthesis": build_synthesis(),
     })
-    v1_07_tabs
-    return
+    tabs
+    return (audit,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(
-    ledger,
-    mo,
-    v1_07_actual_break_even_category,
-    v1_07_actual_overhead_category,
-    v1_07_actual_portability_cost,
-    v1_07_actual_validation_focus,
-    v1_07_break_even_prediction,
-    v1_07_decision,
-    v1_07_framework,
-    v1_07_op_count,
-    v1_07_overhead_prediction,
-    v1_07_part_b_checkpoint,
-    v1_07_part_c_checkpoint,
-    v1_07_portability_prediction,
-    v1_07_profile,
-    v1_07_recommendation,
-    v1_07_release_posture,
-    v1_07_release_result,
-    v1_07_reuse_count,
-    v1_07_runtime_choice,
-    v1_07_selected_break_even,
-    v1_07_selected_stack,
-    v1_07_selected_support,
-    v1_07_shape_dynamism,
-    v1_07_validation_prediction,
-    v1_07_variant,
+    audit, build_lab_report, final_choice, final_rejected, final_risk,
+    final_trigger, get_evidence, get_lab_metadata, mo, profile, rationale,
+    report_export_panel, track_id,
 ):
-    _recommendation_text = str(v1_07_recommendation.value or "").strip()
-    _ready = bool(
-        v1_07_overhead_prediction.value is not None
-        and v1_07_break_even_prediction.value is not None
-        and v1_07_portability_prediction.value is not None
-        and v1_07_validation_prediction.value is not None
-        and _recommendation_text
+    _captures = get_evidence()
+    _e_snapshot = _captures["E"].to_dict() if "E" in _captures else None
+    _no_path_supported = _e_snapshot is not None and _e_snapshot["decision"] == "none" and not _e_snapshot["result"]["executable"]
+    _hold_supported = _e_snapshot is not None and _e_snapshot["decision"] == "hold"
+    _choice_supported = (
+        (final_choice.value == "none" and _no_path_supported)
+        or (final_choice.value == "hold" and _hold_supported)
+        or final_choice.value in {"eager", "compiled", "compiled_fused"}
     )
-    ledger.save(chapter=7, design={
-        "chapter": "v1_07",
-        "track_id": v1_07_profile.track_id,
-        "scenario_id": v1_07_variant.scenario_id,
-        "hardware_ref": v1_07_framework.hardware_ref,
-        "model_ref": v1_07_framework.model_ref,
-        "completed": _ready,
-        "part_a_prediction": v1_07_overhead_prediction.value,
-        "part_a_actual_dominant_overhead": v1_07_actual_overhead_category,
-        "part_b_prediction": v1_07_break_even_prediction.value,
-        "part_b_actual_boundary": v1_07_actual_break_even_category,
-        "part_b_checkpoint": v1_07_part_b_checkpoint.value,
-        "part_c_prediction": v1_07_portability_prediction.value,
-        "part_c_actual_portability_cost": v1_07_actual_portability_cost,
-        "part_c_checkpoint": v1_07_part_c_checkpoint.value,
-        "part_d_validation_prediction": v1_07_validation_prediction.value,
-        "part_d_actual_validation_focus": v1_07_actual_validation_focus,
-        "release_posture": v1_07_release_posture.value,
-        "release_status": v1_07_release_result["status"],
-        "operation_count": v1_07_op_count.value,
-        "reuse_count": v1_07_reuse_count.value,
-        "shape_dynamism_pct": v1_07_shape_dynamism.value,
-        "selected_runtime": v1_07_runtime_choice.value,
-        "dominant_overhead": v1_07_decision.dominant_overhead,
-        "break_even_inferences": v1_07_selected_break_even.break_even_inferences,
-        "total_latency_ms": v1_07_selected_stack.total_latency_ms,
-        "kernel_support_pct": v1_07_selected_support["adjusted_support_pct"],
-        "runtime_feasible": v1_07_selected_support["feasible_with_shape"],
-        "validation_requirement": v1_07_decision.validation_requirement,
-        "residual_risk": v1_07_decision.residual_risk,
-        "final_recommendation": _recommendation_text,
-    })
-
-    _hud = mo.Html(f"""
-    <div class="lab-hud">
-        <span class="hud-label">LAB</span>
-        <span class="hud-value">07 &middot; ML Frameworks</span>
-        <span class="hud-label">TRACK</span>
-        <span class="hud-value">{v1_07_profile.label}</span>
-        <span style="flex:1;"></span>
-        <span class="hud-label">ARTIFACT</span>
-        <span class="hud-value">{v1_07_framework.report_artifact}</span>
-        <span class="hud-label">STATUS</span>
-        <span class="hud-active">{'SAVED' if _ready else 'ACTIVE'}</span>
-    </div>
-    <div class="mlsysbook-panel">
-      <h2>Design Ledger</h2>
-      <div class="mlsysbook-grid">
-        <div class="mlsysbook-field"><strong>Ready to save</strong>{'yes' if _ready else 'not yet'}</div>
-        <div class="mlsysbook-field"><strong>Selected runtime</strong>{v1_07_decision.selected_label}</div>
-        <div class="mlsysbook-field"><strong>Release status</strong>{v1_07_release_result['status']}</div>
-        <div class="mlsysbook-field"><strong>Dominant overhead</strong>{v1_07_decision.dominant_overhead}</div>
-        <div class="mlsysbook-field"><strong>Break-even</strong>{v1_07_selected_break_even.break_even_inferences or 'no payback'}</div>
-        <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_07_decision.residual_risk}</div>
-      </div>
-      <div style="margin-top:10px; color:#475569; line-height:1.55;">
-        The ledger records each student decision. All predictions and a final recommendation mark the design complete.
-      </div>
-    </div>
-    """)
-    _hud
-    return
+    _ready = (
+        audit.complete and final_choice.value is not None
+        and final_rejected.value is not None
+        and final_choice.value != final_rejected.value
+        and _choice_supported
+        and final_trigger.value is not None and final_risk.value is not None
+        and bool(rationale.value.strip())
+    )
+    mo.stop(not _ready)
+    _snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
+    _chosen_e = _snapshots["E"]["chosen_result"] or _snapshots["E"]["result"]
+    report = build_lab_report(
+        get_lab_metadata("vol1/lab_07_ml_frameworks.py"),
+        track=track_id, scenario=profile.workload,
+        learning_objectives=[
+            "Quantify dispatch and compilation overhead across repeated execution",
+            "Compare graph traffic and activation storage across framework policies",
+            "Diagnose native, fallback, and unsupported deployment paths",
+        ],
+        predictions={part: _snapshots[part]["prediction"] for part in "ABCDE"},
+        knob_settings={part: _snapshots[part]["inputs"] for part in "ABCDE"},
+        evidence_summary={part: {"baseline": _snapshots[part]["baseline"], "result": _snapshots[part]["result"], "alternatives": _snapshots[part]["alternatives"]} for part in "ABCDE"},
+        binding_constraints={"runtime_path": _chosen_e["status"], "activation_memory": "PASS" if _snapshots["D"]["result"]["memory_feasible"] else "OOM"},
+        decisions={"recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "reevaluation_trigger": final_trigger.value},
+        final_decision={"recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "rationale": rationale.value},
+        big_takeaways=[
+            "Fine-grained work can spend more time dispatching than computing.",
+            "Compilation and fusion repay costs only when reuse and graph continuity preserve their savings.",
+            "Recomputation and fallback move cost between memory, arithmetic, and portability.",
+        ],
+        reflections={"rationale": rationale.value, "reevaluation_trigger": final_trigger.value},
+        residual_risk=final_risk.value,
+        result_snapshot={"track": track_id, "captures": _snapshots, "recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "reevaluation_trigger": final_trigger.value, "residual_risk": final_risk.value},
+        source_trace={"scenario": "Illustrative operation graph and support fixture.", "calculations": "MLSysIM v1_07_experiments evaluators."},
+    )
+    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    return (report,)
 
 
-@app.cell(hide_code=True)
-def _(
-    build_lab_report,
-    mo,
-    report_export_panel,
-    v1_07_actual_break_even_category,
-    v1_07_actual_overhead_category,
-    v1_07_actual_portability_cost,
-    v1_07_actual_validation_focus,
-    v1_07_break_even_prediction,
-    v1_07_break_evens,
-    v1_07_decision,
-    v1_07_dispatch_rows,
-    v1_07_framework,
-    v1_07_metadata,
-    v1_07_op_count,
-    v1_07_overhead_prediction,
-    v1_07_part_b_checkpoint,
-    v1_07_part_c_checkpoint,
-    v1_07_portability_prediction,
-    v1_07_profile,
-    v1_07_recommendation,
-    v1_07_release_posture,
-    v1_07_release_result,
-    v1_07_reuse_count,
-    v1_07_runtime_choice,
-    v1_07_selected_break_even,
-    v1_07_selected_stack,
-    v1_07_selected_support,
-    v1_07_shape_dynamism,
-    v1_07_support_adjusted_rows,
-    v1_07_validation_prediction,
-    v1_07_variant,
+@app.cell
+async def _(
+    audit, final_choice, final_rejected, final_risk, final_trigger,
+    get_evidence, ledger, mo, rationale, track_id,
 ):
-    _incomplete = []
-    if v1_07_overhead_prediction.value is None:
-        _incomplete.append("Part A overhead prediction")
-    if v1_07_break_even_prediction.value is None:
-        _incomplete.append("Part B break-even prediction")
-    if v1_07_part_b_checkpoint.value is None:
-        _incomplete.append("Part B checkpoint")
-    if v1_07_portability_prediction.value is None:
-        _incomplete.append("Part C portability prediction")
-    if v1_07_part_c_checkpoint.value is None:
-        _incomplete.append("Part C checkpoint")
-    if v1_07_validation_prediction.value is None:
-        _incomplete.append("Part D validation prediction")
-    if v1_07_release_posture.value is None:
-        _incomplete.append("Part D release posture")
-    if not str(v1_07_recommendation.value or "").strip():
-        _incomplete.append("Final runtime recommendation")
+    import html as _html
 
-    _report = build_lab_report(
-        v1_07_metadata,
-        track=v1_07_profile.label,
-        scenario=v1_07_variant.workload_summary,
-        learning_objectives=(
-            "Diagnose how eager and graph execution pay different dispatch and memory overheads.",
-            "Calculate compile or delegate break-even while checking shape and operator support.",
-            "Explain portability as a track-specific amount-system trade.",
-            "Make a runtime deployment recommendation backed by validation evidence.",
-        ),
-        predictions={
-            "part_a_overhead": v1_07_overhead_prediction.value,
-            "part_b_boundary": v1_07_break_even_prediction.value,
-            "part_c_portability_cost": v1_07_portability_prediction.value,
-            "part_d_validation_focus": v1_07_validation_prediction.value,
-        },
-        knob_settings={
-            "operation_count": v1_07_op_count.value,
-            "reuse_count": v1_07_reuse_count.value,
-            "shape_dynamism_pct": v1_07_shape_dynamism.value,
-            "selected_runtime": v1_07_runtime_choice.value,
-            "part_b_checkpoint": v1_07_part_b_checkpoint.value,
-            "part_c_checkpoint": v1_07_part_c_checkpoint.value,
-            "release_posture": v1_07_release_posture.value,
-        },
-        binding_constraints={
-            "actual_overhead_category": v1_07_actual_overhead_category,
-            "actual_break_even_boundary": v1_07_actual_break_even_category,
-            "actual_portability_cost": v1_07_actual_portability_cost,
-            "actual_validation_focus": v1_07_actual_validation_focus,
-            "release_status": v1_07_release_result["status"],
-        },
-        evidence_summary={
-            "hardware_ref": v1_07_framework.hardware_ref,
-            "model_ref": v1_07_framework.model_ref,
-            "latency_budget_ms": v1_07_framework.latency_budget_ms,
-            "memory_budget_mb": v1_07_framework.memory_budget_mb,
-            "kernel_support_floor_pct": v1_07_framework.kernel_support_floor_pct,
-            "selected_runtime": v1_07_decision.selected_label,
-            "total_latency_ms": v1_07_selected_stack.total_latency_ms,
-            "dominant_overhead": v1_07_decision.dominant_overhead,
-            "break_even_inferences": v1_07_selected_break_even.break_even_inferences,
-            "shape_adjusted_support_pct": v1_07_selected_support["adjusted_support_pct"],
-            "runtime_feasible": v1_07_selected_support["feasible_with_shape"],
-            "unsupported_op_warning": v1_07_decision.unsupported_op_warning,
-            "validation_requirement": v1_07_decision.validation_requirement,
-        },
-        final_decision={
-            "memo_summary": v1_07_decision.memo_summary,
-            "release_status": v1_07_release_result["status"],
-            "student_recommendation": v1_07_recommendation.value,
-        },
-        big_takeaways=(
-            "Framework abstractions change deployed runtime behavior, not just source-code style.",
-            "Compile and fusion pay back only when graph reuse and supported shapes are real.",
-            "Portability can cost performance or capability, so unsupported-op evidence belongs in the release memo.",
-            "A runtime recommendation is valid only with track-specific validation evidence.",
-        ),
-        reflections={
-            "student_recommendation": v1_07_recommendation.value,
-            "rejected_alternatives": v1_07_decision.rejected_alternatives,
-            "validation_requirement": v1_07_decision.validation_requirement,
-            "release_gate_issues": v1_07_release_result["issues"],
-            "report_artifact": v1_07_framework.report_artifact,
-        },
-        residual_risk=v1_07_decision.residual_risk,
-        source_trace={
-            "track_id": v1_07_profile.track_id,
-            "scenario_id": v1_07_variant.scenario_id,
-            "hardware_ref": v1_07_variant.hardware_ref,
-            "model_ref": v1_07_variant.model_ref,
-            "shared_helper": "mlsysbook_labs.frameworks",
-            "notebook_local_helpers": "v1_07_* formatting, support-boundary, release-gate helpers",
-            "source_policy": v1_07_profile.source_policy,
-        },
-        result_snapshot={
-            "dispatch_rows": v1_07_dispatch_rows,
-            "break_even_rows": v1_07_break_evens,
-            "support_adjusted_rows": v1_07_support_adjusted_rows,
-            "selected_stack": v1_07_selected_stack,
-            "selected_break_even": v1_07_selected_break_even,
-            "selected_support": v1_07_selected_support,
-            "decision": v1_07_decision,
-            "release_result": v1_07_release_result,
-        },
-        incomplete_fields=tuple(_incomplete),
+    _captures = get_evidence()
+    _e_snapshot = _captures["E"].to_dict() if "E" in _captures else None
+    _no_path_supported = _e_snapshot is not None and _e_snapshot["decision"] == "none" and not _e_snapshot["result"]["executable"]
+    _hold_supported = _e_snapshot is not None and _e_snapshot["decision"] == "hold"
+    _choice_supported = (
+        (final_choice.value == "none" and _no_path_supported)
+        or (final_choice.value == "hold" and _hold_supported)
+        or final_choice.value in {"eager", "compiled", "compiled_fused"}
     )
-
-    mo.vstack([
-        mo.md("## Download Report"),
-        mo.callout(
-            mo.md(
-                "This V1-07 runtime deployment recommendation is generated locally from the "
-                "selected track, structured predictions, manipulation controls, and computed evidence."
-            ),
-            kind="info",
-        ),
-        report_export_panel(_report),
-    ])
+    _ready = (
+        audit.complete and final_choice.value is not None
+        and final_rejected.value is not None
+        and final_choice.value != final_rejected.value
+        and _choice_supported
+        and final_trigger.value is not None and final_risk.value is not None
+        and bool(rationale.value.strip())
+    )
+    _save_error = None
+    _save_succeeded = False
+    if _ready:
+        try:
+            ledger.save(chapter=7, design={
+                "schema_version": 1, "lab_id": "v1_07", "track_id": track_id,
+                "model_id": "v1_07_experiments",
+                "evidence": {part: capture.to_dict() for part, capture in _captures.items()},
+                "recommendation": final_choice.value,
+                "rejected_alternative": final_rejected.value,
+                "reevaluation_trigger": final_trigger.value,
+                "residual_risk": final_risk.value, "rationale": rationale.value,
+            })
+            await ledger.flush()
+        except Exception as _exc:
+            _save_error = f"{type(_exc).__name__}: {_exc}"
+        else:
+            _save_succeeded = True
+    if _save_succeeded:
+        _status = "SAVED"
+    elif _save_error is not None:
+        _status = f"SAVE FAILED: {_html.escape(_save_error)}"
+    else:
+        _status = "EVIDENCE IN PROGRESS"
+    mo.Html(
+        f'<div class="lab-hud"><span>LAB 07 · The Framework Tax · STATUS: {_status}</span></div>'
+    )
     return
 
 

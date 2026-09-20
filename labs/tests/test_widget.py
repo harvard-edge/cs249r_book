@@ -239,26 +239,59 @@ class TestInteractiveState:
 
 # ── Test: Prediction-Reveal Pattern ──────────────────────────────────────────
 
+def check_has_prediction_reveal(source: str) -> bool:
+    """Verify that a prediction-vs-reality reveal exists via AST."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    markers = ("prediction", "predicted", "you predicted", "your prediction", "actual", "off by")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            f = node.func
+            name = f.attr if isinstance(f, ast.Attribute) else (f.id if isinstance(f, ast.Name) else None)
+            if name in ("md", "Html", "callout") and node.args:
+                arg = node.args[0]
+                if isinstance(arg, ast.Call):
+                    arg = arg.args[0] if arg.args else None
+                if isinstance(arg, ast.JoinedStr):
+                    has_m = any(isinstance(p, ast.Constant) and isinstance(p.value, str) and any(m in p.value.lower() for m in markers) for p in arg.values)
+                    has_v = any(isinstance(p, ast.FormattedValue) for p in arg.values)
+                    if has_m and has_v:
+                        return True
+                elif isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    t = arg.value.lower()
+                    if any(m in t for m in ("you predicted", "your prediction", "off by")) or ("predicted" in t and "actual" in t):
+                        return True
+    return False
+
+
 class TestPredictionRevealPattern:
     """Verify the predict → reveal → reflect pedagogical flow exists."""
 
     @pytest.mark.widget
     def test_has_prediction_reveal_overlay(self, lab_path):
-        """Labs should show 'You predicted X, actual is Y' text."""
+        """Labs should show visible prediction-vs-reality reveal overlay."""
         if "lab_00" in lab_path:
             pytest.skip("Lab 00 is orientation")
         source = Path(lab_path).read_text()
-        reveal_markers = [
-            "You predicted",
-            "you predicted",
-            "Your prediction",
-            "your prediction",
-            "predicted",
-            "actual",
-            "off by",
-        ]
-        has_reveal = any(marker in source for marker in reveal_markers)
-        assert has_reveal, "Missing prediction-vs-reality reveal overlay"
+        has_reveal = check_has_prediction_reveal(source)
+        assert has_reveal, (
+            "Missing prediction-vs-reality reveal overlay (expected live mo.md/mo.callout "
+            "rendering formatted prediction value e.g. '**Prediction:** {prediction.value}' "
+            "or legacy reveal pattern)"
+        )
+
+    def test_prediction_reveal_detector_negative_regression(self):
+        """Negative checks: comments, unrelated strings, and empty reveals must not satisfy detector."""
+        assert not check_has_prediction_reveal("# mo.callout(mo.md(f'**Prediction:** {a_prediction.value}'))")
+        assert not check_has_prediction_reveal("notes = '**Prediction:** committed value'\nx = 'predicted actual'")
+        assert not check_has_prediction_reveal("import marimo as mo\nmo.md('')")
+        assert not check_has_prediction_reveal("import marimo as mo\nmo.md('**Prediction:**')")
+        assert not check_has_prediction_reveal("import marimo as mo\nmo.md(f'**Prediction:** pending')")
+        assert check_has_prediction_reveal(
+            "import marimo as mo\nmo.callout(mo.md(f'**Prediction:** {a_prediction.value}. Actual is 42'), kind='info')"
+        )
 
     @pytest.mark.widget
     def test_has_mo_stop_gate(self, lab_path):

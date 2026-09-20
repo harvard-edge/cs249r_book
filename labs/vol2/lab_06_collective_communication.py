@@ -6,1583 +6,631 @@ app = marimo.App(width="full", app_title="Lab 06: Collective Communication · ML
 
 @app.cell
 async def _():
-    import html as html_lib
     import sys
     from pathlib import Path
-
     import marimo as mo
-    import numpy as np
 
     if sys.platform == "emscripten":
         import micropip
-
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
-        _labs_dir = Path(__file__).resolve().parents[1]
-        if str(_labs_dir) not in sys.path:
-            sys.path.insert(0, str(_labs_dir))
+        labs_dir = Path(__file__).resolve().parents[1]
+        if str(labs_dir) not in sys.path:
+            sys.path.insert(0, str(labs_dir))
         from bootstrap import native_bootstrap
-
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
-    import mlsysim
-    from mlsysim import Hardware, Systems, ureg
-    from mlsysim.physics import (
-        calc_hierarchical_allreduce_time,
-        calc_ring_allreduce_time,
-        calc_tree_allreduce_time,
+    from mlsysim.engine.v2_06_experiments import (
+        algorithm_cases, algorithm_crossover, compression_comparison,
+        overlap_bucket_options, overlap_timeline, routing_cases,
+        semantic_exchange, topology_comparison, track_profile,
     )
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        MathPeek,
-        big_takeaways,
-        build_lab_report,
-        gated_hypothesis_card,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        instrumentation_console,
-        report_export_panel,
-        resolve_mlsysim_ref,
-        source_trace,
-        track_arc_context,
-        track_context,
-        track_selector,
+        ACADEMIC_LAB_CSS, build_lab_report, get_lab_metadata, report_export_panel,
     )
+    from mlsysbook_labs.experiment_evidence import audit_evidence, capture_evidence
 
-    ledger = DesignLedger()
-    if getattr(ledger, "is_wasm", False):
-        _ = await ledger.load_async()
+    ledger = DesignLedger(volume="vol2")
+    if ledger.is_wasm:
+        _loaded = await ledger.load_async()
     return (
-        ACADEMIC_LAB_CSS,
-        COLORS,
-        Hardware,
-        MathPeek,
-        Systems,
-        apply_plotly_theme,
-        big_takeaways,
-        build_lab_report,
-        calc_hierarchical_allreduce_time,
-        calc_ring_allreduce_time,
-        calc_tree_allreduce_time,
-        gated_hypothesis_card,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        go,
-        html_lib,
-        instrumentation_console,
-        ledger,
-        mo,
-        np,
-        report_export_panel,
-        resolve_mlsysim_ref,
-        ureg,
+        ACADEMIC_LAB_CSS, COLORS, LAB_CSS, algorithm_cases,
+        algorithm_crossover, apply_plotly_theme, audit_evidence,
+        build_lab_report, capture_evidence, compression_comparison,
+        get_lab_metadata, go, ledger, mo, overlap_bucket_options,
+        overlap_timeline, report_export_panel, routing_cases,
+        semantic_exchange, topology_comparison, track_profile,
     )
 
 
 @app.cell
-def _(get_lab_metadata):
-    v2_06_lab_path = "vol2/lab_06_collective_communication.py"
-    v2_06_chapter = 6
-    v2_06_metadata = get_lab_metadata(v2_06_lab_path)
-    return v2_06_chapter, v2_06_metadata
-
-
-@app.cell(hide_code=True)
 def _(mo):
-    v2_06_track_picker = mo.ui.dropdown(
-        options={
-            "☁️ Cloud Supercomputing Track (H100 Clusters & Ring/Tree/Hierarchical AllReduce)": "cloud_fleet",
-            "🤖 Edge & Embodied Track (Robotaxi Fleet Depot Aggregation & Rare Events)": "robotaxi",
-            "📱 Mobile Track (On-Device Federated Learning & Battery/Privacy Constraints)": "iphone",
-            "⚡ TinyML Track (Wearable Sensor Cohorts & Intermittent Sync Windows)": "oura_ring",
-        },
-        value="☁️ Cloud Supercomputing Track (H100 Clusters & Ring/Tree/Hierarchical AllReduce)",
-        label="Select Course / Industry Track",
+    get_evidence, set_evidence = mo.state({})
+    return get_evidence, set_evidence
+
+
+@app.cell
+def _(mo, set_evidence):
+    track = mo.ui.dropdown(
+        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
+        value="TinyML", label="Fleet track", on_change=lambda _value: set_evidence({}),
     )
-    v2_06_track_picker
-    return (v2_06_track_picker,)
+    return (track,)
 
 
 @app.cell
-def _(
-    get_lab_track_variant,
-    get_track_profile,
-    resolve_mlsysim_ref,
-    v2_06_metadata,
-    v2_06_track_picker,
-):
-    v2_06_track_id = v2_06_track_picker.value
-    v2_06_profile = get_track_profile(v2_06_track_id)
-    v2_06_variant = get_lab_track_variant(v2_06_metadata.lab_id, v2_06_profile.track_id)
-    v2_06_hardware = resolve_mlsysim_ref(v2_06_variant.hardware_ref)
-    v2_06_model = resolve_mlsysim_ref(v2_06_variant.model_ref)
-    v2_06_defaults = v2_06_variant.defaults
-    return v2_06_defaults, v2_06_profile, v2_06_variant
+def _(track, track_profile):
+    track_id = track.value
+    profile = track_profile(track_id)
+    return profile, track_id
 
 
 @app.cell
-def _(
-    COLORS,
-    Hardware,
-    Systems,
-    apply_plotly_theme,
-    calc_hierarchical_allreduce_time,
-    calc_ring_allreduce_time,
-    calc_tree_allreduce_time,
-    go,
-    html_lib,
-    mo,
-    np,
-    ureg,
-):
-    import math
-
-    def v2_06_fmt(value, digits=2):
-        if isinstance(value, int):
-            return f"{value:,}"
-        if isinstance(value, float):
-            if abs(value) >= 100:
-                return f"{value:,.0f}"
-            if abs(value) >= 10:
-                return f"{value:,.1f}"
-            return f"{value:,.{digits}f}"
-        return str(value)
-
-    def v2_06_status_label(ok):
-        return "PASS" if ok else "FAIL"
-
-    def v2_06_bandwidth(fabric_obj):
-        return getattr(fabric_obj, "bandwidth_per_direction", None) or fabric_obj.bandwidth
-
-    _v2_06_nvlink = Hardware.Cloud.H100.nvlink
-    _v2_06_fabrics = {
-        "ib": {
-            "label": "InfiniBand NDR",
-            "fabric": Systems.Fabrics.InfiniBand_NDR,
-            "source": "MLSysIM Systems.Fabrics.InfiniBand_NDR",
-        },
-        "eth": {
-            "label": "100G Ethernet",
-            "fabric": Systems.Fabrics.Ethernet_100G,
-            "source": "MLSysIM Systems.Fabrics.Ethernet_100G",
-        },
-        "nvlink": {
-            "label": "NVLink-only",
-            "fabric": _v2_06_nvlink,
-            "source": "MLSysIM Hardware.Cloud.H100.nvlink",
-        },
+def _(algorithm_cases, mo, overlap_bucket_options, routing_cases, track_id):
+    _algorithms = algorithm_cases(track_id)
+    _algorithm_labels = {
+        f"{x['label']} · {x['payload_mb']:.3g} MB": x["case_id"]
+        for x in _algorithms["cases"]
     }
-
-    def v2_06_fabric_options():
-        return {entry["label"]: key for key, entry in _v2_06_fabrics.items()}
-
-    def v2_06_fabric_label(fabric_id):
-        return _v2_06_fabrics.get(fabric_id, _v2_06_fabrics["ib"])["label"]
-
-    def v2_06_default_fabric_label(defaults):
-        return v2_06_fabric_label(str(defaults.get("fabric", "ib")))
-
-    def v2_06_html_table(rows, columns, caption=""):
-        def _esc(value):
-            return html_lib.escape(str(value))
-
-        _head = "".join(f"<th>{_esc(label)}</th>" for key, label in columns)
-        _body = ""
-        for row in rows:
-            _body += "<tr>" + "".join(f"<td>{_esc(row.get(key, ''))}</td>" for key, label in columns) + "</tr>"
-        _caption = f"<caption>{_esc(caption)}</caption>" if caption else ""
-        return mo.Html(
-            f"""
-            <table style="width:100%; border-collapse:collapse; margin:10px 0 16px 0;
-                          font-size:0.88rem; background:white; border:1px solid {COLORS['Border']};">
-              {_caption}
-              <thead>
-                <tr style="background:#f8fafc; color:{COLORS['Text']}; text-align:left;">{_head}</tr>
-              </thead>
-              <tbody>{_body}</tbody>
-            </table>
-            <style>
-              table th, table td {{
-                border-bottom: 1px solid {COLORS['Border']};
-                padding: 8px 10px;
-                vertical-align: top;
-              }}
-              table caption {{
-                caption-side: bottom;
-                text-align: left;
-                color: {COLORS['TextMuted']};
-                padding-top: 6px;
-                font-size: 0.78rem;
-              }}
-            </style>
-            """
-        )
-
-    def v2_06_prediction_feedback(value, correct_value, correct_message, miss_message):
-        if value is None:
-            return mo.callout(mo.md("Commit to a prediction before opening the instrument."), kind="warn")
-        if value == correct_value:
-            return mo.callout(mo.md(correct_message), kind="success")
-        return mo.callout(mo.md(miss_message), kind="warn")
-
-    def v2_06_failure_callout(ok, pass_message, fail_message):
-        return mo.callout(mo.md(pass_message if ok else fail_message), kind="success" if ok else "danger")
-
-    def v2_06_track_lens(profile, variant):
-        defaults = variant.defaults
-        lenses = {
-            "iphone": {
-                "scenario": "A mobile federated learning engineer is deciding how a phone cohort should aggregate updates without turning secure aggregation into a battery or privacy liability.",
-                "decision_frame": "Choose the cohort aggregation algorithm, topology assumption, and optimization policy.",
-                "payload_name": "secure update payload",
-                "participant_name": "phones in the cohort",
-                "budget_ms": 120.0,
-                "quality_floor_pct": 88.0,
-                "compression_penalty_pct": 2.6,
-                "max_compression_ratio": 4,
-                "max_overlap_pct": 45,
-                "hierarchy_supported": True,
-                "requires_local_tier": False,
-                "topology_guardrail_text": "Cohort hierarchy is an edge-staging assumption; privacy and radio evidence must support it.",
-                "optimization_guardrail_label": "privacy/battery risk",
-                "validation_focus": "privacy protocol audit plus battery regression",
-                "report_prompt": "Frame the review around cohort aggregation, secure aggregation overhead, and battery cost.",
-                "reliability_implication": "V2-07 should test whether coordinator retries or dropped phones corrupt the aggregate or leak privacy metadata.",
-            },
-            "oura_ring": {
-                "scenario": "A wearable systems engineer is deciding how intermittent rings should synchronize tiny summaries through phone-nearby windows.",
-                "decision_frame": "Choose the sync aggregation algorithm, topology assumption, and compression policy.",
-                "payload_name": "nightly summary payload",
-                "participant_name": "rings in a sync cohort",
-                "budget_ms": 60.0,
-                "quality_floor_pct": 90.0,
-                "compression_penalty_pct": 2.3,
-                "max_compression_ratio": 4,
-                "max_overlap_pct": 25,
-                "hierarchy_supported": True,
-                "requires_local_tier": False,
-                "topology_guardrail_text": "Phone-mediated hierarchy is valid only if the sync window is long enough.",
-                "optimization_guardrail_label": "sync reliability risk",
-                "validation_focus": "sync-window replay plus payload integrity check",
-                "report_prompt": "Frame the review around intermittent connectivity, wakeups, and payload integrity.",
-                "reliability_implication": "V2-07 should account for phone absence, retry storms, and partial cohort updates.",
-            },
-            "robotaxi": {
-                "scenario": "An autonomous fleet data platform lead is deciding how vehicle events should aggregate through depot and cloud tiers without losing safety evidence.",
-                "decision_frame": "Choose the depot/cloud aggregation topology and optimization policy.",
-                "payload_name": "fleet event/update payload",
-                "participant_name": "vehicles or depot shards",
-                "budget_ms": 180.0,
-                "quality_floor_pct": 93.0,
-                "compression_penalty_pct": 3.8,
-                "max_compression_ratio": 2,
-                "max_overlap_pct": 55,
-                "hierarchy_supported": True,
-                "requires_local_tier": True,
-                "topology_guardrail_text": "Depot hierarchy must reduce cloud-facing payload without erasing rare-event evidence.",
-                "optimization_guardrail_label": "event fidelity risk",
-                "validation_focus": "rare-event fidelity audit plus depot upload replay",
-                "report_prompt": "Frame the review around depot hierarchy, rare-event fidelity, and fleet update latency.",
-                "reliability_implication": "V2-07 should test whether failed depots, delayed uploads, or corrupt events bias recovery and retraining.",
-            },
-            "cloud_fleet": {
-                "scenario": "A distributed training performance lead is deciding which AllReduce plan should run across NVLink H100 nodes and InfiniBand.",
-                "decision_frame": "Choose the collective algorithm, topology assumption, and optimization policy for exposed training step time.",
-                "payload_name": "gradient bucket payload",
-                "participant_name": "accelerators",
-                "budget_ms": 130.0,
-                "quality_floor_pct": 94.0,
-                "compression_penalty_pct": 5.5,
-                "max_compression_ratio": 2,
-                "max_overlap_pct": 70,
-                "hierarchy_supported": True,
-                "requires_local_tier": True,
-                "topology_guardrail_text": "A multi-node H100 plan must use local/global topology evidence rather than a flat-ring assumption.",
-                "optimization_guardrail_label": "convergence/scheduling risk",
-                "validation_focus": "collective profiler plus convergence regression",
-                "report_prompt": "Frame the review around training throughput, topology mapping, overlap evidence, and convergence risk.",
-                "reliability_implication": "V2-07 should test checkpoint/restart cost, collective hangs, and silent gradient corruption under the selected topology.",
-            },
-        }
-        lens = dict(lenses[profile.track_id])
-        lens["operation"] = defaults.get("operation", "collective")
-        lens["residual_risk"] = defaults.get("residual_risk", "residual communication risk not specified")
-        lens["validation_tests"] = tuple(defaults.get("validation_tests", (lens["validation_focus"],)))
-        lens["workload_summary"] = variant.workload_summary
-        lens["topology_label"] = defaults.get("topology", "selected topology")
-        return lens
-
-    def v2_06_collective_terms(n_gpus, message_gb, fabric_id, local_group=1, compression_ratio=1):
-        n = max(2, int(n_gpus))
-        local = max(1, min(int(local_group), n))
-        compression = max(1, int(compression_ratio))
-        size_gb = max(0.0001, float(message_gb))
-        effective_gb = size_gb / compression
-        fabric_entry = _v2_06_fabrics.get(str(fabric_id), _v2_06_fabrics["ib"])
-        fabric_obj = fabric_entry["fabric"]
-        bandwidth = v2_06_bandwidth(fabric_obj)
-        latency = fabric_obj.latency
-        msg = effective_gb * ureg.GB
-
-        ring_total_q = calc_ring_allreduce_time(msg, n, bandwidth, latency)
-        ring_alpha_q = (2 * (n - 1) * latency).to(ureg.millisecond)
-        ring_total_ms = ring_total_q.m_as("ms")
-        ring_alpha_ms = ring_alpha_q.m_as("ms")
-        ring_beta_ms = max(0.0, ring_total_ms - ring_alpha_ms)
-
-        tree_total_q = calc_tree_allreduce_time(msg, n, bandwidth, latency)
-        tree_steps = 2 * math.ceil(math.log2(max(n, 2)))
-        tree_alpha_q = (tree_steps * latency).to(ureg.millisecond)
-        tree_total_ms = tree_total_q.m_as("ms")
-        tree_alpha_ms = tree_alpha_q.m_as("ms")
-        tree_beta_ms = max(0.0, tree_total_ms - tree_alpha_ms)
-
-        n_nodes = max(1, int(math.ceil(n / local)))
-        nvlink_bw = v2_06_bandwidth(_v2_06_nvlink)
-        hier_total_q = calc_hierarchical_allreduce_time(
-            msg,
-            n_nodes,
-            local,
-            nvlink_bw,
-            bandwidth,
-            _v2_06_nvlink.latency,
-            latency,
-        )
-        hier_total_ms = hier_total_q.m_as("ms")
-        try:
-            from mlsysim.physics.communication import calc_ring_tree_crossover_size
-            crossover_gb = calc_ring_tree_crossover_size(n, latency, bandwidth).to(ureg.GB).magnitude
-        except Exception:
-            crossover_gb = (latency * bandwidth).to(ureg.GB).magnitude
-
-        ring_binding = "alpha latency term" if ring_alpha_ms >= ring_beta_ms else "beta bandwidth term"
-        tree_binding = "alpha latency term" if tree_alpha_ms >= tree_beta_ms else "beta bandwidth term"
-        hierarchy_binding = "topology/inter-node beta" if effective_gb >= max(crossover_gb, 0.001) else "topology/alpha"
-
-        return {
-            "n_gpus": n,
-            "local_group": local,
-            "n_nodes": n_nodes,
-            "message_gb": size_gb,
-            "effective_gb": effective_gb,
-            "compression_ratio": compression,
-            "fabric_id": str(fabric_id),
-            "fabric_label": fabric_entry["label"],
-            "fabric_source": fabric_entry["source"],
-            "bandwidth_gb_s": bandwidth.to(ureg.GB / ureg.second).magnitude,
-            "latency_us": latency.to(ureg.microsecond).magnitude,
-            "crossover_gb": crossover_gb,
-            "ring": {
-                "key": "ring",
-                "label": "Flat Ring",
-                "alpha_ms": ring_alpha_ms,
-                "beta_ms": ring_beta_ms,
-                "total_ms": ring_total_ms,
-                "binding": ring_binding,
-            },
-            "tree": {
-                "key": "tree",
-                "label": "Tree",
-                "alpha_ms": tree_alpha_ms,
-                "beta_ms": tree_beta_ms,
-                "total_ms": tree_total_ms,
-                "binding": tree_binding,
-            },
-            "hierarchical": {
-                "key": "hierarchical",
-                "label": "Hierarchical",
-                "alpha_ms": 0.0,
-                "beta_ms": hier_total_ms,
-                "total_ms": hier_total_ms,
-                "binding": hierarchy_binding,
-            },
-        }
-
-    def v2_06_part_a_rows(lens, terms):
-        rows = []
-        for key in ("ring", "tree"):
-            row = terms[key]
-            rows.append(
-                {
-                    "Algorithm": row["label"],
-                    "Alpha": f"{row['alpha_ms']:.3f} ms",
-                    "Beta": f"{row['beta_ms']:.3f} ms",
-                    "Total": f"{row['total_ms']:.3f} ms",
-                    "Binding": row["binding"],
-                    "Budget": f"{v2_06_status_label(row['total_ms'] <= lens['budget_ms'])} vs {lens['budget_ms']:.0f} ms",
-                }
-            )
-        return rows
-
-    def v2_06_topology_rows(lens, terms):
-        rows = []
-        for key in ("ring", "tree", "hierarchical"):
-            row = terms[key]
-            topology_ok = True
-            reason = "topology assumption is valid for this track lens"
-            if key == "ring" and lens["requires_local_tier"] and terms["local_group"] > 1 and terms["n_gpus"] > terms["local_group"]:
-                topology_ok = False
-                reason = "flat ring ignores the fast local tier and scarce global tier"
-            if key == "hierarchical":
-                topology_ok = lens["hierarchy_supported"] and terms["local_group"] > 1
-                if topology_ok:
-                    reason = f"local group of {terms['local_group']} shrinks global payload to M/G"
-                else:
-                    reason = "hierarchy needs a real or justified local aggregation tier"
-            rows.append(
-                {
-                    "key": key,
-                    "label": row["label"],
-                    "total_ms": row["total_ms"],
-                    "binding": row["binding"],
-                    "topology_ok": topology_ok,
-                    "passes_budget": row["total_ms"] <= lens["budget_ms"],
-                    "reason": reason,
-                }
-            )
-        return rows
-
-    def v2_06_best_topology_key(rows):
-        feasible = [row for row in rows if row["topology_ok"]]
-        candidates = feasible or rows
-        return min(candidates, key=lambda row: row["total_ms"])["key"]
-
-    def v2_06_selected_key(part_b_checkpoint_value, topology_rows):
-        if part_b_checkpoint_value == "flat_ring":
-            return "ring"
-        if part_b_checkpoint_value == "tree_schedule":
-            return "tree"
-        if part_b_checkpoint_value == "hierarchical_schedule":
-            return "hierarchical"
-        return v2_06_best_topology_key(topology_rows)
-
-    def v2_06_row_by_key(rows, key):
-        return next(row for row in rows if row["key"] == key)
-
-    def v2_06_optimization_result(
-        lens,
-        selected_key,
-        n_gpus,
-        message_gb,
-        fabric_id,
-        local_group,
-        compression_ratio,
-        overlap_pct,
-    ):
-        raw_terms = v2_06_collective_terms(n_gpus, message_gb, fabric_id, local_group, compression_ratio=1)
-        opt_terms = v2_06_collective_terms(
-            n_gpus,
-            message_gb,
-            fabric_id,
-            local_group,
-            compression_ratio=compression_ratio,
-        )
-        raw_ms = raw_terms[selected_key]["total_ms"]
-        compressed_ms = opt_terms[selected_key]["total_ms"]
-        overlap = max(0.0, min(95.0, float(overlap_pct)))
-        exposed_ms = compressed_ms * (1 - overlap / 100.0)
-        compression = max(1, int(compression_ratio))
-        quality_proxy = max(0.0, 100.0 - (compression - 1) * lens["compression_penalty_pct"])
-        quality_ok = quality_proxy >= lens["quality_floor_pct"] and compression <= lens["max_compression_ratio"]
-        schedule_ok = overlap <= lens["max_overlap_pct"]
-        exposed_ok = exposed_ms <= lens["budget_ms"]
-        optimization_ok = quality_ok and schedule_ok
-        if not exposed_ok:
-            risk = "communication remains exposed beyond the step-time guardrail"
-        elif not quality_ok:
-            risk = lens["optimization_guardrail_label"]
-        elif not schedule_ok:
-            risk = "overlap assumption exceeds the schedulable work window"
-        else:
-            risk = f"validate with {lens['validation_focus']}"
-        return {
-            "selected_key": selected_key,
-            "selected_label": opt_terms[selected_key]["label"],
-            "raw_ms": raw_ms,
-            "compressed_ms": compressed_ms,
-            "exposed_ms": exposed_ms,
-            "saved_ms": max(0.0, raw_ms - exposed_ms),
-            "effective_gb": opt_terms["effective_gb"],
-            "quality_proxy": quality_proxy,
-            "quality_ok": quality_ok,
-            "schedule_ok": schedule_ok,
-            "exposed_ok": exposed_ok,
-            "optimization_ok": optimization_ok,
-            "risk": risk,
-            "binding_term": opt_terms[selected_key]["binding"],
-        }
-
-    def v2_06_plan_result(
-        lens,
-        selected_key,
-        n_gpus,
-        message_gb,
-        fabric_id,
-        local_group,
-        compression_ratio,
-        overlap_pct,
-    ):
-        terms = v2_06_collective_terms(n_gpus, message_gb, fabric_id, local_group, compression_ratio=compression_ratio)
-        topology_rows = v2_06_topology_rows(lens, terms)
-        selected_row = v2_06_row_by_key(topology_rows, selected_key)
-        opt = v2_06_optimization_result(
-            lens,
-            selected_key,
-            n_gpus,
-            message_gb,
-            fabric_id,
-            local_group,
-            compression_ratio,
-            overlap_pct,
-        )
-        topology_ok = selected_row["topology_ok"]
-        valid_plan = opt["exposed_ok"] and topology_ok and opt["optimization_ok"]
-        if not opt["exposed_ok"]:
-            binding_guardrail = "exposed step-time"
-        elif not topology_ok:
-            binding_guardrail = "topology"
-        elif not opt["optimization_ok"]:
-            binding_guardrail = "optimization risk"
-        else:
-            binding_guardrail = opt["binding_term"]
-        return {
-            **opt,
-            "topology_ok": topology_ok,
-            "topology_reason": selected_row["reason"],
-            "valid_plan": valid_plan,
-            "binding_guardrail": binding_guardrail,
-            "budget_ms": lens["budget_ms"],
-            "compression_ratio": max(1, int(compression_ratio)),
-            "overlap_pct": max(0.0, min(95.0, float(overlap_pct))),
-            "fabric_label": terms["fabric_label"],
-            "participant_count": terms["n_gpus"],
-            "local_group": terms["local_group"],
-            "message_gb": terms["message_gb"],
-        }
-
-    def v2_06_alpha_beta_chart(terms, budget_ms):
-        fig = go.Figure()
-        labels = ["Flat Ring", "Tree"]
-        fig.add_trace(
-            go.Bar(
-                x=labels,
-                y=[terms["ring"]["alpha_ms"], terms["tree"]["alpha_ms"]],
-                name="alpha latency",
-                marker_color=COLORS["OrangeLine"],
-            )
-        )
-        fig.add_trace(
-            go.Bar(
-                x=labels,
-                y=[terms["ring"]["beta_ms"], terms["tree"]["beta_ms"]],
-                name="beta bandwidth",
-                marker_color=COLORS["BlueLine"],
-            )
-        )
-        fig.add_hline(y=budget_ms, line_dash="dash", line_color=COLORS["RedLine"], annotation_text="track budget")
-        fig.update_layout(
-            barmode="stack",
-            height=330,
-            yaxis_title="Modeled time (ms)",
-            legend=dict(orientation="h", y=1.13, x=0),
-            margin=dict(l=60, r=20, t=50, b=45),
-        )
-        return apply_plotly_theme(fig)
-
-    def v2_06_frontier_chart(lens, n_gpus, fabric_id, local_group, current_message_gb):
-        sizes = np.geomspace(0.001, 80, 48)
-        series = {"ring": [], "tree": [], "hierarchical": []}
-        for size in sizes:
-            terms = v2_06_collective_terms(n_gpus, float(size), fabric_id, local_group, compression_ratio=1)
-            for key in series:
-                series[key].append(terms[key]["total_ms"])
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=sizes, y=series["ring"], mode="lines", name="Flat Ring"))
-        fig.add_trace(go.Scatter(x=sizes, y=series["tree"], mode="lines", name="Tree"))
-        fig.add_trace(go.Scatter(x=sizes, y=series["hierarchical"], mode="lines", name="Hierarchical"))
-        current_terms = v2_06_collective_terms(n_gpus, current_message_gb, fabric_id, local_group, compression_ratio=1)
-        for key, color in (("ring", COLORS["RedLine"]), ("tree", COLORS["BlueLine"]), ("hierarchical", COLORS["GreenLine"])):
-            fig.add_trace(
-                go.Scatter(
-                    x=[current_message_gb],
-                    y=[current_terms[key]["total_ms"]],
-                    mode="markers",
-                    marker=dict(size=10, color=color),
-                    name=f"current {current_terms[key]['label']}",
-                    showlegend=False,
-                )
-            )
-        fig.add_hline(y=lens["budget_ms"], line_dash="dash", line_color=COLORS["RedLine"], annotation_text="track budget")
-        fig.update_layout(
-            height=350,
-            xaxis_title="Payload per participant (GB)",
-            yaxis_title="Modeled time (ms)",
-            xaxis_type="log",
-            legend=dict(orientation="h", y=1.15, x=0),
-            margin=dict(l=60, r=20, t=55, b=45),
-        )
-        return apply_plotly_theme(fig)
-
-    def v2_06_optimization_chart(result):
-        fig = go.Figure()
-        fig.add_trace(
-            go.Bar(
-                x=["Raw selected", "Compressed", "Exposed after overlap"],
-                y=[result["raw_ms"], result["compressed_ms"], result["exposed_ms"]],
-                marker_color=[COLORS["BlueLine"], COLORS["GreenLine"], COLORS["OrangeLine"]],
-                text=[f"{result['raw_ms']:.1f}", f"{result['compressed_ms']:.1f}", f"{result['exposed_ms']:.1f}"],
-                textposition="outside",
-            )
-        )
-        fig.add_hline(y=result["budget_ms"], line_dash="dash", line_color=COLORS["RedLine"], annotation_text="track budget")
-        fig.update_layout(
-            height=330,
-            yaxis_title="Time (ms)",
-            showlegend=False,
-            margin=dict(l=60, r=20, t=35, b=45),
-        )
-        return apply_plotly_theme(fig)
-
-    def v2_06_candidate_chart(selected, rejected):
-        fig = go.Figure()
-        fig.add_trace(
-            go.Bar(
-                x=["Selected plan", "Rejected alternative"],
-                y=[selected["exposed_ms"], rejected["exposed_ms"]],
-                marker_color=[
-                    COLORS["GreenLine"] if selected["valid_plan"] else COLORS["RedLine"],
-                    COLORS["GreenLine"] if rejected["valid_plan"] else COLORS["RedLine"],
-                ],
-                text=[f"{selected['exposed_ms']:.1f} ms", f"{rejected['exposed_ms']:.1f} ms"],
-                textposition="outside",
-            )
-        )
-        fig.add_hline(y=selected["budget_ms"], line_dash="dash", line_color=COLORS["RedLine"], annotation_text="track budget")
-        fig.update_layout(
-            height=320,
-            yaxis_title="Exposed time (ms)",
-            showlegend=False,
-            margin=dict(l=60, r=20, t=35, b=45),
-        )
-        return apply_plotly_theme(fig)
-
+    a_payload_case = mo.ui.dropdown(
+        _algorithm_labels,
+        value=next(label for label, case_id in _algorithm_labels.items() if case_id == "track"),
+        label="Payload regime",
+    )
+    _routes = routing_cases(track_id)
+    b_skew = mo.ui.dropdown(
+        {x["label"]: x["case_id"] for x in _routes["cases"]},
+        value="Moderate hotspot", label="Destination pattern",
+    )
+    b_oversubscription = mo.ui.dropdown(
+        {"Nonblocking": 1.0, "2:1 oversubscribed": 2.0, "4:1 oversubscribed": 4.0},
+        value="Nonblocking", label="Fabric pressure",
+    )
+    c_plan = mo.ui.radio(
+        {"Flat ring": "flat", "Hierarchical": "hierarchical", "Hold pending measurement": "hold"},
+        label="Topology decision",
+    )
+    _buckets = overlap_bucket_options(track_id)
+    d_bucket = mo.ui.dropdown(
+        {x["label"]: x["option_id"] for x in _buckets["options"]},
+        value="Medium buckets", label="Bucket policy",
+    )
+    d_algorithm = mo.ui.dropdown(
+        {"Ring": "ring", "Tree": "tree"}, value="Ring", label="Bucket collective",
+    )
+    e_method = mo.ui.dropdown(
+        {"FP8 transport": "fp8", "Top-k with error feedback": "topk_error_feedback", "Naive top-k": "topk_naive"},
+        value="FP8 transport", label="Compression candidate",
+    )
+    e_decision = mo.ui.radio(
+        {"Adopt tested candidate": "adopt", "Keep uncompressed baseline": "keep_baseline"},
+        label="Compression decision",
+    )
     return (
-        v2_06_alpha_beta_chart,
-        v2_06_best_topology_key,
-        v2_06_candidate_chart,
-        v2_06_collective_terms,
-        v2_06_default_fabric_label,
-        v2_06_fabric_options,
-        v2_06_failure_callout,
-        v2_06_fmt,
-        v2_06_frontier_chart,
-        v2_06_html_table,
-        v2_06_optimization_chart,
-        v2_06_optimization_result,
-        v2_06_part_a_rows,
-        v2_06_plan_result,
-        v2_06_prediction_feedback,
-        v2_06_row_by_key,
-        v2_06_selected_key,
-        v2_06_status_label,
-        v2_06_topology_rows,
-        v2_06_track_lens,
+        a_payload_case, b_oversubscription, b_skew, c_plan, d_algorithm,
+        d_bucket, e_decision, e_method,
     )
 
 
 @app.cell
-def _(v2_06_profile, v2_06_track_lens, v2_06_variant):
-    v2_06_lens = v2_06_track_lens(v2_06_profile, v2_06_variant)
-    return (v2_06_lens,)
+def _(mo, track_id):
+    _track_key = track_id
+    a_prediction = mo.ui.radio(
+        {"Ring": "ring", "Tree": "tree"}, label="Which algorithm is faster?",
+    ).form(submit_button_label="Lock Part A prediction")
+    b_prediction = mo.ui.radio(
+        {"Startup": "startup", "Injection": "injection", "Hottest receiver": "hottest_receiver", "Bisection": "bisection"},
+        label="What limits destination-specific exchange?",
+    ).form(submit_button_label="Lock Part B prediction")
+    c_prediction = mo.ui.radio(
+        {"Flat ring": "flat", "Hierarchical": "hierarchical"},
+        label="Which calibrated topology is faster?",
+    ).form(submit_button_label="Lock Part C prediction")
+    d_prediction = mo.ui.radio(
+        {"Mostly hidden": "mostly_hidden", "Mostly exposed": "mostly_exposed"},
+        label="Will the selected buckets hide most communication?",
+    ).form(submit_button_label="Lock Part D prediction")
+    e_prediction = mo.ui.radio(
+        {"Faster to target": "faster", "Slower to target": "slower", "Misses target": "misses"},
+        label="What is the compression consequence?",
+    ).form(submit_button_label="Lock Part E prediction")
+    return a_prediction, b_prediction, c_prediction, d_prediction, e_prediction
 
 
-@app.cell(hide_code=True)
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    final_choice = mo.ui.radio(
+        {"Flat ring": "flat", "Hierarchical": "hierarchical", "Hold for matched measurements": "hold"},
+        label="Recommended topology",
+    )
+    final_rejected = mo.ui.radio(
+        {"Flat ring": "flat", "Hierarchical": "hierarchical", "Compression first": "compression"},
+        label="Quantified rejected alternative",
+    )
+    final_trigger = mo.ui.radio(
+        {"Payload crosses boundary": "payload_boundary", "Placement changes": "topology_context", "Quality target is missed": "quality_target"},
+        label="Reevaluation trigger",
+    )
+    final_risk = mo.ui.radio(
+        {"Calibration mismatch": "calibration", "Network contention": "contention", "Quality evidence transfer": "quality_transfer"},
+        label="Remaining limitation",
+    )
+    rationale = mo.ui.text_area(
+        label="Design rationale",
+        placeholder="Connect saved payload, topology, overlap, and quality evidence.",
+    )
+    return final_choice, final_rejected, final_risk, final_trigger, rationale
+
+
+@app.cell
 def _(
-    ACADEMIC_LAB_CSS,
-    mo,
-    v2_06_defaults,
-    v2_06_lens,
-    v2_06_profile,
-    v2_06_variant,
+    a_payload_case, algorithm_cases, algorithm_crossover, b_oversubscription,
+    b_skew, compression_comparison, d_algorithm, d_bucket, e_method,
+    overlap_bucket_options, overlap_timeline, routing_cases, semantic_exchange,
+    topology_comparison, track_id,
 ):
-    header_html = mo.Html(f"""
-    <div class="mlsysbook-lab-shell">
-      <div class="mlsysbook-lab-header" style="--mlsysbook-accent: #A51C30;">
-        <div class="mlsysbook-meta">
-          ML SYSTEMS TEXTBOOK &middot; VOLUME II &middot; CHAPTER 06 &middot; LAB 06
-        </div>
-        <h1 style="margin: 8px 0 4px 0; color: #0F172A; font-weight: 800; font-size: 1.85rem; letter-spacing: -0.02em;">
-          Collective Communication & AllReduce Topologies
-        </h1>
-        <p style="margin: 0 0 14px 0; color: #475569; font-size: 0.95rem; line-height: 1.5;">
-          Evaluate Ring, Tree, and Hierarchical AllReduce algorithms across multi-node topologies,
-          profile gradient compression with error feedback, and quantify communication-computation overlap.
-        </p>
-        <div class="mlsysbook-chip-row" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
-          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
-            <strong>Track:</strong> {v2_06_profile.label}
-          </span>
-          <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">
-            <strong>Stakeholder:</strong> {v2_06_variant.stakeholder}
-          </span>
-          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
-            <strong>Hardware:</strong> {v2_06_variant.hardware_ref}
-          </span>
-          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
-            <strong>Topology:</strong> {v2_06_defaults["topology"]}
-          </span>
-          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
-            <strong>Guardrail:</strong> {v2_06_variant.guardrail_metric}
-          </span>
-        </div>
-      </div>
+    a_packet = algorithm_cases(track_id)
+    a_choice = next(x for x in a_packet["cases"] if x["case_id"] == a_payload_case.value)
+    _a_below = next(x for x in a_packet["cases"] if x["case_id"] == "below")
+    a_baseline = algorithm_crossover(track_id, payload_mb=_a_below["payload_mb"])
+    a_result = algorithm_crossover(track_id, payload_mb=a_choice["payload_mb"])
+    a_alternatives = tuple(
+        algorithm_crossover(track_id, payload_mb=x["payload_mb"]) for x in a_packet["cases"]
+    )
+    b_packet = routing_cases(track_id)
+    b_choice = next(x for x in b_packet["cases"] if x["case_id"] == b_skew.value)
+    b_result = semantic_exchange(
+        track_id, hotspot_fraction=b_choice["hotspot_fraction"],
+        oversubscription=b_oversubscription.value,
+    )
+    c_result = topology_comparison(track_id)
+    d_packet = overlap_bucket_options(track_id)
+    d_choice = next(x for x in d_packet["options"] if x["option_id"] == d_bucket.value)
+    _d_fused = next(x for x in d_packet["options"] if x["option_id"] == "fused")
+    d_baseline = overlap_timeline(
+        track_id, bucket_mb=_d_fused["bucket_mb"], algorithm=d_algorithm.value,
+    )
+    d_result = overlap_timeline(
+        track_id, bucket_mb=d_choice["bucket_mb"], algorithm=d_algorithm.value,
+    )
+    e_result = compression_comparison(track_id, method=e_method.value)
+    return (
+        a_alternatives, a_baseline, a_choice, a_result, b_choice, b_result,
+        c_result, d_baseline, d_choice, d_result, e_result,
+    )
 
-      <div class="mlsysbook-panel" style="margin-bottom: 20px;">
-        <h3 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.15rem;">
-          System Scenario: {v2_06_profile.label} Collective Scaling
-        </h3>
-        <p style="margin: 0 0 12px 0; font-size: 0.92rem; color: #334155; line-height: 1.55;">
-          {v2_06_lens["scenario"]} Communication algorithm choice is a fundamental systems decision governed by physical fabric topology and message scaling, not an opaque library detail.
-        </p>
-        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
-          <strong>The Architectural Invariants of Collective Communication:</strong>
-          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
-            <li><strong>The Ring AllReduce Scaling Limit (2(N-1)&alpha; + 2((N-1)/N)M/&beta;):</strong> Bandwidth overhead per device is nearly constant (2M/&beta; as N &rarr; &infin;), but latency scales linearly with N (2(N-1)&alpha;).</li>
-            <li><strong>The Tree AllReduce Trade-off (2&lceil;log&sub2; N&rceil;&alpha; + 2&lceil;log&sub2; N&rceil;M/&beta;):</strong> Latency scales logarithmically (O(log N)), making tree optimal for small latency-bound payloads, but bandwidth term carries a 2log&sub2; N multiplier, degrading scaling for large gradient buckets.</li>
-            <li><strong>Hierarchical Topology Decoupling:</strong> Mixing high-speed local fabrics (e.g. NVLink 900 GB/s) with cross-node networks (InfiniBand 50 GB/s) via Reduce-Scatter, Inter-node AllReduce, and All-Gather prevents slow cross-node links from serializing local communication.</li>
-            <li><strong>Gradient Compression & Error Feedback Law:</strong> Quantization and sparsification shrink payload M, but require residual error compensation e<sub>t+1</sub> = (g<sub>t</sub> + e<sub>t</sub>) - v<sub>t</sub> to prevent optimizer divergence or safety fidelity loss.</li>
-          </ul>
-        </div>
+
+@app.cell
+def _(
+    a_alternatives, a_baseline, a_choice, a_prediction, a_result, b_choice,
+    b_oversubscription, b_prediction, b_result, b_skew, c_plan, c_prediction,
+    c_result, capture_evidence, d_algorithm, d_baseline, d_bucket, d_choice,
+    d_prediction, d_result, e_decision, e_method, e_prediction, e_result, mo,
+    set_evidence, track_id,
+):
+    def store(part, capture):
+        set_evidence(lambda current: {**current, part: capture})
+
+    a_upstream = {"payload_case": a_choice["case_id"], "payload_mb": a_choice["payload_mb"]}
+    b_upstream = {"destination_case": b_skew.value, "hotspot_fraction": b_choice["hotspot_fraction"], "oversubscription": b_oversubscription.value}
+    c_upstream = {"fixture": c_result["fixture"], "decision": c_plan.value}
+    d_upstream = {"bucket_policy": d_bucket.value, "bucket_mb": d_choice["bucket_mb"], "algorithm": d_algorithm.value}
+    e_upstream = {"method": e_method.value, "decision": e_decision.value}
+
+    a_capture = mo.ui.button(
+        label="Capture crossover evidence", kind="success",
+        disabled=a_prediction.value is None or a_baseline["inputs"] == a_result["inputs"],
+        on_click=lambda _v: store("A", capture_evidence(
+            track=track_id, part="A", prediction=a_prediction.value,
+            inputs=a_upstream, baseline=a_baseline, result=a_result,
+            alternatives=a_alternatives, decision=a_result["winner"],
+            upstream_inputs=a_upstream, model_key="v2_06_experiments.algorithm_crossover",
+        )),
+    )
+    b_capture = mo.ui.button(
+        label="Capture semantic contrast", kind="success", disabled=b_prediction.value is None,
+        on_click=lambda _v: store("B", capture_evidence(
+            track=track_id, part="B", prediction=b_prediction.value,
+            inputs=b_upstream, baseline=b_result["reduction"], result=b_result["routed"],
+            alternatives=(b_result["reduction"], b_result["routed"]),
+            decision=b_result["routed"]["limiting_bound"],
+            upstream_inputs=b_upstream, model_key="v2_06_experiments.semantic_exchange",
+        )),
+    )
+    c_capture = mo.ui.button(
+        label="Capture topology decision", kind="success",
+        disabled=c_prediction.value is None or c_plan.value is None,
+        on_click=lambda _v: store("C", capture_evidence(
+            track=track_id, part="C", prediction=c_prediction.value,
+            inputs={"selected_plan": c_plan.value, **c_result["inputs"]},
+            baseline=c_result["flat"], result=c_result["hierarchical"],
+            alternatives=(c_result["flat"], c_result["hierarchical"]),
+            decision=c_plan.value, upstream_inputs=c_upstream,
+            model_key="v2_06_experiments.topology_comparison",
+            chosen_result=(c_result["hierarchical"] if c_plan.value == "hierarchical" else c_result["flat"]),
+            result_role=("chosen intervention" if c_plan.value == "hierarchical" else "rejected alternative"),
+        )),
+    )
+    d_capture = mo.ui.button(
+        label="Capture overlap timeline", kind="success",
+        disabled=d_prediction.value is None or d_baseline["inputs"] == d_result["inputs"],
+        on_click=lambda _v: store("D", capture_evidence(
+            track=track_id, part="D", prediction=d_prediction.value,
+            inputs=d_upstream, baseline=d_baseline, result=d_result,
+            alternatives=(d_baseline, d_result), decision=d_bucket.value,
+            upstream_inputs=d_upstream, model_key="v2_06_experiments.overlap_timeline",
+        )),
+    )
+    e_capture = mo.ui.button(
+        label="Capture compression consequence", kind="success",
+        disabled=e_prediction.value is None or e_decision.value is None,
+        on_click=lambda _v: store("E", capture_evidence(
+            track=track_id, part="E", prediction=e_prediction.value,
+            inputs=e_upstream, baseline=e_result["baseline"], result=e_result["result"],
+            alternatives=(e_result["baseline"], e_result["result"]),
+            decision=e_decision.value, upstream_inputs=e_upstream,
+            model_key="v2_06_experiments.compression_comparison",
+            chosen_result=(e_result["result"] if e_decision.value == "adopt" else e_result["baseline"]),
+            result_role=("chosen intervention" if e_decision.value == "adopt" else "rejected alternative"),
+        )),
+    )
+    return (
+        a_capture, a_upstream, b_capture, b_upstream, c_capture, c_upstream,
+        d_capture, d_upstream, e_capture, e_upstream,
+    )
+
+
+@app.cell
+def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
+    css = mo.Html("""
+    <style>
+    .collective-head{background:linear-gradient(135deg,#101827,#312e81);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:12px}
+    .collective-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
+    .collective-head h1{font-size:clamp(1.7rem,5vw,2.7rem);line-height:1.05;margin:16px 0 8px}.collective-head p{color:#e0e7ff;max-width:780px}
+    .collective-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:9px;margin-top:17px}.collective-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
+    .collective-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0}.saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
+    .metric-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px}.metric{border:1px solid #dbe4ee;border-radius:9px;padding:10px;background:#fff}.metric b{display:block;font-size:1.15rem;color:#172554}.metric small{color:#64748b}
+    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
+    .failure-card{border-left:4px solid #CB202D;background:#fff1f2;padding:10px 12px;border-radius:7px}
+    @media(max-width:520px){.collective-head{border-radius:9px;margin-top:30px}.collective-meta,.metric-row{grid-template-columns:1fr}}
+    </style>""")
+    header = mo.Html(f"""
+    <section class="collective-head">
+      <div class="collective-top"><span>VOLUME II · LAB 06</span><span>ABOUT 50 MIN</span></div>
+      <h1>Collective Communication</h1>
+      <p>When should a fleet change the operation, schedule, topology, bucket timeline, or payload it sends?</p>
+      <div class="collective-meta">
+        <div><b>Participants</b><br>{profile['participants']} {profile['participant_kind']}</div>
+        <div><b>Context</b><br>{profile['fleet_semantics']}</div>
+        <div><b>Deliverable</b><br>Communication design review</div>
       </div>
-    </div>
-    """)
-    mo.vstack([ACADEMIC_LAB_CSS, header_html])
+    </section>""")
+    _fleet_note = (
+        "Endpoint uploads remain separate from gateway or backend collectives."
+        if profile["endpoint_count"] > 0
+        else "Multi-node accelerator workers synchronize gradients directly without endpoint upload stages."
+    )
+    note = mo.Html(f'<p class="collective-note">{_fleet_note} Results are analytical or simulated from illustrative fleet workloads; matched calibration and quality fixtures are labeled where used.</p>')
+    mo.vstack([LAB_CSS, ACADEMIC_LAB_CSS, css, header, track, note], gap=0.5)
     return
 
 
-@app.cell(hide_code=True)
-def _(mo, v2_06_defaults):
-    partA_prediction = mo.ui.radio(
-        options={
-            "A) Ring is always best because it is bandwidth-optimal": "ring_always",
-            "B) Tree is always best because it has fewer rounds": "tree_always",
-            "C) The winner depends on alpha, beta, N, and payload size": "depends",
-            "D) FLOPs dominate once the collective is chosen": "flops",
-        },
-        value=None,
-        label="Part A prediction - which rule chooses between ring and tree costs?",
-    )
-    partB_prediction = mo.ui.radio(
-        options={
-            "A) Topology can make a collective infeasible or no longer dominant": "topology",
-            "B) Hierarchy always helps regardless of local links": "hierarchy_always",
-            "C) Topology changes diagrams but not collective time": "label_only",
-            "D) Participant count matters but local grouping does not": "participants_only",
-        },
-        value=None,
-        label=f"Part B prediction - what changes the dominant collective for {v2_06_defaults['topology']}?",
-    )
-    partC_prediction = mo.ui.radio(
-        options={
-            "A) Compression and overlap reduce exposed time but carry validation risk": "risk",
-            "B) Compression is a free bandwidth multiplier": "free_compression",
-            "C) Async overlap makes bandwidth irrelevant": "free_overlap",
-            "D) Compression only changes optimizer math, not systems behavior": "optimizer_only",
-        },
-        value=None,
-        label="Part C prediction - what risk remains after hiding or shrinking communication?",
-    )
-    partD_prediction = mo.ui.radio(
-        options={
-            "A) Exposed step-time rejects the naive plan": "exposed",
-            "B) Topology guardrail rejects the naive plan": "topology",
-            "C) Optimization risk rejects the naive plan": "optimization",
-            "D) The fastest modeled plan should always be approved": "fastest",
-        },
-        value=None,
-        label="Part D prediction - which guardrail is most likely to reject the naive plan?",
-    )
-
-    partA_checkpoint = mo.ui.radio(
-        options={
-            "Carry ring forward for bandwidth-bound payloads": "ring_family",
-            "Carry tree forward for alpha-bound payloads": "tree_family",
-            "Do not lock yet; let topology decide": "defer_to_topology",
-        },
-        value="Carry ring forward for bandwidth-bound payloads",
-        label="Part A checkpoint - which algorithm family should the next module test?",
-    )
-    partB_checkpoint = mo.ui.radio(
-        options={
-            "Use flat ring on the selected fabric": "flat_ring",
-            "Use tree/coordinator scheduling": "tree_schedule",
-            "Use hierarchical local-global scheduling": "hierarchical_schedule",
-        },
-        value="Use hierarchical local-global scheduling",
-        label="Part B checkpoint - which topology assumption should the plan carry forward?",
-    )
-    partC_checkpoint = mo.ui.radio(
-        options={
-            "No compression; only measured overlap": "measured_overlap",
-            "Moderate compression with validation": "moderate_compression",
-            "Aggressive compression/overlap only after convergence or fidelity evidence": "aggressive_with_evidence",
-        },
-        value="Moderate compression with validation",
-        label="Part C checkpoint - which optimization policy should the design review use?",
-    )
-    partD_final_decision = mo.ui.radio(
-        options={
-            "Approve the selected communication plan": "approve",
-            "Revise algorithm, topology, or optimization before approval": "revise",
-            "Reject the plan and rerun topology/validation evidence": "reject",
-        },
-        value="Approve the selected communication plan",
-        label="Final decision - how should the stakeholder sign the communication design review?",
-    )
-    student_id = mo.ui.text(label="Student identifier", placeholder="Optional")
-    memo_note = mo.ui.text_area(
-        label="Communication design review note",
-        placeholder="Name selected algorithm/topology/optimization, binding term, rejected alternative, evidence number, and V2-07 reliability implication.",
-        full_width=True,
-    )
-    return (
-        memo_note,
-        partA_checkpoint,
-        partA_prediction,
-        partB_checkpoint,
-        partB_prediction,
-        partC_checkpoint,
-        partC_prediction,
-        partD_final_decision,
-        partD_prediction,
-        student_id,
-    )
+@app.cell
+def _(mo):
+    mo.sidebar([mo.md("## Lab navigation"), mo.outline(label="Sections")])
+    return
 
 
-@app.cell(hide_code=True)
-def _(mo, v2_06_default_fabric_label, v2_06_defaults, v2_06_fabric_options):
-    n_gpus = mo.ui.slider(
-        start=2,
-        stop=1024,
-        value=int(v2_06_defaults["participants"]),
-        step=2,
-        label="Participants",
-    )
-    message_gb = mo.ui.slider(
-        start=0.001,
-        stop=80.0,
-        value=float(v2_06_defaults["message_gb"]),
-        step=0.001 if float(v2_06_defaults["message_gb"]) < 0.1 else 0.1,
-        label="Payload per participant (GB)",
-    )
-    fabric = mo.ui.dropdown(
-        options=v2_06_fabric_options(),
-        value=v2_06_default_fabric_label(v2_06_defaults),
-        label="Fabric / link analogy",
-    )
-    gpus_per_node = mo.ui.slider(
-        start=1,
-        stop=8,
-        value=int(v2_06_defaults["gpus_per_node"]),
-        step=1,
-        label="Participants per local group",
-    )
-    overlap_pct = mo.ui.slider(
-        start=0,
-        stop=95,
-        value=int(v2_06_defaults["overlap_pct"]),
-        step=5,
-        label="Communication hidden by useful work (%)",
-    )
-    compression_ratio = mo.ui.slider(
-        start=1,
-        stop=16,
-        value=int(v2_06_defaults["compression_ratio"]),
-        step=1,
-        label="Compression ratio",
-    )
-    return (
-        compression_ratio,
-        fabric,
-        gpus_per_node,
-        message_gb,
-        n_gpus,
-        overlap_pct,
-    )
-
-
-@app.cell(hide_code=True)
+@app.cell
 def _(
-    MathPeek,
-    big_takeaways,
-    build_lab_report,
-    compression_ratio,
-    fabric,
-    gated_hypothesis_card,
-    gpus_per_node,
-    instrumentation_console,
-    ledger,
-    memo_note,
-    message_gb,
-    mo,
-    n_gpus,
-    overlap_pct,
-    partA_checkpoint,
-    partA_prediction,
-    partB_checkpoint,
-    partB_prediction,
-    partC_checkpoint,
-    partC_prediction,
-    partD_final_decision,
-    partD_prediction,
-    report_export_panel,
-    student_id,
-    v2_06_alpha_beta_chart,
-    v2_06_best_topology_key,
-    v2_06_candidate_chart,
-    v2_06_chapter,
-    v2_06_collective_terms,
-    v2_06_failure_callout,
-    v2_06_fmt,
-    v2_06_frontier_chart,
-    v2_06_html_table,
-    v2_06_lens,
-    v2_06_metadata,
-    v2_06_optimization_chart,
-    v2_06_optimization_result,
-    v2_06_part_a_rows,
-    v2_06_plan_result,
-    v2_06_prediction_feedback,
-    v2_06_profile,
-    v2_06_row_by_key,
-    v2_06_selected_key,
-    v2_06_status_label,
-    v2_06_topology_rows,
-    v2_06_variant,
+    COLORS, a_capture, a_payload_case, a_prediction, a_result, a_upstream, apply_plotly_theme,
+    audit_evidence, b_capture, b_oversubscription, b_prediction, b_result,
+    b_skew, b_upstream, c_capture, c_plan, c_prediction, c_result, c_upstream,
+    d_algorithm, d_bucket, d_capture, d_prediction, d_result, d_upstream,
+    e_capture, e_decision, e_method, e_prediction, e_result, e_upstream,
+    final_choice, final_rejected, final_risk, final_trigger, get_evidence, go,
+    mo, rationale, track_id,
 ):
-    _n = n_gpus.value
-    _payload = message_gb.value
-    _fabric = fabric.value
-    _local = gpus_per_node.value
-    _compression = compression_ratio.value
-    _overlap = overlap_pct.value
-
-    _terms = v2_06_collective_terms(_n, _payload, _fabric, _local, compression_ratio=1)
-    _topology_rows = v2_06_topology_rows(v2_06_lens, _terms)
-    _part_b_key = v2_06_selected_key(partB_checkpoint.value, _topology_rows)
-    _part_b_row = v2_06_row_by_key(_topology_rows, _part_b_key)
-    _part_c = v2_06_optimization_result(
-        v2_06_lens,
-        _part_b_key,
-        _n,
-        _payload,
-        _fabric,
-        _local,
-        _compression,
-        _overlap,
-    )
-    _selected = v2_06_plan_result(
-        v2_06_lens,
-        _part_b_key,
-        _n,
-        _payload,
-        _fabric,
-        _local,
-        _compression,
-        _overlap,
-    )
-    _rejected = v2_06_plan_result(
-        v2_06_lens,
-        "ring",
-        _n,
-        _payload,
-        _fabric,
-        _local,
-        max(8, _compression),
-        max(85, _overlap),
+    captures = get_evidence()
+    upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream, "E": e_upstream}
+    audit = audit_evidence(
+        captures, track=track_id, required_parts=tuple("ABCDE"),
+        per_part_upstream_inputs=upstream, contrast_required_parts=tuple("ABCDE"),
     )
 
-    def _part_a_table():
-        return v2_06_html_table(
-            v2_06_part_a_rows(v2_06_lens, _terms),
-            [
-                ("Algorithm", "Algorithm"),
-                ("Alpha", "Alpha term"),
-                ("Beta", "Beta term"),
-                ("Total", "Total"),
-                ("Binding", "Binding term"),
-                ("Budget", "Budget status"),
-            ],
-            caption="Part A exact alpha/beta evidence table",
+    def table(rows):
+        return mo.vstack([mo.ui.table(rows, pagination=False)]).style(
+            {"max-width": "100%", "overflow-x": "auto"}
         )
 
-    def _part_b_table():
-        rows = []
-        for row in _topology_rows:
-            rows.append(
-                {
-                    "Candidate": row["label"],
-                    "Time": f"{row['total_ms']:.3f} ms",
-                    "Binding": row["binding"],
-                    "Topology": v2_06_status_label(row["topology_ok"]),
-                    "Budget": v2_06_status_label(row["passes_budget"]),
-                    "Reason": row["reason"],
-                }
+    def metrics(items):
+        cards = "".join(
+            f'<div class="metric"><small>{label}</small><b>{value}</b><small>{detail}</small></div>'
+            for label, value, detail in items
+        )
+        return mo.Html(f'<div class="metric-row">{cards}</div>')
+
+    def saved(part):
+        capture = captures.get(part)
+        if capture is None:
+            return mo.callout(mo.md("No saved evidence for this part."), kind="warn")
+        if part in audit.stale or (part, part) in audit.identical_pairs:
+            return mo.callout(
+                mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** A dependency changed, or the saved evaluator inputs are identical. Recapture this part."),
+                kind="danger",
             )
-        return v2_06_html_table(
-            rows,
-            [
-                ("Candidate", "Candidate"),
-                ("Time", "Modeled time"),
-                ("Binding", "Binding term"),
-                ("Topology", "Topology guard"),
-                ("Budget", "Budget"),
-                ("Reason", "Interpretation"),
-            ],
-            caption="Part B topology feasibility and dominance table",
-        )
-
-    def _part_c_table():
-        return v2_06_html_table(
-            [
-                {
-                    "Metric": "Selected candidate",
-                    "Value": _part_c["selected_label"],
-                    "Limit or interpretation": "Candidate carried forward from Part B.",
-                },
-                {
-                    "Metric": "Compressed payload",
-                    "Value": f"{_part_c['effective_gb']:.4g} GB",
-                    "Limit or interpretation": f"Original payload was {_payload:.4g} GB.",
-                },
-                {
-                    "Metric": "Exposed time",
-                    "Value": f"{_part_c['exposed_ms']:.3f} ms",
-                    "Limit or interpretation": f"Must be <= {v2_06_lens['budget_ms']:.0f} ms.",
-                },
-                {
-                    "Metric": "Quality/fidelity proxy",
-                    "Value": f"{_part_c['quality_proxy']:.1f}%",
-                    "Limit or interpretation": f"Must be >= {v2_06_lens['quality_floor_pct']:.0f}% and compression <= {v2_06_lens['max_compression_ratio']}x.",
-                },
-                {
-                    "Metric": "Overlap schedule",
-                    "Value": f"{_overlap:.0f}%",
-                    "Limit or interpretation": f"Notebook-local schedulable limit is {v2_06_lens['max_overlap_pct']:.0f}%.",
-                },
-                {
-                    "Metric": "Residual risk",
-                    "Value": _part_c["risk"],
-                    "Limit or interpretation": v2_06_lens["residual_risk"],
-                },
-            ],
-            [("Metric", "Metric"), ("Value", "Value"), ("Limit or interpretation", "Limit or interpretation")],
-            caption="Part C optimization evidence table",
-        )
-
-    def _part_d_table(selected, rejected):
-        rows = [
-            {
-                "Guardrail": "Exposed step-time",
-                "Selected": f"{selected['exposed_ms']:.3f} ms ({v2_06_status_label(selected['exposed_ok'])})",
-                "Rejected": f"{rejected['exposed_ms']:.3f} ms ({v2_06_status_label(rejected['exposed_ok'])})",
-                "Limit": f"<= {selected['budget_ms']:.0f} ms",
-            },
-            {
-                "Guardrail": "Topology",
-                "Selected": f"{v2_06_status_label(selected['topology_ok'])}: {selected['topology_reason']}",
-                "Rejected": f"{v2_06_status_label(rejected['topology_ok'])}: {rejected['topology_reason']}",
-                "Limit": v2_06_lens["topology_guardrail_text"],
-            },
-            {
-                "Guardrail": "Optimization risk",
-                "Selected": f"{v2_06_status_label(selected['optimization_ok'])}: {selected['risk']}",
-                "Rejected": f"{v2_06_status_label(rejected['optimization_ok'])}: {rejected['risk']}",
-                "Limit": v2_06_lens["optimization_guardrail_label"],
-            },
-        ]
-        return v2_06_html_table(
-            rows,
-            [
-                ("Guardrail", "Guardrail"),
-                ("Selected", "Selected plan"),
-                ("Rejected", "Rejected alternative"),
-                ("Limit", "Limit or rule"),
-            ],
-            caption="Part D simultaneous guardrail table",
-        )
+        snapshot = capture.to_dict()
+        return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · original prediction: {snapshot["prediction"]}<br><small>Track {snapshot["track"]}; later controls do not rewrite this record.</small></div>')
 
     def build_part_a():
-        _ring_ms = _terms["ring"]["total_ms"]
-        _tree_ms = _terms["tree"]["total_ms"]
-        _actual = "depends"
-        _best_label = "Flat Ring" if _ring_ms <= _tree_ms else "Tree"
-        _best_ms = min(_ring_ms, _tree_ms)
-        items = [
-            mo.md("## Part A - Concept Module: Ring And Tree Costs Bind Different Alpha/Beta Terms"),
-            gated_hypothesis_card(
-                partA_prediction,
-                title="1. Formulate Your AllReduce Scaling Hypothesis",
-                subtitle=(
-                    f"Scenario: {v2_06_variant.stakeholder} must choose a first-pass collective for "
-                    f"{_n} {v2_06_lens['participant_name']} moving a {_payload:.4g} GB "
-                    f"{v2_06_lens['payload_name']} over {_terms['fabric_label']}."
-                ),
-            ),
-            v2_06_prediction_feedback(
-                partA_prediction.value,
-                _actual,
-                f"Correct. At this point the lower cost is **{_best_label}** at **{_best_ms:.3f} ms**, but the reason depends on alpha, beta, N, and payload.",
-                f"The productive failure is locking to one algorithm. Here **{_best_label}** is lower, but the stacked terms show why the answer can flip.",
-            ),
-        ]
-        if partA_prediction.value is None:
-            return mo.vstack(items)
-        items.extend(
-            [
-                instrumentation_console(
-                    mo.hstack([n_gpus, message_gb, fabric], justify="start", gap=1.0),
-                    title="Participant Scale & Fabric Instrumentation",
-                    subtitle="Sweep participant count, payload size, and underlying link bandwidth",
-                ),
-                mo.as_html(v2_06_alpha_beta_chart(_terms, v2_06_lens["budget_ms"])),
-                _part_a_table(),
-                v2_06_failure_callout(
-                    _best_ms <= v2_06_lens["budget_ms"],
-                    f"Consequence: the best ring/tree choice fits the {v2_06_lens['budget_ms']:.0f} ms track budget before topology mitigation.",
-                    f"Boundary: even the best ring/tree choice is {_best_ms:.3f} ms against a {v2_06_lens['budget_ms']:.0f} ms budget. The next module must test topology, not just algorithm label.",
-                ),
-                MathPeek(
-                    "T_ring=2(N-1)alpha+2((N-1)/N)M/beta; T_tree~=2log2(N)alpha+2log2(N)M/beta",
-                    {
-                        "N": f"{_n}",
-                        "payload M": f"{_payload:.4g} GB",
-                        "fabric beta": f"{_terms['bandwidth_gb_s']:.1f} GB/s",
-                        "fabric alpha": f"{_terms['latency_us']:.3f} us",
-                        "chapter source": "Alpha-beta model and AllReduce algorithm crossover sections",
-                    },
-                ),
-                mo.Html(f"""
-                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
-                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part A Algorithm Selection</h4>
-                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
-                        Which collective algorithm family should the next module carry forward?
-                    </p>
-                    {partA_checkpoint}
-                </div>
-                """),
-            ]
-        )
-        return mo.vstack(items)
+        intro = mo.md("### A · When does ring versus tree preference reverse? (8 min)\nChoose a payload regime, then predict the winner. The instrument separates startup rounds from bytes transferred.")
+        if a_prediction.value is None:
+            return mo.vstack([intro, a_payload_case, a_prediction])
+        fig = go.Figure()
+        fig.add_bar(name="Startup", x=["Ring", "Tree"], y=[a_result["ring"]["startup_ms"], a_result["tree"]["startup_ms"]], marker_color=COLORS["OrangeLine"])
+        fig.add_bar(name="Transfer", x=["Ring", "Tree"], y=[a_result["ring"]["transfer_ms"], a_result["tree"]["transfer_ms"]], marker_color=COLORS["BlueLine"])
+        fig.update_layout(barmode="stack", height=285, yaxis_title="Analytical time (ms)", legend_orientation="h")
+        return mo.vstack([
+            intro, a_payload_case, a_prediction, apply_plotly_theme(fig),
+            metrics([
+                ("Payload", f"{a_result['payload_mb']:.3g} MB", "per participant"),
+                ("Crossover", f"{a_result['crossover_mb']:.3g} MB", "same process group"),
+                ("Winner", a_result["winner"].title(), "analytical comparison"),
+            ]),
+            mo.callout(mo.md(f"You predicted **{a_prediction.value}**. The selected payload favors **{a_result['winner']}** because startup and transfer use different counts."), kind="info"),
+            a_capture, saved("A"),
+            mo.accordion({"Calculation Notes": mo.md("Ring uses `2(N−1)` startups and transfers `2(N−1)M/N`. The simple tree uses `2 ceil(log₂N)` startups and transfers a full message at each level. MLSysIM computes their exact intersection.")}),
+        ])
 
     def build_part_b():
-        _actual = "topology"
-        _best_key = v2_06_best_topology_key(_topology_rows)
-        _best_row = v2_06_row_by_key(_topology_rows, _best_key)
-        items = [
-            mo.md("## Part B - Concept Module: Topology Changes Which Collective Is Feasible Or Dominant"),
-            gated_hypothesis_card(
-                partB_prediction,
-                title="2. Formulate Your Topology Feasibility Hypothesis",
-                subtitle=(
-                    f"Scenario: The Part A amount now runs through {v2_06_lens['topology_label']}. "
-                    "Test whether local grouping, fabric, and hierarchy assumptions change the winning collective."
-                ),
-            ),
-            v2_06_prediction_feedback(
-                partB_prediction.value,
-                _actual,
-                f"Correct. The feasible dominant candidate is **{_best_row['label']}** at **{_best_row['total_ms']:.3f} ms**.",
-                "Topology is not a label. The feasibility table shows when flat, tree, or hierarchy depends on a valid physical or track analogy.",
-            ),
-        ]
-        if partB_prediction.value is None:
-            return mo.vstack(items)
-        items.extend(
-            [
-                instrumentation_console(
-                    mo.hstack([n_gpus, gpus_per_node, fabric], justify="start", gap=1.0),
-                    title="Grouping & Topology Controls",
-                    subtitle="Configure intra-node local grouping and cross-node interconnect",
-                ),
-                mo.as_html(v2_06_frontier_chart(v2_06_lens, _n, _fabric, _local, _payload)),
-                _part_b_table(),
-                v2_06_failure_callout(
-                    _part_b_row["topology_ok"] and _part_b_row["passes_budget"],
-                    f"Consequence: **{_part_b_row['label']}** is a valid topology assumption and reports {_part_b_row['total_ms']:.3f} ms.",
-                    f"Boundary: **{_part_b_row['label']}** is not ready. Topology status is {v2_06_status_label(_part_b_row['topology_ok'])}; budget status is {v2_06_status_label(_part_b_row['passes_budget'])}.",
-                ),
-                MathPeek(
-                    "Hierarchical time = local reduce-scatter + inter-node AllReduce(M/G) + local allgather",
-                    {
-                        "local group G": f"{_local}",
-                        "nodes/groups": f"{_terms['n_nodes']}",
-                        "current hierarchy time": f"{_terms['hierarchical']['total_ms']:.3f} ms",
-                        "topology guardrail": v2_06_lens["topology_guardrail_text"],
-                        "chapter source": "Hierarchical AllReduce and topology-aware routing sections",
-                    },
-                ),
-                mo.Html(f"""
-                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
-                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part B Topology Governance</h4>
-                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
-                        Which topology assumption should the plan carry forward?
-                    </p>
-                    {partB_checkpoint}
-                </div>
-                """),
-            ]
-        )
-        return mo.vstack(items)
+        intro = mo.md("### B · Does this workload reduce values or route records? (8 min)\nKeep each participant’s payload fixed. Change destination skew and fabric pressure, then identify the routed exchange’s active bound.")
+        if b_prediction.value is None:
+            return mo.vstack([intro, b_skew, b_oversubscription, b_prediction])
+        fig = go.Figure([go.Bar(
+            x=["Reduction", "Routed exchange"],
+            y=[b_result["reduction"]["time_ms"], b_result["routed"]["time_ms"]],
+            marker_color=[COLORS["BlueLine"], COLORS["OrangeLine"]],
+        )])
+        fig.update_layout(height=270, yaxis_title="Analytical time (ms)", showlegend=False)
+        return mo.vstack([
+            intro, mo.hstack([b_skew, b_oversubscription], widths="equal", wrap=True),
+            b_prediction, apply_plotly_theme(fig),
+            table([
+                {"Operation": "Reduction", "Result semantics": "Same aggregate everywhere", "Time (ms)": b_result["reduction"]["time_ms"]},
+                {"Operation": "Routed exchange", "Result semantics": "Different destination records", "Time (ms)": b_result["routed"]["time_ms"]},
+            ]),
+            mo.callout(mo.md(f"You predicted **{b_prediction.value}**. The routed case is limited by **{b_result['routed']['limiting_bound']}**. AllReduce cannot produce destination-specific outputs."), kind="info"),
+            b_capture, saved("B"),
+            mo.accordion({"Calculation Notes": mo.md(f"Routed traffic is bounded by sender injection, the hottest receiver, and bisection capacity. Oversubscription lowers bisection capacity. {b_result['endpoint_note']}")}),
+        ])
 
     def build_part_c():
-        _actual = "risk"
-        items = [
-            mo.md("## Part C - Concept Module: Overlap And Compression Hide Communication With Risk"),
-            gated_hypothesis_card(
-                partC_prediction,
-                title="3. Formulate Your Optimization & Risk Hypothesis",
-                subtitle=(
-                    f"Scenario: The design tries to reduce exposed time for {_part_c['selected_label']}. "
-                    "Compression shrinks payload; overlap hides only communication with concurrent compute."
-                ),
-            ),
-            v2_06_prediction_feedback(
-                partC_prediction.value,
-                _actual,
-                f"Correct. Exposed time is **{_part_c['exposed_ms']:.3f} ms**, but the residual risk is **{_part_c['risk']}**.",
-                "The productive failure is treating speedup as proof. The table checks exposed time, quality/fidelity, and scheduling together.",
-            ),
-        ]
-        if partC_prediction.value is None:
-            return mo.vstack(items)
-        items.extend(
-            [
-                instrumentation_console(
-                    mo.hstack([compression_ratio, overlap_pct], justify="start", gap=1.0),
-                    title="Optimization & Overlap Controls",
-                    subtitle="Tune gradient compression ratio and computation overlap percentage",
-                ),
-                mo.as_html(v2_06_optimization_chart({**_part_c, "budget_ms": v2_06_lens["budget_ms"]})),
-                _part_c_table(),
-                v2_06_failure_callout(
-                    _part_c["exposed_ok"] and _part_c["optimization_ok"],
-                    f"Consequence: optimization passes the time and validation guardrails; {_part_c['risk']}.",
-                    f"Boundary: optimization is not ready. Exposed-time status is {v2_06_status_label(_part_c['exposed_ok'])}; optimization guardrail is {v2_06_status_label(_part_c['optimization_ok'])}.",
-                ),
-                MathPeek(
-                    "exposed = T_compressed*(1-overlap); compression changes M, not convergence proof",
-                    {
-                        "raw selected time": f"{_part_c['raw_ms']:.3f} ms",
-                        "compressed selected time": f"{_part_c['compressed_ms']:.3f} ms",
-                        "exposed time": f"{_part_c['exposed_ms']:.3f} ms",
-                        "error feedback source model": "e_{t+1}=(g_t+e_t)-v_t",
-                        "chapter source": "Gradient compression, error feedback, and overlap limits sections",
-                    },
-                ),
-                mo.Html(f"""
-                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
-                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part C Optimization Policy</h4>
-                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
-                        Which optimization policy should the design review authorize?
-                    </p>
-                    {partC_checkpoint}
-                </div>
-                """),
-            ]
-        )
-        return mo.vstack(items)
+        intro = mo.md("### C · When does topology change the winning schedule? (9 min)\nCompare a flat inter-group ring with local reduce-scatter, an inter-group ring, and local all-gather. The fixture matches algorithm, group size, and placement.")
+        if c_prediction.value is None:
+            return mo.vstack([intro, c_prediction])
+        fig = go.Figure()
+        fig.add_bar(name="Analytical", x=["Flat ring", "Hierarchical"], y=[c_result["flat"]["analytical_ms"], c_result["hierarchical"]["analytical_ms"]], marker_color=COLORS["BlueLine"])
+        fig.add_bar(name="Calibrated", x=["Flat ring", "Hierarchical"], y=[c_result["flat"]["calibrated_ms"], c_result["hierarchical"]["calibrated_ms"]], marker_color=COLORS["GreenLine"])
+        fig.update_layout(barmode="group", height=285, yaxis_title="Time (ms)", legend_orientation="h")
+        unsupported = c_plan.value is not None and c_plan.value != "hold" and c_plan.value != c_result["calibrated_winner"]
+        consequence = mo.Html('<div class="failure-card"><b>Decision consequence</b><br>The selected topology is slower in the matched illustrative calibration. The report will preserve this unsupported choice.</div>') if unsupported else mo.callout(mo.md("The plan follows current evidence, or deliberately waits for new matched measurements."), kind="success")
+        return mo.vstack([
+            intro, c_prediction, apply_plotly_theme(fig),
+            metrics([
+                ("Analytical winner", c_result["analytical_winner"].title(), "unit-aware model"),
+                ("Calibrated winner", c_result["calibrated_winner"].title(), "illustrative fixture"),
+                ("Local group", str(c_result["local_group"]), "fast-tier participants"),
+            ]),
+            c_plan, consequence, c_capture, saved("C"),
+            mo.accordion({"Calculation Notes": mo.md("The hierarchical path prices all three phases separately. Calibration factors come from the supplied illustrative fixture, not a live product benchmark.")}),
+        ])
 
     def build_part_d():
-        _actual_map = {
-            "exposed step-time": "exposed",
-            "topology": "topology",
-            "optimization risk": "optimization",
-        }
-        _actual = _actual_map.get(_rejected["binding_guardrail"], "optimization")
-        items = [
-            mo.md("## Part D - Concept Module: Communication Plan Guardrails"),
-            gated_hypothesis_card(
-                partD_prediction,
-                title="4. Formulate Your Plan Guardrail Hypothesis",
-                subtitle=(
-                    f"Scenario: The final design review must satisfy exposed step-time, topology, "
-                    f"and {v2_06_lens['optimization_guardrail_label']} guardrails for {v2_06_profile.label}."
-                ),
-            ),
-            v2_06_prediction_feedback(
-                partD_prediction.value,
-                _actual,
-                f"Correct. The rejected alternative is blocked by **{_rejected['binding_guardrail']}**.",
-                f"The rejected alternative is blocked by **{_rejected['binding_guardrail']}**. Fastest modeled time is not enough evidence to approve a collective plan.",
-            ),
-        ]
-        if partD_prediction.value is None:
-            return mo.vstack(items)
-        items.extend(
-            [
-                instrumentation_console(
-                    mo.hstack([gpus_per_node, compression_ratio, overlap_pct], justify="start", gap=1.0),
-                    title="Integrated Guardrail Review Knobs",
-                    subtitle="Simultaneous verification of grouping, compression, and overlap limits",
-                ),
-                mo.as_html(v2_06_candidate_chart(_selected, _rejected)),
-                _part_d_table(_selected, _rejected),
-                v2_06_failure_callout(
-                    _selected["valid_plan"],
-                    f"Consequence: selected plan passes all guardrails. Binding term is **{_selected['binding_guardrail']}**.",
-                    f"Boundary: selected plan fails at least one guardrail. Binding guardrail is **{_selected['binding_guardrail']}**; revise algorithm, topology, compression, or overlap.",
-                ),
-                MathPeek(
-                    "valid = exposed_ms<=budget and topology_guardrail and optimization_guardrail",
-                    {
-                        "selected exposed": f"{_selected['exposed_ms']:.3f} ms vs {v2_06_fmt(_selected['budget_ms'])} ms",
-                        "topology": v2_06_status_label(_selected["topology_ok"]),
-                        "optimization": v2_06_status_label(_selected["optimization_ok"]),
-                        "rejected alternative": "flat ring with aggressive compression and optimistic overlap",
-                        "chapter source": "Fallacies, pitfalls, and chapter summary",
-                    },
-                ),
-                mo.Html(f"""
-                <div class="mlsysbook-panel" style="border-left: 4px solid #006395; margin-top: 16px;">
-                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT DECISION</div>
-                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Part D Engineering Sign-off</h4>
-                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
-                        How should the stakeholder sign off on this collective communication plan?
-                    </p>
-                    {partD_final_decision}
-                </div>
-                """),
-            ]
+        phase_label = d_result.get("compute_phase", "backward pass")
+        member_kind = "parameters" if "aggregation" in phase_label else "gradients"
+        intro = mo.md(f"### D · How much communication can the {phase_label} actually hide? (9 min)\nSelect a bucket policy and algorithm. Buckets launch only when all member {member_kind} are ready, and every launch competes for one network resource.")
+        if d_prediction.value is None:
+            return mo.vstack([intro, mo.hstack([d_bucket, d_algorithm], widths="equal", wrap=True), d_prediction])
+        fig = go.Figure()
+        for event in d_result["events"]:
+            fig.add_bar(
+                name=f"Bucket {event['bucket']}", y=["Network"],
+                x=[event["duration_ms"]], base=[event["start_ms"]], orientation="h",
+                text=[", ".join(event["layers"])],
+                hovertemplate="%{text}<br>start %{base:.2f} ms<br>duration %{x:.2f} ms<extra></extra>",
+            )
+        fig.add_vline(x=d_result["backward_end_ms"], line_dash="dash", line_color=COLORS["RedLine"])
+        fig.update_layout(height=250, xaxis_title=f"{phase_label.capitalize()} timeline (ms)", showlegend=False, barmode="overlay")
+        return mo.vstack([
+            intro, mo.hstack([d_bucket, d_algorithm], widths="equal", wrap=True),
+            d_prediction, apply_plotly_theme(fig),
+            metrics([
+                ("Hidden", f"{d_result['hidden_communication_ms']:.2f} ms", f"before {phase_label} completes"),
+                ("Exposed", f"{d_result['exposed_communication_ms']:.2f} ms", "extends the step"),
+                ("Launches", str(d_result["bucket_count"]), "serialized buckets"),
+            ]),
+            mo.callout(mo.md(f"You predicted **{d_prediction.value}**. The readiness schedule hides **{d_result['overlap_fraction']:.1%}** of collective work; asynchronous launch alone did not determine this result."), kind="info"),
+            d_capture, saved("D"),
+            mo.accordion({"Calculation Notes": mo.md(f"Each bucket starts at the later of its final readiness time and network availability. Exposed time is the final network tail beyond {phase_label} completion. Smaller buckets launch earlier but pay more startup rounds.")}),
+        ])
+
+    def build_part_e():
+        intro = mo.md("### E · When is sending fewer bytes worthwhile? (9 min)\nTest one codec against the uncompressed baseline. The instrument includes encoding, decoding, communication, and supplied steps-to-target evidence.")
+        if e_prediction.value is None:
+            return mo.vstack([intro, e_method, e_prediction])
+        fig = go.Figure()
+        fig.add_bar(name="Communication", x=["Uncompressed", e_result["method"]], y=[e_result["baseline_communication_ms"], e_result["communication_ms"]], marker_color=COLORS["BlueLine"])
+        fig.add_bar(name="Codec", x=["Uncompressed", e_result["method"]], y=[0, e_result["codec_ms"]], marker_color=COLORS["OrangeLine"])
+        fig.update_layout(barmode="stack", height=280, yaxis_title="Per-step overhead (ms)", legend_orientation="h")
+        if e_result["quality_target_reached"]:
+            consequence = mo.callout(mo.md(f"The supplied scenario reaches target in **{e_result['steps_to_target']} steps**. Compare total time to target, not communication time alone."), kind="success")
+        else:
+            consequence = mo.Html(f'<div class="failure-card"><b>Quality target missed</b><br>The supplied outcome remains {e_result["quality_gap_pp"]:.1f} percentage points below target. A faster step has no valid time-to-target.</div>')
+        prediction_feedback = mo.callout(
+            mo.md(f"You predicted **{e_prediction.value}**. The resulting outcome is **{e_result['outcome']}** to target."),
+            kind="info" if e_prediction.value == e_result["outcome"] else "warn",
         )
-        return mo.vstack(items)
+        return mo.vstack([
+            intro, e_method, e_prediction, apply_plotly_theme(fig),
+            prediction_feedback,
+            table([
+                {"Plan": "Uncompressed", "Payload (MB)": e_result["payload_mb"], "Step (ms)": e_result["baseline_step_ms"], "Time to target (ms)": e_result["baseline"]["time_to_target_ms"]},
+                {"Plan": e_result["method"], "Payload (MB)": e_result["compressed_payload_mb"], "Step (ms)": e_result["step_ms"], "Time to target (ms)": e_result["time_to_target_ms"]},
+            ]),
+            consequence, e_decision, e_capture, saved("E"),
+            mo.accordion({"Calculation Notes": mo.md("Encoding scans the original payload; decoding processes the compressed payload. Steps-to-target and target attainment come from a supplied illustrative outcome fixture, not a hardware score or universal quality equation.")}),
+        ])
 
     def build_synthesis():
-        _completed = all(
-            value is not None
-            for value in (
-                partA_prediction.value,
-                partA_checkpoint.value,
-                partB_prediction.value,
-                partB_checkpoint.value,
-                partC_prediction.value,
-                partC_checkpoint.value,
-                partD_prediction.value,
-                partD_final_decision.value,
-            )
+        rows = []
+        for part in "ABCDE":
+            capture = captures.get(part)
+            state = "MISSING"
+            if capture:
+                state = "STALE" if part in audit.stale or (part, part) in audit.identical_pairs else "CURRENT"
+            rows.append({
+                "Part": part,
+                "Original prediction": capture.to_dict()["prediction"] if capture else "—",
+                "Evidence": state,
+            })
+        quantified = []
+        if "C" in captures:
+            topology_snapshot = captures["C"].to_dict()
+            quantified.extend([
+                {"Alternative": "Flat ring", "Saved consequence": f"{topology_snapshot['baseline']['calibrated_ms']} ms calibrated"},
+                {"Alternative": "Hierarchical", "Saved consequence": f"{topology_snapshot['result']['calibrated_ms']} ms calibrated"},
+            ])
+        if "E" in captures:
+            compression_snapshot = captures["E"].to_dict()
+            result_time = compression_snapshot["result"]["time_to_target_ms"]
+            result_consequence = f"{result_time} ms to target" if result_time is not None else "quality target not reached"
+            quantified.extend([
+                {"Alternative": "Uncompressed", "Saved consequence": f"{compression_snapshot['baseline']['time_to_target_ms']} ms to target"},
+                {"Alternative": "Tested compression", "Saved consequence": result_consequence},
+            ])
+        ready = (
+            audit.complete
+            and all(x.value is not None for x in (final_choice, final_rejected, final_trigger, final_risk))
+            and bool(rationale.value.strip())
+            and final_choice.value != final_rejected.value
+            and final_choice.value == c_plan.value
         )
-        _selected_optimization = f"{_compression}x compression, {_overlap:.0f}% overlap"
-        _memo = memo_note.value or (
-            f"Use {_selected['selected_label']} on {_selected['fabric_label']} with local group {_selected['local_group']}; "
-            f"optimization: {_selected_optimization}; binding term: {_selected['binding_guardrail']}; "
-            f"reject flat ring with aggressive compression/overlap because {_rejected['binding_guardrail']} fails; "
-            f"V2-07 implication: {v2_06_lens['reliability_implication']}"
-        )
-        _snapshot = {
-            "track_id": v2_06_profile.track_id,
-            "scenario_id": v2_06_variant.scenario_id,
-            "participants": _n,
-            "payload_gb": _payload,
-            "fabric": _selected["fabric_label"],
-            "local_group": _local,
-            "selected_algorithm": _selected["selected_label"],
-            "selected_topology": _part_b_row["reason"],
-            "selected_optimization": _selected_optimization,
-            "binding_term": _selected["binding_guardrail"],
-            "exposed_ms": round(_selected["exposed_ms"], 4),
-            "budget_ms": _selected["budget_ms"],
-            "topology_guardrail": _selected["topology_ok"],
-            "optimization_guardrail": _selected["optimization_ok"],
-            "valid_plan": _selected["valid_plan"],
-            "rejected_alternative": "flat ring with aggressive compression and optimistic overlap",
-            "rejected_binding": _rejected["binding_guardrail"],
-            "v2_07_reliability_implication": v2_06_lens["reliability_implication"],
-            "completed": _completed,
-        }
-        _design = {
-            "lab_id": v2_06_metadata.lab_id,
-            "track_id": v2_06_profile.track_id,
-            "scenario_id": v2_06_variant.scenario_id,
-            "selected_algorithm": _selected["selected_label"],
-            "selected_topology": _part_b_row["reason"],
-            "selected_optimization": _selected_optimization,
-            "binding_term": _selected["binding_guardrail"],
-            "exposed_ms": _selected["exposed_ms"],
-            "budget_ms": _selected["budget_ms"],
-            "topology_guardrail": _selected["topology_ok"],
-            "optimization_guardrail": _selected["optimization_ok"],
-            "rejected_alternative": "flat ring with aggressive compression and optimistic overlap",
-            "v2_07_reliability_implication": v2_06_lens["reliability_implication"],
-            "completed": _completed,
-            "result_snapshot": _snapshot,
-        }
-        ledger.save(track=v2_06_profile.track_id, chapter=v2_06_chapter, design=_design)
+        message = "**Ready for the local communication design review.**" if ready else "Capture five current contrasts, align the recommendation with the saved topology decision, choose a different rejected alternative, and complete the rationale."
+        return mo.vstack([
+            mo.md("### Synthesis · Defend one fleet communication plan (7 min)\nUse the saved chain: **operation semantics → algorithm boundary → topology → schedulable overlap → time to quality target**."),
+            table(rows),
+            table(quantified) if quantified else mo.md("Quantified alternatives appear after Parts C and E are captured."),
+            mo.callout(mo.md("Saved snapshots preserve the original prediction, exact evaluator inputs, result, and decision. Recapture stale experiments before generating the report."), kind="info"),
+            mo.hstack([final_choice, final_rejected], widths="equal", wrap=True),
+            mo.hstack([final_trigger, final_risk], widths="equal", wrap=True),
+            rationale, mo.callout(mo.md(message), kind="success" if ready else "warn"),
+        ])
 
-        _incomplete = []
-        if partA_prediction.value is None:
-            _incomplete.append("Part A ring/tree prediction")
-        if partA_checkpoint.value is None:
-            _incomplete.append("Part A algorithm checkpoint")
-        if partB_prediction.value is None:
-            _incomplete.append("Part B topology prediction")
-        if partB_checkpoint.value is None:
-            _incomplete.append("Part B topology checkpoint")
-        if partC_prediction.value is None:
-            _incomplete.append("Part C optimization prediction")
-        if partC_checkpoint.value is None:
-            _incomplete.append("Part C optimization checkpoint")
-        if partD_prediction.value is None:
-            _incomplete.append("Part D guardrail prediction")
-        if partD_final_decision.value is None:
-            _incomplete.append("Final communication design decision")
-
-        _report = build_lab_report(
-            v2_06_metadata,
-            student_id=student_id.value or "",
-            track=v2_06_profile.label,
-            scenario=v2_06_lens["scenario"],
-            learning_objectives=(
-                "Decompose ring and tree collective costs into alpha and beta terms.",
-                "Use topology to decide which collective is feasible or dominant.",
-                "Evaluate overlap and compression as conditional optimizations with residual risk.",
-                "Approve a communication plan only when exposed time, topology, and optimization guardrails pass.",
-            ),
-            predictions={
-                "partA_ring_tree": partA_prediction.value,
-                "partB_topology": partB_prediction.value,
-                "partC_overlap_compression": partC_prediction.value,
-                "partD_guardrail": partD_prediction.value,
-            },
-            knob_settings={
-                "participants": _n,
-                "payload_gb": _payload,
-                "fabric": _selected["fabric_label"],
-                "local_group": _local,
-                "compression_ratio": _compression,
-                "overlap_pct": _overlap,
-            },
-            binding_constraints={
-                "binding_term": _selected["binding_guardrail"],
-                "exposed_ms": round(_selected["exposed_ms"], 4),
-                "budget_ms": _selected["budget_ms"],
-                "valid_plan": _selected["valid_plan"],
-            },
-            evidence_summary={
-                "ring_ms": round(_terms["ring"]["total_ms"], 4),
-                "tree_ms": round(_terms["tree"]["total_ms"], 4),
-                "selected_algorithm": _selected["selected_label"],
-                "selected_exposed_ms": round(_selected["exposed_ms"], 4),
-                "rejected_binding": _rejected["binding_guardrail"],
-                "validation_focus": v2_06_lens["validation_focus"],
-            },
-            decisions={
-                "algorithm_checkpoint": partA_checkpoint.value,
-                "topology_checkpoint": partB_checkpoint.value,
-                "optimization_checkpoint": partC_checkpoint.value,
-                "final_decision": partD_final_decision.value,
-            },
-            reflections={"communication_design_review_note": memo_note.value},
-            final_decision=_memo,
-            big_takeaways=(
-                "Ring and tree costs differ because their alpha and beta terms scale differently.",
-                "Topology changes whether a collective is feasible and whether its modeled advantage is real.",
-                "Overlap and compression reduce exposed communication only inside validation guardrails.",
-                "The V2-06 decision becomes a V2-07 reliability obligation.",
-            ),
-            residual_risk=v2_06_lens["residual_risk"],
-            source_trace={
-                "chapter_anchor": "Volume II, Chapter 6: Collective Communication",
-                "source_models": "alpha/beta ring/tree, hierarchical AllReduce, exposed overlap, compression risk",
-                "mlsysim_functions": "calc_ring_allreduce_time, calc_tree_allreduce_time, calc_hierarchical_allreduce_time",
-                "track_source_policy": v2_06_profile.source_policy,
-                "scenario_assumptions": "track budgets, quality proxies, and overlap guardrails are notebook-local pedagogical assumptions",
-            },
-            result_snapshot=_snapshot,
-            incomplete_fields=tuple(_incomplete),
-        )
-
-        return mo.vstack(
-            [
-                mo.md("## Synthesis - Collective Communication Design Review"),
-                mo.Html(f"""
-                <div class="mlsysbook-panel" style="border-left: 4px solid #1F407A; margin-top: 16px;">
-                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">STUDENT MEMO & REFLECTIONS</div>
-                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Design Review Findings</h4>
-                    {student_id}
-                    <div style="margin-top: 12px;">{memo_note}</div>
-                </div>
-                """),
-                mo.callout(
-                    mo.md(
-                        f"**Selected algorithm/topology/optimization:** {_selected['selected_label']} "
-                        f"on {_selected['fabric_label']} with local group {_selected['local_group']}; {_selected_optimization}.\n\n"
-                        f"**Binding term or guardrail:** {_selected['binding_guardrail']}.\n\n"
-                        f"**Rejected alternative:** flat ring with aggressive compression and optimistic overlap "
-                        f"(blocked by {_rejected['binding_guardrail']}).\n\n"
-                        f"**V2-07 reliability implication:** {v2_06_lens['reliability_implication']}"
-                    ),
-                    kind="success" if _selected["valid_plan"] else "warn",
-                ),
-                big_takeaways(
-                    [
-                        "Ring and tree costs differ because their alpha and beta terms scale differently.",
-                        "Topology changes whether a collective is feasible and whether its modeled advantage is real.",
-                        "Overlap and compression reduce exposed communication only inside validation guardrails.",
-                        "The V2-06 decision becomes a V2-07 reliability obligation.",
-                    ]
-                ),
-                mo.Html(f"""
-                <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin-top: 16px;">
-                    <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">FINAL VERIFICATION & SIGN-OFF</div>
-                    <h4 style="margin: 0 0 8px 0; color: #0F172A;">Lead Architect Authorization</h4>
-                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;">
-                        Confirm your collective deployment authorization and export your telemetry audit record.
-                    </p>
-                    {partD_final_decision}
-                </div>
-                """),
-                report_export_panel(_report),
-            ]
-        )
-
-    v2_06_tabs = mo.ui.tabs(
-        {
-            "Part A: Alpha/Beta": build_part_a(),
-            "Part B: Topology": build_part_b(),
-            "Part C: Overlap/Compression": build_part_c(),
-            "Part D: Guardrails": build_part_d(),
-            "Synthesis": build_synthesis(),
-        }
+    complete = (
+        audit.complete
+        and all(x.value is not None for x in (final_choice, final_rejected, final_trigger, final_risk))
+        and bool(rationale.value.strip())
+        and final_choice.value != final_rejected.value
+        and final_choice.value == c_plan.value
     )
-    v2_06_tabs
-    return
+    tabs = mo.ui.tabs({
+        "A · Algorithm": build_part_a(), "B · Semantics": build_part_b(),
+        "C · Topology": build_part_c(), "D · Overlap": build_part_d(),
+        "E · Compression": build_part_e(), "Synthesis": build_synthesis(),
+    })
+    tabs
+    return audit, complete
 
 
-@app.cell(hide_code=True)
-def _(mo, v2_06_metadata, v2_06_profile):
-    mo.Html(
-        f"""
-        <div class="lab-hud">
-            <span class="hud-label">LAB</span>
-            <span class="hud-value">{v2_06_metadata.lab_id}</span>
-            <span class="hud-label">TRACK</span>
-            <span class="hud-value">{v2_06_profile.label}</span>
-            <span style="flex:1;"></span>
-            <span class="hud-label">STATUS</span>
-            <span class="hud-active">ACTIVE</span>
-        </div>
-        """
+@app.cell
+def _(
+    build_lab_report, complete, final_choice, final_rejected, final_risk,
+    final_trigger, get_evidence, get_lab_metadata, mo, profile, rationale,
+    report_export_panel, track_id,
+):
+    mo.stop(
+        not complete,
+        mo.callout(mo.md("## Local evidence report\nThe report unlocks after all five contrasts are current and synthesis is complete."), kind="warn"),
     )
+    snapshots = {part: get_evidence()[part].to_dict() for part in "ABCDE"}
+    chosen = {
+        part: snapshots[part].get("chosen_result") or snapshots[part]["result"]
+        for part in "ABCDE"
+    }
+    report = build_lab_report(
+        get_lab_metadata("vol2/lab_06_collective_communication.py"),
+        track=track_id, scenario=profile["fleet_semantics"],
+        learning_objectives=[
+            "Identify ring versus tree algorithm crossover points",
+            "Distinguish reduction semantics from routed exchange limits",
+            "Compare flat and hierarchical topology schedules",
+            "Quantify backward-pass communication overlap across bucket policies",
+            "Evaluate compression codecs against time to quality target",
+        ],
+        predictions={part: snapshots[part]["prediction"] for part in "ABCDE"},
+        knob_settings={part: snapshots[part]["inputs"] for part in "ABCDE"},
+        evidence_summary={part: {
+            "baseline": snapshots[part]["baseline"], "tested_result": snapshots[part]["result"],
+            "chosen_result": chosen[part], "result_role": snapshots[part]["result_role"],
+            "alternatives": snapshots[part]["alternatives"],
+        } for part in "ABCDE"},
+        binding_constraints={
+            "algorithm": snapshots["A"]["decision"],
+            "routed_exchange": snapshots["B"]["decision"],
+            "topology": snapshots["C"]["decision"],
+            "compression_quality_target": chosen["E"]["quality_target_reached"],
+        },
+        decisions={"recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "reevaluation_trigger": final_trigger.value},
+        final_decision={"recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "rationale": rationale.value},
+        big_takeaways=[
+            "Payload and participant count can reverse ring and tree preference.",
+            "Reduction and destination-specific exchange have different semantics and bounds.",
+            "Overlap requires a feasible readiness and network-resource schedule.",
+        ],
+        reflections={"rationale": rationale.value, "reevaluation_trigger": final_trigger.value},
+        residual_risk=final_risk.value,
+        result_snapshot={
+            "track": track_id, "captures": snapshots, "recommendation": final_choice.value,
+            "rejected": final_rejected.value, "trigger": final_trigger.value,
+            "residual_risk": final_risk.value,
+        },
+        source_trace={
+            "scenario": "Illustrative fleet, calibration, and compression outcome fixtures.",
+            "calculations": "MLSysIM V2-06 experiment engine with Pint-backed collective formulas.",
+        },
+    )
+    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    return (report,)
+
+
+@app.cell
+async def _(
+    complete, final_choice, final_rejected, final_risk, final_trigger,
+    get_evidence, ledger, mo, rationale, track_id,
+):
+    save_status = "EVIDENCE IN PROGRESS"
+    if complete:
+        try:
+            ledger.save(chapter=6, design={
+                "schema_version": 1, "lab_id": "v2_06", "track_id": track_id,
+                "model_id": "v2_06_experiments",
+                "evidence": {part: capture.to_dict() for part, capture in get_evidence().items()},
+                "recommendation": final_choice.value,
+                "rejected_alternative": final_rejected.value,
+                "reevaluation_trigger": final_trigger.value,
+                "residual_risk": final_risk.value, "rationale": rationale.value,
+            })
+            await ledger.flush()
+            save_status = "SAVED"
+        except Exception as exc:
+            save_status = f"SAVE FAILED · {type(exc).__name__}"
+    mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span class="hud-value">06 · Collective Communication</span><span style="flex:1"></span><span class="hud-label">|</span><span class="hud-label">STATUS</span><span class="hud-active">{save_status}</span></div>')
     return
 
 

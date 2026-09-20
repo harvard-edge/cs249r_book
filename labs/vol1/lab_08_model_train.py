@@ -1,14 +1,14 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full", app_title="Lab 08: The Training Gauntlet · MLSysBook")
+app = marimo.App(width="full", app_title="Lab 08: Time to Target · MLSysBook")
 
 
 @app.cell
 async def _():
-    import marimo as mo
     import sys
     from pathlib import Path
+    import marimo as mo
 
     if sys.platform == "emscripten":
         import micropip
@@ -16,1459 +16,566 @@ async def _():
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
-        _labs_dir = Path(__file__).resolve().parents[1]
-        if str(_labs_dir) not in sys.path:
-            sys.path.insert(0, str(_labs_dir))
+        labs_dir = Path(__file__).resolve().parents[1]
+        if str(labs_dir) not in sys.path:
+            sys.path.insert(0, str(labs_dir))
         from bootstrap import native_bootstrap
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
+    from mlsysim.engine.v1_08_experiments import (
+        TRACKS, batch_experiment, batch_policy, bottleneck_experiment,
+        checkpoint_experiment, memory_outcome, optimizer_experiment, precision_experiment, track_profile,
+    )
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        MathPeek,
-        big_takeaways,
-        build_lab_report,
-        gated_hypothesis_card,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        instrumentation_console,
-        report_export_panel,
-        resolve_mlsysim_ref,
-        source_trace,
-        track_arc_context,
-        track_context,
-        training_frontier,
-        training_memory_stack,
-        training_plan,
-        training_track_profile,
+        ACADEMIC_LAB_CSS, build_lab_report, get_lab_metadata, report_export_panel,
     )
+    from mlsysbook_labs.experiment_evidence import audit_evidence, capture_evidence
 
-    ledger = DesignLedger()
-    if getattr(ledger, "is_wasm", False):
-        _ = await ledger.load_async()
+    ledger = DesignLedger(volume="vol1")
+    if ledger.is_wasm:
+        _loaded = await ledger.load_async()
     return (
-        ACADEMIC_LAB_CSS,
-        COLORS,
-        LAB_CSS,
-        apply_plotly_theme,
-        big_takeaways,
-        build_lab_report,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        go,
-        ledger,
-        mo,
-        report_export_panel,
-        resolve_mlsysim_ref,
-        track_arc_context,
-        track_context,
-        training_frontier,
-        training_memory_stack,
-        training_plan,
-        training_track_profile,
+        ACADEMIC_LAB_CSS, COLORS, LAB_CSS, TRACKS, apply_plotly_theme, batch_policy,
+        audit_evidence, batch_experiment, bottleneck_experiment, build_lab_report,
+        capture_evidence, checkpoint_experiment, get_lab_metadata, go, ledger,
+        memory_outcome, mo, optimizer_experiment, precision_experiment,
+        report_export_panel, track_profile,
     )
 
 
 @app.cell
-def _(get_lab_metadata):
-    v1_08_metadata = get_lab_metadata("vol1/lab_08_model_train.py")
-    return (v1_08_metadata,)
+def _(mo):
+    get_evidence, set_evidence = mo.state({})
+    return get_evidence, set_evidence
 
 
-@app.cell(hide_code=True)
-def _(ledger, mo):
-    _options = {
-        "☁️ Cloud Supercomputing Track (H100 & Continuous Training vs Deployment Walls)": "cloud_fleet",
-        "🤖 Edge & Embodied Track (Robotics & Drones · Jetson AGX Orin)": "robotaxi",
-        "📱 Mobile Track (On-Device Personal AI · Apple Silicon M4 / Snapdragon)": "iphone",
-        "⚡ TinyML Track (Microcontrollers & Wearables · Cortex-M55 / ESP32-S3)": "oura_ring",
+@app.cell
+def _(mo, set_evidence):
+    track = mo.ui.dropdown(
+        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
+        value="TinyML", label="Training context",
+        on_change=lambda _value: set_evidence({}),
+    )
+    return (track,)
+
+
+@app.cell
+def _(TRACKS, track, track_profile):
+    track_id = track.value
+    profile = track_profile(track_id)
+    track_settings = TRACKS[track_id]
+    return profile, track_id, track_settings
+
+
+@app.cell
+def _(batch_policy, mo, track_id):
+    _track_key = track_id
+    _b_pol = batch_policy(track_id)
+    a_optimizer = mo.ui.radio(
+        {"Adam": "adam", "AdamW": "adamw"},
+        value="AdamW", label="Optimizer conclusion",
+    )
+    b_strategy = mo.ui.dropdown(
+        _b_pol["options"],
+        value=_b_pol["default_label"], label="Batch strategy",
+    )
+    c_precision = mo.ui.dropdown(
+        {"BF16 mixed": "bf16", "FP16 mixed": "fp16", "FP8 scenario": "fp8"},
+        value="BF16 mixed", label="Precision candidate",
+    )
+    d_checkpoint = mo.ui.radio(
+        {"Selective checkpointing": "selective", "Full checkpointing": "full"},
+        value="Full checkpointing", label="Checkpoint policy",
+    )
+    e_intervention = mo.ui.radio(
+        {"Prefetch input": "prefetch", "Faster arithmetic path": "arithmetic", "Checkpoint activations": "checkpoint", "No change / hold for more evidence": "none"},
+        value="Prefetch input", label="First systems fix",
+    )
+    e_rejected = mo.ui.radio(
+        {"Prefetch input": "prefetch", "Faster arithmetic": "arithmetic", "Checkpoint activations": "checkpoint"},
+        label="Tested alternative if you hold",
+    )
+    return a_optimizer, b_strategy, c_precision, d_checkpoint, e_intervention, e_rejected
+
+
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    a_prediction = mo.ui.radio(
+        {"Weights dominate": "weights", "Gradients dominate": "gradients", "Optimizer state dominates": "optimizer"},
+        label="Which allocation is largest under AdamW?",
+    ).form(submit_button_label="Lock Part A prediction")
+    b_prediction = mo.ui.radio(
+        {"Largest effective batch": "largest", "Resident batch 32": "resident32", "Accumulated middle batch": "middle", "All finish equally": "equal"},
+        label="Which strategy reaches target soonest?",
+    ).form(submit_button_label="Lock Part B prediction")
+    c_prediction = mo.ui.radio(
+        {"Every narrower format": "all", "BF16/FP16 only": "mixed", "Only FP32": "fp32", "Speed alone decides": "speed"},
+        label="Which precision evidence remains acceptable?",
+    ).form(submit_button_label="Lock Part C prediction")
+    d_prediction = mo.ui.radio(
+        {"Memory falls; time rises": "tradeoff", "Both fall": "free", "Only optimizer state changes": "optimizer", "Nothing changes": "none"},
+        label="What does activation checkpointing change?",
+    ).form(submit_button_label="Lock Part D prediction")
+    e_prediction = mo.ui.radio(
+        {"Prefetch input": "prefetch", "Faster arithmetic": "arithmetic", "Checkpoint activations": "checkpoint"},
+        label="Which fix should be tested before buying hardware?",
+    ).form(submit_button_label="Lock Part E prediction")
+    return a_prediction, b_prediction, c_prediction, d_prediction, e_prediction
+
+
+@app.cell
+def _(mo, track_id):
+    _track_key = track_id
+    final_choice = mo.ui.radio(
+        {"Prefetch input": "prefetch", "Faster arithmetic": "arithmetic", "Checkpoint activations": "checkpoint", "No change / hold for more evidence": "none"},
+        label="Recommendation",
+    )
+    final_rejected = mo.ui.radio(
+        {"Prefetch input": "prefetch", "Faster arithmetic": "arithmetic", "Checkpoint activations": "checkpoint"},
+        label="Quantified rejected alternative",
+    )
+    final_trigger = mo.ui.radio(
+        {"Target quality is missed": "target_quality", "Training memory exceeds capacity": "memory", "Schedule or cost limit is crossed": "schedule_cost"},
+        label="Reevaluation trigger",
+    )
+    final_risk = mo.ui.radio(
+        {"Convergence may not transfer": "convergence", "Stage timing may change": "timing", "Replay may miss rare instability": "numerical"},
+        label="Remaining limitation",
+    )
+    rationale = mo.ui.text_area(
+        label="Decision rationale",
+        placeholder="Name the chosen evidence, quantify the rejected alternative, state the limitation, and explain the trigger.",
+    )
+    return final_choice, final_rejected, final_risk, final_trigger, rationale
+
+
+@app.cell
+def _(
+    a_optimizer, b_strategy, batch_experiment, batch_policy,
+    bottleneck_experiment, c_precision, checkpoint_experiment, d_checkpoint,
+    e_intervention, e_rejected, memory_outcome, optimizer_experiment,
+    precision_experiment, track_id, track_settings,
+):
+    a_sgd = optimizer_experiment(track_id, optimizer="sgd")
+    a_adam = optimizer_experiment(track_id, optimizer="adam")
+    a_adamw = optimizer_experiment(track_id, optimizer="adamw")
+    a_selected = {"sgd": a_sgd, "adam": a_adam, "adamw": a_adamw}[a_optimizer.value]
+    _b_pol = batch_policy(track_id)
+    b_physical, b_accumulation = _b_pol["choices"][b_strategy.value]
+    b_baseline = batch_experiment(
+        track_id,
+        physical_batch=_b_pol["baseline"][0],
+        accumulation_steps=_b_pol["baseline"][1],
+    )
+    b_result = batch_experiment(track_id, physical_batch=b_physical, accumulation_steps=b_accumulation)
+    b_alternatives = tuple(
+        batch_experiment(track_id, physical_batch=physical, accumulation_steps=accumulation)
+        for physical, accumulation in _b_pol["choices"].values()
+    )
+    c_fp32 = precision_experiment(track_id, precision="fp32")
+    c_result = precision_experiment(track_id, precision=c_precision.value)
+    c_alternatives = tuple(
+        precision_experiment(track_id, precision=precision)
+        for precision in ("fp32", "bf16", "fp16", "fp8")
+    )
+    probe_batch = track_settings["checkpoint_probe_batch"]
+    d_baseline = memory_outcome(track_id, physical_batch=probe_batch, accumulation_steps=1, checkpointing="none")
+    d_result = memory_outcome(track_id, physical_batch=probe_batch, accumulation_steps=1, checkpointing=d_checkpoint.value)
+    d_timing = checkpoint_experiment(track_id, checkpointing=d_checkpoint.value)
+    e_comparisons = {
+        name: bottleneck_experiment(track_id, intervention=name)
+        for name in ("prefetch", "arithmetic", "checkpoint")
     }
-    _saved_track = ledger.get_track()
-    _default_key = next((k for k, v in _options.items() if v == _saved_track), list(_options.keys())[0])
-    v1_08_track_picker = mo.ui.dropdown(
-        options=_options,
-        value=_default_key,
-        label="Select Course / Industry Track",
+    if e_intervention.value == "none":
+        e_selected = e_comparisons[e_rejected.value] if e_rejected.value is not None else None
+    else:
+        e_selected = e_comparisons[e_intervention.value]
+    return (
+        a_adam, a_adamw, a_selected, a_sgd, b_accumulation, b_alternatives,
+        b_baseline, b_physical, b_result, c_alternatives, c_fp32, c_result,
+        d_baseline, d_result, d_timing, e_comparisons, e_selected, probe_batch,
     )
-    return (v1_08_track_picker,)
 
 
 @app.cell
 def _(
-    get_lab_track_variant,
-    get_track_profile,
-    resolve_mlsysim_ref,
-    training_track_profile,
-    v1_08_track_picker,
+    a_adam, a_adamw, a_optimizer, a_prediction, a_selected, a_sgd,
+    b_accumulation, b_alternatives, b_baseline, b_physical, b_prediction,
+    b_result, c_alternatives, c_fp32, c_precision, c_prediction, c_result,
+    capture_evidence, d_baseline, d_checkpoint, d_prediction, d_result,
+    d_timing, e_comparisons, e_intervention, e_prediction, e_rejected,
+    e_selected, mo,
+    probe_batch, set_evidence, track_id,
 ):
-    # Cross-tier hardware targets: Hardware.Cloud.H100_SXM5_80GB, Hardware.Edge.Jetson_Orin_64GB, Hardware.Mobile.Apple_M4_Unified
-    v1_08_track_id = v1_08_track_picker.value
-    v1_08_profile = get_track_profile(v1_08_track_id)
-    v1_08_variant = get_lab_track_variant("v1_08_training_gauntlet", v1_08_profile.track_id)
-    v1_08_hardware = resolve_mlsysim_ref(v1_08_variant.hardware_ref)
-    v1_08_model = resolve_mlsysim_ref(v1_08_variant.model_ref)
-    v1_08_training = training_track_profile(
-        v1_08_profile,
-        v1_08_variant,
-        v1_08_hardware,
-        v1_08_model,
+    def store(part, capture):
+        set_evidence(lambda current: {**current, part: capture})
+    common_upstream = {}
+    a_capture = mo.ui.button(
+        label="Capture optimizer comparison", kind="success", disabled=a_prediction.value is None,
+        on_click=lambda _v: store("A", capture_evidence(
+            track=track_id, part="A", prediction=a_prediction.value,
+            inputs={"optimizer_choice": a_optimizer.value}, baseline=a_sgd, result=a_selected,
+            alternatives=(a_sgd, a_adam, a_adamw), decision=a_optimizer.value,
+            chosen_result=a_selected, result_role="chosen optimizer",
+            upstream_inputs=common_upstream, model_key="v1_08_experiments.optimizer_experiment",
+        )),
     )
-    return v1_08_profile, v1_08_training, v1_08_variant
+    b_capture = mo.ui.button(
+        label="Capture batch comparison", kind="success",
+        disabled=b_prediction.value is None or (
+            b_physical == b_baseline["timing"]["physical_batch"]
+            and b_accumulation == b_baseline["timing"]["accumulation_steps"]
+        ),
+        on_click=lambda _v: store("B", capture_evidence(
+            track=track_id, part="B", prediction=b_prediction.value,
+            inputs={"physical_batch": b_physical, "accumulation_steps": b_accumulation},
+            baseline=b_baseline, result=b_result, alternatives=b_alternatives,
+            decision=f"{b_physical}x{b_accumulation}", upstream_inputs=common_upstream,
+            chosen_result=b_result, result_role="chosen batch strategy",
+            model_key="v1_08_experiments.batch_experiment",
+        )),
+    )
+    c_capture = mo.ui.button(
+        label="Capture precision comparison", kind="success", disabled=c_prediction.value is None,
+        on_click=lambda _v: store("C", capture_evidence(
+            track=track_id, part="C", prediction=c_prediction.value,
+            inputs={"precision": c_precision.value}, baseline=c_fp32, result=c_result,
+            alternatives=c_alternatives, decision=c_precision.value,
+            chosen_result=c_result, result_role="chosen precision",
+            upstream_inputs=common_upstream, model_key="v1_08_experiments.precision_experiment",
+        )),
+    )
+    d_capture = mo.ui.button(
+        label="Capture checkpoint comparison", kind="success", disabled=d_prediction.value is None,
+        on_click=lambda _v: store("D", capture_evidence(
+            track=track_id, part="D", prediction=d_prediction.value,
+            inputs={"physical_batch": probe_batch, "checkpointing": d_checkpoint.value},
+            baseline=d_baseline, result=d_result, alternatives=(d_timing,),
+            decision=d_checkpoint.value, upstream_inputs=common_upstream,
+            chosen_result=d_result, result_role="chosen checkpoint policy",
+            model_key="v1_08_experiments.memory_outcome",
+        )),
+    )
+    e_hold_without_test = e_intervention.value == "none" and e_rejected.value is None
+    e_capture = mo.ui.button(
+        label="Capture bottleneck decision", kind="success",
+        disabled=e_prediction.value is None or e_hold_without_test,
+        on_click=lambda _v: store("E", capture_evidence(
+            track=track_id, part="E", prediction=e_prediction.value,
+            inputs={"intervention": e_intervention.value, "rejected_alternative": e_rejected.value},
+            baseline=e_selected["baseline"], result=e_selected["result"],
+            alternatives=tuple(e_comparisons.values()), decision=e_intervention.value,
+            chosen_result=e_selected["baseline"] if e_intervention.value == "none" else e_selected["result"],
+            result_role="rejected alternative" if e_intervention.value == "none" else "chosen systems intervention",
+            upstream_inputs=common_upstream, model_key="v1_08_experiments.bottleneck_experiment",
+        )),
+    )
+    return a_capture, b_capture, c_capture, common_upstream, d_capture, e_capture
 
 
-@app.cell(hide_code=True)
-def _(
-    ACADEMIC_LAB_CSS,
-    COLORS,
-    LAB_CSS,
-    mo,
-    track_arc_context,
-    track_context,
-    v1_08_metadata,
-    v1_08_profile,
-    v1_08_track_picker,
-    v1_08_training,
-    v1_08_variant,
-):
+@app.cell
+def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
+    css = """
+    <style>
+    .pilot-head{background:linear-gradient(135deg,#101827,#1d4f78);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin-bottom:14px}
+    .pilot-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}
+    .pilot-head h1{font-size:clamp(1.65rem,5vw,2.65rem);line-height:1.05;margin:16px 0 8px}.pilot-head p{color:#dbeafe;max-width:780px}
+    .pilot-note{color:#475569;font-size:.9rem;line-height:1.5;margin:0;padding:0 2px}.pilot-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-top:17px}.pilot-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}
+    .saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}.table-wrap{max-width:100%;overflow-x:auto}.lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-value{color:#fff}.lab-hud .hud-active{color:#86efac}
+    @media(max-width:520px){.pilot-head{border-radius:9px;margin-top:30px}.pilot-meta{grid-template-columns:1fr}}
+    </style>"""
+    header = mo.Html(f"""{css}<section class="pilot-head"><div class="pilot-top"><span>VOLUME I · LAB 08</span><span>ABOUT 50–55 MIN</span></div><h1>Train for the Target, Not the Counter</h1><p>Which training design reaches a common quality target within memory, schedule, and cost limits?</p><div class="pilot-meta"><div><b>Track</b><br>{profile['label']}</div><div><b>Context</b><br>{profile['task']}</div><div><b>Teaching workload</b><br>GPT-2 on a development host</div><div><b>Deliverable</b><br>Training design recommendation</div></div></section>""")
     mo.vstack([
-        LAB_CSS,
-        ACADEMIC_LAB_CSS,
-        mo.Html(f"""
-        <div class="mlsysbook-lab-shell">
-          <div style="margin-bottom: 16px;">
-            {v1_08_track_picker}
-          </div>
-          <div class="mlsysbook-lab-header" style="border-left: 6px solid #A51C30; background: #FFFFFF; padding: 24px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
-            <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">
-              ML Systems Textbook &middot; Volume I &middot; Chapter 8 &middot; Foundational Lab 08
-            </div>
-            <h1 style="font-size: 2.1rem; font-weight: 800; color: #0F172A; margin: 0 0 10px 0; line-height: 1.2;">
-              Training Gauntlet: Weights, Gradients, Optimizer State &amp; Activations
-            </h1>
-            <p style="font-size: 1.05rem; color: #334155; line-height: 1.6; margin: 0 0 16px 0;">
-              {v1_08_variant.workload_summary} Trace where training, adaptation, or calibration should physically execute. Analyze the multi-gigabyte training memory stack across batch sizes, evaluate precision policy trade-offs, and construct a robust training plan that survives real-world resource constraints.
-            </p>
-            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Track:</strong> {v1_08_profile.label}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Workload:</strong> {v1_08_training.workload_label}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Hardware:</strong> {v1_08_variant.hardware_ref}
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Model:</strong> {v1_08_variant.model_ref}
-              </span>
-              <span style="background: #FEF2F2; color: #A51C30; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; border: 1px solid #FECACA;">
-                <strong>Primary Focus:</strong> Training Memory &amp; Feasibility
-              </span>
-              <span style="background: #F1F5F9; color: #0F172A; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid #CBD5E1;">
-                <strong>Deliverable:</strong> {v1_08_training.report_artifact}
-              </span>
-            </div>
-          </div>
-
-          <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-            <h3 style="margin-top: 0; color: #0F172A; font-size: 1.15rem; font-weight: 700;">
-              System Scenario: {v1_08_profile.label} Training &amp; Adaptation Engineering
-            </h3>
-            <p style="color: #334155; font-size: 0.95rem; line-height: 1.6; margin-bottom: 16px;">
-              You are the <strong>{v1_08_training.stakeholder}</strong> responsible for establishing the training, fine-tuning, or adaptation strategy for <strong>{v1_08_variant.model_ref}</strong> on <strong>{v1_08_variant.hardware_ref}</strong>. The target system must satisfy strict memory, throughput, and stability constraints under <strong>{v1_08_training.workload_label}</strong>.
-            </p>
-            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
-              <div style="font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
-                The Architectural Invariants of ML Model Training:
-              </div>
-              <ul class="mlsysbook-list" style="margin: 0; font-size: 0.92rem; color: #1E293B; line-height: 1.6;">
-                <li><strong>The Training Memory Invariant:</strong> Training memory fundamentally dwarfs inference memory: <em>M</em><sub>train</sub> = <em>M</em><sub>weights</sub> + <em>M</em><sub>grads</sub> + <em>M</em><sub>opt</sub> + <em>M</em><sub>acts</sub> + <em>M</em><sub>batch</sub>. For AdamW optimizers, first and second moment states alone require 8 bytes per parameter in FP32, making optimizer state a major memory bottleneck.</li>
-                <li><strong>The Batch Utilization vs Memory Trade-Off:</strong> Larger batch sizes amortize kernel launch latency and improve accelerator compute utilization: <em>T</em><sub>train</sub> = <em>O</em> / (<em>R</em><sub>peak</sub> &middot; &eta;<sub>hw</sub>). However, activation memory grows with batch size, requiring activation checkpointing or gradient accumulation when hitting memory ceilings.</li>
-                <li><strong>The Precision-Stability Duality:</strong> Reduced-precision training (FP16, BF16, FP8) cuts memory traffic and accelerates tensor core operations, but demands dynamic loss scaling or numeric range verification to prevent gradient underflow and loss spikes.</li>
-                <li><strong>The Deployment Handoff Invariant:</strong> Pre-training, fine-tuning, and on-device adaptation represent fundamentally different operational profiles. A training plan is sound only when training location, validation checks, and deployment artifacts are fully reconciled against hardware boundaries.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['BlueLine']};
-                    background: white; border-radius: 0 12px 12px 0;
-                    padding: 20px 28px; margin: 8px 0 16px 0;
-                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Reason about batch size:</strong>
-                    compare throughput, memory pressure, and convergence evidence.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Build the training memory stack:</strong>
-                    compare weights, gradients, optimizer state, activations, and data batch memory.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Check precision policy:</strong>
-                    weigh memory/throughput gains against stability evidence.</div>
-                <div style="margin-bottom: 3px;">4. <strong>Choose a training plan:</strong>
-                    satisfy cost, time, memory, validation, and deployment handoff constraints.</div>
-            </div>
-            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
-                        padding: 16px 28px 0 28px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Core Question
-                </div>
-                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                            line-height: 1.5; font-style: italic;">
-                    Training is budgeted optimization on {v1_08_training.label}: which
-                    batch, precision, memory budget, and validation evidence make the
-                    training or adaptation plan defensible?
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']};
-                            line-height: 1.6; margin-top: 10px;">
-                    Every track follows the same four concepts. The selected track changes
-                    persona, constraints, thresholds, evidence emphasis, failure mode, and
-                    report framing.
-                </div>
-            </div>
-        </div>
-        """),
-        track_context(v1_08_profile),
-        track_arc_context(v1_08_profile, v1_08_metadata.lab_id),
-    ])
+        LAB_CSS, ACADEMIC_LAB_CSS, header, track,
+        mo.Html('<p class="pilot-note">Device tracks study upstream teacher training or adaptation; GPT-2 is not deployed on the constrained target. Convergence, numerical replay, stage timing, and internal host rates are finite illustrative scenario evidence, not benchmark measurements.</p>'),
+    ], gap=0.5)
     return
 
 
-@app.cell(hide_code=True)
-def _(mo, v1_08_training):
-    v1_08_batch_prediction = mo.ui.radio(
-        options={
-            "The largest feasible batch is always the best choice": "largest_feasible",
-            "The smallest batch is safest because it uses less memory": "smallest_safe",
-            "Batch size must balance utilization, memory, and convergence evidence": "balanced",
-            "Batch only changes wall-clock speed": "speed_only",
-        },
-        label=f"{v1_08_training.label}: what will batch size change besides raw speed?",
-    )
-    v1_08_batch_checkpoint = mo.ui.radio(
-        options={
-            "Keep the current physical batch": "keep_batch",
-            "Lower physical batch and use accumulation": "lower_and_accumulate",
-            "Move training upstream and keep local validation": "upstream_local_validation",
-            "Block until convergence evidence is available": "block_for_convergence",
-        },
-        label="Checkpoint: what batch decision belongs in the memo?",
-    )
-    return v1_08_batch_checkpoint, v1_08_batch_prediction
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_08_training):
-    v1_08_memory_prediction = mo.ui.radio(
-        options={
-            "Weights dominate": "weights",
-            "Gradients dominate": "gradients",
-            "Optimizer state dominates": "optimizer state",
-            "Activations dominate": "activations",
-            "Data batch dominates": "data batch",
-        },
-        label=f"{v1_08_training.label}: which training memory component do you expect to dominate?",
-    )
-    return (v1_08_memory_prediction,)
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_08_training):
-    v1_08_batch_size = mo.ui.slider(
-        start=v1_08_training.batch_min,
-        stop=v1_08_training.batch_max,
-        value=v1_08_training.default_batch_size,
-        step=v1_08_training.batch_step,
-        label="Batch size",
-    )
-    return (v1_08_batch_size,)
-
-
-@app.cell(hide_code=True)
-def _(mo, v1_08_training):
-    _strategy_options = {
-        strategy.label: strategy.strategy_id
-        for strategy in v1_08_training.strategy_options
-    }
-    v1_08_strategy_choice = mo.ui.dropdown(
-        options=_strategy_options,
-        value=v1_08_training.strategy_options[0].label,
-        label="Training/adaptation strategy",
-    )
-    v1_08_memory_mitigation = mo.ui.radio(
-        options={
-            "Reduce physical batch or use accumulation": "reduce_batch",
-            "Reduce trainable fraction or freeze layers": "reduce_trainable",
-            "Use checkpointing to trade recompute for activation memory": "checkpoint",
-            "Move training upstream and validate locally": "move_upstream",
-        },
-        label="Checkpoint: which mitigation addresses the binding memory term?",
-    )
-    v1_08_precision_prediction = mo.ui.radio(
-        options={
-            "Lower precision is always safe if the memory number improves": "always_safe",
-            "Reduced precision improves memory/throughput but requires stability evidence": "needs_evidence",
-            "Precision only affects stored model weights": "weights_only",
-            "Precision is irrelevant because training is upstream": "irrelevant",
-        },
-        label="Prediction: what changes when the precision policy changes?",
-    )
-    v1_08_precision_policy = mo.ui.radio(
-        options={
-            "FP32 stability baseline": "fp32_stability",
-            "FP16 loss-scaled mixed precision": "fp16_loss_scaled",
-            "BF16 mixed precision": "bf16_mixed",
-            "FP8 experimental path": "fp8_experimental",
-        },
-        label="Precision policy to test",
-    )
-    v1_08_precision_checkpoint = mo.ui.radio(
-        options={
-            "FP32/BF16 parity replay": "parity_replay",
-            "loss-scale and NaN telemetry": "loss_scale_telemetry",
-            "rare-event or edge-case validation": "rare_event_validation",
-            "deployment-conversion numeric diff": "conversion_diff",
-        },
-        label="Checkpoint: which evidence must accompany reduced precision?",
-    )
-    v1_08_plan_prediction = mo.ui.radio(
-        options={
-            "Memory capacity": "memory",
-            "Training time, cost, or carbon": "time_cost",
-            "Validation/evidence coverage": "validation",
-            "Deployment handoff or rollback": "handoff",
-        },
-        label="Prediction: which constraint will rule out the naive plan?",
-    )
-    v1_08_plan_checkpoint = mo.ui.radio(
-        options={
-            "Approve selected plan with listed validation": "approve_with_validation",
-            "Reduce scope and keep only adaptation/calibration": "reduce_scope",
-            "Move training upstream and keep local validation": "upstream_train_local_validate",
-            "Block release until evidence gap closes": "block_for_evidence",
-        },
-        label="Checkpoint: what should the memo recommend?",
-    )
-    v1_08_reflection = mo.ui.text_area(
-        label="Training plan memo reflection",
-        placeholder="Name the binding resource, the evidence number, and the deployment implication that carries forward.",
-        full_width=True,
-    )
-    return (
-        v1_08_memory_mitigation,
-        v1_08_plan_checkpoint,
-        v1_08_plan_prediction,
-        v1_08_precision_checkpoint,
-        v1_08_precision_policy,
-        v1_08_precision_prediction,
-        v1_08_reflection,
-        v1_08_strategy_choice,
-    )
+@app.cell
+def _(mo):
+    mo.sidebar([mo.md("## Lab navigation"), mo.outline(label="Sections")])
+    return
 
 
 @app.cell
-def _():
-    def v1_08_strategy_by_id(profile, strategy_id):
-        for strategy in profile.strategy_options:
-            if strategy.strategy_id == strategy_id:
-                return strategy
-        return profile.strategy_options[0]
+def _(
+    COLORS, a_adam, a_adamw, a_capture, a_optimizer, a_prediction,
+    a_selected, a_sgd, apply_plotly_theme, audit_evidence, b_baseline,
+    b_capture, b_physical, b_prediction, b_result, b_strategy, c_capture,
+    c_fp32, c_precision, c_prediction, c_result, common_upstream,
+    d_baseline, d_capture, d_checkpoint, d_prediction, d_result, d_timing,
+    e_capture, e_comparisons, e_intervention, e_prediction, e_rejected,
+    e_selected, final_choice, final_rejected, final_risk, final_trigger,
+    get_evidence, go, mo, probe_batch, profile, rationale, track_id,
+):
+    _captures = get_evidence()
+    audit = audit_evidence(
+        _captures, track=track_id, required_parts=tuple("ABCDE"),
+        per_part_upstream_inputs={part: common_upstream for part in "ABCDE"},
+        contrast_required_parts=tuple("ABCDE"),
+    )
 
-    def v1_08_track_amount_system(profile):
-        notes = {
-            "iphone": {
-                "amount_system": "app memory, thermal headroom, battery drain, privacy-local data, and adapter storage",
-                "batch_consequence": "A local batch that looks feasible can still burn thermal and battery budget or overfit one user's contexts.",
-                "precision_consequence": "Reduced precision must preserve the converted CoreML behavior and privacy-safe local replay evidence.",
-                "plan_consequence": "Full training is upstream; only lightweight local personalization is a defensible device activity.",
-                "carry_forward": "Deployment must carry adapter rollback, privacy-safe telemetry, and local validation gates.",
-            },
-            "oura_ring": {
-                "amount_system": "SRAM, flash, OTA payload, duty cycle, battery life, and scarce biosignal labels",
-                "batch_consequence": "The ring can collect biosignals, but a training batch competes with always-on sensing and firmware memory.",
-                "precision_consequence": "Precision policy is mainly an upstream-training and OTA-artifact choice; firmware must still pass battery and signal replay.",
-                "plan_consequence": "Full firmware training is rejected; cloud/offline training plus tiny calibration is the realistic plan.",
-                "carry_forward": "Deployment must carry SRAM trace, OTA payload size, and battery-regression evidence.",
-            },
-            "robotaxi": {
-                "amount_system": "rare-event coverage, p99/p999 replay time, safety compute, route evidence, and fallback reliability",
-                "batch_consequence": "Bigger fleet batches can improve throughput while diluting or delaying rare-event evidence.",
-                "precision_consequence": "Reduced precision needs rare-event replay because numerical drift can hide in safety tails.",
-                "plan_consequence": "Training belongs in the fleet/simulation pipeline; the vehicle should validate safety behavior locally.",
-                "carry_forward": "Deployment must carry rare-event replay, fallback drill, and route-specific regression evidence.",
-            },
-            "cloud_fleet": {
-                "amount_system": "accelerator HBM, throughput, wall-clock time, cost, utilization, carbon, and serving canary evidence",
-                "batch_consequence": "Large batches improve utilization until memory, learning-rate schedule, or convergence evidence becomes binding.",
-                "precision_consequence": "Mixed precision can reduce cost and carbon, but FP16/BF16/FP8 choices need stability evidence.",
-                "plan_consequence": "Full training is central, but the plan must pay for accelerator memory, recompute, checkpointing, and canary gates.",
-                "carry_forward": "Deployment must carry trained-checkpoint promotion, cost/time evidence, and serving rollback gates.",
-            },
-        }
-        return notes.get(profile.track_id, notes["iphone"])
+    def table(rows):
+        return mo.vstack([mo.ui.table(rows, pagination=False)]).style({"max-width": "100%", "overflow-x": "auto"})
 
-    def v1_08_batch_status(profile, point):
-        if not point.feasible:
-            return (
-                "blocked",
-                "Memory or throughput boundary crossed; lower physical batch, accumulate gradients, or change strategy.",
-            )
-        if point.throughput_samples_s < profile.throughput_budget_samples_s * 1.25:
-            return (
-                "low-throughput",
-                "The batch fits but leaves little utilization margin against the track throughput target.",
-            )
-        high_batch = point.batch_size >= max(profile.batch_min, int(profile.batch_max * 0.75))
-        if high_batch and profile.track_id == "cloud_fleet":
-            return (
-                "convergence validation",
-                "Large effective batch needs learning-rate, warmup, and convergence validation.",
-            )
-        if high_batch and profile.track_id == "robotaxi":
-            return (
-                "evidence dilution",
-                "Rare-event examples must stay represented when fleet batches grow.",
-            )
-        if high_batch and profile.track_id in {"iphone", "oura_ring"}:
-            return (
-                "local-budget caution",
-                "Device-side training/adaptation still competes with local data, energy, and update budgets.",
-            )
-        return ("candidate", "Feasible at this point, pending the track validation evidence.")
+    def saved(part):
+        capture = _captures.get(part)
+        if capture is None:
+            return mo.callout(mo.md("No saved evidence for this part."), kind="warn")
+        if part in audit.stale or (part, part) in audit.identical_pairs:
+            return mo.callout(mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** Recapture this part."), kind="danger")
+        snapshot = capture.to_dict()
+        return mo.Html(f'<div class="saved"><b>Saved snapshot</b> · prediction: {snapshot["prediction"]}<br><small>The report keeps these captured settings and results.</small></div>')
 
-    def v1_08_batch_rows(profile, frontier):
-        rows = []
-        for point in frontier.points:
-            status, consequence = v1_08_batch_status(profile, point)
-            rows.append({
-                "batch_size": point.batch_size,
-                "total_mb": point.total_mb,
-                "throughput_samples_s": point.throughput_samples_s,
-                "feasible": point.feasible,
-                "status": status,
-                "consequence": consequence,
-            })
-        return tuple(rows)
+    def status(result):
+        return "PASS" if result["feasible"] else "FAIL · " + ", ".join(result.get("violations", ("memory",)))
 
-    def v1_08_batch_consequence(profile, selected_stack, frontier):
-        amount_system = v1_08_track_amount_system(profile)
-        if selected_stack.violations:
-            consequence = "; ".join(selected_stack.violations)
-            mitigation = "Lower physical batch, change strategy, or move training upstream."
-        elif (
-            frontier.first_infeasible_batch is not None
-            and selected_stack.batch_size == frontier.max_feasible_batch
-        ):
-            consequence = (
-                f"Batch {selected_stack.batch_size} is the last feasible point before "
-                f"batch {frontier.first_infeasible_batch} crosses the boundary."
+    def part_a():
+        intro = mo.md(
+            f"### A · Why does inference fit while training fails? (8 min)\n"
+            f"On the upstream development host ({profile['hardware'].name}) used for {profile['label']} "
+            "teacher adaptation, single-batch inference fits easily while full training allocates substantial additional state. "
+            "Predict the largest AdamW allocation before opening the training-memory ledger."
+        )
+        if a_prediction.value is None:
+            return mo.vstack([intro, a_prediction])
+        rows = [{
+            "Optimizer": name.upper(), "Weights (GB)": f"{result['memory']['weights_gb']:.1f}",
+            "Gradients (GB)": f"{result['memory']['gradients_gb']:.1f}",
+            "Optimizer state (GB)": f"{result['memory']['optimizer_state_gb']:.1f}",
+            "Total (GB)": f"{result['memory']['total_memory_gb']:.1f}",
+            "Updates to target": result["updates_to_target"],
+        } for name, result in (("sgd", a_sgd), ("adam", a_adam), ("adamw", a_adamw))]
+        figure = go.Figure()
+        for label, key, color in (("Weights", "weights_gb", COLORS["BlueLine"]), ("Gradients", "gradients_gb", COLORS["OrangeLine"]), ("Optimizer", "optimizer_state_gb", COLORS["GreenLine"]), ("Activations", "activations_gb", COLORS["RedLine"])):
+            figure.add_bar(name=label, x=["SGD", "Adam", "AdamW"], y=[r["memory"][key] for r in (a_sgd, a_adam, a_adamw)], marker_color=color)
+        figure.update_layout(barmode="stack", height=290, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Training memory (GB)", legend_orientation="h")
+        return mo.vstack([
+            intro, a_prediction, apply_plotly_theme(figure), table(rows), a_optimizer,
+            mo.callout(mo.md(f"**Your prediction:** {a_prediction.value}. On the {profile['hardware'].name} development host, AdamW optimizer state is **{a_adamw['memory']['optimizer_state_gb']:.1f} GB**; inference weights alone are **{a_adamw['memory']['inference_weights_gb']:.1f} GB**. Your optimizer conclusion is **{a_optimizer.value}**, with {a_selected['updates_to_target']} illustrative updates to target."), kind="info"),
+            a_capture, saved("A"), mo.accordion({"Calculation Notes": mo.md("Training memory sums weights, gradients, optimizer state, retained activations, and buffers. The simulator computes the allocations; convergence traces are supplied scenario observations.")}),
+        ])
+
+    def part_b():
+        intro = mo.md("### B · Does a larger batch finish sooner? (10 min)\nPhysical batch controls resident activations. Accumulation repeats microsteps before one optimizer update. Compare time to the same target quality.")
+        if b_prediction.value is None:
+            return mo.vstack([intro, b_prediction])
+        rows = [
+            {
+                "Design": "Baseline",
+                "Physical batch": b_baseline["timing"]["physical_batch"],
+                "Accumulation": b_baseline["timing"]["accumulation_steps"],
+                "Effective batch": b_baseline["timing"]["effective_batch"],
+                "Updates": b_baseline["updates_to_target"] if b_baseline["updates_to_target"] is not None else "target missed",
+                "Samples presented": b_baseline["samples_presented"] if b_baseline["samples_presented"] is not None else "—",
+                "Update time (ms)": f"{b_baseline['timing']['update_time_ms']:.1f}",
+                "Total time (s)": f"{b_baseline['total_time_seconds']:.1f}" if b_baseline["total_time_seconds"] is not None else "—",
+                "Outcome": status(b_baseline),
+            },
+            {
+                "Design": "Intervention",
+                "Physical batch": b_result["timing"]["physical_batch"],
+                "Accumulation": b_result["timing"]["accumulation_steps"],
+                "Effective batch": b_result["timing"]["effective_batch"],
+                "Updates": b_result["updates_to_target"] if b_result["updates_to_target"] is not None else "target missed",
+                "Samples presented": b_result["samples_presented"] if b_result["samples_presented"] is not None else "—",
+                "Update time (ms)": f"{b_result['timing']['update_time_ms']:.1f}",
+                "Total time (s)": f"{b_result['total_time_seconds']:.1f}" if b_result["total_time_seconds"] is not None else "—",
+                "Outcome": status(b_result),
+            },
+        ]
+        figure = go.Figure()
+        figure.add_scatter(
+            x=[point[0] for point in b_baseline["trace"]],
+            y=[point[1] for point in b_baseline["trace"]],
+            mode="lines+markers",
+            name=f"Baseline (eff {b_baseline['timing']['effective_batch']})",
+            line=dict(color=COLORS["OrangeLine"], width=2, dash="dot"),
+        )
+        figure.add_scatter(
+            x=[point[0] for point in b_result["trace"]],
+            y=[point[1] for point in b_result["trace"]],
+            mode="lines+markers",
+            name=f"Intervention (eff {b_result['timing']['effective_batch']})",
+            line=dict(color=COLORS["BlueLine"], width=3),
+        )
+        figure.add_hline(y=b_result["target_quality"], line_dash="dash", annotation_text="Common target")
+        figure.update_layout(
+            height=280, margin=dict(l=20, r=20, t=20, b=20),
+            xaxis_title="Optimizer updates", yaxis_title="Illustrative held-out quality",
+            legend_orientation="h",
+        )
+        b_success = b_result["feasible"] and b_result["reached_target"]
+        if not b_result["memory"]["feasible"]:
+            b_feedback = (
+                f" **Execution failed ({status(b_result)}).** "
+                f"Resident physical batch {b_physical} requires {b_result['memory']['total_memory_gb']:.1f} GB, "
+                f"exceeding accelerator capacity ({b_result['memory']['available_memory_gb']:.1f} GB) "
+                f"with {b_result['memory']['activations_gb']:.1f} GB of resident activations alone (Out-Of-Memory / OOM). "
+                "Gradient accumulation enables larger effective batches without blowing up resident activation memory."
             )
-            mitigation = "Keep this batch only with validation margin; otherwise use accumulation."
+        elif not b_result["reached_target"]:
+            b_feedback = f" **Target missed ({status(b_result)}).** The design is feasible in memory but failed to reach target quality ({b_result['target_quality']}) within the update horizon."
+        elif not b_result["feasible"]:
+            b_feedback = f" **Constraint violated ({status(b_result)}).** The design reached target quality but violated schedule or cost limits."
         else:
-            consequence = amount_system["batch_consequence"]
-            mitigation = "Preserve evidence that the batch choice still satisfies the track guardrail."
-        return {
-            "consequence": consequence,
-            "mitigation": mitigation,
-            "amount_system": amount_system["amount_system"],
-        }
+            b_feedback = " The design is feasible and reached the common target."
+        return mo.vstack([
+            intro, b_prediction, b_strategy, apply_plotly_theme(figure), table(rows),
+            mo.callout(mo.md(f"**Your prediction:** {b_prediction.value}. The selected design uses physical batch **{b_physical}** and effective batch **{b_result['timing']['effective_batch']}**. It presents **{b_result['samples_presented'] or 'no completed target run'}** samples before the target result.{b_feedback}"), kind="success" if b_success else "danger"),
+            b_capture, saved("B"), mo.accordion({"Calculation Notes": mo.md("Update time repeats input + forward + backward + recomputation for every accumulated microbatch, followed by one optimizer step. The simulator multiplies supplied updates-to-target by update time and separately counts sample presentations.")}),
+        ])
 
-    def v1_08_precision_policy_rows(profile, selected_stack, strategy):
-        policies = (
-            {
-                "policy_id": "fp32_stability",
-                "label": "FP32 stability baseline",
-                "bytes": 4,
-                "throughput_factor": 0.55,
-                "stability_risk": "low",
-                "evidence": "FP32 baseline replay and convergence curve",
-            },
-            {
-                "policy_id": "fp16_loss_scaled",
-                "label": "FP16 loss-scaled mixed precision",
-                "bytes": 2,
-                "throughput_factor": 1.18,
-                "stability_risk": "medium",
-                "evidence": "loss-scale telemetry, NaN checks, and representative replay",
-            },
-            {
-                "policy_id": "bf16_mixed",
-                "label": "BF16 mixed precision",
-                "bytes": 2,
-                "throughput_factor": 1.14,
-                "stability_risk": "low-medium",
-                "evidence": "BF16 vs FP32 parity replay on representative data",
-            },
-            {
-                "policy_id": "fp8_experimental",
-                "label": "FP8 experimental path",
-                "bytes": 1,
-                "throughput_factor": 1.42,
-                "stability_risk": "high",
-                "evidence": "per-tensor scaling audit, holdout convergence, and canary replay",
-            },
-        )
-        base_bytes = max(1, strategy.precision_bytes)
+    def part_c():
+        intro = mo.md("### C · When does lower precision help? (10 min)\nNarrower compute can shorten stages and reduce tensors, while high-precision optimizer state remains. Independent numerical and convergence replays decide acceptance.")
+        if c_prediction.value is None:
+            return mo.vstack([intro, c_prediction])
+        rows = [{
+            "Format": result["memory"]["precision"].upper(), "Memory (GB)": f"{result['memory']['total_memory_gb']:.1f}",
+            "Update time (ms)": f"{result['timing']['update_time_ms']:.1f}", "Optimizer stage (ms)": f"{result['timing']['optimizer_ms']:.1f}",
+            "Finite replay": f"{result['numerical_replay']['finite_fraction']:.1%}", "Target": "reached" if result["reached_target"] else "missed",
+        } for result in (c_fp32, c_result)]
+        figure = go.Figure([go.Bar(x=["FP32", c_precision.value.upper()], y=[c_fp32["timing"]["update_time_ms"], c_result["timing"]["update_time_ms"]], marker_color=[COLORS["BlueLine"], COLORS["OrangeLine"]])])
+        figure.update_layout(height=260, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Update time (ms)", showlegend=False)
+        return mo.vstack([
+            intro, c_prediction, c_precision, apply_plotly_theme(figure), table(rows),
+            mo.callout(mo.md(f"**Your prediction:** {c_prediction.value}. **{c_precision.value.upper()}** {'reaches' if c_result['reached_target'] else 'does not reach'} the common target. Its FP32 optimizer stage remains **{c_result['timing']['optimizer_ms']:.1f} ms**."), kind="success" if c_result["reached_target"] else "danger"),
+            c_capture, saved("C"), mo.accordion({"Calculation Notes": mo.md("Precision selects finite forward/backward observations and tensor widths. Optimizer time is a separate FP32-state fixture. Numerical replay and convergence are not functions of throughput.")}),
+        ])
+
+    def part_d():
+        intro = mo.md(f"### D · When is recomputation worth paying for? (10 min)\nThe resident physical-batch probe is **{probe_batch}**. Without checkpointing it crosses the memory boundary. Predict both memory and time directions.")
+        if d_prediction.value is None:
+            return mo.vstack([intro, d_prediction])
+        rows = [
+            {"Policy": "None", "Activations (GB)": f"{d_baseline['activations_gb']:.1f}", "Total (GB)": f"{d_baseline['total_memory_gb']:.1f}", "Capacity (GB)": f"{d_baseline['available_memory_gb']:.1f}", "Fits": "yes" if d_baseline["feasible"] else "NO"},
+            {"Policy": d_checkpoint.value.title(), "Activations (GB)": f"{d_result['activations_gb']:.1f}", "Total (GB)": f"{d_result['total_memory_gb']:.1f}", "Capacity (GB)": f"{d_result['available_memory_gb']:.1f}", "Fits": "yes" if d_result["feasible"] else "NO"},
+        ]
+        figure = go.Figure([go.Bar(x=["No checkpoint", d_checkpoint.value.title()], y=[d_baseline["total_memory_gb"], d_result["total_memory_gb"]], marker_color=[COLORS["RedLine"], COLORS["GreenLine"]])])
+        figure.add_hline(y=d_baseline["available_memory_gb"], line_dash="dash", annotation_text="Capacity")
+        figure.update_layout(height=270, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Training memory (GB)", showlegend=False)
+        return mo.vstack([
+            intro, d_prediction, d_checkpoint, apply_plotly_theme(figure), table(rows),
+            mo.callout(mo.md(f"**Your prediction:** {d_prediction.value}. The selected policy saves **{d_timing['activation_memory_saved_gb']:.1f} GB** at the default batch and adds **{d_timing['added_update_time_ms']:.1f} ms** per update. The probe changes from **{'fit' if d_baseline['feasible'] else 'OOM'}** to **{'fit' if d_result['feasible'] else 'OOM'}**."), kind="success" if d_result["feasible"] else "danger"),
+            d_capture, saved("D"), mo.accordion({"Calculation Notes": mo.md("The memory model reduces retained activations. The stage model adds supplied recomputation work to each physical microstep; convergence does not improve automatically.")}),
+        ])
+
+    def part_e():
+        intro = mo.md("### E · What should we fix before buying hardware? (8 min)\nCompare input prefetch, a supplied faster arithmetic path, and activation checkpointing against the identical baseline.")
+        if e_prediction.value is None:
+            return mo.vstack([intro, e_prediction])
+        rows = [{
+            "Fix": name.title(), "Update-time change (ms)": f"{comparison['delta_update_time_ms']:+.1f}",
+            "Memory change (GB)": f"{comparison['delta_memory_gb']:+.1f}",
+            "Total time (s)": f"{comparison['result']['total_time_seconds']:.1f}",
+            "Dominant stage": comparison["result"]["timing"]["dominant_stage"], "Outcome": status(comparison["result"]),
+        } for name, comparison in e_comparisons.items()]
+        figure = go.Figure([go.Bar(x=[name.title() for name in e_comparisons], y=[comparison["delta_update_time_ms"] for comparison in e_comparisons.values()], marker_color=[COLORS["BlueLine"], COLORS["GreenLine"], COLORS["OrangeLine"]])])
+        figure.update_layout(height=270, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Change in update time (ms)", showlegend=False)
+        if e_selected is None:
+            return mo.vstack([intro, e_prediction, e_intervention, e_rejected])
+        _held = e_intervention.value == "none"
+        _decision_text = "hold the unchanged baseline" if _held else f"choose {e_intervention.value}"
+        return mo.vstack([
+            intro, e_prediction, e_intervention, apply_plotly_theme(figure), table(rows),
+            e_rejected,
+            mo.callout(mo.md(f"**Your prediction:** {e_prediction.value}. You **{_decision_text}** after testing **{e_selected['intervention']}**, which changes update time by **{e_selected['delta_update_time_ms']:+.1f} ms** and memory by **{e_selected['delta_memory_gb']:+.1f} GB**. Convergence is unchanged."), kind="info"),
+            e_capture, saved("E"), mo.accordion({"Calculation Notes": mo.md("Each intervention selects one supplied causal path. Prefetch changes visible input time; faster arithmetic changes forward/backward stages; checkpointing changes retained activations and adds recomputation.")}),
+        ])
+
+    def synthesis():
         rows = []
-        for policy in policies:
-            byte_factor = policy["bytes"] / base_bytes
-            weights_mb = selected_stack.weights_mb * byte_factor
-            gradients_mb = selected_stack.gradients_mb * byte_factor
-            activations_mb = selected_stack.activations_mb * byte_factor
-            total_mb = (
-                weights_mb
-                + gradients_mb
-                + selected_stack.optimizer_mb
-                + activations_mb
-                + selected_stack.data_batch_mb
-            )
-            throughput = selected_stack.throughput_samples_s * policy["throughput_factor"]
-            memory_ok = total_mb <= selected_stack.budget_mb
-            throughput_ok = throughput >= profile.throughput_budget_samples_s
-            support_ok = not (
-                policy["policy_id"] == "fp8_experimental"
-                and profile.track_id != "cloud_fleet"
-            )
-            if not support_ok:
-                status = "blocked by track/hardware fit"
-            elif not memory_ok:
-                status = "blocked by memory"
-            elif not throughput_ok:
-                status = "blocked by throughput"
-            elif policy["stability_risk"] == "high":
-                status = "candidate only with strong stability evidence"
-            else:
-                status = "candidate with validation"
-            rows.append({
-                "policy_id": policy["policy_id"],
-                "label": policy["label"],
-                "bytes": policy["bytes"],
-                "total_mb": total_mb,
-                "throughput_samples_s": throughput,
-                "memory_ok": memory_ok,
-                "throughput_ok": throughput_ok,
-                "support_ok": support_ok,
-                "status": status,
-                "stability_risk": policy["stability_risk"],
-                "evidence": policy["evidence"],
-            })
-        return tuple(rows)
+        for part in "ABCDE":
+            capture = _captures.get(part)
+            rows.append({"Part": part, "Prediction": capture.to_dict()["prediction"] if capture else "—", "Evidence": "CURRENT" if capture and part not in audit.stale and (part, part) not in audit.identical_pairs else ("STALE" if capture else "MISSING")})
+        saved_e = _captures["E"].to_dict() if "E" in _captures else None
+        saved_e_decision = saved_e["decision"] if saved_e else None
+        saved_e_rejected = saved_e["inputs"].get("rejected_alternative") if saved_e else None
+        selected_matches = (final_choice.value == saved_e_decision and (final_choice.value != "none" or final_rejected.value == saved_e_rejected))
+        choices_complete = all(widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk))
+        distinct = final_choice.value == "none" or final_choice.value != final_rejected.value
+        complete = audit.complete and choices_complete and distinct and selected_matches and bool(rationale.value.strip())
+        return mo.vstack([
+            mo.md("### Synthesis · Defend a time-to-target decision (5 min)\nChoose one tested fix or hold for more evidence, quantify a rejected tested alternative, name the remaining limitation, and state the reevaluation trigger."),
+            table(rows), mo.hstack([final_choice, final_rejected], widths="equal", wrap=True), mo.hstack([final_trigger, final_risk], widths="equal", wrap=True), rationale,
+            mo.callout(mo.md("**Ready for the local report.**" if complete else "Capture five current contrasts. Match the recommendation to saved Part E. If you hold, match the rejected choice to the alternative tested there."), kind="success" if complete else "warn"),
+        ])
 
-    def v1_08_precision_selection(rows, selected_policy):
-        selected = selected_policy or "bf16_mixed"
-        for row in rows:
-            if row["policy_id"] == selected:
-                return row
-        return rows[0]
-
-    def v1_08_binding_resource(profile, selected_stack, plan, precision_selected):
-        if not plan.feasible:
-            if any("memory" in item for item in selected_stack.violations):
-                return "training memory budget"
-            if any("throughput" in item for item in selected_stack.violations):
-                return "throughput/time budget"
-            return "training feasibility"
-        if "blocked" in precision_selected["status"]:
-            return "precision support or stability evidence"
-        if profile.track_id == "robotaxi":
-            return "safety validation evidence"
-        if profile.track_id == "cloud_fleet":
-            return "accelerator memory, training time, cost, and carbon"
-        if profile.track_id == "oura_ring":
-            return "SRAM/OTA deployment budget"
-        if profile.track_id == "iphone":
-            return "thermal, privacy, and local validation evidence"
-        return "deployment evidence"
-
-    def v1_08_memo_evidence_number(selected_stack, precision_selected):
-        return (
-            f"{selected_stack.total_mb:.2f} MB selected-strategy memory; "
-            f"{precision_selected['total_mb']:.2f} MB under {precision_selected['label']}; "
-            f"{selected_stack.throughput_samples_s:.2f} samples/s current throughput"
-        )
-
-    def v1_08_carry_forward_summary(profile, plan, precision_selected):
-        amount_system = v1_08_track_amount_system(profile)
-        return (
-            f"{amount_system['carry_forward']} Selected plan: {plan.selected_label}. "
-            f"Precision evidence: {precision_selected['evidence']}."
-        )
-
-    return (
-        v1_08_batch_consequence,
-        v1_08_batch_rows,
-        v1_08_binding_resource,
-        v1_08_carry_forward_summary,
-        v1_08_memo_evidence_number,
-        v1_08_precision_policy_rows,
-        v1_08_precision_selection,
-        v1_08_strategy_by_id,
-        v1_08_track_amount_system,
-    )
+    tabs = mo.ui.tabs({"Part A · Memory": part_a(), "Part B · Batch": part_b(), "Part C · Precision": part_c(), "Part D · Checkpoint": part_d(), "Part E · Bottleneck": part_e(), "Synthesis": synthesis()})
+    tabs
+    return (audit,)
 
 
 @app.cell
 def _(
-    training_frontier,
-    training_memory_stack,
-    training_plan,
-    v1_08_batch_consequence,
-    v1_08_batch_rows,
-    v1_08_batch_size,
-    v1_08_binding_resource,
-    v1_08_carry_forward_summary,
-    v1_08_memo_evidence_number,
-    v1_08_precision_policy,
-    v1_08_precision_policy_rows,
-    v1_08_precision_selection,
-    v1_08_strategy_by_id,
-    v1_08_strategy_choice,
-    v1_08_track_amount_system,
-    v1_08_training,
+    audit, build_lab_report, final_choice, final_rejected, final_risk,
+    final_trigger, get_evidence, get_lab_metadata, mo, profile, rationale,
+    report_export_panel, track_id,
 ):
-    v1_08_selected_strategy = v1_08_strategy_by_id(
-        v1_08_training,
-        v1_08_strategy_choice.value,
+    _captures = get_evidence()
+    _saved_e = _captures["E"].to_dict() if "E" in _captures else None
+    _saved_e_decision = _saved_e["decision"] if _saved_e else None
+    _saved_e_rejected = _saved_e["inputs"].get("rejected_alternative") if _saved_e else None
+    _choices_complete = all(widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk))
+    _distinct = final_choice.value == "none" or final_choice.value != final_rejected.value
+    _selected_matches = final_choice.value == _saved_e_decision and (final_choice.value != "none" or final_rejected.value == _saved_e_rejected)
+    _ready = audit.complete and _choices_complete and _distinct and _selected_matches and bool(rationale.value.strip())
+    mo.stop(not _ready)
+    snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
+    report = build_lab_report(
+        get_lab_metadata("vol1/lab_08_model_train.py"), track=track_id, scenario=profile["task"],
+        learning_objectives=["Decompose training memory and optimizer state", "Compare physical batch, effective batch, and time to target", "Defend precision, checkpointing, and bottleneck interventions with evidence"],
+        predictions={part: snapshots[part]["prediction"] for part in "ABCDE"},
+        knob_settings={part: snapshots[part]["inputs"] for part in "ABCDE"},
+        evidence_summary={part: {"baseline": snapshots[part]["baseline"], "result": snapshots[part]["result"], "result_role": snapshots[part]["result_role"], "chosen_result": snapshots[part]["chosen_result"], "alternatives": snapshots[part]["alternatives"]} for part in "ABCDE"},
+        binding_constraints={part: (snapshots[part]["chosen_result"] or snapshots[part]["result"]).get("violations", ["memory"] if not (snapshots[part]["chosen_result"] or snapshots[part]["result"]).get("feasible", True) else []) for part in "ABCDE"},
+        decisions={"recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "reevaluation_trigger": final_trigger.value},
+        final_decision={"recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "rationale": rationale.value},
+        big_takeaways=["Training memory includes state inference never retains.", "Step throughput and convergence jointly determine time to target.", "Checkpointing and lower precision need adverse-outcome evidence."],
+        reflections={"rationale": rationale.value, "reevaluation_trigger": final_trigger.value}, residual_risk=final_risk.value,
+        result_snapshot={"track": track_id, "captures": snapshots, "recommendation": final_choice.value, "rejected_alternative": final_rejected.value, "reevaluation_trigger": final_trigger.value, "residual_risk": final_risk.value},
+        source_trace={"scenario": "Illustrative convergence, numerical, timing, and internal-cost fixtures.", "calculations": "Training-memory and stage-time experiment model."},
     )
-    v1_08_memory_rows = tuple(
-        training_memory_stack(
-            v1_08_training,
-            strategy_id=strategy.strategy_id,
-            batch_size=v1_08_batch_size.value,
-        )
-        for strategy in v1_08_training.strategy_options
-    )
-    v1_08_frontier = training_frontier(
-        v1_08_training,
-        strategy_id=v1_08_strategy_choice.value,
-    )
-    v1_08_plan = training_plan(
-        v1_08_training,
-        strategy_id=v1_08_strategy_choice.value,
-        batch_size=v1_08_batch_size.value,
-    )
-    v1_08_selected_stack = next(
-        row for row in v1_08_memory_rows
-        if row.strategy_id == v1_08_plan.selected_id
-    )
-    v1_08_batch_rows_current = v1_08_batch_rows(v1_08_training, v1_08_frontier)
-    v1_08_batch_consequence_current = v1_08_batch_consequence(
-        v1_08_training,
-        v1_08_selected_stack,
-        v1_08_frontier,
-    )
-    v1_08_precision_rows = v1_08_precision_policy_rows(
-        v1_08_training,
-        v1_08_selected_stack,
-        v1_08_selected_strategy,
-    )
-    v1_08_precision_selected = v1_08_precision_selection(
-        v1_08_precision_rows,
-        v1_08_precision_policy.value,
-    )
-    v1_08_amount_system = v1_08_track_amount_system(v1_08_training)
-    v1_08_binding_resource_current = v1_08_binding_resource(
-        v1_08_training,
-        v1_08_selected_stack,
-        v1_08_plan,
-        v1_08_precision_selected,
-    )
-    v1_08_memo_evidence = v1_08_memo_evidence_number(
-        v1_08_selected_stack,
-        v1_08_precision_selected,
-    )
-    v1_08_carry_forward = v1_08_carry_forward_summary(
-        v1_08_training,
-        v1_08_plan,
-        v1_08_precision_selected,
-    )
-    return (
-        v1_08_amount_system,
-        v1_08_batch_consequence_current,
-        v1_08_batch_rows_current,
-        v1_08_binding_resource_current,
-        v1_08_carry_forward,
-        v1_08_frontier,
-        v1_08_memo_evidence,
-        v1_08_memory_rows,
-        v1_08_plan,
-        v1_08_precision_rows,
-        v1_08_precision_selected,
-        v1_08_selected_stack,
-    )
+    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    return (report,)
 
 
-@app.cell(hide_code=True)
-def _(
-    COLORS,
-    apply_plotly_theme,
-    big_takeaways,
-    go,
-    mo,
-    v1_08_amount_system,
-    v1_08_batch_checkpoint,
-    v1_08_batch_consequence_current,
-    v1_08_batch_prediction,
-    v1_08_batch_rows_current,
-    v1_08_batch_size,
-    v1_08_binding_resource_current,
-    v1_08_carry_forward,
-    v1_08_frontier,
-    v1_08_memo_evidence,
-    v1_08_memory_mitigation,
-    v1_08_memory_prediction,
-    v1_08_memory_rows,
-    v1_08_plan,
-    v1_08_plan_checkpoint,
-    v1_08_plan_prediction,
-    v1_08_precision_checkpoint,
-    v1_08_precision_policy,
-    v1_08_precision_prediction,
-    v1_08_precision_rows,
-    v1_08_precision_selected,
-    v1_08_profile,
-    v1_08_reflection,
-    v1_08_selected_stack,
-    v1_08_strategy_choice,
-    v1_08_training,
+@app.cell
+async def _(
+    audit, final_choice, final_rejected, final_risk, final_trigger,
+    get_evidence, ledger, mo, rationale, track_id,
 ):
-    _batch_fig = go.Figure()
-    _batch_fig.add_trace(go.Scatter(
-        x=[row["batch_size"] for row in v1_08_batch_rows_current],
-        y=[row["throughput_samples_s"] for row in v1_08_batch_rows_current],
-        mode="lines+markers",
-        marker=dict(
-            color=[
-                COLORS["GreenLine"] if row["feasible"] else COLORS["RedLine"]
-                for row in v1_08_batch_rows_current
-            ],
-            size=[
-                11 if row["batch_size"] == v1_08_batch_size.value else 7
-                for row in v1_08_batch_rows_current
-            ],
-        ),
-        line=dict(color=COLORS["BlueLine"], width=2.5),
-        name="Throughput",
-    ))
-    _batch_fig.add_hline(
-        y=v1_08_training.throughput_budget_samples_s,
-        line_dash="dash",
-        line_color=COLORS["OrangeLine"],
-        annotation_text="throughput target",
-        annotation_font_color=COLORS["OrangeLine"],
-    )
-    _batch_fig.update_layout(
-        height=350,
-        xaxis=dict(title="Batch size", gridcolor="#f1f5f9"),
-        yaxis=dict(title="Throughput (samples/s)", gridcolor="#f1f5f9"),
-        margin=dict(l=70, r=20, t=35, b=50),
-    )
-    apply_plotly_theme(_batch_fig)
-
-    _component_fig = go.Figure()
-    _component_fig.add_trace(go.Bar(
-        x=["Weights", "Gradients", "Optimizer", "Activations", "Data batch"],
-        y=[
-            v1_08_selected_stack.weights_mb,
-            v1_08_selected_stack.gradients_mb,
-            v1_08_selected_stack.optimizer_mb,
-            v1_08_selected_stack.activations_mb,
-            v1_08_selected_stack.data_batch_mb,
-        ],
-        marker_color=[
-            COLORS["BlueLine"],
-            COLORS["OrangeLine"],
-            COLORS["RedLine"],
-            COLORS["GreenLine"],
-            COLORS["Cloud"],
-        ],
-        text=[
-            f"{v1_08_selected_stack.weights_mb:.1f}",
-            f"{v1_08_selected_stack.gradients_mb:.1f}",
-            f"{v1_08_selected_stack.optimizer_mb:.1f}",
-            f"{v1_08_selected_stack.activations_mb:.1f}",
-            f"{v1_08_selected_stack.data_batch_mb:.1f}",
-        ],
-        textposition="outside",
-    ))
-    _component_fig.add_hline(
-        y=v1_08_selected_stack.budget_mb,
-        line_dash="dash",
-        line_color=COLORS["RedLine"],
-        annotation_text="memory budget",
-        annotation_font_color=COLORS["RedLine"],
-    )
-    _component_fig.update_layout(
-        height=350,
-        xaxis=dict(title="Memory component", gridcolor="#f1f5f9"),
-        yaxis=dict(title="Memory (MB)", gridcolor="#f1f5f9"),
-        margin=dict(l=60, r=20, t=35, b=60),
-    )
-    apply_plotly_theme(_component_fig)
-
-    _precision_fig = go.Figure()
-    _precision_fig.add_trace(go.Bar(
-        x=[row["label"] for row in v1_08_precision_rows],
-        y=[row["total_mb"] for row in v1_08_precision_rows],
-        marker_color=[
-            COLORS["BlueLine"] if row["policy_id"] == v1_08_precision_selected["policy_id"]
-            else COLORS["RedLine"] if "blocked" in row["status"]
-            else COLORS["Cloud"]
-            for row in v1_08_precision_rows
-        ],
-        text=[f"{row['total_mb']:.1f}" for row in v1_08_precision_rows],
-        textposition="outside",
-        name="Precision memory",
-    ))
-    _precision_fig.add_hline(
-        y=v1_08_selected_stack.budget_mb,
-        line_dash="dash",
-        line_color=COLORS["RedLine"],
-        annotation_text="memory budget",
-        annotation_font_color=COLORS["RedLine"],
-    )
-    _precision_fig.update_layout(
-        height=360,
-        xaxis=dict(title="Precision policy", gridcolor="#f1f5f9"),
-        yaxis=dict(title="Estimated memory (MB)", gridcolor="#f1f5f9"),
-        margin=dict(l=70, r=20, t=35, b=90),
-    )
-    apply_plotly_theme(_precision_fig)
-
-    _strategy_details = {strategy.strategy_id: strategy for strategy in v1_08_training.strategy_options}
-    _memory_rows = "".join(
-        f"""
-        <tr>
-          <td>{row.strategy_label}</td>
-          <td>{row.weights_mb:.2f}</td>
-          <td>{row.gradients_mb:.2f}</td>
-          <td>{row.optimizer_mb:.2f}</td>
-          <td>{row.activations_mb:.2f}</td>
-          <td>{row.data_batch_mb:.2f}</td>
-          <td>{row.total_mb:.2f} MB</td>
-          <td>{row.budget_mb:.2f} MB</td>
-          <td>{row.memory_utilization_pct:.1f}%</td>
-          <td>{row.throughput_samples_s:.2f}</td>
-          <td>{'yes' if row.feasible else 'no - violation'}</td>
-          <td>{row.dominant_component}</td>
-        </tr>
-        """
-        for row in v1_08_memory_rows
-    )
-
-    _batch_table_rows = "".join(
-        f"""
-        <tr>
-          <td>{row["batch_size"]}</td>
-          <td>{row["total_mb"]:.2f} MB</td>
-          <td>{row["throughput_samples_s"]:.2f}</td>
-          <td>{'yes' if row["feasible"] else 'no - violation'}</td>
-          <td>{row["status"]}</td>
-          <td>{row["consequence"]}</td>
-        </tr>
-        """
-        for row in v1_08_batch_rows_current
-    )
-    _precision_rows = "".join(
-        f"""
-        <tr>
-          <td>{row["label"]}</td>
-          <td>{row["bytes"]}</td>
-          <td>{row["total_mb"]:.2f} MB</td>
-          <td>{row["throughput_samples_s"]:.2f}</td>
-          <td>{row["stability_risk"]}</td>
-          <td>{row["status"]}</td>
-          <td>{row["evidence"]}</td>
-        </tr>
-        """
-        for row in v1_08_precision_rows
-    )
-    _plan_rows = "".join(
-        f"""
-        <tr>
-          <td>{'selected' if row.strategy_id == v1_08_plan.selected_id else 'alternative'}</td>
-          <td>{row.strategy_label}</td>
-          <td>{_strategy_details[row.strategy_id].training_location}</td>
-          <td>{_strategy_details[row.strategy_id].validation_location}</td>
-          <td>{row.total_mb:.2f} MB</td>
-          <td>{row.dominant_component}</td>
-          <td>{'yes' if row.feasible else 'no - violation'}</td>
-          <td>{_strategy_details[row.strategy_id].hidden_cost}</td>
-        </tr>
-        """
-        for row in v1_08_memory_rows
-    )
-    _validation_items = "".join(f"<li>{test}</li>" for test in v1_08_training.validation_tests)
-    _rejections = "".join(f"<li>{item}</li>" for item in v1_08_plan.rejected_alternatives)
-    _prediction_value = lambda widget: widget.value if widget.value is not None else "not selected yet"
-
-    _part_a = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel mlsysbook-nugget">
-          <div class="mlsysbook-part-title"><h2>Part A: Batch Size Changes Throughput And Convergence</h2></div>
-          <div class="mlsysbook-callout"><strong>Systems question:</strong>
-            What does batch size buy, and what does it put at risk for {v1_08_training.workload_label}?</div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Scenario</h2>
-          <p><strong>{v1_08_training.stakeholder}:</strong> choose a physical batch for {v1_08_training.label}.</p>
-          <ul class="mlsysbook-list">
-            <li><strong>Amount system:</strong> {v1_08_amount_system["amount_system"]}.</li>
-            <li>Batch size affects hardware utilization, activation memory, and convergence evidence.</li>
-            <li>The selected strategy max feasible batch is {v1_08_frontier.max_feasible_batch or 'none'}.</li>
-          </ul>
-        </div>
-        """),
-        v1_08_batch_prediction,
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Structured Prediction</h2>
-          <div class="mlsysbook-callout"><strong>Your prediction:</strong> {_prediction_value(v1_08_batch_prediction)}</div>
-          <div class="mlsysbook-callout"><strong>Actual instrument:</strong>
-            batch {v1_08_batch_size.value} produces {v1_08_selected_stack.throughput_samples_s:.2f}
-            samples/s and {v1_08_selected_stack.total_mb:.2f} MB of training memory.</div>
-        </div>
-        """),
-        v1_08_batch_size,
-        mo.as_html(_batch_fig),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Evidence Table</h2>
-          <table class="mlsysbook-table">
-            <thead><tr><th>Batch</th><th>Total memory</th><th>Throughput</th><th>Feasible</th><th>Status</th><th>Consequence</th></tr></thead>
-            <tbody>{_batch_table_rows}</tbody>
-          </table>
-        </div>
-        """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Consequence And Boundary</h2>
-          <div class="mlsysbook-callout"><strong>Consequence:</strong> {v1_08_batch_consequence_current["consequence"]}</div>
-          <div class="mlsysbook-callout"><strong>Mitigation:</strong> {v1_08_batch_consequence_current["mitigation"]}</div>
-          <div class="mlsysbook-callout"><strong>Math Peek:</strong>
-            <code>T_train = O / (R_peak * eta_hw)</code>. Batch size can improve
-            utilization <code>eta_hw</code>, but it also changes activation memory
-            and the convergence evidence required by the track.</div>
-        </div>
-        """),
-        v1_08_batch_checkpoint,
-    ])
-
-    _part_b = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel mlsysbook-nugget">
-          <div class="mlsysbook-part-title"><h2>Part B: Optimizer State And Activations Create A Memory Budget</h2></div>
-          <div class="mlsysbook-callout"><strong>Systems question:</strong>
-            Which training memory component dominates {v1_08_training.workload_label}?</div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Scenario</h2>
-          <p>{v1_08_training.training_story}</p>
-          <ul class="mlsysbook-list">
-            <li>Training adds gradients, optimizer state, activations, and data batch memory on top of inference weights.</li>
-            <li>Fine-tuning and adaptation reduce the trainable fraction, but they still need validation and rollback plans.</li>
-            <li>Full local training can be the wrong activity even when local inference fits.</li>
-          </ul>
-        </div>
-        """),
-        v1_08_memory_prediction,
-        v1_08_strategy_choice,
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Prediction Vs Actual</h2>
-          <div class="mlsysbook-callout"><strong>Your prediction:</strong> {_prediction_value(v1_08_memory_prediction)}</div>
-          <div class="mlsysbook-callout"><strong>Actual dominant component:</strong>
-            {v1_08_selected_stack.dominant_component} at {v1_08_selected_stack.total_mb:.2f} MB total
-            against a {v1_08_selected_stack.budget_mb:.2f} MB budget.</div>
-        </div>
-        """),
-        v1_08_batch_size,
-        mo.as_html(_component_fig),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Strategy Memory Table</h2>
-          <table class="mlsysbook-table">
-            <thead>
-              <tr>
-                <th>Strategy</th><th>Weights</th><th>Gradients</th><th>Optimizer</th><th>Activations</th><th>Data</th>
-                <th>Total</th><th>Budget</th><th>Utilization</th>
-                <th>Throughput</th><th>Feasible</th><th>Dominant component</th>
-              </tr>
-            </thead>
-            <tbody>{_memory_rows}</tbody>
-          </table>
-        </div>
-        """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel mlsysbook-nugget">
-          <div class="mlsysbook-callout"><strong>Failure boundary:</strong>
-            {'; '.join(v1_08_selected_stack.violations) if v1_08_selected_stack.violations else 'No current violation; preserve margin before increasing batch or trainable fraction.'}</div>
-          <div class="mlsysbook-callout"><strong>Math Peek:</strong>
-            <code>Total Memory = weights + gradients + optimizer + activations + batch data</code>.
-            Activations scale with batch; optimizer state scales with trainable parameters.</div>
-        </div>
-        """),
-        v1_08_memory_mitigation,
-    ])
-
-    _part_c = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel mlsysbook-nugget">
-          <div class="mlsysbook-part-title"><h2>Part C: Precision Changes Memory, Throughput, And Stability Evidence</h2></div>
-          <div class="mlsysbook-callout"><strong>Systems question:</strong>
-            What does a lower-precision policy save, and what evidence does it owe?</div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Scenario</h2>
-          <p>{v1_08_amount_system["precision_consequence"]}</p>
-          <ul class="mlsysbook-list">
-            <li>Precision changes bytes moved and stored for weights, gradients, and activations.</li>
-            <li>FP16, BF16, and FP8 differ in exponent range, loss-scaling burden, and validation risk.</li>
-            <li>The selected policy is {v1_08_precision_selected["label"]}: {v1_08_precision_selected["status"]}.</li>
-          </ul>
-        </div>
-        """),
-        v1_08_precision_prediction,
-        v1_08_precision_policy,
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Prediction Vs Actual</h2>
-          <div class="mlsysbook-callout"><strong>Your prediction:</strong> {_prediction_value(v1_08_precision_prediction)}</div>
-          <div class="mlsysbook-callout"><strong>Actual policy evidence:</strong>
-            {v1_08_precision_selected["label"]} estimates {v1_08_precision_selected["total_mb"]:.2f} MB,
-            {v1_08_precision_selected["throughput_samples_s"]:.2f} samples/s, and requires
-            {v1_08_precision_selected["evidence"]}.</div>
-        </div>
-        """),
-        mo.as_html(_precision_fig),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Precision Evidence Table</h2>
-          <table class="mlsysbook-table">
-            <thead><tr><th>Policy</th><th>Bytes/value</th><th>Total memory</th><th>Throughput</th><th>Stability risk</th><th>Status</th><th>Evidence required</th></tr></thead>
-            <tbody>{_precision_rows}</tbody>
-          </table>
-        </div>
-        """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Consequence And Source Model</h2>
-          <div class="mlsysbook-callout"><strong>Consequence:</strong> {v1_08_amount_system["precision_consequence"]}</div>
-          <div class="mlsysbook-callout"><strong>Math Peek:</strong>
-            Precision changes memory through <code>parameters * bytes_per_value</code>
-            and throughput through hardware tensor paths. Stability evidence decides
-            whether the savings can become a product artifact.</div>
-        </div>
-        """),
-        v1_08_precision_checkpoint,
-    ])
-
-    _part_d = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel mlsysbook-nugget">
-          <div class="mlsysbook-part-title"><h2>Part D: Training Plan Selection Must Satisfy Multiple Constraints</h2></div>
-          <div class="mlsysbook-callout"><strong>Systems question:</strong>
-            Which plan satisfies cost, time, memory, validation, and deployment evidence?</div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Scenario</h2>
-          <p>{v1_08_amount_system["plan_consequence"]}</p>
-          <ul class="mlsysbook-list">
-            <li>A training plan is incomplete unless it names the training location and validation location.</li>
-            <li>Centralized training, local adaptation, calibration, and validation are different activities.</li>
-            <li>The deployment handoff is part of the risk: a trained checkpoint must still become a safe product artifact.</li>
-          </ul>
-        </div>
-        """),
-        v1_08_plan_prediction,
-        v1_08_strategy_choice,
-        v1_08_batch_size,
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Prediction Vs Actual</h2>
-          <div class="mlsysbook-callout"><strong>Your prediction:</strong> {_prediction_value(v1_08_plan_prediction)}</div>
-          <div class="mlsysbook-callout"><strong>Actual binding resource:</strong> {v1_08_binding_resource_current}</div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Computed Plan Evidence</h2>
-          <div class="mlsysbook-grid">
-            <div class="mlsysbook-field"><strong>Selected plan</strong>{v1_08_plan.selected_label}</div>
-            <div class="mlsysbook-field"><strong>Feasible</strong>{'yes' if v1_08_plan.feasible else 'no - violation'}</div>
-            <div class="mlsysbook-field"><strong>Training location</strong>{v1_08_plan.training_location}</div>
-            <div class="mlsysbook-field"><strong>Validation location</strong>{v1_08_plan.validation_location}</div>
-            <div class="mlsysbook-field"><strong>Total memory</strong>{v1_08_plan.total_memory_mb:.2f} MB</div>
-            <div class="mlsysbook-field"><strong>Max feasible batch</strong>{v1_08_plan.max_feasible_batch or 'none'}</div>
-          </div>
-          <div class="mlsysbook-callout"><strong>Hidden cost:</strong> {v1_08_plan.hidden_cost}</div>
-          <div class="mlsysbook-callout"><strong>Memo decision:</strong> {v1_08_plan.memo_summary}</div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Plan Comparison Table</h2>
-          <table class="mlsysbook-table">
-            <thead><tr><th>Role</th><th>Strategy</th><th>Training location</th><th>Validation location</th><th>Total memory</th><th>Dominant component</th><th>Feasible</th><th>Hidden cost</th></tr></thead>
-            <tbody>{_plan_rows}</tbody>
-          </table>
-        </div>
-        """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Rejected Alternatives</h2>
-          <ul class="mlsysbook-list">{_rejections}</ul>
-          <h2>Validation Tests</h2>
-          <ul class="mlsysbook-list">{_validation_items}</ul>
-          <div class="mlsysbook-callout"><strong>Math Peek:</strong>
-            The plan must satisfy the iron-law budget and the physical ceiling:
-            memory, wall-clock time, dataset scale, and deployment evidence all
-            have veto power.</div>
-        </div>
-        """),
-        v1_08_plan_checkpoint,
-        mo.Html('<div class="mlsysbook-panel"><h2>Report Reflection</h2></div>'),
-        v1_08_reflection,
-    ])
-
-    _synthesis = mo.vstack([
-        mo.Html(f"""
-        <div class="mlsysbook-panel">
-          <h2>Synthesis: Training Plan Memo</h2>
-          <div class="mlsysbook-grid">
-            <div class="mlsysbook-field"><strong>Track</strong>{v1_08_training.label}</div>
-            <div class="mlsysbook-field"><strong>Selected plan</strong>{v1_08_plan.selected_label}</div>
-            <div class="mlsysbook-field"><strong>Training location</strong>{v1_08_plan.training_location}</div>
-            <div class="mlsysbook-field"><strong>Validation location</strong>{v1_08_plan.validation_location}</div>
-            <div class="mlsysbook-field"><strong>Binding resource</strong>{v1_08_binding_resource_current}</div>
-            <div class="mlsysbook-field"><strong>Evidence number</strong>{v1_08_memo_evidence}</div>
-            <div class="mlsysbook-field"><strong>Precision policy</strong>{v1_08_precision_selected["label"]}</div>
-            <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_08_plan.residual_risk}</div>
-          </div>
-          <div class="mlsysbook-callout"><strong>Carry-forward deployment implication:</strong> {v1_08_carry_forward}</div>
-        </div>
-        """),
-        mo.Html(f"""
-        <div class="mlsysbook-panel" style="background: #FFFFFF; border: 1px solid #E2E8F0; border-left: 5px solid #10B981; border-radius: 8px; padding: 18px 22px; margin-top: 14px; margin-bottom: 14px;">
-          <div style="font-size: 0.8rem; font-weight: 800; color: #10B981; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">
-            Lead Systems Architect Authorization
-          </div>
-          <div style="color: #1E293B; font-size: 0.95rem; line-height: 1.6;">
-            The training and adaptation architecture for <strong>{v1_08_profile.label}</strong> is authorized for execution. Memory allocation, batch scaling, and precision policies satisfy resource envelopes under <strong>{v1_08_training.workload_label}</strong>.
-          </div>
-        </div>
-        """),
-        big_takeaways([
-            ("Batch is a systems knob", "It changes utilization, memory pressure, convergence risk, and evidence burden."),
-            ("Training memory is a stack", "Optimizer state and activations can dominate even when inference weights fit."),
-            ("Precision buys resources with evidence debt", "Lower precision must be justified by stability and deployment replay."),
-            ("A plan is valid inside constraints", "Cost, time, memory, validation, and deployment handoff all have veto power."),
-        ]),
-        mo.Html(f"""
-        <div class="lab-hud">
-            <span class="hud-label">LAB</span>
-            <span class="hud-value">08 &middot; Training Gauntlet</span>
-            <span class="hud-label">TRACK</span>
-            <span class="hud-value">{v1_08_profile.label}</span>
-            <span style="flex:1;"></span>
-            <span class="hud-label">ARTIFACT</span>
-            <span class="hud-value">{v1_08_training.report_artifact}</span>
-            <span class="hud-label">STATUS</span>
-            <span class="hud-active">ACTIVE</span>
-        </div>
-        """),
-    ])
-
-    def build_part_a():
-        return _part_a
-
-    def build_part_b():
-        return _part_b
-
-    def build_part_c():
-        return _part_c
-
-    def build_part_d():
-        return _part_d
-
-    def build_synthesis():
-        return _synthesis
-
-    v1_08_tabs = mo.ui.tabs({
-        "Part A · Batch": build_part_a(),
-        "Part B · Memory": build_part_b(),
-        "Part C · Precision": build_part_c(),
-        "Part D · Plan": build_part_d(),
-        "Synthesis": build_synthesis(),
-    })
-    v1_08_tabs
-    return
-
-
-@app.cell(hide_code=True)
-def _(
-    ledger,
-    mo,
-    v1_08_batch_checkpoint,
-    v1_08_batch_consequence_current,
-    v1_08_batch_prediction,
-    v1_08_binding_resource_current,
-    v1_08_carry_forward,
-    v1_08_memo_evidence,
-    v1_08_memory_mitigation,
-    v1_08_memory_prediction,
-    v1_08_plan,
-    v1_08_plan_checkpoint,
-    v1_08_plan_prediction,
-    v1_08_precision_checkpoint,
-    v1_08_precision_policy,
-    v1_08_precision_prediction,
-    v1_08_precision_selected,
-    v1_08_profile,
-    v1_08_reflection,
-    v1_08_selected_stack,
-    v1_08_training,
-    v1_08_variant,
-):
-    _reflection_text = str(v1_08_reflection.value or "").strip()
-    _ready = bool(
-        v1_08_batch_prediction.value is not None
-        and v1_08_batch_checkpoint.value is not None
-        and v1_08_memory_prediction.value is not None
-        and v1_08_memory_mitigation.value is not None
-        and v1_08_precision_prediction.value is not None
-        and v1_08_precision_checkpoint.value is not None
-        and v1_08_plan_prediction.value is not None
-        and v1_08_plan_checkpoint.value is not None
-        and _reflection_text
-    )
-    ledger.save(chapter=8, design={
-        "chapter": "v1_08",
-        "track_id": v1_08_profile.track_id,
-        "scenario_id": v1_08_variant.scenario_id,
-        "hardware_ref": v1_08_training.hardware_ref,
-        "model_ref": v1_08_training.model_ref,
-        "completed": _ready,
-        "batch_prediction": v1_08_batch_prediction.value,
-        "batch_decision": v1_08_batch_checkpoint.value,
-        "batch_size": v1_08_selected_stack.batch_size,
-        "batch_consequence": v1_08_batch_consequence_current["consequence"],
-        "memory_prediction": v1_08_memory_prediction.value,
-        "memory_mitigation": v1_08_memory_mitigation.value,
-        "precision_prediction": v1_08_precision_prediction.value,
-        "precision_policy": v1_08_precision_policy.value or v1_08_precision_selected["policy_id"],
-        "precision_status": v1_08_precision_selected["status"],
-        "precision_total_memory_mb": v1_08_precision_selected["total_mb"],
-        "precision_evidence_required": v1_08_precision_selected["evidence"],
-        "plan_constraint_prediction": v1_08_plan_prediction.value,
-        "plan_checkpoint": v1_08_plan_checkpoint.value,
-        "selected_training_plan": v1_08_plan.selected_id,
-        "training_location": v1_08_plan.training_location,
-        "validation_location": v1_08_plan.validation_location,
-        "dominant_component": v1_08_plan.dominant_component,
-        "total_memory_mb": v1_08_selected_stack.total_mb,
-        "binding_resource": v1_08_binding_resource_current,
-        "memo_evidence_number": v1_08_memo_evidence,
-        "carry_forward_deployment_implication": v1_08_carry_forward,
-    })
-
-    _hud = mo.Html(f"""
-    <div class="lab-hud">
-        <span class="hud-label">LAB</span>
-        <span class="hud-value">08 &middot; Training Gauntlet</span>
-        <span class="hud-label">TRACK</span>
-        <span class="hud-value">{v1_08_profile.label}</span>
-        <span style="flex:1;"></span>
-        <span class="hud-label">ARTIFACT</span>
-        <span class="hud-value">{v1_08_training.report_artifact}</span>
-        <span class="hud-label">STATUS</span>
-        <span class="hud-active">{'SAVED' if _ready else 'ACTIVE'}</span>
-    </div>
-    <div class="mlsysbook-panel">
-      <h2>Design Ledger</h2>
-      <div class="mlsysbook-grid">
-        <div class="mlsysbook-field"><strong>Ready to save</strong>{'yes' if _ready else 'not yet'}</div>
-        <div class="mlsysbook-field"><strong>Selected plan</strong>{v1_08_plan.selected_label}</div>
-        <div class="mlsysbook-field"><strong>Training location</strong>{v1_08_plan.training_location}</div>
-        <div class="mlsysbook-field"><strong>Validation location</strong>{v1_08_plan.validation_location}</div>
-        <div class="mlsysbook-field"><strong>Binding resource</strong>{v1_08_binding_resource_current}</div>
-        <div class="mlsysbook-field"><strong>Evidence number</strong>{v1_08_memo_evidence}</div>
-        <div class="mlsysbook-field"><strong>Precision policy</strong>{v1_08_precision_selected["label"]}</div>
-        <div class="mlsysbook-field"><strong>Residual risk</strong>{v1_08_plan.residual_risk}</div>
-      </div>
-      <div style="margin-top:10px; color:#475569; line-height:1.55;">
-        The ledger records each student decision. All predictions and a final recommendation mark the design complete.
-      </div>
-    </div>
-    """)
-    _hud
-    return
-
-
-@app.cell(hide_code=True)
-def _(
-    build_lab_report,
-    mo,
-    report_export_panel,
-    v1_08_batch_checkpoint,
-    v1_08_batch_consequence_current,
-    v1_08_batch_prediction,
-    v1_08_batch_size,
-    v1_08_binding_resource_current,
-    v1_08_carry_forward,
-    v1_08_frontier,
-    v1_08_memo_evidence,
-    v1_08_memory_mitigation,
-    v1_08_memory_prediction,
-    v1_08_memory_rows,
-    v1_08_metadata,
-    v1_08_plan,
-    v1_08_plan_checkpoint,
-    v1_08_plan_prediction,
-    v1_08_precision_checkpoint,
-    v1_08_precision_policy,
-    v1_08_precision_prediction,
-    v1_08_precision_rows,
-    v1_08_precision_selected,
-    v1_08_profile,
-    v1_08_reflection,
-    v1_08_selected_stack,
-    v1_08_training,
-    v1_08_variant,
-):
-    _incomplete = []
-    if v1_08_batch_prediction.value is None:
-        _incomplete.append("Part A batch prediction")
-    if v1_08_batch_checkpoint.value is None:
-        _incomplete.append("Part A batch checkpoint")
-    if v1_08_memory_prediction.value is None:
-        _incomplete.append("Part B dominant-memory prediction")
-    if v1_08_memory_mitigation.value is None:
-        _incomplete.append("Part B memory mitigation")
-    if v1_08_precision_prediction.value is None:
-        _incomplete.append("Part C precision prediction")
-    if v1_08_precision_policy.value is None:
-        _incomplete.append("Part C precision policy")
-    if v1_08_precision_checkpoint.value is None:
-        _incomplete.append("Part C precision evidence checkpoint")
-    if v1_08_plan_prediction.value is None:
-        _incomplete.append("Part D constraint prediction")
-    if v1_08_plan_checkpoint.value is None:
-        _incomplete.append("Part D memo checkpoint")
-    if not str(v1_08_reflection.value or "").strip():
-        _incomplete.append("Synthesis memo reflection")
-
-    _report = build_lab_report(
-        v1_08_metadata,
-        track=v1_08_profile.label,
-        scenario=v1_08_variant.workload_summary,
-        learning_objectives=(
-            "Explain why batch size changes throughput, memory pressure, and convergence evidence.",
-            "Build a training memory stack for weights, gradients, optimizer state, activations, and data batches.",
-            "Evaluate precision policy as a memory/throughput/stability trade-off.",
-            "Choose a training, adaptation, or calibration plan with cost, time, memory, validation, and deployment handoff constraints.",
-        ),
-        predictions={
-            "batch_size_effect": v1_08_batch_prediction.value,
-            "dominant_training_memory": v1_08_memory_prediction.value,
-            "precision_effect": v1_08_precision_prediction.value,
-            "binding_constraint": v1_08_plan_prediction.value,
-        },
-        knob_settings={
-            "batch_size": v1_08_batch_size.value,
-            "selected_strategy": v1_08_plan.selected_id,
-            "batch_checkpoint": v1_08_batch_checkpoint.value,
-            "memory_mitigation": v1_08_memory_mitigation.value,
-            "precision_policy": v1_08_precision_policy.value or v1_08_precision_selected["policy_id"],
-            "precision_checkpoint": v1_08_precision_checkpoint.value,
-            "plan_checkpoint": v1_08_plan_checkpoint.value,
-        },
-        evidence_summary={
-            "hardware_ref": v1_08_training.hardware_ref,
-            "model_ref": v1_08_training.model_ref,
-            "model_params_m": v1_08_training.model_params_m,
-            "training_budget_mb": v1_08_selected_stack.budget_mb,
-            "total_memory_mb": v1_08_selected_stack.total_mb,
-            "dominant_component": v1_08_plan.dominant_component,
-            "max_feasible_batch": v1_08_frontier.max_feasible_batch,
-            "training_location": v1_08_plan.training_location,
-            "validation_location": v1_08_plan.validation_location,
-            "batch_consequence": v1_08_batch_consequence_current["consequence"],
-            "precision_policy": v1_08_precision_selected["label"],
-            "precision_total_memory_mb": v1_08_precision_selected["total_mb"],
-            "precision_status": v1_08_precision_selected["status"],
-            "precision_evidence_required": v1_08_precision_selected["evidence"],
-            "binding_resource": v1_08_binding_resource_current,
-            "memo_evidence_number": v1_08_memo_evidence,
-            "carry_forward_deployment_implication": v1_08_carry_forward,
-        },
-        final_decision=(
-            f"{v1_08_plan.memo_summary} Binding resource: "
-            f"{v1_08_binding_resource_current}. Carry forward: {v1_08_carry_forward}"
-        ),
-        big_takeaways=(
-            "Training is budgeted optimization: batch, precision, optimizer state, memory, throughput, convergence cost, and deployment evidence interact.",
-            "Batch size changes utilization and convergence evidence, not only speed.",
-            "Optimizer state and activations create the memory budget that decides whether training fits.",
-            "Precision changes memory and throughput while adding stability evidence requirements.",
-            "A training plan must include binding resource, hidden cost, validation location, and carry-forward deployment implication.",
-        ),
-        reflections={
-            "student_reflection": v1_08_reflection.value,
-            "hidden_cost": v1_08_plan.hidden_cost,
-            "deployment_handoff": v1_08_plan.deployment_handoff,
-            "report_artifact": v1_08_training.report_artifact,
-            "binding_resource": v1_08_binding_resource_current,
-            "memo_evidence_number": v1_08_memo_evidence,
-            "carry_forward_deployment_implication": v1_08_carry_forward,
-        },
-        residual_risk=v1_08_plan.residual_risk,
-        source_trace={
-            "track_id": v1_08_profile.track_id,
-            "scenario_id": v1_08_variant.scenario_id,
-            "hardware_ref": v1_08_variant.hardware_ref,
-            "model_ref": v1_08_variant.model_ref,
-            "shared_helper": "mlsysbook_labs.training",
-            "source_policy": v1_08_profile.source_policy,
-        },
-        result_snapshot={
-            "training_profile": v1_08_training,
-            "memory_rows": v1_08_memory_rows,
-            "frontier": v1_08_frontier,
-            "precision_rows": v1_08_precision_rows,
-            "precision_selected": v1_08_precision_selected,
-            "selected_stack": v1_08_selected_stack,
-            "plan": v1_08_plan,
-        },
-        incomplete_fields=tuple(_incomplete),
-    )
-
-    mo.vstack([
-        mo.md("## Download Report"),
-        mo.callout(
-            mo.md(
-                "This V1-08 training feasibility plan is generated locally from "
-                "the selected track, your inputs, and the computed evidence."
-            ),
-            kind="info",
-        ),
-        report_export_panel(_report),
-    ])
+    _captures = get_evidence()
+    _saved_e = _captures["E"].to_dict() if "E" in _captures else None
+    _saved_e_decision = _saved_e["decision"] if _saved_e else None
+    _saved_e_rejected = _saved_e["inputs"].get("rejected_alternative") if _saved_e else None
+    _choices_complete = all(widget.value is not None for widget in (final_choice, final_rejected, final_trigger, final_risk))
+    _distinct = final_choice.value == "none" or final_choice.value != final_rejected.value
+    _selected_matches = final_choice.value == _saved_e_decision and (final_choice.value != "none" or final_rejected.value == _saved_e_rejected)
+    _ready = audit.complete and _choices_complete and _distinct and _selected_matches and bool(rationale.value.strip())
+    _status = "EVIDENCE IN PROGRESS"
+    if _ready:
+        try:
+            ledger.save(chapter=8, design={
+                "schema_version": 1, "lab_id": "v1_08", "track_id": track_id,
+                "model_id": "v1_08_experiments",
+                "evidence": {part: capture.to_dict() for part, capture in _captures.items()},
+                "recommendation": final_choice.value,
+                "rejected_alternative": final_rejected.value,
+                "reevaluation_trigger": final_trigger.value,
+                "residual_risk": final_risk.value, "rationale": rationale.value,
+            })
+            await ledger.flush()
+        except Exception:
+            _status = "LOCAL SAVE FAILED · DOWNLOAD THE REPORT TO KEEP YOUR EVIDENCE"
+        else:
+            _status = "SAVED"
+    mo.Html(f'<div class="lab-hud"><span>LAB 08 · Time to Target · STATUS: {_status}</span></div>')
     return
 
 

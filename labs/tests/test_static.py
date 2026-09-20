@@ -278,6 +278,35 @@ class TestWheelConsistency:
         assert not missing, f"mlsysbook_labs wheel missing modules: {missing}"
 
 
+def check_has_evidence_track_report_surface(source: str) -> bool:
+    """Check for four-track dropdown choices plus real report/evidence calls."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    req = {"tinyml", "mobile", "edge", "cloud"}
+    has_drop = False
+    has_report = False
+    has_evidence = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            f = node.func
+            name = f.attr if isinstance(f, ast.Attribute) else (f.id if isinstance(f, ast.Name) else None)
+            if name == "dropdown" and node.args and isinstance(node.args[0], ast.Dict):
+                found = {
+                    r for item in list(node.args[0].keys) + list(node.args[0].values)
+                    if isinstance(item, ast.Constant) and isinstance(item.value, str)
+                    for r in req if r in item.value.lower()
+                }
+                if req.issubset(found):
+                    has_drop = True
+            elif name == "build_lab_report":
+                has_report = True
+            elif name in ("capture_evidence", "audit_evidence"):
+                has_evidence = True
+    return has_drop and has_report and has_evidence
+
+
 class TestLabCatalog:
     """Release metadata catalog must stay aligned with the lab files."""
 
@@ -341,9 +370,29 @@ class TestLabCatalog:
                 "evaluate_rationale" in source
                 and "build_lab_report" in source
             )
-            if not (has_baseline_panel or has_deep_surface or has_shared_renderer_surface or has_rationale_surface):
+            has_evidence_surface = check_has_evidence_track_report_surface(source)
+            if not (has_baseline_panel or has_deep_surface or has_shared_renderer_surface or has_rationale_surface or has_evidence_surface):
                 missing.append(path)
         assert not missing, f"Missing track/report surface: {missing}"
+
+    def test_track_report_detector_negative_regression(self):
+        """Negative checks: comments, unrelated strings, empty/incomplete dropdown, or missing calls must fail."""
+        assert not check_has_evidence_track_report_surface(
+            "# track = mo.ui.dropdown({'TinyML': 'tinyml', 'Mobile': 'mobile', 'Edge': 'edge', 'Cloud': 'cloud'})\n"
+            "# build_lab_report()\n# capture_evidence()"
+        )
+        assert not check_has_evidence_track_report_surface(
+            "tracks = 'TinyML Mobile Edge Cloud'\nr = 'build_lab_report'\ne = 'capture_evidence'"
+        )
+        assert not check_has_evidence_track_report_surface(
+            "track = mo.ui.dropdown({})\nbuild_lab_report()\ncapture_evidence()"
+        )
+        assert not check_has_evidence_track_report_surface(
+            "track = mo.ui.dropdown({'TinyML': 'tinyml', 'Cloud': 'cloud'})\nbuild_lab_report()\ncapture_evidence()"
+        )
+        assert not check_has_evidence_track_report_surface("track = mo.ui.dropdown({'TinyML': 'tinyml', 'Mobile': 'mobile', 'Edge': 'edge', 'Cloud': 'cloud'})\ncapture_evidence()")
+        assert not check_has_evidence_track_report_surface("track = mo.ui.dropdown({'TinyML': 'tinyml', 'Mobile': 'mobile', 'Edge': 'edge', 'Cloud': 'cloud'})\nbuild_lab_report()")
+        assert check_has_evidence_track_report_surface("track = mo.ui.dropdown({'TinyML': 'tinyml', 'Mobile': 'mobile', 'Edge': 'edge', 'Cloud': 'cloud'})\ncapture_evidence(track=t)\nreport = build_lab_report(meta)")
 
     def test_no_absolute_wheel_url(self, lab_path):
         """Labs must use relative URLs for the wheel, not absolute mlsysbook.ai URLs."""

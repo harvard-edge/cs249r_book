@@ -1,1764 +1,694 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full", app_title="Lab 16: The Fairness Budget · MLSysBook")
+app = marimo.App(width="full", app_title="Lab 16: Evidence for Responsible Release · MLSysBook")
 
+# ZONE A · Opening and simulator bootstrap
 
 @app.cell
 async def _():
-    import html
-    import math
-    import marimo as mo
     import sys
     from pathlib import Path
+    import marimo as mo
 
     if sys.platform == "emscripten":
         import micropip
-
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
         await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
         await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
     else:
-        _labs_dir = Path(__file__).resolve().parents[1]
-        if str(_labs_dir) not in sys.path:
-            sys.path.insert(0, str(_labs_dir))
+        labs_dir = Path(__file__).resolve().parents[1]
+        if str(labs_dir) not in sys.path:
+            sys.path.insert(0, str(labs_dir))
         from bootstrap import native_bootstrap
-
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
+    from mlsysim.core.units import Q_
+    from mlsysim.engine.v2_16_experiments import (
+        PRIVACY_PROFILES, assess_fairness,
+        audit_evidence as simulate_audit_evidence,
+        check_privacy_profile, evaluate_capacity, mechanical_gate,
+        record_release_decision, track_profile,
+    )
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
     from mlsysbook_labs import (
-        ACADEMIC_LAB_CSS,
-        MathPeek,
-        big_takeaways,
-        build_lab_report,
-        gated_hypothesis_card,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        instrumentation_console,
+        ACADEMIC_LAB_CSS, build_lab_report, get_lab_metadata,
         report_export_panel,
-        resolve_mlsysim_ref,
-        source_trace,
-        track_arc_context,
-        track_context,
-        track_selector,
+    )
+    from mlsysbook_labs.experiment_evidence import (
+        audit_evidence, capture_evidence,
     )
 
-    ledger = DesignLedger()
-    if getattr(ledger, "is_wasm", False):
-        _ = await ledger.load_async()
+    ledger = DesignLedger(volume="vol2")
+    if ledger.is_wasm:
+        _loaded = await ledger.load_async()
     return (
-        ACADEMIC_LAB_CSS,
-        COLORS,
-        LAB_CSS,
-        MathPeek,
-        apply_plotly_theme,
-        big_takeaways,
-        build_lab_report,
-        gated_hypothesis_card,
-        get_lab_metadata,
-        get_lab_track_variant,
-        get_track_profile,
-        go,
-        html,
-        instrumentation_console,
-        ledger,
-        mo,
-        report_export_panel,
-        resolve_mlsysim_ref,
-        source_trace,
-        track_arc_context,
-        track_context,
+        ACADEMIC_LAB_CSS, COLORS, LAB_CSS, PRIVACY_PROFILES, Q_,
+        apply_plotly_theme, assess_fairness, audit_evidence, build_lab_report,
+        capture_evidence, check_privacy_profile, evaluate_capacity,
+        get_lab_metadata, go, ledger, mechanical_gate, mo,
+        record_release_decision, report_export_panel,
+        simulate_audit_evidence, track_profile,
     )
 
 
 @app.cell
-def _(get_lab_metadata):
-    v2_16_chapter = 16
-    v2_16_lab_path = "vol2/lab_16_responsible_ai.py"
-    v2_16_metadata = get_lab_metadata(v2_16_lab_path)
-    return v2_16_chapter, v2_16_metadata
-
-
-@app.cell(hide_code=True)
 def _(mo):
-    v2_16_track_picker = mo.ui.dropdown(
-        options={
-            "⚡ TinyML Track (ARM Cortex-M55 / ESP32-S3 & Demographic Artifacts / Sensor Bias)": "oura_ring",
-            "📱 Mobile Track (Apple Silicon / Snapdragon & Subgroup Fairness / Battery Equity)": "iphone",
-            "🤖 Edge & Embodied Track (NVIDIA Jetson AGX Orin & Safety Disparities / Audit Logs)": "robotaxi",
-            "☁️ Cloud Supercomputing Track (H100/B200 Clusters & Subgroup Disparities / Explainability)": "cloud_fleet",
-        },
-        value="📱 Mobile Track (Apple Silicon / Snapdragon & Subgroup Fairness / Battery Equity)",
-        label="Select Course / Industry Track",
+    get_evidence, set_evidence = mo.state({})
+    return get_evidence, set_evidence
+
+
+@app.cell
+def _(mo, set_evidence):
+    track = mo.ui.dropdown(
+        {"TinyML": "tinyml", "Mobile": "mobile", "Edge": "edge", "Cloud": "cloud"},
+        value="Mobile", label="Deployment track",
+        on_change=lambda _value: set_evidence({}),
     )
-    v2_16_track_picker
-    return (v2_16_track_picker,)
+    return (track,)
 
 
 @app.cell
-def _(
-    get_lab_track_variant,
-    get_track_profile,
-    resolve_mlsysim_ref,
-    v2_16_metadata,
-    v2_16_track_picker,
-):
-    v2_16_track_id = v2_16_track_picker.value
-    v2_16_profile = get_track_profile(v2_16_track_id)
-    v2_16_variant = get_lab_track_variant(v2_16_metadata.lab_id, v2_16_profile.track_id)
-    v2_16_hardware = resolve_mlsysim_ref(v2_16_variant.hardware_ref)
-    v2_16_model = resolve_mlsysim_ref(v2_16_variant.model_ref)
-    return v2_16_hardware, v2_16_model, v2_16_profile, v2_16_variant
+def _(track, track_profile):
+    track_id = track.value
+    profile = track_profile(track_id)
+    return profile, track_id
 
+# ZONE B · Prediction and experiment controls
 
 @app.cell
-def _(COLORS, apply_plotly_theme, go, html):
-    def v2_16_first_label(options):
-        return next(iter(options.keys()))
-
-    def v2_16_option_label(options, value):
-        for label, option_value in options.items():
-            if option_value == value:
-                return label
-        return str(value)
-
-    def v2_16_fmt(value, suffix="", digits=1):
-        if isinstance(value, int):
-            return f"{value:,}{suffix}"
-        if abs(float(value)) >= 1000:
-            return f"{float(value):,.0f}{suffix}"
-        return f"{float(value):.{digits}f}{suffix}"
-
-    def v2_16_metric_card(title, value, subtitle, color, strong=False):
-        border = f"border-left:4px solid {color};" if strong else f"border-top:3px solid {color};"
-        return f"""
-        <div style="{border} background:white; border-radius:8px; padding:12px 14px;
-                    min-width:185px; flex:1; box-shadow:0 1px 4px rgba(15,23,42,0.08);">
-            <div style="font-size:0.68rem; font-weight:800; color:#64748b;
-                        text-transform:uppercase; letter-spacing:0.08em;">{html.escape(str(title))}</div>
-            <div style="font-size:1.25rem; font-weight:800; color:#0f172a; margin:4px 0;">
-                {html.escape(str(value))}
-            </div>
-            <div style="font-size:0.78rem; color:#475467; line-height:1.35;">
-                {html.escape(str(subtitle))}
-            </div>
-        </div>
-        """
-
-    def v2_16_html_table(headers, rows):
-        head = "".join(f"<th>{html.escape(str(item))}</th>" for item in headers)
-        body = ""
-        for row in rows:
-            body += "<tr>" + "".join(f"<td>{html.escape(str(item))}</td>" for item in row) + "</tr>"
-        return f"""
-        <div style="overflow-x:auto; margin:12px 0;">
-          <table style="border-collapse:collapse; width:100%; font-size:0.88rem;">
-            <thead><tr style="background:#f8fafc; color:#334155;">{head}</tr></thead>
-            <tbody>{body}</tbody>
-          </table>
-        </div>
-        """
-
-    def v2_16_guardrail_callout(mo, violations, success_text, fail_prefix):
-        if violations:
-            return mo.callout(mo.md(f"**{fail_prefix}:** " + "; ".join(violations)), kind="danger")
-        return mo.callout(mo.md(f"**Pass.** {success_text}"), kind="success")
-
-    def v2_16_part_banner(mo, color, label, quote):
-        return mo.Html(f"""
-        <div style="border-left:4px solid {color}; background:white;
-                    border-radius:0 8px 8px 0; padding:16px 22px; margin:12px 0;
-                    box-shadow:0 1px 4px rgba(15,23,42,0.08);">
-            <div style="font-size:0.72rem; font-weight:800; color:{color};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                {html.escape(label)}
-            </div>
-            <div style="font-style:italic; color:#1e293b; line-height:1.6;">
-                "{html.escape(quote)}"
-            </div>
-        </div>
-        """)
-
-    def v2_16_bar_figure(title, values, limit=None, ytitle="Amount"):
-        labels = list(values.keys())
-        ys = [float(value) for value in values.values()]
-        palette = [COLORS["BlueLine"], COLORS["OrangeLine"], COLORS["GreenLine"], COLORS["RedLine"], "#6D5BD0"]
-        fig = go.Figure()
-        fig.add_trace(go.Bar(x=labels, y=ys, marker_color=palette[: len(labels)], opacity=0.9))
-        if limit is not None:
-            fig.add_hline(y=float(limit), line_dash="dash", line_color=COLORS["RedLine"], annotation_text="guardrail")
-        fig.update_layout(
-            title=title,
-            height=340,
-            yaxis=dict(title=ytitle, gridcolor="#eef2f7"),
-            margin=dict(l=60, r=20, t=55, b=50),
-        )
-        apply_plotly_theme(fig)
-        return fig
-
-    def v2_16_track_packet(profile, variant, hardware, model):
-        packets = {
-            "iphone": {
-                "mission": "privacy-safe mobile responsible release",
-                "stakeholders": {
-                    "accessibility": {"label": "Accessibility-context users", "exposure_pct": 18.0},
-                    "low_light": {"label": "Low-light or motion users", "exposure_pct": 24.0},
-                    "opt_out": {"label": "Users who opt out of cloud telemetry", "exposure_pct": 35.0},
-                },
-                "harms": {
-                    "false_negative": {"label": "missed helpful intervention", "severity": 1.0, "gap_delta": 1.0},
-                    "false_positive": {"label": "unwanted intervention or lockout", "severity": 1.2, "gap_delta": 2.0},
-                    "no_recourse": {"label": "no local explanation or appeal", "severity": 1.5, "gap_delta": 3.5},
-                },
-                "events_per_day": 25_000,
-                "baseline_gap_pp": 12.0,
-                "target_gap_pp": 5.0,
-                "residual_cap_units": 220.0,
-                "base_latency_ms": 30.0,
-                "latency_slo_ms": 100.0,
-                "cost_factor_limit": 2.0,
-                "energy_factor_limit": 1.8,
-                "release_delay_limit_days": 10.0,
-                "min_audit_confidence_pct": 72.0,
-                "escalation_limit_hours": 48.0,
-                "audit_sample_default": 4.0,
-                "label_default": 55.0,
-                "monitoring_default": 55,
-                "explanation_default": 25,
-                "privacy_default": 70,
-                "human_review_default": 20,
-                "evidence_emphasis": "privacy-safe counters and accessibility regression",
-                "failure_mode": "small cohorts disappear when telemetry is minimized",
-                "report_frame": "mobile responsible release memo",
-                "residual_owner_options": {
-                    "No named owner": "none",
-                    "Mobile RAI lead": "rai_lead",
-                    "Product plus accessibility reviewer": "cross_functional",
-                },
-            },
-            "oura_ring": {
-                "mission": "health-adjacent wearable governance",
-                "stakeholders": {
-                    "sensor_contact": {"label": "Variable sensor-contact wearers", "exposure_pct": 22.0},
-                    "physiology": {"label": "Rare physiology or activity cohorts", "exposure_pct": 14.0},
-                    "privacy_sensitive": {"label": "Privacy-sensitive health users", "exposure_pct": 30.0},
-                },
-                "harms": {
-                    "false_alarm": {"label": "false health-adjacent alarm", "severity": 1.3, "gap_delta": 2.0},
-                    "missed_signal": {"label": "missed health-adjacent signal", "severity": 1.6, "gap_delta": 3.0},
-                    "unclear_message": {"label": "unclear risk communication", "severity": 1.1, "gap_delta": 1.0},
-                },
-                "events_per_day": 1_440,
-                "baseline_gap_pp": 14.0,
-                "target_gap_pp": 6.0,
-                "residual_cap_units": 18.0,
-                "base_latency_ms": 80.0,
-                "latency_slo_ms": 300.0,
-                "cost_factor_limit": 1.7,
-                "energy_factor_limit": 1.45,
-                "release_delay_limit_days": 21.0,
-                "min_audit_confidence_pct": 80.0,
-                "escalation_limit_hours": 72.0,
-                "audit_sample_default": 8.0,
-                "label_default": 45.0,
-                "monitoring_default": 45,
-                "explanation_default": 10,
-                "privacy_default": 80,
-                "human_review_default": 25,
-                "evidence_emphasis": "sensor-contact cohorts, false alerts, and battery-safe review",
-                "failure_mode": "battery-safe monitoring under-samples rare physiology",
-                "report_frame": "wearable health-adjacent governance memo",
-                "residual_owner_options": {
-                    "No named owner": "none",
-                    "Wearable firmware RAI lead": "rai_lead",
-                    "Clinical reviewer plus firmware owner": "cross_functional",
-                },
-            },
-            "robotaxi": {
-                "mission": "autonomy safety accountability",
-                "stakeholders": {
-                    "vru": {"label": "Vulnerable road users", "exposure_pct": 8.0},
-                    "construction": {"label": "Construction and weather edge cases", "exposure_pct": 11.0},
-                    "rider": {"label": "Riders exposed to unsafe fallback", "exposure_pct": 6.0},
-                },
-                "harms": {
-                    "missed_hazard": {"label": "missed rare hazard", "severity": 2.0, "gap_delta": 2.0},
-                    "unsafe_fallback": {"label": "unsafe or opaque fallback", "severity": 1.7, "gap_delta": 1.5},
-                    "no_trace": {"label": "no reconstructable incident trace", "severity": 1.5, "gap_delta": 1.0},
-                },
-                "events_per_day": 2_000_000,
-                "baseline_gap_pp": 8.0,
-                "target_gap_pp": 2.0,
-                "residual_cap_units": 420.0,
-                "base_latency_ms": 20.0,
-                "latency_slo_ms": 50.0,
-                "cost_factor_limit": 3.0,
-                "energy_factor_limit": 2.4,
-                "release_delay_limit_days": 5.0,
-                "min_audit_confidence_pct": 92.0,
-                "escalation_limit_hours": 2.0,
-                "audit_sample_default": 18.0,
-                "label_default": 85.0,
-                "monitoring_default": 70,
-                "explanation_default": 40,
-                "privacy_default": 35,
-                "human_review_default": 65,
-                "evidence_emphasis": "rare-event replay, trace review, fallback drills",
-                "failure_mode": "long-tail replay coverage leaves safety-case blind spots",
-                "report_frame": "safety-case governance memo",
-                "residual_owner_options": {
-                    "No named owner": "none",
-                    "Autonomy safety owner": "rai_lead",
-                    "Safety board plus fleet ops owner": "cross_functional",
-                },
-            },
-            "cloud_fleet": {
-                "mission": "population-scale responsible AI platform",
-                "stakeholders": {
-                    "tenant": {"label": "Small or underserved tenants", "exposure_pct": 16.0},
-                    "language": {"label": "Underserved languages or regions", "exposure_pct": 20.0},
-                    "appeal": {"label": "Users needing appeal or recourse", "exposure_pct": 12.0},
-                },
-                "harms": {
-                    "aggregate_masking": {"label": "harm hidden by aggregate metrics", "severity": 1.4, "gap_delta": 2.0},
-                    "delayed_label": {"label": "delayed labels hide drift", "severity": 1.2, "gap_delta": 1.0},
-                    "appeal_backlog": {"label": "appeal or review backlog", "severity": 1.5, "gap_delta": 3.0},
-                },
-                "events_per_day": 10_000_000,
-                "baseline_gap_pp": 16.0,
-                "target_gap_pp": 5.0,
-                "residual_cap_units": 8_000.0,
-                "base_latency_ms": 50.0,
-                "latency_slo_ms": 200.0,
-                "cost_factor_limit": 3.0,
-                "energy_factor_limit": 3.0,
-                "release_delay_limit_days": 14.0,
-                "min_audit_confidence_pct": 78.0,
-                "escalation_limit_hours": 24.0,
-                "audit_sample_default": 2.0,
-                "label_default": 60.0,
-                "monitoring_default": 60,
-                "explanation_default": 20,
-                "privacy_default": 50,
-                "human_review_default": 35,
-                "evidence_emphasis": "tenant/language cohorts, appeal workflow, delayed-label governance",
-                "failure_mode": "aggregate dashboards pass while intersectional cohorts are uncovered",
-                "report_frame": "population-scale responsible AI memo",
-                "residual_owner_options": {
-                    "No named owner": "none",
-                    "Responsible AI platform owner": "rai_lead",
-                    "RAI, SRE, and policy review owner": "cross_functional",
-                },
-            },
-        }
-        packet = dict(packets[profile.track_id])
-        packet.update(
-            {
-                "track_id": profile.track_id,
-                "track_label": profile.label,
-                "stakeholder": variant.stakeholder,
-                "scenario_id": variant.scenario_id,
-                "scenario": variant.workload_summary,
-                "hardware_ref": variant.hardware_ref,
-                "hardware_name": getattr(hardware, "name", variant.hardware_ref),
-                "model_ref": variant.model_ref,
-                "model_name": getattr(model, "name", variant.model_ref),
-                "source_policy": profile.source_policy,
-            }
-        )
-        packet["stakeholder_options"] = {
-            value["label"]: key for key, value in packet["stakeholders"].items()
-        }
-        packet["harm_options"] = {
-            value["label"]: key for key, value in packet["harms"].items()
-        }
-        return packet
-
-    def v2_16_obligation_result(packet, stakeholder_key, harm_key, threshold_pp):
-        stakeholder = packet["stakeholders"][stakeholder_key]
-        harm = packet["harms"][harm_key]
-        exposure_units = packet["events_per_day"] * stakeholder["exposure_pct"] / 100.0
-        observed_gap = packet["baseline_gap_pp"] + harm["gap_delta"]
-        residual_gap = max(0.0, observed_gap - float(threshold_pp))
-        affected_units = exposure_units * residual_gap / 100.0 * harm["severity"]
-        threshold_ok = float(threshold_pp) <= packet["target_gap_pp"]
-        residual_ok = affected_units <= packet["residual_cap_units"]
-        violations = []
-        if not threshold_ok:
-            violations.append(
-                f"allowed gap {threshold_pp:.1f} pp exceeds track target {packet['target_gap_pp']:.1f} pp"
-            )
-        if not residual_ok:
-            violations.append(
-                f"residual affected units {affected_units:,.0f}/day exceeds cap {packet['residual_cap_units']:,.0f}/day"
-            )
-        return {
-            "stakeholder_key": stakeholder_key,
-            "stakeholder_label": stakeholder["label"],
-            "harm_key": harm_key,
-            "harm_label": harm["label"],
-            "exposure_pct": stakeholder["exposure_pct"],
-            "exposure_units": exposure_units,
-            "observed_gap_pp": observed_gap,
-            "threshold_pp": float(threshold_pp),
-            "residual_gap_pp": residual_gap,
-            "affected_units_per_day": affected_units,
-            "binding_amount": "allowed subgroup gap" if not threshold_ok else "residual affected units",
-            "obligation_ok": not violations,
-            "violations": tuple(violations),
-        }
-
-    def v2_16_overhead_result(packet, obligation, monitoring, explanation, privacy, human_review):
-        monitoring = float(monitoring)
-        explanation = float(explanation)
-        privacy = float(privacy)
-        human_review = float(human_review)
-        monitor_added_ms = (10.0 + 10.0 * monitoring / 100.0) * monitoring / 100.0
-        explanation_added_ms = packet["base_latency_ms"] * (0.6 + packet["baseline_gap_pp"] / 20.0) * explanation / 100.0
-        privacy_added_ms = packet["base_latency_ms"] * privacy / 350.0
-        review_added_ms = packet["base_latency_ms"] * human_review / 500.0
-        latency_ms = packet["base_latency_ms"] + monitor_added_ms + explanation_added_ms + privacy_added_ms + review_added_ms
-        cost_factor = 1.0 + monitoring / 260.0 + explanation / 210.0 + privacy / 300.0 + human_review / 180.0
-        energy_factor = 1.0 + monitoring / 420.0 + explanation / 260.0 + privacy / 340.0 + human_review / 500.0
-        release_delay_days = (
-            1.0
-            + packet["release_delay_limit_days"] * 0.22
-            + monitoring / 55.0
-            + explanation / 80.0
-            + privacy / 95.0
-            + human_review / 45.0
-        )
-        risk_reduction_pct = min(
-            88.0,
-            0.32 * monitoring + 0.20 * explanation + 0.18 * privacy + 0.30 * human_review,
-        )
-        residual_gap_pp = max(
-            0.0,
-            obligation["observed_gap_pp"]
-            - 0.075 * monitoring
-            - 0.030 * explanation
-            - 0.020 * privacy
-            - 0.055 * human_review,
-        )
-        quality_delta_pp = -0.014 * privacy - 0.006 * explanation + 0.012 * monitoring + 0.010 * human_review
-        violations = []
-        if latency_ms > packet["latency_slo_ms"]:
-            violations.append(f"latency {latency_ms:.1f} ms exceeds SLO {packet['latency_slo_ms']:.1f} ms")
-        if cost_factor > packet["cost_factor_limit"]:
-            violations.append(f"cost factor {cost_factor:.2f}x exceeds limit {packet['cost_factor_limit']:.2f}x")
-        if energy_factor > packet["energy_factor_limit"]:
-            violations.append(f"energy factor {energy_factor:.2f}x exceeds limit {packet['energy_factor_limit']:.2f}x")
-        if release_delay_days > packet["release_delay_limit_days"]:
-            violations.append(
-                f"release delay {release_delay_days:.1f} days exceeds limit {packet['release_delay_limit_days']:.1f} days"
-            )
-        if residual_gap_pp > packet["target_gap_pp"]:
-            violations.append(
-                f"residual gap {residual_gap_pp:.1f} pp remains above target {packet['target_gap_pp']:.1f} pp"
-            )
-        return {
-            "monitoring_intensity_pct": monitoring,
-            "explanation_coverage_pct": explanation,
-            "privacy_strictness_pct": privacy,
-            "human_review_share_pct": human_review,
-            "latency_ms": latency_ms,
-            "cost_factor": cost_factor,
-            "energy_factor": energy_factor,
-            "release_delay_days": release_delay_days,
-            "risk_reduction_pct": risk_reduction_pct,
-            "residual_gap_pp": residual_gap_pp,
-            "quality_delta_pp": quality_delta_pp,
-            "feasible": not violations,
-            "violations": tuple(violations),
-        }
-
-    def v2_16_audit_result(packet, obligation, overhead, sample_rate, label_availability, slice_depth, escalation_hours):
-        slice_profiles = {
-            "single_axis": {"label": "Single-axis groups", "factor": 1.0, "blind_spot": "intersectional harm"},
-            "intersectional": {"label": "Intersectional slices", "factor": 2.4, "blind_spot": "rare-event tail"},
-            "long_tail": {"label": "Long-tail and stress slices", "factor": 4.2, "blind_spot": "delayed labels and sparse cohorts"},
-        }
-        slice_profile = slice_profiles[slice_depth]
-        sample_rate = float(sample_rate)
-        label_availability = float(label_availability)
-        escalation_hours = float(escalation_hours)
-        observable_share = min(
-            0.98,
-            (sample_rate / 100.0) * (label_availability / 100.0) * (3.0 / slice_profile["factor"]),
-        )
-        covered_units = obligation["exposure_units"] * observable_share
-        latent_harm_units = obligation["exposure_units"] * max(overhead["residual_gap_pp"], 0.0) / 100.0
-        blind_units = max(0.0, latent_harm_units * (1.0 - observable_share))
-        escalation_score = min(100.0, 100.0 * packet["escalation_limit_hours"] / max(escalation_hours, 0.1))
-        confidence = max(
-            0.0,
-            min(
-                100.0,
-                25.0
-                + sample_rate * 1.4
-                + label_availability * 0.38
-                - (slice_profile["factor"] - 1.0) * 8.0
-                + min(18.0, escalation_score / 5.0),
-            ),
-        )
-        violations = []
-        if confidence < packet["min_audit_confidence_pct"]:
-            violations.append(
-                f"audit confidence {confidence:.1f}% below floor {packet['min_audit_confidence_pct']:.1f}%"
-            )
-        if blind_units > packet["residual_cap_units"]:
-            violations.append(
-                f"blind residual harm {blind_units:,.0f}/day exceeds cap {packet['residual_cap_units']:,.0f}/day"
-            )
-        if escalation_hours > packet["escalation_limit_hours"]:
-            violations.append(
-                f"escalation {escalation_hours:.1f} h exceeds limit {packet['escalation_limit_hours']:.1f} h"
-            )
-        return {
-            "sample_rate_pct": sample_rate,
-            "label_availability_pct": label_availability,
-            "slice_depth": slice_depth,
-            "slice_label": slice_profile["label"],
-            "blind_spot": slice_profile["blind_spot"],
-            "observable_share_pct": observable_share * 100.0,
-            "covered_units_per_day": covered_units,
-            "blind_units_per_day": blind_units,
-            "audit_confidence_pct": confidence,
-            "escalation_hours": escalation_hours,
-            "escalation_score_pct": escalation_score,
-            "audit_ok": not violations,
-            "violations": tuple(violations),
-        }
-
-    def v2_16_policy_result(packet, obligation, overhead, audit, selected_policy, rejected_policy, residual_owner):
-        policies = {
-            "monitor_only": {
-                "label": "Monitor-and-patch",
-                "utility_pct": 92.0,
-                "harm_reduction_bonus": 4.0,
-                "cost_multiplier": 0.88,
-                "audit_bonus": -8.0,
-                "governance": "weak escalation and delayed remediation",
-            },
-            "guardrail_first": {
-                "label": "Guardrail-first responsible release",
-                "utility_pct": 88.0,
-                "harm_reduction_bonus": 13.0,
-                "cost_multiplier": 1.00,
-                "audit_bonus": 8.0,
-                "governance": "release gate, owner, escalation, and residual obligation",
-            },
-            "max_mitigation": {
-                "label": "Maximum mitigation before launch",
-                "utility_pct": 82.0,
-                "harm_reduction_bonus": 20.0,
-                "cost_multiplier": 1.18,
-                "audit_bonus": 14.0,
-                "governance": "strong evidence but high overhead and launch delay",
-            },
-            "hold_redesign": {
-                "label": "Hold for redesign",
-                "utility_pct": 76.0,
-                "harm_reduction_bonus": 24.0,
-                "cost_multiplier": 1.05,
-                "audit_bonus": 20.0,
-                "governance": "safest when current controls cannot bind residual harm",
-            },
-        }
-        selected = policies[selected_policy]
-        rejected = policies[rejected_policy]
-        residual_gap = max(0.0, overhead["residual_gap_pp"] - selected["harm_reduction_bonus"] / 4.0)
-        technical_cost = overhead["cost_factor"] * selected["cost_multiplier"]
-        technical_latency = overhead["latency_ms"] * (0.96 if selected_policy == "monitor_only" else 1.0)
-        audit_confidence = min(100.0, audit["audit_confidence_pct"] + selected["audit_bonus"])
-        owner_ok = residual_owner not in {None, "none"}
-        violations = []
-        if selected_policy == rejected_policy:
-            violations.append("selected policy and rejected alternative are the same")
-        if technical_latency > packet["latency_slo_ms"]:
-            violations.append("technical latency guardrail fails")
-        if technical_cost > packet["cost_factor_limit"]:
-            violations.append("technical cost guardrail fails")
-        if residual_gap > packet["target_gap_pp"]:
-            violations.append("residual harm remains above target")
-        if audit_confidence < packet["min_audit_confidence_pct"]:
-            violations.append("audit coverage below governance floor")
-        if not audit["audit_ok"]:
-            violations.append("audit blind spot still violates Part C")
-        if not owner_ok:
-            violations.append("no residual obligation owner assigned")
-        return {
-            "selected_policy": selected_policy,
-            "selected_policy_label": selected["label"],
-            "rejected_policy": rejected_policy,
-            "rejected_policy_label": rejected["label"],
-            "utility_pct": selected["utility_pct"],
-            "residual_gap_pp": residual_gap,
-            "technical_latency_ms": technical_latency,
-            "technical_cost_factor": technical_cost,
-            "audit_confidence_pct": audit_confidence,
-            "governance_summary": selected["governance"],
-            "residual_owner": residual_owner,
-            "policy_pass": not violations,
-            "violations": tuple(violations),
-            "policy_table": [
-                [policy["label"], f"{policy['utility_pct']:.0f}%", f"+{policy['harm_reduction_bonus']:.0f}", f"{policy['cost_multiplier']:.2f}x", f"{policy['audit_bonus']:+.0f}", policy["governance"]]
-                for policy in policies.values()
-            ],
-        }
-
+def _(mo, track_id):
+    _track_key = track_id
+    a_threshold = mo.ui.slider(0.30, 0.80, value=0.65, step=0.05, label="Decision threshold")
+    a_criterion = mo.ui.dropdown(
+        {"Demographic parity": "demographic_parity", "Equal opportunity": "equal_opportunity",
+         "Predictive parity": "predictive_parity", "Equalized odds": "equalized_odds"},
+        value="Equal opportunity", label="Fairness criterion",
+    )
+    a_allowed_gap = mo.ui.slider(0.05, 0.40, value=0.15, step=0.05, label="Allowed metric gap")
+    b_explanation_share = mo.ui.slider(0.01, 0.50, value=0.10, step=0.01, label="Explanation share")
+    b_review_share = mo.ui.slider(0.001, 0.10, value=0.02, step=0.001, label="Human-review share")
+    c_sampling = mo.ui.slider(0.10, 1.00, value=0.50, step=0.10, label="Eligible cases sampled")
+    c_label_delay = mo.ui.slider(1, 80, value=24, step=1, label="Label delay (hours)")
+    d_profile = mo.ui.dropdown(
+        {"Cohort aggregate counts": "aggregate_counts", "Pseudonymous scored events": "pseudonymous_events",
+         "Full case-review trace": "full_review_trace"},
+        value="Pseudonymous scored events", label="Evidence data profile",
+    )
+    d_case_review = mo.ui.dropdown(
+        {"Subgroup audit only": False, "Case-level review required": True},
+        value="Case-level review required", label="Evidence obligation",
+    )
     return (
-        v2_16_audit_result,
-        v2_16_bar_figure,
-        v2_16_first_label,
-        v2_16_guardrail_callout,
-        v2_16_html_table,
-        v2_16_metric_card,
-        v2_16_obligation_result,
-        v2_16_overhead_result,
-        v2_16_part_banner,
-        v2_16_policy_result,
-        v2_16_track_packet,
+        a_allowed_gap, a_criterion, a_threshold, b_explanation_share,
+        b_review_share, c_label_delay, c_sampling, d_case_review, d_profile,
     )
 
 
 @app.cell
-def _(
-    v2_16_hardware,
-    v2_16_model,
-    v2_16_profile,
-    v2_16_track_packet,
-    v2_16_variant,
-):
-    v2_16_packet = v2_16_track_packet(v2_16_profile, v2_16_variant, v2_16_hardware, v2_16_model)
-    return (v2_16_packet,)
+def _(mo, track_id):
+    _track_key = track_id
+    a_prediction = mo.ui.radio(
+        {"Chosen criterion passes": "pass", "Chosen criterion fails": "fail",
+         "Chosen criterion is undefined": "undefined"},
+        label="At the selected threshold, what happens to the chosen criterion?",
+    ).form(submit_button_label="Lock Part A prediction")
+    b_prediction = mo.ui.radio(
+        {"Both queues stay within capacity": "both_pass", "Explanation queue overloads": "explanation",
+         "Human-review queue overloads": "review", "Both queues overload": "both_fail"},
+        label="What will the selected coverage require?",
+    ).form(submit_button_label="Lock Part B prediction")
+    c_prediction = mo.ui.radio(
+        {"Enough evidence for the criterion": "estimable", "Sample misses a subgroup": "missing_group",
+         "Class counts make the rate undefined": "undefined"},
+        label="What will the monitoring plan reveal?",
+    ).form(submit_button_label="Lock Part C prediction")
+    d_prediction = mo.ui.radio(
+        {"Aggregate counts": "aggregate_counts", "Pseudonymous events": "pseudonymous_events",
+         "Full review trace": "full_review_trace", "No profile": "none"},
+        label="Which profile satisfies the evidence obligation?",
+    ).form(submit_button_label="Lock Part D prediction")
+    e_prediction = mo.ui.radio(
+        {"All gates pass": "pass", "Fairness blocks": "fairness", "Capacity blocks": "capacity",
+         "Audit evidence blocks": "audit", "Privacy obligations block": "privacy"},
+        label="What controls the current release evidence?",
+    ).form(submit_button_label="Lock Part E prediction")
+    return a_prediction, b_prediction, c_prediction, d_prediction, e_prediction
 
 
-@app.cell(hide_code=True)
-def _(
-    ACADEMIC_LAB_CSS,
-    COLORS,
-    LAB_CSS,
-    mo,
-    source_trace,
-    track_arc_context,
-    track_context,
-    v2_16_metadata,
-    v2_16_packet,
-    v2_16_profile,
-    v2_16_variant,
-):
-    header_html = mo.Html(f"""
-    <div class="mlsysbook-lab-shell">
-      <div class="mlsysbook-lab-header" style="--mlsysbook-accent: #A51C30;">
-        <div class="mlsysbook-meta">
-          ML SYSTEMS TEXTBOOK &middot; VOLUME II &middot; CHAPTER 16 &middot; LAB 16
-        </div>
-        <h1 style="margin: 8px 0 4px 0; color: #0F172A; font-weight: 800; font-size: 1.85rem; letter-spacing: -0.02em;">
-          Responsible AI: Harm Obligations, Evidence Overhead &amp; Fleet Governance
-        </h1>
-        <p style="margin: 0 0 14px 0; color: #475569; font-size: 0.95rem; line-height: 1.5;">
-          Treat responsible AI as core fleet infrastructure: convert qualitative stakeholder harms into quantifiable obligations,
-          budget evidence overheads across latency and energy, and audit intersectional blind spots under strict accountability gates.
-        </p>
-        <div class="mlsysbook-chip-row" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
-          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
-            <strong>Track:</strong> {v2_16_profile.label}
-          </span>
-          <span class="mlsysbook-chip" style="background: #F1F5F9; color: #334155;">
-            <strong>Stakeholder:</strong> {v2_16_packet['stakeholder']}
-          </span>
-          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
-            <strong>Hardware:</strong> {v2_16_variant.hardware_ref}
-          </span>
-          <span class="mlsysbook-chip" style="background: #F8FAFC; color: #475569;">
-            <strong>Model:</strong> {v2_16_variant.model_ref}
-          </span>
-          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
-            <strong>Primary Metric:</strong> Parity Gap &le; {v2_16_packet['target_gap_pp']:.1f} pp
-          </span>
-          <span class="mlsysbook-chip" style="background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5;">
-            <strong>Guardrail:</strong> Audit Confidence &ge; {v2_16_packet['min_audit_confidence_pct']:.0f}%
-          </span>
-        </div>
-      </div>
-
-      <div class="mlsysbook-panel" style="margin-bottom: 20px;">
-        <h3 style="margin: 0 0 8px 0; color: #0F172A; font-size: 1.15rem;">
-          System Scenario: {v2_16_profile.label} Responsible Fleet Governance
-        </h3>
-        <p style="margin: 0 0 12px 0; font-size: 0.92rem; color: #334155; line-height: 1.55;">
-          {v2_16_variant.workload_summary} Responsible AI is not an abstract policy checklist; it is an operating system invariant.
-          Every deployment risk must have an empirical measurement, a bounded evidence budget, a discovery path for intersectional blind spots,
-          and an explicit human owner with an operational escalation protocol.
-        </p>
-        <div style="background: #F8FAFC; border-left: 4px solid #006395; padding: 12px 16px; border-radius: 4px; font-size: 0.9rem; color: #1E293B;">
-          <strong>The Architectural Invariants of Responsible ML Systems:</strong>
-          <ul class="mlsysbook-list" style="margin: 8px 0 4px 0;">
-            <li><strong>The Obligation Transformation Invariant:</strong> Ethical principles become system guarantees only when transformed into quantifiable obligations: Harm &rarr; Threshold<sub>gap</sub> &and; Audit<sub>frequency</sub> &and; Owner.</li>
-            <li><strong>The Responsible Evidence Overhead Law:</strong> Governance exacts measurable taxes: explanations, telemetry monitoring, privacy noise, and human triage consume latency (&Delta;<i>T</i>), compute energy (&Delta;<i>E</i>), and budget (&Delta;<i>$</i>).</li>
-            <li><strong>The Audit Visibility &amp; Blind Spot Law:</strong> What cannot be sampled or labeled cannot be audited. Blind spots grow as intersectional slice depth increases or privacy data minimization restricts cohort telemetry.</li>
-            <li><strong>The Institutional Accountability Invariant:</strong> Every residual risk must have an explicit human owner and bound escalation protocol: ResidualOwner &ne; &empty;. Anonymous residual risk invalidates launch authorization.</li>
-            <li><strong>Conjunctive Responsible Release Gate:</strong> Launch is authorized only when technical, evidence, audit, and organizational gates pass simultaneously: Launchable = Gap<sub>ok</sub> &and; Overhead<sub>ok</sub> &and; Confidence<sub>ok</sub> &and; Owner<sub>ok</sub> &and; (Selected &ne; Rejected).</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-    """)
-
-    objectives_html = mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <ul class="mlsysbook-list" style="margin: 0; padding-left: 1.25rem; font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.6;">
-                <li><strong>Convert stakeholder harm into measurable obligations:</strong> map failure consequences into parity gap thresholds and residual damage units for {v2_16_profile.label}.</li>
-                <li><strong>Budget responsible evidence overheads:</strong> balance monitoring intensity, explanation latency, privacy preservation, and human review capacity against system SLOs.</li>
-                <li><strong>Discover audit blind spots:</strong> quantify audit confidence across intersectional cohorts and compute unmonitored residual failure units.</li>
-                <li><strong>Enforce conjunctive release gates:</strong> evaluate candidate policies under hard operational constraints while rejecting unviable alternatives.</li>
-                <li><strong>Author an authorized fleet governance memorandum:</strong> sign off on policy release, assign a named residual owner, and define downstream implications for V2-17 synthesis.</li>
-            </ul>
-        </div>
-        <div style="display: flex; gap: 24px; padding-top: 12px; border-top: 1px solid {COLORS['Border']}; font-size: 0.82rem; color: {COLORS['TextMuted']};">
-            <div>
-                <strong>PREREQUISITES:</strong> Fairness metrics &middot; Differential privacy &middot; Explainability methods &middot; Audit sampling &middot; SLA envelopes
-            </div>
-            <div style="margin-left: auto;">
-                <strong>DURATION:</strong> ~55 min <span style="color: {COLORS['TextSec']};">(A: 13 &middot; B: 14 &middot; C: 14 &middot; D: 14 min)</span>
-            </div>
-        </div>
-        <div style="margin-top: 14px; padding: 10px 14px; background: {COLORS['BlueLL']}; border-left: 3px solid {COLORS['BlueLine']}; border-radius: 0 6px 6px 0; font-size: 0.85rem; color: {COLORS['Text']};">
-            <strong>CORE QUESTION:</strong> <em>&ldquo;How can a machine learning system turn ethical obligations into verifiable, budgeted engineering constraints?&rdquo;</em>
-        </div>
-    </div>
-    """)
-
-    reading_html = mo.Html(f"""
-    <div style="border: 1px solid {COLORS['Border']}; background: #FAFAFA; border-radius: 8px; padding: 14px 18px; margin-bottom: 20px;">
-      <div style="font-size: 0.85rem; font-weight: 700; color: #1E293B; margin-bottom: 6px;">Recommended Reading</div>
-      <p style="font-size: 0.82rem; color: #475569; margin: 0 0 8px 0;">
-        Complete these foundational readings before beginning this lab:
-      </p>
-      <ul class="mlsysbook-list" style="margin: 0; padding-left: 1.25rem; font-size: 0.82rem; color: #334155; line-height: 1.5;">
-        <li><strong>Fairness &amp; Impossibility Theorems:</strong> mathematical trade-offs between demographic parity, equalized odds, and calibration.</li>
-        <li><strong>Evidence Overhead in AI Systems:</strong> latency and computational cost of feature attribution (SHAP, IG) and continuous canary monitoring.</li>
-        <li><strong>Differential Privacy &amp; Data Minimization:</strong> privacy epsilon-delta bounds, gradient clipping, and telemetry gaps in on-device fleets.</li>
-        <li><strong>Sociotechnical Accountability &amp; Human-in-the-Loop:</strong> escalation time bounds, triage hierarchies, and institutional governance structures.</li>
-      </ul>
-    </div>
-    """)
-
-    mo.vstack(
-        [
-            LAB_CSS,
-            ACADEMIC_LAB_CSS,
-            header_html,
-            objectives_html,
-            reading_html,
-            track_context(v2_16_profile),
-            track_arc_context(v2_16_profile, v2_16_metadata.lab_id),
-            source_trace(
-                {
-                    "Chapter anchor": "Volume II Chapter 16, Responsible AI",
-                    "Part framing": "Responsible Fleet Principles: fairness and safety guarantees are coordination constraints before compute runs",
-                    "Track scenario": v2_16_variant.scenario_id,
-                    "Hardware ref": v2_16_variant.hardware_ref,
-                    "Model ref": v2_16_variant.model_ref,
-                    "Notebook-local helpers": "v2_16_track_packet, v2_16_obligation_result, v2_16_overhead_result, v2_16_audit_result, v2_16_policy_result",
-                    "Source policy": v2_16_profile.source_policy,
-                },
-                collapsed=True,
-                summary="Chapter claims plus track/variant metadata feed the responsible fleet memo.",
-            ),
-        ]
+@app.cell
+def _(mo, profile, track_id):
+    _track_key = track_id
+    e_choice = mo.ui.radio(
+        {"Release": "release", "Restrict deployment": "restrict", "Defer pending evidence": "defer"},
+        label="Recorded release choice",
     )
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo, v2_16_first_label, v2_16_packet):
-    v2_16_partA_pred = mo.ui.radio(
-        options={
-            "A fairness metric is enough if it is documented.": "metric_only",
-            "A named stakeholder harm must become a measurable obligation.": "harm_to_obligation",
-            "The owner can be assigned after the first audit.": "owner_later",
-            "A high aggregate score makes stakeholder harm unlikely.": "aggregate_quality",
-        },
-        label=f"Part A prediction: what blocks {v2_16_packet['track_label']} deployment first?",
-    )
-    v2_16_stakeholder = mo.ui.dropdown(
-        options=v2_16_packet["stakeholder_options"],
-        value=v2_16_first_label(v2_16_packet["stakeholder_options"]),
-        label="Affected stakeholder",
-    )
-    v2_16_harm = mo.ui.dropdown(
-        options=v2_16_packet["harm_options"],
-        value=v2_16_first_label(v2_16_packet["harm_options"]),
-        label="Primary harm mode",
-    )
-    v2_16_obligation_threshold = mo.ui.slider(
-        start=max(0.5, v2_16_packet["target_gap_pp"] / 2.0),
-        stop=v2_16_packet["target_gap_pp"] * 4.0,
-        value=v2_16_packet["target_gap_pp"] * 1.4,
-        step=0.5,
-        label="Allowed obligation gap (percentage points)",
-    )
-    v2_16_partA_checkpoint = mo.ui.radio(
-        options={
-            "Bind release to the named stakeholder obligation.": "bind_obligation",
-            "Ship if aggregate quality remains high.": "aggregate_quality",
-            "Defer stakeholder mapping to postlaunch monitoring.": "defer_mapping",
-        },
-        label="Part A checkpoint",
-    )
-    return (
-        v2_16_harm,
-        v2_16_obligation_threshold,
-        v2_16_partA_checkpoint,
-        v2_16_partA_pred,
-        v2_16_stakeholder,
-    )
-
-
-@app.cell(hide_code=True)
-def _(mo, v2_16_packet):
-    v2_16_partB_pred = mo.ui.radio(
-        options={
-            "The strongest governance controls always dominate.": "strongest_wins",
-            "Evidence reduces harm but can violate latency, energy, cost, or delay budgets.": "overhead_binds",
-            "Explanations are free if they run asynchronously.": "explanations_free",
-            "Monitoring creates accountability without review capacity.": "monitoring_only",
-        },
-        label="Part B prediction: which statement is true about responsible evidence?",
-    )
-    v2_16_monitoring = mo.ui.slider(
-        start=0,
-        stop=100,
-        value=int(v2_16_packet["monitoring_default"]),
-        step=5,
-        label="Fairness/accountability monitoring intensity (%)",
-    )
-    v2_16_explanation = mo.ui.slider(
-        start=0,
-        stop=100,
-        value=int(v2_16_packet["explanation_default"]),
-        step=5,
-        label="Explanation coverage (%)",
-    )
-    v2_16_privacy = mo.ui.slider(
-        start=0,
-        stop=100,
-        value=int(v2_16_packet["privacy_default"]),
-        step=5,
-        label="Privacy/data-minimization strictness (%)",
-    )
-    v2_16_human_review = mo.ui.slider(
-        start=0,
-        stop=100,
-        value=int(v2_16_packet["human_review_default"]),
-        step=5,
-        label="Human review or escalation share (%)",
-    )
-    v2_16_partB_checkpoint = mo.ui.radio(
-        options={
-            "Use the strongest feasible evidence package.": "strongest_feasible",
-            "Reduce evidence until all overhead disappears.": "remove_overhead",
-            "Ignore overhead and let governance decide later.": "ignore_overhead",
-        },
-        label="Part B checkpoint",
-    )
-    return (
-        v2_16_explanation,
-        v2_16_human_review,
-        v2_16_monitoring,
-        v2_16_partB_checkpoint,
-        v2_16_partB_pred,
-        v2_16_privacy,
-    )
-
-
-@app.cell(hide_code=True)
-def _(mo, v2_16_packet):
-    v2_16_partC_pred = mo.ui.radio(
-        options={
-            "A dashboard is accountable once it shows a fairness metric.": "dashboard_enough",
-            "Coverage, labels, slice depth, and escalation decide what harm is visible.": "coverage_path",
-            "Intersectional audits are always better regardless of sample size.": "always_intersectional",
-            "Escalation speed matters only after an incident happens.": "escalation_later",
-        },
-        label="Part C prediction: where does the audit blind spot come from?",
-    )
-    v2_16_audit_sample = mo.ui.slider(
-        start=0.5,
-        stop=80.0,
-        value=float(v2_16_packet["audit_sample_default"]),
-        step=0.5,
-        label="Audit sample rate (% of exposed decisions)",
-    )
-    v2_16_label_availability = mo.ui.slider(
-        start=0,
-        stop=100,
-        value=float(v2_16_packet["label_default"]),
-        step=5,
-        label="Ground-truth or appeal label availability (%)",
-    )
-    v2_16_slice_depth = mo.ui.dropdown(
-        options={
-            "Single-axis groups": "single_axis",
-            "Intersectional slices": "intersectional",
-            "Long-tail and stress slices": "long_tail",
-        },
-        value="Intersectional slices",
-        label="Audit slice depth",
-    )
-    v2_16_escalation_hours = mo.ui.slider(
-        start=0.5,
-        stop=max(6.0, v2_16_packet["escalation_limit_hours"] * 4.0),
-        value=float(v2_16_packet["escalation_limit_hours"] * 1.5),
-        step=0.5,
-        label="Escalation path time (hours)",
-    )
-    v2_16_partC_checkpoint = mo.ui.radio(
-        options={
-            "Escalate the named blind spot with a residual owner.": "escalate_blind_spot",
-            "Accept the dashboard because aggregate coverage is high.": "accept_dashboard",
-            "Wait for the next retraining cycle before acting.": "wait_retrain",
-        },
-        label="Part C checkpoint",
-    )
-    return (
-        v2_16_audit_sample,
-        v2_16_escalation_hours,
-        v2_16_label_availability,
-        v2_16_partC_checkpoint,
-        v2_16_partC_pred,
-        v2_16_slice_depth,
-    )
-
-
-@app.cell(hide_code=True)
-def _(mo, v2_16_packet):
-    v2_16_policy_options = {
-        "Monitor-and-patch": "monitor_only",
-        "Guardrail-first responsible release": "guardrail_first",
-        "Maximum mitigation before launch": "max_mitigation",
-        "Hold for redesign": "hold_redesign",
-    }
-    v2_16_partD_pred = mo.ui.radio(
-        options={
-            "The policy with the most mitigation is always responsible.": "max_is_best",
-            "The policy must satisfy technical, audit, governance, and residual-owner gates.": "conjunction",
-            "A model card and dashboard are sufficient for accountability.": "docs_only",
-            "The release board can accept a policy without a rejected alternative.": "no_rejection",
-        },
-        label="Part D prediction: which policy can ship?",
-    )
-    v2_16_selected_policy = mo.ui.dropdown(
-        options=v2_16_policy_options,
-        value="Guardrail-first responsible release",
-        label="Selected responsible AI policy",
-    )
-    v2_16_rejected_policy = mo.ui.dropdown(
-        options=v2_16_policy_options,
-        value="Monitor-and-patch",
+    e_rejected = mo.ui.radio(
+        {"Release": "release", "Restrict deployment": "restrict", "Defer pending evidence": "defer"},
         label="Rejected alternative",
     )
-    v2_16_residual_owner = mo.ui.radio(
-        options=v2_16_packet["residual_owner_options"],
-        label="Residual obligation owner",
+    e_owner = mo.ui.dropdown(
+        {"No named owner": "", "Fleet responsibility lead": "fleet responsibility lead",
+         "Cross-functional owner": "cross-functional safety and product owner"},
+        value="Fleet responsibility lead", label="Residual-risk owner",
     )
-    v2_16_v2_17_implication = mo.ui.dropdown(
-        options={
-            "Treat this policy as a hard guardrail in the fleet synthesis.": "hard_guardrail",
-            "Carry only the metric target into V2-17.": "metric_only",
-            "Reopen deployment architecture if audit blind spots remain.": "reopen_architecture",
-        },
-        value="Treat this policy as a hard guardrail in the fleet synthesis.",
-        label="V2-17 synthesis implication",
+    _remedies = profile["remedies"]
+    e_remedy = mo.ui.dropdown(
+        _remedies,
+        value=next(iter(_remedies.keys())), label="Remedy",
     )
-    v2_16_student_id = mo.ui.text(label="Lead Architect / Engineer ID", placeholder="e.g. MLSYS-ENG-9042", value="")
-    v2_16_memo_note = mo.ui.text_area(
-        label="Responsible AI Architecture Memo & Ethical Disclosure",
-        placeholder="Document your trade-off rationale, binding guardrail, and named residual obligation owner...",
-        rows=3,
+    e_trigger = mo.ui.dropdown(
+        {"Metric exceeds gap": "chosen metric exceeds allowed gap",
+         "Review backlog appears": "review backlog becomes nonzero",
+         "Audit loses class/group": "audit loses one class or subgroup", "No trigger": ""},
+        value="Metric exceeds gap", label="Reevaluation trigger",
     )
-    return (
-        v2_16_memo_note,
-        v2_16_partD_pred,
-        v2_16_rejected_policy,
-        v2_16_residual_owner,
-        v2_16_selected_policy,
-        v2_16_student_id,
-        v2_16_v2_17_implication,
+    residual_risk = mo.ui.radio(
+        {"Rare cohorts remain sparse": "rare cohorts remain sparse",
+         "Labels arrive after harm": "labels arrive after harm can occur",
+         "Review demand outgrows staffing": "review demand can exceed staffing"},
+        label="Remaining limitation",
     )
+    rationale = mo.ui.text_area(
+        label="Decision rationale",
+        placeholder="Use saved quantities to justify the choice and reject one alternative.",
+    )
+    return e_choice, e_owner, e_rejected, e_remedy, e_trigger, rationale, residual_risk
 
 
 @app.cell
 def _(
-    v2_16_audit_result,
-    v2_16_audit_sample,
-    v2_16_escalation_hours,
-    v2_16_explanation,
-    v2_16_harm,
-    v2_16_human_review,
-    v2_16_label_availability,
-    v2_16_monitoring,
-    v2_16_obligation_result,
-    v2_16_obligation_threshold,
-    v2_16_overhead_result,
-    v2_16_packet,
-    v2_16_policy_result,
-    v2_16_privacy,
-    v2_16_rejected_policy,
-    v2_16_residual_owner,
-    v2_16_selected_policy,
-    v2_16_slice_depth,
-    v2_16_stakeholder,
+    PRIVACY_PROFILES, Q_, a_allowed_gap, a_criterion, a_threshold,
+    assess_fairness, b_explanation_share, b_review_share, c_label_delay,
+    c_sampling, check_privacy_profile, d_case_review, d_profile,
+    evaluate_capacity, mechanical_gate, profile, simulate_audit_evidence,
+    track_id,
 ):
-    v2_16_obligation = v2_16_obligation_result(
-        v2_16_packet,
-        v2_16_stakeholder.value,
-        v2_16_harm.value,
-        v2_16_obligation_threshold.value,
+    a_base_inputs = dict(track_id=track_id, threshold=0.50, criterion=a_criterion.value, allowed_gap=a_allowed_gap.value)
+    a_result_inputs = {**a_base_inputs, "threshold": a_threshold.value}
+    a_base, a_result = assess_fairness(**a_base_inputs), assess_fairness(**a_result_inputs)
+
+    _capacity_common = dict(
+        track_id=track_id, horizon=Q_(8, "hour"),
+        explanation_workers=profile["explanation_workers"], reviewers=profile["reviewers"],
+        explanation_service_time=profile["explanation_service_time"],
+        review_service_time=profile["review_service_time"], target_utilization=0.85,
     )
-    v2_16_overhead = v2_16_overhead_result(
-        v2_16_packet,
-        v2_16_obligation,
-        v2_16_monitoring.value,
-        v2_16_explanation.value,
-        v2_16_privacy.value,
-        v2_16_human_review.value,
+    b_base_inputs = {**_capacity_common, "explanation_share": 0.01, "review_share": 0.001}
+    b_result_inputs = {**_capacity_common, "explanation_share": b_explanation_share.value,
+                       "review_share": b_review_share.value}
+    b_base, b_result = evaluate_capacity(**b_base_inputs), evaluate_capacity(**b_result_inputs)
+
+    _audit_common = dict(track_id=track_id, threshold=a_threshold.value,
+                         criterion=a_criterion.value, allowed_gap=a_allowed_gap.value)
+    c_base_inputs = {**_audit_common, "sampling_fraction": 1.0, "label_delay": Q_(1, "hour")}
+    c_result_inputs = {**_audit_common, "sampling_fraction": c_sampling.value,
+                       "label_delay": Q_(c_label_delay.value, "hour")}
+    c_base = simulate_audit_evidence(**c_base_inputs)
+    c_result = simulate_audit_evidence(**c_result_inputs)
+
+    _privacy_common = dict(track_id=track_id, require_case_review=d_case_review.value,
+                           max_retention=Q_(30, "day"), max_deletion_window=Q_(7, "day"))
+    d_base_inputs = {"profile_key": "aggregate_counts", **_privacy_common}
+    d_result_inputs = {"profile_key": d_profile.value, **_privacy_common}
+    d_base, d_result = check_privacy_profile(**d_base_inputs), check_privacy_profile(**d_result_inputs)
+    d_alternatives = {key: check_privacy_profile(profile_key=key, **_privacy_common)
+                      for key in PRIVACY_PROFILES}
+    e_gate = mechanical_gate(a_result, b_result, c_result, d_result)
+    return (
+        a_base, a_base_inputs, a_result, a_result_inputs, b_base,
+        b_base_inputs, b_result, b_result_inputs, c_base, c_base_inputs,
+        c_result, c_result_inputs, d_alternatives, d_base, d_base_inputs,
+        d_result, d_result_inputs, e_gate,
     )
-    v2_16_audit = v2_16_audit_result(
-        v2_16_packet,
-        v2_16_obligation,
-        v2_16_overhead,
-        v2_16_audit_sample.value,
-        v2_16_label_availability.value,
-        v2_16_slice_depth.value,
-        v2_16_escalation_hours.value,
-    )
-    v2_16_policy = v2_16_policy_result(
-        v2_16_packet,
-        v2_16_obligation,
-        v2_16_overhead,
-        v2_16_audit,
-        v2_16_selected_policy.value,
-        v2_16_rejected_policy.value,
-        v2_16_residual_owner.value,
-    )
-    return v2_16_audit, v2_16_obligation, v2_16_overhead, v2_16_policy
 
 
-@app.cell(hide_code=True)
+@app.cell
+def _():
+    def quantity_json(value, unit):
+        converted = value.to(unit)
+        return {"magnitude": float(converted.magnitude), "unit": unit}
+
+    def plain_inputs(inputs):
+        return {
+            key: ({"magnitude": float(value.magnitude), "unit": str(value.units)}
+                  if hasattr(value, "to") else value)
+            for key, value in inputs.items()
+        }
+
+    def fairness_json(result, inputs):
+        return {
+            "inputs": plain_inputs(inputs), "criterion_gap": result.criterion_gap,
+            "criterion_passes": result.criterion_passes,
+            "ground_truth_positive_cases": result.ground_truth_positive_cases,
+            "predicted_positive_cases": result.predicted_positive_cases,
+            "false_negative_cases": result.false_negative_cases,
+            "subgroups": [{
+                "subgroup": item.subgroup,
+                "counts": {"tp": item.counts.true_positive, "fp": item.counts.false_positive,
+                           "tn": item.counts.true_negative, "fn": item.counts.false_negative},
+                "selection_rate": item.selection_rate, "true_positive_rate": item.true_positive_rate,
+                "false_positive_rate": item.false_positive_rate,
+                "positive_predictive_value": item.positive_predictive_value,
+            } for item in result.subgroup_metrics],
+        }
+
+    def capacity_json(result, inputs):
+        return {
+            "inputs": plain_inputs(inputs),
+            "explanation_arrivals": quantity_json(result.explanation_arrivals, "count/hour"),
+            "explanation_capacity": quantity_json(result.explanation_capacity, "count/hour"),
+            "explanation_backlog": quantity_json(result.explanation_backlog, "count"),
+            "review_arrivals": quantity_json(result.review_arrivals, "count/hour"),
+            "review_capacity": quantity_json(result.review_capacity, "count/hour"),
+            "review_backlog": quantity_json(result.review_backlog, "count"),
+            "explanation_utilization": result.explanation_utilization,
+            "review_utilization": result.review_utilization, "feasible": result.feasible,
+        }
+
+    def audit_json(result, inputs):
+        _observed = result.observed_assessment
+        return {
+            "inputs": plain_inputs(inputs), "eligible_cases": result.eligible_cases,
+            "sampled_cases": result.sampled_cases, "sampled_subgroups": list(result.sampled_subgroups),
+            "observed_gap": None if _observed is None else _observed.criterion_gap,
+            "population_gap": result.population_assessment.criterion_gap,
+            "evidence_complete": result.evidence_complete,
+            "limitations": list(result.limitations),
+            "label_delay": quantity_json(result.label_delay, "hour"),
+        }
+
+    def privacy_json(result, inputs):
+        return {
+            "inputs": plain_inputs(inputs), "profile": result.profile.key,
+            "scope": result.scope,
+            "retained_fields": list(result.profile.retained_fields),
+            "raw_content_retained": result.profile.raw_content_retained,
+            "stable_subject_id_retained": result.profile.stable_subject_id_retained,
+            "retention": quantity_json(result.profile.retention, "day"),
+            "deletion_window": quantity_json(result.profile.deletion_window, "day"),
+            "supports_subgroup_audit": result.supports_subgroup_audit,
+            "supports_case_review": result.supports_case_review,
+            "passes_requirements": result.passes_requirements,
+            "violations": list(result.violations),
+        }
+    return audit_json, capacity_json, fairness_json, plain_inputs, privacy_json, quantity_json
+
+
+@app.cell
 def _(
-    COLORS,
-    MathPeek,
-    big_takeaways,
-    build_lab_report,
-    gated_hypothesis_card,
-    instrumentation_console,
-    ledger,
-    mo,
-    report_export_panel,
-    source_trace,
-    v2_16_audit,
-    v2_16_audit_sample,
-    v2_16_bar_figure,
-    v2_16_chapter,
-    v2_16_escalation_hours,
-    v2_16_explanation,
-    v2_16_guardrail_callout,
-    v2_16_harm,
-    v2_16_html_table,
-    v2_16_human_review,
-    v2_16_label_availability,
-    v2_16_memo_note,
-    v2_16_metadata,
-    v2_16_metric_card,
-    v2_16_monitoring,
-    v2_16_obligation,
-    v2_16_obligation_threshold,
-    v2_16_overhead,
-    v2_16_packet,
-    v2_16_partA_checkpoint,
-    v2_16_partA_pred,
-    v2_16_partB_checkpoint,
-    v2_16_partB_pred,
-    v2_16_partC_checkpoint,
-    v2_16_partC_pred,
-    v2_16_partD_pred,
-    v2_16_part_banner,
-    v2_16_policy,
-    v2_16_privacy,
-    v2_16_profile,
-    v2_16_rejected_policy,
-    v2_16_residual_owner,
-    v2_16_selected_policy,
-    v2_16_slice_depth,
-    v2_16_stakeholder,
-    v2_16_student_id,
-    v2_16_v2_17_implication,
-    v2_16_variant,
+    a_base, a_base_inputs, a_prediction, a_result, a_result_inputs,
+    audit_json, b_base, b_base_inputs, b_prediction, b_result,
+    b_result_inputs, c_base, c_base_inputs, c_prediction, c_result,
+    c_result_inputs, capacity_json, capture_evidence, d_alternatives,
+    d_base, d_base_inputs, d_prediction, d_result, d_result_inputs,
+    e_choice, e_gate, e_owner, e_prediction, e_rejected, e_remedy,
+    e_trigger, fairness_json, mechanical_gate, mo, plain_inputs,
+    privacy_json, record_release_decision, set_evidence, track_id,
 ):
-    # MLSysBook reference tiers: Hardware.Tiny.CortexM55, Hardware.Mobile.AppleM4, Hardware.Edge.JetsonOrin, Hardware.Cloud.H100
+    def store(part, capture):
+        set_evidence(lambda current: {**current, part: capture})
 
-    def build_part_a():
-        _items = [
-            v2_16_part_banner(
-                mo,
-                COLORS["BlueLine"],
-                f"Part A - Harm Becomes an Obligation - {v2_16_packet['stakeholder']}",
-                f"Name the stakeholder harm before choosing a metric for {v2_16_packet['mission']}.",
-            ),
-            mo.md(f"""
-    ## Part A: Harm Becomes a Measurable Obligation
+    a_upstream = {"baseline": plain_inputs(a_base_inputs), "result": plain_inputs(a_result_inputs)}
+    b_upstream = {"baseline": plain_inputs(b_base_inputs), "result": plain_inputs(b_result_inputs)}
+    c_upstream = {"baseline": plain_inputs(c_base_inputs), "result": plain_inputs(c_result_inputs)}
+    d_upstream = {"baseline": plain_inputs(d_base_inputs), "result": plain_inputs(d_result_inputs)}
+    e_upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream, "D": d_upstream,
+                  "choice": e_choice.value, "rejected": e_rejected.value, "owner": e_owner.value,
+                  "remedy": e_remedy.value, "trigger": e_trigger.value}
 
-    **Scenario.** You are reviewing `{v2_16_packet["track_label"]}` deployment for
-    **{v2_16_packet["stakeholder"]}**. The release cannot rely on aggregate quality;
-    it must name who can be harmed, what amount is unacceptable, and what evidence
-    will prove the obligation is being met.
-
-    **Concept.** Responsible AI starts by converting stakeholder harm into a
-    measurable deployment gate. A fairness metric with no stakeholder, threshold, or
-    owner is only a label.
-            """),
-            gated_hypothesis_card(
-                v2_16_partA_pred,
-                gate_label="Hypothesis Gate A",
-                title="1. Formulate Stakeholder Harm Obligation",
-                subtitle=f"Predict how responsible harm metrics bind the {v2_16_packet['track_label']} track before running the evaluation.",
-            ),
-        ]
-        if v2_16_partA_pred.value is None:
-            return mo.vstack(_items)
-
-        _fig_a = v2_16_bar_figure(
-            "Stakeholder Harm Amounts",
-            {
-                "Exposed decisions/day": v2_16_obligation["exposure_units"],
-                "Residual affected/day": v2_16_obligation["affected_units_per_day"],
-            },
-            limit=v2_16_packet["residual_cap_units"],
-            ytitle="Decisions or affected units per day",
+    def _capture(part, prediction, inputs, baseline, result, upstream, model_key, alternatives=(), decision=None):
+        return capture_evidence(
+            track=track_id, part=part, prediction=prediction, inputs=plain_inputs(inputs),
+            baseline=baseline, result=result, alternatives=alternatives,
+            decision=decision, upstream_inputs=upstream, model_key=model_key,
         )
-        _table_a = v2_16_html_table(
-            ["Quantity", "Value"],
-            [
-                ["Affected stakeholder", v2_16_obligation["stakeholder_label"]],
-                ["Primary harm", v2_16_obligation["harm_label"]],
-                ["Fleet events/day", f"{v2_16_packet['events_per_day']:,}"],
-                ["Exposure share", f"{v2_16_obligation['exposure_pct']:.1f}%"],
-                ["Observed gap", f"{v2_16_obligation['observed_gap_pp']:.1f} pp"],
-                ["Allowed obligation gap", f"{v2_16_obligation['threshold_pp']:.1f} pp"],
-                ["Residual affected units/day", f"{v2_16_obligation['affected_units_per_day']:,.1f}"],
-            ],
-        )
-        _items.extend([
-            instrumentation_console(
-                mo.hstack([v2_16_stakeholder, v2_16_harm, v2_16_obligation_threshold], widths="equal"),
-                title="Stakeholder & Harm Metric Controls",
-                subtitle="Select affected stakeholder, harm mode, and allowed obligation gap threshold.",
-            ),
-            mo.as_html(_fig_a),
-            mo.Html(f"""
-            <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-              {v2_16_metric_card("Stakeholder", v2_16_obligation["stakeholder_label"], f"{v2_16_obligation['exposure_pct']:.0f}% exposed", COLORS["BlueLine"])}
-              {v2_16_metric_card("Harm Mode", v2_16_obligation["harm_label"], "track-specific failure consequence", COLORS["OrangeLine"])}
-              {v2_16_metric_card("Allowed Gap", f"{v2_16_obligation['threshold_pp']:.1f} pp", f"target {v2_16_packet['target_gap_pp']:.1f} pp", COLORS["GreenLine"])}
-              {v2_16_metric_card("Binding Amount", v2_16_obligation["binding_amount"], f"{v2_16_obligation['affected_units_per_day']:,.0f}/day residual", COLORS["RedLine"], True)}
-            </div>
-            """),
-            mo.Html(_table_a),
-            v2_16_guardrail_callout(
-                mo,
-                v2_16_obligation["violations"],
-                "The stakeholder harm has a measurable obligation and can flow into the evidence budget.",
-                "Obligation boundary hit",
-            ),
-            MathPeek(
-                title="Math Peek / Source Model - Stakeholder Harm Amount",
-                math=r"\text{affected\_units} = \text{events\_per\_day} \times \text{exposure\_share} \times \max(0, \text{observed\_gap} - \text{allowed\_gap}) \times \text{severity}",
-                explanation=f"For this track, events_per_day = {v2_16_packet['events_per_day']:,} and target gap is {v2_16_packet['target_gap_pp']:.1f} pp. This grounds fairness and accountability into verifiable system properties rather than abstract guidelines.",
-            ),
-            mo.Html(f"""
-            <div class="mlsysbook-panel" style="border-left: 4px solid {COLORS['BlueLine']}; margin-top: 16px;">
-                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT A: HARM FORMALIZATION</div>
-                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Stakeholder Metric Binding</h4>
-                {v2_16_partA_checkpoint}
-            </div>
-            """),
-        ])
-        return mo.vstack(_items)
 
-    def build_part_b():
-        _items = [
-            v2_16_part_banner(
-                mo,
-                COLORS["OrangeLine"],
-                f"Part B - Evidence Consumes Capacity - {v2_16_packet['track_label']}",
-                "The responsible controls that create evidence also consume deployment budgets.",
-            ),
-            mo.md("""
-    ## Part B: Responsible Evidence Consumes Capacity
-
-    **Scenario.** The Part A obligation now needs monitoring, explanations, privacy
-    controls, and review capacity. The release board wants the strongest evidence
-    package that still fits the track's technical and governance guardrails.
-
-    **Concept.** Responsible AI overhead is an amount system: fairness monitoring,
-    explanation, privacy, and human review reduce risk while adding latency, cost,
-    energy, and release delay.
-            """),
-            gated_hypothesis_card(
-                v2_16_partB_pred,
-                gate_label="Hypothesis Gate B",
-                title="2. Predict Responsible Evidence Overhead Limits",
-                subtitle=f"Determine how monitoring, explanations, and review impact latency and capacity for {v2_16_packet['track_label']}.",
-            ),
-        ]
-        if v2_16_partB_pred.value is None:
-            return mo.vstack(_items)
-
-        _fig_b = v2_16_bar_figure(
-            "Responsible AI Overhead",
-            {
-                "Latency ms": v2_16_overhead["latency_ms"],
-                "Risk reduction %": v2_16_overhead["risk_reduction_pct"],
-                "Release delay days": v2_16_overhead["release_delay_days"],
-            },
-            limit=v2_16_packet["latency_slo_ms"],
-            ytitle="Mixed units shown in table below",
-        )
-        _table_b = v2_16_html_table(
-            ["Control or result", "Value"],
-            [
-                ["Monitoring intensity", f"{v2_16_overhead['monitoring_intensity_pct']:.0f}%"],
-                ["Explanation coverage", f"{v2_16_overhead['explanation_coverage_pct']:.0f}%"],
-                ["Privacy strictness", f"{v2_16_overhead['privacy_strictness_pct']:.0f}%"],
-                ["Human review share", f"{v2_16_overhead['human_review_share_pct']:.0f}%"],
-                ["Risk reduction", f"{v2_16_overhead['risk_reduction_pct']:.1f}%"],
-                ["Quality delta", f"{v2_16_overhead['quality_delta_pp']:+.2f} pp"],
-                ["Release delay", f"{v2_16_overhead['release_delay_days']:.1f} days"],
-                ["Feasible", "yes" if v2_16_overhead["feasible"] else "no"],
-            ],
-        )
-        _items.extend([
-            instrumentation_console(
-                mo.hstack([v2_16_monitoring, v2_16_explanation, v2_16_privacy, v2_16_human_review], widths="equal"),
-                title="Evidence Control Parameters",
-                subtitle="Tune monitoring frequency, explanation depth, differential privacy epsilon, and human review routing.",
-            ),
-            mo.as_html(_fig_b),
-            mo.Html(f"""
-            <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-              {v2_16_metric_card("Latency", f"{v2_16_overhead['latency_ms']:.1f} ms", f"SLO {v2_16_packet['latency_slo_ms']:.1f} ms", COLORS["BlueLine"], v2_16_overhead["latency_ms"] > v2_16_packet["latency_slo_ms"])}
-              {v2_16_metric_card("Cost Factor", f"{v2_16_overhead['cost_factor']:.2f}x", f"limit {v2_16_packet['cost_factor_limit']:.2f}x", COLORS["OrangeLine"], v2_16_overhead["cost_factor"] > v2_16_packet["cost_factor_limit"])}
-              {v2_16_metric_card("Energy Factor", f"{v2_16_overhead['energy_factor']:.2f}x", f"limit {v2_16_packet['energy_factor_limit']:.2f}x", COLORS["GreenLine"], v2_16_overhead["energy_factor"] > v2_16_packet["energy_factor_limit"])}
-              {v2_16_metric_card("Residual Gap", f"{v2_16_overhead['residual_gap_pp']:.1f} pp", f"target {v2_16_packet['target_gap_pp']:.1f} pp", COLORS["RedLine"], v2_16_overhead["residual_gap_pp"] > v2_16_packet["target_gap_pp"])}
-            </div>
-            """),
-            mo.Html(_table_b),
-            v2_16_guardrail_callout(
-                mo,
-                v2_16_overhead["violations"],
-                "The evidence package fits the track's latency, cost, energy, delay, and residual-gap guardrails.",
-                "Evidence overhead boundary hit",
-            ),
-            MathPeek(
-                title="Math Peek / Source Model - Responsible Evidence Overhead",
-                math=r"\text{latency} = \text{base\_latency} + \Delta\text{latency}_{\text{monitoring}} + \Delta\text{latency}_{\text{explanation}} + \Delta\text{latency}_{\text{privacy}} + \Delta\text{latency}_{\text{review}}",
-                explanation=f"Track '{v2_16_packet['track_label']}' imposes an SLO limit of {v2_16_packet['latency_slo_ms']:.1f} ms and {v2_16_packet['release_delay_limit_days']:.1f} days max release delay. Adding responsible guardrails must not break system availability.",
-            ),
-            mo.Html(f"""
-            <div class="mlsysbook-panel" style="border-left: 4px solid {COLORS['OrangeLine']}; margin-top: 16px;">
-                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT B: CAPACITY & RESOURCE BUDGETING</div>
-                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Evidence Overhead Feasibility</h4>
-                {v2_16_partB_checkpoint}
-            </div>
-            """),
-        ])
-        return mo.vstack(_items)
-
-    def build_part_c():
-        _items = [
-            v2_16_part_banner(
-                mo,
-                COLORS["GreenLine"],
-                f"Part C - Audit Coverage Determines Blind Spots - {v2_16_packet['track_label']}",
-                "A dashboard is not accountability unless it covers the harm and triggers an owned response.",
-            ),
-            mo.md("""
-    ## Part C: Audit Coverage Determines Blind Spots
-
-    **Scenario.** The governance team asks whether the audit can actually see the
-    harm named in Part A. You choose how much of the fleet is sampled, how many
-    labels arrive, how deep the cohort slicing goes, and how quickly escalation
-    acts.
-
-    **Concept.** Audit coverage is a measurable resource. Sparse labels,
-    intersectional slices, and slow escalation turn residual percentages into
-    unseen affected units.
-            """),
-            gated_hypothesis_card(
-                v2_16_partC_pred,
-                gate_label="Hypothesis Gate C",
-                title="3. Audit Coverage & Observability Hypothesis",
-                subtitle=f"Predict how sampling rate and cohort slicing affect blind residual harm for {v2_16_packet['track_label']}.",
-            ),
-        ]
-        if v2_16_partC_pred.value is None:
-            return mo.vstack(_items)
-
-        _fig_c = v2_16_bar_figure(
-            "Audit Coverage And Blind Units",
-            {
-                "Covered units/day": v2_16_audit["covered_units_per_day"],
-                "Blind residual/day": v2_16_audit["blind_units_per_day"],
-            },
-            limit=v2_16_packet["residual_cap_units"],
-            ytitle="Units per day",
-        )
-        _table_c = v2_16_html_table(
-            ["Quantity", "Value"],
-            [
-                ["Audit sample rate", f"{v2_16_audit['sample_rate_pct']:.1f}%"],
-                ["Label availability", f"{v2_16_audit['label_availability_pct']:.1f}%"],
-                ["Slice depth", v2_16_audit["slice_label"]],
-                ["Observable share", f"{v2_16_audit['observable_share_pct']:.3f}%"],
-                ["Covered units/day", f"{v2_16_audit['covered_units_per_day']:,.1f}"],
-                ["Blind residual harm/day", f"{v2_16_audit['blind_units_per_day']:,.1f}"],
-                ["Escalation score", f"{v2_16_audit['escalation_score_pct']:.1f}%"],
-                ["Audit status", "pass" if v2_16_audit["audit_ok"] else "fail"],
-            ],
-        )
-        _items.extend([
-            instrumentation_console(
-                mo.hstack([v2_16_audit_sample, v2_16_label_availability, v2_16_slice_depth, v2_16_escalation_hours], widths="equal"),
-                title="Audit & Observability Controls",
-                subtitle="Configure fleet sampling, ground-truth label collection rate, intersectional cohort slice depth, and response SLA.",
-            ),
-            mo.as_html(_fig_c),
-            mo.Html(f"""
-            <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-              {v2_16_metric_card("Observable Share", f"{v2_16_audit['observable_share_pct']:.2f}%", "sample x labels x slice burden", COLORS["BlueLine"])}
-              {v2_16_metric_card("Audit Confidence", f"{v2_16_audit['audit_confidence_pct']:.1f}%", f"floor {v2_16_packet['min_audit_confidence_pct']:.1f}%", COLORS["GreenLine"], v2_16_audit["audit_confidence_pct"] < v2_16_packet["min_audit_confidence_pct"])}
-              {v2_16_metric_card("Blind Spot", v2_16_audit["blind_spot"], v2_16_audit["slice_label"], COLORS["OrangeLine"])}
-              {v2_16_metric_card("Escalation", f"{v2_16_audit['escalation_hours']:.1f} h", f"limit {v2_16_packet['escalation_limit_hours']:.1f} h", COLORS["RedLine"], v2_16_audit["escalation_hours"] > v2_16_packet["escalation_limit_hours"])}
-            </div>
-            """),
-            mo.Html(_table_c),
-            v2_16_guardrail_callout(
-                mo,
-                v2_16_audit["violations"],
-                "Audit coverage, blind units, and escalation time are within the track's governance envelope.",
-                "Audit coverage boundary hit",
-            ),
-            MathPeek(
-                title="Math Peek / Source Model - Coverage and Blind Spots",
-                math=r"\text{observable\_share} = \text{sample\_rate} \times \text{label\_availability} \times \frac{3}{\text{slice\_factor}},\quad \text{blind\_units} = \text{exposed\_units} \times \text{residual\_gap} \times (1 - \text{observable\_share})",
-                explanation="Dashboards fail to provide true accountability if cohort slices are unobserved or if human escalation paths exceed SLA limits.",
-            ),
-            mo.Html(f"""
-            <div class="mlsysbook-panel" style="border-left: 4px solid {COLORS['GreenLine']}; margin-top: 16px;">
-                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">CHECKPOINT C: AUDIT VISIBILITY & GOVERNANCE</div>
-                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Observability & Escalation Guarantee</h4>
-                {v2_16_partC_checkpoint}
-            </div>
-            """),
-        ])
-        return mo.vstack(_items)
-
-    def build_part_d():
-        _items = [
-            v2_16_part_banner(
-                mo,
-                COLORS["RedLine"],
-                f"Part D - Policy Is a Guardrailed Design Decision - {v2_16_packet['track_label']}",
-                "The release board needs one policy, one rejected alternative, and a residual owner.",
-            ),
-            mo.md("""
-    ## Part D: Choose a Responsible AI Policy
-
-    **Scenario.** A release board asks for a policy that satisfies technical
-    guardrails and governance guardrails at the same time. The memo must also state
-    which alternative you rejected and who owns residual obligation.
-
-    **Concept.** Responsible policy is a conjunction, not a single score. It must
-    pass technical fit, audit coverage, governance readiness, and residual-owner
-    assignment.
-            """),
-            gated_hypothesis_card(
-                v2_16_partD_pred,
-                gate_label="Hypothesis Gate D",
-                title="4. Responsible Policy Conjunction Hypothesis",
-                subtitle=f"Predict which deployment policy passes simultaneous technical and ethical gates for {v2_16_packet['track_label']}.",
-            ),
-        ]
-        if v2_16_partD_pred.value is None:
-            return mo.vstack(_items)
-
-        _fig_d = v2_16_bar_figure(
-            "Selected Policy Guardrails",
-            {
-                "Utility %": v2_16_policy["utility_pct"],
-                "Audit confidence %": v2_16_policy["audit_confidence_pct"],
-                "Residual gap pp": v2_16_policy["residual_gap_pp"],
-                "Cost factor x10": v2_16_policy["technical_cost_factor"] * 10.0,
-            },
-            limit=v2_16_packet["min_audit_confidence_pct"],
-            ytitle="Score or scaled amount",
-        )
-        _table_d = v2_16_html_table(
-            ["Policy", "Utility", "Harm relief", "Cost multiplier", "Audit bonus", "Governance profile"],
-            v2_16_policy["policy_table"],
-        )
-        _items.extend([
-            instrumentation_console(
-                mo.hstack([v2_16_selected_policy, v2_16_rejected_policy, v2_16_residual_owner], widths="equal"),
-                title="Policy Selection & Governance Assignment",
-                subtitle="Select release policy, specify rejected alternative, and assign accountable residual owner.",
-            ),
-            mo.as_html(_fig_d),
-            mo.Html(f"""
-            <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-              {v2_16_metric_card("Selected", v2_16_policy["selected_policy_label"], v2_16_policy["governance_summary"], COLORS["BlueLine"])}
-              {v2_16_metric_card("Rejected", v2_16_policy["rejected_policy_label"], "must be different and defensible", COLORS["OrangeLine"], v2_16_policy["selected_policy"] == v2_16_policy["rejected_policy"])}
-              {v2_16_metric_card("Residual Gap", f"{v2_16_policy['residual_gap_pp']:.1f} pp", f"target {v2_16_packet['target_gap_pp']:.1f} pp", COLORS["GreenLine"], v2_16_policy["residual_gap_pp"] > v2_16_packet["target_gap_pp"])}
-              {v2_16_metric_card("Policy Gate", "PASS" if v2_16_policy["policy_pass"] else "FAIL", "; ".join(v2_16_policy["violations"]) or "all guardrails pass", COLORS["RedLine"], True)}
-            </div>
-            """),
-            mo.Html(_table_d),
-            v2_16_guardrail_callout(
-                mo,
-                v2_16_policy["violations"],
-                "The selected policy passes the technical, audit, governance, and residual-owner gates.",
-                "Policy gate failed",
-            ),
-            MathPeek(
-                title="Math Peek / Source Model - Policy Conjunction",
-                math=r"\text{policy\_pass} = \text{technical\_ok} \land \text{audit\_ok} \land \text{governance\_ok} \land (\text{residual\_owner} \ne \text{None})",
-                explanation="No single metric or document makes a fleet accountable. Responsible deployment requires conjunctive verification across technical, observational, and organizational axes.",
-            ),
-        ])
-        return mo.vstack(_items)
-
-    _required_values = (
-        v2_16_partA_pred.value,
-        v2_16_partA_checkpoint.value,
-        v2_16_partB_pred.value,
-        v2_16_partB_checkpoint.value,
-        v2_16_partC_pred.value,
-        v2_16_partC_checkpoint.value,
-        v2_16_partD_pred.value,
-        v2_16_policy["residual_owner"],
+    a_capture = mo.ui.button(
+        label="Capture threshold contrast", kind="success",
+        disabled=a_prediction.value is None or a_base_inputs["threshold"] == a_result_inputs["threshold"],
+        on_click=lambda _v: store("A", _capture(
+            "A", a_prediction.value, a_result_inputs, fairness_json(a_base, a_base_inputs),
+            fairness_json(a_result, a_result_inputs), a_upstream,
+            "v2_16_experiments.assess_fairness")),
     )
-    _complete = all(value is not None for value in _required_values) and v2_16_policy["residual_owner"] != "none"
-    if v2_16_partA_pred.value is not None and v2_16_partD_pred.value is not None:
-        ledger.save(
-            track=v2_16_profile.track_id,
-            chapter=v2_16_chapter,
-            design={
-                "chapter": "v2_16",
-                "track_id": v2_16_profile.track_id,
-                "scenario_id": v2_16_variant.scenario_id,
-                "hardware_ref": v2_16_variant.hardware_ref,
-                "model_ref": v2_16_variant.model_ref,
-                "completed": _complete,
-                "stakeholder_group": v2_16_obligation["stakeholder_label"],
-                "harm_mode": v2_16_obligation["harm_label"],
-                "obligation_metric": "maximum subgroup gap plus residual affected units",
-                "obligation_threshold_pp": v2_16_obligation["threshold_pp"],
-                "binding_amount": v2_16_obligation["binding_amount"],
-                "monitoring_intensity_pct": v2_16_overhead["monitoring_intensity_pct"],
-                "explanation_coverage_pct": v2_16_overhead["explanation_coverage_pct"],
-                "privacy_strictness_pct": v2_16_overhead["privacy_strictness_pct"],
-                "human_review_share_pct": v2_16_overhead["human_review_share_pct"],
-                "overhead_binding_constraint": "; ".join(v2_16_overhead["violations"]) or "none",
-                "audit_sample_rate_pct": v2_16_audit["sample_rate_pct"],
-                "label_availability_pct": v2_16_audit["label_availability_pct"],
-                "slice_depth": v2_16_audit["slice_depth"],
-                "audit_blind_spot": v2_16_audit["blind_spot"],
-                "residual_harm_units_per_day": v2_16_audit["blind_units_per_day"],
-                "selected_policy": v2_16_policy["selected_policy_label"],
-                "rejected_alternative": v2_16_policy["rejected_policy_label"],
-                "policy_pass": v2_16_policy["policy_pass"],
-                "residual_owner": v2_16_policy["residual_owner"],
-                "v2_17_synthesis_implication": v2_16_v2_17_implication.value,
-            },
-        )
-
-    _incomplete = []
-    for label, value in (
-        ("Part A prediction", v2_16_partA_pred.value),
-        ("Part A checkpoint", v2_16_partA_checkpoint.value),
-        ("Part B prediction", v2_16_partB_pred.value),
-        ("Part B checkpoint", v2_16_partB_checkpoint.value),
-        ("Part C prediction", v2_16_partC_pred.value),
-        ("Part C checkpoint", v2_16_partC_checkpoint.value),
-        ("Part D prediction", v2_16_partD_pred.value),
-    ):
-        if value is None:
-            _incomplete.append(label)
-    if v2_16_policy["residual_owner"] in {None, "none"}:
-        _incomplete.append("Named residual obligation owner")
-    if v2_16_policy["selected_policy"] == v2_16_policy["rejected_policy"]:
-        _incomplete.append("Rejected alternative different from selected policy")
-
-    _final_decision = (
-        f"{'Approve' if v2_16_policy['policy_pass'] else 'Hold or revise'} "
-        f"{v2_16_policy['selected_policy_label']} for {v2_16_profile.label}. "
-        f"Binding amount: {v2_16_obligation['binding_amount']} "
-        f"({v2_16_obligation['threshold_pp']:.1f} pp threshold, "
-        f"{v2_16_audit['blind_units_per_day']:,.0f} blind residual units/day). "
-        f"Rejected alternative: {v2_16_policy['rejected_policy_label']}."
+    b_capture = mo.ui.button(
+        label="Capture capacity contrast", kind="success",
+        disabled=(b_prediction.value is None or
+                  (b_base_inputs["explanation_share"] == b_result_inputs["explanation_share"] and
+                   b_base_inputs["review_share"] == b_result_inputs["review_share"])),
+        on_click=lambda _v: store("B", _capture(
+            "B", b_prediction.value, b_result_inputs, capacity_json(b_base, b_base_inputs),
+            capacity_json(b_result, b_result_inputs), b_upstream,
+            "v2_16_experiments.evaluate_capacity")),
     )
-    _report = build_lab_report(
-        v2_16_metadata,
-        student_id=v2_16_student_id.value or "",
-        track=v2_16_profile.label,
-        scenario=v2_16_variant.workload_summary,
-        learning_objectives=(
-            "Convert stakeholder harm into a measurable track-specific obligation.",
-            "Budget responsible evidence overhead across latency, cost, energy, and release delay.",
-            "Analyze audit coverage, blind spots, escalation path, and residual harm.",
-            "Choose a responsible fleet policy with a rejected alternative and V2-17 implication.",
-        ),
-        predictions={
-            "part_a_harm_to_obligation": v2_16_partA_pred.value,
-            "part_b_evidence_overhead": v2_16_partB_pred.value,
-            "part_c_audit_coverage": v2_16_partC_pred.value,
-            "part_d_policy_gate": v2_16_partD_pred.value,
-        },
-        knob_settings={
-            "stakeholder_group": v2_16_obligation["stakeholder_label"],
-            "harm_mode": v2_16_obligation["harm_label"],
-            "obligation_threshold_pp": v2_16_obligation["threshold_pp"],
-            "monitoring_intensity_pct": v2_16_overhead["monitoring_intensity_pct"],
-            "explanation_coverage_pct": v2_16_overhead["explanation_coverage_pct"],
-            "privacy_strictness_pct": v2_16_overhead["privacy_strictness_pct"],
-            "human_review_share_pct": v2_16_overhead["human_review_share_pct"],
-            "audit_sample_rate_pct": v2_16_audit["sample_rate_pct"],
-            "label_availability_pct": v2_16_audit["label_availability_pct"],
-            "slice_depth": v2_16_audit["slice_depth"],
-            "escalation_hours": v2_16_audit["escalation_hours"],
-            "selected_policy": v2_16_policy["selected_policy_label"],
-            "rejected_alternative": v2_16_policy["rejected_policy_label"],
-            "v2_17_implication": v2_16_v2_17_implication.value,
-        },
-        binding_constraints={
-            "part_a": "; ".join(v2_16_obligation["violations"]) or "stakeholder obligation stated",
-            "part_b": "; ".join(v2_16_overhead["violations"]) or "evidence overhead feasible",
-            "part_c": "; ".join(v2_16_audit["violations"]) or "audit coverage feasible",
-            "part_d": "; ".join(v2_16_policy["violations"]) or "policy gate passes",
-        },
-        evidence_summary={
-            "binding_amount": v2_16_obligation["binding_amount"],
-            "observed_gap_pp": round(v2_16_obligation["observed_gap_pp"], 3),
-            "residual_gap_pp_after_controls": round(v2_16_overhead["residual_gap_pp"], 3),
-            "latency_ms": round(v2_16_overhead["latency_ms"], 3),
-            "cost_factor": round(v2_16_overhead["cost_factor"], 3),
-            "audit_confidence_pct": round(v2_16_audit["audit_confidence_pct"], 3),
-            "blind_units_per_day": round(v2_16_audit["blind_units_per_day"], 3),
-            "selected_policy": v2_16_policy["selected_policy_label"],
-            "policy_pass": v2_16_policy["policy_pass"],
-        },
-        final_decision=_final_decision,
-        big_takeaways=(
-            "Stakeholder harm has to become a measurable obligation before a fairness metric is actionable.",
-            "Responsible evidence reduces risk while consuming latency, cost, energy, storage, and release-review capacity.",
-            "Audit coverage and escalation determine whether residual harm is seen and owned.",
-            "Responsible AI policy is a conjunction of technical viability, audit confidence, and governance ownership.",
-            "V2-17 synthesis must treat the selected responsible-AI policy as a hard fleet guardrail.",
-        ),
-        reflections={
-            "report_artifact": v2_16_packet["report_frame"],
-            "residual_obligation": (
-                f"{v2_16_audit['blind_units_per_day']:,.0f} blind residual units/day, "
-                f"owned by {v2_16_policy['residual_owner'] if v2_16_policy['residual_owner'] not in {None, 'none'} else 'unassigned'}"
-            ),
-            "part_a_checkpoint": v2_16_partA_checkpoint.value,
-            "part_b_checkpoint": v2_16_partB_checkpoint.value,
-            "part_c_checkpoint": v2_16_partC_checkpoint.value,
-            "v2_17_implication": v2_16_v2_17_implication.value,
-        },
-        residual_risk=(
-            f"{v2_16_packet['failure_mode']}. Teaching estimates need representative "
-            "track audits, privacy review, escalation drills, and postdeployment monitoring before production use."
-        ),
-        source_trace={
-            "track_id": v2_16_profile.track_id,
-            "scenario_id": v2_16_variant.scenario_id,
-            "hardware_ref": v2_16_variant.hardware_ref,
-            "model_ref": v2_16_variant.model_ref,
-            "catalog_variant": "mlsysbook_labs.get_lab_track_variant",
-            "track_profile": "mlsysbook_labs.get_track_profile",
-            "notebook_local_helpers": (
-                "v2_16_track_packet",
-                "v2_16_obligation_result",
-                "v2_16_overhead_result",
-                "v2_16_audit_result",
-                "v2_16_policy_result",
-            ),
-            "chapter_sources": (
-                "responsible_ai.qmd: governance imperative, fairness measurement, overhead table, monitoring architecture, sociotechnical feedback, institutional responsibility",
-                "responsible_fleet_principles.qmd: fairness impossibility and sociotechnical feedback invariants",
-            ),
-        },
-        result_snapshot={
-            "packet": v2_16_packet,
-            "obligation": v2_16_obligation,
-            "overhead": v2_16_overhead,
-            "audit": v2_16_audit,
-            "policy": v2_16_policy,
-        },
-        incomplete_fields=tuple(_incomplete),
+    c_capture = mo.ui.button(
+        label="Capture audit contrast", kind="success",
+        disabled=(c_prediction.value is None or
+                  (c_base_inputs["sampling_fraction"] == c_result_inputs["sampling_fraction"] and
+                   c_base_inputs["label_delay"] == c_result_inputs["label_delay"])),
+        on_click=lambda _v: store("C", _capture(
+            "C", c_prediction.value, c_result_inputs, audit_json(c_base, c_base_inputs),
+            audit_json(c_result, c_result_inputs), c_upstream,
+            "v2_16_experiments.audit_evidence")),
+    )
+    d_capture = mo.ui.button(
+        label="Capture privacy-profile contrast", kind="success",
+        disabled=d_prediction.value is None or d_base_inputs["profile_key"] == d_result_inputs["profile_key"],
+        on_click=lambda _v: store("D", _capture(
+            "D", d_prediction.value, d_result_inputs, privacy_json(d_base, d_base_inputs),
+            privacy_json(d_result, d_result_inputs), d_upstream,
+            "v2_16_experiments.check_privacy_profile",
+            tuple(privacy_json(value, {**d_result_inputs, "profile_key": key})
+                  for key, value in d_alternatives.items()))),
     )
 
-    def build_synthesis():
-        status_text = "All verification checkpoints complete" if not _incomplete else f"{len(_incomplete)} checkpoints incomplete"
-        status_kind = "success" if not _incomplete else "warn"
-        passed = v2_16_policy["policy_pass"]
+    _base_gate = mechanical_gate(a_base, b_base, c_base, d_base)
+    _base_decision = record_release_decision(
+        _base_gate, choice="defer", rejected_alternative="release", owner="", remedy="",
+        reevaluation_trigger="",
+    )
+    _choice = e_choice.value or "defer"
+    _rejected = e_rejected.value or ("release" if _choice != "release" else "defer")
+    e_decision = record_release_decision(
+        e_gate, choice=_choice, rejected_alternative=_rejected, owner=e_owner.value,
+        remedy=e_remedy.value, reevaluation_trigger=e_trigger.value,
+    )
+    _base_gate_inputs = {
+        "assessment": fairness_json(a_base, a_base_inputs),
+        "capacity": capacity_json(b_base, b_base_inputs),
+        "audit": audit_json(c_base, c_base_inputs),
+        "privacy": privacy_json(d_base, d_base_inputs),
+    }
+    _result_gate_inputs = {
+        "assessment": fairness_json(a_result, a_result_inputs),
+        "capacity": capacity_json(b_result, b_result_inputs),
+        "audit": audit_json(c_result, c_result_inputs),
+        "privacy": privacy_json(d_result, d_result_inputs),
+    }
 
-        return mo.vstack([
-            mo.Html(f"""
-            <div class="mlsysbook-panel" style="border-left: 4px solid #1F407A; margin-top: 16px;">
-                <div style="font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; margin-bottom: 6px;">STUDENT MEMO & REFLECTIONS</div>
-                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Responsible AI Engineering Memo</h4>
-                {v2_16_student_id}
-                <div style="margin-top: 12px;">{v2_16_memo_note}</div>
-                <div style="margin-top: 12px;">{v2_16_v2_17_implication}</div>
-            </div>
-            """),
-            mo.callout(
-                mo.md(
-                    f"**Synthesis memo:** Selected `{v2_16_policy['selected_policy_label']}`. Binding amount: "
-                    f"`{v2_16_obligation['binding_amount']}` ({v2_16_obligation['threshold_pp']:.1f} pp threshold, "
-                    f"{v2_16_audit['blind_units_per_day']:,.0f} blind residual units/day). "
-                    f"Reject `{v2_16_policy['rejected_policy_label']}`.  \n\n"
-                    f"**V2-17 implication:** {v2_16_v2_17_implication.value}"
-                ),
-                kind=status_kind,
-            ),
-            mo.callout(
-                mo.md(
-                    f"**Status:** {status_text}. "
-                    + (
-                        "Complete all predictions, checkpoints, and your engineering memo note before final save."
-                        if _incomplete
-                        else "Ledger snapshot successfully recorded for downstream labs."
-                    )
-                ),
-                kind=status_kind,
-            ),
-            mo.Html(f"""
-            <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-                <div style="flex:1; min-width:220px; background:white; border:1px solid #d9dee8;
-                            border-radius:10px; padding:16px; border-top:3px solid {COLORS['GreenLine']};">
-                    <div style="font-size:0.72rem; font-weight:700; color:#64748b; text-transform:uppercase;">
-                        Selected release policy</div>
-                    <div style="font-size:1.05rem; font-weight:800; color:#1f2937; margin-top:5px;">
-                        {v2_16_policy['selected_policy_label']}</div>
-                </div>
-                <div style="flex:1; min-width:220px; background:white; border:1px solid #d9dee8;
-                            border-radius:10px; padding:16px; border-top:3px solid {COLORS['OrangeLine']};">
-                    <div style="font-size:0.72rem; font-weight:700; color:#64748b; text-transform:uppercase;">
-                        Binding amount</div>
-                    <div style="font-size:1.05rem; font-weight:800; color:#1f2937; margin-top:5px;">
-                        {v2_16_obligation['binding_amount']}</div>
-                </div>
-                <div style="flex:1; min-width:220px; background:white; border:1px solid #d9dee8;
-                            border-radius:10px; padding:16px; border-top:3px solid {COLORS['RedLine']};">
-                    <div style="font-size:0.72rem; font-weight:700; color:#64748b; text-transform:uppercase;">
-                        Rejected alternative</div>
-                    <div style="font-size:1.05rem; font-weight:800; color:#1f2937; margin-top:5px;">
-                        {v2_16_policy['rejected_policy_label']}</div>
-                </div>
-            </div>
-            """),
-            big_takeaways([
-                "Stakeholder harm has to become a measurable obligation before a fairness metric is actionable.",
-                "Responsible evidence reduces risk while consuming latency, cost, energy, storage, and release-review capacity.",
-                "Audit coverage and escalation determine whether residual harm is seen and owned.",
-                "Responsible AI policy is a conjunction of technical viability, audit confidence, and governance ownership.",
-                "V2-17 synthesis must treat the selected responsible-AI policy as a hard fleet guardrail.",
-            ]),
-            mo.Html(f"""
-            <div class="mlsysbook-panel" style="border-left: 4px solid #A51C30; margin: 18px 0; background: #FFFDFD;">
-                <div style="font-size: 0.75rem; font-weight: 700; color: #A51C30; text-transform: uppercase; margin-bottom: 6px;">LEAD ARCHITECT AUTHORIZATION</div>
-                <h4 style="margin: 0 0 8px 0; color: #0F172A;">Lead Architect Authorization: {v2_16_packet['stakeholder']}</h4>
-                <div style="display: flex; gap: 12px; align-items: center; margin-top: 8px;">
-                    <span style="display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 800; font-size: 0.8rem; background: {'#ECFDF5' if passed else '#FEF2F2'}; color: {'#065F46' if passed else '#991B1B'}; border: 1px solid {'#A7F3D0' if passed else '#FECACA'};">
-                        {'APPROVED FOR DEPLOYMENT' if passed else 'BLOCKED BY GUARDRAIL CONJUNCTION'}
-                    </span>
-                    <span style="font-size: 0.85rem; color: #475569;">
-                        Policy: <code>{v2_16_policy['selected_policy_label']}</code> &middot; Binding: <code>{v2_16_obligation['binding_amount']}</code>
-                    </span>
-                </div>
-            </div>
-            """),
-            source_trace(
-                {
-                    "Report builder": "mlsysbook_labs.build_lab_report",
-                    "Report export": "mlsysbook_labs.report_export_panel",
-                    "Ledger": "DesignLedger.save(chapter=16)",
-                    "Local teaching models": "v2_16_* helpers in this notebook",
-                },
-                collapsed=True,
-                summary="The report and ledger snapshot are generated from local controls and source-traced helpers.",
-            ),
-            mo.md("## Download Report"),
-            report_export_panel(_report),
-            mo.Html(f"""
-            <div style="border: 1px solid #CBD5E1; border-radius: 8px; padding: 16px 20px; margin-top: 20px; background: #F8FAFC;">
-                <div style="font-size: 0.72rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">
-                    What's Next &middot; Volume II Synthesis Pipeline
-                </div>
-                <h4 style="margin: 0 0 6px 0; color: #0F172A; font-size: 1.05rem;">
-                    Next Lab: Volume II, Chapter 17 &mdash; Fleet Synthesis: Co-Designing Compute, Power, Robustness, and Responsibility
-                </h4>
-                <p style="margin: 0; font-size: 0.88rem; color: #334155; line-height: 1.5;">
-                    Carry your responsible policy forward into Chapter 17, where all distributed scaling dimensions
-                    (compute, networking, storage, fault tolerance, efficiency, and ethics) unify into a complete fleet architecture.
-                </p>
-            </div>
-            """),
-        ])
+    def _decision_json(decision, gate_inputs):
+        return {
+            "inputs": {"gate": gate_inputs, "choice": decision.choice,
+                       "rejected_alternative": decision.rejected_alternative,
+                       "owner": decision.owner, "remedy": decision.remedy,
+                       "reevaluation_trigger": decision.reevaluation_trigger},
+            "choice": decision.choice, "rejected_alternative": decision.rejected_alternative,
+            "owner": decision.owner, "remedy": decision.remedy,
+            "reevaluation_trigger": decision.reevaluation_trigger,
+            "mechanical_gate_passes": decision.evidence_gate.passes,
+            "mechanical_violations": list(decision.evidence_gate.violations),
+            "decision_record_complete": decision.decision_record_complete,
+            "missing_fields": list(decision.missing_fields),
+        }
 
-    tabs = mo.ui.tabs({
-        "Part A -- Stakeholder Obligations": build_part_a(),
-        "Part B -- Evidence Overhead": build_part_b(),
-        "Part C -- Audit Coverage": build_part_c(),
-        "Part D -- Responsible Policy": build_part_d(),
-        "Synthesis": build_synthesis(),
-    })
-    tabs
+    e_capture = mo.ui.button(
+        label="Capture release record", kind="success",
+        disabled=(e_prediction.value is None or e_choice.value is None or
+                  e_rejected.value is None or not e_decision.decision_record_complete),
+        on_click=lambda _v: store("E", capture_evidence(
+            track=track_id, part="E", prediction=e_prediction.value, inputs=e_upstream,
+            baseline=_decision_json(_base_decision, _base_gate_inputs),
+            result=_decision_json(e_decision, _result_gate_inputs),
+            alternatives=(_decision_json(_base_decision, _base_gate_inputs),),
+            decision=e_decision.choice, upstream_inputs=e_upstream,
+            model_key="v2_16_experiments.record_release_decision")),
+    )
+    return (
+        a_capture, a_upstream, b_capture, b_upstream, c_capture, c_upstream,
+        d_capture, d_upstream, e_capture, e_decision, e_upstream,
+    )
+
+# ZONE C · Header and single tabbed investigation surface
+
+@app.cell
+def _(ACADEMIC_LAB_CSS, LAB_CSS, mo, profile, track):
+    css = mo.Html("""
+    <style>
+    .rai-head{background:linear-gradient(135deg,#22131b,#7f1d35);color:white;border-radius:14px;padding:clamp(18px,4vw,32px);margin:30px 0 12px}
+    .rai-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font:700 .72rem ui-monospace;letter-spacing:.08em}.rai-head h1{font-size:clamp(1.6rem,5vw,2.6rem);line-height:1.08;margin:16px 0 8px}.rai-head p{color:#ffe4e6;max-width:790px}
+    .rai-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:9px;margin-top:17px}.rai-meta div{background:#ffffff14;border:1px solid #ffffff26;padding:9px 11px;border-radius:8px}.rai-note{color:#475569;font-size:.9rem;line-height:1.5}.rai-saved{border-left:4px solid #2ca02c;background:#f0fdf4;padding:9px 12px;border-radius:7px}
+    .lab-hud{display:flex;align-items:center;flex-wrap:wrap;gap:10px;background:#101827!important;color:#fff;padding:14px 18px;border-radius:9px}.lab-hud .hud-label{color:#a7b9cf}.lab-hud .hud-active{color:#86efac}@media(max-width:520px){.rai-head{border-radius:9px}.rai-meta{grid-template-columns:1fr}}
+    </style>""")
+    header = mo.Html(f"""<section class="rai-head"><div class="rai-top"><span>VOLUME II · LAB 16</span><span>ABOUT 50–55 MIN</span></div><h1>Evidence for Responsible Release</h1><p>When do subgroup outcomes, audit evidence, and review capacity justify a fleet release decision?</p><div class="rai-meta"><div><b>Track</b><br>{profile['display']}</div><div><b>Role</b><br>{profile['fleet_role']}</div><div><b>Workload</b><br>{profile['events_per_hour'].m_as('count/hour'):,.0f} ev/h</div><div><b>Capacity</b><br>{profile['explanation_workers']} exp / {profile['reviewers']} rev</div><div><b>Cohorts</b><br>{profile['subgroups'][0]} / {profile['subgroups'][1]}</div><div><b>Output</b><br>Auditable release record</div></div></section>""")
+    mo.vstack([LAB_CSS, ACADEMIC_LAB_CSS, css, track, header, mo.Html(
+        '<p class="rai-note">Scores, labels, workloads, and data profiles are illustrative scenario assumptions. Passing a data-handling profile is not a privacy guarantee.</p>')], gap=0.5).style({"padding-top": "32px"})
     return
 
 
 @app.cell
-def _(mo, v2_16_packet):
-    mo.Html(
-        f"""
-    <div class="lab-hud">
-      <span class="hud-label">LAB</span>
-      <span class="hud-value">Vol2 &middot; Lab 16</span>
-      <span class="hud-label">TRACK</span>
-      <span class="hud-value">{v2_16_packet['track_label']}</span>
-      <span class="hud-label">METRIC</span>
-      <span class="hud-value">Affected Units/Day</span>
-    </div>
-    """
+def _(mo):
+    mo.sidebar([mo.md("## Lab navigation"), mo.outline(label="Sections")])
+    return
+
+
+@app.cell
+def _(
+    COLORS, a_allowed_gap, a_base, a_capture, a_criterion, a_prediction,
+    a_result, a_threshold, a_upstream, apply_plotly_theme, audit_evidence,
+    b_base, b_capture, b_explanation_share, b_prediction, b_result,
+    b_review_share, b_upstream, c_base, c_capture, c_label_delay,
+    c_prediction, c_result, c_sampling, c_upstream, d_alternatives,
+    d_capture, d_case_review, d_prediction, d_profile, d_result, d_upstream,
+    e_capture, e_choice, e_decision, e_gate, e_owner, e_prediction,
+    e_rejected, e_remedy, e_trigger, e_upstream, get_evidence, go, mo,
+    profile, rationale, residual_risk, track_id,
+):
+    _captures = get_evidence()
+    _upstream = {"A": a_upstream, "B": b_upstream, "C": c_upstream,
+                 "D": d_upstream, "E": e_upstream}
+    evidence_audit = audit_evidence(
+        _captures, track=track_id, required_parts=tuple("ABCDE"),
+        per_part_upstream_inputs=_upstream, contrast_required_parts=tuple("ABCDE"),
     )
+
+    def _table(rows):
+        return mo.vstack([mo.ui.table(rows, pagination=False)]).style(
+            {"max-width": "100%", "overflow-x": "auto"})
+
+    def _saved(part):
+        capture = _captures.get(part)
+        if capture is None:
+            return mo.callout(mo.md("No saved evidence for this part."), kind="warn")
+        if part in evidence_audit.stale or (part, part) in evidence_audit.identical_pairs:
+            return mo.callout(mo.md("**STALE OR NON-CONTRASTING EVIDENCE.** Recapture this experiment."), kind="danger")
+        data = capture.to_dict()
+        return mo.Html(f'<div class="rai-saved"><b>Saved snapshot</b> · prediction: {data["prediction"]}<br><small>The report uses this fixed result.</small></div>')
+
+    def _gap(value):
+        return "undefined" if value is None else f"{100 * value:.1f} pp"
+
+    def build_part_a():
+        _intro = mo.md("### A · Which fairness claim does the evidence support? (10 min)\nChoose a normative criterion, then replay fixed scores and labels at a new threshold.")
+        if a_prediction.value is None:
+            return mo.vstack([_intro, a_prediction])
+        _fig = go.Figure()
+        for item in a_result.subgroup_metrics:
+            _fig.add_bar(name=item.subgroup, x=["Selection", "TPR", "FPR", "PPV"], y=[
+                100 * item.selection_rate,
+                None if item.true_positive_rate is None else 100 * item.true_positive_rate,
+                None if item.false_positive_rate is None else 100 * item.false_positive_rate,
+                None if item.positive_predictive_value is None else 100 * item.positive_predictive_value])
+        _fig.update_layout(barmode="group", height=290, margin=dict(l=20, r=20, t=20, b=20),
+                           yaxis_title="Rate (%)", legend_orientation="h")
+        _rows = [{"Run": label, "Threshold": f"{result.threshold:.2f}",
+                  "Chosen gap": _gap(result.criterion_gap),
+                  "Status": "PASS" if result.criterion_passes else "FAIL / INSUFFICIENT",
+                  "True labels": result.ground_truth_positive_cases,
+                  "False negatives": result.false_negative_cases}
+                 for label, result in (("Baseline", a_base), ("Selected", a_result))]
+        return mo.vstack([_intro, a_prediction, mo.hstack([a_threshold, a_criterion, a_allowed_gap], wrap=True),
+                          apply_plotly_theme(_fig), _table(_rows),
+                          mo.callout(mo.md(f"**Prediction:** {a_prediction.value}. The chosen gap is **{_gap(a_result.criterion_gap)}**. The allowed gap classifies evidence; it does not change the **{a_result.ground_truth_positive_cases}** true labels."),
+                                     kind="success" if a_result.criterion_passes else "danger"),
+                          a_capture, _saved("A"), mo.accordion({"Calculation Notes": mo.md(
+                              "MLSysIM thresholds each score, builds subgroup confusion matrices, and derives rates from their denominators. Empty denominators remain undefined. Criterion and tolerance only evaluate those counts.")})])
+
+    def build_part_b():
+        _intro = mo.md(f"### B · Can the fleet serve explanations and review? (10 min)\n**Fleet role:** {profile['fleet_role']}. The service tier receives **{profile['events_per_hour'].m_as('count/hour'):,.0f} events/hour**. Predict which queue binds.")
+        if b_prediction.value is None:
+            return mo.vstack([_intro, b_prediction])
+        _fig = go.Figure([
+            go.Bar(name="Arrivals", x=["Explanation", "Human review"],
+                   y=[b_result.explanation_arrivals.m_as("count/hour"), b_result.review_arrivals.m_as("count/hour")], marker_color=COLORS["OrangeLine"]),
+            go.Bar(name="Capacity", x=["Explanation", "Human review"],
+                   y=[b_result.explanation_capacity.m_as("count/hour"), b_result.review_capacity.m_as("count/hour")], marker_color=COLORS["BlueLine"])])
+        _fig.update_layout(barmode="group", height=280, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Cases/hour")
+        _rows = [{"Run": label, "Explanation utilization": f"{100*r.explanation_utilization:.1f}%",
+                  "Review utilization": f"{100*r.review_utilization:.1f}%",
+                  "Explanation backlog": f"{r.explanation_backlog.m_as('count'):,.0f}",
+                  "Review backlog": f"{r.review_backlog.m_as('count'):,.0f}",
+                  "Status": "PASS" if r.feasible else "FAIL"}
+                 for label, r in (("Baseline", b_base), ("Selected", b_result))]
+        return mo.vstack([_intro, b_prediction, mo.hstack([b_explanation_share, b_review_share], widths="equal", wrap=True),
+                          apply_plotly_theme(_fig), _table(_rows),
+                          mo.callout(mo.md(f"**Prediction:** {b_prediction.value}. Review demand is **{b_result.review_arrivals.m_as('count/hour'):,.0f}/hour** against **{b_result.review_capacity.m_as('count/hour'):,.0f}/hour** capacity. Coverage consumes capacity; it does not repair Part A outcomes."),
+                                     kind="success" if b_result.feasible else "danger"),
+                          b_capture, _saved("B"), mo.accordion({"Calculation Notes": mo.md(
+                              "Arrivals equal fleet rate × selected share into offloaded queues. Capacity equals workers × target utilization ÷ service time. Eight-hour backlog grows only above capacity.")})])
+
+    def build_part_c():
+        _intro = mo.md("### C · What can delayed labels and sampling establish? (9 min)\nKeep true cases fixed. Change only which labeled cases the audit observes.")
+        if c_prediction.value is None:
+            return mo.vstack([_intro, c_prediction])
+        _observed = c_result.observed_assessment
+        _observed_gap = "undefined" if _observed is None else _gap(_observed.criterion_gap)
+        _fig = go.Figure([go.Bar(x=["Fixture", "Eligible", "Sampled"],
+                                y=[24, c_result.eligible_cases, c_result.sampled_cases],
+                                marker_color=[COLORS["BlueLine"], COLORS["OrangeLine"], COLORS["GreenLine"]])])
+        _fig.update_layout(height=260, margin=dict(l=20, r=20, t=20, b=20), yaxis_title="Cases", showlegend=False)
+        _rows = [{"Run": label, "Eligible": r.eligible_cases, "Sampled": r.sampled_cases,
+                  "Observed gap": "undefined" if r.observed_assessment is None else _gap(r.observed_assessment.criterion_gap),
+                  "Population gap": _gap(r.population_assessment.criterion_gap),
+                  "Limitations": "; ".join(r.limitations) or "none in fixture"}
+                 for label, r in (("Full prompt", c_base), ("Selected", c_result))]
+        return mo.vstack([_intro, c_prediction, mo.hstack([c_sampling, c_label_delay], widths="equal", wrap=True),
+                          apply_plotly_theme(_fig), _table(_rows),
+                          mo.callout(mo.md(f"**Prediction:** {c_prediction.value}. The plan observes **{c_result.sampled_cases}** cases and reports **{_observed_gap}**. The population gap remains **{_gap(c_result.population_assessment.criterion_gap)}**."),
+                                     kind="danger" if _observed_gap == "undefined" else "info"),
+                          c_capture, _saved("C"), mo.accordion({"Calculation Notes": mo.md(
+                              "MLSysIM filters labels by age, applies deterministic cohort sampling, and computes an observed metric separately from the unchanged population assessment.")})])
+
+    def build_part_d():
+        _intro = mo.md(f"### D · Which evidence profile meets the data obligation? (9 min)\n**Fleet scope:** {profile['fleet_role']}. Compare retained fields, retention, and deletion windows. No percentage represents privacy.")
+        if d_prediction.value is None:
+            return mo.vstack([_intro, d_prediction])
+        _rows = [{"Profile": r.profile.label,
+                  "Scope": r.scope or profile["fleet_role"],
+                  "Raw content": "retained" if r.profile.raw_content_retained else "not retained",
+                  "Stable ID": "retained" if r.profile.stable_subject_id_retained else "not retained",
+                  "Retention": f"{r.profile.retention.m_as('day'):.0f} days",
+                  "Deletion": f"{r.profile.deletion_window.m_as('day'):.0f} days",
+                  "Case review": "yes" if r.supports_case_review else "no",
+                  "Specified checks": "PASS" if r.passes_requirements else "FAIL"}
+                 for r in d_alternatives.values()]
+        return mo.vstack([_intro, d_prediction, mo.hstack([d_profile, d_case_review], widths="equal", wrap=True),
+                          _table(_rows), mo.callout(mo.md(
+                              f"**Prediction:** {d_prediction.value}. **{d_result.profile.label}** ({d_result.scope or profile['fleet_role']}) {'meets' if d_result.passes_requirements else 'does not meet'} the specified checks. This is not a privacy guarantee."),
+                              kind="success" if d_result.passes_requirements else "danger"),
+                          d_capture, _saved("D"), mo.accordion({"Calculation Notes": mo.md(
+                              "The backend checks retained cohort labels, required case-level scored events, and explicit retention and deletion durations against the active fleet role.")})])
+
+    def build_part_e():
+        _intro = mo.md("### E · What decision follows from the evidence? (8 min)\nInspect four mechanical gates, then record a choice, owner, remedy, and trigger. The policy label cannot change a metric.")
+        if e_prediction.value is None:
+            return mo.vstack([_intro, e_prediction])
+        _estimable = c_result.observed_assessment is not None and c_result.observed_assessment.criterion_gap is not None
+        _rows = [{"Gate": "Fairness criterion", "Status": "PASS" if a_result.criterion_passes else "FAIL / INSUFFICIENT"},
+                 {"Gate": "Service capacity", "Status": "PASS" if b_result.feasible else "FAIL"},
+                 {"Gate": "Audit estimate", "Status": "PASS" if _estimable else "INSUFFICIENT EVIDENCE"},
+                 {"Gate": "Privacy obligations", "Status": "PASS" if d_result.passes_requirements else "FAIL"}]
+        _message = "all specified gates pass" if e_gate.passes else " · ".join(e_gate.violations)
+        return mo.vstack([_intro, e_prediction, _table(_rows),
+                          mo.callout(mo.md(f"**Mechanical result:** {_message}. You still own the normative release choice."),
+                                     kind="success" if e_gate.passes else "danger"),
+                          mo.hstack([e_choice, e_rejected], widths="equal", wrap=True),
+                          mo.hstack([e_owner, e_remedy, e_trigger], wrap=True),
+                          mo.callout(mo.md("Decision record complete." if e_decision.decision_record_complete else
+                                          "Name a distinct alternative, owner, remedy, and trigger."),
+                                     kind="info" if e_decision.decision_record_complete else "warn"),
+                          e_capture, _saved("E"), mo.accordion({"Calculation Notes": mo.md(
+                              "The gate combines observable requirements. record_release_decision stores qualitative governance choices without bonuses or metric changes.")})])
+
+    def build_synthesis():
+        _rows = []
+        for part in "ABCDE":
+            _capture = _captures.get(part)
+            _current = _capture and part not in evidence_audit.stale and (part, part) not in evidence_audit.identical_pairs
+            _rows.append({"Part": part, "Prediction": _capture.to_dict()["prediction"] if _capture else "—",
+                          "Evidence": "CURRENT" if _current else ("STALE" if _capture else "MISSING")})
+        _saved_choice = _captures["E"].to_dict()["decision"] if "E" in _captures else None
+        _complete = evidence_audit.complete and residual_risk.value is not None and bool(rationale.value.strip()) and _saved_choice == e_choice.value
+        return mo.vstack([mo.md("### Synthesis · Defend the release record (5 min)\nState the chosen option, quantify the rejected alternative, name the remaining limitation, and give the reevaluation trigger."),
+                          _table(_rows), residual_risk, rationale,
+                          mo.callout(mo.md("**Ready for the local report.**" if _complete else
+                                          "Capture five current contrasts, keep the Part E choice, choose a limitation, and write the quantified rationale."),
+                                     kind="success" if _complete else "warn")])
+
+    tabs = mo.ui.tabs({"Part A": build_part_a(), "Part B": build_part_b(),
+                       "Part C": build_part_c(), "Part D": build_part_d(),
+                       "Part E": build_part_e(), "Synthesis": build_synthesis()})
+    tabs
+    return (evidence_audit,)
+
+# ZONE D · Completion-gated report and ledger
+
+@app.cell
+def _(
+    build_lab_report, e_choice, e_rejected, e_trigger, evidence_audit,
+    get_evidence, get_lab_metadata, mo, profile, rationale,
+    report_export_panel, residual_risk, track_id,
+):
+    _captures = get_evidence()
+    _saved_choice = _captures["E"].to_dict()["decision"] if "E" in _captures else None
+    _ready = evidence_audit.complete and residual_risk.value is not None and bool(rationale.value.strip()) and _saved_choice == e_choice.value
+    mo.stop(not _ready)
+    _snapshots = {part: _captures[part].to_dict() for part in "ABCDE"}
+    _result_snapshot = {
+        "schema_version": 1, "lab_id": "v2_16", "track_id": track_id,
+        "model_id": "v2_16_experiments", "evidence": _snapshots,
+        "recommendation": e_choice.value, "rejected_alternative": e_rejected.value,
+        "reevaluation_trigger": e_trigger.value, "residual_risk": residual_risk.value,
+        "rationale": rationale.value,
+    }
+    report = build_lab_report(
+        get_lab_metadata("vol2/lab_16_responsible_ai.py"), track=track_id,
+        scenario=f"{profile['display']} fleet ({profile['fleet_role']}) subgroup evidence and review service",
+        learning_objectives=["Compute subgroup metrics from scored labels",
+                             "Separate audit evidence from population outcomes",
+                             "Size explanation and review capacity",
+                             "Record a release choice without a governance score"],
+        predictions={part: _snapshots[part]["prediction"] for part in "ABCDE"},
+        knob_settings={part: _snapshots[part]["inputs"] for part in "ABCDE"},
+        evidence_summary={part: {"baseline": _snapshots[part]["baseline"],
+                                 "result": _snapshots[part]["result"],
+                                 "alternatives": _snapshots[part]["alternatives"]}
+                          for part in "ABCDE"},
+        binding_constraints={"release_evidence": _snapshots["E"]["result"]["mechanical_violations"]},
+        decisions={"recommendation": e_choice.value, "rejected_alternative": e_rejected.value,
+                   "reevaluation_trigger": e_trigger.value},
+        final_decision={"recommendation": e_choice.value, "rejected_alternative": e_rejected.value,
+                        "rationale": rationale.value},
+        big_takeaways=["Fairness criteria can disagree on identical decisions.",
+                       "Monitoring changes evidence, not true outcomes.",
+                       "Explanation and review consume finite capacity."],
+        reflections={"rationale": rationale.value, "reevaluation_trigger": e_trigger.value},
+        residual_risk=residual_risk.value, result_snapshot=_result_snapshot,
+        source_trace={"scenario_assumption": f"Illustrative fixtures for {profile['fleet_role']}: {profile['events_per_hour'].m_as('count/hour'):,.0f} events/hour ({profile['explanation_workers']} explanation, {profile['reviewers']} review workers); not measurements or a privacy guarantee.",
+                      "calculation_boundary": "The simulator computes scored-label metrics, queues, audit evidence, and categorical data checks."},
+    )
+    mo.vstack([mo.md("## Local evidence report"), report_export_panel(report)])
+    return (report,)
+
+
+@app.cell
+async def _(
+    e_choice, e_rejected, e_trigger, evidence_audit, get_evidence, ledger,
+    mo, rationale, residual_risk, track_id,
+):
+    _captures = get_evidence()
+    _saved_choice = _captures["E"].to_dict()["decision"] if "E" in _captures else None
+    _ready = evidence_audit.complete and residual_risk.value is not None and bool(rationale.value.strip()) and _saved_choice == e_choice.value
+    _save_state = "EVIDENCE IN PROGRESS"
+    _save_detail = ""
+    if _ready:
+        try:
+            ledger.save(chapter=16, design={
+                "schema_version": 1, "lab_id": "v2_16", "track_id": track_id,
+                "model_id": "v2_16_experiments",
+                "evidence": {part: capture.to_dict() for part, capture in _captures.items()},
+                "recommendation": e_choice.value, "rejected_alternative": e_rejected.value,
+                "reevaluation_trigger": e_trigger.value, "residual_risk": residual_risk.value,
+                "rationale": rationale.value,
+            })
+            await ledger.flush()
+            _save_state = "SAVED"
+        except Exception as exc:
+            _save_state = "SAVE FAILED"
+            _save_detail = f" | {type(exc).__name__}"
+    mo.Html(f'<div class="lab-hud"><span class="hud-label">LAB</span><span>16 | Evidence for Responsible Release</span><span style="flex:1"></span><span class="hud-label">STATUS</span><span class="hud-active">{_save_state}</span><span>{_save_detail}</span></div>')
     return
 
 
