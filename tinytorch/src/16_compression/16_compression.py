@@ -13,80 +13,70 @@
 # ---
 
 # %% [markdown]
-"""
+r"""
 # Module 16: Compression - Pruning and Model Optimization
 
-Welcome to Module 16! You're about to build model compression techniques that make neural networks smaller, and the measurements that say what each technique cost.
+Welcome to Module 16! You are about to build model compression techniques that reduce parameter count and compute footprint: magnitude and structured pruning, low-rank SVD factorization, and knowledge distillation.
+
+<div align="center">
+  <img src="compression_blueprint.svg" alt="Compression Blueprint" width="220">
+</div>
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Complete optimization pipeline with profiling (14) and quantization (15)
-**You'll Build**: Pruning (magnitude & structured), knowledge distillation, and low-rank approximation
-**You'll Enable**: Pruned, factorized, and distilled models, plus the sparsity and output-drift measurements that show what each technique changed
 
-**Connection Map**:
-```
-Profiling (14) → Quantization (15) → Compression (16) → Advanced Optimization
-(measure size)   (reduce precision)  (remove weights)   (next modules)
-```
+**You've Built**: End-to-end optimization pipeline with profiling (`14_profiling`) and simulated INT8 quantization (`15_quantization`).
+**You'll Build**: Unstructured magnitude pruning, structured channel pruning, truncated SVD low-rank factorization, and teacher-student knowledge distillation with temperature scaling.
+**You'll Enable**: Cascaded model compression workflows, measuring parameter sparsity, FLOP reductions, and output drift across compressed architectures.
+
+### Architectural Roadmap
+
+| Tier | Subsystem | Primitives & Capabilities | Status |
+| :--- | :--- | :--- | :--- |
+| **Modules 01–08** | Foundation Tier | `Tensor`, `Function`, `Linear`, `GELU`, `SGD`, `Adam`, `Trainer` | Completed |
+| **Modules 09–13** | Architecture Tier | `Conv2d`, `BPETokenizer`, `EmbeddingLayer`, `MultiHeadAttention`, `GPT` | Completed |
+| **Module 14** | Systems Diagnostics | `Profiler`, `count_flops`, `measure_memory`, `measure_latency` | Completed |
+| **Module 15** | Precision Reduction | `quantize_int8`, `dequantize_int8`, `QuantizedLinear`, `quantize_model` | Completed |
+| **Module 16** | **Model Compression** | `magnitude_prune`, `structured_prune`, `low_rank_approximate`, `KnowledgeDistillation` | **Active Subsystem** |
+| **Modules 17–20** | Advanced Acceleration | `TritonKernels`, `KVCache`, `BenchmarkingSuite`, `TinyGPT` | Downstream Consumers |
 
 ## 🎯 Learning Objectives
-By the end of this module, you will:
-1. Implement magnitude-based and structured pruning
-2. Build knowledge distillation for model compression
-3. Create low-rank approximations of weight matrices
-4. Measure compression ratios and sparsity levels
-5. Understand structured vs unstructured sparsity trade-offs
 
-Let's get started!
+By the end of this module, you will:
+1. Implement global magnitude-based pruning and track sparsity ratios.
+2. Build structured channel pruning that produces dense, hardware-accelerated submatrices.
+3. Compute truncated SVD low-rank factorizations and verify parameter break-even thresholds ($r^*$).
+4. Implement teacher-student knowledge distillation with temperature-scaled soft targets and KL divergence.
+5. Compose multi-stage compression cascades targeting mobile and edge deployment budgets.
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/16_compression/compression.ipynb
-**Building Side:** Code exports to tinytorch.perf.compression
+**Learning Side:** You work in `modules/16_compression/compression.ipynb`
+**Building Side:** Code exports to `tinytorch.perf.compression`
 
 ```python
-# Final package structure:
 from tinytorch.perf.compression import (
     measure_sparsity, magnitude_prune, structured_prune,
     low_rank_approximate, KnowledgeDistillation, compress_model, Compressor,
 )
 ```
-
-**Why this matters:**
-- **Learning:** Complete compression system in one focused module for deep understanding
-- **Production:** Proper organization like real compression libraries with all techniques together
-- **Consistency:** All compression operations and sparsity management in perf.compression
-- **Integration:** Works seamlessly with models and quantization for complete optimization pipeline
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📋 Module Dependencies
 
-**Prerequisites**: Modules 01-15 must be completed. This module uses Tensor (01), Linear and Sequential (03), ReLU (02), log-softmax (04), autograd (06), SGD (07), and the Profiler (14). Quantization (15) is not called here; Milestone 06 stacks the two.
+### Dependency Inventory
 
-**External Dependencies**:
-- `numpy` (for array operations and numerical computing)
-- `copy` (for model duplication during compression)
-
-**TinyTorch Dependencies**:
-- `tinytorch.core.tensor` (Tensor class)
-- `tinytorch.core.layers` (Linear, Sequential)
-- `tinytorch.core.activations` (ReLU)
-- `tinytorch.core.losses` (log_softmax)
-- `tinytorch.core.autograd` (gradient tracking)
-- `tinytorch.core.optimizers` (SGD for the training test)
-- `tinytorch.perf.profiling` (Profiler)
-
-**Dependency Flow**:
-```
-Module 14 (Profiling) → Module 15 (Quantization) → Module 16 (Compression)
-       ↓                        ↓                         ↓
-  Measure size           Reduce precision           Remove weights
-```
-
-Students completing this module will have built compression techniques
-that integrate with profiling and quantization for complete model optimization.
+| Module Dependency | Component Imported | Purpose in Compression Engine |
+| :--- | :--- | :--- |
+| **Module 01: Tensors** | `Tensor` | Multi-dimensional array container storing weights and gradients |
+| **Module 02: Activations** | `ReLU` | Non-linear activations traversed in model graph |
+| **Module 03: Layers** | `Linear`, `Sequential` | Neural layer abstraction for weight extraction and replacement |
+| **Module 04: Losses** | `log_softmax` | Numerically stable log-probabilities for distillation loss |
+| **Module 06: Autograd** | `autograd` | Automatic differentiation tracking gradients to student parameters |
+| **Module 07: Optimizers** | `SGD` | Parameter update verification during student training |
+| **Module 14: Profiling** | `Profiler` | Memory and parameter baseline accounting |
+| **Standard Library / NumPy** | `copy`, `numpy` | Model cloning and vectorized linear algebra operations |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
@@ -182,174 +172,111 @@ if __name__ == "__main__":
     show_weight_distribution_motivation()
 
 # %% [markdown]
-"""
+r"""
 ### Model Compression Concepts
 
-Imagine you have a massive library with millions of books, but you only reference 10% of them regularly. Model compression is like creating a curated collection that keeps the essential knowledge while dramatically reducing storage space.
+Deep neural networks are typically over-parameterized: their parameter matrices contain extensive statistical redundancy. While over-parameterization facilitates convex optimization dynamics during gradient descent training, inference requires only a fraction of the trained weight volume.
 
-Model compression reduces the size and computational requirements of neural networks at some cost in accuracy, and the engineering is in measuring that cost and keeping it small. It's the bridge between research models and practical deployment.
+Model compression bridges the gap between research models and production edge constraints by eliminating redundant parameters, factorizing low-rank manifolds, and distilling dark knowledge into compact student topologies.
 
-### Why Compression Matters in ML Systems
+<div align="center">
+  <img src="compression_methods_overview.svg" alt="Compression Methods Overview" width="100%">
+</div>
 
-**The Storage Challenge:**
-- Modern language models: 100GB+ (GPT-3 scale)
-- Mobile devices: <1GB available for models
-- Edge devices: <100MB realistic limits
-- Network bandwidth: Slow downloads kill user experience
+### The Model Compression Taxonomy
 
-**The Speed Challenge:**
-- Research models: Designed for accuracy, not efficiency
-- Production needs: Sub-second response times
-- Battery life: Energy consumption matters for mobile
-- Cost scaling: Inference costs grow with model size
-
-### The Compression Landscape
-
-```
-Neural Network Compression Techniques:
-
-┌───────────────────────────────────────────────────────────────────────┐
-│                         COMPRESSION METHODS                           │
-├───────────────────────────────────────────────────────────────────────┤
-│  WEIGHT-BASED                       │  ARCHITECTURE-BASED             │
-│  ┌────────────────────────────────┐ │  ┌────────────────────────────┐ │
-│  │ Magnitude Pruning              │ │  │ Knowledge Distillation     │ │
-│  │ • Remove small weights         │ │  │ • Teacher → Student        │ │
-│  │ • Scattered zeros              │ │  │ • Smaller architecture     │ │
-│  │                                │ │  │                            │ │
-│  │ Structured Pruning             │ │  │ Neural Architecture        │ │
-│  │ • Remove entire channels       │ │  │ Search (NAS)               │ │
-│  │ • Zeros that can be deleted    │ │  │ • Automated design         │ │
-│  │                                │ │  │                            │ │
-│  │ Low-Rank Approximation         │ │  │ Early Exit                 │ │
-│  │ • Matrix factorization         │ │  │ • Adaptive compute         │ │
-│  │ • SVD decomposition            │ │  │                            │ │
-│  └────────────────────────────────┘ │  └────────────────────────────┘ │
-└───────────────────────────────────────────────────────────────────────┘
-```
-
-Think of compression like optimizing a recipe - you want to keep the essential ingredients that create the flavor while removing anything that doesn't contribute to the final dish.
+| Category | Compression Paradigm | Operational Mechanism | Hardware Acceleration Profile | Accuracy Trade-Off |
+| :--- | :--- | :--- | :--- | :--- |
+| **Weight-Based** | **Magnitude Pruning** | Zero out individual scalar weights $\lvert W_{i, j} \rvert < \tau$ | Requires sparse BLAS (CSR/COO); dense kernels see $0\times$ speedup | Minimal loss at $\le 70\%$ sparsity |
+| **Weight-Based** | **Structured Pruning** | Zero out entire columns/channels $\lVert W_{:, c} \rVert_2 < \tau$ | Dense GEMM dimension reduction ($M \times N \to M \times N'$); immediate speedup | Higher risk of capacity collapse |
+| **Weight-Based** | **Low-Rank SVD** | Truncate singular spectrum $W \approx A B$ | Replaces 1 large GEMM with 2 small GEMMs ($r(M+N)$ FLOPs) | Exact rank-dependent error bound |
+| **Architecture-Based** | **Knowledge Distillation** | Train smaller student on softened teacher logits | Native execution on any hardware target at full student throughput | Often matches or exceeds raw student |
 """
 
 # %% [markdown]
-"""
-## 📐 Foundations: Mathematical Background
+r"""
+## 📐 Foundations: Mathematical Formulations
 
-Understanding the mathematics behind compression helps us choose the right technique for each situation and predict their effects on model performance.
+Understanding the mathematical principles behind compression enables disciplined trade-offs between parameter volume, arithmetic intensity, and representation fidelity.
 
-### Magnitude-Based Pruning: The Simple Approach
+### 1. Magnitude-Based Pruning (Unstructured)
 
-The core insight: small weights contribute little to the final prediction. Magnitude pruning removes weights based on their absolute values.
+Magnitude pruning hypothesizes that weights with the smallest absolute values contribute least to output activations. For a weight matrix $W \in \mathbb{R}^{M \times N}$, a binary pruning mask $M \in \{0, 1\}^{M \times N}$ is evaluated via a magnitude cutoff threshold $\tau$:
 
-```
-Mathematical Foundation:
-For weight w_ij in layer l:
-    If |w_ij| < threshold_l → w_ij = 0
+$$M_{i, j} = \begin{cases} 1 & \text{if } |W_{i, j}| \ge \tau \\ 0 & \text{otherwise} \end{cases}, \quad W_{\text{pruned}} = W \odot M$$
 
-Threshold Selection:
-- Global: One threshold for entire model
-- Layer-wise: Different threshold per layer
-- Percentile-based: Remove bottom k% of weights
+Given target sparsity $S \in [0, 1]$, the scalar threshold $\tau$ satisfies:
 
-Sparsity Calculation:
-    Sparsity = (Zero weights / Total weights) × 100%
-```
+$$\tau = \text{Quantile}\left( \{|W_{i, j}|\}, \, S \right)$$
 
-### Structured Pruning: Zeros in Deletable Shapes
+$$\text{Global Sparsity} = \frac{\sum_{i, j} \mathbf{1}(W_{i, j} = 0)}{M \times N} = 1 - \frac{\|W_{\text{pruned}}\|_0}{\|W\|_0}$$
 
-Unlike magnitude pruning which creates scattered zeros, structured pruning removes entire computational units (neurons, channels, attention heads). In this module "removes" means zeros the whole column; the shape change that actually deletes it is a separate step (see the Structured Pruning section).
+### 2. Structured Channel Pruning
 
-```
-Channel Importance Metrics:
+Unstructured pruning leaves scattered scalar zeros in dense storage arrays, requiring sparse BLAS representations (e.g. Compressed Sparse Row/Column, COO) that rarely yield wall-clock speedups on modern GPU tensor cores unless sparsity exceeds $80\%\text{--}90\%$.
 
-Method 1: L2 Norm
-    Importance(channel_i) = ||W[:,i]||₂ = √(Σⱼ W²ⱼᵢ)
+Structured pruning eliminates contiguous parameter slices (such as entire output channels or column vectors in linear projections), directly shrinking the matrix dimensions:
 
-Method 2: Gradient-based
-    Importance(channel_i) = |∂Loss/∂W[:,i]|
+$$\|W_{:, c}\|_2 = \sqrt{\sum_{r=1}^M W_{r, c}^2}, \quad c \in \{1, \dots, N\}$$
 
-Method 3: Activation-based
-    Importance(channel_i) = E[|activations_i|]
+Channels with the lowest $\ell_2$-norm are zeroed out or excised, reducing dense matrix multiply dimensions from $(M \times N)$ to $(M \times N')$, delivering guaranteed FLOP reductions on dense hardware.
 
-Pruning Decision:
-    Remove bottom k% of channels based on importance ranking
-```
+### 3. Knowledge Distillation & Dark Knowledge
 
-### Knowledge Distillation: Learning from Teachers
+Knowledge distillation trains a compact student model $\mathcal{S}$ with parameters $\theta_s$ to mimic the continuous predictive probability distribution of an over-parameterized teacher $\mathcal{T}$ with frozen parameters $\theta_t$.
 
-Knowledge distillation transfers knowledge from a large "teacher" model to a smaller "student" model. The student learns not just the correct answers, but the teacher's reasoning process.
+The total objective function balances soft target mimicry with ground-truth supervised cross-entropy:
 
-```
-Distillation Loss Function:
-    L_total = α × L_soft + (1-α) × L_hard
+$$\mathcal{L}_{\text{total}} = \alpha \cdot \mathcal{L}_{\text{soft}} + (1 - \alpha) \cdot \mathcal{L}_{\text{hard}}$$
 
-Where:
-    L_soft = KL(σ(z_t/T) ‖ σ(z_s/T))             # Soft targets: teacher is the reference
-    L_hard = CrossEntropy(σ(z_s), y_true)        # Hard targets
+$$\mathcal{L}_{\text{soft}} = D_{\text{KL}}\left( \sigma\left(\frac{z_t}{T}\right) \,\Big\|\, \sigma\left(\frac{z_s}{T}\right) \right) = \sum_{k=1}^C p_k^t \log \left(\frac{p_k^t}{p_k^s}\right)$$
 
-    σ(z/T) = Softmax with temperature T
-    z_s = Student logits, z_t = Teacher logits
-    α = Balance parameter (typically 0.7)
-    T = Temperature parameter (typically 3-5)
+where temperature parameter $T > 1$ softens probability distributions over output classes $C$:
 
-KL is not symmetric. KL(p ‖ q) = Σ p log(p/q) is zero when q matches p and
-grows fastest where p puts probability that q does not, so the teacher's
-distribution goes first: it is the target the student is pulled toward.
+$$p_k = \sigma\left(\frac{z}{T}\right)_k = \frac{\exp(z_k / T)}{\sum_{j=1}^C \exp(z_j / T)}$$
 
-Temperature Effect:
-    T=1: Standard softmax (sharp probabilities)
-    T>1: Softer distributions (reveals teacher's uncertainty)
-```
+<div align="center">
+  <img src="distillation_temperature_dark_knowledge.svg" alt="Distillation Temperature Softening" width="100%">
+</div>
 
-### Low-Rank Approximation: Matrix Compression
+At $T=1$, the softmax distribution is peaked, suppressing inter-class correlations ("dark knowledge"). At $T=3\text{--}5$, minor class probabilities rise by orders of magnitude, exposing structural similarities between related semantic categories (e.g., distinguishing between a sedan and an SUV versus a truck).
 
-Large weight matrices often have redundancy that can be captured with lower-rank approximations using Singular Value Decomposition (SVD).
+### 4. Low-Rank Approximation (Truncated SVD)
 
-```
-SVD Decomposition:
-    W_{m×n} = U_{m×k} × Σ_{k×k} × V^T_{k×n}
+By the Eckart-Young-Mirsky Theorem, the optimal rank-$r$ approximation of a weight matrix $W \in \mathbb{R}^{M \times N}$ in Frobenius norm is obtained via truncated Singular Value Decomposition:
 
-Parameter Reduction:
-    Original: m × n parameters
-    Compressed: (m × k) + k + (k × n) = k(m + n + 1) parameters
+$$W = U \Sigma V^T \approx U_r \Sigma_r V_r^T$$
 
-    Compression achieved when: k < mn/(m+n+1)
+where $U_r \in \mathbb{R}^{M \times r}$, $\Sigma_r = \text{diag}(\sigma_1, \dots, \sigma_r) \in \mathbb{R}^{r \times r}$, and $V_r^T \in \mathbb{R}^{r \times N}$.
 
-    This module returns three factors: U, the k singular values S, and V^T.
-    Store S as a vector; construct diag(S) only when reconstructing the matrix.
+<div align="center">
+  <img src="svd_rank_breakeven.svg" alt="SVD Rank Break-Even Curve" width="100%">
+</div>
 
-Reconstruction Error:
-    ||W - W_approx||_F = √(Σᵢ₌ₖ₊₁ʳ σᵢ²)
+By absorbing $\Sigma_r$ into $U_r$ or $V_r^T$, the linear projection $y = x W^T$ is factorized into two cascaded low-rank operations:
 
-    Where σᵢ are singular values, r = rank(W)
-```
+$$A = U_r \sqrt{\Sigma_r} \in \mathbb{R}^{M \times r}, \quad B = \sqrt{\Sigma_r} V_r^T \in \mathbb{R}^{r \times N} \implies W \approx A B$$
+
+$$\text{Parameter Volume}: \quad P_{\text{dense}} = M \times N \quad \longrightarrow \quad P_{\text{factorized}} = r \cdot (M + N + 1)$$
+
+$$\text{Break-Even Rank Threshold } r^*: \quad r^* = \frac{M \cdot N}{M + N + 1} \quad \left(\text{When } M = N, \quad r^* \approx \frac{N}{2}\right)$$
+
+If the chosen rank $r$ exceeds $r^*$, the factorized representation contains *more* parameters and requires *more* FLOPs than the original dense layer!
 """
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Implementation: Sparsity Measurement
 
-Before we can compress models, we need to understand how dense they are. Sparsity measurement tells us what percentage of weights are zero (or effectively zero).
+Sparsity quantifies the proportion of non-contributing (zero-valued) parameters within a network graph:
 
-### Understanding Sparsity
+$$\text{Sparsity} = \frac{N_{\text{zeros}}}{N_{\text{total}}} = \frac{\sum_{p \in \Theta} \sum_{i} \mathbf{1}(p_i = 0)}{\sum_{p \in \Theta} \text{size}(p)}$$
 
-Sparsity is like measuring how much of a parking lot is empty. A 90% sparse model means 90% of its weights are zero - only 10% of the "parking spaces" are occupied.
-
-```
-Sparsity Visualization:
-
-Dense Matrix (0% sparse):           Sparse Matrix (75% sparse):
-┌─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐    ┌─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐
-│ 2.1 1.3 0.8 1.9 2.4 1.1 0.7 │    │ 2.1 0.0 0.0 1.9 0.0 0.0 0.0 │
-│ 1.5 2.8 1.2 0.9 1.6 2.2 1.4 │    │ 0.0 2.8 0.0 0.0 0.0 2.2 0.0 │
-│ 0.6 1.7 2.5 1.1 0.8 1.3 2.0 │    │ 0.0 0.0 2.5 0.0 0.0 0.0 2.0 │
-│ 1.9 1.0 1.6 2.3 1.8 0.9 1.2 │    │ 1.9 0.0 0.0 2.3 0.0 0.0 0.0 │
-└─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┘    └─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┘
-All weights active                   Only 7/28 weights active
-Storage: 28 values                   Storage: 7 values + indices
-```
-
-Why this matters: Sparsity directly relates to memory savings, but achieving speedup requires special sparse computation libraries.
+| Matrix State | Active Non-Zero Elements | Memory Footprint (FP32) | Hardware Execution Behavior |
+| :--- | :--- | :--- | :--- |
+| **Dense Matrix ($0\%$ Sparsity)** | $M \times N$ ($100\%$ active) | $M \times N \times 4$ bytes | Peak memory bandwidth and dense GEMM throughput |
+| **Unstructured Sparse ($75\%$ Sparsity)** | $0.25 \times M \times N$ active | $M \times N \times 4$ bytes (Dense) / $0.5 \times M \times N \times 4$ bytes (COO) | No dense speedup without sparse library; memory access divergence |
+| **Structured Sparse ($50\%$ Channels Zeroed)** | $0.50 \times M \times N$ active | $0.5 \times M \times N \times 4$ bytes (after reshape) | Immediate $2\times$ reduction in dense GEMM FLOPs and latency |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "measure-sparsity", "solution": true}
@@ -436,66 +363,39 @@ if __name__ == "__main__":
     test_unit_measure_sparsity()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Magnitude-Based Pruning
 
-Magnitude pruning is the simplest and most intuitive compression technique. It's based on the observation that weights with small magnitudes contribute little to the model's output.
+Magnitude pruning is the foundational weight-level compression technique. It operates on the hypothesis that weights with near-zero absolute values contribute minimally to downstream activation norms and gradient flow.
 
 ### How Magnitude Pruning Works
 
-Think of magnitude pruning like editing a document - you remove words that don't significantly change the meaning. In neural networks, we remove weights that don't significantly affect predictions.
+In an unstructured setting, pruning computes an empirical magnitude threshold across tensor weights and masks values below it:
 
-```
-Magnitude Pruning Process:
+$$\tau = \text{Quantile}\left(\{|W_{i, j}|\}, \, S\right), \quad M_{i, j} = \mathbf{1}(|W_{i, j}| \ge \tau), \quad W_{\text{pruned}} = W \odot M$$
 
-Step 1: Collect All Weights (20 total across 2 layers)
-┌──────────────────────────────────────────────────┐
-│ Layer 1: [2.1, 0.08, -1.8, 0.04, 3.2,            │
-│           -0.02, 1.5, -0.03, 2.8, 0.06]          │
-│ Layer 2: [0.7, 2.4, -0.05, 1.9, 0.01,            │
-│           -1.3, 0.03, 2.1, -0.07, 0.09]          │
-└──────────────────────────────────────────────────┘
-                    ↓
-Step 2: Calculate Magnitudes
-┌──────────────────────────────────────────────────┐
-│ Sorted: [0.01, 0.02, 0.03, 0.03, 0.04, 0.05,     │
-│          0.06, 0.07, 0.08, 0.09, 0.7, 1.3,       │
-│          1.5, 1.8, 1.9, 2.1, 2.1, 2.4, 2.8, 3.2] │
-└──────────────────────────────────────────────────┘
-                    ↓
-Step 3: Find Threshold (e.g., 50th percentile)
-┌──────────────────────────────────────────────────┐
-│ 20 values → 50th pctile between 10th and 11th    │ Threshold ≈ 0.4
-│ Values ≤ 0.4: ten small weights get zeroed        │ (50% of weights removed)
-└──────────────────────────────────────────────────┘
-                    ↓
-Step 4: Apply Pruning Mask
-┌──────────────────────────────────────────────────┐
-│ Layer 1: [2.1, 0.0, -1.8, 0.0, 3.2,              │
-│           0.0, 1.5, 0.0, 2.8, 0.0]              │ 50% weights → 0
-│ Layer 2: [0.7, 2.4, 0.0, 1.9, 0.0,              │ 50% preserved
-│           -1.3, 0.0, 2.1, 0.0, 0.0]              │
-└──────────────────────────────────────────────────┘
+| Pipeline Step | Operational Description | Concrete Example Values | State Transformation |
+| :--- | :--- | :--- | :--- |
+| **1. Collect Weights** | Flatten all layer parameter tensors into a single array | $L_1: [2.1, 0.08, -1.8, 0.04, 3.2, \dots]$, $L_2: [0.7, 2.4, -0.05, \dots]$ | 20 FP32 parameters |
+| **2. Rank Magnitudes** | Compute absolute values $\lvert W \rvert$ and sort stably | $[0.01, 0.02, 0.03, 0.04, 0.05, \dots, 2.4, 2.8, 3.2]$ | Ranked magnitude list |
+| **3. Compute Threshold** | Find quantile cutoff corresponding to target sparsity $S$ | For $S = 50\%$, median value between 10th and 11th rank | Threshold $\tau \approx 0.40$ |
+| **4. Apply Binary Mask** | Zero out elements where $\lvert W_{i, j} \rvert < \tau$ in-place | $L_1: [2.1, 0.0, -1.8, 0.0, 3.2, \dots]$, $L_2: [0.7, 2.4, 0.0, \dots]$ | $50\%$ sparse weight matrix |
 
-Memory Impact:
-- Dense storage: 20 values × 4 bytes = 80 bytes
-- Sparse storage: 10 values + 10 indices = 80 bytes (no savings!)
-- At 90% sparsity: 2 values + 2 indices = 16 bytes (80% savings)
-```
+### Memory Impact: Dense vs. Coordinate Sparse (COO) Formats
 
-### Why Global Thresholding Works
+| Format | Storage Schema | Footprint at $0\%$ Sparsity | Footprint at $50\%$ Sparsity | Footprint at $90\%$ Sparsity | Hardware Speedup |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Dense Tensor** | Flat buffer $N \times 4\text{ B}$ | $20 \times 4 = 80\text{ B}$ | $20 \times 4 = 80\text{ B}$ ($0\times$ saving) | $20 \times 4 = 80\text{ B}$ ($0\times$ saving) | Baseline ($1.0\times$) |
+| **Coordinate (COO)** | $(\text{val}, \text{idx}) \to 4\text{ B} + 4\text{ B}$ | $20 \times 8 = 160\text{ B}$ ($2\times$ overhead) | $10 \times 8 = 80\text{ B}$ ($0\times$ saving) | $2 \times 8 = 16\text{ B}$ ($80\%$ saving) | Requires sparse BLAS; slow $<80\%$ |
+| **Compressed Row (CSR)** | $\text{val}[4\text{B}] + \text{col}[2\text{B}] + \text{ptr}$ | $20 \times 6 + 12 = 132\text{ B}$ | $10 \times 6 + 12 = 72\text{ B}$ ($10\%$ saving) | $2 \times 6 + 12 = 24\text{ B}$ ($70\%$ saving) | Speedup only at $\ge 85\%\text{--}90\%$ sparsity |
 
-Global thresholding treats the entire model as one big collection of weights, finding a single threshold that achieves the target sparsity across all layers.
+### Global vs. Layer-Wise Pruning
 
-**Advantages:**
-- Simple to implement and understand
-- Preserves overall model capacity
-- Works well for uniform network architectures
+Global thresholding treats all parameters across the entire network as a unified distribution, selecting a single threshold $\tau$ for the whole model:
 
-**Disadvantages:**
-- May over-prune some layers, under-prune others
-- Doesn't account for layer-specific importance
-- Can hurt performance if layers have very different weight distributions
+- **Preserved Network Capacity**: Layers with higher dynamic range and larger gradient impact automatically retain more parameters.
+- **Layer-Sensitivity Awareness**: Automatically allocates higher sparsity to redundant layers (e.g. wide intermediate feed-forward projections) while protecting sensitive bottleneck layers.
+- **Boundary Risk**: Extremely deep architectures can experience layer collapse if an entire layer's weights fall below $\tau$; layer-wise guardrails or minimum density constraints are applied in production pipelines.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "magnitude-prune", "solution": true}
@@ -600,75 +500,45 @@ if __name__ == "__main__":
     test_unit_magnitude_prune()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Structured Pruning
 
-While magnitude pruning creates scattered zeros throughout the network, structured pruning removes entire computational units (channels, neurons, heads). This creates sparsity patterns that modern hardware can actually accelerate.
+While unstructured magnitude pruning introduces fine-grained, scattered zeros throughout parameter arrays, structured pruning removes entire architectural units—such as output channels, projection columns, or attention heads. This directly alters tensor dimensions, producing compact dense matrices that standard dense BLAS libraries (cuBLAS, OpenBLAS, Apple Accelerate) can execute with immediate wall-clock speedup.
 
-### Why Structured Pruning Matters
+### Unstructured vs. Structured Sparsity Comparison
 
-Think of the difference between removing random words from a paragraph versus removing entire sentences. Structured pruning removes entire "sentences" (channels) rather than random "words" (individual weights).
+| Property | Unstructured Sparsity (Scalar Pruning) | Structured Sparsity (Channel Pruning) |
+| :--- | :--- | :--- |
+| **Pruning Granularity** | Individual weights $W_{i, j} = 0$ | Entire slice $W_{:, c} = \mathbf{0}$ or sliced out |
+| **Tensor Dimensions** | Preserved $(M \times N)$ | Reduced $(M \times N')$, where $N' = (1 - P) N$ |
+| **Memory Access Pattern** | Non-contiguous, index-divergent, irregular | Fully contiguous, cache-line aligned, coalesceable |
+| **Hardware Acceleration** | Requires custom sparse GEMM kernels ($\ge 80\%$ sparsity threshold) | Immediate linear speedup on standard dense GEMM hardware |
+| **Accuracy Retention** | Exceptional (minimizes loss at $\le 75\%$ sparsity) | Moderate (removing full channels risks capacity drop) |
+| **Index Overhead** | $4\text{--}8\text{ bytes}$ per non-zero value (COO/CSR) | $0\text{ bytes}$ (tensor is simply smaller) |
 
-```
-Unstructured vs Structured Sparsity:
+### Channel Importance Ranking Formulations
 
-UNSTRUCTURED (Magnitude Pruning):
-┌─────────────────────────────────────────────┐
-│ Channel 0: [2.1, 0.0, 1.8, 0.0, 3.2]        │ ← Sparse weights
-│ Channel 1: [0.0, 2.8, 0.0, 2.1, 0.0]        │ ← Sparse weights
-│ Channel 2: [1.5, 0.0, 2.4, 0.0, 1.9]        │ ← Sparse weights
-│ Channel 3: [0.0, 1.7, 0.0, 2.0, 0.0]        │ ← Sparse weights
-└─────────────────────────────────────────────┘
-Issues: Irregular memory access, no hardware speedup
+To prune $k$ channels with minimal loss of representational fidelity, each channel $c \in \{1, \dots, N\}$ is assigned an importance score $\mathcal{I}_c$:
 
-STRUCTURED (Channel Pruning):
-┌─────────────────────────────────────────────┐
-│ Channel 0: [2.1, 1.3, 1.8, 0.9, 3.2]        │ ← Fully preserved
-│ Channel 1: [0.0, 0.0, 0.0, 0.0, 0.0]        │ ← Fully removed
-│ Channel 2: [1.5, 2.2, 2.4, 1.1, 1.9]        │ ← Fully preserved
-│ Channel 3: [0.0, 0.0, 0.0, 0.0, 0.0]        │ ← Fully removed
-└─────────────────────────────────────────────┘
-Benefits: Regular patterns, hardware acceleration possible
-```
+$$\begin{aligned}
+\text{Method 1: } \ell_2\text{-Norm (Standard)} \quad & \mathcal{I}_c = \|W_{:, c}\|_2 = \sqrt{\sum_{r=1}^M W_{r, c}^2} \\
+\text{Method 2: Activation Magnitude} \quad & \mathcal{I}_c = \mathbb{E}_{x \sim \mathcal{D}}\left[ \frac{1}{B} \sum_{b=1}^B |y_{b, c}| \right] \\
+\text{Method 3: First-Order Taylor Expansion} \quad & \mathcal{I}_c = \left| \sum_{r=1}^M \frac{\partial \mathcal{L}}{\partial W_{r, c}} \cdot W_{r, c} \right|
+\end{aligned}$$
 
-### Channel Importance Ranking
-
-How do we decide which channels to remove? We rank them by importance using various metrics:
-
-```
-Channel Importance Metrics:
-
-Method 1: L2 Norm (Most Common)
-    For each output channel i:
-    Importance_i = ||W[:, i]||_2 = √(Σⱼ w²ⱼᵢ)
-
-    Intuition: Channels with larger weights have bigger impact
-
-Method 2: Activation-Based
-    Importance_i = E[|activation_i|] over dataset
-
-    Intuition: Channels that activate more are more important
-
-Method 3: Gradient-Based
-    Importance_i = |∂Loss/∂W[:, i]|
-
-    Intuition: Channels with larger gradients affect loss more
-
-Ranking Process:
-    1. Calculate importance for all channels
-    2. Sort channels by importance (ascending)
-    3. Remove bottom k% (least important)
-    4. Zero out entire channels, not individual weights
-```
+| Channel Ranking Step | Operational Procedure | Systems Implication |
+| :--- | :--- | :--- |
+| **1. Compute Channel Norms** | Calculate $\mathcal{I}_c = \lVert W_{:, c} \rVert_2$ for all $c \in \{0, \dots, N-1\}$ | Vectorized reduction across columns (BLAS-1 `nrm2`) |
+| **2. Rank Channel Importance** | Sort indices $c$ by $\mathcal{I}_c$ in ascending order | Minimal sort overhead over $N$ scalar norms |
+| **3. Identify Prune Set** | Select bottom $\lfloor \text{prune\_ratio} \times N \rfloor$ channels | Preserves highest-energy representations |
+| **4. Mask / Excise Channels** | Zero out entire columns $W_{:, c} = 0$ (or physically slice $W$) | Slices dense GEMM memory traffic from $M \times N$ to $M \times N'$ |
 
 ### Hardware Benefits of Structured Sparsity
 
-Structured sparsity enables real hardware acceleration because:
-
-1. **Memory Coalescing**: Accessing contiguous memory chunks is faster
-2. **SIMD Operations**: Can process multiple remaining channels in parallel
-3. **No Indexing Overhead**: Don't need to track locations of sparse weights
-4. **Cache Efficiency**: Better spatial locality of memory access
+1. **Memory Coalescing**: DRAM burst transactions fetch 32-byte or 64-byte contiguous cache lines. Structured pruning preserves dense contiguous row/column traversal, achieving near-100% bus utilization.
+2. **SIMD / Tensor Core Vectorization**: Hardware vector units (AVX-512, NEON, Tensor Cores) require contiguous vectors of 8, 16, or 32 elements. Excising full channels maintains full vector lane occupancy without zero-mask predication.
+3. **Zero Indexing Overhead**: Avoids pointer arrays and index indirection (`ptr[i]`, `col_idx[k]`), eliminating pointer chase stalls and TLB misses.
+4. **Cache Residency**: Reducing tensor dimensions decreases L1/L2 cache footprint, fitting working sets entirely within SRAM.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "structured-prune", "solution": true}
@@ -959,106 +829,51 @@ if __name__ == "__main__":
     test_unit_low_rank_approximate()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Knowledge Distillation
 
-Knowledge distillation is like having an expert teacher simplify complex concepts for a student. The large "teacher" model shares its knowledge with a smaller "student" model, achieving similar performance with far fewer parameters.
+Knowledge distillation transfers the dark knowledge embedded in a wide, highly accurate teacher model $\mathcal{T}$ into an architecturally compact student model $\mathcal{S}$. While traditional supervised learning forces models to fit sparse, one-hot ground-truth labels, distillation exposes continuous relative probabilities across all negative classes.
 
-### The Teacher-Student Learning Process
+<div align="center">
+  <img src="distillation_temperature_dark_knowledge.svg" alt="Distillation Temperature and Dark Knowledge" width="100%">
+</div>
 
-Unlike traditional training where models learn from hard labels (cat/dog), knowledge distillation uses "soft" targets that contain richer information about the teacher's decision-making process.
+### Teacher vs. Student Systems Profile
 
-```
-Knowledge Distillation Process:
+| Model Role | Parameters | FP32 Footprint | Batch Latency | Relative Accuracy | Deployment Target |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Teacher ($\mathcal{T}$)** | $100\text{M}$ | $400\text{ MB}$ | $500\text{ ms}$ | $95.0\%$ (Baseline) | Cloud Training Server (Multi-GPU) |
+| **Student ($\mathcal{S}$)** | $10\text{M}$ ($10\times$ smaller) | $40\text{ MB}$ ($10\times$ smaller) | $50\text{ ms}$ ($10\times$ faster) | $93.2\%$ ($1.8\%$ gap) | Edge Device / Mobile SoC |
 
-                    TEACHER MODEL (Large)
-                    ┌─────────────────────┐
-Input Data ────────→│ 100M parameters     │
-                    │ 95% accuracy        │
-                    │ 500ms inference     │
-                    └─────────────────────┘
-                             │
-                             ↓ Soft Targets
-                    ┌─────────────────────┐
-                    │  Logits: [2.1, 0.3, │
-                    │           0.8, 4.2] │ ← Rich information
-                    └─────────────────────┘
-                             │
-                             ↓ Distillation Loss
-                    ┌─────────────────────┐
-Input Data ────────→│ STUDENT MODEL       │
-Hard Labels ───────→│ 10M parameters      │ ← 10x smaller
-                    │ 93% accuracy        │ ← 2% loss
-                    │ 50ms inference      │ ← 10x faster
-                    └─────────────────────┘
+### Temperature Scaling: Revealing Dark Knowledge
 
-Benefits:
-• Size: 10x smaller models
-• Speed: 10x faster inference
-• Accuracy: Only 2-5% degradation
-• Knowledge transfer: Student learns teacher's "reasoning"
-```
+At standard temperature $T = 1$, standard softmax exponentiates dominant logits, crushing sub-dominant probabilities to near zero. Temperature scaling softens this distribution, revealing fine-grained cross-class relationships:
 
-### Temperature Scaling: Softening Decisions
+$$p_i(z, T) = \frac{\exp(z_i / T)}{\sum_{j=1}^C \exp(z_j / T)}$$
 
-Temperature scaling is a key innovation that makes knowledge distillation effective. It "softens" the teacher's confidence, revealing uncertainty that helps the student learn.
+| Distribution Parameter | Class 1 (Cat) | Class 2 (Dog) | Class 3 (Car) | Distribution Entropy | Gradient Signal Dynamics |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Teacher Raw Logits $z$** | $1.0$ | $2.0$ | $0.5$ | — | Unbounded linear pre-activations |
+| **Standard Softmax ($T = 1$)** | $0.231$ | $0.628$ | $0.140$ | $0.94\text{ nats}$ | Hardened decisions; negligible gradient on negative classes |
+| **Softened Softmax ($T = 3$)** | $0.312$ | $0.432$ | $0.256$ | $1.07\text{ nats}$ | Reveals dog/cat visual overlap ("dark knowledge"); rich gradients |
+| **Extreme Softmax ($T = 10$)** | $0.332$ | $0.367$ | $0.301$ | $1.10\text{ nats}$ | High entropy; approaches uniform distribution ($1/C = 0.333$) |
 
-```
-Temperature Effect on Probability Distributions:
+### Distillation Loss Formulation
 
-Without Temperature (T=1):           With Temperature (T=3):
-Teacher Logits: [1.0, 2.0, 0.5]    Teacher Logits: [1.0, 2.0, 0.5]
-                       ↓                               ↓ ÷ 3
-Softmax: [0.23, 0.63, 0.14]         Logits/T: [0.33, 0.67, 0.17]
-         ^      ^      ^                       ↓
-      Med   High   Low              Softmax: [0.31, 0.43, 0.26]
-                                             ^      ^      ^
-Sharp decisions (hard to learn)           Soft   decisions (easier to learn)
+The complete training objective balances continuous distribution matching against discrete ground-truth cross-entropy:
 
-Why Soft Targets Help:
-1. Reveal teacher's uncertainty about similar classes
-2. Provide richer gradients for student learning
-3. Transfer knowledge about class relationships
-4. Reduce overfitting to hard labels
-```
+$$\mathcal{L}_{\text{total}} = \alpha \cdot \mathcal{L}_{\text{soft}} + (1 - \alpha) \cdot \mathcal{L}_{\text{hard}}$$
 
-### Loss Function Design
+$$\mathcal{L}_{\text{soft}} = D_{\text{KL}}\left( p(z_T, T) \,\|\, q(z_S, T) \right) = \sum_{i=1}^C p_i(z_T, T) \log \left( \frac{p_i(z_T, T)}{q_i(z_S, T)} \right)$$
 
-The distillation loss balances learning from both the teacher's soft knowledge and the ground truth hard labels:
+$$\mathcal{L}_{\text{hard}} = \text{CrossEntropy}\left(q(z_S, 1), \, y_{\text{true}}\right) = -\sum_{i=1}^C y_{\text{true}, i} \log q_i(z_S, 1)$$
 
-```
-Combined Loss Function:
+| Hyperparameter | Canonical Range | Optimization Objective | Boundary Effect |
+| :--- | :--- | :--- | :--- |
+| **Distillation Weight $\alpha$** | $0.5\text{--}0.8$ | Regulates gradient contribution of teacher vs. ground-truth | $\alpha = 1.0$: Pure imitation; $\alpha = 0.0$: Regular training |
+| **Distillation Temperature $T$** | $2.0\text{--}5.0$ | Expands logit entropy to transmit non-argmax correlations | $T \to \infty$: Uniform probabilities; $T = 1.0$: Standard argmax |
 
-L_total = α × L_soft + (1-α) × L_hard
-
-Where:
-    L_soft = KL_divergence(Teacher_soft, Student_soft)
-             │
-             └─ Measures how well student mimics teacher
-
-    L_hard = CrossEntropy(Student_predictions, True_labels)
-             │
-             └─ Ensures student still learns correct answers
-
-Balance Parameter α:
-• α = 0.7: Focus mainly on teacher (typical)
-• α = 0.9: Almost pure distillation
-• α = 0.3: Balance teacher and ground truth
-• α = 0.0: Ignore teacher (regular training)
-
-Temperature T:
-• T = 1: No softening (standard softmax)
-• T = 3-5: Good balance (typical range)
-• T = 10+: Very soft (may lose information)
-```
-
-Both terms average over samples, so duplicating a batch leaves the loss and
-the balance set by α unchanged. The teacher supplies fixed targets; only the
-student's log-probabilities retain a gradient path. We reuse Module 04's stable
-`log_softmax` and Module 06's autograd instead of extracting the student's NumPy
-array. The returned scalar Tensor can then drive the same backward-and-step
-cycle used for ordinary training. This version keeps the unscaled KL objective;
-it omits the optional T² multiplier discussed in the analysis below.
+Both loss components average across mini-batch samples, ensuring scale-invariant optimization regardless of batch dimension. The teacher parameters remain strictly frozen; autograd gradients flow only through the student's log-probability computational graph.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "distillation", "solution": true}
@@ -1259,72 +1074,30 @@ if __name__ == "__main__":
     test_unit_knowledge_distillation()
 
 # %% [markdown]
-"""
+r"""
 ## 🔧 Integration: Complete Compression Pipeline
 
-Now let's combine all our compression techniques into a unified system that can apply multiple methods and track their cumulative effects.
+Industrial model compression cascades multiple complementary techniques in sequence, each attacking a distinct orthogonal dimension of parameter redundancy:
 
-### Compression Strategy Design
+### Multi-Stage Compression Pipeline Cascade
 
-Real-world compression often combines multiple techniques in sequence, each targeting different types of redundancy:
+| Pipeline Stage | Applied Technique | Model State | Footprint | Cumulative Size Reduction | Relative Accuracy | Inference Latency |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Stage 0** | Baseline Dense Model | Full FP32 Dense Weights | $100\text{ MB}$ | $1.0\times$ (Baseline) | $100.0\%$ | $500\text{ ms}$ |
+| **Stage 1** | Magnitude Pruning ($80\%$ scalar sparsity) | Coordinate / CSR Format | $20\text{ MB}$ | $5.0\times$ | $98.1\%$ | $480\text{ ms}$ (Dense) / $250\text{ ms}$ (Sparse) |
+| **Stage 2** | Structured Pruning ($30\%$ channels excised) | Reduced Dense Dimensions | $14\text{ MB}$ | $7.1\times$ | $96.4\%$ | $175\text{ ms}$ |
+| **Stage 3** | Low-Rank SVD (50% rank reduction on large GEMMs) | Factorized $A B$ Matrices | $10\text{ MB}$ | $10.0\times$ | $95.2\%$ | $120\text{ ms}$ |
+| **Stage 4** | Knowledge Distillation + Retraining | Compact Student Topology | $5\text{ MB}$ | $20.0\times$ | $93.5\%$ | $50\text{ ms}$ |
 
-```
-Multi-Stage Compression Pipeline:
+$$\text{Total Compression} = \frac{\text{Initial Size}}{\text{Final Size}} = \frac{100\text{ MB}}{5\text{ MB}} = 20\times, \quad \text{Speedup} = \frac{500\text{ ms}}{50\text{ ms}} = 10\times, \quad \Delta \text{Acc} = -6.5\%$$
 
-Original Model (100MB, 100% accuracy)
-         │
-         ↓ Stage 1: Magnitude Pruning (remove 80% of small weights)
-Sparse Model (20MB, 98% accuracy)
-         │
-         ↓ Stage 2: Structured Pruning (remove 30% of channels)
-Compact Model (14MB, 96% accuracy)
-         │
-         ↓ Stage 3: Low-Rank Approximation (compress large layers)
-Factorized Model (10MB, 95% accuracy)
-         │
-         ↓ Stage 4: Knowledge Distillation (train smaller architecture)
-Student Model (5MB, 93% accuracy)
+### Target Deployment Configurations and System Budgets
 
-Final Result: 20x size reduction, 7% accuracy loss
-```
-
-### Compression Configuration
-
-Different deployment scenarios require different compression strategies:
-
-```
-Deployment Scenarios and Strategies:
-
-MOBILE APP (Aggressive compression needed):
-┌─────────────────────────────────────────┐
-│ Target: <10MB, <100ms inference         │
-│ Strategy:                               │
-│ • Magnitude pruning: 95% sparsity       │
-│ • Structured pruning: 50% channels      │
-│ • Knowledge distillation: 10x reduction │
-│ • Quantization: 8-bit weights           │
-└─────────────────────────────────────────┘
-
-EDGE DEVICE (Balanced compression):
-┌─────────────────────────────────────────┐
-│ Target: <50MB, <200ms inference         │
-│ Strategy:                               │
-│ • Magnitude pruning: 80% sparsity       │
-│ • Structured pruning: 30% channels      │
-│ • Low-rank: 50% rank reduction          │
-│ • Quantization: 16-bit weights          │
-└─────────────────────────────────────────┘
-
-CLOUD SERVICE (Minimal compression):
-┌─────────────────────────────────────────┐
-│ Target: Maintain accuracy, reduce cost  │
-│ Strategy:                               │
-│ • Magnitude pruning: 50% sparsity       │
-│ • Structured pruning: 10% channels      │
-│ • Dynamic batching optimization         │
-│ • Mixed precision inference             │
-└─────────────────────────────────────────┘
-```
+| Target Platform | Memory & Latency SLA | Recommended Strategy Cascade | Hardware Constraints & Rationale |
+| :--- | :--- | :--- | :--- |
+| **Mobile Smartphone** | Footprint $< 10\text{ MB}$<br>Latency $< 100\text{ ms}$ | 1. Knowledge Distillation ($10\times$ student)<br>2. Structured Pruning ($50\%$ channels)<br>3. Post-Training Quantization (INT8) | Limited DRAM bandwidth ($30\text{--}50\text{ GB/s}$); NEON/NPU tensor accelerators favor contiguous dense buffers over irregular sparse formats. |
+| **Embedded Edge IoT** | Footprint $< 50\text{ MB}$<br>Latency $< 200\text{ ms}$ | 1. Structured Pruning ($30\%$ channels)<br>2. Low-Rank Factorization ($50\%$ rank)<br>3. INT8 / FP16 Mixed Precision | Tight SRAM cache limits ($256\text{ KB}\text{--}2\text{ MB}$); factorized GEMMs keep intermediate working sets resident in SRAM. |
+| **Cloud Multi-Tenant** | Target: Max Throughput<br>Cost / Query SLA | 1. Conservative Magnitude Pruning ($50\%$ sparsity)<br>2. 2:4 Structured Sparsity (Ampere+ Tensor Cores)<br>3. Dynamic Batching + FP8 / BF16 | High compute density; leverages native NVIDIA 2:4 sparse tensor core acceleration for $2\times$ throughput without capacity loss. |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "compress-model-comprehensive", "solution": true}
@@ -1811,69 +1584,93 @@ def test_module():
     print("Run: tito module complete 16")
 
 # %% [markdown]
-"""
+r"""
 ## 🤔 ML Systems Reflection Questions
 
-Answer these to deepen your understanding of compression techniques and their systems implications:
-
 ### Question 1: Compression Trade-offs
-**Question**: You implemented magnitude pruning that removes 90% of weights from a 10M parameter model.
 
-**Consider**:
-- How many parameters remain active? _____ M parameters
-- If the original model was 40MB, what's the theoretical minimum storage? _____ MB
-- Why might actual speedup be less than 10x?
+**Question**: You implemented magnitude pruning that removes $90\%$ of weights from a $10\text{M}$ parameter model.
 
-**Real-world context**: Sparse matrix formats have indexing overhead, and many hardware accelerators cannot efficiently exploit unstructured sparsity.
+- **Active Parameters**:
+  $$N_{\text{active}} = N_{\text{total}} \times (1 - \text{Sparsity}) = 10\text{M} \times (1 - 0.90) = \mathbf{1.0\text{M}}\text{ parameters}$$
+
+- **Theoretical Minimum Storage**:
+  $$S_{\text{raw}} = 1.0\text{M} \times 4\text{ bytes} = \mathbf{4.0\text{ MB}}$$
+  *(Note on sparse format overheads)*:
+  - In Coordinate format (COO: value $+$ 32-bit row $+$ 32-bit column index), storage is $1.0\text{M} \times (4 + 4 + 4) = 12\text{ MB}$.
+  - In Compressed Sparse Row (CSR: FP32 values $+$ 16-bit column indices $+$ row pointers), storage is $1.0\text{M} \times (4 + 2) + (\text{rows} + 1) \times 4 \approx \mathbf{6.0\text{ MB}}$.
+
+- **Why Actual Speedup Is Less Than $10\times$**:
+  1. **Sparse Overhead on Dense Tensor Cores**: Standard systolic arrays (NVIDIA Tensor Cores, Apple Neural Engine) require aligned contiguous blocks. Unstructured zeroing yields $0\times$ speedup under standard dense GEMM kernels.
+  2. **Memory Access Divergence & Irregularity**: When sparse BLAS kernels traverse non-zero elements via pointer indirection (`col_indices[k]`), cache-line utilization drops drastically due to non-coalesced DRAM accesses.
+  3. **Amdahl's Law & Non-Pruned Operations**: Layer norms, activations, residual additions, and memory bandwidth bounds remain unpruned, setting a strict roofline limit on achievable speedup.
 
 ---
 
-### Question 2: Structured vs Unstructured Sparsity
+### Question 2: Structured vs. Unstructured Sparsity
+
 **Question**: Your structured pruning removes entire channels, while magnitude pruning creates scattered zeros.
 
-**Consider**:
-- Which enables better hardware acceleration?
-- Which preserves accuracy better at high sparsity?
-- Which creates more predictable memory access patterns?
+| Evaluation Criterion | Winner | Technical Analysis & Systems Rationale |
+| :--- | :--- | :--- |
+| **Hardware Acceleration** | **Structured Pruning** | Directly decreases physical matrix dimensions $(M \times N \to M \times N')$. Standard BLAS libraries execute dense GEMMs on contiguous arrays at peak hardware FLOP/s without specialized hardware. |
+| **Accuracy Retention** | **Unstructured Pruning** | Allows the optimization manifold to retain isolated high-magnitude synaptic connections across all channels. Preserves critical feature representations at $\ge 80\%$ sparsity where structured pruning suffers catastrophic capacity collapse. |
+| **Memory Predictability** | **Structured Pruning** | Preserves linear strided memory access without index indirection tables, ensuring full cache-line utilization ($64\text{ bytes} = 16\text{ FP32 values}$) and prefetcher effectiveness. |
 
-**Think about**: How would you choose between these approaches for different deployment targets (GPU, CPU, mobile)?
+**Deployment Selection Strategy**:
+- **Mobile / Edge / CPU**: Choose **Structured Pruning** (or 2:4 structured sparsity on Ampere+ GPUs) because edge accelerators lack high-efficiency sparse BLAS runtimes.
+- **Offline Storage / Bandwidth-Constrained Distribution**: Choose **Unstructured Pruning** with Huffman/entropy coding for over-the-air (OTA) binary delivery, followed by sparse decompression or on-device retraining.
 
 ---
 
 ### Question 3: Knowledge Distillation Efficiency
-**Question**: A teacher model has 100M parameters, student has 10M parameters, both achieve 85% accuracy.
 
-**Calculate**:
-- Compression ratio: _____x
-- If teacher inference takes 100ms, student takes 15ms, what's the speedup? _____x
-- Why is the speedup smaller than the compression ratio?
+**Question**: A teacher model has $100\text{M}$ parameters, student has $10\text{M}$ parameters, both achieve $85\%$ accuracy. Teacher latency is $100\text{ ms}$, student latency is $15\text{ ms}$.
 
-**Real-world context**: Fixed inference overhead and different compute or memory bottlenecks keep latency from scaling directly with parameter count.
+- **Compression Ratio**:
+  $$\text{Compression Ratio} = \frac{N_{\text{teacher}}}{N_{\text{student}}} = \frac{100\text{M}}{10\text{M}} = \mathbf{10.0\times}$$
+
+- **Latency Speedup**:
+  $$\text{Speedup} = \frac{\text{Latency}_{\text{teacher}}}{\text{Latency}_{\text{student}}} = \frac{100\text{ ms}}{15\text{ ms}} \approx \mathbf{6.67\times}$$
+
+- **Why Speedup Is Smaller Than the Compression Ratio ($6.67\times < 10.0\times$)**:
+  1. **Memory Bandwidth vs. Compute Roofline**: Small models often become memory-bandwidth bound or kernel-launch overhead dominated at batch size 1.
+  2. **Fixed Layer Overheads**: Both models execute identical sequence length tokenization, positional encodings, layer norms, and softmax operations that scale with sequence length $S$ rather than parameter count $P$.
+  3. **Hardware Latency Floor**: Kernel invocation overheads, CUDA stream synchronization, and PCIe transfers impose constant additive latency independent of model parameter volume.
 
 ---
 
 ### Question 4: Low-Rank Decomposition
-**Question**: You approximate a (512, 256) weight matrix with rank 64 using SVD.
 
-**Calculate**:
-- Original parameter count: _____ parameters
-- Decomposed parameter count: (512 x 64) + 64 + (64 x 256) = _____ parameters
-- Compression ratio: _____x
-- At what rank does compression become ineffective? rank > _____
+**Question**: Approximate a $(512, 256)$ weight matrix with rank $r = 64$ using SVD.
 
-**Trade-offs to consider**: Reconstruction error vs. compression ratio, and the overhead of two matrix multiplications vs. one.
+- **Original Parameter Count**:
+  $$P_{\text{orig}} = 512 \times 256 = \mathbf{131{,}072}\text{ parameters}$$
+
+- **Decomposed Parameter Count**:
+  $$P_{\text{decomposed}} = (512 \times 64) + 64 + (64 \times 256) = 32{,}768 + 64 + 16{,}384 = \mathbf{49{,}216}\text{ parameters}$$
+  *(If absorbing $\Sigma$ into factors $A = U\sqrt{\Sigma}, B = \sqrt{\Sigma}V^T$, parameter count is $32{,}768 + 16{,}384 = 49{,}152$)*.
+
+- **Compression Ratio**:
+  $$\text{Compression Ratio} = \frac{131{,}072}{49{,}216} \approx \mathbf{2.66\times} \quad \left(\text{or } \frac{131{,}072}{49{,}152} \approx 2.67\times\right)$$
+
+- **Break-Even Ineffectiveness Rank ($r^*$)**:
+  $$r \cdot (M + N + 1) \ge M \cdot N \implies r^* = \frac{M \cdot N}{M + N + 1} = \frac{512 \times 256}{512 + 256 + 1} = \frac{131{,}072}{769} \approx 170.44$$
+  Compression becomes ineffective when **$\text{rank } r > 170$**. At $r = 171$, factorized parameter count exceeds dense storage!
 
 ---
 
 ### Question 5: Pruning Strategy Selection
-**Question**: For deploying on a mobile device with 50MB model limit and 100ms latency requirement:
 
-**Consider**:
-- Which pruning strategy optimizes for memory? [magnitude/structured/both]
-- Which pruning strategy optimizes for speed? [magnitude/structured/both]
-- What order should you apply compression techniques?
+**Question**: Deploying on a mobile device with a $50\text{ MB}$ model limit and $100\text{ ms}$ latency requirement.
 
-**Real-world context**: Mobile devices have limited memory bandwidth, making structured sparsity more beneficial for latency.
+- **Memory Optimization Strategy**: **Magnitude Pruning + Weight Quantization** (achieves extreme compression ratios up to $10\text{--}20\times$ by zeroing non-essential weights and packing non-zeros into INT8/INT4).
+- **Speed Optimization Strategy**: **Structured Pruning + Knowledge Distillation** (physically reduces channel dimensions and depth, directly shrinking dense GEMM computation and memory fetch cycles).
+- **Optimal Sequential Compression Cascade**:
+  1. **Knowledge Distillation**: First train a smaller student architecture designed specifically to fit mobile latency constraints.
+  2. **Structured Pruning**: Prune redundant channels in the student model by $20\text{--}30\%$ to optimize cache residency.
+  3. **Fine-Tuning / Retraining**: Recover accuracy lost during structural pruning via student fine-tuning.
+  4. **Post-Training Quantization (INT8)**: Quantize remaining weights and activations from FP32 to INT8, delivering a final $4\times$ memory reduction and activating high-throughput INT8 mobile DSP/NPU vector engines.
 """
 
 # %% [markdown]
