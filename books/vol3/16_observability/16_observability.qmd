@@ -166,7 +166,7 @@ Every evaluation task must execute within a disposable, isolated sandbox that pr
 
 To achieve this, the evaluation supervisor treats every sandbox instance as single-use. While the underlying physical machine or host hypervisor remains long-lived to amortize hardware initialization costs, the guest execution boundary is provisioned dynamically for a single task trajectory and destroyed immediately upon task termination. Any data written outside the designated evaluation workspace is discarded at the virtual block layer.
 
-#### Deterministic Mock Services and Network Fencing {.unnumbered}
+#### Deterministic Mock Services {.unnumbered}
 An autonomous agent operating in a software engineering or administrative setting frequently issues external HTTP requests: fetching package dependencies from PyPI, querying issues via the GitHub REST API, querying AWS metadata endpoints, or posting notification webhooks to Slack. Allowing evaluation sandboxes to communicate directly with live third-party endpoints introduces critical failure modes into the evaluation pipeline:
 
 - **Third-Party Outages and Rate Limiting:** Running 100 parallel agent evaluations can exhaust an organization's GitHub or Jira API rate limits within minutes, causing entire benchmark sweeps to abort prematurely.
@@ -208,7 +208,7 @@ $$\frac{D_{\text{total, naive}}}{D_{\text{total, CoW}}} = \frac{30,000\text{ GB}
 Reset latency drops from $4.8\text{ seconds}$ to $0.047\text{ seconds}$, yielding a $102\times$ speedup and eliminating storage bus saturation across the 64-worker evaluation fleet.
 :::
 
-### Information Leakage, Oracle Isolation, and Benchmark Contamination
+### Benchmark Contamination Hazards
 
 In traditional machine learning, benchmark integrity focuses almost exclusively on *data contamination*: the risk that the evaluation dataset's question-answer pairs were accidentally included in the model's pretraining web scrape. If an LLM memorized the solutions to HumanEval during pretraining, its high pass rate reflects rote retrieval rather than generalized code synthesis.
 
@@ -242,7 +242,7 @@ To eliminate runtime leakage, production gyms enforce a strict **Dual-Chamber Sa
 
 The verification scripts execute exclusively within Chamber B. The agent cannot inspect Chamber B during its trajectory, nor can it modify the test execution scripts or tamper with the resulting exit codes. By physically separating the execution runtime from the verification oracle, the harness guarantees that the agent's measured performance reflects authentic task resolution rather than adversarial environment exploitation.
 
-### Deconstructing Production Agent Gyms: SWE-bench, GAIA, and WebArena
+### Production Agent Gyms
 
 To understand how these architectural principles manifest in concrete implementations, we examine three representative production gyms that serve as standard evaluation targets across the AI systems literature (@tbl-vol3-gym-comparison): **SWE-bench**, **GAIA**, and **WebArena**.
 
@@ -287,7 +287,7 @@ To provide realistic interactions, WebArena populates these applications with au
 
 The core systems innovation in WebArena is its **programmatic state assertion engine**. A task in WebArena rarely reduces to a simple string match. If an agent is instructed to "Cancel my most recent order and post a comment explaining why on the seller's forum," verifying task completion requires multi-system inspection:
 
-1. Querying the e-commerce platform's PostgreSQL database to confirm that the target order status transitioned from `Pending` to `Cancelled`.
+1. Querying the e-commerce platform's PostgreSQL database to confirm that the target order status transitioned from `Pending` to `Canceled`.
 2. Inspecting the forum's MySQL database to verify that a new forum post was inserted with the correct author ID and foreign key linkage.
 3. Confirming that no unintended mutations occurred (e.g., deleting unrelated orders or corrupting user profile records).
 
@@ -303,7 +303,7 @@ In an automated evaluation suite containing 150 software engineering tasks, agen
 
 **Systems engineers cannot treat the execution of an agentic system as a deterministic boolean test suite.** Because foundation models sample tokens from conditional probability distributions over discrete vocabularies, an agent's trajectory through an environment is a stochastic Markov chain modulated by external tool latencies, non-associative floating-point reductions, and sampling hyper-parameters. Evaluating such systems requires transforming empirical benchmarking from ad-hoc scoring into formal statistical estimation. This transformation demands three foundational practices: treating the task environment as the primary resampling unit, bounding finite-sample binomial uncertainty using Wilson score confidence intervals, and strictly decoupling latent reasoning capacity ($pass@k$) from operational execution policy ($pass^k$ and cost-budgeted acceptance).
 
-### The Physics of Stochasticity and the Resampling Hierarchy {#sec-vol3-observability-resampling}
+### Resampling Hierarchies {#sec-vol3-observability-resampling}
 
 A pervasive misconception in machine learning systems engineering is that setting the generation temperature to zero ($T=0$) renders an agent system deterministic. In an unconstrained host runtime, greedy autoregressive decoding does not eliminate run-to-run variance. Non-determinism enters the execution graph through physical hardware operations and asynchronous environment interactions.
 
@@ -330,7 +330,7 @@ $$\text{Var}(\hat{p}) = \frac{\sigma^2_{\text{task}}}{N} + \frac{\sigma^2_{\text
 
 Equation @eq-variance-decomposition exposes an inescapable architectural law: increasing the number of repeated runs $R$ on a fixed benchmark suite diminishes the policy noise per task, but it encounters a hard asymptotic floor dictated by the task-sampling variance $\sigma^2_{\text{task}} / N$. Running an agent ten times across 100 SWE-bench tasks ($N=100, R=10$) achieves high certainty regarding how the agent performs on those specific 100 codebases, but it does not narrow the uncertainty regarding how the agent will perform across unobserved enterprise repositories. In contrast, evaluating an agent once across 1,000 independent tasks ($N=1000, R=1$) directly contracts the dominant task-sampling error term. The independent task fixture is the primary resampling unit of system evaluation.
 
-### Finite-Sample Uncertainty and the Wilson Score Interval {#sec-vol3-observability-wilson}
+### Finite-Sample Uncertainty {#sec-vol3-observability-wilson}
 
 
 ::: {.column-margin}
@@ -406,7 +406,7 @@ $$N_{\text{required}} \approx \frac{2 \cdot (z_{0.975} + z_{0.80})^2 \cdot \bar{
 The four-percentage-point lead on a 150-task suite represents insufficient empirical evidence to justify an architectural migration.
 :::
 
-### Decoupling Latent Potential from Operational Policy: pass@k, pass^k, and Cost-Budgeted Metrics {#sec-vol3-observability-pass-k}
+### Latent Potential Decoupling {#sec-vol3-observability-pass-k}
 
 When an agent system is evaluated non-deterministically across multiple trajectories per task, summarizing performance requires choosing between measures of *latent reasoning capacity* and measures of *operational execution reliability*. Conflating these two dimensions leads to severe deployment failures.
 
@@ -494,34 +494,21 @@ $$s_i = \langle \text{trace\_id}, \text{span\_id}, \text{parent\_id}, t_{\text{s
 
 The identifiers $\text{trace\_id}$ and $\text{span\_id}$ provide 128-bit and 64-bit entropy guarantees, respectively; $\text{parent\_id}$ links the span to its causal ancestor; $t_{\text{start}}$ and $t_{\text{end}}$ denote monotonic clock timestamps; $\mathcal{A}$ is a typed dictionary of semantic key-value attributes; and $\mathcal{X}$ is an ordered sequence of timed events capturing transient state transitions such as token emission intervals or intermediate tool stderr writes.
 
-```text
-+---------------------------------------------------------------------------------------+
-| Trace Root: Task Execution (trace_id: 4bf92f3577b34da6a3ce929d0e0e4736)              |
-| Total Duration: 14.85 s | Model Cost: $0.042 | Status: OK                            |
-+---------------------------------------------------------------------------------------+
-    |
-    +--> Span 1: agent.memory (Retrieval) [0.00 s - 0.18 s]
-    |    Query: "git patch apply syntax" | Chunks: 3 | Index: HNSW | Duration: 185 ms
-    |
-    +--> Span 2: gen_ai.client (Inference: Plan Formulation) [0.18 s - 4.25 s]
-    |    Model: llama-3-70b | Prompt: 4,096 tok | Completion: 256 tok | TTFT: 120 ms
-    |
-    +--> Span 3: agent.tool (Sandbox Exec: bash) [4.26 s - 8.46 s]
-    |    Cmd: `git apply patch.diff` | Exit Code: 0 | Stdout: 142 B | Sandbox: microVM
-    |
-    +--> Span 4: agent.message (Subagent Fan-Out) [8.47 s - 10.32 s]
-    |    Protocol: JSON-RPC | Recipient: reviewer-agent-01 | Envelope Hash: 0x9e12a4
-    |    |
-    |    +--> Span 4.1: gen_ai.client (Subagent Review) [8.50 s - 10.28 s]
-    |         Model: llama-3-8b | Prompt: 1,024 tok | Completion: 128 tok | TTFT: 45 ms
-    |
-    +--> Span 5: gen_ai.client (Inference: Final Synthesis) [10.33 s - 14.85 s]
-         Model: llama-3-70b | Prompt: 6,144 tok | Completion: 384 tok | TTFT: 180 ms
-```
+| Span Identifier | Execution Domain | Time Interval & Duration | Operational & Semantic Attributes | Causal Role in Trajectory |
+| :--- | :--- | :--- | :--- | :--- |
+| **Root Span** (`s_0`) | `agent.orchestration` | $[0.00, 14.85]\text{ s}$ ($\Delta t = 14.85\text{ s}$) | Trace ID `4bf92f35...`, Model Cost \$0.042, Status `OK` | Root trajectory lifecycle envelope |
+| **Span 1** (`s_1`) | `agent.memory` (Retrieval) | $[0.00, 0.18]\text{ s}$ ($\Delta t = 185\text{ ms}$) | Query `"git patch apply syntax"`, 3 chunks, HNSW index | Pre-inference episodic context grounding |
+| **Span 2** (`s_2`) | `gen_ai.client` (Inference) | $[0.18, 4.25]\text{ s}$ ($\Delta t = 4.07\text{ s}$) | Model `llama-3-70b`, Prompt 4,096 tok, Out 256 tok, TTFT 120 ms | Plan formulation and tool call generation |
+| **Span 3** (`s_3`) | `agent.tool` (Sandbox Exec) | $[4.26, 8.46]\text{ s}$ ($\Delta t = 4.20\text{ s}$) | Command `git apply patch.diff`, Exit code 0, MicroVM | Deterministic execution in isolated sandbox |
+| **Span 4** (`s_4`) | `agent.message` (Subagent) | $[8.47, 10.32]\text{ s}$ ($\Delta t = 1.85\text{ s}$) | Protocol JSON-RPC, Recipient `reviewer-01`, Hash `0x9e12a4` | Asynchronous subagent delegation barrier |
+| **Span 4.1** (`s_{4.1}`) | `gen_ai.client` (Subagent Review) | $[8.50, 10.28]\text{ s}$ ($\Delta t = 1.78\text{ s}$) | Model `llama-3-8b`, Prompt 1,024 tok, Out 128 tok, TTFT 45 ms | Specialized peer review and verification pass |
+| **Span 5** (`s_5`) | `gen_ai.client` (Synthesis) | $[10.33, 14.85]\text{ s}$ ($\Delta t = 4.52\text{ s}$) | Model `llama-3-70b`, Prompt 6,144 tok, Out 384 tok, TTFT 180 ms | Final trajectory synthesis and task conclusion |
+
+: Hierarchical Distributed Trace Decomposition for Heterogeneous Agent Execution. {#tbl-vol3-trace-hierarchy}
 
 The directed edges $\mathcal{E}_{\text{causal}} = \{(s_i, s_j)\}$ represent strict happens-before relationships ($s_i \prec s_j$) established either through synchronous stack execution within the agent runtime or through explicit parent context injection across distributed boundaries.
 
-As illustrated in the span hierarchy, the root span $\mathcal{T}_{\text{root}}$ encompasses the end-to-end task execution. It decomposes into child spans that map directly to the hybrid computational domains: synchronous retrieval spans, accelerator-bound model generation spans, isolated sandboxed tool spans, and asynchronous message spans dispatched to downstream subagents. When visualized as a distributed trace waterfall (@fig-vol3-opentelemetry-trace-waterfall), this causal decomposition immediately exposes whether trajectory latency is dominated by neural compute, disk and network I/O, or multi-agent synchronization barriers.
+As illustrated in the distributed trace decomposition (@tbl-vol3-trace-hierarchy), the root span $\mathcal{T}_{\text{root}}$ encompasses the end-to-end task execution. It decomposes into child spans that map directly to the hybrid computational domains: synchronous retrieval spans, accelerator-bound model generation spans, isolated sandboxed tool spans, and asynchronous message spans dispatched to downstream subagents. When visualized as a distributed trace waterfall (@fig-vol3-opentelemetry-trace-waterfall), this causal decomposition immediately exposes whether trajectory latency is dominated by neural compute, disk and network I/O, or multi-agent synchronization barriers.
 
 ::: {.column-margin}
 **W3C Traceparent Header Format**
@@ -686,7 +673,7 @@ An enterprise platform orchestrating thousands of autonomous agent trajectories 
 
 Persisting every production trace across an enterprise agent fleet rapidly saturates network egress bandwidth and overwhelms downstream observability storage clusters with petabytes of redundant, uninformative execution logs. Yet adopting conventional head-based sampling—where a fixed percentage of traces are randomly selected at trajectory initiation—cripples post-incident reliability engineering. In autonomous software systems operating at high baseline success rates, the critical operational signals that engineers must inspect—such as sandbox permission violations, multi-turn reasoning loops, and rare tool timeouts—occur in less than one percent of executions. Randomly dropping ninety-nine percent of incoming tasks at the front door guarantees that when a catastrophic failure corrupts production data, the causal telemetry trace required to diagnose the root cause was discarded before the error manifested. Managing the observability overhead of autonomous agents therefore demands an architectural shift from blind head-based filtering to state-aware, tail-based sampling buffers combined with cryptographic privacy sanitization.
 
-### The Telemetry Volume Explosion and Head-Sampling Pathology
+### Telemetry Volume Explosion
 
 To understand why naive telemetry collection collapses under agentic workloads, consider the mathematical relationship governing context accumulation during an agent's autoregressive execution loop. Let an agent trajectory $\tau$ consist of $T$ sequential reasoning and execution turns:
 
@@ -703,18 +690,17 @@ Because the conversational history monotonically expands with each interaction, 
 
 $$V_{\text{tokens}} = \sum_{t=1}^T \left( L_0 + \sum_{j=0}^{t-1} (|a_j| + |o_j|) + K_t \right) = \mathcal{O}\left(T \cdot L_0 + T^2 \cdot (\overline{|a|} + \overline{|o|})\right)$$
 
-When this textual volume is serialized into standard OpenTelemetry attributes along with vector similarity scores, model generation hyperparameters, environmental variables, and stdout/stderr buffers from sandboxed tool executions, the resulting telemetry payload per turn averages between $30\text{ KB}$ and $150\text{ KB}$. For a fifty-turn trajectory operating within a 32,768-token context window, serializing every intermediate prompt and raw observation yields a single trace size ranging from $5\text{ MB}$ to over $25\text{ MB}$.
+When this textual volume is serialized into standard OpenTelemetry attributes along with vector similarity scores, model generation hyperparameters, environmental variables, and stdout/stderr buffers from sandboxed tool executions, the resulting telemetry payload per turn averages between $30\text{ KB}$ and $150\text{ KB}$. For a fifty-turn trajectory operating within a 32,768-token context window, serializing every intermediate prompt and raw observation yields a single trace size ranging from $5\text{ MB}$ to over $25\text{ MB}$, with individual component distributions detailed in @tbl-vol3-span-telemetry-breakdown.
 
-```text
-Span Serialization Breakdown (45 KB Turn Payload)
------------------------------------------------------------------
-[System Prompt & Tools Schema: 8 KB]
-[Multi-Turn Context History: 24 KB]
-[Raw LLM Output & Logit Metadata: 3 KB]
-[Tool Execution Standard Output/Error Streams: 9 KB]
-[Span Attributes, Resource Metrics & Timings: 1 KB]
------------------------------------------------------------------
-```
+| Telemetry Component | Payload Size | Share (%) | Serialization Format | Ingestion Mitigation Strategy |
+| :--- | :--- | :--- | :--- | :--- |
+| **System Prompt & Tool Schemas** | 8 KB | 17.8% | JSON / Static Protobuf | Pointer-based content-addressable schema deduplication |
+| **Multi-Turn Context History** | 24 KB | 53.3% | UTF-8 String Array | Delta encoding and checkpoint referencing |
+| **Raw LLM Output & Logits** | 3 KB | 6.7% | Protobuf / BFloat16 | Top-logprob truncation and compression |
+| **Tool Execution Stdout/Stderr** | 9 KB | 20.0% | Binary Stream / Chunked Text | Sliding-window truncation with cryptographic digest |
+| **Span Attributes & Metrics** | 1 KB | 2.2% | OTel Key-Value Map | Standard structured metric encoding |
+
+: Telemetry Payload Footprint per Agent Execution Turn (45 KB Baseline). {#tbl-vol3-span-telemetry-breakdown}
 
 Classical distributed tracing architectures address large data volumes by implementing head-based sampling at the tracing client or ingestion proxy, as popularized by systems such as Dapper [@sigelman2010dapper]. Under head-based sampling, an incoming request is assigned a uniform pseudo-random identifier; if the hash of this identifier falls below a predetermined sampling ratio $\theta \in (0, 1]$, tracing headers are propagated across downstream RPCs and the entire trace is recorded. If the hash exceeds $\theta$, trace collection is suppressed immediately at the root span.
 
@@ -778,7 +764,7 @@ Consider an autonomous software engineering agent deployment executing 10,000 ta
 By retaining telemetry based on terminal execution properties rather than initial randomization, the tail-based architecture achieves a $14.5\times$ storage reduction while capturing $100\%$ of all operational failures and performance anomalies.
 :::
 
-### Tail-Based Routing and Dynamic Decision Policies
+### Tail-Based Routing Policies
 
 To circumvent the information loss inherent in head-based sampling, agent runtimes implement *tail-based sampling*. In a tail-based architecture, the decision to retain or discard a trace is deferred until the trajectory has terminated or crossed an unambiguous operational anomaly threshold.
 
@@ -832,7 +818,7 @@ To prevent memory exhaustion during sudden concurrency bursts or cascading strag
 Under memory pressure, an escrow buffer must drop unclassified or routine-success traces before evicting any trace flagged with `exit_code != 0` or `policy_violation = True`. Error telemetry is protected memory.
 :::
 
-### In-Sandbox Cryptographic PII and Secret Redaction
+### Cryptographic Secret Redaction
 
 While tail-based sampling solves the data volume crisis, it exacerbates an equally severe security and compliance vulnerability: the exfiltration of sensitive information into observability backends. In an autonomous environment operating under the Zero Ambient Authority ($A = 0$) model, an agent dynamically interacts with proprietary code repositories, private customer databases, internal APIs, and configuration files. During standard execution, the model's prompts and tool outputs inevitably capture confidential tokens:
 
@@ -844,38 +830,18 @@ If an unprivileged agent executes a bash command such as `env` or reads a creden
 
 To satisfy the principle of least privilege, telemetry data must undergo automated, privacy-preserving sanitization *before* crossing the isolation boundary of the execution sandbox. Sanitization cannot be deferred to downstream telemetry aggregators outside the sandbox; once a secret departs the isolated execution environment over an unencrypted local socket or cleartext collector pipeline, the isolation boundary is fundamentally breached.
 
-```text
-+-----------------------------------------------------------------------+
-| Execution Sandbox Boundary                                            |
-|                                                                       |
-|  [Tool Execution / Bash Command]                                      |
-|                 │                                                     |
-|                 ▼ (Raw stdout/stderr with API keys & PII)             |
-|  ┌─────────────────────────────────────────────────────────────────┐  |
-|  │ Streaming Telemetry Sanitizer Interceptor                       │  |
-|  │                                                                 │  |
-|  │  1. High-Entropy Shannon Regex Filter                           │  |
-|  │     - Matches: AKIA[0-9A-Z]{16}, ghp_[A-Za-z0-9]{36}           │  |
-|  │     - Action: Replace with [REDACTED:API_KEY:hash_8]            │  |
-|  │                                                                 │  |
-|  │  2. Deterministic HMAC Pseudonymization Engine                  │  |
-|  │     - Matches: UUIDs, User IDs, Account Numbers                 │  |
-|  │     - Action: Transform via HMAC-SHA256(secret_salt, value)     │  |
-|  │                                                                 │  |
-|  │  3. Local DistilBERT / Regex PII Classifier                     │  |
-|  │     - Matches: Email, IP addresses, Credit Cards                │  |
-|  │     - Action: Replace with [REDACTED:EMAIL]                     │  |
-|  └─────────────────────────────────────────────────────────────────┘  |
-|                 │                                                     |
-+─────────────────┼─────────────────────────────────────────────────────+
-                  │ (Cleaned Telemetry Stream)
-                  ▼
-         [Trace Escrow Buffer]
-```
+| Filter Stage | Target Threat Class | Detection & Matching Pattern | Transformation Action | Computational Overhead |
+| :--- | :--- | :--- | :--- | :--- |
+| **Stage 1: High-Entropy Filter** | Hardcoded API Keys & Cloud Credentials | Regex patterns (e.g., `AKIA...`, `ghp_...`, Shannon entropy $H > 4.5$) | Redacted token replacement `[REDACTED:API_KEY:<hash_8>]` | $< 0.2\text{ ms}$ per KB |
+| **Stage 2: HMAC Engine** | Tenant Identifiers, User IDs, Account Numbers | UUID regexes, database primary keys, email identities | One-way keyed transform $\text{HMAC-SHA256}(k_{\text{salt}}, v)$ | $< 0.5\text{ ms}$ per record |
+| **Stage 3: Local PII Classifier** | Unstructured PII (Names, Addresses, Cards) | On-device lightweight NER / regex rules | Semantic token replacement `[REDACTED:PII_CLASS]` | $1.5\text{--}3.0\text{ ms}$ per KB |
+| **Egress Escrow Gate** | Plaintext Leakage to External Collectors | Streaming zero-knowledge byte scanner | Dropped spans or isolated quarantine if leak detected | $< 0.1\text{ ms}$ stream tax |
 
-The in-sandbox sanitization pipeline implements a three-stage streaming filter that intercepts all span attributes, prompt strings, and tool I/O payloads prior to serialization:
+: In-Sandbox Streaming Telemetry Sanitization Pipeline Stages. {#tbl-vol3-telemetry-sanitizer-pipeline}
 
-#### High-Entropy Pattern and Signature Matching {.unnumbered}
+As summarized in @tbl-vol3-telemetry-sanitizer-pipeline, the in-sandbox sanitization pipeline implements a multi-stage streaming filter that intercepts all span attributes, prompt strings, and tool I/O payloads prior to serialization:
+
+#### High-Entropy Pattern Matching {.unnumbered}
 Structured secrets—such as API tokens, private cryptographic keys, and authorization headers—exhibit distinct syntactic prefixes and high character entropy. The sanitizer evaluates all outgoing text buffers against a compiled set of deterministic regular expressions matching known cloud provider signatures (e.g., Google Cloud API keys, Slack webhook URLs, Stripe live secrets).
 
 To capture custom or unstructured secrets, the filter calculates the Shannon entropy $H(X)$ over sliding byte windows of length $W$:
@@ -929,7 +895,7 @@ When an autonomous agent crashes in production or emits a catastrophic side effe
 
 Without a systematic forensic protocol, systems teams default to an unscientific anti-pattern: treating every operational failure as an inscrutable "model hallucination," followed by ad-hoc prompt tweaking that degrades generalization across unobserved tasks. Rigorous post-mortem engineering treats the foundation model not as a mystical oracle, but as an unprivileged, deterministic-in-expectation compute engine operating over a causally ordered sequence of discrete context tokens. By capturing the complete Agent Control Block (ACB) and distributed OpenTelemetry span graph during execution, the runtime enables hermetic trajectory replay without mutating external state. Engineers can systematically dissect the causal chain, distinguish semantic interface failures from algorithmic policy breakdown, and formalize verified fixes into permanent, automated regression fixtures within the evaluation gym.
 
-### Deterministic Trajectory Replay and Hermetic Mocking {#sec-vol3-postmortem-replay}
+### Deterministic Trajectory Replay {#sec-vol3-postmortem-replay}
 
 The foundation of forensic analysis is trajectory reconstruction. When an agent trajectory $\tau = (s_0, a_0, o_0, s_1, a_1, o_1, \dots, s_T)$ terminates in an unhandled exception, a violated safety invariant, or an explicit task rejection, the post-mortem engine must reconstruct the exact sequence of historical context buffers $c_t$ presented to the model. In production environments governed by Zero Ambient Authority ($A=0$), all interactions with the operating system, storage layers, and network services are mediated by RPC tool invocations recorded as OpenTelemetry spans. Consequently, the telemetry ledger contains an immutable, chronologically ordered log of every model invocation, prompt serialization, raw completion, tool identifier, input argument dictionary, and serialized observation string.
 
@@ -995,7 +961,7 @@ Distinguishing between a Tool Interface failure and a Model Policy failure is th
 
 When this severed observation is appended to the context buffer, the foundation model at step $t=6$ concludes that the codebase contains a fatal syntax error and generates an unprompted action attempting to rewrite the targeted file from scratch, discarding 500 lines of existing production logic. A superficial review concludes: *"The model hallucinated a syntax error and destroyed the file."* The forensic systems post-mortem reveals the ground truth: the model reacted with perfect logical consistency to an observation stream that had been mangled by an uninstrumented runtime buffer cap. The corrective action belongs not in prompt engineering, but in the tool wrapper's streaming serialization boundary.
 
-### Controlled Counterfactual Ablation and Gym Regression Harness {#sec-vol3-postmortem-ablation}
+### Counterfactual Gym Ablation {#sec-vol3-postmortem-ablation}
 
 Once a causal hypothesis is formulated, the systems engineer must prove that the identified component was both *necessary* and *sufficient* to cause the failure. In complex stochastic systems, mere correlation between an anomalous trace event and a failed trajectory does not establish causality. The rigorous mechanism for causal validation is *controlled counterfactual ablation*.
 
@@ -1106,32 +1072,18 @@ $$H_0: p_{\text{cand}} < p_{\text{base}} - \delta_{\text{tol}} \quad \text{versu
 
 where $\delta_{\text{tol}}$ represents the maximum permissible performance margin, typically set to $0$ for safety-critical systems or a small budget (such as $0.01$) when trading marginal accuracy for substantial latency or cost reductions. A candidate runtime that fails to achieve statistical non-inferiority at significance level $\alpha = 0.05$ is rejected prior to receiving production traffic.
 
-Clearing the offline benchmark gate proves only that the candidate satisfies known, historical invariants; it does not establish safety across the non-stationary distribution of real-world user requests. Stage 2 therefore routes live traffic into shadow execution, commonly referred to as *dark traffic*. In this stage, the production traffic router duplicates incoming user prompts $c_0$. The primary stream routes to the production baseline $\pi_{\text{base}}$, which maintains active execution authority to fulfill user requests. The secondary stream forks asynchronously to the candidate policy $\pi_{\text{cand}}$.
+Clearing the offline benchmark gate proves only that the candidate satisfies known, historical invariants; it does not establish safety across the non-stationary distribution of real-world user requests. Stage 2 therefore routes live traffic into shadow execution, commonly referred to as *dark traffic*. In this stage, the production traffic router duplicates incoming user prompts $c_0$. The primary stream routes to the production baseline $\pi_{\text{base}}$, which maintains active execution authority to fulfill user requests. The secondary stream forks asynchronously to the candidate policy $\pi_{\text{cand}}$, establishing the authority partitioning outlined in @tbl-vol3-dark-traffic-routing.
 
-```text
-                            ┌──────────────────────────────────────────────┐
-                            │           Live Production Traffic            │
-                            └──────────────────────┬───────────────────────┘
-                                                   │
-                                     [ Traffic Forking Proxy ]
-                                                   │
-                         ┌─────────────────────────┴────────────────────────┐
-                         │ (Primary Stream)                                 │ (Dark Mirrored Stream)
-                         ▼                                                  ▼
-            ┌────────────────────────┐                         ┌────────────────────────┐
-            │   Baseline Runtime     │                         │   Candidate Runtime    │
-            │    $\pi_{\text{base}}$ │                         │    $\pi_{\text{cand}}$ │
-            └────────────┬───────────┘                         └────────────┬───────────┘
-                         │                                                  │
-                         ▼                                                  ▼
-            ┌────────────────────────┐                         ┌────────────────────────┐
-            │ Live Environment State │                         │ Read-Only Mock Escrow  │
-            │  (Mutating Authority)  │                         │       ($A = 0$)        │
-            └────────────┬───────────┘                         └────────────┬───────────┘
-                         │                                                  │
-                         ▼                                                  ▼
-                 Live User Output                               Telemetry & Drift Engine
-```
+| Architectural Dimension | Primary Production Stream ($\pi_{\text{base}}$) | Mirrored Dark Stream ($\pi_{\text{cand}}$) | Telemetry & Safety Boundary |
+| :--- | :--- | :--- | :--- |
+| **Traffic Allocation** | $1 - \rho_{\text{dark}}$ ($100\%$ active user requests) | $\rho_{\text{dark}}$ asynchronously duplicated copy | Transparent non-blocking ingress fork |
+| **Execution Authority** | Mutating authority ($A > 0$) on production infra | Zero ambient authority ($A = 0$); mock escrow | Sandbox hypervisor trap on mutating syscalls |
+| **Read Operations** | Live read replicas and active databases | Ephemeral copy-on-write snapshots or read replicas | Isolated connection pool; zero production locking |
+| **Mutating Operations** | Executed directly against production persistence | Intercepted; synthetic stubs or ephemeral containers | Immediate ephemeral container discard post-run |
+| **Response Delivery** | Returned directly to end user / client | Discarded or routed to evaluation analyzer | Zero external client exposure |
+| **Telemetry Objective** | SLA latency, availability, end-user task success | Trajectory divergence, token drift, tool parity | Real-time differential drift calculation |
+
+: Dark Traffic Forking and Authority Partitioning Architecture. {#tbl-vol3-dark-traffic-routing}
 
 The central architectural challenge of shadow execution in agentic systems is enforcing the principle of Zero Ambient Authority ($A=0$) across external side effects. While a stateless web server can execute shadow requests by discarding downstream HTTP responses, an agentic system dynamically interacts with external environments through tools. If $\pi_{\text{cand}}$ invokes a tool executing an HTTP `DELETE`, a database `DROP TABLE`, or an external payment authorization, the shadow execution would corrupt the shared production environment.
 
@@ -1139,7 +1091,7 @@ To resolve this dilemma, the host agent runtime places $\pi_{\text{cand}}$ withi
 
 Telemetry systems during Stage 2 do not evaluate final environmental state, as mutations are sandboxed. Instead, they record structural trajectory divergence between $\tau_{\text{base}}$ and $\tau_{\text{cand}}$. Telemetry agents capture token utilization, step latency, tool selection distributions, and semantic divergence in emitted arguments. If $\pi_{\text{cand}}$ exhibits pathological token consumption, excessive context-window inflation, or anomalous error rates from sandboxed tool calls, the deployment pipeline aborts before the candidate is ever granted authority over production state.
 
-### Canary Traffic Shifting and Automated Circuit Breakers
+### Canary Traffic Shifting
 
 When a candidate runtime clears shadow execution, it enters Stage 3: live canary deployment. In this phase, the traffic routing layer dynamically diverts a small fraction of live production traffic—typically $\rho \in [0.01, 0.05]$, or $1\%$ to $5\%$—directly to $\pi_{\text{cand}}$, granting it full mutating authority over live environment states. Canary deployments balance two competing physical constraints: minimizing the blast radius of undetected failure modes while acquiring statistical power rapidly enough to detect performance regressions before an operational outage occurs.
 
@@ -1160,24 +1112,18 @@ $$A = \ln \left( \frac{1 - \beta}{\alpha} \right), \qquad B = \ln \left( \frac{\
 
 If $\Lambda_n \ge A$, the control plane accepts the candidate as non-inferior and safely accelerates traffic shifting (for instance, advancing $\rho$ from $0.05$ to $0.25$, and subsequently to $1.0$). If $\Lambda_n \le B$, the candidate is conclusively identified as degraded; the control plane trips an automated circuit breaker that immediately sheds all canary traffic, restores $100\%$ routing to $\pi_{\text{base}}$, and triggers an alert for engineering post-mortem.
 
-```text
-       Cumulative Log-Likelihood Ratio ($\Lambda_n$)
-              ▲
-              │
-          A ──┼───────────────────────── Boundary A: Promote Candidate ($\Lambda_n \ge A$)
-              │                       /
-              │                      /
-              │   Continue Sampling /
-              │      (Indeterminate)
-              │                    /
-              │                   /
-          B ──┼──────────────────/────── Boundary B: Trip Circuit Breaker ($\Lambda_n \le B$)
-              │                 /
-              │                /
-              └────────────────┴────────────────► Trajectory Count ($n$)
-```
+::: {#def-vol3-sprt-circuit-breaker .callout-tip}
+## Definition 16.1: Sequential Probability Ratio Test (SPRT) Gating Boundaries
+The automated canary circuit breaker evaluates cumulative trajectory observations against two Wald absorbing boundaries defined by the target false-positive rate $\alpha$ and false-negative rate $\beta$:
 
-The automated circuit breaker must operate with minimal Mean Time to Detect (MTTD) and Mean Time to Recovery (MTTR), adhering to the tail-tolerance principles articulated by Dean and Ghemawat (2013). Beyond sequential hypothesis tests on aggregate task success, the runtime enforces invariant-based circuit breakers that trip instantly upon observing hard safety violations:
+$$\Lambda_n = d_n \ln \left(\frac{p_1}{p_0}\right) + (n - d_n) \ln \left(\frac{1 - p_1}{1 - p_0}\right)$$
+
+1. **Upper Absorbing Boundary ($A = \ln \frac{1 - \beta}{\alpha}$):** If $\Lambda_n \ge A$, the candidate runtime is statistically validated as non-inferior; the control plane promotes the candidate and accelerates canary traffic shifting.
+2. **Lower Absorbing Boundary ($B = \ln \frac{\beta}{1 - \alpha}$):** If $\Lambda_n \le B$, the candidate runtime is conclusively degraded; the control plane instantly trips the automated circuit breaker, shedding all canary traffic to restore baseline routing.
+3. **Indeterminate Region ($B < \Lambda_n < A$):** Sampling continues ($n \leftarrow n + 1$) without adjusting traffic weights.
+:::
+
+As formalized in @def-vol3-sprt-circuit-breaker, the automated circuit breaker must operate with minimal Mean Time to Detect (MTTD) and Mean Time to Recovery (MTTR), adhering to the tail-tolerance principles articulated by Dean and Ghemawat (2013). Beyond sequential hypothesis tests on aggregate task success, the runtime enforces invariant-based circuit breakers that trip instantly upon observing hard safety violations:
 
 1. *Cost-Per-Trajectory Spikes:* If the rolling median of token consumption per trajectory exceeds the baseline threshold by more than $K_{\text{cost}} = 1.5\times$ over a window of $W = 50$ runs, the breaker trips to prevent financial depletion.
 2. *Context-Exhaustion Cascades:* If the proportion of trajectories terminated due to context-window saturation ($K \ge K_{\max}$) exceeds $1\%$, execution halts immediately.
@@ -1185,7 +1131,7 @@ The automated circuit breaker must operate with minimal Mean Time to Detect (MTT
 
 When a circuit breaker trips, automated rollback latency must be deterministic. Because the foundation model inference endpoint is decoupled from the host supervisor, rollback does not require redeploying container images or restarting server daemons. The traffic proxy alters its upstream weight vector in memory, immediately draining canary concurrency and ensuring that subsequent user turns execute exclusively against the golden baseline.
 
-### Core Agent SRE Metrics: Goodput, Drift, and Intervention Rates
+### Core Agent SRE Metrics
 
 Operating stochastic agent fleets requires a fundamental transformation of Site Reliability Engineering (SRE) metrics. Classical web platforms quantify health through the Four Golden Signals: latency, traffic, errors, and saturation (Beyer et al., 2016). For an agentic system, these signals are necessary but entirely insufficient. An agent runtime can run with $0\%$ network-level packet drops, return HTTP 200 OK on every invocation, maintain low CPU saturation on host machines, and yet execute an operational failure by consuming 120,000 tokens across 40 ungrounded tool calls before abandoning the user's objective.
 
@@ -1352,7 +1298,7 @@ The input invariants, telemetry outputs, latency bounds, and dominant failure mo
 
 : **Architectural Specifications of the Observability Control Plane**: Subsystem layers, input invariants, telemetry contracts, latency SLA bounds, and dominant failure modes across the empirical control plane. {#tbl-vol3-controlplane-layers}
 
-### The Telemetry and Evaluation Readiness Contract {#sec-vol3-observability-synthesis-readiness}
+### Evaluation Readiness Contracts {#sec-vol3-observability-synthesis-readiness}
 
 An agent runtime cannot be admitted into production simply because its individual unit tests pass. Before deploying a model, tool library, or orchestration graph to live traffic, the engineering platform must verify that the candidate system fulfills a rigorous *Telemetry and Evaluation Readiness Contract*. This contract guarantees that the agent runtime exposes the necessary interfaces for causal reconstruction, respects privacy invariants, and provides statistical guarantees under production workloads.
 
@@ -1370,7 +1316,7 @@ $$\mathcal{C} = \langle \text{trace\_id}, \text{span\_id}, \text{parent\_span\_i
 
 must remain causally unbroken. If an agent forks an asynchronous sub-agent or dispatches parallel tool executions (such as issuing concurrent filesystem searches and web queries), the parent $\text{span\_id}$ must be explicitly linked in the child spans. Any runtime component that drops the trace context carrier is strictly barred from the deployment topology, as context loss permanently severs the causal graph required for post-mortem analysis.
 
-#### Streaming Escrow and Redaction Invariant {.unnumbered}
+#### Streaming Escrow Invariants {.unnumbered}
 
 Under the zero ambient authority ($A=0$) principle, model completions proposing tool calls must be held in memory escrow by the host supervisor until sanitization and authorization checks pass. Telemetry streams emitted from the agent runtime must pass through inline sanitization pipelines prior to disk persistence. The readiness contract mandates that string serialization filters execute deterministic token replacement on:
 
@@ -1380,7 +1326,7 @@ Under the zero ambient authority ($A=0$) principle, model completions proposing 
 
 The redaction engine must maintain an immutable audit log recording the cryptographic hash of the redacted substring and the policy rule applied, ensuring that traces remain legally auditable while preserving privacy compliance.
 
-#### Deterministic Gym Fidelity and Environmental Reset Invariant {.unnumbered}
+#### Deterministic Gym Fidelity {.unnumbered}
 
 Every task admitted to the evaluation suite must execute within a fully hermetic environment. A test harness qualifies as hermetic if and only if:
 
@@ -1388,7 +1334,7 @@ $$S_{\text{pre}}^{(t+1)} = \text{Reset}(S_{\text{post}}^{(t)}) \equiv S_{\text{p
 
 The state of the container filesystem, memory allocations, mocked external services, and operating system pseudorandom number generators following a reset operation must be bitwise identical to the pristine initial state $S_{\text{pre}}^{(0)}$. External internet access must be physically blocked via network namespaces, with all third-party APIs backed by deterministic mock proxies that return recorded fixture responses indexed by request hash. If an evaluation task demonstrates state drift across successive runs—such as residual temporary files, modified database records, or unseeded random seeds—it fails the readiness contract and cannot serve as a release gate.
 
-#### Statistical Power and Sample Sizing Invariant {.unnumbered}
+#### Statistical Power Invariants {.unnumbered}
 
 The readiness contract dictates that no performance claim may be asserted without an explicit statistical power calculation. To evaluate whether a candidate policy $\pi_{\text{cand}}$ achieves a non-trivial improvement over a baseline policy $\pi_{\text{base}}$ on a task distribution $\mathcal{D}_{\text{task}}$, the evaluation suite must draw a minimum sample size $N$ calculated to resolve the target effect size $\Delta$ at confidence level $1 - \alpha$ with statistical power $1 - \beta$. Treating task fixtures as independent Bernoulli trials with variance $\sigma^2_{\text{task}} = p(1 - p)$, the required sample size per evaluation cohort is bounded by:
 
@@ -1436,7 +1382,7 @@ $$\mathcal{C}_{\text{latency}} \iff p99\big(T_{\text{elapsed}}(\tau)\big) \le T_
 
 where $T_{\max}$ is the maximum permissible trajectory timeout enforced by the host supervisor's dead-man timers.
 
-#### Zero-Tolerance Safety and Escrow Criterion ($\mathcal{C}_{\text{safety}}$) {.unnumbered}
+#### Zero-Tolerance Safety Criteria ($\mathcal{C}_{\text{safety}}$) {.unnumbered}
 
 Unlike stochastic task performance, safety invariants are deterministic. The execution layer monitors whether any agent trajectory attempts an unauthorized tool execution, breaches its container sandbox, bypasses memory escrow, or triggers a critical security policy violation:
 
