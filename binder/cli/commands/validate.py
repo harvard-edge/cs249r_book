@@ -8621,31 +8621,106 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    # ------------------------------------------------------------------
+    # Redundant-noun detection for native Quarto cross-references.
+    #
+    # Quarto renders the noun itself ("figure 3.1", "table 2.4"), so any prose
+    # noun in front of the ref ships doubled ("Table table 2.4"). The three
+    # regex fragments below are shared by the single-line and the line-wrapped
+    # passes in `_run_redundant_xref_prefix`.
+    # ------------------------------------------------------------------
+
+    # Every noun Quarto can auto-render, plus the abbreviations authors reach
+    # for. Kept in sync with the prefixes below: sec/chapter/appendix -> @sec-,
+    # table -> @tbl-, figure -> @fig-, equation -> @eq-, listing -> @lst-,
+    # algorithm -> @algo-. Custom-callout nouns (Principle, Definition,
+    # Notebook, ...) are deliberately ABSENT: those use \ref{}, which renders a
+    # bare number, so the prose noun in front of them is required, not
+    # redundant. The @-form of a custom callout is caught by callout-ref-form.
+    _XREF_NOUN = (
+        r"(?:sections?|secs?\.|§|"
+        r"chapters?|chaps?\.|chs?\.|"
+        r"appendi(?:x|ces)|apps?\.|"
+        r"tables?|tbls?\.|tabs?\.|"
+        r"figures?|figs?\.?|"
+        r"equations?|eqns?\.|eqs?\.|"
+        r"listings?|lsts?\.|"
+        r"algorithms?|algos?\.?|algs?\.)"
+    )
+    # Optional markdown emphasis around the noun: **Table** @tbl-x hides the
+    # noun from a plain `\bTable\s+@` pattern but still renders doubled.
+    _XREF_NOUN_EMPH = r"(?:\*\*|\*|_)?"
+    # Separators that all render as a space: ASCII space/tab, the LaTeX tie
+    # authors carry over (`Table~@tbl-x`), NBSP / narrow NBSP, and &nbsp;.
+    _XREF_GAP = r"(?:[ \t~  ]|&nbsp;)+"
+    # The bare `@target` form is matched for ANY target (a noun in front of one
+    # is wrong whatever follows). The bracketed form is NOT: `[@key]` is the
+    # ordinary citation syntax, and "the ring algorithm [@gibiansky2017baidu]"
+    # is correct prose. Only a bracketed NATIVE crossref renders the noun a
+    # second time, so the bracketed branch is restricted to those prefixes.
+    # `[-@fig-x]` suppresses the rendered noun and stays legal after one.
+    _NATIVE_XREF_PREFIX = r"(?:fig|tbl|sec|eq|lst|algo?)[-_]"
+    _XREF_AT = (
+        r"(?:@([A-Za-z0-9_-]+)"
+        r"|\[(?!-)@(" + _NATIVE_XREF_PREFIX + r"[A-Za-z0-9_-]+)\])"
+    )
+
     def _run_redundant_xref_prefix(self, root: Path) -> ValidationRunResult:
         """Flag redundant prose nouns preceding native cross-references.
 
         Quarto's native cross-reference resolver automatically prepends the
         appropriate label ('section', 'chapter', 'figure', 'table', 'equation',
         'listing', 'algorithm') when rendering `@sec-`, `@fig-`, `@tbl-`,
-        `@eq-`, `@lst-`, `@algo?-`.
+        `@eq-`, `@lst-`, `@algo-`.
 
         Writing 'Section @sec-foo' or 'Table @tbl-bar' causes Quarto to duplicate
         the noun in output, rendering 'Section section X.Y' or 'Table table A.B'.
         Prose must use bare `@sec-` / `@Sec-`, `@tbl-` / `@Tbl-`, etc.
         (Custom callout references via \\ref{} are exempt and supply their own noun).
+
+        Covers, for every noun and every referenceable type:
+          - full words and abbreviations ('Fig.', 'Tbl.', 'Eq.', 'Algo.', '§')
+          - emphasis-wrapped nouns ('**Table** @tbl-x')
+          - LaTeX ties and non-breaking spaces ('Table~@tbl-x', 'Table&nbsp;@tbl-x')
+          - a noun left at the end of one line with the ref wrapping to the next
+          - the bracketed '[@tbl-x]' form (but NOT '[-@tbl-x]', which suppresses
+            the rendered noun and is therefore the correct partner for one)
         """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
 
         pat = re.compile(
-            r"\b(sections?|chapters?|appendi(?:x|ces)|tables?|figures?|figs?\.?|equations?|eqs?\.?|listings?|algorithms?)\s+@([A-Za-z0-9_-]+)",
+            rf"(?<![A-Za-z0-9_]){self._XREF_NOUN_EMPH}({self._XREF_NOUN}){self._XREF_NOUN_EMPH}"
+            rf"{self._XREF_GAP}{self._XREF_AT}",
             re.IGNORECASE,
         )
+        # Line-wrapped form: noun is the last token on the line, the ref opens
+        # the next one. Rendered output is identical to the same-line case.
+        trailing_noun = re.compile(
+            rf"(?<![A-Za-z0-9_]){self._XREF_NOUN_EMPH}({self._XREF_NOUN}){self._XREF_NOUN_EMPH}[ \t]*$",
+            re.IGNORECASE,
+        )
+        leading_ref = re.compile(rf"^{self._XREF_AT}")
+
+        def _issue(file: Path, line_no: int, noun: str, target: str, context: str) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(file),
+                line=line_no,
+                code="redundant_xref_prefix",
+                message=(
+                    f"Redundant noun '{noun}' before native cross-reference '@{target}'. "
+                    f"Quarto auto-generates the noun label; write '@{target}' or '@{target.capitalize()}' directly."
+                ),
+                severity="error",
+                context=context,
+                suggestion=f"Remove '{noun}' and use '@{target}' (or '@{target.capitalize()}' at sentence start)",
+            )
 
         for file in files:
             lines = self._read_text(file).splitlines()
             in_code = False
+            prose: List[tuple] = []  # (line_no, text) for prose lines only
             for idx, line in enumerate(lines, 1):
                 stripped = line.strip()
                 if stripped.startswith("```"):
@@ -8653,23 +8728,26 @@ class ValidateCommand:
                     continue
                 if in_code or stripped.startswith("#|"):
                     continue
+                prose.append((idx, line))
 
                 for m in pat.finditer(line):
-                    noun = m.group(1)
-                    target = m.group(2)
-                    issues.append(
-                        ValidationIssue(
-                            file=self._relative_file(file),
-                            line=idx,
-                            code="redundant_xref_prefix",
-                            message=(
-                                f"Redundant noun '{noun}' before native cross-reference '@{target}'. "
-                                f"Quarto auto-generates the noun label; write '@{target}' or '@{target.capitalize()}' directly."
-                            ),
-                            severity="error",
-                            suggestion=f"Remove '{noun}' and use '@{target}' (or '@{target.capitalize()}' at sentence start)",
-                        )
-                    )
+                    target = m.group(2) or m.group(3)
+                    issues.append(_issue(file, idx, m.group(1), target, stripped[:100]))
+
+            # Second pass over consecutive prose lines for the wrapped form.
+            for (idx, line), (next_idx, next_line) in zip(prose, prose[1:]):
+                if next_idx != idx + 1:
+                    continue
+                tail = trailing_noun.search(line)
+                if not tail:
+                    continue
+                head = leading_ref.match(next_line.lstrip())
+                if not head:
+                    continue
+                target = head.group(1) or head.group(2)
+                issues.append(
+                    _issue(file, idx, tail.group(1), target, line.strip()[-60:])
+                )
 
         return ValidationRunResult(
             name="redundant-xref-prefix",
