@@ -13,85 +13,55 @@
 # ---
 
 # %% [markdown]
-"""
+r"""
 # Module 19: Benchmarking - Performance Measurement Infrastructure
 
-Welcome to Module 19! You'll build the benchmarking infrastructure for systematic ML performance evaluation.
+Welcome to Module 19! In this module, we transition from individual optimization algorithms to systemic evaluation: constructing statistically rigorous, reproducible benchmarking infrastructure that quantifies latency, accuracy, memory, and energy trade-offs across neural network architectures.
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Complete ML framework with profiling, acceleration, quantization, and compression
-**You'll Build**: The Benchmark class - a benchmarking system for fair model comparison and performance evaluation
-**You'll Enable**: Systematic optimization combination and competitive performance evaluation
 
-**Connection Map**:
-```
-Individual Optimizations (M14-18) → Benchmarking (M19) → Module 20 (Capstone)
-(techniques)                        (evaluation)         (application)
-```
+<img src="benchmarking_blueprint.svg" width="100%" alt="TinyTorch Framework Blueprint: Module 19 Benchmarking" />
+
+### Architectural Roadmap
+
+| Optimization Stage | Core Technique | Hardware & Algorithmic Focus | Primary Target |
+|:---|:---|:---|:---|
+| **14. Profiling** | Microsecond Benchmarks & Tracing | Profiler timer loops, Roofline bounds | Identify compute vs memory bottlenecks |
+| **15. Quantization** | Symmetric/Asymmetric INT8 | 8-bit scale & zero-point arithmetic | 4× weight footprint & memory bus bandwidth |
+| **16. Compression** | Magnitude Pruning & Distillation | Weight sparsity & student distillation | Redundant parameter elimination |
+| **17. Acceleration** | SIMD GEMM, Fusion, `im2col` | Memory traffic elimination & systolic arrays | Kernel overhead & hardware utilization |
+| **18. Memoization** | Static KV Cache Buffers | $\mathcal{O}(1)$ decode steps & zero recomputation | Autoregressive decoding latency |
+| **19. Benchmarking** *(Active)* | **Statistical Evaluation & MLPerf** | **Variance control, confidence intervals, Pareto frontiers** | **Rigorous cross-system evaluation** |
+| **20. Capstone** | End-to-End Pipeline Optimization | Capstone deployment & system integration | Production serving pipeline |
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
-1. Implement benchmarking infrastructure with statistical rigor
-2. Measure optimizations alone and in combination on one layer, and read what each step contributes
-3. Build the Benchmark class - a standardized performance evaluation framework
-4. Run an ablation and identify Pareto-optimal models from measured results
-
-The core reading path is to time one model with `Benchmark`, compare a baseline
-with one optimization, and run an ablation to identify what each change
-contributes. Keep the workload and measurement conditions fixed along that
-path. The statistical comparisons, Pareto analysis, and plotting helpers extend
-the interpretation of those measurements; they become useful after the basic
-comparison is reproducible. All implementations are included, but the timing
-and comparison path provides the foundation for understanding the extensions.
+1. Construct high-precision benchmarking infrastructure with warmup discard and statistical variance control.
+2. Formulate sample distribution statistics: reporting median $P_{50}$, tail latency $P_{95}/P_{99}$, and student-$t$ confidence intervals.
+3. Build the `Benchmark` and `BenchmarkSuite` evaluation engines to compare baseline and optimized models across multiple hardware axes.
+4. Implement an MLPerf Tiny standardized compliance runner enforcing deterministic input seeds and hard accuracy/latency thresholds.
+5. Derive empirical Pareto frontiers to identify non-dominated model variants across competing systems objectives.
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/19_benchmarking/benchmarking.ipynb`
+**Learning Side:** You work in `modules/19_benchmarking/benchmarking.ipynb`  
 **Building Side:** Code exports to `tinytorch.perf.benchmarking`
+
+<img src="benchmarking_source_card.svg" width="100%" alt="Source Code Mapping Card for Module 19 Benchmarking" />
 
 ```python
 # Final package structure:
-from tinytorch.perf.benchmarking import Benchmark
-
-# Measure both models under the same conditions:
-benchmark = Benchmark([baseline_model, optimized_model],
-                     [{"name": "baseline"}, {"name": "optimized"}])
-results = benchmark.run_latency_benchmark()
+from tinytorch.perf.benchmarking import Benchmark, BenchmarkSuite, BenchmarkResult, MLPerf, precise_timer
 ```
 
-**Why this matters:**
-- **Learning:** Complete benchmarking ecosystem in one focused module for rigorous evaluation
-- **TinyTorch Olympics:** The Benchmark class provides the standardized framework for capstone submissions
-- **Consistency:** All benchmarking operations and reporting in benchmarking.benchmark
-- **Integration:** Works seamlessly with optimization modules (M14-18) for complete systems evaluation
-"""
-
-# %% [markdown]
-"""
 ## 📋 Module Dependencies
 
-**Prerequisites**: Modules 01-18 (Complete TinyTorch framework)
-
-**External Dependencies**:
-- `numpy` (for numerical operations)
-- `time`, `statistics` (for measurements)
-- `tracemalloc` (for memory profiling)
-- `matplotlib` (optional, for visualization)
-
-**TinyTorch Dependencies**:
-- `tinytorch.core.tensor` (Tensor class)
-- `tinytorch.core.layers` (Linear layer)
-- `tinytorch.perf.profiling` (Profiler from Module 14)
-
-**Dependency Flow**:
-```
-Profiling (M14) → Benchmarking (M19)
-       ↓
-→ Module 20 (Capstone)
-```
-
-Students completing this module will have built professional
-benchmarking infrastructure for systematic performance evaluation.
+| Dependency Module | Exported Abstraction | Consumed Functional Role | Memory & Evaluation Invariant |
+|:---|:---|:---|:---|
+| **Module 01 (`01_tensor`)** | `Tensor` | Contiguous N-D numerical array representation | Evaluation inputs and outputs without autograd overhead |
+| **Module 07 (`07_layers`)** | `Linear` | Fully connected layer primitive | Reference workloads for single-layer benchmarking |
+| **Module 14 (`14_profiling`)** | `Profiler` | High-resolution microsecond timer | Core latency and memory probe reused by `Benchmark` |
+| **Modules 15–18** | Quantized, Pruned, Accelerated Models | Optimized model variants | Inputs to multi-dimensional comparative benchmarking |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
@@ -134,167 +104,91 @@ ENERGY_JOULES_PER_SECOND = 2.0  # about 2 W while the model runs
 ENERGY_JOULES_PER_MB = 0.01
 
 # %% [markdown]
-"""
+r"""
 ### Looking Ahead
 
 The benchmarking tools you build here will be used in Module 20's capstone project, where you'll apply optimization techniques competitively. For now, focus on building reliable, fair measurement infrastructure.
 """
 
 # %% [markdown]
-"""
+r"""
 ## 💡 Introduction: What is Fair Benchmarking?
 
-Benchmarking in ML systems isn't just timing code - it's about making fair, reproducible comparisons that guide real optimization decisions. Think of it like standardized testing: everyone takes the same test under the same conditions.
+Benchmarking in ML systems is not merely recording wall-clock time—it is an empirical science requiring controlled experimental conditions to enable fair, reproducible comparisons that guide production deployment decisions.
 
-Consider comparing three models: a base CNN, a quantized version, and a pruned version. Without proper benchmarking, you might conclude the quantized model is "fastest" because you measured it when your CPU was idle, while testing the others during peak system load. Fair benchmarking controls for these variables.
+<img src="benchmarking_methodology_overview.svg" width="100%" alt="Benchmarking Methodology Pipeline" />
 
-The challenge: ML models have multiple competing objectives (accuracy vs speed vs memory), measurements can be noisy, and "faster" depends on your hardware and use case.
+### Confounding Factors & Controlled Experimental Variables
 
-### Benchmarking as a Systems Engineering Discipline
+| Noise Source | Physical Hardware Mechanism | Benchmarking Defense Strategy | Controlled Variable |
+|:---|:---|:---|:---|
+| **Cold Starts** | Dynamic library loading & page faults | Warmup iterations discarded before recording | Memory state |
+| **Thermal Throttling** | DVFS frequency scaling when silicon overheats | Cooldown pauses & randomized trial interleaving | CPU / GPU clock frequency |
+| **OS Interrupts** | Background scheduler preemption & context switches | Multi-trial sampling with median and percentile reporting | CPU core pinning |
+| **Cache Pollution** | Shared L2/L3 cache evictions by OS daemons | Contiguous tensor layout & deterministic array strides | SRAM cache residency |
+| **Memory Pressure** | Python garbage collection pauses | Explicit GC disabled during inner timing loop | Heap allocation state |
 
-Professional ML benchmarking requires understanding measurement uncertainty and controlling for confounding factors:
+---
 
-**Statistical Foundations**: We need enough measurements to achieve statistical significance. Running a model once tells you nothing about its true performance - you need distributions.
-
-**System Noise Sources**:
-- **Thermal throttling**: CPU frequency drops when hot
-- **Background processes**: OS interrupts and other applications
-- **Memory pressure**: Garbage collection, cache misses
-- **Network interference**: For distributed models
-
-**Fair Comparison Requirements**:
-- Same hardware configuration
-- Same input data distributions
-- Same measurement methodology
-- Statistical significance testing
-
-This module builds infrastructure that addresses all these challenges while generating actionable insights for optimization decisions.
-"""
-
-# %% [markdown]
-"""
 ## 📐 Foundations: Statistics for Performance Engineering
 
-Benchmarking is applied statistics. We measure noisy processes (model inference) and need to extract reliable insights about their true performance characteristics.
+Inference latency on modern superscalar processors is an inherently non-deterministic, right-skewed stochastic process.
 
-### Central Limit Theorem in Practice
+<img src="latency_anatomy_distribution.svg" width="100%" alt="The Anatomy of Latency Distributions and Tail Percentiles" />
 
-When you run a model many times, the distribution of the *sample mean* approaches normal as the sample grows, whatever the shape of the individual measurements (the individual latencies stay skewed, with a long slow tail). This lets us:
-- Compute confidence intervals for the true mean
-- Detect statistically significant differences between models
-- Control for measurement variance
+<img src="benchmarking_latency_card.svg" width="100%" alt="Latency Distribution Card" />
 
-```
-Single measurement: Meaningless
-Few measurements: Unreliable
-Many measurements: Statistical confidence
-```
+### Central Limit Theorem & Confidence Intervals
 
-### Multi-Objective Optimization Theory
+While individual latency measurements exhibit heavy-tailed distributions due to system hiccups, the sample mean $\bar{X}$ over $n$ independent trials converges toward a normal distribution:
 
-ML systems exist on a **Pareto frontier** - you can't simultaneously maximize accuracy and minimize latency without trade-offs. Good benchmarks reveal this frontier:
+$$\bar{X} = \frac{1}{n} \sum_{i=1}^n X_i, \quad s = \sqrt{\frac{1}{n-1} \sum_{i=1}^n (X_i - \bar{X})^2}$$
 
-```
-Accuracy
-    ^
-    |      A .<- Model A: High accuracy, high latency
-    |
-    |    B .  <- Model B: Balanced trade-off
-    |
-    |  C .     <- Model C: Low accuracy, low latency
-    |__________> Latency (lower is better)
-```
+The standard error of the mean ($\text{SE}$) and the two-sided $95\%$ Student-$t$ confidence interval are given by:
 
-The goal: Find the optimal operating point for your specific constraints.
+$$\text{SE} = \frac{s}{\sqrt{n}}, \quad \text{CI}_{95\%} = \left[ \bar{X} - t_{0.025, \, n-1} \frac{s}{\sqrt{n}}, \quad \bar{X} + t_{0.025, \, n-1} \frac{s}{\sqrt{n}} \right]$$
 
-### Measurement Uncertainty and Error Propagation
+### Multi-Objective Optimization & Pareto Dominance
 
-Every measurement has uncertainty. When combining metrics (like accuracy per joule), uncertainties compound:
+Model optimization is multi-objective: latency, accuracy, memory, and energy represent competing physical trade-offs.
 
-- **Systematic errors**: Consistent bias (timer overhead, warmup effects)
-- **Random errors**: Statistical noise (thermal variation, OS scheduling)
-- **Propagated errors**: How uncertainty spreads through calculations
+**Mathematical Definition of Pareto Dominance**:
+Let $\mathcal{M}$ be the set of evaluation metrics. A model variant $\theta_A$ strictly Pareto-dominates variant $\theta_B$ ($\theta_A \succ \theta_B$) if and only if:
 
-Professional benchmarking quantifies and minimizes these uncertainties.
-"""
+$$\forall m \in \mathcal{M}, \quad \text{score}_m(\theta_A) \ge \text{score}_m(\theta_B) \quad \land \quad \exists m \in \mathcal{M}, \quad \text{score}_m(\theta_A) > \text{score}_m(\theta_B)$$
 
-# %% [markdown]
-"""
+| Optimization Dimension | Preferred Direction | Systems Constraint | Typical Hardware Boundary |
+|:---|:---|:---|:---|
+| **Latency ($ms$)** | Minimize ($\downarrow$) | SLA / Real-time interactivity ($<100 \text{ ms}$) | ALU compute & DRAM bandwidth |
+| **Accuracy ($\%$)** | Maximize ($\uparrow$) | Task fidelity & quality threshold | Model representational capacity |
+| **Memory ($MB$)** | Minimize ($\downarrow$) | Embedded / GPU VRAM capacity limit | SRAM / DRAM capacity |
+| **Energy ($Joules$)** | Minimize ($\downarrow$) | Mobile battery life & thermal TDP envelope | Power delivery & dynamic voltage |
+
+---
+
 ## 🏗️ Implementation: Building Professional Benchmarking Infrastructure
 
-We'll build a comprehensive benchmarking system that handles statistical analysis, multi-dimensional comparison, and automated reporting. Each component builds toward production-quality evaluation tools.
+### Architectural Components
 
-### Benchmark Architecture Overview
+| Infrastructure Component | Role & Scope | Core Inputs | Produced Output Abstraction |
+|:---|:---|:---|:---|
+| `precise_timer` | High-precision monotonic interval timing | Code block context manager | `timer.elapsed` (seconds) |
+| `Profiler` (Module 14) | Hardware timer and memory probe | Model + input tensor | Raw latency and memory readings |
+| `Benchmark` | Multi-model evaluation across single metrics | Models, datasets, warmup/trial counts | `Dict[str, BenchmarkResult]` |
+| `BenchmarkResult` | Statistical analysis container | Raw measurements list | Mean, std, median, $P_{90}$, $P_{99}$, CI |
+| `BenchmarkSuite` | Multi-dimensional evaluation engine | Models, datasets, metric configurations | Comparative trade-off tables & Pareto analysis |
+| `MLPerf` | Standardized edge compliance harness | Reference tasks, deterministic seeds | Pass/Fail compliance report |
 
-```
-Benchmark Architecture:
-                    ┌──────────────────────────┐
-                    │ precise_timer            │
-                    │ • one timed block        │
-                    └────────┬─────────┬───────┘
-                             │         │
-┌──────────────────────┐     │         │     ┌──────────────────────────┐
-│ Profiler (Module 14) │     │         └────>│ MLPerf                   │
-│ • measure_latency    │     │               │ • fixed inputs, seeds,   │
-│ • measure_memory     │     │               │   run counts, thresholds │
-└──────────┬───────────┘     │               │ • pass/fail per task     │
-           v                 v               └──────────────────────────┘
-┌──────────────────────────────┐
-│ Benchmark                    │      ┌──────────────────────────┐
-│ • one model, one metric      │─────>│ BenchmarkResult          │
-│ • many models compared       │      │ • mean, std, CI, p99     │
-└──────────┬───────────────────┘      └──────────────────────────┘
-           v
-┌──────────────────────────────┐
-│ BenchmarkSuite               │
-│ • every metric, every model  │
-│ • energy, plots, report      │
-└──────────────────────────────┘
-```
+### Statistical Metrics Tracked by BenchmarkResult
 
-**Key Architectural Decision**: The `Benchmark` class reuses `Profiler` from Module 14 for individual model measurements, then adds statistical comparison across multiple models. Build the measurement once, reuse it everywhere.
-
-**Three harnesses, three jobs.** `Benchmark` measures: one model, one metric,
-one statistically summarized `BenchmarkResult`. `BenchmarkSuite` drives a
-`Benchmark`: it runs every metric for every model, derives energy, and writes
-the plots and the report. `MLPerf` stands beside them rather than on top of
-them. It shares only `precise_timer` and `BenchmarkResult`'s way of thinking;
-what it adds is a protocol, with fixed inputs, seeds, run counts, and pass/fail
-thresholds, so that two submissions are comparable at all. Read them in that
-order: the first two stack, the third is a separate harness for a separate job.
-"""
-
-# %% [markdown]
-"""
-### BenchmarkResult: Statistical Analysis Container
-
-Before measuring anything, we need a robust container that stores measurements and computes statistical properties. This is the foundation of all our benchmarking.
-
-### Why Statistical Analysis Matters
-
-Single measurements are meaningless in performance engineering. Consider timing a model:
-- Run 1: 1.2ms (CPU was idle)
-- Run 2: 3.1ms (background process started)
-- Run 3: 1.4ms (CPU returned to normal)
-
-Without statistics, which number do you trust? BenchmarkResult solves this by:
-- Computing confidence intervals for the true mean
-- Detecting outliers and measurement noise
-- Providing uncertainty estimates for decision making
-
-### Statistical Properties We Track
-
-```
-Raw measurements: [1.2, 3.1, 1.4, 1.3, 1.5, 1.1, 1.6]
-                           ↓
-        Statistical Analysis
-                           ↓
-Mean: 1.60ms ± 0.51ms (95% confidence interval)
-Median: 1.4ms (less sensitive to outliers)
-CV: 43% (coefficient of variation - relative noise)
-```
-
-The confidence interval tells us: "We're 95% confident the true mean latency is between 1.09ms and 2.11ms." This guides optimization decisions with statistical backing.
+| Statistical Metric | Mathematical Estimator | Systems Interpretation | Robustness Against Outliers |
+|:---|:---|:---|:---|
+| **Mean ($\mu$)** | $\frac{1}{n} \sum X_i$ | Average throughput expectation | Sensitive to tail stalls |
+| **Median ($P_{50}$)** | 50th percentile rank | Typical steady-state latency | Highly robust |
+| **Tail Latency ($P_{95}, P_{99}$)** | 95th / 99th percentile rank | Worst-case SLA compliance bound | Captures OS scheduling spikes |
+| **Std Deviation ($s$)** | $\sqrt{\frac{1}{n-1} \sum (X_i - \bar{X})^2}$ | Measurement dispersion | Sensitive to extreme outliers |
+| **Coeff. of Variation (CV)** | $\frac{s}{\bar{X}} \times 100\%$ | Relative measurement noise | Normalized noise index |
+| **$95\%$ Confidence Interval** | $\bar{X} \pm t_{n-1} \cdot \text{SE}$ | True population mean bound | Requisite for statistical claims |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-dataclass", "solution": true}
@@ -379,7 +273,7 @@ class BenchmarkResult:
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: BenchmarkResult
 
 This test validates our BenchmarkResult class correctly computes statistical properties from measurements.
@@ -419,49 +313,43 @@ if __name__ == "__main__":
     test_unit_benchmark_result()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ High-Precision Timing Infrastructure
 
 Accurate timing is the foundation of performance benchmarking. System clocks have different precision and behavior, so we need a robust timing mechanism.
 
 ### Timing Challenges in Practice
 
-Consider what happens when you time a function:
-```
-User calls: time.time()
-            ↓
-Operating System scheduling delays (μs to ms)
-            ↓
-Timer system call overhead (~1μs)
-            ↓
-Hardware clock resolution (ns to μs)
-            ↓
-Your measurement
-```
+When timing a function call in high-level languages like Python, several layers of operating system and hardware indirection intervene between the software invocation and the physical timer:
+
+$$\Delta t_{\text{measured}} = \Delta t_{\text{true}} + \delta_{\text{call}} + \delta_{\text{OS}} + \delta_{\text{quantization}}$$
+
+| Latency Component | Typical Magnitude | Root Cause / System Source | Mitigation Strategy |
+| :--- | :--- | :--- | :--- |
+| **Kernel / Forward Pass** ($\Delta t_{\text{true}}$) | $\mu\text{s}$ to $\text{ms}$ | Actual computational operations (FLOPs, memory loads) | Target metric under benchmark |
+| **Syscall Overhead** ($\delta_{\text{call}}$) | $10\text{--}50\text{ ns}$ | User-to-kernel context switch for clock sampling | Use monotonic userspace vDSO clock |
+| **OS Scheduling** ($\delta_{\text{OS}}$) | $\mu\text{s}$ to $\text{ms}$ | Thread preemption, core migration, page faults | Discard warmup runs, sample distributions |
+| **Timer Quantization** ($\delta_{\text{quantization}}$) | $1\text{ ns}$ to $1\text{ }\mu\text{s}$ | Hardware counter frequency resolution limits | Use nanosecond-resolution monotonic counter |
 
 For microsecond-precision timing, each of these can introduce significant error.
 
-### Why perf_counter() Matters
+### Why `perf_counter()` Matters
 
 Python's `time.perf_counter()` is specifically designed for interval measurement:
-- **Monotonic**: Never goes backwards (unaffected by system clock adjustments)
-- **High resolution**: Typically nanosecond precision
-- **Low overhead**: Optimized system call
+- **Monotonic**: Never goes backwards (unaffected by NTP time sync or system clock adjustments)
+- **High resolution**: Nanosecond resolution backed by hardware counters (`RDTSC` on x86, `CNTVCT_EL0` on ARM)
+- **Low overhead**: Optimized system call via virtual Dynamic Shared Object (vDSO) avoiding kernel trapping
 
-### Timing Best Practices
+### Timing Best Practices: The Context Manager Pattern
 
-```
-Context Manager Pattern:
-┌─────────────────┐
-│  with timer():  │ ← Start timing
-│    operation()  │ ← Your code runs
-│  # End timing   │ ← Automatic cleanup
-└─────────────────┘
-    ↓
-elapsed = timer.elapsed
-```
+| Context Phase | Program Action | System State / Effect |
+| :--- | :--- | :--- |
+| `__enter__` | `t_start = time.perf_counter()` | Sample monotonic nanosecond counter prior to workload |
+| Yield Block | Execute operation (forward pass) | Target compute runs; CPU registers and cache active |
+| `__exit__` (`finally`) | `t_end = time.perf_counter()` | Guaranteed sample even if an unexpected exception occurs |
+| Post-Context | `elapsed = t_end - t_start` | Monotonic interval $\Delta t \ge 0$ recorded reliably |
 
-This pattern ensures timing starts/stops correctly even if exceptions occur.
+This pattern ensures timing starts and stops correctly with deterministic resource handling even if exceptions occur.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "timer-context", "solution": true}
@@ -508,7 +396,7 @@ def precise_timer():
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Precise Timer
 
 This test validates our timing context manager provides accurate measurements.
@@ -546,88 +434,59 @@ if __name__ == "__main__":
     test_unit_precise_timer()
 
 # %% [markdown]
-"""
+r"""
 ### Benchmark Class: Core Measurement Engine
 
-The Benchmark class implements the core measurement logic for different metrics. It handles the complex orchestration of multiple models, datasets, and measurement protocols.
+The `Benchmark` class implements the core measurement logic for different metrics. It handles the orchestration of multiple models, datasets, and measurement protocols.
 
-### Benchmark Architecture Overview
+<img src="benchmarking_methodology_overview.svg" alt="Benchmarking Methodology Overview" width="100%">
 
-```
-Benchmark Execution Flow:
-┌─────────────┐    ┌──────────────┐    ┌─────────────────┐
-│   Models    │    │   Datasets   │    │ Measurement     │
-│ [M1, M2...] │ →  │ [D1, D2...]  │ →  │ Protocol        │
-└─────────────┘    └──────────────┘    └─────────────────┘
-                                               ↓
-                           ┌─────────────────────────────────┐
-                           │        Benchmark Loop           │
-                           │ 1. Warmup runs (JIT, cache)     │
-                           │ 2. Measurement runs (statistics)│
-                           │ 3. System info capture          │
-                           │ 4. Result aggregation           │
-                           └─────────────────────────────────┘
-                                        ↓
-                        ┌────────────────────────────────────┐
-                        │          BenchmarkResult           │
-                        │ • Statistical analysis             │
-                        │ • Confidence intervals             │
-                        │ • Metadata (system, conditions)    │
-                        └────────────────────────────────────┘
-```
+### Benchmark Architecture Execution Flow
+
+| Stage | Input Artifacts | Processing Step | Output Artifacts |
+| :--- | :--- | :--- | :--- |
+| **1. Ingestion** | Models $[M_1, M_2, \dots]$, Datasets $[D_1, D_2, \dots]$ | Register candidate architectures and evaluation datasets | Model registry with validated callable interfaces |
+| **2. Warmup** | Synthetic or unmeasured batches | Execute $W$ iterations to warm CPU caches and JIT tables | Discarded startup latencies, stabilized hardware clocks |
+| **3. Measurement** | Fixed-seed inputs | Sample $N$ independent forward passes with `perf_counter` | Raw latency samples $[t_1, t_2, \dots, t_N]$ |
+| **4. Profiling** | Model instance | Trace memory allocations and peak buffer usage | Traced peak memory (MB) and FLOP counts |
+| **5. Synthesis** | Raw timing and memory metrics | Compute $\mu, s, \text{SE}$, and confidence intervals $[CI_{\text{low}}, CI_{\text{high}}]$ | `BenchmarkResult` container with system metadata |
 
 ### Why Warmup Runs Matter
 
-Modern systems have multiple layers of adaptation:
-- **JIT compilation**: Code gets faster after being run several times
-- **CPU frequency scaling**: Processors ramp up under load
-- **Cache warming**: Data gets loaded into faster memory
-- **Branch prediction**: CPU learns common execution paths
+Modern operating systems and processors have multiple layers of runtime adaptation:
+- **JIT compilation**: Specialized machine code and branch paths stabilize after initial iterations
+- **CPU frequency scaling**: Dynamic Voltage and Frequency Scaling (DVFS) ramps execution cores to performance governors
+- **Cache warming**: Instruction and weight caches ($L_1/L_2/L_3$) achieve steady-state hit rates
+- **Memory frame allocation**: OS page faults occur during initial virtual memory touches
 
-Without warmup, your first few measurements don't represent steady-state performance.
+<img src="latency_anatomy_distribution.svg" alt="Latency Anatomy and Warmup" width="100%">
 
-### Multiple Benchmark Types
+### Multiple Benchmark Dimensions
 
-Different metrics require different measurement strategies:
+Different metrics require distinct measurement strategies:
 
-**Latency Benchmarking**:
-- Focus: Time per inference
-- Key factors: Input size, model complexity, hardware utilization
-- Measurement: High-precision timing of forward pass
-
-**Accuracy Benchmarking**:
-- Focus: Quality of predictions
-- Key factors: Dataset representativeness, evaluation protocol
-- Measurement: Correct predictions / total predictions
-
-**Memory Benchmarking**:
-- Focus: Peak and average memory usage
-- Key factors: Model size, batch size, intermediate activations
-- Measurement: Process memory monitoring during inference
+| Dimension | Primary Focus | Key Governing Factors | Measurement Technique |
+| :--- | :--- | :--- | :--- |
+| **Latency** | Milliseconds per forward pass ($\text{ms}$) | Batch size, compute depth, memory bandwidth | High-precision timing via `perf_counter` |
+| **Accuracy** | Fraction of correct inferences ($[0, 1]$) | Quantization noise, pruning sparsity, model capacity | Ground-truth evaluation over validation set |
+| **Memory** | Allocator footprint during execution ($\text{MB}$) | Parameter storage, activation tensors, workspace | Traced allocator peak vs OS process RSS |
+| **Energy** | Joules per inference pass ($\text{mJ}$) | FLOP complexity, SRAM transfers, DRAM accesses | Empirical analytical modeling or hardware PMUs |
 """
 
 # %% [markdown]
-"""
+r"""
 ### Benchmark.__init__: Setting Up the Measurement Engine
 
-The Benchmark constructor configures the measurement infrastructure: models to test,
+The `Benchmark` constructor configures the measurement infrastructure: models to test,
 datasets for evaluation, and system metadata for reproducibility. It reuses the
-Profiler from Module 14 for individual model measurements.
+`Profiler` from Module 14 for individual model measurements.
 
-```
-Benchmark Setup:
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│   Models    │     │   Datasets   │     │  Profiler   │
-│ [M1, M2...] │ ──> │ [D1, D2...]  │ ──> │ (Module 14) │
-└─────────────┘     └──────────────┘     └─────────────┘
-                           ↓
-                 ┌──────────────────┐
-                 │  System Metadata │
-                 │ • platform       │
-                 │ • processor      │
-                 │ • python version │
-                 └──────────────────┘
-```
+| Configuration Field | Source / Inspection Method | Architectural Role |
+| :--- | :--- | :--- |
+| `models` | Candidate architectures ($M_i$) | Models under comparative evaluation |
+| `datasets` | Labeled or synthetic batches | Validation data slices for evaluation |
+| `profiler` | `Profiler()` (Module 14) | Memory tracing and execution instrumentation |
+| `system_info` | `platform.platform()`, `cpu_count()` | Hardware and runtime metadata for reproducibility |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-init", "solution": true}
@@ -696,7 +555,7 @@ class Benchmark:
         ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Benchmark.__init__
 
 **What we're testing**: Benchmark initialization with models, datasets, and system metadata
@@ -737,18 +596,23 @@ if __name__ == "__main__":
     test_unit_benchmark_init()
 
 # %% [markdown]
-"""
+r"""
 ### Benchmark.run_latency_benchmark: Measuring Inference Speed
 
 Latency benchmarking measures how long each model takes to process input. We use
 the Profiler for warmup, then collect multiple individual measurements for
-statistical analysis via BenchmarkResult.
+statistical analysis via `BenchmarkResult`.
 
-```
-Latency Measurement Flow:
-Input Tensor ──> Warmup Runs (discard) ──> Measurement Runs ──> BenchmarkResult
-                 (JIT, cache warming)      (collect times)      (mean, std, CI)
-```
+<img src="benchmarking_latency_card.svg" alt="Tail Latency Percentiles" width="100%">
+
+### Latency Measurement Pipeline
+
+| Pipeline Stage | Implementation Action | Purpose & Guarantees |
+| :--- | :--- | :--- |
+| **Input Synthesis** | `Tensor(rng.standard_normal(shape))` | Allocates representative evaluation tensor matching hardware target |
+| **Warmup Phase** | `profiler.measure_latency(warmup=W)` | Triggers initial JIT compilation, cache warming, and frame allocation (discarded) |
+| **Measurement Sampling**| `precise_timer()` loop ($N$ trials) | Gathers independent steady-state execution latencies $[t_1, t_2, \dots, t_N]$ in ms |
+| **Statistical Wrapping**| `BenchmarkResult("latency", samples)`| Computes mean, variance, percentiles (p50/p95/p99), and 95% confidence interval |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-latency", "solution": true}
@@ -798,7 +662,7 @@ def benchmark_run_latency_benchmark(self, input_shape: Tuple[int, ...] = (1, 28,
 Benchmark.run_latency_benchmark = benchmark_run_latency_benchmark
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Benchmark.run_latency_benchmark
 
 **What we're testing**: Latency measurement across multiple models
@@ -834,7 +698,7 @@ if __name__ == "__main__":
     test_unit_benchmark_latency()
 
 # %% [markdown]
-"""
+r"""
 ### Simulated Accuracy: The Honest Stand-In
 
 Some models handed to a benchmark harness have no `evaluate` method and no
@@ -916,7 +780,7 @@ def _simulated_accuracy(model: Any, dataset: Any, num_samples: int = 32) -> floa
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _simulated_accuracy
 
 **What we're testing**: Determinism, output-dependence, and identity-independence
@@ -965,7 +829,7 @@ if __name__ == "__main__":
     test_unit_simulated_accuracy()
 
 # %% [markdown]
-"""
+r"""
 ### Benchmark.run_accuracy_benchmark: Measuring Prediction Quality
 
 Accuracy benchmarking evaluates model correctness across datasets. A model that
@@ -983,12 +847,12 @@ its position in the list.
 > A benchmark that reports a number nobody measured is worse than a benchmark
 > that reports nothing. If you take one habit from this module, take that one.
 
-```
-Accuracy Measurement:
-Model ──> Dataset 1 ──> accuracy_1 ──┐
-      ──> Dataset 2 ──> accuracy_2 ──┼──> BenchmarkResult
-      ──> Dataset N ──> accuracy_N ──┘    (mean, std across datasets)
-```
+$$\text{Accuracy}(M) = \frac{1}{|D_{\text{val}}|} \sum_{(x, y) \in D_{\text{val}}} \mathbf{1}\big(\arg\max f_\theta(x) = y\big)$$
+
+| Evaluation Mode | Required Interface | Dataset Source | Scientific Rigor Guarantee |
+| :--- | :--- | :--- | :--- |
+| **Empirical Evaluation** | `model.evaluate(dataset)` | Labeled validation partitions | Measures true task performance against verified ground truth |
+| **Classroom Probe** (`simulate=True`) | Model forward pass outputs | Seeded synthetic label probe | Tagged with `simulated=True` metadata to prevent reporting unmeasured numbers |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-accuracy", "solution": true}
@@ -1056,7 +920,7 @@ def benchmark_run_accuracy_benchmark(self, simulate: bool = False) -> Dict[str, 
 Benchmark.run_accuracy_benchmark = benchmark_run_accuracy_benchmark
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Benchmark.run_accuracy_benchmark
 
 **What we're testing**: Accuracy evaluation across models and datasets
@@ -1090,19 +954,19 @@ if __name__ == "__main__":
     test_unit_benchmark_accuracy()
 
 # %% [markdown]
-"""
+r"""
 ### Benchmark.run_memory_benchmark: Measuring Resource Consumption
 
 Memory benchmarking tracks how much RAM each model consumes during inference.
 We retain the Profiler's traced allocation peak even when it is small. This is
-not total process RSS or the size of all model parameters.
+distinguished from total process RSS or the static size of all model parameters:
 
-```
-Memory Measurement:
-Model ──> Profiler.measure_memory() ──> peak_memory_mb
-                                         ↓
-                                  BenchmarkResult
-```
+| Memory Dimension | Measurement Target | Scope & Definition | Systems Significance |
+| :--- | :--- | :--- | :--- |
+| **Traced Allocator Peak** | `memory_stats['peak_memory_mb']` | High-water mark of live forward tensor buffers | Determines minimal physical DRAM/SRAM working footprint |
+| **Static Weights** | $\sum_l \lvert W_l \rvert \times \text{sizeof}(\text{dtype})$ | Persistent model parameters in storage | Dictates flash storage requirements and transfer latency |
+| **Transient Activations** | Layer intermediate shapes $\mathcal{O}(B \times S \times D)$ | Execution buffers during layer evaluation | Opportunities for memory pooling and inplace reuse |
+| **Process RSS** | Resident Set Size reported by OS | Entire Python runtime, shared libraries, and heap | High-level system footprint influenced by OS page allocation |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-memory", "solution": true}
@@ -1151,7 +1015,7 @@ def benchmark_run_memory_benchmark(self, input_shape: Tuple[int, ...] = (1, 28, 
 Benchmark.run_memory_benchmark = benchmark_run_memory_benchmark
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Benchmark.run_memory_benchmark
 
 **What we're testing**: Memory usage measurement across multiple models
@@ -1184,7 +1048,7 @@ if __name__ == "__main__":
     test_unit_benchmark_memory()
 
 # %% [markdown]
-"""
+r"""
 ### Benchmark.compare_models: Cross-Model Comparison
 
 The compare_models method dispatches to the appropriate benchmark type and
@@ -1244,7 +1108,7 @@ def benchmark_compare_models(self, metric: str = "latency"):
 Benchmark.compare_models = benchmark_compare_models
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Benchmark (Full Class Integration)
 
 This test validates our Benchmark class measures latency, accuracy, and memory correctly,
@@ -1304,7 +1168,7 @@ if __name__ == "__main__":
     test_unit_benchmark()
 
 # %% [markdown]
-"""
+r"""
 ### BenchmarkSuite: Comprehensive Multi-Metric Evaluation
 
 The BenchmarkSuite orchestrates multiple benchmark types and generates comprehensive reports. This is where individual measurements become actionable engineering insights.
@@ -1323,33 +1187,15 @@ Which is "best"? It depends on your constraints:
 
 ### Multi-Dimensional Comparison Workflow
 
-```
-BenchmarkSuite Execution Pipeline:
-┌──────────────┐
-│   Models     │ ← Input: List of models to compare
-│ [M1,M2,M3]   │
-└──────┬───────┘
-       ↓
-┌──────────────┐
-│ Metric Types │ ← Run each benchmark type
-│ • Latency    │
-│ • Accuracy   │
-│ • Memory     │
-│ • Energy     │
-└──────┬───────┘
-       ↓
-┌──────────────┐
-│ Result       │ ← Aggregate into unified view
-│ Aggregation  │
-└──────┬───────┘
-       ↓
-┌──────────────┐
-│ Analysis &   │ ← Generate insights
-│ Reporting    │   • Best performer per metric
-│              │   • Trade-off analysis
-│              │   • Use case recommendations
-└──────────────┘
-```
+<img src="benchmarking_source_card.svg" alt="Source Code Mapping" width="100%">
+
+| Evaluation Phase | Component Operation | Collected Data | Systems Decision Role |
+| :--- | :--- | :--- | :--- |
+| **Model Ingestion** | `models = [M1, M2, ...]` | Model architectures and weight buffers | Candidates for comparative deployment profiling |
+| **Metric Execution** | Latency, Accuracy, Memory, Energy | Sample distributions and allocator peaks | Multi-objective empirical measurement vectors |
+| **Aggregation** | Unified dictionary indexing | Synchronized per-metric `BenchmarkResult` | Cross-model normalization and variance alignment |
+| **Pareto Analysis** | Non-dominated sorting | Pareto frontiers, best-in-class flags | Eliminates strictly sub-optimal candidate variants |
+| **Deployment Synthesis** | Markdown & JSON report generator | Quantitative tradeoff recommendations | Concrete deployment mapping (Server, Mobile, IoT) |
 
 ### Pareto Frontier Analysis
 
@@ -1361,7 +1207,7 @@ Since direct energy measurement requires specialized hardware, we estimate energ
 """
 
 # %% [markdown]
-"""
+r"""
 ### BenchmarkSuite.__init__: Setting Up Multi-Metric Evaluation
 
 The BenchmarkSuite constructor creates the evaluation infrastructure, including
@@ -1411,7 +1257,7 @@ class BenchmarkSuite:
         ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: BenchmarkSuite.__init__
 
 **What we're testing**: Suite initialization with output directory and Benchmark instance
@@ -1448,19 +1294,18 @@ if __name__ == "__main__":
     test_unit_benchsuite_init()
 
 # %% [markdown]
-"""
+r"""
 ### BenchmarkSuite.run_full_benchmark: Orchestrating All Measurements
 
-The run_full_benchmark method runs all four benchmark categories (latency, accuracy,
-memory, energy) in sequence, collecting comprehensive results for each model.
+The `run_full_benchmark` method runs all four benchmark categories (latency, accuracy,
+memory, energy) in sequence, assembling comprehensive empirical results for each candidate model:
 
-```
-Run Full Benchmark Pipeline:
-Models ──> Latency Benchmark ──┐
-       ──> Accuracy Benchmark ──┼──> self.results dict
-       ──> Memory Benchmark   ──┤    (keyed by metric type)
-       ──> Energy Estimation  ──┘
-```
+| Evaluation Phase | Invoked Subsystem | Metric Output | Result Dictionary Key |
+| :--- | :--- | :--- | :--- |
+| **1. Latency** | `Benchmark.run_latency_benchmark()` | Inference duration ($\text{ms}$) with warmup discard | `results['latency']` |
+| **2. Accuracy** | `Benchmark.run_accuracy_benchmark()` | Empirical evaluation accuracy score ($[0, 1]$) | `results['accuracy']` |
+| **3. Memory** | `Benchmark.run_memory_benchmark()` | Traced peak memory allocator allocation ($\text{MB}$) | `results['memory']` |
+| **4. Energy** | `_estimate_energy_efficiency()` | Relative hardware energy proxy score | `results['energy']` |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-run", "solution": true}
@@ -1508,7 +1353,7 @@ def benchsuite_run_full_benchmark(self, simulate: bool = False,
 BenchmarkSuite.run_full_benchmark = benchsuite_run_full_benchmark
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: BenchmarkSuite.run_full_benchmark
 
 **What we're testing**: Orchestration of all four benchmark types
@@ -1549,7 +1394,7 @@ def test_unit_benchsuite_run():
 # after all BenchmarkSuite methods (including _estimate_energy_efficiency) are patched.
 
 # %% [markdown]
-"""
+r"""
 ### BenchmarkSuite._estimate_energy_efficiency: Energy Modeling
 
 Since direct energy measurement requires specialized hardware (power meters, RAPL),
@@ -1619,7 +1464,7 @@ def _benchsuite_estimate_energy_efficiency(self) -> Dict[str, BenchmarkResult]:
 BenchmarkSuite._estimate_energy_efficiency = _benchsuite_estimate_energy_efficiency
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: BenchmarkSuite._estimate_energy_efficiency
 
 **What we're testing**: Energy estimation from latency and memory data
@@ -1659,7 +1504,7 @@ if __name__ == "__main__":
     test_unit_benchsuite_energy()
 
 # %% [markdown]
-"""
+r"""
 ### BenchmarkSuite.plot_results: Visualization
 
 The plot_results method generates a 2x2 grid of bar charts comparing models
@@ -1800,7 +1645,7 @@ def benchsuite_plot_pareto_frontier(self, x_metric: str = 'latency', y_metric: s
 BenchmarkSuite.plot_pareto_frontier = benchsuite_plot_pareto_frontier
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: BenchmarkSuite.plot_results
 
 **What we're testing**: That plot_results actually writes a comparison chart, and stays quiet when there is nothing to plot
@@ -1864,28 +1709,27 @@ if __name__ == "__main__":
     test_unit_benchsuite_plot()
 
 # %% [markdown]
-"""
+r"""
 ### BenchmarkSuite.generate_report: Actionable Insights
 
-The generate_report method compiles all benchmark results into a structured
+The `generate_report` method compiles all benchmark results into a structured
 markdown report with system information, per-metric summaries, best performers,
 trade-off analysis, and deployment recommendations.
 
-```
-Report Generation Pipeline:
-Results Dict ──> System Info Section ──> Per-Metric Summaries ──> Trade-off Analysis
-                                                                         ↓
-                                                              Recommendations Section
-                                                                         ↓
-                                                              Save to benchmark_report.md
-```
+| Report Generation Stage | Input Data | Generated Section | Key Technical Content |
+| :--- | :--- | :--- | :--- |
+| **1. System Metadata** | `system_info` | Environment Header | OS, CPU architecture, core count, Python runtime |
+| **2. Per-Metric Summaries** | `results[metric]` | Score Breakdown | Mean, standard deviation, 95% CI, best performer |
+| **3. Trade-Off Analysis** | Cross-metric vectors | Multi-Objective Ranking | Pareto-optimal models, efficiency ratios ($\text{Acc}/\text{ms}$) |
+| **4. Recommendations** | Decision rules | Deployment Guidance | Recommended variants per deployment target |
+| **5. File Persistence** | Formatted report buffer | Markdown Artifact | Saved to `output_dir / "benchmark_report.md"` |
 
-We'll build this in three steps: format the per-metric results summary,
-compute trade-off recommendations, then compose the full report.
+We will construct this in three modular steps: formatting the per-metric results summary,
+computing trade-off recommendations, and composing the complete report.
 """
 
 # %% [markdown]
-"""
+r"""
 #### Step 1: Format Per-Metric Results Summary
 
 For each metric type, identify the best performer and list all model scores.
@@ -1941,7 +1785,7 @@ def _benchsuite_format_results_summary(self) -> List[str]:
 BenchmarkSuite._format_results_summary = _benchsuite_format_results_summary
 
 # %% [markdown]
-"""
+r"""
 #### Step 2: Compute Trade-off Recommendations
 
 Analyze accuracy vs speed trade-offs and generate use-case recommendations.
@@ -2020,7 +1864,7 @@ def _benchsuite_format_recommendations(self) -> List[str]:
 BenchmarkSuite._format_recommendations = _benchsuite_format_recommendations
 
 # %% [markdown]
-"""
+r"""
 #### Step 3: Compose the Full Report
 
 Combine system info, results summary, and recommendations into a complete
@@ -2080,7 +1924,7 @@ def benchsuite_generate_report(self) -> str:
 BenchmarkSuite.generate_report = benchsuite_generate_report
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: BenchmarkSuite._format_results_summary
 
 **What we're testing**: Per-metric results formatting with best performer identification
@@ -2122,7 +1966,7 @@ if __name__ == "__main__":
     test_unit_benchsuite_format_results()
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: BenchmarkSuite._format_recommendations
 
 **What we're testing**: Trade-off analysis and use-case recommendation generation
@@ -2159,7 +2003,7 @@ if __name__ == "__main__":
     test_unit_benchsuite_format_recs()
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: BenchmarkSuite (Full Class Integration)
 
 This test validates our BenchmarkSuite runs comprehensive multi-metric evaluation
@@ -2222,7 +2066,7 @@ if __name__ == "__main__":
     test_unit_benchmark_suite()
 
 # %% [markdown]
-"""
+r"""
 ### MLPerf: Standardized Industry Benchmarking
 
 MLPerf® is a trademark of MLCommons. This module provides MLPerf-style standardized
@@ -2241,32 +2085,11 @@ This makes it impossible to compare results across papers, products, or research
 
 ### MLPerf Benchmark Architecture
 
-```
-MLPerf Benchmark Structure:
-┌─────────────────────────────────────────────────────────┐
-│                  Benchmark Definition                   │
-│ • Standard datasets (CIFAR-10, Speech Commands, etc.)   │
-│ • Fixed input shapes and data types                     │
-│ • Target accuracy and latency thresholds                │
-│ • Measurement protocol (warmup, runs, etc.)             │
-└─────────────────────────────────────────────────────────┘
-                           ↓
-┌─────────────────────────────────────────────────────────┐
-│                 Execution Protocol                      │
-│ 1. Model registration and validation                    │
-│ 2. Warmup phase (deterministic random inputs)           │
-│ 3. Measurement phase (statistical sampling)             │
-│ 4. Accuracy evaluation (ground truth comparison)        │
-│ 5. Compliance checking (thresholds, statistical tests)  │
-└─────────────────────────────────────────────────────────┘
-                           ↓
-┌─────────────────────────────────────────────────────────┐
-│              Compliance Determination                   │
-│ PASS: accuracy ≥ target AND latency ≤ target            │
-│ FAIL: Either constraint violated                        │
-│ Report: Detailed metrics + system information           │
-└─────────────────────────────────────────────────────────┘
-```
+| Architecture Layer | Core Responsibilities | Operational Specification |
+| :--- | :--- | :--- |
+| **1. Benchmark Definition** | Standardized task configuration | Fixed input tensors, evaluation datasets, accuracy targets ($\text{Acc}_{\text{target}}$), latency constraints ($\text{Lat}_{\text{max}}$) |
+| **2. Execution Protocol** | Controlled measurement environment | Seeded input generation, untimed warmup iterations, monotonic interval sampling via `perf_counter` |
+| **3. Compliance Engine** | Objective threshold gating | Evaluates $\text{Acc} \ge \text{Acc}_{\text{target}} \land \text{Lat} \le \text{Lat}_{\text{max}}$ to produce pass/fail verification |
 
 ### Standard Benchmark Tasks
 
@@ -2300,24 +2123,19 @@ All MLPerf benchmarks use:
 """
 
 # %% [markdown]
-"""
+r"""
 ### MLPerf.__init__: Configuring Standard Benchmarks
 
-The MLPerf constructor sets up four standardized benchmark tasks, each with
+The `MLPerf` constructor sets up four standardized benchmark tasks, each with
 fixed input shapes, target accuracy, and maximum latency thresholds. Using a
-fixed random seed ensures reproducible results across different systems.
+fixed random seed ensures reproducible results across different systems:
 
-```
-Standard MLPerf Benchmarks:
-┌─────────────────────┬──────────────────┬─────────┬──────────┐
-│ Benchmark           │ Input Shape      │ Acc Tgt │ Lat Tgt  │
-├─────────────────────┼──────────────────┼─────────┼──────────┤
-│ keyword_spotting    │ (1, 16000)       │ 90%     │ <100ms   │
-│ visual_wake_words   │ (1, 96, 96, 3)   │ 80%     │ <200ms   │
-│ anomaly_detection   │ (1, 640)         │ 85%     │ <50ms    │
-│ image_classification│ (1, 32, 32, 3)   │ 75%     │ <150ms   │
-└─────────────────────┴──────────────────┴─────────┴──────────┘
-```
+| Benchmark Task | Input Tensor Shape | Domain & Modality | Accuracy Target | Latency Ceiling |
+| :--- | :--- | :--- | :--- | :--- |
+| `keyword_spotting` | `(1, 16000)` | 1-second 16kHz audio stream | $\ge 90\%$ | $< 100\text{ ms}$ |
+| `visual_wake_words` | `(1, 96, 96, 3)` | 96×96 RGB vision camera | $\ge 80\%$ | $< 200\text{ ms}$ |
+| `anomaly_detection` | `(1, 640)` | Multi-channel acoustic sensor | $\ge 85\%$ | $< 50\text{ ms}$ |
+| `image_classification`| `(1, 32, 32, 3)` | 32×32 CIFAR-10 RGB stream | $\ge 75\%$ | $< 150\text{ ms}$ |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-init", "solution": true}
@@ -2391,7 +2209,7 @@ class MLPerf:
         ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: MLPerf.__init__
 
 **What we're testing**: Benchmark configuration setup with all four standard tasks
@@ -2428,17 +2246,17 @@ if __name__ == "__main__":
     test_unit_mlperf_init()
 
 # %% [markdown]
-"""
+r"""
 ### MLPerf._run_latency_test: Measuring Inference Latency
 
 This helper runs the latency measurement phase: warmup, then timed inference
-for each test input. Returns lists of latencies (ms) and model predictions.
+for each test input. Returns lists of latencies (ms) and model predictions:
 
-```
-Latency Test Protocol:
-Test Inputs ──> Warmup Phase (10%) ──> Measurement Phase (100%) ──> latencies[], predictions[]
-                (discard timing)       (collect per-input timing)
-```
+| Test Protocol Step | Execution Action | Statistical / Systems Impact |
+| :--- | :--- | :--- |
+| **Warmup Phase** | Execute $\max(1, \lfloor N / 10 \rfloor)$ inputs | Heats instruction caches, registers, and memory controllers (untimed) |
+| **Monotonic Timing** | `with precise_timer() as timer:` | Samples userspace monotonic clock around single model invocation |
+| **Result Logging** | `latencies.append(timer.elapsed * 1000)` | Converts elapsed seconds to milliseconds for per-sample distribution |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-latency", "solution": true}
@@ -2502,7 +2320,7 @@ def _mlperf_run_latency_test(self, model: Any, test_inputs: List[Any],
 MLPerf._run_latency_test = _mlperf_run_latency_test
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: MLPerf._run_latency_test
 
 **What we're testing**: Warmup and measurement phase execution
@@ -2538,7 +2356,7 @@ if __name__ == "__main__":
     test_unit_mlperf_latency()
 
 # %% [markdown]
-"""
+r"""
 ### MLPerf._run_accuracy_test: Evaluating Prediction Quality
 
 This helper calculates accuracy by comparing model predictions against synthetic
@@ -2551,7 +2369,7 @@ array from various output formats, then the accuracy calculation itself.
 """
 
 # %% [markdown]
-"""
+r"""
 #### Step 1: Extract Prediction Array
 
 Model outputs can be TinyTorch Tensors, numpy arrays, or plain Python objects.
@@ -2594,7 +2412,7 @@ def _extract_pred_array(pred) -> np.ndarray:
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 #### Step 2: Calculate Accuracy
 
 Use _extract_pred_array to get clean predictions, then compare against
@@ -2675,7 +2493,7 @@ def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
 MLPerf._run_accuracy_test = _mlperf_run_accuracy_test
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _extract_pred_array
 
 **What we're testing**: Prediction array extraction from various output formats
@@ -2707,7 +2525,7 @@ if __name__ == "__main__":
     test_unit_extract_pred_array()
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: MLPerf._run_accuracy_test
 
 **What we're testing**: Accuracy calculation for binary and multi-class tasks
@@ -2743,21 +2561,20 @@ if __name__ == "__main__":
     test_unit_mlperf_accuracy()
 
 # %% [markdown]
-"""
+r"""
 ### MLPerf.run_standard_benchmark: Complete Benchmark Execution
 
 This method orchestrates a complete standardized benchmark: input generation,
 latency testing, accuracy evaluation, and compliance determination. It composes
-the `_run_latency_test` and `_run_accuracy_test` helpers into the full protocol.
+the `_run_latency_test` and `_run_accuracy_test` helpers into the full protocol:
 
-```
-run_standard_benchmark Pipeline:
-Config Lookup ──> Generate Inputs ──> _run_latency_test() ──> _run_accuracy_test()
-                  (deterministic)     (warmup + measure)      (evaluate quality)
-                                                                     ↓
-                                                          Compile Results Dict
-                                                          (accuracy, latency, compliance)
-```
+| Pipeline Step | Mechanism | Verification Target |
+| :--- | :--- | :--- |
+| **Config Resolution** | Task lookup in `self.benchmarks` | Retrieves target accuracy and latency threshold |
+| **Input Synthesis** | Seeded random generation (`seed=42`) | Generates $N$ reproducible synthetic tensors or consumes empirical inputs |
+| **Latency Sampling** | `_run_latency_test()` | 10% warmup discard, per-run latency distribution |
+| **Quality Evaluation** | `_run_accuracy_test()` | Top-1 accuracy score across measured predictions |
+| **Compliance Gating** | Threshold comparison | $\text{compliant} \iff (\text{accuracy} \ge \text{target}) \land (\text{mean\_latency} \le \text{limit})$ |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-run", "solution": true}
@@ -2892,7 +2709,7 @@ def mlperf_run_all_benchmarks(self, model: Any) -> Dict[str, Dict[str, Any]]:
 MLPerf.run_all_benchmarks = mlperf_run_all_benchmarks
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: MLPerf.run_standard_benchmark
 
 **What we're testing**: Complete benchmark execution, and that random_seed actually controls the data
@@ -2966,26 +2783,26 @@ if __name__ == "__main__":
     test_unit_mlperf_run()
 
 # %% [markdown]
-"""
+r"""
 ### MLPerf.generate_compliance_report: Scorecard Generation
 
 The compliance report compiles results from multiple benchmarks into both
 machine-readable JSON and human-readable markdown formats, with overall
-compliance determination.
+compliance determination:
 
-```
-Report Generation:
-Results Dict ──> Count compliant benchmarks ──> JSON report (structured data)
-                                              ──> Markdown summary (human-readable)
-                                              ──> Overall: COMPLIANT/NON-COMPLIANT
-```
+| Report Stage | Processing Operation | Generated Artifact |
+| :--- | :--- | :--- |
+| **Statistical Aggregation**| Count compliant vs non-compliant tasks | Compliance ratio: $\frac{N_{\text{compliant}}}{N_{\text{total}}}$ |
+| **Structured Output** | `_compile_report_data()` | Machine-readable JSON dictionary |
+| **Human-Readable Summary** | `_format_summary_markdown()` | Formatted Markdown scorecard table |
+| **Overall Verdict** | Evaluate unanimous compliance | Status tag: `COMPLIANT` vs `NON-COMPLIANT` |
 
-We'll build this in two steps: compile the structured report data,
-then format it into a human-readable summary.
+We will build this in two modular steps: compiling structured report data,
+then formatting it into a human-readable summary.
 """
 
 # %% [markdown]
-"""
+r"""
 #### Step 1: Compile Structured Report Data
 
 Process raw benchmark results into a structured dictionary with compliance
@@ -3067,7 +2884,7 @@ def _mlperf_compile_report_data(self, results: Dict[str, Dict[str, Any]]) -> Dic
 MLPerf._compile_report_data = _mlperf_compile_report_data
 
 # %% [markdown]
-"""
+r"""
 #### Step 2: Format Human-Readable Summary
 
 Convert structured report data into a markdown compliance summary.
@@ -3126,7 +2943,7 @@ def _mlperf_format_compliance_summary(self, report_data: Dict[str, Any]) -> str:
 MLPerf._format_compliance_summary = _mlperf_format_compliance_summary
 
 # %% [markdown]
-"""
+r"""
 #### Step 3: Compose the Full Compliance Report
 
 Combine data compilation, JSON serialization, and summary formatting.
@@ -3171,7 +2988,7 @@ def mlperf_generate_compliance_report(self, results: Dict[str, Dict[str, Any]],
 MLPerf.generate_compliance_report = mlperf_generate_compliance_report
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: MLPerf._compile_report_data
 
 **What we're testing**: Structured data compilation from raw benchmark results
@@ -3210,7 +3027,7 @@ if __name__ == "__main__":
     test_unit_mlperf_compile_data()
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: MLPerf._format_compliance_summary
 
 **What we're testing**: Markdown summary generation from structured report data
@@ -3255,7 +3072,7 @@ if __name__ == "__main__":
     test_unit_mlperf_format_summary()
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: MLPerf (Full Class Integration)
 
 This test validates our MLPerf class provides standardized benchmarking
@@ -3322,7 +3139,7 @@ if __name__ == "__main__":
     test_unit_mlperf()
 
 # %% [markdown]
-"""
+r"""
 ## 🔧 Integration: Building Complete Benchmark Workflows
 
 Now we'll integrate all our benchmarking components into complete workflows that demonstrate professional ML systems evaluation. This integration shows how to combine statistical rigor with practical insights.
@@ -3331,40 +3148,28 @@ The integration layer connects individual measurements into actionable engineeri
 
 ### Workflow Architecture
 
-```
-Integration Workflow Pipeline:
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│ Model Variants  │    │ Optimization    │    │ Use Case        │
-│ • Base model    │ →  │ Techniques      │ →  │ Analysis        │
-│ • Quantized     │    │ • Accuracy loss │    │ • Mobile        │
-│ • Pruned        │    │ • Speed gain    │    │ • Server        │
-│ • Distilled     │    │ • Memory save   │    │ • Edge          │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
-
-This workflow helps answer questions like:
-- "Which optimization gives the best accuracy/latency trade-off?"
-- "What's the memory budget impact of each technique?"
-- "Which model should I deploy for mobile vs server?"
+| Stage | Input Entities | Transformations | Practical Deployment Questions |
+| :--- | :--- | :--- | :--- |
+| **1. Model Variants** | Base, Quantized, Pruned, Distilled | Standardized test execution | "What are the baseline performance envelopes?" |
+| **2. Optimization Profiling** | Multi-metric benchmarks | Compute $\Delta\text{Acc}$, Speedup, Memory savings | "Which optimization yields the highest efficiency ratio?" |
+| **3. Use-Case Mapping** | Hardware & SLA constraints | Multi-objective optimization | "Which model satisfies edge vs server deployment constraints?" |
 """
 
 # %% [markdown]
-"""
+r"""
 ### Optimization Comparison Engine
 
 Before implementing the comparison function, let's understand what makes optimization comparison challenging and valuable.
 
 ### Why Optimization Comparison is Complex
 
-When you optimize a model, you're making trade-offs across multiple dimensions simultaneously:
+When you optimize a model, you make trade-offs across multiple dimensions simultaneously:
 
-```
-Optimization Impact Matrix (illustrative numbers, not measurements):
-                   Accuracy    Latency    Memory    Energy
-Quantization        -5%        +2.1x      +2.0x     +1.8x
-Pruning            -2%        +1.4x      +3.2x     +1.3x
-Knowledge Distill. -8%        +1.9x      +1.5x     +1.7x
-```
+| Optimization Technique | Accuracy Impact ($\Delta \text{Acc}$) | Latency Speedup | Memory Reduction | Energy Savings | Primary Trade-Off |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Quantization** (INT8 / FP8) | $-5\%$ | $2.1\times$ | $2.0\times$ | $1.8\times$ | Precision loss in low dynamic range |
+| **Structured Pruning** | $-2\%$ | $1.4\times$ | $3.2\times$ | $1.3\times$ | Sparse memory access vs density |
+| **Knowledge Distillation** | $-8\%$ | $1.9\times$ | $1.5\times$ | $1.7\times$ | Dark knowledge transfer fidelity |
 
 The challenge: Which is "best"? It depends entirely on your deployment constraints.
 
@@ -3377,25 +3182,20 @@ Our comparison engine implements a decision framework that:
 3. **Identifies Pareto frontiers**: Models that aren't dominated in all metrics
 4. **Generates use-case recommendations**: Tailored to specific constraints
 
-### Recommendation Algorithm
+### Formal Recommendation Objectives
 
-```
-For each use case:
-├── Latency-critical (real-time apps)
-│   └── Optimize: min(latency) subject to accuracy > threshold
-├── Memory-constrained (mobile/IoT)
-│   └── Optimize: min(memory) subject to accuracy > threshold
-├── Accuracy-preservation (quality-critical)
-│   └── Optimize: max(accuracy) subject to latency < threshold
-└── Balanced (general deployment)
-    └── Optimize: weighted combination of all factors
-```
+| Deployment Regime | Optimization Formulation | Constraint Boundary | Target Domain |
+| :--- | :--- | :--- | :--- |
+| **Latency-Critical** | $\min_{\theta} \text{Latency}(\theta)$ | $\text{Accuracy}(\theta) \ge \text{Acc}_{\text{target}}$ | Autonomous driving, real-time audio |
+| **Memory-Constrained** | $\min_{\theta} \text{PeakMemory}(\theta)$ | $\text{Accuracy}(\theta) \ge \text{Acc}_{\text{target}}$ | Microcontrollers, wearable IoT |
+| **Accuracy-Preservation** | $\max_{\theta} \text{Accuracy}(\theta)$ | $\text{Latency}(\theta) \le \text{Lat}_{\text{max}}$ | Medical diagnostics, legal review |
+| **Balanced Deployment** | $\max_{\theta} \big[\alpha \frac{\text{Acc}}{\text{Acc}_0} + \beta \frac{\text{Lat}_0}{\text{Lat}} + \gamma \frac{\text{Mem}_0}{\text{Mem}}\big]$ | Multi-objective budget | Edge mobile, client-side web |
 
 This principled approach ensures recommendations match real deployment needs.
 """
 
 # %% [markdown]
-"""
+r"""
 ### _collect_base_metrics: Extracting Baseline Performance
 
 This helper extracts the base model's mean performance across all metrics from
@@ -3432,7 +3232,7 @@ def _collect_base_metrics(base_name: str, benchmark_results: Dict) -> Dict[str, 
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _collect_base_metrics
 
 **What we're testing**: Extraction of base model's mean metrics from benchmark results
@@ -3463,7 +3263,7 @@ if __name__ == "__main__":
     test_unit_collect_base_metrics()
 
 # %% [markdown]
-"""
+r"""
 ### _calculate_improvements: Computing Speedup and Retention Ratios
 
 This helper computes improvement ratios for each optimized model relative to
@@ -3517,7 +3317,7 @@ def _calculate_improvements(base_metrics: Dict[str, float], opt_metrics: Dict[st
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _calculate_improvements
 
 **What we're testing**: Improvement ratio calculations for all metric types
@@ -3550,7 +3350,7 @@ if __name__ == "__main__":
     test_unit_calculate_improvements()
 
 # %% [markdown]
-"""
+r"""
 ### _generate_recommendations: Deployment-Specific Guidance
 
 This helper analyzes improvement ratios across all optimized models to generate
@@ -3645,7 +3445,7 @@ def _generate_recommendations(all_improvements: Dict[str, Dict[str, float]]) -> 
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _generate_recommendations
 
 **What we're testing**: Recommendation generation from improvement data
@@ -3683,25 +3483,19 @@ if __name__ == "__main__":
     test_unit_generate_recommendations()
 
 # %% [markdown]
-"""
+r"""
 ### analyze_optimization_techniques: Composition Function
 
 This is the main entry point that composes `_collect_base_metrics`,
 `_calculate_improvements`, and `_generate_recommendations` into a complete
-optimization comparison workflow.
+optimization comparison workflow:
 
-```
-analyze_optimization_techniques Pipeline:
-┌────────────┐     ┌────────────────────────┐     ┌──────────────────────────┐
-│ Run Full   │ ──> │ _collect_base_metrics  │ ──> │ For each opt model:      │
-│ Benchmark  │     │ (extract baseline)     │     │ _calculate_improvements  │
-└────────────┘     └────────────────────────┘     └──────────────────────────┘
-                                                              ↓
-                                                  ┌──────────────────────────┐
-                                                  │ _generate_recommendations│
-                                                  │ (deploy guidance)        │
-                                                  └──────────────────────────┘
-```
+| Pipeline Step | Module Subroutine | Computed Metric / Transformation |
+| :--- | :--- | :--- |
+| **1. Full Benchmark** | `BenchmarkSuite.run_full_benchmark()` | Runs latency, accuracy, memory, and energy across all models |
+| **2. Baseline Extraction** | `_collect_base_metrics()` | Isolates baseline vector $\mathbf{v}_{\text{base}} = [\mu_{\text{lat}}, \mu_{\text{acc}}, \mu_{\text{mem}}, \mu_{\text{eng}}]$ |
+| **3. Relative Deltas** | `_calculate_improvements()` | Computes speedup ratios, accuracy changes, and memory reduction factors |
+| **4. Policy Recommendation** | `_generate_recommendations()` | Evaluates constrained optimization criteria to assign models to targets |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-comparison", "solution": true}
@@ -3810,7 +3604,7 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
 
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: analyze_optimization_techniques (Full Integration)
 
 This test validates the complete optimization comparison workflow generates
@@ -3867,7 +3661,7 @@ if __name__ == "__main__":
     test_unit_optimization_comparison()
 
 # %% [markdown]
-"""
+r"""
 ## 📊 Systems Analysis: Benchmark Variance and Optimization Trade-offs
 
 Let's understand the key systems concept of measurement variance and optimization trade-offs.
@@ -3957,7 +3751,7 @@ if __name__ == "__main__":
     analyze_optimization_tradeoffs()
 
 # %% [markdown]
-"""
+r"""
 ### MLPerf Principles: Industry-Standard Benchmarking
 
 MLPerf (created by MLCommons) is the industry-standard ML benchmarking framework. Understanding these principles grounds your capstone competition in professional methodology.
@@ -3983,7 +3777,7 @@ The capstone project follows MLPerf-style principles!
 """
 
 # %% [markdown]
-"""
+r"""
 ### Combination Strategies
 
 Strategic optimization combines multiple techniques for different performance goals. The order matters: quantize-then-prune may preserve accuracy better, while prune-then-quantize may be faster.
@@ -4003,7 +3797,7 @@ You'll apply these strategies with specific optimization targets in Module 20's 
 """
 
 # %% [markdown]
-"""
+r"""
 ## 🧪 Module Integration Test
 
 Final validation that our complete benchmarking system works correctly and integrates properly with all TinyTorch components.
@@ -4192,53 +3986,75 @@ def test_module():
     print("Run: tito module complete 19")
 
 # %% [markdown]
-"""
+r"""
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of benchmarking and performance engineering:
 
 ### Question 1: Statistical Confidence in Measurements
-You implemented BenchmarkResult with confidence intervals for measurements.
-If you run 20 trials and get mean latency 5.2ms with std dev 0.8ms:
-- What's the 95% confidence interval for the true mean? [_____ ms, _____ ms]
-- How many more trials would you need to halve the confidence interval width? _____ total trials
+You implemented `BenchmarkResult` with confidence intervals for measurements.
+If you run 20 trials and get mean latency $\mu = 5.2\text{ ms}$ with sample standard deviation $s = 0.8\text{ ms}$:
+
+- **What's the 95% confidence interval for the true mean?**
+  $$\text{SE} = \frac{s}{\sqrt{n}} = \frac{0.8}{\sqrt{20}} = \frac{0.8}{4.4721} \approx 0.1789\text{ ms}$$
+  Using the normal critical value ($z_{0.975} = 1.96$):
+  $$\text{Margin of Error} = 1.96 \times 0.1789 \approx 0.3506\text{ ms} \implies [4.85\text{ ms}, 5.55\text{ ms}]$$
+  *(Using Student's $t$ distribution with $\nu = 19$ degrees of freedom, $t_{19, 0.975} \approx 2.093$, yielding margin $2.093 \times 0.1789 \approx 0.3744\text{ ms} \implies [4.83\text{ ms}, 5.57\text{ ms}]$.)*
+- **How many more trials would you need to halve the confidence interval width?**
+  $$\text{Width} \propto \frac{1}{\sqrt{n}} \implies \frac{\text{Width}_{\text{new}}}{\text{Width}_{\text{old}}} = \frac{1}{2} \implies \sqrt{\frac{n_{\text{new}}}{n_{\text{old}}}} = 2 \implies n_{\text{new}} = 4 \times n_{\text{old}} = 4 \times 20 = \mathbf{80\text{ total trials}}$$
+  *(You would need $80 - 20 = \mathbf{60\text{ additional trials}}$).*
+
+---
 
 ### Question 2: Measurement Overhead Analysis
-Your precise_timer context manager has microsecond precision, but models run for milliseconds.
-For a model that takes 1ms to execute:
-- If timer overhead is 10μs, what's the relative error? _____%
-- At what model latency does timer overhead become negligible (<1%)? _____ ms
+Your `precise_timer` context manager has microsecond precision, but models run for milliseconds.
+For a model that takes $1.0\text{ ms}$ to execute:
+
+- **If timer overhead is $10\text{ }\mu\text{s}$, what's the relative error?**
+  $$\text{Relative Error} = \frac{\delta_{\text{timer}}}{T_{\text{exec}}} = \frac{10\text{ }\mu\text{s}}{1000\text{ }\mu\text{s}} \times 100\% = \mathbf{1.0\%}$$
+- **At what model latency does timer overhead become negligible ($<1\%$)?**
+  $$\frac{\delta_{\text{timer}}}{T_{\text{exec}}} < 0.01 \implies T_{\text{exec}} > \frac{10\text{ }\mu\text{s}}{0.01} = 1000\text{ }\mu\text{s} = \mathbf{1.0\text{ ms}}$$
+  *Systems implication: For micro-benchmarking sub-millisecond operators (such as individual activation layers or tensor slicing taking $< 50\text{ }\mu\text{s}$), timing individual iterations introduces unacceptable distortion ($> 20\%$). In such regimes, you must amortize overhead by executing an internal loop of $K = 100\text{--}1000$ iterations inside a single timer block and dividing.*
+
+---
 
 ### Question 3: Benchmark Configuration Trade-offs
-The BenchmarkSuite class uses configurable warmup_runs and measurement_runs parameters
-(with DEFAULT_WARMUP_RUNS=5 and DEFAULT_MEASUREMENT_RUNS=10 as defaults).
-For a CI/CD pipeline that runs 100 benchmarks per day:
-- Fast config (3s each): _____ minutes total daily
-- Accurate config (15s each): _____ minutes total daily
-- What's the key trade-off you're making? [accuracy/precision/development velocity]
+The `BenchmarkSuite` class uses configurable `warmup_runs` and `measurement_runs` parameters
+(with `DEFAULT_WARMUP_RUNS = 5` and `DEFAULT_MEASUREMENT_RUNS = 10` as defaults).
+For a CI/CD regression testing pipeline that executes 100 model benchmarks per daily build:
+
+- **Fast config ($3\text{ s}$ each):** $100 \times 3\text{ s} = 300\text{ s} = \mathbf{5.0\text{ minutes}}$ total daily pipeline execution.
+- **Accurate config ($15\text{ s}$ each):** $100 \times 15\text{ s} = 1500\text{ s} = \mathbf{25.0\text{ minutes}}$ total daily pipeline execution.
+- **What's the key trade-off you're making?**
+  **Statistical precision vs development velocity** (detection threshold for small performance regressions vs rapid engineer feedback cycle). A 5-minute suite allows commit-level pre-merge gating; a 25-minute suite is typically reserved for nightly integration builds.
+
+---
 
 ### Question 4: MLPerf Compliance Metrics
 You implemented MLPerf-style standardized benchmarks with target thresholds.
-If a model achieves 89% accuracy (target: 90%) and 120ms latency (target: <100ms):
-- Is it compliant? [Yes/No] _____
-- Which constraint is more critical for edge deployment? [accuracy/latency]
-- How would you prioritize optimization? [accuracy first/latency first/balanced]
+If an edge candidate model achieves 89% accuracy (target: 90%) and 120ms latency (target: <100ms):
+
+- **Is it compliant?** **No**. MLPerf compliance is a strict conjunction ($\text{Acc} \ge \text{Target} \land \text{Lat} \le \text{Threshold}$). Both constraints are violated ($89\% < 90\%$ and $120\text{ ms} > 100\text{ ms}$).
+- **Which constraint is more critical for edge deployment?** **Latency**. Latency on edge devices is a hard real-time physical deadline dictated by sensor sampling rates (e.g. 10 fps camera stream requires $< 100\text{ ms}$ processing), UI responsiveness, or watchdog timeouts. Dropping below the latency ceiling causes dropped sensor frames or system lockup, whereas an accuracy delta of $1\%$ is typically tolerable.
+- **How would you prioritize optimization?** **Latency-first**. First compress/accelerate the model to reliably meet the $\le 100\text{ ms}$ deadline with buffer room, then tune hyper-parameters or calibration datasets to recover the remaining accuracy gap.
+
+---
 
 ### Question 5: Optimization Comparison Analysis
-Your analyze_optimization_techniques() generates recommendations for different use cases.
+Your `analyze_optimization_techniques()` generates recommendations for different use cases.
 Given three optimized models:
-- Quantized: 0.8× memory, 2× speed, 0.95× accuracy
-- Pruned: 0.3× memory, 1.5× speed, 0.98× accuracy
-- Distilled: 0.6× memory, 1.8× speed, 0.92× accuracy
+- **Quantized**: $0.8\times$ memory footprint (20% reduction), $2.0\times$ speedup, $0.95\times$ accuracy
+- **Pruned**: $0.3\times$ memory footprint (70% reduction), $1.5\times$ speedup, $0.98\times$ accuracy
+- **Distilled**: $0.6\times$ memory footprint (40% reduction), $1.8\times$ speedup, $0.92\times$ accuracy
 
-For a mobile app with 50MB model size limit and <100ms latency requirement:
-- Which optimization offers best memory reduction? _____
-- Which balances all constraints best? _____
-- What's the key insight about optimization trade-offs? [no free lunch/specialization wins/measurement guides decisions]
+For a mobile app with a 50MB model size limit and a strict $< 100\text{ ms}$ latency requirement:
+- **Which optimization offers best memory reduction?** **Pruned** ($0.3\times$ original memory footprint, yielding a $70\%$ reduction).
+- **Which balances all constraints best?** **Pruned**. It achieves the greatest memory compression ($0.3\times$), provides a respectable $1.5\times$ speedup, and preserves $98\%$ of base accuracy ($0.98\times$).
+- **What's the key insight about optimization trade-offs?** **No free lunch / empirical Pareto measurement guides decisions**. No single technique dominates across all axes simultaneously; empirical Pareto frontiers reveal non-dominated configurations that match specific hardware budget envelopes.
 """
 
 # %% [markdown]
-"""
+r"""
 ## ⭐ Aha Moment: Measurement Enables Optimization
 
 **What you built:** A benchmarking system with warmup, statistics, and reproducibility.
@@ -4288,28 +4104,32 @@ if __name__ == "__main__":
     demo_benchmarking()
 
 # %% [markdown]
-"""
+r"""
 ## 🚀 MODULE SUMMARY: Benchmarking
 
-Congratulations! You've built a professional benchmarking system that rivals industry-standard evaluation frameworks!
+Congratulations! You have built a professional, statistically rigorous benchmarking framework that mirrors production ML evaluation suites like MLPerf!
 
-### Key Accomplishments
-- Built comprehensive benchmarking infrastructure with BenchmarkResult, Benchmark, and BenchmarkSuite classes
-- Implemented statistical rigor with confidence intervals, variance analysis, and measurement optimization
-- Created MLPerf-style standardized benchmarks for reproducible cross-system comparison
-- Developed optimization comparison workflows that generate actionable recommendations
-- All tests pass ✅ (validated by `test_module()`)
+### Systems Milestone Scorecard
 
-### Systems Insights Discovered
-- **Measurement Science**: Statistical significance requires proper sample sizes and variance control
-- **Benchmark Design**: Standardized protocols enable fair comparison across different systems
-- **Trade-off Analysis**: Pareto frontiers reveal optimization opportunities and constraints
-- **Production Integration**: Automated reporting transforms measurements into engineering decisions
+| Milestone Capability | Mathematical / Systems Mechanism | TinyTorch Implementation | Production Parallel |
+| :--- | :--- | :--- | :--- |
+| **Statistical Rigor** | Sample mean $\mu$, variance $s^2$, standard error $\frac{s}{\sqrt{n}}$, and Student's $t$ CI | `BenchmarkResult` | Google Benchmark, Criterion.rs |
+| **Monotonic Timing** | Monotonic userspace vDSO clock with nanosecond counter | `precise_timer()` | `clock_gettime(CLOCK_MONOTONIC)` |
+| **Warmup Discard** | Cold-start page fault & cache warming isolation | `Benchmark.run_latency_benchmark()` | MLPerf Tiny warmup harness |
+| **Memory Accounting** | Peak allocator buffer tracking vs process RSS | `Benchmark.run_memory_benchmark()` | PyTorch CUDA Caching Allocator profiler |
+| **Standardized Tasks** | Fixed seeds, input shapes, and multi-objective thresholds | `MLPerf` class | MLPerf Inference & Mobile Benchmark Suite |
+| **Multi-Objective Tradeoffs**| Constrained Pareto optimization ($\min \text{Lat}, \min \text{Mem}$ s.t. $\text{Acc} \ge \tau$) | `analyze_optimization_techniques()` | Optuna, Neural Network Intelligence (NNI) |
+
+### Key Systems Insights Discovered
+- **Measurement Science**: Single-run latency numbers are noise; true systems characterization requires isolated warmup and statistical confidence intervals.
+- **Metric Dimensionality**: Optimizing for speed without tracking memory or accuracy creates brittle models that fail silent SLA requirements.
+- **Hardware Realities**: Micro-benchmarks on sub-millisecond kernels must account for syscall overhead ($\delta_{\text{timer}} \sim 1\text{ }\mu\text{s}$) through iteration amortization.
+- **Production Integration**: Objective compliance checks and machine-readable JSON reports bridge experimental training to operational deployment.
 
 ### Ready for Next Steps
-Your benchmarking implementation enables comprehensive systems evaluation, demonstrating your complete optimization toolkit. This is where all 19 modules come together!
+Your benchmarking framework completes the Optimization Tier! All components—from Tensors, Autograd, Convolutions, and Transformers to Quantization, Acceleration, Memoization, and Benchmarking—are now verified.
 
-Export with: `tito module complete 19`
+Export with: `tito dev export 19`
 
-**Next**: Module 20 (Capstone) will demonstrate the complete ML systems engineering workflow!
+**Next**: Module 20 (Capstone) will integrate every single concept into an end-to-end production ML system!
 """
