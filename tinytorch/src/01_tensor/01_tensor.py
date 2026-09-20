@@ -13,7 +13,7 @@
 # ---
 
 # %% [markdown]
-"""
+r"""
 # Module 01: Tensor Foundation - Building Blocks of ML
 
 Welcome to Module 01! You're about to build the foundational Tensor class that powers all machine learning operations.
@@ -55,7 +55,7 @@ from tinytorch.core.tensor import Tensor   # every later module starts here
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📋 Module Dependencies
 
 **Prerequisites**: NONE - This is the foundation module
@@ -91,146 +91,86 @@ BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
 MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
-"""
+r"""
 ## 💡 Introduction: What is a Tensor?
 
 A tensor is a multi-dimensional array that serves as the fundamental data structure in machine learning. Think of it as a universal container that can hold data in different dimensions:
 
-```
-Tensor Dimensions:
-┌─────────────┐
-│ 0D: Scalar  │  5.0          (just a number)
-│ 1D: Vector  │  [1, 2, 3]    (list of numbers)
-│ 2D: Matrix  │  [[1, 2]      (grid of numbers)
-│             │   [3, 4]]
-│ 3D: Cube    │  [[[...       (stack of matrices)
-└─────────────┘
-```
+| Dimension | Concept | Coordinate Shape | Concrete Value Example | ML Systems Role |
+| :--- | :--- | :--- | :--- | :--- |
+| **0D** | Scalar | `()` | `5.0` | Loss value, learning rate, temperature |
+| **1D** | Vector | `(D,)` | `[1.0, 2.0, 3.0]` | Bias parameters, token sequence |
+| **2D** | Matrix | `(N, D)` | `[[1, 2], [3, 4]]` | Dense layer weights, batched embeddings |
+| **3D** | 3-Tensor | `(B, S, D)` | `(Batch, SeqLen, D_model)` | Batched token sequences in Transformers |
+| **4D** | 4-Tensor | `(B, C, H, W)` | `(Batch, Channels, Height, Width)` | Batched feature maps in Convolutional Networks |
 
-In computation, tensors flow through operations like water through pipes:
+In computation, tensors flow through operations like transformations along a processing pipeline:
 
-```
-Data Processing Flow:
-Input Data → Transform 1 → Transform 2 → ... → Result
-  [rows,       [rows,        [rows,              [rows,
-   columns]     new_cols]     new_cols2]           final_cols]
-```
+$$\underbrace{\mathbf{X}}_{\text{Raw Input } (N, D_0)} \xrightarrow{\mathbf{W}_1} \underbrace{\mathbf{H}_1}_{\text{Features } (N, D_1)} \xrightarrow{\mathbf{W}_2} \underbrace{\mathbf{H}_2}_{\text{Features } (N, D_2)} \xrightarrow{\mathbf{W}_3} \underbrace{\hat{\mathbf{Y}}}_{\text{Predictions } (N, C)}$$
 
 From simple statistics to large-scale scientific computing, tensors are the universal data container. Understanding tensors means understanding the foundation of numerical computation.
 
 ### Why Tensors Matter in ML Systems
 
-In production ML systems, tensors carry more than just data - they carry operation history, memory layout information, and execution context:
+In production ML systems, tensors carry more than just data — they carry operation history, memory layout information, and execution context:
 
-```
-Real ML Pipeline:
-Raw Data → Preprocessing → Tensor Creation → Computation → Result
-   ↓           ↓              ↓               ↓              ↓
- Files     NumPy Arrays    Tensors        GPU Tensors     Output Tensor
-```
+$$\text{Disk / Storage} \xrightarrow{\text{I/O Ingestion}} \text{NumPy Buffer} \xrightarrow{\text{Class Wrap}} \text{TinyTorch Tensor} \xrightarrow{\text{Kernel Execution}} \text{Engine Output}$$
 
 **Key Insight**: Tensors bridge the gap between mathematical concepts and efficient computation on modern hardware.
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📐 Foundations: Mathematical Background
 
 ### Core Operations We'll Implement
 
 Our Tensor class will support all fundamental operations that neural networks need:
 
-```
-Operation Types:
-┌─────────────────┬─────────────────┬─────────────────┬─────────────────┐
-│ Element-wise    │ Matrix Ops      │ Shape Ops       │ Reductions      │
-├─────────────────┼─────────────────┼─────────────────┼─────────────────┤
-│ + Addition      │ @ Matrix Mult   │ .reshape()      │ .sum()          │
-│ - Subtraction   │ .transpose()    │ t[key] indexing │ .mean()         │
-│ * Multiplication│                 │ .masked_fill()  │ .max()          │
-│ / Division      │                 │                 │                 │
-└─────────────────┴─────────────────┴─────────────────┴─────────────────┘
-```
+| Category | Operations | Syntax | Return Shape / Behavior |
+| :--- | :--- | :--- | :--- |
+| **Element-wise** | Addition, Subtraction, Multiplication, Division | `a + b`, `a - b`, `a * b`, `a / b` | Broadcasts shapes; preserves rank |
+| **Linear Algebra** | Matrix Multiplication, Transpose | `a @ b`, `a.matmul(b)`, `a.transpose()` | Inner dimension contract: $(M, K) \times (K, N) \to (M, N)$ |
+| **Shape & View** | Reshape, View, Slicing, Masked Fill | `a.reshape(...)`, `a.view(...)`, `a[i]`, `a.masked_fill(...)` | Modifies coordinate strides or view geometry |
+| **Reductions** | Sum, Mean, Maximum | `a.sum(axis=...)`, `a.mean(...)`, `a.max(...)` | Collapses specified axis $(N, D) \xrightarrow{\text{axis}=0} (D,)$ |
 
 ### Broadcasting: Making Tensors Work Together
 
 Broadcasting automatically aligns tensors of different shapes for operations:
 
-```
-Broadcasting Examples:
-┌─────────────────────────────────────────────────────────┐
-│ Scalar + Vector:                                        │
-│    5    + [1, 2, 3] → [5, 5, 5] + [1, 2, 3] = [6, 7, 8] │
-│                                                         │
-│ Matrix + Vector (row-wise):                             │
-│ [[1, 2]]   [10]   [[1, 2]]   [[10, 10]]   [[11, 12]]    │
-│ [[3, 4]] + [10] = [[3, 4]] + [[10, 10]] = [[13, 14]]    │
-└─────────────────────────────────────────────────────────┘
-```
+$$\begin{aligned}
+\mathbf{\text{Scalar } + \text{ Vector:}} \quad & 5 + \begin{bmatrix} 1 & 2 & 3 \end{bmatrix} \xrightarrow{\text{broadcast}} \begin{bmatrix} 5 & 5 & 5 \end{bmatrix} + \begin{bmatrix} 1 & 2 & 3 \end{bmatrix} = \begin{bmatrix} 6 & 7 & 8 \end{bmatrix} \\
+\mathbf{\text{Matrix } + \text{ Row Vector:}} \quad & \begin{bmatrix} 1 & 2 \\ 3 & 4 \end{bmatrix} + \begin{bmatrix} 10 & 20 \end{bmatrix} \xrightarrow{\text{broadcast}} \begin{bmatrix} 1 & 2 \\ 3 & 4 \end{bmatrix} + \begin{bmatrix} 10 & 20 \\ 10 & 20 \end{bmatrix} = \begin{bmatrix} 11 & 22 \\ 13 & 24 \end{bmatrix} \\
+\mathbf{\text{Matrix } + \text{ Column Vector:}} \quad & \begin{bmatrix} 1 & 2 \\ 3 & 4 \end{bmatrix} + \begin{bmatrix} 10 \\ 20 \end{bmatrix} \xrightarrow{\text{broadcast}} \begin{bmatrix} 1 & 2 \\ 3 & 4 \end{bmatrix} + \begin{bmatrix} 10 & 10 \\ 20 & 20 \end{bmatrix} = \begin{bmatrix} 11 & 12 \\ 23 & 24 \end{bmatrix}
+\end{aligned}$$
 
-**Memory Layout**: NumPy uses row-major (C-style) storage where elements are stored row by row in memory for cache efficiency:
+**Memory Layout**: NumPy uses row-major (C-style) storage where elements are stored row by row in contiguous linear memory for cache efficiency:
 
-```
-Memory Layout (2×3 matrix):
-Matrix:     Memory:
-[[1, 2, 3]  [1][2][3][4][5][6]
- [4, 5, 6]]  ↑  Row 1   ↑  Row 2
+$$\mathbf{A} = \begin{bmatrix} 1 & 2 & 3 \\ 4 & 5 & 6 \end{bmatrix} \in \mathbb{R}^{2 \times 3} \implies \text{Linear Storage: } \underbrace{\begin{array}{|c|c|c|} \hline 1 & 2 & 3 \\ \hline \end{array}}_{\text{Row 0: offsets } 0, 4, 8 \text{ B}} \quad \underbrace{\begin{array}{|c|c|c|} \hline 4 & 5 & 6 \\ \hline \end{array}}_{\text{Row 1: offsets } 12, 16, 20 \text{ B}}$$
 
-Cache Behavior (once a row is longer than one cache line):
-Sequential Access: Fast (uses cache lines efficiently)
-  Row access: [1][2][3] → one cache line, every byte in it is used
-Strided Access: Slow (cache misses)
-  Column access: [1][4] → a different cache line per element, one useful value each
-```
+| Traversal Pattern | Memory Footprint | Hardware Cache Behavior |
+| :--- | :--- | :--- |
+| **Sequential (Row-wise)** | `[1, 2, 3]` $\to$ continuous 64-byte cache line | 🟢 **Cache Hit**: Full line utilized |
+| **Strided (Column-wise)** | `[1, 4]` $\to$ jumps memory stride per element | 🔴 **Cache Miss**: Potential bandwidth thrashing |
 
 The 2×3 example above is far too small to miss: all six float32 values fit in a single 64-byte cache line. The pattern matters once a row is longer than a cache line, which is the case for every matrix you will use for real work. Algorithms that access data sequentially run faster than those that stride through memory; the Systems Analysis section measures this on a 2000×2000 matrix.
 """
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Implementation: Building Tensor Foundation
 
 Let's build our Tensor class step by step, testing each component as we go.
 
 ### Tensor Class Architecture
 
-```
-Tensor Class Structure:
-┌─────────────────────────────────┐
-│ Core Attributes:                │
-│ • data: np.array (the numbers)  │
-│ • shape: tuple (dimensions)     │
-│ • size: int (total elements)    │
-│ • dtype: type (float32)         │
-├─────────────────────────────────┤
-│ Arithmetic Operations:          │
-│ • __add__, __sub__, __mul__     │
-│ • __truediv__, matmul()         │
-├─────────────────────────────────┤
-│ Shape Operations:               │
-│ • reshape(), transpose()        │
-│ • __getitem__ (indexing)        │
-│ • masked_fill()                 │
-├─────────────────────────────────┤
-│ Reductions:                     │
-│ • sum(), mean(), max()          │
-├─────────────────────────────────┤
-│ Operations delegate to:         │
-│ • Function subclasses (Add, ...)│
-│   via X.apply(...)              │
-├─────────────────────────────────┤
-│ Utility Methods:                │
-│ • __repr__(), __str__()         │
-│ • numpy(), memory_footprint()   │
-│ • ndim, numel(), contiguous()   │
-└─────────────────────────────────┘
-```
+![Tensor Class Structure](tensor_class_structure.svg)
 
 This clean design focuses on what tensors fundamentally do: store numerical data and route every operation through one shared mechanism, `Function.apply`.
 """
 
 # %% [markdown]
-"""
+r"""
 ### Operations as Objects
 
 Every Tensor method below hands its work to an operation class instead of computing the result itself. `a + b` calls `Tensor.__add__`, which calls `Add.apply(a, b)`. `apply` unwraps the Tensors to NumPy arrays, runs the operation's `forward`, and wraps the result in a new Tensor.
@@ -287,7 +227,7 @@ class Function:
         return Tensor(node.forward(*arrays))
 
 # %% [markdown]
-"""
+r"""
 ### Tensor Creation and Initialization
 
 Before we implement operations, let's understand how tensors store data and manage their attributes. This initialization is the foundation that everything else builds upon.
@@ -723,7 +663,7 @@ class Tensor:
         raise NotImplementedError("Module 06 (autograd) implements Tensor.zero_grad")
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Tensor Creation
 
 This test validates our Tensor constructor works correctly with various data types and properly initializes all attributes.
@@ -784,7 +724,7 @@ if __name__ == "__main__":
     test_unit_tensor_creation()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Element-wise Arithmetic Operations
 
 Element-wise operations are the workhorses of neural network computation. They apply the same operation to corresponding elements in tensors, often with broadcasting to handle different shapes elegantly.
@@ -827,52 +767,39 @@ Broadcasting Rules:
 """
 
 # %% [markdown]
-"""
+r"""
 ### Subtraction, Multiplication, and Division
 
 These operations follow the same pattern as addition, working element-wise with broadcasting support. Each serves specific purposes in data processing:
 
-```
-Element-wise Operations:
+| Operation | Mathematical Form | Concrete Example | Machine Learning Use Case |
+| :--- | :--- | :--- | :--- |
+| **Subtraction** | $\mathbf{x} - \mathbf{y}$ | $[6, 8] - [1, 2] = [5, 6]$ | Data centering: $\mathbf{x} - \boldsymbol{\mu}$ |
+| **Multiplication** | $\mathbf{x} \odot \mathbf{y}$ | $[2, 3] \times [4, 5] = [8, 15]$ | Gating & attention masks: $\mathbf{x} \odot \mathbf{m}$ |
+| **Division** | $\mathbf{x} \oslash \mathbf{y}$ | $[8, 9] / [2, 3] = [4.0, 3.0]$ | Variance normalization: $(\mathbf{x} - \boldsymbol{\mu}) / \boldsymbol{\sigma}$ |
 
-┌─────────────────┬─────────────────┬─────────────────┬─────────────────┐
-│ Subtraction     │ Multiplication  │ Division        │ Use Cases       │
-├─────────────────┼─────────────────┼─────────────────┼─────────────────┤
-│ [6,8] - [1,2]   │ [2,3] * [4,5]   │ [8,9] / [2,3]   │ • Data centering│
-│ = [5,6]         │ = [8,15]        │ = [4.0, 3.0]    │   (x - mean)    │
-│                 │                 │                 │ • Feature       │
-│ Center data:    │ Gate values:    │ Scale features: │   scaling       │
-│ x - mean        │ x * mask        │ x / std         │ • Statistics    │
-└─────────────────┴─────────────────┴─────────────────┴─────────────────┘
+**Broadcasting with Scalars:**
+$$\begin{aligned}
+\text{Scale: } & \begin{bmatrix} 1 & 2 & 3 \end{bmatrix} \times 2 = \begin{bmatrix} 2 & 4 & 6 \end{bmatrix} \\
+\text{Shift: } & \begin{bmatrix} 1 & 2 & 3 \end{bmatrix} - 1 = \begin{bmatrix} 0 & 1 & 2 \end{bmatrix} \\
+\text{Normalize: } & \begin{bmatrix} 2 & 4 & 6 \end{bmatrix} / 2 = \begin{bmatrix} 1 & 2 & 3 \end{bmatrix}
+\end{aligned}$$
 
-Broadcasting with Scalars (very common in ML):
-[1, 2, 3] * 2     = [2, 4, 6]      (scale all values)
-2 * [1, 2, 3]     = [2, 4, 6]      (same scaling, scalar on the left)
-[1, 2, 3] - 1     = [0, 1, 2]      (shift all values)
-[2, 4, 6] / 2     = [1, 2, 3]      (normalize all values)
+**Feature Standardization in ML:**
+Given batch data $\mathbf{X} \in \mathbb{R}^{3 \times 2}$, feature mean $\boldsymbol{\mu} \in \mathbb{R}^2$, and std $\boldsymbol{\sigma} \in \mathbb{R}^2$:
+$$\mathbf{X}_{\text{norm}} = \frac{\mathbf{X} - \boldsymbol{\mu}}{\boldsymbol{\sigma}} \implies (3, 2) - (2,) \xrightarrow{\text{broadcast}} (3, 2) \oslash (2,) \to (3, 2)$$
 
-Real Data Example - Feature Standardization:
-batch_data = [[1, 2], [3, 4], [5, 6]]  # Shape: (3, 2)
-mean = [3, 4]                           # Shape: (2,)
-std = [2, 2]                            # Shape: (2,)
+**Performance Note**: Element-wise operations are vectorized through CPU SIMD instructions (AVX-512/NEON), processing 4–16 float32 elements per instruction cycle.
 
-# Normalize: (x - mean) / std
-normalized = (batch_data - mean) / std
-# Broadcasting: (3,2) - (2,) = (3,2), then (3,2) / (2,) = (3,2)
-```
+**⚠️ Broadcasting Pitfall**: Broadcasting is powerful but dangerous. When shapes are accidentally mismatched, broadcasting silently fills missing dimensions instead of raising an error:
 
-**Performance Note**: Element-wise operations are highly optimized in NumPy and run efficiently on modern CPUs with vectorization (SIMD instructions).
+| Tensor | Shape | Meaning |
+| :--- | :--- | :--- |
+| `predictions` | `(32, 4)` | 32 batch samples, 4 class scores each |
+| `targets` | `(4,)` | Intended 4 classes, but missing batch dimension $(32, 1)$! |
+| **Silent Broadcast** | `(4,)` $\to$ `(32, 4)` | Target is replicated across all 32 samples with no warning |
 
-**⚠️ Broadcasting Pitfall**: Broadcasting is powerful but dangerous. When shapes are
-*accidentally* mismatched, NumPy silently broadcasts instead of raising an error:
-
-```
-predictions shape: (32, 4)   ← 32 samples, 4 outputs each
-targets shape:     (4,)      ← oops, forgot the batch dimension!
-
-NumPy broadcasts (4,) → (32, 4) by repeating the same row for all 32 samples.
-No error. No warning. Just wrong results.
-```
+This is a frequent source of silent bugs in ML code. Always verify tensor shapes before element-wise operations like loss computation.
 
 This is the #1 source of silent bugs in ML code. Always verify shapes match
 before element-wise operations like loss computation.
@@ -880,7 +807,7 @@ before element-wise operations like loss computation.
 
 
 # %% [markdown]
-"""
+r"""
 ### Implement: Add, Sub, Mul, Div
 
 Write `forward` for each operation. The inputs are NumPy arrays; return an array. `Tensor` already wrapped scalars and will wrap your result.
@@ -965,7 +892,7 @@ class Div(Function):
         ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Arithmetic Operations
 
 This test validates our arithmetic operations work correctly with both tensor-tensor and tensor-scalar operations, including broadcasting behavior. Scalar arithmetic should feel natural whether the scalar appears before or after the tensor.
@@ -1046,7 +973,7 @@ if __name__ == "__main__":
     test_unit_arithmetic_operations()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Matrix Multiplication: The Core Computational Operation
 
 Matrix multiplication is fundamentally different from element-wise multiplication. It's the operation that powers linear transformations — combining information across features to produce new representations.
@@ -1055,113 +982,64 @@ Matrix multiplication is fundamentally different from element-wise multiplicatio
 
 Many scientific and data-processing tasks rely on matrix multiplication:
 
-```
-Linear Transformation:
-Input Data × Transform Matrix = Transformed Data
-  (N, D_in)  ×    (D_in, D_out)  =    (N, D_out)
+$$\mathbf{X} \in \mathbb{R}^{N \times D_{\text{in}}}, \quad \mathbf{W} \in \mathbb{R}^{D_{\text{in}} \times D_{\text{out}}} \implies \mathbf{Y} = \mathbf{X}\mathbf{W} \in \mathbb{R}^{N \times D_{\text{out}}}$$
 
-Real Example - Dimensionality Reduction:
-Data Samples × Projection Matrix = Projected Data
-  (32, 784)   ×    (784, 256)    =   (32, 256)
-     ↑                  ↑                ↑
-  32 samples      784→256 projection   32 reduced vectors
-```
+For example, in feature projection (e.g. MNIST dimensionality reduction):
+$$\underbrace{\mathbf{X}}_{(32, 784)} \times \underbrace{\mathbf{W}}_{(784, 256)} = \underbrace{\mathbf{Y}}_{(32, 256)}$$
 
 ### Matrix Multiplication Visualization
 
-```
-Matrix Multiplication Process:
-    A (2×3)      B (3×2)         C (2×2)
-   ┌       ┐    ┌     ┐       ┌                         ┐
-   │ 1 2 3 │    │ 7 8 │       │ 1×7+2×9+3×1 1×8+2×1+3×2 │   ┌       ┐
-   │       │ ×  │ 9 1 │  =    │                         │ = │ 28 16 │
-   │ 4 5 6 │    │ 1 2 │       │ 4×7+5×9+6×1 4×8+5×1+6×2 │   │ 79 49 │
-   └       ┘    └     ┘       └                         ┘   └       ┘
+$$\underbrace{\begin{bmatrix} 1 & 2 & 3 \\ 4 & 5 & 6 \end{bmatrix}}_{A \in \mathbb{R}^{2 \times 3}} \times \underbrace{\begin{bmatrix} 7 & 8 \\ 9 & 1 \\ 1 & 2 \end{bmatrix}}_{B \in \mathbb{R}^{3 \times 2}} = \begin{bmatrix} 1\cdot 7 + 2\cdot 9 + 3\cdot 1 & 1\cdot 8 + 2\cdot 1 + 3\cdot 2 \\ 4\cdot 7 + 5\cdot 9 + 6\cdot 1 & 4\cdot 8 + 5\cdot 1 + 6\cdot 2 \end{bmatrix} = \underbrace{\begin{bmatrix} 28 & 16 \\ 79 & 49 \end{bmatrix}}_{C \in \mathbb{R}^{2 \times 2}}$$
 
-Computation Breakdown:
-C[0,0] = A[0,:] · B[:,0] = [1,2,3] · [7,9,1] = 1×7 + 2×9 + 3×1 = 28
-C[0,1] = A[0,:] · B[:,1] = [1,2,3] · [8,1,2] = 1×8 + 2×1 + 3×2 = 16
-C[1,0] = A[1,:] · B[:,0] = [4,5,6] · [7,9,1] = 4×7 + 5×9 + 6×1 = 79
-C[1,1] = A[1,:] · B[:,1] = [4,5,6] · [8,1,2] = 4×8 + 5×1 + 6×2 = 49
+**Computation Breakdown:**
+$$\begin{aligned}
+C_{0,0} &= \mathbf{A}[0, :] \cdot \mathbf{B}[:, 0] = [1, 2, 3] \cdot [7, 9, 1] = 1\cdot 7 + 2\cdot 9 + 3\cdot 1 = 7 + 18 + 3 = 28 \\
+C_{0,1} &= \mathbf{A}[0, :] \cdot \mathbf{B}[:, 1] = [1, 2, 3] \cdot [8, 1, 2] = 1\cdot 8 + 2\cdot 1 + 3\cdot 2 = 8 + 2 + 6 = 16 \\
+C_{1,0} &= \mathbf{A}[1, :] \cdot \mathbf{B}[:, 0] = [4, 5, 6] \cdot [7, 9, 1] = 4\cdot 7 + 5\cdot 9 + 6\cdot 1 = 28 + 45 + 6 = 79 \\
+C_{1,1} &= \mathbf{A}[1, :] \cdot \mathbf{B}[:, 1] = [4, 5, 6] \cdot [8, 1, 2] = 4\cdot 8 + 5\cdot 1 + 6\cdot 2 = 32 + 5 + 12 = 49
+\end{aligned}$$
 
-Key Rule: Inner dimensions must match!
-A(m,n) @ B(n,p) = C(m,p)
-     ↑     ↑
-   these must be equal
-```
+**Key Rule: Inner dimensions must match!**
+$$\mathbf{A}_{(M \times K)} @ \mathbf{B}_{(K \times N)} = \mathbf{C}_{(M \times N)} \quad \text{where the shared dimension } K \text{ contracts}$$
 
 ### Computational Complexity and Performance
 
-```
-Computational Cost:
-For C = A @ B where A is (M×K), B is (K×N):
-- Multiplications: M × N × K
-- Additions: M × N × (K-1) ≈ M × N × K
-- Total FLOPs: ≈ 2 × M × N × K
+For $\mathbf{C} = \mathbf{A} @ \mathbf{B}$ where $\mathbf{A} \in \mathbb{R}^{M \times K}$ and $\mathbf{B} \in \mathbb{R}^{K \times N}$:
+* **Multiplications**: $M \times N \times K$
+* **Additions**: $M \times N \times (K - 1) \approx M \times N \times K$
+* **Total FLOPs**: $\approx 2MNK$ operations
 
-Example: (1000×1000) @ (1000×1000)
-- FLOPs: 2 × 1000³ = 2 billion operations
-- On 1 GHz CPU: ~2 seconds if no optimization
-- With optimized BLAS: ~0.1 seconds (20× speedup!)
+| Operand | Shape | Traversal Pattern | Memory Locality & Hardware Implications |
+| :--- | :--- | :--- | :--- |
+| **Matrix $A$** | $(M, K)$ | Row-by-row (`A[i, :]`) | 🟢 **Sequential**: Cache-line streaming friendly |
+| **Matrix $B$** | $(K, N)$ | Column-by-column (`B[:, j]`) | 🔴 **Strided**: Cache line thrashing unless tiled/transposed |
+| **Matrix $C$** | $(M, N)$ | Row-by-row accumulation | 🟢 **Sequential**: Spatial write locality |
 
-Memory Access Pattern:
-A: M×K (row-wise access)  ✓ Good cache locality
-B: K×N (column-wise)      ✗ Poor cache locality
-C: M×N (row-wise write)   ✓ Good cache locality
-
-This is why optimized libraries like OpenBLAS, Intel MKL use:
-- Blocking algorithms (process in cache-sized chunks)
-- Vectorization (SIMD instructions)
-- Parallelization (multiple cores)
-```
+This is why optimized BLAS libraries (OpenBLAS, Apple Accelerate, Intel MKL) employ cache blocking, register tiling, and SIMD vectorization.
 
 ### Chained Matrix Multiplications
 
-```
-Chained Transformations:
-Data (100 samples, 50 features)
-  ↓ A: (50, 20)
-Result1 (100, 20)
-  ↓ B: (20, 5)
-Final (100, 5)
+$$\mathbf{X}_{(100 \times 50)} \xrightarrow{\mathbf{W}_1 \in \mathbb{R}^{50 \times 20}} \mathbf{H}_{(100 \times 20)} \xrightarrow{\mathbf{W}_2 \in \mathbb{R}^{20 \times 5}} \mathbf{Y}_{(100 \times 5)}$$
 
-Each arrow represents a matrix multiplication.
-Two chained matmuls progressively reduce dimensionality:
-  50 → 20 → 5
+FLOPs budget for $100$ batch samples across both projections:
+$$\text{Total Compute} = 100 \times (2 \times 50 \times 20 + 2 \times 20 \times 5) = 100 \times (2{,}000 + 200) = 220{,}000 \text{ FLOPs}$$
 
-FLOPs for both multiplications (100 samples):
-  100 × (2×50×20 + 2×20×5) FLOPs
-= 100 × (2,000 + 200) = 100 × 2,200 = 220K FLOPs
-```
-
-This is why hardware acceleration matters - modern processors can perform thousands of these operations in parallel!
+This is why hardware acceleration matters: specialized matrix engines execute thousands of these multiply-accumulate operations in parallel!
 """
 
 # %% [markdown]
-"""
+r"""
 ### Shape Validation for Matrix Multiplication
 
 Before performing any computation, matrix multiplication must verify that the
 two operands are compatible. There are three things that can go wrong, and each
 one deserves a distinct, educational error message.
 
-The first check is a type check: the right-hand operand must be a Tensor, not a
-plain Python number or a raw NumPy array. The second check catches 0D scalars,
-which have no rows or columns and therefore cannot participate in a matrix
-product (students should use `*` for scalar multiplication instead). The third
-check is the classic inner-dimension rule: for `A @ B` where A has shape
-`(M, K)` and B has shape `(K, N)`, the two `K` values must agree. The same rule
-covers vectors once you know where their `K` lives: a 1D operand has a single
-axis, so for `(M, K) @ (K,)` the vector's length is its rows count, and
-`(2, 3) @ (2,)` is a mismatch just as `(2, 3) @ (2, 1)` is.
-
-```
-Validation Decision Tree:
-                     ┌─ Not a Tensor? ──> TypeError
-  _validate_matmul ──┼─ Either is 0D?  ──> ValueError (use * instead)
-                     └─ Inner dims ≠?  ──> ValueError (shape mismatch)
-                         else: pass (ready to compute)
-```
+| Check Order | Invariant Verified | Exception Raised | Educational Error Explanation |
+| :--- | :--- | :--- | :--- |
+| **1. Type Check** | `isinstance(other, Tensor)` | `TypeError` | `f"matmul requires Tensor, got {type(other).__name__}"` |
+| **2. Scalar Rejection** | `self.ndim > 0` and `other.ndim > 0` | `ValueError` | `f"matmul does not support 0D scalars, use * for scalar multiplication"` |
+| **3. Inner Dimension** | `self.shape[-1] == other.shape[0]` | `ValueError` | `f"matmul shape mismatch: ({self.shape[-1]}) != ({other.shape[0]})"` |
 
 Separating validation from computation keeps each function focused on a single
 concept: `_validate_matmul_shapes` teaches input checking, while
@@ -1169,7 +1047,7 @@ concept: `_validate_matmul_shapes` teaches input checking, while
 """
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Validate Matmul Shapes
 
 **What we're testing**: All three shape-mismatch categories are caught and named, for matrices and vectors alike
@@ -1238,7 +1116,7 @@ if __name__ == "__main__":
     test_unit_validate_matmul_shapes()
 
 # %% [markdown]
-"""
+r"""
 ### Implement: MatMul
 
 Write `forward` for the matrix product. The inputs are NumPy arrays whose shapes `Tensor.matmul` already validated; return an array. The explicit-loop guidance lives in the docstring below.
@@ -1302,7 +1180,7 @@ class MatMul(Function):
         ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Matrix Multiplication
 
 Now that validation is handled by `_validate_matmul_shapes`, this test focuses
@@ -1354,111 +1232,68 @@ if __name__ == "__main__":
     test_unit_matrix_multiplication()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Shape Manipulation: Reshape and Transpose
 
 Data processing pipelines constantly change tensor shapes to match computation requirements. Understanding these operations is crucial for efficient data flow.
 
 ### Why Shape Manipulation Matters
 
-Many computations require constant shape changes:
+Many computations require constant shape changes across the network pipeline:
 
-```
-Multi-dimensional Data Processing Example:
-Batch of RGB Images: (32, 3, 224, 224)   # 32 images, 3 color channels, 224x224 pixels
-     ↓ Spatial processing
-Processed: (32, 512, 7, 7)              # 32 images, 512 features, 7x7 spatial
-     ↓ Average across spatial dims
-Reduced: (32, 512)                      # 32 images, 512 features (spatial collapsed)
-     ↓ Matrix multiply to reduce dimensions
-Final: (32, 10)                         # 32 images, 10 output values
-
-Each ↓ involves reshape or similar operations!
-```
+$$\underbrace{\mathbf{X}_{(32, 3, 224, 224)}}_{\text{Batch of RGB Images}} \xrightarrow{\text{Convolutions}} \underbrace{\mathbf{F}_{(32, 512, 7, 7)}}_{\text{Feature Maps}} \xrightarrow{\text{Global Pool}} \underbrace{\mathbf{H}_{(32, 512)}}_{\text{Vector Embeddings}} \xrightarrow{\text{Linear Projection}} \underbrace{\hat{\mathbf{Y}}_{(32, 10)}}_{\text{Class Logits}}$$
 
 ### Reshape: Changing Interpretation of the Same Data
 
-```
-Reshaping (changing dimensions without changing data):
-Original: [1, 2, 3, 4, 5, 6]  (shape: (6,))
-         ↓ reshape(2, 3)
-Result:  [[1, 2, 3],          (shape: (2, 3))
-          [4, 5, 6]]
+Reshaping alters coordinate dimensions without moving or reordering elements:
 
-Memory Layout (unchanged):
-Before: [1][2][3][4][5][6]
-After:  [1][2][3][4][5][6]  ← Same memory, different interpretation
+$$\begin{bmatrix} 1 & 2 & 3 & 4 & 5 & 6 \end{bmatrix}_{(6,)} \xrightarrow{\text{reshape}(2, 3)} \begin{bmatrix} 1 & 2 & 3 \\ 4 & 5 & 6 \end{bmatrix}_{(2, 3)}$$
 
-Key Insight: NumPy can reshape this contiguous array in O(1) by returning a
-view (other layouts may require a copy). Our Tensor wraps the result with np.array(), so
-TinyTorch's reshape is O(N). The layout reasoning is unchanged; the copy is
-the price of every Tensor owning its buffer outright.
+**Underlying Linear Memory Buffer:**
+$$\begin{array}{|c|c|c|c|c|c|} \hline 1 & 2 & 3 & 4 & 5 & 6 \\ \hline \end{array} \quad \text{(Elements remain at identical byte offsets)}$$
 
-Common ML Reshapes:
-┌───────────────────────┬─────────────────────┬─────────────────────┐
-│ Flatten 2D → 1D       │ Unflatten 1D → 2D   │ Batch Dimension     │
-├───────────────────────┼─────────────────────┼─────────────────────┤
-│ (N,H,W,C) → (N,H×W×C) │ (N,D) → (N,H,W,C)   │ (H,W) → (1,H,W)     │
-│ Matrix to vector      │ Vector to matrix    │ Add batch dimension │
-└───────────────────────┴─────────────────────┴─────────────────────┘
-```
+**Key Insight**: NumPy can reshape this contiguous array in $O(1)$ by returning a view (other layouts may require a copy). Our Tensor wraps the result with `np.array()`, so TinyTorch's reshape is $O(N)$. The layout reasoning is unchanged; the copy is the price of every Tensor owning its buffer outright.
+
+| Reshape Pattern | Shape Transformation | Deep Learning Purpose |
+| :--- | :--- | :--- |
+| **Flatten Spatial Grid** | $(N, C, H, W) \to (N, C \cdot H \cdot W)$ | Transition from Conv2D feature map to Linear classifier |
+| **Unflatten Sequence** | $(N, D) \to (N, H, W, C)$ | Latent representation to image decoder grid |
+| **Inject Batch Axis** | $(H, W) \to (1, 1, H, W)$ | Single-sample inference into batched model pipeline |
 
 ### Transpose: Swapping Dimensions
 
-```
-Transposing (swapping dimensions - stride reinterpretation):
-Original: [[1, 2, 3],    (shape: (2, 3))
-           [4, 5, 6]]
-         ↓ transpose()
-Result:  [[1, 4],        (shape: (3, 2))
-          [2, 5],
-          [3, 6]]
+Transposing reinterprets axes by inverting coordinate strides:
 
-Memory Layout (unchanged; strides swapped):
-Before: [1][2][3][4][5][6]   read row-by-row  (row stride 3, col stride 1)
-After:  [1][2][3][4][5][6]   read column-by-column (row stride 1, col stride 3)
-        ↑ the bytes never move; only the strides do, so walking a row of the
-          transposed view now jumps through memory — cache-unfriendly
+$$\mathbf{X} = \begin{bmatrix} 1 & 2 & 3 \\ 4 & 5 & 6 \end{bmatrix}_{(2, 3)} \implies \mathbf{X}^T = \begin{bmatrix} 1 & 4 \\ 2 & 5 \\ 3 & 6 \end{bmatrix}_{(3, 2)}$$
 
-Key Insight: transposing is a stride change, not a data move. NumPy returns a
-non-contiguous view; our Tensor copies it (preserving the layout), so the
-result is still cache-unfriendly to traverse row-wise.
+**Strides Reinterpretation:**
+$$\begin{aligned}
+\text{Original Strides } (3, 1): \quad & \text{row step} = 3 \text{ elements}, \quad \text{col step} = 1 \text{ element} \\
+\text{Transposed Strides } (1, 3): \quad & \text{row step} = 1 \text{ element}, \quad \text{col step} = 3 \text{ elements}
+\end{aligned}$$
 
-Common Linear Algebra Usage:
-┌─────────────────────┬─────────────────────┬─────────────────────┐
-│ Covariance Matrix   │ Solving Least       │ Data Reshaping      │
-│                     │ Squares             │                     │
-├─────────────────────┼─────────────────────┼─────────────────────┤
-│ X^T @ X computes    │ A^T @ b projects    │ Swap rows/columns   │
-│ feature correlations│ onto column space   │ for different views │
-└─────────────────────┴─────────────────────┴─────────────────────┘
-```
+The bytes never move; only the coordinate strides do. Walking a row of the transposed view jumps through memory across stride boundaries:
+
+| Mathematical Formulation | Operation | Systems & ML Purpose |
+| :--- | :--- | :--- |
+| **$\mathbf{X}^T \mathbf{X}$** | Gram / Covariance Matrix | Computes inter-feature correlations |
+| **$\mathbf{A}^T \mathbf{b}$** | Least Squares Projection | Projects target vector onto column space of $\mathbf{A}$ |
+| **$\mathbf{Q} \mathbf{K}^T$** | Attention Matrix Transpose | Aligns sequence positions for dot-product attention |
 
 ### Performance Implications
 
-```
-Storage cost for N elements:
-┌─────────────────┬──────────────────────────┬──────────────────────────┐
-│ Operation       │ NumPy array behavior     │ TinyTorch Tensor result  │
-├─────────────────┼──────────────────────────┼──────────────────────────┤
-│ reshape()       │ View when layout allows  │ Copies N values          │
-│ transpose()     │ View with swapped strides│ Copies N values          │
-└─────────────────┴──────────────────────────┴──────────────────────────┘
+| Operation | NumPy Underlying Behavior | TinyTorch Tensor Implementation | Memory & Cache Implications |
+| :--- | :--- | :--- | :--- |
+| **`reshape()`** | $O(1)$ zero-copy view when C-contiguous | $O(N)$ copies $N$ float32 values | Independent buffer ownership prevents subtle mutation leaks |
+| **`transpose()`** | $O(1)$ view with inverted coordinate strides | $O(N)$ copies with non-contiguous strides | Strided access on transposed data jumps cache lines |
 
-A view changes metadata without moving values. TinyTorch chooses independent
-storage instead, so both operations incur a copy. Layout still matters when
-reading the result: strided access can use cache lines less efficiently.
-```
-
-Measure the operation and its consumer separately. A cheap view can lead to a
-more expensive subsequent computation; a copy can cost time now and improve a
-later access pattern. The result depends on layout, kernel, and hardware.
+Measure the operation and its consumer separately. A cheap view can lead to a more expensive subsequent computation; a copy can cost time now and improve a later access pattern. The result depends on layout, kernel, and hardware.
 
 """
 
 
 # %% [markdown]
-"""
+r"""
 ### Implement: Slice, Reshape, Permute, Copy, MaskedFill
 
 Write `forward` for each operation. The input is a NumPy array; return an array. The Tensor methods pass the extra information (`key`, `shape`, `axes`, `mask` and `value`) as keyword parameters to `apply`, and `Function.__init__` stores each one on the node, so it is available as `self.key`, `self.shape`, and so on.
@@ -1547,7 +1382,7 @@ class MaskedFill(Function):
         ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Shape Manipulation
 
 This test validates reshape and transpose operations work correctly with validation and edge cases.
@@ -1639,7 +1474,7 @@ if __name__ == "__main__":
     test_unit_shape_manipulation()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Reduction Operations: Aggregating Information
 
 Reduction operations collapse dimensions by aggregating data, which is essential for computing statistics and preparing data for further processing.
@@ -1648,89 +1483,53 @@ Reduction operations collapse dimensions by aggregating data, which is essential
 
 Reduction operations appear throughout neural networks:
 
-```
-Common Data Reduction Patterns:
-
-┌─────────────────────┬─────────────────────┬───────────────────────┐
-│ Column Statistics   │ Row Aggregation     │ Spatial Averaging     │
-├─────────────────────┼─────────────────────┼───────────────────────┤
-│ Per-column stats →  │ Per-row stats →     │ 2D data →             │
-│ Summary per feature │ Summary per sample  │ Single value per item │
-│                     │                     │                       │
-│ data.mean(axis=0)   │ data.mean(axis=1)   │ img.mean(axis=(1,2))  │
-│ (N,D) → (D,)        │ (N,D) → (N,)        │ (N,H,W) → (N,)        │
-└─────────────────────┴─────────────────────┴───────────────────────┘
-
-Real Examples:
-• Average grade per subject: grades.mean(axis=0)     [average down columns]
-• Average grade per student: grades.mean(axis=1)     [average across rows]
-• Average pixel intensity: images.mean(axis=(1,2))   [spatial → scalar per image]
-```
+| Reduction Type | Syntax | Dimensional Shift | Machine Learning Use Case |
+| :--- | :--- | :--- | :--- |
+| **Column Statistics** | `data.mean(axis=0)` | $(N, D) \to (D,)$ | Batch normalization: feature mean & variance |
+| **Row Aggregation** | `data.mean(axis=1)` | $(N, D) \to (N,)$ | Sample summary: token energy, sample norm |
+| **Spatial Averaging** | `img.mean(axis=(1, 2))` | $(N, H, W) \to (N,)$ | Global average pooling across image channels |
 
 ### Understanding Axis Operations
 
-```
-Visual Axis Understanding:
-Matrix:     [[1, 2, 3],      All reductions operate on this data
-             [4, 5, 6]]      Shape: (2, 3)
+Given matrix $\mathbf{X} \in \mathbb{R}^{2 \times 3}$:
 
-        axis=0 (↓)
-       ┌─────────┐
-axis=1 │ 1  2  3 │ →  axis=1 reduces across columns (→)
-   (→) │ 4  5  6 │ →  Result shape: (2,) [one value per row]
-       └─────────┘
-         ↓ ↓ ↓
-      axis=0 reduces down rows (↓)
-      Result shape: (3,) [one value per column]
+$$\mathbf{X} = \begin{bmatrix} 1 & 2 & 3 \\ 4 & 5 & 6 \end{bmatrix}$$
 
-Reduction Results:
-├─ .sum() → 21                    (sum all: 1+2+3+4+5+6)
-├─ .sum(axis=0) → [5, 7, 9]       (sum columns: [1+4, 2+5, 3+6])
-├─ .sum(axis=1) → [6, 15]         (sum rows: [1+2+3, 4+5+6])
-├─ .mean() → 3.5                  (average all: 21/6)
-├─ .mean(axis=0) → [2.5, 3.5, 4.5] (average columns)
-└─ .max() → 6                     (maximum element)
+* **Global Reduction (All Elements):**
+  $$\text{sum}(\mathbf{X}) = 21, \quad \text{mean}(\mathbf{X}) = 3.5, \quad \max(\mathbf{X}) = 6$$
+* **$\text{axis}=0$ (Collapse Rows $\downarrow$):** Reduces along height, producing one value per column:
+  $$\text{sum}(\mathbf{X}, \text{axis}=0) = \begin{bmatrix} 1+4 & 2+5 & 3+6 \end{bmatrix} = \begin{bmatrix} 5 & 7 & 9 \end{bmatrix} \in \mathbb{R}^3$$
+  $$\text{mean}(\mathbf{X}, \text{axis}=0) = \begin{bmatrix} 2.5 & 3.5 & 4.5 \end{bmatrix}$$
+* **$\text{axis}=1$ (Collapse Columns $\to$):** Reduces along width, producing one value per row:
+  $$\text{sum}(\mathbf{X}, \text{axis}=1) = \begin{bmatrix} 1+2+3 \\ 4+5+6 \end{bmatrix} = \begin{bmatrix} 6 \\ 15 \end{bmatrix} \to [6, 15] \in \mathbb{R}^2$$
+  $$\text{mean}(\mathbf{X}, \text{axis}=1) = [2.0, 5.0]$$
 
-3D Tensor Example (batch, height, width):
-data.shape = (2, 3, 4)  # 2 samples, 3×4 images
-│
-├─ .sum(axis=0) → (3, 4)    # Sum across batch dimension
-├─ .sum(axis=1) → (2, 4)    # Sum across height dimension
-├─ .sum(axis=2) → (2, 3)    # Sum across width dimension
-└─ .sum(axis=(1,2)) → (2,)  # Sum across both spatial dims (global pool)
-```
+**Multi-axis Reductions on 3D Tensor $(B, H, W) = (2, 3, 4)$:**
+$$\begin{aligned}
+\text{sum}(\text{axis}=0) &\implies (3, 4) \quad \text{(Batch sum)} \\
+\text{sum}(\text{axis}=1) &\implies (2, 4) \quad \text{(Height sum)} \\
+\text{sum}(\text{axis}=2) &\implies (2, 3) \quad \text{(Width sum)} \\
+\text{sum}(\text{axis}=(1, 2)) &\implies (2,) \quad \text{(Global spatial pooling)}
+\end{aligned}$$
 
 ### Memory and Performance Considerations
 
-```
-Reduction Performance:
-┌─────────────────┬──────────────┬─────────────────┬─────────────────┐
-│ Operation       │ Time Complex │ Memory Access   │ Cache Behavior  │
-├─────────────────┼──────────────┼─────────────────┼─────────────────┤
-│ .sum()          │ O(N)         │ Sequential read │ Excellent       │
-│ .sum(axis=0)    │ O(N)         │ Walks rows      │ Vectorizes well │
-│ .sum(axis=1)    │ O(N)         │ Per-row reduce  │ Fair            │
-│ .mean()         │ O(N)         │ Sequential read │ Excellent       │
-│ .max()          │ O(N)         │ Sequential read │ Excellent       │
-└─────────────────┴──────────────┴─────────────────┴─────────────────┘
+| Operation | Complexity | Access Strategy | Hardware Cache Locality |
+| :--- | :--- | :--- | :--- |
+| **`.sum()`** | $O(N)$ | Sequential read | 🟢 **Optimal**: Linear memory streaming |
+| **`.sum(axis=0)`** | $O(N)$ | Sweeps rows in sequence | 🟢 **High**: Accumulates into row buffer, vectorizes cleanly |
+| **`.sum(axis=1)`** | $O(N)$ | Horizontal row reduce | 🟡 **Fair**: Requires horizontal SIMD reduction |
+| **`.mean()` / `.max()`** | $O(N)$ | Sequential read | 🟢 **Optimal**: Single streaming pass |
 
-Why axis=0 is usually FASTER than axis=1 (measured ~1.7x on a 4000x4000 array):
-- NumPy reduces over axis 0 by sweeping memory sequentially and accumulating
-  into an output row, which vectorizes cleanly
-- axis=1 is a horizontal reduction within each row, which vectorizes less well
-- The intuition that 'column access must be strided and therefore slow' is
-  about element-at-a-time access, not about how NumPy implements reductions
-
-Optimization strategies:
-- Measure before assuming a reduction axis is the slow one
-- Use keepdims=True to maintain shape for broadcasting
-- Consider reshaping before reduction for better cache behavior
-```
+**Why `axis=0` is usually FASTER than `axis=1` (measured ~1.7× speedup on a 4000×4000 array):**
+- NumPy reduces over axis 0 by sweeping memory sequentially and accumulating into an output row, which vectorizes cleanly with SIMD instructions.
+- `axis=1` is a horizontal reduction within each row, which requires horizontal SIMD lane shuffling.
+- The intuition that "column access must be strided and slow" applies to element-at-a-time Python loops, not to NumPy's compiled sequential sweep.
 """
 
 
 # %% [markdown]
-"""
+r"""
 ### Implement: Sum, Mean, Max
 
 Write `forward` for each operation. The inputs are NumPy arrays; return an array. `Tensor` already wrapped scalars and will wrap your result.
@@ -1792,7 +1591,7 @@ class Max(Function):
         ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Reduction Operations
 
 This test validates reduction operations work correctly with axis control and maintain proper shapes.
@@ -1863,47 +1662,31 @@ if __name__ == "__main__":
     test_unit_reduction_operations()
 
 # %% [markdown]
-"""
+r"""
 ## 🔧 Integration: Bringing It Together
 
 Let's test how our Tensor operations work together in realistic scenarios. This integration demonstrates that our individual operations combine correctly for complex workflows.
 
 ### Linear Transformation Simulation
 
-A common pattern in scientific computing is the affine transformation: **y = xW + b**
+A common pattern in machine learning and scientific computing is the affine transformation:
 
-```
-Affine Transformation: y = xW + b
+$$\mathbf{Y} = \mathbf{X}\mathbf{W} + \mathbf{b}$$
 
-Input Data    → Weight Matrix → Matrix Multiply → Add Offset  → Output Data
-  (batch, in)   (in, out)        (batch, out)     (batch, out)   (batch, out)
+$$\underbrace{\mathbf{X}}_{(N, D_{\text{in}})} \xrightarrow{\text{Matrix Multiply with } \mathbf{W} \in \mathbb{R}^{D_{\text{in}} \times D_{\text{out}}}} \underbrace{\mathbf{X}\mathbf{W}}_{(N, D_{\text{out}})} \xrightarrow{\text{Broadcast Add with } \mathbf{b} \in \mathbb{R}^{D_{\text{out}}}} \underbrace{\mathbf{Y}}_{(N, D_{\text{out}})}$$
 
-Step-by-Step Breakdown:
-1. Input:   X shape (batch_size, input_features)
-2. Weight:  W shape (input_features, output_features)
-3. Matmul:  XW shape (batch_size, output_features)
-4. Bias:    b shape (output_features,)
-5. Result:  XW + b shape (batch_size, output_features)
+**Concrete Numerical Trace:**
+Given input $\mathbf{X} \in \mathbb{R}^{2 \times 3}$, weight $\mathbf{W} \in \mathbb{R}^{3 \times 2}$, and bias $\mathbf{b} \in \mathbb{R}^2$:
 
-Example Flow:
-Input: [[1, 2, 3],    Weight: [[0.1, 0.2],    Bias: [0.1, 0.2]
-        [4, 5, 6]]            [0.3, 0.4],
-       (2, 3)                 [0.5, 0.6]]
-                             (3, 2)
+$$\mathbf{X} = \begin{bmatrix} 1 & 2 & 3 \\ 4 & 5 & 6 \end{bmatrix}, \quad \mathbf{W} = \begin{bmatrix} 0.1 & 0.2 \\ 0.3 & 0.4 \\ 0.5 & 0.6 \end{bmatrix}, \quad \mathbf{b} = \begin{bmatrix} 0.1 & 0.2 \end{bmatrix}$$
 
-Step 1: Matrix Multiply
-[[1, 2, 3]] @ [[0.1, 0.2]] = [[1×0.1+2×0.3+3×0.5, 1×0.2+2×0.4+3×0.6]]
-[[4, 5, 6]]   [[0.3, 0.4]]   [[4×0.1+5×0.3+6×0.5, 4×0.2+5×0.4+6×0.6]]
-              [[0.5, 0.6]]
-                           = [[2.2, 2.8],
-                              [4.9, 6.4]]
+* **Step 1: Inner-Dimension Contraction ($\mathbf{X}\mathbf{W}$)**
+  $$\mathbf{X}\mathbf{W} = \begin{bmatrix} 1(0.1)+2(0.3)+3(0.5) & 1(0.2)+2(0.4)+3(0.6) \\ 4(0.1)+5(0.3)+6(0.5) & 4(0.2)+5(0.4)+6(0.6) \end{bmatrix} = \begin{bmatrix} 2.2 & 2.8 \\ 4.9 & 6.4 \end{bmatrix}$$
 
-Step 2: Add Bias (Broadcasting)
-[[2.2, 2.8]] + [0.1, 0.2] = [[2.3, 3.0],
- [4.9, 6.4]]                 [5.0, 6.6]]
+* **Step 2: Offset Injection via Broadcasting ($+ \mathbf{b}$)**
+  $$\mathbf{Y} = \begin{bmatrix} 2.2 & 2.8 \\ 4.9 & 6.4 \end{bmatrix} + \begin{bmatrix} 0.1 & 0.2 \end{bmatrix} = \begin{bmatrix} 2.3 & 3.0 \\ 5.0 & 6.6 \end{bmatrix}$$
 
-This affine transformation pattern is the building block of many computational systems!
-```
+This affine transformation pattern is the foundational linear layer underlying MLPs, CNNs, and Transformer projections!
 
 ### Why This Integration Matters
 
@@ -1919,7 +1702,7 @@ You'll see this affine transformation pattern used extensively as we build more 
 
 
 # %% [markdown]
-"""
+r"""
 ## 📊 Systems Analysis: Memory Layout and Performance
 
 Let's understand ONE key systems concept: **memory layout and cache behavior**.
@@ -1995,7 +1778,7 @@ if __name__ == "__main__":
 
 
 # %% [markdown]
-"""
+r"""
 ## 🧪 Module Integration Test
 
 Final validation that everything works together correctly before module completion.
@@ -2103,7 +1886,7 @@ def test_module():
 
 
 # %% [markdown]
-"""
+r"""
 ## 🤔 ML Systems Reflection Questions
 
 Now that you've built a complete Tensor class, let's think about its systems-level implications.
@@ -2172,7 +1955,7 @@ Batching amortizes this overhead and maximizes parallelism across processing uni
 """
 
 # %% [markdown]
-"""
+r"""
 ## ⭐ Aha Moment: Your Tensor Works Like NumPy
 
 **What you built:** A complete Tensor class with arithmetic operations and matrix multiplication.
@@ -2220,7 +2003,7 @@ if __name__ == "__main__":
     demo_tensor()
 
 # %% [markdown]
-"""
+r"""
 ## 🚀 MODULE SUMMARY: Tensor Foundation
 
 Congratulations! You've built the foundational Tensor class that powers all machine learning operations!

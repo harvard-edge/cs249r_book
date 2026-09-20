@@ -8,6 +8,7 @@ nbdev, and protecting generated files.
 
 import json
 import re
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -200,6 +201,13 @@ def convert_py_to_notebook(
     modules_dir = project_root / "modules" / module_name
     modules_dir.mkdir(parents=True, exist_ok=True)
     notebook_file = modules_dir / f"{short_name}.ipynb"
+
+    # Copy static diagram assets (SVGs, PNGs) from source to modules directory
+    for asset in dev_file.parent.glob("*"):
+        if asset.is_file() and asset.suffix.lower() in {".svg", ".png", ".jpg", ".jpeg"}:
+            dest = modules_dir / asset.name
+            if not dest.exists() or dest.stat().st_mtime < asset.stat().st_mtime:
+                shutil.copy2(asset, dest)
 
     rel_notebook = notebook_file.relative_to(project_root)
     console.print(f"[dim]📄 Source: {dev_file.name} → Target: {rel_notebook}[/dim]")
