@@ -13,21 +13,21 @@
 # ---
 
 # %% [markdown]
-"""
+r"""
 # Module 05: DataLoader - Efficient Data Pipeline for ML Training
 
 Welcome to Module 05! You're about to build the data loading infrastructure that transforms how ML models consume data during training.
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Tensor operations, activations, layers, and losses
-**You'll Build**: Dataset abstraction, DataLoader with batching/shuffling, and real dataset support
-**You'll Enable**: Efficient data pipelines that will feed hungry neural networks with properly formatted batches
+- **You've Built**: Tensor operations, activations, layers, and losses
+- **You'll Build**: Dataset abstraction, DataLoader with batching/shuffling, and real dataset support
+- **You'll Enable**: Efficient data pipelines that feed neural networks with properly formatted batches
 
-**Connection Map**:
-```
-Losses → DataLoader → Autograd → Optimizers → Training
-(Module 04)  (Module 05)  (Module 06)  (Module 07)  (Module 08)
-```
+<div align="center">
+  <img src="dataloader_blueprint.svg" width="360" alt="Framework Blueprint">
+</div>
+
+$$\underbrace{\text{Losses}}_{\text{Mod 04}} \longrightarrow \mathbf{\underbrace{\text{DataLoader}}_{\text{Mod 05 (Active)}}} \longrightarrow \underbrace{\text{Autograd}}_{\text{Mod 06}} \longrightarrow \underbrace{\text{Optimizers}}_{\text{Mod 07}} \longrightarrow \underbrace{\text{Training}}_{\text{Mod 08}}$$
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
@@ -53,13 +53,13 @@ from tinytorch.core.dataloader import Dataset, DataLoader, TensorDataset
 
 **Why this matters:**
 - **Learning:** Complete data loading system in one focused module for deep understanding
-- **Production:** Proper organization like PyTorch's torch.utils.data with all core data utilities
+- **Production:** Proper organization like PyTorch's `torch.utils.data` with all core data utilities
 - **Efficiency:** Optimized data pipelines are crucial for training speed and memory usage
 - **Integration:** Works seamlessly with training loops to create complete ML systems
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📋 Module Dependencies
 
 **Prerequisites**: Module 01 (Tensor) must be complete
@@ -73,12 +73,11 @@ from tinytorch.core.dataloader import Dataset, DataLoader, TensorDataset
 **TinyTorch Dependencies**:
 - `tinytorch.core.tensor.Tensor` (foundation from Module 01)
 
-**Dependency Flow**:
-```
-Module 01 (Tensor) → Module 05 (DataLoader)
-     ↓                    ↓
-  Foundation        Data pipeline for training
-```
+$$\begin{array}{ccc}
+\mathbf{\text{Module 01: Tensor}} & \longrightarrow & \mathbf{\text{Module 05: DataLoader}} \\
+\downarrow & & \downarrow \\
+\textit{Multi-dimensional array engine} & & \textit{Batched, shuffled iterator}
+\end{array}$$
 
 Students completing this module will have built the data loading
 infrastructure that powers all training in TinyTorch.
@@ -102,7 +101,7 @@ rng = np.random.default_rng(7)
 from tinytorch.core.tensor import Tensor
 
 # %% [markdown]
-"""
+r"""
 ## 💡 Introduction: Understanding the Data Pipeline
 
 Before we implement anything, let's understand what happens when neural networks "eat" data. The journey from raw data to trained models follows a specific pipeline that every ML engineer must master.
@@ -111,16 +110,15 @@ Before we implement anything, let's understand what happens when neural networks
 
 Imagine you have 50,000 images of cats and dogs, and you want to train a neural network to classify them:
 
-```
-Raw Data Storage          Dataset Interface         DataLoader Batching         Model Input
-┌─────────────────┐      ┌──────────────────┐      ┌────────────────────┐      ┌─────────────┐
-│ cat_001.jpg     │      │ dataset[0]       │      │ Batch 1:           │      │ model(batch)│
-│ dog_023.jpg     │ ───> │ dataset[1]       │ ───> │ [cat, dog, cat]    │ ───> │ compute     │
-│ cat_045.jpg     │      │ dataset[2]       │      │ Batch 2:           │      │ loss        │
-│ ...             │      │ ...              │      │ [dog, cat, dog]    │      │ repeat      │
-│ (50,000 files)  │      │ dataset[49999]   │      │ ...                │      │             │
-└─────────────────┘      └──────────────────┘      └────────────────────┘      └─────────────┘
-```
+<p align="center">
+  <img src="dataloader_pipeline.svg" width="680" alt="DataLoader Pipeline Flow">
+</p>
+
+| Stage | Component | Responsibility | Memory & I/O Characteristic |
+| :--- | :--- | :--- | :--- |
+| **1. Dataset Interface** | `Dataset` | Point-wise random access via `__getitem__(i)` | Zero-copy indexing or on-demand file I/O |
+| **2. Index Permutation** | `Sampler` | Generate index schedule $\pi = [\pi_0, \pi_1, \dots, \pi_{N-1}]$ | $O(N)$ integer pointer array in host RAM |
+| **3. Batch Collation** | `DataLoader` | Slices $B$ samples and stacks into $(B, \dots)$ batch | Allocates contiguous batch tensor buffer |
 
 ### Why This Pipeline Matters
 
@@ -134,25 +132,18 @@ batch at a time. Sample extraction and collation copy values, so batching does
 not make the source dataset disappear or provide zero-copy access.
 
 **Training Variety**: Shuffling changes sample order and batch composition each epoch. It reduces order effects but does not by itself prevent overfitting.
-
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📐 Foundations: The Dataset Abstraction
 
 The Dataset class provides a uniform interface for accessing data, regardless of whether it's stored as files, in memory, in databases, or generated on-the-fly:
 
-```
-Dataset Interface
-┌─────────────────────────────────────┐
-│ __len__()     → "How many samples?" │
-│ __getitem__(i) → "Give me sample i" │
-└─────────────────────────────────────┘
-          ↑                ↑
-     Enables for     Enables indexing
-    loops/iteration   dataset[index]
-```
+| Method | Type Signature | Operational Semantics | Systems Contract |
+| :--- | :--- | :--- | :--- |
+| `__len__()` | `() -> int` | Total sample count $N$ | Enables batch partitioning $\lceil N / B \rceil$ |
+| `__getitem__(idx)` | `(int) -> Any` | Retrieve sample at index $i$ | $O(1)$ random access slicing $0 \le i < N$ |
 
 **Connection to systems**: This abstraction is crucial because it separates *how data is stored* from *how it's accessed*, enabling optimizations like caching, prefetching, and parallel loading.
 """
@@ -264,29 +255,24 @@ if __name__ == "__main__":
 
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ TensorDataset: When Data Lives in Memory
 
 Now let's implement TensorDataset, the most common dataset type for when your data is already loaded into tensors. This is perfect for datasets like MNIST where you can fit everything in memory.
 
 ### Understanding TensorDataset Structure
 
-TensorDataset takes multiple tensors and aligns them by their first dimension (the sample dimension):
+TensorDataset takes multiple tensors and aligns them along axis 0 (the sample dimension):
 
-```
-Input Tensors (aligned by first dimension):
-  Features Tensor        Labels Tensor         Metadata Tensor
-  ┌─────────────────┐   ┌───────────────┐     ┌─────────────────┐
-  │ [1.2, 3.4, 5.6] │   │ 0 (cat)       │     │ "image_001.jpg" │ ← Sample 0
-  │ [2.1, 4.3, 6.5] │   │ 1 (dog)       │     │ "image_002.jpg" │ ← Sample 1
-  │ [3.0, 5.2, 7.4] │   │ 0 (cat)       │     │ "image_003.jpg" │ ← Sample 2
-  │ ...             │   │ ...           │     │ ...             │
-  └─────────────────┘   └───────────────┘     └─────────────────┘
-        (N, 3)               (N,)                   (N,)
+| Sample Index $i$ | Features Tensor $\mathbf{X} \in \mathbb{R}^{N \times 3}$ | Labels Tensor $\mathbf{y} \in \mathbb{R}^{N}$ | Metadata Tensor $\mathbf{m}$ | Dataset Sample `dataset[i]` |
+| :---: | :---: | :---: | :---: | :--- |
+| **0** | $[1.2, 3.4, 5.6]$ | $0$ (cat) | `"image_001.jpg"` | $(\mathbf{x}_0, y_0, m_0)$ |
+| **1** | $[2.1, 4.3, 6.5]$ | $1$ (dog) | `"image_002.jpg"` | $(\mathbf{x}_1, y_1, m_1)$ |
+| **2** | $[3.0, 5.2, 7.4]$ | $0$ (cat) | `"image_003.jpg"` | $(\mathbf{x}_2, y_2, m_2)$ |
+| $\vdots$ | $\vdots$ | $\vdots$ | $\vdots$ | $\vdots$ |
+| **$N-1$** | $\mathbf{x}_{N-1}$ | $y_{N-1}$ | $m_{N-1}$ | $(\mathbf{x}_{N-1}, y_{N-1}, m_{N-1})$ |
 
-Dataset Access:
-  dataset[1] → (Tensor([2.1, 4.3, 6.5]), Tensor(1), "image_002.jpg")
-```
+$$\text{dataset}[i] \longrightarrow \big(\mathbf{X}[i], \mathbf{y}[i], \mathbf{m}[i]\big)$$
 
 ### Why TensorDataset is Powerful
 
@@ -510,7 +496,7 @@ if __name__ == "__main__":
 
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ DataLoader: The Batch Factory
 
 Now we build the DataLoader, the component that transforms individual dataset samples into the batches that neural networks crave. This is where data loading becomes a systems challenge.
@@ -519,42 +505,28 @@ Now we build the DataLoader, the component that transforms individual dataset sa
 
 DataLoader performs a crucial transformation - it collects individual samples and stacks them into batch tensors:
 
-```
-Step 1: Individual Samples from Dataset
-  dataset[0] → (features: [1, 2, 3], label: 0)
-  dataset[1] → (features: [4, 5, 6], label: 1)
-  dataset[2] → (features: [7, 8, 9], label: 0)
-  dataset[3] → (features: [2, 3, 4], label: 1)
+$$\begin{aligned}
+\text{Dataset Samples:} \quad & (\mathbf{x}_i, y_i) = \text{dataset}[i] \\
+\text{Batch Tensors }(B=2): \quad & \mathbf{X}_{\text{batch}} = \begin{bmatrix} \mathbf{x}_0 \\ \mathbf{x}_1 \end{bmatrix} \in \mathbb{R}^{2 \times 3}, \quad \mathbf{y}_{\text{batch}} = \begin{bmatrix} y_0 \\ y_1 \end{bmatrix} \in \mathbb{R}^{2}
+\end{aligned}$$
 
-Step 2: DataLoader Groups into Batch (batch_size=2)
-  Batch 1:
-    features: [[1, 2, 3],    ← Stacked into shape (2, 3)
-               [4, 5, 6]]
-    labels:   [0, 1]         ← Stacked into shape (2,)
-
-  Batch 2:
-    features: [[7, 8, 9],    ← Stacked into shape (2, 3)
-               [2, 3, 4]]
-    labels:   [0, 1]         ← Stacked into shape (2,)
-```
+| Processing Step | Operation | Input Shape | Output Shape | Memory Layout |
+| :--- | :--- | :--- | :--- | :--- |
+| **1. Sample Retrieval** | `[dataset[i] for i in chunk]` | $B \times \text{scalar indices}$ | List of $B$ tuples | Fragmented sample allocations |
+| **2. Collation / Stack** | `np.stack([s[j].data for s in b])` | $B \times (D_1, \dots, D_k)$ | $(B, D_1, \dots, D_k)$ | Contiguous row-major buffer |
 
 ### The Shuffling Process
 
-Shuffling randomizes which samples appear in which batches, crucial for good training:
+Shuffling randomizes which samples appear in which batches, crucial for stochastic gradient descent:
 
-```
-Without Shuffling (epoch 1):          With Shuffling (epoch 1):
-  Batch 1: [sample 0, sample 1]         Batch 1: [sample 2, sample 0]
-  Batch 2: [sample 2, sample 3]         Batch 2: [sample 3, sample 1]
-  Batch 3: [sample 4, sample 5]         Batch 3: [sample 5, sample 4]
+<p align="center">
+  <img src="dataloader_permutation.svg" width="340" alt="Shuffle Permutation Chunking">
+</p>
 
-Without Shuffling (epoch 2):          With Shuffling (epoch 2):
-  Batch 1: [sample 0, sample 1]  ✗      Batch 1: [sample 1, sample 4]  ✓
-  Batch 2: [sample 2, sample 3]  ✗      Batch 2: [sample 0, sample 5]  ✓
-  Batch 3: [sample 4, sample 5]  ✗      Batch 3: [sample 2, sample 3]  ✓
-
-  (Fixed order can introduce bias)     (Different combinations = better learning!)
-```
+| Training Mode | Epoch 1 Batch Sequence | Epoch 2 Batch Sequence | Gradient Variance & Bias |
+| :--- | :--- | :--- | :--- |
+| **Sequential** (`shuffle=False`) | $[s_0, s_1], [s_2, s_3], [s_4, s_5]$ | $[s_0, s_1], [s_2, s_3], [s_4, s_5]$ | Static batch trajectory; high risk of cyclic limit cycles |
+| **Permuted** (`shuffle=True`) | $[s_2, s_0], [s_3, s_1], [s_5, s_4]$ | $[s_1, s_4], [s_0, s_5], [s_2, s_3]$ | Independent stochastic mini-batches; uniform state coverage |
 
 ### DataLoader as a Systems Component
 
@@ -568,15 +540,13 @@ Without Shuffling (epoch 2):          With Shuffling (epoch 2):
 
 ### The DataLoader Algorithm
 
-```
-1. Create indices list: [0, 1, 2, ..., dataset_length-1]
-2. If shuffle=True: randomly shuffle the indices
-3. Group indices into chunks of batch_size
-4. For each chunk:
-   a. Retrieve samples: [dataset[i] for i in chunk]
-   b. Collate samples: stack individual tensors into batch tensors
-   c. Yield the batch tensor tuple
-```
+1. **Initialize Permutation**: Allocate index buffer $\pi = [0, 1, \dots, N-1] \in \mathbb{Z}^N$.
+2. **Epoch Shuffle**: If $\text{shuffle}=\text{True}$, invoke Knuth-Fisher-Yates shuffle on $\pi$.
+3. **Chunk Windows**: Partition $\pi$ into contiguous slices $\mathcal{B}_k = \{\pi_{k B}, \dots, \pi_{(k+1)B - 1}\}$.
+4. **Collate & Yield**: For each batch chunk $\mathcal{B}_k$:
+   - Gather sample records: $\{(\mathbf{x}_i, y_i) \mid i \in \mathcal{B}_k\}$
+   - Collate along axis 0: $\mathbf{X}_k = \text{stack}(\mathbf{x}_i)$, $\mathbf{y}_k = \text{stack}(y_i)$
+   - Yield $(\mathbf{X}_k, \mathbf{y}_k)$ as contiguous tensors.
 
 This transforms the dataset from "access one sample" to "iterate through batches" - exactly what training loops need.
 """
@@ -748,67 +718,38 @@ class DataLoader:
 
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Data Augmentation: Preventing Overfitting Through Variety
 
 Data augmentation is one of the most effective techniques for improving model generalization. By applying random transformations during training, we artificially expand the dataset and force the model to learn robust, invariant features.
 
 ### Why Augmentation Matters
 
-```
-Without Augmentation:                With Augmentation:
-Model sees exact same images         Model sees varied versions
-every epoch                          every epoch
-
-Cat photo #247                       Cat #247 (original)
-Cat photo #247                       Cat #247 (flipped)
-Cat photo #247                       Cat #247 (cropped left)
-Cat photo #247                       Cat #247 (cropped right)
-     ↓                                    ↓
-Model memorizes position             Model learns "cat-ness"
-Overfits to training set             Generalizes to new cats
-```
+| Training Regime | Input Sequence Across Epochs | Optimization Dynamic | Generalization Result |
+| :--- | :--- | :--- | :--- |
+| **No Augmentation** | Sample $i$ static across all epochs | Memorizes spatial pixel coordinates | High training accuracy, low validation accuracy |
+| **With Augmentation** | Flipped, shifted, cropped variants of $i$ | Invariant feature manifold learning | Robust generalization to unseen test samples |
 
 ### Common Augmentation Strategies
 
-For CIFAR-10 and similar image datasets:
+$$\begin{aligned}
+\mathbf{\text{RandomHorizontalFlip:}} \quad & I_{\text{flipped}}[c, y, x] = I[c, y, W - 1 - x] \quad \text{with probability } p = 0.5 \\
+\mathbf{\text{RandomCrop:}} \quad & I_{\text{padded}} = \text{pad}(I, p), \quad I_{\text{crop}} = I_{\text{padded}}[c, \text{top}:\text{top}+H, \text{left}:\text{left}+W]
+\end{aligned}$$
 
-```
-RandomHorizontalFlip (50% probability):
-┌──────────┐     ┌──────────┐
-│ cat →    │  →  │    ← cat │
-│          │     │          │
-└──────────┘     └──────────┘
-Cars, cats, dogs look similar when flipped!
-
-RandomCrop with Padding:
-┌──────────┐     ┌────────────┐     ┌──────────┐
-│   cat    │  →  │░░░░░░░░░░░░│  →  │  cat     │
-│          │     │░░  cat   ░░│     │          │
-└──────────┘     │░░░░░░░░░░░░│     └──────────┘
-  Original       └────────────┘       Random crop
-                   Pad edges         (back to 32×32)
-                  (with zeros)
-```
+| Transform | Coordinate Mapping | Spatial Dimension Effect | Invariant Semantics |
+| :--- | :--- | :--- | :--- |
+| **RandomHorizontalFlip** | $x \mapsto W - 1 - x$ | Unchanged $(C, H, W)$ | Reflection invariance (animals, vehicles, scenes) |
+| **RandomCrop** | $(y, x) \mapsto (y + \delta_y, x + \delta_x)$ | $(C, H + 2p, W + 2p) \to (C, H, W)$ | Translation invariance (decentering objects) |
 
 ### Training vs Evaluation
 
-**Critical**: Augmentation applies ONLY during training!
+> **Important:** Augmentation applies **only during training**. During evaluation and testing, transforms must be deterministic to provide reproducible benchmarks.
 
-```
-Training:                              Evaluation:
-┌─────────────────┐                   ┌─────────────────┐
-│ Original Image  │                   │ Original Image  │
-│      ↓          │                   │      ↓          │
-│ Random Flip     │                   │ (no transforms) │
-│      ↓          │                   │      ↓          │
-│ Random Crop     │                   │ Direct to Model │
-│      ↓          │                   └─────────────────┘
-│ To Model        │
-└─────────────────┘
-```
-
-Why? During evaluation, we want consistent, reproducible predictions. Augmentation during test would add randomness to predictions, making them unreliable.
+| Phase | Pipeline Configuration | Determinism & Systems Objective |
+| :--- | :--- | :--- |
+| **Training** | $\text{Image} \longrightarrow \text{RandomFlip} \longrightarrow \text{RandomCrop} \longrightarrow \text{Model}$ | Stochastic perturbation expands data coverage |
+| **Evaluation / Inference** | $\text{Image} \longrightarrow \text{Model}$ | Deterministic, reproducible scoring without added noise |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "augmentation-transforms", "solution": true}
@@ -913,26 +854,27 @@ class RandomHorizontalFlip:
         ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### Padding an Image for Random Cropping
 
 Before we can randomly crop an image, we need to pad it with zeros on all sides.
 This creates extra space so that when we crop back to the original size, we get
 a slightly shifted version of the image.
 
-```
-Original (H, W):          Padded (H+2p, W+2p):
-┌──────────┐              ┌──────────────────┐
-│  image   │    pad=4     │ 0 0 0 0 0 0 0 0  │
-│  data    │  ────────>   │ 0  image      0  │
-│          │              │ 0  data       0  │
-└──────────┘              │ 0 0 0 0 0 0 0 0  │
-                          └──────────────────┘
-```
+$$\begin{aligned}
+\mathbf{\text{Original Spatial Plane:}} \quad & \mathbf{I} \in \mathbb{R}^{H \times W} \\
+\mathbf{\text{Zero-Padded Plane:}} \quad & \mathbf{I}_{\text{pad}} \in \mathbb{R}^{(H + 2p) \times (W + 2p)}, \quad \mathbf{I}_{\text{pad}}[y, x] = \begin{cases} \mathbf{I}[y - p, x - p] & \text{if } p \le y < H+p \text{ and } p \le x < W+p \\ 0 & \text{otherwise} \end{cases}
+\end{aligned}$$
 
-The tricky part is handling different image formats: (H, W) for grayscale,
-(C, H, W) for channels-first color, and (H, W, C) for channels-last color.
-We must pad ONLY spatial dimensions, never the channel dimension.
+| Image Layout | Raw Shape | Padded Shape ($p$) | Unmodified Axis |
+| :--- | :--- | :--- | :--- |
+| **Grayscale (`HW`)** | $(H, W)$ | $(H + 2p, W + 2p)$ | None |
+| **Channels-First (`CHW`)** | $(C, H, W)$ | $(C, H + 2p, W + 2p)$ | Axis 0 ($C$) |
+| **Channels-Last (`HWC`)** | $(H, W, C)$ | $(H + 2p, W + 2p, C)$ | Axis 2 ($C$) |
+
+The tricky part is handling different image formats: $(H, W)$ for grayscale,
+$(C, H, W)$ for channels-first color, and $(H, W, C)$ for channels-last color.
+We must pad **only spatial dimensions**, never the channel dimension.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "dataloader-pad-image", "solution": true}
@@ -1051,22 +993,22 @@ if __name__ == "__main__":
 
 
 # %% [markdown]
-"""
+r"""
 ### Sampling a Random Crop Region
 
 Once the image is padded, we need to pick a random top-left corner for the crop.
 The valid range depends on the padded size minus the target crop size:
 
-```
-Padded image (H+2p, W+2p):
-┌──────────────────────┐
-│  ╔══════════╗        │  top is randomly chosen from
-│  ║  crop    ║        │  [0, padded_h - target_h]
-│  ║  region  ║        │
-│  ╚══════════╝        │  left is randomly chosen from
-│                      │  [0, padded_w - target_w]
-└──────────────────────┘
-```
+$$\begin{aligned}
+\text{Valid vertical offset:} \quad & \text{top} \sim \mathcal{U}\{0, \, H_{\text{pad}} - H_{\text{target}}\} \\
+\text{Valid horizontal offset:} \quad & \text{left} \sim \mathcal{U}\{0, \, W_{\text{pad}} - W_{\text{target}}\}
+\end{aligned}$$
+
+| Parameter | Calculation | Concrete Example ($40 \times 40 \to 32 \times 32$) |
+| :--- | :--- | :--- |
+| **Max Vertical Offset** | $H_{\text{pad}} - H_{\text{target}}$ | $32 + 2(4) - 32 = 8 \implies \text{top} \in \{0, \dots, 8\}$ |
+| **Max Horizontal Offset** | $W_{\text{pad}} - W_{\text{target}}$ | $32 + 2(4) - 32 = 8 \implies \text{left} \in \{0, \dots, 8\}$ |
+| **Target Slices** | $y \in [\text{top}, \text{top} + H_{\text{target}}]$ | Slices exactly $32$ pixels along vertical axis |
 
 This is a pure random sampling operation — no data manipulation, just
 computing two random integers within valid bounds.
@@ -1147,16 +1089,13 @@ if __name__ == "__main__":
 
 
 # %% [markdown]
-"""
+r"""
 ### RandomCrop — Composing Pad, Sample, and Extract
 
 Now we combine our two helpers into the complete RandomCrop transform.
 The `__call__` method simply orchestrates three clear steps:
 
-```
-Input image ──> _pad_image() ──> _random_crop_region() ──> slice ──> Output
-   (H, W)       (H+2p, W+2p)      (top, left)            (H, W)
-```
+$$\underbrace{\mathbf{I}}_{\mathbb{R}^{H \times W}} \xrightarrow{\text{\_pad\_image}} \underbrace{\mathbf{I}_{\text{pad}}}_{\mathbb{R}^{(H+2p) \times (W+2p)}} \xrightarrow{\text{\_random\_crop\_region}} \underbrace{(\text{top}, \text{left})}_{\text{Sampling}} \xrightarrow{\text{slice}} \underbrace{\mathbf{I}_{\text{crop}}}_{\mathbb{R}^{H \times W}}$$
 
 Each step does ONE thing. The composition function wires them together.
 """
@@ -1539,7 +1478,7 @@ if __name__ == "__main__":
 
 
 # %% [markdown]
-"""
+r"""
 ## 🔧 Integration: Working with Real Datasets
 
 Now that you've built the DataLoader abstraction, you're ready to use it with real data!
@@ -1548,55 +1487,59 @@ Now that you've built the DataLoader abstraction, you're ready to use it with re
 
 TinyTorch separates **mechanics** (this module) from **application** (examples/milestones):
 
-```
-Module 05 (DataLoader)          Examples & Milestones
-┌──────────────────────┐       ┌────────────────────────┐
-│ Dataset abstraction  │       │ Real MNIST digits      │
-│ TensorDataset impl   │  ───> │ CIFAR-10 images        │
-│ DataLoader batching  │       │ Custom datasets        │
-│ Shuffle & iteration  │       │ Download utilities     │
-└──────────────────────┘       └────────────────────────┘
-   (Learn mechanics)              (Apply to real data)
-```
+| Layer | Scope | Key Abstractions & Datasets | Systems Purpose |
+| :--- | :--- | :--- | :--- |
+| **Mechanics** | `tinytorch.core.dataloader` | `Dataset`, `TensorDataset`, `DataLoader` | Core iteration, chunking, and memory layout |
+| **Application** | `milestones/` & `datasets/` | `TinyDigits` ($8 \times 8$), MNIST ($28 \times 28$), CIFAR-10 ($32 \times 32 \times 3$) | End-to-end model training workflows |
 
 ### Understanding Image Data
 
 **What does image data actually look like?**
 
-Images are just 2D arrays of numbers (pixels). Here are actual 8×8 handwritten digits:
+Images are 2D arrays of numbers (pixel intensities). Here are actual $8 \times 8$ grayscale handwritten digits:
 
-```
-Digit "5" (8×8):        Digit "3" (8×8):        Digit "8" (8×8):
- 0  0 12 13  5  0  0  0   0  0 11 12  0  0  0  0   0  0 10 14  8  1  0  0
- 0  0 13 15 10  0  0  0   0  2 16 16 16  7  0  0   0  0 16 15 15  9  0  0
- 0  3 15 13 16  7  0  0   0  0  8 16  8  0  0  0   0  0 15  5  5 13  0  0
- 0  8 13  6 15  4  0  0   0  0  0 12 13  0  0  0   0  1 16  5  5 13  0  0
- 0  0  0  6 16  5  0  0   0  0  1 16 15  9  0  0   0  6 16 16 16 16  1  0
- 0  0  5 15 16  9  0  0   0  0 14 16 16 16  7  0   1 16  3  1  1 15  1  0
- 0  0  9 16  9  0  0  0   0  5 16  8  8 16  0  0   0  9 16 16 16 15  0  0
- 0  0  0  0  0  0  0  0   0  3 16 16 16 12  0  0   0  0  0  0  0  0  0  0
-
-Visual representation:
-░█████░          ░█████░          ░█████░
-░█░░░█░          ░░░░░█░          █░░░░█░
-░░░░█░░          ░░███░░          ░█████░
-░░░█░░░          ░░░░█░░          █░░░░█░
-░░█░░░░          ░█████░          ░█████░
-```
+$$\begin{array}{ccc}
+\mathbf{\text{Digit 5}} & \mathbf{\text{Digit 3}} & \mathbf{\text{Digit 8}} \\
+\begin{bmatrix}
+0 & 0 & 12 & 13 & 5 & 0 & 0 & 0 \\
+0 & 0 & 13 & 15 & 10 & 0 & 0 & 0 \\
+0 & 3 & 15 & 13 & 16 & 7 & 0 & 0 \\
+0 & 8 & 13 & 6 & 15 & 4 & 0 & 0 \\
+0 & 0 & 0 & 6 & 16 & 5 & 0 & 0 \\
+0 & 0 & 5 & 15 & 16 & 9 & 0 & 0 \\
+0 & 0 & 9 & 16 & 9 & 0 & 0 & 0 \\
+0 & 0 & 0 & 0 & 0 & 0 & 0 & 0
+\end{bmatrix} &
+\begin{bmatrix}
+0 & 0 & 11 & 12 & 0 & 0 & 0 & 0 \\
+0 & 2 & 16 & 16 & 16 & 7 & 0 & 0 \\
+0 & 0 & 8 & 16 & 8 & 0 & 0 & 0 \\
+0 & 0 & 0 & 12 & 13 & 0 & 0 & 0 \\
+0 & 0 & 1 & 16 & 15 & 9 & 0 & 0 \\
+0 & 0 & 14 & 16 & 16 & 16 & 7 & 0 \\
+0 & 5 & 16 & 8 & 8 & 16 & 0 & 0 \\
+0 & 3 & 16 & 16 & 16 & 12 & 0 & 0
+\end{bmatrix} &
+\begin{bmatrix}
+0 & 0 & 10 & 14 & 8 & 1 & 0 & 0 \\
+0 & 0 & 16 & 15 & 15 & 9 & 0 & 0 \\
+0 & 0 & 15 & 5 & 5 & 13 & 0 & 0 \\
+0 & 1 & 16 & 5 & 5 & 13 & 0 & 0 \\
+0 & 6 & 16 & 16 & 16 & 16 & 1 & 0 \\
+1 & 16 & 3 & 1 & 1 & 15 & 1 & 0 \\
+0 & 9 & 16 & 16 & 16 & 15 & 0 & 0 \\
+0 & 0 & 0 & 0 & 0 & 0 & 0 & 0
+\end{bmatrix}
+\end{array}$$
 
 **Shape transformations in DataLoader:**
 
-```
-Individual Sample (from Dataset):
-  image: (8, 8)      ← Single 8×8 image
-  label: scalar      ← Single digit (0-9)
-
-After DataLoader batching (batch_size=32):
-  images: (32, 8, 8)  ← Stack of 32 images
-  labels: (32,)       ← Array of 32 labels
+$$\begin{aligned}
+\mathbf{\text{Individual Sample (from Dataset):}} \quad & \mathbf{x}_i \in \mathbb{R}^{8 \times 8}, \quad y_i \in \{0, \dots, 9\} \\
+\mathbf{\text{Collated Batch (batch size } B = 32\text{):}} \quad & \mathbf{X}_{\text{batch}} \in \mathbb{R}^{32 \times 8 \times 8}, \quad \mathbf{y}_{\text{batch}} \in \mathbb{R}^{32}
+\end{aligned}$$
 
 This is what your model sees during training!
-```
 
 ### Quick Start with Real Data
 
@@ -1644,7 +1587,7 @@ You've built the **data loading infrastructure** that powers all modern ML:
 
 
 # %% [markdown]
-"""
+r"""
 ### Common Pitfalls and Best Practices
 
 Before we move to integration testing, let's cover common mistakes students and practitioners make with data loading:
@@ -1703,16 +1646,13 @@ def forward(self, x):
 ### Best Practices for Production
 
 **1. Batch Size Selection Strategy**
-```
-Start with: 32 (almost always works)
-↓
-Monitor GPU memory usage
-↓
-If memory < 80%: double to 64
-If memory > 90%: keep at 32
-↓
-Repeat until you find the sweet spot (usually 32-256)
-```
+
+| Step | Action | Decision Criterion | Target Outcome |
+| :---: | :--- | :--- | :--- |
+| **1** | **Initialize Baseline** | Start at $B = 32$ | Safe baseline for modern accelerators |
+| **2** | **Profile Resident Memory** | Measure peak allocator footprint | Determine device memory headroom |
+| **3** | **Scale Batch Dimension** | Memory $< 75\% \implies B \leftarrow 2B$<br>Memory $> 85\% \implies$ keep or reduce | Maximize compute density while avoiding OOM |
+| **4** | **Convergence Tuning** | Adjust learning rate proportionally ($\eta \propto \sqrt{B}$ or $B$) | Maintain optimization stability |
 
 **2. Data Augmentation Placement**
 - **Option A:** In Dataset's `__getitem__` (random crop, flip, etc.)
@@ -1823,73 +1763,51 @@ if __name__ == "__main__":
     test_unit_training_integration()
 
 # %% [markdown]
-"""
+r"""
 ## 📊 Systems Analysis: Data Pipeline Performance
 
 Now let's understand data pipeline performance like production ML engineers. Understanding where time and memory go is crucial for building systems that scale.
 
+<p align="center">
+  <img src="dataloader_copies_pipeline.svg" width="680" alt="Host Memory Copies vs Pinned DMA Double-Buffering">
+</p>
+
 ### The Performance Question: Where Does Time Go?
 
-In a typical training step, time is split between data loading and computation:
+In a typical training step, time is split between host data preparation and accelerator computation:
 
-```
-Processing Step Breakdown:
-┌─────────────────────────────────────────────────────────────┐
-│ Data Loading             │ Computation                      │
-│ ████████████████         │ ██████████████████████           │
-│ 40ms                     │ 60ms                             │
-└─────────────────────────────────────────────────────────────┘
-              100ms total per step
+$$T_{\text{step}} = T_{\text{load}} + T_{\text{compute}}$$
 
-Bottleneck Analysis:
-- If data loading > computation: "Data starved" (CPU bottleneck)
-- If computation > data loading: "Compute bound" (GPU bottleneck)
-- Ideal: Data loading ≈ computation time (balanced pipeline)
-```
+| Pipeline Regime | Latency Relation | System Bottleneck | Mitigation Strategy |
+| :--- | :--- | :--- | :--- |
+| **Data-Starved (I/O Bound)** | $T_{\text{load}} > T_{\text{compute}}$ | Host CPU / Disk I/O | Prefetching, background workers, pinned DMA memory |
+| **Compute-Bound** | $T_{\text{compute}} > T_{\text{load}}$ | Accelerator ALU / Tensor Cores | Mixed-precision (FP16/BF16), kernel fusion |
+| **Balanced Pipeline** | $T_{\text{load}} \approx T_{\text{compute}}$ | Overlapped Execution | Full saturation of both CPU pipeline and GPU compute |
 
 ### Memory Scaling: The Batch Size Trade-off
 
-Batch size creates a fundamental trade-off in memory vs efficiency:
+Batch size creates a fundamental trade-off in resident memory versus hardware execution efficiency:
 
-```
-Batch Size Impact:
+$$\text{Batch Memory Footprint} = B \times H \times W \times C \times 4\text{ bytes (float32)}$$
 
-Small Batches (batch_size=8):
-┌─────────────────────────────────────────┐
-│ Memory: 8 × 28 × 28 × 4 bytes = 25KB    │ ← Low memory
-│ Overhead: High (many small batches)     │ ← High overhead
-│ GPU Util: Poor (underutilized)          │ ← Poor efficiency
-└─────────────────────────────────────────┘
-
-Large Batches (batch_size=512):
-┌─────────────────────────────────────────┐
-│ Memory: 512 × 28 × 28 × 4 bytes = 1.6MB │ ← Higher memory
-│ Overhead: Low (fewer large batches)     │ ← Lower overhead
-│ GPU Util: Good (well utilized)          │ ← Better efficiency
-└─────────────────────────────────────────┘
-```
+| Batch Size $B$ | Memory Footprint | Bytes per Batch | Host Loop Overhead | Accelerator Utilization |
+| :---: | :---: | :---: | :--- | :--- |
+| **$B = 8$** | $25.1\text{ KB}$ | $8 \times 3{,}136\text{ B}$ | High (many tiny host iterations) | Low (ALU warps largely idle) |
+| **$B = 64$** | $200.7\text{ KB}$ | $64 \times 3{,}136\text{ B}$ | Moderate (balanced loop overhead) | High (saturates streaming multiprocessors) |
+| **$B = 512$** | $1.61\text{ MB}$ | $512 \times 3{,}136\text{ B}$ | Minimal (few large matrix multiplications) | Maximum (saturates peak memory bandwidth) |
 
 ### Shuffling Overhead Analysis
 
-Shuffling seems simple, but let's measure its real cost:
+Shuffling seems simple, but let's measure its real systems cost:
 
-```
-Shuffle Operation Breakdown:
+| Operation | Complexity | Memory Allocation | Implementation Mechanism |
+| :--- | :---: | :---: | :--- |
+| **1. Index Generation** | $O(N)$ | $\approx 36 N\text{ bytes}$ | Allocates `list(range(N))` in CPython |
+| **2. Fisher-Yates Shuffle** | $O(N)$ | $0\text{ bytes}$ | In-place random pointer swapping |
+| **3. Sample Access** | $O(1)$ | $0\text{ bytes}$ | Fast pointer index into memory |
+| **4. Collation Buffer** | $O(B \times D)$ | $4 B D\text{ bytes}$ | Contiguous float32 array allocated per batch |
 
-1. Index Generation:    O(n) - create [0, 1, 2, ..., n-1]
-2. Shuffle Operation:   O(n) - randomize the indices
-3. Sample Access:       O(1) per sample - dataset[shuffled_idx]
-
-Memory Impact:
-- Both modes allocate list(range(n)): O(n) index storage
-- On typical 64-bit CPython: ~8 bytes per pointer + ~28 bytes per integer
-- Shuffle mutates this list in place; it does not allocate a second index list
-
-For 50,000 samples: approximately 36 × 50,000 = 1.8MB for indices
-Exact object sizes depend on the Python runtime.
-```
-
-The key insight: shuffling overhead is typically negligible compared to the actual data loading and tensor operations.
+For $50,000$ samples: approximately $36 \times 50,000 \approx 1.8\text{ MB}$ for indices, which is negligible compared to model parameters and feature tensors.
 
 ### Pipeline Bottleneck Identification
 
@@ -2143,7 +2061,7 @@ def test_module():
     print("Run: tito module complete 05")
 
 # %% [markdown]
-"""
+r"""
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of data loading and its systems implications:
@@ -2168,17 +2086,10 @@ Answer these to deepen your understanding of data loading and its systems implic
 ### Question 2: To Shuffle or Not to Shuffle?
 **Question**: You're training on a medical dataset where samples are ordered by patient (first 1000 samples = Patient A, next 1000 = Patient B, etc.). Consider these scenarios:
 
-**Scenario 1: Training with shuffle=True**
-```
-Epoch 1 batches: [Patient B, Patient C, Patient A, Patient D...]
-Epoch 2 batches: [Patient D, Patient A, Patient C, Patient B...]
-```
-
-**Scenario 2: Training with shuffle=False**
-```
-Epoch 1 batches: [Patient A, Patient A, Patient A, Patient B...]
-Epoch 2 batches: [Patient A, Patient A, Patient A, Patient B...]
-```
+| Scenario | Epoch 1 Batch Composition | Epoch 2 Batch Composition | Empirical Risk |
+| :--- | :--- | :--- | :--- |
+| **Scenario 1: `shuffle=True`** | $[\text{Pt B}, \text{Pt C}, \text{Pt A}, \dots]$ | $[\text{Pt D}, \text{Pt A}, \text{Pt C}, \dots]$ | Uniform patient distribution per gradient step |
+| **Scenario 2: `shuffle=False`** | $[\text{Pt A}, \text{Pt A}, \text{Pt A}, \dots]$ | $[\text{Pt A}, \text{Pt A}, \text{Pt A}, \dots]$ | High ordering bias; catastrophic forgetting of earlier patients |
 
 **What happens in Scenario 2?**
 - The model sees 30+ batches of only Patient A's data first
@@ -2195,11 +2106,11 @@ Epoch 2 batches: [Patient A, Patient A, Patient A, Patient B...]
 ### Question 3: Data Loading Bottlenecks
 **Question**: Your program reports these timings per batch:
 
-```
-Data loading:    45ms
-Computation:     75ms
-Total:          120ms
-```
+| Component | Measured Latency | Fractional Time | Primary System Source |
+| :--- | :---: | :---: | :--- |
+| **Data Loading** | $45\text{ ms}$ | $37.5\%$ | Disk I/O, image decoding, augmentation, collation |
+| **Model Computation** | $75\text{ ms}$ | $62.5\%$ | Matrix multiplication forward and backward pass |
+| **Total Step** | $120\text{ ms}$ | $100.0\%$ | End-to-end iteration latency |
 
 **Where's the bottleneck?** Data loading takes 37.5% of the time!
 
