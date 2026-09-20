@@ -191,30 +191,7 @@ Schedulers operating at the supervisor level must make rapid dispatch decisions 
    $$\mathtt{tokens\_prompt} + \mathtt{tokens\_decode} \ge T_{\max} \quad \lor \quad \mathtt{step\_count} \ge S_{\max}$$
    If an invariant is breached, the supervisor denies dispatch, transitions the ACB to `TERMINATED`, and stamps the `exit_code` with an error indicating an exhausted budget, completely circumventing redundant neural network computation.
 
-```text
-                      +-----------------------------+
-                      |   Scheduler Run Queue       |
-                      |   [ACB_1]  [ACB_4]  [ACB_7] |
-                      +--------------+--------------+
-                                     |
-                                     | inspects (phase == RUNNABLE)
-                                     v
-                      +-----------------------------+
-                      |  Priority Scoring Engine    |
-                      |  P = f(tokens, cost, SLO)   |
-                      +--------------+--------------+
-                                     |
-                      +--------------+--------------+
-                      |                             |
-                      v                             v
-           [Passes Resource Caps]        [Violates Token Limit]
-                      |                             |
-                      v                             v
-           +--------------------+        +--------------------+
-           | Dispatch to Worker |        | Transition Phase:  |
-           | Inference Pipeline |        | TERMINATED         |
-           +--------------------+        +--------------------+
-```
+![**Scheduler Run Queue and Priority Scoring Engine**: The supervisory control plane inspects candidate Agent Control Blocks in host memory, filters for runnable trajectories, calculates fair-share priorities across multi-attribute execution vectors, and enforces hard resource caps prior to dispatching workloads to inference worker pipelines.](images/svg/fig-vol3-scheduler-dispatch.svg){#fig-vol3-scheduler-dispatch}
 
 Beyond local scheduling, the ACB serves as the serialization anchor for process migration. In distributed or elastic agent clusters, physical host machines must occasionally be drained for maintenance, or compute-heavy trajectories must be rebalanced across nodes. Migrating an executing trajectory does not require freezing and shipping an entire virtual machine or capturing opaque operating system core dumps.
 
@@ -432,6 +409,8 @@ In this incident, the sandbox worker suffered a kernel lockup that delayed its r
 Had the control plane lacked a formal finite state machine, this late packet would have reactivated the agent process, potentially dispatching further actions against a broken execution context. The strict mathematical boundaries of the trajectory lifecycle ensure that no matter how non-deterministic or delayed the underlying computational substrate may be, the host control plane remains completely deterministic and secure.
 
 ---
+
+## Signal Trapping Mechanisms {#sec-vol3-controlplane-signals}
 
 The formal state machine establishes the valid operational boundaries of a trajectory, but it assumes that state transitions are driven by predictable internal events: prefill completions, decode ends, tool dispatches, and observation arrivals. In production environments, however, the supervisory control plane must continuously intercept unpredictable, external asynchronous events. A human operator may issue an emergency cancellation (`SIGINT`), a system resource manager may demand an immediate execution pause (`SIGPAUSE`) to defragment GPU memory, or an automated policy monitor may detect a runaway loop and demand instant process termination (`SIGKILL`). How does the runtime control plane deliver these asynchronous external events to an active, suspended, or preempted agent without violating atomic turn boundaries or leaving orphaned child sandboxes?
 
@@ -1151,20 +1130,7 @@ In classical computability theory, Turing proved that no general algorithm can d
 
 A common architectural fallacy assumes that this limitation can be mitigated through prompt engineering—instructing the model to "stop when the task is complete," "avoid unnecessary tool invocations," or "stay within a five-dollar budget." This approach violates the principle of modularity and protection ($A=0$). First, an autoregressive language model has no native mechanism for floating-point arithmetic or token self-counting during generation; it cannot observe its own token consumption while generating a sequence. Second, under stochastic distribution shift or sustained tool execution errors, the probability of emitting a terminal stop token $P(y_{\text{term}} \mid \mathbf{c}_k)$ frequently decays toward zero. When an external tool returns an unexpected stack trace or an environmental failure, the error tokens injected into context $\mathbf{c}_k$ shift the model's conditional distribution away from task completion and toward error recovery. The model becomes trapped in a localized epistemic basin, generating speculative tool invocations that produce further error outputs, reinforcing the non-halting attractor.
 
-```text
-+---------------------------------------------------------------------------------------+
-|                       THE DIVERGENT EPISTEMIC ATTRACTOR CYCLE                         |
-|                                                                                       |
-|   +-------------------+      Tool Error       +-------------------+                   |
-|   | Stochastic Decode | --------------------> | Context Injection |                   |
-|   |  P(a_k | c_k)     |                       | o_k = Error Trace |                   |
-|   +-------------------+                       +-------------------+                   |
-|             ^                                           |                             |
-|             |        Distribution Shift Towards         |                             |
-|             +--------- Speculative Recovery <-----------+                             |
-|                    P(<|im_end|> | c_k) -> 0                                           |
-+---------------------------------------------------------------------------------------+
-```
+![**The Divergent Epistemic Attractor Cycle**: When environmental faults inject error tokens into the context buffer, conditional probability mass shifts away from terminal stop tokens toward speculative recovery, trapping unconstrained agents in non-halting loops that must be broken by out-of-band supervisory resource ceilings.](images/svg/fig-vol3-epistemic-attractor-cycle.svg){#fig-vol3-epistemic-attractor-cycle}
 
 Furthermore, prompt-level constraints suffer from catastrophic context displacement. As long-horizon trajectories progress across dozens of turns, the agent's context window fills with thousands of lines of compiler outputs, file diffs, and database responses. Because attention weights over early system instructions decay as context length increases, soft natural-language budget constraints are routinely overwritten or ignored. Saltzer, Reed, and Clark's End-to-End Argument dictates that invariant closure cannot be maintained by the unprivileged endpoint; loop termination is an end-to-end supervisory responsibility that must be guaranteed by the external runtime control plane. The supervisor must measure physical consumption directly through operating system primitives and network accounting hooks, severing execution out-of-band when quantitative limits are breached.
 

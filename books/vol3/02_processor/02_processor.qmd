@@ -207,7 +207,7 @@ $$S \le S_{\max} - K_{\max}$$
 
 If an unmanaged context ingestion pipeline pushes $S$ beyond $S_{\max} - K_{\max}$, the inference runtime encounters a hard truncation boundary. Once the cumulative sequence length $S + K$ reaches $S_{\max}$, the autoregressive decode loop halts unconditionally, setting its completion status to a length-exhausted state (`finish_reason == "length"`).
 
-```
+```json
 {"tool": "execute_command", "command": "find /var/log -name '*.log' -exec grep -H 'FATAL' {} \;
 ```
 
@@ -251,7 +251,7 @@ $$\text{Mem}_{\text{KV}}(S) = S \cdot \text{Mem}_{\text{KV,token}}$$
 
 This linear memory scaling creates an unforgiving systems constraint: on accelerator hardware, context length translates directly into physical capacity saturation.
 
-::: {#nbk-02-kv-cache-memory-explosion-in .callout-notebook title="KV Cache Memory Explosion in a 128k Long-Context Serving Node"}
+::: {#exmp-02-kv-cache-memory-explosion .callout-example title="KV Cache Memory Explosion in a 128k Long-Context Serving Node"}
 Consider an agentic coding assistant deployed on a frontier model whose architecture matches Llama-3-70B. The network parameters are:
 
 - Layer depth: $L = 80$
@@ -487,7 +487,7 @@ This divergence yields a failure model that is uniquely dangerous to computer sy
 
 Consider the concrete failure trace below, where a model generates a candidate configuration patch with high statistical confidence, yet invents a non-existent parameter:
 
-```
+```bash
 $ pydantic-validator validate --schema deploy_schema.json --input candidate.json
 ValidationError: 1 validation error for DeployConfig
 worker_threads
@@ -762,7 +762,7 @@ Because $p_{t, i} = 0$ for every token outside $\mathcal{V}_{\text{valid}}(q_t)$
 
 While the theoretical formulation of logit masking is straightforward, implementing it efficiently exposes severe hardware latency bottlenecks. In a naive serving architecture, the host CPU supervises grammar transitions externally. At each decode iteration, the accelerator completes its matrix-vector multiplication (GEMV), writes the sampled token ID to unified host-device memory, and issues an interrupt across the PCIe bus. A host runtime process receives the token, updates the automaton state, identifies $\mathcal{V}_{\text{valid}}(q_{t+1})$, packs the legal token IDs into a mask, and transfers the mask back across PCIe to device memory before the next forward pass can proceed.
 
-```
+```text
 Host CPU:        [ Update State ] -> [ Build Bitmask ] --( PCIe DMA )--+
                         ^                                               |
                         | ( PCIe Interrupt )                            v
@@ -836,7 +836,7 @@ Beyond the syntactic divide, rigid grammar constraints introduce a severe failur
 
 If the host runtime binds this model to a strict output schema that lacks explicit error or unknown states—for example, requiring an immediate JSON object containing `{"customer_id": int, "credit_score": int}`—the masking engine forcibly sets the logits of all explanatory, conversational, or error-signaling tokens to $-\infty$. The model's probability distribution is artificially truncated, leaving only the tokens that satisfy the structural schema.
 
-```
+```text
 Unconstrained Distribution:
   "Error: ID not found"   [====================] (p = 0.82)
   "{"                     [==]                   (p = 0.12)
@@ -956,7 +956,7 @@ On-chip SRAM cache memory on modern accelerators is physically constrained by si
 
 To generate a single output token, the accelerator must transfer the entire 70-gigabyte model across the bus, load the weights into local registers, compute the inner products with the single token activation vector, and discard the weights from local register storage to make room for the subsequent layer's parameter tensors. To generate the next token, the hardware repeats the entire sequence from scratch.
 
-::: {#nbk-02-the-roofline-bound-on-single-token .callout-notebook title="The Roofline Bound on Single-Token Generation"}
+::: {#exmp-02-roofline-bound .callout-example title="The Roofline Bound on Single-Token Generation"}
 Consider a foundation model with $P = 70 \times 10^9$ parameters quantized to 8-bit precision (FP8, storing 1 byte per parameter, yielding an in-memory footprint of $70 \times 10^9\text{ bytes}$). The model executes on an accelerator with a peak memory bandwidth of $\beta = 3.35\text{ TB/s}$ ($3.35 \times 10^{12}\text{ bytes/s}$) and a peak matrix compute ceiling of $\pi = 989\text{ TFLOP/s}$ ($9.89 \times 10^{14}\text{ FLOP/s}$). We seek to calculate the theoretical minimum inter-token latency for an agent running at batch size $B = 1$.
 
 First, calculate the time required purely to shuttle the model parameters across the memory bus from HBM into SRAM:
@@ -992,7 +992,7 @@ For an autonomous agent, however, service-level batching introduces an acute sys
 
 Because the prompt for step $t+1$ depends strictly on the empirical side effects of the tool invoked at step $t$, the agent cannot pre-generate future tokens or parallelize across successive steps of its own trajectory. Along its own execution path, the agent operates at an irreducible batch size of $B = 1$.
 
-```
+```text
 Interactive Agent Trajectory (Unamortized Memory Shuttle, B=1):
 Step t:   [Prompt Prefill (GEMM)] -> [Decode Action (GEMV Shuttle: 20.9 ms/tok)] -> [Tool Exec]
                                                                                      |
