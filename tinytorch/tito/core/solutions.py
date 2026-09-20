@@ -28,6 +28,9 @@ from typing import Dict, List, Tuple
 SOLUTION_BEGIN_MARKER = "### BEGIN SOLUTION"
 SOLUTION_END_MARKER = "### END SOLUTION"
 SOLUTION_ROLE_RE = re.compile(r"\brole=[\"']?([A-Za-z0-9_-]+)")
+# The exercise briefing MODULE_ANATOMY.md section 4 fixes to the docstring tail.
+SCAFFOLD_MARKER_RE = re.compile(r"[ \t]*(TODO|APPROACH|EXAMPLE|HINTS?)\b[:\s]")
+DOCSTRING_RE = re.compile(r"(?P<q>\"{3}|'{3})(?P<body>.*?)(?P=q)", re.DOTALL)
 RELEASE_TIERS = ("student", "challenge", "instructor")
 VALID_SOLUTION_ROLES = {"core", "scaffold", "challenge", "instructor"}
 
@@ -53,12 +56,47 @@ def solution_role_action(role: str, release_tier: str) -> str:
     return "strip" if role == "core" else "keep"
 
 
+def strip_exercise_scaffold(source: str) -> str:
+    """Drop the ``TODO``/``APPROACH``/``EXAMPLE``/``HINT`` tail from docstrings.
+
+    That scaffold exists to brief a student on work they are about to do. In a
+    cell whose every region is kept pre-solved, the work is already done, so the
+    scaffold reads as an instruction to implement code that sits right beneath
+    it. MODULE_ANATOMY.md section 4 fixes the scaffold as the tail of the
+    docstring (``TODO``, ``APPROACH``, then optionally ``EXAMPLE`` and
+    ``HINT``), so truncating at the first of those markers keeps the
+    descriptive summary and removes only the briefing.
+
+    2026-09-20: the student release carried 108 pre-solved cells whose
+    docstrings still said "TODO: Implement ...".
+    """
+    def trim(match: "re.Match[str]") -> str:
+        quote, body = match.group("q"), match.group("body")
+        body_lines = body.split("\n")
+        for i, line in enumerate(body_lines):
+            if SCAFFOLD_MARKER_RE.match(line):
+                kept = body_lines[:i]
+                while kept and not kept[-1].strip():
+                    kept.pop()
+                if not any(line.strip() for line in kept):
+                    # Nothing but scaffold; keep the docstring well-formed.
+                    return f"{quote}{quote}"
+                closing_indent = re.match(r"[ \t]*", body_lines[-1]).group(0)
+                return quote + "\n".join(kept) + "\n" + closing_indent + quote
+        return match.group(0)
+
+    return DOCSTRING_RE.sub(trim, source)
+
+
 def apply_release_tier(source: str, release_tier: str) -> Tuple[str, List[str]]:
     """Apply the release-role policy to one cell's source.
 
     ``strip`` regions keep their markers so a clearing pass (nbgrader, or
     :func:`clear_solution_regions`) can replace them. ``keep`` regions lose
     their markers but keep their code. ``remove`` regions disappear.
+
+    When every region in the cell is kept, the exercise scaffold in its
+    docstrings is removed too; see :func:`strip_exercise_scaffold`.
     """
     if not source or (SOLUTION_BEGIN_MARKER not in source and SOLUTION_END_MARKER not in source):
         return source, []
@@ -68,6 +106,8 @@ def apply_release_tier(source: str, release_tier: str) -> Tuple[str, List[str]]:
     errors = []
     in_solution = False
     action = "strip"
+    saw_strip = False
+    saw_keep = False
 
     for line in lines:
         if SOLUTION_BEGIN_MARKER in line:
@@ -80,7 +120,10 @@ def apply_release_tier(source: str, release_tier: str) -> Tuple[str, List[str]]:
             action = solution_role_action(role, release_tier)
             in_solution = True
             if action == "strip":
+                saw_strip = True
                 out.append(line)
+            elif action == "keep":
+                saw_keep = True
             continue
 
         if SOLUTION_END_MARKER in line:
@@ -101,6 +144,8 @@ def apply_release_tier(source: str, release_tier: str) -> Tuple[str, List[str]]:
         errors.append("BEGIN SOLUTION marker without matching END SOLUTION")
 
     result = "\n".join(out)
+    if release_tier != "instructor" and saw_keep and not saw_strip:
+        result = strip_exercise_scaffold(result)
     if source.endswith("\n"):
         result += "\n"
     return result, errors
