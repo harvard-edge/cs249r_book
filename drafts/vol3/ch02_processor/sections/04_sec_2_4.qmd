@@ -1,0 +1,271 @@
+## Prefill, Decode, and Accelerator Hardware Physics {#sec-vol3-processor-cost}
+
+An accelerator executing a foundation model does not operate in a single, uniform execution regime; it bifurcates into two computational phases governed by fundamentally different physical limits. When processing the initial staged prompt of $M$ tokens, the accelerator functions as a massively parallel compute engine running matrix-matrix multiplications (GEMM) that saturate hardware floating-point units. The instant generation transitions to producing output tokens, this parallel efficiency collapses: the accelerator is forced into an iterative sequence of matrix-vector multiplications (GEMV) where execution speed is constrained by the speed of reading model parameters from High-Bandwidth Memory (HBM). 
+
+Understanding this split is essential for systems engineers. In single-trajectory agentic workloads, the host runtime cannot arbitrarily scale batch sizes to mask latency. To optimize agent responsiveness, manage timeouts, and budget token allocations, we must ground our software architectures in the physical realities of memory bandwidth, operational intensity, and accelerator hardware limits.
+
+### The Roofline Model and the Dual-Regime Nature of Inference
+
+The performance boundary of any accelerator kernel is governed by Williams, Waterman, and Patterson's **Roofline Model** [-@williams2009roofline]. The model relates the achievable computational performance $P$ (measured in floating-point operations per second, $\text{FLOP/s}$) to the processor's peak theoretical compute throughput $P_{\text{peak}}$ and its memory bandwidth $\text{BW}_{\text{mem}}$ (bytes per second) through a fundamental metric known as **arithmetic intensity** (or operational intensity), denoted by $I$:
+
+$$I = \frac{\text{Total Floating-Point Operations (FLOPs)}}{\text{Total Memory Traffic (Bytes Transferred)}} \quad \left[\frac{\text{FLOP}}{\text{byte}}\right]$$
+
+The attainable performance of a given workload is bounded by the minimum of the hardware's compute ceiling and the product of its memory bandwidth with the kernel's arithmetic intensity:
+
+$$P = \min\left(P_{\text{peak}}, \; \text{BW}_{\text{mem}} \times I\right)$$
+
+The intersection of these two asymptotes defines the hardware's **saturation arithmetic intensity**, $I_{\text{sat}}$:
+
+$$I_{\text{sat}} = \frac{P_{\text{peak}}}{\text{BW}_{\text{mem}}} \quad \left[\frac{\text{FLOP}}{\text{byte}}\right]$$
+
+When an algorithm's arithmetic intensity $I \ge I_{\text{sat}}$, execution is **compute-bound**; the arithmetic units (such as GPU Tensor Cores) are fully saturated, and memory bandwidth is not the limiting factor. Conversely, when $I < I_{\text{sat}}$, execution is **memory-bandwidth-bound**; compute units sit idle waiting for operands to arrive from off-chip dynamic RAM or HBM.
+
+```
+       Attainable Performance P [TFLOP/s]
+             ▲
+P_peak ──────┼─────────────────────────╭──────────────────────── (Compute Ceiling)
+(989 TFLOP/s)│                        /│
+             │                       / │  Compute-Bound Regime
+             │                      /  │  (Prefill GEMM: I >> I_sat)
+             │                     /   │
+             │                    /    │
+             │                   /     │
+             │                  /      │
+             │                 /       │
+             │  Memory-Bound  /        │
+             │  Regime       /         │
+             │  (Decode     /          │
+             │   GEMV:     /           │
+             │   I ~ 1)   /            │
+             │           /             │
+             └──────────┴──────────────┴───────────────────────►
+                       1.0           295.2 (I_sat)        Arithmetic Intensity I
+                                                          [FLOP/byte]
+```
+
+To ground this in production hardware, consider the datacenter-standard NVIDIA H100 SXM5 accelerator:
+- **Peak Dense Compute ($P_{\text{peak}}$):** $989 \times 10^{12} \text{ FLOP/s}$ ($989\text{ TFLOP/s}$) in dense 16-bit floating-point (FP16/BF16) Tensor Core operations.
+- **Memory Bandwidth ($\text{BW}_{\text{mem}}$):** $3.35 \times 10^{12} \text{ bytes/s}$ ($3.35\text{ TB/s}$) across an 80 GiB HBM3 bus.
+
+Applying the saturation formulation:
+
+$$I_{\text{sat}} = \frac{989 \times 10^{12}\text{ FLOP/s}}{3.35 \times 10^{12}\text{ bytes/s}} \approx 295.2\text{ FLOP/byte}$$
+
+To run the H100's Tensor Cores at $100\%$ utilization, a computational kernel must execute at least $295.2$ floating-point calculations for every single byte loaded across the HBM bus.
+
+A transformer inference invocation traverses two computational phases with radically different arithmetic intensities:
+
+#### 1. The Prefill Phase (Prompt Processing)
+
+During prefill, the serving runtime ingests all $M$ staged tokens of the prompt simultaneously. For a linear layer with weight matrix $\mathbf{W} \in \mathbb{R}^{d_{\text{out}} \times d_{\text{in}}}$, the activations of the $M$ tokens are grouped into a dense input matrix $\mathbf{X} \in \mathbb{R}^{d_{\text{in}} \times M}$. Computing the layer output:
+
+$$\mathbf{Y} = \mathbf{W}\mathbf{X} \in \mathbb{R}^{d_{\text{out}} \times M}$$
+
+This operation is a dense General Matrix-Matrix Multiplication (GEMM). Evaluating $\mathbf{Y}$ requires $2 \cdot d_{\text{out}} \cdot d_{\text{in}} \cdot M$ floating-point operations (each matrix multiply-accumulate represents one multiplication and one addition, or $2\text{ FLOPs}$). 
+
+Assuming weights are loaded once from HBM into on-chip SRAM, reading $\mathbf{W}$ in FP16 ($2\text{ bytes/parameter}$) transfers $2 \cdot d_{\text{out}} \cdot d_{\text{in}}$ bytes. Reading $\mathbf{X}$ transfers $2 \cdot d_{\text{in}} \cdot M$ bytes, and writing $\mathbf{Y}$ transfers $2 \cdot d_{\text{out}} \cdot M$ bytes. For substantial prompt lengths ($M \gg 1$), the parameter weight matrix dominates the memory transfer overhead:
+
+$$I_{\text{prefill}} \approx \frac{2 \cdot d_{\text{out}} \cdot d_{\text{in}} \cdot M\text{ FLOPs}}{2 \cdot d_{\text{out}} \cdot d_{\text{in}}\text{ bytes}} = M\text{ FLOP/byte}$$
+
+Because the weights loaded from HBM are reused $M$ times across all prompt token activations in on-chip caches, the arithmetic intensity scales linearly with prompt length $M$. For an agent prompt containing $M = 4{,}000$ tokens:
+
+$$I_{\text{prefill}} \approx 4{,}000\text{ FLOP/byte} \gg I_{\text{sat}} \; (295.2\text{ FLOP/byte})$$
+
+The prefill phase operates deeply within the **compute-bound regime**. Tensor Cores are driven to near-maximum utilization, making prefill throughput depend directly on the accelerator's peak raw compute throughput ($P_{\text{peak}}$). This phase determines the **Time-to-First-Token (TTFT)**.
+
+#### 2. The Decode Phase (Autoregressive Generation)
+
+Once the prompt is ingested, autoregressive generation produces one token at a time. To generate token $t+1$, the model cannot execute a GEMM because the future activation does not yet exist. Instead, the model evaluates a single activation vector $\mathbf{x}_t \in \mathbb{R}^{d_{\text{in}} \times 1}$ against the weight matrix $\mathbf{W} \in \mathbb{R}^{d_{\text{out}} \times d_{\text{in}}}$:
+
+$$\mathbf{y}_t = \mathbf{W}\mathbf{x}_t \in \mathbb{R}^{d_{\text{out}} \times 1}$$
+
+This operation is a General Matrix-Vector Multiplication (GEMV). Evaluating $\mathbf{y}_t$ requires $2 \cdot d_{\text{out}} \cdot d_{\text{in}}$ FLOPs. However, to execute this single vector transformation, the accelerator must read the entire weight matrix $\mathbf{W}$ from HBM:
+
+$$I_{\text{decode}} = \frac{2 \cdot d_{\text{out}} \cdot d_{\text{in}}\text{ FLOPs}}{2 \cdot d_{\text{out}} \cdot d_{\text{in}}\text{ bytes (weights)} + 2(d_{\text{in}} + d_{\text{out}})\text{ bytes (activations)}} \approx 1.0\text{ FLOP/byte}$$
+
+At an arithmetic intensity of $I_{\text{decode}} \approx 1.0\text{ FLOP/byte}$, the H100 SXM5 operates far below its saturation threshold ($I_{\text{sat}} = 295.2$). The achievable compute throughput during unbatched decode is strictly limited by memory bandwidth:
+
+$$P_{\text{decode}} = \text{BW}_{\text{mem}} \times I_{\text{decode}} = 3.35 \times 10^{12} \text{ bytes/s} \times 1.0 \text{ FLOP/byte} = 3.35\text{ TFLOP/s}$$
+
+Dividing this by the hardware ceiling demonstrates the stark hardware inefficiency of single-sequence autoregression:
+
+$$\text{Utilization} = \frac{P_{\text{decode}}}{P_{\text{peak}}} = \frac{3.35\text{ TFLOP/s}}{989\text{ TFLOP/s}} \approx 0.00339 \implies \mathbf{0.34\%}$$
+
+During unbatched token generation, **over 99.6% of the accelerator's Tensor Core compute capacity sits completely idle**. The processor is reduced to a memory-streaming pipeline. We can think of the GPU as a high-performance sports car engine fed by a narrow cocktail straw: the engine can consume massive amounts of fuel, but the rate of fuel flowing through the straw throttles system performance. In decode mode, the width of the straw—HBM interface bandwidth—dictates output speed.
+
+---
+
+### The HBM Parameter Shuttle Floor and Decode Physics
+
+Because decode arithmetic intensity is clamped near unity, generating each individual token requires streaming the active parameters of the foundation model across the accelerator's memory bus from HBM into on-chip register files and SRAM caches. This physical data movement establishes an inviolable lower bound on per-token generation latency: the **HBM Parameter Shuttle Floor**.
+
+Let $P_{\text{params}}$ represent the active parameter count of the model architecture, and let $b_{\text{weight}}$ denote the precision representation in bytes per parameter ($b_{\text{weight}} = 2$ for FP16/BF16, $b_{\text{weight}} = 1$ for FP8, and $b_{\text{weight}} = 0.5$ for INT4). The total weight payload $Q_{\text{weights}}$ transferred across the memory bus for a single decode step is:
+
+$$Q_{\text{weights}} = P_{\text{params}} \cdot b_{\text{weight}} \quad [\text{bytes}]$$
+
+The theoretical minimum time to transfer these weights across an accelerator memory bus with effective sustained bandwidth $\text{BW}_{\text{mem}}$ yields the fundamental per-token latency floor:
+
+$$T_{\text{decode, token}} \ge \frac{Q_{\text{weights}}}{\text{BW}_{\text{mem}}} = \frac{P_{\text{params}} \cdot b_{\text{weight}}}{\text{BW}_{\text{mem}}} \quad [\text{seconds/token}]$$
+
+Taking the reciprocal yields the maximum theoretical decode throughput for an unbatched request ($B = 1$):
+
+$$\text{Throughput}_{\max} \le \frac{\text{BW}_{\text{mem}}}{P_{\text{params}} \cdot b_{\text{weight}}} \quad [\text{tokens/second}]$$
+
+::: {.callout-note title="Worked Example: Sizing the HBM Parameter Shuttle Floor"}
+Consider an autonomous coding agent executing against an open-weights 70-billion parameter model ($P_{\text{params}} = 70 \times 10^9$) deployed on an NVIDIA H100 SXM5 accelerator with $80\text{ GiB}$ of HBM3 and an interface bandwidth of $\text{BW}_{\text{mem}} = 3.35\text{ TB/s}$ ($3.35 \times 10^{12}\text{ bytes/s}$).
+
+**Case A: 16-Bit Floating Point (FP16 / BF16)**
+At 16-bit precision, each parameter occupies $b_{\text{weight}} = 2\text{ bytes}$.
+The total memory volume that must be shuttled across the bus per token is:
+$$Q_{\text{weights}} = 70 \times 10^9 \times 2\text{ bytes} = 140 \times 10^9\text{ bytes} = 140\text{ GB}$$
+
+*(Note: Storing a 140 GB model requires pooling memory across multiple physical accelerators; here we evaluate the bandwidth floor across the aggregate memory bus).*
+
+The absolute physical latency floor to emit a single token is:
+$$T_{\text{decode, token}} \ge \frac{140 \times 10^9\text{ bytes}}{3.35 \times 10^{12}\text{ bytes/s}} \approx 0.04179\text{ seconds} \approx \mathbf{41.8\text{ ms/token}}$$
+
+The maximum theoretical generation throughput is:
+$$\text{Throughput}_{\max} \le \frac{1}{0.04179\text{ s}} \approx \mathbf{23.9\text{ tokens/second}}$$
+
+**Case B: 8-Bit Quantized Float (FP8)**
+If the model weights are quantized to FP8 ($b_{\text{weight}} = 1\text{ byte}$), the memory shuttle payload drops by half:
+$$Q_{\text{weights}} = 70 \times 10^9 \times 1\text{ byte} = 70\text{ GB}$$
+
+The latency floor drops proportionally:
+$$T_{\text{decode, token}} \ge \frac{70 \times 10^9\text{ bytes}}{3.35 \times 10^{12}\text{ bytes/s}} \approx 0.02090\text{ seconds} \approx \mathbf{20.9\text{ ms/token}}$$
+
+Yielding a maximum unbatched throughput ceiling of:
+$$\text{Throughput}_{\max} \le \frac{1}{0.02090\text{ s}} \approx \mathbf{47.8\text{ tokens/second}}$$
+
+No compiler optimization, CUDA kernel fusion, or architectural framework can overcome this physical limit. If an engineer expects an unbatched 70B parameter model in FP16 to generate $100\text{ tokens/s}$ on this hardware, their expectation contradicts the laws of memory bus physics.
+:::
+
+In practice, the true per-token decode latency is slightly higher than this parameter floor. In addition to reading the model weights $Q_{\text{weights}}$, the accelerator must also read the historical Key and Value cache activations for all preceding tokens in the context window to evaluate multi-head attention. For a sequence of length $S$, this requires transferring additional memory:
+
+$$Q_{\text{KV}}(S) = 2 \cdot L \cdot H_{\text{KV}} \cdot d_{\text{head}} \cdot S \cdot b_{\text{KV}} \quad [\text{bytes}]$$
+
+Where $L$ is the number of transformer layers, $H_{\text{KV}}$ is the number of key-value attention heads, $d_{\text{head}}$ is head dimension, and $b_{\text{KV}}$ is cache precision. While $Q_{\text{weights}}$ remains constant across generation, $Q_{\text{KV}}(S)$ grows monotonically as generation extends, compounding memory bus congestion at large context depths.
+
+To capture and monitor these constraints within an agent host runtime, systems maintain precise latency profiles that decouple memory transfer constraints from host execution overhead. The Python dataclass in @lst-latency-profile illustrates how production runtimes track these metrics across model invocations.
+
+```python
+# Listing 2.1: Python dataclass modeling invocation latency decomposition.
+from dataclasses import dataclass
+from typing import Optional
+
+@dataclass(frozen=True)
+class InvocationLatencyProfile:
+    """Profiles the hardware and software latency components of a model call."""
+    # Token Counts
+    prompt_tokens: int            # M: Tokens processed in prefill GEMM
+    completion_tokens: int        # K: Tokens generated in decode GEMV
+    
+    # Software & Queue Overhead (Host CPU)
+    t_prep_ms: float              # Tokenization, prompt formatting, context assembly
+    t_queue_ms: float             # Time spent waiting in the serving engine queue
+    
+    # Hardware Execution Breakdown (Accelerator)
+    t_ttft_ms: float              # Time-to-First-Token: t_prep + t_queue + t_prefill
+    t_prefill_ms: float           # Pure accelerator GEMM prefill computation
+    t_decode_total_ms: float      # Cumulative time across all K decode cycles
+    
+    # Derived Physical Hardware Metrics
+    sustained_hbm_bandwidth_tbs: float  # Measured sustained HBM bandwidth
+    active_param_count: float           # Model parameter count (e.g., 70e9)
+    weight_precision_bytes: float       # Bytes per weight parameter (e.g., 1.0 for FP8)
+    
+    @property
+    def inter_token_latency_ms(self) -> float:
+        """Mean Inter-Token Latency (ITL) during the decode phase."""
+        if self.completion_tokens <= 1:
+            return 0.0
+        return self.t_decode_total_ms / (self.completion_tokens - 1)
+    
+    @property
+    def physical_shuttle_floor_ms(self) -> float:
+        """Physical HBM weight shuttle floor per token (ms)."""
+        bytes_per_token = self.active_param_count * self.weight_precision_bytes
+        bw_bytes_per_sec = self.sustained_hbm_bandwidth_tbs * 1e12
+        return (bytes_per_token / bw_bytes_per_sec) * 1000.0
+    
+    @property
+    def bus_efficiency(self) -> float:
+        """Ratio of theoretical physical shuttle minimum to actual ITL."""
+        if self.inter_token_latency_ms == 0.0:
+            return 1.0
+        return min(1.0, self.physical_shuttle_floor_ms / self.inter_token_latency_ms)
+```
+
+---
+
+### Workload Asymmetry, Latency Decomposition, and the Batching Dilemma
+
+Understanding the distinct physics of prefill and decode clarifies a fundamental architectural divergence: **agentic workloads exhibit a radical workload asymmetry compared to standard conversational applications**.
+
+In typical conversational chatbot applications, input prompts and output responses are roughly symmetric in token volume: a user submits a prompt of $M \approx 500$ tokens and receives an explanatory response of $K \approx 500$ tokens. In this setting, the overall request latency is heavily dominated by the decode phase. At $25\text{ ms/token}$, generating $500$ tokens consumes $12.5\text{ seconds}$, whereas the initial prefill consumes less than $100\text{ ms}$.
+
+Autonomous software engineering agents (such as Claude Code, Devin, or SWE-agent) invert this profile completely. A production coding agent must ingest comprehensive repository maps, abstract syntax trees, documentation context, multi-file source listings, and lengthy execution logs from failing test suites. Consequently, the staged prompt length $M$ regularly scales to tens of thousands of tokens ($M \ge 40{,}000$). Conversely, when the agent decides its next action, it emits a concise, structured tool invocation—such as writing a shell command, requesting a file edit, or issuing a patch. These structured payloads are brief, typically requiring $K \approx 50\text{ to }150$ tokens.
+
+| Architectural Dimension | Conversational Chatbot | Autonomous Software Agent |
+| :--- | :--- | :--- |
+| **Typical Prompt Length ($M$)** | $200 - 1{,}000\text{ tokens}$ | $20{,}000 - 100{,}000\text{ tokens}$ |
+| **Typical Generation Length ($K$)** | $300 - 1{,}000\text{ tokens}$ | $40 - 200\text{ tokens}$ (Tool Invocation) |
+| **Token Ratio ($M : K$)** | $\approx 1 : 1$ | $\approx \mathbf{200 : 1}\text{ to }\mathbf{1{,}000 : 1}$ |
+| **Primary Latency Bottleneck** | Decode Phase (Inter-Token Latency) | Prefill Phase (Time-to-First-Token) |
+| **Accelerator Regime** | Memory-Bandwidth-Bound Dominant | Compute-Bound Dominant |
+| **Serving System Challenge** | Sustaining low ITL under high concurrency | Managing prefill compute spikes and TTFT |
+
+In agentic systems, **the prefill phase accounts for 95% to 99% of all tokens processed**. As a result, the end-to-end execution profile is dominated by the compute-bound ingestion of massive prompt prefixes rather than the sequential output of long textual narratives.
+
+#### End-to-End Latency Decomposition
+
+To manage timeouts and ensure reliable agent execution loops, the host runtime models the end-to-end latency of a single model invocation ($T_{\text{invocation}}$) as a sum of four distinct components:
+
+$$T_{\text{invocation}} = T_{\text{prep}} + T_{\text{queue}} + T_{\text{prefill}}(M) + \sum_{t=1}^K T_{\text{decode}}(t, S_t)$$
+
+Where:
+1. **$T_{\text{prep}}$ (Host CPU Overhead):** The time required by the host process to serialize structured context blocks, resolve working-set file state, tokenize Unicode strings into integer token sequences, and dispatch the HTTP/gRPC request payload across the network.
+2. **$T_{\text{queue}}$ (Scheduling Queue Latency):** The latency spent resident in the serving engine's incoming request queue waiting for available execution slots and memory allocations on the accelerator.
+3. **$T_{\text{prefill}}(M)$ (Prompt Ingestion Time / TTFT):** The compute-bound GEMM duration required to ingest $M$ staged tokens. For large $M$, this duration scales linearly with token count and model size:
+   $$T_{\text{prefill}}(M) \approx \frac{2 \cdot P_{\text{params}} \cdot M}{P_{\text{peak}} \cdot \eta_{\text{GEMM}}}$$
+   where $\eta_{\text{GEMM}}$ represents the hardware's numerical compute efficiency (typically $0.50 - 0.75$ on modern accelerators).
+4. **$\sum_{t=1}^K T_{\text{decode}}(t, S_t)$ (Cumulative Decode Latency):** The total time spent in the autoregressive decode loop. Each step $t$ incurs a memory-shuttle latency that depends on the parameter shuttle floor and the expanding context sequence length $S_t = M + t$:
+   $$T_{\text{decode}}(t, S_t) \approx \frac{P_{\text{params}} \cdot b_{\text{weight}} + Q_{\text{KV}}(S_t)}{\text{BW}_{\text{mem}} \cdot \eta_{\text{mem}}}$$
+   where $\eta_{\text{mem}}$ represents sustained memory bus efficiency (typically $0.70 - 0.85$).
+
+```
+Total Invocation Latency T_invocation
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│ Host Prep │  Queue  │       Prefill Phase (GEMM)       │      Decode Phase (GEMV)       │
+│  T_prep   │ T_queue │          T_prefill(M)            │       SUM(t=1..K) T_decode     │
+├───────────┼─────────┼──────────────────────────────────┼────────────────────────────────┤
+│ CPU       │ Serving │ Accelerator Tensor Cores         │ Accelerator HBM Memory Bus     │
+│ AST/BPE   │ FIFO    │ Compute-Bound Saturation         │ Memory-Bandwidth Shuttle Floor │
+│ Serialization       │ Dominates Agent Invocation Time  │ Highly Serial, 40ms/tok Floor  │
+└───────────┴─────────┴──────────────────────────────────┴────────────────────────────────┘
+ 0ms        15ms      85ms                             850ms                           1600ms
+```
+
+#### The Batching Dilemma: Single-Agent $B=1$ vs. Multi-Tenant Serving
+
+In traditional throughput-oriented machine learning serving, runtimes mask memory-bandwidth bottlenecks through **batching**. If an inference server groups $B$ independent user requests into a single batch, the linear weight matrix $\mathbf{W} \in \mathbb{R}^{d_{\text{out}} \times d_{\text{in}}}$ loaded from HBM can be multiplied against a batch of $B$ activation vectors simultaneously:
+
+$$\mathbf{Y}_{\text{batch}} = \mathbf{W}\mathbf{X}_{\text{batch}} \quad \text{where} \quad \mathbf{X}_{\text{batch}} \in \mathbb{R}^{d_{\text{in}} \times B}$$
+
+This transformation converts the memory-bound GEMV into a batched GEMM. The arithmetic intensity of the decode step scales directly with batch size $B$:
+
+$$I_{\text{decode}}(B) \approx B \cdot I_{\text{decode}}(1) \approx B\text{ FLOP/byte}$$
+
+By increasing $B$ to a value near $I_{\text{sat}}$ (e.g., $B \approx 128\text{ to }256$), the serving runtime shifts decode from the memory-bound regime into the compute-bound regime. Aggregate system throughput across all users scales up by orders of magnitude, amortizing the cost of reading weights across dozens of concurrent requests.
+
+However, an autonomous agent cannot take advantage of this mechanism within its own execution loop. 
+
+An autonomous agent's execution trajectory is strictly sequential: step $n+1$ depends directly on the environmental observation returned by tool execution at step $n$, which depends on the completion of the tool call emitted at step $n-1$. The agent's control loop cannot generate alternative trajectories concurrently without spawning speculative execution branches. For a single agent solving a single software problem, **the batch size is fixed at $B = 1$**.
+
+This operational reality creates **The Batching Dilemma**:
+1. If the agent runtime hosts its own dedicated accelerator instance at $B=1$, it achieves minimum queue latency ($T_{\text{queue}} \to 0$), but suffers the full penalty of the parameter shuttle floor, running the accelerator at less than $1\%$ hardware compute efficiency.
+2. If the agent dispatches requests to a shared, multi-tenant serving cluster (such as an enterprise inference fleet running vLLM or continuous-batching engines), the serving engine aggregates hundreds of requests into large batches to maximize GPU utilization. While this lowers the monetary cost per token, it introduces queue latency jitter ($T_{\text{queue}}$) and inter-token latency spikes caused by prefill preemption—often degrading the real-time responsiveness of the agent host.
+
+Because every generated token in an unbatched agent trajectory requires shuttling tens of gigabytes of weights across the accelerator bus, generating syntax errors or unparseable text wastes critical latency and bandwidth budgets. If an agent executes a 100-token decode step that takes $3.5\text{ seconds}$ to stream from HBM, only to emit a malformed JSON payload containing an unescaped string or a hallucinated parameter key, that entire latency envelope is wasted. The host parser rejects the malformed payload, requiring an expensive error-correction round trip that doubles invocation costs.
+
+To prevent this waste of accelerator bandwidth and runtime latency, production agent architectures enforce structural and syntactic constraints directly during the autoregressive generation loop. By restricting output generation to valid schemas at decoding time, systems eliminate formatting failures before tokens leave the accelerator. This runtime constraint mechanism—**Grammar-Guided Decoding**—is the focus of the next section.

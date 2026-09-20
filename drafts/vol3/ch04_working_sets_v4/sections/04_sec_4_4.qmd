@@ -1,0 +1,169 @@
+## Context Compaction {#sec-vol3-working-sets-compaction}
+
+When an autonomous agent executes a multi-step debugging or refactoring trajectory, the raw execution history expands monotonically with every shell command, file read, and compiler invocation. A single build failure can emit 4,000 lines of compiler diagnostics; an automated test suite frequently outputs tens of thousands of tokens of passing test names; and repeated file inspections redundantly stage thousands of identical lines into the prompt buffer. If the host supervisor transmits this raw transcript directly into the inference engine, the active token count rapidly approaches the physical context limit $M$ and exceeds the effective comprehension threshold $M_{\text{eff}}$. This unchecked expansion inflates prefill latency, exhausts physical GPU high-bandwidth memory (HBM) allocated to key-value (KV) caches, and degrades the model's ability to attend to critical constraints. Yet, naive truncation—such as dropping the oldest turns or delegating unstructured summarization to a secondary language model—frequently strips out the exact compiler line numbers, variable names, and failing assertions required to synthesize a working patch.
+
+**Context compaction is not a generic text compression problem; it is an active systems trade-off between token budget allocation and semantic fidelity. While lossless filtering strips redundant syntax and supersedes obsolete state without information loss, lossy compaction must enforce an asymmetric preservation invariant: exact identifiers, failing assertions, and negative execution results must be retained verbatim, whereas conversational prose and transient procedural noise may be aggressively distilled.**
+
+### The Compaction Spectrum: From Lossless Filtering to Semantic Distillation
+
+Managing the working set requires a tiered approach that balances host computational overhead against token reduction and semantic integrity. Rather than treating all tokens as equally compressible text, the runtime supervisor routes observations through three sequential stages of compaction: lossless filtering, structured extraction, and semantic summarization.
+
+::: {.column-margin}
+**Hysteretic Watermarks**
+Compaction policies avoid thrashing by separating the trigger threshold ($\tau_{\text{high}}$) from the target eviction boundary ($\tau_{\text{low}}$). Compacting to the high watermark would trigger expensive summarization on every subsequent turn.
+:::
+
+Lossless filtering operates entirely through deterministic host-side logic without invoking an auxiliary language model. This phase targets four categories of systematic redundancy:
+
+1. *Tool Output Deduplication:* Autonomous agents frequently poll system state across iterative repair loops, repeatedly invoking commands such as `git status`, `ls -l`, or process polling loops. When consecutive or near-consecutive invocations return identical output, the runtime retains the initial output and replaces subsequent duplicates with a lightweight tombstone token containing the invocation count and timestamp delta.
+2. *Boilerplate and Terminal Formatting Stripping:* Raw terminal streams contain ANSI escape sequences, progress spinners, interactive cursor repositioning codes, and HTTP download headers. These control sequences consume token budget while providing zero task signal. Deterministic strip filters normalize the stream into canonical plaintext before tokenization.
+3. *Diff Chunk Folding:* When an agent modifies a small segment of a large file, standard unified diff utilities emit dozens of lines of unchanged context surrounding the modified lines. The runtime collapses long stretches of unmodified code into structural fold markers (`@@ -120,45 +120,12 @@ [35 lines unchanged]`), preserving the structural location without paying the token penalty of unchanged code.
+4. *Superseded Read Invalidation:* If an agent inspects a configuration file at step $t=3$, modifies that file at step $t=7$, and inspects it again at step $t=8$, the observation at step $t=3$ is completely obsolete. The runtime replaces the payload of the initial read with a structural pointer indicating that the contents were superseded by the edit at turn 7.
+
+When lossless filtering cannot reclaim sufficient headroom, the runtime transitions to *structured extraction*. Unprivileged language models should never be tasked with parsing multi-megabyte build logs when deterministic host parsers can isolate errors with zero variance and zero token cost. Compilers and test harnesses—such as GCC, Clang, Rustc, Pytest, and Cargo—emit outputs where more than 95% of the log volume consists of informational progress updates, timing metrics, and passing test cases. 
+
+::: {#fig-vol3-compaction-pipeline}
+![](images/svg/fig-vol3-compaction-pipeline.svg)
+
+The multi-stage context compaction pipeline. Raw agent observations pass through three cascading tiers: deterministic lossless filtering (deduplication, diff folding, and superseded read eviction), structured extraction (regex and AST parsing of stack traces and diagnostic codes), and bounded semantic distillation. Each tier records token reduction and fidelity retention across the working set.
+:::
+
+The runtime supervisor deploys domain-specific regular expressions and Abstract Syntax Tree (AST) crash parsers to extract only the actionable diagnostic payload. For a build failure, the extraction engine isolates the target binary name, the failing source file, the exact line and column numbers, the diagnostic error code (such as Rust's `E0308` or GCC's `-Werror=implicit-function-declaration`), and the specific compiler explanation. The thousands of lines detailing successful compilation of unaffected translation units are discarded.
+
+Table @tbl-compaction-spectrum details the performance characteristics, typical reduction ratios, and information-preservation guarantees across the three compaction tiers.
+
+| Compaction Tier | Mechanism | Compute Cost | Reduction Ratio | Preserved Invariants | Information Risk |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Lossless Filtering** | Deduplication, diff folding, ANSI stripping, superseded read pruning | Microsecond host CPU regex/hash operations | $1.5\times - 3\times$ | Exact string identity, syntax, and chronological order | Zero (fully reversible or semantically identical) |
+| **Structured Extraction** | Deterministic AST parsers, compiler diagnostic scrapers, JSON log filtering | Low host CPU parsing overhead | $5\times - 20\times$ | Stack traces, line numbers, error codes, failing assertions | Low (may omit non-standard stdout warnings) |
+| **Semantic Summarization** | Secondary LLM distillation, hypothesis and negative-evidence extraction | High GPU prefill and decode inference latency | $10\times - 50\times$ | Falsified hypotheses, core decisions, causal trajectory | High (loss of exact identifiers, risk of hallucination) |
+
+: The context compaction spectrum, comparing operational overhead, token reduction factors, and risk profiles across architectural tiers. {#tbl-compaction-spectrum}
+
+When context pressure persists despite structured extraction, the runtime must invoke *semantic summarization*. Unlike lossless filtering and extraction, semantic summarization is inherently lossy: an auxiliary inference pass distills dozens of interactive turns into a dense factual narrative. The central failure mode in lossy summarization is the omission of *negative evidence*. In colloquial human communication, summaries naturally focus on successful steps ("Found the missing dependency and installed it"). In an autonomous agent trajectory, however, negative results represent the primary control signal preventing infinite execution loops. 
+
+If a lossy summarizer records that an agent "attempted to configure the database connection," the model on the next turn lacks the evidence that `127.0.0.1:5432` failed with `ECONNREFUSED` and that socket authentication failed with `password authentication failed for user postgres`. Deprived of this negative evidence, the agent autoregressively re-predicts the identical failing action. Lossy compaction algorithms must therefore enforce a strict extraction template: every distilled episode must explicitly register which hypotheses were tested, which physical commands were executed, the exact failure signatures encountered, and which specific configuration paths were eliminated.
+
+### The Information Preservation Principle and Verbatim Invariants
+
+An unprivileged foundation model operates strictly as a statistical token predictor conditioned on its context buffer; it possesses no ambient knowledge of dynamic workspace variables, ephemeral process IDs, or cryptographic hashes generated during execution. When context compaction replaces raw observations with natural language summaries, it risks violating the *Information Preservation Principle*:
+
+> **The Information Preservation Principle:** Never summarize away exact string literals, numerical identifiers, or structural schemas that are required for subsequent code synthesis, file system mutation, or test verification.
+
+To formalize this constraint, let an execution observation $O_t$ at step $t$ consist of a sequence of tokens. The host runtime partitions $O_t$ into two disjoint token sets: an *invariant verbatim set* $\mathcal{V}(O_t)$ and a *compressible syntactic filler set* $\mathcal{C}(O_t)$, such that $O_t = \mathcal{V}(O_t) \cup \mathcal{C}(O_t)$. The invariant set $\mathcal{V}(O_t)$ contains:
+
+$$\mathcal{V}(O_t) = \{ \text{identifiers}, \text{file paths}, \text{line numbers}, \text{type signatures}, \text{hashes}, \text{failing assertions} \}$$
+
+Any valid compaction transformation $\mathcal{T}: O_t \to O_t'$ must satisfy the strict inclusion property:
+
+$$\mathcal{V}(O_t) \subseteq O_t'$$
+
+If $\mathcal{V}(O_t) \setminus O_t' \neq \emptyset$, the compaction pipeline introduces *epistemic drift*: the model's posterior distribution over next-token generations is no longer conditioned on the ground-truth environment state, but on the ungrounded prior of the model.
+
+::: {.column-margin}
+**Epistemic Drift in Action**
+When exact line numbers or variable names are compressed into vague natural language summaries, the agent's probability of synthesizing a correct zero-shot edit drops precipitously, frequently inducing hallucinated file paths.
+:::
+
+The practical danger of violating this principle is evident in continuous debugging tasks. Consider a failing pytest execution where an unconstrained secondary model is tasked with compacting the log to save tokens. The naive summary reduces the failure to conversational prose:
+
+```text
+# Naive lossy summary generated by secondary LLM (Violation of Invariant)
+The test_suite encountered a TypeError in the user authentication flow. 
+A NoneType object was passed where an integer was expected during token validation.
+```
+
+Under this summarized context, the agent knows that a `TypeError` occurred, but it lacks the exact file path, the function signature, the local variable names, and the stack frame line numbers. Inevitably, the agent invokes speculative file reads across `auth/tokens.py`, `models/user.py`, and `middleware/jwt.py`, wasting thousands of tokens to rediscover information that the runtime actively threw away.
+
+In contrast, a structured compaction filter enforcing the preservation invariant $\mathcal{V}(O_t) \subseteq O_t'$ discards the surrounding terminal noise while retaining the exact diagnostic frame:
+
+```python
+# Structured extracted frame preserving invariant set V(O_t)
+FAILED tests/test_auth.py::test_jwt_expiration - TypeError
+Location: services/auth_token.py:142 in validate_claims()
+Caller:   middleware/jwt.py:58 in process_request()
+Line:     expires_at = claims['exp'] + clock_skew_seconds
+Offense:  TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'
+Locals:   claims={'sub': 'usr_99x'}, clock_skew_seconds=30
+```
+
+By preserving the exact file path (`services/auth_token.py`), the line number (`142`), the failing expression, and the local variable assignments verbatim, the compacted frame uses fewer than 70 tokens while preserving 100% of the actionable signal required for the model to synthesize the repair on its next forward pass.
+
+### Bounded Compaction Algorithms: Budgets, Anchors, and Eviction Policies
+
+Dynamic context compaction cannot execute as an uncoordinated background hook; it must operate as a deterministic memory management policy governed by explicit token capacity boundaries. Let $M$ represent the maximum physical token capacity of the context window, and let $M^*$ denote the effective working-set capacity determined by the lost-in-the-middle inflection point. 
+
+The supervisor establishes two operating watermarks over the active working set $S$: a high watermark $\tau_{\text{high}}$ (typically $0.80 \cdot M^*$) and a low watermark $\tau_{\text{low}}$ (typically $0.50 \cdot M^*$). As long as $|S| < \tau_{\text{high}}$, observations are appended using only lossless filtering and structured extraction. The moment $|S| \ge \tau_{\text{high}}$, the supervisor halts generation and triggers batch compaction, evicting and distilling tokens until $|S| \le \tau_{\text{low}}$.
+
+```
+                     LOGICAL CONTEXT WINDOW (M*)
+  +-------------------+-----------------------------+-------------------+
+  |  IMMUTABLE ROOT   |      COMPACTED MIDDLE       | UNCOMPRESSED LEAF |
+  | (System / Tasks)  |    (Anchors & Summaries)    |   (Recent Turns)  |
+  +-------------------+-----------------------------+-------------------+
+  0              L_root                         L_leaf                M*
+  [<-- Static ----->] [<----- Eviction Zone ------->] [<-- High Res --->]
+```
+
+To execute this eviction without destabilizing the agent's core task alignment, the runtime partitions the logical context into three functional zones:
+
+1. *The Immutable Root:* The initial system prompt, tool definitions, environment constraints, and primary user task directive. This zone is pinned permanently in memory ($[0, L_{\text{root}}]$) to maximize Radix tree and prefix cache reuse across turns.
+2. *The Compacted Middle:* Historical turns and intermediate trajectory steps ($[L_{\text{root}}, L_{\text{leaf}}]$). This is the active eviction zone where lossy chunk distillation and structural folding take place.
+3. *The Uncompressed Leaf:* The most recent $k$ interaction turns ($[L_{\text{leaf}}, M^*]$). The leaf zone is maintained in high-resolution, uncompressed form so that the model's autoregressive decode loop has direct, fine-grained access to immediate feedback from the environment.
+
+Within the volatile middle zone, the runtime deploys *semantic anchors*. A semantic anchor is an observation or decision node that is exempt from lossy summarization despite its age. Examples of critical anchors include the initial failing test output (the baseline verification target), the specific git diff of an accepted architectural change, and user-provided configuration credentials. 
+
+When compaction is triggered, the supervisor identifies contiguous blocks of unanchored historical turns, aggregates them into episodic chunks of length $C$, and compacts each chunk into a structured progress record. If the middle zone fills with compacted records over an extended trajectory, the runtime initiates *hierarchical chunk summarization*: multiple first-order chunk summaries are merged into higher-order epochal summaries, ensuring that the total token footprint of the middle zone remains asymptotically bounded.
+
+::: {.callout-note title="Worked Example: Token Budget Compaction and Roofline Prefill Savings"}
+Consider an autonomous software engineering agent running on a dedicated host backed by an NVIDIA H100 SXM5 GPU (3.35 TB/s HBM3 memory bandwidth, 989 TFLOPS peak half-precision Tensor Core throughput). The agent runtime uses a 70-billion parameter dense transformer model with $L = 80$ layers, hidden dimension $d = 8192$, and Grouped-Query Attention (GQA) with $h_{\text{kv}} = 8$ KV heads and head dimension $d_k = 128$. The logical context capacity is configured to $M = 128\text{ Ki tokens}$ ($131{,}072$ tokens).
+
+**Problem:** Over an active debugging trajectory of 45 turns, the uncompressed transcript accumulates $N_{\text{raw}} = 96\text{ Ki tokens}$ ($98{,}304$ tokens). The runtime compaction pipeline processes this transcript:
+1. Lossless filtering strips $30\text{ Ki tokens}$ of redundant diff context, terminal formatting, and superseded file reads.
+2. Structured extraction prunes $25\text{ Ki tokens}$ of verbose build and package management logs into structured diagnostic frames.
+3. Semantic summarization condenses early conversational exploration, reclaiming an additional $17\text{ Ki tokens}$.
+
+Calculate:
+1. The memory savings in the GPU's KV cache allocation (in gigabytes, assuming FP16 precision where each value requires 2 bytes).
+2. The reduction in prefill computational FLOPs and estimated prefill latency, assuming an effective Model FLOPs Utilization (MFU) of 50% ($494.5\text{ TFLOPS}$ sustained).
+
+**Solution:**
+
+*Part 1: KV Cache Footprint Reduction*
+The compacted token count is:
+$$N_{\text{compact}} = 96\text{ Ki} - (30\text{ Ki} + 25\text{ Ki} + 17\text{ Ki}) = 24\text{ Ki tokens} = 24{,}576\text{ tokens}$$
+The KV cache memory consumption per token across all $L$ layers under GQA is:
+$$\text{Bytes per token} = 2 \times (\text{Key} + \text{Value}) = 2 \times (L \times h_{\text{kv}} \times d_k \times 2\text{ bytes})$$
+$$\text{Bytes per token} = 2 \times (80 \times 8 \times 128 \times 2) = 327{,}680\text{ bytes} \approx 320\text{ KiB/token}$$
+
+For the uncompressed context ($N_{\text{raw}} = 98{,}304$ tokens):
+$$\text{Memory}_{\text{raw}} = 98{,}304 \times 327{,}680\text{ bytes} \approx 32.21\times 10^9\text{ bytes} \approx 30.00\text{ GiB}$$
+
+For the compacted context ($N_{\text{compact}} = 24{,}576$ tokens):
+$$\text{Memory}_{\text{compact}} = 24{,}576 \times 327{,}680\text{ bytes} \approx 8.05\times 10^9\text{ bytes} \approx 7.50\text{ GiB}$$
+
+$$\Delta \text{Memory} = 30.00\text{ GiB} - 7.50\text{ GiB} = 22.50\text{ GiB reclaimed}$$
+Compaction frees $22.50\text{ GiB}$ of physical GPU VRAM, preventing out-of-memory crashes and permitting larger batch sizes or extended generation lengths.
+
+*Part 2: Prefill Computation and Latency Savings*
+The computational cost of the prefill phase consists of two terms: the linear parameter projections ($\approx 2 \cdot P \cdot N$) and the quadratic self-attention projections ($\approx 4 \cdot L \cdot d \cdot N^2$ operations).
+
+For $N_{\text{raw}} = 98{,}304$:
+$$\text{FLOPs}_{\text{proj}} = 2 \times (70 \times 10^9) \times 98{,}304 \approx 13.76\times 10^{15}\text{ FLOPs} = 13.76\text{ PFLOPs}$$
+$$\text{FLOPs}_{\text{attn}} = 4 \times 80 \times 8192 \times (98{,}304)^2 \approx 25.30\times 10^{15}\text{ FLOPs} = 25.30\text{ PFLOPs}$$
+$$\text{FLOPs}_{\text{total, raw}} = 13.76 + 25.30 = 39.06\text{ PFLOPs}$$
+
+At $494.5\text{ TFLOPS}$ sustained throughput:
+$$t_{\text{prefill, raw}} = \frac{39.06 \times 10^{15}\text{ FLOPs}}{494.5 \times 10^{12}\text{ FLOPs/sec}} \approx 78.99\text{ seconds}$$
+
+For $N_{\text{compact}} = 24{,}576$:
+$$\text{FLOPs}_{\text{proj}} = 2 \times (70 \times 10^9) \times 24{,}576 \approx 3.44\times 10^{15}\text{ FLOPs} = 3.44\text{ PFLOPs}$$
+$$\text{FLOPs}_{\text{attn}} = 4 \times 80 \times 8192 \times (24{,}576)^2 \approx 1.58\times 10^{15}\text{ FLOPs} = 1.58\text{ PFLOPs}$$
+$$\text{FLOPs}_{\text{total, compact}} = 3.44 + 1.58 = 5.02\text{ PFLOPs}$$
+
+$$t_{\text{prefill, compact}} = \frac{5.02 \times 10^{15}\text{ FLOPs}}{494.5 \times 10^{12}\text{ FLOPs/sec}} \approx 10.15\text{ seconds}$$
+
+Compaction delivers a $7.78\times$ reduction in prefill latency (saving over 68 seconds of blocking host time per turn), primarily driven by the quadratic reduction in self-attention matrix operations over long context sequences.
+:::
+
+While bounded compaction algorithms successfully manage token budget pressures across medium-length trajectories, reactive eviction exhibits fundamental limits over prolonged task horizons. Continually distilling unstructured episodic chunks inevitably degrades the fine-grained causal chain of actions, and higher-order recursive summaries compound semantic drift. When a complex software engineering task extends across dozens of files and hundreds of speculative actions, the runtime supervisor cannot rely solely on rolling window eviction. To sustain coherence across arbitrary task lifespans without cumulative degradation, the systems architecture must transition from reactive context compaction to durable, structured checkpointing—a transition that requires formalizing state persistence through explicit verifiable checkpoints.

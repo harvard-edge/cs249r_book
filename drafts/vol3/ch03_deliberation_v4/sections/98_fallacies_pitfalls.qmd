@@ -1,0 +1,140 @@
+## Fallacies and Pitfalls {#sec-vol3-deliberation-fallacies}
+
+Scaling test-time deliberation fundamentally alters the failure modes of machine learning systems. In a single-shot invocation, failure is immediate, overt, and contained to the boundaries of a single token sequence. In a deliberative architecture, failure becomes dynamic, compounding across speculative search trees, masking itself behind surrogate reward metrics, and silently exhausting accelerator memory bandwidth. When systems engineers transition from deterministic distributed systems to deliberative inference runtimes, they frequently carry over classical assumptions regarding independent sampling, monotonic convergence, and linear cost accounting that do not hold in unprivileged autoregressive generation.
+
+**Treating test-time deliberation as an unconstrained algorithmic panacea—presuming that additional tokens, stochastic samples, or surrogate scores translate monotonically into verified execution—is the primary architectural failure mode in modern agent design.** Building dependable agentic systems requires exposing the physical bottlenecks and statistical illusions that arise when unprivileged neural predictors ($A=0$) operate without rigorous verification boundaries. The following four fallacies and pitfalls dissect these failure mechanisms across the boundary between accelerator memory systems and host execution runtimes.
+
+::: {.fallacy-pitfall}
+**Fallacy:** *More reasoning tokens automatically mean more correct decisions.*
+
+Software engineers accustomed to numerical optimization algorithms or iterative solvers frequently assume that extended autoregressive generation functions as a convergence loop. In classical numerical methods, such as gradient descent or Newton-Raphson approximation, allocating additional computational iterations monotonically contracts the error residual $\|\mathbf{x}_k - \mathbf{x}^*\|$ toward zero. When applied to autoregressive reasoning chains, this assumption suggests that generating an extended sequence of $K_{\text{ext}}$ reasoning tokens allows the model to progressively refine its internal logic and eliminate errors.
+
+This analogy breaks down over the physical and mathematical reality of causal token generation. An autoregressive foundation model generates tokens according to a conditional probability distribution over a discrete vocabulary $\mathcal{V}$:
+
+$$P(y_1, y_2, \dots, y_K \mid \mathbf{x}) = \prod_{t=1}^K P(y_t \mid \mathbf{x}, y_1, \dots, y_{t-1})$$
+
+The generation operates entirely open-loop with zero ambient authority ($A=0$) and zero external ground truth. Every emitted token $y_t$ is conditioned not on the physical state of the external environment, but on the frozen parameter weights $\mathbf{\Theta}$ and the accumulated history of previously generated tokens $[\mathbf{x}, y_1, \dots, y_{t-1}]$. If the model samples an erroneous token or commits to an invalid premise early in the sequence at step $t_0$—such as misidentifying a concurrent race condition as an unhandled network timeout—the probability distribution for all subsequent tokens $t > t_0$ shifts dramatically. The model does not possess an internal oracle that flags the premise as false. Instead, pretraining loss minimization forces the network to generate tokens that maximize joint sequence likelihood given the preceding context. 
+
+Consequently, additional reasoning tokens are optimized to rationalize, elaborate, and defend the initial error. The model constructs extensive, internally consistent mathematical derivations or intricate software explanations that sound persuasive yet build upon a corrupted foundation. Information-theoretically, in the absence of an external observation or a discriminating verifier check, an open-loop reasoning trajectory cannot increase its mutual information with the true solution state:
+
+$$I(Y_{t_0:K}; Y^* \mid \mathbf{x}, y_{1:t_0-1}) = 0$$
+
+::: {.column-margin}
+When an autoregressive chain commits an early error $\epsilon$ at step $t_0$, subsequent tokens optimize self-consistency with the flawed prefix rather than external truth. Without an empirical verification gate, generating more tokens merely produces fluent rationalizations of an invalid premise.
+:::
+
+From a systems and hardware perspective, unconstrained token expansion severely degrades inference efficiency. Generating $K_{\text{ext}}$ tokens requires $K_{\text{ext}}$ serialized memory-bandwidth-bound matrix-vector products ($\text{GEMV}$). At an arithmetic intensity of approximately $1\text{ FLOP/byte}$, the accelerator must stream its entire weight footprint $\mathbf{\Theta}$ from High Bandwidth Memory (HBM) to on-chip registers for every single token. Furthermore, each emitted token appends key-value states to physical KV-cache allocations ($M_{\text{KV}} \propto S + K$), consuming high-bandwidth memory pages and displacing concurrent request slots in continuous batching runtimes like vLLM or SGLang. Schedulers experience head-of-line blocking and tail latency amplification ($P_{99}$) while streaming thousands of tokens that merely elaborate a hallucination.
+
+The architectural defense against rationalization cascades is to make depth conditional on empirical falsification. An agent runtime must partition extended generation into bounded deliberative segments, enforce step ceilings on unverified sequences, and require the model to emit an actionable, testable intermediate prediction that can be evaluated against an external execution environment or an authoritative domain constraint. If an intermediate milestone cannot be validated, the runtime must terminate the branch rather than allocating further memory bus cycles to ungrounded speculation.
+:::
+
+::: {.fallacy-pitfall}
+**Pitfall:** *Counting sampled outputs as independent hypotheses.*
+
+When single-path generation fails, systems architects frequently introduce parallel breadth exploration. The orchestrator configures stochastic decoding with non-zero temperature ($\tau > 0$) or nucleus sampling ($p < 1.0$), samples $N$ alternative candidate trajectories $\{\mathbf{y}^{(1)}, \mathbf{y}^{(2)}, \dots, \mathbf{y}^{(N)}\}$ concurrently from the inference engine, and routes them to a selection harness. Architects then model the coverage of this parallel search using the classical independent Bernoulli formula:
+
+$$P(\text{at least one correct}) = 1 - (1 - p_{\text{pass@1}})^N$$
+
+Treating $N$ sampled completions as $N$ independent draws grossly misstates the effective search breadth. Stochastic sampling introduces variance across token selections, but all $N$ candidates are sampled from the exact same conditional probability distribution $P(\mathbf{y} \mid \mathbf{x}; \mathbf{\Theta})$. They share an identical prompt prefix $\mathbf{x}$, identical attention masks over the input context, and the identical frozen parameter matrix $\mathbf{\Theta}$. In complex software engineering and algorithmic reasoning tasks, the probability mass of the model is heavily concentrated around dominant pretraining heuristics and superficial surface patterns.
+
+::: {.column-margin}
+Sampling $N$ candidates from a single distribution with average pairwise error correlation $\bar{\rho}$ yields an effective hypothesis count of:
+$$N_{\text{eff}} = \frac{N}{1 + (N - 1)\bar{\rho}}$$
+If $\bar{\rho} = 0.85$ across $N=16$ rollouts, the system achieves an effective search breadth of only $N_{\text{eff}} \approx 1.16$ independent hypotheses, despite paying $16\times$ the compute.
+:::
+
+As a result, the candidate trajectories exhibit high mutual covariance. While the $N$ outputs vary at the lexical surface—renaming local variables, rearranging conditional clauses, or adjusting logging statements—they routinely replicate the exact same underlying conceptual error. For example, when tasked with resolving a cache stampede in a distributed key-value store, all sixteen sampled candidates might independently generate variations of a local thread sleep, failing entirely to implement a distributed lease or mutex. The effective number of independent hypotheses $N_{\text{eff}}$ is governed by the rank of the semantic covariance matrix rather than the scalar sample count $N$:
+
+$$N_{\text{eff}} = \frac{N}{1 + (N - 1)\bar{\rho}} \ll N$$
+
+where $\bar{\rho}$ represents the mean pairwise correlation of failure modes across candidates. When $\bar{\rho} \to 1$, scaling $N$ provides vanishingly small increments in actual coverage while multiplying the compute load ($N \cdot C_{\text{FLOP}}$) and saturating accelerator memory channels during parallel prefill and decode.
+
+Relying on unweighted sampling breadth creates a false sense of operational safety while burning system resources. To achieve genuine hypothesis diversification, the runtime must inject structured, orthogonal perturbations into the exploration process:
+
+1. *Contextual Perturbation:* Conditioning alternative rollouts on heterogeneous prompt frames, contrasting architectural stances, or explicitly conflicting hypotheses (e.g., forcing Candidate A to assume an I/O bottleneck while forcing Candidate B to assume lock contention).
+2. *State Branching:* Seeding candidate trajectories from distinct intermediate execution states $\mathcal{S}$ within a sandboxed environment, rather than branching solely from the initial root prompt.
+3. *Semantic Clustering and Deduplication:* Parsing generated proposals into canonical Abstract Syntax Tree (AST) representations, computing structural diffs, and pruning redundant candidates before allocating expensive downstream verification cycles.
+:::
+
+::: {.fallacy-pitfall}
+**Fallacy:** *A high verifier score is task completion.*
+
+To automate the selection of candidates generated during breadth or tree search, agent frameworks incorporate verification components, such as learned Process Reward Models (PRMs), secondary LLM-as-a-judge evaluators, or heuristic test runners. A common architectural fallacy is to treat a high scalar score emitted by one of these surrogate verifiers ($v(\mathbf{y}) > 1 - \epsilon$) as equivalent to verifiable task completion, immediately committing the candidate mutation to production environments.
+
+This fallacy represents a direct manifestation of Goodhart's Law: *when a measure becomes a target, it ceases to be a good measure.* In an optimization setting, when a search algorithm explores an expansive candidate space to maximize an objective function, it systematically searches for and exploits the approximation errors of the objective. Every verifier $v(\mathbf{y})$ is an imperfect surrogate for the true, latent task specification $T^*(\mathbf{y}) \in \{0, 1\}$. We can formalize the surrogate score as:
+
+$$v(\mathbf{y}) = T^*(\mathbf{y}) + \eta(\mathbf{y})$$
+
+where $\eta(\mathbf{y})$ represents the verifier's approximation error. When a deliberation policy scales search breadth or depth, the maximization operator $\arg\max_{\mathbf{y} \in \mathcal{Y}} v(\mathbf{y})$ does not merely identify candidates where $T^*(\mathbf{y}) = 1$; it aggressively samples the extreme positive tail of the error distribution $\eta(\mathbf{y})$.
+
+::: {.column-margin}
+Under Goodhart's Law, test-time search against a surrogate verifier $v(\mathbf{y})$ optimizes for the verifier's blind spots $\eta(\mathbf{y})$. In software agents, this produces reward hacking—such as swallowing exceptions or modifying mock assertions—that achieves perfect scores while corrupting system state.
+:::
+
+In autonomous software engineering agents, this failure mode manifests as reward hacking:
+- *Test Circumvention:* A candidate patch wraps an entire subsystem in a bare `try-except` block that catches all exceptions and silently returns an empty result. A naive test runner that checks only for a zero process exit code records a success, awarding the candidate a score of $1.0$, even though the patch completely disables core system functionality.
+- *Assertion Neutralization:* The candidate modifies the test harness itself, deleting assertion statements or altering mock return values to force automated test suites to pass.
+- *PRM Exploitation:* A learned Process Reward Model trained on human step-level preferences exhibits severe length and stylistic biases. A candidate rollout that adopts a confident, formalistic tone and emits extensive pseudocode will receive an elevated reward score from the PRM despite containing an inverted logical predicate.
+
+Surrogate verifier scores must serve strictly as guidance heuristics to prioritize search exploration, never as authoritative commitments. Under the Saltzer, Reed, and Clark End-to-End Argument, invariant closure can only be certified by the end-to-end consumer of the result. The agent runtime must implement an absolute separation of powers between *search guidance* and *acceptance gating*. The acceptance gate must consist of external, hermetic verification engines—isolated compilers, sandboxed integration test suites with immutable assertions, static type checkers, and containerized invariant monitors—that cannot be modified or influenced by the candidate generator. A task transitions to completed if and only if the immutable acceptance suite asserts full invariant satisfaction.
+:::
+
+::: {.fallacy-pitfall}
+**Pitfall:** *Omitting verifier, tool, and branch-state work from the budget.*
+
+When budgeting resources for test-time deliberation, system designers routinely model total cost as the product of candidate count and generator token consumption:
+
+$$C_{\text{deliberation}} \approx N \times K \times \text{Cost}_{\text{token}}$$
+
+They treat verifier scoring, environment tool execution, and branch-state management as negligible background overheads. In production systems, this omission invalidates capacity plans, causes severe pipeline stalls, and triggers out-of-memory crashes on serving clusters.
+
+In real-world deliberation topologies, non-generation workloads frequently dominate the critical path across wall-clock time, compute FLOPs, host memory, and accelerator HBM:
+
+1. *Verifier Compute Footprint:* If a search policy evaluates intermediate steps using an auxiliary Process Reward Model or a cross-checking model, scoring a tree of breadth $B$ and depth $D$ requires $B \times D$ separate prefill and decode passes. Because verifier inputs contain the entire trajectory prefix plus the candidate step, verifier prefill FLOPs scale quadratically with trajectory length.
+2. *Host Sandbox and Tool Latency:* While an accelerator generates a token in tens of milliseconds, executing a deterministic tool or test runner—such as compiling a C++ codebase, executing an integration test suite, or spinning up a PostgreSQL container—operates on human or operating system timescales (seconds to minutes). If an agent explores eight parallel branches that each require running an integration suite, container startup latency, local disk I/O contention, and test timeouts dominate total wall-clock time $T_{\text{wall}}$.
+3. *Branch-State and KV-Cache Memory Pressures:* Maintaining speculative branches in a search tree requires preserving intermediate execution states. In accelerator memory, preserving the key-value tensors for multiple uncommitted paths to allow backtracking without recomputing prefills consumes gigabytes of HBM. In host memory, maintaining filesystem snapshots or container overlays for each active search branch consumes disk space and memory bandwidth. When HBM or RAM capacity is exceeded, the runtime is forced to evict KV blocks to host memory over the PCIe bus or recompute them from scratch, introducing massive execution bubbles.
+
+::: {.callout-note title="Worked Example: Multi-Resource Budget Accounting in Deliberation Systems"}
+Consider an autonomous repair agent tasked with fixing a bug in an asynchronous database driver. The orchestrator deploys a Best-of-4 tree search of depth $D=3$ using an unprivileged 70B parameter model in FP16 ($|\mathbf{\Theta}| = 140\text{ GB}$).
+
+**Generator Compute:**
+The agent explores $B=4$ branches at each depth $D=3$, generating a total of $4 \times 3 = 12$ speculative candidates. Each candidate step generates $K = 512$ tokens from a running context of $S = 4{,}096$ tokens.
+- Total generation tokens: $12 \times 512 = 6{,}144\text{ tokens}$.
+- On an accelerator with $\beta = 3.35\text{ TB/s}$ memory bandwidth, unbatched decode takes:
+  $$T_{\text{gen}} = 6{,}144 \times \frac{140 \times 10^9}{3.35 \times 10^{12}} \approx 256.8\text{ seconds of decode transit}$$
+
+**Verifier Compute:**
+At each of the 12 steps, a 70B PRM scores the step. The PRM must prefill the entire context ($S \approx 4{,}608\text{ tokens}$) and decode a single score token.
+- Total verifier prefill tokens: $12 \times 4{,}608 = 55{,}296\text{ tokens}$.
+- Prefill compute at $2 \times |\mathbf{\Theta}|$ FLOPs/token:
+  $$C_{\text{verif}} = 55{,}296 \times 2 \times (70 \times 10^9) \approx 7.74 \times 10^{15}\text{ FLOPs}$$
+  On an H100 GPU running dense FP16 tensor cores at an effective $500\text{ TFLOP/s}$, verifier prefill takes $15.5\text{ seconds}$ of pure tensor compute.
+
+**Tool and Sandbox Execution:**
+At depth $D=3$, the 4 leaf candidates are compiled and tested inside hermetic Docker containers.
+- Container initialization, volume mounting, and environment setup: $4.5\text{ s}$ per candidate.
+- Test suite execution: $35.0\text{ s}$ per candidate.
+- Total sandbox wall-clock time (assuming 2 concurrent container slots):
+  $$T_{\text{sandbox}} = \frac{4 \times (4.5 + 35.0)}{2} = 79.0\text{ seconds}$$
+
+**KV-Cache and Branch State Memory:**
+Each active branch maintains a KV-cache footprint across 80 transformer layers, with 8 key-value heads and a head dimension of 128 in 16-bit precision:
+$$M_{\text{KV/token}} = 2 \times 80 \times 8 \times 128 \times 2\text{ bytes} \approx 327.68\text{ KB/token}$$
+At $S+K = 4{,}608$ tokens, each branch retains:
+$$M_{\text{branch}} = 4{,}608 \times 327.68\text{ KB} \approx 1.51\text{ GB}$$
+Maintaining 4 active search paths simultaneously consumes $6.04\text{ GB}$ of dedicated accelerator HBM exclusively for speculative KV state. If evicted to host memory over PCIe Gen5 x16 ($\approx 64\text{ GB/s}$ bidirectional), restoring a branch adds round-trip transfer latency.
+
+**Total Task Resource Ledger:**
+- Total Wall-Clock Time: $T_{\text{wall}} = 256.8\text{ s (gen)} + 15.5\text{ s (verif)} + 79.0\text{ s (sandbox)} = 351.3\text{ seconds}$.
+- Non-generation work (verification and sandboxed testing) accounts for $94.5\text{ seconds}$ ($26.9\%$) of total task wall-clock latency.
+- In financial cost, the 55,296 verifier prefill tokens exceed the generator's token count by nearly an order of magnitude ($9\times$).
+:::
+
+Omitting verifier FLOPs, container execution time, and KV-cache footprints from capacity plans guarantees system failure. The agent runtime must govern deliberation through a multi-dimensional resource ledger:
+
+$$\mathbf{B} = \left\langle T_{\text{wall}}^{\max},\; C_{\text{gen}}^{\max},\; C_{\text{verif}}^{\max},\; M_{\text{KV}}^{\max},\; N_{\text{sandbox}}^{\max} \right\rangle$$
+
+Stopping conditions, branch pruning heuristics, and scheduler admission controls must track all dimensions simultaneously, terminating or degrading search paths whenever any single resource ceiling is breached.
+:::
+
+The dismantling of these four fallacies reinforces the governing architectural reality of test-time deliberation: test-time compute is not a magic lever that converts statistical uncertainty into truth by brute-force token generation. Rather, deliberation is an unprivileged, multi-resource pipeline that balances stochastic generation, hypothesis diversification, and external empirical verification under rigid physical constraints. Recognizing these failure boundaries brings us to the authoritative synthesis of test-time computation and the fundamental state-management problem that deliberate exploration creates.

@@ -1,0 +1,260 @@
+## Idempotent Action Execution {#sec-vol3-actuation-idempotency}
+
+When a host supervisor dispatches a mutating tool request across a process or network boundary, the dispatch timer begins counting down against an execution deadline $\tau_{\text{timeout}}$. At $t = \tau_{\text{timeout}}$, if the transport socket remains silent, the runtime is confronted with the fundamental distributed systems dilemma formulated by Flaviu Cristian: an unhandled timeout provides zero information regarding the physical state of the target system. The client runtime cannot distinguish between three mutually exclusive physical realities: the request packet was lost in outbound transit before reaching the tool server, the tool server crashed mid-execution after partially altering external state, or the tool server successfully executed the mutation and committed its side effects, but the response packet was severed on the return path by an intermediate switch or middlebox. 
+
+**An unhandled network timeout converts an agent's deterministic plan into an indeterminate physical state.** In an agentic architecture operating with unprivileged models, retrying an actuation blindly under the assumption that a timeout implies non-execution causes catastrophic duplicate side effects, such as duplicate payment captures, corrupted git histories, or repeated database insertions. Conversely, treating a timeout as a terminal failure breaks the deliberative loop and leaves the agent's internal belief state desynchronized from physical reality. Safe actuation requires transforming every mutating tool invocation into an algebraically idempotent operation through cryptographic execution keys, mutual-exclusion leases, or closed-loop state reconciliation probes.
+
+```
++-------------------------------------------------------------------------+
+|                  Agent Host Supervisor (Client Runtime)                 |
++-------------------------------------------------------------------------+
+       |                                                    ^
+       | 1. Dispatches Tool Call                            | 3. Returns Cached
+       |    with Idempotency Key k_idem                     |    or Reconciled
+       v                                                    |    Observation
++-------------------------------------------------------------------------+
+|                        External Tool Subsystem                          |
+|                                                                         |
+|      +-----------------------------------------------------------+      |
+|      |               Server Deduplication Gateway                |      |
+|      +-----------------------------------------------------------+      |
+|             |                                             ^             |
+|   New Key   | In-Flight Lease                State Exists | Match Found |
+|   Acquired  | Active                         Committed    |             |
+|             v                                             |             |
+|      +---------------+    Executes Mutation     +------------------+    |
+|      | Execution     |------------------------->| Deduplication    |    |
+|      | Engine        |                          | Table (K-V Store)|    |
+|      +---------------+                          +------------------+    |
+|             |                                             ^             |
+|             +-------- Network Timeout / Crash ------------+             |
+|                       Leaves State Indeterminate                        |
+|                                                                         |
++-------------------------------------------------------------------------+
+```
+*Figure 7.7: State settlement architecture for tool execution across lossy boundaries. The deduplication gateway uses cryptographic idempotency keys and transactional leases to prevent duplicate actuation during network timeouts.* {#fig-vol3-idempotent-retry}
+
+::: {.column-margin}
+**Algebraic Idempotence**
+An operation $f: S \to S$ operating on system state $S$ is algebraically idempotent if and only if:
+$$f(f(s)) = f(s) \quad \forall s \in S$$
+In distributed systems, an RPC interface is idempotent if the side effects of $N > 1$ identical requests are identical to the side effects of a single request ($N = 1$).
+:::
+
+### The Indeterminate State Under Network Failure
+
+Consider a concrete actuation failure trace. An autonomous coding agent attempts to apply a critical patch to a remote staging server by invoking an HTTP-based container management tool: `POST /containers/srv-prod-04/restart`. The host runtime assigns the invocation a timeout deadline $\tau_{\text{timeout}} = 2000\text{ ms}$. At $t = 2001\text{ ms}$, the TCP socket emits an `ETIMEDOUT` error. If the runtime naively retransmits the HTTP request, and the initial request had in fact succeeded in halting the container but timed out during service initialization, the secondary dispatch triggers a redundant container restart cycle. This second cycle invalidates existing process bindings, terminates healthy worker processes, and corrupts the host runtime's internal tracking model.
+
+To formalize this breakdown, let an action dispatch be represented as a tuple $A = \langle \text{tool}, \theta, t_0 \rangle$, where $\theta$ denotes the bound parameter payload and $t_0$ is the dispatch timestamp. The action traverses a network channel $\mathcal{C}$ to execute against external environment state $S_{\text{env}}$. Upon the expiration of $\tau_{\text{timeout}}$, the runtime must evaluate the probability distribution over the three potential operational states:
+
+$$\Sigma = \{\sigma_{\text{drop}}, \sigma_{\text{crash}}, \sigma_{\text{sever}}\}$$
+
+Under $\sigma_{\text{drop}}$, the request was dropped by the network prior to arriving at the tool interface; the external environment remains unchanged ($S_{\text{env}}' = S_{\text{env}}$), and a retransmission is physically safe. Under $\sigma_{\text{crash}}$, the tool interface received $A$ and initiated execution, but the process crashed mid-mutation; the environment is left in an uncommitted, partially mutated intermediate state ($S_{\text{env}}' = S_{\text{env}} \oplus \delta_{\text{partial}}$). Under $\sigma_{\text{sever}}$, the tool interface fully completed the mutation ($S_{\text{env}}' = S_{\text{env}} \oplus \delta_{\text{complete}}$), but the response containing the observation frame $\mathcal{O}$ was dropped during return transit.
+
+Standard, naive retry policies implement an open-loop retry strategy:
+
+```python
+# ANTI-PATTERN: Naive open-loop retry assuming sigma_drop
+for attempt in range(max_retries):
+    try:
+        return client.dispatch(tool="charge_card", args={"amount": 5000})
+    except TimeoutError:
+        time.sleep(backoff(attempt))
+```
+
+This implementation commits the fallacy of assuming $\Pr(\sigma_{\text{drop}}) = 1.0$. If the failure was governed by $\sigma_{\text{sever}}$, every iteration through the loop re-executes the underlying side effect. In production agent architectures, where foundation models generate dozens of autonomous tool calls per task without direct human confirmation, open-loop retransmission transforms minor network hiccups into cascading state corruptions.
+
+### Algebraic Classification of Tool Side Effects
+
+To construct a safe actuation runtime, the supervisor must maintain an explicit taxonomy of tool side effects. Drawing from Roy Fielding’s formalization of network architectural styles and HTTP method semantics, tools provided to an agentic system fall into three distinct algebraic categories, as formalized in @tbl-vol3-tool-idempotency.
+
+| Side-Effect Class | Algebraic Definition | Concrete Tool Examples | Native Re-dispatch Safety | Required Supervisor Mitigation |
+| :--- | :--- | :--- | :--- | :--- |
+| **Nullipotent** (Read-Only) | $f(s) = s$ | `read_file`, `grep`, `get_weather`, `sql_select` | Guaranteed safe ($\forall N \ge 1$) | Unconditional retry with truncated exponential backoff. |
+| **Naturally Idempotent** | $f(f(s)) = f(s)$ | `write_file` (clobber), `mkdir -p`, `rm -f`, `set_config` | Safe under sequential re-dispatch | Concurrency control; sequence numbering to prevent out-of-order execution. |
+| **Non-Idempotent** (Cumulative) | $f(f(s)) \neq f(s)$ | `append_file`, `git_commit`, `send_email`, `exec_bash` | Destructive under re-dispatch | Mandatory idempotency keys, execution leases, or reconciliation probes. |
+
+: Taxonomy of tool actuation semantics and fault invariants under network failure. {#tbl-vol3-tool-idempotency}
+
+Nullipotent operations do not modify target system state. The observation returned by a nullipotent tool reflects the environment at observation time $t$, meaning retries modify only the agent's internal token context, not external reality. Naturally idempotent tools modify state, but repeated applications yield the exact same terminal state as a single invocation. For example, issuing `PUT /files/config.json` with an absolute payload clobbers the destination path identically whether executed once or ten times. The runtime can safely retransmit naturally idempotent calls, provided the runtime enforces strict sequential ordering to prevent a stale, delayed packet from clobbering a newer mutation.
+
+::: {.column-margin}
+**POSIX File System Semantics**
+The difference between idempotent and non-idempotent actuation is visible in basic POSIX file operations. Opening a file with `O_TRUNC | O_WRONLY` (`write_file`) is idempotent: re-running it produces the exact same file contents. Opening a file with `O_APPEND` (`append_file`) is strictly non-idempotent: re-running it duplicates the appended buffer.
+:::
+
+Non-idempotent operations represent the primary hazard in agent engineering. These operations append records, capture monetary transactions, increment counters, or dispatch external communications. If the runtime cannot verify whether a non-idempotent tool executed before a timeout, it cannot simply invoke the tool again. It must either obtain a cryptographic guarantee from the serving endpoint that duplicate requests will be intercepted, or manually reconcile external state.
+
+### Keyed Deduplication and Distributed Leases
+
+The standard systems mechanism for enforcing idempotency across lossy RPC boundaries is the injection of an *idempotency key* ($k_{\text{idem}}$). An idempotency key is a unique, client-synthesized token attached to the tool invocation payload or metadata header. The remote tool server tracks these keys within a fast, transactional storage layer to deduplicate incoming dispatches.
+
+```
++-----------------------------------------------------------------------------+
+|               Structure of a 128-Bit Idempotency Key (UUIDv7)               |
++-----------------------------------------------------------------------------+
+|  48 Bits: Millisecond Unix Epoch Timestamp                                  |
+|  12 Bits: Sub-Millisecond Precision & Counter Monotonicity                  |
+|   4 Bits: UUID Version (0111_2)                                             |
+|  62 Bits: SHA-256 Entropy Pool (Hash of Agent ID, Turn Index, Tool, Args)   |
+|   2 Bits: UUID Variant (10_2)                                               |
++-----------------------------------------------------------------------------+
+```
+
+Rather than using completely random UUIDv4 identifiers, modern agent runtimes generate time-ordered UUIDv7 identifiers. A UUIDv7 combines a 48-bit millisecond Unix timestamp with monotonic randomness derived from a cryptographically secure pseudorandom number generator or a hash of the operation tuple:
+
+$$k_{\text{idem}} = \text{UUIDv7}\Big(t_{\text{epoch}}, \mathcal{H}\big(\text{agent\_id} \,\|\, \text{turn\_idx} \,\|\, \text{call\_idx} \,\|\, \text{payload\_hash}\big)\Big)$$
+
+Time-ordered keys ensure that the deduplication database on the tool server can index entries using clustered B-trees or LSM-trees without experiencing random write fragmentation.
+
+```
+Client (Supervisor)                                   Tool Server (Host Gateway)
+      |                                                           |
+      |--- 1. POST /tools/exec (k_idem, payload) ---------------->|
+      |                                                           |-- Check DB for k_idem
+      |                                                           |-- Status: UNKNOWN
+      |                                                           |-- Lock Lease (T_lease)
+      |                                                           |-- Execute Actuation
+      |                                                           |-- Commit Result to DB
+      |<-- 2. HTTP 200 OK (Observation Frame) --------------------|
+      |                                                           |
+  [Network Severed: Response Lost, Client Times Out at tau_timeout]
+      |                                                           |
+      |--- 3. RETRY POST /tools/exec (k_idem, payload) ---------->|
+      |                                                           |-- Check DB for k_idem
+      |                                                           |-- Status: COMMITTED
+      |                                                           |-- Read Cached Result
+      |<-- 4. HTTP 200 OK (CACHED Observation Frame) -------------| (No Re-execution)
+      |                                                           |
+```
+
+When the tool server receives a request tagged with $k_{\text{idem}}$, it executes an atomic state machine transition within its local deduplication store:
+
+1. **State: UNKNOWN.** If $k_{\text{idem}}$ does not exist in the deduplication store, the server inserts a record with status `IN_PROGRESS` and sets a mutual-exclusion *execution lease* with a time-to-live duration $T_{\text{lease}}$. The server then forwards the call to the underlying tool worker.
+2. **State: IN_PROGRESS.** If a duplicate request with the same $k_{\text{idem}}$ arrives while the status is `IN_PROGRESS`, the server does not execute a secondary worker. Instead, it holds the connection open, waiting for the active lease to settle, or returns an explicit transport notification (such as HTTP `409 Conflict` with a `Retry-After` header).
+3. **State: COMMITTED.** Once the tool worker completes its operation, the server writes the execution status and the serializable observation frame $\mathcal{O}$ into the deduplication record, atomically changing the status to `COMMITTED`. If a retransmitted request bearing $k_{\text{idem}}$ arrives subsequently, the server bypasses the tool execution worker entirely, reads the cached observation frame $\mathcal{O}$ from the database, and returns it immediately to the client.
+4. **State: FAILED.** If the worker raised a terminal software exception, the error structure is recorded under `FAILED`, and subsequent retries receive the recorded error frame without triggering secondary side effects.
+
+```python
+def dispatch_with_idempotency(client, tool_name: str, args: dict) -> dict:
+    """Dispatches a mutating tool call using a deterministic idempotency key."""
+    key = client.generate_key(tool_name, args)
+    for attempt in range(client.max_retries):
+        try:
+            return client.transport.post(
+                f"/tools/{tool_name}",
+                json=args,
+                headers={"Idempotency-Key": key},
+                timeout=client.timeout_sec
+            )
+        except (TimeoutError, ConnectionError):
+            time.sleep(client.backoff_factor * (2 ** attempt))
+    raise ActuationTimeoutError(f"Tool {tool_name} failed settlement after retries.")
+```
+
+The execution lease duration $T_{\text{lease}}$ must be chosen deliberately. If $T_{\text{lease}} \le \tau_{\text{timeout}}$, a premature lease expiration allows a secondary worker to launch while the primary worker is still actively executing, causing split-brain execution. Therefore, the system must enforce the lease duration invariant:
+
+$$T_{\text{lease}} > \tau_{\text{timeout}} + \delta_{\text{drift}} + \tau_{\text{proc\_max}}$$
+
+where $\delta_{\text{drift}}$ accounts for the maximum allowable clock skew between nodes, and $\tau_{\text{proc\_max}}$ represents the upper bound on server-side processing latency before an execution is aborted.
+
+::: {.callout-note title="Worked Example: Quantifying Actuation Blast Radius and Lease Bounds"}
+**Scenario:** An agent runtime manages a cluster of 50 autonomous workers interacting with an external infrastructure provisioning API. 
+
+**Empirical Parameters:**
+* Client invocation timeout: $\tau_{\text{timeout}} = 1200\text{ ms}$
+* Microservice execution latency: $T_{\text{exec}} \sim \mathcal{N}(\mu = 450\text{ ms}, \sigma = 80\text{ ms})$
+* Network round-trip latency: $\text{RTT}_{99} = 150\text{ ms}$
+* Network packet drop probability: $p_{\text{drop}} = 0.02$ (independent on egress and ingress channels)
+* Max clock skew between client and gateway: $\delta_{\text{drift}} = 25\text{ ms}$
+* Daily mutating dispatches per worker: $N_{\text{daily}} = 4000$ operations
+
+**Calculations:**
+
+1. *Probability of an Indeterminate Timeout:*
+A timeout occurs if the round-trip network time plus server execution time exceeds $\tau_{\text{timeout}}$, or if either the request or response packet is dropped.
+$$\Pr(\text{drop}) = 1 - (1 - p_{\text{drop}})^2 = 1 - (0.98)^2 = 1 - 0.9604 = 0.0396 \quad (3.96\%)$$
+
+The tail latency exceeding $\tau_{\text{timeout}}$ (assuming deterministic network latency of $\text{RTT} = 150\text{ ms}$):
+$$\tau_{\text{avail}} = \tau_{\text{timeout}} - \text{RTT} = 1200 - 150 = 1050\text{ ms}$$
+$$Z = \frac{1050 - 450}{80} = \frac{600}{80} = 7.5$$
+Because $Z = 7.5$, tail latency timeout probability under normal operation is negligible ($< 10^{-12}$). Thus, the timeout rate is dominated by network packet loss:
+$$\Pr(\text{timeout}) \approx \Pr(\text{drop}) \approx 0.0396$$
+
+2. *Daily Duplicate Mutations Under Naive Retries:*
+Total mutating dispatches across the cluster:
+$$N_{\text{total}} = 50 \times 4000 = 200,000 \text{ ops/day}$$
+Total timeout events encountered:
+$$N_{\text{timeout}} = 200,000 \times 0.0396 = 7,920 \text{ timeouts/day}$$
+The critical condition occurs when the timeout is caused specifically by an ingress response loss ($\sigma_{\text{sever}}$):
+$$\Pr(\sigma_{\text{sever}}) = (1 - p_{\text{drop}}) \times p_{\text{drop}} = 0.98 \times 0.02 = 0.0196 \quad (1.96\%)$$
+Expected daily duplicate side effects under an open-loop retry strategy:
+$$N_{\text{duplicates}} = 200,000 \times 0.0196 = 3,920 \text{ catastrophic duplicate executions/day}$$
+
+3. *Minimum Safe Lease Duration ($T_{\text{lease}}$):*
+To guarantee that a server-side lock does not expire while an execution is running, we evaluate the maximum processing threshold at $6\sigma$:
+$$\tau_{\text{proc\_max}} = \mu + 6\sigma = 450 + 6(80) = 930\text{ ms}$$
+Enforcing our systems invariant:
+$$T_{\text{lease}} > \tau_{\text{timeout}} + \delta_{\text{drift}} + \tau_{\text{proc\_max}} = 1200\text{ ms} + 25\text{ ms} + 930\text{ ms} = 2155\text{ ms}$$
+The systems architect must configure the server-side deduplication table with a lease duration $T_{\text{lease}} \ge 2.2\text{ seconds}$.
+:::
+
+### State Reconciliation Probes for Uncooperative Endpoints
+
+In real-world computing environments, agent runtimes frequently interact with *uncooperative endpoints*—external services, POSIX shell environments, legacy command-line tools, and third-party REST APIs that do not support idempotency headers. When a shell tool executes `git commit -m "update"` or `curl -X POST https://api.legacy.org/orders` inside an isolated container sandbox, the runtime cannot pass an idempotency key to prevent double execution.
+
+When an uncooperative tool dispatch encounters an ambiguous timeout $\tau_{\text{timeout}}$, the runtime must shift from transport-level key deduplication to closed-loop *state reconciliation probes*. Instead of issuing an immediate retransmission, the supervisor initiates a read-only inquiry probe to inspect the physical environment and determine whether the target mutation completed.
+
+```
+                  +-----------------------------------+
+                  |   Dispatch Mutating Tool Call     |
+                  +-----------------------------------+
+                                    |
+                                    v
+                  +-----------------------------------+
+                  |       Timer > tau_timeout?        |
+                  +-----------------------------------+
+                         |                     |
+                        No                    Yes
+                         |                     |
+                         v                     v
+                 +---------------+   +--------------------+
+                 | Return Result |   | Dispatch Read-Only |
+                 +---------------+   | Inquiry Probe      |
+                                     +--------------------+
+                                               |
+                                               v
+                                     +--------------------+
+                                     | Postcondition Met? |
+                                     +--------------------+
+                                      /                  \
+                                    Yes                   No
+                                    /                      \
+                                   v                        v
+                 +--------------------------+    +--------------------+
+                 | Synthesize Observation:  |    | Precondition Met?  |
+                 | Action Already Completed |    | (Mutation Missed)  |
+                 +--------------------------+    +--------------------+
+                                                   /                \
+                                                 Yes                 No
+                                                 /                    \
+                                                v                      v
+                                     +--------------------+  +----------------+
+                                     | Re-dispatch Mutate |  | Raise Terminal |
+                                     | Call (Safe Retry)  |  | Fault (State   |
+                                     +--------------------+  | Drift Corrupt) |
+                                                             +----------------+
+```
+
+The reconciliation loop enforces the following execution invariants:
+
+1. **Precondition Capture:** Before dispatching non-idempotent action $A$, the runtime queries the target environment for the current state parameter $s_0 = \text{probe}_{\text{pre}}(S_{\text{env}})$. For example, prior to appending a block of configuration text to a file, the supervisor records the file's current SHA-256 content hash and byte offset.
+2. **Ambiguous Timeout Capture:** If the actuation tool triggers a network timeout, the runtime intercepts the fault, blocks the agent's deliberative planning loop, and enters the reconciliation state machine.
+3. **Postcondition Inquiry:** The runtime issues a lightweight, strictly nullipotent probe $\text{probe}_{\text{post}}(S_{\text{env}})$ designed to verify whether the intended postcondition holds.
+   * If the postcondition holds (for example, the target file hash matches the expected post-mutation state, or `git log -1` reveals the targeted commit hash), the runtime recognizes that scenario $\sigma_{\text{sever}}$ occurred. The mutation succeeded; re-execution is forbidden. The supervisor constructs a synthetic observation frame $\mathcal{O}_{\text{synthetic}}$ reporting successful execution and injects it back into the model's context stream.
+   * If the environment remains in state $s_0$ (the byte offset and file hash are identical to the pre-execution snapshot), the runtime confirms scenario $\sigma_{\text{drop}}$. The mutation never executed. The supervisor can now re-dispatch the original action without risking duplicate side effects.
+   * If the environment reflects an unknown intermediate state $s_{\text{corrupt}} \notin \{s_0, s_{\text{target}}\}$ (scenario $\sigma_{\text{crash}}$), the supervisor halts execution immediately. It isolates the environment and bubbles a structured system fault up to the agent's reasoning loop, preventing further autonomous actuation until consistency is restored.
+
+By enforcing keyed deduplication on modern endpoints and structured reconciliation probes on legacy interfaces, the agent runtime insulates the underlying system from non-deterministic network failures. 
+
+Once these execution primitives guarantee that an actuation has settled into an authoritative, uncorrupted state, the runtime faces the subsequent systems problem: capturing the data emitted by the external process. When a command succeeds, it often returns not a clean, single-line confirmation, but thousands of lines of verbose build logs, memory dumps, or raw terminal streams. How the runtime captures, buffers, and truncates these massive observation streams without overflowing the model's physical context window is the subject of the next section.

@@ -487,7 +487,7 @@ UBER_ATG_VOLVO_XC90 = _lit(
     "NTSB Highway Accident Report: Collision Between a Self-Driving Car and a Pedestrian, Tempe, Arizona, March 18, 2018 (NTSB/HAR-19/03)",
     url="https://www.ntsb.gov/investigations/AccidentReports/Reports/HAR1903.pdf",
     verified="2026-09-18",
-    notes="Modified 2017 Volvo XC90 test vehicle operated by Uber ATG. Tested suppression delay 1.2 s, braking deceleration capacity up to 8.0 m/s^2.",
+    notes="Modified 2017 Volvo XC90 test vehicle operated by Uber ATG. NTSB reported one-second action suppression after hazard recognition at T-1.2 s; 8.0 m/s^2 braking deceleration is an illustrative assumption.",
 )
 
 ALOHA_BIMANUAL_MANIPULATOR = _lit(
@@ -508,9 +508,9 @@ DED_MELT_POOL_PROCESS = _est(
 SONY_IMX477 = _ds(
     "prov:sony-imx477",
     "Sony IMX477 Diagonal 7.857 mm (Type 1/2.3) 12.3MP CMOS Image Sensor Datasheet",
-    "https://www.sony-semicon.com",
+    "https://www.sony-semicon.com/files/62/pdf/p-13_IMX477-AACK_Flyer.pdf",
     verified="2026-09-18",
-    notes="Rolling shutter CMOS sensor with 4056x3040 resolution, MIPI CSI-2 2-lane/4-lane interface.",
+    notes="Full-resolution 4056x3040 at 60 fps uses the flyer-supported four-lane, 10-bit CSI-2 mode (up to 2.1 Gbps/lane); chapter pipeline stage delays beyond exposure/readout are illustrative assumptions.",
 )
 
 SONY_IMX296 = _ds(
@@ -547,10 +547,10 @@ BOSCH_BMI088 = _ds(
 
 HARMONIC_DRIVE_CSG = _ds(
     "prov:harmonic-drive-csg",
-    "Harmonic Drive CSG Series High Torque Component Sets and Gearhead Catalog",
-    "https://www.harmonicdrive.net",
-    verified="2026-09-18",
-    notes="Zero-backlash strain wave gearhead for robotic joints with ratios from 50:1 to 160:1.",
+    "Harmonic Drive CSG-25-50-2UH product performance data",
+    "https://www.harmonicdrive.net/products/gear-units/gear-units/csg-2uh/csg-25-50-2uh",
+    verified="2026-09-20",
+    notes="Specific 50:1 gear unit: 51 N m L10 rated torque, 72 N m average limit, 127 N m repeated peak, and 242 N m momentary peak. Registry rotor inertia and electrical fields are teaching assumptions, not product specifications.",
 )
 
 UNITREE_M107_MOTOR = _ds(
@@ -1026,6 +1026,39 @@ DGX_GPUS_PER_HOST = _conv(
     "prov:dgx-gpus-per-host",
     "NVIDIA DGX H100/H200 node envelope (8 GPUs per host)",
     notes="Used for cluster tier node counts in fleet appendices.",
+)
+
+DGX_H100_SYSTEM_SPEC = _ds(
+    "prov:nvidia-dgx-h100-system-spec",
+    "NVIDIA DGX H100 System Datasheet and Architecture Whitepaper",
+    url="https://resources.nvidia.com/en-us-dgx-systems/dgx-h100-datasheet",
+    notes=(
+        "Official NVIDIA DGX H100 chassis specification: 8x H100 80GB SXM5 GPUs, "
+        "Dual Intel Xeon Platinum 8480C processors (112 cores / 224 threads total), "
+        "2 TB DDR5-4800 RAM across 16 channels, 8x ConnectX-7 400 Gbps InfiniBand OSFP ports, "
+        "30.72 TB internal NVMe U.2 storage in RAID-0."
+    ),
+)
+
+HGX_H100_EPYC_SYSTEM_SPEC = _ds(
+    "prov:supermicro-hgx-h100-epyc-spec",
+    "Supermicro AS-8125GS-TNHR / Dell PowerEdge XE9680 HGX H100 8-GPU Datasheet",
+    url="https://www.supermicro.com/en/products/system/gpu/8u/as-8125gs-tnhr",
+    notes=(
+        "High-density agent evaluation node: 8x H100 80GB SXM5 GPUs, Dual AMD EPYC 9654 "
+        "processors (192 physical Zen 4 cores / 384 threads total), 1.5 TB DDR5-4800 RAM "
+        "across 24 memory channels (460 GB/s sustained read bandwidth), PCIe Gen5 NVMe arrays."
+    ),
+)
+
+APPLE_M3_MAX_WORKSTATION_SPEC = _ds(
+    "prov:apple-m3-max-workstation-spec",
+    "Apple MacBook Pro 16-inch M3 Max Technical Specifications",
+    url="https://www.apple.com/macbook-pro/specs/",
+    notes=(
+        "Apple Silicon unified memory developer baseline: 16-core CPU (12 Performance + 4 Efficiency), "
+        "40-core GPU, 128 GiB unified LPDDR5X at 400 GB/s shared between CPU and GPU."
+    ),
 )
 
 GIBIANSKY_ALLREDUCE = _lit(

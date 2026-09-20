@@ -1,0 +1,231 @@
+## Tail-Based Sampling Budgets {#sec-vol3-observability-budgets}
+
+An enterprise platform orchestrating thousands of autonomous agent trajectories per hour encounters a physical telemetry dilemma that classical distributed tracing systems were never engineered to withstand. In microservice architectures, an individual OpenTelemetry span typically records a lightweight remote procedure call (RPC) consisting of HTTP metadata, database query text, and microsecond-scale execution timings—yielding on the order of two to five kilobytes per end-to-end trace. In stark contrast, an autonomous agent executing a complex task accumulates history across dozens of autoregressive inference steps, sandbox terminal interactions, and external tool invocations. Because every turn must preserve the exact input context, generated completion tokens, tool arguments, and standard I/O streams required to reproduce the agent's internal state machine, a single trajectory trace routinely consumes tens of megabytes of raw structured data.
+
+Persisting every production trace across an enterprise agent fleet rapidly saturates network egress bandwidth and overwhelms downstream observability storage clusters with petabytes of redundant, uninformative execution logs. Yet adopting conventional head-based sampling—where a fixed percentage of traces are randomly selected at trajectory initiation—cripples post-incident reliability engineering. In autonomous software systems operating at high baseline success rates, the critical operational signals that engineers must inspect—such as sandbox permission violations, multi-turn reasoning loops, and rare tool timeouts—occur in less than one percent of executions. Randomly dropping ninety-nine percent of incoming tasks at the front door guarantees that when a catastrophic failure corrupts production data, the causal telemetry trace required to diagnose the root cause was discarded before the error manifested. Managing the observability overhead of autonomous agents therefore demands an architectural shift from blind head-based filtering to state-aware, tail-based sampling buffers combined with cryptographic privacy sanitization.
+
+### The Telemetry Volume Explosion and Head-Sampling Pathology
+
+To understand why naive telemetry collection collapses under agentic workloads, consider the mathematical relationship governing context accumulation during an agent's autoregressive execution loop. Let an agent trajectory $\tau$ consist of $T$ sequential reasoning and execution turns:
+
+$$\tau = (s_0, a_0, o_0, s_1, a_1, o_1, \dots, s_T)$$
+
+At each turn $t \in \{1, \dots, T\}$, the host supervisor constructs a model prompt containing the system instructions, the cumulative historical sequence of past actions and tool observations, and the current task state. If the prompt at turn $t$ comprises $L_t$ tokens and the model emits $K_t$ output tokens, the uncompressed text volume generated during that single step scales proportionally with the context length. 
+
+::: {.column-margin}
+**Head vs. Tail Sampling**  
+*Head-based sampling* makes an irreversible retention decision at the arrival of step $t=0$, before the execution outcome or system trajectory is known. *Tail-based sampling* buffers spans in memory throughout execution, evaluating policy predicates only after the terminal state $s_T$ and reward $r$ materialize.
+:::
+
+Because the conversational history monotonically expands with each interaction, the cumulative context size across a multi-turn session does not remain constant; rather, it grows quadratically with respect to the turn count $T$ when step histories are fully mirrored in span payloads:
+
+$$V_{\text{tokens}} = \sum_{t=1}^T \left( L_0 + \sum_{j=0}^{t-1} (|a_j| + |o_j|) + K_t \right) = \mathcal{O}\left(T \cdot L_0 + T^2 \cdot (\overline{|a|} + \overline{|o|})\right)$$
+
+When this textual volume is serialized into standard OpenTelemetry attributes along with vector similarity scores, model generation hyperparameters, environmental variables, and stdout/stderr buffers from sandboxed tool executions, the resulting telemetry payload per turn averages between $30\text{ KB}$ and $150\text{ KB}$. For a fifty-turn trajectory operating within a 32,768-token context window, serializing every intermediate prompt and raw observation yields a single trace size ranging from $5\text{ MB}$ to over $25\text{ MB}$.
+
+```
+Span Serialization Breakdown (45 KB Turn Payload)
+-----------------------------------------------------------------
+[System Prompt & Tools Schema: 8 KB]
+[Multi-Turn Context History: 24 KB]
+[Raw LLM Output & Logit Metadata: 3 KB]
+[Tool Execution Standard Output/Error Streams: 9 KB]
+[Span Attributes, Resource Metrics & Timings: 1 KB]
+-----------------------------------------------------------------
+```
+
+Classical distributed tracing architectures address large data volumes by implementing head-based sampling at the tracing client or ingestion proxy, as popularized by systems such as Dapper [@sigelman2010dapper]. Under head-based sampling, an incoming request is assigned a uniform pseudo-random identifier; if the hash of this identifier falls below a predetermined sampling ratio $\theta \in (0, 1]$, tracing headers are propagated across downstream RPCs and the entire trace is recorded. If the hash exceeds $\theta$, trace collection is suppressed immediately at the root span.
+
+In deterministic client-server architectures where request durations span milliseconds and failures exhibit statistically uniform distributions, head-based sampling provides an unbiased representation of system latency profiles [@dean2013datacenter]. For autonomous agent systems, however, head-based sampling introduces a devastating sampling pathology. Consider an agent fleet processing $N = 100{,}000$ production tasks per day with an empirical task failure rate of $p_{\text{fail}} = 0.01$ (one percent). If an infrastructure team applies a ten-percent head-sampling budget ($\theta = 0.10$) to keep telemetry ingestion within provisioned storage quotas, the probability distribution of captured failures degrades severely.
+
+The expected number of failed trajectories captured over the deployment period is:
+
+$$\mathbb{E}[N_{\text{captured\_failures}}] = N \cdot p_{\text{fail}} \cdot \theta = 100{,}000 \times 0.01 \times 0.10 = 100$$
+
+Out of 1,000 production task failures, exactly 900 failures are irreversibly discarded at the gateway before the agent ever executes its first step. More critically, if a specific failure mode represents a rare edge case—such as a catastrophic file deletion loop or an authentication failure occurring in only $0.05\%$ of runs ($50$ total incidents)—the expected number of captured traces for that failure mode drops to:
+
+$$\mathbb{E}[N_{\text{rare\_failures}}] = 100{,}000 \times 0.0005 \times 0.10 = 5$$
+
+Because trace capture is stochastic and uncorrelated with runtime behavior, there is a substantial probability:
+
+$$P(\text{zero captured}) = (1 - \theta)^{50} = (0.90)^{50} \approx 0.00515$$
+
+that an anomalous behavior leaves almost no forensic footprint across the entire fleet. Conversely, the telemetry pipeline expends ninety percent of its allocated ingestion bandwidth capturing $9{,}900$ traces of mundane, identical successes that provide zero diagnostic value to systems engineers. 
+
+Head-based sampling forces a false dichotomy between storage insolvency and diagnostic blindness. The fundamental architectural defect of head-based sampling in agentic systems is that the decision to retain telemetry is executed under maximal uncertainty: at turn $t=0$, before the non-deterministic policy has committed its first action, encountered its first tool error, or drifted into an infinite execution loop.
+
+::: {.callout-note title="Worked Example: Telemetry Ingestion Inverted Economics"}
+Consider an autonomous software engineering agent deployment executing 10,000 tasks per hour across a distributed worker cluster. 
+
+**Cluster Workload Parameters:**
+- Active task throughput: $\lambda = 10{,}000\text{ tasks/hour} \approx 2.78\text{ tasks/s}$.
+- Average trajectory depth: $\overline{T} = 35\text{ turns}$.
+- Mean serialized telemetry per turn: $\overline{S_{\text{turn}}} = 40\text{ KB}$.
+- Mean trace size: $\overline{S_{\text{trace}}} = 35 \times 40\text{ KB} = 1.40\text{ MB}$.
+- Task outcome distribution: $95\%$ routine successes ($r = 1.0$), $4\%$ execution failures ($r = 0.0$), $1\%$ high-latency stragglers ($p99$ duration).
+
+**Scenario A: 100% Full Retention (Unsampled)**
+- Ingestion Data Rate:
+  $$B_{\text{full}} = 2.78\text{ tasks/s} \times 1.40\text{ MB/task} = 3.89\text{ MB/s} \approx 31.1\text{ Mbps}$$
+- Daily Telemetry Storage Volume:
+  $$V_{\text{daily}} = 10{,}000\text{ tasks/hour} \times 24\text{ hours} \times 1.40\text{ MB} = 336\text{ GB/day}$$
+- Monthly Uncompressed Ingestion: $10.08\text{ TB/month}$. In an enterprise setting with multi-agent fan-out and 100-turn tasks, this volume scales beyond $150\text{ TB/month}$, resulting in cloud observability bills that frequently exceed the raw model inference expenditures.
+
+**Scenario B: 5% Head-Based Sampling ($\theta = 0.05$)**
+- Retained tasks per hour: $500\text{ tasks/hour}$.
+- Daily Telemetry Storage Volume: $16.8\text{ GB/day}$.
+- Captured failures per hour: $10{,}000 \times 0.04 \times 0.05 = 20\text{ failures/hour}$ (out of 400 actual failures).
+- Discarded failures: $380\text{ failures/hour}$ ($95\%$ of all production bugs are lost).
+
+**Scenario C: State-Aware Tail-Based Sampling**
+- Retain $100\%$ of failures ($400\text{ tasks/hour} \times 1.40\text{ MB} = 560\text{ MB/hour}$).
+- Retain $100\%$ of stragglers ($100\text{ tasks/hour} \times 1.40\text{ MB} = 140\text{ MB/hour}$).
+- Downsample routine successes to $2\%$ ($9{,}500 \times 0.02 = 190\text{ tasks/hour} \times 1.40\text{ MB} = 266\text{ MB/hour}$).
+- Total Telemetry Storage Volume:
+  $$V_{\text{tail}} = (560 + 140 + 266)\text{ MB/hour} = 966\text{ MB/hour} \approx 23.2\text{ GB/day}$$
+- Ingestion reduction relative to full logging:
+  $$\text{Data Reduction} = 1 - \frac{23.2}{336} = 93.1\%$$
+
+By retaining telemetry based on terminal execution properties rather than initial randomization, the tail-based architecture achieves a $14.5\times$ storage reduction while capturing $100\%$ of all operational failures and performance anomalies.
+:::
+
+### Tail-Based Routing and Dynamic Decision Policies
+
+To circumvent the information loss inherent in head-based sampling, agent runtimes implement *tail-based sampling*. In a tail-based architecture, the decision to retain or discard a trace is deferred until the trajectory has terminated or crossed an unambiguous operational anomaly threshold. 
+
+Implementing tail-based sampling requires an intermediate, low-latency telemetry buffer capable of holding in-flight spans in memory for the entire lifespan of a task. When an agent executes, its generated spans—encompassing model requests, vector retrievals, sandboxed commands, and inter-agent messages—are streamed directly to an in-memory *trace escrow buffer* running either as a co-located sidecar process or within an ephemeral cluster of trace collectors. The collector groups spans by their root `trace_id`. The spans remain parked in the escrow buffer until the agent runtime emits a terminal status event or until an external supervisor flags an invariant violation.
+
+![Tail-Based Sampling Pipeline for Agent Trajectory Telemetry](images/svg/tail-sampling-pipeline.svg){#fig-vol3-tail-sampling-pipeline}
+
+As formalized in @fig-vol3-tail-sampling-pipeline, the tail-sampling collector evaluates incoming trajectories against a priority cascade of deterministic policy predicates. Rather than applying a single uniform rule, the routing engine classifies each completed trajectory into one of four distinct operational categories:
+
+| Trajectory Category | Classification Predicates | Sampling Policy | Primary Engineering Utility |
+| :--- | :--- | :--- | :--- |
+| **Failures & Violations** | Non-zero sandbox exit code; schema validation error; context budget exhaustion; security invariant tripped. | **$100\%$ Retention** | Forensic root-cause analysis; regression test generation; model patch validation. |
+| **Latency & Token Outliers** | Execution duration $> p99$; prompt tokens $> p95$; turn count $T > 3\times$ median. | **$100\%$ Retention** | Identifying autoregressive loops, prompt bloat, and sandbox I/O bottlenecks. |
+| **Human Interventions** | User override initiated; supervisory tool cancellation; manual permission elevation requested. | **$100\%$ Retention** | Alignment failure diagnosis; edge-case discovery; fine-tuning dataset curation. |
+| **Routine Successes** | Task objective verified ($r = 1.0$); duration $\le p90$; zero tool faults. | **$1\%\text{--}5\%$ Dynamic Sampling** | Longitudinal drift monitoring; baseline latency accounting; model performance tracking. |
+
+The decision logic governing trace eviction from the escrow buffer must operate deterministically. When an agent trajectory finishes, the host supervisor evaluates the terminal record and appends a routing directive attribute (`sampling.priority`) to the root span before closing the trace context.
+
+```python
+# Low-overhead tail-sampling classification predicate
+def classify_trajectory_sampling(trace: TrajectoryTrace) -> float:
+    if trace.has_policy_violation or trace.exit_code != 0:
+        return 1.0  # Retain 100% of faults and security errors
+    if trace.human_intervened:
+        return 1.0  # Retain 100% of supervisor escalations
+    if trace.duration_ms > LATENCY_P99_THRESHOLD_MS:
+        return 1.0  # Retain 100% of severe latency stragglers
+    if trace.total_tokens > TOKEN_BUDGET_P95_THRESHOLD:
+        return 1.0  # Retain 100% of context-thrashing runs
+    return 0.02     # Downsample routine completions to 2%
+```
+
+A critical systems constraint in tail-based sampling is the physical sizing of the trace escrow ring buffer. Because agent tasks can run for tens of minutes—far exceeding the sub-second lifetimes of microservice RPCs—holding uncompressed traces in memory introduces substantial memory pressure on worker nodes. 
+
+Let $C$ denote the number of concurrent agent trajectories executing across a node, $\overline{T_{\text{task}}}$ denote the average task duration in seconds, and $\beta$ denote the uncompressed telemetry generation rate in bytes per second:
+
+$$\beta = \frac{\overline{S_{\text{trace}}}}{\overline{T_{\text{task}}}}$$
+
+The minimum steady-state escrow buffer memory $M_{\text{escrow}}$ required to prevent premature trace eviction is:
+
+$$M_{\text{escrow}} \ge C \cdot \overline{T_{\text{task}}} \cdot \beta = C \cdot \overline{S_{\text{trace}}}$$
+
+If a single worker hosts $C = 128$ concurrent sandbox sessions with an average trace footprint of $\overline{S_{\text{trace}}} = 15\text{ MB}$, the node must dedicate nearly $2\text{ GB}$ of high-speed RAM exclusively to intermediate telemetry buffering. 
+
+To prevent memory exhaustion during sudden concurrency bursts or cascading straggler events, the escrow engine must implement two architectural safeguards. First, spans placed in escrow must be compressed using lightweight, block-oriented compression algorithms such as LZ4 or Zstandard at level 1; empirical benchmarks show these algorithms achieve a $3.5\times$ compression ratio on repetitive natural language and JSON schemas while consuming less than two percent of host CPU cycles. Second, the escrow buffer must enforce an explicit memory ceiling backed by an oldest-first ring eviction policy for routine successes: if the buffer reaches eighty-five percent capacity, routine successful spans are dropped immediately, while anomalous and error spans are strictly shielded from premature eviction.
+
+::: {.column-margin}
+**Escrow Eviction Invariant**  
+Under memory pressure, an escrow buffer must drop unclassified or routine-success traces before evicting any trace flagged with `exit_code != 0` or `policy_violation = True`. Error telemetry is protected memory.
+:::
+
+### In-Sandbox Cryptographic PII and Secret Redaction
+
+While tail-based sampling solves the data volume crisis, it exacerbates an equally severe security and compliance vulnerability: the exfiltration of sensitive information into observability backends. In an autonomous environment operating under the Zero Ambient Authority ($A = 0$) model, an agent dynamically interacts with proprietary code repositories, private customer databases, internal APIs, and configuration files. During standard execution, the model's prompts and tool outputs inevitably capture confidential tokens:
+
+1. **Authentication Secrets:** AWS access keys (`AKIA...`), GitHub personal access tokens (`ghp_...`), Bearer tokens, private SSH keys, and database connection strings containing embedded plaintext passwords.
+2. **Personally Identifiable Information (PII):** Customer names, national identification numbers, credit card sequences, physical addresses, and electronic mail headers encountered during data processing tasks.
+3. **Internal Intellectual Property:** Proprietary source code algorithms, confidential corporate financial projections, and classified architectural schemas.
+
+If an unprivileged agent executes a bash command such as `env` or reads a credentials file to perform an authorized database migration, that private secret is serialized directly into the OpenTelemetry span attributes representing standard output. Once transmitted to a centralized, third-party, or multi-tenant observability platform (e.g., Datadog, Jaeger, or cloud-hosted telemetry lakes), the secret is indexed in plaintext. This creates a severe vector for privilege escalation: any developer, contractor, or automated analytics script with read access to production telemetry traces suddenly inherits ambient access to all credentials processed by the agent fleet.
+
+To satisfy the principle of least privilege, telemetry data must undergo automated, privacy-preserving sanitization *before* crossing the isolation boundary of the execution sandbox. Sanitization cannot be deferred to downstream telemetry aggregators outside the sandbox; once a secret departs the isolated execution environment over an unencrypted local socket or cleartext collector pipeline, the isolation boundary is fundamentally breached.
+
+```
++-----------------------------------------------------------------------+
+| Execution Sandbox Boundary                                            |
+|                                                                       |
+|  [Tool Execution / Bash Command]                                      |
+|                 │                                                     |
+|                 ▼ (Raw stdout/stderr with API keys & PII)             |
+|  ┌─────────────────────────────────────────────────────────────────┐  |
+|  │ Streaming Telemetry Sanitizer Interceptor                       │  |
+|  │                                                                 │  |
+|  │  1. High-Entropy Shannon Regex Filter                           │  |
+|  │     - Matches: AKIA[0-9A-Z]{16}, ghp_[A-Za-z0-9]{36}           │  |
+|  │     - Action: Replace with [REDACTED:API_KEY:hash_8]            │  |
+|  │                                                                 │  |
+|  │  2. Deterministic HMAC Pseudonymization Engine                  │  |
+|  │     - Matches: UUIDs, User IDs, Account Numbers                 │  |
+|  │     - Action: Transform via HMAC-SHA256(secret_salt, value)     │  |
+|  │                                                                 │  |
+|  │  3. Local DistilBERT / Regex PII Classifier                     │  |
+|  │     - Matches: Email, IP addresses, Credit Cards                │  |
+|  │     - Action: Replace with [REDACTED:EMAIL]                     │  |
+|  └─────────────────────────────────────────────────────────────────┘  |
+|                 │                                                     |
++─────────────────┼─────────────────────────────────────────────────────+
+                  │ (Cleaned Telemetry Stream)
+                  ▼
+         [Trace Escrow Buffer]
+```
+
+The in-sandbox sanitization pipeline implements a three-stage streaming filter that intercepts all span attributes, prompt strings, and tool I/O payloads prior to serialization:
+
+#### 1. High-Entropy Pattern and Signature Matching
+Structured secrets—such as API tokens, private cryptographic keys, and authorization headers—exhibit distinct syntactic prefixes and high character entropy. The sanitizer evaluates all outgoing text buffers against a compiled set of deterministic regular expressions matching known cloud provider signatures (e.g., Google Cloud API keys, Slack webhook URLs, Stripe live secrets). 
+
+To capture custom or unstructured secrets, the filter calculates the Shannon entropy $H(X)$ over sliding byte windows of length $W$:
+
+$$H(X) = -\sum_{i=1}^{n} P(x_i) \log_2 P(x_i)$$
+
+Where $P(x_i)$ represents the empirical frequency of character $x_i$ within the window. Base64-encoded secrets and hexadecimal cryptographic keys typically exhibit Shannon entropy values satisfying $H(X) \ge 4.5\text{ bits/byte}$, whereas standard source code and natural language text rarely exceed $3.2\text{ bits/byte}$. Any token sequence exceeding the entropy threshold is excised and replaced with a structured tombstone: `[REDACTED:ENTROPY_KEY:sha256_prefix]`.
+
+#### 2. Deterministic HMAC Pseudonymization
+Completely masking identifiers destroys the ability to perform forensic causal analysis across distributed traces. If a customer identifier `user_89412` causes an agentic workflow to crash across five independent sessions, replacing each occurrence with a generic string `[REDACTED_USER]` prevents engineers from recognizing that all five failures trace back to the same corrupted customer profile. 
+
+To preserve cross-trace join capability without exposing the raw identifier, the sanitizer applies Keyed-Hash Message Authentication Code (HMAC) pseudonymization using an ephemeral salt $S_{\text{ephemeral}}$ rotated on a twenty-four-hour schedule:
+
+$$\text{Pseudonym}(x) = \text{Truncate}_{12}\left(\text{HMAC-SHA256}(S_{\text{ephemeral}}, x)\right)$$
+
+The raw identifier `user_89412` is rewritten to `ID:b8f3a9e21c04`. Within a single operational epoch, all traces referencing this entity maintain structural correlation, enabling clustering algorithms to isolate entity-specific failure modes while ensuring that engineers inspecting trace logs cannot map the pseudonym back to the underlying human identity without authorized access to the secure key management service.
+
+#### 3. Lightweight Local Named Entity Recognition (NER)
+Unstructured PII—such as human names, street addresses, and medical terms embedded in natural language instructions—cannot be reliably detected using static regular expressions. However, invoking an external cloud API to scan every intermediate turn introduces circular dependencies, prohibitive latency penalties, and additional security exposure. 
+
+The runtime addresses this by deploying an optimized, quantized local sequence classification model (such as a 4-bit quantized DistilBERT or compact ONNX-runtime token classifier) directly inside the supervisor host boundary. Operating with an inference latency budget of less than three milliseconds per kilobyte of text, this local model labels entity boundaries for deletion, replacing them with generic entity tags (`[REDACTED:PERSON]`, `[REDACTED:LOCATION]`).
+
+```python
+# Streaming in-sandbox telemetry scrubber interface
+def sanitize_telemetry_payload(raw_text: str, salt: bytes) -> str:
+    # Pass 1: Deterministic regex and Shannon entropy redaction
+    scrubbed = SECRET_REGEX_SUITE.sub("[REDACTED:SECRET]", raw_text)
+    scrubbed = entropy_filter(scrubbed, threshold=4.5)
+    
+    # Pass 2: Consistent HMAC pseudonymization for session identifiers
+    scrubbed = ID_PATTERN.sub(
+        lambda m: f"ID:{hmac.new(salt, m.group(0).encode(), hashlib.sha256).hexdigest()[:12]}",
+        scrubbed
+    )
+    
+    # Pass 3: Local lightweight entity masking
+    return local_ner_classifier.mask_entities(scrubbed)
+```
+
+By coupling in-sandbox cryptographic redaction with state-aware tail sampling, the agent platform establishes a defensible telemetry boundary. The platform systematically captures the elusive, long-tail failures required to stabilize complex autonomous systems without drowning in petabytes of uninformative logs or compromising the fundamental privacy of production data.
+
+***
+
+When an anomalous, high-latency, or failed trajectory is successfully retained by the tail-sampling engine, the raw telemetry trace represents an immutable, causal record of an operational breakdown. However, a captured trace is merely diagnostic evidence; it does not explain why the non-deterministic policy deviated from its expected trajectory or which specific tool interaction precipitated the systemic collapse. Converting an isolated error trace into an actionable, durable software fix requires a rigorous engineering methodology for post-mortem analysis. That forensic challenge motivates the systematic techniques of trajectory replay and counterfactual ablation.

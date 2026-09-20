@@ -27,9 +27,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[4]
 CONTENTS = REPO / "books"
 
-# Volumes with a dedicated bibliography. vol1/vol2 deliberately share the
+# Volumes with a dedicated bibliography. vol1/vol2/vol3 deliberately share the
 # main references.bib and are not built by this script.
-DEDICATED = ("vol3", "vol4")
+DEDICATED = ("vol4",)
 
 # A pandoc citation key. Crossref prefixes share the @ sigil and are excluded.
 CITE = re.compile(r"(?<![A-Za-z0-9_])@([A-Za-z][A-Za-z0-9_:.#$%&+?<>~/-]*)")

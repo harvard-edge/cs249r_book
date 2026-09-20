@@ -1,0 +1,165 @@
+## Autoregressive Generation and the Serving Loop {#sec-vol3-processor-autoregressive}
+
+At the foundation of autoregressive sequence generation lies an irreducibly serial computational graph. Unlike classical batch compilers that translate an entire source module in a single structured sweep, a generative neural language model cannot evaluate its complete output sequence in parallel. Because each successive token's probability distribution is strictly conditioned on the sequence of tokens that precede it, generating an output sequence of length $K$ mandates an iterative serving loop that evaluates the deep neural network $K$ successive times. Each evaluation constitutes an atomic forward pass across accelerator silicon, computing an unnormalized probability distribution over the discrete vocabulary, sampling a single token, and appending that token to the sequence buffer before initiating the next physical cycle.
+
+### Autoregressive Factorization and the Causal Dependency Chain
+
+The mathematical formulation of sequence generation governs this serial execution pipeline. Let $x = (x_1, x_2, \dots, x_M)$ denote the staged input prompt comprising $M$ discrete tokens, and let $y = (y_1, y_2, \dots, y_K)$ denote the candidate output sequence comprising $K$ discrete tokens. The joint probability of the complete sequence $y$ conditioned on the input prompt $x$ is factorized via the chain rule of probability into a product of conditional distributions:
+
+$$P(y_{1:K} \mid x) = \prod_{t=1}^{K} P(y_t \mid x, y_{<t})$$ {#eq-autoregressive-factorization}
+
+where $y_{<t} = (y_1, \dots, y_{t-1})$ represents the sequence of candidate tokens generated prior to step $t$, with $y_{<1} = \emptyset$. Equation @eq-autoregressive-factorization establishes the fundamental architectural invariant of the autoregressive serving loop: the conditional probability distribution at step $t$ cannot be computed in isolation because its conditioning context requires the concrete realization of all preceding tokens $y_1$ through $y_{t-1}$.
+
+In classical superscalar microprocessor architectures, hardware pipelines actively exploit instruction-level parallelism (ILP) through dynamic out-of-order scheduling, register renaming, and speculative branch execution. When an out-of-order execution engine detects that instruction $B$ does not share a true data dependency with instruction $A$, it dispatches both instructions to parallel execution units simultaneously. Even when evaluating conditional branches, hardware branch predictors evaluate speculative execution paths dozens of instructions ahead of program order, committing architectural state only when the branch condition is resolved.
+
+Autoregressive token generation precludes this class of speculative bypass along a single trajectory. In an agentic execution system, the generation of token $y_t$ exhibits a true data dependency of the most unyielding variety: the discrete identity of token $y_{t-1}$ determines the exact embedding row gathered into the input layer of the neural network at step $t$. Furthermore, because token selection is non-deterministic—governed by a parameterized probability distribution sampled over a vocabulary simplex of tens or hundreds of thousands of candidates—the serving daemon cannot resolve which token will be appended at step $t$ until step $t-1$ has fully traversed all transformer layers, projected its final activations into vocabulary space, and executed the host sampling policy. No speculative pipeline can evaluate step $t+1$ before step $t$ has materialized. The generation trajectory is fundamentally, physically serialized.
+
+### The Decode Execution Cycle and Vocabulary Projection
+
+The mechanical execution of autoregressive generation is orchestrated by an iterative serving loop within the inference runtime. Each cycle of this loop executes a deterministic sequence of operations across the host supervisor and the neural accelerator, as illustrated in @fig-autoregressive-serving-loop.
+
+::: {#fig-autoregressive-serving-loop}
+```
++-------------------------------------------------------------------------------+
+|                           THE AUTOREGRESSIVE SERVING LOOP                     |
+|                                                                               |
+|   +-----------------------------------------------------------------------+   |
+|   | 1. Context Staging: Sequence Buffer s_t = [x_1, ..., x_M, y_1, ..., y_{t-1}] |
+|   +-----------------------------------+-----------------------------------+   |
+|                                       |                                       
+|                                       v Dispatch Forward Pass                 
+|   +-----------------------------------------------------------------------+   |
+|   | 2. Deep Transformer Stack: Multi-Head Attention & Feed-Forward MLPs   |   |
+|   |    Emits final-position hidden representation: h_t in R^{d_model}     |   |
+|   +-----------------------------------+-----------------------------------+   |
+|                                       |                                       
+|                                       v Linear Unembedding Projection         
+|   +-----------------------------------------------------------------------+   |
+|   | 3. Vocabulary Unembedding: z_t = W_unembed * h_t  (z_t in R^{|V|})    |   |
+|   +-----------------------------------+-----------------------------------+   |
+|                                       |                                       
+|                                       v Logit Normalization (Softmax & Temp)  
+|   +-----------------------------------------------------------------------+   |
+|   | 4. Distribution Shaping: P_tau(y_t | s_t) = Softmax(z_t / tau)        |   |
+|   |    Apply Top-k / Top-p Truncation Filters                             |   |
+|   +-----------------------------------+-----------------------------------+   |
+|                                       |                                       
+|                                       v Pseudo-Random Uniform Sample          
+|   +-----------------------------------------------------------------------+   |
+|   | 5. Token Sampling: Select discrete token index y_t in V               |   |
+|   +-----------------------------------+-----------------------------------+   |
+|                                       |                                       
+|             +-------------------------+-------------------------+             
+|             | Check Stop Conditions                             |             
+|             v                                                   v             
+|   [Match EOS or Stop Delimiter]                       [Continue Generation]   
+|   Terminate: Status = COMPLETED                       Append y_t to s_{t+1}   
+|   Forward candidate to Host Escrow                    Loop to Step 1 (t <- t+1)
++-------------------------------------------------------------------------------+
+```
+
+The Autoregressive Decode Serving Loop. Each cycle computes an atomic forward pass for the latest position, projects hidden activations into vocabulary logits, shapes the resulting probability distribution, samples a discrete token, and checks termination invariants.
+:::
+
+Let $\mathbf{s}_t = [x_1, \dots, x_M, y_1, \dots, y_{t-1}]$ represent the complete token sequence presented to the inference engine at iteration $t$. The execution cycle proceeds through five distinct stages:
+
+1. **Forward Pass Evaluation:** The accelerator evaluates the deep transformer layers for the newest sequence position. The network propagates activations through stacked layers of multi-head self-attention and non-linear feed-forward sublayers, ultimately yielding a dense hidden activation vector for the terminal position:
+$$\mathbf{h}_t \in \mathbb{R}^{d_{\text{model}}}$$
+where $d_{\text{model}}$ denotes the hidden dimension of the transformer (typically ranging from $4{,}096$ to $12{,}288$ in modern production foundation models).
+
+2. **Vocabulary Unembedding Projection:** The hidden activation $\mathbf{h}_t$ is projected across the entire discrete vocabulary $\mathcal{V}$ via the unembedding matrix $\mathbf{W}_{\text{unembed}} \in \mathbb{R}^{|\mathcal{V}| \times d_{\text{model}}}$:
+$$\mathbf{z}_t = \mathbf{W}_{\text{unembed}} \, \mathbf{h}_t + \mathbf{b}_{\text{unembed}} \in \mathbb{R}^{|\mathcal{V}|}$$
+The resulting vector $\mathbf{z}_t$ consists of raw, unnormalized real-valued logits. Each entry $z_{t, v}$ corresponds to a discrete subword token $v \in \mathcal{V}$. In large vocabulary models (such as modern tokenizers with $|\mathcal{V}| \approx 128{,}000$ to $256{,}000$), this projection alone requires computing hundreds of thousands of inner products per token generated.
+
+3. **Probability Normalization:** To convert unbounded logits into a valid probability distribution lying on the probability simplex $\Delta^{|\mathcal{V}|-1}$, the serving daemon computes the softmax function over the logit vector:
+$$P(y_t = v \mid \mathbf{s}_t) = \frac{\exp(z_{t, v})}{\sum_{j=1}^{|\mathcal{V}|} \exp(z_{t, j})}$$ {#eq-standard-softmax}
+where $P(y_t = v \mid \mathbf{s}_t) \ge 0$ and $\sum_{v \in \mathcal{V}} P(y_t = v \mid \mathbf{s}_t) = 1$.
+
+4. **Stochastic Token Sampling:** The serving runtime draws a pseudo-random scalar $u \sim \text{Uniform}(0, 1)$ and inverts the cumulative distribution function over $\mathcal{V}$ to select a discrete token identifier $y_t$.
+
+5. **Sequence Mutation and Invariant Checking:** The sampled token index $y_t$ is appended to the sequence buffer, producing the expanded context $\mathbf{s}_{t+1} = [\mathbf{s}_t, y_t]$. The serving engine verifies termination invariants against predefined stopping criteria. If no termination boundary is encountered and $t < K_{\max}$, the loop increments $t \leftarrow t + 1$ and dispatches the subsequent accelerator execution.
+
+### Probability Shaping: Temperature Scaling and Simplex Truncation
+
+The raw softmax transformation in Equation @eq-standard-softmax treats model logits directly as log-odds. In practical agent systems, the host runtime must control the dispersion of entropy across the vocabulary simplex to modulate generation determinism. This control is governed primarily by **temperature scaling** ($\tau$).
+
+Let $\tau \in (0, \infty)$ denote a strictly positive real-valued hyperparameter. The temperature-scaled probability distribution is defined as:
+
+$$P_\tau(y_t = v \mid \mathbf{s}_t) = \frac{\exp\left(\frac{z_{t, v}}{\tau}\right)}{\sum_{j=1}^{|\mathcal{V}|} \exp\left(\frac{z_{t, j}}{\tau}\right)}$$ {#eq-temperature-softmax}
+
+The temperature scalar acts as an inverse thermodynamic energy parameter across the vocabulary distribution:
+
+- **Greedy Argmax Limit ($\tau \to 0^+$):** As $\tau$ approaches zero, the ratio between the largest logit and all competing logits approaches infinity. The exponentiated mass concentrates entirely on the single token possessing the maximum logit value:
+$$\lim_{\tau \to 0^+} P_\tau(y_t = v \mid \mathbf{s}_t) = \begin{cases} 1 & \text{if } v = \arg\max_{j \in \mathcal{V}} z_{t, j} \\ 0 & \text{otherwise} \end{cases}$$
+Greedy decoding renders the serving loop completely deterministic for a given input sequence and model checkpoint. In software engineering agents tasked with structured schema generation or tool calling, low temperatures ($\tau \le 0.2$) or greedy decoding are frequently mandated to minimize syntax errors and ensure reproducible code output.
+- **Calibrated Training Density ($\tau = 1.0$):** At unit temperature, the probabilities reflect the unscaled training likelihood distribution.
+- **Maximum Entropy Dispersion ($\tau \to \infty$):** As $\tau$ grows large, the scaled logits $z_{t, v} / \tau$ converge toward zero. Consequently, $\exp(0) = 1$ for all vocabulary entries, causing the distribution to degenerate into a uniform distribution:
+$$\lim_{\tau \to \infty} P_\tau(y_t = v \mid \mathbf{s}_t) = \frac{1}{|\mathcal{V}|}$$
+Under elevated temperatures, the sampler draws from low-probability tokens, causing the generated text to lose grammatical cohesion.
+
+To prevent the sampler from drawing improbable tokens from the long tail of the vocabulary distribution—an occurrence that frequently introduces syntax corruptions or invalid subwords into structured payloads—production inference runtimes apply truncation filters prior to sampling:
+
+- **Top-$k$ Truncation:** The engine restricts the candidate set to the $k$ tokens possessing the highest logit values. Let $\mathcal{V}_k \subset \mathcal{V}$ denote this top-$k$ subset, where $|\mathcal{V}_k| = k$. The logits of all tokens outside $\mathcal{V}_k$ are set to $-\infty$:
+$$z'_{t, v} = \begin{cases} z_{t, v} & \text{if } v \in \mathcal{V}_k \\ -\infty & \text{otherwise} \end{cases}$$
+- **Top-$p$ (Nucleus) Truncation:** Fixed $k$ filtering suffers from a structural flaw: when the model is highly confident, $k$ tokens may include many implausible candidates; conversely, when the distribution is flat, $k$ tokens may exclude valid possibilities. Nucleus sampling dynamically sizes the candidate set by selecting the smallest subset of tokens $\mathcal{V}_p \subset \mathcal{V}$ whose cumulative probability mass meets or exceeds a predefined threshold $p \in (0, 1]$:
+$$\sum_{v \in \mathcal{V}_p} P_\tau(y_t = v \mid \mathbf{s}_t) \ge p$$
+Logits for tokens outside $\mathcal{V}_p$ are set to $-\infty$, and the remaining distribution is renormalized. This dynamically contracts the candidate pool during unambiguous syntax transitions and expands it when multiple valid continuations exist.
+
+::: {.callout-note title="Worked Example: Temperature Scaling on the Vocabulary Simplex"}
+To observe the quantitative impact of temperature scaling on vocabulary selection, consider a concrete systems scenario where a model's unembedding layer emits raw logits over a miniature three-token vocabulary:
+$$\mathcal{V} = \{v_1: \texttt{"def"}, \; v_2: \texttt{"class"}, \; v_3: \texttt{"import"}\}$$
+Suppose the forward pass produces the raw logit vector:
+$$\mathbf{z} = [6.0, \; 4.0, \; 2.0]$$
+We compute the resulting probability distribution across three distinct operational regimes: unit temperature ($\tau = 1.0$), low temperature ($\tau = 0.5$), and high temperature ($\tau = 2.0$).
+
+**Step 1: Standard Evaluation ($\tau = 1.0$):**
+We compute the exponentiated logits:
+$$\exp(6.0) \approx 403.43, \quad \exp(4.0) \approx 54.60, \quad \exp(2.0) \approx 7.39$$
+The normalization denominator is:
+$$\sum_{j=1}^3 \exp(z_j) = 403.43 + 54.60 + 7.39 = 465.42$$
+The resulting probabilities are:
+$$P(v_1) = \frac{403.43}{465.42} \approx 86.68\%, \quad P(v_2) = \frac{54.60}{465.42} \approx 11.73\%, \quad P(v_3) = \frac{7.39}{465.42} \approx 1.59\%$$
+
+**Step 2: Low-Temperature Sharpening ($\tau = 0.5$):**
+Scaling the logits by $\tau = 0.5$ yields $\mathbf{z} / 0.5 = [12.0, \; 8.0, \; 4.0]$. Exponentiating yields:
+$$\exp(12.0) \approx 162{,}754.79, \quad \exp(8.0) \approx 2{,}980.96, \quad \exp(4.0) \approx 54.60$$
+The normalization denominator is:
+$$\sum_{j=1}^3 \exp\left(\frac{z_j}{0.5}\right) = 162{,}754.79 + 2{,}980.96 + 54.60 = 165{,}790.35$$
+The resulting probabilities are:
+$$P(v_1) \approx 98.17\%, \quad P(v_2) \approx 1.80\%, \quad P(v_3) \approx 0.03\%$$
+Under $\tau = 0.5$, the probability of selecting the dominant token $v_1$ increases from $86.68\%$ to $98.17\%$, while the probability of $v_3$ drops by more than a factor of 50.
+
+**Step 3: High-Temperature Flattening ($\tau = 2.0$):**
+Scaling the logits by $\tau = 2.0$ yields $\mathbf{z} / 2.0 = [3.0, \; 2.0, \; 1.0]$. Exponentiating yields:
+$$\exp(3.0) \approx 20.09, \quad \exp(2.0) \approx 7.39, \quad \exp(1.0) \approx 2.72$$
+The normalization denominator is:
+$$\sum_{j=1}^3 \exp\left(\frac{z_j}{2.0}\right) = 20.09 + 7.39 + 2.72 = 30.20$$
+The resulting probabilities are:
+$$P(v_1) \approx 66.52\%, \quad P(v_2) \approx 24.47\%, \quad P(v_3) \approx 9.01\%$$
+
+| Candidate Token | Raw Logit $z$ | $P(\tau = 1.0)$ | $P(\tau = 0.5)$ | $P(\tau = 2.0)$ |
+| :--- | :--- | :--- | :--- | :--- |
+| $v_1 = \texttt{"def"}$ | $6.0$ | $86.68\%$ | $98.17\%$ | $66.52\%$ |
+| $v_2 = \texttt{"class"}$ | $4.0$ | $11.73\%$ | $1.80\%$ | $24.47\%$ |
+| $v_3 = \texttt{"import"}$ | $2.0$ | $1.59\%$ | $0.03\%$ | $9.01\%$ |
+
+*Takeaway:* Reducing temperature concentrates probability mass aggressively onto the highest-scoring candidate, suppressing tail entropy and enforcing structural consistency. Elevating temperature disperses probability mass across competing candidates, elevating non-deterministic variation at the expense of syntactic fidelity.
+:::
+
+### Termination Mechanics and Stop Condition Monitoring
+
+The serving loop cannot execute indefinitely; it requires formal termination invariants to break its serial iteration and return control to the host supervisor. In production inference systems, termination is triggered by three distinct mechanical conditions:
+
+1. **Native End-of-Sequence (`EOS`) Detection:** Foundation models are trained with special control tokens designating sequence completion (such as `<|endoftext|>`, `</s>`, or `<|eot_id|>`). When the stochastic sampling routine selects the vocabulary ID corresponding to the model's native `EOS` token, the inference engine halts the decode loop immediately. The output status is marked as `COMPLETED`.
+
+2. **Multi-Token Stop Delimiters:** In agent systems, tool invocations, code blocks, or structured outputs often conclude with domain-specific string markers rather than global `EOS` tokens. For example, an agent runtime may configure the inference engine to halt upon generating the closing markdown delimiter ```` or a structured XML tag such as `</tool_call>`. Monitoring for custom stop delimiters introduces a subtle systems challenge: subword fragmentation. Because a stop delimiter (such as `</tool_call>`) may be decomposed into multiple subword tokens (such as `["</", "tool", "_call", ">"]`), the serving engine cannot simply match individual token IDs. Instead, it maintains a sliding character buffer over recent emissions. When candidate tokens form a partial prefix of a stop sequence, the engine buffers those tokens, withholding them from client-facing streaming interfaces until subsequent tokens either complete the delimiter match or diverge. When a complete match occurs, the serving engine strips the delimiter characters from the candidate payload and marks the invocation status as `COMPLETED`.
+
+3. **Decode Token Ceilings ($K_{\max}$):** To prevent infinite generation loops resulting from model degradation or repetitive cycles, the host supervisor enforces a strict generation budget $K_{\max}$. If the decode counter reaches $t = K_{\max}$ without encountering an `EOS` token or stop delimiter, the serving runtime forcefully aborts the generation loop. In accordance with strict systems contracts, the engine marks the response with the status `TRUNCATED`.
+
+To ensure safe inter-process communication, the serving engine packages the output into a normalized status envelope. As established under the zero ambient authority principle ($A=0$), the supervisor must strictly discriminate between the four canonical invocation outcomes:
+- `COMPLETED`: The model concluded generation cleanly via an `EOS` token or an explicit stop delimiter. The payload in escrow is structurally intact.
+- `TRUNCATED`: Generation was forcibly severed due to context ceiling exhaustion ($S \ge S_{\max}$) or decode budget expiration ($t \ge K_{\max}$). Under the Quarantining Invariant, this payload is treated as structurally corrupt and quarantined.
+- `REFUSED`: The model's safety alignment mechanisms intervened to suppress output generation.
+- `TRANSPORT_FAILURE`: The underlying network connection was severed, a socket timed out, or the accelerator runtime crashed.
+
+The mechanics of the autoregressive serving loop expose an extreme operational dichotomy across accelerator hardware. When processing the initial staged prompt of $M$ tokens, the neural network can ingest and transform the entire sequence in parallel using high-density matrix multiplication kernels. Once generation transitions to the decode phase, however, this parallelism collapses entirely: every single token generated requires a distinct forward pass that must shuttle tens of billions of model parameters across the accelerator memory bus simply to produce a single vector of logits. To understand why single-batch agent trajectories incur substantial latency and how physical memory bandwidth dictates operational costs, we must transition from the algorithmic logic of the serving loop to the underlying accelerator hardware physics governing prompt prefill and token decode.

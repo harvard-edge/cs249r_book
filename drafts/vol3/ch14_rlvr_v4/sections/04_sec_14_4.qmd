@@ -1,0 +1,138 @@
+## Group Relative Policy Optimization {#sec-vol3-rlvr-grpo}
+
+Deploying classical actor-critic algorithms to train frontier reasoning models exhausts accelerator High-Bandwidth Memory (HBM) long before saturating matrix compute cores. When scaling reinforcement learning across distributed clusters, the canonical Proximal Policy Optimization (PPO) architecture requires concurrent execution and state synchronization across four distinct neural networks: the policy being optimized (the Actor), a learned value estimator (the Critic), a frozen baseline policy (the Reference model), and an evaluative scoring network (the Reward model). In an agentic setting where the base model contains tens of billions of parameters, the Critic network presents an untenable systems bottleneck. Estimating the expected scalar return $V_\phi(s)$ of an uncommitted, multi-turn reasoning trajectory demands a network with representational capacity comparable to the Actor itself. Consequently, the Critic duplicates the Actor's parameter footprint, doubles the backward-pass communication overhead, and allocates hundreds of gigabytes of distributed memory purely to track auxiliary optimizer states.
+
+**Group Relative Policy Optimization (GRPO) resolves this accelerator memory crisis by entirely discarding the neural Critic network, deriving the baseline value of a state directly from the empirical reward distribution of a group of parallel rollouts sampled for the same prompt.** By normalizing candidate trajectory returns against their cohort mean and standard deviation, the training runtime replaces tens of gigabytes of parameter and optimizer state memory with lightweight algebraic operations over scalar execution outcomes. This architectural reduction reclaims substantial accelerator memory for larger training batch sizes, longer reasoning context windows, and higher rollout concurrency, transforming verifiable reinforcement learning from a memory-bound distributed coordination challenge into a throughput-oriented compute pipeline.
+
+### The Memory Wall of Actor-Critic Runtimes {#sec-vol3-rlvr-grpo-memory-wall}
+
+To understand the systems motivation behind Group Relative Policy Optimization, one must account for the physical memory layout of modern distributed training runtimes. Standard autoregressive policy training using PPO coordinates four functional roles across the cluster: the Actor $\pi_\theta$, the Critic $V_\phi$, the Reference model $\pi_{\text{ref}}$, and the Reward model $R_\psi$. Even when weights are stored in 16-bit half-precision floating-point formats (such as BF16 or FP16 at 2 bytes per parameter), training under first-order adaptive optimizers such as AdamW imposes severe memory overheads. Each trainable parameter requires an FP16 gradient (2 bytes) alongside FP32 master weights, first-moment momentum buffers, and second-moment variance accumulators (collectively consuming 16 bytes per parameter).
+
+::: {.column-margin}
+In standard ZeRO-3 or Fully Sharded Data Parallel (FSDP) implementations, model parameters, gradients, and optimizer states are partitioned across $N_{\text{shards}}$ accelerators. Even when fully sharded, storing two independent sets of optimizer states for both the Actor and Critic doubles the cluster-wide memory reservation required before allocating a single token of activation memory or KV cache.
+:::
+
+In classical actor-critic formulations, the Actor and Critic are structurally symmetric: predicting the fine-grained expected return across arbitrary reasoning steps requires the Critic to process the entire dialogue context and model complex hidden-state representations. As a result, the Critic cannot be reduced to a tiny multi-layer perceptron; it is typically instantiated as an identical transformer backbone with a scalar value prediction head. Training the Critic alongside the Actor requires maintaining two full sets of active parameters, gradients, and AdamW optimizer states. Although the Reference model and Reward model are frozen during optimization—demanding only 2 bytes per parameter without gradient or optimizer buffers—the aggregate static memory footprint leaves negligible HBM headroom for dynamic runtime allocations. During the generation phase of reinforcement learning, the runtime must allocate gigabytes of memory to hold the Key-Value (KV) cache for thousands of generated reasoning tokens, while the subsequent policy update phase requires holding multi-gigabyte activation tensors for gradient backpropagation. When aggregate static memory crosses critical thresholds, runtimes are forced to adopt aggressive activation checkpointing, reduce batch sizes to degenerate extremes, or increase tensor-parallel sharding factors across high-latency network switches.
+
+::: {#fig-vol3-ppo-vs-grpo}
+![](images/svg/vol3-ppo-vs-grpo.svg){width=100%}
+
+Comparison of distributed runtime topologies in PPO versus GRPO. Classical PPO concurrently maintains four networks across the cluster: the optimizing Actor ($\pi_\theta$), the value Critic ($V_\phi$), a frozen Reference model ($\pi_{\text{ref}}$), and an auxiliary Reward model ($R_\psi$). GRPO eliminates both the Critic network and its associated AdamW optimizer state shard, replacing neural value baselines with an empirical group advantage computed across $G$ parallel rollouts per prompt.
+:::
+
+GRPO eliminates this memory wall by restructuring the advantage estimation pipeline. First, in verifiable environments (such as compilers, unit-test harnesses, and formal math provers), the neural Reward model $R_\psi$ is replaced entirely by an external, deterministic verification enclave running on host CPU cores. Second, and most critically, GRPO discards the Critic network $V_\phi$ altogether. Without a value network, the training runtime completely removes the parameter allocations, gradient buffers, and AdamW optimizer states associated with $V_\phi$. The training cluster maintains only the trainable Actor $\pi_\theta$ and the static, non-trainable Reference policy $\pi_{\text{ref}}$. 
+
+| Architectural Dimension | Proximal Policy Optimization (PPO) | Group Relative Policy Optimization (GRPO) |
+| :--- | :--- | :--- |
+| **Active Neural Models** | Actor ($\pi_\theta$), Critic ($V_\phi$), Reference ($\pi_{\text{ref}}$), Reward ($R_\psi$) | Actor ($\pi_\theta$), Reference ($\pi_{\text{ref}}$) |
+| **Trainable Parameter Sets** | 2 models ($\theta$ and $\phi$) | 1 model ($\theta$ only) |
+| **Optimizer State Burden** | $2 \times (16\text{ bytes} \times N_{\text{params}})$ | $1 \times (16\text{ bytes} \times N_{\text{params}})$ |
+| **Baseline Value Mechanism** | Neural state-value estimator $V_\phi(s_t)$ | Empirical cohort return mean $\frac{1}{G}\sum r_i$ |
+| **Credit Granularity** | Token-level temporal difference (GAE $\delta_t$) | Trajectory-level cohort normalized scalar ($A_i$) |
+| **Verifier Interface** | Neural proxy score or terminal reward to Critic | Direct external verification score ($r_i \in \mathbb{R}$) |
+| **Degenerate Cohort Failure** | Robust via persistent value network baseline | Gradient collapse when $\text{std}(\{r_i\}) = 0$ |
+
+: Systems comparison of distributed PPO and GRPO training configurations. {#tbl-vol3-ppo-vs-grpo-comparison}
+
+As detailed in @tbl-vol3-ppo-vs-grpo-comparison, eliminating the learned value network fundamentally alters the communication and memory profiles of the training cluster. In PPO, updating the Critic introduces an extra forward and backward pass, coupled with all-reduce gradient synchronizations across distributed model-parallel partitions. GRPO reclaims these compute cycles and network communication slots, repurposing the freed accelerator memory to scale the batch size of parallel agent explorations.
+
+::: {.callout-note title="Worked Example: Accelerator Memory Allocation in PPO vs. GRPO"}
+Consider training a 70-billion parameter reasoning model across a cluster of 32 NVIDIA H100 SXM5 GPUs (each equipped with 80 GB of HBM3, yielding 2,560 GB of aggregate cluster memory). The runtime uses Fully Sharded Data Parallelism (ZeRO-3) across all 32 devices. Model weights and activations are represented in BF16 (2 bytes per parameter), while optimizer states are tracked in FP32 (8 bytes per parameter for AdamW first and second moments, plus 4 bytes for FP32 master weights and 2 bytes for gradients, totaling 16 bytes per parameter for trainable models).
+
+**PPO Static Memory Footprint:**
+1. **Actor ($\pi_\theta$):** Trainable model. 
+   $$\text{Memory} = \frac{70 \times 10^9 \times (2 + 2 + 12)\text{ bytes}}{32} = \frac{1{,}120\text{ GB}}{32} = 35.0\text{ GB per GPU}$$
+2. **Critic ($V_\phi$):** Trainable model identical in size to the Actor.
+   $$\text{Memory} = \frac{70 \times 10^9 \times 16\text{ bytes}}{32} = 35.0\text{ GB per GPU}$$
+3. **Reference Model ($\pi_{\text{ref}}$):** Frozen model; retains only sharded BF16 weights without gradients or optimizer states.
+   $$\text{Memory} = \frac{70 \times 10^9 \times 2\text{ bytes}}{32} = \frac{140\text{ GB}}{32} = 4.375\text{ GB per GPU}$$
+4. **Reward Model ($R_\psi$):** If parameterized as an auxiliary frozen 70B model, it adds another $4.375\text{ GB per GPU}$. Even if external deterministic verifiers replace $R_\psi$, static memory reservation for Actor, Critic, and Reference equals:
+   $$\text{Static Memory}_{\text{PPO}} = 35.0 + 35.0 + 4.375 = 74.375\text{ GB per GPU}$$
+
+Out of the 80 GB available on each H100, PPO leaves exactly $80 - 74.375 = 5.625\text{ GB}$ per GPU for KV cache storage during generation and activation tensors during backpropagation. This razor-thin margin causes immediate out-of-memory faults when batch sizes exceed a single sample per GPU or sequence lengths cross 4,096 tokens.
+
+**GRPO Static Memory Footprint:**
+1. **Actor ($\pi_\theta$):** Trainable model ($35.0\text{ GB per GPU}$).
+2. **Critic ($V_\phi$):** Eliminated completely ($0.0\text{ GB}$).
+3. **Reference Model ($\pi_{\text{ref}}$):** Frozen BF16 weights ($4.375\text{ GB per GPU}$).
+4. **Reward Engine:** Deterministic verification executed on host CPU sandboxes ($0.0\text{ GB GPU HBM}$).
+   $$\text{Static Memory}_{\text{GRPO}} = 35.0 + 0.0 + 4.375 = 39.375\text{ GB per GPU}$$
+
+GRPO releases $35.0\text{ GB}$ of physical HBM per accelerator. The dynamic headroom expands from $5.625\text{ GB}$ to $40.625\text{ GB}$ per GPU—a $7.2\times$ increase in available working memory. This headroom allows the runtime to sustain high-concurrency generation of long-horizon reasoning trajectories (up to 16,384 tokens) across groups of candidate outputs without triggering memory thrashing or pipeline stalls.
+:::
+
+### Cohort Advantage Estimation and the Objective Function {#sec-vol3-rlvr-grpo-objective}
+
+Because GRPO discards the neural Critic network, it cannot evaluate Generalized Advantage Estimation (GAE) over intermediate temporal-difference residuals. Instead, it extracts the baseline value of a state through empirical cohort sampling. Given a query or task prompt $q$ drawn from a training dataset $\mathcal{D}$, the runtime samples a cohort of $G$ distinct candidate reasoning outputs $\mathcal{O} = \{o_1, o_2, \dots, o_G\}$ from the previous policy checkpoint $\pi_{\theta_{\text{old}}}$. Each candidate trajectory $o_i$ is executed against the verifiable environment or test fixture, which computes a deterministic scalar outcome reward $r_i = \mathcal{R}(q, o_i)$.
+
+The advantage $A_i$ of each individual rollout is computed by standardizing its reward relative to the empirical mean and standard deviation of its peer group:
+
+$$A_i = \frac{r_i - \text{mean}(\{r_1, r_2, \dots, r_G\})}{\text{std}(\{r_1, r_2, \dots, r_G\}) + \epsilon} = \frac{r_i - \frac{1}{G}\sum_{j=1}^G r_j}{\sqrt{\frac{1}{G}\sum_{j=1}^G \left(r_j - \frac{1}{G}\sum_{k=1}^G r_k\right)^2} + \epsilon}$$ {#eq-vol3-grpo-advantage}
+
+In @eq-vol3-grpo-advantage, $\epsilon$ represents a small floating-point stabilizer (typically $10^{-8}$) to prevent numerical division-by-zero faults. Notice the systems elegance of this formulation: the cohort mean acts as a prompt-specific empirical baseline, capturing the intrinsic difficulty of the task. If a coding problem is straightforward, nearly all candidate rollouts will compile and pass the unit tests, driving $\text{mean}(\{r_j\})$ close to $1.0$. A rare hallucinated failure will receive a large negative advantage, heavily penalizing the erroneous token sequence. Conversely, if a mathematical theorem is exceptionally difficult and only one candidate out of sixteen generates a valid proof, the cohort mean drops to $0.0625$. The solitary successful rollout receives an enormous positive advantage, strongly pulling the policy gradient toward its reasoning path, while the fifteen failing candidates produce advantages near zero, avoiding catastrophic policy destabilization.
+
+Once advantages are assigned, GRPO optimizes the policy parameters $\theta$ using a clipped surrogate objective that incorporates a token-level Kullback-Leibler (KL) divergence penalty against the frozen reference policy $\pi_{\text{ref}}$. The complete GRPO objective is formulated as:
+
+$$\mathcal{L}_{\text{GRPO}}(\theta) = \mathbb{E}_{q \sim \mathcal{D}, \{o_i\}_{i=1}^G \sim \pi_{\theta_{\text{old}}}(q)} \left[ \frac{1}{G} \sum_{i=1}^G \frac{1}{|o_i|} \sum_{t=1}^{|o_i|} \mathcal{M}_{i,t}(\theta) - \beta D_{\text{KL}}(\pi_\theta \parallel \pi_{\text{ref}}) \right]$$ {#eq-vol3-grpo-objective}
+
+where the per-token clipped surrogate objective $\mathcal{M}_{i,t}(\theta)$ is defined as:
+
+$$\mathcal{M}_{i,t}(\theta) = \min\left( \frac{\pi_\theta(o_{i,t} \mid q, o_{i,<t})}{\pi_{\theta_{\text{old}}}(o_{i,t} \mid q, o_{i,<t})} A_i, \; \text{clip}\left(\frac{\pi_\theta(o_{i,t} \mid q, o_{i,<t})}{\pi_{\theta_{\text{old}}}(o_{i,t} \mid q, o_{i,<t})}, 1-\epsilon_{\text{clip}}, 1+\epsilon_{\text{clip}}\right) A_i \right)$$ {#eq-vol3-grpo-surrogate}
+
+The clipping threshold $\epsilon_{\text{clip}}$ (typically set between $0.1$ and $0.2$) limits the magnitude of the policy ratio update, preventing destructive step sizes when the new policy $\pi_\theta$ drifts too far from the sampling policy $\pi_{\theta_{\text{old}}}$. Crucially, the advantage $A_i$ in @eq-vol3-grpo-surrogate is a sequence-level scalar: every token $t \in \{1, \dots, |o_i|\}$ generated within rollout $i$ inherits the exact same advantage value $A_i$. The inner summation is normalized by the rollout sequence length $|o_i|$ to prevent long, verbosity-padded trajectories from dominating the batch gradient over concise, correct proofs.
+
+::: {.column-margin}
+Directly calculating the exact KL divergence $\sum_{w \in \mathcal{V}} \pi_\theta(w) \log \frac{\pi_\theta(w)}{\pi_{\text{ref}}(w)}$ requires materializing full vocabulary probability vectors (e.g., $|\mathcal{V}| = 128{,}000$), consuming massive memory. Runtimes therefore use Schulman's sample-based estimator $\frac{\pi_{\text{ref}}(o_{i,t})}{\pi_\theta(o_{i,t})} - \log \frac{\pi_{\text{ref}}(o_{i,t})}{\pi_\theta(o_{i,t})} - 1$, which is non-negative and requires only the scalar probabilities of the generated tokens.
+:::
+
+The regularization coefficient $\beta$ governs the penalty enforced by the KL divergence term $D_{\text{KL}}(\pi_\theta \parallel \pi_{\text{ref}})$. In production systems, materializing the complete probability distribution over a vocabulary of over 100,000 tokens during every forward pass would introduce severe memory and compute overheads. Instead, runtimes employ an unbiased, low-variance approximation evaluated strictly over the tokens sampled in trajectory $o_i$:
+
+$$D_{\text{KL}}(\pi_\theta \parallel \pi_{\text{ref}}) \approx \frac{\pi_{\text{ref}}(o_{i,t} \mid q, o_{i,<t})}{\pi_\theta(o_{i,t} \mid q, o_{i,<t})} - \log \frac{\pi_{\text{ref}}(o_{i,t} \mid q, o_{i,<t})}{\pi_\theta(o_{i,t} \mid q, o_{i,<t})} - 1$$ {#eq-vol3-grpo-kl-estimator}
+
+This estimator guarantees that the divergence penalty is strictly non-negative, possesses minimum variance at $\pi_\theta = \pi_{\text{ref}}$, and requires logging only the scalar probabilities of the generated tokens from the forward pass of the frozen reference model.
+
+### Degenerate Cohorts and the Zero-Variance Dilemma {#sec-vol3-rlvr-grpo-zero-variance}
+
+While GRPO delivers exceptional memory efficiency, its reliance on empirical group variance exposes a critical vulnerability in environments with binary verifiable rewards. In code generation, mathematical formalization, and robotic tool execution, verifiers typically emit step-function rewards: a program either passes all unit tests ($r_i = 1$) or fails at least one assertion ($r_i = 0$).
+
+When all $G$ candidate outputs generated for a query $q$ produce identical terminal outcomes, the cohort suffers from *empirical degeneracy*. Consider the two boundary conditions:
+1. **Total Cohort Failure:** Every candidate output generates invalid syntax or fails verification ($r_1 = r_2 = \dots = r_G = 0$).
+2. **Total Cohort Success:** Every candidate output successfully satisfies all verification criteria ($r_1 = r_2 = \dots = r_G = 1$).
+
+In both scenarios, the sample mean equals the individual reward values ($\text{mean}(\{r_i\}) = r_i$), causing the deviation in the numerator of @eq-vol3-grpo-advantage to evaluate to zero:
+
+$$r_i - \text{mean}(\{r_1, \dots, r_G\}) = 0, \quad \forall i \in \{1, \dots, G\}$$
+
+Simultaneously, the sample variance across the group vanishes entirely:
+
+$$\text{std}(\{r_1, \dots, r_G\}) = \sqrt{\frac{1}{G}\sum_{j=1}^G (r_j - \bar{r})^2} = 0$$
+
+Although the numerical stabilizer $\epsilon$ prevents floating-point division-by-zero exceptions, the resulting advantage evaluates to identically zero across all candidate outputs:
+
+$$A_i = \frac{0}{0 + \epsilon} = 0, \quad \forall i \in \{1, \dots, G\}$$
+
+When the advantage $A_i$ is zero, the gradient of the surrogate objective with respect to the policy parameters vanishes:
+
+$$\nabla_\theta \mathcal{L}_{\text{GRPO}}(\theta) \propto \sum_{i=1}^G \sum_{t=1}^{|o_i|} \nabla_\theta \log \pi_\theta(o_{i,t} \mid \cdot) \cdot A_i = 0$$
+
+This mathematical reality imposes a severe physical penalty on training runtimes. Generating $G$ distinct long-horizon rollouts requires thousands of autoregressive decoding steps, occupying memory bus bandwidth and tensor compute units across distributed worker nodes. If a query yields a degenerate cohort, this entire computation produces a zero gradient update. If an uncalibrated training batch contains predominantly trivial prompts (where all rollouts pass) or impossibly hard tasks (where all rollouts fail), the effective batch size of the gradient step drops to zero. The cluster burns megawatt-hours of power executing forward autoregressive decode loops and backward backpropagation passes that result in a null parameter update.
+
+```python
+def compute_group_advantages(rewards: torch.Tensor, eps: float = 1e-8) -> tuple[torch.Tensor, torch.Tensor]:
+    # rewards shape: [batch_size, group_size]
+    mean = rewards.mean(dim=-1, keepdim=True)
+    std = rewards.std(dim=-1, keepdim=True, unbiased=False)
+    active_mask = (std > 0.0).float()
+    # When std == 0, numerator is identically 0; active_mask gates out null cohorts
+    raw_advantages = (rewards - mean) / (std + eps)
+    advantages = raw_advantages * active_mask
+    return advantages, active_mask.squeeze(-1)
+```
+
+To eliminate the compute waste caused by degenerate cohorts, production RLVR runtimes implement three architectural countermeasures:
+
+1. **Dynamic Curriculum Filtering:** The data ingestion pipeline tracks the historical pass rate $\hat{p}(q)$ for each task prompt across preceding training steps. Prompts exhibiting pass rates near the extremes ($\hat{p} < 0.05$ or $\hat{p} > 0.95$) are dynamically deprioritized or assigned smaller sampling probabilities. The scheduler prioritizes tasks residing in the zone of proximal development, where empirical pass rates hover near $0.5$, maximizing the expected binomial variance $\hat{p}(1 - \hat{p})$ and guaranteeing informative, non-zero gradient signals.
+2. **Adaptive Group Sizing ($G$-Expansion):** On tasks flagged as highly complex, the runtime dynamically scales the group size $G$ from 8 to 16, 32, or 64 rollouts. By expanding the sample count on hard prompts, the probability of sampling at least one correct reasoning path—$1 - (1 - p)^G$—increases exponentially, converting what would have been a zero-variance failure into a high-leverage learning signal.
+3. **Multi-Tiered Continuous Reward Shaping:** While terminal outcomes remain strictly verifiable, runtimes augment binary pass/fail signals with objective, intermediate structural metrics. For instance, in software synthesis, the verifier assigns fractional rewards based on the proportion of passed assertions ($k/N$ test suites passed), successful AST compilation, and deterministic linter conformance. This preserves non-zero variance across failing cohorts without relying on ungrounded or subjective reward model proxies.
+
+The empirical efficiency of GRPO relies entirely on the integrity of the external environment: the policy updates its weights specifically to maximize the standardized advantage derived from these verifiable scores. However, because the agent optimizes its policy against mechanical test executions, any vulnerability in how tests are executed presents an immediate opportunity for exploitation. If candidate solutions execute in the same memory context as the test runner, or if intermediate assertion scripts leak output channels back into the prompt, the exploring model will optimize reward by tampering with the verifier itself. To prevent the policy from manipulating the very outcome checks that compute its group advantages, the training runtime must isolate reward evaluation inside tamper-proof execution boundaries.

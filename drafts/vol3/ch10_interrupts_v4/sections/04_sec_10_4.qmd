@@ -1,0 +1,150 @@
+## Historical Trajectory Reconstruction {#sec-vol3-persistence-replay}
+
+When a distributed agent supervisor crashes midway through an automated codebase migration or complex cloud deployment, the runtime cannot simply restart the task by resubmitting the initial user prompt and current repository state to the foundation model. If an operator naively re-executes the agent, the autoregressive inference engine samples an entirely fresh trajectory of candidate tokens. The model may generate different tool invocations, attempt to re-clone existing git repositories, overwrite patched files with conflicting syntax trees, or issue duplicate non-idempotent API calls to external services. 
+
+**Re-running an unprivileged stochastic foundation model is not replay; it is a brand-new computation that forks physical reality.** True trajectory reconstruction requires a dedicated replay mode that rebuilds the exact supervisory state—the Agent Control Block ($\text{ACB}_t$), active context window, memory escrows, and authorization boundaries—without querying the foundation model or dispatching a single physical tool action. By treating historical event records as an immutable, authoritative input stream, the agent runtime decouples state re-hydration from external inference and real-world side effects.
+
+### Replay Versus Re-Execution: The Fundamental Asymmetry
+
+The distinction between deterministic replay and stochastic re-execution marks the boundary between dependable systems engineering and fragile scripting. During live trajectory execution, the agent operates in an interactive closed loop with its environment, as formalized in @fig-vol3-replay-mode. At each discrete turn $t$, the host supervisor constructs an inference context from the current control block $\text{ACB}_t$ and dispatches an autoregressive generation request to the foundation model $M$. The model outputs a completion event containing candidate tool proposals $e_{\text{prop}}$. The supervisor evaluates these proposals against its security policies under zero ambient authority ($A=0$). Upon explicit approval, it commits an authorization record $e_{\text{auth}}$ and dispatches the external action $a_{\text{ext}}$ to a sandboxed environment. The physical world returns an observation $e_{\text{obs}}$, and the state transition function $\delta$ advances the control block:
+
+$$\text{ACB}_{t+1} = \delta(\text{ACB}_t, \, e_{\text{auth}}, \, e_{\text{obs}})$$
+
+::: {.column-margin}
+**TTVM and the Separation of I/O**  
+In their seminal work on Time-Traveling Virtual Machines (TTVM), King et al. (2005) demonstrated that deterministic replay of an operating system requires logging every external interrupt, disk read, and non-deterministic processor instruction. In an agentic architecture, the foundation model completion and the external environment observation serve the exact same role as hardware interrupts and DMA transfers: they are external entropy sources that must be logged to make forward execution reproducible.
+:::
+
+If a crash occurs at turn $t=47$ and the engineering team attempts *re-execution* by invoking $M$ over the accumulated prompt, the system relies on the assumption that the neural network will reproduce the historical trace:
+
+$$\hat{e}_{\text{prop}} \sim P_\theta(\cdot \mid \text{Prompt}(\text{ACB}_{47}))$$
+
+This assumption fails almost universally in production systems. Foundation model inference exhibits non-determinism across temperature settings, GPU floating-point reduction orders in parallel matrix multiplication (GEMM) kernels, dynamic KV-cache eviction policies, and upstream model version updates. Even at temperature $\tau = 0$, differences in batch sizes across serving runtimes alter floating-point summation trees, yielding divergent logits and alternative token sequences. 
+
+Furthermore, re-executing actions against the live environment violates basic safety invariants. External tool invocations—such as submitting pull requests, provisioning virtual machines, or modifying database schemas—are frequently non-idempotent. Re-executing a script that runs `git commit` or `aws ec2 run-instances` mutates external state, corrupts repository histories, and invalidates the preconditions of downstream steps.
+
+| Operational Dimension | Live Trajectory Execution | Stochastic Re-Execution | Deterministic Trajectory Replay |
+| :--- | :--- | :--- | :--- |
+| **Inference Engine** | Active foundation model ($M$) | Active foundation model ($M$) | Severed / Stubbed (Zero inference) |
+| **Tool Dispatch** | Sandboxed execution ($A=0$) | Sandboxed execution ($A=0$) | Severed / Mocked (Zero mutations) |
+| **State Evolution** | Non-deterministic generation | Stochastic branching / Divergent | Bit-exact event replay |
+| **Input Source** | Dynamic user & tool feedback | Dynamic tool feedback | Immutable event log ($\mathcal{E}$) |
+| **Primary Purpose** | Problem solving & task completion| Alternative path exploration | Crash recovery, debugging, audit |
+
+: Architectural comparison between live execution, stochastic re-execution, and deterministic trajectory replay. {#tbl-vol3-replay-comparison}
+
+In contrast, *deterministic trajectory replay* treats the foundation model and the external environment as severed peripherals. As outlined in @tbl-vol3-replay-comparison, the runtime initializes the supervisor in replay mode, stubs the model inference client, and replaces the tool dispatch boundary with an event consumer. The supervisor reads the historical event log $\mathcal{E}_{0 \to t}$ and pumps the recorded completions $e_{\text{prop}}$, authorization records $e_{\text{auth}}$, and tool observations $e_{\text{obs}}$ directly into the state transition function $\delta$. 
+
+Because $\delta$ is a deterministic state machine implemented in the supervisor software, replaying identical inputs produces identical intermediate states $\text{ACB}_0, \text{ACB}_1, \dots, \text{ACB}_t$. The runtime reconstructs the exact context window, token consumption totals, and memory escrow tables that existed immediately prior to the crash without incurring inference latency or issuing duplicate physical mutations.
+
+![Live Trajectory Execution versus Replay Reconstruction Mode. In live execution (top), candidate proposals pass through authorization to external tools and the model generates new tokens. In replay reconstruction mode (bottom), the supervisor operates under zero ambient authority ($A=0$) with external endpoints severed; historical state is reconstructed deterministically by streaming recorded events directly into the state transition function.](images/svg/fig-vol3-replay-mode.svg){#fig-vol3-replay-mode}
+
+### State Re-Hydration and the Sequential Event Fold
+
+Reconstructing a trajectory from an append-only event log requires a two-phase protocol: *base state re-hydration* followed by a *sequential event fold*. When recovering a trajectory that has executed hundreds of turns, folding events from genesis ($t=0$) introduces unacceptable recovery latency. The runtime optimizes this process by combining the periodic checkpoints established under Write-Ahead Logging discipline with incremental log playback.
+
+Let $\mathbf{S}_\tau$ be the most recent physical state snapshot persisted at turn $\tau \le t$, containing the serialized Agent Control Block $\text{ACB}_\tau$, the active token buffer, and the memory escrow indices. Let $\mathcal{E}_{\tau \to t} = (e_{\tau+1}, e_{\tau+2}, \dots, e_t)$ denote the suffix of write-ahead log records committed between turn $\tau$ and target turn $t$. The reconstruction protocol proceeds through two strict phases:
+
+1. **Snapshot Deserialization:** The runtime allocates an uninitialized supervisor instance and deserializes $\mathbf{S}_\tau$ from non-volatile storage into host memory. This operation re-establishes the base control block $\text{ACB}_\tau$, restores the logical context window to its exact state at turn $\tau$, and re-populates the sandbox mount table descriptors.
+2. **Sequential Event Fold:** The supervisor opens a read-only stream over $\mathcal{E}_{\tau \to t}$. For each event record $e_i \in \mathcal{E}_{\tau \to t}$, the supervisor executes the deterministic state transition:
+
+$$\text{ACB}_i = \delta(\text{ACB}_{i-1}, \, e_i) \quad \text{for } i = \tau+1, \dots, t$$
+
+During this folding phase, the supervisor's tool dispatch engine is replaced with a verification interceptor. If the historical log encounters an authorization event $e_{\text{auth}}$ containing an action $a_{\text{ext}}$, the supervisor does not invoke the sandbox RPC client. Instead, it advances its internal program counter and reads the corresponding $e_{\text{obs}}$ record from the log stream, injecting the historical standard output, exit code, or error message directly into the context accumulator. 
+
+::: {.column-margin}
+**The Escrow Invariant During Replay**  
+During live execution, memory escrow holds unverified candidate actions until a verification gate passes. During replay, the verification outcome is already known and recorded in the event log. The supervisor's state transition function $\delta$ must still execute the escrow transition logic to ensure that internal state machine assertions—such as token budgets, pending proposal counters, and quota allocations—remain bit-exact across the recovery boundary.
+:::
+
+If the supervisor's state transition logic attempts to establish a live network connection or emit an unrecorded tool action during replay, the verification interceptor raises an invariant violation ($A=0$ breach). The presence of any unlogged side effect indicates that the supervisor's code has drifted from the version that authored the trace, or that an unrecorded source of entropy was allowed to influence the live control flow.
+
+::: {.callout-note title="Worked Example: Recovery Latency and Compute Savings in Trajectory Reconstruction"}
+Consider an autonomous coding agent that failed at turn $t = 150$ due to a transient worker node kernel panic. The trajectory maintained an active context window of $L = 48,000$ tokens. The system recorded periodic checkpoints every $K = 50$ turns. The nearest checkpoint was taken at turn $\tau = 100$.
+
+**Physical Parameters:**
+- Serialized checkpoint size $|\mathbf{S}_{100}|$: $64\text{ MB}$ (includes serialized ACB, tokenizer cache, and sandbox filesystem overlay metadata).
+- NVMe read bandwidth: $3.2\text{ GB/s}$ ($3,200\text{ MB/s}$).
+- Event log delta count: $n = 50$ turns ($150$ raw events: 50 model completions, 50 authorizations, 50 observations).
+- Average event record size: $4\text{ KB}$ (total event log suffix size: $600\text{ KB}$).
+- Supervisor event fold latency: $0.12\text{ ms}$ per event on an AMD EPYC 9654 host processor.
+- Upstream inference service characteristics: Frontier model prefill processing rate of $3,000\text{ tokens/s}$ at batch size 1; average decode latency of $25\text{ ms/token}$; average completion length of $200\text{ tokens}$ per turn.
+
+**Trajectory Reconstruction Latency ($T_{\text{recon}}$):**
+$$\begin{aligned}
+T_{\text{snap\_read}} &= \frac{64\text{ MB}}{3,200\text{ MB/s}} = 0.020\text{ s} = 20.0\text{ ms} \\
+T_{\text{log\_read}} &= \frac{0.6\text{ MB}}{3,200\text{ MB/s}} \approx 0.0002\text{ s} = 0.2\text{ ms} \\
+T_{\text{event\_fold}} &= 150 \times 0.12\text{ ms} = 18.0\text{ ms} \\
+T_{\text{recon}} &= T_{\text{snap\_read}} + T_{\text{log\_read}} + T_{\text{event\_fold}} = 20.0 + 0.2 + 18.0 = 38.2\text{ ms}
+\end{aligned}$$
+
+**Hypothetical Stochastic Re-Execution Latency ($T_{\text{re-exec}}$):**
+Re-executing the 50 turns through the live model requires recomputing prefill and generating completions across all intermediate turns:
+$$\begin{aligned}
+T_{\text{prefill\_per\_turn}} &\approx \frac{48,000\text{ tokens}}{3,000\text{ tokens/s}} = 16.0\text{ s} \\
+T_{\text{decode\_per\_turn}} &= 200\text{ tokens} \times 0.025\text{ s/token} = 5.0\text{ s} \\
+T_{\text{turn\_total}} &= 16.0\text{ s} + 5.0\text{ s} = 21.0\text{ s} \\
+T_{\text{re-exec}} &= 50 \times 21.0\text{ s} = 1,050.0\text{ s} \approx 17.5\text{ minutes}
+\end{aligned}$$
+
+**Conclusion:**
+Deterministic trajectory reconstruction restores the agent control block in $38.2\text{ ms}$, achieving a speedup of:
+
+$$\text{Speedup} = \frac{1,050.0\text{ s}}{0.0382\text{ s}} \approx 27,486\times$$
+
+Reconstruction completely eliminates $17.5$ minutes of GPU idle time, saves tens of dollars in API billing, and introduces zero risk of non-deterministic branching or duplicate environmental side effects.
+:::
+
+### Non-Destructive Post-Mortem Debugging
+
+When an autonomous agent exhibits pathological behavior—such as falling into an infinite loop of invalid compiler invocations, exhausting its token budget, or attempting to read unauthorized directories—post-mortem root-cause analysis is exceptionally difficult. In standard software systems, developers inspect core dumps or linear text logs. But text logs from an agent run are deceptive: they reveal what the foundation model produced, but they obscure the internal supervisory control flow, the dynamic context window slicing decisions, and the token budget accounting that triggered the failure.
+
+Brian Kernighan (1979) observed that *"debugging is twice as hard as writing the code in the first place."* When debugging software built around non-deterministic neural components, this difficulty compounds exponentially: if the developer cannot reproduce the exact internal control state, the defect cannot be diagnosed.
+
+Historical trajectory reconstruction provides the foundation for *non-destructive time-travel debugging*. Because the event log records every interaction at the supervisor-model and supervisor-sandbox boundaries, the developer can treat trajectory time as an addressable, scrubbable dimension. A developer can mount an archival trajectory, select any turn $t \in [0, T_{\max}]$, and reconstruct the exact in-memory representation of $\text{ACB}_t$.
+
+```
+[Trajectory Timeline: Turns 0 to 48]
+Checkpoints:    [S_0]                [S_20]               [S_40]          [Crash: t=48]
+                  |                    |                    |                   |
+Event Log:       |====E_{0->20}======|====E_{20->40}=====|====E_{40->48}=====|
+                  |                    |                    |                   |
+Rewind Target:   |                    |           =====>  [Step t=35]          |
+                                                    (Load S_20 + Fold 15 events)
+```
+
+Time-travel navigation leverages the checkpoint-delta index. To inspect the agent state at turn $t = 35$, the debugger locates the nearest preceding snapshot $\mathbf{S}_{20}$, deserializes the control block, and folds the 15 intervening event pairs from $\mathcal{E}_{20 \to 35}$. The developer can then execute non-destructive diagnostic queries against the reconstructed state:
+
+- **Context Window Slicing Inspection:** The developer inspects the exact token array passed to the model's prefill buffer at step 35. This exposes whether critical prompt instructions, system reminders, or tool documentation were truncated or evicted by the context manager.
+- **Dynamic Token Budget Audit:** The developer examines the supervisor's internal token ledger to evaluate whether runaway context growth degraded reasoning performance before the crash occurred.
+- **Escrow and Authorization State Review:** The debugger evaluates pending candidate actions $e_{\text{prop}}$ against the active permission mask, revealing whether an overly permissive regex filter allowed a malformed shell argument to escape into the sandbox.
+- **Hypothetical Branching (What-If Analysis):** The developer forks the trajectory at turn $t = 35$. The supervisor retains historical state up to turn 35, but switches from replay mode back to live execution under a modified prompt template or corrected tool schema. This allows engineers to verify bug fixes against historical failures without re-running the successful early stages of the task.
+
+### Trace-Driven Regression Testing of Supervisor Logic
+
+A critical challenge in the lifecycle of an agent platform is continuous integration and regression testing. When systems engineers modify the host supervisor—such as optimizing the tool argument parser, refactoring the context compaction algorithm, or updating permission schemas—they must guarantee that these changes do not break existing agent behaviors.
+
+Running live integration test suites against actual foundation model endpoints is impractical for CI pipelines. Foundation model APIs introduce high latency, non-deterministic completions, rate limits, and substantial financial costs. A test that passes in one run may fail in the next solely because the model sampled a rare synonym in a tool parameter, causing flaky test suites that undermine engineering velocity.
+
+Trace-driven regression testing solves this problem by using historical trajectory logs as fixed, golden test vectors. In this harness, the runtime reads hundreds of archived production trajectories and feeds the recorded model completions $e_{\text{prop}}$ directly into the newly modified supervisor logic.
+
+The test harness validates whether the updated supervisor's state transitions match historical invariants. For example, if an engineer rewires the tool call parser to handle streaming JSON tokens, the regression runner replays historical $e_{\text{prop}}$ payloads containing thousands of malformed, escaped, or edge-case tool calls observed in production. The runner asserts that the new parser extracts identical tool names, arguments, and validation errors as the baseline implementation, without invoking a single GPU kernel.
+
+```text
+=================================== FAILURES ===================================
+_________________ test_supervisor_replay_regression[trace_8492a] ________________
+[replay_engine.py:142]: InvariantViolation: Tool argument schema mismatch at turn 14
+>   supervisor.apply_event(recorded_event)
+E   ValidationError: Tool 'edit_file' argument 'patch' failed validation:
+E   Expected valid unified diff string, received unescaped markdown code fence.
+E   Historical event e_prop (commit: 9f4a12) accepted this payload via legacy regex fallback.
+E   Refactored parser (commit: 3b8c91) rejected payload under strict Pydantic parsing.
+E   Divergence detected: Trajectory replay cannot advance to state ACB_15.
+=========================== 1 failed in 0.04s ==================================
+```
+
+The regression trace above illustrates a practical failure mode uncovered during offline trace replay. A refactored supervisor parser enforced strict Pydantic validation on unified diff strings, breaking backward compatibility with an unescaped markdown format that the historical agent had successfully handled via a legacy regex fallback. 
+
+Because the test ran against an archived event log, the failure was identified in $40\text{ ms}$ on local CPU infrastructure, pin-pointing the exact turn ($t=14$) and token payload where the supervisor logic diverged. By decoupling supervisor validation from live model inference, trace-driven regression harnesses provide deterministic guarantees that platform changes preserve operational behavior across real-world workloads.
+
+Trajectory reconstruction succeeds only as long as the supervisor's state transition function $\delta$ can faithfully interpret historical event streams. However, when the runtime attempts to execute live trajectories or verify deterministic behavior across different hardware nodes, subtle sources of non-determinism—floating-point reduction order in GPU kernels, dynamic wall-clock system calls, and unseeded pseudorandom number generators—threaten replay fidelity. What systems techniques isolate and eliminate these entropy sources to guarantee bit-exact execution?

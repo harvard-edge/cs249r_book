@@ -278,6 +278,35 @@ class MLSysBookCLI:
         no_cover = False
         print_marks = False
         remaining = []
+        normalized_args = []
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            lower = arg.lower()
+            if lower == "--vol" and i + 1 < len(args):
+                val = args[i + 1]
+                v_num = val.removeprefix("vol").removeprefix("v")
+                normalized_args.append(f"--vol{v_num}")
+                i += 2
+                continue
+            elif lower.startswith("--vol="):
+                val = arg.split("=", 1)[1]
+                v_num = val.removeprefix("vol").removeprefix("v")
+                normalized_args.append(f"--vol{v_num}")
+                i += 1
+                continue
+            elif lower == "--chapter" and i + 1 < len(args):
+                normalized_args.append(args[i + 1])
+                i += 2
+                continue
+            elif lower.startswith("--chapter="):
+                normalized_args.append(arg.split("=", 1)[1])
+                i += 1
+                continue
+            normalized_args.append(arg)
+            i += 1
+        args = normalized_args
+
         explicit_volumes = set()
         for arg in args:
             lower = arg.lower()
@@ -320,6 +349,8 @@ class MLSysBookCLI:
                 volume = "tinytorch"
             elif lower == "--all":
                 build_all = True
+            elif lower == "--isolated":
+                skip_validate = True
             elif lower == "--skip-hygiene":
                 # Emergency bypass for the EPUB pre-render hygiene check
                 # added in the fix/epub-issues work. See

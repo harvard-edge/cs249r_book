@@ -3,158 +3,253 @@ import * as runtime from "./runtime.mjs";
 window.MLSP = window.MLSP || {};
 window.MLSP.games = window.MLSP.games || {};
 
-window.MLSP.games.checkpoint = async function(canvas, callbacks) {
-  const { app, stage, width, height, PIXI, onTick, destroy } = await runtime.mountPixiOnCanvas(canvas, { bg: 0x111111 });
-  
-  const state = {
-    score: 0,
-    gameOver: false,
-    started: false
-  };
-  
-  const container = new PIXI.Container();
-  stage.addChild(container);
-  
-  // Progress bar outline
-  const barOutline = new PIXI.Graphics();
-  barOutline.rect(50, height/2 - 20, width - 100, 40);
-  barOutline.stroke({ color: 0xffffff, width: 2 });
-  container.addChild(barOutline);
-  
-  const barFill = new PIXI.Graphics();
-  container.addChild(barFill);
-  const instruction = new PIXI.Text({
-    text: "Hold Space to train. Release to write a checkpoint before a node failure.",
-    style: { fill: 0xffffff, fontSize: 16, fontFamily: "Helvetica Neue, Arial", align: "center" }
-  });
-  instruction.anchor.set(0.5);
-  instruction.position.set(width / 2, height / 2 - 62);
-  container.addChild(instruction);
-  const checkpointText = new PIXI.Text({
-    text: "last checkpoint: 0%",
-    style: { fill: 0xaaaaaa, fontSize: 13, fontFamily: "Helvetica Neue, Arial" }
-  });
-  checkpointText.anchor.set(0.5);
-  checkpointText.position.set(width / 2, height / 2 + 46);
-  container.addChild(checkpointText);
-  
-  let progress = 0;
-  let lastCheckpoint = 0;
-  let spaceHeld = false;
-  
-  let strikeTimer = 2000 + Math.random() * 3000;
-  let warningPhase = false;
-  
-  const checkpoints = [];
-  
-  const downHandler = (e) => { if (state.started && e.code === 'Space') { e.preventDefault(); spaceHeld = true; } };
-  const upHandler = (e) => { 
-    if (e.code === 'Space') {
-      e.preventDefault();
-      spaceHeld = false;
-      // Write checkpoint
-      if (progress > lastCheckpoint && progress < width - 100 && !state.gameOver) {
-        lastCheckpoint = progress;
-        checkpointText.text = "last checkpoint: " + Math.floor((lastCheckpoint / (width - 100)) * 100) + "%";
-        const cp = new PIXI.Graphics();
-        cp.rect(50 + progress - 2, height/2 - 30, 4, 60);
-        cp.fill({ color: 0x00ff00 });
-        container.addChild(cp);
-        checkpoints.push(cp);
-        runtime.pop(stage, 50 + progress, height/2, 0x00ff00);
-        runtime.floatText(stage, 50 + progress, height/2 - 40, "CHECKPOINT", 0x00ff00);
-      }
-    }
-  };
-  
-  window.addEventListener('keydown', downHandler);
-  window.addEventListener('keyup', upHandler);
-  
-  const bgWarning = new PIXI.Graphics();
-  bgWarning.rect(0,0,width,height);
-  bgWarning.fill({color: 0xff0000});
-  bgWarning.alpha = 0;
-  stage.addChildAt(bgWarning, 0);
+window.MLSP.games.checkpoint = async function(canvas, callbacks = {}) {
+  const { stage, width: W, height: H, PIXI, onTick, destroy } =
+    await runtime.mountPixiOnCanvas(canvas, { bg: 0x111827 });
 
-  // Pre-game READY overlay
-  runtime.mountReadyOverlay(stage, {
-    width: width, height: height,
-    title: "CHECKPOINT ROULETTE",
-    goal: "Train fast. Checkpoint before a node failure strikes.",
-    controls: "HOLD SPACE  train · RELEASE  write a checkpoint",
-    onLaunch: () => { state.started = true; }
+  const RUN_MS = 60000;
+  const TRAIN_MS = 20000;
+  const WRITE_MS = 1100;
+  const BAR_X = 50;
+  const BAR_Y = H / 2 - 20;
+  const BAR_W = W - 100;
+  const state = {
+    started: false,
+    over: false,
+    progress: 0,
+    saved: 0,
+    pending: 0,
+    writeLeft: 0,
+    timeLeft: RUN_MS,
+    failureLeft: 2400 + Math.random() * 1800,
+    failures: 0,
+    checkpoints: 0,
+    holding: false
+  };
+
+  const warning = new PIXI.Graphics();
+  const bar = new PIXI.Graphics();
+  const savedMark = new PIXI.Graphics();
+  const writeBar = new PIXI.Graphics();
+  const status = new PIXI.Text({
+    text: "Hold Space or the button to train",
+    style: { fill: 0xffffff, fontSize: 18, fontWeight: "600", align: "center" }
   });
+  status.anchor.set(0.5);
+  status.position.set(W / 2, BAR_Y - 58);
+
+  const savedText = new PIXI.Text({
+    text: "Saved progress  0%",
+    style: { fill: 0xa7c4da, fontSize: 14 }
+  });
+  savedText.position.set(BAR_X, BAR_Y + 62);
+  const timerText = new PIXI.Text({
+    text: "Time  60s",
+    style: { fill: 0xffffff, fontSize: 14 }
+  });
+  timerText.anchor.set(1, 0);
+  timerText.position.set(W - BAR_X, BAR_Y + 62);
+  const legend = new PIXI.Text({
+    text: "Blue: live training   |   Green: durable checkpoint",
+    style: { fill: 0xb6bec9, fontSize: 13, align: "center" }
+  });
+  legend.anchor.set(0.5);
+  legend.position.set(W / 2, BAR_Y + 110);
+  stage.addChild(warning, bar, savedMark, writeBar, status, savedText, timerText, legend);
+
+  function reportProgress() {
+    callbacks.onScoreChange?.({ score: Math.floor(state.progress), saved: Math.floor(state.saved) });
+  }
+
+  function draw() {
+    bar.clear();
+    bar.roundRect(BAR_X, BAR_Y, BAR_W, 40, 5).fill(0x263444);
+    if (state.progress > 0) {
+      bar.roundRect(BAR_X, BAR_Y, BAR_W * state.progress / 100, 40, 5)
+        .fill(state.writeLeft > 0 ? 0xc87b2a : 0x4a90c4);
+    }
+    bar.roundRect(BAR_X, BAR_Y, BAR_W, 40, 5).stroke({ color: 0xdbe5ee, width: 2 });
+    savedMark.clear();
+    if (state.saved > 0) {
+      const x = BAR_X + BAR_W * state.saved / 100;
+      savedMark.moveTo(x, BAR_Y - 11).lineTo(x, BAR_Y + 51)
+        .stroke({ color: 0x64d98b, width: 4 });
+    }
+    writeBar.clear();
+    if (state.writeLeft > 0) {
+      writeBar.roundRect(BAR_X, BAR_Y + 49, BAR_W * (1 - state.writeLeft / WRITE_MS), 4, 2)
+        .fill(0xffc46b);
+    }
+    savedText.text = `Saved progress  ${Math.floor(state.saved)}%`;
+    timerText.text = `Time  ${Math.ceil(state.timeLeft / 1000)}s`;
+  }
+
+  function startTraining() {
+    if (!state.started || state.over || state.writeLeft > 0) return;
+    state.holding = true;
+    status.text = "Training — release to write a checkpoint";
+  }
+
+  function stopTraining() {
+    if (!state.holding) return;
+    state.holding = false;
+    if (state.over || state.progress <= state.saved || state.writeLeft > 0) return;
+    state.pending = state.progress;
+    state.writeLeft = WRITE_MS;
+    status.text = "Writing checkpoint — training paused";
+  }
+
+  const ready = runtime.mountReadyOverlay(stage, {
+    width: W, height: H,
+    title: "CHECKPOINT ROULETTE",
+    goal: "Reach 100% before time runs out. A failure restores your last saved point.",
+    controls: "HOLD SPACE or the button to train · RELEASE to save (1.1s)",
+    onLaunch: () => {
+      state.started = true;
+      status.visible = true;
+      reportProgress();
+    }
+  });
+  // Hide the live instruction until the ready overlay is dismissed.
+  status.visible = false;
+
+  function finish(won) {
+    if (state.over) return;
+    state.over = true;
+    state.holding = false;
+    state.writeLeft = 0;
+    const shade = new PIXI.Graphics();
+    shade.rect(0, 0, W, H).fill({ color: 0x101827, alpha: 0.88 });
+    const title = new PIXI.Text({
+      text: won ? "TRAINING COMPLETE" : "TIME EXPIRED",
+      style: { fill: won ? 0x64d98b : 0xff8b8b, fontSize: 32, fontWeight: "700" }
+    });
+    title.anchor.set(0.5);
+    title.position.set(W / 2, H / 2 - 42);
+    const summary = new PIXI.Text({
+      text: `${state.checkpoints} checkpoints · ${state.failures} failures · ${Math.ceil((RUN_MS - state.timeLeft) / 1000)}s elapsed`,
+      style: { fill: 0xffffff, fontSize: 16 }
+    });
+    summary.anchor.set(0.5);
+    summary.position.set(W / 2, H / 2 + 8);
+    const retry = new PIXI.Text({
+      text: "Press R or tap to try again",
+      style: { fill: 0xffd6a8, fontSize: 15 }
+    });
+    retry.anchor.set(0.5);
+    retry.position.set(W / 2, H / 2 + 48);
+    stage.addChild(shade, title, summary, retry);
+    callbacks.onGameOver?.({
+      won,
+      score: Math.floor(state.progress),
+      checkpoints: state.checkpoints,
+      failures: state.failures,
+      elapsedSeconds: Math.ceil((RUN_MS - state.timeLeft) / 1000)
+    });
+  }
+
+  function fail() {
+    state.failures++;
+    state.progress = state.saved;
+    state.pending = 0;
+    state.writeLeft = 0;
+    state.holding = false;
+    status.text = "Node failed — restored last checkpoint";
+    runtime.flash(stage, 0xc44444, 350, 0.45);
+    reportProgress();
+  }
+
+  const downHandler = (e) => {
+    if (e.code !== "Space") return;
+    e.preventDefault();
+    if (e.repeat) return;
+    if (state.started) startTraining();
+  };
+  const upHandler = (e) => {
+    if (e.code !== "Space") return;
+    e.preventDefault();
+    stopTraining();
+  };
+  const retryHandler = (e) => {
+    if (state.over && e.key.toLowerCase() === "r") callbacks.onRetry?.();
+  };
+  const blurHandler = () => stopTraining();
+  const canvasHandler = () => { if (state.over) callbacks.onRetry?.(); };
+  window.addEventListener("keydown", downHandler);
+  window.addEventListener("keyup", upHandler);
+  window.addEventListener("keydown", retryHandler);
+  window.addEventListener("blur", blurHandler);
+  canvas.addEventListener("pointerdown", canvasHandler);
+
+  const control = callbacks.controlButton;
+  const controlDown = (e) => {
+    e.preventDefault();
+    if (!state.started) ready.dismiss();
+    if (state.over) { callbacks.onRetry?.(); return; }
+    control.setPointerCapture(e.pointerId);
+    startTraining();
+  };
+  const controlUp = () => stopTraining();
+  if (control) {
+    control.addEventListener("pointerdown", controlDown);
+    control.addEventListener("pointerup", controlUp);
+    control.addEventListener("pointercancel", controlUp);
+    control.addEventListener("lostpointercapture", controlUp);
+  }
 
   onTick((dt) => {
-    if (!state.started) return;
-    if (state.gameOver) return;
+    if (!state.started || state.over) return;
+    const step = Math.min(dt, 100);
+    state.timeLeft = Math.max(0, state.timeLeft - step);
+    state.failureLeft -= step;
 
-    if (spaceHeld) {
-      progress += dt * 0.04; // 0.04 px per ms
-      if (progress >= width - 100) {
-        progress = width - 100;
-        state.score = 100;
-        callbacks.onScoreChange(state);
-        state.gameOver = true;
-        endGame(true);
+    if (state.writeLeft > 0) {
+      state.writeLeft = Math.max(0, state.writeLeft - step);
+      if (state.writeLeft === 0) {
+        state.saved = state.pending;
+        state.pending = 0;
+        state.checkpoints++;
+        status.text = "Checkpoint saved — hold to keep training";
+        reportProgress();
       }
+    } else if (state.holding) {
+      state.progress = Math.min(100, state.progress + step * 100 / TRAIN_MS);
+      reportProgress();
+      if (state.progress >= 100) { finish(true); draw(); return; }
     }
-    
-    // Draw fill
-    barFill.clear();
-    if (progress > 0) {
-      barFill.rect(50, height/2 - 20, progress, 40);
-      barFill.fill({ color: spaceHeld ? 0x4a90c4 : 0x555555 });
+
+    warning.clear();
+    if (state.failureLeft < 1600) {
+      warning.rect(0, 0, W, H).fill({ color: 0xc44444, alpha: 0.10 });
+      if (state.writeLeft === 0 && !state.holding) status.text = "Failure imminent — hold after it passes";
     }
-    
-    state.score = Math.floor((progress / (width - 100)) * 100);
-    callbacks.onScoreChange(state);
-    
-    strikeTimer -= dt;
-    if (strikeTimer < 800 && !warningPhase) {
-      warningPhase = true;
+    if (state.failureLeft <= 0) {
+      if (state.holding || state.writeLeft > 0) fail();
+      else status.text = "Failure passed while idle — train or save when ready";
+      state.failureLeft = 2200 + Math.random() * 2200;
+      warning.clear();
     }
-    
-    if (warningPhase) {
-      bgWarning.alpha = 0.15 + Math.sin(performance.now() / 50) * 0.15;
-    } else {
-      bgWarning.alpha = 0;
-    }
-    
-    if (strikeTimer <= 0) {
-      // Strike!
-      runtime.flash(stage, 0xffffff, 400, 0.9);
-      runtime.shake(container, 20, 400);
-      
-      if (spaceHeld) {
-        // Node failure while training! Reset to checkpoint
-        progress = lastCheckpoint;
-        runtime.floatText(stage, 50 + progress, height/2, "NODE FAILED!", 0xff0000, {size: 32});
-      } else {
-        // Safe
-        runtime.floatText(stage, width/2, height/2 - 80, "DODGED", 0xaaaaaa);
-      }
-      
-      strikeTimer = 1500 + Math.random() * 4000;
-      warningPhase = false;
-    }
+    if (state.timeLeft <= 0) finish(false);
+    draw();
   });
-  
-  function endGame(win) {
-    const go = new PIXI.Text({ text: win ? "TRAINING COMPLETE" : "GAME OVER", style: { fill: win ? 0x00ff00 : 0xff0000, fontSize: 48, align: 'center' } });
-    go.anchor.set(0.5);
-    go.position.set(width/2, height/2 - 80);
-    stage.addChild(go);
-    callbacks.onGameOver({ score: state.score });
-  }
-  
+  draw();
+
   return {
     ahaLabel: "Fault Tolerance",
-    ahaText: "Frequent checkpoints save progress during node failures, but taking them pauses training.",
-    ahaLink: { href: "/", label: "Read Vol II: Fault Tolerance" },
+    ahaText: "A completed checkpoint limits lost work after a node failure, but writing it pauses training and can itself be interrupted.",
+    ahaLink: { href: "/vol2/fault_tolerance/fault_tolerance.html", label: "Read Volume II: Fault Tolerance" },
     destroy: () => {
-      window.removeEventListener('keydown', downHandler);
-      window.removeEventListener('keyup', upHandler);
+      window.removeEventListener("keydown", downHandler);
+      window.removeEventListener("keyup", upHandler);
+      window.removeEventListener("keydown", retryHandler);
+      window.removeEventListener("blur", blurHandler);
+      canvas.removeEventListener("pointerdown", canvasHandler);
+      if (control) {
+        control.removeEventListener("pointerdown", controlDown);
+        control.removeEventListener("pointerup", controlUp);
+        control.removeEventListener("pointercancel", controlUp);
+        control.removeEventListener("lostpointercapture", controlUp);
+      }
       destroy();
     }
   };

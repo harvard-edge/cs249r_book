@@ -1,0 +1,146 @@
+## Empirical Safety Cases {#sec-vol3-conclusion-safety}
+
+Deploying an autonomous agent into production exposes live infrastructure to the fundamental tension between unconstrained neural generation and deterministic operational integrity. If an unprivileged neural policy $\pi_\theta$ operating across an external environment exhibits an average per-step reliability of $99\%$, an extended trajectory $\tau = (s_0, a_0, o_0, \dots, a_{T-1}, o_{T-1})$ spanning $T = 100$ discrete tool invocations will complete without a single catastrophic deviation with probability $(0.99)^{100} \approx 0.366$. In a mission-critical systems runtime—such as automated database migration, distributed cluster orchestration, or financial ledger reconciliation—a $63.4\%$ trajectory failure rate is catastrophic. Worse, neural failures are rarely clean crashes; they manifest as plausible, syntactically well-formed, yet semantically destructive operations: dropping production foreign keys, provisioning unthrottled compute instances, or leaking sensitive customer credentials into third-party observation buffers. 
+
+**Releasing an autonomous agent into production requires a defensible multi-tier safety case: combining deterministic mechanical verifiers, statistical evaluation on held-out gyms, and canary telemetry.** Rather than relying on model self-reflection or open-loop benchmark pass rates, dependable systems engineering demands an evidence-based assurance framework that treats the neural model as an untrusted, stochastic component enclosed within an uncompromising deterministic supervisory harness.
+
+### The Claims-Arguments-Evidence Framework
+
+Borrowing from the rigorous safety-critical methodologies of avionics and nuclear systems engineering, an autonomous agent cannot be certified for production deployment based on intuitive confidence or empirical vibes. It requires a formal *safety case*: a structured, auditable body of reasoning demonstrating that the system satisfies its operational invariants within a defined deployment envelope. The safety case decomposes into a tripartite hierarchy comprising claims, arguments, and evidence.
+
+::: {.column-margin}
+**The Epistemic Gap:** A model generating the string `"Verification complete: All schema invariants satisfied"` provides zero bits of assurance. Invariant closure is an external systems property provable only through deterministic software checkers (compilers, linters, SMT solvers), never by model introspection.
+:::
+
+*Claims* ($C$) are precise, testable propositions asserting that the agent runtime preserves specific safety and correctness invariants across all reachable states. A claim must be unambiguously falsifiable. Rather than vague assertions such as "the agent acts responsibly," systems engineering demands concrete invariants: $C_1$: "The agent process cannot mutate production database schemas without cryptographic dual-authorization"; $C_2$: "The agent execution harness will never emit unencrypted network egress packets outside VPC subnet $S_{\text{priv}}$"; and $C_3$: "No sequence of tool invocations can deplete more than $B_{\max}$ cloud compute budget units within a rolling 60-minute window."
+
+*Arguments* ($A$) provide the causal, architectural rationale explaining *why* the system design guarantees that a given claim holds. The argument establishes the bridge between abstract invariant and physical implementation. For claim $C_1$, the argument demonstrates that the agent runtime operates under Zero Ambient Authority ($A=0$), where the foundation model possesses no direct database handles, candidate SQL statements are held in an isolated memory escrow, and the schema-migration RPC endpoint enforces a hardware-backed signature requirement that the model's execution context cannot synthesize.
+
+*Evidence* ($E$) provides the concrete, empirical proof confirming that the mechanisms underpinning the arguments operate correctly in practice. Crucially, evidence cannot originate from model self-reports. A neural network declaring that it has verified its own output violates the End-to-End argument and the fundamental principle of complete mediation. Valid evidence consists exclusively of machine-checked artifacts: compiler diagnostics, static analysis AST dumps, SMT solver satisfiability certificates, hermetic benchmark logs, and cryptographically signed audit trails.
+
+![The Multi-Tier Verification Pyramid and Safety Case Architecture. Claims are established through architectural arguments, backed by three progressive tiers of empirical evidence: deterministic mechanical verifiers, statistical gym benchmarks, and runtime canary telemetry.](images/svg/fig-vol3-safety-case-pyramid.svg){#fig-vol3-safety-case-pyramid}
+
+Formally, a production release gate validates the safety case tuple $\mathcal{S} = \langle \mathcal{C}, \mathcal{A}, \mathcal{E} \rangle$. For each claim $C_i \in \mathcal{C}$, there must exist a valid architectural argument $A_i \in \mathcal{A}$ supported by an empirical evidence set $\mathcal{E}_i \subseteq \mathcal{E}$ such that:
+
+$$\forall C_i \in \mathcal{C}, \quad \text{Verify}(C_i, A_i, \mathcal{E}_i) = \text{PASS}$$
+
+If any evidence artifact fails—such as an AST linter reporting a syntax violation or an egress log revealing an unauthenticated socket connection—the safety case is invalidated, the release gate trips, and the agent deployment is blocked at the pipeline boundary.
+
+### The Three-Tier Verification Pyramid
+
+To substantiate the safety case without imposing infinite verification latency on every interactive step, the runtime organizes its empirical evidence into a three-tier verification pyramid (@fig-vol3-safety-case-pyramid). Each tier operates at a distinct spatial and temporal boundary, trading off absolute formal guarantees against environmental realism.
+
+::: {.column-margin}
+**Hoare Logic in Agent Runtimes:** Following C. A. R. Hoare (1969), every tool invocation is bounded by a precondition $P$ and postcondition $Q$. In agentic runtimes, Tier 1 mechanical verifiers enforce that if state $s_t$ satisfies $P$, action $a_t$ is permitted only if static analysis guarantees postcondition $Q$ will not violate safety envelope $\mathcal{S}_{\max}$.
+:::
+
+#### Tier 1: Deterministic Mechanical Verification
+
+The base of the pyramid consists of deterministic, zero-tolerance software checks executed locally within the host supervisor before any action proposal touches the external environment. Tier 1 verifiers operate synchronously on the model's candidate emissions. They require no GPU compute and introduce negligible latency ($\le 5\text{ ms}$).
+
+1. **AST and Grammar Parsing:** Candidate tool calls emitted in structured interchange formats (such as JSON or Protobuf) are validated against strict context-free grammars. If an autoregressive decode produces an unparseable token sequence, malformed control tokens, or unrecognized schema keys, the candidate frame is dropped immediately at the parser boundary.
+2. **Type Checking and Static Analysis:** Tool arguments representing code modifications (such as Python diffs or SQL patches) are fed into static analysis pipelines prior to staging. In a code-generation agent, candidate modifications must pass language-specific type checkers (e.g., `mypy` or `rustc`) and security linters (e.g., checking for unparameterized SQL queries or dangerous shell escapes) in memory escrow.
+3. **Formal Invariant Provers:** Where safety boundaries involve numerical allocations or temporal sequencing, candidate plans are encoded as satisfiability modulo theories (SMT) constraints and solved via engines such as Z3. If a proposed operational plan violates access-control orderings or exceeds allocated budget thresholds, the SMT solver returns `UNSAT`, terminating execution before any network packet is dispatched.
+
+Because Tier 1 is entirely deterministic, its failure mode is binary: any violation halts the trajectory or forces an immediate local replan. No statistical uncertainty is tolerated at this boundary.
+
+#### Tier 2: Hermetic Gym Evaluation
+
+While Tier 1 guarantees that an action does not violate static syntax or security constraints, it cannot determine whether an agent will successfully accomplish a multi-step objective or suffer from behavioral loops. Tier 2 evaluates the agent's dynamic policy $\pi_\theta$ across a massive suite of hermetic, reproducible simulation environments ("gyms").
+
+::: {.column-margin}
+**Statistical Release Gates:** As established in Chapter 16, point estimates of agent success rates are statistically meaningless without confidence bounds. Release criteria must be formulated over the lower bound of the two-sided Wilson score interval at confidence level $1 - \alpha$.
+:::
+
+A hermetic gym provides a fully isolated, snapshot-isolated replica of the target operating environment—containing ephemeral databases, synthetic API endpoints, mock file systems, and deterministic network latency simulators. The candidate agent is executed across $N$ independent, randomized test fixtures representing both nominal workflows and adversarial edge cases (e.g., network partitions, corrupted input schemas, and hallucination-inducing tool observations).
+
+Evaluation across Tier 2 produces statistical pass rates. To guarantee that a model checkpoint or prompt configuration does not introduce subtle regressions, systems engineers establish strict statistical release criteria based on the lower bound of the Wilson score confidence interval $\hat{p}_{\text{lower}}$:
+
+$$\hat{p}_{\text{lower}} \ge \Theta_{\text{target}}$$
+
+If an agent requires an empirical task success rate of $95\%$ with $99\%$ statistical confidence ($\alpha = 0.01$), and testing across $N = 500$ held-out fixtures yields 480 successes, the empirical pass rate is $\hat{p} = 0.960$. Calculating the Wilson lower bound yields $\hat{p}_{\text{lower}} \approx 0.934$. Because $0.934 < 0.950$, the candidate release fails the Tier 2 gate, compelling the engineering team to expand the test corpus or harden the policy before production promotion.
+
+#### Tier 3: Runtime Containment and Canary Telemetry
+
+No offline benchmark suite, however extensive, captures the full entropy of live production environments. The peak of the verification pyramid therefore enforces continuous dynamic containment and live telemetry gating during canary rollouts.
+
+```
+       [ Production Ingress ]
+                 │
+                 ▼
+     ┌───────────────────────┐
+     │ Traffic Splitter Router│
+     └───────────┬───────────┘
+                 │
+        ┌────────┴────────┐
+        ▼ (98%)           ▼ (2%)
+ ┌──────────────┐  ┌───────────────────────────────┐
+ │ Stable Fleet │  │ Canary MicroVM (gVisor/KVM)   │
+ │   (v1.4)     │  │   Candidate Policy (v1.5)     │
+ └──────────────┘  └──────────────┬────────────────┘
+                                  │
+                                  ▼
+                   ┌───────────────────────────────┐
+                   │ Syscall Filter (seccomp-bpf)  │
+                   └──────────────┬────────────────┘
+                                  │
+                                  ▼
+                   ┌───────────────────────────────┐
+                   │ Telemetry & Circuit Breaker   │
+                   │ Burn Rate > Threshold? ───────┼──> [ Auto-Rollback ]
+                   └───────────────────────────────┘
+```
+
+When a candidate agent configuration passes Tiers 1 and 2, it is deployed to a minimal canary cohort processing a tiny fraction (e.g., $1\%$ to $5\%$) of production traffic. Tier 3 wraps the live agent inside three non-negotiable containment mechanisms:
+
+1. **MicroVM Isolation and Syscall Traps:** As analyzed in Chapter 08, the agent runtime executes within an unprivileged MicroVM (e.g., Firecracker) or user-space kernel sandbox (e.g., gVisor). A restrictive `seccomp-bpf` filter intercepts and logs all system calls. Any unauthorized syscall (such as an attempt to invoke `ptrace` or bind to an unapproved network interface) immediately triggers an asynchronous kernel trap, freezing the container image for forensic analysis.
+2. **Shadow Execution and Read-Only Dry Runs:** Where operational semantics permit, the canary agent runs in *shadow mode*: it receives real production observations and computes candidate actions, but all state-mutating tool calls are rerouted to a mock execution layer or evaluated as dry runs. The shadow outputs are diffed asynchronously against the actions taken by the stable production system.
+3. **Automated Rollback Circuit Breakers:** Borrowing from Site Reliability Engineering principles (Beyer et al., 2016), canary health is governed by error-budget burn rates. The runtime supervisor continuously streams telemetry metrics—such as tool retry rates, schema exception frequencies, unexpected human interventions, and latency distributions. If the canary cohort's short-term error burn rate exceeds safety limits, an automated circuit breaker trips, severing the canary's ingress traffic and reverting all routing state to the stable baseline within seconds.
+
+Table @tbl-verification-pyramid contrasts the operational profiles across the three verification tiers.
+
+| Dimension | Tier 1: Mechanical Verification | Tier 2: Hermetic Gym Evaluation | Tier 3: Runtime Containment |
+|:---|:---|:---|:---|
+| **Execution Boundary** | Synchronous Host Supervisor | Offline CI/CD Pipeline | Live Production Infrastructure |
+| **Latency Profile** | Sub-millisecond to $5\text{ ms}$ | Hours to Days ($N \ge 10^3$ runs) | Continuous (Real-time telemetry) |
+| **Determinism** | Absolute ($100\%$ deterministic) | Statistical (Stochastic sampling) | Empirical / Bounded Non-deterministic |
+| **Primary Failure Action** | Intercept token, abort, replan | Block build release gate | Trip circuit breaker, auto-rollback |
+| **Verification Artifact** | AST dumps, type checks, SMT logs | Wilson confidence intervals, logs | Syscall audit trails, error-budget SLOs |
+
+: Operational comparison of the Three-Tier Verification Pyramid. {#tbl-verification-pyramid}
+
+::: {.callout-note title="Worked Example: Sizing Canary Cohorts and Error-Budget Depletion"}
+A large-scale enterprise agent fleet executes $100{,}000$ automated administrative workflows per day. The service-level objective (SLO) guarantees that $99.9\%$ of all workflow trajectories complete without safety violations or human intervention, corresponding to an allowable 30-day error budget of:
+
+$$E_{\text{budget}} = 30 \times 100{,}000 \times (1 - 0.999) = 3{,}000 \text{ allowed trajectory failures}$$
+
+The systems team deploys a newly fine-tuned policy checkpoint $\pi_{\theta_{\text{new}}}$ to a canary cohort handling a traffic fraction $f_c = 0.02$ ($2{,}000$ workflows/day). Unknown to the operators, a subtle alignment regression causes $\pi_{\theta_{\text{new}}}$ to fail on $5\%$ of real-world trajectories (a failure rate $p_f = 0.05$). The telemetry engine is configured to trigger an automated rollback circuit breaker if the canary burns more than $2\%$ of the fleet's total 30-day error budget.
+
+We compute the physical detection latency and total failure exposure before the system terminates the rollout:
+
+1. **Allocated Canary Failure Allowance:**
+   $$F_{\text{limit}} = 0.02 \times E_{\text{budget}} = 0.02 \times 3{,}000 = 60 \text{ failures}$$
+
+2. **Expected Daily Canary Failures:**
+   $$\mathbb{E}[\text{Failures/day}] = 2{,}000 \times p_f = 2{,}000 \times 0.05 = 100 \text{ failures/day}$$
+
+3. **Time to Circuit-Breaker Trip ($T_{\text{trip}}$):**
+   $$T_{\text{trip}} = \frac{F_{\text{limit}}}{\mathbb{E}[\text{Failures/day}]} = \frac{60}{100} \text{ days} = 0.60 \text{ days} \approx 14.4 \text{ hours}$$
+
+4. **Blast-Radius Containment:**
+   Across the 14.4 hours of execution, exactly 60 failures occur before the canary is automatically severed and drained. Had this policy been released directly to the entire fleet ($f_c = 1.0$), the system would have generated:
+   $$\text{Failures}_{\text{uncontained}} = 100{,}000 \times 0.05 \times 0.60 = 3{,}000 \text{ failures}$$
+   The multi-tier canary gate successfully restricts failure exposure to $2\%$ of the total error budget, preventing catastrophic exhaustion of the fleet's operational reliability buffer.
+:::
+
+### Blast-Radius Minimization and Operational Escalation
+
+Even with comprehensive multi-tier verification, no software architecture can reduce the residual failure probability of a non-deterministic policy to absolute zero ($\epsilon_{\text{res}} > 0$). Systems engineering therefore dictates that an agentic architecture must be designed from the ground up for *graceful failure* and *blast-radius containment*. If an unprevented model failure penetrates Tiers 1 and 2, the host infrastructure must guarantee that the damage is strictly bounded in scope, duration, and authority.
+
+To achieve structural containment, the agent runtime applies the principle of ephemeral least privilege. All database connections, file handles, and cloud API tokens provided to the sandbox are temporary credentials minted dynamically with an explicit time-to-live (e.g., $TTL \le 120\text{ s}$). Credentials are cryptographically restricted to the exact resource identifiers enumerated in the active task contract. If a runaway decode loop causes an agent to attempt actions outside its assigned workspace, the host kernel or remote service mesh rejects the request with an authorization fault.
+
+Furthermore, state modifications spanning multiple microservices cannot be executed as blind open-loop operations. The runtime enforces the Saga pattern (detailed in Chapter 11): every forward mutating action $a_t$ registered in the Write-Ahead Log must be paired with an executable compensating transaction $a_t^{-1}$. If an operational invariant trips during step $t+k$, the supervisor halts execution, suppresses further model decoding, and traverses the log backwards, executing compensations to unwind the environment to a known-consistent baseline state $s_0$.
+
+Finally, the architecture establishes formal *operational escalation paths*. When a candidate action's estimated uncertainty exceeds a safety boundary, or when a tool invocation involves an irreversible physical effect (such as deleting durable backups or dispatching public communications), the supervisor must not guess. Instead, the runtime suspends the execution thread, writes its entire deliberative context and state snapshot to durable storage, and elevates the action to an asynchronous Human-in-the-Loop (HITL) approval queue. The human operator is presented with the explicit claim, the model's causal justification, and the exact deterministic diff proposed. Only upon cryptographic confirmation by an authorized human principal does the supervisor release the action from escrow and commit the state transition.
+
+As we reflect on the capabilities of the agentic system, what timeless software engineering principles govern what AI can and cannot solve? The architecture of safety cases, mechanical verifiers, and sandboxed runtimes underscores a profound reality: automating the generation of code and actions does not eliminate the intellectual burden of software engineering. To understand the fundamental limits of agentic delegation, we must return to Frederick Brooks’ classic distinction between accidental and essential complexity.

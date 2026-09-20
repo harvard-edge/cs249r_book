@@ -73,6 +73,7 @@ instructors/
 ├── course-map.qmd           # Integration matrix + SVG diagrams
 ├── foundations-syllabus.qmd # Semester 1: 16-week schedule
 ├── scale-syllabus.qmd       # Semester 2: 16-week schedule
+├── vol4/README.md          # Volume IV project seminar working draft (GitHub only)
 ├── pedagogy.qmd             # Learning science + facilitation
 ├── assessment.qmd           # Rubrics + sample work
 ├── ta-guide.qmd             # TA training + grading workflows

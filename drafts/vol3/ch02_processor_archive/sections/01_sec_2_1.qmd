@@ -1,0 +1,54 @@
+## A Model Call in the Stochastic Computer {#sec-vol3-processor-role}
+
+In classical computing, a central processing unit (CPU) executes deterministic machine opcodes. An instruction such as `ADD R1, R2` loads operands from physical registers, routes them through an arithmetic logic unit, and commits a state transition that alters machine memory with absolute certainty. The processor is the authoritative master of machine state: its instructions do not hypothesize; they execute.
+
+The Stochastic Computer inverts this execution model. Here, the foundation model functions not as an authoritative executive, but as an unprivileged, non-deterministic **stochastic processor core**[^fn-stochastic-processor]. It does not execute physical opcodes, manipulate memory bus addresses, or mutate system state. Instead, conditioned on staged subword tokens in accelerator high-bandwidth memory (HBM), the core evaluates a forward pass across parameter weights $\Theta$ to compute conditional probability distributions over a discrete vocabulary $\mathcal{V}$, proposing a candidate continuation.
+
+[^fn-stochastic-processor]: **Stochastic Processor** (from Greek *stochastikos*, "aiming at a mark"): An execution unit that models a conditional probability distribution over a discrete vocabulary, emitting speculative candidate continuations whose validity must be confirmed by external verification software. \index{Stochastic Processor!etymology}\index{Stochastic Processor!nondeterminism}
+
+Within the four-dimensional Horizon-State-Authority-Closure (H-S-A-C) taxonomy of Chapter 1, an isolated model call occupies the baseline coordinate: Horizon $H=1$ (an atomic call), State $S$ bounded strictly to staged prompt tokens and ephemeral Key-Value cache activations, Authority $A=0$ (zero ambient privilege), and Closure $C$ delegated entirely to external runtime verification. The core possesses zero authority to alter its host; it evaluates statistical likelihood over staged context.
+
+To anchor this systems boundary in a concrete engineering problem, consider the asynchronous microservice fleet regression introduced in Chapter 1. Telemetry alerts reveal that downstream remote procedure calls (RPCs) are tripping deadline exceptions prematurely under concurrent load. Distributed tracing localizes the issue to an upstream connection pool where an asynchronous client (`AsyncRpcPool`) enforces request deadlines derived from a service configuration schema (`TimeoutConfig` in `config_parser.py`). An integration test isolates the defect: `assert parse_timeout("2.5s") == 2500` fails because an arithmetic truncation casts the floating-point duration to an integer before converting to milliseconds, returning `2000` ms instead of the configured `2500` ms:
+
+```python
+# Legacy implementation in config_parser.py:
+def parse_timeout(timeout_str: str) -> int:
+    # Intended: convert duration string (e.g., "2.5s") to integer milliseconds
+    seconds = float(timeout_str.rstrip("s"))
+    return int(seconds) * 1000  # Truncates 2.5 to 2, yielding 2000 ms instead of 2500 ms
+```
+
+Under steady-state traffic, this five-hundred-millisecond truncation causes the connection pool to drop valid upstream RPC connections before the backend completes execution, triggering cascading queue starvation across the cluster. An autonomous software repair agent is dispatched to remediate the defect. The agent gathers the failing integration test trace, surrounding source files (`config_parser.py`, `connection_pool.py`), and Git diff history, staging this diagnostic context into an invocation payload dispatched to the stochastic core. Conditioned on this context, the neural core executes tensor operations and emits a candidate edit formatted as a structured tool call:
+
+```python
+edit_file(
+    path="config_parser.py",
+    search="int(seconds) * 1000",
+    replace="int(seconds * 1000)"
+)
+```
+
+In a casual description, one might claim the model repaired the defect. From a systems perspective, nothing in the operating environment has changed. The proposed edit is merely a candidate byte sequence occupying a DRAM buffer. The file `config_parser.py` remains byte-for-byte identical to its defective on-disk state. The RPC timeouts continue tripping in production. No machine state advances until the host runtime parses the string, verifies capabilities, applies candidate changes in an isolated ephemeral worktree, and executes regression tests.
+
+This disconnect between text generation and state modification exposes the foundational systems confrontation between deterministic computing and stochastic execution. Classical software operates under a fail-stop model. The stochastic processor core operates under a **fail-plausible** model: it generates syntactically fluent, semantically persuasive token sequences regardless of whether they represent valid logic, empirical truth, or regressions.
+
+Furthermore, the core operates under **Zero Ambient Authority**[^fn-ambient-authority]: it cannot inspect clocks, issue syscalls, access filesystems, open sockets, or certify truth. Stochastic self-evaluation cannot close invariants ($P < 1.0$); invariant closure is strictly external, requiring deterministic validation through compilers, linters, type checkers, and deterministic test suites (sandbox virtualization and containment mechanisms are developed in Chapter 8).
+
+[^fn-ambient-authority]: **Ambient Authority**\index{Ambient Authority!definition}\index{Capability-based security!least privilege}: Authority implicitly granted by execution context rather than explicit capabilities. The neural core possesses zero ambient authority: emitted commands execute nothing until validated and dispatched by the host runtime.
+
+[]{#sec-tripartite-separation}
+To maintain system integrity, the host computer partitions an invocation across a three-tier operational boundary:
+
+1. **Agent Runtime (Host OS / Ring 0):** The sovereign supervisor retaining sole authority over side effects. It stages context, enforces token ceilings ($K_{\max}$) and deadlines ($T_{\max}$), manages ephemeral worktrees and test runners, runs test harnesses, and verifies invariant closure before committing mutations.
+2. **Inference Service (Serving Engine / Driver):** The device driver and serving harness mediating between host and accelerator hardware. It manages tokenization, request queueing, Key-Value (KV) cache buffers, grammar logit masks, and streaming token delivery.
+3. **Learned Model (Neural Core / Tensor Engine):** The raw tensor execution substrate. Comprising frozen parameter weights $\Theta$ distributed across accelerator silicon, the core executes parallel matrix multiplications (GEMM) during prompt prefill and memory-bandwidth-bound matrix-vector operations (GEMV) during decode, emitting unnormalized vocabulary logits $\mathbf{z} \in \mathbb{R}^{|\mathcal{V}|}$.
+
+The sequence connecting these tiers is formalized in @fig-stochastic-processor-core. The host runtime governs every invocation through a rigid contract establishing resource ceilings: input prompt tokens $M$, output generation ceiling $K_{\max}$ satisfying $M + K_{\max} \le S_{\max}$, wall-clock deadline $T_{\max}$, and sampling temperature $\tau$.
+
+::: {#fig-stochastic-processor-core fig-env="figure" fig-pos="htb" fig-cap="**Lifecycle of a Model Invocation**: The agent runtime stages context and enforces execution limits; the inference service manages tokenization, batching, grammar logit masking, and the autoregressive decode loop; the neural core executes tensor operations to compute vocabulary logits. The runtime parses and validates the returned candidate before authorizing any real-world side effect." fig-alt="Three-tier architecture diagram showing Agent Runtime, Inference Service, and Learned Model with request and response flows."}
+![](images/svg/invocation_lifecycle.svg){width=100%}
+:::
+
+As the lifecycle traces, the agent runtime serializes diagnostic context into an unprivileged request envelope. The inference service provisions accelerator memory and KV cache buffers. The neural core evaluates tensor contractions, emitting logit distributions from which candidate tokens are sequentially sampled. Upon encountering a terminal condition—a stop token, step ceiling, or cancellation—the service returns a typed response envelope with candidate tokens and usage metrics. The runtime intercepts this buffer, validates syntax, applies candidate changes in an ephemeral worktree, and executes regression tests, committing changes only upon zero exit codes.
+
+This division of labor isolates the stochastic core behind a deterministic verification perimeter. We begin by examining the data representation that crosses this boundary: discrete subword tokens.

@@ -23,8 +23,8 @@ CONTENTS = REPO / "books"
 CONFIG = REPO / "books" / "config"
 BUILDER = REPO / "binder" / "tools" / "scripts" / "structure" / "build_volume_bib.py"
 
-DEDICATED = ("vol3", "vol4")
-SHARED = ("vol1", "vol2")
+DEDICATED = ("vol4",)
+SHARED = ("vol1", "vol2", "vol3")
 
 sys.path.insert(0, str(BUILDER.parent))
 import build_volume_bib as bvb  # noqa: E402

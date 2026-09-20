@@ -1,6 +1,6 @@
 # Machine Learning Background {#sec-appendix-ml}
 
-This appendix provides a first-principles reference for the machine learning foundations, statistical bounds, and spatial representations used throughout this book. This reference distills the mathematical models, convergence bounds, and error-propagation theorems that systems engineers and roboticists require to design predictable learning pipelines, bound closed-loop policy divergence, and certify physical safety margins.
+This appendix collects the machine learning models, statistical bounds, and spatial representations used throughout this book. Each calculation states what its assumptions support and what still requires measurement on the physical machine.
 
 ## How to Use This Appendix
 
@@ -36,9 +36,9 @@ where $P(\theta)$ represents prior belief over model parameters $\theta$, $P(\ma
 
 Entropy $H(X)$ quantifies the expected uncertainty or information content in a probability distribution. For a discrete random variable $X$ taking values in alphabet $\mathcal{X}$:[^fn-ml-shannon-entropy]
 $$ H(X) = - \sum_{x \in \mathcal{X}} P(x) \log_2 P(x) $$
-When an embodied vision-language model evaluates ambiguous referents (such as choosing between two identical parts on an assembly line), the posterior entropy over candidate actions $H(A \mid O)$ peaks. Rather than arbitrarily breaking ties via an argmax operator—which commits the machine to a ballistic, ungrounded trajectory—systems architectures evaluate whether $H(A \mid O) \ge H_{\text{threshold}}$. Exceeding this threshold triggers an explicit grounding refusal (`ERR_GROUNDING_AMBIGUITY`), holding actuators in a safe state until disambiguating sensor data arrives.
+For two equally scored referents, the *model's* candidate-action entropy is high. A calibrated, task-specific threshold can trigger a grounding refusal (`ERR_GROUNDING_AMBIGUITY`) and a validated hold while better evidence is sought. A confidently wrong model can have low entropy, so this threshold is only one input to permission.
 
-[^fn-ml-shannon-entropy]: **Shannon Information Entropy**\index{Shannon entropy!information theory}: Claude Shannon established in 1948 that entropy uniquely quantifies the average uncertainty of a discrete probability distribution. In embodied autonomy, elevated posterior entropy signals unresolvable ambiguity among competing physical goals. Forcing an argmax decision under high entropy triggers arbitrary physical commitments that risk colliding with unmodeled environment obstacles.
+[^fn-ml-shannon-entropy]: **Shannon Information Entropy**\index{Shannon entropy!information theory}: Entropy quantifies average uncertainty within a specified discrete distribution. Its physical meaning depends on whether that distribution is calibrated to the relevant referents and observations. Low model entropy cannot prove that a physical target was identified correctly.
 
 ### Softmax overconfidence and calibration error {#sec-appendix-ml-calibration}
 
@@ -62,7 +62,7 @@ Rigid body transformations in 3D space belong to the Special Euclidean group $SE
 $$ \mathbf{T} = \begin{bmatrix} \mathbf{R} & \mathbf{t} \\ \mathbf{0}^\top & 1 \end{bmatrix} \in SE(3) $$
 A homogeneous point $\tilde{\mathbf{p}} = [\mathbf{p}^\top, 1]^\top \in \mathbb{R}^4$ transforms across frames according to linear matrix-vector multiplication:
 $$ \tilde{\mathbf{p}}' = \mathbf{T} \tilde{\mathbf{p}} $$
-Composition of successive coordinate frames (e.g., world to robot base, base to wrist, wrist to camera) corresponds to matrix multiplication $\mathbf{T}_{WC} = \mathbf{T}_{WB} \mathbf{T}_{BW} \mathbf{T}_{WC}$, guaranteeing numerical invertibility $\mathbf{T}^{-1} = [\mathbf{R}^\top, -\mathbf{R}^\top \mathbf{t}; \mathbf{0}^\top, 1]$.
+Let $\mathbf{T}_{AB}$ map coordinates expressed in frame $B$ into frame $A$. For world $W$, robot base $B$, end effector $E$, and camera $C$, the chain is $\mathbf{T}_{WC}=\mathbf{T}_{WB}\mathbf{T}_{BE}\mathbf{T}_{EC}$. A valid rigid transform has inverse $\mathbf{T}^{-1} = [\mathbf{R}^\top, -\mathbf{R}^\top \mathbf{t}; \mathbf{0}^\top, 1]$; numerical accuracy still depends on calibrated transforms and their uncertainty.
 
 ### Inverse-depth parameterization
 
@@ -70,9 +70,9 @@ In visual-inertial odometry and SLAM, representing distant 3D landmarks in stand
 
 Under **inverse-depth parameterization**, a 3D feature is parameterized by the 6D vector $\mathbf{y} = [x_0, y_0, z_0, \theta, \phi, \rho]^\top$, where $(x_0, y_0, z_0)$ is the optical center when first observed, $(\theta, \phi)$ are azimuth and elevation angles, and $\rho = 1/d$ is inverse depth:[^fn-ml-inverse-depth]
 $$ \mathbf{p}(d) = \begin{bmatrix} x_0 \\ y_0 \\ z_0 \end{bmatrix} + \frac{1}{\rho} \begin{bmatrix} \cos\phi \sin\theta \\ -\sin\phi \\ \cos\phi \cos\theta \end{bmatrix} $$
-At optical infinity ($d \to \infty$), inverse depth approaches zero ($\rho \to 0$) with finite, Gaussian-distributed covariance. This linearizes the observation manifold, allowing Extended Kalman Filters and factor graphs to track distant visual features without numerical covariance explosion.
+At optical infinity ($d \to \infty$), inverse depth approaches zero ($\rho \to 0$). This parameterization can improve estimator conditioning for distant features; covariance shape and numerical stability still depend on the measurement model, noise assumptions, and estimator implementation.
 
-[^fn-ml-inverse-depth]: **Inverse-Depth Parameterization**\index{Inverse-depth parameterization!visual odometry}: Javier Civera and colleagues established in 2008 that parameterizing visual features by inverse depth transforms hyperbolic depth error distributions into approximately Gaussian distributions. Distant points at optical infinity maintain finite numerical variances under this mapping. Omitting inverse-depth parameterization causes visual estimators to experience covariance divergence when tracking background horizon features.
+[^fn-ml-inverse-depth]: **Inverse-Depth Parameterization**\index{Inverse-depth parameterization!visual odometry}: Civera and colleagues used inverse depth to represent distant visual landmarks in monocular estimation. It is a useful coordinate choice, not a guarantee of Gaussian uncertainty or convergent filtering for every sensor configuration.
 
 ### 3D Gaussian splatting parameters {#sec-appendix-ml-3dgs}
 
@@ -86,9 +86,9 @@ Continuous neural scene representations parameterize physical environments throu
 
 During real-time rendering, 3D Gaussians are projected onto camera coordinate frames via Jacobian approximation $\mathbf{J} \in \mathbb{R}^{2 \times 3}$, yielding projected 2D covariance:
 $$ \boldsymbol{\Sigma}_{2D} = \mathbf{J} \mathbf{W} \boldsymbol{\Sigma} \mathbf{W}^\top \mathbf{J}^\top $$
-where $\mathbf{W}$ is the viewing transformation. Differentiable tile-based rasterization sorts Gaussians by depth and evaluates alpha-blended color accumulation:
+where $\mathbf{W}\in SO(3)$ is the rotational part of the world-to-camera transform; the translation enters the projected mean, not this covariance. Differentiable tile-based rasterization sorts Gaussians by depth and evaluates alpha-blended color accumulation:
 $$ C = \sum_{i \in \mathcal{N}} c_i \alpha_i \prod_{j=1}^{i-1} (1 - \alpha_j) $$
-This explicit parameterization provides analytical surface gradients for real-time trajectory collision checking without volumetric grid discretization.
+These differentiable parameters support novel-view rendering, not a conservative collision surface by themselves. Clearance permission needs a separately validated geometric extraction, occupancy/ESDF conversion, or independent range sensor that accounts for unknown space and geometric error, as developed in @sec-memory-scene-attention-buffers.
 
 ### Recursive Bayesian log-odds occupancy mapping {#sec-appendix-ml-voxels}
 
@@ -96,7 +96,7 @@ Discrete volumetric grids model occupancy uncertainty through recursive Bayesian
 
 Using the log-odds transformation $L(x) = \ln \frac{P(x)}{1 - P(x)}$, recursive Bayesian filtering collapses nonlinear probability multiplication into additive linear updates:[^fn-ml-log-odds]
 $$ L_t(m_i) = L_{t-1}(m_i) + \ln \frac{P(m_i \mid z_t)}{1 - P(m_i \mid z_t)} - \ln \frac{P(m_i)}{1 - P(m_i)} $$
-where $P(m_i \mid z_t)$ is the inverse sensor measurement model and $P(m_i)$ is the static prior probability. Traversed voxels along optical sightlines receive negative log-odds increments (clearing space), while voxels terminating at measured range returns receive positive increments. This additive formulation executes in integer fixed-point arithmetic on embedded real-time perception cores.
+where $P(m_i \mid z_t)$ is the inverse sensor model and $P(m_i)$ the prior. Along a reliable range ray, traversed cells receive free-space evidence and the measured return receives occupied evidence; space behind the return remains unknown unless observed separately. The additive update can use bounded fixed-point log odds, but sensor error, moving objects, and evidence age still matter.
 
 [^fn-ml-log-odds]: **Recursive Log-Odds Occupancy**\index{Log-odds transformation!occupancy mapping}: The log-odds formulation maps probability values from the bounded unit interval to the unbounded real line, turning nonlinear Bayesian product updates into fast additions. Dynamic ranges are clamped by upper and lower saturation bounds to prevent saturation lockup. Failure to clamp log-odds values delays the clearing of dynamic obstacles when physical objects vacate the workspace.
 
@@ -108,14 +108,15 @@ Neural networks deployed as physical controllers must satisfy strict input-outpu
 
 A neural policy $\pi: \mathcal{X} \to \mathcal{U}$ is $L$-Lipschitz continuous if there exists a non-negative scalar constant $L$ such that for all $\mathbf{x}_1, \mathbf{x}_2 \in \mathcal{X}$:\index{Lipschitz continuity!spectral normalization}
 $$ \| \pi(\mathbf{x}_1) - \pi(\mathbf{x}_2) \|_{\mathcal{U}} \le L \| \mathbf{x}_1 - \mathbf{x}_2 \|_{\mathcal{X}} $$
-For a feedforward deep neural network with $K$ layers $\pi(\mathbf{x}) = \phi_K(\mathbf{W}_K \dots \phi_1(\mathbf{W}_1 \mathbf{x}))$, if the activation functions $\phi_k$ are 1-Lipschitz (such as ReLU, GeLU, or Tanh), the upper bound on the network Lipschitz constant is the product of the spectral norms (maximum singular values) of its weight matrices:
-$$ L \le \prod_{k=1}^K \| \mathbf{W}_k \|_2 = \prod_{k=1}^K \sigma_{\max}(\mathbf{W}_k) $$
+For a feedforward network with $K$ layers $\pi(\mathbf{x}) = \phi_K(\mathbf{W}_K \dots \phi_1(\mathbf{W}_1 \mathbf{x}))$, let $L_{\phi_k}$ bound each activation's slope over the input domain. The composed bound is:
+$$ L \le \prod_{k=1}^K L_{\phi_k}\| \mathbf{W}_k \|_2. $$
+ReLU and Tanh are 1-Lipschitz in their usual scalar forms; exact GeLU has maximum derivative about $1.1289$, so assigning it a factor of one would understate the bound.
 
 ### Perturbation amplification and supervisory clamping
 
 In physical systems, input state $\mathbf{x}$ is corrupted by sensor measurement noise $\delta \mathbf{x}$ bounded by $\|\delta \mathbf{x}\| \le \epsilon$. The resulting deviation in commanded control action is bounded by:
 $$ \| \delta \mathbf{u} \| = \| \pi(\mathbf{x} + \delta \mathbf{x}) - \pi(\mathbf{x}) \| \le L \epsilon $$
-When networks are trained without Lipschitz regularization, empirical Lipschitz constants often exceed $L > 10^3$. Under this amplification, an imperceptible sensor quantization error of $\epsilon = 1.0\text{ mm}$ can command a catastrophic torque surge of $L\epsilon = 1000\text{ N}\cdot\text{m}$. Enforcing bounded Lipschitz constants via **spectral normalization**—normalizing each weight matrix by its largest singular value $\mathbf{W} \leftarrow \mathbf{W} / \sigma_{\max}(\mathbf{W})$—prevents gradient explosion and guarantees bounded action divergence.
+The constant has output-units per input-unit. For a constructed policy mapping position in meters to torque in newton-meters, $L=10^3\text{ N}\cdot\text{m}/\text{m}$ and $\epsilon=1\text{ mm}$ allow up to $1\text{ N}\cdot\text{m}$ of command change. Whether that exceeds torque headroom depends on the joint and operating state. **Spectral normalization** can reduce an upper bound on network sensitivity; it does not establish plant stability, safe torque, or sensor validity. Those require a separate actuator limit and state-dependent permission check.
 
 ## Imitation Learning and Compounding Covariate Shift {#sec-appendix-ml-compounding}
 
@@ -131,37 +132,36 @@ When demonstrator behavior is inherently multimodal—such as dodging an obstacl
 $$ \pi^*(o) = 0.5(+1.0) + 0.5(-1.0) = 0.0 $$
 Executing this averaged action commands zero steering deflection, driving the physical robot directly into the central obstacle.
 
-**Diffusion policies** [@chi2024diffusionpolicy] break this symmetry by formulating policy generation as an iterative score-matching denoising process. Starting from Gaussian noise $\mathbf{a}_K \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$, the model predicts noise gradients $\boldsymbol{\epsilon}_\theta(\mathbf{a}_k, k, o)$ over discrete steps $k = K, \dots, 1$. Because individual denoising steps break central symmetry, the generated action trajectory settles into a single coherent mode rather than averaging incompatible commands.
+**Diffusion policies** [@chi2024diffusionpolicy] model a conditional distribution over action sequences rather than returning only its mean. Starting from Gaussian noise $\mathbf{a}_K \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$, iterative denoising can sample one coherent mode. The sampled mode still needs geometric and actuator validation before execution.
 
 ### Compounding quadratic error in behavioral cloning
 
-In open-loop supervised learning, errors at successive steps are independent. In closed-loop embodied execution, the data distribution is endogenous: current action $a_t$ dictates the subsequent physical state $s_{t+1}$.
+Offline supervised evaluation samples from a fixed demonstration distribution. In closed-loop execution, current action $a_t$ affects the subsequent physical state $s_{t+1}$ and the next observation distribution.
 
-Let $\pi^*$ be the expert policy and $\hat{\pi}$ be the learned policy. Suppose the learned policy has per-step error probability bounded by $\epsilon$ under the expert's state distribution $d_{\pi^*}$:
-$$ \mathbb{E}_{s \sim d_{\pi^*}} [ \ell(s, \hat{\pi}) ] \le \epsilon $$
-When the robot commits a mistake, it enters an unfamiliar off-distribution state $s' \notin \text{supp}(d_{\pi^*})$. In subsequent timesteps, the model receives zero demonstration supervision and can make errors with probability up to $1.0$.
+Let $\pi^*$ be the expert and $\hat{\pi}$ the learner. Suppose its error probability is at most $\epsilon$ at each step under the expert's time-indexed state distribution $d_{\pi^*}^{t}$:
+$$ \forall t\le T:\quad \mathbb{E}_{s \sim d_{\pi^*}^{t}} [ \ell(s, \hat{\pi}) ] \le \epsilon. $$
+An error can move the robot into states that the expert demonstrations rarely visited. Offline accuracy under $d_{\pi^*}^{t}$ gives no comparable bound on action error in those induced states.
 
-Across an execution horizon of length $T$, let $P_t$ denote the probability that the policy has made at least one mistake by step $t$. By induction:[^fn-ml-compounding-error]
-$$ P_t \le 1 - (1 - \epsilon)^t \le t \epsilon $$
-If the cost of each subsequent step after an initial divergence is bounded by $C_{\max}$, total cumulative trajectory regret $J(\hat{\pi}) - J(\pi^*)$ compounds quadratically:
-$$ \mathbb{E} \left[ \sum_{t=1}^T c(s_t, a_t) \right] \le \sum_{t=1}^T t \epsilon C_{\max} = \frac{T(T + 1)}{2} \epsilon C_{\max} = \mathcal{O}(T^2 \epsilon) $$
-This quadratic bound [@ross2011reduction] proves that an imitation policy with 99 percent single-step validation accuracy can experience complete task failure within tens of closed-loop physical steps.
+Couple the learner and expert trajectories until their first disagreement. If the error bound applies at each expert-visited step, a union bound gives $P_t\le t\epsilon$ for a disagreement by step $t$.[^fn-ml-compounding-error] If the additional downstream cost after divergence is at most $C_{\max}$ per step, then:
+$$ J(\hat{\pi})-J(\pi^*) \le C_{\max}\sum_{t=1}^{T}P_t \le \frac{T(T+1)}{2}\epsilon C_{\max}=\mathcal{O}(T^2\epsilon). $$
+This is an upper bound under the stated cost and distribution assumptions [@ross2011reduction]. Single-step validation accuracy alone cannot predict a particular closed-loop failure probability.
 
-[^fn-ml-compounding-error]: **Compounding Error in Imitation Learning**\index{Behavioral cloning!compounding error}: Stephane Ross and J. Andrew Bagnell derived the quadratic error compounding bound in 2010, demonstrating that violation of the independent and identically distributed (i.i.d.) assumption produces quadratic divergence under closed-loop execution. Because errors alter future state distributions, single-step offline validation accuracy correlates poorly with real-world task success. Mitigating this divergence requires interactive online data aggregation or runtime safety shielding.
+[^fn-ml-compounding-error]: **Compounding Error in Imitation Learning**\index{Behavioral cloning!compounding error}: Ross and colleagues analyzed how learner actions shift the state distribution. The quadratic form bounds worst-case expected excess cost under bounded loss; it is not a measured task-failure rate. Expert corrective labels on learner-visited states can reduce this exposure, while independent permission still governs physical execution.
 
 ### Interactive dataset aggregation (DAgger) linear reduction
 
-The **DAgger** (Dataset Aggregation) algorithm [@ross2011reduction] eliminates quadratic compounding by collecting training data under the learned policy's own state distribution $d_{\hat{\pi}_i}$.
+The **DAgger** (Dataset Aggregation) algorithm [@ross2011reduction] addresses this distribution shift by collecting training data under the learner's induced state distribution $d_{\hat{\pi}_i}$.
 
 At each training iteration $i$:
 
-1. Execute policy $\hat{\pi}_i$ on the physical robot (or simulation) to collect state trajectory trajectories $\mathcal{T}_i = \{s_1, s_2, \dots, s_T\}$.
+1. Execute policy $\hat{\pi}_i$ under the applicable safety envelope to collect trajectories $\mathcal{T}_i = \{s_1, s_2, \dots, s_T\}$.
 2. Query the expert to label every visited state $s_t \in \mathcal{T}_i$ with the optimal recovery action $a^* = \pi^*(s_t)$.
 3. Aggregate the recovery dataset $\mathcal{D} \leftarrow \mathcal{D} \cup \{(s_t, a^*)\}$.
 4. Retrain policy $\hat{\pi}_{i+1}$ on the aggregated dataset.
 
-Because the policy receives explicit supervision on how to recover from its own past execution errors, the expected trajectory regret reduces from quadratic to linear:
-$$ \mathbb{E}_{\mathcal{T} \sim d_{\hat{\pi}}} \left[ \sum_{t=1}^T c(s_t, a_t) \right] \le \mathcal{O}(T \epsilon) $$
+For the DAgger bound, make a stronger assumption than the earlier per-step $C_{\max}$: one wrong action followed by the expert changes expected remaining cost by at most $u_{\max}$, independent of horizon. With expert labels on learner-visited states, a no-regret online learner, sufficient hypothesis capacity, and a valid finite-sample bound $\delta_N$, a selected policy can satisfy a bound of the form
+$$ J(\hat{\pi})-J(\pi^*) \le T u_{\max}(\epsilon_N+\gamma_N+\delta_N), $$
+where $\epsilon_N$ is best-in-class loss on the induced-state distribution, $\gamma_N$ is average online-learning regret, and $\delta_N$ covers finite-sample generalization and policy selection. It scales linearly in $T$ only when $u_{\max}=\mathcal{O}(1)$ and those errors remain controlled. Appending recovery trajectories alone does not establish these conditions; the drift states need expert corrective labels.
 
 ## Value Functions and Affordance Grounding {#sec-appendix-ml-affordances}
 
@@ -171,7 +171,7 @@ Reinforcement learning optimizes sequential physical decision-making through exp
 
 The optimal state-action value function $Q^*(s, a)$ satisfies the Bellman optimality equation:
 $$ Q^*(s, a) = R(s, a) + \gamma \mathbb{E}_{s' \sim P(\cdot \mid s, a)} \left[ \max_{a' \in \mathcal{A}} Q^*(s', a') \right] $$
-When learning $Q^*(s, a)$ from static, offline demonstration datasets (offline RL), computing the $\max_{a'}$ operator over continuous action spaces queries the neural network critic on unseen action vectors. Because the critic has received zero physical training data in these unvisited regions, function approximation variance produces spurious positive value spikes. The policy exploits these hallucinations by commanding out-of-distribution actions, resulting in violent actuator saturation or mechanical boundary collisions.
+With static offline data, the maximization can query a learned critic on actions poorly represented in training. Value overestimation can then favor an out-of-distribution proposal. That proposal still needs an independently checked action envelope before it reaches an actuator.
 
 ### SayCan affordance-grounded skill selection
 
@@ -184,7 +184,7 @@ where:
 - $P_{\text{LLM}}(a \mid \ell)$ represents the **semantic prior**, evaluating whether skill $a$ contributes logically to completing instruction $\ell$.
 - $V_{\text{policy}}(s, a) \in [0, 1]$ represents the **physical affordance probability**, modeled by a learned value function that predicts the probability of successfully executing skill $a$ from current state $s$.
 
-If an action is semantically logical but physically impossible (e.g., picking up an object that is enclosed behind a locked door), $V_{\text{policy}}(s, a) \to 0$. The product evaluates to zero, preventing the machine from attempting an infeasible physical motion.
+If the learned value correctly assigns a near-zero score to an unavailable skill, the product deprioritizes it. The learned score is an estimate of success, not a path, contact-force, or clearance guarantee; a separate motion-permission check is needed.
 
 ## Signal Temporal Logic and Continuous Robustness {#sec-appendix-ml-stl}
 
@@ -198,28 +198,28 @@ where $\mu = (g(\mathbf{x}) \ge 0)$ is an atomic predicate (e.g., clearance $d(t
 
 ### Quantitative robustness degree
 
-Beyond returning a binary boolean satisfaction verdict ($\mathbf{x} \models \varphi$), STL admits a real-valued **quantitative robustness metric** $\rho(\mathbf{x}, \varphi, t)$ measuring how far the physical trajectory is from violating the specification:[^fn-ml-stl-robustness]
+Beyond a boolean satisfaction verdict ($\mathbf{x} \models \varphi$), STL admits a signed **quantitative robustness metric** $\rho(\mathbf{x}, \varphi, t)$.[^fn-ml-stl-robustness] For a formula combining pressure, speed, and force, first define dimensionless atomic margins $\bar g_i(\mathbf{x})=g_i(\mathbf{x})/s_i$, where each positive scale $s_i$ has the same SI unit as its predicate. Then the minimum and maximum below compare like quantities:
 $$
 \begin{aligned}
-\rho(\mathbf{x}, \mu, t) &= g(\mathbf{x}(t)) \\
+\rho(\mathbf{x}, \mu, t) &= \bar g(\mathbf{x}(t)) \\
 \rho(\mathbf{x}, \neg \varphi, t) &= -\rho(\mathbf{x}, \varphi, t) \\
 \rho(\mathbf{x}, \varphi_1 \wedge \varphi_2, t) &= \min\left( \rho(\mathbf{x}, \varphi_1, t), \rho(\mathbf{x}, \varphi_2, t) \right) \\
 \rho(\mathbf{x}, \square_{[a, b]} \varphi, t) &= \min_{t' \in [t+a, t+b]} \rho(\mathbf{x}, \varphi, t') \\
 \rho(\mathbf{x}, \diamondsuit_{[a, b]} \varphi, t) &= \max_{t' \in [t+a, t+b]} \rho(\mathbf{x}, \varphi, t')
 \end{aligned}
 $$
-The sign of $\rho$ indicates compliance: $\rho(\mathbf{x}, \varphi) > 0$ denotes satisfaction, while $\rho(\mathbf{x}, \varphi) < 0$ denotes violation. The magnitude $|\rho|$ quantifies the physical safety margin in physical engineering units ($\text{m}, \text{N}, \text{kPa}$),\index{Signal Temporal Logic!quantitative robustness} providing an optimization objective for adversarial stress testing and qualification logging.
+The sign of $\rho$ indicates satisfaction or violation, while its normalized magnitude is dimensionless and depends on the declared scales. Preserve each raw physical margin and unit separately in the fault record; a single minimum of meters, newtons, and kilopascals has no physical meaning.
 
-[^fn-ml-stl-robustness]: **Signal Temporal Logic Robustness**\index{Signal Temporal Logic!quantitative robustness}: Alexandre Donzé and Oded Maler formalized quantitative semantics for Signal Temporal Logic in 2010, mapping continuous signals into signed distance metrics. In physical AI qualification, the robustness score $\rho$ measures the minimum physical distance between an observed trajectory and safety boundaries. Tracking negative robustness spikes enables automated falsification frameworks to discover corner-case hardware failures.
+[^fn-ml-stl-robustness]: **Signal Temporal Logic Robustness**\index{Signal Temporal Logic!quantitative robustness}: Quantitative semantics map a trace and formula to a signed score. Its magnitude inherits the atomic predicate's units only when all combined predicates use commensurate units; otherwise a declared normalization gives a dimensionless score. Negative scores identify violations for falsification searches, subject to sampled-time and measurement limits.
 
 ## Zero-Failure Testing and the Astronomical Exposure Bound {#sec-appendix-ml-exposure}
 
-Certifying high-integrity safety claims (such as IEC 61508 SIL 3 / SIL 4 or ISO 26262 ASIL D) requires establishing an upper bound on the catastrophic failure rate $p$ per operating hour at a specified statistical confidence level $1 - \alpha$ (typically 95 percent, giving significance $\alpha = 0.05$).
+Suppose a release case selects a catastrophic-event target rate $\lambda_*=10^{-9}/\text{h}$ and asks what zero-event exposure alone can establish at 95 percent confidence. This numerical target is a scenario assumption, not a rate universally assigned to an IEC SIL, an automotive ASIL, or a learned policy.
 
-When validating a policy through empirical fleet testing where zero failures are observed across $n$ independent exposure hours, the probability of zero failures occurring under a binomial trial model is:
+For $n$ independent equal-duration Bernoulli trials with event probability $p$ in each trial, the probability of zero events is:
 $$ P(\text{zero failures}) = (1 - p)^n \le e^{-p n} $$
 
-To assert with statistical confidence $1 - \alpha$ that the true failure rate does not exceed $p$, the probability of observing zero failures under a system whose failure rate is at least $p$ must be bounded by $\alpha$:
+To exclude a hypothesized per-trial event probability $p$ at one-sided confidence $1-\alpha$, the zero-event probability under that hypothesis must be at most $\alpha$:
 $$ (1 - p)^n \le \alpha $$
 
 Taking the natural logarithm of both sides:
@@ -228,7 +228,7 @@ $$ n \ln(1 - p) \le \ln \alpha $$
 For rare events where $p \ll 1$, using the Taylor expansion $\ln(1 - p) \approx -p$ gives:[^fn-ml-rule-three]
 $$ -n p \le \ln \alpha \implies n \ge \frac{-\ln \alpha}{p} = \frac{\ln(1/\alpha)}{p} $$
 
-[^fn-ml-rule-three]: **Statistical Rule of Three**\index{Rule of three!zero-failure testing}: In reliability engineering, the Rule of Three establishes that observing zero failures across $n$ independent trials bounds the maximum failure rate at $3/n$ under 95 percent confidence. This bound assumes strictly independent, identically distributed trials from a stationary operational distribution. Extrapolating zero observed failures to claim absolute system safety produces ungrounded releases that fail catastrophically upon unmodeled operational shocks.
+[^fn-ml-rule-three]: **Statistical Rule of Three**\index{Rule of three!zero-failure testing}: Zero events in $n$ independent Bernoulli trials give the exact one-sided 95 percent upper probability $1-0.05^{1/n}$, approximately $3/n$ for small probabilities. Continuous operating hours instead require a declared event-rate model. Neither calculation covers changed configurations or unobserved hazard classes automatically.
 
 For standard 95 percent confidence ($\alpha = 0.05$):
 $$ n \ge \frac{-\ln(0.05)}{p} = \frac{2.99573}{p} \approx \frac{3}{p} $$
@@ -236,16 +236,16 @@ This result is known as the **Rule of Three** in reliability engineering and bio
 
 ### The astronomical exposure wall
 
-When target failure rates reach ultra-rare catastrophic regimes ($p = 10^{-9}\text{ failures/h}$), the required zero-failure exposure hours scale astronomically:\index{Astronomical exposure wall!mathematical derivation}
-$$ n \ge \frac{2.99573}{10^{-9}} \approx 3.00 \times 10^9\text{ hours} \approx 342{,}000\text{ machine-years} $$
+For continuous operating time, suppose incidents follow a stationary homogeneous Poisson process of rate $\lambda$ and fleet hours are applicable to the same configuration. Then $P(N_H=0)=e^{-\lambda H}$, giving $\lambda_U=-\ln(0.05)/H$ after zero incidents. For the selected $\lambda_*$, the required exposure is:\index{Astronomical exposure wall!mathematical derivation}
+$$ H \ge \frac{-\ln(0.05)}{10^{-9}/\text{h}} \approx 3.00 \times 10^9\text{ h} \approx 342{,}000\text{ machine-years}. $$
 
-This non-linear scaling creates the **Astronomical Exposure Wall**: because required failure-free hours scale inversely with $p$ ($O(1/p)$), no physical fleet can collect sufficient hours within the commercial lifecycle of a software release. Furthermore, any modification to neural network weights, sensor calibration matrices, or control firmware constitutes a distinct statistical distribution, resetting the trial counter $n$ to zero. Consequently, black-box empirical fleet sampling is mathematically incapable of certifying open-world safety in the absence of deterministic architectural containment.
+The exposure scales inversely with the selected rate. A fleet could accumulate these hours in principle, but a 100-machine fleet would need about 3,420 years of continuous operation, impractical for the illustrated release cycle. A change to weights, calibration, or firmware requires a configuration-equivalence argument before earlier evidence can be pooled; it does not mechanically reset every observation to zero. Zero-event fleet hours bound incidents of the integrated system under the model, not hazardous proposals stopped by a shield. Architectural evidence and separately measured coverage are needed for claims beyond the observed operating envelope.
 
 ## Sequential Probability Ratio Test {#sec-appendix-ml-sprt}
 
 Evaluating embodied physical policies on physical hardware is expensive and induces mechanical wear. Fixed-sample-size testing requires pre-specifying sample count $N$ and executing all $N$ physical trials even if the system fails catastrophically on early runs or achieves overwhelming evidence of safety. Conversely, naive early stopping (halting testing as soon as a nominal threshold is breached) introduces optional stopping bias, drastically inflating Type I error (declaring an unsafe policy safe).
 
-Abraham Wald's **Sequential Probability Ratio Test (SPRT)** [@wald1945sequential] resolves this dilemma by continuously updating a likelihood ratio after each physical rollout and testing against mathematically certified boundary thresholds.\index{Sequential Probability Ratio Test!Wald formulation}
+Abraham Wald's **Sequential Probability Ratio Test (SPRT)** [@wald1945sequential] handles optional stopping for two predeclared simple hypotheses by updating a likelihood ratio after each rollout and comparing it with stopping boundaries.\index{Sequential Probability Ratio Test!Wald formulation}
 
 ### Log-likelihood ratio and bernoulli updates
 
@@ -269,67 +269,64 @@ Given declared Type I error rate $\alpha$ (the maximum allowable probability of 
 $$
 B < \Lambda_m < A
 $$
-where the analytical boundary thresholds are:
+where the usual Wald boundary approximations are:
 $$
 A = \ln \left(\frac{1 - \beta}{\alpha}\right), \quad B = \ln \left(\frac{\beta}{1 - \alpha}\right)
 $$
 At each evaluation step $m$:
 
-1. If $\Lambda_m \ge A$: Halt testing and accept $H_1$ (certifying that the physical policy meets the required reliability target).
-2. If $\Lambda_m \le B$: Halt testing, reject $H_1$, and accept $H_0$ (declaring the policy unsafe and terminating the evaluation to prevent further testbed wear).
+1. If $\Lambda_m \ge A$: Halt and favor $H_1$ over the specified $H_0$ under the trial model; this is not a general safety certification.
+2. If $\Lambda_m \le B$: Halt and favor $H_0$ over the specified $H_1$; do not release on this evidence.
 3. If $B < \Lambda_m < A$: The accumulated evidence remains inconclusive; execute rollout $m+1$.
 
 ### Average sample number optimality
 
-Wald proved that SPRT is mathematically optimal: among all statistical tests with equivalent error bounds $(\alpha, \beta)$, SPRT minimizes the expected number of trials (the Average Sample Number, ASN).[^fn-ml-sprt-optimality] In physical robotics benchmarking, SPRT reduces total robot execution hours and mechanical wear by 30 to 50 percent compared to fixed-horizon testing while guaranteeing statistical rigor.
+For independent identically distributed outcomes under these two simple hypotheses, SPRT has an average-sample-number efficiency result relative to comparable tests.[^fn-ml-sprt-optimality] Actual machine-hour savings depend on the two event probabilities, error allowances, overshoot at the stopping boundaries, and trial cost. The displayed thresholds are approximations; a finite-sample operating-characteristic calculation or calibrated simulation is needed for the chosen protocol.
 
-[^fn-ml-sprt-optimality]: **Wald Sequential Probability Ratio Test**\index{Sequential Probability Ratio Test!Wald optimality}: Developed by Abraham Wald in 1945, SPRT was initially classified by the U.S. military because its sequential stopping rule drastically accelerated testing with minimal sample exposure. In cyber-physical verification, updating log-likelihood ratios after each trial terminates testing as soon as boundary thresholds are crossed, cutting required physical machine-hours by 30 to 50 percent. Testing without sequential stopping bounds either consumes unnecessary mechanical fatigue life or inflates false-positive certification risk.
+[^fn-ml-sprt-optimality]: **Wald Sequential Probability Ratio Test**\index{Sequential Probability Ratio Test!Wald optimality}: The efficiency result assumes the specified simple hypotheses and independent, identically distributed outcomes. Boundary crossing can overshoot the nominal threshold, so exact error rates and average sample count should be checked for the discrete trial model. A sequential design can stop an unpromising test early without claiming a fixed percentage of saved robot hours.
 
 ## Extreme Value Theory and Tail Risk {#sec-appendix-ml-evt}
 
-The Central Limit Theorem (CLT) governs the sum and average of independent random variables, proving that central tendencies converge toward Gaussian distributions. However, cyber-physical safety is not governed by average behavior; it is a weakest-link problem dictated by the single worst-case operational disturbance:
+Under its conditions, the Central Limit Theorem describes normalized sums and averages, not the tail of each disturbance. A clearance or thermal design may instead depend on a maximum over a declared exposure block:
 $$
 M_n = \max\{X_1, X_2, \dots, X_n\}
 $$
-Because Gaussian distributions exhibit light, exponential tail decay ($e^{-x^2/2}$), modeling physical disturbances (such as joint collision shocks, ground impact spikes, or bus transport latencies) with Gaussian assumptions predicts that 5-sigma or 6-sigma excursions are statistically impossible over cosmological timescales. In physical reality, discontinuous contact mechanics, structural backlash, and network contention produce heavy-tailed distributions where catastrophic excursions occur regularly.
+Even a true standard Gaussian has one-sided exceedance probabilities of about $2.87\times10^{-7}$ at $5\sigma$ and $9.87\times10^{-10}$ at $6\sigma$. At 1,000 independent samples per second, the corresponding mean waits are about 0.97 hours and 11.7 days. Contact and bus-delay data may have different tails or dependence; their family and high quantiles must be estimated from relevant measurements, not assigned from the mechanism's name.
 
 ### The fisher-tippett-gnedenko theorem
 
-Just as the CLT establishes the Gaussian distribution as the universal limit for sums, the Fisher-Tippett-Gnedenko theorem [@coles2001introduction] proves that the normalized maximum of independent, identically distributed continuous random variables can converge asymptotically only to the **Generalized Extreme Value (GEV)** distribution family:[^fn-ml-extreme-frechet]
+For independent, identically distributed block observations whose normalized maxima have a nondegenerate limit, the Fisher-Tippett-Gnedenko theorem [@coles2001introduction] restricts that limit to the **Generalized Extreme Value (GEV)** family:[^fn-ml-extreme-frechet]
 $$
 G(z) = \exp\left( -\left[ 1 + \xi \left(\frac{z - \mu}{\sigma}\right) \right]^{-1/\xi} \right)
 $$
-defined on $\{z : 1 + \xi(z - \mu)/\sigma > 0\}$, where $\mu \in \mathbb{R}$ is the location parameter, $\sigma > 0$ is the scale parameter, and $\xi \in \mathbb{R}$ is the shape parameter. The shape parameter $\xi$ partitions operational tail risks into three distinct physical regimes:
+for $\xi\ne0$ and $1+\xi(z-\mu)/\sigma>0$, with location $\mu$, scale $\sigma>0$, and shape $\xi$. Candidate limiting families are:
 
-1. **Gumbel (Type I, $\xi = 0$):** Light exponential tails, governing unconstrained thermal drift, analog clock jitter, and nominal sensor noise:
+1. **Gumbel (Type I, $\xi = 0$):** The continuous limit as $\xi\to0$, often considered for light-tailed observations:
    $$
    G(z) = \exp\left( -\exp\left(-\frac{z - \mu}{\sigma}\right) \right)
    $$
-2. **Fréchet (Type II, $\xi > 0$, with tail index $\alpha = 1/\xi$):** Heavy, power-law tails ($P(X > x) \sim x^{-\alpha}$), governing mechanical impact forces during rigid collisions, structural stress shockwaves, and unmodeled contact mode switches:
-   $$
-   G(z) = \exp\left( -\left(\frac{z - \mu}{\sigma}\right)^{-\alpha} \right) \quad (z > \mu)
-   $$
-3. **Weibull (Type III, $\xi < 0$):** Bounded upper tails, governing systems constrained by rigid physical stops, maximum kinematic linkage lengths, or saturated electrical voltage rails.
+2. **Fréchet (Type II, $\xi > 0$, with tail index $\alpha = 1/\xi$):** A possible limit for power-law tails ($P(X > x) \sim x^{-\alpha}$), if supported by the measured sample and fit. The general GEV expression above supplies its CDF without changing location and scale conventions.
+3. **Weibull (Type III, $\xi < 0$):** A possible limit when the sampled quantity has a finite upper endpoint. A nominal mechanical stop alone does not establish that every measured force or latency is bounded.
 
-[^fn-ml-extreme-frechet]: **Heavy-Tailed Fréchet Extremes**\index{Extreme Value Theory!Frechet distribution}: The Fréchet distribution governs maximum values in physical processes with heavy power-law tails, such as impact forces during mechanical collisions. Because its probability density decays algebraically rather than exponentially, rare extreme values occur with orders of magnitude higher frequency than Gaussian models predict. Sizing physical structural buffers with Gaussian assumptions guarantees unexpected mechanical yield and catastrophic structural fracture.
+[^fn-ml-extreme-frechet]: **Tail Family Is an Empirical Claim**\index{Extreme Value Theory!Frechet distribution}: A positive fitted GEV shape suggests a heavy-tail model for the sampled exposure blocks; it does not make all collision forces Fréchet. Block size, dependence, threshold choice, fit diagnostics, and parameter uncertainty affect a high-quantile estimate. A probabilistic quantile alone is not a worst-case structural guarantee.
 
 ### Peaks-over-threshold and generalized Pareto distribution
 
-When monitoring continuous real-time telemetry, grouping data into arbitrary blocks discards critical secondary peaks. Under the Pickands-Balkema-de Haan theorem, the distribution of excess excursions $Y = X - u$ above a sufficiently high physical threshold $u$, conditioned on $X > u$, converges asymptotically to the **Generalized Pareto Distribution (GPD)**:\index{Generalized Pareto Distribution!peaks over threshold}
+For a suitable underlying distribution and sufficiently high threshold $u$, the excess $Y=X-u$ conditional on $X>u$ may be approximated by a **Generalized Pareto Distribution (GPD)**. Peaks-over-threshold analysis preserves more exceedances than one maximum per block but requires attention to clustered, dependent events:\index{Generalized Pareto Distribution!peaks over threshold}
 $$
 H(y) = 1 - \left( 1 + \frac{\xi y}{\tilde{\sigma}} \right)^{-1/\xi}
 $$
-where $\tilde{\sigma} = \sigma + \xi(u - \mu)$.
+where $\tilde{\sigma}>0$ is the threshold scale and the expression applies on its supported domain, with the $\xi=0$ case defined by a limit.
 
 ### Hardware margin and quantile sizing
 
-To size safety buffers (such as mechanical clearance insets or actuator torque clamping thresholds) against extreme disturbances for an allowable exceedance probability $\epsilon$, systems engineers invert the extreme tail model to obtain the high-quantile estimate:
+For a fitted GPD with exceedance fraction $N_u/n$, one possible high-quantile estimate at per-sample exceedance probability $\epsilon<N_u/n$ and $\xi\ne0$ is:
 $$
 z_{\epsilon} = u + \frac{\tilde{\sigma}}{\xi} \left( \left(\frac{n}{N_u} \epsilon\right)^{-\xi} - 1 \right)
 $$
-where $N_u$ is the count of threshold exceedances observed across $n$ cycles.
+where $N_u$ is the number of threshold exceedances across $n$ sampled cycles. At $\xi=0$, its continuous limit is $z_\epsilon=u+\tilde\sigma\ln[(N_u/n)/\epsilon]$. Either estimate must carry fit and sampling uncertainty; its quantile does not guarantee a hard physical bound.
 
-Because software policies cannot suppress the physics of heavy-tailed mechanical disturbances, systems architectures must defend against extreme values through hardware means: series-elastic elements, crushable physical zones, and fast ($1\text{ kHz}$) deterministic hardware clamps sized to extreme-value tail quantiles rather than nominal Gaussian standard deviations.
+The designer can use fitted tails to choose test levels and candidate margins. A safety-critical clearance or force limit additionally needs a validated operating envelope, actuator response, material threshold, and policy for observations outside the evidence range. Series elasticity, physical stops, or an independently timed clamp are possible protections when their own behavior has been measured for the machine.
 
 ## Further Reading
 

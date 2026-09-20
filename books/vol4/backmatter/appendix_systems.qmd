@@ -1,6 +1,6 @@
 # Systems and Hardware {#sec-appendix-systems}
 
-This appendix provides a first-principles reference for the embedded systems, digital hardware architectures, and electrical dynamics that govern physical machine learning deployments. This reference distills the low-level interactions between software execution, interconnect contention, power delivery, and electro-mechanical dynamics, providing systems engineers and computer scientists with the quantitative tools necessary to achieve microsecond predictability and ensure hardware-level safety closure.
+This appendix collects the embedded timing, memory, power, and actuator models used throughout this book. Each bound depends on a specified device, workload, and operating envelope; the equations identify what must be measured before a physical deadline can be claimed.
 
 ## How to Use This Appendix
 
@@ -9,15 +9,15 @@ Consult this appendix when diagnosing physical systems bottlenecks, timing jitte
 | When you encounter this systems symptom                              | Consult                         | For this quantitative tool                                             |
 |----------------------------------------------------------------------|---------------------------------|------------------------------------------------------------------------|
 | A real-time safety task misses periodic execution deadlines          | @sec-appendix-systems-timers    | Worst-case execution time (WCET) and Response Time Analysis (RTA)      |
-| A software deadlock or kernel panic freezes actuator control loops   | @sec-appendix-systems-timers    | Hardware watchdog down-counters and non-maskable interrupt resets      |
+| A software deadlock or kernel panic freezes actuator control loops   | @sec-appendix-systems-timers    | Watchdog detection and separately measured stop-path response          |
 | Inverter bridge MOSFETs burn out or trip overcurrent protections     | @sec-appendix-systems-inverters | Microcontroller PWM complementary timers and dead-time insertion       |
 | Heavy neural inference bursts induce compute brownout resets         | @sec-appendix-systems-droop     | Inductive voltage droop ($L dI/dt$) and alpha-power gate delay         |
 | High-rate sensor DMA streams cause safety threads to miss deadlines  | @sec-appendix-systems-dram      | DRAM bank-conflict penalties and non-preemptive burst queuing          |
-| Sensor fusion streams suffer temporal registration skew under motion | @sec-appendix-systems-ptp       | IEEE 1588 Precision Time Protocol and PHY hardware timestamping        |
+| Sensor fusion streams suffer temporal registration skew under motion | @sec-appendix-systems-ptp       | PTP hardware timestamping and bounded clock conversion                 |
 | Shared memory queues between Linux and MCU return torn or stale data | @sec-appendix-systems-ipc       | SoC hardware mailboxes, RPMSG, and hardware memory barriers            |
 | Joint actuators fail to track sudden torque reversals or overheat    | @sec-appendix-systems-actuators | Stator electrical time constants ($L/R$) and lumped thermal ODEs       |
 | Emergency braking spikes DC bus voltage and damages power silicon    | @sec-appendix-systems-power     | Regenerative capacitive energy surges and dynamic brake choppers       |
-| Shared serial buses experience priority inversion and message jitter | @sec-appendix-systems-fieldbus  | CAN-FD vs. EtherCAT telegram serialization and lock-free seqlocks      |
+| Shared serial buses experience queuing and message jitter            | @sec-appendix-systems-fieldbus  | CAN FD priority blocking, EtherCAT cycle budgets, and bounded seqlocks |
 | Monocular 3D bounding boxes distort and depth covariance diverges    | @sec-appendix-systems-vision    | Pinhole intrinsic projection and metric unprojection covariance        |
 | A mobile base breaches clearance buffers under surface wetness       | @sec-appendix-systems-stopping  | Kinematic stopping envelopes, information age lag, and velocity clamps |
 
@@ -27,21 +27,21 @@ In embedded real-time systems, temporal predictability is as vital as computatio
 
 ### Real-time task schedulability and response time analysis
 
-A periodic real-time task $\tau_i$ is characterized by its worst-case execution time (WCET) $C_i$, relative deadline $D_i$, and period $T_i$.\index{Real-time systems!worst-case execution time} Under static-priority preemptive scheduling (such as Rate-Monotonic Scheduling [@liu1973scheduling]), schedulability across a set of tasks ordered by decreasing priority ($i = 1, \dots, n$) is verified by computing the worst-case **Response Time** $R_i$:
+A periodic real-time task $\tau_i$ is characterized by its worst-case execution time (WCET) $C_i$, relative deadline $D_i$, and period $T_i$.\index{Real-time systems!worst-case execution time} Under a single-core, fixed-priority preemptive model with bounded blocking and no release jitter (such as Rate-Monotonic Scheduling [@liu1973scheduling]), schedulability is checked using the worst-case **response time** $R_i$:
 $$ R_i = C_i + B_i + I_i \le D_i $$
 where $B_i$ is the maximum blocking duration induced by lower-priority tasks accessing shared resources, and $I_i$ is the interference from higher-priority tasks. The response time is computed via the fixed-point recurrence:
 $$ R_i^{(k+1)} = C_i + B_i + \sum_{j \in hp(i)} \left\lceil \frac{R_i^{(k)}}{T_j} \right\rceil C_j $$
-starting with $R_i^{(0)} = C_i$. Convergence occurs when $R_i^{(k+1)} = R_i^{(k)}$. If $R_i \le D_i$ for all tasks, the task set is deterministically schedulable under worst-case processor load.
+starting with $R_i^{(0)} = C_i+B_i$ and iterating to a fixed point or until a deadline is exceeded. A finite fixed point with $R_i \le D_i$ for every task establishes schedulability under these scheduling and interference assumptions. WCET $C_i$ is one component of response time, not the end-to-end sensor-to-actuator latency.
 
-### Hardware watchdogs and non-maskable interrupts
+### Hardware watchdogs and fault response
 
-To enforce temporal deadlines at the silicon level, embedded architectures deploy **Hardware Watchdog Timers**.\index{Watchdog timer!hardware downcounter} A watchdog is an independent countdown register clocked by an isolated, low-frequency crystal oscillator.
+To detect a missed execution checkpoint, an embedded design may use a **hardware watchdog timer**.\index{Watchdog timer!hardware downcounter} Its clock and response path must be independent enough of the monitored task for the claimed fault set; an independent crystal is one implementation.
 
 The timer is initialized to a threshold value $W_{\text{init}}$. Software execution threads must periodically refresh (or "kick") the register before the count reaches zero. If $W(t)$ represents the register count at physical time $t$, and software executes a refresh at epoch $t_k$, the register resets:[^fn-sys-watchdog-reset]
 $$ W(t_k) = W_{\text{init}} $$
-If the processor hangs, deadlocks on a mutex, or exceeds its execution budget such that $W(t) \le 0$, the watchdog hardware underflows. This underflow immediately trips an external Non-Maskable Interrupt (NMI) or asserts a hardware reset line to the microcontroller, forcing the system into a safe fallback state within clock cycles.
+If the software misses the configured refresh window, the timer expires and raises its configured interrupt, reset, or external supervisor output. Expiry only detects the missed checkpoint. The safety case must bound expiry-to-drive response, wire any MCU-loss trip independently of the failed MCU, and show that the resulting state-matched brake or hold can stop the plant within its remaining clearance. A reset or safe torque off (STO) command alone may leave a moving load coasting.
 
-[^fn-sys-watchdog-reset]: **Hardware Watchdog Down-Counters**\index{Watchdog timer!hardware downcounter}: Dedicated hardware watchdogs run on independent low-frequency crystal oscillators decoupled from main CPU core clocks. Software tasks must periodically refresh the down-counter before it underflows to prevent triggering a non-maskable interrupt or hard platform reset. Missing a watchdog refresh immediately disengages power inverter stages, preventing run-away actuator motion during operating system kernel panics.
+[^fn-sys-watchdog-reset]: **Hardware Watchdog Down-Counters**\index{Watchdog timer!hardware downcounter}: A configured watchdog expires when its expected service does not occur. Its oscillator, timeout, output wiring, and plant response differ by device. Feeding it merely from an unrelated interrupt does not prove that the monitored control computation progressed; a firmware-fed reset also need not signal a drive. See the [Linux watchdog API](https://docs.kernel.org/watchdog/watchdog-api.html) for reset behavior and @sec-enforcement-fallback-ladder for stop selection.
 
 ## Inverter Timers and Power Electronics Gate Drive {#sec-appendix-systems-inverters}
 
@@ -53,9 +53,9 @@ Each inverter phase comprises a high-side power MOSFET (or IGBT) and a low-side 
 $$ t_{\text{dead}} \ge t_{\text{off, max}} + t_{\text{prop, skew}} - t_{\text{on, min}} $$
 where $t_{\text{off, max}}$ is the maximum turn-off time of the power switch, $t_{\text{on, min}}$ is the minimum turn-on time, and $t_{\text{prop, skew}}$ is the propagation delay mismatch across gate drivers.[^fn-sys-pwm-deadtime]
 
-Dead-time ensures that the high-side switch is fully non-conducting before the low-side switch begins conduction. If complementary switches conduct simultaneously—a catastrophic condition termed **shoot-through**—the DC rail is shorted directly to ground, drawing thousands of amperes per microsecond and destroying inverter silicon.
+For the specified device and gate-drive delays, adequate dead time reduces overlap between high-side and low-side conduction. If both switches conduct simultaneously, **shoot-through** creates a low-impedance path across the DC bus; current and damage depend on bus impedance, protection, and event duration.
 
-[^fn-sys-pwm-deadtime]: **Inverter Dead-Time Insertion**\index{Pulse-width modulation!dead-time insertion}: Microcontroller timer peripherals insert hardware dead-time between complementary gate drive outputs to compensate for finite power MOSFET turn-off delays. Failing to enforce dead-time permits both high-side and low-side switches in a half-bridge inverter to conduct simultaneously, causing a low-impedance shoot-through short circuit across the DC bus. Shoot-through events draw hundreds of amperes within nanoseconds, destroying inverter silicon and blowing primary battery protection fuses.
+[^fn-sys-pwm-deadtime]: **Inverter Dead-Time Insertion**\index{Pulse-width modulation!dead-time insertion}: Timer dead time is selected from switch and driver timing over temperature and load, then verified with the actual gate waveforms. An overlap can create a damaging bus short; a numeric current or fuse outcome requires the circuit impedance and protection response.
 
 ## Inductive Voltage Droop and Gate Delay Stretch {#sec-appendix-systems-droop}
 
@@ -65,7 +65,7 @@ When deep neural network accelerators (such as systolic array matrix engines) tr
 
 Every power delivery network (PDN) exhibits finite parasitic loop inductance $L_{\text{PDN}}$ and equivalent series resistance $R_{\text{PDN}}$ across PCB traces, package balls, and bond wires. When accelerator execution triggers a transient current step $\Delta I$ with rise time $t_r$ (giving current slew rate $dI/dt \approx \Delta I / t_r$), Faraday's law of induction dictates an instantaneous voltage collapse $\Delta V_{\text{droop}}$:\index{Inductive voltage droop!power delivery network}
 $$ \Delta V_{\text{droop}} = L_{\text{PDN}} \frac{dI}{dt} + \Delta I \cdot R_{\text{PDN}} $$
-If supply voltage $V(t) = V_{\text{nom}} - \Delta V_{\text{droop}}$ sags below the minimum operating voltage $V_{\min}$, digital logic experiences severe timing degradation.
+If supply voltage $V(t) = V_{\text{nom}} - \Delta V_{\text{droop}}$ approaches a device's characterized minimum operating voltage $V_{\min}$, timing margin may shrink or brownout protection may act.
 
 ### Digital logic gate delay and the alpha-power law
 
@@ -77,9 +77,9 @@ When rail voltage droops from $V_{\text{nom}}$ to $V_{\text{droop}}$, propagatio
 $$ \frac{t_{\text{prop}}(V_{\text{droop}})}{t_{\text{prop}}(V_{\text{nom}})} = \frac{V_{\text{droop}}}{V_{\text{nom}}} \left( \frac{V_{\text{nom}} - V_{\text{th}}}{V_{\text{droop}} - V_{\text{th}}} \right)^\alpha $$
 In a synchronous digital pipeline with clock period $T_{\text{clk}}$, setup time $t_{\text{setup}}$, and clock skew $t_{\text{skew}}$, timing closure requires:
 $$ t_{\text{prop}} + t_{\text{setup}} + t_{\text{skew}} \le T_{\text{clk}} $$
-Stretching $t_{\text{prop}}$ causes setup slack to become negative, corrupting state registers or triggering supervisory brownout resets. On-package deep-trench decoupling capacitors (DTCs) mitigate this collapse by supplying high-frequency charge locally.
+Stretching $t_{\text{prop}}$ reduces setup slack. A timing failure occurs only if the measured path crosses its slack limit; a brownout reset depends on a separately configured supervisor threshold. Local decoupling can reduce the rail excursion, subject to its impedance and placement.
 
-[^fn-sys-sakurai-droop]: **Sakurai-Newton Delay Modeling**\index{Gate delay!Sakurai-Newton model}: Takayasu Sakurai and A. Richard Newton formalized the alpha-power law in 1990 to capture carrier velocity saturation in sub-micron CMOS transistors. Supply voltage droop lengthens gate propagation delay nonlinearly, reducing digital setup slack across synchronous clock domains. Severe rail collapse violates flip-flop setup times, corrupting pipeline registers and triggering catastrophic processor brownout resets.
+[^fn-sys-sakurai-droop]: **Sakurai-Newton Delay Modeling**\index{Gate delay!Sakurai-Newton model}: The alpha-power law models voltage-dependent gate delay; its parameters are technology dependent. The model predicts reduced setup slack during droop, while a missed deadline, register error, or reset must be established against measured path slack and device thresholds.
 
 ## DRAM Contention and Interconnect Arbitration {#sec-appendix-systems-dram}
 
@@ -93,21 +93,19 @@ A DRAM chip is structured into multiple independent banks, each possessing a sin
 2. **Column access** ($t_{\text{CAS}}$): Reads or writes data from the open row buffer onto the data bus.
 3. **Row precharge** ($t_{\text{RP}}$): Restores charge to storage capacitors and closes the active row.
 
-When consecutive memory operations target different rows within the same physical bank (a *bank conflict* or *row-buffer miss*), the memory controller must precharge the active row and activate the requested row before column access can proceed, adding an access penalty of $t_{\text{RP}} + t_{\text{RCD}}$ ($28\text{--}40\text{ ns}$).[^fn-sys-dram-conflicts]
+When consecutive operations target different rows of the same bank (a *bank conflict*), the controller may need to precharge and activate a row before column access, adding approximately $t_{\text{RP}}+t_{\text{RCD}}$. Each bank can have its own open row. The penalty and number of switches depend on address mapping and the controller schedule.[^fn-sys-dram-conflicts]
 
-[^fn-sys-dram-conflicts]: **DRAM Bank-Conflict Penalties**\index{Memory contention!DRAM bank conflicts}: Accessing distinct rows within the same physical DRAM bank forces the memory controller to execute sequential precharge and activate cycles before reading columns. High-bandwidth direct memory access from video streaming engines can repeatedly stall real-time CPU safety threads seeking access to the same bank. Without hardware memory partitioning, this unmodeled bank contention inflates worst-case execution times by tens of microseconds, breaching hard real-time deadlines.
+[^fn-sys-dram-conflicts]: **DRAM Bank-Conflict Penalties**\index{Memory contention!DRAM bank conflicts}: A row change in one bank can add precharge and activate time. Video DMA can also queue transactions ahead of a safety read. The resulting delay must be bounded for the specific address mapping, arbitration policy, and workload; a fixed penalty per request is generally unjustified.
 
 ### Interconnect crossbars and burst contention
 
-On-chip interconnect crossbars (such as AMBA AXI) schedule memory traffic in packet-atomic bursts. If a non-preemptive burst of size $B_{\text{burst}}$ (bytes) is in flight across a shared memory bus with bandwidth $\text{BW}_{\text{bus}}$ (bytes per second), an incoming real-time safety read waits for the in-flight burst duration:
-$$ t_{\text{burst}} = \frac{B_{\text{burst}}}{\text{BW}_{\text{bus}}} $$
-In the worst case where $K$ competing transactions are queued ahead of the real-time request and each induces a bank conflict, total queuing latency expands to:
-$$ t_{\text{queue}} = \sum_{k=1}^K \frac{B_k}{\text{BW}_{\text{bus}}} + K (t_{\text{RP}} + t_{\text{RCD}}) + t_{\text{CAS}} $$
-This queuing latency demonstrates why real-time safety critical state must be pinned in SRAM-based Tightly-Coupled Memory (TCM) rather than shared DDR channels.
+An accelerator tile is split into bounded bus transactions; it is not one atomic AXI burst. For an illustrative FIFO controller that admits all $K$ transactions ahead of a safety request, with no priority bypass or new arrivals, the ideal bus-transfer component is
+$$ t_{\text{queue,ideal}}=\frac{\sum_{k=1}^{K}B_k}{\mathrm{BW}_{\text{bus}}}. $$
+Add the bank-switch penalties for the *actual* address sequence and then the safety request's own transfer and compute times. This is a constructed scheduling model, not a portable worst-case bound: refresh, protocol overhead, controller reordering, and competing traffic can increase latency, while qualified QoS can bypass queued work. @Sec-placement-resource-contention gives a recomputable case. A local, coherently published safety snapshot can avoid this DDR path, but TCM capacity alone does not provide the snapshot or bound its transfer time.
 
 ## Clock Synchronization and Network Timestamps {#sec-appendix-systems-ptp}
 
-Distributed multi-sensor perception pipelines require precise microsecond time synchronization across network nodes.
+Distributed perception must convert sensor timestamps into a common clock domain with a measured conversion-error bound.
 
 ### Precision time protocol message exchange
 
@@ -118,39 +116,41 @@ The IEEE 1588 Precision Time Protocol (PTP) synchronizes a Slave clock ($S$) to 
 3. $t_3$: Slave transmits a *Delay_Req* frame, recording its local transmission timestamp.
 4. $t_4$: Master receives the *Delay_Req* frame, recording its local arrival timestamp.
 
-Assuming symmetric forward and reverse network propagation delay ($D_{M \to S} = D_{S \to M} = D$), the time relationships satisfy:
+Assuming stable clocks during the exchange and symmetric forward and reverse propagation delay ($D_{M \to S}=D_{S \to M}=D$), the time relationships satisfy:
 $$ t_2 = t_1 + O + D $$
 $$ t_4 = t_3 - O + D $$
-where $O$ is the clock offset between Slave and Master. Solving this system yields the exact clock offset:
+where $O$ is the slave-minus-master clock offset. Under those assumptions, the estimated offset is:
 $$ O = \frac{(t_2 - t_1) - (t_4 - t_3)}{2} $$
 The one-way network propagation delay is:
 $$ D = \frac{(t_2 - t_1) + (t_4 - t_3)}{2} $$
-The slave corrects its local clock by subtracting offset $O$.
+The slave estimates the mapping to the master domain by subtracting $O$. Asymmetric path delay, oscillator drift between exchanges, and timestamp error leave a residual that must be bounded for evidence-age checks.
 
 ### Physical layer hardware timestamping
 
-In software-based network implementations, timestamps are recorded inside operating system interrupt handlers, introducing unpredictable queuing and scheduling jitter ($10\text{--}100\text{ }\mu\text{s}$).
+Software timestamping includes operating-system dispatch and queue variation, which must be measured for the selected network stack.
 
-Under PTP hardware timestamping, timestamps $t_1, t_2, t_3, t_4$ are captured directly at the Ethernet physical transceiver (PHY) or Media Access Control (MAC) boundary as the start-of-frame delimiter passes the physical wire.[^fn-sys-ptp-timestamps] Bypassing operating system protocol stacks eliminates software jitter, providing sub-microsecond synchronization ($< 100\text{ ns}$) across distributed sensors.
+PTP-capable hardware can timestamp near the Ethernet PHY or MAC boundary, reducing host-dispatch error.[^fn-sys-ptp-timestamps] It does not by itself establish a submicrosecond end-to-end clock bound; topology, asymmetry, synchronization interval, timestamp location, and MCU clock conversion must be characterized.
 
-[^fn-sys-ptp-timestamps]: **PHY-Layer Timestamping**\index{Precision Time Protocol!hardware timestamping}: IEEE 1588 Precision Time Protocol captures frame transmission and arrival timestamps directly at the physical Ethernet PHY transceiver. By recording timestamps at the physical line boundary, PTP eliminates the variable software queuing and interrupt dispatch jitter inherent in host operating system stacks. Sub-microsecond clock synchronization guarantees that distributed sensor measurements are referenced to a common temporal epoch before fusion filtering.
+[^fn-sys-ptp-timestamps]: **Hardware Timestamping**\index{Precision Time Protocol!hardware timestamping}: A compatible PHY or MAC timestamps frames closer to the wire than a software interrupt handler. Hardware timestamping removes one source of dispatch variation, while path asymmetry and clock conversion remain. Timestamp uncertainty belongs in the physical belief record and permission budget.
 
 ## Heterogeneous SoC Mailboxes and Memory Barriers {#sec-appendix-systems-ipc}
 
-Modern robotics architectures deploy asymmetric multiprocessing (AMP) SoCs, coupling high-performance application processors (e.g., ARM Cortex-A running Linux) with real-time microcontrollers (e.g., ARM Cortex-M running bare-metal firmware).
+Some robotics SoCs couple an application processor running Linux with a real-time core or microcontroller. Their communication contract must specify memory ownership, cache behavior, message validity, and what the real-time side does when no new message arrives.
 
 ### Remote processor messaging over shared SRAM
 
-Inter-core communication utilizes statically allocated on-chip shared SRAM buffers synchronized via the Remote Processor Messaging (RPMSG) framework:\index{Inter-core communication!RPMSG framework}
+An illustrative shared-memory mailbox works as follows:\index{Inter-core communication!RPMSG framework}
 
 1. Core A writes a message payload to a fixed buffer in shared SRAM.
-2. Core A executes a hardware memory barrier to commit writes to physical memory.
+2. Core A makes the payload visible to Core B using the platform's coherent mapping or explicit cache maintenance and ordering.
 3. Core A triggers an inter-processor interrupt (IPI) by writing to Core B's hardware mailbox register.
-4. Core B services the interrupt, reads the buffer descriptor, and processes the payload.
+4. Core B checks publication order, integrity, age, and permission before using the payload.
+
+Linux [RPMsg](https://docs.kernel.org/staging/rpmsg.html) is a virtio-based messaging framework that may use shared memory and a platform-specific kick. It does not prescribe this fixed-buffer protocol or a universal latency bound.
 
 ### CPU pipeline reordering and memory fences
 
-Modern out-of-order CPU pipelines and multi-level cache hierarchies speculatively reorder loads and stores to maximize execution throughput. In shared-memory IPC, this reordering can produce race conditions:\index{Memory barrier!instruction ordering}
+Weak memory ordering and noncoherent caches can let a receiver observe a notification without a current payload unless the producer and consumer follow one published protocol:\index{Memory barrier!instruction ordering}
 ```c
 // Core A (Application Processor)
 shared_buffer->target_torque = 15.0f; // Store 1: Payload
@@ -158,15 +158,15 @@ mailbox_doorbell = 1;                 // Store 2: Interrupt trigger
 ```
 If the CPU or interconnect reorders Store 2 ahead of Store 1, Core B receives the interrupt before the new torque setpoint is committed to physical memory, reading stale or invalid data.
 
-A **Memory Barrier** (or memory fence) enforces a strict happens-before ordering constraint:[^fn-sys-memory-barriers]
+A data memory barrier can order accesses within its selected shareability domain:[^fn-sys-memory-barriers]
 ```c
 shared_buffer->target_torque = 15.0f;
-__asm__ volatile("dmb ish" ::: "memory"); // Data Memory Barrier
+__asm__ volatile("dmb ish" ::: "memory"); // Only if both peers share this domain
 mailbox_doorbell = 1;
 ```
-The data memory barrier (`DMB`) guarantees that all memory stores prior to the barrier are globally visible to all system cores and DMA masters before subsequent stores execute, ensuring data integrity across privilege boundaries.
+The barrier in this example is sufficient only if both cores share the inner-shareable coherent domain and the doorbell has the specified device-memory ordering. It does not flush a noncoherent cache or make data visible to an unrelated DMA master. Otherwise, use the platform's appropriate barrier and [DMA cache-ownership synchronization](https://docs.kernel.org/core-api/dma-api.html), or map the buffer coherently, and verify the receiver's acquire side. The real-time reader still needs a bounded validation attempt and a lease-limited fallback when publication is torn or stale.
 
-[^fn-sys-memory-barriers]: **Hardware Memory Barriers**\index{Memory barrier!instruction ordering}: Modern out-of-order processors and write-combining memory controllers speculatively reorder loads and stores to maximize pipeline throughput. In inter-processor shared memory queues, stores to payload buffers must be globally visible across all cores before the signaling mailbox register is written. Omitting a data memory barrier permits receiving cores to process stale or corrupted payload data, commanding hazardous physical setpoints.
+[^fn-sys-memory-barriers]: **Hardware Memory Barriers**\index{Memory barrier!instruction ordering}: Barriers order accesses only within their specified shareability and memory-attribute contract. On a noncoherent route, cache clean/invalidate operations or coherent mappings are also required. [Arm's memory-ordering guide](https://developer.arm.com/community/arm-community-blogs/b/architectures-and-processors-blog/posts/memory-access-ordering-part-3---memory-access-ordering-in-the-arm-architecture) distinguishes ordering from coherence.
 
 ## Actuator Electrical and Thermal Dynamics {#sec-appendix-systems-actuators}
 
@@ -178,7 +178,7 @@ A brushless DC (BLDC) motor phase winding exhibits phase resistance $R_{\text{ph
 $$ L_{\text{phase}} \frac{dI(t)}{dt} + R_{\text{phase}} I(t) = V_{\text{terminal}} - K_e \omega_m $$
 For a voltage step applied from rest ($\omega_m = 0$), phase current rises exponentially:
 $$ I(t) = \frac{V_{\text{terminal}}}{R_{\text{phase}}} \left( 1 - e^{-t / \tau_e} \right), \quad \tau_e = \frac{L_{\text{phase}}}{R_{\text{phase}}} $$
-where $\tau_e$ is the electrical time constant. Commanded torque $\tau_m = K_t I$ cannot rise faster than $\tau_e$, imposing a physical bandwidth limit on dynamic force generation.
+where $\tau_e$ is the electrical time constant: in this ideal step model, current reaches about 63 percent of its final value after one $\tau_e$. Torque $\tau_m=K_t I$ follows this current only while the magnetic, voltage, and control assumptions hold; a command is not an instantaneous torque change.
 
 ### Lumped thermal networks and duty cycle
 
@@ -192,7 +192,7 @@ Under constant power, temperature rises with thermal time constant $\tau_{\text{
 $$ \Delta T(t) = P_{\text{loss}} \theta_{JA} \left( 1 - e^{-t / \tau_{\text{th}}} \right) $$
 Continuous torque capacity $\tau_{\text{cont}}$ is bounded by maximum allowable winding temperature $\Delta T_{\max}$:
 $$ \tau_{\text{cont}} \le K_t \sqrt{\frac{\Delta T_{\max}}{\theta_{JA} R_{\text{phase}}}} $$
-Peak torque $\tau_{\text{peak}} > \tau_{\text{cont}}$ is permitted only transiently, governed by the integral thermal capacity $\int_0^t I^2 dt \le I^2t_{\text{limit}}$.
+An above-continuous torque may be permitted transiently if the device's temperature estimate and specified current-time limits allow it. The integral $\int_0^t I^2dt$ is one possible protection measure, not a universal motor rating.
 
 [^fn-sys-motor-heating]: **Stator Thermal Time Constants**\index{Actuator!stator thermal dynamics}: Resistive Joule heating elevates motor phase winding temperatures during continuous high-torque maneuvers. Because copper electrical resistivity increases linearly with temperature, hot windings exhibit higher resistance, reducing torque output under terminal voltage saturation. Exceeding winding insulation temperature limits breaks down dielectric coatings, causing inter-turn short circuits and irreversible actuator destruction.
 
@@ -202,58 +202,53 @@ A robotic platform's electrical power distribution network must supply accelerat
 
 ### Inductive droop and capacitive decoupling
 
-When multiple actuators accelerate simultaneously, the aggregate current surge $\Delta I_{\text{bus}}$ draws from the battery through harness resistance $R_{\text{bus}}$ and inductance $L_{\text{bus}}$. Local bus capacitance $C_{\text{bus}}$ supplies transient charge. The peak voltage droop at the main DC-DC converter input is:
-$$ \Delta V_{\text{droop}} \approx \Delta I_{\text{bus}} R_{\text{bus}} + L_{\text{bus}} \frac{dI_{\text{bus}}}{dt} + \frac{\Delta I_{\text{bus}} \Delta t}{2 C_{\text{bus}}} $$
-If $\Delta V_{\text{droop}}$ drops the bus voltage below the under-voltage lockout (UVLO) threshold, the onboard power supply shuts down, resetting processors mid-motion.
+When multiple actuators accelerate, harness resistance and inductance impede source current while local capacitance supplies the difference. For a specified waveform, the resistive and inductive terms are $\Delta I_{\text{source}}R_{\text{bus}}$ and $L_{\text{bus}}\,dI_{\text{source}}/dt$; capacitor discharge obeys
+$$ \Delta V_C(t)=\frac{1}{C_{\text{bus}}}\int_0^t\bigl(I_{\text{load}}(s)-I_{\text{source}}(s)\bigr)\,ds. $$
+These terms cannot simply be added as simultaneous peaks without a circuit and waveform model. If the resulting voltage crosses a configured under-voltage lockout (UVLO) threshold for long enough, the supply may disable or reset; the threshold, filtering, and plant consequence require measurement.
 
 ### Regenerative braking surges and chopper sizing
 
-During emergency deceleration, mechanical kinetic energy $E_k = \frac{1}{2} m v_0^2$ (linear) or $E_k = \frac{1}{2} J_{\text{load}} \dot{q}_0^2$ (rotational) is backdriven through motor inverters into the DC bus with regeneration efficiency $\eta_{\text{regen}} \approx 0.70\text{--}0.85$. If the battery management system (BMS) cannot accept rapid charge, the energy dumps into local DC bus capacitance $C_{\text{bus}}$, driving bus voltage upward:\index{Regenerative braking!chopper resistor}
+During controlled regenerative deceleration, some mechanical kinetic energy $E_k=\frac12mv_0^2$ (linear) or $E_k=\frac12J_{\text{load}}\dot q_0^2$ (rotational) may return through the inverter. If the battery cannot accept it and an assumed fraction $\eta_{\text{regen}}$ reaches the local bus capacitor $C_{\text{bus}}$ before another sink acts, the ideal capacitor relation is:\index{Regenerative braking!chopper resistor}
 $$ \Delta E_C = \frac{1}{2} C_{\text{bus}} \left( V_{\text{final}}^2 - V_{\text{initial}}^2 \right) = \eta_{\text{regen}} E_k $$
 $$ V_{\text{final}} = \sqrt{ V_{\text{initial}}^2 + \frac{2 \eta_{\text{regen}} E_k}{C_{\text{bus}}} } $$
-To prevent $V_{\text{final}}$ from exceeding the breakdown voltage rating of inverter MOSFETs ($V_{\max}$), an active **brake chopper** circuit shunts current through a power resistor $R_{\text{brake}}$ when $V_{\text{bus}} \ge V_{\text{clamp}}$:[^fn-sys-brake-chopper]
+For an implementation with an active **brake chopper**, the resistor and switch must absorb the modeled peak power and pulse energy when $V_{\text{bus}}\ge V_{\text{clamp}}$:[^fn-sys-brake-chopper]
 $$ R_{\text{brake}} \le \frac{V_{\text{clamp}}^2}{P_{\text{regen, peak}}} $$
 $$ P_{\text{regen, peak}} \approx \eta_{\text{regen}} \cdot \tau_{\text{brake}} \cdot \omega_{\max} $$
+The resistor inequality is only a peak-power sizing check; minimum resistance for switch current, pulse energy, and thermal recovery impose additional constraints.
 
-[^fn-sys-brake-chopper]: **Dynamic Braking Choppers**\index{Regenerative braking!chopper resistor}: During rapid deceleration, backdriven kinetic energy returns to the DC power distribution bus via motor phase regeneration. When energy cannot be absorbed by the battery, bus capacitance charges rapidly, elevating voltage toward semiconductor breakdown thresholds. An active brake chopper shunts excess regenerative current through an external power resistor, dissipating kinetic energy as heat and preserving power electronics.
+[^fn-sys-brake-chopper]: **Dynamic Braking Choppers**\index{Regenerative braking!chopper resistor}: A qualified chopper can dissipate returned energy when the battery is unavailable as a sink. Its threshold, switch and resistor ratings, pulse duration, and thermal recovery must be tested. Regeneration and chopper operation are not inherent to every emergency stop; safe torque off can instead leave a motor coasting.
 
 ## Real-Time Fieldbuses and Lock-Free Synchronization {#sec-appendix-systems-fieldbus}
 
-Coordinating distributed motor drives and compute nodes requires deterministic serialization protocols and lock-free memory exchange.
+Coordinating distributed drives requires a measured network schedule and a bounded local publication protocol.
 
 ### Fieldbus serialization and schedulability
 
-On a shared serial bus (such as CAN-FD or RS-485), $N_{\text{axes}}$ motor drives transmit telemetry and receive setpoints cyclically. For payload size $B_{\text{frame}}$ (bits) and transmission bitrate $R_{\text{baud}}$ (bps), transmission duration is $t_{\text{tx}} = B_{\text{frame}} / R_{\text{baud}}$.\index{Fieldbus!CAN-FD arbitration}
+On a shared serial bus, $N_{\text{axes}}$ drives transmit telemetry and receive setpoints cyclically. Serialization time depends on the complete frame, physical bit rates, and any stuffing or retransmission allowance.\index{Fieldbus!CAN-FD arbitration}
 
-Under Controller Area Network (CAN-FD), nodes arbitrate via non-destructive bitwise arbitration. Total nominal cycle time across all axes is:
-$$ T_{\text{bus}} = \sum_{i=1}^{N_{\text{axes}}} \left( \frac{B_{\text{payload}, i} + B_{\text{overhead}}}{R_{\text{data}}} + t_{\text{prop}} \right) $$
-Under high bus utilization ($\rho = T_{\text{bus}} / T_{\text{target}} > 0.70$), collision retries increase nonlinearly, causing priority inversion and high message jitter.
+CAN FD uses non-destructive priority arbitration at its nominal bit rate; a winning frame then sends its data phase at the configured data bit rate. An error-free serialization estimate for frame $i$ is
+$$ t_{\text{frame},i}\approx\frac{B_{\text{arb},i}}{R_{\text{nom}}}+\frac{B_{\text{data},i}}{R_{\text{data}}}+t_{\text{stuff},i}+t_{\text{interframe},i}. $$
+This estimate is not a response-time bound. A lower-priority frame already transmitting can block a newly ready high-priority frame until that transmission ends; arbitration losers defer without a collision-error retry. Bound each message's queuing and release jitter with the actual priority set, frame lengths, error assumptions, and bus load; [Bosch's CAN FD description](https://www.bosch-semiconductors.com/media/ip_modules/pdf_2/papers/icc14_2013_paper_hartwich_1.pdf) distinguishes the arbitration and data phases.
 
-In contrast, **EtherCAT** uses on-the-fly telegram processing: an Ethernet frame traverses an open ring topology through dedicated hardware controllers (application-specific integrated circuit [ASIC] or field-programmable gate array [FPGA]).\index{Fieldbus!EtherCAT on-the-fly} Slaves read and insert data directly within passing Ethernet frames with fixed forwarding latency $t_{\text{forward}} \approx 1\text{ }\mu\text{s}$ per node. Total cycle time is deterministic:
-$$ T_{\text{EtherCAT}} = \frac{B_{\text{Ethernet frame}}}{R_{\text{EtherCAT}}} + N_{\text{axes}} \cdot t_{\text{forward}} + \frac{2 \cdot \text{Distance}}{v_{\text{prop}}} $$
-enabling deterministic sub-millisecond cycle times ($<100\text{ }\mu\text{s}$) across dozens of synchronized axes.
+**EtherCAT** processes data as frames pass through slave controllers.\index{Fieldbus!EtherCAT on-the-fly} For a specified topology, a cycle budget includes serialization of every configured frame, master and slave forwarding, PHY and cable propagation, processing, and a guard for jitter and error recovery:
+$$ T_{\text{cycle}}\ge\sum_f\frac{B_f}{R_{\text{link}}}+t_{\text{master}}+\sum_s t_{\text{slave},s}+t_{\text{prop}}+t_{\text{guard}}. $$
+The achievable cycle period is configuration dependent; short advertised periods do not establish a deadline for a particular machine. The [EtherCAT Technology Group](https://www.ethercat.org/en/technology.html) describes the processing method and configurable process data.
 
 ### Lock-free seqlocks for multi-rate shared memory
 
-When a single high-frequency writer (e.g., a $1\text{ kHz}$ IMU thread) updates multi-word kinematic state $\mathbf{x} \in \mathbb{R}^d$ read by low-frequency deliberative threads (e.g., a $20\text{ Hz}$ neural planner), mutexes introduce priority inversion.
+When a producer updates multiword state read by a deadline-bound enforcer, waiting on a producer-held mutex can violate the reader's deadline. The single-slot mailbox in @algo-lock-free-trajectory uses a sequence counter to detect a torn snapshot.
 
-A **sequence lock (seqlock)** provides lock-free synchronization using a monotonically incrementing integer sequence counter:\index{Concurrency!sequence locks}
+A **sequence counter** marks a single writer's publication in progress with an odd value and a completed publication with an even value:\index{Concurrency!sequence locks}
 
 1. **Writer Protocol**:
-   - Increment sequence counter from even ($2k$) to odd ($2k+1$) using an atomic store with release semantics.
-   - Insert a write memory barrier (`smp_wmb()`).
-   - Update state data fields.
-   - Insert a write memory barrier (`smp_wmb()`).
-   - Increment sequence counter from odd ($2k+1$) to even ($2k+2$) with release semantics.
+   - Publish an odd sequence value, write the payload, and make it visible through the platform's coherent or cache-maintained memory contract.
+   - Publish the next even value with release ordering.
 2. **Reader Protocol**:
-   - Read sequence counter $S_1$ with acquire semantics. If $S_1$ is odd (writer active), spin or yield.
-   - Insert a read memory barrier (`smp_rmb()`).
-   - Copy state data fields locally.
-   - Insert a read memory barrier (`smp_rmb()`).
-   - Read sequence counter $S_2$ with acquire semantics.
-   - If $S_1 \neq S_2$, data was torn during reading; retry loop.
+   - Read $S_1$ with acquire ordering. If it is odd, reject this publication without waiting.
+   - Make one bounded copy to scratch memory using the platform's required load ordering, then read $S_2$.
+   - Accept only if $S_1=S_2$ and both are even, and the copied frame passes integrity, timestamp, and lease checks. Otherwise retain the last validated local command only while its lease and stopping margin permit; then enter the MCU-owned fallback.
 
-Because writer duration is tiny ($t_{\text{write}} \approx 50\text{--}100\text{ ns}$ for 64 bytes of cache copy), reader collision probability is $< 0.01\%$, guaranteeing non-blocking real-time telemetry transfer.
+The reader's one-attempt execution time can be bounded on the target hardware; success probability depends on the writer's schedule and cannot be inferred from payload size alone. Conventional Linux seqlock readers may retry, as the [kernel documentation](https://docs.kernel.org/locking/seqlock.html) shows, but a real-time permission gate cannot use an unbounded retry loop.
 
 ## Camera Projective Geometry and Covariance Propagation {#sec-appendix-systems-vision}
 
@@ -269,7 +264,7 @@ where $(f_x, f_y)$ are focal lengths in pixel units and $(c_x, c_y)$ is the prin
 $$ r^2 = x_n^2 + y_n^2, \quad x_d = x_n (1 + k_1 r^2 + k_2 r^4), \quad y_d = y_n (1 + k_1 r^2 + k_2 r^4) $$
 where $(x_n, y_n) = (x_c / z_c, y_c / z_c)$ are normalized image coordinates.
 
-[^fn-sys-pinhole-projection]: **Pinhole Intrinsic Projection**\index{Camera model!pinhole projection}: The pinhole camera model projects 3D spatial points onto a discrete 2D sensor array via the intrinsic calibration matrix. Measurement noise on photosites unprojects into an anisotropic spatial error covariance that expands quadratically with true object distance. Uncalibrated intrinsic parameters distort perceived physical clearance, causing motion planners to generate collision-prone trajectory corridors.
+[^fn-sys-pinhole-projection]: **Pinhole Intrinsic Projection**\index{Camera model!pinhole projection}: The pinhole model projects 3D points onto a 2D sensor through calibrated intrinsics. Under fixed pixel noise, the lateral variance after depth unprojection grows with squared distance; depth-error and calibration terms follow their own models. Uncalibrated intrinsics can bias a clearance estimate and must be included in its error envelope.
 
 ### Metric unprojection and spatial covariance propagation
 
@@ -279,7 +274,7 @@ $$
 $$
 Transforming this 3D point into the robot body frame via rigid extrinsic transform $\mathbf{T}_{bc} = [\mathbf{R}_{bc}, \mathbf{p}_{bc}; \mathbf{0}^\top, 1]$ yields the spatial body covariance:
 $$ \mathbf{\Sigma}_b = \mathbf{R}_{bc} \mathbf{\Sigma}_c \mathbf{R}_{bc}^\top + \mathbf{\Sigma}_{\text{ext}} $$
-where $\mathbf{\Sigma}_{\text{ext}}$ represents structural mounting compliance and thermal calibration drift. Downstream safety filters evaluate the maximum eigenvalue $\lambda_{\max}(\mathbf{\Sigma}_b)$ to expand geometric collision-clearance buffers proportionally to sensor uncertainty.
+where $\mathbf{\Sigma}_{\text{ext}}$ models independent extrinsic uncertainty under this first-order approximation; correlations require the corresponding cross terms. A probabilistic clearance buffer may scale with $\sqrt{\lambda_{\max}(\mathbf{\Sigma}_b)}$ at a declared tail risk. A deterministic permission check instead needs a justified bounded-error envelope; covariance alone does not give a worst-case bound.
 
 ## Kinematic Stopping Envelopes and Information Age Lag {#sec-appendix-systems-stopping}
 
@@ -287,36 +282,29 @@ Halting an embodied machine transporting mass $m$ at velocity $v_0$ requires bal
 
 ### Sensorimotor information age and lag distance
 
-The total end-to-end information age $\tau_{\text{info}}$ from initial physical photon arrival to mechanical torque application is the sum of pipeline latencies across all tiers:\index{Kinematic stopping distance!information age}
-$$ \tau_{\text{info}} = t_{\text{sensor}} + t_{\text{compute}} + t_{\text{bus}} + t_{\text{actuator}} $$
+For a specified hazard detector and stop path, let $\tau_{\text{pre}}$ bound the time from the physical state represented by the evidence until validated braking deceleration begins:\index{Kinematic stopping distance!information age}
+$$ \tau_{\text{pre}} = t_{\text{age}} + t_{\text{detect}} + t_{\text{compute}} + t_{\text{bus}} + t_{\text{brake-onset}} $$
 where:
 
-- $t_{\text{sensor}}$ is the physical exposure and frame readout interval.
-- $t_{\text{compute}}$ is the DMA transfer, neural inference, and trajectory verification latency.
-- $t_{\text{bus}}$ is the serial fieldbus transmission and arbitration delay.
-- $t_{\text{actuator}}$ is the stator inductive current rise time ($\tau_e = L / R$) and mechanical brake engagement delay.
+- $t_{\text{age}}$ converts the evidence timestamp to the controller clock and includes exposure/readout and clock error.
+- $t_{\text{detect}}$ bounds recognition or lease-expiry detection.
+- $t_{\text{compute}}$ is the admitted stop decision, including any required input transfer.
+- $t_{\text{bus}}$ bounds command dispatch and network queuing.
+- $t_{\text{brake-onset}}$ ends when the measured actuator begins delivering the specified deceleration, not when a command register is written.
 
-During this latency window $\tau_{\text{info}}$, the vehicle continues unbraked at speed $v_0$, traversing unbraked lag distance:
-$$ d_{\text{lag}} = v_0 \cdot \tau_{\text{info}} $$
+Under the explicit simplifying assumption that speed cannot increase before brake onset, the pre-brake travel is bounded by $d_{\text{lag}}=v_0\tau_{\text{pre}}$. If propulsion or a slope can increase speed, use its validated acceleration bound in this interval instead.
 
 ### Braking dynamics and friction limits
 
-Once braking torque engages, maximum physical deceleration $a_{\text{brake}}$ is limited by the Coulomb friction coefficient $\mu$ between tire and floor, or by actuator torque ceilings:\index{Braking!friction limit}
-$$ a_{\text{brake}} \le \mu g $$
-The physical braking distance is:
-$$ d_{\text{brake}} = \frac{v_0^2}{2 a_{\text{brake}}} \ge \frac{v_0^2}{2 \mu g} $$
-The total kinematic stopping envelope $d_{\text{stop}}(v_0)$ is the sum of lag distance and braking distance:
-$$ d_{\text{stop}}(v_0) = d_{\text{lag}} + d_{\text{brake}} = v_0 \tau_{\text{info}} + \frac{v_0^2}{2 \mu g} $$
-Deterministic safety closure requires that this stopping envelope remain strictly within the measured clearance buffer $d_{\text{clear}}$:
-$$ d_{\text{stop}}(v_0) \le d_{\text{clear}} $$
+Tire-floor friction and actuator torque place upper limits on achievable deceleration; $a\le\mu g$ does not establish what braking the machine will deliver.\index{Braking!friction limit} Let $a_{\text{floor}}>0$ be a validated lower bound on *achieved* deceleration throughout the stop, for the declared load, temperature, slope, brake condition, and surface. A justified friction floor $\mu_{\text{floor}}$ may support that bound, but does not replace brake tests. With constant or stronger braking after onset, and a nonnegative clearance allowance $\epsilon_d$ for state and tracking error,
+$$ d_{\text{stop,bound}}(v_0)=v_0\tau_{\text{pre}}+\frac{v_0^2}{2a_{\text{floor}}}+\epsilon_d. $$
+Motion is admitted only when $d_{\text{stop,bound}}(v_0)\le d_{\text{clear,lower}}$, where $d_{\text{clear,lower}}$ is a validated lower bound on available path clearance. The sampled controller must reserve intersample travel and a state-matched stop before the viable region is lost.
 
 ### Kinetic energy derating and friction collapse
 
-If surface contamination (such as water, oil, or ice) causes friction to collapse from nominal $\mu_{\text{nom}}$ to degraded $\mu_{\text{fault}} \ll \mu_{\text{nom}}$, braking distance expands inversely with friction:\index{Velocity clamp!kinetic derating}
-$$ \frac{d_{\text{brake}}(\mu_{\text{fault}})}{d_{\text{brake}}(\mu_{\text{nom}})} = \frac{\mu_{\text{nom}}}{\mu_{\text{fault}}} $$
-When forward friction cannot be continuously monitored prior to braking, the system enforces safety by clamping maximum forward velocity $v_{\text{clamp}}$ in firmware. Solving $v_{\text{clamp}} \tau_{\text{info}} + \frac{v_{\text{clamp}}^2}{2 \mu_{\text{fault}} g} \le d_{\text{clear}}$ yields the certified velocity clamp:
-$$ v_{\text{clamp}} = -\mu_{\text{fault}} g \tau_{\text{info}} + \sqrt{(\mu_{\text{fault}} g \tau_{\text{info}})^2 + 2 \mu_{\text{fault}} g d_{\text{clear}}} $$
-By clamping forward speed to $v_{\text{clamp}}$, the physical stopping envelope is guaranteed to remain within clearance bounds even under catastrophic friction loss, establishing deterministic safety without continuous friction sensing.
+In an ideal friction-limited model, lowering $\mu$ from $\mu_{\text{nom}}$ to a positive $\mu_{\text{fault}}$ changes the braking-distance ratio to $\mu_{\text{nom}}/\mu_{\text{fault}}$.\index{Velocity clamp!kinetic derating} That ratio is illustrative; actual deceleration can also be limited by brake hardware or control. If surface friction is not sensed in time, derive $a_{\text{floor}}$ from a controlled surface condition and inspection schedule, exclude degraded surfaces, or withhold motion. For the constant-speed pre-brake model above, solving the clearance inequality gives
+$$ v_{\text{clamp}}=-a_{\text{floor}}\tau_{\text{pre}}+\sqrt{(a_{\text{floor}}\tau_{\text{pre}})^2+2a_{\text{floor}}(d_{\text{clear,lower}}-\epsilon_d)}. $$
+This clamp is valid only when $d_{\text{clear,lower}}>\epsilon_d$, the braking and timing lower bounds hold, and the speed bound is enforced before entering the hazard corridor. No positive clamp follows if the available deceleration floor is unknown or zero.
 
 ## Further Reading
 

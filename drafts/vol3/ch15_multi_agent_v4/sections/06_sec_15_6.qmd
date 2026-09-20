@@ -1,0 +1,176 @@
+## Cancellation Cascades {#sec-vol3-multiagent-backpressure}
+
+When a supervisor aborts an ongoing goal or an invariant gate flags a corrupted intermediate artifact, every active execution branch spawned across downstream worker agents becomes an immediate computational liability. In multi-agent architectures, where a single worker trajectory can execute dozens of sequential inference calls and run multi-minute sandboxed build commands, unbounded stragglers and orphaned execution trees do not merely consume idle memory. They burn finite token budgets, exhaust concurrent request slots on backend inference engines, and risk committing conflicting mutations to shared storage. 
+
+A dependable multi-agent runtime must treat execution lifecycles as distributed, hierarchically nested transactions. Halting work requires far more than dropping a network socket; the runtime must deterministically propagate cancellation signals down dynamic dependency trees, actively reclaim leaked environment leases, throttle mismatched data producers via explicit backpressure, and preempt stragglers before tail latencies degrade interactive response times.
+
+### Hierarchical Cancellation Trees and Signal Propagation
+
+Every distributed agent coordination graph establishes a hierarchical tree of execution contexts. When an orchestrator delegates subtasks to worker agents—which in turn may spawn specialized leaf workers—it constructs a directed dependency tree $T = (V, E)$, rooted at the primary supervisor $v_0$. Each vertex $v_i \in V$ represents an active agent process possessing its own local execution loop, while each directed edge $(v_i, v_j) \in E$ denotes delegation authority and lifecycle ownership.
+
+```
+       [Supervisor v0]
+        /           \
+   (spawn)         (spawn)
+      v               v
+  [Worker v1]     [Worker v2]
+      |               |
+   (spawn)         (spawn)
+      v               v
+  [Leaf v3]       [Leaf v4]
+```
+
+To maintain control over this topology, the runtime associates every node $v_i$ with a typed cancellation context, denoted $C_i = \langle \text{id}_i, \sigma_i, \tau_{\text{deadline}}, \text{reason} \rangle$, where $\sigma_i \in \{\textsc{Active}, \textsc{Canceling}, \textsc{Canceled}\}$ represents the lifecycle state, $\tau_{\text{deadline}}$ defines an absolute epoch deadline, and $\text{reason}$ records an explicit error descriptor upon termination. Contexts are causally linked: if context $C_i$ transitions to $\textsc{Canceling}$, an invariant of the runtime mandates that every child context $C_j \in \text{children}(v_i)$ must transition to $\textsc{Canceling}$ immediately.
+
+::: {.column-margin}
+A cancellation cascade is an application of the end-to-end argument: because an unprivileged LLM cannot be trusted to self-terminate when its output becomes redundant, the surrounding host supervisor must enforce preemption externally across all mediated boundaries.
+:::
+
+Propagating this transition across distributed agent boundaries requires coordinating three distinct execution domains: the inter-agent Remote Procedure Call (RPC) layer, the host runtime decode loop, and the sandboxed tool environment. Merely marking a flag in the supervisor's memory space does not arrest a remote agent currently waiting on a 4,096-token autoregressive generation stream or a compilation job inside an isolated container.
+
+| Layer | Normal Operational State | Cancellation Mechanism | Preemption Latency Bound |
+| :--- | :--- | :--- | :--- |
+| **Inter-Agent Broker** | Asynchronous message polling via task queues | Broadcast control envelope over channel (`ABORT_TASK`) | Network transport RTT ($\approx 1\text{--}5\text{ ms}$) |
+| **Inference Engine** | Autoregressive generation loop (GEMV decode) | Abort HTTP/2 stream; drop KV cache reservation | Token decode boundary ($\le 25\text{ ms}$) |
+| **Tool Sandbox** | Monitored execution in isolated cgroup/namespace | Container SIGKILL via host supervisor daemon | Process tree teardown ($\le 100\text{ ms}$) |
+
+As illustrated in @fig-vol3-cancellation-cascade, cancellation begins when an invariant check detects a terminal failure in a worker. The supervisor marks the parent context as canceled and emits asynchronous control envelopes down the active tree. Crucially, the runtime attacks the inference boundary directly: by issuing an explicit stream termination to the serving engine (such as vLLM or SGLang), the host supervisor halts downstream token decoding mid-generation. This releases the worker's allocated KV cache blocks back to the memory pool, preventing the engine from wasting GPU compute cycles on a discarded hypothesis. Concurrently, the host runtime signals the tool execution daemon to terminate any active sub-processes inside the container sandbox, guaranteeing that uncommitted file modifications are dropped before they taint the workspace.
+
+```
+   Supervisor                 Worker v1               Serving Engine            Tool Sandbox
+       |                          |                          |                       |
+       |-- Invariant Fails ------>|                          |                       |
+       |   (Context Canceled)     |                          |                       |
+       |                          |                          |                       |
+       |==== CANCEL CASCADE =====>|                          |                       |
+       |   (ABORT_TASK envelope)  |                          |                       |
+       |                          |-- Abort HTTP/2 Stream -->|                       |
+       |                          |                          |-- Evict KV Blocks     |
+       |                          |                          |   from Paged Pool     |
+       |                          |                          |                       |
+       |                          |-- Terminate Tool Job --------------------------->|
+       |                          |                                                  |-- SIGKILL Container
+       |                          |                                                  |   Reclaim Sandbox
+       |<=== ACK CANCELED ========|                                                  |
+       |                          |                                                  |
+```
+: Hierarchical cancellation cascade across an agent execution boundary. Terminating a task propagates downstream to arrest GPU decode loops and reclaim sandbox resources concurrently. {#fig-vol3-cancellation-cascade}
+
+### Straggler Mitigation and Speculative Hedging
+
+Multi-agent coordination frequently relies on fan-out topologies, where a supervisor decomposes an investigation into $N$ parallel sub-problems—such as searching disparate code repositories, evaluating candidate patches, or synthesizing independent reviews. In such parallel fan-outs, trajectory completion latency is strictly governed by the slowest worker. This is the classic "tail at scale" dilemma identified by Jeffrey Dean and Sanjay Ghemawat: as concurrency scales, the probability that a distributed operation encounters a 95th- or 99th-percentile tail latency approaches certainty.
+
+In agentic machine learning systems, tail latency is exceptionally volatile. An inference request's duration varies not only with network jitter, but primarily with the autoregressive generation length, queuing delays in the serving engine, and whether the worker's prompt hits or misses the inference engine's shared prefix KV cache (Radix tree). If an agent encounters an ambiguous instruction, it may emit a chain-of-thought trace ten times longer than its peers, or enter an iterative tool retry loop that stalls the entire barrier synchronization.
+
+Formally, consider a supervisor issuing $N$ parallel subtasks, where each worker's completion time $T_i$ is an independent and identically distributed random variable drawn from cumulative distribution function $F(t) = P(T_i \le t)$. The total makespan of the fan-out barrier without hedging is the maximum order statistic:
+
+$$T_{\text{barrier}} = \max(T_1, T_2, \dots, T_N)$$
+
+The probability that all $N$ workers complete within time $t$ is the product of their individual probabilities:
+
+$$P(T_{\text{barrier}} \le t) = [F(t)]^N$$
+
+If a single agent subtask exhibits a 95th-percentile latency of $t_{95} = 15.0\text{ seconds}$ (meaning $F(15.0) = 0.95$), a supervisor fanning out to $N = 10$ parallel workers will observe that the probability of completing within 15.0 seconds drops to:
+
+$$P(T_{\text{barrier}} \le 15.0) = (0.95)^{10} \approx 0.5987$$
+
+More than $40\%$ of the parallel operations will be delayed by a straggler exceeding the 95th-percentile latency threshold. To prevent these stragglers from degrading interactive systems, the runtime implements two complementary mechanisms: *hedged subtasks* and *$k$-of-$N$ quorum completion*.
+
+Under hedged execution, the supervisor dispatches a subtask to an initial worker. If that worker has not returned an intermediate status or completion artifact within a predetermined latency threshold $\tau_{\text{hedge}}$ (typically parameterized to the 80th- or 90th-percentile expected completion time), the supervisor spawns a replica of the subtask on an alternative runtime path—often directing the request to a distinct inference backend or clearing speculative context. Both workers proceed concurrently; the moment the first worker validates its artifact against the downstream acceptance gate, the supervisor cancels the redundant worker via the cancellation tree.
+
+Similarly, in $k$-of-$N$ quorum topologies, a supervisor intentionally launches $N$ parallel speculative trajectories, requiring only the first $k$ valid completions ($k < N$) to proceed. As soon as the $k$-th valid task envelope is verified, the supervisor issues a cancellation cascade to terminate the remaining $N - k$ lagging workers.
+
+::: {.callout-note title="Worked Example: Hedged Subtasks and Tail Latency Reduction"}
+Consider a supervisor executing a code analysis fan-out with $N = 8$ parallel sub-agents. Empirical profiling reveals that agent subtask completion latency follows a shifted log-normal distribution with a median latency $t_{50} = 3.0\text{ s}$, a 90th-percentile latency $t_{90} = 10.0\text{ s}$, and a 99th-percentile latency $t_{99} = 35.0\text{ s}$. Each worker consumes an average of 40 output tokens per second at a cost of $\$0.002$ per 1,000 tokens.
+
+**Scenario A: Unhedged Barrier.** The supervisor awaits all 8 workers.
+The probability that all workers finish within $10.0\text{ s}$ is:
+$$P(T_{\text{barrier}} \le 10.0) = (0.90)^8 \approx 0.4305$$
+Nearly $57\%$ of requests experience a tail straggler. The expected 99th-percentile barrier latency $T_{\text{barrier}, 99}$ is governed by $P(T_{\text{barrier}} \le t) = 0.99 \implies [F(t)]^8 = 0.99 \implies F(t) = (0.99)^{1/8} \approx 0.9987$, pushing the unhedged barrier tail past $45.0\text{ s}$.
+
+**Scenario B: Quorum Fan-out with Cascade ($k=6$ of $N=8$).**
+The supervisor requires only $k = 6$ successful completions to synthesize the final plan, immediately issuing a cancellation cascade to the 2 stragglers.
+Using the binomial order statistic distribution, the probability that at least 6 out of 8 workers complete by time $t$ is:
+$$P(K \ge 6) = \sum_{j=6}^{8} \binom{8}{j} [F(t)]^j [1 - F(t)]^{8-j}$$
+At $t = 10.0\text{ s}$ where $F(t) = 0.90$:
+$$P(K \ge 6) = \binom{8}{6}(0.9)^6(0.1)^2 + \binom{8}{7}(0.9)^7(0.1)^1 + \binom{8}{8}(0.9)^8 \approx 0.1488 + 0.3826 + 0.4305 = 0.9619$$
+The probability of completing by $10.0\text{ s}$ surges from $43.05\%$ to $96.19\%$, cutting the effective 95th-percentile makespan by more than $60\%$. Furthermore, terminating the remaining 2 stragglers at $t = 10.0\text{ s}$ prevents them from executing an additional average of 25 seconds of unnecessary generation. Across 1,000 fan-out invocations, canceling the two stragglers saves:
+$$2 \times 25\text{ s} \times 40\text{ tokens/s} = 2,000\text{ tokens per run} \implies 2,000,000\text{ tokens} = \$4.00$$
+while reclaiming concurrent serving capacity for incoming tasks.
+:::
+
+### Flow Control, Bounded Buffers, and Backpressure
+
+When agents coordinate through producer-consumer pipelines—such as an automated crawling agent discovering files and emitting candidate patches to a downstream verification agent—the runtime confronts an impedance mismatch between data generation and token consumption.
+
+A lightweight producer agent executing deterministic filesystem searches or basic tool operations can easily produce hundreds of candidate items per second. In contrast, the consumer agent must process each item through an autoregressive model. If the consumer generates an analytical critique of 500 tokens per candidate at a throughput of 40 tokens per second, its processing capacity is bounded at:
+
+$$\mu_{\text{consumer}} = \frac{40\text{ tokens/s}}{500\text{ tokens/item}} = 0.08\text{ items/s}$$
+
+If the producer emits items at an average rate of $\lambda_{\text{producer}} = 5\text{ items/s}$ into an unconstrained message queue, the queue length $Q(t)$ grows linearly:
+
+$$\frac{dQ}{dt} = \lambda_{\text{producer}} - \mu_{\text{consumer}} = 5 - 0.08 = 4.92\text{ items/s}$$
+
+Within 10 minutes of execution, the queue accumulates nearly 3,000 unread messages. In naive implementations, this unconstrained growth triggers three critical systems failures:
+
+1. **Host Memory Exhaustion:** Message brokers or agent memory spaces buffer millions of tokens in serialization queues, eventually triggering host out-of-memory (OOM) fatal aborts.
+2. **Stale Context Contamination:** By the time the consumer agent pulls item $k$, the underlying software environment or upstream repository may have mutated, rendering the queued instructions completely obsolete.
+3. **Worker Starvation and Deadlock:** If downstream agents in a circular pipeline block waiting for queue allocations that are held by upstream producers, the runtime enters an unrecoverable priority inversion or deadlock.
+
+To prevent buffer bloat and queue exhaustion, agent communication channels must enforce explicit backpressure. Rather than relying on unbounded asynchronous FIFO buffers, the inter-agent transport uses a credit-based flow control protocol.
+
+::: {.column-margin}
+Credit-based flow control mirrors the sliding-window mechanisms of TCP (RFC 793) and HTTP/2 flow control frames, shifted from byte-level packet transport to discrete task envelope batches.
+:::
+
+In this protocol, a consumer agent grants a finite number of execution credits $W \in \mathbb{N}$ to upstream producers. The producer is permitted to emit messages if and only if its locally tracked credit balance satisfies $W_{\text{local}} > 0$. Each emitted message decrements $W_{\text{local}}$ by one. When the consumer successfully parses an envelope, completes its local inference trajectory, and flushes its state, it transmits an explicit `FLOW_CREDIT` frame back to the producer, replenishing $W_{\text{local}}$.
+
+```
+Producer Agent                            Consumer Agent
+      |                                         |
+      |<--- Grant Window W = 2 Credits ---------| (Initial Flow Lease)
+      |                                         |
+      |-- Task Envelope 1 (Cost: 1) ----------->|
+      |-- Task Envelope 2 (Cost: 1) ----------->|
+      |                                         |
+    [HALT: W = 0]                               |-- Decode & Verify Task 1
+      |                                         |
+      |<--- Grant Credit W = 1 -----------------| (Task 1 Complete)
+      |                                         |
+    [RESUME: W = 1]                             |-- Decode & Verify Task 2
+      |-- Task Envelope 3 (Cost: 1) ----------->|
+```
+
+When $W_{\text{local}} = 0$, the producer agent's runtime must suspend execution of that specific task branch, yielding CPU threads or execution slots to other concurrent subtasks. If the producer is an unprivileged model loop, the supervisor intercepts the tool invocation that attempted to publish the message, pausing the model's next inference step until the consumer issues fresh credits.
+
+### Leaked Resource Reclamation and Orphan Sweeping
+
+In distributed environments, network partitions, supervisor panics, or unhandled exceptions can sever the parent-child control path. If a parent agent crashes before its cancellation cascade reaches a child worker, that child becomes an *orphan process*.
+
+Orphaned agents present an insidious risk to agentic infrastructure. Unlike traditional POSIX processes, which are reparented to `init` (PID 1) upon the death of their parent and can be culled by standard operating system signals, an agent may be running inside a remote container, executing tool scripts via detached background daemons, or polling an external inference API endpoint. An orphaned agent will continue issuing LLM decode calls, consuming expensive API tokens, generating unauthorized network traffic, and holding optimistic locks or uncommitted git worktree directories.
+
+To guarantee bounded resource lifecycles in the presence of arbitrary node or process failures, the agent runtime enforces a *leased execution invariant*. No agent is permitted to execute indefinitely.
+
+Instead, every delegated task envelope is stamped with a mandatory time-to-live lease duration $\tau_{\text{lease}}$ (typically configured between 30 and 120 seconds). To maintain execution authorization, a worker must periodically emit a cryptographic heartbeat to the runtime lease manager. If the supervisor crashes or explicitly revokes the task, the heartbeat acknowledgment fails. Upon lease expiration ($t > t_{\text{lease}}$), the worker must self-terminate.
+
+```python
+# Empirical verification of worker lease validity inside an agent loop
+def verify_execution_lease(lease_token: str, max_drift_ms: int = 500) -> bool:
+    current_time = time.clock_gettime(time.CLOCK_MONOTONIC)
+    lease_record = runtime_lease_table.lookup(lease_token)
+    if lease_record is None or lease_record.revoked:
+        return False
+    # Enforce strict monotonically increasing deadline check
+    return (lease_record.expiration_time - current_time) > (max_drift_ms / 1000.0)
+```
+
+Complementing the in-process lease check, the host operating environment runs an out-of-band *sweeper daemon*. The sweeper monitors the system's shared state and periodically reconciles physical infrastructure against the central coordination graph:
+
+1. **Sandbox Container Scavenging:** The sweeper cross-references active container namespaces and virtual network interfaces against the active task registry. Any container lacking a corresponding $\textsc{Active}$ task record is terminated immediately with `SIGKILL`.
+2. **Ephemeral Worktree Cleanup:** If an agent was allocated an isolated git worktree for speculative editing (as detailed in Section 15.4), the sweeper detects unreferenced directory paths under `.git/worktrees/` whose holding agent lease has lapsed, pruning the worktree and deleting the scratch branch.
+3. **Socket and Descriptor Pruning:** Unreferenced Unix domain sockets used for tool RPC communication are unlinked to prevent inode exhaustion on host mount points.
+4. **Capability Revocation:** Any temporary API tokens or storage access keys minted for the delegated worker are invalidated within the local authentication provider.
+
+---
+
+Establishing robust cancellation cascades, straggler hedging, and resource reclamation guarantees that the runtime maintains complete control over the operational lifespan of delegated tasks. Yet revoking a process lifecycle addresses only half of the containment problem: while an agent is actively running, the supervisor must ensure it cannot misuse the permissions granted to it. When an orchestrator spawns a child worker to query a repository or compile an isolated module, what security mechanism prevents that worker from escalating its privileges, exfiltrating secret environment variables, or issuing destructive administrative commands? Answering this structural challenge requires examining the formal mechanics of attenuated capability delegation.

@@ -19,7 +19,7 @@ class Cameras(Registry):
         exposure_time=16.0 * ureg.millisecond,
         readout_time=16.6 * ureg.millisecond,
         nominal_latency=33.3 * ureg.millisecond,
-        interface="MIPI CSI-2 (2-lane)",
+        interface="MIPI CSI-2 (4-lane, 10-bit full-resolution 60 fps mode)",
         nominal_power=0.6 * ureg.watt,
         metadata=Metadata(provenance=pc.SONY_IMX477),
     )

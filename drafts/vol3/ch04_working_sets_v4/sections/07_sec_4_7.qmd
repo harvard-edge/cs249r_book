@@ -1,0 +1,202 @@
+## Working-Memory Evaluation {#sec-vol3-working-sets-evaluation}
+
+Subjecting an autonomous agent to an uncalibrated working-memory architecture yields failure modes that aggregate benchmark scores reliably obscure. An agent runtime evaluated on isolated, single-turn tasks may exhibit high tool-calling precision, yet its task completion rate collapses precipitously when deployed across thirty- or fifty-turn refactoring trajectories. This collapse rarely stems from sudden degradation in the underlying neural inference engine's general reasoning capacity; rather, it represents a failure of runtime memory management. The context supervisor either evicts critical system constraints through over-aggressive lossy compaction or clutters the staged prompt with invalidated historical artifacts, inducing catastrophic forgetting or stale-state hallucinations.
+
+**Evaluating an agent's working memory is an empirical discipline focused on measuring semantic fidelity under token scarcity: the runtime must be assessed on its ability to preserve verified historical truth, prune invalidated state, and maintain operational constraints across long horizons under a rigid token budget.** Treating context retention as an uncalibrated heuristic transforms the foundation model into an unreliable predictor. Rigorous systems engineering demands formal benchmarks, quantitative metrics, and explicit evaluation of the Pareto frontier separating compression efficiency from semantic loss.
+
+### Benchmark Topologies: Synthetic Retrieval Versus Operational Trajectories
+
+Evaluating a working-memory architecture requires choosing an appropriate workload topology. In machine learning systems engineering, context evaluation topologies occupy a spectrum between isolated synthetic probes and end-to-end operational environments. Each topology measures a distinct boundary in the host supervisor's memory hierarchy.
+
+```
++-------------------------------------------------------------------------------+
+|                             EVALUATION SPECTRUM                               |
+|                                                                               |
+|  Synthetic Microbenchmarks                     Closed-Loop Operational Tasks  |
+|  (Passive In-Context Recall)                   (Active State & Invalidation)  |
+|                                                                               |
+|  +-------------------------+                   +---------------------------+  |
+|  | Single-Needle (NIAH)    |                   | Multi-Turn Code Editing   |  |
+|  | - Single static fact    |                   | - Iterative compile cycles|  |
+|  | - Uniform random noise  |                   | - File system mutations   |  |
+|  +------------+------------+                   +-------------+-------------+  |
+|               |                                              |                |
+|               v                                              v                |
+|  +-------------------------+                   +---------------------------+  |
+|  | Multi-Needle Associative|                   | Environment Orchestration |  |
+|  | - Key-value resolution  |                   | - Dependency refactoring  |  |
+|  | - Cross-turn reasoning  |                   | - Cascading state repairs |  |
+|  +-------------------------+                   +---------------------------+  |
++-------------------------------------------------------------------------------+
+```
+
+The simplest evaluation topology is the *Needle-in-a-Haystack* (NIAH) microbenchmark. In this test, an arbitrary, high-entropy fact (the "needle," such as a cryptographic nonce or an isolated variable declaration) is inserted at a relative depth $\delta \in [0, 1]$ within a synthetically generated corpus of irrelevant text (the "haystack") spanning a total sequence length $S$. The runtime queries the model to extract the planted value:
+
+$$R_{\text{needle}}(\delta, S) = \mathbb{I}\left( \mathcal{M}\left( \mathcal{S}_{\text{staged}}(\delta, S) \right) = \text{Target} \right)$$
+
+While NIAH sweeps illuminate the physical limits of the underlying model's positional embeddings and attention mechanisms—revealing structural blind spots such as the "lost-in-the-middle" phenomenon—they represent an insufficient test for agent working memory. Synthetic needles are static, context-independent, and structurally orthogonal to the surrounding prose. They test passive addressability rather than the runtime's capacity to manage mutating operational state.
+
+::: {.column-margin}
+**Passive Addressability vs. Dynamic Utility:** A model that scores 100% on synthetic needle retrieval can still fail a 10-turn debugging task if the runtime fails to prune an outdated variable definition from turn 2 that conflicts with a patch applied at turn 8.
+:::
+
+To measure actual working-memory performance, runtimes must be evaluated against *closed-loop operational benchmarks* (such as multi-turn software patch benchmarks and systems administration environments). In an operational benchmark, an agent executes a trajectory of actions $\mathcal{T} = (a_0, o_0, a_1, o_1, \dots, a_T, o_T)$ against an interactive environment $\Omega_{\text{env}}$. The state of the environment mutates dynamically in response to the agent's tool invocations. The agent must:
+
+1. Maintain historical constraints established in the initial task specification $a_0$.
+2. Invalidate superseded environmental observations (such as intermediate compiler errors or modified source files).
+3. Selectively recall specific outputs from earlier exploratory actions executed dozens of turns prior.
+
+Evaluating working memory within operational trajectories introduces non-deterministic execution paths: the contents of the staged context at turn $t$ directly dictate the action $a_t$, which alters the subsequent observation $o_t$. Consequently, valid evaluation frameworks must isolate the working-memory policy from the raw reasoning competence of the underlying model. This isolation is achieved by standardizing the inference engine $\mathcal{M}$, fixing the random seed or decoding temperature ($\tau = 0$), and running controlled comparative evaluations where only the context management policy $\pi_{\text{ctx}}$ varies.
+
+### The Working-Memory Metric Suite
+
+Quantifying the efficacy of a context architecture requires a multidimensional metric suite that captures task success, information fidelity, state freshness, and token efficiency. Single scalar values such as per-token cross-entropy or final task success rates fail to isolate why a memory policy succeeded or failed. Systems engineers rely on five primary metrics:
+
+1. **Multi-Turn Task Completion Rate ($\text{TCR}_H$):** The fraction of tasks successfully solved within an execution horizon of $H$ turns, verified by an authoritative external oracle (such as an automated test harness or a sealed integration suite):
+   $$\text{TCR}_H = \frac{1}{N} \sum_{k=1}^N \mathbb{I}\left( \text{Verify}(\Omega_{\text{env}}^{(k)}) = \text{Success} \right)$$
+   Tracking $\text{TCR}_H$ across expanding horizons ($H \in \{10, 25, 50, 100\}$) exposes how gracefully a memory architecture degrades as history outgrows the raw physical context capacity $S_{\max}$.
+
+2. **Associative Needle Recall ($R_{\text{assoc}}$):** The empirical probability of correctly extracting an operational dependency whose retrieval requires connecting two disjoint turns across the trajectory. Unlike synthetic NIAH tests, associative recall measures whether a compacted working set preserves relationships such as:
+   $$\text{Target} = f(o_i, o_j) \quad \text{where } i \ll j < t$$
+
+3. **Stale-State Error Frequency ($\epsilon_{\text{stale}}$):** The ratio of tool invocations whose arguments or execution premises depend on invalid, superseded environmental states. Let $\text{Inv}_t \subset \mathcal{H}_{<t}$ represent the set of historical facts, file states, or configuration variables that have been explicitly mutated or invalidated by the environment prior to turn $t$. The stale-state error frequency is:
+   $$\epsilon_{\text{stale}} = \frac{1}{T} \sum_{t=1}^T \mathbb{I}\left( a_t \text{ references } x \;\middle|\; x \in \text{Inv}_t \right)$$
+   A high $\epsilon_{\text{stale}}$ reveals a failure of context invalidation: the runtime stages syntactically coherent history that is semantically false, causing the model to attempt operations against phantom files, stale function signatures, or closed network ports.
+
+4. **Compression Ratio ($C_r$) and Token Amortization:** The degree of history reduction achieved by the context policy relative to an uncompressed, append-only log:
+   $$C_r = \frac{\sum_{i=1}^t |a_i| + |o_i|}{S_{\text{staged}}(t)}$$
+   where $|\cdot|$ denotes length in tokens. A policy with $C_r = 1.0$ maintains the full, raw transaction log. A policy achieving $C_r = 4.0$ compresses the historical footprint by 75%, admitting longer operational horizons within an identical hardware footprint.
+
+5. **Effective Working-Set Utilization ($U_{\text{eff}}$):** The proportion of staged tokens that directly contribute to the model's action generation, measured by tracing attention weights or programmatic references in subsequent valid tool calls:
+   $$U_{\text{eff}} = \frac{|\{ x \in S_{\text{staged}} \mid x \text{ is causally referenced in } a_t \}|}{|S_{\text{staged}}|}$$
+   Low utilization indicates that the prompt assembly pipeline is staging irrelevant historical "chaff," consuming budget without aiding task completion.
+
+The interaction of these metrics across canonical memory management strategies is illustrated in @tbl-vol3-context-evaluation.
+
+: Working-memory management policies evaluated across long-horizon software engineering trajectories ($H = 40$ turns). {#tbl-vol3-context-evaluation}
+
+| Policy Architecture | Token Budget ($S_{\max}$) | Mean Compression ($C_r$) | Task Completion ($\text{TCR}_{40}$) | Associative Recall ($R_{\text{assoc}}$) | Stale-State Error ($\epsilon_{\text{stale}}$) |
+|:---|:---:|:---:|:---:|:---:|:---:|
+| **Full Log (Append-Only)** | $128\text{k}$ | $1.0\times$ | $0.41$ | $0.88$ | $0.34$ |
+| **Sliding Window ($W=8\text{k}$)** | $8\text{k}$ | $6.2\times$ | $0.18$ | $0.12$ | $0.06$ |
+| **Lossy Narrative Summary** | $8\text{k}$ | $5.4\times$ | $0.32$ | $0.44$ | $0.28$ |
+| **Structured Checkpoint + Tombstoning** | $8\text{k}$ | $4.8\times$ | **$0.73$** | **$0.82$** | **$0.02$** |
+
+The data in @tbl-vol3-context-evaluation demonstrates why naive metrics are deceptive. The append-only full log strategy maintains high associative recall ($0.88$) because no information is discarded. Yet its task completion rate is poor ($0.41$), hobbled by a severe stale-state error rate ($\epsilon_{\text{stale}} = 0.34$)—the model repeatedly acts on old compiler errors and outdated file snapshots present earlier in the context. 
+
+Conversely, the naive sliding window eliminates stale errors ($\epsilon_{\text{stale}} = 0.06$) by dropping old history entirely, but its task completion rate collapses to $0.18$ due to the catastrophic loss of foundational constraints established in early turns ($R_{\text{assoc}} = 0.12$). Only structured checkpointing with explicit dependency-tracked tombstoning maintains high completion rates by simultaneously bounding stale state and preserving critical invariant needles.
+
+::: {.callout-note title="Worked Example: Quantifying Working-Set Efficiency and Compaction Trade-offs"}
+Consider an autonomous systems repair agent executing an incident remediation trajectory over $T = 30$ turns. 
+- The raw trajectory generates an average of $2\text{,}400$ tokens per turn (comprising shell outputs, log traces, and diffs), producing an uncompressed history of:
+  $$S_{\text{raw}} = 30 \times 2\text{,}400 = 72\text{,}000 \text{ tokens}$$
+- The host system limits the active working set to $S_{\max} = 16\text{,}384$ tokens.
+- We evaluate two context management policies:
+  1. **Policy A (Lossy Narrative Compaction):** Every 5 turns, an auxiliary prompt summarizes historical actions and tool outputs into an unstructured narrative paragraph, achieving an average compression ratio of $C_r = 6.0$. However, compaction introduces a $15\%$ per-compaction probability of omitting minor operational constraints (e.g., specific environment flags or path parameters), and carries a stale-state error frequency of $\epsilon_{\text{stale}} = 0.20$.
+  2. **Policy B (Structured State Checkpointing with Invalidation):** Maintains an explicit JSON state delta, exact file diffs, and tombstones for invalidated observations, achieving $C_r = 3.5$. Constraint retention is guaranteed via deterministic schema validation ($100\%$ retention of tracked environment flags), and invalidation rules suppress stale references to $\epsilon_{\text{stale}} = 0.02$.
+
+**Analysis 1: Context Budget Compliance**
+- Policy A staged size at Turn 30:
+  $$S_A = \frac{72\text{,}000}{6.0} = 12\text{,}000 \text{ tokens} \le S_{\max}$$
+- Policy B staged size at Turn 30:
+  $$S_B = \frac{72\text{,}000}{3.5} \approx 20\text{,}571 \text{ tokens} > S_{\max}$$
+Because Policy B exceeds $S_{\max}$, the runtime must evict secondary observational logs (retaining only the structural state deltas, active file boundaries, and tombstones), bringing the staged working set to exactly $S_B' = 14\text{,}500$ tokens while preserving all primary constraints.
+
+**Analysis 2: Operational Reliability Across Horizons**
+Across 6 compaction cycles ($30 / 5 = 6$), the probability that Policy A retains *all* critical constraints is:
+$$P(\text{Constraints Retained}) = (1 - 0.15)^6 = (0.85)^6 \approx 0.377 \quad (37.7\%)$$
+Assuming any stale-state action requires an average penalty of 3 corrective turns to recover, Policy A incurs an expected wasted execution cost of:
+$$\text{Wasted Turns}_A = 30 \times \epsilon_{\text{stale}} \times 3 = 30 \times 0.20 \times 3 = 18 \text{ turns}$$
+Policy B incurs:
+$$\text{Wasted Turns}_B = 30 \times 0.02 \times 3 = 1.8 \text{ turns}$$
+
+Even though Policy A achieved a higher compression ratio ($6.0\times$ vs. $3.5\times$), its operational efficiency is destroyed by constraint forgetting and stale-state execution loops. Policy B delivers superior systems dependability under an identical physical context constraint.
+:::
+
+### The Compaction-Fidelity Dilemma: Lossiness Versus Constraint Retention
+
+The central trade-off in agent working-memory design is the *Compaction-Fidelity Dilemma*: as the runtime increases the compression ratio $C_r$ to conserve token budget, it risks stripping out low-salience tokens that contain critical operational constraints.
+
+```
++-------------------------------------------------------------------------------+
+|                       THE COMPACTION-FIDELITY PARETO FRONTIER                 |
+|                                                                               |
+|  Fidelity                                                                     |
+|  (Task Success)                                                               |
+|     ^                                                                         |
+| 1.0 |                   * Structured Checkpointing                            |
+|     |                     (Preserved AST / Schemas / Exact Diffs)             |
+|     |                                                                         |
+|     |           * Full Log                                                    |
+|     |             (Stale-State Poisoning)                                     |
+|     |                                                                         |
+|     |                                  * Lossy Narrative Summary              |
+|     |                                    (Constraint Shedding)                |
+|     |                                                                         |
+|     |                                                * Sliding Window         |
+| 0.0 +------------------------------------------------------------------->     |
+|    1.0x                3.0x                   6.0x                 10.0x      |
+|                             Compression Ratio (Cr)                            |
++-------------------------------------------------------------------------------+
+```
+
+When runtimes employ lossy semantic summarization (delegating history compression to a secondary language model call), the summarizer naturally optimizes for high-level narrative coherence rather than mechanical precision. It tends to retain broad descriptive statements ("the agent investigated the authentication module and resolved several type errors") while discarding syntactically precise tokens that appear pedantic but are structurally indispensable:
+
+- Exact CLI flags (e.g., `--preserve-root`, `-DENABLE_EXT=OFF`).
+- Line numbers and exact function signatures from failing stack traces.
+- Negative constraints explicitly mandated by the user ("do not modify `src/core/alloc.c`").
+- Environmental invariants discovered during exploratory commands (e.g., "PostgreSQL is running on non-standard port `5433`").
+
+When a lossy summarizer elides these details, the agent enters an unrecoverable failure loop. The following real-world regression trace demonstrates the mechanical breakdown:
+
+```python
+# Turn 4: Initial attempt fails due to an implicit environmental constraint
+<<< {"tool": "exec", "cmd": "pytest tests/test_auth.py --db-port=5433"}
+>>> "FAILED tests/test_auth.py - Connection refused: localhost:5432 (default)"
+
+# Turn 12: Context compaction occurs.
+# Lossy Narrative Summary stages: "The agent ran pytest on auth tests, but connections failed."
+# (The critical flag --db-port=5433 was shed as low-salience syntactic noise).
+
+# Turn 13: Agent attempts to fix the issue using hallucinated premises
+<<< {"tool": "exec", "cmd": "systemctl restart postgresql"}
+>>> "ERROR: Access denied: user 'agent' lacks sudo privileges for systemctl."
+```
+
+In this failure trace, the agent lost the empirical evidence that port 5433 must be explicitly passed to the test runner. Because the summarized context contained only the generic phrase "connections failed," the inference engine assumed the database daemon was inactive, embarking on a fruitless, permission-violating trajectory to restart system services.
+
+To formally evaluate resistance to constraint shedding, systems engineers subject context compaction modules to a *Differential Constraint Probe*. In this test:
+
+1. A task is configured with a set of $m$ explicit negative constraints $\mathcal{C} = \{c_1, c_2, \dots, c_m\}$.
+2. The agent is driven through an execution trajectory that triggers $k$ successive compaction events.
+3. At each step $t > t_{\text{compaction}}$, the runtime measures whether the generated actions violate any constraint $c \in \mathcal{C}$.
+
+The *Constraint Retention Score* ($S_{\text{CR}}$) is parameterized by the compaction count $k$:
+
+$$S_{\text{CR}}(k) = \frac{1}{|\mathcal{C}|} \sum_{j=1}^{|\mathcal{C}|} \prod_{i=1}^k \mathbb{I}\left( c_j \in \mathcal{S}_{\text{staged}}^{(i)} \right)$$
+
+Empirical evaluation reveals that narrative summarizers suffer an exponential decay in $S_{\text{CR}}$ as a function of compaction cycles: $S_{\text{CR}}(k) \approx (1 - \lambda)^k$, where $\lambda$ represents the per-cycle constraint attenuation rate. By contrast, structured checkpointing architectures that isolate negative constraints in an immutable schema achieve $\lambda = 0$, guaranteeing perfect constraint retention regardless of trajectory horizon.
+
+```
++-------------------------------------------------------------------------------+
+|                       DIFFERENTIAL CONSTRAINT RETENTION                       |
+|                                                                               |
+|  SCR (Constraint Retention)                                                   |
+|  1.0 +========================================= Structured Checkpointing      |
+|      |                                          (Schema-Enforced, lambda = 0) |
+|      |                                                                        |
+|      |  \                                                                     |
+|      |   \                                                                    |
+|      |    \                                                                   |
+|      |     \                                                                  |
+|      |      \                                                                 |
+|      |       *- - - - - - - - - - - - - - - - - Lossy Narrative Summarizer    |
+|  0.0 +----------------------------------------> (Exponential Decay: (1-l)^k)  |
+|      0        1        2        3        4        5                           |
+|                         Compaction Cycles (k)                                 |
++-------------------------------------------------------------------------------+
+```
+
+Evaluating an agent's working memory reveals that context management is not an aesthetic prompt-formatting challenge, but a disciplined systems resource allocation problem. A high-performance working memory architecture must dynamically police its logical working set—striking a calculated balance between information retention, state invalidation, and token economy.
+
+Yet, despite rigorous evaluation methodologies, systems engineers frequently succumb to deceptive intuitions regarding how foundation models interact with memory. The presence of massive nominal context windows often fosters the illusion that physical hardware limits have been rendered irrelevant, or that models possess native abilities to organize their own history. Exposing these engineering traps requires a systematic examination of the architectural fallacies and performance pitfalls that undermine working-memory implementations in production.

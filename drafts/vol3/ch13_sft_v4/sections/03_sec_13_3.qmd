@@ -1,0 +1,152 @@
+## Sequence Packing Isolation {#sec-vol3-sft-batching}
+
+Heterogeneous trajectory lengths in agentic datasets create severe tensor allocation fragmentation and computational waste in accelerator training runtimes. An agent execution trace may span from a single-turn database lookup consuming 380 tokens to a complex 40-turn software debugging session spanning 28,500 tokens. When an engineering team naively batches these variable-length sequences by padding every sample to the maximum context window $S_{\max}$, over $70\%$ to $85\%$ of the processed tokens consist of padding markers. These padding tokens generate zero gradient update under action-targeted loss masks, yet they consume quadratic attention memory, exhaust high-bandwidth memory (HBM) capacity, and squander tensor core compute cycles. Worse, the mathematical convention chosen to aggregate loss across these heterogeneous sequences silently alters the policy's behavioral incentives.
+
+**Sequence packing reconciles variable-length execution traces with rigid accelerator memory buffers by concatenating multiple independent trajectories into a single continuous sequence, but it introduces two severe failure modes: loss distortion and inter-trajectory attention contamination. Preserving the statistical validity of the adapted policy requires decoupling sequence aggregation from token count via per-example normalization, enforcing strict 2D block-diagonal attention masks to prevent cross-trajectory information leakage, and resetting rotary position embeddings at trajectory boundaries.**
+
+### Loss Normalization Dynamics: Per-Token versus Per-Example Weighting
+
+When training an agent on multi-turn trajectories, the loss aggregation strategy across a mini-batch dictates how the optimizer prioritizes different task complexities. Consider a mini-batch of $B$ independent trajectories $\{\tau^{(1)}, \tau^{(2)}, \dots, \tau^{(B)}\}$, where trajectory $b$ contains $L_b$ total tokens and an action-targeted loss mask $m_t^{(b)} \in \{0, 1\}$. The number of active supervised target tokens in trajectory $b$ is given by $N_b = \sum_{t=1}^{L_b} m_t^{(b)}$. The instantaneous cross-entropy loss for token $t$ in trajectory $b$ is denoted by $\ell_t^{(b)} = -\log P_\theta(x_t^{(b)} \mid x_{<t}^{(b)})$.
+
+::: {.column-margin}
+**Gradient Distortion in Action Space**  
+Under per-token normalization, a trajectory with 3,000 action tokens exerts $75\times$ more influence on the weight update $\nabla_\theta \mathcal{L}$ than a concise single-turn action of 40 tokens, regardless of task importance.
+:::
+
+Two fundamentally incompatible loss normalization schemes exist in production training harnesses:
+
+$$\mathcal{L}_{\text{token}} = \frac{\sum_{b=1}^B \sum_{t=1}^{L_b} m_t^{(b)} \ell_t^{(b)}}{\sum_{b=1}^B N_b}$$ {#eq-loss-token}
+
+$$\mathcal{L}_{\text{example}} = \frac{1}{B} \sum_{b=1}^B \left( \frac{1}{N_b} \sum_{t=1}^{L_b} m_t^{(b)} \ell_t^{(b)} \right)$$ {#eq-loss-example}
+
+Equation (@eq-loss-token) defines per-token normalization. In this scheme, the total loss across the entire batch is divided by the aggregate number of active target tokens $\sum_{b=1}^B N_b$. Every individual action token exerts identical weight on the parameter gradient $\nabla_\theta \mathcal{L}$. While mathematically standard in pre-training corpora where text density is uniform, per-token normalization introduces severe pathologies in agent adaptation. Because multi-turn reasoning traces and verbose, iterative bash executions contain thousands of action tokens, they dominate the gradient update. A single multi-turn trace with $N_1 = 4,000$ action tokens contributes one hundred times more gradient magnitude than a concise, single-turn tool invocation with $N_2 = 40$ tokens.
+
+Equation (@eq-loss-example) defines per-example normalization. In this formulation, the loss of each trajectory is first normalized by its own active target token count $N_b$, computing an unweighted mean loss per task. The mini-batch loss is subsequently computed as the unweighted mean across the $B$ trajectories. Each complete task contributes exactly $1/B$ to the gradient update, enforcing equal policy priority across task families regardless of whether the trajectory resolved in two turns or twenty turns.
+
+| Architectural Dimension | Per-Token Normalization ($\mathcal{L}_{\text{token}}$) | Per-Example Normalization ($\mathcal{L}_{\text{example}}$) |
+| :--- | :--- | :--- |
+| **Normalization Divisor** | Total batch target tokens $\sum_{b=1}^B N_b$ | Trajectory count $B$ after internal $N_b$ division |
+| **Token-Level Gradient Weight** | Constant: $\frac{1}{\sum N_k}$ for all tokens | Variable: $\frac{1}{B \cdot N_b}$ inversely scaling with trajectory length |
+| **Task Priority Bias** | Heavily favors verbose, multi-turn iterative traces | Neutral; uniform weighting across task families |
+| **Vulnerability to Looping** | Reinforces repetitive tool calls and verbose rationales | Penalizes ungrounded verbosity equally with concise errors |
+| **Loss Scale Invariance** | Sensitive to batch length composition variance | Stable across heterogeneous trajectory batch distributions |
+
+: Comparative architectural trade-offs between per-token and per-example loss normalization in agent policy adaptation. {#tbl-loss-normalization-comparison}
+
+The choice between these two schemes directly alters the policy's behavioral phenotype. When an engineering team employs per-token normalization, the model learns that minimizing loss on long, rambling trajectories yields the largest reduction in global objective. If the demonstration dataset contains failed attempts where the agent wandered through redundant directory listings before arriving at a solution, per-token normalization heavily penalizes any deviation from those lengthy tokens. Conversely, per-example normalization ensures that concise, decisive trajectories carry equal gradient authority, preventing the adapted policy from degrading into an over-verbose conversationalist that burns inference token budgets.
+
+### Sequence Packing Mechanics and Buffer Utilization
+
+In distributed data-parallel training runtimes, tensor shapes allocated across accelerator memory must remain static to avoid kernel recompilation and dynamic memory fragmentation. Standard implementations pad every sequence in a mini-batch with dummy tokens (such as `[PAD]`) to match a predetermined maximum sequence length $S_{\max}$, producing an input tensor $\mathbf{X} \in \mathbb{N}^{B \times S_{\max}}$.
+
+In agent workflows, the empirical distribution of trajectory lengths exhibits high variance and extreme positive skew. While human user queries and simple database lookups terminate within several hundred tokens, complex coding agents executing multi-turn compiler feedback loops frequently approach context limits of $16\text{K}$ or $32\text{K}$ tokens. If $S_{\max}$ is set to $32,768$ to accommodate the longest trajectories, a batch consisting primarily of short trajectories wastes over $80\%$ of its memory footprint on non-computational padding tokens.
+
+::: {.column-margin}
+**Padding Waste Factor ($W_{\text{pad}}$)**  
+$$W_{\text{pad}} = 1 - \frac{\sum_{b=1}^B L_b}{B \cdot S_{\max}}$$  
+When average trajectory length is $3,200$ and $S_{\max} = 32,768$, $W_{\text{pad}} = 90.2\%$, idling tensor cores during attention projections.
+:::
+
+Sequence packing eliminates this structural inefficiency by concatenating multiple variable-length trajectories into a single continuous sequence of fixed capacity $S_{\text{pack}}$. Rather than assigning one trajectory per batch row, a sequence packing preprocessor applies an online bin packing heuristic—typically First-Fit Decreasing (FFD) or Best-Fit Decreasing (BFD)—to pack $K$ distinct trajectories $\{\tau^{(1)}, \tau^{(2)}, \dots, \tau^{(K)}\}$ into a single contiguous buffer such that:
+
+$$\sum_{k=1}^K L_k \le S_{\text{pack}}$$ {#eq-packing-constraint}
+
+By assembling multiple trajectories into each allocated row, the effective token utilization of the accelerator buffer rises from under $20\%$ to greater than $98\%$. The non-computational padding is confined strictly to the residual margin at the terminal boundary of the packed buffer: $S_{\text{pack}} - \sum_{k=1}^K L_k$.
+
+::: {.callout-note title="Worked Example: Packing Efficiency and Compute Throughput on an 8-GPU Node"}
+An engineering team is fine-tuning an 8-billion parameter model ($d_{\text{model}} = 4,096$, $L = 32$ layers) on an 8-GPU node equipped with NVIDIA H100 SXM5 accelerators (80 GB HBM3 per GPU). The training dataset contains 20,000 agent trajectories. The empirical sequence length distribution has a mean $\mu = 2,800$ tokens, a standard deviation $\sigma = 1,900$ tokens, and a maximum length of $15,800$ tokens. The buffer limit is configured to $S_{\max} = 16,384$ tokens.
+
+**Scenario A: Naive Padded Batching**  
+Each GPU hosts a micro-batch size of $B = 2$ sequences, padded to $S_{\max} = 16,384$. Across the 8-GPU node, the global batch processes:
+$$B_{\text{global}} = 8 \times 2 = 16 \text{ sequences per step}$$
+$$\text{Allocated Tokens per Step} = 16 \times 16,384 = 262,144 \text{ tokens}$$
+$$\text{Active Tokens per Step} = 16 \times 2,800 = 44,800 \text{ tokens}$$
+$$\text{Padding Waste} = 1 - \frac{44,800}{262,144} = 82.91\%$$
+To process all 20,000 trajectories requires:
+$$\text{Total Steps} = \frac{20,000}{16} = 1,250 \text{ optimizer steps}$$
+$$\text{Total Computed Tokens} = 1,250 \times 262,144 = 3.277 \times 10^8 \text{ tokens}$$
+
+**Scenario B: Packed Sequences ($S_{\text{pack}} = 16,384$)**  
+Using Best-Fit Decreasing bin packing, trajectories are concatenated into packed buffers of length $S_{\text{pack}} = 16,384$. The average packed buffer holds:
+$$\bar{K} = \frac{16,384 \times 0.985}{2,800} \approx 5.76 \text{ trajectories}$$
+With micro-batch size of 2 packed buffers per GPU (16 buffers per step), each step processes:
+$$\text{Active Trajectories per Step} = 16 \times 5.76 \approx 92.16 \text{ trajectories}$$
+$$\text{Active Tokens per Step} = 16 \times 16,384 \times 0.985 \approx 258,212 \text{ tokens}$$
+$$\text{Padding Waste} = 1 - 0.985 = 1.50\%$$
+To process all 20,000 trajectories requires:
+$$\text{Total Steps} = \frac{20,000}{92.16} \approx 217 \text{ optimizer steps}$$
+$$\text{Total Computed Tokens} = 217 \times 16,384 \times 16 \approx 5.689 \times 10^7 \text{ tokens}$$
+
+**Throughput and Hardware Speedup:**  
+By eliminating padding tokens from the forward and backward passes, the required floating-point operations drop by a factor of:
+$$\text{FLOP Reduction Factor} = \frac{3.277 \times 10^8}{5.689 \times 10^7} \approx 5.76\times$$
+On the H100 cluster, training wall-clock time drops from 14.8 hours to 2.6 hours, saving 97.6 GPU-hours while maintaining identical gradient semantics.
+:::
+
+### Block-Diagonal Attention Isolation and Positional Resetting
+
+While sequence packing delivers dramatic throughput acceleration, naively concatenating independent trajectories into a single sequence creates catastrophic statistical contamination. In a standard causal transformer, self-attention allows token $i$ to attend to all preceding tokens $j \le i$. If trajectories $\tau^{(1)}$ and $\tau^{(2)}$ are concatenated end-to-end within a single buffer, every token in $\tau^{(2)}$ can attend to all tokens in $\tau^{(1)}$.
+
+::: {.column-margin}
+**The Attention Cross-Talk Hazard**  
+If token $i \in \tau^{(2)}$ attends to token $j \in \tau^{(1)}$, the agent learns spurious causal dependencies across unrelated tasks, leading to syntax errors and state hallucinations during inference.
+:::
+
+This cross-talk violates the fundamental independence assumption of supervised learning. The policy observing trajectory $\tau^{(2)}$ conditions on the system prompt, tool definitions, error states, and terminal outputs of trajectory $\tau^{(1)}$. During live deployment, however, the runtime invokes the agent with a clean context containing only its own task history. A policy trained with unmasked packed attention exhibits severe performance degradation: it learns spurious inter-task correlations, relies on ghost memory from preceding tasks, and fails when presented with an isolated prompt.
+
+```
+       UNISOLATED CAUSAL ATTENTION                     2D BLOCK-DIAGONAL ATTENTION
+           (Contaminated Training)                        (Strict Task Isolation)
+         
+         Key Tokens (j)                                  Key Tokens (j)
+         [--- τ₁ ---] [--- τ₂ ---]                      [--- τ₁ ---] [--- τ₂ ---]
+       ┌─────────────┬────────────┐                   ┌─────────────┬────────────┐
+    τ₁ │ \           │            │                τ₁ │ \           │            │
+       │   \         │   ZERO     │                   │   \         │   ZERO     │
+Query  │     \       │            │             Query │     \       │            │
+Tokens │       \     │            │             Tokens│       \     │            │
+ (i)   ├─────────────┼────────────┤              (i)  ├─────────────┼────────────┤
+    τ₂ │             │ \          │                τ₂ │             │ \          │
+       │ CROSS-TALK  │   \        │                   │    MASKED   │   \        │
+       │  LEAKAGE    │     \      │                   │   (-INF)    │     \      │
+       │             │       \    │                   │             │       \    │
+       └─────────────┴────────────┘                   └─────────────┴────────────┘
+```
+
+Preventing cross-task contamination requires enforcing a 2D block-diagonal causal attention mask. Let the packed buffer contain $K$ independent trajectories delimited by cumulative boundary offsets $\mathbf{c} = [c_0, c_1, \dots, c_K]$, where $c_0 = 0$ and $c_K = S_{\text{pack}}$. The attention mask entry $M_{ij}$ between query token $i$ and key token $j$ (for $0 \le j \le i < S_{\text{pack}}$) is governed by:
+
+$$M_{ij} = \begin{cases} 0 & \text{if } j \le i \text{ and } \exists k \text{ such that } c_k \le j \le i < c_{k+1} \\ -\infty & \text{otherwise} \end{cases}$$ {#eq-block-diagonal-mask}
+
+![Block-diagonal attention mask for packed multi-trajectory training sequences. In a packed buffer containing independent trajectories ($\tau_1, \tau_2, \dots$), causal attention is restricted strictly to the lower-triangular blocks along the main diagonal. Cross-trajectory attention scores ($A_{ij}$ where $i \in \tau_b, j \in \tau_a, a \neq b$) are forced to $-\infty$ prior to softmax, mathematically eliminating information leakage across independent agent tasks.](images/svg/ch13-block-diagonal-mask.svg){#fig-vol3-block-diagonal-mask}
+
+Under Equation (@eq-block-diagonal-mask), attention scores between tokens belonging to different trajectories evaluate to $-\infty$ before the softmax operation, ensuring zero attention probability weight ($A_{ij} = 0$).
+
+In modern hardware-accelerated attention kernels (such as FlashAttention-2), allocating an explicit 2D attention matrix of size $S_{\text{pack}} \times S_{\text{pack}}$ is avoided because it would reintroduce quadratic memory overhead. Instead, the runtime passes an auxiliary cumulative sequence length vector `cu_seqlens` of shape $(K+1,)$ directly to the kernel. The GPU kernel uses `cu_seqlens` to dynamically constrain thread-block memory tiles to the interval $[c_k, c_{k+1})$, maintaining $O(S)$ working memory and computing attention exclusively within valid trajectory boundaries.
+
+A second, equally critical failure mode in sequence packing arises from positional encoding schemes. Modern foundation models employ Rotary Position Embeddings (RoPE) to encode token ordering via complex vector rotations. RoPE calculates rotation angles as a direct function of the token's absolute position index $t$:
+
+$$\mathbf{R}_{\Theta, t}^d = \text{diag}\left( \mathbf{R}_{\theta_1, t}, \mathbf{R}_{\theta_2, t}, \dots, \mathbf{R}_{\theta_{d/2}, t} \right)$$ {#eq-rope-rotation}
+
+If a training pipeline packs trajectories without modifying the position index tensor, tokens in trajectory $\tau^{(2)}$ receive position indices starting at $t = L_1$, tokens in $\tau^{(3)}$ start at $t = L_1 + L_2$, and subsequent tokens escalate toward $S_{\text{pack}}$.
+
+```python
+def build_packed_metadata(trajectory_lens: list[int], device: torch.device):
+    # Construct cumulative sequence lengths for varlen attention kernels
+    cu_seqlens = torch.tensor([0] + list(itertools.accumulate(trajectory_lens)), 
+                              dtype=torch.int32, device=device)
+    # Generate zero-reset position IDs for each constituent trajectory
+    pos_list = [torch.arange(seq_len, dtype=torch.long, device=device) 
+                for seq_len in trajectory_lens]
+    position_ids = torch.cat(pos_list, dim=0)
+    return cu_seqlens, position_ids
+```
+
+This index escalation induces severe positional extrapolation error. The first token of trajectory $\tau^{(2)}$—which is an initial system prompt or user instruction—is rotated by frequencies corresponding to position $t = 12,000$ instead of position $t = 0$. Because initial prompt tokens serve as critical attention sinks and semantic anchors, rotating them into extreme out-of-distribution frequency regimes disrupts the model's self-attention patterns. The model becomes incapable of parsing system instructions that appear at index 0 during inference. 
+
+To maintain strict parity with single-sequence inference, the training harness must reset position IDs to zero at every trajectory boundary:
+
+$$\text{pos}[t] = t - c_k \quad \text{for } t \in [c_k, c_{k+1})$$ {#eq-pos-reset}
+
+By pairing cumulative sequence bounds with position ID resetting, the training runtime achieves maximum hardware efficiency while guaranteeing that every trajectory executes within a mathematically isolated sandbox.
+
+Even when sequence packing achieves $99\%$ accelerator utilization and block-diagonal masks enforce absolute mathematical isolation across tasks, a fundamental vulnerability remains embedded in the training algorithm itself. During supervised fine-tuning, the model is fed ground-truth teacher tokens at every step $t$, never suffering the consequences of its own mistakes. What happens when this carefully packed and masked policy is deployed into a live, closed-loop runtime, where a single slightly mispredicted tool parameter pushes the agent into an unfamiliar error state not present in the demonstration corpus?
