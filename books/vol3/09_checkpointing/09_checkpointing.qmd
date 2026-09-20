@@ -124,25 +124,20 @@ The ACB schema formalizes these fields into a compact, memory-aligned descriptor
 
 : **Formal Agent Control Block (ACB) Data Schema Specification**: Complete descriptor definition across process identity, lifecycle state, generation parameters, memory subsystem pointers, resource accounting, and capability tokens. {#tbl-vol3-acb-schema}
 
-### Memory Pointers and Capability Attenuation {#sec-vol3-acb-pointers}
+### Memory Indirection Pointers {#sec-vol3-acb-pointers}
 
 A fundamental principle of Saltzer and Kaashoek's systems design is modularity: internal representations should not be replicated when a reference suffice. An ACB does not store the multi-megabyte conversation history or the multi-gigabyte neural network activations within its own record. Doing so would turn context switching and scheduling inspections into massive memory-copy operations, degrading control-plane throughput.
 
-Instead, the ACB maintains indirection through explicit memory handles. The `context_buf_ref` field stores an opaque handle to the logical context window buffer managed by the host runtime's virtual memory subsystem. This buffer holds the sequence of serialized turn boundaries, token identifiers, role delimiters, and tool output envelopes. When a trajectory must be evaluated by the inference engine, the supervisor dereferences this handle to feed the prefill pipeline.
+Instead, the ACB maintains indirection through explicit memory handles, summarized in @tbl-vol3-acb-pointers. The `context_buf_ref` field stores an opaque handle to the logical context window buffer managed by the host runtime's virtual memory subsystem. This buffer holds the sequence of serialized turn boundaries, token identifiers, role delimiters, and tool output envelopes. When a trajectory must be evaluated by the inference engine, the supervisor dereferences this handle to feed the prefill pipeline.
 
-```text
-+-------------------------------------------------------------------------+
-|                       Agent Control Block (ACB)                         |
-|  [ID: UUIDv7]   [Phase: RUNNING]   [Model: SHA-256]   [Cost: $0.0412]    |
-+--------+------------------+-------------------+-----------------+-------+
-         |                  |                   |                 |
-         v                  v                   v                 v
-+-----------------+ +---------------+ +------------------+ +-------------+
-| Logical Context | | KV-Cache Lease| | Write-Ahead Log  | | Capabilities |
-| Buffer (Host)   | | Block Map     | | Ring Buffer      | | Ed25519 Token|
-| [tok_0, tok_1..]| | (GPU VRAM)    | | (NVMe Storage)   | | fs: read-only|
-+-----------------+ +---------------+ +------------------+ +-------------+
-```
+| Pointer Reference | Target Subsystem / Memory Tier | Physical Storage Location | Indirection & Attenuation Invariant |
+|:---|:---|:---|:---|
+| `context_buf_ref` | Logical Token Buffer | Host System RAM | Monotonically growing sequence of token IDs and role boundaries; shared across prefill batches. |
+| `kv_lease_id` | Physical PagedAttention Tables | GPU High-Bandwidth Memory (HBM) | Bound to inference engine memory lease; migratable to host DRAM or evictable under contention. |
+| `wal_stream_offset` | Append-Only Write-Ahead Log | Local NVMe Flash Storage | Monotonically advancing byte offset enforcing durable state recovery before turn dispatch. |
+| `cap_token_ref` | Attenuated Capability Tokens | Supervisor Secure Memory | Cryptographically signed Ed25519 tokens enforcing Zero Ambient Authority ($A=0$) across sandboxes. |
+
+: **Agent Control Block Memory Indirection Architecture**: Memory tiers, physical hardware boundaries, and supervisory isolation invariants for ACB descriptor pointer fields. {#tbl-vol3-acb-pointers}
 
 Similarly, the `kv_lease_id` binds the trajectory to an active allocation lease inside the inference serving engine's physical key-value memory pool (such as vLLM or SGLang PagedAttention tables). When a trajectory transitions from `RUNNING` to `WAITING_IO` while awaiting external network input, the supervisory scheduler uses this lease identifier to communicate with the inference engine's memory coordinator. The coordinator can choose to maintain the KV cache blocks in GPU VRAM if high-speed resumption is prioritized, page them out to host DRAM via asynchronous PCIe DMA transfers, or evict them while recording the cache checkpoint index for subsequent prefix-caching restoration.
 
@@ -182,7 +177,7 @@ $$M_{\text{control}} = 10{,}000 \times 256 \text{ bytes} = 2.56 \times 10^6 \tex
 The entire control plane state for ten thousand concurrent agents fits comfortably inside the 32 MB L3 cache of a single modern server CPU. By isolating the 256-byte ACB descriptor from the 128 KB token buffers and 8.59 GB KV-cache leases, the supervisor can inspect, sort, prioritize, and arbitrate 10,000 active agents with near-zero memory bus pressure, achieving a $3.5 \times 10^7\times$ reduction in scheduling metadata footprint relative to raw model state.
 :::
 
-### The Unit of Scheduling, Accounting, and Process Migration {#sec-vol3-acb-scheduling-migration}
+### The Unit of Process Governance {#sec-vol3-acb-scheduling-migration}
 
 Because the ACB provides an opaque, bounded summary of an agent's operational parameters, the supervisory runtime uses it as the foundational currency for all control-plane algorithms: single-node dispatching, multi-dimensional rate limiting, and cross-node migration.
 
@@ -246,38 +241,9 @@ Each state models a distinct physical and logical operating mode of the trajecto
 
 The transitions between these states form the operational backbone of the supervisory control plane. An agent begins in `INITIALIZING`, where the host supervisor mounts a sterile root filesystem, issues unique cryptographic capability tokens, and populates the Agent Control Block with initial environment variables and the staged system prompt. Crucially, an agent in `INITIALIZING` holds no inference engine slots. Only when sandbox provisioning completes and the preflight health check verifies container isolation does the supervisor advance the ACB to `RUNNABLE`, placing the trajectory descriptor into the host scheduler's dispatch queue.
 
-Once marked `RUNNABLE`, the agent contends for execution resources. When the scheduler assigns the agent to an available worker thread and allocates an inference batch slot, the ACB transitions to `RUNNING`. In this state, the agent consumes both CPU cycles (for prompt assembly, token parsing, and schema validation) and accelerator memory bandwidth (during the autoregressive decode loop of the underlying foundation model). The agent remains in `RUNNING` until the model generates a complete execution block: either an end-of-sequence token indicating task completion, or a structured tool invocation requesting external computation.
+Once marked `RUNNABLE`, the agent contends for execution resources. When the scheduler assigns the agent to an available worker thread and allocates an inference batch slot, the ACB transitions to `RUNNING`. In this state, the agent consumes both CPU cycles (for prompt assembly, token parsing, and schema validation) and accelerator memory bandwidth (during the autoregressive decode loop of the underlying foundation model). As mapped in @fig-vol3-acb-lifecycle, the lifecycle forms a deterministic statechart where every transition is mediated by an explicit supervisory guard. The split between `WAITING_IO` and `WAITING_ESCROW` represents a critical architectural boundary. When an agent invokes a sandboxed tool—such as executing a shell command or querying an external database—it transitions into `WAITING_IO`. Here, the agent relinquishes its active inference slot, allowing the serving engine to reclaim key-value cache memory for other active requests while the asynchronous I/O operation proceeds. Conversely, when the agent proposes an action flagged as irreversible or high-consequence by host policy (such as modifying production database schemas or dispatching external payment API requests), the supervisor moves the process to `WAITING_ESCROW`. In this state, the trajectory is quarantined: no tools can be dispatched, no model calls are generated, and a fail-safe timeout ticker begins running.
 
-```text
-       [ INITIALIZING ]
-              │ (Sandbox Ready & Preflight Passed)
-              ▼
-    ┌──► [ RUNNABLE ] ◄─────────────────┐
-    │         │                         │
-    │         │ (Scheduler Dispatch)    │ (Preemption Yield)
-    │         ▼                         │
-    │    [ RUNNING ] ───────────────────┤
-    │      │     │                      │
-    │      │     └──► [ PREEMPTED ] ────┘
-    │      │
-    │      ├──► (Tool Call) ────────────► [ WAITING_IO ]
-    │      │                                     │
-    │      │                                     │ (Observation Arrived)
-    │      │                                     ▼
-    │      │                              [ RUNNABLE ]
-    │      │
-    │      └──► (High-Consequence Call) ─► [ WAITING_ESCROW ]
-    │                                            │
-    │                                            │ (Operator Approved)
-    │                                            ▼
-    │                                     [ RUNNABLE ]
-    │
-    └──────────────── (Signal: SIGPAUSE / SIGRESUME)
-```
-
-The split between `WAITING_IO` and `WAITING_ESCROW` represents a critical architectural boundary. When an agent invokes a sandboxed tool—such as executing a shell command or querying an external database—it transitions into `WAITING_IO`. Here, the agent relinquishes its active inference slot, allowing the serving engine to reclaim key-value cache memory for other active requests while the asynchronous I/O operation proceeds. Conversely, when the agent proposes an action flagged as irreversible or high-consequence by host policy (such as modifying production database schemas or dispatching external payment API requests), the supervisor moves the process to `WAITING_ESCROW`. In this state, the trajectory is quarantined: no tools can be dispatched, no model calls are generated, and a fail-safe timeout ticker begins running.
-
-### Transition Invariants and Guard Predicates
+### Transition Invariants
 
 To prevent state corruption, transitions in the supervisory finite state machine cannot occur via simple assignment. Instead, they are governed by a transition relation $\delta: \mathcal{S} \times \mathcal{E} \times \mathcal{G} \to \mathcal{S}$, where an event $e \in \mathcal{E}$ triggers a transition from state $s \in \mathcal{S}$ to $s' \in \mathcal{S}$ if and only if the associated guard predicate $g \in \mathcal{G}$ evaluates to true:
 
@@ -293,28 +259,14 @@ $$\delta(\text{WAIT\_IO}, e_{\text{tool\_return}}, g_{\text{match}}) = \text{RUN
 
 This guard prevents a notorious class of distributed race conditions known as *observation crossing*. Suppose an agent with an aggressive execution timeout issues a long-running compile command. If the supervisor times out the operation, marks the tool invocation as aborted, and returns an synthetic error to the agent, a late-arriving completion message from the compile sandbox must be discarded. Without the $g_{\text{match}}$ predicate, a late packet arriving while the agent is generating its next step could be improperly injected into the context window, causing prompt desynchronization and invalid BPE token alignment.
 
-```text
-Time   Trajectory Process (Supervisor)              Sandbox Execution Worker
- │                    │                                        │
- │   [ RUNNING ]      │                                        │
- │        │           │ Issue tool call (call_id: 0x4A)        │
- │        ├───────────┼───────────────────────────────────────►│ (Execute bash task)
- │        ▼           │                                        │
- │   [ WAIT_IO ]      │                                        │
- │        │           │                                        │
- │        │ 🛑 Timeout Expired (10.0s)                         │
- │        ├───────────┐                                        │
- │        ▼           │                                        │
- │   [ RUNNABLE ]     │ Synthesize timeout error               │
- │        │           │                                        │
- │        │           │ Late observation arrives (call_id: 0x4A)│
- │        │           │◄───────────────────────────────────────┤
- │        │           │                                        │
- │        │           │ Supervisor Guard Evaluates:            │
- │        │           │ g_match(0x4A, pending=NONE) -> FALSE   │
- │        │           │ [Packet Dropped & Logged]              │
- ▼        ▼           ▼                                        ▼
-```
+::: {#def-vol3-observation-crossing-resolution .callout-note title="Observation Crossing Resolution Protocol"}
+When an asynchronous execution worker responds after its assigned timeout deadline, the supervisor resolves the race condition through the following sequence:
+
+1. **Call Issuance ($t_0$):** Trajectory in state `RUNNING` dispatches tool request with identifier $e.\text{call\_id} = \text{0x4A}$. State transitions to `WAITING_IO`, recording $\text{pending\_io\_id} = \text{0x4A}$.
+2. **Timeout Expiration ($t_1$):** Host deadline ticker expires ($t_{\text{timeout}} = 10.0\text{ s}$). Supervisor invalidates the pending I/O descriptor ($\text{pending\_io\_id} \leftarrow \bot$), synthesizes an execution timeout error envelope into the context buffer, and enqueues the ACB into `RUNNABLE`.
+3. **Late Packet Arrival ($t_2$):** The sandbox execution worker completes execution and emits a late response envelope carrying $\text{call\_id} = \text{0x4A}$.
+4. **Guard Evaluation & Rejection ($t_3$):** The supervisor's network ingress gate evaluates guard predicate $g_{\text{match}}(\text{0x4A}, \bot)$. Because $\text{0x4A} \neq \bot$, the predicate evaluates to $\mathbf{false}$. The packet is dropped, a security audit event is logged, and prompt context integrity is preserved.
+:::
 
 **Invariant 2: The Escrow Quarantine Invariant.** An agent in `WAITING_ESCROW` shall never transition directly to `RUNNING` or invoke external system interfaces. It may transition exclusively to `RUNNABLE` upon receipt of an authorized cryptographic token, or to `TERMINATING` upon timeout or operator rejection.
 
@@ -384,7 +336,7 @@ $$\text{Overhead} = \frac{T_{\text{supervisor}}}{T_{\text{physical}}} = \frac{45
 Even if the supervisor flushes each transition event to an NVMe-backed write-ahead log using group commit ($t_{\text{fsync}} \approx 25\,\mu\text{s}$ amortized), the total supervisory time is only $250 \times 25.18\,\mu\text{s} \approx 6.3\,\text{ms}$, representing less than $0.007\%$ of total execution time. The computational cost of formal lifecycle verification is entirely negligible compared to model inference and tool I/O.
 :::
 
-### State Transition Implementation and Failure Handling
+### State Transition Implementation
 
 Implementing a crash-resilient supervisory state machine requires eliminating all possibilities of partial state updates. If a power failure, unhandled host exception, or kernel panic occurs during a transition from `RUNNING` to `WAITING_IO`, the Agent Control Block must never be left in an ambiguous intermediate condition where its tool RPC is dispatched but its scheduler phase remains marked as active.
 
@@ -406,7 +358,7 @@ def transition_acb(acb: AgentControlBlock, new_state: State, event: Event) -> No
 
 When an invalid transition is detected, the supervisor's failure handler must isolate the faulty process immediately. Consider the concrete failure trace below, captured from a real-world multi-agent debugging scenario where a rogue tool runner attempted to inject a response after the trajectory was terminated:
 
-```text
+```bash
 [2026-09-19T10:14:02.104Z] INFO  supervisor: Trajectory 0x8F9C entered WAITING_IO (pending_tool=0x31)
 [2026-09-19T10:14:12.105Z] WARN  supervisor: Timeout reached (10.0s). Signal SIGKILL dispatched to tool 0x31
 [2026-09-19T10:14:12.106Z] INFO  supervisor: Trajectory 0x8F9C transitioned WAITING_IO -> TERMINATING (reason=TIMEOUT)
@@ -430,7 +382,7 @@ Delivering an asynchronous control signal to a running process is among the clas
 
 The central architectural challenge of agent signal trapping is reconciling the unpredictable, asynchronous arrival of external control events with the strict atomicity requirements of the agent's turn-based execution loop. As in classical operating systems—where hardware interrupts are transformed by the kernel into synchronous traps delivered only at well-defined instruction boundaries—an agent supervisory runtime must decouple the *arrival* of a signal from its *execution*. By buffering asynchronous events in the Agent Control Block (ACB) and evaluating them exclusively at deterministic turn boundaries, the supervisor maintains invariant integrity across host memory, accelerator state, and sandboxed environments.
 
-### Asynchronous Notification Versus Turn-Boundary Atomicity
+### Asynchronous Signal Handling
 
 In standard POSIX environments, as formulated by W. Richard Stevens and Stephen A. Rago (2013), signals represent software interrupts that force a process to deviate from its normal control flow. The kernel pushes a signal frame onto the process stack and executes a registered handler at an arbitrary user-space instruction boundary. While this mechanism is well-suited for preempting a monolithic CPU thread, it breaks down when applied to an agentic system composed of multiple loosely coupled, stateful tiers.
 
@@ -473,33 +425,18 @@ The behavior of these signals separates administrative steering from catastrophi
 `SIGKILL` is the only signal that violates turn-boundary atomicity. Because it forcibly unmounts sandboxes and terminates network connections, any tool execution interrupted by `SIGKILL` must be treated as completely unrecoverable, requiring external reconciliation or sandbox recreation.
 :::
 
-### Safe Inspection Checkpoints and Dispatch Mechanics
+### Safe Inspection Checkpoints
 
-To ensure signals are evaluated deterministically without injecting latency spikes into the execution loop, the supervisory control plane defines four discrete *Safe Inspection Checkpoints* within every turn cycle. These checkpoints represent quiescent states where all in-flight I/O has settled, memory allocations are coherent, and no uncommitted mutations are pending in sandbox storage.
+To ensure signals are evaluated deterministically without injecting latency spikes into the execution loop, the supervisory control plane defines four discrete *Safe Inspection Checkpoints* within every turn cycle, summarized in @tbl-vol3-safe-checkpoints. These checkpoints represent quiescent states where all in-flight I/O has settled, memory allocations are coherent, and no uncommitted mutations are pending in sandbox storage.
 
-```text
-       Trajectory Step Cycle
-                 │
-                 ▼
-      ┌────────────────────┐
-      │  Observation Trap  │ ◄─── Checkpoint C_obs
-      └──────────┬─────────┘
-                 │
-                 ▼
-      ┌────────────────────┐
-      │  Context Assembly  │ ◄─── Checkpoint C_pre
-      └──────────┬─────────┘
-                 │ (Prefill + Autoregressive Decode)
-                 ▼
-      ┌────────────────────┐
-      │  Action Validation │ ◄─── Checkpoint C_post
-      └──────────┬─────────┘
-                 │
-                 ▼
-      ┌────────────────────┐
-      │   Tool Dispatch    │ ◄─── Checkpoint C_tool
-      └────────────────────┘
-```
+| Checkpoint Symbol | Cycle Boundary | Quiescent State & Invariant Guarantee | Supervisory Trap Mechanics |
+|:---|:---|:---|:---|
+| $C_{\text{obs}}$ | Post-Observation | Sandbox execution completed; observation envelope verified against pending I/O descriptor. | Traps pause/kill signals before context append; discards invalid observation payloads. |
+| $C_{\text{pre}}$ | Pre-Inference | Context assembled and serialized; no pending tensor operations on inference engine. | Intercepts signals prior to dispatching expensive prefill batch; evicts KV lease if paused. |
+| $C_{\text{post}}$ | Post-Decode | Autoregressive decode complete; grammar validated; proposed action unparsed. | Captures cancellation or pause before mutating host state or validating tool parameters. |
+| $C_{\text{tool}}$ | Pre-Tool Dispatch | Tool arguments validated; security capability checked; no RPC dispatched. | Final safety gate; prevents uncommitted side effects in sandboxes or external systems. |
+
+: **Safe Inspection Checkpoints**: Turn-cycle boundaries, quiescence guarantees, and supervisory trap actions ensuring atomic signal delivery. {#tbl-vol3-safe-checkpoints}
 
 The four canonical checkpoints function as synchronization barriers:
 
@@ -600,7 +537,7 @@ The execution profile of an autonomous agent is split across two fundamentally m
 
 **Yielding at tool boundaries and bounding model generation keep a trajectory responsive to cancellation and budgets; serving-state retention remains a separate memory-management decision.** A dependable agent runtime does not permit unprivileged foundation models to hold hardware resources hostage, nor does it rely on synchronous blocking abstractions inherited from interactive single-user shells. Instead, the supervisor implements cooperative process yielding at well-defined execution barriers, combines cooperative yielding with preemptive hardware ceilings during token generation, and decouples the lifecycle of the host operating system thread from the allocation of physical accelerator memory.
 
-### The Tool-Wait Inefficiency and Thread Starvation
+### The Tool-Wait Latency Tax
 
 To understand why synchronous execution models fail, consider the latency composition of a single agent step cycle $k$. The total wall-clock duration of a turn, denoted $\tau_{\text{turn}}$, decomposes into three distinct phases:
 
@@ -683,7 +620,7 @@ async def execute_bounded_decode(acb: AgentControlBlock, client: LLMClient) -> G
 
 The combination of bounded output lengths ($K_{\max}$) and asynchronous watchdog timers ensures that unprivileged models operate within strict preemptive bounds, preventing stochastic failure modes from violating supervisory scheduling invariants.
 
-### Event-Driven Wakeup and Runqueue Re-Entry
+### Event-Driven Wakeup Mechanics
 
 When an external tool completes its computation within a sandbox, the supervisory runtime must transition the suspended trajectory from `WAITING_IO` back to `RUNNABLE` and restore its execution context without polling or CPU busy-waiting.
 
@@ -765,7 +702,7 @@ Holding operating system worker threads and memory allocations hostage across hu
 
 The supervisor resolves this dilemma by treating human authorization not as an interactive console prompt, but as a decoupled, asynchronous, cryptographic escrow protocol. High-consequence mutations must be quarantined within tamper-evident escrow manifests, while the proposing trajectory yields all active compute resources and enters an auditable suspension state protected by fail-safe expiration leases.
 
-### The Asynchronous Human Gateway and State Suspension
+### The Asynchronous Human Gateway
 
 Integrating human judgment into an operating system control plane requires modeling the human operator as an untrusted, high-latency, out-of-band Remote Procedure Call (RPC) endpoint. Interactive agent architectures that execute a synchronous read on standard input (`stdin`) inside the worker thread violate basic modularity. A thread blocked on human input holds its kernel stack, local CPU scheduling slice, open network file descriptors, and physical memory bindings. If an enterprise agent farm running $5{,}000$ concurrent trajectories encounters twenty high-consequence operations simultaneously, synchronous thread blocking under a standard worker pool of $64$ threads halts more than thirty percent of the cluster's processing capacity for unbounded durations.
 
@@ -787,7 +724,7 @@ Suspension initiates a multi-tier resource reclamation sequence. The supervisor 
 
 The supervisor serializes the trajectory execution frontier—comprising the context window $\mathbf{c}_k$, the pending action proposal $\mathbf{a}_k$, and the trajectory state descriptor $\mathcal{S}_k$—and persists it to durable storage. The trajectory remains parked in `WAITING_ESCROW` without consuming active compute cycles until an external cryptographic event either ratifies or invalidates the pending operation.
 
-### Cryptographic Escrow Manifests and Blast-Radius Contracts
+### Cryptographic Escrow Manifests
 
 An escrow request cannot consist of unformatted natural language text or raw command strings. Human approvers cannot reliably audit arbitrary shell scripts without formal boundaries delineating the target mutation scope. Furthermore, unauthenticated authorization channels expose the system to replay attacks, approval hijacking, and state desynchronization, wherein an approver validates an action that is subsequently dispatched against an execution context different from the one evaluated during review.
 
@@ -830,7 +767,7 @@ def verify_escrow_payload(manifest: EscrowManifest, auth_token: AuthToken) -> bo
 
 If the signature fails, if the authorization payload references an unknown public key, or if the manifest digest does not match the bitwise representation evaluated by the approver, the supervisor rejects the authorization, discards the token, and emits a high-priority security audit event.
 
-### Fail-Safe Defaults and Expiration Leases
+### Expiration Lease Protocols
 
 The third pillar of the escrow control plane is the enforcement of fail-safe defaults. Following the formulation of Saltzer and Schroeder, the default security decision of a supervisory system in the absence of explicit, positive authorization must always be denial (`DENY`).
 
@@ -882,7 +819,7 @@ $$\text{Reclamation Factor} = \frac{M_{\text{resident}}^{\text{A}}}{M_{\text{res
 Under Design A, pinning host memory requires an enterprise cluster of dozens of high-memory nodes solely to maintain blocked threads awaiting human input. Under Design B, the entire paused cohort resides in under $141\text{ MiB}$ of RAM, permitting the host node to dedicate memory and worker threads entirely to active inference and sandbox execution.
 :::
 
-### Multi-Party Authorization Gates and Quorum Protocols
+### Multi-Party Quorum Protocols
 
 Certain administrative mutations carry blast radii capable of causing unrecoverable organizational harm. Actions such as re-keying root identity providers, initiating cross-border wire transfers exceeding statutory thresholds, or executing production database drops cannot safely be entrusted to the unilateral discretion of a single human reviewer.
 
@@ -933,44 +870,7 @@ Agent trajectories alternate between two distinct execution profiles: an outboun
 
 Traditional operating system schedulers arbitrate access to two primary hardware abstractions: CPU time slices and virtual memory pages. In contrast, an agent runtime scheduler must arbitrate across a heterogeneous vector of physical host resources and external rate-limited APIs. The execution of a single trajectory turn spans an outbound network call to an unprivileged neural inference engine, followed by the execution of non-deterministic shell commands, compilers, or database engines inside an isolated sandbox environment.
 
-```text
-+-----------------------------------------------------------------------------------------+
-|                                  HOST SYSTEM NODE                                       |
-|                                                                                         |
-|   +--------------------------+                         +----------------------------+   |
-|   |   Physical RAM (M_host)  |                         |    Host CPU Cores (C_host) |   |
-|   |   [64 GiB to 128 GiB]    |                         |    [16 to 64 Threads]      |   |
-|   +------------+-------------+                         +-------------+--------------+   |
-|                |                                                     |                  |
-|                +-----------------------+   +-------------------------+                  |
-|                                        |   |                                            |
-|                                        v   v                                            |
-|                        +-------------------------------+                                |
-|                        |      WARM SANDBOX POOL        |                                |
-|                        |    S_max Concurrent Slots     |                                |
-|                        |    [cgroups, namespaces]      |                                |
-|                        +---------------+---------------+                                |
-|                                        ^                                                |
-|                                        | Tool Execution Phase                           |
-|                                        | (Local Subprocess Isolation)                   |
-|                                        |                                                |
-|   +------------------------------------+--------------------------------------------+   |
-|   |                         SUPERVISORY RUNTIME SCHEDULER                           |   |
-|   |                 Deficit Round-Robin (DRR) Dispatch & Admission                  |   |
-|   +------------------------------------+--------------------------------------------+   |
-|                                        |                                                |
-|                                        | Model Inference Phase                          |
-|                                        | (Outbound HTTPS Stream)                        |
-|                                        v                                                |
-|                        +-------------------------------+                                |
-|                        |   UPSTREAM INFERENCE BUCKET   |                                |
-|                        |   Token / Request Bucket      |                                |
-|                        |   [TPM and RPM Ceilings]      |                                |
-|                        +-------------------------------+                                |
-+-----------------------------------------------------------------------------------------+
-```
-
-Arbitrating these disparate environments requires the runtime to isolate and quantify four orthogonal contention vectors:
+Arbitrating these disparate environments requires the runtime to isolate and quantify four orthogonal contention vectors, summarized in @tbl-vol3-contention-vectors:
 
 1. *Physical Memory Footprint ($M_{\text{host}}$):* While an idle Agent Control Block (ACB) occupies less than $50\text{ KiB}$ of structured host memory, an active sandbox container running a compiler toolchain, Python runtime, or browser automation environment requires between $512\text{ MiB}$ and $4\text{ GiB}$ of resident physical memory. If the scheduler admits more concurrent tool invocations than physical memory can back, the host kernel invokes the OOM killer, terminating random sandbox processes or the runtime supervisor itself.
 2. *Host Compute Threads ($C_{\text{host}}$):* Agent tools frequently compile large codebases, run test suites, or parse extensive ASTs. Because tools are executed as child processes, unconstrained execution leads to CPU starvation, causing latency spikes in the supervisor's core event loop.
@@ -984,11 +884,13 @@ Arbitrating these disparate environments requires the runtime to isolate and qua
 | **Inference Bandwidth** | Model Gateway Quota          | Tokens Per Minute ($\text{TPM}$)          | HTTP 429 cascades; exponential backoff convoy stalls  | Local token bucket rate-shaping admission gate      |
 | **Disk Bandwidth**      | Host Storage (NVMe/SSD)      | I/O Operations Per Second ($\text{IOPS}$) | SQLite/WAL snapshot stalls; filesystem locking delays | Direct I/O rate limiting and ephemeral tmpfs mounts |
 
+: **Multi-Dimensional Resource Contention Vectors**: Physical and virtual bottlenecks, failure modes, and supervisory arbitration strategies across host runtime subsystems. {#tbl-vol3-contention-vectors}
+
 The coupling of local sandboxes and external inference creates a severe *Head-of-Line (HoL) blocking dilemma*. If the scheduler allocates a physical sandbox container to a trajectory before that trajectory dispatches its model inference call, the container sits idle throughout the network round-trip, prompt prefill, and autoregressive token generation. At a decode speed of $50\text{ tokens/second}$, an 800-token generation pins that sandbox for $16\text{ seconds}$ without executing a single CPU instruction.
 
 To eliminate this coupling, the supervisory runtime enforces a strict *two-phase decoupled allocation policy*: an ACB in the `RUNNING_MODEL` state holds zero physical sandbox resources. Sandbox environments are acquired exclusively upon transitioning to `RUNNING_TOOL` and are immediately released, recycled, or returned to a dormant warm pool when the tool finishes execution.
 
-### Deficit Round-Robin and Fair-Share Trajectory Dispatch
+### Deficit Round-Robin Dispatch
 
 A naive scheduling policy, such as First-In, First-Out (FIFO) or unweighted Round-Robin, fails immediately when applied to heterogeneous agent workloads. In an agentic environment, turn execution costs vary across multiple orders of magnitude. A lightweight trajectory may emit a 50-token query to run `git status`, finishing within $300\text{ ms}$ and consuming minimal resources. Concurrently, a repository-wide code refactoring trajectory may emit a 4,096-token chain of thought and trigger a 3-minute integration test suite that consumes four CPU cores and $2\text{ GiB}$ of RAM. Under FIFO scheduling, lightweight interactive queries stall behind long-running batch jobs.
 
@@ -1041,7 +943,7 @@ $$\lim_{K \to \infty} \frac{\sum_{k=1}^K C(\tau_{i,k})}{\sum_{k=1}^K C(\tau_{j,k
 
 By enforcing this mathematical bound, high-volume batch indexing runs cannot monopolize the node. A single interactive session ($w_{\text{interactive}} = 4$) running alongside eight background tasks ($w_{\text{batch}} = 1$) is guaranteed at least $33.3\%$ of the total host throughput, keeping interactive UI response times low.
 
-### Sandbox Pooling, Tool Throttling, and Priority Classes
+### Sandbox Priority Classes
 
 While the WDRR scheduler regulates turn dispatch order, the physical limits of the host machine require explicit concurrency controls on the sandbox execution subsystem. Forking an isolated Linux container involves creating cgroups, mounting overlay filesystems, setting up loopback network namespaces, and configuring seccomp filters. Performing this setup on every tool invocation introduces hundreds of milliseconds of cold-start latency and triggers host filesystem contention.
 
@@ -1051,32 +953,16 @@ $$\text{ActiveSandboxes} \le S_{\max} = \left\lfloor \frac{M_{\text{host}} - M_{
 
 where $M_{\text{sandbox\_limit}}$ is the hard cgroup memory ceiling applied to each container (e.g., $2\text{ GiB}$), $M_{\text{supervisor}}$ is the memory reserved for the runtime process and local embeddings, and $M_{\text{buffer}}$ is a reserve protecting the host OS kernel from memory pressure.
 
-```text
-+-----------------------------------------------------------------------------+
-|                           WARM SANDBOX POOL LIFECYCLE                       |
-|                                                                             |
-|      +---------------------------------------------------------------+      |
-|      |                                                               |      |
-|      v                                                               |      |
-|  [DORMANT]  ---(Acquire Semaphore)--->  [ASSIGNED]                  |      |
-|  (Clean fs,                              (Bound to Active ACB,       |      |
-|   pre-forked)                             mounting workspace)        |      |
-|      ^                                           |                   |      |
-|      |                                           | (Execute Tool)    |      |
-|      |                                           v                   |      |
-|  [SCRUBBING] <---(Release Container)---  [DIRTY]                     |      |
-|  (Reset diff,                             (Execution finished,       |      |
-|   flush /tmp)                              stdout captured)          |      |
-|                                                                      |      |
-+-----------------------------------------------------------------------------+
-```
+The pool maintains sandboxes across four lifecycle states, detailed in @tbl-vol3-sandbox-pool-states:
 
-The pool maintains sandboxes across four lifecycle states:
+| Pool State | Container Configuration & Filesystem Layer | Resource Allocation Invariant | Transition Trigger & Target State |
+|:---|:---|:---|:---|
+| `DORMANT` | Clean sterile rootfs; pre-forked execution runtime. | Unbound to any ACB; zero network egress allowed. | Semaphore acquire on tool dispatch $\to$ `ASSIGNED`. |
+| `ASSIGNED` | Bound to active ACB; workspace overlay mounted. | Enforces strict cgroup CPU/memory caps and seccomp filters. | Command completion and stdout/stderr capture $\to$ `DIRTY`. |
+| `DIRTY` | Execution complete; workspace contains mutated diffs. | Held until supervisor extracts output envelope and files. | Container release and recycling handoff $\to$ `SCRUBBING`. |
+| `SCRUBBING` | OverlayFS unmounted; upper/work directories flushed. | Background asynchronous thread; zero impact on active runqueue. | Post-scrub sanity validation passed $\to$ `DORMANT`. |
 
-- `DORMANT`: The container namespace is initialized, mounted on a clean base image, and idling without allocated compute cores.
-- `ASSIGNED`: The container is checked out by an ACB, which mounts its dedicated workspace volume into the sandbox filesystem.
-- `DIRTY`: The tool execution has completed, returning `stdout`, `stderr`, and an exit code. The container holds dirty ephemeral state in `/tmp` and active child processes.
-- `SCRUBBING`: The runtime terminates all child processes inside the cgroup via `SIGKILL`, unmounts the workspace volume, resets the copy-on-write scratch layer, and returns the container to the `DORMANT` queue.
+: **Warm Sandbox Pool Lifecycle States**: Operational phases, storage layer configuration, isolation invariants, and recycling transitions across warm sandbox slots. {#tbl-vol3-sandbox-pool-states}
 
 When all $S_{\max}$ sandboxes are in the `ASSIGNED` state, incoming tool execution requests block in an admission queue ordered by trajectory priority class:
 
@@ -1158,7 +1044,7 @@ A common architectural fallacy assumes that this limitation can be mitigated thr
 
 Furthermore, prompt-level constraints suffer from catastrophic context displacement. As long-horizon trajectories progress across dozens of turns, the agent's context window fills with thousands of lines of compiler outputs, file diffs, and database responses. Because attention weights over early system instructions decay as context length increases, soft natural-language budget constraints are routinely overwritten or ignored. Saltzer, Reed, and Clark's End-to-End Argument dictates that invariant closure cannot be maintained by the unprivileged endpoint; loop termination is an end-to-end supervisory responsibility that must be guaranteed by the external runtime control plane. The supervisor must measure physical consumption directly through operating system primitives and network accounting hooks, severing execution out-of-band when quantitative limits are breached.
 
-### The Multi-Dimensional Resource Vector and Differential Cost Accounting
+### Multi-Dimensional Cost Accounting
 
 To govern stochastic execution without introducing single-variable blind spots, the supervisory runtime models resource limits as a multi-dimensional bounding polytope. Bounding a trajectory along a single axis—such as step count—is fundamentally inadequate. A trajectory restricted to fifty steps can exhaust hundreds of dollars if each turn prefill consumes a two-hundred-thousand-token context window; conversely, a trajectory bounded strictly by wall-clock time may be killed prematurely during a transient network slowdown while executing a computationally inexpensive read-only query.
 
@@ -1234,7 +1120,7 @@ $$\rho_{50} = \max \left( \frac{50}{80}, \frac{807500}{1500000}, \frac{460.55}{9
 At $\rho_{50} = 62.5\%$ resource exhaustion, the step counter represents the binding constraint ($62.5\%$). The trajectory remains within Phase 1 (Nominal Execution), operating without tool degradation or supervisory steering.
 :::
 
-### Progressive Budget Thresholds and Phased Escalation
+### Progressive Budget Thresholds
 
 A naive implementation of resource accounting enforces hard limits through binary cutoff: the moment any consumption metric reaches 100% of its budget ceiling ($u_i^{(k)} \ge B_i$), the supervisor issues an immediate `SIGKILL`. While this approach guarantees host protection, it induces severe operational inefficiency. An agent process that has spent forty minutes modifying code, executing integration tests, and diagnosing edge cases is abruptly terminated before emitting its final patch. All intermediate reasoning is discarded, uncommitted filesystem writes in the sandbox are left in an indeterminate state, and the user receives an unrecoverable failure.
 
@@ -1257,12 +1143,10 @@ In **Phase 1: Nominal Execution** ($\rho_k < 0.70$), the trajectory operates und
 
 When consumption enters **Phase 2: Advisory Steering** ($0.70 \le \rho_k < 0.90$), the supervisor intervenes without revoking capabilities. At the start of turn $k$, the control plane prepends an out-of-band supervisory observation into the model's context window:
 
-```text
-[SUPERVISOR NOTIFICATION: 70% of allocated resource budget exhausted.
-Binding dimension: financial cost ($2.10 / $3.00 consumed).
-Do not initiate new exploratory investigations. Consolidate current findings,
-finalize pending modifications, and emit the terminal solution.]
-```
+> **Supervisor Notification**: 70% of allocated resource budget exhausted.
+> Binding dimension: financial cost ($2.10 / $3.00 consumed).
+> Do not initiate new exploratory investigations. Consolidate current findings,
+> finalize pending modifications, and emit the terminal solution.
 
 This intervention alters the conditional distribution of subsequent autoregressive tokens, steering the model toward completion while preserving its ability to execute necessary compilation or verification tools.
 
@@ -1270,37 +1154,28 @@ If consumption escalates to **Phase 3: Defensive Quarantine** ($0.90 \le \rho_k 
 
 The tool schema presented to the model during prefill is stripped down to read-only inspection and packaging primitives (`read_file`, `emit_diff`, `generate_summary`). Simultaneously, the supervisor injects a mandatory synthesis directive:
 
-```text
-[SUPERVISOR ALERT: 90% of budget exhausted. Trajectory degraded to READ-ONLY.
-Mutating actions and process forks are disabled. You must emit your final patch
-and terminal explanation immediately. Any attempt to call mutating tools will fail.]
-```
+> **Supervisor Alert**: 90% of budget exhausted. Trajectory degraded to READ-ONLY.
+> Mutating actions and process forks are disabled. You must emit your final patch
+> and terminal explanation immediately. Any attempt to call mutating tools will fail.
 
 Under Defensive Quarantine, the model is physically prevented from damaging host state or initiating long-running computations; its remaining 10% budget buffer is reserved strictly for generating explanatory output and synthesizing work completed prior to degradation.
 
 Finally, upon reaching **Phase 4: Hard Preemptive Termination** ($\rho_k \ge 1.00$), the supervisor halts execution deterministically. The control plane cancels pending inference generation, dispatches `SIGKILL` to all associated containerized sandbox processes, and transitions the ACB to `TERMINATED_FAILURE` tagged with the precise failure descriptor `ERR_BUDGET_EXHAUSTED(dimension_i)`. The runtime flushes the Write-Ahead Log (WAL) to durable storage, retains sandbox filesystem snapshots for diagnostic analysis, and returns partial artifacts to the calling user alongside a transparent accounting audit trail.
 
-```text
-+---------------------------------------------------------------------------------------+
-|                    MULTI-DIMENSIONAL RESOURCE BOUNDING POLYTOPE                       |
-|                                                                                       |
-|   Tokens (N)                                                                          |
-|       ^                                                                               |
-| N_max |------------------------+ (Hard Ceiling Vector B)                              |
-|       |                        |                                                      |
-|       |     Phase 3: Degraded  |                                                      |
-|       |   +------------------+ |                                                      |
-|       |   | Phase 2: Advise  | |                                                      |
-|       |   |   +------------+ | |   Trajectory Path u_k                                |
-|       |   |   | Phase 1:   | | |    *--*--*                                           |
-|       |   |   | Nominal    | | |           \                                          |
-|       |   |   |            | | |            *--*                                      |
-|       |   |   +------------+ | |                \                                     |
-|       |   +------------------+ |                 * (Preempted at rho_k >= 1.0)        |
-|       +------------------------+-----------------------------------> Cost (C)        |
-|                               C_max                                                   |
-+---------------------------------------------------------------------------------------+
-```
+::: {#def-vol3-bounding-polytope .callout-note title="Multi-Dimensional Resource Bounding Polytope"}
+Let the agent consumption vector at turn $k$ be $\mathbf{u}_k = (u_{k,1}, u_{k,2}, \dots, u_{k,D}) \in \mathbb{R}^D_{\ge 0}$, measuring cumulative resource usage across $D$ dimensions (e.g., prompt tokens, decode tokens, tool executions, and financial expenditure). The supervisory operating space is bounded by the convex polytope:
+
+$$\mathcal{P}_{\text{admissible}} = \left\{ \mathbf{u} \in \mathbb{R}^D_{\ge 0} \;\middle|\; \forall i \in \{1,\dots,D\}, \; u_i \le B_i \right\}$$
+
+where $\mathbf{B} = (B_1, B_2, \dots, B_D)$ defines the hard ceiling vector. The supervisory control plane defines concentric escalation sub-polytopes:
+$$\mathcal{P}_{\text{nominal}} = \left\{ \mathbf{u} \;\middle|\; \rho(\mathbf{u}) < 0.70 \right\}, \quad \mathcal{P}_{\text{advisory}} = \left\{ \mathbf{u} \;\middle|\; 0.70 \le \rho(\mathbf{u}) < 0.90 \right\}$$
+$$\mathcal{P}_{\text{defensive}} = \left\{ \mathbf{u} \;\middle|\; 0.90 \le \rho(\mathbf{u}) < 1.00 \right\}, \quad \mathcal{P}_{\text{terminal}} = \left\{ \mathbf{u} \;\middle|\; \rho(\mathbf{u}) \ge 1.00 \right\}$$
+
+where the normalized exhaustion metric is defined by the Chebyshev norm:
+$$\rho(\mathbf{u}) = \|\mathbf{u} \oslash \mathbf{B}\|_\infty = \max_{1 \le i \le D} \left( \frac{u_i}{B_i} \right)$$
+
+When the trajectory path $\mathbf{u}_k$ crosses the boundary into $\mathcal{P}_{\text{terminal}}$, the supervisor triggers immediate preemptive termination, preventing unbounded drift outside $\mathcal{P}_{\text{admissible}}$.
+:::
 
 By enforcing progressive escalation through rigid supervisory mediation, the control plane ensures that unprivileged stochastic models remain strictly accountable to the physical and financial constraints of their host environment. The supervisor guarantees loop termination, prevents catastrophic billing overruns, and preserves intermediate work whenever feasible.
 
