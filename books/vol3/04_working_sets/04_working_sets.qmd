@@ -123,30 +123,11 @@ This position bias emerges from two complementary architectural mechanisms:
 
 First, the primacy effect is reinforced by the presence of *attention sinks*. In causal autoregressive transformers, the initial tokens of the prompt—typically the root system prompt or invariant instructions—are attended to by virtually every subsequent token across all layers of the network. Because the softmax function over attention scores requires attention weights to sum to one, tokens that serve as structural anchors accumulate substantial residual probability mass regardless of their immediate semantic relevance to the current token. These initial positions act as natural semantic repositories that the network learns to query reliably.
 
-Second, the recency effect is governed by the locality of causal attention and positional encodings. Tokens situated near the trailing boundary of the prompt have had fewer intermediate transformation steps between their representations and the final output logits. More importantly, modern positional encodings (such as RoPE) introduce decaying inner products as the relative distance $|i - j|$ between token positions increases. While this enables the network to preserve local syntactic order, it attenuates the raw query-key dot products for long-range token pairs unless the model has been explicitly tuned with massive data mixtures to counterbalance the attenuation.
+Second, the recency effect is governed by the locality of causal attention and positional encodings. Tokens situated near the trailing boundary of the prompt have had fewer intermediate transformation steps between their representations and the final output logits. To formalize the competition for attention mass across expanding sequences, consider a query token $\mathbf{q}$ attempting to attend to an authoritative target key token $\mathbf{k}_{\text{target}}$ (such as `worker_db_port = 5432`) embedded amidst $K$ semantically correlated distractor key tokens $\{\mathbf{k}_1, \dots, \mathbf{k}_K\}$ (such as configuration ports for metric collectors, legacy endpoints, or cache proxies). Under the softmax normalizer, the attention weight allocated to the target token is governed by:
 
-```text
-                  THE SOFTMAX ATTENTION COMPETITION
+$$\alpha_{\text{target}} = \frac{\exp\left(\frac{\mathbf{q} \cdot \mathbf{k}_{\text{target}}}{\sqrt{d_k}}\right)}{\exp\left(\frac{\mathbf{q} \cdot \mathbf{k}_{\text{target}}}{\sqrt{d_k}}\right) + \sum_{j=1}^K \exp\left(\frac{\mathbf{q} \cdot \mathbf{k}_j}{\sqrt{d_k}}\right)}$$
 
-   Query: "Which database port is configured for the worker pool?"
-
-   Token Candidates in Working Context:
-   ----------------------------------------------------------------------
-   k_target : "... worker_db_port = 5432 ..."             (Line 12,410)
-   k_dist_1 : "... metrics_collector_port = 9090 ..."     (Line  8,102)
-   k_dist_2 : "... legacy_mysql_port = 3306 ..."          (Line 45,219)
-   k_dist_3 : "... redis_cache_port = 6379 ..."           (Line 61,004)
-   ... [thousands of intermediate code and log tokens] ...
-   ----------------------------------------------------------------------
-
-   Softmax Conservation of Probability Mass:
-                     exp(q · k_target / sqrt(d))
-   alpha_target = ---------------------------------
-                  SUM_j exp(q · k_j / sqrt(d))
-
-   As distractor count grows, SUM_j exp(q · k_dist_j / sqrt(d)) dominates,
-   diluting alpha_target below the threshold required to steer generation.
-```
+As the number of staged distractor tokens $K$ scales into the tens of thousands, the background summation $\sum_{j=1}^K \exp\left(\frac{\mathbf{q} \cdot \mathbf{k}_j}{\sqrt{d_k}}\right)$ dominates the denominator, systematically diluting $\alpha_{\text{target}}$ toward zero even when the individual dot-product alignment with each distractor is modest.
 
 Compounding position bias is the destructive phenomenon of *distractor interference*. In an agentic execution loop, the working context staged by the runtime is not inert; it contains hundreds of semantically active identifiers, previous error messages, partial diffs, and verbose tool outputs. The self-attention operation computes a weighted sum of value vectors:
 
@@ -195,6 +176,18 @@ This quadratic explosion directly dictates the agent's *Time to First Token* (TT
 $$\text{TTFT} \approx \frac{F_{\text{prefill}}}{\mathcal{P}_{\text{effective}}} = \frac{24 M L d^2 + 4 M^2 L d}{\text{MFU} \times \mathcal{P}_{\text{peak}}}$$
 
 As $M$ scales into the tens of thousands of tokens, TTFT transitions from a negligible sub-second pause into a multi-second pipeline stall, fundamentally degrading the reactivity of the autonomous agent.
+
+#### Multi-Tenant Serving Interference and Chunked Prefill {.unnumbered}
+
+The systems impact of massive prefill sequences extends beyond the single agent's TTFT. In production inference clusters hosting multiple concurrent agents, monolithic long-context prefills introduce severe *head-of-line blocking* and *inter-token latency (ITL) bubbles*. 
+
+When an agent runtime dispatches an uncompacted 65,536-token prompt, the inference engine launches dense GEMM kernels that monopolize the GPU's Tensor Cores for seconds (over $6.26\text{ s}$ as quantified in @exmp-04-prefill-compute-scaling-and-latency). During this prolonged execution, any concurrent agent request running in the memory-bandwidth-bound autoregressive decode phase is completely preempted or delayed, causing its token generation latency to spike by orders of magnitude (from $20\text{ ms}$ up to several seconds per token).
+
+To mitigate this multi-tenant interference, modern serving runtimes (such as Sarathi-Serve and vLLM) implement **Chunked Prefill**:
+
+- The serving engine partitions the $M$-token prompt into discrete chunks of fixed token budget $C_{\text{chunk}} \in [512, 2048]$ tokens.
+- Each prefill chunk is co-scheduled in a batch alongside active decode tokens, co-locating compute-bound GEMMs alongside memory-bound GEMVs to achieve high Tensor Core utilization without starvation.
+- While chunked prefill successfully bounds ITL spikes for decoding streams, it stretches the wall-clock completion of the agent's prefill across $\lceil M / C_{\text{chunk}} \rceil$ serving iterations, reinforcing why active context compaction at the host runtime level is an indispensable prerequisite for cluster goodput.
 
 ::: {#exmp-04-prefill-compute-scaling-and-latency .callout-example title="Prefill Compute Scaling and Latency on Accelerator Hardware"}
 **Problem:** An autonomous software agent is evaluated under two different working context staging policies using an 8-billion parameter foundation model ($L = 32$ layers, hidden dimension $d = 4096$). Policy A enforces strict context compaction, staging an average working context of $M_1 = 8{,}192$ tokens. Policy B dumps raw compiler outputs and uncurated directory traces, staging an uncompacted context of $M_2 = 65{,}536$ tokens ($8\times$ expansion).
@@ -389,6 +382,22 @@ Maintaining layout stability introduces an architectural trade-off against *atte
 
 Duplicating instructions at the end of the prompt reconciles prefix caching with attention recency: the static Root establishes the definitive, high-capacity system frame that remains cached across invocations, while a compact, 100-token reminder suffix placed in the volatile Leaf restates critical invariants directly adjacent to the generation point. The runtime amortizes the cost of the extensive Root while ensuring that the model's immediate autoregressive predictions remain tightly conditioned on core task rules.
 
+#### FinOps Economics and the Token-Boundary Alignment Pitfall {.unnumbered}
+
+The benefits of layout stability extend directly to the commercial financial accounting of cloud-hosted agent fleets. Leading frontier API providers (such as Anthropic, OpenAI, and DeepSeek) charge tiered pricing based on prefix cache hits:
+
+- **Cache-Hit Pricing Invariant:** Cached prompt tokens are billed at a $75\%$ to $90\%$ discount relative to uncached prefill tokens (e.g., $\$0.30$ per million tokens for cached reads versus $\$3.00$ per million tokens for base prefill).
+- **Trajectory Financial Waste:** In an interactive 20-turn agent session averaging 30,000 tokens of context, an unstable layout that busts the cache on every turn costs $\$1.80$ in input token expenditure. Enforcing prefix stability reduces the same session cost to under $\$0.25$, yielding an immediate $7.2\times$ cost reduction. Across a fleet executing 100,000 tasks per month, prefix stability prevents over $\$155,000$ in unnecessary API spending.
+
+However, realizing these financial and latency savings requires overcoming the **Token-Boundary Alignment Pitfall**:
+
+Modern Byte-Pair Encoding (BPE) tokenizers operate greedily across whitespace and punctuation boundaries. When the host runtime constructs a prompt by dynamically concatenating static string blocks with dynamic state, subtle boundary variations mutate token IDs. For instance:
+
+- Staging a static prefix ending with `"\nSupervisor:"` and a dynamic block beginning with `" Execute"` produces token IDs `[..., 1845, 3422]`.
+- But if the runtime omits the leading space and concatenates `"\nSupervisor:"` with `"Execute"`, the tokenizer merges the colon and the initial letter into a completely different token ID `[..., 1042]`.
+
+Because physical serving engines (such as vLLM or SGLang) index Radix tree KV cache nodes strictly by exact sequences of *token IDs*, a single mutated boundary token ID at position $k$ invalidates the cache match for that token and all downstream tokens. The engine fails to match the prefix, forcing a full, expensive prefill recomputation. Robust agent runtimes prevent this by tokenizing static prompt segments independently or enforcing strict, verified token-boundary separators.
+
 Even with optimal zone staging and maximal prefix reuse, an agent trajectory executing over long task horizons inevitably accumulates more observations, compiler diagnostics, and workspace diffs than the logical capacity $M^*$ can accommodate. When the working set overflows this boundary, the host runtime cannot simply drop tokens at random or allow uncompressed logs to crowd out critical instructions. The supervisor must actively compress its staged context through selective transformation and structured eviction—a challenge that brings us directly to the mechanics of context compaction.
 
 ## Context Compaction {#sec-vol3-working-sets-compaction}
@@ -424,6 +433,11 @@ When lossless filtering cannot reclaim sufficient headroom, the runtime transiti
 ![**Multi-Stage Context Compaction Pipeline**: The multi-stage context compaction pipeline. Raw agent observations pass through three cascading tiers: deterministic lossless filtering (deduplication, diff folding, and superseded read eviction), structured extraction (regex and AST parsing of stack traces and diagnostic codes), and bounded semantic distillation. Each tier records token reduction and fidelity retention across the working set.](images/svg/fig-vol3-compaction-pipeline.svg){#fig-vol3-compaction-pipeline width=\"95%\"}
 
 The runtime supervisor deploys domain-specific regular expressions and Abstract Syntax Tree (AST) crash parsers to extract only the actionable diagnostic payload. For a build failure, the extraction engine isolates the target binary name, the failing source file, the exact line and column numbers, the diagnostic error code (such as Rust's `E0308` or GCC's `-Werror=implicit-function-declaration`), and the specific compiler explanation. The thousands of lines detailing successful compilation of unaffected translation units are discarded.
+
+Beyond compiler diagnostics, structured extraction applies syntax-aware code compaction to repository files staged in the Trunk zone. When an agent queries a large source module to inspect a single class or method, staging the entire raw file inflates the working set and invites distractor interference. Rather than relying on naive text clipping (which severs syntax trees and induces hallucinated interface completions), modern runtime supervisors deploy **Tree-sitter** or **Language Server Protocol (LSP)** parsers:
+
+- **AST Outline Folding:** The parser builds a concrete syntax tree, preserving module docstrings, type definitions, class structures, and exported function signatures, while folding the implementation blocks of non-target routines (`def handle_handshake(sock: Socket) -> Session: /* folded 64 lines */`).
+- **Syntactic Validity Invariant:** Because the compacted representation is generated from the grammar's AST, the prompt retains valid language syntax and exact type signatures, allowing the foundation model to reason over system interfaces without consuming thousands of tokens on irrelevant implementation details.
 
 Table @tbl-compaction-spectrum details the performance characteristics, typical reduction ratios, and information-preservation guarantees across the three compaction tiers.
 
@@ -788,45 +802,17 @@ Because out-of-band mutations bypass the agent's mediated tool dispatch pipeline
 
 ### Purge, Tombstone, and Refresh Protocols
 
-Once an observation $o_k$ is flagged as stale, the host runtime must resolve the invalidation before passing the prompt sequence to the tokenizer. Simply leaving the stale text in place with an appended natural-language warning (e.g., *"Note: the file above was modified"*) is notoriously unreliable; deep self-attention layers routinely attend to the detailed, highly specific tokens of the stale code rather than the abstract warning footer. The runtime must execute a structural remediation policy.
+Once an observation $o_k$ is flagged as stale, the host runtime must resolve the invalidation before passing the prompt sequence to the tokenizer. Simply leaving the stale text in place with an appended natural-language warning (e.g., *"Note: the file above was modified"*) is notoriously unreliable; deep self-attention layers routinely attend to the detailed, highly specific tokens of the stale code rather than the abstract warning footer. The runtime must execute a structural remediation policy, arbitrating between the trade-offs summarized in @tbl-vol3-invalidation-policies.
 
-```text
-+-----------------------------------------------------------------------------+
-| LOGICAL CONTEXT STAGING PIPELINE                                            |
-|                                                                             |
-|  [Turn 1: File Read]       [Turn 2: Edit Action]     [Turn 3: Current Turn] |
-|  +---------------------+   +---------------------+   +--------------------+ |
-|  | read("buffer.c")    |   | patch("buffer.c")   |   | build_project()    | |
-|  | -> Returns 80 lines |   | -> Lines 142-146 mod|   |                    | |
-|  +----------+----------+   +----------+----------+   +---------+----------+ |
-+-------------|-------------------------|------------------------|------------+
-              |                         |                        |
-              | (Dependency Edge)       | (WAR Invalidation)     |
-              v                         v                        v
-       +---------------+         +---------------+        +---------------+
-       | URI: buffer.c |         | Action: Write |        | Environment   |
-       | Hash: a8f9... |         | Target:       |        | Inode MTime   |
-       | State: VALID  |         |   buffer.c    |        | Verification  |
-       +-------+-------+         +-------+-------+        +-------+-------+
-               |                         |                        |
-               +-------------------> [ POISON ] <-----------------+
-                                         |
-                                         v
-                         +-------------------------------+
-                         | RESOLUTION POLICY ARBITRATION |
-                         +---------------+---------------+
-                                         |
-          +------------------------------+------------------------------+
-          v                                                             v
-+-------------------+                                         +-------------------+
-| POLICY A: PURGE   |                                         | POLICY B: TOMB    |
-| Evict lines 1-80. |                                         | Replace with:     |
-| Prefix cache bust |                                         | [STALE: buffer.c  |
-| Full prefill run. |                                         |  revised at T=2]  |
-+-------------------+                                         +-------------------+
-```
+| Resolution Strategy | Operational Mechanism | Prefix Cache Impact | Attention Distraction Risk | Token Overhead | Primary Failure Mode |
+|:---|:---|:---|:---|:---|:---|
+| **Hard Eviction (Purge)** | Excises historical observation tokens completely from prior turns | Catastrophic invalidation (busts downstream KV cache from eviction index) | Zero (stale tokens completely removed from prompt) | Negative ($\Delta \text{Tokens} < 0$, reclaims context) | Massive prefill recomputation latency on accelerator cluster |
+| **Semantic Tombstoning** | Replaces payload with compact structural marker referencing mutating action | High hit rate when appended at prompt tail; busts cache if edited in-place | Low-to-Moderate (model must attend to tombstone to suppress prior state) | Minimal ($10 - 25$ tokens per tombstone record) | Attentional leakage if model ignores tombstone directive |
+| **Just-In-Time Refresh** | Transparently invokes fresh tool read to rehydrate entity before prefill | Preserves prefix cache if refreshed observation matches prior length/slot | Zero (active context matches physical filesystem reality) | Neutral (replaces old payload with fresh payload) | Tool latency tax; potential cascading dependency invalidation |
 
-The runtime selects among three distinct invalidation resolution strategies based on token cost, prefix-cache stability, and the semantic necessity of the underlying data:
+: **Context Invalidation Resolution Policies**: Architectural trade-offs across eviction, tombstoning, and refresh strategies. {#tbl-vol3-invalidation-policies}
+
+The runtime selects among these three invalidation resolution strategies based on token cost, prefix-cache stability, and the semantic necessity of the underlying data:
 
 1. **Hard Context Eviction (Purge):** The runtime excises the stale observation $o_k$ entirely from the message history, removing both the tool invocation and its returned payload. While mathematically clean, hard eviction alters the exact token sequence of earlier turns. As established in Section 4.3, modifying historical tokens destroys prefix-cache sharing in runtimes utilizing RadixAttention or PagedAttention. If the runtime deletes 500 tokens from Turn 2 of an 18-turn trajectory, the inference engine cannot reuse the cached Key-Value (KV) tensors for Turns 3 through 18, forcing an expensive, full-context prefill phase.
 2. **Semantic Tombstoning:** To preserve KV cache reuse along the prompt prefix while neutralizing the hazard of stale tokens, the runtime replaces the body of $o_k$ with a compact, deterministic tombstone marker. The tombstone explicitly records that the observation was invalidated by a subsequent action, referencing the mutation by action ID and target path. Because the tombstone occupies minimal token space and clearly signals an invalid state, it prevents the model's attention heads from anchoring on obsolete variable names or line numbers while maintaining trajectory continuity.
@@ -874,29 +860,16 @@ Subjecting an autonomous agent to an uncalibrated working-memory architecture yi
 
 ### Benchmark Topologies: Synthetic Retrieval Versus Operational Trajectories
 
-Evaluating a working-memory architecture requires choosing an appropriate workload topology. In machine learning systems engineering, context evaluation topologies occupy a spectrum between isolated synthetic probes and end-to-end operational environments. Each topology measures a distinct boundary in the host supervisor's memory hierarchy.
+Evaluating a working-memory architecture requires choosing an appropriate workload topology. In machine learning systems engineering, context evaluation topologies occupy a spectrum between isolated synthetic probes and end-to-end operational environments, as contrasted in @tbl-vol3-eval-spectrum. Each topology measures a distinct boundary in the host supervisor's memory hierarchy.
 
-```text
-+-------------------------------------------------------------------------------+
-|                             EVALUATION SPECTRUM                               |
-|                                                                               |
-|  Synthetic Microbenchmarks                     Closed-Loop Operational Tasks  |
-|  (Passive In-Context Recall)                   (Active State & Invalidation)  |
-|                                                                               |
-|  +-------------------------+                   +---------------------------+  |
-|  | Single-Needle (NIAH)    |                   | Multi-Turn Code Editing   |  |
-|  | - Single static fact    |                   | - Iterative compile cycles|  |
-|  | - Uniform random noise  |                   | - File system mutations   |  |
-|  +------------+------------+                   +-------------+-------------+  |
-|               |                                              |                |
-|               v                                              v                |
-|  +-------------------------+                   +---------------------------+  |
-|  | Multi-Needle Associative|                   | Environment Orchestration |  |
-|  | - Key-value resolution  |                   | - Dependency refactoring  |  |
-|  | - Cross-turn reasoning  |                   | - Cascading state repairs |  |
-|  +-------------------------+                   +---------------------------+  |
-+-------------------------------------------------------------------------------+
-```
+| Evaluation Topology | Canonical Benchmarks | Primary Evaluated Capability | State Mutation Dynamics | Distractor Semantic Entropy | Feedback Channel | Systemic Failure Mode Exposed |
+|:---|:---|:---|:---|:---|:---|:---|
+| **Synthetic Needle Microbenchmark** | Single-Needle NIAH, RULER | Passive in-context addressability | Static (zero environment mutation) | Low (uniform random background text) | Zero (open-loop, single query) | Positional decay, RoPE inner product attenuation |
+| **Multi-Needle Associative Probe** | Multi-hop QA, BAMBOO | Cross-turn key-value association | Static (read-only reference corpus) | Moderate (topically related prose) | Zero (open-loop, multi-hop query) | Softmax attention dilution across intermediate rungs |
+| **Closed-Loop Code Repair** | SWE-bench, RepoQA | Dependency-aware context staging | Dynamic (file patches, compiler cycles) | High (dense codebases, stale diffs) | Authoritative test suite exit codes | Stale-state reuse, constraint evaporation under compaction |
+| **Interactive System Orchestration** | InterCode, OSWorld | Full trajectory lifecycle memory | Continuous (filesystem, network sockets) | Extreme (heterogeneous logs, terminal output) | Dynamic environmental telemetry | Compaction thrashing, blind-horizon amnesia, tool looping |
+
+: **Working Memory Evaluation Topologies**: Comparative taxonomy of evaluation paradigms, from passive synthetic probes to interactive closed-loop trajectories. {#tbl-vol3-eval-spectrum}
 
 The simplest evaluation topology is the *Needle-in-a-Haystack* (NIAH) microbenchmark. In this test, an arbitrary, high-entropy fact (the "needle," such as a cryptographic nonce or an isolated variable declaration) is inserted at a relative depth $\delta \in [0, 1]$ within a synthetically generated corpus of irrelevant text (the "haystack") spanning a total sequence length $S$. The runtime queries the model to extract the planted value:
 
@@ -1028,25 +1001,11 @@ $$S_{\text{CR}}(k) = \frac{1}{|\mathcal{C}|} \sum_{j=1}^{|\mathcal{C}|} \prod_{i
 
 Empirical evaluation reveals that narrative summarizers suffer an exponential decay in $S_{\text{CR}}$ as a function of compaction cycles: $S_{\text{CR}}(k) \approx (1 - \lambda)^k$, where $\lambda$ represents the per-cycle constraint attenuation rate. By contrast, structured checkpointing architectures that isolate negative constraints in an immutable schema achieve $\lambda = 0$, guaranteeing perfect constraint retention regardless of trajectory horizon.
 
-```text
-+-------------------------------------------------------------------------------+
-|                       DIFFERENTIAL CONSTRAINT RETENTION                       |
-|                                                                               |
-|  SCR (Constraint Retention)                                                   |
-|  1.0 +========================================= Structured Checkpointing      |
-|      |                                          (Schema-Enforced, lambda = 0) |
-|      |                                                                        |
-|      |  \                                                                     |
-|      |   \                                                                    |
-|      |    \                                                                   |
-|      |     \                                                                  |
-|      |      \                                                                 |
-|      |       *- - - - - - - - - - - - - - - - - Lossy Narrative Summarizer    |
-|  0.0 +----------------------------------------> (Exponential Decay: (1-l)^k)  |
-|      0        1        2        3        4        5                           |
-|                         Compaction Cycles (k)                                 |
-+-------------------------------------------------------------------------------+
-```
+Consider a long-horizon systems debugging agent undergoing $k=5$ successive compaction cycles. Under lossy narrative summarization with an empirical constraint attenuation rate of $\lambda = 0.20$ (a 20% chance per cycle of dropping a seemingly minor parameter flag or negative boundary condition), the probability of retaining all critical constraints decays exponentially:
+
+$$S_{\text{CR}}(5) \approx (1 - 0.20)^5 = (0.80)^5 \approx 0.328 \quad (32.8\%)$$
+
+By turn 30, more than two-thirds of the initial negative constraints have evaporated from the working memory, directly causing the agent to repeat forbidden actions or violate security boundaries. Conversely, under structured checkpointing where the invariant constraint set $\Omega$ is maintained as an immutable schema partition ($\lambda = 0$), constraint retention remains invariant at $S_{\text{CR}}(k) = 1.00$ ($100\%$) across indefinitely extended horizons.
 
 Evaluating an agent's working memory reveals that context management is not an aesthetic prompt-formatting challenge, but a disciplined systems resource allocation problem. A high-performance working memory architecture must dynamically police its logical working set—striking a calculated balance between information retention, state invalidation, and token economy.
 
