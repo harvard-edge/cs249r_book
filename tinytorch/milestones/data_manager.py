@@ -42,7 +42,7 @@ DATASET_INFO = {
         'download_size_mb': 12,
         'extracted_size_mb': 55,
         'description': '70,000 handwritten digits (28x28 grayscale)',
-        'url': 'http://yann.lecun.com/exdb/mnist/'
+        'url': 'https://ossci-datasets.s3.amazonaws.com/mnist/'
     }
 }
 
@@ -173,7 +173,7 @@ class DatasetManager:
         mnist_dir.mkdir(exist_ok=True)
 
         # MNIST URLs
-        base_url = "http://yann.lecun.com/exdb/mnist/"
+        base_url = "https://ossci-datasets.s3.amazonaws.com/mnist/"
         files = [
             "train-images-idx3-ubyte.gz",
             "train-labels-idx1-ubyte.gz",

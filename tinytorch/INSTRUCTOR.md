@@ -57,7 +57,7 @@ TinyTorch supports three assignment staging tiers via `--tier <tier>`:
 
 | Release Tier | CLI Flag | Student Implementation Scope | Best For |
 |:---|:---|:---|:---|
-| **Student** *(Default)* | `--tier student` | **52 core regions** (189 secondary helper blocks scaffolded) | Standard 14-week university courses (Harvard CS249r model) |
+| **Student** *(Default)* | `--tier student` | **52 core regions** (189 secondary helper blocks scaffolded) | Standard 16-week university courses (Harvard CS249r model); see the sample schedule below |
 | **Challenge** | `--tier challenge` | Regions marked `role="challenge"` *(currently unannotated: no `role="challenge"` region exists yet, so `tito nbgrader generate --tier challenge` refuses rather than emit the full reference)* | Advanced graduate courses, hackathons, honors tracks |
 | **Instructor** | `--tier instructor` | **0 Blocks** (complete reference solutions retained) | Solution keys, grading rubrics, and TA references |
 
@@ -80,7 +80,7 @@ Hardware extensions are optional and ungraded, and every one falls back to NumPy
 tito nbgrader generate 01_tensor --tier student
 
 # Or stage full challenge assignment
-tito nbgrader generate 01_tensor --tier challenge
+# (the challenge tier has no annotated regions yet and refuses to stage)
 
 # Create student release notebook with solutions removed
 tito nbgrader release 01_tensor
@@ -168,8 +168,10 @@ tito nbgrader report --assignment 01_tensor
 - Output validation
 
 ### **Manually Graded (30%)**
-- ML Systems Thinking questions (3 per module)
-- Each question: 10 points
+- ML Systems Reflection Questions, 4 to 6 per module (97 in total across the
+  twenty modules, five being the common case, plus 5 bonus questions)
+- At 10 points each that is 40 to 60 points of manual marking per module, so
+  scale the weight to your own total rather than assuming a fixed 30%
 - Focus on understanding, not perfection
 
 ### **Grading Rubric for ML Systems Questions**
@@ -293,7 +295,7 @@ def backward(self, grad):
 - Missing None gradient handling
 - Shows understanding but incomplete
 
-### Module 09: Spatial - Convolution Implementation
+### Module 09: Convolutions - Spatial Operations
 
 **Excellent Solution (9-10 points)**:
 ```python
@@ -476,7 +478,7 @@ def forward(self, q, k, v):
 ### **Module 06-08: Autograd, Optimizers & Training**
 - **Focus**: Automatic differentiation, gradient descent, end-to-end training
 - **Key Concept**: The training loop is where all components come together
-- **Project**: Train a real model on MNIST
+- **Project**: Train a real model on TinyDigits (MNIST is an optional extension)
 
 ### **Module 09-13: CNNs & Transformers**
 - **Focus**: Spatial operations, tokenization, attention, full architectures
@@ -492,6 +494,13 @@ def forward(self, q, k, v):
 - **Focus**: Benchmark submission and competition
 - **Key Concept**: Professional benchmarking with standardized reporting
 - **Capstone**: Demonstrate framework capabilities with reproducible results
+
+> **Before you grade on it**: `tito benchmark capstone` does not yet measure the
+> student's model. It prints fixed placeholder values, identical for every
+> student, and says so on screen (`tito/commands/benchmark.py:308-316` sets
+> `is_placeholder: True`). Grade Module 20 on the submission the student
+> generates from their own `BenchmarkReport` inside the notebook, not on that
+> command's output.
 
 ## 🎯 Learning Objectives
 
@@ -530,7 +539,7 @@ Look for:
 ## 💡 Teaching Tips
 
 ### **1. Emphasize Building Over Theory**
-- Have students type every line of code
+- Have students type the code each module asks for, rather than pasting it
 - Run tests immediately after implementation
 - Break and fix things intentionally
 
@@ -605,7 +614,7 @@ ls submitted/*/MODULE/
 | 7 | 07 Optimizers | Training Algorithms |
 | 8 | 08 Training | Complete Training Loop |
 | 9 | Midterm Project | Build and Train Network |
-| 10 | 09 Spatial | Convolutions, CNNs |
+| 10 | 09 Convolutions | Conv2d, pooling, BatchNorm2d, CNNs |
 | 11 | 10 Tokenization | Text Processing |
 | 12 | 11 Embeddings | Word Representations |
 | 13 | 12 Attention | Attention Mechanisms |
@@ -616,12 +625,12 @@ ls submitted/*/MODULE/
 ## 🎓 Assessment Strategy
 
 ### **Continuous Assessment (70%)**
-- Module completion: 4% each × 16 = 64%
+- Module completion: 3.2% each × 20 = 64%
 - Checkpoint achievements: 6%
 
 ### **Projects (30%)**
 - Midterm: Build and train CNN (15%)
-- Final: Extend TinyGPT (15%)
+- Final: Extend the `GPT` built in Module 13 (15%)
 
 ## 📚 Additional Resources
 

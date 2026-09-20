@@ -6,7 +6,7 @@
 *The Complete System Stack: From physical DRAM bytes to autoregressive transformers, built entirely from scratch.*
 :::
 
-We began TinyTorch with a fundamental premise: you cannot truly understand a machine learning system by treating it as a black box. Deep learning frameworks like PyTorch, JAX, and TensorFlow are often taught through high-level API calls—invoking `nn.Linear`, calling `.backward()`, or wrapping models in `torch.compile()`. To the developer, tensors appear as magical multidimensional entities, autograd feels like symbolic calculus, and GPU acceleration seems like free speed.
+We began TinyTorch with a fundamental premise: you cannot truly understand a machine learning system by treating it as a black box. Deep learning frameworks like PyTorch, JAX, and TensorFlow are often taught through high-level API calls, invoking `nn.Linear`, calling `.backward()`, or wrapping models in `torch.compile()`. To the developer, tensors appear as magical multidimensional entities, autograd feels like symbolic calculus, and GPU acceleration seems like free speed.
 
 Over the course of twenty modules and three competitive milestones, you dismantled that magic. You built a publication-grade, fully functional deep learning framework from bare silicon concepts using only Python and raw NumPy memory buffers. By refusing to take abstractions for granted, you discovered what a machine learning framework actually is: **a specialized operating system designed to manage tensor memory, choreograph dynamic directed acyclic graphs, and saturate parallel hardware compute engines.**
 
@@ -18,14 +18,14 @@ The architecture of TinyTorch unfolded across four deliberate tiers of progressi
 
 ### 1. The Core Engine (Part I)
 Before a single neuron could fire, you had to define the physical substrate of machine learning:
-- **Tensors and Strides (@sec-tensors)**: You proved that multidimensional tensors do not exist in physical hardware. Memory is a flat, one-dimensional ribbon of byte addresses in DRAM. A tensor is simply a coordinate lens defined by a pointer, a shape tuple, and a stride vector. You implemented zero-copy slicing, broadcasting via zero-valued strides, and explicit memory contiguity.
+- **Tensors and Strides (@sec-tensors)**: You proved that multidimensional tensors do not exist in physical hardware. Memory is a flat, one-dimensional ribbon of byte addresses in DRAM. A tensor is simply a coordinate lens defined by a pointer, a shape tuple, and a stride vector. You worked out the stride arithmetic that turns an index into an offset, saw how a zero-valued stride expresses broadcasting without moving bytes, and separated owning a buffer from laying it out contiguously. TinyTorch's own constructor then takes the opposite path from a production framework and copies on every construction, which is the choice that made the ownership rule simple enough to reason about and the cost visible enough to measure.
 - **Differentiable Layers and Numerical Stability (@sec-activations–@sec-layers, @sec-losses)**: You constructed linear projections, layer normalizations, and loss functions. In doing so, you confronted IEEE 754 floating-point realities, engineering numerically stable Softmax and LogSumExp formulations that prevent catastrophic exponential overflow.
 - **Autograd and Dynamic Graph Execution (@sec-autograd)**: You implemented automatic differentiation from first principles. Rather than symbolic algebra or numerical perturbation, you built a reverse-mode automatic differentiation engine using dynamic execution tapes. Gradients flow backwards through an acyclic computational graph via depth-first topological sorting, correctly handling fan-out branches and in-place gradient accumulation.
 - **Optimization and Training (@sec-optimizers, @sec-training, @sec-milestone-1)**: You engineered the `AdamW` optimizer, deriving first- and second-moment exponential moving averages with bias corrections and decoupled weight decay. You closed the foundation tier by training `DigitMLP` from scratch to classify handwritten digits, verifying that your home-built autograd engine converges identically to industrial frameworks.
 
 ### 2. Deep Architectures (Part II)
 With the mathematical and systems engine verified, you scaled the framework to modern perception and language workloads:
-- **Spatial Convolutions (@sec-convolutions)**: You implemented 2D spatial feature extraction, contrasting naive nested 6-deep loops with the classic `im2col` matrix transformation that reduces spatial filtering to high-performance general matrix multiplication (GEMM).
+- **Spatial Convolutions (@sec-convolutions)**: You implemented 2D spatial feature extraction with the seven nested loops that pick an output position and form its dot product, and you priced what those loops cost. @Sec-acceleration then built the `im2col` lowering that reduces the same filtering to one high-performance general matrix multiplication (GEMM), and timed it against your loops.
 - **Tokenization and Discrete Semantics (@sec-tokenization, @sec-embeddings)**: You built a Byte-Pair Encoding (BPE) tokenizer from the ground up, learning how vocabulary tables and byte merges convert raw unicode strings into discrete token IDs, and how embedding tables project discrete categorical indices into continuous vector spaces.
 - **Attention and Generative Transformers (@sec-attention, @sec-transformers, @sec-milestone-2)**: You constructed causal multi-head self-attention. You wrestled with coordinate axis permutations (`[Batch, Seq, Heads, Dim]`), lower-triangular causal masking with $-\infty$ additive offsets, and scaled dot-product routing. You stacked these blocks with residual skip connections into `TinyGPT` and generated coherent autoregressive text from a blank prompt.
 
@@ -36,10 +36,10 @@ Building a model is only half the systems discipline; the other half is making i
 - **Kernel Acceleration and KV Cache Memoization (@sec-acceleration, @sec-memoization)**: You broke the memory bandwidth wall. You implemented loop tiling to fit active matrix blocks into L1/L2 cache hierarchies, fused activation chains to eliminate DRAM round trips, and built an autoregressive Key-Value Cache state machine that converted generation from $O(N^2)$ quadratic redundant recomputation to $O(N)$ linear step-by-step lookups.
 - **The Torch Olympics and the Pareto Frontier (@sec-capstone, @sec-milestone-3)**: You deployed your optimized models against strict MLPerf-style benchmarks. You proved why single-metric leaderboards are dangerous (exemplified by the degenerate `ZeroModel`), and charted the multi-objective Pareto frontier across accuracy retention floors ($R \ge 0.99$), memory compression ratios ($C$), and empirical inference speedup ($S$).
 
-### 4. Hardware Horizons (Part IV)
+### 4. Extensions (Part IV)
 Finally, in @sec-extensions, you stepped below the Python interpreter:
 - You crossed the language boundary via `ctypes`, passing contiguous float32 buffers directly into compiled C++ SIMD loops on ARM NEON and x86 AVX2.
-- You authored GPU block kernels in Triton, exploring SPMD program grids, automatic shared memory bank swizzling, and asynchronous copy pipelining.
+- You read a Triton kernel as a block-level SPMD program, with `tl.program_id` selecting a block and a mask switching off the lanes that would run past the end of the array. @Sec-extensions is explicit that the coalescing, the bank-conflict-free shared memory and the copy pipelining are what the Triton compiler generates for you, which is the point: the kernel in that chapter is the kind a compiler writes.
 - You bridged to Apple Metal Performance Shaders (MPS), uncovering the exact latency break-even point where compute intensity covers the fixed overhead of device memory transfer.
 
 ---
@@ -49,7 +49,7 @@ Finally, in @sec-extensions, you stepped below the Python interpreter:
 As you step from TinyTorch into production frameworks and custom hardware, five universal principles will govern every system you design:
 
 ::: {.callout-principle title="Principle 1: Memory Substrates Govern Computational Throughput"}
-Tensors are coordinate lenses over linear byte ribbons. In modern hardware, floating-point arithmetic is virtually free, but moving bytes across memory buses is exceptionally expensive. High-performance machine learning engineering is rarely about optimizing arithmetic; it is about maximizing arithmetic intensity—structuring algorithms so that every byte loaded from DRAM into SRAM or register files is reused dozens of times before eviction.
+Tensors are coordinate lenses over linear byte ribbons. In modern hardware, floating-point arithmetic is virtually free, but moving bytes across memory buses is exceptionally expensive. High-performance machine learning engineering is rarely about optimizing arithmetic; it is about maximizing arithmetic intensity, structuring algorithms so that every byte loaded from DRAM into SRAM or register files is reused dozens of times before eviction.
 :::
 
 ::: {.callout-principle title="Principle 2: Autodiff is an Operational Graph Trace"}
@@ -57,7 +57,7 @@ Automatic differentiation is not magic and not symbolic calculus. It is an opera
 :::
 
 ::: {.callout-principle title="Principle 3: The Memory Wall Dominates Generative Inference"}
-The distinction between compute-bound and memory-bandwidth-bound execution is the central reality of deep learning hardware. Prompt prefill in large language models processes hundreds of tokens in parallel, saturating matrix multiplication units (compute-bound). Autoregressive decoding processes a single token at a time, reading billions of parameter and KV cache bytes just to execute a few thousand arithmetic operations (memory-bandwidth-bound). Every modern serving optimization—from PagedAttention and FlashDecoding to INT4 weight-only quantization—exists solely to alleviate this memory bus bottleneck.
+The distinction between compute-bound and memory-bandwidth-bound execution is the central reality of deep learning hardware. Prompt prefill in large language models processes hundreds of tokens in parallel, saturating matrix multiplication units (compute-bound). Autoregressive decoding processes a single token at a time, reading billions of parameter and KV cache bytes just to execute a few thousand arithmetic operations (memory-bandwidth-bound). Modern serving optimizations attack this bottleneck from two directions. FlashDecoding and INT4 weight-only quantization reduce the bytes that must cross the bus, which is the bandwidth problem @sec-profiling taught you to measure. PagedAttention attacks capacity rather than bandwidth: @sec-memoization shows it reclaiming the 60 to 80 percent of high-bandwidth memory that reservation, internal, and external fragmentation waste, bringing that waste under 4 percent. Both directions matter, and confusing them is how a serving system ends up optimizing the wrong resource.
 :::
 
 ::: {.callout-principle title="Principle 4: No Optimization Exists in Isolation Without Verification"}
