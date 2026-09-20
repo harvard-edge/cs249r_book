@@ -117,7 +117,7 @@ A naive retrieval call treats external storage as an unconstrained associative p
 
 ![**The Formal Retrieval Contract**: The formal retrieval contract between the agent host runtime and persistent storage subsystems. The host issues a strictly typed query tuple $\mathcal{Q}$ governed by latency budgets ($T_{\text{budget}}$), freshness bounds ($\tau_{\text{freshness}}$), and spatial namespaces ($\mathcal{S}_{\text{scope}}$). The storage engine returns structured result envelopes $\mathcal{R}_i$ decorated with cryptographic version hashes and trust classifications. Before staging into working context, an ingress quarantine boundary verifies source authority, enforces token budgets ($S_{\max}$), and sanitizes untrusted text to prevent prompt injection.](images/svg/fig-vol3-retrieval-contract.svg){#fig-vol3-retrieval-contract width="95%"}
 
-### The Query Tuple and Bounded Execution {#sec-vol3-persistent-query-tuple}
+### The Query Tuple {#sec-vol3-persistent-query-tuple}
 
 An unconstrained retrieval query creates unbounded resource contention across both the storage subsystem and the model's inference runtime. If an agent emits a broad semantic query without specifying operational limits, the storage engine may exhaust disk I/O scanning dense vector collections, while the resulting candidate flood threatens to saturate the host's token staging buffers. To guarantee deterministic execution and protect the runtime from resource exhaustion, every interaction with persistent storage must be encapsulated within a formal query tuple:
 
@@ -171,7 +171,7 @@ $$\text{Memory}_{\text{KV}} = 2 \times 32 \times 32 \times 128 \times 2 \times 1
 By enforcing a strict retrieval contract with $K_{\text{top}} = 5$ and a score threshold $\sigma_{\min} = 0.78$, the runtime admits only the top $5$ verified chunks ($1{,}500$ tokens). This slashes the prefill penalty from $300\text{ ms}$ to $30\text{ ms}$ and restricts KV cache allocation to $0.79\text{ GB}$, preventing out-of-memory faults on the host accelerator.
 :::
 
-### The Result Envelope and Provenance Verification {#sec-vol3-persistent-result-envelope}
+### The Result Envelope {#sec-vol3-persistent-result-envelope}
 
 When the storage subsystem satisfies a query, it must not return a loose list of text strings. Raw strings discard execution context, making it impossible for the host runtime to assess whether the information is fresh, authentic, or relevant. The storage layer must wrap every retrieved item in a strongly typed result envelope:
 
@@ -211,7 +211,7 @@ Primary authoritative records encompass immutable source code files, official AP
 
 : **Trust Level Classification Matrix**: Trust level classification matrix for retrieved storage records, detailing source origin, permitted operational use, and mandatory runtime quarantine requirements. {#tbl-vol3-trust-levels}
 
-### Ingress Quarantining, Boundary Sanitization, and Budget Truncation {#sec-vol3-persistent-quarantine}
+### Ingress Quarantining {#sec-vol3-persistent-quarantine}
 
 Persistent storage indexes store untrusted text alongside verified code. An external document retrieved from a public issue tracker or an open-source dependency may contain adversarial instructions engineered to hijack the agent's decode loop—a failure mode known as indirect prompt injection. If an unprivileged retriever injects external text directly into the agent's context without structural framing, the foundation model cannot distinguish between host operating system instructions and passive retrieved data.
 
@@ -236,21 +236,29 @@ By wrapping the payload in explicit metadata wrappers and escaping internal deli
 
 The second quarantine stage enforces strict token budgeting. An agent runtime allocates a fixed token budget $S_{\text{budget}}$ for external evidence during each iteration of its deliberation loop. If an authoritative file exceeds the per-chunk ceiling $S_{\max}$, the runtime must not perform naive character-level slicing, which risks splitting Unicode byte sequences or severing identifiers midway through a statement. Instead, the runtime applies syntax-aware truncation:
 
-```text
-Algorithm: Ingress Token Budget Allocation
-Input:     Result envelopes {R_1, ..., R_k}, Total Budget S_budget, Chunk Ceiling S_max
-Output:    Staged context payload P
-
-1. Filter:  Discard any R_i where R_i.Score < sigma_min
-2. Sort:    Order remaining envelopes descending by R_i.Score
-3. Init:    P <- empty list, TokensUsed <- 0
-4. For each R_i in sorted envelopes:
-5.    AllowedTokens <- min(S_max, S_budget - TokensUsed)
-6.    If AllowedTokens <= 0: Break
-7.    Payload <- SyntaxTruncate(R_i.Content, AllowedTokens)
-8.    TokensUsed <- TokensUsed + TokenCount(Payload)
-9.    P.Append(WrapEnvelope(R_i, Payload))
-10. Return P
+```python
+def allocate_ingress_budget(
+    envelopes: list[ResultEnvelope],
+    s_budget: int,
+    s_max: int,
+    sigma_min: float
+) -> list[str]:
+    """Allocate tokens to retrieved result envelopes under bounded budget."""
+    # Filter envelopes failing the minimum confidence threshold
+    valid = [r for r in envelopes if r.score >= sigma_min]
+    # Sort remaining envelopes descending by retrieval score
+    sorted_envs = sorted(valid, key=lambda r: r.score, reverse=True)
+    
+    staged_payloads: list[str] = []
+    tokens_used = 0
+    for r in sorted_envs:
+        allowed_tokens = min(s_max, s_budget - tokens_used)
+        if allowed_tokens <= 0:
+            break
+        truncated = syntax_truncate(r.content, allowed_tokens)
+        tokens_used += count_tokens(truncated)
+        staged_payloads.append(wrap_envelope(r, truncated))
+    return staged_payloads
 ```
 
 Syntax-aware truncation uses tree-sitter or lexical grammars to identify clean structural cut points, such as function or class boundaries in source code, or section headers in technical documentation. If a document must be clipped, the runtime inserts a cryptographic truncation marker recording the omitted byte offset, informing the model that additional content remains on disk at the specified URI.
@@ -269,7 +277,7 @@ When an autonomous agent attempts to locate the exact definition of a symbol—s
 
 **Durable software repositories require structured retrieval architectures: lexical inverted indexes with BM25 scoring provide sub-millisecond, exact-identifier lookup with bounded saturation, while abstract syntax tree (AST) symbol graphs preserve topological dependencies and lexical scopes that unstructured models destroy.** The primary systems objective of structured retrieval is not to infer fuzzy human intent, but to provide a deterministic, high-throughput filtering substrate. By organizing raw disk artifacts into inverted index postings lists and directed graph relations, the storage engine guarantees that exact symbol definitions, explicit call hierarchies, and constrained filesystem scopes can be isolated and verified before volatile model context is ever consumed.
 
-### Lexical Inverted Indexes and the BM25 Scoring Model
+### Lexical Inverted Indexes
 
 The fundamental data structure underpinning high-throughput lexical retrieval is the *inverted index*. Rather than scanning a collection of $N$ documents to discover which documents contain a target token $t$, an inverted index inverts the relationship: it maintains a sorted vocabulary dictionary $\mathcal{V}$ where each unique term maps directly to a *postings list*. A postings list is an ordered array of posting records, each containing a document identifier $D_j$, the within-document term frequency $f(t, D_j)$, and optional positional offsets indicating where the term occurs within the token stream.
 
@@ -329,7 +337,7 @@ $$\text{score}(D_2, \mathcal{Q}) = 9.808 \times 0.863 = 8.46$$
 Despite containing six times as many occurrences of the search term, the monolithic test file $D_2$ scores $42\%$ lower than the compact header file $D_1$. The combination of document length penalization and asymptotic term frequency saturation correctly ranks the concise primary definition ahead of the sprawling test harness.
 :::
 
-### Syntax-Directed Indexing and Code Symbol Graphs
+### Syntax-Directed Indexing
 
 While BM25 excels at isolating documents containing rare, literal text sequences, code is not an unstructured bag of words. Code possesses rigorous, deterministic grammar governed by formal programming language specifications. A lexical search engine treats a variable declaration, a member access inside a comment, and an instantiation in an import statement as identical token occurrences. To support architectural reasoning, an agent runtime must treat code as a graph of typed syntactic constructs.
 
@@ -358,7 +366,7 @@ As illustrated in @fig-vol3-lexical-vs-ast, this topological representation enab
 
 By compiling source code into structured symbol graphs, the retrieval substrate converts unpredictable natural-language text matching into deterministic graph traversals. When an agent requires the exact boundary of a function, the storage layer returns the exact AST span, guaranteeing that no trailing closing braces, variable initializations, or macro guards are truncated.
 
-### Relational Constraints and Compound Metadata Filtering
+### Relational Constraints
 
 In large-scale production repositories, neither lexical search nor symbol graph traversal operates in a vacuum. A software repository contains rich operational metadata that defines the boundaries of any valid development task: file paths, programming languages, build target configurations, git commit histories, and ownership boundaries. An agent tasked with resolving an issue in the authentication subsystem of a backend service should not inspect test fixtures in an unrelated legacy client or obsolete build artifacts in an export directory.
 
@@ -389,7 +397,7 @@ Under pre-filtering, relational metadata attributes (such as `language = 'python
 
 Consequently, production persistent storage systems employ *iterative single-stage execution* or *cost-based physical planning*. The query planner inspects the estimated cardinality of the metadata predicate against the inverse document frequency of the search terms. If the relational predicate is highly selective, it executes pre-filtered bitset intersection; if the term is extraordinarily rare and the relational predicate is broad, it executes lexical scoring first with immediate early-exit bounding.
 
-### Failure Modes: The Vocabulary Mismatch and Structural Blindness
+### Vocabulary Mismatch Pathologies
 
 
 ::: {.column-margin}
@@ -401,10 +409,10 @@ Despite the mathematical rigor of BM25 and the deterministic precision of AST sy
 
 The most pervasive failure mode of lexical indexing is the *vocabulary mismatch problem*, originally analyzed by Furnas et al. (1987). Human developers and autonomous agents frequently describe computational operations using terminology that shares zero literal tokens with the underlying implementation. Consider an agent attempting to investigate an unhandled connection drop:
 
-```text
-Agent Investigation Query: "network packet throttling and rate limiting algorithm"
-Target Codebase Implementation: TokenBucketTrafficShaper (struct leaky_bucket_valve)
-```
+> **Query vs. Code Vocabulary Mismatch:**  
+> - **Agent Query:** `"network packet throttling and rate limiting algorithm"`  
+> - **Target Implementation:** `TokenBucketTrafficShaper` (`struct leaky_bucket_valve`)  
+> - **Result:** Lexical overlap $= \emptyset$; BM25 postings yield zero matches.
 
 In this scenario, the implementing source file uses the technical domain terms `leaky_bucket`, `drain_rate`, `capacity`, and `watermark`. It never once uses the tokens `throttling`, `rate`, or `limiting`. When evaluated through BM25, the query terms yield zero postings matches within the target implementation file. Because lexical inverted indexes cannot infer synonymy, paraphrase, or high-level conceptual relationships, the search engine returns either completely irrelevant documents that happen to contain the word `network` in a comment, or an empty result set (@fig-vol3-lexical-ast).
 
@@ -427,7 +435,7 @@ When an agent encounters these architectural boundaries, relying exclusively on 
 :::
 When an agent runtime searches persistent storage for relevant context, lexical inverted indexing fails the moment the user's prompt and the target implementation express identical semantics using disjoint vocabularies. If an agent investigating memory leaks queries a codebase for "reclaim orphaned file descriptors," BM25 scores every document lacking those exact morphological roots as zero, failing to surface a critical cleanup routine titled `close_zombie_handles()`. Conversely, pure dense vector retrieval projects both strings into continuous geometric neighborhoods within a latent manifold, resolving the vocabulary mismatch with ease. Yet dense semantic similarity introduces a perilous failure mode of its own: it blurs fine-grained token boundaries, happily returning `get_active_handles()` or `close_socket_descriptors()` because their contextual embeddings occupy adjacent coordinate regions. In a systems engineering environment, substituting an interface definition or an adjacent allocator method for an exact target symbol introduces catastrophic functional regressions. High-assurance agent architectures resolve this tension not by choosing between keyword matching and semantic embeddings, but by decoupling conceptual intent matching from literal identifier verification, executing dual-channel retrieval over inverted lexical postings and dense vector manifolds, and unifying disparate score distributions through non-parametric rank fusion.
 
-### Dense Vector Representations and Bi-Encoder Geometry
+### Dense Vector Representations
 
 Dense retrieval maps textual passages and agent queries into points within a shared low-dimensional Euclidean space $\mathbb{R}^d$, where geometric proximity reflects conceptual similarity. The primary operational interface for production vector retrieval is the bi-encoder architecture [@karpukhin2020dense]. Unlike cross-encoders that compute full bidirectional cross-attention across the concatenated pair of query and document tokens, a bi-encoder employs two structurally decoupled neural networks: a query encoder $E_Q(\cdot)$ and a document encoder $E_D(\cdot)$. In many production systems, $E_Q$ and $E_D$ share weights or derive from the same underlying transformer backbone, operating with a latent dimensionality typically configured to $d \in [384, 1536]$.
 
@@ -467,7 +475,7 @@ $$T_{\text{mem}} = \frac{15.36 \text{ GB}}{68 \text{ GB/s}} \approx 225.88 \text
 Because $T_{\text{mem}} \gg T_{\text{arith}}$, the exact scan is deeply memory-bound, imposing an unyielding latency floor of $\approx 226 \text{ ms}$ per retrieval step. If an agent executes an iterative multi-turn debugging trajectory requiring 20 storage probes, exact linear scanning consumes over $4.5 \text{ seconds}$ in pure memory bus transport, rendering interactive responsiveness impossible. Durable storage runtimes must abandon exact $O(N)$ scanning in favor of sub-linear approximate nearest neighbor data structures.
 :::
 
-### Approximate Nearest Neighbor Mechanics: HNSW and IVF-PQ
+### Approximate Nearest Neighbor Mechanics
 
 To bypass the memory bus bottleneck of exact linear scanning, persistent vector stores rely on Approximate Nearest Neighbor (ANN) indexing. ANN algorithms trade a bounded, deterministic fraction of retrieval recall (typically maintaining $\text{Recall}@K \ge 0.95$) in exchange for orders-of-magnitude reductions in query latency and memory consumption. Production agent storage engines converge on two foundational architectural families: graph-based skip-lists and quantized inverted files.
 
@@ -522,7 +530,7 @@ As summarized in @tbl-vol3-ann-tradeoffs, this inner loop contains zero floating
 
 : **Vector Indexing Mechanism Trade-offs**: Algorithmic and hardware trade-offs of vector indexing mechanisms across exact scan, IVF-PQ, and HNSW. Performance characteristics reflect $N = 10^7$ vectors at $d=768$ in 16-bit floating-point precision. {#tbl-vol3-ann-tradeoffs}
 
-### The Precision Trap of Semantic Matching and Reciprocal Rank Fusion
+### The Semantic Precision Trap
 
 Despite the mathematical sophistication of high-dimensional ANN indexes, relying exclusively on dense vector similarity creates an acute vulnerability in agent software systems: the semantic precision trap. Dense encoders are trained to map conceptual paraphrases to proximate geometric coordinates. In natural language conversation, mapping "terminate process" and "kill task" to the same neighborhood is desirable. In systems programming, however, semantic proximity frequently correlates with catastrophic functional divergence.
 
@@ -664,7 +672,7 @@ $$\text{Function}(\texttt{process\_transaction}) \xrightarrow{\text{CALLS}} \tex
 
 This relationship is preserved explicitly via pointer references in the graph index, completely independent of whether these three symbols share lexical tokens, reside in the same source directory, or were authored in different programming languages.
 
-### Multi-Hop Traversal and Seeded Neighborhood Expansion
+### Multi-Hop Graph Traversal
 
 Graph-structured retrieval does not replace dense and lexical search; it orchestrates them. Pure graph traversal without an entry point requires exhaustive scanning of millions of vertices, whereas pure vector search locates isolated entries but cannot follow connections. Modern agent runtimes bridge this divide using *seeded neighborhood expansion* (@fig-vol3-cpg-traversal b), a two-stage process combining hybrid similarity search with structural graph traversal.
 
@@ -715,7 +723,7 @@ The agent's working memory has a total capacity of $T_{\max} = 32,768$ tokens, w
 
 Once the induced subgraph $G_{\text{sub}}$ is selected, it must be serialized into a format ingestible by the neural inference engine. Dumping raw JSON node-and-edge lists wastes token capacity on syntactic punctuation. Production systems serialize subgraphs as *hierarchical structural callpaths*, expressing the traversal as indented, annotated call trees:
 
-```text
+```bash
 [PATH] network_rx.c:handle_packet()
   -> CALLS packet_parser.c:deserialize_v2()
     -> READS schema.h:HeaderFormat (struct)
@@ -725,7 +733,7 @@ Once the induced subgraph $G_{\text{sub}}$ is selected, it must be serialized in
 
 This compact textual serialization translates graph topology back into an unbroken linear representation, allowing the model's self-attention mechanism to operate across structural execution paths without blowing up context bounds.
 
-### Graph Construction Economics and Ingestion Latency
+### Graph Construction Economics
 
 While structural graphs solve the multi-hop retrieval problem, they impose significant compute, memory, and storage overhead compared to raw text indexing. Building a Code Property Graph requires parsing raw source code into ASTs, resolving symbols, building control flow graphs, and tracing data flows across translation units. System designers must navigate strict trade-offs between static analysis depth and index ingestion latency (@fig-vol3-cpg-ingestion).
 
@@ -764,7 +772,7 @@ When an autonomous agent executes a tool invocation that modifies a source file,
 
 **Derivative search indexes—lexical posting lists, vector embedding spaces, and structural symbol graphs—are not sources of truth; they are lossy, asynchronously materialized views of the underlying filesystem. When an agent mutates the authoritative workspace, any temporal lag between file modification and index synchronization produces a split-brain condition where the unprivileged neural model observes its own obsolete past as present reality. Without formal write-invalidation protocols, generational tracking, and freshness fencing, durable storage ceases to function as a reliable memory hierarchy and transforms into an active engine of agent hallucination, divergence, and unrecoverable execution loops.**
 
-### The Materialized View Dilemma and Consistency Lags
+### The Materialized View Dilemma
 
 To formalize the invalidation boundary, we model the agent workspace as an authoritative collection of source documents $\mathcal{D} = \{D_1, D_2, \dots, D_N\}$. Each document $D_j$ possesses raw byte content $C(D_j) \in \Sigma^*$ and a monotonically increasing filesystem modification timestamp $\tau_{\text{mod}}(D_j) \in \mathbb{R}^+$. The persistent storage layer described across this chapter does not expose raw document strings directly to the model during search. Instead, it operates over three distinct materialized views derived from $\mathcal{D}$:
 
@@ -784,7 +792,7 @@ $$\Delta t = t_{\text{sync}} - t_w$$
 
 During the staleness window $\Delta t$, any retrieval query $\mathcal{Q}$ processed by the storage subsystem executes against an out-of-date index state $\mathcal{I}(t_w^-)$. If the agent issues a query that touches the modified lexical postings, vector neighborhoods, or graph edges during this window, the retrieved context $\mathcal{R}$ contains pre-mutation snippets. Unlike human programmers who read open file buffers directly in an editor and rely on incremental language servers, an autonomous agent relies almost exclusively on retrieval pipelines to assemble its working context. Serving a stale view to the agent runtime directly injects falsified premises into the unprivileged model's prompt, inducing an irrecoverable divergence between the host environment and the agent's internal deliberation trace.
 
-### Invalidation Architectures: Synchronous, Asynchronous, and Read-Time Filtering
+### Invalidation Architectures
 
 Engineering an invalidation subsystem requires navigating a fundamental trade-off between write amplification, query latency, and index staleness. Host agent runtimes implement this trade-off across three primary architectural patterns.
 
@@ -840,7 +848,7 @@ If embedding inference relies on a remote cloud API subject to network round-tri
 Tombstoning reduces write-path latency by five orders of magnitude ($88\text{ ms} \to 0.0004\text{ ms}$) while maintaining mathematical zero-staleness ($\Delta t = 0$), completely shielding the model from pre-mutation content without stalling execution.
 :::
 
-### The Self-Contradiction Trap and Generational Reclamation
+### The Self-Contradiction Trap
 
 The operational necessity of strict invalidation becomes apparent when examining the mechanics of model deliberation under stale retrieval. When an agent receives out-of-date context following a code edit, it does not fail with an explicit software exception or a cleanly caught error code. Instead, it falls into the *Self-Contradiction Trap*.
 
@@ -848,7 +856,7 @@ Because foundation models lack persistent internal state across distinct inferen
 
 Autoregressive language models are highly sensitive to context recency and attention distribution across prompt components. When presented with retrieved source passages that contradict earlier tool execution messages, models routinely treat the retrieved text as authoritative ground truth regarding the present state of the filesystem. The model assumes its previous tool call failed silently, was rolled back, or was overridden by an external process. Consequently, it attempts to re-apply the edit.
 
-```text
+```bash
 [TURN 12] AGENT: ToolCall -> edit_file("net/http.py", replace="timeout=None", with="timeout=30")
 [TURN 12] SYSTEM: File "net/http.py" successfully updated. MD5: 4f8a1c...
 [TURN 13] AGENT: ToolCall -> search_code("def fetch_url")
@@ -896,7 +904,7 @@ A persistent storage subsystem is an unprivileged channel through which external
 
 ![**Retrieval Security and Access Governance Architecture**: Privileged host supervisor interposing between the unprivileged planning engine ($A=0$) and derivative search stores. The unprivileged model emits a structured query tuple $\mathcal{Q}$. The host supervisor's ACL filter applies tenant tokens to generate a pre-filtering bitset mask $B$, constraining index traversals across BM25 postings and HNSW graphs. Raw candidate passages are scrubbed for secrets, credentials, and prompt injection attempts before being encapsulated in cryptographically nonced data frames for context staging.](images/svg/retrieval_security_governance.svg){#fig-vol3-retrieval-security width="95%"}
 
-### Security Boundaries, Access Control, and Ingestion Sanitization
+### Storage Security Boundaries
 
 The primary security vulnerability in an agentic memory plane arises from the collapse of the boundary between code and data. In a classical operating system, the processor enforces a strict separation between executable instructions and non-executable data via page table permissions such as the $W \oplus X$ (Write XOR Execute) invariant. In an autoregressive foundation model, however, all inputs are tokenized into a single sequence of vector embeddings. When an agent queries a persistent vector or lexical store, any natural language instruction contained in a retrieved document—such as a comment in a third-party library, an issue tracker description, or a downloaded web page—is processed by the self-attention mechanism with the same semantic weight as the system prompt or developer instructions. This vulnerability is termed *indirect prompt injection*.
 
@@ -1007,7 +1015,7 @@ $$T_{\text{reindex, B}} = \frac{15}{1{,}250} + \frac{33}{50} = 0.012\text{ s} + 
 Architecture A completes re-indexing in $34\text{ ms}$ (imperceptible within an interactive loop), while Architecture B imposes a $672\text{ ms}$ synchronization delay before the subsequent reasoning step can safely dispatch a query against the modified files.
 :::
 
-### The Distractor Dilemma and End-to-End Task Verification
+### The Distractor Dilemma
 
 In information retrieval, increasing the retrieval cutoff $k$ monotonically increases Recall@$k$. A system designer might conclude that an agent's reasoning engine should be provisioned with as large a $k$ as the context window permits—for example, retrieving $k = 50$ passages into a 128,000-token working context to guarantee that the required evidence is present. In autonomous agent runtimes, this assumption fails.
 
@@ -1025,7 +1033,7 @@ Furthermore, transformer architectures suffer from positional bias ("lost-in-the
 
 The following failure trace illustrates how excess retrieval recall directly derails an autonomous coding agent attempting to implement a network retry handler:
 
-```text
+```bash
 [RETRIEVAL QUERY]: "SocketTimeout retry configuration ExponentialBackoff"
 [RETRIEVAL ENGINE]: Hybrid BM25 + HNSW returns k = 20 chunks.
 [CHUNK 1 (Rank 1, Target)]: src/net/transport.py: ExponentialBackoff(max_retries=3, base_ms=100)
