@@ -132,7 +132,6 @@ As demonstrated in @lst-vol3-tool-schema, the host definition uses high-level ty
 
 ### The Schema Quality Effect
 
-
 ::: {.column-margin}
 ![](images/svg/vol3_actuation_margin_004.svg){width="100%" fig-alt="Knee curve plotting tool selection error percentage against total declared tools, showing a steep error inflection above 30 functions."}
 
@@ -298,7 +297,6 @@ By standardizing these primitives, the runtime establishes a clear operational l
 
 ### Transport Topologies
 
-
 ::: {.column-margin}
 ![](images/svg/vol3_actuation_margin_001.svg){width="100%" fig-alt="Horizontal log-scale ladder comparing tool IPC transport latency: Local UDS at 6.3 microseconds, Intra-DC HTTP at 0.61 milliseconds, and WAN Cloud SSE at 35 milliseconds."}
 
@@ -306,11 +304,11 @@ By standardizing these primitives, the runtime establishes a clear operational l
 :::
 The physical channel connecting the host agent client to an execution server dictates the system's operational latency, failure isolation, and deployment topology. The protocol abstraction decouples message serialization from the underlying transport, enabling runtimes to navigate three distinct operational regimes: local standard input/output pipes, local UNIX domain sockets, and remote streaming over HTTP with Server-Sent Events (SSE). @tbl-vol3-mcp-transports contrasts the architectural profiles of these transport topologies.
 
-| Transport Topology | Underlying IPC Primitives | Typical Round-Trip Latency | Process Lifecycle Coupling | Security & Isolation Boundary | Primary Failure Mode |
-|:---|:---|:---:|:---|:---|:---|
-| **Standard I/O (`stdio`)** | POSIX anonymous pipes (`pipe(2)`) via `stdin`/`stdout` | $< 0.5\text{ ms}$ (memory copy) | Direct child process (`fork`/`exec`); dies with host | In-process namespace / container sandbox | Pipe buffer saturation deadlock (`F_SETPIPE_SZ`) |
-| **UNIX Domain Socket (`UDS`)** | Filesystem socket inode (`AF_UNIX`, `SOCK_STREAM`) | $< 0.1\text{ ms}$ (zero-copy kernel) | Decoupled background daemon; multiplexed clients | POSIX filesystem permissions (`chmod`/`chown`) | Stale socket lockfiles (`/tmp/mcp.sock`); daemon crash |
-| **Remote HTTP with SSE** | TCP/IP, TLS, HTTP POST + `text/event-stream` SSE | $15\text{--}150\text{ ms}$ (network RTT) | Fully distributed; cloud clusters / remote enclaves | Network mTLS, bearer tokens, firewall CIDRs | Packet loss, connection drops, proxy buffering timeouts |
+| Transport Topology             | Underlying IPC Primitives                              |        Typical Round-Trip Latency        | Process Lifecycle Coupling                           | Security & Isolation Boundary                  | Primary Failure Mode                                    |
+|:-------------------------------|:-------------------------------------------------------|:----------------------------------------:|:-----------------------------------------------------|:-----------------------------------------------|:--------------------------------------------------------|
+| **Standard I/O (`stdio`)**     | POSIX anonymous pipes (`pipe(2)`) via `stdin`/`stdout` |     $< 0.5\text{ ms}$ (memory copy)      | Direct child process (`fork`/`exec`); dies with host | In-process namespace / container sandbox       | Pipe buffer saturation deadlock (`F_SETPIPE_SZ`)        |
+| **UNIX Domain Socket (`UDS`)** | Filesystem socket inode (`AF_UNIX`, `SOCK_STREAM`)     |   $< 0.1\text{ ms}$ (zero-copy kernel)   | Decoupled background daemon; multiplexed clients     | POSIX filesystem permissions (`chmod`/`chown`) | Stale socket lockfiles (`/tmp/mcp.sock`); daemon crash  |
+| **Remote HTTP with SSE**       | TCP/IP, TLS, HTTP POST + `text/event-stream` SSE       | $15\text{--}150\text{ ms}$ (network RTT) | Fully distributed; cloud clusters / remote enclaves  | Network mTLS, bearer tokens, firewall CIDRs    | Packet loss, connection drops, proxy buffering timeouts |
 
 : **Model Context Protocol Transport Topologies**: Architectural comparison of IPC transport mechanisms across latency, lifecycle, and isolation boundaries. {#tbl-vol3-mcp-transports}
 
@@ -379,7 +377,6 @@ This architectural division directly reflects the End-to-End Argument in System 
 When these tool invocations cross process or network boundaries and encounter partial failures, this mediation faces an even harder challenge. If a network connection abruptly severs or an intermediate proxy times out during a mutating `tools/call` dispatch, the runtime is plunged into operational uncertainty: Did the remote server complete the mutation before the connection dropped, or did the network fail before the server processed the request? Retransmitting the request blindly risks executing catastrophic duplicate side effects, while abandoning it risks desynchronizing the agent's internal state from physical reality. Resolving this dilemma requires transitioning from transport protocol framing to the mechanics of application-level execution idempotency.
 
 ## Idempotent Action Execution {#sec-vol3-actuation-idempotency}
-
 
 ::: {.column-margin}
 ![](images/svg/vol3_actuation_margin_003.svg){width="100%" fig-alt="Logarithmic timescale ladder comparing 20 ms GPU token generation against 1,200 ms subprocess build execution."}
@@ -561,7 +558,6 @@ By enforcing keyed deduplication on modern endpoints and structured reconciliati
 Once these execution primitives guarantee that an actuation has settled into an authoritative, uncorrupted state, the runtime faces the subsequent systems problem: capturing the data emitted by the external process. When a command succeeds, it often returns not a clean, single-line confirmation, but thousands of lines of verbose build logs, memory dumps, or raw terminal streams. How the runtime captures, buffers, and truncates these massive observation streams without overflowing the model's physical context window is the subject of the next section.
 
 ## Observation Stream Truncation {#sec-vol3-actuation-streaming}
-
 
 ::: {.column-margin}
 ![](images/svg/vol3_actuation_margin_002.svg){width="100%" fig-alt="Segmented stream buffer diagram contrasting a 4.2 MB unconstrained tool output against a 4 KB sandwich-truncated window preserving head and tail lines."}
@@ -1121,7 +1117,7 @@ To prevent catalog bloat without surrendering essential capabilities, systems de
 
 Applied to agent actuation, a deep tool encapsulates multi-step operational complexity behind a concise schema, whereas a shallow tool exposes raw, intermediate operating system calls directly to the model. Consider file manipulation. A shallow design exposes distinct RPC endpoints for `open_file`, `seek_cursor`, `read_line`, `write_bytes`, and `close_file`. This approach turns the foundation model into an agonizingly slow, non-deterministic I/O multiplexer: modifying a single source code file requires dozens of autoregressive decode cycles, where any intermediate token error corrupts the target file. Conversely, a deep file editing tool accepts a target file path, an anchor string, and a replacement string block. The runtime host takes responsibility for opening the file, verifying file existence, locating the exact replacement boundary, performing an atomic write, and reporting a structured unified diff.
 
-The systems implications of this interface partitioning are illustrated in @fig-vol3-deep-vs-shallow-interface. In the shallow multi-turn interface (@fig-vol3-deep-vs-shallow-interface a), the unprivileged model must orchestrate low-level operating system primitives across four distinct autoregressive turns ($t$ to $t+3$), tracking transient operating system file descriptors (`fd: 3`) across generation cycles. This architecture suffers from compounding failure decay: if each step possesses an independent success probability $1 - \epsilon_i$, the composite probability of completing the file mutation successfully plummets to $P(\text{success}) = \prod_{i=1}^M (1 - \epsilon_i)$. Any failure during intermediate turns leaves the target file descriptor unclosed or partially overwritten, producing corrupted on-disk state while churning $M \times \text{tokens}$ through the inference engine's physical KV cache. 
+The systems implications of this interface partitioning are illustrated in @fig-vol3-deep-vs-shallow-interface. In the shallow multi-turn interface (@fig-vol3-deep-vs-shallow-interface a), the unprivileged model must orchestrate low-level operating system primitives across four distinct autoregressive turns ($t$ to $t+3$), tracking transient operating system file descriptors (`fd: 3`) across generation cycles. This architecture suffers from compounding failure decay: if each step possesses an independent success probability $1 - \epsilon_i$, the composite probability of completing the file mutation successfully plummets to $P(\text{success}) = \prod_{i=1}^M (1 - \epsilon_i)$. Any failure during intermediate turns leaves the target file descriptor unclosed or partially overwritten, producing corrupted on-disk state while churning $M \times \text{tokens}$ through the inference engine's physical KV cache.
 
 In contrast, the deep high-cohesion interface (@fig-vol3-deep-vs-shallow-interface b) exposes an atomic RPC endpoint (`apply_patch`). The foundation model generates its operational intent in a single inference turn ($t$). The host runtime supervisor handles the four physical execution steps—verifying the path, locating the anchor string, executing the atomic replacement in memory, and synthesizing a unified diff—natively in compiled host code. This architecture eliminates multi-turn KV cache bloat, insulates the model from transient operating system state, and guarantees atomic execution: either the entire patch applies cleanly, or the transaction aborts with zero modification to persistent storage.
 

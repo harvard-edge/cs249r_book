@@ -252,7 +252,7 @@ def allocate_ingress_budget(
     valid = [r for r in envelopes if r.score >= sigma_min]
     # Sort remaining envelopes descending by retrieval score
     sorted_envs = sorted(valid, key=lambda r: r.score, reverse=True)
-    
+
     staged_payloads: list[str] = []
     tokens_used = 0
     for r in sorted_envs:
@@ -347,13 +347,13 @@ While BM25 excels at isolating documents containing rare, literal text sequences
 
 Syntax-directed indexing transforms flat source files into an entity-relationship model by executing deterministic parser generators across the repository. Using incremental, error-tolerant parsers such as tree-sitter, the indexing pipeline converts raw text into concrete Abstract Syntax Trees (ASTs). The indexer traverses these syntax trees to construct a *Symbol Table* and an associated *Code Property Graph*, contrasting with inverted index designs as summarized in @tbl-vol3-lexical-vs-ast-table.
 
-| Index Attribute        | Lexical Inverted Index (BM25)              | Syntax-Directed Symbol Graph                                                         |
-|:-----------------------|:-------------------------------------------|:-------------------------------------------------------------------------------------|
-| **Atomic Unit**        | Token n-gram or word stem                  | AST Node (Function, Class, Interface, Field)                                         |
-| **Storage Structure**  | Inverted Postings Lists (Term $\to$ DocID) | Directed Property Graph ($V, E$) + Relational Tables                                 |
-| **Traversal Semantic** | Set intersection and union over postings   | Graph edge traversal (e.g., `calls`, `implements`, `overrides`)                      |
-| **Scoping Awareness**  | None (File or fixed chunk boundary only)   | Complete (Lexical block, file, module, and package scope)                            |
-| **Update Mechanism**   | Postings list rewrite or append log        | Localized AST node and edge differential update                                      |
+| Index Attribute        | Lexical Inverted Index (BM25)                                         | Syntax-Directed Symbol Graph                                                        |
+|:-----------------------|:----------------------------------------------------------------------|:------------------------------------------------------------------------------------|
+| **Atomic Unit**        | Token n-gram or word stem                                             | AST Node (Function, Class, Interface, Field)                                        |
+| **Storage Structure**  | Inverted Postings Lists (Term $\to$ DocID)                            | Directed Property Graph ($V, E$) + Relational Tables                                |
+| **Traversal Semantic** | Set intersection and union over postings                              | Graph edge traversal (e.g., `calls`, `implements`, `overrides`)                     |
+| **Scoping Awareness**  | None (File or fixed chunk boundary only)                              | Complete (Lexical block, file, module, and package scope)                           |
+| **Update Mechanism**   | Postings list rewrite or append log                                   | Localized AST node and edge differential update                                     |
 | **Lookup Latency**     | $\mathcal{O}(\log \vert \mathcal{V} \vert + \text{postings\_length})$ | $\mathcal{O}(1)$ hash lookup for symbol $\to \mathcal{O}(k)$ neighborhood expansion |
 
 : **Lexical Index versus Symbol Graph**: Comparison between lexical inverted indexes and syntax-directed symbol graphs for software retrieval. {#tbl-vol3-lexical-vs-ast-table}
@@ -405,7 +405,6 @@ Consequently, production persistent storage systems employ *iterative single-sta
 
 ### Vocabulary Mismatch Pathologies
 
-
 ::: {.column-margin}
 ![](images/svg/vol3_episodic_memory_margin_001.svg){width="100%" fig-alt="Accuracy decay curve showing retrieval precision falling from 94% with 5 retrieved passages down to 42% with 50 distractor passages."}
 
@@ -415,9 +414,9 @@ Despite the mathematical rigor of BM25 and the deterministic precision of AST sy
 
 The most pervasive failure mode of lexical indexing is the *vocabulary mismatch problem*, originally analyzed by Furnas et al. (1987). Human developers and autonomous agents frequently describe computational operations using terminology that shares zero literal tokens with the underlying implementation. Consider an agent attempting to investigate an unhandled connection drop:
 
-> **Query vs. Code Vocabulary Mismatch:**  
-> - **Agent Query:** `"network packet throttling and rate limiting algorithm"`  
-> - **Target Implementation:** `TokenBucketTrafficShaper` (`struct leaky_bucket_valve`)  
+> **Query vs. Code Vocabulary Mismatch:**
+> - **Agent Query:** `"network packet throttling and rate limiting algorithm"`
+> - **Target Implementation:** `TokenBucketTrafficShaper` (`struct leaky_bucket_valve`)
 > - **Result:** Lexical overlap $= \emptyset$; BM25 postings yield zero matches.
 
 In this scenario, the implementing source file uses the technical domain terms `leaky_bucket`, `drain_rate`, `capacity`, and `watermark`. It never once uses the tokens `throttling`, `rate`, or `limiting`. When evaluated through BM25, the query terms yield zero postings matches within the target implementation file. Because lexical inverted indexes cannot infer synonymy, paraphrase, or high-level conceptual relationships, the search engine returns either completely irrelevant documents that happen to contain the word `network` in a comment, or an empty result set (@fig-vol3-lexical-ast).
@@ -436,7 +435,6 @@ A complementary failure mode emerges from the *structural blindness* of AST symb
 When an agent encounters these architectural boundaries, relying exclusively on exact keyword matches or static AST graphs causes it to hit an epistemic dead end. To bridge the divide between what an agent conceptually needs and the literal identifiers written in the source artifacts, durable storage requires a representational space that captures semantic proximity independent of explicit surface tokens.
 
 ## Hybrid Retrieval {#sec-vol3-persistent-dense-retrieval}
-
 
 ::: {.column-margin}
 ![](images/svg/vol3_episodic_memory_margin_002.svg){width="100%" fig-alt="Pareto frontier curve showing HNSW recall versus query latency across varying search depth hyperparameters."}
@@ -533,14 +531,14 @@ $$\tilde{d}(\mathbf{u}_Q, \mathbf{x}) = \sum_{j=1}^M \text{LUT}[j, c_j]$$
 
 As summarized in @tbl-vol3-ann-tradeoffs, this inner loop contains zero floating-point multiplications and zero memory bus reads outside the pre-loaded cache lines, allowing modern SIMD vector units to evaluate distance approximations across millions of documents at near-register speeds.
 
-| Architectural Dimension                            | Exact Linear Scan (GEMV)            | IVF-PQ ($M=64, C=4096$)                               | HNSW ($M=32, efSearch=64$)                             |
-|:---------------------------------------------------|:------------------------------------|:------------------------------------------------------|:-------------------------------------------------------|
-| **Algorithmic Time Complexity**                    | $O(N \cdot D)$                      | $O(C \cdot D + \frac{n_{\text{probe}}}{C} N \cdot M)$ | $O(\log N)$                                            |
-| **DRAM Footprint ($10^7$ vectors, $D=1536$, FP32)**| $61.44 \text{ GB}$ (uncompressed)   | $\approx 0.64 \text{ GB}$ ($96.0\times$ compression)  | $\approx 71.68 \text{ GB}$ (vectors + HNSW graph links)|
-| **Empirical Query Latency**                        | $200 - 400 \text{ ms}$              | $5 - 15 \text{ ms}$                                   | $1 - 4 \text{ ms}$                                     |
-| **Recall@10 Fidelity**                             | $1.00$ (Deterministic Ground Truth) | $0.85 - 0.94$ (Quantization loss)                     | $0.96 - 0.99$ (Near-optimal)                           |
-| **Cache Sensitivity**                              | Main memory bandwidth-bound         | L1/L2 cache lookup-bound                              | Random DRAM pointer chasing                            |
-| **Index Mutation Cost**                            | $O(1)$ append                       | $O(1)$ append to Voronoi list                         | $O(M \log N)$ dynamic edge rebuild                     |
+| Architectural Dimension                             | Exact Linear Scan (GEMV)            | IVF-PQ ($M=64, C=4096$)                               | HNSW ($M=32, efSearch=64$)                              |
+|:----------------------------------------------------|:------------------------------------|:------------------------------------------------------|:--------------------------------------------------------|
+| **Algorithmic Time Complexity**                     | $O(N \cdot D)$                      | $O(C \cdot D + \frac{n_{\text{probe}}}{C} N \cdot M)$ | $O(\log N)$                                             |
+| **DRAM Footprint ($10^7$ vectors, $D=1536$, FP32)** | $61.44 \text{ GB}$ (uncompressed)   | $\approx 0.64 \text{ GB}$ ($96.0\times$ compression)  | $\approx 71.68 \text{ GB}$ (vectors + HNSW graph links) |
+| **Empirical Query Latency**                         | $200 - 400 \text{ ms}$              | $5 - 15 \text{ ms}$                                   | $1 - 4 \text{ ms}$                                      |
+| **Recall@10 Fidelity**                              | $1.00$ (Deterministic Ground Truth) | $0.85 - 0.94$ (Quantization loss)                     | $0.96 - 0.99$ (Near-optimal)                            |
+| **Cache Sensitivity**                               | Main memory bandwidth-bound         | L1/L2 cache lookup-bound                              | Random DRAM pointer chasing                             |
+| **Index Mutation Cost**                             | $O(1)$ append                       | $O(1)$ append to Voronoi list                         | $O(M \log N)$ dynamic edge rebuild                      |
 
 : **Vector Indexing Mechanism Trade-offs**: Algorithmic and hardware trade-offs of vector indexing mechanisms across exact scan, IVF-PQ ($M=64$), and HNSW ($M=32$). Performance characteristics reflect $N = 10^7$ vectors at $D=1536$ in 32-bit floating-point precision ($6,144\text{ bytes}$ uncompressed vs. $64\text{ bytes}$ quantized). {#tbl-vol3-ann-tradeoffs}
 
@@ -606,13 +604,13 @@ This gradual decay prevents a single anomalous top-ranked result from an erratic
 
 Consider a runtime query seeking to `"reclaim orphaned file descriptors"` evaluated across sparse lexical (BM25) and dense approximate nearest neighbor (HNSW) retrieval engines. @tbl-vol3-rrf-scoring details the reciprocal rank fusion scoring ($k = 60$) across top candidate functions.
 
-| Candidate Identifier | BM25 Rank ($r_{\text{sparse}}$) | BM25 RRF Term | HNSW Rank ($r_{\text{dense}}$) | HNSW RRF Term | Combined RRF Score | Final Ranking |
-|:---|:---:|:---:|:---:|:---:|:---:|:---:|
-| `fd_cleanup_orphans()` | 2 | $\frac{1}{62} \approx 0.01613$ | 2 | $\frac{1}{62} \approx 0.01613$ | **$0.03226$** | **1 (Selected)** |
-| `close_all_descriptors()` | 1 | $\frac{1}{61} \approx 0.01639$ | — | $0.0$ | $0.01639$ | 2 |
-| `close_zombie_handles()` | — | $0.0$ | 1 | $\frac{1}{61} \approx 0.01639$ | $0.01639$ | 3 |
-| `audit_system_descriptors()` | 3 | $\frac{1}{63} \approx 0.01587$ | — | $0.0$ | $0.01587$ | 4 |
-| `release_handle_table()` | — | $0.0$ | 3 | $\frac{1}{63} \approx 0.01587$ | $0.01587$ | 5 |
+| Candidate Identifier         | BM25 Rank ($r_{\text{sparse}}$) |         BM25 RRF Term          | HNSW Rank ($r_{\text{dense}}$) |         HNSW RRF Term          | Combined RRF Score |  Final Ranking   |
+|:-----------------------------|:-------------------------------:|:------------------------------:|:------------------------------:|:------------------------------:|:------------------:|:----------------:|
+| `fd_cleanup_orphans()`       |                2                | $\frac{1}{62} \approx 0.01613$ |               2                | $\frac{1}{62} \approx 0.01613$ |   **$0.03226$**    | **1 (Selected)** |
+| `close_all_descriptors()`    |                1                | $\frac{1}{61} \approx 0.01639$ |               —                |             $0.0$              |     $0.01639$      |        2         |
+| `close_zombie_handles()`     |                —                |             $0.0$              |               1                | $\frac{1}{61} \approx 0.01639$ |     $0.01639$      |        3         |
+| `audit_system_descriptors()` |                3                | $\frac{1}{63} \approx 0.01587$ |               —                |             $0.0$              |     $0.01587$      |        4         |
+| `release_handle_table()`     |                —                |             $0.0$              |               3                | $\frac{1}{63} \approx 0.01587$ |     $0.01587$      |        5         |
 
 : **Reciprocal Rank Fusion Scoring ($k=60$)**: Dual-modality score fusion demonstrating how cross-engine consensus elevates structurally robust candidates. {#tbl-vol3-rrf-scoring}
 
@@ -627,7 +625,6 @@ To achieve maximal precision before context insertion, state-of-the-art architec
 Yet even this two-stage hybrid pipeline presumes that the information required to validate an architectural hypothesis resides entirely within a single localized text chunk. When an agent must resolve complex bugs in distributed systems, the evidence rarely sits neatly partitioned inside one file or function. The causal chain linking an anomalous HTTP payload to a corrupted storage record spans network deserializers, state machine dispatchers, memory allocators, and disk commit logs. If the required evidence must be assembled across multiple structural hops, individual passage retrieval—no matter how finely fused—fails to reveal the topology of the system. What persistent storage structures allow an agent to traverse these interconnected execution paths when single-hop hybrid queries cannot see beyond the horizon of an isolated chunk?
 
 ## Multi-Hop Retrieval {#sec-vol3-persistent-graphrag}
-
 
 ::: {.column-margin}
 ![](images/svg/vol3_episodic_memory_margin_003.svg){width="100%" fig-alt="Exponential fan-out tree showing 2-hop search retrieving 25 entities and 4-hop search expanding to over 600 nodes."}
@@ -788,7 +785,6 @@ Because agents do not merely inspect static repositories—they continuously edi
 
 ## Storage Invalidation {#sec-vol3-persistent-invalidation}
 
-
 ::: {.column-margin}
 ![](images/svg/vol3_episodic_memory_margin_004.svg){width="100%" fig-alt="Timeline showing stale memory cache hits causing silent execution faults after repository branch checkouts."}
 
@@ -819,6 +815,7 @@ The source of this asymmetry lies in the chunking boundary problem and the cost 
 :::
 
 The timeline dynamics of these invalidation protocols are compared directly in @fig-vol3-index-invalidation. Following a workspace write mutation $w(D_j)$ at time $t_w$, the three protocols handle the consistency boundary through distinct systems mechanisms:
+
 1. **Synchronous Re-indexing (Top):** The host runtime completely blocks the agent decode loop while executing AST parsing, lexical posting updates, and GPU neural embedding passes. While this guarantees zero staleness ($\Delta t = 0$), the pipeline stall (often $200\text{--}800\text{ ms}$) degrades interactive responsiveness.
 2. **Asynchronous Event-Driven (Middle):** The host returns immediately to the agent, deferring indexing to a background queue. However, this creates a dangerous unfenced staleness window $\Delta t = t_{\text{sync}} - t_w$. If the agent queries storage within this window, it retrieves obsolete pre-mutation candidates, triggering reasoning faults.
 3. **Read-Time Tombstoning (Bottom):** The write operation instantly records an in-memory generation tag $g(D_j) \leftarrow g + 1$ and appends the old chunk IDs to a DRAM tombstone bitset in sub-millisecond time ($<1\text{ ms}$). When subsequent queries execute, the retrieval engine filters candidates against the tombstone mask at query time, guaranteeing fresh results without stalling the agent or waiting for background re-indexing.
