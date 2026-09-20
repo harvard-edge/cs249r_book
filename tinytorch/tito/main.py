@@ -54,6 +54,7 @@ from .commands.benchmark import BenchmarkCommand
 from .commands.community import CommunityCommand
 from .commands.dev import DevCommand
 from .commands.olympics import OlympicsCommand
+from .commands.system.update import UpdateCommand
 
 # Get version from pyproject.toml (single source of truth)
 def _get_version() -> str:
@@ -98,6 +99,7 @@ class TinyTorchCLI:
         self.commands: Dict[str, Type[BaseCommand]] = {
             # Essential
             'setup': SetupCommand,
+            'update': UpdateCommand,
             # Workflow (student-facing)
             'system': SystemCommand,
             'module': ModuleWorkflowCommand,

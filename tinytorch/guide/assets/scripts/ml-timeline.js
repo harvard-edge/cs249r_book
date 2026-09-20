@@ -13,7 +13,8 @@ document.addEventListener('DOMContentLoaded', function() {
             whatYouBuild: ["Binary classification with random weights", "Simple but revolutionary architecture", "YOUR Linear layer recreates history"],
             systemsInsights: ["Memory: O(n) parameters", "Compute: O(n) operations", "Limitation: Only linearly separable problems"],
             modules: "After Modules 01-03", expectedResults: "~50% with untrained random weights",
-            commands: ["tito milestone run perceptron"]
+            commands: ["tito milestone run perceptron"],
+            url: "milestones/01_perceptron.html"
         },
         xor: {
             year: "1969", title: "The XOR Crisis", researcher: "Minsky & Papert",
@@ -23,7 +24,8 @@ document.addEventListener('DOMContentLoaded', function() {
             whatYouBuild: ["Hidden layers enable non-linear solutions", "Multi-layer networks break through limitations", "YOUR autograd makes it possible"],
             systemsInsights: ["Memory: O(n²) with hidden layers", "Compute: O(n²) operations", "Breakthrough: Hidden representations"],
             modules: "After Modules 02-06", expectedResults: "50% (single layer) → 100% (multi-layer) on XOR",
-            commands: ["tito milestone run xor"]
+            commands: ["tito milestone run xor"],
+            url: "milestones/02_xor.html"
         },
         mlp: {
             year: "1986", title: "MLP Revival", researcher: "Backpropagation Era",
@@ -33,7 +35,8 @@ document.addEventListener('DOMContentLoaded', function() {
             whatYouBuild: ["XOR solved with hidden layers", "TinyDigits classification", "YOUR training pipeline learns real images"],
             systemsInsights: ["Memory: ~2.4K parameters for TinyDigits", "Compute: Dense matrix operations", "Architecture: Multi-layer feature learning"],
             modules: "After Modules 01-08", expectedResults: "Solves XOR, 85%+ on TinyDigits",
-            commands: ["tito milestone run mlp"]
+            commands: ["tito milestone run mlp"],
+            url: "milestones/03_mlp.html"
         },
         cnn: {
             year: "1998", title: "CNN Revolution", researcher: "Yann LeCun",
@@ -43,7 +46,8 @@ document.addEventListener('DOMContentLoaded', function() {
             whatYouBuild: ["Convolutional feature extraction", "Natural image classification (CIFAR-10)", "YOUR Conv2d + MaxPool2d unlock spatial intelligence"],
             systemsInsights: ["Memory: ~1M parameters (weight sharing reduces vs dense)", "Compute: Convolution is intensive but parallelizable", "Architecture: Local connectivity + translation invariance"],
             modules: "After Modules 02-09", expectedResults: "75%+ accuracy on CIFAR-10 ✨",
-            commands: ["tito milestone run cnn"], northStar: true
+            commands: ["tito milestone run cnn"], northStar: true,
+            url: "milestones/04_cnn.html"
         },
         transformer: {
             year: "2017", title: "Transformer Era", researcher: "Vaswani et al.",
@@ -53,7 +57,8 @@ document.addEventListener('DOMContentLoaded', function() {
             whatYouBuild: ["Self-attention mechanisms", "Autoregressive text generation", "YOUR attention implementation generates language"],
             systemsInsights: ["Memory: O(n²) attention requires careful management", "Compute: Highly parallelizable", "Architecture: Long-range dependencies"],
             modules: "After Modules 02-13", expectedResults: "Loss < 1.5, coherent responses to questions",
-            commands: ["tito milestone run transformer"]
+            commands: ["tito milestone run transformer"],
+            url: "milestones/05_transformer.html"
         },
         olympics: {
             year: "2018", title: "MLPerf Torch Olympics", researcher: "MLCommons (founded 2018)",
@@ -63,7 +68,8 @@ document.addEventListener('DOMContentLoaded', function() {
             whatYouBuild: ["Performance profiling and bottleneck analysis", "Model compression (quantization + pruning)", "Inference acceleration (KV-cache + batching)"],
             systemsInsights: ["Memory: quantization packs weights up to 4× smaller; pruning zeroes weights without shrinking the array", "Speed: KV-cache and batching can speed generation up, and a small workload can get slower", "Workflow: Systematic 'measure → optimize → validate' methodology"],
             modules: "After Modules 14-19", expectedResults: "Whatever you measure; no ratio is guaranteed",
-            commands: ["tito milestone run mlperf"]
+            commands: ["tito milestone run mlperf"],
+            url: "milestones/06_mlperf.html"
         }
     };
 
@@ -108,6 +114,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div style="background: #f8fafc; padding: 0.75rem; border-radius: 0.375rem;"><div style="font-size: 0.75rem; color: #64748b; margin-bottom: 0.25rem;">Expected Results</div><div style="font-weight: 600;">${data.expectedResults}</div></div>
                 </div>
                 <div style="margin: 1rem 0;"><h4 style="font-size: 0.95rem; margin: 0 0 0.5rem 0;">Try It Yourself</h4><div style="background: #f8fafc; padding: 0.75rem; border-radius: 0.375rem; font-family: monospace; font-size: 0.85rem;">${data.commands.join('\n')}</div></div>
+                ${data.url ? `<div style="margin: 1.25rem 0 0.25rem 0; text-align: center;"><a href="${data.url}" class="btn-tinytorch" style="display: inline-block; padding: 0.6rem 1.5rem; text-decoration: none; font-size: 0.9rem; font-weight: 600;">Read Milestone Guide →</a></div>` : ''}
             `;
 
             popup.classList.add('active');

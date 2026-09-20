@@ -171,7 +171,7 @@ class ModuleTestCommand(BaseCommand):
 
             # Always show pytest output for educational value
             if result.stdout:
-                console.print(result.stdout)
+                console.print(Text.from_ansi(result.stdout))
             if result.stderr and verbose:
                 console.print("[yellow]" + result.stderr + "[/yellow]")
 
@@ -275,7 +275,7 @@ class ModuleTestCommand(BaseCommand):
             )
 
             if result.stdout:
-                console.print(result.stdout)
+                console.print(Text.from_ansi(result.stdout))
             if result.stderr and verbose:
                 console.print("[yellow]" + result.stderr + "[/yellow]")
 

@@ -133,7 +133,13 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
 
 **Want to explore the code?** [Browse the repository structure](#repository-structure) to see how modules are organized.
 
-**Adventurous early adopter?** Local installation works, but expect rough edges. See the [setup guide](guide/getting-started.qmd).
+**Adventurous early adopter?** Local installation works, but expect rough edges. See the [Quick Start Guide](guide/getting-started.qmd):
+
+```bash
+# Install TinyTorch in your current directory:
+curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
+cd tinytorch && source .venv/bin/activate && tito setup
+```
 
 ---
 
