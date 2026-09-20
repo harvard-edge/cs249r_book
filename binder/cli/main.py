@@ -168,6 +168,8 @@ class MLSysBookCLI:
         quality_table.add_row(_cmd("info concepts|headers|acronyms"), "Extract concepts, headers, acronyms", _cmd("./binder/binder info concepts --vol1"))
         quality_table.add_row(_cmd("bib mechanical|normalize|sync"), "Bibliography management", _cmd("./binder/binder bib sync --vol1"))
         quality_table.add_row(_cmd("render plots [--vol1|chapter]"), "Render matplotlib plots to PNG gallery", _cmd("./binder/binder render plots --vol1"))
+        quality_table.add_row(_cmd("render figures --vol1|--vol2"), "Render figure PDF & contact sheets", _cmd("./binder/binder render figures --vol2"))
+        quality_table.add_row(_cmd("build figures --vol1|--vol2"), "Alias for render figures", _cmd("./binder/binder build figures --vol2"))
         quality_table.add_row(_cmd("layout --vol1|--vol2"), "Build/reuse PDF and emit auto-layout plan", _cmd("./binder/binder layout --vol1 --no-build"))
         quality_table.add_row(_cmd("layout chapter <name> --volN --aux <file>"), "Mapped isolated PDF component", _cmd("./binder/binder layout chapter ml_workflow --vol1 --aux full.aux"))
         quality_table.add_row(_cmd("layout check <pdf> [--threshold]"), "Flag PDF pages with excessive bottom whitespace", _cmd("./binder/binder layout check book.pdf"))
@@ -526,6 +528,9 @@ class MLSysBookCLI:
             console.print("[red]`binder build reset` was removed.[/red]")
             console.print("[yellow]Use: ./binder/binder reset <html|pdf|epub|all> [--vol1|--vol2][/yellow]")
             return False
+
+        if args and args[0].lower() in ("figures", "diagrams"):
+            return self.handle_render_command(args)
 
         if "-h" in args or "--help" in args:
             console.print("Usage: ./binder/binder build [html|pdf|epub] [chapters] [--vol1|--vol2|--vol3|--vol4|--all] [--skip-hygiene] [--skip-validate] [--layout] [--no-cover] [--print-marks] [--json] [--parallel [N]] [--each-chapter] [--keep-workspaces]", markup=False)
