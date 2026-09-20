@@ -346,23 +346,20 @@ def gen_ch10():
 
 def gen_ch11():
     chap = "11_planning"
-    # Fig 11-M1: Reflected Rotor Inertia Seam Torque Spike Knee
+    # Fig 11-M1: stated inertial torque requests, not measured motor output.
     fig, ax = new_fig('scale-anchor')
-    t_blend = np.linspace(1, 60, 200) # ms
-    tau_peak = 50.0 / t_blend
-    m = t_blend >= 20.0
-    ax.plot(t_blend[m], tau_peak[m], color=DATA, lw=1.35)
-    ax.plot(t_blend[~m], tau_peak[~m], color=RED, lw=1.35)
-    ax.axhline(5.0, color=GRID, ls="--", lw=0.6)
-    ax.text(45, 7.5, "Limit: 5 Nm", color=INK, fontsize=4.6)
+    t_blend = np.linspace(5, 60, 200) # ms
+    tau_peak = 75.0 / t_blend  # symmetric C2 velocity blend, 1.5 * mean
+    ax.plot(t_blend, tau_peak, color=DATA, lw=1.35)
+    ax.plot(50.0, 1.5, "o", color=DATA, ms=3.3)
+    ax.text(26.0, 13.0, "50 ms: 1.5 Nm", color=DATA, fontsize=7.2, fontweight="bold")
     ax.plot(1.0, 50.0, "o", color=RED, ms=3.3)
-    ax.text(4.0, 48.0, "1 ms: 50 Nm", color=RED, fontsize=4.8, fontweight="bold")
-    ax.text(48.0, 14.0, "50 ms: 1 Nm", color=DATA, fontsize=4.8, fontweight="bold", ha="center")
+    ax.text(5.0, 48.0, "1 ms: 50 Nm", color=RED, fontsize=7.2, fontweight="bold")
     ax.set_xlim(-1, 65); ax.set_ylim(0, 58)
-    for s in ("top", "right"):
-        ax.spines[s].set_visible(False)
-    for s in ("left", "bottom"):
-        ax.spines[s].set_color(GRID); ax.spines[s].set_linewidth(0.55)
+    for sp in ("top", "right"):
+        ax.spines[sp].set_visible(False)
+    for sp in ("left", "bottom"):
+        ax.spines[sp].set_color(GRID); ax.spines[sp].set_linewidth(0.55)
     ax.set_xticks([]); ax.set_yticks([])
     save(fig, out_path(chap, "margin_reflected_rotor_inertia_torque_knee"))
 
@@ -394,9 +391,10 @@ def gen_ch12():
     # Fig 12-M2: Embedded CBF-QP Cycle Budget
     fig, ax = new_fig('budget-envelope')
     rows = [
-        ("QP Active-Set", 175.0, DATA)
+        ("Nominal solve", 175.0, DATA),
+        ("Solver WCET", 650.0, RED),
     ]
-    budget_envelope(ax, rows=rows, limit=1000.0, style='burn', limit_label="1000 us Tick")
+    budget_envelope(ax, rows=rows, limit=1000.0, style='burn', limit_label="1 ms")
     save(fig, out_path(chap, "margin_cbf_qp_cycle_budget_envelope"))
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -468,11 +466,16 @@ def gen_ch15():
     ladder(ax, tiers, domain='compute', style='staircase')
     save(fig, out_path(chap, "margin_fault_injection_coverage_ladder"))
 
-    # Fig 15-M2: Butler & Finelli Poisson Exposure Wall
+    # Fig 15-M2: illustrative zero-event exposure under a constant-rate model
     fig, ax = new_fig('scale-anchor')
-    knee(ax, knee_frac=0.60, style='shaded', pct_label="10^-9/h")
-    ax.text(25, 4.0, "Drone: 3000 h", ha="center", va="center", color=DATA, fontsize=4.8)
-    ax.text(78, 22.0, "AV: 342k years", ha="center", va="center", color=RED, fontsize=4.8, fontweight="bold")
+    x = np.linspace(0.05, 0.95, 100)
+    ax.plot(x, 0.10 + 0.80 * x**2, color=INK, lw=1.35)
+    ax.plot([x[0]], [0.10 + 0.80 * x[0]**2], "o", color=DATA, ms=3.3)
+    ax.plot([x[-1]], [0.10 + 0.80 * x[-1]**2], "o", color=RED, ms=3.3)
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    ax.set_xticks([]); ax.set_yticks([])
+    for spine in ("top", "right", "left", "bottom"):
+        ax.spines[spine].set_visible(False)
     save(fig, out_path(chap, "margin_poisson_exposure_wall_scale_anchor_knee"))
 
 # ─────────────────────────────────────────────────────────────────────────────

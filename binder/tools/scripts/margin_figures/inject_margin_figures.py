@@ -551,11 +551,11 @@ def main():
     )
     repl_11_c2 = (
         "::: {#psp-planning-c2-continuity .callout-perspective title=\"The C² continuity invariant\"}\n"
-        "A trajectory without continuous acceleration ($\\mathcal{C}^2$) is not a motion plan; unblended velocity steps across replanning seams are converted by driveline inertia into destructive torque spikes.\n"
+        "$C^2$ reference continuity avoids a commanded velocity impulse; admission must still check the bridge's interior demands and the measured plant state.\n"
         ":::\n\n"
         "::: {.column-margin}\n"
-        "![](images/svg/margin_reflected_rotor_inertia_torque_knee.svg){width=\"100%\" fig-alt=\"Knee curve showing 50 Newton-meter unblended torque shock collapsing to 1 Newton-meter with 50-millisecond spline blend.\"}\n\n"
-        "*Unblended seam velocity steps provoke a 50-fold torque spike, destroying mechanical transmissions.*\n"
+        "![](images/svg/margin_reflected_rotor_inertia_torque_knee.svg){width=\"100%\" fig-alt=\"Illustrative one-tick velocity-step request of 50 newton-meters versus a 50-millisecond C-squared blend with 1.5 newton-meter peak inertial torque. Actual drive response and load torque require validation.\"}\n\n"
+        "*In this specified inertia model, the C² blend cuts peak inertial torque request by 33.3×; neither request predicts damage by itself.*\n"
         ":::\n\n"
         "A related physical failure arises from output chatter in learned policy proposals."
     )
@@ -587,12 +587,12 @@ def main():
         "The second rung is an active position hold, corresponding to an IEC 60204-1 Category 2 stop (Safe Stop 2)"
     )
     repl_12_cbf = (
-        "When physical saturation, conflicting obstacle boundaries, or numerical divergence render the admissible control set empty ($\\mathcal{U}_{\\text{safe}} = \\emptyset$), the mathematical premise of the projection fails, tripping the Simplex switch to escalate to the second rung.\n\n"
+        "When physical saturation, conflicting obstacle boundaries, or numerical divergence render the admissible control set empty ($\\mathcal{U}_{\\text{safe}} = \\emptyset$), the projection has no feasible solution. A state-matched MCU fallback can limit harm only if it retains the required braking authority and clearance.\n\n"
         "::: {.column-margin}\n"
-        "![](images/svg/margin_cbf_qp_cycle_budget_envelope.svg){width=\"100%\" fig-alt=\"Budget envelope showing active-set CBF-QP solve finishing in 175 microseconds within a 1000-microsecond control cycle.\"}\n\n"
-        "*Embedded active-set CBF-QP solves finish in 175 microseconds, well within the 1000-microsecond control tick.*\n"
+        "![](images/svg/margin_cbf_qp_cycle_budget_envelope.svg){width=\"100%\" fig-alt=\"Illustrative 1000-microsecond cycle with a 175-microsecond nominal solve and a separately qualified 650-microsecond solver worst case.\"}\n\n"
+        "*Illustrative nominal solve: 175 microseconds. Qualification budgets the full cycle and a longer solver worst case.*\n"
         ":::\n\n"
-        "The second rung is an active position hold, corresponding to an IEC 60204-1 Category 2 stop (Safe Stop 2)"
+        "A powered position hold is one possible response when its sensing, torque, and thermal limits have been validated for the present state"
     )
     replace_exact(ch12, target_12_cbf, repl_12_cbf, "Ch 12 CBF-QP cycle budget envelope")
 
@@ -746,20 +746,7 @@ def main():
     )
     replace_exact(ch15, target_15_ladder, repl_15_ladder, "Ch 15 fault injection coverage ladder")
 
-    # Fig 28: margin_poisson_exposure_wall_scale_anchor_knee.svg
-    target_15_knee = (
-        "Consequently, physical AI systems cannot be validated solely by accumulating millions of unperturbed operational fleet miles; safety assurance must instead be established through deterministic fault injection, layered runtime invariant enforcement, and formal architectural partitioning.\n\n"
-        "| Target Safety Integrity Level & Standard"
-    )
-    repl_15_knee = (
-        "Consequently, physical AI systems cannot be validated solely by accumulating millions of unperturbed operational fleet miles; safety assurance must instead be established through deterministic fault injection, layered runtime invariant enforcement, and formal architectural partitioning.\n\n"
-        "::: {.column-margin}\n"
-        "![](images/svg/margin_poisson_exposure_wall_scale_anchor_knee.svg){width=\"100%\" fig-alt=\"Knee curve illustrating Butler and Finelli testing exposure wall scaling from hours to cosmic timescales.\"}\n\n"
-        "*Certifying life-critical reliability through operational exposure hits an astronomical time barrier.*\n"
-        ":::\n\n"
-        "| Target Safety Integrity Level & Standard"
-    )
-    replace_exact(ch15, target_15_knee, repl_15_knee, "Ch 15 Poisson exposure wall scale anchor knee")
+    # Ch 15's exposure figure is maintained directly next to its qualified table.
 
     # =========================================================================
     # Ch 16: 16_release.qmd

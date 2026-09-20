@@ -118,7 +118,7 @@ except ImportError:
         return _finalize_web_figure(fig), ax
 
 
-def plot_roofline(hardware_node, workloads=None):
+def plot_roofline(hardware_node, workloads=None, title=None):
     """
     Plots a publication-quality Roofline Model for a given HardwareNode.
 
@@ -152,7 +152,7 @@ def plot_roofline(hardware_node, workloads=None):
         x[mem_mask],
         y_roof[mem_mask] * 0.001,
         y_roof[mem_mask],
-        color=colors["OrangeL"],
+        color=colors["BlueL"],
         alpha=0.5,
         label="Memory-bound region",
     )
@@ -160,16 +160,23 @@ def plot_roofline(hardware_node, workloads=None):
         x[comp_mask],
         y_roof[comp_mask] * 0.001,
         y_roof[comp_mask],
-        color=colors["BlueFill"],
+        color=colors["OrangeL"],
         alpha=0.5,
         label="Compute-bound region",
     )
 
     # Roofline line
     ax.loglog(
-        x,
-        y_roof,
+        x[mem_mask],
+        y_roof[mem_mask],
         color=colors["BlueLine"],
+        linewidth=2.5,
+        zorder=5,
+    )
+    ax.loglog(
+        x[comp_mask],
+        y_roof[comp_mask],
+        color=colors["OrangeLine"],
         linewidth=2.5,
         zorder=5,
     )
@@ -181,7 +188,7 @@ def plot_roofline(hardware_node, workloads=None):
         slope_x,
         slope_y * 1.6,
         f"BW ceiling: {peak_bw:.0f} GB/s",
-        color=colors["OrangeLine"],
+        color=colors["BlueLine"],
         fontsize=8.5,
         fontweight="bold",
         rotation=38,
@@ -194,7 +201,7 @@ def plot_roofline(hardware_node, workloads=None):
         ridge_point * 8,
         peak_flops * 1.12,
         f"Compute ceiling: {peak_flops:.0f} TFLOP/s",
-        color=colors["BlueLine"],
+        color=colors["OrangeLine"],
         fontsize=8.5,
         fontweight="bold",
         ha="center",
@@ -213,7 +220,7 @@ def plot_roofline(hardware_node, workloads=None):
     ax.annotate(
         f"Ridge Point\n{ridge_point:.1f} FLOP/Byte",
         xy=(ridge_point, peak_flops),
-        xytext=(ridge_point * 3, peak_flops * 0.35),
+        xytext=(ridge_point * 2.6, peak_flops * 0.26),
         fontsize=8.5,
         fontweight="bold",
         color=colors["crimson"],
@@ -236,10 +243,10 @@ def plot_roofline(hardware_node, workloads=None):
 
     # Region labels
     ax.text(
-        x_min * 1.5,
-        peak_flops * 0.6,
+        (x_min * ridge_point) ** 0.5,
+        peak_flops * 0.02,
         "MEMORY\nBOUND",
-        color=colors["OrangeLine"],
+        color=colors["BlueLine"],
         fontsize=11,
         fontweight="bold",
         alpha=0.25,
@@ -247,14 +254,14 @@ def plot_roofline(hardware_node, workloads=None):
         va="center",
     )
     ax.text(
-        x_max * 0.4,
-        peak_flops * 0.6,
+        (ridge_point * x_max) ** 0.5,
+        peak_flops * 0.02,
         "COMPUTE\nBOUND",
-        color=colors["BlueLine"],
+        color=colors["OrangeLine"],
         fontsize=11,
         fontweight="bold",
         alpha=0.25,
-        ha="right",
+        ha="center",
         va="center",
     )
 
@@ -263,7 +270,7 @@ def plot_roofline(hardware_node, workloads=None):
         from ..engine.solvers import SingleNodeModel
 
         workload_colors = [
-            colors["crimson"],
+            colors["primary"],
             colors["GreenLine"],
             colors["VioletLine"],
             colors["BrownLine"],
@@ -288,7 +295,10 @@ def plot_roofline(hardware_node, workloads=None):
 
     ax.set_xlabel("Arithmetic Intensity (FLOP/Byte)")
     ax.set_ylabel("Performance (TFLOP/s)")
-    ax.set_title(f"Roofline: {hardware_node.name}")
+    # The document caption owns the figure title; pass `title` only for
+    # standalone use outside the book.
+    if title:
+        ax.set_title(title)
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(peak_flops * 0.001, peak_flops * 2)
     ax.legend(loc="lower right", fontsize=8, framealpha=0.9)

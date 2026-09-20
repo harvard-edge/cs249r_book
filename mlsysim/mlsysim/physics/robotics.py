@@ -523,7 +523,8 @@ def calc_3dgs_memory_footprint(num_gaussians: int, bytes_per_gaussian: int = 56)
         Number of 3D Gaussian ellipsoids in the spatial memory buffer.
     bytes_per_gaussian : int, optional
         Storage footprint per Gaussian (position 12B, covariance/scale/rotation 16B,
-        opacity 4B, spherical harmonics color 24B = 56 bytes standard).
+        opacity 4B, color coefficients 24B = 56 bytes in this assumed packing;
+        actual storage varies with harmonic degree, precision, and implementation).
 
     Returns
     -------
@@ -612,13 +613,18 @@ def calc_action_chunk_streaming_amortization(
     bus_efficiency: float = 0.70,
 ):
     """
-    Calculate memory streaming latency and amortized control rate for action chunking.
+    Calculate a weight-stream lower bound and its amortized cost per waypoint.
 
     Under memory-bandwidth bound autoregressive weight streaming:
         t_stream = M_weights / (BW_peak * eta_bus)
         f_single = 1 / t_stream
         tau_step = t_stream / H
-        f_effective = 1 / tau_step = H * f_single
+        f_waypoint_equivalent = 1 / tau_step = H * f_single
+
+    The waypoint-equivalent rate is an accounting ratio, not the rate at which
+    the model observes the world or generates a fresh action chunk. Decoder
+    work and other inference costs are excluded. ``f_effective`` is retained
+    as a legacy alias for callers of this function.
 
     Source: Zhao et al., "Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware",
     arXiv:2304.13705; Volume IV Chapter 3.
@@ -637,7 +643,8 @@ def calc_action_chunk_streaming_amortization(
     Returns
     -------
     dict
-        t_stream, f_single, tau_step, f_effective, b_sustained.
+        t_stream, f_single, tau_step, f_waypoint_equivalent,
+        f_effective (legacy alias), b_sustained.
     """
     validate_at_least(chunk_horizon, 1, "chunk_horizon")
     validate_positive(model_weight_memory, "model_weight_memory")
@@ -648,13 +655,14 @@ def calc_action_chunk_streaming_amortization(
     f_single = (1.0 / t_stream).to(ureg.hertz)
 
     tau_step = (t_stream / chunk_horizon).to(ureg.second)
-    f_effective = (1.0 / tau_step).to(ureg.hertz)
+    f_waypoint_equivalent = (1.0 / tau_step).to(ureg.hertz)
 
     return {
         "t_stream": t_stream.to(ureg.millisecond),
         "f_single": f_single,
         "tau_step": tau_step.to(ureg.millisecond),
-        "f_effective": f_effective,
+        "f_waypoint_equivalent": f_waypoint_equivalent,
+        "f_effective": f_waypoint_equivalent,
         "b_sustained": b_sustained.to(ureg.GB / ureg.second),
     }
 
@@ -665,13 +673,18 @@ def calc_watchdog_lease_bound(
     max_deceleration,
 ):
     """
-    Calculate maximum permissible communication / control lease timeout before emergency brake.
+    Calculate the ideal total delay budget before emergency braking begins.
 
     Under constant velocity v0 during uncommanded drift, followed by emergency braking
     at constant deceleration a_max:
         d_brake = (v0^2) / (2 * a_max)
         d_drift = d_clear - d_brake
-        T_lease <= d_drift / v0
+        T_lease + T_detection + T_brake_onset <= d_drift / v0
+
+    The returned ceiling includes every pre-brake delay. A chosen watchdog
+    lease must be shorter after reserving detection, command delivery, and
+    brake-onset time. ``t_lease_max`` is retained as a legacy alias for the
+    ideal total ceiling, not a safe standalone lease setting.
 
     Parameters
     ----------
@@ -685,7 +698,8 @@ def calc_watchdog_lease_bound(
     Returns
     -------
     dict
-        t_lease_max, d_brake, d_drift_allowable.
+        t_total_delay_max, t_lease_max (legacy alias), d_brake,
+        d_drift_allowable.
     """
     validate_positive(clearance_distance, "clearance_distance")
     validate_positive(initial_velocity, "initial_velocity")
@@ -703,10 +717,11 @@ def calc_watchdog_lease_bound(
         )
 
     d_drift = d_clear - d_brake
-    t_lease = (d_drift / v0).to(ureg.second)
+    t_total_delay = (d_drift / v0).to(ureg.millisecond)
 
     return {
-        "t_lease_max": t_lease.to(ureg.millisecond),
+        "t_total_delay_max": t_total_delay,
+        "t_lease_max": t_total_delay,
         "d_brake": d_brake.to(ureg.meter),
         "d_drift_allowable": d_drift.to(ureg.meter),
     }
@@ -1206,11 +1221,14 @@ def calc_shielded_system_hazard_rate(brain_hazard_rate, shield_coverage: float, 
 
 def calc_cbf_qp_orthogonal_projection(u_nom, a_vec, b_scalar):
     """
-    Calculate closed-form minimum-intervention Control Barrier Function (CBF) orthogonal projection.
+    Project onto a supplied abstract half-space in Euclidean control coordinates.
 
     Solves the quadratic program:
         min  1/2 ||u - u_nom||^2
         s.t. a^T u <= b
+
+    The caller must derive ``a`` and ``b`` from its plant and barrier. This
+    arithmetic alone proves neither forward invariance nor a physical stop.
     """
     u_n = np.asarray(u_nom, dtype=float)
     a = np.asarray(a_vec, dtype=float)
@@ -1422,11 +1440,18 @@ def calc_tsdf_voxel_grid_budget(
     ray_rate=None,
     dense_voxels_per_ray: int = 300,
     sparse_voxels_per_ray: int = 6,
+    free_voxels_per_ray: int = 294,
     bytes_per_ray_voxel: int = 8,
     cache_hit_rate: float = 0.95,
 ):
     """
-    Calculate memory footprint and DRAM bus bandwidth demand for dense vs sparse TSDF voxel grids.
+    Calculate partial TSDF storage and modeled DRAM traffic for dense vs sparse grids.
+
+    The four-byte voxel stores distance and fusion weight only. The sparse result
+    includes the stipulated leaf header, but neither result includes a separate
+    occupancy layer, per-cell evidence epochs, lookup/allocator metadata, or
+    other full-map state. The hit rate is an assumed workload input, not a
+    property of sparse allocation.
 
     Equation:
         N_dense = V_workspace / (Delta_v)^3
@@ -1435,7 +1460,7 @@ def calc_tsdf_voxel_grid_budget(
         N_blocks = ceil(N_active / B_block)
         M_sparse = N_blocks * (B_block * B_voxel + B_header)
         BW_dense_dram = R_rays * N_dense_lookups * B_lookup
-        BW_sparse_dram = R_rays * N_sparse_lookups * B_lookup * (1 - Hit_cache)
+        BW_sparse_dram = R_rays * (N_free_occupancy + N_TSDF_band) * B_lookup * (1 - Hit_cache)
 
     Parameters
     ----------
@@ -1444,7 +1469,7 @@ def calc_tsdf_voxel_grid_budget(
     voxel_size : Quantity
         Isotropic voxel side length (e.g. 1.0 cm or 5.0 mm).
     bytes_per_voxel : int
-        Bytes per voxel state (default 4 bytes: 16-bit distance + 16-bit weight).
+        TSDF payload bytes per voxel (default 4: 16-bit distance + 16-bit weight).
     sparsity_ratio : float
         Surface occupancy fraction within bounding volume (default 0.03 = 3%).
     block_size_voxels : int
@@ -1456,20 +1481,27 @@ def calc_tsdf_voxel_grid_budget(
     dense_voxels_per_ray : int
         Raycast integration depth across dense volume (default 300 lookups).
     sparse_voxels_per_ray : int
-        Lookups confined to narrow TSDF truncation margin (default 6 lookups).
+        TSDF fusion updates in the narrow surface band (default 6 lookups).
+    free_voxels_per_ray : int
+        Separate occupancy free-ray updates before the hit (default 294). Sparse
+        TSDF allocation does not remove this traversal or its occupancy work.
     bytes_per_ray_voxel : int
         Read-modify-write memory traffic per ray step (default 8 B).
     cache_hit_rate : float
-        SRAM/L2 cache hit rate for localized sparse blocks (default 0.95).
+        Assumed measured SRAM/L2 hit fraction for both occupancy and TSDF updates
+        (default 0.95 for the illustrative scenario; not a sparse-map property).
 
     Returns
     -------
     dict
-        Voxel count, dense footprint, sparse blocks, sparse footprint,
-        and DRAM bus bandwidths.
+        Voxel count, dense TSDF payload, sparse blocks, sparse TSDF payload
+        plus leaf headers, and modeled DRAM bus bandwidths. The legacy
+        ``dense_memory`` and ``sparse_memory`` keys are not full-map totals.
     """
     validate_positive(workspace_volume, "workspace_volume")
     validate_positive(voxel_size, "voxel_size")
+    if not (0.0 <= cache_hit_rate <= 1.0):
+        raise ValueError(f"cache_hit_rate must be in [0, 1], got {cache_hit_rate}")
 
     v_vol = workspace_volume.to(ureg.meter**3).magnitude
     v_vox = (voxel_size.to(ureg.meter).magnitude) ** 3
@@ -1495,38 +1527,49 @@ def calc_tsdf_voxel_grid_budget(
     if ray_rate is not None:
         r_rate = ray_rate.to(1 / ureg.second).magnitude if hasattr(ray_rate, "magnitude") else float(ray_rate)
         dense_dram_raw = r_rate * dense_voxels_per_ray * bytes_per_ray_voxel
-        sparse_dram_raw = r_rate * sparse_voxels_per_ray * bytes_per_ray_voxel * (1.0 - cache_hit_rate)
+        validate_at_least(free_voxels_per_ray, 0, "free_voxels_per_ray")
+        sparse_dram_raw = r_rate * (free_voxels_per_ray + sparse_voxels_per_ray) * bytes_per_ray_voxel * (1.0 - cache_hit_rate)
 
         result["dense_dram_bandwidth"] = (dense_dram_raw * (ureg.byte / ureg.second)).to(ureg.gigabyte / ureg.second)
         result["sparse_dram_bandwidth"] = (sparse_dram_raw * (ureg.byte / ureg.second)).to(ureg.megabyte / ureg.second)
+        result["free_occupancy_updates_per_ray"] = free_voxels_per_ray
+        result["tsdf_band_updates_per_ray"] = sparse_voxels_per_ray
+        result["traversed_voxels_per_ray"] = free_voxels_per_ray + sparse_voxels_per_ray
 
     return result
 
 
-def calc_intent_drift_lease(
+def calc_target_evidence_horizon(
     tolerance_radius,
     sensor_noise,
     drift_velocity,
 ):
     """
-    Calculate maximum permissible intent lease duration before drift breaches safety tolerance.
+    Calculate the target-evidence validity horizon under a bounded drift model.
+
+    This is not a stopping-time or stopping-distance bound. Motion admission also
+    needs current clearance, total pre-brake delay, achievable deceleration, and
+    a feasible fallback after this evidence expires.
 
     Equation:
-        tau = (r_tol - sigma_sensor) / v_drift
+        tau = (r_tol - e_0) / v_drift
 
     Parameters
     ----------
     tolerance_radius : Quantity
         Defended task spatial tolerance radius (e.g. mm or m).
     sensor_noise : Quantity
-        Uncertainty / sensor noise floor (e.g. mm or m). Must be < tolerance_radius.
+        Initial target-error allowance e_0 (legacy parameter name). It is a hard
+        bound only when the sensing model justifies one; a quantile gives a
+        validity horizon at its declared tail risk. Must be < tolerance_radius.
     drift_velocity : Quantity
-        Dynamic obstacle or unguided drift velocity (e.g. m/s).
+        Bounded relative target drift under the declared operating envelope
+        (e.g. m/s), or a calibrated rate at a declared tail risk.
 
     Returns
     -------
     Quantity
-        Permissible lease duration in milliseconds.
+        Maximum target-evidence age in milliseconds.
     """
     validate_positive(tolerance_radius, "tolerance_radius")
     validate_positive(sensor_noise, "sensor_noise")
@@ -1542,13 +1585,24 @@ def calc_intent_drift_lease(
     return tau.to(ureg.millisecond)
 
 
+def calc_intent_drift_lease(tolerance_radius, sensor_noise, drift_velocity):
+    """Compatibility name for :func:`calc_target_evidence_horizon`.
+
+    The result limits target-evidence age, not the time needed to stop.
+    """
+    return calc_target_evidence_horizon(tolerance_radius, sensor_noise, drift_velocity)
+
+
 def calc_process_thermal_runaway_lease(
     heat_generation_rate,
     thermal_capacitance,
     max_temp_overshoot,
 ):
     """
-    Calculate thermal rise rate and allowable control lease duration before thermal runaway.
+    Calculate lumped thermal rise rate and an assumed overshoot horizon.
+
+    This heat-capacity model does not predict thermal runaway or venting;
+    those require chemistry, initial temperature, cooling, and validated thresholds.
 
     Equation:
         dT_dt = P_in / C_th
@@ -1566,7 +1620,7 @@ def calc_process_thermal_runaway_lease(
     Returns
     -------
     dict
-        rate_of_rise, tau_lease.
+        rate_of_rise and tau_lease, the latter an overshoot horizon only.
     """
     validate_positive(heat_generation_rate, "heat_generation_rate")
     validate_positive(thermal_capacitance, "thermal_capacitance")
@@ -1582,4 +1636,62 @@ def calc_process_thermal_runaway_lease(
     return {
         "rate_of_rise": dt_dt.to(ureg.kelvin / ureg.second),
         "tau_lease": tau.to(ureg.millisecond),
+    }
+
+
+def calc_axi_fifo_contention(
+    *,
+    tile_bytes: int,
+    camera_bytes: int,
+    telemetry_bytes: int,
+    safety_read_bytes: int,
+    transaction_bytes: int,
+    bandwidth,
+    bank_switches: int,
+    bank_switch_time,
+    compute_time,
+):
+    """Compare a constructed FIFO backlog with priority bypass at AXI granularity.
+
+    All transfers are aligned multiples of ``transaction_bytes``. The FIFO
+    scenario admits the entire tile, camera transfer, and telemetry transfer
+    ahead of the safety read, then allows no new arrivals. The priority-bypass
+    scenario waits only for one already in-flight transaction. These are
+    controller-policy assumptions, not AXI timing guarantees. Peak bandwidth
+    ignores arbitration, refresh, and protocol overhead, so times are floors.
+    """
+    for name, count in (
+        ("tile_bytes", tile_bytes),
+        ("camera_bytes", camera_bytes),
+        ("telemetry_bytes", telemetry_bytes),
+        ("safety_read_bytes", safety_read_bytes),
+        ("transaction_bytes", transaction_bytes),
+    ):
+        if not isinstance(count, int) or count <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+    if any(count % transaction_bytes for count in (
+        tile_bytes, camera_bytes, telemetry_bytes, safety_read_bytes
+    )):
+        raise ValueError("all transfers must align to transaction_bytes")
+    if not isinstance(bank_switches, int) or bank_switches < 0:
+        raise ValueError("bank_switches must be a nonnegative integer")
+    validate_positive(bandwidth, "bandwidth")
+    validate_nonnegative(bank_switch_time, "bank_switch_time")
+    validate_nonnegative(compute_time, "compute_time")
+
+    byte_rate = bandwidth.to(ureg.byte / ureg.second)
+    switch_time = bank_switch_time.to(ureg.second)
+    compute = compute_time.to(ureg.second)
+    fifo_bytes = tile_bytes + camera_bytes + telemetry_bytes
+    queue_fifo = fifo_bytes * ureg.byte / byte_rate + bank_switches * switch_time
+    queue_bypass = transaction_bytes * ureg.byte / byte_rate
+    own_read = safety_read_bytes * ureg.byte / byte_rate
+    return {
+        "queued_transactions": fifo_bytes // transaction_bytes,
+        "tile_transactions": tile_bytes // transaction_bytes,
+        "queue_fifo": queue_fifo.to(ureg.microsecond),
+        "queue_priority_bypass": queue_bypass.to(ureg.microsecond),
+        "own_read": own_read.to(ureg.microsecond),
+        "total_fifo": (compute + queue_fifo + own_read).to(ureg.microsecond),
+        "total_priority_bypass": (compute + queue_bypass + own_read).to(ureg.microsecond),
     }
