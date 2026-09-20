@@ -141,6 +141,10 @@ class Node(BaseModel):
     nics_per_node: int = 1
     psus_per_node: int = 2
     host_memory: Optional[Quantity] = None
+    host_cpu: Optional[str] = None
+    host_cpu_cores: Optional[int] = None
+    host_memory_bw: Optional[Quantity] = None
+    host_storage: Optional[Any] = None
     metadata: Metadata = Field(default_factory=Metadata)
 
     @field_validator("intra_node_bw", mode="after")
@@ -151,7 +155,16 @@ class Node(BaseModel):
     @field_validator("host_memory", mode="after")
     @classmethod
     def _validate_host_memory(cls, v):
+        if v is None:
+            return v
         return require_unit_family(v, ureg.byte, "host_memory", "data")
+
+    @field_validator("host_memory_bw", mode="after")
+    @classmethod
+    def _validate_host_memory_bw(cls, v):
+        if v is None:
+            return v
+        return require_unit_family(v, ureg.bit / ureg.second, "host_memory_bw", "data")
 
 
 class RackProfile(BaseModel):

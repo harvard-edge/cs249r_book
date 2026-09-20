@@ -1,0 +1,159 @@
+## Autoregressive Generation {#sec-vol3-processor-autoregressive}
+
+The autoregressive generation loop is the fundamental execution cycle of modern language model serving, transforming an inherently parallel tensor accelerator into a synchronous, step-by-step state machine. While modern accelerator hardware incorporates tens of thousands of arithmetic units designed to saturate during large-scale matrix multiplications, generating text forces this compute fabric into an iterative, serial dependency chain: to emit a sequence of $K$ output tokens, the runtime must dispatch $K$ successive forward passes through the network. Each pass evaluates the model, produces a probability distribution over the discrete vocabulary, samples exactly one token, and appends that token to the context buffer before the subsequent forward pass can begin.
+
+::: {.column-margin}
+**Key Concept: Autoregressive Factorization**  
+The probabilistic contract where the joint likelihood of a token sequence decomposes into a product of conditional probabilities, each conditioning on all previously emitted tokens.
+:::
+
+**The foundational dilemma of sequence generation is that an accelerator cannot compute token $t$ until the discrete identity of token $t-1$ is finalized and bound to the Key-Value cache.** Generating a sequence requires an iterative serving loop that repeatedly evaluates the model and samples a token, creating an irreducibly serial causal dependency along one output path. For the agent systems engineer, this operational reality dictates both the wall-clock latency characteristics of model invocation and the non-deterministic interface boundaries across which candidate tool calls and structured plans are emitted.
+
+### Autoregressive Factorization and the Probabilistic Contract
+
+Mathematically, a foundation model does not generate an entire sequence $\mathbf{y} = (y_1, y_2, \dots, y_K)$ in a single holistic calculation. Instead, it defines a joint probability distribution over candidate token sequences conditioned on an input prompt $\mathbf{x} = (x_1, x_2, \dots, x_S)$. By the probability chain rule, this joint distribution decomposes strictly into a directed product of conditional next-token probabilities:
+
+$$P(y_{1:K} \mid x_{1:S}) = \prod_{t=1}^{K} P(y_t \mid x_{1:S}, y_{1:t-1})$$ {#eq-autoregressive-factorization}
+
+In this factorization, the context conditioning token $y_t$ consists of two distinct segments: the static, immutable input prefix $x_{1:S}$ provided by the host application, and the dynamic prefix of previously generated tokens $y_{<t} = (y_1, \dots, y_{t-1})$ produced by prior iterations of the decode loop. At each generation step $t$, the neural network acts as a parameterized function $\mathbf{f}_\Theta$ mapping the current sequence history $(x_{1:S}, y_{<t})$ to an unnormalized vector of scores across the discrete vocabulary $\mathcal{V}$:
+
+$$\mathbf{z}_t = \mathbf{f}_\Theta(x_{1:S}, y_{<t}) \in \mathbb{R}^{|\mathcal{V}|}$$ {#eq-logit-generation}
+
+The vector $\mathbf{z}_t$ contains the model's *logits*. Projecting these raw real-valued scores onto the probability simplex $\Delta^{|\mathcal{V}|-1}$ provides the conditional categorical distribution from which the next token $y_t$ is selected.
+
+Because the vocabulary size $|\mathcal{V}|$ typically ranges between $32{,}000$ and $128{,}000$ unique subword tokens, the total number of distinct output sequences of length $K$ is $|\mathcal{V}|^K$. For an output sequence of modest length, such as $K = 512$, the cardinality of this output space ($|\mathcal{V}|^{512} \approx 10^{2400}$) makes global sequence optimization—such as discovering the exact sequence that maximizes joint likelihood $\arg\max_{\mathbf{y}} P(\mathbf{y} \mid \mathbf{x})$—computationally intractable. 
+
+Classical search procedures like beam search retain a small pool of candidate hypotheses at each step, but they scale memory consumption linearly with the beam width and introduce significant decoding synchronization overhead. Modern high-throughput inference engines and agent runtimes almost universally dispense with beam search, opting instead for point-wise sampling or greedy selection along a single trajectory.
+
+### The Serving Loop and Execution State Machine
+
+To execute this mathematical factorization on physical hardware, the serving runtime wraps the neural network inside an iterative control loop. This loop maintains dynamic execution state across iterations, coordinating memory buffers, device kernels, and termination delimiters.
+
+The serving state machine tracks four primary structures at each step $t$: the active token input, the accelerator's persistent Key-Value (KV) cache tensors, the emitted logit vector, and the monotonic sequence history. The execution sequence proceeds through five synchronous phases:
+
+1. **Kernel Dispatch:** The runtime feeds the most recently selected token $y_{t-1}$ to the model's compute graph on the accelerator, referencing the accumulated key and value tensors from previous steps.
+2. **Logit Projection:** The network's final layer projects the normalized hidden activation vector through the language model head $\mathbf{W}_{\text{embed}}^T$, yielding the logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$.
+3. **Discretization Kernel:** The runtime scales $\mathbf{z}_t$ and executes a sampling or argmax kernel directly on the device, resolving a single discrete integer token ID $y_t \in [0, |\mathcal{V}|-1]$.
+4. **State Commit:** The internal projection vectors $\mathbf{k}_t$ and $\mathbf{v}_t$ computed during step $t$ are appended to the physical KV cache memory allocated within accelerator High-Bandwidth Memory (HBM).
+5. **Boundary Evaluation:** The host supervisor checks $y_t$ against pre-registered stopping conditions. If a boundary condition evaluates to true, the loop terminates; otherwise, $y_t$ becomes the input for step $t+1$.
+
+```python
+def decode_loop(model, kv_cache, prompt_tokens, stop_token_ids, max_tokens):
+    generated = []
+    current_token = prompt_tokens[-1]
+    for _ in range(max_tokens):
+        logits = model.forward_decode_step(current_token, kv_cache)
+        next_token = sample_simplex(logits, temperature=0.7, top_p=0.9)
+        generated.append(next_token)
+        if next_token in stop_token_ids:
+            break
+        current_token = next_token
+    return generated
+```
+
+The termination criteria evaluated in step 5 serve as the runtime's primary execution guardrails. Without rigorous termination checks, a model can cycle indefinitely through repetitive token loops or continue generating speculative text until the physical KV cache exhausts its allocated buffer. 
+
+| State Component | Notation | Physical Substrate | Memory Lifetime |
+| :--- | :--- | :--- | :--- |
+| **Step Input Token** | $y_{t-1}$ | Accelerator SRAM / Register | Single step ($1$ iteration) |
+| **Unnormalized Logits** | $\mathbf{z}_t$ | Accelerator SRAM / High-Bandwidth Memory | Transient per-step vector |
+| **KV Cache Tensors** | $\mathbf{K}_{1:t}, \mathbf{V}_{1:t}$ | Accelerator High-Bandwidth Memory | Persistent across entire sequence |
+| **Sequence Ledger** | $\mathbf{y}_{1:t}$ | Host System Memory (DRAM) | Durable host transaction record |
+
+: State components maintained across the autoregressive serving loop. {#tbl-serving-state}
+
+The host supervisor enforces three distinct stop conditions during boundary evaluation:
+
+*   **Tokenizer End-of-Sequence (EOS):** The model emits a reserved structural token (such as `<|endoftext|>` or `<|im_end|>`), signaling that its learned statistical prior has converged to sequence completion.
+*   **Host Stop Delimiters:** The runtime matches emitted subword sequences against application-specified byte strings (such as `\nObservation:` or `</tool_call>`), terminating model execution immediately when the generation crosses an external architectural boundary.
+*   **Resource Ceilings ($T_{\max}$):** The loop reaches a strict maximum output token limit $T_{\max}$, preventing non-terminating loops and enforcing budget isolation.
+
+### The Causal Serialization Barrier
+
+To engineers steeped in the design of out-of-order, superscalar microprocessors, this iterative loop appears glaringly inefficient. Modern microprocessors extract extensive instruction-level parallelism (ILP) by looking dozens or hundreds of cycles ahead in an instruction stream, executing instructions out of program order, and employing sophisticated branch predictors to speculate past conditional jumps. One might naturally ask: why cannot a high-throughput tensor accelerator speculatively evaluate token $t+50$ while token $t$ is being sampled?
+
+The obstacle lies in the mathematical structure of the self-attention mechanism and the extreme cardinality of the token vocabulary. In a multi-layer Transformer, the query vector $\mathbf{Q}_t$, key vector $\mathbf{K}_t$, and value vector $\mathbf{V}_t$ computed at layer $l$ for step $t$ depend directly on the contextual representation emitted by layer $l-1$:
+
+$$\operatorname{Attention}(\mathbf{Q}_t, \mathbf{K}_{1:t}, \mathbf{V}_{1:t}) = \operatorname{softmax}\left(\frac{\mathbf{Q}_t \mathbf{K}_{1:t}^T}{\sqrt{d_k}}\right) \mathbf{V}_{1:t}$$ {#eq-attention-causal-step}
+
+Here, $\mathbf{K}_{1:t}$ and $\mathbf{V}_{1:t}$ represent the full concatenated history of keys and values from the prompt through step $t$. Crucially, $\mathbf{Q}_t$ is derived directly from the embedding of $y_{t-1}$ passed through the lower-layer transformations. If the discrete identity of token $y_{t-1}$ changes, the input vector to the first layer changes, causing every subsequent intermediate representation up to $\mathbf{Q}_t$, $\mathbf{K}_t$, and $\mathbf{V}_t$ to diverge completely.
+
+::: {.column-margin}
+**Contrast: Branch Prediction vs. Simplex Speculation**  
+A CPU branch predictor chooses between two explicit instruction addresses ($0$ or $1$). An autoregressive model branches across a simplex of $|\mathcal{V}| \ge 32{,}000$ possible transitions at every step.
+:::
+
+On a general-purpose CPU, conditional branches are binary, exhibiting strong temporal and spatial correlation that enables branch prediction accuracies exceeding 95%. On an accelerator evaluating an autoregressive language model, however, the branching factor at every single step is $|\mathcal{V}| \approx 32{,}000$ to $128{,}000$. Speculating just four tokens ahead without resolving intermediate selections would require expanding a combinatorial tree of $|\mathcal{V}|^4 \approx 10^{18}$ parallel execution paths—vastly exceeding the aggregate computational capacity of any physical datacenter.
+
+Consequently, generation is bound by an absolute *causal serialization barrier*. The identity of token $y_t$ depends on $y_{t-1}$; the identity of $y_{t+1}$ depends on $y_t$; and no mathematical bypass allows the engine to compute the state representations for step $t+1$ without committing to a concrete choice for $y_t$. While techniques such as speculative decoding can leverage a smaller auxiliary model to propose candidate linear sequences, the primary model must still verify those tokens against its own sequential KV representations. For standard autoregressive decode loops, the wall-clock execution time scales strictly linearly with the number of generated tokens $K$.
+
+### Sampling on the Vocabulary Simplex
+
+Once an execution step emits the unnormalized logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$, the runtime must map these raw scores onto a probability distribution over the vocabulary simplex. This transformation is governed by the *temperature* scaling parameter $\tau > 0$, which modifies the relative sharpness of the distribution prior to applying the softmax operator:
+
+$$P(y_t = v \mid x_{1:S}, y_{<t}) = \frac{\exp\left(z_{t, v} / \tau\right)}{\sum_{w \in \mathcal{V}} \exp\left(z_{t, w} / \tau\right)}$$ {#eq-temperature-softmax}
+
+The temperature parameter acts as an entropy modulator across the output space:
+
+*   **Greedy Limit ($\tau \to 0$):** As $\tau$ approaches zero, the relative numerical difference between the maximum logit $\max_w z_{t, w}$ and all competing scores is amplified toward infinity. The softmax function collapses to a Dirac delta distribution centered entirely on the argmax:
+    $$\lim_{\tau \to 0} P(y_t = v \mid x_{1:S}, y_{<t}) = \begin{cases} 1 & \text{if } v = \arg\max_{w \in \mathcal{V}} z_{t, w} \\ 0 & \text{otherwise} \end{cases}$$
+    Greedy decoding is completely deterministic. For an identical prompt and fixed runtime configuration, the engine will always traverse the exact same path through sequence space.
+*   **Calibrated Prior ($\tau = 1.0$):** The output distribution directly reflects the unscaled, cross-entropy-calibrated predictions of the neural network.
+*   **High Entropy ($\tau \gg 1.0$):** As $\tau \to \infty$, the scaled logits $z_{t, v} / \tau$ converge toward zero. The exponential terms $\exp(0)$ equal 1, flattening the distribution toward a uniform categorical distribution over the entire vocabulary: $P(y_t = v) \to \frac{1}{|\mathcal{V}|}$.
+
+Unconstrained stochastic sampling across the full vocabulary $\mathcal{V}$ frequently yields catastrophic failures in automated agents. Because language model vocabularies contain tens of thousands of subwords, the aggregate probability mass residing in the extreme tail of the distribution—comprising obscure unicode sequences, syntax errors, and low-probability tokens—is non-negligible. When sampling draws a token from this long tail, the error compounds: on the subsequent step $t+1$, the model conditions on this malformed token, frequently derailing downstream reasoning.
+
+To suppress this tail, serving runtimes apply *truncation filters* prior to normalization:
+
+::: {.column-margin}
+**Top-$k$ vs. Top-$p$ Truncation**  
+Top-$k$ applies a rigid rank ceiling regardless of certainty. Top-$p$ dynamically expands or contracts the candidate set based on the cumulative shape of the probability distribution.
+:::
+
+1.  **Top-$k$ Truncation:** The runtime sorts the logit vector and sets $z_{t, v} = -\infty$ for all tokens ranked below a fixed threshold $k \in \mathbb{N}^+$:
+    $$\mathcal{V}_k = \{v \in \mathcal{V} \mid \operatorname{rank}(z_{t, v}) \le k\}$$
+    While top-$k$ guarantees that the runtime never considers tokens ranked outside the top $k$ candidates, its fixed boundary is poorly matched to variable model confidence. If the model is highly certain (e.g., predicting the closing parenthesis of a function call), the top candidate might possess $99\%$ of the probability mass, yet top-$k$ forces the inclusion of $k-1$ irrelevant options. Conversely, if the distribution is flat across dozens of plausible synonyms, top-$k$ prematurely truncates viable continuations.
+2.  **Top-$p$ (Nucleus) Truncation:** Rather than fixing the count of candidates, nucleus truncation dynamically sizes the candidate set to the smallest subset $\mathcal{V}_p \subseteq \mathcal{V}$ whose cumulative probability mass exceeds a specified threshold $p \in (0, 1]$:
+    $$\mathcal{V}_p = \arg\min_{\mathcal{S} \subseteq \mathcal{V}} |\mathcal{S}| \quad \text{subject to} \quad \sum_{v \in \mathcal{S}} P(v \mid x_{1:S}, y_{<t}) \ge p$$
+    All tokens outside $\mathcal{V}_p$ have their logits masked to $-\infty$, and the remaining scores are renormalized. Under high certainty, $|\mathcal{V}_p|$ naturally collapses to one or two tokens; under high entropy, $|\mathcal{V}_p|$ expands to accommodate the broad candidate pool.
+
+::: {.callout-note title="Logit Scaling and Truncation on the Vocabulary Simplex"}
+Consider a reduced vocabulary $\mathcal{V} = \{v_1, v_2, v_3, v_4, v_5\}$ where an execution step emits unnormalized logits $\mathbf{z}_t = [12.0, 10.5, 9.0, 6.0, 3.0]$. We examine the resulting probability distributions across three distinct runtime sampling configurations.
+
+**Step 1: Baseline Softmax at Unit Temperature ($\tau = 1.0$)**  
+First, compute the exponentials $\exp(z_i)$:
+$$\exp(\mathbf{z}_t) = [162754.8, 36315.5, 8103.1, 403.4, 20.1]$$
+Summing the terms yields $\sum_i \exp(z_i) = 207596.9$. Dividing each term by the denominator gives:
+$$\mathbf{P}_{\tau=1.0} = [0.7840, 0.1749, 0.0390, 0.0019, 0.0001]$$
+
+**Step 2: Low-Temperature Sharpening ($\tau = 0.5$)**  
+Scale the logits by $\tau = 0.5$, which doubles each exponent: $\mathbf{z}_t / 0.5 = [24.0, 21.0, 18.0, 12.0, 6.0]$.  
+Computing the new exponentials:
+$$\exp(\mathbf{z}_t / 0.5) = [2.649 \times 10^{10}, 1.319 \times 10^9, 6.566 \times 10^7, 1.628 \times 10^5, 403.4]$$
+The sum is dominated almost entirely by the top token: $\sum_i \exp(z_i / 0.5) \approx 2.788 \times 10^{10}$.  
+Normalizing produces the sharpened probabilities:
+$$\mathbf{P}_{\tau=0.5} = [0.9502, 0.0473, 0.0024, 0.0000, 0.0000]$$
+Lowering the temperature concentrates $95\%$ of the total probability mass onto the top token $v_1$, drastically reducing the entropy of the generation step.
+
+**Step 3: Nucleus Truncation ($p = 0.90, \tau = 1.0$)**  
+Starting from the unscaled probabilities $\mathbf{P}_{\tau=1.0} = [0.7840, 0.1749, 0.0390, 0.0019, 0.0001]$, sort the tokens in descending order and compute their cumulative distribution:
+*   Token $v_1$: $P(v_1) = 0.7840$ (Cumulative: $0.7840 < 0.90$)
+*   Token $v_2$: $P(v_2) = 0.1749$ (Cumulative: $0.7840 + 0.1749 = 0.9589 \ge 0.90$)
+
+The cumulative threshold $0.90$ is exceeded by including $v_2$. Therefore, the nucleus set is $\mathcal{V}_p = \{v_1, v_2\}$.  
+The logits for tokens $v_3, v_4, v_5$ are set to $-\infty$. We renormalize the surviving subset $\{v_1, v_2\}$:
+$$\text{Denominator} = 0.7840 + 0.1749 = 0.9589$$
+$$P_{\text{nucleus}}(v_1) = \frac{0.7840}{0.9589} = 0.8176, \quad P_{\text{nucleus}}(v_2) = \frac{0.1749}{0.9589} = 0.1824$$
+Tokens $v_3, v_4,$ and $v_5$ receive zero probability mass, eliminating tail risk while maintaining proportional stochastic choice between the two plausible candidates.
+:::
+
+For an agent systems designer, the selection between deterministic greedy decoding ($\tau = 0$) and nucleus sampling ($p < 1.0, \tau > 0$) represents an architectural trade-off between *reproducibility* and *robustness*:
+
+*   **Determinism and Testability:** Greedy decoding provides strict determinism at the model interface. For compiler toolchains, database queries, and system configuration tasks, determinism is vital: a regression test executed against a deterministic model produces reproducible traces, enabling engineers to isolate bugs in downstream runtime logic without contending with sampling variance.
+*   **Path Degeneration:** Despite its reproducibility, greedy decoding is uniquely vulnerable to *pathological attractors*. If an uncalibrated model enters a repetitive loop (e.g., emitting repetitive whitespace or cycling between two contradictory logic statements), the greedy argmax will select the exact same token on step $t+m$ that triggered the cycle on step $t$, locking the generation into an infinite loop until $T_{\max}$ is exhausted. Injecting mild entropy through nucleus sampling ($p = 0.95, \tau = 0.7$) perturbs these deterministic attractor basins, allowing the generation to break free from repetitive loops.
+
+***
+
+Suppose the autoregressive serving loop finishes its traversal across the vocabulary simplex without encountering an abnormal hardware exception. Step by step, it has evaluated the causal attention layers, sampled tokens with high individual conditional likelihoods, and halted cleanly upon encountering a designated stop delimiter. The host system now holds a complete, fluent candidate sequence $\mathbf{y}_{1:K}$ in memory escrow. 
+
+Does this high sequence likelihood establish that the generated payload is valid, syntactically well-formed, or operationally safe? It does not. The autoregressive loop optimizes solely for statistical likelihood under the training distribution; it possesses no internal model of system truth, no awareness of operating system invariants, and no mechanism to verify whether a proposed shell command or database transaction will succeed or corrupt state. The foundation model has functioned purely as an unprivileged hypothesis generator. Before any emitted candidate sequence can be granted authority to mutate external system state, the host agent runtime must submit the proposal to explicit, deterministic candidate sequence verification.

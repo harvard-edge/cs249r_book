@@ -1,0 +1,180 @@
+## Write-Ahead Logging Discipline {#sec-vol3-persistence-wal}
+
+The central vulnerability of an autonomous agent operating over external tools is the physical asymmetry between volatile network transmission and non-volatile storage persistence. When an agent runtime decides to invoke an external tool—whether dispatching an HTTP POST to transfer capital, provisioning a compute instance on a cloud provider, or executing a shell command that recursively deletes a directory tree—it crosses an administrative boundary from which there is no physical rollback. If the host operating system transmits the network packet across the network interface card (NIC) before the storage controller has safely committed the corresponding authorization event to non-volatile flash memory, any immediate hardware failure—a power loss, a kernel panic, or an unhandled out-of-memory eviction—creates an irrecoverable state divergence. The external world records that the mutation occurred, but the surviving agent process boots with an event log that terminates prior to the action. Upon trajectory reconstruction, the supervisor observes an unfulfilled plan, re-evaluates the context, and re-emits the exact same mutation, generating duplicate payments, duplicate infrastructure allocations, or corrupted remote state.
+
+::: {.column-margin}
+**Phantom Mutation**\
+An external side effect executed by an agent runtime that lacks a corresponding durable record in non-volatile storage due to a crash occurring within the window between network dispatch and disk synchronization.
+:::
+
+**To prevent this inconsistency, the host runtime must enforce the Write-Ahead Logging (WAL) discipline: no external side effect may cross the network boundary until the immutable event record authorizing that action has been physically synchronized to a non-volatile medium via an operating system I/O barrier.**
+
+### The Classical Invariant at the External Boundary
+
+In classical database architectures, the Write-Ahead Logging protocol, formalized by Gray and Reuter (1992) and codified in the ARIES recovery algorithm by Mohan et al. (1992), addresses a specific internal synchronization dilemma: coordinating volatile memory buffers with non-volatile disk pages. The classical WAL invariant mandates that any update to a data page cached in volatile DRAM must be preceded by a non-volatile log record describing the update before that dirty data page is permitted to overwrite the old page on disk. This invariant supports the *no-force/steal* buffer management policy, enabling high transactional throughput by allowing the database engine to flush dirty pages to disk at its leisure (*steal*) without forcing synchronous page writes on transaction commit (*no-force*), because the non-volatile log contains sufficient structural information to execute either an undo or a redo operation during crash recovery.
+
+```
+       UNPRIVILEGED MODEL                   SUPERVISORY RUNTIME                      EXTERNAL ENVIRONMENT
+               │                                     │                                         │
+               │  1. Propose Action a                │                                         │
+               ├────────────────────────────────────>│                                         │
+               │                                     │                                         │
+               │                              [Escrow & Validate]                              │
+               │                                     │                                         │
+               │                                     │ 2. Append & fsync()                     │
+               │                                     ├──┐                                      │
+               │                                     │  │ I/O Barrier                          │
+               │                                     │<─┘                                      │
+               │                                     │                                         │
+               │                                     │ 3. Dispatch Mutating RPC                │
+               │                                     ├────────────────────────────────────────>│
+               │                                     │                                         │ [Physical
+               │                                     │                                         │  Mutation]
+               │                                     │ 4. Receive Observation o                │
+               │                                     │<────────────────────────────────────────┤
+               │                                     │                                         │
+               │                                     │ 5. Append Observation                   │
+               │                                     ├──┐                                      │
+               │                                     │  │ Async/Buffered                       │
+               │                                     │<─┘                                      │
+               │  6. Ingest Observation o            │                                         │
+               │<────────────────────────────────────┤                                         │
+               │                                     │                                         │
+```
+![The Agent Write-Ahead Logging (WAL) execution sequence. The runtime intercepts model proposals, enforces policy validation in escrow, blocks on a physical storage synchronization barrier (`fsync`), dispatches the external mutating call across the network interface, and finally ingests the resulting observation.](images/svg/ch10-wal-sequence.svg){#fig-vol3-wal-sequence}
+
+When transferred to agentic machine learning systems, the physical boundary shifts fundamentally. In a database engine, both the log and the data tables reside within storage subsystems under the ultimate control of the local operating system and storage controller. If a transaction crashes midway through an execution cycle, the database engine executes an undo pass using its log records to overwrite the dirty, partially mutated tables on disk. In an agentic system, however, the target of an action is not an internal disk page; it is the external, non-rollbackable physical world. There is no distributed two-phase commit protocol spanning arbitrary third-party REST APIs, external filesystems, or cloud endpoints. Once an IP packet leaves the host machine's NIC, the mutation is irrevocable.
+
+Consequently, the agentic runtime must adapt the WAL invariant to govern external side effects under Zero Ambient Authority ($A=0$). The runtime acts as a secure mediation supervisor interposed between the unprivileged foundation model $M$ and the host execution environment. We formalize this interaction as a strict partial order of execution phases across the physical boundaries of the system.
+
+Let $e_{\text{prop}}$ represent the event generated when the model emits an action proposal within its autoregressive decode loop. The supervisor intercepts this proposal and holds it in memory escrow. Next, the runtime's deterministic policy validator checks schema compliance, security invariants, and rate limits, generating an authorization event $e_{\text{auth}}$. Before transmitting the mutating payload across the physical network interface as an external action $a_{\text{ext}}$, the runtime must execute a synchronous non-volatile storage barrier $e_{\text{flush}}$. Only upon the return of this storage barrier does the runtime execute the network dispatch. Finally, when the external environment returns an outcome, the runtime ingests the result as an observation event $e_{\text{obs}}$.
+
+The Agent Write-Ahead Logging Invariant dictates that for any mutating operation, the causal timeline of physical operations must satisfy:
+
+$$e_{\text{prop}} \prec e_{\text{auth}} \prec e_{\text{flush}} \prec a_{\text{ext}} \prec e_{\text{obs}}$$
+
+The critical ordering constraint is the relation $e_{\text{flush}} \prec a_{\text{ext}}$. If the runtime permits $a_{\text{ext}} \prec e_{\text{flush}}$, there exists a non-zero time interval $\Delta t = t(e_{\text{flush}}) - t(a_{\text{ext}})$ during which the external mutation has been initiated or executed in the physical world, but no surviving record of that authorization exists in non-volatile storage. If the physical host experiences a power failure, hypervisor eviction, or operating system crash during $\Delta t$, the state of the real world permanently diverges from the durable state of the agent trajectory.
+
+### The Physical Anatomy of Phantom Mutations and the Storage Barrier
+
+To understand why naive implementations of agent runtimes violate this invariant, one must analyze the physical path of I/O operations through the operating system kernel and storage hardware. Programmers writing agent orchestrators frequently assume that calling a standard POSIX write function, such as `write(fd, buffer, length)`, guarantees that the corresponding bytes have been permanently written to disk. This assumption is completely false.
+
+::: {.column-margin}
+**Metadata vs. Data Sync**\
+`fdatasync()` flushes modified user data blocks and only the minimal file metadata needed to read that data (such as file size). It omits non-essential attributes like `st_atime` and `st_mtime`, eliminating an unnecessary synchronous write on copy-on-write filesystems.
+:::
+
+When an application issues a standard `write()` system call, the operating system kernel copies the serialized event data from the process's virtual address space into the kernel's volatile page cache. Once this in-memory memory-to-memory copy completes, the kernel immediately returns control to user space with a return value indicating success. At this point, the data resides purely in volatile DRAM as a "dirty" memory page. The physical transfer of those bytes to the underlying solid-state drive (SSD) or hard disk is deferred and scheduled asynchronously by kernel background writeback daemons (such as Linux's `bdi_writeback` threads, controlled by system parameters like `/proc/sys/vm/dirty_writeback_centisecs`).
+
+If an agent runtime issues a standard `write()` for an `ActionAuthorized` event and immediately follows it with a non-blocking `socket.send()` to an external API, the two operations race across radically different physical media:
+
+1. **The Network Path:** The `send()` syscall places the TCP payload into the kernel's socket send buffer (`sk_buff`). The network interface card reads this buffer via Direct Memory Access (DMA) over the PCIe bus, serializes the bytes into Ethernet frames, and transmits them across physical fiber or copper at gigabit line rate. Within a few hundred microseconds, the remote third-party server receives the request, processes the HTTP mutation, and permanently alters its underlying database.
+2. **The Storage Path:** The dirty page containing the authorization log record remains in host DRAM, waiting for the kernel writeback timer to expire—a delay that defaults to several seconds, or even up to 30 seconds under standard operating system configurations.
+
+If power is severed or the host kernel encounters an unrecoverable panic during this window, the volatile DRAM contents evaporate instantly. Upon reboot, the file system mounts its journaling log, reconciles its metadata, and exposes the agent log file as it existed prior to the unwritten dirty page. The external server, however, retains the completed mutation. 
+
+| Phase | System Layer | Physical Medium | Volatile State | Non-Volatile State |
+|:---|:---|:---|:---|:---|
+| **1. Proposal** | Model Runtime | Host DRAM | Model emits token stream | Prior events on disk |
+| **2. Escrow** | Supervisor | Host DRAM | Action held; policy check passed | Prior events on disk |
+| **3. Page Cache Write** | OS Kernel | Kernel DRAM | Log appended in dirty page cache | Prior events on disk |
+| **4. Storage Barrier** | Drive Controller | NVMe Flash | Controller flushes internal SRAM | Event $e_{\text{auth}}$ committed to flash |
+| **5. Tool Dispatch** | Network Interface | Physical Wire | TCP packet transmitted | Event $e_{\text{auth}}$ committed to flash |
+| **6. Ingestion** | Supervisor | Host DRAM | Tool output received | Event $e_{\text{auth}}$ committed to flash |
+
+: Operational phases of the Write-Ahead Logging protocol across physical system layers. The storage barrier at Phase 4 must complete before the network dispatch at Phase 5 begins. {#tbl-vol3-wal-layers}
+
+To close this vulnerability window, the runtime must invoke an explicit operating system I/O barrier that forces the dirty pages out of host memory and blocks until the underlying storage hardware acknowledges non-volatile commitment. Under POSIX semantics, this is achieved using `fsync(fd)` or `fdatasync(fd)`.
+
+Even an operating system sync call, however, must be evaluated against modern drive controller architectures. Contemporary enterprise NVMe SSDs contain internal volatile DRAM caches designed to buffer writes and maintain flash translation layer (FTL) address mappings. A naive drive controller might acknowledge a write as soon as it hits its internal drive RAM. To guarantee genuine durability, the operating system's filesystem and block layers must transmit an explicit NVMe Flush command (Opcode `0x35`) or utilize Force Unit Access (FUA) flags on block writes. These commands instruct the drive controller to flush its internal volatile cache to non-volatile flash cells (or verify that its internal supercapacitors are charged to provide power-loss protection) before signaling completion back to the host kernel. Only when this hardware-level barrier completes does `fsync()` return, establishing the precondition $e_{\text{flush}}$ required for safe network transmission.
+
+::: {.callout-note title="Worked Example: Latency and Throughput Cost of Synchronous Disk Barriers"}
+Consider an autonomous software engineering agent deployed on an enterprise server. The agent executes tasks by interacting with a local sandboxed file system, running unit tests, and dispatching code review comments to a remote Git hosting platform.
+
+**Hardware Specifications:**
+- **Compute:** Dual-socket host executing concurrent agent worker processes.
+- **Primary Storage (Enterprise NVMe SSD):** Local PCIe 4.0 x4 drive. Uncached sequential `write()` to page cache: $t_{\text{write}} = 1.2\ \mu\text{s}$. Synchronous `fdatasync()` barrier (including controller cache flush): $t_{\text{sync}} = 85\ \mu\text{s}$.
+- **Network Interface:** 25 GbE interface. Network round-trip time to external Git API: $t_{\text{net}} = 12\ \text{ms}$.
+- **Alternative Cloud Storage (Network Block Store):** Attached cloud volume (e.g., AWS EBS gp3). Synchronous `fdatasync()` barrier: $t_{\text{ebs}} = 1.8\ \text{ms}$.
+
+**Problem 1: Latency Overhead per Mutating Turn**\
+Suppose an agent trajectory requires issuing an authorized shell command to delete an obsolete build artifact (`rm -rf build/`). 
+1. Calculate the percentage latency overhead added by the storage barrier when running on the local enterprise NVMe drive versus the cloud block volume, assuming the local tool execution takes $t_{\text{exec}} = 4.0\ \text{ms}$.
+2. Calculate the theoretical maximum action dispatch rate ($R_{\max}$) for a single-threaded agent process bound to sequential operations on both storage configurations.
+
+**Solution:**\
+1. For local NVMe:
+$$\text{Total Turn Latency} = t_{\text{write}} + t_{\text{sync}} + t_{\text{exec}} = 0.0012\ \text{ms} + 0.085\ \text{ms} + 4.0\ \text{ms} = 4.0862\ \text{ms}$$
+$$\text{Overhead}_{\text{NVMe}} = \frac{t_{\text{sync}}}{t_{\text{write}} + t_{\text{exec}}} = \frac{0.085\ \text{ms}}{4.0012\ \text{ms}} \approx 2.12\%$$
+For the cloud network block volume:
+$$\text{Total Turn Latency} = t_{\text{write}} + t_{\text{ebs}} + t_{\text{exec}} = 0.0012\ \text{ms} + 1.8\ \text{ms} + 4.0\ \text{ms} = 5.8012\ \text{ms}$$
+$$\text{Overhead}_{\text{EBS}} = \frac{t_{\text{ebs}}}{t_{\text{write}} + t_{\text{exec}}} = \frac{1.8\ \text{ms}}{4.0012\ \text{ms}} \approx 44.99\%$$
+
+2. The theoretical maximum dispatch throughput for a strictly sequential, single-threaded execution loop without tool execution latency is bounded entirely by the I/O barrier:
+$$R_{\max, \text{NVMe}} = \frac{1}{t_{\text{sync}}} = \frac{1}{85 \times 10^{-6}\ \text{s}} \approx 11,764\ \text{dispatches/sec}$$
+$$R_{\max, \text{EBS}} = \frac{1}{t_{\text{ebs}}} = \frac{1}{1.8 \times 10^{-3}\ \text{s}} \approx 555\ \text{dispatches/sec}$$
+
+When external network interactions are factored in ($t_{\text{net}} = 12\ \text{ms}$), the relative impact of the local NVMe barrier drops to less than $0.7\%$, demonstrating that local synchronous logging adds negligible overhead relative to wide-area network latency. However, on cloud block storage, the 1.8 ms synchronization barrier accounts for over $13\%$ of the total 13.8 ms turn time, posing a severe bottleneck if hundreds of concurrent agent threads contend on the same storage volume.
+:::
+
+### Amortizing Barrier Latency via Group Commit
+
+While a local NVMe drive provides microsecond-level synchronization barriers for single trajectories, production systems run dozens or hundreds of concurrent agent trajectories within a unified cluster node. If each concurrent worker process executes an independent `fdatasync()` call on every mutating event, the storage subsystem experiences pathological I/O contention:
+
+1. **I/O Serialization:** The storage controller's command queues become saturated with high-priority flush barriers, stalling both background writeback and sequential reads.
+2. **Write Amplification:** Even if an event record occupies only 512 bytes, the operating system and the flash translation layer operate at page and block granularities (typically 4 KiB file system pages and 128 KiB to 4 MiB flash erase blocks). Synchronously flushing small, independent writes forces repeated write amplification on disk, shortening hardware lifespan and degrading tail latency.
+3. **Lock Convoy Effects:** Threads contending to append to a shared append-only trajectory log serialize behind the file system inode mutex, causing context-switch thrashing.
+
+To resolve this systems bottleneck without weakening the Write-Ahead Logging invariant, the runtime implements the *Group Commit* optimization. Originally introduced in high-throughput database systems (DeWitt et al., 1984), group commit amortizes the cost of a single physical storage barrier across multiple concurrent, independent operations.
+
+```
+THREAD 1 (Agent A):  [Escrow a_1] ──┐
+                                    │
+THREAD 2 (Agent B):  [Escrow a_2] ──┼─> [Lock-Free Ring Buffer] ──> [Vectorized writev()] ──> [Single fdatasync()]
+                                    │                                                               │
+THREAD 3 (Agent C):  [Escrow a_3] ──┘                                                               │
+                                                                                                    │
+                                    ┌───────────────────────────────────────────────────────────────┘
+                                    ▼
+                     [Simultaneous Barrier Release]
+                                    │
+                     ┌──────────────┼──────────────┐
+                     ▼              ▼              ▼
+                [Dispatch 1]   [Dispatch 2]   [Dispatch 3]
+```
+
+In an agent supervisor utilizing group commit, individual execution threads do not independently execute `fsync()`. Instead, when an agent thread verifies that a proposed tool mutation is authorized, it appends its serialized event record $e_i$ to a shared, in-memory, lock-free ring buffer and enqueues its continuation on an internal completion channel. The thread then suspends execution, entering a blocked wait state.
+
+A dedicated storage coordinator daemon (or an elected worker thread acting as group leader) monitors the queue. The coordinator gathers all pending authorization events that have accumulated during a microsecond-scale aggregation window $W$ into an event batch:
+
+$$B = \{e_1, e_2, \dots, e_k\}$$
+
+The coordinator executes a single vectorized `writev()` system call to transfer all $k$ records to the kernel page cache, followed by an immediate, single `fdatasync()` barrier. Once the NVMe hardware acknowledges that the batch $B$ is durably settled in non-volatile cells, the coordinator broadcasts a notification across the waiting worker threads. Upon receiving this wake-up signal, all $k$ threads simultaneously advance to their respective network dispatch phases ($a_{\text{ext}, 1}, a_{\text{ext}, 2}, \dots, a_{\text{ext}, k}$).
+
+| Interface | Cache Semantics | Kernel Return Condition | NVMe State on Return | Safe for $e_{\text{flush}} \prec a_{\text{ext}}$? | Typical Latency ($\mu\text{s}$) |
+|:---|:---|:---|:---|:---|:---|
+| `write()` | Standard Page Cache | Copied to kernel DRAM | Volatile / Unwritten | ❌ **Unsafe** (Data loss on crash) | $1 - 2$ |
+| `write()` + `O_SYNC` | Synchronous Page Cache | Written to drive cache | Controller DRAM / Unknown | ⚠️ **Conditional** (Depends on FUA) | $150 - 500$ |
+| `write()` + `fdatasync()` | Explicit Flush | Acknowledged by drive | Committed to Flash Cells | ✅ **Safe** (Minimal metadata overhead) | $80 - 150$ |
+| `write()` + `fsync()` | Explicit Full Sync | Acknowledged by drive | Committed to Flash Cells | ✅ **Safe** (Updates full inode attributes) | $100 - 250$ |
+| Group Commit (`fdatasync`) | Batched Vectorized Flush | Acknowledged for batch | Committed to Flash Cells | ✅ **Safe** (Amortized per event) | $\frac{85}{k} + \frac{W}{2}$ |
+
+: Comparison of POSIX I/O persistence interfaces and their durability guarantees for agent event logging. {#tbl-vol3-io-semantics}
+
+We model the effective per-turn storage synchronization latency $t_{\text{eff}}$ under a Poisson arrival process of authorization events with aggregate arrival rate $\lambda$. If the group commit coordinator employs a maximum batch timeout window $W$ and a maximum batch capacity $K_{\max}$, the expected number of events amortized by each barrier is:
+
+$$\bar{k} = \min\left(K_{\max},\, \max\left(1,\, \lambda W\right)\right)$$
+
+The effective latency experienced by an individual agent thread comprises two components: the expected queuing wait time in the ring buffer, and the physical duration of the storage barrier:
+
+$$t_{\text{eff}} = \frac{W}{2} + \frac{t_{\text{writev}}(\bar{k}) + t_{\text{sync}}}{\bar{k}}$$
+
+As concurrency scales ($\lambda \to \infty$), the queuing window $W$ can be shrunk toward zero ($W \to 0$), allowing the system to achieve the maximum queue depth of the storage controller. The physical barrier cost $t_{\text{sync}}$ is divided across $K_{\max}$ events, reducing the per-agent barrier overhead from several milliseconds to single-digit microseconds.
+
+Crucially, group commit preserves the causal ordering invariants of every individual agent trajectory. Let $\mathcal{T}_A$ and $\mathcal{T}_B$ represent two independent trajectories running on the same host supervisor. Within trajectory $\mathcal{T}_A$, the sequence of events is strictly causal:
+
+$$e_{A, \text{prop}} \prec e_{A, \text{auth}} \prec e_{A, \text{flush}} \prec a_{A, \text{ext}}$$
+
+The fact that $e_{A, \text{flush}}$ and $e_{B, \text{flush}}$ were physically written to flash within the exact same NVMe block write does not alter the causal independence of $\mathcal{T}_A$ and $\mathcal{T}_B$. Because neither thread dispatches its network RPC until the shared storage barrier completes, neither trajectory can produce a phantom mutation in the physical world.
+
+Strict adherence to the Write-Ahead Logging invariant guarantees that upon crash recovery, the reconstruction engine possesses an unbroken, mathematically sound audit trail: every external mutation surviving in the real world corresponds to a committed authorization record on disk. However, as an agent trajectory progresses through hundreds or thousands of steps, the size of this append-only log expands monotonically. Rebuilding the operational Agent Control Block ($\text{ACB}$) after an unexpected crash by sequentially reading and evaluating thousands of historical events from turn zero introduces unacceptable recovery latency. How an agent supervisor bounds this recovery overhead without incurring continuous disk write amplification is the governing question of periodic state checkpointing.

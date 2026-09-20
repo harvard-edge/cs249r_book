@@ -1,0 +1,155 @@
+## The Agent Control Block {#sec-vol3-controlplane-acb}
+
+Operating systems do not schedule or isolate programs by parsing their source text, inspecting raw machine instructions, or guessing where an executing thread might jump next. A classical kernel encapsulates execution state within a dedicated kernel data structure—the Process Control Block (PCB)—which records virtual memory base registers, file descriptor arrays, thread contexts, CPU register snapshots, and accounting counters (Silberschatz et al., 2018). In an agentic machine learning system, the basic unit of execution is not a compiled ELF binary executing on a synchronous CPU, but an unprivileged, non-deterministic trajectory process navigating an open-ended problem space through alternating phases of foundation model generation and tool execution.
+
+When naive agent runtimes attempt to manage trajectories as ad-hoc Python coroutines or raw strings passed across recursive loops, they suffer immediate operational collapse. An in-flight trajectory paused for human approval loses its active execution state if the host process restarts; a runaway agent consuming tens of thousands of tokens per minute cannot be pre-empted without tearing downstream sandbox sockets; and a single-node scheduler attempting to arbitrate GPU inference slots across hundreds of concurrent users is forced to parse multi-megabyte prompt histories to determine how long an agent has been running or what permissions it retains.
+
+**The trajectory process requires a formal kernel abstraction: the Agent Control Block (ACB).** Analogous to the operating system PCB, the ACB is the canonical, host-managed descriptor that reifies an agent's existence within the supervisory control plane. It decouples the supervisory metadata required to govern, schedule, and account for a task from the internal token sequences and tensor allocations of the underlying model. By maintaining an explicit ACB, the supervisory runtime can suspend an execution, revoke tool privileges, reassign KV-cache allocation leases, enforce financial ceilings, or migrate a trajectory across physical compute nodes without inspecting prompt text or altering model weights.
+
+### Anatomy of the Agent Control Block {#sec-vol3-acb-anatomy}
+
+The Agent Control Block resides in host memory under the exclusive ownership of the supervisory control plane. Neither the foundation model nor the unprivileged tool execution sandbox can read or mutate the ACB directly; all modifications occur through supervisory system calls or control-plane signal traps. Structurally, the ACB aggregates six orthogonal domains of execution metadata: process identification, lifecycle state, generation parameters, memory subsystem pointers, resource accounting ledgers, and security capabilities.
+
+::: {.column-margin}
+**Zero Ambient Authority ($A=0$) in Process Descriptors:**
+The ACB enforces the principle of least privilege by explicitly listing capability handles rather than granting broad ambient permissions. A tool call proposed by a model is verified against the ACB's capability set before the runtime issues the external RPC.
+:::
+
+Process identification establishes the lineage and administrative tenancy of the execution. Every trajectory is assigned a globally unique Trajectory Identifier formatted as a time-ordered UUIDv7, which encodes millisecond-precision Unix timestamps within its most significant 48 bits. This temporal ordering guarantees that database indexes over ACB collections remain monotonic, preventing B-tree fragmentation during high-throughput logging. The identity domain also binds the trajectory to its parent agent (enabling hierarchical delegation trees where subagents inherit attenuated privileges), the overarching user session, and the administrative tenant identity for billing isolation.
+
+The execution lifecycle state tracks the coarse-grained scheduling phase of the trajectory. At any instant, an ACB resides in one of a bounded set of discrete states—such as `INITIALIZING`, `RUNNABLE`, `RUNNING`, `WAITING_IO`, `WAITING_ESCROW`, or `TERMINATED`. Schedulers inspect this single enumerated field to assemble dispatch queues, entirely ignoring inactive or suspended trajectories during scheduling ticks.
+
+Generation configuration preserves the deterministic hyperparameter envelope governing the model's stochastic sampling. Because foundation models exhibit non-stationary behavior across architecture checkpoints, the ACB anchors generation to an immutable model snapshot identifier (e.g., a cryptographic digest of model weights or a pinned inference endpoint version), sampling temperature $T$, nucleus sampling threshold $p$, top-$k$ cutoffs, maximum token budgets $T_{\max}$, and grammar constraint handles. If an agent must be resumed after pre-emption, these parameters guarantee that the inference runtime reconstructs the exact decoding environment under which previous steps were evaluated.
+
+The ACB schema formalizes these fields into a compact, memory-aligned descriptor, presented in @tbl-vol3-acb-schema.
+
+| Domain | Field Name | Representation | Invariant & Systems Semantics |
+|:---|:---|:---|:---|
+| **Process Identity** | `trajectory_id` | `UUIDv7` (128-bit) | Globally unique, monotonically time-ordered identifier. |
+| | `parent_id` | `UUIDv7` (Nullable) | Identifies supervisory parent; null for root user trajectories. |
+| | `session_id` | `UUIDv4` (128-bit) | Binds execution to an external interactive client session. |
+| | `tenant_id` | `uint32_t` | Identifies organizational boundary for billing and isolation. |
+| **Lifecycle State** | `phase` | `uint8_t` (`enum`) | Operational state (`INITIALIZING`, `RUNNABLE`, `RUNNING`, etc.). |
+| | `exit_code` | `uint16_t` | Zero indicates goal satisfaction; non-zero encodes failure faults. |
+| **Generation Config** | `model_digest` | `SHA-256` (256-bit) | Pinned model checkpoint hash or immutable endpoint tag. |
+| | `temperature` | `float32_t` | Sampling dispersion parameter $T \in [0.0, 2.0]$. |
+| | `top_p` | `float32_t` | Nucleus sampling probability mass cutoff $p \in (0.0, 1.0]$. |
+| | `grammar_ptr` | `uintptr_t` (Nullable) | Reference to compiled context-free grammar or JSON schema automaton. |
+| **Memory Pointers** | `context_buf_ref` | `uint64_t` Handle | Opaque handle to host-resident logical token array (Chapter 4). |
+| | `kv_lease_id` | `UUIDv4` (128-bit) | Active physical memory lease in PagedAttention engine (Chapter 5). |
+| | `wal_stream_offset`| `uint64_t` | Byte offset in write-ahead log for crash recovery (Chapter 10). |
+| | `storage_idx_ref` | `uint64_t` Handle | Handle to external vector or document retrieval context (Chapter 6). |
+| **Resource Ledger** | `tokens_prompt` | `uint64_t` | Cumulative input tokens submitted to inference prefill GEMM. |
+| | `tokens_decode` | `uint64_t` | Cumulative output tokens emitted by autoregressive GEMV decode. |
+| | `step_count` | `uint32_t` | Total supervisor-mediated tool-interaction iterations completed. |
+| | `wall_clock_us` | `uint64_t` | Cumulative elapsed execution time in microseconds. |
+| | `accrued_cost_uc`| `uint64_t` | Accumulated financial expenditure denominated in micro-cents ($10^{-6}$ USD). |
+| **Capability Set** | `tool_mask` | `uint64_t` Bitmask | Coarse bitmask of authorized tool categories. |
+| | `cap_token_ref` | `uintptr_t` | Pointer to array of cryptographically signed capability tokens. |
+| | `sandbox_id` | `uint32_t` | Handle to isolated container, gVisor sandbox, or microVM (Chapter 8). |
+
+: Formal Agent Control Block (ACB) data schema specification. {#tbl-vol3-acb-schema}
+
+### Memory Pointers and Capability Attenuation {#sec-vol3-acb-pointers}
+
+A fundamental principle of Saltzer and Kaashoek's systems design is modularity: internal representations should not be replicated when a reference suffice. An ACB does not store the multi-megabyte conversation history or the multi-gigabyte neural network activations within its own record. Doing so would turn context switching and scheduling inspections into massive memory-copy operations, degrading control-plane throughput.
+
+Instead, the ACB maintains indirection through explicit memory handles. The `context_buf_ref` field stores an opaque handle to the logical context window buffer managed by the host runtime's virtual memory subsystem. This buffer holds the sequence of serialized turn boundaries, token identifiers, role delimiters, and tool output envelopes. When a trajectory must be evaluated by the inference engine, the supervisor dereferences this handle to feed the prefill pipeline.
+
+```
++-------------------------------------------------------------------------+
+|                       Agent Control Block (ACB)                         |
+|  [ID: UUIDv7]   [Phase: RUNNING]   [Model: SHA-256]   [Cost: $0.0412]    |
++--------+------------------+-------------------+-----------------+-------+
+         |                  |                   |                 |
+         v                  v                   v                 v
++-----------------+ +---------------+ +------------------+ +-------------+
+| Logical Context | | KV-Cache Lease| | Write-Ahead Log  | | Capabilities |
+| Buffer (Host)   | | Block Map     | | Ring Buffer      | | Ed25519 Token|
+| [tok_0, tok_1..]| | (GPU VRAM)    | | (NVMe Storage)   | | fs: read-only|
++-----------------+ +---------------+ +------------------+ +-------------+
+```
+
+Similarly, the `kv_lease_id` binds the trajectory to an active allocation lease inside the inference serving engine's physical key-value memory pool (such as vLLM or SGLang PagedAttention tables). When a trajectory transitions from `RUNNING` to `WAITING_IO` while awaiting external network input, the supervisory scheduler uses this lease identifier to communicate with the inference engine's memory coordinator. The coordinator can choose to maintain the KV cache blocks in GPU VRAM if high-speed resumption is prioritized, page them out to host DRAM via asynchronous PCIe DMA transfers, or evict them while recording the cache checkpoint index for subsequent prefix-caching restoration.
+
+The capability attenuation set implements Saltzer's principle of protection under Zero Ambient Authority ($A=0$). Rather than executing tools with the ambient privileges of the host daemon, the ACB holds an explicit, signed capability list. Each capability token encapsulates a permitted action, a resource target (e.g., a POSIX filesystem subtree or a specific external API path), an expiration timestamp, and constraint predicates.
+
+When the agent proposes a tool call—for example, invoking `fs_write` on `/etc/hosts`—the supervisor intercepts the request, reads the `cap_token_ref` from the calling trajectory's ACB, and verifies that the capability array contains an unexpired token granting write access to that path. If the token is absent, malformed, or attenuated to read-only access, the supervisor traps the violation at the boundary, records a permission fault in the ACB's event stream, and rejects the tool invocation without touching the underlying operating system.
+
+::: {.callout-note title="Worked Example: Control Plane Descriptor Footprint vs. Tensor State Overhead"}
+Consider an enterprise agent cluster hosting $N = 10{,}000$ concurrent trajectories on a single supervisory management node. Each trajectory operates over an average context length of $L = 32{,}768$ tokens using a foundation model with $H = 64$ layers, an attention head dimension $D = 128$, and $N_{\text{kv}} = 8$ key-value heads under Grouped-Query Attention (GQA), running with 16-bit half-precision floats (2 bytes per element).
+
+**1. Physical KV-Cache Allocation per Trajectory:**
+The memory consumed by the key-value cache for a single trajectory is given by:
+$$M_{\text{KV}} = 2 \times H \times N_{\text{kv}} \times D \times L \times \text{sizeof(fp16)}$$
+$$M_{\text{KV}} = 2 \times 64 \times 8 \times 128 \times 32{,}768 \times 2 \text{ bytes}$$
+$$M_{\text{KV}} = 131{,}072 \times 32{,}768 \times 2 = 8{,}589{,}934{,}592 \text{ bytes} \approx 8.59 \text{ GB}$$
+If the supervisory control plane stored KV tensor allocations inline or tightly coupled descriptor state with memory physical frames, managing 10,000 trajectories would require an astronomical 85.9 TB of VRAM.
+
+**2. Host Context Buffer Allocation per Trajectory:**
+Storing the token identifiers directly as 32-bit integers in host DRAM:
+$$M_{\text{tokens}} = L \times 4 \text{ bytes} = 32{,}768 \times 4 = 131{,}072 \text{ bytes} = 128 \text{ KB}$$
+
+**3. Supervisory Agent Control Block (ACB) Footprint:**
+Summing the byte widths of the fields enumerated in @tbl-vol3-acb-schema:
+- Process Identity: $16 + 16 + 16 + 4 = 52$ bytes
+- Lifecycle State & Exit Code: $1 + 2 = 3$ bytes
+- Generation Configuration: $32 + 4 + 4 + 8 = 48$ bytes
+- Memory & Storage Handles: $8 + 16 + 8 + 8 = 40$ bytes
+- Resource Ledger: $8 + 8 + 4 + 8 + 8 = 36$ bytes
+- Capability Set & Security: $8 + 8 + 4 = 20$ bytes
+- Synchronization mutex, alignment padding to 64-byte cache line: $57$ bytes
+$$\text{SizeOf}(\text{ACB}) = 256 \text{ bytes}$$
+
+**4. Systems Takeaway:**
+For $N = 10{,}000$ trajectories, the total memory required to retain all supervisory descriptors in the kernel control plane is:
+$$M_{\text{control}} = 10{,}000 \times 256 \text{ bytes} = 2.56 \times 10^6 \text{ bytes} \approx 2.44 \text{ MB}$$
+The entire control plane state for ten thousand concurrent agents fits comfortably inside the 32 MB L3 cache of a single modern server CPU. By isolating the 256-byte ACB descriptor from the 128 KB token buffers and 8.59 GB KV-cache leases, the supervisor can inspect, sort, prioritize, and arbitrate 10,000 active agents with near-zero memory bus pressure, achieving a $3.5 \times 10^7\times$ reduction in scheduling metadata footprint relative to raw model state.
+:::
+
+### The Unit of Scheduling, Accounting, and Process Migration {#sec-vol3-acb-scheduling-migration}
+
+Because the ACB provides an opaque, bounded summary of an agent's operational parameters, the supervisory runtime uses it as the foundational currency for all control-plane algorithms: single-node dispatching, multi-dimensional rate limiting, and cross-node migration.
+
+Schedulers operating at the supervisor level must make rapid dispatch decisions under tight latency budgets. When thousands of user tasks compete for access to a limited pool of GPU inference workers or isolated execution sandboxes, the scheduler cannot afford to scan conversation histories or run lexical parsers across prompt buffers to decide which agent to run next. Instead, the scheduler performs an *opaque evaluation* directly over the ACB:
+
+1. **Read-Only Invariant Scans:** The dispatch thread iterates over an array of ACB pointers residing in host memory. By inspecting `phase`, the scheduler immediately filters out trajectories blocked on network I/O (`WAITING_IO`) or human sign-off (`WAITING_ESCROW`).
+2. **Fair-Share Priority Calculation:** For all `RUNNABLE` candidates, the scheduler computes scheduling priority as a function of the resource ledger. It evaluates cumulative execution metrics:
+   $$P_i = f(\mathtt{tokens\_prompt}, \mathtt{tokens\_decode}, \mathtt{wall\_clock\_us}, \mathtt{accrued\_cost\_uc})$$
+   Agents that have consumed less than their fair-share allocation of decoding compute or whose elapsed wall-clock time is furthest from their service-level objective (SLO) deadlines are promoted to the head of the dispatch queue.
+3. **Pre-Dispatch Boundary Check:** Before assigning a trajectory to an inference worker, the supervisor compares the ledger against hard administrative caps:
+   $$\mathtt{tokens\_prompt} + \mathtt{tokens\_decode} \ge T_{\max} \quad \lor \quad \mathtt{step\_count} \ge S_{\max}$$
+   If an invariant is breached, the supervisor denies dispatch, transitions the ACB to `TERMINATED`, and stamps the `exit_code` with an error indicating an exhausted budget, completely circumventing redundant neural network computation.
+
+```
+                      +-----------------------------+
+                      |   Scheduler Run Queue       |
+                      |   [ACB_1]  [ACB_4]  [ACB_7] |
+                      +--------------+--------------+
+                                     |
+                                     | inspects (phase == RUNNABLE)
+                                     v
+                      +-----------------------------+
+                      |  Priority Scoring Engine    |
+                      |  P = f(tokens, cost, SLO)   |
+                      +--------------+--------------+
+                                     |
+                      +--------------+--------------+
+                      |                             |
+                      v                             v
+           [Passes Resource Caps]        [Violates Token Limit]
+                      |                             |
+                      v                             v
+           +--------------------+        +--------------------+
+           | Dispatch to Worker |        | Transition Phase:  |
+           | Inference Pipeline |        | TERMINATED         |
+           +--------------------+        +--------------------+
+```
+
+Beyond local scheduling, the ACB serves as the serialization anchor for process migration. In distributed or elastic agent clusters, physical host machines must occasionally be drained for maintenance, or compute-heavy trajectories must be rebalanced across nodes. Migrating an executing trajectory does not require freezing and shipping an entire virtual machine or capturing opaque operating system core dumps.
+
+Instead, process migration reduces to an atomic snapshot of the ACB and its referenced buffers. The supervisor suspends the trajectory at a clean turn boundary, freezes mutations to the context buffer, and unbinds the local `kv_lease_id`. The 256-byte ACB descriptor, along with the tokenized context buffer, is transmitted over the network to the target node. The destination supervisor instantiates a new local ACB, rebinds the memory pointers to local buffer pools, negotiates a fresh KV-cache allocation lease with its local inference engine, and transitions the state from `RUNNABLE` to `RUNNING`.
+
+Treating the Agent Control Block as an explicit, first-class kernel object transforms agent management from brittle scripting into rigorous systems engineering. However, an administrative descriptor is only as reliable as the rules that govern its mutation. If any component of the host runtime could alter an ACB's phase arbitrarily—transitioning an agent from `WAITING_ESCROW` directly to `RUNNING` without human authorization, or moving an agent from `TERMINATED` back to `RUNNABLE` after resources have been reclaimed—the supervisory plane would rapidly accumulate zombie processes, corrupted memory allocations, and leaked credentials. 
+
+To maintain system integrity, the supervisory control plane must enforce a formal operational lifecycle over the ACB. What formal state machine dictates the valid transitions of an Agent Control Block across its operational lifetime, and what guard conditions must the supervisor evaluate before permitting a trajectory to advance from one execution state to the next?

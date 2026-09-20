@@ -457,7 +457,7 @@ class MaintenanceCommand:
         Returns:
             True if the check or synchronization succeeded (exit code 0), False otherwise.
         """
-        supported_vols = ("vol3", "vol4")
+        supported_vols = ("vol4",)
         if volume not in supported_vols:
             disp_name = format_volume_display_name(volume)
             console.print(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from mlsysim import Systems
-from mlsysim.core.units import GB, MW, TB, TiB, bit, kilowatt, pJ, second
+from mlsysim.core.units import GB, GiB, MW, TB, TiB, bit, kilowatt, pJ, second
 
 
 def test_reference_25k_h100_cluster_totals():
@@ -113,3 +113,33 @@ def test_production_2k_checkpoint_storage_path():
     )
     assert path.durable_store is Systems.Storage.PfsOneTbPerSecond
     assert path.write_bandwidth.to(TB / second).magnitude == pytest.approx(1.0)
+
+
+def test_nodes_host_platform_specs():
+    dgx = Systems.Nodes.DGX_H100
+    assert dgx.host_cpu == "Dual Intel Xeon Platinum 8480C"
+    assert dgx.host_cpu_cores == 112
+    assert dgx.host_memory_bw.to(GB / second).magnitude == pytest.approx(614.0)
+
+    hgx = Systems.Nodes.HGX_H100_EPYC
+    assert hgx.host_cpu == "Dual AMD EPYC 9654"
+    assert hgx.host_cpu_cores == 192
+    assert hgx.host_memory_bw.to(GB / second).magnitude == pytest.approx(460.0)
+
+    ws = Systems.Nodes.Workstation_M3Max
+    assert ws.host_cpu == "Apple M3 Max 16-Core"
+    assert ws.host_cpu_cores == 16
+    assert ws.host_memory.to(GiB).magnitude == pytest.approx(128.0)
+    assert ws.accelerators_per_node == 1
+
+
+def test_storage_local_nvme_gen5():
+    gen5 = Systems.Storage.LocalNvmeGen5
+    assert gen5.bandwidth.to(GB / second).magnitude == pytest.approx(14.0)
+    assert gen5.iops == pytest.approx(1_500_000)
+
+    gen5x4 = Systems.Storage.LocalNvmeGen5x4
+    assert gen5x4.devices_per_node == 4
+    assert gen5x4.aggregate_bandwidth.to(GB / second).magnitude == pytest.approx(56.0)
+
+

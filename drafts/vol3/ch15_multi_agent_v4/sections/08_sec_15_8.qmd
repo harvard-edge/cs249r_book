@@ -1,0 +1,186 @@
+## Single-Agent Baseline Benchmarking {#sec-vol3-multiagent-evaluation}
+
+A software engineering team deploys an ensemble of five specialized agents—a supervisor, three parallel code generators, and a test synthesizer—to resolve complex bug tickets, observing a modest four percent improvement in task completion over their initial prototype. When instrumented under rigorous systems profiling, however, the cluster reveals an alarming pathology: the multi-agent system consumes fourteen times more tokens, incurs a $3.8\times$ critical-path wall-clock latency penalty due to serialization and context-synchronization barriers, and repeatedly deadlocks when reconciling merge conflicts in shared repositories. More damning still, when the original single agent is granted identical test-time computational resources—permitting it to run an iterative critique-and-refine loop with tool execution as formulated in Chapter 3—the single agent matches the ensemble's pass rate while cutting token consumption by sixty-eight percent and finishing in half the wall-clock time.
+
+**Architectural complexity is not a substitute for computational efficiency: a multi-agent coordination topology is justified if and only if it Pareto-dominates an optimized, compute-matched single-agent baseline across task completion quality, critical-path makespan, and total resource expenditure.** In distributed systems design, decomposing a workload across multiple processing nodes is never treated as an automatic virtue; it is an engineering compromise accepted strictly to overcome physical bounds on single-node throughput or memory capacity. In agentic machine learning, the physical boundaries correspond to the model's effective context window, its attention degradation over long token sequences, and wall-clock limits on sequential autoregressive decoding. When engineers partition a task across agents without first measuring what a single model can achieve when equipped with test-time search, they frequently construct distributed systems that do nothing more than amplify communication overhead, duplicate shared context, and propagate correlated errors across unisolated workers. Rigorous benchmarking requires establishing fair baseline protocols, evaluating systems across three orthogonal axes, and applying formal scalability models to quantify coordination contention.
+
+### The Fallacy of the Zero-Shot Baseline and Matched-Resource Protocols
+
+The most pervasive methodological flaw in multi-agent literature is comparing an elaborate multi-agent architecture against a naive, single-turn, zero-shot single-agent baseline. A zero-shot baseline generates a candidate solution in a single autoregressive forward pass without environmental feedback, scratchpad deliberation, tool invocations, or error recovery. Comparing a multi-agent collective—which executes dozens of sequential tool calls, inspects compiler diagnostics, and re-prompts itself across thousands of intermediate tokens—against a zero-shot model does not evaluate multi-agent coordination; it evaluates the trivial advantage of dynamic test-time computation over static feed-forward inference.
+
+::: {.column-margin}
+The **Resource Equivalence Principle** dictates that any empirical comparison between an orchestration topology $\mathcal{T}$ and a single-agent baseline $\mathcal{S}$ must hold total compute expenditure constant:
+$$\mathcal{B}_{\text{total}}(\mathcal{T}) \approx \mathcal{B}_{\text{total}}(\mathcal{S})$$
+where compute includes both token volume and sandbox execution cycles.
+:::
+
+To determine whether multi-agent delegation provides true architectural value, the baseline must be an *optimized single-agent runtime*. As established in Chapter 3 and Chapter 7, an unprivileged neural inference engine can be organized into an iterative execution loop governed by host supervision. A properly configured single-agent baseline must be granted:
+
+1. *Iterative Environment Feedback:* The agent executes actions within an isolated sandbox, receives raw exit codes and standard error streams, and iteratively refactors its plan across multiple turns.
+2. *Deliberative Search and Revision:* The agent employs sequential test-time compute, including self-correction, tree search, or best-of-$N$ candidate sampling over verification filters.
+3. *Dynamic Context Compaction:* The runtime prunes intermediate scratchpad traces, offloads bulky tool outputs to external disk storage, and maintains an active working memory within the model's operational context limit.
+
+| Protocol Property | Naive Baseline (Invalid) | Optimized Single Agent (Valid) | Multi-Agent Collective |
+| :--- | :--- | :--- | :--- |
+| **Deliberation Budget** | 1 forward pass ($K=1$) | $N$ iterative turns with tools | $\sum_{i=1}^M N_i$ distributed turns |
+| **Environmental Feedback** | None (Blind generation) | Interactive execution sandbox | Replicated worker sandboxes |
+| **Search Mechanism** | Greedy or single temperature | Sequential reflection / ReAct | Parallel branch exploration |
+| **Context Scope** | Monolithic prompt ($S_{\text{in}}$) | Managed sliding window | Partitioned task envelopes |
+| **Cost Basis ($\mathcal{B}_{\text{tokens}}$)** | Base token cost $T_0$ | Matched budget $\mathcal{B} \approx M \times T_0$ | Distributed sum $\sum T_{\text{worker}}$ |
+
+: Architectural comparison of baseline protocols for agentic systems evaluation. {#tbl-vol3-baseline-protocols}
+
+When evaluating a multi-agent system against an optimized single agent, systems engineers must enforce the *Resource Equivalence Principle*. If a four-agent ensemble consumes an aggregate of 400,000 tokens and 120 seconds of sandbox execution across its subtasks, the single-agent baseline must be evaluated under a matched token budget ($\mathcal{B}_{\text{tokens}} = 400{,}000$) and equivalent sandbox wall-clock limits. If the single agent achieves an equal or superior completion rate when allowed to spend those 400,000 tokens on sequential search, deeper planning, or repeated unit-test repair, the multi-agent architecture represents negative systems utility. It incurs the maintenance complexity, network failure surface, and serialization taxes of a distributed system without delivering an empirical return on investment.
+
+### The Tri-Axial Evaluation Metric: Quality, Makespan, and Token Volume
+
+Evaluating an agentic system along a single dimension—such as benchmark pass rate—obscures critical systems trade-offs. An architecture that increases task success by two percentage points while quadrupling operational cost and introducing ten-minute latency spikes is rarely deployable in production engineering environments. Rigorous systems evaluation requires tracking three orthogonal axes: Task Completion Quality, Critical-Path Makespan, and Total Resource Expenditure.
+
+```
+                  Quality (Verified Pass Rate Q)
+                              ▲
+                             / \
+                            /   \
+                           /  •  \  Pareto Frontier
+                          /       \
+                         /_________\
+Critical-Path Makespan (τ)           Total Resource Cost (E)
+```
+
+The first axis is *Task Completion Quality* ($Q$), defined as the ratio of tasks whose terminal artifacts satisfy all functional and non-functional invariants to the total number of attempted tasks:
+$$Q = \frac{1}{|\mathcal{D}|} \sum_{i=1}^{|\mathcal{D}|} \mathbb{I}\left( \text{Verify}(\mathcal{A}_i) == \text{SUCCESS} \right)$$
+In strict accordance with the End-to-End Argument, verification must be executed by external, deterministic software harnesses—such as hermetic unit test suites, static analysis linters, or cryptographic signature validators—never by model self-assessment. An agent's self-reported confidence or textual assertion that a task is complete carries zero evidential weight.
+
+The second axis is *Critical-Path Makespan* ($\tau_{\text{crit}}$), the elapsed wall-clock time from task ingestion to final artifact acceptance. For a single-agent runtime executing $N$ sequential turns, makespan is strictly additive:
+$$\tau_{\text{crit}}^{\text{single}} = \sum_{j=1}^N \left( \tau_{\text{prefill}}^{(j)} + \tau_{\text{decode}}^{(j)} + \tau_{\text{env}}^{(j)} \right)$$
+where $\tau_{\text{prefill}}$ is the time to process input context via matrix-matrix multiplication (GEMM), $\tau_{\text{decode}}$ is autoregressive token generation bounded by memory bandwidth (GEMV), and $\tau_{\text{env}}$ is the execution latency of tools in the sandbox. In a multi-agent directed acyclic graph (DAG) $\mathcal{G} = (\mathcal{V}, \mathcal{E})$, workers execute concurrently, allowing parallelization of the workload across available compute engines. However, makespan is governed by the graph's longest operational path:
+$$\tau_{\text{crit}}^{\text{multi}} = \max_{\pi \in \text{Paths}(\mathcal{G})} \sum_{v \in \pi} \left( \tau_{\text{agent}}(v) + \tau_{\text{envelope}}(v) \right) + \tau_{\text{reconciliation}}$$
+Here, $\tau_{\text{envelope}}$ captures the serialization, transport, and deserialization latencies of typed task envelopes between parent and child runtimes, while $\tau_{\text{reconciliation}}$ represents the time required to perform three-way merges or resolve optimistic concurrency conflicts. Even if worker nodes exhibit high concurrency, synchronization barriers at join nodes can cause $\tau_{\text{crit}}^{\text{multi}}$ to exceed $\tau_{\text{crit}}^{\text{single}}$.
+
+The third axis is *Total Resource Expenditure* ($\mathcal{E}$), representing the aggregate operational cost across all participating models, runtimes, and sandboxes:
+$$\mathcal{E} = \sum_{i=1}^M \left( c_{\text{in}} \cdot T_{\text{in}}^{(i)} + c_{\text{out}} \cdot T_{\text{out}}^{(i)} \right) + c_{\text{compute}} \cdot \tau_{\text{sandbox}}$$
+where $T_{\text{in}}^{(i)}$ and $T_{\text{out}}^{(i)}$ denote input and output token counts for agent $i$, $c_{\text{in}}$ and $c_{\text{out}}$ denote pricing per token, and $c_{\text{compute}}$ accounts for sandbox infrastructure costs. Multi-agent topologies invariably suffer from *context duplication*: when a supervisor delegates a subtask to three parallel workers, the base system instructions, repository schemas, and task descriptions are replicated across three separate context windows, multiplying $T_{\text{in}}$ by a factor of $M$.
+
+A multi-agent design is defensible only if it occupies a superior position on the Pareto frontier defined by $(Q, \tau_{\text{crit}}, \mathcal{E})$. If an engineering requirement mandates minimizing makespan regardless of cost (e.g., automated incident response), parallel multi-agent delegation may be chosen to compress $\tau_{\text{crit}}$, provided the parallelizable fraction is sufficiently high. Conversely, if token budget is tightly bounded, a single-agent sequential architecture is almost universally superior.
+
+### Amdahl's Law and Coordination Contention in Agent Runtimes
+
+In 1967, Gene Amdahl formulated the fundamental mathematical limit on the speedup of a task executed across multiple parallel processors. When applied to multi-agent machine learning systems, Amdahl's Law reveals why adding worker agents frequently yields diminishing—and eventually negative—returns.
+
+Let $T_1$ be the execution time of a task on an optimized single agent. Suppose a fraction $f \in [0, 1]$ of the task can be partitioned into perfectly independent subtasks executed in parallel by $M$ worker agents, while the remaining fraction $(1 - f)$ represents strictly serial operations (such as initial root planning, task decomposition, final artifact synthesis, and sequential regression validation). If coordination between agents were instantaneous and free of friction, the theoretical parallel runtime would be:
+$$T_M = (1 - f)T_1 + \frac{f T_1}{M}$$
+yielding the classical speedup ratio:
+$$\text{Speedup}_{\text{ideal}}(M) = \frac{T_1}{T_M} = \frac{1}{(1 - f) + \frac{f}{M}}$$
+
+::: {.column-margin}
+![Amdahl scaling and the Universal Scalability Law (USL) for multi-agent execution. In the presence of coordination overhead $h(M)$, speedup peaks at an optimal worker count $M^*$ and degrades thereafter due to merge contention and context reconciliation overhead.](images/svg/fig-vol3-amdahl-multiagent-scaling.svg){#fig-vol3-amdahl-multiagent-scaling}
+:::
+
+In real distributed agent runtimes, coordination is never free. As formalized in Sections 15.2 and 15.4, inter-agent delegation incurs context serialization overhead, network RPC transport latency, supervisor dispatch overhead, and optimistic concurrency merge contention. Let $T_{\text{overhead}}(M)$ represent the total wall-clock coordination cost as a function of worker count $M$. The empirical multi-agent execution time becomes:
+$$T_M = (1 - f)T_1 + \frac{f T_1}{M} + T_{\text{overhead}}(M)$$
+Dividing by $T_1$ and defining the normalized overhead function $h(M) = \frac{T_{\text{overhead}}(M)}{T_1}$, the achievable speedup is:
+$$\text{Speedup}(M) = \frac{1}{(1 - f) + \frac{f}{M} + h(M)}$$
+
+To model the precise physical behavior of $h(M)$, systems engineers apply Neil J. Gunther's Universal Scalability Law (USL, 2007). In an agent runtime, coordination overhead stems from two distinct physical sources:
+$$h(M) = \sigma (M - 1) + \kappa M(M - 1)$$
+The parameter $\sigma \ge 0$ is the *contention coefficient*, representing time spent queuing for serial resources, such as the supervisor's input context processing queue or shared repository branch locks. The parameter $\kappa \ge 0$ is the *coherency coefficient*, representing the pairwise communication delay required to reconcile conflicting mutations, synchronize state across worker scratchpads, or achieve consensus among ensemble members.
+
+When pairwise coherency delays exist ($\kappa > 0$), the speedup curve does not merely plateau—it *retrogrades*. As $M$ increases beyond a critical threshold, the $\kappa M(M - 1)$ quadratic term outgrows the parallel reduction $\frac{f}{M}$. Adding more agents causes the system to run slower than a single agent. The optimal worker count $M^*$ that maximizes speedup is derived by finding the stationary point $\frac{d}{dM} \text{Speedup}(M) = 0$:
+$$M^* = \sqrt{\frac{f - \sigma}{\kappa}}$$
+If a task has a small parallelizable fraction ($f \le \sigma$), or if merge contention is high, the optimal worker count is $M^* = 1$: the workload should not be delegated at all.
+
+::: {.callout-note title="Worked Example: Quantitative Evaluation of a Parallel Refactoring Fleet"}
+A platform team designs an agentic refactoring pipeline to modernize legacy code across a microservice repository. Profiling an optimized single-agent baseline reveals an average task execution time $T_1 = 600\text{ s}$ (10 minutes) and a total token consumption of 120,000 tokens (100,000 input tokens, 20,000 output tokens). Analysis of the execution trace indicates that initial dependency analysis and the final integration test suite require 180 seconds of strictly serial execution ($1 - f = 0.30$, meaning $f = 0.70$).
+
+The team deploys a supervisor-worker topology with $M = 4$ worker agents operating on isolated git worktrees. Systems telemetry measures a contention parameter $\sigma = 0.04$ (supervisor dispatch latency) and a coherency parameter $\kappa = 0.02$ (AST merge conflicts and three-way reconciliation delays).
+
+**1. Calculate Achievable Speedup and Makespan:**
+Using the Universal Scalability Law:
+$$h(4) = 0.04(4 - 1) + 0.02(4)(4 - 1) = 0.12 + 0.24 = 0.36$$
+The speedup is:
+$$\text{Speedup}(4) = \frac{1}{0.30 + \frac{0.70}{4} + 0.36} = \frac{1}{0.30 + 0.175 + 0.36} = \frac{1}{0.835} \approx 1.20$$
+The actual multi-agent makespan is:
+$$T_4 = \frac{T_1}{\text{Speedup}(4)} = \frac{600\text{ s}}{1.20} = 501\text{ s}$$
+Despite provisioning four worker agents, the wall-clock execution time decreases by only 99 seconds—a meager 16.5% reduction.
+
+**2. Calculate Resource and Token Amplification:**
+Each worker agent requires the supervisor's decomposed task instructions, architectural rules, and AST slice, incurring 60,000 input tokens per worker. Each worker generates 15,000 output tokens. The supervisor consumes 40,000 tokens for planning and 50,000 tokens for merge validation.
+$$\text{Total Tokens} = 40{,}000 + 50{,}000 + 4 \times (60{,}000 + 15{,}000) = 390{,}000\text{ tokens}$$
+The multi-agent system incurs a **$3.25\times$ token amplification** (390,000 vs. 120,000) and quadruples the required sandbox concurrency to achieve a $1.20\times$ speedup.
+
+**3. Determine the Optimal Worker Count:**
+$$M^* = \sqrt{\frac{f - \sigma}{\kappa}} = \sqrt{\frac{0.70 - 0.04}{0.02}} = \sqrt{\frac{0.66}{0.02}} = \sqrt{33} \approx 5.74 \implies 5\text{ or }6\text{ workers}$$
+At $M=6$, speedup peaks at only $1.24\times$ ($T_6 = 484\text{ s}$) before retrograding. Decomposing the workload across 8 workers yields $h(8) = 0.04(7) + 0.02(8)(7) = 0.28 + 1.12 = 1.40$, resulting in a speedup of $0.56\times$ ($T_8 = 1{,}073\text{ s}$)—nearly twice as slow as the single agent!
+:::
+
+To verify whether a proposed delegation topology improves system efficiency prior to deployment, systems engineers can evaluate Gunther's speedup equation directly against profiling traces:
+
+```python
+def evaluate_coordination_efficiency(f: float, sigma: float, kappa: float, M: int) -> float:
+    """Computes multi-agent speedup under Gunther's Universal Scalability Law."""
+    if M < 1:
+        raise ValueError("Worker count M must be >= 1")
+    overhead = sigma * (M - 1) + kappa * M * (M - 1)
+    effective_denominator = (1.0 - f) + (f / M) + overhead
+    return 1.0 / effective_denominator
+```
+
+### The Architectural Deployment Checklist
+
+Before decomposing an agentic workflow into a multi-agent cluster, systems architects must evaluate the six operational criteria outlined in the deployment checklist below. If a proposed system fails any of these gates, the architectural default must remain an optimized single-agent runtime.
+
+```
+       [Task Request]
+              │
+              ▼
+   ┌──────────────────────┐      FAIL
+   │ 1. Context Boundary  │ ──────────────► [Single-Agent Runtime]
+   │    Partitionable?    │
+   └──────────────────────┘
+              │ PASS
+              ▼
+   ┌──────────────────────┐      FAIL
+   │ 2. Single-Agent Loop │ ──────────────► [Single-Agent Runtime]
+   │    Saturated?        │
+   └──────────────────────┘
+              │ PASS
+              ▼
+   ┌──────────────────────┐      FAIL
+   │ 3. Speedup Positive? │ ──────────────► [Single-Agent Runtime]
+   │    f/M > h(M)        │
+   └──────────────────────┘
+              │ PASS
+              ▼
+   ┌──────────────────────┐      FAIL
+   │ 4. Failure Modes     │ ──────────────► [Reject Topology /
+   │    De-correlated?    │                  Redesign Prompts]
+   └──────────────────────┘
+              │ PASS
+              ▼
+   ┌──────────────────────┐      FAIL
+   │ 5. Capabilities      │ ──────────────► [Halt: Privilege
+   │    Attenuated?       │                  Escalation Risk]
+   └──────────────────────┘
+              │ PASS
+              ▼
+   ┌──────────────────────┐      FAIL
+   │ 6. Net Tri-Axial     │ ──────────────► [Single-Agent Runtime]
+   │    Dominance?        │
+   └──────────────────────┘
+              │ PASS
+              ▼
+[Deploy Multi-Agent Topology]
+```
+
+1. *Context Partitionability Gate:* Can the operational state of the task be cleanly partitioned into disjoint sub-contexts? If every subtask requires access to the complete, monolithic system prompt, complete file tree, and global execution history, multi-agent delegation will saturate the network and inference engine with duplicated prefill tokens. Delegation is justified only when subtasks exhibit strong locality of reference.
+2. *Single-Agent Saturation Gate:* Has the single-agent baseline been fully optimized with test-time reflection, tool execution, dynamic context pruning, and budget-matched search? If a single agent given identical compute can solve the problem, multi-agent orchestration introduces needless operational fragility.
+3. *Amdahl Scalability Gate:* Does the parallelizable fraction $f$ substantially exceed the serialization overhead $h(M)$? The expected speedup must satisfy:
+   $$\frac{f}{M} + h(M) < f \implies h(M) < f \left(1 - \frac{1}{M}\right)$$
+   If merge conflicts, task serialization, or supervisor dispatch latencies erase the concurrency gain, the system degrades throughput while inflating cost.
+4. *Error De-correlation Gate:* Are worker agents structurally protected against correlated failure modes? As proven in Section 15.5, deploying multiple instances of the same base model under identical prompting creates an illusion of consensus while sharing blind spots. Workers must use diverse prompts, heterogeneous model backends, or orthogonal decomposition strategies.
+5. *Capability Attenuation Gate:* Does the architecture enforce strict least privilege across delegated child runtimes? Child agents must operate under cryptographically attenuated capability tokens ($A_{\text{child}} \subset A_{\text{parent}}$) and execute within isolated sandboxes (Sections 15.4 and 15.7). An agent must never be granted ambient authority or the ability to escalate its own permissions.
+6. *Net Tri-Axial Dominance Gate:* Does the multi-agent system achieve empirical Pareto dominance over the compute-matched baseline? The collective must demonstrate either:
+   - Statistically significant improvement in Task Completion Quality ($Q_{\text{multi}} > Q_{\text{single}}$) under matched total token expenditure ($\mathcal{E}_{\text{multi}} \approx \mathcal{E}_{\text{single}}$), or
+   - Substantial compression of Critical-Path Makespan ($\tau_{\text{crit}}^{\text{multi}} \ll \tau_{\text{crit}}^{\text{single}}$) within acceptable cost limits.
+
+When an architecture satisfies all six criteria, distributed delegation provides genuine systems leverage. Yet across industry and research, engineers routinely bypass these foundational gates, falling prey to pervasive design traps that mistake organizational metaphors for sound computer systems engineering.

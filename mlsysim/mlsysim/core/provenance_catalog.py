@@ -440,6 +440,20 @@ INDUSTRIAL_AMR = _est(
     verified="2026-09-15",
 )
 
+WAREHOUSE_AMR = _est(
+    "prov:warehouse-amr-300kg",
+    "Representative warehouse fulfillment AMR class profile (300 kg gross mass)",
+    notes="300 kg mass, 1.5 m/s max velocity, 2.0 m/s^2 emergency braking deceleration (Chapter 4 watchdog model).",
+    verified="2026-09-18",
+)
+
+HEAVY_AMR = _est(
+    "prov:heavy-amr-250kg",
+    "Representative heavy industrial logistics AMR class profile (250 kg mass)",
+    notes="250 kg mass, 1.8 m/s cruise velocity, 2.0 m/s^2 braking deceleration (Chapter 1 model).",
+    verified="2026-09-18",
+)
+
 AUTONOMOUS_VEHICLE_ROBOTAXI = _est(
     "prov:autonomous-vehicle-robotaxi",
     "Representative Level 4 robotaxi class profile (not a single vehicle)",
@@ -466,6 +480,101 @@ UNITREE_H1_HUMANOID = _est(
     ),
     url="https://www.unitree.com/h1/",
     verified="2026-09-15",
+)
+
+UBER_ATG_VOLVO_XC90 = _lit(
+    "prov:uber-atg-volvo-xc90",
+    "NTSB Highway Accident Report: Collision Between a Self-Driving Car and a Pedestrian, Tempe, Arizona, March 18, 2018 (NTSB/HAR-19/03)",
+    url="https://www.ntsb.gov/investigations/AccidentReports/Reports/HAR1903.pdf",
+    verified="2026-09-18",
+    notes="Modified 2017 Volvo XC90 test vehicle operated by Uber ATG. NTSB reported one-second action suppression after hazard recognition at T-1.2 s; 8.0 m/s^2 braking deceleration is an illustrative assumption.",
+)
+
+ALOHA_BIMANUAL_MANIPULATOR = _lit(
+    "prov:aloha-bimanual-manipulator",
+    "Zhao et al. (2023), Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware",
+    url="https://arxiv.org/abs/2304.13705",
+    verified="2026-09-18",
+    notes="ALOHA dual ViperX 300 6-DOF arms with leader-follower teleoperation, 50 Hz control loop, 14 total DOFs.",
+)
+
+DED_MELT_POOL_PROCESS = _est(
+    "prov:ded-melt-pool-process",
+    "Representative laser directed energy deposition (DED) additive manufacturing testbed",
+    verified="2026-09-18",
+    notes="High-speed coaxially monitored melt pool process with 1000 Hz closed-loop control.",
+)
+
+SONY_IMX477 = _ds(
+    "prov:sony-imx477",
+    "Sony IMX477 Diagonal 7.857 mm (Type 1/2.3) 12.3MP CMOS Image Sensor Datasheet",
+    "https://www.sony-semicon.com/files/62/pdf/p-13_IMX477-AACK_Flyer.pdf",
+    verified="2026-09-18",
+    notes="Full-resolution 4056x3040 at 60 fps uses the flyer-supported four-lane, 10-bit CSI-2 mode (up to 2.1 Gbps/lane); chapter pipeline stage delays beyond exposure/readout are illustrative assumptions.",
+)
+
+SONY_IMX296 = _ds(
+    "prov:sony-imx296",
+    "Sony IMX296LLR/LQR Diagonal 6.3 mm (Type 1/2.9) 1.58MP Global Shutter CMOS Sensor",
+    "https://www.sony-semicon.com",
+    verified="2026-09-18",
+    notes="Global shutter CMOS sensor with 1440x1080 resolution, sub-10ms latency profile for robotics.",
+)
+
+INTEL_REALSENSE_D435I = _ds(
+    "prov:intel-realsense-d435i",
+    "Intel RealSense Depth Camera D435i Datasheet",
+    "https://www.intelrealsense.com/depth-camera-d435i/",
+    verified="2026-09-18",
+    notes="Active IR stereo depth camera with integrated Bosch BMI055/BMI088 IMU, 90 fps depth stream.",
+)
+
+OUSTER_OS1_64 = _ds(
+    "prov:ouster-os1-64",
+    "Ouster OS1 Mid-Range High-Resolution Imaging LiDAR Datasheet",
+    "https://ouster.com/products/hardware/os1-lidar-sensor",
+    verified="2026-09-18",
+    notes="64-channel digital LiDAR with 120m range, 10-20 Hz configurable spin rate.",
+)
+
+BOSCH_BMI088 = _ds(
+    "prov:bosch-bmi088",
+    "Bosch Sensortec BMI088 High-Performance 6-Axis Inertial Measurement Unit Datasheet",
+    "https://www.bosch-sensortec.com/products/motion-sensors/imus/bmi088/",
+    verified="2026-09-18",
+    notes="Automotive and robotics grade 6-DoF IMU with 1000 Hz gyroscope and 1600 Hz accelerometer update rates.",
+)
+
+HARMONIC_DRIVE_CSG = _ds(
+    "prov:harmonic-drive-csg",
+    "Harmonic Drive CSG-25-50-2UH product performance data",
+    "https://www.harmonicdrive.net/products/gear-units/gear-units/csg-2uh/csg-25-50-2uh",
+    verified="2026-09-20",
+    notes="Specific 50:1 gear unit: 51 N m L10 rated torque, 72 N m average limit, 127 N m repeated peak, and 242 N m momentary peak. Registry rotor inertia and electrical fields are teaching assumptions, not product specifications.",
+)
+
+UNITREE_M107_MOTOR = _ds(
+    "prov:unitree-m107-motor",
+    "Unitree M107 High Torque Joint Motor Technical Specifications",
+    "https://www.unitree.com",
+    verified="2026-09-18",
+    notes="Planetary/QDD joint motor providing 360 N*m peak torque used in humanoid hip and knee joints.",
+)
+
+TMOTOR_AK80_9 = _ds(
+    "prov:tmotor-ak80-9",
+    "T-Motor AK80-9 Dynamic Actuator Specifications",
+    "https://store.tmotor.com",
+    verified="2026-09-18",
+    notes="9:1 planetary quasi-direct-drive actuator for dynamic legged robotics.",
+)
+
+DYNAMIXEL_XM430 = _ds(
+    "prov:dynamixel-xm430-w350",
+    "ROBOTIS DYNAMIXEL XM430-W350-T/R E-Manual",
+    "https://emanual.robotis.com/docs/en/dxl/x/xm430-w350/",
+    verified="2026-09-18",
+    notes="Integrated robot actuator with contactless absolute encoder, TTL/RS-485 multidrop bus.",
 )
 
 GOOGLE_CORAL = _ds(
@@ -617,6 +726,38 @@ MNIST_DATASET = _lit(
     "prov:mnist-1998",
     "LeCun et al. (1998), Gradient-Based Learning Applied to Document Recognition",
     url="http://yann.lecun.com/exdb/publis/pdf/lecun-98.pdf",
+)
+
+OPEN_X_EMBODIMENT_DATASET = _lit(
+    "prov:open-x-embodiment-2023",
+    "Open X-Embodiment Collaboration et al. (2023), Open X-Embodiment: Robotic Learning Datasets and RT-X Models",
+    url="https://arxiv.org/abs/2310.08864",
+    verified="2026-09-18",
+    notes="1M+ robot trajectories across 22 embodiments and 527 tasks.",
+)
+
+DROID_DATASET = _lit(
+    "prov:droid-dataset-2024",
+    "Khazatsky et al. (2024), DROID: A Large-Scale In-The-Wild Robot Manipulation Dataset",
+    url="https://arxiv.org/abs/2403.12945",
+    verified="2026-09-18",
+    notes="76k demonstration trajectories, 350 hours of Franka interaction data across diverse household and industrial environments.",
+)
+
+BRIDGE_DATA_V2_DATASET = _lit(
+    "prov:bridge-data-v2-2023",
+    "Walke et al. (2023), BridgeData V2: A Dataset for Robot Manipulation at Scale",
+    url="https://arxiv.org/abs/2308.08451",
+    verified="2026-09-18",
+    notes="60k trajectories across 24 environments for visual-motor skill learning with WidowX 250.",
+)
+
+ALOHA_BIMANUAL_DATASET = _lit(
+    "prov:aloha-bimanual-dataset-2023",
+    "Zhao et al. (2023), Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware",
+    url="https://arxiv.org/abs/2304.13705",
+    verified="2026-09-18",
+    notes="Fine-grained bimanual teleoperated demonstration dataset for insertion, threading, and slotting.",
 )
 
 DEPLOYMENT_ENVELOPES = _est(
@@ -885,6 +1026,39 @@ DGX_GPUS_PER_HOST = _conv(
     "prov:dgx-gpus-per-host",
     "NVIDIA DGX H100/H200 node envelope (8 GPUs per host)",
     notes="Used for cluster tier node counts in fleet appendices.",
+)
+
+DGX_H100_SYSTEM_SPEC = _ds(
+    "prov:nvidia-dgx-h100-system-spec",
+    "NVIDIA DGX H100 System Datasheet and Architecture Whitepaper",
+    url="https://resources.nvidia.com/en-us-dgx-systems/dgx-h100-datasheet",
+    notes=(
+        "Official NVIDIA DGX H100 chassis specification: 8x H100 80GB SXM5 GPUs, "
+        "Dual Intel Xeon Platinum 8480C processors (112 cores / 224 threads total), "
+        "2 TB DDR5-4800 RAM across 16 channels, 8x ConnectX-7 400 Gbps InfiniBand OSFP ports, "
+        "30.72 TB internal NVMe U.2 storage in RAID-0."
+    ),
+)
+
+HGX_H100_EPYC_SYSTEM_SPEC = _ds(
+    "prov:supermicro-hgx-h100-epyc-spec",
+    "Supermicro AS-8125GS-TNHR / Dell PowerEdge XE9680 HGX H100 8-GPU Datasheet",
+    url="https://www.supermicro.com/en/products/system/gpu/8u/as-8125gs-tnhr",
+    notes=(
+        "High-density agent evaluation node: 8x H100 80GB SXM5 GPUs, Dual AMD EPYC 9654 "
+        "processors (192 physical Zen 4 cores / 384 threads total), 1.5 TB DDR5-4800 RAM "
+        "across 24 memory channels (460 GB/s sustained read bandwidth), PCIe Gen5 NVMe arrays."
+    ),
+)
+
+APPLE_M3_MAX_WORKSTATION_SPEC = _ds(
+    "prov:apple-m3-max-workstation-spec",
+    "Apple MacBook Pro 16-inch M3 Max Technical Specifications",
+    url="https://www.apple.com/macbook-pro/specs/",
+    notes=(
+        "Apple Silicon unified memory developer baseline: 16-core CPU (12 Performance + 4 Efficiency), "
+        "40-core GPU, 128 GiB unified LPDDR5X at 400 GB/s shared between CPU and GPU."
+    ),
 )
 
 GIBIANSKY_ALLREDUCE = _lit(

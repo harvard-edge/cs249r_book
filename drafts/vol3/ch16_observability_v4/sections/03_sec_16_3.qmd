@@ -1,0 +1,159 @@
+In an automated evaluation suite containing 150 software engineering tasks, agent runtime release candidate $v_{\text{RC1}}$ achieves a measured pass rate of 54.7% (82 solved tasks), while candidate $v_{\text{RC2}}$ achieves 58.7% (88 solved tasks). In conventional deterministic software engineering—such as benchmarking an optimizing compiler or regression-testing an SQL query planner—a four-percentage-point performance delta across an invariant test harness represents unequivocal progress. In stochastic agent systems, this conclusion is an empirical illusion. If the test harness executes $v_{\text{RC2}}$ a second time across the identical task fixtures, its measured success rate may drop to 51.3%, while a second sweep of $v_{\text{RC1}}$ rises to 56.0%. The apparent performance delta between the two runtimes was not a structural architectural breakthrough; it was sampling noise within a wide, overlapping distribution of non-deterministic trajectories.
+
+**Systems engineers cannot treat the execution of an agentic system as a deterministic boolean test suite.** Because foundation models sample tokens from conditional probability distributions over discrete vocabularies, an agent's trajectory through an environment is a stochastic Markov chain modulated by external tool latencies, non-associative floating-point reductions, and sampling hyper-parameters. Evaluating such systems requires transforming empirical benchmarking from ad-hoc scoring into formal statistical estimation. This transformation demands three foundational practices: treating the task environment as the primary resampling unit, bounding finite-sample binomial uncertainty using Wilson score confidence intervals, and strictly decoupling latent reasoning capacity ($pass@k$) from operational execution policy ($pass^k$ and cost-budgeted acceptance).
+
+### The Physics of Stochasticity and the Resampling Hierarchy {#sec-vol3-observability-resampling}
+
+A pervasive misconception in machine learning systems engineering is that setting the generation temperature to zero ($T=0$) renders an agent system deterministic. In an unconstrained host runtime, greedy autoregressive decoding does not eliminate run-to-run variance. Non-determinism enters the execution graph through physical hardware operations and asynchronous environment interactions.
+
+::: {.column-margin}
+Floating-point non-associativity is governed by IEEE-754: for finite-precision values, $(a + b) + c \neq a + (b + c)$. In high-throughput GPU kernels, the order in which thread warps complete parallel reductions changes dynamically based on memory bus contention and clock frequency scaling.
+:::
+
+At the hardware level, parallel matrix reductions inside GPU tensor cores are fundamentally non-associative. When calculating scaled dot-product attention over thousands of tokens or reducing logits across split vocabulary projections, modern GPU runtimes partition tensor tiles across streaming multiprocessors. Because thread block scheduling is governed by dynamic memory bus contention, thermal throttling, and warp scheduler arbitration, the order of floating-point summations varies between successive forward passes. Whenever the logit margin between the two highest-probability tokens is smaller than the precision threshold of the floating-point accumulator ($\ell_{(1)} - \ell_{(2)} < \epsilon_{\text{fp}}$), a minor reordering of floating-point operations flips the argmax token selection. In an autonomous agent executing a fifty-step trajectory, a single altered token in an early planning step diverges the entire downstream execution path.
+
+Beyond device-level floating-point non-determinism, the runtime environment introduces asynchronous timing jitter. External tool endpoints, database connections, container filesystem operations, and subagent Remote Procedure Calls (RPCs) exhibit variable latencies. If an agent executes concurrent tool invocations or polls an external subprocess with a non-blocking timeout, variations in operating system thread scheduling alter the order of observations injected into the model's context window. An agent that receives `ToolResult(stdout="OK")` before `ToolResult(stderr="Warning")` constructs an entirely different prompt prefix than one that observes the reverse arrival order, irrevocably bifurcating the reasoning trajectory.
+
+To measure performance amidst this physical stochasticity, the systems engineer must formally define the resampling hierarchy. An evaluation harness contains two distinct sources of variance:
+
+1. **Task-Sampling Variance ($\sigma^2_{\text{task}}$):** The variability introduced by selecting a finite subset of $N$ evaluation tasks from the broader universe of real-world problems $\mathcal{D}_{\text{task}}$.
+2. **Policy-Sampling Variance ($\sigma^2_{\text{policy}}$):** The run-to-run stochasticity of the agent's internal trajectory generation when evaluated repeatedly against an identical task fixture $\tau_i$.
+
+::: {.column-margin}
+The fundamental unit of statistical replication is the independent task fixture, not the repeated run. Averaging 100 runs over five tasks yields high precision on five narrow fixtures, but zero confidence regarding out-of-sample generalization.
+:::
+
+When estimating an agent's true operational success rate $p^* = \mathbb{E}_{\tau \sim \mathcal{D}_{\text{task}}} [\mathbb{E}_{a \sim \pi} [S(\tau, a)]]$, the total estimator variance decomposes hierarchically across $N$ independent tasks and $R$ repeated execution runs per task:
+
+$$\text{Var}(\hat{p}) = \frac{\sigma^2_{\text{task}}}{N} + \frac{\sigma^2_{\text{policy}}}{N \cdot R}$$ {#eq-variance-decomposition}
+
+Equation @eq-variance-decomposition exposes an inescapable architectural law: increasing the number of repeated runs $R$ on a fixed benchmark suite diminishes the policy noise per task, but it encounters a hard asymptotic floor dictated by the task-sampling variance $\sigma^2_{\text{task}} / N$. Running an agent ten times across 100 SWE-bench tasks ($N=100, R=10$) achieves high certainty regarding how the agent performs on those specific 100 codebases, but it does not narrow the uncertainty regarding how the agent will perform across unobserved enterprise repositories. In contrast, evaluating an agent once across 1,000 independent tasks ($N=1000, R=1$) directly contracts the dominant task-sampling error term. The independent task fixture is the primary resampling unit of system evaluation.
+
+### Finite-Sample Uncertainty and the Wilson Score Interval {#sec-vol3-observability-wilson}
+
+Because benchmark execution is computationally and financially expensive, evaluation suites operate over finite sample sizes—typically between 100 and 1,000 tasks. Across these finite horizons, systems engineers must construct confidence intervals that accurately capture the probability distribution of success.
+
+Standard introductory engineering texts frequently compute confidence bounds using the normal approximation, known as the Wald confidence interval:
+
+$$\text{CI}_{\text{Wald}} = \hat{p} \pm z_{1-\alpha/2} \sqrt{\frac{\hat{p}(1-\hat{p})}{N}}$$ {#eq-wald-interval}
+
+where $\hat{p} = X / N$ is the empirical success proportion across $N$ tasks, and $z_{1-\alpha/2}$ is the standard normal quantile (e.g., $1.96$ for a 95% confidence level). 
+
+For agentic systems, the Wald interval is disastrously unsuited. The normal approximation assumes that the sampling distribution of $\hat{p}$ is symmetric and well-behaved. This assumption fails along two dimensions:
+
+- **Boundary Catastrophe:** When an agent achieves zero successes ($X=0$) or perfect success ($X=N$) on a benchmark, the estimated standard error $\sqrt{\hat{p}(1-\hat{p})/N}$ evaluates to zero. The Wald formulation asserts with 100% mathematical certainty that the agent will never succeed (or never fail) in production. If an early prototype fails on all 50 tasks in an evaluation harness, claiming a 95% confidence interval of $[0.0, 0.0]$ is completely invalid; the true success rate could easily be 3% or 5%.
+- **Severe Skewness in Extreme Regimes:** Complex agent tasks (such as automated repository-level bug fixing or multi-hop web extraction) routinely exhibit low baseline pass rates ($\hat{p} \in [0.05, 0.20]$). In this asymmetric regime, the true binomial sampling distribution is highly skewed. The symmetric Wald interval extends downward into physically impossible negative territory ($\text{CI}_{\text{lower}} < 0$) while drastically under-covering the true parameter on the upper bound.
+
+To obtain mathematically sound bounds on binary task outcomes, systems engineers employ the Wilson score interval, established by Edwin B. Wilson in 1927. Rather than evaluating standard error at the noisy empirical point estimate $\hat{p}$, the Wilson score method inverts the hypothesis test under the null distribution, calculating variance at the hypothesized true parameter $p$:
+
+$$\tilde{p} = \frac{X + \frac{z^2}{2}}{N + z^2}, \quad \text{CI}_{\text{Wilson}} = \tilde{p} \pm \frac{z}{N + z^2}\sqrt{\frac{X(N-X)}{N} + \frac{z^2}{4}}$$ {#eq-wilson-interval}
+
+The algebraic formulation of the Wilson score interval provides an intuitive systems interpretation. The midpoint of the interval, $\tilde{p}$, is not the raw sample proportion $X/N$. Instead, it introduces a shrinkage prior that pulls the estimate toward maximum entropy ($0.5$). The denominator increases from $N$ to $N + z^2$, while the numerator adds $z^2/2$ "virtual" successes. For a 95% confidence level ($z \approx 1.96, z^2 \approx 3.84$), the formula effectively adds two virtual successes and two virtual failures to the sample (the Agresti-Coull interpretation), ensuring that even when $X=0$, the upper bound remains strictly positive:
+
+$$\text{CI}_{\text{Wilson}}(X=0, N=50) = \left[0.000, \, \frac{3.84}{53.84} + \frac{1.96}{53.84}\sqrt{\frac{3.84}{4}}\right] = [0.000, \, 0.071]$$
+
+The systems engineer can definitively report that despite observing zero successes across 50 trials, the agent's true performance ceiling may reach 7.1% at the 95% confidence horizon.
+
+::: {.column-margin}
+![Sample Size vs. 95% Wilson Score Interval Width](images/svg/sample_size_confidence_intervals.svg){#fig-vol3-sample-size-confidence-intervals}
+As task sample size $N$ scales from 50 to 2,000, the 95% confidence interval width contracts. Resolving fine-grained architectural regressions ($\Delta p < 0.03$) requires hundreds of independent fixtures.
+:::
+
+Figure @fig-vol3-sample-size-confidence-intervals illustrates the contraction of the 95% Wilson confidence interval width as sample size scales. On a benchmark suite of $N=100$ tasks, a candidate runtime reporting a 50% pass rate carries a confidence span of $\pm 9.8\%$ ($[40.2\%, 59.8\%]$). Distinguishing whether an updated reasoning scaffold delivers a genuine 3% improvement or mere stochastic variation requires expanding the evaluation set to well over 1,000 independent fixtures.
+
+```python
+import math
+
+def compute_wilson_score_interval(x: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """Calculate the Wilson score confidence interval for a binomial proportion."""
+    if n <= 0:
+        raise ValueError("Sample size n must be strictly positive.")
+    p_tilde = (x + (z**2) / 2) / (n + z**2)
+    margin = (z / (n + z**2)) * math.sqrt((x * (n - x) / n) + (z**2) / 4)
+    return max(0.0, p_tilde - margin), min(1.0, p_tilde + margin)
+```
+
+::: {.callout-note title="Worked Example 16.1: Resolving Benchmark Superiority under Wilson Score Bounds"}
+**The Systems Dilemma:** An engineering team evaluates two candidate agent supervisory architectures on a standardized test harness of $N = 150$ independent repository repair tasks:
+- Architecture A (Baseline ReAct): Solves 82 tasks ($X_A = 82, \hat{p}_A = 54.67\%$).
+- Architecture B (Speculative Verification): Solves 88 tasks ($X_B = 88, \hat{p}_B = 58.67\%$).
+
+The project lead proposes deploying Architecture B immediately, citing a 4.0% performance lead. Does the empirical data support shipping this release candidate under a 95% confidence standard ($\alpha = 0.05, z = 1.96$)?
+
+**Analysis:**
+We apply the Wilson score interval formulation from Equation @eq-wilson-interval to both candidates:
+
+For Architecture A ($X_A = 82, N = 150$):
+$$\tilde{p}_A = \frac{82 + \frac{1.96^2}{2}}{150 + 1.96^2} = \frac{82 + 1.9208}{153.8416} = \frac{83.9208}{153.8416} \approx 0.5455$$
+$$\text{Margin}_A = \frac{1.96}{153.8416}\sqrt{\frac{82(68)}{150} + \frac{1.96^2}{4}} = 0.01274 \times \sqrt{37.1733 + 0.9604} = 0.01274 \times 6.1753 \approx 0.0787$$
+$$\text{CI}_A = [0.5455 - 0.0787, \, 0.5455 + 0.0787] = [0.4668, \, 0.6242] \implies [46.7\%, \, 62.4\%]$$
+
+For Architecture B ($X_B = 88, N = 150$):
+$$\tilde{p}_B = \frac{88 + 1.9208}{153.8416} = \frac{89.9208}{153.8416} \approx 0.5845$$
+$$\text{Margin}_B = \frac{1.96}{153.8416}\sqrt{\frac{88(62)}{150} + 0.9604} = 0.01274 \times \sqrt{36.3733 + 0.9604} = 0.01274 \times 6.1101 \approx 0.0778$$
+$$\text{CI}_B = [0.5845 - 0.0778, \, 0.5845 + 0.0778] = [0.5067, \, 0.6623] \implies [50.7\%, \, 66.2\%]$$
+
+**Conclusion:**
+The confidence intervals overlap heavily ($[46.7\%, 62.4\%]$ versus $[50.7\%, 66.2\%]$). Architecture A could plausibly possess an operational pass rate of 61%, while Architecture B possesses a pass rate of 52%. To establish whether a 4% improvement is statistically significant at $\alpha = 0.05$ with 80% statistical power, the harness would require evaluating:
+
+$$N_{\text{required}} \approx \frac{2 \cdot (z_{0.975} + z_{0.80})^2 \cdot \bar{p}(1 - \bar{p})}{(\Delta p)^2} = \frac{2 \cdot (1.96 + 0.84)^2 \cdot 0.5667(0.4333)}{(0.04)^2} \approx 2,408 \text{ tasks}$$
+
+The four-percentage-point lead on a 150-task suite represents insufficient empirical evidence to justify an architectural migration.
+:::
+
+### Decoupling Latent Potential from Operational Policy: pass@k, pass^k, and Cost-Budgeted Metrics {#sec-vol3-observability-pass-k}
+
+When an agent system is evaluated non-deterministically across multiple trajectories per task, summarizing performance requires choosing between measures of *latent reasoning capacity* and measures of *operational execution reliability*. Conflating these two dimensions leads to severe deployment failures.
+
+In the foundational work on evaluating generative models on code, Mark Chen et al. (2021) formalized the metric $pass@k$. When an agent generates $k$ candidate solution trajectories for a given task, $pass@k$ measures the probability that *at least one* of the $k$ trajectories passes all verification gates.
+
+Evaluating this quantity naively by generating exactly $k$ trajectories per task and checking if any passed yields an empirical estimator with high sampling variance. Instead, Chen et al. established the unbiased, low-variance hypergeometric estimator. The harness executes $n$ independent candidate runs per task ($n \ge k$) and observes the number of successful runs $c$. The expected probability that a randomly drawn subset of size $k$ contains at least one passing trajectory is:
+
+$$\text{pass}@k = \mathbb{E}_{\tau \sim \mathcal{D}_{\text{task}}} \left[ 1 - \frac{\binom{n-c}{k}}{\binom{n}{k}} \right]$$ {#eq-pass-at-k}
+
+where $\binom{n-c}{k} / \binom{n}{k}$ represents the combinatorial probability that all $k$ selected trajectories were drawn entirely from the $n-c$ failed attempts.
+
+```python
+import math
+
+def compute_pass_at_k(n: int, c: int, k: int) -> float:
+    """Calculate the unbiased pass@k metric using Chen et al.'s formulation."""
+    if n - c < k:
+        return 1.0
+    return 1.0 - (math.comb(n - c, k) / math.comb(n, k))
+```
+
+::: {.column-margin}
+$pass@k$ assumes an omniscient, cost-free verifier capable of selecting the single valid trajectory out of $k$ proposals. In production without an automated test oracle, the user experiences $pass@1$.
+:::
+
+Equation @eq-pass-at-k is a rigorous tool for scientific research, but it presents a dangerous trap for systems engineers. The $pass@k$ metric measures *latent generative reach*: what the agent architecture could achieve if paired with an omniscient, zero-cost oracle that inspects all $k$ candidate runs and deploys the successful one. 
+
+In a customer-facing enterprise deployment (such as an automated customer support agent or an unmonitored infrastructure remediation worker), no such external oracle exists. If the agent runtime generates five candidate trajectories for a customer request, the system cannot guess which trajectory is correct unless it possesses an automated, deterministic verification oracle (e.g., a test suite that passes, or a compiler that validates output). If deployed without an automated verification filter, an agent system exhibiting a stellar $pass@10 = 92\%$ will deliver an operational reliability of $pass@1 = 48\%$ directly to users.
+
+To evaluate operational safety in autonomous production settings, systems engineers contrast $pass@k$ with two deployment-focused metrics:
+
+1. **Execution Consistency ($pass^k$):** For multi-step enterprise workflows, the governing operational concern is not whether the system can succeed once in $k$ attempts, but whether it executes consistently every single time without human intervention. The consistency metric $pass^k$ evaluates the probability that an agent succeeds across *all* $k$ successive executions:
+
+$$pass^k = \mathbb{E}_{\tau \sim \mathcal{D}_{\text{task}}} \left[ \frac{\binom{c}{k}}{\binom{n}{k}} \right]$$ {#eq-pass-pow-k}
+
+For an autonomous agent integrated into a continuous delivery pipeline, single-run reliability ($pass@1$) must approach unity. If an agent has an 85% single-run pass rate ($pass@1 = 0.85$), its consistency over a five-task deployment sequence collapses to $pass^5 \approx (0.85)^5 = 44.4\%$.
+
+2. **Cost-Budgeted Acceptance ($pass@\$B$):** Standard evaluation metrics ignore resource consumption. An agent that achieves an 80% pass rate by consuming 1.2 million tokens across deep multi-turn planning loops ($12.50 per task) may be commercially unviable compared to an optimized baseline achieving 76% at $0.18 per task. The cost-budgeted metric $pass@\$B$ computes the maximum pass rate attainable when the runtime's cumulative financial or token expenditure is bounded by a ceiling $B$:
+
+$$pass@\$B = \mathbb{E}_{\tau \sim \mathcal{D}_{\text{task}}} \left[ \mathbb{I}\left( S(\tau, a) = 1 \;\land\; \text{Cost}(a) \le B \right) \right]$$ {#eq-pass-at-budget}
+
+| Metric | Formal Formulation | Systems Meaning | Production Prerequisite |
+| :--- | :--- | :--- | :--- |
+| **$pass@k$** | $\mathbb{E}\left[ 1 - \frac{\binom{n-c}{k}}{\binom{n}{k}} \right]$ | Latent model capability given $k$ parallel generation attempts. | Requires an automated, hermetic verification oracle to select candidate trajectories. |
+| **$pass@1$** | $\mathbb{E}\left[ \frac{c}{n} \right]$ | Expected single-shot autonomous execution success rate. | Standard release baseline for single-turn autonomous workers. |
+| **$pass^k$** | $\mathbb{E}\left[ \frac{\binom{c}{k}}{\binom{n}{k}} \right]$ | Probability of $k$ consecutive successful runs (consistency). | Essential for unmonitored automation pipelines and multi-agent cascades. |
+| **$pass@\$B$** | $\mathbb{E}\left[ \mathbb{I}(S = 1 \land \text{Cost} \le B) \right]$ | Operational efficiency under hard financial/resource ceilings. | Financial viability gate for commercial agent runtimes. |
+
+: The spectrum of evaluation metrics for stochastic agent architectures. {#tbl-vol3-statistical-metrics}
+
+By decomposing evaluation into statistical confidence intervals and operational metric profiles, systems engineers establish whether an agent architecture's performance delta represents a reproducible advancement.
+
+---
+
+Statistical rigor across task fixtures establishes whether an agent system's aggregate performance has improved, regressed, or stagnated within quantifiable confidence bounds. Yet aggregate statistics remain fundamentally black-box indicators: they quantify *the frequency* of failure without explaining *the mechanics* of failure. When an updated agent runtime causes a benchmark pass rate to regress by six percentage points, the confidence intervals confirm that the regression is statistically genuine, but they cannot isolate whether the failure originated from a corrupted retrieval query, an erroneous tool invocation schema, an exhausted context window, or a cascading loop in multi-agent RPC consensus. To diagnose the microscopic etiology of non-deterministic failures, systems engineers must penetrate the aggregate distribution and inspect the causal execution graph of individual trajectories. That diagnostic requirement motivates distributed trajectory tracing.

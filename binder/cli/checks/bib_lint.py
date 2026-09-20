@@ -260,7 +260,7 @@ CANONICAL_PUBLISHERS: set[str] = {
     "mlsys.org", "CIDR", "AAAI Press", "Springer", "Elsevier",
     "Nature Publishing Group", "AAAS", "arXiv", "Schloss Dagstuhl",
     "MIT Press", "Cambridge University Press", "Oxford University Press",
-    "Harvard University Press", "Morgan Kaufmann", "Wiley", "O'Reilly Media",
+    "Harvard University Press", "Princeton University Press", "Morgan Kaufmann", "Wiley", "O'Reilly Media",
     "SIAM", "Viking Penguin", "Science Research Council",
     "The MIT Press", "Dartmouth College", "Microsoft Research",
     "Carnegie Mellon University", "University of Toronto", "Stanford University",
@@ -268,6 +268,7 @@ CANONICAL_PUBLISHERS: set[str] = {
     "IEEE Computer Society", "ISCA", "Sage Publications", "Routledge", "USENIX",
     "SAGE Publications", "PLOS", "PLOS ONE", "Frontiers Media S.A.",
     "American Statistical Association", "Pearson", "Prentice Hall",
+    "Internet Society",
 }
 
 

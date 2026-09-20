@@ -1,0 +1,142 @@
+## Replay Divergence Diagnostics {#sec-vol3-persistence-non-determinism}
+
+An autonomous software-engineering agent executing a multi-file refactoring task halts unexpectedly at turn $t=42$ due to an unhandled supervisor timeout. To diagnose the fault, an engineer retrieves the exact model weights, fixes the sampling temperature to $T=0$, restores the target repository to the identical Git commit hash, and launches an offline reproduction run on a secondary GPU cluster. Instead of reproducing the timeout at turn $t=42$, the trajectory abruptly diverges at turn $t=6$: the model selects an entirely different tool call, emits an unescaped shell argument, triggers an early syntax error, and terminates without ever reaching the target failure state. The bug cannot be reproduced, the crash dump is useless, and post-mortem analysis grinds to a halt.
+
+**Bit-exact trajectory replay is disrupted by non-deterministic sampling, floating-point kernel race conditions, and dynamic wall-clocks; runtimes must virtualize and record all entropy sources.** A foundation model cannot be treated as a deterministic mathematical function $f(\mathbf{x}) \to \mathbf{y}$ across distinct hardware nodes, kernel versions, or execution passes. In an agentic system, minute non-determinisms at the micro-architectural or operating system layer do not remain localized perturbations; because autoregressive decoding feeds generated tokens directly back into subsequent attention contexts, a single flipped bit or altered token at turn $t$ propagates exponentially across subsequent turns. Constructing a dependable diagnostic and recovery engine requires systematically identifying every physical source of trajectory entropy, establishing virtualization boundaries to capture ambient nondeterminism, and enforcing observation escrow during replay.
+
+### Taxonomy of Trajectory Entropy Sources
+
+Entropy enters an agentic execution loop through four distinct architectural strata: stochastic inference parameters, GPU micro-architectural scheduling, dynamic host operating system interfaces, and mutable external environments. Operating systems engineers traditionally classify non-determinism into internal software state and external asynchronous I/O; in agentic runtimes, this boundary shifts because the core computational engine—the parallel matrix execution pipeline on hardware accelerators—is itself a major source of internal non-determinism.
+
+The first and most obvious source of non-determinism is stochastic temperature sampling. When an inference runtime evaluates next-token predictions with a temperature parameter $T > 0$, the decode loop draws tokens randomly from the resulting categorical distribution. Unless the pseudorandom number generator (PRNG) state and seed are explicitly pinned and preserved, consecutive forward passes over identical prompt prefixes yield different token sequences. While pinning the PRNG seed provides statistical repeatability on a single isolated thread, it remains insufficient to guarantee bit-exact execution on modern parallel inference servers.
+
+::: {.column-margin}
+**Floating-Point Non-Associativity**  
+Under IEEE 754 arithmetic, addition is not associative: $(a \oplus b) \oplus c \neq a \oplus (b \oplus c)$. In parallel reduction kernels, changing the arrival order of partial sums changes the round-off error in the final floating-point significand.
+:::
+
+The second and more pernicious source of entropy arises from floating-point non-associativity in parallel GPU reduction kernels. High-performance matrix multiplication (GEMM) and fused multi-head attention kernels execute parallel reductions across thousands of streaming multiprocessor (SM) threads. As formalized by David Goldberg (1991), floating-point addition under IEEE 754 standards does not satisfy mathematical associativity. In parallel reduction trees where thread warps schedule dynamically based on DRAM bank contention, cache hits, and clock throttling, the exact summation order of partial products varies from run to run. Consequently, even when evaluating an identical prompt prefix at greedy decoding ($T=0$), the raw logit values for vocabulary tokens can drift by small floating-point epsilons ($\sim 10^{-6}$ to $10^{-4}$). If the two highest-ranking candidate tokens have logit margins smaller than this micro-architectural drift, the greedy `argmax` operator flips. A single flipped token alters the key-value context for all subsequent decode steps, leading to complete trajectory divergence within a handful of generated words.
+
+```
+       Host OS Stratum           System Calls (gettimeofday, getpid, urandom)
+             │                   ├── Leak dynamic timestamps into prompts
+             ▼                   └── Create non-reproducible UUID identifiers
+  ┌───────────────────────┐
+  │ Agent Supervisor Loop │◄───── External Environment Mutex
+  └──────────┬────────────┘      └── Tool observation changes across replay
+             │
+             ▼                   Floating-Point Kernel Scheduling
+     [Inference Engine]          ├── Warp arrival race conditions in GEMM
+             │                   └── Asynchronous atomicAdd logit drift
+             ▼
+     [Token Emission] ──────────► Greedy Argmax Flip at t_diverge
+```
+
+The third stratum involves dynamic host operating system state leaked into prompts and control structures. Agent supervisors frequently inject metadata into system prompts, tool schemas, or scratchpads: current wall-clock timestamps via `time.time()`, host process identifiers via `getpid()`, local file paths, or random correlation identifiers via `uuid.uuid4()`. When a supervisor passes dynamic timestamps into an LLM context, the model conditions its reasoning on values that can never naturally repeat during subsequent execution. Furthermore, file system iterators that traverse directory trees without explicit collation return directory entries in raw inode order, which varies across file systems, container instances, and operating system kernels.
+
+The fourth stratum encompasses external environment mutation. An agent does not operate in a hermetic computational vacuum; its primary purpose is interacting with external tools, HTTP endpoints, databases, and operating system shells. Between a production failure at time $t_{\text{live}}$ and a diagnostic replay session at time $t_{\text{replay}}$, external REST APIs change their response payloads, public search engines update their indices, remote Git repositories accept new commits, and local filesystems reflect intermediate mutations. If the replay harness allows the agent to execute real tool invocations against live external services, the observations returned to the agent will differ from historical execution, instantly invalidating the state trajectory.
+
+| Entropy Stratum | Physical Mechanism | Impact on Trajectory | Runtime Isolation & Mitigation Strategy |
+|:---|:---|:---|:---|
+| **Stochastic Decoding** | Multinomial token selection with $T > 0$. | Completely divergent token outputs from identical prefix. | Explicit PRNG seed recording; log probability capture; token-level event replay. |
+| **GPU Micro-Architecture** | Warp scheduling races during parallel reductions in GEMM/attention. | Sub-epsilon logit drift flipping greedy `argmax` selection. | Deterministic reduction algorithms; fixed accumulation ordering; token-stream escrow. |
+| **Host System State** | Dynamic syscalls (`gettimeofday`, `getpid`, `getrandom`, `readdir`). | Unrepeatable timestamps and identifiers embedded in prompt context. | System call virtualization; PRNG sequence virtualization; strict canonical collation. |
+| **External Environment** | Modifying external filesystems, databases, and third-party APIs. | Observation drift yielding divergent planning decisions. | Observation mocking; Write-Ahead Log (WAL) escrow; sandbox snapshot rollbacks. |
+: Non-determinism classification matrix and runtime mitigation strategies. {#tbl-vol3-nondeterminism-mitigation}
+
+### Floating-Point Non-Associativity and Logit Flips
+
+To understand why bit-exact reproduction fails on identical GPU clusters under greedy decoding ($T=0$), one must inspect the arithmetic pipeline of parallel tensor reduction. During the prefill and decode stages of autoregressive inference, computing the attention score matrix $\mathbf{S} = \mathbf{Q}\mathbf{K}^T / \sqrt{d_k}$ and aggregating value vectors $\mathbf{O} = \text{Softmax}(\mathbf{S})\mathbf{V}$ requires summing millions of floating-point products across parallel SIMD lanes.
+
+Modern accelerator architectures optimize throughput by utilizing atomic floating-point accumulation instructions (such as `atomicAdd` in CUDA) or dynamic reduction trees across thread blocks. In an accelerator with hundreds of streaming multiprocessors, the physical completion order of thread blocks depends on dynamic runtime conditions: memory bus congestion, L2 cache bank collisions, temperature-induced frequency scaling, and thread block dispatch scheduling. Because floating-point representations allocate a fixed number of bits to the significand (10 bits for IEEE 754 half-precision FP16; 7 bits for Brain Floating Point BF16), round-off occurs at every pairwise addition.
+
+::: {.callout-note title="Worked Example: Logit Flip via Non-Associative Attention Reduction"}
+Consider an inference pass for a model with vocabulary size $V = 128{,}000$, hidden dimension $d = 4096$, and sequence length $L = 2048$, evaluating the final linear projection layer $\mathbf{z} = \mathbf{h} \mathbf{W}_{\text{vocab}}$ under BF16 precision. Suppose that for two candidate tokens—Token A (representing identifier `"write"`) and Token B (representing identifier `"save"`)—the exact mathematical dot products before rounding are:
+
+$$\mathbf{z}_{\text{ideal}}[A] = 14.20012, \quad \mathbf{z}_{\text{ideal}}[B] = 14.20008$$
+
+The margin separating the two candidates is $\Delta = \mathbf{z}_{\text{ideal}}[A] - \mathbf{z}_{\text{ideal}}[B] = 0.00004 = 4 \times 10^{-5}$.
+
+The projection computes $\mathbf{z}[i] = \sum_{k=1}^{d} \mathbf{h}[k] \mathbf{W}_{\text{vocab}}[k, i]$ using parallel reduction across $P = 128$ threads per warp. In BF16, the machine epsilon is $\epsilon_{\text{mach}} = 2^{-7} \approx 7.81 \times 10^{-3}$. In a tree reduction where summation order is strictly fixed, round-off error accumulates deterministically. However, in an unconstrained atomic accumulation pipeline, partial sums arrive out of order.
+
+Suppose Run 1 schedules warps such that smaller partial sums accumulate first, yielding a net rounding perturbation of $\delta_1 = -2 \times 10^{-5}$ on Token A and $+3 \times 10^{-5}$ on Token B:
+
+$$\mathbf{z}_{\text{Run 1}}[A] = 14.20010, \quad \mathbf{z}_{\text{Run 1}}[B] = 14.20011 \implies \text{Argmax selects Token B (`\"save\"`)}$$
+
+In Run 2, memory bank conflicts delay thread block 3, altering the accumulation order such that $\delta_2 = +2 \times 10^{-5}$ on Token A and $-1 \times 10^{-5}$ on Token B:
+
+$$\mathbf{z}_{\text{Run 2}}[A] = 14.20014, \quad \mathbf{z}_{\text{Run 2}}[B] = 14.20007 \implies \text{Argmax selects Token A (`\"write\"`)}$$
+
+The logit ranking inverts purely due to micro-architectural scheduling jitter. If Token A corresponds to a structured tool call delimiter while Token B triggers standard prose generation, the supervisor's state transition function $\delta$ branches into an entirely disconnected control state.
+:::
+
+Systems engineers have attempted to enforce determinism at the GPU kernel layer by replacing asynchronous atomic additions with deterministic segmented scan algorithms or fixed-order reduction trees. While deterministic GEMM implementations exist (such as setting `CUBLAS_WORKSPACE_CONFIG=:4096:8` in CUDA environments), they introduce measurable performance penalties. Enforcing deterministic reductions restricts warp scheduling freedom, prevents opportunistic memory coalescing, and disables dynamic load balancing across SMs, imposing a 10% to 25% throughput reduction on dense model serving.
+
+More fundamentally, deterministic CUDA flags only guarantee repeatability across runs conducted on the *identical physical hardware model with the identical compute capability, microcode version, and SM count*. A trajectory generated on an NVIDIA H100 (132 SMs, FP8/BF16 Tensor Cores) cannot be deterministically reproduced at the kernel level on an A100 (108 SMs) or an L40S, because the thread block tiling dimensions and warp partition topologies differ fundamentally. Consequently, relying on GPU-level arithmetic determinism for trajectory replay is an architectural dead end for portable systems.
+
+### Virtualizing Time, Entropy, and Observation Escrow
+
+Because bit-level model determinism cannot be achieved portably across hardware tiers, a resilient agent runtime must apply the classical systems principle of virtualization. Rather than attempting to force the underlying execution hardware to behave deterministically, the supervisor interposes on the boundary between the agent and all ambient entropy sources. This design separates execution into two operating modes: *recording mode* during live execution, and *virtualized replay mode* during diagnostic analysis.
+
+::: {.column-margin}
+**Crash-Only Verification**  
+Following George Candea et al. (2004), systems should treat recovery paths as first-class operational paths. Virtualized replay ensures that post-crash state reconstruction relies on immutable, recorded event streams rather than live environment synchronization.
+:::
+
+Virtualizing host entropy requires trapping every nondeterministic system call before its return value can enter the model context or supervisor state machine. When an agent process initializes, the runtime injects an interception shim (via an `LD_PRELOAD` shared library, an eBPF tracepoint probe, or a custom execution runtime sandbox). This shim intercepts four critical system interfaces:
+
+1. **Wall-Clock Virtualization:** Calls to `clock_gettime(CLOCK_REALTIME)`, `gettimeofday()`, or language-level wrappers (`time.time()`) are intercepted. In recording mode, the real system time is returned and simultaneously written to the event stream as a side-effect event $e_{\text{clock}}$. In replay mode, the interceptor blocks access to the hardware clock and returns the recorded sequence of timestamps from the event log, ensuring monotonic and identical time progression.
+2. **Pseudorandom Number Generators:** Calls to `/dev/urandom`, `getrandom()`, or framework-level seeds (`random.seed()`, `torch.manual_seed()`) are intercepted. The initial seed and all consumed random sequences are logged. During replay, the pseudo-random stream is regenerated deterministically from the recorded seed.
+3. **Identifier Generation:** Dynamic generation of UUIDs, process identifiers (`getpid()`), and socket descriptors is trapped. The runtime replaces random UUID generation with a deterministic counter hashed with the trajectory's base execution ID: $\text{UUID}_k = \text{HMAC-SHA256}(\text{TrajectoryID}, k)$.
+4. **Filesystem Traversal Collation:** Calls to `getdents64` or `readdir()` are intercepted to enforce strict lexicographical sorting on returned directory entries, neutralizing kernel-dependent inode ordering.
+
+```
++-------------------------------------------------------------+
+|                     RECORDING MODE                          |
+|                                                             |
+|  Agent Supervisor ──► Syscall Shim ──► Host OS Kernel       |
+|                            │                                |
+|                            ▼                                |
+|                   Append to Event Log                       |
++-------------------------------------------------------------+
+|                      REPLAY MODE                            |
+|                                                             |
+|  Agent Supervisor ──► Syscall Shim ──X (Kernel Trapped)     |
+|                            ▲                                |
+|                            │                                |
+|                   Inject from Event Log                     |
++-------------------------------------------------------------+
+```
+
+While host virtualization eliminates environment entropy within the supervisor process, it does not resolve divergence within external tools. When an agent invokes an external action $a_{\text{ext}}$ (such as querying an API, executing a database transaction, or running a build script), repeating this invocation during replay risks secondary non-determinism or unintended external mutation.
+
+To neutralize external tool divergence, the runtime implements *observation escrow*. In recording mode, whenever an external action $a_{\text{ext}}$ executes, its complete observation payload $e_{\text{obs}}$—including standard output, standard error, exit codes, HTTP headers, and response bodies—is flushed to the append-only Write-Ahead Log before being returned to the model. In replay mode, the runtime completely disconnects the external RPC transport. When the supervisor's state machine reaches the dispatch phase for $a_{\text{ext}}$, the action is intercepted by an observation mocking engine. The mock engine validates that the proposed action matches the recorded action schema; if valid, it injects the historical observation $e_{\text{obs}}$ directly from the event log without dispatching network packets or modifying external filesystems.
+
+```python
+# Trace-level verification diff demonstrating logit-induced replay divergence
+--- recorded_trajectory_step_14.json
++++ replayed_trajectory_step_14.json
+@@ -6,9 +6,9 @@
+   "entropy_sources": {
+-    "wall_clock_ms": 1729340112405,
+-    "host_pid": 84120
++    "wall_clock_ms": 1729340119881,  # UNVIRTUALIZED SYSCALL DETECTED
++    "host_pid": 84993
+   },
+   "proposed_action": {
+-    "tool": "file_search", "pattern": "*.py", "order": "lexicographical"
++    "tool": "file_search", "pattern": "*.py", "order": "inode"
+   }
+```
+
+The realization that bit-exact model re-execution is computationally expensive and fragile across heterogeneous hardware leads to an essential architectural decoupling: **Trajectory Verification vs. Model Re-Execution**. 
+
+When diagnosing supervisor state machines, distributed consensus, or tool orchestration failures, the runtime does not re-invoke the foundation model at all. Instead, it performs *trace-driven verification*: the recorded tokens and tool proposals are replayed directly from the immutable event ledger into the supervisor logic, verifying that the supervisor's state transition function $\delta(\mathbf{S}_t, e_t) = \mathbf{S}_{t+1}$ faithfully reproduces the expected intermediate states. 
+
+If an engineer specifically needs to evaluate model divergence across new model weights, quantization schemes, or inference engines, the system runs *divergence analysis mode*. Here, the model is re-invoked on the historical prompt prefixes, and the runtime computes token-level log-probability divergence (Kullback-Leibler divergence over logits):
+
+$$D_{\text{KL}}(P_{\text{live}} \parallel P_{\text{replay}}) = \sum_{w \in \mathcal{V}} P_{\text{live}}(w) \log \left( \frac{P_{\text{live}}(w)}{P_{\text{replay}}(w)} \right)$$
+
+By establishing strict virtualization boundaries around wall-clocks, trapping PRNG entropy, escrowing external tool observations, and measuring logit-level divergence, the runtime guarantees that diagnostic analysis operates with mathematical precision. An engineer can bisect a failing trajectory, inspect intermediate supervisor state transitions, and verify algorithmic invariants without being misled by floating-point hardware races or drifting external APIs.
+
+Sealing ambient entropy channels transforms an executing trajectory into a closed, self-contained computational state defined entirely by its serialized Agent Control Block ($\text{ACB}_t$), its append-only event stream $\mathcal{E}$, and its isolated sandbox state overlays. Because the runtime no longer depends on static physical host bindings, local hardware clocks, or unrepeatable GPU reduction schedules, an active trajectory becomes fully portable across space and time. If a worker node experiences physical hardware failure, thermal throttling, or spot-instance preemption, the supervisor can detach this serialized state package and reconstruct the running task on a completely different physical machine without loss of execution integrity. How does a distributed runtime coordinate the live migration of an active trajectory across physical cluster nodes without dropping inflight RPCs or duplicating external side effects?

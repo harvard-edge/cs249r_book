@@ -35,6 +35,39 @@ Release body. Omit any section that has no entries for a given release.
 
 ## Unreleased
 
+### Physical AI & Embodied Modeling
+
+- **Embodied Hardware & Platform Registry (`mlsysim.embodied`)**: Added first-principles registries for physical robotics platforms:
+  - `Embodied.Vehicle`: Autonomous vehicles (e.g. `UberATG_VolvoXC90`, `Waymo_Pacifica_Chrysler`) with mass, max velocity, acceleration, braking profiles, and thermal/power envelopes.
+  - `Embodied.AMR`: Autonomous mobile robots (e.g. `LogisticsAMR`, `WarehouseAMR`) with mass, velocity limits, sensor latencies, and stopping clearances.
+  - `Embodied.Manipulator`: Articulated robotic arms (e.g. `Franka_Emika_Panda`, `UR5e`) with joint count, effective end-effector inertia, payload capacity, and stiction thresholds.
+- **Physical Robotics Closed-Form Physics (`mlsysim.physics.robotics`)**: Added closed-form analytical solvers for cyber-physical AI:
+  - `calc_safe_stopping_distance`: Safe stopping envelope combining reaction lag, braking deceleration, and localization margins.
+  - `calc_kinetic_energy`: Kinetic energy for moving mass.
+  - `calc_transient_impact_force`: Transient collision impact force using effective mass and tissue stiffness.
+  - `calc_coulomb_stiction_deadband`: Torque deadband latency from Coulomb friction and motor torque slewing.
+  - `calc_watchdog_lease_bound`: Maximum safety watchdog lease duration bounded by optical sensor clearance and stopping distance.
+  - `calc_canfd_bus_utilization`: Deterministic bus frame transmission time and utilization under CAN-FD arbitration/data phases.
+  - `calc_ethercat_cycle_time`: Sum-frame EtherCAT cycle time, transmission latency, and timing margin.
+  - `calc_teleop_ingestion_budget`: Multi-camera teleoperation ingestion data rates, PCIe bus bandwidth, and raw memory footprint.
+  - `calc_demonstration_yield_fatigue`: Ergonomic teleoperator fatigue decay and usable demonstration throughput yield.
+  - `calc_covariate_drift_compounding`: Exponential error compounding across closed-loop horizon under covariate shift.
+  - `calc_action_chunk_denoising_cadence`: Diffusion policy denoising step latency vs camera frame cycle time.
+  - `calc_clopper_pearson_zero_failure_bound`: Exact binomial lower confidence bound on operational survival probability from zero-failure trials.
+  - `calc_zero_failure_sample_size`: Required flawless trials to demonstrate target reliability at confidence level.
+  - `calc_sensor_information_age`: End-to-end information age and spatial error displacement from sensor acquisition to actuator current.
+  - `calc_tsdf_voxel_grid_budget`: Memory capacity and bandwidth requirements for 3D TSDF voxel grids vs octrees.
+  - `calc_intent_drift_lease`: Temporal validity lease for high-level semantic goals bounded by odometry drift and workspace obstacles.
+  - `calc_tripwire_contact_force_accumulation`: Contact force integration across actuator response delay.
+  - `calc_process_thermal_runaway_lease`: Critical thermal runaway lease duration before actuator or plant temperature exceeds safety limits.
+  - `calc_planning_seam_inertia_discontinuity`: Trajectory stitch acceleration spike and mechanical jerk from replanning discontinuities.
+  - `calc_cbf_qp_orthogonal_projection`: Control Barrier Function minimum-norm QP projection to enforce safe forward-invariant set.
+  - `calc_inductive_pdn_voltage_droop`: Fast inductive power distribution network (PDN) $L \cdot di/dt$ voltage droop under transient current steps.
+  - `calc_intervention_takeover_budget`: Human takeover reaction time, out-of-loop drift displacement, and total safety stopping distance.
+  - `calc_architectural_shield_dilution`: Reliability dilution across layered runtime defense shields.
+- **Physical AI SI Units (`mlsysim.core.units`)**: Added exported aliases and quantities for `millimeter`, `mm`, `newton`, `N`, `volt`, `V`, `millivolt`, `mV`, `ampere`, `A`, `milliampere`, `mA`, `ohm`, `milliohm`, `radian`, `rad`, `hertz`, `Hz`.
+- **Provenance Catalog (`mlsysim.core.provenance_catalog`)**: Integrated verifiable engineering sources and datasheets for all embodied platforms and parameters.
+
 ### Bug Fixes
 
 - `CompressionModel` measured every ratio against a hard-coded FP32 baseline

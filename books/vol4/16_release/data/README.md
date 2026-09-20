@@ -1,0 +1,3 @@
+# Testing-gap illustration
+
+`testing_gap.csv` is a constructed constant-rate comparison, not measured robot or fleet exposure. For each target rate `lambda` per hour, `Black_Box_Years = -ln(0.05)/(lambda * 24 * 365)` is the one-sided 95% zero-event exposure under a homogeneous Poisson model. `Conditional_Proposal_Years = Black_Box_Years * (1 - 0.9999)` assumes an independently evidenced 99.99% containment fraction for the relevant hazardous-proposal population. It omits detector common-cause failures, hardware hazards, distribution shift, and ODD coverage. The second column therefore illustrates a conditional evidence decomposition, not a system safety or release result.
