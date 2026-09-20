@@ -558,7 +558,187 @@ Partial allocation of multi-GPU jobs creates a failure mode unique to ML cluster
 
 ::: {#fig-gang-scheduling-deadlock fig-env="figure" fig-pos="htb" fig-cap="**The distributed deadlock (hold and wait)**: In a non-gang scheduler (left), job J1 acquires half the cluster and waits for the rest, while job J2 acquires the other half and waits for J1 to release its GPUs. Neither can proceed, and 100 percent of the cluster sits idle. Gang scheduling (right) solves this by mandating atomic allocation: a job is either granted its entire $N$-GPU requirement simultaneously or it waits in the queue without holding any resources." fig-alt="Two-panel diagram. Left panel shows jobs J1 and J2 each holding half of an 8-GPU pool and waiting for the other half, creating a deadlock. Right panel shows the same jobs running sequentially to completion under gang scheduling."}
 
-![](images/svg/gang-deadlock.svg)
+```{=latex}
+\begin{tikzpicture}[
+    >=Stealth,
+    font=\small,
+    gpubox/.style={
+        draw=#1!70!black,
+        fill=#1!12!white,
+        rounded corners=3pt,
+        line width=0.8pt,
+        minimum width=0.68cm,
+        minimum height=0.58cm,
+        inner sep=0pt,
+        font=\scriptsize\bfseries\color{#1!90!black}
+    },
+    stepbox/.style={
+        draw=#1!50!black,
+        fill=#1!6!white,
+        rounded corners=4pt,
+        line width=0.9pt,
+        minimum width=7.2cm,
+        inner sep=5pt,
+        align=center
+    },
+    coffmancard/.style={
+        draw=gray!50,
+        fill=white,
+        rounded corners=3pt,
+        line width=0.8pt,
+        minimum width=3.3cm,
+        minimum height=1.6cm,
+        inner sep=5pt,
+        align=center
+    }
+]
+
+    % Provide colors if not defined
+    \providecolor{NavyBlue}{RGB}{0,102,204}
+    \providecolor{DarkOrchid}{RGB}{153,50,204}
+    \providecolor{ForestGreen}{RGB}{34,139,34}
+    \providecolor{BrickRed}{RGB}{178,34,34}
+    \providecolor{BurntOrange}{RGB}{204,102,0}
+
+    % Vertical dividing line
+    \draw[dashed, gray!40, line width=0.8pt] (0, -1.0) -- (0, 5.6);
+
+    % =========================================================================
+    % LEFT PANEL: Non-Gang Scheduler (Deadlock)
+    % Center: x = -4.1
+    % =========================================================================
+    \node[font=\bfseries\color{BrickRed!90!black}] at (-4.1, 5.3) {Non-Gang Scheduler (Deadlock)};
+    \node[font=\scriptsize\color{black!70}] at (-4.1, 4.9) {8 GPUs total; J1 and J2 each hold 4 and wait for 4};
+
+    % 8 GPUs: G0..G3 (J1) and G4..G7 (J2)
+    \foreach \i/\label in {0/G0, 1/G1, 2/G2, 3/G3} {
+        \node[gpubox=NavyBlue] (gpu\i) at (-7.0 + \i*0.82, 4.2) {\label};
+    }
+    \node[font=\tiny\bfseries\color{NavyBlue!90!black}, below=2pt of $(gpu1.south)!0.5!(gpu2.south)$] {J1 holds 4 GPUs};
+
+    \foreach \i/\label in {4/G4, 5/G5, 6/G6, 7/G7} {
+        \node[gpubox=DarkOrchid] (gpu\i) at (-7.0 + \i*0.82, 4.2) {\label};
+    }
+    \node[font=\tiny\bfseries\color{DarkOrchid!90!black}, below=2pt of $(gpu5.south)!0.5!(gpu6.south)$] {J2 holds 4 GPUs};
+
+    % Job J1 and Job J2 Cards with clear separation
+    \node[draw=NavyBlue!40, fill=NavyBlue!6!white, rounded corners=3pt, line width=0.8pt, minimum width=2.7cm, minimum height=1.5cm, align=center, inner sep=4pt] (j1_card) at (-6.0, 2.6) {
+        {\footnotesize\bfseries\color{NavyBlue!90!black} Job J1 (4/8 GPUs)}\\[2pt]
+        {\scriptsize Waiting for 4 more}\\[2pt]
+        {\footnotesize\bfseries\color{BrickRed!90!black} Blocked (0\%)}
+    };
+
+    \node[draw=DarkOrchid!40, fill=DarkOrchid!6!white, rounded corners=3pt, line width=0.8pt, minimum width=2.7cm, minimum height=1.5cm, align=center, inner sep=4pt] (j2_card) at (-2.2, 2.6) {
+        {\footnotesize\bfseries\color{DarkOrchid!90!black} Job J2 (4/8 GPUs)}\\[2pt]
+        {\scriptsize Waiting for 4 more}\\[2pt]
+        {\footnotesize\bfseries\color{BrickRed!90!black} Blocked (0\%)}
+    };
+
+    % Arrows: J1 -> J2 (wants) and J2 -> J1 (wants)
+    \draw[-{Stealth[length=4pt, width=3pt]}, thick, BrickRed] ([yshift=7pt]j1_card.east) -- node[above=1pt, font=\tiny\bfseries\color{BrickRed!90!black}] {wants} ([yshift=7pt]j2_card.west);
+    \draw[-{Stealth[length=4pt, width=3pt]}, thick, BrickRed] ([yshift=-7pt]j2_card.west) -- node[below=1pt, font=\tiny\bfseries\color{BrickRed!90!black}] {wants} ([yshift=-7pt]j1_card.east);
+
+    % Queue banner
+    \node[draw=BurntOrange!40, fill=BurntOrange!8!white, rounded corners=3pt, line width=0.8pt, minimum width=7.2cm, minimum height=0.65cm, inner sep=3pt, font=\scriptsize\bfseries\color{BurntOrange!90!black}] at (-4.1, 1.3) {
+        Job J3 in Queue: needs 4 GPUs, 0 available
+    };
+
+    % Circular Deadlock box
+    \node[draw=BrickRed, fill=white, line width=1.1pt, rounded corners=3pt, minimum width=3.2cm, inner sep=4pt, font=\small\bfseries\color{BrickRed!90!black}] at (-4.1, 0.45) {
+        CIRCULAR DEADLOCK
+    };
+
+    % Bottom Waste Banner
+    \node[draw=BrickRed!40, fill=BrickRed!8!white, rounded corners=3pt, line width=0.8pt, minimum width=7.2cm, inner sep=4pt, align=center] at (-4.1, -0.55) {
+        {\scriptsize\bfseries\color{BrickRed!90!black} 8 GPUs 100\% Allocated $\cdot$ 0 Useful Compute}\\[1pt]
+        {\tiny\color{BrickRed!80!black} Waste: \$16/hr (\$2/GPU-hr) until timeout or operator intervention}
+    };
+
+    % =========================================================================
+    % RIGHT PANEL: Gang Scheduler (All-or-Nothing)
+    % Center: x = 4.1
+    % =========================================================================
+    \node[font=\bfseries\color{ForestGreen!90!black}] at (4.1, 5.3) {Gang Scheduler (All-or-Nothing)};
+    \node[font=\scriptsize\color{black!70}] at (4.1, 4.9) {Atomic grants prevent hold-and-wait; jobs execute sequentially};
+
+    % Step 1: Allocate J1 Atomically
+    \node[stepbox=ForestGreen, minimum height=1.3cm] (step1) at (4.1, 4.0) {
+        {\scriptsize\bfseries\color{ForestGreen!90!black} Step 1: Allocate J1 Atomically (8/8 GPUs)}\\[3pt]
+        \tikz{
+            \foreach \i in {0,...,7} {
+                \node[draw=NavyBlue!60, fill=NavyBlue!10, rounded corners=2pt, minimum width=0.68cm, minimum height=0.52cm, inner sep=0pt, font=\tiny\bfseries\color{NavyBlue!90!black}] at (\i*0.75, 0) {J1};
+            }
+        }
+    };
+
+    % Step 2: J2 Queued Cleanly
+    \node[stepbox=NavyBlue, minimum height=1.0cm] (step2) at (4.1, 2.5) {
+        {\scriptsize\bfseries\color{NavyBlue!90!black} Step 2: J2 Queued Cleanly (Holds 0 GPUs)}\\[2pt]
+        {\tiny\color{black!70} J2 waits without occupying partial slots $\cdot$ zero cluster lock}
+    };
+
+    % Step 3: J1 Completes; J2 Granted
+    \node[stepbox=DarkOrchid, minimum height=1.3cm] (step3) at (4.1, 1.05) {
+        {\scriptsize\bfseries\color{DarkOrchid!90!black} Step 3: J1 Completes; J2 Granted 8/8 GPUs}\\[3pt]
+        \tikz{
+            \foreach \i in {0,...,7} {
+                \node[draw=DarkOrchid!60, fill=DarkOrchid!10, rounded corners=2pt, minimum width=0.68cm, minimum height=0.52cm, inner sep=0pt, font=\tiny\bfseries\color{DarkOrchid!90!black}] at (\i*0.75, 0) {J2};
+            }
+        }
+    };
+
+    % Right Summary Banner
+    \node[stepbox=ForestGreen, fill=ForestGreen!8!white, minimum height=0.85cm] at (4.1, -0.55) {
+        {\scriptsize\bfseries\color{ForestGreen!90!black} Zero Starvation $\cdot$ Sequential Execution}\\[1pt]
+        {\tiny\color{ForestGreen!80!black} Both jobs complete in minimum time with 100\% productive GPU cycles}
+    };
+
+    % =========================================================================
+    % BOTTOM PANEL: Coffman Deadlock Conditions
+    % =========================================================================
+    \node[draw=gray!40, fill=gray!3, rounded corners=4pt, line width=0.9pt, minimum width=15.6cm, minimum height=3.2cm] (coffman_panel) at (0, -3.1) {};
+
+    \node[font=\small\bfseries] at (0, -1.8) {Resource Dependency Analysis: Coffman Deadlock Conditions};
+
+    % Card 1: Mutual Exclusion
+    \node[coffmancard] (c_c1) at (-5.5, -2.8) {
+        {\footnotesize\bfseries 1. Mutual Exclusion}\\[2pt]
+        {\scriptsize\color{black!70} Exclusive GPU access}\\[1pt]
+        {\scriptsize\color{black!70} (no device sharing)}
+    };
+
+    % Card 2: Hold & Wait (Broken by Gang)
+    \node[coffmancard, draw=ForestGreen, fill=ForestGreen!8!white, line width=1.1pt] (c_c2) at (-1.8, -2.8) {
+        {\footnotesize\bfseries\color{ForestGreen!90!black} 2. Hold \& Wait}\\[2pt]
+        {\scriptsize\bfseries Jobs hold partial GPUs}\\[1pt]
+        {\scriptsize\bfseries\color{ForestGreen!90!black} BROKEN BY GANG}
+    };
+
+    % Pill below Card 2
+    \node[draw=ForestGreen, fill=ForestGreen, rounded corners=2pt, inner sep=3pt, font=\scriptsize\bfseries\color{white}] (pill_break) at (-1.8, -3.9) {Breaks Hold \& Wait};
+    \draw[->, very thick, ForestGreen] (c_c2.south) -- (pill_break.north);
+
+    % Card 3: No Preemption
+    \node[coffmancard] (c_c3) at (1.8, -2.8) {
+        {\footnotesize\bfseries 3. No Preemption}\\[2pt]
+        {\scriptsize\color{black!70} Allocations cannot be}\\[1pt]
+        {\scriptsize\color{black!70} forcibly reclaimed}
+    };
+
+    % Card 4: Circular Wait
+    \node[coffmancard, draw=BrickRed, fill=BrickRed!8!white, line width=1.1pt] (c_c4) at (5.5, -2.8) {
+        {\footnotesize\bfseries\color{BrickRed!90!black} 4. Circular Wait}\\[2pt]
+        {\scriptsize\color{BrickRed!90!black} J1 waits for J2's GPUs}\\[1pt]
+        {\scriptsize\color{BrickRed!90!black} J2 waits for J1's GPUs}
+    };
+
+    % Connectors between Coffman cards
+    \draw[-{Stealth[length=4pt, width=3pt]}, very thick, gray!60] (c_c1.east) -- (c_c2.west);
+    \draw[-{Stealth[length=4pt, width=3pt]}, very thick, gray!60] (c_c2.east) -- (c_c3.west);
+    \draw[-{Stealth[length=4pt, width=3pt]}, very thick, gray!60] (c_c3.east) -- (c_c4.west);
+
+\end{tikzpicture}
+```
 
 :::
 
