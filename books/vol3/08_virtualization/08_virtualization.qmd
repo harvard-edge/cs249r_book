@@ -141,7 +141,7 @@ Confusing language-level variable scoping with hardware-enforced protection doma
 
 In-process sandboxing fails along four distinct physical dimensions: the dynamic introspection of the runtime's heap object graph, the undecidability of static syntactic analysis, the presence of memory-unsafe native C/C++ extensions, and the ambient authority inherent to running under the host process's operating system identity. Once an untrusted model proposal executes inside the host interpreter, containment is already lost.
 
-### Dynamic Introspection and Heap Object Graph Traversal
+### Dynamic Heap Object Traversal
 
 High-level interpreted languages treat types, functions, scopes, and classes not as immutable compiler artifacts, but as first-class, mutable objects residing in a unified virtual memory heap. A developer attempting to build an in-process sandbox will typically clear the global execution environment, deleting dangerous functions such as `__import__`, `eval`, and `exec`, or removing modules like `os`, `sys`, and `subprocess` from the interpreter's dictionary (`globals()`).
 
@@ -243,7 +243,7 @@ In-process sandboxing forces the host system to trust more than $4.25\text{ mill
 By contrast, decoupling execution into a strictly mediated external boundary reduces the privileged system call attack surface by over $97\%$, decoupling the host supervisor's survival from the language runtime's internal vulnerabilities.
 :::
 
-### Native Extension Exploits and Memory Corruption
+### Native Memory Corruption Exploits
 
 Even if a language runtime could theoretically achieve total formal verification of its bytecode and reflection graphs, modern machine learning workflows break the boundary through native C/C++ extensions. An agent tasked with analyzing data, manipulating images, or calculating tensors does not execute pure interpreted bytecode. It invokes compiled binaries through foreign function interfaces (FFI), linking libraries such as NumPy, Pillow, PyTorch, and libvips directly into the interpreter's address space.
 
@@ -292,17 +292,16 @@ First articulated by Norm Hardy in 1988, a confused deputy is a privileged progr
 
 **To prevent stochastic execution from inducing catastrophic host mutation, an agent architecture must replace ambient authority with an unforgeable capability-based security model governed by the principles of Least Privilege and Complete Mediation. Authority to read, mutate, or transmit state must never exist as a passive attribute of a process namespace. Instead, every execution request must present an explicit, unforgeable capability token that is validated on every invocation and attenuated monotonically across delegation hierarchies, guaranteeing that a child context can never possess greater authority than the parent that spawned it.**
 
-### Ambient Authority and the Confused Deputy Problem
+### The Confused Deputy Vulnerability
 
 Conventional POSIX systems enforce access control through Access Control Lists (ACLs) evaluated against ambient credentials. When a process issues an `open()`, `unlink()`, or `connect()` system call, the kernel inspects the effective user ID ($euid$) and group ID ($egid$) stored in the calling process's kernel credential structure. Authority is *ambient*: it is implicitly associated with the execution context rather than being explicitly designated at the point of invocation. In an interactive environment where human developers manually inspect commands before executing them, ambient authority offers convenience. In an autonomous agentic runtime, ambient authority creates an existential vulnerability known as the *confused deputy problem*.
 
-```text
-Ambient Access Control (ACL):
-[Process: euid=1000] ─── open("/etc/shadow") ───> [Kernel ACL Check: euid==0?] ───> DENIED
-
-Confused Deputy in Agent Runtime:
-[Untrusted Context] ─── "Read API Key" ───> [Agent Supervisor (euid=1000)] ─── open("~/.aws/credentials") ───> ALLOWED
-```
+::: {.callout-caution title="Ambient Authority vs. Confused Deputy Vulnerability"}
+- **Ambient Access Control (Classical ACL):**
+  $$\text{Process } (\text{euid}=1000) \xrightarrow{\texttt{open("/etc/shadow")}} [\text{Kernel ACL Check}: \text{euid} \stackrel{?}{=} 0] \implies \textbf{DENIED}$$
+- **Confused Deputy in Agentic Runtimes:**
+  $$\text{Untrusted Injected Context} \xrightarrow{\text{"Read API Key"}} [\text{Supervisor } (\text{euid}=1000)] \xrightarrow{\texttt{open("~/.aws/credentials")}} \textbf{ALLOWED}$$
+:::
 
 When a foundation model constructs a tool call, it operates as an unprivileged planner proposing candidate state transitions ($A=0$). If the host supervisor accepts a tool invocation such as `read_file(path="/Users/alice/.ssh/id_rsa")` and executes it directly against the local filesystem, the supervisor acts as a confused deputy. The supervisor holds the ambient authority of user `alice`, but the intent driving the invocation originated from an unverified inference trajectory that may have ingested untrusted data from an external website, an issue tracker, or a compromised source file. The operating system cannot distinguish between an intentional read issued by the human developer and a coerced read triggered by an adversarial prompt injection.
 
@@ -343,22 +342,11 @@ Complete mediation requires intercepting tool proposals at the serialization int
 2. **Constraint and Scope Evaluation:** The proxy evaluates the token's embedded operational constraints against the proposed action parameters. If the token grants read authority over the directory prefix `/workspace/build/` but the tool argument targets `/workspace/src/main.py`, the constraint check fails.
 3. **Temporal Lease Validity:** The proxy checks the token's temporal validity against the system monotonic clock. Capabilities must be short-lived leases bounded by a strict expiration epoch ($T_{\text{expire}}$). Expired tokens are rejected unconditionally.
 
-```text
-[Candidate Proposal] ───> [Schema Unmarshaling]
-                                 │
-                                 ▼
-                     [Capability Verification]
-                     ├── 1. Cryptographic Signature Valid?
-                     ├── 2. Operation ∈ Permitted Set?
-                     ├── 3. Arguments ⊆ Resource Scope?
-                     └── 4. Monotonic Clock < Expire Epoch?
-                                 │
-                     ┌───────────┴───────────┐
-                     ▼                       ▼
-                 [REJECT]                [APPROVE]
-              Raise SecurityFault     Dispatch Mediated Driver
-              Log Epistemic Audit     (Scoped File Descriptor / Socket)
-```
+Formally, the complete mediation decision predicate is expressed as:
+
+$$\text{Verdict}(P, C, t) = \begin{cases} \text{APPROVE} & \text{if } \text{VerifySig}(C) \land P.\text{op} \in C.O \land P.\text{args} \sqsubseteq C.P \land t < C.E \\ \text{REJECT} & \text{otherwise} \end{cases}$$
+
+Upon approval, the mediation supervisor dispatches the request to a scoped driver initialized exclusively with restricted file descriptors (such as those minted via `openat()`) or an isolated loopback socket pair. If any condition in the verification predicate fails, the supervisor rejects the proposal immediately, raises a `SecurityFault`, writes the violation to the epistemic audit log, and drops the proposal without modifying host state.
 
 To maintain complete mediation, the agent runtime must guarantee that tool drivers cannot be reached through side channels. A common architectural anti-pattern involves mediated tool dispatch where a tool execution context retains access to raw POSIX networking or broad host memory. Under complete mediation, the runtime isolates tool drivers within compartmentalized address spaces, passing only the exact kernel descriptors (such as restricted file descriptors minted via `openat()` or isolated loopback socket pairs) required to satisfy the mediated request.
 
@@ -385,24 +373,20 @@ The relation $\sqsubseteq$ denotes a strict partial order over capability sets, 
 
 Under monotonic attenuation, privilege amplification is mathematically impossible by construction. An agent holding a read-write capability over a directory tree can delegate read-only access to a child linter, but it cannot delegate write access if it does not possess write authority itself. Furthermore, the child cannot manufacture or request a capability that exceeds the bounds of its parent's grant.
 
-```text
-Parent Capability:  ( R="/workspace/repo",  O={read, write},  E=T0+300s )
-                             │
-            [Attenuate: Drop write, Restrict path]
-                             │
-                             ▼
-Child 1 (Search):   ( R="/workspace/repo/src",  O={read},        E=T0+120s )  [VALID: C_child ⊑ C_parent]
-
-Child 2 (Network):  ( R="https://api.github.com", O={connect},   E=T0+60s  )  [REJECTED: R_child ⊈ R_parent]
-```
+$$\begin{aligned}
+C_{\text{parent}} &= \big(R=\text{"/workspace/repo"}, &&O=\{\text{read}, \text{write}\}, &&E=T_0 + 300\text{ s}\big) \\
+C_{\text{child, 1}} &= \big(R=\text{"/workspace/repo/src"}, &&O=\{\text{read}\}, &&E=T_0 + 120\text{ s}\big) \quad &&[\text{Valid: } C_{\text{child, 1}} \sqsubseteq C_{\text{parent}}] \\
+C_{\text{child, 2}} &= \big(R=\text{"https://api.github.com"}, &&O=\{\text{connect}\}, &&E=T_0 + 60\text{ s}\big) \quad &&[\text{Rejected: } R_{\text{child, 2}} \not\subseteq R_{\text{parent}}]
+\end{aligned}$$
 
 When an adversarial observation or stochastic planning failure attempts to escalate privilege during delegation, the mediation supervisor aborts the delegation call immediately. Consider an attempted privilege escalation trace recorded at the supervisory boundary:
 
-```text
+```bash
+# Attempted privilege escalation trapped at the supervisory boundary
 [SUPERVISOR] Spawn child task: "dependency_scanner"
 [PARENT_CAP] Token=cap_9f8a1 Resource="/workspace" Ops={READ} Expire=1726743600
 [DELEGATION] Child requested: Resource="/workspace" Ops={READ, WRITE} Expire=1726743600
-[SECURITY] Privilege amplification rejected: Ops {WRITE} not in Parent Ops {READ}
+[SECURITY]   Privilege amplification rejected: Ops {WRITE} not in Parent Ops {READ}
 [SUPERVISOR] Invariant violation: Child capability set not a subset of parent.
 [SUPERVISOR] Terminating delegation request; returning EPERM to parent agent.
 ```
@@ -507,27 +491,15 @@ Firecracker completely eliminates the PCI bus hierarchy, ACPI tables, and legacy
 
 Because Firecracker avoids legacy BIOS and UEFI firmware stages, the hypervisor boots the guest kernel through a direct kernel boot path. The host Firecracker process reads an uncompressed 64-bit Linux kernel binary (`vmlinux`) from disk, maps it directly into the guest's physical memory address space at a predetermined offset, and populates the x86 64-bit boot protocol data structure (the `boot_params` "zero page"). Firecracker writes the kernel command-line arguments directly into guest memory—specifying the root filesystem location, the fixed MMIO base addresses for each VirtIO device, and disabling all legacy hardware probing. The VMM sets the guest vCPU registers to point directly to the 64-bit kernel entry point (`startup_64`), initializes the segment registers into 64-bit long mode, and immediately calls the `KVM_RUN` ioctl.
 
-```text
-Host Memory Space (Virtual Memory)
-+-----------------------------------------------------------+
-| Firecracker VMM Process Memory (Rust runtime, ~5 MiB)     |
-+-----------------------------------------------------------+
-| Guest Physical Memory Backing Buffer (mmap, anon)         |
-| 0x00000000 +--------------------------------------------+ |
-|            | Real Mode Compatibility & Zero Page        | |
-| 0x00100000 +--------------------------------------------+ |
-|            | Linux Kernel Code & Static Data (vmlinux)  | |
-|            +--------------------------------------------+ |
-|            | Guest Operating System Page Frames         | |
-|            | (Dynamic guest allocations, page cache)    | |
-| 0x10000000 +--------------------------------------------+ |
-|            | VirtIO-MMIO Device Control Registers       | |
-| 0x20000000 +--------------------------------------------+ |
-|            | Sandboxed Agent Process Working Memory     | |
-| 0x3FFFFFFF +--------------------------------------------+ |
-+-----------------------------------------------------------+
-```
-*Figure 8.5: Memory layout of the Firecracker host process, showing the VMM process overhead and the contiguous anonymous memory mapping representing the guest physical address space.* {#fig-vol3-firecracker-memory}
+| Address Range (GPA / Offset) | Segment Classification | Architectural Function & Allocation Backing | Host Memory Protection ($W \oplus X$) |
+|:---|:---|:---|:---|
+| `0x0000_0000 - 0x000F_FFFF` (1 MiB) | Real Mode & Zero Page | BIOS Data Area, interrupt vector table, and Linux `boot_params` setup structure. | Read-Only post-boot (`PROT_READ`) |
+| `0x0010_0000 - 0x0FFF_FFFF` (255 MiB) | Guest Kernel (`vmlinux`) | Uncompressed kernel code, static read-only data, BSS, and initial kernel page tables. | Kernel Text (`PROT_READ + PROT_EXEC`) |
+| `0x1000_0000 - 0x1FFF_FFFF` (256 MiB) | VirtIO-MMIO Trap Window | Memory-Mapped I/O registers for `virtio-block`, `virtio-net`, and serial console. Trapped via EPT. | Unbacked (Triggers EPT Misconfig VM-Exit) |
+| `0x2000_0000 - GPA_MAX` (Configured) | Guest OS & Agent Workspaces | Dynamic page allocations, guest page cache, and sandboxed agent process working memory. | Read-Write (`PROT_READ + PROT_WRITE`) |
+| Host Process VMM Overhead (~5 MiB) | Hypervisor Runtime | Rust VMM binary text, vCPU thread stacks, KVM ioctl contexts, and VirtIO ring descriptors. | Host Private (`MAP_PRIVATE + MAP_ANON`) |
+
+: **Firecracker VMM Host Memory Space and Guest Physical Address Layout**: Physical address ranges, backing mechanisms, and architectural roles for minimal microVM guest execution. {#tbl-vol3-firecracker-memory}
 
 This direct initialization eliminates the kernel decompression phase, device discovery loops, and bus arbitration delays. A minimal Linux guest operating system reaches its user-space initialization binary (`/sbin/init`) within 5 to 10 milliseconds of `KVM_RUN` invocation. Because the hypervisor state consists only of the vCPU execution contexts and minimal VirtIO device ring buffers, Firecracker maintains an active host memory overhead of approximately 5 MiB per instance. This allows a single physical host to maintain thousands of concurrent, hardware-isolated microVMs.
 
@@ -537,57 +509,17 @@ Although Firecracker is written in memory-safe Rust and interacts with the host 
 
 To neutralize this escalation vector, Firecracker enforces a defense-in-depth architecture using an auxiliary host-level security wrapper known as the *Firecracker Jailer*. The Jailer binary executes with host administrative privileges (`root`) prior to booting the microVM, applies a strict four-layer isolation envelope around the execution context, drops all host privileges, and then executes the Firecracker VMM process via `execve(2)`. The resulting VMM process runs with no ambient authority on the host system.
 
-```text
-       Root Context                                       Unprivileged Context
-+-------------------------+                       +----------------------------------+
-|      Spawn Jailer       |                       |  Jailed Firecracker VMM Process  |
-|  (Initial Root Process) |                       |     (Runs with Dropped Caps)     |
-+-------------------------+                       +----------------------------------+
-             |                                                     ^
-             v                                                     |
-+-------------------------+                                        |
-| 1. Create Namespaces    |                                        |
-|    - Mount (CLONE_NEWNS)|                                        |
-|    - PID (CLONE_NEWPID) |                                        |
-|    - Net (CLONE_NEWNET) |                                        |
-+-------------------------+                                        |
-             |                                                     |
-             v                                                     |
-+-------------------------+                                        |
-| 2. Configure Chroot     |                                        |
-|    - Construct Empty FS |                                        |
-|    - Bind-mount Kernel  |                                        |
-|    - chroot() & chdir() |                                        |
-+-------------------------+                                        |
-             |                                                     |
-             v                                                     |
-+-------------------------+                                        |
-| 3. Set cgroups v2 Caps  |                                        |
-|    - Bound CPU Quotas   |                                        |
-|    - Restrict RAM Limit |                                        |
-|    - Cap pids.max = 2   |                                        |
-+-------------------------+                                        |
-             |                                                     |
-             v                                                     |
-+-------------------------+                                        |
-| 4. Drop Privileges      |                                        |
-|    - Set unpriv UID/GID |                                        |
-|    - Clear Capabilities |                                        |
-+-------------------------+                                        |
-             |                                                     |
-             v                                                     |
-+-------------------------+                                        |
-| 5. Apply seccomp-bpf    |                                        |
-|    - Whitelist ~35 calls|                                        |
-+-------------------------+                                        |
-             |                                                     |
-             v                                                     |
-+-------------------------+                                        |
-| 6. Execve Firecracker   |----------------------------------------+
-|    - Replace Process    |
-+-------------------------+
-```
-*Figure 8.6: The sequential state transitions executed by the Firecracker Jailer before handing execution over to the unprivileged VMM process.* {#fig-vol3-jailer-pipeline}
+| Pipeline Stage | Subsystem Target | Kernel Primitives & System Calls | Execution Context | Containment Invariant Established |
+|:---|:---|:---|:---|:---|
+| **1. Root Bootstrap** | Host Process | `clone()`, PID allocation | Privileged Host Root (`UID=0, GID=0`) | Allocates per-instance metadata and working directories. |
+| **2. Namespace Isolation** | Linux Namespaces | `unshare(CLONE_NEWNS + CLONE_NEWPID + CLONE_NEWNET + CLONE_NEWIPC)` | Isolated Namespace Boundaries | Isolates VFS mounts, PID hierarchy, network routes, and IPC queues. |
+| **3. Filesystem Chroot** | VFS Mounts | `mount(--bind)`, `chroot(jail_dir)`, `chdir("/")` | Confined Root Directory | Strips access to host root; exposes only kernel binary and socket. |
+| **4. Cgroup Quotas** | `cgroups v2` | Writes to `cpu.max`, `memory.max`, `pids.max = 2 + N_vcpus` | Resource-Capped Slice | Bounds CPU consumption, hard-caps RAM, and blocks fork bombs. |
+| **5. Privilege Demotion** | Credentials | `setresgid(jail_gid)`, `setresuid(jail_uid)`, `capng_clear()` | Unprivileged Context (`UID > 10000`) | Eradicates all ambient POSIX capabilities (`CAP_SYS_ADMIN`, etc.). |
+| **6. Syscall Lockdown** | `seccomp-bpf` | `prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, ...)` | Hardened Kernel Boundary | Enforces default-deny allowlist of ~35 syscalls; `SIGSYS` on breach. |
+| **7. Process Replacement** | Execution Image | `execve("/usr/bin/firecracker", argv, envp)` | Fully Jailed MicroVM VMM | Runs VMM with zero ambient authority on host filesystem or network. |
+
+: **Sequential Privilege Demotion and Containment Pipeline of the Firecracker Jailer**: Seven-stage hardening sequence executed prior to microVM initialization. {#tbl-vol3-jailer-pipeline}
 
 The Jailer establishes four independent containment mechanisms:
 
@@ -604,7 +536,7 @@ The Jailer establishes four independent containment mechanisms:
 
 Through this layered architecture, even if an attacker executes code that breaches the guest Linux kernel and exploits a zero-day vulnerability in Firecracker's virtio implementation, the resulting host exploit executes inside an unprivileged, chrooted, seccomp-restricted user space process that cannot communicate with the host network, access other processes, or read files from the host filesystem.
 
-### Quantitative Trade-offs and the Isolation Taxonomy
+### The Multi-Tenant Isolation Taxonomy
 
 Architecting an execution runtime for agentic workflows requires balancing four competing systems dimensions: isolation strength (the robustness of the security boundary), cold boot latency (the delay incurred when instantiating a fresh sandbox on demand), memory density (the number of concurrent execution environments a host can support), and syscall compatibility (the ability to run arbitrary off-the-shelf compilers, interpreters, and debuggers without modification), as systematized in @tbl-vol3-isolation-taxonomy.
 
@@ -694,7 +626,7 @@ WebAssembly was standardized as an open, portable bytecode format for secure cli
 
 **The WebAssembly Isolation Principle:** *A WebAssembly runtime executes unprivileged, validated bytecode inside a mathematically bounded linear memory space, entirely divorced from the host's physical address translation hardware. The guest module possesses zero ambient authority ($A=0$); every interaction with the physical machine—whether reading a file, querying a monotonic clock, or allocating memory—must cross an explicit host-mediated call gate governed by the WebAssembly System Interface (WASI).*
 
-### Linear Memory Bounds and Structural Validation
+### WebAssembly Linear Memory Isolation
 
 At the foundation of WebAssembly's containment model is the complete decoupling of guest execution from host virtual memory management. Unlike native ELF or Mach-O binaries, which issue machine instructions directly against virtual memory addresses mapped through operating system page tables, a compiled WebAssembly module operates entirely within a flat, byte-addressable array termed *linear memory*.
 
@@ -726,17 +658,12 @@ Linear memory isolates computation, but useful agent tools must consume inputs a
 
 The WebAssembly System Interface (WASI) standardizes these imports through a pure capability-based security model, enforcing the zero ambient authority invariant ($A=0$) established in @sec-vol3-isolation-threats. In a standard POSIX environment, processes inherit ambient authority from their execution credentials: any thread can call `open("/etc/passwd", O_RDONLY)` and succeed if the process's effective user ID holds read permission on the file. In sharp contrast, a WASI runtime provides zero ambient authority to the guest. A WASI module cannot reference a global, absolute filesystem path, open an arbitrary network socket, or query a system hardware device unless the host has explicitly injected a capability descriptor for that specific resource during module instantiation.
 
-```text
-Guest WASI Module                          Host Wasmtime Runtime
-       |                                             |
-       |-- path_open(dir_fd=3, path="data.json") --->| (Check: is fd 3 valid & directory?)
-       |                                             | (Verify: path does not escape fd 3)
-       |<-- Ok(file_fd=4) ---------------------------| (Return unforgeable handle)
-       |                                             |
-       |-- path_open(dir_fd=3, path="../../etc") --->| (Check: relative path traversal)
-       |                                             | (Reject: directory traversal detected)
-       |<-- Err(WASI_ERRNO_NOTCAPABLE) --------------| (Deterministic capability violation)
-```
+| Invocation Step | Guest Module Call | Host Runtime Validation Checks | Host Kernel Action | Return Value to Guest |
+|:---|:---|:---|:---|:---|
+| **1. Authorized File Access** | `path_open(dir_fd=3, path="data.json")` | Validates `dir_fd=3` is an open directory handle; checks canonical path stays within root of `dir_fd`. | Mints scoped child file descriptor in host kernel. | `Ok(file_fd=4)` (Unforgeable handle) |
+| **2. Traversal Escape Attempt** | `path_open(dir_fd=3, path="../../etc/shadow")` | Resolves path against directory root; detects attempted escape out of sandbox root. | Blocks host VFS call; logs capability violation event. | `Err(WASI_ERRNO_NOTCAPABLE)` |
+
+: **WebAssembly WASI Capability Call Gate Resolution Sequence**: Step-by-step verification of guest module filesystem requests against pre-opened directory capabilities. {#tbl-vol3-wasi-callgate}
 
 WASI organizes filesystem interactions around pre-opened directory capabilities. During runtime staging, the host agent process identifies the precise directory required for the tool's execution—such as `/tmp/agent_scratch/task_104`—and maps it to a virtual descriptor (e.g., descriptor index 3). When the guest module attempts to access a file, it must invoke the WASI syscall `path_open` by supplying the parent directory descriptor:
 
@@ -744,14 +671,14 @@ $$\text{WASI\_STATUS} = \text{path\_open}(fd_{\text{parent}}, \text{dirflags}, \
 
 The host runtime verifies that $fd_{\text{parent}}$ corresponds to an active, valid capability token owned by the instance. If the guest attempts directory traversal by embedding relative navigation segments—such as `path = "../../etc/shadow"`—the host's path canonicalization logic detects that the path resolves outside the root bounds of $fd_{\text{parent}}$ and instantly aborts the call with `WASI_ERRNO_NOTCAPABLE`.
 
-```text
-Traceback (Host WASI Complete Mediation Trap):
-  [SECURITY FAULT] Guest instance 'code_eval_worker_04' invoked wasi_snapshot_preview1:path_open
-  Base Capability Descriptor: fd=3 -> HostPath("/var/agent/sandbox/workspace")
-  Requested Relative Path:    "../../../../etc/passwd"
-  Canonicalized Target:       HostPath("/etc/passwd")
-  Enforcement Verdict:        VIOLATION [Escape Attempt]
-  Host Action:                Immediate trap raised; instance memory frozen; err=ENOTCAPABLE
+```bash
+# Host WASI Complete Mediation Trap
+[SECURITY FAULT] Guest instance 'code_eval_worker_04' invoked wasi_snapshot_preview1:path_open
+Base Capability Descriptor: fd=3 -> HostPath("/var/agent/sandbox/workspace")
+Requested Relative Path:    "../../../../etc/passwd"
+Canonicalized Target:       HostPath("/etc/passwd")
+Enforcement Verdict:        VIOLATION [Escape Attempt]
+Host Action:                Immediate trap raised; instance memory frozen; err=ENOTCAPABLE
 ```
 
 Privilege attenuation is strictly monotonic across delegated operations. When an agent creates a sub-capability from an existing pre-opened directory handle, the inherited rights bitmask ($\text{rights\_inheriting}$) must be an exact subset of the parent descriptor's rights ($\text{rights\_base}$):
@@ -841,32 +768,18 @@ An autonomous agent executing arbitrary shell commands, compiling code, and runn
 
 **Runtime safety and rapid environment cycling require decoupling the immutable baseline from transient execution mutations through copy-on-write filesystem virtualization.** By virtualizing storage at the kernel's Virtual Filesystem (VFS) interface, the host supervisor can present an agent with an isolated, fully mutable directory hierarchy while backing all unchanged files with a shared, read-only baseline. This architecture confines all filesystem mutations—file overwrites, metadata adjustments, and file deletions—to an ephemeral scratchpad that can be inspected, merged, or discarded in milliseconds without altering the underlying image.
 
-### Anatomy of Layered Virtual Filesystems: Lower, Upper, and Merged Mounts
+### Layered Virtual Filesystem Topologies
 
 Modern Linux execution sandboxes implement copy-on-write storage isolation primarily through *OverlayFS*, a kernel union filesystem integrated into the upstream Linux VFS. Unlike block-level snapshotting mechanisms that operate beneath the filesystem, OverlayFS operates at the dentry and inode layers. It multiplexes two or more directory trees into a unified namespace presented to user space.
 
-```text
-       +-------------------------------------------------------+
-       |             Unified Merged Mount (`merged`)           |
-       |  (Read-write view presented to agent execution context)|
-       +-------------------------------------------------------+
-                                  |
-            +---------------------+---------------------+
-            |                                           |
-            v                                           v
-+-----------------------+                   +-----------------------+
-|  Upper Scratchpad     |                   |  Lower Baseline Image |
-|      (`upperdir`)     |                   |      (`lowerdir`)     |
-| (Ephemeral, writable) |                   |  (Pristine, read-only)|
-+-----------------------+                   +-----------------------+
-            |
-            v
-+-----------------------+
-|  Staging Workdir      |
-|      (`workdir`)      |
-|  (Atomic operations)  |
-+-----------------------+
-```
+| Layer Identifier | Mount Parameter | POSIX Access | Storage Backing | Kernel Inode Mediation Role |
+|:---|:---|:---|:---|:---|
+| **Merged View** | `merged` mount point | Read-Write | Synthetic VFS Union | Presents a unified filesystem tree to the sandboxed agent. Mediates path traversal lazily between upper and lower layers. |
+| **Upper Scratchpad** | `upperdir` | Read-Write | Ephemeral Host Storage | Captures all new files, modified files copied up via `ovl_copy_up`, directory structures, and `0/0` character device whiteouts. |
+| **Staging Workdir** | `workdir` | Read-Write (Internal) | Same Filesystem as `upperdir` | Used by the kernel to stage intermediate file writes and atomic renames, preventing torn writes from corrupting the workspace. |
+| **Lower Baseline** | `lowerdir` | Read-Only | Immutable Golden Image | Shared base filesystem containing pristine source code, compilers, and toolchains. Shared read-only across all concurrent sandboxes. |
+
+: **OverlayFS Layer Hierarchy and Inode Virtualization Roles**: Directory roles, access privileges, and kernel mediation dynamics in copy-on-write workspace virtualization. {#tbl-vol3-overlayfs-layers}
 
 An OverlayFS mount requires four distinct path specifications:
 
@@ -890,37 +803,27 @@ workdir=/tmp/sandbox_042/work /tmp/sandbox_042/merged
 
 Because the pristine code resides entirely in `lowerdir`, multiple concurrent agent sandboxes can share the exact same underlying baseline directory simultaneously. If thirty-two independent agent instances are evaluating parallel sub-tasks against the same codebase, the host kernel shares a single unified page cache for all unchanged code and binary assets across every sandbox, maximizing DRAM utilization and eliminating redundant disk reads.
 
-### Mutation Mechanics: Copy-Up Latency, Inode Severing, and Whiteouts
+### Copy-Up Mutation Mechanics
 
 The operational efficiency of a union filesystem relies on lazy evaluation: reads incur near-zero overhead, while writes pay a one-time relocation penalty governed by file size. The kernel resolves POSIX operations across the boundary through distinct structural mechanisms.
 
 When an agent issues a read-only system call (`stat`, `access`, or `open` with `O_RDONLY`) against a path in `merged`, the VFS performs a hierarchical dentry lookup. It checks `upperdir` first; if the path is absent, it queries `lowerdir`. Upon locating the file in `lowerdir`, the kernel constructs a virtual inode referencing the lower filesystem's physical inode. Data blocks are streamed directly from the lower file's page cache into the process memory. No data copying or memory allocation takes place.
 
-```text
-Agent POSIX Call: open("build/kernel.bin", O_RDWR)
-                           |
-                           v
-           Check Upper Directory (`upperdir`)
-                           |
-            +--------------+--------------+
-            |                             |
-      File Exists                    File Absent
-            |                             |
-     Open Upper Inode                     v
-     (Direct mutation)            Check Lower Directory (`lowerdir`)
-                                          |
-                           +--------------+--------------+
-                           |                             |
-                      File Absent                   File Exists
-                           |                             |
-                     Return -ENOENT                      v
-                                              Trigger ovl_copy_up:
-                                              1. Create temp file in `workdir`
-                                              2. Copy data blocks & xattrs
-                                              3. Atomic rename into `upperdir`
-                                              4. Sever lower inode binding
-                                              5. Grant write access to upper file
-```
+::: {#def-vol3-copy-up-resolution .callout-note title="OverlayFS VFS Inode Lookup and Copy-Up Resolution Protocol"}
+When an agent execution thread issues an `open(path, flags)` system call with write intent (`O_WRONLY`, `O_RDWR`, or `O_TRUNC`) against a virtual path in `merged`, the Linux VFS resolves the target inode through a four-stage decision sequence:
+
+1. **Upper Layer Probe:** The kernel checks `upperdir` for the requested dentry.
+   - *Hit:* If the file already exists in `upperdir`, the VFS opens the upper inode directly for in-place mutation.
+   - *Miss:* If the dentry is absent from `upperdir`, proceed to Stage 2.
+2. **Lower Layer Probe:** The kernel traverses the `lowerdir` hierarchy in stack order.
+   - *Miss:* If the file does not exist in any lower layer, the syscall aborts with error code `-ENOENT`.
+   - *Hit:* If located in `lowerdir`, the file is immutable; proceed to Stage 3.
+3. **Atomic Copy-Up (`ovl_copy_up`):**
+   - *Staging Allocation:* The kernel allocates a temporary inode in `workdir` mirroring the permissions, UID/GID ownership, and extended attributes (`xattrs`) of the lower file.
+   - *Data Re-replication:* The kernel sequentially reads all data blocks from the lower inode and writes them to the staging file.
+   - *Atomic Rename:* The staged file is atomically renamed via `vfs_rename()` into its relative destination within `upperdir`.
+4. **Descriptor Binding:** The agent process file descriptor is bound exclusively to the newly provisioned upper inode. The binding to the lower baseline inode is permanently severed.
+:::
 
 When an agent opens an existing lower file with write intent (`O_WRONLY`, `O_RDWR`, or `truncate`), the kernel intercepts the operation via `ovl_copy_up`. Because the lower file is immutable, the kernel must replicate the target file into the writable layer before user space can alter a single byte:
 
@@ -950,26 +853,22 @@ When the VFS encounters a character device with major/minor `0/0` during path lo
 | **Delete File** (`unlink`)   | Exists              | Exists (Copied up)          | Unlinks upper file; replaces with `0/0` whiteout         | File absent (`-ENOENT`)       |
 | **Wipe Directory** (`rmdir`) | Directory Exists    | Absent                      | Creates directory in `upperdir` with opaque xattr        | Empty directory (`.`, `..`)   |
 
-### Reset Overhead, Storage Quotas, and Resource Containment
+: **OverlayFS POSIX Operations and Inode Lifecycle Dynamics**: Kernel-level resolution and copy-up behavior across lower and upper layers during agent execution. {#tbl-vol3-overlayfs-operations}
 
-When an agent finishes an execution trajectory—whether it succeeds, times out, or triggers an unrecoverable runtime exception—the supervisor must revert the workspace to a pristine state. The design of the underlying copy-on-write abstraction dictates the latency, I/O cost, and reliability of this reset phase.
+### Scratchpad Storage Quotas
 
-```text
-                          Workspace Reset Architectures
-                                       |
-            +--------------------------+--------------------------+
-            |                                                     |
-            v                                                     v
-   OverlayFS Teardown                                   Block-Level Snapshotting
-(Directory Layer Discard)                                (Device-Mapper / Btrfs)
-            |                                                     |
-            +---> 1. Unmount `merged`                             +---> 1. Deactivate Snapshot
-            +---> 2. Asynchronous `rm -rf`                       +---> 2. Discard Thin Device
-            +---> 3. Re-create empty upper                       +---> 3. Clone Zero-Cost Leaf
-            |                                                     |
-  Latency: O(k) directory unlink                        Latency: O(1) B-tree pointer update
-  Overhead: Host inode scanning                         Overhead: Kernel block allocation
-```
+When an agent finishes an execution trajectory—whether it succeeds, times out, or triggers an unrecoverable runtime exception—the supervisor must revert the workspace to a pristine state. The design of the underlying copy-on-write abstraction dictates the latency, I/O cost, and reliability of this reset phase, as compared in @tbl-vol3-reset-architectures.
+
+| Reset Dimension | OverlayFS Directory Reclamation | Block-Level Snapshotting (`dm-thin` / Btrfs) | Pre-Warmed MicroVM Rollback (`madvise`) |
+|:---|:---|:---|:---|
+| **Teardown Primitive** | `umount` + asynchronous directory unlink (`rm -rf`) | Snapshot de-allocation + thin device discard | `madvise(MADV_DONTNEED)` + vCPU register reset |
+| **Algorithmic Complexity** | $\mathcal{O}(k_{\text{inodes}})$ directory tree traversal | $\mathcal{O}(1)$ B-tree leaf pointer release | $\mathcal{O}(1)$ VMA page table zeroing |
+| **Reset Latency ($T_{\text{reset}}$)** | $1\text{--}5\text{ ms}$ (Async) / $200\text{--}800\text{ ms}$ (Sync) | $< 5\text{ ms}$ | **$< 2\text{ ms}$** |
+| **Page Cache Sharing** | Unified host page cache across all sandboxes | Deduplicated only within common block tree | Shared template page cache; private CoW dirty pages |
+| **Host Write Amplification** | Proportional to modified file sizes | Block-level granularity (typically 64 KiB chunks) | Page-level granularity (4 KiB or 2 MiB huge pages) |
+| **Failure Mode** | Inode exhaustion or lock contention on host XFS | Block pool allocation exhaustion under leak | Kernel lockup if dirty page flushing stalls host memory |
+
+: **Workspace Reset Architectures: Union Filesystem Teardown versus Block-Level Thin Provisioning**: Performance characteristics, algorithmic complexities, and operational failure modes. {#tbl-vol3-reset-architectures}
 
 In an OverlayFS-backed runtime, resetting the workspace is conceptually simple: the supervisor unmounts `merged`, purges `upperdir` and `workdir`, and mounts fresh, empty directories. However, if an agent's build system generated hundreds of thousands of intermediate object files, deep node module hierarchies, or cache directories inside `upperdir`, running a synchronous `rm -rf` on `upperdir` blocks the supervisor on recursive filesystem metadata traversal, introducing hundreds of milliseconds of teardown delay.
 
@@ -981,6 +880,8 @@ Production runtimes decouple workspace recycling from synchronous deletion by em
 | **OverlayFS Union**           | File-level             | ✅ Yes (shared lower pages)  | $O(k_{\text{mutated}})$, $1\text{--}5\text{ ms}$ | Kernel `overlay` module, `xattr` |
 | **Btrfs / ZFS Subvolumes**    | Extent-level           | ❌ No (divergent inodes)     | $O(1)$, $< 10\text{ ms}$                         | Specialized root filesystem      |
 | **Device-Mapper (`dm-thin`)** | Block-level (64 KB)    | ❌ No (block virtualization) | $O(1)$, $< 5\text{ ms}$                          | LVM thin-pool, block devices     |
+
+: **Storage Virtualization and Snapshot Teardown Performance**: Quantitative comparison of directory copying, OverlayFS unions, filesystem subvolumes, and thin-provisioned device-mapper blocks for agent scratchpad lifecycle management. {#tbl-vol3-storage-virtualization}
 
 While OverlayFS excels at page cache sharing and rapid resets, it lacks internal storage quotas. If an unconstrained or compromised agent process executes an adversarial disk-exhaustion script (such as `dd if=/dev/zero of=fill.dat bs=1M`), the write mutations accumulate unchecked in `upperdir`. Because `upperdir` typically resides on the host root filesystem or a shared data partition, an unconstrained agent can exhaust all available disk blocks or inode tables on the physical host, starving sibling sandboxes and triggering kernel failures in host logging daemons.
 
@@ -1056,27 +957,15 @@ The foundation of secure network virtualization is the invariant of zero ambient
 
 Relying on traditional user-space firewall wrappers or legacy `iptables` rules incurs substantial performance and maintenance penalties at high sandbox density. Standard `iptables` configurations depend on the kernel's `netfilter` subsystem, which traverses sequential rule chains for every packet traversal. In an agent host running hundreds of concurrent transient sandboxes, the connection tracking table (`nf_conntrack`) rapidly exhausts its memory bounds, while rule evaluation scales linearly with the number of active tenant interfaces. Modern high-density runtimes replace sequential table traversal with extended Berkeley Packet Filter (`eBPF`) programs attached directly to the Traffic Control (`tc`) subsystem or the cgroup socket egress hooks (`BPF_PROG_TYPE_CGROUP_SKB`).
 
-```text
-Guest Userspace [ curl https://api.github.com ]
-       │
-       ▼ (Guest Kernel TCP Stack)
-Guest vNIC / TAP Device
-       │  (Host-Side veth / tap0)
-       ▼
-┌────────────────────────────────────────────────────────┐
-│ Host Kernel eBPF Hook (tc / egress)                   │
-│                                                        │
-│  1. Match IP Destination against 169.254.0.0/16?       │
-│     ├── TRUE  ──> Action: BPF_DROP (Log Alert)         │
-│     └── FALSE ──> Continue                             │
-│  2. Match IP Destination against RFC 1918 Intranet?    │
-│     ├── TRUE  ──> Action: BPF_DROP (Log Alert)         │
-│     └── FALSE ──> Continue                             │
-│  3. Match Packet against Proxy Enclave IP & Port?      │
-│     ├── TRUE  ──> Action: BPF_OK (Forward to Proxy)    │
-│     └── FALSE ──> Action: BPF_DROP (Default Deny)      │
-└────────────────────────────────────────────────────────┘
-```
+| Evaluation Order | Packet Header Matching Rule | Destination Criterion | Kernel Verdict | Action & Telemetry Emitted |
+|:---|:---|:---|:---|:---|
+| **1. Link-Local Metadata Trap** | IPv4 `dst == 169.254.0.0/16` or IPv6 `[fd00:ec2::254]` | Cloud Instance Metadata (IMDSv1/v2) | `TC_ACT_SHOT` (DROP) | Drops packet immediately; logs high-severity SSRF alert to security bus. |
+| **2. Intranet RFC 1918 Trap** | IPv4 `dst \in \{10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16\}` | Internal Host & Peer Subnets | `TC_ACT_SHOT` (DROP) | Blocks lateral movement to host daemons or sibling agent containers. |
+| **3. Raw Numeric IP Trap** | Destination is not resolvable via approved DNS | Non-allowlisted external IP | `TC_ACT_SHOT` (DROP) | Defeats direct reverse shells (`bash -i >& /dev/tcp/...`). |
+| **4. Forward Proxy Redirect** | Protocol is TCP and $dst = \text{IP}_{\text{proxy}} \land dport = P_{\text{proxy}}$ | Dedicated Egress Forward Proxy | `TC_ACT_OK` (FORWARD) | Passes packet to Envoy/Squid proxy for SNI allowlisting and TLS inspection. |
+| **5. Default Deny Catch-All** | Any packet not matching rules 1–4 | Arbitrary outbound destination | `TC_ACT_SHOT` (DROP) | Drops unmatched traffic; returns ICMP Destination Host Unreachable. |
+
+: **eBPF Traffic Control Packet Egress Disposition Logic**: Ordered rule evaluation executed inside the host kernel's packet processing pipeline before socket frame allocation. {#tbl-vol3-ebpf-disposition}
 
 The eBPF filter operates at the earliest point of packet ingestion in the host networking stack, executing before the kernel allocates an `sk_buff` structure to full protocol processing. Outbound traffic must satisfy a strict packet disposition predicate:
 
@@ -1084,7 +973,7 @@ $$D(p) = \begin{cases} \text{FORWARD} & \text{if } p.\text{dst} = \text{IP}_{\te
 
 Where $\text{IP}_{\text{proxy}}$ is the loopback or internal interface of a dedicated, unprivileged proxy enclave, and $P_{\text{proxy}}$ is its authenticated listening port. Any TCP SYN packet directed toward an arbitrary public IP address, internal cloud gateway, or foreign port is discarded in-kernel with zero context-switching overhead, returning an immediate destination unreachable or timing out without leaking packet bytes onto the physical fabric.
 
-### Server-Side Request Forgery and Link-Local Metadata Poisoning
+### Server-Side Request Forgery Containment
 
 The most catastrophic failure mode of permissive agent networking is Server-Side Request Forgery (SSRF) directed at infrastructure metadata services. Modern cloud execution platforms (such as Amazon Web Services, Google Cloud Platform, and Microsoft Azure) provide hypervisor-level metadata services bound to the non-routable link-local IPv4 address `169.254.169.254` (RFC 3927) and IPv6 address `[fd00:ec2::254]`. These endpoints allow virtual instances to retrieve instance identity documents, bootstrap configurations, and—most critically—temporary IAM role credentials generated by the cloud control plane.
 
@@ -1110,7 +999,7 @@ $$\mathcal{B}_{\text{blocked}} = \{ \text{169.254.0.0/16}, \text{10.0.0.0/8}, \t
 
 If an agent process attempts to invoke a socket connection whose destination IP satisfies $p.\text{dst} \in \mathcal{B}_{\text{blocked}}$, the host kernel drops the initial SYN packet and logs an immediate policy violation trap to the host supervisor.
 
-### Transparent Forward Proxying and Protocol Validation
+### Transparent Forward Proxying
 
 While absolute network blackholing provides maximum isolation, production agents frequently require selective outbound internet access to complete assigned software engineering tasks. An agent tasked with resolving an issue in an open-source repository must clone Git remotes from `github.com`, download language runtimes from `nodejs.org`, and install third-party dependencies from package registries such as `pypi.org` or `registry.npmjs.org`.
 
@@ -1134,11 +1023,13 @@ The forward proxy mediates client requests using one of two architectural strate
 | **Payload Exfiltration**   | Permits data leaks via encrypted POST bodies      | Can restrict methods to `GET` and scan bodies     |
 | **Application Breakage**   | Low (compatible with certificate pinning)         | High (breaks pinned tools: `pip`, `npm`, `cargo`) |
 
+: **Egress Filtering Architectures for Agent Execution Environments**: Comparative analysis of Server Name Indication (SNI) domain filtering versus TLS Man-in-the-Middle (MitM) termination. {#tbl-vol3-egress-filtering}
+
 In an SNI filtering architecture, when the agent initiates an HTTPS connection, the client runtime sends an unencrypted `ClientHello` message during the initial TLS handshake. The forward proxy parses the Server Name Indication extension field to identify the target Fully Qualified Domain Name (FQDN). The proxy checks this FQDN against a compiled Radix tree containing the system's approved domain list. If the domain matches an approved pattern (e.g., `*.pypi.org`), the proxy establishes a TCP connection to the destination server and splices the two socket streams using the zero-copy `splice()` system call. If the FQDN is unauthorized (e.g., `attacker-command-control.com`), the proxy abruptly terminates the client connection with a TCP RST.
 
 While SNI filtering is lightweight and preserves the integrity of client-side certificate pinning, it leaves a significant security vulnerability open: once the TLS tunnel is established to an approved host (such as `github.com`), the proxy cannot inspect the HTTP method or payload. A compromised agent could exfiltrate internal system secrets by embedding them in an HTTP POST request to a public GitHub repository or a public gist. Where strict data loss prevention (DLP) is mandatory, the runtime must deploy full TLS termination. The host installs an ephemeral root CA into the sandbox's `/etc/ssl/certs/` bundle at initialization. The proxy intercepts the TLS handshake, terminates the encrypted connection with a dynamically minted leaf certificate, inspects the plaintext HTTP stream to enforce read-only semantics (blocking all `POST`, `PUT`, and `DELETE` requests), and re-encrypts the traffic to the upstream destination.
 
-### Covert Channels and DNS Exfiltration Vectors
+### Covert DNS Tunneling
 
 Even when all IPv4/IPv6 TCP and UDP egress is trapped or routed through a proxy, a critical communication vector remains open: the Domain Name System (DNS). Standard operating system networking stacks resolve human-readable domain names into IP addresses by dispatching UDP datagrams to port 53. If the host forwards guest DNS queries directly to external public resolvers (such as `8.8.8.8` or `1.1.1.1`), the agent inherits an out-of-band covert exfiltration channel known as a DNS tunnel.
 
@@ -1221,7 +1112,7 @@ To resolve this conflict, the supervisor introduces a pre-warmed sandbox pool or
 
 By preparing the guest kernel, base OS daemons, and language runtimes prior to request arrival, the lease protocol reduces the critical path of sandbox acquisition to file descriptor plumbing, namespace moves, and hypervisor register resumption. Across production configurations, this design reliably caps acquisition latency below five milliseconds.
 
-### Memory Snapshot Re-hydration and On-Demand Paging {#sec-vol3-virtualization-pooling-snapshots}
+### Memory Snapshot Re-hydration {#sec-vol3-virtualization-pooling-snapshots}
 
 While pre-booting microVMs eliminates kernel initialization overhead, holding dozens of fully booted guest instances active in host DRAM imposes severe physical memory pressure. A standard Linux guest running a minimal Python environment requires between 512 MB and 2 GB of resident memory. Maintaining a standby reserve of one hundred idle instances would consume 50 to 200 GB of host RAM, drastically reducing the physical memory available for model weights, KV caches, and host filesystem buffers.
 
@@ -1237,33 +1128,14 @@ $$\text{HVA} = \text{mmap}\left(\text{NULL}, M_{\text{guest}}, \text{PROT\_READ}
 
 Under `MAP_PRIVATE`, the host operating system kernel does not copy physical memory pages into the new process address space during initialization. Instead, it creates page table entries referencing the read-only file cache pages of the golden template snapshot. The physical memory footprint of an idle re-hydrated instance consists solely of page table structures and hypervisor metadata—typically between 2 and 5 MB per guest. Multiple concurrent sandboxes share the exact same underlying physical RAM pages for all read-only operations, including kernel text, shared libraries, and Python bytecode.
 
-```text
-Host Virtual Address Space (Guest RAM Mapping)
-┌────────────────────────────────────────────────────────┐
-│ Page 0 (Shared) │ Page 1 (Dirty) │ Page 2 (Unaccessed) │
-└────────┬─────────────────┬──────────────────┬──────────┘
-         │                 │                  │
-         ▼                 ▼                  ▼
-┌─────────────────┐ ┌─────────────┐   ┌──────────────────┐
-│ Template File   │ │ Host DRAM   │   │ Not Present in   │
-│ Page Cache      │ │ (CoW Page)  │   │ Host Page Tables │
-└─────────────────┘ └─────────────┘   └──────────────────┘
-                                               │
-                                      Guest Access Triggers
-                                               │
-                                               ▼
-                                      ┌──────────────────┐
-                                      │ userfaultfd      │
-                                      │ Page Fault Event │
-                                      └────────┬─────────┘
-                                               │
-                                      Host Handler Fetches
-                                      Page via UFFDIO_COPY
-                                               │
-                                               ▼
-                                      [Resume Guest vCPU]
-```
-*Figure 8.13: On-demand memory paging using `userfaultfd`. The hypervisor maps guest physical address space lazily; pages untouched by the guest remain unallocated, while read accesses hit the shared template cache and write accesses trigger private page duplication.*
+| Page Classification | Memory Residency | Host Page Table Entry (PTE) | Guest Access Trigger | Kernel Resolution & Copy Dynamics |
+|:---|:---|:---|:---|:---|
+| **Unaccessed Snapshot Page** | Backing NVMe image file | `PTE_PRESENT = 0` (Unmapped) | Guest instruction fetch or read | Host MMU traps; delivers missing page message over `userfaultfd` descriptor. |
+| **In-Flight Paging Request** | Host supervisor memory buffer | Suspended vCPU thread | Asynchronous page fetch | Supervisor calls `ioctl(uffd, UFFDIO_COPY, ...)` to populate host physical frame. |
+| **Shared Read-Only Page** | Host page cache (Golden template) | `PTE_PRESENT = 1`, `PROT_READ` | Subsequent guest read accesses | Direct reads from host DRAM without duplication; shared across $N$ microVMs. |
+| **Dirty Private CoW Page** | Private host DRAM frame | `PTE_PRESENT = 1`, `PROT_WRITE` | Guest write intent (`store`, stack/heap) | Host MMU write fault; transparently duplicates 4 KiB frame into private DRAM. |
+
+: **userfaultfd On-Demand Page Lifecycle and State Transitions**: Memory states, fault interception, and copy-on-write page duplication dynamics during microVM execution. {#tbl-vol3-uffd-states}
 
 When the guest vCPU writes to a shared memory page—for instance, modifying a stack variable or allocating heap memory—the host MMU traps the write fault, transparently duplicates the 4 KB physical frame in host DRAM, and updates the guest's page table mapping. However, if the snapshot file resides on remote block storage or fast NVMe drives, even the initial page table mapping can induce unacceptably high tail latency if implemented eagerly.
 
@@ -1313,7 +1185,7 @@ To guarantee the Saltzer and Kaashoek invariant of complete mediation, the reset
 
 As quantified in @tbl-vol3-sandbox-pool-sizing, combining a pre-warmed pool with copy-on-write memory mapping and on-demand paging provides the sub-five-millisecond acquisition latency of an in-process container while preserving the ironclad hardware-isolated security invariants of a pristine cold-booted microVM.
 
-### Pool Dimensioning and Queueing Dynamics Under Bursty Traffic {#sec-vol3-virtualization-pooling-queueing}
+### Pool Dimensioning Under Bursty Traffic {#sec-vol3-virtualization-pooling-queueing}
 
 Maintaining a pre-warmed pool eliminates cold-start latency only so long as the pool contains an available instance in the `WARM_STANDBY` state. If a sudden surge of model actions exhausts the pool, incoming requests suffer catastrophic queue tail latency, blocking until active tasks complete or falling back to high-latency cold initialization. Dimensioning a sandbox pool requires modeling the stochastic arrival patterns of autonomous agents and balancing memory consumption against the probability of pool exhaustion.
 
@@ -1323,27 +1195,11 @@ $$N_{\text{active}} = \lambda \cdot \mathbb{E}[T_{\text{hold}}] = \frac{\lambda}
 
 However, provisioning the pool solely for the average concurrency $N_{\text{active}}$ guarantees severe tail degradation under real-world conditions. Agent workloads are inherently bursty: when an agent parallelizes exploration across multiple reasoning trajectories, or when multiple concurrent agents execute batch tool plans, request arrival deviates sharply from a smooth Poisson process, exhibiting high peak-to-average ratios.
 
-```text
-Request Arrival (λ)
- ────► [Burst Arrival] ───┐
-                          ▼
-            ┌───────────────────────────┐
-            │   WARM_STANDBY Pool (S)   │
-            │   Capacity: S_max         │
-            └─────────────┬─────────────┘
-                          │ Instant Acquisition (T_acq < 5 ms)
-                          ▼
-            ┌───────────────────────────┐
-            │      Active Execution     │ ──► [Task Complete]
-            │      Capacity: N_active   │          │
-            └───────────────────────────┘          │
-                          ▲                        │
-                          │ Replenishment Loop     ▼
-                          │ (T_init = 450 ms) ┌─────────┐
-                          └────────────────── │ Reclaim │
-                                              └─────────┘
-```
-*Figure 8.14: Closed-loop replenishment pipeline. If the arrival rate $\lambda$ exceeds the replenishment throughput $S_{\max} / T_{\text{init}}$ during a burst, the standby buffer depletes, exposing subsequent requests to the cold-boot latency cliff.*
+The replenishment pipeline operates as a closed-loop stochastic queue governed by the discrete-time balance equation:
+
+$$S(t + \Delta t) = \max\left(0, \min\left(S_{\max}, S(t) - A(t, t + \Delta t) + R(t, t + \Delta t)\right)\right)$$
+
+where $A(t, t + \Delta t)$ represents the stochastic arrival volume claiming available sandboxes during epoch $\Delta t$, and $R(t, t + \Delta t)$ denotes the number of recycled or cold-booted instances successfully returned to `WARM_STANDBY` by the supervisor's background worker pool. If the arrival surge $A(t, t + \Delta t)$ exceeds the available reserve $S(t)$, the standby pool completely depletes ($S(t) = 0$). At that inflection point, incoming agent tool requests fall off the acquisition latency frontier, degrading from $T_{\text{acq}} \le 3\text{ ms}$ directly to the cold-provisioning cliff:
 
 Let $T_{\text{init}}$ denote the replenishment latency—the time required by the host supervisor to tear down a tainted instance, reset host resources, and initialize a fresh replacement into `WARM_STANDBY`. If the pool size is $S$, the system can withstand an instantaneous burst of at most $S$ concurrent arrivals before exhausting its pre-warmed capacity. If an arrival occurs when the pool is empty ($S = 0$), the request incurs the full cold-boot penalty:
 
