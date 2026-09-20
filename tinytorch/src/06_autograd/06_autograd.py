@@ -13,21 +13,21 @@
 # ---
 
 # %% [markdown]
-"""
+r"""
 # Module 06: Autograd - The Gradient Engine
 
 Welcome to Module 06! Today you'll awaken the gradient engine and unlock automatic differentiation.
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Tensor operations, activations, layers, losses, and DataLoader
-**You'll Build**: The autograd system that computes gradients automatically
-**You'll Enable**: Learning! Training! The ability to optimize neural networks!
+- **You've Built**: Tensor operations, activations, layers, losses, and DataLoader
+- **You'll Build**: The autograd system that computes gradients automatically via reverse-mode AD
+- **You'll Enable**: Learning! Training! The ability to optimize neural networks!
 
-**Connection Map**:
-```
-Modules 01-05 → Autograd → Optimizers → Training
-(forward pass)  (Module 06)  (Module 07)  (Module 08)
-```
+<div align="center">
+  <img src="autograd_blueprint.svg" width="360" alt="Framework Blueprint">
+</div>
+
+$$\underbrace{\text{Modules 01--05}}_{\text{Forward Computation Tape}} \longrightarrow \mathbf{\underbrace{\text{Autograd}}_{\text{Mod 06 (Active)}}} \longrightarrow \underbrace{\text{Optimizers}}_{\text{Mod 07}} \longrightarrow \underbrace{\text{Training}}_{\text{Mod 08}}$$
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
@@ -37,7 +37,7 @@ By the end of this module, you will:
 4. **Complete the Function classes** from Module 01 with their backward() rules
 5. **Test gradient correctness** with mathematical validation
 
-**CRITICAL**: This module enhances the existing Tensor class - no new wrapper classes needed!
+> **Important:** This module enhances the existing `Tensor` class — no new wrapper classes needed!
 
 ## 📦 Where This Code Lives in the Final Package
 
@@ -52,18 +52,18 @@ from tinytorch.core.autograd import method_of, no_grad
 **Why this matters:**
 - **Learning:** Complete autograd system enabling automatic differentiation
 - **Production:** PyTorch-style computational graph and backward pass
-- **Consistency:** All gradient operations in core.autograd
+- **Consistency:** All gradient operations in `core.autograd`
 - **Integration:** Enhances existing Tensor without breaking anything
 
 Let's get started!
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📋 Module Dependencies
 
 **Prerequisites**: Modules 01, 02, and 04 must be complete
-- Module 01: Tensor and the operation classes (their forward halves)
+- Module 01: `Tensor` and the operation classes (their forward halves)
 - Module 02: the activation operations
 - Module 04: the loss operations
 
@@ -78,12 +78,11 @@ of any particular layer.
 **TinyTorch Dependencies**:
 - `tinytorch.core.tensor.Tensor` - Core tensor operations
 
-**Dependency Flow**:
-```
-Module 01 (Tensor) → Module 06 (Autograd) → Module 07 (Optimizers)
-        ↓                     ↓                      ↓
-   data structure      gradient engine        parameter updates
-```
+$$\begin{array}{ccccc}
+\mathbf{\text{Module 01: Tensor}} & \longrightarrow & \mathbf{\text{Module 06: Autograd}} & \longrightarrow & \mathbf{\text{Module 07: Optimizers}} \\
+\downarrow & & \downarrow & & \downarrow \\
+\textit{Core data structure} & & \textit{Dynamic tape \& backward AD} & & \textit{Gradient parameter updates}
+\end{array}$$
 
 This module completes the operation classes built in Modules 01, 02, and 04
 with their `backward()` halves and gives the Tensor class its `backward()` method. Everything downstream that trains -- optimizers,
@@ -113,160 +112,120 @@ from tinytorch.core.losses import LogSoftmax, MSEFunction, BinaryCrossEntropyFun
 EPSILON = 1e-7  # Small perturbation for numerical gradient computation
 
 # %% [markdown]
-"""
+r"""
 ## 💡 Introduction: What is Automatic Differentiation?
 
-Automatic differentiation (autograd) is the magic that makes neural networks learn. Instead of manually computing gradients for every parameter, autograd tracks operations and automatically computes gradients via the chain rule.
+Automatic differentiation (autograd) is the computational engine that makes neural networks learn. Instead of manually computing analytical gradients for every parameter, autograd tracks operations during the forward pass and automatically evaluates gradients via reverse-mode accumulation.
 
 ### The Challenge
-In previous modules, you implemented layers and loss functions. To train a model, you need:
-```
-Loss = f(W₃, f(W₂, f(W₁, x)))
-∂Loss/∂W₁ = ?  ∂Loss/∂W₂ = ?  ∂Loss/∂W₃ = ?
-```
 
-Manual gradient computation becomes impossible for complex models with millions of parameters.
+In previous modules, you implemented layers and loss functions. To optimize deep architectures, we evaluate:
+
+$$\mathcal{L} = f_3\big(\mathbf{W}_3, f_2(\mathbf{W}_2, f_1(\mathbf{W}_1, \mathbf{x}))\big)$$
+
+$$\frac{\partial \mathcal{L}}{\partial \mathbf{W}_1} = ?, \quad \frac{\partial \mathcal{L}}{\partial \mathbf{W}_2} = ?, \quad \frac{\partial \mathcal{L}}{\partial \mathbf{W}_3} = ?$$
+
+Manual gradient calculation becomes impossible for multi-layer models with millions of parameters.
 
 ### The Solution: Computational Graphs
-```
-Forward Pass:  x → Linear₁ → ReLU → Linear₂ → Loss
-Backward Pass: ∇x ← ∇Linear₁ ← ∇ReLU ← ∇Linear₂ ← ∇Loss
-```
 
-**Complete Autograd Process Visualization:**
-```
-┌─ FORWARD PASS ─────────────────────────────────────────────────┐
-│                                                                │
-│ x ──┬── W₁ ──┐                                                 │
-│     │        ├──[Linear₁]──→ z₁ ──[ReLU]──→ a₁ ──┬── W₂ ──┐    │
-│     └── b₁ ──┘                               │        ├─→ Loss │
-│                                              └── b₂ ──┘        │
-│                                                                │
-└─ COMPUTATION GRAPH BUILT ──────────────────────────────────────┘
-                             │
-                             ▼
-┌─ BACKWARD PASS ─────────────────────────────────────────────┐
-│                                                             │
-│∇x ←┬← ∇W₁ ←┐                                                │
-│    │       ├←[Linear₁]←─ ∇z₁ ←[ReLU]← ∇a₁ ←┬← ∇W₂ ←┐        │
-│    └← ∇b₁ ←┘                             │       ├← ∇Loss   │
-│                                          └← ∇b₂ ←┘          │
-│                                                             │
-└─ GRADIENTS COMPUTED ────────────────────────────────────────┘
+$$\begin{aligned}
+\text{Forward Pass:} \quad & \mathbf{x} \longrightarrow \text{Linear}_1 \longrightarrow \text{ReLU} \longrightarrow \text{Linear}_2 \longrightarrow \mathcal{L} \\
+\text{Backward Pass:} \quad & \nabla_{\mathbf{x}} \longleftarrow \nabla_{\text{Linear}_1} \longleftarrow \nabla_{\text{ReLU}} \longleftarrow \nabla_{\text{Linear}_2} \longleftarrow \nabla_{\mathcal{L}}
+\end{aligned}$$
 
-Key Insight: Each [operation] stores how to compute its backward pass.
-The chain rule automatically flows gradients through the entire graph.
-```
+<div align="center">
+  <img src="autograd_forward_backward.svg" width="680" alt="Autograd Forward and Backward Sweep">
+</div>
+
+| Phase | Primary Function | State Stored | Gradient Action |
+| :--- | :--- | :--- | :--- |
+| **Forward Pass** | Evaluates outputs $\mathbf{y} = f(\mathbf{x})$ | Inputs / activations required for backward | Records operation tape & builds pointer DAG |
+| **Backward Pass** | Applies chain rule $\nabla_{\mathbf{x}} = \nabla_{\mathbf{y}} J_f$ | Reads saved forward tensors | Accumulates $\nabla \mathbf{x} \mathrel{+}= \text{VJP}$ in reverse topological order |
 
 Each operation records how to compute its backward pass. The chain rule connects them all.
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📐 Foundations: The Chain Rule in Action
 
 ### Mathematical Foundation
-For composite functions: f(g(x)), the derivative is:
-```
-df/dx = (df/dg) × (dg/dx)
-```
+
+For composite functions $f\big(g(x)\big)$, the chain rule states:
+
+$$\frac{df}{dx} = \frac{df}{dg} \cdot \frac{dg}{dx}$$
 
 ### Computational Graph Example
-```
-Simple computation: L = (x * y + 5)²
 
-Forward Pass:
-  x=2 ──┐
-        ├──[×]──→ z=6 ──[+5]──→ w=11 ──[²]──→ L=121
-  y=3 ──┘
+<div align="center">
+  <img src="autograd_pointer_dag.svg" width="680" alt="Autograd Dynamic Tape Pointer Graph">
+</div>
 
-Backward Pass (Chain Rule in Action):
-  ∂L/∂x = ∂L/∂w × ∂w/∂z × ∂z/∂x
-        = 2w  ×  1  ×  y
-        = 2(11) × 1 × 3 = 66
+Consider the composite scalar function $\mathcal{L} = (x \cdot y + 5)^2$ evaluated at $x = 2, \, y = 3$:
 
-  ∂L/∂y = ∂L/∂w × ∂w/∂z × ∂z/∂y
-        = 2w  ×  1  ×  x
-        = 2(11) × 1 × 2 = 44
-
-Gradient Flow Visualization:
-  ∇x=66 ←──┐
-           ├──[×]←── ∇z=22 ←──[+]←── ∇w=22 ←──[²]←── ∇L=1
-  ∇y=44 ←──┘
-```
+$$\begin{aligned}
+\mathbf{\text{Forward Pass:}} \quad & z = x \cdot y = 2 \cdot 3 = 6 \\
+& w = z + 5 = 6 + 5 = 11 \\
+& \mathcal{L} = w^2 = 11^2 = 121 \\[0.5em]
+\mathbf{\text{Backward Pass:}} \quad & \frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1.0 \\
+& \frac{\partial \mathcal{L}}{\partial w} = 2w = 2(11) = 22 \\
+& \frac{\partial \mathcal{L}}{\partial z} = \frac{\partial \mathcal{L}}{\partial w} \frac{\partial w}{\partial z} = 22 \cdot 1 = 22 \\
+& \frac{\partial \mathcal{L}}{\partial x} = \frac{\partial \mathcal{L}}{\partial z} \frac{\partial z}{\partial x} = 22 \cdot y = 22 \cdot 3 = 66 \\
+& \frac{\partial \mathcal{L}}{\partial y} = \frac{\partial \mathcal{L}}{\partial z} \frac{\partial z}{\partial y} = 22 \cdot x = 22 \cdot 2 = 44
+\end{aligned}$$
 
 ### Memory Layout During Backpropagation
-```
-Computation Graph Memory Structure:
-┌─────────────────────────────────────────────────────────┐
-│ Forward Pass (stored for backward)                      │
-├─────────────────────────────────────────────────────────┤
-│ Node 1: x=2 (leaf, requires_grad=True) │ grad: None→66  │
-│ Node 2: y=3 (leaf, requires_grad=True) │ grad: None→44  │
-│ Node 3: z=x*y (Mul)                    │ grad: None→22  │
-│         saved: (x=2, y=3)              │ inputs: [x,y]  │
-│ Node 4: w=z+5 (Add)                    │ grad: None→22  │
-│         saved: (z=6, 5)                │ inputs: [z]    │
-│ Node 5: L=w*w (Mul)                    │ grad: 1        │
-│         saved: (w=11, w=11)            │ inputs: [w]    │
-└─────────────────────────────────────────────────────────┘
 
-Memory Cost: 2× parameters (data + gradients) + graph overhead
-```
+| Node ID | Expression | Op | Saved Data | Inputs | Gradient Accumulation |
+| :---: | :--- | :---: | :--- | :---: | :--- |
+| `0x10` | $x = 2$ | Leaf | None | None | $\nabla_x = 66$ |
+| `0x20` | $y = 3$ | Leaf | None | None | $\nabla_y = 44$ |
+| `0x30` | $z = x \cdot y$ | `Mul` | $x=2, y=3$ | $[x, y]$ | $\nabla_z = 22$ |
+| `0x40` | $w = z + 5$ | `Add` | None | $[z]$ | $\nabla_w = 22$ |
+| `0x50` | $\mathcal{L} = w^2$ | `Mul` | $w=11$ | $[w]$ | $\nabla_{\mathcal{L}} = 1.0$ (seed) |
+
+$$\text{Memory Overhead} \approx 2 \times \text{parameters (values} + \text{gradients)} + \mathcal{O}(\text{DAG nodes})$$
 """
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Implementation: Building the Autograd Engine
 
 Let's implement the autograd system step by step. We'll enhance the existing Tensor class and create supporting infrastructure.
 
 ### The Function Architecture
 
-Every differentiable operation needs two things:
-1. **Forward pass**: Compute the result
-2. **Backward pass**: Compute gradients for inputs
+Every differentiable operation requires a dual execution contract:
+1. **Forward pass**: Compute the output tensor and stash required inputs/outputs on the node
+2. **Backward pass**: Receive the upstream gradient and compute vector-Jacobian products for inputs
 
-```
-Function Class Design:
-┌─────────────────────────────────────┐
-│ Function (Base Class)               │
-├─────────────────────────────────────┤
-│ • inputs           ← Store data     │
-│ • forward()        ← Module 01      │
-│ • backward()       ← Module 06      │
-└─────────────────────────────────────┘
-          ↑
-    ┌─────┴─────┬─────────┬──────────┐
-    │           │         │          │
-┌───▼────┐ ┌────▼───┐ ┌───▼────┐ ┌───▼────┐
-│  Add   │ │  Mul   │ │ MatMul │ │  Sum   │
-│forward │ │forward │ │forward │ │forward │
-└────────┘ └────────┘ └────────┘ └────────┘
-```
+| Component | Scope | Role | Implementation |
+| :--- | :--- | :--- | :--- |
+| **`Function` (Base)** | Framework Core | Saves input context & anchors computation graph node | `tinytorch.core.tensor` |
+| **`Add`, `Mul`, `MatMul`** | Arithmetic Ops | Pairwise forward tensor arithmetic & dual VJP | Implemented below |
+| **`Sum`, `Mean`** | Reductions | Axis projection forward & broadcast VJP | Implemented below |
+| **`Reshape`, `Permute`** | Stride & View Ops | Zero-copy forward shape changes & inverse VJP | Implemented below |
 
-Each operation inherits from Function and implements specific gradient rules.
+Each operation inherits from `Function` and implements specific vector-Jacobian product rules.
 """
 
 # %% [markdown]
-"""
+r"""
 ### Function Base Class: The Foundation of Autograd
 
-The Function class is the foundation that makes autograd possible. Every differentiable operation (addition, multiplication, etc.) inherits from this class.
+The `Function` class is the foundation that makes autograd possible. Every differentiable operation inherits from this class.
 
 **Why Functions Matter:**
-- They remember inputs needed for backward pass
-- They implement gradient computation via backward()
-- They connect to form computation graphs
-- They enable the chain rule to flow gradients
+- **Context Storage**: Remember inputs and intermediate activations needed for the backward pass
+- **Gradient VJPs**: Implement reverse-mode automatic differentiation via `backward()`
+- **Graph Topology**: Connect producing nodes to form directed acyclic computation graphs
+- **Chain Rule Dispatch**: Enable reverse gradient propagation across arbitrarily deep networks
 
-**The Pattern:**
-```
-Forward:  inputs → Function.forward() → output
-Backward: grad_output → Function.backward() → grad_inputs
-```
-
-This pattern enables the chain rule to flow gradients through complex computations.
+$$\begin{aligned}
+\text{Forward Pass:} \quad & \mathbf{y} = f(\mathbf{x}_1, \dots, \mathbf{x}_k) \quad \implies \quad \text{cache } \{\mathbf{x}_1, \dots, \mathbf{x}_k\} \text{ on node} \\
+\text{Backward Pass:} \quad & \frac{\partial \mathcal{L}}{\partial \mathbf{x}_i} = \frac{\partial \mathcal{L}}{\partial \mathbf{y}} \cdot \frac{\partial \mathbf{y}}{\partial \mathbf{x}_i} \quad \implies \quad \text{return tuple } (\nabla_{\mathbf{x}_1} \mathcal{L}, \dots, \nabla_{\mathbf{x}_k} \mathcal{L})
+\end{aligned}$$
 
 The `Function` class itself was built in Module 01 (`tinytorch.core.tensor`), where every operation received its `forward()`. This module fills in the `backward()` of those same classes. The `method_of` helper below attaches each one to its class, so the exported file reads as a list of completions with the class named on the line above each.
 """
@@ -300,129 +259,52 @@ def method_of(cls):
     return attach
 
 # %% [markdown]
-"""
+r"""
 ### Operation Functions: Implementing Gradient Rules
 
-Now we'll implement specific operations that compute gradients correctly. Each operation has mathematical rules for how gradients flow backward.
+Now we will implement specific operations that compute vector-Jacobian products (VJPs) correctly. Each primitive operation applies local derivative rules to push gradients backward through the graph:
 
-**Gradient Flow Visualization:**
-```
-Addition (z = a + b):
-    ∂z/∂a = 1    ∂z/∂b = 1
+| Primitive Operation | Forward Mapping | Stashed Tensors | Upstream Gradient | Input Gradient VJP Rule |
+| :--- | :--- | :--- | :--- | :--- |
+| **Addition (`Add`)** | $z = a + b$ | None | $\bar{z} \in \mathbb{R}^{M \times N}$ | $\bar{a} = \bar{z}, \quad \bar{b} = \bar{z}$ |
+| **Multiplication (`Mul`)** | $z = a \odot b$ | $a, b$ | $\bar{z} \in \mathbb{R}^{M \times N}$ | $\bar{a} = \bar{z} \odot b, \quad \bar{b} = \bar{z} \odot a$ |
+| **Matrix Multiply (`MatMul`)** | $Z = A B$ | $A, B$ | $\bar{Z} \in \mathbb{R}^{M \times P}$ | $\bar{A} = \bar{Z} B^T, \quad \bar{B} = A^T \bar{Z}$ |
 
-    a ──┐           grad_a ←──┐
-        ├─[+]─→ z          ├─[+]←── grad_z
-    b ──┘           grad_b ←──┘
-
-Multiplication (z = a * b):
-    ∂z/∂a = b    ∂z/∂b = a
-
-    a ──┐           grad_a = grad_z * b
-        ├─[×]─→ z
-    b ──┘           grad_b = grad_z * a
-
-Matrix Multiplication (Z = A @ B):
-    ∂Z/∂A = grad_Z @ B.T
-    ∂Z/∂B = A.T @ grad_Z
-
-    A ──┐           grad_A = grad_Z @ B.T
-        ├─[@]─→ Z
-    B ──┘           grad_B = A.T @ grad_Z
-```
-
-Each operation stores the inputs it needs for computing gradients.
+Each operation preserves the tensors needed to compute its local Jacobian during the backward pass.
 """
 
 # %% [markdown]
-"""
+r"""
 ### Understanding Broadcasting in Gradients
 
-Before implementing gradient operations, we need to understand a critical challenge:
+Before implementing gradient operations, we need to address a fundamental architectural challenge:
 **Broadcasting in Forward Pass vs. Gradient Reduction in Backward Pass**
 
-#### The Broadcasting Problem
+#### The Broadcasting Duality
 
-NumPy automatically broadcasts tensors of different shapes during forward operations:
+When NumPy broadcasts tensors of different shapes during forward operations, a small tensor is virtually replicated along new or singleton dimensions without copying memory. In reverse-mode autograd, the chain rule dictates that the gradient w.r.t. that broadcasted tensor must be **summed** across every replicated dimension:
 
-```
-Forward Pass (Broadcasting):
-┌─────────────────────────────────────────────────────────────┐
-│ Example: Adding bias to batched data                        │
-│                                                             │
-│ x:    (32, 128)  ← Batch of 32 samples, 128 features        │
-│ bias: (128,)     ← Just 128 features (no batch dimension)   │
-│                                                             │
-│ Forward: y = x + bias                                       │
-│          NumPy broadcasts bias from (128,) to (32, 128)     │
-│          Result shape: (32, 128)                            │
-└─────────────────────────────────────────────────────────────┘
+- **Forward Pass**: $x \in \mathbb{R}^{32 \times 128}$ and bias $b \in \mathbb{R}^{128}$ evaluate to $y_{ij} = x_{ij} + b_j$. NumPy applies virtual stride-0 expansion with zero memory duplication.
+- **Backward Pass**: Upstream gradient $\bar{y} \in \mathbb{R}^{32 \times 128}$ branches to $\bar{x} = \bar{y}$, while bias gradient reduces via $\bar{b}_j = \sum_{i=0}^{31} \bar{y}_{ij}$ to restore the original shape $(128,)$.
 
-Backward Pass (Gradient Reduction):
-┌─────────────────────────────────────────────────────────────┐
-│ grad_output: (32, 128)  ← Gradient from upstream            │
-│                                                             │
-│ grad_x:    (32, 128)    ← Same shape as x ✓                 │
-│ grad_bias: (128,)       ← Must match bias shape!            │
-│                                                             │
-│ Problem: grad_output is (32, 128) but bias is (128,)        │
-│ Solution: Sum gradients over batch dimension                │
-│           grad_bias = grad_output.sum(axis=0)               │
-│           Result: (128,) ✓                                  │
-└─────────────────────────────────────────────────────────────┘
-```
+#### Why Gradient Reduction is Necessary: Multivariable Chain Rule
 
-#### Why Gradient Reduction is Necessary
+When bias $b$ broadcasts to multiple samples, each entry $b_j$ contributes to every sample's prediction $y_{ij}$. By the multivariable chain rule, the total derivative of the scalar loss $\mathcal{L}$ with respect to $b_j$ is the sum of contributions across all samples:
 
-**Mathematical Intuition:**
-When bias broadcasts to multiple samples, it contributes to each sample's loss.
-The total gradient w.r.t. bias is the SUM of gradients from all samples.
+$$\frac{\partial \mathcal{L}}{\partial b_j} = \sum_{i=0}^{B-1} \frac{\partial \mathcal{L}}{\partial y_{ij}} \frac{\partial y_{ij}}{\partial b_j} = \sum_{i=0}^{B-1} \frac{\partial \mathcal{L}}{\partial y_{ij}} \cdot 1 = \sum_{i=0}^{B-1} \bar{y}_{ij}$$
 
-**Concrete Example:**
-```
-x = [[1, 2],      bias = [0.1, 0.2]
-     [3, 4]]
+$$\begin{bmatrix} y_{0,0} & y_{0,1} \\ y_{1,0} & y_{1,1} \end{bmatrix} = \begin{bmatrix} x_{0,0} & x_{0,1} \\ x_{1,0} & x_{1,1} \end{bmatrix} + \begin{bmatrix} b_0 & b_1 \end{bmatrix} \quad \implies \quad \nabla_b \mathcal{L} = \begin{bmatrix} \bar{y}_{0,0} + \bar{y}_{1,0} & \bar{y}_{0,1} + \bar{y}_{1,1} \end{bmatrix}$$
 
-Forward:
-  y[0] = [1, 2] + [0.1, 0.2] = [1.1, 2.2]  ← bias[0]=0.1 affects sample 0
-  y[1] = [3, 4] + [0.1, 0.2] = [3.1, 4.2]  ← bias[0]=0.1 affects sample 1
+#### Generalized Shape Reduction Algorithm
 
-Backward:
-  grad_output = [[1, 1],   ← ∂Loss/∂y[0]
-                 [1, 1]]   ← ∂Loss/∂y[1]
-  
-  grad_bias[0] = ∂Loss/∂bias[0] 
-               = ∂Loss/∂y[0,0] + ∂Loss/∂y[1,0]  ← Chain rule: sum contributions
-               = 1 + 1 = 2
-  
-  grad_bias = [2, 2]  ← Sum over batch dimension
-```
+Any arbitrary broadcasting pattern decomposes into two structural operations:
 
-#### Broadcasting Scenarios to Handle
+| Dimension Pattern | Trigger Condition | Backward Shape Reduction Action |
+| :--- | :--- | :--- |
+| **Leading Axes** | `grad.ndim > len(orig_shape)` | Sum axis 0 until rank matches: `grad.sum(axis=0)` |
+| **Singleton Axes** | `orig_shape[i] == 1 and grad.shape[i] > 1` | Sum singleton dimension with kept rank: `grad.sum(axis=i, keepdims=True)` |
 
-```
-Scenario 1: Batch Dimension Broadcasting
-  x:    (32, 128)  +  bias: (128,)    →  y: (32, 128)
-  grad: (32, 128)  →  grad_bias = sum(grad, axis=0) → (128,)
-
-Scenario 2: Multiple Dimension Broadcasting  
-  x:    (32, 10, 5)  +  y: (10, 1)    →  z: (32, 10, 5)
-  grad: (32, 10, 5)  →  
-    1. Sum over extra dim: sum(grad, axis=0) → (10, 5)
-    2. Sum over singleton: sum(grad, axis=2, keepdims=True) → (10, 1)
-
-Scenario 3: Scalar Broadcasting
-  x:    (32, 128)  +  scalar: ()      →  y: (32, 128)
-  grad: (32, 128)  →  grad_scalar = sum(grad) → scalar
-```
-
-#### The General Algorithm
-
-To reduce gradient back to original input shape:
-1. **Remove extra dimensions**: Sum over leading dimensions that weren't in input
-2. **Collapse singleton dimensions**: Sum over dimensions where input had size 1
-3. **Preserve shape**: Use keepdims=True when collapsing to maintain dimensionality
-
-This ensures gradients flow correctly regardless of broadcasting patterns!
+This guarantees that every backward pass restores exact gradient shapes matching their input tensors, regardless of broadcasting depth.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "broadcast-grad-helper", "solution": true}
@@ -1156,28 +1038,22 @@ def backward(self, grad_output):
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### Slice.backward: Gradient Rules for Indexing
 
-Slicing keeps some values and drops the rest. Gradients follow the same split:
-the kept positions receive their gradient, and everything else receives zero.
+Slicing selects a subset of coordinates and leaves the rest untouched. The chain rule mirrors this partition: positions selected by the slice receive the upstream gradient $\bar{Z}$, while unselected positions contributed nothing to the output and receive zero.
 
-**Mathematical Principle:**
-```
-If Z = A[key], then grad_A = zeros_like(A); grad_A[key] = grad_Z
-```
+$$\begin{aligned}
+\text{Forward Slice:} \quad & Z = A[\text{key}] \\
+\text{Backward VJP:} \quad & \bar{A} = \mathbf{0}_{\text{shape}(A)}, \quad \bar{A}[\text{key}] \mathrel{+}= \bar{Z}
+\end{aligned}$$
 
-**Why a zeros scaffold:**
-```
-Forward:  A=[1,2,3,4,5] → A[1:3] → Z=[2,3]
-Backward: grad_Z=[g0,g1] → grad_A=[0,g0,g1,0,0]
-                            ↑ positions that were never read contributed
-                              nothing to the output, so their gradient is 0
-```
+| Element Position | Forward Role | Backward Derivative $\frac{\partial Z}{\partial A_i}$ | Gradient Received $\bar{A}_i$ |
+| :--- | :--- | :--- | :--- |
+| **Indexed ($i \in \text{key}$)** | Copied into output slice $Z$ | $1$ | $\bar{Z}_{\text{subscript}}$ (accumulated via `np.add.at`) |
+| **Unindexed ($i \notin \text{key}$)** | Dropped from output | $0$ | $0$ (remains unperturbed in zeros scaffold) |
 
-This is the first backward that has to build a tensor the shape of its INPUT
-rather than reshaping its output. Embedding lookup in Module 11 is the same
-pattern at scale.
+This is the first backward implementation that constructs a tensor matching the shape of its **input** rather than reshaping its output. Embedding lookup in Module 11 uses this identical scatter-add pattern at scale.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "slice-backward", "solution": true}
@@ -1261,27 +1137,22 @@ def backward(self, grad_output):
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### Reshape.backward: Gradient Rules for Changing Shape
 
-Reshape reinterprets the same values under a new shape. Nothing is added,
-dropped, or combined, so the gradient just needs its original shape back.
+Reshape reinterprets the same contiguous array buffer under a new stride and dimension tuple. Because elements are neither duplicated, scaled, nor discarded, the vector-Jacobian product is simply a reshape of the upstream gradient back to the input's original geometry.
 
-**Mathematical Principle:**
-```
-If Z = A.reshape(new_shape), then grad_A = grad_Z.reshape(A.shape)
-```
+$$\begin{aligned}
+\text{Forward View:} \quad & Z = \text{reshape}(A, \text{shape}_{\text{new}}) \\
+\text{Backward View:} \quad & \bar{A} = \text{reshape}(\bar{Z}, \text{shape}(A))
+\end{aligned}$$
 
-**Why the input shape must be saved:**
-```
-Forward:  A(2,6) → reshape(3,4) → Z(3,4)
-Backward: grad_Z(3,4) → reshape(?, ?) → grad_A must be (2,6)
-                                ↑ the only way to know is to have stored A.shape
-```
+| Direction | Tensor | Shape Transformation | Memory Layout |
+| :--- | :--- | :--- | :--- |
+| **Forward** | $A \to Z$ | $(d_0, d_1, \dots) \to (s_0, s_1, \dots)$ | Stride reinterpretation of identical flat buffer |
+| **Backward** | $\bar{Z} \to \bar{A}$ | $(s_0, s_1, \dots) \to (d_0, d_1, \dots)$ | Restores stashed input shape from `self.inputs[0].shape` |
 
-Every backward in this group saves something from the forward pass. Reshape
-saves a shape, slice saves a key, permute saves an axis order. That is the
-general rule: the backward pass needs whatever the forward pass consumed.
+Every operation in this structural group stashes what the forward pass consumed: `Reshape` saves input shape, `Slice` saves index keys, and `Permute` saves original axis order.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "reshape-backward", "solution": true}
@@ -1346,27 +1217,20 @@ def backward(self, grad_output):
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### Sum.backward: Gradient Rules for Reduction Operations
 
-Sum operations reduce tensor dimensions, so gradients must be broadcast back.
+Sum operations reduce tensor rank and element count by aggregating across one or all axes. Because addition has a unit local derivative ($\frac{\partial}{\partial a_i} \sum_k a_k = 1$), the upstream gradient is broadcast back to every contributing input coordinate.
 
-**Mathematical Principle:**
-```
-If z = sum(a), then ∂z/∂a[i] = 1 for all i
-Gradient is broadcasted from scalar result back to input shape.
-```
+$$\begin{aligned}
+\text{Full Sum Reduction:} \quad & z = \sum_{i} a_i \implies \frac{\partial z}{\partial a_i} = 1 \implies \bar{a} = \bar{z} \cdot \mathbf{1}_{\text{shape}(a)} \\
+\text{Axis Reduction:} \quad & z_j = \sum_{i} A_{ij} \implies \frac{\partial z_j}{\partial A_{ij}} = 1 \implies \bar{A} = \text{broadcast}(\bar{z}, \text{shape}(A))
+\end{aligned}$$
 
-**Gradient Broadcasting Examples:**
-```
-Case 1: Full sum
-  Forward:  a=[1,2,3] → sum() → z=6 (scalar)
-  Backward: grad_z=1 → broadcast → grad_a=[1,1,1]
-
-Case 2: Axis sum
-  Forward:  a=[[1,2],[3,4]] → sum(axis=0) → z=[4,6]
-  Backward: grad_z=[1,1] → broadcast → grad_a=[[1,1],[1,1]]
-```
+| Sum Variation | Forward Operation | Upstream Gradient $\bar{z}$ | Backward VJP $\bar{a}$ |
+| :--- | :--- | :--- | :--- |
+| **Full Scalar Sum** | $z = \sum a \in \mathbb{R}$ | Scalar $\bar{z} \in \mathbb{R}$ | `np.ones_like(a) * grad_output` |
+| **Axis-Specific Sum** | $Z = \sum_{k} A \in \mathbb{R}^{\dots}$ | Tensor $\bar{Z}$ | Broadcast $\bar{Z}$ along reduced axes to `A.shape` |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "sum-backward", "solution": true}
@@ -2098,32 +1962,19 @@ def backward(self, grad_output):
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### GELUFunction.backward: Gradient Rules for the Transformer Activation
 
-GELU is the activation inside every transformer MLP you will build in Module 13.
-Unlike ReLU it is smooth everywhere, so its gradient is defined at every point,
-including zero.
+GELU is the canonical activation inside modern transformer feed-forward blocks (built in Module 13). Unlike ReLU, GELU is smooth everywhere with continuous, non-zero derivatives across negative values.
 
-**Mathematical Principle (the sigmoid form Module 02 built):**
-```
-z = a·s            where s = σ(1.702·a) and σ is Module 02's sigmoid
+**Mathematical Formulation (Sigmoid Approximation):**
+$$\begin{aligned}
+z &= a \cdot s, \quad \text{where } s = \sigma(1.702 a) \\
+\frac{\partial z}{\partial a} &= \underbrace{s}_{\text{pass-through value}} + \underbrace{a \cdot 1.702 \cdot s(1 - s)}_{\text{gate movement rate}}
+\end{aligned}$$
 
-∂z/∂a = s + a·1.702·s·(1 - s)
-        └┘   └── how the gate itself moves with a ──┘
-        how much passes
-```
-
-**Why two terms and not one:**
-```
-ReLU's gate is a step: it is either open or shut, so only the first term exists.
-GELU's gate is smooth, so changing a changes BOTH what passes through and how far
-open the gate is. Both effects carry gradient.
-```
-
-**The systems consequence**: GELU costs an exponential and several multiplies per
-element where ReLU costs one comparison. Module 17 will fuse the whole expression
-into a single pass over memory for exactly that reason.
+- **ReLU**: Evaluates $z = \max(0, a)$ with backward derivative $\bar{a} = \bar{z} \cdot \mathbb{I}(a > 0)$. Fast branchless comparison executed in a single memory streaming pass.
+- **GELU**: Evaluates $z = a \cdot \sigma(1.702 a)$ with backward derivative $\bar{a} = \bar{z} [s + 1.702 a s(1 - s)]$. Higher arithmetic intensity requiring 1 exponential, 4 multiplications, and 1 addition per element; prime candidate for Triton kernel fusion in Module 17.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "gelu-backward", "solution": true}
@@ -2519,20 +2370,14 @@ if __name__ == "__main__":
 
 
 # %% [markdown]
-"""
+r"""
 ### One-Hot Encoding
 
-Converts class indices to one-hot vectors. This is needed by the cross-entropy
-gradient formula: `grad = softmax - one_hot`.
+Converts integer ground-truth target indices into one-hot binary indicator vectors. This transformation is required to compute the vector-Jacobian product for categorical cross-entropy loss:
 
-```
-Indices: [0, 2, 1]  with 3 classes
+$$\nabla_{\mathbf{z}} \mathcal{L}_{\text{CE}} = \frac{1}{B} (\mathbf{p} - \mathbf{y}_{\text{one\_hot}})$$
 
-One-hot:
-  [[1, 0, 0],    ← class 0
-   [0, 0, 1],    ← class 2
-   [0, 1, 0]]    ← class 1
-```
+$$\mathbf{t} = \begin{bmatrix} 0 \\ 2 \\ 1 \end{bmatrix} \quad \xrightarrow{\text{one-hot}} \quad Y = \begin{bmatrix} 1 & 0 & 0 \\ 0 & 0 & 1 \\ 0 & 1 & 0 \end{bmatrix} \begin{matrix} \leftarrow \text{sample 0 (label 0)} \\ \leftarrow \text{sample 1 (label 2)} \\ \leftarrow \text{sample 2 (label 1)} \end{matrix}$$
 """
 
 # %% nbgrader={"grade": false, "grade_id": "one-hot-helper", "solution": true}
@@ -2791,7 +2636,7 @@ class no_grad:
 
 
 # %% [markdown]
-"""
+r"""
 ### Walking the Graph in the Right Order
 
 We have every gradient rule. What remains is the traversal: given the output,
@@ -2799,10 +2644,9 @@ visit the graph and hand each tensor its gradient. The obvious approach is
 recursion -- compute a tensor's gradient, then immediately recurse into its
 parents. That works, right up until a tensor is used twice.
 
-```
-        x ──► y ──┬──► loss = y * y
-                  └──►
-```
+<div align="center">
+  <img src="gradient_fanin_accumulation.svg" alt="Gradient Fan-in Accumulation" width="680px">
+</div>
 
 Here `y` feeds the multiply twice, so the true gradient at `y` is the SUM of
 what both edges send back. Naive recursion reaches `y` on the first edge and
@@ -2814,17 +2658,19 @@ every reused node, which is exponential on a graph with several of them.
 The fix is a **topological order**: an ordering of the graph in which every
 consumer of a tensor appears before the tensor itself.
 
-```
-   build order (DFS post-order)    reversed = topological order
-   [x, y, loss]                    [loss, y, x]
-                                     │     │   └─ visited last, gradient complete
-                                     │     └───── both edges have contributed
-                                     └─────────── the seed
-```
+<div align="center">
+  <img src="autograd_margin_diamond.svg" alt="Diamond DAG Gradient Accumulation" width="260px">
+</div>
+
+| Traversal Phase | Nodes Ordered | Upstream Inflow ($\nabla_{\text{out}} \mathcal{L}$) | Invariant / Status |
+| :--- | :--- | :--- | :--- |
+| **0. Post-Order DFS** | `[x, y, loss]` | Traverses children before parents | Builds post-order recursion stack |
+| **1. Reversed Order** | `[loss, y, x]` | Seeds traversal with $\nabla_{\text{loss}} \mathcal{L} = 1.0$ | Topological sort: all consumers precede inputs |
+| **2. Branch Fan-In** | Node `y` | $\bar{y}_{\text{branch1}} + \bar{y}_{\text{branch2}}$ | **Accumulation complete**: `y.grad += vjp` before descending |
+| **3. Leaf Resolution** | Node `x` | $\text{VJP}(y \to x)$ | Visited once after all consumers finalize |
 
 Process tensors in that order and each one is visited exactly once, at the
-moment its gradient is complete. Correct, and linear in the size of the graph
-rather than exponential.
+moment its gradient is complete. Correct, and linear in the size of the graph $\mathcal{O}(|V| + |E|)$ rather than exponential.
 
 This is the piece that makes reverse-mode AD practical, and it is why PyTorch,
 JAX, and every other framework sort before they walk. `backward()` below builds
@@ -2837,22 +2683,21 @@ contribution the sort exists to collect.
 """
 
 # %% [markdown]
-"""
+r"""
 ### Completing apply() and Adding backward()
 
 Module 01 left two slots open. `Function.apply()` runs an operation but forgets it, and `Tensor.backward()` raises. The cell below fills both in:
 
-1. **apply() records the graph** - After running forward(), the output remembers the operation that produced it (`_grad_fn`) whenever an input has requires_grad=True
-2. **Adding backward() method** - Implements reverse-mode automatic differentiation
-3. **Maintaining compatibility** - Tensor's operators were already routed through apply() in Module 01, so all existing code continues to work unchanged
+1. **`apply()` records the graph** - After running `forward()`, the output remembers the operation that produced it (`_grad_fn`) whenever an input has `requires_grad=True`
+2. **`backward()` drives traversal** - Implements reverse-mode automatic differentiation over the topologically sorted tape
+3. **Transparent operator dispatch** - Tensor's operators were already routed through `apply()` in Module 01, so all arithmetic syntax (`+`, `*`, `@`) builds autograd tapes automatically
 
-**The Pattern:**
-```
-Module 01: x + y → Add.apply(x, y) → result
-Module 06: x + y → Add.apply(x, y) → result that remembers Add (if requires_grad=True)
-```
+| Milestone | Execution Step | State Transition | Autograd Tape Status |
+| :--- | :--- | :--- | :--- |
+| **Module 01** | `x + y` | `Add.apply(x, y) \to \text{Tensor}` | Stateless arithmetic; no node retained |
+| **Module 06** | `x + y` | `Add.apply(x, y) \to \text{Tensor}(\text{grad\_fn}=\text{AddBackward})` | Graph recorded; backward pass enabled |
 
-This is how PyTorch's `torch.autograd.Function` works - clean, modern, and educational.
+This matches the exact architecture of PyTorch's `torch.autograd.Function`.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "apply-and-backward", "solution": false}
