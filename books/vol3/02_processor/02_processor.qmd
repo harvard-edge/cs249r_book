@@ -405,7 +405,9 @@ A CPU branch predictor chooses between two explicit instruction addresses ($0$ o
 
 On a general-purpose CPU, conditional branches are binary, exhibiting strong temporal and spatial correlation that enables branch prediction accuracies exceeding 95%. On an accelerator evaluating an autoregressive language model, however, the branching factor at every single step is $|\mathcal{V}| \approx 32{,}000$ to $128{,}000$. Speculating just four tokens ahead without resolving intermediate selections would require expanding a combinatorial tree of $|\mathcal{V}|^4 \approx 10^{18}$ parallel execution paths—vastly exceeding the aggregate computational capacity of any physical data center.
 
-Consequently, generation is bound by an absolute *causal serialization barrier*. The identity of token $y_t$ depends on $y_{t-1}$; the identity of $y_{t+1}$ depends on $y_t$; and no mathematical bypass allows the engine to compute the state representations for step $t+1$ without committing to a concrete choice for $y_t$. While techniques such as speculative decoding can leverage a smaller auxiliary model to propose candidate linear sequences, the primary model must still verify those tokens against its own sequential KV representations. For standard autoregressive decode loops, the wall-clock execution time scales strictly linearly with the number of generated tokens $K$.
+Consequently, generation is bound by an absolute *causal serialization barrier*. The identity of token $y_t$ depends on $y_{t-1}$; the identity of $y_{t+1}$ depends on $y_t$; and no mathematical bypass allows the engine to compute the state representations for step $t+1$ without committing to a concrete choice for $y_t$. While techniques such as speculative decoding can leverage a smaller auxiliary model to propose candidate linear sequences, the primary model must still verify those tokens against its own sequential KV representations, as illustrated in @fig-vol3-speculative-decoding. For standard autoregressive decode loops, the wall-clock execution time scales strictly linearly with the number of generated tokens $K$.
+
+![**Speculative Rejection Sampling Pipeline**: Three-phase speculative execution converting idle GPU memory bandwidth into token generation speedup without altering output distributions. (1) Small draft model $M_q$ (1B–3B) sequentially proposes $K=4$ candidate tokens at low latency. (2) Target model $M_p$ (70B) scores all $K$ candidates in parallel via a single batched forward pass, evaluating acceptance test $\alpha_k = \min(1, p_k/q_k)$. (3) KV cache commit and rollback: accepted tokens are committed to physical HBM slots, rejected branches trigger immediate KV slot invalidation, and residual sampling ensures bit-exact mathematical distribution equivalence, achieving an effective $2.14\times$ speedup.](images/svg/speculative_decoding_pipeline.svg){#fig-vol3-speculative-decoding width="95%"}
 
 ### Sampling on the Vocabulary Simplex
 
@@ -780,7 +782,9 @@ The masked logits $\mathbf{z}_t' = \mathbf{z}_t + \mathbf{M}(q_t)$ are subsequen
 
 $$p_{t, i} = \frac{\exp(z_{t, i}')}{\sum_{j \in \mathcal{V}} \exp(z_{t, j}')} = \begin{cases} \frac{\exp(z_{t, i})}{\sum_{k \in \mathcal{V}_{\text{valid}}(q_t)} \exp(z_{t, k})} & \text{if } i \in \mathcal{V}_{\text{valid}}(q_t) \\ 0 & \text{if } i \notin \mathcal{V}_{\text{valid}}(q_t) \end{cases}$$
 
-Because $p_{t, i} = 0$ for every token outside $\mathcal{V}_{\text{valid}}(q_t)$, any sampling algorithm—whether greedy argmax selection, temperature-scaled sampling, or top-$p$ nucleus filtering—is mathematically constrained to select a token that satisfies the grammar. Upon sampling $y_t \sim p_t$, the runtime updates the parser state to $q_{t+1} = \delta^*(q_t, \mathbf{b}^{(y_t)})$, advancing the automaton synchronously with the model's autoregressive decode loop.
+Because $p_{t, i} = 0$ for every token outside $\mathcal{V}_{\text{valid}}(q_t)$, any sampling algorithm—whether greedy argmax selection, temperature-scaled sampling, or top-$p$ nucleus filtering—is mathematically constrained to select a token that satisfies the grammar. Upon sampling $y_t \sim p_t$, the runtime updates the parser state to $q_{t+1} = \delta^*(q_t, \mathbf{b}^{(y_t)})$, advancing the automaton synchronously with the model's autoregressive decode loop (@fig-vol3-grammar-constrained-fsm).
+
+![**Grammar-Constrained Decoding via GPU Logit Masking**: End-to-end compile-time and runtime pipeline for schema-constrained generation. (1) Pydantic tool schemas compile ahead-of-time into regular expressions and deterministic finite automata (DFAs), generating precomputed vocabulary bitmasks. (2) A fused GPU masking kernel applies $-\infty$ biases to invalid vocabulary tokens directly in accelerator memory before the softmax reduction, guaranteeing zero syntactic violations ($P=0$). (3) Systems performance comparison showing a drop in syntax errors from $12.4\%\text{--}28\%$ to $0.00\%$, eliminating error-correction turns and context bloat with sub-millisecond ($<0.8\text{ ms}$) execution overhead.](images/svg/grammar_constrained_decoding_fsm.svg){#fig-vol3-grammar-constrained-fsm width="95%"}
 
 ### Accelerator Bitmask Execution
 
@@ -939,7 +943,7 @@ The hardware *ridge point*, $I^* = \pi / \beta$, defines the operational boundar
 
 $$I^* = \frac{9.89 \times 10^{14}\text{ FLOPs/s}}{3.35 \times 10^{12}\text{ bytes/s}} \approx 295.2\text{ FLOPs/byte}$$
 
-To saturate the accelerator's matrix math units and avoid wasting compute cycles, a numerical kernel must execute at least 295 floating-point operations for every single byte of data fetched across the memory bus, establishing the profound dichotomy between prefill and decode highlighted in @tbl-prefill-decode-roofline.
+To saturate the accelerator's matrix math units and avoid wasting compute cycles, a numerical kernel must execute at least 295 floating-point operations for every single byte of data fetched across the memory bus, establishing the profound dichotomy between prefill and decode highlighted in @tbl-prefill-decode-roofline and @fig-vol3-roofline-prefill-decode.
 
 | Operational Dimension          | Prompt Prefill Phase                                                    | Autoregressive Decode Phase                                             |
 |:-------------------------------|:------------------------------------------------------------------------|:------------------------------------------------------------------------|
@@ -952,6 +956,8 @@ To saturate the accelerator's matrix math units and avoid wasting compute cycles
 | **Latency Scaling Law**        | Sub-linear with $S$ until compute limits                                | Strictly linear with output tokens $K$                                  |
 
 : **Roofline Execution Regimes**: Architectural comparison of the prompt prefill and token decode execution regimes on accelerator hardware. {#tbl-prefill-decode-roofline}
+
+![**Roofline Operational Intensity Across Generation Phases**: Hardware roofline curve on an NVIDIA H100 SXM5 GPU comparing compute-bound context prefill (GEMM, operational intensity $I \approx S \gg I^*$) against memory-bandwidth-bound autoregressive decode (GEMV, $I \approx 1\text{ FLOP/byte} \ll I^*$). In unbatched decode, Tensor Core utilization drops below $0.5\%$ due to memory bus saturation, driving architectural mitigations such as continuous batching, chunked prefill, and speculative decoding.](images/svg/prefill_vs_decode_v2.svg){#fig-vol3-roofline-prefill-decode width="95%"}
 
 During the prompt prefill phase, the accelerator evaluates the transformer's feed-forward and projection layers across all $S$ tokens simultaneously. The input activation tensor is a two-dimensional matrix $\mathbf{X} \in \mathbb{R}^{S \times d}$, which multiplies the static parameter weight tensor $\mathbf{W} \in \mathbb{R}^{d \times d_{\text{out}}}$. This operation executes as a dense General Matrix-Matrix Multiplication (GEMM).
 
