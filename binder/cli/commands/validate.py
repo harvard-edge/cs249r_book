@@ -401,10 +401,8 @@ class ValidateCommand:
                   default=True),
         ],
         "refs": [
-            # python-syntax: passes on dev but never wired to pre-commit historically;
-            # leaving default=False to preserve current coverage exactly. Flip later
-            # if we want it in the curated set.
-            Scope("python-syntax", "_run_python_syntax", default=False),
+            # All Volume IV Python cells are syntax-checked in the curated refs gate.
+            Scope("python-syntax", "_run_python_syntax", default=True),
             # inline-python + self-ref currently fail on dev (corpus debt).
             # Runnable on demand via --scope or --all-scopes.
             Scope("inline-python", "_run_inline_python", default=False),
@@ -1489,12 +1487,10 @@ class ValidateCommand:
                     continue
                 if in_block and block_end_re.match(line):
                     in_block = False
-                    # Skip YAML-style #| directives before compiling
-                    source_lines = [
-                        ln for ln in block_lines
-                        if not ln.strip().startswith("#|")
-                    ]
-                    source = "\n".join(source_lines)
+                    # 2026-09-20: Keep #| directives as Python comments so
+                    # SyntaxError line numbers match the QMD source. This gate
+                    # caught six malformed Volume IV cells during reader review.
+                    source = "\n".join(block_lines)
                     if not source.strip():
                         continue
                     try:
