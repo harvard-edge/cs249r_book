@@ -78,3 +78,26 @@ def test_sanitize_xml_removes_textless_nav_link_only(tmp_path):
     assert counts["empty_nav_links"] == 1
     assert 'id="empty"' not in nav
     assert '<a href="text/ch002.xhtml#chapter">Chapter</a>' in nav
+
+
+def test_sanitize_xml_transfers_quarto_float_alt_before_wrapper_cleanup(tmp_path):
+    text_dir = tmp_path / "EPUB" / "text"
+    text_dir.mkdir(parents=True)
+    chapter = text_dir / "chapter.xhtml"
+    chapter.write_text(
+        '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+        '<div class="quarto-float quarto-figure" alt="Robot diagram">'
+        '<figure><div><img src="robot.svg" alt="" /></div></figure></div>'
+        '<div class="other" alt="Other description">Text</div>'
+        '</body></html>',
+        encoding="utf-8",
+    )
+
+    counts = sanitize_xml_for_epubcheck(tmp_path)
+    output = chapter.read_text(encoding="utf-8")
+
+    assert counts["figure_alt_transferred"] == 1
+    assert '<img src="robot.svg" alt="Robot diagram" />' in output
+    assert '<div class="quarto-float quarto-figure">' in output
+    assert 'aria-label="Other description"' in output
+    assert ' alt="Robot diagram"' not in output.split('<img')[0]

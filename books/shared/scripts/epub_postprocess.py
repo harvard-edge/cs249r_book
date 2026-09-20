@@ -21,6 +21,7 @@ from resolve_cross_references import (
     process_html_file
 )
 from verify_rendered_xrefs import scan_build_dir, _format_report
+from fix_figure_alts import repair_figure_alts
 
 
 # Matches C0 control chars that are illegal in XML 1.0 attribute values.
@@ -126,11 +127,9 @@ _ALT_LEGAL_TAGS = frozenset({'img', 'area', 'input'})
 def _rewrite_alt_on_wrapper(match):
     """Rewrite alt="..." on a non-img element to aria-label="...".
 
-    Quarto emits `fig-alt` onto the enclosing `<div class="quarto-figure">`
-    in addition to the inner `<img>` (the inner `<img>` carries alt=""
-    because the wrapper already has it). Epubcheck rejects `alt` on
-    non-image elements. aria-label is valid on any element and preserves
-    the accessibility data for screen readers.
+    After figure descriptions have been moved to their sole images, remaining
+    invalid `alt` attributes on non-image elements become `aria-label`.
+    Epubcheck rejects `alt` on non-image elements.
 
     If the tag already has an aria-label, we strip the alt rather than
     duplicate the attribute.
@@ -168,6 +167,7 @@ def sanitize_xml_for_epubcheck(temp_dir):
         'svg_aria_c0': 0,      # C0 chars in aria-label     (RSC-016 FATAL)
         'href_rewritten': 0,   # href URLs needing sanitization (RSC-020)
         'alt_on_wrapper': 0,   # alt="..." on non-img element  (RSC-005)
+        'figure_alt_transferred': 0,  # Quarto float alt moved to its sole img
         'empty_nav_links': 0,  # textless nav anchors            (RSC-005)
     }
 
@@ -179,6 +179,7 @@ def sanitize_xml_for_epubcheck(temp_dir):
             'bare_br': 0,
             'href_rewritten': 0,
             'alt_on_wrapper': 0,
+            'figure_alt_transferred': 0,
         }
 
         new_out, _ = _HTML_COMMENT.subn(_sanitize_comment_body, out)
@@ -210,7 +211,14 @@ def sanitize_xml_for_epubcheck(temp_dir):
             deltas['href_rewritten'] = rewrites
             out = new_out
 
-        # Rename/strip alt="..." on wrapper elements (non-img).
+        # Preserve figure descriptions on the actual image before the generic
+        # invalid-wrapper-alt sanitizer removes the Quarto float attribute.
+        new_out, figure_counts = repair_figure_alts(out)
+        if figure_counts['transferred']:
+            deltas['figure_alt_transferred'] = figure_counts['transferred']
+        out = new_out
+
+        # Rename/strip alt="..." on remaining wrapper elements (non-img).
         alt_rewrites = 0
 
         def count_alt_rewrite(m):
@@ -269,6 +277,7 @@ def sanitize_xml_for_epubcheck(temp_dir):
     print(f"      ✅ SVG aria-label C0 chars:       {counts['svg_aria_c0']}")
     print(f"      ✅ href URLs normalized:          {counts['href_rewritten']}")
     print(f"      ✅ alt→aria-label on wrappers:    {counts['alt_on_wrapper']}")
+    print(f"      ✅ figure alt→img transfers:      {counts['figure_alt_transferred']}")
     print(f"      ✅ Empty nav links removed:       {counts['empty_nav_links']}")
 
     return counts

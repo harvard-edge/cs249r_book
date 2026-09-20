@@ -11,7 +11,7 @@
 
 Volume IV covers machine learning systems whose outputs are physical actions. It begins at the causal boundary, the point where a command becomes current in a winding and mass begins to accelerate, and follows the consequences of that boundary through the design of the body, the brain, and the nervous system that connects them.
 
-The governing constraint is irreversibility. A mispredicted token costs a retry. A mistimed motor command delivers kinetic energy into an environment that will not roll back. Every design decision in this volume is shaped by that asymmetry.
+The governing constraint is irreversibility after actuation. An advisory prediction can be reconsidered before it commands an actuator, though errors may still have consequences when acted upon. A mistimed motor command delivers energy into an environment that will not roll back. Every design decision in this volume is shaped by that asymmetry.
 
 ## Structure
 

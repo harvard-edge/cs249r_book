@@ -42,8 +42,8 @@ class HarmonicDrives(Registry):
         name="Harmonic Drive CSG-25-50",
         actuator_type="HarmonicDrive",
         gear_ratio=50.0,
-        rated_torque=67.0 * (ureg.newton * ureg.meter),
-        peak_torque=150.0 * (ureg.newton * ureg.meter),
+        rated_torque=51.0 * (ureg.newton * ureg.meter),  # L10 rated, CSG-25-50-2UH
+        peak_torque=127.0 * (ureg.newton * ureg.meter),  # repeated peak limit
         rotor_inertia=1.0e-4 * (ureg.kg * ureg.meter**2),
         reflected_inertia=0.25 * (ureg.kg * ureg.meter**2),  # 50^2 * 1.0e-4
         internal_resistance=0.60 * ureg.ohm,

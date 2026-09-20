@@ -487,7 +487,7 @@ UBER_ATG_VOLVO_XC90 = _lit(
     "NTSB Highway Accident Report: Collision Between a Self-Driving Car and a Pedestrian, Tempe, Arizona, March 18, 2018 (NTSB/HAR-19/03)",
     url="https://www.ntsb.gov/investigations/AccidentReports/Reports/HAR1903.pdf",
     verified="2026-09-18",
-    notes="Modified 2017 Volvo XC90 test vehicle operated by Uber ATG. Tested suppression delay 1.2 s, braking deceleration capacity up to 8.0 m/s^2.",
+    notes="Modified 2017 Volvo XC90 test vehicle operated by Uber ATG. NTSB reported one-second action suppression after hazard recognition at T-1.2 s; 8.0 m/s^2 braking deceleration is an illustrative assumption.",
 )
 
 ALOHA_BIMANUAL_MANIPULATOR = _lit(
@@ -508,9 +508,9 @@ DED_MELT_POOL_PROCESS = _est(
 SONY_IMX477 = _ds(
     "prov:sony-imx477",
     "Sony IMX477 Diagonal 7.857 mm (Type 1/2.3) 12.3MP CMOS Image Sensor Datasheet",
-    "https://www.sony-semicon.com",
+    "https://www.sony-semicon.com/files/62/pdf/p-13_IMX477-AACK_Flyer.pdf",
     verified="2026-09-18",
-    notes="Rolling shutter CMOS sensor with 4056x3040 resolution, MIPI CSI-2 2-lane/4-lane interface.",
+    notes="Full-resolution 4056x3040 at 60 fps uses the flyer-supported four-lane, 10-bit CSI-2 mode (up to 2.1 Gbps/lane); chapter pipeline stage delays beyond exposure/readout are illustrative assumptions.",
 )
 
 SONY_IMX296 = _ds(
@@ -547,10 +547,10 @@ BOSCH_BMI088 = _ds(
 
 HARMONIC_DRIVE_CSG = _ds(
     "prov:harmonic-drive-csg",
-    "Harmonic Drive CSG Series High Torque Component Sets and Gearhead Catalog",
-    "https://www.harmonicdrive.net",
-    verified="2026-09-18",
-    notes="Zero-backlash strain wave gearhead for robotic joints with ratios from 50:1 to 160:1.",
+    "Harmonic Drive CSG-25-50-2UH product performance data",
+    "https://www.harmonicdrive.net/products/gear-units/gear-units/csg-2uh/csg-25-50-2uh",
+    verified="2026-09-20",
+    notes="Specific 50:1 gear unit: 51 N m L10 rated torque, 72 N m average limit, 127 N m repeated peak, and 242 N m momentary peak. Registry rotor inertia and electrical fields are teaching assumptions, not product specifications.",
 )
 
 UNITREE_M107_MOTOR = _ds(
