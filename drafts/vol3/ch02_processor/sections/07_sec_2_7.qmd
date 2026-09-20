@@ -1,0 +1,317 @@
+## Verification Boundaries: Likelihood Versus Operational Truth {#sec-vol3-processor-continuations}
+
+A high sequence likelihood $P(\mathbf{y} \mid \mathbf{x}; \Theta)$ emitted by an autoregressive neural core measures statistical typicality within a pretraining corpus, not semantic validity, mathematical consistency, or operational safety. In an unconstrained autoregressive forward pass, the model optimizes next-token cross-entropy along an empirical distribution:
+
+$$\mathcal{L}_{\text{CE}}(\Theta) = - \sum_{k=1}^K \log P(y_k \mid \mathbf{x}, y_{<k}; \Theta)$$
+
+A candidate sequence $\mathbf{y} = (y_1, y_2, \dots, y_K)$ can achieve near-maximal probability mass under $P(\mathbf{y} \mid \mathbf{x}; \Theta)$ while containing non-existent API endpoints, incompatible parameter types, uncompilable syntax, or catastrophic shell commands. Because statistical likelihood decouples completely from operational truth, the host agent runtime must treat every byte emitted by the neural core as an unprivileged, untrusted proposal. Under the principle of Zero Ambient Authority ($A=0$), candidate strings cannot alter host memory, dispatch network frames, or modify storage systems until they cross an external, deterministic verification boundary.
+
+```
+                  ┌───────────────────────────────────────────────────────────┐
+                  │                 NEURAL INFERENCE SERVER                   │
+                  │   Autoregressive Core (GPU/HBM): Unprivileged, A = 0       │
+                  │   Generates candidate token sequence y ~ P(y | x; Θ)      │
+                  └─────────────────────────────┬─────────────────────────────┘
+                                                │ Candidate Payload (y)
+                                                ▼
+                  ┌───────────────────────────────────────────────────────────┐
+                  │                 MEMORY ESCROW BUFFER                      │
+                  │   Quarantined Host RAM: Zero Ambient Authority ($A=0$)     │
+                  └─────────────────────────────┬─────────────────────────────┘
+                                                │
+                                                ▼
+                        ┌───────────────────────────────────────────────┐
+                        │     IN-MEMORY STATIC VERIFICATION GATES       │
+                        │     (Deterministic Host CPU Inspection)       │
+                        └───────┬───────────────────────────────┬───────┘
+                                │                               │
+                       Passes All Invariants           Fails Invariant
+                                │                               │
+                                ▼                               ▼
+                  ┌───────────────────────────┐   ┌───────────────────────────┐
+                  │     ACTION DISPATCH       │   │  TRAP FAULT & ABORT       │
+                  │  Ready for dynamic run    │   │  Zero Host Bits Mutated   │
+                  │  (Deferred to Ch 07)      │   │  Escrow Reclaimed         │
+                  └───────────────────────────┘   └───────────────────────────┘
+```
+
+### The Likelihood–Truth Decoupling and the Pathology of Self-Checking
+
+The fundamental dilemma of generative models in agentic architectures is that fluency mimics correctness. A sequence predicting the invocation of a database migration or a git merge can exhibit pristine grammatical layout and high token confidence while referencing dropped columns or hallucinated branch names. The mathematical objective of token generation provides no structural guarantee regarding environmental reality:
+
+$$P(\mathbf{y} \text{ is operationally safe and true} \mid \mathbf{x}) \neq \prod_{k=1}^K P(y_k \mid \mathbf{x}, y_{<k}; \Theta)$$
+
+When an agent runtime encounters an unexpected result or seeks to audit a candidate action, an intuitive temptation is to ask the model to evaluate its own output: appending a prompt such as *"Are you sure this code is correct? Verify your reasoning."* In computer systems design, this pattern represents a severe violation of the reference monitor guarantees formulated by Saltzer and Kaashoek: **an unprivileged, fallible component cannot serve as its own verifier**.
+
+Autoregressive models suffer from *attentional confirmation bias*. When a model generates a reflection over a prefix containing its own prior generation $\mathbf{y}_{\text{err}}$, the self-attention mechanism computes attention weights $\mathbf{A}_{l}$ across all layers $l \in [1, L]$ by projecting query vectors against the key cache:
+
+$$\mathbf{A}_{l} = \text{Softmax}\left(\frac{\mathbf{Q}_l \mathbf{K}_l^T}{\sqrt{d_k}}\right)$$
+
+Because the erroneous tokens $y \in \mathbf{y}_{\text{err}}$ already populate the physical KV cache, subsequent query tokens generated during the "self-verification" phase attend heavily to those exact tokens. The model treats its own hallucinated identifiers and faulty assertions as established contextual facts. If the network lacked the parametric knowledge or reasoning capacity to generate the correct output on the initial forward pass:
+
+$$P(\mathbf{y}_{\text{correct}} \mid \mathbf{x}) < P(\mathbf{y}_{\text{err}} \mid \mathbf{x})$$
+
+then conditioning the subsequent verification sequence on the flawed generation $\mathbf{y}_{\text{err}}$ mathematically suppresses the probability of self-correction:
+
+$$P(\text{"Valid"} \mid \mathbf{x}, \mathbf{y}_{\text{err}}) \gg P(\text{"Invalid"} \mid \mathbf{x}, \mathbf{y}_{\text{err}})$$
+
+Instead of discovering the underlying flaw, the autoregressive core constructs plausible post-hoc rationalizations that defend the initial generation. Closing invariants requires an external, deterministic oracle whose state transitions are entirely decoupled from the model's token distribution.
+
+::: {.callout-note title="Systems Deep Dive: Attentional Confirmation Bias in Autoregressive Self-Verification"}
+Consider an unprivileged model generating a JSON payload to invoke a file modification tool. The model hallucinates an invalid parameter name:
+
+```json
+{"tool": "edit_file", "arguments": {"target_path": "src/main.py", "replacement_chunk": "..."}}
+```
+
+The registered interface requires `path`, not `target_path`. If the runtime feeds this string back to the model with the prompt *"Review the JSON above. Does it match the tool contract?"*, the attention heads responsible for syntactic resolution bind the token `target_path` to standard English semantics rather than the authoritative interface specification. 
+
+Because the tokens `target` and `path` exhibit high mutual information in training corpora with file operations, the model generates:
+
+> *"Yes, the arguments correctly supply `target_path`, identifying the destination file to be updated."*
+
+The model cannot falsify the hallucination because its predictive distribution is conditioned directly on the token whose existence is under dispute. The error cannot be trapped by statistical sampling; it can only be trapped by an external reference monitor executing a deterministic hash-set membership lookup: `target_path in registry["edit_file"].parameters`.
+:::
+
+### The Memory Escrow Architecture and In-Memory Static Invariant Gates
+
+To enforce the principle of Complete Mediation, the host runtime establishes a strict boundary between candidate generation and host actuation through a **Memory Escrow Gate**. The neural serving engine streams or delivers generated bytes into an isolated memory buffer owned exclusively by the host supervisor. The candidate payload possesses zero authority ($A=0$): it cannot write to standard output, write to disk, or invoke operating system system calls.
+
+Before any generated payload can be considered an actionable plan, it must pass through an in-memory static verification pipeline running entirely on the host CPU. A critical systems distinction must be drawn between **in-memory static validation** and **dynamic execution**:
+
+1. **Dynamic Execution:** Involves spawning processes, executing shell interpreters, invoking test runners (such as `pytest`), or provisioning containerized sandboxes. Dynamic execution modifies external state, incurs operating system scheduling overhead, and introduces process-level attack surfaces (topics systematically analyzed in Chapters 07 and 08).
+2. **In-Memory Static Validation:** Operates strictly on bytes staged in host RAM. It uses deterministic parsers, Abstract Syntax Tree (AST) analyzers, and static type inspectors to prove structural and relational invariants in microseconds, without executing a single instruction of candidate code and without touching the host filesystem.
+
+The in-memory static verification architecture evaluates four sequential invariant tiers:
+
+```
+Candidate Bytes in Escrow
+          │
+          ▼
+┌──────────────────┐  FAILS  ┌──────────────────────────────┐
+│  Schema & JSON   ├────────►│ Raise SchemaDecodeFault      │
+│  Deserializer    │         └──────────────────────────────┘
+└─────────┬────────┘
+          │ PASS
+          ▼
+┌──────────────────┐  FAILS  ┌──────────────────────────────┐
+│  In-Memory AST   ├────────►│ Raise ASTSyntaxFault         │
+│  Grammar Parser  │         └──────────────────────────────┘
+└─────────┬────────┘
+          │ PASS
+          ▼
+┌──────────────────┐  FAILS  ┌──────────────────────────────┐
+│  Symbol & Scope  ├────────►│ Raise UndefinedSymbolFault   │
+│  Registry Walk   │         └──────────────────────────────┘
+└─────────┬────────┘
+          │ PASS
+          ▼
+┌──────────────────┐  FAILS  ┌──────────────────────────────┐
+│  Type Lattice    ├────────►│ Raise StaticTypeMismatchFault│
+│  Consistency     │         └──────────────────────────────┘
+└─────────┬────────┘
+          │ PASS
+          ▼
+Payload Cleared to Escrow Release
+```
+
+The data structures and operational mechanics governing this in-memory boundary are implemented by the host agent supervisor, as shown in the following architectural implementation:
+
+```python
+"""
+In-Memory Static Verification Pipeline.
+Enforces structural invariants on quarantined model outputs inside host RAM.
+"""
+
+from __future__ import annotations
+import ast
+import json
+from dataclasses import dataclass, field
+from enum import Enum, auto
+from typing import Any, Dict, List, Optional, Set
+
+
+class InvariantFailureCode(Enum):
+    NONE = auto()
+    SCHEMA_VIOLATION = auto()
+    JSON_DECODE_ERROR = auto()
+    AST_SYNTAX_ERROR = auto()
+    UNKNOWN_TOOL_SYMBOL = auto()
+    ARITY_MISMATCH = auto()
+    TYPE_ASSERTION_FAILED = auto()
+
+
+@dataclass(frozen=True)
+class [`ToolManifest`](file:///agent/escrow.py#L28-L36):
+    name: str
+    required_parameters: Set[str]
+    parameter_types: Dict[str, type]
+
+
+@dataclass(frozen=True)
+class [`QuarantinedPayload`](file:///agent/escrow.py#L39-L48):
+    raw_bytes: bytes
+    invocation_id: str
+    token_count: int
+
+
+@dataclass
+class [`VerificationVerdict`](file:///agent/escrow.py#L51-L60):
+    is_valid: bool
+    failure_code: InvariantFailureCode = InvariantFailureCode.NONE
+    diagnostic: str = ""
+    parsed_ast: Optional[ast.AST] = None
+    sanitized_arguments: Dict[str, Any] = field(default_factory=dict)
+
+
+class [`InMemoryStaticVerifier`](file:///agent/verifier.py#L63-L148):
+    """
+    Host-side deterministic reference monitor.
+    Inspects quarantined RAM payloads without process execution or filesystem I/O.
+    """
+
+    def __init__(self, tool_registry: Dict[str, ToolManifest]):
+        self._registry = tool_registry
+
+    def verify_tool_invocation(
+        self, payload: QuarantinedPayload
+    ) -> VerificationVerdict:
+        # Tier 1: In-Memory JSON Deserialization
+        try:
+            decoded_str = payload.raw_bytes.decode("utf-8")
+            data = json.loads(decoded_str)
+        except UnicodeDecodeError as err:
+            return VerificationVerdict(
+                is_valid=False,
+                failure_code=InvariantFailureCode.SCHEMA_VIOLATION,
+                diagnostic=f"Payload contains non-UTF8 byte sequence: {err}",
+            )
+        except json.JSONDecodeError as err:
+            return VerificationVerdict(
+                is_valid=False,
+                failure_code=InvariantFailureCode.JSON_DECODE_ERROR,
+                diagnostic=f"Malformed JSON buffer at line {err.lineno}, col {err.colno}: {err.msg}",
+            )
+
+        if not isinstance(data, dict) or "tool" not in data or "arguments" not in data:
+            return VerificationVerdict(
+                is_valid=False,
+                failure_code=InvariantFailureCode.SCHEMA_VIOLATION,
+                diagnostic="Object missing mandatory 'tool' or 'arguments' keys.",
+            )
+
+        tool_name = data["tool"]
+        arguments = data["arguments"]
+
+        # Tier 2: Static Symbol and Namespace Resolution
+        if tool_name not in self._registry:
+            return VerificationVerdict(
+                is_valid=False,
+                failure_code=InvariantFailureCode.UNKNOWN_TOOL_SYMBOL,
+                diagnostic=f"Tool symbol '{tool_name}' not bound in supervisor registry.",
+            )
+
+        manifest = self._registry[tool_name]
+
+        # Tier 3: Arity and Mandatory Parameter Verification
+        missing_params = manifest.required_parameters - set(arguments.keys())
+        if missing_params:
+            return VerificationVerdict(
+                is_valid=False,
+                failure_code=InvariantFailureCode.ARITY_MISMATCH,
+                diagnostic=f"Invocation of '{tool_name}' missing required parameters: {missing_params}",
+            )
+
+        # Tier 4: Type Lattice Conformance
+        for param_name, val in arguments.items():
+            if param_name in manifest.parameter_types:
+                expected_type = manifest.parameter_types[param_name]
+                if not isinstance(val, expected_type):
+                    return VerificationVerdict(
+                        is_valid=False,
+                        failure_code=InvariantFailureCode.TYPE_ASSERTION_FAILED,
+                        diagnostic=(
+                            f"Parameter '{param_name}' failed type lattice check: "
+                            f"expected {expected_type.__name__}, got {type(val).__name__}"
+                        ),
+                    )
+
+        return VerificationVerdict(
+            is_valid=True,
+            sanitized_arguments=arguments,
+        )
+
+    def verify_code_patch_ast(
+        self, candidate_code: str
+    ) -> VerificationVerdict:
+        """
+        Validates code patch parseability in host RAM using Python's native AST parser.
+        Does not execute or compile to bytecode.
+        """
+        try:
+            parsed_tree = ast.parse(candidate_code, filename="<escrow>", mode="exec")
+        except SyntaxError as err:
+            return VerificationVerdict(
+                is_valid=False,
+                failure_code=InvariantFailureCode.AST_SYNTAX_ERROR,
+                diagnostic=f"AST parse failure at line {err.lineno}, col {err.offset}: {err.msg}",
+            )
+
+        return VerificationVerdict(
+            is_valid=True,
+            parsed_ast=parsed_tree,
+        )
+```
+
+By decoupling in-memory structural verification from execution, the host supervisor guarantees that syntax errors, missing parameters, and type collisions are trapped in microseconds directly inside the host CPU's L1/L2 cache footprint, preventing corrupted payloads from ever scheduling operating system resources.
+
+::: {.callout-note title="Worked Example: Sizing the In-Memory Verification Escrow Gate"}
+Consider an agent system receiving candidate tool invocations from a serving cluster running on an NVIDIA DGX H100 host (`Systems.Nodes.DGX_H100` with dual Intel Xeon Platinum 8480C processors).
+
+**Workload Parameters:**
+- Mean candidate payload size ($S_{\text{payload}}$): $4\text{ KiB}$ ($4{,}096\text{ bytes}$).
+- Candidate rate ($\lambda$): $250\text{ invocations/sec}$ across concurrent agent worker threads.
+- Host Memory: $2\text{ TiB}$ DDR5-4800 RAM across 16 channels, providing $614\text{ GB/s}$ aggregate bandwidth.
+
+**Computational Verification Costs:**
+1. *In-Memory JSON Parsing:* Modern SIMD JSON deserializers (such as `simdjson`) process structured data at sustained rates exceeding $2.5\text{ GB/s}$ per x86 core. Parsing a $4\text{ KiB}$ buffer takes:
+   $$t_{\text{json}} = \frac{4{,}096\text{ bytes}}{2.5 \times 10^9\text{ bytes/sec}} \approx 1.64\,\mu\text{s}$$
+2. *AST Parsing & Symbol Check:* Python's C-based `ast.parse` and dictionary registry lookups require approximately $32\,\mu\text{s}$ for an equivalent code chunk.
+3. *Total Verification Latency ($t_{\text{verify}}$):*
+   $$t_{\text{verify}} \approx 1.64\,\mu\text{s} + 32.0\,\mu\text{s} = 33.64\,\mu\text{s}$$
+
+**Comparison to Dynamic Subprocess Execution:**
+If the runtime attempted to verify candidate validity by spawning a subprocess (e.g., executing `python -c "import ast..."` or a shell linter), the operating system must perform `fork()`, allocate kernel page tables, invoke `execve()`, initialize the runtime dynamic linker, and dismantle the address space upon termination. On modern Linux kernels, the minimum latency floor for a clean `fork/exec/exit` cycle is:
+$$t_{\text{subprocess}} \approx 2{,}500\,\mu\text{s} \text{ to } 15{,}000\,\mu\text{s} \quad (2.5\text{ ms} - 15\text{ ms})$$
+
+In-memory static verification closes the structural invariant $75\times$ to $450\times$ faster than process creation. Furthermore, at $\lambda = 250\text{ req/s}$, in-memory verification occupies:
+$$C_{\text{cpu}} = 250 \times 33.64 \times 10^{-6}\text{ s/s} = 0.0084 \text{ cores} \quad (< 1\% \text{ of a single physical core})$$
+Attempting dynamic execution at the same rate would require continuously cycling $250 \times 0.010 = 2.5$ dedicated host cores solely to service process lifecycles.
+:::
+
+### Layered Verification Architecture: Closing Invariants Without Trust
+
+Deterministic verification cannot be treated as a monolithic pass. Instead, verifiable systems implement a tiered defense-in-depth model where each layer enforces a distinct class of system invariants. As candidate data moves outward from the accelerator matrix cores to the host operating system, the verification checks become computationally more comprehensive, moving from hardware-level grammar filtering to memory-level static analysis, and finally to dynamic sandboxed execution.
+
+@tbl-verification-layers formalizes this tiered hierarchy, detailing the subsystem responsible, the execution locus, the invariant closed, and the resulting failure signature.
+
+| Verification Tier | Subsystem / Mechanism | Execution Locus | Invariant Closed | Mathematical Guarantee | Failure Signature |
+|:---|:---|:---|:---|:---|:---|
+| **Tier 1: Token Grammar** | Logit Masking via Finite State Automata (FSM) | Accelerator HBM / Tensor Core decode loop | Syntactic Token Legality | $P(\text{Illegal Token}) = 0$ | Mask exhaust; logit clamped to $-\infty$ |
+| **Tier 2: Deserialization** | SIMD In-Memory Parser (`simdjson`, JSON schema) | Host CPU RAM (Memory Escrow) | Structural Object Well-Formedness | Deterministic framing; complete key trees | `JSONDecodeError`, `SchemaDecodeFault` |
+| **Tier 3: Static AST & Symbols** | Abstract Syntax Tree Visitor (`ast.parse`) | Host CPU RAM (Memory Escrow) | Language Grammar & Arity Conformance | Valid parse tree; valid identifiers | `SyntaxError`, `ArityMismatchFault` |
+| **Tier 4: Type Lattice** | In-Memory Static Type Checker / Schema Validator | Host CPU RAM (Memory Escrow) | Argument Type System Compatibility | $\forall p \in \text{Params}, \text{Type}(p) \sqsubseteq \tau_p$ | `StaticTypeMismatchFault` |
+| **Tier 5: Dynamic Execution** | Isolated Subprocess / Sandboxed Harness *(Ch 07/08)* | Host Kernel Sandboxed Domain | Semantic Runtime Task Correctness | Deterministic exit code: $\text{status} = 0$ | Non-zero exit, `SIGSEGV`, test assertion failure |
+
+: Tiered Verification Architecture across the Agentic Hierarchy. Tiers 1 through 4 execute in hardware or host memory without operating system side effects; Tier 5 involves dynamic execution in isolated sandboxes. {#tbl-verification-layers}
+
+The critical architectural insight embedded in @tbl-verification-layers is the sharp boundary between **Tiers 1–4** and **Tier 5**:
+
+- **Tiers 1–4 are Invariant Preserving and Side-Effect Free:** They verify that the candidate sequence satisfies the rules of formal language theory (automata, grammars, ASTs, and types). They require zero disk writes, zero process forks, and zero environmental mutations. If a candidate fails any tier between 1 and 4, it is discarded immediately from host memory, leaving the supervisor and environment in an identical state to that prior to invocation.
+- **Tier 5 is State-Mutating and Semantically Definitive:** Dynamic execution (running tests, evaluating linters against filesystems, or compiling binaries) confirms whether the candidate sequence performs the intended semantic task. However, because dynamic execution involves executing arbitrary instructions, it cannot be safely conducted on the raw host without the process isolation, sandboxed execution domains, and capability attenuation mechanisms analyzed in Chapter 08.
+
+By enforcing Tiers 1 through 4 inside the host memory escrow gate, the agent runtime ensures that the neural processor's statistical outputs are thoroughly sanitized and structurally validated before any execution resource is committed. However, having established how individual invocations are verified, systems engineers face an operational question: how do different interface architectures—ranging from raw string completion to JSON schema masking and native RPC protocols—perform when benchmarked under identical hardware constraints? Moving from the mechanics of single-call validation to the comparative evaluation of complete invocation boundaries requires measuring task success under equal computational budgets.
+
+***
+
+## Systems Benchmarking of Invocation Interfaces {#sec-vol3-processor-interface-design}

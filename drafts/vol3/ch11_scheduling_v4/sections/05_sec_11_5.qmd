@@ -1,0 +1,146 @@
+## Semantic Watchdog Timers {#sec-vol3-sagas-watchdogs}
+
+A compute thread executing an autoregressive decode loop consumes 100% of its allocated GPU Tensor Cores, saturates high-bandwidth memory (HBM) channels during the memory-bound token generation phase, emits syntactically valid JSON-RPC tool invocations over POSIX sockets at regular temporal intervals, and consistently acknowledges host supervisory heartbeats. To the host operating system kernel, the container cgroup subsystem, and the orchestration plane's `/healthz` HTTP probes, this inference process represents an exemplar of operational vitality. Yet, evaluated against the state-convergence objective of the broader distributed task, the agent is catastrophically deadlocked. In an ungrounded attempt to resolve a compiler syntax error, the model modifies line 42 of a configuration file, inspects the resulting test failure, reverts line 42 to its original state, encounters the initial failure, and repeats this cycle across dozens of turns. Traditional operating system liveness monitors look only for the *absence of activity*; an agentic system trapped in a semantic infinite loop fails via an *excess of unadvancing activity*.
+
+::: {.column-margin}
+![State hash oscillation detection over a sliding history window.](images/svg/semantic-watchdog-oscillation.svg){#fig-vol3-semantic-watchdog}
+:::
+
+**The central systems thesis of semantic monitoring:** *Classical process heartbeats verify only computational and transport liveness, not computational utility. To bound the blast radius of non-convergent deliberation and prevent unbounded financial, power, and memory resource drain, the agent runtime must decouple process health from semantic progress, enforcing explicit, mathematically verifiable progress invariants over environment state hashes, external verification metrics, and action entropy.*
+
+### The Failure of Classical OS Liveness Probes
+
+In classical operating systems and distributed runtimes, liveness is modeled as a binary property of a thread or process. A subsystem is live if it transitions through states within a bounded temporal delta $\Delta t$. System daemons register periodic keepalives with system supervisors (for example, `sd_notify("WATCHDOG=1")` under Linux `systemd`), while distributed schedulers query container health endpoints over TCP. If a process enters an infinite loop in kernel space, deadlocks on a POSIX mutex, or hangs on an unserviced read from a blocked network socket, the heartbeat stops. The hardware watchdog timer or host supervisor fires, triggering an uncatchable `SIGKILL`, releasing file descriptors, and rescheduling the container.
+
+This architectural assumption collapses when applied to foundation models operating under Zero Ambient Authority ($A=0$). An unprivileged neural inference engine running a forward pass does not stall at the instruction pointer level. The model is an unprivileged predictor: each token generation step consists of regular, highly parallel matrix-vector multiplications ($\text{GEMV}$) that stream weights from high-bandwidth memory to arithmetic logic units with predictable clock-cycle determinism. As long as the inference server (such as vLLM or SGLang) and the host agent supervisor exchange well-formed Remote Procedure Call (RPC) messages, every standard transport-layer watchdog is satisfied. 
+
+The divergence between operational health and task advancement mirrors the core insight of Martin Rinard's *Acceptability-Oriented Computing* (2003): classical software engineering presupposes that systems either execute according to an idealized, deterministic specification or crash. When real-world systems encounter unmodeled state spaces, however, treating every non-crashing execution as acceptable allows software to burn resources indefinitely in degraded, non-productive cycles. In an agentic architecture, this failure mode manifests as an epistemic gap between the agent's internal reasoning context and the external environment. Because the autoregressive context window expands with every turn, the agent's attention mechanism experiences continuous novelty: each turn appends new reasoning tokens, fresh tool execution traces, and updated error payloads. The agent possesses the local, self-reinforcing illusion of forward momentum, even as its external environment remains trapped in a closed, circular orbit.
+
+### Quantifiable Semantic Progress Invariants
+
+To restore deterministic liveness guarantees, the supervisor must monitor the external environment rather than the internal deliberation of the model. The runtime establishes a *Semantic Watchdog* that intercepts every proposed action and evaluates the resulting state transitions against three quantifiable progress invariants: state hash monotonicity, metric monotonicity, and action entropy.
+
+```
+       Trajectory Step:   t-3         t-2         t-1          t
+                       +-------+   +-------+   +-------+   +-------+
+    Environment State: | s_t-3 |   | s_t-2 |   | s_t-1 |   |  s_t  |
+                       +-------+   +-------+   +-------+   +-------+
+                           |           |           |           |
+    SHA-256 State Hash: [ 0x8F4A ]  [ 0xA19C ]  [ 0xC3E2 ]  [ 0xA19C ]
+                           |           |           |           ^
+                           \___________|___________|___________|
+                                       |
+                           COLLISION DETECTED: H(s_t) == H(s_t-2)
+                           TRIP: Period k = 2 Semantic Oscillation
+```
+
+Let the trajectory of an agent be formalized as a discrete sequence of steps $t \in \{1, 2, \dots, n\}$. At each step, the runtime captures the system state tuple $S_t = \langle \mathbf{s}_t, a_t, o_t \rangle$, where $\mathbf{s}_t$ represents the deterministic snapshot of the target environment (the sandboxed working directory, database state, or configuration manifest), $a_t$ represents the proposed tool action, and $o_t$ represents the environmental observation returned by the execution sandbox.
+
+1. **State Hash Monotonicity and Cycle Detection:** The runtime maintains a bounded history ring buffer $W = [\mathcal{H}_{t-K}, \dots, \mathcal{H}_{t-1}]$ of cryptographic hashes of the environment state:
+$$\mathcal{H}_t = \text{SHA-256}(\text{Canonicalize}(\mathbf{s}_t))$$
+The canonicalization function sorts file trees, strips transient filesystem timestamps, and formats database records into deterministic byte streams. At each step $t$, the watchdog queries the history window $W$. A semantic cycle of period $k$ is detected if:
+$$\exists k \in [1, K] \quad \text{such that} \quad \mathcal{H}_t = \mathcal{H}_{t-k}$$
+Because SHA-256 provides a 256-bit collision-resistant mapping, the probability of two distinct physical environment states yielding identical hashes is bounded by $2^{-128}$ (under the birthday bound), rendering false-positive cycle detection mathematically negligible. When $\mathcal{H}_t = \mathcal{H}_{t-k}$, the agent has executed $k$ mutative actions that resulted in a net zero transformation of the external system.
+
+2. **Metric Monotonicity:** In complex software engineering tasks, environment state hashes naturally change when editing scratch files, running linters, or updating log outputs. Thus, distinct state hashes do not guarantee task convergence. The runtime tracks a vector of external verification metrics $\mathbf{m}_t = \langle m_1(\mathbf{s}_t), m_2(\mathbf{s}_t), \dots, m_p(\mathbf{s}_t) \rangle$ emitted by deterministic host verifiers—such as the number of passing unit tests, compiler error counts, or static analysis diagnostics. Progress requires that the metric vector exhibits a non-negative directional derivative over an epoch of length $E$:
+$$\Delta \mathbf{m}_{t, t-E} = \mathbf{m}_t - \mathbf{m}_{t-E} \not\le \mathbf{0}$$
+If an agent executes $E$ consecutive mutative actions without yielding a positive delta in at least one target metric (or worse, oscillates between $m_{\text{pass}} = 4$ and $m_{\text{pass}} = 3$), the watchdog identifies metric stagnation.
+
+3. **Action Entropy and Syntactic Repetition:** Even before an action executes, the runtime analyzes the syntactic and semantic structure of the proposed action $a_t$. The runtime computes a fast 64-bit non-cryptographic hash of the tool invocation:
+$$h_{\text{tool}}(a_t) = \text{xxHash64}(\text{tool\_identifier} \parallel \text{CanonicalJSON}(\text{arguments}))$$
+If $h_{\text{tool}}(a_t) = h_{\text{tool}}(a_{t-k})$ and the intervening observation $o_{t-k}$ returned an unhandled error (e.g., `ENOENT: File not found` or `HTTP 403 Forbidden`), the agent is re-issuing a known invalid request. Additionally, the supervisor tracks the lexical token entropy of the chain-of-thought scratchpad; an abrupt collapse in token diversity often indicates that the autoregressive sampler has entered a degenerative mode collapse.
+
+| Invariant Type | Detection Mechanism | Primary Detection Target | Tracking Overhead | False Positive Mitigation |
+| :--- | :--- | :--- | :--- | :--- |
+| **State Hash Monotonicity** | Sliding window SHA-256 table ($W$) | Reversible oscillations ($\mathbf{s}_t \to \mathbf{s}_{t-1} \to \mathbf{s}_t$) | $O(1)$ lookup via hash set; $O(B)$ hash compute over $B$ state bytes | Whitelist non-deterministic directories (`/tmp`, logs) |
+| **Metric Monotonicity** | Strict Pareto delta over epoch $E$ ($\Delta \mathbf{m}$) | Non-convergent thrashing across tests/linters | Incurred only during test suite execution | Allow bounded exploratory regressions ($E_{\text{grace}}$ steps) |
+| **Action Syntactic Equivalence** | Exact matching on canonicalized JSON-RPC | Repetitive invocation of failing commands | $O(1)$ string canonicalization and integer compare | Bypass when arguments include dynamic nonces |
+| **Semantic Embedding Drift** | Cosine distance $1 - \frac{e(a_t) \cdot e(a_{t-k})}{\|e(a_t)\|\|e(a_{t-k})\|}$ | Paraphrased reasoning loops and reworded prompts | Small matrix-vector dot product ($d \le 1536$) | Set conservative similarity thresholds ($\cos \theta \ge 0.96$) |
+
+The following listing illustrates the concrete ring-buffer cycle detector used by the agent supervisor to enforce state hash monotonicity:
+
+```python
+def check_state_hash_invariants(history: list[str], current_hash: str, max_period: int) -> int | None:
+    # Scan backward through sliding window to detect cyclic state oscillations
+    window = history[-max_period:] if len(history) >= max_period else history
+    for distance, past_hash in enumerate(reversed(window), start=1):
+        if past_hash == current_hash:
+            return distance  # Returns cycle period k (e.g., 1 for no-op, 2 for flip-flop)
+    return None
+```
+
+::: {.callout-note title="Worked Example: The Microeconomic and Hardware Cost of a Silent Semantic Loop"}
+Consider an autonomous agent executing on a dedicated host node powered by an 8-GPU NVIDIA H100 SXM5 server (700 W thermal design power per GPU, 3.35 TB/s HBM3 bandwidth per GPU). The host serves an open-weights 70-billion parameter dense foundation model running under 8-bit floating-point quantization (FP8 weight representation, requiring 70 GB of VRAM for base parameters). 
+
+The agent enters a semantic loop attempting to repair a faulty network configuration script. In each iteration, the agent generates 300 output tokens of chain-of-thought reasoning and tool calls, executes a shell command that fails, and receives an 800-token error trace appended to its prompt. The decode loop runs memory-bandwidth bound at a generation throughput of 40 tokens per second.
+
+**Compute and Latency Costs Without a Semantic Watchdog:**
+Without an invariant monitor, the agent continues until hitting an arbitrary maximum step limit $S_{\max} = 50$.
+- Output token generation time per iteration: 
+  $$T_{\text{decode}} = \frac{300 \text{ tokens}}{40 \text{ tokens/sec}} = 7.5 \text{ seconds}$$
+- Shell tool execution and environment reset time: $T_{\text{exec}} = 2.5 \text{ seconds}$.
+- Total time per iteration: $T_{\text{iter}} = 10.0 \text{ seconds}$.
+- Total execution time across 50 steps: 
+  $$T_{\text{total}} = 50 \times 10.0 \text{ s} = 500 \text{ s} \approx 8.33 \text{ minutes}$$
+- Energy consumption across the 8-GPU cluster (excluding host CPU/DRAM):
+  $$E_{\text{cluster}} = 8 \times 700 \text{ W} \times 500 \text{ s} = 2.80 \times 10^6 \text{ J} = 0.778 \text{ kWh}$$
+- Context growth and memory footprint: Over 50 iterations, the context accumulates $50 \times (300 + 800) = 55,000$ tokens. For a model with 64 transformer layers, a key-value head dimension $d_{\text{head}} = 128$, and 8 key-value heads (Grouped-Query Attention), each token stores:
+  $$S_{\text{token}} = 2 \times 64 \text{ layers} \times 8 \text{ heads} \times 128 \text{ dim} \times 1 \text{ byte} = 131,072 \text{ bytes} = 128 \text{ KB}$$
+  By step 50, the KV cache alone consumes $55,000 \times 128 \text{ KB} \approx 7.04 \text{ GB}$ of dedicated HBM3 capacity for this single trajectory.
+- Economic cost: Evaluated at commercial frontier API rates ($3.00 per $10^6$ prompt tokens, $15.00 per $10^6$ completion tokens), the unmonitored loop processes a triangular progression of prompt tokens $\sum_{i=1}^{50} (1,000 + 1,100 \cdot i) \approx 1.45 \times 10^6$ tokens and $50 \times 300 = 15,000$ completion tokens, totaling:
+  $$\text{Cost} = (1.45 \times \$3.00) + (0.015 \times \$15.00) = \$4.35 + \$0.23 = \$4.58$$
+
+**Mitigation with a State Hash Semantic Watchdog:**
+The runtime configures a sliding window hash monitor with period bound $K = 4$. At step $t = 4$, the watchdog detects that $\mathcal{H}_4 = \mathcal{H}_2$ ($k = 2$ oscillation). The watchdog trips immediately, halting execution after 4 steps:
+- Total time elapsed: $4 \times 10.0 \text{ s} = 40.0 \text{ seconds}$ (a 92.0% reduction in wall-clock latency).
+- Cluster energy expended: $8 \times 700 \text{ W} \times 40 \text{ s} = 0.224 \times 10^6 \text{ J} = 0.062 \text{ kWh}$ (a 92.0% reduction in thermal and power load).
+- Financial expenditure: Prompt tokens processed drop to approximately $21,000$, resulting in an API charge of $\$0.08$ (a 98.2% cost reduction).
+:::
+
+### Watchdog Intervention Protocols and Escalation Sagas
+
+Detecting an invariant violation represents only half of the architectural requirement; the runtime must also define deterministic state-machine semantics for intervention. Silently dropping an agent's tool call leaves the autoregressive decode loop in an undefined state. The runtime implements a three-tier intervention protocol designed to trade off recovery cost against trajectory termination.
+
+```
++-------------------------------------------------------------+
+|               Semantic Watchdog Violation                   |
++-------------------------------------------------------------+
+                               |
+                               v
+                       [ Iteration <= 2 ]
+                     /                    \
+             (YES)  /                      \  (NO)
+                   v                        v
+    +-----------------------------+  +-------------------------------+
+    | Tier 1: Context Interrupt   |  | Tier 2: Checkpoint Backtrack  |
+    | Inject synthetic warning    |  | Rewind WAL to s_t-k; prune     |
+    | observation into prompt     |  | oscillating context branch    |
+    +-----------------------------+  +-------------------------------+
+                   |                                |
+                   v                                v
+         Did cycle break?                  Did recovery succeed?
+        /                \                /                     \
+ (YES) /            (NO)  \        (YES) /                 (NO)  \
+      v                    v            v                         v
+  [ Resume ]        [ Escalate Tier 2 ] [ Resume ]   +--------------------------+
+                                                     | Tier 3: Terminal Abort   |
+                                                     | ERR_SEMANTIC_DEADLOCK;   |
+                                                     | Execute Saga Compensator |
+                                                     +--------------------------+
+```
+
+1. **Tier 1: Synthetic Context Interrupt (The Epistemic Jolt):** When a state hash collision ($\mathcal{H}_t = \mathcal{H}_{t-k}$) or syntactic action cycle is initially flagged, the supervisor intercepts the execution pipeline before dispatching the action to the physical sandbox. The supervisor generates a synthetic observation payload $o_t^{\text{watchdog}}$ and appends it directly to the model's context stream:
+   ```
+   [SYSTEM ALERT: SEMANTIC_WATCHDOG_INTERRUPT]
+   Action rejected by host supervisor. Invariant failure: STATE_OSCILLATION_DETECTED.
+   Your proposed action returned the environment to an identical state observed at step t-2.
+   You are trapped in an unproductive loop. Do NOT repeat the previous command.
+   Formulate an alternative hypothesis or verify underlying environmental assumptions.
+   ```
+   This synthetic observation exploits the model's in-context conditioning. By inserting a high-salience error message into the prompt, the runtime forcibly alters the attention weights of subsequent decode steps, breaking the autoregressive self-reinforcement that drives the loop.
+
+2. **Tier 2: Trajectory Backtracking and Action Masking:** If the agent fails to converge after a Tier 1 interrupt—emitting an action that triggers a second invariant violation within an epoch of 3 steps—the supervisor escalates. The runtime reaches into the Write-Ahead Log (WAL), identifies the checkpoint snapshot $\mathbf{s}_{t-k}$ that preceded the cycle onset, and rewinds the physical sandbox filesystem to that checkpoint. Concurrently, the runtime rewrites the logical conversation history: it truncates the failed, cyclic turns from the context window and inserts a tombstone marker that permanently masks the failed action signature $h_{\text{tool}}(a_t)$ from the agent's action space.
+
+3. **Tier 3: Terminal Abort and Saga Escalation (`ERR_SEMANTIC_DEADLOCK`):** If the agent exhausts its allotted backtracking budget or violates invariants after crossing a pivot action boundary (where physical rollback is impossible), the watchdog issues a non-maskable trajectory termination. The runtime raises `ERR_SEMANTIC_DEADLOCK`, revokes the agent's transient capability tokens, releases all acquired POSIX file and database locks, and dispatches the trajectory's Write-Ahead Log to human operators. Crucially, the runtime triggers the compensating transactions of the enclosing Trajectory Saga: any partial, uncommitted side effects registered in the compensating log ($\mathcal{L}_{\text{comp}}$) are executed in reverse order, returning the broader distributed system to a consistent, quiesced state.
+
+When semantic watchdogs successfully bound local reasoning loops within an isolated execution sandbox, a broader distributed failure mode emerges at the boundary of external network services. In many production failures, an agent's failure to advance state is driven not by an internal algorithmic cycle or model hallucination, but by an external dependency—such as a third-party payment gateway, an artifact repository, or a code-formatting daemon—experiencing elevated latency, intermittent HTTP 503 errors, or silent network partitions. Under naive forward recovery, an agent observing a failed tool RPC interprets the fault as an environmental hurdle to be solved, immediately re-issuing mutated requests or hammering the failing endpoint. Multiplied across hundreds of concurrent agent trajectories, these uncoordinated autonomous retries trigger a catastrophic retry storm that overwhelms degraded upstream infrastructure. How do we engineer execution gateways that isolate failing tool dependencies, dampen retry pressure through exponential backoff with decorrelated jitter, and shed load before an external outage cascades into the agent runtime itself?

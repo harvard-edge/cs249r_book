@@ -1,0 +1,153 @@
+When an autonomous agent crashes in production or emits a catastrophic side effect, classical debugging paradigms immediately collapse. In conventional deterministic software, an engineer attaches a symbolic debugger, inspects a deterministic core dump, or steps backward through an execution stack to locate the offending instruction. In an agentic machine learning system, the observable failure manifestation—such as an agent executing an unrecoverable filesystem deletion or entering an infinite token-generation cycle—is rarely co-located with the underlying defect. Because the host runtime delegates planning and tool synthesis to an unprivileged, autoregressive foundation model operating under non-zero sampling temperatures ($\tau > 0$), a run that failed at step $t=14$ may have been fatally poisoned at step $t=2$ by a truncated tool payload that silently corrupted the model's epistemic state. Furthermore, attempting to reproduce the bug by re-executing the agent against live production microservices introduces destructive side effects, violates state isolation, and fails to guarantee identical observations due to external environment drift.
+
+**Diagnosing failed trajectories requires structured post-mortem forensics—replaying recorded observations, isolating component failure hypotheses, and conducting controlled counterfactual ablations.**
+
+Without a systematic forensic protocol, systems teams default to an unscientific anti-pattern: treating every operational failure as an inscrutable "model hallucination," followed by ad-hoc prompt tweaking that degrades generalization across unobserved tasks. Rigorous post-mortem engineering treats the foundation model not as a mystical oracle, but as an unprivileged, deterministic-in-expectation compute engine operating over a causally ordered sequence of discrete context tokens. By capturing the complete Agent Control Block (ACB) and distributed OpenTelemetry span graph during execution, the runtime enables hermetic trajectory replay without mutating external state. Engineers can systematically dissect the causal chain, distinguish semantic interface failures from algorithmic policy breakdown, and formalize verified fixes into permanent, automated regression fixtures within the evaluation gym.
+
+### Deterministic Trajectory Replay and Hermetic Mocking {#sec-vol3-postmortem-replay}
+
+The foundation of forensic analysis is trajectory reconstruction. When an agent trajectory $\tau = (s_0, a_0, o_0, s_1, a_1, o_1, \dots, s_T)$ terminates in an unhandled exception, a violated safety invariant, or an explicit task rejection, the post-mortem engine must reconstruct the exact sequence of historical context buffers $c_t$ presented to the model. In production environments governed by Zero Ambient Authority ($A=0$), all interactions with the operating system, storage layers, and network services are mediated by RPC tool invocations recorded as OpenTelemetry spans. Consequently, the telemetry ledger contains an immutable, chronologically ordered log of every model invocation, prompt serialization, raw completion, tool identifier, input argument dictionary, and serialized observation string.
+
+::: {.column-margin}
+Replaying an agent trajectory against live external APIs guarantees non-determinism. External databases change, web services return shifting payloads, and mutating calls duplicate transactions. True forensic replay requires an immutable record of past observations.
+:::
+
+Forensic replay operates in two distinct execution modes, each answering a different diagnostic question:
+
+1. *Pure Playback Replay (State Machine Verification):* The runtime supervisor reads the recorded trajectory log and steps through the execution sequence without invoking the foundation model or executing external tool RPCs. The replay harness feeds recorded actions $a_t$ directly into the supervisor's state machine to verify whether validation logic, rate limiters, token counting estimators, or sandboxing policies malfunctioned. If the supervisor crashed due to an unhandled JSON parsing exception or an integer overflow in context-window accounting, pure playback surfaces the defect in milliseconds at zero inference cost.
+2. *Generative Replay with Hermetic Mocking (Policy Verification):* To diagnose why the foundation model selected an erroneous action $a_t$, the replay harness re-instantiates the agent runtime, loads the prompt template, system instructions, and historical context buffer $c_t$, but intercepts all outbound tool dispatches. Instead of executing the requested tool against live infrastructure, the harness queries the recorded trace for the corresponding observation $o_t$ and injects it into the next context frame. The foundation model is then re-queried under identical generation hyperparameters (temperature $\tau \to 0$, fixed random seed, identical logit penalties).
+
+Generative replay mirrors the replicated state machine principles articulated by David K. Gifford (1979) in *Weighted Voting for Replicated Data*. Gifford demonstrated that distributed replicas maintain semantic consistency across network partitions only when state transitions are governed by an immutable, quorum-verified log of historical mutations. In an agentic runtime, hermetic mocking constructs a synthetic, local replica of the external world from the telemetry trace. When the agent issues a mutating tool call—such as `DROP TABLE analytics_staging` or `DELETE /v1/instances/i-09a1`—the hermetic mock engine matches the call signature against the recorded span graph, returns the exact status payload received during the live incident, and advances the agent clock without exposing production infrastructure to secondary corruption.
+
+```python
+# Minimal trajectory replay harness intercepting tool execution via trace mocks
+def replay_step(agent, trace_span, model_client):
+    context = agent.format_context(trace_span.history)
+    predicted_action = model_client.generate(context, temperature=0.0)
+    if predicted_action.tool_name != trace_span.expected_action.tool_name:
+        raise DivergenceError(f"Drift at step {trace_span.step}: {predicted_action}")
+    # Hermetic mock: inject recorded observation without re-executing tool
+    agent.append_observation(trace_span.recorded_observation)
+```
+
+If the model re-invoked under $\tau = 0$ reproduces the exact failure action $a_t$ when presented with context $c_t$, the defect is verified to be computationally reproducible. If the model emits a completely different, valid action under zero temperature, the original production failure is classified as an edge-case stochastic excursion driven by high inference temperature or non-deterministic token sampling across distributed inference clusters.
+
+### Subsystem Fault Attribution: Distinguishing Hallucination from Interface Failure {#sec-vol3-postmortem-attribution}
+
+When an agent emits an invalid SQL query, attempts to access non-existent file paths, or loops endlessly while parsing a compiler error, operational teams routinely label the incident as an intrinsic "model hallucination." Forensic systems analysis rejects this characterization as intellectually lazy. A foundation model is an autoregressive probability distribution over next tokens conditioned entirely on the sequence of preceding tokens:
+
+$$P(a_t \mid c_t) = \prod_{i=1}^{M} P(w_i \mid c_t, w_{<i})$$
+
+where $c_t = (s_{\text{sys}}, p_{\text{task}}, a_0, o_0, \dots, a_{t-1}, o_{t-1})$ represents the accumulated context. If the observation $o_{t-1}$ returned by an operating system tool is ambiguous, silently truncated, stripped of error codes, or formatted inconsistently with the tool's declared schema, the resulting erroneous action $a_t$ is not an unprovoked hallucination. It is a completely rational, Bayesian-optimal completion over a corrupted context buffer.
+
+::: {.column-margin}
+In *A Philosophy of Software Design* (2018), John Ousterhout observes that the best interfaces are "deep": they provide powerful functionality through simple, unambiguous contracts. "Shallow" or leaky interfaces force callers to handle edge cases they cannot see. When tool interfaces are shallow or return corrupted observations, the agent's internal model of reality fractures.
+:::
+
+John Ousterhout (2018) observes in *A Philosophy of Software Design* that modules must be designed to conceal complexity and present clean, deep abstractions. When interfaces leak implementation details or produce ambiguous error modes, caller code inevitably misinterprets the interface contract. In agentic architectures, this design law is magnified: because the "caller" is a probabilistic neural network rather than a static compiler, ambiguous tool interfaces directly trigger semantic policy failures.
+
+To establish true root causes, the forensic protocol classifies every incident into one of five candidate subsystems:
+
+1. *Prompt and In-Context Budget Subsystem:* The context window manager silently pruned critical historical tokens, the system prompt contained contradictory behavioural constraints, or key instructions suffered from "lost-in-the-middle" attention degradation across long token sequences.
+2. *Tool Contract and Interface Subsystem:* The tool implementation violated its published schema, emitted raw escape characters that disrupted JSON tokenization, omitted non-zero exit codes from standard error outputs, or truncated payload bodies at an arbitrary byte threshold without appending an explicit truncation marker.
+3. *Model Deliberation and Policy Subsystem:* Given a complete, unambiguous context buffer and valid tool observations, the model made an invalid logical deduction, miscalculated an arithmetic index, or entered an autoregressive repetition cycle due to degenerative attention sink weights.
+4. *Runtime Sandbox and OS Isolation Subsystem:* The physical container environment failed. Typical mechanisms include out-of-memory kernel termination (cgroup OOM-killer dropping exit code 137), filesystem permission denials enforced by the security supervisor, or network namespace timeouts masquerading as application errors.
+5. *External Environment and Epistemic Drift:* An external microservice altered its API response schema without updating the agent's tool specification, an upstream database returned rows in non-deterministic order, or concurrent operations by external actors altered the underlying environment between steps $t$ and $t+1$.
+
+| Subsystem Classification | Physical Failure Mechanism | Observable Telemetry Signature | Forensic Verification Method |
+| :--- | :--- | :--- | :--- |
+| **Prompt / Context** | FIFO pruning evicts initial user constraints; conflicting markdown rules. | $L_t \ge S_{\max}$; high attention dispersion on early spans. | Token offset diff between $c_0$ and $c_t$; replay with expanded context capacity. |
+| **Tool Interface** | Silent payload truncation; raw ANSI escapes; unparsed stderr streams. | Payload length equals buffer cap ($16\text{ KB}$); JSON parse error in span. | Byte inspection of raw $o_t$; validation against OpenAPI JSON schema. |
+| **Model Policy** | Faulty logical deduction; spatial reasoning collapse; repetition trap. | Schema-valid action $a_t$; high sequence entropy; repetition penalty flags. | Replay with stepped reasoning prompts; temperature ablation ($\tau = 0.0$ vs. $0.7$). |
+| **Runtime Sandbox** | cgroup memory exhaustion; missing POSIX binary; namespace network drop. | Subprocess exit code 137 (SIGKILL) or 127; span duration matches timeout. | Audit `/sys/fs/cgroup/memory.events`; replay command inside bare Docker container. |
+| **External Environment** | REST API schema drift; third-party rate limit (HTTP 429); stale DNS. | External span returns HTTP 5xx/4xx; latency spike preceding failure. | Diff external payload against historical cache; replay with frozen API mock. |
+
+: Subsystem fault attribution matrix for agentic incident forensics. {#tbl-vol3-fault-attribution}
+
+Distinguishing between a Tool Interface failure and a Model Policy failure is the single most critical step in the diagnostic protocol. Consider an agent tasked with refactoring a Python codebase. At step $t=5$, the agent executes a search tool `grep_code(pattern="UserAuth")`. The underlying shell subprocess produces 180 kilobytes of matching lines. However, the host runtime's tool execution wrapper enforces an undocumented, hard-coded truncation limit of 8,192 bytes. The subprocess standard output is sliced mid-line, severing a JSON string delimiter and truncating the closing parenthesis of a function definition. 
+
+When this severed observation is appended to the context buffer, the foundation model at step $t=6$ concludes that the codebase contains a fatal syntax error and generates an unprompted action attempting to rewrite the targeted file from scratch, discarding 500 lines of existing production logic. A superficial review concludes: *"The model hallucinated a syntax error and destroyed the file."* The forensic systems post-mortem reveals the ground truth: the model reacted with perfect logical consistency to an observation stream that had been mangled by an uninstrumented runtime buffer cap. The corrective action belongs not in prompt engineering, but in the tool wrapper's streaming serialization boundary.
+
+### Controlled Counterfactual Ablation and Gym Regression Harness {#sec-vol3-postmortem-ablation}
+
+Once a causal hypothesis is formulated, the systems engineer must prove that the identified component was both *necessary* and *sufficient* to cause the failure. In complex stochastic systems, mere correlation between an anomalous trace event and a failed trajectory does not establish causality. The rigorous mechanism for causal validation is *controlled counterfactual ablation*.
+
+In a counterfactual ablation experiment, the forensic harness isolates the exact trajectory branch point—the state $s_t$ immediately preceding the catastrophic decision $a_t$. The engineer modifies exactly one architectural variable $\Delta X$ while holding all other system variables strictly invariant:
+
+$$\tau_{\text{cf}} \sim \pi_{\theta, \text{config} \oplus \Delta X}(\cdot \mid c_t)$$
+
+If the single-variable modification $\Delta X$ restores trajectory recovery across repeated stochastic evaluations, the root cause is formally confirmed. Typical ablation interventions include:
+
+- *Tool Contract Augmentation:* Appending strict input/output type annotations, providing explicit schema definitions, or converting unstructured string returns into typed JSON payloads with explicit status flags.
+- *Observation Boundary Sanitization:* Stripping terminal escape sequences, replacing silent byte truncation with explicit pagination markers (`[TRUNCATED: 4,112 bytes omitted; query with page=2]`), or redirecting stderr into dedicated observation fields.
+- *Context Pruning Refinement:* Replacing naive sliding-window FIFO token eviction with semantic summarization or selective observation masking, preventing the eviction of foundational task instructions.
+- *Deliberation Scaffolding:* Inserting a deterministic verification gate or structured scratchpad requirement prior to the generation of mutating actions.
+
+::: {.callout-note title="Worked Example: Counterfactual Ablation of a Silent Tool Truncation"}
+**Physical Scenario:** An autonomous maintenance agent operating on a 128,000-token context budget ($\approx 512\text{ KB}$ text) fails while executing a dependency audit across a mono-repository. At step $t=8$, the agent invokes `list_directory(path="/services/auth", depth=3)`. The underlying filesystem contains 420 files. The runtime tool RPC wrapper limits stdout buffers to $16\text{ KB}$ ($16,384\text{ bytes}$), truncating the file listing mid-path at file 118 (`/services/auth/models/us...`) without an EOF token or warning banner.
+
+**Observed Manifestation:** At step $t=9$, the agent emits a hallucinated conclusion: *"The directory `/services/auth/models` is corrupt; regenerating default models file."* The agent issues a destructive write action overwriting the live database model definition, triggering an immediate integration test failure.
+
+**Diagnostic Hypotheses:**
+- *Hypothesis $H_1$ (Model Reasoning):* The model lacks the capacity to comprehend nested directory hierarchies and hallucinated the corruption.
+- *Hypothesis $H_2$ (Tool Interface Contract):* The model interpreted the abruptly truncated path string as physical filesystem corruption because the tool wrapper provided no semantic signal indicating buffer overflow.
+
+**Counterfactual Ablation Protocol:**
+The forensic engineer sets up a controlled replay harness at step $t=8$. The test harness runs $N=20$ stochastic completions ($\tau = 0.7$, identical system prompt) across three experimental conditions:
+1. *Baseline Condition (Recorded Trace):* Unmodified context containing the $16\text{ KB}$ silently truncated observation.
+2. *Ablation A (Prompt Coercion):* Appending a prompt warning: *"Note: tools may truncate outputs. Do not assume corruption."*
+3. *Ablation B (Interface Contract Fix):* Modifying the tool wrapper to append an explicit structural header and pagination metadata:
+   ```json
+   {"status": "PARTIAL_CONTENT", "bytes_returned": 16384, "total_bytes": 58210, 
+    "has_more": true, "next_offset": 16384, "entries": [...]}
+   ```
+
+**Empirical Results:**
+- Under Baseline, the agent reproduces the destructive write in $19 / 20$ trials (95% failure rate).
+- Under Ablation A (Prompt Coercion), the agent avoids destructive writing in $8 / 20$ trials, but stalls or loops in $12 / 20$ trials (60% failure rate; prompt instruction proves insufficient to resolve missing file paths).
+- Under Ablation B (Interface Contract Fix), the agent recognizes partial content, emits `list_directory(..., offset=16384)`, and successfully completes the audit in $20 / 20$ trials (0% failure rate).
+
+**Forensic Conclusion:** Root cause conclusively attributed to Subsystem 2 (Tool Contract). The model's destructive action was a rational deduction over an architecturally flawed interface abstraction.
+:::
+
+The completion of a forensic post-mortem is not a static text document; it is an automated software artifact. The ultimate goal of the post-mortem protocol is to guarantee that the diagnosed failure mode can never silently recur in production. The systems engineer converts the captured trajectory, the ablated context, and the verified tool interface fix into a permanent regression test fixture within the hermetic evaluation gym (@sec-vol3-observability-gyms).
+
+```python
+# Automated regression test synthesized from forensic post-mortem INC-4921
+def test_regression_inc_4921_directory_truncation_handling(eval_gym):
+    fixture = eval_gym.load_fixture("fixtures/inc_4921_large_directory.tar.gz")
+    agent = eval_gym.spawn_agent(config="configs/production_agent.yaml")
+    # Verify agent gracefully paginates instead of emitting destructive writes
+    trajectory = agent.execute_task("Audit dependencies in /services/auth", fixture)
+    assert trajectory.status == TaskStatus.SUCCESS
+    assert not any(action.tool_name == "write_file" for action in trajectory.actions)
+    assert any(action.tool_name == "list_directory" and action.params.get("offset") 
+               for action in trajectory.actions)
+```
+
+The comprehensive findings of the investigation are compiled into a formal Systems Trajectory Post-Mortem Report, detailed in @tbl-vol3-postmortem-template. This document establishes an immutable record of the failure mechanism, the empirical validation of the root cause via counterfactual ablation, and the exact software commit that prevents regression across future agent iterations.
+
+| Report Section | Field Definition | Forensic Investigation Data |
+| :--- | :--- | :--- |
+| **Incident Metadata** | Unique Incident Identifier | `INC-2026-8831` |
+| | Root Trace ID (`trace_id`) | `4bf92f3577b34da6a3ce929d0e0e4736` |
+| | Failing Span ID (`span_id`) | `00f067aa0ba902b7` |
+| | Agent Deployment Version | `v2.4.1-runtime-prod` |
+| **Failure Manifestation** | Operational Symptom | Agent initiated unprompted rewrite of `auth_models.py`, wiping 500 lines. |
+| | Violations Incurred | Invariant Violation: Destructive write outside intended task scope. |
+| | Detection Mechanism | Tail-sampling rule triggered by `git_diff_lines > 200` on maintenance task. |
+| **Replay Verification** | Pure Playback Result | Supervisor state machine successfully verified; no internal runtime crash. |
+| | Generative Replay Result | Model deterministically reproduces destructive write at $\tau = 0.0$ ($20/20$ runs). |
+| **Fault Attribution** | Primary Subsystem | Subsystem 2: Tool Contract and Interface Design. |
+| | Root Cause Mechanism | Tool RPC wrapper silently truncated stdout buffer at $16\text{ KB}$ without signaling EOF. |
+| | Disproven Hypotheses | Model hallucination disproven; prompt instruction following disproven. |
+| **Counterfactual Validation** | Ablation Parameter $\Delta X$ | Replacement of raw truncated string with structured JSON pagination metadata. |
+| | Empirical Recovery Rate | $100\%$ recovery across $N=20$ stochastic rollouts under fixed failure seed. |
+| **Corrective Action** | Software Patch | Commit `7f1a90c`: Streaming buffer chunking with explicit pagination flags. |
+| | Gym Regression Fixture | Added `test_regression_inc_4921_directory_truncation_handling` to CI suite. |
+
+: The Systems Trajectory Post-Mortem Report template and reference instance. {#tbl-vol3-postmortem-template}
+
+***
+
+When forensic analysis successfully resolves an operational incident, the resulting engineering deliverables—a patched tool contract, an augmented runtime boundary, or an updated foundation model checkpoint—must eventually be promoted back into the live production environment. However, verifying that a patch eliminates a specific failure mode in a hermetic gym does not prove that the modified system will remain stable when subjected to the full entropy of real-world user requests. In a complex stochastic fleet, even a provably beneficial tool modification can trigger subtle behavioural drift, shift token allocation patterns, or degrade goodput across previously unaffected workflows. Safely releasing updated model weights and runtime supervisors requires moving beyond offline post-mortems to active, real-time verification in production. That operational imperative motivates the architectural mechanics of staged canary deployments and runtime circuit breakers.

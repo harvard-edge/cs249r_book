@@ -6173,6 +6173,48 @@ class ValidateCommand:
         r"(?:ms|GB|TB|MB|KB|Gbps|Mbps|Tbps|TFLOPS|GFLOPS|W)\b"
     )
 
+    # ------------------------------------------------------------------
+    # Prose masking shared by the unit/binary-unit scanners
+    #
+    # 2026-09-20: both scanners previously skipped only fenced code blocks, so
+    # they fired inside inline math, inline code spans, and pipe-table cells —
+    # exactly the contexts book-prose.md exempts. On Volume III that was 321 of
+    # 354 binary-unit hits and 17 of 20 unit-spacing hits, all false positives.
+    # Mask first, then match.
+    # ------------------------------------------------------------------
+
+    INLINE_MATH_PATTERN = re.compile(r"(?<!\\)\$(?!\$)(.+?)(?<!\\)\$")
+    INLINE_CODE_PATTERN = re.compile(r"`[^`]*`")
+
+    _UNIT_TOKEN_ALLOWLIST: Optional[frozenset] = None
+
+    @classmethod
+    def _unit_token_allowlist(cls) -> frozenset:
+        """Tokens whose digit-letter run is a proper noun, not a missing space."""
+        if cls._UNIT_TOKEN_ALLOWLIST is None:
+            path = Path(__file__).resolve().parent.parent / "data" / "unit_token_allowlist.txt"
+            entries = set()
+            if path.exists():
+                for raw in path.read_text(encoding="utf-8").splitlines():
+                    entry = raw.split("#", 1)[0].strip()
+                    if entry:
+                        entries.add(entry)
+            cls._UNIT_TOKEN_ALLOWLIST = frozenset(entries)
+        return cls._UNIT_TOKEN_ALLOWLIST
+
+    @classmethod
+    def _mask_prose_line(cls, line: str) -> Optional[str]:
+        """Blank out spans where units are allowed; return None to skip the line.
+
+        Inline math and inline code keep their length so match offsets stay
+        valid against the original line. Pipe-table rows are skipped whole.
+        """
+        if line.lstrip().startswith("|"):
+            return None
+        masked = cls.INLINE_MATH_PATTERN.sub(lambda m: "\x00" * len(m.group(0)), line)
+        masked = cls.INLINE_CODE_PATTERN.sub(lambda m: "\x00" * len(m.group(0)), masked)
+        return masked
+
     def _run_unit_spacing(self, root: Path) -> ValidationRunResult:
         """Flag number+unit with no space (e.g. 100ms → 100 ms, 4GB → 4 GB)."""
         start = time.time()
@@ -6189,7 +6231,20 @@ class ValidateCommand:
                     continue
                 if in_code:
                     continue
-                for m in self.UNIT_SPACING_PATTERN.finditer(line):
+                masked = self._mask_prose_line(line)
+                if masked is None:
+                    continue
+                allowlist = self._unit_token_allowlist()
+                for m in self.UNIT_SPACING_PATTERN.finditer(masked):
+                    # Widen to the whole surrounding token so a part number
+                    # such as A100-SXM4-80GB is tested, not just its "80GB".
+                    ts, te = m.start(), m.end()
+                    while ts > 0 and (line[ts - 1].isalnum() or line[ts - 1] == "-"):
+                        ts -= 1
+                    while te < len(line) and (line[te].isalnum() or line[te] == "-"):
+                        te += 1
+                    if line[ts:te] in allowlist or m.group(0) in allowlist:
+                        continue
                     context = line[max(0, m.start() - 2) : min(len(line), m.end() + 5)].strip()
                     issues.append(
                         ValidationIssue(
@@ -6232,7 +6287,10 @@ class ValidateCommand:
                     continue
                 if in_code:
                     continue
-                for m in self.BINARY_UNITS_PATTERN.finditer(line):
+                masked = self._mask_prose_line(line)
+                if masked is None:
+                    continue
+                for m in self.BINARY_UNITS_PATTERN.finditer(masked):
                     context = line[max(0, m.start() - 3) : min(len(line), m.end() + 3)].strip()
                     issues.append(
                         ValidationIssue(
@@ -10565,8 +10623,9 @@ class ValidateCommand:
             parts.append(f"{total_errors} error(s)")
         if total_warnings:
             parts.append(f"{total_warnings} warning(s)")
-        label = " and ".join(parts)
-        console.print(f"[red]Validation failed with {label}.[/red]")
+        if parts:
+            label = " and ".join(parts)
+            console.print(f"[red]Validation failed with {label}.[/red]")
 
     def _emit(self, as_json: bool, payload: Dict[str, Any], failed: bool) -> None:
         """Print a status payload as JSON, or print its message in red or green."""

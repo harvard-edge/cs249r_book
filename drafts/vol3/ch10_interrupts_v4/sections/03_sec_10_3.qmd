@@ -1,0 +1,244 @@
+## Periodic State Checkpointing {#sec-vol3-persistence-checkpointing}
+
+A pure Write-Ahead Logging architecture guarantees safety under sudden process termination, but it exposes the runtime to a severe computational bottleneck during crash recovery: replay latency scales linearly with trajectory length. If an autonomous coding agent fails at turn $t = 1{,}200$ after six hours of continuous tool execution, forcing the supervisor to sequentially parse, deserialize, and project twelve hundred historical event records across an empty memory space guarantees unacceptable service unavailability. The recovery engine must reconstruct the active prompt context, the tool dispatch table, the variable environment, and the workspace filesystem state before the neural inference loop can generate a single replacement token. As trajectories stretch across thousands of discrete interaction turns, sequential event-log scan time balloons from tens of milliseconds into dozens of seconds, during which client connections stall and downstream orchestration pipelines idle.
+
+**Durable state checkpointing bounds recovery latency by decoupling trajectory restart time from total execution history.** By periodically committing a consolidated snapshot of the runtime's memory structures and filesystem state to non-volatile storage, the agent supervisor transforms crash recovery from an $\mathcal{O}(t)$ scan over the entire lifetime of the trajectory into an $\mathcal{O}(1)$ base-state hydration followed by an $\mathcal{O}(k)$ scan over the short delta log accumulated since the most recent checkpoint. Yet state checkpointing is not free; capturing and committing an operational snapshot consumes host CPU cycles, saturates memory bus bandwidth, and triggers non-volatile storage write amplification that stalls active token processing. A dependable agent runtime must therefore formulate checkpoint cadence as an analytical optimization problem, balancing the immediate write overhead of periodic snapshots against the probabilistic recomputation cost incurred when a crash forces historical trajectory replay.
+
+::: {.column-margin}
+![Periodic Checkpoint Cadence: Base Snapshots and Delta Segments](images/svg/checkpoint-cadence.svg){#fig-vol3-checkpoint-cadence}
+:::
+
+### Full State Snapshots versus Incremental Delta Encoding
+
+Every state snapshot must preserve enough structural information to resurrect an operational Agent Control Block ($\text{ACB}$) without re-evaluating historical intermediate events. In an unprivileged agent architecture operating under Zero Ambient Authority ($A=0$), the active state vector at turn $t$, denoted $\mathbf{S}_t$, comprises three distinct system layers: the supervisor control plane, the structured interaction context, and the external execution environment. The supervisor control plane encompasses the task goal specification, the active step counter $t$, the remaining token and monetary budgets, the tool authorization capability table, and the lifecycle status of all child subagent processes. The interaction context encapsulates the logical prompt conversation buffer, the active system instructions, and the ordered sequence of validated tool call invocations paired with their returned observation references. The execution environment state captures the guest filesystem mount configuration, working directory pointers, exported shell environment variables, and cryptographic hashes of modified workspace artifacts.
+
+The architectural dilemma lies in how this compound state vector is serialized and committed to disk. The runtime can execute a *full state snapshot*, serializing the entire consolidated $\mathbf{S}_t$ into a self-contained, monolithic binary payload, or it can emit an *incremental delta snapshot*, recording only the differential mutations that occurred since the preceding checkpoint $\mathbf{S}_{t-1}$.
+
+```
++-------------------------------------------------------------------------+
+|                  Full Snapshot vs. Incremental Delta                    |
++-------------------------------------------------------------------------+
+|  Turn 0       Turn 100            Turn 200            Turn 300          |
+|  [Base S_0] -> [Full Snap S_100] -> [Full Snap S_200] -> [Full S_300]   |
+|   |             |                   |                   |               |
+|   +-(Delta 1)---+-(Delta 2)---------+-(Delta 3)---------+               |
+|                 \                                       /               |
+|                  +-- Cumulative Recovery Chain --------+                |
++-------------------------------------------------------------------------+
+```
+
+Under a full snapshot policy, the supervisor marshals the complete $\text{ACB}_t$ into a compact binary representation—typically using a schema-validated columnar format or zero-copy serialization buffers such as FlatBuffers—and writes the resulting byte array directly to the persistence store. The primary advantage of the full snapshot is immediate, decoupled recovery: resurrection requires reading exactly one snapshot record from disk. The runtime performs no historical backwards-chaining. The storage engine can prune or archive all preceding snapshots and raw event logs prior to turn $t$ without compromising the recoverability of the active state. 
+
+However, full snapshots exhibit prohibitive write amplification as the trajectory context expands. In long-horizon reasoning tasks, the interaction context grows monotonically as thousands of input and output tokens, file diffs, and compiler logs accumulate in the conversation buffer. If an agent's context window reaches $128\text{ KiB}$ of structured text and metadata, committing a full snapshot every five turns over a five-hundred-turn trajectory forces the storage engine to write:
+
+$$\text{Total Bytes Written} = \sum_{k=1}^{100} k \cdot \Delta_{\text{turn}} \approx 50 \cdot 100 \cdot 128\text{ KiB} \approx 640\text{ MiB}$$
+
+This steady stream of redundant byte serialization consumes storage bus throughput and evicts active pages from the host operating system's unified page cache, competing directly with the memory requirements of local inference engines and sandboxed compiler toolchains.
+
+::: {.column-margin}
+**Write Amplification Factor ($\text{WAF}_{\text{snap}}$):**
+$$\text{WAF}_{\text{snap}} = \frac{\text{Bytes Written to Disk}}{\text{Unique State Changes}}$$
+For full snapshots over monotonic trajectories, $\text{WAF}_{\text{snap}} \propto t$, whereas for incremental delta encoding, $\text{WAF}_{\text{snap}} \approx 1$.
+:::
+
+Incremental delta encoding mitigates this write amplification by decomposing the state transition into a compact delta function:
+
+$$\Delta_t = \mathbf{S}_t \ominus \mathbf{S}_{t - \tau}$$
+
+where $\tau$ represents the checkpoint stride. Rather than serializing the entire conversation buffer and environment map, the runtime records only the newly appended message tokens, the updated budget decrement counters, newly opened file descriptors, and filesystem inodes modified within the window $[t - \tau, t]$. When operating with an underlying append-only Write-Ahead Log, this delta encoding is frequently free: the delta $\Delta_t$ is isomorphic to the ordered sequence of event records $\langle e_{t-\tau+1}, \dots, e_t \rangle$ already committed by the WAL engine.
+
+| Architectural Dimension | Full State Snapshot | Incremental Delta Snapshot | Copy-on-Write (CoW) Memory Fork |
+| :--- | :--- | :--- | :--- |
+| **Serialization Overhead** | High; scales linearly with total context size $\mathcal{O}(\|\mathbf{S}_t\|)$ | Low; strictly bounded by window mutation $\mathcal{O}(\|\Delta_t\|)$ | Near-zero pause; page table duplication $\mathcal{O}(\text{RSS})$ |
+| **Storage Amplification** | Severe quadratic growth over extended trajectories | Minimal; stores unique state transitions | Moderate; proportional to dirty memory page volume |
+| **Crash Recovery Time** | Minimal $\mathcal{O}(1)$; single read and instantaneous memory unpack | Moderate $\mathcal{O}(\tau)$; requires applying delta chain from base | Minimal $\mathcal{O}(1)$; re-maps backing store or page files |
+| **Log Compaction Impact** | Trivial; all historical snapshots before $t$ can be pruned | Complex; requires periodic base consolidation to prune logs | Moderate; requires background page coalescing and cleanup |
+| **Isolation Barrier** | High; complete decoupling from live process memory space | Moderate; dependent on continuous replay engine verification | Process-bound; tied to local host kernel memory semantics |
+
+The engineering trade-off of incremental delta encoding centers on crash recovery complexity. Restoring an agent from an incremental scheme requires locating the most recent full base checkpoint $\mathbf{S}_{\text{base}}$ and sequentially applying the chain of subsequent deltas:
+
+$$\mathbf{S}_t = \mathbf{S}_{\text{base}} \oplus \Delta_1 \oplus \Delta_2 \oplus \dots \oplus \Delta_m$$
+
+If any delta segment in the recovery chain suffers bit-rot, cryptographic signature mismatch, or torn writes, the entire trajectory downstream of the corruption boundary becomes unrecoverable. Robust production runtimes therefore adopt a *hybrid tiered checkpointing strategy*: the supervisor emits lightweight incremental deltas at high frequency (for instance, following every mutating tool dispatch) and consolidates these deltas into a monolithic full base snapshot at low frequency (for instance, every fifty turns, or after major task milestones). This architecture bounds the recovery chain to at most $\tau_{\max}$ delta evaluations while keeping steady-state write amplification flat.
+
+### The Mechanics of Optimal Checkpoint Cadence: Young-Daly Formulations
+
+Selecting the temporal interval between consecutive checkpoints represents a classical systems dilemma. If the supervisor checkpoints too frequently, the runtime expends its computational budget serializing data structures, locking concurrent queues, and waiting on non-volatile storage barriers, thereby throttling end-to-end agent throughput. Conversely, if the supervisor checkpoints too infrequently, any hardware crash, network partition, or out-of-memory kernel eviction forces the recovery engine to replay a vast log of historical operations. During replay, the system incurs significant recomputation latency and wastes valuable token and compute budgets re-evaluating deterministic operations.
+
+```
+       Checkpoint Write Latency (delta_snap)
+      |<- C ->|
+------+-------+---------------------------------------+-------+----> Time
+      | Checkpoint 1                                  | Checkpoint 2
+      |<--------------- Interval (T) ---------------->|
+                                              * CRASH *
+                                              |<- R ->|
+                                               Replay Recomputation
+```
+
+To establish the mathematically optimal checkpoint interval, we adapt the classical fault-tolerance models formulated by J. W. Young (1974) and extended by John T. Daly (2006) for high-performance computing systems. Let $\text{MTBF}$ represent the Mean Time Between Failures of the execution environment, encompassing host hardware faults, container evictions, spot instance terminations, and unhandled sandbox panics. Let $\delta_{\text{snap}}$ denote the total wall-clock time required to serialize, flush, and confirm a state snapshot to persistent storage, during which active agent execution is paused or throttled. Let $T$ represent the checkpoint interval (the time elapsed between the completion of one checkpoint and the initiation of the next).
+
+The total execution time of a long-running agent trajectory can be partitioned into three components: useful progress time ($T_{\text{work}}$), checkpointing overhead ($T_{\text{overhead}}$), and recovery/recomputation waste ($T_{\text{lost}}$). Over an extended operating horizon comprising $N$ failure cycles, the number of checkpoints taken per unit time is approximately $1 / T$, meaning the fractional overhead consumed by checkpoint creation is:
+
+$$\mathcal{L}_{\text{snap}} = \frac{\delta_{\text{snap}}}{T}$$
+
+When a failure occurs, it interrupts the system at a random point within the checkpoint interval. Assuming that failure arrivals follow an independent Poisson process with constant rate $\lambda = 1 / \text{MTBF}$, the expected time of failure occurrence is uniformly distributed across the interval $[0, T]$. Upon restarting from the last committed checkpoint, the runtime must read the snapshot from disk (requiring recovery latency $R$) and re-execute the trajectory up to the failure point. The expected time lost per failure is:
+
+$$\mathbb{E}[T_{\text{lost\_per\_failure}}] = R + \frac{T}{2}$$
+
+Because failures occur at rate $1 / \text{MTBF}$, the fractional waste incurred due to system failures and subsequent recomputation is:
+
+$$\mathcal{L}_{\text{fault}} = \frac{1}{\text{MTBF}} \left( R + \frac{T}{2} \right)$$
+
+The total fractional overhead $\mathcal{U}(T)$ across the life of the agent runtime is the sum of the checkpointing cost and the failure-recovery waste:
+
+$$\mathcal{U}(T) = \mathcal{L}_{\text{snap}} + \mathcal{L}_{\text{fault}} = \frac{\delta_{\text{snap}}}{T} + \frac{R}{\text{MTBF}} + \frac{T}{2 \cdot \text{MTBF}}$$
+
+To find the checkpoint interval $T_{\text{opt}}$ that minimizes total overhead, we compute the first derivative of $\mathcal{U}(T)$ with respect to $T$ and set the result to zero:
+
+$$\frac{d\mathcal{U}}{dT} = -\frac{\delta_{\text{snap}}}{T^2} + \frac{1}{2 \cdot \text{MTBF}} = 0$$
+
+Solving for $T$ yields Young's first-order optimal checkpoint interval:
+
+$$T_{\text{opt}} = \sqrt{2 \cdot \delta_{\text{snap}} \cdot \text{MTBF}}$$ {#eq-vol3-young-formula}
+
+Young's formulation reveals that the optimal checkpoint interval scales with the geometric mean of the snapshot commit latency and the mean time between failures. If storage performance improves such that $\delta_{\text{snap}}$ decreases by a factor of four, the supervisor should checkpoint twice as frequently. Conversely, if the agent runs in a highly volatile spot-instance environment where $\text{MTBF}$ drops from twenty-four hours to thirty minutes, the checkpoint frequency must dramatically increase to bound the recovery blast radius.
+
+Daly extended Young's first-order approximation to account for higher-order effects that emerge when the snapshot commit time $\delta_{\text{snap}}$ constitutes a non-negligible fraction of the total interval $T$, and when failures can occur during the snapshotting operation itself. Under Daly's formulation, the higher-order optimal interval is:
+
+$$T_{\text{opt, Daly}} = \begin{cases}
+\sqrt{2 \cdot \delta_{\text{snap}} \cdot \text{MTBF}} + \delta_{\text{snap}}, & \text{for } \delta_{\text{snap}} < 2 \cdot \text{MTBF} \\
+\sqrt{2 \cdot \delta_{\text{snap}} \cdot \text{MTBF}} - \delta_{\text{snap}}, & \text{first-order perturbation expansion}
+\end{cases}$$
+
+In practice, an agent supervisor does not measure time purely in continuous wall-clock seconds; it measures progress in discrete interaction turns $t$. Let $\mu_{\text{turn}}$ represent the mean wall-clock duration of a single agent interaction turn (including foundation model inference, network transit, tool execution, and local validation). The optimal checkpoint cadence expressed in terms of turn interval $\tau_{\text{opt}}$ is obtained by discretizing the continuous formulation:
+
+$$\tau_{\text{opt}} = \left\lceil \frac{T_{\text{opt}}}{\mu_{\text{turn}}} \right\rceil = \left\lceil \frac{\sqrt{2 \cdot \delta_{\text{snap}} \cdot \text{MTBF}}}{\mu_{\text{turn}}} \right\rceil$$ {#eq-vol3-turn-cadence}
+
+::: {.callout-note title="Worked Example: Optimal Checkpoint Cadence on NVMe versus Network Block Storage"}
+Consider an autonomous software engineering agent deployed on an ephemeral cloud instance. The agent executes complex multi-file refactoring workflows where each turn averages $\mu_{\text{turn}} = 12\text{ seconds}$ (dominated by remote LLM inference and local test execution). The environment exhibits an estimated $\text{MTBF} = 4\text{ hours} = 14{,}400\text{ seconds}$ due to aggressive spot-instance preemption and container host recycles. 
+
+The supervisor maintains an $\text{ACB}$ and execution context that produces a serialized snapshot payload of $32\text{ MiB}$ per checkpoint. We evaluate two distinct persistence storage tiers:
+
+**Tier 1: Direct-Attached NVMe Flash.** The runtime writes serialized snapshots to local NVMe storage using direct I/O (`O_DIRECT`). The storage tier sustains a sequential write bandwidth of $1.6\text{ GiB/s}$, yielding a snapshot commit latency of:
+$$\delta_{\text{snap, NVMe}} = \frac{32\text{ MiB}}{1600\text{ MiB/s}} = 0.020\text{ seconds} \ (20\text{ ms})$$
+
+Applying Young's formula (@eq-vol3-young-formula):
+$$T_{\text{opt}} = \sqrt{2 \cdot 0.020\text{ s} \cdot 14{,}400\text{ s}} = \sqrt{576} = 24.0\text{ seconds}$$
+Converting to interaction turns via @eq-vol3-turn-cadence:
+$$\tau_{\text{opt}} = \left\lceil \frac{24.0\text{ s}}{12\text{ s}} \right\rceil = 2\text{ turns}$$
+On high-speed local NVMe, the supervisor should commit a snapshot every 2 turns. The fractional runtime overhead introduced by this aggressive checkpointing is:
+$$\mathcal{U} = \frac{0.020}{24} + \frac{24}{2 \cdot 14{,}400} = 0.00083 + 0.00083 = 0.166\%$$
+
+**Tier 2: Network-Attached Object Store.** The runtime transmits snapshots over a shared gigabit virtual interface to a remote object store. Due to TLS handshakes, multi-part HTTP POST overhead, and network transit, the effective snapshot commit latency rises to:
+$$\delta_{\text{snap, Network}} = 4.5\text{ seconds}$$
+
+Applying Young's formula:
+$$T_{\text{opt}} = \sqrt{2 \cdot 4.5\text{ s} \cdot 14{,}400\text{ s}} = \sqrt{129{,}600} = 360.0\text{ seconds} \ (6\text{ minutes})$$
+Converting to interaction turns:
+$$\tau_{\text{opt}} = \left\lceil \frac{360.0\text{ s}}{12\text{ s}} \right\rceil = 30\text{ turns}$$
+On the higher-latency network tier, the supervisor must back off its checkpoint cadence to once every 30 turns. The total fractional overhead rises to:
+$$\mathcal{U} = \frac{4.5}{360} + \frac{360}{28{,}800} = 0.0125 + 0.0125 = 2.50\%$$
+Attempting to maintain the 2-turn cadence over the network store would waste $4.5 / 24 = 18.75\%$ of all execution time purely waiting on network I/O barriers.
+:::
+
+The mathematical model underscores a critical operational principle: checkpoint cadence must dynamically adapt to physical storage capabilities. If an agent runtime detects storage congestion or network interface throttling, it must dynamically scale the interval parameter $\tau$ upward to prevent checkpoint queuing from starving forward execution progress.
+
+### Coordinated Atomicity Across Memory, Database, and Storage Overlays
+
+The central architectural failure in naive agent checkpointing implementations is the *plane-skew tearing hazard*. An autonomous agent is not an isolated in-memory program; it is a distributed composite spanning three decoupled persistence planes:
+
+1. **The In-Memory Supervisor Plane:** The live Python/Rust runtime memory space holding the active $\text{ACB}_t$, call stacks, token buffers, pending futures, and ephemeral capability tokens.
+2. **The Relational/LSM Event Store Plane:** The structured database (such as an embedded SQLite WAL engine or external PostgreSQL instance) maintaining the append-only event log $\mathcal{E}$.
+3. **The Sandboxed Guest Filesystem Plane:** The guest workspace filesystem containing files modified, compiled, or executed by tools (managed via a Linux container namespace backed by an OverlayFS or Btrfs filesystem).
+
+If the agent supervisor attempts to take uncoordinated snapshots of these three planes independently, recovery guarantees collapse. Consider the concrete failure sequence illustrated in the following execution trace.
+
+```
++-------------------------------------------------------------------------+
+|                  Plane-Skew Tearing Failure Sequence                    |
++-------------------------------------------------------------------------+
+| Time   Plane                Action                                      |
+| ----   -----                ------                                      |
+| t_0    Supervisor Plane     Freezes ACB state at turn t=42.             |
+| t_1    Guest Filesystem     Dispatches tool mutating workspace:         |
+|                             `rm -rf /workspace/src/compiler.cc`         |
+| t_2    Filesystem Plane     Captures OverlayFS snapshot (reflects rm).  |
+| t_3    Host Crash           Kernel panics before event e_43 commits.    |
+| ----   ---------------------------------------------------------------- |
+| Recv   Recovery Engine      Restores ACB at t=42; inspects workspace.   |
+|                             Invariant violated: ACB expects file,       |
+|                             filesystem already destroyed it!            |
++-------------------------------------------------------------------------+
+```
+
+When the recovery engine resurrects the trajectory from this torn checkpoint, the supervisor attempts to resume execution from turn $t=42$. The restored $\text{ACB}_{42}$ instructs the agent to read `/workspace/src/compiler.cc` or compute a unified patch against it. However, the restored filesystem snapshot reflects the state from time $t_2$, where the file was already deleted by uncommitted turn $t=43$. The agent crashes immediately with an unhandled `ENOENT` (No such file or directory) error. The system has suffered state tearing: the filesystem traveled into the future relative to the supervisor control plane.
+
+To prevent plane-skew tearing, the runtime must enforce *coordinated cross-plane snapshot atomicity*. All three planes must advance their snapshot boundaries across a synchronized barrier, ensuring that the restored state reflects a globally consistent cut across memory, events, and disk bytes.
+
+```
+       Live Execution
+             |
+             v
+   [ 1. Phase-1: Barrier ]   --> Quiesce tool dispatch; drain pending RPCs
+             |
+             v
+   [ 2. Phase-2: Freeze ]    --> Flush SQLite WAL; issue FIFREEZE to disk
+             |
+             v
+   [ 3. Phase-3: CoW Fork ]  --> Fork memory (CoW); create Btrfs/OverlayFS snapshot
+             |
+             v
+   [ 4. Phase-4: Thaw ]      --> FIFTHAW disk; resume live execution loop
+             |
+             v (Background Thread)
+   [ 5. Phase-5: Commit ]    --> Stream frozen memory and DB bytes to durable storage
+```
+
+This coordinated snapshot protocol proceeds through five strictly ordered phases:
+
+First, in the **Quiescence Barrier Phase**, the supervisor pauses the agent's outer execution loop between interaction turns. It blocks the dispatch of new tool invocations and drains all in-flight asynchronous completions from the model provider. No mutating syscalls may enter the execution pipeline during this phase.
+
+Second, in the **Database Flush Phase**, the supervisor instructs the event storage engine to flush all uncommitted WAL frames to disk using `PRAGMA wal_checkpoint(TRUNCATE)` or an explicit `fsync()` barrier. This guarantees that the relational event log precisely matches the current turn $t$.
+
+Third, in the **Filesystem Freeze Phase**, the supervisor coordinates with the host container runtime to freeze the guest filesystem. On Linux hosts, this is achieved by issuing the `FIFREEZE` ioctl against the underlying block device or invoking an atomic snapshot against the storage driver:
+
+```c
+// Atomic filesystem freeze prior to storage snapshot
+int fd = open("/var/lib/agent/sandboxes/sand_042/upper", O_RDONLY);
+if (ioctl(fd, FIFREEZE, 0) < 0) {
+    perror("ioctl FIFREEZE failed; aborting snapshot");
+    abort();
+}
+```
+
+While the filesystem is frozen, all pending write operations to the upper directory of the OverlayFS layer are halted, and the kernel guarantees that metadata structures and directory entries remain completely static.
+
+Fourth, in the **Copy-on-Write Fork Phase**, the runtime captures instantaneous point-in-time references across all three planes:
+- *Memory:* The supervisor performs a process fork (`fork()`) or utilizes userfaultfd memory tracking to capture a Copy-on-Write reference of the $\text{ACB}_t$ serialization buffer.
+- *Database:* The runtime opens a read-only transaction handle or creates a hard-link copy of the flushed SQLite database file.
+- *Filesystem:* The runtime creates an atomic Copy-on-Write snapshot of the container's upper layer using subvolume cloning in Btrfs (`btrfs subvolume snapshot`), ZFS clones, or by atomically creating a new upper directory branch in OverlayFS.
+
+Fifth, in the **Thaw and Asynchronous Commit Phase**, the supervisor immediately issues the `FITHAW` ioctl to unfreeze the guest filesystem, releases the quiescence lock on the tool dispatcher, and resumes active agent processing. The pause time imposed on the agent is strictly bounded by the microseconds required to capture the metadata pointers and CoW branches. A background I/O worker thread takes ownership of the forked memory buffers, database hard links, and disk snapshot directories, serializing and streaming them to the non-volatile persistence tier asynchronously.
+
+::: {.callout-note title="Empirical Failure Trace: Crash Recovery Verification"}
+The following log trace illustrates a dependable recovery sequence executed by an agent supervisor following an unexpected host power failure during a refactoring task:
+
+```text
+[04:12:01.102] CRIT host_kernel: Power fault detected; emergency halt.
+[04:12:08.431] INFO agent_boot: Initializing supervisor crash recovery subsystem.
+[04:12:08.445] INFO agent_boot: Found valid base snapshot 'snap_t250.bin' (Turn 250).
+[04:12:08.448] INFO agent_boot: Verifying SHA-256 integrity: 8f4a3c... MATCH.
+[04:12:08.452] INFO agent_boot: Rolling back OverlayFS upper layer to 'snap_t250_disk'.
+[04:12:08.471] INFO agent_boot: Restoring in-memory ACB from snapshot buffer: 2.1 ms.
+[04:12:08.472] INFO agent_boot: Scanning WAL event log from sequence 251 to 258...
+[04:12:08.479] INFO agent_boot: Replaying event 251: tool_auth(git_status) -> deterministic ok.
+[04:12:08.484] INFO agent_boot: Replaying event 254: tool_auth(patch_apply) -> verified ok.
+[04:12:08.490] WARN agent_boot: Event 258 torn at EOF; discarding incomplete record.
+[04:12:08.495] INFO agent_boot: Recovery complete. State synchronized at Turn 257. Resuming.
+```
+:::
+
+By synchronizing the memory structures, database event logs, and sandbox filesystem layers across an atomic barrier, the runtime guarantees that any restored checkpoint represents a mathematically valid cut of the agent's world. Crash recovery can unpack the memory image, mount the corresponding filesystem snapshot, and immediately resume forward execution without encountering the phantom files, corrupted git trees, or missing file descriptors that inevitably plague uncoordinated logging systems.
+
+Once snapshots and event logs are safely coordinated and persisted, the runtime faces the challenge of re-activating these records following a failure. How the agent supervisor uses this historical record to rebuild the active control block and resume forward execution—without blindly re-executing external tool actions and triggering duplicate real-world mutations—is the governing systems problem of historical trajectory reconstruction.

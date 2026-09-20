@@ -30,6 +30,7 @@ def test_agents_registry_units():
 def test_agents_registry_provenance():
     for agent in [
         Agents.Coding.SWE_Bench_Runner,
+        Agents.Coding.SWE_Bench_Workstation,
         Agents.Deliberation.TreeSearch,
         Agents.MultiAgent.SupervisorWorker,
         Agents.Interactive.StreamingVoice,
@@ -37,3 +38,29 @@ def test_agents_registry_provenance():
         assert isinstance(agent, AgentArchitecture)
         assert agent.metadata.provenance is not None
         assert agent.metadata.provenance.ref != ""
+
+
+def test_agent_platforms_hierarchy():
+    from mlsysim import AgentPlatforms, Systems, Hardware, Models
+
+    cloud = AgentPlatforms.Cloud_DGX_H100
+    assert cloud is Agents.Coding.SWE_Bench_Runner
+    assert cloud.serving_node is Systems.Nodes.HGX_H100_EPYC
+    assert cloud.serving_node.accelerator is Hardware.Cloud.H100
+    assert cloud.serving_node.host_cpu == "Dual AMD EPYC 9654"
+    assert cloud.serving_node.host_cpu_cores == 192
+    assert cloud.sandbox_startup_latency.to("ms").magnitude == pytest.approx(5.0)
+    assert cloud.sandbox_snapshot_restore_latency.to("ms").magnitude == pytest.approx(15.0)
+    assert cloud.sandbox_memory_footprint.to("MiB").magnitude == pytest.approx(512.0)
+    assert cloud.max_trajectory_steps == 30
+    assert cloud.reference_model is Models.Language.Llama3_70B
+
+    ws = AgentPlatforms.Workstation_Apple
+    assert ws is Agents.Coding.SWE_Bench_Workstation
+    assert ws.serving_node is Systems.Nodes.Workstation_M3Max
+    assert ws.serving_node.accelerator is Hardware.Workstation.MacBookM3Max
+    assert ws.serving_node.host_cpu == "Apple M3 Max 16-Core"
+    assert ws.serving_node.host_cpu_cores == 16
+    assert ws.reference_model is Models.Language.Llama3_8B
+    assert ws.sandbox_startup_latency.to("ms").magnitude == pytest.approx(25.0)
+

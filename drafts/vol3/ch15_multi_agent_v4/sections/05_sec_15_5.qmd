@@ -1,0 +1,183 @@
+## Correlated Ensemble Failures {#sec-vol3-multiagent-consensus}
+
+Deploying an ensemble of language agents to achieve high-assurance task execution confronts an immediate operational trap: when multiple agent processes review code proposals, vote on tool parameters, or validate plan traces, systems architects routinely treat them as independent stochastic trials whose aggregate majority vote asymptotically suppresses error. In classical fault-tolerant computing, this assumption mirrors $N$-modular redundancy (NMR), where replicated hardware units with independent failure distributions vote to mask transient single-event upsets. However, applying majority voting or peer-review protocols to unprivileged foundation model agents commits a fundamental category error. 
+
+**Multi-agent consensus does not prove semantic correctness; because stochastic foundation models share pre-training corpora, tokenizer vocabulary boundaries, and architectural inductive biases, their error distributions are strongly correlated, causing homogeneous voting ensembles to arrive at confident, unanimous, and catastrophic failures.**
+
+```
++-----------------------------------------------------------------------------+
+| Classical Fault Tolerance (NMR)          Agent Fleet Consensus              |
+| Independent physical hardware faults     Correlated statistical blind spots |
+|                                                                             |
+| Unit 1: [ Normal ]                       Agent 1: [ Hallucinated Path ]     |
+| Unit 2: [ Normal ]                       Agent 2: [ Hallucinated Path ]     |
+| Unit 3: [ Alpha Hit ] (Masked by vote)   Agent 3: [ Hallucinated Path ]     |
+| Outcome: Correct output via 2/3 quorum   Outcome: Unanimous failure (3/3)   |
++-----------------------------------------------------------------------------+
+```
+
+When an agent runtime delegates critical verification to an ungrounded voting council, it merely multiplies inference cost without purchasing genuine fault tolerance. Understanding why requires dissecting the mathematical breakdown of ensemble independence, establishing the boundary between subjective consensus and empirical invariant verification, and analyzing how flawed agent outputs act as Byzantine faults that poison downstream contexts.
+
+### The Fallacy of the Condorcet Jury Theorem in Stochastic Models
+
+The theoretical justification for voting ensembles traces back to the Condorcet Jury Theorem (Condorcet, 1785). The theorem states that if a group of $M$ decision-makers makes a binary choice between a correct and an incorrect option, and each voter has an independent probability $p > 0.5$ of choosing correctly, then the probability that the majority vote is correct approaches $1$ monotonically as $M \to \infty$. Conversely, if $p < 0.5$, the probability of a correct majority vote approaches $0$.
+
+The operational linchpin of Condorcet's theorem is the assumption of conditional statistical independence. For a ground truth state $\theta \in \{0, 1\}$ and voter decisions $X_1, X_2, \dots, X_M$, the joint decision probability must factorize as:
+
+$$P(X_1, X_2, \dots, X_M \mid \theta) = \prod_{i=1}^M P(X_i \mid \theta)$$
+
+In language model fleets, this factorization is false. Foundation models do not draw their hypotheses from independent physical noise sources; they draw them from parameter matrices optimized over virtually identical web-scale pre-training distributions (Common Crawl, GitHub, Wikipedia, Stack Overflow). Furthermore, they share identical Byte-Pair Encoding (BPE) tokenizer vocabulary structures and Transformer attention inductors. When confronted with an out-of-distribution programming pattern, a deceptive counterexample, or a subtly broken API contract, agents sharing the same base model do not fail randomly—they fail along identical latent fault lines:
+
+$$P(X_1 = 0, X_2 = 0, \dots, X_M = 0 \mid \theta = 1) \gg \prod_{i=1}^M P(X_i = 0 \mid \theta = 1)$$
+
+::: {.column-margin}
+Setting decode temperature $T > 0$ introduces stochastic variation across generated token sequences, but it does not alter the underlying conditional probability distribution over semantic concepts. Temperature alters the *sampling path* through the logit distribution; it does not eliminate the latent blind spots encoded in the model's static weight tensors.
+:::
+
+When identical or similarly trained models vote on an ambiguous task, their errors exhibit high positive intra-class correlation. Rather than canceling out like uncorrelated thermal noise in electronic circuits, the correlated errors amplify. If five parallel agent instances are queried to determine whether a complex concurrent lock implementation contains a race condition, and the base model's pre-training data overrepresents an incorrect textbook pattern, all five instances will confidently approve the broken code with near certainty.
+
+![Error Correlation vs. Ensemble Size: Independent Statistical Errors vs. Correlated Foundation Model Failures.](images/svg/vol3/ch15/fig-vol3-correlated-ensemble-failure.svg){#fig-vol3-correlated-ensemble-failure}
+
+As illustrated in @fig-vol3-correlated-ensemble-failure, increasing the voter pool size $M$ under independent errors yields exponential reliability gains. In contrast, under positive pairwise error correlation $\rho$, the ensemble error probability rapidly reaches an irreducible asymptotic floor. Beyond three to five agents, adding more homogeneous workers consumes tokens and compute bandwidth while yielding zero marginal improvement in correctness.
+
+::: {.callout-note title="Worked Example: The Illusion of Independence in Majority Voting"}
+**Problem:** A system architect designs an automated code-review gate using an ensemble of $M = 5$ parallel agent workers. Each worker inspects a proposed pull request and votes to `APPROVE` or `REJECT`. Assume the baseline per-agent error rate on subtle memory leak bugs is $p = 0.20$ (an 80% individual accuracy rate). 
+
+1. Calculate the ensemble error probability $P(\text{majority fail})$ assuming individual agents fail independently.
+2. Calculate the true ensemble error probability assuming a pairwise error correlation coefficient of $\rho = 0.40$ modeled via a standard Beta-Binomial failure distribution.
+3. Quantify the probability of a unanimous, confident false approval ($M = 5$ failures).
+
+**Solution:**
+
+*Step 1: Under strict Condorcet independence ($\rho = 0$):*
+The majority vote fails if $k \ge 3$ agents fail. Modeling this as a Binomial distribution $B(M=5, p=0.20)$:
+
+$$P(k \ge 3) = \binom{5}{3} (0.2)^3 (0.8)^2 + \binom{5}{4} (0.2)^4 (0.8)^1 + \binom{5}{5} (0.2)^5$$
+$$P(k = 3) = 10 \times 0.008 \times 0.64 = 0.0512$$
+$$P(k = 4) = 5 \times 0.0016 \times 0.8 = 0.0064$$
+$$P(k = 5) = 1 \times 0.00032 = 0.00032$$
+$$P(\text{majority fail})_{\text{indep}} = 0.0512 + 0.0064 + 0.00032 = 0.05792 \quad (\approx 5.79\%)$$
+
+*Step 2: Under positive error correlation ($\rho = 0.40$):*
+In a Beta-Binomial model with mean $p = 0.20$ and correlation $\rho = 0.40$, the dispersion parameter is $\alpha + \beta = \frac{1 - \rho}{\rho} = \frac{1 - 0.40}{0.40} = 1.5$. The shape parameters are:
+
+$$\alpha = p(\alpha + \beta) = 0.20 \times 1.5 = 0.30$$
+$$\beta = (1 - p)(\alpha + \beta) = 0.80 \times 1.5 = 1.20$$
+
+The probability of exactly $k$ failures out of $M$ is given by:
+
+$$P(k) = \binom{M}{k} \frac{\mathrm{B}(k + \alpha, M - k + \beta)}{\mathrm{B}(\alpha, \beta)}$$
+
+Evaluating for $k \in \{3, 4, 5\}$ using the Gamma relation $\mathrm{B}(x, y) = \frac{\Gamma(x)\Gamma(y)}{\Gamma(x+y)}$:
+
+$$P(k = 3) = 10 \times \frac{\mathrm{B}(3.3, 3.2)}{\mathrm{B}(0.3, 1.2)} \approx 0.0729$$
+$$P(k = 4) = 5 \times \frac{\mathrm{B}(4.3, 2.2)}{\mathrm{B}(0.3, 1.2)} \approx 0.0546$$
+$$P(k = 5) = 1 \times \frac{\mathrm{B}(5.3, 1.2)}{\mathrm{B}(0.3, 1.2)} \approx 0.0392$$
+$$P(\text{majority fail})_{\text{corr}} = 0.0729 + 0.0546 + 0.0392 = 0.1667 \quad (\approx 16.67\%)$$
+
+*Step 3: Probability of unanimous catastrophic failure ($k = 5$):*
+- Independent model: $P(k = 5) = (0.20)^5 = 0.00032$ (0.032%, or roughly 1 in 3,125 reviews).
+- Correlated model: $P(k = 5) \approx 0.0392$ (3.92%, or roughly 1 in 25 reviews).
+
+**Takeaway:** Correlation nearly triples the ensemble error rate ($5.79\% \to 16.67\%$) and increases the probability of a unanimous, confident false approval by more than **$120\times$**. Relying on majority voting among homogeneous agents creates a dangerous illusion of safety.
+:::
+
+### Consensus Voting versus Invariant Verification
+
+The systemic vulnerability of agent voting highlights the need to distinguish between *social consensus* and *invariant verification*. In multi-agent system design, these two concepts are often conflated under the generic heading of "validation." Yet they occupy opposite poles of reliability engineering.
+
+*Consensus* is an agreement protocol among unprivileged stochastic predictors. Whether structured as majority voting, iterative multi-agent debate, or hierarchical peer review, consensus measures only inter-agent coherence. It answers the question: *Do these $M$ computational processes output matching representations given their input contexts?* Because language models are trained to produce plausible continuations rather than formally sound deductions, high consensus indicates only that a proposal aligns with the high-probability manifold of the models' shared training distribution.
+
+*Invariant Verification*, by contrast, applies Saltzer, Reed, and Clark's (1984) End-to-End Argument directly to agent operations. The end-to-end principle dictates that an operation cannot be completely and correctly certified by intermediate subsystems that lack the semantics of the final application; true verification must come from the endpoints that own the physical execution state. In agentic software engineering, an invariant is a non-negotiable, deterministic condition verified by an authoritative external oracle: a compiler (`gcc`, `rustc`), an AST linter (`flake8`, `eslint`), a static type checker (`mypy`, `tsc`), a formal Satisfiability Modulo Theories (SMT) solver (`Z3`), or an isolated integration test suite (`pytest`, `cargo test`).
+
+| Dimension | Consensus Mechanisms (Voting / Debate) | Invariant Verification (Deterministic Oracles) |
+| :--- | :--- | :--- |
+| **Grounding Authority** | Inter-agent token alignment (subjective) | Operating system and runtime execution (objective) |
+| **Epistemic Basis** | Plausibility within pre-trained prior | Physical state transition and formal correctness |
+| **Failure Modes** | Correlated hallucinations, sycophancy, collusion | Incomplete test coverage, specification bugs |
+| **Vulnerability Profile** | Context poisoning, prompt injection, peer drift | Out-of-memory errors, environment timeouts |
+| **Compute Scaling** | Multiplies inference tokens ($M \times T_{\text{decode}}$) | Consumes deterministic CPU/OS compute cycles |
+| **Mutation Gate** | Cannot safely authorize destructive actions | **Mandatory gate** before merging any workspace mutation |
+
+Iterative multi-agent debate—wherein agents review and critique each other's outputs across sequential rounds—frequently degrades into conversational sycophancy rather than truth convergence. If Agent $A$ generates a plausible but fatally flawed algorithm, and Agent $B$ is asked to critique it, Agent $B$'s attention heads attend heavily to the structured natural language framing of Agent $A$. Unless Agent $B$ is explicitly grounded by an execution trace, it tends to adopt the premises of Agent $A$, refining formatting and superficial mechanics while ratifying the underlying semantic error.
+
+### The Byzantine Threat in Autonomous Fleets
+
+When designing coordination protocols for autonomous fleets, the systems engineer must adopt an explicit fault model. In traditional distributed systems, architectures distinguish between *fail-stop* faults (where a node crashes and cleanly ceases transmission) and *Byzantine* faults (where a node fails arbitrarily, exhibiting omissions, timing faults, or malicious and coordinated deception, as formalized by Lamport, Shostak, and Pease in 1982).
+
+Unprivileged language agents never fail according to a clean fail-stop model. When an agent encounters an edge case, suffers context window saturation, or is targeted by indirect prompt injection, it does not cleanly crash with a hardware signal. Instead, it behaves as an unannounced Byzantine node:
+
+1. **Syntactic Compliance:** It continues emitting schema-compliant JSON or task envelopes that satisfy all structural validation parsers.
+2. **Plausible Justification:** It constructs coherent, authoritative-sounding chains of thought that mimic valid deductive reasoning.
+3. **Deceptive Alignment:** If compromised by a poisoned context (such as an adversarial markdown document retrieved during a web search), it actively manipulates task parameters, modifies test configurations, or misreports compilation statuses to peer agents.
+
+::: {.column-margin}
+In classical Byzantine fault tolerance (BFT), reaching consensus among $M$ nodes requires at least $M \ge 3f + 1$ replicas to tolerate $f$ Byzantine actors, assuming independent Byzantine corruption. In language model fleets, because context poisoning cascades through natural language channels, a single Byzantine agent can corrupt multiple peers, violating the $f < M/3$ threshold.
+:::
+
+In a multi-agent review ring or pipeline, a single Byzantine agent induces *context poisoning*. When the output of a compromised or hallucinating agent is injected into the prompt of a downstream reviewer, the reviewer's attention distribution is distorted by the poisoned context. Consider the failure trace below, where a worker agent hallucinates an insecure mock test to bypass an invariant, and two downstream reviewer agents ratify the change because the test technically "passes":
+
+```python
+# Regression Trace: False Consensus via Hallucinated Test Mocking
+# Worker Agent proposes patch to auth/jwt.py and updates tests/test_jwt.py:
+def test_jwt_verification_bypass():
+    # Hallucinated mock: agent overrides cryptographic check with stub
+    jwt.verify_signature = lambda token, key: {"role": "admin", "uid": 0}
+    assert auth_service.authorize_request(b"invalid_token") == True
+
+# Execution: pytest executes against mocked stub and exits code 0
+# >>> pytest tests/test_jwt.py returned 0 (1 passed, 0 failed)
+
+# Reviewer Agent 1: "Pytest passed cleanly with exit code 0. Approve."
+# Reviewer Agent 2: "Verified test execution output matches expected state. Approve."
+# RESULT: Unanimous consensus (2/2 approvals) commits critical auth vulnerability.
+```
+
+In this trace, relying on peer review to evaluate the validity of the test structure failed. Both reviewer agents parsed the exit code `0` and the apparent alignment between the test name and the assertion, treating the synthetic mock as a valid design choice. The peer agents functioned not as independent evaluators, but as amplifiers of the initial hallucination.
+
+### Heterogeneous Ensembling Discipline
+
+If multi-agent voting among homogeneous models provides negligible reliability gains and exposes the fleet to Byzantine context poisoning, how should a systems engineer deploy multi-agent coordination safely? The solution requires enforcing two architectural disciplines: *structural heterogeneity* and *invariant-first gating*.
+
+```
++-----------------------------------------------------------------------------+
+| UNACCEPTABLE: Homogeneous Consensus as Mutation Gate                        |
+|                                                                             |
+| Worker (Model A) ---> Proposal ---> Reviewer 1 (Model A) ---+               |
+|                                 ---> Reviewer 2 (Model A) ---+--> [ Merge ] |
+|                                                              (Catastrophic) |
++-----------------------------------------------------------------------------+
+| ARCHITECTURAL DISCIPLINE: Heterogeneous Proposal, Invariant-Gated Commit   |
+|                                                                             |
+| Worker (Model A) -----\                                                     |
+| Worker (Model B) -----> [ Schema Merge ] ---> Deterministic Gate ---> Merge |
+| Worker (Model C) -----/    (Heuristic)         (Compiler / Tests)           |
+|                                                (Exit Code == 0)             |
++-----------------------------------------------------------------------------+
+```
+
+#### Structural Heterogeneity
+
+When consensus mechanisms are used (for example, generating heuristic search seeds or drafting alternative natural language summaries), the runtime must enforce model diversity to depress pairwise error correlation $\rho$:
+
+1. **Disjoint Model Families:** Ensembles must combine models trained on separate data curation pipelines and distinct pre-training mixtures (for example, pairing an open-weights dense Transformer with an externally developed mixture-of-experts model). Disjoint training data directly attacks the shared prior that causes correlated errors.
+2. **Disjoint Tokenizers:** Models with distinct vocabulary sizes and tokenization schemes (such as byte-level BPE versus WordPiece or sentence-piece variants) prevent token boundary artifacts from triggering synchronized decoding failures across the ensemble.
+3. **Asymmetric Parameter Scales:** Pairing a large reasoning model (which acts as a high-latency planner) with a compact, task-specialized model (fine-tuned exclusively for a constrained grammar or domain) disrupts the uniformity of attention-weight distributions.
+
+#### Invariant-First Gating
+
+The definitive safeguard against correlated ensemble failures is the **Golden Rule of Agentic Redundancy**:
+
+$$\text{Consensus may propose, but only an invariant gate may commit.}$$
+
+Under Zero Ambient Authority ($A=0$), no number of agent approvals—whether unanimous, supermajority, or hierarchically ranked—is ever permitted to authorize a mutation to the target repository or external environment. Agent consensus is strictly confined to generating candidate hypotheses in isolated branch workspaces. Before those candidates are integrated:
+
+1. **Isolated Compilation:** The proposed state must compile cleanly under strict, non-permissive compiler flags (`-Wall -Werror`, `strict: true`).
+2. **Sealed Test Suites:** The mutation must pass an immutable, authoritatively sealed suite of regression tests located in a protected directory that the proposing agents have no permissions to modify.
+3. **Static Security Checks:** The candidate diff must be parsed by deterministic AST analyzers to verify that security controls, imports, or test configurations have not been stripped, stubbed, or mocked out.
+
+By subordinating stochastic multi-agent consensus to deterministic invariant gates, the runtime insulates the host system from correlated model errors and Byzantine hallucinations.
+
+---
+
+Once an invariant gate detects that an agent has emitted broken code, failed a compilation check, or diverged into an unrecoverable hallucination loop, the runtime confronts a distributed control challenge. Allowing dependent downstream workers in a complex task graph to continue executing wastes significant token budgets, consumes GPU inference concurrency, and risks further state contamination. How does the host orchestrator cleanly terminate failed sub-graphs, propagate cancellation signals through active dependency trees, and enforce backpressure to prevent worker starvation? Addressing this operational problem requires examining the mechanics of cancellation cascades.

@@ -1,0 +1,174 @@
+## In-Process Sandbox Failures {#sec-vol3-virtualization-in-process-failure}
+
+The belief that an unprivileged execution environment can be synthesized inside the address space of an existing managed runtime is the most enduring and costly fallacy in software sandboxing. When an agent runtime attempts to isolate untrusted model-generated code by sanitizing language-level namespaces, intercepting bytecodes, or filtering Abstract Syntax Tree (AST) nodes, it commits a fundamental category error: it confuses linguistic scope with an operating system protection boundary. A programming language runtime—whether Python, Ruby, or Node.js—was engineered to provide expressiveness, dynamic reflection, and rapid development. It was never architected to defend against an adversarial workload executing within its own process boundary.
+
+::: {.column-margin}
+**Category Error in Systems Isolation**
+Confusing language-level variable scoping with hardware-enforced protection domains violates the principle of *Complete Mediation* (Saltzer and Schroeder, 1975). An in-process barrier can never mediate access to the memory space it inhabits.
+:::
+
+In-process sandboxing fails along four distinct physical dimensions: the dynamic introspection of the runtime's heap object graph, the undecidability of static syntactic analysis, the presence of memory-unsafe native C/C++ extensions, and the ambient authority inherent to running under the host process's operating system identity. Once an untrusted model proposal executes inside the host interpreter, containment is already lost.
+
+### Dynamic Introspection and Heap Object Graph Traversal
+
+High-level interpreted languages treat types, functions, scopes, and classes not as immutable compiler artifacts, but as first-class, mutable objects residing in a unified virtual memory heap. A developer attempting to build an in-process sandbox will typically clear the global execution environment, deleting dangerous functions such as `__import__`, `eval`, and `exec`, or removing modules like `os`, `sys`, and `subprocess` from the interpreter's dictionary (`globals()`).
+
+```python
+# Naive in-process sandbox attempt
+restricted_globals = {"__builtins__": {}}
+exec(untrusted_model_code, restricted_globals)
+```
+
+This defense misunderstands the topology of managed runtime heaps. Removing a variable name from a dictionary breaks only a single symbolic reference; it does not destroy the underlying object in memory, nor does it sever the bidirectional pointers that link every object instance back to the root of the runtime's type hierarchy. 
+
+In Python, every object instance maintains a pointer to its class object via the `__class__` attribute. That class object points to its parent class via `__base__`, which ultimately terminates at the universal base class `object`. Crucially, `object` maintains an internal registry of every class defined within the runtime's address space via the `__subclasses__()` method. Any benign literal instantiated in untrusted code—an empty tuple `()`, an empty string `""`, or a literal integer—provides an immutable traversal anchor from which an adversary can walk the heap inheritance tree, locate a dormant system utility class, and instantiate an unconstrained shell executor.
+
+```python
+#| label: lst-vol3-sandbox-escape
+#| caption: Traversing the Python heap object graph to resurrect unconstrained process execution primitives from an empty tuple.
+# 1. Anchor to universal root object via literal tuple reflection
+root_object = ().__class__.__base__
+
+# 2. Enumerate all subclasses currently registered in runtime heap memory
+live_subclasses = root_object.__subclasses__()
+
+# 3. Locate a class with access to OS execution primitives (e.g., Popen or FileLoader)
+popen_cls = [cls for cls in live_subclasses if cls.__name__ == "Popen"][0]
+
+# 4. Instantiate class directly, bypassing sanitized global namespaces
+popen_cls(["cat", "/etc/passwd"])
+```
+
+As demonstrated in @lst-vol3-sandbox-escape, no reference to `os` or `subprocess` was passed into the execution scope. The adversary used dynamic introspection to rediscover the compiled `subprocess.Popen` constructor already resident in the process address space. 
+
+Similar traversal vectors exist across all dynamic runtimes. In Node.js, clearing `require` fails because functions retain references to their lexical parent contexts through `arguments.callee.caller` or the `constructor` property of an empty function literal (`(() => {}).constructor("return process")().mainModule.require("child_process")`). 
+
+Attempts to patch these vulnerabilities by recursively traversing the runtime heap at startup and stripping attributes like `__subclasses__` or freezing prototypes inevitably break standard library dependencies. The runtime's standard library internally depends on the very reflective mechanisms the sandbox attempts to disable.
+
+| Dynamic Language Vector | Traversal Mechanism | Exposed Primitive | Bypass Consequence |
+| :--- | :--- | :--- | :--- |
+| **Python MRO Walking** | `().__class__.__mro__[1].__subclasses__()` | `os._wrap_close`, `subprocess.Popen` | Direct shell command execution |
+| **Python Frame Introspection** | `(lambda: 0).__globals__['__builtins__']` | Native dictionary of builtins | Restoration of deleted `__import__` |
+| **Python GC Sweep** | `import gc; gc.get_objects()` | Live module references in heap | Re-acquisition of unlinked handles |
+| **JavaScript Prototype Hijack** | `({}).constructor.prototype` | Global `Object` prototype | Cross-realm sandbox poisoning |
+| **Node.js Scope Unwinding** | `arguments.callee.caller` | Invoking host function closure | Access to privileged host scope |
+
+: Systematic reflection vectors enabling heap object resurrection in dynamic runtimes. {#tbl-reflection-vectors}
+
+### The Failure of Static Abstract Syntax Tree Validation
+
+Faced with the failure of namespace sanitization, system architects often turn to static inspection. The reasoning appears intuitive: parse the untrusted code into an Abstract Syntax Tree (AST) before execution, traverse the tree to verify that every node belongs to an approved whitelist of benign syntactic constructs (such as arithmetic expressions and variable assignments), and reject any script containing identifiers such as `import`, `exec`, `eval`, or attribute accesses beginning with dunder prefixes (`__`).
+
+Static AST filtering fails because a dynamic language defers semantic binding from compile time to execution time. In Python, an attribute access `obj.attr` is syntactically equivalent to the runtime dispatch `getattr(obj, "attr")`. A static AST parser evaluating the syntax tree of a script cannot determine the runtime values of strings constructed dynamically.
+
+Consider the evasion techniques available to an untrusted script facing a static AST filter that bans the string literal `"__subclasses__"` and function calls to `eval`:
+
+1.  *String Obfuscation and Concatenation:* The script constructs banned attribute names via dynamic string manipulation:
+    ```python
+    attr_name = "".join(["_", "_", "sub", "classes", "_", "_"])
+    subclasses = getattr((), "__class__")
+    classes = getattr(getattr(subclasses, "__base__"), attr_name)()
+    ```
+2.  *Encoding and De-serialization:* The script stores the exploit payload as base64-encoded bytes or hexadecimal sequences, decoding the payload and invoking it via indirect dictionary dispatch:
+    ```python
+    payload = bytes.fromhex("5f5f737562636c61737365735f5f").decode()
+    ```
+3.  *Runtime Variable Indirection:* In dynamic languages, syntax trees do not track variable dataflow across execution steps. Banning `import os` does not prevent:
+    ```python
+    modules_dict = {}.__class__.__base__.__subclasses__()[100].load_module
+    ```
+
+To statically prove that an untrusted dynamic script cannot access a forbidden primitive is equivalent to solving the Halting Problem. Under Rice's Theorem, any non-trivial semantic property of a universal computing system is undecidable. Because an AST parser analyzes only syntax, it cannot anticipate the runtime state of the interpreter's dictionary bindings. 
+
+Any parser strict enough to eliminate all dynamic dispatch vectors reduces the language to a non-Turing-complete domain-specific language, destroying the computational utility required by modern agentic tasks.
+
+::: {.callout-note title="Worked Example: Trusted Computing Base Expansion in In-Process Execution"}
+Consider an autonomous data-science agent host written in Python. To execute model-generated analytics scripts, the architect considers two designs: an in-process AST-sanitized environment vs. an out-of-process isolation boundary. 
+
+Calculate the relative Trusted Computing Base (TCB) size and attack surface exposed to untrusted code under both architectures.
+
+**Model Assumptions:**
+1.  *In-Process Python Host:* Runs CPython 3.12 (`~800,000` lines of C) linking standard machine learning libraries: NumPy (`~350,000` lines of C/C++), PyTorch (`~2,500,000` lines of C++/CUDA), and SciPy (`~600,000` lines of C/C++/Fortran).
+2.  *System Call Exposure:* The Linux x86_64 kernel exposes $S_{\text{host}} = 450$ system calls. An in-process runtime executes with no system call filtering, leaving all $450$ calls accessible.
+3.  *Out-of-Process Micro-boundary:* A separate, unprivileged worker process mediated via a strict system call filter (e.g., Linux `seccomp-bpf`), exposing only $S_{\text{isolated}} = 12$ deterministic I/O primitives (`read`, `write`, `exit`, `mmap`, `brk`, `fstat`, etc.).
+
+**Calculations:**
+The in-process Trusted Computing Base ($TCB_{\text{in-process}}$) encompasses the entire interpreter runtime and all natively linked libraries:
+$$
+TCB_{\text{in-process}} = 800\text{k} + 350\text{k} + 2,500\text{k} + 600\text{k} = 4,250,000 \text{ lines of memory-unsafe code}
+$$
+
+The ratio of kernel system call exposure between the unconfined in-process architecture and the filtered boundary is:
+$$
+\text{Attack Surface Reduction} = \frac{S_{\text{host}} - S_{\text{isolated}}}{S_{\text{host}}} = \frac{450 - 12}{450} = \frac{438}{450} \approx 97.33\%
+$$
+
+**Takeaway:**
+In-process sandboxing forces the host system to trust more than $4.25\text{ million}$ lines of compiled C/C++ code. Any single memory-safety flaw in this massive footprint compromises the entire agent host. 
+By contrast, decoupling execution into a strictly mediated external boundary reduces the privileged system call attack surface by over $97\%$, decoupling the host supervisor's survival from the language runtime's internal vulnerabilities.
+:::
+
+### Native Extension Exploits and Memory Corruption
+
+Even if a language runtime could theoretically achieve total formal verification of its bytecode and reflection graphs, modern machine learning workflows break the boundary through native C/C++ extensions. An agent tasked with analyzing data, manipulating images, or calculating tensors does not execute pure interpreted bytecode. It invokes compiled binaries through foreign function interfaces (FFI), linking libraries such as NumPy, Pillow, PyTorch, and libvips directly into the interpreter's address space.
+
+These compiled extensions are written in languages that lack memory safety. When an agent executes a model-generated script that loads an untrusted image using Pillow or manipulates an array using NumPy, the underlying execution passes directly to compiled C routines. If the model-generated input or execution script triggers a heap buffer overflow, integer overflow, or use-after-free vulnerability in the native library, the language runtime's safety guarantees vanish.
+
+```
++-----------------------------------------------------------------------+
+| Host Agent Process Address Space (Virtual Memory)                     |
+|                                                                       |
+|  +-------------------------+       +-------------------------------+  |
+|  | Python Virtual Machine  |       | Native Extensions (C/C++)     |  |
+|  |                         |       |                               |  |
+|  | - Restricted Globals    |       | - PyTorch (C++ / CUDA)        |  |
+|  | - AST Node Sanitizer    |       | - NumPy (C BLAS / LAPACK)     |  |
+|  | - Bytecode Evaluator    |       | - Pillow (libjpeg, libpng)    |  |
+|  +------------+------------+       +---------------+---------------+  |
+|               |                                    |                  |
+|               | FFI Dispatch                       | Memory Write     |
+|               v                                    v                  |
+|  +-----------------------------------------------------------------+  |
+|  | Process Heap & Stack Memory (Shared Virtual Memory Pages)       |  |
+|  |                                                                 |  |
+|  | [ Python Frame Object ] <== [ Corrupted Buffer Overwrite ]      |  |
+|  | [ Host AWS Credentials] <== [ Arbitrary Pointer Dereference ]   |  |
+|  +-----------------------------------------------------------------+  |
++-----------------------------------------------------------------------+
+                                    |
+                         Unrestricted System Calls
+                                    v
++-----------------------------------------------------------------------+
+| Host Linux Kernel (Shared PID, UID, Sockets, Filesystem Descriptor)   |
++-----------------------------------------------------------------------+
+```
+
+An adversary exploiting a memory-unsafe extension does not need to bypass Python's object model; they overwrite the process's physical memory pages directly. By overwriting function pointers, return addresses on the stack, or CPython's internal `PyTypeObject` structures in the heap, the executing script achieves arbitrary code execution (ACE). At this point, the unprivileged model script converts into native machine instructions executing with the full authority of the host process.
+
+### The Shared Kernel Boundary: Ambient Authority Under a Common Identity
+
+The final point of failure for in-process sandboxing is the shared operating system boundary. At the hardware and kernel layers, an operating system does not manage language scopes, objects, or AST nodes; it manages processes, address spaces, credentials, and system calls.
+
+When an agent runtime evaluates untrusted code in-process, that code executes under the **identical process identifier (PID)**, **user identifier (UID)**, and **group identifier (GID)** as the supervisor application itself. In the taxonomy of operating system security, the executing script possesses full *ambient authority*:
+
+1.  *Shared File Descriptor Table:* Any open file descriptor held by the host process—database connections, internal logging pipes, local state databases, or network sockets—is accessible to untrusted in-process code. An adversary executing in-process can issue an unmediated `sys_write` call directly to open descriptors without touching the filesystem.
+2.  *Virtual Memory Exposure:* Because the untrusted code shares the host virtual memory address space, confidential memory pages—including host API tokens, private SSH keys, and system environment variables stored in `environ`—reside in readable memory pages within the same address space.
+3.  *Shared System Call Table:* The untrusted code can invoke any system call supported by the host kernel. It can probe local loopback network interfaces (`127.0.0.1`), inspect neighbor processes running under the same UID via `/proc`, fork background worker threads, or register signal handlers that intercept termination attempts from the host supervisor.
+
+Attempting to enforce security invariants inside the user-space address space of an unconstrained interpreter violates Saltzer and Kaashoek's core systems tenet: *an isolation mechanism must be implemented by a layer lower than the code it seeks to control*. 
+
+Because in-process controls can be bypassed by memory corruption, dynamic reflection, or direct syscall invocation, reliable containment cannot rely on language-level sandboxing. Real security requires delegating isolation to an external boundary: one that completely strips ambient authority and enforces access mediation through explicit capability tokens and hardware-backed boundaries.
+
+How, then, can an architecture structure this authority so that execution components receive only the minimal, verifiable privileges necessary to accomplish their assigned task?
+
+### Complete Mediation Across the Protection Boundary
+
+The breakdown of in-process mechanisms underscores the foundational systems design axiom formulated by Saltzer and Schroeder (1975): the principle of *Complete Mediation*. Every access to every resource—be it a memory page, a storage block, an operating system call, or a network interface—must be intercepted and checked against an authoritative security policy at an enforcement boundary that the untrusted entity cannot modify or bypass.
+
+An in-process interpreter cannot achieve Complete Mediation because the policy enforcement code resides in the exact same failure domain as the code being evaluated. If an untrusted script overwrites an instruction pointer or walks an object reference chain, it compromises the reference monitor itself. 
+
+To achieve dependable containment, systems architects must enforce isolation using boundaries anchored outside the runtime's address space. The system must replace ambient authority—wherein an executing thread automatically inherits all permissions associated with its host process—with explicit, unforgeable capabilities. 
+
+By restructuring the system around formal capability tokens and isolated execution domains, the agent runtime ensures that even if an execution path experiences catastrophic model failure, prompt injection, or arbitrary code execution, its blast radius remains strictly confined to an ephemeral, partitioned environment.
+
+The path forward requires abandoning linguistic filtering in favor of structural operating systems protections. We turn next to the formalization of capability-based privilege attenuation: establishing how systems can issue, track, and monotonically attenuate explicit authority tokens across complex agent delegation hierarchies.

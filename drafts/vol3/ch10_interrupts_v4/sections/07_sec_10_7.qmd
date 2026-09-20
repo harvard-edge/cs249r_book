@@ -1,0 +1,174 @@
+## Log Compaction Policies {#sec-vol3-persistence-compaction}
+
+An uncompacted append-only event stream becomes an operational liability within hours of sustained agent execution. During a long-horizon coding or software maintenance task, an autonomous agent issuing repetitive build commands, unit tests, and repository searches accumulates vast quantities of unstructured stdout and stderr bytes. A single test failure trace or compiler error log can inject several megabytes of raw textual output into the event store, even though the model requires only the exit code and a handful of error lines to formulate its next repair hypothesis. Across thousands of concurrently running agents in an enterprise environment, unconstrained append-only logging exhausts the input/output operations per second (IOPS) and storage capacity of high-performance non-volatile storage, inflates snapshot restoration latency, and multiplies cloud archival costs.
+
+**Trajectory storage must enforce multi-tier lifecycle compaction, pruning bulky ephemeral observation bytes while preserving the causal decision graph across Hot, Warm, and Cold storage tiers.**
+
+Preserving durable records does not require retaining every ephemeral byte in perpetuity at maximum read availability. Just as classical database management systems distinguish between hot transactional write-ahead logs and cold historical backups, an agent runtime must treat trajectory persistence as a progressive data lifecycle. Storage systems for autonomous agents solve this challenge by decoupling the causal spine—the cryptographically verifiable sequence of model proposals, supervisor authorizations, and state transitions—from bulky, low-information observation payloads. By progressively demoting and compacting execution artifacts across distinct hardware storage tiers, runtimes maintain strict compliance and diagnostic auditability without letting storage costs scale linearly with raw tool output volume.
+
+### Multi-Tier Storage Hierarchy: Hot, Warm, and Cold Planes
+
+The storage requirements of an autonomous trajectory change radically across its lifecycle. While an agent is actively executing, the runtime prioritizes write latency and crash recovery throughput above all else. Every per-turn transition must be durably committed before the runtime triggers external side effects, demanding sub-millisecond append latency to prevent the supervisor from stalling the model's decode loop. Conversely, once an agent completes its assigned task, write frequency drops to zero, and the access pattern shifts from latency-sensitive sequential writes to ad-hoc query scans for debugging, regression testing, or regulatory audits.
+
+```
+       ▲                HOT TIER (< 24 Hours)
+      / \        Active trajectories, local NVMe / RocksDB
+     /   \       Sub-millisecond fsync(), uncompacted raw events
+    /     \
+   /       \            WARM TIER (1 - 30 Days)
+  /         \    Completed trajectories, PostgreSQL / ClickHouse
+ /           \   Metadata indexed, selective payload compaction
+/             \
+/───────────────\        COLD TIER (> 30 Days)
+                 Immutable columnar archives, S3 / Parquet / Glacier
+                 Cryptographic hashes retained, deep compliance storage
+```
+
+To balance these conflicting demands, modern agent platforms organize trajectory persistence into a three-tier hierarchy spanning Hot, Warm, and Cold physical storage planes, as illustrated in @fig-vol3-storage-pyramid.
+
+![Multi-tier trajectory storage pyramid organizing event persistence across Hot, Warm, and Cold planes according to latency, compaction state, and lifecycle retention policies.](images/svg/fig-vol3-storage-pyramid.svg){#fig-vol3-storage-pyramid}
+
+The *Hot Tier* serves active, running trajectories spanning the initial zero to twenty-four hour operational window. This tier is physically located on local non-volatile solid-state storage (NVMe SSDs) attached directly to the agent execution host, typically managed by an embedded Log-Structured Merge-tree (LSM-tree) engine such as RocksDB or an append-only raw file journal. The Hot Tier accepts synchronous Write-Ahead Log (WAL) flushes with explicit `fsync()` barriers on every operational turn. Because crash recovery requires restoring the exact, bit-for-bit control state of an interrupted agent, no compaction or data pruning is permitted in this plane; raw prompts, unedited tool observations, floating-point sampling parameters, and supervisor authorization records are stored in their entirety.
+
+::: {.column-margin}
+**Write Amplification in Tier Transitions**
+Moving data from local LSM-trees to distributed columnar stores incurs write amplification. Runtimes mitigate this overhead by buffering completed turns in memory and streaming compacted batches directly to object storage via asynchronous background workers once a trajectory reaches a terminal state (`COMPLETED`, `FAILED`, or `ABORTED`).
+:::
+
+The *Warm Tier* houses completed or long-quiescent trajectories over a retention window of one to thirty days. Once an agent terminates or yields execution, its local journal is demoted to a centralized, distributed relational or analytical database cluster, such as PostgreSQL or ClickHouse. In this plane, the runtime strips away raw scratchpad buffers while indexing high-level metadata: trajectory identifiers, total token expenditures, wall-clock latencies, exit statuses, and tool invocation signatures. The Warm Tier empowers systems engineers to execute interactive SQL queries, run regression evaluations against known test suites, and isolate faulty reasoning trajectories without fetching multi-gigabyte disk images.
+
+The *Cold Tier* provides long-term archival storage for trajectories older than thirty days, targeting regulatory compliance windows that often mandate data retention for three to seven years. In this plane, trajectories are serialized into immutable, highly compressed columnar formats, such as Apache Parquet files compressed with Zstandard, and uploaded to globally distributed object storage clusters (e.g., Amazon S3, Google Cloud Storage, or deep cold storage such as AWS Glacier). In the Cold Tier, storage density and read cost dominate system design; raw terminal streams are permanently discarded, leaving only structured event schemas, cryptographic execution digests, and audit certificates.
+
+| Storage Dimension | Hot Tier (Execution) | Warm Tier (Triage & Eval) | Cold Tier (Compliance) |
+| :--- | :--- | :--- | :--- |
+| **Physical Media** | Local Host NVMe SSD / DRAM | Distributed SSD Cluster | Distributed Object Storage / Tape |
+| **Storage Engine** | Embedded LSM-Tree (RocksDB) | Relational / Columnar DB | Parquet on Object Store (S3) |
+| **Target Latency** | $< 1\text{ ms}$ (Append) | $10\text{--}100\text{ ms}$ (Query) | $1\text{--}5\text{ s}$ (Batch Read) |
+| **Payload State** | Raw, uncompacted bytes | Selectively pruned & digested | Columnar compressed, pruned |
+| **Retention Horizon** | $0\text{ to }24\text{ hours}$ | $1\text{ to }30\text{ days}$ | $30\text{ days to }7\text{ years}$ |
+| **Cost Profile** | Highest per GB; IOPS-bound | Moderate; query-optimized | Lowest per GB; capacity-bound |
+
+: Architectural characteristics and hardware tradeoffs across trajectory persistence tiers. {#tbl-vol3-storage-tiers}
+
+### Selective Payload Compaction and Epistemic Pruning
+
+The core invariant of trajectory persistence states that any valid reconstruction must reproduce the supervisory control state $\text{ACB}_t$ without repeating historical external side effects. However, preserving the supervisory state does not require preserving every peripheral character produced by an external tool. When a compiler fails, the supervisor needs to know that the build failed and needs access to the relevant compiler diagnostic lines that the agent will parse to plan a correction. The thousands of intermediate lines indicating successful compilation of unaffected translation units provide zero epistemic value to future turns or post-incident audits.
+
+Selective payload compaction exploits this asymmetry between causal relevance and raw textual volume. Rather than treating all event payloads as uniform binary blobs, the compaction engine classifies event data into two distinct operational classes: the *causal spine* and *ephemeral observations*.
+
+```
+UNCOMPACTED EVENT RECORD (Hot Tier):
+┌────────────────────────────────────────────────────────────────────────┐
+│ Turn: 42 | Event: TOOL_OBSERVATION | Tool: cargo_build                 │
+│ Causal Spine: exit_code=101, duration_ms=4821                          │
+│ Payload (Raw stdout/stderr):                                          │
+│   "Compiling libc v0.2.147                                             │
+│    Compiling syn v2.0.28                                               │
+│    ... [14,800 lines of standard compilation output: ~1.2 MB] ...      │
+│    error[E0308]: mismatched types in src/engine/buffer.rs:42:15        │
+│    expected `usize`, found `u32`"                                      │
+└────────────────────────────────────────────────────────────────────────┘
+
+                                    │
+                                    ▼ Selective Compaction Engine
+COMPACTED EVENT RECORD (Warm/Cold Tiers):
+┌────────────────────────────────────────────────────────────────────────┐
+│ Turn: 42 | Event: TOOL_OBSERVATION | Tool: cargo_build                 │
+│ Causal Spine: exit_code=101, duration_ms=4821                          │
+│ Digest: "error[E0308]: mismatched types in src/engine/buffer.rs:42:15" │
+│ Epistemic Metadata: head_lines=5, tail_lines=20, dropped_bytes=1258100 │
+│ Cryptographic Attestation:                                            │
+│   sha256: 4f3a9a7b9e11c8d6428e5f... [Authenticates raw execution]      │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+The causal spine consists of the formal event header: the turn index $t$, the unique trajectory identifier $\tau$, the timestamp, the model proposal $e_{\text{prop}}$, the supervisor authorization record $e_{\text{auth}}$, the tool action parameters $a_{\text{ext}}$, and the structural exit metadata (such as UNIX return codes, signaled exceptions, and execution duration). The causal spine is strictly immutable; it is preserved without modification across all storage tiers to guarantee that the agent's directional decision tree remains completely reconstructible.
+
+Ephemeral observations, captured in $e_{\text{obs}}$, represent the physical outputs streamed back from the sandbox execution environment. During compaction from the Hot Tier to the Warm Tier, the runtime applies *epistemic pruning* to these observation payloads:
+
+$$\Phi_{\text{compact}} = \left\langle \text{status}, \text{Head}(k), \text{Tail}(k), \text{Filter}_{\text{err}}(\text{stdout}), \text{SHA-256}(\Phi_{\text{raw}}) \right\rangle$$
+
+Under this transformation, the compaction worker strips the vast internal expanse of the standard output stream, preserving only the first $k$ lines (to capture the execution invocation and environment headers), the final $k$ lines (to capture completion summaries or panics), and any lines matching domain-specific diagnostic filters (such as compiler errors, stack traces, or linter violations).
+
+Crucially, the compaction worker computes a cryptographic digest $h = \text{SHA-256}(\Phi_{\text{raw}})$ of the original, uncompacted observation payload prior to truncation. This hash is permanently recorded alongside the pruned record. If an auditor, a security supervisor, or an automated evaluator later questions whether the summarized tool output genuinely reflected the sandboxed system's behavior, the runtime can verify any external copy of the original log against the immutable cryptographic digest stored in the trajectory's causal spine.
+
+::: {.callout-note title="Worked Example: Storage Compaction Economics Across an Enterprise Fleet"}
+Consider an enterprise agent cluster supporting $N = 2{,}500$ concurrent autonomous software development agents. Each agent executes an average of $T = 180$ turns per day. 
+
+*Baseline Parameters:*
+
+- Model prompt context metadata: $S_{\text{prompt}} = 12\text{ KB}$ per turn.
+- Model generation payload: $S_{\text{gen}} = 2\text{ KB}$ per turn.
+- Tool invocation parameters: $S_{\text{call}} = 1\text{ KB}$ per turn.
+- Raw tool observation output (compilers, git diffs, test runners): $S_{\text{obs}} = 350\text{ KB}$ per turn.
+- Uncompacted event size: $S_{\text{turn}} = 12 + 2 + 1 + 350 = 365\text{ KB}$ per turn.
+
+*Daily Ingestion Footprint:*
+
+$$\text{Volume}_{\text{raw}} = 2{,}500 \times 180 \times 365\text{ KB} \approx 164.25\text{ GB/day} \approx 4.93\text{ TB/month}$$
+
+Over a standard one-year compliance retention window, maintaining raw uncompacted logs requires $59.1\text{ TB}$ of capacity. When replicated threefold for high availability across distributed nodes, the infrastructure must provision $177.3\text{ TB}$ of high-IOPS block storage.
+
+*Compacted Parameters (Hot-to-Warm Demotion after 24 Hours):*
+The compaction engine applies epistemic pruning to $S_{\text{obs}}$. The runtime retains the exit code, a $4\text{ KB}$ extracted error trace, and a $32\text{ byte}$ SHA-256 digest:
+
+$$S_{\text{obs, compact}} = 4.032\text{ KB}$$
+
+$$S_{\text{turn, compact}} = 12 + 2 + 1 + 4.032 \approx 19.03\text{ KB}$$
+
+*Compacted Footprint:*
+
+$$\text{Volume}_{\text{compact}} = 2{,}500 \times 180 \times 19.03\text{ KB} \approx 8.56\text{ GB/day} \approx 256.8\text{ GB/month}$$
+
+*Storage Compaction Ratio:*
+
+$$\text{Ratio} = \frac{164.25\text{ GB/day}}{8.56\text{ GB/day}} \approx 19.19\times \text{ reduction } (94.8\% \text{ space savings})$$
+
+When demoted to the Cold Tier after thirty days, the columnar Parquet representation with Zstandard compression achieves an additional $3.2\times$ compression factor on the structured text, shrinking the annual compliance archive from $59.1\text{ TB}$ to just $963\text{ GB}$. A single terabyte of cold object storage easily accommodates the entire corporate history of $164$ million autonomous operational turns.
+:::
+
+### Tombstoning, Cryptographic Shredding, and Retention Governance
+
+While selective compaction prunes observation bulk, enterprise agent systems must also satisfy legal and regulatory mandates governing complete data lifecycle termination. Under statutes such as the European Union General Data Protection Regulation (GDPR Article 17) and corporate SOC 2 Type II controls, organizations must guarantee that sensitive user information, proprietary source code, and personally identifiable information (PII) processed by an agent are irreversibly erased upon user request or expiration of the retention window.
+
+This requirement conflicts directly with the physical architecture of append-only, content-addressed storage. In an append-only log or an immutable columnar file on object storage, data cannot be modified in place. Rewriting multi-gigabyte Parquet partitions or running live compaction merges on distributed object stores to erase a single turn incurs catastrophic write amplification, degrades cluster read performance, and risks corrupting the causal integrity of adjacent trajectories.
+
+Runtimes resolve this fundamental tension through two complementary systems mechanisms: logical *tombstoning* and physical *cryptographic shredding*.
+
+```
+ENCRYPTED TRAJECTORY PERSISTENCE WITH CRYPTO-SHREDDING:
+
+Key Management Service (KMS)
+┌────────────────────────────────────────────────────────┐
+│ Master Key (KEK)                                       │
+│   ├── Wrapped DEK (Trajectory τ_A) ──► [Active]        │
+│   └── Wrapped DEK (Trajectory τ_B) ──► [SHREDDED / ZEROED]
+└────────────────────────────────────────────────────────┘
+                       │
+                       ▼
+Immutable Columnar Storage (Warm/Cold S3 Object Store)
+┌────────────────────────────────────────────────────────┐
+│ Partition: 2026-Q3-trajectories.parquet                │
+│                                                        │
+│ [Trajectory τ_A Record]                                │
+│ Ciphertext: 8f4b2c... ──► Decrypts with DEK_A (Valid) │
+│                                                        │
+│ [Trajectory τ_B Record]                                │
+│ Ciphertext: 3a9e1d... ──► Indistinguishable from noise │
+│                           (DEK_B permanently destroyed)│
+└────────────────────────────────────────────────────────┘
+```
+
+Logical tombstoning introduces a supervisory revocation record into the event stream. When an administrative command or user request demands the expungement of a trajectory $\tau$, the supervisor appends a signed tombstone event $e_{\text{tomb}} = \langle \tau, t_{\text{curr}}, \text{reason}, \text{auth\_sig} \rangle$ to the active log. During subsequent warm queries or trajectory reconstruction procedures, the storage layer inspects the tombstone registry; any trajectory marked with an authenticated tombstone is immediately filtered from query projections, rendering it invisible to evaluation pipelines and user-facing dashboards.
+
+However, a logical tombstone merely masks the data; it does not satisfy strict regulatory mandates requiring the physical destruction of the underlying bits on disk. To achieve physical erasure without rewriting immutable archives, the runtime employs *cryptographic shredding* (also known as crypto-erasure).
+
+Under this design, the runtime enforces an envelope encryption invariant across all storage tiers. When a new trajectory $\tau$ is initialized, the supervisor requests a unique, symmetric 256-bit Data Encryption Key ($\text{DEK}_\tau$) from an external Key Management Service (KMS). All event payloads, execution snapshots, and file diffs associated with trajectory $\tau$ are encrypted using $\text{DEK}_\tau$ (typically via authenticated AES-256-GCM) before they are dispatched to the storage engine:
+
+$$C_t = \text{AES-GCM-Enc}(\text{DEK}_\tau, \text{Payload}_t)$$
+
+The $\text{DEK}_\tau$ itself is stored within the KMS, protected by hardware security modules (HSMs) and access-control policies. The underlying immutable object storage records only the ciphertext $C_t$ and the unencrypted causal routing metadata (the trajectory ID and turn index).
+
+When the retention horizon expires, or when an explicit right-to-be-forgotten deletion order is validated, the supervisor commands the KMS to permanently destroy the key $\text{DEK}_\tau$. Once the key is zeroed out in the HSM, the ciphertext blocks residing within the immutable Warm databases and Cold Parquet archives become mathematically indecipherable from random static entropy. The effective erasure of petabytes of distributed, immutable trajectory logs is accomplished instantaneously by destroying a single 32-byte key, entirely bypassing the need for expensive, high-amplification storage compaction rewrites.
+
+Executing this multi-tier persistence strategy requires concrete software engines capable of coordinating append-only write paths, high-performance structured compaction, and archival serialization across heterogeneous hardware. How do systems engineers architect the underlying storage engines to satisfy these sub-millisecond logging requirements while simultaneously supporting analytical trajectory queries?

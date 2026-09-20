@@ -1,0 +1,227 @@
+## Fleet Capacity Provisioning {#sec-vol3-tokenomics-capacity}
+
+When an engineering team provisions accelerator capacity for an agent platform using the static sizing heuristics of conventional web services or stateless model APIs, the cluster reliably succumbs to one of two structural failure modes: catastrophic queue collapse under moderate nominal load, or severe financial hemorrhage caused by drastically underutilized, stranded silicon. In traditional distributed services, incoming RPCs exhibit sub-second service times with narrow variance, allowing capacity planners to dimension server pools using classical Erlang-C or $M/M/k$ queueing models. In stateless foundation model serving, continuous batching runtimes dynamically interleave prefill and decode phases across a uniform request stream. 
+
+An autonomous agent platform, however, introduces a fundamental operational mismatch: **the wall-clock duration of an end-to-end agent trajectory exceeds the execution latency of any single constituent model forward pass by three to five orders of magnitude, decoupling physical accelerator occupancy from nominal request arrival rates.** Sizing a cluster solely to absorb mean token generation throughput ignores the bursty, multi-turn feedback loops characteristic of autonomous reasoning, the protracted blocking periods during which agents wait for external tool execution, and the immense memory footprint of long-lived Key-Value (KV) caches pinned in accelerator High-Bandwidth Memory (HBM). Dimensioning a resilient, cost-effective agent serving fleet requires modeling the distinct occupancy profiles of invocations versus trajectories, applying heavy-traffic queueing theory to mitigate tail latency, deploying multi-level scheduling disciplines to prevent interactive starvation, and establishing rigorous financial break-even boundaries between dedicated hardware reservations and elastic serverless APIs.
+
+### The Occupancy-Duration Mismatch: Invocations versus Trajectories
+
+To understand why standard capacity models fail, we must decompose an agentic workflow into its two distinct operational layers: the ephemeral *model invocation* and the persistent *agent trajectory*. A model invocation is an isolated inference request submitted to an execution engine, consisting of a prefill phase over an input prompt followed by autoregressive token generation. Its service time $S_{\text{model}}$ is strictly bounded by sequence length, typically spanning 50 milliseconds to 4 seconds. In contrast, an agent trajectory is a stateful, multi-turn supervisory loop comprising sequential model invocations interleaved with environment interactions:
+
+$$T_{\text{trajectory}} = \sum_{i=1}^{N} \left( S_{\text{model}, i} + S_{\text{tool}, i} + S_{\text{runtime}, i} \right)$$
+
+where $N$ represents the number of sequential turns required to satisfy the task, $S_{\text{tool}, i}$ represents the latency of external tool executions (such as running test suites, querying search APIs, or compiling code), and $S_{\text{runtime}, i}$ denotes host orchestration overhead. In production environments, $S_{\text{tool}}$ routinely dwarfs $S_{\text{model}}$, with external API calls requiring hundreds of milliseconds and comprehensive test suites running for minutes. Consequently, an agent trajectory may persist across an operational lifespan $T_{\text{trajectory}} \in [10^1, 10^3]$ seconds, despite consuming only a fraction of that duration in active accelerator compute.
+
+::: {.column-margin}
+Holding an uncompressed KV cache in HBM while an agent blocks on an external tool is the systems equivalent of holding a database write-lock across an interactive user think-time. It artificially constrains concurrency at the physical memory layer rather than the compute layer.
+:::
+
+This discrepancy creates a severe dilemma for accelerator memory management. In a standard continuous-batching engine, the Key-Value cache generated during turn $i$ must be preserved to evaluate turn $i+1$, preventing the quadratic computational penalty of re-evaluating the entire prompt prefix from scratch. If the runtime pins the agent's KV cache within GPU HBM while the agent blocks on a 30-second external tool execution, that physical memory allocation remains unavailable to other active jobs. Because modern accelerator memory is tightly bounded (for example, 80 to 141 GB per GPU), memory saturation occurs long before the tensor cores reach peak computational utilization. The cluster's effective capacity becomes memory-capacity-bound rather than compute-bound.
+
+Conversely, if the serving runtime evicts the KV cache to host CPU system memory (DDR5) or local NVMe storage upon tool dispatch, it frees HBM frames for active decodes but introduces substantial bus-transfer latency over PCIe or NVLink when the agent resumes. If the runtime discards the cache entirely, relying on prefix caching and Radix-tree reuse to re-evaluate the context upon the next turn, it swaps memory pressure for redundant compute, re-running prefill matrix multiplications (GEMM) over thousands of historical tokens at every cycle.
+
+The capacity implications become stark when evaluated through Little's Law ($L = \lambda W$), which dictates that the average number of concurrent requests in a stable system $L$ equals the arrival rate $\lambda$ multiplied by the average residence time $W$. When sizing a cluster at the raw inference layer, the average concurrency is $L_{\text{inv}} = \lambda_{\text{inv}} \cdot \mathbb{E}[S_{\text{model}}]$. However, when sizing at the agent trajectory layer, the concurrency of active stateful workflows is $L_{\text{traj}} = \lambda_{\text{traj}} \cdot \mathbb{E}[T_{\text{trajectory}}]$. Because $\mathbb{E}[T_{\text{trajectory}}] \gg \mathbb{E}[S_{\text{model}}]$, an infrastructure architect who sizes memory allocations against $L_{\text{inv}}$ will observe rapid buffer exhaustions, thrashing page-eviction daemons, and pervasive admission rejection as soon as concurrent trajectory volume scales.
+
+### Queueing Dynamics and Tail Latency in Heterogeneous Fleets
+
+Because agent platforms cannot decouple accelerator scheduling from the stochastic nature of agent behavior, sizing a fleet requires queueing-theoretic models that capture extreme variability. Standard introductory systems analysis frequently relies on $M/M/1$ or $M/M/k$ formulations, which presume Poisson arrival processes (exponential inter-arrival distributions) and memoryless, exponentially distributed service durations. In production agent fleets, both assumptions are demonstrably invalid.
+
+The arrival process of model invocations generated by autonomous agents is structurally bursty. When an orchestrator spawns parallel verification sub-agents or when an agent executes a multi-step planning loop, requests hit the serving layer in tightly correlated batches rather than uncorrelated Poisson streams. The squared coefficient of variation of inter-arrival times, defined as $C_a^2 = \sigma_a^2 / (\mathbb{E}[T_a])^2$, routinely exceeds unity ($C_a^2 > 1$). 
+
+Simultaneously, the distribution of model service times is radically non-exponential. An agent fleet processes a bimodal mixture of workloads: lightweight, low-latency classification probes, JSON schema validations, and single-token tool-routing decisions consuming tens of milliseconds ($S \ll 100\text{ ms}$), juxtaposed against heavy, multi-thousand-token chain-of-thought generations and complex code syntheses lasting several seconds ($S > 10\text{ s}$). This bimodal dispersion yields a service time squared coefficient of variation substantially greater than one ($C_s^2 = \sigma_s^2 / (\mathbb{E}[S])^2 \gg 1$).
+
+To estimate expected waiting times in queues characterized by arbitrary arrival and service distributions without resorting immediately to cycle-accurate discrete-event simulations, systems engineers rely on Kingman's heavy-traffic approximation for a $G/G/1$ queue:
+
+$$W_q \approx \left( \frac{C_a^2 + C_s^2}{2} \right) \left( \frac{\rho}{1 - \rho} \right) \frac{1}{\mu}$$ {#eq-vol3-kingman-gg1}
+
+where $\rho = \lambda / \mu$ denotes server utilization, and $\mu = 1 / \mathbb{E}[S]$ is the mean service rate. Kingman's formula decomposes mean queue wait time $W_q$ into three explicit multiplicative components:
+
+1. **The Variability Factor $\frac{C_a^2 + C_s^2}{2}$:** This term scales latency directly by the combined dispersion of the arrival and service processes. In an idealized $M/M/1$ system where $C_a^2 = C_s^2 = 1$, this factor equals 1. In an agent fleet where correlated bursts and bimodal generation lengths push $C_a = 1.8$ and $C_s = 2.4$, the variability factor reaches $\frac{1.8^2 + 2.4^2}{2} = \frac{3.24 + 5.76}{2} = 4.5$. The system experiences a $4.5\times$ amplification in mean queue delay purely due to workload variance, holding hardware throughput and mean arrival rates identical.
+2. **The Utilization Factor $\frac{\rho}{1 - \rho}$:** This hyperbolic penalty governs the non-linear asymptote as server utilization approaches saturation. As $\rho$ advances from $0.70$ to $0.90$, the multiplier jumps from $2.33$ to $9.00$—nearly a four-fold increase.
+3. **The Base Service Scale $\frac{1}{\mu}$:** The unweighted mean processing duration of the underlying model.
+
+::: {.column-margin}
+As Jeffrey Dean and Luiz André Barroso articulated in *The Datacenter as a Computer*, tail latency—not mean latency—dictates the user-perceived performance of distributed systems. In an agent trajectory comprising $N$ serial model calls, the probability of completing without hitting a 99th-percentile queue delay decays as $(1 - 0.01)^N$.
+:::
+
+In an enterprise fleet operating $k$ parallel accelerator instances, the single-server $G/G/1$ model transitions to an aggregate multi-server $G/G/k$ system. Using the Allen-Cunneen approximation, multi-server queue waiting time scales proportional to the Erlang-C waiting probability $P_{\text{wait}}(M/M/k)$:
+
+$$W_q(G/G/k) \approx \left( \frac{C_a^2 + C_s^2}{2} \right) \frac{P_{\text{wait}}(M/M/k)}{k\mu(1 - \rho)}$$ {#eq-vol3-allen-cunneen}
+
+While pooling $k$ accelerators into a unified serving cluster provides statistical multiplexing benefits that dampen average wait times relative to isolated single-server silos, it exacerbates tail-latency amplification across multi-turn trajectories. If an agent workflow requires $N = 30$ sequential model invocations to complete an end-to-end task, and the runtime operates at an aggressive hardware utilization $\rho = 0.85$, the likelihood that the trajectory encounters an extreme tail delay ($P_{99}$) on at least one critical-path turn is:
+
+$$P(\text{Tail Incident}) = 1 - (1 - 0.01)^{30} = 1 - 0.7397 \approx 0.26$$
+
+More than one-quarter of all executed agent trajectories will suffer an extreme tail delay. Because an agent trajectory executes synchronously across sequential turns, a single tail delay on turn 7 cascades directly into the total time-to-completion, often causing the host orchestrator to breach its global Service Level Objective (SLO).
+
+::: {.callout-note title="Worked Example: Sizing Queue Capacity and Tail Latency under Heavy-Tailed Agent Traffic"}
+An infrastructure team operates an inference cluster dedicated to serving intermediate agent reasoning loops. The cluster processes an aggregate arrival rate of $\lambda = 160\text{ requests/sec}$ distributed across pooled accelerator workers. Profiling reveals that the mean model service time is $\mathbb{E}[S] = 20\text{ ms}$ ($\mu = 50\text{ req/sec/worker}$), but the workload exhibits extreme bimodality: 80% of requests are fast JSON schema evaluations ($\mathbb{E}[S_1] = 5\text{ ms}$), while 20% are extended chain-of-thought generations ($\mathbb{E}[S_2] = 80\text{ ms}$). Empirical measurements indicate an arrival coefficient of variation $C_a = 1.4$ and a service coefficient of variation $C_s = 2.2$. 
+
+The engineering lead proposes provisioning $k = 4$ worker nodes to run at an average utilization of $\rho = \frac{\lambda}{k \mu} = \frac{160}{4 \times 50} = 0.80$. Compute the expected queue wait time $W_q$ under this configuration using the Allen-Cunneen approximation, and contrast it with an alternative provisioning plan of $k = 5$ workers ($\rho = 0.64$).
+
+**Step 1: Compute the variability scaling factor.**
+$$\frac{C_a^2 + C_s^2}{2} = \frac{1.4^2 + 2.2^2}{2} = \frac{1.96 + 4.84}{2} = \frac{6.80}{2} = 3.40$$
+
+**Step 2: Evaluate Erlang-C waiting probability for $k = 4$ at $\rho = 0.80$.**
+For an $M/M/4$ queue with offered load $A = k\rho = 3.2\text{ Erlangs}$:
+$$P_{\text{wait}}(M/M/4) = \frac{\frac{A^4}{4!(1 - \rho)}}{\sum_{n=0}^{3} \frac{A^n}{n!} + \frac{A^4}{4!(1 - \rho)}} \approx 0.554$$
+
+**Step 3: Calculate $W_q$ for $k = 4$.**
+$$W_q \approx 3.40 \times \frac{0.554}{4 \times 50 \times (1 - 0.80)} = 3.40 \times \frac{0.554}{200 \times 0.20} = 3.40 \times \frac{0.554}{40} = 3.40 \times 0.01385\text{ s} \approx 47.1\text{ ms}$$
+Under $k = 4$ workers, the average queue wait time ($47.1\text{ ms}$) exceeds the mean execution time of the request itself ($20\text{ ms}$) by more than $2.3\times$.
+
+**Step 4: Evaluate the cluster over-provisioned to $k = 5$ at $\rho = 0.64$.**
+For $M/M/5$ with $A = 3.2\text{ Erlangs}$, the waiting probability drops sharply to $P_{\text{wait}}(M/M/5) \approx 0.237$.
+$$W_q \approx 3.40 \times \frac{0.237}{5 \times 50 \times (1 - 0.64)} = 3.40 \times \frac{0.237}{250 \times 0.36} = 3.40 \times \frac{0.237}{90} = 3.40 \times 0.00263\text{ s} \approx 8.95\text{ ms}$$
+
+**Takeaway:** Increasing capacity by a single accelerator node ($25\%$ hardware expansion) reduces average queue waiting time from $47.1\text{ ms}$ down to $8.95\text{ ms}$—a latency reduction of over $80\%$. In heavy-tailed agent serving environments, operating below the knee of the utilization curve ($\rho \le 0.70$) is mandatory to absorb variance and protect multi-turn trajectory critical paths.
+:::
+
+### Multi-Level Feedback Queueing for Agent Workloads
+
+When an agent serving cluster schedules all requests through an undifferentiated First-Come-First-Served (FCFS) queue, it encounters the classic *head-of-line blocking* pathology. A massive, multi-step code-generation invocation requiring 4,096 output tokens will occupy an accelerator's continuous batching slots for several contiguous seconds. If an interactive user or an latency-critical supervisory agent submits a 10-token routing query behind this massive job, the short query is delayed behind the long-running decode phase. This degradation violates the core scheduling objective of computing systems: minimizing mean response time by prioritizing short jobs (Shortest Job First), without possessing prior knowledge of exact execution durations.
+
+Because the host runtime cannot predict the exact token length of an autoregressive generation prior to inference, it cannot implement pure Shortest Processing Time (SPT) scheduling. Instead, the cluster must employ an adaptive **Multi-Level Feedback Queue (MLFQ)** discipline tailored to the memory and compute mechanics of token generation, as illustrated in @fig-vol3-mlfq-serving-architecture.
+
+![Multi-Level Feedback Queue (MLFQ) scheduling architecture for agent fleets. Interactive queries, intermediate tool-loop steps, and background batch trajectories are isolated into distinct priority queues with dynamic quantum allocation and KV-cache eviction policies.](images/svg/vol3-mlfq-serving-architecture.svg){#fig-vol3-mlfq-serving-architecture}
+
+The agent-aware MLFQ structures accelerator capacity into distinct priority tiers, governing preemption, batch assembly, and memory tenancy:
+
+1. **Priority Queue 0 ($Q_0$, Interactive & Probes):** All newly arriving model invocations enter $Q_0$. This tier is allocated the highest dispatch priority and a strictly bounded token generation quantum (for example, $\Delta_0 = 64\text{ tokens}$). Invocations in $Q_0$ consist of interactive user queries, fast semantic classifier probes, tool-call routing decisions, and safety guardrail checks. If an invocation completes its generation within $\Delta_0$ tokens (emitting an `EOS` token or tool-dispatch sequence), it exits the system immediately, achieving minimal queue wait time and near-zero tail latency.
+2. **Priority Queue 1 ($Q_1$, Multi-Turn Reasoning):** If an invocation exhausts its $Q_0$ token quantum without terminating, the scheduler preempts its forward pass at the token boundary, demotes the task to $Q_1$, and context-switches its execution state. $Q_1$ operates with a larger quantum (for example, $\Delta_1 = 512\text{ tokens}$) and intermediate dispatch priority. It accommodates routine agent deliberation turns, standard code edits, and multi-sentence reasoning steps.
+3. **Priority Queue 2 ($Q_2$, Long-Horizon Batch Trajectories):** Tasks that exceed $\Delta_1$ tokens are demoted to $Q_2$, the lowest-priority background queue. $Q_2$ operates with expansive token quanta ($\Delta_2 \ge 4,096\text{ tokens}$) or unconstrained run-to-completion mechanics. This tier processes asynchronous background tasks: extensive repository-wide refactoring passes, synthetic test-suite generation, offline embedding pipelines, and non-urgent verification passes. Invocations in $Q_2$ are explicitly preemptible; if $Q_0$ or $Q_1$ experiences an arrival surge, active $Q_2$ requests yield their continuous batching slots.
+
+```
+Queue Level    Priority    Token Quantum (Δ)    Target Workload                 Preemption Policy
+--------------------------------------------------------------------------------------------------
+Q0             Highest     64 tokens            Interactive UI, Guardrails,     Non-preemptible
+                                                Tool-call routing probes        within quantum
+Q1             Medium      512 tokens           Standard reasoning loops,       Preemptible by Q0
+                                                Single-file code generation
+Q2             Lowest      4096+ tokens         Repository refactoring,         Preemptible by Q0/Q1;
+                                                Test generation, Batch eval     Eligible for swap-to-host
+```
+
+To maintain architectural stability, an agent MLFQ must resolve two critical systems challenges: *starvation* and *KV-cache memory churn*.
+
+If high-priority interactive traffic in $Q_0$ and $Q_1$ saturates the cluster, long-running batch trajectories in $Q_2$ will starve indefinitely. To enforce forward progress invariants, the scheduler implements periodic *priority boosting*. At regular time intervals $T_{\text{boost}}$ (e.g., every 60 seconds), all unserviced tasks across all priority tiers are flushed back into $Q_0$, resetting their elapsed quantum counters and ensuring that background trajectories periodically advance.
+
+```
+                      +-----------------------------+
+                      |   New Invocations Arrive    |
+                      +--------------+--------------+
+                                     |
+                                     v
+                       +---------------------------+
+         +------------>|      Priority Queue 0     |<------------+
+         |             |  (Interactive, Δ = 64)    |             |
+         |             +-------------+-------------+             |
+         |                           |                           |
+         |                 Exhausts  | Completes                 |
+         |                 Quantum 0 | within Δ0                 |
+         |                           v                           |
+         |             +---------------------------+             |
+  Priority Boost       |      Priority Queue 1     |       Exit System
+  (Every T_boost sec)  |    (Reasoning, Δ = 512)   |     (Output Emitted)
+         |             +-------------+-------------+             |
+         |                           |                           |
+         |                 Exhausts  | Completes                 |
+         |                 Quantum 1 | within Δ1                 |
+         |                           v                           |
+         |             +---------------------------+             |
+         +-------------+      Priority Queue 2     |-------------+
+                       |    (Batch, Δ = 4096+)     |
+                       +---------------------------+
+```
+
+The second challenge involves physical memory management during preemption. When a $Q_2$ job is preempted to free tensor cores for an incoming $Q_0$ burst, evicting its accumulated 4,000-token KV cache to host CPU RAM consumes valuable interconnect bandwidth. If the preempted task is re-admitted milliseconds later, swapping those physical pages back into HBM creates severe PCIe/NVLink thrashing. The MLFQ scheduler mitigates this via *tiered eviction thresholds*: preempted $Q_1$ tasks retain their physical HBM page allocations in a suspended state for a grace period $\tau_{\text{grace}}$. Only if memory pressure persists and $Q_0$ exhausts the free HBM frame pool does the PagedAttention memory manager trigger asynchronous page migration to host DDR5 memory.
+
+| Scheduling Discipline | Mean Wait ($W_q$) | Tail Latency ($P_{99}$) | Starvation Risk | Preemption Overhead | Memory Efficiency (KV Cache) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **First-Come-First-Served (FCFS)** | High | Severe (HoL blocking) | None | Zero | Low (pinned memory stalls) |
+| **Shortest Processing Time (SPT)** | Optimal | Low for short jobs; High for long | Severe for large tasks | Zero (requires oracle) | High (fast job clearance) |
+| **Multi-Level Feedback Queue (MLFQ)**| Near-Optimal | Low across $Q_0/Q_1$; Bounded on $Q_2$ | Bounded via $T_{\text{boost}}$ | Low to Moderate (quantum boundaries) | High (tiered memory migration) |
+
+### Provisioned Dedicated Accelerators versus Serverless Elasticity
+
+Beyond internal queue dynamics, the central economic decision facing agent systems engineers is the partition between **provisioned dedicated accelerators** (such as leased or owned 8-GPU SXM5 nodes) and **elastic serverless APIs** (such as commercial pay-per-token foundation model endpoints). This architectural choice directly dictates operational expenditure, tail-latency predictability, and failure domains.
+
+Dedicated hardware offers deterministic hardware-level isolation, zero external rate-limiting, custom kernel optimization (such as tailored speculative decoding or PagedAttention block configurations), and zero per-token marginal billing. However, its cost is fixed and continuous: whether the accelerators execute sustained matrix multiplications or sit completely idle waiting for jobs, the enterprise incurs linear capital depreciation, power, cooling, network fabric, and administrative overhead. 
+
+Conversely, serverless token APIs convert fixed capital expenditures into variable operational expenditures. The enterprise pays strictly for processed input and output tokens:
+
+$$C_{\text{serverless}} = \sum_{t \in \mathcal{T}} \left( L_{\text{input}, t} \cdot P_{\text{in}} + L_{\text{output}, t} \cdot P_{\text{out}} \right)$$
+
+where $P_{\text{in}}$ and $P_{\text{out}}$ denote the market prices per token (typically quoted per million tokens), and $\mathcal{T}$ is the set of all trajectory turns. However, serverless APIs introduce distinct systems hazards: multi-tenant noisy-neighbor interference, opaque external queueing policies, unpredictable tail latencies, strict provider concurrency rate limits (HTTP 429), and geographic compliance constraints.
+
+To determine when an enterprise agent workload justifies moving from serverless APIs to dedicated on-premise or reserved cloud accelerators, we formulate the **financial break-even utilization rate $\rho^*$**.
+
+Let $C_{\text{node}}$ represent the fully burdened operational cost of a dedicated accelerator server per hour (including hardware amortization or lease costs, power, cooling, networking, and cluster management software). Let an individual node deliver an effective continuous generation throughput of $R_{\text{out}}$ output tokens per second and $R_{\text{in}}$ input tokens per second under realistic continuous batching conditions. 
+
+Assuming a characteristic workload where the ratio of input tokens to output tokens is $\kappa = \bar{L}_{\text{input}} / \bar{L}_{\text{output}}$, the economic value $V_{\text{node}}$ generated by that dedicated node operating at $100\%$ saturation over one hour ($3,600\text{ seconds}$) evaluated at prevailing serverless market rates is:
+
+$$V_{\text{node}} = 3600 \cdot R_{\text{out}} \cdot \left( P_{\text{out}} + \kappa \cdot P_{\text{in}} \right)$$ {#eq-vol3-node-value}
+
+Because physical hardware does not operate at $100\%$ capacity without inducing infinite queue delays, the actual financial value generated per hour at an average sustained utilization $\rho$ is $\rho \cdot V_{\text{node}}$. The break-even utilization $\rho^*$ occurs precisely where the operational cost of the dedicated node matches the equivalent market expenditure of the serverless provider:
+
+$$C_{\text{node}} = \rho^* \cdot V_{\text{node}} \implies \rho^* = \frac{C_{\text{node}}}{3600 \cdot R_{\text{out}} \cdot \left( P_{\text{out}} + \kappa \cdot P_{\text{in}} \right)}$$ {#eq-vol3-breakeven-utilization}
+
+If an engineering team's projected steady-state workload drives sustained accelerator utilization above $\rho^*$, hosting dedicated instances yields immediate financial savings. If sustained utilization hovers below $\rho^*$, running dedicated hardware strands capital, and the team should rely on serverless APIs.
+
+::: {.callout-note title="Worked Example: Financial Break-Even Utilization for Dedicated Accelerator Fleets"}
+An enterprise operates a fleet of autonomous software engineering agents. The workload exhibits an input-to-output token ratio $\kappa = 5.0$ (reflecting context-heavy prompt prefixes including codebase files, execution traces, and compiler errors). Third-party commercial API pricing for a competitive model tier is:
+- $P_{\text{in}} = \$3.00\text{ per } 10^6\text{ tokens} = \$3.00 \times 10^{-6}\text{ per token}$
+- $P_{\text{out}} = \$15.00\text{ per } 10^6\text{ tokens} = \$15.00 \times 10^{-6}\text{ per token}$
+
+The infrastructure team evaluates leasing dedicated 8-accelerator nodes on a 1-year reserved contract. The fully burdened cost per node is $C_{\text{node}} = \$28.00\text{ per hour}$. Benchmarking the serving engine (vLLM with PagedAttention and FP8 quantization) on real agent traces establishes an average sustained throughput of $R_{\text{out}} = 1,200\text{ output tokens/second}$ per node at saturation.
+
+Calculate the financial break-even utilization $\rho^*$. Furthermore, evaluate whether dedicated hosting is financially viable if the team expects a diurnal load profile yielding an average daily utilization of $\bar{\rho} = 0.52$.
+
+**Step 1: Compute the effective serverless value per output token.**
+Each output token is accompanied by $\kappa = 5.0$ input tokens. The equivalent API cost per output token is:
+$$P_{\text{effective}} = P_{\text{out}} + \kappa \cdot P_{\text{in}} = \$15.00 \times 10^{-6} + 5.0 \times (\$3.00 \times 10^{-6}) = \$30.00 \times 10^{-6}\text{ per output token}$$
+
+**Step 2: Calculate the saturated hourly economic value of a dedicated node ($V_{\text{node}}$).**
+$$V_{\text{node}} = 3600\text{ s/hr} \times 1,200\text{ tokens/s} \times (\$30.00 \times 10^{-6}\text{ /token})$$
+$$V_{\text{node}} = 4,320,000\text{ tokens/hr} \times (\$30.00 \times 10^{-6}\text{ /token}) = \$129.60\text{ per hour}$$
+
+**Step 3: Calculate the break-even utilization $\rho^*$.**
+$$\rho^* = \frac{C_{\text{node}}}{V_{\text{node}}} = \frac{\$28.00}{\$129.60} \approx 0.216\text{ (or } 21.6\%\text{)}$$
+
+**Step 4: Assess operational viability at $\bar{\rho} = 0.52$.**
+Because the projected average operational utilization $\bar{\rho} = 0.52$ substantially exceeds the break-even threshold $\rho^* = 0.216$, dedicated infrastructure is economically advantageous.
+- Hourly cost of dedicated node: $\$28.00$
+- Hourly market value delivered: $0.52 \times \$129.60 = \$67.39$
+- Net hourly savings per node: $\$67.39 - \$28.00 = \$39.39$ ($58.4\%$ reduction in serving cost)
+
+**Takeaway:** The low break-even threshold ($21.6\%$) demonstrates that dedicated hardware becomes compelling even at modest utilization for token-dense, high-throughput agent workloads. However, operating dedicated nodes below $\rho^*$ during off-peak night shifts rapidly turns them into financial liabilities unless backfilled with preemptible batch tasks ($Q_2$ in an MLFQ).
+:::
+
+In enterprise deployments, the optimal architecture rarely adopts a pure binary posture (exclusively dedicated versus exclusively serverless). Instead, robust platforms deploy a **hybrid tiered provisioning architecture** (often termed *cloud bursting*). 
+
+```
+                                  Agent Requests
+                                        |
+                                        v
+                          +---------------------------+
+                          |   Fleet Admission Router  |
+                          +-------------+-------------+
+                                        |
+                 +----------------------+----------------------+
+                 | (Load <= 65%)                               | (Load > 65% Spike)
+                 v                                             v
+  +-----------------------------+               +-----------------------------+
+  |  Dedicated Accelerator Pool |               |  Elastic Serverless APIs    |
+  |  (Reserved 8x H100 Nodes)   |               |  (Pay-per-token Fallback)   |
+  |                             |               |                             |
+  |  - Low queue latency        |               |  - Absorbs non-linear tail  |
+  |  - High baseline efficiency |               |  - Zero stranded capital    |
+  |  - Serves Q0, Q1, and Q2    |               |  - Rate-limited burst buffer|
+  +-----------------------------+               +-----------------------------+
+```
+
+Under this hybrid topology, the infrastructure team dimensions a baseline dedicated accelerator cluster sized to absorb base load up to an operating utilization of $\rho \approx 0.60\text{--}0.65$. Keeping dedicated utilization within this boundary ensures that Kingman's queueing multiplier remains low, insulating the fleet from catastrophic queue spikes and tail-latency explosions. When workload bursts push aggregate demand beyond this threshold, the fleet admission controller dynamically routes excess requests to elastic, multi-tenant serverless APIs. The enterprise pays premium spot rates on the marginal overflow but avoids purchasing dedicated nodes that would sit idle during baseline troughs, achieving both cost minimization and tail-latency protection.
+
+***
+
+Even when an accelerator fleet is mathematically dimensioned with low-latency MLFQ scheduling and balanced provisioned-serverless economics, physical cluster stability does not guarantee financial sustainability. In an agentic architecture operating under Zero Ambient Authority ($A=0$), physical hardware capacity constitutes merely the serving substrate; the autonomous software logic executing atop it possesses the latent capacity to consume unbounded compute. If an agent enters an undetected cyclic error-retry loop, spawns recursive sub-agents without bound, or inflates prompt prefixes exponentially across extended context windows, even an infinitely scalable cluster will merely accelerate the depletion of financial capital. To prevent economic runaway, the host runtime must govern consumption internally through monotonic spending ledgers, hierarchical budget reservations, and automated circuit breakers.

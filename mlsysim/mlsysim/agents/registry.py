@@ -18,9 +18,28 @@ class CodingAgents(Registry):
         context_window=128_000 * ureg.token,
         working_memory=32_000 * ureg.token,
         sandbox_startup_latency=5.0 * ureg.ms,
+        sandbox_snapshot_restore_latency=15.0 * ureg.ms,
+        sandbox_memory_footprint=512 * ureg.MiB,
+        max_trajectory_steps=30,
         reference_model=Models.Language.Llama3_70B,
-        serving_node=Systems.Nodes.DGX_H100,
+        serving_node=Systems.Nodes.HGX_H100_EPYC,
         metadata=Metadata(provenance=pc.SWE_BENCH_HARNESS),
+    )
+    SWE_Bench_Workstation = AgentArchitecture(
+        name="SWE-bench Workstation Developer Harness",
+        paradigm="ReAct / Tool-Use",
+        context_window=128_000 * ureg.token,
+        working_memory=32_000 * ureg.token,
+        sandbox_startup_latency=25.0 * ureg.ms,
+        sandbox_snapshot_restore_latency=45.0 * ureg.ms,
+        sandbox_memory_footprint=512 * ureg.MiB,
+        max_trajectory_steps=30,
+        reference_model=Models.Language.Llama3_8B,
+        serving_node=Systems.Nodes.Workstation_M3Max,
+        metadata=Metadata(
+            provenance=pc.DEPLOYMENT_ENVELOPES,
+            description="Local workstation developer baseline running on Apple Silicon unified memory.",
+        ),
     )
 
 
@@ -70,6 +89,13 @@ class InteractiveAgents(Registry):
     )
 
 
+class ReferencePlatforms(Registry):
+    """Canonical reference execution platforms for Volume III: The Stochastic Computer."""
+
+    Cloud_DGX_H100 = CodingAgents.SWE_Bench_Runner
+    Workstation_Apple = CodingAgents.SWE_Bench_Workstation
+
+
 class Agents(Registry):
     """Authoritative registry of agent system profiles and execution harnesses."""
 
@@ -77,3 +103,5 @@ class Agents(Registry):
     Deliberation = DeliberationAgents
     MultiAgent = MultiAgents
     Interactive = InteractiveAgents
+    Platforms = ReferencePlatforms
+

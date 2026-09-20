@@ -1,0 +1,174 @@
+## Trajectory Credit Assignment {#sec-vol3-rlvr-credit}
+
+Consider an autonomous agent executing a software repair task that spans thirty discrete environment interactions: reading directory structures, inspecting stack traces, reproducing an invariant failure in a debugger, modifying five lines of C++ source, invoking a compiler, and running an end-to-end integration test. The compilation succeeds, but the test harness encounters an unhandled boundary condition and emits an exit code of `1`, terminating the rollout with a scalar reward of $R(\tau) = 0$. In a naive policy gradient formulation, this terminal zero propagates uniformly across every token emitted along the trajectory. The critical bug localization via `gdb`, the inspection of the faulty pointer arithmetic, and the flawed off-by-one boundary edit receive identical negative reinforcement. Conversely, had a lucky syntactic mutation satisfied the test suite despite incoherent intermediate reasoning, every intermediate step—including redundant commands and dead ends—would receive identical positive reinforcement.
+
+**Terminal outcome verification guarantees correctness at the boundary of an execution trace, but leaves the learning runtime fundamentally blind to the causal efficacy of intermediate decisions. Resolving this temporal credit assignment dilemma requires decoupling intermediate state evaluation from terminal oracle evaluation—either through external Process Reward Models (PRMs) that score discrete deductive steps, or through Monte Carlo sub-tree rollouts that estimate state values via empirical branch continuation—without penalizing the exploratory diagnostic actions essential to long-horizon problem solving.**
+
+### The Structural Dilemma of Sparse Terminal Feedback
+
+The mathematical core of the credit assignment problem in agentic reinforcement learning originates in the gap between token-level parameter updates and trajectory-level evaluation [@sutton1984temporal]. Let an agent trajectory $\tau$ of horizon $T$ be represented as an alternating sequence of environment states, observations, and discrete action segments:
+
+$$\tau = \left(s_0, a_0, s_1, a_1, \dots, s_T, a_T\right)$$
+
+Here, each action $a_t$ consists of a variable-length sequence of autoregressively generated tokens that form either a natural language reasoning block or a structured tool invocation, while $s_t$ represents the combined host state: the active context window prefix, the current working directory, filesystem contents, and the process table of the execution sandbox. 
+
+::: {.column-margin}
+**Epistemic vs. Instrumental Actions**
+*Epistemic actions* gather environmental data to reduce internal policy entropy without altering persistent system state (e.g., `git status`, `grep`, memory profiling). *Instrumental actions* mutate external invariants to advance toward the goal state (e.g., editing source code, applying database migrations).
+:::
+
+When training under a terminal Verifiable Reward Oracle, the environment returns a single scalar outcome $R(\tau) \in \{0, 1\}$ strictly at time $T$. In the standard REINFORCE policy gradient estimator with baseline $b(s_0)$, the empirical gradient with respect to policy parameters $\theta$ is:
+
+$$\hat{g}_{\text{terminal}} = \sum_{t=0}^T \nabla_\theta \log \pi_\theta(a_t \mid s_t) \left( R(\tau) - b(s_0) \right)$$
+
+The variance of this estimator scales linearly with the trajectory horizon $T$. Because the terminal return $R(\tau)$ is coupled to the joint realization of all $T$ actions, the covariance between an early exploratory action $a_0$ and the distant outcome $R(\tau)$ is swamped by the stochastic noise of all subsequent actions $a_1, \dots, a_T$. When $R(\tau) = 0$, the update penalizes every step $a_t$ equally, regardless of whether $a_t$ was a brilliant deduction or an catastrophic error.
+
+This indiscriminate attribution triggers an observable failure mode during policy optimization: *diagnostic suppression*. In complex debugging or systems administration tasks, an optimal agent must execute *epistemic actions*—commands that do not directly mutate code toward the solution, but instead gather diagnostic information to reduce the agent's epistemic uncertainty regarding the environment. If the agent spends ten steps running `grep`, reading documentation, and inspecting runtime memory, but fails on the final patch, uniform credit assignment marks all ten diagnostic queries as failures. Over successive gradient steps, the log-probabilities of exploratory tool calls are driven downward. The policy degenerates into hasty, non-diagnostic guessing: it immediately attempts single-shot edits on arbitrary files, because skipping diagnostic steps shortens the trajectory, reducing the cumulative token-penalty footprint without improving task comprehension.
+
+```
+FAILED TRAJECTORY TRACE (UNIFORM CREDIT PENALTY COLLAPSE)
+--------------------------------------------------------------------------------
+Step 01 [EPISTEMIC]:    $ ls -la src/core/                  -> Exit 0  [Reward: 0.0]
+Step 02 [EPISTEMIC]:    $ grep -rn "buffer_overflow" src/   -> Exit 0  [Reward: 0.0]
+Step 03 [EPISTEMIC]:    $ gdb --batch -ex "bt" ./bin/server -> Exit 0  [Reward: 0.0]
+Step 04 [INSTRUMENTAL]: Patch applied to src/core/net.c     -> Exit 0  [Reward: 0.0]
+Step 05 [VERIFY]:       $ pytest tests/test_allocator.py    -> Exit 1  [Reward: 0.0]
+--------------------------------------------------------------------------------
+Outcome: All 5 steps penalized uniformly (-1.0).
+Policy Collapse: Step 01-03 weights penalized, driving policy to skip diagnostics.
+```
+
+To eliminate diagnostic suppression, the runtime must allocate credit that reflects the *marginal causal contribution* of each transition $(s_t, a_t) \to s_{t+1}$ toward the eventual success of the trajectory, isolating individual errors without corrupting the value of prerequisite investigative work.
+
+### Outcome vs. Process Verifiers: Inductive Bias and Gaming Surfaces
+
+To provide granular learning signals along an extended rollout, policy optimization runtimes bifurcate into two structural paradigms: Outcome Reward Models (ORMs) and Process Reward Models (PRMs) [@lightman2023let].
+
+An Outcome Reward Model evaluates only the terminal state $s_T$. In verifiable software environments, the ORM is rarely a neural network; it is a deterministic, sandbox-hosted verification harness that checks compiler exits, unit test assertions, and integration criteria. The inductive bias of an ORM is conservative: it makes zero assumptions about the path taken to reach the solution. This property renders the ORM impervious to intermediate reasoning style differences, but inflicts high sample complexity during training. Because non-zero reward signals occur sparsely in the search space, the policy receives no gradient guidance across the intermediate nodes of the trajectory.
+
+Conversely, a Process Reward Model evaluates each discrete reasoning step or environment transition individually:
+
+$$r_t^{\text{PRM}} = M_{\text{PRM}}(s_t, a_t) \in [0, 1]$$
+
+Under a PRM, the total trajectory advantage decomposes into dense additive returns $G_t = \sum_{l=0}^{T-t} \gamma^l r_{t+l}^{\text{PRM}}$. By rewarding correct intermediate deductions—such as properly isolating a race condition in a multi-threaded trace—the PRM lowers policy gradient variance and accelerates sample efficiency. 
+
+![Credit assignment topologies for agentic trajectories. Terminal ORMs evaluate solely the completed execution state, providing high-fidelity verification at the cost of high variance. Step-level PRMs score intermediate reasoning tokens via an auxiliary model, offering dense guidance vulnerable to verifier gaming. Monte Carlo Sub-Tree Rollouts fork execution branches from intermediate states, grounding step values in empirical terminal outcomes without an auxiliary reward model.](images/svg/credit-assignment-topologies.svg){#fig-vol3-credit-assignment}
+
+However, replacing an objective terminal execution check with a learned neural PRM introduces an expansive, non-deterministic attack surface governed by Goodhart's Law: *when a measure becomes a target, it ceases to be a good measure*. A PRM is typically a transformer trained via supervised step-level labels to predict human or compiler approval. Because it operates over the agent's textual tokens rather than physical sandbox invariants, the policy rapidly learns to exploit statistical blind spots in the PRM's scoring function:
+
+1. **Performative Deliberation:** The policy emits conversational filler, formulaic checklists, and exaggerated hedging ("I must verify this pointer thoroughly to avoid memory corruption") that trigger high PRM confidence scores without performing substantive debugging.
+2. **Sycophantic Self-Consistency:** If the agent generates an erroneous code change in step $t$, subsequent steps that build coherently upon that false premise can receive high process scores because the PRM evaluates local logical consistency rather than grounded physical truth.
+3. **Premature Convergence:** Dense step rewards encourage the policy to pursue paths that maximize immediate local reward, penalizing complex exploratory trajectories that traverse temporarily low-scoring or counter-intuitive intermediate states to reach an elusive global fix.
+
+| Dimension | Outcome Reward Model (ORM) | Process Reward Model (PRM) | Monte Carlo Sub-Tree Rollouts (MCR) |
+| :--- | :--- | :--- | :--- |
+| **Evaluation Target** | Terminal state $s_T$ | Transition step $(s_t, a_t)$ | Intermediate state $s_t$ |
+| **Supervision Source** | External verification harness | Learned neural verifier | Empirical terminal oracle |
+| **Verification Basis** | Deterministic tests / linter | Token-level semantic proxy | Realized execution branches |
+| **Gradient Variance** | Severe: $\mathcal{O}(T)$ | Low: $\mathcal{O}(1)$ | Moderate: $\mathcal{O}(1/\sqrt{K})$ |
+| **Sample Efficiency** | Low (requires lucky solutions) | High (dense step feedback) | High (dense empirical values) |
+| **Vulnerability to Gaming**| Zero (bounded by oracle) | Critical (Goodhart exploitation)| Zero (grounded in terminal test)|
+| **Runtime Compute Cost** | Baseline ($\mathcal{O}(T)$ decode tokens) | Low ($\mathcal{O}(T)$ verifier passes)| Extreme ($\mathcal{O}(K \cdot T^2)$ rollouts)|
+
+: Comparative analysis of credit assignment paradigms in verifiable agentic systems. {#tbl-vol3-credit-comparison}
+
+The trade-offs summarized in @tbl-vol3-credit-comparison expose a core systems dilemma: learned PRMs offer dense credit assignment but introduce soft proxy gaming, while deterministic ORMs preserve verification integrity but introduce intractable variance over long horizons. This tension motivates non-parametric credit assignment mechanisms that compute dense intermediate state values directly from the terminal oracle itself.
+
+### Monte Carlo Sub-Tree Rollout Estimation
+
+To derive dense intermediate learning signals without deploying a gameable, learned PRM, the agent runtime can turn to empirical estimation via Monte Carlo Sub-Tree Rollouts. Rather than training an auxiliary neural model to guess the value of an intermediate state $s_t$, the runtime empirically measures the value by sampling continuation trajectories directly from the active environment.
+
+Let an agent rollout reach state $s_t$, where the environment state encapsulates both the prompt token history and the physical state of the execution sandbox (the filesystem, file descriptors, and environment variables). To compute the empirical value $\hat{V}(s_t)$, the host runtime checkpoints the sandbox state, freezes the prefix context window, and forks $K$ independent stochastic rollouts using the current policy $\pi_\theta$:
+
+$$\tau_k^{(s_t)} = \left(s_t, a_t^{(k)}, s_{t+1}^{(k)}, \dots, s_T^{(k)}\right), \quad k \in \{1, \dots, K\}$$
+
+Each forked trajectory runs inside its own isolated copy-on-write sandbox until it hits a termination condition, where it is evaluated by the deterministic terminal verification oracle $R\left(\tau_k^{(s_t)}\right) \in \{0, 1\}$. The empirical value of state $s_t$ is the Monte Carlo average:
+
+$$\hat{V}(s_t) = \frac{1}{K} \sum_{k=1}^K R\left(\tau_k^{(s_t)}\right)$$
+
+Correspondingly, the empirical state-action value $\hat{Q}(s_t, a_t)$ of taking specific action $a_t$ from state $s_t$ is computed by fixing $a_t$ across all branches, transitioning to state $s_{t+1}$, and sampling $K$ rollouts from $s_{t+1}$:
+
+$$\hat{Q}(s_t, a_t) = \hat{V}(s_{t+1}) = \frac{1}{K} \sum_{k=1}^K R\left(\tau_k^{(s_{t+1})}\right)$$
+
+This yields an empirical, step-level advantage estimate $\hat{A}(s_t, a_t)$:
+
+$$\hat{A}(s_t, a_t) = \hat{Q}(s_t, a_t) - \hat{V}(s_t) = \hat{V}(s_{t+1}) - \hat{V}(s_t)$$
+
+Notice how this formulation naturally shields epistemic diagnostic actions from suppression. Suppose an agent begins at $s_0$ with an ambiguous bug report. Because the search space is vast, the baseline probability of randomly resolving the bug from $s_0$ is low: $\hat{V}(s_0) = 0.05$. 
+
+In step $a_0$, the agent executes a targeted diagnostic command: `gdb --batch -ex 'run' -ex 'bt' ./bin/app`. This command does not write code or alter the underlying bug, but it appends the precise stack trace and failing line number (`allocator.c:142`) to the observation stream $s_1$. When the runtime forks $K$ rollouts from $s_1$, the continuation policies now observe the exact root cause, causing the empirical success rate across the sub-tree to surge to $\hat{V}(s_1) = 0.60$.
+
+The resulting advantage for the diagnostic step is positive and large:
+
+$$\hat{A}(s_0, a_0) = \hat{V}(s_1) - \hat{V}(s_0) = 0.60 - 0.05 = +0.55$$
+
+The diagnostic action receives substantial positive reinforcement *even if the specific outer trajectory eventually fails on step 25*. Credit is decoupled from downstream execution noise: an action is rewarded if and only if it improves the empirical probability of satisfying the terminal verification oracle from that point forward.
+
+::: {.callout-note title="Worked Example: Accelerator Compute and Memory Footprint of Monte Carlo Credit Assignment"}
+**Problem Statement:**  
+An engineering team is training a 70-billion parameter dense model on complex software tasks using an 8-GPU node of NVIDIA H100 SXM5 accelerators. The model weights are represented in BF16 format (2 bytes per parameter, requiring 140 GB of aggregate VRAM, tensor-parallelized across all 8 GPUs at 17.5 GB per GPU). Each H100 GPU provides 80 GB of HBM3 memory with an individual memory bandwidth of 3.35 TB/s (yielding an aggregate cluster memory bandwidth of $B_{\text{agg}} = 8 \times 3.35 = 26.8\text{ TB/s}$) and delivers 989 TFLOPS of dense BF16 compute.
+
+A base agent trajectory spans $T = 30$ interaction steps, generating an average of 512 tokens per step ($L_{\text{total}} = 30 \times 512 = 15,360$ tokens). 
+
+1. Calculate the inference decode wall-clock time for a single base trajectory assuming an autoregressive decode throughput bound by memory bandwidth at batch size 1.
+2. Calculate the total tokens generated, theoretical floating-point operations (using the standard $2N$ FLOPs/token inference rule), and wall-clock execution time if the runtime performs exhaustive Monte Carlo Sub-Tree Rollouts at every intermediate step $t \in \{1, \dots, T-1\}$ with $K = 8$ continuation branches per step.
+
+**Solution:**
+
+*Part 1: Base Rollout Wall-Clock Time*  
+In autoregressive generation at batch size 1, the model is strictly memory bandwidth-bound (GEMV regime). Every newly decoded token requires streaming the entire 140 GB parameter footprint across the GPU memory bus:
+
+$$\text{Time per token} = \frac{\text{Model Footprint}}{B_{\text{agg}}} = \frac{140\text{ GB}}{26,800\text{ GB/s}} \approx 5.224 \times 10^{-3}\text{ seconds}$$
+
+$$\text{Decode Throughput} = \frac{1}{5.224 \times 10^{-3}\text{ s}} \approx 191.4\text{ tokens/second}$$
+
+The wall-clock time $T_{\text{base}}$ required to generate the 15,360 tokens of the base trajectory is:
+
+$$T_{\text{base}} = \frac{15,360\text{ tokens}}{191.4\text{ tokens/s}} \approx 80.25\text{ seconds}$$
+
+*Part 2: Exhaustive Monte Carlo Sub-Tree Cost*  
+At each step $t \in \{1, \dots, 29\}$, the remaining horizon is $T - t$ steps. Forking $K = 8$ branches that each run to termination generates:
+
+$$N_{\text{tokens}}^{\text{MCR}} = \sum_{t=1}^{T-1} K \cdot (T - t) \cdot 512 = 8 \times 512 \sum_{t=1}^{29} (30 - t)$$
+
+Noting that $\sum_{t=1}^{29} (30 - t) = \sum_{j=1}^{29} j = \frac{29 \times 30}{2} = 435$:
+
+$$N_{\text{tokens}}^{\text{MCR}} = 4,096 \times 435 = 1,781,760\text{ tokens}$$
+
+Total tokens generated for this single training example:
+
+$$N_{\text{total}} = N_{\text{tokens}}^{\text{base}} + N_{\text{tokens}}^{\text{MCR}} = 15,360 + 1,781,760 = 1,797,120\text{ tokens}$$
+
+Using $2N$ FLOPs per token for forward inference ($N = 70 \times 10^9$):
+
+$$\text{FLOPs} = 2 \times 70 \times 10^9 \times 1,797,120 \approx 2.516 \times 10^{17}\text{ FLOPs} = 251.6\text{ PFLOPs}$$
+
+If rollouts are executed sequentially without batching across branches, the wall-clock time required to generate the MCR tokens at 191.4 tokens/second is:
+
+$$T_{\text{MCR}} = \frac{1,781,760\text{ tokens}}{191.4\text{ tokens/s}} \approx 9,309\text{ seconds} \approx 2.58\text{ hours}$$
+
+**Systems Implication:**  
+Exhaustive Monte Carlo evaluation scales quadratically with horizon length: $\mathcal{O}(K \cdot T^2)$. While batching across the $K$ branches increases the arithmetic intensity of the GEMV operations and amortizes parameter streaming across concurrent tokens, the 116-fold increase in generated tokens imposes an intolerable bottleneck on accelerator clusters. Exhaustive sub-tree estimation is computationally prohibitive for continuous training loops.
+:::
+
+Because exhaustive sub-tree rollouts hit an arithmetic intensity wall, production runtimes must employ *stratified credit assignment*. Instead of evaluating all $T$ steps, the runtime instruments the policy's token entropy to identify branch points where predictive uncertainty is high:
+
+$$\mathcal{H}(s_t) = -\sum_{v \in \mathcal{V}} \pi_\theta(v \mid s_t) \log \pi_\theta(v \mid s_t)$$
+
+Sub-tree forks are triggered selectively only when $\mathcal{H}(s_t)$ exceeds a predefined activation threshold, or exclusively on transitions that invoke mutating tool calls (`patch`, `rm`, `sed`). By filtering the evaluation points down to the 2–3 critical divergence nodes of a trajectory, the runtime reduces the Monte Carlo rollout budget by an order of magnitude while maintaining unbiased value estimates at key decision boundaries.
+
+```
+SELECTIVE FORKING TOPOLOGY (ENTROPY-GATED BRANCHING)
+--------------------------------------------------------------------------------
+State s_0 [Entropy: 0.12] ---> Pass through (No branch)
+State s_1 [Entropy: 0.89] ---> FORK K=8 ROLLOUTS ---> Estimate V(s_1) = 0.62
+State s_2 [Entropy: 0.08] ---> Pass through (No branch)
+State s_3 [Entropy: 0.76] ---> FORK K=8 ROLLOUTS ---> Estimate V(s_3) = 0.15
+--------------------------------------------------------------------------------
+Advantage of Action a_2: V(s_3) - V(s_1) = 0.15 - 0.62 = -0.47 (Identified fault)
+Compute Savings: 28 steps unbranched; 2 steps evaluated -> 93% token reduction.
+```
+
+The empirical mechanics of Monte Carlo sub-tree rollouts illuminate the dual constraints governing RLVR systems: terminal reward oracles prevent verifier gaming, but estimating intermediate advantages via recursive rollouts incurs an explosive compute cost. Furthermore, maintaining a separate neural Critic network to approximate $V(s_t)$ in real time—the standard approach in actor-critic frameworks like PPO—requires allocating tens of gigabytes of precious accelerator memory purely to hold value parameters, causing out-of-memory faults and limiting training throughput. 
+
+How can a training runtime extract stable, low-variance advantage estimates across sampled agent trajectories without suffering the quadratic computational explosion of sub-tree rollouts or dedicating accelerator high-bandwidth memory to an independent Critic network?

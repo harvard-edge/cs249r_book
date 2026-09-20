@@ -1,0 +1,170 @@
+## Deliberation Strategy Evaluation {#sec-vol3-deliberation-strategy-design}
+
+Evaluating an inference-time deliberation strategy presents a subtle systems measurement trap: an architecture that appears superior in unconstrained benchmarking frequently collapses when subjected to hard token ceilings, strict tail-latency service-level objectives, or fallible verifiers. In open-loop literature, it is commonplace to showcase a Monte Carlo tree search or an iterative self-correction loop achieving higher absolute benchmark accuracy than a single-shot greedy baseline. Yet such comparisons routinely compare unequal compute classes. A tree search that explores thirty-two candidate branches consumes thirty-two times the forward FLOPs, demands gigabytes of transient key-value cache memory, and multiplies critical-path wall-clock latency. If that identical compute budget were instead granted to a higher-capacity base model or allocated across parallel independent samples with majority voting, the apparent superiority of the complex search policy often evaporates.
+
+::: {.column-margin}
+Deliberation policies must never be evaluated against an unconstrained compute horizon. Every additional token, expansion branch, or sandbox execution consumes concrete physical resources that must justify their marginal contribution to accepted accuracy.
+:::
+
+**A deliberation policy earns its architectural complexity only if it Pareto-dominates simpler baselines under strictly matched resource budgets, equalized environmental privilege, and realistic verification accuracy.** Introducing tree expansion queues, learned process verifiers, or multi-turn reflection loops is not an automatic algorithmic upgrade; it is an architectural commitment that incurs concrete memory bandwidth overhead, scheduling complexity, and tail-latency amplification. To determine whether an agent runtime should deliberate, an engineer must subject candidate strategies to controlled, resource-equivalent evaluation across multi-dimensional performance metrics, mapping the exact Pareto frontiers where deliberation succeeds and identifying the operational regimes where it induces catastrophic failure.
+
+### Controlled Systems Evaluation Under Resource Equivalence
+
+A rigorous systems evaluation demands that all confounding variables external to the search policy be held invariant. In software systems engineering, comparing two sorting routines requires executing them on identical CPU architectures with identical cache hierarchies, memory configurations, and compiler optimization flags. In an agentic machine learning runtime, achieving equivalent experimental control requires freezing three distinct architectural boundaries:
+
+1. *Model Parameter and Precision Invariance ($\Theta$):* The underlying foundation model weights, quantization format (e.g., FP8, BF16), and serving engine configurations must remain identical across all tested strategies. Evaluating an iterative search policy on an 8-billion-parameter model against a single-shot prompt on a 70-billion-parameter model measures parameter scaling rather than search efficacy.
+2. *Environment and Sandbox Interface Invariance ($A=0$):* Every candidate strategy must operate under the exact same unprivileged sandbox boundary. If an environment-feedback policy is granted access to a compiler toolchain or a linters suite, the baseline policies must be evaluated under the identical tool-call interface and permissions envelope.
+3. *Total Compute Ceiling ($\mathcal{C}_{\max}$):* All policies must be evaluated under an identical maximum budget constraint. This constraint is parameterized either as a total token generation ceiling ($T_{\text{total}} = T_{\text{prompt}} + T_{\text{completion}}$), an aggregated floating-point operation ceiling ($C_{\text{FLOP}}$), or a hard wall-clock latency timeout ($T_{\text{wall}} \le T_{\max}$).
+
+::: {.column-margin}
+Snell et al. (2024) demonstrated that optimizing test-time compute allocation can yield accuracy gains equivalent to orders-of-magnitude parameter scaling, provided the compute is matched against an explicit verification mechanism.
+:::
+
+The necessity of strict compute-matching was formalized empirically by Snell et al. (2024), who demonstrated that the optimal test-time compute allocation strategy is fundamentally task-dependent. Given a fixed compute expenditure $\mathcal{C}$, an agent runtime faces an explicit resource allocation trade-off: it can spend tokens along *depth* (generating longer, highly detailed autoregressive reasoning traces), along *breadth* (sampling $N$ independent trajectories and choosing among them), or along *feedback* (iteratively running candidate code in an external execution sandbox and refining based on error logs). Naive benchmarking obscures this trade-off by reporting accuracy as an unconstrained function of algorithmic complexity. 
+
+```python
+# Empirical check: verify strict token budget conformance across strategies
+def compute_efficiency(tokens_spent: int, success: bool, budget: int) -> float:
+    if tokens_spent > budget:
+        return 0.0  # Disqualified: budget overrun violates systems equivalence
+    return 1.0 if success else 0.0
+```
+
+When strategies are evaluated under a strict ceiling $\mathcal{C}_{\max}$, the systems hierarchy shifts. A complex deliberation graph with multiple prompt-expansion stages and heuristic branch pruners often exhausts its token budget on conversational orchestration and context-window reprompting, leaving insufficient budget for core problem synthesis. A simpler strategy—such as parallel Best-of-$N$ with an automated syntactic verifier—frequently captures the available performance gains while eliminating the complex state tracking of tree search.
+
+### Multi-Dimensional Systems Metrics
+
+Evaluating a deliberation runtime solely on binary task success rate (accuracy) is an architectural anti-pattern. In production environments, an agent that improves accuracy by five percentage points but triples the $p99$ tail latency or increases silent corruptions is unacceptable. A comprehensive systems evaluation requires tracking four orthogonal metrics simultaneously.
+
+#### Pass@1 versus Pass@$k$ Under Matched Budgets
+
+In academic code generation, the metric $\text{Pass}@k$ is widely defined as the probability that at least one candidate solution out of $k$ generated samples passes a given evaluation suite:
+
+$$\text{Pass}@k = \mathbb{E}_{\text{tasks}} \left[ 1 - \frac{\binom{N - c}{k}}{\binom{N}{k}} \right]$$
+
+where $N \ge k$ samples are generated and $c$ represents the number of correct samples. While $\text{Pass}@k$ provides a theoretical bound on the *generation potential* of the model's stochastic distribution, it represents a deceitful systems metric. $\text{Pass}@k$ assumes the existence of an omniscient, zero-cost oracle that can effortlessly select the single working candidate out of the set $k$. 
+
+In an authentic systems implementation, no such oracle exists. The host supervisor must either select a single candidate to commit to persistent storage using an automated verifier or output the top-ranked candidate directly. An unverified set of $k$ candidates provides zero operational utility. Consequently, systems evaluation must report **budget-constrained accepted accuracy**: the empirical probability that the candidate *selected and emitted* by the search policy under budget $\mathcal{C} \le B$ passes all invariants.
+
+#### Effective Cost per Verified Success
+
+Raw token consumption does not scale linearly with system value. A search strategy that raises task success from 50% to 60% while increasing mean token consumption from 1,000 tokens to 8,000 tokens represents an architectural degradation in cost efficiency. We quantify this balance through the **Effective Cost per Verified Success** ($C_{\text{eff}}$):
+
+$$C_{\text{eff}} = \frac{\mathbb{E}[C]}{P(\text{verified success})}$$
+
+where $\mathbb{E}[C]$ denotes the expected resource cost per problem instance—measured in aggregated generation tokens or floating-point operations—and $P(\text{verified success})$ is the proportion of tasks that pass the host supervisor's verification harness. If a baseline single-candidate policy achieves 45% accuracy at an average cost of 512 tokens, its $C_{\text{eff}}$ is $1{,}138$ tokens per successful outcome. If an iterative refinement loop achieves 68% accuracy but burns an average of $4{,}096$ tokens across repeated review iterations, its $C_{\text{eff}}$ inflates to $6{,}024$ tokens per successful outcome—a more than five-fold increase in the resource cost required to deliver a single verified deliverable.
+
+#### Wall-Clock Latency Distributions and Tail Amplification
+
+Different deliberation topologies distribute their computational load across the critical path in fundamentally disparate ways:
+
+- *Depth-Heavy Topologies (Sequential Deliberation):* Sequential chain-of-thought generation, iterative critique, and single-branch backtracking serialize execution. The wall-clock latency is strictly bounded by the sum of sequential forward passes:
+  
+  $$T_{\text{wall}} = \sum_{i=1}^D t_{\text{decode}}(y_i)$$
+  
+  Because autoregressive token generation (the decode phase) is memory-bandwidth bound—operating as a Generalized Matrix-Vector multiplication (GEMV) at low operational intensity—the critical path cannot be compressed by throwing parallel compute at a single instance. This creates high median latency ($p50$) and exposes the execution to severe variance if the model enters an expansive generation loop.
+- *Breadth-Heavy Topologies (Parallel Sampling):* Generating $N$ candidates concurrently allows the host supervisor to batch prompt prefill and token decoding across tensor-parallel GPU ranks. So long as the aggregated batch size does not exceed the hardware saturation threshold or exhaust high-bandwidth memory (HBM), the critical-path wall-clock latency scales near $\mathcal{O}(1)$ relative to $N$. However, breadth strategies impose severe pressure on the key-value (KV) cache:
+  
+  $$M_{\text{KV, total}} = N \cdot 2 \cdot L \cdot d_{\text{model}} \cdot S$$
+  
+  where $L$ is the layer count and $S$ is context length. If $M_{\text{KV, total}}$ exceeds physical GPU memory capacity, the serving engine must preempt sequences or swap KV blocks to host DRAM, causing tail latency ($p99$) to skyrocket.
+- *Feedback-Heavy Topologies (Environment Interrogation):* Interleaving token generation with containerized sandboxes, unit test execution, or compilation runs introduces non-deterministic host system overhead. The total latency becomes dominated by process fork times, compilation overhead, and filesystem I/O.
+
+#### False Acceptance Rate and Silent Failure Leakage
+
+When candidate selection relies on automated verifiers, heuristic linters, or learned process reward models, search optimization is governed by Goodhart's Law: *when a measure becomes a target, it ceases to be a good measure.* As the breadth of candidate exploration $N$ expands, the likelihood that the generator discovers an adversarial edge case—a candidate that technically satisfies the verifier's syntactic checks while completely violating the underlying task invariants—grows monotonically.
+
+We define the **False Acceptance Rate (FAR)** as the probability that the runtime's verification harness marks a failed or corrupted proposal as valid:
+
+$$\text{FAR} = P(\text{accept} \mid \text{incorrect})$$
+
+In production systems operating under zero ambient authority, false acceptances represent silent failure leakage. An agent that emits an explicit failure signal allows the host supervisor to halt, trigger a saga compensating transaction, or route the task to human review. Conversely, an agent with a high false acceptance rate commits corrupted state changes to the persistent environment, poisoning downstream system components.
+
+::: {.callout-note title="Worked Example: Compute-Matched Deliberation Trade-offs"}
+Consider an autonomous code repair service processing incoming bug reports. The serving engine operates on an NVIDIA H100 GPU (3,350 TFLOPS FP8, 3.35 TB/s HBM3). The runtime enforces an SLA deadline of $T_{\max} = 10.0\text{ s}$ and evaluates three distinct strategies under a matched total compute ceiling of $\mathcal{C}_{\max} \le 4{,}096\text{ tokens}$:
+
+1. **Greedy Single-Shot:** Generates a single solution of 512 tokens.
+2. **Parallel Best-of-8 (Breadth):** Batches 8 concurrent candidate generations of 512 tokens each ($T_{\text{total}} = 4{,}096\text{ tokens}$). Candidates are evaluated by a test-runner verifier; the first candidate passing all tests is selected.
+3. **Sequential Refinement (Depth):** Executes up to 4 iterative critique-generation loops, consuming an average of 800 tokens per loop ($T_{\text{total}} \le 3{,}200\text{ tokens}$).
+
+The empirical execution logs yield the performance metrics summarized below:
+
+| Strategy | $P(\text{success})$ | Mean Tokens | $C_{\text{eff}}$ (Tokens/Succ) | Latency $p50$ | Latency $p99$ | FAR |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Greedy Single-Shot** | 0.42 | 512 | $1{,}219$ | 1.1 s | 1.4 s | 0.01 |
+| **Parallel Best-of-8** | 0.74 | $4{,}096$ | $5{,}535$ | 1.8 s | 9.4 s | 0.09 |
+| **Sequential Refinement**| 0.61 | $2{,}650$ | $4{,}344$ | 6.2 s | 14.8 s | 0.04 |
+
+**Analysis:**
+- *Accuracy vs. Cost:* Parallel Best-of-8 yields the highest raw accuracy ($0.74$), but its $C_{\text{eff}}$ is $4.5\times$ higher than Greedy. Each verified success requires burning $5{,}535$ tokens of GPU capacity.
+- *Tail Latency SLA:* While Parallel Best-of-8 maintains an acceptable $p50$ latency of 1.8 s due to concurrent batch decoding, its $p99$ latency degrades to 9.4 s—dangerously close to the 10.0 s SLA—due to KV cache memory contention on the serving engine. Sequential Refinement violates the SLA entirely at $p99$ (14.8 s), as serial autoregressive decode passes stack deterministically.
+- *Silent Failure Risk:* Parallel Best-of-8 leaks an alarming 9% False Acceptance Rate. By generating 8 diverse candidates, the model frequently crafts subtle exploits that pass incomplete test assertions (e.g., hardcoding expected return values for specific test cases).
+:::
+
+### The Deliberation Pareto Frontier and Regimes of Failure
+
+Plotting empirical task success against token consumption and wall-clock latency reveals the **Deliberation Pareto Frontier**—the set of optimal operating points where no alternative allocation of inference compute can achieve higher accuracy without consuming more resources or violating latency bounds.
+
+```
+       Task 
+    Success ^                    [ReAct + Feedback] (Optimal under tools)
+     P(succ)|                             *
+            |                     * [MCTS + PRM]
+            |              * [Best-of-8]
+            |         * [Self-Refine]
+            |        /
+            |       /  <-- Pareto Frontier
+            |      * [Greedy Baseline]
+            +--------------------------------------------------> 
+              0    1k    2k    3k    4k    5k    6k    7k   Total Tokens
+```
+
+As conceptualized in the frontier curve, the three computational axes occupy distinct operational niches along this trade-off space:
+
+1. *The Depth Regime (Sequential Deductive Chains):* Optimal for tasks characterized by high internal constraint density and low intermediate branching, such as mathematical proofs or complex algorithm synthesis. In this regime, intermediate reasoning tokens act as a scratchpad that stabilizes the model's autoregressive trajectory. However, the marginal return on additional depth decays rapidly; beyond a critical context length, additional reasoning tokens induce wandering, where the model begins questioning verified facts or loses track of initial constraints.
+2. *The Breadth Regime (Independent Candidate Exploration):* Optimal when the solution space is broad, multiple disconnected solution paths exist, and candidate verification is computationally inexpensive (such as compilation checks or deterministic schema validators). Sampling across breadth minimizes critical-path latency on high-throughput inference engines at the expense of massive aggregate token consumption.
+3. *The Feedback Regime (Environment-Mediated Execution):* Optimal when internal self-critique is inherently ungrounded. Foundation models exhibit severe blind spots when attempting to verify their own outputs through pure introspection. Injecting deterministic environment feedback—such as compiler error messages, test failure backtraces, or database runtime exceptions—anchors the deliberation process in empirical ground truth, breaking circular reasoning loops.
+
+```python
+# Systems check: filter candidate strategies against the operational Pareto frontier
+def is_pareto_efficient(candidates: list[tuple[float, float, float]]) -> list[bool]:
+    # candidates: list of (cost, latency, -accuracy)
+    efficient = [True] * len(candidates)
+    for i, c1 in enumerate(candidates):
+        for j, c2 in enumerate(candidates):
+            if i != j and all(x <= y for x, y in zip(c2, c1)) and any(x < y for x, y in zip(c2, c1)):
+                efficient[i] = False
+                break
+    return efficient
+```
+
+#### Regimes of Failure: Negative Transfer and Over-Deliberation
+
+Crucially, deliberation is not universally beneficial. Across a broad class of operational tasks, allocating additional test-time computation produces **negative transfer**: an observable phenomenon where search degrades performance below the single-shot baseline.
+
+Negative transfer occurs primarily through two failure mechanisms:
+
+- *The Over-Deliberation Trap:* When presented with straightforward, high-confidence tasks, a deliberation runtime configured with mandatory reflection or tree search often manufactures spurious complexity. The model treats trivial requirements as ambiguous edge cases, hallucinates hypothetical corner conditions, and rewrites a concise, correct solution into an over-engineered, buggy abstraction.
+- *False Premise Entrenchment:* If an early step in a sequential reasoning chain commits a subtle semantic error, allocating additional reasoning depth causes the model to rationalize and reinforce the error rather than correct it. Because autoregressive generation attends to its own prior context, the hallucinated premise becomes an immutable historical fact within the prompt, permanently steering downstream deduction away from the correct solution.
+
+To rigorously capture these trade-offs, @tbl-vol3-deliberation-comparison contrasts the five canonical deliberation topologies under an identical token ceiling ($T_{\text{total}} \le 8{,}192\text{ tokens}$), reporting 95% confidence intervals across empirical trial batches.
+
+| Strategy | Primary Axis | Verified Success ($95\%\text{ CI}$) | Effective Cost $C_{\text{eff}}$ (Tokens/Succ) | Latency $p50$ (s) | Latency $p99$ (s) | False Acceptance Rate |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Greedy Single-Shot** | Baseline | $0.44 \pm 0.03$ | $1{,}163$ | **1.2** | **1.5** | **0.01** |
+| **Best-of-8 Sampling** | Breadth | $0.71 \pm 0.03$ | $5{,}769$ | 2.1 | 8.8 | 0.08 |
+| **Self-Refine (Depth 4)** | Depth | $0.58 \pm 0.03$ | $4{,}482$ | 5.4 | 13.2 | 0.04 |
+| **MCTS + Learned PRM** | Tree Hybrid | $0.76 \pm 0.02$ | $8{,}684$ | 8.9 | 24.1 | 0.11 |
+| **ReAct + Tool Feedback** | Feedback | $\mathbf{0.83 \pm 0.02}$ | $4{,}939$ | 4.1 | 11.6 | 0.03 |
+
+: Deliberation strategy performance under a fixed token budget ceiling ($T_{\text{total}} \le 8{,}192$ tokens). {#tbl-vol3-deliberation-comparison}
+
+::: {.column-margin}
+Confidence intervals in @tbl-vol3-deliberation-comparison are calculated using Wilson score intervals ($n=1{,}000$ trials). Notice that while MCTS achieves high accuracy, its $p99$ latency and false acceptance rate render it fragile in production.
+:::
+
+The architectural lesson of @tbl-vol3-deliberation-comparison is definitive: ungrounded internal search (MCTS with a learned neural PRM) incurs the highest effective cost and the greatest risk of false acceptance leakage. Conversely, grounding the deliberation loop in external environment feedback (ReAct + Tool Feedback) achieves the highest verified success rate while maintaining a lower effective cost per success than pure breadth sampling, because the external execution environment ruthlessly prunes invalid search branches before they can consume downstream tokens.
+
+***
+
+Yet the formalization of search topologies, resource ledgers, and empirical Pareto frontiers exposes a sobering reality: even the most mathematically elegant deliberation policy can be utterly undermined by fundamental architectural misunderstandings. In production environments, engineers routinely fall prey to pervasive misconceptions regarding model behavior—mistaking stochastic sampling for independent reasoning, conflating plausible self-critique with rigorous verification, or presuming that test-time search can compensate for a lack of domain knowledge. Unmasking these architectural fallacies is the final prerequisite to building dependable deliberation systems.

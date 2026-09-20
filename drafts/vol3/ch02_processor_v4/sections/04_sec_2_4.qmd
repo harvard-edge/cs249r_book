@@ -1,0 +1,129 @@
+## Candidate Sequence Verification {#sec-vol3-processor-continuations}
+
+Consider an agent runtime executing a system maintenance task where the foundation model completes an autoregressive decode phase and emits a candidate sequence containing a shell command intended to purge expired temporary files: `rm -rf /var/log/app_temp_${ENV}/*`. Every single token along this generation trajectory was sampled with an individual conditional probability exceeding 0.95; the sequence as a whole possesses exceptionally high statistical likelihood under the model's parameter distribution. Yet, if the host environment has not populated the variable `ENV`, the shell interprets the string as `rm -rf /var/log/app_temp_/*`, or worse, if a whitespace token was hallucinated before the slash, as `rm -rf /`. The physical operating system does not evaluate statistical likelihood; it blindly executes the instruction across the POSIX interface, truncating file system hierarchies and inducing unrecoverable state destruction.
+
+**Sequence likelihood measures statistical typicality within a training corpus, not operational correctness, semantic truth, or system invariant preservation.** A foundation model is an unprivileged, non-deterministic pattern-matching engine that produces hypotheses, not validated operational commands. In an agentic architecture governed by Zero Ambient Authority ($A=0$), candidate token streams must never possess direct execution privileges against physical host resources. The host agent runtime must stage every emitted candidate in memory escrow and subject it to a multi-tiered, deterministic verification perimeter before any state transition is authorized.
+
+### Likelihood, Typicality, and the Epistemic Gap
+
+During autoregressive generation, the probability assigned to a complete candidate sequence $\mathbf{y}_{1:K} = (y_1, y_2, \dots, y_K)$ conditioned on prompt $\mathbf{x}$ and model weights $\Theta$ is given by the product of individual token likelihoods:
+
+$$P(\mathbf{y}_{1:K} \mid \mathbf{x}; \Theta) = \prod_{t=1}^K P(y_t \mid \mathbf{x}, \mathbf{y}_{<t}; \Theta)$$
+
+The standard training objective—cross-entropy minimization across billions of web-scraped documents and source code repositories—maximizes this probability across historical text. However, statistical likelihood in a language corpus diverges sharply from logical and operational validity on physical computing hardware.
+
+Public training datasets are saturated with deprecated API signatures, buggy forum snippets, hallucinated command-line flags, and syntactically malformed configuration scripts. When the autoregressive decode loop samples tokens that maximize $P(\mathbf{y}_{1:K} \mid \mathbf{x}; \Theta)$, it selects sequences that are typical of this heterogeneous corpus, not sequences that satisfy the formal invariants of the host environment. Furthermore, the model has no direct visibility into the host operating system's kernel state, file system hierarchy, or network topology, except through whatever static context was serialized into $\mathbf{x}$. Even if that context is impeccably accurate, the model performs statistical continuation rather than formal theorem proving.
+
+::: {.column-margin}
+**Zero Ambient Authority ($A=0$):** A security design pattern where an unprivileged component possesses no default operational capabilities. The component cannot access system resources directly; its outputs are staged as inert data in *memory escrow* until an external reference monitor grants an explicit execution capability.
+:::
+
+This divergence yields a failure model that is uniquely dangerous to computer systems: the *fail-plausible* fault. In classical distributed systems, components typically exhibit fail-stop behavior (crashing cleanly) or fail-silent behavior (dropping packets). In contrast, an unprivileged neural predictor fails by generating output that is syntactically fluent, semantically cohesive, and completely incorrect in its physical side effects. A candidate tool call may reference non-existent database columns, hallucinate API parameters, or emit inverted boolean logic, all while exhibiting token-level probabilities that rival those of perfectly sound code.
+
+Consider the concrete failure trace below, where a model generates a candidate configuration patch with high statistical confidence, yet invents a non-existent parameter:
+
+```
+$ pydantic-validator validate --schema deploy_schema.json --input candidate.json
+ValidationError: 1 validation error for DeployConfig
+worker_threads
+  Extra inputs are not permitted [type=extra_forbidden, input_value=16]
+Found 1 validation failure in candidate payload staged in escrow.
+```
+
+The model generated `"worker_threads": 16` because multi-threaded configurations are pervasive in server software. However, the target microservice architecture enforces an asynchronous single-threaded event loop, making this attribute an invalid configuration entry that would prevent service initialization.
+
+### Memory Escrow and Zero Ambient Authority
+
+To protect host resources against fail-plausible candidates, the agent architecture must adhere to the Saltzer-Kaashoek principle of least privilege. In particular, the foundation model must operate under strict Zero Ambient Authority ($A=0$). Ambient authority occurs when a process possesses system privileges merely by virtue of its existence—such as a program inheriting the full filesystem permissions of the user who launched it. If an LLM invocation had ambient authority, tokens streaming from the accelerator's memory bus could trigger POSIX `write()`, `fork()`, or `socket()` syscalls dynamically as delimiters are decoded.
+
+Under Zero Ambient Authority, the foundation model has access to zero system handles, zero file descriptors, and zero network sockets. The model communicates solely through an unprivileged input-output memory interface managed by the host supervisor. When the autoregressive engine emits candidate tokens, the host runtime intercepts the stream and places it into *memory escrow*.
+
+Memory escrow is a transient, host-allocated buffer that isolates unverified candidate sequences from the operational execution environment. Tokens are accumulated, decoded into text or binary payloads, and structured into symbolic candidate representations without granting them capability tokens. While held in escrow, the candidate sequence is purely passive data; it cannot mutate registers, manipulate disk blocks, or transmit network datagrams.
+
+The lifecycle of every candidate sequence within the host supervisor follows a strict, non-bypassable state machine:
+
+1. `EMITTED`: The model generates tokens across the accelerator interface into a host-side ring buffer.
+2. `STAGED_ESCROW`: The runtime detects an end-of-sequence delimiter or generation budget limit, locks the escrow buffer, and constructs a candidate object.
+3. `VALIDATING`: The host runtime dispatches the staged payload to the deterministic verification perimeter. The model cannot alter the payload during this phase.
+4. `COMMITTED` or `REJECTED`: If every verification gate in the perimeter passes, the runtime issues execution capabilities, promoting the candidate to an actionable system command. If any gate rejects the payload, the candidate is discarded, and an error envelope is synthesized for diagnostic logging or subsequent handling.
+
+### The Fallacy of Autoregressive Self-Checking
+
+A tempting but fundamentally flawed approach to verification is *autoregressive self-checking*—prompting the foundation model to inspect its own generated continuation and answer whether the proposed action is correct. Practitioners often construct prompts of the form: *"You generated the above shell command. Review it carefully. Is it correct and safe to execute? Reply YES or NO."*
+
+This approach violates the fundamental systems principle of independent verification. From an architectural perspective, self-checking assumes that an unprivileged inference engine can act as its own reference monitor. This assumption fails for three mechanistic reasons:
+
+First, *correlated parameter bias*. The model that evaluates the candidate sequence shares the identical weight matrix $\Theta$, identical token embeddings, and identical training distribution priors as the model that generated the candidate. If the model's attention weights favored a hallucinated CLI flag during generation because that pattern appeared frequently in low-quality training data, the exact same attention heads will activate during the verification prompt, confirming the hallucination. The generator and the evaluator suffer from common-mode failure.
+
+Second, *asymmetric calibration under prompt framing*. Autoregressive models are susceptible to sycophancy and confirmation bias. When presented with an existing sequence in its prompt context, the model's attention mechanism allocates probability mass to tokens that affirm the context's internal coherence rather than tokens that contradict it. The prior probability of a self-checker emitting `YES` on an invalid sequence is drastically higher than the probability of an external, unbiased judge doing so.
+
+Third, *the infinite regress of unverified probability*. A foundation model cannot emit a boolean guarantee; it emits a probability distribution over the vocabulary simplex. Even if a model assigns a probability $P(\text{"YES"} \mid \mathbf{y}) = 0.99$, that value does not close an invariant. If the system requires verification of the verifier, it must initiate a second self-check, yielding a cascade:
+
+$$P(\text{invariant closed}) = \prod_{j=1}^M P(\text{verdict}_j = \text{VALID}) < 1.0$$
+
+Because each evaluation step incurs an independent probability of sampling error, cascading autoregressive checks compounds latency and inference cost while leaving the foundational uncertainty strictly unclosed.
+
+In 1984, Saltzer, Reed, and Clark articulated the *End-to-End Argument in System Design*: a function that requires complete correctness cannot be implemented solely inside the lower-level communication or generation mechanism; it can only be reliably implemented with the assistance of the application endpoints that possess full domain knowledge. In agent architectures, the foundation model is an intermediate hypothesis generator. True invariant closure can only be achieved at the host runtime endpoint, using deterministic verification tools that possess ground-truth authority over the system environment.
+
+::: {.callout-note title="The Fallacy of Correlated Self-Verification"}
+**Problem:**
+An agent runtime stages an emitted configuration payload $\mathbf{y}$ consisting of $K = 128$ tokens. Due to imperfect training distribution coverage, the model has an operational error rate of $\epsilon = 0.18$ (18% of generated payloads violate runtime invariants).
+To catch errors before execution, an engineer considers two verification strategies:
+1. *Autoregressive Self-Verification:* The runtime prompts the same model to review the payload. Because the evaluator shares parameter weights $\Theta$ with the generator, it exhibits correlated bias: while its true positive rate on valid payloads is $0.85$, its false positive rate on invalid payloads is $\alpha_{\text{model}} = 0.65$ (it mistakenly validates 65% of its own defective outputs).
+2. *Deterministic External Linter:* A host-side static analysis tool checks the payload against schema constraints. The linter has a true positive rate of $1.00$ and a false positive rate on invalid payloads of $\alpha_{\text{ext}} = 0.00$.
+
+Calculate the posterior probability that a staged payload is actually invalid given that it passed the verification check ($P(\text{Defective} \mid \text{PASS})$) under both strategies.
+
+**Solution:**
+Let $D$ represent the event that the payload is defective ($P(D) = \epsilon = 0.18$), and let $V$ represent the event that the payload is valid ($P(V) = 1 - \epsilon = 0.82$). Let $\text{PASS}$ denote the verification gate approving the candidate.
+
+Using Bayes' theorem, the probability that an approved payload is defective is:
+
+$$P(D \mid \text{PASS}) = \frac{P(\text{PASS} \mid D) \cdot P(D)}{P(\text{PASS} \mid D) \cdot P(D) + P(\text{PASS} \mid V) \cdot P(V)}$$
+
+*Case 1: Autoregressive Self-Verification.*
+We have $P(\text{PASS} \mid D) = \alpha_{\text{model}} = 0.65$, and $P(\text{PASS} \mid V) = 0.85$.
+Substituting the values:
+
+$$P(\text{PASS}) = (0.65 \times 0.18) + (0.85 \times 0.82) = 0.1170 + 0.6970 = 0.8140$$
+
+$$P(D \mid \text{PASS}) = \frac{0.1170}{0.8140} \approx 0.1437 \quad (14.37\%)$$
+
+Even after passing autoregressive self-verification, more than 14 out of every 100 executed commands remain defective, an unacceptable failure rate for critical system infrastructure.
+
+*Case 2: Deterministic External Linter.*
+Here, $P(\text{PASS} \mid D) = \alpha_{\text{ext}} = 0.00$, and $P(\text{PASS} \mid V) = 1.00$.
+
+$$P(\text{PASS}) = (0.00 \times 0.18) + (1.00 \times 0.82) = 0.8200$$
+
+$$P(D \mid \text{PASS}) = \frac{0.00 \times 0.18}{0.8200} = 0.0000 \quad (0.00\%)$$
+
+The deterministic external gate eliminates defective candidates completely on the checked invariant, demonstrating that invariant closure requires an external ground-truth authority.
+:::
+
+### The Deterministic Verification Perimeter
+
+Rather than relying on model self-reflection, robust agent architectures construct an external *deterministic verification perimeter*. This perimeter consists of a pipeline of specialized software validators operating outside the neural inference engine. Each validator acts as a sieve, intercepting candidate payloads held in memory escrow and evaluating them against explicit, non-probabilistic invariants.
+
+The verification perimeter is structured hierarchically, as summarized in @tbl-verification-layers. The runtime schedules checks in order of increasing computational cost, enabling fast-rejection paths for coarse structural errors before committing host resources to expensive semantic evaluations.
+
+| Verification Layer | Gate Mechanism | Invariant Enforced | Latency Overhead | Ground Truth Authority |
+|:---|:---|:---|:---|:---|
+| **1. Lexical & Syntactic** | Stream parser, AST builder | Valid grammar, balanced delimiters, complete JSON/YAML encoding | $< 100\,\mu\text{s}$ | Formal language grammar |
+| **2. Structural & Schema** | Typed deserializers (Pydantic, Protobuf) | Parameter presence, type conformity, bounded ranges, enum validity | $0.1 - 1\,\text{ms}$ | Static schema definition |
+| **3. Static Semantic** | Linters, type checkers (`tsc`, `mypy`) | Scoping, resolved identifiers, symbol table existence, imports | $10 - 500\,\text{ms}$ | Host workspace symbol table |
+| **4. Dynamic Behavioral** | Sandboxed dry-run, mock execution | Zero exit code, state assertion satisfaction, budget adherence | $50\,\text{ms} - 5\,\text{s}$ | Isolated runtime execution |
+
+: The Deterministic Verification Perimeter {#tbl-verification-layers}
+
+The layered architecture in @tbl-verification-layers enforces the *fail-fast* principle across candidate evaluation. If a candidate sequence contains malformed syntax, such as an unclosed quotation mark or an illegal JSON delimiter, Layer 1 catches the defect in under 100 microseconds. The host supervisor immediately halts further evaluation, discarding the invalid payload without consuming the milliseconds required to spin up a type checker or the seconds required to execute a dynamic test.
+
+Layer 2 validates that the candidate matches the programmatic interface contract of the intended tool. If an unprivileged model proposes an API call with missing mandatory arguments, unexpected fields, or out-of-range numerical values, the typed schema validator rejects the operation deterministically.
+
+Layer 3 addresses semantic validity within the current codebase or operational context. A candidate code edit may be syntactically flawless Python and conform perfectly to a function-call schema, yet attempt to call a function that was deprecated or removed in the current git revision. Static analysis tools, linters, and type checkers inspect the abstract syntax tree (AST) against the host's authoritative symbol table, verifying that all referenced identifiers and types actually exist.
+
+Finally, Layer 4 evaluates dynamic behavior by staging the candidate inside an isolated environment to observe side effects. If a candidate passes all static gates, the runtime can execute a dry-run or unit test suite to verify that the proposed command terminates with exit code zero and satisfies explicit post-condition assertions.
+
+The crucial architectural insight is that the verification perimeter cleanly separates the *generation of candidate solutions* from the *verification of invariants*. The foundation model provides heuristic search across an astronomical space of possible actions, which no combinatorial algorithm could easily navigate. The deterministic verification perimeter provides absolute, non-probabilistic invariant enforcement, which no neural network can intrinsically guarantee. By pairing an unprivileged probabilistic generator with an authoritative deterministic verifier, the agent runtime constructs a dependable system out of non-deterministic components.
+
+To operationalize this verification perimeter within a running agent architecture, the host system cannot treat foundation model invocations as informal string-in, string-out operations. A raw API call that returns an unadorned text stream leaves the runtime unable to distinguish between a generation that halted naturally, an output truncated mid-expression by a token budget ceiling, or a connection terminated by a transport timeout. To enforce deterministic verification, the host runtime must govern every model interaction through a strictly typed Remote Procedure Call (RPC) contract. This contract must establish unambiguous operational boundaries—specifying maximum prefill and decode allocations, hard execution latency timeouts, and structured status envelopes that encapsulate candidate payloads alongside their physical serving metadata. We turn next to the architectural specification of this foundation model invocation contract.
