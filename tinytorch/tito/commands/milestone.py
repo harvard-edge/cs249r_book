@@ -100,7 +100,7 @@ MILESTONE_SCRIPTS = {
             {
                 "name": "TinyDigits",
                 "script": "milestones/04_1998_cnn/01_lecun_tinydigits.py",
-                "description": "Prove CNNs > MLPs on synthetic 8x8 digits (works offline)",
+                "description": "Train a LeNet-style CNN on 8x8 handwritten digits (works offline)",
                 "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 9]  # Full training + Convolutions
             },
             {

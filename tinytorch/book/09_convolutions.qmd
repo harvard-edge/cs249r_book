@@ -7,14 +7,14 @@
 :::
 
 
-Visual and spatial data exhibit two fundamental physical properties: spatial locality and translation equivariance. Neighboring pixels share strong local correlations, and a visual feature—such as an edge, corner, or texture—maintains identical semantic meaning regardless of where it appears in an image. Fully connected dense layers completely ignore this spatial structure: flattening an image into a 1D vector requires millions of redundant parameters that overfit and fail to generalize across spatial shifts.
+Visual and spatial data exhibit two fundamental physical properties: spatial locality and translation equivariance. Neighboring pixels share strong local correlations, and a visual feature, such as an edge, corner, or texture, maintains identical semantic meaning regardless of where it appears in an image. Fully connected dense layers ignore this spatial structure. Flattening an image into a 1D vector gives every pixel its own weight to every hidden unit, so the parameter count grows with image size and a feature learned in one place must be learned again in another.
 
-From a framework and systems standpoint, convolutional layers solve this by sliding compact, weight-shared receptive field kernels across 2D spatial dimensions. However, implementing 2D sliding convolutions using naive nested loops results in 6-deep nested loops that thrash CPU/GPU caches and run disastrously slowly. The systems architect must resolve key implementation challenges:
+From a framework and systems standpoint, convolutional layers solve this by sliding compact, weight-shared receptive field kernels across 2D spatial dimensions. The direct implementation is a set of nested loops that performs each multiply-add as a separate scalar operation, which is easy to verify and slow to run. The systems architect must resolve key implementation challenges:
 1. **The `im2col` lowering transformation**: Rearranging overlapping 2D image patches into matrix rows or columns, lowering the spatial convolution into a single high-performance BLAS matrix multiplication (GEMM) at the cost of temporary memory duplication.
 2. **Padding and stride geometry**: Calculating exact output spatial feature map dimensions while maintaining boundary information.
-3. **Autograd gradient routing**: Propagating gradients through shared kernel weights and routing spatial derivatives back to input feature maps via transposed convolution routines (`col2im`).
+3. **Autograd gradient routing**: Accumulating gradients into shared kernel weights from every position they touched, and scattering each output gradient back onto the input pixels its window covered.
 
-This chapter expands TinyTorch into spatial representation learning, implementing 2D convolutions, max pooling, and the `im2col` engine within our modular autograd framework.
+This chapter expands TinyTorch into spatial representation learning. It implements 2D convolution and max pooling as direct loops inside the autograd framework, then lowers the convolution to a matrix multiply with `im2col` in a model that the loop version checks; @sec-acceleration later builds that lowering into the package.
 
 ::: {#fig-conv-topology fig-cap="**One filter, four windows**: The highlighted input patch supplies the first output. Moving the same kernel across the remaining positions produces the other three values." fig-alt="A four-by-four grid containing 1 through 16, a three-by-three all-ones kernel, and a two-by-two output containing 54, 63, 90, and 99. The upper-left input patch and output are highlighted."}
 ![](assets/images/diagrams/09_convolutions-diag-1.svg)
@@ -74,6 +74,14 @@ Count the parameters. A $3 \times 3$ layer taking 3 channels to 64 filters holds
 
 **Max pooling** is the second layer we build, and it shrinks the planes a convolution produces. A $2 \times 2$ window with stride 2 slides over each channel independently and keeps only the largest value in each window, halving both height and width. It has no weights. It also makes the network a little tolerant to small shifts, since moving a strong activation one pixel within its window does not change the pooled output. The output-size formula is the same one as for convolution.
 
+### How far a stack of layers can see
+
+One convolution's output pixel sees a $K \times K$ patch. Stack layers and the patch grows, because each output of a later layer combines several outputs of the earlier one. A layer adds $K - 1$ positions of reach at its own depth, and one position at that depth spans as many input pixels as the product of the strides below it. The **receptive field** $r_\ell$ of layer $\ell$, measured in input pixels along one axis, therefore follows
+
+$$r_\ell = r_{\ell-1} + (K_\ell - 1)\prod_{i<\ell} S_i, \qquad r_0 = 1.$$
+
+Three stacked $3 \times 3$ convolutions at stride 1 see 3, then 5, then 7 pixels. One $7 \times 7$ filter would see the same patch with $49$ weights per pair of input and output channels, where the stack uses $3 \times 9 = 27$ and applies a nonlinearity between each layer; that trade is the design argument behind the VGG family of networks. Pooling layers count as well. @sec-milestone-2's network runs a $3 \times 3$ convolution and then $2 \times 2$ pooling at stride 2, so its receptive field is 3 after the convolution and $3 + (2 - 1) \cdot 1 = 4$ after the pool. A $3 \times 3$ convolution placed after that pool would add $(3 - 1) \cdot 2 = 4$ more, reaching 8 of the image's 8 pixels.
+
 ### The im2col trick
 
 Look again at the single-output formula. Each output pixel is a dot product between two lists of $C_{\text{in}} K^2$ numbers, the flattened patch under the filter and the flattened filter. That means the entire layer is a matrix multiply in disguise. Write every patch the filter visits as one row of a matrix, with $N \cdot H_{\text{out}} \cdot W_{\text{out}}$ rows of length $C_{\text{in}} K^2$, and write every filter as one column of a second matrix, with $C_{\text{in}} K^2$ rows and $C_{\text{out}}$ columns. Their product has one row per output position and one column per filter, and reshaping it gives the $[N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}}]$ output. Building the patch matrix is called **im2col** ("image to column"), and the four steps are
@@ -104,7 +112,10 @@ $$
 \end{aligned}
 $$
 
-The input gradient is the mirror image, scattering $G[n, o, h, c] \cdot W[o, \text{ch}, i, j]$ back onto input pixel $(hS + i, cS + j)$. The window loops accumulate input and weight gradients; a separate reduction sums the bias gradient. Max pooling has no weights, and its gradient goes entirely to the one input pixel that won each window; the others receive zero.
+The input gradient is the mirror image, scattering $G[n, o, h, c] \cdot W[o, \text{ch}, i, j]$ back onto input pixel $(hS + i, cS + j)$. The window loops accumulate input and weight gradients; a separate reduction sums the bias gradient.[^fn-col2im-scatter] Max pooling has no weights, and its gradient goes entirely to the one input pixel that won each window; the others receive zero.
+
+[^fn-col2im-scatter]: In lowered matrix formulations, input gradient accumulation is computed via the **col2im** operation, the adjoint of im2col. Because sliding windows overlap, col2im cannot simply reshape $G_{\text{col}}$; it must accumulate overlapping entries using a scatter-add ($+=$) reduction into the spatial input buffer.
+
 
 ---
 
@@ -165,7 +176,7 @@ Average pooling changes the reduction, not the geometry. For a window `[[1, 2], 
 ### im2col
 
 ::: {#chk-conv-im2col-scope .callout-checkpoint title="Checkpoint: Model implementation versus module code"}
-Module 09 stops at the loops. The two functions in this section are the chapter's own NumPy model of the trick GPU libraries use, and the worked trace checks that they reproduce the module's numbers.
+Module 09 stops at the loops. The two functions in this section are the chapter's own NumPy model of the trick GPU libraries use, and the worked trace checks that they reproduce the module's numbers. @sec-acceleration builds im2col into the package and times it against these loops.
 :::
 
 The direct loops spend time on more than arithmetic. Each multiply requires Python to execute loop control and NumPy scalar indexing. The array accesses are structured, but writing the computation as scalar Python operations does not hand an entire dot product to NumPy's compiled matrix-multiplication routine. im2col changes that execution boundary.
@@ -209,6 +220,15 @@ def conv2d_im2col(x, weight, bias, stride=1, padding=0):
 
 The multiplies all happen inside the `@`. Everything around it is copying and reshaping. `patches` holds $N H_{\text{out}} W_{\text{out}} C_{\text{in}} K^2$ numbers where the input held $N C_{\text{in}} H W$, which gives the ninefold storage expansion in the example above. The last line uses NumPy views to arrange the output axes: the product comes out with the output channel as its last axis, and a `reshape` plus a `transpose` present it as $[N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}}]$ without moving a number. This helper supports square filters and scalar stride/padding. It is an array-only comparison model; the module also accepts rectangular kernels, and its tensor operations retain the gradient graph.
 
+::: {.column-margin}
+**Core Invariant: Spatial Unfolding**\
+$$\text{Patch } (C_{\text{in}}, K, K) \to \text{Row in } X_{\text{col}}$$\
+*Converts nested 4D spatial sliding windows into a single BLAS GEMM at the expense of $K^2$ memory expansion.*
+:::
+
+![**Lowering 2D convolution to GEMM via im2col**: Spatial receptive fields across input feature maps are unfolded into contiguous rows/columns. The resulting matrix product executes with optimized level-3 BLAS libraries, trading temporary buffer replication for maximum compute density.](assets/images/diagrams/09_im2col-unfolding.svg){#fig-im2col-unfolding fig-alt="Diagram of im2col lowering: 2D sliding receptive field unfolds into column vector, filter bank unfolds into rows, resulting in single matrix multiplication."}
+
+
 ::: {#nbk-convolutions-im2col-footprint .callout-notebook title="Napkin Math: im2col memory expansion ratio"}
 
 **Problem**: For a batch of $B=32$ feature maps with $C_{\text{in}}=64$ channels and spatial dimensions $112 \times 112$, what is the memory overhead of lowering a $3 \times 3$ convolution via explicit im2col?
@@ -239,7 +259,10 @@ Where the forward pass read `input_val * weight_val` and wrote to `output`, the 
 
 ### The layer
 
-Finally the layer object, because the routines above are helpers and operations and the rest of TinyTorch works with layers. The optimizer from @sec-optimizers asks each layer for `parameters()`, and `Sequential` from @sec-layers calls `forward`, so `Conv2d` needs the same two methods `Linear` has. The one decision hiding in the constructor is the initial scale of the weights, and the wrong choice here produces a wrong number, not a slow one. This convolution uses a normal distribution with standard deviation $\sqrt{2 / \text{fan\_in}}$, whose factor of 2 compensates for the ReLU that follows, and the trap is what fan-in means for a filter. It is not the number of pixels in the image. Each output pixel sums $C_{\text{in}} K^2$ products, 27 for the first layer of a color network, so that is the fan-in. Use the image size instead, 150,528 for a $224 \times 224$ photo, and the weights come out about 75 times too small; the first layer's activations inherit that smaller scale. Repeating such under-scaling through a network can leave very small signals at the loss.
+Finally the layer object, because the routines above are helpers and operations and the rest of TinyTorch works with layers. The optimizer from @sec-optimizers asks each layer for `parameters()`, and `Sequential` from @sec-layers calls `forward`, so `Conv2d` needs the same two methods `Linear` has. The one decision hiding in the constructor is the initial scale of the weights, and the wrong choice here produces a wrong number, not a slow one. This convolution uses a normal distribution with standard deviation $\sqrt{2 / \text{fan\_in}}$, whose factor of 2 compensates for the ReLU that follows, and the trap is what fan-in means for a filter. It is not the number of pixels in the image. Each output pixel sums $C_{\text{in}} K^2$ products, 27 for the first layer of a color network, so that is the fan-in.[^fn-kaiming-init] Use the image size instead, 150,528 for a $224 \times 224$ photo, and the weights come out about 75 times too small; the first layer's activations inherit that smaller scale. Repeating such under-scaling through a network can leave very small signals at the loss.
+
+[^fn-kaiming-init]: **Kaiming (He) initialization** sets weight variance $\text{Var}(W) = 2 / \text{fan\_in}$ where $\text{fan\_in} = C_{\text{in}} \cdot K_h \cdot K_w$. The factor of 2 accounts for half the activations being zeroed out by subsequent ReLU nonlinearities ($\mathbb{E}[\max(0, x)^2] = \frac{1}{2} \text{Var}(x)$), maintaining constant activation variance across arbitrarily deep convolutional networks.
+
 
 {{< include _listings/09_convolutions/Conv2d_init.qmd >}}
 
@@ -409,6 +432,12 @@ Pooling preserves batch and channel axes while changing the spatial dimensions. 
 The im2col model gives the same forward computation a matrix shape at the cost of an explicit patch buffer. It does not replace the module's recorded operations or establish a universal speedup. @Sec-tokenization changes the input domain from image grids to text and explains how strings become the integer IDs that later tensor layers consume.
 
 ---
+
+## Further reading
+
+- LeCun et al. (1998), [Gradient-based learning applied to document recognition](https://doi.org/10.1109/5.726791), *Proceedings of the IEEE*. LeNet, weight sharing, and pooling, the design @sec-milestone-2 tests on TinyDigits.
+- Chellapilla, Puri, and Simard (2006), [High performance convolutional neural networks for document processing](https://inria.hal.science/inria-00112631), *IWFHR*. The unrolling of convolution into a matrix product that this chapter models as im2col.
+- Simonyan and Zisserman (2015), [Very deep convolutional networks for large-scale image recognition](https://arxiv.org/abs/1409.1556), *ICLR*. Stacks of small filters in place of large ones, the receptive-field trade described above.
 
 ## Exercises
 

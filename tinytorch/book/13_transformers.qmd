@@ -10,7 +10,7 @@
 Stacking attention layers directly leads to gradient instability and signal degradation as network depth increases. To build scalable, multi-layer foundation models, attention must be organized into a robust, repeating architectural block. The **Transformer decoder block** stabilizes deep sequence processing by combining causal multi-head attention with position-wise feed-forward networks (MLPs), Pre-Layer Normalization (Pre-LN), and residual skip connections.
 
 From a framework and systems standpoint, the Transformer block acts as an information highway: the residual connection passes signals directly through network depth without attenuation, while sub-layers compute additive feature updates. Implementing a full Transformer (TinyGPT) requires coordinating multiple runtime contracts:
-1. **Pre-LN numerical stability**: Applying layer normalization before attention and MLP sub-layers, ensuring clean gradient backpropagation through the residual stream without exploding variance.
+1. **Pre-LN residual path**: Applying layer normalization before the attention and MLP sub-layers, so the residual stream itself stays unnormalized and gives gradients an identity path from the output back to every block.
 2. **Balanced parameter allocation**: Allocating parameter and FLOP budgets between attention projections ($4D^2$) and MLP feed-forward expansions ($8D^2$).
 3. **End-to-end model composition**: Stacking $N$ identical blocks, connecting token and position embeddings at the input, and projecting final hidden states through a vocabulary head to produce next-token logit distributions of shape $(B, S, V)$.
 
@@ -140,7 +140,10 @@ Why did the deep learning community migrate universally from original Post-LN tr
 
 ### The MLP
 
-The second sub-layer supplies the per-token feature transformation missing from attention alone. The **MLP** (multi-layer perceptron, the transformer literature's name for a two-layer feed-forward network) widens each token's vector from $D$ to $4D$, applies GELU from @sec-activations, and projects back to $D$:
+The second sub-layer supplies the per-token feature transformation missing from attention alone. The **MLP** (multi-layer perceptron, the transformer literature's name for a two-layer feed-forward network) widens each token's vector from $D$ to $4D$, applies GELU from @sec-activations, and projects back to $D$:[^fn-mlp-4d-expansion]
+
+[^fn-mlp-4d-expansion]: The $4\times$ hidden expansion ($d_{\text{ff}} = 4D$) originated in Vaswani et al. (2017) as an empirical heuristic balancing non-linear representation capacity against parameter budget. It allocates $2 \times D \times 4D = 8D^2$ weights to the feed-forward network, exactly double the $4D^2$ projection weights of Multi-Head Attention. Modern architectures using 3-matrix gated activations like SwiGLU (e.g. LLaMA) scale the expansion to approximately $\frac{8}{3}D$ so that $3 \times D \times \frac{8}{3}D = 8D^2$, maintaining the exact same parameter and FLOP allocation.
+
 
 $$\text{MLP}(x) = \text{GELU}(x W_1 + b_1)\, W_2 + b_2, \qquad W_1 \in \mathbb{R}^{D \times 4D},\; W_2 \in \mathbb{R}^{4D \times D}$$
 
@@ -377,6 +380,12 @@ A GPT forward call begins with $(B,S)$ token IDs. The embedding layer adds learn
 Persistent state belongs to the parameter tensors. Forward operations create new activations and, when recording gradients, per-call operation records; they do not overwrite the caller's stream or update weights. `parameters()` exposes the complete ownership tree to the optimizer, and backward follows the recorded residual branches into that tree. @sec-milestone-2 uses these logits to construct a next-token loss and to sample from the final row. It must supply targets during training and the whole prefix during ordinary generation.
 
 ---
+
+## Further reading
+
+- Xiong et al. (2020), [On layer normalization in the transformer architecture](https://arxiv.org/abs/2002.04745), *ICML*. Post-LN and Pre-LN compared, and why the Pre-LN arrangement this chapter uses trains without warmup.
+- Radford et al. (2019), [Language models are unsupervised multitask learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf), *OpenAI*. The GPT-2 block that the chapter's `GPT` follows.
+- Kaplan et al. (2020), [Scaling laws for neural language models](https://arxiv.org/abs/2001.08361), *arXiv*. How loss falls with parameters, data, and compute for this family of models.
 
 ## Exercises
 

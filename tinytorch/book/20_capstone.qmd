@@ -7,14 +7,14 @@
 :::
 
 
-Real-world machine learning systems engineering is never about applying a single optimization in isolation; it is an exercise in multi-objective trade-offs. An optimization that doubles inference speed is unacceptable if it degrades model accuracy below acceptable limits. Similarly, a compression technique that reduces storage is worthless if it introduces excessive runtime latency. The systems engineer must synthesize multiple optimizations into a coherent, balanced production pipeline.
+Real-world machine learning systems engineering is never about applying a single optimization in isolation; it is an exercise in multi-objective trade-offs. An optimization that doubles inference speed is unacceptable if it drops accuracy below the task's floor, and a compression technique that reduces storage can still lose if it adds latency. The systems engineer must synthesize multiple optimizations into a coherent, balanced production pipeline.
 
 From a framework and systems standpoint, the Capstone integrates the full optimization arsenal developed across Part III:
-1. **End-to-end optimization pipeline**: Systematically combining profiling, INT8 post-training quantization, knowledge distillation, and KV cache memoization on TinyGPT.
-2. **Pareto frontier analysis**: Mapping the multi-dimensional trade-offs between model accuracy retention, storage compression ratios, and inference latency speedups.
-3. **Verification and scorecard reporting**: Enforcing strict verification gates to ensure optimized models produce valid predictions that pass classroom and production quality thresholds.
+1. **A decode-step cost model**: Predicting how INT8 quantization, low-rank factorization, kernel fusion, and the KV cache each change one TinyGPT decode step, and why multiplying each lever's solo speedup can mispredict what the levers do together.
+2. **Measured trade-offs**: Benchmarking a baseline and a candidate model for accuracy, stored size, and latency, and placing candidates on the trade-off curve among the three.
+3. **Verification and scorecard reporting**: Checking a candidate's outputs and accuracy against the baseline before its speed or size counts, then writing the comparison into a submission report.
 
-This chapter guides the student through the complete optimization and benchmarking of TinyGPT, synthesizing the principles of the entire TinyTorch curriculum.
+This chapter combines Part III's measurements and models into one report, with each claimed gain traced to the lever that produced it.
 
 ![**An optimization needs a comparison**: Preserve the baseline and workload, transform a candidate, recheck quality, and measure its actual arrays and execution before recording the comparison.](assets/images/diagrams/20_capstone-diag-1.svg){#fig-capstone-stack fig-alt="Baseline model and workload lead to a transformed candidate and a quality and timing check. Lower panels compare against the same baseline and record measured evidence."}
 
@@ -323,7 +323,9 @@ Running `waterfall(Config(), Machine(), 128)` produces @tbl-capstone-waterfall. 
 
 : **Estimated composition costs**: Four transformations applied to the analytical model in the stated order. The product of solo speedups is 4.00x; the full-stack estimate is 4.89x. {#tbl-capstone-waterfall tbl-colwidths="[34,17,16,16,17]"}
 
-Most of the initial estimate is the assumed dispatch term. Reducing weight bytes alone barely changes it. Fusion lowers that term, which makes the remaining row-dependent work more consequential. Caching then removes repeated projections and reduces the linear activation traffic to one row, while adding context-dependent reads of stored keys and values.
+Most of the initial estimate is the assumed dispatch term. Reducing weight bytes alone barely changes it.[^fn-dispatch-bottleneck-waterfall] Fusion lowers that term, which makes the remaining row-dependent work more consequential. Caching then removes repeated projections and reduces the linear activation traffic to one row, while adding context-dependent reads of stored keys and values.
+
+[^fn-dispatch-bottleneck-waterfall]: **Bottleneck migration in optimization stacks**: When an initial baseline is severely dispatch-bound ($n_{\text{ops}} \cdot c \gg \text{compute, memory}$), reducing memory traffic via INT8 quantization yields an apparent $1.00\times$ speedup. It is only after kernel fusion eliminates over 80% of dispatch overhead that memory bus bandwidth becomes the primary constraint, allowing INT8 and KV caching to unlock their full theoretical throughput gains.
 
 The order exposes a cost that a parameter count would miss. Reversing `LEVERS` gives marginal factors of 1.10x for caching, 4.93x for fusion, 0.87x for factorization, and 1.03x for INT8, with the same final 30.63 milliseconds. Factorization is a slowdown at that point: its extra products cost dispatch time even though its matrices are smaller. Because the configuration edits commute, the final configuration and total agree in both orders, as summarized in \ref{nbk-capstone-total-speedup-scorecard}. A real pair of transformations may change one another's weights or supported execution path, so this equality is a property of the model, not a general guarantee.
 
@@ -437,6 +439,8 @@ A production comparison must establish the combined execution path and its costs
 
 A production runtime can change the execution path behind the same mathematical model. Fusion groups operations so intermediate values need not pass through separate arrays. Graph replay records a fixed dependency structure and reuses it, reducing repeated work in dispatch.[^fn-cuda-graphs-bridge] Packed weight formats can reduce stored bytes and transfers, but dequantization and kernel support determine the resulting time. None of those benefits follows merely from changing `bytes_per_weight` or `fused` in our model. The executable candidate and its workload must establish the gain.
 
+[^fn-cuda-graphs-bridge]: **CUDA Graphs and dispatch elimination**: Standard PyTorch execution submits individual CUDA kernel launches over PCIe driver queues, incurring $5\text{--}15\,\mu\text{s}$ CPU overhead per operation. CUDA Graphs record an entire sequence of kernel launches, memory copies, and stream dependencies into a single executable graph. Subsequent executions launch the entire graph with a single CPU instruction, slashing launch overhead to $<1\,\mu\text{s}$. Because graph nodes reference fixed device memory addresses and grid dimensions, dynamic input shapes require bucketed padding or multiple pre-captured graphs.
+
 ::: {#psp-capstone-production-pipeline .callout-production-bridge title="Production bridge: industrial inference serving with TensorRT and Triton"}
 Moving from classroom Python evaluation to industrial production deployment requires automated optimization graphs and specialized inference engines:
 
@@ -459,6 +463,11 @@ Module 20 turns model execution into a comparison that another reader can check.
 The analytical model explains why an optimization's marginal gain depends on the work that remains. Its byte ledger distinguishes stored embedding capacity from selected rows and distinguishes uncached prefix rows from a cached single row. The cache experiment then tests real outputs and request state before timing either path. @sec-milestone-3 carries this discipline to a trained model and a held-out workload. The artifact to preserve is the baseline, candidate, workload, and evidence together; a speedup detached from those cannot explain what improved.
 
 ---
+
+## Further reading
+
+- Reddi et al. (2020), [MLPerf inference benchmark](https://arxiv.org/abs/1911.02549), *ISCA*. Accuracy floors that an optimized submission must still meet, the rule this chapter's events apply.
+- Sculley et al. (2015), [Hidden technical debt in machine learning systems](https://proceedings.neurips.cc/paper/2015/hash/86df7dcfd896fcaf2674f757a2463eba-Abstract.html), *NeurIPS*. The costs a deployed system carries beyond its model.
 
 ## Exercises
 

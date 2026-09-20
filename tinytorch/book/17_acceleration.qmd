@@ -7,14 +7,14 @@
 :::
 
 
-In modern deep learning execution, arithmetic operations like addition, scaling, and non-linear activations execute on compute units in fractions of a microsecond. However, in eager execution runtimes, chaining separate operations forces intermediate tensors to make round-trip journeys across the slow off-chip memory bus (DRAM/HBM), incurring devastating latency and memory bandwidth overhead.
+Elementwise operations such as addition, scaling, and activation functions do little arithmetic per value. In an eager runtime that executes one operation at a time, each operation writes a full intermediate array that the next one reads back, so a chain of them can spend more time moving arrays through memory than computing on them.
 
-From a framework and systems standpoint, **operator fusion** is the primary compiler optimization used to break the memory bandwidth wall:
-1. **Eliminating memory round-trips**: Combining sequential elementwise operations (such as linear bias addition followed by GELU activation) into a single compiled kernel execution pass.
-2. **On-chip register reuse**: Retaining intermediate values in ultra-fast on-chip processor registers or SRAM rather than allocating temporary tensors in global DRAM.
-3. **The memory traffic ledger**: Quantifying exact memory traffic reductions, proving how fusing an 8-operation GELU expression slashes DRAM bytes moved by up to $9\times$.
+From a framework and systems standpoint, **operator fusion** and **tiling** are the two standard answers, one reducing intermediate arrays and the other reusing data while it is still close to the processor:
+1. **Eliminating memory round-trips**: Combining sequential elementwise operations into one pass, as a compiled kernel would, so intermediates need not be written out and read back.
+2. **Reuse before eviction**: Keeping values in registers or cache while they are still needed, which a compiled kernel or a tiled loop can arrange and a sequence of NumPy calls cannot guarantee.
+3. **The memory traffic ledger**: Counting logical array reads and writes, which for the eight-operation GELU come to nine times those of an ideal single pass. That ratio compares two models; it is not the measured traffic of either NumPy helper.
 
-This chapter implements TinyTorch's operator fusion engine, demonstrating how kernel fusion transforms memory-bound operator sequences into peak hardware performance.
+This chapter writes a GELU expressed with fewer temporary Tensors and a tiled matrix multiply in NumPy, then times both. The names describe how each computation is expressed; only the timing says what changed.
 
 ::: {#fig-kernel-fusion fig-env="figure" fig-pos="htb" fig-cap="**Three NumPy execution paths**: Vectorized multiplication delegates to a library, the GELU helpers retain different intermediate arrays, and tiled multiplication explicitly accumulates block products. Every comparison checks values before measuring time." fig-alt="Three boxes labeled vectorized matmul, GELU expressions, and tiled matmul point to a shared output-check and measurement box."}
 ![](assets/images/diagrams/17_acceleration-diag-1.svg)
@@ -80,7 +80,7 @@ Matrix multiplication presents a different opportunity. Each input element contr
 
 ::: {.column-margin}
 **↪ Jump ahead:** @sec-extensions
-*How modern ML compilers (OpenAI Triton and PyTorch Inductor) automate kernel fusion at scale.*
+*The same tiling and fusion compiled to C++ and Triton, then measured against NumPy.*
 :::
 
 
@@ -123,7 +123,19 @@ The tile cannot grow without limit. Three blocks must fit in fast memory at once
 
 $$3\,T^2 \times 4 \text{ bytes} \le \text{cache size}.$$
 
-For a hypothetical cache budget of 32,768 bytes, the inequality gives $T \le 52$. A tile of 32 fits this three-block budget; a tile of 64 requires 49,152 bytes. The estimate excludes other live data, library workspace, and cache-line effects. Choosing a tile therefore starts with a capacity estimate and ends with measurement, rather than a promise that a particular size is fastest.
+For a hypothetical cache budget of 32,768 bytes, the inequality gives $T \le 52$. A tile of 32 fits this three-block budget; a tile of 64 requires 49,152 bytes. The estimate excludes other live data, library workspace, and cache-line effects. Choosing a tile therefore starts with a capacity estimate and ends with measurement, rather than a promise that a particular size is fastest.[^fn-gotoblas-hierarchical-tiling]
+
+[^fn-gotoblas-hierarchical-tiling]: **Hierarchical multi-level tiling and GotoBLAS**: High-performance implementations (such as OpenBLAS, BLIS, and NVIDIA CUTLASS) do not stop at single-level cache tiling. As established by Kazushige Goto and Robert van de Geijn (2008), GEMM is structured as a hierarchy of nested tiles matching hardware memory levels: an outer macro-kernel packs $M_c \times K_c$ panels of $A$ and $K_c \times N_c$ panels of $B$ into the L2/L3 cache, while an inner micro-kernel streams tiny $m_r \times n_r$ blocks directly into CPU SIMD or GPU register files. This eliminates cache evictions during the inner dot products and achieves over 90% of theoretical peak hardware arithmetic throughput.
+
+### Why libraries route through matrix multiply
+
+The BLAS interface that NumPy calls groups its routines into three levels by the shapes they combine, and the levels differ in how much arithmetic each moved value can support. Count float32 values and assume each operand is read once and each result written once.
+
+- **Level 1, vector with vector**, such as AXPY ($y \leftarrow \alpha x + y$) on $n$ elements: $2n$ FLOPs over $3n$ values, or $12n$ bytes, which is $1/6$ FLOP per byte whatever $n$ is.
+- **Level 2, matrix with vector**, such as GEMV ($y \leftarrow A x$) with an $n \times n$ matrix: $2n^2$ FLOPs over about $n^2$ values, or $4n^2$ bytes, which is about $1/2$ FLOP per byte.
+- **Level 3, matrix with matrix**, GEMM, with $n \times n$ operands: $2n^3$ FLOPs over $3n^2$ values, or $12n^2$ bytes, which is $n/6$ FLOPs per byte and grows with the matrix.
+
+Only Level 3 has an intensity that grows with problem size. That growth is what tiling exploits, and it is the reason a library can bring matrix multiplication close to a machine's arithmetic ceiling while vector routines stay bound by memory. The levels map directly onto this book's workloads. A Linear layer applied to a batch of rows is a GEMM. The same layer applied to one row is a GEMV, which is the cached decode step in @tbl-m2-inference-regimes: each weight is read to perform two floating-point operations.
 
 ---
 
@@ -202,6 +214,50 @@ np.testing.assert_array_equal(vectorized_matmul(A, B).data, expected)
 The multiply within each block uses NumPy's `@`. NumPy documents that `matmul` uses an optimized BLAS library when possible; BLAS is a collection of compiled linear-algebra routines. The Python loops expose block selection while the library performs each block's arithmetic. [NumPy matmul documentation](https://numpy.org/doc/stable/reference/generated/numpy.matmul.html).
 
 This extra Python loop structure can cost more than one whole-matrix library call. The block size also changes summation order, so larger floating-point examples need numerical tolerances rather than bitwise equality. Measure against `vectorized_matmul` using the same inputs. A faster result is useful only after it satisfies the same numerical contract.
+
+### Convolution as one matrix multiply
+
+@sec-convolutions ended with a trade it could only describe. Module 09's `Conv2d` computes every multiply-add as a separate Python operation, and the chapter modeled im2col as the way out: copy each patch into a row, flatten each filter into a column, and let one matrix multiply do every dot product. Module 17 builds that path into the package, and it is the one place in the module where acceleration reaches a layer a model actually uses.
+
+The chapter model in @sec-convolutions filled the patch matrix one output position at a time, which is still a Python loop over $N H_{\text{out}} W_{\text{out}}$ positions. `im2col` turns the loop around. For kernel element $(i, j)$, the input values it touches at every output position form one strided slice of the padded input, so the function copies $K^2$ slices instead of $N H_{\text{out}} W_{\text{out}}$ patches. For a $3 \times 3$ kernel that is nine copies whatever the image size.
+
+{{< include _listings/17_acceleration/im2col.qmd >}}
+
+The six-axis buffer `cols` has shape $(N, C, K, K, H_{\text{out}}, W_{\text{out}})$. After the loop, `cols[n, c, i, j, oh, ow]` holds the input value that kernel element $(i, j)$ of channel $c$ multiplies at output position $(oh, ow)$ of image $n$. The transpose moves the three position axes to the front and the reshape flattens the rest, in the order (channel, kernel row, kernel column). That order is the one contract that matters: `weight.reshape(out_ch, -1)` flattens a filter in exactly that order, and a patch matrix with its columns permuted still multiplies without error while pairing the wrong pixels with the wrong weights. The unit test checks it with a two-channel input whose channels are numbered apart.
+
+{{< include _listings/17_acceleration/im2col_conv2d.qmd >}}
+
+`im2col_conv2d` is the convolution in three steps. It builds the patch matrix, multiplies it by the transposed filter matrix with the `vectorized_matmul` from earlier in the module, and moves the channel axis from last to second. It reads `.data` and wraps the result in a new `Tensor`, like the other helpers in this chapter, so it computes Module 09's forward pass but records no backward path.
+
+::: {#lst-acceleration-im2col-check lst-pos="H" lst-cap="**The loops are the reference**: The matrix-multiply convolution must reproduce Module 09's output before its timing means anything."}
+```python
+from tinytorch.core.spatial import Conv2d
+from tinytorch.perf.acceleration import im2col_conv2d
+
+conv = Conv2d(3, 16, kernel_size=3, padding=1)
+x = Tensor(rng.standard_normal((2, 3, 16, 16)).astype(np.float32))
+np.testing.assert_allclose(im2col_conv2d(x, conv.weight, conv.bias, padding=1).data,
+                           conv(x).data, atol=1e-5)
+```
+:::
+
+The module's analysis cell times both versions on two layers. On my machine, a $2 \times 3 \to 16$ layer on $16 \times 16$ images takes 34.4 ms through the loops and 0.044 ms through im2col, and a $2 \times 16 \to 32$ layer takes 339 ms against 0.096 ms, about 780 and 3,500 times faster. The patch matrix is 9.0 times the size of the input in both cases, as the storage count in @sec-convolutions predicted. Neither version does less arithmetic; the difference is whether the multiply-adds run in the interpreter or inside one library call.[^fn-cudnn-implicit-gemm]
+
+[^fn-cudnn-implicit-gemm]: **Implicit GEMM in production convolution libraries**: While explicit `im2col` lowers convolution to standard Level 3 GEMM, materializing the patch matrix $X_{\text{col}}$ in DRAM incurs a severe $K^2$ memory footprint penalty ($9\times$ expansion for $3 \times 3$ kernels). Production acceleration libraries (such as NVIDIA cuDNN and oneDNN) circumvent this via *implicit GEMM*: instead of constructing $X_{\text{col}}$ in memory, GPU thread blocks compute patch index arithmetic on the fly inside register address calculations. Each thread loads the appropriate image pixel directly into shared memory or registers as needed by the matrix multiply, gaining GEMM computational efficiency without allocating any intermediate buffer.
+
+### Training through im2col
+
+A convolution that only runs forward can evaluate a CNN but not train one. In matrix form the forward pass is $Y = X_{\text{col}} W + b$, with $X_{\text{col}}$ the patch matrix and $W$ the flattened filters. Writing $G$ for the output gradient in the same row layout, the matrix-multiply rule from @sec-autograd gives $\partial W = X_{\text{col}}^{\top} G$ and $\partial X_{\text{col}} = G W^{\top}$, two matrix multiplies of the same size as the forward pass, and $\partial b$ is a column sum of $G$. The one step that is not a matrix multiply turns $\partial X_{\text{col}}$ into a gradient for the image. Every pixel was copied into several rows, so its gradient is the sum of the gradients of its copies. That is col2im.
+
+{{< include _listings/17_acceleration/col2im.qmd >}}
+
+`col2im` walks the same kernel offsets and strided slices as `im2col`, with the copy turned into `+=`. Within one offset the slice touches each pixel at most once, so the in-place add is safe; across offsets, the adds are what combine overlapping patches. Assignment instead of addition would keep only the last patch's gradient for each pixel, and the unit test catches it by sending a gradient of one from every patch entry and checking that the $3 \times 3$ example comes back as the coverage counts `[[1,2,1],[2,4,2],[1,2,1]]`. A second test checks the defining property of a transpose, $\langle \text{im2col}(x), c\rangle = \langle x, \text{col2im}(c)\rangle$, for random $x$ and $c$ with stride and padding.
+
+`Im2colConv2dFunction` puts the three gradients into the same `Function` shape as Module 09's `Conv2dFunction`. Its forward pass saves the patch matrix and the flattened filters; its backward pass uses them.
+
+{{< include _listings/17_acceleration/Im2colConv2dFunction_backward.qmd >}}
+
+Keeping `self.cols` alive until backward holds the $K^2$-times-larger buffer for every convolution in a model until its gradient is computed. Rebuilding it from the saved input would trade that memory for a second `im2col`. The unit test compares all three gradients with Module 09's loops on the same weights, and the module test checks that one SGD step moves the weights the same way on both paths. On my machine a full training step on the $2 \times 16 \to 32$ layer takes 1,201 ms through the loops and 0.25 ms through `Im2colConv2dFunction`, about 4,800 times faster.
 
 ---
 
@@ -328,6 +384,10 @@ assert count_naive_loads(4, 4, 4) == 128 and count_tile_loads(4, 4, 4, 2) == 64
 
 At $n=1024$ and $T=64$, this model counts 2,147,483,648 scalar input requests against 33,554,432 blocked input requests. Multiplying by four gives about 8.6 GB against 134 MB of logical input data. The model excludes output reads and writes, and real cache traffic can differ. Both algorithms still compute the same 1,073,741,824 multiply-add pairs.
 
+### im2col: which pixels land in which row
+
+Take one $3 \times 3$ image holding the values 1 through 9 and a $2 \times 2$ kernel with stride 1. There are four output positions, and at kernel offset $(0, 0)$ the strided slice is the top-left $2 \times 2$ block `[[1,2],[4,5]]`, one value per position. Offset $(0,1)$ gives `[[2,3],[5,6]]`, offset $(1,0)$ gives `[[4,5],[7,8]]`, and offset $(1,1)$ gives `[[5,6],[8,9]]`. Reading the four slices at position $(0,0)$ in offset order gives its patch `[1,2,4,5]`; the other positions give `[2,3,5,6]`, `[4,5,7,8]`, and `[5,6,8,9]`. The center value 5 appears in all four rows, which is the storage cost in miniature: nine input values became sixteen matrix entries.
+
 ---
 
 ## From TinyTorch to Production
@@ -368,9 +428,17 @@ Tiling and fusion also consume resources. Larger blocks require more working sto
 
 `tiled_matmul` allocates a zero accumulator and adds one block product per shared-dimension tile. Before each inner iteration, the accumulator contains every earlier contribution; after the final iteration, it contains the complete product. Partial tiles change slice sizes, not that invariant. The returned Tensor owns a copy of the accumulator. Timing this mechanism against one `vectorized_matmul` call exposes the cost of Python blocking around library arithmetic.
 
+`im2col` copies $K^2$ strided slices into a patch matrix whose columns follow the order in which a filter flattens, and `im2col_conv2d` turns Module 09's seven loops into one call to `vectorized_matmul`. It reproduces `Conv2d` exactly and pays for it with a patch matrix about $K^2$ times the input. `col2im` reverses the copy with an accumulation, and `Im2colConv2dFunction` combines the two into a convolution that trains through two matrix multiplies and a scatter-add, with gradients that match Module 09's loops.
+
 @sec-memoization moves from data reused inside one operation to results reused across calls. During text generation, earlier keys and values can remain valid when one new token arrives. A cache makes that lifetime explicit and introduces a new obligation: reuse only state that belongs to the current generation.
 
 ---
+
+## Further reading
+
+- Goto and van de Geijn (2008), [Anatomy of high-performance matrix multiplication](https://doi.org/10.1145/1356052.1356053), *ACM TOMS*. The blocking that turns Level 3 reuse into speed on real caches.
+- Chen et al. (2018), [TVM: an automated end-to-end optimizing compiler for deep learning](https://arxiv.org/abs/1802.04799), *OSDI*. A compiler that performs the operator fusion this chapter expresses by hand.
+- Lawson et al. (1979), [Basic Linear Algebra Subprograms for Fortran usage](https://doi.org/10.1145/355841.355847), *ACM TOMS*. The original BLAS interface behind the three levels above.
 
 ## Exercises
 
@@ -381,3 +449,5 @@ Tiling and fusion also consume resources. Larger blocks require more working sto
 3. **Count and measure separately.** Reproduce the GELU operation ledger for three inputs. Add the logical read and write required by each Tensor constructor copy in `unfused_gelu`. Then time both helpers on several larger sizes. Explain why dividing your modeled byte count by elapsed time does not measure hardware memory bandwidth.
 
 4. **Size the tile.** For a cache budget of 32,768 bytes, check which of $T=16,32,64$ satisfy the three-block storage estimate. Compare the actual tiled result with `vectorized_matmul` for a $(13,7)$ by $(7,5)$ product at each size. Then time a larger fixed workload and explain why fitting the estimate alone does not identify the fastest size.
+
+5. **Recompute instead of saving.** `Im2colConv2dFunction` keeps the patch matrix from forward to backward. Change it to save only the input and rebuild `cols` in `backward`. Check that the gradients still match `Conv2d`, then measure the time per training step and the peak memory of both versions on a layer large enough for the difference to show. State which you would choose for a deep CNN on a device with little memory.

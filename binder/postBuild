@@ -3,7 +3,7 @@
 # repo2docker reads its configuration from binder/, which is also the book
 # toolchain; postBuild and requirements.txt are the only files here it uses.
 
-set -e
+set -euo pipefail
 
 echo "🔧 Setting up TinyTorch from monorepo..."
 cd tinytorch
@@ -13,26 +13,66 @@ pip install -e .
 
 echo ""
 echo "📓 Generating student notebooks from source..."
-# Convert all src/*.py files to notebooks in modules/
-# This ensures students always get fresh notebooks matching the code
+# These notebooks MUST be generated the same way `tito module start` generates
+# them, i.e. through convert_py_to_notebook(student=True), which clears every
+# student-core solution region to nbgrader's stub.
+#
+# This script used to call `jupytext --to notebook src/NN_x/NN_x.py` directly.
+# That is the `student=False` path: it shipped the full reference solution in
+# every notebook a Binder student opened (17 solved regions in 01_tensor
+# alone), which is exactly the leak #1684 closed for the local workflow.
+python3 - <<'PY'
+import sys
+from pathlib import Path
 
-for module_dir in src/*/; do
-    module_name=$(basename "$module_dir")
-    py_file="$module_dir/${module_name}.py"
-    # Strip numeric prefix for notebook name (e.g., "01_tensor" -> "tensor")
-    short_name="${module_name#*_}"
+sys.path.insert(0, str(Path.cwd()))
+from tito.commands.export_utils import convert_py_to_notebook
 
-    if [ -f "$py_file" ]; then
-        # Create output directory
-        mkdir -p "modules/$module_name"
 
-        # Convert .py to .ipynb using jupytext
-        echo "   📝 Converting $module_name..."
-        jupytext --to notebook "$py_file" --output "modules/$module_name/${short_name}.ipynb" 2>/dev/null || {
-            echo "   ⚠️  Warning: Could not convert $module_name"
-        }
-    fi
-done
+class _Console:
+    def print(self, *args, **kwargs):
+        if args:
+            print(args[0])
+
+
+root = Path.cwd()
+venv = Path(sys.prefix)
+failed = []
+
+for src in sorted((root / "src").iterdir()):
+    if not src.is_dir() or not (src / f"{src.name}.py").exists():
+        continue
+    print(f"   📝 Converting {src.name}...")
+    if not convert_py_to_notebook(src, venv, _Console(),
+                                  student=True, project_root=root):
+        failed.append(src.name)
+
+if failed:
+    sys.exit(f"❌ Failed to generate student notebooks: {', '.join(failed)}")
+PY
+
+echo ""
+echo "🔎 Verifying no reference solutions leaked into the student notebooks..."
+python3 - <<'PY'
+import json
+import sys
+from pathlib import Path
+
+leaked = []
+for nb_path in sorted(Path("modules").rglob("*.ipynb")):
+    nb = json.loads(nb_path.read_text(encoding="utf-8"))
+    code = "\n".join(
+        "".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code"
+    )
+    # A student notebook keeps scaffold regions solved, so the marker itself is
+    # expected; an unstubbed student-core region is not.
+    if "### BEGIN SOLUTION" in code and "raise NotImplementedError" not in code:
+        leaked.append(nb_path.as_posix())
+
+if leaked:
+    sys.exit("❌ Reference solutions present in: " + ", ".join(leaked))
+print("   ✅ Student notebooks carry stubs, not solutions.")
+PY
 
 echo ""
 echo "✅ TinyTorch setup complete!"

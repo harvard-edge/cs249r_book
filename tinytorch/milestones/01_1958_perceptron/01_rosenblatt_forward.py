@@ -45,7 +45,7 @@ This milestone shows you WHY training is essential - the model won't work withou
       └────────────                    └────────────
         0   2   4                        0   2   4
 
-    ❌ Accuracy: ~50%                ❌ Accuracy: ~50%
+    ✅ Accuracy: 100%                ❌ Accuracy: 0% to 100%, by chance
        (What you hoped for)             (What random weights give you)
 
     WHY IS IT SO BAD?
@@ -64,14 +64,15 @@ This milestone shows you WHY training is essential - the model won't work withou
 
 🔍 KEY INSIGHTS (This Milestone):
 - ✅ Architecture works: Forward pass executes correctly
-- ❌ But it's useless: Random weights = random predictions (~50% accuracy)
+- ❌ But it's useless: Random weights = a random line, right or wrong by chance
 - 💡 The lesson: Building the model is easy; making it LEARN is the hard part
 - 🎯 Motivation: You NEED training (coming in Modules 04-08!)
 
 📊 WHAT TO EXPECT (This Milestone):
 - Dataset: 10 linearly separable synthetic points (just for testing)
 - No training: Just forward pass with random weights
-- Expected accuracy: ~40-60% (essentially random guessing)
+- Expected accuracy: anything from 0% to 100%. The points are separable, so a
+  random line often lands all-right or all-backwards; neither is learning
 - Key takeaway: "My model doesn't work... yet!"
 
 🚀 WHAT COMES NEXT:
@@ -345,7 +346,13 @@ def main():
     results_table.add_row("Matches", match_str)
 
     # Determine status
-    if accuracy < 0.6:
+    if accuracy <= 0.2:
+        # Nearly every point on the wrong side: the random line happens to
+        # separate the classes, but with its sides swapped.
+        accuracy_display = f"[red]{accuracy:.1%} ❌ Boundary points the wrong way![/red]"
+        status = "FAILED"
+        status_color = "red"
+    elif accuracy < 0.6:
         accuracy_display = f"[red]{accuracy:.1%} ❌ Random Guessing![/red]"
         status = "FAILED"
         status_color = "red"
@@ -392,7 +399,11 @@ def main():
     # Diagnosis
     if status == "FAILED":
         diagnosis = (
-            "[red]❌ The model is essentially guessing randomly[/red]\n"
+            ("[red]❌ Almost every prediction is wrong, which is still luck: the random line[/red]\n"
+             "[red]   splits the classes, but labels each side backwards[/red]\n"
+             if accuracy <= 0.2 else
+             "[red]❌ The model is essentially guessing randomly[/red]\n")
+            +
             "[red]❌ Random initialization = random decision boundary[/red]\n\n"
             "[bold cyan]💡 KEY INSIGHT:[/bold cyan] Building the architecture is easy.\n"
             "   Making it [bold]LEARN[/bold] is the hard part!"

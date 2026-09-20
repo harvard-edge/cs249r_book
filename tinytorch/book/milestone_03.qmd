@@ -10,8 +10,8 @@
 In competitive systems benchmarks like MLPerf, raw speedup numbers and compression ratios mean nothing if the candidate model compromises accuracy. A system optimization is only valid if it satisfies strict accuracy retention floors while delivering verifiable reductions in memory footprint and latency under concrete edge hardware constraints.
 
 From a systems and framework perspective, Milestone III represents the ultimate competitive arena of TinyTorch: The Torch Olympics. Students deploy their optimized TinyGPT and DigitMLP models against strict scoring gates:
-1. **The three-axis scorecard**: Evaluating candidate submissions across accuracy retention ($R \ge 0.99$), stored size compression ratio ($C$), and runtime speedup ($S$).
-2. **Edge deployment constraints**: Operating under strict memory ceilings where unoptimized models trigger out-of-memory crashes, requiring quantized weights and cached attention to fit within resource budgets.
+1. **The three-axis scorecard**: Evaluating each candidate by accuracy retention ($R$, the fraction of the baseline's accuracy it keeps), stored-size ratio ($C$), and speedup ($S$), with event floors such as the latency sprint's 85 percent accuracy.
+2. **Memory budgets**: Estimating whether quantized weights and an attention cache fit a device's memory before choosing which optimizations to apply.
 3. **Rigorous empirical verification**: Generating auditable benchmark reports that compare optimized candidates against frozen baseline models on identical workloads.
 
 This milestone concludes the TinyTorch journey, proving that students have mastered not just deep learning theory, but the systems engineering discipline required to build and deploy efficient ML runtimes.
@@ -65,7 +65,7 @@ So the need is concrete. Take one model, apply the optimizations, and report acc
 
 ::: {.column-margin}
 **↪ Jump ahead:** @sec-extensions
-*Scaling from single-node edge deployment to distributed cluster training and custom accelerators.*
+*Taking the framework below NumPy with compiled C++ and GPU kernels, measured the same way.*
 :::
 
 
@@ -342,7 +342,9 @@ for name, cand in ledger.items():
           f"events={[e.value for e in OlympicEvent if qualifies(cand, e)]}")
 ```
 
-The sparse byte count assumes INT8 values with 1-byte column indices (every column index is below 64, so one byte suffices), 2-byte row-start entries for the 65 and 33 row boundaries of the stored $(64,32)$ and $(32,10)$ weight matrices, 42 bias bytes, and the scales. The loop prints the rows of @tbl-m3-scorecard from those counts.
+The sparse byte count assumes INT8 values with 1-byte column indices (every column index is below 64, so one byte suffices), 2-byte row-start entries for the 65 and 33 row boundaries of the stored $(64,32)$ and $(32,10)$ weight matrices, 42 bias bytes, and the scales.[^fn-csr-index-sizing] The loop prints the rows of @tbl-m3-scorecard from those counts.
+
+[^fn-csr-index-sizing]: The storage overhead of Compressed Sparse Row (CSR) depends on matrix dimensions: column indices require $\lceil \log_2(N) / 8 \rceil$ bytes per nonzero element (1 byte for $N \le 256$, 2 bytes for $N \le 65{,}536$), while row pointers require $\lceil \log_2(\text{nnz}) / 8 \rceil$ bytes per row. When weight matrices are wide (e.g., $N = 4096$ in modern LLMs), column indices take 2 bytes, meaning a 1-byte INT8 value carries a 2-byte index, quadrupling the per-weight storage unless sparsity exceeds $75\%$ or block-sparse representations (e.g., 2:4 structured sparsity with 2-bit index nibbles) are used.
 
 | Candidate format | Bytes | Accuracy | $R$ | $C$ | Pass floor? |
 | :--- | ---: | ---: | ---: | ---: | :--- |
@@ -358,14 +360,16 @@ The packed INT8 ratio is $9{,}640/2{,}442 \approx 3.95$, including the metadata 
 
 ## From TinyTorch to Production
 
-The classroom scorecard checks arithmetic on supplied measurements. An external benchmark must also control how those measurements were obtained. [MLPerf Inference's rules](https://github.com/mlcommons/inference_policies/blob/master/inference_rules.adoc) specify workloads, quality requirements, execution scenarios, and reproducibility requirements. Its LoadGen harness issues queries and records completions. The scenario determines the reported performance metric; there is no single universal latency number. TinyTorch's class named `MLPerf` does not implement that official protocol.
+The classroom scorecard checks arithmetic on supplied measurements. An external benchmark must also control how those measurements were obtained. [MLPerf Inference's rules](https://github.com/mlcommons/inference_policies/blob/master/inference_rules.adoc) specify workloads, quality requirements, execution scenarios, and reproducibility requirements. Its LoadGen harness issues queries and records completions.[^fn-mlperf-inference-scenarios] The scenario determines the reported performance metric; there is no single universal latency number. TinyTorch's class named `MLPerf` does not implement that official protocol.
+
+[^fn-mlperf-inference-scenarios]: MLPerf Inference standardizes benchmarking across four distinct operational scenarios: (1) **Single-Stream**: queries arrive one at a time with query size 1, measuring 90th-percentile latency for interactive edge devices; (2) **Server**: queries arrive following a Poisson distribution, measuring the maximum supported query rate (QPS) subject to a strict 99th-percentile latency constraint; (3) **Offline**: all input queries are resident in memory upfront, measuring peak throughput (samples/second) where latency is unconstrained; and (4) **Multi-Stream**: multiple concurrent video or sensor feeds submit batches at fixed intervals, measuring the maximum stream count before frame drops.
 
 ::: {#psp-milestone3-gguf-edge-runtime .callout-production-bridge title="Production bridge: edge runtimes with llama.cpp, GGUF, and ONNX Runtime"}
 Deploying quantized transformer models on consumer hardware (phones, laptops, embedded edge boards) requires moving beyond Python runtimes to specialized C/C++ inference engines:
 
 - **GGUF Format and llama.cpp**: Georgi Gerganov's `llama.cpp` uses the unified binary file format **GGUF** (successor to GGML). GGUF bundles model architecture hyperparameters, tokenizer vocabulary, and mixed-precision quantized tensor weights (e.g., Q4_K_M, Q8_0) into a single mmap-friendly file.
 - **Zero-Copy Memory Mapping (`mmap`)**: Instead of allocating and loading gigabytes of weights into heap RAM on startup, edge runtimes map the GGUF file directly into virtual address space. Pages are faulted into memory on demand by the OS kernel, enabling near-instantaneous startup and memory sharing across processes.
-- **Heterogeneous Offloading**: GGUF runtimes dynamically split layers between available compute backends—offloading $N$ transformer layers to a discrete or integrated GPU (via Metal on Apple Silicon, CUDA, or Vulkan) while executing remaining layers on the CPU SIMD units (ARM NEON, x86 AVX-512).
+- **Heterogeneous Offloading**: GGUF runtimes dynamically split layers between available compute backends, offloading $N$ transformer layers to a discrete or integrated GPU (via Metal on Apple Silicon, CUDA, or Vulkan) while executing remaining layers on the CPU SIMD units (ARM NEON, x86 AVX-512).
 - **ONNX Runtime (ORT)**: For cross-platform enterprise edge deployments, ONNX Runtime compiles computational graphs with hardware-specific Execution Providers (DirectML, OpenVINO, QNN for Qualcomm NPUs), fusing attention and layer normalization while executing quantized integer GEMM kernels.
 :::
 
@@ -386,9 +390,14 @@ The practical questions are the same when reading either report. Which artifact 
 
 ## Summary
 
-This milestone built the scorecard that turns Part III's separate optimizations into a verdict. Three ratios, accuracy retention $R$, size ratio $C$, and speedup $S$, each compare the optimized model against the baseline; a floor on $R$ decides whether the other two are looked at; and the capstone helper checks eligibility for each classroom event without combining the ratios into a ranking. The worked trace pushed six weights through min-max INT8 quantization and 50% magnitude pruning by hand, then counted a proposed packed representation of `DigitMLP` to show that its packed INT8 format would give $3.95\times$, that 50% pruning with sparse indices gives less, and that neither changes how many multiplies the dense forward pass performs. Reading the milestone scripts closely exposed where their printed numbers are measurements and where they are assumptions, which is the skill the scorecard exists to teach. The invariant to carry forward is that an optimization has paid off only when the optimized artifact itself has been measured on all three axes, against the same baseline, with an accuracy floor it cleared. @sec-extensions takes for granted that you can measure an optimization honestly on accuracy, memory, and latency at once, and asks what production compilers and custom silicon do to move those numbers further than pure Python can.
+This milestone built the scorecard that turns Part III's separate optimizations into a verdict. Three ratios, accuracy retention $R$, size ratio $C$, and speedup $S$, each compare the optimized model against the baseline; a floor on $R$ decides whether the other two are looked at; and the capstone helper checks eligibility for each classroom event without combining the ratios into a ranking. The worked trace pushed six weights through min-max INT8 quantization and 50% magnitude pruning by hand, then counted a proposed packed representation of `DigitMLP` to show that its packed INT8 format would give $3.95\times$, that 50% pruning with sparse indices gives less, and that neither changes how many multiplies the dense forward pass performs. Reading the milestone scripts closely exposed where their printed numbers are measurements and where they are assumptions, which is the skill the scorecard exists to teach. The invariant to carry forward is that an optimization has paid off only when the optimized artifact itself has been measured on all three axes, against the same baseline, with an accuracy floor it cleared. @sec-extensions applies the same discipline to kernels. It leaves NumPy for compiled C++ and GPU code and measures what each step actually gains.
 
 ---
+
+## Further reading
+
+- Reddi et al. (2020), [MLPerf inference benchmark](https://arxiv.org/abs/1911.02549), *ISCA*. The benchmark design the Torch Olympics borrows: fixed tasks, quality floors, and measured latency.
+- Mattson et al. (2020), [MLPerf training benchmark](https://arxiv.org/abs/1910.01500), *MLSys*. The training-side counterpart and its rules for comparable results.
 
 ## Exercises
 

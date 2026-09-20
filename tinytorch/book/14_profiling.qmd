@@ -10,9 +10,9 @@
 In machine learning systems, optimizing without measurement is guesswork. As models scale from millions to billions of parameters, understanding where execution time and memory are spent is essential. A practitioner must be able to inspect a model architecture and quantitatively predict its resource requirements: how many FLOPs does a forward pass consume, how much memory is dedicated to parameters versus activations, and what hardware limits govern execution speed?
 
 From a framework and systems standpoint, profiling provides the formal accounting tools necessary to diagnose computational bottlenecks:
-1. **Parameter and memory accounting**: Calculating exact byte footprints across model parameters, gradients, optimizer states, and forward activation tensors.
-2. **FLOP arithmetic and operational intensity**: Deriving the exact theoretical floating-point operations per layer and computing operational intensity (FLOPs per byte moved).
-3. **The Roofline model**: Plotting workload operational intensity against machine hardware ceilings to determine definitively whether an operation is **memory-bandwidth bound** (limited by memory bus throughput) or **compute-bound** (limited by arithmetic ALUs).
+1. **Parameter and memory accounting**: Counting parameter bytes, measuring the new allocations a forward pass makes, and estimating what gradients and optimizer state would add.
+2. **FLOP arithmetic and operational intensity**: Counting floating-point operations from layer shapes and dividing by bytes moved to get operational intensity.
+3. **The Roofline model**: Placing an operation's intensity against a machine's two ceilings to bound its attainable speed and to ask whether it is **memory-bandwidth bound** (limited by memory bus throughput) or **compute-bound** (limited by arithmetic units). The profiler's own label is a heuristic, and the chapter says where it can mislead.
 
 This chapter establishes TinyTorch's profiling harness, providing the analytical and empirical diagnostic foundations that guide all performance optimizations in Part III.
 
@@ -28,7 +28,10 @@ This chapter establishes TinyTorch's profiling harness, providing the analytical
 :::
 
 
-The natural way to estimate how long a computation takes is to count its arithmetic. A Linear layer with $n$ inputs and $m$ outputs, applied to $R$ rows, does $2Rnm$ floating-point operations, or FLOPs, counting one for each multiply and one for each add. Doubling the rows doubles the FLOPs, which suggests doubling the time.
+The natural way to estimate how long a computation takes is to count its arithmetic. A Linear layer with $n$ inputs and $m$ outputs, applied to $R$ rows, does $2Rnm$ floating-point operations, or FLOPs, counting one for each multiply and one for each add.[^fn-fma-flops] Doubling the rows doubles the FLOPs, which suggests doubling the time.
+
+[^fn-fma-flops]: In computing and machine learning systems literature, one **Multiply-Accumulate** (MAC) or Fused Multiply-Add (FMA, $a \cdot b + c$) counts as two floating-point operations: one multiplication and one addition ($1\text{ MAC} = 2\text{ FLOPs}$). Hardware accelerators execute FMAs in a single clock cycle, so hardware peak FLOPS ratings are calculated as $2 \times \text{FMA units} \times \text{frequency}$.
+
 
 Try it. Take one weight matrix the size of a real model's layer and push two rows through it, then sixteen. The second call does eight times the arithmetic.
 
@@ -283,6 +286,8 @@ FLOPs depend on the row count. Each block has six Linear layers whose in-times-o
 
 The longer input increases counted arithmetic by about 68.5 times, while this storage total increases by about 5.8 percent. The table deliberately excludes intermediate activations. Its last row checks the ratio of two known counts; it cannot place the model on a main-memory roofline. That would require a traffic estimate accounting for lookup rows, intermediate arrays, and reuse. The arithmetic in the listing below verifies the table without executing a forward pass. In line 1, dimensions `D, V, L, P = 128, 1000, 4, 256` define the TinyGPT configuration. Lines 2--6 express the analytical parameter formulas, verified by `assert params == 1_082_112` in line 7. The loop in lines 9--14 evaluates total FLOPs and storage footprint across prompt lengths $S=1$ and $S=64$, printing the ratios $0.42$ and $27.42$ matching @tbl-tinygpt-intensity.
 
+The same counts say when attention's quadratic term takes over. Per block, the two attention products cost $4S^2D$ FLOPs, the four projections $8SD^2$, and the MLP $16SD^2$. The products overtake the projections when $S > 2D$, the MLP when $S > 4D$, and all six Linear layers together when $S > 6D$. For TinyGPT's $D = 128$, those thresholds are 256, 512, and 768 tokens, and its 256-position table stops the model at the first one, so Linear layers dominate every configuration it can run. At $S = 64$ the attention products are under 8 percent of the block arithmetic in @tbl-tinygpt-intensity. A model with $D = 4096$ reaches the all-Linear threshold at 24,576 tokens, so whether attention dominates depends on the context the model actually runs at, not on the architecture alone.
+
 ```python
 D, V, L, P = 128, 1000, 4, 256
 per_block_linear = 2 * (4 * D * D + 2 * D * 4 * D)     # six Linear layers, one row
@@ -451,6 +456,11 @@ The transferable habit is to make each optimization claim match its evidence. Re
 The roofline adds an explicit model of transferred bytes and machine ceilings. Its bound, $T \ge \max(F/P_{\text{peak}}, Q/B_{\text{peak}})$, explains why more arithmetic need not increase time proportionally. For a float32 Linear layer with few rows and one transfer per weight, intensity is approximately half the row count. That gives a reason to investigate weight traffic, while the timer determines whether a proposed change helps the actual workload. @sec-quantization follows one such proposal: represent weights with integer codes, check reconstruction error, and distinguish modeled packed storage from the NumPy arrays that execute the reference.
 
 ---
+
+## Further reading
+
+- Williams, Waterman, and Patterson (2009), [Roofline: an insightful visual performance model for multicore architectures](https://doi.org/10.1145/1498765.1498785), *CACM*. The roofline model this chapter applies.
+- Hennessy and Patterson (2019), *Computer Architecture: A Quantitative Approach*, 6th edition, Morgan Kaufmann. Memory hierarchies and the discipline of measuring before optimizing.
 
 ## Exercises
 

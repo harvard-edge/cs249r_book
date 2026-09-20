@@ -7,12 +7,12 @@
 :::
 
 
-A neural network produces raw, unbounded scores across possible outputs, but learning requires a scalar objective that quantifies prediction error: how far is the model's prediction from ground truth? Different learning tasks require distinct mathematical loss formulations—mean squared error for continuous regression, binary cross-entropy for probabilities, and categorical cross-entropy for multi-class classification.
+A neural network produces raw, unbounded scores across possible outputs, but learning requires a scalar objective that quantifies prediction error: how far is the model's prediction from ground truth? Different learning tasks require distinct mathematical loss formulations. Mean squared error for continuous regression, binary cross-entropy for probabilities, and categorical cross-entropy for multi-class classification.
 
 From a framework and systems standpoint, a loss function is a tensor reduction operator: it ingests high-dimensional batch predictions and ground-truth targets and collapses them into a single scalar that drives gradient descent. However, implementing loss functions on physical hardware exposes the harsh reality of IEEE 754 floating-point arithmetic. Textbook mathematical formulas frequently suffer from catastrophic numerical instability:
 1. **Exponential overflow**: Exponentiating large positive raw scores ($e^{1000}$) overflows float32 dynamic range to `+inf`, causing division to produce `nan`.
 2. **Logarithmic underflow**: Taking the logarithm of probabilities near zero ($\log(0)$) underflows to `-inf`.
-3. **Operator fusion for stability**: To prevent numerical breakdown, frameworks must mathematically fuse separate operations—combining LogSoftmax with Negative Log-Likelihood into a single numerically stable kernel using the max-subtraction shift.
+3. **Stable composition**: Computing cross-entropy through a max-shifted log-softmax, so the exponentials never overflow and the logarithm never sees zero, rather than exponentiating, normalizing, and taking a logarithm as separate steps.
 
 This chapter constructs TinyTorch's loss library, defusing the numerical traps of cross-entropy to provide stable scalar objectives that @sec-autograd and @sec-optimizers turn into parameter updates.
 
@@ -85,6 +85,16 @@ $$\mathcal{L}_{\text{CE}} = -\log p_t$$
 A few values make the shape of this function clear. If the model gives the right class probability 0.99, the loss is 0.01. At 0.5 it is 0.69. At 0.1 it is 2.30, and at 0.01 it is 4.61. The loss is near zero for a confident correct answer and grows without bound for a confident wrong one, which is exactly the pressure we want training to apply. Here and throughout the chapter, `log` means the natural logarithm, the inverse of the exponential. Statisticians call this quantity the negative log-likelihood,[^fn-nll-cross-entropy] and over a batch of $N$ examples we average it, for the same reason MSE divides by $N$.
 
 [^fn-nll-cross-entropy]: **Negative log-likelihood** (NLL): the negative logarithm of the probability a model assigns to the outcome that actually occurred. For class-index targets without additional weighting or smoothing, this is the log-softmax, select, negate, and average computation implemented below.
+
+The three loss functions in TinyTorch partition the core supervised learning workloads as summarized in @tbl-loss-taxonomy.
+
+| Loss Class | Target Type | Input Domain | Stability Mechanism | Primary Task |
+| :--- | :--- | :--- | :--- | :--- |
+| `MSELoss` | Continuous $\mathbb{R}$ | Unbounded predictions | Elementwise mean | Regression |
+| `BinaryCrossEntropyLoss` | Probabilities $[0, 1]$ | Probabilities in $(0, 1)$ | Epsilon clipping $[\epsilon, 1-\epsilon]$ | Binary classification |
+| `CrossEntropyLoss` | Class indices $\{0, \dots, C-1\}$ | Unbounded logits $\mathbb{R}^C$ | Max-shifted log-softmax & gather | Multi-class classification |
+
+: **Loss function taxonomy**: Architectural contracts, input domains, and numerical stabilization strategies across TinyTorch losses. {#tbl-loss-taxonomy tbl-colwidths="[22,20,22,22,14]"}
 
 ### The fix: shift before you exponentiate
 
@@ -172,7 +182,9 @@ The binary loss has a different input contract. With probabilities `[0.9, 0.2]` 
 
 {{< include _listings/04_losses/BinaryCrossEntropyFunction.qmd >}}
 
-The first check rejects mismatched or empty shapes. The next checks require finite probabilities and targets in `[0, 1]`; intermediate target values are allowed, and weight the two logarithms accordingly. `np.clip` then creates a new probability array bounded by `1e-7` and `1-1e-7`, leaving the input unchanged. Both `p` and `1-p` are positive at the logarithms. The two logged arrays and `bce_per_sample` have the input shape, and `np.mean` reduces every element to one scalar, including every output in a `(B, D)` input.
+The first check rejects mismatched or empty shapes. The next checks require finite probabilities and targets in `[0, 1]`; intermediate target values are allowed, and weight the two logarithms accordingly. `np.clip` then creates a new probability array bounded by `1e-7` and `1-1e-7`, leaving the input unchanged.[^fn-bce-clipping] Both `p` and `1-p` are positive at the logarithms. The two logged arrays and `bce_per_sample` have the input shape, and `np.mean` reduces every element to one scalar, including every output in a `(B, D)` input.
+
+[^fn-bce-clipping]: In exact real analysis, $\lim_{p \to 0^+} p \ln p = 0$. In IEEE 754 floating-point hardware, however, $\ln(0.0) = -\infty$, and the arithmetic expression $0.0 \times (-\infty)$ evaluates immediately to $\text{NaN}$. Bounding $p \in [\epsilon, 1-\epsilon]$ guarantees strictly positive arguments to $\ln(\cdot)$ and finite intermediate values.
 
 {{< include _listings/04_losses/BinaryCrossEntropyLoss.qmd >}}
 
@@ -314,6 +326,11 @@ A caller enters a loss wrapper with predictions and targets and receives a scala
 The numerical invariant is the max shift: for representable finite differences, every shifted logit is nonpositive and at least one is zero. Exponentials are therefore at most 1, and their row sum is at least 1. Keeping the target log-probability in log-space also avoids taking `log(0)`. The precision trace adds an ordering rule: compute `x - max_vals` before subtracting the log of the sum. Production implementations can reduce memory traffic while preserving this objective. @sec-dataloader now asks where the matched batches come from and how to assemble them without losing the pairing between each prediction's input and its label.
 
 ---
+
+## Further reading
+
+- Lin et al. (2017), [Focal loss for dense object detection](https://arxiv.org/abs/1708.02002), *ICCV*. A reshaped cross-entropy that shows how the choice of loss changes which examples drive the gradient.
+- Müller, Kornblith, and Hinton (2019), [When does label smoothing help?](https://arxiv.org/abs/1906.02629), *NeurIPS*. What happens to cross-entropy's targets and to the learned representation when the one-hot label is softened.
 
 ## Exercises
 

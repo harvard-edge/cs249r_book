@@ -54,6 +54,7 @@ from .commands.benchmark import BenchmarkCommand
 from .commands.community import CommunityCommand
 from .commands.dev import DevCommand
 from .commands.olympics import OlympicsCommand
+from .commands.system.update import UpdateCommand
 
 # Get version from pyproject.toml (single source of truth)
 def _get_version() -> str:
@@ -98,6 +99,7 @@ class TinyTorchCLI:
         self.commands: Dict[str, Type[BaseCommand]] = {
             # Essential
             'setup': SetupCommand,
+            'update': UpdateCommand,
             # Workflow (student-facing)
             'system': SystemCommand,
             'module': ModuleWorkflowCommand,
@@ -140,27 +142,35 @@ class TinyTorchCLI:
 
     def _generate_welcome_text(self) -> str:
         """Generate dynamic welcome text for interactive mode."""
+        from rich.text import Text
         lines = []
+        # Pad by visible width: the commands carry Rich markup tags of different
+        # lengths, so padding the raw string misaligns the description column.
+        width = max(Text.from_markup(cmd).cell_len
+                    for section in self.welcome_sections.values() for cmd, _ in section)
+
+        def pad(cmd: str) -> str:
+            return " " * (width - Text.from_markup(cmd).cell_len)
 
         # Quick Start
         lines.append(f"[{Theme.SECTION}]Quick Start:[/{Theme.SECTION}]")
         for cmd, desc in self.welcome_sections['quick_start']:
-            lines.append(f"  {cmd:<38} {desc}")
+            lines.append(f"  {cmd}{pad(cmd)} {desc}")
 
         # Track Progress
         lines.append(f"\n[{Theme.SECTION}]Track Progress:[/{Theme.SECTION}]")
         for cmd, desc in self.welcome_sections['track_progress']:
-            lines.append(f"  {cmd:<38} {desc}")
+            lines.append(f"  {cmd}{pad(cmd)} {desc}")
 
         # Community
         lines.append(f"\n[{Theme.SECTION}]Community:[/{Theme.SECTION}]")
         for cmd, desc in self.welcome_sections['community']:
-            lines.append(f"  {cmd:<38} {desc}")
+            lines.append(f"  {cmd}{pad(cmd)} {desc}")
 
         # Help & Docs
         lines.append(f"\n[{Theme.SECTION}]Help & Docs:[/{Theme.SECTION}]")
         for cmd, desc in self.welcome_sections['help_docs']:
-            lines.append(f"  {cmd:<38} {desc}")
+            lines.append(f"  {cmd}{pad(cmd)} {desc}")
 
         return "\n".join(lines)
 
@@ -181,21 +191,20 @@ class TinyTorchCLI:
 
         welcome_text = f"""[{Theme.EMPHASIS}]🎓 LEARNING APPROACH[/{Theme.EMPHASIS}]
 
-Solutions are included in the notebooks. [bold]This is intentional![/bold]
+[bold]Don't import it. Build it.[/bold]
 
-The best way to learn:
-  [{Theme.SUCCESS}]1.[/{Theme.SUCCESS}] Read the module and run the code
-  [{Theme.SUCCESS}]2.[/{Theme.SUCCESS}] Study how the solutions work
-  [{Theme.SUCCESS}]3.[/{Theme.SUCCESS}] Try implementing from scratch
-     [{Theme.DIM}](reset with: tito module reset)[/{Theme.DIM}]
+The learning cycle for each module:
+  [{Theme.SUCCESS}]1.[/{Theme.SUCCESS}] Start a module: [{Theme.INFO}]tito module start 01[/{Theme.INFO}]
+  [{Theme.SUCCESS}]2.[/{Theme.SUCCESS}] Implement your code in the notebook ([{Theme.DIM}]# YOUR CODE HERE[/{Theme.DIM}])
+  [{Theme.SUCCESS}]3.[/{Theme.SUCCESS}] Test, export, and record progress: [{Theme.INFO}]tito module complete 01[/{Theme.INFO}]
 
-[{Theme.WARNING}]🐛 PRE-RELEASE:[/{Theme.WARNING}] We're looking for bugs and feedback!
-   Found something? → [{Theme.INFO}]github.com/harvard-edge/cs249r_book/discussions[/{Theme.INFO}]"""
+[{Theme.WARNING}]🐛 FEEDBACK:[/{Theme.WARNING}] Found an issue or have a suggestion?
+   Discussions → [{Theme.INFO}]github.com/harvard-edge/cs249r_book/discussions[/{Theme.INFO}]"""
 
         self.console.print()
         self.console.print(Panel(
             welcome_text,
-            title="[bold]Welcome to TinyTorch (Pre-release)[/bold]",
+            title="[bold]Welcome to TinyTorch[/bold]",
             border_style=Theme.BORDER_WELCOME,
             box=box.ROUNDED
         ))

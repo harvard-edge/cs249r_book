@@ -74,67 +74,6 @@ jobs:
           path: tinytorch/paper/paper.pdf
           retention-days: 7
 
-  build-guide:
-    name: '📚 Build Lab Guide'
-    runs-on: ubuntu-latest
-    if: inputs.update_guide
-    steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: main
-
-      - name: 📝 Setup Quarto
-        uses: quarto-dev/quarto-actions/setup@v2
-
-      - name: 📚 Setup TinyTeX
-        uses: quarto-dev/quarto-actions/setup@v2
-        with:
-          tinytex: true
-
-      - name: 🟢 Setup Node.js (for Mermaid)
-        uses: actions/setup-node@v6
-        with:
-          node-version: ${{ vars.NODE_VERSION || '20' }}
-
-      - name: 📦 Install Mermaid CLI
-        run: npm install -g @mermaid-js/mermaid-cli
-
-      - name: 📦 Install build dependencies (apt + TeX)
-        # Same one-line deps install as tinytorch-build-pdfs.yml;
-        # reads tinytorch/guide/pdf/{apt,tex}-requirements.txt.
-        working-directory: tinytorch/guide
-        run: make install-deps
-
-      - name: 📚 Render Guide PDF (make pdf → Quarto + XeLaTeX)
-        # Delegate to the Makefile so CI and local dev share one build
-        # recipe: figures target pre-converts SVG diagrams to PDF via
-        # rsvg-convert, then quarto render, then the Makefile's
-        # self-heal handles Quarto's benign post-render cleanup error.
-        #
-        # Canonical output: pdf/_build/TinyTorch-Guide.pdf
-        working-directory: tinytorch/guide
-        run: |
-          set +e
-          make pdf
-          quarto_exit=$?
-          set -e
-          if [ ! -f pdf/_build/TinyTorch-Guide.pdf ]; then
-            echo "::error::PDF missing — Quarto exit $quarto_exit and no pdf/_build/TinyTorch-Guide.pdf was produced"
-            exit 1
-          fi
-          echo "PDF produced at pdf/_build/TinyTorch-Guide.pdf ($(du -h pdf/_build/TinyTorch-Guide.pdf | cut -f1))"
-          if [ $quarto_exit -ne 0 ]; then
-            echo "::notice::Quarto exit $quarto_exit (post-render cleanup) — PDF still produced successfully"
-          fi
-
-      - name: 📤 Upload PDF Guide
-        uses: actions/upload-artifact@v7
-        with:
-          name: TinyTorch-Guide
-          path: tinytorch/guide/pdf/_build/TinyTorch-Guide.pdf
-          retention-days: 7
-
   build-book:
     name: '📘 Build Textbook'
     runs-on: ubuntu-latest
@@ -162,13 +101,14 @@ jobs:
         run: npm install -g @mermaid-js/mermaid-cli
 
       - name: 📦 Install build dependencies (apt + TeX)
-        working-directory: tinytorch/guide
+        working-directory: tinytorch/book
         run: make install-deps
 
-      - name: 📘 Render Textbook PDF (Quarto + XeLaTeX)
+      - name: 📘 Render Textbook PDF (Quarto + LuaLaTeX)
+        # `make pdf` converts the book's SVG diagrams to PDF, then renders.
         working-directory: tinytorch/book
         run: |
-          quarto render
+          make pdf
           if [ ! -f _build/TinyTorch-Book.pdf ]; then
             echo "::error::PDF missing — _build/TinyTorch-Book.pdf was not produced"
             exit 1
@@ -185,8 +125,8 @@ jobs:
   deploy-pdfs:
     name: '🚀 Deploy PDFs to gh-pages'
     runs-on: ubuntu-latest
-    needs: [build-paper, build-guide, build-book]
-    if: always() && (needs.build-paper.result == 'success' || needs.build-guide.result == 'success' || needs.build-book.result == 'success')
+    needs: [build-paper, build-book]
+    if: always() && (needs.build-paper.result == 'success' || needs.build-book.result == 'success')
     steps:
       - name: 📥 Checkout gh-pages
         uses: actions/checkout@v6
@@ -200,13 +140,6 @@ jobs:
         with:
           name: TinyTorch-Paper
           path: ./artifacts/paper
-
-      - name: 📥 Download Guide PDF
-        if: needs.build-guide.result == 'success'
-        uses: actions/download-artifact@v8
-        with:
-          name: TinyTorch-Guide
-          path: ./artifacts/guide
 
       - name: 📥 Download Book PDF
         if: needs.build-book.result == 'success'
@@ -227,11 +160,6 @@ jobs:
           if [ -f ../artifacts/paper/paper.pdf ]; then
             cp ../artifacts/paper/paper.pdf tinytorch/assets/downloads/TinyTorch-Paper.pdf
             echo "✅ Updated TinyTorch-Paper.pdf"
-          fi
-
-          if [ -f ../artifacts/guide/TinyTorch-Guide.pdf ]; then
-            cp ../artifacts/guide/TinyTorch-Guide.pdf tinytorch/assets/downloads/TinyTorch-Guide.pdf
-            echo "✅ Updated TinyTorch-Guide.pdf"
           fi
 
           if [ -f ../artifacts/book/TinyTorch-Book.pdf ]; then
@@ -256,7 +184,7 @@ jobs:
   summary:
     name: '📊 Summary'
     runs-on: ubuntu-latest
-    needs: [build-paper, build-guide, build-book, deploy-pdfs]
+    needs: [build-paper, build-book, deploy-pdfs]
     if: always()
     steps:
       - name: 📊 Generate Summary
@@ -266,6 +194,5 @@ jobs:
           echo "| PDF | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| 📘 Textbook | ${{ needs.build-book.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 📚 Lab Guide | ${{ needs.build-guide.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 📑 Research Paper | ${{ needs.build-paper.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🚀 Deploy | ${{ needs.deploy-pdfs.result }} |" >> $GITHUB_STEP_SUMMARY

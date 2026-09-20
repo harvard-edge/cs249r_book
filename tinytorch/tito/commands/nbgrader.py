@@ -347,6 +347,33 @@ class NBGraderCommand(BaseCommand):
             return 1
 
         release_tier = getattr(args, "tier", "student")
+
+        # The challenge tier strips only regions marked role="challenge"
+        # (solutions.py::solution_role_action, matching NBGRADER_RELEASE_TIERS.md).
+        # No module carries that annotation yet, so today the tier is a no-op and
+        # its output is byte-identical to --tier instructor: a complete reference
+        # solution. Refuse rather than hand an instructor a "challenge" assignment
+        # that is fully solved.
+        if release_tier == "challenge":
+            unannotated = [m for m in modules_to_process
+                           if not self._module_has_challenge_regions(m)]
+            if unannotated:
+                console.print(
+                    "[red]Refusing to stage --tier challenge: no solution region in "
+                    f"{', '.join(unannotated)} is marked role=\"challenge\".[/red]"
+                )
+                console.print(
+                    "[yellow]The challenge tier strips only role=\"challenge\" regions, "
+                    "so the output would be identical to --tier instructor, i.e. the "
+                    "full reference solution.[/yellow]"
+                )
+                console.print(
+                    "Annotate the regions students should build unaided with "
+                    '[cyan]### BEGIN SOLUTION role="challenge"[/cyan], '
+                    "or use [cyan]--tier student[/cyan]."
+                )
+                return 1
+
         console.print(f"Staging nbgrader source assignments: {', '.join(modules_to_process)}")
 
         for module_name in modules_to_process:
@@ -355,6 +382,18 @@ class NBGraderCommand(BaseCommand):
 
         console.print("[green]All requested source assignments staged successfully.[/green]")
         return 0
+
+    def _module_has_challenge_regions(self, module_name: str) -> bool:
+        """True when the module's source marks at least one role="challenge" region."""
+        source = self.project_root / "src" / module_name / f"{module_name}.py"
+        if not source.exists():
+            return False
+        text = source.read_text(encoding="utf-8", errors="replace")
+        return any(
+            solution_role(line) == "challenge"
+            for line in text.splitlines()
+            if SOLUTION_BEGIN_MARKER in line
+        )
 
     def _generate_single_module(self, module_name: str, *, release_tier: str = "student") -> bool:
         """Stage one module notebook under assignments/source."""
@@ -412,14 +451,21 @@ class NBGraderCommand(BaseCommand):
         if notebook_up_to_date:
             return notebook_file
 
-        if notebook_file.exists():
-            staged_file = self.staging_dir / module_name / f"{self._short_name(module_name)}.ipynb"
-            reason = "Student notebook exists; staging nbgrader source separately"
-            target = staged_file
-        else:
-            notebook_file.parent.mkdir(parents=True, exist_ok=True)
-            reason = "Generated notebook missing"
-            target = notebook_file
+        # Always stage into the private nbgrader cache, never into the student
+        # path. This branch used to write the raw conversion to notebook_file
+        # when it was missing, which is the normal state of a fresh clone:
+        # modules/ is gitignored, and `tito nbgrader generate` is the first
+        # command INSTRUCTOR.md tells an instructor to run. That planted the
+        # full reference at modules/<name>/<short>.ipynb, and `tito module
+        # start` only creates the notebook when it is absent
+        # (module/workflow.py), so it then opened the answer key and never
+        # re-stripped it. The docstring's "must never overwrite" guard covered
+        # the wrong case: not overwriting, but creating, was the leak.
+        staged_file = self.staging_dir / module_name / f"{self._short_name(module_name)}.ipynb"
+        reason = ("Student notebook exists; staging nbgrader source separately"
+                  if notebook_file.exists() else
+                  "Staging nbgrader source; student notebook left for `tito module start`")
+        target = staged_file
 
         target.parent.mkdir(parents=True, exist_ok=True)
         self.console.print(
@@ -555,11 +601,55 @@ class NBGraderCommand(BaseCommand):
 
     def _release(self, args: Namespace) -> int:
         if args.all:
-            return self._batch_operation("release", "generate_assignment", self.source_dir)
-        if args.assignment:
-            return self._single_operation("release", "generate_assignment", args.assignment)
-        self.console.print("[red]Must specify either --all or an assignment name[/red]")
-        return 1
+            result = self._batch_operation("release", "generate_assignment", self.source_dir)
+        elif args.assignment:
+            result = self._single_operation("release", "generate_assignment", args.assignment)
+        else:
+            self.console.print("[red]Must specify either --all or an assignment name[/red]")
+            return 1
+        if result != 0:
+            return result
+        # assignments/release/ is what students receive. Nothing checked it, and
+        # three separate paths have shipped the reference solution by accident
+        # (Binder's postBuild, --tier challenge, and generate writing the student
+        # path). Verify the artifact itself rather than trusting the pipeline.
+        return self._verify_release_has_no_solutions()
+
+    def _verify_release_has_no_solutions(self) -> int:
+        """Fail if any released notebook still contains a solution region."""
+        import json as _json
+
+        if not self.release_dir.exists():
+            return 0
+        leaked = []
+        for nb_path in sorted(self.release_dir.rglob("*.ipynb")):
+            try:
+                nb = _json.loads(nb_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            source = "\n".join(
+                "".join(cell.get("source", []))
+                for cell in nb.get("cells", [])
+            )
+            if SOLUTION_BEGIN_MARKER in source:
+                leaked.append(nb_path.relative_to(self.project_root).as_posix())
+
+        if leaked:
+            self.console.print(
+                "[red]Refusing to leave these released notebooks in place: they still "
+                "contain solution regions.[/red]"
+            )
+            for path in leaked:
+                self.console.print(f"[red]  • {path}[/red]")
+            self.console.print(
+                "[yellow]A released notebook must carry nbgrader stubs, not the "
+                "reference. Re-run `tito nbgrader generate` for these modules and "
+                "check the tier you passed.[/yellow]"
+            )
+            return 1
+
+        self.console.print("[green]Verified: no released notebook contains a solution region.[/green]")
+        return 0
 
     def _collect(self, args: Namespace) -> int:
         if args.all:
@@ -576,6 +666,7 @@ class NBGraderCommand(BaseCommand):
                 "autograde",
                 "autograde",
                 self.submitted_dir,
+                student_first=True,
                 student=args.student,
                 extra_args=extra_args,
             )
@@ -592,7 +683,8 @@ class NBGraderCommand(BaseCommand):
 
     def _feedback(self, args: Namespace) -> int:
         if args.all:
-            return self._batch_operation("feedback", "generate_feedback", self.autograded_dir, student=args.student)
+            return self._batch_operation("feedback", "generate_feedback", self.autograded_dir,
+                                         student=args.student, student_first=True)
         if args.assignment:
             return self._single_operation("feedback", "generate_feedback", args.assignment, student=args.student)
         self.console.print("[red]Must specify either --all or an assignment name[/red]")
@@ -636,13 +728,29 @@ class NBGraderCommand(BaseCommand):
         *,
         student: Optional[str] = None,
         extra_args: Optional[List[str]] = None,
+        student_first: bool = False,
     ) -> int:
-        """Perform a batch nbgrader operation."""
+        """Perform a batch nbgrader operation.
+
+        ``student_first`` describes the directory being enumerated. nbgrader's
+        layout is ``{nbgrader_step}/{student_id}/{assignment_id}`` (see
+        nbgrader.coursedir), so ``source/`` and ``release/`` list assignments
+        while ``submitted/`` and ``autograded/`` list *students*. Enumerating
+        the latter as if they were assignments fed student IDs to nbgrader as
+        assignment names.
+        """
         if not source_dir.exists():
             self.console.print(f"[red]No {action} source directory found: {source_dir.relative_to(self.project_root)}[/red]")
             return 1
 
-        assignments = sorted(d.name for d in source_dir.iterdir() if d.is_dir())
+        if student_first:
+            assignments = sorted({
+                assignment.name
+                for student_dir in source_dir.iterdir() if student_dir.is_dir()
+                for assignment in student_dir.iterdir() if assignment.is_dir()
+            })
+        else:
+            assignments = sorted(d.name for d in source_dir.iterdir() if d.is_dir())
         if not assignments:
             self.console.print(f"[red]No assignments found for {action}[/red]")
             return 1

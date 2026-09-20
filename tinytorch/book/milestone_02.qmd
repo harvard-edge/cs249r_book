@@ -1,27 +1,83 @@
-# Milestone II: Training TinyGPT and Generating Text {#sec-milestone-2}
+# Milestone II: Convolution, Attention, and Generated Text {#sec-milestone-2}
 
 ::: {.column-margin}
 ![](assets/images/diagrams/m02_framework-you-are-here.svg){width="100%" fig-alt="TinyTorch execution datapath blueprint highlighting Milestone II Language Model Generation as the active subsystem."}
 
-*Framework Blueprint: Milestone II closes the generative loop: prompting TinyGPT, shaping probability distributions, and streaming autoregressive tokens.*
+*Framework Blueprint: Milestone II runs both Part II architectures against a task and a baseline, then closes the generative loop that Part III optimizes.*
 :::
 
 
-A trained language model outputs raw next-token logit distributions, but generating coherent text requires closing the autoregressive loop: predicting the next token, appending it to the prompt, and feeding the extended sequence back into the model. However, naive generation strategies fail: greedy argmax selection produces repetitive, robotic loops, while unconstrained random sampling produces incoherent gibberish. Controllable text generation requires shaping probability distributions through temperature scaling and top-$k$ filtering.
+Part II built two architectures on the Part I engine. Convolution shares one small filter across every position of an image. Attention lets every position of a sequence decide, from the data, which other positions to read. This milestone puts each to work, measures what it bought, and then turns the transformer into a text generator.
 
-From a systems and framework perspective, Milestone II unites the entire natural language processing stack developed across Part II (tokenization, embeddings, causal self-attention, and Transformer blocks) with the Part I training engine. The runtime must orchestrate several sequential steps:
-1. **Self-supervised text modeling**: Formatting plain text corpora into shifted input-target token pairs ($x_{1:t} \to x_{2:t+1}$) and computing cross-entropy loss across all sequence positions simultaneously.
-2. **Distribution shaping and sampling**: Implementing numerically stable temperature division and top-$k$ truncation over vocabulary probability vectors in float32.
-3. **Autoregressive context management**: Managing the token generation loop, iteratively feeding expanding context prefixes through TinyGPT and streaming generated text back through the tokenizer.
+It runs in three parts.
 
-This milestone demonstrates end-to-end generative capability in TinyTorch, taking raw text, training TinyGPT from scratch, and sampling coherent language.
+1. **A convolutional network on TinyDigits.** The course's milestone 04 trains a LeNet-style network on the 8×8 digits that @sec-milestone-1's MLP learned. We compare the two networks at the same training budget and measure what convolution costs in this implementation.
+2. **Attention on structured sequence tasks.** The course's milestone 05 trains a small attention model to reverse a sequence, copy it, or pick between the two from a prefix token. Each task has exactly one right answer, so the score is exact.
+3. **Generating text with TinyGPT.** Open-ended generation has many acceptable answers. It needs the next-token objective, a sampling loop, and the temperature and top-$k$ controls that shape the loop's choices. This is the model Part III profiles, compresses, and caches.
+
+Parts one and two run with `tito milestone run 04` and `tito milestone run 05`. Part three uses @sec-transformers's `GPT`, which this book calls TinyGPT, and its training and sampling code appears in this chapter.
+
+---
+
+## Convolution on TinyDigits
 
 ::: {.column-margin}
-**Milestone Scope:**
-Milestone II integrates Modules 09 through 13 (`tinytorch/src/09_convolutions` through `tinytorch/src/13_transformers`) with the Part I engine. The convolution module from @sec-convolutions is exercised by the course's CNN milestone; this milestone uses the tokenizer, embeddings, attention, and transformer modules to train and sample a small GPT.
+**↩ Jump back:** @sec-convolutions
+*The direct loop implementation this network runs, and the im2col lowering it does not use.*
 :::
 
-![The positive-temperature generation loop. Each pass recomputes the retained token prefix, then samples from its last logit row and appends the selected ID.](assets/images/diagrams/milestone_02-diag-1.svg){#fig-milestone2-loop}
+@sec-milestone-1's `DigitMLP` flattened each 8×8 digit into 64 numbers and learned 2,410 parameters. The CNN script keeps the image an image. One `Conv2d` slides eight 3×3 filters over it, `MaxPool2d` halves each 6×6 feature map to 3×3, and a single `Linear` layer reads the 72 values that remain.
+
+{{< include _listings/milestone_02/SimpleCNN_forward.qmd >}}
+
+The flatten uses `Tensor.reshape`, so the pooled maps stay on the autograd graph and the loss can reach the filters. Wrapping `out.data` in a new `Tensor` would train the classifier and leave all eight filters at their initial values.
+
+The filters hold $8 \times 3 \times 3 + 8 = 80$ parameters and the classifier $72 \times 10 + 10 = 730$, which makes 810, a third of the MLP's 2,410. Parameters are not work, though. Every filter weight is applied at all 36 positions of its 6×6 output, so one image costs $8 \times 36 \times 9 = 2{,}592$ multiply-accumulates in the convolution and $720$ in the classifier, 3,312 in all. The MLP spends $64 \times 32 + 32 \times 10 = 2{,}368$. Weight sharing moves the budget from stored weights to reused ones.
+
+| Epochs | CNN, 810 parameters | MLP, 2,410 parameters |
+| :--- | :--- | :--- |
+| 20 | 73.0 to 75.5% | 81.0 to 82.5% |
+| 50 | 86.0 to 87.0% | 88.5 to 89.0% |
+| 100 | 89.0 to 90.5% | 90.5 to 91.0% |
+
+: Held-out accuracy on the 200 TinyDigits test images for both networks trained the same way, with SGD at learning rate 0.01 and batches of 32. Each cell is the range over five runs that differ only in batch shuffling; one test image is half a percentage point. {#tbl-m2-cnn-vs-mlp tbl-colwidths="[20,40,40]"}
+
+The course materials compare the CNN's 50-epoch result with the MLP milestone's 20-epoch result, which is how they come to announce a win for convolution. At equal budgets there is no win on these images. The MLP leads at every row of @tbl-m2-cnn-vs-mlp, and both networks approach 90 percent. An 8×8 digit has only 64 pixels, so a dense first layer can afford to connect every pixel to every hidden unit, and nothing about the input forces the network to share weights.
+
+Resolution changes that. A dense layer's weight count grows with the number of input values, while a convolutional layer's depends only on filter size and channel counts. For a 32×32 color image, 3,072 input values, the MLP's 32-unit hidden layer would need $3{,}072 \times 32 = 98{,}304$ weights. The same eight 3×3 filters over three input channels need $8 \times 3 \times 3 \times 3 = 216$. That is the constraint LeNet was designed around, and it is the regime of the milestone's optional CIFAR-10 script. On 8×8 digits the constraint does not bind yet. The parameter saving is real and the accuracy gain is not.
+
+The price shows up on the clock. On my machine one training epoch over the 1,000 training images takes 1.48 seconds for the CNN and 0.017 seconds for the MLP, about 87 times longer for 1.4 times the multiply-accumulates. Arithmetic does not explain a gap that size. @sec-convolutions's `_convolve_loops` nests seven Python loops, so each of the 2,592 multiply-accumulates in the convolution is a scalar Python operation, and the backward pass loops again. The MLP's 2,368 run inside two NumPy `matmul` calls per batch. The im2col lowering in @sec-convolutions turns the loops into one matrix multiply, and this measurement is the reason to want it.
+
+---
+
+## Attention on Structured Sequences
+
+::: {.column-margin}
+**↩ Jump back:** @sec-attention
+*Scaled dot-product attention and the multi-head projections these tasks exercise.*
+:::
+
+The course's integration script for the attention modules, `01_vaswani_attention.py`, does not train on prose. It builds an `AttentionTransformer` from the @sec-embeddings through @sec-transformers pieces: token embeddings, a learned positional table, and two Post-LN blocks with four heads, a ReLU feed-forward layer, and no causal mask, since its tasks need every position to see every other. With a 29-token vocabulary (26 letters, padding, and two task markers) and 64-dimensional embeddings, it has 104,157 parameters.
+
+It puts that model through three tests on six-letter sequences. Reversal maps `PYTHON` to `NOHTYP`. Copying maps `TENSOR` to itself. The mixed task prefixes each sequence with a marker, `[R]` or `[C]`, and the model must reverse or copy depending on which marker it sees. The first two tests share one model, trained on reversal and then on copying; the mixed test starts from fresh weights. A sequence counts as correct only if every position is. The pass thresholds are 95 percent on reversal, 95 on copying, and 90 on the mixed task, and training stops as soon as held-out accuracy crosses the threshold.
+
+The training step, quoted from the script, flattens the model's `[B, S, V]` logits to `B·S` classification rows before the loss, counts completely correct sequences beside the loss, and takes its batches from @sec-dataloader's `DataLoader`.
+
+{{< include _listings/milestone_02/train_epoch.qmd >}}
+
+| Task | Held-out sequences | Epochs to threshold | Sequence accuracy |
+| :--- | :--- | :--- | :--- |
+| Reversal | 200 | 2 | 97.0 to 99.0% |
+| Copying | 200 | 2 | 100% |
+| Mixed, by prefix | 300 | 4 | 99.0 to 99.7% |
+
+: Results of the attention milestone over six runs that differ only in batch shuffling. On my machine each epoch takes 0.13 to 0.17 seconds. {#tbl-m2-attention-tasks tbl-colwidths="[28,24,22,26]"}
+
+Two epochs is fast, and the reason is structural. Reversal and copying are fixed permutations of positions. With a learned positional table and no mask, an attention head can learn queries and keys that match output position $i$ to input position $5 - i$, or to $i$ itself, and the value vectors carry the letter across. Copying is easier still, because the residual path already carries each letter straight through. The mixed task is the real test of attention. The permutation now depends on the content of position zero, so every position must read the marker and route accordingly. Starting from fresh weights, like reversal, it needs twice as many epochs, and it is the behavior that a fixed, input-independent mixing of positions cannot express.
+
+The script builds its optimizer list from each component's `parameters()`, including the learned positional table. That table receives gradients and is updated, unlike @sec-embeddings's intentionally fixed sinusoidal table. Checking this registration boundary matters even when a score passes, because a model can learn through its other weights while an omitted component never changes.
+
+Scoring uses `np.argmax`, and here the argmax is exactly right. Reversal has one correct output, so the most probable token is the answer and sampling would only add errors. The rest of this chapter is about the opposite case: open-ended generation, where many continuations are acceptable and always taking the argmax is the first thing that goes wrong.
 
 ---
 
@@ -78,6 +134,8 @@ Here $x_t$ is the token at position $t$ and $P(x_t \mid x_1, \dots, x_{t-1})$ is
 
 Generation reuses the same forward pass with no labels. Encode the prompt into token IDs. Run the model. Take the last row of logits, the prediction for the token after the prompt. Choose a token from it. Append that token to the sequence and run the model again on the longer sequence. The loop below stops after a fixed number of tokens. Stopping on an end-of-sequence token would require reserving and training such a token, then testing for its ID in the loop; this small corpus does neither. That is the whole model of generation; what it costs per iteration is a question for the code.
 
+![The positive-temperature generation loop. Each pass recomputes the retained token prefix, then samples from its last logit row and appends the selected ID.](assets/images/diagrams/milestone_02-diag-1.svg){#fig-milestone2-loop}
+
 ![**Teacher forcing versus autoregressive text generation**: In training, teacher forcing presents the full sequence simultaneously, utilizing causal masking so position $t$ predicts target $t+1$ ($O(1)$ parallel passes). In autoregressive inference, generation proceeds iteratively token-by-token, taking the last logit row, sampling with temperature/top-$k$, and appending to the prompt prefix ($O(T)$ sequential passes).](assets/images/diagrams/milestone_02_teacher-forcing-grid.svg){#fig-teacher-forcing-grid fig-alt="Matrix grid contrasting parallel teacher forcing training with autoregressive token-by-token generation."}
 
 ### Temperature
@@ -96,7 +154,10 @@ Temperature reshapes the distribution but never removes the tail. **Top-$k$ filt
 
 $$z_i' = \begin{cases} z_i & \text{if } z_i \text{ is among the } k \text{ largest} \\ -\infty & \text{otherwise} \end{cases}$$
 
-Since $\exp(-\infty) = 0$, the discarded tokens have exactly zero probability after the softmax, and the remaining $k$ probabilities are renormalized to sum to one. With $k = 2$ on the five-token example above, the 20 percent tail vanishes. For distinct logits in exact arithmetic, temperature and top-$k$ commute. Dividing by a positive $T$ does not change which $k$ logits are largest, so applying either first gives the same distribution.
+Since $\exp(-\infty) = 0$, the discarded tokens have exactly zero probability after the softmax, and the remaining $k$ probabilities are renormalized to sum to one.[^fn-top-p-nucleus] With $k = 2$ on the five-token example above, the 20 percent tail vanishes. For distinct logits in exact arithmetic, temperature and top-$k$ commute. Dividing by a positive $T$ does not change which $k$ logits are largest, so applying either first gives the same distribution.
+
+[^fn-top-p-nucleus]: In addition to fixed-count top-$k$, production systems frequently use **nucleus sampling** (top-$p$; Holtzman et al., 2020), which dynamically retains the smallest set of tokens whose cumulative probability reaches threshold $p$ (e.g., $p=0.9$). Unlike top-$k$, top-$p$ automatically expands its candidate pool when predictions are uncertain (flat distribution) and contracts to a single token when confident (peaked distribution).
+
 
 ---
 
@@ -228,7 +289,7 @@ One seam does not fit. @sec-losses's `CrossEntropyLoss` takes a matrix of $[N, C
 
 ```python
 corpus = [
-    "TinyTorch is the xv6 of machine learning systems.",
+    "TinyTorch is an educational framework for machine learning systems.",
     "A machine learning framework is built from first principles.",
     "Tensors own NumPy arrays and track their shapes.",
     "Autograd walks the computation graph in reverse to compute gradients.",
@@ -269,23 +330,13 @@ print(generate_text(model, tokenizer, "TinyTorch is", max_new_tokens=20,
                     max_context=SEQ_LEN, rng=np.random.default_rng(0)))
 ```
 
-The one line that is new relative to @sec-milestone-1 is the reshape. A classifier hands the loss $B$ rows and $B$ labels; a language model hands it $B \cdot S$ of each. Nothing else in the loop changes, and that is the point: the engine of Part I did not know it was training a classifier, and it does not need to know it is training a language model now. The important boundary is between the model's sequence-shaped output and the loss's list of independent classification rows.
+The one line that is new relative to @sec-milestone-1 is the reshape, the same one the attention script makes. A classifier hands the loss $B$ rows and $B$ labels; a language model hands it $B \cdot S$ of each. Nothing else in the loop changes, and that is the point: the engine of Part I did not know it was training a classifier, and it does not need to know it is training a language model now. The important boundary is between the model's sequence-shaped output and the loss's list of independent classification rows.
 
 Two ways to write that reshape look the same and are not. `logits.reshape(B * S, V)` is a `Tensor` method from @sec-tensors, so the reshaped logits stay on the autograd graph and the loss reaches the weights. `Tensor(logits.data.reshape(B * S, V))` wraps the raw array in a fresh `Tensor` with no history, so `loss.backward()` finds nothing behind the loss, the optimizer moves nothing, and the loss prints the same number every epoch. I wrote the second one first. The loss sat at 5.62 for ten epochs before I noticed, and that flat line is the failure to check for when a language model refuses to learn.
 
 A useful reference loss is $\ln V$, the cross-entropy of a uniform prediction assigning every token probability $1/V$. A randomly initialized model need not predict uniformly, so its first loss need not equal this value. The printed vocabulary size uses the tokenizer's actual vocabulary, not its requested target of 320. The window builder rejects a stream too short to supply even one input/target pair.
 
 This run checks composition. A falling loss shows that the model can fit its training windows; it does not establish generalization. Five sentences provide only a small set of continuations, so generated text may largely reproduce them. There is no document-separator token: concatenating the encoded sentences teaches a transition from the end of one sentence to the start of the next. For a larger experiment, reserve separate text for evaluation and decide explicitly how document boundaries should be represented.
-
-### What the course script actually runs
-
-The course's integration script for these modules, `01_vaswani_attention.py`, does not train on prose. It builds an `AttentionTransformer` from the @sec-embeddings through @sec-transformers pieces (a Post-LN block with a ReLU feed-forward layer and no causal mask, since its tasks need every position to see every other) and puts the attention mechanism through three tests: reverse a six-letter sequence, copy it, and do either depending on a prefix token. Its pass thresholds are 95 percent sequence accuracy on reversal, 95 percent on copying, and 90 percent on the mixed task. Its training step, quoted from the script, is the same reshape this milestone just used, with the fraction of completely correct sequences counted beside the loss and @sec-dataloader's `DataLoader` handing out the batches.
-
-{{< include _listings/milestone_02/train_epoch.qmd >}}
-
-The script builds its optimizer list from each component's `parameters()`, including the learned positional table. That table can now both receive gradients and be updated, unlike @sec-embeddings's intentional fixed sinusoidal table. Checking this registration boundary matters even when a task score passes: a model can learn through its other weights while an omitted component remains unchanged.
-
-The `np.argmax` that scores each batch is worth a pause, because it is the argmax that The Problem warned against, and here it is exactly right. Reversal has one correct output, so the argmax is the answer and sampling would only add errors. Temperature and top-$k$ exist for open-ended generation, where many continuations are acceptable and the goal is to pick a good one, not the one.
 
 ---
 
@@ -385,14 +436,26 @@ A serving system often reports the delay until the first output token separately
 
 ## Summary
 
-This milestone turned the `TinyGPT` of @sec-transformers into a system that trains on plain text and writes text back. Training needs no labels beyond the text itself, because the target at every position is the next token, and one forward pass over a window of $S$ tokens yields $S$ training examples that the causal mask keeps honest. Generation is a loop that runs the model, reads the last row of logits, samples one token, and appends it. Inside that loop, temperature divides the logits to sharpen or flatten the distribution, and top-$k$ sets the tail to exactly zero; greedy decoding is the zero-temperature limit and can produce repetitive continuations. The invariant of this implementation is that each sampled token is appended as an ID and every subsequent forward pass recomputes the retained context. Its cost grows with the number of context rows; cached one-row decoding is a later implementation. @sec-profiling measures where the time goes before choosing an optimization.
+This milestone ran both Part II architectures against a task and a baseline, then turned the `TinyGPT` of @sec-transformers into a system that trains on plain text and writes text back. On 8×8 digits, convolution matched a dense network with a third of the parameters but no accuracy gain, and cost about 87 times the training time because its loops run in Python; its advantage grows with input size. Attention learned fixed permutations in two epochs and a content-dependent choice between them in four, which is the routing a fixed mixing of positions cannot do. Generation is the case with no single right answer.
+
+For text, training needs no labels beyond the text itself, because the target at every position is the next token, and one forward pass over a window of $S$ tokens yields $S$ training examples that the causal mask keeps honest. Generation is a loop that runs the model, reads the last row of logits, samples one token, and appends it. Inside that loop, temperature divides the logits to sharpen or flatten the distribution, and top-$k$ sets the tail to exactly zero; greedy decoding is the zero-temperature limit and can produce repetitive continuations. The invariant of this implementation is that each sampled token is appended as an ID and every subsequent forward pass recomputes the retained context. Its cost grows with the number of context rows; cached one-row decoding is a later implementation. @sec-profiling measures where the time goes before choosing an optimization.
 
 ---
 
+## Further reading
+
+- LeCun et al. (1998), [Gradient-based learning applied to document recognition](https://doi.org/10.1109/5.726791), *Proceedings of the IEEE*. The convolutional network the first part of this milestone scales down.
+- Vaswani et al. (2017), [Attention is all you need](https://arxiv.org/abs/1706.03762), *NeurIPS*. The architecture the attention tasks exercise.
+- Holtzman et al. (2020), [The curious case of neural text degeneration](https://arxiv.org/abs/1904.09751), *ICLR*. Why greedy decoding repeats itself and how sampling choices change generated text.
+
 ## Exercises
 
-1. Run `shaped_probs` from the worked trace at $T = 0.1$ and $T = 10$ on the same logits and confirm the two limits: the first column should be within 0.01 percent of $[100, 0, 0, 0, 0]$ and the second flatter than the $T = 1$ distribution. Continue increasing $T$ until every probability is within one percentage point of uniform. At what $T$ does token A first drop below 50 percent?
+1. Rerun @tbl-m2-cnn-vs-mlp's comparison with one change: shrink the MLP's hidden layer until its parameter count brackets the CNN's 810 (ten and eleven hidden units give 760 and 835). Predict each network's 100-epoch accuracy before training. Then compute the first-layer weights each design would need on 32×32 color input, and say at what input size you would expect the CNN to lead.
 
-2. `sample_next_token` filters by top-$k$ before scaling by temperature. Swap the order in a copy and show, on the logits from @tbl-sampling-shaping-trace with positive $T$, that both probability vectors agree within floating-point tolerance. Then explain in one sentence why the two orders could differ if `top_k` selected by probability threshold rather than by count.
+2. In the attention script, skip the positional encoding in `AttentionTransformer.forward` so the model sees letters but no positions. Predict which of the three tasks can still pass and which cannot, and justify the prediction from how self-attention treats a permutation of its inputs. Then run it.
 
-3. Modify `make_windows` to stride by `seq_len` instead of by one, so that windows do not overlap. For a stream of 1,000 tokens and `seq_len=32`, how many training windows does each version produce, and how many times does each token appear as a target under each? Compare both with sampling windows at random offsets from one stored token stream. Which scheme allocates duplicated token arrays, and how does each choose which contexts receive training?
+3. Run `shaped_probs` from the worked trace at $T = 0.1$ and $T = 10$ on the same logits and confirm the two limits: the first column should be within 0.01 percent of $[100, 0, 0, 0, 0]$ and the second flatter than the $T = 1$ distribution. Continue increasing $T$ until every probability is within one percentage point of uniform. At what $T$ does token A first drop below 50 percent?
+
+4. `sample_next_token` filters by top-$k$ before scaling by temperature. Swap the order in a copy and show, on the logits from @tbl-sampling-shaping-trace with positive $T$, that both probability vectors agree within floating-point tolerance. Then explain in one sentence why the two orders could differ if `top_k` selected by probability threshold rather than by count.
+
+5. Modify `make_windows` to stride by `seq_len` instead of by one, so that windows do not overlap. For a stream of 1,000 tokens and `seq_len=32`, how many training windows does each version produce, and how many times does each token appear as a target under each? Compare both with sampling windows at random offsets from one stored token stream. Which scheme allocates duplicated token arrays, and how does each choose which contexts receive training?

@@ -21,30 +21,30 @@ from ..base import BaseCommand
 
 BUILD_TARGETS = {
     'html': {
-        'command': ['make', 'html'],
-        'cwd': 'site',
-        'label': 'Build HTML Site',
+        'command': ['make', 'site'],
+        'cwd': 'guide',
+        'label': 'Build HTML Guide Site',
     },
     'serve': {
-        'command': ['make', 'serve'],
-        'cwd': 'site',
-        'label': 'Build & Serve Site',
+        'command': ['quarto', 'preview'],
+        'cwd': 'guide',
+        'label': 'Build & Serve Guide Site',
     },
     'pdf': {
         'command': ['make', 'pdf'],
-        'cwd': 'site',
-        'label': 'Build PDF Course Guide',
+        'cwd': 'book',
+        'label': 'Build PDF Book',
     },
     'paper': {
-        'command': ['make', 'paper'],
-        'cwd': 'site',
+        'command': ['make', 'all'],
+        'cwd': 'paper',
         'label': 'Build Research Paper',
     },
 }
 
 
 class DevBuildCommand(BaseCommand):
-    """Developer build command — wraps make targets for site/paper builds."""
+    """Developer build command — wraps make targets for guide/book/paper builds."""
 
     @property
     def name(self) -> str:
@@ -52,7 +52,7 @@ class DevBuildCommand(BaseCommand):
 
     @property
     def description(self) -> str:
-        return "Build site, PDF, or paper"
+        return "Build guide site, PDF, or paper"
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument(
@@ -73,23 +73,22 @@ class DevBuildCommand(BaseCommand):
 
         console.print(f"[cyan]🔨 {config['label']}...[/cyan]")
 
-        # `make` isn't bundled with Git Bash on Windows (unlike git/python,
-        # it has no equivalent auto-installed fallback), so this is a very
-        # reachable crash for any Windows user without WSL or a separate
-        # make install: subprocess.run raises FileNotFoundError with no
-        # indication of *why*, rather than something recognizable as
-        # "install this tool".
+        # Run the build command in the appropriate directory
         try:
             result = subprocess.run(
                 config['command'],
                 cwd=str(cwd),
             )
         except FileNotFoundError:
-            console.print("[red]❌ 'make' is not installed or not on your PATH[/red]")
-            console.print("  This command needs GNU Make to run its build targets.")
-            console.print("  Windows: install via 'choco install make', WSL, or Git Bash's own")
-            console.print("           MinGW package manager.")
-            console.print("  macOS/Linux: usually preinstalled, or 'brew install make' / 'apt install make'.")
+            tool_name = config['command'][0]
+            console.print(f"[red]❌ '{tool_name}' is not installed or not on your PATH[/red]")
+            if tool_name == 'make':
+                console.print("  This command needs GNU Make to run its build targets.")
+                console.print("  Windows: install via 'choco install make', WSL, or Git Bash's own")
+                console.print("           MinGW package manager.")
+                console.print("  macOS/Linux: usually preinstalled, or 'brew install make' / 'apt install make'.")
+            elif tool_name == 'quarto':
+                console.print("  This command needs Quarto: https://quarto.org")
             return 1
 
         return result.returncode

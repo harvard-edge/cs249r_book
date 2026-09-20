@@ -63,7 +63,7 @@ class SystemResetCommand(BaseCommand):
                 "[bold red]⚠️  SYSTEM RESET[/bold red]\n\n"
                 "This will remove:\n"
                 "  • [bold]modules/[/bold] - All student notebooks (01_tensor/, 02_activations/, etc.)\n"
-                "  • [bold]tinytorch/core/[/bold] - All exported module code\n"
+                "  • [bold]tinytorch/[/bold] - All exported module code (core, perf, olympics)\n"
                 + ("" if args.keep_progress else "  • [bold]Progress tracking[/bold] - Completion history\n") +
                 "\n"
                 "[dim]The src/ files remain untouched - you can rebuild everything with:[/dim]\n"
@@ -100,21 +100,34 @@ class SystemResetCommand(BaseCommand):
                     except Exception as e:
                         errors.append(f"modules/{item.name}: {e}")
 
-        # 2. Clear tinytorch/core/ (keep __init__.py)
-        core_dir = project_root / "tinytorch" / "core"
+        # 2. Clear exported package files (tinytorch/core/, tinytorch/perf/, tinytorch/olympics.py)
+        # Keep __init__.py files and hand-written tinytorch/extensions/
         core_cleared = 0
-        if core_dir.exists():
-            for py_file in core_dir.glob("*.py"):
-                if py_file.name != "__init__.py":
-                    try:
-                        py_file.unlink()
-                        core_cleared += 1
-                    except Exception as e:
-                        errors.append(f"tinytorch/core/{py_file.name}: {e}")
-            # Clean bytecode cache in core
-            for pycache in core_dir.glob("**/__pycache__"):
-                if pycache.is_dir():
-                    shutil.rmtree(pycache, ignore_errors=True)
+        package_cleared = 0
+        for subpkg in ["core", "perf"]:
+            subpkg_dir = project_root / "tinytorch" / subpkg
+            if subpkg_dir.exists():
+                for py_file in subpkg_dir.glob("*.py"):
+                    if py_file.name != "__init__.py":
+                        try:
+                            py_file.unlink()
+                            if subpkg == "core":
+                                core_cleared += 1
+                            package_cleared += 1
+                        except Exception as e:
+                            errors.append(f"tinytorch/{subpkg}/{py_file.name}: {e}")
+                # Clean bytecode cache
+                for pycache in subpkg_dir.glob("**/__pycache__"):
+                    if pycache.is_dir():
+                        shutil.rmtree(pycache, ignore_errors=True)
+
+        olympics_file = project_root / "tinytorch" / "olympics.py"
+        if olympics_file.exists():
+            try:
+                olympics_file.unlink()
+                package_cleared += 1
+            except Exception as e:
+                errors.append(f"tinytorch/olympics.py: {e}")
 
         # 3. Reset progress (unless --keep-progress)
         progress_reset = False
@@ -153,8 +166,8 @@ class SystemResetCommand(BaseCommand):
                 summary = []
                 if modules_cleared > 0:
                     summary.append(f"{modules_cleared} module directories")
-                if core_cleared > 0:
-                    summary.append(f"{core_cleared} core files")
+                if package_cleared > 0:
+                    summary.append(f"{package_cleared} exported package files")
                 if progress_reset:
                     summary.append("progress tracking")
 

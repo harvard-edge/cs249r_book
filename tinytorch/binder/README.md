@@ -1,117 +1,53 @@
-# Binder Environment Setup
+# Binder / Colab environment
 
-This directory contains configuration files for running TinyTorch in cloud environments via [Binder](https://mybinder.org) and [Google Colab](https://colab.research.google.com).
+**The live configuration is not in this directory.** repo2docker reads a
+repository's Binder config from the repo root, from `binder/`, or from
+`.binder/` — and this is a monorepo, so `tinytorch/binder/` is never consulted.
 
-## Files
+The files that actually build the Binder image are:
 
-- **`requirements.txt`**: Python dependencies for the Binder environment
-- **`postBuild`**: Script that runs after environment setup to install TinyTorch
+| File | Role |
+|---|---|
+| `../../binder/requirements.txt` | Python dependencies for the image |
+| `../../binder/postBuild` | `cd tinytorch`, install the package, generate student notebooks |
 
-## How It Works
+This directory used to hold a second `requirements.txt` and `postBuild`, each
+labelled "keep synchronized" with the live pair. They were not synchronized —
+the pins had drifted apart (numpy `>=1.24` vs `>=2.2.6`, rich `>=13` vs
+`>=15`, ipykernel `>=6.31` vs `>=7.2`) — and because repo2docker never read
+them, the drift was invisible. They are gone; edit the live pair instead.
 
-### Binder
+## Launch URLs
 
-When users click the "Launch Binder" button on any notebook page in the TinyTorch documentation:
-
-1. Binder reads `binder/requirements.txt` to install Python dependencies
-2. Binder runs `binder/postBuild` which:
-   - Installs the TinyTorch package (`pip install -e .`)
-   - Generates student notebooks from `src/*.py` files using Jupytext
-   - Populates `modules/` with ready-to-use Jupyter notebooks
-3. Users get a fully configured JupyterLab environment with TinyTorch and all notebooks ready to use
-
-**Note**: The `modules/` directory is gitignored because notebooks are generated from the source `.py` files. This ensures students always get notebooks that match the current code.
-
-**Binder URL Format:**
 ```
-https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main
+Binder: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main
+Colab:  https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/<path>.ipynb
 ```
 
-### Google Colab
+The module pages link to Binder with a `labpath` pointing at that module's
+notebook under `tinytorch/modules/`.
 
-Colab launch buttons automatically:
-1. Clone the repository
-2. Install dependencies from `binder/requirements.txt`
-3. Run setup commands (users may need to manually run `pip install -e .`)
+## Notebook generation
 
-**Colab URL Format:**
+`modules/` is gitignored; the notebooks are generated at image build time.
+`postBuild` generates them through `convert_py_to_notebook(..., student=True)`,
+the same path `tito module start` uses, so a Binder student gets the same
+stubbed notebook a local student gets.
+
+This matters: `postBuild` previously ran `jupytext --to notebook` on `src/`
+directly, which is the `student=False` path, and shipped the full reference
+solution in every notebook. `postBuild` now asserts after generation that no
+notebook contains an unstubbed solution region, and fails the build if one
+does.
+
+## Verifying a build
+
+Once Binder launches:
+
+```python
+import tinytorch
+print(tinytorch.__version__)
 ```
-https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/path/to/notebook.ipynb
-```
 
-## Testing
-
-To test your Binder setup:
-
-1. **Test Binder Build:**
-   ```bash
-   # Visit: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main
-   # Or use the badge:
-   [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main)
-   ```
-
-2. **Verify Installation:**
-   Once Binder launches, test in a notebook:
-   ```python
-   import tinytorch
-   print(tinytorch.__version__)
-   ```
-
-3. **Check Available Resources:**
-   ```python
-   import os
-   print("Modules:", os.listdir("modules"))
-   print("Assignments:", os.listdir("assignments"))
-   print("Milestones:", os.listdir("milestones"))
-   ```
-
-## Troubleshooting
-
-### Binder Build Fails
-
-- Check `binder/requirements.txt` for syntax errors
-- Verify `binder/postBuild` has execute permissions (`chmod +x binder/postBuild`)
-- Review Binder build logs at: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/logs%2Fbuild.log
-
-### Colab Import Errors
-
-- Ensure `binder/requirements.txt` includes all dependencies
-- Users may need to run: `!pip install -e .` in a Colab cell
-- Check that the repository is public (Colab can't access private repos)
-
-### Package Not Found
-
-- Verify `postBuild` script runs `pip install -e .` correctly
-- Check that `pyproject.toml` is in the repository root
-- Ensure all dependencies in `requirements.txt` are compatible
-
-## Deployment Environments
-
-As documented in the TinyTorch paper, three deployment environments are supported:
-
-1. **JupyterHub** (institutional server)
-   - 8-core/32GB supports ~50 students
-   - Best for classroom use
-
-2. **Google Colab** (zero installation)
-   - Best for MOOCs and self-paced learning
-   - No setup required from students
-
-3. **Local Installation** (`pip install tinytorch`)
-   - Best for self-paced learning and development
-   - Full control over environment
-
-## Keeping Dependencies Updated
-
-When updating dependencies:
-
-1. Update `requirements.txt` (root) - for local development
-2. Update `binder/requirements.txt` - for Binder/Colab
-3. Update `docs/requirements.txt` - for documentation builds
-4. Keep versions synchronized where possible
-
-## References
-
-- [Binder Documentation](https://mybinder.readthedocs.io/)
-- [Jupyter Book Launch Buttons](https://jupyterbook.org/en/stable/interactive/launchbuttons.html)
-- [Google Colab GitHub Integration](https://colab.research.google.com/github/)
+Then open any notebook under `modules/` and confirm the exercises are stubs
+(`raise NotImplementedError`), not completed implementations.

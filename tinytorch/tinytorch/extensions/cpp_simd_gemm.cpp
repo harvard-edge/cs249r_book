@@ -1,17 +1,18 @@
 /**
  * TinyTorch C++ SIMD Matrix Multiplication Kernel
  *
- * Implements cache-blocked, multi-threaded SIMD GEMM (General Matrix Multiply)
- * for CPU backends using standard C++17, OpenMP, and auto-vectorizable memory layouts.
+ * Implements cache-blocked SIMD GEMM (General Matrix Multiply) for CPUs in
+ * standard C++17. The inner loop is written so the compiler vectorizes it
+ * (AVX2 on x86, NEON on ARM); OpenMP spreads the tiles across cores when the
+ * library is built with -fopenmp, and the pragmas are ignored otherwise.
  *
  * C = A * B
  * A: [M x K], B: [K x N], C: [M x N]
  */
 
-#include <iostream>
-#include <vector>
+#include <algorithm>
+#include <cmath>
 #include <cstring>
-#include <chrono>
 
 #if defined(_OPENMP)
 #include <omp.h>
@@ -20,7 +21,7 @@
 extern "C" {
 
 /**
- * Tiled, multi-threaded GEMM kernel with zero allocation overhead.
+ * Tiled GEMM kernel; allocates nothing, writes into the caller's C buffer.
  * Designed to be called directly via Python ctypes.
  */
 void tinytorch_cpp_gemm(
@@ -83,11 +84,18 @@ void tinytorch_cpp_fused_bias_gelu(
         float cube = val * val * val;
         float inner = SQRT_2_OVER_PI * (val + COEFF * cube);
         
-        // Fast approximation of tanh(z) = (exp(2z) - 1) / (exp(2z) + 1)
-        float exp_2z = std::exp(2.0f * inner);
-        float tanh_val = (exp_2z - 1.0f) / (exp_2z + 1.0f);
+        float tanh_val = std::tanh(inner);
         Y[idx] = 0.5f * val * (1.0f + tanh_val);
     }
+}
+
+/** Threads OpenMP will use, or 1 when built without OpenMP. */
+int tinytorch_cpp_num_threads(void) {
+#if defined(_OPENMP)
+    return omp_get_max_threads();
+#else
+    return 1;
+#endif
 }
 
 } // extern "C"

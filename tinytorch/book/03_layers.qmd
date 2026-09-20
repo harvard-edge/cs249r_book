@@ -10,9 +10,9 @@
 Deep learning models are not solitary mathematical equations; they are modular compositions of stateful, parameterized building blocks. As architectures grow in depth, raw tensor math must be organized into clean modules that bundle weights, biases, and forward computation rules. Furthermore, deep networks require systematic numerical initialization to prevent signal variance from vanishing or exploding across layers, as well as distinct operational behaviors during training versus inference (such as stochastic zeroing in Dropout).
 
 From a framework and systems perspective, a **layer** represents the critical boundary between *persistent model state* and *ephemeral activations*. Trainable parameters live across iterations in persistent memory buffers, while input and output activations are temporary tensors allocated and freed during each pass. A framework must solve three architectural obligations:
-1. **State management and parameter discovery**: How to hierarchically register child parameters (`parameters()`) so optimizers can locate every trainable weight without duplicate references or memory leaks.
+1. **State management and parameter discovery**: How to hierarchically register child parameters (`parameters()`) so optimizers can locate every trainable weight exactly once.
 2. **Modular container orchestration**: How to pipeline layers sequentially (`Sequential`), automatically threading forward arguments and training mode flags through child layers.
-3. **Variance-preserving initialization**: How to initialize weight matrices (e.g., He and Xavier scaling) so that activation and gradient variances remain stable regardless of network depth.
+3. **Variance-preserving initialization**: How to scale initial weights by fan-in (LeCun's rule, which this module uses, and its He and Xavier relatives) so that activation variance neither grows nor shrinks from one layer to the next at initialization.
 
 Building upon the memory buffers of @sec-tensors and activations of @sec-activations, this chapter encapsulates stateful parameters into reusable, composable layer blocks.
 
@@ -133,11 +133,11 @@ For an activation of value 3 and dropout probability $p=0.5$, half of the random
 
 [^fn-overfitting-dropout-motive]: **Overfitting**: fitting training examples, including their noise, so closely that performance on new examples suffers. Dropout perturbs the activations during training; it can reduce reliance on particular combinations of features, but does not guarantee that a model will generalize.
 
-The correction can be placed on either side of training. One convention leaves surviving values unchanged during training and scales them down at evaluation. **Inverted dropout**, which TinyTorch implements, instead divides surviving training activations by the probability of keeping them, $1-p$. Evaluation can then return the original input:
+The correction can be placed on either side of training. One convention leaves surviving values unchanged during training and scales them down at evaluation. **Inverted dropout**, which TinyTorch implements, instead divides surviving training activations by the probability of keeping them, $1-p$. Evaluation can then return the original input without performing any scaling or array passes:
 
 $$y_{\text{train}} = \frac{x \cdot m}{1 - p}, \quad m \in \{0, 1\} \text{ with } P(m = 1) = 1 - p, \qquad y_{\text{eval}} = x.$$
 
-For $0 \leq p < 1$, the expected value of $m$ is $1 - p$, so the expected value of $y_{\text{train}}$ is exactly $x$. Training sees a noisy version of what eval sees, with the same average, and the eval path is the identity. The price is that `Dropout` must know which of the two it is doing, and that is the `training` argument it is called with.
+For $0 \leq p < 1$, the expected value of $m$ is $1 - p$, so the expected value of $y_{\text{train}}$ is exactly $x$. Training sees a noisy version of what eval sees, with the same average, and the eval path becomes an exact zero-overhead identity. The price is that `Dropout` must know which of the two it is doing, and that is the `training` argument it is called with.
 
 ::: {#chk-dropout-inference-mode .callout-checkpoint title="Checkpoint: The dropout evaluation trap"}
 
@@ -178,6 +178,15 @@ The constructor derives the initialization scale from its own width. Module 03 u
 Notice that `scale` comes from `in_features` alone. With a ReLU after every layer, LeCun's scale lets the next pre-activation variance shrink rather than hold steady, which is the gap Kaiming's gain of 2 closes. The module implements one simple default; the first exercise changes the gain and measures its effect instead of assuming that one initializer suits every network. PyTorch's `nn.Linear` stores the weight the other way around, as `(out_features, in_features)`, and uses a different default distribution; the bridge section takes up both. Notice also that the weights are created without `requires_grad`. The `training` argument controls behavior such as dropout; gradient tracking is a separate concern. Parameters initially have `requires_grad=False`. @sec-optimizers's optimizer enables it when the parameters are supplied for learning.
 
 The forward pass is two tensor operations, `matmul` and `+`, and that choice is doing quiet work. Each returns a fresh `Tensor`. Once @sec-autograd adds gradient recording to tensor operations, the same forward code can connect the result to `weight` and `bias`. The addition of `self.bias` relies on the broadcasting from @sec-tensors: the bias has shape `(out_features,)`, the product has shape `(B, out_features)`, and NumPy reads the same bias values for all $B$ rows without allocating a repeated bias matrix. The addition still allocates its output, and the Tensor constructor copies the returned array into its own storage. That forward efficiency creates an obligation for @sec-autograd. Because the bias influenced every row in the batch, the backward engine will have to sum those gradients across the batch to keep the parameter's shape.
+
+::: {.column-margin}
+**Core Invariant: Linear Contraction**\
+$$(B, D_{\text{in}}) \times (D_{\text{in}}, D_{\text{out}}) + (D_{\text{out}},) \to (B, D_{\text{out}})$$\
+*Inner dimension $D_{\text{in}}$ contracts via row-major GEMM; bias broadcasts with stride 0.*
+:::
+
+![**Linear layer dimension flow and weight layout**: In a forward linear projection, the inner dimension $D_{\text{in}}$ contracts via matrix multiplication while the batch dimension $B$ is preserved. Bias broadcasting adds $(D_{\text{out}},)$ across all rows in zero-stride memory without replication.](assets/images/diagrams/03_linear-dimension-flow.svg){#fig-linear-dimension-flow fig-alt="Block diagram illustrating tensor dimension flow: input (B, D_in) multiplies transposed weight (D_in, D_out), followed by stride-zero bias broadcast addition yielding output (B, D_out)."}
+
 
 ### Dropout
 
@@ -309,7 +318,9 @@ On return, the model still owns the same four parameter tensors with the same va
 
 PyTorch moves parameter bookkeeping into its base class. Assigning an `nn.Parameter` or a child module to an `nn.Module` attribute registers it for later traversal. `parameters()` can then discover nested parameters without a handwritten list in each layer. `train()` and `eval()` set a stored `training` flag recursively; TinyTorch instead forwards a call argument. Both designs need a path from the root model to the components whose behavior or values matter. The [Module documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.Module.html) describes that registration and mode contract.
 
-The shared interface does not imply identical weight layout or initialization. PyTorch's [Linear documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.Linear.html) specifies a weight of shape `(out_features, in_features)` and the calculation $xW^T+b$. Its default uniform bound is $1/\sqrt{D_{\text{in}}}$, giving variance $1/(3D_{\text{in}})$. TinyTorch stores `(in_features, out_features)` and uses a normal draw with variance $1/D_{\text{in}}$. Transferring weights between those conventions requires a transpose, and matching dimensions alone does not establish matching initial values.
+The shared interface does not imply identical weight layout or initialization. PyTorch's [Linear documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.Linear.html) specifies a weight of shape `(out_features, in_features)` and the calculation $xW^T+b$.[^fn-pytorch-weight-layout] Its default uniform bound is $1/\sqrt{D_{\text{in}}}$, giving variance $1/(3D_{\text{in}})$. TinyTorch stores `(in_features, out_features)` and uses a normal draw with variance $1/D_{\text{in}}$. Transferring weights between those conventions requires a transpose, and matching dimensions alone does not establish matching initial values.
+
+[^fn-pytorch-weight-layout]: PyTorch's `nn.Linear` stores weights as `(out_features, in_features)` so that low-level BLAS and cuBLAS routines (`sgemm`) can compute matrix products directly over row-major memory buffers without requiring explicit transposition of weight matrices in GPU SRAM.
 
 PyTorch's [Dropout documentation](https://docs.pytorch.org/docs/stable/generated/torch.nn.Dropout.html) specifies the same inverted scaling and evaluation identity. That mathematical contract does not depend on how a backend schedules the work. TinyTorch exposes separate NumPy steps for the random draw, comparison, scaling, and multiplication, plus Tensor allocations. A production implementation can combine those steps to reduce temporary storage and repeated passes over the arrays. The local contract remains the one we traced: preserve the input's expected value during training and pass it through at evaluation.
 
@@ -338,6 +349,12 @@ A `Linear` constructor allocates weight and optional bias once; `forward` reads 
 Those contracts are enough to reconstruct the worked path from `(1, 4)` to `(1, 3)` to `(1, 2)`, identify the 23 stored parameter values, and explain why one training output differs from evaluation. @sec-losses takes the next step. A final linear layer supplies one raw score per class; a loss function must combine those scores with the correct label into a scalar that measures the prediction error.
 
 ---
+
+## Further reading
+
+- Glorot and Bengio (2010), [Understanding the difficulty of training deep feedforward neural networks](https://proceedings.mlr.press/v9/glorot10a.html), *AISTATS*. The variance argument behind fan-in scaling and the Xavier rule.
+- He et al. (2015), [Delving deep into rectifiers](https://arxiv.org/abs/1502.01852), *ICCV*. The same argument redone for ReLU, which gives the factor of two in Kaiming initialization.
+- Srivastava et al. (2014), [Dropout: a simple way to prevent neural networks from overfitting](https://jmlr.org/papers/v15/srivastava14a.html), *JMLR*. The dropout layer and the rescaling that keeps its expected output unchanged.
 
 ## Exercises
 

@@ -6,11 +6,21 @@
 *Framework Datapath: Module 01 lays the physical 1D DRAM storage and strided coordinate foundation for the entire framework.*
 :::
 
-Every machine learning system—from the smallest training script to production infrastructure like PyTorch or JAX—is fundamentally an engine for transforming numerical arrays. Whether ingesting a batch of images, projecting token embeddings through transformer layers, or computing gradients during backpropagation, the universal medium of exchange across the framework is the **tensor**.
+Every machine learning system, from the smallest training script to production infrastructure like PyTorch or JAX, is fundamentally an engine for streaming, transforming, and storing numerical arrays. Whether ingesting a batch of images, projecting token embeddings through transformer attention heads, or computing parameter updates during backpropagation, the universal medium of exchange across the framework is the **tensor**.
 
-A **tensor** is a multidimensional array of numerical values organized along a defined sequence of coordinate axes. A single number is a scalar (a 0-dimensional tensor); an ordered list of numbers is a vector (1-dimensional); a rectangular grid is a matrix (2-dimensional); and higher-order tensors represent batches of sequence or spatial data. The tensor's **shape** is an integer tuple specifying how many entries each dimension contains—for example, $(B, S, D)$ for a batch of $B$ sequences of length $S$ with hidden dimension $D$.
+Before writing a single line of framework code, we must answer a fundamental question: **How is a tensor used in deep learning?**
 
-In deep learning mathematics, tensors appear as abstract multidimensional objects. But physical hardware—the CPU or GPU memory subsystem—has no concept of multidimensional grids. Memory is a flat, one-dimensional ribbon of sequential byte addresses in physical DRAM. A machine learning framework's first and most critical job is therefore **stratified memory management**: projecting multidimensional coordinates onto a one-dimensional address space, and executing structural operations like slicing, broadcasting, and transpositions without duplicating millions of floating-point numbers across the memory bus.
+A deep learning model is an organized dataflow pipeline where tensors fulfill three distinct operational roles (@fig-tensor-roles):
+
+1. **Input Data (Sensory Coordinates)**: How real-world phenomena enter the network. An image batch is a 4D tensor of shape $(B, C, H, W)$, with batch size $B$, color channels $C$ (such as RGB), height $H$, and width $W$. A batch of natural language text is a 3D tensor of shape $(B, S, D)$, with batch size $B$, sequence length $S$ tokens, and embedding hidden dimension $D$.
+2. **Model Parameters (Persistent Learned Knowledge)**: The weights and biases that define the network's transformations. A linear projection layer (@sec-layers) stores a 2D weight tensor of shape $(D_{\text{in}}, D_{\text{out}})$ and a 1D bias vector of shape $(D_{\text{out}},)$. A convolutional layer (@sec-convolutions) stores a 4D weight tensor of shape $(C_{\text{out}}, C_{\text{in}}, K, K)$ holding spatial filter banks.
+3. **Activations and Gradients (The Ephemeral Flow)**: As inputs propagate forward through layers, each intermediate calculation is an *activation tensor*. When the loss function (@sec-losses) evaluates prediction error, the automatic differentiation engine (@sec-autograd) traces the computational graph backward, generating a matching *gradient tensor* of identical shape for every parameter so that optimizers (@sec-optimizers) can update the weights.
+
+![The three roles of tensors in a machine learning system. Input data, model parameters, and intermediate activations/gradients all use the tensor as their common medium of exchange, projecting logical coordinate axes onto a single physical substrate: a flat 1D byte ribbon in physical DRAM.](assets/images/diagrams/01_tensor-roles.svg){#fig-tensor-roles width="100%" fig-alt="Left panel shows input data (Vision and Language tensors). Center panel shows model parameters (Linear and Conv weights). Right panel shows activations and gradients. Vertical dashed lines project down to a shared 1D DRAM byte ribbon."}
+
+A **tensor** is thus a multidimensional array of numerical values organized along a defined sequence of coordinate axes. A single number is a scalar (a 0-dimensional tensor); an ordered list of numbers is a vector (1-dimensional); a rectangular grid is a matrix (2-dimensional); and higher-order tensors represent batches of sequence or spatial data. The tensor's **shape** is an integer tuple specifying how many entries each dimension contains.
+
+In deep learning mathematics and whiteboard diagrams, tensors appear as abstract multidimensional objects. But physical hardware, the CPU or GPU memory subsystem, has no concept of multidimensional grids. Memory is a flat, one-dimensional ribbon of sequential byte addresses in physical DRAM. A machine learning framework's first and most critical job is therefore **stratified memory management**: projecting multidimensional coordinates onto a one-dimensional address space, and executing structural operations like slicing, broadcasting, and transpositions without duplicating millions of floating-point numbers across the memory bus.
 
 Take the six values `[[1, 2, 3], [4, 5, 6]]`. Adding `[10, 20, 30]` should produce `[[11, 22, 33], [14, 25, 36]]`; transposing should produce `[[1, 4], [2, 5], [3, 6]]`. The first operation changes the values. The second changes which coordinates name them. A framework must represent both computations and decide whether their results share storage with the input.
 
@@ -107,6 +117,15 @@ $$\text{index} = \text{offset} + \sum_{k=0}^{N-1} i_k \times S_k$$
 
 This equation describes an array view. We first use it to explain what NumPy can do without moving values, then follow the module's wrapper to see when TinyTorch copies those values. Shape describes the logical coordinates; strides describe their physical layout. Neither alone tells us whether another object shares the storage.
 
+::: {.column-margin}
+**Core Invariant: Flat Coordinate Mapping**\
+$$\text{index} = \text{offset} + \sum_{k=0}^{N-1} i_k S_k$$\
+*Slicing shifts base offset; transposing reorders strides; neither allocates a single byte.*
+:::
+
+![**Zero-copy slicing and stride manipulation**: Slicing advances the base memory offset pointer without allocating new memory, while strided views navigate the flat 1D byte ribbon in row-major or transposed order.](assets/images/diagrams/01_slice-offset-stride.svg){#fig-slice-offset-stride fig-alt="Left panel shows flat 1D byte ribbon with slot offsets. Bottom panels show View A with base offset 0x00 and View B with slice offset 0x0C, demonstrating zero-copy indexing."}
+
+
 ### Transposition is a swap
 
 A transpose exchanges rows and columns. In the mapping equation, that is the same as exchanging the roles of $i_0$ and $i_1$, which is the same as swapping the two shape entries and the two stride entries. The matrix with shape $(2, 3)$ and strides $(3, 1)$ becomes a view with shape $(3, 2)$ and strides $(1, 3)$ over the *same* buffer. Nothing is copied. The transposed view walks the buffer in column order because its strides tell it to.
@@ -132,6 +151,32 @@ For the forward pass, the contract is simple: compatible dimensions either agree
 ### Contiguity is a property you can check
 
 After a transpose or a broadcast, the buffer is unchanged but the view no longer walks it in plain row order. Our transposed matrix has shape $(3, 2)$ and strides $(1, 3)$, whereas row-major strides for that new shape would be $(2, 1)$. The broadcast view repeats locations because its row stride is zero. For arrays whose dimensions all exceed one, matching the formula for the array's own shape establishes C-contiguity. A dimension of length one is an exception because we never step along it; its stride does not affect the traversal. Empty arrays are another special case. NumPy's [array flags documentation](https://numpy.org/doc/stable/reference/generated/numpy.ndarray.flags.html) describes these cases, so `C_CONTIGUOUS` is the authoritative check. NumPy can read these layouts through their strides. Writes need more care: a broadcast view can map several coordinates to one location, and `np.broadcast_to` returns a read-only view. TinyTorch avoids sharing the returned tensor with its input by copying at construction. Its `contiguous()` method additionally requests row-major layout, which is a separate property from owning the buffer.
+
+### Reductions remove an axis
+
+Broadcasting adds an axis by walking it with stride zero. A reduction does the
+opposite: it collapses one, combining every entry along that axis into a single
+value. `Sum`, `Mean`, and `Max` are the three the module builds, and they share
+one parameter that decides the output's shape.
+
+For a matrix of shape $(R, C)$, `axis=0` collapses the rows and leaves one value
+per column, shape $(C,)$. `axis=1` collapses the columns and leaves one value per
+row, shape $(R,)$. `axis=None`, the default, collapses everything to a scalar.
+The axis you name is the axis that disappears.
+
+That disappearance is the source of a shape error that recurs in later chapters.
+A loss reduces a batch of predictions to one number, and the gradient flowing
+back must broadcast against the original shape. If the reduced axis is gone, the
+broadcast has nothing to align against. `keepdims=True` retains the collapsed
+axis with length one, so $(R, C)$ reduces to $(R, 1)$ rather than $(R,)$ and the
+result still broadcasts against the input. @sec-losses relies on this when it
+subtracts a per-row maximum from a matrix of logits.
+
+The arithmetic cost is linear in the entries read, since every element is touched
+once whichever axis is named. What changes is the access pattern: collapsing the
+last axis of a row-major array walks contiguous memory, while collapsing the
+first walks with a stride, reading one element per row. Same arithmetic, a
+different number of cache lines.
 
 ---
 
@@ -213,6 +258,8 @@ The naive way to give `Tensor` a `+` is to write the arithmetic inside `__add__`
 
 The constructor stores the input tensors and any parameters the operation needs, an axis for a reduction, a shape for a reshape. The `apply` classmethod is the only entry point the rest of the framework uses. It builds the operation object, unwraps every input to its NumPy array, calls `forward` on the arrays, and wraps the result in a new `Tensor`. `forward` receives arrays rather than Tensors. The final wrap goes through the constructor above, so every result from this path owns a fresh buffer. A helper turns scalars into tensors so that `x + 1` works.
 
+![The TinyTorch execution stack. High-level Python expressions dispatch through Function.apply into concrete NumPy array operations, which execute on the CPU using compiled numerical routines and linked BLAS libraries.](assets/images/diagrams/01_tensor-diag-3.svg){#fig-tensor-execution-stack width="90%" fig-alt="Four-tier vertical stack: Python program -> TinyTorch operation dispatch -> NumPy arrays and routines -> CPU execution."}
+
 {{< include _listings/01_tensors/as_tensor.qmd >}}
 
 With those two in place, the operator method on `Tensor` is one line, and the operation class is barely more.
@@ -246,6 +293,14 @@ The product needs shape `(3, 2)` from a `(2, 3)` input. `Tensor.transpose` build
 {{< include _listings/01_tensors/Permute.qmd >}}
 
 `np.transpose` implements the axis rearrangement illustrated by the model. It returns a view with the shape and stride entries swapped and the buffer untouched, and the worked trace confirms that the view shares memory with the original. Then `apply` wraps that view in a new `Tensor`, and the constructor copies. The TinyTorch result therefore has independent storage, even though the intermediate NumPy view does not. The copy is not a plain row-major one, though. For this transpose, `np.array` preserves column-major order, so the new buffer keeps strides `(4, 12)`. The returned Tensor owns its memory and is still not C-contiguous. This example does not imply that copying preserves every possible slice's exact strides.
+
+::: {#chk-ownership-vs-contiguity .callout-checkpoint title="Checkpoint: Ownership versus Contiguity"}
+
+**Independent buffer does not imply row-major layout**: When `Tensor.transpose` executes, `np.transpose` returns a view with swapped strides sharing memory with the input. TinyTorch wraps this view in a fresh `Tensor`, and its constructor copies the values into a newly allocated buffer (`Buffer B` in @fig-tensor-storage-transpose).
+
+Crucially, this copy allocates an **independent memory buffer** (`np.shares_memory(At.data, A.data) == False`), but NumPy's `np.array` constructor preserves the strided access pattern of the view. The strides of `At.data` remain `(4, 12)` in bytes, which is column-major order. The tensor owns its memory, yet `At.data.flags["C_CONTIGUOUS"]` is `False`. To arrange the physical elements sequentially in row-major order, the student must call `At.contiguous()`, producing `Buffer C`.
+
+:::
 
 The constructor has already paid for an independent buffer, but that buffer is still in column-major order. `contiguous()` answers a different request: arrange the same logical values in row-major order. Some consumers can use arbitrary strides, and matrix libraries can often accept a transpose directly; others require a particular layout. Copying for ownership and copying for layout therefore belong on separate lines of the cost ledger.
 
@@ -374,6 +429,12 @@ The distinction in @tbl-tinytorch-vs-pytorch explains why similarly named method
 Module 01 gives later code two contracts. A `Tensor` holds float32 data with a definite shape, and each operation reaches NumPy through `Function.apply`. NumPy's strides explain how transpose and broadcast views read existing storage; the wrapper explains why TinyTorch's returned tensors generally own fresh storage instead. The worked trace separates those questions with `data.strides` and `np.shares_memory`. This distinction lets us reason about a result's values, layout, and copying independently. The next step in @sec-activations uses the same operation boundary to transform each value without changing its shape.
 
 ---
+
+## Further reading
+
+- Harris et al. (2020), [Array programming with NumPy](https://doi.org/10.1038/s41586-020-2649-2), *Nature*. The design behind the strides, views, and broadcasting this chapter rests on.
+- Lawson et al. (1979), [Basic Linear Algebra Subprograms for Fortran usage](https://doi.org/10.1145/355841.355847), *ACM TOMS*. The Level 1/2/3 split that explains why matrix multiplication is the operation the whole stack is tuned around.
+- Baydin et al. (2018), [Automatic differentiation in machine learning: a survey](https://www.jmlr.org/papers/v18/17-468.html), *JMLR*. Background for @sec-autograd, including why reverse mode makes memory the binding constraint.
 
 ## Exercises
 

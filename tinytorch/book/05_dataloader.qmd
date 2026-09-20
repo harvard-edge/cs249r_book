@@ -7,12 +7,12 @@
 :::
 
 
-Training neural networks with Stochastic Gradient Descent (SGD) requires balancing gradient accuracy with computational tractability. Computing the true gradient across an entire dataset of millions of samples is computationally prohibitive and prone to trapping models in sharp local minima. Conversely, updating parameters on single samples produces high-variance, noisy gradient trajectories. Mini-batching resolves this tension: it yields stable empirical gradient estimates while random shuffling breaks autocorrelation between consecutive training steps.
+Training neural networks with Stochastic Gradient Descent (SGD) requires balancing gradient accuracy with computational tractability. Computing the true gradient across an entire dataset of millions of samples before every update is computationally prohibitive. Conversely, updating parameters on single samples produces high-variance, noisy gradient trajectories. Mini-batching resolves this tension: it yields stable empirical gradient estimates while random shuffling breaks autocorrelation between consecutive training steps.
 
-From a systems and framework perspective, the data ingestion pipeline is often the primary bottleneck of modern deep learning. Processors and accelerators spend immense time starved of operands if data loading cannot continuously saturate the memory bus. An ML framework must address three core architectural responsibilities:
+From a systems and framework perspective, the data pipeline sets a floor on step time: an accelerator that finishes its arithmetic before the next batch arrives sits idle. An ML framework must address three core architectural responsibilities:
 1. **Separation of concerns**: Decouple dataset storage and random-access sample indexing (`Dataset`) from batching, shuffling, and memory collation logic (`DataLoader`).
 2. **Memory packing and tensor collation**: Pack individual scattered samples into contiguous, row-major tensor batches $(B, \dots)$ that modern BLAS and GEMM compute kernels require for high throughput.
-3. **Epoch orchestration**: Generate deterministic random permutation arrays to ensure reproducible shuffling, and handle edge-case boundary conditions such as remainder batches (`drop_last`).
+3. **Epoch orchestration**: Draw a fresh permutation of sample indices every epoch, reproducible when the caller seeds Python's `random` module, and deliver the final partial batch when the dataset size is not a multiple of the batch size.
 
 This chapter builds TinyTorch's data loading pipeline, establishing the contiguous batch stream that feeds the forward passes of @sec-layers and powers the end-to-end training loop in @sec-training.
 
@@ -85,7 +85,9 @@ The separation in @tbl-data-pipeline-layers lets sample access and batching chan
 
 A **Dataset** is any object that can count itself and answer index lookups. It knows nothing about batches or order. That is what makes the split useful. A dataset of ten rows in memory and a dataset of ten million images on disk present the same two methods, and the loader on top of them does not change.
 
-An **epoch** is one complete pass over the dataset, every sample visited exactly once. At the start of each pass the loader writes down the indices $0, 1, \dots, N-1$ and, when `shuffle=True`, shuffles them. The shuffled list is a **permutation**, written $\pi$, of the indices. Position $k$ of the epoch visits sample $\pi(k)$, and because $\pi$ is a rearrangement rather than a redraw, every index appears exactly once. This is sampling *without replacement*. Drawing indices at random *with* replacement would visit some samples twice and others not at all in a given epoch, and the loss would be tuned to whichever samples happened to be drawn more often.
+An **epoch** is one complete pass over the dataset, every sample visited exactly once. At the start of each pass the loader writes down the indices $0, 1, \dots, N-1$ and, when `shuffle=True`, shuffles them.[^fn-fisher-yates] The shuffled list is a **permutation**, written $\pi$, of the indices. Position $k$ of the epoch visits sample $\pi(k)$, and because $\pi$ is a rearrangement rather than a redraw, every index appears exactly once. This is sampling *without replacement*. Drawing indices at random *with* replacement would visit some samples twice and others not at all in a given epoch, and the loss would be tuned to whichever samples happened to be drawn more often.
+
+[^fn-fisher-yates]: In Python's standard library, `random.shuffle` implements the Durstenfeld-Knuth-Fisher-Yates in-place shuffle algorithm. It operates in $O(N)$ time complexity and guarantees that each of the $N!$ possible permutations has equal probability $(1/N!)$ under ideal pseudo-random generator entropy.
 
 ::: {.column-margin}
 ![](assets/images/diagrams/05_dataloader-margin-permutation.svg){width="100%" fig-alt="Index permutation array being shuffled and chunked into mini-batch slices of size B."}
@@ -332,6 +334,11 @@ The reference path gives us a way to diagnose a slow loader without assuming tha
 You built the three pieces that turn a pile of samples into a stream of batches: a `Dataset` that answers `len` and index lookups, a per-epoch permutation that fixes the visiting order, and a `DataLoader` that walks the permutation in strides of $B$ and collates each stride into a tuple of contiguous batch tensors by copying samples together. A feature vector becomes a row of a $(B, D)$ tensor; an image retains its spatial and channel axes after the new batch axis. With shuffling enabled, batches come from a permutation rather than repeated independent draws. A completed epoch visits each sample once, and collation must preserve feature-label pairing. The final batch can be smaller, so consumers must use its actual sample count when combining batch means. A transform inside sample lookup can change an image on each visit while keeping its label paired. Production loaders retain these separations and add configurable sampling, worker scheduling, and memory transfers. @sec-autograd takes for granted that each training step receives an input batch and its paired targets, and asks how the gradient of the loss with respect to every parameter is computed from them.
 
 ---
+
+## Further reading
+
+- Goyal et al. (2017), [Accurate, large minibatch SGD: training ImageNet in 1 hour](https://arxiv.org/abs/1706.02677), *arXiv*. How batch size and learning rate move together, which @sec-optimizers returns to.
+- Krizhevsky, Sutskever, and Hinton (2012), [ImageNet classification with deep convolutional neural networks](https://proceedings.neurips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html), *NeurIPS*. A training pipeline in which data loading and augmentation ran alongside the model, the arrangement this chapter's separation of `Dataset` and `DataLoader` prepares for.
 
 ## Exercises
 

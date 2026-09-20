@@ -282,7 +282,7 @@ class PreflightCommand(BaseCommand):
 
         # Optional directories (generated, not in git)
         optional_dirs = [
-            ("tinytorch/", "Package directory (run 'tito export' to generate)"),
+            ("tinytorch/", "Package directory (run 'tito dev export' to generate)"),
         ]
 
         for dir_path, desc in required_dirs:

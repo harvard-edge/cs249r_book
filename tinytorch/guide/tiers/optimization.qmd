@@ -23,7 +23,7 @@ The Optimization tier teaches you how to make ML systems fast, small, and deploy
 ::: {#fig-optimization-deps}
 ![](../assets/images/svg/tiers-optimization-dependencies.svg){fig-alt="Profiling guides experiments in quantization, compression, acceleration, and memoization. Benchmarking compares their measured outcomes."}
 
-**Optimization Module Flow.** Starting from profiling, two parallel tracks: model-level (quantization, compression) and runtime (acceleration, memoization), converging at benchmarking.
+**Optimization Module Flow.** Profiling locates the bottleneck first. Quantization, compression, acceleration, and memoization are then independent candidates, and benchmarking is what decides between them.
 :::
 
 
@@ -61,7 +61,7 @@ The Optimization tier teaches you how to make ML systems fast, small, and deploy
 
 **Why it matters**: Pruning reveals which weights a model can lose while preserving accuracy. Zeroing weights in a dense array preserves its allocation and dense arithmetic; sparse storage or structural changes are needed to reduce those costs.
 
-**What you'll build**: Magnitude-based pruning, structured pruning (entire channels/layers), and fine-tuning after pruning.
+**What you'll build**: Magnitude-based pruning, structured pruning (entire channels/layers), and measuring what each technique costs in accuracy.
 
 **Systems focus**: Sparsity patterns, memory layout, retraining strategies
 
@@ -74,11 +74,11 @@ The Optimization tier teaches you how to make ML systems fast, small, and deploy
 
 **Why it matters**: Python loop overhead and memory access patterns can dominate runtime. Comparing implementations exposes these costs; gains depend on the operation, input size, and hardware.
 
-**What you'll build**: Vectorized and explicitly tiled matrix multiplication, plus grouped and staged GELU implementations. The NumPy function named `fused_gelu` still allocates intermediate arrays.
+**What you'll build**: Vectorized and explicitly tiled matrix multiplication, grouped and staged GELU implementations, and an im2col/col2im convolution lowering. The NumPy function named `fused_gelu` still allocates intermediate arrays.
 
-**Systems focus**: Cache locality, SIMD utilization, memory bandwidth optimization, loop tiling
+**Systems focus**: Cache locality, SIMD utilization, memory bandwidth optimization, loop tiling, memory layouts for convolution lowering
 
-**Impact**: Measure matrix multiplication and activation runtimes against their baselines.
+**Impact**: Measure matrix multiplication, activation runtimes, and convolution lowering speed and memory against their baselines.
 
 
 ### 18. Memoization - KV-Cache for Fast Generation
@@ -100,7 +100,7 @@ The Optimization tier teaches you how to make ML systems fast, small, and deploy
 
 **Why it matters**: "What gets measured gets managed." Benchmarking provides apples-to-apples comparisons of accuracy, speed, memory, and energy—essential for production decisions.
 
-**What you'll build**: Comprehensive benchmarking suite measuring accuracy, latency, throughput, memory, and FLOPs.
+**What you'll build**: Comprehensive benchmarking suite measuring accuracy, latency, throughput, and memory.
 
 **Systems focus**: Measurement methodology, statistical significance, performance metrics
 
@@ -118,25 +118,27 @@ The Optimization tier teaches you how to make ML systems fast, small, and deploy
 After completing the Optimization tier, you'll be able to:
 
 - **Milestone 06 (2018)**: Evaluate optimization candidates:
- - Compare rounded and pruned weights independently against the baseline
- - Distinguish modeled packed storage from actual dense bytes
- - Validate cached generation and measure its speed ratio
+   - Compare rounded and pruned weights independently against the baseline
+   - Distinguish modeled packed storage from actual dense bytes
+   - Validate cached generation and measure its speed ratio
 
 - Use measurements to reason about deployment constraints on:
- - Edge devices (Raspberry Pi, mobile phones)
- - Cloud infrastructure (cost-effective serving)
- - Real-time applications (low-latency requirements)
+   - Edge devices (Raspberry Pi, mobile phones)
+   - Cloud infrastructure (cost-effective serving)
+   - Real-time applications (low-latency requirements)
 
 
 ## Prerequisites
 
 **Required**:
-- ** Architecture Tier** (Modules 09-13) completed
+
+- **Architecture Tier** (Modules 09-13) completed
 - Understanding of CNNs and/or transformers
 - Experience training models on real datasets
 - Basic understanding of systems concepts (memory, CPU/GPU, throughput)
 
 **Helpful but not required**:
+
 - Production ML experience
 - Systems programming background
 - Understanding of hardware constraints
@@ -144,9 +146,9 @@ After completing the Optimization tier, you'll be able to:
 
 ## Time Commitment
 
-**Per module**: 4-6 hours (implementation + profiling + benchmarking)
+**Per module**: 3 to 7 hours; each module page gives its own estimate
 
-**Total tier**: ~30-40 hours for complete mastery
+**Total tier**: 25-37 hours, the sum of the per-module estimates for modules 14-19
 
 **Recommended pace**: 1 module per week (this tier is dense!)
 
@@ -162,14 +164,12 @@ Each module follows **Measure → Optimize → Validate**:
 This mirrors production ML workflows where optimization is an iterative, data-driven process.
 
 
-## Key Achievement: MLPerf Torch Olympics
+## Key Achievement: MLPerf Benchmarks
 
-**After Module 19**, you'll complete the **MLPerf Torch Olympics Milestone (2018)**:
+**After Module 19**, you'll complete the **MLPerf Benchmarks milestone (2018)**:
 
 ```bash
-cd milestones/06_2018_mlperf
-python3 01_optimization_olympics.py # Compare baseline, rounded, and pruned models
-python3 02_generation_speedup.py # Validate and time cached prefix replay
+tito milestone run 06   # compare baseline, rounded, and pruned models, then time cached generation
 ```
 
 **What makes this special**: You'll have built the entire optimization pipeline from scratch—profiling tools, quantization engine, pruning algorithms, caching systems, and benchmarking infrastructure.
@@ -199,7 +199,7 @@ Note the progression: general-purpose optimization (acceleration) comes before d
 
 ### Why This Order?
 
-The Optimization tier follows **Measure → Transform → Execute → Validate**:
+The order below spells out that cycle, **Measure → Model-Level → Runtime → Validate**:
 
 ```
 Profile (14) → Model-Level (15-16) → Runtime (17-18) → Benchmark (19)
@@ -223,6 +223,16 @@ Both tracks start from **Module 14 (Profiling)** and converge at **Module 19 (Be
 **Recommendation**: Complete modules in order (14→15→16→17→18→19) to build a complete understanding of the optimization landscape.
 
 
+## Going Further: Hardware Extensions (Optional)
+
+Everything in this tier runs on NumPy. The package also ships `tinytorch.extensions`, three optional kernels that show what Module 17's ideas look like on real hardware:
+
+- `simd_matmul` and `simd_fused_bias_gelu`: C++ kernels called through `ctypes` and compiled on first use. The matrix multiply is cache-blocked with a vectorized inner loop, and uses several cores when an OpenMP runtime is installed; `simd_build_info()` tells you whether yours is.
+- `triton_fused_gelu`: a Triton GPU kernel that fuses a bias add and GELU into one pass, for NVIDIA GPUs.
+- `mps_matmul`: a matrix multiply on the Apple GPU through PyTorch's Metal Performance Shaders backend.
+
+Each one checks for its hardware or toolchain (`has_simd_support()`, `has_triton_support()`, `has_mps_support()`) and falls back to NumPy when it is missing, so no module depends on them and nothing is graded on them. The two GPU paths need PyTorch, installed separately. The book's final chapter, *Extensions: Leaving NumPy*, walks the code and measures each one against NumPy, including where it loses.
+
 ## Real-World Impact
 
 The techniques in this tier are used by every production ML system:
@@ -242,7 +252,7 @@ After this tier, you'll understand how real ML systems achieve production perfor
 
 ```bash
 # Start the Optimization tier
-tito module start 14_profiling
+tito module start 14
 
 # Follow the measure → optimize → validate cycle
 ```
@@ -251,7 +261,7 @@ tito module start 14_profiling
 
 - **[Foundation Tier](foundation.qmd)** (Modules 01-08): Mathematical foundations
 - **[Architecture Tier](architecture.qmd)** (Modules 09-13): CNNs and transformers
-- **[ Torch Olympics](olympics.qmd)** (Module 20): Final integration challenge
+- **[ Torch Olympics](../modules/20_capstone.qmd)** (Module 20): Final integration challenge
 
 
-**[← Back to Home](../index.qmd)** | **[Milestone System](../tito/milestones.qmd)**
+**[← Back to Home](../index.qmd)** | **[Milestone System](../milestones/index.qmd)**

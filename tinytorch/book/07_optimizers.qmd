@@ -9,12 +9,12 @@
 
 Gradient descent is the engine that drives neural learning, but raw gradients alone are often insufficient to train deep models effectively. High-dimensional loss landscapes are characterized by ill-conditioned ravines, saddle points, and extreme curvature variations where gradients are steep in some directions and nearly flat in others. Plain gradient descent oscillates uncontrollably across canyon walls while making glacial progress along the valley floor toward the optimum.
 
-From a systems and framework perspective, an optimizer is an in-place stateful memory manager. While automatic differentiation (@sec-autograd) computes raw gradient vectors, the optimizer must translate those derivatives into stable parameter trajectories:
+From a systems and framework perspective, an optimizer is a manager of per-parameter state. While automatic differentiation (@sec-autograd) computes raw gradient vectors, the optimizer must translate those derivatives into stable parameter trajectories:
 1. **State buffer allocation**: Track persistent auxiliary moment buffers for each parameter. Momentum stores velocity vectors ($m_t$), while adaptive algorithms like Adam and AdamW maintain running estimates of both first and uncentered second moments ($v_t$), doubling or tripling the runtime memory footprint of model parameters.
 2. **Decoupled weight decay (AdamW)**: Separate $L_2$ regularization weight shrinkage from adaptive gradient moment scaling, preventing weights with large historical gradients from evading regularization.
-3. **In-place memory mutation**: Apply trajectory updates directly to parameter memory buffers without allocating new tensors or breaking existing references.
+3. **Stable parameter identity**: Replace each parameter's values while keeping the same `Tensor` object, so the model and the optimizer continue to refer to one shared parameter.
 
-This chapter builds TinyTorch's optimization suite—SGD with momentum, Adam, and AdamW—providing the parameter update engine that drives the unified training loop in @sec-training.
+This chapter builds TinyTorch's optimization suite (SGD with momentum, Adam, and AdamW), providing the parameter update engine that drives the unified training loop in @sec-training.
 
 ---
 
@@ -94,7 +94,9 @@ The first, $m$, tracks the direction. The second, $v$, tracks the scale. Both ar
 
 Both averages start at zero, which biases them low at first. At the very first step, $m = 0.1\, g$, a tenth of the true gradient. Adam corrects this by dividing by $1 - \beta^t$, where $t$ counts updates of this parameter from one:
 
-$$\hat{m} = \frac{m}{1 - \beta_1^t}, \qquad \hat{v} = \frac{v}{1 - \beta_2^t}.$$
+$$\hat{m} = \frac{m}{1 - \beta_1^t}, \qquad \hat{v} = \frac{v}{1 - \beta_2^t}.$$[^fn-adam-bias-correction]
+
+[^fn-adam-bias-correction]: **Derivation of bias correction**: Unrolling the recurrence $v_t = \beta_2 v_{t-1} + (1 - \beta_2) g_t^2$ starting from $v_0 = 0$ yields $v_t = (1 - \beta_2) \sum_{i=1}^t \beta_2^{t-i} g_i^2$. Taking expectations under the assumption that true second moments $\mathbb{E}[g_i^2]$ are stationary yields $\mathbb{E}[v_t] = \mathbb{E}[g^2] (1 - \beta_2) \sum_{i=1}^t \beta_2^{t-i} = \mathbb{E}[g^2] (1 - \beta_2^t)$. Dividing by $1 - \beta_2^t$ produces an exact unbiased estimator $\mathbb{E}[\hat{v}_t] = \mathbb{E}[g^2]$ even at step $t=1$.
 
 At $t = 1$ the denominator for $m$ is $1 - 0.9 = 0.1$, which restores the full gradient. As $t$ grows the denominators approach one and the correction fades. The update is then
 
@@ -129,6 +131,13 @@ For the weight above, an adaptive update of $0.1$ therefore gives $0.999-0.1=0.8
 ::: {#fig-optimizers-landscape fig-env="figure" fig-pos="htb" fig-cap="**Where decay enters the update**: SGD and Adam add decay to the gradient before updating their history. AdamW forms moments from the unmodified gradient, shrinks the old weight, and then subtracts the adaptive update." fig-alt="Three columns show SGD, Adam, and AdamW update flows. SGD adds decay before optional momentum. Adam adds decay before moment estimation. AdamW estimates moments from the gradient and separately shrinks the weight before its adaptive update."}
 ![](assets/images/diagrams/07_optimizers-diag-1.svg)
 :::
+
+
+### What a learning rate means
+
+The two families give $\eta$ different units, which is why their customary values differ by about a factor of ten. For SGD the step is $\eta g$, so a safe rate depends on the curvature of the loss. The ravine above diverged along its steep axis for any $\eta$ above $2/100$; a loss with ten times that curvature would need a rate ten times smaller. There is no universal SGD rate, only a rate for a given loss. For Adam the normalized step $\hat m / (\sqrt{\hat v} + \epsilon)$ has magnitude close to one when a coordinate's gradients agree in sign and less when they do not, so $\eta$ approximately bounds how far any parameter moves in one step, whatever the scale of its gradient (Kingma and Ba, 2015). That is why an Adam rate carries between models more readily than an SGD rate. TinyTorch's defaults follow the usual convention, $0.01$ for SGD and $0.001$ for Adam and AdamW, and the course milestones use those values: SGD at 0.01 for the digit networks of @sec-milestone-1 and @sec-milestone-2, and Adam at 0.001 for the attention tasks.
+
+The batch size moves the rate as well. Averaging $B$ independent per-example gradients divides the variance of the estimate by $B$, so a larger batch gives a more reliable direction and can support a larger step. Goyal and colleagues (2017) turned this into a rule for SGD: when the batch grows by a factor of $k$, multiply the learning rate by $k$, and ramp the rate up over the first few epochs. With it they trained ResNet-50 on ImageNet at batches of up to 8,192 images without losing accuracy, and accuracy fell at larger batches. The rule is an empirical regularity for a family of models, not a law, and it is the reason a learning rate reported without its batch size is incomplete.
 
 ---
 
@@ -340,6 +349,13 @@ When comparing configurations, record where decay enters the rule and which arra
 An optimizer reads each parameter's gradient and changes the array held by that same Tensor. SGD may retain a velocity; Adam and AdamW retain two moments and an update count for each parameter tensor. Adam couples decay to those moments, while AdamW shrinks the old weight separately before the adaptive subtraction. `grad=None` skips the entire parameter update, whereas `zero_grad()` clears gradients without clearing history. These are the contracts the training loop can rely on. @Sec-training will arrange forward computation, gradient clearing, backward, and stepping, then preserve the optimizer's history when a run is saved and resumed.
 
 ---
+
+## Further reading
+
+- Kingma and Ba (2015), [Adam: a method for stochastic optimization](https://arxiv.org/abs/1412.6980), *ICLR*. The moment estimates, the bias correction, and the bound on the effective step used above.
+- Loshchilov and Hutter (2019), [Decoupled weight decay regularization](https://arxiv.org/abs/1711.05101), *ICLR*. Why decay folded into Adam's gradient is not the same as decay applied to the weights, the difference AdamW makes.
+- Sutskever et al. (2013), [On the importance of initialization and momentum in deep learning](https://proceedings.mlr.press/v28/sutskever13.html), *ICML*. Momentum's role in training deep networks, with the velocity form this chapter implements.
+- Goyal et al. (2017), [Accurate, large minibatch SGD: training ImageNet in 1 hour](https://arxiv.org/abs/1706.02677), *arXiv*. The linear scaling rule and warmup discussed with learning rates above.
 
 ## Exercises
 

@@ -42,7 +42,7 @@ DATASET_INFO = {
         'download_size_mb': 12,
         'extracted_size_mb': 55,
         'description': '70,000 handwritten digits (28x28 grayscale)',
-        'url': 'http://yann.lecun.com/exdb/mnist/'
+        'url': 'https://ossci-datasets.s3.amazonaws.com/mnist/'
     }
 }
 
@@ -62,7 +62,8 @@ class DatasetManager:
         else:
             self.data_dir = Path(data_dir)
 
-        self.auto_confirm = auto_confirm
+        # TINYTORCH_AUTO_DOWNLOAD=1 answers yes for runs without a terminal (CI, scripts).
+        self.auto_confirm = auto_confirm or os.environ.get("TINYTORCH_AUTO_DOWNLOAD") == "1"
 
         # Create data directory if it doesn't exist
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -135,7 +136,13 @@ class DatasetManager:
             response = input(f"  Download {info['name']}? [Y/n]: ").strip().lower()
             print("=" * 60)
             return response in ('', 'y', 'yes')
-        except (EOFError, KeyboardInterrupt):
+        except EOFError:
+            # No terminal to answer (piped or scripted run): don't download silently.
+            print("\n  No answer (input is not a terminal), so nothing was downloaded.")
+            print("  Run it in a terminal, or set TINYTORCH_AUTO_DOWNLOAD=1 to download without asking.")
+            print("=" * 60)
+            return False
+        except KeyboardInterrupt:
             print("\n  Download cancelled.")
             print("=" * 60)
             return False
@@ -166,7 +173,7 @@ class DatasetManager:
         mnist_dir.mkdir(exist_ok=True)
 
         # MNIST URLs
-        base_url = "http://yann.lecun.com/exdb/mnist/"
+        base_url = "https://ossci-datasets.s3.amazonaws.com/mnist/"
         files = [
             "train-images-idx3-ubyte.gz",
             "train-labels-idx1-ubyte.gz",

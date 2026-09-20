@@ -7,14 +7,14 @@
 :::
 
 
-Standard neural network training uses 32-bit floating-point (FP32) arithmetic, but serving large models on edge devices and production servers is heavily constrained by memory capacity, memory bandwidth, and power consumption. Post-training quantization (PTQ) addresses these limits by converting 32-bit floating-point weights and activations into compact 8-bit integers (INT8), slashing storage requirements by $4\times$ and drastically accelerating inference while preserving accuracy.
+Standard neural network training uses 32-bit floating-point (FP32) arithmetic, but serving large models on edge devices and production servers is heavily constrained by memory capacity, memory bandwidth, and power consumption. Post-training quantization (PTQ) addresses these limits by representing 32-bit floating-point weights and activations as 8-bit integers (INT8). Packed one byte per value, INT8 weights need a quarter of the FP32 storage. Whether they also run faster depends on hardware with integer matrix units, and whether accuracy survives depends on how well the integer grid covers each tensor's values.
 
-From a systems and framework perspective, quantization requires mapping continuous real numbers onto discrete integer grids through rigorous affine transformations:
+From a systems and framework perspective, quantization maps continuous real numbers onto discrete integer grids through affine transformations:
 1. **Affine quantization arithmetic**: Deriving scale ($S$) and zero-point ($Z$) parameters ($q = \text{round}(x/S) + Z$) across symmetric and asymmetric mapping schemes.
-2. **Integer GEMM execution**: Executing matrix multiplications using fast integer arithmetic while accumulating intermediate products in 32-bit integer accumulators to prevent overflow.
-3. **Dequantization and precision calibration**: Scaling accumulated integers back into floating-point representation, balancing numerical dynamic range against quantization noise.
+2. **Integer accumulation**: How an integer matrix multiply widens 8-bit products into 32-bit accumulators to prevent overflow, shown in a book-only comparison against TinyTorch's float path.
+3. **Dequantization and calibration**: Scaling integers back to floating point, choosing each tensor's range from sample data, and measuring the error against the FP32 result.
 
-This chapter constructs TinyTorch's quantization engine, demonstrating how to compress weights to INT8 and measure the resulting storage savings and numerical fidelity.
+This chapter constructs TinyTorch's quantization engine. It simulates INT8 by keeping integer codes in float32 arrays and multiplying in float32, so it measures numerical fidelity and models the packed storage a real INT8 runtime would use, without realizing that saving itself.
 
 ::: {#fig-quantization-geometry fig-env="figure" fig-pos="htb" fig-cap="**Quantization and storage**: A scale and zero point map floats to integer codes and reconstruct rounded values. Packed storage uses one byte per code; TinyTorch wraps codes in float32 arrays." fig-alt="Three boxes connect floating-point values, affine integer codes from minus 128 through 127, and reconstructed floats. Separate boxes distinguish packed storage from TinyTorch float32 execution."}
 ![](assets/images/diagrams/15_quantization-diag-1.svg)
@@ -85,7 +85,13 @@ $$|x - \hat{x}| \le \frac{S}{2} = \frac{x_{\max} - x_{\min}}{510}$$
 
 The bound describes individual values inside the observed range, with an additional floating-point rounding error in the implementation. It does not bound the model's prediction error, nor does it apply to later inputs outside a frozen calibration range. Within its scope, it is about $0.2\%$ of the zero-inclusive range, regardless of the tensor's size. The bound is also the warning. It is relative to the range, not to $x$. A weight of $0.001$ in a tensor whose values span $[-1, 1]$ is rounded to the grid step $S \approx 0.0078$, and comes back as $0$. Small values in a tensor with one large outlier are where quantization loses information.
 
-This mapping is called **asymmetric** because the grid does not have to be centered on zero; it is the form Module 15 uses. The **symmetric** special case takes $x_{\min} = -x_{\max}$, so that $Z = 0$ and the formulas lose a term; it wastes codes when a tensor is all positive, which is why the general form earns its extra integer. A tensor of all one value has no range at all, and the module handles it with a separate branch that encodes every element as code $0$ and lets $Z$ and $S$ carry the constant.
+A signal-to-noise ratio turns the per-value bound into one number for the whole tensor. If rounding errors are spread evenly across $[-S/2, S/2]$, their root-mean-square value is $S/\sqrt{12}$. A signal that fills the range uniformly has root-mean-square value $(x_{\max} - x_{\min})/\sqrt{12}$, and the ratio of the two, expressed in decibels, is
+
+$$\text{SNR} = 20 \log_{10} \frac{x_{\max} - x_{\min}}{S} = 20 \log_{10} \left(2^b - 1\right) \approx 6.02\,b \ \text{dB}$$
+
+for a grid of $b$ bits. Eight bits give $20 \log_{10} 255 \approx 48.1$ dB, and each added bit adds about 6 dB, because it doubles the number of steps. The figure is a ceiling, not a prediction. Real weight tensors cluster near zero rather than filling their range, so their signal power falls below the uniform case while the noise, which is set by the step, does not; one outlier that stretches the range lowers the ratio for every other value. How much ratio a given model can tolerate is a property of that model, and only an accuracy measurement settles it.
+
+This mapping is called **asymmetric** because the grid does not have to be centered on zero; it is the form Module 15 uses. The **symmetric** special case takes $x_{\min} = -x_{\max}$, so that $Z = 0$ and the formulas lose a term; it wastes codes when a tensor is all positive, which is why the general form earns its extra integer.[^fn-symmetric-hardware-reduction] A tensor of all one value has no range at all, and the module handles it with a separate branch that encodes every element as code $0$ and lets $Z$ and $S$ carry the constant.
 
 ![**Affine quantization grid and zero-point alignment**: Continuous float32 values across dynamic range $[x_{\min}, x_{\max}]$ are discretized into 256 uniform integer bins ($q \in [-128, 127]$). Scale $S$ specifies step size, zero-point $Z$ aligns real value $0.0$ to an exact integer code, and clamping prevents out-of-range overflow, bounding reconstruction error to $\le S/2$.](assets/images/diagrams/15_affine-quantization-grid.svg){#fig-affine-quantization-grid fig-alt="Diagram showing continuous float32 dynamic range mapped into 256 discrete int8 bins with scale S, zero point Z, and reconstruction error bounds."}
 
@@ -96,6 +102,15 @@ A shared scale also explains how a kernel could multiply the integer codes. Tiny
 $$\hat{y} = \hat{x} \hat{W}^{T} = (S_x S_W)\,\big((Q_x - Z_x)(Q_W - Z_W)^{T}\big)$$
 
 For this equation, the weight matrix has one output per row; the source Linear stores its transpose with shape `[in_features, out_features]`. Everything inside the last parentheses is integer arithmetic: subtract each zero point from its codes, which is still an integer, then take the dot products. The two scales are ordinary floats, and their product can rescale each accumulated output once. A single scale per tensor makes this factorization possible. The stored codes fit in a byte, but subtracting zero points and summing products require wider integers. The book-only integer function below will make those intermediate types explicit.
+
+::: {.column-margin}
+**Core Invariant: Symmetric Zero-Point Cancellation**\
+$$Z_W = 0 \implies (Q_x - Z_x) Q_W^T = Q_x Q_W^T - Z_x \sum Q_W$$\
+*Weight symmetry eliminates online activation zero-point subtraction during integer matrix multiplication.*
+:::
+
+![**Symmetric versus asymmetric quantization grids**: Asymmetric quantization maps arbitrary $[x_{\min}, x_{\max}]$ to $[-128, 127]$ with an integer offset $Z$. Symmetric quantization centers the grid on zero ($Z_W = 0, \pm M$), sacrificing minor dynamic range on skewed distributions to eliminate runtime zero-point subtraction overhead on hardware DP4A / Tensor Cores.](assets/images/diagrams/15_zero-point-centering.svg){#fig-zero-point-centering fig-alt="Number line diagram comparing asymmetric quantization with non-zero Z against symmetric absmax quantization centered at zero."}
+
 
 Everything in this chapter happens after training, with no gradient in sight. It is **post-training quantization**, a transformation of a finished model. Weight-only conversion needs the weights; static activation quantization also needs representative calibration inputs.
 
@@ -364,7 +379,7 @@ The storage and execution changes remain the important contrast with TinyTorch. 
 
 An integer dot product is only one deployment design. A weight-only kernel can keep activations in floating point and decode small groups of packed weights immediately before using them. The important distinction from TinyTorch is where expansion happens. Expanding a full weight matrix into a separate float32 array creates a large temporary buffer; consuming small decoded groups within the multiply can avoid that buffer. The benefit still depends on the kernel and workload, and cannot be inferred from the code width alone.
 
-A finer grouping also changes accuracy. Giving each output channel or small weight group its own scale prevents one outlier from coarsening the grid for the entire tensor, at the cost of more metadata and rescaling work. With 4-bit codes there are only 16 levels, so this choice becomes more consequential. Training with rounding simulated in the forward pass is another option, called quantization-aware training.[^fn-ste-qat] These are extensions to the grid mechanism, not paths implemented by Module 15.
+A finer grouping also changes accuracy. Giving each output channel or small weight group its own scale prevents one outlier from coarsening the grid for the entire tensor,[^fn-llm-outlier-channels] at the cost of more metadata and rescaling work. With 4-bit codes there are only 16 levels, so this choice becomes more consequential. Training with rounding simulated in the forward pass is another option, called quantization-aware training.[^fn-ste-qat] These are extensions to the grid mechanism, not paths implemented by Module 15.
 
 ::: {#psp-quantization-hardware-tensor-cores .callout-production title="Production bridge: INT8 / FP8 Tensor Cores and CUTLASS GEMM"}
 TinyTorch simulates affine quantization by mapping floats to integer steps and dequantizing back to float32 before matrix multiplication. In production acceleration runtimes (e.g., NVIDIA TensorRT, vLLM, and CUTLASS):
@@ -387,6 +402,8 @@ The comparison in @tbl-quantization-production-comparison keeps two contracts se
 Three things are worth looking for in your own work. When a quantized model loses accuracy, find the tensor whose largest magnitude is far from its typical magnitude, because that is where the grid is too coarse, and ask whether per-row or per-group scales fix it before reaching for training. When a quantized model is not faster, check whether the kernel actually consumes integers or dequantizes first, and whether the workload was memory-bound to begin with; smaller stored weights alone do not establish a speedup for a multiply limited by arithmetic. Check how far inference activations wander outside the calibration range before freezing that grid.
 
 [^fn-ste-qat]: **Straight-through estimator**: the rule that lets gradients flow through a rounding step during training. Rounding has zero derivative almost everywhere, so backpropagation would stop at it; the estimator pretends the derivative is one, so the optimizer can update the underlying floating-point weights despite the discrete forward operation. The backward rule is an approximation to guide training, not the derivative of rounding.
+[^fn-symmetric-hardware-reduction]: **Hardware efficiency of symmetric quantization**: In symmetric quantization, $Z = 0$, which halves the algebraic expansion of integer matrix multiplication. Expanding the general asymmetric product yields $(Q_x - Z_x)(Q_W - Z_W)^T = Q_x Q_W^T - Z_x \sum Q_W^T - Z_W \sum Q_x^T + Z_x Z_W K$. For symmetric weights ($Z_W = 0$), two terms vanish entirely: $Q_x Q_W^T - Z_x \sum Q_W^T$. Because weights are static during inference, the column reduction vector $\sum Q_W^T$ can be precomputed once at compilation time, leaving hardware tensor cores to execute a pure fused multiply-add on raw integer codes with a single runtime vector correction.
+[^fn-llm-outlier-channels]: **Outlier features in large language models**: When Transformer parameter counts scale past 6.7B, emergent outlier features appear in a small subset ($<0.1\%$) of hidden state channels, exhibiting magnitudes $20\times$ to $100\times$ larger than normal activations across all tokens (Dettmers et al., 2022, *LLM.int8()*). Per-tensor or per-token quantization causes severe perplexity degradation because scaling for the outlier compresses all other channels into zero or one bit of resolution. Production runtimes resolve this via mixed-precision decomposition: outlier coordinate channels are routed to standard FP16 GEMM, while the remaining $>99.9\%$ are safely executed on INT8 tensor cores.
 
 ---
 
@@ -397,6 +414,12 @@ Three things are worth looking for in your own work. When a quantized model lose
 `QuantizedLinear` snapshots weight and bias codes at construction. Calibration changes only its input-grid state; forward reconstructs the operands, multiplies in float32, and returns a new output. `quantize_model` replaces layers in container order, using inference-mode activations from the already converted prefix to calibrate each replacement. The separate integer trace explains how scales can be factored out of dot products, but it is not the module's execution path. Packed code bytes and metadata are modeled; the Tensor arrays still occupy float32 storage. @sec-compression changes the other factor in the storage calculation, the number of entries a layer needs, rather than the precision of each entry.
 
 ---
+
+## Further reading
+
+- Jacob et al. (2018), [Quantization and training of neural networks for efficient integer-arithmetic-only inference](https://arxiv.org/abs/1712.05877), *CVPR*. The affine scheme with a scale and zero point that this chapter implements, and the integer arithmetic it enables.
+- Nagel et al. (2021), [A white paper on neural network quantization](https://arxiv.org/abs/2106.08295), *arXiv*. Post-training quantization in practice, including per-channel scales and outliers.
+- Gholami et al. (2021), [A survey of quantization methods for efficient neural network inference](https://arxiv.org/abs/2103.13630), *arXiv*. The wider design space, from uniform grids to mixed precision.
 
 ## Exercises
 

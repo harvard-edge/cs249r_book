@@ -13,31 +13,36 @@
 # ---
 
 # %% [markdown]
-"""
+r"""
 # Module 12: Attention - Learning to Focus
 
-Welcome to Module 12! You're about to build the attention mechanism at the heart of GPT, BERT, and modern transformers.
+Welcome to Module 12! You're about to build the multi-head attention mechanism that forms the computational core of GPT, BERT, Llama, and modern transformer architectures.
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Tensor, activations, layers, losses, autograd, optimizers, training, dataloaders, spatial layers, tokenization, and embeddings
-**You'll Build**: Scaled dot-product attention and multi-head attention mechanisms
-**You'll Enable**: Transformer architectures, GPT-style language models, and sequence-to-sequence processing
+**You've Built**: Complete neural network stack including autograd, optimizers, data loaders, 2D convolutions, subword BPE tokenization, and vector embeddings (`Tensor`, `Function`, `Linear`, `Conv2d`, `BPETokenizer`, `EmbeddingLayer`).
+**You'll Build**: Scaled dot-product attention (`scaled_dot_product_attention`), causal autoregressive masking, and parallel subspace routing (`MultiHeadAttention`).
+**You'll Enable**: Complete Transformer Blocks and causal language models (`13_transformers`), KV caching (`18_memoization`), and the Capstone model (`20_capstone`).
 
-**Connection Map**:
-```
-Embeddings → Attention → Transformers → Language Models
-(representations) (focus mechanism) (complete architecture) (text generation)
-```
+<div align="center">
+  <img src="attention_blueprint.svg" alt="TinyTorch Architecture Blueprint: Module 12 Attention" width="380px">
+</div>
+
+### Architectural Roadmap
+
+| Stage | Subsystem | Primitives & Capabilities | Status |
+| :--- | :--- | :--- | :--- |
+| **Modules 01–08** | Foundation & Training | `Tensor`, `Function`, `Linear`, `SGD`, `Adam`, `Trainer` | Completed |
+| **Modules 09–11** | Spatial & Language Representations | `Conv2d`, `BPETokenizer`, `Embedding`, `PositionalEncoding` | Completed |
+| **Module 12** | **Self-Attention & Multi-Head** | `scaled_dot_product_attention`, `MultiHeadAttention` | **Active Subsystem** |
+| **Modules 13–20** | Transformers & Acceleration | `TransformerBlock`, `create_causal_mask`, `KVCache`, `TinyGPT` | Downstream Consumers |
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
-1. Implement scaled dot-product attention with explicit O(n²) complexity
-2. Build multi-head attention for parallel processing streams
-3. Understand attention weight computation and interpretation
-4. Experience attention's quadratic memory scaling firsthand
-5. Test attention mechanisms with masking and sequence processing
-
-Let's get started!
+1. **Implement scaled dot-product attention** from mathematical first principles, exposing the quadratic $\mathcal{O}(S^2)$ memory and compute bottleneck.
+2. **Derive score normalization variance scaling ($1/\sqrt{d_k}$)** to prevent dot product magnitudes from saturating softmax gradients.
+3. **Apply a causal mask** by replacing future logits with $-\infty$ before the softmax, enforcing autoregressive temporal ordering without information leakage.
+4. **Implement multi-head coordinate origami** (`_split_heads` and `_merge_heads`), transforming 3D tensors $(B, S, D)$ into 4D subspace planes $(B, H, S, d_k)$ for batched GEMM execution.
+5. **Benchmark quadratic memory and FLOP scaling** across sequence lengths and quantify the activation memory footprint during backward pass.
 
 ## 📦 Where This Code Lives in the Final Package
 
@@ -50,42 +55,33 @@ from tinytorch.core.attention import scaled_dot_product_attention, MultiHeadAtte
 ```
 
 **Why this matters:**
-- **Learning:** Complete attention system in one focused module for deep understanding
-- **Production:** Proper organization like PyTorch's torch.nn.functional and torch.nn with attention operations
-- **Consistency:** All attention computations and multi-head mechanics in core.attention
-- **Integration:** Works seamlessly with embeddings for complete sequence processing pipelines
+- **Learning:** Unveils the inner mechanics of attention as soft dynamic routing across queries, keys, and values.
+- **Production:** Mirrors PyTorch's `torch.nn.MultiheadAttention` and `torch.nn.functional.scaled_dot_product_attention`. One convention is inverted, so port masks with care. TinyTorch marks the positions to keep (1 = attend, 0 = block), while PyTorch's boolean `attn_mask` marks the positions to block.
+- **Consistency:** Unifies tensor transformations and attention projections in `tinytorch.core.attention`.
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📋 Module Dependencies
 
-**Prerequisites**: Modules 01-11 must be complete
-- Module 01: Tensor (core data structure)
-- Module 02: Activations (Softmax for attention weights)
-- Module 03: Layers (Linear for projections)
+| Dependency | Origin | Purpose in Module 12 | Systems Invariant |
+| :--- | :--- | :--- | :--- |
+| `Tensor` | Module 01 (`core.tensor`) | Multi-dimensional array container supporting strided matmul and transposition | Manages contiguous memory buffers and backward computational graph |
+| `Softmax` | Module 02 (`core.activations`) | Normalizes raw attention scores into probability distributions | Numerically stable along last dimension `dim=-1` |
+| `Linear` | Module 03 (`core.layers`) | Parameter projections $W_Q, W_K, W_V$ and output projection $W_O$ | Dense matrix multiplication $(B, S, D) \times (D, D)$ |
+| `EmbeddingLayer` | Module 11 (`core.embeddings`) | Upstream provider of position-aware continuous vectors | Produces input tensor $X \in \mathbb{R}^{B \times S \times D}$ |
+| `numpy` | External | Fast array operations, upper-triangular masking, and benchmarking | Provides `np.tril` and `np.broadcast_to` for causal masks |
 
-**External Dependencies**:
-- `numpy` (for array operations and numerical computing)
-- `math` (for square root in scaling)
-- `time` (for performance analysis)
-- `typing` (for type hints)
+### Attention Information Routing Pipeline
 
-**TinyTorch Dependencies**:
-- `tinytorch.core.tensor.Tensor` - Core tensor operations
-- `tinytorch.core.layers.Linear` - For Q, K, V projections
-- `tinytorch.core.activations.Softmax` - For attention weight normalization
-
-**Dependency Flow**:
-```
-Tensor → Activations → Layers → Attention
-   ↓                                  ↓
-Foundation for              Core mechanism for
-all operations             transformer models
-```
-
-Students completing this module will have built the attention mechanism
-that powers GPT, BERT, and all modern transformer architectures.
+| Step | Operation | Mathematical Formula | Tensor Shape & Semantics |
+| :--- | :--- | :--- | :--- |
+| **1. Linear Projections**| Query, Key, Value mappings | $\mathbf{Q} = \mathbf{X}\mathbf{W}_Q, \; \mathbf{K} = \mathbf{X}\mathbf{W}_K, \; \mathbf{V} = \mathbf{X}\mathbf{W}_V$ | $(B, S, D) \rightarrow (B, H, S, d_k)$ |
+| **2. Scaled Dot-Product**| Raw attention scores | $\mathbf{S} = \frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}}$ | $(B, H, S, S)$ query-key correlation |
+| **3. Causal Masking** | Autoregressive masking | $\mathbf{S}_{\text{masked}} = \mathbf{S} + \mathbf{M}$ (upper triangle $= -\infty$) | Prevents attending to future tokens |
+| **4. Probability Weights**| Softmax normalizer | $\mathbf{A} = \text{softmax}(\mathbf{S}_{\text{masked}}, \text{dim}=-1)$ | Non-negative attention distribution |
+| **5. Value Mixture** | Context aggregation | $\mathbf{Y} = \mathbf{A}\mathbf{V}$ | Weighted sum of value vectors |
+| **6. Output Projection** | Feature projection | $\text{Output} = \mathbf{Y}\mathbf{W}_O$ | Restores model dimension $(B, S, D)$ |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
@@ -105,142 +101,87 @@ from tinytorch.core.activations import Softmax
 MASK_VALUE = float("-inf")  # Hard exclusion: exp(-inf) is exactly zero
 
 # %% [markdown]
-"""
+r"""
 ## 💡 Introduction: What is Attention?
 
-Attention is the mechanism that allows models to focus on relevant parts of the input when processing sequences. Think of it as a search engine inside your neural network - given a query, attention finds the most relevant keys and retrieves their associated values.
+Attention is the foundational routing mechanism that enables neural networks to dynamically focus on relevant coordinates of an input sequence. Instead of compressing an entire sequence into a single fixed-size recurrent bottleneck vector, attention allows every token representation to directly query and gather information from all other tokens in the sequence.
 
-### The Attention Intuition
+<div align="center">
+  <img src="attention_routing.svg" alt="Attention as Dynamic Soft Information Routing" width="700px">
+</div>
 
-When you read "The cat sat on the ___", your brain automatically focuses on "cat" and "sat" to predict "mat". This selective focus is exactly what attention mechanisms provide to neural networks.
+### Comparing Sequence Processing Paradigms
 
-Imagine attention as a library research system:
-- **Query (Q)**: "I need information about machine learning"
-- **Keys (K)**: Index cards describing each book's content
-- **Values (V)**: The actual books on the shelves
-- **Attention Process**: Find books whose descriptions match your query, then retrieve those books
+| Architecture | Information Routing | Path Length Between Tokens | Parallel Work Available | Memory Footprint |
+| :--- | :--- | :--- | :--- | :--- |
+| **Recurrent (RNN/LSTM)** | Sequential hidden state passing | $\mathcal{O}(S)$ steps | $\mathcal{O}(1)$ (strictly sequential) | $\mathcal{O}(S \cdot d_{\text{model}})$ |
+| **Convolutional (Conv1D)** | Local receptive field sliding | $\mathcal{O}(S / K)$ layers | $\mathcal{O}(S)$ parallel | $\mathcal{O}(S \cdot d_{\text{model}})$ |
+| **Attention (Transformer)** | Pairwise dynamic dot-product | $\mathcal{O}(1)$ direct connection | $\mathcal{O}(S^2)$ fully parallel | $\mathcal{O}(S^2)$ per head |
 
-### Why Attention Changed Everything
+### The Core Attention Formulation
+In the landmark paper *Attention Is All You Need* (Vaswani et al., 2017), scaled dot-product attention is formulated as:
 
-Before attention, RNNs processed sequences step-by-step, creating an information bottleneck:
+$$\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^\top}{\sqrt{d_k}} + M\right) V$$
 
-```
-RNN Processing (Sequential):
-Token 1 → Hidden → Token 2 → Hidden → ... → Final Hidden
-         ↓              ↓                      ↓
-    Limited Info   Compressed State    Heavily Compressed
-```
-
-Attention allows direct connections between any two positions:
-
-```
-Attention Processing (Parallel):
-Token 1 ←─────────→ Token 2 ←─────────→ Token 3 ←─────────→ Token 4
-   ↑                   ↑                   ↑                   ↑
-   └─────────────── Direct Connections ──────────────────────┘
-```
-
-This enables:
-- **Long-range dependencies**: Connecting words far apart
-- **Parallel computation**: No sequential dependencies
-- **Interpretable focus patterns**: We can see what the model attends to
-
-### The Mathematical Foundation
-
-Attention computes a weighted sum of values, where weights are determined by the similarity between queries and keys:
-
-```
-Attention(Q, K, V) = softmax(QK^T / √d_k) V
-```
-
-This simple formula powers GPT, BERT, and virtually every modern language model.
+where queries ($Q$), keys ($K$), and values ($V$) represent learned linear projections of the input representations, and $M$ is an optional mask tensor.
 """
 
 # %% [markdown]
-"""
-## 📐 Foundations: Attention Mathematics
+r"""
+## 📐 Foundations: Attention Mathematics & The Causal Engine
 
-### The Three Components Visualized
+The attention mechanism implements a differentiable soft key-value store. Given a continuous query vector $\mathbf{q}_i$, the model computes compatibility scores against all available key vectors $\mathbf{k}_j$, normalizes these scores into a probability simplex via softmax, and computes a convex combination of value vectors $\mathbf{v}_j$.
 
-Think of attention like a sophisticated address book lookup:
+<div align="center">
+  <img src="causal_attention_engine.svg" alt="The Causal Attention Engine Architecture" width="760px">
+</div>
 
-```
-Query: "What information do I need?"
-┌─────────────────────────────────────┐
-│ Q: [0.1, 0.8, 0.3, 0.2]             │ ← Query vector (what we're looking for)
-└─────────────────────────────────────┘
+### The Five-Stage Attention Pipeline
 
-Keys: "What information is available at each position?"
-┌─────────────────────────────────────┐
-│ K₁: [0.2, 0.7, 0.1, 0.4]            │ ← Key 1 (description of position 1)
-│ K₂: [0.1, 0.9, 0.2, 0.1]            │ ← Key 2 (description of position 2)
-│ K₃: [0.3, 0.1, 0.8, 0.3]            │ ← Key 3 (description of position 3)
-│ K₄: [0.4, 0.2, 0.1, 0.9]            │ ← Key 4 (description of position 4)
-└─────────────────────────────────────┘
+1. **Similarity Scoring (Raw Matrix Multiplication)**:
+   For query token $i$ and key token $j$:
+   $$\text{RawScore}_{i, j} = \mathbf{q}_i^\top \mathbf{k}_j = \sum_{d=1}^{d_k} Q_{i, d} K_{j, d} \implies S = Q K^\top \in \mathbb{R}^{B \times S \times S}$$
+2. **Variance Scaling ($1/\sqrt{d_k}$)**:
+   Dividing by $\sqrt{d_k}$ preserves unit variance when queries and keys have zero mean and unit variance, preventing dot products from growing excessively large:
+   $$S_{\text{scaled}} = \frac{S}{\sqrt{d_k}}$$
+3. **Causal Masking ($M$)**:
+   In autoregressive language models, tokens must not attend to future positions ($j > i$). An upper-triangular mask sets future positions to $-\infty$:
+   $$S_{\text{masked}} = S_{\text{scaled}} + M, \quad \text{where } M_{i, j} = \begin{cases} 0 & \text{if } j \le i \\ -\infty & \text{if } j > i \end{cases}$$
+   This additive $M$ is the paper's notation. TinyTorch's code takes the equivalent boolean keep mask instead, covered under *Applying the Causal Mask* below.
+4. **Softmax Normalization**:
+   Exponentiating $-\infty$ yields strictly zero probability ($e^{-\infty} = 0$), forming a valid probability distribution over past and present tokens:
+   $$A_{i, j} = \frac{\exp(S_{\text{masked}}[i, j])}{\sum_{m=1}^S \exp(S_{\text{masked}}[i, m])}, \quad \sum_{j=1}^S A_{i, j} = 1.0$$
+5. **Value Aggregation**:
+   The output vector for token $i$ is the expectation over all values weighted by attention probabilities:
+   $$\mathbf{y}_i = \sum_{j=1}^S A_{i, j} \mathbf{v}_j \implies Y = A V \in \mathbb{R}^{B \times S \times d_k}$$
 
-Values: "What actual content can I retrieve?"
-┌─────────────────────────────────────┐
-│ V₁: [content from position 1]       │ ← Value 1 (actual information)
-│ V₂: [content from position 2]       │ ← Value 2 (actual information)
-│ V₃: [content from position 3]       │ ← Value 3 (actual information)
-│ V₄: [content from position 4]       │ ← Value 4 (actual information)
-└─────────────────────────────────────┘
-```
+---
 
-### The Attention Process Step by Step
+### Tensor Shapes & Computational Complexity
 
-```
-Step 1: Compute Similarity Scores
-Q · K₁ = 0.69    Q · K₂ = 0.81    Q · K₃ = 0.41    Q · K₄ = 0.41
-  ↓               ↓               ↓               ↓
-Raw similarity scores (higher = more relevant)
+| Tensor Stage | Symbol | Shape Contract | FLOPs per Head | Primary Memory Bottleneck |
+| :--- | :--- | :--- | :--- | :--- |
+| **Input Queries** | $Q$ | $(B, S, d_k)$ | — | Activation buffer |
+| **Input Keys** | $K$ | $(B, S, d_k)$ | — | Activation buffer |
+| **Input Values** | $V$ | $(B, S, d_k)$ | — | Activation buffer |
+| **Score Matrix** | $S = Q K^\top$ | $(B, S, S)$ | $2 \cdot B \cdot S^2 \cdot d_k$ | Quadratic $\mathcal{O}(S^2)$ memory wall |
+| **Attention Weights** | $A = \text{softmax}(S)$ | $(B, S, S)$ | $3 \cdot B \cdot S^2$ (exp + sum + div) | Stored for backward pass |
+| **Attended Output** | $Y = A V$ | $(B, S, d_k)$ | $2 \cdot B \cdot S^2 \cdot d_k$ | Feed-forward input buffer |
 
-Step 2: Scale and Normalize
-Scores / √d_k = [0.345, 0.405, 0.205, 0.205]  ← Scale for stability
-     ↓
-Softmax = [0.26, 0.28, 0.23, 0.23]        ← Convert to probabilities
+$$\text{Total Attention FLOPs} = 4 \cdot B \cdot S^2 \cdot d_k \quad (\text{quadratic in sequence length } S)$$
 
-Step 3: Weighted Combination
-Output = 0.26×V₁ + 0.28×V₂ + 0.23×V₃ + 0.23×V₄
-```
+---
 
-### Dimensions and Shapes
+### Attention Weight Matrix ($A \in \mathbb{R}^{S \times S}$)
 
-```
-Input Shapes:
-Q: (batch_size, seq_len, d_model)  ← Each position has a query
-K: (batch_size, seq_len, d_model)  ← Each position has a key
-V: (batch_size, seq_len, d_model)  ← Each position has a value
+Under causal masking, the attention matrix forms a lower-triangular probability distribution where every row sums to $1.00$:
 
-Intermediate Shapes:
-QK^T: (batch_size, seq_len, seq_len)  ← Attention matrix (the O(n²) part!)
-Weights: (batch_size, seq_len, seq_len)  ← After softmax
-Output: (batch_size, seq_len, d_model)  ← Weighted combination of values
-```
-
-### Why O(n²) Complexity?
-
-For sequence length n and embedding dimension d, we compute:
-1. **QK^T**: n queries × n keys, each a d-dimensional dot product = O(n² × d) operations
-2. **Softmax**: n² weights to normalize = O(n²) operations
-3. **Weights×V**: n² weights applied to d-dimensional values = O(n² × d) operations
-
-The total **time complexity** is **O(n² × d)** per attention head. The **memory complexity** is **O(n²)** for storing the attention weight matrix. This quadratic scaling in sequence length is attention's blessing (global connectivity) and curse (memory/compute limits).
-
-### The Attention Matrix Visualization
-
-For a 4-token sequence "The cat sat down":
-
-```
-Attention Matrix (after softmax):
-        The   cat   sat  down
-The   [0.30  0.20  0.15  0.35]  ← "The" attends mostly to "down"
-cat   [0.10  0.60  0.25  0.05]  ← "cat" focuses on itself and "sat"
-sat   [0.05  0.40  0.50  0.05]  ← "sat" attends to "cat" and itself
-down  [0.25  0.15  0.10  0.50]  ← "down" focuses on itself and "The"
-
-Each row sums to 1.0 (probability distribution)
-```
+| Query Token ($i$) | Key 0 (`"The"`) | Key 1 (`"cat"`) | Key 2 (`"sat"`) | Key 3 (`"down"`) | Row Sum ($\sum_j A_{i, j}$) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **`"The"` ($i=0$)** | $1.00$ | $0.00$ ($-\infty$) | $0.00$ ($-\infty$) | $0.00$ ($-\infty$) | **$1.00$** |
+| **`"cat"` ($i=1$)** | $0.35$ | $0.65$ | $0.00$ ($-\infty$) | $0.00$ ($-\infty$) | **$1.00$** |
+| **`"sat"` ($i=2$)** | $0.10$ | $0.45$ | $0.45$ | $0.00$ ($-\infty$) | **$1.00$** |
+| **`"down"` ($i=3$)** | $0.15$ | $0.25$ | $0.20$ | $0.40$ | **$1.00$** |
 """
 
 # %% [markdown]
@@ -403,31 +344,42 @@ def test_unit_scale_scores():
     """🧪 Test attention score scaling."""
     print("🧪 Unit Test: Score Scaling...")
     scores = Tensor(np.array([[[4.0, 8.0]]]))
-    scaled = _scale_scores(scores, d_k=4)
-    assert np.allclose(scaled.data, [[[2.0, 4.0]]]), f"Expected /sqrt(4)=2, got {scaled.data}"
+    # d_k=16 separates sqrt(d_k)=4 from d_k/2=8, so dividing by the wrong factor fails here
+    scaled = _scale_scores(scores, d_k=16)
+    assert np.allclose(scaled.data, [[[1.0, 2.0]]]), f"Expected /sqrt(16)=4, got {scaled.data}"
     print("✅ Score scaling works correctly!")
 
 if __name__ == "__main__":
     test_unit_scale_scores()
 
 # %% [markdown]
-"""
+r"""
 ### Applying the Causal Mask
 
-In autoregressive models (like GPT), each token can only attend to tokens
-that came before it -- not future tokens. We enforce this by replacing future scores with negative infinity before
-softmax. Their attention weights are exactly zero, even when a blocked score
-was very large. The masked_fill operation also blocks their gradients.
+In autoregressive language models (such as GPT and Llama), generation proceeds token by token. A token at position $i$ must only attend to past and current tokens ($j \le i$), never future tokens ($j > i$). We enforce this temporal causality by replacing future attention logits with $-\infty$ before applying the softmax operator:
 
-```
-Causal Mask (4 tokens):       After masking:
-+---+---+---+---+            +----+----+----+----+
-| 1 | 0 | 0 | 0 |            | s1 |-inf|-inf|-inf|
-| 1 | 1 | 0 | 0 |     ->     | s2 | s3 |-inf|-inf|
-| 1 | 1 | 1 | 0 |            | s4 | s5 | s6 |-inf|
-| 1 | 1 | 1 | 1 |            | s7 | s8 | s9 | s10|
-+---+---+---+---+            +----+----+----+----+
-```
+<div align="center">
+  <img src="attention_margin_mask.svg" alt="Causal Attention Masking Transformation" width="300px">
+</div>
+
+#### Two Notations for One Operation
+
+Read the mask twice, because the paper and the code spell it differently and mixing them up is the single most common way to get a `ValueError` out of this module.
+
+The additive form is the one used in $\text{softmax}(QK^\top/\sqrt{d_k} + M)$ above, and it is what the literature means by $M$, a real-valued matrix added to the scores, carrying $0$ where the key is allowed and $-\infty$ where it is blocked.
+
+TinyTorch never asks you to build that matrix. The mask you hand to `_apply_mask` and to `scaled_dot_product_attention` is a **boolean keep mask** with entries in $\{0, 1\}$, and `masked_fill` performs the $+M$ addition for you by writing $-\infty$ into every position where $\text{keep} = 0$. The two are the same operation, and $\text{scores} + M$ is bit-identical to $\texttt{masked\_fill}(\text{keep} = 0, -\infty)$. Passing a matrix that already contains $-\infty$ raises `ValueError: Attention mask must contain only 0 (blocked) or 1 (allowed)`, so build $\text{keep}$ with `np.tril(np.ones(...))`, not with $-\infty$.
+
+$$S_{\text{masked}}[i, j] = \begin{cases} S[i, j] & \text{if } \text{keep}[i, j] = 1 \\ -\infty & \text{if } \text{keep}[i, j] = 0 \end{cases} \qquad \text{where } \text{keep}[i, j] = \begin{cases} 1 & \text{if } j \le i \\ 0 & \text{if } j > i \end{cases}$$
+
+When exponentiated during softmax normalization, $\exp(-\infty) = 0$, guaranteeing mathematically zero probability and severing backward gradient flow from future tokens:
+
+$$A[i, j] = \frac{\exp(S_{\text{masked}}[i, j])}{\sum_{k=1}^S \exp(S_{\text{masked}}[i, k])} = 0 \quad \text{for all } j > i$$
+
+| Query Position $i$ | Allowed Keys $j$ | Keep Value $\text{keep}[i, j]$ | Equivalent Additive $M[i, j]$ | Pre-Softmax Score $S_{\text{masked}}[i, j]$ | Post-Softmax Attention $A[i, j]$ | Temporal Semantics |
+|:---|:---|:---:|:---:|:---:|:---:|:---|
+| Current / Historical ($j \le i$) | Historical ($t_j \le t_i$) | $1$ | $0$ | $S[i, j]$ | $\frac{\exp(S[i, j])}{\sum_k \exp(S[i, k])}$ | Causally valid context |
+| Future ($j > i$) | Lookahead ($t_j > t_i$) | $0$ | $-\infty$ | $-\infty$ | $\exp(-\infty) / \Sigma = 0.0$ | Severed (no future leakage) |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "attn-apply-mask", "solution": true}
@@ -451,6 +403,10 @@ def _apply_mask(scores: Tensor, mask: Tensor) -> Tensor:
     HINT: mask=0 means "block this position", mask=1 means "allow"
     """
     ### BEGIN SOLUTION role="scaffold"
+    # Both guards below sweep the whole broadcast (B, H, S, S) array, so they cost
+    # O(B*H*S^2) on EVERY forward call. That is the price of catching a mis-built mask
+    # at the point of use. Production kernels validate the mask once where it is
+    # constructed and keep the attention inner loop free of checks.
     if np.any((mask.data != 0) & (mask.data != 1)):
         raise ValueError("Attention mask must contain only 0 (blocked) or 1 (allowed)")
     allowed = np.broadcast_to(mask.data, scores.shape)
@@ -613,6 +569,7 @@ def test_unit_scaled_dot_product_attention():
     # Test with causal mask
     mask = Tensor(np.tril(np.ones((batch_size, seq_len, seq_len)), k=0))  # Lower triangular
     output_masked, weights_masked = scaled_dot_product_attention(Q, K, V, mask)
+    assert output_masked.shape == (batch_size, seq_len, d_model), f"Masked output shape {output_masked.shape} incorrect"
 
     # Check that future positions have zero attention
     for b in range(batch_size):
@@ -626,86 +583,77 @@ if __name__ == "__main__":
     test_unit_scaled_dot_product_attention()
 
 # %% [markdown]
+r"""
+## 🏗️ Multi-Head Attention: Subspace Specialization via Coordinate Origami
+
+Single-head attention computes a single convex combination of values for each token, forcing the model to average over distinct grammatical, positional, and semantic relationships. Multi-Head Attention solves this by projecting input representations into $H$ distinct, lower-dimensional subspaces ($d_k = d_{\text{model}} / H$), allowing parallel heads to independently track syntax, long-range coreference, and semantic dependencies simultaneously.
+
+<div align="center">
+  <img src="head_split_origami.svg" alt="Multi-Head Coordinate Origami: Subspace Partitioning and Parallel Execution" width="680px">
+</div>
+
+### Mathematical Definition of Multi-Head Attention
+$$\text{MultiHead}(Q, K, V) = \text{Concat}(\text{head}_1, \text{head}_2, \dots, \text{head}_H) W_O$$
+$$\text{head}_h = \text{Attention}\left(Q W_h^Q, \, K W_h^K, \, V W_h^V\right)$$
+
+where projection matrices $W_h^Q, W_h^K, W_h^V \in \mathbb{R}^{d_{\text{model}} \times d_k}$ and output projection $W_O \in \mathbb{R}^{d_{\text{model}} \times d_{\text{model}}}$.
+
+---
+
+### The Coordinate Origami Datapath
+
+To execute all $H$ heads in parallel on hardware accelerators without slow Python loops, TinyTorch uses **tensor coordinate origami** (reshaping and transposing axis strides):
+
+| Stage | Tensor Operation | NumPy / TinyTorch Expression | Resulting Shape Contract |
+| :--- | :--- | :--- | :--- |
+| **1. Input Projection** | Linear GEMM | `x.matmul(W_q)` | $(B, S, D)$ |
+| **2. Subspace Reshape** | Decompose hidden dim $D \to (H, d_k)$ | `x.reshape(B, S, H, d_k)` | $(B, S, H, d_k)$ |
+| **3. Head Transposition** | Swap seq and head axes | `x.transpose(1, 2)` | $(B, H, S, d_k)$ |
+| **4. Batched Attention** | Parallel $QK^\top$ & $AV$ | `scaled_dot_product_attention(...)` | $(B, H, S, d_k)$ |
+| **5. Untangling Swap** | Restore temporal sequence axis | `x.transpose(1, 2)` | $(B, S, H, d_k)$ |
+| **6. Recombination** | Flatten heads back into hidden dim | `x.reshape(B, S, D)` | $(B, S, D)$ |
+| **7. Output Projection** | Inter-head representation mixing | `x.matmul(W_o)` | $(B, S, D)$ |
+
+### Systems Efficiency Invariant
+Notice that $H$ heads each computing attention with head dimension $d_k = D / H$ require:
+$$\text{FLOPs} = H \times (4 \cdot B \cdot S^2 \cdot d_k) = 4 \cdot B \cdot S^2 \cdot (H \cdot d_k) = \mathbf{4 \cdot B \cdot S^2 \cdot D}$$
+Multi-head attention provides $H$ specialized, independent attention patterns with **identical computational complexity and parameter count** as a single massive head, while enabling tensor cores to run batched Level-3 BLAS GEMMs over $(B \cdot H)$ matrix slices simultaneously!
 """
-## 🏗️ Multi-Head Attention
 
-Multi-head attention runs multiple attention "heads" in parallel, each learning to focus on different types of relationships. Think of it as having multiple specialists: one for syntax, one for semantics, one for long-range dependencies, etc.
+# %% [markdown]
+"""
+### Splitting Heads
 
-### Understanding Multi-Head Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ SINGLE-HEAD vs MULTI-HEAD ATTENTION ARCHITECTURE                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│ SINGLE HEAD ATTENTION (Limited Representation):                         │
-│ ┌─────────────────────────────────────────────────────────────────────┐ │
-│ │ Input (512) → [Linear] → Q,K,V (512) → [Attention] → Output (512)   │ │
-│ │                  ↑           ↑            ↑            ↑            │ │
-│ │            Single proj  Full dimensions  One head   Limited focus   │ │
-│ └─────────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-│ MULTI-HEAD ATTENTION (Rich Parallel Processing):                        │
-│ ┌─────────────────────────────────────────────────────────────────────┐ │
-│ │ Input (512)                                                         │ │
-│ │      ↓                                                              │ │
-│ │ [Q/K/V Projections] → 512 dimensions each                           │ │
-│ │      ↓                                                              │ │
-│ │ [Split into 8 heads] → 8 × 64 dimensions per head                   │ │
-│ │      ↓                                                              │ │
-│ │ Head₁: Q₁(64) ⊗ K₁(64) → Attention₁ → Output₁(64)  │ Syntax focus   │ │
-│ │ Head₂: Q₂(64) ⊗ K₂(64) → Attention₂ → Output₂(64)  │ Semantic       │ │
-│ │ Head₃: Q₃(64) ⊗ K₃(64) → Attention₃ → Output₃(64)  │ Position       │ │
-│ │ Head₄: Q₄(64) ⊗ K₄(64) → Attention₄ → Output₄(64)  │ Long-range     │ │
-│ │ Head₅: Q₅(64) ⊗ K₅(64) → Attention₅ → Output₅(64)  │ Local deps     │ │
-│ │ Head₆: Q₆(64) ⊗ K₆(64) → Attention₆ → Output₆(64)  │ Coreference    │ │
-│ │ Head₇: Q₇(64) ⊗ K₇(64) → Attention₇ → Output₇(64)  │ Composition    │ │
-│ │ Head₈: Q₈(64) ⊗ K₈(64) → Attention₈ → Output₈(64)  │ Global view    │ │
-│ │      ↓                                                              │ │
-│ │ [Concatenate] → 8 × 64 = 512 dimensions                             │ │
-│ │      ↓                                                              │ │
-│ │ [Output Linear] → Final representation (512)                        │ │
-│ └─────────────────────────────────────────────────────────────────────┘ │
-│                                                                         │
-│ Key Benefits of Multi-Head:                                             │
-│ • Parallel specialization across different relationship types           │
-│ • Same total parameters, distributed across multiple focused heads      │
-│ • Each head can learn distinct attention patterns                       │
-│ • Enables rich, multifaceted understanding of sequences                 │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### The Multi-Head Process Detailed
+Multi-head attention processes the same data through multiple independent "heads."
+To do this efficiently, we reshape the projected tensor from 3D to 4D, separating
+the embedding dimension into (num_heads, head_dim). Then we transpose so the head
+dimension comes before the sequence dimension, enabling parallel attention computation.
 
 ```
-Step 1: Project to Q, K, V
-Input (512 dims) → Linear → Q, K, V (512 dims each)
+Split heads: (batch, seq, embed_dim) -> (batch, heads, seq, head_dim)
 
-Step 2: Split into Heads
-Q (512) → Reshape → 8 heads × 64 dims per head
-K (512) → Reshape → 8 heads × 64 dims per head
-V (512) → Reshape → 8 heads × 64 dims per head
-
-Step 3: Parallel Attention (for each of 8 heads)
-Head 1: Q₁(64) attends to K₁(64) → weights₁ → output₁(64)
-Head 2: Q₂(64) attends to K₂(64) → weights₂ → output₂(64)
-...
-Head 8: Q₈(64) attends to K₈(64) → weights₈ → output₈(64)
-
-Step 4: Concatenate and Mix
-[output₁ ∥ output₂ ∥ ... ∥ output₈] (512) → Linear → Final(512)
+Example with embed_dim=64, num_heads=8, head_dim=8:
+  (2, 10, 64) -> reshape -> (2, 10, 8, 8) -> transpose -> (2, 8, 10, 8)
+                             batch seq heads dim          batch heads seq dim
 ```
+"""
 
-### Why Multiple Heads Help
+# %% [markdown]
+"""
+### Merging Heads
 
-Each head can specialize in different patterns:
-- **Head 1**: Short-range syntax ("the cat" → subject-article relationship)
-- **Head 2**: Long-range coreference ("John...he" → pronoun resolution)
-- **Head 3**: Semantic similarity ("dog" ↔ "pet" connections)
-- **Head 4**: Positional patterns (attending to specific distances)
+After each head computes its own attention independently, we need to recombine
+them back into a single embedding. This is the reverse of splitting: transpose
+the head and sequence dimensions back, then reshape to merge (heads, head_dim)
+into a single embed_dim.
 
-This parallelization allows the model to attend to different representation subspaces simultaneously.
+```
+Merge heads: (batch, heads, seq, head_dim) -> (batch, seq, embed_dim)
+
+Example with embed_dim=64, num_heads=8, head_dim=8:
+  (2, 8, 10, 8) -> transpose -> (2, 10, 8, 8) -> reshape -> (2, 10, 64)
+                                batch seq heads dim          batch seq embed_dim
+```
 """
 
 # %% nbgrader={"grade": false, "grade_id": "multihead-attention", "solution": true}
@@ -927,24 +875,6 @@ class MultiHeadAttention:
 
 # %% [markdown]
 """
-### Splitting Heads
-
-Multi-head attention processes the same data through multiple independent "heads."
-To do this efficiently, we reshape the projected tensor from 3D to 4D, separating
-the embedding dimension into (num_heads, head_dim). Then we transpose so the head
-dimension comes before the sequence dimension, enabling parallel attention computation.
-
-```
-Split heads: (batch, seq, embed_dim) -> (batch, heads, seq, head_dim)
-
-Example with embed_dim=64, num_heads=8, head_dim=8:
-  (2, 10, 64) -> reshape -> (2, 10, 8, 8) -> transpose -> (2, 8, 10, 8)
-                             batch seq heads dim          batch heads seq dim
-```
-"""
-
-# %% [markdown]
-"""
 ### 🧪 Unit Test: Split Heads
 
 **What we're testing**: 3D to 4D reshape correctly separates embedding into heads
@@ -960,28 +890,13 @@ def test_unit_split_heads():
     x = Tensor(rng.standard_normal((2, 10, 64)))
     split = mha._split_heads(x, 2, 10)
     assert split.shape == (2, 8, 10, 8), f"Expected (2,8,10,8), got {split.shape}"
-    print("✅ Split heads: correct 4D shape!")
+    # Values must be regrouped, not shuffled. Head h owns columns [h*head_dim, (h+1)*head_dim)
+    for h in range(8):
+        assert np.allclose(split.data[:, h, :, :], x.data[:, :, h * 8:(h + 1) * 8]), f"Head {h} holds the wrong slice"
+    print("✅ Split heads: correct 4D shape and per-head values!")
 
 if __name__ == "__main__":
     test_unit_split_heads()
-
-# %% [markdown]
-"""
-### Merging Heads
-
-After each head computes its own attention independently, we need to recombine
-them back into a single embedding. This is the reverse of splitting: transpose
-the head and sequence dimensions back, then reshape to merge (heads, head_dim)
-into a single embed_dim.
-
-```
-Merge heads: (batch, heads, seq, head_dim) -> (batch, seq, embed_dim)
-
-Example with embed_dim=64, num_heads=8, head_dim=8:
-  (2, 8, 10, 8) -> transpose -> (2, 10, 8, 8) -> reshape -> (2, 10, 64)
-                                batch seq heads dim          batch seq embed_dim
-```
-"""
 
 # %% [markdown]
 """
@@ -1183,40 +1098,28 @@ def run_attention_scenarios():
     print("\n✅ All attention scenarios work correctly!")
 
 # %% [markdown]
-"""
+r"""
 ## 📊 Systems Analysis: Memory Layout and Performance
 
 Let's understand ONE key systems concept: **attention's O(n^2) memory and compute scaling**.
 
 This single analysis reveals why attention becomes the bottleneck in modern transformers and drives research into efficient attention variants.
 
-### Memory Complexity Visualization
+### Attention Memory Footprint Scaling (per Layer)
 
-```
-Attention Memory Scaling (per layer):
+Every memory figure in this module is decimal, so $1\text{ kB} = 10^3$ bytes and $1\text{ MB} = 10^6$ bytes. Powers-of-two units are marked KiB / MiB / GiB where they appear.
 
-Sequence Length = 128:
-┌────────────────────────────────┐
-│ Attention Matrix: 128x128      │ = 16K values
-│ Memory: 64 KB (float32)        │
-└────────────────────────────────┘
+| Sequence Length ($T$) | Attention Matrix ($T \times T$) | Element Count | Memory (FP32, 1 Head) | Relative Scaling |
+| :--- | :--- | :--- | :--- | :--- |
+| **$T = 128$** | $128 \times 128$ | $16\text{K}$ values | $65.5\text{ kB}$ | $1.0\times$ (Reference) |
+| **$T = 512$** | $512 \times 512$ | $262\text{K}$ values | $1.05\text{ MB}$ | $16\times$ larger ($4^2$) |
+| **$T = 2048$ (GPT-3)** | $2048 \times 2048$ | $4.2\text{M}$ values | $16.78\text{ MB}$ | $256\times$ larger ($16^2$) |
 
-Sequence Length = 512:
-┌────────────────────────────────┐
-│ Attention Matrix: 512x512      │ = 262K values
-│ Memory: 1 MB (float32)         │ <- 16x larger!
-└────────────────────────────────┘
+For full-scale models like GPT-3 ($L = 96$ layers, $H = 96$ heads):
 
-Sequence Length = 2048 (GPT-3):
-┌────────────────────────────────┐
-│ Attention Matrix: 2048x2048    │ = 4.2M values
-│ Memory: 16 MB (float32)        │ <- 256x larger than 128!
-└────────────────────────────────┘
+$$\text{Total Attention Memory} = L \times H \times (T^2 \times 4\text{ bytes}) = 96 \times 96 \times 16.78\text{ MB} \approx \mathbf{154.62\text{ GB}} \quad (144.0\text{ GiB})$$
 
-That is one head. For GPT-3 (96 layers x 96 heads):
-Total Attention Memory = 96 x 96 x 16 MB ≈ 144 GB
-Just for attention matrices, for a single sequence!
-```
+Just for raw intermediate attention score matrices for a single sequence!
 """
 
 # %%
@@ -1229,23 +1132,24 @@ def analyze_attention_complexity():
     sequence_lengths = [16, 32, 64, 128, 256]
 
     print("\nSequence Length vs Attention Matrix Size:")
-    print("Seq Len | Attention Matrix | Memory (KB) | Complexity")
+    print("Seq Len | Attention Matrix | Memory (kB) | FLOPs")
     print("-" * 55)
 
     for seq_len in sequence_lengths:
         # Calculate attention matrix size
         attention_matrix_size = seq_len * seq_len
 
-        # Memory for attention weights (float32 = 4 bytes)
-        attention_memory_kb = (attention_matrix_size * 4) / 1024
+        # Memory for attention weights (float32 = 4 bytes), decimal kB
+        attention_memory_kb = (attention_matrix_size * 4) / 1000
 
-        # Total complexity (Q@K + softmax + weights@V)
-        complexity = 2 * seq_len * seq_len * embed_dim + seq_len * seq_len
+        # Both matmuls plus the softmax: 2*S^2*d for Q@K^T, 2*S^2*d for weights@V,
+        # and 3*S^2 for softmax (exp + sum + divide), matching the Foundations table
+        flops = 4 * seq_len * seq_len * embed_dim + 3 * seq_len * seq_len
 
-        print(f"{seq_len:7d} | {attention_matrix_size:14d} | {attention_memory_kb:10.2f} | {complexity:10.0f}")
+        print(f"{seq_len:7d} | {attention_matrix_size:14d} | {attention_memory_kb:10.2f} | {flops:10.0f}")
 
     print(f"\n💡 KEY INSIGHT: Attention memory scales as O(n^2) with sequence length")
-    print(f"🚀 For seq_len=1024, attention matrix alone needs {(1024*1024*4)/1024/1024:.1f} MB")
+    print(f"🚀 For seq_len=1024, attention matrix alone needs {(1024*1024*4)/1e6:.2f} MB")
 
 if __name__ == "__main__":
     analyze_attention_complexity()
@@ -1259,8 +1163,8 @@ def analyze_attention_timing():
     sequence_lengths = [32, 64, 128, 256]
 
     print("\nSequence Length vs Computation Time:")
-    print("Seq Len | Time (ms) | Ops/sec | Scaling")
-    print("-" * 40)
+    print("Seq Len | Time (ms) | Forward/sec | Scaling")
+    print("-" * 45)
 
     prev_time = None
     for seq_len in sequence_lengths:
@@ -1277,12 +1181,12 @@ def analyze_attention_timing():
             times.append((end_time - start_time) * 1000)  # Convert to ms
 
         avg_time = np.mean(times)
-        ops_per_sec = 1000 / avg_time if avg_time > 0 else 0
+        forwards_per_sec = 1000 / avg_time if avg_time > 0 else 0
 
         # Calculate scaling factor vs previous
         scaling = avg_time / prev_time if prev_time else 1.0
 
-        print(f"{seq_len:7d} | {avg_time:8.2f} | {ops_per_sec:7.0f} | {scaling:6.2f}x")
+        print(f"{seq_len:7d} | {avg_time:8.2f} | {forwards_per_sec:11.0f} | {scaling:6.2f}x")
         prev_time = avg_time
 
     print(f"\n💡 KEY INSIGHT: Attention time scales roughly as O(n^2) with sequence length")
@@ -1304,7 +1208,7 @@ def analyze_attention_memory_overhead():
 
     for seq_len in sequence_lengths:
         # Inference: the attention matrix lives only while the layer runs
-        attention_matrix_mb = (seq_len * seq_len * 4) / (1024 * 1024)
+        attention_matrix_mb = (seq_len * seq_len * 4) / 1e6  # decimal MB
 
         # Training: the softmax weights are saved for backward, and backward
         # materializes a gradient of the same shape
@@ -1314,49 +1218,42 @@ def analyze_attention_memory_overhead():
 
         print(f"{seq_len:7d} | {attention_matrix_mb:7.2f}MB | {saved_mb:16.2f}MB | {gradient_mb:6.2f}MB | {training_total_mb:12.2f}MB")
 
-    print("\n💡 KEY INSIGHT: Training roughly doubles attention's activation memory: the softmax")
-    print("   weights are saved for backward and their gradient is the same size.")
+    print("\n💡 KEY INSIGHT: Training roughly doubles attention's activation memory.")
+    print("   The softmax weights are saved for backward and their gradient is the same size.")
     print("   Optimizer state (Adam's two moments) scales with parameters, not sequence length.")
-    print("🚀 For GPT-3 (96 layers x 96 heads, 2048 context): 16MB per head becomes ~144GB of saved weights per sequence!")
+    print("🚀 For GPT-3 (96 layers x 96 heads, 2048 context): 16.78 MB per head becomes ~154.62 GB of saved weights per sequence!")
 
 if __name__ == "__main__":
     analyze_attention_memory_overhead()
 
 # %% [markdown]
-"""
-### Systems Insights: The O(n^2) Reality
+r"""
+### Systems Insights: The $\mathcal{O}(n^2)$ Attention Memory Wall
 
-Our analysis reveals the fundamental challenge that drives modern attention research:
+Our empirical benchmarking reveals the fundamental scalability bottleneck governing modern transformer systems:
 
-**Memory Scaling Crisis:**
-- Attention matrix grows as n^2 with sequence length
-- For GPT-3 context (2048 tokens): 16MB of attention weights per head per layer
-- With 96 layers x 96 heads: ~144GB of attention matrices per sequence!
-- This excludes activations, gradients, and other tensors
+#### The Quadratic Memory Scaling Formula
 
-**Time Complexity Validation:**
-- Each sequence length doubling roughly quadruples computation time
-- This matches the theoretical O(n^2) complexity we implemented
-- Real bottleneck shifts from computation to memory at scale
+For a transformer model operating on sequence length $S$, batch size $B$, and $H$ attention heads with float32 precision ($4\text{ bytes/element}$):
 
-**The Production Reality:**
-```
-Model Scale Impact:
+$$\text{Attention Matrix Memory (per layer)} = B \times H \times S^2 \times 4\text{ bytes}$$
 
-Small Model (6 layers, 8 heads, 512 context):
-Attention Memory = 6 x 8 x 1MB = 48MB - Manageable
+$$\text{Total Attention Activation Memory (all layers)} = B \times L \times H \times S^2 \times 4\text{ bytes}$$
 
-GPT-3 Scale (96 layers, 96 heads, 2048 context):
-Attention Memory = 96 x 96 x 16MB ≈ 144GB - Far beyond one GPU
+#### Production Reality Across Model Scales
 
-32K context (hypothetical: 120 layers, 128 heads):
-Attention Memory = 120 x 128 x 4GB ≈ 60TB - Impossible without a different algorithm
-```
+| Model Architecture | Layers ($L$) | Heads ($H$) | Context ($S$) | Per Head | Per Layer | All Layers Total | Hardware Feasibility |
+|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---|
+| **Edge / TinyTorch** | $6$ | $8$ | $512$ | $1.05\text{ MB}$ | $8.39\text{ MB}$ | $\mathbf{50.33\text{ MB}}$ | Fits DRAM easily, but already past a typical $32\text{ MB}$ L3, so every layer's scores round-trip to main memory |
+| **Base Model** (BERT-Base) | $12$ | $12$ | $512$ | $1.05\text{ MB}$ | $12.58\text{ MB}$ | $\mathbf{150.99\text{ MB}}$ | Commodity GPU VRAM |
+| **GPT-3 (175B)** | $96$ | $96$ | $2{,}048$ | $16.78\text{ MB}$ | $1.61\text{ GB}$ | $\mathbf{154.62\text{ GB}}$ | Exceeds single $80\text{ GB}$ A100 GPU VRAM |
+| **Long Context** (32K Tokens) | $32$ | $32$ | $32{,}768$ | $4.29\text{ GB}$ | $137.44\text{ GB}$ | $\mathbf{4.40\text{ TB}}$ | Intractable with standard materialization |
 
-**Why This Matters:**
-This quadratic wall motivates active research into more efficient attention mechanisms (linear attention, sparse attention, Flash Attention).
+#### The Three Systems Bottlenecks
 
-The quadratic wall is why long-context AI is an active research frontier, not a solved problem.
+1. **Memory Capacity Wall**: As context length $S$ scales from $2\text{K} \to 32\text{K} \to 128\text{K}$, the memory consumed by attention matrices dwarfs parameter storage by orders of magnitude.
+2. **Arithmetic Intensity Deficit**: Attention logit computation involves $\mathcal{O}(S^2)$ multiply-accumulate operations to produce an $\mathcal{O}(S^2)$ tensor, followed by memory-bandwidth-bound softmax normalization ($\mathcal{O}(1)\text{ FLOPs/byte}$).
+3. **The IO Memory Wall**: In naive attention implementations, the full $S \times S$ matrix is repeatedly transferred between off-chip High-Bandwidth Memory (HBM) and fast on-chip SRAM. This memory traffic bottleneck spurred the development of **FlashAttention** (Dao et al., 2022), which tiles the softmax computation to eliminate global memory materialization entirely. Module 17 will build the cache-aware tiling and operator fusion that FlashAttention rests on, and Module 18 will build the inference-time reuse (KV caching) that avoids recomputing keys and values altogether.
 """
 
 # %% [markdown]
@@ -1403,101 +1300,110 @@ def test_module():
     print("Run: tito module complete 12")
 
 # %% [markdown]
-"""
+r"""
 ## 🤔 ML Systems Reflection Questions
 
-Answer these to deepen your understanding of attention operations and their systems implications:
+Questions 1 and 2 are yours to work out, and every quantity they ask for is derivable from the tables in this module with a calculator. Questions 3 through 5 and the bonus are worked systems analyses. Read those once you have committed to your own answers for the first two, then look for where your reasoning diverged from theirs.
 
-### Question 1: Quadratic Complexity and Memory
-**Question**: For sequence length 1024, how much memory does attention's O(n^2) use? What about length 2048?
+### Question 1: Quadratic Complexity, Memory Footprint & Context Scaling
+You benchmarked the memory scaling of the attention logit matrix $S = Q K^\top / \sqrt{d_k}$.
 
-**Consider**:
-- For float32 (4 bytes per value), the attention matrix for seq_len=n requires n^2 x 4 bytes
-- Memory for seq_len=1024: 1024^2 x 4 bytes = _____ MB
-- Memory for seq_len=2048: 2048^2 x 4 bytes = _____ MB
-- Scaling factor when doubling sequence length: _____x
-- Why this limits transformer context lengths in production
+**1. Exact Attention Matrix Memory Calculations**:
+- At float32 ($4\text{ bytes/element}$), how many bytes does one head's $n \times n$ logit matrix occupy at $n = 1{,}024$, and at $n = 2{,}048$? Give each in decimal MB.
+- By what factor does that memory grow when you double $n$? Explain why the factor is the same at every $n$.
 
-**Real-world context**: GPT-3's 2048 token context was chosen partly due to this memory constraint. Longer contexts require specialized efficiency techniques (KV caching, sparse attention, Flash Attention).
-
----
-
-### Question 2: Attention vs FFN Bottleneck
-**Question**: In production transformers, attention is often the memory bottleneck, not the FFN (feed-forward network). Why?
-
-**Consider**:
-- A typical transformer has attention + FFN layers
-- FFN parameters scale as O(d^2), compute as O(n x d^2), and activations as O(n x d) for a fixed expansion ratio, where d is embed_dim
-- Attention activations scale as O(n^2)
-- For short sequences (n << d): Which dominates? _____
-- For long sequences (n >> d): Which dominates? _____
-- At what sequence length does attention become the bottleneck?
-
-**Think about**:
-- Why does this matter for models like GPT-3 (96 layers, 2048 context)?
-- How does this inform architecture choices for different use cases?
+**2. Production Context Length Constraints**:
+- GPT-3 175B runs $L = 96$ layers and $H = 96$ heads at $n = 2{,}048$. Multiply out the total logit-matrix memory held for a single sequence.
+- Set your answer against the $80\text{ GB}$ of an A100 or H100. What does that comparison rule out about running naive dense attention at $32\text{K}$ or $128\text{K}$ context, and which two techniques named in this module buy the headroom back?
 
 ---
 
-### Question 3: Multi-Head Trade-offs
-**Question**: 8 attention heads vs 1 head with 8x dimensions - same parameters, different performance. What's the systems difference?
+### Question 2: Attention vs FFN Memory Bottleneck and Crossover Mechanics
+In transformer architectures, attention is frequently the primary memory bottleneck, despite Feed-Forward Networks (FFNs) containing more parameters.
 
-**Consider**:
-- Your MultiHeadAttention splits embed_dim=512 into 8 heads of 64 dims each
-- Alternative: one head with full 512 dims
-- Parameter count: 8 heads x 64 dims vs 1 head x 512 dims = _____ (same or different?)
-- Memory access patterns: Multiple small heads vs one large head
-- Parallelization: Can heads run in parallel? _____
+**1. Dimensional Scaling Comparison**:
+- For hidden dimension $d$ with the standard $4d$ intermediate expansion, write the FFN's parameter count, its compute FLOPs, and its activation memory in terms of $n$ and $d$.
+- Do the same for self-attention with $H$ heads of dimension $d_k = d / H$, splitting its FLOP count into the projection term (in $n d^2$) and the score term (in $n^2 d$). Which of the two grows faster as $n$ rises, and which one does the activation memory follow?
 
-**Think about**:
-- Specialization: Why might diverse small heads learn better than one large head?
-- Cache efficiency: Smaller head_dim vs larger single dimension
-- Why did the original Transformer paper choose multiple heads?
+**2. Regime Dominance and Crossover Point**:
+- Which subsystem dominates activation memory when $n \ll d$, and which dominates when $n \gg d$? State the inequality that decides it.
+- Set attention's activation memory equal to the FFN's and solve for the crossover length $n^*$. Express $n^*$ in terms of $d_k$ alone, then evaluate it for the standard $d_k = 64$. Compare that number against the context lengths production models actually serve.
 
 ---
 
-### Question 4: Masking Costs
-**Question**: Causal masking (for autoregressive models) zeros out half the attention matrix. Do we save computation or just correctness?
+### Question 3: Multi-Head Trade-offs: Subspace Diversity vs Hardware Execution
+Comparing $H = 8$ heads of dimension $d_k = 64$ versus $H = 1$ head with $d_k = 512$ (where $d_{\text{embed}} = 512$):
 
-**Consider**:
-- You set masked positions to -infinity before softmax
-- In a seq_len=n causal mask, roughly n^2/2 positions are masked (upper triangle)
-- Does your implementation skip computation for masked positions? _____
-- Does replacing scores with -infinity before softmax save compute? _____
+**1. Parameter and FLOP Equivalence**:
+- **Parameter Count**:
+  - Multi-Head ($H = 8, d_k = 64$): $W_Q, W_K, W_V \in \mathbb{R}^{512 \times 512}$ plus $W_O \in \mathbb{R}^{512 \times 512} \implies 4 \times 512^2 = \mathbf{1{,}048{,}576\text{ parameters}}$.
+  - Single-Head ($H = 1, d_k = 512$): $W_Q, W_K, W_V, W_O \in \mathbb{R}^{512 \times 512} \implies 4 \times 512^2 = \mathbf{1{,}048{,}576\text{ parameters}}$.
+  - Parameter counts are **identical**.
+- **Compute FLOPs**:
+  - Multi-Head $Q K^\top$: $8 \times (n \times 64 \times n) = n^2 \times 512$ multiply-accumulates ($2 n^2 d\text{ FLOPs}$).
+  - Single-Head $Q K^\top$: $1 \times (n \times 512 \times n) = n^2 \times 512$ multiply-accumulates ($2 n^2 d\text{ FLOPs}$).
+  - Theoretical FLOP counts are **identical**.
 
-**Think about**:
-- What would you need to change to actually skip masked computation?
-- In production, does sparse attention (skipping masked positions) help?
-- Memory saved: Can we avoid storing masked attention weights?
-
----
-
-### Question 5: The Quadratic Memory Challenge
-**Question**: Your implementation computes the full (seq_len x seq_len) attention matrix. Why is this the primary memory bottleneck?
-
-**Calculate**:
-- For a 4096-token sequence with 32 heads at float32: attention memory = _____ GB
-- For a 512-token sequence with 8 heads: attention memory = _____ MB
-- How does doubling sequence length affect attention memory?
-
-**Think about**:
-- Why is the attention matrix the dominant memory cost (vs. Q, K, V projections)?
-- What property of the softmax operation makes it hard to avoid materializing the full matrix?
-- Techniques like KV caching and Flash Attention address this in practice.
+**2. Systems and Representation Differences**:
+- **Activation Memory**: The multi-head model materializes $8$ separate $n \times n$ attention maps, requiring $8 \times n^2 \times 4\text{ bytes}$, whereas the single-head model requires only $1 \times n^2 \times 4\text{ bytes}$ (**$8\times$ memory expansion**).
+- **GPU Hardware Efficiency**: Single large GEMMs ($(n \times 512) \times (512 \times n)$) maximize systolic array occupancy on Tensor Cores. Splitting into 8 smaller GEMMs ($(n \times 64) \times (64 \times n)$) introduces kernel launch overhead unless batched into a single batched-strided GEMM.
+- **Representational Capacity**: Multi-head attention allows the model to jointly attend to information from different representation subspaces at different positions (e.g. tracking syntactic dependencies, semantic coreference, and positional offsets independently).
 
 ---
 
-### Bonus Question: Training Memory Overhead
-**Question**: Training requires storing activations for backward pass. How much extra memory does backprop through attention need?
+### Question 4: Causal Masking Costs & Arithmetic Intensity
+Causal autoregressive masking sets future positions ($j > i$) to $-\infty$.
 
-**Calculate**:
-- Inference memory: the attention matrix, n^2 values per head, freed after use
-- Training memory: the softmax weights saved for backward (n^2) plus their gradient (n^2)
-- Training total: _____ x inference memory per head
-- Adam's momentum and velocity are per parameter: how many parameters does the attention matrix add? _____
-- For GPT-3 scale (96 layers, 96 heads, 2048 context): _____ GB of saved attention weights per sequence
+**1. Computational and Memory Savings in Naive Implementations**:
+- In standard vectorized attention, the implementation computes the full dense matrix product $S = Q K^\top$ ($n^2$ dot products), adds an $n \times n$ mask tensor, and evaluates softmax over all $n$ columns.
+- Compute saved: **0 FLOPs**. In fact, it expends extra memory bandwidth writing and reading $-\infty$ values across the upper triangle ($\frac{n^2 - n}{2}$ positions).
+- Memory saved: **0 bytes**. The full $n \times n$ matrix is still allocated in VRAM.
 
-**Key insight**: Training roughly doubles attention's activation memory; optimizer state scales with parameters, not sequence length.
+**2. Production GPU Optimization**:
+In production kernels (such as FlashAttention-2 causal mode):
+- The GPU thread grid tiles the attention computation into blocks (e.g. $128 \times 128$).
+- Thread blocks located entirely in the upper triangle ($j > i$) are **never scheduled**, skipping $\approx 50\%$ of matrix multiply FLOPs.
+- Only the boundary tiles along the diagonal require causal masking, dramatically reducing both memory traffic and compute cycles.
+
+---
+
+### Question 5: The Quadratic Memory Challenge & The Softmax Barrier
+Materializing the full $(S \times S)$ attention matrix is the primary architectural memory bottleneck.
+
+**1. Exact Numerical Memory Footprint**:
+- **$4{,}096$-token sequence with $32$ heads at float32**:
+  $$\text{Memory} = 32 \times 4{,}096^2 \times 4\text{ B} = 32 \times 16{,}777{,}216 \times 4\text{ B} = 2{,}147{,}483{,}648\text{ B} = \mathbf{2.15\text{ GB}} \quad (2.0\text{ GiB / layer})$$
+  Across a 32-layer model: $32 \times 2.15\text{ GB} = \mathbf{68.72\text{ GB}}$ for a single sequence!
+- **$512$-token sequence with $8$ heads at float32**:
+  $$\text{Memory} = 8 \times 512^2 \times 4\text{ B} = 8 \times 262{,}144 \times 4\text{ B} = 8{,}388{,}608\text{ B} = \mathbf{8.39\text{ MB}} \quad (8.0\text{ MiB / layer})$$
+  Across a 6-layer TinyTorch model: $6 \times 8.39\text{ MB} = \mathbf{50.33\text{ MB}}$.
+- **Scaling Behavior**: Doubling sequence length increases attention matrix memory by exactly **$4\times$**.
+
+**2. The Softmax Normalizer Barrier**:
+Why can't we easily avoid materializing $S$? Because the softmax operator requires a row-wise reduction:
+$$A_{i, j} = \frac{\exp(S_{i, j})}{\sum_{k=1}^S \exp(S_{i, k})}$$
+Computing the normalizer requires seeing all keys in row $i$ before outputting any probability. Standard implementations must store all $S_{i, j}$ intermediate values in off-chip global memory (HBM). **FlashAttention** overcomes this barrier using the **online softmax trick**, which maintains running row maximums and partial sums in fast SRAM tiles, avoiding global memory materialization altogether.
+
+---
+
+### Bonus Question: Training Memory Overhead & Optimizer Dynamics
+Training requires caching activations during the forward pass to evaluate backward gradients.
+
+**1. Forward vs Backward Activation Footprint**:
+- **Inference**: Once the context vector $O = A V$ is computed, the attention weights $A \in \mathbb{R}^{B \times H \times S \times S}$ can be immediately deallocated.
+- **Training**: Softmax weights $A$ must be retained in memory for the backward pass because the gradient of softmax depends on its forward output:
+  $$\frac{\partial L}{\partial S_{i, j}} = A_{i, j} \left( \frac{\partial L}{\partial A_{i, j}} - \sum_k \frac{\partial L}{\partial A_{i, k}} A_{i, k} \right)$$
+  During backward execution, the gradient tensor $\nabla_S$ of the same shape ($B \times H \times S \times S$) is also materialized.
+- **Training Overhead**: Training requires $\mathbf{2\times}$ the activation memory of inference for the attention matrix ($A$ retained + $\nabla_S$ allocated).
+
+**2. Optimizer Memory Immunity**:
+- The attention matrix $A$ contains **$0$ trainable parameters**. It is a transient dynamic activation generated from input embeddings.
+- Consequently, optimizer states (such as Adam's first moment $m_t$ and second moment $v_t$, consuming $8\text{ bytes/param}$) do **not** scale with sequence length $S$. Optimizer state memory scales strictly with model parameters ($W_Q, W_K, W_V, W_O$).
+
+**3. GPT-3 Scale Activation Retention**:
+In GPT-3 ($L = 96$ layers, $H = 96$ heads, $S = 2{,}048$):
+$$\text{Saved Softmax Weights} = 96 \times 96 \times 2{,}048^2 \times 4\text{ B} \approx \mathbf{154.62\text{ GB per sequence}}$$
+This immense activation footprint is why modern large-scale training pipelines employ **Activation Checkpointing** (recomputing attention on the fly during backward) to trade $33\%$ extra compute for drastic VRAM savings.
 """
 
 # %% [markdown]
@@ -1510,6 +1416,9 @@ Answer these to deepen your understanding of attention operations and their syst
 each token "look at" every other token and decide what's relevant. This is how transformers
 understand that "it" refers to "the cat" in a sentence!
 
+Nothing is trained yet, so the demo below plants the match by hand. It makes one key an exact
+copy of one query, then shows the attention weight collapsing onto that position.
+
 In the next module, you'll combine attention with MLPs to build full transformer blocks.
 """
 
@@ -1519,23 +1428,36 @@ def demo_attention():
     print("🎯 AHA MOMENT: Attention Finds Relationships")
     print("=" * 45)
 
-    # Create Q, K, V for 4 tokens with 8-dim embeddings
-    Q = Tensor(rng.standard_normal((1, 4, 8)))
-    K = Tensor(rng.standard_normal((1, 4, 8)))
-    V = Tensor(rng.standard_normal((1, 4, 8)))
+    # Its own generator, so this prints the same numbers standalone or in module order
+    demo_rng = np.random.default_rng(1234)
 
-    # Compute attention
-    output, weights = scaled_dot_product_attention(Q, K, V)
+    # 4 tokens with 8-dim embeddings
+    Q = demo_rng.standard_normal((1, 4, 8))
+    K = demo_rng.standard_normal((1, 4, 8))
+    V = demo_rng.standard_normal((1, 4, 8))
 
-    print(f"Sequence length: 4 tokens")
-    print(f"Embedding dim:   8")
+    # Plant the relationship. Key 2 becomes an exact copy of query 0, standing in for
+    # the key that a pronoun like "it" would be hunting for.
+    match_pos = 2
+    K[0, match_pos] = Q[0, 0]
+
+    output, weights = scaled_dot_product_attention(Tensor(Q), Tensor(K), Tensor(V))
+    token0 = weights.data[0, 0, :]
+
+    print("Sequence length: 4 tokens")
+    print("Embedding dim:   8")
+    print(f"Planted match:   query 0 matches key {match_pos}")
     print(f"\nAttention weights shape: {weights.shape}")
-    print(f"Each token attends to all 4 positions!")
 
-    print(f"\nToken 0 attention: {weights.data[0, 0, :].round(2)}")
-    print("(sums to 1.0 - it's a probability distribution)")
+    print(f"\nToken 0 attention: {token0.round(3)}")
+    print(f"Strongest match:   position {int(token0.argmax())}, holding {token0.max():.1%} of the weight")
+    print(f"Row sum:           {token0.sum():.1f} (a probability distribution over the 4 positions)")
 
-    print("\n✨ Attention lets tokens communicate!")
+    drift = float(np.abs(output.data[0, 0] - V[0, match_pos]).max())
+    print(f"\nToken 0's output lands within {drift:.2f} of value vector {match_pos},")
+    print("so it is a near copy of the matched value rather than an average of all four.")
+
+    print("\n✨ Attention routed token 0 to the position we planted!")
 
 # %%
 if __name__ == "__main__":
@@ -1558,7 +1480,7 @@ Congratulations! You've built the attention mechanism that revolutionized deep l
 
 ### Systems Insights Discovered
 - **Quadratic scaling**: Attention memory grows as n^2, limiting context lengths
-- **Memory bottlenecks**: Attention matrices dominate memory in transformers (~144GB per sequence at GPT-3 scale)
+- **Memory bottlenecks**: Attention matrices dominate memory in transformers (~154.62 GB per sequence at GPT-3 scale)
 - **Multi-head parallelism**: Different heads can specialize in different relationship types
 - **Production challenges**: Understanding why attention efficiency research is crucial
 

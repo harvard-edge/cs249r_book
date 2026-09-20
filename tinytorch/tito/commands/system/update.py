@@ -366,15 +366,16 @@ class UpdateCommand(BaseCommand):
                 shutil.copy2(src_init, dst_init)
                 self.console.print("[dim]  ✓ Updated tinytorch/__init__.py[/dim]")
 
-            # Update core/__init__.py but NOT other .py files in core/
-            src_core = src_pkg / "core"
-            dst_core = dst_pkg / "core"
-            if src_core.exists() and dst_core.exists():
-                src_core_init = src_core / "__init__.py"
-                dst_core_init = dst_core / "__init__.py"
-                if src_core_init.exists():
-                    shutil.copy2(src_core_init, dst_core_init)
-                    self.console.print("[dim]  ✓ Updated tinytorch/core/__init__.py[/dim]")
+            # Update core/__init__.py and perf/__init__.py but NOT exported implementation files
+            for subpkg in ["core", "perf"]:
+                src_sub = src_pkg / subpkg
+                dst_sub = dst_pkg / subpkg
+                if src_sub.exists() and dst_sub.exists():
+                    src_sub_init = src_sub / "__init__.py"
+                    dst_sub_init = dst_sub / "__init__.py"
+                    if src_sub_init.exists():
+                        shutil.copy2(src_sub_init, dst_sub_init)
+                        self.console.print(f"[dim]  ✓ Updated tinytorch/{subpkg}/__init__.py[/dim]")
 
             return True
         except Exception as e:

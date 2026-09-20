@@ -1,332 +1,269 @@
-# The Modern Stack: Compilers, Triton, and Custom Silicon {#sec-extensions}
+# Extensions: Leaving NumPy {#sec-extensions}
 
 ::: {.column-margin}
-![](assets/images/diagrams/21_framework-you-are-here.svg){width="100%" fig-alt="TinyTorch execution datapath blueprint highlighting Module 21 Extensions as the active subsystem."}
+![](assets/images/diagrams/21_framework-you-are-here.svg){width="100%" fig-alt="TinyTorch execution datapath blueprint highlighting the Extensions chapter between the TinyTorch software stack and the hardware."}
 
-*Framework Blueprint: Module 21 reaches beyond the educational interpreter to examine graph compilers, custom GPU kernels, and TPU systolic arrays.*
+*Framework Blueprint: the optional extensions call compiled kernels from TinyTorch, one level below NumPy.*
 :::
 
 
-While TinyTorch implements an educational reference runtime in pure Python and NumPy, production deep learning systems at hyperscale operate through sophisticated compiler stacks and dedicated custom silicon. Modern ML systems do not execute tensor operations one by one in an interpreter; they capture computational graphs, generate optimized GPU machine code, and dispatch workloads to specialized matrix acceleration hardware.
+Every module so far bottoms out in NumPy. When TinyTorch multiplies two matrices, it hands the arrays to `np.matmul`, and a library someone else wrote does the arithmetic. This chapter goes one level down. TinyTorch ships three optional extensions in `tinytorch.extensions`, each a small piece of code that runs a kernel outside NumPy:
 
-From a systems and architecture perspective, this chapter reaches beyond the educational interpreter to explore the frontiers of modern ML systems:
-1. **Computation graph capture**: Tracing dynamic Python programs into intermediate representations (IR) using graph capture engines like TorchDynamo and JAX JIT.
-2. **Automated kernel compilation**: Lowering tensor operations to high-performance GPU machine code via domain-specific compiler frameworks like OpenAI Triton and PyTorch Inductor.
-3. **Custom domain-specific hardware**: Analyzing weight-stationary systolic arrays (such as the Google TPU Matrix Multiply Unit) that achieve massive energy efficiency by streaming operands across 2D grids of physical arithmetic units.
-4. **Distributed data parallelism**: Scaling training across clusters of GPUs using collective communication algorithms (Ring-AllReduce) to synchronize parameter gradients across the network.
+1. **C++ through `ctypes`**: a tiled matrix multiply and a fused bias-plus-GELU, compiled on your machine the first time you call them.
+2. **Triton**: the same fused bias-plus-GELU written as a GPU kernel for NVIDIA hardware.
+3. **PyTorch MPS**: a matrix multiply handed to the GPU of an Apple M-series chip.
 
-This final chapter completes the bridge from the educational xv6 kernel of TinyTorch to the high-performance compiler and hardware architectures powering modern artificial intelligence.
+None of the twenty modules depends on these extensions, and each falls back to NumPy when its compiler, library, or hardware is missing (@fig-extension-paths). The C++ kernels need only a compiler. The two GPU paths need PyTorch, which TinyTorch itself never imports, so you install it separately to try them.
 
-![**Execution layers**: Graph capture and kernel generation form an optional production bridge between framework code and execution hardware.](assets/images/diagrams/21_extensions-diag-1.svg){#fig-modern-stack fig-alt="Framework program above optional graph capture and kernel generation, followed by execution hardware. TinyTorch uses eager NumPy on CPU."}
+The measurements in this chapter come from one machine, an Apple M5 Max laptop. The C++ library there is built single-threaded, because Apple's compiler ships without the OpenMP runtime the kernel would use to spread work across cores. Your absolute numbers will differ. The ratios between them are what the chapter is about.
+
+![**Four ways to run an operation on a TinyTorch Tensor.** The modules use NumPy. The extensions reach the CPU's vector units directly through compiled C++, or move the data to a GPU and back.](assets/images/diagrams/21_extension-paths.svg){#fig-extension-paths fig-alt="A TinyTorch Tensor at the top branches to four routes: NumPy, C++ through ctypes, PyTorch MPS, and Triton. NumPy and C++ run on the CPU, MPS on the Apple GPU, and Triton on an NVIDIA GPU. The two GPU routes copy data in and out. Each extension falls back to NumPy."}
 
 ## The Problem
 
 ::: {.column-margin}
-**↩ Jump back:** @sec-transformers
-*Mapping TinyGPT's attention projections and feed-forward networks onto custom systolic array silicon.*
+**↩ Jump back:** @sec-acceleration
+*`tiled_matmul` and `fused_gelu` expressed tiling and fusion in NumPy; here the same ideas are compiled.*
 :::
 
 
-@sec-acceleration's compact GELU expression avoids retaining intermediate Tensor wrappers, but NumPy still executes array operations and creates temporary arrays. A compiled fused kernel could instead keep each element's intermediate values local until it writes the result. To see the difference independently of NumPy's implementation, consider three pointwise operations on a four-element vector. A pointwise operation computes output element $i$ using the corresponding input elements, without consulting other positions.
+@sec-acceleration expressed two optimizations in NumPy. `tiled_matmul` walked a matrix product in 64 × 64 blocks, and `fused_gelu` wrote GELU as a single expression. Both still hand every block of arithmetic to NumPy, so neither controls what happens inside a block. Writing the loops in Python instead gives that control and throws away the speed. The function below is a matrix product over Python lists, with the loops in the same order the C++ kernel will use.
 
 ```python
-import math
-
-def gelu1(v):
-    c = math.sqrt(2 / math.pi)
-    return 0.5 * v * (1 + math.tanh(c * (v + 0.044715 * v ** 3)))
-
-def add(x, b):    return [xi + bi for xi, bi in zip(x, b)]
-def gelu(z):      return [gelu1(v) for v in z]
-def scale(y, s):  return [s * v for v in y]
-
-x = [1.0, -2.0, 0.5, 3.0]
-b = [0.1, 0.1, 0.1, 0.1]
-z = add(x, b)          # pass 1: read x, b; write z
-y = gelu(z)            # pass 2: read z;    write y
-out = scale(y, 2.0)    # pass 3: read y;    write out
+def matmul_loops(A, B):
+    M, K, N = len(A), len(A[0]), len(B[0])
+    C = [[0.0] * N for _ in range(M)]
+    for i in range(M):
+        for k in range(K):
+            a_ik = A[i][k]
+            for j in range(N):
+                C[i][j] += a_ik * B[k][j]
+    return C
 ```
 
-Each function reads a whole list and writes a whole list. The lists `z` and `y` exist only to connect adjacent operations. For a vector of $n$ elements and a chain of $k$ operations, our simplified ledger counts $2kn$ activation values moved: one read and one write per element per operation. A fused chain needs $2n$. Both also read the bias vector, so this ledger omits that common traffic. It also omits Python object overhead and does not measure physical memory transfers. A GPU implementation can additionally pay dispatch and launch overhead for separate kernels; its magnitude depends on the workload and execution environment.
+On a 128 × 128 product it runs at 0.12 billion floating-point operations per second (GFLOP/s) on my machine. A 1024 × 1024 product needs $2 \times 1024^3$, about 2.1 billion, operations, which at that rate would take about 17 seconds. `np.matmul` finishes it in 1.33 ms.
 
-A hand-written fused loop solves this one chain. Adding another activation or changing the order would require another implementation. A compiler makes the chain available as data so that a reusable transformation can identify the same opportunity in many programs. It must also establish that the transformation is legal: an intermediate needed by another consumer cannot simply disappear.
-
-A matrix product offers a different reuse opportunity. For $C = AB$, each element of $A$ contributes to several columns of $C$, and each element of $B$ contributes to several rows. A plain triple loop for square matrices performs $2n^3$ source-level operand accesses for $n^3$ multiply-adds. That count is not a count of reads from main memory: caches, register reuse, and the tiling of @sec-acceleration can serve many accesses locally. The hardware model later in this chapter makes another form of local reuse visible by passing operands directly between neighboring cells.
+Between those two numbers lies everything a kernel writer controls. That includes the language the loop is compiled from, whether the loop uses the processor's vector units, how the loop order treats the cache, how many cores run, and whether the arithmetic moves to a different processor altogether. The extensions let you change these one at a time and measure each.
 
 ## The Idea
 
 ::: {.column-margin}
-**↩ Jump back:** @sec-autograd
-*Tracing dynamic Python autograd tapes into static intermediate representation (IR) computation graphs.*
+**↩ Jump back:** @sec-tensors
+*A Tensor's data is one NumPy array over one block of memory, which is what makes handing it to C possible.*
 :::
 
 
-The three mechanisms change different parts of the execution. Graph capture exposes dependencies, fusion removes eligible intermediate arrays, and an array of arithmetic cells reuses operands locally. The roofline model from @sec-profiling helps distinguish cases where less data movement matters from cases limited by arithmetic or overhead.
+### Cross the language boundary without copying
 
-### Capture the program as a graph
+A NumPy array of `float32` values is a pointer to a contiguous block of memory plus a shape. Compiled code needs only the pointer and the dimensions. The `ctypes` module in Python's standard library loads a compiled shared library and calls its functions with exactly those arguments. No values are copied as long as the array is already contiguous `float32`; otherwise `np.ascontiguousarray` makes one converted copy first.
 
-TinyTorch's autograd graph records dependencies during a differentiable forward computation so that `backward()` can traverse them in reverse. A compiler also needs dependencies, but in a representation it can analyze and transform for later execution. The following explicit program is a small **intermediate representation**,[^fn-ir-graph-capture] or IR. Each named value makes a connection between an operation and its consumer visible.
+The call itself is not free. On my machine a 1 × 1 `simd_matmul` takes 2.4 µs, against 0.33 µs for `np.matmul` on the same arrays, because `ctypes` converts each argument in Python on every call. That fixed cost disappears inside a 1024 × 1024 product and dominates a tiny one.
 
-[^fn-ir-graph-capture]: **IR** (intermediate representation): a program written in a form meant for tools rather than people, usually a list of operations on named values. A compiler may use several representations as it lowers operations toward machine instructions; the list in this chapter is a deliberately small example.
+### Let the compiler use the vector unit
 
-```
-%z = add(%x, %b)
-%y = gelu(%z)
-%o = mul(%y, 2.0)
-```
+Each CPU core has vector registers that hold several numbers and apply one instruction to all of them. On the ARM cores measured here a NEON register holds four `float32` values, and one fused multiply-add instruction updates all four.[^fn-simd-alignment-cache] A C++ compiler emits these instructions without being asked when a loop's iterations are independent and walk memory in order. The kernel's innermost statement, `c_row[j] += a_ik * b_row[j]`, is written for exactly that. It walks two rows from left to right with one fixed scalar `a_ik`. Compiling the same file with the vectorizer switched off isolates the effect, which comes to a factor of 3.4 (@tbl-extensions-gemm), close to the four lanes of the register.
 
-This explicit IR is written before its interpreter executes it. TinyTorch's autograd graph, by contrast, is recorded during an eager forward pass; obtaining a reusable compiler representation would require a new capture mechanism. With the graph in hand, the compiler can see that `%z` and `%y` are consumed exactly once, by the next operation, and never leave the chain. They need not be materialized as complete arrays.
+### Keep the working set in cache
 
-![**Modern machine learning compiler lowering and fusion pipeline**: A high-level Python computation graph is captured into an intermediate representation (Graph IR), optimized via algebraic rewrites, grouped into fused operator clusters, and lowered through Triton IR or LLVM to emit optimized machine code executed as a single launch kernel.](assets/images/diagrams/21_compiler-lowering-fusion.svg){#fig-compiler-lowering-fusion fig-alt="Four-stage compiler pipeline showing Python graph capture, graph optimization, kernel fusion pass, and code generation into Triton or machine code."}
+Loop order matters as much as the instructions. In `i, k, j` order the inner loop reads `B` and updates `C` along rows, so consecutive iterations touch consecutive addresses. The kernel also tiles all three loops in blocks of 64, with the same reasoning as `tiled_matmul`. A 64 × 64 tile of `float32` values is 16 KB, and the three tiles in use at once, 48 KB in all, fit in the 128 KB first-level data cache of the cores measured here.
 
-### Fuse what is memory-bound
+### Fuse only what memory limits
 
-The activation ledger gives a precise reason to fuse this chain. For a fixed amount of arithmetic, reducing counted activation traffic from $2kn$ to $2n$ increases the arithmetic intensity of that ledger by $k$. Including bias reads reduces this factor, and actual execution includes costs outside the model. Our toy rule groups consecutive pointwise operations and treats every other operation as a boundary. It assumes a single chain with unchanged length and no externally visible intermediate. A production compiler must prove corresponding shape, dependency, and mutation conditions rather than infer them from adjacency alone. For the example, the rewritten representation is one line.
+Fusion saves memory traffic. In NumPy, `x + bias` followed by GELU writes the sum to memory and reads it back; a fused loop keeps it in a register. That saving helps only when memory traffic is what limits the loop, and GELU contains a hyperbolic tangent, which costs far more than a load. On a 4096 × 768 array, `x + bias` takes 0.37 ms on my machine and `np.tanh` takes 2.10 ms (@tbl-extensions-gelu). A fused kernel that computes its tangent one element at a time is slower than NumPy's unfused expression, whose `np.tanh` uses the vector unit. Fusion pays off only once the arithmetic inside the fused loop is vectorized as well.
 
-```
-%o = fused_add_gelu_mul(%x, %b, 2.0)
-```
+### Move work to a device, and pay for the trip
 
-Generating an element loop for this group is a separate step from identifying the group. The grouping pass below changes only program data; the fused executor is what avoids materializing the internal activation lists.
+A GPU runs thousands of arithmetic lanes, but it computes on data in memory it can reach. An NVIDIA GPU has its own memory across a PCIe link, so `triton_fused_gelu` copies `x` to the GPU, runs the kernel, and copies the result back. Apple silicon shares one memory between CPU and GPU. That removes the PCIe link but not every copy, because `mps_matmul` still moves its arrays into buffers the GPU owns and back out. Offloading is worth it only when the time the GPU saves exceeds the time the copies and the launch cost.
 
-### Match the hardware to the matrix multiply
+::: {#nbk-extensions-offload .callout-napkin-math title="Napkin math: which operations pay for the trip"}
+Count the work an operation does for each byte it moves.
 
-::: {.column-margin}
-![](assets/images/diagrams/21_extensions-margin-systolic.svg){width="100%"}
-*2D systolic array: wavefront dataflow through multiply-accumulate cells.*
-:::
+- **Matrix multiply**, $n \times n$ by $n \times n$ in `float32`: $2n^3$ operations on $3n^2$ values of 4 bytes each, so $2n^3 / 12n^2 = n/6$ operations per byte moved. For $n = 256$ that is about 43; for $n = 4096$, about 683. The larger the product, the more arithmetic each copied byte pays for.
+- **Bias-plus-GELU**, any size: about a dozen arithmetic operations and one tangent per element, on 4 bytes read and 4 bytes written. The ratio does not grow with the array, so a lone GELU seldom pays for its own round trip.
 
-The last idea leaves software entirely. A **systolic array** is a grid of small multiply-accumulate cells wired to their neighbors, whose operands move from cell to cell at each clock tick in our ideal model. In the output-stationary form, cell $(i, j)$ holds the running sum for one output $C_{ij}$ and never moves it. Row $i$ of $A$ streams in from the left, one value per cycle; column $j$ of $B$ streams in from the top. When $a_{ik}$ and $b_{kj}$ meet at cell $(i, j)$, the cell multiplies them, adds the product to its sum, and passes both values along to the next cell. At cycle $t$ each cell computes
-
-$$C_{ij} \leftarrow C_{ij} + a_{ik} \, b_{kj}, \qquad k = t - i - j,$$
-
-where the offset $i + j$ is the delay before the first product reaches that cell, and an update occurs only when $0 \leq k < K$. The inputs are staggered so that the matching pair arrives together. Assume the whole $M \times N$ output fits in the array, boundary buffers supply every scheduled input without a stall, and each cell completes a multiply-accumulate per tick. Then each input crosses the array boundary once, for $MK + KN$ input injections. This counts boundary traffic, not all internal transfers or total system memory traffic. The last output finishes after
-
-$$T = M + N + K - 2 \text{ cycles},$$
-
-(\ref{nbk-extensions-systolic-array-latency}) with the first tick numbered zero in the code. Thus the final tick has index $T-1$. The cells fill and drain at different times; short products may never have every cell active simultaneously. Each output accumulator remains in its cell until completion. Real arrays have fixed dimensions, so larger products require tiling, buffering, and additional transfers. The specialization also has a limit: multiply-accumulate cells do not by themselves compute operations such as exponentiation or softmax.
-
-::: {#nbk-extensions-systolic-array-latency .callout-napkin-math title="Napkin math: systolic array cycle count and throughput scaling"}
-For an $M \times K \times N$ matrix multiplication executed on an ideal $M \times N$ output-stationary 2D systolic array:
-
-- **Latency Formula**: The total execution latency is $T = M + N + K - 2$ cycles. For square matrices where $M = N = K$, this simplifies to $T = 3N - 2 \approx 3N$ cycles.
-- **Propagation Wavefront**: The first product $a_{00} b_{00}$ arrives at cell $(0,0)$ at cycle $t=0$. The final product $a_{(M-1)(K-1)} b_{(K-1)(N-1)}$ reaches the bottom-right cell $(M-1, N-1)$ at cycle $T-1$, incurring an input delay of $(M-1) + (N-1)$ cycles plus $K$ computation steps.
-- **Arithmetic Throughput**: The array performs $2MNK$ arithmetic operations (or $MNK$ multiply-accumulate ops) in $M + N + K - 2$ cycles. As $K \to \infty$ with continuous streaming, the peak throughput reaches $MN$ MACs per cycle—100% compute unit utilization across all cells.
+Inside a model the data stays on the device from one layer to the next, so the copies happen once and the kernels run many times. Each call to an extension in this chapter pays the copies again, which is the worst case for offloading.
 :::
 
 ## The Code
 
 ::: {.column-margin}
-![](assets/images/diagrams/21_ext-margin-source.svg){width="100%" fig-alt="Source code mapping card for Module 21 Extensions showing file path, exported package, and tested primitives."}
+![](assets/images/diagrams/21_ext-margin-source.svg){width="100%" fig-alt="Source code mapping card for the Extensions chapter: files in tinytorch/extensions/, imported as tinytorch.extensions, hand-written rather than exported."}
 
-*Source Code Mapping: Module 21 presents architectural models of computational graph capture, Triton GPU execution, and 2D systolic array hardware.*
+*Source Code Mapping: the extensions live in `tinytorch/extensions/` and are the one part of the package not exported from `src/`.*
 :::
 
-There is no TinyTorch module to walk in this extension. The following pure-Python models implement eager execution, grouping, fused execution, and an ideal array schedule. They run on a CPU and expose state explicitly. The separate Triton listing is an optional GPU comparison; its dependencies are not needed for these models.
+Everything in this section lives in `tinytorch/extensions/`. Unlike the rest of the package, these files are written by hand rather than exported from `src/`, so they are the files to edit when you experiment.
 
-### An eager runtime that counts its memory traffic
+### Calling the kernel
 
-The first interpreter executes an explicit list of operations. These examples assume nonempty, equal-length input and bias lists and a nonempty program containing supported operations. Each operation receives one activation value, its element index, and an argument. The index lets bias addition read `b[i]`; scaling uses a scalar argument. The interpreter allocates a new activation list after each operation and counts these modeled passes. It records neither elapsed time nor Python memory allocation sizes.
+`simd_matmul` is the Python side of the C++ matrix multiply.
 
-```python
-POINTWISE = {
-    "add":   lambda v, i, b: v + b[i],
-    "gelu":  lambda v, i, _: gelu1(v),
-    "scale": lambda v, i, s: s * v,
-}
+{{< include _listings/21_extensions/simd_matmul.qmd >}}
 
-def run_eager(x, program):
-    """One kernel per op. Every op reads a whole list and writes a whole list."""
-    buf, moves, kernels = x, 0, 0
-    for op, arg in program:
-        buf = [POINTWISE[op](v, i, arg) for i, v in enumerate(buf)]
-        moves += 2 * len(x)      # one read pass plus one write pass
-        kernels += 1
-    return buf, moves, kernels
+`compile_and_load_simd` returns the loaded library, compiling it first if needed, or `None` if there is no working compiler; in that case the function falls back to `np.matmul`. The two `np.ascontiguousarray` calls guarantee what the C code assumes, one row-major block of `float32` values per matrix, and they cost nothing when the input already has that form. The shape check has to happen here, before the call. C code handed mismatched dimensions does not raise an error; it reads past the end of a buffer. The output is allocated with `np.empty` because the kernel overwrites every element, and `_ptr` passes each array's data pointer as a `float*`.
 
-program = [("add", b), ("gelu", None), ("scale", 2.0)]
-out, moves, kernels = run_eager(x, program)
-```
+### Building it where it runs
 
-The `program` list is a minimal intermediate representation: operation names and arguments form an implicit chain, with each operation consuming the previous result. `run_eager` starts with the caller's `x`, then rebinds `buf` to a new list at every step. It does not modify `x` or `b`. The returned counters describe three modeled kernels, one per list comprehension, rather than the individual scalar `POINTWISE[op]` calls inside it.
+The library is compiled on the student's machine, not shipped, because the right instructions depend on the processor.
 
-### The fusion pass
+{{< include _listings/21_extensions/compile.qmd >}}
 
-Once the program is data, a grouping pass can inspect it without running the arithmetic. Its `run` list accumulates eligible operations. Encountering an unsupported operation flushes that pending group into `groups`, clears `run`, and appends the boundary operation unchanged. The final flush matters when the program ends with pointwise work. No activation values enter this function; its return value is another program representation.
+`_compile` makes up to two attempts. The first adds the OpenMP flags if `_openmp_flags` found a runtime; the second builds the same source without them, and the OpenMP pragmas in the kernel are then ignored. The finished library replaces the old one with `os.replace`, which is atomic, so two processes importing TinyTorch at once never load half a file. `_arch_flags` supplies the vector flags for the machine: AVX2 and fused multiply-add on x86, nothing extra on ARM, where NEON is always present. On macOS it adds `-fveclib=Accelerate`, which lets the compiler replace a scalar `std::tanh` in a loop with a vector version from Apple's Accelerate library. `simd_build_info()` reports what the build produced, including the thread count, so a single-threaded build is never mistaken for a parallel one.
 
-```python
-def fuse(program):
-    """Group consecutive pointwise ops into one fused node; leave others alone."""
-    groups, run = [], []
-    for op, arg in program:
-        if op in POINTWISE:
-            run.append((op, arg))
-        else:
-            if run:
-                groups.append(("fused", run))
-                run = []
-            groups.append((op, arg))
-    if run:
-        groups.append(("fused", run))
-    return groups
+### The matrix multiply kernel
 
-full = [
-    ("add", b), ("gelu", None), ("matmul", "W"),
-    ("scale", 2.0), ("gelu", None),
-]
-for op, arg in fuse(full):
-    print(op, [o for o, _ in arg] if op == "fused" else arg)
-```
+{{< include _listings/21_extensions/tinytorch_cpp_gemm.qmd >}}
 
-On the five-operation example, the pass prints `fused ['add', 'gelu']`, then `matmul W`, then `fused ['scale', 'gelu']`. It proposes three groups instead of five operations. The matrix multiplication is only a boundary marker here; these interpreters do not implement it. No allocation has disappeared yet because no numerical execution has occurred. The pass also does not validate shapes or support branches. Its useful invariant is narrower: flattening the groups reproduces the original operation sequence in the original order.
+The function sits inside an `extern "C"` block in the source file, so its name is not mangled and `ctypes` can find it as `tinytorch_cpp_gemm`. The `__restrict__` qualifiers promise the compiler that `A`, `B`, and `C` do not overlap. Without that promise it would have to assume a store to `C` might change `B` and could not safely vectorize the inner loop.
 
-### The fused executor
+The kernel zeroes `C`, then visits it in 64 × 64 output tiles. For each output tile at column `sj` and row `si`, the `sk` loop walks the shared dimension one tile at a time and accumulates each tile product into the same block of `C`. The `#pragma omp parallel for collapse(2)` line hands the output tiles, the `(sj, si)` pairs, to different threads when OpenMP is enabled. Each thread owns whole tiles of `C`, so no two threads ever write the same element. The `sk` loop stays inside one thread because every step adds to the same tile.
 
-A fused group specifies an opportunity; an executor must realize it. Unpacking the group and passing its operations through `run_eager` would still allocate a fresh list per operation. Passing the group marker itself would fail because `POINTWISE` has no `"fused"` operation. The new executor turns the loop inside out: one loop over elements contains the entire operation chain. Its modeled activation ledger records one input read and one output write per element.
+Inside a tile the loops run in `i, k, j` order, as in `matmul_loops`. The inner loop loads `c_row[j]` and `b_row[j]`, multiplies and adds, and stores `c_row[j]` back, so every fused multiply-add costs two loads and a store. That ratio, not the arithmetic, is what limits this kernel, and it is the first thing a tuned library changes.
 
-```python
-def run_fused(x, chain):
-    """Model one activation pass for a nonempty pointwise chain."""
-    out = []
-    for i, v in enumerate(x):
-        for op, arg in chain:    # v never leaves this local variable
-            v = POINTWISE[op](v, i, arg)
-        out.append(v)
-    return out, 2 * len(x), 1
+### The fused bias-plus-GELU kernel
 
-out_f, moves_f, kernels_f = run_fused(x, program)
-assert out_f == out
-```
+{{< include _listings/21_extensions/tinytorch_cpp_fused_bias_gelu.qmd >}}
 
-The two Python runs produce identical values because they apply the same scalar operations in the same order at each position. `run_fused` preserves the input lists and returns a new output list, but no full-length `z` or `y` list. A Python local is not a guarantee of register residency. It models the lifetime a compiled kernel can give an intermediate: the value remains available within one element's computation, then becomes unnecessary.
+The kernel treats `X` as one flat array of `total_elements` values whose last axis has length `inner_dim`. `idx % inner_dim` gives the column of each element, and therefore which bias value to add, which is broadcasting written out by hand. Each element is read once, carried through the whole formula in local variables, and written once; the sum `x + bias` never reaches memory.
 
-### The same kernel in Triton
+An earlier version of this kernel computed the tangent as $(e^{2z} - 1)/(e^{2z} + 1)$. In `float32`, $e^{2z}$ overflows to infinity once $z$ exceeds about 44, which happens for inputs above about 10, and infinity divided by infinity is `NaN`. `std::tanh` saturates at $\pm 1$ instead. The regression test for this kernel now feeds it inputs far above 10.
 
-Triton expresses work on blocks of elements and compiles it for a supported GPU backend. Its [vector-addition tutorial](https://triton-lang.org/main/getting-started/tutorials/01-vector-add.html) uses the same block index, offset vector, and masked loads as the example below. Here the block computes bias addition followed by GELU; it omits the final scale in `program`. This hand-written illustration is not captured compiler output and is not TinyTorch code. It requires Triton and a compatible GPU environment; the pure-Python traces remain runnable without either.
+### The same fusion in Triton
 
-```python
-import triton
-import triton.language as tl
+A Triton kernel describes the work of one block of elements. Triton compiles it for the GPU and runs one instance, called a program, per block.
 
-@triton.jit
-def fused_bias_gelu_kernel(x_ptr, b_ptr, y_ptr, n_elements,
-                           BLOCK_SIZE: tl.constexpr):
-    pid = tl.program_id(axis=0)                     # which block am I?
-    offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-    mask = offsets < n_elements                     # last block may be partial
+{{< include _listings/21_extensions/fused_bias_gelu_kernel.qmd >}}
 
-    x = tl.load(x_ptr + offsets, mask=mask, other=0.0)
-    b = tl.load(b_ptr + offsets, mask=mask, other=0.0)
+`tl.program_id(0)` says which block this program handles, and `offsets` lists its `BLOCK_SIZE` element indices.[^fn-triton-compiler-swizzling] The last block usually extends past the end of the array, so `mask` switches off the lanes that would read or write out of bounds. The bias index is the same modulo as in the C++ kernel. The formula is computed on whole blocks at once, and the tangent comes from the identity $\tanh(z) = 2\sigma(2z) - 1$ because `tl.sigmoid` is available in every Triton release. `tl.store` writes the finished block, which is the only write the kernel makes. The Python wrapper, `triton_fused_gelu`, copies the arrays to the GPU, launches one program per block, and copies the result back. This path needs an NVIDIA GPU, which the machine measured in this chapter does not have, so it has no timing here.
 
-    z = x + b                                       # block-local intermediate
-    c = 0.7978845608028654                          # sqrt(2 / pi)
-    inner = c * (z + 0.044715 * z * z * z)
-    tanh_inner = 2 * tl.sigmoid(2 * inner) - 1      # tanh via sigmoid
-    y = 0.5 * z * (1.0 + tanh_inner)
+### The Apple GPU path
 
-    tl.store(y_ptr + offsets, y, mask=mask)
-```
+{{< include _listings/21_extensions/mps_matmul.qmd >}}
 
-For a block size of four and six inputs, program 0 uses offsets `[0, 1, 2, 3]` and program 1 uses `[4, 5, 6, 7]`. The second mask is `[True, True, False, False]`; it prevents the final two loads and stores from accessing beyond the arrays. `x_ptr + offsets` names locations in a flat buffer. The kernel expects `b` to have one value per input element, as in our Python example; it does not implement the feature-axis broadcasting of a batched Linear layer. The compiler maps this block description to GPU execution. The source alone does not guarantee register allocation or the number of blocks running simultaneously.
-
-### A systolic array in twelve lines
-
-The systolic simulation changes the order in which a matrix product's operands meet. It assumes nonempty rectangular inputs with matching inner dimensions. It has one accumulator per output and uses $k = t - i - j$ to identify the pair arriving at cell $(i,j)$ during tick $t$. When $k$ lies outside the inner dimension, that cell does nothing. This schedule explains the ideal hardware array's behavior; Python executes the nested loops sequentially and repeatedly indexes the input lists.
-
-```python
-def systolic_matmul(A, B):
-    """Output-stationary systolic array: one multiply-accumulate cell per C[i][j]."""
-    M, K, N = len(A), len(A[0]), len(B[0])
-    C = [[0] * N for _ in range(M)]
-    cycles = M + N + K - 2
-    for t in range(cycles):
-        for i in range(M):
-            for j in range(N):
-                k = t - i - j            # the product cell (i, j) sees at cycle t
-                if 0 <= k < K:
-                    C[i][j] += A[i][k] * B[k][j]
-    return C, cycles
-
-C, cycles = systolic_matmul([[1, 2], [3, 4]], [[5, 6], [7, 8]])
-assert C == [[19, 22], [43, 50]] and cycles == 4
-```
-
-The `C` lists are new state owned by this call; `A` and `B` remain unchanged. After tick $t$, cell $(i,j)$ holds the sum of products whose indices have arrived, from zero through $\min(K-1,t-i-j)$ when that range is nonempty. On return every valid $k$ has arrived exactly once, so `C` equals the ordinary matrix product. Interpreting the inner loops as simultaneous cells gives the hardware schedule. Running the Python function itself gives neither hardware timing nor a measurement of boundary traffic.
+`mps_matmul` is three lines of PyTorch. `.to("mps")` copies each input into a buffer the GPU owns, `torch.matmul` queues the product on the GPU, and `.cpu()` waits for the GPU to finish and copies the result back. The function is a thin wrapper by design, since the point is not the matrix multiply, which Apple's Metal Performance Shaders library supplies, but what it costs to send work to another processor.
 
 ## A Worked Trace
 
-Both mechanisms trace by hand in a few lines. Feeding $x = (1.0, -2.0, 0.5, 3.0)$ and a bias of $0.1$ through add, GELU, and a scale of $2$ gives @tbl-extensions-fusion-trace. For the first row, we obtain $z = 1.1$ and the GELU inner term $\sqrt{2/\pi}(1.1 + 0.044715 \times 1.331) \approx 0.92515965$. Its hyperbolic tangent is approximately $0.72832917$, giving $y \approx 0.95058105$. Keeping the unrounded intermediates and rounding only the displayed result gives $2y \approx 1.9012$.
+### One tile by hand
 
-```{=latex}
-\newpage
-```
+Take $A = \begin{pmatrix} 1 & 2 \\ 3 & 4 \end{pmatrix}$ and $B = \begin{pmatrix} 5 & 6 \\ 7 & 8 \end{pmatrix}$. With $M = K = N = 2$, every tile loop runs once, and `i_max`, `j_max`, and `k_max` are all 2, because the only tile is a partial one. @tbl-extensions-gemm-trace follows the two inner loops. Each row adds `a_ik` times one row of `B` to one row of `C`; the vectorized loop does that addition for all of `j` at once.
 
-| Element | $x$ | $z = x + 0.1$ | $y = \text{GELU}(z)$ | $\text{out} = 2y$ |
+| `i` | `k` | `a_ik` | `b_row` | `c_row` after the step |
 | :---: | :---: | :---: | :---: | :---: |
-| 0 | $1.0$ | $1.1$ | $0.9506$ | $1.9012$ |
-| 1 | $-2.0$ | $-1.9$ | $-0.0545$ | $-0.1091$ |
-| 2 | $0.5$ | $0.6$ | $0.4354$ | $0.8708$ |
-| 3 | $3.0$ | $3.1$ | $3.0974$ | $6.1947$ |
+| 0 | 0 | 1 | $(5, 6)$ | $(5, 6)$ |
+| 0 | 1 | 2 | $(7, 8)$ | $(19, 22)$ |
+| 1 | 0 | 3 | $(5, 6)$ | $(15, 18)$ |
+| 1 | 1 | 4 | $(7, 8)$ | $(43, 50)$ |
 
-: **Fusion trace**: The eager interpreter materializes the $z$ and $y$ columns as lists. The fused interpreter computes those values locally and appends only the last column to its output list. {#tbl-extensions-fusion-trace tbl-colwidths="[14,18,22,24,22]"}
+: **Inner loops of `tinytorch_cpp_gemm` on a 2 × 2 product.** Row $i$ of $C$ is complete after its last $k$ step, so the rows of $C$ are $(19, 22)$ and $(43, 50)$. {#tbl-extensions-gemm-trace tbl-colwidths="[10,10,14,26,40]"}
 
-The values are identical in both runs. What differs is the count the interpreters kept: `run_eager` (lines 7--14 of the eager runtime) charges `2 * len(x)` per operation in line 12, reporting 24 element moves and 3 kernels (three separate read and write passes over four elements). In contrast, `run_fused` (lines 1--8 of the fused executor) evaluates the entire chain in line 5 inside a single element loop, reporting only 8 moves and 1 kernel in line 8. That is the factor of $k = 3$ memory traffic reduction from The Idea, on a vector small enough to check by hand.
+For a 130 × 130 product the tile loops start at 0, 64, and 128, so each dimension has two full tiles and one of width 2. There are nine output tiles, the `(sj, si)` pairs that OpenMP would share among threads, and each accumulates three tile products along `sk`, 27 in all. The corner tile computes a 2 × 2 block of `C`, and the `std::min` bounds keep every loop inside the arrays.
 
-The systolic trace multiplies $A = \begin{pmatrix} 1 & 2 \\ 3 & 4 \end{pmatrix}$ by $B = \begin{pmatrix} 5 & 6 \\ 7 & 8 \end{pmatrix}$ on a $2 \times 2$ array. In `systolic_matmul` (lines 1--12 of the systolic listing), line 4 computes the total propagation latency as $\text{cycles} = M + N + K - 2 = 4$. Line 8 determines cell activation via the diagonal arrival coordinate $k = t - i - j$, accumulating active products in line 10. Applying that schedule cell by cell gives the accumulator contents in @tbl-systolic-trace.
+### The fused GELU on four values
 
-| Cycle | Cell $(0,0)$ | Cell $(0,1)$ | Cell $(1,0)$ | Cell $(1,1)$ |
-| :---: | :---: | :---: | :---: | :---: |
-| 1 | $0 + 1 \cdot 5 = 5$ | idle | idle | idle |
-| 2 | $5 + 2 \cdot 7 = \mathbf{19}$ | $0 + 1 \cdot 6 = 6$ | $0 + 3 \cdot 5 = 15$ | idle |
-| 3 | $19$ | $6 + 2 \cdot 8 = \mathbf{22}$ | $15 + 4 \cdot 7 = \mathbf{43}$ | $0 + 3 \cdot 6 = 18$ |
-| 4 | $19$ | $22$ | $43$ | $18 + 4 \cdot 8 = \mathbf{50}$ |
+Feeding the row $x = (1.0, -2.0, 0.5, 3.0)$ with a bias of $0.1$ in every column through `simd_fused_bias_gelu` returns $(0.9506, -0.0545, 0.4354, 3.0974)$. For the first element, `val` is $1.1$, `inner` is $\sqrt{2/\pi}\,(1.1 + 0.044715 \times 1.331) \approx 0.9252$, its tangent is about $0.7283$, and $0.5 \times 1.1 \times 1.7283 \approx 0.9506$. Those intermediates live in registers for one element and are gone before the next.
 
-: **Accumulator trace**: Each row shows a completed tick of the ideal $2 \times 2$ array. Bold marks the cycle in which each output finishes; cycle 1 corresponds to code index $t=0$. {#tbl-systolic-trace tbl-colwidths="[12,22,22,22,22]"}
+### The measurements
 
-The wavefront is visible in the table. Cell $(0,0)$ starts first and finishes at cycle 2; the cells one step away start at cycle 2; the far corner starts at cycle 3 and finishes at cycle 4. In line 14, `systolic_matmul` confirms the final result $\begin{pmatrix} 19 & 22 \\ 43 & 50 \end{pmatrix}$ and `cycles == 4`. Across those ticks, the ideal array injects eight input values at its boundary. The Python simulator performs sixteen indexed operand accesses. These count different boundaries, so their ratio is not a measured CPU traffic reduction.
+@tbl-extensions-gemm times a 1024 × 1024 `float32` product five ways. The C++ and tiled results match `np.matmul` to within float32 rounding.
 
+| Implementation | Time | GFLOP/s |
+| :--- | ---: | ---: |
+| `matmul_loops`, Python (128 × 128 product) | 33.9 ms | 0.12 |
+| C++ kernel, vectorizer switched off | 336 ms | 6.4 |
+| `simd_matmul` | 99.4 ms | 21.6 |
+| `tiled_matmul` from @sec-acceleration | 18.5 ms | 116 |
+| `np.matmul` | 1.33 ms | 1,611 |
 
-@fig-systolic-wavefront separates the active products from the accumulated state. An inactive cell may still hold a completed output; no later cell takes ownership of that sum.
+: **Matrix multiply, 1024 × 1024, on one Apple M5 Max.** Medians of repeated runs; the C++ library is single-threaded. The Python row uses a smaller product because the full one would take about 17 seconds. {#tbl-extensions-gemm tbl-colwidths="[52,24,24]"}
 
-![**Output-stationary systolic wavefront**: Active cells accumulate products while completed cells retain their outputs. Operands move right and down for reuse in this ideal hardware schedule.](assets/images/diagrams/21_systolic-wavefront.svg){#fig-systolic-wavefront width=5in fig-alt="Four two-by-two arrays show active products and retained accumulators at ticks zero through three, ending with outputs 19, 22, 43, and 50. Horizontal arrows carry A right and vertical arrows carry B down."}
+Compiling the loop gains a factor of 50 over Python, and vectorizing it another 3.4. The row below it is humbling. `tiled_matmul`, with its tile loops in interpreted Python, is five times faster than the compiled kernel, because each 64 × 64 tile product it computes is a call to NumPy's library. That library is another fourteen times faster again. Limiting it to one thread did not change its rate on this machine, so the difference is not extra cores. A tuned matrix library keeps a small block of `C` in registers for the whole `k` loop, so each multiply-add needs a fraction of a load instead of two loads and a store. It also packs tiles of `A` and `B` into the order the inner loop reads them.
+
+@tbl-extensions-gelu times bias-plus-GELU on a 4096 × 768 `float32` array, 12.6 MB, the activations of a 768-wide transformer layer for 4,096 tokens.
+
+| Implementation | Time |
+| :--- | ---: |
+| `fused_gelu` from @sec-acceleration, after `x + bias` | 26.5 ms |
+| NumPy expression with `z * z * z` in place of `z ** 3` | 4.33 ms |
+| C++ fused kernel, scalar `std::tanh` | 22.1 ms |
+| `simd_fused_bias_gelu`, vector tangent | 3.06 ms |
+| *Pieces:* `x ** 3` alone | 16.6 ms |
+| *Pieces:* `x * x * x` alone | 0.46 ms |
+| *Pieces:* `x + bias` alone | 0.37 ms |
+| *Pieces:* `np.tanh(x)` alone | 2.10 ms |
+
+: **Bias plus GELU, 4096 × 768, on the same machine.** Medians of repeated runs; outputs agree to within $5 \times 10^{-7}$. {#tbl-extensions-gelu tbl-colwidths="[76,24]"}
+
+The largest single effect has nothing to do with fusion. NumPy computes `x ** 3` through a general power routine that takes 16.6 ms, while `x * x * x` takes 0.46 ms, so rewriting one term of @sec-acceleration's expression speeds it up six times. The fused C++ kernel with a scalar tangent is then five times slower than that NumPy expression. With the vector tangent it is 1.4 times faster. Fusion saved the traffic of the intermediate arrays in both kernels, and only the one whose arithmetic kept pace was able to show it.
+
+@tbl-extensions-mps times `mps_matmul` against `np.matmul` at four sizes. The third column is the GPU product alone, timed with the inputs already on the GPU.
+
+| $n$ | `np.matmul` | `mps_matmul` | GPU product alone |
+| ---: | ---: | ---: | ---: |
+| 256 | 0.02 ms | 0.72 ms | 0.21 ms |
+| 1024 | 1.28 ms | 1.06 ms | 0.37 ms |
+| 2048 | 10.4 ms | 2.53 ms | 1.39 ms |
+| 4096 | 86.9 ms | 14.2 ms | 10.1 ms |
+
+: **Matrix multiply on the Apple GPU through MPS, same machine**, measured with PyTorch 2.14 installed in a separate environment. `mps_matmul` includes both copies; the last column does not. {#tbl-extensions-mps tbl-colwidths="[16,28,28,28]"}
+
+At $n = 256$ the GPU path is about 30 times slower than NumPy; most of its time is the trip, not the product. The two break even near $n = 1024$, and at $n = 4096$ the GPU path is six times faster even with the copies included. As the napkin math's $n/6$ predicts, the advantage grows with $n$.
 
 ## From TinyTorch to Production
 
-The toy pass begins with an explicit program. A production framework first has to obtain one from ordinary model code. In PyTorch's compilation path, TorchDynamo captures supported operations, AOTAutograd can construct graphs for training, and TorchInductor lowers supported graphs to executable code. These are related to the dependencies recorded by TinyTorch autograd, but they are not its tape read in another direction. Capture needs reusable representations and checks on the assumptions under which execution remains valid. The [PyTorch compiler FAQ](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_faq.html) describes this separation.
-
-TorchInductor can generate Triton for GPU execution or C++ for CPU execution, with the selected path depending on the backend and operators. It can also use existing operator implementations; not every operation becomes a newly generated kernel. Its decisions include legality, scheduling, and memory use beyond our adjacency rule. The [Dynamo overview](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_dynamo_overview.html) describes the capture-to-backend boundary.
-
-The hardware comparison is similarly specific. Google's documented TPU designs include matrix units organized as systolic arrays alongside other execution units. Array dimensions differ across generations; a particular grid size is not the definition of a TPU. The [TPU architecture documentation](https://docs.cloud.google.com/tpu/docs/system-architecture-tpu-vm) describes the matrix units and surrounding storage. Our simulation models an ideal arrival schedule (\ref{psp-extensions-tpu-vs-tensor-cores}), not those devices' complete arithmetic formats, instruction sets, or memory systems.
-
-::: {#psp-extensions-tpu-vs-tensor-cores .callout-production-bridge title="Production bridge: Google TPU matrix units vs. NVIDIA Tensor Cores"}
-Industrial AI acceleration balances hardware specialization, memory bandwidth, and programming flexibility across competing architectural philosophies:
-
-- **Google TPU (Matrix Multiply Unit / MXU)**: A dedicated 2D systolic array (e.g., $128 \times 128$ in TPU v4/v5p, capable of 16,384 MACs per cycle in BF16). Weights or outputs remain stationary on-chip while activation data streams across neighbor-to-neighbor interconnects without reading/writing intermediate results back to registers or SRAM caches.
-- **NVIDIA Tensor Cores (Warp-Level Matrix Engine)**: Rather than an autonomous systolic grid, Tensor Cores operate as synchronous warp instructions (e.g., `mma.sync`, `wgmma`) tightly coupled to streaming multiprocessor (SM) register files and shared memory. Threads cooperatively load tile fragments, compute small matrix products ($16 \times 8 \times 16$ or $64 \times 128 \times 16$), and accumulate into registers.
-- **Architectural Trade-Off**: Systolic arrays achieve superior energy efficiency and silicon density for large, dense, statically shaped GEMMs by eliminating register file read/write power. Tensor Cores offer higher flexibility for irregular shapes, dynamic control flow, fused activations, and sparse or unstructured workloads.
+::: {.column-margin}
+**↩ Jump back:** @sec-milestone-3
+*The benchmarking scorecard applies to kernels too: same inputs, checked outputs, measured time.*
 :::
 
-| Layer | TinyTorch | Production alternative | Constraint that motivates it |
-| :--- | :--- | :--- | :--- |
-| Program capture | Executes Python operations eagerly | Capture supported regions with validity checks | Expose opportunities across operations |
-| Fusion | Compact NumPy expression with temporary arrays | Generate eligible combined kernels | Avoid selected intermediate transfers and launches |
-| Kernel source | NumPy numerical operations | Generated code and existing kernel libraries | Map operations to a supported execution backend |
-| Matrix multiply | NumPy products and explicit teaching loops | Tiled matrix units and local operand reuse | Supply arithmetic units without unnecessary distant transfers |
 
-: **Execution choices**: Each layer preserves an intended computation while changing how it is represented or executed. The alternatives require additional correctness checks and do not guarantee a speedup. {#tbl-stack-comparison tbl-colwidths="[16,24,32,28]"}
+The mechanisms here are the ones production frameworks use. What differs is how much of the surrounding system takes part in them.
 
-Compilation adds preparation work and assumptions to execution. Captured regions can require guards, checks that the inputs and program state still satisfy those assumptions. Unsupported control flow can split a program into separate captured regions, limiting optimization across the split. A changed input need not always require recompilation, but a failed specialization assumption can. These trade-offs replace the toy pass's deliberately restricted input contract.
+**Custom operators, not `ctypes`.** A production framework registers a C++ or CUDA kernel with its operator dispatcher; PyTorch documents this as [custom C++ and CUDA operators](https://docs.pytorch.org/tutorials/advanced/cpp_custom_ops.html). A registered operator takes tensors instead of raw pointers, checks devices and dtypes once in C++, can declare a backward function so autograd can differentiate through it, and works under the framework's compiler. The `ctypes` extensions here do none of that. They take NumPy arrays and return NumPy arrays, and TinyTorch's autograd cannot see inside them.
 
-A performance investigation should compare cold compilation with repeated execution separately, check outputs within the required numerical tolerance, and inspect what operations actually execute. Fewer kernel launches are evidence that execution changed, not proof of a speedup. A memory-bound chain can benefit from fewer transfers; a larger fused group can also consume more local resources, and a matrix product can remain limited by arithmetic. The measured workload decides. The useful connection back to TinyTorch is the habit of following values, state, and costs through each layer before accepting the result.
+**Libraries for the matrix product.** Frameworks almost never ship their own matrix multiply for a CPU or GPU. They call a tuned library, such as Accelerate, OpenBLAS, or oneMKL on CPUs and cuBLAS or CUTLASS on NVIDIA GPUs, because @tbl-extensions-gemm is typical: a clear, correct, vectorized kernel is still far from what the library achieves. Custom kernels are written for the operations libraries do not cover, most often fused chains like bias-plus-GELU.
+
+**Generated kernels for the fused chains.** As @sec-acceleration described, `torch.compile` finds chains of elementwise operations in a model and generates Triton kernels for them on NVIDIA GPUs. The Triton kernel in this chapter is the kind a compiler writes for you.
+
+**Data that stays on the device.** A framework moves a model's weights to the GPU once and keeps each layer's activations there. Only the inputs and the final results cross back. TinyTorch's Tensor holds a NumPy array, so every GPU extension call is a full round trip, the worst case in @tbl-extensions-mps.
+
+| Layer | TinyTorch extension | Production counterpart |
+| :--- | :--- | :--- |
+| Calling compiled code | `ctypes` and raw pointers | Operators registered with the framework's dispatcher |
+| Matrix multiply | Tiled, vectorized C++ loop | Tuned vendor library |
+| Fused elementwise chains | Hand-written C++ and Triton kernels | Kernels generated by a compiler, hand-written for the rest |
+| GPU data | Copied in and out on every call | Kept on the device across layers |
+| Gradients | None; autograd cannot see inside | Backward functions registered with each operator |
+
+: **What changes between the extensions and a production framework.** The kernels are recognizable; the integration around them is what production adds. {#tbl-extensions-production tbl-colwidths="[22,36,42]"}
 
 ## Summary
 
-This chapter extended the framework's execution model without adding a new TinyTorch module. `run_eager` materializes each operation's output, `fuse` groups eligible operations without executing them, and `run_fused` carries each element through a group before writing it. The systolic simulation retains one partial sum per output while operand pairs arrive according to a schedule. These mechanisms preserve different invariants, but the reading method is the same: identify the inputs, follow the state changes, establish the returned result, and separate an analytical count from a measurement. That method carries from a four-element trace to an unfamiliar production profiler report. The completed reference remains small enough to reread whenever one of those boundaries becomes unclear.
+The extensions take a TinyTorch computation below NumPy in three ways. `simd_matmul` and `simd_fused_bias_gelu` pass NumPy's data pointers to C++ compiled on the student's machine. `triton_fused_gelu` runs the fused kernel as block programs on an NVIDIA GPU. `mps_matmul` sends a product to the Apple GPU. Each checks its inputs before handing over a pointer, because compiled code does not check them, and each falls back to NumPy when it cannot run.
+
+The measurements carry the lesson. Compiling and vectorizing a loop gains a factor of 170 over Python, and a tuned library is still 75 times faster than that loop. Fusion saves memory traffic, but the gain appears only when the arithmetic inside the fused loop keeps up, and on this workload rewriting one power as two multiplications mattered more. Offloading to a GPU pays only once the work is large enough to cover the copies. None of this was visible from the code alone, and all of it was visible from one table of timings.
+
+The invariant to carry out of the book is the one this chapter tested on its own kernels. An optimization has paid off only when its output has been checked against a reference and its time has been measured on the workload that matters.
+
+[^fn-simd-alignment-cache]: Modern SIMD execution units (e.g., 128-bit ARM NEON, 256-bit x86 AVX2, or 512-bit AVX-512) achieve peak throughput when memory operands are naturally aligned to the vector register width (16, 32, or 64 bytes). When an unaligned vector load straddles a 64-byte CPU cache line boundary, the hardware memory subsystem must issue two separate cache access transactions and splice the result in the processor load buffer, incurring throughput penalties. Production BLAS implementations routinely pad matrix row strides to multiples of 64 bytes to guarantee full cache line alignment.
+
+[^fn-triton-compiler-swizzling]: In traditional CUDA C++, the programmer must explicitly partition thread grids, choreograph intra-warp shuffles, manage shared memory (`__shared__`) buffers, and apply hand-tuned index swizzling permutations to avoid bank conflicts across the 32 hardware memory banks. Triton operates at a higher abstraction: the developer writes SPMD block-level tensor algorithms, and the Triton compiler automatically generates coalesced global memory transactions, bank-conflict-free shared memory layouts, and asynchronous copy pipelines (`cp.async` on NVIDIA Ampere/Hopper).
+
+## Further reading
+
+- Goto and van de Geijn (2008), [Anatomy of high-performance matrix multiplication](https://doi.org/10.1145/1356052.1356053), *ACM TOMS*. Register blocking and packing, the two techniques that separate `simd_matmul` from a tuned library.
+- Van Zee and van de Geijn (2015), [BLIS: a framework for rapidly instantiating BLAS functionality](https://doi.org/10.1145/2764454), *ACM TOMS*. How a matrix library is built from one small hand-tuned kernel.
+- Tillet, Kung, and Cox (2019), [Triton: an intermediate language and compiler for tiled neural network computations](https://doi.org/10.1145/3315508.3329973), *MAPL*. The design behind the block programs in `triton_gelu.py`.
+- The Python documentation for [`ctypes`](https://docs.python.org/3/library/ctypes.html), which covers loading libraries, declaring argument types, and passing buffers.
 
 ## Exercises
 
-1. Add `relu` to `POINTWISE` and group the sequence `add, relu, softmax, scale`, treating softmax as a boundary. Predict the groups before running `fuse`. Implement a separate stable whole-vector softmax and a dispatcher that can execute both fused groups and that boundary operation. Check output agreement with an eager dispatcher. Explain why simply adding a scalar lambda to `POINTWISE` cannot implement softmax.
+1. **Turn on the cores.** Install an OpenMP runtime (`brew install libomp` on macOS; GCC on Linux includes one), delete `libtinytorch_simd.so`, and call `simd_build_info()` to confirm the thread count. Time `simd_matmul` at $n = 1024$ with `OMP_NUM_THREADS` set to 1, 2, 4, and the number of cores. Predict the speedup before you run it, then explain why it falls short of linear.
 
-2. Change the example so that the caller needs both the final output and the intermediate `z`. Predict which activation list must remain materialized. Extend the program representation to mark that output, then compare the resulting traffic ledger with the original 24 and 8 moves. State separately the traffic for the bias input.
+2. **Tile the registers.** Rewrite the inner loops of `tinytorch_cpp_gemm` so that each step computes a 4 × 16 block of `C` held in local variables for the whole `k` tile, and store it once at the end. Count the loads and stores per multiply-add before and after the change, then measure. Keep the regression tests passing.
 
-3. Record each systolic cell's partial sum after every tick for the $2 \times 2$ example. Then run an $M=2$, $K=3$, $N=2$ product and compare with ordinary matrix multiplication. Count boundary injections by tracking each distinct `A[i][k]` and `B[k][j]` once; count the simulation's list accesses separately. Explain why those are different counts, and why neither measures CPU main-memory traffic.
+3. **Measure the vector tangent.** Build the library with and without `-fveclib=Accelerate` (on Linux, find the GCC or Clang flags that give a vector `tanh`) and time `simd_fused_bias_gelu` at three array sizes. Then time `x + bias` alone at the same sizes and decide, from your own numbers, whether the fused kernel is limited by memory or by arithmetic.
+
+4. **Give it a gradient.** Write the derivative of bias-plus-GELU as a second C++ kernel, wrap both kernels in a `Function` from @sec-autograd, and check the gradient against a finite-difference estimate. State which values the backward kernel needs from the forward pass, and whether it must recompute them.
+
+5. **Find the break-even point.** With PyTorch installed, time `mps_matmul`, or `triton_fused_gelu` on an NVIDIA GPU, against NumPy for sizes from 64 to 4096, with and without the copies. Plot both curves, mark where they cross, and compare the crossing with the napkin math.

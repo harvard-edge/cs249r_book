@@ -880,12 +880,17 @@ class DevTestCommand(BaseCommand):
                     if item.is_dir() and item.name[0].isdigit():
                         shutil.rmtree(item)
 
-            # Clear tinytorch/core/ (remove all .py except __init__.py)
-            core_dir = project_root / "tinytorch" / "core"
-            if core_dir.exists():
-                for py_file in core_dir.glob("*.py"):
-                    if py_file.name != "__init__.py":
-                        py_file.unlink()
+            # Clear exported module files (core/, perf/, olympics.py)
+            for subpkg in ["core", "perf"]:
+                subpkg_dir = project_root / "tinytorch" / subpkg
+                if subpkg_dir.exists():
+                    for py_file in subpkg_dir.glob("*.py"):
+                        if py_file.name != "__init__.py":
+                            py_file.unlink()
+
+            olympics_file = project_root / "tinytorch" / "olympics.py"
+            if olympics_file.exists():
+                olympics_file.unlink()
 
             # Clear progress tracking
             tito_dir = project_root / ".tito"

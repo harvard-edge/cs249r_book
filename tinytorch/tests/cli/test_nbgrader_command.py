@@ -80,6 +80,28 @@ def make_module(project_root: Path, module_name: str = "01_tensor") -> Path:
     return notebook_path
 
 
+
+def mark_challenge_region(project_root: Path, module_name: str = "01_tensor") -> None:
+    """Give the fixture's source a role=challenge region.
+
+    Since 2026-09-17 `--tier challenge` refuses modules whose src/ file marks no
+    challenge region (it would otherwise ship the full solution), so the
+    challenge-tier tests must declare one, as a real module would.
+    """
+    source = project_root / "src" / module_name / f"{module_name}.py"
+    source.write_text(
+        "def optimize(x):\n"
+        "    ### BEGIN SOLUTION role=challenge\n"
+        "    return x + 3\n"
+        "    ### END SOLUTION\n",
+        encoding="utf-8",
+    )
+    # Keep the source older than the fixture notebook so tito stages the
+    # notebook as written instead of regenerating it from this stub source.
+    notebook = next((project_root / "modules" / module_name).glob("*.ipynb"))
+    older = notebook.stat().st_mtime - 60
+    os.utime(source, (older, older))
+
 def test_generate_stages_current_notebook_with_normalized_metadata(tmp_path):
     make_module(tmp_path)
     command = NBGraderCommand(make_config(tmp_path))
@@ -301,6 +323,7 @@ def test_generate_keeps_scaffold_role_in_student_release(tmp_path):
 
 def test_generate_challenge_tier_keeps_core_baseline(tmp_path):
     make_module(tmp_path)
+    mark_challenge_region(tmp_path)
     command = NBGraderCommand(make_config(tmp_path))
 
     result = command._generate(Namespace(all=False, module_range=None, module="01", tier="challenge"))
@@ -318,6 +341,7 @@ def test_generate_challenge_tier_keeps_core_baseline(tmp_path):
 
 def test_generate_challenge_tier_strips_challenge_role(tmp_path):
     make_module(tmp_path)
+    mark_challenge_region(tmp_path)
     notebook_path = tmp_path / "modules" / "01_tensor" / "tensor.ipynb"
     notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
     notebook["cells"][1]["source"] = (

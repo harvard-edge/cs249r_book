@@ -10,10 +10,10 @@
 Supervised machine learning is the practical execution of empirical risk minimization: repeatedly exposing a parameterized model to training data, evaluating loss, computing gradients, and steering weights toward optimal generalization. However, learning is not a loose script; it is a precisely choreographed state machine where data pipelines, forward models, autograd graphs, and optimizers interact in lockstep.
 
 From a framework and systems standpoint, the training engine coordinates execution lifecycles and memory boundaries across five non-negotiable phases:
-1. **Gradient zeroing (`zero_grad()`)**: Clearing accumulated gradients from prior steps to prevent catastrophic, silent gradient accumulation.
+1. **Gradient zeroing (`zero_grad()`)**: Clearing accumulated gradients from the previous step, which backward would otherwise add to without warning.
 2. **Forward evaluation**: Pipelining batch inputs through model layers to compute predictions and scalar losses.
-3. **Backward tape execution**: Traversing the autograd DAG to populate parameter `.grad` fields, followed by immediate graph disposal to release gigabytes of intermediate activation memory.
-4. **Gradient clipping and optimization**: Bounding global gradient $L_2$ norms to prevent numerical divergence, followed by in-place optimizer parameter updates.
+3. **Backward tape execution**: Traversing the autograd DAG to populate parameter `.grad` fields, then releasing the graph so intermediate activations can be reclaimed.
+4. **Gradient clipping and optimization**: Bounding global gradient $L_2$ norms to prevent numerical divergence, followed by the optimizer's parameter updates.
 5. **Epoch and batch boundary accounting**: Correctly weighting partial remainder batches so update trajectories reflect true sample-weighted empirical risk.
 
 This chapter synthesizes the foundational modules of @sec-tensors through @sec-optimizers into the unified `Trainer` engine, establishing the end-to-end execution loop of TinyTorch.
@@ -140,7 +140,9 @@ where $\mathbf{g}_i$ is the gradient of the $i$-th of $P$ parameter tensors and 
 
 {{< include _listings/08_training/clip_grad_norm.qmd >}}
 
-Parameters whose `.grad` is `None` contribute nothing to the norm. For the remaining parameters, the function accepts either the NumPy gradient array produced by backward or a Tensor assigned by hand. It replaces the array stored in `param.grad`, or in `param.grad.data` for the Tensor case, with scaled values. An external reference to the old array does not become a reference to the replacement. Squaring in float64 avoids overflowing the norm calculation for large finite float32 gradients. The returned value is the norm before clipping, so a caller can record how much scaling the update required.
+Parameters whose `.grad` is `None` contribute nothing to the norm. For the remaining parameters, the function accepts either the NumPy gradient array produced by backward or a Tensor assigned by hand. It replaces the array stored in `param.grad`, or in `param.grad.data` for the Tensor case, with scaled values. An external reference to the old array does not become a reference to the replacement. Squaring in float64 avoids overflowing the norm calculation for large finite float32 gradients.[^fn-clipping-float64] The returned value is the norm before clipping, so a caller can record how much scaling the update required.
+
+[^fn-clipping-float64]: In a deep network with tens of millions of parameters, summing squared float32 gradients ($\sum g_i^2$) can exceed float32's maximum finite bound of $\approx 3.4 \times 10^{38}$ during transient gradient spikes, triggering a premature $\text{inf}$ overflow. Accumulating in IEEE 754 double precision (`float64`) provides dynamic range up to $\approx 1.8 \times 10^{308}$, preventing accumulator overflow before square-root extraction.
 
 ### The Trainer and the five steps
 
@@ -436,6 +438,11 @@ A call to `train_epoch` clears old gradients, sets the epoch's learning rate, an
 Evaluation changes mode and disables recording while preserving weights and existing gradients. Checkpointing preserves parameters, optimizer buffers and ages, hyperparameters, clipping, schedule settings, counters, and history at an epoch boundary. With a matching deterministic model and the same next batch, this state preserves the next update; random execution and loader position require additional state. Milestone I uses these contracts to test the complete engine on XOR and handwritten digits. The next layer mechanisms can then build on a loop whose state transitions are explicit.
 
 ---
+
+## Further reading
+
+- Pascanu, Mikolov, and Bengio (2013), [On the difficulty of training recurrent neural networks](https://arxiv.org/abs/1211.5063), *ICML*. Exploding gradients and the norm clipping that `clip_grad_norm` implements.
+- Loshchilov and Hutter (2017), [SGDR: stochastic gradient descent with warm restarts](https://arxiv.org/abs/1608.03983), *ICLR*. The cosine schedule behind `CosineSchedule`.
 
 ## Exercises
 

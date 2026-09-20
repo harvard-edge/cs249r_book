@@ -21,9 +21,12 @@ source .venv/bin/activate
 # Install with instructor tools
 pip install -r requirements.txt
 
-# NBGrader must be on PATH for instructor workflows.
-# For course deployments, install it system-wide or in the managed grading environment.
-python -m pip install nbgrader
+# NBGrader must be on PATH for instructor workflows. The repo declares an
+# extra that pulls nbgrader and the notebook tooling together:
+python -m pip install -e ".[grading]"
+
+# For course deployments, install it system-wide or in the managed grading
+# environment instead.
 
 # Setup grading infrastructure (creates assignments/ and nbgrader_config.py)
 tito nbgrader init
@@ -54,8 +57,8 @@ TinyTorch supports three assignment staging tiers via `--tier <tier>`:
 
 | Release Tier | CLI Flag | Student Implementation Scope | Best For |
 |:---|:---|:---|:---|
-| **Student** *(Default)* | `--tier student` | **41 Core Archetypes** (195 secondary helper blocks scaffolded) | Standard 14-week university courses (Harvard CS249r model) |
-| **Challenge** | `--tier challenge` | **All 236 Blocks** (full implementation from scratch) | Advanced graduate courses, hackathons, honors tracks |
+| **Student** *(Default)* | `--tier student` | **52 core regions** (189 secondary helper blocks scaffolded) | Standard 16-week university courses (Harvard CS249r model); see the sample schedule below |
+| **Challenge** | `--tier challenge` | Regions marked `role="challenge"` *(currently unannotated: no `role="challenge"` region exists yet, so `tito nbgrader generate --tier challenge` refuses rather than emit the full reference)* | Advanced graduate courses, hackathons, honors tracks |
 | **Instructor** | `--tier instructor` | **0 Blocks** (complete reference solutions retained) | Solution keys, grading rubrics, and TA references |
 
 #### The "One-Archetype-Per-Concept" Pedagogical Model
@@ -65,19 +68,19 @@ In a standard course, students should build the foundational mechanisms without 
 
 ### **Hardware Extensions Track (`tinytorch.extensions`)**
 To expose students to production accelerator bridging without breaking the pure-NumPy curriculum:
-- **`simd_ops.py` / `cpp_simd_gemm.cpp`**: Native C++ SIMD vectorization with AVX2/NEON and OpenMP multithreading.
-- **`triton_gelu.py`**: OpenAI Triton GPU kernel with automatic SRAM block tiling (falls back gracefully to NumPy on CPU).
-- **`mps_ops.py`**: Apple Silicon Metal Performance Shaders unified-memory dispatch.
+- **`simd_ops.py` / `cpp_simd_gemm.cpp`**: C++ matrix multiply and fused bias + GELU, vectorized for AVX2/NEON and compiled on first use. Multithreaded only when an OpenMP runtime is present (on macOS, `brew install libomp`); `simd_build_info()` reports which build a student got.
+- **`triton_gelu.py`**: Triton kernel that fuses bias + GELU on an NVIDIA GPU; needs PyTorch and Triton, falls back to NumPy.
+- **`mps_ops.py`**: Matrix multiply on the Apple GPU through PyTorch's MPS backend; needs PyTorch, falls back to NumPy.
 
-Hardware extensions are completely optional and modular; they demonstrate real-world systems acceleration while preserving 100% CPU compatibility for autograding.
+Hardware extensions are optional and ungraded, and every one falls back to NumPy, so autograding never depends on them. The book's final chapter walks the code and measures each against NumPy.
 
 ### **1. Prepare Assignments**
 ```bash
-# Stage student assignment (default: 41 core archetypes)
+# Stage student assignment (default: 52 core regions)
 tito nbgrader generate 01_tensor --tier student
 
 # Or stage full challenge assignment
-tito nbgrader generate 01_tensor --tier challenge
+# (the challenge tier has no annotated regions yet and refuses to stage)
 
 # Create student release notebook with solutions removed
 tito nbgrader release 01_tensor
@@ -104,6 +107,23 @@ tito nbgrader collect 01_tensor
 # Or specific student
 tito nbgrader collect 01_tensor --student student_id
 ```
+
+> **`collect` reads nbgrader's exchange, which `tito nbgrader release` does not
+> fill.** `release` maps to nbgrader's `generate_assignment`, which writes the
+> student version to `assignments/release/` on your machine. `collect` maps to
+> nbgrader's `CollectApp`, which moves files students submitted *into the
+> exchange* with `nbgrader submit`. The exchange is a shared directory
+> (`/srv/nbgrader/exchange` by default) and is not supported on Windows.
+>
+> Two workable paths:
+>
+> - **Exchange.** Set up the exchange directory, hand it out with
+>   `nbgrader release_assignment`, have students run `nbgrader submit`, then
+>   `tito nbgrader collect` works as written.
+> - **Hand distribution** (GitHub Classroom, LMS, a zip). Skip `collect`
+>   entirely and place each submission yourself at
+>   `assignments/submitted/<student_id>/<assignment_id>/`, then go straight to
+>   `tito nbgrader autograde`.
 
 ### **4. Auto-Grade**
 ```bash
@@ -148,8 +168,10 @@ tito nbgrader report --assignment 01_tensor
 - Output validation
 
 ### **Manually Graded (30%)**
-- ML Systems Thinking questions (3 per module)
-- Each question: 10 points
+- ML Systems Reflection Questions, 4 to 6 per module (97 in total across the
+  twenty modules, five being the common case, plus 5 bonus questions)
+- At 10 points each that is 40 to 60 points of manual marking per module, so
+  scale the weight to your own total rather than assuming a fixed 30%
 - Focus on understanding, not perfection
 
 ### **Grading Rubric for ML Systems Questions**
@@ -273,7 +295,7 @@ def backward(self, grad):
 - Missing None gradient handling
 - Shows understanding but incomplete
 
-### Module 09: Spatial - Convolution Implementation
+### Module 09: Convolutions - Spatial Operations
 
 **Excellent Solution (9-10 points)**:
 ```python
@@ -456,7 +478,7 @@ def forward(self, q, k, v):
 ### **Module 06-08: Autograd, Optimizers & Training**
 - **Focus**: Automatic differentiation, gradient descent, end-to-end training
 - **Key Concept**: The training loop is where all components come together
-- **Project**: Train a real model on MNIST
+- **Project**: Train a real model on TinyDigits (MNIST is an optional extension)
 
 ### **Module 09-13: CNNs & Transformers**
 - **Focus**: Spatial operations, tokenization, attention, full architectures
@@ -473,6 +495,13 @@ def forward(self, q, k, v):
 - **Key Concept**: Professional benchmarking with standardized reporting
 - **Capstone**: Demonstrate framework capabilities with reproducible results
 
+> **Before you grade on it**: `tito benchmark capstone` does not yet measure the
+> student's model. It prints fixed placeholder values, identical for every
+> student, and says so on screen (`tito/commands/benchmark.py:308-316` sets
+> `is_placeholder: True`). Grade Module 20 on the submission the student
+> generates from their own `BenchmarkReport` inside the notebook, not on that
+> command's output.
+
 ## 🎯 Learning Objectives
 
 By course end, students should be able to:
@@ -488,15 +517,18 @@ By course end, students should be able to:
 
 ### **Individual Progress**
 ```bash
-# Check specific student progress
-tito module status --student student_id
+# Check one student's grades (requires nbgrader and a gradebook)
+tito nbgrader report --student student_id
 ```
 
 ### **Class Overview**
 ```bash
-# Export all module progress
-tito module status --export class_progress.csv
+# Export class-wide progress as CSV
+tito nbgrader report --format csv
 ```
+
+`tito module status` reports the progress of the checkout it runs in and takes no
+options, so it cannot select a student or export a file.
 
 ### **Identify Struggling Students**
 Look for:
@@ -507,7 +539,7 @@ Look for:
 ## 💡 Teaching Tips
 
 ### **1. Emphasize Building Over Theory**
-- Have students type every line of code
+- Have students type the code each module asks for, rather than pasting it
 - Run tests immediately after implementation
 - Break and fix things intentionally
 
@@ -582,7 +614,7 @@ ls submitted/*/MODULE/
 | 7 | 07 Optimizers | Training Algorithms |
 | 8 | 08 Training | Complete Training Loop |
 | 9 | Midterm Project | Build and Train Network |
-| 10 | 09 Spatial | Convolutions, CNNs |
+| 10 | 09 Convolutions | Conv2d, pooling, BatchNorm2d, CNNs |
 | 11 | 10 Tokenization | Text Processing |
 | 12 | 11 Embeddings | Word Representations |
 | 13 | 12 Attention | Attention Mechanisms |
@@ -593,12 +625,12 @@ ls submitted/*/MODULE/
 ## 🎓 Assessment Strategy
 
 ### **Continuous Assessment (70%)**
-- Module completion: 4% each × 16 = 64%
+- Module completion: 3.2% each × 20 = 64%
 - Checkpoint achievements: 6%
 
 ### **Projects (30%)**
 - Midterm: Build and train CNN (15%)
-- Final: Extend TinyGPT (15%)
+- Final: Extend the `GPT` built in Module 13 (15%)
 
 ## 📚 Additional Resources
 

@@ -13,85 +13,59 @@
 # ---
 
 # %% [markdown]
-"""
+r"""
 # Module 19: Benchmarking - Performance Measurement Infrastructure
 
-Welcome to Module 19! You'll build the benchmarking infrastructure for systematic ML performance evaluation.
+Welcome to Module 19! In this module, we transition from individual optimization algorithms to systemic evaluation: constructing statistically rigorous, reproducible benchmarking infrastructure that quantifies latency, accuracy, memory, and energy trade-offs across neural network architectures.
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Complete ML framework with profiling, acceleration, quantization, and compression
-**You'll Build**: The Benchmark class - a benchmarking system for fair model comparison and performance evaluation
-**You'll Enable**: Systematic optimization combination and competitive performance evaluation
 
-**Connection Map**:
-```
-Individual Optimizations (M14-18) → Benchmarking (M19) → Module 20 (Capstone)
-(techniques)                        (evaluation)         (application)
-```
+<div align="center">
+  <img src="benchmarking_blueprint.svg" width="380px" alt="TinyTorch Framework Blueprint: Module 19 Benchmarking" />
+</div>
+
+### Architectural Roadmap
+
+| Optimization Stage | Core Technique | Hardware & Algorithmic Focus | Primary Target |
+|:---|:---|:---|:---|
+| **14. Profiling** | Microsecond Benchmarks & Tracing | Profiler timer loops, Roofline bounds | Identify compute vs memory bottlenecks |
+| **15. Quantization** | Symmetric/Asymmetric INT8 | 8-bit scale & zero-point arithmetic | 4× weight footprint & memory bus bandwidth |
+| **16. Compression** | Magnitude Pruning & Distillation | Weight sparsity & student distillation | Redundant parameter elimination |
+| **17. Acceleration** | SIMD GEMM, Fusion, `im2col` | Memory traffic elimination & systolic arrays | Kernel overhead & hardware utilization |
+| **18. Memoization** | Static KV Cache Buffers | $\mathcal{O}(1)$ decode steps & zero recomputation | Autoregressive decoding latency |
+| **19. Benchmarking** *(Active)* | **Statistical Evaluation & MLPerf** | **Variance control, confidence intervals, Pareto frontiers** | **Rigorous cross-system evaluation** |
+| **20. Capstone** | End-to-End Pipeline Optimization | Capstone deployment & system integration | Production serving pipeline |
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
-1. Implement benchmarking infrastructure with statistical rigor
-2. Measure optimizations alone and in combination on one layer, and read what each step contributes
-3. Build the Benchmark class - a standardized performance evaluation framework
-4. Run an ablation and identify Pareto-optimal models from measured results
-
-The core reading path is to time one model with `Benchmark`, compare a baseline
-with one optimization, and run an ablation to identify what each change
-contributes. Keep the workload and measurement conditions fixed along that
-path. The statistical comparisons, Pareto analysis, and plotting helpers extend
-the interpretation of those measurements; they become useful after the basic
-comparison is reproducible. All implementations are included, but the timing
-and comparison path provides the foundation for understanding the extensions.
+1. Construct high-precision benchmarking infrastructure with warmup discard and statistical variance control.
+2. Formulate sample distribution statistics: reporting median $P_{50}$, tail latency $P_{95}/P_{99}$, and student-$t$ confidence intervals.
+3. Build the `Benchmark` and `BenchmarkSuite` evaluation engines to compare baseline and optimized models across multiple hardware axes.
+4. Implement an MLPerf Tiny standardized compliance runner enforcing deterministic input seeds, MLPerf Tiny's published accuracy targets, and a $p_{90}$ single-stream latency gate (that ceiling being TinyTorch's own, since MLPerf Tiny measures latency rather than gating on it).
+5. Derive empirical Pareto frontiers with `pareto_frontier()` to identify non-dominated model variants across competing systems objectives.
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/19_benchmarking/benchmarking.ipynb`
+**Learning Side:** You work in `modules/19_benchmarking/benchmarking.ipynb`  
 **Building Side:** Code exports to `tinytorch.perf.benchmarking`
+
+<div align="center">
+  <img src="benchmarking_source_card.svg" width="260px" alt="Source Code Mapping Card for Module 19 Benchmarking" />
+</div>
 
 ```python
 # Final package structure:
-from tinytorch.perf.benchmarking import Benchmark
-
-# Measure both models under the same conditions:
-benchmark = Benchmark([baseline_model, optimized_model],
-                     [{"name": "baseline"}, {"name": "optimized"}])
-results = benchmark.run_latency_benchmark()
+from tinytorch.perf.benchmarking import Benchmark, BenchmarkSuite, BenchmarkResult, MLPerf, precise_timer, pareto_frontier
 ```
 
-**Why this matters:**
-- **Learning:** Complete benchmarking ecosystem in one focused module for rigorous evaluation
-- **TinyTorch Olympics:** The Benchmark class provides the standardized framework for capstone submissions
-- **Consistency:** All benchmarking operations and reporting in benchmarking.benchmark
-- **Integration:** Works seamlessly with optimization modules (M14-18) for complete systems evaluation
-"""
-
-# %% [markdown]
-"""
 ## 📋 Module Dependencies
 
-**Prerequisites**: Modules 01-18 (Complete TinyTorch framework)
-
-**External Dependencies**:
-- `numpy` (for numerical operations)
-- `time`, `statistics` (for measurements)
-- `tracemalloc` (for memory profiling)
-- `matplotlib` (optional, for visualization)
-
-**TinyTorch Dependencies**:
-- `tinytorch.core.tensor` (Tensor class)
-- `tinytorch.core.layers` (Linear layer)
-- `tinytorch.perf.profiling` (Profiler from Module 14)
-
-**Dependency Flow**:
-```
-Profiling (M14) → Benchmarking (M19)
-       ↓
-→ Module 20 (Capstone)
-```
-
-Students completing this module will have built professional
-benchmarking infrastructure for systematic performance evaluation.
+| Dependency Module | Exported Abstraction | Consumed Functional Role | Memory & Evaluation Invariant |
+|:---|:---|:---|:---|
+| **Module 01 (`01_tensor`)** | `Tensor` | Contiguous N-D numerical array representation | Evaluation inputs and outputs without autograd overhead |
+| **Module 03 (`03_layers`)** | `Linear` | Fully connected layer primitive | Reference workloads for single-layer benchmarking |
+| **Module 14 (`14_profiling`)** | `Profiler` | High-resolution microsecond timer | Core latency and memory probe reused by `Benchmark` |
+| **Modules 15–16** | `QuantizedLinear`, `magnitude_prune` | Optimized model variants | Inputs to multi-dimensional comparative benchmarking |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
@@ -102,6 +76,7 @@ import json
 import os
 import platform
 import statistics
+import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -133,168 +108,153 @@ ENERGY_BASE_JOULES = 0.1
 ENERGY_JOULES_PER_SECOND = 2.0  # about 2 W while the model runs
 ENERGY_JOULES_PER_MB = 0.01
 
+# Two-sided 95% Student-t critical values t_{0.975, nu}, indexed by
+# nu = n - 1 degrees of freedom for nu = 1..30. scipy is not a TinyTorch
+# dependency and a benchmark loop needs nothing more than this, because the
+# table covers exactly the range where t and the normal limit disagree most.
+T_CRITICAL_95 = (
+    12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228,
+    2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086,
+    2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052, 2.048, 2.045, 2.042,
+)
+Z_CRITICAL_95 = 1.96  # the nu -> infinity limit
+
+
+def t_critical_95(dof: int) -> float:
+    """
+    Two-sided 95% critical value t_{0.975, nu} for `dof` degrees of freedom.
+
+    Table lookup up to nu = 30. Past that, the Cornish-Fisher expansion
+    t ~ z + (z^3 + z) / (4 nu) is within 0.15% of the true value and converges
+    to z from above, so the interval never comes out narrower than it should.
+    """
+    if dof < 1:
+        raise ValueError("A confidence interval needs at least 1 degree of freedom (n >= 2)")
+    if dof <= len(T_CRITICAL_95):
+        return T_CRITICAL_95[dof - 1]
+    z = Z_CRITICAL_95
+    return z + (z ** 3 + z) / (4 * dof)
+
 # %% [markdown]
-"""
+r"""
+## 💡 Introduction: What is Fair Benchmarking?
+
+Benchmarking in ML systems is not merely recording wall-clock time. It is an empirical science requiring controlled experimental conditions to enable fair, reproducible comparisons that guide production deployment decisions.
+
+<div align="center">
+  <img src="benchmarking_methodology_overview.svg" width="680px" alt="Benchmarking Methodology Pipeline" />
+</div>
+
+### Confounding Factors: What This Harness Controls
+
+Every noise source below is real. Only two of them are controlled by the code in
+this module, and the table says which. Read the last column as the list of things
+a number from this harness does **not** account for.
+
+| Noise Source | Physical Hardware Mechanism | What this harness does | What a production harness adds |
+|:---|:---|:---|:---|
+| **Cold Starts** | Dynamic library loading & page faults | Discards warmup iterations before recording (implemented) | Pre-faults and locks pages so the first timed run is already resident |
+| **OS Interrupts** | Background scheduler preemption & context switches | Samples many trials and reports median and percentiles (implemented) | Pins threads to cores (`sched_setaffinity`) and raises scheduling priority |
+| **Thermal Throttling** | DVFS frequency scaling when silicon overheats | Nothing; a throttled trial simply shows up in the tail of the distribution | Cooldown pauses between trials and randomized trial interleaving |
+| **Cache Pollution** | Shared L2/L3 cache evictions by other processes | Nothing; array layout cannot stop another process evicting your lines | An isolated core with a partitioned cache, or a quiesced machine |
+| **Memory Pressure** | Python garbage collection pauses | Nothing; a collection during a timed run lands in the tail | `gc.disable()` around the inner timing loop, then a forced collection between trials |
+
 ### Looking Ahead
 
 The benchmarking tools you build here will be used in Module 20's capstone project, where you'll apply optimization techniques competitively. For now, focus on building reliable, fair measurement infrastructure.
-"""
 
-# %% [markdown]
-"""
-## 💡 Introduction: What is Fair Benchmarking?
+---
 
-Benchmarking in ML systems isn't just timing code - it's about making fair, reproducible comparisons that guide real optimization decisions. Think of it like standardized testing: everyone takes the same test under the same conditions.
-
-Consider comparing three models: a base CNN, a quantized version, and a pruned version. Without proper benchmarking, you might conclude the quantized model is "fastest" because you measured it when your CPU was idle, while testing the others during peak system load. Fair benchmarking controls for these variables.
-
-The challenge: ML models have multiple competing objectives (accuracy vs speed vs memory), measurements can be noisy, and "faster" depends on your hardware and use case.
-
-### Benchmarking as a Systems Engineering Discipline
-
-Professional ML benchmarking requires understanding measurement uncertainty and controlling for confounding factors:
-
-**Statistical Foundations**: We need enough measurements to achieve statistical significance. Running a model once tells you nothing about its true performance - you need distributions.
-
-**System Noise Sources**:
-- **Thermal throttling**: CPU frequency drops when hot
-- **Background processes**: OS interrupts and other applications
-- **Memory pressure**: Garbage collection, cache misses
-- **Network interference**: For distributed models
-
-**Fair Comparison Requirements**:
-- Same hardware configuration
-- Same input data distributions
-- Same measurement methodology
-- Statistical significance testing
-
-This module builds infrastructure that addresses all these challenges while generating actionable insights for optimization decisions.
-"""
-
-# %% [markdown]
-"""
 ## 📐 Foundations: Statistics for Performance Engineering
 
-Benchmarking is applied statistics. We measure noisy processes (model inference) and need to extract reliable insights about their true performance characteristics.
+Inference latency on modern superscalar processors is an inherently non-deterministic, right-skewed stochastic process.
 
-### Central Limit Theorem in Practice
+<div align="center">
+  <img src="latency_anatomy_distribution.svg" width="680px" alt="The Anatomy of Latency Distributions and Tail Percentiles" />
+</div>
 
-When you run a model many times, the distribution of the *sample mean* approaches normal as the sample grows, whatever the shape of the individual measurements (the individual latencies stay skewed, with a long slow tail). This lets us:
-- Compute confidence intervals for the true mean
-- Detect statistically significant differences between models
-- Control for measurement variance
+<div align="center">
+  <img src="benchmarking_latency_card.svg" width="320px" alt="Latency Distribution Card" />
+</div>
 
-```
-Single measurement: Meaningless
-Few measurements: Unreliable
-Many measurements: Statistical confidence
-```
+### Central Limit Theorem & Confidence Intervals
 
-### Multi-Objective Optimization Theory
+While individual latency measurements exhibit heavy-tailed distributions due to system hiccups, the sample mean $\bar{X}$ over $n$ independent trials converges toward a normal distribution:
 
-ML systems exist on a **Pareto frontier** - you can't simultaneously maximize accuracy and minimize latency without trade-offs. Good benchmarks reveal this frontier:
+$$\bar{X} = \frac{1}{n} \sum_{i=1}^n X_i, \quad s = \sqrt{\frac{1}{n-1} \sum_{i=1}^n (X_i - \bar{X})^2}$$
 
-```
-Accuracy
-    ^
-    |      A .<- Model A: High accuracy, high latency
-    |
-    |    B .  <- Model B: Balanced trade-off
-    |
-    |  C .     <- Model C: Low accuracy, low latency
-    |__________> Latency (lower is better)
-```
+The standard error of the mean ($\text{SE}$) and the two-sided $95\%$ Student-$t$ confidence interval are given by:
 
-The goal: Find the optimal operating point for your specific constraints.
+$$\text{SE} = \frac{s}{\sqrt{n}}, \quad \text{CI}_{95\%} = \left[ \bar{X} - t_{0.025, \, n-1} \frac{s}{\sqrt{n}}, \quad \bar{X} + t_{0.025, \, n-1} \frac{s}{\sqrt{n}} \right]$$
 
-### Measurement Uncertainty and Error Propagation
+The critical value is Student's $t$, not the normal $z_{0.975} = 1.96$, because $s$
+is an estimate from the same $n$ samples rather than a known population value. The
+distinction is not cosmetic at benchmarking sample sizes. At the module default of
+$n = 10$, $t_{0.975, 9} = 2.262$ against $z = 1.96$, so quoting $1.96$ reports an
+interval $13\%$ narrower than the data supports. The two agree to within $2\%$ only
+past $n \approx 60$, which is well beyond what most benchmark loops run.
 
-Every measurement has uncertainty. When combining metrics (like accuracy per joule), uncertainties compound:
+### Latency, Throughput, and the Batching Precondition
 
-- **Systematic errors**: Consistent bias (timer overhead, warmup effects)
-- **Random errors**: Statistical noise (thermal variation, OS scheduling)
-- **Propagated errors**: How uncertainty spreads through calculations
+The reciprocal identity $\text{throughput} = 1 / \text{latency}$ holds **only when
+each timed call processes exactly one example**. That single-stream regime is the one
+this harness enforces, because `MLPerf._run_accuracy_test` rejects a prediction
+carrying more than one example's scores.
 
-Professional benchmarking quantifies and minimizes these uncertainties.
-"""
+Batching breaks the identity in both directions at once. A batch of $B$ examples takes
+longer per call, so latency rises, while per-example cost falls as fixed overhead
+amortizes and the matmul reaches a better shape. Throughput becomes
+$B / T_{\text{batch}}$, which can exceed $1 / T_{\text{single}}$ by an order of
+magnitude while every individual user waits longer. Reporting one of those numbers and
+calling it the other is the most common way a benchmark misleads.
 
-# %% [markdown]
-"""
+### Multi-Objective Optimization & Pareto Dominance
+
+Model optimization is multi-objective: latency, accuracy, memory, and energy represent competing physical trade-offs.
+
+**Mathematical Definition of Pareto Dominance**:
+Let $\mathcal{M}$ be the set of evaluation metrics. A model variant $\theta_A$ strictly Pareto-dominates variant $\theta_B$ ($\theta_A \succ \theta_B$) if and only if:
+
+$$\forall m \in \mathcal{M}, \quad \text{score}_m(\theta_A) \ge \text{score}_m(\theta_B) \quad \land \quad \exists m \in \mathcal{M}, \quad \text{score}_m(\theta_A) > \text{score}_m(\theta_B)$$
+
+The definition is written for scores where more is better. Latency, memory, and
+energy are the opposite, so an implementation either negates them or carries one
+direction flag per objective. `pareto_frontier()` below takes the flags, because
+negating measured milliseconds makes the debugging output unreadable.
+
+| Optimization Dimension | Preferred Direction | Systems Constraint | Typical Hardware Boundary |
+|:---|:---|:---|:---|
+| **Latency ($ms$)** | Minimize ($\downarrow$) | SLA / Real-time interactivity ($<100 \text{ ms}$) | ALU compute & DRAM bandwidth |
+| **Accuracy ($\%$)** | Maximize ($\uparrow$) | Task fidelity & quality threshold | Model representational capacity |
+| **Memory ($MB$)** | Minimize ($\downarrow$) | Embedded / GPU VRAM capacity limit | SRAM / DRAM capacity |
+| **Energy ($Joules$)** | Minimize ($\downarrow$) | Mobile battery life & thermal TDP envelope | Power delivery & dynamic voltage |
+
+---
+
 ## 🏗️ Implementation: Building Professional Benchmarking Infrastructure
 
-We'll build a comprehensive benchmarking system that handles statistical analysis, multi-dimensional comparison, and automated reporting. Each component builds toward production-quality evaluation tools.
+### Architectural Components
 
-### Benchmark Architecture Overview
+| Infrastructure Component | Role & Scope | Core Inputs | Produced Output Abstraction |
+|:---|:---|:---|:---|
+| `precise_timer` | High-precision monotonic interval timing | Code block context manager | `timer.elapsed` (seconds) |
+| `Profiler` (Module 14) | Hardware timer and memory probe | Model + input tensor | Raw latency and memory readings |
+| `Benchmark` | Multi-model evaluation across single metrics | Models, datasets, warmup/trial counts | `Dict[str, BenchmarkResult]` |
+| `BenchmarkResult` | Statistical analysis container | Raw measurements list | Mean, std, median, $P_{90}$, $P_{99}$, CI |
+| `BenchmarkSuite` | Multi-dimensional evaluation engine | Models, datasets, metric configurations | Comparative trade-off tables, plus the non-dominated set from `pareto_frontier` |
+| `pareto_frontier` | Non-dominated filtering over measured points | Per-model metric vectors, one direction flag per objective | Names of the variants no other variant dominates |
+| `MLPerf` | Standardized edge compliance harness | Reference tasks, deterministic seeds | Pass/Fail compliance report |
 
-```
-Benchmark Architecture:
-                    ┌──────────────────────────┐
-                    │ precise_timer            │
-                    │ • one timed block        │
-                    └────────┬─────────┬───────┘
-                             │         │
-┌──────────────────────┐     │         │     ┌──────────────────────────┐
-│ Profiler (Module 14) │     │         └────>│ MLPerf                   │
-│ • measure_latency    │     │               │ • fixed inputs, seeds,   │
-│ • measure_memory     │     │               │   run counts, thresholds │
-└──────────┬───────────┘     │               │ • pass/fail per task     │
-           v                 v               └──────────────────────────┘
-┌──────────────────────────────┐
-│ Benchmark                    │      ┌──────────────────────────┐
-│ • one model, one metric      │─────>│ BenchmarkResult          │
-│ • many models compared       │      │ • mean, std, CI, p99     │
-└──────────┬───────────────────┘      └──────────────────────────┘
-           v
-┌──────────────────────────────┐
-│ BenchmarkSuite               │
-│ • every metric, every model  │
-│ • energy, plots, report      │
-└──────────────────────────────┘
-```
+### Statistical Metrics Tracked by BenchmarkResult
 
-**Key Architectural Decision**: The `Benchmark` class reuses `Profiler` from Module 14 for individual model measurements, then adds statistical comparison across multiple models. Build the measurement once, reuse it everywhere.
-
-**Three harnesses, three jobs.** `Benchmark` measures: one model, one metric,
-one statistically summarized `BenchmarkResult`. `BenchmarkSuite` drives a
-`Benchmark`: it runs every metric for every model, derives energy, and writes
-the plots and the report. `MLPerf` stands beside them rather than on top of
-them. It shares only `precise_timer` and `BenchmarkResult`'s way of thinking;
-what it adds is a protocol, with fixed inputs, seeds, run counts, and pass/fail
-thresholds, so that two submissions are comparable at all. Read them in that
-order: the first two stack, the third is a separate harness for a separate job.
-"""
-
-# %% [markdown]
-"""
-### BenchmarkResult: Statistical Analysis Container
-
-Before measuring anything, we need a robust container that stores measurements and computes statistical properties. This is the foundation of all our benchmarking.
-
-### Why Statistical Analysis Matters
-
-Single measurements are meaningless in performance engineering. Consider timing a model:
-- Run 1: 1.2ms (CPU was idle)
-- Run 2: 3.1ms (background process started)
-- Run 3: 1.4ms (CPU returned to normal)
-
-Without statistics, which number do you trust? BenchmarkResult solves this by:
-- Computing confidence intervals for the true mean
-- Detecting outliers and measurement noise
-- Providing uncertainty estimates for decision making
-
-### Statistical Properties We Track
-
-```
-Raw measurements: [1.2, 3.1, 1.4, 1.3, 1.5, 1.1, 1.6]
-                           ↓
-        Statistical Analysis
-                           ↓
-Mean: 1.60ms ± 0.51ms (95% confidence interval)
-Median: 1.4ms (less sensitive to outliers)
-CV: 43% (coefficient of variation - relative noise)
-```
-
-The confidence interval tells us: "We're 95% confident the true mean latency is between 1.09ms and 2.11ms." This guides optimization decisions with statistical backing.
+| Statistical Metric | Mathematical Estimator | Systems Interpretation | Robustness Against Outliers |
+|:---|:---|:---|:---|
+| **Mean ($\mu$)** | $\frac{1}{n} \sum X_i$ | Average cost per timed call; it inverts to throughput only at one example per call | Sensitive to tail stalls |
+| **Median ($P_{50}$)** | 50th percentile rank | Typical steady-state latency | Highly robust |
+| **Tail Latency ($P_{95}, P_{99}$)** | 95th / 99th percentile rank | Worst-case SLA compliance bound | Captures OS scheduling spikes |
+| **Std Deviation ($s$)** | $\sqrt{\frac{1}{n-1} \sum (X_i - \bar{X})^2}$ | Measurement dispersion | Sensitive to extreme outliers |
+| **Coeff. of Variation (CV)** | $\frac{s}{\bar{X}} \times 100\%$ | Relative measurement noise | Normalized noise index |
+| **$95\%$ Confidence Interval** | $\bar{X} \pm t_{n-1} \cdot \text{SE}$ | True population mean bound | Requisite for statistical claims |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-dataclass", "solution": true}
@@ -345,14 +305,18 @@ class BenchmarkResult:
         self.max_val = max(self.values)
         self.count = len(self.values)
 
-        # 95% confidence interval for the mean
-        if len(self.values) > 1:
-            z_score = 1.96  # normal approximation for 95%; accurate once count is large
-            margin_error = z_score * (self.std / np.sqrt(self.count))
+        # 95% Student-t confidence interval for the mean. The critical value
+        # depends on n through the degrees of freedom, so it cannot be the
+        # constant 1.96: at n = 10 that constant reports an interval 13% too
+        # narrow. One sample has no degrees of freedom and therefore no
+        # interval at all, so the bounds are None rather than the mean itself.
+        # A zero-width 95% interval printed beside a result is a false claim.
+        if self.count > 1:
+            margin_error = t_critical_95(self.count - 1) * (self.std / np.sqrt(self.count))
             self.ci_lower = self.mean - margin_error
             self.ci_upper = self.mean + margin_error
         else:
-            self.ci_lower = self.ci_upper = self.mean
+            self.ci_lower = self.ci_upper = None
 
     def percentile(self, p: float) -> float:
         """The value p percent of the way through the sorted measurements (NumPy's linear rule)."""
@@ -379,7 +343,7 @@ class BenchmarkResult:
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: BenchmarkResult
 
 This test validates our BenchmarkResult class correctly computes statistical properties from measurements.
@@ -405,8 +369,24 @@ def test_unit_benchmark_result():
     assert result.max_val == 5.0
     assert result.count == 5
 
-    # Test confidence intervals
+    # Test confidence intervals. The critical value must be Student's t for
+    # n - 1 = 4 degrees of freedom (2.776), not the normal 1.96, which would
+    # give a half-width of 1.386 instead of 1.964.
     assert result.ci_lower < result.mean < result.ci_upper
+    expected_half_width = 2.776 * (result.std / np.sqrt(result.count))
+    assert abs((result.ci_upper - result.mean) - expected_half_width) < 1e-3, (
+        f"Half-width {result.ci_upper - result.mean:.4f} does not match the "
+        f"Student-t interval {expected_half_width:.4f}; a constant 1.96 would "
+        f"give {1.96 * result.std / np.sqrt(result.count):.4f}"
+    )
+
+    # A single measurement has no degrees of freedom, so it has no interval.
+    single = BenchmarkResult("one_shot", [7.5])
+    assert single.mean == 7.5 and single.std == 0.0
+    assert single.ci_lower is None and single.ci_upper is None, (
+        "n=1 must report no interval; a zero-width 95% CI claims a precision "
+        "one sample cannot support"
+    )
 
     # Test serialization
     result_dict = result.to_dict()
@@ -419,49 +399,43 @@ if __name__ == "__main__":
     test_unit_benchmark_result()
 
 # %% [markdown]
-"""
-## 🏗️ High-Precision Timing Infrastructure
+r"""
+## 🏗️ Timing: High-Precision Interval Measurement
 
 Accurate timing is the foundation of performance benchmarking. System clocks have different precision and behavior, so we need a robust timing mechanism.
 
 ### Timing Challenges in Practice
 
-Consider what happens when you time a function:
-```
-User calls: time.time()
-            ↓
-Operating System scheduling delays (μs to ms)
-            ↓
-Timer system call overhead (~1μs)
-            ↓
-Hardware clock resolution (ns to μs)
-            ↓
-Your measurement
-```
+When timing a function call in high-level languages like Python, several layers of operating system and hardware indirection intervene between the software invocation and the physical timer:
+
+$$\Delta t_{\text{measured}} = \Delta t_{\text{true}} + \delta_{\text{call}} + \delta_{\text{OS}} + \delta_{\text{quantization}}$$
+
+| Latency Component | Typical Magnitude | Root Cause / System Source | Mitigation Strategy |
+| :--- | :--- | :--- | :--- |
+| **Kernel / Forward Pass** ($\Delta t_{\text{true}}$) | $\mu\text{s}$ to $\text{ms}$ | Actual computational operations (FLOPs, memory loads) | Target metric under benchmark |
+| **Syscall Overhead** ($\delta_{\text{call}}$) | $10\text{--}50\text{ ns}$ (one `perf_counter()` call measured at $\approx 35\text{ ns}$ here) | User-to-kernel context switch for clock sampling | Use monotonic userspace vDSO clock |
+| **OS Scheduling** ($\delta_{\text{OS}}$) | $\mu\text{s}$ to $\text{ms}$ | Thread preemption, core migration, page faults | Discard warmup runs, sample distributions |
+| **Timer Quantization** ($\delta_{\text{quantization}}$) | $1\text{ ns}$ to $1\text{ }\mu\text{s}$ | Hardware counter frequency resolution limits | Use nanosecond-resolution monotonic counter |
 
 For microsecond-precision timing, each of these can introduce significant error.
 
-### Why perf_counter() Matters
+### Why `perf_counter()` Matters
 
 Python's `time.perf_counter()` is specifically designed for interval measurement:
-- **Monotonic**: Never goes backwards (unaffected by system clock adjustments)
-- **High resolution**: Typically nanosecond precision
-- **Low overhead**: Optimized system call
+- **Monotonic**: Never goes backwards (unaffected by NTP time sync or system clock adjustments)
+- **High resolution**: Nanosecond resolution backed by hardware counters (`RDTSC` on x86, `CNTVCT_EL0` on ARM)
+- **Low overhead**: Optimized system call via virtual Dynamic Shared Object (vDSO) avoiding kernel trapping
 
-### Timing Best Practices
+### Timing Best Practices: The Context Manager Pattern
 
-```
-Context Manager Pattern:
-┌─────────────────┐
-│  with timer():  │ ← Start timing
-│    operation()  │ ← Your code runs
-│  # End timing   │ ← Automatic cleanup
-└─────────────────┘
-    ↓
-elapsed = timer.elapsed
-```
+| Context Phase | Program Action | System State / Effect |
+| :--- | :--- | :--- |
+| `__enter__` | `t_start = time.perf_counter()` | Sample monotonic nanosecond counter prior to workload |
+| Yield Block | Execute operation (forward pass) | Target compute runs; CPU registers and cache active |
+| `__exit__` (`finally`) | `t_end = time.perf_counter()` | Guaranteed sample even if an unexpected exception occurs |
+| Post-Context | `elapsed = t_end - t_start` | Monotonic interval $\Delta t \ge 0$ recorded reliably |
 
-This pattern ensures timing starts/stops correctly even if exceptions occur.
+This pattern ensures timing starts and stops correctly with deterministic resource handling even if exceptions occur.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "timer-context", "solution": true}
@@ -508,7 +482,7 @@ def precise_timer():
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Precise Timer
 
 This test validates our timing context manager provides accurate measurements.
@@ -546,88 +520,69 @@ if __name__ == "__main__":
     test_unit_precise_timer()
 
 # %% [markdown]
-"""
+r"""
 ### Benchmark Class: Core Measurement Engine
 
-The Benchmark class implements the core measurement logic for different metrics. It handles the complex orchestration of multiple models, datasets, and measurement protocols.
+The `Benchmark` class implements the core measurement logic for different metrics. It handles the orchestration of multiple models, datasets, and measurement protocols.
 
-### Benchmark Architecture Overview
+<div align="center">
+  <img src="benchmarking_methodology_overview.svg" alt="Benchmarking Methodology Overview" width="680px">
+</div>
 
-```
-Benchmark Execution Flow:
-┌─────────────┐    ┌──────────────┐    ┌─────────────────┐
-│   Models    │    │   Datasets   │    │ Measurement     │
-│ [M1, M2...] │ →  │ [D1, D2...]  │ →  │ Protocol        │
-└─────────────┘    └──────────────┘    └─────────────────┘
-                                               ↓
-                           ┌─────────────────────────────────┐
-                           │        Benchmark Loop           │
-                           │ 1. Warmup runs (JIT, cache)     │
-                           │ 2. Measurement runs (statistics)│
-                           │ 3. System info capture          │
-                           │ 4. Result aggregation           │
-                           └─────────────────────────────────┘
-                                        ↓
-                        ┌────────────────────────────────────┐
-                        │          BenchmarkResult           │
-                        │ • Statistical analysis             │
-                        │ • Confidence intervals             │
-                        │ • Metadata (system, conditions)    │
-                        └────────────────────────────────────┘
-```
+### Benchmark Architecture Execution Flow
+
+| Stage | Input Artifacts | Processing Step | Output Artifacts |
+| :--- | :--- | :--- | :--- |
+| **1. Ingestion** | Models $[M_1, M_2, \dots]$, Datasets $[D_1, D_2, \dots]$ | Register candidate architectures and evaluation datasets | Model registry with validated callable interfaces |
+| **2. Warmup** | Synthetic or unmeasured batches | Execute $W$ iterations to warm CPU caches and fault in pages | Discarded startup latencies, stabilized hardware clocks |
+| **3. Measurement** | Fixed-seed inputs | Sample $N$ independent forward passes with `perf_counter` | Raw latency samples $[t_1, t_2, \dots, t_N]$ |
+| **4. Profiling** | Model instance | Trace memory allocations and peak buffer usage | Traced peak memory (MB) and FLOP counts |
+| **5. Synthesis** | Raw timing and memory metrics | Compute $\mu, s, \text{SE}$, and confidence intervals $[CI_{\text{low}}, CI_{\text{high}}]$ | `BenchmarkResult` container with system metadata |
 
 ### Why Warmup Runs Matter
 
-Modern systems have multiple layers of adaptation:
-- **JIT compilation**: Code gets faster after being run several times
-- **CPU frequency scaling**: Processors ramp up under load
-- **Cache warming**: Data gets loaded into faster memory
-- **Branch prediction**: CPU learns common execution paths
+Modern operating systems and processors have multiple layers of runtime adaptation:
+- **CPU frequency scaling**: Dynamic Voltage and Frequency Scaling (DVFS) ramps execution cores to performance governors
+- **Cache warming**: Instruction and weight caches ($L_1/L_2/L_3$) achieve steady-state hit rates
+- **Memory frame allocation**: OS page faults occur during initial virtual memory touches
+- **Branch predictor and TLB training**: The first pass through a loop mispredicts and misses; later passes do not
 
-Without warmup, your first few measurements don't represent steady-state performance.
+TinyTorch runs on NumPy, which has **no JIT compiler**, so none of the warmup
+benefit here comes from code specialization. On a JIT-backed stack (PyTorch's
+`torch.compile`, JAX, Numba) the first call additionally pays for tracing and
+compilation, which is often orders of magnitude larger than everything above and
+is the reason warmup counts are so much higher there.
 
-### Multiple Benchmark Types
+<div align="center">
+  <img src="latency_anatomy_distribution.svg" alt="Latency Anatomy and Warmup" width="680px">
+</div>
 
-Different metrics require different measurement strategies:
+### Multiple Benchmark Dimensions
 
-**Latency Benchmarking**:
-- Focus: Time per inference
-- Key factors: Input size, model complexity, hardware utilization
-- Measurement: High-precision timing of forward pass
+Different metrics require distinct measurement strategies:
 
-**Accuracy Benchmarking**:
-- Focus: Quality of predictions
-- Key factors: Dataset representativeness, evaluation protocol
-- Measurement: Correct predictions / total predictions
-
-**Memory Benchmarking**:
-- Focus: Peak and average memory usage
-- Key factors: Model size, batch size, intermediate activations
-- Measurement: Process memory monitoring during inference
+| Dimension | Primary Focus | Key Governing Factors | Measurement Technique |
+| :--- | :--- | :--- | :--- |
+| **Latency** | Milliseconds per forward pass ($\text{ms}$) | Batch size, compute depth, memory bandwidth | High-precision timing via `perf_counter` |
+| **Accuracy** | Fraction of correct inferences ($[0, 1]$) | Quantization noise, pruning sparsity, model capacity | Ground-truth evaluation over validation set |
+| **Memory** | Allocator footprint during execution ($\text{MB}$) | Parameter storage, activation tensors, workspace | Traced allocator peak vs OS process RSS |
+| **Energy** | Joules per inference pass ($\text{mJ}$) | FLOP complexity, SRAM transfers, DRAM accesses | Empirical analytical modeling or hardware PMUs |
 """
 
 # %% [markdown]
-"""
+r"""
 ### Benchmark.__init__: Setting Up the Measurement Engine
 
-The Benchmark constructor configures the measurement infrastructure: models to test,
+The `Benchmark` constructor configures the measurement infrastructure: models to test,
 datasets for evaluation, and system metadata for reproducibility. It reuses the
-Profiler from Module 14 for individual model measurements.
+`Profiler` from Module 14 for individual model measurements.
 
-```
-Benchmark Setup:
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│   Models    │     │   Datasets   │     │  Profiler   │
-│ [M1, M2...] │ ──> │ [D1, D2...]  │ ──> │ (Module 14) │
-└─────────────┘     └──────────────┘     └─────────────┘
-                           ↓
-                 ┌──────────────────┐
-                 │  System Metadata │
-                 │ • platform       │
-                 │ • processor      │
-                 │ • python version │
-                 └──────────────────┘
-```
+| Configuration Field | Source / Inspection Method | Architectural Role |
+| :--- | :--- | :--- |
+| `models` | Candidate architectures ($M_i$) | Models under comparative evaluation |
+| `datasets` | Labeled or synthetic batches | Validation data slices for evaluation |
+| `profiler` | `Profiler()` (Module 14) | Memory tracing and execution instrumentation |
+| `system_info` | `platform.platform()`, `cpu_count()` | Hardware and runtime metadata for reproducibility |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-init", "solution": true}
@@ -696,7 +651,7 @@ class Benchmark:
         ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Benchmark.__init__
 
 **What we're testing**: Benchmark initialization with models, datasets, and system metadata
@@ -737,18 +692,25 @@ if __name__ == "__main__":
     test_unit_benchmark_init()
 
 # %% [markdown]
-"""
+r"""
 ### Benchmark.run_latency_benchmark: Measuring Inference Speed
 
 Latency benchmarking measures how long each model takes to process input. We use
 the Profiler for warmup, then collect multiple individual measurements for
-statistical analysis via BenchmarkResult.
+statistical analysis via `BenchmarkResult`.
 
-```
-Latency Measurement Flow:
-Input Tensor ──> Warmup Runs (discard) ──> Measurement Runs ──> BenchmarkResult
-                 (JIT, cache warming)      (collect times)      (mean, std, CI)
-```
+<div align="center">
+  <img src="benchmarking_latency_card.svg" alt="Tail Latency Percentiles" width="320px">
+</div>
+
+### Latency Measurement Pipeline
+
+| Pipeline Stage | Implementation Action | Purpose & Guarantees |
+| :--- | :--- | :--- |
+| **Input Synthesis** | `Tensor(rng.standard_normal(shape))` | Allocates representative evaluation tensor matching hardware target |
+| **Warmup Phase** | `profiler.measure_latency(warmup=W)` | Absorbs page faults, cache misses, and DVFS ramp (discarded) |
+| **Measurement Sampling**| `precise_timer()` loop ($N$ trials) | Gathers independent steady-state execution latencies $[t_1, t_2, \dots, t_N]$ in ms |
+| **Statistical Wrapping**| `BenchmarkResult("latency", samples)`| Computes mean, variance, percentiles (p50/p95/p99), and 95% confidence interval |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-latency", "solution": true}
@@ -798,7 +760,7 @@ def benchmark_run_latency_benchmark(self, input_shape: Tuple[int, ...] = (1, 28,
 Benchmark.run_latency_benchmark = benchmark_run_latency_benchmark
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Benchmark.run_latency_benchmark
 
 **What we're testing**: Latency measurement across multiple models
@@ -826,7 +788,15 @@ def test_unit_benchmark_latency():
     assert "fast" in results
     assert "slow" in results
     assert all(isinstance(r, BenchmarkResult) for r in results.values())
-    assert all(r.mean > 0 for r in results.values())
+
+    # A mean above zero passes even if only one run was timed, or if the timer
+    # returns a constant. Pin the sample count and the known floor instead:
+    # each forward() sleeps 1 ms, so every sample must clear 0.9 ms.
+    for name, r in results.items():
+        assert r.count == 3, f"{name}: timed {r.count} runs, expected measurement_runs=3"
+        assert r.min_val >= 0.9, f"{name}: a 1ms sleep measured {r.min_val:.3f}ms"
+        assert r.mean >= 0.9, f"{name}: mean {r.mean:.3f}ms is below the 1ms sleep"
+        assert r.ci_lower <= r.mean <= r.ci_upper
 
     print("✅ Benchmark.run_latency_benchmark works correctly!")
 
@@ -834,7 +804,7 @@ if __name__ == "__main__":
     test_unit_benchmark_latency()
 
 # %% [markdown]
-"""
+r"""
 ### Simulated Accuracy: The Honest Stand-In
 
 Some models handed to a benchmark harness have no `evaluate` method and no
@@ -916,7 +886,7 @@ def _simulated_accuracy(model: Any, dataset: Any, num_samples: int = 32) -> floa
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _simulated_accuracy
 
 **What we're testing**: Determinism, output-dependence, and identity-independence
@@ -965,7 +935,7 @@ if __name__ == "__main__":
     test_unit_simulated_accuracy()
 
 # %% [markdown]
-"""
+r"""
 ### Benchmark.run_accuracy_benchmark: Measuring Prediction Quality
 
 Accuracy benchmarking evaluates model correctness across datasets. A model that
@@ -983,12 +953,12 @@ its position in the list.
 > A benchmark that reports a number nobody measured is worse than a benchmark
 > that reports nothing. If you take one habit from this module, take that one.
 
-```
-Accuracy Measurement:
-Model ──> Dataset 1 ──> accuracy_1 ──┐
-      ──> Dataset 2 ──> accuracy_2 ──┼──> BenchmarkResult
-      ──> Dataset N ──> accuracy_N ──┘    (mean, std across datasets)
-```
+$$\text{Accuracy}(M) = \frac{1}{|D_{\text{val}}|} \sum_{(x, y) \in D_{\text{val}}} \mathbf{1}\big(\arg\max f_\theta(x) = y\big)$$
+
+| Evaluation Mode | Required Interface | Dataset Source | Scientific Rigor Guarantee |
+| :--- | :--- | :--- | :--- |
+| **Empirical Evaluation** | `model.evaluate(dataset)` | Labeled validation partitions | Measures true task performance against verified ground truth |
+| **Classroom Probe** (`simulate=True`) | Model forward pass outputs | Seeded synthetic label probe | Tagged with `simulated=True` metadata to prevent reporting unmeasured numbers |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-accuracy", "solution": true}
@@ -1056,7 +1026,7 @@ def benchmark_run_accuracy_benchmark(self, simulate: bool = False) -> Dict[str, 
 Benchmark.run_accuracy_benchmark = benchmark_run_accuracy_benchmark
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Benchmark.run_accuracy_benchmark
 
 **What we're testing**: Accuracy evaluation across models and datasets
@@ -1090,19 +1060,19 @@ if __name__ == "__main__":
     test_unit_benchmark_accuracy()
 
 # %% [markdown]
-"""
+r"""
 ### Benchmark.run_memory_benchmark: Measuring Resource Consumption
 
 Memory benchmarking tracks how much RAM each model consumes during inference.
 We retain the Profiler's traced allocation peak even when it is small. This is
-not total process RSS or the size of all model parameters.
+distinguished from total process RSS or the static size of all model parameters:
 
-```
-Memory Measurement:
-Model ──> Profiler.measure_memory() ──> peak_memory_mb
-                                         ↓
-                                  BenchmarkResult
-```
+| Memory Dimension | Measurement Target | Scope & Definition | Systems Significance |
+| :--- | :--- | :--- | :--- |
+| **Traced Allocator Peak** | `memory_stats['peak_memory_mb']` | High-water mark of live forward tensor buffers | Determines minimal physical DRAM/SRAM working footprint |
+| **Static Weights** | $\sum_l \lvert W_l \rvert \times \text{sizeof}(\text{dtype})$ | Persistent model parameters in storage | Dictates flash storage requirements and transfer latency |
+| **Transient Activations** | Layer intermediate shapes $\mathcal{O}(B \times S \times D)$ | Execution buffers during layer evaluation | Opportunities for memory pooling and inplace reuse |
+| **Process RSS** | Resident Set Size reported by OS | Entire Python runtime, shared libraries, and heap | High-level system footprint influenced by OS page allocation |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-memory", "solution": true}
@@ -1151,7 +1121,7 @@ def benchmark_run_memory_benchmark(self, input_shape: Tuple[int, ...] = (1, 28, 
 Benchmark.run_memory_benchmark = benchmark_run_memory_benchmark
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Benchmark.run_memory_benchmark
 
 **What we're testing**: Memory usage measurement across multiple models
@@ -1176,7 +1146,17 @@ def test_unit_benchmark_memory():
     results = benchmark.run_memory_benchmark()
     assert len(results) == 2
     assert all(isinstance(r, BenchmarkResult) for r in results.values())
-    assert all(r.mean >= 0 for r in results.values())
+    assert all(r.count == 3 for r in results.values())
+
+    # `mean >= 0` is vacuous: the implementation clamps at zero, so it holds even
+    # if the method reports nothing it measured. Pin the value to the profiler's
+    # peak, using a sub-1MB peak that must survive rather than be rounded away.
+    benchmark.profiler.measure_memory = lambda model, shape: {'peak_memory_mb': 0.125}
+    stubbed = benchmark.run_memory_benchmark()
+    for name, r in stubbed.items():
+        assert r.values == [0.125, 0.125, 0.125], (
+            f"{name}: recorded {r.values}, not the profiler's 0.125 MB peak"
+        )
 
     print("✅ Benchmark.run_memory_benchmark works correctly!")
 
@@ -1184,71 +1164,10 @@ if __name__ == "__main__":
     test_unit_benchmark_memory()
 
 # %% [markdown]
-"""
-### Benchmark.compare_models: Cross-Model Comparison
-
-The compare_models method dispatches to the appropriate benchmark type and
-formats results into a structured list of dictionaries for easy comparison.
-This is the primary interface for multi-model evaluation.
-"""
-
-# %% nbgrader={"grade": false, "grade_id": "benchmark-compare", "solution": true}
-#| exporti
-def benchmark_compare_models(self, metric: str = "latency"):
-    """
-    Compare models across a specific metric.
-
-    TODO: Dispatch to the appropriate benchmark and format comparison results
-
-    APPROACH:
-    1. Select benchmark type based on metric string
-    2. Run the selected benchmark
-    3. Format results into list of dicts for easy comparison
-
-    HINTS:
-    - Support 'latency', 'accuracy', 'memory' metrics
-    - Return list of dicts with model, metric, mean, std, ci_lower, ci_upper, count
-    """
-    ### BEGIN SOLUTION role="scaffold"
-    if metric == "latency":
-        results = self.run_latency_benchmark()
-    elif metric == "accuracy":
-        results = self.run_accuracy_benchmark()
-    elif metric == "memory":
-        results = self.run_memory_benchmark()
-    else:
-        raise ValueError(
-            f"Unknown benchmark metric: '{metric}'\n"
-            f"  ❌ Metric '{metric}' is not supported\n"
-            f"  💡 compare_models() supports three metrics: latency (timing), memory (bytes), accuracy (correctness)\n"
-            f"  🔧 Use: compare_models(metric='latency') or 'memory' or 'accuracy'"
-        )
-
-    # Return structured list of dicts for easy comparison
-    # (No pandas dependency - students can convert to DataFrame if needed)
-    comparison_data = []
-    for model_name, result in results.items():
-        comparison_data.append({
-            'model': model_name,
-            'metric': metric,
-            'mean': result.mean,
-            'std': result.std,
-            'ci_lower': result.ci_lower,
-            'ci_upper': result.ci_upper,
-            'count': result.count
-        })
-
-    return comparison_data
-    ### END SOLUTION
-
-Benchmark.compare_models = benchmark_compare_models
-
-# %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Benchmark (Full Class Integration)
 
-This test validates our Benchmark class measures latency, accuracy, and memory correctly,
-and that compare_models dispatches properly.
+This test validates our Benchmark class measures latency, accuracy, and memory correctly.
 
 **What we're testing**: Multi-model benchmarking with different metrics
 **Why it matters**: Reliable comparisons guide optimization decisions
@@ -1288,15 +1207,7 @@ def test_unit_benchmark():
     # Test memory benchmark
     memory_results = benchmark.run_memory_benchmark()
     assert len(memory_results) == 2
-    assert all(result.mean >= 0 for result in memory_results.values())
-
-    # Test comparison (returns list of dicts, not DataFrame)
-    comparison_data = benchmark.compare_models("latency")
-    assert len(comparison_data) == 2
-    assert isinstance(comparison_data, list)
-    assert all(isinstance(item, dict) for item in comparison_data)
-    assert "model" in comparison_data[0]
-    assert "mean" in comparison_data[0]
+    assert all(result.count == 3 for result in memory_results.values())
 
     print("✅ Benchmark works correctly!")
 
@@ -1304,8 +1215,8 @@ if __name__ == "__main__":
     test_unit_benchmark()
 
 # %% [markdown]
-"""
-### BenchmarkSuite: Comprehensive Multi-Metric Evaluation
+r"""
+## 🏗️ Benchmark Suite: Multi-Metric Evaluation and Reporting
 
 The BenchmarkSuite orchestrates multiple benchmark types and generates comprehensive reports. This is where individual measurements become actionable engineering insights.
 
@@ -1323,37 +1234,25 @@ Which is "best"? It depends on your constraints:
 
 ### Multi-Dimensional Comparison Workflow
 
-```
-BenchmarkSuite Execution Pipeline:
-┌──────────────┐
-│   Models     │ ← Input: List of models to compare
-│ [M1,M2,M3]   │
-└──────┬───────┘
-       ↓
-┌──────────────┐
-│ Metric Types │ ← Run each benchmark type
-│ • Latency    │
-│ • Accuracy   │
-│ • Memory     │
-│ • Energy     │
-└──────┬───────┘
-       ↓
-┌──────────────┐
-│ Result       │ ← Aggregate into unified view
-│ Aggregation  │
-└──────┬───────┘
-       ↓
-┌──────────────┐
-│ Analysis &   │ ← Generate insights
-│ Reporting    │   • Best performer per metric
-│              │   • Trade-off analysis
-│              │   • Use case recommendations
-└──────────────┘
-```
+<div align="center">
+  <img src="benchmarking_source_card.svg" alt="Source Code Mapping" width="260px">
+</div>
+
+| Evaluation Phase | Component Operation | Collected Data | Systems Decision Role |
+| :--- | :--- | :--- | :--- |
+| **Model Ingestion** | `models = [M1, M2, ...]` | Model architectures and weight buffers | Candidates for comparative deployment profiling |
+| **Metric Execution** | Latency, Accuracy, Memory, Energy | Sample distributions and allocator peaks | Multi-objective empirical measurement vectors |
+| **Aggregation** | Unified dictionary indexing | Synchronized per-metric `BenchmarkResult` | Cross-model normalization and variance alignment |
+| **Pareto Analysis** | `pareto_frontier()` non-dominated filtering | The set of variants no other variant dominates | Eliminates strictly sub-optimal candidate variants |
+| **Deployment Synthesis** | Markdown & JSON report generator | Quantitative tradeoff recommendations | Concrete deployment mapping (Server, Mobile, IoT) |
 
 ### Pareto Frontier Analysis
 
-The suite automatically identifies Pareto-optimal solutions - models that aren't strictly dominated by others across all metrics. This reveals the true trade-off space for optimization decisions.
+`generate_report` names the Pareto-optimal models, the ones no other model beats on
+every metric at once. That is a filter rather than a ranking. It narrows the candidate
+set without deciding among what survives, and it never collapses the trade-off to a
+single score. Collapsing is a separate, weighted choice, and this module keeps the
+two steps apart so you can see which one is doing the deciding.
 
 ### Energy Efficiency Modeling
 
@@ -1361,11 +1260,15 @@ Since direct energy measurement requires specialized hardware, we estimate energ
 """
 
 # %% [markdown]
-"""
+r"""
 ### BenchmarkSuite.__init__: Setting Up Multi-Metric Evaluation
 
 The BenchmarkSuite constructor creates the evaluation infrastructure, including
 a Benchmark instance for measurements and an output directory for reports and plots.
+It also forwards `warmup_runs` and `measurement_runs` to that Benchmark, which is
+the only knob that trades measurement wall-clock time against confidence-interval
+width. A suite that hard-coded the defaults would leave a CI pipeline no way to run
+a fast smoke configuration and a slow nightly one from the same code.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-init", "solution": true}
@@ -1384,7 +1287,9 @@ class BenchmarkSuite:
     """
 
     def __init__(self, models: List[Any], datasets: List[Any],
-                 output_dir: str = "benchmark_results"):
+                 output_dir: str = "benchmark_results",
+                 warmup_runs: int = DEFAULT_WARMUP_RUNS,
+                 measurement_runs: int = DEFAULT_MEASUREMENT_RUNS):
         """
         Initialize comprehensive benchmark suite.
 
@@ -1393,25 +1298,29 @@ class BenchmarkSuite:
         APPROACH:
         1. Store models and datasets
         2. Create output directory (use Path, mkdir with exist_ok)
-        3. Create Benchmark instance for measurements
+        3. Create Benchmark instance for measurements, forwarding the run counts
         4. Initialize empty results dict
 
         HINTS:
         - Use Path(output_dir) for cross-platform paths
         - The Benchmark instance handles individual model measurements
+        - Forward warmup_runs and measurement_runs; a suite that swallows them
+          leaves no way to trade measurement time against interval width
         """
         ### BEGIN SOLUTION role="scaffold"
         self.models = models
         self.datasets = datasets
         self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.benchmark = Benchmark(models, datasets)
+        self.benchmark = Benchmark(models, datasets,
+                                   warmup_runs=warmup_runs,
+                                   measurement_runs=measurement_runs)
         self.results = {}
         ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: BenchmarkSuite.__init__
 
 **What we're testing**: Suite initialization with output directory and Benchmark instance
@@ -1441,6 +1350,15 @@ def test_unit_benchsuite_init():
         assert suite.output_dir == Path(tmp_dir)
         assert isinstance(suite.benchmark, Benchmark)
         assert isinstance(suite.results, dict)
+        assert suite.benchmark.warmup_runs == DEFAULT_WARMUP_RUNS
+        assert suite.benchmark.measurement_runs == DEFAULT_MEASUREMENT_RUNS
+
+        # The run counts must actually reach the Benchmark, or a CI pipeline has
+        # no way to pick a fast or an accurate configuration.
+        tuned = BenchmarkSuite(models, datasets, output_dir=tmp_dir,
+                               warmup_runs=1, measurement_runs=3)
+        assert tuned.benchmark.warmup_runs == 1
+        assert tuned.benchmark.measurement_runs == 3
 
     print("✅ BenchmarkSuite.__init__ works correctly!")
 
@@ -1448,19 +1366,18 @@ if __name__ == "__main__":
     test_unit_benchsuite_init()
 
 # %% [markdown]
-"""
+r"""
 ### BenchmarkSuite.run_full_benchmark: Orchestrating All Measurements
 
-The run_full_benchmark method runs all four benchmark categories (latency, accuracy,
-memory, energy) in sequence, collecting comprehensive results for each model.
+The `run_full_benchmark` method runs all four benchmark categories (latency, accuracy,
+memory, energy) in sequence, assembling comprehensive empirical results for each candidate model:
 
-```
-Run Full Benchmark Pipeline:
-Models ──> Latency Benchmark ──┐
-       ──> Accuracy Benchmark ──┼──> self.results dict
-       ──> Memory Benchmark   ──┤    (keyed by metric type)
-       ──> Energy Estimation  ──┘
-```
+| Evaluation Phase | Invoked Subsystem | Metric Output | Result Dictionary Key |
+| :--- | :--- | :--- | :--- |
+| **1. Latency** | `Benchmark.run_latency_benchmark()` | Inference duration ($\text{ms}$) with warmup discard | `results['latency']` |
+| **2. Accuracy** | `Benchmark.run_accuracy_benchmark()` | Empirical evaluation accuracy score ($[0, 1]$) | `results['accuracy']` |
+| **3. Memory** | `Benchmark.run_memory_benchmark()` | Traced peak memory allocator allocation ($\text{MB}$) | `results['memory']` |
+| **4. Energy** | `_estimate_energy_efficiency()` | Relative hardware energy proxy score | `results['energy']` |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-run", "solution": true}
@@ -1508,61 +1425,26 @@ def benchsuite_run_full_benchmark(self, simulate: bool = False,
 BenchmarkSuite.run_full_benchmark = benchsuite_run_full_benchmark
 
 # %% [markdown]
-"""
-### 🧪 Unit Test: BenchmarkSuite.run_full_benchmark
-
-**What we're testing**: Orchestration of all four benchmark types
-**Why it matters**: Complete evaluation requires all metrics measured consistently
-**Expected**: Results dict with keys for latency, accuracy, memory, energy
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-benchsuite-run", "locked": true, "points": 15}
-def test_unit_benchsuite_run():
-    """🧪 Test BenchmarkSuite.run_full_benchmark."""
-    print("🧪 Unit Test: BenchmarkSuite.run_full_benchmark...")
-
-    class MockModel:
-        def __init__(self, name):
-            self.name = name
-        def forward(self, x):
-            time.sleep(0.001)
-            return x
-
-    import tempfile
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        models = [MockModel("m1"), MockModel("m2")]
-        suite = BenchmarkSuite(models, [{"d": "1"}], output_dir=tmp_dir)
-
-        results = suite.run_full_benchmark(simulate=True)
-
-        assert 'latency' in results
-        assert 'accuracy' in results
-        assert 'memory' in results
-        assert 'energy' in results
-        for metric_results in results.values():
-            assert len(metric_results) == 2
-            assert all(isinstance(r, BenchmarkResult) for r in metric_results.values())
-
-    print("✅ BenchmarkSuite.run_full_benchmark works correctly!")
-
-# Note: test_unit_benchsuite_run() is called at the bottom of the module
-# after all BenchmarkSuite methods (including _estimate_energy_efficiency) are patched.
-
-# %% [markdown]
-"""
+r"""
 ### BenchmarkSuite._estimate_energy_efficiency: Energy Modeling
 
 Since direct energy measurement requires specialized hardware (power meters, RAPL),
-we estimate energy from latency and memory usage. This simplified model captures the
-key relationship: energy is proportional to power (memory-related) multiplied by time (latency).
+we estimate energy from latency and memory usage. The model is a sum of three terms,
+not a product: a fixed cost per inference, an active-power term that is the only one
+multiplied by time, and a static term charged per megabyte resident.
 
 ```
 Energy Estimation Model:
 energy = base_cost + (latency/1000) * 2.0 + memory * 0.01   (Joules; illustrative constants)
          ↑            ↑                      ↑
-         Fixed        Time component          Memory component
-         overhead     (active power)          (static power)
+         Fixed        Active power x time    Static cost per MB
+         overhead     (the only t term)      (added, not scaled by t)
 ```
+
+Charging memory additively rather than as $P_{\text{static}} \times t$ is a
+simplification, and an inspectable one. A model that is slow and small gets no
+static-power credit for finishing quickly. Say so in a report rather than letting a
+reader assume the constants came off a power meter.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-energy", "solution": true}
@@ -1595,7 +1477,14 @@ def _benchsuite_estimate_energy_efficiency(self) -> Dict[str, BenchmarkResult]:
             memory_result = self.results['memory'].get(model_name)
 
             if latency_result and memory_result:
-                # Energy ∝ power × time, power ∝ memory usage
+                # Three additive terms: fixed overhead, active power x time, and a
+                # static per-MB charge. Only the middle term scales with latency.
+                #
+                # zip() pairs the i-th latency with the i-th memory peak, but those
+                # came from two separate sweeps over the model, so the pairing is an
+                # artifact. The MEAN of energy_values is still correct (the mean of a
+                # sum is the sum of the means); its STD is not, because it assumes a
+                # within-run correlation that was never measured.
                 energy_values = []
                 for lat, mem in zip(latency_result.values, memory_result.values):
                     energy = ENERGY_BASE_JOULES + (lat / 1000) * ENERGY_JOULES_PER_SECOND + mem * ENERGY_JOULES_PER_MB
@@ -1604,7 +1493,8 @@ def _benchsuite_estimate_energy_efficiency(self) -> Dict[str, BenchmarkResult]:
                 energy_results[model_name] = BenchmarkResult(
                     f"{model_name}_energy_joules",
                     energy_values,
-                    metadata={'estimated': True, **self.benchmark.system_info}
+                    metadata={'estimated': True, 'std_is_meaningful': False,
+                              **self.benchmark.system_info}
                 )
 
     if not energy_results:
@@ -1619,7 +1509,7 @@ def _benchsuite_estimate_energy_efficiency(self) -> Dict[str, BenchmarkResult]:
 BenchmarkSuite._estimate_energy_efficiency = _benchsuite_estimate_energy_efficiency
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: BenchmarkSuite._estimate_energy_efficiency
 
 **What we're testing**: Energy estimation from latency and memory data
@@ -1659,7 +1549,48 @@ if __name__ == "__main__":
     test_unit_benchsuite_energy()
 
 # %% [markdown]
+r"""
+### 🧪 Unit Test: BenchmarkSuite.run_full_benchmark
+
+**What we're testing**: Orchestration of all four benchmark types
+**Why it matters**: Complete evaluation requires all metrics measured consistently
+**Expected**: Results dict with keys for latency, accuracy, memory, energy
 """
+
+# %% nbgrader={"grade": true, "grade_id": "test-benchsuite-run", "locked": true, "points": 15}
+def test_unit_benchsuite_run():
+    """🧪 Test BenchmarkSuite.run_full_benchmark."""
+    print("🧪 Unit Test: BenchmarkSuite.run_full_benchmark...")
+
+    class MockModel:
+        def __init__(self, name):
+            self.name = name
+        def forward(self, x):
+            time.sleep(0.001)
+            return x
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        models = [MockModel("m1"), MockModel("m2")]
+        suite = BenchmarkSuite(models, [{"d": "1"}], output_dir=tmp_dir)
+
+        results = suite.run_full_benchmark(simulate=True)
+
+        assert 'latency' in results
+        assert 'accuracy' in results
+        assert 'memory' in results
+        assert 'energy' in results
+        for metric_results in results.values():
+            assert len(metric_results) == 2
+            assert all(isinstance(r, BenchmarkResult) for r in metric_results.values())
+
+    print("✅ BenchmarkSuite.run_full_benchmark works correctly!")
+
+if __name__ == "__main__":
+    test_unit_benchsuite_run()
+
+# %% [markdown]
+r"""
 ### BenchmarkSuite.plot_results: Visualization
 
 The plot_results method generates a 2x2 grid of bar charts comparing models
@@ -1744,63 +1675,17 @@ def benchsuite_plot_results(self, save_plots: bool = True):
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         print(f"📊 Plots saved to {plot_path}")
 
-    plt.show()
+    # Agg is the headless backend: it can write a file but has no window to
+    # open, and calling show() on it emits a UserWarning instead of a plot.
+    if plt.get_backend().lower() != 'agg':
+        plt.show()
+    plt.close(fig)
     ### END SOLUTION
 
 BenchmarkSuite.plot_results = benchsuite_plot_results
 
-def benchsuite_plot_pareto_frontier(self, x_metric: str = 'latency', y_metric: str = 'accuracy'):
-    """Plot Pareto frontier for two competing objectives."""
-    if not MATPLOTLIB_AVAILABLE:
-        print("⚠️ matplotlib not available - skipping plots. Install with: pip install matplotlib")
-        return
-
-    if x_metric not in self.results or y_metric not in self.results:
-        print(f"Missing data for {x_metric} or {y_metric}")
-        return
-
-    plt.figure(figsize=(10, 8))
-
-    x_values = []
-    y_values = []
-    model_names = []
-
-    # Both result dicts are keyed by model name, so a plain lookup pairs them
-    for model_name, x_result in self.results[x_metric].items():
-        y_result = self.results[y_metric].get(model_name)
-        if y_result is None:
-            continue
-        x_values.append(x_result.mean)
-        y_values.append(y_result.mean)
-        model_names.append(model_name)
-
-    # Plot points
-    plt.scatter(x_values, y_values, s=100, alpha=0.7)
-
-    # Label points
-    for i, name in enumerate(model_names):
-        plt.annotate(name, (x_values[i], y_values[i]),
-                    xytext=(5, 5), textcoords='offset points')
-
-    # Determine if lower or higher is better for each metric
-    x_lower_better = x_metric in ['latency', 'memory', 'energy']
-    y_lower_better = y_metric in ['latency', 'memory', 'energy']
-
-    plt.xlabel(f'{x_metric.capitalize()} ({"lower" if x_lower_better else "higher"} is better)')
-    plt.ylabel(f'{y_metric.capitalize()} ({"lower" if y_lower_better else "higher"} is better)')
-    plt.title(f'Pareto Frontier: {x_metric.capitalize()} vs {y_metric.capitalize()}')
-    plt.grid(True, alpha=0.3)
-
-    # Save plot
-    plot_path = self.output_dir / f'pareto_{x_metric}_vs_{y_metric}.png'
-    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-    print(f"📊 Pareto plot saved to {plot_path}")
-    plt.show()
-
-BenchmarkSuite.plot_pareto_frontier = benchsuite_plot_pareto_frontier
-
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: BenchmarkSuite.plot_results
 
 **What we're testing**: That plot_results actually writes a comparison chart, and stays quiet when there is nothing to plot
@@ -1829,8 +1714,9 @@ def test_unit_benchsuite_plot():
         suite.run_full_benchmark(simulate=True)
 
         if MATPLOTLIB_AVAILABLE:
-            # Agg is the headless backend: it writes files and never opens a
-            # window, so plt.show() inside plot_results becomes a no-op here.
+            # Agg is the headless backend: it writes files and has no window to
+            # open, so plot_results skips plt.show() rather than triggering
+            # "UserWarning: FigureCanvasAgg is non-interactive".
             plt.switch_backend("Agg")
             suite.plot_results(save_plots=True)
 
@@ -1864,28 +1750,151 @@ if __name__ == "__main__":
     test_unit_benchsuite_plot()
 
 # %% [markdown]
+r"""
+### pareto_frontier: Filtering Out the Dominated Variants
+
+The dominance definition from 📐 is one function. A variant is on the frontier when
+no other variant matches it on every objective and beats it on at least one. Nothing
+is weighted, nothing is normalized, and no single winner is produced. The frontier is
+a **set**, and its size is the honest answer to "how many real choices do I have?"
+
+| Input | Meaning | Example |
+| :--- | :--- | :--- |
+| `points` | One metric vector per variant, all in the same order | `{'small': (5.0, 0.80), 'big': (40.0, 0.94)}` |
+| `lower_is_better` | One flag per objective, in that same order | `(True, False)` for (latency ms, accuracy) |
+
+With those two inputs, `small` and `big` are both on the frontier: `small` wins on
+latency, `big` wins on accuracy, and neither dominates. Add `{'bad': (40.0, 0.70)}`
+and it drops out, because `big` is no slower and more accurate.
+
+The cost is $O(n^2 m)$ for $n$ variants and $m$ objectives, which is the right
+algorithm here. $n$ is the number of variants you are choosing between, so it is
+single digits, and the $O(n \log n)$ divide-and-conquer alternatives only pay off in
+the thousands.
 """
+
+# %% nbgrader={"grade": false, "grade_id": "pareto-frontier", "solution": true}
+#| export
+def pareto_frontier(points: Dict[str, Tuple[float, ...]],
+                    lower_is_better: Tuple[bool, ...]) -> List[str]:
+    """
+    Return the names of the non-dominated points, in input order.
+
+    TODO: Implement Pareto dominance filtering over measured metric vectors
+
+    APPROACH:
+    1. Write a dominates(a, b) predicate straight from the 📐 definition:
+       a is at least as good as b on EVERY objective, and strictly better on ONE
+    2. Respect lower_is_better per objective, so latency and accuracy can mix
+    3. Keep a point when nothing else dominates it
+
+    Args:
+        points: {name: metric vector}, every vector the same length
+        lower_is_better: one flag per objective, in the vectors' order
+
+    Returns:
+        List of names on the frontier, in the order they appeared in `points`
+
+    EXAMPLE:
+    >>> pareto_frontier({'a': (5.0, 0.80), 'b': (40.0, 0.94), 'c': (40.0, 0.70)},
+    ...                 (True, False))
+    ['a', 'b']
+
+    HINTS:
+    - "At least as good" is <= for a minimized objective and >= for a maximized one
+    - Both conditions are required. Without the strict part, two identical points
+      would dominate each other and the frontier would come back empty
+    """
+    ### BEGIN SOLUTION
+    width = len(lower_is_better)
+    if any(len(vector) != width for vector in points.values()):
+        raise ValueError(f"Every metric vector must carry {width} objectives")
+
+    def dominates(a: Tuple[float, ...], b: Tuple[float, ...]) -> bool:
+        no_worse = all((x <= y) if low else (x >= y)
+                       for x, y, low in zip(a, b, lower_is_better))
+        better_somewhere = any((x < y) if low else (x > y)
+                               for x, y, low in zip(a, b, lower_is_better))
+        return no_worse and better_somewhere
+
+    return [name for name, vector in points.items()
+            if not any(dominates(other, vector)
+                       for rival, other in points.items() if rival != name)]
+    ### END SOLUTION
+
+# %% [markdown]
+r"""
+### 🧪 Unit Test: pareto_frontier
+
+**What we're testing**: Dominance filtering, including the strictness condition and mixed objective directions
+**Why it matters**: A frontier is the claim this module makes seven times; an implementation that returns everything (or nothing) makes the claim vacuous
+**Expected**: Dominated variants are dropped, tied variants both survive, and a single objective reduces to the best value
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-pareto-frontier", "locked": true, "points": 5}
+def test_unit_pareto_frontier():
+    """🧪 Test pareto_frontier dominance filtering."""
+    print("🧪 Unit Test: pareto_frontier...")
+
+    # (latency ms, accuracy): minimize the first, maximize the second.
+    points = {
+        'fast':      (5.0, 0.80),
+        'accurate': (40.0, 0.94),
+        'dominated': (40.0, 0.70),   # no faster than 'accurate', less accurate
+        'balanced': (12.0, 0.90),
+    }
+    frontier = pareto_frontier(points, (True, False))
+    assert frontier == ['fast', 'accurate', 'balanced'], frontier
+    assert 'dominated' not in frontier, (
+        "'dominated' is beaten by 'accurate' on accuracy and tied on latency"
+    )
+
+    # Ties must both survive. Identical points do not dominate each other,
+    # because dominance requires being strictly better somewhere.
+    twins = pareto_frontier({'a': (1.0, 0.5), 'b': (1.0, 0.5)}, (True, False))
+    assert sorted(twins) == ['a', 'b'], twins
+
+    # One objective collapses to "the best value wins", ties included.
+    single = pareto_frontier({'a': (3.0,), 'b': (1.0,), 'c': (1.0,)}, (True,))
+    assert sorted(single) == ['b', 'c'], single
+
+    # A frontier is never empty: something always survives.
+    assert pareto_frontier({'only': (1.0, 1.0)}, (True, True)) == ['only']
+
+    # Mismatched widths are a caller bug, not a silently wrong frontier.
+    try:
+        pareto_frontier({'a': (1.0, 2.0), 'b': (1.0,)}, (True, False))
+        assert False, "Should have raised ValueError for a short metric vector"
+    except ValueError:
+        pass
+
+    print("✅ pareto_frontier works correctly!")
+
+if __name__ == "__main__":
+    test_unit_pareto_frontier()
+
+# %% [markdown]
+r"""
 ### BenchmarkSuite.generate_report: Actionable Insights
 
-The generate_report method compiles all benchmark results into a structured
+The `generate_report` method compiles all benchmark results into a structured
 markdown report with system information, per-metric summaries, best performers,
 trade-off analysis, and deployment recommendations.
 
-```
-Report Generation Pipeline:
-Results Dict ──> System Info Section ──> Per-Metric Summaries ──> Trade-off Analysis
-                                                                         ↓
-                                                              Recommendations Section
-                                                                         ↓
-                                                              Save to benchmark_report.md
-```
+| Report Generation Stage | Input Data | Generated Section | Key Technical Content |
+| :--- | :--- | :--- | :--- |
+| **1. System Metadata** | `system_info` | Environment Header | OS, CPU architecture, core count, Python runtime |
+| **2. Per-Metric Summaries** | `results[metric]` | Score Breakdown | Mean with its unit, standard deviation, 95% CI, best performer |
+| **3. Trade-Off Analysis** | Cross-metric vectors | Non-dominated filtering | The Pareto frontier over (latency, accuracy) from `pareto_frontier()` |
+| **4. Recommendations** | Per-axis winners | Deployment Guidance | Fastest and most accurate variant, drawn from the frontier |
+| **5. File Persistence** | Formatted report buffer | Markdown Artifact | Saved to `output_dir / "benchmark_report.md"` |
 
-We'll build this in three steps: format the per-metric results summary,
-compute trade-off recommendations, then compose the full report.
+We will construct this in three modular steps: formatting the per-metric results summary,
+computing trade-off recommendations, and composing the complete report.
 """
 
 # %% [markdown]
-"""
+r"""
 #### Step 1: Format Per-Metric Results Summary
 
 For each metric type, identify the best performer and list all model scores.
@@ -1906,9 +1915,16 @@ def _benchsuite_format_results_summary(self) -> List[str]:
     1. For each metric type in self.results:
        a. Determine if lower or higher is better
        b. Find the best performer (min for latency/memory/energy, max for accuracy)
-       c. List all models with mean ± std
+       c. List all models with mean ± std, THE UNIT, and the 95% CI
+    2. For n = 1 print "n=1, no interval" rather than a zero-width interval
+
+    HINTS:
+    - METRIC_UNITS below carries one unit per metric; a bare four-decimal number
+      is not comparable, which is the one thing this whole module is about
     """
     ### BEGIN SOLUTION role="scaffold"
+    METRIC_UNITS = {'latency': 'ms', 'accuracy': '', 'memory': 'MB', 'energy': 'J'}
+
     lines = []
     lines.append("## Benchmark Results Summary")
     lines.append("")
@@ -1917,7 +1933,9 @@ def _benchsuite_format_results_summary(self) -> List[str]:
         qualifier = " (estimated)" if any(r.metadata.get('estimated', False) for r in results.values()) else ""
         if any(r.metadata.get('simulated', False) for r in results.values()):
             qualifier += " (synthetic probe)"
-        lines.append(f"### {metric_type.capitalize()} Results{qualifier}")
+        unit = METRIC_UNITS.get(metric_type, '')
+        unit_label = f" [{unit}]" if unit else " [fraction of 1]"
+        lines.append(f"### {metric_type.capitalize()} Results{unit_label}{qualifier}")
         lines.append("")
 
         # Find best performer
@@ -1932,7 +1950,22 @@ def _benchsuite_format_results_summary(self) -> List[str]:
         lines.append("")
 
         for model_name, result in results.items():
-            lines.append(f"- **{model_name}**: {result.mean:.4f} ± {result.std:.4f}")
+            suffix = f" {unit}" if unit else ""
+            # One measurement has no degrees of freedom, so it has no interval.
+            # Printing [x, x] as a 95% CI would claim a precision n=1 cannot give.
+            if result.ci_lower is None:
+                interval = "n=1, no interval"
+            else:
+                interval = (f"95% CI [{result.ci_lower:.4f}, {result.ci_upper:.4f}]{suffix}"
+                            f" (n={result.count})")
+            lines.append(f"- **{model_name}**: {result.mean:.4f}{suffix} "
+                         f"± {result.std:.4f}{suffix}, {interval}")
+        if any(r.metadata.get('std_is_meaningful') is False for r in results.values()):
+            lines.append("")
+            lines.append("> **Note:** the spread here is not a measured spread. Each value "
+                         "pairs the i-th latency with the i-th memory peak from two separate "
+                         "sweeps, so the mean is sound and the standard deviation and interval "
+                         "assume a within-run correlation nobody measured.")
         lines.append("")
 
     return lines
@@ -1941,10 +1974,22 @@ def _benchsuite_format_results_summary(self) -> List[str]:
 BenchmarkSuite._format_results_summary = _benchsuite_format_results_summary
 
 # %% [markdown]
-"""
-#### Step 2: Compute Trade-off Recommendations
+r"""
+#### Step 2: Report the Trade-off Space, Then the Per-Axis Winners
 
-Analyze accuracy vs speed trade-offs and generate use-case recommendations.
+This step reports the Pareto frontier over (latency, accuracy) and names the winner
+on each axis. It deliberately does **not** compute a "best overall" score.
+
+The tempting alternative is to min-max normalize both metrics and average them. Do not.
+With two models where each is worst on the other's axis, the fastest normalizes to
+$(1, 0)$ and the most accurate to $(0, 1)$, so both score exactly $0.500$ and the
+winner is whichever the dictionary happens to yield first. A tie broken by insertion
+order, printed to three decimals, reads as a measurement. It is not one.
+
+Weighing latency against accuracy needs weights, and weights come from the deployment,
+not from the benchmark. `_generate_recommendations` in 🔧 Integration is the one place
+in this module that applies weights, and it states them. Here we narrow the field and
+stop.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-format-recs", "solution": true}
@@ -1956,16 +2001,18 @@ def _benchsuite_format_recommendations(self) -> List[str]:
     Returns:
         List of markdown-formatted recommendation lines
 
-    TODO: Compute trade-off scores and generate use-case recommendations
+    TODO: Report the Pareto frontier over (latency, accuracy), then the per-axis winners
 
     APPROACH:
-    1. If latency and accuracy results exist, normalize and compute combined scores
-    2. Find best overall trade-off model
-    3. Add use-case recommendations (max accuracy, min latency, production)
+    1. Bail out early when the accuracy numbers came from the synthetic probe
+    2. Build one (latency, accuracy) vector per model that has both
+    3. Call pareto_frontier(points, (True, False)) and list what survives
+    4. Name the fastest and the most accurate model, both unambiguous
 
     HINTS:
-    - Normalize: 1 - (val - min) / (max - min) for lower-is-better
-    - Normalize: (val - min) / (max - min) for higher-is-better
+    - Do NOT average normalized metrics into a single score; see the lead-in above
+    - The frontier is a set. Reporting its size is the useful line, because it says
+      how many genuine choices the measurements left open
     """
     ### BEGIN SOLUTION role="scaffold"
     lines = []
@@ -1976,43 +2023,39 @@ def _benchsuite_format_recommendations(self) -> List[str]:
         lines.append("Synthetic accuracy probe: no deployment recommendations.")
         return lines
 
+    if 'latency' in self.results and 'accuracy' in self.results:
+        latency_results = self.results['latency']
+        accuracy_results = self.results['accuracy']
 
-    if len(self.results) >= 2:
-        if 'latency' in self.results and 'accuracy' in self.results:
+        # One vector per model, in a fixed objective order: (latency, accuracy).
+        points = {name: (result.mean, accuracy_results[name].mean)
+                  for name, result in latency_results.items()
+                  if name in accuracy_results}
+
+        if points:
             lines.append("### Accuracy vs Speed Trade-off")
+            frontier = pareto_frontier(points, (True, False))
+            lines.append(f"- **Pareto frontier** (latency ms down, accuracy up): "
+                         f"{', '.join(frontier)}")
+            dominated = [name for name in points if name not in frontier]
+            if dominated:
+                lines.append(f"- **Dominated** (another model is no slower and no "
+                             f"less accurate): {', '.join(dominated)}")
+            else:
+                lines.append(f"- No model dominates another: all {len(points)} are "
+                             f"real choices, and the weights are yours to set")
+            lines.append("")
 
-            latency_results = self.results['latency']
-            accuracy_results = self.results['accuracy']
+        lines.append("### Usage Recommendations")
+        best_acc_model = max(accuracy_results.items(), key=lambda x: x[1].mean)
+        best_lat_model = min(latency_results.items(), key=lambda x: x[1].mean)
 
-            scores = {}
-            for model_name in latency_results.keys():
-                acc_key = model_name if model_name in accuracy_results else None
-
-                if acc_key:
-                    lat_vals = [r.mean for r in latency_results.values()]
-                    acc_vals = [r.mean for r in accuracy_results.values()]
-
-                    norm_latency = 1 - (latency_results[model_name].mean - min(lat_vals)) / (max(lat_vals) - min(lat_vals) + 1e-8)
-                    norm_accuracy = (accuracy_results[acc_key].mean - min(acc_vals)) / (max(acc_vals) - min(acc_vals) + 1e-8)
-
-                    scores[model_name] = (norm_latency + norm_accuracy) / 2
-
-            if scores:
-                best_overall = max(scores.items(), key=lambda x: x[1])
-                lines.append(f"- **Best overall trade-off**: {best_overall[0]} (score: {best_overall[1]:.3f})")
-                lines.append("")
-
-    lines.append("### Usage Recommendations")
-    if 'accuracy' in self.results and 'latency' in self.results:
-        acc_results = self.results['accuracy']
-        lat_results = self.results['latency']
-
-        best_acc_model = max(acc_results.items(), key=lambda x: x[1].mean)
-        best_lat_model = min(lat_results.items(), key=lambda x: x[1].mean)
-
-        lines.append(f"- **For maximum accuracy**: Use {best_acc_model[0]}")
-        lines.append(f"- **For minimum latency**: Use {best_lat_model[0]}")
-        lines.append("- **For production deployment**: Consider the best overall trade-off model above")
+        lines.append(f"- **For maximum accuracy**: Use {best_acc_model[0]} "
+                     f"({best_acc_model[1].mean:.4f})")
+        lines.append(f"- **For minimum latency**: Use {best_lat_model[0]} "
+                     f"({best_lat_model[1].mean:.4f} ms)")
+        lines.append("- **For production deployment**: Pick from the frontier above "
+                     "using your own latency budget; this report will not pick for you")
 
     return lines
     ### END SOLUTION
@@ -2020,7 +2063,7 @@ def _benchsuite_format_recommendations(self) -> List[str]:
 BenchmarkSuite._format_recommendations = _benchsuite_format_recommendations
 
 # %% [markdown]
-"""
+r"""
 #### Step 3: Compose the Full Report
 
 Combine system info, results summary, and recommendations into a complete
@@ -2080,7 +2123,7 @@ def benchsuite_generate_report(self) -> str:
 BenchmarkSuite.generate_report = benchsuite_generate_report
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: BenchmarkSuite._format_results_summary
 
 **What we're testing**: Per-metric results formatting with best performer identification
@@ -2122,12 +2165,12 @@ if __name__ == "__main__":
     test_unit_benchsuite_format_results()
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: BenchmarkSuite._format_recommendations
 
-**What we're testing**: Trade-off analysis and use-case recommendation generation
-**Why it matters**: Wrong recommendations lead to wrong deployment decisions
-**Expected**: Markdown lines with trade-off scores and use-case guidance
+**What we're testing**: Both paths, the synthetic-probe bail-out and the measured path that computes the frontier and names the per-axis winners
+**Why it matters**: Wrong recommendations lead to wrong deployment decisions, and a test that only runs the bail-out never sees the recommendation code at all
+**Expected**: Probe results yield no recommendations; measured results name the frontier, drop the dominated model, and pick the right winner on each axis
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-benchsuite-format-recs", "locked": true, "points": 3}
@@ -2135,23 +2178,60 @@ def test_unit_benchsuite_format_recs():
     """🧪 Test BenchmarkSuite._format_recommendations implementation."""
     print("🧪 Unit Test: BenchmarkSuite._format_recommendations...")
 
-    class MockModel:
+    class ProbeModel:
+        """No evaluate(), so accuracy can only come from the synthetic probe."""
         def __init__(self, name):
             self.name = name
         def forward(self, x):
             return x * 0.5
 
+    class MeasuredModel:
+        """Has evaluate(), so the measured recommendation path runs."""
+        def __init__(self, name, score, delay):
+            self.name, self.score, self.delay = name, score, delay
+        def forward(self, x):
+            time.sleep(self.delay)
+            return x * 0.5
+        def evaluate(self, dataset):
+            return self.score
+
     import tempfile
     with tempfile.TemporaryDirectory() as tmp_dir:
-        models = [MockModel("fast_model"), MockModel("accurate_model")]
-        suite = BenchmarkSuite(models, [{"data": "test"}], output_dir=tmp_dir)
+        suite = BenchmarkSuite([ProbeModel("a"), ProbeModel("b")],
+                               [{"data": "test"}], output_dir=tmp_dir,
+                               warmup_runs=0, measurement_runs=2)
         suite.run_full_benchmark(simulate=True)
 
         lines = suite._format_recommendations()
-
         assert isinstance(lines, list), f"Expected list, got {type(lines)}"
         text = "\n".join(lines)
         assert "Recommendations" in text, "Should contain 'Recommendations'"
+        assert "Synthetic accuracy probe" in text, (
+            "A probe score must not turn into a deployment recommendation"
+        )
+
+    # Measured path: 'quick' is fastest, 'sharp' is most accurate, and 'weak' is
+    # dominated (slower than 'sharp' and less accurate than either).
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        suite = BenchmarkSuite(
+            [MeasuredModel("quick", 0.80, 0.001),
+             MeasuredModel("sharp", 0.95, 0.010),
+             MeasuredModel("weak", 0.60, 0.020)],
+            [{"data": "test"}], output_dir=tmp_dir,
+            warmup_runs=0, measurement_runs=2)
+        suite.run_full_benchmark()
+
+        text = "\n".join(suite._format_recommendations())
+        assert "Synthetic accuracy probe" not in text, (
+            "Models with evaluate() are measured, so the bail-out must not fire"
+        )
+        assert "Pareto frontier" in text, "Measured path must report the frontier"
+        assert "quick" in text and "sharp" in text
+        assert "For maximum accuracy**: Use sharp" in text, text
+        assert "For minimum latency**: Use quick" in text, text
+        assert "Dominated" in text and "weak" in text, (
+            f"'weak' is dominated by 'sharp' and must be named as such:\n{text}"
+        )
 
     print("✅ BenchmarkSuite._format_recommendations works correctly!")
 
@@ -2159,7 +2239,7 @@ if __name__ == "__main__":
     test_unit_benchsuite_format_recs()
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: BenchmarkSuite (Full Class Integration)
 
 This test validates our BenchmarkSuite runs comprehensive multi-metric evaluation
@@ -2222,8 +2302,8 @@ if __name__ == "__main__":
     test_unit_benchmark_suite()
 
 # %% [markdown]
-"""
-### MLPerf: Standardized Industry Benchmarking
+r"""
+## 🏗️ MLPerf Harness: Standardized Edge Compliance
 
 MLPerf® is a trademark of MLCommons. This module provides MLPerf-style standardized
 benchmarks that enable fair comparison across different systems, similar to how the
@@ -2241,54 +2321,48 @@ This makes it impossible to compare results across papers, products, or research
 
 ### MLPerf Benchmark Architecture
 
-```
-MLPerf Benchmark Structure:
-┌─────────────────────────────────────────────────────────┐
-│                  Benchmark Definition                   │
-│ • Standard datasets (CIFAR-10, Speech Commands, etc.)   │
-│ • Fixed input shapes and data types                     │
-│ • Target accuracy and latency thresholds                │
-│ • Measurement protocol (warmup, runs, etc.)             │
-└─────────────────────────────────────────────────────────┘
-                           ↓
-┌─────────────────────────────────────────────────────────┐
-│                 Execution Protocol                      │
-│ 1. Model registration and validation                    │
-│ 2. Warmup phase (deterministic random inputs)           │
-│ 3. Measurement phase (statistical sampling)             │
-│ 4. Accuracy evaluation (ground truth comparison)        │
-│ 5. Compliance checking (thresholds, statistical tests)  │
-└─────────────────────────────────────────────────────────┘
-                           ↓
-┌─────────────────────────────────────────────────────────┐
-│              Compliance Determination                   │
-│ PASS: accuracy ≥ target AND latency ≤ target            │
-│ FAIL: Either constraint violated                        │
-│ Report: Detailed metrics + system information           │
-└─────────────────────────────────────────────────────────┘
-```
+| Architecture Layer | Core Responsibilities | Operational Specification |
+| :--- | :--- | :--- |
+| **1. Benchmark Definition** | Standardized task configuration | Fixed input tensors, evaluation datasets, accuracy targets ($\text{Acc}_{\text{target}}$), latency constraints ($\text{Lat}_{\text{max}}$) |
+| **2. Execution Protocol** | Controlled measurement environment | Seeded input generation, untimed warmup iterations, monotonic interval sampling via `perf_counter` |
+| **3. Compliance Engine** | Objective threshold gating | Evaluates $\text{Acc} \ge \text{Acc}_{\text{target}} \land \text{Lat} \le \text{Lat}_{\text{max}}$ to produce pass/fail verification |
 
 ### Standard Benchmark Tasks
+
+**What MLPerf Tiny actually specifies, and what this module adds.** MLPerf Tiny
+defines a **quality target** per task and then **measures** latency and energy. It
+does not impose a latency threshold a submission must clear; a slow submission is a
+valid submission with a slow number. The millisecond ceilings below are **TinyTorch
+classroom thresholds**, invented here so that `run_standard_benchmark` has something
+to gate on and you can see a pass/fail harness work. The accuracy targets are the
+real ones.
 
 **Keyword Spotting**: Wake word detection from audio
 - Input: 1-second 16kHz audio samples
 - Task: Binary classification (keyword present/absent)
-- Target: 90% accuracy, <100ms latency
+- Quality target (MLPerf Tiny): 90% top-1 accuracy
+- Latency ceiling: <100ms *(TinyTorch classroom threshold, not an MLPerf rule)*
 
 **Visual Wake Words**: Person detection in images
 - Input: 96×96 RGB images
 - Task: Binary classification (person present/absent)
-- Target: 80% accuracy, <200ms latency
+- Quality target (MLPerf Tiny): 80% top-1 accuracy
+- Latency ceiling: <200ms *(TinyTorch classroom threshold, not an MLPerf rule)*
 
 **Anomaly Detection**: Industrial sensor monitoring
 - Input: 640-element sensor feature vectors
-- Task: Binary classification (anomaly/normal)
-- Target: 85% accuracy, <50ms latency
+- Task: MLPerf Tiny scores this by **AUC ≥ 0.85** on an autoencoder's reconstruction
+  error, not by classification accuracy. This module simplifies it to a binary
+  accuracy ≥ 0.85 so that all four tasks share one scoring path. AUC is
+  threshold-free and accuracy is not, so the two are not interchangeable; the
+  simplification is ours
+- Latency ceiling: <50ms *(TinyTorch classroom threshold, not an MLPerf rule)*
 
-**Image Classification**: Tiny image recognition (CIFAR-style)
+**Image Classification**: Tiny image recognition (CIFAR-10)
 - Input: 32×32 RGB images
 - Task: Multi-class classification (10 classes)
-- Target: 75% accuracy, <150ms latency
+- Quality target (MLPerf Tiny): 85% top-1 accuracy (ResNet-8 on CIFAR-10)
+- Latency ceiling: <150ms *(TinyTorch classroom threshold, not an MLPerf rule)*
 
 ### Reproducibility Requirements
 
@@ -2300,24 +2374,23 @@ All MLPerf benchmarks use:
 """
 
 # %% [markdown]
-"""
+r"""
 ### MLPerf.__init__: Configuring Standard Benchmarks
 
-The MLPerf constructor sets up four standardized benchmark tasks, each with
+The `MLPerf` constructor sets up four standardized benchmark tasks, each with
 fixed input shapes, target accuracy, and maximum latency thresholds. Using a
 fixed random seed ensures reproducible results across different systems.
 
-```
-Standard MLPerf Benchmarks:
-┌─────────────────────┬──────────────────┬─────────┬──────────┐
-│ Benchmark           │ Input Shape      │ Acc Tgt │ Lat Tgt  │
-├─────────────────────┼──────────────────┼─────────┼──────────┤
-│ keyword_spotting    │ (1, 16000)       │ 90%     │ <100ms   │
-│ visual_wake_words   │ (1, 96, 96, 3)   │ 80%     │ <200ms   │
-│ anomaly_detection   │ (1, 640)         │ 85%     │ <50ms    │
-│ image_classification│ (1, 32, 32, 3)   │ 75%     │ <150ms   │
-└─────────────────────┴──────────────────┴─────────┴──────────┘
-```
+The accuracy column is MLPerf Tiny's real quality target. The latency column is a
+**TinyTorch classroom threshold**: MLPerf Tiny measures latency and does not gate on
+it, so these four ceilings exist only to give this harness something to check.
+
+| Benchmark Task | Input Tensor Shape | Domain & Modality | Accuracy Target (MLPerf Tiny) | Latency Ceiling (TinyTorch) |
+| :--- | :--- | :--- | :--- | :--- |
+| `keyword_spotting` | `(1, 16000)` | 1-second 16kHz audio stream | $\ge 90\%$ | $< 100\text{ ms}$ |
+| `visual_wake_words` | `(1, 96, 96, 3)` | 96×96 RGB vision camera | $\ge 80\%$ | $< 200\text{ ms}$ |
+| `anomaly_detection` | `(1, 640)` | Multi-channel acoustic sensor | $\ge 0.85$ **AUC** upstream, simplified to $\ge 85\%$ accuracy here | $< 50\text{ ms}$ |
+| `image_classification`| `(1, 32, 32, 3)` | 32×32 CIFAR-10 RGB stream | $\ge 85\%$ (ResNet-8) | $< 150\text{ ms}$ |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-init", "solution": true}
@@ -2352,6 +2425,9 @@ class MLPerf:
         HINTS:
         - Each benchmark is a dict with 'input_shape', 'target_accuracy', 'max_latency_ms', 'description'
         - keyword_spotting uses (1, 16000) for 1 second of 16kHz audio
+        - target_accuracy carries MLPerf Tiny's real quality targets (0.90 / 0.80 /
+          0.85 / 0.85). max_latency_ms carries TinyTorch classroom thresholds:
+          MLPerf Tiny measures latency, it does not gate on it
         - Store the seed itself, not a generator. Each phase calls
           np.random.default_rng(self.random_seed), so running the same
           benchmark twice draws the same inputs and the same synthetic labels.
@@ -2361,37 +2437,42 @@ class MLPerf:
         ### BEGIN SOLUTION role="scaffold"
         self.random_seed = random_seed
 
-        # Standard MLPerf benchmark configurations
+        # Benchmark configurations. 'target_accuracy' is MLPerf Tiny's published
+        # quality target; 'max_latency_ms' is a TinyTorch classroom threshold, since
+        # MLPerf Tiny measures latency rather than gating on it.
         self.benchmarks = {
             'keyword_spotting': {
                 'input_shape': (1, 16000),  # 1 second of 16kHz audio
                 'target_accuracy': 0.90,
-                'max_latency_ms': 100,
+                'max_latency_ms': 100,  # classroom threshold, not an MLPerf rule
                 'description': 'Wake word detection'
             },
             'visual_wake_words': {
                 'input_shape': (1, 96, 96, 3),  # 96x96 RGB image
                 'target_accuracy': 0.80,
-                'max_latency_ms': 200,
+                'max_latency_ms': 200,  # classroom threshold, not an MLPerf rule
                 'description': 'Person detection in images'
             },
             'anomaly_detection': {
                 'input_shape': (1, 640),  # Machine sensor data
+                # MLPerf Tiny scores this task by AUC >= 0.85. This harness has one
+                # scoring path (accuracy), so the target is carried as an accuracy
+                # of 0.85. The number matches; the statistic does not.
                 'target_accuracy': 0.85,
-                'max_latency_ms': 50,
-                'description': 'Industrial anomaly detection'
+                'max_latency_ms': 50,  # classroom threshold, not an MLPerf rule
+                'description': 'Industrial anomaly detection (AUC upstream, accuracy here)'
             },
             'image_classification': {
                 'input_shape': (1, 32, 32, 3),  # CIFAR-10 style
-                'target_accuracy': 0.75,
-                'max_latency_ms': 150,
+                'target_accuracy': 0.85,  # MLPerf Tiny: ResNet-8 on CIFAR-10
+                'max_latency_ms': 150,  # classroom threshold, not an MLPerf rule
                 'description': 'Tiny image classification'
             }
         }
         ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: MLPerf.__init__
 
 **What we're testing**: Benchmark configuration setup with all four standard tasks
@@ -2422,23 +2503,31 @@ def test_unit_mlperf_init():
         assert 0 < config['target_accuracy'] <= 1.0
         assert config['max_latency_ms'] > 0
 
+    # MLPerf Tiny's published quality targets, which are the numbers a reader will
+    # take away from this module. Image classification is 85% (ResNet-8 on
+    # CIFAR-10), not 75%.
+    assert perf.benchmarks['keyword_spotting']['target_accuracy'] == 0.90
+    assert perf.benchmarks['visual_wake_words']['target_accuracy'] == 0.80
+    assert perf.benchmarks['anomaly_detection']['target_accuracy'] == 0.85
+    assert perf.benchmarks['image_classification']['target_accuracy'] == 0.85
+
     print("✅ MLPerf.__init__ works correctly!")
 
 if __name__ == "__main__":
     test_unit_mlperf_init()
 
 # %% [markdown]
-"""
+r"""
 ### MLPerf._run_latency_test: Measuring Inference Latency
 
 This helper runs the latency measurement phase: warmup, then timed inference
-for each test input. Returns lists of latencies (ms) and model predictions.
+for each test input. Returns lists of latencies (ms) and model predictions:
 
-```
-Latency Test Protocol:
-Test Inputs ──> Warmup Phase (10%) ──> Measurement Phase (100%) ──> latencies[], predictions[]
-                (discard timing)       (collect per-input timing)
-```
+| Test Protocol Step | Execution Action | Statistical / Systems Impact |
+| :--- | :--- | :--- |
+| **Warmup Phase** | Execute $\max(1, \lfloor N / 10 \rfloor)$ inputs | Heats instruction caches, registers, and memory controllers (untimed) |
+| **Monotonic Timing** | `with precise_timer() as timer:` | Samples userspace monotonic clock around single model invocation |
+| **Result Logging** | `latencies.append(timer.elapsed * 1000)` | Converts elapsed seconds to milliseconds for per-sample distribution |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-latency", "solution": true}
@@ -2502,7 +2591,7 @@ def _mlperf_run_latency_test(self, model: Any, test_inputs: List[Any],
 MLPerf._run_latency_test = _mlperf_run_latency_test
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: MLPerf._run_latency_test
 
 **What we're testing**: Warmup and measurement phase execution
@@ -2538,7 +2627,7 @@ if __name__ == "__main__":
     test_unit_mlperf_latency()
 
 # %% [markdown]
-"""
+r"""
 ### MLPerf._run_accuracy_test: Evaluating Prediction Quality
 
 This helper calculates accuracy by comparing model predictions against synthetic
@@ -2551,7 +2640,7 @@ array from various output formats, then the accuracy calculation itself.
 """
 
 # %% [markdown]
-"""
+r"""
 #### Step 1: Extract Prediction Array
 
 Model outputs can be TinyTorch Tensors, numpy arrays, or plain Python objects.
@@ -2594,7 +2683,7 @@ def _extract_pred_array(pred) -> np.ndarray:
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 #### Step 2: Calculate Accuracy
 
 Use _extract_pred_array to get clean predictions, then compare against
@@ -2636,6 +2725,10 @@ def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
       model for calling itself 'efficient' measures marketing, not the model
     """
     ### BEGIN SOLUTION role="scaffold"
+    # anomaly_detection sits in the binary branch because this harness has one
+    # scoring path. Real MLPerf Tiny scores it by AUC over an autoencoder's
+    # reconstruction error, which needs the full score distribution rather than a
+    # thresholded label, so the simplification is TinyTorch's and not the standard's.
     binary = benchmark_name in ['keyword_spotting', 'visual_wake_words', 'anomaly_detection']
     num_classes = 2 if binary else 10
     if num_runs <= 0 or len(predictions) != num_runs:
@@ -2675,11 +2768,11 @@ def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
 MLPerf._run_accuracy_test = _mlperf_run_accuracy_test
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _extract_pred_array
 
 **What we're testing**: Prediction array extraction from various output formats
-**Why it matters**: Models return Tensors, numpy arrays, or lists — we need to handle all
+**Why it matters**: Models return Tensors, numpy arrays, or lists, and we need to handle all of them
 **Expected**: Always returns a flat numpy array regardless of input format
 """
 
@@ -2707,7 +2800,7 @@ if __name__ == "__main__":
     test_unit_extract_pred_array()
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: MLPerf._run_accuracy_test
 
 **What we're testing**: Accuracy calculation for binary and multi-class tasks
@@ -2737,27 +2830,68 @@ def test_unit_mlperf_accuracy():
     accuracy_mc = perf._run_accuracy_test(model, predictions_mc, 'image_classification', 10)
     assert 0 <= accuracy_mc <= 1
 
+    # `0 <= acc <= 1` passes on a function that returns a constant. Pin the actual
+    # agreement rate against labels we choose, at both ends of the range.
+    labels = np.array([0, 1, 0, 1])
+    perfect = [np.array([1.0, 0.0]), np.array([0.0, 1.0]),
+               np.array([1.0, 0.0]), np.array([0.0, 1.0])]
+    assert perf._run_accuracy_test(model, perfect, 'keyword_spotting', 4, labels) == 1.0
+    inverted = [p[::-1] for p in perfect]
+    assert perf._run_accuracy_test(model, inverted, 'keyword_spotting', 4, labels) == 0.0
+    half = perfect[:2] + inverted[2:]
+    assert perf._run_accuracy_test(model, half, 'keyword_spotting', 4, labels) == 0.5
+
+    # Multi-class must take the argmax, not the first or the largest index.
+    mc_labels = np.array([3, 7])
+    mc_preds = [np.eye(10)[3], np.eye(10)[7]]
+    assert perf._run_accuracy_test(model, mc_preds, 'image_classification', 2, mc_labels) == 1.0
+
     print("✅ MLPerf._run_accuracy_test works correctly!")
 
 if __name__ == "__main__":
     test_unit_mlperf_accuracy()
 
 # %% [markdown]
-"""
+r"""
 ### MLPerf.run_standard_benchmark: Complete Benchmark Execution
 
 This method orchestrates a complete standardized benchmark: input generation,
 latency testing, accuracy evaluation, and compliance determination. It composes
-the `_run_latency_test` and `_run_accuracy_test` helpers into the full protocol.
+the `_run_latency_test` and `_run_accuracy_test` helpers into the full protocol:
 
-```
-run_standard_benchmark Pipeline:
-Config Lookup ──> Generate Inputs ──> _run_latency_test() ──> _run_accuracy_test()
-                  (deterministic)     (warmup + measure)      (evaluate quality)
-                                                                     ↓
-                                                          Compile Results Dict
-                                                          (accuracy, latency, compliance)
-```
+| Pipeline Step | Mechanism | Verification Target |
+| :--- | :--- | :--- |
+| **Config Resolution** | Task lookup in `self.benchmarks` | Retrieves target accuracy and latency threshold |
+| **Input Synthesis** | Seeded random generation (`seed=42`) | Generates $N$ reproducible synthetic tensors or consumes empirical inputs |
+| **Latency Sampling** | `_run_latency_test()` | 10% warmup discard, per-run latency distribution |
+| **Quality Evaluation** | `_run_accuracy_test()` | Top-1 accuracy score across measured predictions |
+| **Compliance Gating** | Threshold comparison | $\text{compliant} \iff (\text{accuracy} \ge \text{target}) \land (p_{90} \le \text{limit})$ |
+
+### Which Latency Statistic Gates, and How Many Samples It Needs
+
+This harness is **single-stream**: one example per timed call, enforced by
+`_run_accuracy_test`. MLPerf Inference's single-stream metric is the **90th
+percentile**, so that is what the gate uses. The 99th percentile is the **server**
+scenario's rule, and borrowing it here would import a tail bound from a workload this
+harness does not run. The gated statistic and the printed statistic must be the same
+one, or a reader sees a number beside a verdict it did not produce.
+
+A percentile needs samples to mean anything, and this is where classroom benchmarks
+quietly break:
+
+| Samples $n$ | What `np.percentile(latencies, 99)` actually returns |
+| :--- | :--- |
+| $3$ | An interpolation $98\%$ of the way from the second value to the maximum |
+| $5$ | Essentially the maximum: for `[1, 1, 1, 1, 50]` it returns $48.04$ |
+| $100$ | The first honest estimate, and still a noisy one |
+| $\ge 10{,}000$ | A stable tail estimate |
+
+The unit tests below run $n = 3$ and $n = 5$ because they test the protocol, not
+performance. Read any percentile from them as the maximum wearing a percentile's name.
+MLPerf's server scenario mandates hundreds of thousands of queries for exactly this
+reason, and it uses a **non-interpolating order statistic** (the
+$\lceil 0.99 n \rceil$-th sorted sample) where `np.percentile` interpolates between
+neighbors, so the two disagree on small $n$.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-run", "solution": true}
@@ -2782,12 +2916,15 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
     3. Call self._run_latency_test() for timing
     4. Call self._run_accuracy_test() for quality
     5. Compile results with compliance determination: the latency bar is checked
-       at the 99th percentile, as MLPerf's server scenario bounds the tail, not the mean
+       at the 90th percentile, which is MLPerf Inference's single-stream metric.
+       (p99 is the server scenario's rule and does not apply to a batch-1 harness.)
 
     HINTS:
     - Seed one generator from self.random_seed, and draw every input from it
     - Audio data: rng.standard_normal, Image data: rng.integers(0,256)/255
     - compliant = accuracy_met AND latency_met
+    - Print the statistic you gated on. Printing the mean beside a p90 verdict
+      leaves a reader staring at "50.0ms (target: <100ms)" next to FAIL
     """
     ### BEGIN SOLUTION role="scaffold"
     if benchmark_name not in self.benchmarks:
@@ -2801,8 +2938,8 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
 
     config = self.benchmarks[benchmark_name]
     print(f"🧪 Running MLPerf {benchmark_name} benchmark...")
-    print(f"   Target: {config['target_accuracy']:.1%} accuracy, "
-          f"<{config['max_latency_ms']}ms latency")
+    print(f"   Target: {config['target_accuracy']:.1%} accuracy (MLPerf Tiny), "
+          f"p90 < {config['max_latency_ms']}ms (TinyTorch classroom ceiling)")
 
     # Use the caller's test set, or generate standardized test inputs
     # (as Tensors for TinyTorch model compatibility)
@@ -2834,12 +2971,14 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
     latencies, predictions = self._run_latency_test(model, test_inputs, benchmark_name, num_runs)
     accuracy = self._run_accuracy_test(model, predictions, benchmark_name, num_runs, labels)
 
-    # Compile results. The latency bar is checked at the tail (p99), because a
-    # user waits on the slow requests; the mean is reported beside it.
+    # Compile results. The gate is p90, MLPerf Inference's single-stream metric,
+    # because every timed call here processes exactly one example. The mean and
+    # p99 are reported alongside it but neither decides the verdict.
     mean_latency = float(np.mean(latencies))
+    p90_latency = float(np.percentile(latencies, 90))
     p99_latency = float(np.percentile(latencies, 99))
     accuracy_met = bool(accuracy >= config['target_accuracy'])
-    latency_met = bool(p99_latency <= config['max_latency_ms'])
+    latency_met = bool(p90_latency <= config['max_latency_ms'])
 
     results = {
         'synthetic_labels': labels is None,
@@ -2850,10 +2989,14 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
         'mean_latency_ms': mean_latency,
         'std_latency_ms': float(np.std(latencies)),
         'p50_latency_ms': float(np.percentile(latencies, 50)),
-        'p90_latency_ms': float(np.percentile(latencies, 90)),
+        'p90_latency_ms': p90_latency,
         'p99_latency_ms': p99_latency,
-        'max_latency_ms': float(np.max(latencies)),
-        'throughput_fps': float(1000 / mean_latency),
+        # The OBSERVED maximum, not a ceiling. The ceiling is target_latency_ms.
+        'max_observed_latency_ms': float(np.max(latencies)),
+        # One example per timed call, so 1/latency is a real rate. Not 'fps':
+        # keyword spotting scores audio windows and there are no frames here.
+        'inferences_per_second': float(1000 / mean_latency),
+        'gating_statistic': 'p90_latency_ms',
         'target_accuracy': float(config['target_accuracy']),
         'target_latency_ms': float(config['max_latency_ms']),
         'accuracy_met': accuracy_met,
@@ -2863,7 +3006,8 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
         'random_seed': int(self.random_seed)
     }
 
-    print(f"   Results: {accuracy:.1%} accuracy, {mean_latency:.1f}ms mean latency, {p99_latency:.1f}ms p99")
+    print(f"   Results: {accuracy:.1%} accuracy, {p90_latency:.1f}ms p90 latency (gated), "
+          f"{mean_latency:.1f}ms mean")
     print(f"   Compliance: {'✅ PASS' if results['compliant'] else '❌ FAIL'}")
 
     return results
@@ -2871,28 +3015,8 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
 
 MLPerf.run_standard_benchmark = mlperf_run_standard_benchmark
 
-def mlperf_run_all_benchmarks(self, model: Any) -> Dict[str, Dict[str, Any]]:
-    """Run all MLPerf benchmarks on a model."""
-    all_results = {}
-
-    print(f"🚀 Running full MLPerf suite on {getattr(model, 'name', 'model')}...")
-    print("=" * 60)
-
-    for benchmark_name in self.benchmarks.keys():
-        try:
-            results = self.run_standard_benchmark(model, benchmark_name)
-            all_results[benchmark_name] = results
-            print()
-        except Exception as e:
-            print(f"   ❌ Failed to run {benchmark_name}: {e}")
-            all_results[benchmark_name] = {'error': str(e)}
-
-    return all_results
-
-MLPerf.run_all_benchmarks = mlperf_run_all_benchmarks
-
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: MLPerf.run_standard_benchmark
 
 **What we're testing**: Complete benchmark execution, and that random_seed actually controls the data
@@ -2919,13 +3043,22 @@ def test_unit_mlperf_run():
 
     result = perf.run_standard_benchmark(model, 'keyword_spotting', num_runs=5)
 
-    required_keys = ['accuracy', 'mean_latency_ms', 'throughput_fps', 'compliant',
-                     'accuracy_met', 'latency_met', 'p50_latency_ms', 'p99_latency_ms']
-    assert all(key in result for key in required_keys)
+    required_keys = ['accuracy', 'mean_latency_ms', 'inferences_per_second', 'compliant',
+                     'accuracy_met', 'latency_met', 'p50_latency_ms', 'p90_latency_ms',
+                     'p99_latency_ms', 'max_observed_latency_ms', 'gating_statistic']
+    assert all(key in result for key in required_keys), [k for k in required_keys if k not in result]
     assert 0 <= result['accuracy'] <= 1
     assert result['mean_latency_ms'] > 0
-    assert result['throughput_fps'] > 0
+    assert result['inferences_per_second'] > 0
     assert isinstance(result['compliant'], bool)
+
+    # The verdict must come from the statistic the harness says it gates on.
+    assert result['gating_statistic'] == 'p90_latency_ms'
+    assert result['latency_met'] == (result['p90_latency_ms'] <= result['target_latency_ms'])
+    # One example per timed call, so the rate is exactly the reciprocal of the mean.
+    assert abs(result['inferences_per_second'] - 1000 / result['mean_latency_ms']) < 1e-6
+    # The observed maximum is a measurement; the ceiling is target_latency_ms.
+    assert result['max_observed_latency_ms'] >= result['p99_latency_ms']
 
     # Test invalid benchmark name
     try:
@@ -2966,26 +3099,26 @@ if __name__ == "__main__":
     test_unit_mlperf_run()
 
 # %% [markdown]
-"""
+r"""
 ### MLPerf.generate_compliance_report: Scorecard Generation
 
 The compliance report compiles results from multiple benchmarks into both
 machine-readable JSON and human-readable markdown formats, with overall
-compliance determination.
+compliance determination:
 
-```
-Report Generation:
-Results Dict ──> Count compliant benchmarks ──> JSON report (structured data)
-                                              ──> Markdown summary (human-readable)
-                                              ──> Overall: COMPLIANT/NON-COMPLIANT
-```
+| Report Stage | Processing Operation | Generated Artifact |
+| :--- | :--- | :--- |
+| **Statistical Aggregation**| Count compliant vs non-compliant tasks | Compliance ratio: $\frac{N_{\text{compliant}}}{N_{\text{total}}}$ |
+| **Structured Output** | `_compile_report_data()` | Machine-readable JSON dictionary |
+| **Human-Readable Summary** | `_format_summary_markdown()` | Formatted Markdown scorecard table |
+| **Overall Verdict** | Evaluate unanimous compliance | Status tag: `COMPLIANT` vs `NON-COMPLIANT` |
 
-We'll build this in two steps: compile the structured report data,
-then format it into a human-readable summary.
+We will build this in two modular steps: compiling structured report data,
+then formatting it into a human-readable summary.
 """
 
 # %% [markdown]
-"""
+r"""
 #### Step 1: Compile Structured Report Data
 
 Process raw benchmark results into a structured dictionary with compliance
@@ -3042,8 +3175,10 @@ def _mlperf_compile_report_data(self, results: Dict[str, Dict[str, Any]]) -> Dic
                 'official_mlperf': False,
                 'accuracy': result['accuracy'],
                 'mean_latency_ms': result['mean_latency_ms'],
+                # p90 is the gated statistic; the others are context.
+                'p90_latency_ms': result.get('p90_latency_ms'),
                 'p99_latency_ms': result['p99_latency_ms'],
-                'throughput_fps': result['throughput_fps'],
+                'inferences_per_second': result.get('inferences_per_second'),
                 'target_accuracy': result['target_accuracy'],
                 'target_latency_ms': result['target_latency_ms'],
                 'accuracy_met': result['accuracy_met'],
@@ -3067,7 +3202,7 @@ def _mlperf_compile_report_data(self, results: Dict[str, Dict[str, Any]]) -> Dic
 MLPerf._compile_report_data = _mlperf_compile_report_data
 
 # %% [markdown]
-"""
+r"""
 #### Step 2: Format Human-Readable Summary
 
 Convert structured report data into a markdown compliance summary.
@@ -3115,7 +3250,14 @@ def _mlperf_format_compliance_summary(self, report_data: Dict[str, Any]) -> str:
             status = "✅ PASS" if result['compliant'] else "❌ FAIL"
             summary_lines.append(f"- **{benchmark_name}**: {status}")
             summary_lines.append(f"  - Accuracy: {result['accuracy']:.1%} (target: {result['target_accuracy']:.1%})")
-            summary_lines.append(f"  - Latency: {result['mean_latency_ms']:.1f}ms (target: <{result['target_latency_ms']}ms)")
+            # Print the statistic the gate used (p90, single-stream), then the mean
+            # as context. Printing only the mean beside a p90 verdict leaves the
+            # reader with a passing-looking number next to FAIL and no explanation.
+            gated = result.get('p90_latency_ms')
+            gated_text = f"{gated:.1f}ms p90" if gated is not None else "p90 unavailable"
+            summary_lines.append(
+                f"  - Latency: {gated_text} (gated, target: <{result['target_latency_ms']}ms); "
+                f"mean {result['mean_latency_ms']:.1f}ms")
             summary_lines.append("")
     else:
         summary_lines.append("No successful benchmark runs.")
@@ -3126,7 +3268,7 @@ def _mlperf_format_compliance_summary(self, report_data: Dict[str, Any]) -> str:
 MLPerf._format_compliance_summary = _mlperf_format_compliance_summary
 
 # %% [markdown]
-"""
+r"""
 #### Step 3: Compose the Full Compliance Report
 
 Combine data compilation, JSON serialization, and summary formatting.
@@ -3171,7 +3313,7 @@ def mlperf_generate_compliance_report(self, results: Dict[str, Dict[str, Any]],
 MLPerf.generate_compliance_report = mlperf_generate_compliance_report
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: MLPerf._compile_report_data
 
 **What we're testing**: Structured data compilation from raw benchmark results
@@ -3189,8 +3331,9 @@ def test_unit_mlperf_compile_data():
     # Simulate results from run_standard_benchmark
     mock_results = {
         'keyword_spotting': {
-            'accuracy': 0.92, 'mean_latency_ms': 50.0, 'p99_latency_ms': 80.0,
-            'throughput_fps': 20.0, 'target_accuracy': 0.90, 'target_latency_ms': 100,
+            'accuracy': 0.92, 'mean_latency_ms': 50.0,
+            'p90_latency_ms': 72.0, 'p99_latency_ms': 80.0,
+            'inferences_per_second': 20.0, 'target_accuracy': 0.90, 'target_latency_ms': 100,
             'accuracy_met': True, 'latency_met': True, 'compliant': True,
             'model_name': 'test_model'
         }
@@ -3203,6 +3346,9 @@ def test_unit_mlperf_compile_data():
     assert report_data['summary']['total_benchmarks'] == 1
     assert report_data['summary']['overall_compliant'] == True
     assert report_data['model_name'] == 'test_model'
+    # The gated statistic must survive into the report, or the scorecard cannot
+    # show the number the verdict came from.
+    assert report_data['benchmarks']['keyword_spotting']['p90_latency_ms'] == 72.0
 
     print("✅ MLPerf._compile_report_data works correctly!")
 
@@ -3210,7 +3356,7 @@ if __name__ == "__main__":
     test_unit_mlperf_compile_data()
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: MLPerf._format_compliance_summary
 
 **What we're testing**: Markdown summary generation from structured report data
@@ -3235,7 +3381,7 @@ def test_unit_mlperf_format_summary():
         },
         'benchmarks': {
             'keyword_spotting': {
-                'accuracy': 0.92, 'mean_latency_ms': 50.0,
+                'accuracy': 0.92, 'mean_latency_ms': 50.0, 'p90_latency_ms': 72.0,
                 'target_accuracy': 0.90, 'target_latency_ms': 100,
                 'compliant': True
             }
@@ -3248,6 +3394,10 @@ def test_unit_mlperf_format_summary():
     assert "COMPLIANT" in summary, "Should contain compliance status"
     assert "keyword_spotting" in summary, "Should list benchmark names"
     assert "PASS" in summary, "Compliant benchmark should show PASS"
+    # The scorecard must show the statistic the gate used, not only the mean.
+    assert "72.0ms p90 (gated" in summary, (
+        f"Summary reports no gated statistic:\n{summary}"
+    )
 
     print("✅ MLPerf._format_compliance_summary works correctly!")
 
@@ -3255,7 +3405,7 @@ if __name__ == "__main__":
     test_unit_mlperf_format_summary()
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: MLPerf (Full Class Integration)
 
 This test validates our MLPerf class provides standardized benchmarking
@@ -3293,11 +3443,11 @@ def test_unit_mlperf():
     result = perf.run_standard_benchmark(model, 'keyword_spotting', num_runs=5)
 
     # Verify result structure
-    required_keys = ['accuracy', 'mean_latency_ms', 'throughput_fps', 'compliant']
+    required_keys = ['accuracy', 'mean_latency_ms', 'inferences_per_second', 'compliant']
     assert all(key in result for key in required_keys)
     assert 0 <= result['accuracy'] <= 1
     assert result['mean_latency_ms'] > 0
-    assert result['throughput_fps'] > 0
+    assert result['inferences_per_second'] > 0
 
     # Test full benchmark suite (with fewer runs for speed)
     import tempfile
@@ -3322,7 +3472,7 @@ if __name__ == "__main__":
     test_unit_mlperf()
 
 # %% [markdown]
-"""
+r"""
 ## 🔧 Integration: Building Complete Benchmark Workflows
 
 Now we'll integrate all our benchmarking components into complete workflows that demonstrate professional ML systems evaluation. This integration shows how to combine statistical rigor with practical insights.
@@ -3331,40 +3481,28 @@ The integration layer connects individual measurements into actionable engineeri
 
 ### Workflow Architecture
 
-```
-Integration Workflow Pipeline:
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│ Model Variants  │    │ Optimization    │    │ Use Case        │
-│ • Base model    │ →  │ Techniques      │ →  │ Analysis        │
-│ • Quantized     │    │ • Accuracy loss │    │ • Mobile        │
-│ • Pruned        │    │ • Speed gain    │    │ • Server        │
-│ • Distilled     │    │ • Memory save   │    │ • Edge          │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
-
-This workflow helps answer questions like:
-- "Which optimization gives the best accuracy/latency trade-off?"
-- "What's the memory budget impact of each technique?"
-- "Which model should I deploy for mobile vs server?"
+| Stage | Input Entities | Transformations | Practical Deployment Questions |
+| :--- | :--- | :--- | :--- |
+| **1. Model Variants** | Base, Quantized, Pruned, Distilled | Standardized test execution | "What are the baseline performance envelopes?" |
+| **2. Optimization Profiling** | Multi-metric benchmarks | Compute $\Delta\text{Acc}$, Speedup, Memory savings | "Which optimization yields the highest efficiency ratio?" |
+| **3. Use-Case Mapping** | Hardware & SLA constraints | Multi-objective optimization | "Which model satisfies edge vs server deployment constraints?" |
 """
 
 # %% [markdown]
-"""
+r"""
 ### Optimization Comparison Engine
 
 Before implementing the comparison function, let's understand what makes optimization comparison challenging and valuable.
 
 ### Why Optimization Comparison is Complex
 
-When you optimize a model, you're making trade-offs across multiple dimensions simultaneously:
+When you optimize a model, you make trade-offs across multiple dimensions simultaneously:
 
-```
-Optimization Impact Matrix (illustrative numbers, not measurements):
-                   Accuracy    Latency    Memory    Energy
-Quantization        -5%        +2.1x      +2.0x     +1.8x
-Pruning            -2%        +1.4x      +3.2x     +1.3x
-Knowledge Distill. -8%        +1.9x      +1.5x     +1.7x
-```
+| Optimization Technique | Accuracy Impact ($\Delta \text{Acc}$) | Latency Speedup | Memory Reduction | Energy Savings | Primary Trade-Off |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Quantization** (INT8 from FP32) | $-5\%$ | $2.1\times$ | $4.0\times$ | $1.8\times$ | Precision loss in low dynamic range |
+| **Structured Pruning** | $-2\%$ | $1.4\times$ | $3.2\times$ | $1.3\times$ | Sparse memory access vs density |
+| **Knowledge Distillation** | $-8\%$ | $1.9\times$ | $1.5\times$ | $1.7\times$ | Dark knowledge transfer fidelity |
 
 The challenge: Which is "best"? It depends entirely on your deployment constraints.
 
@@ -3374,28 +3512,25 @@ Our comparison engine implements a decision framework that:
 
 1. **Measures all dimensions**: Don't optimize in isolation
 2. **Calculates efficiency ratios**: Accuracy per MB, accuracy per ms
-3. **Identifies Pareto frontiers**: Models that aren't dominated in all metrics
-4. **Generates use-case recommendations**: Tailored to specific constraints
+3. **Identifies the Pareto frontier**: `pareto_frontier()` keeps a variant when no
+   other variant is at least as good on *every* metric and strictly better on one
+4. **Generates use-case recommendations**: Tailored to specific constraints, using
+   stated weights (see `_generate_recommendations`, the one weighted step here)
 
-### Recommendation Algorithm
+### Formal Recommendation Objectives
 
-```
-For each use case:
-├── Latency-critical (real-time apps)
-│   └── Optimize: min(latency) subject to accuracy > threshold
-├── Memory-constrained (mobile/IoT)
-│   └── Optimize: min(memory) subject to accuracy > threshold
-├── Accuracy-preservation (quality-critical)
-│   └── Optimize: max(accuracy) subject to latency < threshold
-└── Balanced (general deployment)
-    └── Optimize: weighted combination of all factors
-```
+| Deployment Regime | Optimization Formulation | Constraint Boundary | Target Domain |
+| :--- | :--- | :--- | :--- |
+| **Latency-Critical** | $\min_{\theta} \text{Latency}(\theta)$ | $\text{Accuracy}(\theta) \ge \text{Acc}_{\text{target}}$ | Autonomous driving, real-time audio |
+| **Memory-Constrained** | $\min_{\theta} \text{PeakMemory}(\theta)$ | $\text{Accuracy}(\theta) \ge \text{Acc}_{\text{target}}$ | Microcontrollers, wearable IoT |
+| **Accuracy-Preservation** | $\max_{\theta} \text{Accuracy}(\theta)$ | $\text{Latency}(\theta) \le \text{Lat}_{\text{max}}$ | Medical diagnostics, legal review |
+| **Balanced Deployment** | $\max_{\theta} \big[\alpha \frac{\text{Acc}}{\text{Acc}_0} + \beta \frac{\text{Lat}_0}{\text{Lat}} + \gamma \frac{\text{Mem}_0}{\text{Mem}}\big]$ | Multi-objective budget | Edge mobile, client-side web |
 
 This principled approach ensures recommendations match real deployment needs.
 """
 
 # %% [markdown]
-"""
+r"""
 ### _collect_base_metrics: Extracting Baseline Performance
 
 This helper extracts the base model's mean performance across all metrics from
@@ -3432,7 +3567,7 @@ def _collect_base_metrics(base_name: str, benchmark_results: Dict) -> Dict[str, 
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _collect_base_metrics
 
 **What we're testing**: Extraction of base model's mean metrics from benchmark results
@@ -3463,7 +3598,7 @@ if __name__ == "__main__":
     test_unit_collect_base_metrics()
 
 # %% [markdown]
-"""
+r"""
 ### _calculate_improvements: Computing Speedup and Retention Ratios
 
 This helper computes improvement ratios for each optimized model relative to
@@ -3517,7 +3652,7 @@ def _calculate_improvements(base_metrics: Dict[str, float], opt_metrics: Dict[st
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _calculate_improvements
 
 **What we're testing**: Improvement ratio calculations for all metric types
@@ -3550,12 +3685,28 @@ if __name__ == "__main__":
     test_unit_calculate_improvements()
 
 # %% [markdown]
-"""
+r"""
 ### _generate_recommendations: Deployment-Specific Guidance
 
 This helper analyzes improvement ratios across all optimized models to generate
 recommendations for four deployment scenarios: latency-critical, memory-constrained,
 accuracy-preservation, and balanced deployment.
+
+Three of the four are unambiguous, each picking the maximum of one ratio. The fourth,
+balanced deployment, is the **only** weighted decision in this module, and the weights
+are worth stating because they are a choice and not a measurement:
+
+$$\text{score} = \frac{\sum_{k \in \text{speedups}} \min(r_k,\, 5) \;+\; 5\,\rho_{\text{acc}}}{\lvert \text{speedups} \rvert + 1}$$
+
+Accuracy retention $\rho_{\text{acc}}$ carries a weight of $5$ against $1$ per
+speedup, so a variant that gives up $10\%$ of the baseline's accuracy must win roughly
+$0.5\times$ of speedup somewhere to break even. Speedups are capped at $5\times$ so one
+outlier ratio cannot outvote everything else. Change either number and the
+recommendation changes, which is why the reason string carries both.
+
+Compare this with `pareto_frontier()`, which weighs nothing and therefore decides
+nothing. The frontier narrows the field; a weighted score picks from it. Keep the two
+steps separate, so you always know which one moved the answer.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-gen-recs", "solution": true}
@@ -3575,6 +3726,8 @@ def _generate_recommendations(all_improvements: Dict[str, Dict[str, float]]) -> 
     HINTS:
     - Iterate over all_improvements items (opt_name -> improvements dict)
     - Overall score = (sum of capped speedups + accuracy_retention * 5) / count
+    - This is the module's ONE weighted decision. Put the weights in the reason
+      string: an unexplained score reads like a measurement
     """
     ### BEGIN SOLUTION role="scaffold"
     best_latency = None
@@ -3638,14 +3791,15 @@ def _generate_recommendations(all_improvements: Dict[str, Dict[str, float]]) -> 
         },
         'for_balanced_deployment': {
             'model': best_overall,
-            'reason': f"Best overall trade-off (score: {best_overall_score:.2f})",
+            'reason': (f"Best weighted trade-off (score: {best_overall_score:.2f}; "
+                       f"speedups capped at 5x, accuracy retention weighted 5x)"),
             'use_case': "General production deployment with multiple constraints"
         }
     }
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _generate_recommendations
 
 **What we're testing**: Recommendation generation from improvement data
@@ -3683,32 +3837,28 @@ if __name__ == "__main__":
     test_unit_generate_recommendations()
 
 # %% [markdown]
-"""
+r"""
 ### analyze_optimization_techniques: Composition Function
 
 This is the main entry point that composes `_collect_base_metrics`,
 `_calculate_improvements`, and `_generate_recommendations` into a complete
-optimization comparison workflow.
+optimization comparison workflow:
 
-```
-analyze_optimization_techniques Pipeline:
-┌────────────┐     ┌────────────────────────┐     ┌──────────────────────────┐
-│ Run Full   │ ──> │ _collect_base_metrics  │ ──> │ For each opt model:      │
-│ Benchmark  │     │ (extract baseline)     │     │ _calculate_improvements  │
-└────────────┘     └────────────────────────┘     └──────────────────────────┘
-                                                              ↓
-                                                  ┌──────────────────────────┐
-                                                  │ _generate_recommendations│
-                                                  │ (deploy guidance)        │
-                                                  └──────────────────────────┘
-```
+| Pipeline Step | Module Subroutine | Computed Metric / Transformation |
+| :--- | :--- | :--- |
+| **1. Full Benchmark** | `BenchmarkSuite.run_full_benchmark()` | Runs latency, accuracy, memory, and energy across all models |
+| **2. Baseline Extraction** | `_collect_base_metrics()` | Isolates baseline vector $\mathbf{v}_{\text{base}} = [\mu_{\text{lat}}, \mu_{\text{acc}}, \mu_{\text{mem}}, \mu_{\text{eng}}]$ |
+| **3. Relative Deltas** | `_calculate_improvements()` | Computes speedup ratios, accuracy changes, and memory reduction factors |
+| **4. Frontier** | `pareto_frontier()` | Drops variants another variant beats on every metric at once |
+| **5. Policy Recommendation** | `_generate_recommendations()` | Applies the one stated weighting to pick a balanced variant |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-comparison", "solution": true}
 #| export
 def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any],
                                   datasets: List[Any], simulate: bool = False,
-                                  input_shape: Tuple[int, ...] = (1, 28, 28)) -> Dict[str, Any]:
+                                  input_shape: Tuple[int, ...] = (1, 28, 28),
+                                  output_dir: Optional[str] = None) -> Dict[str, Any]:
     """
     Compare base model against various optimization techniques.
 
@@ -3726,9 +3876,13 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
         optimized_models: List of models with different optimizations applied
         datasets: List of datasets for evaluation
         input_shape: Representative inference batch shape for latency and memory
+        output_dir: Where the suite may write reports and plots. None uses a
+            temporary directory, so importing and calling this never creates
+            a folder in the caller's working directory.
 
     Returns:
-        Dictionary with 'base_metrics', 'optimized_results', 'improvements', 'recommendations'
+        Dictionary with 'base_metrics', 'optimized_results', 'improvements',
+        'pareto_frontier', and 'recommendations'
 
     EXAMPLE:
     >>> results = analyze_optimization_techniques(base_model, [quant, pruned], datasets)
@@ -3736,7 +3890,12 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
     """
     ### BEGIN SOLUTION role="scaffold"
     all_models = [base_model] + optimized_models
-    suite = BenchmarkSuite(all_models, datasets)
+
+    # A function that leaves ./benchmark_results/ behind on every import-and-call
+    # is a side effect nobody asked for. Default to a directory that cleans itself.
+    scratch = tempfile.TemporaryDirectory() if output_dir is None else None
+    suite = BenchmarkSuite(all_models, datasets,
+                           output_dir=output_dir if scratch is None else scratch.name)
 
     print("🧪 Running optimization comparison benchmark...")
     benchmark_results = suite.run_full_benchmark(simulate=simulate, input_shape=input_shape)
@@ -3782,6 +3941,20 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
 
         comparison_results['efficiency_metrics'][opt_name] = efficiency
 
+    # Narrow the field before weighting it: the frontier over the four measured
+    # objectives, baseline included, since the baseline can itself be non-dominated.
+    frontier_points = {}
+    for model_name in suite.benchmark.model_names:
+        vector = tuple(benchmark_results[metric][model_name].mean
+                       for metric in ('latency', 'accuracy', 'memory', 'energy')
+                       if model_name in benchmark_results.get(metric, {}))
+        if len(vector) == 4:
+            frontier_points[model_name] = vector
+    # Minimize latency, memory and energy; maximize accuracy.
+    frontier = (pareto_frontier(frontier_points, (True, False, True, True))
+                if frontier_points else [])
+    comparison_results['pareto_frontier'] = frontier
+
     # Generate recommendations using helper
     simulated = any(r.metadata.get('simulated', False) for r in benchmark_results['accuracy'].values())
     recommendations = {} if simulated else _generate_recommendations(comparison_results['improvements'])
@@ -3800,17 +3973,26 @@ def analyze_optimization_techniques(base_model: Any, optimized_models: List[Any]
             elif 'retention' in metric:
                 print(f"  {metric}: {value:.1%}")
 
+    if frontier:
+        dominated = [n for n in frontier_points if n not in frontier]
+        print(f"\n🧭 Pareto frontier over (latency, accuracy, memory, energy): "
+              f"{', '.join(frontier)}")
+        print(f"   Dominated: {', '.join(dominated) if dominated else 'none'}")
+
     print("\n🎯 Recommendations:")
     for use_case, rec in recommendations.items():
         if rec['model']:
             print(f"  {use_case}: {rec['model']} - {rec['reason']}")
+
+    if scratch is not None:
+        scratch.cleanup()
 
     return comparison_results
     ### END SOLUTION
 
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: analyze_optimization_techniques (Full Integration)
 
 This test validates the complete optimization comparison workflow generates
@@ -3845,17 +4027,35 @@ def test_unit_optimization_comparison():
 
     datasets = [{"test": "data"}]
 
-    # Run comparison
-    results = analyze_optimization_techniques(base_model, [quantized_model, pruned_model], datasets, simulate=True)
+    # Run comparison from inside a scratch directory. output_dir defaults to a
+    # temporary directory, so the call must leave that scratch directory empty:
+    # importing a function should never create a folder where you are standing.
+    import tempfile
+    with tempfile.TemporaryDirectory() as scratch_cwd:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(scratch_cwd)
+            results = analyze_optimization_techniques(
+                base_model, [quantized_model, pruned_model], datasets, simulate=True)
+            leftovers = sorted(p.name for p in Path(scratch_cwd).iterdir())
+        finally:
+            os.chdir(original_cwd)
+    assert leftovers == [], f"The call wrote into the caller's directory: {leftovers}"
 
     # Verify results structure
     assert 'base_model' in results
     assert 'optimized_results' in results
     assert 'improvements' in results
     assert 'recommendations' in results
+    assert 'pareto_frontier' in results
 
     # Verify improvements were calculated
     assert len(results['improvements']) == 2  # Two optimized models
+
+    # The frontier covers all three models and is never empty.
+    assert 1 <= len(results['pareto_frontier']) <= 3
+    assert set(results['pareto_frontier']) <= (
+        set(results['optimized_results']) | {results['base_model']})
 
     # Synthetic probe results must not become deployment recommendations.
     assert results['simulated'] is True
@@ -3867,7 +4067,7 @@ if __name__ == "__main__":
     test_unit_optimization_comparison()
 
 # %% [markdown]
-"""
+r"""
 ## 📊 Systems Analysis: Benchmark Variance and Optimization Trade-offs
 
 Let's understand the key systems concept of measurement variance and optimization trade-offs.
@@ -3884,29 +4084,48 @@ def analyze_benchmark_variance():
     true_latency = 10.0  # True mean latency in ms
     noise_std = 1.5  # Standard deviation of measurement noise
 
+    print(f"⚠️  SYNTHETIC DATA: draws from a known Normal(mu={true_latency} ms, "
+          f"sigma={noise_std} ms), not timings of any model. Nothing was benchmarked.")
+    print("   Holding the true distribution fixed is the only way to isolate the")
+    print("   sample-size effect, and a real measurement cannot do it.\n")
+
     print("Effect of Sample Size on Confidence Interval Width:\n")
-    print(f"{'Samples':<10} {'Mean (ms)':<15} {'CI Width (ms)':<15} {'Relative Error':<15}")
-    print("-" * 60)
+    print(f"{'Samples':<10} {'Mean (ms)':<12} {'t_0.975':<10} {'CI Width (ms)':<15} {'Relative Width':<15}")
+    print("-" * 66)
 
     for n_samples in sample_sizes:
-        # Simulate measurements
+        # Draw from the known distribution
         measurements = rng.normal(true_latency, noise_std, n_samples)
         mean_latency = np.mean(measurements)
-        std_latency = np.std(measurements)
+        std_latency = np.std(measurements, ddof=1)
 
-        # Calculate 95% confidence interval
-        t_score = 1.96
+        # 95% Student-t interval, the same critical value BenchmarkResult uses
+        t_score = t_critical_95(n_samples - 1)
         margin_error = t_score * (std_latency / np.sqrt(n_samples))
         ci_width = 2 * margin_error
-        relative_error = ci_width / mean_latency * 100
+        relative_width = ci_width / mean_latency * 100
 
-        print(f"{n_samples:<10} {mean_latency:<15.2f} {ci_width:<15.2f} {relative_error:<15.1f}%")
+        print(f"{n_samples:<10} {mean_latency:<12.2f} {t_score:<10.3f} "
+              f"{ci_width:<15.2f} {relative_width:<15.1f}%")
+
+    # The sample size needed for a target width follows from the ratio the table
+    # shows, so compute it rather than quoting a remembered rule of thumb. For a
+    # relative CI width w: w = 2 * t * (sigma/mu) / sqrt(n).
+    cv = noise_std / true_latency
+    needed = next(n for n in range(2, 1000)
+                  if 2 * t_critical_95(n - 1) * cv / np.sqrt(n) < 0.10)
+    at_twenty = 2 * t_critical_95(19) * cv / np.sqrt(20) * 100
 
     print("\n💡 Key Insights:")
     print("   • More samples reduce confidence interval width")
     print("   • CI width decreases with √n (diminishing returns)")
-    print("   • 20-50 samples typically sufficient for <10% error")
-    print("   • Statistical rigor requires measuring variance, not just mean")
+    print(f"   • At sigma/mu = {cv:.2f} the EXPECTED width at n=20 is {at_twenty:.1f}%, and")
+    print(f"     n={needed} is the first size expected under 10%. A single draw lands")
+    print("     either side of that, which is what the table's scatter shows")
+    print("   • So 'use 20 samples' is not a rule, it is a number that depends on")
+    print("     the noise you actually have. Measure the noise, then pick n")
+    print("   • The critical value is Student's t, not 1.96: at n=10 the constant")
+    print("     1.96 reports an interval 13% narrower than the samples support")
 
 if __name__ == "__main__":
     analyze_benchmark_variance()
@@ -3957,7 +4176,7 @@ if __name__ == "__main__":
     analyze_optimization_tradeoffs()
 
 # %% [markdown]
-"""
+r"""
 ### MLPerf Principles: Industry-Standard Benchmarking
 
 MLPerf (created by MLCommons) is the industry-standard ML benchmarking framework. Understanding these principles grounds your capstone competition in professional methodology.
@@ -3970,7 +4189,7 @@ MLPerf (created by MLCommons) is the industry-standard ML benchmarking framework
 - **Closed:** Same models/datasets, optimize systems (hardware/software)
 - **Open:** Modify models/algorithms, show innovation
 
-**MLPerf Tiny:** Edge-device benchmarks (<1MB models, <100ms latency, <10mW power) that inspire the capstone.
+**MLPerf Tiny:** Four reference benchmarks for microcontroller-class devices (keyword spotting, visual wake words, anomaly detection, image classification) that inspire the capstone. Each defines a **quality target** and then **measures** latency and energy. It sets no model-size, latency, or power limit a submission must clear, which is why the millisecond ceilings in this module are labeled as TinyTorch's own.
 
 ### Key Takeaways
 
@@ -3983,10 +4202,10 @@ The capstone project follows MLPerf-style principles!
 """
 
 # %% [markdown]
-"""
+r"""
 ### Combination Strategies
 
-Strategic optimization combines multiple techniques for different performance goals. The order matters: quantize-then-prune may preserve accuracy better, while prune-then-quantize may be faster.
+Strategic optimization combines multiple techniques for different performance goals. The order matters. Quantize-then-prune may preserve accuracy better, while prune-then-quantize may be faster.
 
 ### Ablation Studies
 
@@ -4003,7 +4222,7 @@ You'll apply these strategies with specific optimization targets in Module 20's 
 """
 
 # %% [markdown]
-"""
+r"""
 ## 🧪 Module Integration Test
 
 Final validation that our complete benchmarking system works correctly and integrates properly with all TinyTorch components.
@@ -4040,6 +4259,7 @@ def test_module():
     test_unit_benchsuite_run()
     test_unit_benchsuite_energy()
     test_unit_benchsuite_plot()
+    test_unit_pareto_frontier()
     test_unit_benchsuite_format_results()
     test_unit_benchsuite_format_recs()
     test_unit_benchmark_suite()
@@ -4085,9 +4305,15 @@ def test_module():
             return x
 
         def evaluate(self, dataset):
-            # Simulate evaluation
+            # Deterministic per (model, dataset), and clipped into [0, 1].
+            # Drawing from the shared module-level rng made this mock
+            # order-dependent: the score changed with how many draws earlier
+            # cells had taken, and a 0.95 base could wander above 1.0 and trip
+            # run_accuracy_benchmark's range check.
             base_acc = self.characteristics.get('base_accuracy', 0.85)
-            return base_acc + rng.normal(0, 0.02)
+            seed = (sum(self.name.encode()) + sum(repr(dataset).encode())) % 100_000
+            probe = np.random.default_rng(seed)
+            return float(np.clip(base_acc + probe.normal(0, 0.02), 0.0, 1.0))
 
         def parameters(self):
             # Simulate parameter count - return Tensor objects for compatibility
@@ -4119,9 +4345,13 @@ def test_module():
 
     datasets = [{"test_data": f"dataset_{i}"} for i in range(3)]
 
-    # Test 1: Comprehensive benchmark suite
+    # Test 1: Comprehensive benchmark suite. The output directory is a temporary
+    # one: running a module top to bottom must not leave ./benchmark_results/
+    # behind in the student's working directory.
+    import tempfile
+    tmp_output = tempfile.TemporaryDirectory()
     print("  Testing comprehensive benchmark suite...")
-    suite = BenchmarkSuite(models, datasets)
+    suite = BenchmarkSuite(models, datasets, output_dir=tmp_output.name)
     results = suite.run_full_benchmark(simulate=True)
 
     assert 'latency' in results
@@ -4140,7 +4370,11 @@ def test_module():
             assert isinstance(result, BenchmarkResult)
             assert result.count > 0
             assert result.std >= 0
-            assert result.ci_lower <= result.mean <= result.ci_upper
+            # n = 1 has no interval at all; anything larger must bracket the mean.
+            if result.count == 1:
+                assert result.ci_lower is None and result.ci_upper is None
+            else:
+                assert result.ci_lower <= result.mean <= result.ci_upper
 
     # Test 3: Report generation
     print("  Testing report generation...")
@@ -4148,6 +4382,10 @@ def test_module():
     assert "Benchmark Report" in report
     assert "System Information" in report
     assert "Recommendations" in report
+    # Every reported number carries its unit and its interval, or the table is
+    # four decimal places of nothing comparable.
+    assert "Latency Results [ms]" in report and "Memory Results [MB]" in report
+    assert "95% CI [" in report, "The report claims a 95% CI it never prints"
 
     # Test 4: MLPerf compliance
     print("  Testing MLPerf compliance...")
@@ -4165,13 +4403,18 @@ def test_module():
     # Test 5: Optimization comparison
     print("  Testing optimization comparison...")
     comparison_results = analyze_optimization_techniques(
-        models[0], models[1:], datasets[:1], simulate=True
+        models[0], models[1:], datasets[:1], simulate=True, output_dir=tmp_output.name
     )
 
     assert 'base_model' in comparison_results
     assert 'improvements' in comparison_results
     assert 'recommendations' in comparison_results
+    assert 'pareto_frontier' in comparison_results
     assert len(comparison_results['improvements']) == 2
+    # The frontier is a subset of the models measured, and never empty.
+    frontier = comparison_results['pareto_frontier']
+    assert 1 <= len(frontier) <= 3
+    assert set(frontier) <= set(comparison_results['optimized_results']) | {comparison_results['base_model']}
 
     # Test 6: Cross-platform compatibility
     print("  Testing cross-platform compatibility...")
@@ -4187,67 +4430,149 @@ def test_module():
 
     print("✅ End-to-end benchmarking workflow works!")
 
+    tmp_output.cleanup()
+
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 19")
 
 # %% [markdown]
-"""
+r"""
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of benchmarking and performance engineering:
 
 ### Question 1: Statistical Confidence in Measurements
-You implemented BenchmarkResult with confidence intervals for measurements.
-If you run 20 trials and get mean latency 5.2ms with std dev 0.8ms:
-- What's the 95% confidence interval for the true mean? [_____ ms, _____ ms]
-- How many more trials would you need to halve the confidence interval width? _____ total trials
+You implemented `BenchmarkResult` with confidence intervals for measurements.
+If you run 20 trials and get mean latency $\mu = 5.2\text{ ms}$ with sample standard deviation $s = 0.8\text{ ms}$:
+
+- **What's the 95% confidence interval for the true mean?**
+  $$\text{SE} = \frac{s}{\sqrt{n}} = \frac{0.8}{\sqrt{20}} = \frac{0.8}{4.4721} \approx 0.1789\text{ ms}$$
+  $s$ is estimated from the same 20 samples, so the critical value is Student's $t$
+  with $\nu = 19$ degrees of freedom, $t_{0.975, 19} = 2.093$:
+  $$\text{Margin of Error} = 2.093 \times 0.1789 \approx 0.3744\text{ ms} \implies \mathbf{[4.83\text{ ms},\ 5.57\text{ ms}]}$$
+  *(Substituting the normal $z_{0.975} = 1.96$ gives margin $0.3506\text{ ms}$ and
+  $[4.85, 5.55]$, an interval $6.4\%$ too narrow. `BenchmarkResult` uses the $t$
+  value, which is why `t_critical_95()` carries a table rather than a constant.)*
+- **How many more trials would you need to halve the confidence interval width?**
+  $$\text{Width} \propto \frac{1}{\sqrt{n}} \implies \frac{\text{Width}_{\text{new}}}{\text{Width}_{\text{old}}} = \frac{1}{2} \implies \sqrt{\frac{n_{\text{new}}}{n_{\text{old}}}} = 2 \implies n_{\text{new}} = 4 \times n_{\text{old}} = 4 \times 20 = \mathbf{80\text{ total trials}}$$
+  *(You would need $80 - 20 = \mathbf{60\text{ additional trials}}$).*
+
+---
 
 ### Question 2: Measurement Overhead Analysis
-Your precise_timer context manager has microsecond precision, but models run for milliseconds.
-For a model that takes 1ms to execute:
-- If timer overhead is 10μs, what's the relative error? _____%
-- At what model latency does timer overhead become negligible (<1%)? _____ ms
+`precise_timer` samples `time.perf_counter()` twice per measurement. On this machine a
+single `perf_counter()` call costs about $35\text{ ns}$ (see the timing table in 🏗️),
+so the overhead a measurement pays is $\delta_{\text{timer}} \approx 70\text{ ns}$.
+
+- **For a model that takes $1.0\text{ ms}$, what's the relative error?**
+  $$\text{Relative Error} = \frac{\delta_{\text{timer}}}{T_{\text{exec}}} = \frac{0.07\text{ }\mu\text{s}}{1000\text{ }\mu\text{s}} \times 100\% = \mathbf{0.007\%}$$
+  Negligible, and this is the usual case. Timer overhead is almost never what
+  distorts a benchmark; OS scheduling ($\delta_{\text{OS}}$, microseconds to
+  milliseconds) is, and it is three to five orders of magnitude larger.
+- **Below what execution time does timer overhead exceed $1\%$?**
+  $$T_{\text{exec}} < \frac{\delta_{\text{timer}}}{0.01} = \frac{70\text{ ns}}{0.01} = 7\text{ }\mu\text{s}$$
+  *Systems implication: individual operator timing only becomes clock-limited in the
+  single-digit-microsecond range, which is roughly one $256 \times 256$ matmul. Below
+  that, amortize by running an internal loop of $K = 100\text{--}1000$ iterations
+  inside one timer block and dividing. Note what the amortization does and does not
+  buy. It removes the clock cost, and it leaves the $\delta_{\text{OS}}$ term
+  untouched, because a preemption inside the loop is still inside the interval.*
+
+---
 
 ### Question 3: Benchmark Configuration Trade-offs
-The BenchmarkSuite class uses configurable warmup_runs and measurement_runs parameters
-(with DEFAULT_WARMUP_RUNS=5 and DEFAULT_MEASUREMENT_RUNS=10 as defaults).
-For a CI/CD pipeline that runs 100 benchmarks per day:
-- Fast config (3s each): _____ minutes total daily
-- Accurate config (15s each): _____ minutes total daily
-- What's the key trade-off you're making? [accuracy/precision/development velocity]
+`BenchmarkSuite` forwards `warmup_runs` and `measurement_runs` to its `Benchmark`
+(defaults `DEFAULT_WARMUP_RUNS = 5`, `DEFAULT_MEASUREMENT_RUNS = 10`), so a CI pipeline
+can pick a configuration per stage. Latency cost per model is roughly
+$(\text{warmup} + \text{measurement}) \times T_{\text{forward}}$.
+
+For a model with $T_{\text{forward}} = 20\text{ ms}$, benchmarked across 100 models:
+
+- **Fast config** (`warmup_runs=2, measurement_runs=5`): $7 \times 20\text{ ms} = 0.14\text{ s}$ per model, $\mathbf{14\text{ s}}$ for the suite.
+- **Accurate config** (`warmup_runs=5, measurement_runs=40`): $45 \times 20\text{ ms} = 0.9\text{ s}$ per model, $\mathbf{90\text{ s}}$ for the suite.
+- **What does the extra $76\text{ s}$ actually buy?** Interval width, and only as
+  $1/\sqrt{n}$. Going from $n=5$ to $n=40$ narrows the confidence interval by
+  $\sqrt{40/5} = 2.83\times$, and the $t$ critical value drops from $2.776$ to
+  $2.023$, for a total narrowing of about $3.9\times$. Run
+  `analyze_benchmark_variance()` to see this table for your own noise level.
+- **What's the key trade-off you're making?** **Regression detection threshold vs
+  feedback latency.** At the $\sigma/\mu = 0.15$ noise level
+  `analyze_benchmark_variance()` uses, the fast config's own interval is
+  $\pm 18.6\%$, so it cannot resolve a $5\%$ regression. It will neither catch it nor
+  report it as unresolvable, and a gate that
+  cannot see the thing it guards against is worse than no gate, because it grants
+  confidence. Size $n$ from the smallest regression you need to catch, not from the
+  wall-clock budget, and if the two disagree, benchmark fewer models rather than
+  benchmarking all of them badly.
+
+---
 
 ### Question 4: MLPerf Compliance Metrics
 You implemented MLPerf-style standardized benchmarks with target thresholds.
-If a model achieves 89% accuracy (target: 90%) and 120ms latency (target: <100ms):
-- Is it compliant? [Yes/No] _____
-- Which constraint is more critical for edge deployment? [accuracy/latency]
-- How would you prioritize optimization? [accuracy first/latency first/balanced]
+If an edge candidate model achieves 89% accuracy (MLPerf Tiny target: 90%) and a $p_{90}$
+latency of 120ms (TinyTorch classroom ceiling: <100ms):
+
+- **Is it compliant?** **No**. This harness gates on a strict conjunction ($\text{Acc} \ge \text{Target} \land p_{90} \le \text{Threshold}$). Both are violated ($89\% < 90\%$ and $120\text{ ms} > 100\text{ ms}$). Note which half of that is a real MLPerf rule. The accuracy target is; the latency ceiling is ours. In official MLPerf Tiny this submission misses the quality target and is simply reported with its latency, whatever that latency is.
+- **Which constraint is more critical for edge deployment?** **Latency**. Latency on edge devices is a hard real-time physical deadline dictated by sensor sampling rates (e.g. 10 fps camera stream requires $< 100\text{ ms}$ processing), UI responsiveness, or watchdog timeouts. Dropping below the latency ceiling causes dropped sensor frames or system lockup, whereas an accuracy delta of $1\%$ is typically tolerable.
+- **How would you prioritize optimization?** **Latency-first**. First compress/accelerate the model to reliably meet the $\le 100\text{ ms}$ deadline with buffer room, then tune hyper-parameters or calibration datasets to recover the remaining accuracy gap.
+
+---
 
 ### Question 5: Optimization Comparison Analysis
-Your analyze_optimization_techniques() generates recommendations for different use cases.
-Given three optimized models:
-- Quantized: 0.8× memory, 2× speed, 0.95× accuracy
-- Pruned: 0.3× memory, 1.5× speed, 0.98× accuracy
-- Distilled: 0.6× memory, 1.8× speed, 0.92× accuracy
+Your `analyze_optimization_techniques()` generates recommendations for different use cases.
+Start from an FP32 baseline measuring $120\text{ MB}$ and $180\text{ ms}$, and three
+optimized variants:
+- **Quantized** (INT8 from FP32): $0.25\times$ memory footprint (75% reduction, the exact $4\times$ ratio of 4 bytes to 1), $2.0\times$ speedup, $0.95\times$ accuracy
+- **Pruned**: $0.3\times$ memory footprint (70% reduction), $1.5\times$ speedup, $0.98\times$ accuracy
+- **Distilled**: $0.6\times$ memory footprint (40% reduction), $1.8\times$ speedup, $0.92\times$ accuracy
 
-For a mobile app with 50MB model size limit and <100ms latency requirement:
-- Which optimization offers best memory reduction? _____
-- Which balances all constraints best? _____
-- What's the key insight about optimization trade-offs? [no free lunch/specialization wins/measurement guides decisions]
+For a mobile app with a $50\text{ MB}$ model size limit and a strict $< 100\text{ ms}$ latency requirement:
+- **Which optimization offers best memory reduction?** **Quantized** ($0.25\times$, a $75\%$ reduction). INT8 from FP32 stores one byte where four were stored, so the ratio is exactly $4\times$ and not a tunable number. Pruning's $0.3\times$ is close but is a *modeled* figure, because zeroed weights still occupy dense storage unless you also change the format, which is why `analyze_optimization_tradeoffs()` above reports the same payload bytes for baseline and pruned.
+- **Which variants actually satisfy both constraints?** Apply them:
+
+  | Variant | Size | $\le 50\text{ MB}$? | Latency | $< 100\text{ ms}$? |
+  | :--- | :--- | :--- | :--- | :--- |
+  | Quantized | $120 \times 0.25 = 30\text{ MB}$ | ✅ | $180 / 2.0 = 90\text{ ms}$ | ✅ |
+  | Pruned | $120 \times 0.3 = 36\text{ MB}$ | ✅ | $180 / 1.5 = 120\text{ ms}$ | ❌ |
+  | Distilled | $120 \times 0.6 = 72\text{ MB}$ | ❌ | $180 / 1.8 = 100\text{ ms}$ | ❌ (not strictly under) |
+
+  Only **Quantized** clears both, so the answer is Quantized despite Pruned retaining
+  more accuracy. This is what a hard constraint does: it removes candidates from
+  consideration before any trade-off is weighed, and the $0.98$ retention that would
+  have won an unconstrained comparison never gets to compete.
+- **What's the key insight about optimization trade-offs?** **The frontier filters,
+  constraints filter again, and only then do weights choose.** Run
+
+  ```python
+  pareto_frontier({'Quantized': (0.25, 2.0, 0.95),
+                   'Pruned':    (0.30, 1.5, 0.98),
+                   'Distilled': (0.60, 1.8, 0.92)},
+                  (True, False, False))   # minimize memory, maximize speedup and accuracy
+  ```
+
+  and you get `['Quantized', 'Pruned']`. **Distilled is dominated**: Quantized is
+  smaller *and* faster *and* more accurate, so nothing about any deployment could
+  make Distilled the right answer, and no weighting needs to be argued about. That is
+  what the frontier is for. It does not rank Quantized against Pruned, because
+  neither beats the other on every axis; the $50\text{ MB}$ and $100\text{ ms}$
+  constraints do that, and they remove Pruned. Had both survived, you would still owe
+  an explicit weighting, and the weights would be a statement about your deployment
+  rather than a fact about the models.
 """
 
 # %% [markdown]
-"""
+r"""
 ## ⭐ Aha Moment: Measurement Enables Optimization
 
 **What you built:** A benchmarking system with warmup, statistics, and reproducibility.
 
-**Why it matters:** "Premature optimization is the root of all evil"—but you can't optimize
-without measuring! Your benchmarking system produces reliable, comparable numbers: warmup
-iterations eliminate cold-start effects, multiple runs give confidence intervals.
+**Why it matters:** "Premature optimization is the root of all evil", but you cannot
+optimize what you have not measured. Your benchmarking system produces reliable,
+comparable numbers. Warmup iterations discard cold-start effects, repeated runs give a
+Student-$t$ confidence interval, and every reported number carries its unit.
 
-This is how production ML teams make decisions: measure, compare, improve, repeat.
+This is how production ML teams make decisions. Measure, compare, improve, repeat.
 """
 
 # %%
@@ -4271,13 +4596,15 @@ def demo_benchmarking():
     results = benchmark.run_latency_benchmark(input_shape=(32, 512))
     result = list(results.values())[0]
 
-    print(f"Model: Linear(512 → 256)")
-    print(f"Batch: 32 samples")
-    print(f"\nBenchmark Results (10 iterations):")
+    print("Model: Linear(512 → 256)")
+    print("Batch: 32 samples")
+    print(f"\nBenchmark Results ({result.count} iterations):")
     print(f"  Mean latency: {result.mean:.2f} ms")
     print(f"  Std dev:      {result.std:.2f} ms")
     print(f"  Min:          {result.min_val:.2f} ms")
     print(f"  Max:          {result.max_val:.2f} ms")
+    print(f"  95% CI:       [{result.ci_lower:.2f}, {result.ci_upper:.2f}] ms "
+          f"(Student-t, {result.count - 1} dof)")
 
     print("\n✨ Reliable measurements guide optimization decisions!")
 
@@ -4288,28 +4615,36 @@ if __name__ == "__main__":
     demo_benchmarking()
 
 # %% [markdown]
-"""
+r"""
 ## 🚀 MODULE SUMMARY: Benchmarking
 
-Congratulations! You've built a professional benchmarking system that rivals industry-standard evaluation frameworks!
+Congratulations! You have built a professional, statistically rigorous benchmarking framework that mirrors production ML evaluation suites like MLPerf!
 
 ### Key Accomplishments
-- Built comprehensive benchmarking infrastructure with BenchmarkResult, Benchmark, and BenchmarkSuite classes
-- Implemented statistical rigor with confidence intervals, variance analysis, and measurement optimization
-- Created MLPerf-style standardized benchmarks for reproducible cross-system comparison
-- Developed optimization comparison workflows that generate actionable recommendations
-- All tests pass ✅ (validated by `test_module()`)
+
+| Milestone Capability | Mathematical / Systems Mechanism | TinyTorch Implementation | Production Parallel |
+| :--- | :--- | :--- | :--- |
+| **Statistical Rigor** | Sample mean $\mu$, variance $s^2$, standard error $\frac{s}{\sqrt{n}}$, and a Student-$t$ CI from a 30-entry $t_{0.975,\nu}$ table | `BenchmarkResult` | Google Benchmark, Criterion.rs |
+| **Monotonic Timing** | Monotonic userspace vDSO clock with nanosecond counter | `precise_timer()` | `clock_gettime(CLOCK_MONOTONIC)` |
+| **Warmup Discard** | Cold-start page fault & cache warming isolation | `Benchmark.run_latency_benchmark()` | MLPerf Tiny warmup harness |
+| **Memory Accounting** | Peak allocator buffer tracking vs process RSS | `Benchmark.run_memory_benchmark()` | PyTorch CUDA Caching Allocator profiler |
+| **Standardized Tasks** | Fixed seeds, input shapes, real MLPerf Tiny quality targets, and a $p_{90}$ single-stream latency gate | `MLPerf` class | MLPerf Inference & Mobile Benchmark Suite |
+| **Pareto Filtering** | Non-dominated set under one direction flag per objective | `pareto_frontier()` | Optuna, Neural Network Intelligence (NNI) |
+| **Weighted Selection** | Capped speedups plus $5\times$ accuracy retention, weights stated in the output | `analyze_optimization_techniques()` | Ax, Vizier multi-objective schedulers |
 
 ### Systems Insights Discovered
-- **Measurement Science**: Statistical significance requires proper sample sizes and variance control
-- **Benchmark Design**: Standardized protocols enable fair comparison across different systems
-- **Trade-off Analysis**: Pareto frontiers reveal optimization opportunities and constraints
-- **Production Integration**: Automated reporting transforms measurements into engineering decisions
+- **Measurement Science**: Single-run latency numbers are noise; true systems characterization requires isolated warmup and statistical confidence intervals.
+- **The Critical Value Matters**: At $n = 10$ the normal constant $1.96$ reports an interval $13\%$ narrower than $t_{0.975,9} = 2.262$ allows. A CI is a claim, and the claim has to match the estimator.
+- **Metric Dimensionality**: Optimizing for speed without tracking memory or accuracy creates brittle models that fail silent SLA requirements.
+- **Filtering Is Not Choosing**: A Pareto frontier removes the variants nothing could justify and ranks nothing. Any single "best overall" number is a weighting, and a weighting that is not printed is a decision nobody reviewed.
+- **Hardware Realities**: A `perf_counter()` call costs about $35\text{ ns}$, so timer overhead only matters below roughly $7\text{ }\mu\text{s}$ of work. Scheduling jitter, three to five orders of magnitude larger, is what actually distorts a benchmark.
+- **Percentiles Need Samples**: A $p_{99}$ over five samples is the maximum wearing a percentile's name, which is why MLPerf's server scenario mandates hundreds of thousands of queries.
+- **Production Integration**: Objective compliance checks and machine-readable JSON reports bridge experimental training to operational deployment.
 
 ### Ready for Next Steps
-Your benchmarking implementation enables comprehensive systems evaluation, demonstrating your complete optimization toolkit. This is where all 19 modules come together!
+Your benchmarking framework completes the Optimization Tier. Every component, from Tensors, Autograd, Convolutions, and Transformers to Quantization, Acceleration, Memoization, and Benchmarking, is now verified.
 
-Export with: `tito module complete 19`
+Export with: `tito dev export 19`
 
-**Next**: Module 20 (Capstone) will demonstrate the complete ML systems engineering workflow!
+**Next**: Module 20 (Capstone) will integrate every single concept into an end-to-end production ML system!
 """

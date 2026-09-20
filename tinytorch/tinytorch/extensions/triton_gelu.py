@@ -16,9 +16,13 @@
 # ╚═══════════════════════════════════════════════════════════════════════════════╝
 """OpenAI Triton Fused Bias + GELU Kernel for TinyTorch.
 
-Demonstrates block-level GPU programming with automatic SRAM tiling.
-Falls back seamlessly to CPU if Triton / CUDA GPU is unavailable.
-This is a standalone, optional accelerator extension (not generated from src/).
+Adds a bias and applies GELU in one GPU kernel, so the intermediate x + bias
+never makes a round trip through GPU memory. Each Triton program handles one
+block of BLOCK_SIZE elements. This is an optional, hand-written extension: it
+is tracked in git as-is and is not generated from src/.
+
+It needs PyTorch, Triton, and an NVIDIA GPU; TinyTorch itself never imports
+PyTorch. Without them, triton_fused_gelu computes the same formula in NumPy.
 """
 
 import numpy as np
@@ -52,19 +56,21 @@ if _HAS_TRITON:
         # Compute bias offset (modulo inner_dim)
         bias_offsets = offsets % inner_dim
 
-        # Zero-overhead coalesced DRAM -> SRAM load
+        # Adjacent programs read adjacent addresses, so the loads coalesce
         x = tl.load(x_ptr + offsets, mask=mask)
         bias = tl.load(bias_ptr + bias_offsets, mask=mask)
 
-        # Fused arithmetic inside register file
+        # The whole formula stays in registers
         val = x + bias
         sqrt_2_over_pi = 0.7978845608028654
         coeff = 0.044715
         inner = sqrt_2_over_pi * (val + coeff * val * val * val)
-        tanh_val = tl.extra.cuda.libdevice.tanh(inner)
+        # tanh(z) = 2*sigmoid(2z) - 1; tl.sigmoid exists in every Triton
+        # release, while the libdevice tanh import path has moved between them.
+        tanh_val = 2.0 * tl.sigmoid(2.0 * inner) - 1.0
         out = 0.5 * val * (1.0 + tanh_val)
 
-        # Write back directly to HBM without intermediate activation traffic
+        # One write of the result; x + bias is never stored
         tl.store(out_ptr + offsets, out, mask=mask)
 
 
@@ -74,20 +80,21 @@ def has_triton_support() -> bool:
 
 
 def triton_fused_gelu(x: np.ndarray, bias: np.ndarray | None = None) -> np.ndarray:
-    """Computes Fused Bias + GELU on GPU via Triton JIT.
-    
+    """GELU(x + bias) in one Triton kernel on an NVIDIA GPU (tanh approximation).
+
     Args:
-        x: Input numpy array of shape [..., D]
-        bias: Optional bias vector of shape [D]
-        
+        x: array [..., D]
+        bias: optional vector [D]
+
     Returns:
-        Numpy array of identical shape with fused GELU applied.
+        float32 array with the shape of x. Computed in NumPy without Triton.
     """
     if not _HAS_TRITON:
-        # Fallback to pure numpy CPU implementation
-        val = x + bias if bias is not None else x
+        val = np.asarray(x, dtype=np.float32)
+        if bias is not None:
+            val = val + np.asarray(bias, dtype=np.float32)
         inner = np.sqrt(2.0 / np.pi) * (val + 0.044715 * np.power(val, 3))
-        return 0.5 * val * (1.0 + np.tanh(inner))
+        return (0.5 * val * (1.0 + np.tanh(inner))).astype(np.float32)
 
     x_torch = torch.from_numpy(np.ascontiguousarray(x, dtype=np.float32)).cuda()
     if bias is not None:
