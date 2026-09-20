@@ -35,6 +35,145 @@ Release body. Omit any section that has no entries for a given release.
 
 ## Unreleased
 
+### Physical AI & Embodied Modeling
+
+- **Embodied Hardware & Platform Registry (`mlsysim.embodied`)**: Added first-principles registries for physical robotics platforms:
+  - `Embodied.Vehicle`: Autonomous vehicles (e.g. `UberATG_VolvoXC90`, `Waymo_Pacifica_Chrysler`) with mass, max velocity, acceleration, braking profiles, and thermal/power envelopes.
+  - `Embodied.AMR`: Autonomous mobile robots (e.g. `LogisticsAMR`, `WarehouseAMR`) with mass, velocity limits, sensor latencies, and stopping clearances.
+  - `Embodied.Manipulator`: Articulated robotic arms (e.g. `Franka_Emika_Panda`, `UR5e`) with joint count, effective end-effector inertia, payload capacity, and stiction thresholds.
+- **Physical Robotics Closed-Form Physics (`mlsysim.physics.robotics`)**: Added closed-form analytical solvers for cyber-physical AI:
+  - `calc_safe_stopping_distance`: Safe stopping envelope combining reaction lag, braking deceleration, and localization margins.
+  - `calc_kinetic_energy`: Kinetic energy for moving mass.
+  - `calc_transient_impact_force`: Transient collision impact force using effective mass and tissue stiffness.
+  - `calc_coulomb_stiction_deadband`: Torque deadband latency from Coulomb friction and motor torque slewing.
+  - `calc_watchdog_lease_bound`: Maximum safety watchdog lease duration bounded by optical sensor clearance and stopping distance.
+  - `calc_canfd_bus_utilization`: Deterministic bus frame transmission time and utilization under CAN-FD arbitration/data phases.
+  - `calc_ethercat_cycle_time`: Sum-frame EtherCAT cycle time, transmission latency, and timing margin.
+  - `calc_teleop_ingestion_budget`: Multi-camera teleoperation ingestion data rates, PCIe bus bandwidth, and raw memory footprint.
+  - `calc_demonstration_yield_fatigue`: Ergonomic teleoperator fatigue decay and usable demonstration throughput yield.
+  - `calc_covariate_drift_compounding`: Exponential error compounding across closed-loop horizon under covariate shift.
+  - `calc_action_chunk_denoising_cadence`: Diffusion policy denoising step latency vs camera frame cycle time.
+  - `calc_clopper_pearson_zero_failure_bound`: Exact binomial lower confidence bound on operational survival probability from zero-failure trials.
+  - `calc_zero_failure_sample_size`: Required flawless trials to demonstrate target reliability at confidence level.
+  - `calc_sensor_information_age`: End-to-end information age and spatial error displacement from sensor acquisition to actuator current.
+  - `calc_tsdf_voxel_grid_budget`: Memory capacity and bandwidth requirements for 3D TSDF voxel grids vs octrees.
+  - `calc_intent_drift_lease`: Temporal validity lease for high-level semantic goals bounded by odometry drift and workspace obstacles.
+  - `calc_tripwire_contact_force_accumulation`: Contact force integration across actuator response delay.
+  - `calc_process_thermal_runaway_lease`: Critical thermal runaway lease duration before actuator or plant temperature exceeds safety limits.
+  - `calc_planning_seam_inertia_discontinuity`: Trajectory stitch acceleration spike and mechanical jerk from replanning discontinuities.
+  - `calc_cbf_qp_orthogonal_projection`: Control Barrier Function minimum-norm QP projection to enforce safe forward-invariant set.
+  - `calc_inductive_pdn_voltage_droop`: Fast inductive power distribution network (PDN) $L \cdot di/dt$ voltage droop under transient current steps.
+  - `calc_intervention_takeover_budget`: Human takeover reaction time, out-of-loop drift displacement, and total safety stopping distance.
+  - `calc_architectural_shield_dilution`: Reliability dilution across layered runtime defense shields.
+- **Physical AI SI Units (`mlsysim.core.units`)**: Added exported aliases and quantities for `millimeter`, `mm`, `newton`, `N`, `volt`, `V`, `millivolt`, `mV`, `ampere`, `A`, `milliampere`, `mA`, `ohm`, `milliohm`, `radian`, `rad`, `hertz`, `Hz`.
+- **Provenance Catalog (`mlsysim.core.provenance_catalog`)**: Integrated verifiable engineering sources and datasheets for all embodied platforms and parameters.
+
+### Bug Fixes
+
+- `CompressionModel` measured every ratio against a hard-coded FP32 baseline
+  with no way to change it, so INT4 always reported 8x compression and an 8x
+  memory-bound speedup, even for models served from FP16/BF16 weights where
+  practice quotes 4x. `solve`, `candidate`, and `sweep` now take a configurable
+  `baseline_precision` (resolved through `core.units.PRECISION_MAP`) that
+  defaults to `"fp32"`, so existing results are unchanged:
+  `compression_ratio = b_base / target_bitwidth`, and original sizes and the
+  Roofline regime use the baseline width. Pass `baseline_precision="fp16"` for
+  FP16/BF16-served models (INT4 = 4x). `CompressionResult` and
+  `CompressionCandidate` record the baseline; the Wall 13 equation now reads
+  `r = b_base/b`.
+- `DistributedModel` counted 2 tensor-parallel AllReduces per layer (the
+  forward path only) for a training step and priced them as one collective of
+  twice the activation size. Megatron-LM tensor parallelism runs two AllReduces
+  in the forward path and two in the backward path per layer (Shoeybi et al.
+  2019, p.4), so a training step now pays 4 separate AllReduces per layer, each
+  with its own ring latency term: the bandwidth term of `tp_communication_latency`
+  doubles and the latency term quadruples.
+- `SensitivitySolver` returned all-zero sensitivities with `peak_flops` named
+  as binding when the configuration does not fit in memory (for example
+  Llama-3 70B FP16 on one H100): the offload path pins latency, so no 10%
+  perturbation moves it, and `max()` broke the tie on the first key.
+  `SensitivityResult` now carries `feasible`; an infeasible baseline reports
+  `binding_constraint="memory_capacity"` and a `constraint_trace` with the
+  Memory Wall failure.
+- `DistributedModel` priced the local step with `Engine.solve` on the whole,
+  unsharded model on one accelerator and counted one token per sequence. Any
+  multi-billion-parameter transformer therefore failed the memory check and
+  was priced at the PCIe offload bandwidth, so step time ignored `efficiency`
+  and every TP/PP/DP split looked alike (Llama-3 70B at TP=8 on 512 H100s:
+  9.5 TB "per GPU"). The step is now one model-parallel replica: step FLOPs
+  (`inference_flops * seq_len * local_batch`, 3x for training, 4x with
+  recomputation) shared across its `tp * pp * ep` accelerators, and
+  feasibility from `TrainingMemoryModel` with the same TP/PP/EP/ZeRO
+  sharding, selective recomputation (full when `activation_recomputation`),
+  and the microbatches a 1F1B stage holds in flight. Non-transformer
+  workloads without model parallelism keep the `Engine.solve` path.
+  - Tensor-parallel communication now covers one pipeline stage's layers
+    (stages run concurrently) instead of charging every layer to every stage.
+  - The pipeline bubble is added as idle time `compute * b / (1 - b)`, since
+    `calc_pipeline_bubble` returns the idle share of the whole step; it was
+    added as `compute * b`, which understated it most for few microbatches.
+  - `effective_throughput` multiplies by the DP replica count, not the
+    accelerator count.
+- `DistributedModel`'s data-parallel AllReduce sized each rank's gradients as
+  the model over TP, ignoring PP, and split the ring by accelerators per node
+  rather than DP ranks per node. A TP=8 group on 8-GPU nodes therefore ringed
+  part of its gradients over NVLink although every DP rank sits on a different
+  node, and one-accelerator nodes ringed over the intra-node link. Each rank
+  now holds a `tp * pp` shard, a node holds `accelerators_per_node // (tp * pp
+  * ep)` ranks of a group, and the collective is an intra-node ring, a fabric
+  ring (one rank per node), or hierarchical accordingly.
+- `ParallelismOptimizer` drops candidates whose replica does not fit once
+  activations are counted, prices pipelined candidates with one-sample
+  microbatches, takes `seq_len` and `activation_recomputation`, and names the
+  memory remedies when nothing fits.
+- `TrainingMemoryModel` never divided activations by the tensor-parallel
+  degree. With `sequence_parallel=True` (the default, Korthikanti et al. 2023)
+  activations shard across the TP group; `tp_size=1` results are unchanged.
+- `WeightStreamingModel.wafer_memory_utilization` divided GB by GiB without
+  reducing units, overstating utilization by 7.4%.
+
+### Solvers, Models & Taxonomy
+
+- `ContinuousBatchingModel` now derives static and paged capacity from a
+  request-length distribution instead of assuming static batching reaches 60%
+  of the paged batch. Static allocation reserves `max_seq_len` per request;
+  paged allocation holds `ceil(S/p)` blocks averaged over exponential request
+  lengths capped at `max_seq_len` with mean `mean_request_tokens`. Page size
+  now changes fragmentation and capacity even when the context divides evenly
+  by the page size, and `speedup_vs_static` compares memory-bound decode
+  throughput at the two concurrencies. Provenance now cites Kwon et al. (2023)
+  Fig. 2 correctly (20.4% to 38.2% of KV memory holds token states under
+  contiguous pre-allocation).
+- `ServingCapacityModel` accepts `mean_request_tokens` and evaluates base
+  latency at the mean request length.
+- Added `calc_capped_exponential_scale` and `calc_expected_paged_kv_tokens` to
+  `mlsysim.physics`.
+- Added the `mlsysim.Agents` registry (`Coding.SWE_Bench_Runner`,
+  `Deliberation.TreeSearch`, `MultiAgent.SupervisorWorker`,
+  `Interactive.StreamingVoice`) and the `mlsysim.Embodied` registry
+  (`Quadruped.Spot`, `Humanoid.Atlas`, `Humanoid.Unitree_H1`,
+  `Manipulator.Panda`, `Drone.DJI_Matrice`, `AMR.LogisticsAMR`,
+  `Vehicle.Robotaxi`). Provenance states what is sourced. The Panda record is
+  a datasheet. Spot, Atlas, Unitree H1, and the DJI Matrice 350 RTK are
+  estimates that link their spec pages and name the unsourced fields. The AMR
+  and robotaxi are estimated class profiles, and the four agent profiles are
+  illustrative teaching assumptions.
+- Added `mlsysim.physics.agents` (trajectory step time and reliability, Pareto
+  trajectory-length tail, radix prefix-cache latency, test-time compute cost,
+  multi-agent coordination overhead, speedup, and optimal concurrency) and
+  `mlsysim.physics.robotics` (sensor-to-actuator latency, stopping distance
+  and maximum permitted velocity, kinetic energy, reflected inertia and seam
+  torque, inverted-pendulum fall time, actuator Joule heating, and
+  action-chunk cadence). Each docstring has a `Source:` line that cites a
+  checked reference or names the formula as a modeling assumption.
+
+### Hardware Registry
+
+- `Hardware.Cloud.TPUv4` records its inter-chip interconnect (ICI) as 300 GB/s
+  per direction, six links at 50 GB/s (Jouppi et al. 2023, Table 4, which
+  quotes the A100's NVLink at the same one-way convention). Its provenance now
+  carries the paper's actual title.
+
 ### Documentation
 
 - Align website tutorials and landing pages with canonical nested registry paths
@@ -55,6 +194,16 @@ Release body. Omit any section that has no entries for a given release.
   `Ops.Monitoring`, and `core.calibration` (solver/engine parameters only).
 - Added `Infrastructure.Pricing` (`Cloud`, `Storage`, `Labeling`, `Fleet`, `Capital`).
   Appendix lineage audits registry paths and rejects stale `defaults.*` references.
+
+### Breaking Changes
+
+- `ContinuousBatchingModel.solve()` and `ServingCapacityModel.solve()` rename
+  `seq_len` to `max_seq_len`.
+- `ContinuousBatchingResult.memory_fragmentation_pct` is replaced by
+  `paged_internal_fragmentation` and `static_internal_fragmentation`
+  (fractions in [0, 1]). New fields: `static_max_active_requests`,
+  `static_throughput_tokens_per_sec`, `static_kv_cache_size`, and
+  `mean_request_tokens`.
 
 ## v0.1.2 (2026-05-17) — CLI & Website Release Polish
 

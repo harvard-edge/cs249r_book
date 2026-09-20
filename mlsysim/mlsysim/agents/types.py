@@ -1,6 +1,6 @@
 """Agent system profile and architecture types."""
 
-from typing import Optional, Any
+from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..core.units import ureg

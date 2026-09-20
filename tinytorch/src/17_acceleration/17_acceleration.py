@@ -361,21 +361,24 @@ if __name__ == "__main__":
 
 ### The Memory Bandwidth Crisis
 
-Consider this innocent-looking computation: `y = gelu(x * weight + bias)`
+Consider this computation: `y = gelu(x * weight + bias)`.
+Assume `x`, `weight`, and `bias` are each 4 GB arrays. Count one read of
+each input and one write of each output per operation, ignoring cache reuse.
+Treat GELU itself as one compiled operation in both paths.
 
 **Naive Implementation (Memory Intensive):**
 ```
-Step 1: temp1 = x * weight     → Write 4GB to memory
-Step 2: temp2 = temp1 + bias   → Read 4GB, Write 4GB
+Step 1: temp1 = x * weight     → Read 8GB, Write 4GB
+Step 2: temp2 = temp1 + bias   → Read 8GB, Write 4GB
 Step 3: y = gelu(temp2)        → Read 4GB, Write 4GB
-                                 Total: 20GB memory traffic!
+                                 Total: 32GB memory traffic!
 ```
 
 **Fused Implementation (Memory Efficient):**
 ```
-Single Step: y = gelu(x * weight + bias)  → Read 8GB, Write 4GB
-                                            Total: 12GB memory traffic!
-                                            40% memory bandwidth reduction!
+Single Step: y = gelu(x * weight + bias)  → Read 12GB, Write 4GB
+                                            Total: 16GB memory traffic!
+                                            50% less modeled memory traffic!
 ```
 
 ### Understanding GELU: The Smooth Activation
@@ -429,10 +432,10 @@ Unfused Operations:                    Fused Operation:
 
 def fused_gelu(x: Tensor) -> Tensor:
     """
-    Fused GELU activation that combines all operations in a single kernel.
+    Compact GELU expression that avoids retaining intermediate Tensor copies.
 
     GELU combines the benefits of ReLU and sigmoid:
-    - Smooth everywhere (unlike ReLU's discontinuity at 0)
+    - Smooth everywhere (ReLU is continuous but not differentiable at 0)
     - Non-saturating for positive values (unlike sigmoid)
     - Probabilistic interpretation: x * P(X ≤ x) where X ~ N(0,1)
 
@@ -494,10 +497,10 @@ def fused_gelu(x: Tensor) -> Tensor:
 This test validates the fused GELU activation against the mathematical
 properties GELU must satisfy.
 
-**What we're testing**: GELU(0) = 0, monotonicity, and the tanh approximation
-**Why it matters**: Fusion collapses several passes over memory into one, so the
-fused version must stay numerically faithful to the unfused definition
-**Expected**: Exact zero at the origin, increasing output, correct tail behavior
+**What we're testing**: GELU(0) = 0, increasing nonnegative outputs, and the negative dip
+**Why it matters**: Reducing retained Tensor copies must preserve the activation;
+our NumPy expression still executes multiple array operations
+**Expected**: Exact zero at the origin, a nonmonotonic negative region, correct tails
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-fused-gelu", "locked": true, "points": 10}
@@ -512,8 +515,11 @@ def test_unit_fused_gelu():
     # GELU(0) = 0 (exact property)
     assert abs(result.data[2]) < 1e-6, f"GELU(0) should be 0, got {result.data[2]}"
 
-    # GELU is smooth and increasing
-    assert result.data[4] > result.data[3] > result.data[2], "GELU should be increasing"
+    # GELU increases for nonnegative inputs, but dips on the negative side.
+    assert result.data[4] > result.data[3] > result.data[2], \
+        "GELU should increase for nonnegative inputs"
+    assert result.data[0] > result.data[1] < result.data[2], \
+        "GELU should retain its nonmonotonic negative dip"
 
     # GELU has positive bias (unlike ReLU)
     assert result.data[3] > 0.8, "GELU(1) should be close to 1"
@@ -985,6 +991,7 @@ Let's analyze how our acceleration techniques perform across different scenarios
 def analyze_vectorization_scaling():
     """📊 Analyze vectorization performance across different tensor sizes."""
     print("📊 Analyzing vectorization scaling behavior...")
+    print("AI and GB/s use idealized byte counts, not measured memory traffic.")
 
     # Test sizes spanning different cache regimes
     sizes = [64, 128, 256, 512, 1024, 2048]
@@ -1117,9 +1124,13 @@ def analyze_arithmetic_intensity():
     print("└─────────────────────┴─────────┴─────────────┴─────────────┴─────────────┘")
 
     print(f"\n💡 Roofline Model Insights:")
-    print(f"   📊 Low AI (< 1): Memory bound - limited by bandwidth")
-    print(f"   📊 Med AI (1-10): Transitional - depends on implementation")
-    print(f"   📊 High AI (> 10): Compute bound - limited by ALU throughput")
+    print("   📊 Ridge point = peak FLOP/s / memory bandwidth in bytes/s")
+    print("   📊 Below the ridge: the roofline is limited by memory bandwidth")
+    print("   📊 Above the ridge: the roofline is limited by compute throughput")
+    print("   📊 The ridge depends on hardware, precision, and the memory level")
+    print("   Example: 10 TFLOP/s / 100 GB/s gives a ridge of 100 FLOPs/byte")
+    print("   At 20 FLOPs/byte, that example is memory-bandwidth limited")
+    print("   Actual performance can fall below either roof due to other overheads")
     print(f"   🎯 Matrix multiplication ({matmul_ai:.1f} AI) is ideal for GPUs/TPUs")
     print(f"   ⚡ Element-wise ops ({add_ai:.3f} AI) need memory optimization")
     print("🚀 Design algorithms with high arithmetic intensity for performance")
@@ -1591,7 +1602,7 @@ Congratulations! You've mastered the fundamental techniques for accelerating neu
 - **Roofline Model**: Operations with high arithmetic intensity (FLOPs/byte) scale better
 - **Memory Bandwidth**: Often the limiting factor for modern accelerators
 - **Cache Awareness**: Tiling keeps working sets in cache for better performance
-- **Kernel Fusion**: Critical for memory-bound workloads, reduces intermediate storage by 4-5×
+- **Kernel Fusion**: A compiled fused kernel can eliminate intermediate arrays; the savings depend on the expression
 - **Optimization Strategy**: Start simple (vectorization), add complexity as needed
 
 In production, these techniques enable:

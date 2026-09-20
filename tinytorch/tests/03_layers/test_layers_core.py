@@ -8,27 +8,28 @@ WHY LAYERS MATTER:
 -----------------
 Layers are the building blocks of neural networks:
 - Linear (Dense): y = Wx + b
-- Conv2d: sliding window feature detection
-- RNN/LSTM: sequence processing
+- Dropout: Regularization by random neuron deactivation
+- Sequential: Container chaining layers in sequence
 
-Every architecture (ResNet, GPT, BERT) is just layers + connections.
+Every architecture (MLP, ResNet, Transformer, GPT) is built from layers.
 
 WHAT STUDENTS LEARN:
 -------------------
-1. The Layer interface (forward, parameters, etc.)
-2. How to compose layers into networks
-3. Parameter management for training
+1. The Layer interface (forward, parameters, __call__)
+2. The Linear layer mechanics (weights, bias, initialization, affine transformations)
+3. Dropout regularization (training vs. inference behavior, inverted scaling)
+4. Sequential container composition and parameter collection
 """
 
 import numpy as np
-rng = np.random.default_rng(7)
 import pytest
 import sys
 from pathlib import Path
 
+# Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tinytorch.core.layers import Layer
+from tinytorch.core.layers import Layer, Linear, Dropout, Sequential
 from tinytorch.core.tensor import Tensor
 
 
@@ -36,8 +37,9 @@ class TestLayerBaseClass:
     """
     Test the Layer base class.
 
-    CONCEPT: Layer is an abstract class that all layers inherit from.
-    It defines the interface that makes layers composable.
+    CONCEPT: Layer is the base class that all layers inherit from.
+    It defines the common interface (forward, __call__, parameters)
+    that makes layers composable.
     """
 
     def test_layer_creation(self):
@@ -64,16 +66,8 @@ class TestLayerBaseClass:
         This pattern allows layers to be used like functions.
         """
         layer = Layer()
-
-        assert hasattr(layer, 'forward'), (
-            "Layer must have forward() method.\n"
-            "This is where the computation happens."
-        )
-
-        assert callable(layer), (
-            "Layer must be callable (implement __call__).\n"
-            "This allows: output = layer(input)"
-        )
+        assert hasattr(layer, 'forward'), "Layer must have forward() method"
+        assert callable(layer), "Layer must be callable (implement __call__)"
 
     def test_layer_inheritance(self):
         """
@@ -87,7 +81,6 @@ class TestLayerBaseClass:
         3. Optionally store parameters as Tensors
         """
         class IdentityLayer(Layer):
-            """A layer that returns its input unchanged."""
             def forward(self, x):
                 return x
 
@@ -96,396 +89,295 @@ class TestLayerBaseClass:
         output = layer(x)
 
         assert isinstance(output, Tensor)
-        assert np.array_equal(output.data, x.data), (
-            "Identity layer should return input unchanged."
-        )
+        assert np.array_equal(output.data, x.data), "Identity layer should return input unchanged"
 
 
-class TestParameterManagement:
+class TestLinearLayer:
     """
-    Test how layers manage learnable parameters.
+    Test Linear (Dense) layer functionality.
 
-    CONCEPT: Parameters (weights, biases) are what we train.
-    They must be tracked so optimizers can update them.
+    CONCEPT: Linear(in_features, out_features) performs y = x @ W + b.
+    It is the most fundamental learnable transformation in deep learning.
     """
 
-    def test_layer_with_parameters(self):
+    def test_linear_creation_and_shapes(self):
         """
-        WHAT: Verify layers can store trainable parameters.
+        WHAT: Verify Linear layer initializes weights and bias with expected shapes.
 
-        WHY: Neural networks learn by adjusting parameters.
-        Layers must store them as Tensor attributes.
-
-        STUDENT LEARNING: Parameters are Tensors with requires_grad=True.
-        The optimizer finds them via layer.parameters().
-        """
-        class ParameterLayer(Layer):
-            def __init__(self, input_size, output_size):
-                self.weights = Tensor(rng.standard_normal((input_size, output_size)))
-                self.bias = Tensor(np.zeros(output_size))
-
-            def forward(self, x):
-                return Tensor(x.data @ self.weights.data + self.bias.data)
-
-        layer = ParameterLayer(5, 3)
-
-        assert hasattr(layer, 'weights'), "Layer should store weights"
-        assert hasattr(layer, 'bias'), "Layer should store bias"
-        assert layer.weights.shape == (5, 3), (
-            f"Weights shape wrong: expected (5, 3), got {layer.weights.shape}"
-        )
-
-    def test_parameter_initialization(self):
-        """
-        WHAT: Verify weights are initialized properly.
-
-        WHY: Bad initialization causes:
-        - Vanishing gradients (too small)
-        - Exploding gradients (too large)
-        - Dead neurons (all same value)
-
-        STUDENT LEARNING: Xavier/Glorot initialization:
-        weights ~ Uniform(-sqrt(6/(in+out)), sqrt(6/(in+out)))
-        This keeps activations and gradients stable.
-        """
-        class XavierLayer(Layer):
-            def __init__(self, size):
-                # Xavier initialization
-                limit = np.sqrt(6.0 / (size + size))
-                self.weights = Tensor(rng.uniform(-limit, limit, (size, size)))
-
-            def forward(self, x):
-                return Tensor(x.data @ self.weights.data)
-
-        layer = XavierLayer(10)
-
-        weights_std = np.std(layer.weights.data)
-        assert 0.1 < weights_std < 1.0, (
-            f"Weight initialization looks wrong.\n"
-            f"  std = {weights_std}\n"
-            "For Xavier with size=10, expect std ≈ 0.32"
-        )
-
-    def test_parameter_shapes(self):
-        """
-        WHAT: Verify parameter shapes match layer configuration.
-
-        WHY: Shape mismatches cause runtime errors.
-        Linear(128, 64) must have weights of shape (128, 64).
+        WHY: Linear layers map an input space of dimension in_features to out_features.
+        Shape mismatches break matrix multiplication immediately.
 
         STUDENT LEARNING: For Linear(in_features, out_features):
-        - weights: (in_features, out_features)
-        - bias: (out_features,)
-        - output: (batch, out_features)
+        - weight shape is (in_features, out_features)
+        - bias shape is (out_features,) when bias=True
+        - bias is None when bias=False
         """
-        class LinearLayer(Layer):
-            def __init__(self, in_features, out_features):
-                self.in_features = in_features
-                self.out_features = out_features
-                self.weights = Tensor(rng.standard_normal((in_features, out_features)))
-                self.bias = Tensor(np.zeros(out_features))
+        layer = Linear(10, 5, bias=True)
+        assert layer.weight.shape == (10, 5)
+        assert layer.bias is not None
+        assert layer.bias.shape == (5,)
+        assert isinstance(layer.weight, Tensor)
+        assert isinstance(layer.bias, Tensor)
 
-            def forward(self, x):
-                return Tensor(x.data @ self.weights.data + self.bias.data)
+        layer_no_bias = Linear(10, 5, bias=False)
+        assert layer_no_bias.weight.shape == (10, 5)
+        assert layer_no_bias.bias is None
 
-        layer = LinearLayer(128, 64)
-
-        assert layer.weights.shape == (128, 64), (
-            f"Weights shape wrong.\n"
-            f"  Expected: (128, 64)\n"
-            f"  Got: {layer.weights.shape}"
-        )
-        assert layer.bias.shape == (64,)
-
-        # Test with batch input
-        x = Tensor(rng.standard_normal((16, 128)))
-        output = layer(x)
-        assert output.shape == (16, 64), (
-            f"Output shape wrong.\n"
-            f"  Input: (16, 128)\n"
-            f"  Expected output: (16, 64)\n"
-            f"  Got: {output.shape}"
-        )
-
-
-class TestLinearTransformations:
-    """
-    Test linear transformation layers (y = Wx + b).
-
-    CONCEPT: Linear layers are the most fundamental building block.
-    Every MLP, transformer, and most networks use them.
-    """
-
-    def test_matrix_multiplication_layer(self):
+    def test_linear_weight_initialization(self):
         """
-        WHAT: Verify matrix multiplication works correctly.
+        WHAT: Verify weights are initialized with stable variance.
 
-        WHY: Matrix multiply (x @ W) is the core of linear layers.
-        If this fails, no neural network can work.
+        WHY: Bad initialization causes vanishing or exploding activations.
+        LeCun / Xavier initialization scales weights inversely with fan-in.
 
-        STUDENT LEARNING: For input x of shape (batch, in_features):
-        output = x @ weights  # (batch, in_features) @ (in_features, out_features)
-        result shape = (batch, out_features)
+        STUDENT LEARNING: Weights should have zero mean and standard deviation
+        close to 1/sqrt(in_features).
         """
-        class MatMulLayer(Layer):
-            def __init__(self, weight_matrix):
-                self.weights = Tensor(weight_matrix)
+        layer = Linear(100, 50)
+        weights_data = layer.weight.data
+        std = np.std(weights_data)
+        # Expected std is approximately 1/sqrt(100) = 0.10
+        assert 0.05 < std < 0.20, f"Weight std unexpected: {std:.4f}"
 
-            def forward(self, x):
-                return Tensor(x.data @ self.weights.data)
-
-        W = np.array([[1, 2], [3, 4]])  # 2x2
-        layer = MatMulLayer(W)
-
-        x = Tensor(np.array([[1, 0], [0, 1]]))  # Identity matrix
-        output = layer(x)
-
-        # I @ W = W
-        expected = np.array([[1, 2], [3, 4]])
-        assert np.array_equal(output.data, expected), (
-            f"Matrix multiplication failed.\n"
-            f"  I @ W should equal W\n"
-            f"  Expected: {expected}\n"
-            f"  Got: {output.data}"
-        )
-
-    def test_affine_transformation(self):
+    def test_linear_forward_with_bias(self):
         """
-        WHAT: Verify affine transformation y = Wx + b.
+        WHAT: Verify forward pass computes y = x @ W + b.
 
-        WHY: This is what Linear layers do.
-        W scales and rotates, b shifts (bias).
+        WHY: The affine transformation allows neural networks to represent
+        functions not centered at the origin.
 
-        STUDENT LEARNING: Bias allows the line/plane to not pass
-        through the origin. Without bias, y = Wx always gives 0
-        when x = 0.
+        STUDENT LEARNING: When input is zero, the output equals the bias vector.
         """
-        class AffineLayer(Layer):
-            def __init__(self, weights, bias):
-                self.weights = Tensor(weights)
-                self.bias = Tensor(bias)
+        layer = Linear(4, 2, bias=True)
+        zero_x = Tensor(np.zeros((1, 4)))
+        output = layer(zero_x)
 
-            def forward(self, x):
-                return Tensor(x.data @ self.weights.data + self.bias.data)
+        assert output.shape == (1, 2)
+        np.testing.assert_allclose(output.data, layer.bias.data.reshape(1, 2))
 
-        W = np.array([[1, 0], [0, 1]])  # Identity
-        b = np.array([10, 20])           # Offset
+    def test_linear_forward_without_bias(self):
+        """
+        WHAT: Verify forward pass without bias computes strictly linear y = x @ W.
 
-        layer = AffineLayer(W, b)
-        x = Tensor(np.array([[1, 2]]))
+        WHY: Some architectures (e.g. projection layers before LayerNorm) omit bias.
+
+        STUDENT LEARNING: With zero input and bias=False, the output is strictly zero.
+        """
+        layer = Linear(4, 2, bias=False)
+        zero_x = Tensor(np.zeros((1, 4)))
+        output = layer(zero_x)
+
+        assert output.shape == (1, 2)
+        np.testing.assert_allclose(output.data, np.zeros((1, 2)))
+
+    def test_linear_exact_arithmetic(self):
+        """
+        WHAT: Verify exact numerical computation of matrix multiplication and bias add.
+
+        WHY: Testing known hand-calculated arithmetic guarantees correct matrix ordering.
+
+        STUDENT LEARNING: For batch size 1: [1, 2] @ [[1, 3], [2, 4]] + [10, 20] = [15, 31].
+        """
+        layer = Linear(2, 2, bias=True)
+        layer.weight.data[:] = np.array([[1.0, 3.0], [2.0, 4.0]])
+        layer.bias.data[:] = np.array([10.0, 20.0])
+
+        x = Tensor(np.array([[1.0, 2.0]]))
         output = layer(x)
 
-        # [1, 2] @ I + [10, 20] = [11, 22]
-        expected = np.array([[11, 22]])
-        assert np.array_equal(output.data, expected), (
-            f"Affine transformation failed.\n"
-            f"  x @ W + b\n"
-            f"  [1,2] @ I + [10,20] = [11,22]\n"
-            f"  Got: {output.data}"
-        )
+        expected = np.array([[15.0, 31.0]])
+        np.testing.assert_allclose(output.data, expected)
 
-    def test_batch_processing(self):
+    def test_linear_batch_processing(self):
         """
-        WHAT: Verify layer processes batches correctly.
+        WHAT: Verify Linear handles arbitrary batch sizes independently.
 
-        WHY: Training uses batches for efficiency.
-        Each sample in the batch is processed independently.
+        WHY: Efficient training processes mini-batches in parallel.
 
-        STUDENT LEARNING: Batch dimension is always first.
-        (batch_size, features) @ (features, output) = (batch_size, output)
+        STUDENT LEARNING: The batch dimension is preserved throughout:
+        (batch_size, in_features) @ (in_features, out_features) = (batch_size, out_features).
         """
-        class ScaleLayer(Layer):
-            def __init__(self):
-                self.weights = Tensor(np.array([[2, 0], [0, 3]]))
+        layer = Linear(8, 4)
+        for batch_size in [1, 7, 16, 32]:
+            x = Tensor(np.random.default_rng(batch_size).standard_normal((batch_size, 8)))
+            output = layer(x)
+            assert output.shape == (batch_size, 4)
 
-            def forward(self, x):
-                return Tensor(x.data @ self.weights.data)
+    def test_linear_parameters_collection(self):
+        """
+        WHAT: Verify parameters() returns weight and bias Tensors.
 
-        layer = ScaleLayer()
+        WHY: Optimizers need access to all trainable parameters of a layer.
 
-        # 3 samples, 2 features each
-        x = Tensor(np.array([[1, 1], [2, 2], [3, 3]]))
-        output = layer(x)
+        STUDENT LEARNING: layer.parameters() yields [weight, bias] (or just [weight] if bias=False).
+        """
+        layer_with_bias = Linear(4, 2, bias=True)
+        params = layer_with_bias.parameters()
+        assert len(params) == 2
+        assert params[0] is layer_with_bias.weight
+        assert params[1] is layer_with_bias.bias
 
-        expected = np.array([[2, 3], [4, 6], [6, 9]])
-        assert np.array_equal(output.data, expected)
-        assert output.shape == (3, 2), (
-            f"Batch output shape wrong.\n"
-            f"  Input: 3 samples\n"
-            f"  Expected: (3, 2)\n"
-            f"  Got: {output.shape}"
-        )
+        layer_without_bias = Linear(4, 2, bias=False)
+        params_no_b = layer_without_bias.parameters()
+        assert len(params_no_b) == 1
+        assert params_no_b[0] is layer_without_bias.weight
 
 
-class TestLayerComposition:
+class TestDropoutLayer:
     """
-    Test composing multiple layers into networks.
+    Test Dropout regularization layer.
 
-    CONCEPT: Neural networks are compositions of layers.
-    x → Layer1 → Layer2 → ... → output
+    CONCEPT: Dropout randomly deactivates neurons during training to prevent co-adaptation.
+    During inference, it behaves as the identity pass-through.
     """
 
-    def test_layer_chaining(self):
+    def test_dropout_validation(self):
         """
-        WHAT: Verify layers can be chained together.
+        WHAT: Verify Dropout validates probability p is between 0.0 and 1.0.
 
-        WHY: Networks are just chained layers.
-        The output of one is the input to the next.
+        WHY: A probability outside [0.0, 1.0] is mathematically invalid.
 
-        STUDENT LEARNING: Forward pass flows data through layers:
-        x → (scale by 2) → (add 10) → output
+        STUDENT LEARNING: p is the probability of dropping a neuron.
         """
-        class ScaleLayer(Layer):
-            def __init__(self, scale):
-                self.scale = scale
-            def forward(self, x):
-                return Tensor(x.data * self.scale)
+        Dropout(0.0)
+        Dropout(0.5)
+        Dropout(1.0)
 
-        class AddLayer(Layer):
-            def __init__(self, offset):
-                self.offset = offset
-            def forward(self, x):
-                return Tensor(x.data + self.offset)
+        with pytest.raises(ValueError):
+            Dropout(-0.1)
+        with pytest.raises(ValueError):
+            Dropout(1.1)
 
-        layer1 = ScaleLayer(2)
-        layer2 = AddLayer(10)
-
-        x = Tensor(np.array([1, 2, 3]))
-        h = layer1(x)    # [2, 4, 6]
-        output = layer2(h)  # [12, 14, 16]
-
-        expected = np.array([12, 14, 16])
-        assert np.array_equal(output.data, expected), (
-            f"Layer chaining failed.\n"
-            f"  x = [1, 2, 3]\n"
-            f"  → scale by 2 → [2, 4, 6]\n"
-            f"  → add 10 → [12, 14, 16]\n"
-            f"  Got: {output.data}"
-        )
-
-    def test_sequential_layer_composition(self):
+    def test_dropout_eval_mode_pass_through(self):
         """
-        WHAT: Verify Sequential container works.
+        WHAT: Verify Dropout in evaluation/inference mode returns input unchanged.
 
-        WHY: Sequential is a convenience wrapper that
-        automatically chains layers: Sequential([l1, l2, l3])
+        WHY: During testing or inference, all neurons must remain active.
 
-        STUDENT LEARNING: Sequential is like a list of layers.
-        forward() runs each layer in order on the input.
+        STUDENT LEARNING: Pass training=False for deterministic evaluation pass-through.
         """
-        class Sequential(Layer):
-            def __init__(self, layers):
-                self.layers = layers
-            def forward(self, x):
-                for layer in self.layers:
-                    x = layer(x)
-                return x
+        dropout = Dropout(0.5)
+        x = Tensor(np.array([[1.0, 2.0], [3.0, 4.0]]))
+        output = dropout(x, training=False)
 
-        class LinearLayer(Layer):
-            def __init__(self, weights):
-                self.weights = Tensor(weights)
-            def forward(self, x):
-                return Tensor(x.data @ self.weights.data)
+        np.testing.assert_allclose(output.data, x.data)
 
-        # 2-layer network
-        layer1 = LinearLayer(np.array([[1, 2], [3, 4]]))  # 2→2
-        layer2 = LinearLayer(np.array([[1], [1]]))        # 2→1
+    def test_dropout_zero_prob_is_identity(self):
+        """
+        WHAT: Verify Dropout with p=0.0 does not zero any activations even in training.
 
-        network = Sequential([layer1, layer2])
+        WHY: A drop rate of 0% means no regularization is applied.
 
-        x = Tensor(np.array([[1, 1]]))
-        output = network(x)
+        STUDENT LEARNING: Dropout(0.0) acts as an identity layer.
+        """
+        dropout = Dropout(0.0)
+        x = Tensor(np.array([[1.0, 2.0], [3.0, 4.0]]))
+        output = dropout(x, training=True)
 
-        # [1,1] @ [[1,2],[3,4]] = [4, 6]
-        # [4,6] @ [[1],[1]] = [10]
-        expected = np.array([[10]])
-        assert np.array_equal(output.data, expected), (
-            f"Sequential composition failed.\n"
-            f"  Step 1: [1,1] @ [[1,2],[3,4]] = [4,6]\n"
-            f"  Step 2: [4,6] @ [[1],[1]] = [10]\n"
-            f"  Got: {output.data}"
-        )
+        np.testing.assert_allclose(output.data, x.data)
+
+    def test_dropout_full_prob_zeros_all(self):
+        """
+        WHAT: Verify Dropout with p=1.0 drops all activations during training.
+
+        WHY: At p=1.0, every neuron is zeroed out.
+
+        STUDENT LEARNING: Inverted dropout zeros all elements when p=1.0.
+        """
+        dropout = Dropout(1.0)
+        x = Tensor(np.array([[1.0, 2.0], [3.0, 4.0]]))
+        output = dropout(x, training=True)
+
+        np.testing.assert_allclose(output.data, np.zeros_like(x.data))
+
+    def test_dropout_inverted_scaling_expectation(self):
+        """
+        WHAT: Verify surviving activations are scaled by 1/(1-p) to preserve expected value.
+
+        WHY: Inverted dropout avoids having to scale weights at inference time.
+
+        STUDENT LEARNING: Scaling by 1/(1-p) keeps the expected sum equal to the input sum:
+        E[output] = (1-p) * (x / (1-p)) = x.
+        """
+        p = 0.5
+        dropout = Dropout(p)
+
+        # Large tensor to test expected value empirically
+        x_data = np.ones((100, 100), dtype=np.float32)
+        x = Tensor(x_data)
+        output = dropout(x)
+
+        # Output elements should be either 0.0 or 1.0 / (1 - p) = 2.0
+        unique_vals = np.unique(np.round(output.data, decimals=3))
+        for val in unique_vals:
+            assert val in [0.0, 2.0], f"Unexpected value in dropout output: {val}"
+
+        # Mean output should be close to 1.0 (mean of input)
+        mean_val = np.mean(output.data)
+        assert 0.90 < mean_val < 1.10, f"Expected mean ~1.0, got {mean_val:.4f}"
 
 
-class TestLayerUtilities:
+class TestSequentialContainer:
     """
-    Test utility functions for layers.
+    Test Sequential container layer.
 
-    CONCEPT: Understanding layers requires utilities:
-    - Parameter count (model complexity)
-    - Output shape inference (debugging)
+    CONCEPT: Sequential chains multiple layers in order: x -> Layer1 -> Layer2 -> Layer3.
+    It encapsulates complex multi-layer architectures behind a single Layer interface.
     """
 
-    def test_layer_parameter_count(self):
+    def test_sequential_instantiation_list_and_args(self):
         """
-        WHAT: Verify we can count layer parameters.
+        WHAT: Verify Sequential accepts either a list of layers or *args.
 
-        WHY: Parameter count tells you:
-        - Model memory usage
-        - Risk of overfitting (more params = more risk)
-        - Computational cost
+        WHY: Flexible API matches PyTorch conventions and student expectations.
 
-        STUDENT LEARNING: Linear(in, out) has:
-        - in * out weights
-        - out biases
-        - Total: in * out + out parameters
+        STUDENT LEARNING: Sequential([l1, l2]) and Sequential(l1, l2) both work.
         """
-        class CountableLayer(Layer):
-            def __init__(self, in_features, out_features):
-                self.weights = Tensor(rng.standard_normal((in_features, out_features)))
-                self.bias = Tensor(np.zeros(out_features))
+        l1 = Linear(4, 8)
+        l2 = Linear(8, 2)
 
-            def parameter_count(self):
-                return self.weights.data.size + self.bias.data.size
+        s1 = Sequential([l1, l2])
+        assert len(s1.layers) == 2
 
-            def forward(self, x):
-                return Tensor(x.data @ self.weights.data + self.bias.data)
+        s2 = Sequential(l1, l2)
+        assert len(s2.layers) == 2
 
-        layer = CountableLayer(10, 5)
-
-        # 10*5 weights + 5 biases = 55 parameters
-        expected_count = 10 * 5 + 5
-        if hasattr(layer, 'parameter_count'):
-            assert layer.parameter_count() == expected_count, (
-                f"Parameter count wrong.\n"
-                f"  Linear(10, 5): 10*5 + 5 = 55\n"
-                f"  Got: {layer.parameter_count()}"
-            )
-
-    def test_layer_output_shape_inference(self):
+    def test_sequential_forward_chaining(self):
         """
-        WHAT: Verify we can predict output shape.
+        WHAT: Verify Sequential executes layers in sequential order.
 
-        WHY: Shape inference helps:
-        - Debug shape mismatches
-        - Plan architecture without running data
-        - Validate connections between layers
+        WHY: Forward pass must pipe the output of each layer as the input to the next.
 
-        STUDENT LEARNING: For most layers:
-        output_shape = (input_batch, layer_output_features)
+        STUDENT LEARNING: output = layerN(...layer2(layer1(x))).
         """
-        class ShapeInferenceLayer(Layer):
-            def __init__(self, out_features):
-                self.out_features = out_features
+        l1 = Linear(2, 2, bias=False)
+        l2 = Linear(2, 1, bias=False)
+        l1.weight.data[:] = np.array([[1.0, 0.0], [0.0, 2.0]])
+        l2.weight.data[:] = np.array([[3.0], [4.0]])
 
-            def forward(self, x):
-                batch_size = x.shape[0]
-                return Tensor(rng.standard_normal((batch_size, self.out_features)))
+        model = Sequential(l1, l2)
+        x = Tensor(np.array([[2.0, 3.0]]))
+        # l1(x) = [2*1 + 0, 0 + 3*2] = [2, 6]
+        # l2([2, 6]) = [2*3 + 6*4] = [6 + 24] = [30]
+        output = model(x)
+        expected = np.array([[30.0]])
+        np.testing.assert_allclose(output.data, expected)
 
-            def output_shape(self, input_shape):
-                return (input_shape[0], self.out_features)
+    def test_sequential_parameters_aggregation(self):
+        """
+        WHAT: Verify Sequential.parameters() collects parameters from all child layers.
 
-        layer = ShapeInferenceLayer(20)
+        WHY: An optimizer trains the entire network by iterating over model.parameters().
 
-        if hasattr(layer, 'output_shape'):
-            out_shape = layer.output_shape((32, 10))
-            assert out_shape == (32, 20), (
-                f"Shape inference wrong.\n"
-                f"  Input: (32, 10)\n"
-                f"  Layer out_features: 20\n"
-                f"  Expected output: (32, 20)\n"
-                f"  Got: {out_shape}"
-            )
+        STUDENT LEARNING: Sequential traverses child layers to aggregate their parameter lists.
+        """
+        l1 = Linear(4, 8, bias=True)
+        l2 = Linear(8, 2, bias=True)
+        model = Sequential(l1, l2)
+
+        params = model.parameters()
+        assert len(params) == 4
+        assert params == [l1.weight, l1.bias, l2.weight, l2.bias]
 
 
 if __name__ == "__main__":

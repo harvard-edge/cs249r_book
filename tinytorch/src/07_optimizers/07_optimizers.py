@@ -592,6 +592,9 @@ class SGD(Optimizer):
         - They'll be created lazily on first step
         """
         ### BEGIN SOLUTION role="scaffold"
+        for name, value in (("lr", lr), ("momentum", momentum), ("weight_decay", weight_decay)):
+            if not np.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and nonnegative")
         super().__init__(params)
 
         self.lr = lr
@@ -671,6 +674,11 @@ class SGD(Optimizer):
                 f"      assert len(saved_state) == len(optimizer.params)"
             )
 
+        # Validate every buffer before replacing any state. Broadcasting a wrong
+        # shape during step() could otherwise change the parameter's data shape.
+        for param, buf in zip(self.params, state):
+            if buf is not None and (not isinstance(buf, np.ndarray) or buf.shape != param.data.shape):
+                raise ValueError("Momentum buffer shape must match its parameter")
         self.momentum_buffers = [None if buf is None else buf.copy() for buf in state]
 
     def step(self):
@@ -889,6 +897,11 @@ class Adam(Optimizer):
         >>> optimizer = Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999))
         """
         ### BEGIN SOLUTION role="scaffold"
+        for name, value in (("lr", lr), ("eps", eps), ("weight_decay", weight_decay)):
+            if not np.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and nonnegative")
+        if len(betas) != 2 or any(not np.isfinite(beta) or not 0 <= beta < 1 for beta in betas):
+            raise ValueError("betas must contain two finite values in [0, 1)")
         super().__init__(params)
 
         self.lr = lr
@@ -1277,6 +1290,11 @@ class AdamW(Optimizer):
         >>> optimizer = AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
         """
         ### BEGIN SOLUTION role="scaffold"
+        for name, value in (("lr", lr), ("eps", eps), ("weight_decay", weight_decay)):
+            if not np.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and nonnegative")
+        if len(betas) != 2 or any(not np.isfinite(beta) or not 0 <= beta < 1 for beta in betas):
+            raise ValueError("betas must contain two finite values in [0, 1)")
         super().__init__(params)
 
         self.lr = lr
@@ -1575,8 +1593,11 @@ if __name__ == "__main__":
 Module 08's Trainer will save optimizer state through three small methods that SGD
 already has: `has_momentum()`, `get_momentum_state()`, and `set_momentum_state()`.
 Adam and AdamW carry two buffers per parameter instead of one, so they answer the
-same three questions with (m, v) pairs. Without this, a restored Adam run would
-restart its moments from zero.
+same three questions with (m, v) pairs. These methods save and restore **buffers
+only**, not a complete optimizer checkpoint. Module 08's Trainer will also save
+the per-parameter `update_counts`, global `step_count`, and hyperparameters.
+The moments and their update counts must resume together: restoring only the
+buffers gives the wrong bias correction on the next step.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "adam-checkpoint-state", "solution": false}
@@ -1586,14 +1607,14 @@ def _adam_has_momentum(self) -> bool:
     return True
 
 def _adam_get_momentum_state(self) -> List:
-    """Copy the (m, v) buffers for checkpointing; None for parameters not yet stepped."""
+    """Copy only (m, v) buffers; Trainer also saves counts and hyperparameters."""
     return [
         (None if m is None else m.copy(), None if v is None else v.copy())
         for m, v in zip(self.m_buffers, self.v_buffers)
     ]
 
 def _adam_set_momentum_state(self, state: Optional[List]) -> None:
-    """Restore the (m, v) buffers saved by get_momentum_state()."""
+    """Restore only buffers; the caller must also restore update_counts to resume."""
     if state is None:
         return
     if len(state) != len(self.m_buffers):
@@ -1601,8 +1622,19 @@ def _adam_set_momentum_state(self, state: Optional[List]) -> None:
             f"Optimizer state mismatch: state has {len(state)} entries, "
             f"optimizer has {len(self.m_buffers)} parameters"
         )
-    self.m_buffers = [None if m is None else m.copy() for m, _ in state]
-    self.v_buffers = [None if v is None else v.copy() for _, v in state]
+    # Check the complete state before mutating either list of moment buffers.
+    for param, pair in zip(self.params, state):
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            raise ValueError("Adam state entries must be (m, v) pairs")
+        m, v = pair
+        if (m is None) != (v is None):
+            raise ValueError("Adam moment buffers must both be initialized or both be None")
+        for buf in pair:
+            if buf is not None and (not isinstance(buf, np.ndarray) or buf.shape != param.data.shape):
+                raise ValueError("Adam moment buffer shape must match its parameter")
+    restored_m = [None if m is None else m.copy() for m, _ in state]
+    restored_v = [None if v is None else v.copy() for _, v in state]
+    self.m_buffers, self.v_buffers = restored_m, restored_v
 
 for _cls in (Adam, AdamW):
     _cls.has_momentum = _adam_has_momentum

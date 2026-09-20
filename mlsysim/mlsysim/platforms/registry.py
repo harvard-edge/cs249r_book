@@ -4,7 +4,6 @@ from ..core.units import (
     GB,
     GiB,
     KiB,
-    MB,
     PFLOP,
     TB,
     TFLOPs,

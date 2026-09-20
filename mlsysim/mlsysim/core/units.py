@@ -51,7 +51,10 @@ __all__ = [
     "GW", "MW", "kW", "mW", "uW",
     "kilojoule", "microjoule", "gigawatt", "megawatt", "microwatt",
     # Mass and length
-    "gram", "kilogram", "kg", "metric_ton", "tonne", "kilometer", "km", "foot", "feet",
+    "gram", "kilogram", "kg", "metric_ton", "tonne", "kilometer", "km", "meter", "millimeter", "mm", "foot", "feet",
+    # Electrical and kinematic (Physical AI / Embodied)
+    "volt", "V", "millivolt", "mV", "ampere", "A", "milliampere", "mA",
+    "ohm", "milliohm", "newton", "N", "radian", "rad", "hertz", "Hz",
 ]
 
 ureg = pint.UnitRegistry()
@@ -274,8 +277,29 @@ metric_ton = ureg.metric_ton
 tonne = ureg.metric_ton
 kilometer = ureg.kilometer
 km = ureg.kilometer
+millimeter = ureg.millimeter
+mm = ureg.millimeter
 foot = ureg.foot
 feet = ureg.foot
 megabit = ureg.megabit
 gigabit = ureg.gigabit
 terabit = ureg.terabit
+
+# --- Electrical & Kinematic Units (Physical AI / Embodied) ---
+volt = ureg.volt
+V = ureg.volt
+millivolt = ureg.millivolt
+mV = ureg.millivolt
+ampere = ureg.ampere
+A = ureg.ampere
+milliampere = ureg.milliampere
+mA = ureg.milliampere
+ohm = ureg.ohm
+milliohm = ureg.milliohm
+newton = ureg.newton
+N = ureg.newton
+radian = ureg.radian
+rad = ureg.radian
+hertz = ureg.hertz
+Hz = ureg.hertz
+

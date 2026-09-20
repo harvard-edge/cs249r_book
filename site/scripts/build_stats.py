@@ -176,13 +176,13 @@ def count_slide_svgs() -> int:
 
 
 def count_tinytorch_modules() -> int:
-    """Counted from tinytorch/quarto/modules/NN_*.qmd.
+    """Counted from tinytorch/guide/modules/NN_*.qmd.
 
     Not from tinytorch/modules/, which .gitignore excludes because nbdev
     regenerates it from src/. That directory is populated locally and empty in
     CI, which would silently publish "0 progressive modules".
     """
-    return sum(1 for f in tracked_files("tinytorch/quarto/modules")
+    return sum(1 for f in tracked_files("tinytorch/guide/modules")
                if re.search(r"/\d{2}_[^/]+\.qmd$", f))
 
 

@@ -37,3 +37,16 @@ def test_unsupported_dropout_is_explicit():
                         lambda: TransformerBlock(4, 1, dropout_prob=0.1)]:
         with pytest.raises(ValueError, match='dropout_prob=0'):
             constructor()
+
+
+@pytest.mark.parametrize('temperature', [1e-40, 1e-300, np.nextafter(0.0, 1.0)])
+def test_tiny_positive_temperature_preserves_maximum_probability(temperature, monkeypatch):
+    from unittest.mock import Mock
+    sampler = Mock()
+    sampler.choice.return_value = 1
+    model = GPT(4, 4, 1, 1)
+    monkeypatch.setitem(model._sample_next_token.__globals__, 'rng', sampler)
+    logits = np.array([[1., 4., 2., 4.]], dtype=np.float32)
+    with np.errstate(all='raise'):
+        assert model._sample_next_token(logits, temperature) == 1
+    np.testing.assert_array_equal(sampler.choice.call_args.kwargs['p'], [0., .5, 0., .5])

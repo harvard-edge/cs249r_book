@@ -6,12 +6,11 @@ Tests that the NLP pipeline works end-to-end:
 1. Tokenization produces valid token IDs
 2. Embeddings convert tokens to vectors
 3. Attention mechanisms process sequences
-4. Transformers combine everything correctly
-5. Gradients flow back through the entire pipeline
+4. Gradients flow back through the entire pipeline
 
 These tests catch issues at module boundaries in the NLP stack.
 
-Modules tested: 10-13 (Tokenization → Embeddings → Attention → Transformers)
+Modules tested: 10-12 (Tokenization → Embeddings → Attention)
 """
 
 import pytest
@@ -27,7 +26,6 @@ from tinytorch.core.tensor import Tensor
 import tinytorch.core.autograd  # completes every operation with its backward half
 from tinytorch.core.embeddings import Embedding
 from tinytorch.core.attention import MultiHeadAttention
-from tinytorch.core.transformers import TransformerBlock
 from tinytorch.core.layers import Linear
 from tinytorch.core.losses import CrossEntropyLoss
 
@@ -173,80 +171,6 @@ class TestAttentionGradientFlow:
         )
 
 
-class TestTransformerGradientFlow:
-    """
-    Critical Test: Verify gradients flow through complete Transformer.
-
-    Common bugs caught:
-    - Residual connection gradients
-    - Layer norm gradient issues
-    - Deep network vanishing gradients
-    """
-
-    def test_transformer_block_gradient_flow(self):
-        """Gradients must flow through a complete transformer block"""
-        embed_dim = 32
-        num_heads = 4
-        ff_dim = 64
-
-        block = TransformerBlock(embed_dim, num_heads, ff_dim)
-
-        x = Tensor(
-            rng.standard_normal((1, 8, embed_dim)),
-            requires_grad=True
-        )
-
-        output = block.forward(x)
-        # Use Tensor operation to preserve computation graph
-        loss = output.sum()
-        loss.backward()
-
-        # Input must receive gradients (for stacking blocks)
-        assert x.grad is not None, (
-            "Transformer block input did not receive gradients!"
-        )
-
-        # Gradient should not be too small (vanishing)
-        grad_norm = np.linalg.norm(x.grad)
-        assert grad_norm > 1e-6, (
-            f"Vanishing gradients in transformer block: {grad_norm}"
-        )
-
-    def test_stacked_transformer_blocks(self):
-        """Gradients must flow through multiple stacked blocks"""
-        embed_dim = 32
-        num_heads = 4
-        ff_dim = 64
-        num_layers = 4
-
-        blocks = [TransformerBlock(embed_dim, num_heads, ff_dim) for _ in range(num_layers)]
-
-        x = Tensor(
-            rng.standard_normal((1, 8, embed_dim)),
-            requires_grad=True
-        )
-
-        # Forward through all blocks
-        h = x
-        for block in blocks:
-            h = block.forward(h)
-
-        # Use Tensor operation to preserve computation graph
-        loss = h.sum()
-        loss.backward()
-
-        # Input must receive gradients through all layers
-        assert x.grad is not None, (
-            f"Gradients did not flow through {num_layers} transformer blocks!"
-        )
-
-        # Check gradient magnitude is reasonable
-        grad_norm = np.linalg.norm(x.grad)
-        assert grad_norm > 1e-8, (
-            f"Severe vanishing gradients through {num_layers} blocks: {grad_norm}"
-        )
-
-
 class TestNLPPipelineEndToEnd:
     """
     Integration Test: Full NLP pipeline from tokens to loss.
@@ -269,7 +193,9 @@ class TestNLPPipelineEndToEnd:
         embedding.weight.requires_grad = True
         attention = MultiHeadAttention(embed_dim, num_heads)
         classifier = Linear(embed_dim, num_classes)
-        classifier.weight.requires_grad = True
+        for component in (attention, classifier):
+            for parameter in component.parameters():
+                parameter.requires_grad = True
         loss_fn = CrossEntropyLoss()
 
         # Input: token IDs (as Tensor) - shape (batch_size, seq_len)
@@ -280,10 +206,8 @@ class TestNLPPipelineEndToEnd:
         embedded = embedding.forward(token_ids)  # [batch_size, seq_len, embed_dim]
         attended = attention.forward(embedded)  # [batch_size, seq_len, embed_dim]
 
-        # Mean pooling over sequence (position 1) - use Tensor operation
-        # attended.data.mean(axis=1) gives [batch_size, embed_dim]
-        pooled_data = attended.data.mean(axis=1)
-        pooled = Tensor(pooled_data, requires_grad=True)
+        # Pool through Tensor operations so gradients reach attention and embeddings.
+        pooled = attended.mean(axis=1)
 
         logits = classifier.forward(pooled)  # [batch_size, num_classes]
         loss = loss_fn.forward(logits, target)
@@ -291,10 +215,15 @@ class TestNLPPipelineEndToEnd:
         # Backward pass
         loss.backward()
 
-        # Verify classifier received gradients
-        assert classifier.weight.grad is not None, (
-            "Classifier did not receive gradients!"
-        )
+        for component in (embedding, attention, classifier):
+            for parameter in component.parameters():
+                assert parameter.grad is not None, (
+                    f"{type(component).__name__} parameter did not receive gradients"
+                )
+                assert np.isfinite(parameter.grad).all()
+        assert np.linalg.norm(embedding.weight.grad) > 0
+        for projection in (attention.q_proj, attention.v_proj, attention.out_proj):
+            assert np.linalg.norm(projection.weight.grad) > 0
 
 
 # Quick smoke tests for CI

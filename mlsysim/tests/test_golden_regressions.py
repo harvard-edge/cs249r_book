@@ -107,13 +107,32 @@ def test_golden_distributed_llama3_8b_research_cluster():
     # the collective beta terms instead of the 900 GB/s bidirectional total,
     # so intra-node-bound communication latencies roughly doubled (they were
     # ~2x optimistic before). findings_provenance.md M1.
-    assert result.step_latency_total.m_as("ms") == pytest.approx(4553.363026660118)
-    assert result.communication_latency.m_as("ms") == pytest.approx(542.5227635022222)
-    assert result.dp_communication_latency.m_as("ms") == pytest.approx(7.813944444444444)
-    assert result.tp_communication_latency.m_as("ms") == pytest.approx(534.7088190577778)
-    assert result.pipeline_bubble_latency.m_as("ms") == pytest.approx(546.9327631578948)
-    assert result.effective_throughput.m_as("1/s") == pytest.approx(7196.439161152336)
-    assert result.scaling_efficiency == pytest.approx(0.760736071277139)
+    # 2026-09-15: re-pinned after the TP AllReduce count fix. A training step
+    # pays 4 AllReduces per layer (2 forward + 2 backward, Megatron-LM p.4),
+    # each its own ring collective, instead of one 2x-sized collective.
+    # TP comm 534.709 -> 1069.866 ms (bandwidth term exactly 2x, +0.448 ms
+    # from counting the latency term per collective); step, throughput, and
+    # scaling efficiency follow. DP comm and the bubble are unchanged.
+    # 2026-09-15: re-pinned after the replica fix. The local step was
+    # Engine.solve on the whole unsharded model on one GPU (infeasible, so
+    # priced at the offload bandwidth, one token per sequence); it is now one
+    # TP8 x PP4 replica: 6 * 16.06 GFLOP/token * 2048 tokens * 32 sequences over
+    # 32 GPUs at eta 0.45, 11.6 GB per GPU (fits); node latency is now 888 ms.
+    # TP comm covers one stage's 8 layers instead of all 32 (1069.9 -> 267.5 ms).
+    # The bubble is additive idle time, node * b / (1 - b) (was node * b).
+    # Effective throughput counts DP replicas (8), not accelerators (256).
+    # 2026-09-15 (later): re-pinned after the DP group fix. Each DP rank holds a
+    # TP8 x PP4 shard (1/32 of the model, was 1/8), and with TP=8 on 8-GPU nodes
+    # every rank sits on its own node, so the 8-rank ring crosses the 100GbE
+    # fabric instead of mostly riding NVLink: DP comm 7.8 -> 71.0 ms.
+    assert result.node_profile.feasible is True
+    assert result.step_latency_total.m_as("ms") == pytest.approx(1392.7097363320572)
+    assert result.communication_latency.m_as("ms") == pytest.approx(338.42890952888894)
+    assert result.dp_communication_latency.m_as("ms") == pytest.approx(70.9625)
+    assert result.tp_communication_latency.m_as("ms") == pytest.approx(267.4664095288889)
+    assert result.pipeline_bubble_latency.m_as("ms") == pytest.approx(166.4653937057634)
+    assert result.effective_throughput.m_as("1/s") == pytest.approx(735.2572996989894)
+    assert result.scaling_efficiency == pytest.approx(0.6374734159866081)
     assert result.bubble_fraction == pytest.approx(0.15789473684210525)
 
 

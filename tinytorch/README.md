@@ -100,21 +100,31 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
   <tbody>
     <tr>
       <td>✅ All 20 modules implemented</td>
-      <td>🔧 Documentation polish</td>
-      <td>📅 NBGrader integration</td>
+      <td>🔧 Community leaderboard</td>
+      <td>📅 Hosted cloud GPU environments</td>
     </tr>
     <tr>
-      <td>✅ Module, CLI, integration, and milestone tests</td>
-      <td>🔧 Edge case handling</td>
-      <td>📅 Community leaderboard</td>
+      <td>✅ 1,400+ unit, CLI, integration, & milestone tests</td>
+      <td>🔧 Binder / WebAssembly preview</td>
+      <td>📅 Video walkthrough lectures</td>
     </tr>
     <tr>
-      <td>✅ <code>tito</code> CLI for workflows</td>
-      <td>🔧 Instructor resources</td>
-      <td>📅 Binder/Colab support</td>
+      <td>✅ <code>tito</code> CLI workflow & progress tracking</td>
+      <td></td>
+      <td></td>
     </tr>
     <tr>
-      <td>✅ Historical milestone scripts</td>
+      <td>✅ Historical milestones (1958 Perceptron to 2018 MLPerf)</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>✅ NBGrader 3-tier classroom autograding</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>✅ Instructor guides & classroom resources</td>
       <td></td>
       <td></td>
     </tr>
@@ -123,7 +133,7 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
 
 **Want to explore the code?** [Browse the repository structure](#repository-structure) to see how modules are organized.
 
-**Adventurous early adopter?** Local installation works, but expect rough edges. See the [setup guide](quarto/getting-started.qmd).
+**Adventurous early adopter?** Local installation works, but expect rough edges. See the [setup guide](guide/getting-started.qmd).
 
 ---
 
@@ -253,7 +263,7 @@ model.fit(X, y)  # Magic happens
   <tbody>
     <tr>
       <td><b>Students</b></td>
-      <td><a href="https://mlsysbook.ai/tinytorch">Course Website</a> ・ <a href="quarto/getting-started.qmd">Getting Started</a></td>
+      <td><a href="https://mlsysbook.ai/tinytorch">Course Website</a> ・ <a href="guide/getting-started.qmd">Getting Started</a></td>
     </tr>
     <tr>
       <td><b>Instructors</b></td>
@@ -276,7 +286,7 @@ TinyTorch/
 │   ├── 01_tensor/              # Module 01: Tensor operations from scratch
 │   │   ├── 01_tensor.py        # Python source (version controlled)
 │   │   └── module.yaml         # Module metadata
-│   │   # Chapter content lives in tinytorch/quarto/modules/01_tensor.qmd
+│   │   # Chapter content lives in tinytorch/guide/modules/01_tensor.qmd
 │   ├── 02_activations/         # Module 02: ReLU, Softmax activations
 │   ├── 03_layers/              # Module 03: Linear layers, Module system
 │   ├── 04_losses/              # Module 04: MSE, CrossEntropy losses
@@ -304,7 +314,7 @@ TinyTorch/
 │   │   └── tensor.py           # Your implementation
 │   └── ...                     # (20 module directories)
 │
-├── quarto/                     # 🌐 Course website & documentation (Quarto)
+├── guide/                      # 🌐 Course website & lab guide (Quarto)
 │   ├── index.qmd               # Landing page
 │   ├── _quarto.yml             # Site navigation & configuration
 │   ├── install.sh              # One-line installer (served at mlsysbook.ai/tinytorch/install.sh)
@@ -334,6 +344,22 @@ TinyTorch/
 ```
 
 **Key workflow**: `src/*.py` → `modules/*.ipynb` → `tinytorch/*.py`
+
+---
+
+## 🧪 Testing & Verification Architecture
+
+TinyTorch features an automated, multi-tiered test suite (~1,400 tests across 20 modules) engineered to catch defects early and deliver immediate educational feedback to learners.
+
+- **Three-Phase Module Testing (`tito module test <NN>`)**:
+  1. **Phase 1: Inline Unit Tests** - Immediate assertion checks embedded directly within notebook cells.
+  2. **Phase 2: Educational Pytest (`--tinytorch`)** - Displays structured `WHAT`, `WHY`, and `STUDENT LEARNING` explanations on failures to guide learners through fixes.
+  3. **Phase 3: Cumulative Integration Tests** - Runs cross-module integration tests inherited up through the current module.
+- **Cross-Module Integration (`tests/integration/`)**: Backpropagation validation across deep layers, full training loops, and end-to-end computer vision and NLP pipelines.
+- **Bug & Hardware Regressions (`tests/regression/`)**: Prevents silent backprop regressions, verifies shape compatibility, and validates hardware acceleration parity (C++ SIMD, Apple Metal MPS, Triton).
+- **Historical Milestones (`tests/milestones/`)**: Proves student-built frameworks can train real neural architectures (1958 Perceptron to 2020 MLPerf).
+
+For the full test suite breakdown, conventions, and running instructions, see **[tests/README.md](tests/README.md)**.
 
 ---
 
@@ -406,20 +432,23 @@ Thanks to these wonderful people who helped improve TinyTorch!
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/aadityansha06"><img src="https://avatars.githubusercontent.com/u/96714228?v=4?v=4?s=80" width="80px;" alt="Aadityansha "/><br /><sub><b>Aadityansha </b></sub></a><br />🪲 🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/euwyngoh"><img src="https://avatars.githubusercontent.com/u/211522196?v=4?v=4?s=80" width="80px;" alt="euwyngoh"/><br /><sub><b>euwyngoh</b></sub></a><br />🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/pratyushadk"><img src="https://avatars.githubusercontent.com/u/184196841?v=4?v=4?s=80" width="80px;" alt="Pratyush Adhikari"/><br /><sub><b>Pratyush Adhikari</b></sub></a><br />🧑‍💻 🧪</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/diegosaldonid-lab"><img src="https://avatars.githubusercontent.com/u/301918395?v=4?v=4?s=80" width="80px;" alt="diegosaldonid-lab"/><br /><sub><b>diegosaldonid-lab</b></sub></a><br />🪲 🧑‍💻</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/choyrim"><img src="https://avatars.githubusercontent.com/u/380261?v=4?v=4?s=80" width="80px;" alt="Choy Rim"/><br /><sub><b>Choy Rim</b></sub></a><br />🪲 🧑‍💻</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/hiimnhan"><img src="https://avatars.githubusercontent.com/u/35358825?v=4?v=4?s=80" width="80px;" alt="Nhan Nguyen"/><br /><sub><b>Nhan Nguyen</b></sub></a><br />🪲 🧑‍💻</td>
+    </tr>
+    <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/AmirAlasady"><img src="https://avatars.githubusercontent.com/AmirAlasady?v=4?s=80" width="80px;" alt="Amir Alasady"/><br /><sub><b>Amir Alasady</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/jettythek"><img src="https://avatars.githubusercontent.com/jettythek?v=4?s=80" width="80px;" alt="jettythek"/><br /><sub><b>jettythek</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/wz1114841863"><img src="https://avatars.githubusercontent.com/wz1114841863?v=4?s=80" width="80px;" alt="wzz"/><br /><sub><b>wzz</b></sub></a><br />🪲</td>
-    </tr>
-    <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/keo-dara"><img src="https://avatars.githubusercontent.com/u/175544368?v=4?v=4?s=80" width="80px;" alt="keo-dara"/><br /><sub><b>keo-dara</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Kobra299"><img src="https://avatars.githubusercontent.com/u/4283156?v=4?v=4?s=80" width="80px;" alt="Wayne Norman"/><br /><sub><b>Wayne Norman</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/lalalostcode"><img src="https://avatars.githubusercontent.com/u/149884766?v=4?v=4?s=80" width="80px;" alt="Ilham Rafiqin"/><br /><sub><b>Ilham Rafiqin</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/oscarf189"><img src="https://avatars.githubusercontent.com/u/28113740?v=4?v=4?s=80" width="80px;" alt="Oscar Flores"/><br /><sub><b>Oscar Flores</b></sub></a><br />✍️</td>
+    </tr>
+    <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/sotoblanco"><img src="https://avatars.githubusercontent.com/u/46135649?v=4?v=4?s=80" width="80px;" alt="Pastor Soto"/><br /><sub><b>Pastor Soto</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/salmanmkc"><img src="https://avatars.githubusercontent.com/u/32169182?v=4?v=4?s=80" width="80px;" alt="Salman Chishti"/><br /><sub><b>Salman Chishti</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/adityamulik"><img src="https://avatars.githubusercontent.com/u/10626835?v=4?v=4?s=80" width="80px;" alt="Aditya Mulik"/><br /><sub><b>Aditya Mulik</b></sub></a><br />✍️</td>
-    </tr>
-    <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/yarikoptic"><img src="https://avatars.githubusercontent.com/u/39889?v=4?v=4?s=80" width="80px;" alt="Yaroslav Halchenko"/><br /><sub><b>Yaroslav Halchenko</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/RinZ27"><img src="https://avatars.githubusercontent.com/u/222222878?v=4?v=4?s=80" width="80px;" alt="Rin"/><br /><sub><b>Rin</b></sub></a><br />🧑‍💻</td>
     </tr>

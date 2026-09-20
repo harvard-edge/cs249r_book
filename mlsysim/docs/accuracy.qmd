@@ -135,7 +135,7 @@ The KV-cache formula ($\text{KV} = 2 \times L \times H_{\text{kv}} \times d_{\te
 
 ### Serving capacity planning
 
-`ServingCapacityModel` is a composition model. It uses `ServingModel` for TTFT/ITL, `ContinuousBatchingModel` for per-replica token capacity, and `TailLatencyModel` for queueing pressure. This is useful for first-pass sizing and sensitivity sweeps: if QPS doubles, or generated length doubles, you can see how many replicas are implied. Do not use the result as a production SLA guarantee. Production serving must still be validated with the target scheduler, traffic mix, batching policy, and percentile measurement.
+`ServingCapacityModel` is a composition model. It uses `ServingModel` for TTFT/ITL, `ContinuousBatchingModel` for per-replica token capacity, and `TailLatencyModel` for queueing pressure. This is useful for first-pass sizing and sensitivity sweeps: if QPS doubles, or generated length doubles, you can see how many replicas are implied. Capacity depends on the request-length assumption. By default every request fills `max_seq_len`, the conservative case; passing `mean_request_tokens` sizes paged allocation for a workload of shorter, exponentially distributed requests ([KV Allocation and Batch Capacity](math.qmd#sec-batching)). Do not use the result as a production SLA guarantee. Production serving must still be validated with the target scheduler, traffic mix, batching policy, and percentile measurement.
 
 ### MoE routing imbalance
 
@@ -156,7 +156,7 @@ Sustainability and economics estimates are usually dominated by a few explicit a
 | No NVLink contention model | 5--15% on TP overhead | Tensor parallel with TP > 4 |
 | No pipeline schedule optimization | 10--20% on PP efficiency | Interleaved 1F1B schedules |
 | No quantization kernel overhead | −30% on INT8 ITL | Quantized serving |
-| No memory fragmentation | −10--20% on KV-cache capacity | Long-context serving |
+| No external-fragmentation model | ~37--42% of KV memory | Comparing paging against exact-size or power-of-two contiguous allocators [@kwon2023] |
 
 : {tbl-colwidths="[30,18,52]"}
 
@@ -191,7 +191,7 @@ MLSys·im deliberately omits the following effects. Each omission is a design de
 
 4. **Quantization kernel efficiency.** INT8/INT4 kernels achieve lower utilization than FP16 Tensor Core kernels due to dequantization overhead and less mature compiler support. MLSys·im treats precision as a pure ops-per-byte ratio.
 
-5. **Memory fragmentation and PagedAttention overhead.** The KV-cache formula gives the *dense* allocation size. In practice, PagedAttention introduces fragmentation (typically 5--10%) and paging latency.
+5. **KV allocation dynamics.** `ServingModel` sizes the KV cache densely for a known sequence length. `ContinuousBatchingModel` compares max-length reservation with paged allocation under an assumed exponential request-length distribution, sized at peak occupancy. It does not model how reserved slots fill over a request's lifetime, external fragmentation in exact-size or power-of-two contiguous allocators, preemption and swapping, or paged-attention kernel latency. Kwon et al. measure 96.3% of vLLM's KV memory holding token states, against 20.4% to 38.2% for contiguous pre-allocation [@kwon2023].
 
 ---
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from mlsysim.core.units import ureg, DAYS_PER_YEAR
-from mlsysim.core._validation import validate_nonnegative, validate_positive
+from mlsysim.core._validation import validate_nonnegative
 
 from ._units import _ensure_unit
 

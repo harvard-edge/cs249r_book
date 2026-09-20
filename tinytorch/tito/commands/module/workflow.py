@@ -238,7 +238,7 @@ class ModuleWorkflowCommand(BaseCommand):
         path_group.add_argument(
             '--guide',
             action='store_true',
-            help='Path to module Lab Guide chapter (quarto/modules/NN_xxx.qmd)'
+            help='Path to module Lab Guide chapter (guide/modules/NN_xxx.qmd)'
         )
 
     # Module mapping and normalization now imported from core.modules
@@ -437,13 +437,15 @@ class ModuleWorkflowCommand(BaseCommand):
         return self._open_jupyter(module_name)
 
     def _create_module_from_src(self, module_name: str) -> bool:
-        """Create a module in modules/ by converting from src/.
+        """Create the student notebook in modules/ from src/.
 
-        Uses the same conversion logic as 'tito dev export' but only creates
-        the student-facing notebook, without exporting to the tinytorch package.
-        Full `src/` (including `### BEGIN SOLUTION` ... `### END SOLUTION` blocks) is
-        passed through to jupytext so notebooks match the source-of-truth and exports
-        remain consistent for `tito module complete` and CI user-journey.
+        Uses the same jupytext conversion as 'tito dev export', then clears the
+        student-core solution regions to nbgrader's stub, following the student
+        release tier (scaffold regions stay solved). Nothing is exported to the
+        package here; `tito module complete` exports whatever the student writes.
+
+        CI checks the student notebook before filling in reference solutions
+        through `tito dev export`.
         """
         from ..export_utils import convert_py_to_notebook
 
@@ -451,8 +453,13 @@ class ModuleWorkflowCommand(BaseCommand):
         if not src_path.exists():
             return False
 
-        # Convert src/*.py to modules/*.ipynb using jupytext
-        return convert_py_to_notebook(src_path, self.venv_path, self.console)
+        return convert_py_to_notebook(
+            src_path,
+            self.venv_path,
+            self.console,
+            student=True,
+            project_root=self.config.project_root,
+        )
 
     def _get_milestone_for_module(self, module_num: int) -> Optional[tuple]:
         """Get the milestone this module contributes to."""
@@ -763,7 +770,7 @@ class ModuleWorkflowCommand(BaseCommand):
         unit_test_count = 0
         integration_test_count = 0
 
-        # Step 1: Run UNIT tests (test source files, don't need exported package)
+        # Step 1: Run the inline unit tests in the student's own notebook
         if not skip_tests:
             self.console.print("[bold]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold]")
             self.console.print()
@@ -781,9 +788,9 @@ class ModuleWorkflowCommand(BaseCommand):
 
             self.console.print(f"   ✅ Unit tests: {unit_result['passed']}/{unit_result['passed']} passed")
 
-        # Step 1.5: Catch notebook syntax errors before export. Unit tests run
-        # against the instructor src/ file, so a SyntaxError in the student
-        # notebook would otherwise slip through to a silent, broken export.
+        # Step 1.5: Catch notebook syntax errors before export. Export runs
+        # nbdev without executing the notebook, so with --skip-tests a
+        # SyntaxError would otherwise slip through to a silent, broken export.
         if not skip_export:
             syntax_check = self._check_notebook_syntax(module_name)
             if not syntax_check['ok']:
@@ -1031,7 +1038,7 @@ class ModuleWorkflowCommand(BaseCommand):
     def run_module_tests(self, module_name: str, verbose: bool = True) -> int:
         """
         Run comprehensive tests for a module:
-        1. Inline unit tests (from src/XX_modulename/XX_modulename.py)
+        1. Inline unit tests (from the student's notebook in modules/XX_modulename/)
         2. Progressive integration tests (from tests/XX_modulename/test_XX_modulename_progressive.py)
         """
         from rich.table import Table
@@ -1091,17 +1098,39 @@ class ModuleWorkflowCommand(BaseCommand):
         return 0
 
     def _run_inline_unit_tests(self, module_name: str, verbose: bool) -> Dict[str, int]:
-        """Run inline unit tests and parse output for detailed display.
+        """Run the inline unit tests in the student's notebook and parse the output.
 
-        Prefers the student's working notebook in modules/ so that tests
-        actually certify the student's implementation (#2117). Falls back
-        to the instructor reference in src/ if no notebook exists.
+        Only the working notebook in modules/ is certified (#2117). There is
+        deliberately no fallback to the reference in src/: with the notebook
+        missing, a fallback would pass on the instructor's code and mark the
+        module complete for work the student never did.
         """
-        project_root = Path.cwd()
+        project_root = self.config.project_root
         short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
         notebook_path = project_root / "modules" / module_name / f"{short_name}.ipynb"
-        src_dir = project_root / "src" / module_name
-        dev_file = src_dir / f"{module_name}.py"
+
+        if not notebook_path.exists():
+            module_num = module_name.split("_", 1)[0]
+            error = (
+                f"Notebook not found: modules/{module_name}/{short_name}.ipynb "
+                f"(run: tito module start {module_num})"
+            )
+            if verbose:
+                self.console.print(f"   [red]❌ {error}[/red]")
+            return {
+                'passed': 0,
+                'failed': 1,
+                'tests': [{'name': 'notebook', 'passed': False, 'error': error}],
+                'returncode': 1,
+            }
+
+        contract = self._notebook_contract(module_name)
+        if not contract["ok"]:
+            if verbose:
+                self.console.print(f"[red]❌ {contract['error']}[/red]")
+            return {'passed': 0, 'failed': 1,
+                    'tests': [{'name': 'notebook_contract', 'passed': False, 'error': contract['error']}],
+                    'returncode': 1}
 
         # Set up environment with project root in PYTHONPATH
         # This allows module code to import from tinytorch.core.*
@@ -1112,31 +1141,48 @@ class ModuleWorkflowCommand(BaseCommand):
         else:
             env['PYTHONPATH'] = str(project_root)
 
-        if notebook_path.exists():
-            runner = (
-                "import json, sys; from pathlib import Path; "
-                "p = Path(sys.argv[1]); nb = json.loads(p.read_text(encoding='utf-8')); "
-                "code = '\\n'.join(''.join(c['source']) for c in nb['cells'] if c['cell_type'] == 'code'); "
-                "exec(compile(code, str(p), 'exec'), {'__name__': '__main__'})"
-            )
-            cmd = [sys.executable, "-c", runner, str(notebook_path.absolute())]
-        elif dev_file.exists():
-            cmd = [sys.executable, str(dev_file.absolute())]
-        else:
-            if verbose:
-                self.console.print(f"   [dim yellow]No module file found: {notebook_path} or {dev_file}[/dim yellow]")
-            return {'passed': 0, 'failed': 0, 'tests': [], 'returncode': 0}
+        runner = """
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+expected = set(json.loads(sys.argv[2]))
+seen = set()
+nb = json.loads(p.read_text(encoding='utf-8'))
+code = '\\n'.join(''.join(c['source']) for c in nb['cells'] if c['cell_type'] == 'code')
+def record_test(frame, event, arg):
+    if event == 'call' and frame.f_code.co_filename == str(p):
+        seen.add(frame.f_code.co_name)
+sys.setprofile(record_test)
+try:
+    exec(compile(code, str(p), 'exec'), {'__name__': '__main__'})
+finally:
+    sys.setprofile(None)
+missing = expected - seen
+if missing:
+    raise RuntimeError('Required inline tests did not run: ' + ', '.join(sorted(missing)))
+"""
+        import json
+        cmd = [sys.executable, "-c", runner, str(notebook_path.absolute()), json.dumps(contract["tests"])]
 
-        # Run the module file (which triggers if __name__ == "__main__" tests)
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            cwd=project_root,
-            env=env
-        )
+        # Bound notebook execution just as the standalone module-test command did.
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=project_root,
+                env=env,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            error = "Notebook tests timed out after 300 seconds; check for a nonterminating loop or unexpectedly large workload."
+            if verbose:
+                self.console.print(f"[red]❌ {error}[/red]")
+            return {'passed': 0, 'failed': 1,
+                    'tests': [{'name': 'notebook_timeout', 'passed': False, 'error': error}],
+                    'returncode': 1}
 
         # Parse output to extract individual test results
         tests_run = self._parse_test_output(result.stdout, result.stderr, result.returncode)
@@ -1165,7 +1211,7 @@ class ModuleWorkflowCommand(BaseCommand):
 
     def _run_integration_tests(self, module_name: str, verbose: bool) -> Dict[str, int]:
         """Run progressive integration tests using pytest."""
-        project_root = Path.cwd()
+        project_root = self.config.project_root
 
         # Find integration test file(s). Most modules are named
         # tests/<module>/test_<module>_progressive.py (e.g. test_01_tensor_progressive.py),
@@ -1193,6 +1239,13 @@ class ModuleWorkflowCommand(BaseCommand):
                 self.console.print(f"   [dim yellow]No integration tests found: {primary_test_file}[/dim yellow]")
             return {'passed': 0, 'failed': 0, 'tests': [], 'returncode': 0}
 
+        # Scope conftest's export gate to this module and the ones before it,
+        # so completing module 01 is not blocked by modules 02-04 being absent.
+        env = os.environ.copy()
+        module_num = module_name.split("_", 1)[0]
+        if module_num.isdigit():
+            env["TINYTORCH_EXPORT_CHECK_THROUGH"] = str(int(module_num))
+
         # Run pytest with verbose output
         result = subprocess.run(
             [
@@ -1209,38 +1262,28 @@ class ModuleWorkflowCommand(BaseCommand):
             text=True,
             encoding="utf-8",
             errors="replace",
-            cwd=project_root
+            cwd=project_root,
+            env=env,
         )
 
         # Parse pytest output
         tests_run = self._parse_pytest_output(result.stdout, result.stderr)
 
-        if not tests_run and result.returncode != 0:
-            # pytest itself errored (e.g. a collection-time import failure in
-            # the exported package) rather than legitimately having zero
-            # tests. Surface this as a failure instead of silently reporting
-            # "no integration tests for this module" -- except for two cases
-            # that are not real collection failures:
-            #   - exit code 5: pytest's own "no tests collected" signal
-            #   - exit code 4: a pytest.UsageError, which conftest.py raises
-            #     from _validate_package_exported() when core modules that
-            #     come *later* in the build order haven't been exported yet.
-            #     That check is unconditional (it requires every core file to
-            #     exist, not just the one under test), so it legitimately
-            #     trips for early modules during a progressive build.
+        no_tests_collected = result.returncode == 5
+        if result.returncode != 0 and not no_tests_collected and all(t['passed'] for t in tests_run):
+            # pytest failed without a FAILED test line: a collection-time
+            # import error, an ERROR in setup, or conftest's export gate (exit
+            # code 4, "TINYTORCH PACKAGE NOT EXPORTED") finding one of this
+            # student's own modules missing or broken. All are real failures.
+            # The export gate checks only modules through
+            # TINYTORCH_EXPORT_CHECK_THROUGH for the student's current stage.
             error_msg = (result.stderr or result.stdout).strip()
-            is_no_tests_collected = result.returncode == 5
-            is_progressive_export_gate = (
-                result.returncode == 4
-                and "TINYTORCH PACKAGE NOT EXPORTED" in error_msg
-            )
-            if not is_no_tests_collected and not is_progressive_export_gate:
-                concise_error = '\n'.join(error_msg.split('\n')[:5]) if error_msg else "pytest exited with an error"
-                tests_run = [{
-                    'name': 'pytest_collection',
-                    'passed': False,
-                    'error': concise_error,
-                }]
+            concise_error = '\n'.join(error_msg.split('\n')[:5]) if error_msg else "pytest exited with an error"
+            tests_run.append({
+                'name': 'pytest_collection',
+                'passed': False,
+                'error': concise_error,
+            })
 
         if verbose:
             for test in tests_run:
@@ -1293,6 +1336,15 @@ class ModuleWorkflowCommand(BaseCommand):
                     'passed': passed,
                     'error': error
                 })
+
+        # A crash after some tests printed ✅ still fails the run.
+        if tests and returncode != 0:
+            error_msg = stderr.strip() if stderr.strip() else stdout.strip()
+            tests.append({
+                'name': 'module_execution',
+                'passed': False,
+                'error': '\n'.join(error_msg.split('\n')[-3:]) if error_msg else "Test execution failed",
+            })
 
         # If no explicit test markers found, infer from return code
         if not tests:
@@ -1386,9 +1438,9 @@ class ModuleWorkflowCommand(BaseCommand):
 
     def _check_notebook_syntax(self, module_name: str) -> dict:
         """Compile each code cell of the student notebook to catch syntax errors
-        before export. Unit tests run against the instructor ``src/`` file, while
-        export runs nbdev on the student notebook, so a SyntaxError in the
-        notebook would otherwise slip silently into a broken package.
+        before export. Export runs nbdev on the notebook without executing it,
+        so when unit tests are skipped a SyntaxError in the notebook would
+        otherwise slip silently into a broken package.
 
         Returns ``{'ok': bool, 'error': Optional[str]}``. A missing notebook is
         not an error; some flows have nothing to check yet.
@@ -1430,74 +1482,108 @@ class ModuleWorkflowCommand(BaseCommand):
                 }
         return {'ok': True, 'error': None}
 
-    def export_module(self, module_name: str) -> int:
-        """Export student's notebook to the TinyTorch package.
-        
-        This only runs nbdev_export on the existing notebook.
-        It does NOT convert from src/*.py (that would overwrite student work).
-        
-        Developers who want to rebuild from src/ should use: tito dev export
+    def _notebook_contract(self, module_name: str) -> dict:
+        """Check identity and required tests against the canonical module source.
+
+        Reject missing tests and mismatched exports before executing student code.
         """
-        import subprocess
-        from pathlib import Path
-        from ..export_utils import get_export_target, ensure_writable_target
-        
+        import ast
+        import json
+        import re
+
+        root = self.config.project_root
+        short_name = module_name.split("_", 1)[-1]
+        notebook_path = root / "modules" / module_name / f"{short_name}.ipynb"
+        source_path = root / "src" / module_name / f"{module_name}.py"
         try:
-            # Find the notebook in modules/
-            short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
-            notebook_path = Path("modules") / module_name / f"{short_name}.ipynb"
-            
-            if not notebook_path.exists():
-                self.console.print(f"[red]❌ Notebook not found: {notebook_path}[/red]")
-                self.console.print("[dim]Make sure you're in the TinyTorch project root.[/dim]")
-                return 1
-            
-            # Ensure target file is writable
-            module_path = notebook_path.parent
-            export_target = get_export_target(module_path)
-            if export_target != "unknown":
-                ensure_writable_target(export_target)
-            
-            # Run nbdev_export using Python API directly (more reliable than subprocess)
+            reference = source_path.read_text(encoding="utf-8")
+            notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+            code = "\n".join(
+                "".join(cell["source"]) for cell in notebook["cells"]
+                if cell["cell_type"] == "code"
+            )
+            directive = r"^#\|\s*default_exp\s+([\w.]+)\s*$"
+            targets = re.findall(directive, reference, re.M)
+            if len(targets) != 1 or not all(part.isidentifier() for part in targets[0].split(".")):
+                raise ValueError("The module source must declare one valid default_exp target")
+            target = targets[0]
+            if re.findall(directive, code, re.M) != [target]:
+                raise ValueError(f"Notebook must declare exactly '#| default_exp {target}'")
+            for explicit_target in re.findall(r"^#\|\s*exporti?[ \t]+(\S+)", code, re.M):
+                if explicit_target != target:
+                    raise ValueError(f"Notebook export target must be {target}, not {explicit_target}")
+            expected_tests = {
+                node.name for node in ast.parse(reference).body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and (node.name.startswith("test_unit_") or node.name == "test_module")
+            }
+            definitions = {
+                node.name for node in ast.parse(code).body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            if not expected_tests or "test_module" not in expected_tests:
+                raise ValueError("Module source has no canonical inline test runner")
+            missing = expected_tests - definitions
+            if missing:
+                raise ValueError("Notebook is missing required tests: " + ", ".join(sorted(missing)))
+            return {"ok": True, "target": target, "tests": sorted(expected_tests), "error": None}
+        except (OSError, ValueError, KeyError, TypeError, SyntaxError) as error:
+            return {"ok": False, "error": f"Cannot certify {notebook_path.name}: {error}. Restore the module's header and locked test cells."}
+
+    def export_module(self, module_name: str) -> int:
+        """Validate a fresh export before replacing the student's package file."""
+        import ast
+        import tempfile
+        from pathlib import Path
+
+        contract = self._notebook_contract(module_name)
+        if not contract["ok"]:
+            self.console.print(f"[red]❌ {contract['error']}[/red]")
+            return 1
+        target = contract["target"]
+        root = self.config.project_root
+        short_name = module_name.split("_", 1)[-1]
+        notebook_path = root / "modules" / module_name / f"{short_name}.ipynb"
+        relative_target = Path(*target.split(".")).with_suffix(".py")
+        destination = root / "tinytorch" / relative_target
+        try:
             from nbdev.export import nb_export
 
-            target_display = (
-                f"tinytorch/{export_target.replace('.', '/')}.py"
-                if export_target != "unknown"
-                else "tinytorch/..."
-            )
-            self.console.print(f"[dim]📦 Exporting {notebook_path.name} → {target_display}[/dim]")
-
-            lib_path = Path.cwd() / "tinytorch"
-            nb_export(notebook_path, lib_path=lib_path)
-
-            # Verify the export actually produced a file
-            if export_target != "unknown":
-                target_file = lib_path / (export_target.replace(".", "/") + ".py")
-                if not target_file.exists():
-                    self.console.print(f"[red]❌ Export verification failed: {target_file} was not created[/red]")
-                    self.console.print(f"[dim]   Expected from #| default_exp: {export_target}[/dim]")
-                    self.console.print("[yellow]   Check that your notebook has #| export cells with code[/yellow]")
-                    return 1
-
-                # Verify the file has actual content (not empty)
-                content = target_file.read_text(encoding="utf-8")
-                code_lines = [l for l in content.split('\n')
-                              if l.strip() and not l.strip().startswith('#')]
-                if len(code_lines) < 2:
-                    self.console.print(f"[red]❌ Export verification failed: {target_file} is empty[/red]")
-                    self.console.print("[yellow]   Your notebook's #| export cells may not contain code[/yellow]")
-                    return 1
-
-            self.console.print(f"[dim]✅ Your code is now part of the tinytorch package![/dim]")
+            self.console.print(f"[dim]📦 Exporting {notebook_path.name} → tinytorch/{relative_target}[/dim]")
+            # nbdev may succeed without producing anything. A fresh directory
+            # prevents a previous export from masquerading as this notebook's work.
+            with tempfile.TemporaryDirectory(prefix="tinytorch-export-") as staging:
+                nb_export(notebook_path, lib_path=Path(staging))
+                produced = Path(staging) / relative_target
+                if not produced.is_file():
+                    raise ValueError(f"No fresh {relative_target} was produced; restore the notebook's #| export cells")
+                content = produced.read_text(encoding="utf-8")
+                tree = ast.parse(content)
+                implementation = [node for node in tree.body if not (
+                    isinstance(node, ast.Assign) and any(
+                        isinstance(name, ast.Name) and name.id == "__all__" for name in node.targets
+                    )
+                )]
+                if not implementation:
+                    raise ValueError(f"Fresh export {relative_target} contains no implementation")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                # Stage beside the target for atomic replacement on the same filesystem.
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=destination.parent,
+                                                 suffix=".py", delete=False) as replacement:
+                    replacement.write(content)
+                    replacement_path = Path(replacement.name)
+                try:
+                    os.replace(replacement_path, destination)
+                finally:
+                    replacement_path.unlink(missing_ok=True)
+            self.console.print("[dim]✅ Your code is now part of the tinytorch package![/dim]")
             return 0
-
         except ImportError:
             self.console.print("[red]❌ nbdev not found — cannot export module[/red]")
             self.console.print("[yellow]   Fix: pip install nbdev[/yellow]")
             return 1
-        except Exception as e:
-            self.console.print(f"[red]❌ Export failed: {e}[/red]")
+        except Exception as error:
+            self.console.print(f"[red]❌ Export failed: {error}[/red]")
             return 1
 
     def get_progress_data(self) -> dict:
@@ -1704,7 +1790,7 @@ class ModuleWorkflowCommand(BaseCommand):
         elif source:
             target = project_root / "src" / folder / f"{folder}.py"
         elif guide:
-            target = project_root / "quarto" / "modules" / f"{folder}.qmd"
+            target = project_root / "guide" / "modules" / f"{folder}.qmd"
         else:
             self.console.print("[red]❌ Specify --notebook, --source, or --guide[/red]")
             return 1

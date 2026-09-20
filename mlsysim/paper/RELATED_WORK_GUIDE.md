@@ -146,7 +146,7 @@ The tools most similar to MLSysim in spirit — analytical approaches trading fi
 - **Where**: L266 (comparison table), L299 (Related Work)
 - **Verdict**: ✅ Appropriate positioning.
 
-### `kim2023llmanalysis` — Li, Cheng, "llm-analysis" (GitHub 2023)
+### `li2023llmanalysis` — Li, Cheng, "llm-analysis" (GitHub 2023)
 - **What they did**: Open-source lightweight latency and memory estimation tool for transformer inference.
 - **Why we cite it**: Same category as LLM-Viewer. Useful but narrow scope.
 - **Where**: L266 (comparison table), L299 (Related Work)

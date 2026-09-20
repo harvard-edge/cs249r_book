@@ -5,11 +5,9 @@ from __future__ import annotations
 import pint
 
 from mlsysim.core.units import (
-    Bparam,
     byte,
     count,
     gram,
-    hour,
     joule,
     kilogram,
     kWh,

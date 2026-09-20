@@ -365,12 +365,14 @@ class TestQuickTrainingSmoke:
         x = Tensor([[1., 2.]], requires_grad=True)
         y = Tensor([[1.]])
 
+        w_before = layer.weight.data.copy()
         out = layer.forward(x)
         loss = MSELoss().forward(out, y)
         loss.backward()
         opt.step()
 
-        assert True  # If we got here, it works
+        assert layer.weight.grad is not None, "Gradient should be computed"
+        assert not np.allclose(layer.weight.data, w_before), "Optimizer should update weights"
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@
  *
  * Intentional non-mirrors (different content per subsite, keep in sync
  * manually if behaviour needs to align):
- *   tinytorch/quarto/assets/scripts/subscribe-modal.js  (TinyTorch-branded)
+ *   tinytorch/guide/assets/scripts/subscribe-modal.js  (TinyTorch-branded)
  */
 
 (function() {

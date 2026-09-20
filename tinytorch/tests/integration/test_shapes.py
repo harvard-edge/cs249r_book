@@ -19,59 +19,11 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.insert(0, project_root)
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear
+from tinytorch.core.layers import Linear, Sequential
 from tinytorch.core.activations import ReLU, Sigmoid, Tanh, Softmax
-from tinytorch.core.spatial import Conv2d
+from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d
 from tinytorch.core.transformers import TransformerBlock, LayerNorm
 from tinytorch.core.embeddings import Embedding, PositionalEncoding
-
-class Sequential:
-    """Simple sequential container for testing."""
-    def __init__(self, layers):
-        self.layers = layers
-    def __call__(self, x):
-        for layer in self.layers:
-            x = layer(x)
-        return x
-    def parameters(self):
-        params = []
-        for layer in self.layers:
-            if hasattr(layer, 'parameters'):
-                params.extend(layer.parameters())
-        return params
-
-class F:
-    """Functional interface for testing."""
-    @staticmethod
-    def relu(x):
-        from tinytorch.core.activations import ReLU
-        return ReLU()(x)
-    @staticmethod
-    def sigmoid(x):
-        from tinytorch.core.activations import Sigmoid
-        return Sigmoid()(x)
-    @staticmethod
-    def tanh(x):
-        from tinytorch.core.activations import Tanh
-        return Tanh()(x)
-    @staticmethod
-    def softmax(x, dim=-1):
-        from tinytorch.core.activations import Softmax
-        return Softmax()(x)
-    @staticmethod
-    def max_pool2d(x, kernel_size):
-        from tinytorch.core.spatial import MaxPool2d
-        return MaxPool2d(kernel_size)(x)
-    @staticmethod
-    def avg_pool2d(x, kernel_size):
-        from tinytorch.core.spatial import AvgPool2d
-        return AvgPool2d(kernel_size)(x)
-    @staticmethod
-    def flatten(x, start_dim=1):
-        import numpy as np
-        shape = x.shape
-        new_shape = shape[:start_dim] + (np.prod(shape[start_dim:]),)
-        return x.reshape(*new_shape)
 
 
 # ============== Linear Layer Shape Tests ==============
@@ -168,35 +120,35 @@ def test_conv2d_chain():
 def test_relu_preserves_2d_shape():
     """ReLU preserves 2D tensor shape."""
     x = Tensor(rng.standard_normal((10, 20)))
-    y = F.relu(x)
+    y = ReLU()(x)
     assert y.shape == x.shape, f"ReLU changed shape: {x.shape} → {y.shape}"
 
 
 def test_relu_preserves_4d_shape():
     """ReLU preserves 4D tensor shape (conv output)."""
     x = Tensor(rng.standard_normal((2, 16, 32, 32)))
-    y = F.relu(x)
+    y = ReLU()(x)
     assert y.shape == x.shape, f"ReLU changed shape: {x.shape} → {y.shape}"
 
 
 def test_sigmoid_preserves_shape():
     """Sigmoid preserves tensor shape."""
     x = Tensor(rng.standard_normal((5, 10)))
-    y = F.sigmoid(x)
+    y = Sigmoid()(x)
     assert y.shape == x.shape, f"Sigmoid changed shape: {x.shape} → {y.shape}"
 
 
 def test_tanh_preserves_shape():
     """Tanh preserves tensor shape."""
     x = Tensor(rng.standard_normal((5, 10)))
-    y = F.tanh(x)
+    y = Tanh()(x)
     assert y.shape == x.shape, f"Tanh changed shape: {x.shape} → {y.shape}"
 
 
 def test_softmax_preserves_shape():
     """Softmax preserves tensor shape."""
     x = Tensor(rng.standard_normal((5, 10)))
-    y = F.softmax(x, dim=-1)
+    y = Softmax()(x)
     assert y.shape == x.shape, f"Softmax changed shape: {x.shape} → {y.shape}"
 
 
@@ -205,21 +157,21 @@ def test_softmax_preserves_shape():
 def test_maxpool2d_kernel_2():
     """MaxPool2d with kernel=2 halves spatial dimensions."""
     x = Tensor(rng.standard_normal((2, 16, 32, 32)))
-    y = F.max_pool2d(x, kernel_size=2)
+    y = MaxPool2d(kernel_size=2)(x)
     assert y.shape == (2, 16, 16, 16), f"Expected (2, 16, 16, 16), got {y.shape}"
 
 
 def test_maxpool2d_kernel_4():
     """MaxPool2d with kernel=4 quarters spatial dimensions."""
     x = Tensor(rng.standard_normal((2, 16, 32, 32)))
-    y = F.max_pool2d(x, kernel_size=4)
+    y = MaxPool2d(kernel_size=4)(x)
     assert y.shape == (2, 16, 8, 8), f"Expected (2, 16, 8, 8), got {y.shape}"
 
 
 def test_avgpool2d_kernel_2():
     """AvgPool2d with kernel=2 halves spatial dimensions."""
     x = Tensor(rng.standard_normal((2, 16, 32, 32)))
-    y = F.avg_pool2d(x, kernel_size=2)
+    y = AvgPool2d(kernel_size=2)(x)
     assert y.shape == (2, 16, 16, 16), f"Expected (2, 16, 16, 16), got {y.shape}"
 
 
@@ -229,7 +181,7 @@ def test_pool_after_conv():
     x = Tensor(rng.standard_normal((4, 3, 32, 32)))
     x = conv(x)
     assert x.shape == (4, 32, 28, 28), f"After conv: expected (4, 32, 28, 28), got {x.shape}"
-    x = F.max_pool2d(x, 2)
+    x = MaxPool2d(2)(x)
     assert x.shape == (4, 32, 14, 14), f"After pool: expected (4, 32, 14, 14), got {x.shape}"
 
 
@@ -238,14 +190,14 @@ def test_pool_after_conv():
 def test_flatten_4d():
     """Flatten 4D tensor for FC after Conv."""
     x = Tensor(rng.standard_normal((4, 64, 5, 5)))
-    y = F.flatten(x, start_dim=1)
+    y = x.reshape(x.shape[0], -1)
     assert y.shape == (4, 1600), f"Expected (4, 1600), got {y.shape}"
 
 
 def test_flatten_cnn_to_fc():
     """Flatten for CNN→FC transition."""
     x = Tensor(rng.standard_normal((8, 128, 7, 7)))
-    y = F.flatten(x, start_dim=1)
+    y = x.reshape(x.shape[0], -1)
     expected = 128 * 7 * 7
     assert y.shape == (8, expected), f"Expected (8, {expected}), got {y.shape}"
 
@@ -369,7 +321,7 @@ def test_conv_small_spatial():
 def test_flatten_already_2d():
     """Flatten on already 2D tensor (should be no-op)."""
     x = Tensor(rng.standard_normal((10, 20)))
-    y = F.flatten(x, start_dim=1)
+    y = x.reshape(x.shape[0], -1)
     assert y.shape == (10, 20), f"Expected (10, 20), got {y.shape}"
 
 
@@ -391,18 +343,18 @@ def test_mnist_cnn_dimensions():
     conv1 = Conv2d(1, 32, kernel_size=3)
     x = conv1(x)
     assert x.shape == (32, 32, 26, 26), f"After conv1: {x.shape}"
-    x = F.max_pool2d(x, 2)
+    x = MaxPool2d(2)(x)
     assert x.shape == (32, 32, 13, 13), f"After pool1: {x.shape}"
 
     # Conv block 2
     conv2 = Conv2d(32, 64, kernel_size=3)
     x = conv2(x)
     assert x.shape == (32, 64, 11, 11), f"After conv2: {x.shape}"
-    x = F.max_pool2d(x, 2)
+    x = MaxPool2d(2)(x)
     assert x.shape == (32, 64, 5, 5), f"After pool2: {x.shape}"
 
     # Flatten for FC
-    x = F.flatten(x, start_dim=1)
+    x = x.reshape(x.shape[0], -1)
     assert x.shape == (32, 1600), f"After flatten: {x.shape}"
 
     # FC layers
@@ -423,18 +375,18 @@ def test_cifar10_cnn_dimensions():
     conv1 = Conv2d(3, 32, kernel_size=3)
     x = conv1(x)
     assert x.shape == (16, 32, 30, 30), f"After conv1: {x.shape}"
-    x = F.max_pool2d(x, 2)
+    x = MaxPool2d(2)(x)
     assert x.shape == (16, 32, 15, 15), f"After pool1: {x.shape}"
 
     # Conv block 2
     conv2 = Conv2d(32, 64, kernel_size=3)
     x = conv2(x)
     assert x.shape == (16, 64, 13, 13), f"After conv2: {x.shape}"
-    x = F.max_pool2d(x, 2)
+    x = MaxPool2d(2)(x)
     assert x.shape == (16, 64, 6, 6), f"After pool2: {x.shape}"
 
     # Flatten and FC
-    x = F.flatten(x, start_dim=1)
+    x = x.reshape(x.shape[0], -1)
     assert x.shape == (16, 2304), f"After flatten: {x.shape}"
 
     fc = Linear(2304, 10)

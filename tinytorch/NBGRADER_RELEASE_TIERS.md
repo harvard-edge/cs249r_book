@@ -242,7 +242,7 @@ Extend the NBGrader validator with tier checks:
 Run these checks in CI or release verification:
 
 ```bash
-python3 tests/validate_nbgrader_config.py
+python3 tools/validate_nbgrader_config.py
 tito nbgrader generate --all --tier student
 tito nbgrader release --all
 ```

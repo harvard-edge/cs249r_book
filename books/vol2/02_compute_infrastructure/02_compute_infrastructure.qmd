@@ -3573,6 +3573,49 @@ In large installations, the cable plant alone can take weeks to install and test
 
 As rack power densities climb toward 100 kW for liquid-cooled clusters, the inefficiency of per-server AC conversion becomes untenable. Traditional designs dedicate volume in every chassis to redundant AC power supply units (PSUs), while many dense-rack designs use **rack-level DC power distribution**\index{Rack-level DC power distribution}. In this architecture, a centralized power shelf converts mains AC to a **48V DC busbar**\index{48V DC busbar} that runs the height of the rack, replacing individual server PSUs. This consolidation eliminates one conversion stage, yielding a system-wide efficiency gain of 2--3 percent -- a meaningful reduction in thermal load when training a 175B-parameter model across thousands of GPUs. Power is delivered via the 48V bus directly to the server backplane, where compact DC-to-DC converters step it down to 12V and finally to the GPU's sub-1V operating voltage. Pioneered by Google and Meta through the Open Compute Project, this topology reduces failure points and recovers valuable chassis volume for hydraulic cooling loops and high-bandwidth interconnects.
 
+#### Power delivery networks and transient dynamics {#sec-compute-power-delivery-transients}
+
+Stepping voltage down from 48V to sub-1V operating levels at the silicon die introduces an acute physical challenge: managing dynamic current slew rates ($di/dt$) across the **Power Delivery Network (PDN)**\index{Power Delivery Network!definition}.
+
+Modern AI accelerators operate at supply voltages below one volt ($V_{\text{core}} \approx 0.7\text{--}0.9\text{ V}$) while consuming $700\text{--}1{,}200\text{ W}$ each. By conservation of power ($P = V \cdot I$), a single accelerator draws sustained currents exceeding $I_{\text{core}} \approx 1{,}000\text{--}1{,}500\text{ A}$. Across a dense liquid-cooled rack housing 36 to 72 accelerators (e.g., drawing $100\text{--}120\text{ kW}$), the aggregate core current reaches $50{,}000\text{--}100{,}000\text{ A}$ at the silicon level.
+
+::: {#dfn-compute-infrastructure-power-delivery-network .callout-definition title="Power delivery network (PDN) and transient dynamics"}
+
+***Power delivery network (PDN)***\index{Power Delivery Network!definition}\index{Transient Voltage Droop!definition} is the physical electrical distribution hierarchy connecting the facility power supply to the on-die transistor gates, whose parasitic loop inductance ($L_{\text{parasitic}}$) induces transient voltage fluctuations ($\Delta V = L \frac{di}{dt}$) during rapid changes in processor switching activity.
+
+1.  **Significance**: Synchronous distributed training creates severe step-function current transients when thousands of GPUs transition simultaneously between communication stalls and dense matrix multiplication, threatening voltage collapse or catastrophic dielectric breakdown.
+2.  **Distinction**: Unlike thermal constraints (which operate over seconds or minutes due to thermal mass), PDN transients operate in the nanosecond-to-microsecond domain, far too fast for feedback loops in data-center power shelves to compensate.
+3.  **Common pitfall**: Relying solely on passive board-level capacitors to suppress transients. High-frequency transients must be mitigated through a multi-tier decoupling hierarchy spanning on-die trench capacitors, package capacitors, and firmware-coordinated software power ramping.
+
+:::
+
+In high-speed electrical circuits, any change in current through an inductive path generates an induced voltage offset governed by Faraday's law of induction, formulated in @eq-compute-pdn-droop:
+
+$$\Delta V = L_{\text{parasitic}} \frac{di}{dt}$$ {#eq-compute-pdn-droop}
+
+where $L_{\text{parasitic}}$ is the cumulative loop inductance of the PDN (encompassing the rack busbar, board power planes, voltage regulator module (VRM) traces, socket connector pins, and chip package interposers), and $\frac{di}{dt}$ is the current slew rate.
+
+In distributed deep learning, this physical property becomes an operational hazard due to the synchronous nature of the bulk synchronous parallel (BSP) execution model:
+
+-   **The transient trigger**: During a collective communication barrier (such as an AllReduce or pipeline bubble), Tensor Cores sit idle while waiting for network packets. Core current drops to an idle floor of roughly $200\text{ A}$. The instant communication completes, all 32 to 72 GPUs in the rack simultaneously issue dense Tensor Core GEMM instructions within nanoseconds.
+-   **Transient magnitude**: Core current spikes from $200\text{ A}$ to $1{,}200\text{ A}$ in less than $10\text{ ns}$, producing a current slew rate exceeding:
+    $$\frac{di}{dt} \approx \frac{1{,}000\text{ A}}{10^{-8}\text{ s}} = 10^{11}\text{ A/s}$$
+-   **Voltage droop**: Even with an extraordinarily low parasitic inductance of only $1\text{ nH}$ ($10^{-9}\text{ H}$) between the VRM and the silicon die, @eq-compute-pdn-droop dictates a voltage collapse of:
+    $$\Delta V = 10^{-9}\text{ H} \times 10^{11}\text{ A/s} = 100\text{ mV}$$
+    When operating at a nominal $V_{\text{core}}$ of $0.8\text{ V}$, a $100\text{ mV}$ droop represents a $12.5$ percent voltage drop—well beyond the standard $\pm 5$ percent operating tolerance window.
+
+This transient excursion creates two distinct failure modes:
+
+1.  **Under-voltage droop**: If core voltage droops below the minimum operating threshold ($V_{\text{min}}$), gate propagation delay increases ($t_{\text{prop}} \propto 1/V$). Logic paths fail to meet clock setup times, leading to silent data corruption (flipped bits in activations) or immediate processor machine-check exceptions and unrecoverable node resets.
+2.  **Over-voltage overshoot**: When a massive GEMM finishes abruptly, the sudden collapse of current causes the stored magnetic energy in the parasitic inductors ($\frac{1}{2} L I^2$) to discharge into the circuit, generating a positive voltage spike. If this spike exceeds the transistor gate dielectric breakdown voltage, it causes physical punch-through, permanently destroying silicon gates.
+
+To contain these transients (definition \ref{dfn-compute-infrastructure-power-delivery-network}), modern AI compute infrastructure employs a **multi-tier decoupling hierarchy** paired with software power smoothing:
+
+-   **High-frequency on-die decoupling**: Deep-trench capacitors (DTC) and land-side capacitors (LSC) embedded directly within or underneath the silicon interposer. With ultra-low parasitic inductance ($<10\text{ pH}$), they provide immediate charge storage for the first $0.1\text{--}1\text{ ns}$ of current transition.
+-   **Mid-frequency package and socket decoupling**: High-density multilayer ceramic capacitors (MLCC) mounted directly on the package substrate and adjacent to the socket on the baseboard, buffering transients in the $1\text{--}100\text{ ns}$ window.
+-   **Low-frequency bulk decoupling**: Polymer tantalum and aluminum electrolytic capacitors on the VRM and power shelf, sustaining charge over the microsecond domain until the switched-mode power supplies adjust their duty cycle.
+-   **Firmware and software power smoothing**: Because physical capacitors consume valuable silicon and board area, modern GPU architectures implement software-coordinated power ramping. When launching massive GEMM kernels following a barrier, GPU microcode or CUDA runtime introduces micro-throttling or staggered pipeline ramp-up cycles over tens of microseconds, bounding the maximum $\frac{di}{dt}$ slope and ensuring voltage excursions remain safely within operational margins.
+
 ```{python}
 #| echo: false
 from mlsysim.fmt import fmt_bandwidth
