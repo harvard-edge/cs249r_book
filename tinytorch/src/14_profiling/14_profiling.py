@@ -13,74 +13,59 @@
 # ---
 
 # %% [markdown]
-"""
+r"""
 # Module 14: Profiling - Measuring What Matters in ML Systems
 
-Welcome to Module 14! You'll build professional profiling tools to measure model performance and uncover optimization opportunities.
+Welcome to Module 14! You'll build professional profiling tools to measure model performance, identify hardware bottlenecks, and uncover optimization opportunities.
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Complete ML stack from tensors to transformers (Modules 01-13)
-**You'll Build**: Comprehensive profiling system for parameters, FLOPs, memory, and latency
-**You'll Enable**: Data-driven optimization decisions and performance analysis
 
-**Connection Map**:
-```
-All Modules (01-13) → Profiling (14)
-(implementations)     (measurement)
-```
+**You've Built**: Complete ML stack from tensors to autoregressive transformers (`Tensor`, `Linear`, `Conv2d`, `MultiHeadAttention`, `TransformerBlock`, `GPT`).
+**You'll Build**: Comprehensive profiling system for parameters, FLOPs, memory allocations, and latency (`Profiler`, `count_parameters`, `count_flops`, `measure_memory`, `measure_latency`).
+**You'll Enable**: Data-driven optimization decisions across quantization (`15_quantization`), compression (`16_compression`), acceleration (`17_acceleration`), and memory caching (`18_memoization`).
+
+![TinyTorch Architecture Blueprint: Module 14 Profiling](profiling_blueprint.svg)
+
+### Architectural Roadmap
+
+| Tier | Subsystem | Primitives & Capabilities | Status |
+| :--- | :--- | :--- | :--- |
+| **Modules 01–08** | Foundation Tier | `Tensor`, `Function`, `Linear`, `GELU`, `SGD`, `Adam`, `Trainer` | Completed |
+| **Modules 09–13** | Architecture Tier | `Conv2d`, `BPETokenizer`, `EmbeddingLayer`, `MultiHeadAttention`, `GPT` | Completed |
+| **Module 14** | **Profiling & Diagnostics** | `Profiler`, `count_flops`, `measure_memory`, `measure_latency` | **Active Subsystem** |
+| **Modules 15–20** | Optimization & Capstone | `QuantizedLinear`, `Pruner`, `TritonKernels`, `KVCache`, `TinyGPT` | Downstream Consumers |
 
 ## 🎯 Learning Objectives
-By the end of this module, you will:
-1. Implement a complete Profiler class for model analysis
-2. Count parameters and FLOPs accurately for different architectures
-3. Measure memory usage and latency with statistical rigor
-4. Create production-quality performance analysis tools
 
-Let's build the measurement foundation for ML systems optimization!
+By the end of this module, you will:
+
+1. **Implement a Unified Profiler Engine**: Construct a multi-pass measurement harness tracking model weights, runtime activations, execution latency, and peak memory allocations.
+2. **Derive Precise FLOP and Parameter Formulations**: Distinguish persistent memory footprint ($W \times 4\text{ B}$) from computational work ($2 \cdot M \cdot N \cdot K$), uncovering why convolutions and attention diverge from linear layers.
+3. **Isolate Hardware Bottlenecks with the Roofline Model**: Calculate arithmetic intensity ($I = \text{FLOPs} / \text{Bytes}$) to classify workloads into memory-bandwidth bound versus compute-bound regimes.
+4. **Profile Multi-Stage Training Lifecycles**: Measure the 4x memory explosion across forward activations, backward gradients, and first/second moment optimizer state tracking.
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in modules/14_profiling/profiling.ipynb
-**Building Side:** Code exports to tinytorch.perf.profiling
+**Learning Side:** You work in `modules/14_profiling/profiling.ipynb`
+**Building Side:** Code exports to `tinytorch.perf.profiling`
 
 ```python
 # Final package structure:
 from tinytorch.perf.profiling import Profiler, quick_profile, analyze_weight_distribution
 ```
 
-**Why this matters:**
-- **Learning:** Complete profiling system for understanding model performance characteristics
-- **Production:** Professional measurement tools like those used in PyTorch, TensorFlow
-- **Consistency:** All profiling and measurement tools in perf.profiling
-- **Integration:** Works with any model built using TinyTorch components
-"""
+![Source Code Mapping: Module 14 Profiling](prof_margin_source.svg)
 
-# %% [markdown]
-"""
 ## 📋 Module Dependencies
 
-**Prerequisites**: Modules 01-13 (Complete ML stack)
-
-**External Dependencies**:
-- `numpy` (for array operations and numerical computing)
-- `time` (for latency measurement)
-- `tracemalloc` (for memory tracking)
-- `gc` (for garbage collection control)
-
-**TinyTorch Dependencies**:
-- `tinytorch.core.tensor` (Tensor class from Module 01)
-- `tinytorch.core.layers` (Linear layer from Module 03)
-- `tinytorch.core.spatial` (Conv2d from Module 09)
-
-**Dependency Flow**:
-```
-Modules 01-13 → Module 14 (Profiling)
-     ↓                   ↓
- Implementations    Measurement tools
-```
-
-Students completing this module will have built the measurement foundation
-that enables data-driven optimization decisions.
+| Dependency | Origin | Imported Symbols | Architectural Purpose in Profiling |
+| :--- | :--- | :--- | :--- |
+| `tinytorch.core.tensor` | Module 01 | `Tensor` | Multi-dimensional array container and gradient storage tracker |
+| `tinytorch.core.layers` | Module 03 | `Linear` | Dense projection layers evaluated for FLOPs and parameter memory |
+| `tinytorch.core.spatial` | Module 09 | `Conv2d` | Sliding window spatial convolutions with high compute reuse |
+| `numpy` | External | `np`, `default_rng` | High-performance array generation and statistical reductions |
+| `tracemalloc` | Standard Lib | `tracemalloc` | Python memory allocation snapshotting and peak heap tracking |
+| `time` | Standard Lib | `perf_counter` | High-precision nanosecond monotonic timestamping for latency benchmarking |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
@@ -107,177 +92,110 @@ KB_TO_BYTES = 1024  # Kilobytes to bytes conversion
 MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
-"""
+r"""
 ## 💡 Introduction: Why Profiling Matters in ML Systems
 
-Imagine you're a detective investigating a performance crime. Your model is running slowly, using too much memory, or burning through compute budgets. Without profiling, you're flying blind - making guesses about what to optimize. With profiling, you have evidence.
+Imagine you're an engineer investigating an ML systems regression. Your model runs unacceptably slowly, exhausts device memory, or inflates cloud inference bills. Without profiling, you are flying blind—guessing whether to optimize matrix multiplication kernels, reduce activation precision, or shard model weights. With profiling, you have empirical ground truth.
 
-**The Performance Investigation Process:**
-```
-Suspect Model → Profile Evidence → Identify Bottleneck → Target Optimization
-     ↓               ↓                    ↓                    ↓
-   "Too slow"    "200 GFLOP/s"      "Memory bound"      "Reduce transfers"
-```
+![Systems Profiling and Optimization Workflow](profiling_engineering_workflow.svg)
 
-**Questions Profiling Answers:**
-- **How many parameters?** (Memory footprint, model size)
-- **How many FLOPs?** (Computational cost, energy usage)
-- **Where are bottlenecks?** (Memory vs compute bound)
-- **What's actual latency?** (Real-world performance)
+### The Profiling and Optimization Engineering Loop
 
-**Production Importance:**
-In production ML systems, profiling isn't optional - it's survival. A model that's 10% more accurate but 100× slower often can't be deployed. Teams use profiling daily to make data-driven optimization decisions, not guesses.
+| Phase | Primary Objective | Concrete Metric / Telemetry | Downstream Systems Action |
+| :--- | :--- | :--- | :--- |
+| **1. Measure** | Establish empirical telemetry | Latency ($T_{\text{median}}$), Peak VRAM ($M_{\text{peak}}$), FLOPs | Detect resource bottlenecks |
+| **2. Analyze** | Compute arithmetic intensity | $I = \text{FLOPs} / \text{Bytes}$, Roofline position | Classify compute vs memory-bound regimes |
+| **3. Optimize** | Eliminate hardware constraint | INT8 quantization, KV cache, operator fusion | Restructure memory/compute datapath |
+| **4. Validate** | Verify speedup and fidelity | Speedup ratio $S = T_{\text{base}} / T_{\text{opt}}$, numerical parity | Confirm production readiness |
 
-### The Profiling Workflow Visualization
-```
-Model → Profiler → Measurements → Analysis → Optimization Decision
-  ↓        ↓           ↓           ↓            ↓
- GPT   Parameter   125M params   Memory      Apply targeted
-       Counter     2.5B FLOPs    bound       optimization
-```
+Without profiling, engineers routinely waste months optimizing code that accounts for less than 2% of runtime. As Amdahl's Law dictates, system speedup is strictly bounded by the fraction of execution time an optimization addresses:
+
+$$S_{\text{overall}} = \frac{1}{(1 - f) + \frac{f}{s}}$$
+
+Where $f$ is the execution fraction of the targeted component and $s$ is its isolated speedup. Profiling identifies the high-$f$ bottlenecks before a single line of optimization code is written.
 """
 
 # %% [markdown]
-"""
-### From Implementation to Optimization: The Profiling Foundation
-
-**In this module (14)**, you'll build the measurement tools to discover optimization opportunities.
-Profiling insights guide targeted performance improvements — you can't optimize what you can't measure.
-
-**The Real ML Engineering Workflow**:
-
-```
-┌────────────────────────────────────────────────────────────────┐
-│ Step 1: Measure (This Module!)    Step 2: Analyze              │
-│   ↓                                 ↓                          │
-│ Profile baseline → Find bottleneck → Understand cause          │
-│ 40 tok/s          80% in attention    O(n^2) recomputation     │
-│                                       ↓                        │
-│ Step 4: Validate                    Step 3: Optimize (Future)  │
-│   ↓                                   ↓                        │
-│ Profile optimized ← Verify speedup ← Implement optimization    │
-│ 500 tok/s (12.5x)   Measure impact    Design solution          │
-└────────────────────────────────────────────────────────────────┘
-```
-
-**Without profiling**: You'd never know WHERE to optimize!
-**Without measurement**: You couldn't verify improvements!
-
-This module teaches the measurement and analysis skills that enable optimization breakthroughs. You'll profile real models and discover bottlenecks just like production ML teams do.
-"""
-
-# %% [markdown]
-"""
+r"""
 ## 📐 Foundations: Performance Measurement Principles
 
-Before we build our profiler, let's understand what we're measuring and why each metric matters.
+Before building the profiler class, let us establish the four core dimensional pillars of machine learning systems telemetry: parameters, compute (FLOPs), memory residency, and execution latency.
 
-### Parameter Counting: Model Size Detective Work
+### 1. Parameter Counting: The Static Memory Footprint
 
-Parameters determine your model's memory footprint and storage requirements. Every parameter is typically a 32-bit float (4 bytes), so counting them precisely predicts memory usage.
+Parameters determine persistent storage requirements, weight transfer latency from high-bandwidth memory (HBM/DRAM) to on-chip SRAM, and minimum GPU VRAM capacity.
 
-**Parameter Counting Formula:**
-```
-Linear Layer: (input_features × output_features) + output_features
-               ↑              ↑                    ↑
-            Weight matrix   Bias vector      Total parameters
+$$\text{Memory}_{\text{FP32}} = P \times 4\text{ bytes} = \frac{P \times 4}{1024^2}\text{ MB}$$
 
-Example: Linear(768, 3072) → (768 × 3072) + 3072 = 2,362,368 parameters
-Memory: 2,362,368 × 4 bytes = 9.45 MB
-```
+| Layer Type | Learnable Weights | Learnable Biases | Total Parameters ($P$) | Memory at FP32 ($4\text{ B/elem}$) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Linear** | $W \in \mathbb{R}^{d_{\text{in}} \times d_{\text{out}}}$ | $b \in \mathbb{R}^{d_{\text{out}}}$ | $d_{\text{in}} \cdot d_{\text{out}} + d_{\text{out}}$ | $(d_{\text{in}} + 1) \cdot d_{\text{out}} \times 4\text{ B}$ |
+| **Conv2d** | $K \in \mathbb{R}^{C_{\text{out}} \times C_{\text{in}} \times k_h \times k_w}$ | $b \in \mathbb{R}^{C_{\text{out}}}$ | $C_{\text{out}} \cdot (C_{\text{in}} \cdot k_h \cdot k_w + 1)$ | $C_{\text{out}} \cdot (C_{\text{in}} k_h k_w + 1) \times 4\text{ B}$ |
+| **LayerNorm** | $\gamma \in \mathbb{R}^{d_{\text{embed}}}$ | $\beta \in \mathbb{R}^{d_{\text{embed}}}$ | $2 \cdot d_{\text{embed}}$ | $8 \cdot d_{\text{embed}}\text{ B}$ |
+| **Embedding** | $E \in \mathbb{R}^{V \times d_{\text{embed}}}$ | None | $V \cdot d_{\text{embed}}$ | $4 \cdot V \cdot d_{\text{embed}}\text{ B}$ |
 
-### FLOP Counting: Computational Cost Analysis
+### 2. FLOP Counting: Theoretical Arithmetic Work
 
-FLOPs (Floating Point Operations) measure computational work. Unlike wall-clock time, FLOPs are hardware-independent and predict compute costs across different systems.
+A floating-point operation (FLOP) measures arithmetic work independent of hardware implementation. In deep learning primitives, each multiply-accumulate (MAC) counts as **2 FLOPs** (one multiplication and one addition):
 
-**FLOP Formulas for Key Operations:**
+$$\text{FLOP}_{\text{GEMM}}(M, K, N) = 2 \cdot M \cdot K \cdot N$$
 
-```
-Matrix Multiplication (M,K) @ (K,N):
-   FLOPs = M x N x K x 2
-           ↑   ↑   ↑   ↑
-        Rows Cols Inner Multiply+Add
+$$\text{FLOP}_{\text{Conv2d}} = 2 \cdot B \cdot H_{\text{out}} \cdot W_{\text{out}} \cdot (C_{\text{in}} \cdot k_h \cdot k_w) \cdot C_{\text{out}}$$
 
-Linear Layer Forward:
-   FLOPs = input_features x output_features x 2  (per sample, batch-independent)
-                ↑                  ↑              ↑
-           Input dimension   Output dimension  Multiply+Add
+| Operation Type | Input / Weight Shapes | FLOP Count (Per Sample) | Data Reuse Ratio ($R$) | Hardware Regime |
+| :--- | :--- | :--- | :--- | :--- |
+| **Linear Projection** | $(d_{\text{in}}) \times (d_{\text{in}}, d_{\text{out}})$ | $2 \cdot d_{\text{in}} \cdot d_{\text{out}}$ | $1\text{ FLOP/B}$ (Batch=1) | Memory-bandwidth bound |
+| **Batched Linear** | $(B, d_{\text{in}}) \times (d_{\text{in}}, d_{\text{out}})$ | $2 \cdot B \cdot d_{\text{in}} \cdot d_{\text{out}}$ | $B\text{ FLOPs/B}$ (Batch=B) | Compute-bound at high $B$ |
+| **Conv2d** | $(C_{\text{in}}, H, W) \ast (C_{\text{out}}, C_{\text{in}}, k_h, k_w)$ | $2 \cdot H_{\text{out}} W_{\text{out}} C_{\text{in}} C_{\text{out}} k_h k_w$ | $O(H_{\text{out}} W_{\text{out}})\text{ FLOPs/B}$ | Compute-bound (kernel reuse) |
+| **Pointwise (GELU/Add)**| $(B, S, D)$ | $1 \text{ to } 8 \text{ FLOPs/elem}$ | $\le 0.25\text{ FLOP/B}$ | Strictly memory-bound |
 
-Convolution (simplified):
-   FLOPs = output_H x output_W x kernel_H x kernel_W x in_channels x out_channels x 2
-```
+### 3. Memory Profiling: The Training Memory Lifecycle
 
-### Memory Profiling: The Three Types of Memory
+Deep learning training memory divides into four distinct pools that undergo dynamic lifecycle transitions during forward and backward passes.
 
-ML models use memory in three distinct ways, each with different optimization strategies:
+![Deep Learning Training Memory Lifecycle](training_memory_lifecycle.svg)
 
-**Memory Type Breakdown:**
-```
-Total Training Memory = Parameters + Activations + Gradients + Optimizer State
-                           ↓            ↓           ↓            ↓
-                        Model         Forward     Backward     Adam: 2×params
-                        weights       pass cache  gradients    SGD: 0×params
+| Memory Pool | Lifecycle Invariant | Scaling Dimensions | Budget Formula (FP32) | Example (125M GPT) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Parameters ($W$)** | Persistent in device VRAM | Model dimension $P$ | $P \times 4\text{ B}$ | $500\text{ MB}$ ($1.0\times$) |
+| **Activations ($A$)** | Cached in forward; freed in backward | Batch $\times$ Sequence $\times$ Layers | $B \cdot S \cdot L \cdot d_{\text{embed}} \cdot c_{\text{act}} \times 4\text{ B}$ | $\approx 200\text{ MB}$ ($0.4\times$) |
+| **Gradients ($\nabla_W L$)** | Allocated during backward pass | 1:1 match with parameters $P$ | $P \times 4\text{ B}$ | $500\text{ MB}$ ($1.0\times$) |
+| **Optimizer State (Adam)**| Persistent in device VRAM | First moment $m$ + second moment $v$ | $2 \times P \times 4\text{ B}$ | $1,000\text{ MB}$ ($2.0\times$) |
+| **Total Training Budget** | Peak concurrent residency | $4.4\times \text{ to } 16\times$ model weight size | $4 \cdot P + A + 8 \cdot P$ | **$2,200\text{ MB}$ ($4.4\times$)** |
 
-Example for 125M parameter model:
-Parameters:    500 MB (125M × 4 bytes)
-Activations:   200 MB (depends on batch size)
-Gradients:     500 MB (same as parameters)
-Adam state:  1,000 MB (momentum + velocity)
-Total:      2,200 MB (4.4× parameter memory!)
-```
+### 4. Latency Measurement: Statistical Rigor
 
-### Latency Measurement: Dealing with Reality
+Measuring execution latency on modern multi-core CPUs and GPUs is subject to background operating system interrupts, CPU frequency governors (thermal throttling), dynamic cache warmups, and garbage collection pauses. Professional profiling demands strict statistical isolation:
 
-Latency measurement is tricky because systems have variance, warmup effects, and measurement overhead. Professional profiling requires statistical rigor.
-
-**Latency Measurement Best Practices:**
-
-```
-Measurement Protocol:
-┌────────────────────────────────────────────────────────────────┐
-│ 1. Warmup runs (10+)  → CPU/GPU caches warm up                 │
-│ 2. Timed runs (100+)  → Statistical significance               │
-│ 3. Outlier handling   → Use median, not mean                   │
-│ 4. Memory cleanup     → Prevent contamination                  │
-└────────────────────────────────────────────────────────────────┘
-
-Timeline:
-Warmup: [run][run][run]...[run]     <- Don't time these
-Timing: [run][run]...[run]          <- Time these
-Result: median(all_times)           <- Robust to outliers
-```
+| Protocol Stage | Iteration Budget | System State | Treatment of Output |
+| :--- | :--- | :--- | :--- |
+| **Warmup Passes** | $3 \text{ to } 10$ iterations | Cold instruction & data caches, JIT compilation | Excluded from measurements to eliminate cold-start noise |
+| **Timed Benchmark** | $10 \text{ to } 100+$ iterations | Steady-state thermal and memory cache profile | Compute robust median ($Q_2$) and IQR rather than mean |
+| **Memory Cleanup** | Between runs | Explicit garbage collection (`gc.collect()`) | Prevents heap fragmentation contamination |
 """
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Implementation: Building the Profiler Class
 
-Now let's implement our profiler step by step. We'll start with the foundation and build up to comprehensive analysis.
+Let us now implement the complete `Profiler` class. We structure the profiling harness into four core telemetry engines and two multi-pass synthesis pipelines.
 
-### The Profiler Architecture
+![Profiler Architecture and Diagnostic Pipeline](profiler_architecture_pipeline.svg)
 
-```
-Profiler Class Structure:
-┌─────────────────────────────────────────────────────────────┐
-│ Core Measurement Methods:                                   │
-│ • count_parameters() → Model size analysis                  │
-│ • count_flops() → Computational cost estimation             │
-│ • measure_memory() → Memory usage tracking                  │
-│ • measure_latency() → Performance timing                    │
-├─────────────────────────────────────────────────────────────┤
-│ Advanced Profiling Methods:                                 │
-│ • profile_layer() → Layer-wise analysis                     │
-│ • profile_forward_pass() → Complete forward analysis        │
-│ • profile_backward_pass() → Training analysis               │
-├─────────────────────────────────────────────────────────────┤
-│ Integration:                                                │
-│ All methods work together for comprehensive insights        │
-└─────────────────────────────────────────────────────────────┘
-```
+### Profiler Architectural Specification
+
+| Component Method | Telemetry Category | Measurement Mechanism | Systems Output |
+| :--- | :--- | :--- | :--- |
+| `count_parameters()` | Static Footprint | Recursive weight and bias buffer enumeration | Learnable parameter count and persistent VRAM budget |
+| `count_flops()` | Arithmetic Complexity | Theoretical multiply-accumulate formulations | Hardware-agnostic compute work ($2 \cdot M \cdot K \cdot N$) |
+| `measure_memory()` | Memory Dynamics | Python `tracemalloc` peak heap allocation snapshots | Activation memory, peak memory, and allocation efficiency |
+| `measure_latency()` | Temporal Latency | High-precision monotonic timestamps (`perf_counter`) | Warmup-filtered median latency in milliseconds |
+| `profile_forward_pass()`| Runtime Synthesis | Fused latency, FLOP, and activation analysis | Throughput ($\text{samp/s}$), GFLOP/s, bandwidth, bottleneck |
+| `profile_backward_pass()`| Training Synthesis | 2x FLOP scaling, gradient tracking, optimizer estimation | Total training latency, gradient memory, and Adam states |
 """
 
 # %% [markdown]
-"""
+r"""
 ### Layer Parameters: The Atom of Model Size
 
 Parameter count is the first number anyone quotes about a model, and it is the
@@ -336,7 +254,7 @@ def _count_layer_parameters(layer) -> int:
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _count_layer_parameters
 
 This test validates the helper that counts parameters from a single layer's weight and bias.
@@ -386,7 +304,7 @@ if __name__ == "__main__":
     test_unit_count_layer_parameters()
 
 # %% [markdown]
-"""
+r"""
 ### Convolution FLOPs: Where Parameters and Compute Diverge
 
 A convolution costs far more than its parameter count suggests, and the gap is
@@ -462,7 +380,7 @@ def _count_conv_flops(model, input_shape: Tuple[int, ...]) -> int:
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _count_conv_flops
 
 This test validates the helper that computes FLOPs for a Conv2d layer.
@@ -525,7 +443,7 @@ if __name__ == "__main__":
     test_unit_count_conv_flops()
 
 # %% [markdown]
-"""
+r"""
 ### Linear FLOPs: The Cost of One Matrix Multiply
 
 A Linear layer is a single matrix multiply, so its arithmetic cost is fixed by
@@ -586,7 +504,7 @@ def _count_linear_flops(model, input_shape: Tuple[int, ...]) -> int:
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: count_linear_flops
 
 This test validates the helper that computes FLOPs for a single Linear layer.
@@ -631,7 +549,7 @@ if __name__ == "__main__":
     test_unit_count_linear_flops()
 
 # %% [markdown]
-"""
+r"""
 ### Bottleneck Classification: Compute-Bound or Memory-Bound
 
 Every optimization decision starts with one question: is this workload waiting on
@@ -698,7 +616,7 @@ def _analyze_bottleneck(gflops_per_second: float,
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: analyze_bottleneck
 
 This test validates the helper that identifies memory-bound vs compute-bound workloads.
@@ -737,7 +655,7 @@ if __name__ == "__main__":
     test_unit_analyze_bottleneck()
 
 # %% [markdown]
-"""
+r"""
 ### Memory Efficiency: Useful Bytes vs. Peak Bytes
 
 Peak memory is almost never the memory you asked for. Allocators round up,
@@ -787,7 +705,7 @@ def _calculate_memory_efficiency(useful_memory_mb: float, peak_memory_mb: float)
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _calculate_memory_efficiency
 
 This test validates the helper that computes useful-to-total memory ratio.
@@ -828,7 +746,7 @@ if __name__ == "__main__":
     test_unit_calculate_memory_efficiency()
 
 # %% [markdown]
-"""
+r"""
 ### Derived Metrics: Turning Counts into Rates
 
 Raw measurements are not yet insight. A FLOP count and a latency are two
@@ -900,7 +818,7 @@ def _compute_derived_metrics(flops: int, latency_ms: float,
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _compute_derived_metrics
 
 This test validates the helper that converts raw FLOPs and latency into throughput metrics.
@@ -941,7 +859,7 @@ if __name__ == "__main__":
     test_unit_compute_derived_metrics()
 
 # %% [markdown]
-"""
+r"""
 ### Backward Pass Cost: Why Training Is 3x Inference
 
 Training costs roughly three times what inference costs, and the split is worth
@@ -998,7 +916,7 @@ def _estimate_backward_costs(forward_flops: int,
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _estimate_backward_costs
 
 This test validates the helper that estimates backward pass FLOPs and latency from forward measurements.
@@ -1031,7 +949,7 @@ if __name__ == "__main__":
     test_unit_estimate_backward_costs()
 
 # %% [markdown]
-"""
+r"""
 ### Optimizer Memory: The Hidden Cost of Adam
 
 Optimizer state is the memory cost people forget. SGD keeps nothing between
@@ -1088,7 +1006,7 @@ def _estimate_optimizer_memory(gradient_memory_mb: float) -> Dict[str, float]:
     ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _estimate_optimizer_memory
 
 This test validates the helper that estimates memory requirements for different optimizers.
@@ -1122,7 +1040,7 @@ if __name__ == "__main__":
     test_unit_estimate_optimizer_memory()
 
 # %% [markdown]
-"""
+r"""
 ### Profiler: The Object That Ties the Measurements Together
 
 Every helper above answers one narrow question: how many parameters, how many
@@ -1623,7 +1541,7 @@ class Profiler:
         ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Helper Functions: Quick Profiling Utilities
 
 These helper functions provide simplified interfaces for common profiling tasks. They make it easy to quickly profile models and analyze characteristics without manually calling multiple profiler methods.
@@ -1735,7 +1653,7 @@ def analyze_weight_distribution(model, percentiles=[10, 25, 50, 75, 90]):
     return stats
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Helper Functions
 
 This test validates our helper utilities work correctly and provide useful output.
@@ -1791,31 +1709,25 @@ if __name__ == "__main__":
     test_unit_helper_functions()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Parameter Counting: Model Size Analysis
 
-Parameter counting is the foundation of model profiling. Every parameter contributes to memory usage, training time, and model complexity. Let's validate our implementation.
+Parameter counting is the foundation of model profiling. Every parameter contributes directly to persistent memory footprint, initialization overhead, checkpoint storage size, and weight transfer latency across the PCIe/NVLink bus.
 
-### Why Parameter Counting Matters
+### Hardware Footprint Across Model Scales
 
-```
-Model Deployment Pipeline:
-Parameters → Memory → Hardware → Cost
-    ↓         ↓         ↓        ↓
-  125M    500MB     8GB GPU   $200/month
+$$\text{Memory}_{\text{FP32}} = P \times 4\text{ bytes}, \quad \text{Memory}_{\text{FP16}} = P \times 2\text{ bytes}, \quad \text{Memory}_{\text{INT8}} = P \times 1\text{ byte}$$
 
-Parameter Growth Examples:
-┌──────────────────────────────────────────────────┐
-│ Small:   GPT-2 Small (124M parameters)  → 500MB  │
-│ Medium:  GPT-2 Medium (350M parameters) → 1.4GB  │
-│ Large:   GPT-2 Large (774M parameters)  → 3.1GB  │
-│ XL:      GPT-2 XL (1.5B parameters)     → 6.0GB  │
-└──────────────────────────────────────────────────┘
-```
+| Architecture Scale | Parameter Count ($P$) | FP32 Footprint ($4\text{ B}$) | FP16 / BF16 Footprint ($2\text{ B}$) | INT8 Footprint ($1\text{ B}$) | Target Serving Hardware |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **GPT-2 Small** | $124\text{M}$ | $496\text{ MB}$ | $248\text{ MB}$ | $124\text{ MB}$ | Edge device / CPU socket |
+| **GPT-2 Medium** | $350\text{M}$ | $1.40\text{ GB}$ | $700\text{ MB}$ | $350\text{ MB}$ | Single consumer GPU ($4\text{ GB}$) |
+| **GPT-2 Large** | $774\text{M}$ | $3.10\text{ GB}$ | $1.55\text{ GB}$ | $774\text{ MB}$ | Single consumer GPU ($8\text{ GB}$) |
+| **GPT-2 XL** | $1,558\text{M}$ | $6.23\text{ GB}$ | $3.12\text{ GB}$ | $1.56\text{ GB}$ | Single workstation GPU ($16\text{ GB}$) |
 """
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Parameter Counting
 
 This test validates our parameter counting works correctly for different model types.
@@ -1869,45 +1781,32 @@ if __name__ == "__main__":
     test_unit_parameter_counting()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ FLOP Counting: Computational Cost Estimation
 
-FLOPs measure the computational work required for model operations. Unlike latency, FLOPs are hardware-independent and help predict compute costs across different systems.
+FLOPs (Floating Point Operations) quantify theoretical arithmetic work independent of execution hardware, operating system, or compiler optimizations. Comparing theoretical FLOPs against measured execution time reveals whether an operation achieves high computational efficiency or stalls waiting on memory bandwidth.
 
-### FLOP Counting Visualization
+### Mathematical FLOP Formulations
 
-```
-Linear Layer FLOP Breakdown:
-┌────────────────────────────────────────────────────────────────┐
-│ Input (batch=32, features=768) × Weight (768, 3072) + Bias     │
-│                         ↓                                      │
-│ Matrix Multiplication: 32 × 768 × 3072 × 2 = 150,994,944 FLOPs │
-│ Bias Addition:         32 × 3072 × 1      =      98,304 FLOPs  │
-│                         ↓                                      │
-│ Total FLOPs:                                 151,093,248 FLOPs │
-│ Per sample (count_flops): 768 × 3072 × 2 = 4,718,592 FLOPs     │
-└────────────────────────────────────────────────────────────────┘
+$$\text{FLOP}_{\text{Linear}} = 2 \cdot B \cdot d_{\text{in}} \cdot d_{\text{out}} + B \cdot d_{\text{out}}$$
 
-Convolution FLOP Breakdown:
-┌────────────────────────────────────────────────────────────────┐
-│ Input (batch=1, channels=3, H=224, W=224)                      │
-│ Kernel (out=64, in=3, kH=7, kW=7)                              │
-│                         ↓                                      │
-│ Output size: (224×224) → (112×112) with stride=2, padding=3    │
-│ FLOPs = 112 × 112 × 7 × 7 × 3 × 64 × 2 = 236,027,904 FLOPs     │
-└────────────────────────────────────────────────────────────────┘
-```
+$$\text{FLOP}_{\text{Conv2d}} = 2 \cdot B \cdot H_{\text{out}} \cdot W_{\text{out}} \cdot (C_{\text{in}} \cdot k_h \cdot k_w) \cdot C_{\text{out}}$$
 
-### FLOP Counting Strategy
+| Workload Configuration | Mathematical Dimension | Total Arithmetic FLOPs | Per-Sample FLOPs | Arithmetic Reuse |
+| :--- | :--- | :--- | :--- | :--- |
+| **Linear Layer** | $B=32, d_{\text{in}}=768, d_{\text{out}}=3072$ | $150,994,944\text{ FLOPs}$ | $4,718,592\text{ FLOPs}$ | $32\text{ MACs/param}$ |
+| **Conv2d Layer** | $B=1, C=3 \to 64, 224 \to 112, k=7$ | $236,027,904\text{ FLOPs}$ | $236,027,904\text{ FLOPs}$ | $12,544\text{ MACs/param}$ |
+| **GELU Non-linearity**| $B=32, S=128, D=768$ | $3,145,728\text{ FLOPs}$ | $98,304\text{ FLOPs}$ | $1\text{ FLOP/elem}$ (memory bound) |
 
-Different operations require different FLOP calculations:
-- **Matrix operations**: M x N x K x 2 (multiply + add)
-- **Convolutions**: Output spatial x kernel spatial x channels
-- **Activations**: Usually 1 FLOP per element
+### Algorithmic FLOP Counting Strategy
+
+- **Dense Matrix Products**: $2 \cdot M \cdot K \cdot N$ floating point operations (fused multiply-accumulate).
+- **Spatial Convolutions**: $2 \times$ output spatial elements $\times$ kernel footprint $\times$ input/output channels.
+- **Pointwise Non-linearities**: Evaluated at 1 to 8 FLOPs per tensor element.
 """
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _count_sequential_flops
 
 This test validates the helper that sums FLOPs across layers in a sequential model.
@@ -1953,7 +1852,7 @@ if __name__ == "__main__":
     test_unit_count_sequential_flops()
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: FLOP Counting
 
 This test validates our FLOP counting for different operations and architectures.
@@ -2001,41 +1900,27 @@ if __name__ == "__main__":
     test_unit_flop_counting()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Memory Profiling: Understanding Memory Usage Patterns
 
-Memory profiling reveals how much RAM your model consumes during training and inference. This is critical for deployment planning and performance optimization.
+Memory profiling reveals how much RAM and VRAM your model consumes during inference and training. In production deep learning, memory limits dictate allowable batch sizes, maximum context windows, and target serving hardware.
 
-### Memory Usage Breakdown
+### Memory Allocation Pools & Scaling Dynamics
 
-```
-ML Model Memory Components:
-┌───────────────────────────────────────────────────┐
-│                 Total Memory                      │
-├─────────────────┬─────────────────┬───────────────┤
-│   Parameters    │   Activations   │  Gradients    │
-│   (persistent)  │  (per forward)  │ (per backward)│
-├─────────────────┼─────────────────┼───────────────┤
-│ Linear weights  │ Hidden states   │ dL/dW         │
-│ Conv filters    │ Attention maps  │ dL/db         │
-│ Embeddings      │ Residual cache  │ Optimizer     │
-└─────────────────┴─────────────────┴───────────────┘
-
-Memory Scaling:
-┌────────────────────────────────────────────────────┐
-│ Batch Size      → Activation Memory (linear)       │
-│ Model Size      → Parameter + Gradient (linear)    │
-│ Sequence Length → Attention Memory (quadratic!)    │
-└────────────────────────────────────────────────────┘
-```
+| Allocation Component | Lifecycle Duration | Dimension Dependency | Scaling Complexity | Systems Mitigation |
+| :--- | :--- | :--- | :--- | :--- |
+| **Parameters ($W$)** | Static / Persistent | Model parameter count $P$ | $O(1)$ w.r.t batch/sequence | Weight quantization (INT8/FP4), sharding (ZeRO) |
+| **Activations ($A$)** | Stored forward, freed backward | Batch $B \times \text{Seq } S \times \text{Dim } d$ | $O(B \cdot S)$ (Linear) / $O(B \cdot S^2)$ (Attention) | Activation checkpointing, FlashAttention |
+| **Gradients ($\nabla_W L$)** | Backward pass accumulation | Matches parameter count $P$ | $O(1)$ w.r.t batch/sequence | Gradient accumulation, mixed precision (FP16) |
+| **Optimizer States** | Persistent across steps | Multiplier of parameter count | $2 \times P$ (Adam) vs $0 \times P$ (SGD) | 8-bit Adam (bitsandbytes), Adafactor |
 
 ### Memory Measurement Strategy
 
-We use Python's `tracemalloc` to track memory allocations during model execution. This gives us precise measurements of memory usage patterns.
+We use Python's standard `tracemalloc` to track peak allocation deltas during model execution. This yields byte-precise telemetry of memory consumption patterns across arbitrary tensor graphs.
 """
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: _calculate_parameter_memory
 
 This test validates the helper that converts parameter count to memory in MB.
@@ -2078,7 +1963,7 @@ if __name__ == "__main__":
     test_unit_calculate_parameter_memory()
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Memory Measurement
 
 This test validates our memory tracking works correctly and provides useful metrics.
@@ -2136,42 +2021,31 @@ if __name__ == "__main__":
     test_unit_memory_measurement()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Latency Measurement: Accurate Performance Timing
 
-Latency measurement is the most challenging part of profiling because it's affected by system state, caching, and measurement overhead. We need statistical rigor to get reliable results.
+Latency measurement is the most challenging facet of profiling because execution time is perturbed by CPU thread scheduling, hardware cache misses, memory bus contention, and thermal frequency governor transitions. Statistical rigor is essential to extract reproducible metrics.
 
-### Latency Measurement Challenges
+### Systemic Latency Variance & Experimental Safeguards
 
-```
-Timing Challenges:
-┌─────────────────────────────────────────────────┐
-│                 Time Variance                   │
-├─────────────────┬─────────────────┬─────────────┤
-│  System Noise   │   Cache Effects │   Thermal   │
-│                 │                 │  Throttling │
-├─────────────────┼─────────────────┼─────────────┤
-│ Background      │ Cold start vs   │ CPU slows   │
-│ processes       │ warm caches     │ when hot    │
-│ OS scheduling   │ Memory locality │ GPU thermal │
-│ Network I/O     │ Branch predict  │ limits      │
-└─────────────────┴─────────────────┴─────────────┘
-
-Solution: Statistical Approach
-Warmup → Multiple measurements → Robust statistics (median)
-```
+| Variance Source | Physical / OS Mechanism | Impact on Raw Latency | Experimental Safeguard |
+| :--- | :--- | :--- | :--- |
+| **Cold Cache Misses** | Instruction & data lines absent from L1/L2/L3 caches | First runs take $5\times \text{ to } 20\times$ longer | Execute 3–10 warmup passes before recording timestamps |
+| **OS Thread Scheduling**| Kernel interrupts, context switches, daemons | Sporadic high-latency spikes in single runs | Report sample median ($Q_2$) rather than arithmetic mean |
+| **Thermal Throttling** | Dynamic frequency scaling (DVFS) under sustained load | Late runs slow down as junction temperature rises | Benchmark in short, burst-controlled sample batches |
+| **Garbage Collection** | Python runtime stop-the-world heap sweeps | Unpredictable multi-millisecond halts | Synchronize explicit `gc.collect()` passes outside timing blocks |
 
 ### Measurement Protocol
 
-Our latency measurement follows professional benchmarking practices:
-1. **Warmup runs** to stabilize system state
-2. **Multiple measurements** for statistical significance
-3. **Median calculation** to handle outliers
-4. **Memory cleanup** to prevent contamination
+Our latency measurement pipeline follows rigorous systems benchmarking practices:
+1. **Warmup Passes**: Execute un-timed forward iterations to warm hardware caches and trigger any lazy initialization.
+2. **Repeated Measurements**: Collect multiple steady-state iterations to form an empirical timing distribution.
+3. **Median Reduction**: Compute the median ($50^{\text{th}}$ percentile) to discard asymmetrical OS context-switching outliers.
+4. **Memory Hygiene**: Enforce explicit cleanup before and after measurement sweeps.
 """
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Latency Measurement
 
 This test validates our latency measurement provides consistent and reasonable results.
@@ -2227,7 +2101,7 @@ if __name__ == "__main__":
     test_unit_latency_measurement()
 
 # %% [markdown]
-"""
+r"""
 ## 🔧 Integration: Advanced Profiling Functions
 
 Now let's validate our higher-level profiling functions that combine core measurements into comprehensive analysis tools.
@@ -2249,37 +2123,27 @@ A forward pass profile combines all our measurements to understand model behavio
 """
 
 # %% [markdown]
-"""
+r"""
 ### Backward Pass Profiling: Training Analysis
 
-Training requires both forward and backward passes. The backward pass typically uses 2x the compute and adds gradient memory. Understanding this is crucial for training performance.
+Training deep neural networks requires executing both forward inference and reverse-mode automatic differentiation. The backward pass requires approximately **$2\times$ the compute** of the forward pass (computing input activations gradients $\nabla_X L$ and weight parameter gradients $\nabla_W L$) and introduces massive memory residency requirements for gradients and optimizer states.
 
-### Training Memory Visualization
+### Training Memory Expansion Dynamics
 
-```
-Training Memory Timeline:
-┌────────────────────────────────────────────────────────────────┐
-│ Forward Pass:   [Parameters] + [Activations]                   │
-│                      ↓                                         │
-│ Backward Pass:  [Parameters] + [Activations] + [Gradients]     │
-│                      ↓                                         │
-│ Optimizer:      [Parameters] + [Gradients] + [Optimizer State] │
-└────────────────────────────────────────────────────────────────┘
+$$\text{Compute}_{\text{backward}} \approx 2 \times \text{Compute}_{\text{forward}}$$
 
-Memory Examples:
-Model: 125M parameters (500MB)
-┌────────────────────────────────────────────────────────────────┐
-│ Forward:  500MB params + 100MB activations = 600MB             │
-│ Backward: 500MB params + 100MB acts + 500MB grads = 1,100MB    │
-│ Adam:     500MB params + 500MB grads + 1,000MB state = 2,000MB │
-└────────────────────────────────────────────────────────────────┘
+$$\text{Memory}_{\text{training}} = M_{\text{params}} + M_{\text{activations}} + M_{\text{gradients}} + M_{\text{optimizer}}$$
 
-Total Training Memory: 4x parameter memory!
-```
+| Training Phase | Resident Memory Pools | Analytical Formula (FP32) | Example Footprint ($125\text{M}$ GPT) |
+| :--- | :--- | :--- | :--- |
+| **Forward Pass** | Model Weights ($W$) + Saved Activations ($A$) | $P \times 4\text{ B} + B \cdot S \cdot d \cdot c_{\text{act}} \times 4\text{ B}$ | $500\text{ MB} + 100\text{ MB} = 600\text{ MB}$ |
+| **Backward Pass** | Weights ($W$) + Activations ($A$) + Gradients ($\nabla_W L$) | $P \times 4\text{ B} + A + P \times 4\text{ B}$ | $500\text{ MB} + 100\text{ MB} + 500\text{ MB} = 1,100\text{ MB}$ |
+| **Adam Optimizer Step** | Weights ($W$) + Gradients ($\nabla_W L$) + First & Second Moments ($m, v$) | $P \times 4\text{ B} + P \times 4\text{ B} + 2 \times P \times 4\text{ B}$ | $500\text{ MB} + 500\text{ MB} + 1,000\text{ MB} = 2,000\text{ MB}$ |
+| **Peak Resident Footprint**| All concurrent buffers before gradient zeroing | $4 \cdot P + A$ | **$\approx 2,100\text{ MB}$ ($4.2\times$ model weight size)** |
 """
 
 # %% [markdown]
-"""
+r"""
 ### 🧪 Unit Test: Advanced Profiling Functions
 
 This test validates our advanced profiling functions provide comprehensive analysis.
@@ -2350,25 +2214,34 @@ if __name__ == "__main__":
     test_unit_advanced_profiling()
 
 # %% [markdown]
-"""
+r"""
 ## 📊 Systems Analysis: Understanding Performance Characteristics
 
-Let's analyze how different model characteristics affect performance. This analysis guides optimization decisions and helps identify bottlenecks.
+Model profiling reveals the empirical performance characteristics of deep learning architectures across dimensions of model scale, batch size, and arithmetic intensity.
 
-### Performance Analysis Workflow
+![Illustrative Hardware Limits and the Roofline Model](roofline_model_hardware_limits.svg)
 
-```
-Model Scaling Analysis:
-┌─────────────────────────────────────────────────────────────────┐
-│ Size → Params → FLOPs → Latency → GFLOP/s → Bottleneck          │
-│                                                                 │
-│ Params and FLOPs grow with size². Latency grows more slowly at  │
-│ small sizes (overhead dominates) and catches up at large sizes. │
-│ GFLOP/s far below the machine's peak → memory-bound.            │
-└─────────────────────────────────────────────────────────────────┘
+### The Roofline Model Formulation
 
-Insight: measure, then classify. The numbers below come from your machine.
-```
+The attainable floating-point performance $P$ (in $\text{GFLOP/s}$) on any physical processor is strictly bounded by two fundamental hardware ceilings:
+
+$$P \le \min\left(P_{\text{peak}},\, I \times \text{BW}_{\text{mem}}\right)$$
+
+Where:
+- $P_{\text{peak}}$ is the peak arithmetic compute throughput of the device (ALUs / Tensor Cores).
+- $\text{BW}_{\text{mem}}$ is the sustained memory bandwidth between device DRAM/HBM and on-chip caches/SRAM.
+- $I = \frac{\text{FLOPs}}{\text{Bytes Transferred}}$ is the **arithmetic intensity** of the operation.
+
+The hardware **ridge point** is defined as the operational intensity where the memory ceiling intersects peak compute:
+
+$$I_{\text{ridge}} = \frac{P_{\text{peak}}}{\text{BW}_{\text{mem}}}$$
+
+| Operational Regime | Condition | Limiting Hardware Subsystem | Systems Remedy |
+| :--- | :--- | :--- | :--- |
+| **Memory-Bandwidth Bound** | $I < I_{\text{ridge}}$ | DRAM / HBM transfer bus | Weight quantization, operator fusion, KV caching |
+| **Compute Bound** | $I \ge I_{\text{ridge}}$ | ALU / Tensor Core matrix engines | Algorithmic transforms, FP16 Tensor Cores |
+
+![Weight Streaming vs Cache Reuse in Autoregressive Decode](weight_streaming_vs_reuse.svg)
 """
 
 # %% nbgrader={"grade": false, "grade_id": "performance_analysis", "solution": false}
@@ -2471,32 +2344,27 @@ if __name__ == "__main__":
     analyze_batch_size_effects()
 
 # %% [markdown]
-"""
+r"""
 ### Optimization Insights: Production Performance Patterns
 
-Understanding profiling results helps guide optimization decisions. Let's analyze different operation types and measurement overhead.
+Profiling results guide targeted systems interventions. Different machine learning operations inhabit fundamentally different regimes on the roofline curve, demanding distinct optimization strategies.
 
-### Operation Efficiency Analysis
+### Operational Characteristics & Optimization Taxonomy
 
-```
-Operation Types and Their Characteristics:
-┌─────────────────┬──────────────────┬──────────────────┬─────────────────┐
-│   Operation     │   Compute/Memory │   Optimization   │   Priority      │
-├─────────────────┼──────────────────┼──────────────────┼─────────────────┤
-│ Matrix Multiply │   Compute-bound  │   BLAS libraries │   High          │
-│ Elementwise     │   Memory-bound   │   Data locality  │   Medium        │
-│ Reductions      │   Memory-bound   │   Parallelization│   Medium        │
-│ Attention       │   Memory-bound   │   FlashAttention │   High          │
-└─────────────────┴──────────────────┴──────────────────┴─────────────────┘
+| Operation Class | Dominant Workload | Arithmetic Intensity ($I$) | Primary Hardware Bound | High-Leverage Optimization Mechanism |
+| :--- | :--- | :--- | :--- | :--- |
+| **Matrix Multiplications (GEMM)** | Linear projections, MLP up/down | High ($I \gg I_{\text{ridge}}$ at large $B$) | Compute (ALU / Tensor Core) | Optimized BLAS kernels, Tensor Core MMA, loop tiling |
+| **Spatial Convolutions** | Conv2d feature extraction | High ($I \gg I_{\text{ridge}}$) | Compute (ALU) | Im2col GEMM transforms, Winograd minimal filtering |
+| **Self-Attention ($QK^\top, SV$)** | Dynamic relational routing | Variable ($I \propto \text{Seq Len}$) | Memory bandwidth (SRAM transfers) | FlashAttention (online softmax tiling in SRAM) |
+| **Pointwise Elements** | GELU, ReLU, residual additions | Very low ($I < 0.25\text{ FLOP/B}$) | Memory bandwidth | Kernel fusion (fused pointwise passes) |
+| **Reductions & Normalizations** | LayerNorm, Softmax, sum pooling | Very low ($I < 0.25\text{ FLOP/B}$) | Memory bandwidth | Fused two-pass reduction kernels, Welford's algorithm |
 
-Optimization Strategy:
-┌────────────────────────────────────────────────────────────────┐
-│ 1. Profile first      → Identify bottlenecks                   │
-│ 2. Compute-bound ops  → Algorithmic improvements               │
-│ 3. Memory-bound ops   → Data movement optimization             │
-│ 4. Measure again      → Verify improvements                    │
-└────────────────────────────────────────────────────────────────┘
-```
+### Systematic Optimization Strategy
+
+1. **Profile First**: Establish baseline latency, peak memory, and GFLOP/s to identify the high-overhead stages.
+2. **Compute-Bound Operations**: Address with precision reduction (FP32 $\to$ FP16/BF16/FP8) and hardware-specialized Tensor Core instructions.
+3. **Memory-Bound Operations**: Address with data movement minimization, activation recomputation, KV cache reuse, and kernel fusion.
+4. **Iterative Verification**: Re-profile after each code change to confirm speedup on the empirical roofline curve.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "optimization_insights", "solution": false}
@@ -2639,7 +2507,7 @@ if __name__ == "__main__":
     analyze_profiling_overhead()
 
 # %% [markdown]
-"""
+r"""
 ## 🧪 Module Integration Test
 
 Final validation that everything works together correctly.
@@ -2755,52 +2623,112 @@ def test_module():
     print("Run: tito module complete 14")
 
 # %% [markdown]
-"""
+r"""
 ## 🤔 ML Systems Reflection Questions
 
-Answer these to deepen your understanding of profiling operations and their systems implications:
+### Question 1: FLOP Analysis & Hardware Projection
 
-### Question 1: FLOP Analysis
-**Question**: You implemented a profiler that counts FLOPs for different operations. For a Linear layer with 1000 input features and 500 output features:
+**Scenario**: You profile a `Linear(1000, 500)` projection layer with input dimension $d_{\text{in}} = 1,000$ and output dimension $d_{\text{out}} = 500$, with weights $W \in \mathbb{R}^{1000 \times 500}$ and bias $b \in \mathbb{R}^{500}$.
 
-**Consider**:
-- How many FLOPs are required for one forward pass?
-- If you process a batch of 32 samples, how does this change the per-sample FLOPs?
-- How does the FLOP count help you predict compute costs across different hardware?
+#### 1. Forward Pass Arithmetic Work (Single Sample $B=1$):
+- **Matrix Multiplication**: Each output feature requires an inner dot product of length $d_{\text{in}}$: $1,000$ multiplications and $999$ additions $\approx 2 \cdot d_{\text{in}} = 2,000$ floating-point operations. Across all $500$ output features:
+  $$\text{FLOP}_{\text{matmul}} = 2 \cdot d_{\text{in}} \cdot d_{\text{out}} = 2 \times 1,000 \times 500 = 1,000,000\text{ FLOPs } (1.00\text{ MFLOP})$$
+- **Bias Addition**: Adding $b \in \mathbb{R}^{500}$ requires $500$ additions:
+  $$\text{FLOP}_{\text{total}} = 1,000,000 + 500 = 1,000,500\text{ FLOPs } (1.0005\text{ MFLOP})$$
 
----
+#### 2. Scaling to Batch Size $B=32$:
+- **Total Work**: $\text{FLOP}_{\text{batch}} = 32 \times 1,000,500 = 32,016,000\text{ FLOPs } (32.016\text{ MFLOPs})$.
+- **Per-Sample FLOP Invariant**: Per-sample FLOPs remain exactly constant at $1,000,500\text{ FLOPs/sample}$.
+- **Systems Consequence**: Although per-sample compute is invariant, **arithmetic reuse increases $32\times$**. At $B=1$, the $500,000$ parameter weights ($2.0\text{ MB}$ at FP32) must be streamed from DRAM for only $1.0\text{ MFLOP}$ ($I \approx 0.5\text{ FLOP/B}$). At $B=32$, the weights are loaded once into high-speed L1/SRAM and reused across 32 tokens ($I \approx 16\text{ FLOP/B}$), shifting the kernel toward the compute-bound roofline regime.
 
-### Question 2: Memory Scaling
-**Question**: Your profiler measures memory usage for models and activations. A transformer model has 125M parameters (500MB at FP32). During training with batch size 16:
+#### 3. Cross-Hardware Latency Projection:
+Theoretical lower-bound execution latency is predicted by dividing FLOP count by device peak arithmetic throughput:
 
-**Calculate**:
-- What's the minimum memory for gradients?
-- With Adam optimizer, what's the total memory requirement?
-- How would mixed precision (FP16) change these numbers?
+$$T_{\text{compute\_bound}} = \frac{\text{FLOPs}}{P_{\text{peak}}}$$
 
----
-
-### Question 3: Performance Bottlenecks
-**Question**: You built tools to identify compute vs memory bottlenecks. A model achieves 10 GFLOP/s on hardware with 100 GFLOP/s peak.
-
-**Think about**:
-- What's the computational efficiency?
-- If doubling batch size doesn't improve GFLOP/s, the bottleneck is likely...
-- How would you use profiling data to guide optimization strategy?
+| Hardware Device | Peak FP32 Throughput ($P_{\text{peak}}$) | Memory Bandwidth ($\text{BW}$) | Theoretical Compute Latency | Hardware Regime ($B=32$) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Intel Xeon CPU** | $1.5\text{ TFLOP/s}$ | $100\text{ GB/s}$ | $21.3\ \mu\text{s}$ | Compute-bound |
+| **NVIDIA A100 GPU** | $19.5\text{ TFLOP/s}$ (FP32) | $2,039\text{ GB/s}$ (HBM2e) | $1.64\ \mu\text{s}$ | Launch overhead / Memory-bound |
+| **NVIDIA H100 GPU** | $60.0\text{ TFLOP/s}$ (FP32) | $3,350\text{ GB/s}$ (HBM3) | $0.53\ \mu\text{s}$ | Kernel launch limited |
 
 ---
 
-### Question 4: Profiling Trade-offs
-**Question**: Your profiler adds measurement overhead to understand performance. If profiling adds 5x overhead but reveals a 50% speedup opportunity:
+### Question 2: Memory Scaling & Precision Economics
 
-**Consider**:
-- Is the profiling cost justified for development?
-- When should you disable profiling in production?
-- How does the cost of profiling compare to the cost of optimizing the wrong thing?
+**Scenario**: A 125M parameter transformer ($P = 125 \times 10^6$) trained at batch size $B=16$.
+
+#### 1. Minimum Gradient Memory:
+In reverse-mode automatic differentiation, every learnable weight and bias requires an accumulator tensor $\nabla_W L$ of identical dimensions:
+
+$$\text{Memory}_{\text{grad}} = P \times 4\text{ bytes} = 125 \times 10^6 \times 4\text{ B} = 500,000,000\text{ B} \approx 500\text{ MB}$$
+
+#### 2. Adam Optimizer State & Total Training Budget:
+The standard Adam/AdamW optimizer maintains two full-precision float32 state tensors per parameter:
+1. First moment vector $m_t$ (exponential moving average of gradients): $P \times 4\text{ B} = 500\text{ MB}$.
+2. Second moment vector $v_t$ (exponential moving average of squared gradients): $P \times 4\text{ B} = 500\text{ MB}$.
+
+$$\text{Memory}_{\text{Adam}} = 2 \times P \times 4\text{ B} = 1,000\text{ MB} = 1.0\text{ GB}$$
+
+Assuming activation memory $A \approx 200\text{ MB}$ at $B=16$:
+
+$$\text{Total Training VRAM} = W (500\text{ MB}) + A (200\text{ MB}) + \nabla W (500\text{ MB}) + \text{Adam } (1,000\text{ MB}) = \mathbf{2,200\text{ MB}} \quad (4.4\times \text{ Model Size})$$
+
+#### 3. Mixed Precision (FP16 / BF16 AMP) Impact:
+In Automatic Mixed Precision (AMP):
+- Forward/backward model weights: $P \times 2\text{ B} = 250\text{ MB}$ (50% reduction).
+- Backward gradients: $P \times 2\text{ B} = 250\text{ MB}$ (50% reduction).
+- Activation caches: $A \times 0.5 \approx 100\text{ MB}$ (50% reduction).
+- Master weights (FP32 for numerical stability against underflow): $P \times 4\text{ B} = 500\text{ MB}$.
+- Adam optimizer states (FP32 moments): $2 \times P \times 4\text{ B} = 1,000\text{ MB}$.
+- **Net Static Footprint**: $250 + 250 + 100 + 500 + 1,000 = \mathbf{2,100\text{ MB}}$.
+- **Key Takeaway**: While static weight memory savings are modest in standard AMP due to FP32 master weights and Adam states, **activation memory drops by 50%**, enabling $2\times$ larger batch sizes or $2\times$ longer context windows, while Tensor Cores deliver up to $4\times$ throughput speedup.
+
+---
+
+### Question 3: Performance Bottlenecks & The Roofline Bound
+
+**Scenario**: A model kernel achieves $10\text{ GFLOP/s}$ on hardware rated at $100\text{ GFLOP/s}$ peak. Doubling batch size ($B \to 2B$) yields zero change in achieved GFLOP/s.
+
+#### 1. Computational Efficiency:
+$$\eta = \frac{P_{\text{achieved}}}{P_{\text{peak}}} = \frac{10\text{ GFLOP/s}}{100\text{ GFLOP/s}} = 10.0\%$$
+The hardware compute units are active for only 10% of total elapsed execution time; the system is severely bottlenecked.
+
+#### 2. Root Cause Diagnosis:
+Because doubling batch size does **not** improve arithmetic throughput, the workload is **not** suffering from insufficient arithmetic intensity or under-filled warp occupancy. The root cause is:
+- **Memory Bandwidth Saturation**: The memory bus between DRAM and processor is already saturated at 100% capacity ($\text{BW}_{\text{achieved}} \approx \text{BW}_{\text{peak}}$). Increasing batch size simply scales compute and memory transfers proportionally, locking throughput at the memory bandwidth ceiling.
+- **Alternative Contributor (Small Sizes)**: High per-call runtime overhead (Python interpreter dispatch latency or asynchronous kernel launch overhead) dominating wall-clock time.
+
+#### 3. Profiling-Guided Optimization Strategy:
+1. **Refuse to write micro-kernel GEMM optimizations**: Optimizing matrix multiply algorithms will yield zero speedup because the ALU is already idle waiting on data.
+2. **Apply Quantization**: Convert FP32 weights to INT8. Cutting data bus transfers by $4\times$ yields an immediate theoretical $4\times$ throughput improvement in bandwidth-saturated regimes.
+3. **Fuse Pointwise Kernels**: Combine adjacent operations (e.g. Bias + GELU + LayerNorm) to execute in on-chip SRAM registers, eliminating redundant intermediate VRAM write/read round-trips.
+
+---
+
+### Question 4: Profiling Trade-offs & Production Economics
+
+**Scenario**: Profiler instrumentation adds $5\times$ latency overhead during measurement, but exposes a targeted optimization opportunity delivering a 50% runtime reduction ($2\times$ speedup).
+
+#### 1. Justification in Development:
+Profiling overhead is an **offline capital investment**. It is paid only during diagnostic benchmarking across a few hundred iterations. The resulting 50% runtime reduction is harvested across **billions of production requests** continuously. The return on investment (ROI) is overwhelming.
+
+#### 2. Production Profiling Policy:
+Invasive synchronous profilers (using Python's `tracemalloc`, full execution hooks, or monotonic timer calls on every layer) must **never run inline on production user traffic**:
+- They disable GPU kernel concurrency, serializing asynchronous streams.
+- They incur multi-millisecond CPU scheduling penalties that degrade P99 latency SLAs.
+- **Production Solution**: Employ asynchronous out-of-band statistical sampling (e.g., eBPF hardware counter sampling, 1-in-10,000 request tracing, or NVIDIA DCGM telemetry) that imposes $< 0.1\%$ overhead.
+
+#### 3. The Cost of Profiling vs. The Cost of Misdirected Optimization:
+As formalized by **Amdahl's Law**:
+
+$$S_{\text{overall}} = \frac{1}{(1 - f) + \frac{f}{s}}$$
+
+If an engineering team spends three months optimizing an unprofiled routine that accounts for only $f = 5\%$ of total execution time, even an infinite speedup ($s \to \infty$) improves total system throughput by a negligible **$5.2\%$**. Profiling identifies the true $80\%$ bottlenecks, ensuring that engineering hours directly translate to order-of-magnitude systems acceleration.
 """
 
 # %% [markdown]
-"""
+r"""
 ## ⭐ Aha Moment: Know Your Model
 
 **What you built:** A complete profiler that measures parameters, FLOPs, memory, and latency.
@@ -2842,7 +2770,7 @@ if __name__ == "__main__":
     demo_profiling()
 
 # %% [markdown]
-"""
+r"""
 ## 🚀 MODULE SUMMARY: Profiling
 
 Congratulations! You've built a comprehensive profiling system for ML performance analysis!
