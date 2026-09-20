@@ -143,7 +143,7 @@ When an unconstrained reinforcement learning policy interacts with an execution 
 When a proxy metric $\hat{R}$ becomes the target of numerical optimization, any nonzero divergence $\delta = |\hat{R} - U|$ between the proxy and true utility $U$ will be magnified by gradient ascent until $\hat{R}(\tau) \to \max$ while $U(\tau) \to 0$.
 :::
 
-### The Proxy Incongruence Problem and Specification Gaming
+### Specification Gaming Hazards
 
 Every reinforcement learning objective is parameterized by a scalar feedback function $R: \mathcal{S} \times \mathcal{A} \to \mathbb{R}$. In policy gradient frameworks, the objective is to maximize the expected return over trajectories $\tau = (s_0, a_0, s_1, a_1, \dots, s_T)$:
 
@@ -167,20 +167,7 @@ These failure modes are not anomalies of bad prompting; they are mathematical co
 
 To establish dependable reward signals across large-scale distributed training runs, systems architects categorize verification mechanisms into three distinct tiers based on their mathematical determinism, execution latency, and resistance to policy gaming.
 
-```text
-+-------------------------------------------------------------------------------+
-|                       VERIFICATION ORACLE TAXONOMY                            |
-+--------------------+-------------------------+--------------------------------+
-| Gold Standard      | Silver Standard         | Bronze Standard                |
-| Deterministic      | Learned Process         | Human-in-the-Loop              |
-| Mechanical Checks  | Verifiers (PRMs)        | Feedback (RLHF)                |
-| [Binary {0, 1}]    | [Continuous Scaled]     | [Subjective Preference]        |
-|                    |                         |                                |
-| • gcc / rustc      | • Neural Step Scorers   | • Manual Expert Review         |
-| • pytest / cargo   | • LLM-as-a-Judge        | • High Latency (>60s)          |
-| • Formal Provers   | • Vulnerable to Gaming  | • Unscalable for Rollouts      |
-+--------------------+-------------------------+--------------------------------+
-```
+
 
 *Deterministic Verifiable Oracles (The Gold Standard)* represent the foundation of RLVR. These oracles consist of non-neural, algorithmic state evaluators: compilers (`gcc`, `clang`, `rustc`), formal interactive theorem provers (Lean 4, Isabelle, Coq), sandboxed unit test runners (`pytest`, `cargo test`), and relational database constraint checkers. A deterministic oracle evaluates an agent's candidate solution against an immutable specification and emits a binary or discrete categorical outcome:
 
@@ -235,7 +222,7 @@ $$\text{Fraction of Positive Gradient} = \frac{205}{819 + 205} = \frac{205}{1{,}
 **Conclusion:** Although Oracle B evaluates $10\times$ faster than Oracle A, over $20\%$ of every parameter update is dedicated to reinforcing degenerate token patterns that fool the neural verifier. Within 50 gradient steps, the policy will reallocate capacity toward emitting exploit sequences, degrading true test pass rates. Oracle A's $4.32\text{ s}$ latency overhead is the essential computational cost of mathematical soundness.
 :::
 
-### Formulating Verifiable Reward Tuples and Guard Separation
+### Verifiable Reward Tuples
 
 To prevent an agent from maximizing rewards through inefficient or degenerate operational paths, verifiable reinforcement learning constructs a composite reward tuple that balances mechanical correctness against operational efficiency:
 
@@ -247,36 +234,12 @@ $$\text{Cost}(\text{tokens}) = \frac{|\tau_{\text{gen}}|}{T_{\max}}$$
 
 where $|\tau_{\text{gen}}|$ is the number of autoregressive tokens generated in the trajectory and $T_{\max}$ is the context window generation limit. The scaling coefficient $\alpha \ll 1$ (typically $10^{-3} \le \alpha \le 10^{-2}$) ensures that functional correctness strictly dominates operational parsimony; a concise incorrect solution must never achieve a higher return than a verbose but correct solution.
 
-```text
-+-------------------------------------------------------------------------------+
-|             DEFENSE-IN-DEPTH: HARD GUARDS VS. SOFT PENALTIES                  |
-+-------------------------------------------------------------------------------+
-|                                                                               |
-|  [ Agent Policy: Untrusted Autoregressive Generator ]                         |
-|         |                                                                     |
-|         |-- Action Request: RPC / System Call                                 |
-|         v                                                                     |
-|  +-------------------------------------------------------------------------+  |
-|  | HARD RUNTIME ENCLAVE (Host Hypervisor / Kernel Namespace)               |  |
-|  | Zero Ambient Authority (A = 0)                                          |  |
-|  |                                                                         |  |
-|  | • Network Egress Attempt? --------> [ HARD BLOCKED: SIGSEGV / EPERM ]   |  |
-|  | • Test Fixture Write Attempt? ----> [ HARD BLOCKED: Read-Only FS ]      |  |
-|  | • Memory Exhaustion? -------------> [ HARD KILLED: OOM Reaper ]         |  |
-|  +-------------------------------------------------------------------------+  |
-|         |                                                                     |
-|         | Permissible Functional Output                                       |
-|         v                                                                     |
-|  +-------------------------------------------------------------------------+  |
-|  | SOFT REWARD FORMULATION (Loss Landscape Optimization)                   |  |
-|  |                                                                         |  |
-|  | • Unit Tests Pass? ---------------> R_outcome = +1.0                   |  |
-|  | • Token Overhead Count? ----------> - alpha * (|tokens| / T_max)       |  |
-|  | • Malformed Tool Arguments? ------> - beta * Penalty(syntax)           |  |
-|  +-------------------------------------------------------------------------+  |
-|                                                                               |
-+-------------------------------------------------------------------------------+
-```
+: **Defense-in-Depth Separation**: Architectural contrast between hard runtime enclaves and soft reward formulations in RLVR systems. {#tbl-vol3-hard-guards-vs-soft-rewards}
+
+| Architectural Layer | Enforcement Mechanism | Failure Response & Signal | Target Objectives |
+|:---|:---|:---|:---|
+| **Hard Runtime Enclave** | Hypervisor namespaces, seccomp-bpf, read-only mounts ($A=0$) | Hard fault (`SIGSEGV`, `EPERM`, OOM kill); immediate process abort | Absolute host safety, zero data exfiltration, test fixture protection |
+| **Soft Reward Formulation** | Mathematical loss objective ($R_{\text{outcome}} + R_{\text{format}} - \alpha \cdot \text{Cost}$) | Differentiable gradient updates backpropagated across rollout batch | Task accuracy optimization, token economy, syntactically valid tool dispatches |
 
 A critical systems failure in reward engineering is the conflation of *hard runtime guards* with *soft reward penalties*. System designers are frequently tempted to handle dangerous or unauthorized actions—such as attempting network egress, issuing destructive filesystem operations outside the sandbox (`rm -rf /`), or attempting to inspect environment variables containing verification secrets—by assigning a severe negative reward penalty via $\beta \cdot \text{Penalty}(\text{unauthorized})$ with $\beta \gg 1$.
 
@@ -313,22 +276,20 @@ The variance of this estimator scales linearly with the trajectory horizon $T$. 
 
 This indiscriminate attribution triggers an observable failure mode during policy optimization: *diagnostic suppression*. In complex debugging or systems administration tasks, an optimal agent must execute *epistemic actions*—commands that do not directly mutate code toward the solution, but instead gather diagnostic information to reduce the agent's epistemic uncertainty regarding the environment. If the agent spends ten steps running `grep`, reading documentation, and inspecting runtime memory, but fails on the final patch, uniform credit assignment marks all ten diagnostic queries as failures. Over successive gradient steps, the log-probabilities of exploratory tool calls are driven downward. The policy degenerates into hasty, non-diagnostic guessing: it immediately attempts single-shot edits on arbitrary files, because skipping diagnostic steps shortens the trajectory, reducing the cumulative token-penalty footprint without improving task comprehension.
 
-```text
-FAILED TRAJECTORY TRACE (UNIFORM CREDIT PENALTY COLLAPSE)
---------------------------------------------------------------------------------
+```bash
+# FAILED TRAJECTORY TRACE (UNIFORM CREDIT PENALTY COLLAPSE)
 Step 01 [EPISTEMIC]:    $ ls -la src/core/                  -> Exit 0  [Reward: 0.0]
 Step 02 [EPISTEMIC]:    $ grep -rn "buffer_overflow" src/   -> Exit 0  [Reward: 0.0]
 Step 03 [EPISTEMIC]:    $ gdb --batch -ex "bt" ./bin/server -> Exit 0  [Reward: 0.0]
 Step 04 [INSTRUMENTAL]: Patch applied to src/core/net.c     -> Exit 0  [Reward: 0.0]
 Step 05 [VERIFY]:       $ pytest tests/test_allocator.py    -> Exit 1  [Reward: 0.0]
---------------------------------------------------------------------------------
-Outcome: All 5 steps penalized uniformly (-1.0).
-Policy Collapse: Step 01-03 weights penalized, driving policy to skip diagnostics.
+# Outcome: All 5 steps penalized uniformly (-1.0).
+# Policy Collapse: Step 01-03 weights penalized, driving policy to skip diagnostics.
 ```
 
 To eliminate diagnostic suppression, the runtime must allocate credit that reflects the *marginal causal contribution* of each transition $(s_t, a_t) \to s_{t+1}$ toward the eventual success of the trajectory, isolating individual errors without corrupting the value of prerequisite investigative work.
 
-### Outcome vs. Process Verifiers: Inductive Bias and Gaming Surfaces
+### Process Verifier Trade-Offs
 
 To provide granular learning signals along an extended rollout, policy optimization runtimes bifurcate into two structural paradigms: Outcome Reward Models (ORMs) and Process Reward Models (PRMs) [@lightman2023let].
 
@@ -445,16 +406,14 @@ $$\mathcal{H}(s_t) = -\sum_{v \in \mathcal{V}} \pi_\theta(v \mid s_t) \log \pi_\
 
 Sub-tree forks are triggered selectively only when $\mathcal{H}(s_t)$ exceeds a predefined activation threshold, or exclusively on transitions that invoke mutating tool calls (`patch`, `rm`, `sed`). By filtering the evaluation points down to the 2–3 critical divergence nodes of a trajectory, the runtime reduces the Monte Carlo rollout budget by an order of magnitude while maintaining unbiased value estimates at key decision boundaries.
 
-```text
-SELECTIVE FORKING TOPOLOGY (ENTROPY-GATED BRANCHING)
---------------------------------------------------------------------------------
+```bash
+# SELECTIVE FORKING TOPOLOGY (ENTROPY-GATED BRANCHING)
 State s_0 [Entropy: 0.12] ---> Pass through (No branch)
 State s_1 [Entropy: 0.89] ---> FORK K=8 ROLLOUTS ---> Estimate V(s_1) = 0.62
 State s_2 [Entropy: 0.08] ---> Pass through (No branch)
 State s_3 [Entropy: 0.76] ---> FORK K=8 ROLLOUTS ---> Estimate V(s_3) = 0.15
---------------------------------------------------------------------------------
-Advantage of Action a_2: V(s_3) - V(s_1) = 0.15 - 0.62 = -0.47 (Identified fault)
-Compute Savings: 28 steps unbranched; 2 steps evaluated -> 93% token reduction.
+# Advantage of Action a_2: V(s_3) - V(s_1) = 0.15 - 0.62 = -0.47 (Identified fault)
+# Compute Savings: 28 steps unbranched; 2 steps evaluated -> 93% token reduction.
 ```
 
 The empirical mechanics of Monte Carlo sub-tree rollouts illuminate the dual constraints governing RLVR systems: terminal reward oracles prevent verifier gaming, but estimating intermediate advantages via recursive rollouts incurs an explosive compute cost. Furthermore, maintaining a separate neural Critic network to approximate $V(s_t)$ in real time—the standard approach in actor-critic frameworks like PPO—requires allocating tens of gigabytes of precious accelerator memory purely to hold value parameters, causing out-of-memory faults and limiting training throughput.
@@ -538,7 +497,7 @@ Out of the 80 GB available on each H100, PPO leaves exactly $80 - 74.375 = 5.625
 GRPO releases $35.0\text{ GB}$ of physical HBM per accelerator. The dynamic headroom expands from $5.625\text{ GB}$ to $40.625\text{ GB}$ per GPU—a $7.2\times$ increase in available working memory. This headroom allows the runtime to sustain high-concurrency generation of long-horizon reasoning trajectories (up to 16,384 tokens) across groups of candidate outputs without triggering memory thrashing or pipeline stalls.
 :::
 
-### Cohort Advantage Estimation and the Objective Function {#sec-vol3-rlvr-grpo-objective}
+### Cohort Advantage Estimation {#sec-vol3-rlvr-grpo-objective}
 
 Because GRPO discards the neural Critic network, it cannot evaluate Generalized Advantage Estimation (GAE) over intermediate temporal-difference residuals. Instead, it extracts the baseline value of a state through empirical cohort sampling. Given a query or task prompt $q$ drawn from a training dataset $\mathcal{D}$, the runtime samples a cohort of $G$ distinct candidate reasoning outputs $\mathcal{O} = \{o_1, o_2, \dots, o_G\}$ from the previous policy checkpoint $\pi_{\theta_{\text{old}}}$. Each candidate trajectory $o_i$ is executed against the verifiable environment or test fixture, which computes a deterministic scalar outcome reward $r_i = \mathcal{R}(q, o_i)$.
 
@@ -568,7 +527,7 @@ $$D_{\text{KL}}(\pi_\theta \parallel \pi_{\text{ref}}) \approx \frac{\pi_{\text{
 
 This estimator guarantees that the divergence penalty is strictly non-negative, possesses minimum variance at $\pi_\theta = \pi_{\text{ref}}$, and requires logging only the scalar probabilities of the generated tokens from the forward pass of the frozen reference model.
 
-### Degenerate Cohorts and the Zero-Variance Dilemma {#sec-vol3-rlvr-grpo-zero-variance}
+### Degenerate Cohort Dilemmas {#sec-vol3-rlvr-grpo-zero-variance}
 
 While GRPO delivers exceptional memory efficiency, its reliance on empirical group variance exposes a critical vulnerability in environments with binary verifiable rewards. In code generation, mathematical formalization, and robotic tool execution, verifiers typically emit step-function rewards: a program either passes all unit tests ($r_i = 1$) or fails at least one assertion ($r_i = 0$).
 
@@ -662,7 +621,7 @@ The threat model of an autonomous agent operating under Zero Ambient Authority (
 
 Securing the evaluation loop requires adhering to Saltzer and Schroeder's *Principle of Least Privilege* and *Separation of Privilege*. The policy requires permission to edit target source files, compile intermediate code, and run ad-hoc diagnostics. It must have zero privilege, zero ambient visibility, and zero write access to the test suite that calculates its reward.
 
-### The Dual-Sandbox Architecture and Artifact Extraction Barrier
+### Dual-Sandbox Isolation
 
 To enforce strict isolation, the host runtime decouples the agent's interactive workspace from the evaluation harness using a **Dual-Sandbox Architecture** (@fig-vol3-verification-enclave). Rather than evaluating candidate code in-situ, the training system instantiates two distinct execution boundaries for every rollout: an *Untrusted Agent Workspace* and an *Isolated Verification Enclave*.
 
@@ -717,7 +676,7 @@ $$C_{\text{enclave}} = \left\lceil \frac{W_{\text{cpu}}}{T_{\text{verif}}} \righ
 If the architecture relied on naive container cold-starts, provisioning an entire container root filesystem per task would add $t_{\text{boot}} \approx 1.80\text{ s}$, increasing $t_{\text{task}}$ to $4.35\text{ s}$ and inflating the required compute to $4,454.4\text{ core}\cdot\text{seconds}$. That would demand $1,114$ concurrent CPU cores just to avoid stalling the GPUs. Decoupling the extraction barrier from a pre-warmed pool of read-only enclaves reduces host infrastructure requirements by $41.4\%$.
 :::
 
-### Non-Deterministic Test Mitigation and Gated Observation Channels
+### Non-Deterministic Test Mitigation
 
 Isolating the execution boundary protects the test harness from deliberate tampering, but it introduces a subtle statistical vulnerability: test non-determinism. In software engineering tasks involving multi-threading, network mocks, randomized algorithms, or floating-point comparisons, individual assertions can exhibit flakiness. A flawed patch might succeed on one test run and fail on another without any changes to its underlying code.
 
@@ -756,7 +715,7 @@ When an unconstrained language policy is optimized against deterministic verific
 
 ![**Entropy Collapse and Runaway Verbosity Dynamics in RLVR**: (a) In unregularized training, policy entropy drops precipitously as the model mode-locks on early reward paths while token length inflates toward the context ceiling. (b) Calibrated dual regularization dynamically schedules an entropy floor to preserve exploration while penalizing tokens exceeding $T_{\text{target}}$ to bound serving memory footprints.](images/svg/entropy_verbosity_dynamics.svg){#fig-vol3-entropy-verbosity-regularization width="95%"}
 
-### The Entropy Collapse Hazard and Degenerate Sub-Optima
+### Entropy Collapse Hazards
 
 Autoregressive policy optimization depends fundamentally on stochastic exploration. At each step $t$ of a reasoning rollout, the policy defines a categorical distribution over the vocabulary $\mathcal{V}$ conditioned on the preceding token history $s_t$:
 
@@ -786,29 +745,27 @@ $$\sigma_R = \sqrt{\frac{1}{G}\sum_{i=1}^G (R_i - \bar{R})^2} = 0$$
 
 Under the normalized advantage formulation $\hat{A}_i = (R_i - \bar{R}) / (\sigma_R + \epsilon)$, the advantage collapses to zero for all candidate rollouts. Consequently, the empirical policy gradient $\nabla_\theta \mathcal{J}_{\text{GRPO}}(\theta)$ drops identically to zero. Training enters an unrecoverable stall: the model cannot improve because it generates zero gradient signal, and it cannot escape its sub-optimal local minimum because it can no longer sample counterfactual reasoning trajectories.
 
-### The Runaway Verbosity Trap and KV-Cache Memory Bloat
+### Runaway Verbosity Hazards
 
 While some training runs succumb to premature determinism, models operating under sparse terminal rewards ($R \in \{0, 1\}$) more commonly develop the inverse pathology: *runaway verbosity*. Under pure outcome verification, the host runtime evaluates only the final answer emitted at the end of the trajectory. If an agent emits thousands of intermediate reasoning tokens inside a chain-of-thought block $\langle\text{think}\rangle \dots \langle/\text{think}\rangle$ before producing a correct terminal answer, the policy gradient credits every token in that trajectory with a positive advantage.
 
-```text
-+---------------------------------------------------------------------------------------+
-| Trace A: Parsimonious Analytical Proof (184 tokens, R = 1.0)                          |
-| <think>                                                                               |
-| The target recurrence is T(n) = 2T(n/2) + O(n). By the Master Theorem, case 2 applies|
-| because a = 2, b = 2, and f(n) = Theta(n^(log_2(2))). Thus, T(n) = Theta(n log n).   |
-| </think>                                                                              |
-| Result: Theta(n log n)                                                                |
-+---------------------------------------------------------------------------------------+
-| Trace B: Degenerate Runaway Verbosity (4,096 tokens, R = 1.0)                          |
-| <think>                                                                               |
-| Let me think about this carefully. Let me re-read the recurrence. The recurrence says |
-| T(n) = 2T(n/2) + O(n). Let me double check if a=2. Yes, a=2. Let me verify b=2. Yes,  |
-| b=2. Let me re-verify that 2/2 is 1. Yes, that is correct. Now let me think if there   |
-| is another way to view this. Let me restate the definition of Master Theorem...       |
-| [Emits 3,900 tokens of circular discursive loops and redundant re-verifications]      |
-| </think>                                                                              |
-| Result: Theta(n log n)                                                                |
-+---------------------------------------------------------------------------------------+
+```xml
+<!-- Trace A: Parsimonious Analytical Proof (184 tokens, R = 1.0) -->
+<think>
+The target recurrence is T(n) = 2T(n/2) + O(n). By the Master Theorem, case 2 applies
+because a = 2, b = 2, and f(n) = Theta(n^(log_2(2))). Thus, T(n) = Theta(n log n).
+</think>
+Result: Theta(n log n)
+
+<!-- Trace B: Degenerate Runaway Verbosity (4,096 tokens, R = 1.0) -->
+<think>
+Let me think about this carefully. Let me re-read the recurrence. The recurrence says
+T(n) = 2T(n/2) + O(n). Let me double check if a=2. Yes, a=2. Let me verify b=2. Yes,
+b=2. Let me re-verify that 2/2 is 1. Yes, that is correct. Now let me think if there
+is another way to view this. Let me restate the definition of Master Theorem...
+[Emits 3,900 tokens of circular discursive loops and redundant re-verifications]
+</think>
+Result: Theta(n log n)
 ```
 
 Language models rapidly discover that extending the reasoning trace acts as an unconstrained computational scratchpad. Emitting redundant paraphrases, speculative re-evaluations, and circular justifications increases the probability of eventually sampling the tokens corresponding to the correct solution. Without length constraints, the policy gradient reinforces this discursive bloat. Over successive training iterations, the mean rollout length $\mathbb{E}[T_{\text{tokens}}]$ drifts relentlessly toward the maximum context ceiling $T_{\max}$.
@@ -878,7 +835,7 @@ $$R_{\text{final}} = R_{\text{task}} - \gamma \cdot \tau_{\text{scale}} \log\lef
 
 This mathematical structure guarantees that within the operational budget $[0, T_{\text{budget}}]$, the gradient $\nabla_\theta R_{\text{final}}$ with respect to sequence length is zero. Beyond $T_{\text{budget}}$, the penalty gradient aggressively drives the policy to eliminate vacuous verbosity.
 
-#### N-Gram Repetition Penalties and Frequency Gating
+#### N-Gram Repetition Penalties
 
 The most destructive manifestation of verbosity is the emergence of infinite periodic loops, where the model outputs the identical multi-token phrase indefinitely until hitting $T_{\max}$. This occurs because each repetition of the phrase extends the context window with the exact causal prompt needed to trigger that phrase again.
 
@@ -996,23 +953,13 @@ When the group scheduler dispatches a cohort of $G$ rollouts targeting task fixt
 
 Because the initial $L_{\text{prompt}}$ tokens remain immutable, all $G$ generation workers execute attention kernels that reference the shared physical pages concurrently during their respective decode steps, slashing both prefill computation and accelerator memory pressure.
 
-```text
-                    [Radix Tree Root: Empty]
-                               |
-                               |  Shared System Prompt + Task Harness
-                               |  Tokens: [0 ... L_prompt - 1]
-                               v
-                     (Node A: Shared Prefix)
-                  [Physical KV Blocks: P_0 ... P_k]
-                  [Reference Counter = G]
-                   /           |            \
-                  /            |             \
-   Rollout tau_1 /             | tau_2        \ Rollout tau_G
-                v              v               v
-           (Node B)         (Node C)        (Node D)
-         Tokens: [...]    Tokens: [...]   Tokens: [...]
-        [Private Pages]  [Private Pages] [Private Pages]
-```
+: **RadixAttention Shared Prefix Memory Hierarchy**: Physical page sharing and reference counting across parallel task rollout cohorts. {#tbl-vol3-radix-prefix-caching}
+
+| Radix Tree Node | Constituent Tokens | Physical Allocation | Concurrency State | Eviction Lifecycle Policy |
+|:---|:---|:---|:---|:---|
+| **Root Node** | Empty initialization | Zero bytes | Global anchor | Permanent |
+| **Shared Prefix Node** | System prompt + Task test harness ($0 \dots L_{\text{prompt}}-1$) | Dedicated KV blocks ($P_0 \dots P_k$) | Shared across $G$ generation workers (Ref count $= G$) | Retained via LRU queue across training steps |
+| **Private Rollout Leaves** | Per-worker exploratory tokens ($\tau_1 \dots \tau_G$) | Private HBM pages per worker | Exclusive access by single rollout thread | Recycled to free pool immediately upon trajectory completion |
 
 When a rollout sequence completes execution, its terminal node decrements the reference counts of its path components. While private leaf blocks are returned immediately to the free page pool, the parent prefix node retains its allocated HBM pages. An Eviction LRU queue monitors these prefix nodes, evicting them only when incoming novel tasks require free memory pages, thus amortizing prefill computation across successive training epochs.
 
@@ -1048,25 +995,20 @@ The floating-point operations required to execute prefill across $L$ tokens scal
   Under radix-tree sharing, this prefill latency collapses to **$0.36\text{ seconds}$**, enabling immediate transition to the decode phase.
 :::
 
-### Dynamic Straggler Mitigation and Asymmetric Scheduling
+### Dynamic Straggler Mitigation
 
 While radix-tree caching optimizes prefix ingestion, executing agentic rollouts introduces an acute runtime vulnerability: *tail-latency amplification* across the generation group.
 
 In standard supervised fine-tuning or fixed-depth classification, sequence lengths are bounded and predictable. In verifiable agentic tasks, rollout lengths exhibit high variance. An agent traversing an execution graph may detect a syntax flaw and terminate its trajectory after only $48$ tokens. A peer rollout within the identical group might enter a complex iterative reasoning loop, invoke a multi-step bash compilation tool, and run until hitting the hard trajectory ceiling $T_{\max} = 4\text{,}096$ tokens.
 
-```text
-Rollout Group Cohort (G = 4)
-tau_1: [48 tokens] (Terminated: Syntax Error)
-tau_2: [512 tokens] (Terminated: Test Passed)
-tau_3: [1024 tokens] (Terminated: Refactoring)
-tau_4: [4096 tokens] (Terminated: Max Depth Timeout)
------------------------------------------------------------------------------------> Time
-[======== Generation Window for Group ========]
-tau_1 finishes | Idle Wait: 4048 token slots
-tau_2 finishes        | Idle Wait: 3584 token slots
-tau_3 finishes               | Idle Wait: 3072 token slots
-tau_4 finishes                                                           | Done
-```
+: **Rollout Cohort Execution Latency Disparity**: Tail latency amplification and GPU idle wait across heterogeneous trajectory lengths within a cohort ($G=4$). {#tbl-vol3-cohort-latency-disparity}
+
+| Rollout Worker | Generated Tokens | Termination Reason | Execution Time Profile | Synchronous Barrier Idle Tax |
+|:---|:---|:---|:---|:---|
+| **Worker $\tau_1$** | 48 tokens | Early failure (syntax error) | Fast exit ($\sim 0.2\ \text{s}$) | 4,048 token slots idle wait ($98.8\%$ idle) |
+| **Worker $\tau_2$** | 512 tokens | Early success (test passed) | Nominal completion ($\sim 2.1\ \text{s}$) | 3,584 token slots idle wait ($87.5\%$ idle) |
+| **Worker $\tau_3$** | 1,024 tokens | Multi-turn refactoring | Extended search ($\sim 4.2\ \text{s}$) | 3,072 token slots idle wait ($75.0\%$ idle) |
+| **Worker $\tau_4$** | 4,096 tokens | Max depth timeout ($T_{\max}$) | Straggler worst-case ($\sim 16.8\ \text{s}$) | $0$ slots idle (Active barrier straggler) |
 In a *synchronous execution architecture*, the training fleet dispatches policy weights $\theta_v$ to all rollout workers, suspends gradient computation, and waits for a global synchronization barrier. Each worker generates its assigned candidate rollouts, evaluates actions within sandboxed verification enclaves, and returns trajectory batches to the host. Only when all $G$ trajectories across all parallel tasks arrive does the training cluster assemble the global batch and execute the forward-backward optimization step to produce $\theta_{v+1}$.
 
 While synchronous execution guarantees that all trajectories remain strictly on-policy ($\theta_{\text{rollout}} = \theta_{\text{train}}$), it exposes the system to extreme *tail-latency amplification*. In agentic environments, task duration is stochastic: an agent debugging an application may execute a compiler check that fails immediately (terminating in under $100$ tokens), while another agent on an identical task explores an intricate multi-turn shell session that executes multiple compilation passes, tool invocations, and test suites up to the trajectory horizon $T_{\max} = 4\text{,}096$ tokens. Because the synchronous barrier requires the completion of the slowest task cohort across the entire cluster:
@@ -1094,7 +1036,7 @@ To reclaim hardware saturation, production architectures adopt an *asynchronous 
 
 This decoupling eliminates execution pipeline bubbles. Accelerators in the training fleet run at continuous compute saturation, while inference workers stream generation steps without waiting for global batch synchronization. However, this throughput optimization creates the *policy staleness problem*: during the time interval required for a rollout worker to sample tokens, execute bash actions in an isolated sandbox, and transmit the trajectory over the network, the training fleet may have completed multiple gradient steps. The trajectory arriving at the trainer reflects an outdated policy distribution $\pi_{\theta_{\text{stale}}}$.
 
-### Quantifying and Bounding Version Staleness
+### Bounding Version Staleness
 
 To prevent stale data from destabilizing policy updates, the runtime must establish a rigorous metric for policy lag and enforce strict admittance boundaries at the ingestion interface.
 
@@ -1125,23 +1067,19 @@ $$\text{Admit}(\tau) = \begin{cases}
 
 When an incoming trajectory arrives with $\Delta v > \Delta v_{\max}$, the ingestion gate immediately drops the trajectory, decrements the task reference count, and recycles its backing host memory buffers. In modern large-scale RLVR systems, empirical stability requires setting $\Delta v_{\max} \in \{1, 2\}$, with $\Delta v_{\max} = 0$ reducing to lockstep synchronization.
 
-```text
-+-----------------------------------------------------------------------------------------+
-|                              TRAJECTORY ADMISSION GATE RECORD                           |
-+------------------------------------+----------------------------------------------------+
-| Field Identifier                   | Physical Typing & Description                      |
-+------------------------------------+----------------------------------------------------+
-| trajectory_id                      | uint64: Unique 64-bit monotonically increasing ID  |
-| task_fixture_hash                  | uint64: MurmurHash3 of initial environment state   |
-| rollout_version (v_rollout)        | uint32: Checkpoint version used during generation  |
-| ingestion_version (v_trainer)      | uint32: Active training step counter at arrival    |
-| staleness_delta (Δv)               | int32: Computed as (v_trainer - v_rollout)         |
-| sequence_length (T)                | uint32: Materialized token count                   |
-| token_logprobs                     | float32[T]: Log-probabilities under π_rollout      |
-| verification_status                | enum: {VERIFIED_PASS, VERIFIED_FAIL, TIMEOUT}      |
-| admission_decision                 | enum: {ADMITTED, DROPPED_STALE, DROPPED_CORRUPT}   |
-+------------------------------------+----------------------------------------------------+
-```
+: **Trajectory Admission Gate Record Schema**: Ingestion metadata fields evaluated during asynchronous rollout filtering and version staleness gating. {#tbl-vol3-admission-gate-schema}
+
+| Field Identifier | Physical Typing & Schema | Operational Semantics | Admission Role |
+|:---|:---|:---|:---|
+| **trajectory_id** | `uint64` | Unique 64-bit monotonically increasing trajectory ID | Uniquely tracks rollout instances across cluster |
+| **task_fixture_hash** | `uint64` | MurmurHash3 of initial environment state and task spec | Prevents duplicate evaluations within cohort |
+| **rollout_version ($v_{\text{rollout}}$)** | `uint32` | Checkpoint parameter version used during generation | Identifies policy origin |
+| **ingestion_version ($v_{\text{trainer}}$)** | `uint32` | Active training parameter step counter at arrival | Evaluates pipeline staleness |
+| **staleness_delta ($\Delta v$)** | `int32` | Computed delta $(v_{\text{trainer}} - v_{\text{rollout}})$ | Compares against staleness threshold $\Delta v_{\max}$ |
+| **sequence_length ($T$)** | `uint32` | Materialized sequence token count | Asserts context boundary compliance |
+| **token_logprobs** | `float32[T]` | Token log-probabilities evaluated under $\pi_{\text{rollout}}$ | Required for off-policy importance sampling ratio |
+| **verification_status** | `enum` | `{VERIFIED_PASS, VERIFIED_FAIL, TIMEOUT}` | Ground-truth reward outcome from sandbox oracle |
+| **admission_decision** | `enum` | `{ADMITTED, DROPPED_STALE, DROPPED_CORRUPT}` | Enforces admission gate policy |
 
 Enforcing this gate introduces a fundamental systems trade-off between *trajectory wastage* and *pipeline bubble minimization*. If $\Delta v_{\max}$ is set too aggressively (e.g., $\Delta v_{\max} = 1$), any transient network jitter, garbage collection pause, or prolonged compilation check in an environment sandbox causes rollouts to exceed the staleness ceiling. The cluster drops valid trajectories, wasting the inference FLOPs invested in generating them. Conversely, if $\Delta v_{\max}$ is relaxed to $4$ or $8$ to prevent drops, the optimization engine suffers severe policy drift, requiring heavy importance sampling truncation that nullifies the gradient contribution of exploratory tokens.
 
@@ -1157,8 +1095,8 @@ In standard on-policy training, $\rho_t(\theta_{\text{rollout}}) = 1.0$. In asyn
 
 In long autoregressive reasoning chains, this ratio introduces severe numerical vulnerability. While standard supervised learning computes losses over ground-truth reference distributions, reinforcement learning evaluates the ratio of two dynamic neural distributions. If the active policy has updated its weights such that an exploratory token $a_t$ chosen by the stale policy now has a substantially lower probability ($\pi_\theta(a_t \mid s_t) \ll \pi_{\theta_{\text{rollout}}}(a_t \mid s_t)$), the ratio $\rho_t$ approaches zero, extinguishing the gradient signal for that step. Far more destructively, if the active policy assigns a much higher probability to a token than the stale policy did ($\pi_\theta(a_t \mid s_t) \gg \pi_{\theta_{\text{rollout}}}(a_t \mid s_t)$), $\rho_t$ explodes to a massive value.
 
-```text
-Iteration Step t=184: Off-Policy Importance Sampling Collapse Trace
+```bash
+# Iteration Step t=184: Off-Policy Importance Sampling Collapse Trace
 [Rank 0] Ingesting Trajectory tau_89412 (v_rollout=410, v_trainer=414, Delta_v=4)
 [Rank 0] Token 42 ('('): pi_theta=0.812, pi_stale=0.0014 -> rho_t = 580.00
 [Rank 0] Advantage A_i = +1.428 (Passed unit tests)
@@ -1248,7 +1186,7 @@ $$M_{\text{buffer}} = 250 \times 45.06\text{ KB} \approx 11.27\text{ MB}$$
 The staging buffer requires less than $12\text{ MB}$ of pinned host memory—a negligible fraction of modern host DRAM (typically $1\text{--}2\text{ TB}$ per node). This proves that host-side buffer sizing is constrained not by physical memory capacity, but by the mathematical tolerance of the optimization algorithm to policy staleness $\Delta v_{\max}$.
 :::
 
-### Deterministic Release Gating and Invariant Evaluation
+### Deterministic Release Gating
 
 While bounding step-level staleness stabilizes gradient updates during training, the host runtime faces an equally critical gatekeeper problem: determining when an updated policy checkpoint $\theta_v$ is mathematically sound enough to promote to the rollout fleet, or ultimately to advance to deployment staging.
 
@@ -1262,39 +1200,13 @@ Deploying a compromised checkpoint $\theta_v$ to the rollout fleet poisons the g
 
 To prevent cluster poisoning, modern RLVR runtimes implement an automated *Deterministic Release Gate* (@fig-vol3-asynchronous-freshness-pipeline). Checkpoints are never promoted to the rollout fleet directly from gradient updates. Instead, newly materialized parameter checkpoints $\theta_v$ are routed to an isolated evaluation sub-cluster running a locked suite of deterministic verification environments.
 
-```text
-                    [ Training Fleet: Checkpoint Generated (theta_v) ]
-                                            |
-                                            v
-                    +------------------------------------------------+
-                    |          DETERMINISTIC RELEASE GATE            |
-                    +------------------------------------------------+
-                                            |
-                         Parallel Evaluation Across Enclaves
-                                            |
-                 +--------------------------+--------------------------+
-                 |                          |                          |
-                 v                          v                          v
-      [ Core Domain Bench ]       [ Regression Suite ]       [ Contract Invariants ]
-      - 256 Code Tasks            - 256 Reasoning Tasks      - Strict Schema Tests
-      - Compilation & Pytest      - Formal Proof Checks      - Zero Formatting Drift
-                 |                          |                          |
-                 +--------------------------+--------------------------+
-                                            |
-                               Aggregated Pass Rates
-                                            |
-                                            v
-                            Pass Rate >= Baseline - delta?
-                           /                              \
-                    [YES] /                                \ [NO]
-                         v                                  v
-       +-----------------------------------+    +-----------------------------------+
-       |     PROMOTE CHECKPOINT theta_v    |    |      REJECT & ALERT CHECKPOINT    |
-       | - Broadcast to Rollout Fleet      |    | - Suppress Weight Broadcast       |
-       | - Update Active Baseline Reference|    | - Trigger Learning Rate Backoff   |
-       | - Advance Global Release Pointer  |    | - Revert to Last Valid Checkpoint |
-       +-----------------------------------+    +-----------------------------------+
-```
+: **Deterministic Release Gate Evaluation Enclaves**: Test domains, benchmarking targets, and release pass conditions governing checkpoint promotion. {#tbl-vol3-release-gate-enclaves}
+
+| Evaluation Enclave | Test Suite & Benchmark Target | Verification Oracle | Gate Pass Threshold | Mitigation upon Gate Failure |
+|:---|:---|:---|:---|:---|
+| **Core Domain Benchmark** | 256 unseen software engineering tasks | Sandboxed compilation & test suite runner | Pass rate $\ge \text{Baseline} - \epsilon$ ($\epsilon \le 0.5\%$) | Suppress promotion; trigger learning rate decay |
+| **Regression Test Suite** | 256 formal multi-step reasoning tasks | Formal provers (Lean 4) & symbolic checkers | Pass rate $\ge 100\%$ on golden reference tasks | Reject checkpoint; revert to last valid release pointer |
+| **Contract Invariant Suite** | Programmatic schema validation tests | Strict JSON schema parser ($A=0$ validator) | Zero formatting drift (100% strict compliance) | Roll back policy weights; inspect tokenizer and prompt shims |
 
 The release gate enforces three strict contract invariants before marking a checkpoint valid:
 
