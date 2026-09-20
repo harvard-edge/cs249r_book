@@ -335,14 +335,14 @@ While BM25 excels at isolating documents containing rare, literal text sequences
 
 Syntax-directed indexing transforms flat source files into an entity-relationship model by executing deterministic parser generators across the repository. Using incremental, error-tolerant parsers such as tree-sitter, the indexing pipeline converts raw text into concrete Abstract Syntax Trees (ASTs). The indexer traverses these syntax trees to construct a *Symbol Table* and an associated *Code Property Graph*, contrasting with inverted index designs as summarized in @tbl-vol3-lexical-vs-ast-table.
 
-| Index Attribute        | Lexical Inverted Index (BM25)              | Syntax-Directed Symbol Graph                                    |                             |                                                                                     |
-|:-----------------------|:-------------------------------------------|:----------------------------------------------------------------|-----------------------------|-------------------------------------------------------------------------------------|
-| **Atomic Unit**        | Token n-gram or word stem                  | AST Node (Function, Class, Interface, Field)                    |                             |                                                                                     |
-| **Storage Structure**  | Inverted Postings Lists (Term $\to$ DocID) | Directed Property Graph ($V, E$) + Relational Tables            |                             |                                                                                     |
-| **Traversal Semantic** | Set intersection and union over postings   | Graph edge traversal (e.g., `calls`, `implements`, `overrides`) |                             |                                                                                     |
-| **Scoping Awareness**  | None (File or fixed chunk boundary only)   | Complete (Lexical block, file, module, and package scope)       |                             |                                                                                     |
-| **Update Mechanism**   | Postings list rewrite or append log        | Localized AST node and edge differential update                 |                             |                                                                                     |
-| **Lookup Latency**     | $\mathcal{O}(\log                          | \mathcal{V}                                                     | + \text{postings\_length})$ | $\mathcal{O}(1)$ hash lookup for symbol $\to \mathcal{O}(k)$ neighborhood expansion |
+| Index Attribute        | Lexical Inverted Index (BM25)              | Syntax-Directed Symbol Graph                                                         |
+|:-----------------------|:-------------------------------------------|:-------------------------------------------------------------------------------------|
+| **Atomic Unit**        | Token n-gram or word stem                  | AST Node (Function, Class, Interface, Field)                                         |
+| **Storage Structure**  | Inverted Postings Lists (Term $\to$ DocID) | Directed Property Graph ($V, E$) + Relational Tables                                 |
+| **Traversal Semantic** | Set intersection and union over postings   | Graph edge traversal (e.g., `calls`, `implements`, `overrides`)                      |
+| **Scoping Awareness**  | None (File or fixed chunk boundary only)   | Complete (Lexical block, file, module, and package scope)                            |
+| **Update Mechanism**   | Postings list rewrite or append log        | Localized AST node and edge differential update                                      |
+| **Lookup Latency**     | $\mathcal{O}(\log \vert \mathcal{V} \vert + \text{postings\_length})$ | $\mathcal{O}(1)$ hash lookup for symbol $\to \mathcal{O}(k)$ neighborhood expansion |
 
 : **Lexical Index versus Symbol Graph**: Comparison between lexical inverted indexes and syntax-directed symbol graphs for software retrieval. {#tbl-vol3-lexical-vs-ast-table}
 
@@ -572,28 +572,19 @@ $$\frac{1}{60 + 2} \approx 0.01613$$
 
 This gradual decay prevents a single anomalous top-ranked result from an erratic modality from dominating documents that demonstrate consistent, high-ranking performance across multiple independent retrieval engines.
 
-```text
-Query: "reclaim orphaned file descriptors"
-================================================================================
-Lexical Retrieval (BM25) Top Candidates:
-  Rank 1: close_all_descriptors()      [r_sparse = 1]
-  Rank 2: fd_cleanup_orphans()         [r_sparse = 2]
-  Rank 3: audit_system_descriptors()   [r_sparse = 3]
+Consider a runtime query seeking to `"reclaim orphaned file descriptors"` evaluated across sparse lexical (BM25) and dense approximate nearest neighbor (HNSW) retrieval engines. @tbl-vol3-rrf-scoring details the reciprocal rank fusion scoring ($k = 60$) across top candidate functions.
 
-Dense Retrieval (HNSW) Top Candidates:
-  Rank 1: close_zombie_handles()       [r_dense = 1]
-  Rank 2: fd_cleanup_orphans()         [r_dense = 2]
-  Rank 3: release_handle_table()       [r_dense = 3]
-================================================================================
-Reciprocal Rank Fusion Scoring (k = 60):
-  fd_cleanup_orphans:      1/(60+2) + 1/(60+2) = 0.01613 + 0.01613 = 0.03226  [WINNER]
-  close_all_descriptors:   1/(60+1) + 0        = 0.01639 + 0       = 0.01639
-  close_zombie_handles:    0        + 1/(60+1) = 0       + 0.01639 = 0.01639
-  audit_descriptors:       1/(60+3) + 0        = 0.01587 + 0       = 0.01587
-  release_handle_table:    0        + 1/(60+3) = 0       + 0.01587 = 0.01587
-```
+| Candidate Identifier | BM25 Rank ($r_{\text{sparse}}$) | BM25 RRF Term | HNSW Rank ($r_{\text{dense}}$) | HNSW RRF Term | Combined RRF Score | Final Ranking |
+|:---|:---:|:---:|:---:|:---:|:---:|:---:|
+| `fd_cleanup_orphans()` | 2 | $\frac{1}{62} \approx 0.01613$ | 2 | $\frac{1}{62} \approx 0.01613$ | **$0.03226$** | **1 (Selected)** |
+| `close_all_descriptors()` | 1 | $\frac{1}{61} \approx 0.01639$ | — | $0.0$ | $0.01639$ | 2 |
+| `close_zombie_handles()` | — | $0.0$ | 1 | $\frac{1}{61} \approx 0.01639$ | $0.01639$ | 3 |
+| `audit_system_descriptors()` | 3 | $\frac{1}{63} \approx 0.01587$ | — | $0.0$ | $0.01587$ | 4 |
+| `release_handle_table()` | — | $0.0$ | 3 | $\frac{1}{63} \approx 0.01587$ | $0.01587$ | 5 |
 
-As demonstrated in the trace, `fd_cleanup_orphans` appears at Rank 2 in both lexical and dense retrieval paths. Although it captured first place in neither individual modality, its dual confirmation across both structural representations propels it to the definitive top position under RRF. The agent receives a candidate that honors both semantic intent and lexical precision.
+: **Reciprocal Rank Fusion Scoring ($k=60$)**: Dual-modality score fusion demonstrating how cross-engine consensus elevates structurally robust candidates. {#tbl-vol3-rrf-scoring}
+
+As demonstrated in @tbl-vol3-rrf-scoring, `fd_cleanup_orphans` appears at Rank 2 in both lexical and dense retrieval paths. Although it captured first place in neither individual modality, its dual confirmation across both structural representations propels it to the definitive top position under RRF. The agent receives a candidate that honors both semantic intent and lexical precision.
 
 ![**Multi-Stage Hybrid Retrieval Pipeline**: Dual sparse lexical (BM25) and dense approximate nearest neighbor (HNSW/IVF-PQ) engines generate candidate sets in parallel. Reciprocal Rank Fusion (RRF) resolves score incommensurability through parameter-free ordinal merging ($k=60$), producing a unified candidate pool. A full-attention cross-encoder then re-ranks candidates with $O(k \cdot L^2)$ all-to-all token attention, yielding high-precision staged context ($k^* \in [3, 5]$).](images/svg/vol3_ch06_hnsw_rrf.svg){#fig-vol3-hnsw-rrf width="95%"}
 
