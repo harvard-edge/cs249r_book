@@ -34,25 +34,26 @@ kilogram = ureg.kilogram
 hour = ureg.hour
 
 
-def test_vol4_ch01_tempe_stopping_budget():
+def test_vol4_ch01_tempe_idealized_constant_speed_budget():
     vehicle = Embodied.Vehicle.UberATG_VolvoXC90
     v0 = 19.2 * (meter / second)
     mass = vehicle.mass
-    t_suppress = 1.2 * second
+    t_suppress = 1.0 * second
+    v_end = 18.1 * (meter / second)
+    t_remaining = 0.2 * second
     a_max = vehicle.max_acceleration
-    d_remaining_at_request = 3.8 * meter
 
     d_lag = (v0 * t_suppress).to(meter)
-    d_brake = ((v0**2) / (2 * a_max)).to(meter)
-    d_stop = calc_safe_stopping_distance(v0, t_suppress, a_max)
+    d_brake = ((v_end**2) / (2 * a_max)).to(meter)
+    d_remaining = (v_end * t_remaining).to(meter)
     kinetic_energy = calc_kinetic_energy(mass, v0)
 
-    check(abs(d_lag.to(meter).magnitude - 23.04) < 0.1, f"Unexpected lag displacement: {d_lag}")
-    check(abs(d_brake.to(meter).magnitude - 23.04) < 0.1, f"Unexpected braking distance: {d_brake}")
-    check(abs(d_stop.to(meter).magnitude - 46.08) < 0.1, f"Unexpected stopping distance: {d_stop}")
+    check(abs(d_lag.to(meter).magnitude - 19.2) < 0.1, f"Unexpected lag displacement: {d_lag}")
+    check(abs(d_brake.to(meter).magnitude - 20.5) < 0.1, f"Unexpected braking distance: {d_brake}")
+    check(abs(d_remaining.to(meter).magnitude - 3.6) < 0.1, f"Unexpected remaining travel: {d_remaining}")
     check(
-        d_stop.to(meter).magnitude > d_remaining_at_request.to(meter).magnitude * 12,
-        "Remaining clearance should be less than 1/12 of stopping envelope",
+        d_brake > d_remaining,
+        "Idealized stopping distance should exceed remaining travel",
     )
 
 
@@ -154,14 +155,16 @@ def test_vol4_ch11_planning_seam_inertia():
     tau_unblended = calc_seam_acceleration_torque_jump(gear_ratio, rotor_inertia, alpha_unblended)
     alpha_blended = (delta_omega / t_blend).to(ureg.radian / (second**2))
     tau_blended = calc_seam_acceleration_torque_jump(gear_ratio, rotor_inertia, alpha_blended)
-    torque_reduction_ratio = tau_unblended / tau_blended
+    tau_blend_peak = 1.5 * tau_blended
+    torque_reduction_ratio = tau_unblended / tau_blend_peak
 
     check(abs(j_reflected.magnitude - 0.25) < 0.001, f"Unexpected reflected inertia: {j_reflected}")
     check(abs(alpha_unblended.magnitude - 200.0) < 0.1, f"Unexpected unblended acceleration: {alpha_unblended}")
     check(abs(tau_unblended.magnitude - 50.0) < 0.1, f"Unexpected unblended torque: {tau_unblended}")
     check(abs(alpha_blended.magnitude - 4.0) < 0.01, f"Unexpected blended acceleration: {alpha_blended}")
     check(abs(tau_blended.magnitude - 1.0) < 0.01, f"Unexpected blended torque: {tau_blended}")
-    check(abs(torque_reduction_ratio.magnitude - 50.0) < 0.1, f"Unexpected reduction ratio: {torque_reduction_ratio}")
+    check(abs(tau_blend_peak.magnitude - 1.5) < 0.01, f"Unexpected peak blend torque: {tau_blend_peak}")
+    check(abs(torque_reduction_ratio.magnitude - 50/1.5) < 0.1, f"Unexpected peak reduction ratio: {torque_reduction_ratio}")
 
 
 def test_vol4_ch14_intervention_takeover_budget():
@@ -367,7 +370,9 @@ def test_vol4_ch09_tsdf_voxel_grid_budget():
     check(res_1cm["sparse_block_count"] == 17579, f"Unexpected 1cm blocks: {res_1cm['sparse_block_count']}")
     check(abs(res_1cm["sparse_memory"].to(MB).magnitude - 36.56) < 0.1, f"Unexpected 1cm sparse mem: {res_1cm['sparse_memory']}")
     check(abs(res_1cm["dense_dram_bandwidth"].to(GB / second).magnitude - 44.24) < 0.1, f"Unexpected dense BW: {res_1cm['dense_dram_bandwidth']}")
-    check(abs(res_1cm["sparse_dram_bandwidth"].to(MB / second).magnitude - 44.24) < 0.1, f"Unexpected sparse BW: {res_1cm['sparse_dram_bandwidth']}")
+    check(res_1cm["free_occupancy_updates_per_ray"] == 294, "Free-ray work must be counted")
+    check(res_1cm["tsdf_band_updates_per_ray"] == 6, "TSDF band work must be counted")
+    check(abs(res_1cm["sparse_dram_bandwidth"].to(GB / second).magnitude - 2.21184) < 0.01, f"Unexpected sparse BW: {res_1cm['sparse_dram_bandwidth']}")
 
     res_5mm = calc_tsdf_voxel_grid_budget(
         workspace_volume=workspace,
@@ -451,15 +456,23 @@ def test_vol4_ch15_coulomb_stiction_deadband():
     t_eval = 50.0 * millisecond
     theta_sim = (0.5 * alpha_sim.magnitude * (t_eval.to(second).magnitude ** 2))
     t_active_real = (t_eval - t_dead).to(second).magnitude
-    theta_real = (0.5 * alpha_real.magnitude * (t_active_real ** 2))
+    lag_s = tau_lag.to(second).magnitude
+    dead_s = t_dead.to(second).magnitude
+    eval_s = t_eval.to(second).magnitude
+    theta_real = (
+        0.5 * alpha_real.magnitude * t_active_real**2
+        + tau_cmd.magnitude * lag_s / inertia.magnitude
+        * (lag_s * (math.exp(-dead_s / lag_s) - math.exp(-eval_s / lag_s))
+           - math.exp(-dead_s / lag_s) * t_active_real)
+    )
     delta_theta = abs(theta_sim - theta_real)
 
     check(abs(t_dead.to(millisecond).magnitude - 6.93) < 0.02, f"Unexpected deadband: {t_dead}")
     check(abs(alpha_sim.magnitude - 120.0) < 0.1, f"Unexpected sim accel: {alpha_sim}")
     check(abs(alpha_real.magnitude - 30.0) < 0.1, f"Unexpected real accel: {alpha_real}")
     check(abs(theta_sim - 0.1500) < 0.001, f"Unexpected sim angle: {theta_sim}")
-    check(abs(theta_real - 0.0278) < 0.001, f"Unexpected real angle: {theta_real}")
-    check(abs(delta_theta - 0.1222) < 0.001, f"Unexpected delta theta: {delta_theta}")
+    check(abs(theta_real - 0.0221130564) < 1e-7, f"Unexpected real angle: {theta_real}")
+    check(abs(delta_theta - 0.1278869436) < 1e-7, f"Unexpected delta theta: {delta_theta}")
 
 
 def test_vol4_ch06_covariate_drift_compounding():
@@ -514,65 +527,44 @@ def test_vol4_ch06_action_chunk_denoising_cadence():
 
 def test_vol4_ch10_intent_lease_archetypes():
     from mlsysim.physics.robotics import (
-        calc_intent_drift_lease,
+        calc_target_evidence_horizon,
         calc_tripwire_contact_force_accumulation,
         calc_contact_force,
         calc_process_thermal_runaway_lease,
     )
 
-    # Class 1: Logistics AMR
-    r_tol_amr = 30.0 * millimeter
-    sig_sensor_amr = 6.0 * millimeter
-    v_drift_amr = 0.40 * (meter / second)
-    v_cruise_amr = 1.5 * (meter / second)
-    a_brake_amr = 3.0 * (meter / (second**2))
-    delta_t_stall_amr = 200.0 * millisecond
+    target_horizon = calc_target_evidence_horizon(
+        30.0 * millimeter, 6.0 * millimeter, 0.40 * (meter / second)
+    )
+    speed = 1.5 * (meter / second)
+    brake = 3.0 * (meter / (second**2))
+    bounded_delay = 60.0 * millisecond  # Separately admitted total pre-brake delay.
+    unbounded_delay = 200.0 * millisecond
+    brake_distance = ((speed**2) / (2.0 * brake)).to(millimeter)
+    bounded_stop = (speed * bounded_delay).to(millimeter) + brake_distance
+    delayed_stop = (speed * unbounded_delay).to(millimeter) + brake_distance
+    boundary = 500.0 * millimeter
 
-    # Class 2: Manipulator
-    k_fixture = 4.0e5 * (newton / meter)
-    v_approach = 0.03 * (meter / second)
-    f_max_ceiling = 15.0 * newton
-    t_clamp_loop = 2.0 * millisecond
-    delta_t_stall_arm = 200.0 * millisecond
+    check(abs(target_horizon.to(millisecond).magnitude - 60.0) < 0.1, "Unexpected target-evidence horizon")
+    check(abs(bounded_stop.to(millimeter).magnitude - 465.0) < 0.5, "Unexpected illustrative stop")
+    check(abs((boundary - bounded_stop).to(millimeter).magnitude - 35.0) < 0.5, "Unexpected clearance")
+    check(abs((delayed_stop - boundary).to(millimeter).magnitude - 175.0) < 0.5, "Unexpected breach")
+    check(abs((delayed_stop - bounded_stop).to(millimeter).magnitude - 210.0) < 0.5, "Unexpected stop difference")
 
-    # Class 3: BESS Thermal
-    c_thermal_bess = 900.0 * (joule / kelvin)
-    p_heat_in = 3600.0 * watt
-    delta_t_overshoot_max = 2.0 * kelvin
-    delta_t_stall_bess = 10.0 * second
+    stiffness = 4.0e5 * (newton / meter)
+    approach = 0.03 * (meter / second)
+    trip = 15.0 * newton
+    response = 2.0 * millisecond
+    force_at_brake_command = calc_tripwire_contact_force_accumulation(trip, stiffness, approach, response)
+    check(abs(force_at_brake_command.to(newton).magnitude - 39.0) < 0.1, "Unexpected force at brake command")
+    stalled_contact = calc_contact_force(stiffness, (approach * unbounded_delay).to(millimeter))
+    check(abs(stalled_contact.to(newton).magnitude - 2400.0) < 1.0, "Unexpected no-response contact estimate")
 
-    # Class 1 Computations
-    tau_amr = calc_intent_drift_lease(r_tol_amr, sig_sensor_amr, v_drift_amr)
-    d_react_bounded = (v_cruise_amr * tau_amr).to(millimeter)
-    d_brake_amr = ((v_cruise_amr**2) / (2.0 * a_brake_amr)).to(millimeter)
-    d_stop_bounded = d_react_bounded + d_brake_amr
-
-    d_react_unbounded = (v_cruise_amr * delta_t_stall_amr).to(millimeter)
-    d_stop_unbounded = d_react_unbounded + d_brake_amr
-    d_overrun_amr = d_stop_unbounded - d_stop_bounded
-
-    # Class 2 Computations
-    df_dt = (k_fixture * v_approach).to(newton / second)
-    f_peak_bounded = calc_tripwire_contact_force_accumulation(f_max_ceiling, k_fixture, v_approach, t_clamp_loop)
-    delta_x_unbounded = (v_approach * delta_t_stall_arm).to(millimeter)
-    f_unbounded = calc_contact_force(k_fixture, delta_x_unbounded)
-
-    # Class 3 Computations
-    thermal_res = calc_process_thermal_runaway_lease(p_heat_in, c_thermal_bess, delta_t_overshoot_max)
-    dt_dt_bess = thermal_res["rate_of_rise"]
-    tau_bess = thermal_res["tau_lease"]
-    delta_t_runaway = (dt_dt_bess * delta_t_stall_bess).to(kelvin)
-
-    check(abs(tau_amr.to(millisecond).magnitude - 60.0) < 0.1, f"Unexpected AMR lease: {tau_amr}")
-    check(abs(d_stop_bounded.to(millimeter).magnitude - 465.0) < 0.5, f"Unexpected bounded AMR stop: {d_stop_bounded}")
-    check(abs(d_stop_unbounded.to(millimeter).magnitude - 675.0) < 0.5, f"Unexpected unbounded AMR stop: {d_stop_unbounded}")
-    check(abs(d_overrun_amr.to(millimeter).magnitude - 210.0) < 0.5, f"Unexpected AMR overrun: {d_overrun_amr}")
-    check(abs(f_peak_bounded.to(newton).magnitude - 39.0) < 0.1, f"Unexpected peak bounded force: {f_peak_bounded}")
-    check(abs(f_unbounded.to(newton).magnitude - 2400.0) < 1.0, f"Unexpected unbounded force: {f_unbounded}")
-    check(abs(dt_dt_bess.to(kelvin / second).magnitude - 4.0) < 0.1, f"Unexpected thermal rise rate: {dt_dt_bess}")
-    check(abs(tau_bess.to(millisecond).magnitude - 500.0) < 0.1, f"Unexpected BESS lease: {tau_bess}")
-    check(abs(delta_t_runaway.to(kelvin).magnitude - 40.0) < 0.1, f"Unexpected thermal runaway delta: {delta_t_runaway}")
-
+    thermal = calc_process_thermal_runaway_lease(3600.0 * watt, 900.0 * (joule / kelvin), 2.0 * kelvin)
+    rise_rate = thermal["rate_of_rise"]
+    check(abs(rise_rate.to(kelvin / second).magnitude - 4.0) < 0.1, "Unexpected lumped rise rate")
+    check(abs(thermal["tau_lease"].to(millisecond).magnitude - 500.0) < 0.1, "Unexpected overshoot horizon")
+    check(abs((rise_rate * (10.0 * second)).to(kelvin).magnitude - 40.0) < 0.1, "Unexpected lumped rise")
 
 def test_vol4_ch16_biomechanical_impact_envelope():
     from mlsysim.physics.robotics import (
@@ -622,44 +614,61 @@ def test_vol4_ch16_biomechanical_impact_envelope():
     check(abs(expansion_pct - 57.14) < 0.2, f"Unexpected expansion pct: {expansion_pct}")
 
 
+def test_vol4_ch16_release_trip_and_contact_budget():
+    """Keep the proposed release trip below its energy and clearance ceilings."""
+    moving_mass = 40.0
+    energy_ceiling = 15.0
+    speed_trip = 0.84
+    bounded_overshoot = 0.02
+    worst_speed = speed_trip + bounded_overshoot
+    assert 0.90 > math.sqrt(2 * energy_ceiling / moving_mass)
+    assert 0.5 * moving_mass * worst_speed**2 == pytest.approx(14.792)
+
+    nominal_stop = worst_speed * 0.020 + worst_speed**2 / (2 * 15.0)
+    worn_stop = worst_speed * 0.030 + worst_speed**2 / (2 * 10.0)
+    assert nominal_stop * 1000 == pytest.approx(41.8533333333)
+    assert worn_stop * 1000 == pytest.approx(62.78)
+    assert nominal_stop < 0.050 < worn_stop
+
+    # Positive root of the independent ideal contact-energy balance.
+    mass, speed, stiffness, initial_indentation, decel = 4.0, 0.40, 4000.0, 0.0053, 8.0
+    initial_energy = 0.5 * mass * speed**2
+    linear = mass * decel + stiffness * initial_indentation
+    travel = (-linear + math.sqrt(linear**2 + 2 * stiffness * initial_energy)) / stiffness
+    assert travel * 1000 == pytest.approx(5.0545634653)
+    assert stiffness * (initial_indentation + travel) == pytest.approx(41.4182538610)
+
+
 def test_vol4_ch17_architectural_shield_dilution():
     from mlsysim.physics.robotics import (
         calc_empirical_testing_exposure,
         calc_shielded_system_hazard_rate,
     )
 
-    p_statutory_target = 1.0e-9  # failures / hour
-    statutory_confidence = 0.95
-    alpha_statutory = 1.0 - statutory_confidence
+    target = 1e-9
+    alpha = 0.05
+    fleet_hours = 100 * 90 * 24
+    observed_system_upper = -math.log(alpha) / fleet_hours
+    assert fleet_hours == 216000
+    assert abs(observed_system_upper - 1.3869130896e-5) < 1e-12
+    assert observed_system_upper > target
 
-    fleet_units = 100
-    t_cycle_days = 90.0
-    hours_per_day = 24.0
-    hours_per_year = 8766.0
-
-    c_shield_spec = 0.9999
-
-    n_astronomical_hours = calc_empirical_testing_exposure(p_statutory_target, confidence=statutory_confidence)
-    machine_years_astronomical = n_astronomical_hours.magnitude / hours_per_year
-    fleet_calendar_years = machine_years_astronomical / fleet_units
-
-    t_cycle_hours = t_cycle_days * hours_per_day
-    n_cycle_hours = fleet_units * t_cycle_hours
-    p_emp_cycle = -math.log(alpha_statutory) / n_cycle_hours
-    ratio_empirical_to_statutory = p_emp_cycle / p_statutory_target
-
-    p_brain_relaxed = p_statutory_target / (1.0 - c_shield_spec)
-    n_brain_hours = calc_empirical_testing_exposure(p_brain_relaxed, confidence=statutory_confidence)
-    t_test_days = n_brain_hours.magnitude / (fleet_units * hours_per_day)
-    t_test_months = t_test_days / (365.25 / 12.0)
-
-    check(abs(n_astronomical_hours.magnitude - 2.9957e9) < 1e7, f"Unexpected astronomical exposure: {n_astronomical_hours}")
-    check(abs(machine_years_astronomical - 341744.0) < 500.0, f"Unexpected machine years: {machine_years_astronomical}")
-    check(abs(fleet_calendar_years - 3417.4) < 10.0, f"Unexpected fleet calendar years: {fleet_calendar_years}")
-    check(abs(n_cycle_hours - 216000.0) < 1.0, f"Unexpected cycle hours: {n_cycle_hours}")
-    check(abs(p_emp_cycle - 1.3869e-5) < 1e-8, f"Unexpected empirical p: {p_emp_cycle}")
-    check(abs(ratio_empirical_to_statutory - 13869.0) < 10.0, f"Unexpected empirical ratio: {ratio_empirical_to_statutory}")
-    check(abs(p_brain_relaxed - 1.0e-5) < 1e-9, f"Unexpected relaxed p_brain: {p_brain_relaxed}")
-    check(abs(n_brain_hours.magnitude - 299573.0) < 100.0, f"Unexpected brain exposure: {n_brain_hours}")
-    check(abs(t_test_days - 124.8) < 1.0, f"Unexpected test days: {t_test_days}")
-    check(abs(t_test_months - 4.1) < 0.1, f"Unexpected test months: {t_test_months}")
+    # A separate, hypothetical counterfactual-oracle log happens to have equal
+    # exposure and zero hazardous proposals. System incidents do not measure it.
+    proposal_hours = 216000
+    proposal_events = 0
+    assert proposal_events == 0
+    proposal_upper = -math.log(alpha) / proposal_hours
+    coverage_assumed = 0.9999
+    other_hazard_assumed = 0.0
+    residual = calc_shielded_system_hazard_rate(
+        proposal_upper / hour, coverage_assumed, other_hazard_assumed / hour
+    ).to(1 / hour).magnitude
+    assert abs(residual - 1.3869130896e-9) < 1e-16
+    assert residual > target
+    required_coverage = 1 - target / proposal_upper
+    assert abs(required_coverage - 0.9999278974) < 1e-9
+    proposal_limit = target / (1 - coverage_assumed)
+    needed_hours = calc_empirical_testing_exposure(proposal_limit, confidence=0.95)
+    assert abs(needed_hours.magnitude - 299573.2274) < 0.1
+    assert needed_hours.magnitude / (100 * 24) > 90

@@ -70,6 +70,7 @@ def test_sensors_registry():
     assert isinstance(cam477, CameraSensor)
     assert cam477.shutter_type == "rolling"
     assert cam477.resolution_width == 4056
+    assert "4-lane" in cam477.interface
     assert cam477.nominal_latency.to("ms").magnitude == pytest.approx(33.3, rel=0.01)
 
     cam296 = Sensors.Camera.Sony_IMX296
@@ -93,6 +94,10 @@ def test_actuators_registry():
     assert csg17.rated_torque.to("N*m").magnitude == pytest.approx(21.0)
     # Reflected inertia computed or verified: 50^2 * 0.19e-4 = 0.0475 kg*m^2
     assert csg17.reflected_inertia.to("kg*m^2").magnitude == pytest.approx(0.0475, rel=0.01)
+
+    csg25 = Actuators.HarmonicDrive.CSG_25_50
+    assert csg25.rated_torque.to("N*m").magnitude == pytest.approx(51.0)
+    assert csg25.peak_torque.to("N*m").magnitude == pytest.approx(127.0)
 
     m107 = Actuators.QuasiDirectDrive.Unitree_M107
     assert isinstance(m107, ActuatorJoint)

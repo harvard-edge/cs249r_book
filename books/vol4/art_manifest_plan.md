@@ -195,16 +195,16 @@ Volume IV: Physical AI Systems
 *Focus: Control Barrier Functions, QP filtering, safety shields, hardware interlocks.*
 - [x] **`fig12_cbf_safety_filter.svg`** (Type A): Quadratic Program (QP) minimal-intervention vector projection: unconstrained policy action $u_{\text{nom}}$ projected onto safe half-space.
 - [x] **`fig12_stopping_envelope_phase_plane.svg`** (Type A): Phase plane $(x, \dot{x})$ showing safe set $\mathcal{C}$, viability boundary, and maximum emergency deceleration envelope.
-- [x] **`fig12_fallback_ladder.svg`** (Type A): 4-tier safety fallback ladder (Nominal AI $\to$ CBF-QP Shield $\to$ Deterministic Kinematic Stop $\to$ Category 4 Hardware STO).
-- [x] **`fig12_sto_safety_circuit.svg`** (Type A): **[UPGRADED]** Authentic Category 4 / PLe dual-channel safety relay schematic showing force-guided contacts and optical isolation to Safe Torque Off (STO), replacing retired stock photo `fig12_real_estop_interlock.jpg`.
+- [x] **`fig12_canonical_fallback_ladder.svg`** (Type A): Active figure showing state-dependent filtering, powered hold, controlled stop, and drive torque inhibit as alternatives with different prerequisites. The older `fig12_fallback_ladder.svg` is unreferenced legacy art and must not be reused.
+- [x] **`fig12_sto_safety_circuit.svg`** (Type A): Illustrative dual-contact emergency-stop path to safety relays and drive STO inputs, with a separate optional brake. Performance level, isolation, and physical stopping time require application-specific validation.
 - [x] **`fig12_real_laser_scanner.jpg`** (Type B): Authentic industrial safety laser scanner (SICK microScan3) showing programmable protective fields.
 
 #### Chapter 13: Placement
 *Focus: Heterogeneous SoCs, Linux-RTOS boundaries, memory bus contention, cache partitioning.*
 - [x] **`fig13_soc_contention_droop.svg`** (Type A): DRAM memory bus bandwidth contention between GPU neural inference and real-time CPU DMA packet servicing.
 - [x] **`fig13_lockfree_boundary_contract.svg`** (Type A): Shared memory layout of single-producer multi-consumer lockless seqlock ring buffer across Linux and RTOS.
-- [x] **`fig13_real_jetson_orin.jpg`** (Type B): Authentic NVIDIA Jetson AGX Orin module and carrier board with labeled SoC, LPDDR5 DRAM, and power ICs.
-- [x] **`fig13_real_fsd_board.jpg`** (Type B): Authentic Tesla Dual-FSD automotive board showing redundant SoCs, separate power rails, and independent CAN/Ethernet interfaces.
+- [x] **`fig13_real_jetson_orin.jpg`** (Type B): Photograph of a Jetson AGX Orin Developer Kit retail box and closed vented enclosure; internal components are not visible. Auledas, CC BY 4.0, via Wikimedia Commons (local JPG re-encoded from the Commons PNG).
+- [x] **`fig13_real_fsd_board.jpg`** (Type B): Unannotated automotive controller board photograph showing two Tesla SoC packages and surrounding circuitry. Photograph by Votpuske, CC BY 4.0, via Wikimedia Commons (re-encoded copy of the Commons original). Independent rails, clocks, and failover behavior require separate evidence. The annotated variant is legacy and unreferenced.
 
 ---
 
@@ -212,31 +212,31 @@ Volume IV: Physical AI Systems
 
 #### Chapter 14: Intervention
 *Focus: Shared authority, bumpless transfer, Mode 2 automation surprise, forensic logging.*
-- [x] **`fig14_authority_handshake_fsm.svg`** (Type A): Formal finite state machine governing human takeover, override latching, and supervisory clearance.
-- [x] **`fig14_bumpless_transfer_dynamics.svg`** (Type A): Actuator torque and acceleration waveforms comparing discontinuous step transfer with $C^1$-smooth quintic smoothstep blending.
-- [x] **`fig14_real_ntsb_telemetry.png`** (Type B): Official NTSB forensic crash telemetry graph of the Tempe collision showing suppression of emergency braking.
-- [x] **`fig14_real_teach_pendant.jpg`** (Type B): Industrial robot teach pendant showing ergonomic 3-position liveman enabling switch.
+- [x] **`fig14_authority_handshake_fsm.svg`** (Type A): Request, ACK, atomic commit, enforcer-owned blend, manual lease, and fallback states.
+- [x] **`fig14_bumpless_transfer_dynamics.svg`** (Type A): Illustrative command step versus fixed-endpoint $C^2$ quintic command and their derivatives; plant response is not measured.
+- [x] **`fig14_real_ntsb_telemetry.png`** (Type B): NTSB preliminary Figure 2 overhead playback still near 1.3 seconds before the Tempe impact, not a telemetry trace; NTSB U.S. public-domain image via Wikimedia Commons.
+- [x] **`fig14_real_teach_pendant.jpg`** (Type B): Front view of ABB teach pendant; rear enabling grip and wiring are not visible. Auledas, [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Teach_Pendant_ABB.JPG), CC BY-SA 4.0; local copy re-encoded. The annotated derivative is legacy and is not used in this chapter.
 
 #### Chapter 15: Verification
 *Focus: Qualification ladders, fault injection, sim-to-real falsification, HIL dynos.*
 - [x] **`fig15_qualification_ladder.svg`** (Type A): 4-tier qualification ladder (Model-in-the-Loop $\to$ Software-in-the-Loop $\to$ Hardware-in-the-Loop $\to$ Proving Ground).
 - [x] **`fig15_hardware_fault_injection.svg`** (Type A): Hardware fault injection breakout topology (switched open circuits, rail shorts, clock jitter, bus corruption).
-- [x] **`fig15_real_hil_avionics_testbed.jpg`** (Type B): Authentic aerospace/automotive HIL dynamometer test rack with real-time dSPACE / NI PXI chassis.
-- [x] **`fig15_real_crash_test_instrumentation.jpg`** (Type B): High-g crash dummy and vehicle optical tracking instrumentation.
+- [x] **`fig15_real_hil_avionics_testbed.jpg`** (Type B): Unannotated NASA Marshall avionics integration-ring photograph showing mounted electronics and harnesses. Timing and fault-injection capabilities are not established by the image; the annotated derivative is legacy and unreferenced.
+- [x] **`fig15_real_crash_test_instrumentation.jpg`** (Type B): NHTSA/MGA post-test photograph of a 2018 Honda Odyssey in moving-deformable-barrier test 10132, with visible body targets and fixtures. See the [NHTSA photo record](https://www-nrd.nhtsa.dot.gov/database/VSR/SearchMedia.aspx?database=v&tstno=10132&mediatype=p&p_tstno=10132); sensor roles and sample rates are not inferred from the image.
 
 #### Chapter 16: Release
 *Focus: Safety assurance cases, Goal Structuring Notation (GSN), ODD bounds, release manifests.*
-- [x] **`fig16_cae_tree.svg`** (Type A): Formal Claim-Argument-Evidence (CAE) / GSN tree linking top-level system safety goal to empirical test results and formal bounds.
-- [x] **`fig16_release_record.svg`** (Type A): Cryptographically signed release manifest schema linking neural weights, firmware hashes, and HIL test certificates.
-- [x] **`fig16_real_autonomous_haul_truck.jpg`** (Type B): Heavy autonomous mining haul truck operating inside strictly geofenced, controlled ODD.
-- [x] **`fig16_real_robot_safety_cell.jpg`** (Type B): Industrial robotic manufacturing cell with interlocked perimeter fencing and optical light curtains.
+- [x] **`fig16_canonical_gsn_tree.svg`** (Type A): Challenged draft GSN tree; lubricant defeats tactile sensing, while contact-force and timing leaves need calibrated evidence.
+- [x] **`fig16_release_record.svg`** (Type A): Fail-closed signed-release path with separate authentication and physical-standing checks before an enforcer-limited permit.
+- [x] **`fig16_real_autonomous_haul_truck.jpg`** (Type B): Roy Luck's loaded Caterpillar 785C at Kosse Mine illustrates vehicle scale and clearance, not autonomous operation or sensor/brake function. [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Caterpillar_haul_truck,_Luminant_Energy_Kosse_lignite_mine_(5556779421).jpg) records the [CC BY 2.0](https://creativecommons.org/licenses/by/2.0/) license and links the [original Flickr photograph](https://www.flickr.com/photos/royluck/5556779421/).
+- [x] **`fig16_real_robot_safety_cell.jpg`** (Type B): Industrial arm behind yellow mesh fencing; interlock rating and stopping behavior are not visible.
 
 #### Chapter 17: The Epistemic Frontier
 *Focus: Astronomical exposure walls, observational indistinguishability, curriculum synthesis.*
-- [x] **`fig17_epistemic_limits.svg`** (Type A): The $10^9$-hour exposure barrier graph: required test hours to statistically prove ultra-rare catastrophe probabilities.
-- [x] **`fig17_closed_loop_synthesis.svg`** (Type A): Master architectural diagram synthesizing Volume IV: Causal Boundary $\to$ Body $\to$ Brain $\to$ Nervous System $\to$ Policy Training $\to$ Real-Time Shielding.
-- [x] **`fig17_real_perseverance_mars_drill.jpg`** (Type B): Authentic NASA/JPL telemetry photo of Perseverance rover autonomous coring drill on Martian rock.
-- [x] **`fig17_real_humanoid_disaster_rubble.jpg`** (Type B): Humanoid robot traversing unstructured rubble test course at DARPA Robotics Challenge.
+- [x] **`fig17_epistemic_limits.svg`** (Type A): Constructed distinction between identical pre-deadline telemetry and the zero-event Poisson exposure wall; speed and barrier insets are conditional on their physical premises.
+- [x] **`fig17_closed_loop_synthesis.svg`** (Type A): Proposal–permission loop with the causal boundary at admitted actuation; the 1 kHz MCU is illustrative, not a certified device specification.
+- [x] **`fig17_real_perseverance_mars_drill.jpg`** (Type B): NASA/JPL-Caltech/MSSS rover image showing the contact setting; protective response claims come from separate JPL documentation, not visible telemetry.
+- [x] **`fig17_real_humanoid_disaster_rubble.jpg`** (Type B): Unannotated U.S. Navy public-domain image of a DARPA Robotics Challenge humanoid on a cinderblock course; no timing, torque, or foot-support guarantee inferred from pixels.
 
 ---
 

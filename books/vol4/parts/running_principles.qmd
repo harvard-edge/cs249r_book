@@ -1,40 +1,40 @@
 # Running the Machine {.unnumbered}
 
-\lettrine{B}{uilding} a physical AI machine is fundamentally an exercise in **reconciling disparate timescales, representations, and failure domains**. No single algorithm, neural model, or silicon core can span the vast continuum between high-level human reasoning and low-level physical dynamics. At the deliberative tier, human intent and task semantics are linguistic and symbolic, evolving over seconds ($0.1\text{--}1\text{ Hz}$). In the middle tier, physical space is continuous and metric, requiring 3D spatial representations and smooth kinematic trajectories generated at tens of hertz ($20\text{--}50\text{ Hz}$). At the execution tier, motor torque control is electromagnetic and immediate, demanding cycle-deterministic execution at kilohertz frequencies ($1000\text{ Hz}$) on bare-metal silicon to prevent mechanical resonance and kinetic destruction.
+\lettrine{A}{s} a mobile robot approaches an obstacle, a camera frame locates a person near its path. The planner proposes a turn, but the permission path must decide whether that observation is still fresh and whether the remaining clearance permits the turn or a stop. The decision has a deadline: another polished trajectory is useless if the robot has already crossed the braking margin. Running a physical AI machine means reconciling the timescales of sensing, planning, and actuation with that physical deadline. Human goals may change over seconds, trajectories over tens of milliseconds, and a particular motor controller may update every millisecond. The required rates and response times come from the plant and its measured delays, not from the names of the software tiers.
 
 ::: {#pri-vol4-multirate-authority .callout-principle title="The multi-rate authority hierarchy"}
 
-**Invariant**: In an embodied architecture spanning $0.1\text{ Hz}$ to $1000\text{ Hz}$, safety and actuation authority scale inversely with semantic complexity and cycle latency. Fast, deterministic monitors ($1000\text{ Hz}$, microsecond response) always hold preemptive veto power over slow, high-complexity learned planners ($1\text{--}10\text{ Hz}$, multi-millisecond latency).
+**Invariant**: A learned policy or planner proposes motion; an independent permission path controls whether that proposal reaches the actuators. Its deadline must account for observation age, computation, communication, actuator response, and available braking or clearance margin. A 1 kHz microcontroller loop is one implementation with a 1 ms period, not a microsecond response guarantee.
 
-**Implication**: Real-time execution must run as an asymmetric pipeline. High-level Foundation Models issue advisory intentions, middle-tier planners generate kinematically feasible trajectories, and dedicated real-time microcontrollers project planned actions through Control Barrier Functions (CBFs) to guarantee safety invariants on every millisecond cycle.
+**Implication**: Deliberation can run more slowly than local feedback, provided the permission path can reject stale or infeasible proposals in time. A control-barrier-function (CBF) check implemented with quadratic programming (QP) can support this design only within a validated dynamics model and state estimate, with a feasible intervention, sufficient actuator authority, and a demonstrated deadline.
 
 :::
 
-Part III details **The Living Organism: The Millisecond Pipeline** that transforms raw physical sensor photons into coordinated motor currents across six computational stages, implementing the complete S·P·A intersection landscape (@sec-boundary-spa-triad, @sec-appendix-spa):
+Part III follows the observation, proposal, permission decision, and physical response through six stages. Their interfaces implement the Sense–Plan–Act (S·P·A) decisions introduced in @sec-boundary-spa-triad and developed in @sec-appendix-spa. The center, $S \cap P \cap A$, is the permission decision that brings sensing age, proposed motion, and physical response into one budget; compute placement supports that decision across all three tasks.
 
-* **From Photons to Spatial Claims (@sec-perception, Sense):** How raw, uncompressed sensor streams from SerDes lanes are ingested via DMA ring buffers, corrected for rolling-shutter distortion, calibrated against IMUs, and lifted into calibrated metric $SE(3)$ spatial claims under strict information-age budgets.
-* **Preserving Belief Under Occlusion (@sec-memory, $S \cap P$):** How spatial representations (transform trees, TSDF voxel grids, 3D Gaussian Splats) persist when objects pass behind obstacles or cameras pan away, enforcing explicit temporal decay rates to prevent "frozen transform" collisions.
-* **From Semantic Goals to Reachable Affordances (@sec-intent, $S \cap P$):** How open-vocabulary foundation models decompose human language into spatial affordances, issuing cryptographically bounded, expiring **Intent Leases** with hard time-to-live (TTL) envelopes that fail-safe on silence.
-* **Synthesizing Continuous Motion (@sec-planning, $P \cap A$):** How continuous generative models predict $H$-step action chunks, smooth kinematic transitions across chunk boundaries using $C^2$ jerk splines, and guarantee safe stopping suffixes when upstream inference experiences latency spikes.
-* **The Deterministic Gatekeeper (@sec-enforcement, $A \cap S$ & Causal Boundary):** The bare-metal 1 kHz safety shield. We implement Control Barrier Functions (CBFs) and quadratic programming (QP) projection on dedicated microcontrollers, enforcing the Four-Tier Fallback Ladder and the Simplex Architecture Pattern to retain exclusive veto authority over power stages.
-* **The Silicon Substrate (@sec-placement, $S \cap P \cap A$):** How high-throughput neural deliberation and hard-real-time safety co-exist on shared heterogeneous System-on-Chip (SoC) platforms. We quantify on-chip memory crossbar QoS, DRAM bank contention, power distribution network ($L_{\text{bus}} \frac{dI_{\text{bus}}}{dt}$) voltage droop, and hysteretic thermal clock throttling.
+* **Perception (@sec-perception, Sense):** Timestamp and calibrate camera and motion measurements so the robot can decide whether an object's location is current enough to use.
+* **Memory (@sec-memory, $S \cap P$):** Track an object through occlusion, carry its uncertainty forward, and require a new observation when the motion margin no longer supports the estimate.
+* **Intent (@sec-intent, $S \cap P$):** Turn a human goal into a spatial, time-limited proposal without granting the language model actuator authority.
+* **Planning (@sec-planning, $P \cap A$):** Generate continuous motion and check any smooth trajectory or stopping suffix against available braking and clearance before it is admitted.
+* **Enforcement (@sec-enforcement, $A \cap S$):** Use fresh state and a separately validated permission path to admit, modify, or reject proposed motion before the actuator command crosses the causal boundary.
+* **Placement (@sec-placement):** Allocate compute, memory, power, and thermal resources so inference traffic cannot make the permission path miss its measured deadline.
 
-::: {#pri-vol4-epistemic-decay .callout-principle title="The epistemic decay law"}
+::: {#pri-vol4-epistemic-decay .callout-principle title="Age-limited physical belief"}
 
-**Invariant**: Every spatial and sensory belief about the physical world degrades over time as unobserved entities move and sensor timestamps recede:
+**Invariant**: An unobserved dynamic object's position estimate must carry an age and uncertainty bound; uncertain motion can widen that bound. Under an illustrative constant process-noise model,
 $$ \sigma^2(t) = \sigma_0^2 + Q \cdot (t - t_{\text{meas}}) $$
-An unrefreshed spatial belief is an obstacle hazard.
+where $\sigma_0^2$ is position variance at measurement time $t_{\text{meas}}$, $t-t_{\text{meas}}$ is the nonnegative observation age ($t\geq t_{\text{meas}}$), and $Q \geq 0$ is the assumed position-variance growth per unit time. This model does not prescribe exponential confidence decay or apply unchanged to every object and sensor.
 
-**Implication**: Dynamic spatial representations (TSDF voxel grids, transform trees) must enforce exponential confidence decay on unobserved regions. High-level commands must be issued as bounded **Intent Leases** with strict time-to-live (TTL) deadlines. If a lease expires before renewal, the runtime immediately executes a safe-stop fallback.
+**Implication**: Revalidate or expire a belief when its position-uncertainty bound exceeds the task's clearance or contact margin. Time-limited intent proposals similarly require renewal before use. On expiry, the permission path rejects the stale proposal and selects a validated fallback; a safe stop is available only if the current speed, clearance, braking capability, and response delay still permit one.
 
 :::
 
 ::: {#pri-vol4-substrate-isolation .callout-principle title="Heterogeneous substrate isolation"}
 
-**Invariant**: Placing high-throughput neural inference (bursty memory traffic, massive DRAM bandwidth saturation, large $dI/dt$ transients) and real-time safety control on shared System-on-Chip (SoC) silicon creates microarchitectural interference: DRAM bank collisions, crossbar arbitration stalls, and core throttling under supply voltage droop.
+**Invariant**: Shared compute, memory, power, or thermal resources must not delay a safety-critical permission decision beyond its validated deadline. Bursty neural inference can interfere with a real-time path on a shared system-on-chip, so the interference must be measured under the intended workload.
 
-**Implication**: Physical AI compute platforms must enforce hard hardware partitioning: memory bus QoS priority tagging, cache reservation for real-time threads, isolated power rails, and dedicated real-time microcontroller cores physically decoupled from GPU/NPU burst pipelines.
+**Implication**: Choose scheduling, memory quality-of-service controls, cache reservation, separate rails, bare-metal execution, or a separate controller according to measured worst-case timing and power budgets. Verify that the chosen isolation preserves the permission deadline during inference bursts and faults.
 
 :::
 
-Part III teaches students how to architect, synchronize, and isolate the six computational stages that keep high-level machine intelligence grounded in physical reality.
+The six stages keep learned proposals connected to measurements and constrained by the machine's available physical margin.

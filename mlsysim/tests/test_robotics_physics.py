@@ -9,6 +9,7 @@ import pint
 from mlsysim.core.units import ureg, Q_
 from mlsysim.physics.robotics import (
     calc_sensor_to_actuator_latency,
+    calc_axi_fifo_contention,
     calc_safe_stopping_distance,
     calc_max_permitted_velocity,
     calc_kinetic_energy,
@@ -49,9 +50,43 @@ from mlsysim.physics.robotics import (
     calc_process_containment_time_to_breach,
     calc_teleop_ingestion_budget,
     calc_tsdf_voxel_grid_budget,
+    calc_target_evidence_horizon,
     calc_intent_drift_lease,
     calc_process_thermal_runaway_lease,
 )
+
+
+def test_axi_fifo_contention_distinguishes_tile_from_transaction_and_bypass():
+    result = calc_axi_fifo_contention(
+        tile_bytes=256 * 1024,
+        camera_bytes=64 * 1024,
+        telemetry_bytes=32 * 1024,
+        safety_read_bytes=64 * 1024,
+        transaction_bytes=4 * 1024,
+        bandwidth=Q_("12.8 GB/s"),
+        bank_switches=3,
+        bank_switch_time=Q_("28 ns"),
+        compute_time=Q_("95 us"),
+    )
+    assert result["tile_transactions"] == 64
+    assert result["queued_transactions"] == 88
+    assert result["queue_fifo"].to("us").magnitude == pytest.approx(28.244)
+    assert result["own_read"].to("us").magnitude == pytest.approx(5.120)
+    assert result["total_fifo"].to("us").magnitude == pytest.approx(128.364)
+    assert result["total_priority_bypass"].to("us").magnitude == pytest.approx(100.44)
+    assert result["total_priority_bypass"] < result["total_fifo"]
+    with pytest.raises(ValueError):
+        calc_axi_fifo_contention(
+            tile_bytes=256 * 1024,
+            camera_bytes=64 * 1024,
+            telemetry_bytes=32 * 1024,
+            safety_read_bytes=64 * 1024,
+            transaction_bytes=4 * 1024 + 1,
+            bandwidth=Q_("12.8 GB/s"),
+            bank_switches=3,
+            bank_switch_time=Q_("28 ns"),
+            compute_time=Q_("95 us"),
+        )
 
 
 def test_sensor_to_actuator_latency():
@@ -65,14 +100,14 @@ def test_sensor_to_actuator_latency():
 
 
 def test_safe_stopping_distance_tempe_golden():
-    # Tempe crash golden numbers: v = 19.2 m/s, t_suppress = 1.2 s, a_max = 8.0 m/s^2
+    # Tempe-inspired illustration: rounded speed, NTSB one-second suppression, assumed 8.0 m/s^2 braking.
     d_stop = calc_safe_stopping_distance(
         velocity=Q_("19.2 m/s"),
-        total_latency=Q_("1.2 s"),
+        total_latency=Q_("1.0 s"),
         max_deceleration=Q_("8.0 m/s^2"),
     )
-    # reaction = 19.2 * 1.2 = 23.04 m, braking = 19.2^2 / 16.0 = 23.04 m -> total = 46.08 m
-    assert d_stop.to("m").magnitude == pytest.approx(46.08, rel=0.01)
+    # reaction = 19.2 * 1.0 = 19.2 m, braking = 19.2^2 / 16.0 = 23.04 m -> total = 42.24 m
+    assert d_stop.to("m").magnitude == pytest.approx(42.24, rel=0.01)
 
 
 def test_safe_stopping_distance_with_margins():
@@ -225,8 +260,9 @@ def test_action_chunk_streaming_amortization():
     assert res["f_single"].to("Hz").magnitude == pytest.approx(10.24, rel=0.01)
     # tau_step = 6.10 ms
     assert res["tau_step"].to("ms").magnitude == pytest.approx(6.10, rel=0.01)
-    # f_effective = 163.84 Hz
-    assert res["f_effective"].to("Hz").magnitude == pytest.approx(163.84, rel=0.01)
+    # 163.84 waypoint equivalents per second; fresh chunks remain bound by t_stream.
+    assert res["f_waypoint_equivalent"].to("Hz").magnitude == pytest.approx(163.84, rel=0.01)
+    assert res["f_effective"] == res["f_waypoint_equivalent"]
 
 
 def test_watchdog_lease_bound():
@@ -241,7 +277,8 @@ def test_watchdog_lease_bound():
     # d_drift = 0.6939 - 0.5625 = 0.1314 m
     assert res["d_drift_allowable"].to("m").magnitude == pytest.approx(0.1314, rel=1e-3)
     # t_lease = 0.1314 / 1.5 = 0.0876 s = 87.6 ms
-    assert res["t_lease_max"].to("ms").magnitude == pytest.approx(87.6, rel=1e-2)
+    assert res["t_total_delay_max"].to("ms").magnitude == pytest.approx(87.6, rel=1e-2)
+    assert res["t_lease_max"] == res["t_total_delay_max"]
 
 
 def test_canfd_bus_utilization():
@@ -516,7 +553,8 @@ def test_tsdf_voxel_grid_budget():
     assert res_1cm["dense_memory"].to("GB").magnitude == pytest.approx(1.20, rel=1e-2)
     assert res_1cm["sparse_memory"].to("MB").magnitude == pytest.approx(36.56, rel=1e-2)
     assert res_1cm["dense_dram_bandwidth"].to("GB/s").magnitude == pytest.approx(44.24, rel=1e-2)
-    assert res_1cm["sparse_dram_bandwidth"].to("MB/s").magnitude == pytest.approx(44.24, rel=1e-2)
+    assert res_1cm["traversed_voxels_per_ray"] == 300
+    assert res_1cm["sparse_dram_bandwidth"].to("GB/s").magnitude == pytest.approx(2.21184, rel=1e-2)
 
     res_5mm = calc_tsdf_voxel_grid_budget(
         workspace_volume=Q_("300 m^3"),
@@ -529,14 +567,25 @@ def test_tsdf_voxel_grid_budget():
     assert res_5mm["sparse_memory"].to("MB").magnitude == pytest.approx(292.5, rel=1e-2)
 
 
+@pytest.mark.parametrize("hit_rate", [-0.01, 1.01, float("nan")])
+def test_tsdf_voxel_grid_budget_rejects_invalid_cache_hit_rate(hit_rate):
+    with pytest.raises(ValueError, match="cache_hit_rate must be in"):
+        calc_tsdf_voxel_grid_budget(
+            workspace_volume=Q_("300 m^3"),
+            voxel_size=Q_("1 cm"),
+            cache_hit_rate=hit_rate,
+        )
+
+
 def test_intent_drift_lease():
-    # Chapter 10: r_tol = 30 mm, sig = 6 mm, v_drift = 0.40 m/s -> tau = 24 / 400 = 60 ms
-    tau = calc_intent_drift_lease(
+    # Chapter 10: target error reaches tolerance in 60 ms; this is not a stopping budget.
+    tau = calc_target_evidence_horizon(
         tolerance_radius=Q_("30.0 mm"),
         sensor_noise=Q_("6.0 mm"),
         drift_velocity=Q_("0.40 m/s"),
     )
     assert tau.to("ms").magnitude == pytest.approx(60.0, rel=1e-3)
+    assert calc_intent_drift_lease(Q_("30.0 mm"), Q_("6.0 mm"), Q_("0.40 m/s")) == tau
 
 
 def test_process_thermal_runaway_lease():

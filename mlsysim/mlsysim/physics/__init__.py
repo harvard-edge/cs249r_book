@@ -124,6 +124,7 @@ from .robotics import (
     calc_process_containment_time_to_breach,
     calc_teleop_ingestion_budget,
     calc_tsdf_voxel_grid_budget,
+    calc_target_evidence_horizon,
     calc_intent_drift_lease,
     calc_process_thermal_runaway_lease,
 )
@@ -243,6 +244,7 @@ __all__ = [
     "calc_process_containment_time_to_breach",
     "calc_teleop_ingestion_budget",
     "calc_tsdf_voxel_grid_budget",
+    "calc_target_evidence_horizon",
     "calc_intent_drift_lease",
     "calc_process_thermal_runaway_lease",
     "transfer_time",
