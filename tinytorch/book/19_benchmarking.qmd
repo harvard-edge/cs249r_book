@@ -11,8 +11,10 @@ Performance claims in machine learning systems—such as "this optimization prov
 
 From a framework and systems standpoint, a trustworthy benchmarking harness needs a few controls:
 1. **Warmup**: Running untimed iterations first, so one-time costs such as cold caches, first allocations, and (in runtimes that have one) just-in-time compilation are not counted as steady-state latency.
-2. **High-resolution monotonic timing**: Measuring with a monotonic clock (`time.perf_counter`) and, on asynchronous hardware, waiting for queued work to finish before reading it.
+2. **High-resolution monotonic timing**: Measuring with a monotonic clock (`time.perf_counter`)[^fn-perf-counter-monotonic] and, on asynchronous hardware, waiting for queued work to finish before reading it.
 3. **Statistical distribution reporting**: Reporting the spread as well as the mean, with standard deviation and latency percentiles (P50, P90, P99), alongside throughput in samples per second.
+
+[^fn-perf-counter-monotonic]: **Monotonic clocks versus wall-clock time**: Standard Python `time.time()` reads the operating system's calendar wall clock, which is subject to Network Time Protocol (NTP) slews, clock synchronization jumps, and leap seconds; an NTP correction during a benchmark run can yield negative or falsely inflated durations. In contrast, `time.perf_counter()` accesses a monotonic hardware counter (such as the invariant Time Stamp Counter `RDTSC` on x86-64 or `CNTVCT_EL0` on ARM64) that is guaranteed never to move backward and offers nanosecond-level resolution undisturbed by system clock changes.
 
 This chapter builds TinyTorch's benchmarking suite, establishing the rigorous empirical measurement standards required for the Capstone evaluation in @sec-capstone.
 
@@ -368,10 +370,11 @@ output = model(inputs)
 torch.cuda.synchronize()
 t1 = time.perf_counter()
 ```
-Or record timestamps directly on device streams via `torch.cuda.Event(enable_timing=True)`.
+Or record timestamps directly on device streams via `torch.cuda.Event(enable_timing=True)`.[^fn-cuda-event-overhead-vs-sync]
 :::
 
 [^fn-cuda-event-gpu-timer]: **CUDA event**: a marker recorded in a GPU stream, the ordered queue of device work. With timing enabled, two completed events provide elapsed time between their positions in that stream. Work from other streams or gaps between submitted operations can still affect the interval.
+[^fn-cuda-event-overhead-vs-sync]: **CUDA events versus host synchronization**: Calling `torch.cuda.synchronize()` on the CPU blocks the host thread until the GPU has completely drained all submitted command queues. While necessary before reading CPU clocks, doing so inside a per-layer loop artificially flushes the GPU hardware execution pipeline, preventing the overlap of kernel launches and memory transfers. Using `torch.cuda.Event(enable_timing=True)` records GPU clock cycle timestamps asynchronously within the stream without halting execution; host synchronization is deferred until after the entire benchmark window concludes.
 
 A more complete experiment also varies and records its conditions. Repeating the same setup at different times can reveal interference that one long run hides. Interleaving baseline and candidate measurements can reduce the effect of a slow change in machine load. Neither a warmup nor a fixed random seed guarantees a stable machine, as detailed in \ref{psp-benchmarking-environment-noise}, so preserve the raw observations and report the comparison procedure.
 

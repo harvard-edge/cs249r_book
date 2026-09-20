@@ -85,7 +85,10 @@ For four tokens the mask is zero on and below the diagonal and $-\infty$ above i
 
 $$M = \begin{pmatrix} 0 & -\infty & -\infty & -\infty \\ 0 & 0 & -\infty & -\infty \\ 0 & 0 & 0 & -\infty \\ 0 & 0 & 0 & 0 \end{pmatrix}$$
 
-Because $e^{-\infty} = 0$, a masked position contributes nothing to the softmax denominator and receives exactly zero weight. TinyTorch accepts a binary mask, with `1` for an allowed key and `0` for a forbidden key. Each query must retain at least one allowed key; a row with none has no probability distribution to normalize and raises `ValueError`.
+Because $e^{-\infty} = 0$, a masked position contributes nothing to the softmax denominator and receives exactly zero weight.[^fn-float-mask-values] TinyTorch accepts a binary mask, with `1` for an allowed key and `0` for a forbidden key. Each query must retain at least one allowed key; a row with none has no probability distribution to normalize and raises `ValueError`.
+
+[^fn-float-mask-values]: In 32-bit floating point, using $-\infty$ directly (`float("-inf")`) is mathematically exact since $e^{-\infty} = 0.0$ under IEEE 754. In 16-bit floating point (`float16` or `bfloat16`), production frameworks often clamp masked values to large finite negative numbers like $-10^4$ (or `torch.finfo(dtype).min`) to prevent downstream NaN anomalies during intermediate kernel reductions.
+
 
 ### Several heads at once
 
@@ -178,6 +181,15 @@ The Idea said a pronoun, a verb, and a closing bracket each want a different rou
 The projections run once at full width. `_split_heads` reshapes `(B, S, D)` to `(B, S, H, d_k)` and swaps the middle axes, so the attention function receives `(B, H, S, d_k)`. There is no Python loop over heads. A supplied three-dimensional mask `(B, S, S)` becomes `(B, 1, S, S)` and broadcasts across heads; a shared `(S, S)` mask can broadcast directly. The constructor's divisibility check ensures that every feature belongs to exactly one head.
 
 After attention, `_merge_heads` reverses the axis swap and combines the head and feature axes. The output projection then mixes information across heads and returns `(B, S, D)`. Split and merge preserve the association between a token and its features, but each `reshape` and `transpose` returns a tensor with its own storage in TinyTorch. Forward creates these temporary activations without changing the input or the four projection layers.
+
+::: {.column-margin}
+**Core Invariant: Head Split Origami**\
+$$(B, S, D) \xrightarrow{\text{reshape}} (B, S, H, d_k) \xrightarrow{\text{transpose}(1, 2)} (B, H, S, d_k)$$\
+*Placing head dimension before sequence turns multi-head attention into a single batched 2D GEMM.*
+:::
+
+![**Multi-head coordinate origami**: Slicing the full hidden embedding $(B, S, D)$ into $(B, H, S, d_k)$ via reshape and transposition isolates head subspaces into independent 2D planes, enabling hardware parallel matrix multiplication across all heads in a single batch call.](assets/images/diagrams/12_head-split-origami.svg){#fig-head-split-origami fig-alt="Diagram of coordinate origami: (B, Seq, D_model) reshapes and transposes to Head 0 and Head 1 subspaces, enabling batched Q @ K.T matrix multiplication."}
+
 
 ---
 
@@ -296,6 +308,11 @@ The [PyTorch scaled-dot-product attention interface](https://docs.pytorch.org/do
 The comparison in @tbl-attention-bridge concerns execution and storage. It does not add FlashAttention to this NumPy implementation. For either approach, valid probability rows sum to one and a causal output cannot depend on later input tokens. Comparisons should allow for floating-point rounding and should use probabilities before any production attention dropout, since dropout changes individual row sums.
 
 A separate opportunity appears during generation. Under causal attention, adding a token does not change the keys and values already computed for earlier tokens. @Sec-memoization will introduce the state and lifetime needed to reuse them. That cache removes repeated projection work but still leaves the new query to attend over its growing prefix. The attention computation and the storage decision remain distinct mechanisms.
+
+::: {#psp-attention-gqa-mqa .callout-perspective title="Systems Perspective: From MHA to Multi-Query and Grouped-Query Attention"}
+Standard Multi-Head Attention (MHA) pairs each query head with its own dedicated key and value heads ($H_q = H_k = H_v$). While computationally expressive, storing separate KV vectors per head for long contexts causes the KV cache to overwhelm accelerator DRAM during generation. **Multi-Query Attention** (MQA; Shazeer, 2019) collapses all heads to a single shared key/value projection ($H_k = H_v = 1$), reducing KV cache memory by $H\times$ at the cost of modest model capacity. Modern frontier models (LLaMA 3, Mistral, Gemma) adopt the optimal middle ground: **Grouped-Query Attention** (GQA; Ainslie et al., 2023), grouping $H_q$ query heads into $G$ key/value partitions ($H_k = H_v = G$, typically $G = 8$), slashing KV memory traffic while retaining full multi-head modeling accuracy. @sec-memoization explores this cache lifecycle in depth.
+:::
+
 
 ---
 

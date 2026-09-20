@@ -123,7 +123,9 @@ The tile cannot grow without limit. Three blocks must fit in fast memory at once
 
 $$3\,T^2 \times 4 \text{ bytes} \le \text{cache size}.$$
 
-For a hypothetical cache budget of 32,768 bytes, the inequality gives $T \le 52$. A tile of 32 fits this three-block budget; a tile of 64 requires 49,152 bytes. The estimate excludes other live data, library workspace, and cache-line effects. Choosing a tile therefore starts with a capacity estimate and ends with measurement, rather than a promise that a particular size is fastest.
+For a hypothetical cache budget of 32,768 bytes, the inequality gives $T \le 52$. A tile of 32 fits this three-block budget; a tile of 64 requires 49,152 bytes. The estimate excludes other live data, library workspace, and cache-line effects. Choosing a tile therefore starts with a capacity estimate and ends with measurement, rather than a promise that a particular size is fastest.[^fn-gotoblas-hierarchical-tiling]
+
+[^fn-gotoblas-hierarchical-tiling]: **Hierarchical multi-level tiling and GotoBLAS**: High-performance implementations (such as OpenBLAS, BLIS, and NVIDIA CUTLASS) do not stop at single-level cache tiling. As established by Kazushige Goto and Robert van de Geijn (2008), GEMM is structured as a hierarchy of nested tiles matching hardware memory levels: an outer macro-kernel packs $M_c \times K_c$ panels of $A$ and $K_c \times N_c$ panels of $B$ into the L2/L3 cache, while an inner micro-kernel streams tiny $m_r \times n_r$ blocks directly into CPU SIMD or GPU register files. This eliminates cache evictions during the inner dot products and achieves over 90% of theoretical peak hardware arithmetic throughput.
 
 ### Why libraries route through matrix multiply
 
@@ -239,7 +241,9 @@ np.testing.assert_allclose(im2col_conv2d(x, conv.weight, conv.bias, padding=1).d
 ```
 :::
 
-The module's analysis cell times both versions on two layers. On my machine, a $2 \times 3 \to 16$ layer on $16 \times 16$ images takes 34.4 ms through the loops and 0.044 ms through im2col, and a $2 \times 16 \to 32$ layer takes 339 ms against 0.096 ms, about 780 and 3,500 times faster. The patch matrix is 9.0 times the size of the input in both cases, as the storage count in @sec-convolutions predicted. Neither version does less arithmetic; the difference is whether the multiply-adds run in the interpreter or inside one library call.
+The module's analysis cell times both versions on two layers. On my machine, a $2 \times 3 \to 16$ layer on $16 \times 16$ images takes 34.4 ms through the loops and 0.044 ms through im2col, and a $2 \times 16 \to 32$ layer takes 339 ms against 0.096 ms, about 780 and 3,500 times faster. The patch matrix is 9.0 times the size of the input in both cases, as the storage count in @sec-convolutions predicted. Neither version does less arithmetic; the difference is whether the multiply-adds run in the interpreter or inside one library call.[^fn-cudnn-implicit-gemm]
+
+[^fn-cudnn-implicit-gemm]: **Implicit GEMM in production convolution libraries**: While explicit `im2col` lowers convolution to standard Level 3 GEMM, materializing the patch matrix $X_{\text{col}}$ in DRAM incurs a severe $K^2$ memory footprint penalty ($9\times$ expansion for $3 \times 3$ kernels). Production acceleration libraries (such as NVIDIA cuDNN and oneDNN) circumvent this via *implicit GEMM*: instead of constructing $X_{\text{col}}$ in memory, GPU thread blocks compute patch index arithmetic on the fly inside register address calculations. Each thread loads the appropriate image pixel directly into shared memory or registers as needed by the matrix multiply, gaining GEMM computational efficiency without allocating any intermediate buffer.
 
 ### Training through im2col
 

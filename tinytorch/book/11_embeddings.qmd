@@ -174,7 +174,10 @@ The last step is wiring the tables together, and this is where @sec-transformers
 
 {{< include _listings/11_embeddings/emblayer_forward.qmd >}}
 
-Calling `layer(tokens, start_pos)` enters `EmbeddingLayer.__call__`, then the attached `emblayer_forward`. A one-dimensional `(S,)` input is temporarily reshaped to `(1, S)`; a batched `(B, S)` input keeps its shape. The token lookup returns `(B, S, D)`. Optional scaling multiplies those token values by $\sqrt{D}$ before position addition; the default is `False`. The selected position strategy then returns the same shape, and an input that lacked a batch axis has that temporary axis removed. Thus the caller gets `(S, D)` or `(B, S, D)` to match its input.
+Calling `layer(tokens, start_pos)` enters `EmbeddingLayer.__call__`, then the attached `emblayer_forward`. A one-dimensional `(S,)` input is temporarily reshaped to `(1, S)`; a batched `(B, S)` input keeps its shape. The token lookup returns `(B, S, D)`. Optional scaling multiplies those token values by $\sqrt{D}$ before position addition; the default is `False`.[^fn-embed-sqrt-scaling] The selected position strategy then returns the same shape, and an input that lacked a batch axis has that temporary axis removed. Thus the caller gets `(S, D)` or `(B, S, D)` to match its input.
+
+[^fn-embed-sqrt-scaling]: In the original Transformer (Vaswani et al., 2017), token embeddings are initialized with variance $1/D$, giving each token vector an expected $L_2$ norm of approximately $1.0$. In contrast, sinusoidal positional encoding rows have a fixed Euclidean norm of $\sqrt{D/2}$. Multiplying the token vectors by $\sqrt{D}$ elevates their norm to approximately $\sqrt{D}$, preventing the deterministic positional signal from dominating the semantic token representations upon addition.
+
 
 `parameters()` always returns the token table and includes the position table only when it is learned. The sinusoidal branch deliberately wraps its selected position values in a fresh constant Tensor; it has no position parameter to train, while addition still carries gradients into the token branch. With `pos_encoding=None`, the layer skips position addition entirely. @sec-transformers constructs this layer with learned positions and unscaled token embeddings. Its initializer makes no promise that token magnitudes dominate position magnitudes: the token bound depends on $V+D$, while the learned-position bound depends only on $D$.
 
@@ -305,11 +308,21 @@ Position schemes change where the position signal enters the model. The comparis
 | :--- | :--- | :--- | :--- | :--- |
 | Sinusoidal (Vaswani et al., 2017) | Added to the token vector | None | Allocated table in TinyTorch | Original Transformer |
 | Learned table | Added to the token vector | $S_{\max} \times D$ | Allocated table | TinyTorch GPT, GPT-2 |
-| Rotary (RoPE) | Rotates query and key vectors inside attention | None for the rotation | Formula can extend; model limits remain | RoFormer |
+| Rotary (RoPE) | Rotates query and key vectors inside attention | None for the rotation | Formula can extend; model limits remain | RoFormer, LLaMA, Mistral, Gemma |
+| ALiBi (Press et al., 2022) | Static slope penalty added to attention logits | None | Linear penalty extrapolates | MPT, BLOOM |
 
 : **Position information enters at different points**: Fixed formulas avoid learning a row for every position, but do not guarantee successful inference at unseen sequence lengths. {#tbl-position-encodings tbl-colwidths="[24,28,14,16,18]"}
 
 [Rotary position embedding (RoPE)](https://arxiv.org/html/2104.09864v5) rotates pairs of coordinates in query and key vectors, two projections of a token vector that @sec-attention will introduce. Their dot product retains both tokens' content, while its positional factor depends on their relative offset. This uses the same sine/cosine angle-addition identities studied here, but changes the attention computation rather than adding a second table to the input. Evaluating a rotation at a larger position does not by itself guarantee that a model trained on shorter sequences will work there. TinyTorch's `EmbeddingLayer` implements learned and sinusoidal addition, not RoPE.
+
+::: {.column-margin}
+**Core Invariant: RoPE Shift Invariance**\
+$$\langle R_m q, R_n k \rangle = q^T R_{n-m} k$$\
+*Rotates 2D coordinate subspaces by $m\theta$; attention dot product depends strictly on relative offset $(n - m)$.*
+:::
+
+![**Rotary Position Embedding (RoPE) 2D subspace rotation**: Instead of adding static position vectors to inputs, RoPE rotates 2D coordinate slices of query ($m$) and key ($n$) vectors by angle multiples $m\theta$ and $n\theta$. The resulting attention inner product preserves relative distance $(n - m)$, enabling length generalization.](assets/images/diagrams/11_rope-phase-clock.svg){#fig-rope-phase-clock fig-alt="Diagram of 2D complex subspace circles showing query rotated by m*theta and key rotated by n*theta, with invariant relative distance dot product formula."}
+
 
 Three practical checks follow from the reference. Keep token IDs paired with the tokenizer that assigned them. Include the token table and any learned position table in the optimizer's parameter list. Check position capacity before a call: both position strategies in `EmbeddingLayer` raise `ValueError` when the requested interval exceeds their allocated table. A sinusoidal table can be regenerated at a greater length without learning new rows, but that storage change and the model's ability to use longer inputs are separate questions.
 

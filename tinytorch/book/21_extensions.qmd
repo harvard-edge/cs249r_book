@@ -61,7 +61,7 @@ The call itself is not free. On my machine a 1 × 1 `simd_matmul` takes 2.4 µs,
 
 ### Let the compiler use the vector unit
 
-Each CPU core has vector registers that hold several numbers and apply one instruction to all of them. On the ARM cores measured here a NEON register holds four `float32` values, and one fused multiply-add instruction updates all four. A C++ compiler emits these instructions without being asked when a loop's iterations are independent and walk memory in order. The kernel's innermost statement, `c_row[j] += a_ik * b_row[j]`, is written for exactly that. It walks two rows from left to right with one fixed scalar `a_ik`. Compiling the same file with the vectorizer switched off isolates the effect, which comes to a factor of 3.4 (@tbl-extensions-gemm), close to the four lanes of the register.
+Each CPU core has vector registers that hold several numbers and apply one instruction to all of them. On the ARM cores measured here a NEON register holds four `float32` values, and one fused multiply-add instruction updates all four.[^fn-simd-alignment-cache] A C++ compiler emits these instructions without being asked when a loop's iterations are independent and walk memory in order. The kernel's innermost statement, `c_row[j] += a_ik * b_row[j]`, is written for exactly that. It walks two rows from left to right with one fixed scalar `a_ik`. Compiling the same file with the vectorizer switched off isolates the effect, which comes to a factor of 3.4 (@tbl-extensions-gemm), close to the four lanes of the register.
 
 ### Keep the working set in cache
 
@@ -134,7 +134,7 @@ A Triton kernel describes the work of one block of elements. Triton compiles it 
 
 {{< include _listings/21_extensions/fused_bias_gelu_kernel.qmd >}}
 
-`tl.program_id(0)` says which block this program handles, and `offsets` lists its `BLOCK_SIZE` element indices. The last block usually extends past the end of the array, so `mask` switches off the lanes that would read or write out of bounds. The bias index is the same modulo as in the C++ kernel. The formula is computed on whole blocks at once, and the tangent comes from the identity $\tanh(z) = 2\sigma(2z) - 1$ because `tl.sigmoid` is available in every Triton release. `tl.store` writes the finished block, which is the only write the kernel makes. The Python wrapper, `triton_fused_gelu`, copies the arrays to the GPU, launches one program per block, and copies the result back. This path needs an NVIDIA GPU, which the machine measured in this chapter does not have, so it has no timing here.
+`tl.program_id(0)` says which block this program handles, and `offsets` lists its `BLOCK_SIZE` element indices.[^fn-triton-compiler-swizzling] The last block usually extends past the end of the array, so `mask` switches off the lanes that would read or write out of bounds. The bias index is the same modulo as in the C++ kernel. The formula is computed on whole blocks at once, and the tangent comes from the identity $\tanh(z) = 2\sigma(2z) - 1$ because `tl.sigmoid` is available in every Triton release. `tl.store` writes the finished block, which is the only write the kernel makes. The Python wrapper, `triton_fused_gelu`, copies the arrays to the GPU, launches one program per block, and copies the result back. This path needs an NVIDIA GPU, which the machine measured in this chapter does not have, so it has no timing here.
 
 ### The Apple GPU path
 
@@ -244,6 +244,10 @@ The extensions take a TinyTorch computation below NumPy in three ways. `simd_mat
 The measurements carry the lesson. Compiling and vectorizing a loop gains a factor of 170 over Python, and a tuned library is still 75 times faster than that loop. Fusion saves memory traffic, but the gain appears only when the arithmetic inside the fused loop keeps up, and on this workload rewriting one power as two multiplications mattered more. Offloading to a GPU pays only once the work is large enough to cover the copies. None of this was visible from the code alone, and all of it was visible from one table of timings.
 
 The invariant to carry out of the book is the one this chapter tested on its own kernels. An optimization has paid off only when its output has been checked against a reference and its time has been measured on the workload that matters.
+
+[^fn-simd-alignment-cache]: Modern SIMD execution units (e.g., 128-bit ARM NEON, 256-bit x86 AVX2, or 512-bit AVX-512) achieve peak throughput when memory operands are naturally aligned to the vector register width (16, 32, or 64 bytes). When an unaligned vector load straddles a 64-byte CPU cache line boundary, the hardware memory subsystem must issue two separate cache access transactions and splice the result in the processor load buffer, incurring throughput penalties. Production BLAS implementations routinely pad matrix row strides to multiples of 64 bytes to guarantee full cache line alignment.
+
+[^fn-triton-compiler-swizzling]: In traditional CUDA C++, the programmer must explicitly partition thread grids, choreograph intra-warp shuffles, manage shared memory (`__shared__`) buffers, and apply hand-tuned index swizzling permutations to avoid bank conflicts across the 32 hardware memory banks. Triton operates at a higher abstraction: the developer writes SPMD block-level tensor algorithms, and the Triton compiler automatically generates coalesced global memory transactions, bank-conflict-free shared memory layouts, and asynchronous copy pipelines (`cp.async` on NVIDIA Ampere/Hopper).
 
 ## Further reading
 

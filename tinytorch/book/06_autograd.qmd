@@ -95,7 +95,9 @@ For the chapter's concrete input $A=[1,2]$ and incoming gradient $G=[1,1]$, $A^T
 
 ### Reverse order
 
-During the forward pass each result is computed from earlier results, so the tensors and operations form a graph with a direction (from inputs toward the loss) and no cycles (a tensor cannot depend on something computed after it). Reverse mode starts at the loss, where the gradient is trivially $\partial L / \partial L = 1$, and moves toward the inputs.
+During the forward pass each result is computed from earlier results, so the tensors and operations form a graph with a direction (from inputs toward the loss) and no cycles (a tensor cannot depend on something computed after it). Reverse mode starts at the loss, where the gradient is trivially $\partial L / \partial L = 1$, and moves toward the inputs.[^fn-reverse-mode-efficiency]
+
+[^fn-reverse-mode-efficiency]: **Forward-mode versus reverse-mode AD**: For a function $f: \mathbb{R}^N \to \mathbb{R}^M$, forward-mode automatic differentiation propagates tangent vectors with cost proportional to the number of inputs $N$. Reverse-mode automatic differentiation propagates cotangent vectors with cost proportional to the number of outputs $M$. Because deep neural networks optimize a single scalar loss ($M=1$) over millions of parameters ($N \gg 1$), reverse-mode AD computes all $N$ parameter gradients in a single backward pass ($O(1)$ sweeps), whereas forward-mode would require $N$ separate forward passes.
 
 The order matters. A tensor's backward rule turns the gradient at that tensor into gradients at its parents, so the rule must not run until the gradient at that tensor is complete. If the tensor feeds two later operations, both of them must have reported back first. The backward traversal therefore needs the reverse of a **topological order**: consumers precede the tensors they read. A depth-first walk from the loss that lists each tensor only after all of its parents produces the opposite order (parents first), and reversing that list gives us the one we want.
 
@@ -112,6 +114,15 @@ When a tensor feeds two operations, the loss depends on it along two paths, and 
 $$\frac{\partial L}{\partial x} = \sum_{k} \frac{\partial L}{\partial y_k} \frac{\partial y_k}{\partial x},$$
 
 where the $y_k$ are the tensors computed directly from $x$. In code the incoming contributions must be added. The implementation accumulates them in `pending` before adding the complete result into `x.grad`. The smallest example is `x + x`. The same tensor is both inputs of one addition, so its gradient is the incoming gradient twice. An engine that overwrote each pending contribution would silently report half the true value, and the mistake would not raise an error. It would just train worse. The same accumulation is what makes a layer whose input is added back to its output work, and it introduces one kind of accumulation: combining paths within a backward call. A separate choice keeps `.grad` between calls, so the training loop must clear it when starting a new gradient estimate.
+
+::: {.column-margin}
+**Core Invariant: Fan-In Accumulation**\
+$$x.\text{grad} \mathrel{+}= \sum_k \text{vjp}_k$$\
+*Silent bug: assigning `=` instead of `+=` drops multi-branch gradients without raising an error.*
+:::
+
+![**Gradient fan-in accumulation across branches**: When a tensor fan-outs during forward execution (e.g. into parallel residual branches or multi-head attention), reverse-mode autograd must accumulate incoming vector-Jacobian products (`x.grad += dL/dx`) rather than assigning them, honoring the multivariable chain rule.](assets/images/diagrams/06_gradient-fanin-accumulation.svg){#fig-gradient-fanin-accumulation fig-alt="DAG diagram illustrating Node X receiving accumulated gradients from Op A and Op B via multivariable chain rule summation."}
+
 
 ### What the design costs
 

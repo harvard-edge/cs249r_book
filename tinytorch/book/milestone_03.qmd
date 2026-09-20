@@ -342,7 +342,9 @@ for name, cand in ledger.items():
           f"events={[e.value for e in OlympicEvent if qualifies(cand, e)]}")
 ```
 
-The sparse byte count assumes INT8 values with 1-byte column indices (every column index is below 64, so one byte suffices), 2-byte row-start entries for the 65 and 33 row boundaries of the stored $(64,32)$ and $(32,10)$ weight matrices, 42 bias bytes, and the scales. The loop prints the rows of @tbl-m3-scorecard from those counts.
+The sparse byte count assumes INT8 values with 1-byte column indices (every column index is below 64, so one byte suffices), 2-byte row-start entries for the 65 and 33 row boundaries of the stored $(64,32)$ and $(32,10)$ weight matrices, 42 bias bytes, and the scales.[^fn-csr-index-sizing] The loop prints the rows of @tbl-m3-scorecard from those counts.
+
+[^fn-csr-index-sizing]: The storage overhead of Compressed Sparse Row (CSR) depends on matrix dimensions: column indices require $\lceil \log_2(N) / 8 \rceil$ bytes per nonzero element (1 byte for $N \le 256$, 2 bytes for $N \le 65{,}536$), while row pointers require $\lceil \log_2(\text{nnz}) / 8 \rceil$ bytes per row. When weight matrices are wide (e.g., $N = 4096$ in modern LLMs), column indices take 2 bytes, meaning a 1-byte INT8 value carries a 2-byte index—quadrupling the per-weight storage unless sparsity exceeds $75\%$ or block-sparse representations (e.g., 2:4 structured sparsity with 2-bit index nibbles) are used.
 
 | Candidate format | Bytes | Accuracy | $R$ | $C$ | Pass floor? |
 | :--- | ---: | ---: | ---: | ---: | :--- |
@@ -358,7 +360,9 @@ The packed INT8 ratio is $9{,}640/2{,}442 \approx 3.95$, including the metadata 
 
 ## From TinyTorch to Production
 
-The classroom scorecard checks arithmetic on supplied measurements. An external benchmark must also control how those measurements were obtained. [MLPerf Inference's rules](https://github.com/mlcommons/inference_policies/blob/master/inference_rules.adoc) specify workloads, quality requirements, execution scenarios, and reproducibility requirements. Its LoadGen harness issues queries and records completions. The scenario determines the reported performance metric; there is no single universal latency number. TinyTorch's class named `MLPerf` does not implement that official protocol.
+The classroom scorecard checks arithmetic on supplied measurements. An external benchmark must also control how those measurements were obtained. [MLPerf Inference's rules](https://github.com/mlcommons/inference_policies/blob/master/inference_rules.adoc) specify workloads, quality requirements, execution scenarios, and reproducibility requirements. Its LoadGen harness issues queries and records completions.[^fn-mlperf-inference-scenarios] The scenario determines the reported performance metric; there is no single universal latency number. TinyTorch's class named `MLPerf` does not implement that official protocol.
+
+[^fn-mlperf-inference-scenarios]: MLPerf Inference standardizes benchmarking across four distinct operational scenarios: (1) **Single-Stream**: queries arrive one at a time with query size 1, measuring 90th-percentile latency for interactive edge devices; (2) **Server**: queries arrive following a Poisson distribution, measuring the maximum supported query rate (QPS) subject to a strict 99th-percentile latency constraint; (3) **Offline**: all input queries are resident in memory upfront, measuring peak throughput (samples/second) where latency is unconstrained; and (4) **Multi-Stream**: multiple concurrent video or sensor feeds submit batches at fixed intervals, measuring the maximum stream count before frame drops.
 
 ::: {#psp-milestone3-gguf-edge-runtime .callout-production-bridge title="Production bridge: edge runtimes with llama.cpp, GGUF, and ONNX Runtime"}
 Deploying quantized transformer models on consumer hardware (phones, laptops, embedded edge boards) requires moving beyond Python runtimes to specialized C/C++ inference engines:

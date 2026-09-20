@@ -86,6 +86,16 @@ A few values make the shape of this function clear. If the model gives the right
 
 [^fn-nll-cross-entropy]: **Negative log-likelihood** (NLL): the negative logarithm of the probability a model assigns to the outcome that actually occurred. For class-index targets without additional weighting or smoothing, this is the log-softmax, select, negate, and average computation implemented below.
 
+The three loss functions in TinyTorch partition the core supervised learning workloads as summarized in @tbl-loss-taxonomy.
+
+| Loss Class | Target Type | Input Domain | Stability Mechanism | Primary Task |
+| :--- | :--- | :--- | :--- | :--- |
+| `MSELoss` | Continuous $\mathbb{R}$ | Unbounded predictions | Elementwise mean | Regression |
+| `BinaryCrossEntropyLoss` | Probabilities $[0, 1]$ | Probabilities in $(0, 1)$ | Epsilon clipping $[\epsilon, 1-\epsilon]$ | Binary classification |
+| `CrossEntropyLoss` | Class indices $\{0, \dots, C-1\}$ | Unbounded logits $\mathbb{R}^C$ | Max-shifted log-softmax & gather | Multi-class classification |
+
+: **Loss function taxonomy**: Architectural contracts, input domains, and numerical stabilization strategies across TinyTorch losses. {#tbl-loss-taxonomy tbl-colwidths="[22,20,22,22,14]"}
+
 ### The fix: shift before you exponentiate
 
 Softmax has a property that saves it. Multiply the numerator and denominator by the same constant $e^{-c}$ and nothing changes:
@@ -172,7 +182,9 @@ The binary loss has a different input contract. With probabilities `[0.9, 0.2]` 
 
 {{< include _listings/04_losses/BinaryCrossEntropyFunction.qmd >}}
 
-The first check rejects mismatched or empty shapes. The next checks require finite probabilities and targets in `[0, 1]`; intermediate target values are allowed, and weight the two logarithms accordingly. `np.clip` then creates a new probability array bounded by `1e-7` and `1-1e-7`, leaving the input unchanged. Both `p` and `1-p` are positive at the logarithms. The two logged arrays and `bce_per_sample` have the input shape, and `np.mean` reduces every element to one scalar, including every output in a `(B, D)` input.
+The first check rejects mismatched or empty shapes. The next checks require finite probabilities and targets in `[0, 1]`; intermediate target values are allowed, and weight the two logarithms accordingly. `np.clip` then creates a new probability array bounded by `1e-7` and `1-1e-7`, leaving the input unchanged.[^fn-bce-clipping] Both `p` and `1-p` are positive at the logarithms. The two logged arrays and `bce_per_sample` have the input shape, and `np.mean` reduces every element to one scalar, including every output in a `(B, D)` input.
+
+[^fn-bce-clipping]: In exact real analysis, $\lim_{p \to 0^+} p \ln p = 0$. In IEEE 754 floating-point hardware, however, $\ln(0.0) = -\infty$, and the arithmetic expression $0.0 \times (-\infty)$ evaluates immediately to $\text{NaN}$. Bounding $p \in [\epsilon, 1-\epsilon]$ guarantees strictly positive arguments to $\ln(\cdot)$ and finite intermediate values.
 
 {{< include _listings/04_losses/BinaryCrossEntropyLoss.qmd >}}
 

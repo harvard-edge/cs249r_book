@@ -95,7 +95,10 @@ The language-model input pipeline begins with these integers. In @sec-embeddings
 
 {{< include _listings/10_tokenization/Tokenizer.qmd >}}
 
-The class attributes name the unknown token and the word boundary. `<UNK>` occupies ID 0. `TOK_EOW` is the string `" "`, a single space, appended to the last character of each word. Since `str.split()` removes whitespace before creating words, the boundary cannot collide with their contents. The notation `</w>` makes that invisible suffix visible on the page; the implementation does not replace literal `</w>` text. The character tokenizer is the simplest thing that satisfies the contract, and it makes the trade in The Problem concrete: one ID per character, `<UNK>` at ID 0, and a `build_vocab` that sorts the characters it saw so that two runs on the same corpus agree.
+The class attributes name the unknown token and the word boundary. `<UNK>` occupies ID 0. `TOK_EOW` is the string `" "`, a single space, appended to the last character of each word. Since `str.split()` removes whitespace before creating words, the boundary cannot collide with their contents. The notation `</w>` makes that invisible suffix visible on the page; the implementation does not replace literal `</w>` text.[^fn-boundary-markers] The character tokenizer is the simplest thing that satisfies the contract, and it makes the trade in The Problem concrete: one ID per character, `<UNK>` at ID 0, and a `build_vocab` that sorts the characters it saw so that two runs on the same corpus agree.
+
+[^fn-boundary-markers]: Different subword tokenizers use distinct conventions to preserve whitespace boundaries across merges: Sennrich et al. (2016) used trailing `</w>` (or `@@` continuation markers), Google's SentencePiece uses the Unicode meta-symbol ` ` (U+2581 Lower One Eighth Block), and OpenAI's GPT-2/tiktoken maps raw UTF-8 whitespace bytes into printable Unicode characters such as `Ġ` (U+0120).
+
 
 {{< include _listings/10_tokenization/CharTokenizer.qmd >}}
 
@@ -148,6 +151,15 @@ The tempting encoder is greedy: at each position, take the longest string that i
 {{< include _listings/10_tokenization/BPE_encode.qmd >}}
 
 `_apply_merges` takes the rules in rank order and, for each one, walks the word with the same skip-two loop as `_merge_pair`. `encode` calls `str.split()`, then `_get_word_tokens` and `_apply_merges` for each word, then maps the resulting strings to IDs. Each helper constructs lists for this call; encoding does not alter the learned vocabulary or merge list. Every returned ID lies between zero and `vocab_size - 1` once the tokenizer has been trained.
+
+::: {.column-margin}
+**Core Invariant: Merge Rank Determinism**\
+$$\text{Rank}(\text{pair}) = \text{Order of discovery}$$\
+*Encoder must apply merges strictly in ascending rank order to guarantee deterministic segmentation matching training.*
+:::
+
+![**Progressive BPE merge sequence**: Starting with raw base byte tokens, adjacent pairs are iteratively merged according to their corpus frequency rank (`lo`, then `low`). Applying merges in strict rank order guarantees identical token segmentation during inference.](assets/images/diagrams/10_bpe-merge-progression.svg){#fig-bpe-merge-progression fig-alt="Progression diagram showing base byte tokens merging to 'lo' at Rank 1, then merging to 'low' at Rank 2."}
+
 
 Every rule walks the current word whether or not it applies. Four learned rules therefore mean four scans per word, and adding rules increases that work even when a particular word cannot use them. An unseen character falls back to `<UNK>`. A known character in a new position does not: both its internal and word-final forms were reserved during training. The returned Python list has one entry per final token; the dataset and batching machinery of @sec-dataloader can later collect compatible sequences for a model.
 

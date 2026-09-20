@@ -85,6 +85,19 @@ $$\mathbf{h} = \sigma(\mathbf{x}\mathbf{W}_1 + \mathbf{b}_1), \qquad \mathbf{y} 
 
 and the substitution trick fails, because $\sigma(\mathbf{x}\mathbf{W}_1)\mathbf{W}_2$ cannot be rewritten as $\mathbf{x}$ times some matrix. A one-element example makes the point. With ReLU, the function that replaces negatives by zero, $\text{ReLU}(-3 \times -2) = 6$ while $\text{ReLU}(-3) \times (-2) = 0$. The function does not commute with multiplication, so it cannot be pushed through the weights and absorbed. Each layer now bends the space it receives before the next layer draws a line through it, which is how a network builds a boundary that one linear layer cannot represent. ReLU networks produce boundaries made from straight pieces; smooth activations can produce smooth curves.
 
+To see this folding in action, consider a two-neuron hidden layer with weights and biases:
+
+$$\mathbf{W}_1 = \begin{bmatrix} 1 & 1 \\ 1 & 1 \end{bmatrix}, \qquad \mathbf{b}_1 = [0, -1]$$
+
+Operating on an input row $\mathbf{x} = [x_1, x_2]$, the affine step produces $[x_1 + x_2, x_1 + x_2 - 1]$. Applying $\text{ReLU}$ yields hidden features $\mathbf{h} = [h_1, h_2] = [\max(0, x_1 + x_2), \max(0, x_1 + x_2 - 1)]$. Let us trace the four XOR truth-table inputs into this folded space:
+
+- $(0, 0) \to [\max(0, 0), \max(0, -1)] = [0, 0]$ (Class 0)
+- $(1, 0) \to [\max(0, 1), \max(0, 0)] = [1, 0]$ (Class 1)
+- $(0, 1) \to [\max(0, 1), \max(0, 0)] = [1, 0]$ (Class 1)
+- $(1, 1) \to [\max(0, 2), \max(0, 1)] = [2, 1]$ (Class 0)
+
+Notice the spatial collapse: the two off-diagonal points $(1, 0)$ and $(0, 1)$ map to the identical location $[1, 0]$, while $(0, 0)$ remains at the origin and $(1, 1)$ moves to $[2, 1]$. As shown in @fig-space-folding-relu, a single downstream linear decision boundary $h_1 - 2h_2 = 0.5$ now cleanly partitions the positive class $[1, 0]$ (evaluating to $1 - 0 = 1.0 > 0.5$) from both negative classes $[0, 0]$ (evaluating to $0.0 < 0.5$) and $[2, 1]$ (evaluating to $2 - 2(1) = 0.0 < 0.5$). The hinge of the ReLU physically folded the 2D plane along the $x_1 + x_2 = 1$ crease, untangling an inseparable topological configuration.
+
 ![**Space folding with ReLU**: Linear layers in sequence collapse into a single affine transformation unable to partition linearly inseparable patterns such as XOR. An intervening elementwise $\text{ReLU}(z) = \max(0, z)$ folds the negative quadrant onto the coordinate axes, bending the representation space so a downstream hyperplane can separate classes.](assets/images/diagrams/02_space-folding-relu.svg){#fig-space-folding-relu fig-alt="Left panel shows linear collapse where XOR points cannot be separated by a single hyperplane. Right panel shows ReLU folding negative inputs along axes, enabling a linear boundary to cleanly separate positive and negative classes."}
 
 Breaking the collapse is only the first requirement. The function also has to be inexpensive to evaluate across a whole array and responsive enough that changing the incoming values can change the result. A nearly flat function loses that responsiveness. @sec-autograd will turn this observation into derivatives and gradients, the quantities used to decide how weights should change during training. Here the output values and the shapes of the curves are enough to compare the choices in @tbl-activation-zoo.
@@ -108,7 +121,9 @@ Breaking the collapse is only the first requirement. The function also has to be
 
 The **sigmoid** maps zero to $0.5$, $-1$ to about $0.269$, and $1$ to about $0.731$. Its mathematical range is $(0, 1)$, useful when an output represents a probability. The endpoints are approached but never reached in exact arithmetic; float32 can round sufficiently extreme results to exactly 0 or 1.
 
-At the ends of the curve, large input changes produce small output changes. For example, increasing the input from 5 to 6 moves the output only from about $0.9933$ to $0.9975$. This flattening is called **saturation**. @sec-autograd explains why saturated activations can weaken the signal used to update earlier weights, a problem called vanishing gradients. Saturation is already visible in the forward values, without implementing training.
+At the ends of the curve, large input changes produce small output changes. For example, increasing the input from 5 to 6 moves the output only from about $0.9933$ to $0.9975$. This flattening is called **saturation**. At extreme inputs, float32 evaluations of exponential functions also encounter severe hardware limits.[^fn-exp-overflow] @sec-autograd explains why saturated activations can weaken the signal used to update earlier weights, a problem called vanishing gradients. Saturation is already visible in the forward values, without implementing training.
+
+[^fn-exp-overflow]: In single-precision IEEE 754 float32, the maximum finite positive value is $(2 - 2^{-23}) \times 2^{127} \approx 3.4028235 \times 10^{38}$. Because $\ln(3.4028235 \times 10^{38}) \approx 88.72284$, any unshielded evaluation of $e^x$ for $x > 88.72$ overflows to $+\infty$, quickly poisoning downstream calculations with $\text{NaN}$ or infinity.
 
 ### Tanh
 
@@ -152,7 +167,9 @@ A gate is a multiplier that controls how much of a value passes through. ReLU us
 
 TinyTorch approximates the gate with the sigmoid already introduced:
 
-$$\operatorname{GELU}_{\text{TinyTorch}}(x) = x\,\sigma(1.702x).$$
+$$\operatorname{GELU}_{\text{TinyTorch}}(x) = x\,\sigma(1.702x).$$[^fn-gelu-constant]
+
+[^fn-gelu-constant]: The scaling factor $1.702 \approx \sqrt{8/\pi} \times 1.066$ is the classical logistic coefficient that minimizes the uniform Chebyshev discrepancy $\sup_{x \in \mathbb{R}} |\sigma(c \cdot x) - \Phi(x)|$, guaranteeing that the sigmoid gate deviates from the standard Gaussian cumulative normal distribution by less than $0.0095$ across the entire real line.
 
 At $x=-1$, the gate is about $0.1542$, giving an output of $-0.1542$. At $x=1$, it is about $0.8458$, giving $0.8458$. Negative inputs can therefore affect the next layer, unlike ReLU's zero branch. Very negative inputs still produce outputs close to zero, so smoothness does not promise strong responsiveness everywhere. The approximation also differs from exact GELU, whose outputs at $-1$ and $1$ are about $-0.1587$ and $0.8413$. The worked trace follows the sigmoid form that the code actually computes.
 
@@ -249,7 +266,17 @@ For scores `[1, 2, 3]`, Softmax returns approximately `[0.0900, 0.2447, 0.6652]`
 
 {{< include _listings/02_activations/SoftmaxFunction.qmd >}}
 
-The formula exponentiates each score and divides by the row's exponential sum. To avoid asking for an enormous exponential, the code subtracts the row maximum first. For `[1, 2, 3]`, the shifted scores are `[-2, -1, 0]`, the exponentials are approximately `[0.1353, 0.3679, 1]`, and their sum is `1.5032`. Division gives the probabilities above. Subtracting a common constant does not change the normalized ratios, since its exponential factor cancels between numerator and denominator.
+The formula exponentiates each score and divides by the row's exponential sum. To avoid asking for an enormous exponential, the code subtracts the row maximum first. For `[1, 2, 3]`, the shifted scores are `[-2, -1, 0]`, the exponentials are approximately `[0.1353, 0.3679, 1]`, and their sum is `1.5032`. Division gives the probabilities above. Subtracting a common constant $m = \max_k x_k$ does not change the normalized ratios, since its exponential factor cancels between numerator and denominator:
+
+$$\frac{e^{x_i - m}}{\sum_j e^{x_j - m}} = \frac{e^{x_i} e^{-m}}{\sum_j (e^{x_j} e^{-m})} = \frac{e^{-m} e^{x_i}}{e^{-m} \sum_j e^{x_j}} = \frac{e^{x_i}}{\sum_j e^{x_j}}.$$
+
+::: {.column-margin}
+**Core Invariant: Safe Exponentiation**\
+$$\max(z) \text{ subtraction keeps } z_i - m \le 0$$\
+*Exponentials never exceed $e^0 = 1.0$, preventing float32 overflow cliff.*
+:::
+
+![**The Softmax numerical cliff**: Naive exponentiation of large logits triggers float32 overflow ($> 3.4 \times 10^{38}$), returning $\text{NaN}$ and collapsing training. Subtracting the running maximum shifts exponents into the non-positive domain ($\le 0$), ensuring finite, stable probability evaluation.](assets/images/diagrams/02_softmax-numerical-cliff.svg){#fig-softmax-numerical-cliff fig-alt="Top panel displays naive softmax overflowing to +Inf and NaN. Bottom panel displays safe LogSumExp shifting by max logit to compute exact probabilities without NaN risk."}
 
 A difference between extreme finite scores may round to negative infinity; `errstate` permits that result because its exponential is correctly zero.
 
@@ -337,7 +364,7 @@ For such a simple function, memory movement can dominate arithmetic. An operatio
 
 $$\text{Time} \approx \frac{\text{Bytes Read} + \text{Bytes Written}}{\text{Peak Memory Bandwidth}}$$
 
-**Kernel fusion**: Compilers like PyTorch Inductor or Triton fuse the activation directly into the epilogue of the preceding GEMM (matrix multiplication). Instead of writing the unactivated result to DRAM and reading it back, the GPU keeps intermediate matrix products in fast on-chip registers (RF) or shared memory (SRAM), applies the activation elementwise, and writes only the final activated tensor back to HBM.
+**Kernel fusion**: Compilers like PyTorch Inductor or Triton fuse the activation directly into the epilogue of the preceding GEMM (matrix multiplication). Instead of writing the unactivated result to DRAM and reading it back, the GPU keeps intermediate matrix products in fast on-chip registers (RF) or shared memory (SRAM), applies the activation elementwise, and writes only the final activated tensor back to HBM (see @fig-kernel-fusion-traffic in @sec-acceleration for a hardware trace of register versus DRAM traffic).
 
 :::
 

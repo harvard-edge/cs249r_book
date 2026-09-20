@@ -51,6 +51,15 @@ A sparse format such as compressed sparse row[^fn-csr-sparse-format] stores nonz
 
 [^fn-csr-sparse-format]: **Compressed sparse row (CSR)**: a storage format that keeps three arrays, the nonzero values, the column index of each one, and the position where each row starts. It only saves memory once fewer than roughly half the entries are nonzero, because every stored value drags an index along with it.
 
+::: {.column-margin}
+**Core Invariant: CSR Index Metadata Breakeven**\
+$$\text{Memory}_{\text{CSR}} = \text{NNZ} \times (\text{sizeof}(V) + \text{sizeof}(I)) + (M + 1) \times \text{sizeof}(P)$$\
+*Because each nonzero requires an explicit column index, CSR only saves memory when sparsity exceeds $\approx 66\%$.*
+:::
+
+![**Compressed Sparse Row (CSR) 3-array representation**: Storing sparse matrices requires three coordinated buffers: non-zero `values`, corresponding `col_indices`, and `row_ptr` slicing bounds. Below $\sim 66\%$ sparsity, column index metadata outweighs the memory saved by omitting zero elements.](assets/images/diagrams/16_csr-three-arrays.svg){#fig-csr-three-arrays fig-alt="Diagram comparing a dense 3x3 grid with 66% zeros against CSR 3-array representation showing values, col_indices, and row_ptr arrays."}
+
+
 ---
 
 ## The Idea
@@ -103,9 +112,10 @@ Two facts make this useful. First, the Eckart-Young theorem (1936) says $W_r$ is
 
 $$\|W - W_r\|_F = \sqrt{\sum_{i=r+1}^{\min(M,N)} \sigma_i^2}$$
 
-where $\|\cdot\|_F$ is the Frobenius norm.[^fn-frobenius-svd-error] You can read the error off the singular values before deciding on $r$. Second, the parameter count changes from $M \times N$ to $r \times (M + N)$, and so does the multiply count, because computing $x W_A$ and then multiplying the result by $W_B$ costs $2r(M+N)$ operations instead of $2MN$.
+where $\|\cdot\|_F$ is the Frobenius norm.[^fn-frobenius-svd-error] You can read the error off the singular values before deciding on $r$. Second, the parameter count changes from $M \times N$ to $r \times (M + N)$, and so does the multiply count, because computing $x W_A$ and then multiplying the result by $W_B$ costs $2r(M+N)$ operations instead of $2MN$.[^fn-svd-activation-traffic]
 
 [^fn-frobenius-svd-error]: **Frobenius norm**: the square root of the sum of the squares of every entry, which is the ordinary vector length applied to a matrix as if it were one long vector. For the $3 \times 3$ matrix in the worked trace it is $\sqrt{18} \approx 4.24$, so a reconstruction error of $1.41$ means about a third of the matrix's "length" was dropped.
+[^fn-svd-activation-traffic]: **Activation traffic in low-rank factorization**: While factorizing $W \in \mathbb{R}^{M \times N}$ into $W_A \in \mathbb{R}^{M \times r}$ and $W_B \in \mathbb{R}^{r \times N}$ strictly reduces parameter storage and multiply-accumulate FLOPs for $r < \frac{MN}{M+N}$, it introduces an intermediate hidden activation tensor $h = x W_A \in \mathbb{R}^{B \times r}$ for batch size $B$. In unfused execution runtimes, $h$ must be written to DRAM or L2 cache after the first GEMM and reloaded for the second GEMM. If $B$ is large, the memory bandwidth consumed by streaming intermediate activations can offset the weight traffic savings, making operator fusion of $x W_A W_B$ or kernel chaining essential.
 
 ![**Low-rank SVD factorization and breakeven rank**: A weight matrix $W \in \mathbb{R}^{M \times N}$ is factorized into two thin matrices $W_A \in \mathbb{R}^{M \times r}$ and $W_B \in \mathbb{R}^{r \times N}$. The scree plot (left) reveals exponential decay of singular values, indicating low effective rank. Stored parameters drop from $M \times N$ to $r(M+N)$, achieving real storage and FLOP savings whenever chosen rank $r < \frac{MN}{M+N}$ (right).](assets/images/diagrams/16_svd-rank-breakeven.svg){#fig-svd-rank-breakeven fig-alt="Left panel shows singular value scree plot. Right panel shows parameter count scaling with rank r, crossing the original uncompressed line at the breakeven rank."}
 
@@ -132,7 +142,9 @@ Knowledge distillation trains a compact student model, but the training run must
 Dual forward passes and high-dimensional KL divergence evaluations require substantial temporary memory headroom before the compressed student can be deployed standalone.
 :::
 
-Module 16 defaults to $T = 3$ and $\alpha = 0.7$. Both terms average over examples after summing over classes, so duplicating a batch leaves the objective unchanged. The soft term here omits the optional temperature-squared multiplier; changing temperature therefore changes both the target distribution and its gradient scale. The training loop still uses @sec-training's forward, backward, and update sequence, with the teacher held fixed.
+Module 16 defaults to $T = 3$ and $\alpha = 0.7$. Both terms average over examples after summing over classes, so duplicating a batch leaves the objective unchanged. The soft term here omits the optional temperature-squared multiplier; changing temperature therefore changes both the target distribution and its gradient scale.[^fn-distillation-temperature-squared] The training loop still uses @sec-training's forward, backward, and update sequence, with the teacher held fixed.
+
+[^fn-distillation-temperature-squared]: **The $T^2$ scaling factor in knowledge distillation**: In the high-temperature limit ($T \to \infty$), the Taylor expansion of softened softmax probabilities yields $p_i \approx \frac{1}{K} + \frac{z_i - \bar{z}}{K T}$. Differentiating the KL divergence between teacher and student softened distributions with respect to student logit $z_i$ produces $\frac{\partial \mathcal{L}_{\text{KL}}}{\partial z_i} \approx \frac{1}{K T^2} (z_i - v_i)$, where $v_i$ is the teacher logit. Because the gradient magnitude decays quadratically ($1/T^2$) as logits are flattened, Hinton et al. (2015) multiply the soft loss term by $T^2$ to keep the gradient scale and the balance between hard cross-entropy and soft distillation invariant to temperature adjustments. TinyTorch intentionally omits $T^2$ to preserve code transparency, requiring users to adjust $\alpha$ or learning rate when modifying $T$.
 
 ---
 

@@ -112,7 +112,10 @@ $$
 \end{aligned}
 $$
 
-The input gradient is the mirror image, scattering $G[n, o, h, c] \cdot W[o, \text{ch}, i, j]$ back onto input pixel $(hS + i, cS + j)$. The window loops accumulate input and weight gradients; a separate reduction sums the bias gradient. Max pooling has no weights, and its gradient goes entirely to the one input pixel that won each window; the others receive zero.
+The input gradient is the mirror image, scattering $G[n, o, h, c] \cdot W[o, \text{ch}, i, j]$ back onto input pixel $(hS + i, cS + j)$. The window loops accumulate input and weight gradients; a separate reduction sums the bias gradient.[^fn-col2im-scatter] Max pooling has no weights, and its gradient goes entirely to the one input pixel that won each window; the others receive zero.
+
+[^fn-col2im-scatter]: In lowered matrix formulations, input gradient accumulation is computed via the **col2im** operation—the adjoint of im2col. Because sliding windows overlap, col2im cannot simply reshape $G_{\text{col}}$; it must accumulate overlapping entries using a scatter-add ($+=$) reduction into the spatial input buffer.
+
 
 ---
 
@@ -217,6 +220,15 @@ def conv2d_im2col(x, weight, bias, stride=1, padding=0):
 
 The multiplies all happen inside the `@`. Everything around it is copying and reshaping. `patches` holds $N H_{\text{out}} W_{\text{out}} C_{\text{in}} K^2$ numbers where the input held $N C_{\text{in}} H W$, which gives the ninefold storage expansion in the example above. The last line uses NumPy views to arrange the output axes: the product comes out with the output channel as its last axis, and a `reshape` plus a `transpose` present it as $[N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}}]$ without moving a number. This helper supports square filters and scalar stride/padding. It is an array-only comparison model; the module also accepts rectangular kernels, and its tensor operations retain the gradient graph.
 
+::: {.column-margin}
+**Core Invariant: Spatial Unfolding**\
+$$\text{Patch } (C_{\text{in}}, K, K) \to \text{Row in } X_{\text{col}}$$\
+*Converts nested 4D spatial sliding windows into a single BLAS GEMM at the expense of $K^2$ memory expansion.*
+:::
+
+![**Lowering 2D convolution to GEMM via im2col**: Spatial receptive fields across input feature maps are unfolded into contiguous rows/columns. The resulting matrix product executes with optimized level-3 BLAS libraries, trading temporary buffer replication for maximum compute density.](assets/images/diagrams/09_im2col-unfolding.svg){#fig-im2col-unfolding fig-alt="Diagram of im2col lowering: 2D sliding receptive field unfolds into column vector, filter bank unfolds into rows, resulting in single matrix multiplication."}
+
+
 ::: {#nbk-convolutions-im2col-footprint .callout-notebook title="Napkin Math: im2col memory expansion ratio"}
 
 **Problem**: For a batch of $B=32$ feature maps with $C_{\text{in}}=64$ channels and spatial dimensions $112 \times 112$, what is the memory overhead of lowering a $3 \times 3$ convolution via explicit im2col?
@@ -247,7 +259,10 @@ Where the forward pass read `input_val * weight_val` and wrote to `output`, the 
 
 ### The layer
 
-Finally the layer object, because the routines above are helpers and operations and the rest of TinyTorch works with layers. The optimizer from @sec-optimizers asks each layer for `parameters()`, and `Sequential` from @sec-layers calls `forward`, so `Conv2d` needs the same two methods `Linear` has. The one decision hiding in the constructor is the initial scale of the weights, and the wrong choice here produces a wrong number, not a slow one. This convolution uses a normal distribution with standard deviation $\sqrt{2 / \text{fan\_in}}$, whose factor of 2 compensates for the ReLU that follows, and the trap is what fan-in means for a filter. It is not the number of pixels in the image. Each output pixel sums $C_{\text{in}} K^2$ products, 27 for the first layer of a color network, so that is the fan-in. Use the image size instead, 150,528 for a $224 \times 224$ photo, and the weights come out about 75 times too small; the first layer's activations inherit that smaller scale. Repeating such under-scaling through a network can leave very small signals at the loss.
+Finally the layer object, because the routines above are helpers and operations and the rest of TinyTorch works with layers. The optimizer from @sec-optimizers asks each layer for `parameters()`, and `Sequential` from @sec-layers calls `forward`, so `Conv2d` needs the same two methods `Linear` has. The one decision hiding in the constructor is the initial scale of the weights, and the wrong choice here produces a wrong number, not a slow one. This convolution uses a normal distribution with standard deviation $\sqrt{2 / \text{fan\_in}}$, whose factor of 2 compensates for the ReLU that follows, and the trap is what fan-in means for a filter. It is not the number of pixels in the image. Each output pixel sums $C_{\text{in}} K^2$ products, 27 for the first layer of a color network, so that is the fan-in.[^fn-kaiming-init] Use the image size instead, 150,528 for a $224 \times 224$ photo, and the weights come out about 75 times too small; the first layer's activations inherit that smaller scale. Repeating such under-scaling through a network can leave very small signals at the loss.
+
+[^fn-kaiming-init]: **Kaiming (He) initialization** sets weight variance $\text{Var}(W) = 2 / \text{fan\_in}$ where $\text{fan\_in} = C_{\text{in}} \cdot K_h \cdot K_w$. The factor of 2 accounts for half the activations being zeroed out by subsequent ReLU nonlinearities ($\mathbb{E}[\max(0, x)^2] = \frac{1}{2} \text{Var}(x)$), maintaining constant activation variance across arbitrarily deep convolutional networks.
+
 
 {{< include _listings/09_convolutions/Conv2d_init.qmd >}}
 

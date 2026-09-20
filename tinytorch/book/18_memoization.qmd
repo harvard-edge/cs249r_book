@@ -72,7 +72,9 @@ Consider token $i$ at some attention layer, with input row $\mathbf{x}_i$ and th
 
 $$\mathbf{k}_i = \mathbf{x}_i W_K, \qquad \mathbf{v}_i = \mathbf{x}_i W_V.$$
 
-Three facts together make $\mathbf{k}_i$ and $\mathbf{v}_i$ constants for the rest of the generation. The weights are frozen at inference time, so $W_K$ and $W_V$ are the same at every step. The projection is a function of $\mathbf{x}_i$ and the weights alone, with no dependence on any other token. Finally, $\mathbf{x}_i$ itself does not change when later tokens arrive, because of the causal mask. The mask in every layer below this one forbids position $i$ from attending to positions after $i$, so the row that reaches this layer for token $i$ is a function of tokens $1$ through $i$ only, and those tokens are already fixed. The third fact is the one the whole scheme rests on. Without a causal mask, appending token $t$ would change every earlier row at every layer, and there would be nothing safe to cache.
+Three facts together make $\mathbf{k}_i$ and $\mathbf{v}_i$ constants for the rest of the generation. The weights are frozen at inference time, so $W_K$ and $W_V$ are the same at every step. The projection is a function of $\mathbf{x}_i$ and the weights alone, with no dependence on any other token. Finally, $\mathbf{x}_i$ itself does not change when later tokens arrive, because of the causal mask. The mask in every layer below this one forbids position $i$ from attending to positions after $i$, so the row that reaches this layer for token $i$ is a function of tokens $1$ through $i$ only, and those tokens are already fixed. The third fact is the one the whole scheme rests on. Without a causal mask, appending token $t$ would change every earlier row at every layer, and there would be nothing safe to cache.[^fn-rope-kv-cache-interaction]
+
+[^fn-rope-kv-cache-interaction]: **Caching Rotary Position Embeddings (RoPE)**: In architectures employing Rotary Position Embeddings (such as LLaMA, Mistral, and Gemma), position information is embedded by rotating queries and keys by position-dependent angles: $\tilde{\mathbf{q}}_m = R_{\Theta, m} \mathbf{q}_m$ and $\tilde{\mathbf{k}}_n = R_{\Theta, n} \mathbf{k}_n$. Because the attention dot product depends strictly on relative displacement $(m - n)$ via $(R_{\Theta, m} \mathbf{q})^T (R_{\Theta, n} \mathbf{k}) = \mathbf{q}^T R_{\Theta, n - m} \mathbf{k}$, keys are rotated at their absolute write slot $n = \text{seq\_pos}$ *before* insertion into the KV cache. Once written, cached keys never need to be re-rotated when future tokens are generated.
 
 ### Only the newest query is needed
 
@@ -92,6 +94,15 @@ Putting the two facts together, one generation step at one attention layer does 
 4. Mix the $t$ cached values with those weights to produce $\mathbf{o}_t$.
 
 Nothing in steps 1 through 4 touches an old key or value except to read it. The cache is append-only, and a single integer tracks the filled prefix shared by the layers. The stored key and value arrays carry the rest of its state.
+
+::: {.column-margin}
+**Core Invariant: Cursor Write-Head Advance**\
+$$\text{cache}[:, :, \text{seq\_pos}, :] = k_{\text{new}}, \quad \text{seq\_pos} \mathrel{+}= 1$$\
+*Preallocating max capacity turns $O(S)$ dynamic memory reallocation into $O(1)$ stride indexing.*
+:::
+
+![**KV cache advancing write cursor and ring buffer**: Rather than reallocating expanding key/value tensors each generation step, a fixed buffer of shape $(B, H, S_{\max}, d_k)$ is preallocated. Each token generation step writes the newly projected key and value into the single slot indexed by `seq_pos` and advances the cursor, eliminating memory reallocation.](assets/images/diagrams/18_kv-cache-cursor.svg){#fig-kv-cache-cursor fig-alt="Diagram of KV cache preallocated slots with valid slots 0 and 1, write head slot 2 at seq_pos=2, and reserved remaining slots."}
+
 
 ### What it costs and what it buys
 
@@ -324,7 +335,7 @@ The **PagedAttention** algorithm (Kwon et al., 2023, powering **vLLM**) adopts o
 - **Copy-on-Write Prefix Sharing**: Parallel beams in beam search or shared system prompts reference the same physical KV blocks, enabling instantaneous prefix reuse.
 :::
 
-@Tbl-kv-bridge separates these alternatives from the reference. Paging can preserve the full-context computation, subject to the same floating-point tolerance. Quantization introduces approximation, and a sliding window changes the attended context; each requires its own quality check. Increased latency at long context is a reason to measure growing cache reads, not proof that they are the only bottleneck. The invariant remains that every required position occurs once, belongs to this request, and carries the same key and value that an uncached causal forward would compute.
+@Tbl-kv-bridge separates these alternatives from the reference. Paging can preserve the full-context computation, subject to the same floating-point tolerance. Quantization introduces approximation, and a sliding window changes the attended context; each requires its own quality check. Optimized decode kernels like FlashDecoding parallelize along the cached sequence dimension to saturate memory bandwidth.[^fn-flash-decoding-parallelism] Increased latency at long context is a reason to measure growing cache reads, not proof that they are the only bottleneck. The invariant remains that every required position occurs once, belongs to this request, and carries the same key and value that an uncached causal forward would compute.
 
 | | This chapter | Production serving |
 | :--- | :--- | :--- |
@@ -337,6 +348,7 @@ The **PagedAttention** algorithm (Kwon et al., 2023, powering **vLLM**) adopts o
 : **Serving alternatives**: What changes between TinyTorch's cache and a production serving engine. Storage-preserving alternatives retain the recurrence; approximation or eviction needs additional checks. {#tbl-kv-bridge tbl-colwidths="[18,36,46]"}
 
 [^fn-virtual-memory-paged-kv]: **Virtual memory**: the operating system mechanism that lets a program address memory as if it were one contiguous range while the physical pages behind it are scattered wherever the allocator found room, with a page table translating one to the other. PagedAttention applies the same indirection to KV rows so that a 4,000-token sequence can occupy 250 scattered 16-token blocks instead of one reserved 4,096-row buffer.
+[^fn-flash-decoding-parallelism]: **FlashDecoding and sequence-split parallelism**: While standard FlashAttention parallelizes along batch and query sequence dimensions, autoregressive decode features a single query token ($S_q = 1$) attending to thousands of cached keys ($S_{\text{kv}} \gg 1$), underutilizing GPU streaming multiprocessors. FlashDecoding (Dao et al., 2023) resolves this bottleneck by splitting the cached KV sequence length across independent GPU thread blocks. Each block computes local softmax running maxima and partial attention outputs in SRAM; a lightweight secondary reduction kernel combines these partial states via logsumexp rescaling, achieving near-optimal memory bandwidth saturation during decode.
 
 ---
 
