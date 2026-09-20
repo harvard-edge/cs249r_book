@@ -6,7 +6,7 @@ window.MLSP.games = window.MLSP.games || {};
 window.MLSP.games.allreduce = function(canvas, opts) { return mountAllreduce(canvas, opts); };
 
 export async function mountAllreduce(canvas, opts = {}) {
-  const { app, stage, width: W, height: H, onTick } = await mountPixiOnCanvas(canvas, { bg: 0x11151c });
+  const { stage, width: W, height: H, onTick, destroy } = await mountPixiOnCanvas(canvas, { bg: 0x11151c });
 
   const COL = {
     bg: 0x11151c,
@@ -25,12 +25,15 @@ export async function mountAllreduce(canvas, opts = {}) {
   const BPM = 60;
   const beatInterval = 60000 / BPM;
   const tolerance = 150; // ms
+  const runTime = 30000;
 
   const state = {
     combo: 0,
     score: 0,
     time: 0,
     lastBeatTime: 0,
+    lastResolvedBeat: 0,
+    misses: 0,
     over: false,
     started: false
   };
@@ -50,6 +53,21 @@ export async function mountAllreduce(canvas, opts = {}) {
   metronome.circle(0, 0, R).stroke({ width: 2, color: 0xffffff });
   metronome.position.set(cx, cy);
   gameLayer.addChild(metronome);
+
+  const targetText = new P.Text({
+    text: "NEXT GPU 1",
+    style: { fill: COL.text, fontSize: 19, fontWeight: "700" }
+  });
+  targetText.anchor.set(0.5);
+  targetText.position.set(cx, cy);
+  gameLayer.addChild(targetText);
+  const timeText = new P.Text({
+    text: "30s",
+    style: { fill: 0xb8cbd8, fontSize: 18, fontWeight: "700" }
+  });
+  timeText.anchor.set(1, 0);
+  timeText.position.set(W - 26, 20);
+  stage.addChild(timeText);
 
   for (let i = 0; i < 4; i++) {
     const angle = (i * Math.PI) / 2 - Math.PI / 4; // 45, 135, 225, 315 deg
@@ -111,36 +129,38 @@ export async function mountAllreduce(canvas, opts = {}) {
 
   function handleInput(idx) {
     if (!state.started || state.over) return;
-    
-    // Check timing
-    const nextBeat = state.lastBeatTime + beatInterval;
-    const diff = Math.min(Math.abs(state.time - state.lastBeatTime), Math.abs(state.time - nextBeat));
+
+    const beat = Math.round(state.time / beatInterval);
+    const diff = Math.abs(state.time - beat * beatInterval);
+    const expected = (beat - 1) % 4;
 
     const box = gpus[idx].box;
     box.tint = 0xffffff;
     setTimeout(() => { if (!box.destroyed) box.tint = COL.gpu; }, 100);
 
-    if (diff <= tolerance) {
-      // Perfect
+    if (beat >= 1 && diff <= tolerance && beat > state.lastResolvedBeat && idx === expected) {
+      state.lastResolvedBeat = beat;
       state.combo++;
       state.score += 10 * state.combo;
       flash(stage, COL.perfect, 150, 0.2);
       burst(gameLayer, gpus[idx].x, gpus[idx].y, COL.perfect, 12);
       spawnChunk(idx);
-      if (opts.onScoreChange) opts.onScoreChange({ score: state.score, combo: state.combo });
+      if (opts.onScoreChange) opts.onScoreChange({ score: state.score, combo: state.combo, timeLeft: Math.max(0, runTime - state.time) });
     } else {
-      // Miss
       state.combo = 0;
+      state.misses++;
       flash(stage, COL.miss, 200, 0.4);
       shake(gameLayer, 10, 200);
-      floatText(gameLayer, gpus[idx].x, gpus[idx].y - 30, "COLLISION", COL.miss, { size: 18 });
-      if (opts.onScoreChange) opts.onScoreChange({ score: state.score, combo: state.combo });
+      floatText(gameLayer, gpus[idx].x, gpus[idx].y - 30, idx !== expected && beat >= 1 && diff <= tolerance ? "WRONG GPU" : "OFF BEAT", COL.miss, { size: 18 });
+      if (opts.onScoreChange) opts.onScoreChange({ score: state.score, combo: state.combo, timeLeft: Math.max(0, runTime - state.time) });
     }
   }
 
   function handleKeydown(e) {
     if (e.key >= '1' && e.key <= '4') {
       handleInput(parseInt(e.key) - 1);
+    } else if (state.over && e.key.toLowerCase() === 'r') {
+      opts.onRetry?.();
     }
   }
   window.addEventListener('keydown', handleKeydown);
@@ -149,14 +169,28 @@ export async function mountAllreduce(canvas, opts = {}) {
   mountReadyOverlay(stage, {
     width: W, height: H,
     title: "ALL-REDUCE RHYTHM",
-    goal: "Tap each GPU on the beat. Keep gradients flowing.",
+    goal: "Follow GPUs 1 → 4 on the beat for 30 seconds.",
     controls: "1 2 3 4  fire to GPU · TAP a GPU · R  retry",
     onLaunch: () => { state.started = true; state.lastBeatTime = state.time; }
   });
 
   onTick((dt) => {
     if (!state.started || state.over) return;
-    state.time += dt;
+    state.time = Math.min(runTime, state.time + Math.min(dt, 100));
+    timeText.text = Math.ceil((runTime - state.time) / 1000) + "s";
+    const upcomingBeat = Math.floor(state.time / beatInterval) + 1;
+    targetText.text = "NEXT GPU " + ((upcomingBeat - 1) % 4 + 1);
+    opts.onScoreChange?.({ score: state.score, combo: state.combo, timeLeft: runTime - state.time });
+
+    if (state.time >= runTime) { finish(); return; }
+
+    const expiredBeat = Math.floor((state.time - tolerance) / beatInterval);
+    if (expiredBeat >= 1 && expiredBeat > state.lastResolvedBeat) {
+      state.lastResolvedBeat = expiredBeat;
+      state.combo = 0;
+      state.misses++;
+      floatText(gameLayer, cx, cy + 32, "MISSED SLOT", COL.miss, { size: 17 });
+    }
 
     if (state.time >= state.lastBeatTime + beatInterval) {
       state.lastBeatTime += beatInterval;
@@ -169,13 +203,40 @@ export async function mountAllreduce(canvas, opts = {}) {
     metronome.alpha = 0.5 * (1 - progress);
   });
 
+  function finish() {
+    if (state.over) return;
+    state.over = true;
+    const shade = new P.Graphics();
+    shade.rect(0, 0, W, H).fill(COL.bg);
+    const title = new P.Text({
+      text: "ROUND COMPLETE",
+      style: { fill: COL.perfect, fontSize: 32, fontWeight: "700" }
+    });
+    title.anchor.set(0.5);
+    title.position.set(cx, cy - 42);
+    const summary = new P.Text({
+      text: `Score ${state.score} · Misses ${state.misses}`,
+      style: { fill: COL.text, fontSize: 17 }
+    });
+    summary.anchor.set(0.5);
+    summary.position.set(cx, cy + 7);
+    const retry = new P.Text({
+      text: "Press R to try again",
+      style: { fill: 0xffd6a8, fontSize: 16 }
+    });
+    retry.anchor.set(0.5);
+    retry.position.set(cx, cy + 47);
+    stage.addChild(shade, title, summary, retry);
+    opts.onGameOver?.({ score: state.score, misses: state.misses });
+  }
+
   return {
     id: "allreduce",
     ahaLabel: "You just experienced",
-    ahaText: "Ring All-Reduce synchronizes gradients across GPUs by passing chunks in a circle. Perfect timing (synchronous steps) ensures maximum bandwidth utilization. When GPUs fall out of sync, collisions and pipeline stalls occur, cratering your training throughput.",
+    ahaText: "Ring all-reduce passes gradient chunks between GPUs in ordered steps. A delayed participant makes peers wait and leaves communication slots idle. The rhythm game is a timing analogy, not a packet-level simulation.",
     destroy() {
       window.removeEventListener('keydown', handleKeydown);
-      app.destroy(true, { children: true, texture: true });
+      destroy();
     }
   };
 }

@@ -40,6 +40,7 @@ done
 # Maps mlsysbook.ai/<key>/ to the dev site path <value>/.
 # Every subsite (including the volumes) is 1:1 — top-level on both targets.
 SUBSITES=(
+  games
   vol1
   vol2
   vol3
