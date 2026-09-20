@@ -125,7 +125,7 @@ If $T_k$ produced partial side effects before failing, its own compensator $C_k$
 
 : **Trajectory Saga Sub-Transaction State Transition Matrix**: State transition matrix for Trajectory Saga sub-transactions. Every forward mutation must reach either `COMMITTED` or undergo transition to `COMPENSATED` via the reverse unwind path. {#tbl-vol3-saga-state-transitions}
 
-### Compensating Action Semantics and Semantic Neutralization
+### Compensating Action Semantics
 
 A compensating action is fundamentally distinct from a database rollback. In a relational database operating under ARIES-style write-ahead logging, rolling back an aborted transaction restores the exact physical image of disk pages using historical `BEFORE-IMAGE` log records. The transaction's existence is erased as though it had never occurred.
 
@@ -146,18 +146,17 @@ $$S'_0 \equiv_{\text{semantic}} S_0 \iff \forall \phi \in \Phi_{\text{invariants
 
 where $\Phi_{\text{invariants}}$ is the set of system invariants governing resource allocations, file integrity, access control privileges, and process boundaries.
 
-```text
-PHYSICAL TIME-TRAVEL (IMPOSSIBLE)
-S₀ ──────[ T₁ ]──────► S₁
-▲                      │
-└──────[ ROLLBACK ]────┘ (Assumes zero external side effects)
-
-SEMANTIC COMPENSATION (REAL-WORLD SAGAS)
-S₀ ──────[ T₁ ]──────► S₁
-                       │
-                       ▼
-S′₀ ◄────[ C₁ ]────────┘ (Active forward mutation: S′₀ ≢ S₀, but S′₀ ≡ S₀)
-```
+::: {#def-vol3-semantic-compensation .callout-definition title="Definition 11.1: Semantic Compensation Duality"}
+Let $\mathcal{W}$ denote external world state, $T_i$ denote an external tool action that transitions state from $\mathbf{S}_{i-1}$ to $\mathbf{S}_i$, and $C_i$ denote its corresponding compensating action:
+1. **Physical Rollback (Impossible under External Side Effects)**:
+   Requires physical time-reversal to undo external observations and network mutations:
+   $$\mathbf{S}_{i-1} \xrightarrow{\quad T_i \quad} \mathbf{S}_i \xrightarrow{\quad \text{Rollback} \quad} \mathbf{S}_{i-1}$$
+   Violated when $T_i$ crosses process or network boundaries (e.g. cloud provisioning, external emails, database commits).
+2. **Semantic Compensation (Forward Mutating Equivalence)**:
+   Applies an active forward compensating operation $C_i$ that transitions system state to $\mathbf{S}_{i-1}'$:
+   $$\mathbf{S}_{i-1} \xrightarrow{\quad T_i \quad} \mathbf{S}_i \xrightarrow{\quad C_i \quad} \mathbf{S}_{i-1}'$$
+   where $\mathbf{S}_{i-1}' \not\equiv \mathbf{S}_{i-1}$ physically (e.g. invoice cancellation receipt exists), but $\mathbf{S}_{i-1}' \equiv_{\text{semantic}} \mathbf{S}_{i-1}$ under system invariants $\Phi_{\text{invariants}}$.
+:::
 
 To illustrate, consider three canonical archetypes of compensating actions encountered in production agent runtimes:
 
@@ -167,28 +166,19 @@ To illustrate, consider three canonical archetypes of compensating actions encou
 
 Compensating actions must be strictly *commutative* with respect to unrelated system activity and *idempotent* under network retry. If a network blip causes the runtime to doubt whether $C_i$ succeeded, re-issuing $C_i(\kappa_i^c)$ multiple times must yield the exact same environmental state as executing it once, without producing orphan side effects.
 
-### The Saga Orchestrator: Control Plane and the Compensation Stack
+### Saga Compensation Stacks
 
 The execution of a Trajectory Saga is managed by the *Saga Orchestrator*, an authoritative control plane component operating within the host runtime supervisor. The orchestrator maintains two primary data structures inside the Agent Control Block (ACB): the *Forward Execution Log* ($\mathcal{L}_{\text{fwd}}$) and the *LIFO Compensation Stack* ($\mathcal{S}_{\text{comp}}$).
 
-```text
-   ┌────────────────────────────────────────────────────────┐
-   │            AGENT CONTROL BLOCK (ACB)                   │
-   │                                                        │
-   │  FORWARD EXECUTION LOG (WAL)                           │
-   │  ┌──────────────────────────────────────────────────┐  │
-   │  │ Entry 1: T₁ [COMMITTED]  idempotency_key=k₁      │  │
-   │  │ Entry 2: T₂ [COMMITTED]  idempotency_key=k₂      │  │
-   │  │ Entry 3: T₃ [FAILED]     idempotency_key=k₃      │  │
-   │  └──────────────────────────────────────────────────┘  │
-   │                                                        │
-   │  LIFO COMPENSATION STACK                               │
-   │  ┌──────────────────────────────────────────────────┐  │
-   │  │ TOP ──► [ C₂: teardown_sandbox(id="sbx-99")   ]  │  │
-   │  │         [ C₁: release_port(port=8080)         ]  │  │
-   │  └──────────────────────────────────────────────────┘  │
-   └────────────────────────────────────────────────────────┘
-```
+: **Agent Control Block Saga Orchestrator Structures**: Internal state architecture of the forward execution write-ahead log and LIFO compensation stack. {#tbl-vol3-saga-orchestrator-state}
+
+| Subsystem Layer | Data Structure | Entry State & Parameters | Operational Role |
+|:---|:---|:---|:---|
+| **Forward Execution Log ($\mathcal{L}_{\text{fwd}}$)** | Append-only write-ahead log | `Entry 1: T_1 [COMMITTED] (idempotency_key=k_1)` | Records sequential forward progression; establishes durable audit trail. |
+| **Forward Execution Log ($\mathcal{L}_{\text{fwd}}$)** | Append-only write-ahead log | `Entry 2: T_2 [COMMITTED] (idempotency_key=k_2)` | Captures intermediate parameters and outputs required for compensation. |
+| **Forward Execution Log ($\mathcal{L}_{\text{fwd}}$)** | Append-only write-ahead log | `Entry 3: T_3 [FAILED] (idempotency_key=k_3)` | Triggers fault handling; halts forward progression before pivot action. |
+| **Compensation Stack ($\mathcal{S}_{\text{comp}}$)** | LIFO execution stack | `TOP -> C_2: teardown_sandbox(id="sbx-99")` | First compensator popped; unwinds most recent committed side effect. |
+| **Compensation Stack ($\mathcal{S}_{\text{comp}}$)** | LIFO execution stack | `STACK[0] -> C_1: release_port(port=8080)` | Second compensator executed; restores baseline network state. |
 
 The orchestrator enforces a strict discipline on how tools are exposed to the foundation model. Under no circumstances is the model permitted to synthesize compensating actions on the fly during a failure. When an autoregressive model hallucinates a compensation command under stress, it frequently compounds the damage—for instance, issuing `rm -rf /` or deleting the wrong virtual network interface. Instead, the runtime supervisor requires tool developers to register forward-compensating action pairs at tool definition time.
 
@@ -264,7 +254,7 @@ The latency and financial realities highlighted in the worked example reveal a f
 
 If the failure at step five was caused by a transient DNS API timeout, a typographical syntax error in a configuration payload, or a temporary rate limit on an external endpoint, tearing down the entire infrastructure stack and starting over from scratch is catastrophically inefficient. Under what circumstances should an agent runtime abandon backward rollback and instead attempt to heal forward through localized, self-correcting mutations?
 
-## Forward Recovery Versus Rollback {#sec-vol3-sagas-forward-vs-backward}
+## Forward Recovery {#sec-vol3-sagas-forward-vs-backward}
 
 
 ::: {.column-margin}
@@ -276,7 +266,7 @@ An agent executing an automated cloud migration fails at step six of eight: a ge
 
 **The agent runtime must dynamically arbitrate between backward rollback and forward self-healing, balancing the accumulated sunk cost of completed sub-transactions against the convergence probability and token expenditure of synthesizing localized corrective mutations.** Unconditional rollback prioritizes clean external invariants at the expense of extreme latency and resource waste. Unchecked forward self-healing preserves committed infrastructure work but risks trapping the agent in non-terminating repair loops that compound initial errors. A dependable runtime implements a formal decision policy that measures remaining resource budgets, evaluates error classification signatures, and enforces an anti-spin invariant that bounds forward repair attempts before cascading to compensation or human escalation.
 
-### The Recovery Spectrum: State Restoration Versus State Transformation
+### The Recovery Spectrum
 
 In their classical taxonomy of dependable computing, Algirdas Avizienis and colleagues formalized fault recovery as two fundamentally distinct mechanisms: backward recovery, which returns the system to an earlier error-free state prior to fault manifestation, and forward recovery, which transforms the current erroneous state into a new, valid state enabling computation to proceed [@avizienis2004dependable]. Distributed databases almost exclusively implement backward recovery; because database engines maintain complete control over local physical frames and write-ahead logs, restoring an uncorrupted snapshot through page undo operations is deterministic and computationally inexpensive.
 
@@ -395,7 +385,7 @@ Forward recovery reduces end-to-end recovery latency by **91.5%** ($7.34\text{ s
 
 While forward recovery yields dramatic efficiency improvements on benign syntax and configuration errors, it exposes the system to a catastrophic failure mode unique to autoregressive foundation models: *repair spinning*. When a model attempts to repair an error without fundamentally understanding the underlying environmental state, it frequently engages in hallucinated patch cycling. The model modifies superficial code syntax, receives a secondary error, modifies a different irrelevant parameter, and gradually drifts away from the original goal while consuming tokens and API call limits.
 
-```text
+```bash
 # Observable Trace of an Agent Repair Spin Loop (Pytest Validation Failure)
 Iteration 1: ImportError: cannot import name 'AsyncSession' from 'sqlalchemy.orm'
 Agent Patch 1: from sqlalchemy.ext.asyncio import AsyncSession  # Fixed import
@@ -479,7 +469,7 @@ The operational contracts, side-effect characteristics, and recovery protocols g
 
 : **The Action Invertibility Matrix**: Operational contracts, side-effect characteristics, and recovery protocols governing invertible, compensable, and pivot tools in agentic runtimes. {#tbl-vol3-action-invertibility}
 
-### The Pivot Action Boundary and Phase Invariants
+### The Pivot Action Boundary
 
 Because an irreversible action cannot be undone, an agent runtime cannot permit arbitrary interleaving of pivot operations throughout a long-horizon plan. If an agent executes a sequence of three pivot actions interspersed with unverified compensable actions, a failure at step four leaves the system stranded in an unrecoverable hybrid state: partially published, partially billed, and structurally incapable of rollback.
 
@@ -517,7 +507,7 @@ The runtime supervisor reorders the transaction graph prior to execution by deco
 By shifting the true point of irreversibility to the final step, the failure envelope is minimized. If the database migration fails during step 3, the instances are de-provisioned cleanly via $C_1$, zero public traffic is dropped, and no invalid compliance records are emitted.
 :::
 
-### Terminal Escalation and the Agent Control Block Freeze
+### Terminal Escalation
 
 Despite robust forward self-healing mechanisms, an autonomous system operating in an open world will eventually encounter terminal divergence. A post-pivot step may face an unrecoverable condition: an external API endpoint changes its authentication scheme mid-trajectory, a required downstream service suffers a multi-region outage, or a compensating action $C_j$ in a pre-pivot rollback throws an unhandled `500 Internal Server Error`, corrupting the compensation chain itself.
 
@@ -652,46 +642,24 @@ The runtime configures a sliding window hash monitor with period bound $K = 4$. 
 - Financial expenditure: Prompt tokens processed drop to approximately $21,000$, resulting in an API charge of $\$0.08$ (a 98.2% cost reduction).
 :::
 
-### Watchdog Intervention Protocols and Escalation Sagas
+### Watchdog Intervention Protocols
 
 Detecting an invariant violation represents only half of the architectural requirement; the runtime must also define deterministic state-machine semantics for intervention. Silently dropping an agent's tool call leaves the autoregressive decode loop in an undefined state. The runtime implements a three-tier intervention protocol designed to trade off recovery cost against trajectory termination.
 
-```text
-+-------------------------------------------------------------+
-|               Semantic Watchdog Violation                   |
-+-------------------------------------------------------------+
-                               |
-                               v
-                       [ Iteration <= 2 ]
-                     /                    \
-             (YES)  /                      \  (NO)
-                   v                        v
-    +-----------------------------+  +-------------------------------+
-    | Tier 1: Context Interrupt   |  | Tier 2: Checkpoint Backtrack  |
-    | Inject synthetic warning    |  | Rewind WAL to s_t-k; prune     |
-    | observation into prompt     |  | oscillating context branch    |
-    +-----------------------------+  +-------------------------------+
-                   |                                |
-                   v                                v
-         Did cycle break?                  Did recovery succeed?
-        /                \                /                     \
- (YES) /            (NO)  \        (YES) /                 (NO)  \
-      v                    v            v                         v
-  [ Resume ]        [ Escalate Tier 2 ] [ Resume ]   +--------------------------+
-                                                     | Tier 3: Terminal Abort   |
-                                                     | ERR_SEMANTIC_DEADLOCK;   |
-                                                     | Execute Saga Compensator |
-                                                     +--------------------------+
-```
+: **Semantic Watchdog Three-Tier Escalation Protocol**: Escalation ladder trading recovery latency and compute cost against trajectory termination upon invariant violations. {#tbl-vol3-watchdog-escalation-protocol}
+
+| Intervention Tier | Trigger Condition | Supervisory Mechanism | Recovery Latency & Cost | Next Action upon Failure |
+|:---|:---|:---|:---|:---|
+| **Tier 1: Context Interrupt** | Initial cycle or state hash collision detected ($N_{\text{iter}} \le 2$) | Injects synthetic warning observation ($o_t^{\text{watchdog}}$) directly into LLM prompt stream. | Sub-millisecond; 0 token rollback cost | Escalate to Tier 2 if cycle persists across 2 turns |
+| **Tier 2: Checkpoint Backtrack** | Persistent oscillation; failure to converge after Tier 1 interrupt | Rewinds physical sandbox to checkpoint snapshot $\mathbf{s}_{t-k}$; prunes failed context turns and applies action mask. | $10 - 250\ \text{ms}$; recomputes $k$ turns from clean checkpoint | Escalate to Tier 3 if recovery fails after rollback |
+| **Tier 3: Terminal Abort** | Unrecoverable deadlock; cyclic regression exceeds budget threshold | Halts execution, raises `ERR_SEMANTIC_DEADLOCK`, strips capabilities, and executes Saga compensators. | Complete trajectory freeze; emits audit alert | Human-in-the-loop escalation / post-mortem queue |
 
 1. **Tier 1: Synthetic Context Interrupt (The Epistemic Jolt):** When a state hash collision ($\mathcal{H}_t = \mathcal{H}_{t-k}$) or syntactic action cycle is initially flagged, the supervisor intercepts the execution pipeline before dispatching the action to the physical sandbox. The supervisor generates a synthetic observation payload $o_t^{\text{watchdog}}$ and appends it directly to the model's context stream:
-```text
-   [SYSTEM ALERT: SEMANTIC_WATCHDOG_INTERRUPT]
-   Action rejected by host supervisor. Invariant failure: STATE_OSCILLATION_DETECTED.
-   Your proposed action returned the environment to an identical state observed at step t-2.
-   You are trapped in an unproductive loop. Do NOT repeat the previous command.
-   Formulate an alternative hypothesis or verify underlying environmental assumptions.
-   ```
+> **`[SYSTEM ALERT: SEMANTIC_WATCHDOG_INTERRUPT]`**  
+> `Action rejected by host supervisor. Invariant failure: STATE_OSCILLATION_DETECTED.`  
+> `Your proposed action returned the environment to an identical state observed at step t-2.`  
+> `You are trapped in an unproductive loop. Do NOT repeat the previous command.`  
+> `Formulate an alternative hypothesis or verify underlying environmental assumptions.`
    This synthetic observation exploits the model's in-context conditioning. By inserting a high-salience error message into the prompt, the runtime forcibly alters the attention weights of subsequent decode steps, breaking the autoregressive self-reinforcement that drives the loop.
 
 2. **Tier 2: Trajectory Backtracking and Action Masking:** If the agent fails to converge after a Tier 1 interrupt—emitting an action that triggers a second invariant violation within an epoch of 3 steps—the supervisor escalates. The runtime reaches into the Write-Ahead Log (WAL), identifies the checkpoint snapshot $\mathbf{s}_{t-k}$ that preceded the cycle onset, and rewinds the physical sandbox filesystem to that checkpoint. Concurrently, the runtime rewrites the logical conversation history: it truncates the failed, cyclic turns from the context window and inserts a tombstone marker that permanently masks the failed action signature $h_{\text{tool}}(a_t)$ from the agent's action space.
@@ -717,7 +685,7 @@ The mechanics of an agent-driven retry storm stem directly from the mismatch bet
 
 Now suppose the remote service experiences a transient slowdown, causing latency to spike to $L_{\text{degraded}} = 2000\text{ ms}$, or begins dropping a fraction $\epsilon$ of incoming requests. In standard distributed architectures, client SDKs employ static retry counts, such as retrying up to three times before failing the top-level application workflow. In an agentic architecture, however, the retry loop is mediated by the foundation model's context window. When the tool execution framework returns an error string—such as `{"error": "Gateway Timeout", "code": 504}`—the model interprets this string not as a hard operational barrier, but as conversational feedback.
 
-```text
+```bash
 [Trajectory-042] Tool invocation failed: HTTP 504 Gateway Timeout (elapsed: 5002ms)
 [Trajectory-042] Agent synthesized alternative: search_index(query="v2 auth patch", retry=True)
 [Trajectory-118] Tool invocation failed: HTTP 503 Service Unavailable (elapsed: 5001ms)
@@ -737,7 +705,7 @@ Compounding the crisis, standard agent prompt designs frequently instruct models
 When a circuit breaker trips to Open, the host runtime immediately synthesizes an `ERR_CIRCUIT_OPEN` observation. This synthetic token sequence explicitly informs the model that physical network access is severed, halting further retries and forcing the trajectory into an alternative plan or a Trajectory Saga compensation path.
 :::
 
-### Tri-State Circuit Breakers and Fast-Fail Semantics
+### Tri-State Circuit Breakers
 
 To protect upstream dependencies and conserve host compute, the runtime implements the circuit breaker pattern formulated by Michael Nygard. The tool execution gateway wraps every external RPC interface in a stateful software proxy that monitors outcome telemetry over a sliding execution window. As illustrated in @fig-vol3-circuit-breaker, the proxy operates as a finite-state machine with three distinct operational states: Closed, Open, and Half-Open.
 
@@ -769,7 +737,7 @@ The circuit remains in the Open state for the duration of a sleep window $T_{\te
 
 In the **Half-Open** state, the proxy allows a strictly limited number of trial invocations—often exactly one canary request ($K_{\text{canary}} = 1$)—to pass through to the remote service. All other concurrent agent calls arriving during this state continue to fail fast with `ERR_CIRCUIT_OPEN`. If the canary request succeeds, the proxy assumes the downstream dependency has recovered, resets the sliding window buffer $W$, and returns to the Closed state, restoring normal traffic flow. If the canary request fails, times out, or receives an HTTP 5xx status, the proxy assumes the remote service remains impaired, resets the cooldown timer with an exponentially increased backoff duration ($T_{\text{cooldown}} \leftarrow \min(2 \cdot T_{\text{cooldown}}, T_{\text{cooldown\_max}})$), and trips immediately back to the Open state.
 
-### Desynchronizing Load via Backoff and Full Jitter
+### Jittered Backoff Protocols
 
 While circuit breakers protect infrastructure during sustained outages, transient network hiccups and brief service blips require controlled retries. However, naive implementations of exponential backoff introduce their own failure mode: lockstep synchronization.
 
@@ -857,7 +825,7 @@ $$\frac{\lambda_{\text{peak, deterministic}}}{\lambda_{\text{expected, jitter}}}
 This keeps the retry traffic well within the capacity bounds of typical network infrastructure.
 :::
 
-### Bulkhead Isolation and Resource Partitioning
+### Bulkhead Resource Partitioning
 
 Even with circuit breakers and full jitter, a failing external dependency can still cripple an agent runtime if all tools share a single pool of execution resources. In maritime architecture, a ship's hull is divided into watertight compartments called *bulkheads*. If a collision punctures one compartment, the water is contained locally, preventing the entire vessel from sinking.
 
@@ -869,35 +837,25 @@ In an agent runtime, tool invocations exhibit vastly different execution profile
 
 If the host runtime dispatches all tool calls into a single global worker pool, an outage in a single external web-scraping tool will consume all worker threads as calls block waiting for TCP connection timeouts. Within hundreds of milliseconds, the entire host runtime stalls. An agent attempting a simple POSIX file read to verify a local code edit cannot acquire an execution thread because the global thread pool is saturated with blocked HTTP connections to a dead external server.
 
-```text
-[Unified Pool Exhaustion]
-Global Worker Pool: [ BUSY | BUSY | BUSY | BUSY | BUSY | BUSY | BUSY | BUSY ] (8/8 threads blocked)
-  Threads 1-8: http_get("https://api.thirdparty.com/v1/search") -> Waiting for TCP socket timeout (30s)
-Pending Queue:
-  Task-101: fs_read("/workspace/main.py")            -> BLOCKED (Starvation)
-  Task-102: git_status()                              -> BLOCKED (Starvation)
-  Task-103: http_get("https://api.thirdparty.com/...") -> Queued
-```
+::: {#def-vol3-pool-exhaustion .callout-definition title="Definition 11.2: Unpartitioned Resource Pool Exhaustion"}
+In an unpartitioned worker architecture where local POSIX filesystem operations, cluster RPCs, and external HTTP tools share a single unified execution pool of capacity $C_{\text{pool}}$:
+
+If external endpoints experience transient delays of duration $T_{\text{timeout}} \gg T_{\text{local}}$, arriving external requests saturate all worker slots:
+$$N_{\text{blocked}} = \min\left(C_{\text{pool}}, \lambda_{\text{ext}} \cdot T_{\text{timeout}}\right) \to C_{\text{pool}}$$
+Consequently, local operations with sub-millisecond execution times ($\tau_{\text{fs}} \le 1\ \text{ms}$) suffer absolute resource starvation:
+$$\text{WaitTime}_{\text{local}} \approx T_{\text{timeout}} \gg \tau_{\text{fs}}$$
+halting all agent progress across the host runtime.
+:::
 
 To enforce the end-to-end argument and maintain system availability, the runtime must implement bulkhead isolation by partitioning execution threads, rate limits, and memory queues into strictly isolated resource domains.
 
-```text
-[Bulkhead Partitioning Architecture]
-┌────────────────────────────────────────────────────────────────────────┐
-│                      Agent Tool Execution Gateway                      │
-└───────────────────┬───────────────────┬───────────────────┬────────────┘
-                    │                   │                   │
-      ┌─────────────▼───────┐ ┌─────────▼─────────┐ ┌───────▼─────────────┐
-      │  Local System Pool  │ │ Internal RPC Pool │ │  External API Pool  │
-      ├─────────────────────┤ ├───────────────────┤ ├─────────────────────┤
-      │ Capacity: 64 Concur │ │ Capacity: 32 Concur│ │ Capacity: 16 Concur │
-      │ Max Timeout: 500 ms │ │ Max Timeout: 2000ms│ │ Max Timeout: 10000ms│
-      │ Failure: Fast-Fail  │ │ Failure: Circuit  │ │ Failure: Circuit    │
-      │ Queue: 128 Slots    │ │ Queue: 64 Slots   │ │ Queue: 16 Slots     │
-      └─────────────┬───────┘ └─────────┬─────────┘ └───────┬─────────────┘
-                    │                   │                   │
-              POSIX / Disk          Cluster gRPC        Public WAN
-```
+: **Bulkhead Partitioning Architecture**: Resource reservation and concurrency isolation parameters across execution pools. {#tbl-vol3-bulkhead-architecture}
+
+| Execution Domain | Target Subsystems | Concurrency Cap | Max Execution Timeout | Failure Semantics | Queue Capacity |
+|:---|:---|:---|:---|:---|:---|
+| **Local System Pool** | POSIX file I/O, local git, in-memory inspect | 64 threads | 500 ms | Fast-Fail (immediate error) | 128 slots |
+| **Internal RPC Pool** | Cluster microVMs, vector databases, Redis | 32 threads | 2,000 ms | Tri-state circuit breaker | 64 slots |
+| **External API Pool** | Public WAN endpoints, third-party web scrapers | 16 threads | 10,000 ms | Circuit breaker with full jitter backoff | 16 slots |
 
 Bulkhead isolation is enforced through three concrete mechanisms:
 
@@ -960,29 +918,14 @@ Under these failure modes, backward compensation via the agent's normal executio
 
 To enforce containment without inducing host-level instability, the supervisor executes a deterministic four-stage quarantine protocol. This pipeline bypasses the agent's inference loop entirely, executing strictly within the host runtime's privileged control plane.
 
-```text
-       [ Anomaly / Invariant Violation Detected ]
-                          │
-                          ▼
-       ┌────────────────────────────────────────┐
-       │ Stage 1: Immediate Process Suspension  │ ──► cgroup freezer: SIGSTOP / freeze
-       └────────────────────────────────────────┘
-                          │
-                          ▼
-       ┌────────────────────────────────────────┐
-       │ Stage 2: Ephemeral Credential Revoked  │ ──► Invalidate IAM STS / OAuth tokens
-       └────────────────────────────────────────┘
-                          │
-                          ▼
-       ┌────────────────────────────────────────┐
-       │ Stage 3: Network Interfaces Severed    │ ──► eBPF TC drop / veth teardown
-       └────────────────────────────────────────┘
-                          │
-                          ▼
-       ┌────────────────────────────────────────┐
-       │ Stage 4: Downstream Taint Propagation  │ ──► WAL tombstone / taint ledger
-       └────────────────────────────────────────┘
-```
+: **Deterministic Four-Stage Quarantine Protocol**: Ordered sequence executed within privileged supervisor control plane upon anomaly detection. {#tbl-vol3-quarantine-protocol}
+
+| Quarantine Stage | Execution Primitive & System Interface | Target Subsystems | Latency & Blast-Radius Guarantee |
+|:---|:---|:---|:---|
+| **Stage 1: Process Suspension** | Linux cgroup v2 freezer (`cgroup.freeze`), `SIGSTOP` | Agent process, runtime interpreter, child worker trees | $\le 1\ \text{ms}$; immediate execution freeze |
+| **Stage 2: Credential Revocation** | Invalidate IAM STS tokens, rotate OAuth session keys | Host token cache, cloud provider metadata endpoints | Monotonic privilege strip; zero new API authorizations |
+| **Stage 3: Network Severing** | eBPF TC ingress/egress filter drop, veth teardown | Sandbox virtual network interfaces, host sockets | Prevents exfiltration and command-and-control communication |
+| **Stage 4: Taint Propagation** | WAL tombstone record emission, central taint ledger update | Downstream peer agents, shared artifact storage | Blocks consumption of corrupt artifacts across cluster |
 
 The sequence begins with *Immediate Process Suspension*. The supervisor targets the agent's host sandbox cgroup, issuing a kernel-level freeze (`SIGSTOP` or freezing the cgroup v2 `cgroup.freeze` controller). This freezes the agent runtime process, its Python/Node interpreter, and any spawned child worker processes instantaneously. Freezing the execution tree prevents the model from initiating subsequent system calls, writing to local memory buffers, or consuming additional GPU inference cycles. The execution context remains intact in physical RAM, preserved as an immutable memory artifact for offline post-mortem analysis.
 
@@ -1008,7 +951,7 @@ The fourth stage executes *Taint Propagation*. A malfunctioning trajectory rarel
 When a trajectory $T_k$ is quarantined, the supervisor attaches cryptographic taint markers $(\tau = \text{TAINTED})$ to all emitted artifacts $A_k$. Peer agents block at the escrow boundary, and Git branch references lock until cleared by verification.
 :::
 
-### Dynamic Taint Tracking and Artifact Invalidation
+### Dynamic Taint Tracking
 
 When an agent is quarantined, the supervisor must ensure that none of its partially computed outputs corrupt the broader enterprise workflow. An artifact generated by a rogue or buggy trajectory is considered *tainted* until explicitly cleared by an external verification harness or a human operator.
 
@@ -1018,22 +961,13 @@ To operationalize this, the supervisor maintains a directed provenance graph tra
 
 $$\tau(a) \in \{\text{UNTAINTED}, \text{SUSPECT}, \text{TAINTED}, \text{CLEARED}\}$$
 
-```text
-                [ Upstream Agent T1 ] (Quarantined)
-                         │
-               emits Artifact a_1 (TAINTED)
-                         │
-                         ▼
-             [ Shared Message Broker ]
-                         │
-          ┌──────────────┴──────────────┐
-          ▼                             ▼
-  [ Peer Agent T2 ]             [ Peer Agent T3 ]
-  Consumes a_1?                 Consumes a_1?
-  └──► BLOCKED: Exception       └──► BLOCKED: Exception
-       raised by Runtime             raised by Runtime
-       Capability Gateway            Capability Gateway
-```
+::: {#def-vol3-taint-propagation .callout-definition title="Definition 11.3: Dynamic Taint Propagation and Mediation"}
+Let agent trajectory $\mathcal{T}_k$ produce a set of shared artifacts $\mathcal{A}_k = \{a_1, a_2, \dots\}$. Upon quarantine of $\mathcal{T}_k$ at turn $t_{\text{fault}}$, the runtime supervisor assigns taint labels:
+$$\tau(a) = \begin{cases} \text{TAINTED}, & \text{if } a \text{ was emitted by } \mathcal{T}_k \text{ during tainted epoch} \\ \text{UNTAINTED}, & \text{otherwise} \end{cases}$$
+For any peer agent $\mathcal{T}_{\text{peer}}$ attempting access via read operation $\text{Read}(a)$:
+$$\text{MediationGateway}(\mathcal{T}_{\text{peer}}, a) = \begin{cases} a, & \text{if } \tau(a) \in \{\text{UNTAINTED}, \text{CLEARED}\} \\ \text{Throw } \texttt{ArtifactQuarantinedException}, & \text{if } \tau(a) = \text{TAINTED} \end{cases}$$
+guaranteeing that Byzantine or corrupted outputs cannot cascade across multi-agent boundaries.
+:::
 
 When $\mathcal{T}_k$ is quarantined, the supervisor marks all $a \in \mathcal{A}_k$ produced within the taint epoch as $\text{TAINTED}$ in the central runtime state store. Downstream agents operating within the multi-agent system interact with shared resources through an unprivileged mediation gateway. When peer agent $\mathcal{T}_{\text{peer}}$ attempts to read artifact $a$, the mediation gateway intercepts the read request, verifies the artifact's metadata against the taint registry, and blocks access, returning an `ArtifactQuarantinedException`.
 
@@ -1137,7 +1071,7 @@ At Turn 5, while the agent is planning the configuration update, the physical ho
 
 Finally, at Turn 6, the trajectory reaches an irreversible boundary: deploying the schema and code to the live production cluster. This operation constitutes a pivot action $T_{\text{pivot}}$ ($C_{\text{pivot}} = \emptyset$); once executed, backward physical compensation is impossible. Before the control plane releases the action to the external executor, the verification gate $\mathcal{G}_{\text{gate}}$ seizes execution control. In accordance with the end-to-end argument of system design, the runtime completely disregards the model's internal self-confidence or self-reported success claims. Instead, the runtime runs a suite of deterministic, sandboxed integration tests against the staging environment, verifies that cryptographic signatures match the expected build artifacts, and validates database consistency invariants. Only when all deterministic checks pass does the runtime issue the unrevocable production deploy command, append the terminal commit marker to the WAL, and close the trajectory.
 
-### Empirical Fault Injection and Recovery Benchmarks {#sec-vol3-synthesis-benchmarks}
+### Fault Injection Benchmarks {#sec-vol3-synthesis-benchmarks}
 
 The engineering validity of a fault-tolerant runtime cannot be established through theoretical proofs alone; it must be empirically validated under active turbulence. This methodology traces directly to Jim Gray's foundational 1986 insights on software fault tolerance and the modern principles of Chaos Engineering formulated by Basiri and colleagues. Gray demonstrated that production system outages are rarely caused by deterministic, easily reproducible software bugs ("Bohrbugs"), which are typically eliminated during initial testing. Rather, production systems succumb to transient, context-sensitive faults ("Heisenbugs") arising from network jitter, race conditions, and asynchronous interface mismatches.
 
