@@ -13,34 +13,36 @@
 # ---
 
 # %% [markdown]
-"""
+r"""
 # Module 07: Optimizers - Turning Gradients into Updates
 
 Welcome to Module 07! You'll build the optimizers that turn the gradients Module 06 computes into parameter updates.
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Tensor with gradients (Modules 01-06)
-**You'll Build**: SGD, Adam, and AdamW optimizers with momentum, per-parameter step sizes, and decoupled weight decay
-**You'll Enable**: The update rules Module 08's training loop and every later milestone will call
+**You've Built**: Tensor with autograd tape tracking (Modules 01–06)  
+**You'll Build**: SGD, Adam, and AdamW optimizers with velocity momentum, adaptive per-parameter scaling, and decoupled weight decay  
+**You'll Enable**: The parameter update engines driving Module 08's training loop and every downstream architecture
 
-**Connection Map**:
-```
-Gradients → Optimizers → Training
-(Module 06)  (Module 07)  (Module 08)
-```
+<div align="center">
+  <img src="optimizer_blueprint.svg" alt="Optimizers Blueprint: You Are Here" width="380px">
+</div>
+
+$$\underbrace{\text{Modules 01–06}}_{\text{Tensor and Autograd Tape}} \longrightarrow \underbrace{\mathbf{\text{Optimizers}}}_{\mathbf{\text{Mod 07 (Active)}}} \longrightarrow \underbrace{\text{Training Loop}}_{\text{Mod 08}} \longrightarrow \underbrace{\text{Scale and Architecture}}_{\text{Mods 09–20}}$$
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
-1. Implement SGD with momentum for stable gradient descent
-2. Build Adam optimizer with adaptive learning rates
-3. Create AdamW optimizer with decoupled weight decay
-4. Understand memory and computational trade-offs in optimization algorithms
-
-Let's get started!
+1. **SGD with Velocity Momentum**: Implement physical momentum accumulation to dampen high-curvature ravine oscillations.
+2. **Adaptive Moments (Adam)**: Construct running first ($\mathbf{m}$) and second ($\mathbf{v}$) moment estimators with early-step bias correction.
+3. **Decoupled Weight Decay (AdamW)**: Separate analytical $L_2$ gradient penalty from adaptive step scaling to restore scale-invariant regularization.
+4. **Systems & Memory Economics**: Profile the 16-byte-per-parameter optimizer memory footprint that dictates hardware training limits.
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/07_optimizers/optimizers.ipynb`
+<div align="center">
+  <img src="optimizer_margin_source.svg" alt="Source Code Mapping" width="220px">
+</div>
+
+**Learning Side:** You work in `modules/07_optimizers/optimizers.ipynb`  
 **Building Side:** Code exports to `tinytorch.core.optimizers`
 
 ```python
@@ -49,38 +51,29 @@ from tinytorch.core.optimizers import SGD, Adam, AdamW
 ```
 
 **Why this matters:**
-- **Learning:** Complete optimization system for modern neural network training
-- **Production:** Proper organization like PyTorch's torch.optim with all optimization algorithms together
-- **Consistency:** All optimization logic and parameter updating in core.optimizers
-- **Integration:** Reads the gradients Module 06 writes into `param.grad`
+- **Framework Parity**: Matches PyTorch's `torch.optim` module architecture and parameter state dictionary protocols.
+- **Production Decoupling**: Isolate update mathematical mechanics from model execution graphs and training state machines.
+- **Loss Navigation**: Transform raw instantaneous gradients into robust descent trajectories across non-convex loss surfaces.
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📋 Module Dependencies
 
 **Prerequisites**: Modules 01 and 06 must be complete
-- Module 01: Tensor (parameters to update)
-- Module 06: Autograd (supplies `param.grad`, without which there is nothing to optimize)
+- **Module 01 (`Tensor`)**: Provides model parameter tensors with contiguous data buffers.
+- **Module 06 (`Autograd`)**: Writes analytical gradients into `param.grad` via reverse topological traversal.
 
-**External Dependencies**:
-- `numpy` (for array operations and numerical computing)
-- `typing` (for type hints)
+| Component | Upstream Origin | Role in Module 07 | Downstream Target |
+| :--- | :--- | :--- | :--- |
+| **`Tensor`** | Module 01 (`core.tensor`) | Model parameter instances carrying weight buffers | Consumed by optimizers |
+| **`param.grad`** | Module 06 (`core.autograd`) | Instantaneous gradient vectors $\nabla_{\boldsymbol{\theta}} \mathcal{L}$ | Read by optimizer `step()` |
+| **`method_of`** | Module 06 (`core.autograd`) | Method decorator attaching step logic to optimizer classes | Implementation cleanly modularized |
+| **Optimizers** | Module 07 (`core.optimizers`) | State buffers ($\mathbf{v}, \mathbf{m}$) and in-place weight mutation | Wired into Module 08 Training Loop |
 
-**TinyTorch Dependencies**:
-- `tinytorch.core.tensor.Tensor` - Core tensor operations
-- `tinytorch.core.autograd` - Imported so every operation carries its backward half,
-  and for `method_of`, the decorator Module 06 used to attach methods to a class
+$$\mathbf{w} \in \mathbb{R}^D \xrightarrow{\text{Forward (Mod 01)}} \mathcal{L} \xrightarrow{\text{Backward (Mod 06)}} \mathbf{g} = \nabla_{\mathbf{w}} \mathcal{L} \xrightarrow{\text{Step (Mod 07)}} \mathbf{w}' = \mathbf{w} - \eta \cdot \mathbf{u}(\mathbf{g}) \xrightarrow{\text{Epoch (Mod 08)}} \text{Trained Model}$$
 
-**Dependency Flow**:
-```
-Module 01 (Tensor) → Module 06 (Autograd) → Module 07 (Optimizers) → Module 08 (Training)
-        ↓                     ↓                      ↓                        ↓
-   parameters           gradients            update rule            the training loop
-```
-
-Optimizers are the step that turns gradients into learning. Module 08 will wire
-them into a full training loop.
+Optimizers are the operational step that transforms gradients into learning. Module 08 will integrate them into an end-to-end training loop.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
@@ -109,142 +102,91 @@ DEFAULT_WEIGHT_DECAY_ADAMW = 0.01  # Default weight decay for AdamW
 r"""
 ## 💡 Introduction: What are Optimizers?
 
-Optimizers are the engines that drive neural network learning. They take gradients computed from your loss function and use them to update model parameters toward better solutions. Think of optimization as navigating a complex landscape where you're trying to find the lowest valley (minimum loss).
+Optimizers are the numerical engines that drive neural network learning. They take analytical gradients computed by Module 06's autograd engine and update model parameters toward loss minima. In high-dimensional deep learning, loss landscapes are rarely isotropic bowls—they feature ill-conditioned ravines, saddle points, and sharp cliffs.
 
-### The Optimization Challenge
+<div align="center">
+  <img src="ravine_optimization.svg" alt="Ill-Conditioned Ravine and 16-Byte Optimizer Memory Rule" width="680px">
+</div>
 
-Imagine you're hiking in dense fog, trying to reach the bottom of a valley. You can only feel the slope under your feet (the gradient), but you can't see where you're going. Different optimization strategies are like different hiking approaches:
+### The Ill-Conditioned Ravine Challenge
 
-```
-Loss Landscape (2D visualization):
+Consider an anisotropic quadratic bowl with condition number $\kappa = 100$:
 
-   /\         /\
-   |         /
-    \       |
-     |     /
-      \   |
-       \ /
-        *  ← Global minimum (goal)
+$$\mathcal{L}(w_1, w_2) = 50 w_1^2 + 0.5 w_2^2 \implies \mathbf{H} = \begin{bmatrix} 100 & 0 \\ 0 & 1 \end{bmatrix}, \quad \kappa = \frac{\lambda_{\max}}{\lambda_{\min}} = 100$$
 
-Challenge: Navigate to * using only local slope information!
-```
+- **Steep Axis ($w_1$)**: The gradient $\nabla_{w_1} \mathcal{L} = 100 w_1$ is massive, causing vanilla gradient descent to oscillate violently across the valley walls.
+- **Gentle Axis ($w_2$)**: The gradient $\nabla_{w_2} \mathcal{L} = w_2$ is tiny, causing progress along the valley floor to stall.
 
-### Our Optimizer Toolkit
+Every optimization algorithm in this module implements a specialized strategy to resolve this curvature imbalance under the universal update template:
 
-**SGD (Stochastic Gradient Descent)**
-- Strategy: Always step downhill
-- Problem: Can get stuck oscillating in narrow valleys
-- Solution: Add momentum to "coast" through oscillations
+$$\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \alpha \cdot \mathbf{u}(\mathbf{g}_t, \mathbf{s}_t)$$
 
-**Adam (Adaptive Moment Estimation)**
-- Strategy: Adapt step size for each parameter individually
-- Advantage: Different learning rates for different dimensions
-- Key Insight: Some directions need big steps, others need small steps
-
-**AdamW (Adam with Weight Decay)**
-- Strategy: Adam + proper regularization
-- Fix: Separates optimization from regularization
-- Result: Better generalization and training stability
-
-### The Mathematics Behind Movement
-
-At its core, optimization follows: **θ_new = θ_old - α * direction**
-
-Where:
-- `θ` = parameters (your position in the landscape)
-- `α` = step size (learning rate)
-- `direction` = where to step (gradient-based)
-
-The three optimizers below differ in how they choose `direction` and how they scale it.
+where $\boldsymbol{\theta}$ represents model parameters, $\alpha$ is the learning rate, $\mathbf{g}_t = \nabla_{\boldsymbol{\theta}} \mathcal{L}$ is the current gradient, and $\mathbf{s}_t$ denotes internal optimizer state buffers.
 """
 
 # %% [markdown]
 r"""
 ## 📐 Foundations: Mathematical Background
 
-### Understanding Momentum: The Physics of Optimization
+<div align="center">
+  <img src="optimizer_update_pipeline.svg" alt="Optimizer Update Pipeline: SGD vs Adam vs AdamW" width="680px">
+</div>
 
-Momentum in optimization works like momentum in physics. A ball rolling down a hill doesn't immediately change direction when it hits a small bump - it has momentum that carries it forward.
+### 1. Understanding Momentum: The Physics of Optimization
 
-```
-Narrow valley problem:            Momentum solution:
-|\  •→  ←•  /|                    |\  •        /|
-| \   ↕    / |  ← ping-pong       | \   ↘     / |  ← smoother
-|  \  •   /  |    motion          |  \   •→• /  |    descent
-|   \    /   |                    |   \     /   |
-|     ●      |                    |     ●      |
-```
+In physical systems, a rolling marble possesses inertia: when traveling through a narrow ravine, alternating sideways forces cancel out while forward momentum accumulates along the valley floor.
 
-**SGD with Momentum Formula:**
-```
-velocity = β * previous_velocity + current_gradient
-parameter = parameter - learning_rate * velocity
+$$\begin{aligned}
+\mathbf{v}_t &= \beta \mathbf{v}_{t-1} + \mathbf{g}_t \\
+\boldsymbol{\theta}_{t+1} &= \boldsymbol{\theta}_t - \alpha \mathbf{v}_t
+\end{aligned}$$
 
-Where β ≈ 0.9 means "90% memory of previous direction"
-```
+With momentum coefficient $\beta \approx 0.9$, the effective step size along consistent gradient directions scales by $\frac{1}{1 - \beta} \approx 10\times$, while high-frequency transverse oscillations cancel.
 
-Note: SGD momentum uses raw gradient accumulation (no (1-β) factor). Adam uses
-the EMA form `β * m + (1-β) * g` to keep moment estimates on the same scale as
-the gradient, which is needed for its bias-correction and adaptive scaling steps.
+### 2. Adam: Adaptive Moment Estimation
 
-### Adam: Adaptive Learning for Each Parameter
+Adam maintains running exponential moving averages (EMA) of both the gradient direction (first moment $\mathbf{m}$) and uncentered variance (second moment $\mathbf{v}$):
 
-Adam solves a key problem: different parameters need different learning rates. Imagine adjusting the focus and zoom on a camera - you need fine control for focus but coarse control for zoom.
-- A steep gradient would require small steps, as if it were carefully climbing down the mountain.
-- A gentle gradient would require large steps, since going fast doesn't have as large of an effect.
+$$\begin{aligned}
+\mathbf{m}_t &= \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \mathbf{g}_t, \quad & \hat{\mathbf{m}}_t &= \frac{\mathbf{m}_t}{1 - \beta_1^t} \\
+\mathbf{v}_t &= \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t^2, \quad & \hat{\mathbf{v}}_t &= \frac{\mathbf{v}_t}{1 - \beta_2^t}
+\end{aligned}$$
 
-Adam Solution: Automatic step size per parameter!
+The parameter update scales coordinates inversely by their empirical standard deviation:
 
-**Adam's Two-Memory System:**
+$$\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} \hat{\mathbf{m}}_t$$
 
-1. **First Moment (m)**: "Which direction am I usually going?"
-   - `m = β₁ * old_m + (1-β₁) * gradient`
-   - Like momentum, but for direction
+- **High-Curvature Coordinates**: Large $v_i \implies \sqrt{v_i}$ dampens step size, preventing explosive divergence.
+- **Low-Curvature Coordinates**: Small $v_i \implies \sqrt{v_i}$ amplifies step size, accelerating escape from flat plateaus.
 
-2. **Second Moment (v)**: "How big are my gradients usually?"
-   - `v = β₂ * old_v + (1-β₂) * gradient²`
-   - Tracks gradient magnitude
+### 3. AdamW: Decoupled Weight Decay
 
-3. **Adaptive Update**:
-   - `step_size = m / √v`
-   - Big gradients → smaller steps
-   - Small gradients → relatively bigger steps
+When standard $L_2$ regularization $\frac{1}{2} \lambda \|\boldsymbol{\theta}\|^2$ is folded into the loss, its gradient $\lambda \boldsymbol{\theta}$ is divided by $\sqrt{\mathbf{v}}$. Parameters with large historical gradients receive suppressed regularization, while parameters with small gradients are over-penalized.
 
-### AdamW: Fixing Weight Decay
+AdamW restores scale-invariant regularization by separating parameter decay from gradient adaptation:
 
-Adam folds weight decay into the gradient, so the adaptive step size rescales it. AdamW keeps the two apart:
+$$\boldsymbol{\theta}_{t+1} = \underbrace{(1 - \alpha \lambda) \boldsymbol{\theta}_t}_{\text{decoupled weight shrinkage}} - \underbrace{\frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} \hat{\mathbf{m}}_t}_{\text{pure gradient adaptive step}}$$
 
-```
-Adam (coupled L2):              AdamW (decoupled):
-gradient += weight_decay * param    [compute gradient update]
-update_param_with_gradient()        param -= learning_rate * gradient_update
-                                    param *= (1 - learning_rate * weight_decay)  ← separate!
-
-Why it matters:
-- Adam: Weight decay affected by adaptive learning rates
-- AdamW: Weight decay is consistent regardless of gradients
-```
+| Algorithm | State Buffers | Update Direction $\mathbf{u}_t$ | Regularization Mechanism |
+| :--- | :--- | :--- | :--- |
+| **SGD** | None | $\mathbf{g}_t$ | Coupled gradient penalty $\mathbf{g} + \lambda \boldsymbol{\theta}$ |
+| **SGD + Momentum** | Velocity $\mathbf{v} \in \mathbb{R}^D$ | $\mathbf{v}_t = \beta \mathbf{v}_{t-1} + \mathbf{g}_t$ | Coupled gradient penalty $\mathbf{g} + \lambda \boldsymbol{\theta}$ |
+| **Adam** | Moments $\mathbf{m}, \mathbf{v} \in \mathbb{R}^D$ | $\frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$ | Coupled gradient penalty $\mathbf{g} + \lambda \boldsymbol{\theta}$ |
+| **AdamW** | Moments $\mathbf{m}, \mathbf{v} \in \mathbb{R}^D$ | $\frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$ | **Decoupled**: $\boldsymbol{\theta} \leftarrow (1 - \alpha \lambda) \boldsymbol{\theta}$ |
 """
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Implementation: Building Optimizers
 
-Now we'll implement each optimizer step by step, following the pattern: understand the algorithm → implement it → test it immediately. Each optimizer builds on the foundation of the previous one.
+We construct each optimizer incrementally, establishing the base class contract before specializing into first-order and adaptive update rules:
 
-### Implementation Strategy
-
-```
-Optimizer Base Class
-    ↓
-SGD (foundation algorithm)
-    ↓
-SGD + Momentum (reduce oscillations)
-    ↓
-Adam (adaptive learning rates)
-    ↓
-AdamW (proper weight decay)
-```
+| Component | Scope | Core Responsibility |
+| :--- | :--- | :--- |
+| **`Optimizer` (Base)** | Interface & Plumbing | Holds parameter references, implements `zero_grad()`, unpacks gradient buffers |
+| **`SGD`** | Classical Descent | First-order gradient updates with velocity accumulation buffer |
+| **`Adam`** | Adaptive Moments | First-moment direction EMA, second-moment magnitude EMA, bias corrections |
+| **`AdamW`** | Modern Standard | Decoupled parameter decay applied directly to weights before adaptive step |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "optimizer-base", "solution": true}
@@ -335,24 +277,19 @@ class Optimizer:
         )
 
 # %% [markdown]
-"""
+r"""
 ### Gradient Extraction: Handling Tensor vs NumPy Gradients
 
-Module 06's `backward()` writes a bare NumPy array into `param.grad`. A gradient
-can also be assigned by hand as a `Tensor`, which is what the unit tests in this
-module do to check an update rule without running a forward and backward pass.
-Every optimizer normalizes the two shapes before doing math on the gradient.
+Module 06's `backward()` writes a bare NumPy ndarray into `param.grad`. However, during isolated unit testing or custom training loops, gradients may be initialized directly as `Tensor` instances (holding an internal `.data` buffer).
 
-```
-param.grad
-    │
-    ├── Tensor?  ──→  return grad.data  (unwrap the NumPy array)
-    │
-    └── ndarray? ──→  return grad       (already NumPy, use directly)
-```
+To ensure deterministic numeric updates across all algorithms, `_extract_gradient()` acts as an idempotent unwrapping contract:
 
-This helper lives in the base `Optimizer` class so SGD, Adam, and AdamW
-all share the same extraction logic.
+| Gradient Representation | Type Signature | Extraction Logic | Normalized Return |
+| :--- | :--- | :--- | :--- |
+| **Autograd Engine Output** | `np.ndarray` | Direct pass-through | `np.ndarray` |
+| **Explicit Tensor Wrapper** | `Tensor` | Extract buffer via `grad.data` | `np.ndarray` |
+
+This helper is attached directly to the base `Optimizer` class via `method_of(Optimizer)` so that `SGD`, `Adam`, and `AdamW` share unified type handling.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "extract-gradient", "solution": true}
@@ -488,78 +425,44 @@ if __name__ == "__main__":
 r"""
 ## 🏗️ SGD: Stochastic Gradient Descent
 
-SGD is the foundation of neural network training. It implements one idea: "move in the direction opposite to the gradient."
+SGD is the foundation of neural network optimization. It implements the principle of steepest descent: stepping in the direction opposite to the analytical gradient.
 
-### Why SGD Works
+### Why SGD Works: The Geometry of Steepest Descent
 
-Gradients point uphill (toward higher loss). To minimize loss, we go downhill:
+The gradient vector $\nabla_{\boldsymbol{\theta}} \mathcal{L}(\boldsymbol{\theta})$ defines the direction of greatest local rate of increase (steepest ascent). To minimize the scalar loss objective $\mathcal{L}$, parameter updates move opposite to this vector:
 
-```
-Loss Surface (side view, imagine plane):
+$$\nabla_{\boldsymbol{\theta}} \mathcal{L}(\boldsymbol{\theta}) = \left[ \frac{\partial \mathcal{L}}{\partial \theta_1}, \dots, \frac{\partial \mathcal{L}}{\partial \theta_D} \right]^T \implies \boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \alpha \nabla_{\boldsymbol{\theta}} \mathcal{L}(\boldsymbol{\theta}_t)$$
 
-    Loss
-     ↑
-     |
-     |  current position
-     |    |
-     |   /|
-     |  / |\
-     | /  |\ gradient points uphill
-     |/   | \
-     ●----|--\--→ parameter
-    / \  •   \ ↘ SGD steps downhill (opposite to gradient)
-   /   \         
-  /     \   ★ ← goal (minimum loss)     
- ↙       \
- other
-parameter
-```
+### The Oscillation Problem in Ill-Conditioned Ravines
 
-### The Oscillation Problem
+In deep architectures, loss surfaces rarely form isotropic spherical bowls. Instead, they form elongated, ill-conditioned ravines where the Hessian eigenvalues diverge ($\kappa = \lambda_{\max}/\lambda_{\min} \gg 1$):
 
-Pure SGD can get trapped oscillating in narrow valleys:
+$$\mathbf{g}_t = \mathbf{g}_t^{\text{transverse}} + \mathbf{g}_t^{\text{floor}}, \quad \text{where } \|\mathbf{g}_t^{\text{transverse}}\| \gg \|\mathbf{g}_t^{\text{floor}}\|$$
 
-```
-Narrow valley (side view, two different gradients shown as planes):
-   
-    first position
-          |
-     -----+---------- 
-     \ / |     \ /
-      \  •→ ←•  \
-      /\     |  /\
-     /  \ ★  | /  \
-    /    \|  |/    \
-    -------+--+-------  
-           |  |
-           | second position
-           |
-          goal (minimum loss)
-```
+Because the transverse walls are steep, gradient descent steps overshoot and bounce back and forth across opposing valley walls ($\mathbf{g}_{t+1}^{\text{transverse}} \approx -\mathbf{g}_t^{\text{transverse}}$). This wastes kinetic energy in high-frequency oscillations while making negligible forward progress along the gentle valley floor.
 
-### Momentum Solution
+### The Momentum Solution: Physical Inertia (Polyak Heavy-Ball)
 
-Momentum remembers the direction you were going and continues in that direction:
+Momentum introduces physical inertia into the update dynamics. Instead of taking steps proportional to instantaneous gradients, SGD maintains a running velocity accumulator $\mathbf{v}_t$:
 
-```
-With momentum:
+$$\begin{aligned}
+\mathbf{v}_t &= \beta \mathbf{v}_{t-1} + \mathbf{g}_t \\
+\boldsymbol{\theta}_{t+1} &= \boldsymbol{\theta}_t - \alpha \mathbf{v}_t
+\end{aligned}$$
 
-starting position
-          |
-     -----|---------- 
-     \ / •↘     \ /
-      \    ↙•    \
-      /\ •↘     / \
-     /  \ *    /   \
-    /    \|   /     \
-    -------+----------  
-           | 
-           | 
-           |
-          goal (minimum loss)
-```
+Unrolling the velocity recurrence reveals how momentum acts as a directional low-pass filter:
 
-**Implementation:** SGD keeps a "velocity" buffer that accumulates momentum.
+$$\mathbf{v}_t = \sum_{\tau=0}^t \beta^{t-\tau} \mathbf{g}_\tau$$
+
+- **Transverse Components**: Alternating gradient signs cancel out across successive steps ($\sum \beta^{t-\tau} \mathbf{g}_\tau^{\text{transverse}} \to \mathbf{0}$).
+- **Floor Components**: Consistent gradients accumulate constructively, accelerating along the valley floor up to a terminal steady-state multiplier of $\frac{1}{1 - \beta} \approx 10\times$ (for $\beta = 0.9$).
+
+| Metric / Property | Vanilla SGD ($\beta = 0$) | SGD with Momentum ($\beta = 0.9$) |
+| :--- | :--- | :--- |
+| **Effective Velocity** | $\mathbf{v}_t = \mathbf{g}_t$ | $\mathbf{v}_t = 0.9 \mathbf{v}_{t-1} + \mathbf{g}_t$ |
+| **Steady-State Step Multiplier** | $1.0\times$ | $\frac{1}{1 - \beta} = 10.0\times$ |
+| **Ravine Trajectory** | Transverse zig-zag oscillation | Filtered low-pass forward acceleration |
+| **State Buffer Memory** | $0\text{ bytes}$ (stateless) | $4\text{ bytes/param}$ (`velocity` buffer) |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "sgd-optimizer", "solution": true}
@@ -799,70 +702,51 @@ if __name__ == "__main__":
     test_unit_sgd_optimizer()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ Adam: Adaptive Moment Estimation
 
-Adam solves a fundamental problem with SGD: different parameters often need different learning rates. Think of tuning a complex system where some knobs need gentle adjustments and others need bold changes.
+Adam (Adaptive Moment Estimation) solves a fundamental failure mode of SGD: in deep networks, different parameters require radically different effective step sizes.
 
-### The Parameter Scaling Problem
+### The Parameter Sensitivity Dilemma
 
-Consider a neural network with both first layer weights and output weights:
+Consider a neural network where early feature layers receive attenuated backpropagated gradients ($\sim 10^{-4}$), while the classification head receives direct, large-magnitude error signals ($\sim 10^{-1}$). A single global scalar learning rate $\alpha$ produces an impossible trade-off:
+- **Small $\alpha$**: Output weights converge smoothly, but early layers remain virtually frozen.
+- **Large $\alpha$**: Early layers learn effectively, but output layer weights oscillate wildly or explode.
 
-```
-Parameter Sensitivity Landscape:
+### Adam's Dual-Momentum Formulation
 
-    first_layer_weight              output_weight
-           ↑                               ↑
-           |                               |
-           |  gentle slope                 |  steep cliff
-           |  (needs big steps)            |  (needs tiny steps)
-           |                               |
-        ━━━●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●━━━→
+Adam dynamically normalizes each coordinate's update step by tracking two running statistics via Exponential Moving Averages (EMA):
 
-Same learning rate = disaster!
-• Small LR: output weights learn fast, first layer crawls
-• Large LR: first layer learns well, output weights explode
-```
+$$\begin{aligned}
+\mathbf{m}_t &= \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \mathbf{g}_t && \text{(First Moment: Directional Velocity)} \\
+\mathbf{v}_t &= \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t^{\odot 2} && \text{(Second Moment: Coordinate Energy / Variance)}
+\end{aligned}$$
 
-### Adam's Adaptive Solution
+With standard defaults $\beta_1 = 0.9$ and $\beta_2 = 0.999$, $\mathbf{m}_t$ averages over $\sim 10$ recent gradients while $\mathbf{v}_t$ averages energy over $\sim 1000$ recent steps.
 
-Adam automatically adjusts learning rates by tracking two statistics:
+### Bias Correction: Resolving the Cold-Start Problem
 
-```
-1. MOMENTUM (first moment): "Which way am I usually going?"
-   m = 0.9 * old_direction + 0.1 * current_gradient
+Because buffers are initialized at zero ($\mathbf{m}_0 = \mathbf{0}, \mathbf{v}_0 = \mathbf{0}$), early-step running moments are heavily biased toward zero. Unrolling the recurrence for stationary expectation $\mathbb{E}[\mathbf{g}_i] \approx \mathbb{E}[\mathbf{g}_t]$:
 
-   Visualization:
-   old: →→→→
-   new:     ↗
-   m:   →→→↗  (weighted average)
+$$\mathbb{E}[\mathbf{m}_t] = \mathbb{E}\left[(1 - \beta_1) \sum_{i=1}^t \beta_1^{t-i} \mathbf{g}_i\right] = (1 - \beta_1^t) \mathbb{E}[\mathbf{g}_t] \implies \hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1 - \beta_1^t}$$
 
-2. SCALE (second moment): "How big are my steps usually?"
-   v = 0.999 * old_scale + 0.001 * (current_gradient)²
+$$\mathbb{E}[\mathbf{v}_t] = \mathbb{E}\left[(1 - \beta_2) \sum_{i=1}^t \beta_2^{t-i} \mathbf{g}_i^{\odot 2}\right] = (1 - \beta_2^t) \mathbb{E}[\mathbf{g}_t^{\odot 2}] \implies \hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1 - \beta_2^t}$$
 
-   Big gradients → bigger v → smaller effective steps
-   Small gradients → smaller v → bigger effective steps
+The bias correction divisor $1 - \beta^t$ starts near zero and asymptotes to $1.0$ as $t \to \infty$, ensuring mathematically unbiased estimators from the very first step:
 
-3. ADAPTIVE UPDATE:
-   step = momentum / √scale
-   param = param - learning_rate * step
-```
+| Step $t$ | Raw Accumulator $\mathbf{m}_t$ | Bias Divisor $(1 - \beta_1^t)$ | Unbiased Estimate $\hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1 - \beta_1^t}$ | Effective Step Scaling |
+| :--- | :--- | :--- | :--- | :--- |
+| $t = 1$ | $0.100 \cdot \mathbf{g}$ | $1 - 0.900 = 0.100$ | $\frac{0.100 \mathbf{g}}{0.100} = 1.000 \cdot \mathbf{g}$ | $100\%$ true gradient signal |
+| $t = 2$ | $0.190 \cdot \mathbf{g}$ | $1 - 0.810 = 0.190$ | $\frac{0.190 \mathbf{g}}{0.190} = 1.000 \cdot \mathbf{g}$ | $100\%$ true gradient signal |
+| $t = 3$ | $0.271 \cdot \mathbf{g}$ | $1 - 0.729 = 0.271$ | $\frac{0.271 \mathbf{g}}{0.271} = 1.000 \cdot \mathbf{g}$ | $100\%$ true gradient signal |
 
-### Bias Correction: The Cold Start Problem
+### The Scale-Invariant Update Step
 
-Adam starts with m=0 and v=0, which creates a bias toward zero initially:
+Dividing directional momentum by the root-mean-square energy yields coordinate-wise scale invariance:
 
-```
-Without bias correction:    With bias correction:
+$$\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \alpha \frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$$
 
-Step 1: m = 0.9*0 + 0.1*g    Step 1: m̂ = m / (1-0.9¹) = m / 0.1
-       = 0.1*g (too small!)           = g (correct!)
-
-Step 2: m = 0.9*0.1*g + 0.1*g Step 2: m̂ = m / (1-0.9²) = m / 0.19
-       = 0.19*g (still small)         = g (exact again)
-```
-
-**Key Insight:** Adam is like having an automatic transmission that adjusts gear ratios for each parameter individually.
+Parameters with consistently large gradients are scaled down, while parameters with faint gradients are boosted, allowing all network layers to learn concurrently at rate $\sim \alpha$.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "adam-optimizer", "solution": true}
@@ -916,24 +800,23 @@ class Adam(Optimizer):
         ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### Moment Updates: EMA and Bias Correction
 
-Adam tracks two running statistics per parameter: a first moment (mean of
-gradients) and a second moment (mean of squared gradients). Both use
-exponential moving averages (EMA) and need bias correction because they
-start from zero.
+Adam tracks two running statistics per parameter: a first moment ($\mathbf{m}$, exponentially decaying average of past gradients) and a second uncentered moment ($\mathbf{v}$, exponentially decaying average of squared gradients). Because buffers are initialized to zero, both statistics are biased toward zero in early iterations and require step-dependent scaling corrections:
 
-```
-grad_data ──→ m = β₁ * m + (1-β₁) * grad       (direction EMA)
-         └──→ v = β₂ * v + (1-β₂) * grad²      (magnitude EMA)
+$$\begin{aligned}
+\text{Raw First Moment (EMA):} \quad & \mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \mathbf{g}_t \\
+\text{Raw Second Moment (EMA):} \quad & \mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t^2 \\
+\text{Bias-Corrected Estimates:} \quad & \hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1 - \beta_1^t}, \quad \hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1 - \beta_2^t}
+\end{aligned}$$
 
-             m̂ = m / (1 - β₁^t)                 (bias-corrected mean)
-             v̂ = v / (1 - β₂^t)                 (bias-corrected variance)
-```
+| Moment Buffer | Statistic Modeled | Default Parameter | Bias Correction Factor | Asymptotic Behavior ($t \to \infty$) |
+| :--- | :--- | :--- | :--- | :--- |
+| **First Moment $\mathbf{m}$** | Mean direction | $\beta_1 = 0.9$ | $1 - \beta_1^t$ | $1 - 0.9^t \to 1.0$ |
+| **Second Moment $\mathbf{v}$** | Uncentered variance | $\beta_2 = 0.999$ | $1 - \beta_2^t$ | $1 - 0.999^t \to 1.0$ |
 
-This helper isolates the EMA + bias correction math so that `step()`
-only has to compose: extract gradient, update moments, apply update.
+This helper isolates the moment tracking and bias correction mathematics so that `step()` cleanly composes extraction, moment evaluation, and coordinate updates.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "adam-update-moments", "solution": true}
@@ -1046,24 +929,19 @@ if __name__ == "__main__":
     test_unit_adam_update_moments()
 
 # %% [markdown]
-"""
+r"""
 ### Adam Step: Composing Gradient Extraction, Moments, and Update
 
-The `step()` method now composes three focused operations:
-1. `_extract_gradient()` -- normalize Tensor/ndarray gradient to NumPy
-2. `_update_moments()` -- EMA + bias correction for adaptive scaling
-3. Parameter update -- `param -= lr * m_hat / (sqrt(v_hat) + eps)`
+The Adam `step()` pipeline executes a sequence of localized numerical transformations across each parameter:
 
-```
-For each parameter:
-    param.grad ──→ _extract_gradient() ──→ grad_data
-                                               │
-                   (optional weight decay)  ←──┘
-                                               │
-                   _update_moments(i, grad) ──→ (m_hat, v_hat)
-                                                     │
-                   param.data -= lr * m_hat / (√v_hat + ε)
-```
+| Step Phase | Mathematical Operation | Systems Invariant |
+| :--- | :--- | :--- |
+| **1. Extraction** | $\mathbf{g} = \text{unwrap}(\text{param.grad})$ | Obtains contiguous float32 NumPy buffer |
+| **2. Coupled Decay** | $\mathbf{g} \leftarrow \mathbf{g} + \lambda \boldsymbol{\theta}$ | In-place gradient penalty (coupled $L_2$) |
+| **3. Moments** | $(\hat{\mathbf{m}}, \hat{\mathbf{v}}) = \text{EMA}(\mathbf{g})$ | Bias-corrected first and second moment updates |
+| **4. Mutation** | $\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \alpha \frac{\hat{\mathbf{m}}}{\sqrt{\hat{\mathbf{v}}} + \epsilon}$ | Elementwise vector update in place on `param.data` |
+
+$$\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} \hat{\mathbf{m}}_t$$
 """
 
 # %% nbgrader={"grade": false, "grade_id": "adam-step", "solution": true}
@@ -1189,75 +1067,44 @@ if __name__ == "__main__":
     test_unit_adam_optimizer()
 
 # %% [markdown]
-"""
+r"""
 ## 🏗️ AdamW: Adam with Decoupled Weight Decay
 
-AdamW changes where weight decay enters the update. Adam adds the decay term to the gradient, so the adaptive step size rescales it along with everything else. AdamW applies the decay to the parameter directly, after the adaptive step.
+AdamW (Loshchilov & Hutter, 2017) resolves a fundamental flaw in how adaptive optimizers historically handled weight decay. In standard SGD, $L_2$ regularization and weight decay are mathematically identical; in adaptive algorithms like Adam, they diverge catastrophically.
 
-### Coupled vs. Decoupled Weight Decay
+### The Mathematical Divergence: SGD vs Adam
 
-In standard Adam, weight decay is added to gradients before the adaptive scaling:
+In classical SGD, adding an $L_2$ regularization penalty $\frac{\lambda}{2} \|\boldsymbol{\theta}\|_2^2$ to the loss function yields:
 
-```
-Adam's approach (problematic):
-1. gradient = computed_gradient + weight_decay * parameter
-2. m = β₁ * m + (1-β₁) * gradient
-3. v = β₂ * v + (1-β₂) * gradient²
-4. step = m / √v
-5. parameter = parameter - learning_rate * step
+$$\nabla_{\boldsymbol{\theta}} \mathcal{L}_{\text{reg}} = \mathbf{g}_t + \lambda \boldsymbol{\theta}_t \implies \boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \alpha (\mathbf{g}_t + \lambda \boldsymbol{\theta}_t) = (1 - \alpha \lambda) \boldsymbol{\theta}_t - \alpha \mathbf{g}_t$$
 
-Problem: Weight decay gets "adapted" by the learning rate scaling!
-```
+Each parameter is shrunk uniformly by factor $(1 - \alpha \lambda)$ at every step, independent of gradient scale.
 
-### Why This Matters
+### The Inversion Pathology in Standard Adam
 
-Weight decay should be a consistent regularization force, but Adam makes it inconsistent:
+Standard Adam implements "coupled" weight decay by adding $\lambda \boldsymbol{\theta}_t$ directly to the gradient vector $\mathbf{g}_t^{\text{coupled}} = \mathbf{g}_t + \lambda \boldsymbol{\theta}_t$ before computing moment buffers:
 
-```
-Parameter Update Comparison:
+$$\Delta \boldsymbol{\theta}_t = -\alpha \frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} \approx -\alpha \frac{\mathbf{g}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} - \frac{\alpha \lambda}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} \boldsymbol{\theta}_t$$
 
-Large gradients → small adaptive LR → weak weight decay effect
-Small gradients → large adaptive LR → strong weight decay effect
+Notice the denominator $\sqrt{\hat{\mathbf{v}}_t} + \epsilon$:
+- **Frequent or High-Magnitude Gradients**: $\hat{\mathbf{v}}_t$ is large $\implies$ the effective weight decay $\frac{\alpha \lambda}{\sqrt{\hat{\mathbf{v}}_t}}$ is severely suppressed! Active parameters receive virtually no regularization.
+- **Sparse or Low-Magnitude Gradients**: $\hat{\mathbf{v}}_t$ is small $\implies$ the effective weight decay is amplified! Rare feature parameters are shrunk aggressively toward zero.
 
-This is backwards! We want consistent regularization.
-```
+This behavior is completely backwards from principled statistical regularization.
 
-### AdamW's Fix: Decoupled Weight Decay
+### AdamW's Decoupled Solution
 
-AdamW separates gradient-based updates from weight decay:
+AdamW decouples weight decay from adaptive gradient scaling. Moments are accumulated exclusively on pure task gradients $\mathbf{g}_t$, while shrinkage is applied directly to the parameter buffer:
 
-```
-AdamW's approach (correct):
-1. m = β₁ * m + (1-β₁) * pure_gradient  ← NO weight decay here
-2. v = β₂ * v + (1-β₂) * pure_gradient²
-3. step = m / √v
-4. parameter = parameter * (1 - lr * weight_decay)       ← decay old weight
-5. parameter = parameter - learning_rate * step           ← gradient update
+$$\boldsymbol{\theta}_{t+1} = \underbrace{(1 - \alpha \lambda) \boldsymbol{\theta}_t}_{\text{Uniform Parameter Shrinkage}} - \underbrace{\alpha \frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}}_{\text{Adaptive Gradient Step}}$$
 
-Result: Consistent regularization independent of gradient magnitudes!
-```
-
-Note: Step 4 uses the "decoupled" form where weight decay is scaled by the
-learning rate (`1 - lr * weight_decay`), not the simpler `(1 - weight_decay)`.
-This ensures the regularization strength scales consistently with the gradient
-update step size.
-
-### Visual Comparison
-
-```
-Adam weight decay:                  AdamW weight decay:
-
-gradient ──┐                        gradient ──→ adaptive ──→ param
-           ├─→ adaptive ──→ param                  update
-weight ────┘   scaling
-decay
-                                    weight ─────────→ param
-                                    decay           shrinkage
-
-Coupled (inconsistent)          Decoupled (consistent)
-```
-
-**Key Insight:** AdamW treats optimization and regularization as separate, independent processes, leading to better training dynamics and generalization.
+| Property | Coupled Regularization (Adam) | Decoupled Weight Decay (AdamW) |
+| :--- | :--- | :--- |
+| **Gradient Fed to Moments** | $\mathbf{g}_t + \lambda \boldsymbol{\theta}_t$ (contaminated) | $\mathbf{g}_t$ (pure loss gradient) |
+| **Coordinate Decay Rate** | $\frac{\alpha \lambda}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$ (inversely scaled by variance) | $\alpha \lambda$ (constant and uniform across all weights) |
+| **Frequent / Active Features** | Under-regularized (large $\hat{v} \implies$ negligible decay) | Consistently regularized |
+| **Sparse / Inactive Features** | Over-regularized (small $\hat{v} \implies$ massive decay) | Consistently regularized |
+| **Hyperparameter Coupling** | Optimal $\lambda$ depends nonlinearly on $\alpha$ | Optimal $\lambda$ is largely decoupled from $\alpha$ |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "adamw-optimizer", "solution": true}
@@ -1309,25 +1156,14 @@ class AdamW(Optimizer):
         ### END SOLUTION
 
 # %% [markdown]
-"""
-### AdamW Moment Updates: Same EMA, Different Context
+r"""
+### AdamW Moment Updates: Pure Gradients without Decay Pollution
 
-AdamW uses identical moment update math as Adam (EMA + bias correction), and
-the module keeps the two classes separate on purpose: a student building either
-one sees the whole rule in one place.
-The critical difference is that AdamW passes **pure gradients** to moment
-updates -- weight decay is applied separately to parameters, not mixed
-into the gradient signal.
+AdamW employs the exact same Exponential Moving Average (EMA) and bias correction mathematics as Adam. However, the architectural context differs fundamentally: AdamW feeds **pure objective gradients** $\mathbf{g}_t$ into `_update_moments()`, ensuring that parameter decay never distorts the coordinate variance estimates:
 
-```
-AdamW flow:
-    grad_data ──→ _update_moments(i, grad_data)  ← pure gradient, no decay
-                        │
-                   (m_hat, v_hat)
-                        │
-    param *= (1 - lr * weight_decay)              ← decay old weight
-    param -= lr * m_hat / (√v_hat + ε)           ← gradient update
-```
+$$\mathbf{g}_t \xrightarrow{\text{pure gradient}} \_ \text{update\_moments}(i, \mathbf{g}_t) \implies \begin{cases} \hat{\mathbf{m}}_t = \frac{\beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \mathbf{g}_t}{1 - \beta_1^t} \\ \hat{\mathbf{v}}_t = \frac{\beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t^{\odot 2}}{1 - \beta_2^t} \end{cases}$$
+
+Parameter shrinkage is subsequently applied as an independent transformation directly to the parameter buffer.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "adamw-update-moments", "solution": true}
@@ -1438,22 +1274,19 @@ if __name__ == "__main__":
     test_unit_adamw_update_moments()
 
 # %% [markdown]
-"""
+r"""
 ### AdamW Step: Decoupled Weight Decay Composition
 
-AdamW's `step()` composes the same helpers as Adam, but with one critical
-difference: weight decay is applied **before** the gradient update, directly
-to the parameter values, rather than being mixed into the gradient.
+AdamW's `step()` composes the unified gradient extraction and moment update helpers into an atomic four-phase pipeline per parameter tensor:
 
-```
-For each parameter:
-    param.grad ──→ _extract_gradient() ──→ grad_data
-                                               │
-                   _update_moments(i, grad) ──→ (m_hat, v_hat)
-                                                     │
-                   param.data *= (1 - lr * weight_decay)      ← decay old weight
-                   param.data -= lr * m_hat / (√v_hat + ε)   ← gradient step
-```
+| Phase | Operation | Mathematical Transformation | Implementation Vector |
+| :--- | :--- | :--- | :--- |
+| **1. Unpack** | Gradient Extraction | $\mathbf{g}_t \leftarrow \text{param.grad}$ | `grad_data = self._extract_gradient(param)` |
+| **2. Moments** | Variance Tracking | $(\hat{\mathbf{m}}_t, \hat{\mathbf{v}}_t) \leftarrow \text{EMA}(\mathbf{g}_t)$ | `m_hat, v_hat = self._update_moments(i, grad_data)` |
+| **3. Shrinkage** | Decoupled Weight Decay | $\boldsymbol{\theta} \leftarrow (1 - \alpha \lambda) \boldsymbol{\theta}$ | `param.data *= (1 - self.lr * self.weight_decay)` |
+| **4. Descent** | Adaptive Normalization | $\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \alpha \frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$ | `param.data -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)` |
+
+Applying parameter shrinkage in Phase 3 prior to the adaptive descent in Phase 4 ensures that regularization remains completely orthogonal to gradient conditioning.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "adamw-step", "solution": true}
@@ -1673,64 +1506,53 @@ if __name__ == "__main__":
     test_unit_adam_checkpoint_state()
 
 # %% [markdown]
-"""
+r"""
 ## 🔧 Integration: Bringing It Together
 
-Now let's see how our optimizers perform in realistic scenarios. We'll compare their behavior on the same optimization problem to understand their different characteristics.
+Now let's observe how our optimizers perform across canonical optimization benchmarks. Each algorithm embodies a distinct geometric approach to resolving loss curvature:
 
-### Optimizer Behavior Comparison
-
-Each optimizer takes a different approach to the same problem:
-
-```
-Optimization Problem: Find minimum of f(x) = x²
-
-SGD approach:        Adam approach:        AdamW approach:
-  ↓                    ↓                     ↓
- x ──→ minimize       x ──→ minimize       x ──→ minimize
-  ↑                    ↑                     ↑
-fixed LR           adaptive LR          adaptive LR + decay
-```
+| Algorithm | Trajectory Dynamic | Effective Step Scaling | Regularization Coupling |
+| :--- | :--- | :--- | :--- |
+| **SGD** | Steepest descent along local slope | Global scalar $\alpha$ | None (or coupled $L_2$ gradient penalty) |
+| **SGD + Momentum** | Heavy-ball physical inertia | Accumulated velocity $\frac{\alpha}{1 - \beta}$ | None |
+| **Adam** | Directional & variance EMA tracking | Coordinate-wise $\frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$ | Coupled to gradient before moment estimation |
+| **AdamW** | Directional & variance EMA tracking | Coordinate-wise $\frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$ | **Decoupled**: Direct parameter shrinkage $(1 - \alpha \lambda)$ |
 """
 
 
 # %% [markdown]
-"""
+r"""
 ## 📊 Systems Analysis: Optimizer Performance and Memory
 
-Different optimizers have very different resource requirements. Understanding these trade-offs is crucial for production ML systems.
+In production machine learning systems, optimizer state buffers often dominate the total resident memory of hardware accelerators. Understanding the arithmetic and memory bandwidth trade-offs is essential for scaling models to large architectures.
 
-### Memory Usage Patterns
+<div align="center">
+  <img src="optimizer_margin_memory.svg" alt="AdamW State: 16 Bytes per Parameter" width="320px">
+</div>
 
-```
-Optimizer Memory Requirements (per parameter):
+### Memory Usage Patterns: The 16-Byte Parameter Rule
 
-SGD:           Adam/AdamW:
-┌────────┐     ┌────────┐
-│ param  │     │ param  │
-├────────┤     ├────────┤
-│momentum│     │   m    │ ← first moment
-└────────┘     ├────────┤
-               │   v    │ ← second moment
-               └────────┘
+For single-precision (FP32) training, each model parameter incurs substantial secondary state allocations:
 
-2× memory       3× memory
-```
+| Buffer Role | Precision & Size | Resident Lifespan | SGD ($\beta=0$) | SGD + Momentum | Adam / AdamW |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Model Weight ($\boldsymbol{\theta}$)** | FP32 (4 Bytes) | Permanent | 4 Bytes | 4 Bytes | 4 Bytes |
+| **Loss Gradient ($\mathbf{g}$)** | FP32 (4 Bytes) | Transient (backward pass) | 4 Bytes | 4 Bytes | 4 Bytes |
+| **First Moment Buffer ($\mathbf{m}$)** | FP32 (4 Bytes) | Permanent state | 0 Bytes | 4 Bytes (`velocity`) | 4 Bytes (`m_buffer`) |
+| **Second Moment Buffer ($\mathbf{v}$)** | FP32 (4 Bytes) | Permanent state | 0 Bytes | 0 Bytes | 4 Bytes (`v_buffer`) |
+| **Total Resident Memory** | — | — | **8 B / param ($2\times$)** | **12 B / param ($3\times$)** | **16 B / param ($4\times$)** |
 
-### Computational Complexity
+> **Systems Takeaway**: Training a 7-billion parameter language model in FP32 requires $7 \times 10^9 \times 16\text{ Bytes} = 112\text{ GB}$ of memory solely for weights, gradients, and AdamW moments—before allocating a single byte for activation tensors or KV caches!
 
-```
-Per-step Operations:
+### Computational Complexity & Memory Bandwidth
 
-SGD:                     Adam:
-• 1 multiplication       • 3 multiplications
-• 1 addition            • 4 additions
-• 1 subtraction         • 1 subtraction
-                        • 1 square root
-                        • 1 division
+Because optimizer steps execute element-wise over the entire parameter set, their execution speed is bound by memory bandwidth rather than compute throughput (FLOP/s):
 
-O(n) simple ops         O(n) complex ops
-```
+| Optimizer | Arithmetic FLOPs / Parameter | Dominant Vector Math Kernel | Memory Bandwidth (Bytes / Param) |
+| :--- | :--- | :--- | :--- |
+| **Vanilla SGD** | 2 FLOPs ($\boldsymbol{\theta} - \alpha \mathbf{g}$) | Scaled axpy | 8 B Read ($\boldsymbol{\theta}, \mathbf{g}$) + 4 B Write ($\boldsymbol{\theta}$) = 12 B |
+| **SGD + Momentum** | 4 FLOPs ($\mathbf{v} \leftarrow \beta \mathbf{v} + \mathbf{g}; \boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \alpha \mathbf{v}$) | Compound axpy | 12 B Read ($\boldsymbol{\theta}, \mathbf{g}, \mathbf{v}$) + 8 B Write ($\mathbf{v}, \boldsymbol{\theta}$) = 20 B |
+| **Adam / AdamW** | ~14 FLOPs (2 EMA, 2 bias div, sqrt, div, decay, axpy) | Fused point-wise kernel | 16 B Read ($\boldsymbol{\theta}, \mathbf{g}, \mathbf{m}, \mathbf{v}$) + 12 B Write ($\mathbf{m}, \mathbf{v}, \boldsymbol{\theta}$) = 28 B |
 """
 
 # %% nbgrader={"grade": false, "grade_id": "optimizer-analysis", "solution": false}
