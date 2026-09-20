@@ -47,6 +47,12 @@ Granting an autonomous software agent access to terminal shells, compiler tools,
 
 ## Adversarial Threat Models {#sec-vol3-virtualization-threat-model}
 
+
+::: {.column-margin}
+![](images/svg/vol3_virtualization_margin_001.svg){width="100%" fig-alt="Horizontal bar ladder showing host system calls exposed to untrusted code: Container at 450, gVisor at 50, Firecracker at 35, and WebAssembly at 0."}
+
+*MicroVMs and WebAssembly collapse host kernel syscall exposure by over 90% compared to containers.*
+:::
 **When an operating system kernel dispatches instructions to a classical processor, it relies on a foundational architectural invariant: the physical hardware enforces a rigid, hardware-mediated separation between executable instructions and untrusted application data.** The processor's Memory Management Unit (MMU) checks page-table protection bits on every memory cycle, enforcing Write XOR Execute ($W \oplus X$) permissions that prevent writable data buffers from executing as machine code, while hardware privilege rings cleanly isolate the supervisor kernel (Ring 0 on x86-64, Exception Level 1 on ARM64) from unprivileged user-space processes (Ring 3 or Exception Level 0). If an unprivileged application attempts to execute a privileged instruction, dereference an unmapped address, or overwrite kernel memory, the hardware synchronously raises an architectural exception. Execution traps immediately to a registered kernel vector, halting the offending thread in a deterministic, inspectable state. Modern operating systems security has been constructed for over half a century upon this bedrock of hardware-enforced privilege boundaries, deterministic fault signaling, and the strict physical decoupling of the control plane from the data plane.
 
 The moment an autonomous agent system connects a foundation model to operating system actuation, this entire architectural foundation dissolves. In Chapter 07, we established tool interfaces, typed schemas, and observation streaming as the software abstractions through which an agent interacts with external peripherals. However, transforming autoregressive token generation into operating system actuation bridges an unprivileged statistical predictor directly to state-mutating system calls. The execution target is not a deterministic instruction processor operating within a hardware-verified privilege ring; it is a non-deterministic neural inference engine executing tensor contractions across accelerator silicon. In a conventional conversational interface, an erroneous or adversarial token sequence emits passive, incorrect text to a human terminal, where an ambient human operator absorbs the cognitive burden of error detection. Under autonomous delegation—such as an automated software engineering agent executing inside a continuous integration pipeline—the human is removed from the critical loop. The model's token emissions are decoded by the host supervisor into candidate tool invocations that directly mutate host file trees, spawn untrusted subshells, invoke compilers, and open network sockets.
@@ -444,6 +450,12 @@ Even with mathematically sound capability attenuation and complete mediation imp
 
 ## MicroVM Kernel Isolation {#sec-vol3-virtualization-microvms}
 
+
+::: {.column-margin}
+![](images/svg/vol3_virtualization_margin_004.svg){width="100%" fig-alt="Log-scale latency ladder comparing sandbox acquisition times: Cold MicroVM boot at 450 milliseconds, Eager Snapshot restore at 35 milliseconds, and Pre-Warmed CoW Pool with UFFD at 3 milliseconds, matching container speeds without sacrificing hardware isolation."}
+
+*Pre-warmed memory pooling with on-demand userfaultfd paging delivers 3 ms microVM acquisition, matching container speed while preserving hardware isolation.*
+:::
 When an agent runtime translates an unprivileged language model's tool proposal into an arbitrary shell command (`sh -c ...`) or dynamically compiles native source code, executing that payload inside a standard operating system container places only an administrative boundary between untrusted execution and the underlying physical host. Operating system containers rely on Linux namespaces and control groups (`cgroups`) to partition resource visibility and enforce scheduling limits. However, every container on a host shares the identical monolithic Linux kernel image. The Linux system call interface spans over 450 distinct system calls, thousands of auxiliary `ioctl` commands, and millions of lines of privileged kernel C code. A single zero-day integer overflow, race condition, or use-after-free vulnerability within a kernel subsystem—such as `netfilter`, `eBPF`, or `io_uring`—collapses the container abstraction entirely, granting ring-0 execution rights to hostile code and exposing the capability tables, memory spaces, and private credentials of all co-located agent sessions.
 
 ::: {.column-margin}
@@ -819,6 +831,12 @@ While WebAssembly provides an efficient capability-bounded execution harness for
 
 ## Copy-on-Write Filesystem Overlays {#sec-vol3-virtualization-cow}
 
+
+::: {.column-margin}
+![](images/svg/vol3_virtualization_margin_002.svg){width="100%" fig-alt="A latency curve plotting file mutation stall against file size; latency remains sub-millisecond up to 1 megabyte, then steepens to a 10.97-second stall at 1.2 gigabytes under parallel worker contention, with the region past 100 megabytes shaded red."}
+
+*Modifying a single byte triggers full-file copy-up, turning sub-millisecond writes into multi-second NVMe stalls for gigabyte assets.*
+:::
 An autonomous agent executing arbitrary shell commands, compiling code, and running test suites inevitably alters filesystem state. If the agent operates directly on the host's primary repository checkout, a single errant `rm -rf /` or mutated configuration file permanently corrupts the ground-truth environment for all subsequent reasoning steps. Conversely, allocating a dedicated, physically duplicated copy of the target environment for every single trial imposes prohibitive I/O bandwidth overhead and latency. In an automated evaluation harness testing hundreds of candidate patches across concurrent sandboxes, duplicating a 4 GB repository and language toolchain via standard directory copying (`cp -a`) consumes gigabytes of NVMe write bandwidth and stalls task initialization for several seconds per trial.
 
 **Runtime safety and rapid environment cycling require decoupling the immutable baseline from transient execution mutations through copy-on-write filesystem virtualization.** By virtualizing storage at the kernel's Virtual Filesystem (VFS) interface, the host supervisor can present an agent with an isolated, fully mutable directory hierarchy while backing all unchanged files with a shared, read-only baseline. This architecture confines all filesystem mutations—file overwrites, metadata adjustments, and file deletions—to an ephemeral scratchpad that can be inspected, merged, or discarded in milliseconds without altering the underlying image.
@@ -1020,6 +1038,12 @@ Filesystem virtualization ensures that code alterations, scratch binaries, and a
 
 ## Network Egress Firewalls {#sec-vol3-virtualization-network}
 
+
+::: {.column-margin}
+![](images/svg/vol3_virtualization_margin_003.svg){width="100%" fig-alt="Two log-scale horizontal bars comparing covert DNS exfiltration bandwidth: an unrestricted channel at 234 kilobytes per second exfiltrates in 0.28 seconds, while a rate-clamped resolver drops bandwidth to 30 bytes per second, stretching exfiltration to 36.4 minutes."}
+
+*Rate-clamping DNS queries chokes covert exfiltration bandwidth by 7,800x, expanding the anomaly detection window from 0.28 seconds to 36 minutes.*
+:::
 When an unprivileged agent process executes an unvetted script or compiler command inside an isolated guest namespace, an unrestricted network interface turns every computational task into a potential data exfiltration pipe or network weapon. A single call to `socket(AF_INET, SOCK_STREAM, 0)` exposes the execution runtime to the host's entire intranet, including link-local hypervisor interfaces, container cluster metadata servers, and arbitrary public endpoints. If the host assigns a standard bridge interface with Network Address Translation (NAT) without strict packet-level mediation, the agent can initiate outbound TCP handshakes to command-and-control servers or pivot laterally across adjacent corporate subnets.
 
 **Systems Takeaway:** Sandboxed execution must enforce default-deny network egress rules, transparent HTTP/TLS proxy inspection, and link-local IP blocks to eliminate credential exfiltration and SSRF attacks. Containment requires terminating ambient network authority at the virtual network boundary: every outbound packet must be explicitly matched against deterministic identity rules, dropped at the kernel ingress hook, or forwarded through an inspecting application-level proxy, as illustrated in @fig-vol3-network-egress.

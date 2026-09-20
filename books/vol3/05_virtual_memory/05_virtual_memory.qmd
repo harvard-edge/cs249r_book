@@ -124,6 +124,12 @@ If every agent trajectory possessed an invariant, statically predictable sequenc
 
 ## Memory Fragmentation {#sec-vol3-kvcache-fragmentation}
 
+
+::: {.column-margin}
+![](images/svg/vol3_virtual_memory_margin_001.svg){width="100%" fig-alt="Memory waste percentage ladder comparing static contiguous allocation at 87.5 percent, dynamic buddy allocation at 34.4 percent, and paged key-value allocation at 0.12 percent, highlighting a 700-fold reduction."}
+
+*Paged attention collapses memory waste from 87.5% down to 0.12%, eliminating external fragmentation.*
+:::
 Contiguous memory allocators in accelerator runtimes force an untenable operational trade-off between catastrophic memory exhaustion and pervasive capacity starvation. When an inference engine allocates memory for the key-value (KV) cache, it must accommodate sequences whose ultimate lengths are inherently unpredictable. A model generating an autoregressive sequence cannot declare its termination point in advance; completion depends entirely on the sampled output tokens, the emergence of an end-of-sequence token, or an external termination criterion imposed by the agent harness. Yet conventional GPU tensor libraries require dense, contiguous memory allocations to execute matrix-vector multiplications efficiently. This mismatch between dynamic, unpredictable logical growth and rigid, contiguous physical allocation constitutes the central memory management dilemma of modern machine learning serving systems.
 
 **Variable sequence lengths transform naive contiguous KV cache allocation into an engine of severe memory waste, stranding between 60% and 80% of accelerator high-bandwidth memory (HBM) in unreferenced reservations and unallocatable physical holes.** In multi-turn agent workloads where sequence lifetimes are punctuated by external environment calls and wildly variable generation budgets, fixed-reservation and contiguous-chunk allocators rapidly collapse effective serving throughput. Runtimes reject incoming requests due to perceived capacity exhaustion while the physical memory bus reports dozens of gigabytes of nominally unwritten space. Understanding the structural origins of this waste requires examining how memory is provisioned, partitioned, and stranded across dynamic inference lifecycles.
@@ -474,6 +480,12 @@ As formalized in @tbl-radix-node-schema, the Radix tree serves as an authoritati
 
 ### Longest Prefix Matching and Block Boundary Alignment
 
+
+::: {.column-margin}
+![](images/svg/vol3_virtual_memory_margin_002.svg){width="100%" fig-alt="Radix tree prefix matching diagram showing a 100-token shared system prefix partitioned into 6 full 16-token blocks with a 4-token unaligned tail truncated to prevent race conditions."}
+
+*Only fully packed blocks are shared across requests; partial block tails are truncated to prevent race conditions.*
+:::
 When an incoming request arrives with a tokenized prompt $\mathbf{t} = [t_0, t_1, \dots, t_{S-1}]$, the serving runtime searches the Radix tree to determine the maximum prefix length $S_{\text{match}}$ that can be resolved from cache. The host scheduler begins at the root node and iteratively matches slices of $\mathbf{t}$ against edge labels. If an edge matches a substring of the prompt, the engine consumes those tokens, records the associated physical `block_ids`, and inspects the child map using the subsequent token $t_{i}$ as the lookup key. This traversal terminates when a token mismatch occurs or when the prompt is exhausted, yielding the longest matched path.
 
 While longest prefix matching is computationally straightforward on the host CPU, translating $S_{\text{match}}$ into usable physical blocks exposes a hardware-induced quantization dilemma: the block boundary alignment problem. PagedAttention groups key and value states into physical blocks of uniform size $B$ (typically $B = 16$ or $B = 32$ tokens) to minimize external fragmentation and optimize memory bus alignment during tensor operations. A block can only be shared safely across independent requests if its internal token slots are completely populated and mathematically sealed.
@@ -654,6 +666,12 @@ Chunking trades a small amount of redundant computation for bounded iteration la
 
 ### Token-Budget Scheduling and SLA Optimization
 
+
+::: {.column-margin}
+![](images/svg/vol3_virtual_memory_margin_003.svg){width="100%" fig-alt="Execution timeline comparing monolithic prefill stalling decode loops for 1,195 milliseconds against chunked prefill pacing decode at 159 milliseconds."}
+
+*Chunking prompts into 512-token slices cuts P99 decode latency from 1,195 ms to 159 ms.*
+:::
 Chunked prefill enables an inference engine to construct hybrid batches containing both prefill chunks and single-token decode requests. In systems such as Sarathi-Serve and modern implementations of vLLM, this scheduling is governed by a strict token budget, denoted by $C_{\text{budget}}$.
 
 In every scheduling cycle, the engine examines the queue of pending prefill chunks and the set of running decode sequences. The scheduler selects a combination of prefill chunks and decode tokens such that the total number of processed tokens in the iteration does not exceed $C_{\text{budget}}$:
@@ -760,6 +778,12 @@ To navigate this constraint, the inference supervisor can deploy four distinct m
 
 ### Analytical Mechanics: The Break-Even Decision Frontier
 
+
+::: {.column-margin}
+![](images/svg/vol3_virtual_memory_margin_004.svg){width="100%" fig-alt="Break-even curve showing PCIe host swapping beating full prompt recomputation whenever external tool execution pauses exceed 215 milliseconds."}
+
+*For tool pauses exceeding 215 ms, PCIe offload frees HBM while beating prefill recompute by 53.6×.*
+:::
 Selecting statically among these four policies creates severe operational pathological behavior. An engine that always retains KV state will crash under out-of-memory (OOM) faults when an agent encounters a long build step. Conversely, an engine that always recomputes will waste over half its operational energy re-evaluating static system prompts and file buffers. The serving runtime must evaluate an analytical decision boundary driven by sequence length $S$, expected wait time $T_{\text{wait}}$, accelerator compute throughput, and interconnect transfer bandwidth.
 
 Consider an autoregressive transformer model with $P$ parameters, $L$ layers, $H_{\text{kv}}$ key-value heads, and head dimension $d_{\text{head}}$, operating with element byte size $b_{\text{elem}}$ (where $b_{\text{elem}} = 2$ for 16-bit half precision and $b_{\text{elem}} = 1$ for 8-bit quantization). The memory footprint consumed by each token's key-value projection is:

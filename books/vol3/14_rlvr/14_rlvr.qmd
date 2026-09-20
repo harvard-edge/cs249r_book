@@ -463,12 +463,24 @@ How can a training runtime extract stable, low-variance advantage estimates acro
 
 ## Group Relative Policy Optimization {#sec-vol3-rlvr-grpo}
 
+
+::: {.column-margin}
+![](images/svg/vol3_rlvr_margin_002.svg){width="100%" fig-alt="Concave exploration curve showing pass@k trajectory completion surging from 18% at k=1 to 79.6% at k=8 and 95.8% at k=16."}
+
+*Scaling parallel rollout exploration from k=1 to k=8 boosts verifiable task pass rates from 18% to nearly 80%.*
+:::
 Deploying classical actor-critic algorithms to train frontier reasoning models exhausts accelerator High-Bandwidth Memory (HBM) long before saturating matrix compute cores. When scaling reinforcement learning across distributed clusters, the canonical Proximal Policy Optimization (PPO) architecture requires concurrent execution and state synchronization across four distinct neural networks: the policy being optimized (the Actor), a learned value estimator (the Critic), a frozen baseline policy (the Reference model), and an evaluative scoring network (the Reward model). In an agentic setting where the base model contains tens of billions of parameters, the Critic network presents an untenable systems bottleneck. Estimating the expected scalar return $V_\phi(s)$ of an uncommitted, multi-turn reasoning trajectory demands a network with representational capacity comparable to the Actor itself. Consequently, the Critic duplicates the Actor's parameter footprint, doubles the backward-pass communication overhead, and allocates hundreds of gigabytes of distributed memory purely to track auxiliary optimizer states.
 
 **Group Relative Policy Optimization (GRPO) resolves this accelerator memory crisis by entirely discarding the neural Critic network, deriving the baseline value of a state directly from the empirical reward distribution of a group of parallel rollouts sampled for the same prompt.** By normalizing candidate trajectory returns against their cohort mean and standard deviation, the training runtime replaces tens of gigabytes of parameter and optimizer state memory with lightweight algebraic operations over scalar execution outcomes. This architectural reduction reclaims substantial accelerator memory for larger training batch sizes, longer reasoning context windows, and higher rollout concurrency, transforming verifiable reinforcement learning from a memory-bound distributed coordination challenge into a throughput-oriented compute pipeline.
 
 ### The Memory Wall of Actor-Critic Runtimes {#sec-vol3-rlvr-grpo-memory-wall}
 
+
+::: {.column-margin}
+![](images/svg/vol3_rlvr_margin_001.svg){width="100%" fig-alt="Two-rung horizontal memory ladder comparing persistent cluster VRAM for 70B parameter models: PPO at 2,380 GB (92% VRAM, 4.8 GB context headroom) versus GRPO at 1,260 GB (49% VRAM, 41.2 GB context headroom)."}
+
+*Eliminating the Critic network reclaims 1.12 TB of accelerator memory, freeing 41.2 GB of per-GPU headroom for extended context windows.*
+:::
 To understand the systems motivation behind Group Relative Policy Optimization, one must account for the physical memory layout of modern distributed training runtimes. Standard autoregressive policy training using PPO coordinates four functional roles across the cluster: the Actor $\pi_\theta$, the Critic $V_\phi$, the Reference model $\pi_{\text{ref}}$, and the Reward model $R_\psi$. Even when weights are stored in 16-bit half-precision floating-point formats (such as BF16 or FP16 at 2 bytes per parameter), training under first-order adaptive optimizers such as AdamW imposes severe memory overheads. Each trainable parameter requires an FP16 gradient (2 bytes) alongside FP32 master weights, first-moment momentum buffers, and second-moment variance accumulators (collectively consuming 16 bytes per parameter).
 
 ::: {.column-margin}
@@ -732,6 +744,12 @@ Under this unyielding optimization pressure, however, the learning dynamics enco
 
 ## Reasoning Entropy Collapse {#sec-vol3-rlvr-pathologies}
 
+
+::: {.column-margin}
+![](images/svg/vol3_rlvr_margin_003.svg){width="100%" fig-alt="Two-trajectory plot comparing policy entropy across training steps: unconstrained RL plunges to zero entropy degeneracy by step 40, while GRPO with reference-model KL stabilization maintains a healthy 2.2 nats plateau."}
+
+*Unconstrained policy optimization collapses reasoning entropy to zero, producing repetitive degeneracies unless KL penalties anchor exploration.*
+:::
 When an unconstrained language policy is optimized against deterministic verification harnesses, the policy gradient rapidly identifies and exploits degenerate shortcuts in the token search space. Rather than steadily discovering broader and more robust problem-solving strategies, the reinforcement learning loop repeatedly falls prey to two complementary failure modes: *policy entropy collapse*, where token distributions prematurely degenerate into deterministic, unexploring sub-optima, and *runaway verbosity*, where reasoning traces inflate toward the maximum context boundary without yielding corresponding gains in solution accuracy.
 
 **The central systems challenge in policy regularization is balancing exploratory variance against structural efficiency: an agent must retain sufficient policy entropy across its vocabulary to discover alternative reasoning branches, while bounding intermediate sequence length so that rollouts do not exhaust physical accelerator memory or degrade into repetitive computational loops.**
@@ -808,11 +826,13 @@ Consider an RLVR training cluster optimizing a 70-billion parameter model on an 
 $$S_{\text{token}} = 4 \times 64 \times 8 \times 128 = 262{,}144 \text{ bytes} = 256 \text{ KiB/token}$$
 
 **Regime 1: Calibrated Reasoning ($T_{\text{reason}} = 1{,}536$ tokens, total $T = 2{,}048$):**
+
 - KV cache per sequence: $2{,}048 \times 256 \text{ KiB} = 512 \text{ MiB}$.
 - Aggregate KV cache across 128 rollouts: $128 \times 512 \text{ MiB} = 64 \text{ GiB}$.
 - Decode execution: Generating 1,536 tokens at an empirical decode throughput of 40 tokens/sec requires $38.4 \text{ seconds}$.
 
 **Regime 2: Runaway Verbosity ($T_{\text{reason}} = 7{,}680$ tokens, total $T = 8{,}192$):**
+
 - KV cache per sequence: $8{,}192 \times 256 \text{ KiB} = 2{,}048 \text{ MiB} = 2.0 \text{ GiB}$.
 - Aggregate KV cache across 128 rollouts: $128 \times 2.0 \text{ GiB} = 256 \text{ GiB}$.
 - Decode execution: Generating 7,680 tokens at 40 tokens/sec requires $192.0 \text{ seconds}$.
@@ -824,11 +844,11 @@ Runaway verbosity quadruples the active KV-cache memory footprint on the inferen
 
 Stabilizing RLVR requires explicit algorithmic mechanisms that simultaneously prevent the collapse of policy entropy and penalize ungrounded trajectory verbosity without suppressing necessary analytical computation.
 
-| Pathology | Primary Manifestation | Underlying Cause | Corrective Mechanism | Algorithmic Impact |
-| :--- | :--- | :--- | :--- | :--- |
-| **Entropy Collapse** | $\mathcal{H}(\pi_\theta) \to 0$; zero group variance ($\sigma_R = 0$) | Excessive reinforcement of early brittle solutions | Adaptive Entropy Regularization | Restores exploration breadth across token vocabulary |
-| **Runaway Verbosity** | $T_{\text{tokens}} \to T_{\max}$; KV cache memory exhaustion | Credit assignment heuristic assigns reward to padding | Piecewise Non-Linear Length Penalty | Constrains output length to parsimonious computation budget |
-| **Degenerate N-Gram Looping** | Infinite repetitive loops of identical token phrases | Autoregressive self-reinforcement of high-probability sequences | N-Gram Repetition Penalties during rollout generation | Truncates degenerate cyclic traces and zeroes trajectory reward |
+| Pathology                     | Primary Manifestation                                                 | Underlying Cause                                                | Corrective Mechanism                                  | Algorithmic Impact                                              |
+|:------------------------------|:----------------------------------------------------------------------|:----------------------------------------------------------------|:------------------------------------------------------|:----------------------------------------------------------------|
+| **Entropy Collapse**          | $\mathcal{H}(\pi_\theta) \to 0$; zero group variance ($\sigma_R = 0$) | Excessive reinforcement of early brittle solutions              | Adaptive Entropy Regularization                       | Restores exploration breadth across token vocabulary            |
+| **Runaway Verbosity**         | $T_{\text{tokens}} \to T_{\max}$; KV cache memory exhaustion          | Credit assignment heuristic assigns reward to padding           | Piecewise Non-Linear Length Penalty                   | Constrains output length to parsimonious computation budget     |
+| **Degenerate N-Gram Looping** | Infinite repetitive loops of identical token phrases                  | Autoregressive self-reinforcement of high-probability sequences | N-Gram Repetition Penalties during rollout generation | Truncates degenerate cyclic traces and zeroes trajectory reward |
 
 #### Adaptive Policy Entropy Regularization
 
@@ -897,6 +917,12 @@ Yet maintaining these calibrated training dynamics across tens of thousands of p
 
 ## Disaggregated Rollout Infrastructure {#sec-vol3-rlvr-infrastructure}
 
+
+::: {.column-margin}
+![](images/svg/vol3_rlvr_margin_004.svg){width="100%" fig-alt="Two-tier operational comparison showing rollout inference operating at 4.2 FLOP/byte in memory-bandwidth-bound execution at 32% MFU versus training gradient compute operating at 145 FLOP/byte in compute-bound execution at 58% MFU."}
+
+*Disaggregating memory-bound rollout inference from compute-bound gradient updates prevents accelerator underutilization across the training fleet.*
+:::
 Attempting to execute reinforcement learning rollouts directly inside a distributed training framework exposes a severe structural impedance mismatch between autoregressive token generation and backward-pass gradient optimization. A distributed training engine (such as Megatron-LM or PyTorch FSDP) optimizes for compute-dense, statically scheduled matrix-matrix multiplications ($\text{GEMM}$) executed across rigid tensor- and pipeline-parallel topologies. Conversely, an agentic rollout engine must process high-concurrency, dynamic-length sequence generation governed by memory-bandwidth-bound matrix-vector operators ($\text{GEMV}$), unpredictable tool-invocation pauses, and high-variance termination depths. Forcing these divergent workloads onto a shared pool of accelerators degrades training hardware efficiency to single-digit model-FLOPS utilization while simultaneously starving inference workers of the dynamic high-bandwidth memory (HBM) allocations required for intermediate Key-Value (KV) caching.
 
 **Decoupling distributed generation workers from gradient update workers into disaggregated, specialized clusters—bridged by high-throughput Remote Direct Memory Access (RDMA) trajectory streams and coordinated via radix-tree KV-cache sharing—resolves this architectural conflict, achieving near-peak hardware saturation across both rollout and optimization phases.**
@@ -925,14 +951,14 @@ When training and generation are co-located on the same physical accelerators, t
 2. **Topology Inefficiency:** Distributed training maximizes throughput via multidimensional parallelism (such as 8-way Tensor Parallelism combined with Pipeline and Data Parallelism). In contrast, serving autoregressive decode loops across large tensor-parallel dimensions incurs prohibitive inter-accelerator communication latencies on every single decoded token. Rollout engines operate with peak token-per-second efficiency at low tensor-parallel degrees ($TP \le 2$ or $TP=4$), maximizing data-parallel rollout concurrency across independent nodes.
 3. **Execution Pipeline Bubbles:** Co-located runtimes alternate synchronously between generation and optimization. While gradient workers execute backpropagation, inference serving infrastructure idles. Conversely, while the cluster awaits the slowest agent environment to terminate its rollout, the massive matrix multiplication engines sit completely stalled.
 
-| Operational Dimension | Inference Fleet (Rollouts) | Training Fleet (Gradients) |
-| :--- | :--- | :--- |
-| **Dominant Kernel** | Autoregressive GEMV (Decode) / Prefill GEMM | Static GEMM (Forward & Backward) |
-| **Roofline Bound** | Memory Bandwidth Bound ($I \approx 1$ FLOP/byte) | Compute Bound ($I \gg 100$ FLOP/byte) |
-| **Accelerator Memory** | Dedicated to Dynamic KV Cache Pages | Dedicated to Weights, Optimizer States, Gradients |
-| **Parallelism Strategy** | High Data Parallelism, Minimal Tensor Parallelism | 3D Parallelism (TP, PP, FSDP / ZeRO-3) |
-| **Execution Cadence** | Asynchronous, Dynamic Sequence Terminations | Synchronous, Coordinated Global Barriers |
-| **Interconnect Demand** | High-concurrency client RPCs and trajectory streaming | High-bandwidth Ring All-Reduce collectives |
+| Operational Dimension    | Inference Fleet (Rollouts)                            | Training Fleet (Gradients)                        |
+|:-------------------------|:------------------------------------------------------|:--------------------------------------------------|
+| **Dominant Kernel**      | Autoregressive GEMV (Decode) / Prefill GEMM           | Static GEMM (Forward & Backward)                  |
+| **Roofline Bound**       | Memory Bandwidth Bound ($I \approx 1$ FLOP/byte)      | Compute Bound ($I \gg 100$ FLOP/byte)             |
+| **Accelerator Memory**   | Dedicated to Dynamic KV Cache Pages                   | Dedicated to Weights, Optimizer States, Gradients |
+| **Parallelism Strategy** | High Data Parallelism, Minimal Tensor Parallelism     | 3D Parallelism (TP, PP, FSDP / ZeRO-3)            |
+| **Execution Cadence**    | Asynchronous, Dynamic Sequence Terminations           | Synchronous, Coordinated Global Barriers          |
+| **Interconnect Demand**  | High-concurrency client RPCs and trajectory streaming | High-bandwidth Ring All-Reduce collectives        |
 
 Table: Architectural dichotomy between rollout inference engines and gradient optimization runtimes. {#tbl-vol3-disaggregated-contrast}
 
@@ -966,7 +992,7 @@ When the group scheduler dispatches a cohort of $G$ rollouts targeting task fixt
 
 1. **Prefix Matching and Cache Paging:** The token string $x_{1:L_{\text{prompt}}}$ is looked up in the radix index. If the prefix exists in memory, zero prefill computation is performed. If it does not exist, the engine executes the prefill GEMM *exactly once* for the root node, materializes the corresponding Key and Value states into physical memory blocks, and stores the resulting page descriptors inside the tree node.
 2. **Read-Only Physical Sharing:** The scheduler instantiates $G$ logical execution contexts. Each context binds its initial memory page table directly to the physical page descriptors stored at the shared radix node. The reference count of the physical memory blocks is incremented by $G$.
-3. **Copy-on-Write Autoregressive Branching:** As each trajectory $\tau_i$ begins its private autoregressive generation loop, it samples distinct actions $a_t^{(i)}$ due to non-zero temperature scaling ($T > 0$). The new Key and Value vectors generated at step $t > L_{\text{prompt}}$ cannot be written into the shared parent node. Instead, the runtime dynamically allocates private page blocks managed by the virtual memory subsystem for each diverging branch.
+3. **Copy-on-Write Autoregressive Branching:** As each trajectory $\tau_i$ begins its private autoregressive generation loop, it samples distinct actions $a_t^{(i)}$ due to nonzero temperature scaling ($T > 0$). The new Key and Value vectors generated at step $t > L_{\text{prompt}}$ cannot be written into the shared parent node. Instead, the runtime dynamically allocates private page blocks managed by the virtual memory subsystem for each diverging branch.
 
 Because the initial $L_{\text{prompt}}$ tokens remain immutable, all $G$ generation workers execute attention kernels that reference the shared physical pages concurrently during their respective decode steps, slashing both prefill computation and accelerator memory pressure.
 
@@ -1003,6 +1029,7 @@ For FP16 precision (2 bytes/element), storing one token's Key and Value states a
 $$S_{\text{token}} = 2 \times (\text{Key} + \text{Value}) \times n_{\text{layers}} \times d_{\text{kv}} = 2 \times 2 \times 80 \times 1\text{,}024 = 327\text{,}680\text{ bytes} \approx 0.3125\text{ MB/token}$$
 
 **2. Memory Footprint Comparison (Prefix Phase):**
+
 - *Naive Independent Allocation:* Each of the $G = 16$ rollouts independently stores the prompt prefix:
   $$M_{\text{naive}} = G \times L_{\text{prompt}} \times S_{\text{token}} = 16 \times 8\text{,}192 \times 0.3125\text{ MB} = 40\text{,}960\text{ MB} = 40.0\text{ GB}$$
 - *Radix-Tree Shared Allocation:* The prefix is materialized once and shared across all 16 workers:
@@ -1011,6 +1038,7 @@ $$S_{\text{token}} = 2 \times (\text{Key} + \text{Value}) \times n_{\text{layers
 
 **3. Compute Footprint Comparison (Prefill GEMM):**
 The floating-point operations required to execute prefill across $L$ tokens scale as $2 \cdot N \cdot L$:
+
 - *Naive Independent Prefill:*
   $$\text{FLOPs}_{\text{naive}} = 16 \times (2 \times 70 \times 10^9 \times 8\text{,}192) \approx 1.835 \times 10^{16}\text{ FLOPs}$$
 - *Radix Shared Prefill:*

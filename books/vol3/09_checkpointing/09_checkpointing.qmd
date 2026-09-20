@@ -68,6 +68,12 @@ To govern an autonomous trajectory across hours of execution, interleaved tool i
 
 ## The Agent Control Block {#sec-vol3-controlplane-acb}
 
+
+::: {.column-margin}
+![](images/svg/vol3_checkpointing_margin_001.svg){width="100%" fig-alt="Logarithmic scale bar chart comparing per-trajectory memory footprint: 256 bytes for the Agent Control Block descriptor, 128 kilobytes for the host context buffer, and 8.59 gigabytes for the physical GPU KV cache, illustrating a 35-million-fold decoupling."}
+
+*Decoupling 256-byte control descriptors from 8.59-gigabyte tensor state enables lightweight process scheduling across distributed worker nodes.*
+:::
 Operating systems do not schedule or isolate programs by parsing their source text, inspecting raw machine instructions, or guessing where an executing thread might jump next. A classical kernel encapsulates execution state within a dedicated kernel data structure—the Process Control Block (PCB)—which records virtual memory base registers, file descriptor arrays, thread contexts, CPU register snapshots, and accounting counters (Silberschatz et al., 2018). In an agentic machine learning system, the basic unit of execution is not a compiled ELF binary executing on a synchronous CPU, but an unprivileged, non-deterministic trajectory process navigating an open-ended problem space through alternating phases of foundation model generation and tool execution.
 
 When naive agent runtimes attempt to manage trajectories as ad-hoc Python coroutines or raw strings passed across recursive loops, they suffer immediate operational collapse. An in-flight trajectory paused for human approval loses its active execution state if the host process restarts; a runaway agent consuming tens of thousands of tokens per minute cannot be pre-empted without tearing downstream sandbox sockets; and a single-node scheduler attempting to arbitrate GPU inference slots across hundreds of concurrent users is forced to parse multi-megabyte prompt histories to determine how long an agent has been running or what permissions it retains.
@@ -203,6 +209,12 @@ To maintain system integrity, the supervisory control plane must enforce a forma
 
 ## Trajectory Lifecycle States {#sec-vol3-controlplane-statemachine}
 
+
+::: {.column-margin}
+![](images/svg/vol3_checkpointing_margin_002.svg){width="100%" fig-alt="Knee curve plotting operator signal interception latency against decode polling frequency K, dropping steeply from 68.2 seconds without sub-checkpoints to 533 milliseconds at K=16 tokens."}
+
+*Polling interrupts every 16 tokens compresses supervisor signal response latency from 68 seconds down to 533 milliseconds.*
+:::
 When an agent runtime treats process lifecycle as an unverified enumeration or an ad-hoc integer flag, the system quickly exhibits catastrophic concurrency anomalies. In unmediated frameworks, a slow tool execution often returns its payload after the supervisor has already canceled the parent task due to a deadline timeout. If the runtime naively accepts this late response, the agent re-enters execution within a partially dismantled environment, corrupting its context window or driving tools against recycled container namespaces. Worse, an unprivileged model might emit an unauthorized tool call while ostensibly paused for operator review, executing high-consequence mutations because the host control plane failed to strictly isolate human escrow from the execution queue.
 
 **A trajectory process is not an unconstrained procedural loop; it is a discrete dynamical system governed by an explicit finite state machine with strict transition guards.** To guarantee fault isolation, prevent zombie resource leaks, and eliminate reentrancy hazards, every mutation of the Agent Control Block (ACB) must satisfy mathematical transition invariants enforced by the supervisory kernel. By formalizing these states and their transition relations, the runtime guarantees that untrusted model completions cannot hijack process progression, and that physical compute resources—from inference batch slots to sandbox mounts—are allocated, suspended, and reclaimed through provably safe operational paths.
@@ -741,6 +753,12 @@ Cooperative yielding and event-driven multiplexing ensure that host worker threa
 
 ## Human Escrow Protocols {#sec-vol3-controlplane-hitl}
 
+
+::: {.column-margin}
+![](images/svg/vol3_checkpointing_margin_003.svg){width="100%" fig-alt="Paired bar comparison showing 9.06 TiB of memory consumed by 36,000 synchronous thread stacks versus 141 MiB consumed by asynchronous Agent Control Block stubs during human approval pauses."}
+
+*Asynchronous escrow stubs reduce dormant memory footprint by 67,584x during multi-hour human-in-the-loop pauses.*
+:::
 When an unprivileged foundation model generates an action proposal carrying irreversible side effects—such as pruning database tables, revoking security credentials, or dispatching external wire transfers—automated sandbox containment reaches its structural limit. The execution supervisor cannot rely on speculative sandboxing because the targeted external state cannot be isolated, checkpointed, or rolled back without global disruption. However, pausing an agent to await human intervention introduces an impedance mismatch spanning six orders of magnitude: model decode iterations and local system calls complete within milliseconds ($10^{-3}$ to $10^{-1}\text{ s}$), whereas human inspection, deliberation, and authorization require minutes to hours ($10^2$ to $10^4\text{ s}$).
 
 Holding operating system worker threads and memory allocations hostage across human deliberation intervals causes thread exhaustion, locks resident memory, and stalls host control planes. Conversely, permitting autonomous execution without definitive authorization violates the principle of complete mediation.
@@ -896,6 +914,12 @@ The ability to suspend, park, and wake trajectories on demand solves the protect
 
 ## Single-Node Runtime Scheduling {#sec-vol3-controlplane-scheduling}
 
+
+::: {.column-margin}
+![](images/svg/vol3_checkpointing_margin_004.svg){width="100%" fig-alt="Four-tier threshold ladder illustrating progressive resource exhaustion: nominal operation below 70%, advisory warnings between 70% and 90%, defensive shedding between 90% and 100%, and immediate preemption at 100%."}
+
+*Tiered exhaustion thresholds trigger progressive mitigation before trajectory runaway exhausts global cluster token quotas.*
+:::
 Deploying an agent runtime on a host machine without an explicit concurrency arbiter rapidly precipitates a severe multi-resource thrashing crisis. When dozens of asynchronous trajectory loops run concurrently via unconstrained thread pools or naive asynchronous event loops, each trajectory independently triggers model inference, parses structured actions, and forks external processes within local container sandboxes. Under unconstrained concurrency, the host machine experiences simultaneous physical memory exhaustion as multiple container environments allocate memory concurrently, CPU thread starvation as local compiler builds saturate all host cores, and cascading HTTP `429 Too Many Requests` failures as outbound requests breach upstream inference rate limits.
 
 ::: {.column-margin}
