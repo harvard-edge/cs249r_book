@@ -125,3 +125,20 @@ def test_code_blocks_are_ignored(tmp_path):
         ),
     )
     assert not result.issues
+
+
+def test_line_wrapped_variants_are_flagged(tmp_path):
+    """A tie left at the line break, and a capitalized bracketed ref, still double."""
+    result = _run(
+        tmp_path,
+        "\n".join(
+            [
+                "The measured throughput appears in Table~",
+                "@tbl-results, which the next section reads.",
+                "",
+                "The layout is drawn in Figure",
+                "[@Fig-roofline] on the facing page.",
+            ]
+        ),
+    )
+    assert [issue.line for issue in result.issues] == [1, 4]

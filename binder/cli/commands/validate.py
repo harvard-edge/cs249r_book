@@ -8698,10 +8698,11 @@ class ValidateCommand:
         # Line-wrapped form: noun is the last token on the line, the ref opens
         # the next one. Rendered output is identical to the same-line case.
         trailing_noun = re.compile(
-            rf"(?<![A-Za-z0-9_]){self._XREF_NOUN_EMPH}({self._XREF_NOUN}){self._XREF_NOUN_EMPH}[ \t]*$",
+            rf"(?<![A-Za-z0-9_]){self._XREF_NOUN_EMPH}({self._XREF_NOUN}){self._XREF_NOUN_EMPH}"
+            rf"[ \t~\u00A0\u202F]*$",
             re.IGNORECASE,
         )
-        leading_ref = re.compile(rf"^{self._XREF_AT}")
+        leading_ref = re.compile(rf"^{self._XREF_AT}", re.IGNORECASE)
 
         def _issue(file: Path, line_no: int, noun: str, target: str, context: str) -> ValidationIssue:
             return ValidationIssue(
