@@ -13,36 +13,45 @@
 # ---
 
 # %% [markdown]
-"""
+r"""
 # Module 20: Capstone - Benchmarking & Submission
 
-Welcome to the TinyTorch capstone! You've built an entire ML framework from scratch across 19 modules. Now it's time to demonstrate your work by benchmarking a model and generating a submission that showcases your framework's capabilities.
+Welcome to the TinyTorch capstone! You've built an entire deep learning framework from scratch across 19 foundational modules. Now it is time to demonstrate your engineering achievements by systematically benchmarking a neural architecture, applying compound optimizations, and generating a verified submission that proves framework performance.
+
+<img src="capstone_blueprint.svg" alt="Capstone Framework Blueprint" width="100%">
 
 ## 🔗 Prerequisites & Progress
-**You've Built**: Complete ML framework with profiling (M14), quantization (M15), compression (M16), acceleration (M17), memoization (M18), and benchmarking (M19)
-**You'll Build**: Professional benchmark submission workflow with standardized reporting
-**You'll Enable**: Shareable, reproducible results demonstrating framework performance
 
-**Connection Map**:
-```
-Modules 01-13 → Optimization Suite (14-18) → Benchmarking (19) → Submission (20)
-(Framework)     (Performance Tools)            (Measurement)       (Results)
-```
+| Systems Dimension | Previous Modules (01–19) | Capstone Synthesis (Module 20) | Production Parallel |
+| :--- | :--- | :--- | :--- |
+| **Foundation Engine** | Tensors, Autograd, Optimizers, Training | Complete verified neural pipeline execution | PyTorch / LibTorch C++ Core |
+| **Architectures** | Convolutions (M09), Attention & Transformers (M12–M13) | Multi-layer perceptron & vision baselines | Hugging Face Transformers |
+| **Optimization Stack**| INT8 Quant (M15), Pruning (M16), Fusion (M17), KV Cache (M18) | Compound optimization stacking & Pareto frontiers | TensorRT, ONNX Runtime |
+| **Measurement Rigor** | Monotonic timing, warmup discard, confidence intervals (M19) | Schema-validated standardized benchmark submission | MLPerf Inference & Mobile Suite |
+
+### Architectural Roadmap
+
+| Stage | Module Focus | Core Deliverable | Verification Target |
+| :--- | :--- | :--- | :--- |
+| **1. Measurement** | Latency vs Throughput separation | Monotonic interval timing via `precise_timer()` | Zero cold-start cache distortion |
+| **2. Optimization** | Precision & sparsity transforms | Combined INT8 quantization and structured pruning | Compounding memory & latency gains |
+| **3. Validation** | Standardized JSON schema | Strict type checking & range constraints | Schema-certified reproducible report |
+| **4. Submission** | Olympic events & qualification | Multi-objective tradeoff documentation | Pareto dominance over baseline |
 
 ## 🎯 Learning Objectives
 By the end of this capstone, you will:
-1. Use Module 19's `precise_timer` to measure latency and throughput as two separate measurements
+1. Use Module 19's `precise_timer` to measure latency and throughput as two distinct physical measurements
 2. Apply optimization techniques from Modules 15 and 16 to improve a baseline model
 3. Generate standardized JSON submissions following industry best practices
-4. Validate submissions against a schema for reproducibility
-5. Compare baseline vs. optimized models with quantitative metrics
-6. Share your results with the TinyTorch community in a professional format
-
-Let's get started!
+4. Validate submissions against a strict schema for end-to-end reproducibility
+5. Compare baseline vs. optimized models with quantitative Pareto efficiency metrics
+6. Share your results with the TinyTorch community in an automated, machine-readable format
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/20_capstone/capstone.ipynb`
+<img src="capstone_source_card.svg" alt="Source Code Mapping" width="100%">
+
+**Learning Side:** You work in `modules/20_capstone/capstone.ipynb`  
 **Building Side:** Code exports to `tinytorch.olympics`
 
 ```python
@@ -57,46 +66,30 @@ report.benchmark_model(my_model, X_test, y_test)
 # Generate, validate, and save the submission (a plain dict, written as JSON)
 submission = generate_submission(report)
 validate_submission_schema(submission)
-# Eligibility is separate from a well-formed submission.
+# Eligibility is separate from a well-formed submission
 qualifies_event(report.metrics, OlympicEvent.LATENCY_SPRINT)
 save_submission(submission, "my_submission.json")
 ```
 
 **Why this matters:**
-- **Learning:** Complete workflow from model to shareable results
-- **Production:** Professional submission format mirroring MLPerf and Papers with Code standards
-- **Community:** Share and compare results with other builders using standardized metrics
-- **Reproducibility:** Schema-validated submissions ensure results can be verified and trusted
+- **Learning:** Complete workflow from raw model weights to shareable, reproducible evidence
+- **Production:** Standardized submission protocol mirroring MLPerf and Papers with Code standards
+- **Community:** Objective apples-to-apples performance comparisons across distinct hardware architectures
+- **Reproducibility:** Strict schema validation ensures experimental findings can be replicated and audited
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📋 Module Dependencies
 
-**Prerequisites**: Modules 01-19 must be complete
+| Dependency Type | Component / Module | Systems Function | Technical Role |
+| :--- | :--- | :--- | :--- |
+| **External Runtime** | `numpy`, `time`, `json`, `pathlib`, `platform`, `enum` | OS interface & serialization | High-resolution timing, platform detection, JSON encoding |
+| **Core Primitives** | `tinytorch.core.tensor`, `tinytorch.core.layers` | Computational substrate | Tensor allocations, affine projections (`Linear`), activations (`ReLU`) |
+| **Optimization Stack**| `tinytorch.perf.profiling`, `quantization`, `compression` | Efficiency transformations | Memory tracing (M14), INT8 conversion (M15), magnitude pruning (M16) |
+| **Benchmarking Engine**| `tinytorch.perf.benchmarking.precise_timer` | High-precision measurement | Monotonic nanosecond timing with guaranteed `finally` cleanup |
 
-**External Dependencies**:
-- `numpy` (for array operations and numerical computing)
-- `time` (for the report timestamp)
-- `json` (for submission serialization)
-- `pathlib` (for file path handling)
-- `platform` (for system information)
-- `enum` (for the capstone event names)
-
-**TinyTorch Dependencies**:
-- `tinytorch.core.tensor` (Tensor class from Module 01)
-- `tinytorch.core.layers` (Linear layer from Module 03)
-- `tinytorch.core.activations` (ReLU from Module 02)
-- `tinytorch.perf.benchmarking` (`precise_timer` from Module 19, used for every timing)
-- `tinytorch.perf.profiling`, `tinytorch.perf.quantization`, `tinytorch.perf.compression` (Modules 14, 15, 16; imported only inside the optimization workflow example)
-
-**Dependency Flow**:
-```
-Modules 01-13 → Modules 14-18 → Module 19 → Module 20 (Capstone)
-(Framework)     (Optimization)   (Benchmark)  (Submission)
-```
-
-Students completing this module will demonstrate their complete framework's capabilities through reproducible benchmarking and professional submission generation.
+Students completing this module demonstrate their complete framework's capabilities through reproducible benchmarking and professional submission generation.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": false}
@@ -143,21 +136,14 @@ Modern ML faces a reproducibility crisis. Many published results can't be replic
 - **Cherry-picked results** - Showing best runs without variance
 - **Incomplete reporting** - Omitting negative results or failed optimizations
 
-### Industry Standard: Benchmarking Frameworks
+#### Industry Standard: Benchmarking Frameworks
 
-Professional ML systems use standardized benchmarking frameworks:
+Professional ML systems rely on standardized, community-verified benchmarking frameworks:
 
-```
-Industry Benchmarking Standards:
-┌──────────────────────────────────────────────────────────────┐
-│ MLPerf (AI Hardware)     │ Papers with Code (Research)       │
-├──────────────────────────┼───────────────────────────────────┤
-│ • Standardized tasks     │ • Leaderboards for all datasets   │
-│ • Hardware specifications│ • Reproducible results required   │
-│ • Measurement protocols  │ • Code submission mandatory       │
-│ • Fair comparisons       │ • Automated verification          │
-└──────────────────────────┴───────────────────────────────────┘
-```
+| Benchmark Consortium | Primary Domain | Core Standards & Methodologies | Quality Guarantees |
+| :--- | :--- | :--- | :--- |
+| **MLPerf (MLCommons)** | AI Hardware & Systems | Fixed tasks, datasets, warmup rules, and percentile latency constraints | Level-playing-field evaluation across microarchitectures |
+| **Papers with Code** | Academic Research | Public leaderboards, tracked checkpoints, mandatory open reproducibility | Verifiable algorithmic claims backed by code artifacts |
 
 ### What This Capstone Teaches You
 
@@ -172,142 +158,73 @@ Let's build the benchmarking and submission system.
 """
 
 # %% [markdown]
-"""
+r"""
 ## 📐 Foundations: The Science of Benchmarking
 
 Before we build our submission system, let's understand what makes a good benchmark and why standardized reporting matters.
 
 ### The Three Pillars of Good Benchmarking
 
-```
-Good Benchmarks Rest on Three Pillars:
-┌─────────────────┬─────────────────┬─────────────────┐
-│ Repeatability   │ Comparability   │ Completeness    │
-├─────────────────┼─────────────────┼─────────────────┤
-│ Same result     │ Apples-to-apples│ All relevant    │
-│ every time      │ comparisons     │ metrics captured│
-│                 │                 │                 │
-│ • Fixed seeds   │ • Same hardware │ • Accuracy      │
-│ • Same data     │ • Same metrics  │ • Latency       │
-│ • Same config   │ • Same protocol │ • Memory        │
-│ • Variance      │ • Documented    │ • Throughput    │
-└─────────────────┴─────────────────┴─────────────────┘
-```
+| Pillar | Operational Principle | Required Controls | Systems Failure Mode Prevented |
+| :--- | :--- | :--- | :--- |
+| **Repeatability** | Identical inputs produce statistically consistent distributions | Seeded PRNG (`default_rng`), fixed datasets, $N=100$ trials | Single-run outlier distortion (GC pauses, OS jitter) |
+| **Comparability** | Fair apples-to-apples evaluation across model variants | Identical hardware platform, shared evaluation sets | Incomparable heterogeneous execution environments |
+| **Completeness** | Multi-dimensional characterization | Quality, Latency, Memory, Throughput | Blind optimization sacrificing latency for parameter size |
 
 ### What Metrics Actually Matter?
 
-Different stakeholders care about different metrics:
+Different engineering stakeholders care about distinct system dimensions:
 
-```
-Stakeholder View:
-┌──────────────────────────────────────────────────────────────┐
-│ ML Researcher:                                               │
-│   Primary   → Accuracy, F1, BLEU (task-specific)             │
-│   Secondary → Training time, convergence                     │
-│                                                              │
-│ Systems Engineer:                                            │
-│   Primary   → Latency (p50, p99), throughput                 │
-│   Secondary → Memory usage, CPU/GPU utilization              │
-│                                                              │
-│ Product Manager:                                             │
-│   Primary   → User experience (latency < 100ms?)             │
-│   Secondary → Cost per request, scalability                  │
-│                                                              │
-│ DevOps/MLOps:                                                │
-│   Primary   → Model size (deployment), inference cost        │
-│   Secondary → Batch throughput, hardware utilization         │
-└──────────────────────────────────────────────────────────────┘
-```
+| Engineering Persona | Primary Metric | Secondary Metric | Production SLA Focus |
+| :--- | :--- | :--- | :--- |
+| **ML Researcher** | Task accuracy ($\text{Top-1}$), $F_1$, BLEU | Training epochs, loss convergence | Generalization and model capacity |
+| **Systems Engineer** | Latency ($p_{50}, p_{99}$ tail), throughput | Allocator peak memory, cache misses | Real-time interactive deadlines ($< 100\text{ ms}$) |
+| **Product Manager** | End-to-end user perceived latency | Cloud infrastructure cost per query | Retention, conversion, and service reliability |
+| **DevOps / MLOps** | Binary artifact footprint (MB), DRAM RSS | Concurrency headroom, thermal throttle | Resource density in serverless or edge silicon |
 
 **Key Insight**: A complete benchmark captures ALL perspectives, not just one.
 
 ### Benchmark Report Components
 
-Our BenchmarkReport class will track everything needed for reproducibility:
+Our `BenchmarkReport` class tracks everything required for end-to-end reproducibility:
 
-```
-BenchmarkReport Structure:
-┌─────────────────────────────────────────────────────────────┐
-│ Model Characteristics:                                      │
-│   • Parameter count     → Model capacity                    │
-│   • Model size (MB)     → Deployment cost                   │
-│                                                             │
-│ Performance Metrics:                                        │
-│   • Accuracy           → Task performance                   │
-│   • Latency (mean/std) → Inference speed + variance         │
-│   • Throughput         → Samples/second capacity            │
-│                                                             │
-│ System Context:                                             │
-│   • Platform           → Hardware/OS environment            │
-│   • Python version     → Language runtime                   │
-│   • NumPy version      → Numerical library version          │
-│   • Timestamp          → When benchmark was run             │
-└─────────────────────────────────────────────────────────────┘
-```
+| Metadata Category | Tracked Attributes | Systems Role |
+| :--- | :--- | :--- |
+| **Model Characteristics** | `parameter_count`, `model_size_mb` | Parameter storage and hardware memory footprint |
+| **Inference Latency** | `latency_ms_mean`, `latency_ms_std`, `median` | Execution speed and statistical dispersion across runs |
+| **Throughput** | `throughput` ($\text{samples}/\text{sec}$) | Batch processing capacity under sustained load |
+| **Model Quality** | `accuracy` ($\% \text{ or ratio}$) | Preservation of functional predictive accuracy |
+| **System Context** | Platform, processor, Python / NumPy version, timestamp | Exact hardware and software environment for reproducibility |
 
 ### Latency vs. Throughput: A Critical Distinction
 
-Many beginners confuse latency and throughput. They measure different things:
+Many engineers conflate latency and throughput. They quantify distinct physical characteristics:
 
-```
-Latency vs. Throughput:
+$$\text{Latency} = T_{\text{batch}=1} \quad [\text{ms}]$$
 
-Latency (Per-Sample Speed):
-┌──────────────────────────────────────────────────┐
-│  Input → Model → Output                          │
-│   ↑              ↓                               │
-│   └──── 10ms ────┘                               │
-│                                                  │
-│  "How fast can I get ONE result?"                │
-│  Critical for: Real-time apps, user experience   │
-└──────────────────────────────────────────────────┘
+$$\text{Throughput} = \frac{N_{\text{batch}}}{T_{\text{batch}}} \quad \left[\frac{\text{samples}}{\text{second}}\right]$$
 
-Throughput (Batch Capacity):
-┌──────────────────────────────────────────────────┐
-│  [Input1, Input2, ... Input100]                  │
-│           ↓                                      │
-│        Model                                     │
-│           ↓                                      │
-│  [Out1, Out2, ... Out100] in 200ms               │
-│                                                  │
-│  "How many samples per second?"                  │
-│  Critical for: Batch jobs, data processing       │
-└──────────────────────────────────────────────────┘
+By Little's Law, the maximum concurrency $L$ that an engine can sustain without queuing delay is:
 
-Example:
-  Latency:     10ms per sample   → "Fast" for users
-  Throughput:  500 samples/sec   → "Fast" for batches
+$$L = \text{Throughput} \times \text{Latency}$$
 
-Trade-off: Batching increases throughput but adds latency!
-```
+| Performance Metric | Physical Definition | Primary Use Case | Scaling Behavior |
+| :--- | :--- | :--- | :--- |
+| **Latency ($T_1$)** | Time to process a single sample from arrival to return | Interactive web APIs, autonomous control, robotics | Bounded by memory bandwidth and kernel launch latency |
+| **Throughput ($\Phi$)** | Total input samples evaluated per unit time | Offline indexing, batch inference, dataset preprocessing | Scales with tensor parallelism and larger GEMM tile sizes |
 
-Because the two pull in opposite directions, `BenchmarkReport` measures them with two different calls: latency times `model.forward` on one sample, and throughput times `model.forward` on the whole test batch and divides the batch size by that time. Deriving one from the other (`1000 / latency_ms`) would erase exactly the trade-off this box describes.
+Because the two pull in opposite directions, `BenchmarkReport` measures them with two different calls: latency times `model.forward` on one sample, and throughput times `model.forward` on the whole test batch and divides the batch size by that time. Deriving one from the other ($1000 / \text{latency\_ms}$) would erase exactly the trade-off this relationship exposes.
 
 ### Why Variance Matters
 
-Single measurements lie. Variance tells the truth:
+Single measurements lie. Reporting statistical dispersion reveals true system predictability:
 
-```
-Why We Report Mean ± Std:
+| Measurement Sequence | Individual Trials (ms) | Mean ($\mu$) | Standard Deviation ($s$) | Production Assessment |
+| :--- | :--- | :--- | :--- | :--- |
+| **Engine A (Consistent)** | $9.2, 10.1, 9.8, 10.5, 10.4$ | $10.0\text{ ms}$ | $0.5\text{ ms}$ | Predictable real-time compliance; low tail jitter |
+| **Engine B (Erratic)** | $5.2, 14.8, 8.1, 15.3, 6.6$ | $10.0\text{ ms}$ | $4.2\text{ ms}$ | Unacceptable tail spikes; causes frame drops and timeouts |
 
-Measurement 1: 9.2ms    ┐
-Measurement 2: 10.1ms   │ Mean = 10.0ms
-Measurement 3: 9.8ms    │ Std  = 0.5ms
-Measurement 4: 10.5ms   │
-Measurement 5: 10.4ms   ┘
-
-vs.
-
-Measurement 1: 5.2ms    ┐
-Measurement 2: 14.8ms   │ Mean = 10.0ms ← Same mean!
-Measurement 3: 8.1ms    │ Std  = 4.2ms  ← Different variance!
-Measurement 4: 15.3ms   │
-Measurement 5: 6.6ms    ┘
-           ↑
-    Unpredictable performance!
-```
-
-**Which model would you deploy?** The first one, because consistent performance matters in production.
+**Which model would you deploy?** Engine A, because deterministic execution is essential for production SLAs.
 
 ### The Submission Schema: Enforcing Standards
 
@@ -450,40 +367,31 @@ class SimpleMLP:
         return total
 
 # %% [markdown]
-"""
+r"""
 ### Understanding SimpleMLP Parameter Counting
 
-Let's break down where the parameters come from:
+Let's break down where the parameter allocations originate in the network hierarchy:
 
-```
-SimpleMLP Parameter Breakdown:
-┌─────────────────────────────────────────────────────────────┐
-│ Layer 1: Linear(10, 20)                                     │
-│   Weight matrix: (10, 20) = 200 parameters                  │
-│   Bias vector:   (20,)    = 20 parameters                   │
-│   Subtotal: 220 parameters                                  │
-│                                                             │
-│ Layer 2: ReLU                                               │
-│   No parameters (just max(0, x))                            │
-│   Subtotal: 0 parameters                                    │
-│                                                             │
-│ Layer 3: Linear(20, 3)                                      │
-│   Weight matrix: (20, 3)  = 60 parameters                   │
-│   Bias vector:   (3,)     = 3 parameters                    │
-│   Subtotal: 63 parameters                                   │
-│                                                             │
-│ TOTAL: 220 + 0 + 63 = 283 parameters                        │
-└─────────────────────────────────────────────────────────────┘
+| Layer Index & Module | Tensor Dimension & Shape | Parameter Arithmetic | Weight + Bias Subtotal |
+| :--- | :--- | :--- | :--- |
+| **Layer 1: `Linear(10, 20)`** | Weights: $(10, 20)$, Biases: $(20,)$ | $10 \times 20 + 20$ | $220\text{ parameters}$ |
+| **Layer 2: `ReLU()`** | Element-wise $\max(0, x)$ | Non-parametric | $0\text{ parameters}$ |
+| **Layer 3: `Linear(20, 3)`** | Weights: $(20, 3)$, Biases: $(3,)$ | $20 \times 3 + 3$ | $63\text{ parameters}$ |
+| **Total Architecture** | Full multi-layer perceptron | $220 + 0 + 63$ | $\mathbf{283\text{ parameters}}$ |
 
-Memory Calculation (FP32):
-  283 parameters × 4 bytes/param = 1,132 bytes ≈ 0.001 MB
+### Memory Footprint Derivations
 
-If we quantize to INT8:
-  283 parameters × 1 byte/param = 283 bytes ≈ 0.0003 MB
-  → 4× memory reduction!
-```
+The storage requirement scales directly with the numerical data type ($\text{dtype}$):
 
-This small model is perfect for demonstrating optimization impact without long benchmark times.
+$$\text{Memory}_{\text{FP32}} = 283\text{ params} \times 4\text{ bytes} = 1,132\text{ bytes} \approx 1.13\text{ KB} \quad (0.00113\text{ MB})$$
+
+Quantizing the parameter tensors to INT8 (Module 15):
+
+$$\text{Memory}_{\text{INT8}} = 283\text{ params} \times 1\text{ byte} = 283\text{ bytes} \approx 0.28\text{ KB} \quad (0.00028\text{ MB})$$
+
+$$\text{Compression Factor} = \frac{1,132\text{ bytes}}{283\text{ bytes}} = \mathbf{4.0\times\text{ memory reduction}}$$
+
+This compact architecture provides an ideal benchmark probe to measure optimization compounding without lengthy test suite runtimes.
 """
 
 # %% [markdown]
@@ -730,67 +638,52 @@ class BenchmarkReport:
         ### END SOLUTION
 
 # %% [markdown]
-"""
+r"""
 ### Why These Metrics?
 
-Each metric answers a specific production question:
+Each metric answers a specific production engineering and deployment question:
 
-```
-Metric Decision Tree:
-┌─────────────────────────────────────────────────────────────┐
-│ Question                 │ Metric              │ Why        │
-├──────────────────────────┼─────────────────────┼────────────┤
-│ "Will it fit on device?" │ model_size_mb       │ Memory     │
-│ "Is it accurate enough?" │ accuracy            │ Quality    │
-│ "Is it fast enough?"     │ latency_ms_mean     │ UX         │
-│ "Is it consistent?"      │ latency_ms_std      │ Reliability│
-│ "Can it scale?"          │ throughput          │ Capacity   │
-│ "How complex is it?"     │ parameter_count     │ Capacity   │
-└─────────────────────────────────────────────────────────────┘
-```
+| Production Inquiry | Monitored Metric | Physical Dimension | Systems Decision SLA |
+| :--- | :--- | :--- | :--- |
+| **"Will it fit on the target device?"** | `model_size_mb` | Parameter storage & DRAM footprint | SRAM bounds in microcontroller or embedded cache |
+| **"Is prediction quality preserved?"** | `accuracy` | Top-1 accuracy score ($[0, 1]$) | Task accuracy threshold ($\ge \tau_{\text{acc}}$) |
+| **"Is interactive inference fast enough?"**| `latency_ms_mean` | Forward pass duration ($\text{ms}$) | Frame rate budget ($< 16\text{ ms}$ or $< 100\text{ ms}$) |
+| **"Is execution latency predictable?"** | `latency_ms_std` | Latency dispersion / jitter | Elimination of tail stalls ($p_{99}$) |
+| **"Can the service scale under load?"** | `throughput` | Processed samples per second | Cloud server concurrency headroom |
+| **"How compute-heavy is the graph?"** | `parameter_count` | Total active scalar weights | Memory bus transfer volume |
 
-### Design Choice: Warmup, Then num_runs=100
+### Design Choice: Warmup, Then $N=100$ Iterations
 
-`measure_latency` makes a few untimed calls first, then times 100 calls:
-- **Warmup is untimed**, so first-call costs (allocations, cold caches) stay out of the numbers
-- **100 timed runs** average out OS interrupts and GC pauses, and the std shows how consistent the model is
-- **The median is reported alongside mean ± std** because a few slow outliers drag the mean; the submission compares medians for that reason
-- **Std is a spread, not a confidence interval**: it says how wide the distribution is, not how sure you are of the mean
+`measure_latency` executes untimed warmup iterations first, followed by 100 timed trials:
+- **Warmup is untimed**, ensuring first-call costs (physical frame allocations, instruction cache warming, and JIT compilation) stay out of the numbers
+- **100 timed runs** average out OS scheduler interrupts and garbage collection cycles
+- **The median is reported alongside mean $\pm$ std** because asymmetric tail outliers drag the mean; the submission compares medians for robust qualification
+- **Standard deviation ($s$) is a distribution spread, not a confidence interval**: it quantifies runtime variance, while standard error ($\text{SE} = \frac{s}{\sqrt{n}}$) bounds precision
 
-```
-Single Run (Unreliable):        Multiple Runs (Reliable):
-┌─────────────────────────┐     ┌─────────────────────────┐
-│ Run 1: 12.3ms           │     │ Run 1: 12.3ms           │
-│                         │     │ Run 2: 9.8ms            │
-│ Result: 12.3ms          │     │ Run 3: 10.1ms           │
-│ Spread: unknown         │     │ ...                     │
-│ (Could be outlier!)     │     │ Run 100: 10.2ms         │
-│                         │     │                         │
-│                         │     │ Result: 10.0ms ± 0.5ms  │
-│                         │     │ Spread: visible         │
-│                         │     │ (median 10.1ms)         │
-└─────────────────────────┘     └─────────────────────────┘
-```
+| Benchmark Strategy | Sample Size | Reported Metrics | Systems Reliability & Risk |
+| :--- | :--- | :--- | :--- |
+| **Single Run (Unreliable)** | $N=1$ | Single scalar (e.g. $12.3\text{ ms}$) | Unknown variance; highly vulnerable to cold starts or GC spikes |
+| **Sampled Distribution (Reliable)**| $N=100$ | $\mu \pm s$ (e.g. $10.0\text{ ms} \pm 0.5\text{ ms}$), $\text{median} = 10.1\text{ ms}$ | Statistically grounded; captures true tail behavior and ensures reproducibility |
 
 ### Design Choice: Python Native Types
 
-Notice we convert all metrics to Python native types (int, float):
+All metrics are explicitly cast to native Python primitives (`int`, `float`) before report assembly:
 
 ```python
-'parameter_count': int(param_count),  # NumPy int64 → Python int
-'accuracy': float(accuracy),          # NumPy float64 → Python float
+'parameter_count': int(param_count),  # NumPy int64 -> Python int
+'accuracy': float(accuracy),          # NumPy float64 -> Python float
 ```
 
-**Why?** JSON can't serialize NumPy types directly:
+**Why?** Standard JSON libraries cannot serialize NumPy scalar types directly:
 ```python
-# ❌ This fails:
-json.dumps({"value": np.int64(42)})  # TypeError!
+# Fails with TypeError: Object of type int64 is not JSON serializable
+json.dumps({"value": np.int64(42)})
 
-# ✅ This works:
-json.dumps({"value": int(42)})  # Success!
+# Succeeds seamlessly across all JSON parsers
+json.dumps({"value": int(42)})
 ```
 
-This design decision makes our submissions JSON-compatible without custom encoders.
+This design decision ensures generated submissions are universally machine-readable across any programming language without proprietary serializer dependencies.
 """
 
 # %% [markdown]
@@ -1016,86 +909,35 @@ def save_submission(submission: Dict[str, Any], filepath: str = "submission.json
     return filepath
 
 # %% [markdown]
-"""
+r"""
 ### Understanding the Improvements Calculation
 
-When you provide both baseline and optimized results, the submission auto-calculates three key improvement metrics:
+When you provide both baseline and optimized reports, the submission system auto-calculates three foundational improvement metrics:
 
-```
-Improvement Metrics Explained:
+$$\text{Speedup } (S) = \frac{\text{Latency}_{\text{base}}}{\text{Latency}_{\text{opt}}}$$
 
-1. Speedup (Latency Ratio):
-   ┌────────────────────────────────────────────────┐
-   │ Speedup = baseline_latency / optimized_latency │
-   │                                                │
-   │ Example:                                       │
-   │   Baseline:  10.0ms                            │
-   │   Optimized: 5.0ms                             │
-   │   Speedup:   10.0 / 5.0 = 2.0x                 │
-   │                                                │
-   │ Interpretation:                                │
-   │   2.0x = Optimized model is 2× faster          │
-   │   1.0x = No change                             │
-   │   0.5x = Optimized model is slower (bad!)      │
-   └────────────────────────────────────────────────┘
+$$\text{Compression Ratio } (C) = \frac{\text{ModelSize}_{\text{base}}}{\text{ModelSize}_{\text{opt}}}$$
 
-2. Compression Ratio (Size Reduction):
-   ┌────────────────────────────────────────────────┐
-   │ Compression = baseline_size / optimized_size   │
-   │                                                │
-   │ Example:                                       │
-   │   Baseline:  4.0 MB                            │
-   │   Optimized: 1.0 MB                            │
-   │   Compression: 4.0 / 1.0 = 4.0x                │
-   │                                                │
-   │ Interpretation:                                │
-   │   4.0x = Model is 4× smaller                   │
-   │   1.0x = Same size                             │
-   │   0.8x = Larger after "optimization" (bad!)    │
-   └────────────────────────────────────────────────┘
+$$\text{Accuracy Delta } (\Delta \text{Acc}) = \text{Accuracy}_{\text{opt}} - \text{Accuracy}_{\text{base}}$$
 
-3. Accuracy Delta (Quality Impact):
-   ┌────────────────────────────────────────────────┐
-   │ Delta = optimized_accuracy - baseline_accuracy │
-   │                                                │
-   │ Example:                                       │
-   │   Baseline:  92.0%                             │
-   │   Optimized: 91.5%                             │
-   │   Delta:     91.5 - 92.0 = -0.5%               │
-   │                                                │
-   │ Interpretation:                                │
-   │   +0.5% = Improved accuracy (rare but good!)   │
-   │    0.0% = Maintained accuracy (ideal!)         │
-   │   -0.5% = Slight loss (acceptable)             │
-   │   -5.0% = Major loss (unacceptable)            │
-   └────────────────────────────────────────────────┘
-```
+| Quantitative Improvement Metric | Mathematical Definition | Numerical Example | Systems Engineering Interpretation |
+| :--- | :--- | :--- | :--- |
+| **Speedup ($S$)** | $\frac{T_{\text{base}}}{T_{\text{opt}}}$ | $\frac{10.0\text{ ms}}{5.0\text{ ms}} = 2.0\times$ | $2.0\times = \text{Optimized model is twice as fast}$; $< 1.0\times = \text{Regression}$ |
+| **Compression Ratio ($C$)** | $\frac{M_{\text{base}}}{M_{\text{opt}}}$ | $\frac{4.0\text{ MB}}{1.0\text{ MB}} = 4.0\times$ | $4.0\times = \text{Model footprint reduced to } 25\%$; $< 1.0\times = \text{Bloat}$ |
+| **Accuracy Delta ($\Delta \text{Acc}$)** | $\text{Acc}_{\text{opt}} - \text{Acc}_{\text{base}}$ | $91.5\% - 92.0\% = -0.5\%$ | $\ge 0.0\% = \text{Lossless quality}$; $-0.5\% = \text{Acceptable degradation}$ |
 
-### The Optimization Trade-off Triangle
+### The Optimization Trade-off Space: Pareto Frontiers
 
-Every optimization involves trade-offs:
+Every physical optimization technique trades off across the three vertices of systems engineering: speed, storage, and predictive accuracy:
 
-```
-The Impossible Triangle:
-         Fast (Speedup)
-              ▲
-             /│\
-            / │ \
-           /  │  \
-          /   │   \
-         /  Good  \
-        /  Balance \
-       ▼─────────────▼
-    Small         Accurate
-  (Compression)   (Delta)
+<img src="capstone_pareto_frontier.svg" alt="Capstone Optimization Pareto Frontier" width="100%">
 
-You can pick TWO:
-• Fast + Small   → Aggressive optimization, some accuracy loss
-• Fast + Accurate → Careful optimization, less compression
-• Small + Accurate → Conservative quantization, slower
-
-The goal: Find the sweet spot for YOUR use case!
-```
+| Optimization Strategy | Prioritized Dimensions | Incurred Cost | Typical Target Deployment |
+| :--- | :--- | :--- | :--- |
+| **Aggressive Quantization** | Speedup ($2.8\times$) + Compression ($4\times$) | Small accuracy delta ($-0.5\text{ to } -1.0\%$) | Edge mobile, embedded microcontrollers |
+| **Structured Pruning** | Compression ($2\times$) + Memory bandwidth | Small accuracy delta, indexing overhead | Cache-constrained serverless runtimes |
+| **Operator Fusion + KV Caching**| Latency speedup ($4.8\times$) | Transient SRAM working memory | Interactive LLM generation & real-time audio |
+| **Balanced Optimization** | Pareto frontier sweet spot | Co-designed constraint envelope | General production microservices |
 
 ### Why JSON Schema Validation Matters
 
@@ -1588,37 +1430,25 @@ if __name__ == "__main__":
     run_example_benchmark()
 
 # %% [markdown]
-"""
+r"""
 ### Understanding the Workflow Pattern
 
-This workflow follows industry best practices:
+This workflow follows industry best practices for iterative optimization and deployment qualification:
 
-```
-Production ML Workflow:
-┌─────────────────────────────────────────────────────────────┐
-│ 1. Define Task                                              │
-│    ↓ What are we solving? What's the test set?              │
-│                                                             │
-│ 2. Baseline Model                                           │
-│    ↓ Simplest reasonable model                              │
-│                                                             │
-│ 3. Baseline Benchmark                                       │
-│    ↓ Measure: accuracy, latency, memory                     │
-│                                                             │
-│ 4. Optimization (ITERATIVE)                                 │
-│    ↓ Try technique → Benchmark → Compare → Keep or revert   │
-│    ↓ Quantization? Pruning? Distillation?                   │
-│                                                             │
-│ 5. Final Submission                                         │
-│    ↓ Document: baseline, optimized, improvements            │
-│    ↓ Share: JSON file, metrics, techniques                  │
-│                                                             │
-│ 6. Community Comparison                                     │
-│    ↓ How do your results compare to others?                 │
-└─────────────────────────────────────────────────────────────┘
-```
+<img src="capstone_pipeline_overview.svg" alt="Capstone Optimization Pipeline Overview" width="100%">
 
-**Key Insight**: Professional ML engineers iterate on step 4, trying different optimizations and measuring their impact. The submission captures the BEST result after this exploration.
+### Production ML Systems Optimization Lifecycle
+
+| Lifecycle Stage | Implementation Action | Output Artifact / Decision | Systems Verification |
+| :--- | :--- | :--- | :--- |
+| **1. Define Task & SLA** | Select dataset and evaluation metrics | Fixed test split, latency ceiling, minimum accuracy | Controlled experimental environment |
+| **2. Baseline Measurement**| Profile unoptimized reference model | `BenchmarkReport` ($\mu_{\text{base}}, s_{\text{base}}, M_{\text{base}}$) | True unoptimized reference baseline |
+| **3. Apply Candidate Transform**| Apply one optimization technique (e.g. INT8) | Transformed model graph (e.g. `QuantizedLinear`) | Isolate individual transformation impact |
+| **4. Benchmark & Recheck** | Sample latency and evaluate accuracy | Candidate `BenchmarkReport` | Detect immediate accuracy regressions |
+| **5. Multi-Objective Comparison**| Calculate Speedup ($S$), Compression ($C$), $\Delta \text{Acc}$ | Pareto frontier assignment | Keep if dominating, revert if regressing |
+| **6. Submission & Audit** | Serialized JSON submission schema | `submission.json` with system environment metadata | Machine-readable reproducible artifact |
+
+**Key Insight**: Professional ML systems engineers iterate methodically on Step 3 and Step 4, verifying each single modification before compounding optimizations.
 """
 
 # %% [markdown]
@@ -1757,39 +1587,31 @@ if __name__ == "__main__":
     run_optimization_workflow_example()
 
 # %% [markdown]
-"""
-#### Combining Multiple Optimizations
+r"""
+#### Combining Multiple Optimizations: Stacking & Amdahl's Law
 
-In production ML, you often stack optimizations for cumulative benefits:
+In production ML systems, optimizations are rarely deployed in isolation. Rather, systems engineers stack multiple complementary transformations (vectorization, operator fusion, INT8 quantization, weight pruning, KV-caching) for compounding returns:
 
-```
-Stacking Optimizations (illustrative numbers):
-┌─────────────────────────────────────────────────────────────┐
-│ Baseline Model                                              │
-│   Size: 4.0 MB, Latency: 10.0ms, Accuracy: 92.0%            │
-│                                                             │
-│ ↓ Apply Quantization (INT8)                                 │
-│   Size: 1.0 MB (4.0×), Latency: 5.0ms (2.0×), Acc: 91.8%    │
-│                                                             │
-│ ↓ Apply Pruning (50% sparsity)                              │
-│   Size: 0.5 MB (2.0×), Latency: 3.5ms (1.4×), Acc: 91.5%    │
-│                                                             │
-│ Final Optimized Model                                       │
-│   Total compression: 8.0× (4.0 MB → 0.5 MB)                 │
-│   Total speedup: 2.9× (10.0ms → 3.5ms)                      │
-│   Accuracy loss: -0.5% (92.0% → 91.5%)                      │
-└─────────────────────────────────────────────────────────────┘
+<img src="stacking_waterfall_amdahl.svg" alt="Stacking Optimizations Waterfall & Amdahl's Law" width="100%">
 
-Key Insight: Effects multiply!
-  Quant (4.0×) × Pruning (2.0×) = 8.0× total compression
-```
+### Compounding Optimization Stacking
 
-The submission's `techniques_applied` list documents this for reproducibility:
+| Optimization Pass | Transformation Mechanism | Memory Footprint | Latency | Compounding Benefit | Accuracy Impact |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **0. Unoptimized Baseline** | Naive Python / FP32 arrays | $4.0\text{ MB}$ ($1.0\times$) | $10.0\text{ ms}$ ($1.0\times$) | Reference baseline | $92.0\%$ (Baseline) |
+| **1. INT8 Quantization** | Symmetrically scaled 8-bit integers | $1.0\text{ MB}$ ($4.0\times$) | $5.0\text{ ms}$ ($2.0\times$) | $4.0\times\text{ memory, } 2.0\times\text{ speed}$ | $91.8\%$ ($-0.2\%$) |
+| **2. Magnitude Pruning** | 50% structured weight sparsity | $0.5\text{ MB}$ ($2.0\times$) | $3.5\text{ ms}$ ($1.4\times$) | $2.0\times\text{ memory, } 1.4\times\text{ speed}$ | $91.5\%$ ($-0.3\%$) |
+| **Cumulative Optimized**| **Compounded Pipeline** | $\mathbf{0.5\text{ MB}}$ ($\mathbf{8.0\times}$) | $\mathbf{3.5\text{ ms}}$ ($\mathbf{2.9\times}$) | **$\mathbf{8.0\times}$ compression, $\mathbf{2.9\times}$ speedup** | $\mathbf{91.5\%}$ ($-0.5\%$) |
+
+$$\text{Total Compression} = C_{\text{quant}} \times C_{\text{prune}} = 4.0\times \times 2.0\times = \mathbf{8.0\times\text{ reduction}}$$
+
+The submission's `techniques_applied` list documents each applied pass for automated audit and community replication:
+
 ```json
 "techniques_applied": ["int8_quantization", "magnitude_pruning_0.5"]
 ```
 
-This tells other engineers EXACTLY what you did, so they can reproduce or build on your work!
+This ensures downstream deployment pipelines know the exact sequence of graph lowering transformations required to reproduce the numbers.
 """
 
 # %% [markdown]
@@ -1855,7 +1677,7 @@ def test_module():
     print("Run: tito module complete 20")
 
 # %% [markdown]
-"""
+r"""
 ## 🤔 ML Systems Reflection Questions
 
 Answer these to deepen your understanding of benchmarking, reproducibility, and ML systems integration:
@@ -1868,33 +1690,45 @@ Modern ML systems aren't just individual components working in isolation—they'
 
 **The Complete Pipeline You Built:**
 
-```
-Data → Tensor (M01) → Layers (M03) → Model → Training (M08)
-                ↓                      ↓           ↓
-          Activations (M02)      DataLoader (M05) Spatial Ops (M09)
-                ↓                      ↓
-          Losses (M04)           Autograd (M06) → Optimizers (M07)
-                                       ↓
-                              Advanced Architectures
-                         (Tokenization, Embeddings, Attention,
-                          Transformers: M10-M13)
-                                       ↓
-                              Optimization Pipeline
-                         (Profiling, Quantization, Compression,
-                          KV Cache, Acceleration: M14-M18)
-                                       ↓
-                           Measurement & Validation
-                         (Benchmarking M19, Submission M20)
-```
+| Tier | Modules | Systems Responsibility | Artifacts & Dependencies |
+| :--- | :--- | :--- | :--- |
+| **Tier 1: Foundations** | `01_tensor` $\rightarrow$ `08_training` | N-D strided memory, autodiff DAG engine, loss optimization | `Tensor`, computational graph, SGD/Adam, mini-batch loops |
+| **Tier 2: Architectures** | `09_convolutions` $\rightarrow$ `13_transformers` | Spatial filtering, tokenization, multi-head causal attention | `Conv2d`, `BPETokenizer`, `MultiHeadAttention`, `TransformerLM` |
+| **Tier 3: Optimization** | `14_profiling` $\rightarrow$ `18_memoization` | Bottleneck isolation, dynamic range mapping, state reuse | Call trees, INT8 symmetric affine quantization, KV-Cache |
+| **Tier 4: Evaluation** | `19_benchmarking` $\rightarrow$ `20_capstone` | Statistical rigor, Pareto frontiers, standardized schemas | `BenchmarkReport`, Olympic submission schemas, leaderboards |
 
 **Systems Integration Lessons:**
 
-1. **Dependency Management** - Each module imports from previous modules, creating a proper dependency graph
-2. **API Consistency** - Tensor operations work the same whether in Module 01 or Module 20
-3. **Composability** - Complex systems (transformers) built from simple primitives (linear layers)
-4. **Progressive Enhancement** - Module 06 activated gradients dormant since Module 01
+1. **Dependency Management** — Each module imports cleanly from previous modules, creating an acyclic dependency graph.
+2. **API Consistency** — Tensor operations (`+`, `@`, `.reshape()`) behave identically whether executed in Module 01 or Module 20.
+3. **Composability** — Complex architectures (Transformers) are composed cleanly from elementary primitives (linear projections, softmax, residuals).
+4. **Progressive Enhancement** — Module 06 activated autograd hooks dormant since Module 01 without breaking existing tensor callers.
 
 **Reflection Question:** When you imported `from tinytorch.core.tensor import Tensor` in Module 15 (Quantization), the Tensor already had gradient tracking from Module 06. How does this "single source of truth" design simplify system integration compared to having separate BasicTensor and GradTensor classes?
+
+**Systems Analysis & Solution:**
+
+The "single source of truth" design provides decisive architectural and systems advantages over maintaining dual `BasicTensor` and `GradTensor` class hierarchies:
+
+1. **Zero-Copy Memory Layout and Uniform Buffers**:
+   A single unified `Tensor` class encapsulates both the underlying storage buffer (`self.data: np.ndarray`) and execution metadata (`self.grad: Optional[np.ndarray]`, `self.requires_grad: bool`, `self._backward: Callable`). If separate `BasicTensor` and `GradTensor` classes existed:
+   - Transitioning between inference/quantization and training would require wrapping, unwrapping, or copying the underlying raw data buffer, introducing $O(N)$ allocation overheads and cache thrashing.
+   - In-place quantization passes (e.g., `tensor.quantize_int8()`) or weight packing can mutate or alias the underlying array in-place without invalidating the container identity or DAG connections.
+
+2. **Computational Graph Discovery and Polymorphic Dispatch**:
+   When autograd traverses the DAG during backpropagation, every node in the graph expects identical interfaces. If an intermediate layer output were a `BasicTensor` while its weights were a `GradTensor`, every forward and backward operator would need combinatoric type checking:
+   $$\text{Op}(\text{Basic}, \text{Grad}) \rightarrow ?, \quad \text{Op}(\text{Grad}, \text{Basic}) \rightarrow ?, \quad \text{Op}(\text{Grad}, \text{Grad}) \rightarrow ?$$
+   With a single unified `Tensor`, the dispatch logic reduces to a single boolean flag:
+   $$\text{requires\_grad}_{\text{out}} = A.\text{requires\_grad} \lor B.\text{requires\_grad}$$
+   Quantization scales and zero-points can thus be attached directly to tensors without disrupting autograd lineage.
+
+3. **Elimination of Dual Operator Registrations**:
+   Every mathematical operator (`__add__`, `__matmul__`, `relu`, `conv2d`) only needs to be implemented once against the `Tensor` interface. Separate classes would double the required test and maintenance surface across all 20 modules.
+
+4. **Production Framework Alignment (The PyTorch 0.4 Unification)**:
+   Early versions of PyTorch (pre-0.4.0) separated `torch.Tensor` (raw multidimensional arrays) from `torch.autograd.Variable` (DAG node wrappers). This caused ubiquitous boilerplate (`x = Variable(tensor)`), type conversion bugs, and double allocations. PyTorch 0.4 completely merged `Variable` into `torch.Tensor` with a `.requires_grad` attribute—exactly the architectural pattern TinyTorch embodies.
+
+---
 
 ### Question 2: Benchmarking Methodology: Science Meets Engineering
 
@@ -1902,258 +1736,203 @@ Effective benchmarking requires rigorous methodology that bridges scientific mea
 
 **The Three Pillars of Reliable Benchmarking:**
 
-```
-1. REPEATABILITY (Same Experiment → Same Result)
-   ┌─────────────────────────────────────────┐
-   │ • Fixed random seeds (default_rng)      │
-   │ • Same test dataset across runs         │
-   │ • Consistent environment (same hardware)│
-   │ • Multiple runs to capture variance     │
-   │                                         │
-   │ Why: Single measurements lie            │
-   │ 10.3ms once vs 10.0ms ± 0.5ms (100×)    │
-   └─────────────────────────────────────────┘
+| Pillar | Core Principle | Technical Mechanism | Failure Mode Without It |
+| :--- | :--- | :--- | :--- |
+| **1. Repeatability** | Same Experiment $\rightarrow$ Same Result | Fixed PRNG seeds (`default_rng(42)`), cache warmup ($N_{\text{warmup}} \ge 10$), multi-trial statistical sampling ($N \ge 100$) | Single measurement lies: a transient OS interrupt can turn a $10.0\text{ ms}$ kernel into a $15.2\text{ ms}$ false regression. |
+| **2. Comparability** | Fair, Apples-to-Apples Evaluation | Standardized evaluation splits, identical batch dimensions, documented hardware environment (`platform`, CPU architecture) | Comparing inference latency on an AVX-512 server against a low-power laptop core invalidates performance claims. |
+| **3. Completeness** | Multidimensional Trade-off Capture | Joint Pareto logging of Latency ($T$), Throughput ($\Phi$), Memory ($M$), and Accuracy ($\text{Acc}$) | Degenerative solutions: an aggressive pruning pass achieving $10\times$ speedup but dropping accuracy to random chance ($10\%$). |
 
-2. COMPARABILITY (Fair Comparisons)
-   ┌─────────────────────────────────────────┐
-   │ • Same hardware platform                │
-   │ • Same test data for baseline/optimized │
-   │ • Same metrics (latency, accuracy)      │
-   │ • Documented environment (sys.platform) │
-   │                                         │
-   │ Why: Apples-to-apples decisions         │
-   │ Can't compare GPU timing to CPU timing  │
-   └─────────────────────────────────────────┘
+**The Variance Story: Why Single Runs Lie:**
 
-3. COMPLETENESS (Capture All Dimensions)
-   ┌─────────────────────────────────────────┐
-   │ • Accuracy (quality metric)             │
-   │ • Latency (speed metric)                │
-   │ • Memory (resource metric)              │
-   │ • Throughput (capacity metric)          │
-   │                                         │
-   │ Why: Optimizations have trade-offs      │
-   │ Fast + Small might mean Less Accurate   │
-   └─────────────────────────────────────────┘
-```
+A single latency sample $T_{\text{single}} = 12.3\text{ ms}$ is uninterpretable: was it delayed by an OS scheduler context switch, Python garbage collection pause, or CPU thermal frequency drop? In contrast, reporting $N=100$ runs with Student's $t$ confidence bounds provides rigorous statistical confidence:
 
-**Measurement Best Practices You Implemented:**
+$$\bar{T} = \frac{1}{N}\sum_{i=1}^N T_i, \quad s = \sqrt{\frac{1}{N-1}\sum_{i=1}^N (T_i - \bar{T})^2}, \quad \text{CI}_{95\%} = \bar{T} \pm t_{0.975, N-1} \frac{s}{\sqrt{N}}$$
 
-1. **Warm-up runs** - First inference is often slower (cold cache)
-2. **Statistical aggregation** - Report mean ± std, not single values
-3. **Multiple metrics** - Never optimize for just one dimension
-4. **System context** - Platform, Python version, library versions matter
-
-**The Variance Story:**
-
-```python
-# Why we run 100 iterations instead of 1:
-
-Single measurement: 12.3ms
-  → Could be outlier (GC pause? OS interrupt?)
-  → No confidence interval
-  → Can't detect performance regressions
-
-100 measurements: 10.0ms ± 0.5ms
-  → Statistically valid
-  → Confidence: "Next run will likely be 9.5-10.5ms"
-  → Can detect if update made things worse
-```
+| Measurement Strategy | Reported Latency | Statistical Validity | Systems Utility |
+| :--- | :--- | :--- | :--- |
+| **Single Measurement ($N=1$)** | $12.3\text{ ms}$ | Non-reproducible (Zero CI) | Useless: cannot detect whether a code change introduced a regression or caught a quiet OS tick. |
+| **Statistical Aggregate ($N=100$)** | $10.0\text{ ms} \pm 0.5\text{ ms}$ | Statistically sound ($p < 0.05$) | Actionable: regressions $> 0.5\text{ ms}$ can be flagged with high confidence in automated CI pipelines. |
 
 **Reflection Question:** Your benchmark runs inference 100 times and reports mean latency. A production API serves 1 million requests/day. Which percentile (p50, p90, p99) matters more for user experience, and why isn't mean sufficient?
+
+**Systems Analysis & Solution:**
+
+For user experience in production, **tail latency percentiles ($p_{90}$, $p_{99}$, and $p_{99.9}$) matter vastly more than the mean**, and mean is actively deceptive for several fundamental systems reasons:
+
+1. **The Scale of $p_{99}$ at One Million Requests**:
+   At $1{,}000{,}000$ requests per day, the 99th percentile represents the experience of **$10{,}000$ user requests every single day**:
+   $$\text{Affected Users} = 1{,}000{,}000 \times (1.0 - 0.99) = \mathbf{10{,}000\text{ daily degraded interactions}}$$
+   If those $10{,}000$ requests time out, stall interactive UI rendering, or exceed user patience thresholds ($>200\text{ ms}$), the service suffers severe user abandonment and customer churn, even if the mean latency looks pristine.
+
+2. **Asymmetric Fat Tails in Real Systems**:
+   Execution latency is bounded on the left by the speed of light and peak hardware FLOPs ($T > T_{\text{hardware\_min}} > 0$), but is completely unbounded on the right. Systems events—such as page faults, thread descheduling, network TCP retransmissions, container CPU throttle CFS credits, and GC collection passes—cause asymmetric, multimodal spikes.
+   $$\mu = \frac{99 \times 5\text{ ms} + 1 \times 500\text{ ms}}{100} = \mathbf{9.95\text{ ms}}$$
+   Here, reporting $\mu = 9.95\text{ ms}$ conceals the catastrophic reality that $1\%$ of requests suffered a **$100\times$ latency blowout** ($500\text{ ms}$).
+
+3. **Fan-Out Amplification in Distributed Microservices**:
+   Modern production architectures rarely serve a user request with a single inference. A user query typically fans out across $K$ parallel model inferences or retrieval workers (e.g., $K=20$ candidate rankers or ensemble models). The user's total waiting time is determined by the *slowest* worker:
+   $$P(\text{User Request Complete in } \le t) = [P(T_{\text{worker}} \le t)]^K$$
+   If each individual worker meets its SLA $99\%$ of the time ($p_{99}$), the probability that a user request involving $K=50$ backend worker calls completes without experiencing a tail spike drops dramatically:
+   $$P(\text{No Tail Delay}) = 0.99^{50} \approx 0.605 \implies \mathbf{39.5\%\text{ of user requests suffer tail latency!}}$$
+   Monitoring and optimizing $p_{99}$ and $p_{99.9}$ is therefore the only way to prevent distributed service degradation.
+
+---
 
 ### Question 3: Performance Measurement Traps and How to Avoid Them
 
 Real-world benchmarking is full of subtle traps that can invalidate your measurements.
 
-**Common Measurement Pitfalls:**
+**Common Measurement Pitfalls and Systems Countermeasures:**
 
-```
-TRAP 1: Measuring the Wrong Thing
-  ❌ Timing model creation instead of inference
-  ❌ Including data loading in latency measurement
-  ❌ Measuring batch=32 when production uses batch=1
-
-  ✅ FIX: Isolate exactly what you're measuring
-     start = time.perf_counter()
-     output = model.forward(x)  # ONLY this
-     latency = time.perf_counter() - start
-
-TRAP 2: Ignoring System Noise
-  ❌ Running benchmarks while streaming video
-  ❌ Single measurement (affected by GC, OS)
-  ❌ Not warming up (first run is slow)
-
-  ✅ FIX: Multiple runs, discard outliers
-     for _ in range(100):  # Warm up + measure
-         measure_latency()
-     report mean ± std
-
-TRAP 3: Cherry-Picking Results
-  ❌ "Ran 10 times, best was 8.2ms!" (reporting min)
-  ❌ Rerunning until you get good numbers
-  ❌ Omitting variance in reporting
-
-  ✅ FIX: Report full distribution
-     "10.0ms ± 0.5ms (n=100, p99=11.2ms)"
-
-TRAP 4: Wrong Hardware Baseline
-  ❌ Benchmarking on MacBook, deploying to server
-  ❌ Comparing GPU results to CPU results
-  ❌ Not documenting hardware (can't reproduce)
-
-  ✅ FIX: Benchmark on deployment hardware
-     submission['system_info'] = {
-       'platform': platform.platform(),
-       'cpu': 'Intel Xeon Gold',
-       'gpu': 'NVIDIA A100'
-     }
-
-TRAP 5: Confusing Latency and Throughput
-  ❌ "Processes 1000 samples in 10s = 0.01s per sample"
-     (Batch processing != per-sample latency!)
-  ❌ Optimizing throughput hurts latency (big batches)
-
-  ✅ FIX: Measure both separately
-     latency = measure_single_sample()
-     throughput = measure_batch_processing()
-```
+| Measurement Trap | Flawed Practice | Root Cause Mechanism | Systems Mitigation |
+| :--- | :--- | :--- | :--- |
+| **Trap 1: Scope Leakage** | Timing input tensor creation, disk I/O, or metric logging inside the timed loop | Interleaving host I/O and memory allocations with compute kernels | Isolate purely the inference kernel: `start = perf_counter(); out = model.forward(x); latency = perf_counter() - start`. |
+| **Trap 2: Transient Noise & Cold Caches** | Benchmarking on first run with background apps active | CPU cold instruction/data caches, OS page faults, thermal throttling | Execute $N_{\text{warmup}} \ge 10$ discard iterations, pin CPU thread affinity, disable background daemons. |
+| **Trap 3: Cherry-Picking Best Runs** | Reporting only $\min(T)$ from 10 runs | Minimum captures unrealistic peak CPU turbo boost without thermal equilibrium | Report complete empirical distribution: median ($p_{50}$), mean $\pm$ standard deviation, and $p_{95}/p_{99}$ tail percentiles. |
+| **Trap 4: Architectural Mismatch** | Benchmarking on an Apple Silicon M-series laptop and deploying to an x86 server | Differing memory bandwidth, instruction sets (NEON vs AVX-512), and cache hierarchies | Benchmark directly on production-equivalent target instances and record hardware metadata in `system_info`. |
+| **Trap 5: Conflating Latency & Throughput** | Dividing batch inference time by batch size and calling it "user latency" | Amortized batch compute does not reflect single-stream interactive arrival latency | Separately report single-sample online latency ($T_{\text{online}}$, $\text{batch}=1$) and batched throughput ($\Phi = N / T$). |
 
 **Real Example from TinyTorch:**
 
 ```python
-# ❌ WRONG: Measures more than inference
-def bad_benchmark():
-    start = time.time()
-    x = create_random_input()      # Includes data generation!
-    output = model.forward(x)
-    result = postprocess(output)   # Includes postprocessing!
-    return time.time() - start
+# ❌ WRONG: Measures memory allocation, data synthesis, and formatting overhead
+def bad_benchmark(model):
+    start = time.perf_counter()
+    x = Tensor(np.random.randn(32, 10))  # Synthesis allocation included!
+    out = model.forward(x)
+    preds = np.argmax(out.data, axis=1)  # Post-processing included!
+    return time.perf_counter() - start
 
-# ✅ CORRECT: Isolates inference
-def good_benchmark():
-    x = create_random_input()      # Setup (not timed)
-
-    start = time.time()
-    output = model.forward(x)      # ONLY inference
-    latency = time.time() - start
-
-    postprocess(output)            # Cleanup (not timed)
+# ✅ CORRECT: Isolates pure inference compute on warm cache
+def good_benchmark(model, x_cached):
+    # Warmup
+    for _ in range(10):
+        _ = model.forward(x_cached)
+    # Timed region: strictly model compute
+    start = time.perf_counter()
+    out = model.forward(x_cached)
+    latency = time.perf_counter() - start
     return latency
 ```
 
 **Reflection Question:** You benchmark a model at batch_size=32 and report 50ms latency (1.56ms per sample). A production API serves requests one at a time. Will real users experience 1.56ms latency? Why or why not?
 
+**Systems Analysis & Solution:**
+
+**No, real online users will NOT experience $1.56\text{ ms}$ latency.** They will experience substantially higher latency—typically $8\text{ ms}$ to $15\text{ ms}$ or worse—for fundamental systems reasons:
+
+1. **Fixed Kernel Launch and Dispatch Overheads**:
+   Every model invocation incurs fixed runtime costs: Python interpreter function call dispatch, NumPy C-API binding overhead, CPU thread pool synchronization, and memory allocator tracking:
+   $$T_{\text{total}}(\text{batch}) = T_{\text{fixed\_overhead}} + \text{batch} \times T_{\text{marginal\_compute}}$$
+   At $\text{batch}=32$, $T_{\text{fixed\_overhead}}$ (e.g., $3.0\text{ ms}$) is amortized over 32 samples ($\approx 0.09\text{ ms/sample}$). At $\text{batch}=1$, that entire $3.0\text{ ms}$ overhead falls squarely upon that single user sample, establishing a hard latency floor that cannot be amortized.
+
+2. **Under-Subscribed Hardware Vectorization & Memory Bandwidth**:
+   Modern CPUs and GPUs rely on wide SIMD registers (AVX-512, NEON) and parallel matrix multiplication engines (Tensor Cores). At $\text{batch}=32$, GEMM operations achieve high computational density, keeping memory buses saturated and compute pipelines full. At $\text{batch}=1$, matrix-matrix multiplication degrades to a memory-bandwidth-bound matrix-vector product (GEMV). The processor spends the majority of its clock cycles waiting for weights to travel from DRAM/L3 cache into registers, yielding poor operational intensity.
+
+3. **Queueing Latency and Little's Law**:
+   In an online API serving real users, requests arrive asynchronously according to a Poisson process with arrival rate $\lambda$. To achieve a batch size of 32 in production, incoming requests must sit in an ingress buffer:
+   $$T_{\text{user\_latency}} = T_{\text{queue\_wait}} + T_{\text{inference}}$$
+   The first user to arrive must wait for 31 other distinct users to send requests before the dynamic batch is triggered. If requests arrive every $1.0\text{ ms}$, the earliest user waits $31\text{ ms}$ in queue plus $50\text{ ms}$ for batch execution—experiencing an unacceptable **$81\text{ ms}$ turnaround latency**, over $50\times$ higher than the advertised $1.56\text{ ms}$ throughput metric!
+
+---
+
 ### Question 4: Schema Validation: Making Results Machine-Readable
 
 Your submission format uses JSON Schema validation—a powerful pattern for ensuring data quality and enabling automation.
 
-**Why Schema Validation Matters:**
+**Unstructured vs Schema-Validated Payloads:**
 
-```
-WITHOUT Schema:                     WITH Schema:
-┌──────────────────────────┐       ┌──────────────────────────┐
-│ {                        │       │ {                        │
-│   "accuracy": "92%",     │  bad  │   "accuracy": 0.92,      │  ok
-│   "latency": 10.5,       │  bad  │   "latency_ms_mean": 10.5│  ok
-│   "time": "today"        │  bad  │   "timestamp": "2025..." │  ok
-│ }                        │       │ }                        │
-│                          │       │                          │
-│ Problems:                │       │ Benefits:                │
-│ • Wrong type (string %)  │       │ • Enforced types (float) │
-│ • Ambiguous name         │       │ • Clear field names      │
-│ • Unparsable time        │       │ • Standard format        │
-│ • Can't aggregate        │       │ • Automated validation   │
-│ • No automation possible │       │ • Aggregation works      │
-└──────────────────────────┘       └──────────────────────────┘
-```
+| Dimension | Without Schema (Unstructured Ad-Hoc Dictionaries) | With Schema (Standardized Specification) |
+| :--- | :--- | :--- |
+| **Data Types** | Brittle string coercion: `"accuracy": "92%"`, `"latency": "10ms"` | Strict native typing: `"accuracy": 0.92` (float), `"latency_ms_mean": 10.0` |
+| **Value Constraints** | Undetected bugs: negative memory size, accuracy $> 1.0$ | Automated range enforcement: `minimum: 0.0`, `maximum: 1.0` |
+| **Field Semantics** | Ambiguous terminology: `"time": 10.5` (seconds or milliseconds?) | Unambiguous unit contracts: `"latency_ms_mean": 10.5` |
+| **Automation & CI** | Manual review required; regex parsing scripts frequently break | Zero-touch automated leaderboard ingestion, verification, and regression gating |
+| **Replication** | Missing hardware context prevents reproduction | Enforced `system_info` schema captures platform, architecture, and libraries |
 
 **Schema Design Principles:**
 
-1. **Required fields** - Baseline metrics are mandatory, optimized optional
-2. **Type safety** - `accuracy: float` not `accuracy: any`
-3. **Value constraints** - `accuracy in [0.0, 1.0]` catches errors
-4. **Nested structure** - Group related fields (`baseline: {metrics: {...}}`)
-5. **Version tracking** - `tinytorch_version: "0.1.0"` enables evolution
-
-**The Power of Machine-Readable Data:**
-
-```python
-# With schema-validated submissions, you can:
-
-# 1. Automatically aggregate community results
-all_submissions = load_all_submissions()
-avg_accuracy = np.mean([s['baseline']['metrics']['accuracy']
-                       for s in all_submissions])
-
-# 2. Build leaderboards
-sorted_by_speedup = sorted(all_submissions,
-                          key=lambda s: s['improvements']['speedup'],
-                          reverse=True)
-
-# 3. Detect regressions
-if new_latency > baseline_latency * 1.1:
-    alert("Performance regression detected!")
-
-# 4. Generate visualizations
-plot_accuracy_vs_speedup(all_submissions)
-```
+1. **Required vs Optional Fields** — Baseline metrics and system context are strictly mandatory; optimization metadata is conditionally structured.
+2. **Strict Type Safety** — Enforce numeric primitives (`number`, `integer`) rather than freeform strings.
+3. **Value Boundary Verification** — Enforce mathematical limits ($\text{accuracy} \in [0.0, 1.0]$, $\text{latency} > 0.0$).
+4. **Hierarchical Encapsulation** — Cleanly isolate `baseline`, `optimized`, and `improvements` sub-objects.
+5. **Contract Versioning** — Explicit `tinytorch_version` field enables backward-compatible schema evolution.
 
 **Reflection Question:** Your submission schema requires `model_size_mb` as a float. Why is this better than allowing users to write "4MB" or "4.0 megabytes" as strings? Think about aggregation and comparison.
+
+**Systems Analysis & Solution:**
+
+Enforcing `model_size_mb` as a floating-point number is fundamentally superior to accepting freeform strings for four critical systems reasons:
+
+1. **Deterministic Machine Ordering and $O(N \log N)$ Sorting**:
+   A competitive leaderboard or automated regression gate must sort hundreds of submissions by model footprint. Numeric floats sort in native machine registers with zero overhead. Freeform strings sort lexicographically, leading to disastrous ordering bugs where `"10.0MB" < "2.0MB"` because character `'1'` precedes `'2'`.
+
+2. **Elimination of Binary vs Decimal Unit Ambiguity**:
+   The string `"4MB"` is notorious for creating conflicting interpretations across software stacks:
+   $$\text{Decimal (SI)}: 4 \times 10^6 = 4{,}000{,}000\text{ bytes} \quad \text{vs} \quad \text{Binary (IEC)}: 4 \times 2^{20} = 4{,}194{,}304\text{ bytes}$$
+   A $4.86\%$ discrepancy corrupts compression ratio calculations ($C = M_{\text{base}} / M_{\text{opt}}$). By enforcing a float defined explicitly as megabytes ($M / 10^6$) or mebibytes ($M / 2^{20}$), all submissions adhere to the identical unit baseline.
+
+3. **Automated Mathematical Validation and Constraint Checking**:
+   JSON Schema can directly validate floats using mathematical boundary conditions:
+   ```json
+   "model_size_mb": { "type": "number", "minimum": 0.000001 }
+   ```
+   Accepting strings would allow invalid, unparsable entries (such as `"-4MB"`, `"four megs"`, `"N/A"`, or `"4.0 GB"`) to bypass schema validation, causing runtime exceptions during downstream analytics.
+
+4. **Zero-Overhead Vectorized Aggregation**:
+   When computing community benchmark statistics (e.g., average compression ratio across all submissions), a column of floats loads directly into a contiguous NumPy array (`np.float64`) for SIMD aggregation. Parsing strings requires regex tokenization, exception handling for malformed units, and dynamic string allocations in Python.
+
+---
 
 ### Question 5: The Complete ML Systems Lifecycle
 
 This capstone represents the final stage of the ML systems lifecycle—but it's also the beginning of the next iteration.
 
-**The Never-Ending Loop:**
+**The Seven-Stage ML Systems Lifecycle:**
 
-```
-            ┌──────────────────────────────────┐
-            │    1. RESEARCH & DEVELOPMENT     │
-            │  (Modules 01-13: Build framework)│
-            └────────────┬─────────────────────┘
-                         ↓
-            ┌──────────────────────────────────┐
-            │     2. BASELINE MEASUREMENT      │
-            │   (Module 19: Benchmark baseline)│
-            └────────────┬─────────────────────┘
-                         ↓
-            ┌──────────────────────────────────┐
-            │      3. OPTIMIZATION PHASE       │
-            │ (Modules 14-18: Apply techniques)│
-            └────────────┬─────────────────────┘
-                         ↓
-            ┌──────────────────────────────────┐
-            │    4. VALIDATION & COMPARISON    │
-            │  (Module 20: Benchmark optimized)│
-            └────────────┬─────────────────────┘
-                         ↓
-            ┌──────────────────────────────────┐
-            │     5. DECISION & SUBMISSION     │
-            │  (Keep? Deploy? Iterate? Share?) │
-            └────────────┬─────────────────────┘
-                         ↓
-                   Did we meet goals?
-                         ↓
-                    No ─────→ (Loop back to step 3)
-                         ↓ Yes
-            ┌──────────────────────────────────┐
-            │      6. PRODUCTION DEPLOY        │
-            │   (Model serves real traffic)    │
-            └────────────┬─────────────────────┘
-                         ↓
-            ┌──────────────────────────────────┐
-            │     7. MONITORING & FEEDBACK     │
-            │  (Is performance degrading? New  │
-            │   optimization opportunities?)   │
-            └────────────┬─────────────────────┘
-                         ↓
-                   (Loop back to step 1)
-```
+| Stage | Name | Systems Focus | Primary TinyTorch Milestone |
+| :--- | :--- | :--- | :--- |
+| **1** | **Research & Modeling** | Architectural design, forward/backward differentiation, loss convergence | Modules 01–13 (`tensor`, `autograd`, `transformers`) |
+| **2** | **Baseline Profiling** | Identifying compute and memory bottlenecks, call tree analysis | Modules 14 (`profiling`) & 19 (`benchmarking`) |
+| **3** | **Systems Optimization** | Quantization, structured pruning, kernel fusion, cache memoization | Modules 15–18 (`quantization`, `acceleration`, `memoization`) |
+| **4** | **Validation & Comparison** | Multi-metric Pareto evaluation, empirical speedup & compression verification | Module 20 (`capstone` BenchmarkReport) |
+| **5** | **Packaging & Contract** | Schema validation, hardware context capture, deployment qualification | Module 20 Olympic Submission Schema |
+| **6** | **Production Serving** | Model serving, dynamic batching, hardware execution | Milestones 05 & 06 (Serving & Inference) |
+| **7** | **Monitoring & Drift Loop** | Tail latency tracking, SLA compliance, continuous profiling | Continuous feedback triggering Stage 2 or 3 |
 
-**Key Insight:** Production ML is iterative. Your submission captures a snapshot, but the system keeps evolving. This is why reproducibility (schema, environment documentation) is critical—you need to know what changed when performance shifts.
+**Key Insight:** Production ML is never "write once and forget." Hardware, libraries, and traffic distributions continuously evolve. Standardized benchmark reports capture an immutable snapshot of systems performance so any future regression can be pinpointed instantly.
 
 **Reflection Question:** You deploy a model with 92% accuracy and 10ms latency. Three months later, users complain it's slow. Monitoring shows 30ms latency now (same model, same code). You didn't save system_info in your original benchmark. What went wrong, and how does proper benchmarking prevent this?
+
+**Systems Analysis & Solution:**
+
+When latency triples from $10\text{ ms}$ to $30\text{ ms}$ without any code changes, **the underlying systems environment has drifted**. Because `system_info` was not recorded, engineers face a blind troubleshooting nightmare.
+
+**Probable Systems Root Causes:**
+
+1. **BLAS / Linear Algebra Library Drift**:
+   A routine host update or container image rebuild may have replaced an optimized BLAS library (Intel MKL or OpenBLAS compiled with AVX-512 vectorization) with an unoptimized generic BLAS fallback, or unset the environment variable `OMP_NUM_THREADS=1`, causing catastrophic OpenMP thread over-subscription and lock thrashing.
+2. **CPU Dynamic Voltage and Frequency Scaling (DVFS) / Thermal Throttling**:
+   The initial benchmark was performed when the server was cool and idle. Under sustained production load or elevated rack ambient temperature, the CPU downclocked from a $3.8\text{ GHz}$ turbo frequency to a $1.2\text{ GHz}$ thermal protection throttle.
+3. **Container Resource Contention and CFS Throttling**:
+   The deployment was moved into a container (Docker/K8s) where CPU quota limits (`cpu.cfs_quota_us`) were exhausted by sibling processes on the same host ("noisy neighbors"), pausing the inference thread mid-kernel.
+4. **Memory Swapping and Major Page Faults**:
+   Another service on the node consumed host memory, forcing model weight buffers out of high-speed DDR RAM into swap space on disk. Every forward pass incurred millisecond-scale page fault interrupts.
+
+**How Proper Benchmarking Prevents and Resolves This:**
+
+By capturing a comprehensive `system_info` snapshot in the benchmark schema:
+- `platform`: OS version, kernel release (`uname -r`)
+- `cpu`: Exact processor model, microarchitecture, core count, cache sizes (L1/L2/L3)
+- `python_version` & `numpy_version`: Runtime environment
+- `blas_info`: Linked BLAS/LAPACK libraries and vector instruction flags (AVX2, AVX-512, NEON)
+- `thread_count`: Configured active thread pool
+
+When the regression occurs, engineers simply execute a **diff between the current deployment node and the benchmark baseline**. Within seconds, they discover:
+$$\Delta\text{Config}: \quad \text{Baseline BLAS} = \text{libmkl\_avx512.so} \quad \longleftrightarrow \quad \text{Production BLAS} = \text{libopenblas\_generic.so}$$
+This turns a multi-day blind investigation into an immediate, deterministic fix.
+
+---
 
 ### Question 6: Your Path Forward: From Learning to Production
 
@@ -2161,33 +1940,23 @@ You've completed an educational framework, but the patterns you learned apply di
 
 **Translating TinyTorch Skills to Production:**
 
-```
-TinyTorch Pattern          →  Production Equivalent
-─────────────────────────────────────────────────────
-BenchmarkReport            →  MLflow Tracking
-generate_submission()      →  Experiment logging
-validate_schema()          →  JSON Schema / Protobuf
-system_info collection     →  Environment containers (Docker)
-baseline vs optimized      →  A/B testing framework
-improvements calculation   →  Regression detection
-```
+| TinyTorch Educational Pattern | Production Enterprise Equivalent | Industry Standard / Tooling |
+| :--- | :--- | :--- |
+| `BenchmarkReport` | Centralized Experiment Tracking | MLflow, Weights & Biases, Neptune.ai |
+| `generate_submission()` | Automated Artifact & Metric Packaging | BentoML, TorchScript, ONNX Model Cards |
+| `validate_submission_schema()` | Schema Enforcement & API Contracts | Pydantic, Protobuf, JSON Schema |
+| `system_info` collection | Reproducible Containerized Environments | Docker, OCI Containers, Kubernetes |
+| Baseline vs Optimized comparison | A/B Testing & Shadow Deployments | Triton Inference Server, TorchServe, vLLM |
+| `calculate_improvements()` | Automated Regression CI/CD Gates | GitHub Actions Performance Regression Testing |
 
 **Real-World Applications:**
 
-1. **Model Comparison** - Same workflow as Module 20, scaled to dozens of experiments
-2. **Performance Monitoring** - Continuous benchmarking in CI/CD pipelines
-3. **Reproducible Research** - Papers with Code submissions use similar schemas
-4. **Team Collaboration** - Shared benchmark format enables comparison across engineers
+1. **Model Comparison** — Same workflow as Module 20, scaled across dozens of candidate checkpoints and quantization bit-widths.
+2. **Continuous Performance CI/CD** — Triggering automated benchmarks on every Pull Request to catch latency regressions before merging.
+3. **Reproducible Research Standards** — Aligning with MLPerf and Papers with Code submission guidelines.
+4. **Engineering Alignment** — Providing an unambiguous, cross-functional scorecard for researchers, systems engineers, and product teams.
 
-**Next Steps for Production Systems:**
-
-- **Scale beyond toy models** - Apply to CNNs, Transformers from milestones
-- **Automated pipelines** - Trigger benchmarks on every commit (CI/CD)
-- **Visualization dashboards** - Plot accuracy vs latency trade-off curves
-- **Multi-hardware comparison** - Benchmark on CPU, GPU, TPU
-- **Production monitoring** - Track deployed model performance over time
-
-Congratulations! You've gone from implementing basic tensors to understanding end-to-end ML systems. The benchmarking methodology and systems thinking you learned here will serve you throughout your career in ML engineering. 🚀
+Congratulations! You've gone from implementing basic multidimensional array striding to architecting, optimizing, and benchmark-validating an end-to-end deep learning framework. 🚀
 """
 
 # %% [markdown]
@@ -2235,7 +2004,7 @@ if __name__ == "__main__":
     demo_capstone()
 
 # %% [markdown]
-"""
+r"""
 ## 🚀 MODULE SUMMARY: Capstone
 
 Congratulations! You've completed the TinyTorch capstone by building a professional benchmarking and submission system!
@@ -2253,25 +2022,24 @@ Congratulations! You've completed the TinyTorch capstone by building a professio
 - **Reproducibility requirements**: System context, schema validation, and standardized reporting
 - **Production patterns**: How real ML systems measure and compare model performance
 
-The complete journey:
+### 20-Module Grand Systems Milestone Scorecard
 
-```
-Module 01: Tensor          -> Built foundation
-Modules 02-13: Framework   -> Implemented ML components
-Modules 14-18: Optimization -> Learned performance techniques
-Module 19: Benchmarking    -> Measured performance
-Module 20: Submission      -> Proved it works!
-```
+| Curriculum Tier | Modules Completed | Core Systems Primitives Built | Systems Capabilities Unlocked |
+| :--- | :--- | :--- | :--- |
+| **Tier 1: Foundations** | `01_tensor` $\rightarrow$ `08_training` | Strided N-D array memory, activations, modular layers, cross-entropy loss, data batching, autograd DAG engine, SGD/Adam, training loop | Deterministic striding, dynamic reverse-mode autodiff, loss convergence, backpropagation |
+| **Tier 2: Architectures** | `09_convolutions` $\rightarrow$ `13_transformers` | 2D im2col convolutions, BPE tokenizer, token/positional embeddings, scaled dot-product multi-head causal attention, full decoder Transformer | Vision filtering, subword tokenization, sequence autoregression, language modeling |
+| **Tier 3: Optimization** | `14_profiling` $\rightarrow$ `18_memoization` | cProfile call trees, INT8 symmetric affine quantization, magnitude/structured pruning, SIMD vectorization & operator fusion, KV-cache memoization | $4\times$ weight compression, $2.9\times$ latency speedup, eliminating duplicate autoregressive attention compute |
+| **Tier 4: Evaluation** | `19_benchmarking` $\rightarrow$ `20_capstone` | High-resolution statistical timers, Student's $t$ confidence bounds, Pareto frontier trade-offs, JSON Schema contract enforcement | Publication-grade empirical measurement, automated regression gating, TinyTorch Olympic qualification |
 
 ### Ready for Next Steps
 
 You started Module 01 with a simple Tensor class. Now you have:
-- A complete ML framework
-- Advanced optimization techniques
-- Professional benchmarking infrastructure
-- Reproducible, shareable results
+- A complete ML framework built from first principles
+- Advanced hardware-aware optimization techniques
+- Professional benchmarking and evaluation infrastructure
+- Reproducible, shareable JSON Schema-validated results
 
-**You didn't just learn ML systems - you BUILT one from scratch.**
+**You didn't just learn ML systems — you BUILT one from scratch.**
 
 Export with: `tito module complete 20`
 
