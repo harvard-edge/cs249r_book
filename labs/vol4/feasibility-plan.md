@@ -42,7 +42,9 @@ Complete these physical build steps and verify electrical safety before powering
   - Plug the UVC webcam into a USB-A port on the hub; verify Linux recognizes the device at `/dev/video0`.
   - Connect the single-wire half-duplex UART communication line from the STS3215 servo bus to the STM32U585 USART pins via the level-shifter circuit.
 
-![Arduino UNO Q Dual-Silicon Architecture and Safety Boundary](assets/images/vol4-uno-q-dual-core-architecture.svg)
+![Arduino UNO Q Dual-Silicon Architecture and Safety Boundary](assets/images/vol4-uno-q-dual-core-architecture.svg){#fig-dual-arch width=100%}
+
+![Physical Bench Rigging & Electrical Power Isolation Harness](assets/images/vol4-bench-wiring-harness.svg){#fig-bench-harness width=100%}
 
 ---
 

@@ -18,6 +18,14 @@ How does an embodied system integrate disparate sensory modalities across asynch
 3. **Calibration Target:** Printed OpenCV checkerboard or ArUco board fixture placed flat on the table.
 4. **Arm Station:** Seeed SO-101 arm connected to the STM32 MCU via the internal RPC bridge.
 
+::: {layout-ncol=2}
+![Logitech C270 HD Webcam Mounted Overhead](assets/images/logitech-c270-webcam.png){#fig-webcam width=75%}
+
+![Feetech STS3215 Dual Daisy-Chain Bus Ports](assets/images/feetech-sts3215-bus-ports.jpg){#fig-bus-ports width=100%}
+:::
+
+![Physical Bench Rigging & Electrical Power Isolation Harness](assets/images/vol4-bench-wiring-harness.svg){#fig-bench-harness width=100%}
+
 ---
 
 ### 3. Step-by-Step Protocol

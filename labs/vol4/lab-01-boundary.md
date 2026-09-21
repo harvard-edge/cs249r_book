@@ -19,6 +19,10 @@ Where does computational authority end and physical delegation begin? If a host 
 4. **Isolated Power:** 7.4V–12V DC regulated motor power supply wired through an accessible physical emergency-stop toggle switch.
 5. **Initial State:** Motor power switch **OFF (Disarmed)**. Arm in resting, folded configuration.
 
+![The Physical AI Sense-Propose-Permit-Act Loop](assets/images/vol4-physical-ai-loop.svg){#fig-loop width=100%}
+
+![Arduino UNO Q Dual-Silicon Architecture and Safety Boundary](assets/images/vol4-uno-q-dual-core-architecture.svg){#fig-dual-arch width=100%}
+
 ---
 
 ### 3. Step-by-Step Protocol

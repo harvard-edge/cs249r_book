@@ -18,6 +18,14 @@ How do we mathematically and physically ensure that an unverified, probabilistic
 3. **Robot Arm:** Seeed SO-101 6-DoF arm with 6× Feetech STS3215 bus servos.
 4. **Physical Obstacle:** Tabletop acrylic guard defining the forbidden zone ($Z < Z_{\text{table}}$).
 
+::: {layout-ncol=2}
+![Latching Mushroom Emergency Stop Switch](assets/images/emergency-stop-button.jpg){#fig-estop width=90%}
+
+![Feetech STS3215 Smart Serial Actuator](assets/images/feetech-sts3215-servo.jpg){#fig-sts3215 width=90%}
+:::
+
+![Physical Bench Rigging & Electrical Power Isolation Harness](assets/images/vol4-bench-wiring-harness.svg){#fig-bench-harness width=100%}
+
 ---
 
 ### 3. Step-by-Step Protocol

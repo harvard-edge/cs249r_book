@@ -13,29 +13,59 @@
 
 This master plan governs the 13-week physical implementation, hardware bring-up, and pedagogical qualification period between **Monday, September 21, 2026**, and **Friday, December 18, 2026**.
 
-To ensure the physical studio runs smoothly in Spring 2027, the instruction staff serves as **"Student Zero"**:
-1. **Week 1 Alignment & Preparation:** Finalize the full implementation plan, audit the Bill of Materials (BOM), allocate dedicated workbench space at ETH Zurich, and verify electrical safety equipment before unboxing.
-2. **Hardware Bring-Up & Gate Qualification:** Build, wire, verify, and qualify one complete **Golden Reference Station**, passing the **Four Technical Go/No-Go Gate Tests (Gates A–D)**.
+::: {.callout-note}
+### The "Student Zero" Methodology
+To ensure every student station operates flawlessly when the studio launches in Spring 2027, the instruction team acts as **Student Zero**. Before any student touches the bench, staff personally unboxes, mounts, wires, programs, and qualifies every single component, lab brief, and automated test.
+:::
+
+The primary objectives for this 13-week execution window:
+1. **Week 1 Planning & Bench Preparation:** Finalize the master curriculum plan, audit the Bill of Materials (BOM), allocate dedicated workbench space at ETH Zurich, and verify electrical safety equipment before unboxing.
+2. **Hardware Bring-Up & Gate Qualification:** Assemble, wire, verify, and qualify one complete **Golden Reference Station**, passing the **Four Technical Go/No-Go Gate Tests (Gates A–D)**.
 3. **End-to-End Curriculum Qualification:** Execute all **8 Hands-On Student Labs** from scratch, producing verified golden artifacts, starter scripts, reference datasets, and calibration profiles.
 4. **Software & Firmware Freeze:** Compile and lock the **Golden Qualcomm Linux Image** and **STM32 Firmware Binary**.
 5. **Independent Replication Audit:** Have a secondary researcher or teaching assistant build Station 2 from scratch using only the staff documentation to ensure seamless class deployment.
 
 ---
 
-## 2. Master 13-Week Timeline Overview
+## 2. Master 13-Week Execution Roadmap
 
-```
-SEPTEMBER 2026                  OCTOBER 2026                    NOVEMBER 2026                   DECEMBER 2026
-W01       W02       W03       W04       W05       W06       W07       W08       W09       W10       W11       W12       W13
-[PLANNING]  [--- SPRINT 1: HARDWARE ---]  [--- SPRINT 2: DATA & MODEL ---]  [--- SPRINT 3: EDGE LOOP ---]   [-- SPRINT 4: GOV --]   [-- SPRINT 5: PACK --]
-Plan &      Gate A    Gate B    Gate C    Lab 1-2   Lab 3     Lab 4     Gate D    Lab 6     Mid-Term  Lab 7     Lab 8     Capstone  Image Freeze &
-Bench Prep  Unbox     1-Joint   6-DoF     Calibrate Teleop    ACT Train Untether  Chunking  Stress    Safety    Watchdog  Rehearsal Replication Test
-BOM Audit   Assembly  Veto      Governor  Rig       Dataset   ONNX INT8 Reach     Perturb   Audit     Governor  Cutoff    20-Trials Ready for Class!
-```
+The 13-week schedule is organized into six logical phases across five sprints, shifting physical assembly into Week 2 to allow Week 1 to focus entirely on architecture alignment, BOM audit, and bench safety preparation:
+
+![Volume IV Physical AI Studio: 13-Week Staff Implementation Roadmap](assets/images/vol4-staff-roadmap.svg){#fig-staff-roadmap width=100%}
 
 ---
 
-## 3. Sprint-by-Sprint Weekly Implementation Breakdown
+## 3. Physical Hardware Stack & Bench Architecture
+
+The studio relies on an open, modular, and safety-hardened hardware stack designed specifically for edge Physical AI:
+
+::: {layout-ncol=4}
+![**Dual-Silicon Compute**<br>Arduino UNO Q: Qualcomm QRB2210 Linux + STM32U585 Real-Time MCU](assets/images/arduino-uno-q.jpg){#fig-uno-q width=100%}
+
+![**6-DoF Arm Rig**<br>Seeed Studio SO-101 6-DoF Follower Arm with STS3215 Smart Servos](assets/images/so101-follower.png){#fig-so101 width=100%}
+
+![**Smart Serial Actuator**<br>Feetech STS3215: 19 kg·cm, 12-bit magnetic encoder, dual bus ports](assets/images/feetech-sts3215-servo.jpg){#fig-sts3215 width=100%}
+
+![**Sensing & Safety**<br>Logitech C270 USB HD Webcam (30 Hz RGB) & Latching Mushroom E-Stop Button](assets/images/logitech-c270-webcam.png){#fig-c270 width=80%}
+:::
+
+### Complete Bench Rigging & Electrical Power Isolation Schematic
+
+Before assembling the physical arm or connecting motor power, review the electrical wiring schematic. The single most critical electrical rule is **galvanic isolation between high-power motor rails and low-voltage digital logic**:
+
+![Physical Bench Rigging & Electrical Power Isolation Harness](assets/images/vol4-bench-wiring-harness.svg){#fig-bench-harness width=100%}
+
+::: {.callout-warning}
+### Mandatory Electrical Safety Invariant
+The physical **Latching Mushroom Emergency Stop (E-Stop)** switch MUST be wired in-line with the external **7.4V / 5A DC motor power supply** feeding the STS3215 servo bus rail.
+
+* **When the E-Stop is pressed:** The 7.4V motor power drops to $0\text{V}$ in $< 5\text{ ms}$, immediately releasing all mechanical torque.
+* **Logic Power Remains Live:** The 5V logic supply to the Arduino UNO Q (Qualcomm Linux + STM32 MCU) and USB webcam remains **100% powered**, ensuring real-time telemetry logging and diagnostic capture are never interrupted during an emergency shutdown.
+:::
+
+---
+
+## 4. Sprint-by-Sprint Weekly Implementation Breakdown
 
 ### Sprint 0: Architecture Alignment & Bench Preparation (Week 1)
 **Focus:** Curriculum plan finalization, Bill of Materials audit, dedicated bench allocation, and electrical safety verification.
@@ -197,7 +227,7 @@ BOM Audit   Assembly  Veto      Governor  Rig       Dataset   ONNX INT8 Reach   
 
 ---
 
-## 4. Master Deliverables & Weekly Technical Sign-Off Checklist
+## 5. Master Deliverables & Weekly Technical Sign-Off Checklist
 
 | Week & Date Range | Milestone / Sprint Phase | Primary Physical AI Deliverables | Hardware Verification & Acceptance Criteria | Status |
 |:---|:---|:---|:---|:---:|
@@ -217,7 +247,7 @@ BOM Audit   Assembly  Veto      Governor  Rig       Dataset   ONNX INT8 Reach   
 
 ---
 
-## 5. Weekly Execution & Reporting Protocol
+## 6. Weekly Execution & Reporting Protocol
 
 To ensure rapid resolution of hardware bugs and maintain transparent progress toward the December deadline:
 
