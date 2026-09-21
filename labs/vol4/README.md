@@ -1,29 +1,176 @@
-# Volume IV physical AI studio
+# Volume IV: Physical AI Studio & Hardware Kit (iKit)
 
-**Status:** Curriculum and feasibility drafts for an ETH spring project seminar. The proposed primary station combines Hugging Face LeRobot, a Seeed SO-101 arm, and an Arduino UNO Q. The teaching team must qualify the arm command path, local learned policy, physical outcome measurement, and station capacity before releasing student assignments. The [instructor syllabus](../../instructors/vol4/README.md) lives outside the book front matter.
+**Status:** Official curriculum, hardware architecture, and laboratory studio guide for the [Volume IV Physical AI Seminar](https://mlsysbook.ai/vol4/). Companion to the [MLSysBook Hardware Kits](../../kits/index.qmd) and [Master Course Syllabus](syllabus.md).
 
-## The project students build
+---
 
-The course's unit of work is a **physical episode**: a versioned learned model on Qualcomm Linux proposes an action; the STM32 permits or refuses it; the actuator moves; the team measures the resulting tool and object state; and a fresh observation changes the next proposal or causes abstention. This satisfies the book's [three-part Physical AI scope test](../../books/vol4/01_boundary/01_boundary.qmd): learned decision, consequential physical feedback, and delegated actuation. A model that only classifies camera frames, or a model output that triggers a fixed arm script, cannot satisfy the capstone.
+## 1. What This Course Is About
 
-The common reference project is **disturbance-and-recovery manipulation**. The SO-101 reaches toward a soft target in a marked workspace; after its first action, staff safely shift the target or cause an incomplete move. The system must compare intended with measured state and decide again. Grasp-and-place, active inspection, and instruction-conditioned sorting are extensions once this smaller loop works. The capstone compares repeated held-out disturbance trials with a scripted baseline and includes a measured object or task outcome. Model score, latency, and memory are recorded as constraints on that result, not as the result itself.
+> **"Physical AI begins where computation stops being symbolic and becomes physical force."**
 
-The book's principles are visible in the same episode: commanded versus settled state exposes physical causality; the next observation exposes endogenous data; MCU refusal exposes proposal–permission privilege; and the frozen fault and outcome record supports a bounded release claim. The arm teaches the contact-dominated manipulation regime. Kinetic mobility and thermal/process regimes need separately qualified bodies for hands-on claims; seminar and simulator comparisons can introduce their different physical deadlines. The classroom station is a prototype within a measured envelope, not a certified safety system.
+In digital software AI, an algorithm outputs text, tokens, or pixels on a screen. Errors are symbolic, harmless, and can be undone with a keystroke. In **Physical AI**, an algorithm commands real electrical currents to motors possessing mass, velocity, inertia, and momentum. If the model makes a mistake, physical things collide, tear, or break. **You cannot `Ctrl+Z` physics.**
 
-## Curriculum and build documents
+This studio teaches the science and systems engineering of machines that sense and act in the physical world:
+1. **The Brain:** Deploying high-capacity Vision-Language-Action (VLA) neural policies (**Hugging Face SmolVLA and ACT**) on an edge Linux processor (**Arduino UNO Q Qualcomm MPU**).
+2. **The Body:** Actuating a 6-DoF robotic follower arm (**Seeed Studio SO-101**) with smart serial bus servos and an overhead workspace webcam.
+3. **The Governor:** Enforcing deterministic, real-time safety constraints, velocity limits, and emergency cutoffs through an independent microcontroller (**STM32U585 MCU**).
 
-- [Student competency matrix](student-competencies.md): platform-independent 2×2 checklist and evidence for each outcome.
-- [Course operating plan](course-architecture.md): the physical episode, semester milestones, project choices, book-principle mapping, and assessment.
-- [First-offering teaching plan](../../instructors/vol4/first-offering-plan.md): Vijay and Andrea's roles, four graded milestones, reading scope, and rehearsal buffer.
-- [Fourteen lab blueprints](lab-blueprints.md): staff overview with links to 14 weekly studio prompts. The [course page](../../instructors/vol4/README.md) pairs each brief with its chapter source. Six common labs lead to eight project studios; the briefs are not fourteen separately graded assignments.
-- [Feasibility plan](feasibility-plan.md): the proposed student exercise for each week, the question Andrea should test on the kit, and a simple report-back format.
-- [One-station bench notes](station-pilot/README.md): optional technical detail for hardware investigation, with a [bench report](station-pilot/report-template.md) and [student bench card](station-pilot/bench-card-template.md).
-- [SO-101/UNO Q course candidate](so101-uno-q-course.md): arm station and hardware tests.
-- [Hugging Face curriculum spine](hugging-face-spine.md): LeRobot data, policy, simulation, correction, and re-evaluation workflow.
-- [Candidate kit](kit-bom.md) and [staff build brief](staff-build-brief.md): parts, motor route, and integration risks.
-- [Archetype proxy sketch](archetype-proxies.md): candidate mass, contact, and thermal systems.
-- [One-axis fallback](lab-sequence.md): a simpler governed body if the SO-101's MCU motor route cannot be qualified. The arm can still teach LeRobot data and policy work in that case.
+---
 
-## What staff must test before enrollment
+## 2. The Three Foundational Pillars
 
-Stock SO-101 LeRobot operation uses a host USB motor-bus adapter and does not by itself place the STM32 between policy and motor. Staff must reproduce a sole live Qualcomm → Bridge → STM32 → servo-bus command route, with refusal and measured readback. They must also run a compact Hugging Face policy locally on the exact Q, show a changed-scene proposal after a physical move, and measure success independently of joint readback. SmolVLA on the Q is a separate experiment until its memory and timing are measured. The [feasibility plan](feasibility-plan.md) asks Andrea to test which student labs can use that station and what each one would require.
+```{=html}
+<table style="width: 100%; border: none; border-collapse: separate; border-spacing: 16px;">
+  <tr style="border: none;">
+    <td style="width: 33%; vertical-align: top; text-align: center; padding: 16px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fafafa;">
+      <div style="height: 180px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 130px; max-width: 48%; object-fit: contain;">
+        <img src="assets/images/so101-follower.png" alt="Seeed SO-101 Follower Arm" style="max-height: 130px; max-width: 48%; object-fit: contain;">
+      </div>
+      <h3 style="margin-top: 12px; margin-bottom: 6px;">1. The Board & Body</h3>
+      <p style="font-size: 0.88rem; color: #475569; text-align: left; line-height: 1.4;">
+        <strong>Arduino UNO Q + Seeed SO-101 Arm</strong><br>
+        A dual-brain architecture combining a Qualcomm QRB2210 Linux MPU for vision and VLA inference with an STM32U585 MCU acting as the hard real-time safety governor over 6× Feetech STS3215 bus smart servos.
+      </p>
+    </td>
+    <td style="width: 33%; vertical-align: top; text-align: center; padding: 16px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fafafa;">
+      <div style="height: 180px; display: flex; align-items: center; justify-content: center;">
+        <img src="assets/images/lerobot-logo.png" alt="Hugging Face LeRobot" style="max-height: 85px; max-width: 85%; object-fit: contain;">
+      </div>
+      <h3 style="margin-top: 12px; margin-bottom: 6px;">2. The Software Spine</h3>
+      <p style="font-size: 0.88rem; color: #475569; text-align: left; line-height: 1.4;">
+        <strong>Hugging Face LeRobot & SmolVLA</strong><br>
+        The open-source physical AI foundation providing teleoperation capture, LeRobot Dataset v3 format with 4-action-tap logging, language conditioning, and action-chunk policies (SmolVLA and ACT).
+      </p>
+    </td>
+    <td style="width: 33%; vertical-align: top; text-align: center; padding: 16px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fafafa;">
+      <div style="height: 180px; display: flex; align-items: center; justify-content: center;">
+        <img src="assets/images/vol4-textbook-cover.png" alt="MLSysBook Volume IV: Physical AI" style="max-height: 170px; object-fit: contain;">
+      </div>
+      <h3 style="margin-top: 12px; margin-bottom: 6px;">3. The Curriculum</h3>
+      <p style="font-size: 0.88rem; color: #475569; text-align: left; line-height: 1.4;">
+        <strong>MLSysBook Volume IV (17 Chapters)</strong><br>
+        Four thematic parts: Anatomy (Chapters 1–4), Teaching (Chapters 5–7), Running (Chapters 8–13), and Governing (Chapters 14–17). Establishing the S·P·A causal loop and authority boundaries under fault.
+      </p>
+    </td>
+  </tr>
+</table>
+```
+
+---
+
+## 3. The Physical AI Unit of Work: The S·P·A Loop
+
+The unit of work across every studio experiment is a single **physical episode**:
+
+$$\text{Physical State } (s_t) \longrightarrow \text{Observation } (I_t, q_t) \longrightarrow \text{Learned Proposal } (a_{\text{req}}) \longrightarrow \text{MCU Permission } (a_{\text{enf}}) \longrightarrow \text{Actuation } (a_{\text{meas}}) \longrightarrow \text{New Observation } (I_{t+1}, q_{t+1}) \longrightarrow \text{Revised Decision}$$
+
+```
+       ┌───────────────────────────────────────────────────────────┐
+       │                 Arduino UNO Q ("Unikue")                  │
+       │                                                           │
+       │   Qualcomm QRB2210 Linux MPU        STM32U585 MCU Core    │
+       │   • USB Camera capture (V4L2)       • Dedicated UART Bus  │
+       │   • SmolVLA / ACT on ONNX           • Real-time Governor  │
+       │   • Proposes action chunks (a_req)  • Safety cutoff (a_enf│
+       │   └─────────────┬───────────┘       └─────────────▲───────┘
+       │                 │     Fast RPC Bridge (<1 ms)     │       │
+       │                 └─────────────────────────────────┘       │
+       └───────────────────────────────┬───────────────────────────┘
+                                       │ Half-Duplex TTL Serial (1 Mbps)
+                                       ▼
+                         ┌───────────────────────────┐
+                         │  Seeed SO-101 6-DoF Arm   │
+                         │  • 6× STS3215 Smart Servos│
+                         │  • Position & load (a_meas│
+                         │  • Table Workspace Fixture│
+                         └───────────────────────────┘
+                                       ▲
+                                       │ Observes Workspace
+                         ┌─────────────┴─────────────┐
+                         │  $20 UVC USB Webcam       │
+                         │  • 224×224 Visual Stream  │
+                         └───────────────────────────┘
+```
+
+> **The Three-Part Scope Test:** A lab submission that merely classifies camera frames without driving actuators, or a model output wired to a hardcoded robotic script, does not satisfy the Physical AI requirement. Students must demonstrate learned decision-making whose next proposal responds directly to measured physical change under an independent MCU permission boundary.
+
+---
+
+## 4. The 2×2 Competency Architecture (The 12 Skills)
+
+Engineering mastery is tracked using the [Physical AI Station Competency Card](student-competencies.md) across four balanced quadrants (**3 competencies per quadrant = 12 total**):
+
+```
+                                    ENGINEERING FUNCTION
+                        ┌──────────────────────────┬──────────────────────────┐
+                        │   Characterize & Model   │     Control & Govern     │
+                        │  (Observe, Profile, Data)│   (Act, Enforce, Defend) │
+┌───────────────────────┼──────────────────────────┼──────────────────────────┤
+│ PHYSICAL EMBODIMENT   │  QUADRANT A:             │  QUADRANT C:             │
+│ (The Plant: World,    │  Measure the Plant       │  Act in the World        │
+│  Mechanics, Actuators)│  A1: Plant Mechanics & E.│  C1: Closed-Loop Action  │
+│                       │  A2: Sensing & Load      │  C2: Temporal Horizons   │
+│                       │  A3: Feedback & Latency  │  C3: Disturbance Adapt   │
+├───────────────────────┼──────────────────────────┼──────────────────────────┤
+│ COMPUTING SYSTEM      │  QUADRANT B:             │  QUADRANT D:             │
+│ (The Machine: Board,  │  Characterize the Brain  │  Govern the System       │
+│  Brains, Models, Edge)│  B1: Dataset Engineering │  D1: Authority Routing   │
+│                       │  B2: Baseline Benchmark  │  D2: Real-Time Governor  │
+│                       │  B3: Edge Model Profiling│  D3: Physical Release    │
+└───────────────────────┴──────────────────────────┴──────────────────────────┘
+```
+
+---
+
+## 5. The 14-Week Semester Schedule
+
+Formal classroom instruction and new textbook readings run through **Week 11**, covering the four parts of the textbook across **8 focused labs**. The final three weeks (**Weeks 12–14**) are preserved as an open **Capstone Project Studio**:
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ PART I: THE MACHINE ANATOMY (Weeks 1–3 · Labs 1–2) ─── Chapters 1, 2, 3, 4             │
+│ • Mechanics, envelope, sensor calibration, latency     (Checks: A1, A2, A3, D1)        │
+│ 🎯 Milestone 1 (End of W3): Station Charter & Calibrated Operating Envelope            │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ PART II: TEACHING THE MACHINE (Weeks 4–6 · Labs 3–4) ─ Chapters 5, 6, 7                │
+│ • Teleoperation, LeRobot Dataset v3, baselines, ONNX   (Checks: B1, B2, B3)            │
+│ 🎯 Milestone 2 (End of W6): Edge-Ready SmolVLA / ACT Policy on Qualcomm Linux          │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ PART III: RUNNING THE MACHINE (Weeks 7–9 · Labs 5–6) ─ Chapters 8, 9, 10, 11, 12, 13   │
+│ • Autonomous closed-loop reach, language conditioning  (Checks: C1, C2, C3)            │
+│ 🎯 Milestone 3 (End of W9): Autonomous Closed-Loop Manipulation Under Disturbance      │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ PART IV: GOVERNING THE MACHINE (Weeks 10–11 · Labs 7–8) Chapters 14, 15, 16, 17        │
+│ • Microcontroller safety governor, watchdogs, cutoffs  (Checks: D1, D2)                │
+│ 🎯 Milestone 4 (End of W11): Certified Governed Station                                │
+│ *Classroom lectures and new textbook reading conclude here!*                          │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ CAPSTONE PROJECT STUDIO (Weeks 12–14 · 3 Full Weeks Runway) ── Full Synthesis (Ch 1–17)│
+│ • Week 12: Independent team task design & custom dataset collection                    │
+│ • Week 13: Adversarial peer disturbance swapping & governor hardening                  │
+│ • Week 14: 20 held-out physical disturbance trials & oral defense ────▶ Checks: D3     │
+│ 🎯 Milestone 5 (End of W14): Final System Defense & Release Dossier                    │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 6. Studio Lab Directory & Reading Guide
+
+| Studio Module & Link | Schedule | Required Textbook Reading | Primary Physical AI Focus | Competency Check-Off |
+|:---|:---:|:---|:---|:---:|
+| **[Module 1: The Machine Anatomy](module-1-machine-anatomy.md)**<br>• [Lab 1: Causal Boundary & Bus Bring-Up](lab-01-boundary.md)<br>• [Lab 2: Sensing & Inter-Core Bridge](lab-02-body-and-sensors.md) | Weeks 1–3 | **Ch 1:** Causal Boundary<br>**Ch 2:** Physical Body<br>**Ch 3:** Cognitive Brain<br>**Ch 4:** Nervous System | Enumerate STS3215 servos on STM32; zero-calibrate offsets; measure travel limits and power-off drop trace. Calibrate USB webcam ($T_{\text{cam}}^{\text{base}}$) and measure inter-core RPC latency. | `[ ] A1`<br>`[ ] A2`<br>`[ ] A3`<br>`[ ] D1` |
+| **[Module 2: Teaching the Machine](module-2-teaching-the-machine.md)**<br>• [Lab 3: Teleoperation & Datasets](lab-03-physical-episodes.md)<br>• [Lab 4: Baseline & Policy Export](lab-04-baseline-and-learning.md) | Weeks 4–6 | **Ch 5:** Physical Data<br>**Ch 6:** Policy Training<br>**Ch 7:** Closed-Loop Evaluation | Teleoperate SO-101; record 30 episodes in LeRobot Dataset v3 format with 4 action taps. Build scripted reach baseline. Train ACT / fine-tune SmolVLA; export ONNX to Qualcomm Linux (<100ms). | `[ ] B1`<br>`[ ] B2`<br>`[ ] B3` |
+| **[Module 3: Running the Machine](module-3-running-the-machine.md)**<br>• [Lab 5: Closed-Loop Autonomous Reach](lab-05-local-feedback-loop.md)<br>• [Lab 6: Action Horizons & Disturbances](lab-06-action-chunks.md) | Weeks 7–9 | **Ch 8:** Sensor Perception<br>**Ch 10:** Grounded Intent<br>**Ch 11:** Trajectory Planning<br>**Ch 13:** Silicon Placement | Deploy live inference on UNO Q without host tethering. Benchmark action chunk horizons ($K=1$ vs $16$). Test SmolVLA language conditioning. Shift target mid-reach to evaluate replanning vs. drift. | `[ ] C1`<br>`[ ] C2`<br>`[ ] C3` |
+| **[Module 4: Governing the Machine](module-4-governing-the-machine.md)**<br>• [Lab 7: Microcontroller Safety Governor](lab-07-authority-under-fault.md)<br>• [Lab 8: Fault Injection & Safe Cutoff](lab-08-verification-and-release.md) | Weeks 10–11 | **Ch 12:** Safety Enforcement<br>**Ch 14:** Supervisory Intervention<br>**Ch 15:** Adversarial Verification<br>**Ch 16:** Safe Release | Implement real-time velocity clamps and table geofences on STM32. Inject synthetic faults (frozen Linux, dropped frames, stale packets); verify communication watchdog cutoff with zero backlog. | `[ ] D1`<br>`[ ] D2` |
+| **[Capstone Project Studio](lab-capstone-studio.md)**<br>*(Synthesis & Physical Release)* | Weeks 12–14 | **Chapters 1–17**<br>*(Complete Book Synthesis)* | 3 full weeks: independent task design, peer adversarial fault exchange, 20 held-out physical disturbance trials, and oral defense of the **Physical Release Dossier**. | `[ ] D3`<br>*(Full Card Mastery)* |
+
+---
+
+## 7. Key Operational Documents
+
+* 📋 **[Master Course Syllabus](syllabus.md):** Full academic policy, grading weights (15% M1, 25% M2, 20% M3, 15% M4, 25% M5), team roles, and safety contract.
+* 🏷️ **[Physical AI Competency Card](student-competencies.md):** The 12-item platform-independent rubric signed off at the bench.
+* 📦 **[Kit Bill of Materials (BOM)](kit-bom.md):** Parts list, pricing, and supplier links for the UNO Q, SO-101 arm, USB webcam, and power accessories.
+* 🧪 **[Teaching Staff Bench Pilot](feasibility-plan.md):** Hardware pre-flight qualification protocol (Tests A–D) before releasing kits to students.

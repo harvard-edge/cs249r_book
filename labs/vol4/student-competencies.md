@@ -1,88 +1,156 @@
-# Volume IV physical AI competency checklist
+# Volume IV: Physical AI Competency Matrix & Check-Off Card
 
-**Status:** Course design contract for the teaching team. The competencies below describe transferable abilities and acceptable evidence without naming a simulator, model library, board, sensor bus, or robot. The later course map shows how the proposed [LeRobot/UNO Q operating plan](course-architecture.md) and [SO-101 lab draft](so101-uno-q-course.md) would teach them. Changing the kit should change that map, not the competencies.
+**Status:** Course design contract for the teaching team. The competencies below describe transferable engineering capabilities and observable physical evidence without restricting the pedagogy to a single board, sensor bus, or arm. The second half of this document shows how the [LeRobot, Seeed SO-101, and Arduino UNO Q platform](course-architecture.md) realizes these competencies.
 
-## The minimum graduation demonstration
+---
 
-Given an unfamiliar starting condition, a team must show a trace of **physical state → sensed state → versioned learned model → proposed action → permission → measured physical action → new observation → revised decision**. It must repeat the task, compare against a nonlearned baseline, and handle a seeded fault without a prohibited move. This implements the book's [three-part scope test](../../books/vol4/01_boundary/01_boundary.qmd): learned model, consequential physical feedback, and delegated actuator authority. Individual competencies can be assessed across common labs and the capstone; every model family need not run in the final device.
+## The Graduation Standard: The Three-Part Scope Test
 
-## Transferable student competencies
+To demonstrate mastery of Physical AI systems, a student team must produce a verifiable end-to-end trace:
 
-An engineer who passes this course should be able to **measure an unfamiliar physical process, build and test models of it, close a feedback loop, and justify the authority and evidence behind a deployed system**. The two axes below separate the object of study (physical process or computing system) from the engineering work (characterize and predict, or decide, act, and govern). The quadrant names are shorthand for the checklist items, not four separate projects.
+$$\text{Physical State } (s_t) \longrightarrow \text{Observation } (I_t, q_t) \longrightarrow \text{Learned Proposal } (a_{\text{req}}) \longrightarrow \text{MCU Permission } (a_{\text{enf}}) \longrightarrow \text{Actuation } (a_{\text{meas}}) \longrightarrow \text{New Observation } (I_{t+1}, q_{t+1}) \longrightarrow \text{Revised Decision}$$
 
-| | **Characterize and predict** | **Decide and govern** |
+The final system must satisfy the three conditions of the book's [scope test](../../books/vol4/01_boundary/01_boundary.qmd):
+1. **A Learned Decision:** A model whose output is conditioned on high-dimensional physical observations, not a hardcoded trajectory.
+2. **Consequential Physical Feedback:** Action changes the world, and subsequent decisions must respond to the actual measured state produced by prior motion or disturbance.
+3. **Delegated Actuator Authority:** Low-level actuation executes within an independent microcontroller permission boundary capable of vetoing proposals in real time.
+
+---
+
+## The 2×2 Competency Architecture
+
+An engineer who passes this course can **characterize an unfamiliar physical plant, build and optimize models for it, close an autonomous physical feedback loop, and govern delegated authority under fault**.
+
+The two axes separate the **domain of study** (the physical plant vs. the computing architecture) from the **engineering work** (characterize & model vs. control & govern):
+
+| | **Characterize & Model**<br>*(Observe, Measure, Predict, Profile)* | **Control & Govern**<br>*(Act, Enforce, Adapt, Defend)* |
 |:---|:---|:---|
-| **Physical process** | **A. Measure the world**<br>Sense, simulate, predict.<br>C1, C2, C3, C5, C7, C9 | **C. Change the world**<br>Plan, act, recover.<br>C10, C11, C14 |
-| **Computing system** | **B. Characterize computation**<br>Compare models and profile runtime.<br>C4, C8, C12 | **D. Integrate and govern**<br>Connect, constrain, verify.<br>C6, C13, C15 |
+| **Physical Embodiment**<br>*(The World, Mechanics, Senses & Actuators)* | **Quadrant A: Measure the Plant**<br>Kinematics, sensing, timing.<br>**A1, A2, A3** | **Quadrant C: Act in the World**<br>Execution, chunking, replanning.<br>**C1, C2, C3** |
+| **Computing Architecture**<br>*(The Board, Brain, Models & Software)* | **Quadrant B: Characterize the Brain**<br>Datasets, baselines, edge profiling.<br>**B1, B2, B3** | **Quadrant D: Govern the System**<br>Authority, safety governor, release.<br>**D1, D2, D3** |
 
-### A. Measure the world
+---
 
-| ID | Student can... | Evidence that would count on any platform |
+## Transferable Competency Definitions
+
+### Quadrant A: Measure the Plant (Physical × Characterize)
+
+| ID | Competency | Observable Physical Evidence (Platform-Independent) |
 |:---|:---|:---|
-| [ ] **C1 Body** | Identify the physical state, available actions, energy source, motion limits, and safe state of a mechanism. | A measured operating envelope and observed behavior at startup, shutdown, and loss of power. |
-| [ ] **C2 Sensing** | Acquire and calibrate two different kinds of physical feedback; explain units, electrical or communication interface, sampling, uncertainty, and missing data. | Raw readings, calibration procedure, disagreement analysis, and a sensor-loss trial. |
-| [ ] **C3 Feedback and time** | Associate an observation, decision, commanded action, measured action, and subsequent observation; detect delay and stale information. | Linked trace with timestamps or cycle IDs, latency distribution, and a stale-data trial. |
-| [ ] **C5 Simulation** | Express a task through a reusable observation/action contract, test at least two simulation models, and identify discrepancies against held-out physical trials. | Versioned models, matched initial conditions and actions, prediction errors, and an explanation of failed assumptions. |
-| [ ] **C7 Physical data** | Record repeatable episodes with observations, attempted and executed actions, measured state, outcomes, and interventions; construct a defensible held-out split. | Replayable episode sample, schema, dataset card, and split rationale. |
-| [ ] **C9 Dynamics** | Learn or identify how state changes after an action and test prediction beyond the training trajectories. | One-step and rollout errors on held-out physical trials, compared with a simple model. |
+| **A1** | **Plant Kinematics & Safe Envelope**<br>Identify physical degrees of freedom, joint limits, motor power routing, homing calibration, and de-energized rest state. | Measured operating workspace envelope, joint range table, and power-off drop trace proving no uncommanded motion upon boot or power loss. |
+| **A2** | **Multi-Modal Sensing & Calibration**<br>Acquire and calibrate two distinct physical feedback streams (e.g., vision and joint telemetry); quantify uncertainty, backlash, and sensor loss. | Extrinsic camera calibration ($T_{\text{cam}}^{\text{base}}$), command-versus-settled error distributions, backlash quantification, and a sensor-dropout trial. |
+| **A3** | **Feedback Timing & Latency**<br>Align multi-modal observation timestamps; measure physical sensor-to-torque loop delay; detect stale physical measurements. | Synchronized $(I_t, q_t)$ timestamp alignment trace, end-to-end loop latency histogram, and deliberate stale-data rejection trial. |
 
-### B. Characterize the computation
+### Quadrant B: Characterize the Brain (Computing × Characterize)
 
-| ID | Student can... | Evidence that would count on any platform |
+| ID | Competency | Observable Physical Evidence (Platform-Independent) |
 |:---|:---|:---|
-| [ ] **C4 Baseline** | Build a nonlearned rule or controller and evaluate it under the same conditions as a learned system. | Matched trials reporting both policies' actions and physical outcomes. |
-| [ ] **C8 Perception** | Version a learned perception model and its preprocessing, evaluate it on held-out physical observations, and deploy inference where the task requires it. | Model artifact, matched development/deployment outputs, error cases, memory use, and inference timing. |
-| [ ] **C12 Compute placement** | Assign sensing, inference, planning, and low-level control to available processors and justify the timing and resource budget. | Processor map, memory use, ordinary and loaded latency tails, and the resulting deadline rule. |
+| **B1** | **Physical Dataset Engineering**<br>Capture repeatable demonstration episodes with standardized schemas; log multi-tap action telemetry; construct defensible held-out splits. | Replayable demonstration dataset (e.g., LeRobot Dataset v3) logging all 4 action taps (`a_req`, `a_map`, `a_enf`, `a_meas`), dataset card, and leak-free train/val/test splits. |
+| **B2** | **Deterministic Baseline Benchmarking**<br>Construct a non-learned scripted or rule-based controller to serve as an objective performance, latency, and reliability reference. | Matched-start physical trials comparing rule-based controller against human teleoperation and learned policies under identical conditions. |
+| **B3** | **Edge Model Profiling & Optimization**<br>Train a compact imitation policy (e.g., ACT); quantize/export (ONNX/INT8); profile memory footprint and inference latency against edge deadline budgets. | Pinned model artifact, training/validation loss curves, host-vs-edge numerical parity check, memory footprint profile, and inference execution time distribution. |
 
-### C. Change the world
+### Quadrant C: Act in the World (Physical × Control)
 
-| ID | Student can... | Evidence that would count on any platform |
+| ID | Competency | Observable Physical Evidence (Platform-Independent) |
 |:---|:---|:---|
-| [ ] **C10 Planning** | Use current state, a goal, and a prediction to select an admissible action; replan when measured motion differs from prediction. | Open-loop and feedback trials, task error, action count, and response to an omitted or incomplete move. |
-| [ ] **C11 Policies** | Compare a reactive action policy with a policy that predicts a sequence of actions; explain drift and when to observe again. | Policy traces on common episodes, including a changed scene or failed action. |
-| [ ] **C14 Intervention** | Stop a task, invalidate old intent, recover state, and resume only from a fresh observation. | Cutoff, reset, and rearm trace showing no queued motion. |
+| **C1** | **Closed-Loop Physical Action**<br>Close the autonomous physical loop on hardware; stream policy proposals to produce consequential, intended physical change in the workspace. | Witnessed autonomous physical task completion driven entirely by on-board model inference without host PC tethering. |
+| **C2** | **Action Chunk Dynamics**<br>Evaluate multi-step action chunk horizons ($K$) versus single-step reactive execution; analyze trade-offs between trajectory smoothness and latency drift. | Trajectory tracking comparison across chunk horizons ($K=1, 8, 16, 32$), tracking error vs. horizon curves, and open-loop drift characterization. |
+| **C3** | **Disturbance Recovery & Replanning**<br>Detect physical discrepancies (e.g., moved target mid-trajectory) from fresh sensory feedback; adapt action proposals or deliberately abstain. | Matched trials with mid-trajectory object displacement, comparing open-loop continuation (failure) against closed-loop adaptation (recovery) or justified abstention. |
 
-### D. Integrate and govern
+### Quadrant D: Govern the System (Computing × Control)
 
-| ID | Student can... | Evidence that would count on any platform |
+| ID | Competency | Observable Physical Evidence (Platform-Independent) |
 |:---|:---|:---|
-| [ ] **C6 Hardware integration** | Trace a decision through software, communication, control electronics, actuator, and feedback; identify where state or commands can be lost or bypassed. | Interface and power diagram, software versions, a command trace, and an injected communication fault. |
-| [ ] **C13 Authority** | Identify who may issue, permit, and physically execute an action; test what happens when a proposer stalls or sends an invalid request. | Accepted and refused requests paired with measured actuator and power behavior. |
-| [ ] **C15 Evaluation** | Compare repeated physical outcomes with the baseline and simulation predictions, including failures and abstentions; state the tested envelope. | Frozen trial protocol, raw traces, fault results, and a bounded release or no-release claim. |
+| **D1** | **Hardware Authority Routing**<br>Enforce that all actuation flows exclusively through the independent microcontroller permission boundary (`a_req` $\to$ `a_map` $\to$ `a_enf`); prove zero unmonitored host bypass. | Hardware interface and power routing diagram, verified single-path command trace, and proof of blocked host USB direct motor access. |
+| **D2** | **Real-Time Safety Governor & Cutoff**<br>Implement velocity clamps, collision envelopes, communication watchdogs, and emergency cutoffs on the MCU; verify safe-state transition with zero backlog. | Injected fault trials (over-speed request, workspace boundary breach, Linux hang/dropped frames) showing immediate MCU clipping or safe shutdown with 0 queued packets. |
+| **D3** | **Physical Release Defense**<br>Conduct a statistically frozen 20-trial held-out disturbance evaluation; compare against baseline; defend a bounded release dossier. | 20-trial physical benchmark report across varied initial positions and disturbances, failure mode taxonomy, and formal Physical Release Dossier oral defense. |
 
-The postdoc should make each row an observable pass/fail check in the student handout. A team may use a different body or simulator if it supplies equivalent evidence. A language model or arm is an optional way to exercise these abilities, not a substitute for any row.
+---
 
-## Course realization: LeRobot, UNO Q, and SO-101
+## The Physical AI Competency Check-Off Card
 
-The [course operating plan](course-architecture.md) specifies the seminar rhythm and milestones; the [SO-101 lab draft](so101-uno-q-course.md) details each weekly experiment. The proposed common stack is a LeRobot-compatible robot and dataset, a simulator, a versioned Hugging Face policy, UNO Q Qualcomm-side local inference, and STM32-permitted physical action. Staff must test the SO-101 STM32-to-servo command path before claiming MCU control of the arm. The one-axis [reference sequence](lab-sequence.md) remains a fallback body under the same competency contract.
+This card serves as the concrete, observable sign-off sheet for students and instructors at the lab bench:
 
-### A. Measure the world
+```markdown
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                        PHYSICAL AI STATION COMPETENCY CARD                             │
+│ Student / Team: ___________________________   Station ID: ____________________________ │
+├──────┬────────────────────────────────────────┬─────────────────────────┬──────────────┤
+│ ID   │ Competency Description                 │ Required Physical Proof │ Sign-Off     │
+├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
+│ [ ]  │ A1: Plant Kinematics & Safe Envelope   │ Workspace envelope,     │ Date: ______ │
+│      │                                        │ joint limits, safe rest │ Staff: _____ │
+├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
+│ [ ]  │ A2: Multi-Modal Sensing & Calibration  │ Extrinsic camera matrix,│ Date: ______ │
+│      │                                        │ settled error plot      │ Staff: _____ │
+├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
+│ [ ]  │ A3: Feedback Timing & Latency          │ Timestamp sync trace,   │ Date: ______ │
+│      │                                        │ sensor-to-torque delay  │ Staff: _____ │
+├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
+│ [ ]  │ B1: Physical Dataset Engineering       │ 30 LeRobot episodes,    │ Date: ______ │
+│      │                                        │ 4 action taps logged    │ Staff: _____ │
+├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
+│ [ ]  │ B2: Deterministic Baseline Benchmark   │ Scripted reach baseline │ Date: ______ │
+│      │                                        │ matched trials report   │ Staff: _____ │
+├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
+│ [ ]  │ B3: Edge Model Profiling & Opt.        │ ONNX export, <100ms     │ Date: ______ │
+│      │                                        │ latency on Qualcomm MPU │ Staff: _____ │
+├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
+│ [ ]  │ C1: Closed-Loop Physical Action        │ Live autonomous reach   │ Date: ______ │
+│      │                                        │ completion on UNO Q     │ Staff: _____ │
+├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
+│ [ ]  │ C2: Action Chunk Dynamics              │ K=1 vs K=16 comparison, │ Date: ______ │
+│      │                                        │ latency/smoothness plot │ Staff: _____ │
+├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
+│ [ ]  │ C3: Disturbance Recovery & Replanning  │ Target moved mid-reach, │ Date: ______ │
+│      │                                        │ adaptive correction     │ Staff: _____ │
+├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
+│ [ ]  │ D1: Hardware Authority Routing         │ Linux➔Bridge➔MCU trace, │ Date: ______ │
+│      │                                        │ host bypass verified cut│ Staff: _____ │
+├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
+│ [ ]  │ D2: Real-Time Safety Governor & Cutoff │ MCU over-speed refusal, │ Date: ______ │
+│      │                                        │ watchdog timeout cutoff │ Staff: _____ │
+├──────┼────────────────────────────────────────┼─────────────────────────┼──────────────┤
+│ [ ]  │ D3: Physical Release Defense           │ 20-trial frozen benchmark│ Date: ______ │
+│      │                                        │ & Release Dossier oral  │ Staff: _____ │
+└──────┴────────────────────────────────────────┴─────────────────────────┴──────────────┘
+```
 
-- **C1 Body (weeks 1–2):** map power, joints, gripper, workspace, and safe state; submit the measured envelope and power-off trace.
-- **C2 Sensing (weeks 2–4):** calibrate camera and joint readback as two physical feedback sources; submit units, disagreement, and a sensor-loss trial. An MCU-read SPI sensor can add independent joint feedback after staff qualification.
-- **C3 Feedback and time (weeks 3–6):** link frame, action taps, joint response, and next frame; submit clock or cycle alignment and a stale-data trial.
-- **C5 Simulation (weeks 7–8):** compare a simple model and a second robot simulator; submit matched-start predictions and measured simulation gaps.
-- **C7 Physical data (weeks 4–5):** record LeRobot episodes with requested, mapped, enforced, and measured action taps; submit a replayable dataset, held-out split, intervention fields, and card.
-- **C9 Dynamics (week 7):** fit a small next-state predictor; submit one-step and rollout errors on held-out physical trials against a simple model.
+---
 
-### B. Characterize computation
+## Course Realization: LeRobot, Arduino UNO Q, and Seeed SO-101
 
-- **C4 Baseline (week 5):** run a scripted or teleoperated reference under a frozen protocol; submit matched baseline and learned-policy physical trials.
-- **C8 Perception (weeks 5–6):** freeze visual preprocessing and local model output; submit held-out error cases, host/board agreement, memory, and timing.
-- **C12 Compute placement (weeks 6 and 9–10):** profile Qualcomm inference, Bridge, MCU decision, and action age; submit a processor map, latency tails, and deadline rule.
+Here is how the 12 competencies map directly into the **four textbook parts** and the **14-week semester schedule**:
 
-### C. Change the world
-
-- **C10 Planning (weeks 6, 8, and 11):** correct after an incomplete move or changed object state, beginning with the week-6 local learned loop; submit open-loop versus feedback outcomes and a replanning trace.
-- **C11 Policies (weeks 8–9):** compare ACT and SmolVLA action chunks with a reactive policy; submit a changed-scene or changed-instruction trace.
-- **C14 Intervention (weeks 11–12):** exercise cutoff, reset, correction, and rearm; show that no queued motion executes and resumption uses fresh evidence.
-
-### D. Integrate and govern
-
-- **C6 Hardware integration (weeks 1–3):** trace Qualcomm → Bridge → STM32 → motor bus → feedback; submit command/power diagrams and a communication-fault trace.
-- **C13 Authority (weeks 3 and 10):** test MCU acceptance and refusal under deliberate faults; submit enforced-action and measured-motion traces showing no bypass.
-- **C15 Evaluation (weeks 12–14):** repeat frozen physical trials; submit raw outcomes, baseline comparison, fault results, and a release or no-release verdict.
-
-The capstone rubric uses the four quadrants equally: **A** measures the world, **B** characterizes computation, **C** changes the world, and **D** integrates and governs. Students still check off the specific competencies within each quadrant. The qualifying episode must contain a learned action proposal, actual world change, a fresh measurement of tool and object/task state, and a state-dependent revised decision under the MCU permission boundary. A model score alone cannot replace C10 correction, C13 authority, or C15 physical evidence. The [course operating plan](course-architecture.md) describes team and individual evidence.
-
-The SO-101 is the book's contact-dominated manipulation example. [LeKiwi or a custom rover](so101-uno-q-course.md) can add a mobility comparison; a qualified thermal cell can add a process/energy comparison. Changing the embodiment changes the lab realization and measured physical law, not the competency definitions above. The staff build report should mark each competency **proved on hardware**, **prepared with replay or simulation**, or **unresolved**, with a linked trace supporting the mark.
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ PART I: THE MACHINE ANATOMY (Weeks 1–3 · Labs 1–2)                                     │
+│ • Week 1: Hardware Bring-Up & Power Safety ──────────▶ Check off: A1, D1               │
+│ • Week 2: Joint Telemetry & Homing Calibration ──────▶ Check off: A1                   │
+│ • Week 3: Vision Capture & The Inter-Core Bridge ────▶ Check off: A2, A3               │
+│ 🎯 Milestone 1 Sign-Off (Week 3): Station Charter, Calibrated Envelope & Authority Route│
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ PART II: TEACHING THE MACHINE (Weeks 4–6 · Labs 3–4)                                   │
+│ • Week 4: Teleoperation & Episode Logging ───────────▶ Check off: B1                   │
+│ • Week 5: Scripted Baseline & Dataset Splits ────────▶ Check off: B1, B2               │
+│ • Week 6: Policy Training & Qualcomm Edge Export ────▶ Check off: B3                   │
+│ 🎯 Milestone 2 Sign-Off (Week 6): Edge-Ready Policy on Qualcomm Linux                  │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ PART III: RUNNING THE MACHINE (Weeks 7–9 · Labs 5–6)                                   │
+│ • Week 7: Autonomous Closed-Loop Reach on UNO Q ─────▶ Check off: C1                   │
+│ • Week 8: Action Chunk Horizons (K=1 vs K=16) ───────▶ Check off: C2                   │
+│ • Week 9: Disturbance Response & Replanning ─────────▶ Check off: C3                   │
+│ 🎯 Milestone 3 Sign-Off (Week 9): Autonomous Closed-Loop Manipulation Under Disturbance│
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ PART IV: GOVERNING THE MACHINE (Weeks 10–11 · Labs 7–8)                                │
+│ • Week 10: The STM32 Microcontroller Safety Governor ▶ Check off: D1, D2               │
+│ • Week 11: Fault Injection, Watchdogs & Safe Cutoff ─▶ Check off: D2                   │
+│ 🎯 Milestone 4 Sign-Off (Week 11): Certified Governed Station                          │
+│ *Classroom lectures and new textbook reading conclude here!*                          │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ DEDICATED CAPSTONE PROJECT STUDIO (Weeks 12–14 · 3 Full Weeks Runway)                  │
+│ • Week 12: Independent Task Build & Custom Policy Teleoperation                        │
+│ • Week 13: Adversarial Peer Disturbance Swapping & Governor Hardening                  │
+│ • Week 14: 20 Held-Out Physical Disturbance Trials & Oral Defense ──▶ Check off: D3   │
+│ 🎯 Milestone 5 Sign-Off (Week 14): Final System Defense & Release Dossier (A, B, C, D) │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
