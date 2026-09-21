@@ -13,13 +13,20 @@ for the canonical list.
 
 ## [Unreleased]
 
+## [0.1.14] — 2026-09-21
+
 ### Added
+- **Milestone Architecture Alignment**: Formalized Milestone 05 as `transformer` (2017: self-attention sequence routing on reversal and copying) and Milestone 06 as `mlperf` (2018: DigitMLP optimization olympics, profiling, INT8 quantization, weight pruning, and Pareto frontier certification).
+- **Chapter Openings Deconstruction**: Standardized opening sections of all 24 textbook chapters into the structured 4-beat PyTorch deconstruction pattern (Standard PyTorch, The Illusion, The Engineering Reality, The Contract).
+- **Swiss Modernist Cover Redesign**: Modernized textbook cover with centered TinyTorch typography, monospace code tagline, and the 20-module runtime bus terminating in TinyGPT.
 - **Vector diagrams across all 20 modules**: ASCII pipeline art replaced with bespoke SVGs and markdown tables, with LaTeX rendered through MathJax, so notebook figures stay legible at any zoom and in print.
 - **`tools/check_grading_holes.py`**: builds each module's real student-tier source, runs it with no student code, and reports which graded cells still pass. Ships with its own upper-bound caveat, because modules that import their own export target resolve it to whatever `tinytorch/` was last exported.
 - **Release gate `grading: no graded cell scores only pre-solved scaffold code`**: catches a module that awards points while stripping nothing for the student. 34 fast gates.
 - **`im2col` documented end to end**: Module 09 states the trade it can only describe, Module 17 builds and times the lowering, and book chapters 9 and 17 now hand off to each other explicitly.
 
 ### Changed
+- **Diagram Width Harmonization**: Standardized all main-column diagrams across the textbook to 100% full text width with consistent margins and clean typography.
+- **Streamlined Chapter Content**: Removed end-of-chapter exercises across the textbook to focus student progression entirely on hands-on notebook implementations.
 - **Student release no longer instructs students to implement solved code**: `apply_release_tier` drops the `TODO`/`APPROACH`/`EXAMPLE`/`HINT` briefing from a cell whose every region is kept pre-solved. 108 such cells across 19 modules shipped with a docstring reading "TODO: Implement ..." directly above the finished implementation; the briefing now survives exactly when the student still has work to do, or when the tier is the instructor reference.
 - **Classroom-release target moved** from Fall 2026 to Spring 2027.
 - **Hardware extensions** repaired and no longer stamped DO NOT EDIT; book chapter 21 rewritten around the extensions TinyTorch actually ships.
