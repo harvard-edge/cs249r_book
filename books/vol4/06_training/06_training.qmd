@@ -54,16 +54,6 @@ Two learned controllers can achieve identical validation loss on offline benchma
 
 On a physical calibration bench under nominal pressure, both policies regulate flow at $1.50\text{ L/min}$. But when a line transient suddenly drops supply pressure by $12\text{ kPa}$, their failure modes diverge violently. The imitation policy issues a corrective valve adjustment that slightly undershoots, landing in a joint pressure-flow state absent from its training demonstrations. Because the policy cannot extrapolate beyond its demonstrated support manifold, its subsequent actions become erratic, compounding tracking error across consecutive $20\text{ ms}$ control steps until the fluid reservoir overflows. The simulated policy, having learned inside an idealized simulation that assumes instantaneous electromagnetic response, commands valve position reversals at $50\text{ Hz}$. The physical solenoid spool requires $35\text{ ms}$ to transit between seating positions; unable to track the commanded high-frequency chatter, the mechanical valve seat experiences violent cavitation, rupturing an upstream hydraulic seal. The data collection regime defined what the policy saw, while the training algorithm shaped its assumptions about the physical universe.
 
-::: {#dfn-training-actuator-latency-robustness .callout-definition title="Actuator dynamics latency robustness"}
-
-***Actuator dynamics latency robustness***\index{Actuator dynamics latency robustness!definition}\index{Sim-to-real!latency robustness} describes a policy tested across a specified range of transport delays, phase lags, and mechanical compliance. Training with randomized delay can improve performance in that range; closed-loop stability still requires measured phase margin and validation on the physical plant.
-
-1.  **Significance**: Prevents simulated policies from exploiting zero-latency communication and idealized instantaneous torque generation, which cause violent phase-lag oscillations and mechanical fatigue on physical actuators.
-2.  **Distinction**: Unlike general domain randomization of visual textures or masses, latency invariance specifically targets the dynamic phase margins of the closed-loop system by randomizing observation-to-action delay buffers during training.
-3.  **Common pitfall**: Training policies in simulation with fixed single-timestep delays, leaving the controller fragile to real-world bus jitter and variable inference latencies that cross stability margins.
-
-:::
-
 Every training regime purchases deployment capability at the cost of runtime vulnerability:
 
 - **Imitation learning** buys task competence without manual reward engineering by mimicking human demonstrations (drawn from the ingestion archives established in @sec-data). However, standard point-regression objectives suffer from the *multimodality catastrophe*—if demonstrators avoid an obstacle by passing either to the left or to the right, minimizing mean squared error forces the neural network to predict the geometric average of both modes, commanding the robot to drive straight into the obstacle.[^fn-training-mode-averaging] Furthermore, small single-step errors compound quadratically over time as the policy drifts into unsupported state space.
@@ -145,6 +135,18 @@ Let the policy operate in discrete time over an execution horizon of $T$ control
 The quadratic dependency on time $T^2$ represents the structural price of open-loop supervised training applied to a closed-loop dynamical system. The first error incurs a direct penalty, and every subsequent step spends the remainder of the rollout accumulating cost because the demonstration dataset never provided examples of how to return to the nominal path.
 
 @ross2011reduction derives a worst-case $\mathcal{O}(T^2 \epsilon)$ expected-cost bound for expert-only behavioral cloning under bounded one-step loss because the learner's own execution errors induce covariate shift away from the demonstration distribution. To overcome this fundamental limitation in software, the authors formulated DAgger (Dataset Aggregation), an interactive online imitation learning framework that queries an expert oracle to label the states visited by the learner's policy, obtaining a linear $\mathcal{O}(T \epsilon)$ bound under its expert-labeling and no-regret assumptions. In physical robotics, however, running an unverified policy to gather online expert labels is hazardous, as off-distribution exploration risks mechanical collisions and hardware damage before the human supervisor can intervene.
+
+::: {#dfn-training-compounding-rollout-error .callout-definition title="Compounding rollout error"}
+
+***Compounding rollout error***\index{Compounding rollout error!definition}\index{Behavioral cloning!error accumulation} is the quadratic accumulation of closed-loop tracking drift incurred when an open-loop supervised policy executes sequentially on a physical dynamical plant, bounded in expectation by:
+$$J(\pi) - J(\pi^*) \le \mathcal{O}(T^2 \epsilon)$$
+where $T$ is the task execution horizon and $\epsilon = \mathbb{E}_{\mathbf{s} \sim d_{\pi^*}} [\mathbb{I}(\pi(\mathbf{s}) \ne \pi^*(\mathbf{s}))]$ is the single-step policy error rate on the demonstration distribution $d_{\pi^*}$.
+
+1.  **Significance**: Proves that minimizing single-step prediction error on offline demonstrations is fundamentally insufficient for closed-loop stability; any nonzero error rate $\epsilon > 0$ eventually drives physical state outside demonstrated support.
+2.  **Distinction**: Unlike static supervised learning where validation error scales linearly with sample count, compounding rollout error couples policy mistakes with environmental physics, turning small initial trajectory deviations into irreversible state divergence.
+3.  **Common pitfall**: Assuming low offline validation loss on held-out demonstration splits translates to high closed-loop task success, ignoring that offline datasets contain zero examples of returning to nominal support once perturbed.
+
+:::
 
 ### What action chunking changes—and what it leaves unresolved
 

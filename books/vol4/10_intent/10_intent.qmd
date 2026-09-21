@@ -70,7 +70,7 @@ This fundamental challenge is the modern robotics manifestation of what Harnad t
 
 ::: {#dfn-intent-grounding-refusal .callout-definition title="Intent grounding refusal"}
 
-***Intent grounding refusal***\index{Intent grounding refusal!definition}\index{Refusal!grounding ambiguity} is the deterministic safety primitive by which an embodied policy explicitly rejects ambiguous semantic directives or unreachable spatial targets (`ERR_GROUNDING_AMBIGUITY`), refusing to execute non-deterministic argmax guesses through clearance volumes.
+***Intent grounding refusal***\index{Intent grounding refusal!definition}\index{Refusal!grounding ambiguity} is the deterministic safety mechanism whereby an embodied system explicitly rejects semantically ambiguous natural-language directives or unreachable spatial goal hypotheses ($\mathcal{H}_{\text{goal}}$), returning a typed failure status (`ERR_GROUNDING_AMBIGUITY`) rather than executing ungrounded maximum-likelihood guesses across physical clearance margins.
 
 1.  **Significance**: Rejects a proposal when the specified ambiguity test fails, before that proposal reaches trajectory generation. Protection also depends on the independent motion-permission and fallback checks.
 2.  **Distinction**: Unlike a trajectory planning failure that cannot find a collision-free path to a valid goal, grounding refusal rejects the goal itself as physically ungrounded or ambiguous before the planner is invoked.
@@ -128,16 +128,6 @@ In this proposed interface, each intent packet from the learned MPU requests thr
 3. **Admissible command and force envelope**\index{Intent record!force envelope}: Explicit dynamic limits that cap the peak velocity ($v_{\max}$), acceleration ($a_{\max}$), and contact wrench ($F_{\max}$) the machine may exert while pursuing the target.
 
 [^fn-intent-dual-brain]: **Inter-core communication across privilege boundaries**\index{Inter-core communication!RPMSG}\index{Dual-brain!privilege boundaries}: RPMSG over a statically bounded shared SRAM ring is one implementation of this proposal-permission path. An independent timer can detect loss of host renewals despite a host kernel panic; the complete detection-to-brake response still needs validated bus, sensing, drive, and actuator timing. See @sec-enforcement-authority-refuse and @sec-appendix-systems-ipc.
-
-::: {#dfn-intent-expiring-intent-lease .callout-definition title="Expiring intent lease"}
-
-***Expiring intent lease***\index{Expiring intent lease!definition}\index{Intent lease!definition} ($\mathcal{L}_{\text{intent}}$) is a finite target-evidence validity request derived from a dated observation. The independent permission tier admits a shorter or equal execution interval only after checking configured ceilings, current clearance, and a feasible stopping response; it revokes tracking authority when evidence or the admitted interval expires.
-
-1.  **Significance**: Momentum and gravity continue when the high-level planner stalls. An independent timer can revoke tracking without an abort packet; safe stopping additionally requires a validated response and enough remaining clearance.
-2.  **Distinction**: A target-evidence horizon follows workspace drift and task tolerance. A separate stopping budget covers detection, communication, brake onset, and physical deceleration.
-3.  **Common pitfall**: Sizing the lease duration too generously to mask high inference latency percentiles ($P_{99}$). An oversized lease leaves a wide unmonitored window where the machine operates open-loop in an environment that may have changed.
-
-:::
 
 Grounding an open-ended directive therefore requires a proposal that carries the target, its evidence age, spatial tolerance, and requested effort limits. The independent permission path must test that proposal against current state and stopping clearance before motion begins.
 
@@ -567,6 +557,18 @@ The timestamp `t_source_mcu` is the **physical capture epoch converted into the 
 The fields in @tbl-10-intent-schema support layered checks. Sequence and parent-ring lookup reject stale or mismatched observations but do not authenticate the sender. Cheap workspace and target-envelope tests reject obvious failures before planning; passing them does not prove a collision-free path. A planner and permission check must still evaluate the swept path, unknown space, actuator constraints, total pre-brake delay, and current stopping clearance.
 
 The admitted intent moves through Pending, Active, Renewed, Expired, and Aborted states. The MCU enters Active only after checking the request against independently configured ceilings and a feasible response from the measured state. A renewal needs a newer sequence, a fresh trusted observation, and a new permission check; it does not automatically extend authority. Meeting the approved task tolerance completes the goal. Unexpected contact or loss of a required belief aborts the dependent motion.
+
+::: {#dfn-intent-expiring-intent-lease .callout-definition title="Expiring intent lease"}
+
+***Expiring intent lease***\index{Expiring intent lease!definition}\index{Intent lease!definition} ($\mathcal{L}_{\text{intent}}$) is a time-bounded execution authorization issued by the independent permission tier that binds an admitted target pose and effort envelope to a strict monotonic hardware deadline ($\tau_{\text{lease}}$):
+$$t_{\text{expire}} = \min(t_{\text{evidence}} + \tau_{\text{horizon}}, \; t_{\text{issue}} + \tau_{\text{lease}}, \; t_{\text{stop\_deadline}})$$
+upon whose expiration motion tracking authority is automatically revoked without requiring an explicit cancellation packet.
+
+1.  **Significance**: Ensures physical mass and momentum cannot coast unguided when upstream neural deliberation stalls; hardware timers autonomously enforce motion cessation upon lease exhaustion.
+2.  **Distinction**: Unlike a network keepalive or software ping, an intent lease couples physical sensor evidence age ($\tau_{\text{horizon}}$) with dynamic braking feasibility, guaranteeing that remaining travel clearance is never exceeded during deceleration.
+3.  **Common pitfall**: Sizing lease durations generously to mask tail latency ($P_{99}$) in neural inference, which creates an unmonitored open-loop window where the robot moves through an environment that may have changed.
+
+:::
 
 At expiration, the timer revokes tracking authority. The packet's `terminal_request` is advisory: the MCU selects among approved hold, controlled deceleration, or torque-disable responses according to load, contact mode, brake capability, and clearance. A suspended payload may need powered holding; disabling torque can drop it. A moving base needs enough room to decelerate. Neither a $1\text{ kHz}$ check period nor a hardware interrupt establishes a one-millisecond physical stop.
 

@@ -59,16 +59,6 @@ Solving this dilemma requires stepping across the **proposal-permission boundary
 ![](images/svg/fig_locator.svg){width="100%"}
 :::
 
-::: {#dfn-enforcement-reflex-enforcer .callout-definition title="Reflex enforcer"}
-
-***Reflex enforcer***\index{Reflex enforcer!definition} is an edge-deployed deterministic gatekeeper positioned between unverified deliberative software proposals and physical actuator drive electronics, executing at a rate chosen from plant dynamics to check validated state and torque constraints, project feasible proposals, and command a state-matched fallback when the tracking contract fails.
-
-1.  **Significance**: Physical momentum and actuator saturation make late software intervention catastrophic. An independent permission path at the drive interface can reject uninspected commands; its actual braking response must be tested.
-2.  **Distinction**: Unlike high-level trajectory planners that optimize multi-step paths over hundreds of milliseconds, a reflex enforcer performs instantaneous, single-step feasibility checks and projections under strict sub-millisecond execution deadlines.
-3.  **Common pitfall**: Treating the enforcer as an emergency exception handler invoked only during crashes. In practice, the enforcer is a continuous, per-tick gatekeeper; if its state estimate or execution deadline leaves the validated envelope, it must transfer to a feasible fallback before the reserved stopping margin is consumed.
-
-:::
-
 ::: {.column-margin .margin-pointer}
 ↰ **Prerequisite:** The dual-brain proposal-permission privilege split was established in @sec-boundary-dual-brain.
 :::
@@ -395,15 +385,15 @@ By constraining the temporal derivative of the barrier function along the system
 For formal mathematical derivations of Control Barrier Functions, Lie derivatives, and Nagumo's viability theorem, see @sec-appendix-control-cbf.
 :::
 
-::: {#dfn-enforcement-control-barrier-function-cbf-qp .callout-definition title="Control barrier function (CBF-QP)"}
+::: {#dfn-enforcement-control-barrier-function-cbf-qp .callout-definition title="Control barrier function safety filter"}
 
-***Control barrier function safety filter (CBF-QP)***\index{Control barrier function!definition}\index{CBF-QP safety filter!definition} is a conditional safety filter that projects a proposed input through a bounded convex quadratic program:
+***Control barrier function safety filter***\index{Control barrier function!definition}\index{CBF-QP safety filter!definition} is the constrained optimization filter that projects unverified nominal control proposals $\mathbf{u}_{\text{nom}}$ onto a forward-invariant safe set $\mathcal{C} = \{\mathbf{x} \mid h(\mathbf{x}) \ge 0\}$ by solving the quadratic program:
 $$\min_{\mathbf{u}} \frac{1}{2}\|\mathbf{u} - \mathbf{u}_{\text{nom}}\|^2 \quad \text{s.t.} \quad \mathbf{a}(\mathbf{x})^\top \mathbf{u} \le b(\mathbf{x}), \quad \mathbf{u}_{\min} \le \mathbf{u} \le \mathbf{u}_{\max}$$
-that projects unverified learned proposals $\mathbf{u}_{\text{nom}}$ onto linear braking constraints ($\mathbf{a}(\mathbf{x})^\top \mathbf{u} \le b(\mathbf{x})$), leaving candidates that satisfy the current torque half-space untouched and projecting candidates that violate it, even while the state remains inside the viable region.
+that enforces linear braking half-space constraints ($\mathbf{a}(\mathbf{x})^\top \mathbf{u} \le b(\mathbf{x})$), leaving candidate inputs that satisfy the safe boundary untouched and minimally projecting violating inputs in control space.
 
 1.  **Significance**: Rather than attempting the impossible task of proving formal safety across billions of uninterpretable neural network weights, a CBF-QP filter decouples high-level policy innovation from low-level safety enforcement. The learned model is free to explore complex manipulation or navigation strategies, while the deterministic enforcer can preserve a validated viable set while its physical assumptions remain true.
 2.  **Distinction**: Unlike a heuristic clamp that saturates control channels independently (destroying multi-axis coordination), a CBF-QP filter performs an optimal orthogonal projection in control space, minimizing the chosen torque-space distance; it does not automatically preserve a Cartesian path.
-3.  **Common pitfall**: Formulating barrier constraints using raw geometric coordinates without accounting for relative degree or braking inertia. If the barrier does not incorporate stopping distance ($\Delta d = v^2 / 2a_{\max}$), the filter intervenes too late, after the vehicle's momentum has already made a boundary collision inevitable.
+3.  **Common pitfall**: Formulating barrier constraints using raw geometric coordinates without accounting for relative degree ($r = 2$) or braking inertia. If the barrier does not incorporate stopping distance ($\Delta d_{\text{stop}} = v \tau + v^2 / 2a_{\max}$), the filter intervenes too late, after the vehicle's momentum has already made a boundary collision inevitable.
 
 :::
 
@@ -684,6 +674,16 @@ For such dynamic systems, the terminal fallback cannot simply be an uncoordinate
 The rungs trade intervention time, available control authority, and recovery cost. A controlled stop requires reserved clearance and a working drive; an STO request removes torque and may leave a moving machine coasting. The plant-specific response must be validated for the state at which each rung can be entered.
 
 The deterministic escalation hierarchy across these four defensive tiers is structured in @fig-12-fallback-ladder. The diagram orders possible responses by fault condition; it is not a guarantee that each lower rung stops faster or protects a moving plant better.
+
+::: {#dfn-enforcement-dynamic-fallback-ladder .callout-definition title="Dynamic fallback ladder"}
+
+***Dynamic fallback ladder***\index{Dynamic fallback ladder!definition}\index{Fallback ladder!definition} is the deterministic multi-tier mitigation hierarchy that escalates control authority from nominal safety filtering to progressively restrictive deterministic stopping modes ($u \in \{\mathcal{P}_{\mathcal{C}}(u_{\text{nom}}), u_{\text{hold}}, u_{\text{brake}}, u_{\text{STO}}\}$) upon detecting invariant violations, timing overrun, or hardware faults.
+
+1.  **Significance**: Physical AI systems cannot treat all faults identically; cutting actuator power on dynamic, underactuated, or high-momentum plants (e.g., legged robots at speed, multirotors in flight) can precipitate catastrophic tumbling, requiring state-matched deceleration before terminal torque removal.
+2.  **Distinction**: Unlike software exception handlers that unwind the call stack or kill a process thread, a dynamic fallback ladder operates against physical inertia, matching each escalation tier to the remaining valid sensing, control authority, and reserved stopping clearance.
+3.  **Common pitfall**: Assuming higher ladder rungs (such as Safe Torque Off, STO) universally provide faster or safer arrest. On moving unbraked loads or gravity-loaded vertical axes, STO removes active holding torque, causing the plant to coast or drop unless paired with an independent, mechanically rated friction brake.
+
+:::
 
 ::: {#fig-12-fallback-ladder fig-env="figure" fig-pos="t" fig-cap="**Available enforcement responses**: A deterministic arbiter can select feasible torque projection, controlled hold, controlled stop, or drive torque inhibit according to the current fault and measured plant state. The responses are alternatives with different prerequisites; descending the diagram does not imply increasing physical safety or faster arrest." fig-alt="Policy proposals reach a local arbiter with four possible outputs: a feasible torque projection, powered position hold, controlled braking stop, or drive torque inhibit. Each output requires a state-specific clearance and hardware response check; torque inhibit alone may allow coasting."}
 ![](images/svg/fig12_canonical_fallback_ladder.svg){width="100%"}
