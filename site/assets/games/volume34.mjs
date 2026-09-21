@@ -362,3 +362,12 @@ export function mountSafetyGate(root) {
   });
   render();
 }
+
+if (typeof window !== "undefined") {
+  window.MLSP = window.MLSP || {};
+  window.MLSP.games = window.MLSP.games || {};
+  window.MLSP.games.contextCache = mountContextCache;
+  window.MLSP.games.toolTrail = mountToolTrail;
+  window.MLSP.games.latencyLine = mountLatencyLine;
+  window.MLSP.games.safetyGate = mountSafetyGate;
+}
