@@ -109,13 +109,7 @@ If an architecture predicts actions one step ahead ($H = 1$), the motor tracking
 
 :::
 
-Planning is the last of the four proposal-side stages of Part III, after perception, memory, and intent, and @fig-11-locator marks where it sits in the Brain. Intent defines the admissible goal; planning supplies the continuous motion, temporal parameterization, and dynamic limits needed to pursue that goal.
-
-::: {#fig-11-locator fig-env="figure" fig-pos="htb" fig-cap="**Planner stage architecture focus**: In the physical AI systems architecture, the deliberative brain proposes time-parameterized action chunks across an unprivileged boundary to the deterministic nervous system. Because neural inference latencies exhibit heavy-tailed stochastic distributions, every plan must define its own replacement timing, boundary derivatives, and precomputed stopping suffix before execution begins." fig-alt="Diagram titled Physical AI Systems Architecture Stack, drawn as four stacked tiers. Layer 4 is system governance and assurance at 0.1 to 1 hertz, holding boxes for shared autonomy, verification, safety cases, and frontier limits. Layer 3 is the brain, a cognitive deliberation tier at 1 to 50 hertz, holding five stages named ingestion, perception, memory, intent, and planner. A dashed proposal-permission privilege boundary separates it from layer 2, the nervous system, a real-time safety and timing tier at 1000 hertz. Layer 1 is the physical body and continuous plant. Layer 3 is shaded and its planner stage is outlined; the badge reads Active Focus, Chapter 11, Trajectory Planning."}
-![](images/svg/fig_locator.svg){width="100%"}
-:::
-
-Across the **proposal-permission boundary**, a plan is not a direct command written to actuator registers, nor is it a guaranteed physical path. It is an unprivileged proposal submitted across the MPU-to-MCU inter-processor communication bus to the tracking controller and the real-time safety enforcer (@sec-enforcement).[^fn-plan-nervous-gatekeeper] Because measured inference latencies can have consequential tails, the downstream controller in this design consumes admitted references on its own clock and cannot suspend physical motion while the model finishes. A plan must therefore be an atomic, self-contained contract: it must establish second-order derivative continuity ($C^2$ continuity) at its admission seam,[^fn-plan-c2-spline] budget its replacement dispatch epoch against extreme tail quantiles, and include a stopping suffix admitted with the nominal motion, subject to the current state, clearance, and actuator assumptions.
+Intent defines the admissible goal; planning supplies the continuous motion, temporal parameterization, and dynamic limits needed to pursue that goal. Across the **proposal-permission boundary**, a plan is not a direct command written to actuator registers, nor is it a guaranteed physical path. It is an unprivileged proposal submitted across the MPU-to-MCU inter-processor communication bus to the tracking controller and the real-time safety enforcer (@sec-enforcement).[^fn-plan-nervous-gatekeeper] Because measured inference latencies can have consequential tails, the downstream controller in this design consumes admitted references on its own clock and cannot suspend physical motion while the model finishes. A plan must therefore be an atomic, self-contained contract: it must establish second-order derivative continuity ($C^2$ continuity) at its admission seam,[^fn-plan-c2-spline] budget its replacement dispatch epoch against extreme tail quantiles, and include a stopping suffix admitted with the nominal motion, subject to the current state, clearance, and actuator assumptions.
 
 ::: {.column-margin .margin-pointer}
 ↰ **Prerequisite:** Expiring intent leases provide the bounded time windows discharged by trajectories in @sec-intent-lease.
@@ -137,23 +131,13 @@ The trajectory record names its coordinate frame $\mathcal{F}$, evidence time $t
 
 The initial reference state matters while the plant moves during inference. Suppose the host samples at $t=0$ and spends $60\text{ ms}$ planning while the arm advances $20\text{ mm}$. Starting the new chunk from that historical pose would create a $20\text{ mm}$ reference error. Before admission, the MCU compares the candidate seam with its current encoder state, checks position, velocity, and acceleration, and either admits a feasible bridge or retains the active plan and fallback. Projecting the active *reference* forward helps form a candidate, but it is not a measurement of the plant.
 
-The candidate declares payload, contact, effort, and obstacle assumptions. The MCU first validates its finite header and lineage, then checks the complete bounded trajectory and suffix, including interior extrema, clearance, stopping distance, and a feasible response for reachable states. A scan over $N$ setpoints is $O(N)$, even with a fixed maximum $N$ and measured worst-case execution time. After admission, a distinct $O(1)$ per-tick check reads the current state and local reference. The MCU latches the validated payload and stop coefficients into protected memory before enabling TRACK; a host crash or shared-memory corruption cannot remove the resident fallback. A separately validated immutable baseline covers earlier invalidation or a state outside the matched suffix's entry region.
+The candidate declares payload, contact, effort, and obstacle assumptions. The MCU first validates its fixed header and lineage, then checks the complete bounded trajectory and suffix, including interior extrema, clearance, stopping distance, and a feasible response for reachable states. A scan over $N$ setpoints is $O(N)$, even with a fixed maximum $N$ and measured worst-case execution time. After admission, a distinct $O(1)$ per-tick check reads the current state and local reference. The MCU latches the validated payload and stop coefficients into protected memory before enabling TRACK; a host crash or shared-memory corruption cannot remove the resident fallback. A separately validated immutable baseline covers earlier invalidation or a state outside the matched suffix's entry region.
 
 The two consumers have different jobs. The tracker interpolates the admitted reference and feedforward terms. The independent permission path monitors current limits and authority; it does not inherit the planner's feasibility claim as proof. A fresh obstacle, changed payload, or contact event can revoke nominal tracking and invoke the state-matched fallback. The record therefore binds nominal motion, the commitment point, and a physically checked stopping continuation into one reviewable request.[^fn-hw-dma-pingpong]
 
 [^fn-hw-dma-pingpong]: **Inter-core shared-memory contracts**\index{Inter-processor communication!shared memory}\index{Real-time systems!memory barriers}: A shared-memory implementation needs an ownership protocol, cache maintenance where required, and release/acquire ordering. The MCU validates a completed candidate and copies the admitted plan and stop into protected memory before activation. The protocol must be tested on the selected platform.
 
 Structuring the plan handoff as a bounded, hardware-grounded contract shifts the burden of safety and timing from the non-deterministic planner to the Nervous System. The tracking controller receives the dense state targets, timestamps, and feedforward terms required to drive the actuators along a smooth path. The safety enforcer receives the lineage and timing metadata, dynamic assumptions, validity bounds, and terminal suffix needed to guard the machine against latency tails, state divergence, and physical model mismatches. When each field in the handoff corresponds to an explicit runtime verification, the Nervous System can execute high-speed motions without relying on the assumption that the next inference cycle will always succeed.
-
-::: {#chk-plan-trajectory-packet-contract .callout-checkpoint title="The trajectory record contract"}
-
-Before exploring the generation of trajectories from high-level intent, verify your understanding of the interface boundary between planning proposals and real-time execution:
-
-- [ ] **Dual consumer roles**: Can you distinguish between the operational requirements of the tracking controller and the real-time safety enforcer when consuming a trajectory record?
-- [ ] **State alignment and drift**: Can you explain why a trajectory record must declare both its evidence time $t_0$ and initial state $\mathbf{x}_0$, and how the Nervous System detects execution drift?
-- [ ] **Lockless buffer mechanics**: Can you describe how a double-buffered execution queue with atomic pointer swaps prevents race conditions between an asynchronous planning thread and a 1 kHz servo loop?
-
-:::
 
 ## From Goal to Trajectory {#sec-planning-goal-to-trajectory}
 
@@ -362,16 +346,6 @@ This timing lower bound competes with target-evidence age. With the conveyor's r
 Budget replacement admission before $t_{\mathrm{commit}}$ and the complete stopping continuation after it. A tail percentile allocates risk; it does not replace observed timing and physical clearance validation.
 :::
 
-::: {#chk-plan-action-chunk-horizon-tail .callout-checkpoint title="Action chunk horizon and tail latency budgeting"}
-
-Before evaluating real-time disturbance recovery and future-state conditioning, verify your ability to dimension action chunk horizons against extreme latency tails:
-
-- [ ] **Mission exposure and tail quantiles**: In the stated independent-handoff illustration, what is the chance of one or more missed $P_{99}$ deadlines across 3000 handoffs, and why is that not a measured mission failure rate?
-- [ ] **Horizon sizing trade-off**: Can you distinguish between the risk of trajectory buffer starvation from too short an action chunk and the risk of unmodeled state drift and stale perception from an excessively long chunk?
-- [ ] **Reserve margin allocation**: Can you describe why the horizon equation requires an explicit reserve term $T_{\text{reserve}}$ dedicated to trajectory splicing, safety filtering, and timer jitter beyond raw inference latency?
-
-:::
-
 When a generative policy serves as the planner, iterative score evaluation and denoising steps govern the shape of this latency distribution. The internal mechanics of diffusion schedules, attention caching, and token generation sit below the first budgetable quantity of the physical AI system. Building on the causal boundary established in @sec-boundary-causal-boundary, the systems interface treats the learned model strictly as a stochastic producer of motion chunks characterized by an empirical latency profile and an output horizon $N$. In physical hardware deployments of receding-horizon action chunking, the execution buffer absorbs inference latency while allowing the controller to react dynamically to disturbances (@fig-11-action-chunking-trace). Sizing $N$ against a validated latency distribution lowers the risk of a late replacement; the protected stop handles a miss. Yet ensuring that a replacement trajectory arrives in time addresses only the temporal continuity of the plan. The state samples contained within the admitted chunk must also match the kinematic capabilities of the joints and remain continuous with the physical velocity and acceleration of the mechanism at the handoff seam.
 
 ::: {#fig-11-action-chunking-trace fig-env="figure" fig-pos="t" fig-cap="**Push-T disturbance recovery**: Chi et al. report a real Push-T configuration with 16 predicted and 6 executed action steps; 10 Hz commands were interpolated to 125 Hz. The illustrated recoveries show closed-loop replanning in those tests. They do not establish a validated stopping suffix or immunity to inference starvation [@chi2024diffusionpolicy]." fig-alt="Three Push-T examples show recovery from camera occlusion, in-flight target movement, and target movement near completion. The real Push-T configuration predicts 16 steps and executes 6 before replanning; the experiment does not measure a safety stopping suffix."}
@@ -394,15 +368,13 @@ The projected seam in @eq-plan-execution-delay-gap is useful for constructing a 
 
 :::
 
-::: {#chk-plan-future-state-conditioning .callout-checkpoint title="Execution delay gaps and future-state conditioning"}
+::: {#chk-plan-action-chunk-horizon-tail .callout-checkpoint title="Action chunk horizon and tail latency budgeting"}
 
-![](images/svg/chk_plan_future_state_conditioning.svg){fig-alt="Left: a new proposal starts from a request-time pose, leaving a reference gap after the arm moves during 80 milliseconds of planning. Right: projecting the active reference improves the candidate seam; the measured encoder state and bridge still need independent admission before tracking." width=100%}
+Before turning from replacement timing to the feasibility of the motion itself, verify your ability to size an action chunk horizon against the latency tail:
 
-Before analyzing kinodynamic feasibility and transmission dynamics, evaluate your understanding of computational latency compensation at the handoff seam:
-
-- [ ] **Execution delay gap origin**: Can you calculate the spatial offset injected into a robot joint if a planner conditions on the current measured state rather than projecting forward across computational latency?
-- [ ] **Forward simulation protocol**: Can you explain why projected reference matching still requires encoder-state and bridge checks at admission?
-- [ ] **Disturbance vulnerability**: Can you identify the failure mode that occurs when a physical disturbance displaces the mechanism while an upstream planner is solving a future-conditioned rollout?
+- [ ] **Mission exposure and tail quantiles**: In the stated independent-handoff illustration, what is the chance of one or more missed $P_{99}$ deadlines across 3000 handoffs, and why is that not a measured mission failure rate?
+- [ ] **Horizon sizing trade-off**: Can you distinguish between the risk of trajectory buffer starvation from too short an action chunk and the risk of unmodeled state drift and stale perception from an excessively long chunk?
+- [ ] **Projected seam state**: Can you explain why a candidate built from the active plan's projected reference still needs an encoder-state and bridge check at admission?
 
 :::
 
@@ -421,12 +393,6 @@ A candidate trajectory is a geometric and timed proposal, not permission to move
 Validating feasibility only at discrete waypoints creates a false sense of compliance. When a planner outputs trajectory points separated by a sampling interval $T_s$, the physical mechanism moves along an interpolated path between those samples. If the nervous system checks constraints only at the discrete sample timestamps $t_k = k T_s$, high-order trajectory derivatives can exceed physical bounds during the inter-sample interval $[t_k, t_{k+1}]$. Consider an analytical example of a linear joint with a maximum acceleration limit $a_{\max} = 20.0\text{ m/s}^2$ and a velocity ceiling $v_{\max} = 2.00\text{ m/s}$. If the planner outputs consecutive velocity samples $\dot{q}_k = 1.95\text{ m/s}$ and $\dot{q}_{k+1} = 1.95\text{ m/s}$ separated by $T_s = 20\text{ ms}$, a cubic spline interpolator that applies a peak acceleration of $a_{\max}$ produces an intra-sample velocity overshoot bounded by $\Delta v \le \frac{1}{4} a_{\max} T_s$ (integrating a worst-case triangular acceleration reversal across the sampling midpoint). Evaluating this bound yields:
 $$\Delta v \le \frac{1}{4} (20.0\text{ m/s}^2)(0.020\text{ s}) = 0.10\text{ m/s}$$
 The true physical velocity peaks at $1.95\text{ m/s} + 0.10\text{ m/s} = 2.05\text{ m/s}$ between the two valid waypoints, exceeding the $2.00\text{ m/s}$ limit and triggering an over-speed clamp. To guarantee continuous-time feasibility without evaluating every infinitesimal point, the admission filter must evaluate an interior contracted bound, $|\dot{q}_k| \le v_{\max} - \frac{1}{4} a_{\max} T_s$. This acts as a conservative safety margin that artificially shrinks the allowed velocity limit to absorb the maximum possible intra-sample overshoot.
-
-::: {.column-margin}
-![](images/svg/spa_locator_pa.svg){width="100%" fig-alt="S·P·A locator triad highlighting the Plan-Act motion edge."}
-
-*The Plan $\cap$ Act motion interface: synthesizing kinodynamically feasible $C^2$ splines and verified stopping suffixes.*
-:::
 
 Concatenating individually feasible chunks can create an infeasible seam. Position-only matching ($C^0$) can leave a velocity step; matching velocity ($C^1$) can leave a finite acceleration and torque step. In a rigid-inertia approximation, a commanded velocity change $\Delta\dot q$ spread over servo period $T_c$ asks for the torque in @eq-plan-seam-torque. A physical drive saturates or filters that request according to its current limits and compliance; the arithmetic is a demand estimate, not a measured impact load. @Fig-11-action-chunk-seam-continuity places that request beside its remedy, a finite $C^2$ bridge that removes the reference velocity step without thereby certifying the interior jerk and torque the bridge itself introduces.
 
@@ -538,16 +504,6 @@ $C^2$ reference continuity avoids a commanded velocity impulse; admission must s
 A related physical failure arises from output chatter in learned policy proposals. High-frequency oscillations across successive planning chunks are frequently produced by stochastic sampling, score-matching noise, or autoregressive variance in generative policies. Even when every discrete sample in a chattering trajectory satisfies absolute position and velocity limits, rapid sign reversals in commanded acceleration can request repeated torque reversals. Building on the actuator thermal limits established in @sec-body-actuator-limits, an analytical duty cycle where an actuator reverses a torque of $30\text{ N}\cdot\text{m}$ at $25\text{ Hz}$ would create current transitions and $I^2 R$ heating if the drive tracks them; backlash impact and wear depend on the transmitted load and joint response.[^fn-hw-thermal-derating] The systems engineer budgets this high-frequency variation not as a perceptual roughness metric, but as an actuator thermal rise and transmission fatigue cost. A trajectory that excites structural resonances or exceeds the motor drive's thermal dissipation limits is physically infeasible, regardless of how accurately its waypoints follow the task objective. Even when a candidate chunk satisfies every internal and boundary feasibility check, the nervous system must still account for the reality that the next replacement chunk may fail to arrive before the active plan reaches its terminal sample.
 
 [^fn-hw-thermal-derating]: **Actuator Thermal Derating**\index{Actuator thermal derating!physics}: Continuous peak current commands induce rapid Joule heating ($I^2R$) in motor windings, driving stator core temperatures past safe thermal thresholds and degrading permanent magnet flux density. To prevent irreversible demagnetization and winding insulation breakdown, motor controllers enforce thermal derating curves that dynamically throttle allowable continuous torque. In trajectory planning, ignoring this thermal governor causes aggressive velocity profiles to trigger mid-trajectory current limits, leading to dynamic tracking failure.
-
-::: {#chk-plan-seam-reflected-torque-jump .callout-checkpoint title="Seam continuity and reflected inertia"}
-
-Before examining seam timelines and fallback deceleration hierarchies, verify your understanding of reflected drivetrain inertia and higher-order spline continuity:
-
-- [ ] **Continuity orders across seams**: Can you explain why $C^0$ position matching or $C^1$ velocity matching between consecutive action chunks can request a velocity impulse or torque step, and what determines the actual drivetrain response?
-- [ ] **Reflected inertia amplification**: Can you describe how a gearbox reduction ratio ($N_g$) squares the motor rotor inertia, and explain why high-ratio strain wave drives are far more vulnerable to velocity steps than direct-drive or quasi-direct-drive actuators?
-- [ ] **Spline blending physics**: Can you distinguish between cosmetic trajectory smoothing and online fifth-order ($C^2$) polynomial spline synthesis across a replanning seam?
-
-:::
 
 ## Behavior at the Seam {#sec-planning-behavior-seam}
 
@@ -698,16 +654,6 @@ The base of the mobile manipulator stops the same way, and for a reason of its o
 
 At the `{python} PlanningC2Stop.v_aisle_str` aisle speed that @sec-enforcement-stopping-envelopes sets after adding the tracking inset, the same suffix lasts `{python} PlanningC2Stop.c2_aisle_time_str` and travels `{python} PlanningC2Stop.c2_aisle_dist_str`, and the budget with that inset leaves `{python} PlanningC2Stop.spare_aisle_str` of the clear distance. Commitment decides whether that margin survives. If the MCU waited `{python} PlanningC2Stop.t_wait_str` past commitment for the nominal setpoints to end, cruise would add `{python} PlanningC2Stop.late_cruise_str` before the same stop and breach the clear distance by `{python} PlanningC2Stop.late_breach_str`. A later stop must still match its actual entry state; this counterfactual holds cruise speed constant only to show the lost clearance.
 
-::: {#chk-plan-fallback-clearance-stopping-budget .callout-checkpoint title="Commitment and full stopping clearance"}
-
-Before committing an autonomous machine to an action chunk, verify your understanding of commitment deadlines, stopping budgets, and trajectory continuity:
-
-- [ ] **Deadline distinction**: Can you distinguish nominal setpoint end, physical stop completion, and target-evidence expiry?
-- [ ] **Continuous entry**: Why would a constant-deceleration switch fail $C^2$ matching at zero-acceleration cruise entry?
-- [ ] **Clearance and latency**: The base's `{python} PlanningC2Stop.spare_aisle_str` margin at the aisle speed already charges the reserved pre-brake delay. Where must an unreserved delay $\delta$ beyond it be charged, and how much of that margin does $v\delta$ consume?
-
-:::
-
 A replacement received after the preferred blend deadline can still be admitted only if its full bridge and suffix validate before the commitment cutoff. A compressed bridge can raise acceleration and torque; the controller evaluates its polynomial extrema and current encoder discrepancy before latching it. If the check cannot finish, it keeps the current plan and executes STOP. A candidate received after commitment cannot retrospectively restore the spent runway.
 
 The planner proposes the suffix, but the MCU validates and latches its coefficients and immutable assumptions into protected local memory **before** nominal motion begins. At commitment, the MCU selects that resident path without reading host DRAM. A host crash, bus stall, or corrupted shared packet therefore does not erase the stop. If the measured state falls outside the latched suffix's entry region, the MCU uses the separately validated baseline appropriate to that state; torque disable or a spring brake is not a universal substitute for a controlled stop, especially with a suspended load.
@@ -738,6 +684,16 @@ The admission and fallback decisions in @tbl-11-seam-fallback-hierarchy are dist
 
 The MCU carries out these decisions through the admission and latch sequence of @sec-planning-handoff.
 
+::: {#chk-plan-fallback-clearance-stopping-budget .callout-checkpoint title="Commitment and full stopping clearance"}
+
+Before committing an autonomous machine to an action chunk, verify your understanding of commitment deadlines, stopping budgets, and trajectory continuity:
+
+- [ ] **Deadline distinction**: Can you distinguish nominal setpoint end, physical stop completion, and target-evidence expiry?
+- [ ] **Continuous entry**: Why would a constant-deceleration switch fail $C^2$ matching at zero-acceleration cruise entry?
+- [ ] **Clearance and latency**: The base's `{python} PlanningC2Stop.spare_aisle_str` margin at the aisle speed already charges the reserved pre-brake delay. Where must an unreserved delay $\delta$ beyond it be charged, and how much of that margin does $v\delta$ consume?
+
+:::
+
 ## How Plans Go Wrong {#sec-planning-failure-modes}
 
 A plan can become infeasible by execution time. Building on the causal boundary established in @sec-boundary-causal-boundary, the latency between trajectory synthesis in the learned policy and physical actuation by the motor drives (including magnetic stator delays and digital communication bottlenecks such as SerDes serialization latency) creates a blind spot. During this temporal window, the physical state of the machine drifts, the environment shifts, or the geometric interface between consecutive trajectory chunks violates dynamic constraints. Failures in planned motion distribute across several distinct points of first visibility. Establishing where a failure first becomes visible dictates which subsystem possesses the signal and the time budget required to detect and reject it.
@@ -750,7 +706,7 @@ For an illustrative $J=0.080\text{ kg m}^2$, $\Delta t=1.0\text{ ms}$, and $40.0
 
 [^fn-inc-seam-trip]: **Drive and resonance response**\index{Drivetrain!resonant frequency}\index{Inverter!desaturation trip}: A sharp command can excite a joint's *identified* flexible modes, but their frequencies and damping depend on the transmission and load. Current limiting, desaturation detection, DC-bus response, and shutdown depend on the selected driver and its configuration; see the [TI gate-driver protection description](https://www.ti.com/document-viewer/lit/html/SLVAG18/GUID-1263241E-9C90-419F-B3D8-D2F599BCABEA). Neither a requested torque nor this simplified model establishes a particular trip, bearing damage, or gear failure.
 
-Even with all pre-execution and boundary checks passed, changes in the physical world can render the plan infeasible. A grasped workpiece can slip from its intended $\mathrm{SE}(3)$ pose, an unmodeled obstacle can enter the workspace, or structural tracking error can accumulate beyond allowable tolerances. **Runtime monitors**\index{Runtime monitor} detect changed-world infeasibility by observing four dedicated signals, comprising joint state divergence, tracking error velocity, unexpected contact wrenches, and the invalidation of geometric assumptions recorded in the plan header. The tracking error allowance $\epsilon_{\mathrm{pos}}$ is derived directly from the geometric clearance $d_{\mathrm{clearance}}$ between the planned trajectory's swept volume and the nearest obstacle boundary minus the structural deflection and gearbox compliance allowance $\delta_{\mathrm{deflect}}$. For the mobile manipulator's arm reaching past the conveyor guard, with a budgeted clearance of $d_{\mathrm{clearance}} = 0.020\text{ m}$ and an unmodeled payload deflection and gearbox compliance allowance of $\delta_{\mathrm{deflect}} = 0.005\text{ m}$, the position error trip threshold evaluates to $\epsilon_{\mathrm{pos}} = d_{\mathrm{clearance}} - \delta_{\mathrm{deflect}} = 0.015\text{ m}$. If measured Cartesian tool-position error $\|\mathbf{x}_{\mathrm{tool,actual}}(t)-\mathbf{x}_{\mathrm{tool,planned}}(t)\|$ exceeds $0.015\text{ m}$, or a six-axis force-torque sensor reports an unmodeled $10.0\text{ N}$ contact in this free-space example, the monitor revokes nominal tracking and requests the validated state-matched fallback. Actual deceleration begins after the measured detection, dispatch, and actuator response delays.
+Even with all pre-execution and boundary checks passed, changes in the physical world can render the plan infeasible. A grasped workpiece can slip from its intended $\mathrm{SE}(3)$ pose, an unmodeled obstacle can enter the workspace, or structural tracking error can accumulate beyond allowable tolerances. **Runtime monitors**\index{Runtime monitor} detect changed-world infeasibility by observing four dedicated signals, comprising joint state divergence, tracking error velocity, unexpected contact wrenches, and the invalidation of geometric assumptions recorded in the plan's sidecar. The tracking error allowance $\epsilon_{\mathrm{pos}}$ is derived directly from the geometric clearance $d_{\mathrm{clearance}}$ between the planned trajectory's swept volume and the nearest obstacle boundary minus the structural deflection and gearbox compliance allowance $\delta_{\mathrm{deflect}}$. For the mobile manipulator's arm reaching past the conveyor guard, with a budgeted clearance of $d_{\mathrm{clearance}} = 0.020\text{ m}$ and an unmodeled payload deflection and gearbox compliance allowance of $\delta_{\mathrm{deflect}} = 0.005\text{ m}$, the position error trip threshold evaluates to $\epsilon_{\mathrm{pos}} = d_{\mathrm{clearance}} - \delta_{\mathrm{deflect}} = 0.015\text{ m}$. If measured Cartesian tool-position error $\|\mathbf{x}_{\mathrm{tool,actual}}(t)-\mathbf{x}_{\mathrm{tool,planned}}(t)\|$ exceeds $0.015\text{ m}$, or a six-axis force-torque sensor reports an unmodeled $10.0\text{ N}$ contact in this free-space example, the monitor revokes nominal tracking and requests the validated state-matched fallback. Actual deceleration begins after the measured detection, dispatch, and actuator response delays.
 
 A plan can also exhaust its nominal references before the next candidate passes admission. The MCU must not wait for the execution pointer to run off the array or treat a final-position hold as a stop. It compares the absolute current time with the admitted commitment and intent deadlines in its own monotonic domain. At the earliest transfer event, it selects the matched protected suffix if its entry state is valid, or a separately validated state-matched baseline. Complete stopping clearance includes detection, dispatch, actuator response, and motion under the selected profile; an assumed constant deceleration is insufficient for the $C^2$ worked suffix.
 
@@ -763,16 +719,6 @@ Waymo reported a heavy-fog interruption in San Francisco's Balboa Terrace neighb
 
 Every detector in the planning pipeline relies on an explicit contract between the trajectory generator and the execution runtime. If a plan is delivered as a raw list of coordinates without metadata defining its valid lifespan, its geometric clearance bounds, its boundary derivatives, and its intended fallback behavior, the nervous system cannot determine whether an ongoing motion remains safe or has drifted into infeasibility. Making plan execution verifiable requires encapsulating waypoints within a structured record that binds kinematic trajectories to their temporal validity windows and monitoring thresholds.
 
-::: {#chk-plan-failure-modes-monitoring .callout-checkpoint title="Trajectory failure modes and runtime detection"}
-
-Before examining the wire-level schema and execution buffers of the trajectory contract, evaluate your understanding of real-time monitoring and failure detection:
-
-- [ ] **Point-of-visibility classification**: Can you categorize trajectory failures into pre-execution invalidity, seam boundary steps, runtime world divergence, and horizon exhaustion?
-- [ ] **Boundary torque limits**: Can you derive the maximum admissible velocity step $\Delta \dot{q}_{\mathrm{allow}}$ across a single control cycle from actuator peak torque and reflected joint inertia?
-- [ ] **Cross-plan oscillation mechanics**: Can you explain why single-plan validators fail to detect policy dithering between competing local minima, and how sequence monitors track thermal derating budgets?
-
-:::
-
 ## The Trajectory Contract {#sec-planning-trajectory-contract}
 
 The **trajectory record**\index{Trajectory record!definition} is the immutable record that the planner hands to the permission path at every replanning cycle. It consumes the intent lease of @sec-intent-lease, carrying that lease's digest as its parent record, and every setpoint it proposes pursues the lease's target without exceeding its effort ceilings. No nominal setpoint is admitted unless its matched stop suffix is resident and feasible from every state reachable before $t_{\text{commit}}$. Within its kinematic definition, the record stores the geometric motion profile either as discrete kinematic setpoint arrays or as continuous polynomial spline coefficients. It pairs this representation with the sample cadence (on this machine a `{python} PlanningArmTimeline.t_period_str` period $\Delta t_{\text{step}}$, a `{python} PlanningArmTimeline.f_step_str` setpoint stream), the total planned horizon $T_{\mathrm{plan}}$ (`{python} PlanningArmTimeline.t_plan_exp_str` for one chunk), the target coordinate frame identifier $\mathcal{F}$, the engineering SI units, and the evidence time $t_0$ of the state measurement from which the path was computed. Recording the coordinate frame and units directly in the handoff prevents frame mismatches at the tracking layer, while the explicit cadence and timestamp allow the low-level joint controller to interpolate setpoints and evaluate kinematic derivatives without relying on ambient system clocks.
@@ -783,51 +729,13 @@ The **trajectory record**\index{Trajectory record!definition} is the immutable r
 
 Physical feasibility depends on the scene and load used to validate the plan. The immutable sidecar therefore identifies obstacle-map epochs, payload and friction assumptions, limits, validator version, measured margin, and the source observation. A digest in the fixed header binds both setpoints and sidecar. The sidecar's payload and friction assumptions must lie inside the target ODD of @sec-evaluation-logs; the permission path revokes TRACK when live state leaves them. A recorded margin is evidence for a stated scene, not a permanent safety flag. Solver seed and model hash belong in the audit sidecar for reproducibility where the toolchain supports it, not in the servo's per-tick path.
 
-On this machine the chunk policy's output is the nominal part of each trajectory record: this chapter adds the seam state, the four deadlines, and the matched stop suffix, so the permission path admits one stream, and the chunk lease of @sec-nervous-cadences becomes the record's expiry. For the six-axis worked implementation, @tbl-11-trajectory-schema gives a **344-byte header**. All time fields are absolute MCU-monotonic nanoseconds after a validated bounded conversion. The active intent record, referenced by digest, supplies $t_{\mathrm{intent\_exp}}$ separately. A variable-length setpoint payload and immutable provenance/assumption sidecar are outside the header. The MCU verifies their digest, validates the complete bounded candidate in staging memory, then latches the admitted payload and suffix in protected memory before TRACK. The payload digest binds content, and the parent digest binds lineage. The record carries no keyed tag, because the permission path admits a proposal by its content rather than its origin (@sec-nervous-cadences).
+On this machine the chunk policy's output is the nominal part of each trajectory record: this chapter adds the seam state, the four deadlines, and the matched stop suffix, so the permission path admits one stream, and the chunk lease of @sec-nervous-cadences becomes the record's expiry. The record's fixed header groups its fields by purpose. Lineage fields give a sequence number, the evidence time $t_0$, and the digest of the parent intent lease. Timing fields give the four deadlines of @sec-planning-handoff. Seam fields give the frame, each joint's entry state $(q,\dot q,\ddot q)$, and the stop-suffix coefficients. Content fields give the payload kind and size and one digest over the setpoint payload and the sidecar. All time fields are absolute MCU-monotonic nanoseconds after a validated bounded conversion. The active intent record, referenced by digest, supplies $t_{\mathrm{intent\_exp}}$ separately. A variable-length setpoint payload and immutable provenance/assumption sidecar are outside the fixed header. The MCU verifies their digest, validates the complete bounded candidate in staging memory, then latches the admitted payload and suffix in protected memory before TRACK. The payload digest binds content, and the parent digest binds lineage. The record carries no keyed tag, because the permission path admits a proposal by its content rather than its origin (@sec-nervous-cadences).
 
-::: {.content-visible when-format="pdf"}
-\Needspace{26\baselineskip}
+::: {.column-margin .margin-pointer}
+↳ **Byte layout:** The trajectory record's field offsets and sizes are given in @sec-appendix-systems-wire-trajectory.
 :::
-
-| Bytes    | Header field                               | Shape           | Admission purpose                    |
-|:---------|:-------------------------------------------|:----------------|:-------------------------------------|
-| 0x00–07  | sequence                                   | `u64`           | Reject replay.                       |
-| 0x08–0F  | evidence time $t_0$                        | `u64`           | Bound age after clock conversion.    |
-| 0x10–2F  | parent record (intent lease digest)        | `u8[32]`        | Match active intent lineage.         |
-| 0x30–37  | kind and size (cadence, $N$, DOF, version) | `u32,u16,u8,u8` | Bound payload size and decoder.      |
-| 0x38–3F  | $t_{\mathrm{start}}$                       | `u64`           | First nominal sample.                |
-| 0x40–47  | $t_{\mathrm{commit}}$                      | `u64`           | Latest matched-suffix entry.         |
-| 0x48–4F  | plan expiry $t_{\mathrm{plan\_exp}}$       | `u64`           | Nominal setpoint end.                |
-| 0x50–57  | $t_{\mathrm{stop\_end}}$                   | `u64`           | Protected stop completion.           |
-| 0x58–5F  | frame                                      | `u64`           | Check coordinate frame.              |
-| 0x60–7F  | payload and sidecar digest                 | `u8[32]`        | Bind immutable evidence and samples. |
-| 0x80–C7  | entry $(q,\dot q,\ddot q)$                 | `f32[18]`       | Six-axis seam state.                 |
-| 0xC8–157 | suffix coefficients                        | `f32[36]`       | Six-axis quintic stop.               |
-
-: **Worked six-axis trajectory header**: Offsets are contiguous and total 344 bytes; the separately bounded setpoint payload and assumptions/provenance sidecar are digested, validated, and latched before activation. {#tbl-11-trajectory-schema tbl-colwidths="[12,26,18,44]"}
 
 The deadline relation is $t_{\mathrm{commit}}=t_{\mathrm{stop\_end}}-T_{\mathrm{stop}}$, with $t_{\mathrm{start}}\le t_{\mathrm{commit}}<t_{\mathrm{plan\_exp}}<t_{\mathrm{stop\_end}}$ in the worked case. The MCU permits TRACK only while the active intent and nominal plan remain valid. The protected suffix may continue after either expires. Earlier invalidation requires the separately admitted baseline; a header timestamp cannot make a mismatched suffix safe. A log records evidence, request, validation, admission, activation, transfer, and stop-completion times in a common converted domain so actual response delay can be measured.
-
-::: {#capstone-planning-humanoid-crucible .callout-perspective title="Centroidal momentum and multi-contact QP"}
-Whole-body trajectory planning on a humanoid robot pushes real-time numerical optimization to its computational limits:
-
-* **Centroidal Momentum and Underactuated Floating Base:** Unlike fixed manipulators where every degree of freedom has an active motor anchoring it to the floor, a humanoid possesses an underactuated 6-DoF floating base. Acceleration of the robot's center of mass (CoM) is governed strictly by external contact wrenches:
-  $$\dot{\mathbf{h}}_{\text{lin}} = m \ddot{\mathbf{c}} = \sum_{k} \mathbf{f}_k + m \mathbf{g}, \quad \dot{\mathbf{h}}_{\text{ang}} = \sum_{k} (\mathbf{p}_k - \mathbf{c}) \times \mathbf{f}_k$$
-  A planned trajectory cannot arbitrarily accelerate limbs without verifying that the required ground reaction forces $\mathbf{f}_k$ remain strictly inside friction cones ($\|\mathbf{f}_{k,\parallel}\| \le \mu f_{k,\perp}$) and unilateral contact constraints ($f_{k,\perp} \ge 0$). For the complete mathematical formulation of floating-base dynamics and hierarchical WBC-QP, see @sec-appendix-control-centroidal.
-* **Whole-Body Control Quadratic Programming (WBC-QP):** One implementation solves a hierarchical Quadratic Program (QP) at a configured $500\text{ Hz}$ to track tasks while respecting underactuated balance constraints. The QP optimizes joint accelerations $\ddot{\mathbf{q}}$ and contact forces subject to rigid-body kinematics ($\mathbf{J} \ddot{\mathbf{q}} + \dot{\mathbf{J}}\dot{\mathbf{q}} = \ddot{\mathbf{x}}$), actuator torque limits ($|\boldsymbol{\tau}| \le \boldsymbol{\tau}_{\max}$), and Center of Pressure (CoP) boundaries. If that implementation misses its measured computation budget, the controller must switch to a separately admitted fallback for its current contact state.
-* **Commitment Horizons and Dynamic Deceleration Seams:** If high-level trajectory replanning stalls, a wheeled AMR needs an admitted stop path and brake capability within remaining clearance. A walking humanoid cannot stop instantaneously without tipping forward over its toes. The planned trajectory chunk must include a **validated stopping response** matched to the current contact state and balance region. A learned capture-step proposal needs independent checks; a double-support outcome is not automatic.
-:::
-
-::: {#chk-plan-trajectory-contract-schema .callout-checkpoint title="Trajectory contract schema and timing ledgers"}
-
-Before exploring the fallacies and pitfalls of robotic motion planning, verify your understanding of real-time trajectory serialization and hardware provenance:
-
-- [ ] **Fixed-size memory invariance**: Can you explain why the trajectory handoff structure uses bounded staging and protected execution storage instead of allocating in the servo interrupt?
-- [ ] **Hardware timestamp chains**: Can you trace how logging monotonic hardware timestamps from request to expiration enables automated detection of bus contention and queue starvation?
-- [ ] **Deterministic replay hashing**: Can you describe why a logged seed, model hash, and solver configuration help reproduce a stochastic trajectory proposal?
-- [ ] **Humanoid momentum contracts**: Can you explain why whole-body trajectory contracts on an underactuated bipedal robot must constrain ground reaction forces to friction cones while budgeting capture-step stopping suffixes?
-
-:::
 
 ## Fallacies and Pitfalls {#sec-planning-fallacies-pitfalls}
 

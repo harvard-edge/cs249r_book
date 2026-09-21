@@ -20,7 +20,7 @@ Consult this appendix when diagnosing physical systems bottlenecks, timing jitte
 | Shared serial buses experience queuing and message jitter                   | @sec-appendix-systems-fieldbus     | CAN FD priority blocking, EtherCAT cycle budgets, and bounded seqlocks                |
 | Monocular 3D bounding boxes distort and depth covariance diverges           | @sec-appendix-systems-vision       | Pinhole intrinsic projection, Zhang's calibration, and metric unprojection covariance |
 | A mobile base breaches clearance buffers under surface wetness              | @sec-appendix-systems-stopping     | Kinematic stopping envelopes, information age lag, and velocity clamps                |
-| A record must be laid out for a fixed-size mailbox or log                   | @sec-appendix-systems-wire-formats | Proposal header fields, time units, and integrity fields                              |
+| A record must be laid out for a fixed-size mailbox or log                   | @sec-appendix-systems-wire-formats | Byte layouts of the proposal header, its payloads, and each record in the chain       |
 
 ## Real-Time Timers, Watchdogs, and Schedulability {#sec-appendix-systems-timers}
 
@@ -153,15 +153,15 @@ Linux [RPMsg](https://docs.kernel.org/staging/rpmsg.html) is a virtio-based mess
 
 Weak memory ordering and noncoherent caches can let a receiver observe a notification without a current payload unless the producer and consumer follow one published protocol:\index{Memory barrier!instruction ordering}
 ```c
-// Core A (Application Processor)
-shared_buffer->target_torque = 15.0f; // Store 1: Payload
-mailbox_doorbell = 1;                 // Store 2: Interrupt trigger
+// Core A (Application Processor); q_target and q_cmd are joint_target_t structs
+shared_buffer->q_target = q_cmd; // Store 1: Payload (struct copy)
+mailbox_doorbell = 1;            // Store 2: Interrupt trigger
 ```
-If the CPU or interconnect reorders Store 2 ahead of Store 1, Core B receives the interrupt before the new torque setpoint is committed to physical memory, reading stale or invalid data.
+If the CPU or interconnect reorders Store 2 ahead of Store 1, Core B receives the interrupt before the new joint target is committed to physical memory, reading stale or invalid data.
 
 A data memory barrier can order accesses within its selected shareability domain:[^fn-sys-memory-barriers]
 ```c
-shared_buffer->target_torque = 15.0f;
+shared_buffer->q_target = q_cmd; // Struct copy of the joint targets
 __asm__ volatile("dmb ish" ::: "memory"); // Only if both peers share this domain
 mailbox_doorbell = 1;
 ```
@@ -417,29 +417,203 @@ This clamp is valid only when $D_{\text{clear}}$ exceeds the three fixed allowan
 
 ## Wire Formats for the Record Chain {#sec-appendix-systems-wire-formats}
 
-The chapters name each record's fields by meaning and state the invariant the record enforces. This section gives the byte layouts for records that must fit a fixed-size mailbox or log. Every time field is an unsigned 64-bit count of nanoseconds on the permission processor's monotonic clock, and `sync_error_ns` carries the conversion bound for evidence captured on another clock. The clock and integrity policies themselves belong to @sec-nervous-cadences; the layouts here fix the algorithm for each integrity job. Corruption detection uses a CRC-32 (IEEE 802.3) over header and payload, lineage uses a SHA-256 digest of the consumed record, and authority uses HMAC-SHA-256 on operator commands, a keyed hash chain on the forensic log, and Ed25519 signatures on offline evidence and release artifacts.
+The chapters name each record's fields by meaning and state the invariant the record enforces. This section gives the byte layouts for records that must fit a fixed-size mailbox or log, and the canonical field order for the offline records that are stored and bound by digest. Every absolute time is an unsigned 64-bit count of nanoseconds on the permission processor's monotonic clock, every duration is an unsigned count of nanoseconds, and `sync_error_ns` carries the conversion bound for evidence captured on another clock. The clock and integrity policies themselves belong to @sec-nervous-cadences; the layouts here fix the algorithm for each integrity job. Corruption detection uses a CRC-32 (IEEE 802.3) over header and payload, lineage uses a SHA-256 digest of the consumed record, and authority uses HMAC-SHA-256 on operator commands, a keyed hash chain on the forensic log, and Ed25519 signatures on fault records and release artifacts.
+
+Fixed layouts are little-endian and packed in the order listed. Offsets are hexadecimal byte positions from the start of the record, and every multibyte field sits on its natural alignment, so no field needs hidden padding. A field whose length depends on a count comes after every fixed field, and its offset is written in terms of that count. The record itself carries $K$ waypoints, $N_j$ commanded joints, and $K_b$ barrier constraints; the static authority manifest fixes $N_c$ command components and $N_s$ state components. Offline records (placement, fault, release) are identified by the SHA-256 digest of their canonical encoding, and the record that consumes one stores that digest under the consumed record's name.
 
 ### Proposal header and chunk payload {#sec-appendix-systems-wire-header}
 
-Every proposal that crosses the proposal boundary opens with the same header, and `payload_kind` selects the payload that follows. @Tbl-appendix-systems-wire-header lays out the header with the minimal chunk payload of @sec-nervous-cadences. The chunk carries kinematic setpoints only. Torque is computed on the permission side, where the tracker derives it from the admitted reference, so a learned proposal never names a motor torque.
+Every proposal that crosses the proposal boundary opens with the same header, and `payload_kind` selects the payload that follows at `0x50`. @Tbl-appendix-systems-wire-header lays out the header with the minimal chunk payload of @sec-nervous-cadences. The chunk carries kinematic setpoints only. Torque is computed on the permission side, where the tracker derives it from the admitted reference, so a learned proposal never names a motor torque.
 
-| Field              | Scalar type       | Unit                       | Invariant and description                                                                                   |
-|:-------------------|:------------------|:---------------------------|:------------------------------------------------------------------------------------------------------------|
-| `sequence_id`      | `uint64_t`        | dimensionless              | Strictly increasing per producer; a record not newer than the last accepted one is rejected.                |
-| `t_evidence_ns`    | `uint64_t`        | ns, permission clock       | Capture epoch of the oldest evidence the proposal rests on, converted to the permission processor's clock.  |
-| `sync_error_ns`    | `uint32_t`        | ns                         | Bound on that conversion's error; added to every age the reader checks.                                     |
-| `t_issue_ns`       | `uint64_t`        | ns, permission clock       | Time the producer published the record.                                                                     |
-| `t_expire_ns`      | `uint64_t`        | ns, permission clock       | Requested absolute expiry, no later than the chunk lease allows; the permission path may only shorten it.   |
-| `parent_digest`    | `uint8_t[32]`     | SHA-256                    | Digest of the record this proposal was derived from.                                                        |
-| `frame_id`         | `uint64_t`        | dimensionless              | Transform-tree key and calibration revision of the setpoints' frame.                                        |
-| `payload_kind`     | `uint16_t`        | enumeration                | `CHUNK` for this payload; `INTENT`, `TRAJECTORY`, and `OPERATOR` select the other payloads.                 |
-| `payload_len`      | `uint16_t`        | bytes                      | Payload length; bounds the parser before any payload byte is read.                                          |
-| `num_waypoints`    | `uint16_t`        | dimensionless              | Chunk horizon count ($K \in [16, 50]$).                                                                     |
-| `joint_positions`  | `float32[K][N_j]` | radians ($\text{rad}$)     | Commanded joint angles within the reach limits ($q_{\min} \le q \le q_{\max}$).                             |
-| `joint_velocities` | `float32[K][N_j]` | radians/s ($\text{rad/s}$) | Commanded joint velocities within certified ceilings ($\lVert \dot{\mathbf{q}} \rVert \le \dot{q}_{\max}$). |
-| `crc32`            | `uint32_t`        | checksum                   | Last field; IEEE 802.3 CRC-32 over all preceding bytes.                                                     |
+| Offset                 | Field              | Scalar type       | Unit                 | Invariant and check                                                                                         |
+|:-----------------------|:-------------------|:------------------|:---------------------|:------------------------------------------------------------------------------------------------------------|
+| `0x00`                 | `sequence_id`      | `uint64_t`        | dimensionless        | Strictly increasing per producer; a record not newer than the last accepted one is rejected.                |
+| `0x08`                 | `t_evidence_ns`    | `uint64_t`        | ns, permission clock | Capture epoch of the oldest evidence the proposal rests on, converted to the permission processor's clock.  |
+| `0x10`                 | `t_issue_ns`       | `uint64_t`        | ns, permission clock | Time the producer published the record.                                                                     |
+| `0x18`                 | `t_expire_ns`      | `uint64_t`        | ns, permission clock | Requested absolute expiry, no later than the chunk lease allows; the permission path may only shorten it.   |
+| `0x20`                 | `frame_id`         | `uint64_t`        | dimensionless        | Transform-tree key and calibration revision of the setpoints' frame.                                        |
+| `0x28`                 | `parent_digest`    | `uint8_t[32]`     | SHA-256              | Digest of the record this proposal was derived from; establishes lineage, authenticates nothing.            |
+| `0x48`                 | `sync_error_ns`    | `uint32_t`        | ns                   | Bound on the evidence time's conversion error; added to every age the reader checks.                        |
+| `0x4C`                 | `payload_kind`     | `uint16_t`        | enumeration          | `CHUNK` for this payload; `INTENT`, `TRAJECTORY`, and `OPERATOR` select the other payloads.                 |
+| `0x4E`                 | `payload_len`      | `uint16_t`        | bytes                | Payload length; bounds the parser before any payload byte is read.                                          |
+| `0x50`                 | `num_waypoints`    | `uint16_t`        | count                | Chunk horizon $K$; a count outside the configured range is rejected.                                        |
+| `0x52`                 | `num_joints`       | `uint8_t`         | count                | Commanded joints $N_j$; must equal the configured count, and `payload_len` must equal $4+8KN_j$.            |
+| `0x53`                 | reserved           | `uint8_t`         | —                    | Zero.                                                                                                       |
+| `0x54`                 | `joint_positions`  | `float32[K][N_j]` | rad                  | Commanded joint angles within the reach limits ($q_{\min} \le q \le q_{\max}$).                             |
+| `0x54` + $4KN_j$       | `joint_velocities` | `float32[K][N_j]` | rad/s                | Commanded joint velocities within certified ceilings ($\lVert \dot{\mathbf{q}} \rVert \le \dot{q}_{\max}$). |
+| `0x50` + `payload_len` | `crc32`            | `uint32_t`        | checksum             | Last field; IEEE 802.3 CRC-32 over all preceding bytes.                                                     |
 
-: **Proposal header and chunk payload**: Field layout, scalar types, units, and invariants for a chunk proposal exchanged through the seqlock mailbox of @algo-lock-free-trajectory. All times are nanoseconds on the permission processor's monotonic clock. {#tbl-appendix-systems-wire-header tbl-colwidths="[18,16,20,46]"}
+: **Proposal header and chunk payload**: Field offsets, scalar types, units, and invariants for a chunk proposal exchanged through the seqlock mailbox of @algo-lock-free-trajectory. The header occupies `0x00`–`0x4F` in every proposal; the other payload layouts in this section begin at `0x50`. {#tbl-appendix-systems-wire-header tbl-colwidths="[14,17,14,14,41]"}
+
+### Intent payload {#sec-appendix-systems-wire-intent}
+
+The intent lease of @sec-intent-lease travels under the proposal header with `payload_kind` set to `INTENT` (@tbl-appendix-systems-wire-intent). Three header fields take specific meanings. `t_evidence_ns` is the parent belief record's evidence epoch, never its estimate epoch; `parent_digest` is that belief record's digest, which the permission path matches against a retained record; and `t_expire_ns` is the requested expiry, which the permission path shortens to the earliest of the evidence horizon, its configured lease ceiling, and the stop deadline. The six `bounds` values are three conservative position-error envelopes and three task tolerances in the base frame named by `frame_id`. They are not an encoding of a covariance, and the producer must justify any conversion from its covariance estimate, including calibration bias and the declared tail risk.
+
+| Offset        | Field              | Scalar type  | Unit               | Invariant and check                                                                                                               |
+|:--------------|:-------------------|:-------------|:-------------------|:----------------------------------------------------------------------------------------------------------------------------------|
+| `0x00`–`0x4F` | proposal header    | as above     | as above           | @Tbl-appendix-systems-wire-header, with `payload_kind` = `INTENT`.                                                                |
+| `0x50`        | `target_pose`      | `float64[7]` | m; unit quaternion | Base-frame position and orientation; finite values, normalized quaternion, workspace prefilter.                                   |
+| `0x88`        | `bounds`           | `float32[6]` | m                  | Error envelope $e_{x,y,z}$, then task tolerance $r_{x,y,z}$; $0 \le e_i \le r_i$, each checked against the approved task profile. |
+| `0xA0`        | `wrench_request`   | `float32[6]` | N; N·m             | Three requested forces and three torques; clamped or rejected against independent task and actuator limits.                       |
+| `0xB8`        | `terminal_request` | `uint32_t`   | enumeration        | Requested terminal mode; the permission path selects a feasible approved response from the current load and contact state.        |
+| `0xBC`        | `crc32`            | `uint32_t`   | checksum           | IEEE 802.3 CRC-32 over all preceding bytes.                                                                                       |
+
+: **Intent payload**: The intent lease as a proposal-header payload. Orientation tolerances and contact-mode rules come from an independently approved task profile; the quaternion is the proposed orientation only. {#tbl-appendix-systems-wire-intent tbl-colwidths="[13,17,13,15,42]"}
+
+### Trajectory payload {#sec-appendix-systems-wire-trajectory}
+
+The trajectory record of @sec-planning-trajectory-contract replaces the chunk on the running machine and travels under the same proposal header, with `payload_kind` set to `TRAJECTORY` and `parent_digest` set to the digest of the active intent lease (@tbl-appendix-systems-wire-trajectory). The header's `t_expire_ns` carries the chunk lease; the intent's own expiry comes from the lease that `parent_digest` identifies. The setpoint samples and the assumptions sidecar travel outside this fixed part. The permission path verifies `sidecar_digest` over both, validates the complete candidate in staging memory, and latches the admitted setpoints and stop suffix in protected memory before tracking begins.
+
+| Offset           | Field              | Scalar type       | Unit                 | Invariant and check                                                                                              |
+|:-----------------|:-------------------|:------------------|:---------------------|:-----------------------------------------------------------------------------------------------------------------|
+| `0x00`–`0x4F`    | proposal header    | as above          | as above             | @Tbl-appendix-systems-wire-header, with `payload_kind` = `TRAJECTORY`.                                           |
+| `0x50`           | `sample_period_ns` | `uint32_t`        | ns                   | Setpoint cadence $\Delta t_{\text{step}}$; must match the configured decoder.                                    |
+| `0x54`           | `num_samples`      | `uint16_t`        | count                | Nominal setpoints in the digested sample payload; bounds its size.                                               |
+| `0x56`           | `num_joints`       | `uint8_t`         | count                | Commanded joints $N_j$; must equal the configured count.                                                         |
+| `0x57`           | `payload_version`  | `uint8_t`         | enumeration          | Decoder version; an unknown version is rejected.                                                                 |
+| `0x58`           | `t_start_ns`       | `uint64_t`        | ns, permission clock | First nominal sample.                                                                                            |
+| `0x60`           | `t_commit_ns`      | `uint64_t`        | ns, permission clock | Latest entry into the matched stop suffix; $t_{\text{commit}}=t_{\text{stop\_end}}-T_{\text{stop}}$.             |
+| `0x68`           | `t_plan_exp_ns`    | `uint64_t`        | ns, permission clock | End of the nominal setpoints.                                                                                    |
+| `0x70`           | `t_stop_end_ns`    | `uint64_t`        | ns, permission clock | Protected stop completion; $t_{\text{start}}\le t_{\text{commit}}<t_{\text{plan\_exp}}<t_{\text{stop\_end}}$.    |
+| `0x78`           | `sidecar_digest`   | `uint8_t[32]`     | SHA-256              | Digest over the setpoint samples and the assumptions sidecar; binds content.                                     |
+| `0x98`           | `seam_state`       | `float32[3][N_j]` | rad; rad/s; rad/s²   | Entry state $(q,\dot q,\ddot q)$ of each joint.                                                                  |
+| `0x98` + $12N_j$ | `stop_suffix`      | `float32[6][N_j]` | quintic coefficients | One quintic stop per joint; must be resident and feasible from every state reachable before $t_{\text{commit}}$. |
+| `0x98` + $36N_j$ | `crc32`            | `uint32_t`        | checksum             | IEEE 802.3 CRC-32 over all preceding bytes.                                                                      |
+
+: **Trajectory payload**: The trajectory record as a proposal-header payload. The four deadlines are absolute times on the permission processor's clock; the variable-length setpoint samples and the assumptions sidecar are bound by `sidecar_digest` and validated before activation. {#tbl-appendix-systems-wire-trajectory tbl-colwidths="[14,16,14,15,41]"}
+
+### Enforcement record {#sec-appendix-systems-wire-enforcement}
+
+The enforcement record of @sec-enforcement-telemetry is configuration, not a proposal, so it carries no proposal header (@tbl-appendix-systems-wire-enforcement). Three digests name what the record rests on: the evaluation record, the limit records behind the stopping envelope, and the validity region. Each threshold names the fallback-ladder rung that a failed check selects.
+
+| Offset          | Field                      | Scalar type       | Unit                                 | Check, and the rung a failure selects                                                                                                                                                                                    |
+|:----------------|:---------------------------|:------------------|:-------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `0x00`          | `evaluation_record_digest` | `uint8_t[32]`     | SHA-256                              | Evaluation record whose runtime monitor specifications become this record's monitor channels.                                                                                                                            |
+| `0x20`          | `limit_record_digest`      | `uint8_t[32]`     | SHA-256                              | Canonical list of the limit records whose braking, onset, and actuator limits parameterize $d_{\text{stop}}(v)$.                                                                                                         |
+| `0x40`          | `validity_region_digest`   | `uint8_t[32]`     | SHA-256                              | `validity_region`, the plant-parameter bounds inside the target ODD; a live state outside it selects `STOP`.                                                                                                             |
+| `0x60`          | `loop_period_ns`           | `uint32_t`        | ns                                   | Permission-loop period $T_{\text{loop}}$; the placement record's `nominal_period_ns` must equal it.                                                                                                                      |
+| `0x64`          | `deadline_ns`              | `uint32_t`        | ns                                   | Permission-path deadline inside the tick; a cycle at risk of overrunning it selects `HOLD`.                                                                                                                              |
+| `0x68`          | `lease_ceiling_ns`         | `uint32_t`        | ns                                   | Ceiling on proposal age; the permission path shortens `t_expire_ns` to at most `t_evidence_ns` plus the ceiling minus `sync_error_ns`, and an expired proposal, or one whose `sequence_id` is not newer, selects `HOLD`. |
+| `0x6C`          | `watchdog_timeout_ns`      | `uint32_t`        | ns                                   | The self-watchdog is fed only after a completed tick; expiry requests `INHIBIT` through the independently wired trip.                                                                                                    |
+| `0x70`          | `t_stop_ns`                | `uint32_t`        | ns                                   | Stopping-time bound from the maximum admitted speed; a reference that leaves less clearance than $\epsilon_{\text{track}} + v_{\max} t_{\text{stop}}$ selects `STOP`.                                                    |
+| `0x74`          | `pos_tracking_bound`       | `float32`         | m                                    | $\lvert x_{\text{meas}} - r_{\text{cmd}} \rvert \le \epsilon_{\text{track}}$; `HOLD` above it.                                                                                                                           |
+| `0x78`          | `pos_critical_bound`       | `float32`         | m                                    | $\lvert x_{\text{meas}} - r_{\text{cmd}} \rvert \le \epsilon_{\text{crit}}$, with $\epsilon_{\text{crit}} > \epsilon_{\text{track}}$; `STOP` above it.                                                                   |
+| `0x7C`          | `vel_ceiling_limit`        | `float32`         | rad/s                                | $\lvert \dot{q} \rvert \le \dot{q}_{\max}$; `PROJECT` (QP clamp).                                                                                                                                                        |
+| `0x80`          | `torque_slew_ceiling`      | `float32`         | N·m/s                                | $\lvert \dot{\tau} \rvert \le \dot{\tau}_{\max}$; `PROJECT` (slew limiter).                                                                                                                                              |
+| `0x84`          | `actuator_curr_limit`      | `float32`         | A                                    | $\lvert I_{\text{phase}} \rvert \le I_{\text{peak}}$; `STOP`.                                                                                                                                                            |
+| `0x88`          | `dc_bus_overvolt_thresh`   | `float32`         | V                                    | $V_{\text{bus}} \le V_{\text{max\_safe}}$; `STOP`, with the brake chopper absorbing returned energy.                                                                                                                     |
+| `0x8C`          | `num_barriers`             | `uint32_t`        | count                                | Barrier constraints $K_b$; must equal the configured count.                                                                                                                                                              |
+| `0x90`          | `cbf_barrier_params`       | `float32[K_b][2]` | normalized distance; $\text{s}^{-1}$ | Margin $\delta_k$ and class-$\mathcal{K}$ rate $\alpha_k$ of each barrier; $h_k(\mathbf{x}) \ge \delta_k$, else `PROJECT`, or `STOP` when no feasible input remains.                                                     |
+| `0x90` + $8K_b$ | `crc32`                    | `uint32_t`        | checksum                             | IEEE 802.3 CRC-32 over all preceding bytes; a mismatch rejects the stored record, and no motion is admitted until a valid copy loads.                                                                                    |
+
+: **Enforcement record**: Thresholds of the permission path with the fallback-ladder rung each failed check selects, and digests of the evaluation record, limit records, and validity region the thresholds rest on. The record is configuration and telemetry; it adds no packet to the proposal stream. {#tbl-appendix-systems-wire-enforcement tbl-colwidths="[13,22,12,13,40]"}
+
+### Placement record {#sec-appendix-systems-wire-placement}
+
+The placement record of @sec-placement-hardware-allocation is offline evidence with a fixed header and a linked test ledger (@tbl-appendix-systems-wire-placement). It carries no signature of its own; the signed release manifest binds it through `placement_record_digest`. `enforcement_record_digest` names the enforcement record whose `deadline_ns` was tested, and `test_ledger_digest` identifies the external ledger of distributions, sample counts, test conditions, mitigations, and untested states. A maximum that has not been measured is stored as all ones, never zero, the same unavailable-value convention the fault record uses.
+
+| Offset | Field                        | Scalar type   | Unit            | Invariant and check                                                                                                                            |
+|:-------|:-----------------------------|:--------------|:----------------|:-----------------------------------------------------------------------------------------------------------------------------------------------|
+| `0x00` | `execution_domain_id`        | `uint64_t`    | enumeration     | Must match the declared topology (MPU, NPU, GPU, MCU, lockstep controller).                                                                    |
+| `0x08` | `privilege_and_ring`         | `uint64_t`    | privilege level | Proposer at EL0; enforcer at EL1 or above, or in the secure world.                                                                             |
+| `0x10` | `nominal_period_ns`          | `uint32_t`    | ns              | Enforcer tick; equal to the enforcement record's `loop_period_ns`.                                                                             |
+| `0x14` | `hard_deadline_ns`           | `uint32_t`    | ns              | The permission path's deadline inside the tick; equal to the enforcement record's `deadline_ns`.                                               |
+| `0x18` | `unloaded_observed_max_ns`   | `uint64_t`    | ns              | Largest response observed without competing load; a sample maximum, not a WCET.                                                                |
+| `0x20` | `loaded_observed_max_ns`     | `uint64_t`    | ns              | Largest response under the declared load; all ones until a loaded test runs. Independence stands only while it stays below `hard_deadline_ns`. |
+| `0x28` | `shared_axi_channel_qos`     | `uint64_t`    | configured QoS  | Arbitration priority per claimant; controller semantics verified by register capture and a stress test.                                        |
+| `0x30` | `max_pdn_droop_thermal_trip` | `uint32_t[2]` | mV; m°C         | Configured rail-droop and thermal trip thresholds; the ledger records the tests behind them.                                                   |
+| `0x38` | `hardware_mitigation_flags`  | `uint8_t[32]` | bitfield        | Active mitigations, such as a TCM snapshot, memory partitioning, or an isolated rail; register-locked after boot.                              |
+| `0x58` | `enforcement_record_digest`  | `uint8_t[32]` | SHA-256         | Enforcement record whose `loop_period_ns` and `deadline_ns` this record tests.                                                                 |
+| `0x78` | `test_ledger_digest`         | `uint8_t[32]` | SHA-256         | External test ledger, including the model and firmware digests under test.                                                                     |
+
+: **Placement record header**: Configuration values and observed maxima, with digests linking the tested enforcement record and the external test ledger. The header alone does not establish freedom from interference. {#tbl-appendix-systems-wire-placement tbl-colwidths="[9,26,13,14,38]"}
+
+### Authority record and operator payload {#sec-appendix-systems-wire-authority}
+
+The authority record of @sec-intervention-authority-log has two runtime layouts. A network operator's command is a proposal-header payload (@tbl-appendix-systems-wire-operator), and it is the one proposal whose sender's identity confers authority, so it carries an HMAC-SHA-256 tag under the operator role's key. The static authority manifest fixes each role's channel grant, the command's component count, order, and units, and the key custody.
+
+| Offset          | Field                    | Scalar type    | Unit         | Invariant and check                                                               |
+|:----------------|:-------------------------|:---------------|:-------------|:----------------------------------------------------------------------------------|
+| `0x00`–`0x4F`   | proposal header          | as above       | as above     | @Tbl-appendix-systems-wire-header, with `payload_kind` = `OPERATOR`.              |
+| `0x50`          | `nonce`                  | `uint64_t`     | —            | Never repeated within a key's lifetime; a repeated nonce is rejected as a replay. |
+| `0x58`          | `requested_channel_mask` | `uint16_t`     | bitfield     | Channels requested; must lie within the role's grant in the static manifest.      |
+| `0x5A`          | `operator_role_id`       | `uint8_t`      | enumeration  | Role whose key produced `mac`.                                                    |
+| `0x5B`          | reserved                 | `uint8_t`      | —            | Zero.                                                                             |
+| `0x5C`          | `command`                | `float32[N_c]` | per manifest | Requested command components in manifest order, admitted like any other proposal. |
+| `0x5C` + $4N_c$ | `mac`                    | `uint8_t[32]`  | HMAC-SHA-256 | Tag over all preceding bytes; an invalid tag locks out the channel.               |
+| `0x7C` + $4N_c$ | `crc32`                  | `uint32_t`     | checksum     | IEEE 802.3 CRC-32 over all preceding bytes.                                       |
+
+: **Operator payload**: A network operator's command under the proposal header. The tag authenticates the role; the permission path still admits the command by its content. {#tbl-appendix-systems-wire-operator tbl-colwidths="[13,22,13,13,39]"}
+
+The forensic authority record (@tbl-appendix-systems-wire-authority) is a log record written once per tick, not a packet. Its time is on the permission processor's clock; the mapping that relates it to PTP and calendar time, with its error bound, lives in the static manifest together with the vector lengths, units, and component order. Each record's `chain_link` is an HMAC-SHA-256, under the log key, over the previous record's link and this record's preceding fields, so an altered or deleted record breaks every later link.
+
+| Offset                | Field                    | Scalar type    | Unit                 | Recorded evidence and limit                                                                                                                |
+|:----------------------|:-------------------------|:---------------|:---------------------|:-------------------------------------------------------------------------------------------------------------------------------------------|
+| `0x00`                | `t_mcu_ns`               | `uint64_t`     | ns, permission clock | Event time of this tick's decision.                                                                                                        |
+| `0x08`                | `actuator_channel_mask`  | `uint16_t`     | bitfield             | Channels to which this decision applies; bus and DMA permissions enforce write scope.                                                      |
+| `0x0A`                | `preempt_trigger_code`   | `uint16_t`     | enumeration          | Request, timeout, enabling-device loss, or protective input cause.                                                                         |
+| `0x0C`                | `authority_state`        | `uint8_t`      | enumeration          | `AUTO`, `PEND`, `BLEND`, `MAN`, `FALLBACK`, or `PROTECTIVE`.                                                                               |
+| `0x0D`                | `fallback_rung`          | `uint8_t`      | enumeration          | `PROJECT`, `HOLD`, `STOP`, or `INHIBIT` when the state is `FALLBACK`; `NONE` otherwise.                                                    |
+| `0x0E`                | `operator_role_id`       | `uint8_t`      | enumeration          | Authenticated source role, interpreted against the static manifest.                                                                        |
+| `0x0F`                | reserved                 | `uint8_t`      | —                    | Zero.                                                                                                                                      |
+| `0x10`                | `blend_factor_alpha`     | `float32`      | dimensionless        | Progress in $[0,1]$ of the enforcer-owned blending profile.                                                                                |
+| `0x14`                | `policy_proposed_cmd`    | `float32[N_c]` | per manifest         | Command components before permission; not a motor write.                                                                                   |
+| `0x14` + $4N_c$       | `enforcer_clamped_cmd`   | `float32[N_c]` | per manifest         | Components admitted after the current constraint check.                                                                                    |
+| `0x14` + $8N_c$       | `actuator_delivered_cmd` | `float32[N_c]` | per manifest         | Dispatched setpoint components; delivery at the drive needs separate evidence.                                                             |
+| `0x14` + $12N_c$      | `measured_plant_state`   | `float32[N_s]` | per manifest         | Sampled state components, with sensor timing in the manifest.                                                                              |
+| `0x14` + $12N_c+4N_s$ | `chain_link`             | `uint8_t[32]`  | HMAC-SHA-256         | Keyed link over the previous link and this record's preceding fields; evidence of tampering only while the key and anchor stay in custody. |
+
+: **Forensic authority record**: One record per tick of the permission loop. A missing record is a gap in the chain, never an implied pass, and the record is a sampled decision trace, not proof of delivered force or contact. {#tbl-appendix-systems-wire-authority tbl-colwidths="[16,21,12,13,38]"}
+
+### Fault record {#sec-appendix-systems-wire-fault}
+
+The fault record of @sec-verification-fault-manifest is offline evidence, a fixed header signed with Ed25519 that links to the retained evidence bundle by digest (@tbl-appendix-systems-wire-fault). The fault-ledger root that the release manifest binds is computed over the canonical encodings of these headers. `envelope_point` has a per-machine definition in the versioned fault-class manifest; for the mobile manipulator its four values are aisle speed (m/s), payload (kg), floor friction coefficient, and ambient temperature (K).
+
+| Offset | Field                   | Scalar type   | Unit            | Purpose and interpretation                                                               |
+|:-------|:------------------------|:--------------|:----------------|:-----------------------------------------------------------------------------------------|
+| `0x00` | `trial_id`              | `uint64_t`    | —               | Unique trial identifier in the versioned ledger.                                         |
+| `0x08` | `claim_ref_id`          | `uint32_t`    | index           | Precommitted physical claim and its units.                                               |
+| `0x0C` | `envelope_point`        | `float32[4]`  | per manifest    | Declared operating point of the trial.                                                   |
+| `0x1C` | `fault_injection_mode`  | `uint16_t`    | enumeration     | Injected fault class.                                                                    |
+| `0x1E` | `injection_target_node` | `uint16_t`    | enumeration     | Hardware boundary receiving the injection.                                               |
+| `0x20` | `fault_magnitude`       | `float32`     | per fault class | Injection amplitude; its unit is fixed by the fault-class manifest.                      |
+| `0x24` | `t_det_ns`              | `uint32_t`    | ns              | Fault trigger to detector assertion.                                                     |
+| `0x28` | `t_takeover_ns`         | `uint32_t`    | ns              | Fault trigger to measured takeover; subtract `t_det_ns` for the post-detection interval. |
+| `0x2C` | `stl_robustness_rho`    | `float32`     | claim's unit    | Raw signed margin for `claim_ref_id`; other predicate margins remain in the bundle.      |
+| `0x30` | `verdict_status`        | `uint8_t`     | enumeration     | `PASS`, `FAIL`, `INVALID`, or `UNOBSERVABLE`.                                            |
+| `0x31` | reserved                | `uint8_t[3]`  | —               | Zero.                                                                                    |
+| `0x34` | `oracle_digest`         | `uint8_t[32]` | SHA-256         | Immutable predicate and oracle configuration.                                            |
+| `0x54` | `evidence_digest`       | `uint8_t[32]` | SHA-256         | Separately retained trial evidence bundle.                                               |
+| `0x74` | `signature`             | `uint8_t[64]` | Ed25519         | Signature over all preceding bytes; the key identifier is in the versioned manifest.     |
+
+: **Fault-record header**: The fixed part of one fault trial. The linked evidence bundle carries fault duration, hardware and software build identifiers, raw trace references and clock domains, detector identity, every margin value and scale, the measured physical outcome, secondary anomalies, and partial traces for non-pass verdicts. {#tbl-appendix-systems-wire-fault tbl-colwidths="[9,23,13,14,41]"}
+
+For a trial aborted before injection, detector time, takeover time, and robustness margin are unavailable rather than zero. The layout stores all ones (`0xFFFFFFFF`) in an unavailable `uint32_t` time slot and a canonical quiet NaN in an unavailable `float32` margin slot, and the signed evidence bundle records a validity flag for each measured field and why it is absent. The oracle checks those flags and the verdict before doing arithmetic, and excludes unavailable slots from pass counts and from latency or margin statistics. The versioned manifest fixes the NaN bit pattern so that hashing remains reproducible.
+
+### Release manifest {#sec-appendix-systems-wire-release}
+
+The release manifest of @sec-release-manifest is a signed offline artifact, not a mailbox record, so it has a canonical encoding in place of fixed offsets. Fields appear in the order that @tbl-appendix-systems-wire-release lists, each variable-length field carries a length prefix, and the adjudicator's Ed25519 signature covers the encoding of every preceding field. Every digest is SHA-256. The expiry is the one calendar time in the record chain, and it is checked against a tamper-resistant real-time clock rather than the permission processor's monotonic clock.
+
+| Field                       | Encoding                                             | Binds                                                                                                        | Check before permission                                                                 |
+|:----------------------------|:-----------------------------------------------------|:-------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------|
+| `claim_manifest_id`         | `uint8_t[16]` UUID                                   | Top-level safety claim                                                                                       | Linked to the root node of the signed argument graph.                                   |
+| `argument_digest`           | `uint8_t[32]`                                        | Complete claim–argument–evidence graph                                                                       | Matches the graph the adjudicator reviewed.                                             |
+| `policy_weights_digest`     | `uint8_t[32]`                                        | Learned model weights                                                                                        | Mismatch refuses release.                                                               |
+| `enforcer_bitstream_digest` | `uint8_t[32]`                                        | Enforcer logic image                                                                                         | Mismatch refuses release.                                                               |
+| `rtos_kernel_digest`        | `uint8_t[32]`                                        | Real-time kernel image and drivers                                                                           | Verified by the hardware root of trust at power-on.                                     |
+| `calib_trace_pointers`      | length-prefixed list of signed evidence references   | Calibration certificates                                                                                     | Missing or stale evidence refuses unless a separately signed restricted case covers it. |
+| `fault_ledger_root`         | `uint8_t[32]`                                        | Signed fault-record headers (@sec-appendix-systems-wire-fault)                                               | Missing, unauthenticated, or mismatched ledger refuses.                                 |
+| `authority_record_digest`   | `uint8_t[32]`                                        | Static authority manifest and the forensic log's initial chain anchor (@sec-appendix-systems-wire-authority) | Mismatch refuses release.                                                               |
+| `placement_record_digest`   | `uint8_t[32]`                                        | Placement record (@sec-appendix-systems-wire-placement)                                                      | Mismatch refuses release.                                                               |
+| `evaluation_record_digest`  | `uint8_t[32]`                                        | Evaluation record                                                                                            | Mismatch refuses release.                                                               |
+| `verdict_classification`    | `uint8_t` enumeration                                | `UNCOND`, `COND`, or `REFUSE`                                                                                | Selects the permitted operating envelope.                                               |
+| `standing_conditions`       | length-prefixed array of (premise, check rate, trip) | Physical premises checked in operation                                                                       | Checked on every permission tick; an unknown premise takes the assessed stop.           |
+| `telemetry_drift_budget`    | length-prefixed task-specific limits and triggers    | Tracking and timing drift                                                                                    | A bound violation revokes; a trend prompts inspection.                                  |
+| `verdict_expiry`            | UTC calendar time (ISO 8601)                         | Validity period of the verdict                                                                               | A real-time clock reading past the expiry voids the permit.                             |
+| `lifecycle_budget`          | `uint64_t[2]` (hours, cycles)                        | Wear allowance                                                                                               | An exceeded budget or an invalid counter refuses motion.                                |
+| `adjudicator_signature`     | key identifier plus `uint8_t[64]` Ed25519 signature  | The whole manifest                                                                                           | Verifies under an authorized, unrevoked adjudicator key.                                |
+
+: **Release manifest**: Canonical field order of the signed release artifact. A new signed version can supersede a manifest only after the current physical conditions are checked, and the hardware root anchors keys rather than storing mutable digests. {#tbl-appendix-systems-wire-release tbl-colwidths="[21,25,24,30]"}
 
 ## Further Reading
 

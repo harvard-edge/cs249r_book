@@ -110,13 +110,7 @@ A high-capacity foundation model or diffusion policy requires tens to hundreds o
 - The base (Class 1) cruises at up to its `{python} MachineStallTravel.v_str` drive limit (illustrative; see the Reader Guide), so it travels `{python} MachineStallTravel.d_chunk_str` during one `{python} MachineStallTravel.t_chunk_str` chunk-policy inference and `{python} MachineStallTravel.d_intent_str` during one `{python} MachineStallTravel.t_intent_str` intent-model inference, and nothing brakes it in that time unless a process other than the proposer is watching.
 - The arm (Class 2) carries reflected rotor inertia ($N^2 J$) through its gearboxes; if its high-rate impedance loops are interrupted while the gripper is on a door latch or a mug, that inertia drives the contact force past its limit.
 
-Physical safety cannot be guaranteed by software discipline, OS thread priorities, or runtime exception handlers alone. It requires an explicit, deterministic computing, memory, and communication fabric. In the five-level machine of @sec-boundary-machine-model, that fabric is the Nervous System\index{Nervous system!architecture}, and the mechanism it holds is the permission path, which admits, modifies, or refuses each proposal on fresh state within a deadline the plant sets.
-
-::: {#fig-04-locator fig-env="figure" fig-pos="htb" fig-cap="**The real-time nervous system**: The four-tier physical AI systems architecture highlights the real-time nervous system (Layer 2). Operating between the deliberative brain (Layer 3) and dynamical body (Layer 1), the deterministic nervous system enforces multi-rate synchronization, transports sensorimotor signals under hard real-time deadlines, and maintains exclusive execution authority over actuator power." fig-alt="Diagram titled Physical AI Systems Architecture Stack, drawn as four stacked tiers. Layer 4 is system governance and assurance at 0.1 to 1 hertz, holding boxes for shared autonomy, verification, safety cases, and frontier limits. Layer 3 is the brain, a cognitive deliberation tier at 1 to 50 hertz, holding five stages named ingestion, perception, memory, intent, and planner. A dashed proposal-permission privilege boundary separates it from layer 2, the nervous system, a real-time safety and timing tier at 1000 hertz. Layer 1 is the physical body and continuous plant. Layer 2 is shaded and outlined and the badge reads Active Focus, Chapter 04, Nervous System."}
-![](images/svg/fig_locator.svg){width="100%"}
-:::
-
-Within the four-tier physical AI architecture (@fig-04-locator), this chapter centers on Layer 2: the Nervous System. Bridging the Cognitive Brain (Layer 3) and the Physical Body (Layer 1), the Nervous System holds the permission path beneath the proposal boundary. It enforces an asymmetric contract: high-capacity learned models operate strictly as unprivileged clients proposing trajectory waypoints, while dedicated, cycle-deterministic silicon retains exclusive authority to evaluate safety invariants and commit current setpoints to motor inverter registers.
+Physical safety cannot be guaranteed by software discipline, OS thread priorities, or runtime exception handlers alone. It requires an explicit, deterministic computing, memory, and communication fabric. In the five-level machine of @sec-boundary-machine-model, that fabric is the Nervous System\index{Nervous system!architecture}, and the mechanism it holds is the permission path, which admits, modifies, or refuses each proposal on fresh state within a deadline the plant sets. The contract is asymmetric. The learned models propose trajectory waypoints as unprivileged clients, and only the permission path, on cycle-deterministic silicon, may commit current setpoints to the motor drives.
 
 Every signal traversing the boundary between deliberation and physical actuation is constrained by five physical limits: transport and computation latency ($\tau$), interconnect bandwidth ($\beta$), thermal dissipation ($\mathcal{E}$), temporal jitter ($\sigma_t$), and fault domain isolation ($\mathcal{F}$). Reconciling these limits requires an architecture that delivers microsecond cycle determinism ($1000\text{ Hz}$ to $20\text{ kHz}$) to preserve controller phase margin, maintains lock-free asynchronous decoupling to prevent slow neural inference from blocking inner control loops, isolates actuator writes from host crashes, restricts actuation privilege to an independent enforcer, and requests a validated local response when a watchdog lease expires.[^fn-nervous-watchdog-envelope]
 
@@ -155,7 +149,7 @@ The hardware floor exposes this physical separation at the interface boundary. A
 In the two-processor implementation (@fig-04-two-processor-implementation), deliberate planning and reactive enforcement do not share a processor core, a cache hierarchy, or a common memory bus. The slow, stochastic path runs on parallel hardware (Linux host application processors and tensor accelerators) optimized for raw throughput across wide data streams, while the fast, deterministic path runs on isolated hardware (bare-metal microcontrollers or FPGA cores) optimized for worst-case execution time and cycle-counted predictability. Separate chips are one realization; a single die can also host the permission path if its response bound and fault containment are shown to hold (@sec-placement-two-paths-one-die).
 
 ::: {#fig-04-two-processor-implementation fig-env="figure" fig-pos="t" fig-cap="**The two-processor implementation**: An application processor publishes learned proposals to a shared mailbox. An independently scheduled microcontroller, which runs the permission path, checks freshness and physical limits before commanding motor current and executes a defined fallback on stale or unsafe proposals. The indicated rates and mailbox are design examples whose suitability depends on the plant's measured response budget." fig-alt="Block diagram with an application processor proposing action chunks through a shared mailbox to a microcontroller permission controller, which checks commands before motor inverters drive the plant."}
-![](../01_boundary/images/svg/fig01_dual_brain_soc.svg){width="100%"}
+![](images/svg/fig04_two_processor.svg){width="100%"}
 :::
 
 ::: {#psp-nervous-silicon-privilege .callout-perspective title="Silicon privilege partitioning"}
@@ -163,16 +157,6 @@ Never allow a high-capacity learned model to share a fault domain with the actua
 :::
 
 Safety in physical AI is an architectural partition in silicon, not an operating system scheduling priority. The high-throughput deliberative engine acts strictly as an untrusted client, while dedicated real-time silicon acts as the immutable hardware gatekeeper.
-
-::: {#chk-nervous-silicon-partitioning .callout-checkpoint title="Silicon partitioning and execution predictability"}
-
-Before examining multi-rate cadences, verify your understanding of hardware privilege separation:
-
-- [ ] **Microarchitectural resource contention**: Can you explain why kernel-level priority patches (`PREEMPT_RT`) cannot prevent memory crossbar saturation and cache line eviction when an accelerator streams neural network weights?
-- [ ] **TLB shootdowns and hardware wait states**: Can you describe how virtual memory management operations on a general-purpose processor introduce multi-millisecond tail latency into co-located software tasks?
-- [ ] **Dual-brain fault isolation**: Can you distinguish the failure modes of an unprivileged deliberative application core from a cycle-deterministic motor microcontroller?
-
-:::
 
 ## Multi-Rate Cadences {#sec-nervous-cadences}
 
@@ -348,6 +332,10 @@ Three timers guard the exchange, and each answers a different question. The **ch
 
 The lease is enforced through the **proposal header**\index{Proposal header}, the part of every proposal that lets the permission path judge it without trusting its author. By meaning, the header carries a sequence number, the evidence time of the observation the proposal was computed from together with that time's conversion error, the issue time, the expiry, a reference to the parent record the proposal was derived from, the coordinate frame, the payload kind, and a checksum. The minimal payload behind it, a chunk, carries the number of waypoints and, for each waypoint, joint positions and joint velocities. It carries no torques, because a learned proposal specifies kinematic setpoints and torque is what the tracker on the permission side computes from them. A proposal drives the actuators only until the earlier of its expiry and its evidence deadline, whether or not any cancellation arrives.
 
+::: {.column-margin .margin-pointer}
+↳ **Byte layout:** The proposal header's and chunk payload's fields, types, and offsets are given in @sec-appendix-systems-wire-header.
+:::
+
 Every record that crosses the proposal boundary carries its times on the permission processor's clock. A producer on another clock converts with a versioned mapping and carries that mapping's error bound, which the consumer adds to every age it checks. Calendar time appears only in logs and in a release verdict's expiry, never in an age test.
 
 A record crossing the boundary is protected against three different failures by three different fields. A checksum over header and payload detects accidental corruption; it proves nothing about who wrote the bytes. A digest of the record it was derived from establishes lineage; it is not an authenticator either. A keyed tag appears only where the sender's identity itself confers authority: on operator commands that arrive over a network (@sec-intervention-authenticating-intervention), on the forensic log (@sec-intervention-trustworthy-logs), and on offline evidence and release artifacts (@sec-verification-fault-manifest, @sec-release-manifest). Proposals from the learned model carry no keyed tag: the permission path admits by content, not origin, and a key held by a compromised proposer would authenticate nothing.
@@ -359,7 +347,7 @@ If the relative writer–reader phase varies uniformly across the writer period,
 $$P_{\text{collision}\mid\text{uniform phase}} = \frac{t_{\text{vulnerable}}}{T_{\text{writer}}} = \frac{3.0\,\mu\text{s}}{50{,}000\,\mu\text{s}} = 6.0 \times 10^{-5} = 0.006\text{ percent}.$$
 That assumption gives about 6 torn reads in $100{,}000$ reader cycles. With exactly periodic $20\text{ Hz}$ and $1\text{ kHz}$ clocks at an unfavorable fixed phase, one read can collide with every write: about $2{,}000$ in $100{,}000$ cycles ($2\%$). Under the stated bounded $1.5\,\mu\text{s}$ write duration and one write per $50\text{ ms}$, adjacent $1\text{ ms}$ reader ticks cannot both overlap a write. A detected odd or changed counter makes the reader discard that attempt and retain its last validated spline; its age and lease must still be checked. No collision percentage proves a safe physical trajectory or a bounded recovery from a writer stuck mid-write.
 
-The reader's possible failures fall into four classes (@tbl-13-boundary-fallbacks), and none of them lets a failed producer make the permission path wait. The classes keep the exchange from blocking; they do not by themselves contain the plant, because the fallback each one selects still needs bounded timing and a validated stop.
+The reader's possible failures fall into four classes (@tbl-04-boundary-fallbacks), and none of them lets a failed producer make the permission path wait. The classes keep the exchange from blocking; they do not by themselves contain the plant, because the fallback each one selects still needs bounded timing and a validated stop.
 
 | Failure Class        | Reader Detection Condition                         | Physical Systems Fallback Action                                | Bounded Response                      |
 |:---------------------|:---------------------------------------------------|:----------------------------------------------------------------|:--------------------------------------|
@@ -368,17 +356,7 @@ The reader's possible failures fall into four classes (@tbl-13-boundary-fallback
 | **Stale**            | Converted local age exceeds lease                  | End tracking authority; enter feasible MCU fallback             | Deadline from plant budget            |
 | **Missing**          | Sequence gap                                       | Record audit gap; evaluate current record on its own merits     | One tick for flag                     |
 
-: **Boundary contract failure classes and deterministic fallback matrix**: Systematic classification of exchange faults across the proposal boundary. Fallback paths are selected without waiting on host recovery; their physical response remains conditional on the validated plant and actuator. {#tbl-13-boundary-fallbacks tbl-colwidths="[20,30,35,15]"}
-
-::: {#chk-nervous-seqlock-collision .callout-checkpoint title="Lock-free seqlock collision dynamics"}
-
-Before examining rate transitions and spline interpolation, verify your understanding of lock-free mailbox synchronization:
-
-- [ ] **Lock-free mailbox mechanics**: Can you explain how atomic sequence counters detect torn reads across asynchronous clock domains without requiring mutexes or priority inversion?
-- [ ] **Clock phase and consecutive reads**: Under what timing assumptions does a short write avoid consecutive collisions, and why can fixed phase still cause one failed read per write?
-- [ ] **Degradation during torn reads**: Can you describe how a real-time enforcer maintains smooth actuation trajectories when a shared-memory collision forces it to discard a torn proposal frame?
-
-:::
+: **Boundary contract failure classes and deterministic fallback matrix**: Systematic classification of exchange faults across the proposal boundary. Fallback paths are selected without waiting on host recovery; their physical response remains conditional on the validated plant and actuator. {#tbl-04-boundary-fallbacks tbl-colwidths="[20,30,35,15]"}
 
 Rate mismatches introduce three failure modes: phase lag accumulation, aliasing, and buffer starvation. In a discrete-to-continuous conversion, a Zero-Order Hold (ZOH) maintains setpoints constant across the planning period $T_{\text{plan}}$, delivering piecewise-constant position steps rather than a smooth trajectory. This step quantization introduces an intrinsic half-sample phase lag $\Delta \phi = -\frac{\omega T_{\text{plan}}}{2}$. Directly feeding raw planner waypoints to inner motor loops at $10\text{ Hz}$ incurs $50\text{ ms}$ of uncompensated phase delay, degrading tracking margins and exciting unmodeled mechanical resonances. For the six endpoint conditions on position, velocity, and acceleration, the real-time enforcer can use a suitably constrained quintic bridge across the latched waypoint seam. It evaluates the admitted bridge at $1000\text{ Hz}$ to provide $C^2$ position continuity and corresponding velocity and feedforward acceleration setpoints; the tick rate alone does not establish seam continuity.
 
@@ -429,9 +407,7 @@ Taming this latency spread requires classifying every source of execution varian
 
 *Experimentally characterized sources* encompass shared architectural mechanisms whose maximum latencies cannot be proven from first-principles schematics alone, but whose worst-case envelopes can be bounded through exhaustive stress profiling under locked hardware configurations: shared last-level cache misses under hardware line locking, write-buffer drain stalls, dynamic RAM refresh intervals, and thermal throttling ceilings enforced by active cooling.
 
-*Unbounded variance sources* encompass non-deterministic software and hardware mechanisms whose maximum latency has no finite upper bound: demand-paged virtual memory page faults, preemptive operating system thread scheduling without priority inheritance,[^fn-inc-mars-pathfinder] dynamic heap allocations traversing fragmented free lists, speculative branch mispredictions that pollute pipeline caches, and unscheduled peripheral direct memory access traffic. A hard real-time safety path must strictly eliminate every mechanism from this third category.
-
-[^fn-inc-mars-pathfinder]: **Mars Pathfinder Priority Inversion**\index{Priority inversion!Mars Pathfinder}: The 1997 Mars Pathfinder mission suffered unbounded priority inversion when a low-priority meteorological task blocked high-priority attitude control, tripping the system watchdog [@reeves1997pathfinder]. The anomaly was resolved by enabling priority inheritance protocols on the RTOS mutex, as formalized by @sha1990priority.
+*Unbounded variance sources* encompass non-deterministic software and hardware mechanisms whose maximum latency has no finite upper bound: demand-paged virtual memory page faults, preemptive operating system thread scheduling without priority inheritance (war story \ref{ws-nervous-1997-mars-pathfinder-priority-inversion}), dynamic heap allocations traversing fragmented free lists, speculative branch mispredictions that pollute pipeline caches, and unscheduled peripheral direct memory access traffic. A hard real-time safety path must strictly eliminate every mechanism from this third category.
 
 ::: {#ws-nervous-1997-mars-pathfinder-priority-inversion .callout-war-story title="The Mars Pathfinder priority inversion (1997)"}
 **Context**: In July 1997, shortly after landing on Mars, the Mars Pathfinder spacecraft's avionics computer ran the VxWorks real-time operating system with preemptive priority-based scheduling across mission tasks [@reeves1997pathfinder].
@@ -440,7 +416,7 @@ Taming this latency spread requires classifying every source of execution varian
 
 **Impact**: The high-priority bus distribution task missed its hard real-time deadline. A hardware watchdog timer detected the deadline overrun and initiated a complete spacecraft reboot, resetting state and threatening total mission loss.
 
-**Response**: Engineers remotely diagnosed the thread deadlock, patched the spacecraft software from Earth by enabling priority inheritance on the VxWorks mutex semaphore, and verified stable telemetry scheduling.
+**Response**: Engineers remotely diagnosed the thread deadlock, patched the spacecraft software from Earth by enabling priority inheritance [@sha1990priority] on the VxWorks mutex semaphore, and verified stable telemetry scheduling.
 
 **Systems lesson**: The medium-priority task kept the low-priority mutex holder from running, so the high-priority bus task could not progress. Priority inheritance let the holder finish and release the mutex. In a motor-control path, engineers must bound such blocking time ($B$) or remove the shared lock from the cycle-critical exchange.
 :::
@@ -602,16 +578,6 @@ class FieldbusSchedulability:
 **Systems insight**: For the machine's `{python} FieldbusSchedulability.num_axes_str` axes at 64 bytes per axis, CAN-FD serialization alone misses the `{python} FieldbusSchedulability.cycle_time_str` bus cycle, while EtherCAT frame and forwarding occupancy leaves room for other work. Choosing EtherCAT, TSN, a different CAN schedule, or a different cycle requires a complete response-time and fault-budget analysis. While **TSN Ethernet**\index{Time-sensitive networking} offers the allure of unifying gigabit camera feeds with microsecond servo frames over a single physical link, configuring and formally verifying its time-gated queues across asynchronous switches requires exhaustive verification to prevent video bursts from colliding with time-critical control slots.
 :::
 
-::: {#chk-nervous-fieldbus-schedulability .callout-checkpoint title="Fieldbus latency and WCET schedulability"}
-
-Before evaluating actuation authority and hardware isolation, verify your understanding of fieldbus schedulability and jitter bounds:
-
-- [ ] **On-the-fly frame processing**: Can you explain why EtherCAT's hardware-forwarded frame structure scales to multi-axis kinematic loops with minimal bus utilization, whereas CAN-FD experiences severe deadline pressure under cyclic polling?
-- [ ] **Asynchronous frame preemption**: Can you explain how arbitration, retransmission, and competing frames enter a response-time bound beyond the simple serialization sum?
-- [ ] **Distributed clock synchronization**: Can you distinguish physical jitter bounds enforced by hardware phase-locked loops from statistical latency metrics gathered on an idle system?
-
-:::
-
 Real-time dependability cannot be achieved by buying faster clock speeds or measuring statistical latency percentiles on an idle bench. Dependability requires structural analysis of the execution path: eliminating all unbounded variance sources ($I_{\text{unbounded}} = 0$), bounding shared hardware blocking ($B$), enforcing zero-allocation static memory layouts, and selecting fieldbuses with cycle-deterministic distributed clocks. Read as examples rather than a historical performance law, @fig-04-fieldbus-evolution plots illustrative link rates and scenario cycle targets for five fieldbus families.[^fn-net-tsn-fieldbus] The points are not measured end-to-end latency or evidence that bandwidth alone determines schedulability.
 
 ::: {.column-margin}
@@ -689,12 +655,6 @@ Consider the physical energy dynamics of this intervention. If the enforcer reje
 
 By virtue of the causal boundary established in @sec-boundary-causal-boundary, the enforcer treats the origin of an aberrant proposal as completely irrelevant. A remote memory exploit in an operating system daemon, an adversarial camera perturbation inducing model hallucination, and an arithmetic overflow in a neural matrix multiplier produce the identical boundary event: an invalid proposal packet. Because the enforcer evaluates invariant bounds against physical sensor feedback from optical encoders and current shunts rather than inspecting neural network weights, the host cannot write actuator registers directly. Protection against a compromised host still depends on independent sensing, a correct limit model, actuator capability, and a feasible fallback.
 
-::: {.column-margin}
-![](images/svg/spa_locator_as.svg){width="100%" fig-alt="S·P·A locator triad highlighting the Act-Sense reflex edge."}
-
-*The Act $\cap$ Sense reflex interface: sub-millisecond fieldbus loops and override registers.*
-:::
-
 To guard against internal hardware faults or microcontroller latch-ups within the enforcer itself, the system incorporates out-of-band supervisory channels and physical disconnects. These channels consist of unprogrammable analog circuits, hardwired emergency stop mushroom push buttons, and dual-channel safety relays that sever power to the motor inverter bridges independently of all digital logic through Safe Torque Off (@fig-real-estop, IEC 61800-5-2), which physically interrupts gate-driver bias to prevent torque-producing stator current.[^fn-std-iec61800-sto] While these disconnects remove torque-producing power through the designed path, they impose a severe cost on system availability. Re-energizing a tripped high-voltage direct-current bus requires pre-charging the inverter filter capacitors through current-limiting resistors; without this step, closing the contactor onto empty capacitors draws a massive inrush spark that physically welds the mechanical metal contacts together. This pre-charge sequence consumes hundreds of milliseconds before motor control can resume. Physical disconnects therefore trade availability and active control for a fault response whose mechanical consequences depend on brakes, load, and stored energy. Ensuring that these supervisory circuits and enforcer channels remain capable of acting when the primary controller fails requires verifying that they share no hidden dependencies in their clocks, power rails, or silicon substrates.
 
 [^fn-std-iec61800-sto]: **Safe Torque Off (STO)**\index{Safe torque off}: An STO implementation removes torque-producing drive signals through a hardware interlock. The illustrated dual-channel circuit is one design pattern; an IEC 61800-5-2 integrity rating depends on the actual devices, diagnostic coverage, wiring, and validation. STO does not by itself establish a controlled stop for moving mass.
@@ -755,8 +715,9 @@ Locomotion policies and compact visuomotor models compiled for edge accelerators
 
 ::: {#chk-nervous-hardware-invariants .callout-checkpoint title="Hardware isolation and real-time invariant checking"}
 
-Before examining supervisory teleoperation, verify your understanding of hardware isolation and pre-actuation invariant defenses:
+Before examining supervisory teleoperation, verify your understanding of the exchange, hardware isolation, and pre-actuation invariant defenses:
 
+- [ ] **Nonblocking exchange**: Can you explain how the seqlock reader detects a torn read in one bounded attempt, and why a writer stopped mid-write leaves the active spline valid only until its lease expires?
 - [ ] **Four dimensions of physical isolation**: Can you enumerate the four physical boundaries (silicon pipelines, timing crystals, power rails, memory buses) that this example checks for fault-domain independence, and explain how shared paths would need validation?
 - [ ] **Physical derivation of watchdog leases**: Can you explain why the chunk lease must be sized from stopping distance and clearance rather than chosen as a software timeout, and why a heartbeat never renews it?
 - [ ] **Rate matching and authority**: Can you explain why a policy that runs at the plant's own rate still produces only proposals, and which check answers each of its three failure modes?
@@ -934,7 +895,7 @@ These facts fix the **lease rule**\index{Chunk lease!lease rule} for this machin
 
 ::: {#chk-nervous-handoffs-grid .callout-checkpoint title="The handoffs matrix and physical budgets"}
 
-Before reviewing the humanoid crucible and engineering fallacies, verify your understanding of system-wide interface contracts:
+Before testing the lease on a humanoid and reviewing the engineering fallacies, verify your understanding of system-wide interface contracts:
 
 - [ ] **Signal handoff classification**: Can you identify the five canonical handoffs ($\mathcal{H}_1\text{--}\mathcal{H}_5$) bridging physical plant mechanics to high-level deliberative reasoning?
 - [ ] **Binding physical constraints**: Can you explain why sensory handoffs bind on bandwidth and exposure latency, whereas actuation handoffs bind on temporal determinism and thermal dissipation?
@@ -943,12 +904,49 @@ Before reviewing the humanoid crucible and engineering fallacies, verify your un
 
 :::
 
-::: {#capstone-nervous-humanoid-crucible .callout-perspective title="Fieldbus jitter in kinematic trees"}
-In a humanoid robot, the nervous system's physical and temporal routing constraints reach their extreme:
+```{python}
+#| label: calc-nervous-humanoid-fall-deadline
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HUMANOID FALL TIMESCALE FOR THE PART I CAPSTONE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-nervous-coupled-budget, the Part I humanoid capstone
+# │          (canon §3.7).
+# │ Goal:    State the deadline a fall sets, in place of the stop's pre-brake
+# │          ceiling, so the lease question can be asked of a biped.
+# │ Show:    tau_fall = sqrt(z_c / g) ~ 303 ms for a 0.9 m center-of-mass height.
+# │ How:     calc_inverted_pendulum_fall_time; the registry's humanoids carry no
+# │          center-of-mass height, so z_c is a scenario input.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_latency, check
 
-* **Fieldbus Daisy-Chains across Articulated Limbs:** A typical humanoid distributes thirty to fifty joint servo drives across high-degree-of-freedom limbs. Running point-to-point Ethernet or dedicated cabling to every joint creates an impractically thick, stiff wiring harness that resists joint articulation and fatigues to failure under repeated cyclic bending. Consequently, humanoids route communication through daisy-chained industrial fieldbuses (EtherCAT, CAN-FD, or RS-485 rings) traversing the pelvis, shoulders, and ankles. In an EtherCAT ring with forty slave nodes, packet traversal delays accumulate. If frame forwarding jitter or cyclic synchronization (Distributed Clocks) slips by more than $50\ \mu\text{s}$, phase lag ($-\omega \tau$) directly degrades the phase margin of 1 kHz whole-body balance control loops, causing standing limit-cycle oscillations (jitter-induced shaking).
-* **Multi-Rate Asynchrony between Vision and Balance:** Whole-body operational space controllers require continuous floating-base state estimates at 1 kHz, fed by high-rate IMUs and joint torque sensors. Meanwhile, visual-inertial odometry (VIO) and 3D perception pipelines output poses at 30 to 60 Hz with 30–60 ms of compute latency. If the nervous system naively locks the balance loop waiting for updated visual poses, the floating-base controller drops cycles, leading to immediate bipedal collapse. The nervous system must enforce strict lock-free seqlock or triple-buffered mailboxes, allowing the 1 kHz balance thread to integrate IMU kinodynamics continuously while smoothly fusing low-rate visual corrections through asynchronous Kalman updates.
-* **Transient Ground Bounce and Packet Corruption:** During dynamic jumping or running, high phase currents switching in close proximity to unshielded fieldbus lines within cramped limb casings induce transient electromagnetic interference (EMI) and ground bounce ($\Delta V = L_{\text{gnd}} \frac{dI}{dt}$). If parity checks or cyclic redundancy checks (CRC) drop corrupted packets during a high-speed foot strike, the joint controllers must deterministically hold last-commanded torques or transition to local impedance damping within a single fieldbus cycle ($1\text{ ms}$) rather than freezing or faulting into uncontrolled limpness.
+class HumanoidFallDeadline:
+    """Characteristic fall timescale of an upright biped modeled as an inverted pendulum."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    z_c = 0.9 * meter  # category: illustrative (scenario center-of-mass height; no registry field)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_fall = calc_inverted_pendulum_fall_time(effective_length=z_c).to(millisecond)
+    t_fall_rounded = round(t_fall.magnitude) * millisecond  # prose says "about"
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_fall.magnitude - 302.9) < 0.5, f"Humanoid fall timescale drifted: {t_fall}")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    t_fall_str = fmt_latency(t_fall_rounded, unit=millisecond, precision=0)
+```
+
+::: {#capstone-nervous-humanoid-crucible .callout-perspective title="A deadline set by a fall"}
+**Question**: Does the split among proposer, lease, and permission path still hold when the deadline comes from a fall rather than a stop?
+
+An upright biped diverges from balance on the timescale $\tau_{\text{fall}} = \sqrt{z_c/g}$, where $z_c$ is its center-of-mass height, about `{python} HumanoidFallDeadline.t_fall_str` for a center of mass near hip height. The split holds, and what changes is the deadline its terms answer to:
+
+* **The lease is sized from the step deadline.** The lease, the tick, the bus cycle, and the observation age must fit inside the time before a recovery step must begin, and the fallback that an expired lease selects is a validated step rather than a brake.
+* **The intent model is still disqualified.** Its renewal period alone spends most of the fall timescale and leaves no room for the tick, the bus cycle, and the step itself, so only the chunk policy can renew a lease on this deadline.
+* **Heat and supply sag compete with the step for authority.** The recovery step draws peak current in both legs at once, heating windings and sagging the shared rail (@sec-body-power-integrity) at the moment the permission path can least afford to refuse it.
 :::
 
 ## Fallacies and Pitfalls {#sec-nervous-fallacies-pitfalls}

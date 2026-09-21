@@ -59,21 +59,7 @@ A physical machine cannot rely solely on raw sensory observations or static memo
 
 [^fn-mem-belief-state]: **Belief state formulation**\index{State estimation!belief state}: In a Partially Observable Markov Decision Process (POMDP), a belief represents a probability distribution over latent states. A physical state interface can additionally carry a justified bounded-disturbance error envelope, or a calibrated error quantile with its declared tail risk; the latter is not a deterministic upper bound. Without the value, frame, evidence epoch, and applicable uncertainty model, a downstream optimizer cannot evaluate clearance during a sensor dropout.
 
-Within the four-tier physical AI systems architecture, the memory stage highlighted in @fig-09-locator connects perception to intent and trajectory planning. As the second of the four proposal-side stages of Part III, its **spatial memory**\index{Spatial memory} carries geometric and physical state estimates forward across sensor dropouts, occlusions, and variable processing delays.
-
-::: {#fig-09-locator fig-env="figure" fig-pos="htb" fig-cap="**Memory stage architecture focus**: The four-tier physical AI systems architecture highlights the cognitive deliberation tier, with memory as this chapter's active focus. The stage carries latent state $z_t$ into a persistent spatial belief $b_t$, making it the only place the system holds what its sensors can no longer see." fig-alt="Diagram titled Physical AI Systems Architecture Stack, drawn as four stacked tiers. Layer 4 is system governance and assurance at 0.1 to 1 hertz, holding boxes for shared autonomy, verification, safety cases, and frontier limits. Layer 3 is the brain, a cognitive deliberation tier at 1 to 50 hertz, holding five stages named ingestion, perception, memory, intent, and planner. A dashed proposal-permission privilege boundary separates it from layer 2, the nervous system, a real-time safety and timing tier at 1000 hertz. Layer 1 is the physical body and continuous plant. Layer 3 is shaded and its memory stage is outlined; the badge reads Active Focus, Chapter 09, Temporal Memory."}
-![](images/svg/fig_locator.svg){width="100%"}
-:::
-
-Crucially, memory operates directly across the **proposal-permission boundary**.[^fn-mem-dual-brain] The unprivileged application processor (Linux MPU) maintains high-dimensional spatial belief structures, occupancy voxels, and coordinate transform trees. However, because the MPU experiences unpredictable scheduling jitter, memory bus contention, and inference latency, it cannot be trusted to self-report temporal freshness. The real-time safety processor (MCU) acts as the permission referee, evaluating every candidate motion proposal against independent hardware timers. When an unrefreshed belief breaches task safety margins, the nervous system unilaterally revokes execution permission.
-
-::: {.column-margin}
-![](images/svg/spa_locator_sp.svg){width="100%" fig-alt="S·P·A locator triad highlighting the Sense-Plan belief edge."}
-
-*The Sense $\cap$ Plan belief interface: preserving spatial object state under line-of-sight occlusions.*
-:::
-
-[^fn-mem-dual-brain]: **Dual-brain spatial partitioning**\index{Architecture!dual-brain}: The dual-brain architecture assigns high-dimensional spatial mapping (OctoMap, VDB voxels, factor graphs) to Linux application processor (MPU) cores while reserving deterministic hardware countdown timers and barrier evaluations for the real-time microcontroller (MCU). An independently clocked permission controller with a segregated memory path can continue its local check during MPU stalls; its complete detection-to-brake response still depends on validated sensing, bus, and actuator timing. See @sec-brain-embodied for the foundational interface specifications governing this boundary.
+As the second of the four proposal-side stages of Part III, between perception and intent, **spatial memory**\index{Spatial memory} carries geometric and physical state estimates forward across sensor dropouts, occlusions, and variable processing delays. It sits above the proposal boundary, so a remembered state can shape a proposal but cannot certify its own freshness; the permission path checks the age of the evidence against its own clock.
 
 Consider an analytical example of a manipulator tasked with touching a workpiece and regulating contact force against a moving assembly fixture. The fixture drifts relative to the robot base at a bounded velocity of at most $20\text{ mm/s}$. The tooling compliance of $1\text{ mm/N}$ permits an allowable positioning error of $2\text{ mm}$ before generating a $2\text{ N}$ reaction force that overloads the wrist sensor. Dividing the allowable error by the maximum drift velocity yields an operational lifetime of $100\text{ ms}$, calculated as $2\text{ mm} / (20\text{ mm/s}) = 0.100\text{ s}$. For the first $50\text{ ms}$ after the camera captures an image, the physical position of the workpiece remains safely within the tolerance window. At $100\text{ ms}$, the unobserved displacement reaches the outer boundary of the error budget. At $101\text{ ms}$, without a new measurement, the modeled displacement exceeds the stated tolerance; a close approach using the stale coordinate would no longer satisfy the contact margin.
 
@@ -163,16 +149,6 @@ Consider an analytical example of a manipulator holding a tool point at a distan
 ![](images/svg/fig09_frame_staleness_error.svg){width="100%"}
 :::
 
-::: {#chk-mem-transform-staleness-lever-arm .callout-checkpoint title="Transform staleness and lever-arm deflection"}
-
-Before exploring continuous volumetric mapping and attention buffer bounds, verify your understanding of kinematic frame staleness:
-
-- [ ] **Transform staleness amplification**: Can you explain how uncompensated latency in base or wrist kinematic transforms amplifies across structural link lengths to induce large lever-arm displacements at the tool center point?
-- [ ] **Silent evaluation failure**: Can you describe why a stale coordinate transform that continues to evaluate cleanly in linear algebra libraries is far more dangerous than a transform that raises a software exception?
-- [ ] **Kinematic error allocation**: Can you distinguish between allocating error budgets purely to sensor calibration versus bounding end-to-end transport and thread scheduling jitter in distributed transform trees?
-
-:::
-
 ::: {#psp-memory-leverage-of-staleness .callout-perspective title="The leverage of staleness"}
 *Transform staleness multiplies through kinematic link lengths; an uncompensated millisecond of lag at the robot base swings the tool center point through centimeters of unobserved deflection.*
 :::
@@ -183,7 +159,7 @@ While kinematic trees govern the relative poses of articulated robot links, navi
 
 Beyond discrete kinematic frames, an embodied agent must also maintain continuous volumetric spatial memory to track unobserved obstacles, plan collision-free paths, and support real-time reactive grasping (@fig-09-octomap-volumetric-mapping). Formulated originally by Elfes [@elfes1989using], **occupancy grid mapping**\index{Occupancy grid mapping} models the world as a tessellation of spatial cells, recursively estimating occupancy state under sensor beam models. By executing **volumetric free-space raycasting**\index{Volumetric free-space raycasting} along sensor sightlines, spatial memory actively updates 3D voxel hierarchies (such as OctoMap or OpenVDB [@museth2013vdb]) and updates observed free cells under a sensor model. The foundational algorithm for volumetric raycasting is the 3D Differential Digital Analyzer (3D-DDA) fast voxel traversal [@amanatides1987fast].[^fn-hw-cuda-octree]
 
-[^fn-hw-cuda-octree]: **Branchless DDA raycasting**\index{Hardware!branchless DDA}: On Single Instruction, Multiple Threads (SIMT) GPU architectures, parallel 3D-DDA raycasting encounters execution divergence when adjacent threads within a 32-thread warp traverse spatial voxels of differing depths. High-throughput engines implement branchless DDA traversal, cache active voxel blocks in GPU Shared Memory, and apply atomic integer bitmasks (`atomicOr`) to register spatial updates without global DRAM lock contention. Eliminating warp serialization preserves memory bus bandwidth for concurrent neural network inference.
+[^fn-hw-cuda-octree]: **Branchless DDA raycasting**\index{Hardware!branchless DDA}: On Single Instruction, Multiple Threads (SIMT) GPU architectures, parallel 3D-DDA raycasting encounters execution divergence when adjacent threads within a 32-thread warp traverse spatial voxels of differing depths. High-throughput engines implement branchless DDA traversal, cache active voxel blocks in GPU Shared Memory, and apply atomic integer bitmasks (`atomicOr`) to register spatial updates without global DRAM lock contention.
 
 Crucially, as the ray traverses free space from the sensor to the obstacle, the pipeline asserts **negative evidence**\index{Negative evidence} to clear unoccupied voxels. At the terminal measurement point where the obstacle is detected, positive evidence is integrated.[^fn-math-voxel-raycast] This active assertion of negative evidence along valid sensor sightlines can invalidate a phantom obstacle track when the same region is observed free; occluded space still needs expiry.
 
@@ -369,16 +345,6 @@ At eight bytes of assumed read/write traffic per update, sending all 300 updates
 **Systems insight**: Sparse allocation yields `{python} TSDFVoxelGridBudget.mem_reduction_mult_str` less *modeled TSDF payload* in this surface-fraction scenario; it is not a full-map memory ratio. Bus demand instead depends on measured locality and all traversed-cell work. Whether that demand fits beside policy inference on a shared bus is a placement question. A burst adds to the age of every record queued behind it, and @sec-placement-resource-contention measures whether the permission path survives it.
 :::
 
-::: {#chk-mem-volumetric-dram-bandwidth .callout-checkpoint title="Volumetric spatial memory and DRAM traffic"}
-
-Before sizing 3D spatial representations for real-time navigation, verify your understanding of volumetric scaling, raycasting bandwidth, and DRAM traffic:
-
-- [ ] **Volumetric scaling penalty**: Can you explain why cubic voxel scaling ($\mathcal{O}(N^3)$) makes dense 3D grids silicon-infeasible on embedded edge SoCs when voxel resolution is refined from $1\text{ cm}$ to $5\text{ mm}$?
-- [ ] **Raycast DRAM demand**: Can you explain why un-cached $60\text{ Hz}$ RGB-D raycasting demands `{python} TSDFVoxelGridBudget.dense_bw_str` of DRAM traffic even when the map is sparse, and why a 95 percent measured hit rate, including free-ray occupancy updates, is needed for the illustrated DRAM reduction?
-- [ ] **Negative evidence raycasting**: Can you explain how active line-of-sight raycasting using 3D-DDA clears phantom obstacles without relying on arbitrary software timeout decay?
-
-:::
-
 To integrate incoming sensory point clouds while actively evicting stale obstacle geometry, the spatial memory engine executes the structured raycast update detailed in @algo-volumetric-tsdf-raycast.
 
 ::: {.column-margin}
@@ -455,18 +421,6 @@ For an illustrative 32-layer decoder with 32 heads of width 128 in 16-bit storag
 The cache ceiling is
 $$\text{Memory}_{\text{KV},\max}=2N_{\text{layers}}N_{\text{heads}}d_{\text{head}}(N_{\text{sink}}+W)b_{\text{bytes}}$$ {#eq-mem-kv-cache-bound}
 Applying @eq-mem-kv-cache-bound with $N_{\text{sink}}=4$ and $W=512$ yields a 516-token cache consuming $270{,}532{,}608$ bytes (about $270.5\text{ MB}$). Per-token cached attention work is then $O(N_{\text{sink}}+W)$ and cumulative work over $T$ new tokens is $O(T(N_{\text{sink}}+W))$, aside from model layers and other costs. This bounds cache allocation, not the quality of long-horizon decisions or the deadline of a particular accelerator.
-
-::: {#chk-mem-vla-kv-cache-ring-buffer .callout-checkpoint title="VLA key-value cache growth and ring buffers"}
-
-![](images/svg/chk_mem_vla_kv_cache_ring_buffer.svg){fig-alt="Architecture schematic of a streaming ring-buffer attention KV-cache for Vision-Language-Action policies. Shows permanently pinned initial attention sinks (N_sink = 4) anchoring softmax normalization, an eviction zone where historical middle tokens are discarded, and a rolling circular observation window (W = 512) for incoming multimodal tokens. At the assumed 100 tokens per second, the 512-token window spans 5.12 seconds. An uncapped cache adds about 52.4 MB per second and fills a roughly 4.29 GB allocation in 81.92 seconds using exact byte counts; a 516-token cap uses about 270.5 MB. Attention sinks do not preserve task semantics by themselves." width=100%}
-
-Before deploying streaming vision-language-action policies on resource-constrained hardware, verify your understanding of KV-cache growth, eviction mechanics, and ring-buffer bounds:
-
-- [ ] **Autoregressive memory leakage**: Can you explain why unconstrained Key-Value caching in vision-language-action policies grows linearly in memory and, at the stated token rate and budget, fills the available cache unless tokens are evicted?
-- [ ] **Attention sinks**: Can you describe why attention-sink tokens support the attention mechanism but cannot by themselves preserve task instructions or physical history?
-- [ ] **Complexity bounding**: Can you distinguish between $O(L)$ cached attention work for one new token and $O(L^2)$ cumulative uncapped work from a fixed-window $O(W)$ per-token computation?
-
-:::
 
 For motion permission, spatial representations must carry evidence ages and error limits appropriate to the task and operating region. Extending the proposal-permission architecture from @sec-brain-embodied, a representation without an epoch is an unverified assertion, and an estimate whose age exceeds task tolerance must be excluded from motion proposals before the independent permission tier considers actuator commands. When direct geometric observations become unavailable, the machine cannot simply halt every operation at the first missed sensor frame. Extending action across brief sensing gaps requires estimators that propagate physical belief forward until new measurements arrive to confirm or correct the state.
 
@@ -689,16 +643,6 @@ plt.show()
 
 :::
 
-::: {#chk-mem-occlusion-invalidation-horizon .callout-checkpoint title="Occlusion covariance and invalidation horizon"}
-
-Before examining empirical covariance calibration and operational decay tables, verify your understanding of occlusion horizons:
-
-- [ ] **Physical invalidation horizon**: Can you explain why the shelf life of a spatial belief during sensor occlusion is a physical property set by task clearance and disturbance dynamics rather than an arbitrary software timeout?
-- [ ] **Disturbance acceleration hazards**: Can you describe why linear constant-velocity extrapolation underestimates physical error growth, causing controllers to continue executing open-loop motions past the true expiration deadline?
-- [ ] **Tolerance sensitivity**: Can you distinguish between the gentle invalidation horizons permitted by generous macro-clearances versus the rapid, sub-control-frame expirations imposed by precision micro-clearance assemblies?
-
-:::
-
 An estimator's internal **covariance matrix**\index{Covariance matrix} reflects its stochastic model, not a measured hard maximum. A safety argument has two different choices. A **bounded-disturbance** envelope needs justified limits on initial error, velocity, acceleration, clock conversion, and mode changes; then the `{python} RackEndBelief.t_exp_str` rack-end root and the 66 ms latch-slot root are conditional worst-case deadlines within that region. Alternatively, staged dropouts and external ground truth can calibrate a specified residual quantile (for example $P_{99}$ or $P_{99.9}$) under a named test distribution. That yields a probabilistic admission limit with a one-percent or 0.1-percent tail before other model and coverage errors, not a guarantee. The record and consumer must declare which regime applies, monitor its validity region, and refuse dependent motion or choose a validated feasible fallback when evidence exceeds it.
 
 Either regime yields the same kind of deadline. Stated for any validated envelope rather than the quadratic model alone, the invalidation horizon of \ref{dfn-memory-belief-invalidation-horizon} is the earliest time at which that envelope reaches the physical task tolerance:
@@ -792,21 +736,13 @@ The record in @tbl-09-invalidation-epochs separates publication time from cell e
 
 A voxel map also has a publication time, but that time does not date each voxel. A path query checks the evidence age and state of every occupancy or clearance cell it uses, including gaps marked unknown. A new scan on the far side of the workcell cannot renew a cell hidden behind the robot. Negative free-space evidence updates only cells actually traversed by a valid ray; it does not clear a volume behind its terminal return.
 
-::: {#capstone-memory-humanoid-crucible .callout-perspective title="Blind-spot terrain memory for footsteps"}
-For a bipedal humanoid walking over irregular or cluttered terrain, spatial memory is not an abstract database—it is a non-negotiable prerequisite for physical balance:
+::: {#chk-mem-observability-state-schema .callout-checkpoint title="Belief expiry, observability, and the belief record"}
 
-* **Self-Occlusion and Blind-Spot Stepping:** A humanoid's forward-facing head cameras cannot see the terrain directly beneath its feet or behind its pelvis due to occlusion by its own chest, arms, and thighs. Consequently, every forward footstep descends blindly onto terrain that was observed 1.5 to 3.0 seconds earlier when it was still within the camera's forward field of view. The robot must rely completely on a local 2.5D elevation map and affordance memory stored in spatial belief records.
-* **Kinematic Drift and False Footing:** In the seconds between when a stair edge or rock was visually observed and when the swing foot makes contact, accumulated floating-base odometry drift ($e_{\text{drift}} > 3\text{ cm}$) distorts the remembered terrain elevation. If the spatial memory overconfidently reports the ground surface 3 cm higher than it physically is, the swing foot initiates ground contact deceleration prematurely in mid-air, throwing off swing phase momentum. Conversely, if memory reports the ground lower, the foot strikes the surface with high velocity, transmitting an unbudgeted impact impulse that causes the support leg to buckle.
-* **Per-Voxel Expiry and Dynamic Obstacles:** If a rolling ball or another person moves into the humanoid's blind spot after the head camera has panned away, static voxel grids fail catastrophically. The humanoid memory architecture must associate every elevation cell with an explicit evidence epoch ($t_0$) and confidence decay envelope ($\tau_{\text{decay}}$). When evidence decays beyond threshold before foot touchdown, the stepping planner must widen its impedance margins or execute an exploratory tactile foot search rather than committing full weight to an unverified memory.
-:::
+Before examining common spatial belief fallacies and failure modes, verify your understanding of belief expiry, observability limits, and the belief record:
 
-::: {#chk-mem-observability-state-schema .callout-checkpoint title="Observability bounds and state lifecycle contracts"}
-
-Before examining common spatial belief fallacies and failure modes, verify your understanding of observability limits and state schema invariants:
-
+- [ ] **Physical invalidation horizon**: Can you explain why the shelf life of a spatial belief during occlusion is set by task clearance and bounded disturbance rather than by a software timeout, and why a constant-velocity extrapolation admits the belief past its deadline?
 - [ ] **Unobservable manifold hazards**: Can you explain why zero innovation residuals ($\tilde{y} = 0$) fail to detect sensor bias drift caused by motor thermal heating ($I^2 R$ Joule heating) along an unobservable degree of freedom?
 - [ ] **State lifecycle state machine**: Can you trace the deterministic transitions between `VALID`, `DEGRADED`, `EXPIRED`, and `UNOBSERVABLE`, explaining why a state record must never revert to `VALID` without a fresh hardware evidence epoch $t_0$?
-- [ ] **Provenance validation**: Can you describe why intermediate compute nodes (planners, filters, message bridges) must be forbidden from updating $t_0$ when forward-propagating estimates across occlusions?
 
 :::
 

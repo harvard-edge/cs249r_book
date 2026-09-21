@@ -94,8 +94,6 @@ An advisory model that only displays a recommendation has no direct path to a mo
 
 [^fn-math-idempotency-physical]: **Idempotency**\index{Idempotency}: Repeating an idempotent operation has the same specified result as executing it once. A motor setpoint command can have idempotent command semantics, but repeated execution may still dissipate energy. Idempotency does not imply reversibility or harmlessness.
 
-[^fn-bridge-control-state]: **Control State vs. Latent ML State**\index{State!control vs. machine learning}: In classical control, state $\mathbf{x}(t)$ is strictly defined as the minimal set of physical coordinates and velocities required to compute future system trajectories. In contrast, deep learning literature frequently conflates state with high-dimensional latent activations or history windows. Relying on latent representations without observable physical derivatives ($dq/dt$) prevents control barriers from proving forward invariance.
-
 Physical artificial intelligence eliminates that detachment. In a physical machine, the final instruction of a control loop does not write to a screen or populate a web response. For a machine learning systems engineer accustomed to writing `action = policy(observation)` in PyTorch, the causal boundary is where floating-point tensors meet physical silicon. The policy's output tensor—typically an action chunk predicting a sequence of upcoming waypoints (joint positions, velocities, or 6-DOF Cartesian poses)[^fn-action-chunk-repr]—cannot execute directly on physical motors.
 
 [^fn-action-chunk-repr]: **Action Chunk Representations**\index{Action Chunk Representations}: In robot learning literature [@zhao2023learning], action chunks are typically tensors of shape $[B, H, d_a]$ where $B$ is batch size, $H$ is the planning prediction horizon, and $d_a$ is action dimension (such as target joint positions $\hat{\mathbf{q}} \in \mathbb{R}^d$ or 3D Cartesian position and orientation deltas). The formal Lie group formulation ($SE(3)$) is deferred to @sec-appendix-control-spatial.
@@ -112,7 +110,7 @@ An independent check must stand between a learned proposal and the actuator comm
 
 :::
 
-Transitioning from digital state to physical force destroys the statistical foundation of classical machine learning. In offline vision, natural language processing, and tabular prediction, data collection is exogenous: the world generates a distribution of inputs, and the model processes them without altering the mechanism that created them. In a physical system, the environment evolves in a closed causal loop: the next physical state[^fn-bridge-control-state] and sensor observation depend directly on the action produced by the prior model inference.
+Transitioning from digital state to physical force destroys the statistical foundation of classical machine learning. In offline vision, natural language processing, and tabular prediction, data collection is exogenous: the world generates a distribution of inputs, and the model processes them without altering the mechanism that created them. In a physical system, the environment evolves in a closed causal loop: the next physical state and sensor observation depend directly on the action produced by the prior model inference.
 
 ::: {.column-margin .margin-pointer}
 ↳ **Downstream:** The non-smooth contact mechanics and torque saturation limits governing motor irreversibility are derived in @sec-body-actuator-limits.
@@ -464,16 +462,6 @@ class MachineMomentum:
 
 To see the consequences of this scaling, return to the warehouse base cruising at its `{python} MachineMomentum.v_str` drive limit toward a rack end where a person has stepped out. Loaded with its tote rack, its mass is at most `{python} MachineMomentum.m_loaded_str`, and it carries `{python} MachineMomentum.e_kinetic_str` of kinetic energy, which braking must shed through the grip of its wheels on the floor. At a credible deceleration of `{python} MachineMomentum.a_brake_str`, braking alone takes `{python} MachineMomentum.d_brake_str` of floor. The `{python} MachineMomentum.blind_str` of blind travel during the pre-brake delay comes before any of that braking, adding `{python} MachineMomentum.blind_share_str` to the distance. The two terms answer to different design choices. A larger model that lengthens the delay lengthens the blind travel in proportion, whereas doubling the cruising speed would quadruple both the energy and the braking distance. The machine therefore does not let a learned model's latency set its stopping distance. An independent check bounds how long the base may keep acting on a proposal that has not been renewed, and @sec-nervous sizes that bound from the stopping budget.
 
-::: {#chk-boundary-latency-budget .callout-checkpoint title="The inelastic latency budget"}
-
-Before analyzing contact-dominated mechanics, verify your understanding of how computational latency translates into physical space:
-
-- [ ] **Sense-to-actuation lag**: Can you explain why the delay $\tau_{\text{delay}}$ from frame capture to braking onset becomes blind travel $v\,\tau_{\text{delay}}$ that no braking can recover?
-- [ ] **Nonlinear stopping scaling**: Can you describe why doubling the vehicle velocity quadruples the physical braking distance while linearly expanding the reaction distance?
-- [ ] **Model scaling trade-offs**: Can you distinguish between a software system where extra inference latency merely delays screen rendering and a physical robot where extra latency directly consumes physical safety margin?
-
-:::
-
 ### Class 2: Manipulation systems
 
 Class 2 machines apply mechanical force through contact, limited by actuator torque saturation, environmental stiffness, and current loop bandwidth—how quickly the motor controller senses and regulates electrical current to control torque (@fig-01-three-archetypes b, @fig-01-real-three-archetypes b). In articulated manipulators, precision assembly fixtures, and robot learning workcells executing contact-rich insertion and grasping, the end-effector interacts directly with a rigid or compliant workpiece. Unlike a mobile platform, an arm in contact with a surface cannot resolve unexpected displacement by rolling forward. When an actuator commands position into a rigid boundary, physical displacement is blocked, and the interaction acts like a compressed spring governed by mechanical impedance. By Hooke's law, the contact force generated by a spatial penetration error $\Delta x$ against an environment of stiffness $k$ is $F = k \Delta x$.[^fn-math-contact-lcp]
@@ -534,16 +522,6 @@ class LatchContact:
 ```
 
 Contact stiffness can make a held motion command expensive before the high-level planner returns. Consider the arm of the same warehouse mobile manipulator driving its gripper toward the strike plate of a spring-latched door at `{python} LatchContact.v_str`, and suppose its low-level controller keeps executing that command while the high-level process stalls for `{python} LatchContact.t_stall_str`. The plate acts as a spring of stiffness `{python} LatchContact.k_str`, the latch tolerates at most `{python} LatchContact.f_limit_str` of contact force, and the arm is assumed to have enough torque to keep moving through contact. Under these assumptions the plate deflects by $\Delta x = v \cdot \Delta t =$ `{python} LatchContact.dx_str`, and the spring model gives $F = k \cdot \Delta x =$ `{python} LatchContact.force_str`, `{python} LatchContact.force_ratio_str` times the limit. Motor saturation, compliance elsewhere, or a controller that stops on stale commands would change that result. Against a plate this stiff, the time available to detect contact and bring commanded motion within the limit is a matter of milliseconds, far shorter than any planner stall, and @sec-training derives that budget for this plate.
-
-::: {#chk-boundary-contact-stiffness .callout-checkpoint title="Contact stiffness and operating system stalls"}
-
-Before exploring continuous flow and energy archetypes, verify your understanding of contact mechanics and execution timing:
-
-- [ ] **Hookean force rise**: Can you explain why contact with stiff environments ($k \ge 10^5\text{ N/m}$) converts sub-millimeter position errors into structural shock loads that exceed gearbox yield limits?
-- [ ] **Operating system latency vs. reflex loop**: Under what held-command, compliance, and torque assumptions does a $75\text{ ms}$ stall exceed the illustrative contact-force limit?
-- [ ] **Asymmetric authority**: Can you distinguish the operational responsibilities of a $20\text{ Hz}$ neural motion planner from a $1\text{ kHz}$ bare-metal torque-clamping reflex loop during unexpected collision?
-
-:::
 
 ### Class 3: Process and energy systems
 
@@ -606,16 +584,6 @@ Beyond moving linkages and contacts, Class 3 machines regulate continuous fluid,
 ↳ **Downstream:** Preemption of proposal streams across the causal boundary is arbitrated by the supervisor state machine in @sec-intervention-authority-transitions.
 :::
 
-::: {#chk-boundary-thermal-capacitance .callout-checkpoint title="Thermal capacitance and grid phase alignment"}
-
-Before analyzing multi-physics capstone systems, verify your understanding of continuous flow dynamics and thermal/electrical budgets:
-
-- [ ] **Thermal capacitance time constants**: Can you explain how thermal inertia and transport lag dictate temperature rise ($\Delta T = \int \frac{P}{C_{\text{th}}} \, dt$) when coolant pumps or valve scheduling loops stall?
-- [ ] **Grid phase alignment deadlines**: Can you convert a $1\text{ ms}$ delay on a $60\text{ Hz}$ grid into phase error and explain what additional impedance and protection data would set a current limit?
-- [ ] **Continuous flow vs. kinematic state**: Can you contrast systems bounded by spatial clearance or contact force against process systems bounded by mass-energy balances, enthalpy transport, and phase synchronization?
-
-:::
-
 ### Class 4: Integrative capstone systems
 
 A central question for physical AI architects is: *Where do complex general-purpose embodiments, such as humanoid robots, fit into this taxonomy?*
@@ -627,26 +595,16 @@ A humanoid robot is not a simple variation of a single machine class. Rather, it
 3. **Class 3 Dynamics in Actuation & Power Delivery:** Driving 20 to 50 high-torque actuators simultaneously from a single onboard DC battery pack pushes inverter thermal dissipation ($I_{\text{phase}}^2 R_{\text{phase}}$) to its limits. Rapid simultaneous current spikes ($dI_{\text{bus}}/dt$) across the parasitic inductance ($L_{\text{bus}}$) of internal wiring harnesses induce severe inductive voltage droop ($\Delta V = L_{\text{bus}} \frac{dI_{\text{bus}}}{dt}$). This transient bus sag can brown out onboard coprocessors precisely during leg impact absorption or high-torque disturbance recovery.
 
 ::: {#capstone-boundary-humanoid-crucible .callout-perspective title="The humanoid crucible"}
-A humanoid couples stopping clearance, contact force, and electrical power on one chassis. When a hand catches a load, the contact force can demand a balancing step whose motor currents also draw down the shared supply:
+A humanoid couples stopping clearance, contact force, and electrical power on one chassis, so a demand in one regime becomes a demand in the other two within a single step. When a hand catches an unexpected load:
 
-* **Momentum–Contact Coupling (Classes 1 & 2):** When a $65\text{ kg}$ bipedal robot catches an unexpected $12\text{ kg}$ payload with its hands, the sudden contact force (Class 2) introduces a high-torque disturbance ($>180\text{ N}\cdot\text{m}$) that immediately perturbs its inverted-pendulum center of mass. To avoid tipping, the underactuated floating base must synthesize a dynamic recovery step within $180\text{ ms}$, converting a contact problem into a momentum-braking problem (Class 1).
-* **Kinematic–Thermal Contention (Classes 1, 2 & 3):** That single dynamic recovery step demands peak current bursts ($>45\text{ A}$ per phase) across hip and knee actuators. In an enclosed humanoid torso and leg casing without external cooling fans, continuous locomotion generates rapid $I_{\text{phase}}^2 R_{\text{phase}}$ Joule heating ($\Delta T = \frac{P \cdot t}{C_{\text{th}}}$), pushing winding temperatures toward insulation limits ($125^\circ\text{C}$) and forcing the nervous system to derate available torque precisely when maximum authority is needed to sustain balance.
-* **Electrical Bus Transients ($\Delta V = L_{\text{bus}} \, dI_{\text{bus}}/dt$):** Driving thirty to fifty high-bandwidth actuators simultaneously from a single internal $48\text{ V}$ lithium-ion bus creates sharp current transients ($dI_{\text{bus}}/dt > 100\text{ A/ms}$). The parasitic inductance of dense wiring harnesses creates voltage droops that can brown out the vision-language deliberate coprocessor unless power domains and real-time safety microcontrollers are physically decoupled.
+* **Contact becomes momentum (Classes 1 and 2):** The contact force perturbs the center of mass, and the robot must place a recovery step before it tips, turning a contact problem into a braking problem.
+* **Momentum becomes heat (Classes 1 and 3):** The recovery step draws peak current through the hip and knee drives, and winding temperature forces the drives to derate torque when balance needs it most.
+* **Current becomes brownout (Class 3):** The same current transient sags the shared battery bus and can reset the computer running the learned models in mid-step unless its power domain is decoupled from the drives.
 
 Each part of this book ends by testing its law on a humanoid.
 :::
 
-While a single-class machine (such as a wheeled AMR or a fixed industrial arm) isolates its physical budget to a single dominant conservation law, a humanoid robot forces the systems architect to manage **cross-class coupled contention**\index{Cross-Class Coupled Contention}. When a bipedal robot catches a falling heavy object, the contact force (Class 2) shifts its center of mass, requiring an instantaneous balancing recovery step (Class 1) that draws peak phase currents threatening to collapse the electrical bus and overheat the knee actuators (Class 3). A landing transient on a battery bus shared by the motor drives and the onboard computer can pull the compute supply below its brownout threshold and reset the processor in mid-step, which is why high-capacity neural computers cannot share unbuffered, inductive power rails with high-torque motor drives (@sec-body-power-integrity quantifies the droop).
-
-::: {#chk-boundary-inductive-droop .callout-checkpoint title="Inductive rail droop and processor brownouts"}
-
-Before applying the Physical AI scope test, verify your understanding of multi-physics interactions and electrical bus transients:
-
-- [ ] **Lumped bus inductance**: Can you explain how sudden actuator current surges ($dI_{\text{bus}}/dt$) during dynamic locomotion generate inductive voltage droop ($\Delta V = L_{\text{bus}} \, dI_{\text{bus}}/dt$) across lumped loop inductance (interconnects, fuses, contactors, cable loops)?
-- [ ] **Brownout vulnerability**: Can you describe how transient voltage sags on high-torque motor buses can reset digital coprocessors and trigger unrecoverable mechanical collapse?
-- [ ] **Power domain decoupling**: Can you distinguish the architectural mechanisms required to protect digital computing boards from motor back-EMF spikes and inductive rail collapse?
-
-:::
+While a single-class machine (such as a wheeled AMR or a fixed industrial arm) isolates its physical budget to a single dominant conservation law, a humanoid robot forces the systems architect to manage **cross-class coupled contention**\index{Cross-Class Coupled Contention}, in which no one budget can be sized without the other two (@sec-body-power-integrity quantifies the bus droop).
 
 For any Physical AI system, engineering the nervous system begins by determining which physical budget is exhausted first during a failure. In software systems, resource constraints center on processor cycles, memory allocation, and network bandwidth. In physical systems, the systems architect must identify whether spatial clearance, structural stress, or heat dissipation creates the critical timing deadline. In a high-speed vehicle or quadruped, spatial clearance fails within fractions of a second while motor winding temperatures remain safely below thermal limits. In an assembly press, mechanical stress exceeds the yield point of structural members within tens of milliseconds long before the chassis moves perceptibly or heats up. In a chemical reactor or battery pack, mechanical stress is negligible, but accumulated thermal energy breaches safe operational envelopes over several seconds. The shortest time to failure across these three domains defines the deterministic execution deadline that the nervous system must meet.
 
@@ -690,13 +648,13 @@ Evaluating an ambiguous machine requires a three-step decision rubric that tests
 
 : **The Physical AI scope test decision matrix**:  Systematic evaluation of representative engineering systems across the three joint criteria (Learned Model, Consequential Physical Feedback, and Delegated Physical Authority), establishing the governing engineering discipline, limiting physical factors, and primary failure modes for each candidate. {#tbl-01-scope-matrix tbl-colwidths="[18,16,16,18,15,17]"}
 
-::: {#chk-boundary-scope-test .callout-checkpoint title="Applying the physical AI scope test"}
+::: {#chk-boundary-scope-test .callout-checkpoint title="Binding budgets and the scope test"}
 
-Before examining the five-level machine, verify your diagnostic ability to categorize ambiguous autonomous machines:
+Before examining the five-level machine, verify that you can place an unfamiliar machine by its binding budget and by the scope test:
 
-- [ ] **Three-criteria scope evaluation**: Can you evaluate whether an automated system qualifies as Physical AI by testing for the simultaneous presence of an unspecifiable learned model, consequential physical feedback, and delegated actuator authority?
-- [ ] **Digital autonomy vs. physical embodiment**: Can you explain why a high-frequency algorithmic trading system executing automated market orders under a deep transformer policy falls outside the scope of Physical AI?
-- [ ] **Shared autonomy reflex boundary**: Can you identify why a haptic surgical tool or lane-centering assist transitions into Physical AI whenever software actuation authority acts within the $150\text{--}250\text{ ms}$ human neuromuscular reflex interval?
+- [ ] **Blind travel and braking**: Can you explain why the pre-brake delay $\tau_{\text{delay}}$ becomes blind travel $v\,\tau_{\text{delay}}$ that no braking can recover, and why doubling speed quadruples the braking term but only doubles the delay term?
+- [ ] **First budget to exhaust**: Can you name which budget runs out first, and on roughly what timescale, for a mobile base, for an arm pressing against a stiff latch plate, and for a stalled cooling loop, and explain why a humanoid couples all three?
+- [ ] **Three-criteria scope test**: Can you test an automated system for a learned model, consequential physical feedback, and delegated physical authority, and explain why a trading engine falls outside Physical AI while a shared-autonomy surgical tool falls inside whenever it can apply force before the surgeon can react?
 
 :::
 
@@ -860,9 +818,7 @@ Before studying the four bedrock laws, verify your understanding of the failure 
 - [ ] **Classification changes and path prediction**: Can you explain how classification changes caused the ADS path predictor to omit earlier object locations, despite continued tracking?
 - [ ] **Software suppression vs. kinematic clearance**: Can you distinguish the $T-1.2\text{ s}$ recognition time from the one-second suppression period and compare the idealized stopping distance with travel remaining at $T-0.2\text{ s}$?
 - [ ] **Safety redundancy**: Can you explain why disabling factory collision warning and emergency braking removed a layer of protection from a developmental ADS?
-- [ ] **Dual-failure poles across the boundary**: Can you contrast the pre-impact failure mode (suppressing braking due to classification thrashing) with the post-impact failure mode (a fallback that moved the vehicle while a pedestrian was pinned beneath it)?
 
-*If any check reveals uncertainty, review the forensic autopsy in this section before proceeding to the four laws.*
 :::
 
 ## The Four Bedrock Laws {#sec-boundary-bedrock-laws}
@@ -910,16 +866,6 @@ Traditional software authorization models fail in physical machines because capa
 [^fn-ctrl-reachable-set]: **Forward-Invariant Reachable Sets**\index{Reachable Set!forward invariance}: A modeled set of physical states (positions, velocities, and temperatures) from which an admissible controller can keep the plant within specified bounds under stated disturbances and actuator limits [@mitchell2005time]. Admission against this set is meaningful only while those state, plant, and timing premises hold.
 
 Accountability requires proving the exact causal chain that led to actuation when a machine damages hardware or breaches an envelope. In standard computing systems, logging is asynchronous, best-effort, and coarse-grained, dropping records during buffer pressure or recording timestamps with millisecond jitter. At the causal boundary, accountability demands deterministic, high-rate telemetry captured synchronously with the control loop. If a joint actuator commands $1000\text{ Hz}$ updates with a $1\text{ ms}$ deadline, the permission gate must record the raw candidate vector proposed by the model, the state estimate used by the gate, the mathematical criterion applied by the safety filter, and the exact vector written to the hardware registers. Sealing these records in tamper-evident, append-only circular buffers in non-volatile SRAM/FRAM—memory that survives a sudden power loss when a safety breaker trips—provides post-incident reconstruction. When an anomaly occurs, an engineer can verify mathematically whether the failure originated in a corrupted sensor reading, a degraded policy proposal, an erroneous permission rule, or a mechanical component that failed to produce the commanded counter-torque.
-
-::: {#chk-boundary-safety-convergence .callout-checkpoint title="State-dependent authority and causal accountability"}
-
-Before reviewing the roadmap for the entire textbook, verify your understanding of safety, security, and accountability at the causal boundary:
-
-- [ ] **State-dependent physical authority**: Can you explain why traditional stateless software permissions (such as RBAC or API capability tokens) fail to protect a dynamic physical robot whose allowable torque depends continuously on joint velocity and distance to hard stops?
-- [ ] **Sensor physics injection attacks**: Can you describe how an adversary can manipulate physical actuation without compromising operating system root credentials by exploiting acoustic resonance ($18\text{--}32\text{ kHz}$) in MEMS gyroscopes?
-- [ ] **Deterministic post-incident accountability**: Can you identify why post-incident reconstruction requires capturing candidate proposals, barrier criteria, and executed register commands synchronously in non-volatile SRAM/FRAM circular buffers?
-
-:::
 
 ## The Architecture of This Book {#sec-boundary-book-architecture}
 
