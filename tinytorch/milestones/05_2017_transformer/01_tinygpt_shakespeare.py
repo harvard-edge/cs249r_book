@@ -217,6 +217,29 @@ def build_model(vocab_size, embed_dim=64, num_layers=2, num_heads=4, max_seq_len
     return model, total_params
 
 
+def train_epoch(model, dataloader, criterion, optimizer, vocab_size=None):
+    """Train TinyGPT for one epoch of next-token prediction with flattened sequence loss."""
+    total_loss = 0.0
+    total_tokens = 0
+    v_size = vocab_size if vocab_size is not None else getattr(model, "vocab_size", None)
+
+    for inputs, targets in dataloader:
+        optimizer.zero_grad()
+        logits = model(inputs)
+        cur_vocab = v_size if v_size is not None else logits.shape[-1]
+        logits_flat = logits.reshape(-1, cur_vocab)
+        targets_flat = targets.reshape(-1)
+        loss = criterion(logits_flat, targets_flat)
+        loss.backward()
+        optimizer.step()
+
+        batch_tokens = targets.data.size
+        total_loss += float(loss.data) * batch_tokens
+        total_tokens += batch_tokens
+
+    return total_loss / total_tokens if total_tokens > 0 else 0.0
+
+
 def generate_continuation(model, tokenizer, prompt, max_new_tokens=40, temperature=0.8):
     """Autoregressively extend prompt tokens using TinyGPT's generation loop."""
     prompt_ids = tokenizer.encode(prompt)
@@ -321,7 +344,6 @@ def run_milestone(args=None):
     # ─────────────────────────────────────────────────────────────────────────
     optimizer = AdamW(model.parameters(), lr=2e-3, weight_decay=0.01)
     loss_fn = CrossEntropyLoss()
-    trainer = Trainer(model, optimizer, loss_fn)
 
     console.print("[bold]🚀 Training TinyGPT from Scratch (Next-Token Prediction)...[/bold]")
 
@@ -339,7 +361,7 @@ def run_milestone(args=None):
         task = progress.add_task("[cyan]Training epochs...", total=epochs)
 
         for epoch in range(epochs):
-            loss = trainer.train_epoch(dataloader)
+            loss = train_epoch(model, dataloader, loss_fn, optimizer, vocab_size=vocab_size)
             perplexity = np.exp(min(loss, 20.0))
             history.append((epoch + 1, loss, perplexity))
             progress.update(task, advance=1, description=f"[cyan]Epoch {epoch+1}/{epochs} - Loss: {loss:.4f} (PPL: {perplexity:.1f})")

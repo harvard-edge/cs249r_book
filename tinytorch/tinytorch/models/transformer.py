@@ -31,13 +31,35 @@ import numpy as np
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.embeddings import EmbeddingLayer
-from tinytorch.core.transformers import (
-    LayerNorm,
-    TransformerBlock,
-    create_causal_mask,
-    sample_next_token,
-    generate,
-)
+def _get_transformer_components():
+    global LayerNorm, TransformerBlock, create_causal_mask, sample_next_token, generate
+    try:
+        from tinytorch.core import transformers as _tf
+        if getattr(_tf, "LayerNorm", None) is not None:
+            LayerNorm = _tf.LayerNorm
+            TransformerBlock = _tf.TransformerBlock
+            create_causal_mask = _tf.create_causal_mask
+            sample_next_token = _tf.sample_next_token
+            generate = _tf.generate
+            return LayerNorm, TransformerBlock, create_causal_mask, sample_next_token, generate
+    except ImportError:
+        pass
+
+    import sys
+    _main = sys.modules.get("__main__")
+    if _main is not None:
+        if getattr(_main, "LayerNorm", None) is not None:
+            LayerNorm = getattr(_main, "LayerNorm")
+            TransformerBlock = getattr(_main, "TransformerBlock")
+            create_causal_mask = getattr(_main, "create_causal_mask")
+            sample_next_token = getattr(_main, "sample_next_token")
+            generate = getattr(_main, "generate")
+
+    return LayerNorm, TransformerBlock, create_causal_mask, sample_next_token, generate
+
+
+LayerNorm = TransformerBlock = create_causal_mask = sample_next_token = generate = None
+_get_transformer_components()
 
 rng = np.random.default_rng(7)
 
@@ -58,6 +80,7 @@ class GPT:
         num_heads: int,
         max_seq_len: int = 1024,
     ):
+        _get_transformer_components()
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.num_layers = num_layers
@@ -80,6 +103,7 @@ class GPT:
 
     def forward(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
         """Forward pass through GPT model."""
+        _get_transformer_components()
         batch_size, seq_len = tokens.shape
 
         # Token + positional embeddings

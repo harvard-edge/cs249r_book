@@ -945,9 +945,9 @@ $$P(w_i) = \frac{\exp(z_i / T)}{\sum_{j=1}^V \exp(z_j / T)}$$
 Two notes on that table. The $4\times$ expansion this module builds is an empirical convention, not a law, and the newest models have already left it. Llama 3's $d_{\text{ff}} = 14{,}336$ is $3.5d$ rather than $4d$ because SwiGLU splits the up-projection across three matrices instead of two, so a smaller width holds the same parameter budget. Llama 3 8B also needs more than $16\text{ GB}$ in practice, since $16\text{ GB}$ is exactly its FP16 weights with nothing left for the KV cache or activations.
 """
 
-# # %% [markdown]
+# %% [markdown]
 r"""
-## 🎲 Autoregressive Generation & Token Sampling
+### 🎲 Autoregressive Generation & Token Sampling
 
 Language models generate text by iteratively predicting the probability distribution of the next token, sampling a token, and appending it to the sequence context.
 
@@ -967,6 +967,15 @@ def sample_next_token(logits: np.ndarray, temperature: float = 1.0, rng: Any = N
 
     Returns:
         Sampled token index as an integer.
+
+    TODO: Implement temperature-scaled token sampling.
+
+    APPROACH:
+    1. Validate that temperature is finite and non-negative.
+    2. Flatten logits; if temperature is 0, return argmax (greedy decoding).
+    3. Center logits by subtracting max(logits) for numerical stability.
+    4. Scale by temperature, exponentiate, and normalize to get probabilities.
+    5. Sample a token index using the categorical probability distribution.
     """
     ### BEGIN SOLUTION role="scaffold"
     # Apply temperature scaling
@@ -1040,7 +1049,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 r"""
-## 🔤 Autoregressive Generation Loop
+### 🔤 Autoregressive Generation Loop
 
 The `generate()` function drives any causal language model token-by-token.
 """
@@ -1062,6 +1071,18 @@ def generate(model: Any, prompt_tokens: Tensor, max_new_tokens: int = 50,
 
     Returns:
         Tensor of shape (1, prompt_len + max_new_tokens)
+
+    TODO: Implement autoregressive generation loop.
+
+    APPROACH:
+    1. Validate prompt shape, max_new_tokens, and total length against max_seq_len.
+    2. Maintain current tokens initialized from prompt_tokens.
+    3. In a loop for max_new_tokens iterations:
+       - Run model.forward(current_tokens) to get sequence logits.
+       - Extract logits for the last token position.
+       - Call sample_next_token to sample the next token ID.
+       - Append the new token to current_tokens along the sequence dimension.
+    4. Return the completed token sequence as a Tensor.
     """
     ### BEGIN SOLUTION role="scaffold"
     if len(prompt_tokens.shape) != 2 or prompt_tokens.shape[0] != 1 or prompt_tokens.shape[1] == 0:
