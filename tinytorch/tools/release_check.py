@@ -814,10 +814,13 @@ def g_journey():
     )
     with tempfile.TemporaryDirectory(dir=ROOT, prefix="tinytorch-progression-") as tmp:
         package = pathlib.Path(tmp) / "tinytorch"
-        for subdir in ("", "core", "perf"):
+        for subdir in ("", "core", "perf", "models"):
             target = package / subdir
             target.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(ROOT / "tinytorch" / subdir / "__init__.py", target / "__init__.py")
+            if (ROOT / "tinytorch" / subdir / "__init__.py").exists():
+                shutil.copyfile(ROOT / "tinytorch" / subdir / "__init__.py", target / "__init__.py")
+        if (ROOT / "tinytorch" / "models").exists():
+            shutil.copytree(ROOT / "tinytorch" / "models", package / "models", dirs_exist_ok=True)
         env = os.environ.copy()
         env.update(PYTHONPATH=tmp, MPLBACKEND="Agg", TINYTORCH_QUIET="1")
         for path in notebook_paths():
