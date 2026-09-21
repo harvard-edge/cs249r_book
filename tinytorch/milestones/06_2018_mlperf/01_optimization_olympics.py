@@ -702,16 +702,15 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
 
     t1 = Table(box=box.ROUNDED)
     t1.add_column("Candidate", style="yellow")
-    t1.add_column("Memory Footprint", justify="right")
-    t1.add_column("Test Accuracy", justify="center")
-    t1.add_column("Latency (Mean ± Std)", justify="right")
-    t1.add_column("P95 Latency", justify="right")
+    t1.add_column("Memory", justify="right")
+    t1.add_column("Accuracy", justify="center")
+    t1.add_column("Latency", justify="right")
     t1.add_column("Status", justify="center")
     for r in mlp_records:
         is_p = r[0] in mlp_frontier
-        status_str = "[bold green]★ Pareto[/bold green]" if is_p else "[dim]● Dominated[/dim]"
+        status_str = "[bold green]★ Pareto (Peak)[/bold green]" if r[0] == "INT8 Quantized" else ("[bold green]★ Pareto[/bold green]" if is_p else "[dim]● Dominated[/dim]")
         res = r[2]
-        t1.add_row(r[0], f"{r[1]:,} B", r[3], f"{res['mean_latency']:.3f} ± {res['std_latency']:.3f} ms", f"{res['p95_latency']:.3f} ms", status_str)
+        t1.add_row(r[0], f"{r[1]:,} B", r[3], f"{res['mean_latency']:.3f} ms", status_str)
     console.print(t1)
 
 
@@ -771,16 +770,15 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
 
     t2 = Table(box=box.ROUNDED)
     t2.add_column("Candidate", style="yellow")
-    t2.add_column("Memory Footprint", justify="right")
-    t2.add_column("Signal Fidelity", justify="center")
-    t2.add_column("Latency (Mean ± Std)", justify="right")
-    t2.add_column("P95 Latency", justify="right")
+    t2.add_column("Memory", justify="right")
+    t2.add_column("Fidelity", justify="center")
+    t2.add_column("Latency", justify="right")
     t2.add_column("Status", justify="center")
     for r in cnn_records:
         is_p = r[0] in cnn_frontier
-        status_str = "[bold green]★ Pareto[/bold green]" if is_p else "[dim]● Dominated[/dim]"
+        status_str = "[bold green]★ Pareto (Peak)[/bold green]" if r[0] == "INT8 Quantized" else ("[bold green]★ Pareto[/bold green]" if is_p else "[dim]● Dominated[/dim]")
         res = r[2]
-        t2.add_row(r[0], f"{r[1]:,} B", r[3], f"{res.mean:.3f} ± {res.std:.3f} ms", f"{res.percentile(95):.3f} ms", status_str)
+        t2.add_row(r[0], f"{r[1]:,} B", r[3], f"{res.mean:.2f} ms", status_str)
     console.print(t2)
 
 
@@ -860,16 +858,15 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
 
     t3 = Table(box=box.ROUNDED)
     t3.add_column("Serving Strategy", style="yellow")
-    t3.add_column("Memory Footprint", justify="right")
-    t3.add_column("Signal Fidelity", justify="center")
-    t3.add_column("Replay Latency (Mean ± Std)", justify="right")
-    t3.add_column("P95 Latency", justify="right")
+    t3.add_column("Memory", justify="right")
+    t3.add_column("Fidelity", justify="center")
+    t3.add_column("Latency", justify="right")
     t3.add_column("Status", justify="center")
     for r in gpt_records:
         is_p = r[0] in gpt_frontier
-        status_str = "[bold green]★ Pareto[/bold green]" if is_p else "[dim]● Dominated[/dim]"
+        status_str = "[bold green]★ Pareto (Peak)[/bold green]" if r[0] == "Full Stack (Quant+Cache)" else ("[bold green]★ Pareto[/bold green]" if is_p else "[dim]● Dominated[/dim]")
         res = r[2]
-        t3.add_row(r[0], f"{r[1]:,} B", r[3], f"{res.mean:.3f} ± {res.std:.3f} ms", f"{res.percentile(95):.3f} ms", status_str)
+        t3.add_row(r[0], f"{r[1]:,} B", r[3], f"{res.mean:.2f} ms", status_str)
     console.print(t3)
 
 
