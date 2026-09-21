@@ -59,14 +59,15 @@ Each bench station provides an integrated physical and computational workstation
 
 ## 3. Pedagogy & Studio Philosophy
 
-1. **Bench-First Studio Learning:** There are no passive lecture halls. Conceptual systems principles are grounded immediately in physical experiments at the bench.
-2. **The S·P·A Causal Feedback Loop:** Every physical episode connects:
+1. **The Dual-Brain Architecture as Core Systems Pedagogy:** Physical AI cannot be solved by a single monolithic computing environment. High-capacity foundation policies demand a complex, probabilistic Linux application environment (Brain 1: Qualcomm QRB2210 MPU), while mechanical actuators demand hard real-time determinism, microsecond bus control, and physical safety guarantees (Brain 2: STM32U585 MCU). Students learn to construct, benchmark, and defend this fundamental architectural boundary across every lab.
+2. **Bench-First Studio Learning:** There are no passive lecture halls. Conceptual systems principles are grounded immediately in physical experiments at the bench.
+3. **The S·P·A Causal Feedback Loop:** Every physical episode connects:
    $$\text{Sense (Camera/Telemetry)} \longrightarrow \text{Propose (Linux VLA)} \longrightarrow \text{Permit (STM32 MCU)} \longrightarrow \text{Act (SO-101 Servos)}$$
 
 ![The Physical AI Sense-Propose-Permit-Act Loop](assets/images/vol4-physical-ai-loop.svg)
 
-3. **The Three-Part Scope Test:** A lab submission is rejected if it merely runs a classifier on a screen or wires a model to an unmonitored hardcoded script. Action must be learned, consequential, and permitted by an independent safety boundary.
-4. **Adversarial Verification:** You do not prove a physical AI system works by recording a cherry-picked 5-second video. You prove it by allowing instructors and peer teams to introduce physical disturbances (lighting drops, target displacements, obstacle obstacles) and measuring whether the system recovers or safely abstains.
+4. **The Three-Part Scope Test:** A lab submission is rejected if it merely runs a classifier on a screen or wires a model to an unmonitored hardcoded script. Action must be learned, consequential, and permitted by an independent safety boundary.
+5. **Adversarial Verification:** You do not prove a physical AI system works by recording a cherry-picked 5-second video. You prove it by allowing instructors and peer teams to introduce physical disturbances (lighting drops, target displacements, obstacle obstacles) and measuring whether the system recovers or safely abstains.
 
 ---
 
