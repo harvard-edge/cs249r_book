@@ -62,10 +62,6 @@ def test_transformer_memorization():
     num_params = sum(np.prod(p.shape) for p in model.parameters())
     print(f"   Model parameters: {num_params:,}")
 
-    # Enable gradient tracking on all model parameters
-    for param in model.parameters():
-        param.requires_grad = True
-
     # Optimizer and loss
     optimizer = Adam(model.parameters(), lr=0.001)
     loss_fn = CrossEntropyLoss()

@@ -46,9 +46,6 @@ class TestEmbeddingGradientFlow:
         embed_dim = 32
         embedding = Embedding(vocab_size, embed_dim)
 
-        # Enable gradient tracking on embedding weights
-        embedding.weight.requires_grad = True
-
         # Token IDs (as Tensor)
         token_ids = Tensor(np.array([1, 5, 3, 7, 2]))
 
@@ -76,9 +73,6 @@ class TestEmbeddingGradientFlow:
         vocab_size = 10
         embed_dim = 4
         embedding = Embedding(vocab_size, embed_dim)
-
-        # Enable gradient tracking on embedding weights
-        embedding.weight.requires_grad = True
 
         # Token 5 appears twice (as Tensor)
         token_ids = Tensor(np.array([5, 2, 5, 3]))
@@ -190,12 +184,8 @@ class TestNLPPipelineEndToEnd:
 
         # Build pipeline
         embedding = Embedding(vocab_size, embed_dim)
-        embedding.weight.requires_grad = True
         attention = MultiHeadAttention(embed_dim, num_heads)
         classifier = Linear(embed_dim, num_classes)
-        for component in (attention, classifier):
-            for parameter in component.parameters():
-                parameter.requires_grad = True
         loss_fn = CrossEntropyLoss()
 
         # Input: token IDs (as Tensor) - shape (batch_size, seq_len)

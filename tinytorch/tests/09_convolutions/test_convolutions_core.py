@@ -330,7 +330,6 @@ class TestConvGradientFlow:
         input with output gradient. Each weight sees where it contributed.
         """
         conv = Conv2d(in_channels=1, out_channels=1, kernel_size=3)
-        conv.weight.requires_grad = True  # Enable gradient tracking for weights
         # NCHW format
         x = Tensor(rng.standard_normal((1, 1, 8, 8)), requires_grad=True)
 

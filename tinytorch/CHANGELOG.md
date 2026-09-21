@@ -13,6 +13,16 @@ for the canonical list.
 
 ## [Unreleased]
 
+## [0.1.15] — 2026-09-21
+
+Patch release aligning layer initialization and autograd across all 20 modules. Learnable parameters in `Linear` (Module 03) are now initialized with `requires_grad=True` by default, bringing it into full parity with `Conv2d`, `BatchNorm2d`, `Embedding`, and `LayerNorm`. Removed downstream workaround loops in `Trainer`, milestone scripts, and test suites, enabling true out-of-the-box autograd recording and preserving parameter freezing during fine-tuning.
+
+### 🧠 Core Framework & Autograd
+- **Linear Parameter Invariant**: `Linear.weight` and `Linear.bias` now initialize with `requires_grad=True` at creation, matching PyTorch's `nn.Linear` and all subsequent TinyTorch layers (`Conv2d`, `Embedding`, `LayerNorm`).
+- **Clean Trainer Loop**: Removed the workaround loop in `Trainer.__init__` that forcefully mutated model parameters, allowing user-configured parameter freezing (`param.requires_grad = False`) to persist during training.
+- **Milestone Simplification**: Removed manual `requires_grad = True` patches in Milestone 04 (LeNet-5) and Milestone 05 (Vaswani Attention).
+- **Test Suite Hygiene**: Cleaned up defensive `requires_grad` loops across all test suites (`06_autograd`, `09_convolutions`, `11_embeddings`, `12_attention`, `13_transformers`, `integration`, and `regression`) to verify authentic, unassisted gradient flow.
+
 ## [0.1.14] — 2026-09-21
 
 Patch release focused on curriculum alignment, milestone updates, and platform reliability. It brings a visual refresh of the textbook and cover, standardizes diagram widths across all chapters, clarifies Milestone 05 (`transformer`) and Milestone 06 (`mlperf`), hardens the `tito` CLI across Windows and Linux, and fixes edge cases in KV-cache generation and autograd. Version bumped from `0.1.13` to `0.1.14`.

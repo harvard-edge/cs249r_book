@@ -185,7 +185,6 @@ class TestCNNGradientFlow:
         """Verify that gradients flow through Conv2d layers correctly."""
         x = Tensor(rng.standard_normal((1, 3, 8, 8)), requires_grad=True)
         conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3)
-        conv.weight.requires_grad = True
 
         # Forward pass
         output = conv.forward(x)
@@ -219,7 +218,6 @@ class TestCNNGradientFlow:
 
         # Layer 1: Conv2d
         conv1 = Conv2d(in_channels=3, out_channels=8, kernel_size=3)
-        conv1.weight.requires_grad = True
         out1 = conv1.forward(x)
 
         # Layer 2: MaxPool2d
@@ -228,7 +226,6 @@ class TestCNNGradientFlow:
 
         # Layer 3: Conv2d
         conv2 = Conv2d(in_channels=8, out_channels=16, kernel_size=3)
-        conv2.weight.requires_grad = True
         out3 = conv2.forward(out2)
 
         # Loss - use tensor operation to maintain computation graph

@@ -293,12 +293,7 @@ def test_cnn_training_updates():
 
     y = Tensor(np.array([[1, 0], [0, 1], [1, 0], [0, 1]]))
 
-    # Get parameters with gradients
-    params = []
-    for p in [conv.weight, conv.bias, linear.weight, linear.bias]:
-        if not p.requires_grad:
-            p.requires_grad = True
-        params.append(p)
+    params = [conv.weight, conv.bias, linear.weight, linear.bias]
 
     # Optimizer
     optimizer = SGD(params, lr=0.01)

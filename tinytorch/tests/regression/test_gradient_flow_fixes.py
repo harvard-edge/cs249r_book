@@ -139,8 +139,6 @@ def test_regression_layernorm_gradient_flow():
     from tinytorch.core.transformers import LayerNorm
 
     ln = LayerNorm(4)
-    ln.gamma.requires_grad = True
-    ln.beta.requires_grad = True
 
     x = Tensor([[1.0, 2.0, 3.0, 4.0]], requires_grad=True)
     output = ln.forward(x)
@@ -170,7 +168,6 @@ def test_regression_embedding_requires_grad():
     from tinytorch.core.embeddings import Embedding
 
     embed = Embedding(vocab_size=10, embed_dim=8)
-    embed.weight.requires_grad = True
 
     indices = Tensor([[1, 2, 3]])
     output = embed.forward(indices)

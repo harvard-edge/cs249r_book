@@ -67,7 +67,6 @@ def test_embedding_gradient_flow():
 
     # Create embedding
     emb = Embedding(vocab_size=vocab_size, embed_dim=embed_dim)
-    emb.weight.requires_grad = True
 
     # Forward pass
     indices = Tensor([[1, 3, 5]])  # (batch=1, seq=3)
@@ -121,7 +120,6 @@ def test_positional_encoding_gradient_flow():
 
     # Create positional encoding (signature: max_seq_len, embed_dim)
     pos_enc = PositionalEncoding(max_seq_len, embed_dim)
-    pos_enc.position_embeddings.requires_grad = True
 
     # Input
     x = Tensor(rng.standard_normal((2, 5, embed_dim)), requires_grad=True)
@@ -230,10 +228,6 @@ def test_multi_head_attention_gradient_flow():
     # Create multi-head attention
     mha = MultiHeadAttention(embed_dim=embed_dim, num_heads=num_heads)
 
-    # Set requires_grad for all parameters
-    for param in mha.parameters():
-        param.requires_grad = True
-
     # Input
     x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)), requires_grad=True)
     mask = Tensor(np.tril(np.ones((seq_len, seq_len))))
@@ -291,10 +285,6 @@ def test_layernorm_gradient_flow():
     # Create LayerNorm
     ln = LayerNorm(normalized_shape)
 
-    # Enable gradient tracking on parameters
-    ln.gamma.requires_grad = True
-    ln.beta.requires_grad = True
-
     # Verify parameters have requires_grad=True
     assert ln.gamma.requires_grad, "Gamma should have requires_grad=True"
     assert ln.beta.requires_grad, "Beta should have requires_grad=True"
@@ -344,10 +334,6 @@ def test_mlp_gradient_flow():
     # Create MLP
     mlp = MLP(embed_dim=embed_dim, hidden_dim=hidden_dim)
 
-    # Set requires_grad
-    for param in mlp.parameters():
-        param.requires_grad = True
-
     # Input
     x = Tensor(rng.standard_normal((2, 4, embed_dim)), requires_grad=True)
 
@@ -393,10 +379,6 @@ def test_transformer_block_gradient_flow():
 
     # Create transformer block
     block = TransformerBlock(embed_dim=embed_dim, num_heads=num_heads)
-
-    # Set requires_grad
-    for param in block.parameters():
-        param.requires_grad = True
 
     # Input
     x = Tensor(rng.standard_normal((2, 8, embed_dim)), requires_grad=True)
@@ -465,11 +447,7 @@ def test_full_gpt_model_gradient_flow():
         num_heads=num_heads
     )
 
-    # Set requires_grad for all parameters
     params = model.parameters()
-    for param in params:
-        param.requires_grad = True
-
     total_params = len(params)
     print(f"  Model has {total_params} parameters")
 

@@ -48,7 +48,6 @@ def test_conv2d_weight_gradient_flow():
     print("Testing Conv2d weight gradient flow...")
 
     conv = Conv2d(1, 8, kernel_size=3)
-    conv.weight.requires_grad = True
 
     x = Tensor(rng.standard_normal((2, 1, 8, 8)), requires_grad=True)
 
@@ -71,7 +70,6 @@ def test_conv2d_bias_gradient_flow():
     print("Testing Conv2d bias gradient flow...")
 
     conv = Conv2d(1, 8, kernel_size=3)
-    conv.bias.requires_grad = True
 
     x = Tensor(rng.standard_normal((2, 1, 8, 8)), requires_grad=True)
 
@@ -162,8 +160,6 @@ def test_conv2d_maxpool2d_chain():
     print("Testing Conv2d → MaxPool2d gradient chain...")
 
     conv = Conv2d(1, 8, kernel_size=3)
-    conv.weight.requires_grad = True
-    conv.bias.requires_grad = True
     pool = MaxPool2d(2)
 
     x = Tensor(rng.standard_normal((2, 1, 8, 8)), requires_grad=True)
@@ -193,7 +189,6 @@ def test_conv2d_gradient_correctness():
     print("Testing Conv2d gradient correctness...")
 
     conv = Conv2d(1, 2, kernel_size=3, padding=0)
-    conv.weight.requires_grad = True
 
     x = Tensor(rng.standard_normal((1, 1, 5, 5)), requires_grad=True)
 

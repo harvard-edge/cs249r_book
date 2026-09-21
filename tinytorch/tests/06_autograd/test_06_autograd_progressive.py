@@ -207,9 +207,6 @@ class TestAutogradWithLayers:
 
             # Create layer
             layer = Linear(4, 2)
-            # Module 06 opts parameters into tracking explicitly; optimizers come next.
-            for parameter in layer.parameters():
-                parameter.requires_grad = True
 
             # Input with gradient tracking
             x = Tensor(rng.standard_normal((2, 4)), requires_grad=True)
@@ -354,9 +351,6 @@ class TestAutogradWithDataLoader:
 
             # Create model
             layer = Linear(4, 2)
-            # Module 06 opts parameters into tracking explicitly; optimizers come next.
-            for parameter in layer.parameters():
-                parameter.requires_grad = True
             loss_fn = MSELoss()
 
             # Test gradient computation with batches
@@ -439,9 +433,6 @@ class TestRegressionPrevention:
             from tinytorch.core.layers import Linear
 
             layer = Linear(5, 3)
-            # Module 06 opts parameters into tracking explicitly; optimizers come next.
-            for parameter in layer.parameters():
-                parameter.requires_grad = True
             x = Tensor(rng.standard_normal((2, 5)))
             output = layer(x)
 
@@ -551,9 +542,6 @@ class TestModule06Completion:
             try:
                 from tinytorch.core.layers import Linear
                 layer = Linear(2, 1)
-                # Module 06 opts parameters into tracking explicitly; optimizers come next.
-                for parameter in layer.parameters():
-                    parameter.requires_grad = True
                 x = Tensor(rng.standard_normal((1, 2)), requires_grad=True)
                 out = layer(x)
                 assert hasattr(out, 'backward'), "Required autograd capability is missing"

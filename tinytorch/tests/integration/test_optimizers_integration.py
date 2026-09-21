@@ -322,11 +322,6 @@ def test_gradient_preparation_linear():
     print("🧪 Unit Test: Linear Gradient Preparation...")
     layer = Linear(2, 2)
 
-    # Enable gradient tracking on layer parameters
-    layer.weight.requires_grad = True
-    if layer.bias is not None:
-        layer.bias.requires_grad = True
-
     x = Tensor(np.array([[1.0, 2.0]]), requires_grad=True)
     output = layer(x)
     loss = output.sum()

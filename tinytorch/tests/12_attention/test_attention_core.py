@@ -261,10 +261,6 @@ class TestAttentionGradientFlow:
         """
         mha = MultiHeadAttention(embed_dim=16, num_heads=2)
 
-        # Enable gradient tracking on all attention parameters
-        for param in mha.parameters():
-            param.requires_grad = True
-
         x = Tensor(rng.standard_normal((1, 4, 16)), requires_grad=True)
 
         output = mha.forward(x)

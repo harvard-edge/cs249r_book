@@ -29,10 +29,6 @@ def test_multihead_attention_gradient_flow():
     # Create attention module
     mha = MultiHeadAttention(embed_dim, num_heads)
 
-    # Enable gradient tracking on all parameters
-    for param in mha.parameters():
-        param.requires_grad = True
-
     # Forward pass
     x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
     output = mha.forward(x)
@@ -95,10 +91,6 @@ def test_mlp_gradient_flow():
     # Create MLP
     mlp = MLP(embed_dim)
 
-    # Enable gradient tracking on parameters
-    for param in mlp.parameters():
-        param.requires_grad = True
-
     # Forward pass
     x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
     output = mlp.forward(x)
@@ -134,10 +126,6 @@ def test_full_gpt_gradient_flow():
         num_heads=num_heads,
         max_seq_len=max_seq_len
     )
-
-    # Enable gradient tracking on all parameters
-    for param in model.parameters():
-        param.requires_grad = True
 
     # Create input and targets
     batch_size = 2
@@ -188,10 +176,6 @@ def test_attention_mask_gradient_flow():
 
     # Create attention module
     mha = MultiHeadAttention(embed_dim, num_heads)
-
-    # Enable gradient tracking on parameters
-    for param in mha.parameters():
-        param.requires_grad = True
 
     # Create causal mask
     mask = Tensor(np.tril(np.ones((seq_len, seq_len))))

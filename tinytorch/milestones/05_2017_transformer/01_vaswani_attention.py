@@ -510,9 +510,6 @@ def build_model(config=CONFIG):
         num_layers=config['num_layers']
     )
 
-    for param in model.parameters():
-        param.requires_grad = True
-
     optimizer = Adam(model.parameters(), lr=config['lr'])
     loss_fn = CrossEntropyLoss()
 

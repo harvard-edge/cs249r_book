@@ -118,9 +118,12 @@ class TestLinearLayer:
         assert layer.bias.shape == (5,)
         assert isinstance(layer.weight, Tensor)
         assert isinstance(layer.bias, Tensor)
+        assert layer.weight.requires_grad is True
+        assert layer.bias.requires_grad is True
 
         layer_no_bias = Linear(10, 5, bias=False)
         assert layer_no_bias.weight.shape == (10, 5)
+        assert layer_no_bias.weight.requires_grad is True
         assert layer_no_bias.bias is None
 
     def test_linear_weight_initialization(self):

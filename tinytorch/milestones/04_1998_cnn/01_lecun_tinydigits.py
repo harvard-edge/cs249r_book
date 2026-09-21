@@ -234,12 +234,6 @@ class SimpleCNN:
         # Flattened size: 8 channels × 3 × 3 = 72
         self.fc = Linear(in_features=72, out_features=10)
 
-        # Set requires_grad for all parameters
-        self.conv1.weight.requires_grad = True
-        self.conv1.bias.requires_grad = True
-        self.fc.weight.requires_grad = True
-        self.fc.bias.requires_grad = True
-
         self.params = [self.conv1.weight, self.conv1.bias, self.fc.weight, self.fc.bias]
 
     def __call__(self, x):

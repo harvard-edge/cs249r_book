@@ -27,7 +27,6 @@ def test_embedding_has_backward_function():
     print("Testing Embedding _grad_fn attachment...")
 
     embed = Embedding(vocab_size=20, embed_dim=8)
-    embed.weight.requires_grad = True  # Enable gradient tracking
     indices = Tensor(np.array([[0, 1, 2], [3, 4, 5]]))
 
     # Forward pass
@@ -47,7 +46,6 @@ def test_embedding_weight_gradient_flow():
     print("Testing Embedding weight gradient flow...")
 
     embed = Embedding(vocab_size=20, embed_dim=8)
-    embed.weight.requires_grad = True
 
     indices = Tensor(np.array([[0, 1, 2], [3, 4, 5]]))
 
@@ -76,7 +74,6 @@ def test_embedding_sparse_gradients():
     vocab_size = 100
     embed_dim = 16
     embed = Embedding(vocab_size=vocab_size, embed_dim=embed_dim)
-    embed.weight.requires_grad = True
 
     # Only access a few indices
     accessed_indices = [5, 10, 15]
@@ -102,7 +99,6 @@ def test_embedding_batch_gradient_flow():
     print("Testing Embedding batch gradient flow...")
 
     embed = Embedding(vocab_size=20, embed_dim=8)
-    embed.weight.requires_grad = True
 
     # Batched input
     batch_size = 4
@@ -137,11 +133,7 @@ def test_embedding_in_sequence():
     seq_len = 4
 
     embed = Embedding(vocab_size=vocab_size, embed_dim=embed_dim)
-    embed.weight.requires_grad = True
-
     fc = Linear(seq_len * embed_dim, 2)
-    fc.weight.requires_grad = True
-    fc.bias.requires_grad = True
 
     # Forward
     indices = Tensor(np.array([[0, 1, 2, 3]]))
@@ -166,7 +158,6 @@ def test_embedding_data_bypass_detection():
     print("Testing Embedding .data bypass detection...")
 
     embed = Embedding(vocab_size=20, embed_dim=8)
-    embed.weight.requires_grad = True  # Enable gradient tracking
     indices = Tensor(np.array([[0, 1, 2]]))
 
     # Correct way (should have _grad_fn)
