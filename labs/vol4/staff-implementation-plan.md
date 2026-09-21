@@ -19,19 +19,19 @@ To ensure every student station operates flawlessly when the studio launches in 
 :::
 
 ::: {.callout-important}
-### The Core Pedagogical Thesis: Teaching the Dual-Brain Architecture
-The defining intellectual contribution of the Volume IV studio is teaching students to navigate the fundamental asymmetry of Physical AI:
-1. **The Cognitive Brain (Qualcomm QRB2210 Linux MPU):** High-capacity, probabilistic foundation neural policies (SmolVLA, ACT) that ingest sensory camera streams ($I_t$) and propose multi-step action trajectory chunks ($a_{\text{req}}$).
-2. **The Safety Governor (STM32U585 Real-Time MCU):** Deterministic, hard real-time safety invariants (velocity saturation clamping $\omega_i \le 45^\circ/\text{s}$, geometric table geofencing $z_{\text{tool}} \ge 15\text{ mm}$, and $150\text{ ms}$ communication watchdogs) that arbitrate, permit, or veto proposals ($a_{\text{enf}}$) before they reach physical motor coils ($a_{\text{meas}}$).
+### Studio Focus: The Dual-Brain Architecture
+This studio teaches students to build and evaluate physical AI systems across two distinct computing layers:
+1. **The Cognitive Brain (Qualcomm QRB2210 Linux MPU):** High-capacity neural policies (SmolVLA, ACT) that ingest sensory camera streams ($I_t$) and propose multi-step action trajectory chunks ($a_{\text{req}}$).
+2. **The Safety Governor (STM32U585 Real-Time MCU):** Deterministic safety invariants (velocity saturation clamping $\omega_i \le 45^\circ/\text{s}$, geometric table geofencing $z_{\text{tool}} \ge 15\text{ mm}$, and $150\text{ ms}$ communication watchdogs) that arbitrate, permit, or veto proposals ($a_{\text{enf}}$) before they reach physical motor coils ($a_{\text{meas}}$).
 
-Students do not merely train models in isolation or write bare-metal motor drivers; they build, measure, and defend the **Causal Permission Boundary** connecting the two brains over an internal RPC bridge with zero unmonitored host bypass.
+Students build, measure, and defend the **Causal Permission Boundary** connecting the two processors over an internal RPC bridge with zero unmonitored host bypass.
 :::
 
 ![The Dual-Brain Architecture of Physical AI: Asymmetric Cognition vs. Deterministic Governance](assets/images/vol4-dual-brain-architecture.svg){#fig-dual-brain width=100%}
 
 The primary objectives for this 13-week execution window:
 1. **Week 1 Planning & Bench Preparation:** Finalize the master curriculum plan, audit the Bill of Materials (BOM), allocate dedicated workbench space at ETH Zurich, and verify electrical power rails before unboxing.
-2. **Hardware Bring-Up & Gate Qualification:** Assemble, wire, verify, and qualify one complete **Golden Reference Station**, passing the **Four Technical Go/No-Go Gate Tests (Gates A–D)**.
+2. **Hardware Bring-Up & Validation:** Assemble, wire, verify, and qualify one complete **Golden Reference Station**, validating the **Four Hardware Validation Steps (Steps 1–4)**.
 3. **End-to-End Curriculum Qualification:** Execute all **8 Hands-On Student Labs** from scratch, producing verified golden artifacts, starter scripts, reference datasets, and calibration profiles.
 4. **Software & Firmware Freeze:** Compile and lock the **Golden Qualcomm Linux Image** and **STM32 Firmware Binary**.
 5. **Independent Replication Audit:** Have a secondary researcher or teaching assistant build Station 2 from scratch using only the staff documentation to ensure seamless class deployment.
@@ -93,35 +93,35 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
 
 ---
 
-### Sprint 1: Mechanical Bring-Up & Gate Tests A–C (Weeks 2–4)
+### Sprint 1: Mechanical Bring-Up & Validation Steps 1–3 (Weeks 2–4)
 **Focus:** Mechanical assembly, electrical isolation, and establishing the governed servo bus path.
 
-#### Week 2 (Sep 28 – Oct 2, 2026): Hardware Bring-Up, Arm Assembly & Gate A
+#### Week 2 (Sep 28 – Oct 2, 2026): Hardware Bring-Up, Arm Assembly & Step 1 (USB Teleop)
 * **Primary Objective:** Assemble the physical arm, establish power safety isolation, and achieve native teleoperation.
 * **Tasks:**
   - [ ] Assemble Seeed Studio SO-101 6-DoF follower arm from kit components.
   - [ ] Clamp arm baseplate rigidly to workbench using heavy-duty C-clamps.
   - [ ] Wire external 7.4V/5A DC motor power supply directly to STS3215 servo power rail with common ground to UNO Q.
   - [ ] Connect SO-101 arm to workstation via USB BusLinker; install Hugging Face LeRobot (`pip install lerobot`).
-  - [ ] **Pass Gate A:** Run joint calibration and execute 60-second teleoperation replay (`lerobot-replay`).
-* **Weekly Deliverable:** Video proof of Gate A teleoperation + voltage rail multimeter verification.
+  - [ ] **Validation Step 1 Check:** Run joint calibration and execute 60-second teleoperation replay (`lerobot-replay`).
+* **Weekly Deliverable:** Video proof of Step 1 teleoperation + voltage rail multimeter verification.
 
-#### Week 3 (Oct 5 – Oct 9, 2026): Inter-Core Bridge Wiring & Gate B (1-Joint Interceptor)
+#### Week 3 (Oct 5 – Oct 9, 2026): Inter-Core Bridge Wiring & Step 2 (1-Joint Interceptor)
 * **Primary Objective:** Route servo communication through the STM32 and prove real-time command veto.
 * **Tasks:**
   - [ ] Disconnect Joint 1 (Base Yaw) from USB BusLinker; connect single-wire half-duplex UART line to STM32U585 USART via level-shifter.
   - [ ] Flash baseline interceptor firmware to STM32 using Arduino App Lab.
   - [ ] Write Python bridge script on Qualcomm Linux transmitting target commands across `/dev/ttyRPMSG`.
-  - [ ] **Pass Gate B:** Verify STM32 permits valid commands ($10^\circ$ at $20^\circ/\text{s}$), clamps over-speed commands ($> 45^\circ/\text{s}$), and refuses out-of-range targets ($> 180^\circ$).
+  - [ ] **Validation Step 2 Check:** Verify STM32 permits valid commands ($10^\circ$ at $20^\circ/\text{s}$), clamps over-speed commands ($> 45^\circ/\text{s}$), and refuses out-of-range targets ($> 180^\circ$).
 * **Weekly Deliverable:** Telemetry log showing MCU clamping and rejection of out-of-bounds joint commands.
 
-#### Week 4 (Oct 12 – Oct 16, 2026): Full 6-DoF Governed Arm & Gate C
+#### Week 4 (Oct 12 – Oct 16, 2026): Full 6-DoF Governed Arm & Step 3 (Full Integration)
 * **Primary Objective:** Scale the governed bus to all 6 joints and achieve full LeRobot teleoperation under MCU control.
 * **Tasks:**
   - [ ] Daisy-chain all 6 STS3215 servos into the STM32 USART bus line.
   - [ ] Implement the 60-line Python `UnoQMotorsBus` custom LeRobot adapter.
   - [ ] Program Cartesian forward kinematics check in STM32 firmware; implement table collision geofence ($z_{\text{tool}} \ge 15\text{ mm}$).
-  - [ ] **Pass Gate C:** Run full 6-DoF LeRobot teleoperation through the governed adapter; verify that table-crash command proposals are actively vetoed by the STM32.
+  - [ ] **Validation Step 3 Check:** Run full 6-DoF LeRobot teleoperation through the governed adapter; verify that table-crash command proposals are actively vetoed by the STM32.
 * **Weekly Deliverable:** `UnoQMotorsBus.py` source code + demonstration of live table-crash veto.
 
 ---
@@ -164,16 +164,16 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
 ### Sprint 3: Untethered Edge Deployment & Dynamic Adaptation (Weeks 8–10)
 **Focus:** Natively running neural policies on Qualcomm Linux, action chunk horizons, and closed-loop disturbance recovery.
 
-#### Week 8 (Nov 9 – Nov 13, 2026): Gate D & Lab 5 (Untethered Autonomous Reach)
+#### Week 8 (Nov 9 – Nov 13, 2026): Validation Step 4 & Lab 5 (Untethered Autonomous Reach)
 * **Primary Objective:** Run closed-loop visual reach completely untethered on the Arduino UNO Q.
 * **Tasks:**
   - [ ] Transfer `policy_int8.onnx` and `pai_edge_runtime.py` to Qualcomm Linux storage.
   - [ ] Unplug host PC tether; board runs exclusively on 45W USB-PD supply with webcam and governed arm.
   - [ ] Launch autonomous runtime via SSH over Wi-Fi:
     $$\text{Webcam Frames } (30\text{ Hz}) \longrightarrow \text{ONNX Policy } (<45\text{ ms}) \longrightarrow \text{RPC Bridge } (<5\text{ ms}) \longrightarrow \text{STM32 Motion}$$
-  - [ ] **Pass Gate D:** Verify end-to-end loop latency $T_{\text{total}} \le 80\text{ ms}$; arm autonomously reaches foam block at arbitrary locations across 10 trials.
+  - [ ] **Validation Step 4 Check:** Verify end-to-end loop latency $T_{\text{total}} \le 80\text{ ms}$; arm autonomously reaches foam block at arbitrary locations across 10 trials.
   - [ ] Package starter assets: `pai_edge_runtime.py`, `telemetry_logger.py`, `sample_reach_trace.csv`.
-* **Weekly Deliverable:** Gate D verification report + multi-tap telemetry CSV of untethered reach.
+* **Weekly Deliverable:** Step 4 verification report + multi-tap telemetry CSV of untethered reach.
 
 #### Week 9 (Nov 16 – Nov 20, 2026): "Student Zero" Run for Lab 6 (Action Horizons & Disturbances)
 * **Primary Objective:** Evaluate action chunk horizons and closed-loop disturbance recovery.
@@ -199,7 +199,7 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
 ---
 
 ### Sprint 4: Real-Time Governance & Fault Hardening (Week 11)
-**Focus:** Active microcontroller safety gating, hardware watchdogs, and zero-backlog recovery.
+**Focus:** Microcontroller safety boundary enforcement, hardware watchdogs, and zero-backlog recovery.
 
 #### Week 11 (Nov 30 – Dec 4, 2026): "Student Zero" Run for Lab 8 & Milestone 4
 * **Primary Objective:** Hardware watchdog timeout and fail-safe cutoff under system crash.
@@ -230,7 +230,7 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
 * **Tasks:**
   - [ ] Build Golden Qualcomm Linux SD card image: pre-installed Debian, LeRobot v0.2+, PyTorch ARM64, ONNX Runtime, V4L2 utilities, pre-cloned course repository.
   - [ ] Freeze STM32 pre-flashed binary for one-click flashing via Arduino App Lab.
-  - [ ] **Independent Replication Test:** Have a secondary researcher or teaching assistant unbox a second UNO Q and SO-101 arm, follow the staff setup guide, flash the images, and achieve Gate D untethered reach.
+  - [ ] **Independent Replication Test:** Have a secondary researcher or teaching assistant unbox a second UNO Q and SO-101 arm, follow the staff setup guide, flash the images, and achieve standalone reach.
   - [ ] Assemble spare parts buffer: 4x spare STS3215 servos, 2x spare webcams, replacement 3D-printed brackets, multimeters.
   - [ ] Final sign-off review: certify lab readiness for Spring 2027 studio launch.
 * **Weekly Deliverable:** Golden `.img` file uploaded to lab server + signed Replication Audit Report.
@@ -242,18 +242,18 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
 | Week & Date Range | Milestone / Sprint Phase | Primary Physical AI Deliverables | Hardware Verification & Acceptance Criteria | Status |
 |:---|:---|:---|:---|:---:|
 | **W01: Sep 21 – Sep 25** | Master Plan & Prep | • Complete curriculum review & syllabus freeze<br>• BOM inventory & receiving audit<br>• Dedicated bench allocation & power rail check | Multimeter confirmation of 7.4V DC & 45W USB-PD rails; complete toolchain staged | `[ ]` |
-| **W02: Sep 28 – Oct 02** | Hardware Bring-Up | • Mechanical arm assembled & clamped<br>• 7.4V motor power harness verified<br>• **Gate A:** LeRobot USB teleoperation passing | 60-second teleoperation replay executed without communication dropout | `[ ]` |
-| **W03: Oct 05 – Oct 09** | Bus Authority | • STM32 UART level-shifter circuit wired<br>• Inter-core RPC bridge test script<br>• **Gate B:** 1-joint velocity clamp & veto | Joint 1 clamped at $45^\circ/\text{s}$; out-of-range targets ($> 180^\circ$) rejected | `[ ]` |
-| **W04: Oct 12 – Oct 16** | 6-DoF Integration | • `UnoQMotorsBus` Python adapter deployed<br>• Table geofence ($z \ge 15\text{ mm}$) programmed<br>• **Gate C:** Governed 6-DoF teleoperation | Full 6-DoF teleoperation functional; downward table crash actively vetoed | `[ ]` |
+| **W02: Sep 28 – Oct 02** | Hardware Bring-Up | • Mechanical arm assembled & clamped<br>• 7.4V motor power harness verified<br>• **Step 1:** LeRobot USB teleoperation passing | 60-second teleoperation replay executed without communication dropout | `[ ]` |
+| **W03: Oct 05 – Oct 09** | Bus Authority | • STM32 UART level-shifter circuit wired<br>• Inter-core RPC bridge test script<br>• **Step 2:** 1-joint velocity clamp & veto | Joint 1 clamped at $45^\circ/\text{s}$; out-of-range targets ($> 180^\circ$) rejected | `[ ]` |
+| **W04: Oct 12 – Oct 16** | 6-DoF Integration | • `UnoQMotorsBus` Python adapter deployed<br>• Table geofence ($z \ge 15\text{ mm}$) programmed<br>• **Step 3:** Governed 6-DoF teleoperation | Full 6-DoF teleoperation functional; downward table crash actively vetoed | `[ ]` |
 | **W05: Oct 19 – Oct 23** | **Milestone 1:** Anatomy | • Lab 1 (Boundary) qualified by Student Zero<br>• Lab 2 (Sensing & Bridge) qualified<br>• AprilTag camera & joint offset calibration | Joint repeatability $\pm 1.5^\circ$; inter-core bridge round-trip $\le 5\text{ ms}$ at $50\text{ Hz}$ | `[ ]` |
 | **W06: Oct 26 – Oct 30** | Dataset Pipeline | • Lab 3 (Teleoperation) qualified<br>• 10-episode pick-and-place reference dataset<br>• Standardized LeRobot v2 schema validated | Zero dropped frames at $30\text{ Hz}$; all 4 action taps synchronized | `[ ]` |
 | **W07: Nov 02 – Nov 06** | **Milestone 2:** Training | • Lab 4 (Baseline & Export) qualified<br>• ACT model trained on workstation GPU<br>• Quantized ONNX INT8 policy exported ($< 50\text{ MB}$) | Offline MSE validation curves clean; model file size $< 50\text{ MB}$ | `[ ]` |
-| **W08: Nov 09 – Nov 13** | Edge Inference | • **Gate D:** Untethered reach on Qualcomm Linux<br>• End-to-end loop latency $T_{\text{total}} \le 80\text{ ms}$<br>• Lab 5 (Autonomous Reach) qualified | Host PC tether disconnected; 10/10 autonomous reach completions | `[ ]` |
+| **W08: Nov 09 – Nov 13** | Edge Inference | • **Step 4:** Untethered reach on Qualcomm Linux<br>• End-to-end loop latency $T_{\text{total}} \le 80\text{ ms}$<br>• Lab 5 (Autonomous Reach) qualified | Host PC tether disconnected; 10/10 autonomous reach completions | `[ ]` |
 | **W09: Nov 16 – Nov 20** | **Milestone 3:** Dynamics | • Lab 6 (Action Horizons) qualified<br>• Horizon benchmark curves ($K=1..32$)<br>• Disturbance recovery mid-trajectory verified | Measurable trajectory adaptation under $50\text{ mm}$ block displacement | `[ ]` |
 | **W10: Nov 23 – Nov 27** | Stress & Governor | • 50-cycle continuous autonomous reliability test<br>• Servo thermal profiling ($< 60^\circ\text{C}$)<br>• Lab 7 (Safety Governor) qualified | Servo casing $< 60^\circ\text{C}$; live table-crash proposals vetoed in $< 5\text{ ms}$ | `[ ]` |
 | **W11: Nov 30 – Dec 04** | **Milestone 4:** Cutoffs | • Lab 8 (Watchdog Cutoffs) qualified<br>• $150\text{ ms}$ hardware SysTick watchdog verified<br>• Linux process freeze & zero backlog proved | Arm halts in $\le 150\text{ ms}$ upon heartbeat loss; zero stale commands on resume | `[ ]` |
 | **W12: Dec 07 – Dec 11** | Capstone Rehearsal | • Capstone Studio protocol simulated<br>• 20 witnessed physical trials executed<br>• Claim-Argument-Evidence dossier template | $\ge 80\%$ task success rate across 20 trials with zero safety violations | `[ ]` |
-| **W13: Dec 14 – Dec 18** | **Final Release Freeze** | • Golden Linux SD card image compiled<br>• STM32 baseline binary locked<br>• Secondary TA replication test completed | Independent replication on Station 2 passes Gate D without staff intervention | `[ ]` |
+| **W13: Dec 14 – Dec 18** | **Final Release Freeze** | • Golden Linux SD card image compiled<br>• STM32 baseline binary locked<br>• Secondary TA replication test completed | Independent replication on Station 2 passes standalone reach without staff intervention | `[ ]` |
 
 ---
 
@@ -268,6 +268,6 @@ To ensure rapid resolution of hardware bugs and maintain transparent progress to
      - **Evidence Links:** Commit hash, telemetry CSV, model evaluation curve, or uncut video clip.
      - **Active Blockers:** Detailed diagnostic logs of any hardware/timing failure.
 2. **Bi-Weekly Physical Sync:**
-   - 30-minute bench review demonstrating the gate tests and milestone deliverables on live hardware.
+   - 30-minute bench review demonstrating the hardware bring-up steps and milestone deliverables on live hardware.
 3. **Escalation Trigger:**
-   - If any Gate Test (A, B, C, or D) is delayed by more than 4 business days, activate the pre-approved fallback matrix in [`feasibility-plan.md`](feasibility-plan.md#sec-fallbacks) immediately.
+   - If any bring-up step (Steps 1–4) is delayed by more than 4 business days, activate the pre-approved fallback matrix in [`feasibility-plan.md`](feasibility-plan.md#sec-fallbacks) immediately.

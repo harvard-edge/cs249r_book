@@ -45,7 +45,7 @@ During the final exam session in Week 14, each team executes **20 repeated physi
    * Target objects placed at 10 randomized, held-out coordinates across the characterized workspace.
    * Zero human intervention allowed.
    * Evaluate positioning precision, reach duration, and final object state.
-2. **Trials 11–20 (Physical Disturbance Crucible):**
+2. **Trials 11–20 (Physical Disturbance Trials):**
    * The examination panel or peer team introduces live disturbances:
      * *Disturbance A (Mid-Reach Shift):* Object displaced by 50 mm during active trajectory.
      * *Disturbance B (Illumination Drop):* Overhead ambient lighting reduced by 70%.
