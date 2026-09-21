@@ -15,45 +15,44 @@ for the canonical list.
 
 ## [0.1.14] — 2026-09-21
 
-Patch release focused on **curriculum harmonization, milestone alignment, and platform robustness**. It delivers a comprehensive visual and pedagogical overhaul of the textbook (Swiss Modernist cover, 4-beat PyTorch chapter deconstructions, 100% full-width diagrams), formally aligns Milestone 05 (`transformer`) and Milestone 06 (`mlperf`), hardens the `tito` CLI across Windows and Linux, and resolves key bugs in KV-cache generation and autograd. Version bumped from `0.1.13` to `0.1.14`.
+Patch release focused on curriculum alignment, milestone updates, and platform reliability. It brings a visual refresh of the textbook and cover, standardizes diagram widths across all chapters, clarifies Milestone 05 (`transformer`) and Milestone 06 (`mlperf`), hardens the `tito` CLI across Windows and Linux, and fixes edge cases in KV-cache generation and autograd. Version bumped from `0.1.13` to `0.1.14`.
 
-### 📖 Textbook & Curriculum Architecture
-- **4-Beat Chapter Openings**: Standardized the opening sections of all 24 chapters to the structured 4-beat PyTorch deconstruction pattern (*Standard PyTorch*, *The Illusion*, *The Engineering Reality*, and *The Contract*).
-- **Swiss Modernist Cover**: Redesigned the textbook cover in Swiss Modernist palette with centered TinyTorch wordmark, monospace inline code tagline, and the 20-module runtime bus terminating in TinyGPT.
-- **Diagram Harmonization**: Standardized all main-column diagrams across the textbook to 100% full text width with aligned margins and crisp vector typography.
-- **Streamlined Chapter Content**: Removed end-of-chapter exercises across all 24 chapters to focus student progression entirely on hands-on notebook implementations.
-- **Vector diagrams across all 20 modules**: Replaced ASCII pipeline art with bespoke SVGs and markdown tables, with LaTeX rendered through MathJax for crisp display at any zoom and in print.
-- **`im2col` Lowering Documented**: Connected Module 09 and Module 17 with an explicit cross-chapter hand-off detailing the memory-compute trade-off.
+### 📖 Textbook & Design Updates
+- **Chapter Introductions**: Standardized chapter openings with clear PyTorch baselines, systems-level context, and API specifications.
+- **Cover Refresh**: Updated the book cover with centered typography, a clean code tagline, and the 20-module runtime architecture diagram.
+- **Diagram Formatting**: Standardized all main-column diagrams to full text width with consistent margins and vector typography.
+- **Streamlined Content**: Removed end-of-chapter exercises across all chapters to keep students focused on the executable notebooks.
+- **Vector Diagrams**: Replaced older raster diagrams across all 20 modules with SVGs and markdown tables.
+- **Convolution Details**: Expanded documentation on `im2col` across Chapters 9 and 17, detailing the memory versus compute trade-off.
 
-### 🏆 Milestones & Historical Progression
-- **Milestone 05 Formalized as `transformer`**: Anchored to Vaswani et al. (2017) to prove multi-head attention routing on algorithmic sequence reversal and copying (`PYTHON` → `NOHTYP`).
-- **Milestone 06 Formalized as `mlperf`**: Anchored to the MLPerf benchmark discipline (2018), taking `DigitMLP` through the Optimization Olympics (profiling, INT8 quantization, weight pruning, and BLAS acceleration) to certify the Pareto frontier.
-- **Elevated TinyGPT Culmination**: Unified textbook narrative and roadmap SVGs to position TinyGPT as the overarching Generative AI capstone.
+### 🏆 Milestones
+- **Milestone 05 (`transformer`)**: Anchored to Vaswani et al. (2017) to verify multi-head attention routing on sequence reversal and copying.
+- **Milestone 06 (`mlperf`)**: Anchored to the MLPerf benchmark discipline (2018), taking `DigitMLP` through profiling, INT8 quantization, weight pruning, and acceleration to establish the Pareto frontier.
+- **TinyGPT Roadmap**: Clarified the curriculum progression to position TinyGPT as the culminating generative AI project.
 
-### 🔧 Tito CLI & Platform Robustness
-- **Windows Process & Encoding Robustness**: Fixed subprocess crashes on Windows systems with cp1252 codepages by pinning UTF-8 encoding across all CLI file I/O (#1966, #1971) and hardened the installer against silent hangs (#1969).
-- **Subcommand Fixes**: Repaired multiple CLI commands that previously threw argparse or runtime errors:
-  - `tito setup` now honors `TINYTORCH_NON_INTERACTIVE` and survives corrupted `profile.json` files (#2013).
-  - `tito module complete` now verifies integration tests across all modules rather than skipping silently (#2008).
-  - `tito module start` and `view` validate notebook presence before reporting success (#2010).
-  - `tito benchmark baseline` handles missing input gracefully (#2014).
-  - `tito milestone info` and `status` cleanly format milestones without duplicate years (#2009, #2019).
-  - Registered real login command `tito community login` (#2012).
-- **nbdev Pinning**: Added `[tool.nbdev]` configuration to `pyproject.toml` and pinned `nbdev < 3.0.16` for reliable export builds.
+### 🔧 Tito CLI & Platform Reliability
+- **Windows Encoding Fixes**: Resolved subprocess crashes on Windows systems with cp1252 codepages by enforcing UTF-8 across all CLI file operations (#1966, #1971), and resolved installer hangs (#1969).
+- **Command Fixes**:
+  - `tito setup` now supports non-interactive execution and recovers from corrupted profile configurations (#2013).
+  - `tito module complete` now runs integration tests across all completed modules (#2008).
+  - `tito module start` and `view` verify notebook presence before reporting success (#2010).
+  - `tito benchmark baseline` handles missing input without crashing (#2014).
+  - `tito milestone info` and `status` cleanly format milestone names without duplicate text (#2009, #2019).
+  - Cleaned up community login command routing (#2012).
+- **Build Configurations**: Configured nbdev settings in `pyproject.toml` and pinned compatible dependencies.
 
-### 🐛 Framework Correctness & Ops
-- **KV-Cache Self-Attention Fix** (M18 `memoization`, #1953): Ensured cached generation step incorporates the current token within the self-attention window.
-- **Convolution FLOP Counting** (M14 `profiling`): Corrected FLOP calculation formulas for `Conv2d` in the runtime profiler.
-- **Atomic Checkpoints** (M08 `training`): Made `Trainer.save_checkpoint` an atomic write to prevent corrupted model states during interrupted training runs.
-- **Gradient Preservation** (M07 `optimizers`): Prevented `Optimizer.__init__` from inadvertently discarding pre-existing parameter gradients.
+### 🐛 Framework Fixes
+- **KV-Cache Self-Attention** (M18 `memoization`, #1953): Ensured cached generation correctly includes the current token within the self-attention window.
+- **FLOP Counting** (M14 `profiling`): Corrected FLOP calculation formulas for 2D convolutions in the profiler.
+- **Atomic Checkpoints** (M08 `training`): Ensured `Trainer.save_checkpoint` writes atomically to prevent file corruption during training interruptions.
+- **Optimizer Gradients** (M07 `optimizers`): Prevented `Optimizer.__init__` from inadvertently clearing existing parameter gradients.
 - **DataLoader Indexing** (M05 `dataloader`): Added negative index support in `TensorDataset.__getitem__`.
-- **Autograd Layer Cleanup** (M06 `autograd`): Removed dead reimplementations in the autograd graph and fixed broadcast-gradient tests.
+- **Autograd Cleanup** (M06 `autograd`): Cleaned up redundant code in the autograd layer and fixed broadcast-gradient tests.
 
-### 🛡️ Grading & Certification Pipeline
-- **34 Pre-Release Verification Gates**: Added automated release gates ensuring no graded cell awards points exclusively for pre-solved scaffold code.
-- **`tools/check_grading_holes.py`**: Automated validation tool that runs student-tier sources without student code to detect zero-work grading holes.
-- **Scaffold Briefing Hygiene**: `apply_release_tier` now strips `TODO`/`APPROACH`/`HINT` briefings from cells that ship pre-solved, eliminating confusing instructions on completed code.
-- **Classroom Target**: Aligned official classroom-release target for Spring 2027.
+### 🎓 Grading & Student Notebooks
+- **Notebook Validation**: Added automated checks to verify that graded notebook cells require active student implementation rather than awarding credit for pre-solved code.
+- **Scaffolding Cleanup**: Stripped unnecessary docstring briefings from cells where solutions are intentionally provided, avoiding conflicting instructions for students.
+- **Classroom Schedule**: Aligned the official course timeline for Spring 2027.
 
 ## [0.1.13] — 2026-09-16
 
