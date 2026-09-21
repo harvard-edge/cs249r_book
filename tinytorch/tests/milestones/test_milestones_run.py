@@ -158,3 +158,13 @@ class TestMilestoneRuns:
 
         # Should show compression ratio (4x for INT8)
         assert "4" in stdout and ("compress" in stdout.lower() or "×" in stdout or "x" in stdout.lower())
+
+    @pytest.mark.slow
+    def test_milestone_07_tinygpt(self):
+        """Milestone 07: Generative LLM (2020) - TinyGPT on Shakespeare."""
+        returncode, stdout, stderr = run_milestone("07", timeout=180)
+
+        assert returncode == 0, f"Milestone 07 failed:\nstdout: {stdout}\nstderr: {stderr}"
+        assert "MILESTONE ACHIEVED!" in stdout or "Milestone 07" in stdout
+        assert "TinyGPT" in stdout or "Shakespeare" in stdout
+        assert "Generated Output:" in stdout or "Sample:" in stdout

@@ -229,6 +229,11 @@ As you progress, unlock recreations of landmark ML achievements:
       <td>MLPerf</td>
       <td>Production-ready optimization</td>
     </tr>
+    <tr>
+      <td align="center"><b>2020</b></td>
+      <td>TinyGPT</td>
+      <td>Autoregressive Shakespeare generation with Pre-LN GPT</td>
+    </tr>
   </tbody>
 </table>
 
@@ -335,7 +340,8 @@ TinyTorch/
 │   ├── 03_1986_mlp/            # Backpropagation & TinyDigits
 │   ├── 04_1998_cnn/            # LeCun's CNNs & CIFAR-10
 │   ├── 05_2017_transformer/    # Attention mechanisms & language
-│   └── 06_2018_mlperf/         # Modern optimization & profiling
+│   ├── 06_2018_mlperf/         # Modern optimization & profiling
+│   └── 07_2020_tinygpt/        # Generative LLM & Shakespeare next-token prediction
 │
 ├── tito/                       # 🎛️ CLI tool for streamlined workflows
 │   ├── main.py                 # Entry point

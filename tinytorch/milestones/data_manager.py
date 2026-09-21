@@ -43,6 +43,13 @@ DATASET_INFO = {
         'extracted_size_mb': 55,
         'description': '70,000 handwritten digits (28x28 grayscale)',
         'url': 'https://ossci-datasets.s3.amazonaws.com/mnist/'
+    },
+    'tinyshakespeare': {
+        'name': 'TinyShakespeare',
+        'download_size_mb': 1.1,
+        'extracted_size_mb': 1.1,
+        'description': '1.1MB of William Shakespeare plays and sonnets',
+        'url': 'https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt'
     }
 }
 
@@ -164,7 +171,12 @@ class DatasetManager:
                 print(f"\r   [{bar}] {percent:.1f}% ({mb_downloaded:.1f}/{mb_total:.1f} MB)", end='', flush=True)
 
         print(f"📥 Downloading {Path(filename).name}...")
-        urllib.request.urlretrieve(url, filename, progress_hook)
+        try:
+            urllib.request.urlretrieve(url, filename, progress_hook)
+        except Exception:
+            # Fallback to curl on SSL certificate failures
+            import subprocess
+            subprocess.run(["curl", "-sSL", url, "-o", str(filename)], check=True)
         print("\n✅ Download complete!")
 
     def get_mnist(self):
@@ -247,6 +259,41 @@ class DatasetManager:
 
         print(f"📊 CIFAR-10 loaded: {len(train_data)} training, {len(test_data)} test images")
         return (train_data, train_labels), (test_data, test_labels)
+
+    def get_tinyshakespeare(self, sample_only=False):
+        """Download and prepare TinyShakespeare dataset for Milestone 07.
+
+        Args:
+            sample_only: If True, return the offline bundled sample (no download).
+
+        Returns:
+            str: The raw text content of Shakespeare plays.
+        """
+        sample_path = Path(__file__).resolve().parent.parent / "datasets" / "tinyshakespeare" / "tinyshakespeare_sample.txt"
+        if not sample_path.exists():
+            sample_path = Path(__file__).parent / "07_2020_tinygpt" / "data" / "tinyshakespeare_sample.txt"
+
+        if sample_only and sample_path.exists():
+            with open(sample_path, 'r', encoding='utf-8') as f:
+                return f.read()
+
+        shakespeare_dir = self.data_dir / "tinyshakespeare"
+        shakespeare_dir.mkdir(exist_ok=True)
+        data_file = shakespeare_dir / "input.txt"
+
+        if not data_file.exists():
+            if not self.confirm_download('tinyshakespeare'):
+                if sample_path.exists():
+                    print("⚠️ Falling back to bundled offline Shakespeare sample.")
+                    with open(sample_path, 'r', encoding='utf-8') as f:
+                        return f.read()
+                raise RuntimeError("TinyShakespeare download cancelled and no offline sample found")
+
+            url = DATASET_INFO['tinyshakespeare']['url']
+            self.download_with_progress(url, data_file)
+
+        with open(data_file, 'r', encoding='utf-8') as f:
+            return f.read()
 
     def get_xor_data(self, num_samples=1000):
         """Generate XOR problem data for non-linear milestone."""

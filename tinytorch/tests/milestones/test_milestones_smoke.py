@@ -146,3 +146,15 @@ class TestModelConstruction:
                 assert module.DigitMLP() is not None
             if hasattr(module, "SimpleCNN"):
                 assert module.SimpleCNN() is not None
+
+    def test_milestone_07_tinygpt(self):
+        """Milestone 07: TinyGPT model constructs and script loads."""
+        module = _import_milestone(
+            MILESTONES_DIR / "07_2020_tinygpt" / "01_tinygpt_shakespeare.py"
+        )
+        assert module is not None
+        if hasattr(module, "build_model"):
+            with patch("builtins.print"):
+                model, total_params = module.build_model(vocab_size=50, embed_dim=32, num_layers=1, num_heads=2, max_seq_len=32)
+            assert model is not None
+            assert total_params > 0

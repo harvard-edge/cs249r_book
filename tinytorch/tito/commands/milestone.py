@@ -40,6 +40,9 @@ MILESTONE_ALIASES = {
     "transformer": "05",
     "mlperf": "06",
     "olympics": "06",
+    "tinygpt": "07",
+    "gpt": "07",
+    "shakespeare": "07",
 }
 
 # Milestone-to-script mapping for tito milestone run command
@@ -149,6 +152,17 @@ MILESTONE_SCRIPTS = {
         "description": "Compress and accelerate your neural network",
         "historical_context": "MLPerf standardized ML benchmarks",
         "emoji": "🏆"
+    },
+    "07": {
+        "id": "07",
+        "name": "Generative LLM (2020)",
+        "year": 2020,
+        "title": "TinyGPT: Autoregressive Language Modeling",
+        "script": "milestones/07_2020_tinygpt/01_tinygpt_shakespeare.py",
+        "required_modules": [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13],
+        "description": "Train TinyGPT from scratch on Shakespeare and generate text",
+        "historical_context": "Brown et al. (GPT-3) proved emergent generation from next-token prediction",
+        "emoji": "✨"
     }
 }
 
@@ -187,6 +201,11 @@ MILESTONE_ACHIEVEMENT_HIGHLIGHTS = {
         "Every line of code: YOUR implementations",
         "Every candidate measured: YOUR quantization and compression",
         "Every gradient: YOUR autograd",
+    ],
+    "07": [
+        "Every line of code: YOUR implementations",
+        "Every attention score: YOUR Causal MultiHeadAttention",
+        "Every gradient and weight update: YOUR Autograd & AdamW",
     ],
 }
 
@@ -588,7 +607,7 @@ class MilestoneCommand(BaseCommand):
         )
         run_parser.add_argument(
             'milestone_id',
-            help='Milestone ID (01-06) or name (perceptron, xor, mlp, cnn, transformer, mlperf)'
+            help='Milestone ID (01-07) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt)'
         )
         run_parser.add_argument(
             '--part',
@@ -608,7 +627,7 @@ class MilestoneCommand(BaseCommand):
         )
         info_parser.add_argument(
             'milestone_id',
-            help='Milestone ID (01-06) or name (perceptron, xor, mlp, cnn, transformer, mlperf)'
+            help='Milestone ID (01-07) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt)'
         )
 
         # Status subcommand
@@ -1103,7 +1122,7 @@ class MilestoneCommand(BaseCommand):
 
         console.print(Panel(
             "[bold cyan]🏆 TinyTorch Milestones[/bold cyan]\n\n"
-            "[dim]Recreate ML history from 1958 to 2018[/dim]",
+            "[dim]Recreate ML history from 1958 to 2020[/dim]",
             title="Available Milestones",
             border_style="bright_cyan"
         ))
@@ -1345,9 +1364,10 @@ class MilestoneCommand(BaseCommand):
             padding=(1, 2)
         ))
 
-        # Only prompt if in interactive terminal
+        # Only prompt if in interactive terminal and not non-interactive mode
         import sys
-        if sys.stdin.isatty() and sys.stdout.isatty():
+        import os
+        if sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get("TINYTORCH_NON_INTERACTIVE") != "1" and os.environ.get("CI") != "true":
             try:
                 console.input("\n[yellow]Press Enter to begin...[/yellow] ")
             except EOFError:
