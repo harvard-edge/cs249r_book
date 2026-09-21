@@ -344,6 +344,7 @@ def run_milestone(args=None):
     # ─────────────────────────────────────────────────────────────────────────
     optimizer = AdamW(model.parameters(), lr=2e-3, weight_decay=0.01)
     loss_fn = CrossEntropyLoss()
+    trainer = Trainer(model, optimizer, loss_fn)
 
     console.print("[bold]🚀 Training TinyGPT from Scratch (Next-Token Prediction)...[/bold]")
 
@@ -361,7 +362,7 @@ def run_milestone(args=None):
         task = progress.add_task("[cyan]Training epochs...", total=epochs)
 
         for epoch in range(epochs):
-            loss = train_epoch(model, dataloader, loss_fn, optimizer, vocab_size=vocab_size)
+            loss = trainer.train_epoch(dataloader)
             perplexity = np.exp(min(loss, 20.0))
             history.append((epoch + 1, loss, perplexity))
             progress.update(task, advance=1, description=f"[cyan]Epoch {epoch+1}/{epochs} - Loss: {loss:.4f} (PPL: {perplexity:.1f})")
