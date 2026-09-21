@@ -46,7 +46,7 @@ install-deps: ## Install system + LaTeX packages needed to build the PDF.
 	@if [ -f tex-requirements.txt ]; then \
 	  TLMGR="$$(command -v tlmgr 2>/dev/null || true)"; \
 	  if [ -z "$$TLMGR" ]; then \
-	    for dir in "$$HOME/bin" "$$HOME/.TinyTeX" "$$HOME/Library/TinyTeX" "$${APPDATA:-}/TinyTeX"; do \
+	    for dir in "$$HOME/bin" "$$HOME/.TinyTeX" "$$HOME/.local/share/TinyTeX" "$$HOME/Library/TinyTeX" "$${APPDATA:-}/TinyTeX"; do \
 	      [ -d "$$dir" ] || continue; \
 	      TLMGR="$$(find "$$dir" \( -name tlmgr -o -name tlmgr.bat \) -type f 2>/dev/null | head -n 1)"; \
 	      [ -n "$$TLMGR" ] && break; \
