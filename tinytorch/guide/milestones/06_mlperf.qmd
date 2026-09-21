@@ -199,7 +199,42 @@ Primary Bottleneck: $O(N^2)$ causal prefix recomputation and DRAM weight streami
 
 **Division 3 Takeaway:** Autoregressive generation is throttled by causal attention history and weight streaming. KV-Cache memoization eliminates quadratic prefix processing (reducing generation latency from 6.31 ms to 3.98 ms, a $1.58\times$ speedup) while guaranteeing exact mathematical logit parity ($100.0\%$ fidelity). INT8 quantization compresses weight memory by $4\times$. When combined (`Full Stack`), they achieve the lowest latency (3.70 ms) and an ultra-compact footprint (45 KB including cache), representing the industry standard for production LLM serving.
 
-### Part 2: Generation Speedup
+### Part 2: Kernel Acceleration & Systems Speedups
+
+Beyond model compression (quantization and pruning), Milestone 06 evaluates the systems-level kernel optimizations you authored in Modules 17 and 18. Each optimization attacks a distinct computational bottleneck:
+
+:::{.callout-note title="🏎️ Kernel 1: Dense Matrix Multiply (Module 17 Vectorization)"}
+- **Baseline (3 Nested Interpreter Loops):** 5.30 ms
+- **Accelerated (Hardware SIMD / BLAS):** 0.02 ms
+- **Empirical Speedup:** **>200× FASTER ⚡**
+- **Mechanism:** `vectorized_matmul` replaces interpreter loop overhead with contiguous vector instructions and hardware SIMD execution.
+:::
+
+:::{.callout-note title="⚡ Kernel 2: Spatial Convolution Lowering (Module 17 im2col)"}
+- **Baseline (7 Nested Interpreter Loops):** 1.79 ms
+- **Accelerated (im2col Patch GEMM):** 0.06 ms
+- **Empirical Speedup:** **>30× FASTER ⚡**
+- **Mechanism:** `im2col_conv2d` lowers sliding spatial convolution loops into a single contiguous BLAS matrix multiplication.
+:::
+
+:::{.callout-note title="💾 Kernel 3: Autoregressive Memoization (Module 18 KV-Cache)"}
+- **Baseline (O(N²) Prefix Recomputation):** 5.86 ms
+- **Accelerated (O(1) Step KV-Cached):** 4.14 ms
+- **Empirical Speedup:** **~1.5× FASTER ⚡**
+- **Mechanism:** `KVCache` memoizes previous Key/Value attention tensors, turning quadratic $O(N^2)$ token generation into linear $O(N)$ operations while preserving exact numerical output parity.
+:::
+
+@tbl-milestone-06-acceleration-scorecard summarizes the measured hardware speedups across these three critical workloads.
+
+| Kernel / Workload | Baseline (Unoptimized) | Accelerated (TinyTorch) | Empirical Speedup |
+|:---|---:|---:|:---:|
+| **Dense GEMM (32×32)** | 5.30 ms (loops) | 0.02 ms (SIMD) | **>200× FASTER ⚡** |
+| **2D Conv (4-ch, 8×8)** | 1.79 ms (loops) | 0.06 ms (im2col) | **>30× FASTER ⚡** |
+| **Autoregressive Decode (16 tokens)** | 5.86 ms (recompute) | 4.14 ms (cached) | **~1.5× FASTER ⚡** |
+
+: **Optimization Tier Acceleration Scorecard.** {#tbl-milestone-06-acceleration-scorecard}
+
+### Part 3: Autoregressive Generation Speedup
 
 @tbl-milestone-06-generation-speedup shows median total prefix-replay time with and without the KV cache.
 

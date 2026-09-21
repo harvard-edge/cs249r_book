@@ -211,8 +211,8 @@ As you progress, unlock recreations of landmark ML achievements:
     </tr>
     <tr>
       <td align="center"><b>1986</b></td>
-      <td>Backpropagation</td>
-      <td>Multi-layer network training</td>
+      <td>MLP Revival</td>
+      <td>Multi-layer network training with backpropagation</td>
     </tr>
     <tr>
       <td align="center"><b>1998</b></td>
@@ -221,18 +221,13 @@ As you progress, unlock recreations of landmark ML achievements:
     </tr>
     <tr>
       <td align="center"><b>2017</b></td>
-      <td>Transformer Era</td>
-      <td>Language generation with self-attention</td>
+      <td>Transformer Era (TinyGPT)</td>
+      <td>Autoregressive Shakespeare generation with Pre-LN GPT</td>
     </tr>
     <tr>
       <td align="center"><b>2018+</b></td>
-      <td>MLPerf</td>
-      <td>Production-ready optimization</td>
-    </tr>
-    <tr>
-      <td align="center"><b>2020</b></td>
-      <td>TinyGPT</td>
-      <td>Autoregressive Shakespeare generation with Pre-LN GPT</td>
+      <td>MLPerf Optimization Olympics</td>
+      <td>Triad benchmarking, kernel acceleration, and Pareto trade-offs</td>
     </tr>
   </tbody>
 </table>

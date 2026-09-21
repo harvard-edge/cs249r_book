@@ -353,47 +353,64 @@ def step_4_kv_cache(KVCache, MinimalTransformer):
 # STEP 5: ACCELERATION
 # =============================================================================
 
-def step_5_accelerate(vectorized_matmul, Tensor, im2col_conv2d=None, Conv2d=None):
+def step_5_accelerate(vectorized_matmul, Tensor, im2col_conv2d=None, Conv2d=None,
+                      enable_kv_cache=None, disable_kv_cache=None, GPT=None):
     """
-    Step 5: Demonstrate acceleration with YOUR Module 17.
+    Step 5: Demonstrate acceleration with YOUR Modules 17 & 18.
 
-    Lowering spatial convolution loops into optimized GEMM:
-    ──────────────────────────────────────────────────────
-        Naive Conv2d:   7 nested Python loops (batch, out_c, out_h, out_w, in_c, kh, kw)
-        im2col Conv2d:  Unfold patches into 2D matrix + single BLAS GEMM (vectorized_matmul)
-
-        BLAS exploits:
-        - CPU cache hierarchy (data locality)
-        - SIMD instructions (AVX/NEON processing 8+ floats simultaneously)
-        - Multi-threading & optimized assembly kernels
+    Evaluates three concrete systems accelerations:
+    1. Vectorized Matrix Multiply (Module 17): Hardware SIMD replacing interpreter loops
+    2. Spatial Convolution Lowering (Module 17): im2col lowering 7 nested loops to BLAS GEMM
+    3. Autoregressive Memoization (Module 18): KV-Cache eliminating quadratic recomputation
 
     Returns:
         dict with timing comparison
     """
     console.print(Panel(
-        "[bold magenta]🚀 STEP 5: Kernel Acceleration with YOUR Module 17[/bold magenta]\n"
-        "1. Vectorized Matrix Multiply: Compare wrapper vs NumPy BLAS GEMM\n"
-        "2. Spatial Lowering (im2col): 7 nested loops → single vectorized_matmul (>100× speedup!)",
+        "[bold magenta]🚀 STEP 5: Kernel Acceleration with YOUR Modules 17 & 18[/bold magenta]\n"
+        "Benchmark three concrete kernel optimizations you implemented:\n"
+        "• Kernel 1: Vectorized BLAS GEMM vs 3 nested interpreter loops\n"
+        "• Kernel 2: Spatial Convolution Lowering (im2col) vs 7 nested loops\n"
+        "• Kernel 3: Autoregressive KV-Cache Attention Memoization vs O(N²) prefix recomputation",
         border_style="magenta"
     ))
 
-    # Test 1: Vectorized MatMul numerical verification
-    A = Tensor(rng.standard_normal((64, 128)).astype(np.float32))
-    B = Tensor(rng.standard_normal((128, 64)).astype(np.float32))
+    # -------------------------------------------------------------------------
+    # KERNEL 1: Dense Matrix Multiply (GEMM)
+    # -------------------------------------------------------------------------
+    A = rng.standard_normal((32, 32)).astype(np.float32)
+    B = rng.standard_normal((32, 32)).astype(np.float32)
 
     start = time.perf_counter()
-    for _ in range(50):
-        C_standard = Tensor(np.dot(A.data, B.data))
-    standard_time = (time.perf_counter() - start) * 1000
+    C_loop = np.zeros((32, 32), dtype=np.float32)
+    for i in range(32):
+        for j in range(32):
+            for k in range(32):
+                C_loop[i, j] += A[i, k] * B[k, j]
+    gemm_loop_ms = (time.perf_counter() - start) * 1000
 
     start = time.perf_counter()
-    for _ in range(50):
-        C_vectorized = vectorized_matmul(A, B)
-    vectorized_time = (time.perf_counter() - start) * 1000
+    C_vec = vectorized_matmul(Tensor(A), Tensor(B))
+    gemm_vec_ms = (time.perf_counter() - start) * 1000
+    gemm_speedup = gemm_loop_ms / gemm_vec_ms if gemm_vec_ms > 0 else 1.0
 
-    np.testing.assert_allclose(C_vectorized.data, C_standard.data, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(C_vec.data, C_loop, rtol=1e-4, atol=1e-4)
 
-    # Test 2: Kernel Lowering Speedup (Naive Loop Conv2d vs im2col_conv2d)
+    box1 = Panel(
+        f"[bold cyan]Baseline (3 Nested Interpreter Loops):[/bold cyan]  {gemm_loop_ms:.2f} ms\n"
+        f"[bold green]Accelerated (Hardware SIMD / BLAS):[/bold green]      {gemm_vec_ms:.2f} ms\n"
+        f"[bold yellow]Empirical Speedup:[/bold yellow]                      [bold bright_green]{gemm_speedup:.1f}× FASTER ⚡[/bold bright_green]\n\n"
+        f"[dim]• Workload: 32×32 @ 32×32 Matrix Multiply\n"
+        f"• Mechanism: Module 17 vectorized_matmul replaces interpreter loops with hardware SIMD[/dim]",
+        title="[bold cyan]🏎️  Kernel 1: Dense Matrix Multiply (Module 17 Vectorization)[/bold cyan]",
+        border_style="cyan",
+        box=box.ROUNDED,
+    )
+    console.print(box1)
+
+    # -------------------------------------------------------------------------
+    # KERNEL 2: Spatial Convolution Lowering (im2col)
+    # -------------------------------------------------------------------------
     if im2col_conv2d is None:
         from tinytorch.perf.acceleration import im2col_conv2d as _im2col
         im2col_conv2d = _im2col
@@ -411,44 +428,115 @@ def step_5_accelerate(vectorized_matmul, Tensor, im2col_conv2d=None, Conv2d=None
     start = time.perf_counter()
     for _ in range(10):
         out_loop = conv_layer(x_conv)
-    loop_time = (time.perf_counter() - start) * 1000
+    conv_loop_ms = (time.perf_counter() - start) * 1000 / 10
 
     start = time.perf_counter()
     for _ in range(10):
         out_im2col = im2col_conv2d(x_conv, conv_layer.weight, conv_layer.bias, padding=1)
-    im2col_time = (time.perf_counter() - start) * 1000
+    conv_im2col_ms = (time.perf_counter() - start) * 1000 / 10
 
     np.testing.assert_allclose(out_loop.data, out_im2col.data, rtol=1e-4, atol=1e-4)
-    speedup = loop_time / im2col_time if im2col_time > 0 else 1.0
+    conv_speedup = conv_loop_ms / conv_im2col_ms if conv_im2col_ms > 0 else 1.0
 
-    table = Table(title="🚀 Kernel Acceleration Results (YOUR Module 17)", box=box.ROUNDED)
-    table.add_column("Kernel / Operation", style="cyan")
-    table.add_column("Baseline (Loops / Std)", style="yellow")
-    table.add_column("Accelerated (Mod 17)", style="green")
-    table.add_column("Speedup / Notes", style="bold")
+    box2 = Panel(
+        f"[bold cyan]Baseline (7 Nested Interpreter Loops):[/bold cyan]  {conv_loop_ms:.2f} ms\n"
+        f"[bold green]Accelerated (im2col Patch GEMM):[/bold green]        {conv_im2col_ms:.2f} ms\n"
+        f"[bold yellow]Empirical Speedup:[/bold yellow]                      [bold bright_green]{conv_speedup:.1f}× FASTER ⚡[/bold bright_green]\n\n"
+        f"[dim]• Workload: 4-Channel 3×3 Conv2d on 8×8 Spatial Patches (Batch 4)\n"
+        f"• Mechanism: Module 17 im2col lowers sliding convolution loops into a single BLAS GEMM[/dim]",
+        title="[bold magenta]⚡ Kernel 2: Spatial Convolution Lowering (Module 17 im2col)[/bold magenta]",
+        border_style="magenta",
+        box=box.ROUNDED,
+    )
+    console.print(box2)
+
+    # -------------------------------------------------------------------------
+    # KERNEL 3: Autoregressive Memoization (KV-Cache)
+    # -------------------------------------------------------------------------
+    if enable_kv_cache is None or disable_kv_cache is None:
+        from tinytorch.perf.memoization import enable_kv_cache as _ekv, disable_kv_cache as _dkv
+        enable_kv_cache, disable_kv_cache = _ekv, _dkv
+    if GPT is None:
+        from tinytorch.core.transformers import GPT as _GPT
+        GPT = _GPT
+
+    gpt = GPT(vocab_size=28, embed_dim=32, num_layers=2, num_heads=2, max_seq_len=32)
+    tokens = rng.integers(0, 28, (1, 16))
+
+    with redirect_stdout(io.StringIO()):
+        start = time.perf_counter()
+        for _ in range(2):
+            for pos in range(tokens.shape[1]):
+                _ = gpt(Tensor(tokens[:, :pos+1]))
+        uncached_ms = (time.perf_counter() - start) * 1000 / 2
+
+        cache = enable_kv_cache(gpt)
+        start = time.perf_counter()
+        for _ in range(2):
+            cache.reset()
+            with cache.generation():
+                for pos in range(tokens.shape[1]):
+                    _ = gpt(Tensor(tokens[:, pos:pos+1]), start_pos=cache.seq_pos)
+                    cache.advance()
+        cached_ms = (time.perf_counter() - start) * 1000 / 2
+        disable_kv_cache(gpt)
+
+    cache_speedup = uncached_ms / cached_ms if cached_ms > 0 else 1.0
+
+    box3 = Panel(
+        f"[bold cyan]Baseline (O(N²) Prefix Recomputation):[/bold cyan] {uncached_ms:.2f} ms\n"
+        f"[bold green]Accelerated (O(1) Step KV-Cached):[/bold green]     {cached_ms:.2f} ms\n"
+        f"[bold yellow]Empirical Speedup:[/bold yellow]                  [bold bright_green]{cache_speedup:.1f}× FASTER ⚡[/bold bright_green]\n\n"
+        f"[dim]• Workload: 16-Token Autoregressive Generation (TinyGPT)\n"
+        f"• Mechanism: Module 18 KVCache memoizes past Key/Value tensors, avoiding quadratic recompute[/dim]",
+        title="[bold green]💾 Kernel 3: Autoregressive Memoization (Module 18 KV-Cache)[/bold green]",
+        border_style="green",
+        box=box.ROUNDED,
+    )
+    console.print(box3)
+
+    # -------------------------------------------------------------------------
+    # SUMMARY SCORECARD TABLE
+    # -------------------------------------------------------------------------
+    table = Table(title="🚀 Optimization Tier Acceleration Scorecard", box=box.ROUNDED)
+    table.add_column("Kernel / Workload", style="cyan")
+    table.add_column("Baseline (Unoptimized)", style="yellow")
+    table.add_column("Accelerated (TinyTorch)", style="green")
+    table.add_column("Empirical Speedup", style="bold")
 
     table.add_row(
-        "GEMM (64×128 @ 128×64)",
-        f"{standard_time:.2f} ms",
-        f"{vectorized_time:.2f} ms",
-        "[green]Numerical Match ✓[/green]"
+        "Dense GEMM (32×32)",
+        f"{gemm_loop_ms:.2f} ms (loops)",
+        f"{gemm_vec_ms:.2f} ms (SIMD)",
+        f"[bold green]{gemm_speedup:.1f}× FASTER ⚡[/bold green]"
     )
     table.add_row(
-        "2D Conv (7 nested loops → GEMM)",
-        f"{loop_time:.2f} ms",
-        f"{im2col_time:.2f} ms",
-        f"[bold green]{speedup:.1f}× FASTER ⚡[/bold green]"
+        "2D Conv (4-ch, 8×8)",
+        f"{conv_loop_ms:.2f} ms (loops)",
+        f"{conv_im2col_ms:.2f} ms (im2col)",
+        f"[bold green]{conv_speedup:.1f}× FASTER ⚡[/bold green]"
+    )
+    table.add_row(
+        "Autoregressive Decode (16 tokens)",
+        f"{uncached_ms:.2f} ms (recompute)",
+        f"{cached_ms:.2f} ms (cached)",
+        f"[bold green]{cache_speedup:.1f}× FASTER ⚡[/bold green]"
     )
 
     console.print(table)
-    console.print(f"  [green]✓[/green] Kernel lowering validated: [bold]{speedup:.1f}× acceleration[/bold] via im2col GEMM!")
 
     return {
-        'standard_time': standard_time,
-        'vectorized_time': vectorized_time,
-        'conv_loop_time': loop_time,
-        'conv_im2col_time': im2col_time,
-        'conv_speedup': speedup,
+        'standard_time': gemm_loop_ms,
+        'vectorized_time': gemm_vec_ms,
+        'gemm_loop_time': gemm_loop_ms,
+        'gemm_vec_time': gemm_vec_ms,
+        'gemm_speedup': gemm_speedup,
+        'conv_loop_time': conv_loop_ms,
+        'conv_im2col_time': conv_im2col_ms,
+        'conv_speedup': conv_speedup,
+        'kv_recompute_time': uncached_ms,
+        'kv_cached_time': cached_ms,
+        'kv_speedup': cache_speedup,
     }
 
 
@@ -640,9 +728,13 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
     mlp_pts = {r[0]: (r[1] / 1024.0, r[5]) for r in mlp_records}
     mlp_frontier = set(pareto_frontier(mlp_pts, (True, True)))
 
-    console.print("\n[bold cyan]📍 DIVISION 1: Edge & Embedded Inference — DigitMLP (Dense)[/bold cyan]")
-    console.print("[dim]   Primary Bottleneck: Dense weight memory capacity (SRAM/Flash footprint)[/dim]")
-    console.print("[dim]   Harness: Measured via Module 19 Benchmark on held-out TinyDigits test set[/dim]")
+    console.print(Panel(
+        "[bold cyan]📍 DIVISION 1: Edge & Embedded Inference — DigitMLP (Dense)[/bold cyan]\n"
+        "[dim]Primary Bottleneck: Dense weight memory capacity (SRAM/Flash footprint)\n"
+        "Harness: Measured via Module 19 Benchmark on held-out TinyDigits test set[/dim]",
+        border_style="cyan",
+        box=box.ROUNDED,
+    ))
 
     t1 = Table(box=box.ROUNDED)
     t1.add_column("Candidate", style="yellow")
@@ -710,9 +802,13 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
     cnn_pts = {r[0]: (r[1] / 1024.0, r[5]) for r in cnn_records}
     cnn_frontier = set(pareto_frontier(cnn_pts, (True, True)))
 
-    console.print("\n[bold cyan]📍 DIVISION 2: Spatial Vision & Compute — SimpleCNN (Spatial)[/bold cyan]")
-    console.print("[dim]   Primary Bottleneck: 2D sliding convolution loops & spatial feature extraction[/dim]")
-    console.print("[dim]   Harness: Measured via Module 19 Benchmark; quality is measured output signal fidelity[/dim]")
+    console.print(Panel(
+        "[bold magenta]📍 DIVISION 2: Spatial Vision & Compute — SimpleCNN (Spatial)[/bold magenta]\n"
+        "[dim]Primary Bottleneck: 2D sliding convolution loops & spatial feature extraction\n"
+        "Harness: Measured via Module 19 Benchmark; quality is measured output signal fidelity[/dim]",
+        border_style="magenta",
+        box=box.ROUNDED,
+    ))
 
     t2 = Table(box=box.ROUNDED)
     t2.add_column("Candidate", style="yellow")
@@ -800,9 +896,13 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
     gpt_pts = {r[0]: (r[2].mean, r[1] / 1024.0, r[5]) for r in gpt_records}
     gpt_frontier = set(pareto_frontier(gpt_pts, (True, True, True)))
 
-    console.print("\n[bold cyan]📍 DIVISION 3: Generative LLM Serving — TinyGPT (Autoregressive)[/bold cyan]")
-    console.print("[dim]   Primary Bottleneck: O(N²) causal prefix recomputation & DRAM weight streaming[/dim]")
-    console.print("[dim]   Harness: Measured via Module 19 BenchmarkResult; sequence replay across 10 trials[/dim]")
+    console.print(Panel(
+        "[bold green]📍 DIVISION 3: Generative LLM Serving — TinyGPT (Autoregressive)[/bold green]\n"
+        "[dim]Primary Bottleneck: O(N²) causal prefix recomputation & DRAM weight streaming\n"
+        "Harness: Measured via Module 19 BenchmarkResult; sequence replay across 10 trials[/dim]",
+        border_style="green",
+        box=box.ROUNDED,
+    ))
 
     t3 = Table(box=box.ROUNDED)
     t3.add_column("Serving Strategy", style="yellow")
@@ -1043,7 +1143,11 @@ def main():
     press_enter_to_continue()
 
     # Step 5: Acceleration
-    step_5_accelerate(vectorized_matmul, Tensor, im2col_conv2d=im2col_conv2d, Conv2d=Conv2d)
+    step_5_accelerate(
+        vectorized_matmul, Tensor,
+        im2col_conv2d=im2col_conv2d, Conv2d=Conv2d,
+        enable_kv_cache=enable_kv_cache, disable_kv_cache=disable_kv_cache, GPT=GPT
+    )
     press_enter_to_continue()
 
     # Step 6: Benchmark
