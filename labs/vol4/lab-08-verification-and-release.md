@@ -12,7 +12,7 @@ What happens when the host computer freezes, the camera is disconnected, or the 
 
 ---
 
-### 2. Hardware & Bench Setup
+### 2. Hardware Setup
 1. **Controller Board:** Arduino UNO Q (Qualcomm Linux MPU + STM32 MCU).
 2. **Safety Switch:** Accessible physical emergency-stop toggle switch wired in-line with the motor power rail.
 3. **Robot Station:** Seeed SO-101 6-DoF arm carrying a light payload in active motion.

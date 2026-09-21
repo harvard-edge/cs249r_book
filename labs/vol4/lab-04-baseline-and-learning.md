@@ -12,7 +12,7 @@ Why do we use machine learning instead of classical control? Does a learned neur
 
 ---
 
-### 2. Hardware & Bench Setup
+### 2. Hardware Setup
 1. **Workstation / GPU Server:** Machine learning training environment (or Google Colab / HF Hub) equipped with PyTorch and LeRobot.
 2. **Edge Board:** Arduino UNO Q with Qualcomm Debian Linux.
 3. **Robot Station:** Seeed SO-101 arm and USB webcam.

@@ -12,7 +12,7 @@ How do we mathematically and physically ensure that an unverified, probabilistic
 
 ---
 
-### 2. Hardware & Bench Setup
+### 2. Hardware Setup
 1. **Controller Board:** Arduino UNO Q with STM32U585 MCU firmware running the safety governor.
 2. **Serial Bridge:** Inter-core RPC bridge connecting Qualcomm Linux to the STM32 MCU.
 3. **Robot Arm:** Seeed SO-101 6-DoF arm with 6× Feetech STS3215 bus servos.

@@ -12,7 +12,7 @@ Can a trained neural policy run completely untethered on edge silicon, closing t
 
 ---
 
-### 2. Hardware & Bench Setup
+### 2. Hardware Setup
 1. **Edge Board:** Arduino UNO Q running standalone (Qualcomm Linux MPU + STM32 MCU).
 2. **Network Connection:** Disconnected or headless network (zero tethering to a workstation during task execution).
 3. **Camera & Arm:** USB webcam mounted above the table; Seeed SO-101 arm in resting pose.

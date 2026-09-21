@@ -12,7 +12,7 @@ Where does computational authority end and physical delegation begin? If a host 
 
 ---
 
-### 2. Hardware & Bench Setup
+### 2. Hardware Setup
 1. **Actuator Station:** Seeed Studio SO-101 6-DoF arm mounted securely to the tabletop acrylic baseplate.
 2. **Controller Board:** Arduino UNO Q ("Unikue") powered via USB-C PD (45W).
 3. **Bus Interface:** Half-duplex TTL serial bus connecting the STM32U585 MCU (TX/RX pin pair) to the first Feetech STS3215 smart servo.

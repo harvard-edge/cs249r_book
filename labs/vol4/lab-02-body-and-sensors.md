@@ -12,7 +12,7 @@ How does an embodied system integrate disparate sensory modalities across asynch
 
 ---
 
-### 2. Hardware & Bench Setup
+### 2. Hardware Setup
 1. **Compute Board:** Arduino UNO Q with Qualcomm Debian Linux booted and USB webcam attached.
 2. **Camera:** Standard 720p UVC USB webcam mounted on a rigid overhead clamp pointing down at the workspace.
 3. **Calibration Target:** Printed OpenCV checkerboard or ArUco board fixture placed flat on the table.

@@ -202,7 +202,7 @@ Every lab handout (`lab-01` through `lab-08`) adheres to a strict, 7-section ope
 ### 1. The Physical Question
 What fundamental systems relationship are we measuring or proving on hardware today?
 
-### 2. Hardware & Bench Setup
+### 2. Hardware Setup
 Required wiring, power supply verification, camera framing, and initial arm rest pose.
 
 ### 3. Step-by-Step Bench Protocol

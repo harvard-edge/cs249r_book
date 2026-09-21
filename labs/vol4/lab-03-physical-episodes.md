@@ -12,7 +12,7 @@ How do we collect demonstration data from human teleoperation that accurately ca
 
 ---
 
-### 2. Hardware & Bench Setup
+### 2. Hardware Setup
 1. **Follower Arm:** Seeed SO-101 6-DoF arm connected to the Arduino UNO Q.
 2. **Teleoperation Input:** Leader arm, USB gamepad (Xbox / Logitech), or keyboard teleoperator connected to the workstation or UNO Q.
 3. **Overhead Webcam:** Calibrated USB camera streaming 30 FPS RGB frames of the tabletop manipulation arena.

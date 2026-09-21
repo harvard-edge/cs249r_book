@@ -12,7 +12,7 @@ How far into the future can an embodied model predict open-loop actions before p
 
 ---
 
-### 2. Hardware & Bench Setup
+### 2. Hardware Setup
 1. **Edge Board:** Arduino UNO Q running the closed-loop runtime pipeline.
 2. **Robot Station:** Seeed SO-101 arm and overhead USB webcam.
 3. **Task Arena:** Tabletop setup containing two colored target blocks: a **Red Block** (left zone) and a **Blue Block** (right zone).
