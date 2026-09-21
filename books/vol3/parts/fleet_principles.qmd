@@ -1,27 +1,53 @@
-# Fleet Principles {.unnumbered}
+# Distributed Fleets and Operations Principles {.unnumbered}
 
-Part VI examines agentic systems at distributed fleet scale. When complex objectives require multiple autonomous entities to collaborate, agentic systems scale across distributed clusters. We analyze multi-agent coordination under the Actor model and evaluate coordination overhead, instrument distributed execution graphs with OpenTelemetry semantic conventions for causal post-mortem debugging, and establish the macro-economics of accelerator fleet sizing via the Tokenomic Roofline model.
+Part VI, Distributed Fleets and Operations, takes the Stochastic Computer from one machine to a fleet, in two senses. Several agents may cooperate on one task, which turns one trajectory into a distributed computation with a coordination cost of its own. Many independent trajectories may also share one cluster, which raises two further questions, how an operator knows the fleet works and what each accepted task costs. Scale multiplies all three H·S·A exposures. Delegation stretches the horizon across agents, each agent carries state that others may read after it has gone stale, and every handoff passes authority that must not grow on the way. The principles below govern when splitting a task pays, how authority and budget travel between agents, what counts as evidence that a fleet works, and how its work is priced and provisioned.
 
-::: {#pri-vol3-stochastic-actors .callout-principle title="Distributed stochastic coordination"}
+::: {#pri-vol3-coordination-tax .callout-principle title="The coordination tax"}
 
-**Invariant**: Multi-agent collaboration is distributed computing over stochastic nodes subject to non-deterministic failure; unconstrained communication incurs an $O(M^2)$ coordination tax.
+**Invariant**: Splitting a task across agents places serialization, duplicated context, and reconciliation on the critical path, and agents that share weights share errors. Speedup is capped by the serial fraction of the task and falls once pairwise coordination grows faster than the parallel work shrinks.
 
-**Implication**: Systems must employ the Actor model with isolated state and hierarchical supervisor trees rather than unconstrained peer-to-peer conversational swarms.
-
-:::
-
-::: {#pri-vol3-trace-reconstructibility .callout-principle title="Deterministic trace reconstructibility"}
-
-**Invariant**: Robust production operations require capturing non-deterministic environmental interactions into immutable event streams to enable bit-exact post-mortem replay and causal fault isolation.
-
-**Implication**: Runtimes must implement OpenTelemetry GenAI semantic conventions across all trajectory spans, logging token deltas, tool inputs/outputs, and latency profiles.
+**Implication**: A fleet earns its tax only through context partitioning, authority attenuation, or independent exploration, and it must then run as an explicit dependency graph whose edges carry typed, schema-validated handoffs, never as open conversation among agents.
 
 :::
 
-::: {#pri-vol3-trajectory-goodput .callout-principle title="Trajectory goodput and fleet economics"}
+When a fleet does earn its tax, each handoff between agents must not become a way to acquire authority or budget.
 
-**Invariant**: The governing metric of autonomous agent systems is Trajectory Goodput (verified task completions per dollar per GPU-hour), uniting compute efficiency and outcome accuracy.
+::: {#pri-vol3-monotonic-delegation .callout-principle title="Monotonic delegation"}
 
-**Implication**: Hardware fleet sizing and model routing must operate along the Pareto frontier, sizing accelerator pools for asymmetric prefill and decode phases.
+**Invariant**: When one agent delegates to another, the child's authority, time, and budget must be a subset of what the parent still holds, and whatever the child receives is withheld from the parent until the child returns it. No sequence of delegations can create authority or spending that the root did not have, and money once spent cannot be recovered.
+
+**Implication**: The runtime, not the agents, enforces the subset rule at every handoff, using credentials that each holder can narrow but never widen, budgets reserved in escrow before any child spends them, and cancellation that reaches every descendant.
 
 :::
+
+A fleet that runs must also be shown to work, and a stochastic fleet cannot be judged from one run.
+
+::: {#pri-vol3-release-evidence .callout-principle title="Causal and statistical release evidence"}
+
+**Invariant**: Activity signals such as exit codes and status responses do not show that a stochastic system works. Evidence that it works is a verified change in environment state, measured over many independent tasks with stated uncertainty, and joined by one causal trace to the model calls, tool effects, and authority grants that produced it.
+
+**Implication**: The runtime must carry trace context across every process, sandbox, and agent boundary, retain every failing trajectory, and diagnose failures by replaying recorded observations rather than by expecting regenerated model output to match. A change reaches production only after staged gates show, at a stated confidence, that it is no worse than the version it replaces.
+
+:::
+
+The same verified outcome that counts as evidence also defines what a fleet is paying for.
+
+::: {#pri-vol3-trajectory-goodput .callout-principle title="Trajectory goodput and the accepted task"}
+
+**Invariant**: Only trajectories that pass independent verification deliver value, so every resource spent on failed or unverified attempts is charged to the accepted ones. Cost per accepted task, not cost per token, is the quantity a fleet minimizes, and trajectory goodput is the share of resources that reaches accepted tasks.
+
+**Implication**: Model choice, routing, acceleration, and capacity are judged by their effect on cost and time per accepted task across the whole trajectory, which often makes tool execution, sandboxes, and verification, rather than model inference, the term worth optimizing.
+
+:::
+
+Cost per accepted task says what to minimize. Capacity must also absorb how trajectories arrive and how long they hold what they are given.
+
+::: {#pri-vol3-heavy-tailed-scheduling .callout-principle title="Trajectory-lifetime capacity and tail-aware scheduling"}
+
+**Invariant**: A trajectory holds capacity for its whole lifetime, which is orders of magnitude longer than any one model call, and the calls it issues arrive in correlated bursts with service times that differ by orders of magnitude. Queue delay grows with that variability and rises steeply as utilization approaches saturation, and a trajectory of many serial calls is likely to meet at least one tail delay on its critical path.
+
+**Implication**: Capacity is sized from trajectory concurrency, the arrival rate of trajectories times their lifetime, and run below the knee of the utilization curve. Because the runtime cannot know a generation's length in advance, it schedules by demoting calls that exceed a token quantum so that short calls never wait behind long ones.
+
+:::
+
+@Sec-vol3-multi-agent decides when a task should be split and how authority and budget flow down the resulting graph. @Sec-vol3-observability turns traces and repeated trials into evidence strong enough to support a release. @Sec-vol3-tokenomics prices each accepted task, provisions capacity for trajectory lifetimes and tails, and holds spending to reserved budgets. With every subsystem now built, Part VII runs them together on one trajectory.

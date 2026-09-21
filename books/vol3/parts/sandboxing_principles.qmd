@@ -1,19 +1,33 @@
 # Execution Sandboxing Principles {.unnumbered}
 
-Part III investigates the tool execution boundary and environmental isolation of agentic machine learning systems. When a model commands external tools, stochastic tokens must interface with deterministic software environments. We develop typed tool application binary interfaces (such as Model Context Protocol), analyze the physical breakdown of the $W \oplus X$ execution boundary in neural reasoning, and engineer virtualized sandboxes (Firecracker microVMs, WebAssembly, and Copy-on-Write filesystems) to enforce zero-trust isolation.
+Parts I and II gave the Stochastic Computer a processor and a memory, but nothing they build can change the world outside the model. Part III adds its input and output, the path by which a proposal becomes an effect in the environment, and so builds closure for the authority exposure of H·S·A. Authority covers what an action can read and send as well as what it can change. A read-only tool that returns a customer record into context, or a sandbox with an open network route, can leak data without mutating anything, so read access is exposure too. Two questions decide whether an effect is safe. The first is whether it may happen at all and, once dispatched, whether it happens exactly once. The second is how far the code behind the call can reach once it runs.
 
 ::: {#pri-vol3-strict-action-abi .callout-principle title="The typed action contract"}
 
-**Invariant**: Stochastic models must interface with deterministic environments through typed, schema-validated, versioned, and idempotent protocol contracts.
+**Invariant**: A tool call reaches the environment only as a typed proposal that the host runtime validates against a closed schema and authorizes against grants the session explicitly holds. A server that advertises a tool establishes that the tool exists, never that this session may invoke it.
 
-**Implication**: Free-form text parsing must be replaced with typed protocol standards (Model Context Protocol) and grammar-constrained logit decoding at the model tokenization boundary.
+**Implication**: Each tool's schema, side-effect class, and required grant live in a descriptor the host owns, not in the protocol that discovered the tool. Grants expire and can only narrow when a task delegates to a subtask. Grammar-constrained decoding removes parse failures but replaces neither validation nor authorization. Rejected proposals return a structured diagnostic to the model, and observations returning across the boundary are bounded and typed before they enter context.
+
+:::
+
+Validation and authorization decide whether a call may be dispatched. They say nothing about what the runtime should do when the dispatch times out.
+
+::: {#pri-vol3-exactly-once-settlement .callout-principle title="Settlement before retry"}
+
+**Invariant**: A timeout on a mutating dispatch carries no information about whether the effect occurred. The request may have been lost, the tool may have crashed partway through the mutation, or the mutation may have committed and only its reply been lost.
+
+**Implication**: The runtime retries a non-idempotent action only under an idempotency key the endpoint deduplicates, or after a read-only probe shows the environment still in its pre-dispatch state. A probe that finds an intermediate state halts autonomous action until recovery, and any execution lease must outlast the timeout it protects.
 
 :::
 
-::: {#pri-vol3-zero-trust-sandboxing .callout-principle title="Zero-trust virtualization and defense-in-depth"}
+An authorized, settled call still runs code the model chose, and often code the model wrote.
 
-**Invariant**: Because neural models interleave prompt instructions and untrusted data within the same token stream ($W \oplus X$ breakdown), runtimes must assume model compromise and isolate all tool execution inside ephemeral hardware boundaries.
+::: {#pri-vol3-zero-trust-sandboxing .callout-principle title="Containment beneath the model"}
 
-**Implication**: Tool execution must occur inside hardware-isolated microVMs with strict network egress firewalls and Copy-on-Write snapshots to prevent data exfiltration and persistent host corruption.
+**Invariant**: A model reads system instructions and untrusted data as one sequence of tokens, so no instruction to the model can guarantee that its next proposal is safe. Every dispatched action therefore runs inside an envelope enforced by a layer below the code it contains, and nothing inside that envelope reaches the host, another tenant, or the network except through channels the runtime controls.
+
+**Implication**: The strength of the envelope follows from what runs inside it. Arbitrary native code needs its own guest kernel behind hardware virtualization, while pure computation can run in a bytecode sandbox with no direct system calls. Network egress passes through a proxy that allows only named destinations. Envelopes are reset by destruction or snapshot rollback, never by cleaning in place, and their start-up cost is recovered by keeping ready envelopes in a pool rather than by weakening the boundary.
 
 :::
+
+@Sec-vol3-actuation builds the first two principles into a descriptor for every tool, an authorization check the host owns, and a dispatch that settles before it retries. @Sec-vol3-virtualization builds the third into an envelope priced in start-up latency and memory. Both work on one action at a time. When a trajectory runs for hours, the order of its actions and the survival of its state across crashes become problems of their own, and Part IV takes them up.
