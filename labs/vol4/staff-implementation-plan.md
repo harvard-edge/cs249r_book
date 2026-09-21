@@ -27,6 +27,8 @@ The defining intellectual contribution of the Volume IV studio is teaching stude
 Students do not merely train models in isolation or write bare-metal motor drivers; they build, measure, and defend the **Causal Permission Boundary** connecting the two brains over an internal RPC bridge with zero unmonitored host bypass.
 :::
 
+![The Dual-Brain Architecture of Physical AI: Asymmetric Cognition vs. Deterministic Governance](assets/images/vol4-dual-brain-architecture.svg){#fig-dual-brain width=100%}
+
 The primary objectives for this 13-week execution window:
 1. **Week 1 Planning & Bench Preparation:** Finalize the master curriculum plan, audit the Bill of Materials (BOM), allocate dedicated workbench space at ETH Zurich, and verify electrical power rails before unboxing.
 2. **Hardware Bring-Up & Gate Qualification:** Assemble, wire, verify, and qualify one complete **Golden Reference Station**, passing the **Four Technical Go/No-Go Gate Tests (Gates A–D)**.
