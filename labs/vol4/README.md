@@ -119,5 +119,5 @@ Formal classroom instruction and new textbook readings run through **Week 11**, 
 * 📋 **[Master Course Syllabus](syllabus.md):** Full academic policy, grading weights (15% M1, 25% M2, 20% M3, 15% M4, 25% M5), team roles, and safety contract.
 * 🏷️ **[Physical AI Competency Card](student-competencies.md):** The 12-item platform-independent rubric signed off at the bench.
 * 📦 **[Kit Bill of Materials (BOM)](kit-bom.md):** Parts list, pricing, and supplier links for the UNO Q, SO-101 arm, USB webcam, and power accessories.
-* 🧪 **[Postdoc Pre-Flight Qualification Guide](feasibility-plan.md):** Engineering bring-up protocol and the 4 Go/No-Go Gate Tests (A–D).
+* 🧪 **[Postdoc Pre-Flight Qualification Guide](feasibility-plan.md):** Engineering bring-up protocol and the four hardware validation steps (Steps 1–4).
 * 🗓️ **[Staff Implementation Master Plan](staff-implementation-plan.md):** Comprehensive 13-week execution schedule (Sep 21 – Dec 18, 2026) for hardware bring-up, "Student Zero" runs, and class-set replication.

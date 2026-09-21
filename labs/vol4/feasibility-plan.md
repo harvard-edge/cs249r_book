@@ -47,25 +47,25 @@ Complete these physical build steps and verify electrical safety before powering
 
 ---
 
-## 3. Phase 1: The Four Go/No-Go Hardware Gate Tests
+## 3. Phase 1: Hardware Bring-Up & Validation Steps
 
-Before publishing student labs or ordering additional stations, you must successfully pass and log these four sequential technical gates:
+Before publishing student labs or ordering additional stations, you must successfully complete and log these four sequential validation steps:
 
 ```
-[ Gate A: Native LeRobot Teleop ]
-       │ (Pass: Arm moves via standard HF LeRobot scripts)
+[ Step 1: Native LeRobot Teleop ]
+       │ (Arm moves via standard HF LeRobot scripts)
        ▼
-[ Gate B: 1-Joint MCU Interceptor ]
-       │ (Pass: STM32 intercepts UART, rejects invalid commands)
+[ Step 2: 1-Joint MCU Interceptor ]
+       │ (STM32 intercepts UART, rejects invalid commands)
        ▼
-[ Gate C: 6-DoF Governed Arm ]
-       │ (Pass: UnoQMotorsBus adapter runs full arm under MCU bounds)
+[ Step 3: 6-DoF Governed Arm ]
+       │ (UnoQMotorsBus adapter runs full arm under MCU bounds)
        ▼
-[ Gate D: Untethered Closed-Loop Reach ]
-         (Pass: Qualcomm Linux runs INT8 policy at < 100 ms latency)
+[ Step 4: Standalone Untethered Reach ]
+         (Qualcomm Linux runs INT8 policy at < 100 ms latency)
 ```
 
-### Gate A: Native LeRobot USB Teleoperation
+### Bring-Up Step 1: Native LeRobot USB Teleoperation
 - [ ] Connect the SO-101 arm to a development workstation using the standard USB BusLinker adapter.
 - [ ] Install Hugging Face LeRobot (`pip install lerobot`).
 - [ ] Run the official LeRobot joint calibration utility:
@@ -75,7 +75,7 @@ Before publishing student labs or ordering additional stations, you must success
 - [ ] Record a 60-second teleoperation sequence (leader arm or keyboard teleop) and execute episode replay (`lerobot-replay`).
 - **Success Criteria:** Arm smoothly mirrors teleoperated commands with zero servo jitter or dropped packets.
 
-### Gate B: Single-Joint STM32 Safety Interceptor
+### Bring-Up Step 2: Single-Joint STM32 Safety Interceptor
 - [ ] Disconnect joint 1 (base yaw) from the host USB BusLinker. Connect its serial data line to the STM32U585 USART header.
 - [ ] Flash baseline interceptor firmware to the STM32 via Arduino App Lab.
 - [ ] Write a 40-line Python test script on Qualcomm Linux that sends velocity requests across the inter-core Bridge (`/dev/ttyRPMSG` or Arduino RPC).
@@ -85,7 +85,7 @@ Before publishing student labs or ordering additional stations, you must success
   3. An out-of-bounds target position ($220^\circ$) $\to$ **STM32 must refuse motion and enter safe hold**.
 - **Success Criteria:** The STM32 deterministically filters commands; no software bypass can cause unpermitted physical motion.
 
-### Gate C: Full 6-DoF Governed Arm Integration
+### Bring-Up Step 3: Full 6-DoF Governed Arm Integration
 - [ ] Connect all 6 SO-101 joints to the governed STM32 bus line.
 - [ ] Implement the minimal LeRobot custom motor bus adapter (`UnoQMotorsBus`) in Python:
   - Methods: `connect()`, `disconnect()`, `write("Goal_Position", targets)`, `read("Present_Position")`.
@@ -97,7 +97,7 @@ Before publishing student labs or ordering additional stations, you must success
   ```
 - **Success Criteria:** All 6 joints operate smoothly through LeRobot while the STM32 intercepts and vetoes any command that would collide with the table surface.
 
-### Gate D: Untethered Closed-Loop Reach on Qualcomm Linux
+### Bring-Up Step 4: Standalone Untethered Reach on Qualcomm Linux
 - [ ] Export a trained ACT or SmolVLA policy checkpoint to ONNX INT8 format.
 - [ ] Transfer the model file (`policy_int8.onnx`) and Python inference runtime (`pai_edge_runtime.py`) to the Qualcomm Linux storage.
 - [ ] Unplug the USB cable connecting the UNO Q to the host PC. The board must run completely untethered on its USB-PD power supply.
@@ -137,7 +137,7 @@ For each lab in the 14-week curriculum, Andrea must execute the student protocol
 
 ## 5. Phase 3: Golden System Image & Bench Duplication
 
-Once the single station passes all Gate Tests and Lab Qualifications, prepare the infrastructure for the full student cohort:
+Once the single station passes all validation steps and lab qualifications, prepare the infrastructure for the full student cohort:
 
 - [ ] **Qualcomm Linux Golden SD Card Image:**
   - Build a clean Ubuntu/Debian rootfs image for the UNO Q QRB2210.
