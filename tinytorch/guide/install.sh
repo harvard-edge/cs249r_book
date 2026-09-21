@@ -94,7 +94,7 @@ SPARSE_PATH="tinytorch"
 NON_INTERACTIVE="${TINYTORCH_NON_INTERACTIVE:-}"
 # Version is fetched from GitHub tags or branch pyproject.toml
 # Can be overridden for testing: TINYTORCH_VERSION=0.1.5 ./install.sh
-TINYTORCH_DEFAULT_VERSION="0.1.16"  # TINYTORCH_INSTALL_VERSION
+TINYTORCH_DEFAULT_VERSION="0.1.17"  # TINYTORCH_INSTALL_VERSION
 TINYTORCH_VERSION="${TINYTORCH_VERSION:-$TINYTORCH_DEFAULT_VERSION}"
 
 # ============================================================================
