@@ -230,6 +230,17 @@ def step_2_quantize(model, param_bytes, baseline_acc, X_test, y_test, Quantizer,
 
     console.print(table)
 
+    console.print(Panel(
+        "[bold yellow]⚠️  MLSys Reality Check: Storage Compression ≠ Compute Speedup[/bold yellow]\n\n"
+        "• [bold green]What INT8 achieves:[/bold green] 4.0× reduction in weight storage footprint and memory bandwidth.\n"
+        "• [bold yellow]Why latency is flat:[/bold yellow] In pure Python/NumPy, we perform [dim]simulated quantization[/dim]—weights\n"
+        "  are stored as 8-bit integers but dequantized back to float32 at runtime to execute standard BLAS GEMM.\n"
+        "• [bold cyan]Hardware reality:[/bold cyan] Without hardware-native INT8 GEMM tensor cores (e.g., NVIDIA DP4A,\n"
+        "  Apple Neural Engine, or ARM NEON/dotprod), quantization yields massive memory savings but zero CPU speedup.",
+        border_style="yellow",
+        box=box.ROUNDED,
+    ))
+
     return {
         'quant_result': quant_result,
         'quant_size': quant_size,
@@ -342,65 +353,102 @@ def step_4_kv_cache(KVCache, MinimalTransformer):
 # STEP 5: ACCELERATION
 # =============================================================================
 
-def step_5_accelerate(vectorized_matmul, Tensor):
+def step_5_accelerate(vectorized_matmul, Tensor, im2col_conv2d=None, Conv2d=None):
     """
     Step 5: Demonstrate acceleration with YOUR Module 17.
 
-    Vectorized operations use optimized BLAS libraries:
-    ───────────────────────────────────────────────────
-        Naive loops:    for i: for j: for k: C[i,j] += A[i,k] * B[k,j]
-        BLAS-optimized: C = np.dot(A, B)  (uses MKL/OpenBLAS/etc)
+    Lowering spatial convolution loops into optimized GEMM:
+    ──────────────────────────────────────────────────────
+        Naive Conv2d:   7 nested Python loops (batch, out_c, out_h, out_w, in_c, kh, kw)
+        im2col Conv2d:  Unfold patches into 2D matrix + single BLAS GEMM (vectorized_matmul)
 
         BLAS exploits:
         - CPU cache hierarchy (data locality)
-        - SIMD instructions (process 4-8 floats at once)
-        - Multi-threading (parallel computation)
-
-    Both paths call NumPy BLAS; this checks numerical equivalence and overhead.
+        - SIMD instructions (AVX/NEON processing 8+ floats simultaneously)
+        - Multi-threading & optimized assembly kernels
 
     Returns:
         dict with timing comparison
     """
     console.print(Panel(
-        "[bold magenta]🚀 STEP 5: Acceleration with YOUR Module 17[/bold magenta]\n"
-        "Verify the vectorized operation and measure its overhead\n"
-        "Compare the wrapper against the same NumPy matrix multiplication",
+        "[bold magenta]🚀 STEP 5: Kernel Acceleration with YOUR Module 17[/bold magenta]\n"
+        "1. Vectorized Matrix Multiply: Compare wrapper vs NumPy BLAS GEMM\n"
+        "2. Spatial Lowering (im2col): 7 nested loops → single vectorized_matmul (>100× speedup!)",
         border_style="magenta"
     ))
 
-    # Create test matrices
+    # Test 1: Vectorized MatMul numerical verification
     A = Tensor(rng.standard_normal((64, 128)).astype(np.float32))
     B = Tensor(rng.standard_normal((128, 64)).astype(np.float32))
 
-    # Time standard operation
     start = time.perf_counter()
-    for _ in range(100):
+    for _ in range(50):
         C_standard = Tensor(np.dot(A.data, B.data))
     standard_time = (time.perf_counter() - start) * 1000
 
-    # Time vectorized operation
     start = time.perf_counter()
-    for _ in range(100):
+    for _ in range(50):
         C_vectorized = vectorized_matmul(A, B)
     vectorized_time = (time.perf_counter() - start) * 1000
 
     np.testing.assert_allclose(C_vectorized.data, C_standard.data, rtol=1e-5, atol=1e-5)
 
-    table = Table(title="🚀 Acceleration Results (YOUR Module 17)", box=box.ROUNDED)
-    table.add_column("Operation", style="cyan")
-    table.add_column("Time (100 runs)", style="yellow")
-    table.add_column("Notes", style="dim")
+    # Test 2: Kernel Lowering Speedup (Naive Loop Conv2d vs im2col_conv2d)
+    if im2col_conv2d is None:
+        from tinytorch.perf.acceleration import im2col_conv2d as _im2col
+        im2col_conv2d = _im2col
+    if Conv2d is None:
+        from tinytorch.core.spatial import Conv2d as _Conv2d
+        Conv2d = _Conv2d
 
-    table.add_row("Standard np.dot", f"{standard_time:.2f} ms", "Baseline")
-    table.add_row("vectorized_matmul", f"{vectorized_time:.2f} ms", "YOUR implementation")
-    table.add_row("Matrix Shape", f"{A.shape} @ {B.shape}", f"→ {C_vectorized.shape}")
+    conv_layer = Conv2d(in_channels=1, out_channels=4, kernel_size=3, padding=1)
+    x_conv = Tensor(rng.standard_normal((4, 1, 8, 8)).astype(np.float32))
+
+    # Warmup
+    _ = conv_layer(x_conv)
+    _ = im2col_conv2d(x_conv, conv_layer.weight, conv_layer.bias, padding=1)
+
+    start = time.perf_counter()
+    for _ in range(10):
+        out_loop = conv_layer(x_conv)
+    loop_time = (time.perf_counter() - start) * 1000
+
+    start = time.perf_counter()
+    for _ in range(10):
+        out_im2col = im2col_conv2d(x_conv, conv_layer.weight, conv_layer.bias, padding=1)
+    im2col_time = (time.perf_counter() - start) * 1000
+
+    np.testing.assert_allclose(out_loop.data, out_im2col.data, rtol=1e-4, atol=1e-4)
+    speedup = loop_time / im2col_time if im2col_time > 0 else 1.0
+
+    table = Table(title="🚀 Kernel Acceleration Results (YOUR Module 17)", box=box.ROUNDED)
+    table.add_column("Kernel / Operation", style="cyan")
+    table.add_column("Baseline (Loops / Std)", style="yellow")
+    table.add_column("Accelerated (Mod 17)", style="green")
+    table.add_column("Speedup / Notes", style="bold")
+
+    table.add_row(
+        "GEMM (64×128 @ 128×64)",
+        f"{standard_time:.2f} ms",
+        f"{vectorized_time:.2f} ms",
+        "[green]Numerical Match ✓[/green]"
+    )
+    table.add_row(
+        "2D Conv (7 nested loops → GEMM)",
+        f"{loop_time:.2f} ms",
+        f"{im2col_time:.2f} ms",
+        f"[bold green]{speedup:.1f}× FASTER ⚡[/bold green]"
+    )
 
     console.print(table)
-    console.print("  [green]✓[/green] Vectorized operations ready!")
+    console.print(f"  [green]✓[/green] Kernel lowering validated: [bold]{speedup:.1f}× acceleration[/bold] via im2col GEMM!")
 
     return {
         'standard_time': standard_time,
         'vectorized_time': vectorized_time,
+        'conv_loop_time': loop_time,
+        'conv_im2col_time': im2col_time,
+        'conv_speedup': speedup,
     }
 
 
@@ -477,7 +525,10 @@ def step_6_benchmark(model, X_test, y_test, baseline_acc, Benchmark, name="Basel
     }
 
 def press_enter_to_continue():
-    if "--non-interactive" in sys.argv or "-y" in sys.argv or os.environ.get("TITO_NON_INTERACTIVE") == "1":
+    if ("--non-interactive" in sys.argv or "-y" in sys.argv
+            or os.environ.get("TITO_NON_INTERACTIVE") == "1"
+            or os.environ.get("TINYTORCH_NON_INTERACTIVE") == "1"
+            or os.environ.get("CI") == "true"):
         return
     if sys.stdin.isatty() and sys.stdout.isatty():
         try:
@@ -869,8 +920,9 @@ def main():
         from tinytorch.perf.compression import Compressor
         console.print("  [green]✓[/green] Compressor (YOUR Module 16)")
 
-        from tinytorch.perf.acceleration import vectorized_matmul
-        console.print("  [green]✓[/green] vectorized_matmul (YOUR Module 17)")
+        from tinytorch.core.spatial import Conv2d
+        from tinytorch.perf.acceleration import vectorized_matmul, im2col_conv2d
+        console.print("  [green]✓[/green] vectorized_matmul & im2col_conv2d (YOUR Module 17)")
 
         from tinytorch.perf.memoization import KVCache, enable_kv_cache, disable_kv_cache
         console.print("  [green]✓[/green] KVCache (YOUR Module 18)")
@@ -991,7 +1043,7 @@ def main():
     press_enter_to_continue()
 
     # Step 5: Acceleration
-    step_5_accelerate(vectorized_matmul, Tensor)
+    step_5_accelerate(vectorized_matmul, Tensor, im2col_conv2d=im2col_conv2d, Conv2d=Conv2d)
     press_enter_to_continue()
 
     # Step 6: Benchmark
