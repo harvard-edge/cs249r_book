@@ -200,7 +200,7 @@ def build():
         f'<tspan font-family="{SERIF}" font-size="{56}" font-weight="bold" fill="{CAP_TEXT}">TinyGPT</tspan>'
         f'</text>'
     )
-    p.append(_t(cap_x, ly + n + 44, "Full TinyGPT Architecture · Torch Olympics Benchmark", SANS, 25, TEXT_C))
+    p.append(_t(cap_x, ly + n + 44, "Full TinyGPT Architecture · MLPerf Benchmark Olympics", SANS, 25, TEXT_C))
 
     # --- author -------------------------------------------------------------
     p.append(f'<rect x="{L}" y="2780" width="120" height="4" fill="{ACCENT}"/>')

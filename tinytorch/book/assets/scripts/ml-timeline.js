@@ -56,7 +56,7 @@ document.addEventListener('DOMContentLoaded', function() {
             commands: ["tito milestone run transformer"]
         },
         olympics: {
-            year: "2018", title: "MLPerf Torch Olympics", researcher: "MLCommons (founded 2018)",
+            year: "2018", title: "MLPerf Benchmark Olympics", researcher: "MLCommons (founded 2018)",
             subtitle: "Systematic optimization becomes essential as models grow larger",
             achievement: "Production-ready optimization",
             architecture: "Profile → Compress → Accelerate",
