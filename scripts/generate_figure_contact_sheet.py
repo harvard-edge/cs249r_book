@@ -73,9 +73,9 @@ class FigureContactSheetBuilder:
         self.out_dir = out_dir or (REPO_ROOT / "binder" / ".layout" / "figures" / self.volume)
         self.out_dir.mkdir(parents=True, exist_ok=True)
 
-        self.theme_tex = REPO_ROOT / "books" / "shared" / "tex" / f"theme-colors-{self.volume}.tex"
+        self.theme_tex = REPO_ROOT / "books" / self.volume / "tex" / "theme-colors.tex"
         if not self.theme_tex.exists():
-            self.theme_tex = REPO_ROOT / "books" / "shared" / "tex" / "theme-colors-vol2.tex"
+            self.theme_tex = REPO_ROOT / "books" / "vol2" / "tex" / "theme-colors.tex"
 
         self.header_tex = REPO_ROOT / "books" / "shared" / "tex" / "header-includes.tex"
 
