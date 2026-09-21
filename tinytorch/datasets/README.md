@@ -6,9 +6,10 @@ This directory contains datasets for TinyTorch milestone examples.
 
 ```
 datasets/
-├── tinydigits/     ← 8×8 handwritten digits (ships with repo, ~310KB)
-├── tinytalks/    ← conversational Q&A text for transformers (~40KB)
-└── README.md     ← This file
+├── tinydigits/         ← 8×8 handwritten digits (ships with repo, ~310KB)
+├── tinytalks/          ← conversational Q&A text for transformers (~40KB)
+├── tinyshakespeare/    ← bundled sample of Shakespeare plays (~21KB)
+└── README.md           ← This file
 ```
 
 ## Shipped Datasets (No Download Required)
@@ -26,6 +27,13 @@ datasets/
 - **Format:** Plain text (`Q:` / `A:` lines), character-level friendly
 - **Size:** ~40 KB
 - **Purpose:** Fast, offline conversational text for attention and GPT-style experiments
+
+### TinyShakespeare (Sample)
+- **Used by:** Milestone 05 (Transformer Era: TinyGPT autoregressive language modeling)
+- **Contents:** Curated excerpt from William Shakespeare's plays
+- **Format:** Plain text, character-level friendly
+- **Size:** ~21 KB
+- **Purpose:** Fast, offline next-token prediction and autoregressive sampling without downloading the full corpus
 
 ## Downloaded Datasets (On-Demand)
 

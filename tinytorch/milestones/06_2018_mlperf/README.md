@@ -4,20 +4,26 @@ Compare a trained model with changed versions of itself, and measure a cache
 without changing the computation. These are classroom experiments inspired by
 MLPerf's measurement discipline, not official MLPerf submissions.
 
-## Part 1: Model compression
+## Part 1: Optimization Olympics across Three Benchmark Divisions
 
-`01_optimization_olympics.py` trains DigitMLP on TinyDigits, profiles the baseline,
-and creates two independent candidates: rounded weights and pruned weights.
-Each candidate runs on the same held-out data and receives its own accuracy and
-latency measurements. The original model remains intact.
+`01_optimization_olympics.py` evaluates three distinct architectural categories across their natural physical constraints:
 
-Both candidates still execute dense float32 operations. The report distinguishes
-actual parameter-array bytes from modeled packed INT8 code size. Zeroing weights
-does not shrink their arrays. Better accuracy, smaller resident storage, and a
-speedup are outcomes to measure, not benefits the script assumes.
+1. **Division 1: Edge & Embedded Inference — `DigitMLP` (Dense, Parameter-Bound)**
+   - Primary constraint: Weight storage capacity in SRAM/Flash.
+   - Evaluates: FP32 Baseline, INT8 Quantization (4× smaller), 50% Magnitude Pruning.
+   - Trade-off curve: Memory Footprint (KB) vs. Classification Accuracy (%).
 
-Separate cache-lifecycle and matrix-multiplication checks exercise Modules 18
-and 17. They are not additional transformations of the MLP.
+2. **Division 2: Spatial Vision & Compute — `SimpleCNN` (Spatial, Compute-Bound)**
+   - Primary constraint: Spatial convolution loops and compute throughput.
+   - Evaluates: FP32 Baseline, INT8 Quantization, 50% Magnitude Pruning.
+   - Trade-off curve: Memory Footprint (KB) vs. Output Signal Fidelity (%).
+
+3. **Division 3: Generative LLM Serving — `TinyGPT` (Autoregressive, Prefix-Bound)**
+   - Primary constraint: $O(N^2)$ prefix recomputation and DRAM weight streaming.
+   - Evaluates: Full Prefix Recompute, INT8 Quantization, KV-Cache Memoization, Full Stack (Quant + Cache).
+   - Trade-off curve: Replay Latency (ms) vs. Memory Footprint (KB).
+
+Each division computes its own **Pareto frontier** using Module 19 (`pareto_frontier`) and plots a tailored ASCII trade-off curve, illustrating why optimization strategies must match the workload category.
 
 Required modules: 01–08 and 14–19.
 

@@ -19,7 +19,7 @@ from tinytorch.core.losses import CrossEntropyLoss
 from tinytorch.core.optimizers import Adam
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.tokenization import CharTokenizer
-from tinytorch.core.transformers import GPT
+from tinytorch.models.transformer import GPT
 
 
 def test_transformer_memorization():

@@ -194,3 +194,23 @@ def test_generated_warning_points_to_current_export_command():
 
     assert "tito module complete XX" in text
     assert "tito module complete <module_name>" not in text
+
+
+def test_milestone_05_requirements_cover_all_used_modules():
+    """Verify Milestone 05 required_modules includes Trainer (08) and Tokenizer (10)."""
+    milestone = MILESTONE_SCRIPTS["05"]
+    required = set(milestone["required_modules"])
+
+    assert 8 in required, "Module 08 (Trainer) must be in Milestone 05 requirements"
+    assert 10 in required, "Module 10 (Tokenization) must be in Milestone 05 requirements"
+    assert {1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13} == required
+
+
+def test_workflow_detects_all_milestones_for_module():
+    """Verify Module 13 reports both Milestone 05 and Milestone 06."""
+    command = ModuleWorkflowCommand(CLIConfig.from_project_root(TINYTORCH_ROOT))
+    milestones = command._get_milestones_for_module(13)
+    milestone_ids = [m[0] for m in milestones]
+
+    assert "05" in milestone_ids
+    assert "06" in milestone_ids

@@ -77,7 +77,7 @@ class TestTransformerCore:
         """
         ✅ TEST: GPT class exists
         """
-        from tinytorch.core.transformers import GPT
+        from tinytorch.models.transformer import GPT
 
         assert GPT is not None
 
@@ -86,7 +86,7 @@ class TestTransformerCore:
         """
         ✅ TEST: GPT can be initialized
         """
-        from tinytorch.core.transformers import GPT
+        from tinytorch.models.transformer import GPT
 
         vocab_size = 1000
         embed_dim = 64
@@ -107,7 +107,7 @@ class TestTransformerCore:
         """
         ✅ TEST: GPT forward pass produces logits
         """
-        from tinytorch.core.transformers import GPT
+        from tinytorch.models.transformer import GPT
         from tinytorch.core.tensor import Tensor
 
         vocab_size = 100
@@ -211,7 +211,7 @@ class TestTransformerWithTraining:
         """
         ✅ TEST: GPT can execute training step
         """
-        from tinytorch.core.transformers import GPT
+        from tinytorch.models.transformer import GPT
         from tinytorch.core.losses import CrossEntropyLoss
         from tinytorch.core.optimizers import Adam
         from tinytorch.core.tensor import Tensor
@@ -351,7 +351,7 @@ class TestModule13Completion:
             capabilities["TransformerBlock forward works"] = True
 
         # Test 3: GPT
-        from tinytorch.core.transformers import GPT
+        from tinytorch.models.transformer import GPT
         capabilities["GPT exists"] = True
 
         completed = sum(capabilities.values())

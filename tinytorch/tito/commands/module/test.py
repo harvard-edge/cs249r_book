@@ -148,14 +148,14 @@ class ModuleTestCommand(BaseCommand):
 
         try:
             # Run pytest with --tinytorch for educational output
-            # Use --no-cov to avoid root pyproject.toml coverage requirements
+            # Use -o addopts= to override any root pyproject.toml coverage requirements safely
             cmd = [
                 sys.executable, "-m", "pytest",
                 str(tests_dir),
                 "--tinytorch",
                 "-v" if verbose else "-q",
                 "--tb=short",
-                "--no-cov",
+                "-o", "addopts=",
             ]
 
             result = subprocess.run(
@@ -253,14 +253,14 @@ class ModuleTestCommand(BaseCommand):
             return True, "No relevant integration tests for this module"
 
         try:
-            # Use --no-cov to avoid root pyproject.toml coverage requirements
+            # Use -o addopts= to override any root pyproject.toml coverage requirements safely
             cmd = [
                 sys.executable, "-m", "pytest",
                 *relevant_tests,
                 "--tinytorch",
                 "-v" if verbose else "-q",
                 "--tb=short",
-                "--no-cov",
+                "-o", "addopts=",
             ]
 
             result = subprocess.run(

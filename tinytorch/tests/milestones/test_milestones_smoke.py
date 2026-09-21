@@ -127,10 +127,22 @@ class TestModelConstruction:
                 model = module.CIFARCNN()
             assert model is not None
 
-    def test_milestone_05_transformer(self):
-        """Milestone 05: Transformer script loads."""
+    def test_milestone_05_transformer_tinygpt(self):
+        """Milestone 05: TinyGPT model constructs and script loads."""
         module = _import_milestone(
-            MILESTONES_DIR / "05_2017_transformer" / "01_vaswani_attention.py"
+            MILESTONES_DIR / "05_2017_transformer" / "01_tinygpt_shakespeare.py"
+        )
+        assert module is not None
+        if hasattr(module, "build_model"):
+            with patch("builtins.print"):
+                model, total_params = module.build_model(vocab_size=50, embed_dim=32, num_layers=1, num_heads=2, max_seq_len=32)
+            assert model is not None
+            assert total_params > 0
+
+    def test_milestone_05_sequence_routing(self):
+        """Milestone 05 Part 2: Sequence routing script loads."""
+        module = _import_milestone(
+            MILESTONES_DIR / "05_2017_transformer" / "02_vaswani_attention.py"
         )
         assert module is not None
 

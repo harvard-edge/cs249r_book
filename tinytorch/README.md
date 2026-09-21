@@ -211,8 +211,8 @@ As you progress, unlock recreations of landmark ML achievements:
     </tr>
     <tr>
       <td align="center"><b>1986</b></td>
-      <td>Backpropagation</td>
-      <td>Multi-layer network training</td>
+      <td>MLP Revival</td>
+      <td>Multi-layer network training with backpropagation</td>
     </tr>
     <tr>
       <td align="center"><b>1998</b></td>
@@ -221,13 +221,13 @@ As you progress, unlock recreations of landmark ML achievements:
     </tr>
     <tr>
       <td align="center"><b>2017</b></td>
-      <td>Transformer Era</td>
-      <td>Language generation with self-attention</td>
+      <td>Transformer Era (TinyGPT)</td>
+      <td>Autoregressive Shakespeare generation with Pre-LN GPT</td>
     </tr>
     <tr>
       <td align="center"><b>2018+</b></td>
-      <td>MLPerf</td>
-      <td>Production-ready optimization</td>
+      <td>MLPerf Optimization Olympics</td>
+      <td>Triad benchmarking, kernel acceleration, and Pareto trade-offs</td>
     </tr>
   </tbody>
 </table>
@@ -335,7 +335,8 @@ TinyTorch/
 │   ├── 03_1986_mlp/            # Backpropagation & TinyDigits
 │   ├── 04_1998_cnn/            # LeCun's CNNs & CIFAR-10
 │   ├── 05_2017_transformer/    # Attention mechanisms & language
-│   └── 06_2018_mlperf/         # Modern optimization & profiling
+│   ├── 06_2018_mlperf/         # Modern optimization & profiling
+│   └── 07_2020_tinygpt/        # Generative LLM & Shakespeare next-token prediction
 │
 ├── tito/                       # 🎛️ CLI tool for streamlined workflows
 │   ├── main.py                 # Entry point
