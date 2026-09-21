@@ -60,6 +60,9 @@ Each bench station provides an integrated physical and computational workstation
 ## 3. Pedagogy & Studio Philosophy
 
 1. **The Dual-Brain Architecture as Core Systems Pedagogy:** Physical AI cannot be solved by a single monolithic computing environment. High-capacity foundation policies demand a complex, probabilistic Linux application environment (Brain 1: Qualcomm QRB2210 MPU), while mechanical actuators demand hard real-time determinism, microsecond bus control, and physical safety guarantees (Brain 2: STM32U585 MCU). Students learn to construct, benchmark, and defend this fundamental architectural boundary across every lab.
+
+![The Dual-Brain Architecture of Physical AI: Asymmetric Cognition vs. Deterministic Governance](assets/images/vol4-dual-brain-architecture.svg){#fig-dual-brain width=100%}
+
 2. **Bench-First Studio Learning:** There are no passive lecture halls. Conceptual systems principles are grounded immediately in physical experiments at the bench.
 3. **The S·P·A Causal Feedback Loop:** Every physical episode connects:
    $$\text{Sense (Camera/Telemetry)} \longrightarrow \text{Propose (Linux VLA)} \longrightarrow \text{Permit (STM32 MCU)} \longrightarrow \text{Act (SO-101 Servos)}$$

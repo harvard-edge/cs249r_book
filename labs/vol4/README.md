@@ -11,9 +11,11 @@
 In digital software AI, an algorithm outputs text, tokens, or pixels on a screen. Errors are symbolic, harmless, and can be undone with a keystroke. In **Physical AI**, an algorithm commands real electrical currents to motors possessing mass, velocity, inertia, and momentum. If the model makes a mistake, physical things collide, tear, or break. **You cannot `Ctrl+Z` physics.**
 
 This studio teaches the science and systems engineering of machines that sense and act in the physical world:
-1. **The Brain:** Deploying high-capacity Vision-Language-Action (VLA) neural policies (**Hugging Face SmolVLA and ACT**) on an edge Linux processor (**Arduino UNO Q Qualcomm MPU**).
-2. **The Body:** Actuating a 6-DoF robotic follower arm (**Seeed Studio SO-101**) with smart serial bus servos and an overhead workspace webcam.
-3. **The Governor:** Enforcing deterministic, real-time safety constraints, velocity limits, and emergency cutoffs through an independent microcontroller (**STM32U585 MCU**).
+1. **The Cognitive Brain:** Deploying high-capacity Vision-Language-Action (VLA) neural policies (**Hugging Face SmolVLA and ACT**) on an edge Linux processor (**Arduino UNO Q Qualcomm MPU**).
+2. **The Physical Body:** Actuating a 6-DoF robotic follower arm (**Seeed Studio SO-101**) with smart serial bus servos and an overhead workspace webcam.
+3. **The Safety Governor:** Enforcing deterministic, real-time safety constraints, velocity limits, and watchdog cutoffs through an independent microcontroller (**STM32U585 MCU**).
+
+![The Dual-Brain Architecture of Physical AI: Asymmetric Cognition vs. Deterministic Governance](assets/images/vol4-dual-brain-architecture.svg){#fig-dual-brain width=100%}
 
 ---
 
