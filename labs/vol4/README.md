@@ -65,33 +65,7 @@ The unit of work across every studio experiment is a single **physical episode**
 
 $$\text{Physical State } (s_t) \longrightarrow \text{Observation } (I_t, q_t) \longrightarrow \text{Learned Proposal } (a_{\text{req}}) \longrightarrow \text{MCU Permission } (a_{\text{enf}}) \longrightarrow \text{Actuation } (a_{\text{meas}}) \longrightarrow \text{New Observation } (I_{t+1}, q_{t+1}) \longrightarrow \text{Revised Decision}$$
 
-```
-       ┌───────────────────────────────────────────────────────────┐
-       │                 Arduino UNO Q ("Unikue")                  │
-       │                                                           │
-       │   Qualcomm QRB2210 Linux MPU        STM32U585 MCU Core    │
-       │   • USB Camera capture (V4L2)       • Dedicated UART Bus  │
-       │   • SmolVLA / ACT on ONNX           • Real-time Governor  │
-       │   • Proposes action chunks (a_req)  • Safety cutoff (a_enf│
-       │   └─────────────┬───────────┘       └─────────────▲───────┘
-       │                 │     Fast RPC Bridge (<1 ms)     │       │
-       │                 └─────────────────────────────────┘       │
-       └───────────────────────────────┬───────────────────────────┘
-                                       │ Half-Duplex TTL Serial (1 Mbps)
-                                       ▼
-                         ┌───────────────────────────┐
-                         │  Seeed SO-101 6-DoF Arm   │
-                         │  • 6× STS3215 Smart Servos│
-                         │  • Position & load (a_meas│
-                         │  • Table Workspace Fixture│
-                         └───────────────────────────┘
-                                       ▲
-                                       │ Observes Workspace
-                         ┌─────────────┴─────────────┐
-                         │  $20 UVC USB Webcam       │
-                         │  • 224×224 Visual Stream  │
-                         └───────────────────────────┘
-```
+![The Physical AI Sense-Propose-Permit-Act Loop](assets/images/vol4-physical-ai-loop.svg)
 
 > **The Three-Part Scope Test:** A lab submission that merely classifies camera frames without driving actuators, or a model output wired to a hardcoded robotic script, does not satisfy the Physical AI requirement. Students must demonstrate learned decision-making whose next proposal responds directly to measured physical change under an independent MCU permission boundary.
 
@@ -102,22 +76,17 @@ $$\text{Physical State } (s_t) \longrightarrow \text{Observation } (I_t, q_t) \l
 Engineering mastery is tracked using the [Physical AI Station Competency Card](student-competencies.md) across four balanced quadrants (**3 competencies per quadrant = 12 total**):
 
 ```
-                                    ENGINEERING FUNCTION
                         ┌──────────────────────────┬──────────────────────────┐
                         │   Characterize & Model   │     Control & Govern     │
                         │  (Observe, Profile, Data)│   (Act, Enforce, Defend) │
 ┌───────────────────────┼──────────────────────────┼──────────────────────────┤
 │ PHYSICAL EMBODIMENT   │  QUADRANT A:             │  QUADRANT C:             │
-│ (The Plant: World,    │  Measure the Plant       │  Act in the World        │
-│  Mechanics, Actuators)│  A1: Plant Mechanics & E.│  C1: Closed-Loop Action  │
-│                       │  A2: Sensing & Load      │  C2: Temporal Horizons   │
-│                       │  A3: Feedback & Latency  │  C3: Disturbance Adapt   │
+│ (Actuators, Plant,    │  Kinematics & Sensing    │  Edge Loops & Planning   │
+│  Dynamics, Noise)     │  (A1, A2, A3)            │  (C1, C2, C3)            │
 ├───────────────────────┼──────────────────────────┼──────────────────────────┤
-│ COMPUTING SYSTEM      │  QUADRANT B:             │  QUADRANT D:             │
-│ (The Machine: Board,  │  Characterize the Brain  │  Govern the System       │
-│  Brains, Models, Edge)│  B1: Dataset Engineering │  D1: Authority Routing   │
-│                       │  B2: Baseline Benchmark  │  D2: Real-Time Governor  │
-│                       │  B3: Edge Model Profiling│  D3: Physical Release    │
+│ LOGICAL COGNITION     │  QUADRANT B:             │  QUADRANT D:             │
+│ (Neural Policies,     │  Data & Learning         │  Authority & Safety      │
+│  Compute, Safety)     │  (B1, B2, B3)            │  (D1, D2, D3)            │
 └───────────────────────┴──────────────────────────┴──────────────────────────┘
 ```
 
@@ -127,32 +96,7 @@ Engineering mastery is tracked using the [Physical AI Station Competency Card](s
 
 Formal classroom instruction and new textbook readings run through **Week 11**, covering the four parts of the textbook across **8 focused labs**. The final three weeks (**Weeks 12–14**) are preserved as an open **Capstone Project Studio**:
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ PART I: THE MACHINE ANATOMY (Weeks 1–3 · Labs 1–2) ─── Chapters 1, 2, 3, 4             │
-│ • Mechanics, envelope, sensor calibration, latency     (Checks: A1, A2, A3, D1)        │
-│ 🎯 Milestone 1 (End of W3): Station Charter & Calibrated Operating Envelope            │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ PART II: TEACHING THE MACHINE (Weeks 4–6 · Labs 3–4) ─ Chapters 5, 6, 7                │
-│ • Teleoperation, LeRobot Dataset v3, baselines, ONNX   (Checks: B1, B2, B3)            │
-│ 🎯 Milestone 2 (End of W6): Edge-Ready SmolVLA / ACT Policy on Qualcomm Linux          │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ PART III: RUNNING THE MACHINE (Weeks 7–9 · Labs 5–6) ─ Chapters 8, 9, 10, 11, 12, 13   │
-│ • Autonomous closed-loop reach, language conditioning  (Checks: C1, C2, C3)            │
-│ 🎯 Milestone 3 (End of W9): Autonomous Closed-Loop Manipulation Under Disturbance      │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ PART IV: GOVERNING THE MACHINE (Weeks 10–11 · Labs 7–8) Chapters 14, 15, 16, 17        │
-│ • Microcontroller safety governor, watchdogs, cutoffs  (Checks: D1, D2)                │
-│ 🎯 Milestone 4 (End of W11): Certified Governed Station                                │
-│ *Classroom lectures and new textbook reading conclude here!*                          │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ CAPSTONE PROJECT STUDIO (Weeks 12–14 · 3 Full Weeks Runway) ── Full Synthesis (Ch 1–17)│
-│ • Week 12: Independent team task design & custom dataset collection                    │
-│ • Week 13: Adversarial peer disturbance swapping & governor hardening                  │
-│ • Week 14: 20 held-out physical disturbance trials & oral defense ────▶ Checks: D3     │
-│ 🎯 Milestone 5 (End of W14): Final System Defense & Release Dossier                    │
-└────────────────────────────────────────────────────────────────────────────────────────┘
-```
+![Volume IV Physical AI Studio 14-Week Curriculum Map](assets/images/vol4-course-structure-map.svg)
 
 ---
 

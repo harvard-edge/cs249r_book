@@ -45,6 +45,8 @@ Each bench station provides an integrated physical and computational workstation
    * *ACT (Action Chunking with Transformers):* Multi-step joint trajectory prediction policy.
 4. **Edge Runtime:** ONNX Runtime / INT8 quantization optimized for Qualcomm ARM Cortex-A53 execution providers.
 
+![Arduino UNO Q Dual-Silicon Architecture and Safety Boundary](assets/images/vol4-uno-q-dual-core-architecture.svg)
+
 ---
 
 ## 3. Pedagogy & Studio Philosophy
@@ -52,6 +54,9 @@ Each bench station provides an integrated physical and computational workstation
 1. **Bench-First Studio Learning:** There are no passive lecture halls. Conceptual systems principles are grounded immediately in physical experiments at the bench.
 2. **The S·P·A Causal Feedback Loop:** Every physical episode connects:
    $$\text{Sense (Camera/Telemetry)} \longrightarrow \text{Propose (Linux VLA)} \longrightarrow \text{Permit (STM32 MCU)} \longrightarrow \text{Act (SO-101 Servos)}$$
+
+![The Physical AI Sense-Propose-Permit-Act Loop](assets/images/vol4-physical-ai-loop.svg)
+
 3. **The Three-Part Scope Test:** A lab submission is rejected if it merely runs a classifier on a screen or wires a model to an unmonitored hardcoded script. Action must be learned, consequential, and permitted by an independent safety boundary.
 4. **Adversarial Verification:** You do not prove a physical AI system works by recording a cherry-picked 5-second video. You prove it by allowing instructors and peer teams to introduce physical disturbances (lighting drops, target displacements, obstacle obstacles) and measuring whether the system recovers or safely abstains.
 
@@ -138,32 +143,7 @@ Because actuators impart physical momentum and electrical current:
 
 Formal instruction spans **Weeks 1–11 (8 focused labs)**, followed by the **3-week Capstone Project Studio (Weeks 12–14)**:
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ PART I: THE MACHINE ANATOMY (Weeks 1–3 · Labs 1–2) ─── Chapters 1, 2, 3, 4             │
-│ • Mechanics, envelope, sensor calibration, latency     (Checks: A1, A2, A3, D1)        │
-│ 🎯 Milestone 1 (End of W3): Station Charter & Calibrated Operating Envelope            │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ PART II: TEACHING THE MACHINE (Weeks 4–6 · Labs 3–4) ─ Chapters 5, 6, 7                │
-│ • Teleoperation, LeRobot Dataset v3, baselines, ONNX   (Checks: B1, B2, B3)            │
-│ 🎯 Milestone 2 (End of W6): Edge-Ready SmolVLA / ACT Policy on Qualcomm Linux          │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ PART III: RUNNING THE MACHINE (Weeks 7–9 · Labs 5–6) ─ Chapters 8, 9, 10, 11, 12, 13   │
-│ • Autonomous closed-loop reach, language conditioning  (Checks: C1, C2, C3)            │
-│ 🎯 Milestone 3 (End of W9): Autonomous Closed-Loop Manipulation Under Disturbance      │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ PART IV: GOVERNING THE MACHINE (Weeks 10–11 · Labs 7–8) Chapters 14, 15, 16, 17        │
-│ • Microcontroller safety governor, watchdogs, cutoffs  (Checks: D1, D2)                │
-│ 🎯 Milestone 4 (End of W11): Certified Governed Station                                │
-│ *Classroom lectures and new textbook reading conclude here!*                          │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ CAPSTONE PROJECT STUDIO (Weeks 12–14 · 3 Full Weeks Runway) ── Full Synthesis (Ch 1–17)│
-│ • Week 12: Independent team task design & custom dataset collection                    │
-│ • Week 13: Adversarial peer disturbance swapping & governor hardening                  │
-│ • Week 14: 20 held-out physical disturbance trials & oral defense ────▶ Checks: D3     │
-│ 🎯 Milestone 5 (End of W14): Final System Defense & Release Dossier                    │
-└────────────────────────────────────────────────────────────────────────────────────────┘
-```
+![Volume IV Physical AI Studio 14-Week Curriculum Map](assets/images/vol4-course-structure-map.svg)
 
 ### Detailed Lab Directory:
 * **[Lab 1: The Causal Boundary & Servo Bus Bring-Up](lab-01-boundary.md) (Weeks 1–2):** Chapters 1 & 2 $\to$ Checks A1, D1.
