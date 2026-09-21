@@ -22,7 +22,7 @@ This studio teaches the science and systems engineering of machines that sense a
 ```{=html}
 <table style="width: 100%; border: none; border-collapse: separate; border-spacing: 16px;">
   <tr style="border: none;">
-    <td style="width: 33%; vertical-align: top; text-align: center; padding: 16px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fafafa;">
+    <td style="width: 33%; vertical-align: top; text-align: center; padding: 16px; border: 1px solid #e2e8f0; border-radius: 0px; background: #fafafa;">
       <div style="height: 180px; display: flex; align-items: center; justify-content: center; gap: 8px;">
         <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 130px; max-width: 48%; object-fit: contain;">
         <img src="assets/images/so101-follower.png" alt="Seeed SO-101 Follower Arm" style="max-height: 130px; max-width: 48%; object-fit: contain;">
@@ -33,7 +33,7 @@ This studio teaches the science and systems engineering of machines that sense a
         A dual-brain architecture combining a Qualcomm QRB2210 Linux MPU for vision and VLA inference with an STM32U585 MCU acting as the hard real-time safety governor over 6× Feetech STS3215 bus smart servos.
       </p>
     </td>
-    <td style="width: 33%; vertical-align: top; text-align: center; padding: 16px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fafafa;">
+    <td style="width: 33%; vertical-align: top; text-align: center; padding: 16px; border: 1px solid #e2e8f0; border-radius: 0px; background: #fafafa;">
       <div style="height: 180px; display: flex; align-items: center; justify-content: center;">
         <img src="assets/images/lerobot-logo.png" alt="Hugging Face LeRobot" style="max-height: 85px; max-width: 85%; object-fit: contain;">
       </div>
@@ -43,7 +43,7 @@ This studio teaches the science and systems engineering of machines that sense a
         The open-source physical AI foundation providing teleoperation capture, LeRobot Dataset v3 format with 4-action-tap logging, language conditioning, and action-chunk policies (SmolVLA and ACT).
       </p>
     </td>
-    <td style="width: 33%; vertical-align: top; text-align: center; padding: 16px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fafafa;">
+    <td style="width: 33%; vertical-align: top; text-align: center; padding: 16px; border: 1px solid #e2e8f0; border-radius: 0px; background: #fafafa;">
       <div style="height: 180px; display: flex; align-items: center; justify-content: center;">
         <img src="assets/images/vol4-textbook-cover.png" alt="MLSysBook Volume IV: Physical AI" style="max-height: 170px; object-fit: contain;">
       </div>

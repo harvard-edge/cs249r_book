@@ -13,16 +13,17 @@ How does an embodied system integrate disparate sensory modalities across asynch
 ---
 
 ### 2. Hardware Setup
+
+| Component | Function in Lab 2 | Interface & Protocol | Visual Reference |
+|:---|:---|:---|:---:|
+| **Logitech C270 Webcam** | Overhead workspace visual sensing | UVC USB 2.0, 720p @ 30 FPS, rigid overhead clamp mount | <img src="assets/images/logitech-c270-webcam.png" alt="Logitech C270 Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Feetech STS3215 Bus Ports** | Inter-servo daisy-chain communications | Dual 3-pin ports, TTL half-duplex UART @ 1 Mbps | <img src="assets/images/feetech-sts3215-bus-ports.jpg" alt="STS3215 Bus Ports" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Arduino UNO Q Board** | Multi-modal edge computer & bridge master | Qualcomm Linux (V4L2 vision) + STM32U585 MCU (STS3215 bus) | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+
 1. **Compute Board:** Arduino UNO Q with Qualcomm Debian Linux booted and USB webcam attached.
 2. **Camera:** Standard 720p UVC USB webcam mounted on a rigid overhead clamp pointing down at the workspace.
 3. **Calibration Target:** Printed OpenCV checkerboard or ArUco board fixture placed flat on the table.
 4. **Arm Station:** Seeed SO-101 arm connected to the STM32 MCU via the internal RPC bridge.
-
-::: {layout-ncol=2}
-![Logitech C270 HD Webcam Mounted Overhead](assets/images/logitech-c270-webcam.png){#fig-webcam width=75%}
-
-![Feetech STS3215 Dual Daisy-Chain Bus Ports](assets/images/feetech-sts3215-bus-ports.jpg){#fig-bus-ports width=100%}
-:::
 
 ![Physical Bench Rigging & Electrical Power Isolation Harness](assets/images/vol4-bench-wiring-harness.svg){#fig-bench-harness width=100%}
 

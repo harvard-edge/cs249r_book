@@ -13,11 +13,21 @@ Where does computational authority end and physical delegation begin? If a host 
 ---
 
 ### 2. Hardware Setup
-1. **Actuator Station:** Seeed Studio SO-101 6-DoF arm mounted securely to the tabletop acrylic baseplate.
+
+| Component | Station Role | Specification | Image |
+|:---|:---|:---|:---:|
+| **Seeed Studio SO-101 Arm** | 6-DoF follower arm for physical manipulation | 6 active joints, STS3215 bus servos, rigid 3D-printed arm links | <img src="assets/images/so101-follower.png" alt="SO-101 6-DoF Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Arduino UNO Q ("Unikue")** | Dual-silicon brain: Linux MPU (Qualcomm) + Real-time MCU (STM32U585) | Dedicated inter-core RPC, hardware watchdog, half-duplex UART bus master | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Feetech STS3215 Servos** | Daisy-chained smart actuators | 12-bit magnetic encoder ($0.088^\circ$ res), 19 kg·cm torque @ 7.4V, 1 Mbps TTL UART | <img src="assets/images/feetech-sts3215-servo.jpg" alt="Feetech STS3215 Servo" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Dual Power Rails** | Electrical isolation: 45W USB-PD (Logic) + Dedicated 7.4V/5A DC (Servos) | Common star ground at UNO Q GND pin; zero brownout cross-talk | <img src="assets/images/feetech-sts3215-bus-ports.jpg" alt="Dual Daisy-Chain Bus Ports" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+
+1. **Actuator Station:** Seeed Studio SO-101 6-DoF arm mounted securely to the tabletop baseplate.
 2. **Controller Board:** Arduino UNO Q ("Unikue") powered via USB-C PD (45W).
 3. **Bus Interface:** Half-duplex TTL serial bus connecting the STM32U585 MCU (TX/RX pin pair) to the first Feetech STS3215 smart servo.
-4. **Isolated Power:** 7.4V–12V DC regulated motor power supply wired through an accessible physical emergency-stop toggle switch.
-5. **Initial State:** Motor power switch **OFF (Disarmed)**. Arm in resting, folded configuration.
+4. **Isolated Power:** Regulated 7.4V/5A DC motor power supply with a toggle switch, sharing a common star ground with the Arduino UNO Q.
+5. **Initial State:** Motor power supply switch **OFF (Disarmed)**. Arm in resting, folded configuration.
+
+![Bench Wiring Harness: Dual Power Isolation & Inter-Core Safety Routing](assets/images/vol4-bench-wiring-harness.svg){#fig-wiring-harness width=100%}
 
 ![The Physical AI Sense-Propose-Permit-Act Loop](assets/images/vol4-physical-ai-loop.svg){#fig-loop width=100%}
 
@@ -52,7 +62,7 @@ Where does computational authority end and physical delegation begin? If a host 
 ---
 
 ### 4. The Disturbance & Failure Test
-1. **Power-Off Drop Test:** Command the arm to a stable elevated test pose (Joint 2 @ $45^\circ$, Joint 3 @ $45^\circ$). While elevated, depress the physical emergency-stop switch.
+1. **Power-Off Drop Test:** Command the arm to a stable elevated test pose (Joint 2 @ $45^\circ$, Joint 3 @ $45^\circ$). While elevated, switch off the 7.4V motor power supply.
    * *Observation:* Record the mechanical drop trajectory as gravity pulls the unpowered links down. Verify that no mechanical binding or violent snapping occurs.
 2. **Re-Power Surge Audit:** With the arm now resting in an arbitrary fallen position, flip the motor power switch back ON.
    * *Pass Criteria:* The arm must remain completely limp and passive. The servos must **never** violently jerk, snap to zero, or execute pre-stored moves upon power restoration until an explicit arming handshake is sent from the console.
@@ -80,5 +90,5 @@ Log an elevation move in CSV format and verify that $a_{\text{meas}}$ converges 
 To receive credit for Lab 1, demonstrate the following live to the instructor:
 1. [ ] **Authority Route Proof:** Show the physical wiring diagram and prove that disconnecting the STM32 stops all motor communication.
 2. [ ] **Measured Operating Envelope Table:** Present the measured travel limits ($\theta_{\min}, \theta_{\max}$) for all 6 joints and the calibrated resting rest pose.
-3. [ ] **Power-Off & Re-Arm Trace:** Demonstrate depressing the E-stop switch during motion, observing a safe passive drop, restoring power, and proving zero uncommanded motion occurs.
+3. [ ] **Power-Off & Re-Arm Trace:** Demonstrate switching off the 7.4V motor power supply during active motion, observing a safe passive drop, restoring power, and proving zero uncommanded motion occurs.
 *Staff signs off `[ ] A1` and `[ ] D1` on the team's [Competency Card](student-competencies.md).*

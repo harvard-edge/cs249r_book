@@ -24,6 +24,14 @@ This course teaches how to build, deploy, evaluate, and govern an embodied machi
 Each bench station provides an integrated physical and computational workstation:
 
 ### The Hardware Platform
+
+| Component | Role in Lab Bench Station | Technical Specification | Visual Reference |
+|:---|:---|:---|:---:|
+| **Arduino UNO Q ("Unikue")** | Dual-silicon brain: Linux MPU + Real-time MCU | Qualcomm QRB2210 (Debian Linux) + STM32U585 MCU, inter-core RPC, hardware watchdog | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q Board" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Seeed Studio SO-101 Arm** | 6-DoF physical robot manipulator | 6 revolute joints, 3D-printed rigid structure, calibrated workspace boundary | <img src="assets/images/so101-follower.png" alt="Seeed Studio SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Feetech STS3215 Smart Servos** | Daisy-chained serial bus actuators | 12-bit magnetic encoder ($0.088^\circ$), 19 kg·cm stall torque @ 7.4V, 1 Mbps TTL UART | <img src="assets/images/feetech-sts3215-servo.jpg" alt="Feetech STS3215 Servo" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Dual Power Infrastructure** | Decoupled logic and motor power rails | 45W USB-C PD (Logic) + Dedicated 7.4V/5A DC (Servos) with common star ground | <img src="assets/images/feetech-sts3215-bus-ports.jpg" alt="Dual Daisy-Chain Bus Ports" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+
 1. **The Dual-Brain Compute Board (Arduino UNO Q "Unikue"):**
    * *Qualcomm Dragonwing QRB2210 MPU:* Quad-core 64-bit ARM Cortex-A53 running Debian Linux. Ingests USB video frames, runs quantized ONNX policy inference, and packages action chunk proposals ($a_{\text{req}}$).
    * *STM32U585 Real-Time Microcontroller (MCU):* Dedicated ARM Cortex-M33 running bare-metal/RTOS firmware. Mediates the half-duplex TTL motor bus, enforces hard real-time safety limits ($a_{\text{enf}}$), and manages watchdog timers.
@@ -34,8 +42,8 @@ Each bench station provides an integrated physical and computational workstation
 3. **The Visual Sensor:**
    * Standard 720p/1080p UVC USB webcam mounted on a rigid overhead/oblique clamp observing the workspace.
 4. **Electrical & Safety Infrastructure:**
-   * Regulated 7.4V–12V DC motor power supply separate from logic power.
-   * Accessible, physical emergency-stop toggle switch directly interrupting motor power.
+   * Regulated 7.4V/5A DC motor power supply separate from logic power (45W USB-C PD).
+   * Switched motor power toggle sharing a common star ground with the Arduino UNO Q.
 
 ### The Software Spine
 1. **Hugging Face LeRobot:** Open-source robot learning framework handling teleoperation capture, data formatting, and deployment loops.
@@ -83,7 +91,7 @@ Students are evaluated against the [Physical AI Station Competency Card](student
 
 ### Quadrant D: Govern the System (Computing × Control)
 * **D1 — Hardware Authority Routing & Boundary Enforcement:** Enforce an asymmetric architecture where neural proposals flow exclusively through an independent real-time microcontroller permission boundary ($a_{\text{req}} \to a_{\text{map}} \to a_{\text{enf}}$); mathematically and physically prove zero unmonitored host bypass.
-* **D2 — Real-Time Safety Governor & Fault Isolation:** Implement hard real-time velocity clamps, acceleration limits, collision geofences, communication watchdogs, and emergency-stop cutoffs; demonstrate safe state transition under injected faults with zero command backlog.
+* **D2 — Real-Time Safety Governor & Fault Isolation:** Implement hard real-time velocity clamps, acceleration limits, collision geofences, communication watchdogs, and motor power cutoffs; demonstrate safe state transition under injected faults with zero command backlog.
 * **D3 — Physical Release Defense & Evidence Dossier:** Conduct a statistically frozen 20-trial physical evaluation across held-out starting poses and adversarial disturbances; evaluate failure modes against the baseline; defend a formal Physical Release Dossier.
 
 ---
@@ -107,7 +115,7 @@ Physical engineering cannot be judged by paper exams. Grades are earned through 
 Students work in teams of 2 or 3 per bench station. To ensure individual accountability and comprehensive skill mastery, roles rotate on a weekly basis:
 
 1. **The Operator:**
-   * Controls hardware power, physical target positioning, teleoperation input devices, and holds the physical emergency-stop cutoff switch.
+   * Controls hardware power, physical target positioning, teleoperation input devices, and oversees bench motor power cutoffs.
    * Responsible for mechanical calibration, homing checks, and fixture safety.
 2. **The Systems Lead:**
    * Operates the Qualcomm Linux terminal, executes LeRobot scripts, manages ONNX model quantization, and monitors inter-core RPC bridge logs.
@@ -123,9 +131,9 @@ Students work in teams of 2 or 3 per bench station. To ensure individual account
 ## 7. The Physical Safety Contract & Lab Policy
 
 Because actuators impart physical momentum and electrical current:
-1. **The E-Stop Mandate:** Motor power may only be energized when a designated operator has an immediate hand on the physical emergency-stop toggle switch.
+1. **The Power Separation Mandate:** Motor DC power may only be energized after the STM32 firmware has initialized and the operator confirms the workspace is clear.
 2. **The Table Geofence:** Actuator trajectories must remain within the marked table boundaries. Driving the gripper into the tabletop or mounting bracket triggers an immediate hardware disarm.
-3. **Hardware Incident Protocol:** If a servo chatters, buzzes, stalls, or overheats, motor power must be cut within 2 seconds. A post-incident inspection is mandatory before rearming.
+3. **Hardware Incident Protocol:** If a servo chatters, buzzes, stalls, or overheats, switch off motor power within 2 seconds. A post-incident inspection is mandatory before rearming.
 4. **Zero Live Bypass Rule:** Plugging a host USB cable directly into the servo bus to bypass the STM32 MCU permission boundary results in an immediate milestone failure.
 
 ---

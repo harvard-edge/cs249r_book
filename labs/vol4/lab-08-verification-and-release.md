@@ -13,10 +13,19 @@ What happens when the host computer freezes, the camera is disconnected, or the 
 ---
 
 ### 2. Hardware Setup
-1. **Controller Board:** Arduino UNO Q (Qualcomm Linux MPU + STM32 MCU).
-2. **Safety Switch:** Accessible physical emergency-stop toggle switch wired in-line with the motor power rail.
-3. **Robot Station:** Seeed SO-101 6-DoF arm carrying a light payload in active motion.
-4. **Fault Injection Toolkit:** Python process-killing scripts and serial corruption utilities.
+
+| Component | Role in Fault & Release Testing | Fault Injection Mode | Visual Reference |
+|:---|:---|:---|:---:|
+| **Arduino UNO Q Board** | Dual-silicon brain running Linux runtime & STM32 watchdog | Process suspension (`kill -STOP`), RPC buffer overflow | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Logitech C270 Webcam** | Visual perception sensor | Live physical USB disconnect during trajectory execution | <img src="assets/images/logitech-c270-webcam.png" alt="Logitech C270 Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Seeed SO-101 6-DoF Arm** | Physical plant under active load | Table collision veto, watchdog freeze, unpowered gravity drop | <img src="assets/images/so101-follower.png" alt="SO-101 Robot Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Switched 7.4V DC Rail** | Isolated motor power rail | Live power disconnect while logic telemetry continues uninterrupted | <img src="assets/images/feetech-sts3215-bus-ports.jpg" alt="Motor Bus Power Ports" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+
+1. **Controller Board:** Arduino UNO Q (Qualcomm Linux MPU + STM32U585 MCU).
+2. **Motor Power Rail:** Switched 7.4V/5A DC motor power supply sharing a common star ground with the Arduino UNO Q.
+3. **Perception Sensor:** Logitech C270 USB webcam connected to Qualcomm Linux.
+4. **Robot Station:** Seeed SO-101 6-DoF arm carrying a light payload in active motion.
+5. **Fault Injection Toolkit:** Python process-killing scripts and serial corruption utilities.
 
 ---
 
@@ -53,7 +62,7 @@ What happens when the host computer freezes, the camera is disconnected, or the 
 ### 4. The Disturbance & Failure Test
 1. **Camera Disconnect During Motion:** Physically unplug the USB webcam while the arm is reaching toward an object.
    * *Pass Criteria:* The Linux perception thread must detect the device drop, flag `SENSOR_LOSS`, and signal the STM32 to abort the reach and return to rest pose.
-2. **Physical E-Stop Depressed Under Full Load:** While the arm is lifting a payload at maximum speed, depress the physical emergency-stop switch.
+2. **Motor Power Cutoff Under Full Load:** While the arm is lifting a payload at maximum speed, switch off the 7.4V motor DC power supply.
    * *Pass Criteria:* Motor torque must drop to zero immediately ($< 10\text{ ms}$). Logic power on the UNO Q must remain uninterrupted, and telemetry logging must capture the event.
 
 ---
@@ -70,7 +79,7 @@ Capture the complete telemetry trace during an injected watchdog timeout:
 
 ### 6. Common Pitfalls & Debugging
 * ⚠️ **UART Buffer Overflow:** When a receiver stops processing, Linux UART buffers can fill up with hundreds of bytes. Upon resumption, reading stale buffer data will cause erratic behavior. Always explicitly flush the input buffer (`tcflush(fd, TCIFLUSH)`) on rearm.
-* ⚠️ **E-Stop Induced Brownout:** Cutting high inductive motor currents abruptly can cause inductive kickback spikes. Ensure flyback suppression diodes or snubbers are present across the motor power rail.
+* ⚠️ **Power Cutoff Inductive Kickback:** Cutting high inductive motor currents abruptly can cause inductive kickback spikes. Ensure flyback suppression diodes or snubbers are present across the motor power rail.
 
 ---
 
@@ -78,5 +87,5 @@ Capture the complete telemetry trace during an injected watchdog timeout:
 To receive credit for Lab 8 and complete Milestone 4:
 1. [ ] **Watchdog Timeout Proof:** Demonstrate that suspending the Linux process halts the arm within $150\text{ ms}$ with zero anomalous motion.
 2. [ ] **Zero Backlog Audit:** Prove that resuming the suspended process does not execute stale buffered movements.
-3. [ ] **Physical E-Stop Verification:** Depress the physical E-stop switch during active motion, proving immediate motor cutoff while system telemetry continues logging.
+3. [ ] **Motor Power Cutoff Verification:** Switch off the 7.4V motor power supply during active motion, proving immediate motor cutoff while system telemetry continues logging.
 *Staff signs off `[ ] D2` on the team's [Competency Card](student-competencies.md).*

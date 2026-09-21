@@ -13,6 +13,13 @@ How far into the future can an embodied model predict open-loop actions before p
 ---
 
 ### 2. Hardware Setup
+
+| Component | Station Function | Technical Role | Visual Reference |
+|:---|:---|:---|:---:|
+| **Seeed SO-101 Arm** | Physical manipulation follower arm | Executes variable action chunk horizons ($K \in \{1, 8, 16, 32\}$) | <img src="assets/images/so101-follower.png" alt="SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Arduino UNO Q Board** | Edge VLA runtime engine | Runs SmolVLA/ACT inference and dynamic chunk replanning | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Logitech C270 Webcam** | Live optical feedback | Provides continuous 30 FPS observation frames for disturbance detection | <img src="assets/images/logitech-c270-webcam.png" alt="Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+
 1. **Edge Board:** Arduino UNO Q running the closed-loop runtime pipeline.
 2. **Robot Station:** Seeed SO-101 arm and overhead USB webcam.
 3. **Task Arena:** Tabletop setup containing two colored target blocks: a **Red Block** (left zone) and a **Blue Block** (right zone).

@@ -19,7 +19,7 @@ To ensure every student station operates flawlessly when the studio launches in 
 :::
 
 The primary objectives for this 13-week execution window:
-1. **Week 1 Planning & Bench Preparation:** Finalize the master curriculum plan, audit the Bill of Materials (BOM), allocate dedicated workbench space at ETH Zurich, and verify electrical safety equipment before unboxing.
+1. **Week 1 Planning & Bench Preparation:** Finalize the master curriculum plan, audit the Bill of Materials (BOM), allocate dedicated workbench space at ETH Zurich, and verify electrical power rails before unboxing.
 2. **Hardware Bring-Up & Gate Qualification:** Assemble, wire, verify, and qualify one complete **Golden Reference Station**, passing the **Four Technical Go/No-Go Gate Tests (Gates A–D)**.
 3. **End-to-End Curriculum Qualification:** Execute all **8 Hands-On Student Labs** from scratch, producing verified golden artifacts, starter scripts, reference datasets, and calibration profiles.
 4. **Software & Firmware Freeze:** Compile and lock the **Golden Qualcomm Linux Image** and **STM32 Firmware Binary**.
@@ -29,7 +29,7 @@ The primary objectives for this 13-week execution window:
 
 ## 2. Master 13-Week Execution Roadmap
 
-The 13-week schedule is organized into six logical phases across five sprints, shifting physical assembly into Week 2 to allow Week 1 to focus entirely on architecture alignment, BOM audit, and bench safety preparation:
+The 13-week schedule is organized into six logical phases across five sprints, shifting physical assembly into Week 2 to allow Week 1 to focus entirely on architecture alignment, BOM audit, and bench preparation:
 
 ![Volume IV Physical AI Studio: 13-Week Staff Implementation Roadmap](assets/images/vol4-staff-roadmap.svg){#fig-staff-roadmap width=100%}
 
@@ -37,30 +37,30 @@ The 13-week schedule is organized into six logical phases across five sprints, s
 
 ## 3. Physical Hardware Stack & Bench Architecture
 
-The studio relies on an open, modular, and safety-hardened hardware stack designed specifically for edge Physical AI:
+The studio relies on an open, modular, and safety-hardened hardware stack designed specifically for edge Physical AI.
 
-::: {layout-ncol=4}
-![**Dual-Silicon Compute**<br>Arduino UNO Q: Qualcomm QRB2210 Linux + STM32U585 Real-Time MCU](assets/images/arduino-uno-q.jpg){#fig-uno-q width=100%}
+### Physical AI Hardware Platform Overview
 
-![**6-DoF Arm Rig**<br>Seeed Studio SO-101 6-DoF Follower Arm with STS3215 Smart Servos](assets/images/so101-follower.png){#fig-so101 width=100%}
+| Component Image | System Pillar & Hardware | Key Technical Specifications | Core Function in Studio |
+|:---:|:---|:---|:---|
+| <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;"> | **Dual-Silicon Compute**<br>`Arduino UNO Q` | • Qualcomm QRB2210 Linux Application MPU (Debian)<br>• STM32U585 Real-Time Microcontroller (160 MHz ARM Cortex-M33)<br>• OpenAMP RPMsg shared-SRAM inter-core bridge<br>• Dedicated 45W USB-PD logic power | Runs Hugging Face LeRobot and SmolVLA/ACT neural policies on Linux; delegates physical motor bounds and safety governance to STM32. |
+| <img src="assets/images/so101-follower.png" alt="Seeed Studio SO-101" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;"> | **Manipulator Plant**<br>`Seeed Studio SO-101 Pro` | • 6-DoF open-source follower arm linkage<br>• Rigid benchtop clamp mount (zero tip under load)<br>• Parallel-jaw gripper end-effector<br>• $300 \times 200\text{ mm}$ marked manipulation workspace | Provides the physical body for imitation learning, human teleoperation demonstration recording, and autonomous block reach. |
+| <img src="assets/images/feetech-sts3215-servo.jpg" alt="Feetech STS3215" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;"> | **Smart Serial Actuator**<br>`Feetech STS3215 Bus Servo` | • 19 kg·cm stall torque at 7.4V<br>• 12-bit contactless magnetic angle encoder<br>• 1 Mbps half-duplex UART daisy-chain protocol<br>• Real-time angular position and load telemetry readback | Translates commanded joint action chunks ($a_{\text{enf}}$) into calibrated physical motion and returns measured angles ($a_{\text{meas}}$). |
+| <img src="assets/images/logitech-c270-webcam.png" alt="Logitech C270 Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;"> | **Vision Sensor**<br>`Logitech C270 HD Webcam` | • 720p 30 Hz RGB video ingestion via Linux V4L2<br>• Mounted 40 cm overhead at 45° oblique perspective<br>• AprilTag 36h11 extrinsic calibration target<br>• Locked exposure and white balance to avoid visual drift | Ingests sensory frames $o_t \in \mathbb{R}^{3 \times 224 \times 224}$ for closed-loop visual feedback and dynamic disturbance recovery. |
 
-![**Smart Serial Actuator**<br>Feetech STS3215: 19 kg·cm, 12-bit magnetic encoder, dual bus ports](assets/images/feetech-sts3215-servo.jpg){#fig-sts3215 width=100%}
+### Complete Bench Rigging & Electrical Bus Interface
 
-![**Sensing & Safety**<br>Logitech C270 USB HD Webcam (30 Hz RGB) & Latching Mushroom E-Stop Button](assets/images/logitech-c270-webcam.png){#fig-c270 width=80%}
-:::
+Before assembling the physical arm or connecting motor power, review the electrical wiring schematic. The architecture uses clean galvanic separation between digital computing logic and high-current actuator power:
 
-### Complete Bench Rigging & Electrical Power Isolation Schematic
+![Physical Bench Rigging & Electrical Bus Interface](assets/images/vol4-bench-wiring-harness.svg){#fig-bench-harness width=100%}
 
-Before assembling the physical arm or connecting motor power, review the electrical wiring schematic. The single most critical electrical rule is **galvanic isolation between high-power motor rails and low-voltage digital logic**:
-
-![Physical Bench Rigging & Electrical Power Isolation Harness](assets/images/vol4-bench-wiring-harness.svg){#fig-bench-harness width=100%}
-
-::: {.callout-warning}
-### Mandatory Electrical Safety Invariant
-The physical **Latching Mushroom Emergency Stop (E-Stop)** switch MUST be wired in-line with the external **7.4V / 5A DC motor power supply** feeding the STS3215 servo bus rail.
-
-* **When the E-Stop is pressed:** The 7.4V motor power drops to $0\text{V}$ in $< 5\text{ ms}$, immediately releasing all mechanical torque.
-* **Logic Power Remains Live:** The 5V logic supply to the Arduino UNO Q (Qualcomm Linux + STM32 MCU) and USB webcam remains **100% powered**, ensuring real-time telemetry logging and diagnostic capture are never interrupted during an emergency shutdown.
+::: {.callout-note}
+### Dual Power Supply Engineering Rationale
+To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
+* **Digital Logic Power:** The Arduino UNO Q and USB camera are powered exclusively through the USB-C port via the **45W USB-PD adapter**.
+* **Actuator Power:** The 6× STS3215 smart servos are powered by an independent, regulated **7.4V / 5A DC bench power supply** connected directly to the servo bus rail.
+* **Common Ground Reference:** The DC motor power supply ground and Arduino UNO Q ground are connected together into a solid star-ground reference. Motor current NEVER passes through board headers.
+* **Safety Invariant:** Software faults, servo stalls, or power cuts on the motor rail will never reset the Qualcomm Linux processor or disrupt telemetry logging.
 :::
 
 ---
@@ -68,33 +68,32 @@ The physical **Latching Mushroom Emergency Stop (E-Stop)** switch MUST be wired 
 ## 4. Sprint-by-Sprint Weekly Implementation Breakdown
 
 ### Sprint 0: Architecture Alignment & Bench Preparation (Week 1)
-**Focus:** Curriculum plan finalization, Bill of Materials audit, dedicated bench allocation, and electrical safety verification.
+**Focus:** Curriculum plan finalization, Bill of Materials audit, dedicated bench allocation, and electrical power verification.
 
 #### Week 1 (Sep 21 – Sep 25, 2026): Master Plan Alignment & Bench Preparation
-* **Primary Objective:** Finalize the master execution plan, complete the BOM inventory, allocate the physical workbench, and verify laboratory safety systems.
+* **Primary Objective:** Finalize the master execution plan, complete the BOM inventory, allocate the physical workbench, and verify laboratory power systems.
 * **Tasks:**
   - [ ] Review master curriculum architecture: [Master Landing Page](README.md), [Course Syllabus](syllabus.md), [Pre-Flight Guide](feasibility-plan.md), [8 Lab Briefs](lab-01-boundary.md), and [Capstone Studio](lab-capstone-studio.md).
-  - [ ] Inventory delivered hardware packages: Seeed Studio SO-101 Pro arm kit, Arduino UNO Q (4GB RAM), 45W USB-PD power supply, USB 3.0 powered hub, Logitech C270 camera, latching mushroom E-Stop button, 7.4V/5A DC motor power supply, UART level-shifter, and wiring harnesses.
+  - [ ] Inventory delivered hardware packages: Seeed Studio SO-101 Pro arm kit, Arduino UNO Q (4GB RAM), 45W USB-PD power supply, USB 3.0 powered hub, Logitech C270 camera, 7.4V/5A DC motor power supply, UART level-shifter, and wiring harnesses.
   - [ ] Dedicate a clean $120 \times 80\text{ cm}$ workbench at ETH Zurich with rigid table-edge clamping surface, overhead camera mount fixture, and anti-static mat.
-  - [ ] Wire and bench-test the physical latching mushroom E-Stop switch using a multimeter/oscilloscope to confirm instantaneous cutoff of the 7.4V servo DC bus without interrupting the 5V logic rail.
+  - [ ] Bench-test the regulated 7.4V DC motor supply and 45W USB-PD adapter with a digital multimeter to confirm clean voltage levels and common star-ground reference.
   - [ ] Stage bench workstation software: install Hugging Face LeRobot dependencies, PyTorch ARM64 toolchains, Arduino App Lab, and ONNX Runtime developer packages.
-* **Weekly Deliverable:** Finalized master checklist, verified hardware inventory audit, workbench setup ready for assembly, and E-Stop electrical schematic verification.
+* **Weekly Deliverable:** Finalized master checklist, verified hardware inventory audit, workbench setup ready for assembly, and electrical schematic verification.
 
 ---
 
 ### Sprint 1: Mechanical Bring-Up & Gate Tests A–C (Weeks 2–4)
-**Focus:** Mechanical assembly, electrical safety isolation, and establishing the governed servo bus path.
+**Focus:** Mechanical assembly, electrical isolation, and establishing the governed servo bus path.
 
 #### Week 2 (Sep 28 – Oct 2, 2026): Hardware Bring-Up, Arm Assembly & Gate A
 * **Primary Objective:** Assemble the physical arm, establish power safety isolation, and achieve native teleoperation.
 * **Tasks:**
   - [ ] Assemble Seeed Studio SO-101 6-DoF follower arm from kit components.
   - [ ] Clamp arm baseplate rigidly to workbench using heavy-duty C-clamps.
-  - [ ] Wire external 7.4V/5A DC motor power supply through physical latching mushroom E-Stop switch to STS3215 servo power rail.
-  - [ ] Verify E-Stop cuts motor power in $< 5\text{ ms}$ while leaving logic power untouched.
+  - [ ] Wire external 7.4V/5A DC motor power supply directly to STS3215 servo power rail with common ground to UNO Q.
   - [ ] Connect SO-101 arm to workstation via USB BusLinker; install Hugging Face LeRobot (`pip install lerobot`).
   - [ ] **Pass Gate A:** Run joint calibration and execute 60-second teleoperation replay (`lerobot-replay`).
-* **Weekly Deliverable:** Video proof of Gate A teleoperation + E-Stop power cutoff oscilloscope/multimeter trace.
+* **Weekly Deliverable:** Video proof of Gate A teleoperation + voltage rail multimeter verification.
 
 #### Week 3 (Oct 5 – Oct 9, 2026): Inter-Core Bridge Wiring & Gate B (1-Joint Interceptor)
 * **Primary Objective:** Route servo communication through the STM32 and prove real-time command veto.
@@ -231,8 +230,8 @@ The physical **Latching Mushroom Emergency Stop (E-Stop)** switch MUST be wired 
 
 | Week & Date Range | Milestone / Sprint Phase | Primary Physical AI Deliverables | Hardware Verification & Acceptance Criteria | Status |
 |:---|:---|:---|:---|:---:|
-| **W01: Sep 21 – Sep 25** | Master Plan & Prep | • Complete curriculum review & syllabus freeze<br>• BOM inventory & receiving audit<br>• Dedicated bench allocation & E-Stop verification | Multimeter confirmation of E-Stop power isolation; complete toolchain staged | `[ ]` |
-| **W02: Sep 28 – Oct 02** | Hardware Bring-Up | • Mechanical arm assembled & clamped<br>• E-Stop motor power harness verified<br>• **Gate A:** LeRobot USB teleoperation passing | 60-second teleoperation replay executed without communication dropout | `[ ]` |
+| **W01: Sep 21 – Sep 25** | Master Plan & Prep | • Complete curriculum review & syllabus freeze<br>• BOM inventory & receiving audit<br>• Dedicated bench allocation & power rail check | Multimeter confirmation of 7.4V DC & 45W USB-PD rails; complete toolchain staged | `[ ]` |
+| **W02: Sep 28 – Oct 02** | Hardware Bring-Up | • Mechanical arm assembled & clamped<br>• 7.4V motor power harness verified<br>• **Gate A:** LeRobot USB teleoperation passing | 60-second teleoperation replay executed without communication dropout | `[ ]` |
 | **W03: Oct 05 – Oct 09** | Bus Authority | • STM32 UART level-shifter circuit wired<br>• Inter-core RPC bridge test script<br>• **Gate B:** 1-joint velocity clamp & veto | Joint 1 clamped at $45^\circ/\text{s}$; out-of-range targets ($> 180^\circ$) rejected | `[ ]` |
 | **W04: Oct 12 – Oct 16** | 6-DoF Integration | • `UnoQMotorsBus` Python adapter deployed<br>• Table geofence ($z \ge 15\text{ mm}$) programmed<br>• **Gate C:** Governed 6-DoF teleoperation | Full 6-DoF teleoperation functional; downward table crash actively vetoed | `[ ]` |
 | **W05: Oct 19 – Oct 23** | **Milestone 1:** Anatomy | • Lab 1 (Boundary) qualified by Student Zero<br>• Lab 2 (Sensing & Bridge) qualified<br>• AprilTag camera & joint offset calibration | Joint repeatability $\pm 1.5^\circ$; inter-core bridge round-trip $\le 5\text{ ms}$ at $50\text{ Hz}$ | `[ ]` |

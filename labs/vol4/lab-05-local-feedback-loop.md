@@ -13,6 +13,13 @@ Can a trained neural policy run completely untethered on edge silicon, closing t
 ---
 
 ### 2. Hardware Setup
+
+| Component | Station Function | Technical Details | Visual Reference |
+|:---|:---|:---|:---:|
+| **Arduino UNO Q Board** | Untethered edge computer | Runs ONNX runtime on Linux MPU & safety bridge on STM32 MCU | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Seeed SO-101 Arm** | Physical manipulation follower arm | Executes closed-loop reach entirely without workstation tether | <img src="assets/images/so101-follower.png" alt="SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Logitech C270 Webcam** | Live optical feedback | 30 FPS USB video streaming directly into Qualcomm Linux V4L2 | <img src="assets/images/logitech-c270-webcam.png" alt="Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+
 1. **Edge Board:** Arduino UNO Q running standalone (Qualcomm Linux MPU + STM32 MCU).
 2. **Network Connection:** Disconnected or headless network (zero tethering to a workstation during task execution).
 3. **Camera & Arm:** USB webcam mounted above the table; Seeed SO-101 arm in resting pose.

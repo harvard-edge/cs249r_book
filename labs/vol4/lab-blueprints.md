@@ -41,7 +41,7 @@ The Volume IV studio is structured into **4 foundational parts (8 hands-on labs,
 
 #### Lab 1: Causal Boundary & Bus Bring-Up
 * **Core Systems Question:** Where does software end, where does physical actuation begin, and who holds veto authority?
-* **Hands-On Experiment:** Map the physical wiring harness between the Arduino UNO Q, the independent 7.4V/5A motor power rail, the latching mushroom E-stop, and the STS3215 single-wire half-duplex UART bus. Measure cold boot time, reset transients, and verify zero-motion safe hold when motor power is severed.
+* **Hands-On Experiment:** Map the physical wiring harness between the Arduino UNO Q, the independent 7.4V/5A motor power rail, the switched DC power supply, and the STS3215 single-wire half-duplex UART bus. Measure cold boot time, reset transients, and verify zero-motion safe hold when motor power is severed.
 * **Exit Proof & Artifact:** Submit `wiring_diagram_golden.pdf` and an oscilloscope/logic-analyzer trace demonstrating motor power cutoff within $< 5\text{ ms}$ while Linux logging remains active.
 * **Competencies:** A1, D1.
 

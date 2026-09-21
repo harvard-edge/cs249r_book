@@ -30,7 +30,7 @@ The physical station enforces an asymmetry between high-level computation and lo
 [ Camera (USB) ] ──▶ [ Qualcomm QRB2210 (Debian Linux) ]
                             │
                             ▼ (Arduino Bridge RPC over UART/SPI)
-                     [ STM32U585 Real-Time MCU ] ◄── [ Hardware E-Stop Cutoff ]
+                     [ STM32U585 Real-Time MCU ] ◄── [ Hardware Watchdog & Power Rail ]
                             │
                             ▼ (Half-Duplex TTL Serial Bus @ 1 Mbps)
                      [ 6× Feetech STS3215 Bus Servos ]
@@ -38,7 +38,7 @@ The physical station enforces an asymmetry between high-level computation and lo
 
 ### Key Engineering Rules:
 - **Zero Host Bypass:** The SO-101 servos must be commanded **exclusively** through the STM32 microcontroller. The host workstation or Qualcomm USB bus must never connect directly to the servo bus via a USB-to-UART adapter.
-- **Physical Power Cutoff:** The motor supply (7.4V–12V DC) passes through an accessible physical emergency-stop toggle switch. Cutting motor power must de-energize the servos without resetting the Qualcomm Linux MPU or STM32 MCU logic power.
+- **Physical Power Isolation:** The motor supply (7.4V/5A DC) operates on an independent rail with a switched toggle, sharing a common star ground with the Arduino UNO Q. Cutting motor power de-energizes the servos instantly without resetting the Qualcomm Linux MPU or STM32 MCU logic power.
 
 ---
 
@@ -49,7 +49,7 @@ The physical station enforces an asymmetry between high-level computation and lo
 *Textbook Reading:* Chapters 1 & 2
 *Competencies Checked:* `[ ] A1 Plant Mechanics & Safe Envelope`, `[ ] D1 Hardware Authority Routing`
 1. **Trace the Actuation Chain:** Map each physical layer: Camera $\to$ Qualcomm QRB2210 $\to$ Arduino Bridge $\to$ STM32U585 $\to$ STS3215 Servos. Verify zero host bypass.
-2. **Safe-State Transitions:** Measure servo bus behavior during board boot, soft reset, sudden power loss, and emergency-stop activation. Confirm that uncommanded motion cannot occur upon power restoration.
+2. **Safe-State Transitions:** Measure servo bus behavior during board boot, soft reset, and sudden motor power loss. Confirm that uncommanded motion cannot occur upon power restoration.
 3. **The Physical AI Scope Test:** Formulate a team counterexample: identify a system that uses machine learning in robotics but fails the book's 3-part scope test.
 
 ### Lab 2: Multi-Modal Sensing & The Inter-Core Bridge (Week 3)

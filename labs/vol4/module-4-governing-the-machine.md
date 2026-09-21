@@ -24,7 +24,7 @@ Formal lectures and new conceptual textbook reading conclude in **Week 11**. The
 
 In Part IV, teams prove that their system can survive in the wild:
 1. **The STM32 Microcontroller Safety Governor:** Enforcing hard real-time velocity clamps, collision envelopes, and communication watchdogs that veto invalid neural proposals in real time.
-2. **Adversarial Fault Injection:** Deliberately corrupting action packets, disconnecting sensors, simulating OS freezes, and testing physical emergency-stop transitions with zero command queue backlog.
+2. **Adversarial Fault Injection:** Deliberately corrupting action packets, disconnecting sensors, simulating OS freezes, and testing motor rail power cutoff transitions with zero command queue backlog.
 3. **The Capstone Project Studio:** Freezing code and weights, swapping adversarial fault challenges with peer teams, executing 20 live held-out physical disturbance trials, and defending an auditable **Physical Release Dossier**.
 
 ---
@@ -47,7 +47,7 @@ In Part IV, teams prove that their system can survive in the wild:
 *Competencies Checked:* `[ ] D2 Real-Time Safety Governor & Fault Isolation`
 1. **Communication Watchdogs:** Configure an MCU hardware watchdog timer ($T_{\text{watchdog}} = 150\text{ ms}$). Forcefully kill or suspend the Linux inference process. Verify that missing heartbeats trigger an immediate safe disarm to de-energized rest state.
 2. **Queue Backlog Test:** Flood the bridge with delayed packets. Confirm that the MCU never executes a stale command buffer after recovery.
-3. **Physical E-Stop Audit:** Depress the physical emergency-stop toggle switch during active trajectory execution. Confirm immediate servo de-energization while logic power and telemetry logging remain active.
+3. **Hardware Power Cutoff Audit:** Switch off the 7.4V motor DC power supply during active trajectory execution. Confirm immediate servo de-energization while logic power and telemetry logging remain active.
 *🎯 Milestone 4 Sign-Off (Week 11): Certified Governed Station.*
 
 ---

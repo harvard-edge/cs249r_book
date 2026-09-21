@@ -32,10 +32,9 @@ Complete these physical build steps and verify electrical safety before powering
   - Mount the standard UVC USB webcam (Logitech C270 or equivalent) on a rigid, vibration-isolated gooseneck arm overlooking the manipulation stage at an oblique angle ($45^\circ$, $40\text{ cm}$ distance).
   - Define a marked physical workspace boundary ($300\text{ mm} \times 200\text{ mm}$) on the bench surface using high-contrast tape.
   - Set up diffused, flicker-free LED task lighting to prevent exposure fluctuations.
-- [ ] **Electrical Power Harness & Safety Cutoff:**
+- [ ] **Electrical Power Harness & Dedicated Rail:**
   - Connect a regulated external DC bench power supply ($7.4\text{V}$, $5\text{A}$ rating) dedicated exclusively to the STS3215 servo rail.
-  - Wire a physical, latching mushroom Emergency Stop (E-Stop) switch in series with the positive ($+7.4\text{V}$) motor power rail.
-  - Verify that hitting the E-Stop mechanically drops motor power to zero volts within $< 5\text{ ms}$ while leaving the Arduino UNO Q and camera fully powered.
+  - Verify that the motor power supply delivers stable $7.4\text{V}$ without voltage sag under multi-joint motion.
   - **CRITICAL:** Tie the DC motor power ground and Arduino UNO Q ground together into a solid star-ground. **NEVER** draw motor current through the UNO Q headers.
 - [ ] **Dual-Core Board & Bus Communication:**
   - Power the Arduino UNO Q via its USB-C port using an official 45W USB-PD adapter through the powered USB-C hub.
@@ -125,7 +124,7 @@ For each lab in the 14-week curriculum, Andrea must execute the student protocol
 
 | Lab & Title | Pre-Flight Tasks for Andrea ("Student Zero") | Required Staff Deliverables for Students |
 |:---|:---|:---|
-| **[Lab 1: Causal Boundary](lab-01-boundary.md)** | • Wire power harness, E-stop, and UART bus.<br>• Verify motor cutoff while Linux continues logging.<br>• Clock cold boot and reset settling times. | • `wiring_diagram_golden.pdf`<br>• `board_pinout_reference.md`<br>• `lab01_boundary_check.py` |
+| **[Lab 1: Causal Boundary](lab-01-boundary.md)** | • Wire dual power rails, common ground, and UART bus.<br>• Verify independent power rail isolation.<br>• Clock cold boot and reset settling times. | • `wiring_diagram_golden.pdf`<br>• `board_pinout_reference.md`<br>• `lab01_boundary_check.py` |
 | **[Lab 2: Sensing & Bridge](lab-02-body-and-sensors.md)** | • Calibrate camera intrinsic/extrinsics using AprilTag.<br>• Test STM32 joint angle readback accuracy ($\pm 1.5^\circ$).<br>• Benchmark inter-core RPC throughput ($> 50\text{ Hz}$). | • `calibrate_camera.py`<br>• `test_bridge_latency.py`<br>• `camera_v4l2_config.sh` |
 | **[Lab 3: Teleop & Datasets](lab-03-physical-episodes.md)** | • Record 10 pick-and-place episodes into LeRobot v2 format.<br>• Validate synchronized storage of RGB frames and joint taps.<br>• Verify HDF5/parquet schema compatibility. | • `teleop_record.py`<br>• `dataset_golden_10ep/`<br>• `inspect_dataset.py` |
 | **[Lab 4: Baseline & Policy Export](lab-04-baseline-and-learning.md)** | • Train baseline ACT policy on workstation (Colab/cluster).<br>• Quantize trained PyTorch checkpoint to ONNX INT8.<br>• Build deterministic heuristic reach baseline. | • `train_act_baseline.py`<br>• `export_onnx_quantized.py`<br>• `pretrained_act_int8.onnx` |
@@ -152,7 +151,7 @@ Once the single station passes all Gate Tests and Lab Qualifications, prepare th
 - [ ] **Spare Parts Buffer & Tooling Kit:**
   - 4x spare STS3215 smart servos (pre-addressed IDs 1 through 6).
   - 2x backup Logitech C270 USB webcams.
-  - 3x spare 7.4V/5A motor power supplies and E-stop switches.
+  - 3x spare 7.4V/5A DC motor power supplies.
   - Set of 3D-printed spare brackets, gripper jaws, and base clamps.
   - 2x digital multimeters and logic analyzers (for UART bus debugging).
 

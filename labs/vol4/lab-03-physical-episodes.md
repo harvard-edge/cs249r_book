@@ -13,6 +13,13 @@ How do we collect demonstration data from human teleoperation that accurately ca
 ---
 
 ### 2. Hardware Setup
+
+| Component | Station Function | Technical Details | Visual Reference |
+|:---|:---|:---|:---:|
+| **Seeed SO-101 Arm** | Follower arm under teleoperation | 6-DoF, STS3215 serial servos, resting pose return | <img src="assets/images/so101-follower.png" alt="SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Logitech C270 Webcam** | Tabletop manipulation arena video capture | Overhead mount, 30 FPS RGB, synchronized with joint states | <img src="assets/images/logitech-c270-webcam.png" alt="Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Arduino UNO Q Board** | Multi-tap telemetry logger & bus interface | Logs `a_req`, `a_map`, `a_enf`, `a_meas` across inter-core RPC | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+
 1. **Follower Arm:** Seeed SO-101 6-DoF arm connected to the Arduino UNO Q.
 2. **Teleoperation Input:** Leader arm, USB gamepad (Xbox / Logitech), or keyboard teleoperator connected to the workstation or UNO Q.
 3. **Overhead Webcam:** Calibrated USB camera streaming 30 FPS RGB frames of the tabletop manipulation arena.

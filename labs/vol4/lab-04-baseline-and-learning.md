@@ -13,7 +13,14 @@ Why do we use machine learning instead of classical control? Does a learned neur
 ---
 
 ### 2. Hardware Setup
-1. **Workstation / GPU Server:** Machine learning training environment (or Google Colab / HF Hub) equipped with PyTorch and LeRobot.
+
+| Component | Station Function | Technical Role | Visual Reference |
+|:---|:---|:---|:---:|
+| **Arduino UNO Q Board** | Edge inference target | Qualcomm QRB2210 running INT8 quantized ONNX policy | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Seeed SO-101 Arm** | Physical validation plant | 6-DoF execution of scripted baseline vs. learned policy | <img src="assets/images/so101-follower.png" alt="SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Logitech C270 Webcam** | Visual observation source | Real-time workspace frames fed to baseline CV & neural policy | <img src="assets/images/logitech-c270-webcam.png" alt="Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+
+1. **Workstation / GPU Server:** Machine learning training environment equipped with PyTorch and LeRobot.
 2. **Edge Board:** Arduino UNO Q with Qualcomm Debian Linux.
 3. **Robot Station:** Seeed SO-101 arm and USB webcam.
 4. **Bench Target:** Foam block placed at 10 fixed coordinate positions in the workspace.

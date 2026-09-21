@@ -13,16 +13,17 @@ How do we mathematically and physically ensure that an unverified, probabilistic
 ---
 
 ### 2. Hardware Setup
-1. **Controller Board:** Arduino UNO Q with STM32U585 MCU firmware running the safety governor.
+
+| Component | Function in Safety Architecture | Physical Boundary Specification | Visual Reference |
+|:---|:---|:---|:---:|
+| **Feetech STS3215 Smart Actuator** | Closed-loop joint servo with hardware status registers | 12-bit magnetic encoder feedback, internal temperature & voltage monitoring | <img src="assets/images/feetech-sts3215-servo.jpg" alt="Feetech STS3215 Servo" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Dual Daisy-Chain Bus Ports** | Multi-drop TTL serial bus isolation | Single half-duplex UART line driven exclusively by STM32 MCU; no direct Linux access | <img src="assets/images/feetech-sts3215-bus-ports.jpg" alt="STS3215 Bus Ports" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Arduino UNO Q Dual Silicon** | Deterministic microcontroller permission barrier | STM32U585 enforces velocity clamps, geofences, and 150 ms watchdog | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+
+1. **Controller Board:** Arduino UNO Q with STM32U585 MCU firmware running the deterministic safety governor.
 2. **Serial Bridge:** Inter-core RPC bridge connecting Qualcomm Linux to the STM32 MCU.
 3. **Robot Arm:** Seeed SO-101 6-DoF arm with 6× Feetech STS3215 bus servos.
 4. **Physical Obstacle:** Tabletop acrylic guard defining the forbidden zone ($Z < Z_{\text{table}}$).
-
-::: {layout-ncol=2}
-![Latching Mushroom Emergency Stop Switch](assets/images/emergency-stop-button.jpg){#fig-estop width=90%}
-
-![Feetech STS3215 Smart Serial Actuator](assets/images/feetech-sts3215-servo.jpg){#fig-sts3215 width=90%}
-:::
 
 ![Physical Bench Rigging & Electrical Power Isolation Harness](assets/images/vol4-bench-wiring-harness.svg){#fig-bench-harness width=100%}
 
