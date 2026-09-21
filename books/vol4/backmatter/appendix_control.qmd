@@ -6,18 +6,18 @@ This appendix collects the control and dynamics models used throughout this book
 
 Consult this appendix when encountering specific physical systems bottlenecks, control interface boundaries, or design sizing decisions across chapters in this book:
 
-| When you encounter this systems symptom                                                      | Consult                            | For this quantitative tool                                                       |
-|----------------------------------------------------------------------------------------------|------------------------------------|----------------------------------------------------------------------------------|
-| A learned policy commands unsafe actions near physical obstacles or joint limits             | @sec-appendix-control-cbf          | Control Barrier Function (CBF-QP) safety filters and kinetic stopping insets     |
-| Mode switching (policy handover, human intervention, or fallback) causes torque spikes       | @sec-appendix-control-splines      | $C^2$ quintic splines and bumpless transfer blending duration bounds             |
-| Sizing the validity horizon, spatial lease, or watchdog timeout for an action chunk          | @sec-appendix-control-reachability | Triangular, trapezoidal, and jerk-limited kinematic reachability envelopes       |
-| An articulated manipulator stalls, exceeds joint velocity limits, or loses control authority | @sec-appendix-control-kinematics   | Manipulator Jacobian singularities and Yoshikawa manipulability index            |
-| Spatial sensor offsets or IMU-camera lever arms corrupt state estimation under rotation      | @sec-appendix-control-spatial      | Spatial coordinate transforms ($SE(3)$) and lever-arm acceleration propagation   |
-| Discrete sampling and transport latency erode control loop stability margins                 | @sec-appendix-control-zoh          | Discrete zero-order hold (ZOH) phase lag and latency margin penalties            |
-| Physics simulation diverges or sim-to-real transfer fails during mechanical contact          | @sec-appendix-control-contact      | Unilateral contact complementarity and non-smooth impact mechanics               |
-| Sensor occlusions or unobservable states cause state estimation uncertainty to diverge       | @sec-appendix-control-covariance   | Continuous Lyapunov covariance propagation and Lie derivative observability rank |
-| Teleoperation or compliant contact chatters due to transport delay                           | @sec-appendix-control-passivity    | Passivity conditions, wave variables, and energy-bounded interaction             |
-| Underactuated legged or humanoid robots balance dynamic momentum across multi-contact points | @sec-appendix-control-centroidal   | Centroidal momentum equations and hierarchical Whole-Body Control QP             |
+| When you encounter this systems symptom                                                      | Consult                            | For this quantitative tool                                                             |
+|----------------------------------------------------------------------------------------------|------------------------------------|----------------------------------------------------------------------------------------|
+| A learned policy commands unsafe actions near physical obstacles or joint limits             | @sec-appendix-control-cbf          | Control Barrier Function (CBF-QP) safety filters and kinetic stopping insets           |
+| Mode switching (policy handover, human intervention, or fallback) causes torque spikes       | @sec-appendix-control-splines      | $C^2$ quintic splines, $C^1$ cubic Hermite interpolation, and bumpless transfer bounds |
+| Sizing the validity horizon, spatial lease, or watchdog timeout for an action chunk          | @sec-appendix-control-reachability | Triangular, trapezoidal, and jerk-limited kinematic reachability envelopes             |
+| An articulated manipulator stalls, exceeds joint velocity limits, or loses control authority | @sec-appendix-control-kinematics   | Manipulator Jacobian singularities and Yoshikawa manipulability index                  |
+| Spatial sensor offsets or IMU-camera lever arms corrupt state estimation under rotation      | @sec-appendix-control-spatial      | Spatial coordinate transforms ($SE(3)$) and lever-arm acceleration propagation         |
+| Discrete sampling and transport latency erode control loop stability margins                 | @sec-appendix-control-zoh          | Discrete zero-order hold (ZOH) phase lag and latency margin penalties                  |
+| Physics simulation diverges, impacts exceed limits, or wheels spin out during maneuvers      | @sec-appendix-control-contact      | Contact complementarity, elastodynamic impact, and wheel slip boundaries               |
+| Sensor occlusions or unobservable states cause state estimation uncertainty to diverge       | @sec-appendix-control-covariance   | Continuous Lyapunov covariance propagation and Lie derivative observability rank       |
+| Teleoperation or compliant contact chatters due to transport delay                           | @sec-appendix-control-passivity    | Passivity conditions, wave variables, and energy-bounded interaction                   |
+| Underactuated legged or humanoid robots balance dynamic momentum across multi-contact points | @sec-appendix-control-centroidal   | Centroidal momentum equations and hierarchical Whole-Body Control QP                   |
 
 ## Safety and Control Barrier Functions {#sec-appendix-control-cbf}
 
@@ -46,6 +46,28 @@ For a control-affine dynamical system $\dot{x} = f(x) + g(x)u$, the time derivat
 $$ \dot{h}(x, u) = \frac{\partial h}{\partial x} \dot{x} = \frac{\partial h}{\partial x} f(x) + \frac{\partial h}{\partial x} g(x) u = L_f h(x) + L_g h(x) u $$
 where $L_f h(x) \in \mathbb{R}$ represents the unforced drift of clearance (momentum, gravity), and $L_g h(x) \in \mathbb{R}^{1 \times m}$ represents the directional control effectiveness matrix.
 
+### Nagumo's viability theorem and contingent cones
+
+The geometric foundation of set invariance for dynamic systems is Nagumo's Viability Theorem [@blanchini1999set]. Let $\mathcal{S} \subset \mathbb{R}^n$ be a non-empty closed set. The **Bouligand contingent cone** (or tangent cone) $T_{\mathcal{S}}(x)$ to $\mathcal{S}$ at a point $x \in \mathcal{S}$ is defined as:\index{Nagumo theorem!contingent cone}\index{Set invariance!Bouligand cone}
+$$
+T_{\mathcal{S}}(x) = \left\{ v \in \mathbb{R}^n \;\middle|\; \liminf_{\tau \to 0^+} \frac{\text{dist}(x + \tau v, \mathcal{S})}{\tau} = 0 \right\}
+$$
+where $\text{dist}(y, \mathcal{S}) = \inf_{z \in \mathcal{S}} \|y - z\|$. Nagumo's theorem proves that for an autonomous system $\dot{x} = f(x)$ with locally Lipschitz vector field $f$, the set $\mathcal{S}$ is forward-invariant if and only if the velocity vector satisfies the **subtangentiality condition**:
+$$
+f(x) \in T_{\mathcal{S}}(x) \quad \forall x \in \mathcal{S}
+$$
+In the interior $\text{int}(\mathcal{S})$, $T_{\mathcal{S}}(x) = \mathbb{R}^n$, so the condition is trivially satisfied. On the boundary $\partial \mathcal{S}$ of a smooth set defined by the zero-superlevel set of $h(x)$ ($\mathcal{S} = \{x \mid h(x) \ge 0\}$ with $\nabla h(x) \neq \mathbf{0}$), the inward normal is $\nabla h(x)$. The contingent cone becomes the closed half-space pointing into or along the tangent plane of the safe set:
+$$
+T_{\mathcal{S}}(x) = \left\{ v \in \mathbb{R}^n \;\middle|\; \nabla h(x)^\top v \ge 0 \right\} \quad \forall x \in \partial \mathcal{S}
+$$
+Consequently, the system cannot exit the set if and only if $\dot{h}(x) = \nabla h(x)^\top f(x) \ge 0$ whenever $h(x) = 0$.
+
+Control Barrier Functions [@ames2019control] extend Nagumo's subtangentiality to controlled affine systems $\dot{x} = f(x) + g(x)u$. For safety, there must exist an admissible control $u \in \mathcal{U}$ such that $f(x) + g(x)u \in T_{\mathcal{S}}(x)$. By introducing an extended class $\mathcal{K}_\infty$ decay rate $\alpha(h(x))$ satisfying $\alpha(0) = 0$, the CBF inequality:
+$$
+\dot{h}(x, u) = L_f h(x) + L_g h(x)u \ge -\alpha(h(x))
+$$
+ensures that as the state approaches the boundary ($h(x) \to 0$), the admissible decay rate contracts to zero ($-\alpha(h(x)) \to 0$). At the boundary $h(x) = 0$, it strictly enforces $\dot{h}(x, u) \ge 0$, directly preserving Nagumo's subtangentiality invariant and preventing trajectory exit into the unsafe set.
+
 ### Relative degree and kinetic stopping insets
 
 The **relative degree**\index{Relative degree!definition} $r$ of a barrier function $h(x)$ is the number of times it must be differentiated with respect to time before the control input $u$ explicitly appears:
@@ -68,7 +90,7 @@ Writing its half-space as $a^\top u\le b$, with $a=-L_g h_b(x)^\top$ and $b=L_f 
 $$ u^* = u_{\text{nom}} - \lambda^* a, \quad \text{where } \lambda^* = \max\left( 0, \frac{a^\top u_{\text{nom}} - b}{\|a\|^2} \right) $$
 If the feasible set is nonempty and convex, the strictly convex objective has a unique minimizer. Solver response time and total dispatch delay must be measured for the selected dimension and hardware.
 
-::: {.callout-warning title="Check feasibility before relying on invariance"}
+::: {#psp-appendix-control-feasibility .callout-perspective title="Check feasibility before relying on invariance"}
 The projection formula does not solve the box-constrained problem. Clamping its result afterward can violate $a^\top u\le b$. If no command satisfies both the barrier and actuator limits, the modeled invariant cannot be maintained by this filter. A separately validated fallback may still limit harm; it does not restore the lost forward-invariance claim. Admission must reserve stopping authority before the state reaches this boundary.
 :::
 
@@ -96,6 +118,88 @@ a_5 &= \frac{6(q_1 - q_0) - 3(\dot{q}_0 + \dot{q}_1)T - (\ddot{q}_0 - \ddot{q}_1
 $$
 The finite-duration polynomial has quadratic jerk $\dddot{\theta}(t)=6a_3+24a_4t+60a_5t^2$. Matching position, velocity, and acceleration at the endpoints gives a $C^2$ join to adjacent segments with those same endpoint values. Its peak jerk and resonant response still require an extrema check against the machine's limits.
 
+#### Boundary value matrix formulation
+
+The polynomial coefficients $\mathbf{a} = [a_0, a_1, a_2, a_3, a_4, a_5]^\top$ are determined by evaluating the trajectory and its first two derivatives at the temporal endpoints $t = 0$ and $t = T$. This yields the $6 \times 6$ confluent Vandermonde linear system $\mathbf{M} \mathbf{a} = \mathbf{b}$:\index{Quintic spline!Vandermonde system}
+$$
+\begin{bmatrix}
+1 & 0 & 0 & 0 & 0 & 0 \\
+0 & 1 & 0 & 0 & 0 & 0 \\
+0 & 0 & 2 & 0 & 0 & 0 \\
+1 & T & T^2 & T^3 & T^4 & T^5 \\
+0 & 1 & 2T & 3T^2 & 4T^3 & 5T^4 \\
+0 & 0 & 2 & 6T & 12T^2 & 20T^3
+\end{bmatrix}
+\begin{bmatrix}
+a_0 \\ a_1 \\ a_2 \\ a_3 \\ a_4 \\ a_5
+\end{bmatrix}
+=
+\begin{bmatrix}
+q_0 \\ \dot{q}_0 \\ \ddot{q}_0 \\ q_1 \\ \dot{q}_1 \\ \ddot{q}_1
+\end{bmatrix}
+$$
+The top three rows trivially yield the initial boundary terms: $a_0 = q_0$, $a_1 = \dot{q}_0$, and $a_2 = \frac{1}{2}\ddot{q}_0$. Substituting these values into the bottom three rows isolates the higher-order coefficients $[a_3, a_4, a_5]^\top$ under the reduced $3 \times 3$ system:
+$$
+\begin{bmatrix}
+T^3 & T^4 & T^5 \\
+3T^2 & 4T^3 & 5T^4 \\
+6T & 12T^2 & 20T^3
+\end{bmatrix}
+\begin{bmatrix}
+a_3 \\ a_4 \\ a_5
+\end{bmatrix}
+=
+\begin{bmatrix}
+q_1 - q_0 - \dot{q}_0 T - \frac{1}{2}\ddot{q}_0 T^2 \\
+\dot{q}_1 - \dot{q}_0 - \ddot{q}_0 T \\
+\ddot{q}_1 - \ddot{q}_0
+\end{bmatrix}
+$$
+The determinant of this $3 \times 3$ matrix is $\det(\mathbf{M}_{33}) = 2 T^9 > 0$ for all strictly positive blending horizons $T > 0$, guaranteeing non-singularity and uniqueness. The analytic matrix inverse is:
+$$
+\begin{bmatrix}
+T^3 & T^4 & T^5 \\
+3T^2 & 4T^3 & 5T^4 \\
+6T & 12T^2 & 20T^3
+\end{bmatrix}^{-1}
+=
+\begin{bmatrix}
+\frac{10}{T^3} & -\frac{4}{T^2} & \frac{1}{2T} \\
+-\frac{15}{T^4} & \frac{7}{T^3} & -\frac{1}{T^2} \\
+\frac{6}{T^5} & -\frac{3}{T^4} & \frac{1}{2T^3}
+\end{bmatrix}
+$$
+Matrix multiplication $\mathbf{a}_{3:5} = \mathbf{M}_{33}^{-1} \mathbf{b}_{\text{red}}$ directly produces the closed-form coefficients $a_3, a_4, a_5$ stated above.
+
+### Cubic hermite spline interpolation for multi-rate synchronization
+
+When synchronizing physical sensor and state streams arriving at heterogeneous rates (such as 30 Hz camera frames against 1000 Hz joint encoder trajectories), intermediate poses must be continuously interpolated while preserving velocity continuity. A cubic Hermite spline over interval $t \in [t_0, t_1]$ with segment duration $T = t_1 - t_0$ interpolates position and velocity between endpoints:\index{Cubic Hermite spline!multi-rate interpolation}
+$$ q(t_0) = q_0, \quad \dot{q}(t_0) = \dot{q}_0, \quad q(t_1) = q_1, \quad \dot{q}(t_1) = \dot{q}_1 $$
+
+Introducing the normalized time coordinate $s = (t - t_0) / T \in [0, 1]$, the trajectory is parameterized by the cubic Hermite basis polynomials:
+$$ q(s) = h_{00}(s) q_0 + h_{10}(s) T \dot{q}_0 + h_{01}(s) q_1 + h_{11}(s) T \dot{q}_1 $$
+where the basis functions satisfy:
+$$
+\begin{aligned}
+h_{00}(s) &= 2s^3 - 3s^2 + 1 \\
+h_{10}(s) &= s^3 - 2s^2 + s \\
+h_{01}(s) &= -2s^3 + 3s^2 \\
+h_{11}(s) &= s^3 - s^2
+\end{aligned}
+$$
+Differentiating with respect to physical time $t$ yields the instantaneous velocity:
+$$ \dot{q}(t) = \frac{1}{T} \frac{dq}{ds} = \frac{1}{T} \left( h'_{00}(s) q_0 + h_{01}'(s) q_1 \right) + h'_{10}(s) \dot{q}_0 + h'_{11}(s) \dot{q}_1 $$
+with derivative basis functions:
+$$
+\begin{aligned}
+h'_{00}(s) &= 6s^2 - 6s \\
+h'_{10}(s) &= 3s^2 - 4s + 1 \\
+h'_{01}(s) &= -6s^2 + 6s \\
+h'_{11}(s) &= 3s^2 - 2s
+\end{aligned}
+$$
+Because the basis polynomials satisfy $h_{00}(0)=1, h_{00}(1)=0, h'_{10}(0)=1, h'_{10}(1)=0$, this yields a $C^1$-continuous trajectory matching position and velocity exactly at sample boundaries without the computational overhead of solving a 6-boundary-condition quintic system. However, the resulting acceleration $\ddot{q}(t)$ is piecewise linear and discontinuous across sample boundaries ($C^1$ but not $C^2$), producing finite torque steps $\Delta \tau = M(q) \Delta \ddot{q}$ at knot points that must remain within actuator torque-slew limits.
+
 ### Bumpless transfer and smoothstep blending
 
 For **bumpless transfer**\index{Bumpless transfer!handover blending}, let $s=(t-t_0)/\tau_{\text{blend}}\in[0,1]$ and use the $C^2$ smoothstep $\alpha(s)$ to interpolate two commands:\index{Smoothstep polynomial!jerk bounding}
@@ -105,6 +209,46 @@ $$ j_{\rm cmd}(t)=\frac{\alpha'(s)}{\tau_{\text{blend}}}(u_{\rm new}-u_{\rm prio
 Here $\alpha'(s)=30s^2(1-s)^2$ differentiates with respect to *normalized* time and peaks at $1.875$. Only for two fixed, latched endpoint accelerations ($\dot u_{\rm prior}=\dot u_{\rm new}=0$) does the blend contribution satisfy
 $$ \max|j_{\rm cmd}|=\frac{1.875|\Delta u|}{\tau_{\text{blend}}},\qquad \tau_{\text{blend}}\ge\frac{1.875|\Delta u|}{j_{\rm allowable}}. $$
 This is a command-rate condition. Measured plant jerk, tracking error, and available stopping clearance remain separate admission checks.
+
+### Flexible joint dynamics and singular perturbations {#sec-appendix-control-flexible-joints}
+
+Mechanical transmissions such as harmonic strain-wave drives, planetary reducers, and cable linkages introduce torsional elasticity between actuator motor rotors and robot links. Following Mark W. Spong's canonical formulation [@spong1987modeling], an $n$-degree-of-freedom manipulator with elastic joints is governed by two coupled second-order vector differential equations:\index{Flexible joint dynamics!Spong model}\index{Singular perturbation!elastic joints}
+$$ \mathbf{M}(\mathbf{q}) \ddot{\mathbf{q}} + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}}) \dot{\mathbf{q}} + \mathbf{g}(\mathbf{q}) = \mathbf{K} (\boldsymbol{\theta} - \mathbf{q}) $$
+$$ \mathbf{J}_m \ddot{\boldsymbol{\theta}} + \mathbf{B}_m \dot{\boldsymbol{\theta}} + \mathbf{K} (\boldsymbol{\theta} - \mathbf{q}) = \boldsymbol{\tau} $$
+where:
+
+- $\mathbf{q} \in \mathbb{R}^n$ represents the physical link coordinates.
+- $\boldsymbol{\theta} \in \mathbb{R}^n$ represents the motor rotor coordinates reflected through gear reduction $N$ to the link side.
+- $\mathbf{M}(\mathbf{q}) \in \mathbb{R}^{n \times n}$ is the symmetric, positive-definite link inertia matrix.
+- $\mathbf{C}(\mathbf{q}, \dot{\mathbf{q}}) \dot{\mathbf{q}} \in \mathbb{R}^n$ collects Coriolis and centripetal terms.
+- $\mathbf{g}(\mathbf{q}) \in \mathbb{R}^n$ is the gravitational torque vector.
+- $\mathbf{J}_m = \operatorname{diag}(J_{m,1}, \dots, J_{m,n})$ is the diagonal matrix of reflected rotor inertias ($J_{m,i} = N_i^2 J_{\text{rotor},i}$).
+- $\mathbf{B}_m = \operatorname{diag}(B_{m,1}, \dots, B_{m,n})$ collects viscous motor damping.
+- $\mathbf{K} = \operatorname{diag}(k_1, \dots, k_n)$ is the diagonal joint torsional stiffness matrix ($k_i > 0$).
+- $\boldsymbol{\tau} \in \mathbb{R}^n$ is the vector of electromagnetic actuator torques delivered to the rotor.
+
+#### Singular perturbation formulation and time-scale separation
+
+When joint stiffness is high relative to link inertia ($k_i \gg 1$), the system exhibits a two-time-scale separation between slow rigid-body dynamics and fast torsional oscillations. Define the scalar perturbation parameter $\epsilon = 1 / \sqrt{k_{\min}}$, where $k_{\min} = \min_i(k_i)$, and express stiffness as $\mathbf{K} = (1/\epsilon^2) \tilde{\mathbf{K}}$ with $\tilde{\mathbf{K}} = \mathcal{O}(1)$.
+
+Define the elastic torque fast state variable $\mathbf{z} \in \mathbb{R}^n$:
+$$ \mathbf{z} = \frac{1}{\epsilon^2} \tilde{\mathbf{K}} (\boldsymbol{\theta} - \mathbf{q}) = \mathbf{K} (\boldsymbol{\theta} - \mathbf{q}) $$
+Differentiating $\mathbf{z}$ twice with respect to continuous time $t$ gives:
+$$ \ddot{\mathbf{z}} = \mathbf{K} (\ddot{\boldsymbol{\theta}} - \ddot{\mathbf{q}}) = \mathbf{K} \left[ \mathbf{J}_m^{-1} (\boldsymbol{\tau} - \mathbf{B}_m \dot{\boldsymbol{\theta}} - \mathbf{z}) - \mathbf{M}(\mathbf{q})^{-1} (\mathbf{z} - \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}}) \dot{\mathbf{q}} - \mathbf{g}(\mathbf{q})) \right] $$
+Multiplying through by $\epsilon^2$ reveals the singularly perturbed boundary layer:
+$$ \epsilon^2 \ddot{\mathbf{z}} = \tilde{\mathbf{K}} \left[ \mathbf{J}_m^{-1} \boldsymbol{\tau} - (\mathbf{J}_m^{-1} + \mathbf{M}(\mathbf{q})^{-1}) \mathbf{z} + \mathbf{M}(\mathbf{q})^{-1} (\mathbf{C} \dot{\mathbf{q}} + \mathbf{g}) - \mathbf{J}_m^{-1} \mathbf{B}_m \dot{\boldsymbol{\theta}} \right] $$
+Introducing the stretched fast time variable $\tau_{\text{fast}} = t / \epsilon$ transforms the elastic dynamics into:
+$$ \frac{d^2 \mathbf{z}}{d\tau_{\text{fast}}^2} + \tilde{\mathbf{K}} (\mathbf{J}_m^{-1} + \mathbf{M}(\mathbf{q})^{-1}) \mathbf{z} = \tilde{\mathbf{K}} \mathbf{J}_m^{-1} \boldsymbol{\tau} + \tilde{\mathbf{K}} \mathbf{M}(\mathbf{q})^{-1} (\mathbf{C} \dot{\mathbf{q}} + \mathbf{g}) $$
+
+#### The rigid manifold and boundary-layer resonance
+
+In the singular limit as joint stiffness approaches infinity ($\epsilon \to 0$), the fast elastic variable $\mathbf{z}$ collapses algebraically onto the quasi-steady manifold $\mathbf{z}_0$:
+$$ \mathbf{z}_0 = (\mathbf{J}_m^{-1} + \mathbf{M}(\mathbf{q})^{-1})^{-1} \left[ \mathbf{J}_m^{-1} \boldsymbol{\tau} + \mathbf{M}(\mathbf{q})^{-1} (\mathbf{C}(\mathbf{q}, \dot{\mathbf{q}}) \dot{\mathbf{q}} + \mathbf{g}(\mathbf{q})) \right] $$
+Substituting $\mathbf{z}_0$ into the link dynamics recovers the classical rigid-body equations with aggregated inertia $\mathbf{M}(\mathbf{q}) + \mathbf{J}_m$:
+$$ (\mathbf{M}(\mathbf{q}) + \mathbf{J}_m) \ddot{\mathbf{q}} + \mathbf{C}(\mathbf{q}, \dot{\mathbf{q}}) \dot{\mathbf{q}} + \mathbf{g}(\mathbf{q}) + \mathbf{B}_m \dot{\mathbf{q}} = \boldsymbol{\tau} $$
+For finite physical stiffness ($\epsilon > 0$), any high-frequency excitation in commanded torque $\boldsymbol{\tau}$—such as discontinuous torque steps produced across discrete inference intervals by learned neural policies—acts as an impulsive forcing function on the boundary-layer oscillator $\frac{d^2 \mathbf{z}}{d\tau_{\text{fast}}^2} + \boldsymbol{\Omega}^2(\mathbf{q}) \mathbf{z} = \mathbf{0}$, where the natural structural resonance frequency matrix is:
+$$ \boldsymbol{\Omega}(\mathbf{q}) = \sqrt{\mathbf{K} (\mathbf{J}_m^{-1} + \mathbf{M}(\mathbf{q})^{-1})} $$
+Because transmission mechanical damping is minimal ($\zeta < 0.05$), unsmoothed step commands excite persistent limit-cycle chatter, accelerate gear-tooth micro-fatigue, and invalidate rigid-link assumptions. Enforcing $C^2$ quintic spline interpolation and limiting torque slew rate ($d\boldsymbol{\tau}/dt$) are necessary to prevent energy injection into this fast boundary-layer manifold.
 
 ### Discrete-time sampling and zero-order hold phase lag {#sec-appendix-control-zoh}
 
@@ -155,6 +299,48 @@ $$ \mathbf{v}_P = \mathbf{v}_O + \boldsymbol{\omega} \times \mathbf{r}_{P/O} $$
 $$ \mathbf{a}_P = \mathbf{a}_O + \boldsymbol{\alpha} \times \mathbf{r}_{P/O} + \boldsymbol{\omega} \times (\boldsymbol{\omega} \times \mathbf{r}_{P/O}) $$
 where $\boldsymbol{\omega}$ is the body angular velocity, $\boldsymbol{\alpha} = \dot{\boldsymbol{\omega}}$ is the angular acceleration, $\boldsymbol{\alpha} \times \mathbf{r}$ is the tangential acceleration, and $\boldsymbol{\omega} \times (\boldsymbol{\omega} \times \mathbf{r})$ is the centripetal acceleration. State estimation and perception pipelines must compensate for these kinematic lever-arm terms when synchronizing multi-camera extrinsics and fusing IMU data.
 
+### Watchdog validity leases and teleoperation latency bounds {#sec-appendix-control-teleop-leases}
+
+In distributed autonomous systems and supervisory teleoperation architectures, actuation authority is governed by bounded-duration validity leases and communications latency constraints.\index{Watchdog lease!kinematic derivation}\index{Teleoperation!latency bound}
+
+#### Kinematic derivation of watchdog validity leases
+
+Consider an autonomous mobile platform or manipulator moving at velocity $v_0$ toward an obstacle with measured physical clearance $D_{\text{clear}}$. If the host processor or neural network fails to refresh the control setpoint, a hardware or firmware watchdog must intervene to prevent boundary violation.
+
+The total elapsed time from the sensor observation until physical braking initiates comprises five sequential intervals:
+$$ \tau_{\text{delay}} = T_{\text{lease}} + T_{\text{detect}} + T_{\text{hold}} + T_{\text{age}} + T_{\text{act}} $$
+where:
+
+- $T_{\text{lease}}$ is the granted duration during which the policy proposal remains valid for execution.
+- $T_{\text{detect}}$ is the watchdog countdown detection latency before heartbeat loss is recognized.
+- $T_{\text{hold}}$ is an optional transient hold or fault confirmation debounce window.
+- $T_{\text{age}}$ is the sensor evidence age (exposure, readout, and bus transit to the controller clock).
+- $T_{\text{act}}$ is the physical actuator onset delay before braking deceleration reaches the commanded floor.
+
+Under constant cruising speed $v_0$ prior to brake onset and a verified lower bound on mechanical braking deceleration $a_{\text{floor}} > 0$, the total stopping distance bounded by available clearance $D_{\text{clear}}$ (with safety margin $\epsilon_d \ge 0$) satisfies:
+$$ v_0 \tau_{\text{delay}} + \frac{v_0^2}{2 a_{\text{floor}}} + \epsilon_d \le D_{\text{clear}} $$
+Solving directly for the maximum admissible validity lease $T_{\text{lease}}$ yields:
+$$ T_{\text{lease}} \le \frac{D_{\text{clear}} - \epsilon_d - \frac{v_0^2}{2 a_{\text{floor}}}}{v_0} - \left( T_{\text{detect}} + T_{\text{hold}} + T_{\text{age}} + T_{\text{act}} \right) $$
+If $T_{\text{lease}} \le 0$, the platform's speed exceeds its stopping margin for the current clearance, and the real-time enforcer must immediately revoke motion permission and execute a verified emergency stop.
+
+#### Teleoperation network round-trip time bounds
+
+When a human supervisor remotely teleoperates the robot across an external wireless link, the control loop includes human perceptual reaction latency and network packet transport delays. Let:
+
+- $T_{\text{video}}$ represent video camera exposure, encoding, network downlink, and operator display latency.
+- $T_{\text{human}}$ denote human neuromuscular reaction time ($T_{\text{human}} \approx 150\text{--}250\text{ ms}$).
+- $T_{\text{RTT}} = T_{\text{downlink}} + T_{\text{uplink}}$ represent network round-trip transport latency.
+- $T_{\text{act}}$ denote actuator braking engagement lag.
+- $d_{\text{brake}} = \frac{v_0^2}{2 a_{\text{floor}}}$ represent the purely mechanical braking distance.
+
+Total available time before available clearance $D_{\text{clear}}$ is exhausted is bounded by $T_{\text{total}} = (D_{\text{clear}} - d_{\text{brake}}) / v_0$. The allowable round-trip network latency ceiling is:
+$$ T_{\text{RTT}} \le \frac{D_{\text{clear}} - d_{\text{brake}}}{v_0} - \left( T_{\text{video}} + T_{\text{human}} + T_{\text{act}} \right) $$
+If network jitter pushes $T_{\text{RTT}}$ beyond this bound, the human operator cannot perceive an obstacle and deliver a corrective command before the vehicle exhausts its stopping distance. Consequently, the local real-time enforcer must evaluate physical invariants independently at $1\text{ kHz}$, revoking operator command authority and executing autonomous braking before physical clearance is lost.
+
+#### Kinodynamic bounds versus wave-variable passivity
+
+Transport delay in teleoperation creates two distinct failure modes: spatial boundary breach (kinematic collision) and high-frequency dynamic chatter (loss of closed-loop passivity). While wave variables (@sec-appendix-control-passivity) preserve port passivity and prevent energy accumulation under delay, passivity guarantees only that the teleoperator will not become an active energy source. It does not bound physical displacement. Safety requires satisfying both invariants simultaneously: wave variables bound interactive contact energy, while the kinodynamic latency inequality guarantees collision-free spatial clearance.
+
 ## Rigid Body Contact Mechanics {#sec-appendix-control-contact}
 
 Simulating and controlling physical interaction—such as locomotion, dexterous grasping, and tool assembly—requires modeling mechanical contact. The governing physical challenge of contact is its non-smooth complementarity: interaction forces arise strictly when bodies establish physical contact.
@@ -187,6 +373,46 @@ $$ \lim_{\Delta t \to 0} \frac{\| \dot{x}(t + \Delta t) - \dot{x}(t) \|}{\Delta 
 
 Smooth learned models and trajectory gradients may be inaccurate at contact-mode changes. A controller can use an explicit hybrid/contact model, while compliance, pads, or torque limiters can reduce force only within validated stroke, energy, wear, and load-path conditions. Neither modeling nor a passive element alone guarantees safe contact.
 
+### Elastodynamic impact force and compliance deformation
+
+When an effective moving mass $m_{\rm eff}$ strikes an obstacle or human tissue, rigid-body approximations break down because real materials deform elastically over a nonzero compression stroke $\delta(t)$. Let $k_{\rm eff}$ denote the effective contact stiffness across the interface. In series compliance between the manipulator structural chain ($k_{\rm robot}$) and human tissue or obstacle ($k_{\rm tissue}$):
+$$ \frac{1}{k_{\rm eff}} = \frac{1}{k_{\rm robot}} + \frac{1}{k_{\rm tissue}} $$
+
+#### Unmitigated elastic impact force
+
+For an unmitigated collision at impact velocity $v_{\max}$, initial kinetic energy $E_k = \frac{1}{2} m_{\rm eff} v_{\max}^2$ converts entirely into elastic strain energy $U_{\rm elastic} = \frac{1}{2} k_{\rm eff} \delta_{\max}^2$ at the point of maximum compression ($\dot{\delta}=0$). Energy conservation yields the peak structural deflection:
+$$ \frac{1}{2} m_{\rm eff} v_{\max}^2 = \frac{1}{2} k_{\rm eff} \delta_{\max}^2 \implies \delta_{\max} = v_{\max} \sqrt{\frac{m_{\rm eff}}{k_{\rm eff}}} $$
+The resulting peak transient contact force $F_{\rm peak} = k_{\rm eff} \delta_{\max}$ evaluates to:
+$$ F_{\rm peak} = v_{\max} \sqrt{k_{\rm eff} m_{\rm eff}} $$
+This relation establishes that peak impact force scales linearly with velocity and with the square root of both moving mass and contact stiffness. Even modest kinetic energies (e.g., $17.5\text{ J}$) striking stiff biological structures ($k_{\rm tissue} \approx 15{,}000\text{ N/m}$) generate peak forces exceeding $700\text{ N}$—well beyond collaborative safety limits (such as ISO/TS 15066 transient thresholds).
+
+#### Coupled contact indentation with mechanical braking
+
+When active mechanical brakes engage with constant deceleration $a_{\rm brake}$ during deformation, the braking system performs mechanical work $W_{\rm brake} = m_{\rm eff} a_{\rm brake} \delta$ across the indentation depth $\delta$. The coupled energy balance becomes:
+$$ \frac{1}{2} m_{\rm eff} v_{\rm impact}^2 = \frac{1}{2} k_{\rm eff} \delta_{\max}^2 + m_{\rm eff} a_{\rm brake} \delta_{\max} $$
+Rearranging into quadratic form:
+$$ \delta_{\max}^2 + \frac{2 m_{\rm eff} a_{\rm brake}}{k_{\rm eff}} \delta_{\max} - \frac{m_{\rm eff} v_{\rm impact}^2}{k_{\rm eff}} = 0 $$
+Solving for the physically admissible positive deformation root:
+$$ \delta_{\max} = \sqrt{\left(\frac{m_{\rm eff} a_{\rm brake}}{k_{\rm eff}}\right)^2 + \frac{m_{\rm eff} v_{\rm impact}^2}{k_{\rm eff}}} - \frac{m_{\rm eff} a_{\rm brake}}{k_{\rm eff}} $$
+When $a_{\rm brake} = 0$, this expression smoothly recovers the unmitigated deformation $\delta_{\max} = v_{\rm impact}\sqrt{m_{\rm eff}/k_{\rm eff}}$. Because the quarter-cycle compression duration $t_{\rm peak} = \frac{\pi}{2}\sqrt{m_{\rm eff}/k_{\rm eff}}$ is typically on the order of $20\text{--}50\text{ ms}$, reactive braking triggered only *after* physical contact cannot attenuate the initial force peak if sensor detection and brake engagement latency exceed $t_{\rm peak}$. Consequently, safety cases cannot substitute reactive post-impact braking for verified pre-impact separation clearance envelopes ($d_{\rm sep} \ge d_{\rm stop}$).
+
+### Wheel slip ratio and friction boundaries {#sec-appendix-control-slip}
+
+For wheeled mobile robots and terrestrial platforms, tractive force transmission between the wheel contact patch and the ground plane is governed by non-linear slip dynamics. The longitudinal slip ratio $\lambda$ quantifies the kinematic velocity mismatch between the wheel circumferential speed $r\omega$ (wheel radius $r$, angular rate $\omega$) and the vehicle forward longitudinal speed $v_x$:\index{Slip ratio!longitudinal tire kinematics}
+$$
+\lambda = \begin{cases}
+\frac{r\omega - v_x}{v_x}, & \text{under acceleration } (r\omega > v_x, \ v_x > 0) \\[6pt]
+\frac{r\omega - v_x}{r\omega}, & \text{under braking } (r\omega < v_x, \ r\omega > 0)
+\end{cases}
+$$
+A normalized form frequently implemented in digital traction control avoids denominator singularities via:
+$$ \lambda = \frac{r\omega - v_x}{\max(|v_x|, |r\omega|, \epsilon_{\text{reg}})} \in [-1, 1] $$
+where $\lambda = 0$ corresponds to pure rolling without slip, $\lambda = 1$ denotes complete drive-wheel spin-out ($v_x = 0, \omega > 0$), and $\lambda = -1$ corresponds to complete wheel lock-up ($r\omega = 0, v_x > 0$).
+
+Tractive force $F_x$ scales with the normal contact load $F_z$ through the longitudinal friction coefficient $\mu_x(\lambda)$:
+$$ F_x(\lambda) = \mu_x(\lambda) F_z $$
+At low slip ratios ($|\lambda| < \lambda_{\text{peak}} \approx 0.10\text{--}0.15$), tire or tread rubber shears elastically, and tractive force is approximately linear in slip: $F_x \approx C_x \lambda$, with longitudinal traction stiffness $C_x$. Beyond $\lambda_{\text{peak}}$, adhesion collapses into gross sliding friction: the slope $d\mu_x / d\lambda$ turns negative, rendering open-loop torque control unstable. If an ungrounded policy commands drive motor torque exceeding peak traction ($F_{\text{cmd}} > \mu_{\text{peak}} F_z$), the wheel rapidly accelerates into the unstable slip regime ($d\omega/dt = (\tau - r F_x)/I_{\text{wheel}} > 0$). This causes spin-out, severe yaw rate disturbance, or loss of lateral authority—a cyber-physical disconnect that cannot be detected by directional agreement or cosine similarity metrics that evaluate only vector angles while ignoring control magnitude.
+
 ## Continuous Covariance Propagation and Observability {#sec-appendix-control-covariance}
 
 When sensors suffer line-of-sight dropouts or environmental occlusion, internal state estimators must project the physical state forward in time. Quantifying how rapidly estimation confidence degrades across blind intervals requires analyzing continuous error covariance dynamics and systems observability.
@@ -206,6 +432,40 @@ $$ \dot{\mathbf{P}}(t) = \mathbf{A} \mathbf{P}(t) + \mathbf{P}(t) \mathbf{A}^\to
 When direct sensing is occluded or dropped ($\mathbf{C} = \mathbf{0}$), the measurement correction term vanishes. The covariance growth collapses to the open-loop **continuous Lyapunov differential equation**:\index{Lyapunov differential equation!covariance divergence}
 $$ \dot{\mathbf{P}}(t) = \mathbf{A} \mathbf{P}(t) + \mathbf{P}(t) \mathbf{A}^\top + \mathbf{Q} $$
 The solution propagates initial uncertainty and accumulated $\mathbf{Q}$ through $e^{\mathbf{A}t}$. Unstable modes can grow exponentially; a random walk with $\mathbf{A}=0$ grows linearly in covariance. A state-memory record should carry the calibrated growth model and expire tracking permission before its declared error bound crosses the physical tolerance. Covariance alone is not a hard error envelope unless its tail and model assumptions are justified.
+
+### Closed-form double-integrator covariance expansion
+
+Consider a one-dimensional double-integrator kinematic system modeling position $p(t)$ and velocity $v(t)$ under unmeasured stochastic acceleration noise $w(t)$:\index{Double-integrator!covariance expansion}\index{Covariance propagation!cubic dispersion}
+$$
+\begin{bmatrix} \dot{p}(t) \\ \dot{v}(t) \end{bmatrix} = \begin{bmatrix} 0 & 1 \\ 0 & 0 \end{bmatrix} \begin{bmatrix} p(t) \\ v(t) \end{bmatrix} + \begin{bmatrix} 0 \\ 1 \end{bmatrix} w(t)
+$$
+where $w(t)$ is zero-mean continuous white process noise with continuous spectral power intensity $q_c > 0$, such that $\mathbb{E}[w(t) w(s)] = q_c \delta(t - s)$. Here, $\mathbf{A} = \begin{bmatrix} 0 & 1 \\ 0 & 0 \end{bmatrix}$ and the continuous process noise matrix is $\mathbf{Q} = \begin{bmatrix} 0 & 0 \\ 0 & q_c \end{bmatrix}$.
+
+The continuous state transition matrix $\mathbf{\Phi}(t) = e^{\mathbf{A}t}$ is nilpotent:
+$$
+\mathbf{\Phi}(t) = \mathbf{I} + \mathbf{A}t = \begin{bmatrix} 1 & t \\ 0 & 1 \end{bmatrix}
+$$
+During a blind occlusion window $t \in [0, \Delta t]$ with no measurement updates ($\mathbf{C} = \mathbf{0}$), the total state covariance $\mathbf{P}(t)$ evolves as the sum of unforced homogeneous propagation and accumulated process diffusion:
+$$
+\mathbf{P}(t) = \mathbf{\Phi}(t) \mathbf{P}_0 \mathbf{\Phi}(t)^\top + \int_0^t \mathbf{\Phi}(t - \tau) \mathbf{Q} \mathbf{\Phi}(t - \tau)^\top d\tau
+$$
+Let the initial state covariance at the instant of sensor loss ($t = 0$) be:
+$$
+\mathbf{P}_0 = \begin{bmatrix} \sigma_{p,0}^2 & \sigma_{pv,0} \\ \sigma_{pv,0} & \sigma_{v,0}^2 \end{bmatrix}
+$$
+The homogeneous propagation term evaluates to:
+$$
+\mathbf{\Phi}(t) \mathbf{P}_0 \mathbf{\Phi}(t)^\top = \begin{bmatrix} 1 & t \\ 0 & 1 \end{bmatrix} \begin{bmatrix} \sigma_{p,0}^2 & \sigma_{pv,0} \\ \sigma_{pv,0} & \sigma_{v,0}^2 \end{bmatrix} \begin{bmatrix} 1 & 0 \\ t & 1 \end{bmatrix} = \begin{bmatrix} \sigma_{p,0}^2 + 2\sigma_{pv,0} t + \sigma_{v,0}^2 t^2 & \sigma_{pv,0} + \sigma_{v,0}^2 t \\ \sigma_{pv,0} + \sigma_{v,0}^2 t & \sigma_{v,0}^2 \end{bmatrix}
+$$
+The accumulated stochastic diffusion term integrates across elapsed time:
+$$
+\mathbf{Q}_d(t) = \int_0^t \begin{bmatrix} 1 & t - \tau \\ 0 & 1 \end{bmatrix} \begin{bmatrix} 0 & 0 \\ 0 & q_c \end{bmatrix} \begin{bmatrix} 1 & 0 \\ t - \tau & 1 \end{bmatrix} d\tau = \int_0^t \begin{bmatrix} q_c (t - \tau)^2 & q_c (t - \tau) \\ q_c (t - \tau) & q_c \end{bmatrix} d\tau = \begin{bmatrix} \frac{1}{3} q_c t^3 & \frac{1}{2} q_c t^2 \\ \frac{1}{2} q_c t^2 & q_c t \end{bmatrix}
+$$
+Summing the homogeneous and stochastic contributions yields the closed-form positional variance $\sigma_p^2(t) = \mathbf{P}_{11}(t)$:
+$$
+\sigma_p^2(t) = \sigma_{p,0}^2 + 2 \sigma_{pv,0} t + \sigma_{v,0}^2 t^2 + \frac{1}{3} q_c t^3
+$$
+This derivation explains the distinct physical error regimes during sensor occlusion: initial velocity uncertainty $\sigma_{v,0}^2$ induces quadratic error growth in time ($t^2$), while continuous stochastic disturbances $q_c$ (such as air currents or unmodeled drivetrain chatter) inject cubic uncertainty growth ($\frac{1}{3} q_c t^3$). In long blind intervals, the cubic term dominates, rapidly exhausting safety margins unless motion is derated or halted.
 
 ### Observability rank and Lie derivative extensions
 

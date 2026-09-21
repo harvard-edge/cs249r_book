@@ -54,16 +54,6 @@ Two learned controllers can achieve identical validation loss on offline benchma
 
 On a physical calibration bench under nominal pressure, both policies regulate flow at $1.50\text{ L/min}$. But when a line transient suddenly drops supply pressure by $12\text{ kPa}$, their failure modes diverge violently. The imitation policy issues a corrective valve adjustment that slightly undershoots, landing in a joint pressure-flow state absent from its training demonstrations. Because the policy cannot extrapolate beyond its demonstrated support manifold, its subsequent actions become erratic, compounding tracking error across consecutive $20\text{ ms}$ control steps until the fluid reservoir overflows. The simulated policy, having learned inside an idealized simulation that assumes instantaneous electromagnetic response, commands valve position reversals at $50\text{ Hz}$. The physical solenoid spool requires $35\text{ ms}$ to transit between seating positions; unable to track the commanded high-frequency chatter, the mechanical valve seat experiences violent cavitation, rupturing an upstream hydraulic seal. The data collection regime defined what the policy saw, while the training algorithm shaped its assumptions about the physical universe.
 
-::: {#dfn-training-actuator-latency-robustness .callout-definition title="Actuator dynamics latency robustness"}
-
-***Actuator dynamics latency robustness***\index{Actuator dynamics latency robustness!definition}\index{Sim-to-real!latency robustness} describes a policy tested across a specified range of transport delays, phase lags, and mechanical compliance. Training with randomized delay can improve performance in that range; closed-loop stability still requires measured phase margin and validation on the physical plant.
-
-1.  **Significance**: Prevents simulated policies from exploiting zero-latency communication and idealized instantaneous torque generation, which cause violent phase-lag oscillations and mechanical fatigue on physical actuators.
-2.  **Distinction**: Unlike general domain randomization of visual textures or masses, latency invariance specifically targets the dynamic phase margins of the closed-loop system by randomizing observation-to-action delay buffers during training.
-3.  **Common pitfall**: Training policies in simulation with fixed single-timestep delays, leaving the controller fragile to real-world bus jitter and variable inference latencies that cross stability margins.
-
-:::
-
 Every training regime purchases deployment capability at the cost of runtime vulnerability:
 
 - **Imitation learning** buys task competence without manual reward engineering by mimicking human demonstrations (drawn from the ingestion archives established in @sec-data). However, standard point-regression objectives suffer from the *multimodality catastrophe*—if demonstrators avoid an obstacle by passing either to the left or to the right, minimizing mean squared error forces the neural network to predict the geometric average of both modes, commanding the robot to drive straight into the obstacle.[^fn-training-mode-averaging] Furthermore, small single-step errors compound quadratically over time as the policy drifts into unsupported state space.
@@ -109,7 +99,7 @@ We compare demonstration, offline, simulated, and on-machine learning by the fai
 
 As compared across synthesis paradigms (@tbl-06-regimes), **behavioral cloning**\index{Behavioral cloning} is the cheapest route to a working policy and the one whose failure mode is best understood. It frames policy synthesis as supervised regression or classification over a collected dataset of expert state-action pairs $\mathcal{D} = \{(\mathbf{o}_t, \mathbf{a}_t)\}$. Grounding this in the telemetry architecture from @sec-data-teleop-costs, physical demonstration datasets are constructed from explicit action tap streams:
 $$\mathcal{D}_{\text{intent}} = \left\{ \left(\mathbf{o}_t, \mathbf{a}_{\text{cmd}, t:t+H-1}\right) \right\} \quad \text{versus} \quad \mathcal{D}_{\text{verified}} = \left\{ \left(\mathbf{o}_t, \mathbf{a}_{\text{enf}, t:t+H-1}\right) \right\}$$
-Cloning unconstrained operator commands ($\mathbf{a}_{\text{cmd}}$) trains the model on pure human demonstration intent, whereas cloning enforcer-admitted setpoints ($\mathbf{a}_{\text{enf}}$) bakes the nervous system's runtime barrier deceleration profiles directly into the network weights. In its standard formulation, the optimization objective minimizes a multi-step prediction loss over continuous action sequences drawn from demonstration trajectories (see @sec-appendix-ml for classical regression formulations).[^fn-hist-alvinn-cloning]
+Cloning unconstrained operator commands ($\mathbf{a}_{\text{cmd}}$) trains the model on pure human demonstration intent, whereas cloning enforcer-admitted setpoints ($\mathbf{a}_{\text{enf}}$) bakes the nervous system's runtime barrier deceleration profiles directly into the network weights. In its standard formulation, the optimization objective minimizes a multi-step prediction loss over continuous action sequences drawn from demonstration trajectories (see @sec-appendix-ml-multimodal for classical regression formulations).[^fn-hist-alvinn-cloning]
 Because this loss penalizes only the discrepancy between the commanded action and the recorded demonstration at observed states, the training objective does not evaluate task completion, terminal cost, or the stability of the closed-loop dynamical system. It fits actions to observations only.
 
 ::: {.column-margin .margin-pointer}
@@ -120,7 +110,7 @@ Because this loss penalizes only the discrepancy between the commanded action an
 
 ### The multimodality breakdown and mode averaging {.unnumbered}
 
-A deterministic point-regression behavioral-cloning policy cannot represent distinct valid actions for the same observation. Under squared-error loss, its optimal output is the conditional mean, which can be invalid when valid actions lie on separate paths (for the derivation, see @sec-appendix-ml).[^fn-math-mode-averaging]
+A deterministic point-regression behavioral-cloning policy cannot represent distinct valid actions for the same observation. Under squared-error loss, its optimal output is the conditional mean, which can be invalid when valid actions lie on separate paths (for the derivation, see @sec-appendix-ml-multimodal).[^fn-math-mode-averaging]
 
 [^fn-math-mode-averaging]: **Mode averaging under L2 loss**\index{Mode averaging!mathematical derivation}: Under an $L_2$ regression loss, the expected risk $\mathcal{R}(\hat{a}) = \int \|\hat{a} - a\|_2^2 p(a \mid o) da$ is strictly convex with respect to $\hat{a}$. Differentiating with respect to $\hat{a}$ and setting the gradient to zero yields $2 \int (\hat{a} - a) p(a \mid o) da = 0 \implies \hat{a}^* = \int a p(a \mid o) da = \mathbb{E}[a \mid o]$. For a nonlinear plant $f_{\text{plant}}$, $\mathbb{E}[f_{\text{plant}}(a)]$ generally differs from $f_{\text{plant}}(\mathbb{E}[a])$; equality can hold in particular distributions. For a convex action cost $c(a)$, Jensen's inequality gives $c(\mathbb{E}[a]) \le \mathbb{E}[c(a)]$, but it does not establish the physical safety of the mean action. In the obstacle example, the mean lies outside the demonstrated set of valid paths.
 
@@ -145,6 +135,18 @@ Let the policy operate in discrete time over an execution horizon of $T$ control
 The quadratic dependency on time $T^2$ represents the structural price of open-loop supervised training applied to a closed-loop dynamical system. The first error incurs a direct penalty, and every subsequent step spends the remainder of the rollout accumulating cost because the demonstration dataset never provided examples of how to return to the nominal path.
 
 @ross2011reduction derives a worst-case $\mathcal{O}(T^2 \epsilon)$ expected-cost bound for expert-only behavioral cloning under bounded one-step loss because the learner's own execution errors induce covariate shift away from the demonstration distribution. To overcome this fundamental limitation in software, the authors formulated DAgger (Dataset Aggregation), an interactive online imitation learning framework that queries an expert oracle to label the states visited by the learner's policy, obtaining a linear $\mathcal{O}(T \epsilon)$ bound under its expert-labeling and no-regret assumptions. In physical robotics, however, running an unverified policy to gather online expert labels is hazardous, as off-distribution exploration risks mechanical collisions and hardware damage before the human supervisor can intervene.
+
+::: {#dfn-training-compounding-rollout-error .callout-definition title="Compounding rollout error"}
+
+***Compounding rollout error***\index{Compounding rollout error!definition}\index{Behavioral cloning!error accumulation} is the quadratic accumulation of closed-loop tracking drift incurred when an open-loop supervised policy executes sequentially on a physical dynamical plant, bounded in expectation by:
+$$J(\pi) - J(\pi^*) \le \mathcal{O}(T^2 \epsilon)$$
+where $T$ is the task execution horizon and $\epsilon = \mathbb{E}_{\mathbf{s} \sim d_{\pi^*}} [\mathbb{I}(\pi(\mathbf{s}) \ne \pi^*(\mathbf{s}))]$ is the single-step policy error rate on the demonstration distribution $d_{\pi^*}$.
+
+1.  **Significance**: Proves that minimizing single-step prediction error on offline demonstrations is fundamentally insufficient for closed-loop stability; any nonzero error rate $\epsilon > 0$ eventually drives physical state outside demonstrated support.
+2.  **Distinction**: Unlike static supervised learning where validation error scales linearly with sample count, compounding rollout error couples policy mistakes with environmental physics, turning small initial trajectory deviations into irreversible state divergence.
+3.  **Common pitfall**: Assuming low offline validation loss on held-out demonstration splits translates to high closed-loop task success, ignoring that offline datasets contain zero examples of returning to nominal support once perturbed.
+
+:::
 
 ### What action chunking changes—and what it leaves unresolved
 
@@ -192,6 +194,9 @@ which evaluates to `{python} FirstErrorHorizon.p_at_least_one_error_str` percent
 :::
 
 ::: {#chk-training-compounding-drift-budget .callout-checkpoint title="Compounding drift budget and recovery dynamics"}
+
+Before analyzing generative policy architectures, verify your understanding of compounding error, drift budgets, and expert recovery dynamics:
+
 - [ ] **Compounding error scaling**: Can you state the support-loss and expert-labeling assumptions under which the expected cumulative cost bounds are $\mathcal{O}(T^2\epsilon)$ for expert-only cloning and $\mathcal{O}(T\epsilon)$ for interactive imitation?
 - [ ] **Action chunking error suppression**: Can you distinguish the temporal-coherence benefit of action chunks from the recovery data or monitoring needed to address support drift?
 - [ ] **Interactive expert interventions**: Can you explain how DAgger interventions expand policy support to boundary states without sacrificing nominal performance?
@@ -231,7 +236,7 @@ During training, a forward diffusion process corrupts a ground-truth demonstrate
 $$\mathbf{A}_t^k = \sqrt{\bar{\alpha}_k}\mathbf{A}_t^0 + \sqrt{1 - \bar{\alpha}_k}\boldsymbol{\epsilon}, \quad \boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$$
 The noise-prediction network $\boldsymbol{\epsilon}_\theta$ (parameterized as a 1D temporal convolutional neural network (CNN) or Transformer decoder) minimizes the mean squared error between injected and predicted noise:
 $$\mathcal{L}_{\text{diff}}(\theta) = \mathbb{E}_{k \in [1, N_{\text{diff}}], \boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}), (\mathbf{O}_t, \mathbf{A}_t^0) \sim \mathcal{D}} \left[ \left\| \boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta\left( \mathbf{A}_t^k, \mathbf{O}_t, k \right) \right\|^2 \right]$$
-The squared-error target is the injected noise conditional on the noisy trajectory, observation, and diffusion step, rather than the mean of incompatible clean actions (for diffusion fundamentals, see @sec-appendix-ml). At inference time, sampling begins from random noise $\mathbf{A}^{N_{\text{diff}}} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ and follows repeated conditioned denoising updates. Different initial samples can resolve into left- or right-side obstacle paths instead of averaging the two into a collision path. Physical smoothness and feasibility still require suitable training data and execution checks.
+The squared-error target is the injected noise conditional on the noisy trajectory, observation, and diffusion step, rather than the mean of incompatible clean actions (for diffusion fundamentals, see @sec-appendix-ml-diffusion). At inference time, sampling begins from random noise $\mathbf{A}^{N_{\text{diff}}} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ and follows repeated conditioned denoising updates. Different initial samples can resolve into left- or right-side obstacle paths instead of averaging the two into a collision path. Physical smoothness and feasibility still require suitable training data and execution checks.
 
 ::: {#fig-diffusion-policy-architecture fig-env="figure" fig-pos="t" fig-cap="**Diffusion policy architecture**: A continuous trajectory diffusion policy for visuomotor control, denoising a candidate action chunk from Gaussian noise across $K$ iterations and dispatching only a prefix of it before re-planning. Asynchronous buffering and an independent high-rate permission path can separate slower chunk generation from actuation. Conditional denoising can represent alternative demonstrated paths without taking their direct-regression mean. (Adapted from Chi et al. [@chi2024diffusionpolicy])." fig-alt="Diffusion Policy architecture and closed-loop action chunk denoising. An authentic continuous trajectory diffusion architecture for visuomotor control. The policy conditions on an observation horizon of multi-camera images and robot state vectors. Starting from pure Gaussian noise, the noise-prediction backbone (parameterized as either a 1D Temporal Convolutional U-Net or a Time-Transformer) iteratively denoises a candidate action trajectory across diffusion iterations. The resulting action chunk spans a prediction horizon, from which an execution horizon is dispatched to real-time motor controllers before receding-horizon re-planning occurs. This decouples slow generative inference from high-rate motor actuation while allowing alternative action sequences to be sampled when the learned conditional distribution and data support them. (Adapted from Chi et al. [@chi2024diffusionpolicy])."}
 ![](images/svg/fig06_canonical_diffusion_policy.svg){width="100%"}
@@ -372,6 +377,8 @@ Consider an illustrative embedded edge deployment (@fig-diffusion-denoising-proc
 
 ![](images/svg/chk_training_diffusion_denoising_budget.svg){fig-alt="Hypothetical compute-only timing diagram against a 20 millisecond deadline. Two Euler flow evaluations plus perception total 17.3 milliseconds, leaving 2.7 milliseconds for all unmodeled overhead; sixteen DDIM evaluations plus perception total 40.4 milliseconds. Solver adequacy and measured tail latency are required before admission." width=100%}
 
+Before deploying diffusion or flow-matching policies to physical hardware, verify your understanding of iterative denoising latency and execution deadlines:
+
 - [ ] **Diffusion step budgets**: Can you explain why iterative denoising latency in diffusion policies conflicts with real-time feedback deadlines on embedded accelerators?
 - [ ] **Flow matching vs. DDIM**: Can you calculate the assumed two-evaluation Euler budget and name the action-quality and tail-latency evidence needed before claiming it meets the deadline?
 - [ ] **Asynchronous chunk buffering**: Can you explain how decoupling neural proposal generation from deterministic spline interpolation resolves the mismatch between accelerator inference latency and motor control rates?
@@ -381,7 +388,7 @@ Consider an illustrative embedded edge deployment (@fig-diffusion-denoising-proc
 
 When physical demonstration datasets $\mathcal{D} = \{(s_t, a_t, r_t, s_{t+1})\}$ contain heterogeneous or sub-optimal trajectories (e.g., mixtures of teleoperation, scripted routines, and exploratory human play), behavioral cloning struggles because it treats all demonstrations with equal supervised weight. In classical Reinforcement Learning (RL) formulated on Markov Decision Processes (MDPs) [@sutton2018reinforcement], an agent optimizes a policy to maximize expected discounted cumulative returns $J = \mathbb{E}\left[\sum_{t=0}^\infty \gamma^t r(s_t, a_t)\right]$. **Offline reinforcement learning (Batch RL)**\index{Offline reinforcement learning} aims to optimize a policy directly from logged transition archives without active hardware exploration, using reward signals to stitch together high-performing composite trajectories from disjoint, imperfect demonstrations [@kumar2020conservative].
 
-However, applying standard Q-learning to static offline datasets triggers a catastrophic failure mode known as **out-of-distribution (OOD) action overestimation**\index{Out-of-distribution action overestimation}. In standard reinforcement learning, the algorithm estimates the value of future states by asking its "critic" network to predict the highest possible reward it could achieve in the next step (for formal Bellman equations, see @sec-appendix-ml). To find this maximum, the operator scans across the entire continuous action space. For actions that were never executed in the logging dataset, the network has received zero training signal and often outputs erroneously large value estimates due to generalization variance (hallucinating that an untried physical maneuver will result in a massive reward). The algorithm greedily selects these spurious peaks, propagating over-optimistic value errors backwards. When deployed, the actor greedily selects these ungrounded actions, commanding physically unviable motor voltages that cause immediate joint stalls or boundary collisions.
+However, applying standard Q-learning to static offline datasets triggers a catastrophic failure mode known as **out-of-distribution (OOD) action overestimation**\index{Out-of-distribution action overestimation}. In standard reinforcement learning, the algorithm estimates the value of future states by asking its "critic" network to predict the highest possible reward it could achieve in the next step (for formal Bellman equations, see @sec-appendix-ml-affordances). To find this maximum, the operator scans across the entire continuous action space. For actions that were never executed in the logging dataset, the network has received zero training signal and often outputs erroneously large value estimates due to generalization variance (hallucinating that an untried physical maneuver will result in a massive reward). The algorithm greedily selects these spurious peaks, propagating over-optimistic value errors backwards. When deployed, the actor greedily selects these ungrounded actions, commanding physically unviable motor voltages that cause immediate joint stalls or boundary collisions.
 
 To reduce value overestimation without querying the physical environment, **Conservative Q-learning (CQL)**\index{Conservative Q-Learning} adds a regularizer to the offline Bellman objective.[^fn-math-cql-bound] It penalizes high values for actions sampled by the learned policy relative to actions in the logged data. This can improve value estimation under the paper's assumptions, but limited state-action coverage and approximation error remain; actuator permission still requires independent physical checks.
 
@@ -531,7 +538,7 @@ A distinction exists between an inaccurate parameter value and an omitted physic
 
 ### Non-smooth contact physics and solver relaxations {.unnumbered}
 
-Severe structural omissions in physical simulators stem from the mathematical formulation of contact mechanics. In physical reality, contact between rigid or semi-rigid bodies is fundamentally non-smooth. Continuous contact mechanics enforces two truths: when bodies separate, the normal contact force is zero. When contact is established, the normal contact force can take any non-negative compressive value required to prevent interpenetration. Tangential friction is governed by a strict Coulomb friction cone boundary. When sliding occurs, friction opposes motion at the absolute limit of the cone; when surfaces stick, the frictional force can be any value inside that cone (for the full LCP formulation, see @sec-appendix-control).
+Severe structural omissions in physical simulators stem from the mathematical formulation of contact mechanics. In physical reality, contact between rigid or semi-rigid bodies is fundamentally non-smooth. Continuous contact mechanics enforces two truths: when bodies separate, the normal contact force is zero. When contact is established, the normal contact force can take any non-negative compressive value required to prevent interpenetration. Tangential friction is governed by a strict Coulomb friction cone boundary. When sliding occurs, friction opposes motion at the absolute limit of the cone; when surfaces stick, the frictional force can be any value inside that cone (for the full LCP formulation, see @sec-appendix-control-contact).
 
 This formulation introduces two profound computational and physical difficulties:
 
@@ -560,6 +567,9 @@ On physical hardware, however, the rigid aluminum and steel fixture limits defor
 :::
 
 ::: {#chk-training-sim2real-contact-impulse .callout-checkpoint title="Sim-to-real contact impulse discrepancy"}
+
+Before relying on physics engines for contact-rich training, verify your understanding of penalty-based contact dynamics and structural stiffness mismatches:
+
 - [ ] **Penalty contact dynamics**: Can you compare peak force and impulse in the soft-simulator/rigid-hardware case and the opposite stiff-simulator/compliant-hardware case?
 - [ ] **Structural stiffness mismatch**: Can you describe how unmodeled mechanical stiffness ($k_{\text{struct}}$) converts simulated compliance into destructive deceleration transients on hardware?
 - [ ] **Nervous system contact safeguards**: Can you distinguish precontact approach-speed enforcement from a reactive force trip that may arrive after the first impact peak?
@@ -639,6 +649,9 @@ To prevent domain randomization from degenerating into ad-hoc parameter tuning, 
 Decomposing the gap into its constitutive physical channels yields two concrete engineering artifacts, namely a supported deployment envelope and an explicit residual mismatch list. The supported deployment envelope defines the bounded domain within which physical hardware matches simulation within validated tolerances. For the analytical drive, this envelope specifies approach velocities below $0.25\text{ m/s}$, ambient illumination between $300\text{ lux}$ and $600\text{ lux}$, and total loop latency below $40\text{ ms}$. The residual mismatch list itemizes every unclosed difference that remains outside the training distribution, including the $1.5\times 10^{-3}\text{ rad/N}\cdot\text{m}$ drivetrain compliance, the $49.5\text{ ms}$ $P_{99}$ latency tail, and the $0.40\text{ N}$ thermal sensor drift. Each entry on the residual list defines an explicit requirement for runtime monitors and safety filters, which must detect when physical execution drifts past the boundary where the simulated policy remains valid.
 
 ::: {#chk-training-reality-gap-corridor .callout-checkpoint title="Reality gap decomposition and randomization bounds"}
+
+Before deploying simulation-trained policies to physical robots, verify your understanding of reality gap decomposition and domain randomization boundaries:
+
 - [ ] **Multi-channel gap decomposition**: Can you explain why aggregate scalar loss metrics fail to predict localized physical failure modes across dynamics, sensing, appearance, and timing?
 - [ ] **Domain randomization corridor**: Can you describe the physical trade-off between over-randomization (performance collapse) and under-randomization (hardware damage risk)?
 - [ ] **Paired-trace discrepancy auditing**: Can you explain how injecting identical open-loop step commands into both simulation and hardware exposes unmodeled drivetrain compliance and transport lag?
@@ -679,6 +692,8 @@ A magnitude limit $\|g(s)\Delta\pi_\theta(s)\|\le\Delta_{\max}$ bounds one aspec
 ::: {#chk-training-residual-bounded-authority .callout-checkpoint title="Residual adaptation and bounded authority"}
 
 ![](images/svg/chk_training_residual_bounded_authority.svg){fig-alt="Block diagram of a frozen base controller and learned contact residual. A contact-region gate sets the residual to zero elsewhere; magnitude and rate limits constrain the proposed correction. The combined command still requires measured-state permission and regression testing; clipping alone does not establish stability or wear safety." width=100%}
+
+Before admitting on-robot adaptation or residual policy updates, verify your understanding of bounded authority, fatigue wear, and verification invalidation:
 
 - [ ] **Real-machine fine-tuning debt**: Can you explain how on-robot exploratory trial steps consume drivetrain fatigue life and induce motor thermal heating?
 - [ ] **Bounded residual authority**: Can you name the activation gate, rate and state limits, robustness margin, and post-update tests required before a bounded residual can receive actuator permission?
@@ -756,6 +771,9 @@ Downstream engineering teams consume the training record throughout the design, 
 :::
 
 ::: {#chk-training-provenance-record .callout-checkpoint title="Training provenance and policy manifests"}
+
+Before releasing a trained policy checkpoint to physical verification, verify your understanding of training manifests, omission logging, and provenance records:
+
 - [ ] **Complete the latch record**: A fixture-shoulder strike appears after `latch-res-03` was trained with rigid contact and no actuator lag. Which omitted mechanism belongs in `simulation_provenance`, and which paired probe and admission decision must the manifest record?
 - [ ] **Negative event logging**: Can you describe how capturing pre-trigger ring buffers from operator takeovers and E-stop events isolates physical boundary instability?
 - [ ] **Declared operational boundaries**: Can you explain how downstream safety governors use the data support ledger to differentiate validated policy competence from ungrounded extrapolation?
