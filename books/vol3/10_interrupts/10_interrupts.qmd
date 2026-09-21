@@ -816,6 +816,14 @@ $$D_{\text{KL}}(P_{\text{live}} \parallel P_{\text{replay}}) = \sum_{w \in \math
 
 By establishing strict virtualization boundaries around wall-clocks, trapping PRNG entropy, escrowing external tool observations, and measuring logit-level divergence, the runtime guarantees that diagnostic analysis operates with mathematical precision. An engineer can bisect a failing trajectory, inspect intermediate supervisor state transitions, and verify algorithmic invariants without being misled by floating-point hardware races or drifting external APIs.
 
+::: {#psp-10-the-illusion-of-neural-determinism .callout-perspective title="The illusion of neural determinism and the replay paradox"}
+In classical software debugging, record-and-replay tools (such as Mozilla `rr` or hypervisor execution recorders) rely on a foundational axiom: an isolated CPU executing deterministic machine instructions with pinned inputs and recorded asynchronous interrupts produces bit-exact identical register states. Developers new to agentic systems routinely attempt to apply this mental model to foundation models, assuming that setting sampling temperature $T=0$ and fixing random seeds guarantees repeatable trajectory execution.
+
+This assumption is destroyed by accelerator micro-architecture. Modern parallel inference kernels (such as FlashAttention, cuBLAS GEMMs, and Triton reductions) dynamically distribute matrix operations across thousands of CUDA threads. Under IEEE 754 arithmetic, floating-point addition is non-associative: $(a + b) + c \neq a + (b + c)$. Dynamic thread scheduling, memory bank collisions, and clock throttling alter the physical summation order of partial products across execution runs. This micro-architectural jitter introduces small numerical perturbations ($\sim 10^{-5}$) into the output logits. When two candidate tokens possess near-identical logits, this tiny perturbation flips the greedy `argmax` selection. A single flipped token alters all subsequent key-value representations, causing the replayed trajectory to diverge completely within a few turns.
+
+**Systems insight**: Bit-exact determinism is an illusion on modern parallel accelerator clusters. Reliable trajectory replay cannot re-execute neural inference; it must replay recorded tokens directly from an immutable Write-Ahead Log. Systems architects must separate *trace-driven state verification* (replaying recorded tokens to audit supervisor logic) from *divergence analysis* (re-evaluating models to measure epistemic drift).
+:::
+
 ::: {#chk-10-time-travel-debugging .callout-checkpoint title="Evaluating historical replay and non-determinism diagnostics"}
 Before examining live trajectory migration protocols, verify your understanding of trajectory reconstruction:
 
@@ -911,7 +919,7 @@ In an OverlayFS deployment, the sandbox filesystem consists of three directories
 - A writable `upperdir` hosted on an ephemeral local filesystem. Every file edit, newly created source file, or deleted directory performed by the agent is recorded exclusively as a copy-on-write delta inside `upperdir`.
 - A `workdir` utilized by the kernel for atomic directory operations.
 
-::: {#psp-10-overlayfs-migration .callout-perspective title="Layered copy-on-write delta migration"}
+::: {#not-10-overlayfs-migration .callout-note title="Layered copy-on-write delta migration"}
 Let a containerized sandbox filesystem be composed of an immutable base layer $\mathcal{L}_{\text{lower}}$ of size $M_{\text{base}}$ pre-cached across all worker nodes, and an ephemeral writable layer $\mathcal{L}_{\text{upper}}$ of size $M_{\Delta} \ll M_{\text{base}}$ capturing runtime modifications.
 
 During preemptive node evacuation, the migration coordinator transfers only the mutable delta:

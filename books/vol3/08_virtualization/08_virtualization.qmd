@@ -517,6 +517,10 @@ Traditional open-source hypervisors such as QEMU were architected to support arb
 
 Firecracker, developed by @agache2020firecracker at Amazon Web Services, discards the legacy PC platform model entirely in favor of an aggressively minimalist Virtual Machine Monitor (VMM). Implemented in memory-safe Rust, Firecracker leverages the Linux Kernel-based Virtual Machine (`/dev/kvm`) ioctl API to manage hardware virtualization while stripping all emulated hardware components down to the absolute theoretical minimum required for modern ephemeral workloads.
 
+::: {#dfn-microvm-isolation .callout-definition title="MicroVM isolation"}
+A minimalist, hardware-virtualized execution container that runs a dedicated guest operating system kernel over hardware virtualization extensions (KVM, VT-x/AMD-V) while stripping emulated legacy peripherals, achieving sub-100-millisecond boot times and hardware-enforced memory isolation.
+:::
+
 Firecracker completely eliminates the PCI bus hierarchy, ACPI tables, and legacy BIOS/UEFI firmware initialization routines. Instead of emulating PCI devices, Firecracker exposes virtualized peripherals exclusively via VirtIO over Memory-Mapped I/O (VirtIO-MMIO). In this architecture, device registers are mapped to fixed, contiguous guest physical memory address ranges hardcoded into the kernel launch parameters. Firecracker provides exactly four virtual device types:
 
 1. **`virtio-block`:** An asynchronous block device interface that provides the guest with a virtual hard drive backed by a host file or raw device node, executing block reads and writes using the host's asynchronous file APIs.
@@ -789,6 +793,16 @@ The 64 cores absorb the entire initialization overhead in $\frac{0.25}{64} \appr
 **Systems Engineering Takeaway:** When tools can be compiled to WebAssembly, Wasm provides orders-of-magnitude improvements in memory density and cold-start latency over microVMs. However, if the verification suite requires executing unmodified Python scripts importing native C-extensions (such as Pandas or Torch), the runtime must fall back to microVMs or container sandboxes despite their steep resource footprint.
 :::
 
+::: {#psp-08-the-shared-kernel-fallacy .callout-perspective title="The shared kernel fallacy in autonomous execution"}
+In cloud-native application engineering, Linux containers (namespaces, cgroups, and seccomp filters) are celebrated as the universal unit of workload isolation. When applied to autonomous agent execution, however, containerization commits a dangerous architectural fallacy: confusing process confinement with an adversarial security boundary.
+
+A standard container shares the host Linux kernel directly across the system call interface. The modern Linux kernel encompasses tens of millions of lines of C code, hundreds of system calls, and complex subsystems (such as `io_uring`, eBPF, and network packet schedulers) that are routinely subject to privilege escalation vulnerabilities. An autonomous agent writing, compiling, and executing arbitrary low-level code does not behave like a benign web microservice; it acts as an unconstrained fuzzer operating against the host kernel. A single kernel vulnerability allows an unprivileged agent process to break out of its container and compromise the physical host.
+
+True zero ambient authority requires terminating the untrusted execution boundary in silicon. Hardware-assisted virtualization (MicroVMs) ensures that guest instructions and guest kernel memory faults are trapped by CPU virtualization extensions (Intel VT-x, AMD-V) and mediated through Second Level Address Translation (SLAT/EPT). Even if an agent executing inside a MicroVM achieves root privilege over the guest kernel, it remains trapped in hardware register state—unable to mutate host memory or inspect sibling workloads.
+
+**Systems insight**: Namespaces isolate cooperative processes from accidental interference; only hardware virtualization isolates unprivileged agents from deliberate or accidental host compromise. Systems runtimes that execute arbitrary agent-generated code must never share the host kernel.
+:::
+
 ::: {#chk-08-sandboxing-substrates .callout-checkpoint title="Evaluating sandboxing substrates and virtualization boundaries"}
 Before examining copy-on-write filesystems and network isolation, verify your understanding of execution substrates:
 
@@ -850,7 +864,7 @@ The operational efficiency of a union filesystem relies on lazy evaluation: read
 
 When an agent issues a read-only system call (`stat`, `access`, or `open` with `O_RDONLY`) against a path in `merged`, the VFS performs a hierarchical dentry lookup. It checks `upperdir` first; if the path is absent, it queries `lowerdir`. Upon locating the file in `lowerdir`, the kernel constructs a virtual inode referencing the lower filesystem's physical inode. Data blocks are streamed directly from the lower file's page cache into the process memory. No data copying or memory allocation takes place.
 
-::: {#psp-copy-up-resolution .callout-perspective title="OverlayFS VFS inode lookup and copy-up resolution protocol"}
+::: {#not-08-copy-up-resolution .callout-note title="OverlayFS VFS inode lookup and copy-up resolution protocol"}
 When an agent execution thread issues an `open(path, flags)` system call with write intent (`O_WRONLY`, `O_RDWR`, or `O_TRUNC`) against a virtual path in `merged`, the Linux VFS resolves the target inode through a four-stage decision sequence:
 
 1. **Upper Layer Probe:** The kernel checks `upperdir` for the requested dentry.
