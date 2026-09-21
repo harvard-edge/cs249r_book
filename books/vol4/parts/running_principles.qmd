@@ -2,39 +2,21 @@
 
 \lettrine{A}{s} a mobile robot approaches an obstacle, a camera frame locates a person near its path. The planner proposes a turn, but the permission path must decide whether that observation is still fresh and whether the remaining clearance permits the turn or a stop. The decision has a deadline: another polished trajectory is useless if the robot has already crossed the braking margin. Running a physical AI machine means reconciling the timescales of sensing, planning, and actuation with that physical deadline. Human goals may change over seconds, trajectories over tens of milliseconds, and a particular motor controller may update every millisecond. The required rates and response times come from the plant and its measured delays, not from the names of the software tiers.
 
-::: {#pri-vol4-multirate-authority .callout-principle title="The multi-rate authority hierarchy"}
+::: {#pri-vol4-proposal-permission .callout-principle title="Proposal is not permission"}
 
-**Invariant**: A learned policy or planner proposes motion; an independent permission path controls whether that proposal reaches the actuators. Its deadline must account for observation age, computation, communication, actuator response, and available braking or clearance margin. A 1 kHz microcontroller loop is one implementation with a 1 ms period, not a microsecond response guarantee.
+**Invariant**: A learned model may propose motion; only an independent permission path may admit it. The path decides each action on state whose age is known, within a deadline set by observation age, computation, transport, actuator response, and the clearance the delay leaves, and it owns a fallback that is feasible from the current state without the proposer.
 
-**Implication**: Deliberation can run more slowly than local feedback, provided the permission path can reject stale or infeasible proposals in time. A control-barrier-function (CBF) check implemented with quadratic programming (QP) can support this design only within a validated dynamics model and state estimate, with a feasible intervention, sufficient actuator authority, and a demonstrated deadline.
-
-:::
-
-Part III follows the observation, proposal, permission decision, and physical response through six stages. Their interfaces implement the Sense–Plan–Act (S·P·A) decisions introduced in @sec-boundary-spa-triad and developed in @sec-appendix-spa. The center, $S \cap P \cap A$, is the permission decision that brings sensing age, proposed motion, and physical response into one budget; compute placement supports that decision across all three tasks.
-
-* **Perception (@sec-perception, Sense):** Timestamp and calibrate camera and motion measurements so the robot can decide whether an object's location is current enough to use.
-* **Memory (@sec-memory, $S \cap P$):** Track an object through occlusion, carry its uncertainty forward, and require a new observation when the motion margin no longer supports the estimate.
-* **Intent (@sec-intent, $S \cap P$):** Turn a human goal into a spatial, time-limited proposal without granting the language model actuator authority.
-* **Planning (@sec-planning, $P \cap A$):** Generate continuous motion and check any smooth trajectory or stopping suffix against available braking and clearance before it is admitted.
-* **Enforcement (@sec-enforcement, $A \cap S$):** Use fresh state and a separately validated permission path to admit, modify, or reject proposed motion before the actuator command crosses the causal boundary.
-* **Placement (@sec-placement):** Allocate compute, memory, power, and thermal resources so inference traffic cannot make the permission path miss its measured deadline.
-
-::: {#pri-vol4-epistemic-decay .callout-principle title="Age-limited physical belief"}
-
-**Invariant**: An unobserved dynamic object's position estimate must carry an age and uncertainty bound; uncertain motion can widen that bound. Under an illustrative constant process-noise model,
-$$ \sigma^2(t) = \sigma_0^2 + Q \cdot (t - t_{\text{meas}}) $$
-where $\sigma_0^2$ is position variance at measurement time $t_{\text{meas}}$, $t-t_{\text{meas}}$ is the nonnegative observation age ($t\geq t_{\text{meas}}$), and $Q \geq 0$ is the assumed position-variance growth per unit time. This model does not prescribe exponential confidence decay or apply unchanged to every object and sensor.
-
-**Implication**: Revalidate or expire a belief when its position-uncertainty bound exceeds the task's clearance or contact margin. Time-limited intent proposals similarly require renewal before use. On expiry, the permission path rejects the stale proposal and selects a validated fallback; a safe stop is available only if the current speed, clearance, braking capability, and response delay still permit one.
+**Implication**: Every runtime stage serves one decision, whether this proposal can cross the causal boundary before the margin runs out. Stages ahead of the permission path deliver evidence with its age and uncertainty attached, the permission path runs on resources that learned workloads cannot delay, and any guarantee the path offers, such as a barrier filter's, holds only while its model, state estimate, actuator authority, and deadline hold.
 
 :::
 
-::: {#pri-vol4-substrate-isolation .callout-principle title="Heterogeneous substrate isolation"}
+Part III follows one proposal through six stages, four that build it, one that decides whether it may act, and one that keeps that decision on time.
 
-**Invariant**: Shared compute, memory, power, or thermal resources must not delay a safety-critical permission decision beyond its validated deadline. Bursty neural inference can interfere with a real-time path on a shared system-on-chip, so the interference must be measured under the intended workload.
+* **Sensor Perception (@sec-perception):** Decides whether a measurement is current and calibrated enough to use, and produces the observation contract, which dates each measurement in a clock the permission path can convert to its own.
+* **Spatial Memory (@sec-memory):** Decides how long an estimate may stand without fresh evidence, and produces the spatial belief record, which keeps the age of the evidence separate from the age of the estimate.
+* **Grounded Intent (@sec-intent):** Decides how a human goal becomes a bounded, expiring request that grants no actuator authority, and produces the intent lease, with a process-plant contrast.
+* **Trajectory Planning (@sec-planning):** Decides when a trajectory may commit, and produces the trajectory record, which carries its deadlines and a matched stop suffix.
+* **Safety Enforcement (@sec-enforcement):** Decides on every tick whether a proposal is admitted, modified, or refused, and produces the enforcement record, where the two strands of records meet.
+* **Silicon Placement (@sec-placement):** Decides where the permission path runs so that learned workloads cannot delay it, and produces the placement record with the tests that support it.
 
-**Implication**: Choose scheduling, memory quality-of-service controls, cache reservation, separate rails, bare-metal execution, or a separate controller according to measured worst-case timing and power budgets. Verify that the chosen isolation preserves the permission deadline during inference bursts and faults.
-
-:::
-
-The six stages keep learned proposals connected to measurements and constrained by the machine's available physical margin.
+Part III hands forward the runtime evidence that Part IV must judge. Observation contracts date every measurement, belief records expire, intent leases and trajectory records name their parents and their deadlines, the enforcement record states the stopping envelope and the premises of each guarantee, and the placement record shows by test that learned workloads cannot delay the permission path. Each is a claim with conditions, and none is yet a license to operate.
