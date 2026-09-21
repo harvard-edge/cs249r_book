@@ -2546,12 +2546,19 @@ def backward(self, grad_output):
     logits, targets = self.inputs
 
     if isinstance(logits, Tensor) and logits.requires_grad:
-        batch_size, num_classes = logits.data.shape[0], logits.data.shape[1]
-        softmax = _stable_softmax(logits.data)
-        one_hot = _one_hot_encode(targets.data.astype(int), batch_size, num_classes)
+        orig_shape = logits.data.shape
+        num_classes = orig_shape[-1]
+        flat_logits = logits.data.reshape(-1, num_classes)
+        flat_targets = targets.data.reshape(-1).astype(int)
+        total_samples = flat_logits.shape[0]
 
-        # Gradient: (softmax - one_hot) / batch_size
-        grad = (softmax - one_hot) / batch_size
+        softmax = _stable_softmax(flat_logits)
+        one_hot = _one_hot_encode(flat_targets, total_samples, num_classes)
+
+        # Gradient: (softmax - one_hot) / total_samples
+        grad = (softmax - one_hot) / total_samples
+        if len(orig_shape) != 2:
+            grad = grad.reshape(orig_shape)
 
         return grad * grad_output, None
     return None, None

@@ -70,7 +70,7 @@ This fundamental challenge is the modern robotics manifestation of what Harnad t
 
 ::: {#dfn-intent-grounding-refusal .callout-definition title="Intent grounding refusal"}
 
-***Intent grounding refusal***\index{Intent grounding refusal!definition}\index{Refusal!grounding ambiguity} is the deterministic safety primitive by which an embodied policy explicitly rejects ambiguous semantic directives or unreachable spatial targets (`ERR_GROUNDING_AMBIGUITY`), refusing to execute non-deterministic argmax guesses through clearance volumes.
+***Intent grounding refusal***\index{Intent grounding refusal!definition}\index{Refusal!grounding ambiguity} is the deterministic safety mechanism whereby an embodied system explicitly rejects semantically ambiguous natural-language directives or unreachable spatial goal hypotheses ($\mathcal{H}_{\text{goal}}$), returning a typed failure status (`ERR_GROUNDING_AMBIGUITY`) rather than executing ungrounded maximum-likelihood guesses across physical clearance margins.
 
 1.  **Significance**: Rejects a proposal when the specified ambiguity test fails, before that proposal reaches trajectory generation. Protection also depends on the independent motion-permission and fallback checks.
 2.  **Distinction**: Unlike a trajectory planning failure that cannot find a collision-free path to a valid goal, grounding refusal rejects the goal itself as physically ungrounded or ambiguous before the planner is invoked.
@@ -127,17 +127,7 @@ In this proposed interface, each intent packet from the learned MPU requests thr
 2. **Expiring temporal lease (TTL)**\index{Intent record!temporal lease}: An explicit time-to-live $\tau$ measured in milliseconds. If no renewal packet arrives before the deadline passes, hardware timers automatically revoke motion authority.
 3. **Admissible command and force envelope**\index{Intent record!force envelope}: Explicit dynamic limits that cap the peak velocity ($v_{\max}$), acceleration ($a_{\max}$), and contact wrench ($F_{\max}$) the machine may exert while pursuing the target.
 
-[^fn-intent-dual-brain]: **Inter-core communication across privilege boundaries**\index{Inter-core communication!RPMSG}\index{Dual-brain!privilege boundaries}: RPMSG over a statically bounded shared SRAM ring is one implementation of this proposal-permission path. An independent timer can detect loss of host renewals despite a host kernel panic; the complete detection-to-brake response still needs validated bus, sensing, drive, and actuator timing. See @sec-enforcement-authority-refuse and @sec-appendix-systems.
-
-::: {#dfn-intent-expiring-intent-lease .callout-definition title="Expiring intent lease"}
-
-***Expiring intent lease***\index{Expiring intent lease!definition}\index{Intent lease!definition} ($\mathcal{L}_{\text{intent}}$) is a finite target-evidence validity request derived from a dated observation. The independent permission tier admits a shorter or equal execution interval only after checking configured ceilings, current clearance, and a feasible stopping response; it revokes tracking authority when evidence or the admitted interval expires.
-
-1.  **Significance**: Momentum and gravity continue when the high-level planner stalls. An independent timer can revoke tracking without an abort packet; safe stopping additionally requires a validated response and enough remaining clearance.
-2.  **Distinction**: A target-evidence horizon follows workspace drift and task tolerance. A separate stopping budget covers detection, communication, brake onset, and physical deceleration.
-3.  **Common pitfall**: Sizing the lease duration too generously to mask high inference latency percentiles ($P_{99}$). An oversized lease leaves a wide unmonitored window where the machine operates open-loop in an environment that may have changed.
-
-:::
+[^fn-intent-dual-brain]: **Inter-core communication across privilege boundaries**\index{Inter-core communication!RPMSG}\index{Dual-brain!privilege boundaries}: RPMSG over a statically bounded shared SRAM ring is one implementation of this proposal-permission path. An independent timer can detect loss of host renewals despite a host kernel panic; the complete detection-to-brake response still needs validated bus, sensing, drive, and actuator timing. See @sec-enforcement-authority-refuse and @sec-appendix-systems-ipc.
 
 Grounding an open-ended directive therefore requires a proposal that carries the target, its evidence age, spatial tolerance, and requested effort limits. The independent permission path must test that proposal against current state and stopping clearance before motion begins.
 
@@ -310,7 +300,7 @@ A natural language instruction becomes dangerous when an unverified semantic hyp
 
 To understand how open-vocabulary language directives translate into actionable geometric targets, modern physical AI systems rely on three foundational grounding paradigms:
 
-1. **Affordance-grounded skill selection (SayCan)**: Ahn et al. [@ahn2022saycan] combine a language model's semantic score with a learned estimate of a skill's success[^fn-math-saycan-value] (see @sec-appendix-ml). A closed drawer may lower the estimated success of "pick up the sponge" and favor "open the drawer" first. This is a task-dependent ranking, not a deterministic veto on kinematically impossible or obstructed motion.
+1. **Affordance-grounded skill selection (SayCan)**: Ahn et al. [@ahn2022saycan] combine a language model's semantic score with a learned estimate of a skill's success[^fn-math-saycan-value] (see @sec-appendix-ml-affordances). A closed drawer may lower the estimated success of "pick up the sponge" and favor "open the drawer" first. This is a task-dependent ranking, not a deterministic veto on kinematically impossible or obstructed motion.
 2. **3D value-map affordance fields (VoxPoser)**: Rather than selecting from discrete, pretrained skill policies, VoxPoser[^fn-ai-voxposer-intent] [@huang2023voxposer] leverages vision-language models and LLM-generated Python code to synthesize continuous 3D spatial affordance and constraint value maps directly in the robot's physical workspace. By querying 2D visual grounding backends (e.g., OWL-ViT, SAM, Grounding DINO) across multi-view RGB-D streams, the system back-projects visual activations into a 3D voxel grid $\mathcal{V} \subset \mathbb{R}^3$. The LLM writes code that computes 3D potential fields: an **attraction value map**\index{Value map!attraction} $\mathbf{V}_{\text{attr}}(\mathbf{x})$ that pulls the end-effector toward target contact affordances (e.g., grasping handles or rim geometries), and a **repulsion constraint map**\index{Value map!repulsion} $\mathbf{V}_{\text{rep}}(\mathbf{x})$ that penalizes trajectories passing near obstacles. A downstream **model-predictive controller (MPC)**\index{Model predictive control}[^fn-ctrl-mpc-intent] or trajectory optimizer then computes dynamic paths directly over this composed 3D cost manifold (an invisible spatial landscape of attraction valleys and repulsion hills) without requiring task-specific reinforcement training. A separate permission path must check actuator limits and the proposed path.
 3. **Language model programs for embodied control (Code as Policies)**: Introduced by Liang et al. [@liang2023code], Code as Policies (CaP)[^fn-ai-codepolicies-intent] prompts large language models to generate executable Python programs that compose perception APIs, geometric coordinate transformations, and parameterized motion primitives. Instead of outputting single static setpoints, the LLM writes algorithmic control structures containing spatial arithmetic, conditional branching (`if is_grasped(): ...`), and reactive loops that query real-time sensor feedback.
 
@@ -471,7 +461,7 @@ Commanding instantaneous step changes in acceleration assumes infinite jerk ($j 
 
 This finite ramp rounds the sharp corners of triangular and trapezoidal profiles into smooth S-curves ($C^2$-continuous in position). For a preliminary schedule, adding $a_{\max}/j_{\max}$ to the idealized time gives an **illustrative allowance**,[^fn-math-jerk-transit] not an exact seven-segment S-curve solution. For a velocity-limited move the estimate is:
 
-[^fn-math-jerk-transit]: **Jerk-limited reachability envelopes**\index{Kinematics!jerk limits}\index{Trajectory generation!S-curve profiles}: A finite jerk cap changes acceleration ramp times. The additive $a_{\max}/j_{\max}$ term is a schedule illustration; exact reachability depends on initial state and the chosen S-curve profile. See @sec-appendix-control for the piecewise treatment.
+[^fn-math-jerk-transit]: **Jerk-limited reachability envelopes**\index{Kinematics!jerk limits}\index{Trajectory generation!S-curve profiles}: A finite jerk cap changes acceleration ramp times. The additive $a_{\max}/j_{\max}$ term is a schedule illustration; exact reachability depends on initial state and the chosen S-curve profile. See @sec-appendix-control-reachability for the piecewise treatment.
 
 $$t_{\text{est}, j} = \frac{d}{v_{\max}} + \frac{v_{\max}}{a_{\max}} + \frac{a_{\max}}{j_{\max}}$$ {#eq-intent-jerk-trapezoidal-transit-time}
 
@@ -479,7 +469,7 @@ For acceleration-limited moves ($d \le d_{\text{crit}}$), the analogous estimate
 
 $$t_{\text{est}, j} \approx 2 \sqrt{\frac{d}{a_{\max}}} + \frac{a_{\max}}{j_{\max}}$$ {#eq-intent-jerk-triangular-transit-time}
 
-Geometrically, a **dynamic reachability envelope** $\mathcal{R}(\tau)$ contains states reachable from the measured state within the admitted time $\tau=t_{\text{exp}}-t_{\text{now}}$. The idealized rest-to-rest formulas above provide necessary time lower bounds under their stated acceleration and speed limits. A jerk cap further contracts the envelope, but its exact boundary requires the selected trajectory model and actuator constraints (see @sec-appendix-control). If the idealized lower bound already exceeds the remaining target-evidence horizon, the proposal can be rejected before a full solve. Passing this scalar test proves neither a feasible path nor an available safe stop.
+Geometrically, a **dynamic reachability envelope** $\mathcal{R}(\tau)$ contains states reachable from the measured state within the admitted time $\tau=t_{\text{exp}}-t_{\text{now}}$. The idealized rest-to-rest formulas above provide necessary time lower bounds under their stated acceleration and speed limits. A jerk cap further contracts the envelope, but its exact boundary requires the selected trajectory model and actuator constraints (see @sec-appendix-control-reachability). If the idealized lower bound already exceeds the remaining target-evidence horizon, the proposal can be rejected before a full solve. Passing this scalar test proves neither a feasible path nor an available safe stop.
 
 In an analytical scenario, consider a manipulator resting at $\mathbf{p}_0$ with limits $v_{\max} = 0.60\text{ m/s}$, $a_{\max} = 2.0\text{ m/s}^2$, and jerk limit $j_{\max} = 20.0\text{ m/s}^3$, yielding critical displacement $d_{\text{crit}} = (0.60)^2 / 2.0 = 0.18\text{ m}$ and jerk ramp time $t_j = 2.0 / 20.0 = 0.100\text{ s} = 100\text{ ms}$.
 For a long displacement $d=0.30\text{ m}$ and an offered $450\text{ ms}$ window, the no-jerk trapezoidal formula alone exceeds the window; the illustrative jerk allowance in @eq-intent-jerk-trapezoidal-transit-time gives $900\text{ ms}$. For a short displacement $d=0.08\text{ m}$ and a $350\text{ ms}$ window, the no-jerk triangular formula also exceeds the window; the illustrative estimate in @eq-intent-jerk-triangular-transit-time is $500\text{ ms}$. Both proposals fail even the necessary idealized test. The $900\text{ ms}$ and $500\text{ ms}$ estimates are not certified travel times for a particular joint trajectory.
@@ -533,9 +523,11 @@ The proposed target must carry its spatial envelope, provenance, and expiry. A r
 
 ::: {#chk-intent-failure-pathology .callout-checkpoint title="Intent failure taxonomy and detection limits"}
 
-- [ ] **Geometry and meaning:** Why can an occupancy check reject some phantom targets yet miss a confidently selected wrong object?
-- [ ] **Staleness and stopping:** Which delays belong in the physical stopping budget after a target becomes invalid?
-- [ ] **Contact response:** Why does the $39\text{ N}$ force at brake-command onset not bound the peak load?
+Before granting actuation permission to high-level intent proposals, verify your understanding of semantic failure modes, stopping budgets, and contact dynamics:
+
+- [ ] **Geometry and meaning**: Why can an occupancy check reject some phantom targets yet miss a confidently selected wrong object?
+- [ ] **Staleness and stopping**: Which delays belong in the physical stopping budget after a target becomes invalid?
+- [ ] **Contact response**: Why does the $39\text{ N}$ force at brake-command onset not bound the peak load?
 
 :::
 
@@ -565,6 +557,18 @@ The timestamp `t_source_mcu` is the **physical capture epoch converted into the 
 The fields in @tbl-10-intent-schema support layered checks. Sequence and parent-ring lookup reject stale or mismatched observations but do not authenticate the sender. Cheap workspace and target-envelope tests reject obvious failures before planning; passing them does not prove a collision-free path. A planner and permission check must still evaluate the swept path, unknown space, actuator constraints, total pre-brake delay, and current stopping clearance.
 
 The admitted intent moves through Pending, Active, Renewed, Expired, and Aborted states. The MCU enters Active only after checking the request against independently configured ceilings and a feasible response from the measured state. A renewal needs a newer sequence, a fresh trusted observation, and a new permission check; it does not automatically extend authority. Meeting the approved task tolerance completes the goal. Unexpected contact or loss of a required belief aborts the dependent motion.
+
+::: {#dfn-intent-expiring-intent-lease .callout-definition title="Expiring intent lease"}
+
+***Expiring intent lease***\index{Expiring intent lease!definition}\index{Intent lease!definition} ($\mathcal{L}_{\text{intent}}$) is a time-bounded execution authorization issued by the independent permission tier that binds an admitted target pose and effort envelope to a strict monotonic hardware deadline ($\tau_{\text{lease}}$):
+$$t_{\text{expire}} = \min(t_{\text{evidence}} + \tau_{\text{horizon}}, \; t_{\text{issue}} + \tau_{\text{lease}}, \; t_{\text{stop\_deadline}})$$
+upon whose expiration motion tracking authority is automatically revoked without requiring an explicit cancellation packet.
+
+1.  **Significance**: Ensures physical mass and momentum cannot coast unguided when upstream neural deliberation stalls; hardware timers autonomously enforce motion cessation upon lease exhaustion.
+2.  **Distinction**: Unlike a network keepalive or software ping, an intent lease couples physical sensor evidence age ($\tau_{\text{horizon}}$) with dynamic braking feasibility, guaranteeing that remaining travel clearance is never exceeded during deceleration.
+3.  **Common pitfall**: Sizing lease durations generously to mask tail latency ($P_{99}$) in neural inference, which creates an unmonitored open-loop window where the robot moves through an environment that may have changed.
+
+:::
 
 At expiration, the timer revokes tracking authority. The packet's `terminal_request` is advisory: the MCU selects among approved hold, controlled deceleration, or torque-disable responses according to load, contact mode, brake capability, and clearance. A suspended payload may need powered holding; disabling torque can drop it. A moving base needs enough room to decelerate. Neither a $1\text{ kHz}$ check period nor a hardware interrupt establishes a one-millisecond physical stop.
 

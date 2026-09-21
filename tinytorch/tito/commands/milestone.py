@@ -38,6 +38,9 @@ MILESTONE_ALIASES = {
     "mlp": "03",
     "cnn": "04",
     "transformer": "05",
+    "tinygpt": "05",
+    "gpt": "05",
+    "shakespeare": "05",
     "mlperf": "06",
     "olympics": "06",
 }
@@ -119,11 +122,25 @@ MILESTONE_SCRIPTS = {
         "id": "05",
         "name": "Transformer Era (2017)",
         "year": 2017,
-        "title": "Attention is All You Need",
-        "script": "milestones/05_2017_transformer/01_vaswani_attention.py",
-        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13],  # Full training + Embeddings, Attention, Transformers
-        "description": "Prove attention works with sequence reversal",
-        "historical_context": "Vaswani et al. revolutionized NLP",
+        "title": "TinyGPT: Autoregressive Language Modeling (ChatGPT Foundation)",
+        "default_part": 1,
+        "scripts": [
+            {
+                "name": "TinyGPT (Shakespeare)",
+                "script": "milestones/05_2017_transformer/01_tinygpt_shakespeare.py",
+                "description": "Train TinyGPT from scratch on Shakespeare and generate text",
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
+            },
+            {
+                "name": "Sequence Routing",
+                "script": "milestones/05_2017_transformer/02_vaswani_attention.py",
+                "description": "Prove attention mechanism on sequence reversal and copying",
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13]
+            }
+        ],
+        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13],  # TinyGPT training requirements
+        "description": "Train TinyGPT from scratch on Shakespeare and generate text",
+        "historical_context": "Vaswani et al. (2017) and the Generative LLM revolution (2020–2022) proved transformers and emergent autoregressive scaling",
         "emoji": "🤖"
     },
     "06": {
@@ -180,8 +197,8 @@ MILESTONE_ACHIEVEMENT_HIGHLIGHTS = {
     ],
     "05": [
         "Every line of code: YOUR implementations",
-        "Every attention weight: YOUR MultiHeadAttention",
-        "Every gradient: YOUR autograd",
+        "Every attention score: YOUR Causal MultiHeadAttention",
+        "Every token generated: YOUR autoregressive loop (ChatGPT foundation)",
     ],
     "06": [
         "Every line of code: YOUR implementations",
@@ -588,7 +605,7 @@ class MilestoneCommand(BaseCommand):
         )
         run_parser.add_argument(
             'milestone_id',
-            help='Milestone ID (01-06) or name (perceptron, xor, mlp, cnn, transformer, mlperf)'
+            help='Milestone ID (01-06) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt)'
         )
         run_parser.add_argument(
             '--part',
@@ -608,7 +625,7 @@ class MilestoneCommand(BaseCommand):
         )
         info_parser.add_argument(
             'milestone_id',
-            help='Milestone ID (01-06) or name (perceptron, xor, mlp, cnn, transformer, mlperf)'
+            help='Milestone ID (01-06) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt)'
         )
 
         # Status subcommand
@@ -1101,9 +1118,11 @@ class MilestoneCommand(BaseCommand):
         """Handle milestone list command - show available milestones."""
         console = self.console
 
+        min_year = min(m["year"] for m in MILESTONE_SCRIPTS.values())
+        max_year = max(m["year"] for m in MILESTONE_SCRIPTS.values())
         console.print(Panel(
             "[bold cyan]🏆 TinyTorch Milestones[/bold cyan]\n\n"
-            "[dim]Recreate ML history from 1958 to 2018[/dim]",
+            f"[dim]Recreate ML history from {min_year} to {max_year}[/dim]",
             title="Available Milestones",
             border_style="bright_cyan"
         ))
@@ -1345,9 +1364,10 @@ class MilestoneCommand(BaseCommand):
             padding=(1, 2)
         ))
 
-        # Only prompt if in interactive terminal
+        # Only prompt if in interactive terminal and not non-interactive mode
         import sys
-        if sys.stdin.isatty() and sys.stdout.isatty():
+        import os
+        if sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get("TINYTORCH_NON_INTERACTIVE") != "1" and os.environ.get("CI") != "true":
             try:
                 console.input("\n[yellow]Press Enter to begin...[/yellow] ")
             except EOFError:

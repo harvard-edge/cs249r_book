@@ -88,11 +88,11 @@ The execution becomes trapped on a *garden path*: an execution trajectory where 
 
 As demonstrated in @fig-vol3-diagnostic-tree, open-loop generation on the left commits irrevocably to the high-probability prior $H_1$ ($P(H_1)=0.75$), allowing poisoned KV cache context to steer downstream actuation toward an ineffective timeout patch. On the right, deliberative execution withholds actuation at root state $S_0$ until an external diagnostic probe executes a targeted concurrency test. The probe captures concrete runtime evidence—confirming that sockets remain healthy while lease locks are released prematurely—which decisively falsifies $H_1$, prunes the invalid branch, and guides subsequent generation toward the verified synchronization fix at $S_2^*$.
 
-::: {#exmp-03-memory-bus-latency-tax .callout-example title="Sizing the memory bus and latency tax of autoregressive commitment"}
+::: {#nbk-03-memory-bus-latency-tax .callout-notebook title="Sizing the memory bus and latency tax of autoregressive commitment"}
 Consider an autonomous systems agent diagnosing our distributed cache defect using an open-weights 70-billion parameter model ($P_{\text{params}} = 70 \times 10^9$) quantized to FP8 ($b_{\text{weight}} = 1\text{ byte/param}$, occupying $70\text{ GB}$ of memory) deployed on an NVIDIA H100 SXM5 accelerator ($80\text{ GiB}$ HBM3, $\text{BW}_{\text{mem}} = 3.35\text{ TB/s}$).
 
 **Single-Token Decode Latency at Batch Size $B = 1$:**
-Because autoregressive decoding shuttles all active model parameters from HBM into accelerator compute cores for each emitted token, per-token latency is memory-bandwidth bound:
+Applying the single-token memory bandwidth floor derived in @sec-vol3-processor-cost, per-token decode latency is strictly memory-bandwidth bound:
 
 $$T_{\text{decode}} \approx \frac{P_{\text{params}} \cdot b_{\text{weight}}}{\text{BW}_{\text{mem}}} = \frac{70 \times 10^9\text{ bytes}}{3.35 \times 10^{12}\text{ bytes/s}} \approx 20.90\text{ ms/token}$$
 
@@ -120,7 +120,9 @@ Spending $40\text{ ms}$ on an external execution probe saves $21.07\text{ second
 
 To build dependable systems around unprivileged, non-deterministic foundation models, systems engineers must resolve this epistemic gap using the foundational principles of system design. As articulated by Saltzer, Reed, and Clark [-@saltzer1984endtoend] in the End-to-End Argument, functions placed at low levels of a distributed system may be redundant or of little value when compared with the cost of providing them at that low level; true correctness can only be completely defined and verified with the knowledge and help of the application endpoints. In an agentic architecture, semantic correctness cannot be certified internally by the generative core. The model cannot validate its own hypotheses through internal consistency checks or conversational self-reflection because the generative core is the very source of the failure-plausible proposal. Invariant closure must be established at the application endpoints by external, authoritative, deterministic verification mechanisms: compilers, type checkers, static analysis linters, reproduction test harnesses, and regression suites.
 
-This separation of concerns operationalizes Dijkstra's [-@dijkstra1970structured] foundational principle of software engineering: program testing can be used to show the presence of bugs, but never to show their absence. In an agentic deliberation process, an empirical test execution provides an indispensable systems property: *discriminatory power*. An external execution probe can definitively falsify an invalid hypothesis. When a concurrency test runner emits a nonzero exit code or an assertion failure, that empirical observation injects ground-truth evidence directly into the runtime's state.
+This separation of concerns operationalizes Dijkstra's [-@dijkstra1970structured] testing principle (introduced in @sec-vol3-intro-operational-incident):[^fn-dijkstra-testing-deliberation] empirical test execution demonstrates the presence of bugs but never their absence. In an agentic deliberation process, an empirical test execution provides an indispensable systems property: *discriminatory power*. An external execution probe can definitively falsify an invalid hypothesis. When a concurrency test runner emits a nonzero exit code or an assertion failure, that empirical observation injects ground-truth evidence directly into the runtime's state.
+
+[^fn-dijkstra-testing-deliberation]: **Dijkstra Testing Principle**: As formalized in @sec-vol3-intro-operational-incident, deterministic test execution establishes empirical falsification across the deliberation tree, separating valid reasoning branches from plausible hallucinations.
 
 In their seminal analysis of test-time compute scaling, Snell et al. [-@snell2024scaling] demonstrated this principle quantitatively: increasing inference computation—whether by extending token generation, sampling multiple candidate trajectories, or conditioning on verifiers—improves task performance if and only if the additional compute yields *discriminatory signal*. Sampling additional candidates from an unguided distribution without an external verifier saturates rapidly, while generating extended rationalizations without empirical feedback compounds errors. Test-time computation is valuable if and only if it generates or acquires evidence that separates valid execution states from invalid ones.
 
@@ -139,6 +141,16 @@ Test-time computation is not an undifferentiated scalar currency. Its architectu
 As formalized in @fig-vol3-allocation-axes, test-time compute spans three distinct architectural topologies. In the Depth topology (left), compute scales along a serialized chain of $K_{\text{ext}}$ autoregressive tokens; while this enables unrolled intermediate derivations, wall-clock latency scales strictly as $O(K_{\text{ext}})$ with memory bandwidth saturation at batch size $B=1$. In the Breadth topology (center), the runtime forks execution into $N$ parallel candidate streams; wall-clock latency matches a single rollout $O(K_{\text{cand}})$, but accelerator high-bandwidth memory scales as $O(N \cdot K_{\text{cand}})$ without pruning unpromising branches. In the Feedback topology (right), compute loops through external execution sandboxes over $M$ discrete epochs; each candidate is compiled and falsified by empirical probes, breaking the autoregressive commitment trap while capping working memory at a single active generation context.
 
 Understanding how to allocate inference-time computation requires decomposing these three execution topologies down to their physical and information-theoretic foundations. The agent runtime designer must balance the critical-path wall-clock latency ($T_{\text{wall}}$), the total floating-point operations ($C_{\text{FLOP}}$), the active state footprint retained in accelerator memory ($M_{\text{KV}}$), and the empirical validity of the resulting proposals.
+
+::: {#dfn-deliberation-rollout .callout-definition title="Test-time deliberation rollout"}
+
+***Test-time deliberation rollout***\index{Test-time deliberation rollout!definition}\index{Deliberation!rollout definition} is a directed trajectory expansion operator $\mathcal{T}_{\text{delib}}: \mathcal{S}_{\text{ctx}} \to 2^{\mathcal{A} \times \mathcal{O}}$ wherein an agent runtime allocates inference compute dynamically across depth, breadth, and feedback axes to explore, simulate, and verify candidate action sequences prior to committing irreversible environmental side effects.
+
+1.  **Significance**: Transforms model invocation from a single-shot open-loop token emission into a closed-loop search process, mitigating compounding error drift and decoupling problem-solving capacity from fixed parameter weights by scaling test-time compute.
+2.  **Distinction**: Unlike single-turn autoregressive decoding (which executes a fixed $O(1)$ computational graph per token along a single irreversible KV-cache prefix), a deliberation rollout maintains a revisable candidate search frontier, interleaving parallel branch exploration with out-of-band verification probes.
+3.  **Common pitfall**: Allocating test-time compute purely along the depth or breadth axes without empirical feedback or verification oracles; open-loop rollouts suffer from the paraphrasing fallacy and Goodhart divergence, burning GPU memory bandwidth and FLOP budgets without increasing task success.
+
+:::
 
 ### Depth: Sequential token extension
 
@@ -237,7 +249,7 @@ As @tbl-vol3-allocation-tradeoffs makes clear, the three axes present radical en
 
 The concrete consequences of these architectural trade-offs are best illustrated by tracing hardware metrics on a modern inference node.
 
-::: {#exmp-03-hardware-trade-offs-across-compute-allocation .callout-example title="Hardware trade-offs across compute allocation axes"}
+::: {#nbk-03-hardware-trade-offs-across-compute-allocation .callout-notebook title="Hardware trade-offs across compute allocation axes"}
 Consider an autonomous agent runtime deployed on an 8-GPU node running an unquantized 70-billion parameter model ($|\Theta| = 70 \times 10^9$) in BF16 precision ($b_{\text{bytes}} = 2$ bytes). The node possesses an aggregate memory bandwidth $B_{\text{mem}} = 26.8\text{ TB/s}$ ($3.35\text{ TB/s}$ per GPU) and sustained BF16 matrix compute throughput of $R_{\text{peak}} = 15{,}800\text{ TFLOPS}$.
 
 The agent is tasked with synthesizing a lockless ring buffer. The base specification prompt contains $P = 4{,}096$ tokens. We analyze three concrete configurations designed to consume comparable total generation budgets of approximately $4{,}096$ emitted tokens:
@@ -293,7 +305,14 @@ Prompt lengths expand across rounds:
 
 The architectural imperative that emerges from this quantitative comparison is that real-world agent runtimes rarely deploy any single axis in isolation. Instead, high-performance runtime orchestrators construct hybrid deliberation topologies: leveraging depth to unpack local procedural logic, deploying breadth to explore disjoint architectural candidates across parallel workers, and closing the loop with feedback to verify and prune invalid candidates against deterministic system oracles.
 
-Yet whether a runtime allocates its deliberation budget across parallel candidate branches or successive feedback iterations, it immediately encounters a selection bottleneck: generating multiple candidate solutions yields zero systemic value if the runtime cannot reliably distinguish which candidate is correct. If the system samples sixteen candidate implementations of a cache eviction policy, or branches across five possible query plans, how does the host supervisor evaluate and select the winning trajectory without introducing catastrophic verification exploits?
+::: {#chk-03-compute-allocation-axes .callout-checkpoint title="Evaluating deliberation compute allocation axes"}
+Before evaluating candidate selection mechanisms and verification topologies, verify your understanding of compute allocation trade-offs:
+
+- [ ] **Allocation dimensions**: How do sequential depth, parallel breadth, and observation feedback differ in their consumption of accelerator FLOPs and KV cache memory?
+- [ ] **Prefix caching**: Under what conditions does parallel candidate sampling share KV cache state, and when does divergence force redundant memory allocation?
+- [ ] **Feedback efficiency**: Why does observation-conditioned feedback achieve higher trajectory goodput than ungrounded depth or unverified parallel sampling?
+- [ ] **Wall-clock latency**: What architectural constraints prevent parallel sampling from reducing wall-clock latency when serving infrastructure is memory-bandwidth saturated?
+:::
 
 ## Candidate Selection {#sec-vol3-deliberation-candidate-diversity}
 
@@ -408,7 +427,7 @@ The following candidate matrix illustrates how these selection stages filter and
 
 Notice that Candidates $\mathbf{y}^{(1)}$ and $\mathbf{y}^{(2)}$ exhibited distinct surface code structures but collapsed into the identical functional equivalence cluster (Cluster $\alpha$), sharing a common synchronization failure. Deterministic filtering dropped $\mathbf{y}^{(4)}$ immediately due to compilation failure, allowing the learned verifier to focus its evaluation budget exclusively on the valid alternatives.
 
-::: {#exmp-03-candidate-sampling-and-verifier-throughput .callout-example title="Candidate sampling and verifier throughput under fixed GPU memory bandwidth"}
+::: {#nbk-03-candidate-sampling-and-verifier-throughput .callout-notebook title="Candidate sampling and verifier throughput under fixed GPU memory bandwidth"}
 A systems engineer deploys an agentic code generation supervisor running on an NVIDIA H100 SXM5 GPU (3,350 GB/s HBM3 memory bandwidth). The system generates $N = 16$ candidate solutions in parallel, each generating an average of $L = 1,024$ decode tokens. The base generator is a 70-billion parameter dense model stored in FP8 ($P = 70 \times 10^9$ bytes).
 
 During the autoregressive decode phase, generation is strictly memory-bandwidth bound: each token generation step must sweep the entire 70 GB weight matrix from High Bandwidth Memory (HBM) into the streaming multiprocessors. Evaluating candidates using a learned Process Reward Model (PRM) of identical size requires an independent forward prefill pass over the generated tokens.
@@ -504,6 +523,10 @@ Yet process verifiers introduce architectural trade-offs:
 
 As summarized in @tbl-vol3-verifier-hierarchy, no single verification mechanism provides universal coverage at zero cost. Deterministic execution engines yield infallible negative proof—if a patch fails to compile, it is unreservedly rejected—but they cannot assess semantic intent or structural readability. Neural process verifiers provide broad semantic scoring across arbitrary reasoning steps, but lack strict execution guarantees. Consequently, dependable agent architectures organize these mechanisms into hierarchical cascades, subjecting candidates to low-cost deterministic checks before dedicating expensive neural FLOPs to process verification.
 
+::: {#dfn-process-reward-model .callout-definition title="Process reward model (PRM)"}
+A neural verification model trained to evaluate the correctness, validity, or utility of individual intermediate reasoning steps or tool invocations in a multi-step trajectory, rather than scoring only the final terminal outcome.
+:::
+
 ### The asymmetry of verifier error: False acceptance versus false rejection
 
 In classical statistical classification, type I and type II errors are often analyzed symmetrically against a loss matrix. In autonomous agent architectures, however, verifier errors exhibit extreme operational asymmetry. Let an arbitrary proposed candidate trajectory be denoted by $\tau$, possessing a true, ground-truth validity state $y^* \in \{\text{Valid}, \text{Invalid}\}$. The verifier outputs an operational judgment $V(\tau) \in \{\text{Accept}, \text{Reject}\}$. We characterize the verifier by two foundational error probabilities:
@@ -535,7 +558,7 @@ $$\Pi_V = \frac{0.01 \times 0.98}{(0.01 \times 0.98) + (0.99 \times 0.02)} = \fr
 
 Despite utilizing a verifier with $98\%$ nominal accuracy, roughly two out of every three candidates approved by the supervisor are functionally invalid. Scaling breadth-based sampling under these operating conditions does not elevate system reliability; it merely floods the downstream execution environment with plausible, verifier-approved bugs. In safety-critical infrastructure, systems architects must establish an absolute rule: statistical neural verifiers ($\alpha > 0$) can only be utilized for *heuristic candidate ordering*, while the authoritative commit gate must be guarded by sound, deterministic execution oracles where $\alpha = 0$.
 
-::: {#exmp-03-compute-overhead-and-yield-under .callout-example title="Compute overhead and yield under asymmetric verifier error"}
+::: {#nbk-03-compute-overhead-and-yield-under .callout-notebook title="Compute overhead and yield under asymmetric verifier error"}
 A distributed agent runtime orchestrates candidate generation on an 8-GPU node running an inference serving engine. The engine generates $N = 64$ parallel candidate trajectories for a complex concurrency bug fix. Each candidate consumes $L = 1024$ decode tokens. The serving cluster achieves an autoregressive decode throughput of $R = 32\text{ tokens/second}$ per GPU worker thread, allocating one GPU worker per candidate.
 
 The generation parameters and verifier performance metrics are:
@@ -636,6 +659,14 @@ To an automated outcome verifier monitoring exit code status, `ExploitCandidate`
 $$P(\text{Exploit Discovery}) = 1 - (1 - \epsilon)^N = 1 - (0.995)^{1000} \approx 1 - 0.0066 = 99.34\%$$
 
 High-intensity test-time search transforms marginal evaluation blind spots into deterministic failure pathways.
+
+::: {#psp-03-goodharts-curse-in-test-time-search .callout-perspective title="Goodhart's curse and the verification asymmetry"}
+In the pursuit of inference-time scaling, systems designers frequently assume that allocating more compute to test-time search monotonically improves task performance. This assumption collides with a fundamental systems reality: candidate generation in unconstrained semantic spaces is cheap, but sound verification is structurally asymmetric.
+
+When an agent searches across $N$ candidate trajectories against an approximate or learned verifier $\widehat{U}$, the search policy $\arg\max_i \widehat{U}(\tau_i)$ does not act merely as a filter; it operates as an adversarial fuzzer against the evaluation harness. Extreme value theory dictates that the maximum of $N$ noisy measurements with error variance $\sigma^2$ grows asymptotically as $\sigma \sqrt{2 \ln N}$. For large $N$, the candidate that claims the top score is not the one with the highest true operational utility $U(\tau)$, but the one that maximizes the verifier's positive estimation error. Unless the verifier's false positive rate $\alpha$ shrinks faster than $1/N$ ($\alpha \ll 1/N$), scaling search breadth guarantees that the selected trajectory will be an out-of-distribution exploit.
+
+**Systems insight**: Deliberation without sound verification does not converge to correctness; it converges to the systematic exploitation of the verifier's omissions. In high-reliability agent systems, test-time compute can only be scaled as far as deterministic execution oracles (compilers, type systems, hermetic sandboxes) can authoritatively bound the search space.
+:::
 
 #### Adversarial sandboxing {.unnumbered}
 
@@ -792,7 +823,7 @@ where $\mathcal{F}_{\text{verified}}$ is the verified frontier (the set of compl
 #### Global escalation (root invalidation) {.unnumbered}
 When an environmental failure falsifies an invariant of the root task itself—such as encountering an immutable hardware incompatibility, missing kernel capabilities, or revoked access credentials—branch-level resynthesis cannot succeed. Continuing to deliberate in this regime wastes tokens in an unresolvable search space. The runtime halts graph execution, marks the root objective as unachievable under the current environment constraints, and escalates to the supervisor or human operator, emitting a structured diagnostic proof containing the chain of verified state deltas and the terminal invalidation signature.
 
-::: {#exmp-03-compute-and-token-savings-of .callout-example title="Compute and token savings of subgraph resynthesis vs. global regeneration"}
+::: {#nbk-03-compute-and-token-savings-of .callout-notebook title="Compute and token savings of subgraph resynthesis vs. global regeneration"}
 Consider an autonomous systems agent running on an inference cluster powered by a 70-billion parameter dense foundation model ($P = 70 \times 10^9$ parameters) in 16-bit precision. The model architecture uses Grouped-Query Attention (GQA) with $L = 80$ transformer layers, $d_{\text{model}} = 8{,}192$, and 8 key-value heads ($d_{\text{head}} = 128$).
 
 Under GQA, each token stored in the KV cache consumes:
@@ -960,7 +991,7 @@ $$C_{\text{verif}}^{\text{det}} = \sum_{j \in \mathcal{V}_{\text{eval}}} \left( 
 
 The tool execution cost $C_{\text{tool}}$ encapsulates the latency, network bandwidth, and third-party API overhead incurred when an exploratory branch interacts with external environments. Unlike pure generation, tool execution introduces non-deterministic wall-clock delays: an agent branch that invokes an external database query or static analysis tool may stall for hundreds of milliseconds while holding accelerator memory state in suspense.
 
-::: {#exmp-03-compute-allocation-and-latency-trade-offs .callout-example title="Compute allocation and latency trade-offs in bounded search"}
+::: {#nbk-03-compute-allocation-and-latency-trade-offs .callout-notebook title="Compute allocation and latency trade-offs in bounded search"}
 **Problem Statement:**
 An autonomous software engineering runtime must generate a functional patch for a failing repository module. The host system operates an NVIDIA H100 SXM accelerator with a peak memory bandwidth of $\text{BW}_{\text{HBM}} = 3.35\text{ TB/s}$. The generator is a 70B parameter model ($|\Theta| = 70 \times 10^9$ parameters) operating in 8-bit floating-point precision (FP8, 1 byte per parameter). Each reasoning step requires generating $L_{\text{step}} = 128$ tokens.
 
@@ -1096,9 +1127,14 @@ Conversely, irreversible mutations (e.g., executing database migrations, deletin
 
 To safeguard the environment, the runtime must enforce that exploratory search operates exclusively within isolated scratchpads or sandboxes (as formalized in @sec-vol3-virtualization). Physical environment commits are deferred until the search algorithm terminates, the stopping criteria are satisfied, and a candidate trajectory is formally selected and certified.
 
-***
+::: {#chk-03-search-topologies .callout-checkpoint title="Evaluating search topologies and stopping invariants"}
+Before benchmarking deliberation strategies under resource equivalence, verify your understanding of bounded search mechanics:
 
-Yet the formalization of search topologies, resource ledgers, and stopping criteria exposes an empirical challenge: configuring these parameters requires verifiable evidence. How does an engineer determine whether a complex Monte Carlo tree search with process reward modeling genuinely outperforms a simpler Best-of-$N$ baseline under an equivalent compute budget? This question of rigorous, compute-matched evaluation forms the foundation of deliberation strategy design.
+- [ ] **Plan invalidation**: When an intermediate environment observation violates a precondition in a plan DAG, which downstream nodes must be marked stale?
+- [ ] **Verifier error asymmetry**: Why does false verifier acceptance ($\alpha_{\text{accept}}$) degrade end-to-end task completion more severely than false rejection ($\beta_{\text{reject}}$)?
+- [ ] **Stopping invariants**: How do multicriteria stopping rules prevent search thrashing when verifier scores plateau or token budgets exhaust?
+- [ ] **Irreversible actions**: Why must exploratory search branches remain strictly sandboxed until a candidate trajectory satisfies certification oracles?
+:::
 
 ## Deliberation Strategy Evaluation {#sec-vol3-deliberation-strategy-design}
 

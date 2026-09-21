@@ -106,11 +106,17 @@ try:
 except ImportError:
     MultiHeadAttention = scaled_dot_product_attention = None
 
-# Module 13: Transformers
+# Module 13: Transformers (LEGO Bricks)
 try:
-    from .core.transformers import LayerNorm, MLP, TransformerBlock, GPT, TinyGPT, create_causal_mask
+    from .core.transformers import LayerNorm, MLP, TransformerBlock, create_causal_mask, sample_next_token, generate
 except ImportError:
-    LayerNorm = MLP = TransformerBlock = GPT = TinyGPT = create_causal_mask = None
+    LayerNorm = MLP = TransformerBlock = create_causal_mask = sample_next_token = generate = None
+
+# Models: Assembled Architectures
+try:
+    from .models.transformer import GPT, TinyGPT
+except ImportError:
+    GPT = TinyGPT = None
 
 # Module 14: Profiling
 try:
@@ -179,7 +185,8 @@ __all__ = [
     'Embedding', 'PositionalEncoding', 'EmbeddingLayer',
     # Attention & Transformers
     'MultiHeadAttention', 'scaled_dot_product_attention',
-    'LayerNorm', 'MLP', 'TransformerBlock', 'GPT', 'TinyGPT', 'create_causal_mask',
+    'LayerNorm', 'MLP', 'TransformerBlock', 'create_causal_mask', 'sample_next_token', 'generate',
+    'GPT', 'TinyGPT',
     # Performance
     'Profiler', 'quick_profile',
     'Quantizer', 'quantize_int8', 'dequantize_int8',

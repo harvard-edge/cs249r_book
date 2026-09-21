@@ -2,7 +2,8 @@
 import numpy as np
 import pytest
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.transformers import GPT, LayerNorm
+from tinytorch.core.transformers import LayerNorm, sample_next_token, generate
+from tinytorch.models.transformer import GPT
 
 
 def test_zero_temperature_is_greedy():

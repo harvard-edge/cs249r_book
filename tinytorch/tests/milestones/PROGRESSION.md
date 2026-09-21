@@ -238,14 +238,15 @@ loss.backward()
 - ✅ Optional CIFAR-10 scale-up exercises the same CNN path on larger images
 
 ### 5. **Transformer Era** (2017)
-- ✅ Attention solves reversal, copy, and mixed sequence tasks
-- ✅ Embeddings, positional encoding, multi-head attention, and transformer blocks compose
-- ✅ Sequence accuracy meets the milestone targets
+- ✅ Train decoder-only transformer (TinyGPT) from scratch on Shakespeare
+- ✅ Next-token prediction loss drops steadily (< 1.0) with teacher forcing
+- ✅ Autoregressively generates coherent text (foundation of ChatGPT)
+- ✅ Optional Part 2: Attention solves sequence routing (reversal, copy, mixed tasks)
 
 ### 6. **MLPerf Benchmarks** (2018)
 - ✅ Optimization pipeline runs on prior milestone models
 - ✅ Benchmarking reports reproducible performance metrics
-- ✅ KV caching demonstrates generation speedup
+- ✅ KV caching demonstrates generation speedup on TinyGPT
 
 ## Fair Comparisons
 
@@ -320,4 +321,4 @@ The journey continues:
 - **Diffusion models** (2020+)
 - **Mixture of Experts** (2023+)
 
-But they all build on these five fundamental milestones! 🚀
+But they all build on these six fundamental milestones! 🚀

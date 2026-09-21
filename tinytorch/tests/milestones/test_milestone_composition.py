@@ -54,7 +54,7 @@ def test_mlp_flatten_preserves_input_gradient():
 
 
 def test_transformer_registers_and_trains_each_parameter_group():
-    module = milestone('05_2017_transformer/01_vaswani_attention.py')
+    module = milestone('05_2017_transformer/02_vaswani_attention.py')
     model = module.AttentionTransformer(7, embed_dim=8, num_heads=2, seq_len=4, num_layers=1)
     groups = [model.embedding, model.pos_encoding, model.attention_layers[0],
               model.ln1_layers[0], model.ln2_layers[0], model.fc1_layers[0],
@@ -154,3 +154,26 @@ def test_failed_xor_training_does_not_report_process_success(monkeypatch):
     monkeypatch.setattr(module, 'train_network', lambda *args, **kwargs:
                         {'loss': [1.0], 'accuracy': [0.5]})
     assert module.main() == 1
+
+
+def test_tinygpt_parameters_and_autograd_training():
+    module = milestone('05_2017_transformer/01_tinygpt_shakespeare.py')
+    model, total_params = module.build_model(vocab_size=20, embed_dim=16, num_layers=1, num_heads=2, max_seq_len=16)
+    params = model.parameters()
+    assert len(params) > 0
+    assert total_params == sum(p.data.size for p in params)
+    optimizer = module.AdamW(params, lr=0.01)
+    inputs = Tensor(np.array([[1, 2, 3, 4], [4, 3, 2, 1]], dtype=np.int64))
+    targets = Tensor(np.array([[2, 3, 4, 1], [3, 2, 1, 4]], dtype=np.int64))
+    before = {id(p): p.data.copy() for p in params}
+    losses = []
+    for _ in range(5):
+        optimizer.zero_grad()
+        logits = model(inputs)
+        loss = module.CrossEntropyLoss()(logits.reshape(-1, 20), targets.reshape(-1))
+        losses.append(float(loss.data))
+        loss.backward()
+        assert all(p.grad is not None and np.isfinite(p.grad).all() for p in params)
+        optimizer.step()
+    assert losses[-1] < losses[0]
+    assert any(np.any(p.data != before[id(p)]) for p in params)

@@ -132,16 +132,13 @@ class TestMilestoneRuns:
 
     @pytest.mark.slow
     def test_milestone_05_transformer(self):
-        """Milestone 05: Transformer Era (2017) - Sequence reversal with attention."""
+        """Milestone 05: Transformer Era (2017) - TinyGPT on Shakespeare."""
         returncode, stdout, stderr = run_milestone("05", timeout=180)
 
         assert returncode == 0, f"Milestone 05 failed:\nstdout: {stdout}\nstderr: {stderr}"
-
-        # Should mention attention/transformer
-        assert "attention" in stdout.lower() or "transformer" in stdout.lower()
-
-        accuracy = reported_accuracy(stdout, "1. Reversal")
-        assert accuracy >= 95, f"Transformer final reversal accuracy too low: {accuracy}%"
+        assert "MILESTONE ACHIEVED!" in stdout or "Milestone 05" in stdout
+        assert "TinyGPT" in stdout or "Shakespeare" in stdout
+        assert "Generated Output:" in stdout or "Sample:" in stdout
 
     @pytest.mark.slow
     def test_milestone_06_mlperf(self):

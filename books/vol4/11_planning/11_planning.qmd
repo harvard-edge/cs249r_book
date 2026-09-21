@@ -178,7 +178,11 @@ The projected seam in @eq-plan-execution-delay-gap is useful for constructing a 
 
 ::: {#dfn-planning-future-state-conditioning .callout-definition title="Future-state conditioning"}
 
-***Future-state conditioning***\index{Future-state conditioning!definition} uses the active plan's projected reference at an anticipated handoff time to form the next candidate. It reduces the expected reference seam gap when timing and tracking remain close to the model. Admission still compares the proposal with measured state and checks a feasible bridge; a projection cannot certify the actual plant state.
+***Future-state conditioning***\index{Future-state conditioning!definition} is the practice of generating candidate motion plans anchored to the anticipated state at execution time rather than the stale state measured at plan initiation.
+
+1.  **Significance**: Offsets computational latency $\Delta t_{\text{plan}}$, eliminating the kinematic jump at trajectory handoff without requiring artificial zero-velocity stops between chunks.
+2.  **Distinction**: Distinct from state estimation or filtering; it is a reference-planning strategy that projects the admitted trajectory forward rather than filtering sensor noise.
+3.  **Common pitfall**: Assuming the predicted execution state is guaranteed; if a disturbance displaces the plant during planning, the candidate remains unadmissible without state verification at the boundary.
 
 :::
 
@@ -222,9 +226,13 @@ Concatenating individually feasible chunks can create an infeasible seam. Positi
 ![](images/svg/fig11_action_chunk_seam_continuity.svg){width="100%"}
 :::
 
-::: {#dfn-planning-c-jerk-spline-seam .callout-definition title="The C² spline seam"}
+::: {#dfn-planning-c-jerk-spline-seam .callout-definition title="C² spline seam"}
 
-A ***$C^2$ seam***\index{C2 jerk spline seam@$C^2$ jerk spline seam!definition} matches position, velocity, and acceleration of two admitted reference segments at their join. A quintic can satisfy six endpoint conditions. The controller must still check interior speed, acceleration, jerk, torque, and clearance and compare the candidate with measured plant state.
+A ***$C^2$ spline seam***\index{C2 jerk spline seam@$C^2$ jerk spline seam!definition} is a trajectory junction that enforces continuity through the second time derivative (position, velocity, and acceleration) between adjoining motion segments.
+
+1.  **Significance**: Prevents instantaneous acceleration steps across trajectory chunks, bounding the inertial torque spike $\tau_{\text{step}} = J_{\text{eff}} \Delta\ddot{q}$ demanded from actuators.
+2.  **Distinction**: Distinct from $C^1$ continuity (which matches only velocity and allows finite acceleration jumps) and $C^0$ continuity (which matches only position and allows infinite acceleration impulses).
+3.  **Common pitfall**: Assuming $C^2$ continuity guarantees torque feasibility; while acceleration is continuous, interior velocities, accelerations, or jerks within the blending bridge may still violate physical actuator or clearance limits.
 
 :::
 
@@ -264,7 +272,7 @@ Solving this linear boundary value problem yields exact closed-form expressions 
 $$\dddot{\theta}(t) = 6 a_3 + 24 a_4 t + 60 a_5 t^2$$
 The jerk is a quadratic function of time in general, and finite over a finite blend. Admission must check its extrema and the measured joint response; $C^2$ endpoints alone do not suppress all resonant energy.
 
-[^fn-math-quintic-spline]: **Quintic spline boundary value solutions**\index{Quintic spline!boundary solution}\index{Trajectory optimization!spline synthesis}: Matching position, velocity, and acceleration at both boundary endpoints yields a non-singular system of six linear algebraic equations. The unique polynomial solution matches acceleration at the endpoints; its jerk is generally quadratic within the blend. For the complete closed-form matrix inversion and coefficient derivations, see @sec-appendix-control.
+[^fn-math-quintic-spline]: **Quintic spline boundary value solutions**\index{Quintic spline!boundary solution}\index{Trajectory optimization!spline synthesis}: Matching position, velocity, and acceleration at both boundary endpoints yields a non-singular system of six linear algebraic equations. The unique polynomial solution matches acceleration at the endpoints; its jerk is generally quadratic within the blend. For the complete closed-form matrix inversion and coefficient derivations, see @sec-appendix-control-splines.
 
 A fixed-degree polynomial can be evaluated with bounded work per axis on a chosen controller. Coefficient synthesis and whole-trajectory extrema checks occur at admission; the measured worst-case execution time, including memory access and monitoring, must fit the configured servo period.
 
@@ -388,6 +396,8 @@ For a second illustrative AMR, choose blend at $300\text{ ms}$, commitment at $3
 
 ![](images/svg/chk_plan_fallback_clearance_stopping_budget.svg){fig-alt="Two AMR distance bars under an illustrative 500-millimeter corridor. Commitment at 360 milliseconds uses 90 millimeters of cruise plus 337.5 millimeters of C-squared braking and leaves 72.5 millimeters. Delaying until nominal end at 500 milliseconds uses 300 plus 337.5 millimeters and breaches the boundary by 137.5 millimeters. The comparison assumes 1.5 meters per second cruise and a validated 450-millisecond stop." width=100%}
 
+Before committing an autonomous machine to an action chunk, verify your understanding of commitment deadlines, stopping budgets, and trajectory continuity:
+
 - [ ] **Deadline distinction**: Can you distinguish nominal setpoint end, physical stop completion, and target-evidence expiry?
 - [ ] **Continuous entry**: Why would a constant-deceleration switch fail $C^2$ matching at zero-acceleration cruise entry?
 - [ ] **Clearance and latency**: Where must a nonzero brake-command delay appear in the 72.5 mm corridor margin?
@@ -397,6 +407,18 @@ For a second illustrative AMR, choose blend at $300\text{ ms}$, commitment at $3
 A replacement received after the preferred blend deadline can still be admitted only if its full bridge and suffix validate before the commitment cutoff. A compressed bridge can raise acceleration and torque; the controller evaluates its polynomial extrema and current encoder discrepancy before latching it. If the check cannot finish, it keeps the current plan and executes STOP. A candidate received after commitment cannot retrospectively restore the spent runway.
 
 The planner proposes the suffix, but the MCU validates and latches its coefficients and immutable assumptions into protected local memory **before** nominal motion begins. At commitment, the MCU selects that resident path without reading host DRAM. A host crash, bus stall, or corrupted shared packet therefore does not erase the stop. If the measured state falls outside the latched suffix's entry envelope, the MCU uses the separately validated baseline appropriate to that state; torque disable or a spring brake is not a universal substitute for a controlled stop, especially with a suspended load.
+
+::: {#dfn-planning-inevitable-collision-state .callout-definition title="Inevitable collision state"}
+
+***Inevitable collision state***\index{Inevitable collision state!definition}\index{Collision avoidance!inevitable collision state} (ICS) is any dynamic plant state $\mathbf{x}(t) \in \mathcal{X}$ from which every physically admissible future control trajectory $\mathbf{u}_{[t, \infty)} \in \mathcal{U}$ inevitably produces collision with an obstacle or constraint boundary:
+$$\mathbf{x} \in \text{ICS}(\mathcal{X}_{\text{obs}}) \iff \forall \mathbf{u}(\cdot) \in \mathcal{U}, \; \exists \tau \ge t \text{ such that } \mathbf{x}(\tau) \in \mathcal{X}_{\text{obs}}$$
+where $\mathcal{U}$ denotes the admissible control input set bounded by actuator torque, traction, and deceleration limits.
+
+1.  **Significance**: Dictates the non-negotiable commitment deadline $t_{\text{commit}}$ in receding-horizon planning; advancing beyond the braking commitment horizon without an admitted successor trajectory transitions the plant into an ICS regardless of subsequent neural replanning.
+2.  **Distinction**: Unlike static geometric collision checks that evaluate only instantaneous spatial overlap ($\mathbf{x} \in \mathcal{X}_{\text{obs}}$), an ICS identifies dynamically trapped states where current momentum and finite braking torque make future boundary breach physically unavoidable.
+3.  **Common pitfall**: Delaying emergency braking in the expectation that an overdue neural planner will complete an evasive path, ignoring that moving mass enters an ICS long before geometric contact occurs.
+
+:::
 
 The admission and fallback decisions in @tbl-11-seam-fallback-hierarchy are distinct from an emergency power cut. Each row is conditional on sensed state, available actuation, and the clearance checked for that response.
 

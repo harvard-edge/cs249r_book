@@ -95,6 +95,10 @@ In systems architecture, the distinction between nominal capacity and operationa
 
 The *usable working context* $M_{\text{eff}}$, by contrast, denotes the maximum sequence length over which the model can reliably attend to, retrieve, and synthesize disparate pieces of evidence to satisfy task invariants under zero ambient authority ($A=0$). While $S_{\max}$ is a static design constant reported on a specification sheet, $M_{\text{eff}}$ is an empirical, workload-dependent variable that is invariably smaller than $S_{\max}$. The divergence between these two metrics stems from the fundamental difference between single-needle retrieval and the complex, multi-hop dependency reasoning demanded by agentic tasks.
 
+::: {#dfn-usable-working-context .callout-definition title="Usable working context"}
+The maximum input sequence length over which an autoregressive model reliably retrieves, integrates, and reasons across multi-hop operational evidence, which is strictly smaller than the model's architectural nominal context capacity ($M_{\text{eff}} \ll S_{\max}$).
+:::
+
 Synthetic evaluations frequently obscure this divergence. In a standard "Needle-in-a-Haystack" (NIAH) benchmark, evaluators insert an isolated, synthetically unique key-value pair—such as an arbitrary passphrase—into a long, homogeneous corpus of unrelated text and query the model for that exact key at the sequence boundary. Because the query tokens share near-perfect lexical and semantic correlation with the target needle and virtually zero correlation with the background filler text, the unprivileged attention heads easily isolate the needle's representation via scaled dot-product matching. Under these artificial conditions, frontier models regularly achieve near-perfect retrieval accuracy across their full nominal span of 100,000 tokens or more.
 
 As the volume of staged context grows, the density of cross-token dependencies multiplies, causing multi-hop reasoning fidelity to collapse long before the input sequence approaches the model's nominal capacity $S_{\max}$, as detailed in the structural comparison in @tbl-vol3-capacity-comparison.
@@ -192,7 +196,7 @@ As $M$ scales into the tens of thousands of tokens, TTFT transitions from a negl
 
 The systems impact of massive prefill sequences extends beyond the single agent's TTFT. In production inference clusters hosting multiple concurrent agents, monolithic long-context prefills introduce severe *head-of-line blocking* and *inter-token latency (ITL) bubbles*.
 
-When an agent runtime dispatches an uncompacted 65,536-token prompt, the inference engine launches dense GEMM kernels that monopolize the GPU's Tensor Cores for seconds (over $6.26\text{ s}$ as quantified in \ref{exmp-04-prefill-compute-scaling-and-latency}). During this prolonged execution, any concurrent agent request running in the memory-bandwidth-bound autoregressive decode phase is completely preempted or delayed, causing its token generation latency to spike by orders of magnitude (from $20\text{ ms}$ up to several seconds per token).
+When an agent runtime dispatches an uncompacted 65,536-token prompt, the inference engine launches dense GEMM kernels that monopolize the GPU's Tensor Cores for seconds (over $6.26\text{ s}$ as quantified in \ref{nbk-04-prefill-compute-scaling-and-latency}). During this prolonged execution, any concurrent agent request running in the memory-bandwidth-bound autoregressive decode phase is completely preempted or delayed, causing its token generation latency to spike by orders of magnitude (from $20\text{ ms}$ up to several seconds per token).
 
 To mitigate this multi-tenant interference, modern serving runtimes (such as Sarathi-Serve and vLLM) implement **Chunked Prefill**:
 
@@ -200,7 +204,7 @@ To mitigate this multi-tenant interference, modern serving runtimes (such as Sar
 - Each prefill chunk is co-scheduled in a batch alongside active decode tokens, co-locating compute-bound GEMMs alongside memory-bound GEMVs to achieve high Tensor Core utilization without starvation.
 - While chunked prefill successfully bounds ITL spikes for decoding streams, it stretches the wall-clock completion of the agent's prefill across $\lceil M / C_{\text{chunk}} \rceil$ serving iterations, reinforcing why active context compaction at the host runtime level is an indispensable prerequisite for cluster goodput.
 
-::: {#exmp-04-prefill-compute-scaling-and-latency .callout-example title="Prefill compute scaling and latency on accelerator hardware"}
+::: {#nbk-04-prefill-compute-scaling-and-latency .callout-notebook title="Prefill compute scaling and latency on accelerator hardware"}
 **Problem:** An autonomous software agent is evaluated under two different working context staging policies using an 8-billion parameter foundation model ($L = 32$ layers, hidden dimension $d = 4096$). Policy A enforces strict context compaction, staging an average working context of $M_1 = 8{,}192$ tokens. Policy B dumps raw compiler outputs and uncurated directory traces, staging an uncompacted context of $M_2 = 65{,}536$ tokens ($8\times$ expansion).
 
 The runtime executes inference on a dedicated NVIDIA H100 SXM5 GPU delivering a theoretical peak throughput of $\mathcal{P}_{\text{peak}} = 989\text{ TFLOP/s}$ ($9.89 \times 10^{14}\text{ FLOP/s}$) in 16-bit precision. In prefill GEMM operations, the engine achieves an average model FLOPs utilization (MFU) of $50\%$, yielding an effective compute throughput of:
@@ -370,7 +374,7 @@ This physical caching mechanism imposes a strict ordering requirement on the log
 
 A common implementation error involves placing dynamic execution metadata—such as the current system time, an incrementing turn counter, or a unique request UUID—at the very top of the system prompt. Placing a 10-token timestamp header at index $0$ guarantees a total cache miss on every invocation: because token indices $0$ through $9$ change on every turn, the prefix match length $k$ drops to zero, forcing the engine to recompute the entire prompt from scratch. Moving that same 10-token timestamp to the Leaf zone preserves a cache hit across all preceding Root and Trunk tokens.
 
-::: {#exmp-04-quantitative-impact-of-prefix-layout .callout-example title="Quantitative impact of prefix layout on prefill amortization"}
+::: {#nbk-04-quantitative-impact-of-prefix-layout .callout-notebook title="Quantitative impact of prefix layout on prefill amortization"}
 Consider an autonomous coding agent executing a debugging task over a trajectory of $T = 20$ turns. The host supervisor interacts with a 70-billion parameter dense model ($P = 70 \times 10^9$) operating at a context length of $L = 32{,}768$ tokens.
 
 The logical working set decomposes into three components:
@@ -385,11 +389,11 @@ We evaluate two staging policies:
 2. *Stable Layout:* The supervisor stages the immutable Root at index $0$, followed by the Trunk, and places all dynamic timestamps and observations exclusively within the Leaf.
 
 **Case 1: Unstable Layout (Zero Cache Hits)**
-Because token index $0$ mutates on every invocation, the prefix match length is $k = 0$ for all $20$ turns. The prefill engine must process the full $L = 32{,}768$ tokens on every turn.
-$$\text{FLOPs per turn} = 2 \times P \times L = 2 \times (70 \times 10^9) \times 32{,}768 \approx 4.587 \times 10^{15}\text{ FLOPs}$$
-$$\text{Total Trajectory Prefill FLOPs} = 20 \times 4.587 \times 10^{15} \approx 9.175 \times 10^{16}\text{ FLOPs}$$
+Because token index $0$ mutates on every invocation, the prefix match length is $k = 0$ for all $20$ turns. In accordance with the foundation engine Roofline model established in @sec-vol3-processor-cost, the prefill engine processes all $L = 32{,}768$ tokens on every turn without cache reuse:
+$$\text{FLOPs per turn} = 2 \cdot P \cdot L = 2 \cdot (70 \times 10^9) \cdot 32{,}768 \approx 4.587 \times 10^{15}\text{ FLOPs}$$
+$$\text{Total Trajectory Prefill FLOPs} = 20 \cdot 4.587 \times 10^{15} \approx 9.175 \times 10^{16}\text{ FLOPs}$$
 
-On an accelerator serving system delivering an effective sustained prefill throughput of $150\text{ TFLOPs/s}$ ($1.5 \times 10^{14}\text{ FLOPs/s}$), the prefill latency per turn is:
+On an accelerator serving system delivering an effective sustained prefill throughput of $\Pi_{\text{prefill}} = 150\text{ TFLOPs/s}$ ($1.5 \times 10^{14}\text{ FLOPs/s}$), the prefill duration per turn evaluates to:
 $$\text{Latency}_{\text{unstable}} = \frac{4.587 \times 10^{15}\text{ FLOPs}}{1.5 \times 10^{14}\text{ FLOPs/s}} \approx 30.58\text{ seconds}$$
 Across 20 turns, the cumulative time spent strictly computing prompt prefills is approximately $611.6\text{ seconds}$ ($10.2\text{ minutes}$).
 
@@ -429,7 +433,14 @@ Modern Byte-Pair Encoding (BPE) tokenizers operate greedily across whitespace an
 
 Because physical serving engines (such as vLLM or SGLang) index Radix tree KV cache nodes strictly by exact sequences of *token IDs*, a single mutated boundary token ID at position $k$ invalidates the cache match for that token and all downstream tokens. The engine fails to match the prefix, forcing a full, expensive prefill recomputation. Robust agent runtimes prevent this by tokenizing static prompt segments independently or enforcing strict, verified token-boundary separators.
 
-Even with optimal zone staging and maximal prefix reuse, an agent trajectory executing over long task horizons inevitably accumulates more observations, compiler diagnostics, and workspace diffs than the logical capacity $M^*$ can accommodate. When the working set overflows this boundary, the host runtime cannot simply drop tokens at random or allow uncompressed logs to crowd out critical instructions. The supervisor must actively compress its staged context through selective transformation and structured eviction—a challenge that brings us directly to the mechanics of context compaction.
+::: {#chk-04-context-hierarchy .callout-checkpoint title="Evaluating working context staging and prefix stability"}
+Before analyzing context compaction algorithms, verify your understanding of context zones and cache alignment:
+
+- [ ] **Three-zone layout**: How does partitioning prompt memory into static system instructions, immutable history, and ephemeral scratchpad prevent attention dilution?
+- [ ] **Prefix stability**: Why does mutating a single whitespace character or dynamic timestamp in the system prefix invalidate KV cache reuse across subsequent trajectory turns?
+- [ ] **Token-boundary alignment**: How do BPE merge rules across segment boundaries bust Radix tree cache matches in serving engines like vLLM and SGLang?
+- [ ] **Working-set sizing**: Why does the usable context capacity $M^*$ diverge from the model's nominal architectural window $M_{\max}$ under multi-turn retrieval?
+:::
 
 ## Context Compaction {#sec-vol3-working-sets-compaction}
 
@@ -487,6 +498,16 @@ Beyond compiler diagnostics, structured extraction applies syntax-aware code com
 | **Semantic Summarization** | Secondary LLM distillation, hypothesis and negative-evidence extraction     | High GPU prefill and decode inference latency | $10\times - 50\times$ | Falsified hypotheses, core decisions, causal trajectory     | High (loss of exact identifiers, risk of hallucination) |
 
 : **The Context Compaction Spectrum**: The context compaction spectrum, comparing operational overhead, token reduction factors, and risk profiles across architectural tiers. {#tbl-compaction-spectrum}
+
+::: {#dfn-context-compaction .callout-definition title="Context compaction"}
+
+***Context compaction***\index{Context compaction!definition}\index{Working sets!compaction definition} is an entropy-reduction transformation $\mathcal{C}: \mathcal{S}_{\text{ctx}} \to \mathcal{S}_{\text{ctx}}'$ executed across the context hierarchy to bound active token memory under a length ceiling $L_{\max}$ while preserving the invariant verbatim set $\mathcal{V}(O_t) \subseteq \mathcal{C}(O_t)$.
+
+1.  **Significance**: Prevents KV-cache memory exhaustion and quadratic attention latency degradation across long-horizon trajectories while preserving the critical causal chain required for task completion.
+2.  **Distinction**: Unlike naive rolling-window eviction (FIFO truncation, which indiscriminately drops foundational system prompts or early architectural decisions), structured compaction orders transformations by escalating semantic risk from lossless filtering to structured AST extraction and lossy semantic summarization.
+3.  **Common pitfall**: Summarizing away negative execution evidence (such as compiler stack traces or failed test assertions), causing the agent to lose track of falsified hypotheses and fall into repetitive, looping action proposals.
+
+:::
 
 When context pressure persists despite structured extraction, the runtime must invoke *semantic summarization*. Unlike lossless filtering and extraction, semantic summarization is inherently lossy: an auxiliary inference pass distills dozens of interactive turns into a dense factual narrative. The central failure mode in lossy summarization is the omission of *negative evidence*. In colloquial human communication, summaries naturally focus on successful steps ("Found the missing dependency and installed it"). In an autonomous agent trajectory, however, negative results represent the primary control signal preventing infinite execution loops.
 
@@ -552,7 +573,7 @@ Within the volatile middle zone, the runtime deploys *semantic anchors*. A seman
 
 When compaction is triggered, the supervisor identifies contiguous blocks of unanchored historical turns, aggregates them into episodic chunks of length $C$, and compacts each chunk into a structured progress record. If the middle zone fills with compacted records over an extended trajectory, the runtime initiates *hierarchical chunk summarization*: multiple first-order chunk summaries are merged into higher-order epochal summaries, ensuring that the total token footprint of the middle zone remains asymptotically bounded.
 
-::: {#exmp-04-token-budget-compaction-and-roofline .callout-example title="Token budget compaction and Roofline prefill savings"}
+::: {#nbk-04-token-budget-compaction-and-roofline .callout-notebook title="Token budget compaction and Roofline prefill savings"}
 Consider an autonomous software engineering agent running on a dedicated host backed by an NVIDIA H100 SXM5 GPU (3.35 TB/s HBM3 memory bandwidth, 989 TFLOPS peak half-precision Tensor Core throughput). The agent runtime uses a 70-billion parameter dense transformer model with $L = 80$ layers, hidden dimension $d = 8192$, and Grouped-Query Attention (GQA) with $h_{\text{kv}} = 8$ KV heads and head dimension $d_k = 128$. The logical context capacity is configured to $M = 128\text{ Ki tokens}$ ($131{,}072$ tokens).
 
 **Problem:** Over an active debugging trajectory of 45 turns, the uncompressed transcript accumulates $N_{\text{raw}} = 96\text{ Ki tokens}$ ($98{,}304$ tokens). The runtime compaction pipeline processes this transcript:
@@ -677,7 +698,7 @@ def audit_checkpoint(raw_trace: list[Event], chk: CheckpointSchema) -> bool:
 
 The verification logic above demonstrates the programmatic gating enforced by the host supervisor. Because this check executes as native host code outside the inference engine, it runs in sub-millisecond time and requires zero neural evaluation. If `audit_checkpoint` returns `False`, the host runtime rejects the candidate checkpoint, injects an explicit error diagnostic into the active context ("Error: Proposed checkpoint contradicted tool result for call_id..."), and forces the model to regenerate the state tuple under constrained decoding.
 
-::: {#exmp-04-quantitative-checkpoint-auditing-and-prefill .callout-example title="Quantitative checkpoint auditing and prefill reclaim"}
+::: {#nbk-04-quantitative-checkpoint-auditing-and-prefill .callout-notebook title="Quantitative checkpoint auditing and prefill reclaim"}
 Consider an autonomous software engineering agent executing a multi-file refactoring task on a large repository. Over 48 turns of tool interactions, the raw context buffer accumulates $L_{\text{raw}} = 114\text{,}688$ tokens ($112\text{k}$ tokens), consisting of compiler outputs, source diffs, and directory listings.
 
 The agent runs on a host server backed by an 8-GPU tensor-parallel cluster of NVIDIA H100 SXM5 accelerators ($1975\text{ TFLOP/s}$ dense FP16 per GPU, $3.35\text{ TB/s}$ HBM3 bandwidth). The model employs a standard Transformer architecture ($d_{\text{model}} = 8192$, $N_{\text{layers}} = 80$, $N_{\text{heads}} = 64$, $d_{\text{head}} = 128$). We evaluate the computational and financial impact of checkpointing versus maintaining the uncompacted context.
@@ -737,9 +758,14 @@ A critical vulnerability in multi-turn summarization is *invariant erosion*: whe
 
 Under memory anchoring, constraints are not treated as soft narrative text subject to model summarization. Instead, the runtime supervisor isolates $\Omega$ in a dedicated, pinned prompt container. During summarization passes, the model is explicitly forbidden from updating or rewriting $\Omega$; the model is permitted only to modify the mutable state components ($\mathcal{C}$, $\mathcal{H}$, and $\mathcal{A}$). Upon context resumption, the runtime mechanically re-injects the original, pristine constraint set $\Omega_{\text{system}}$ into the anchored root of the prompt template.
 
-Through memory anchoring and structured resumption, the host runtime maintains the logical coherence of the agent across arbitrary task durations. The agent perceives a continuous, coherent trajectory governed by consistent operational boundaries, while the physical inference hardware processes a compact, highly optimized working set.
+::: {#chk-04-context-compaction .callout-checkpoint title="Evaluating context compaction and checkpointing"}
+Before examining environmental dependency tracking and cache invalidation, verify your understanding of compaction invariants:
 
-The architectural integrity of context checkpointing rests on an implicit foundational assumption: that the physical environment remains frozen while the checkpoint is recorded. The verified milestone record $\mathcal{C}$ and artifact pointers $\mathcal{A}$ capture observations that were true at the exact moment of tool execution. However, software systems, databases, and network environments are inherently dynamic. If an external compiler process modifies a build artifact, a concurrent git rebase alters local source lines, or a remote API terminates a test container after a checkpoint has been committed, the checkpoint's internal pointers remain syntactically flawless while their underlying semantic truth dissolves—a condition of silent context corruption that requires formal invalidation protocols.
+- [ ] **Information preservation**: Which environmental state components must be retained as structured milestone frames rather than lossy narrative prose?
+- [ ] **Invariant erosion**: How does memory anchoring prevent negative constraints from decaying during repeated recursive summarization passes?
+- [ ] **Pre-eviction verification**: What validation checks must succeed before purging raw tool observations from the active working set?
+- [ ] **Scratchpad lifecycle**: Why does purging ephemeral chain-of-thought tokens post-action slash trajectory memory overhead without impairing subsequent steps?
+:::
 
 ## Context Invalidation {#sec-vol3-working-sets-context-rot}
 
@@ -862,7 +888,17 @@ The runtime selects among these three invalidation resolution strategies based o
 2. **Semantic Tombstoning:** To preserve KV cache reuse along the prompt prefix while neutralizing the hazard of stale tokens, the runtime replaces the body of $o_k$ with a compact, deterministic tombstone marker. The tombstone explicitly records that the observation was invalidated by a subsequent action, referencing the mutation by action ID and target path. Because the tombstone occupies minimal token space and clearly signals an invalid state, it prevents the model's attention heads from anchoring on obsolete variable names or line numbers while maintaining trajectory continuity.
 3. **Just-In-Time (JIT) Refresh:** If the runtime determines that the invalidated entity is critical to the pending step—for example, if the agent is about to execute a patch on `src/network/buffer.c` and the only staged copy of that file has been tombstoned—the runtime transparently dispatches a fresh read tool invocation before invoking the neural model. The stale observation is replaced by the freshly observed state, accompanied by a refreshed version vector $\mathbf{v}_{\text{env}}'$.
 
-::: {#exmp-04-latency-and-compute-roofline-of .callout-example title="Latency and compute Roofline of context invalidation strategies"}
+::: {#psp-04-the-cache-coherence-dilemma .callout-perspective title="The cache coherence dilemma in neural working sets"}
+In symmetric multiprocessing hardware, cache coherence is enforced transparently by silicon snooping protocols (MESI/MOESI) across sub-nanosecond interconnects. When a CPU core mutates a physical cache line, invalidation signals propagate instantaneously, guaranteeing that no stale value is ever read by an execution unit.
+
+In an agentic machine learning system, the staged prompt history operates as an application-level L1 cache of external reality—storing snapshots of files, git branches, process tables, and network sockets. Yet this neural cache is fundamentally decoupled from the environment it mirrors. Autoregressive sequence models are append-only state machines; mutating an earlier turn in-place to reflect an external change invalidates the entire downstream Key-Value cache in modern serving engines (such as vLLM or SGLang). This busts Radix tree prefix matches, transforming a sub-100-millisecond cached prefill into a multi-second recomputation across tens of thousands of tokens.
+
+Conversely, preserving the KV cache by leaving historical turns untouched forces the unprivileged model to attend to obsolete code offsets, stale diagnostics, and superseded variables. The resulting failure mode—epistemic state fracture—causes the agent to act on historical memories that are mathematically present in the prompt but physically false in the host operating system.
+
+**Systems insight**: Context management in agentic architectures is not a prompt styling exercise; it is an unyielding trade-off between physical accelerator cache reuse and epistemic coherence. Robust runtimes bridge this gap through out-of-band tombstoning and dependency-aware just-in-time rehydration, never trusting the neural engine to intuit when the world beneath it has shifted.
+:::
+
+::: {#nbk-04-latency-and-compute-roofline-of .callout-notebook title="Latency and compute Roofline of context invalidation strategies"}
 Consider an agent debugging an operating system kernel repository. The conversation trajectory has reached Turn 12, accumulating a logical working context of $S = 28\text{,}672$ tokens. In Turn 3, the agent read a device driver header `include/net/nic.h` (850 tokens). In Turn 11, the agent applied a patch modifying `include/net/nic.h`.
 
 We evaluate the system performance on an NVIDIA H100 SXM5 GPU (3,350 TFLOPS FP8 Tensor Core peak, 3.35 TB/s HBM3 memory bandwidth) running a 70-billion parameter dense foundation model (FP8 quantized weights, $P = 70 \times 10^9$ parameters).
@@ -971,7 +1007,7 @@ The data in @tbl-vol3-context-evaluation demonstrates why naive metrics are dece
 
 Conversely, the naive sliding window eliminates stale errors ($\epsilon_{\text{stale}} = 0.06$) by dropping old history entirely, but its task completion rate collapses to $0.18$ due to the catastrophic loss of foundational constraints established in early turns ($R_{\text{assoc}} = 0.12$). Only structured checkpointing with explicit dependency-tracked tombstoning maintains high completion rates by simultaneously bounding stale state and preserving critical invariant needles.
 
-::: {#exmp-04-quantifying-working-set-efficiency-and-compaction .callout-example title="Quantifying working-set efficiency and compaction trade-offs"}
+::: {#nbk-04-quantifying-working-set-efficiency-and-compaction .callout-notebook title="Quantifying working-set efficiency and compaction trade-offs"}
 Consider an autonomous systems repair agent executing an incident remediation trajectory over $T = 30$ turns.
 
 - The raw trajectory generates an average of $2\text{,}400$ tokens per turn (comprising shell outputs, log traces, and diffs), producing an uncompressed history of:
