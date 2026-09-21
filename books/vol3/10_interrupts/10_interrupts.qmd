@@ -85,7 +85,7 @@ $$\text{ACB}_t = \text{fold}(\text{ACB}_0, \mathcal{E}) = \delta(\delta(\dots \d
 
 where $\delta: (\text{ACB}_{k-1}, e_k) \to \text{ACB}_k$ is a pure, deterministic state transition function implemented in the host supervisor. If an operational node crashes at turn $t$, recovery does not require neural inference. The runtime reads the sequential event stream $\mathcal{E}$ from persistent storage, executes the transition function $\delta$ across the log entries, and reconstructs the bit-exact in-memory $\text{ACB}_t$ in milliseconds. The model is never re-invoked for historical turns; the historical decisions and observed outcomes are reconstructed directly from the durable log.
 
-::: {#exmp-10-storage-io-amplification-and-recovery .callout-example title="Storage I/O amplification and recovery time in event-sourced vs. in-place trajectory engines"}
+::: {#nbk-10-storage-io-amplification-and-recovery .callout-notebook title="Storage I/O amplification and recovery time in event-sourced vs. in-place trajectory engines"}
 Consider an autonomous agent executing an extensive debugging trajectory across $N = 100$ turns. In each turn, the supervisor records the model's action proposal ($2\text{ KB}$), policy authorization metadata ($0.5\text{ KB}$), tool dispatch metadata ($0.5\text{ KB}$), and the raw sandboxed observation consisting of compiler diagnostics and unified file diffs ($12\text{ KB}$). The total payload per turn is:
 
 $$S_{\text{turn}} = 2\text{ KB} + 0.5\text{ KB} + 0.5\text{ KB} + 12\text{ KB} = 15\text{ KB}$$
@@ -210,7 +210,7 @@ To close this vulnerability window, the runtime must invoke an explicit operatin
 
 Even an operating system sync call, however, must be evaluated against modern drive controller architectures. Contemporary enterprise NVMe SSDs contain internal volatile DRAM caches designed to buffer writes and maintain flash translation layer (FTL) address mappings. A naive drive controller might acknowledge a write as soon as it hits its internal drive RAM. To guarantee genuine durability, the operating system's filesystem and block layers must transmit an explicit NVMe Flush command (Opcode `0x35`) or utilize Force Unit Access (FUA) flags on block writes. These commands instruct the drive controller to flush its internal volatile cache to non-volatile flash cells (or verify that its internal supercapacitors are charged to provide power-loss protection) before signaling completion back to the host kernel. Only when this hardware-level barrier completes does `fsync()` return, establishing the precondition $e_{\text{flush}}$ required for safe network transmission.
 
-::: {#exmp-10-latency-and-throughput-cost-of .callout-example title="Latency and throughput cost of synchronous disk barriers"}
+::: {#nbk-10-latency-and-throughput-cost-of .callout-notebook title="Latency and throughput cost of synchronous disk barriers"}
 Consider an autonomous software engineering agent deployed on an enterprise server. The agent executes tasks by interacting with a local sandboxed file system, running unit tests, and dispatching code review comments to a remote Git hosting platform.
 
 **Hardware Specifications:**
@@ -296,7 +296,14 @@ $$e_{A, \text{prop}} \prec e_{A, \text{auth}} \prec e_{A, \text{flush}} \prec a_
 
 The fact that $e_{A, \text{flush}}$ and $e_{B, \text{flush}}$ were physically written to flash within the exact same NVMe block write does not alter the causal independence of $\mathcal{T}_A$ and $\mathcal{T}_B$. Because neither thread dispatches its network RPC until the shared storage barrier completes, neither trajectory can produce a phantom mutation in the physical world.
 
-Strict adherence to the Write-Ahead Logging invariant guarantees that upon crash recovery, the reconstruction engine possesses an unbroken, mathematically sound audit trail: every external mutation surviving in the real world corresponds to a committed authorization record on disk. However, as an agent trajectory progresses through hundreds or thousands of steps, the size of this append-only log expands monotonically. Rebuilding the operational Agent Control Block ($\text{ACB}$) after an unexpected crash by sequentially reading and evaluating thousands of historical events from turn zero introduces unacceptable recovery latency. How an agent supervisor bounds this recovery overhead without incurring continuous disk write amplification is the governing question of periodic state checkpointing.
+::: {#chk-10-wal-invariants .callout-checkpoint title="Evaluating write-ahead logging invariants and event sourcing"}
+Before analyzing periodic state checkpointing and incremental delta encoding, verify your understanding of write-ahead logging:
+
+- [ ] **Logging order**: Why does the causal chain $e_{\text{prop}} \prec e_{\text{auth}} \prec e_{\text{flush}} \prec a_{\text{ext}} \prec e_{\text{obs}}$ strictly forbid dispatching actions before `fsync()` completes?
+- [ ] **Phantom mutations**: How does a node failure between asynchronous network dispatch and disk commit induce irreconcilable state divergence?
+- [ ] **Group commit**: How does batching storage barriers across concurrent trajectories amortize NVMe sync latency without violating individual causal ordering?
+- [ ] **Event sourcing**: Why does retaining only periodic snapshots of active prompt context discard essential forensic and security audit trails?
+:::
 
 ## Periodic State Checkpointing {#sec-vol3-persistence-checkpointing}
 
@@ -359,7 +366,7 @@ If any delta segment in the recovery chain suffers bit-rot, cryptographic signat
 
 Selecting the temporal interval between consecutive checkpoints represents a classical systems dilemma. If the supervisor checkpoints too frequently, the runtime expends its computational budget serializing data structures, locking concurrent queues, and waiting on non-volatile storage barriers, thereby throttling end-to-end agent throughput. Conversely, if the supervisor checkpoints too infrequently, any hardware crash, network partition, or out-of-memory kernel eviction forces the recovery engine to replay a vast log of historical operations. During replay, the system incurs significant recomputation latency and wastes valuable token and compute budgets re-evaluating deterministic operations.
 
-::: {#callout-def-vol3-young-daly .callout-definition title="Definition 10.1: Young-Daly optimal checkpoint cadence"}
+::: {#nbk-10-young-daly-cadence .callout-notebook title="Young-Daly optimal checkpoint cadence"}
 Let $\text{MTBF}$ denote the mean time between failures across the execution environment, $\delta_{\text{snap}}$ denote the snapshot write and storage barrier latency during which agent execution is throttled, and $\delta_{\text{rec}}$ denote the fixed state restoration overhead upon reboot.
 
 Under a Poisson failure process where crashes occur uniformly at random with arrival rate $\lambda = 1/\text{MTBF}$, the expected wasted execution time per unit of productive progress is minimized at the optimal checkpoint interval $T_{\text{opt}}$:
@@ -407,7 +414,7 @@ In practice, an agent supervisor does not measure time purely in continuous wall
 
 $$\tau_{\text{opt}} = \left\lceil \frac{T_{\text{opt}}}{\mu_{\text{turn}}} \right\rceil = \left\lceil \frac{\sqrt{2 \cdot \delta_{\text{snap}} \cdot \text{MTBF}}}{\mu_{\text{turn}}} \right\rceil$$ {#eq-vol3-turn-cadence}
 
-::: {#exmp-10-optimal-checkpoint-cadence-on-nvme .callout-example title="Optimal checkpoint cadence on NVMe versus network block storage"}
+::: {#nbk-10-optimal-checkpoint-cadence-on-nvme .callout-notebook title="Optimal checkpoint cadence on NVMe versus network block storage"}
 Consider an autonomous software engineering agent deployed on an ephemeral cloud instance. The agent executes complex multi-file refactoring workflows where each turn averages $\mu_{\text{turn}} = 12\text{ seconds}$ (dominated by remote LLM inference and local test execution). The environment exhibits an estimated $\text{MTBF} = 4\text{ hours} = 14{,}400\text{ seconds}$ due to aggressive spot-instance preemption and container host recycles.
 
 The supervisor maintains an $\text{ACB}$ and execution context that produces a serialized snapshot payload of $32\text{ MiB}$ per checkpoint. We evaluate two distinct persistence storage tiers:
@@ -587,7 +594,7 @@ During live execution, memory escrow holds unverified candidate actions until a 
 
 If the supervisor's state transition logic attempts to establish a live network connection or emit an unrecorded tool action during replay, the verification interceptor raises an invariant violation ($A=0$ breach). The presence of any unlogged side effect indicates that the supervisor's code has drifted from the version that authored the trace, or that an unrecorded source of entropy was allowed to influence the live control flow.
 
-::: {#exmp-10-recovery-latency-and-compute-savings .callout-example title="Recovery latency and compute savings in trajectory reconstruction"}
+::: {#nbk-10-recovery-latency-and-compute-savings .callout-notebook title="Recovery latency and compute savings in trajectory reconstruction"}
 Consider an autonomous coding agent that failed at turn $t = 150$ due to a transient worker node kernel panic. The trajectory maintained an active context window of $L = 48,000$ tokens. The system recorded periodic checkpoints every $K = 50$ turns. The nearest checkpoint was taken at turn $\tau = 100$.
 
 **Physical Parameters:**
@@ -632,17 +639,14 @@ Brian Kernighan (1979) observed that *"debugging is twice as hard as writing the
 
 Historical trajectory reconstruction provides the foundation for *non-destructive time-travel debugging*. Because the event log records every interaction at the supervisor-model and supervisor-sandbox boundaries, the developer can treat trajectory time as an addressable, scrubbable dimension. A developer can mount an archival trajectory, select any turn $t \in [0, T_{\max}]$, and reconstruct the exact in-memory representation of $\text{ACB}_t$.
 
-::: {#callout-def-vol3-time-travel-replay .callout-definition title="Definition 10.2: Checkpoint-delta time-travel replay"}
-Given a historical trajectory spanning $T$ turns with periodic base snapshots $\mathcal{S} = \{\mathbf{S}_0, \mathbf{S}_k, \mathbf{S}_{2k}, \dots\}$ where $k$ is the checkpoint stride, and an ordered write-ahead log of deterministic events $\mathcal{E} = \langle e_1, e_2, \dots, e_T \rangle$:
+::: {#dfn-time-travel-replay .callout-definition title="Checkpoint-delta time-travel replay"}
 
-Any arbitrary historical state $\mathbf{S}_t$ ($t \in [0, T]$) is reconstructible without forward side effects via the bounded left-fold operator:
-$$\mathbf{S}_t = \text{Fold}\left(\mathbf{S}_{\lfloor t/k \rfloor \cdot k}, \langle e_{(\lfloor t/k \rfloor \cdot k) + 1}, \dots, e_t \rangle\right)$$
-where the replay engine:
+***Checkpoint-delta time-travel replay***\index{Time-travel replay!definition}\index{Interrupts!time-travel replay definition} is a deterministic state reconstruction operator $\mathbf{S}_t = \text{Fold}(\mathbf{S}_{\text{anchor}}, \Delta\mathcal{E})$ that recovers arbitrary historical agent control blocks by folding sequential event deltas over the nearest preceding snapshot in sandboxed copy-on-write memory without forward side effects.
 
-1. Selects the nearest preceding snapshot $\mathbf{S}_{\text{anchor}} = \mathbf{S}_{\lfloor t/k \rfloor \cdot k}$.
-2. Maps $\mathbf{S}_{\text{anchor}}$ into a sandboxed, copy-on-write memory buffer.
-3. Sequentially applies exactly $m = t - (\lfloor t/k \rfloor \cdot k) < k$ transition deltas without issuing external system calls.
-4. Bounds worst-case random access retrieval latency to $\mathcal{O}(k)$ event evaluations.
+1.  **Significance**: Enables non-destructive post-mortem debugging, context window inspection, and speculative what-if branching without re-executing expensive or irreversible environment mutations.
+2.  **Distinction**: Unlike naive full-history event replay (which incurs $O(t)$ deserialization and re-computation latency from $t=0$) or continuous full snapshotting (which exhausts storage bandwidth), checkpoint-delta replay bounds random-access reconstruction latency to $O(k)$ event applications where $k$ is the snapshot stride.
+3.  **Common pitfall**: Allowing replayed events to issue live external system calls or network RPCs during historical reconstruction, which corrupts live external databases and breaks replay isolation.
+
 :::
 
 Time-travel navigation leverages the checkpoint-delta index. To inspect the agent state at turn $t = 35$, the debugger locates the nearest preceding snapshot $\mathbf{S}_{20}$, deserializes the control block, and folds the 15 intervening event pairs from $\mathcal{E}_{20 \to 35}$. The developer can then execute non-destructive diagnostic queries against the reconstructed state:
@@ -705,14 +709,14 @@ Under IEEE 754 arithmetic, addition is not associative: $(a \oplus b) \oplus c \
 
 The second and more pernicious source of entropy arises from floating-point non-associativity in parallel GPU reduction kernels. High-performance matrix multiplication (GEMM) and fused multi-head attention kernels execute parallel reductions across thousands of streaming multiprocessor (SM) threads. As formalized by David Goldberg (1991), floating-point addition under IEEE 754 standards does not satisfy mathematical associativity. In parallel reduction trees where thread warps schedule dynamically based on DRAM bank contention, cache hits, and clock throttling, the exact summation order of partial products varies from run to run. Consequently, even when evaluating an identical prompt prefix at greedy decoding ($T=0$), the raw logit values for vocabulary tokens can drift by small floating-point epsilons ($\sim 10^{-6}$ to $10^{-4}$). If the two highest-ranking candidate tokens have logit margins smaller than this micro-architectural drift, the greedy `argmax` operator flips. A single flipped token alters the key-value context for all subsequent decode steps, leading to complete trajectory divergence within a handful of generated words.
 
-::: {#callout-def-vol3-entropy-strata .callout-definition title="Definition 10.3: The three strata of replay non-determinism"}
-During offline trajectory replay, divergences between recording time $t_{\text{rec}}$ and replay time $t_{\text{rep}}$ originate across three distinct architectural strata:
+::: {#dfn-entropy-strata .callout-definition title="Strata of replay non-determinism"}
 
-1. **Host OS Stratum (Kernel & Process State)**: Wall-clock timers (`gettimeofday`), process identifiers (`getpid`), filesystem inode traversal order, and thread scheduling interleavings.
-2. **Inference Stratum (Floating-Point Hardware & Scheduling)**: Non-associative parallel summation in GPU GEMM kernels, warp arrival race conditions, compiler target differences, and asynchronous `atomicAdd` logit drift triggering greedy argmax flips.
-3. **Environment Stratum (External Services & Tool APIs)**: Dynamic network responses, remote server clocks, mutable database state, and nondeterministic external web payloads.
+***Strata of replay non-determinism***\index{Replay non-determinism!definition}\index{Entropy strata!definition} are the hierarchical architectural layers—encompassing host operating system state, accelerator floating-point scheduling, and external environment APIs—where latent entropy enters execution to cause trajectory divergence during replay.
 
-A runtime achieves *strict replay fidelity* if and only if all three strata are mediated by deterministic virtual escrow buffers, as categorized in @tbl-vol3-nondeterminism-mitigation.
+1.  **Significance**: Identifies and isolates every non-deterministic boundary condition required to achieve bit-exact reproduction of autonomous agent execution paths across diverse hardware targets.
+2.  **Distinction**: Unlike classical software debugging (which assumes that identical source code and pinned PRNG seeds yield bit-exact CPU executions), neural agent replay must account for non-associative parallel GPU reduction order and dynamic prompt timestamp injections.
+3.  **Common pitfall**: Assuming that greedy decoding ($T=0$) guarantees deterministic replay across heterogeneous GPU clusters; warp scheduling races and sub-epsilon floating-point drift can flip argmax logits and trigger exponential trajectory divergence.
+
 :::
 
 The third stratum involves dynamic host operating system state leaked into prompts and control structures. Agent supervisors frequently inject metadata into system prompts, tool schemas, or scratchpads: current wall-clock timestamps via `time.time()`, host process identifiers via `getpid()`, local file paths, or random correlation identifiers via `uuid.uuid4()`. When a supervisor passes dynamic timestamps into an LLM context, the model conditions its reasoning on values that can never naturally repeat during subsequent execution. Furthermore, file system iterators that traverse directory trees without explicit collation return directory entries in raw inode order, which varies across file systems, container instances, and operating system kernels.
@@ -812,7 +816,22 @@ $$D_{\text{KL}}(P_{\text{live}} \parallel P_{\text{replay}}) = \sum_{w \in \math
 
 By establishing strict virtualization boundaries around wall-clocks, trapping PRNG entropy, escrowing external tool observations, and measuring logit-level divergence, the runtime guarantees that diagnostic analysis operates with mathematical precision. An engineer can bisect a failing trajectory, inspect intermediate supervisor state transitions, and verify algorithmic invariants without being misled by floating-point hardware races or drifting external APIs.
 
-Sealing ambient entropy channels transforms an executing trajectory into a closed, self-contained computational state defined entirely by its serialized Agent Control Block ($\text{ACB}_t$), its append-only event stream $\mathcal{E}$, and its isolated sandbox state overlays. Because the runtime no longer depends on static physical host bindings, local hardware clocks, or unrepeatable GPU reduction schedules, an active trajectory becomes fully portable across space and time. If a worker node experiences physical hardware failure, thermal throttling, or spot-instance preemption, the supervisor can detach this serialized state package and reconstruct the running task on a completely different physical machine without loss of execution integrity. How does a distributed runtime coordinate the live migration of an active trajectory across physical cluster nodes without dropping inflight RPCs or duplicating external side effects?
+::: {#psp-10-the-illusion-of-neural-determinism .callout-perspective title="The illusion of neural determinism and the replay paradox"}
+In classical software debugging, record-and-replay tools (such as Mozilla `rr` or hypervisor execution recorders) rely on a foundational axiom: an isolated CPU executing deterministic machine instructions with pinned inputs and recorded asynchronous interrupts produces bit-exact identical register states. Developers new to agentic systems routinely attempt to apply this mental model to foundation models, assuming that setting sampling temperature $T=0$ and fixing random seeds guarantees repeatable trajectory execution.
+
+This assumption is destroyed by accelerator micro-architecture. Modern parallel inference kernels (such as FlashAttention, cuBLAS GEMMs, and Triton reductions) dynamically distribute matrix operations across thousands of CUDA threads. Under IEEE 754 arithmetic, floating-point addition is non-associative: $(a + b) + c \neq a + (b + c)$. Dynamic thread scheduling, memory bank collisions, and clock throttling alter the physical summation order of partial products across execution runs. This micro-architectural jitter introduces small numerical perturbations ($\sim 10^{-5}$) into the output logits. When two candidate tokens possess near-identical logits, this tiny perturbation flips the greedy `argmax` selection. A single flipped token alters all subsequent key-value representations, causing the replayed trajectory to diverge completely within a few turns.
+
+**Systems insight**: Bit-exact determinism is an illusion on modern parallel accelerator clusters. Reliable trajectory replay cannot re-execute neural inference; it must replay recorded tokens directly from an immutable Write-Ahead Log. Systems architects must separate *trace-driven state verification* (replaying recorded tokens to audit supervisor logic) from *divergence analysis* (re-evaluating models to measure epistemic drift).
+:::
+
+::: {#chk-10-time-travel-debugging .callout-checkpoint title="Evaluating historical replay and non-determinism diagnostics"}
+Before examining live trajectory migration protocols, verify your understanding of trajectory reconstruction:
+
+- [ ] **Replay asymmetry**: Why does re-playing recorded event tokens through supervisor logic cost orders of magnitude less compute than re-invoking the neural core?
+- [ ] **Floating-point non-determinism**: How does the non-associativity of GPU floating-point reductions cause greedy decode ($\tau = 0$) to diverge across runs?
+- [ ] **Ambient entropy virtualization**: Which external inputs (timestamps, UUIDs, filesystem ordering) must be recorded in the event stream to guarantee deterministic replay?
+- [ ] **Trace-driven verification**: Under what conditions should debugging use recorded event playback instead of regenerating model completions?
+:::
 
 ## Live Trajectory Migration {#sec-vol3-persistence-migration}
 
@@ -900,7 +919,7 @@ In an OverlayFS deployment, the sandbox filesystem consists of three directories
 - A writable `upperdir` hosted on an ephemeral local filesystem. Every file edit, newly created source file, or deleted directory performed by the agent is recorded exclusively as a copy-on-write delta inside `upperdir`.
 - A `workdir` utilized by the kernel for atomic directory operations.
 
-::: {#callout-def-vol3-overlayfs-migration .callout-definition title="Definition 10.4: Layered copy-on-write delta migration"}
+::: {#not-10-overlayfs-migration .callout-note title="Layered copy-on-write delta migration"}
 Let a containerized sandbox filesystem be composed of an immutable base layer $\mathcal{L}_{\text{lower}}$ of size $M_{\text{base}}$ pre-cached across all worker nodes, and an ephemeral writable layer $\mathcal{L}_{\text{upper}}$ of size $M_{\Delta} \ll M_{\text{base}}$ capturing runtime modifications.
 
 During preemptive node evacuation, the migration coordinator transfers only the mutable delta:
@@ -929,7 +948,7 @@ The supervisor addresses this by enforcing *declarative channel virtualization*.
 
 From the perspective of the external tool service, the migration appears simply as a momentary network keep-alive pause followed by an authenticated session resumption.
 
-::: {#exmp-10-calculating-migration-budgets-under-hard .callout-example title="Calculating migration budgets under hard preemption deadlines"}
+::: {#nbk-10-calculating-migration-budgets-under-hard .callout-notebook title="Calculating migration budgets under hard preemption deadlines"}
 Consider an autonomous coding agent executing on a Google Cloud Spot VM that receives an ACPI preemption warning providing an evacuation window of $\Delta t_{\text{evac}} = 30\text{ seconds}$.
 
 The agent operates with the following physical footprint:
@@ -1074,7 +1093,7 @@ Under this transformation, the compaction worker strips the vast internal expans
 
 Crucially, the compaction worker computes a cryptographic digest $h = \text{SHA-256}(\Phi_{\text{raw}})$ of the original, uncompacted observation payload prior to truncation. This hash is permanently recorded alongside the pruned record. If an auditor, a security supervisor, or an automated evaluator later questions whether the summarized tool output genuinely reflected the sandboxed system's behavior, the runtime can verify any external copy of the original log against the immutable cryptographic digest stored in the trajectory's causal spine.
 
-::: {#exmp-10-storage-compaction-economics-across-an .callout-example title="Storage compaction economics across an enterprise fleet"}
+::: {#nbk-10-storage-compaction-economics-across-an .callout-notebook title="Storage compaction economics across an enterprise fleet"}
 Consider an enterprise agent cluster supporting $N = 2{,}500$ concurrent autonomous software development agents. Each agent executes an average of $T = 180$ turns per day.
 
 *Baseline Parameters:*
@@ -1198,7 +1217,7 @@ $$\text{WAF}_{\text{LSM}} = 1 + T \times k$$ {#eq-vol3-waf-lsm}
 
 For an LSM-tree maintaining 4 levels with $T=10$, the total lifetime write amplification reaches $\text{WAF}_{\text{LSM}} \approx 1 + 10 \times 4 = 41$. However, unlike B-tree page updates, LSM compaction writes are purely asynchronous, batched, and executed using large, sequential multi-megabyte I/O requests. The critical path of model execution observes only the low-latency, sequential WAL append. The storage subsystem can absorb high burst rates without stalling the agent runtime, provided background compaction throughput matches the aggregate event generation rate.
 
-::: {#exmp-10-io-bottlenecks-and-write-amplification .callout-example title="I/O bottlenecks and write amplification in synchronous trajectory logging"}
+::: {#nbk-10-io-bottlenecks-and-write-amplification .callout-notebook title="I/O bottlenecks and write amplification in synchronous trajectory logging"}
 **Problem Statement:**
 Consider a high-density compute node hosting 128 concurrent agent worker processes. Each agent trajectory executes an interactive loop generating turns at an aggregate rate of $\lambda = 400\text{ turns/second}$ across the entire host. Each turn produces three distinct events: an action proposal $e_{\text{prop}}$ ($1.2\text{ KB}$), an authorization decision $e_{\text{auth}}$ ($0.3\text{ KB}$), and an execution observation payload $e_{\text{obs}}$ ($6.5\text{ KB}$), totaling a logical payload of $S_{\text{turn}} = 8.0\text{ KB}$ per turn. The host is equipped with an enterprise PCIe 4.0 NVMe SSD with the following specifications:
 
@@ -1346,7 +1365,6 @@ Architecturally, the active context window is merely a lossy, ephemeral projecti
 
 In pursuit of low interaction latency, runtime developers frequently commit the classic write-ahead logging violation: dispatching a mutating tool action $a_{\text{ext}}$ across a network socket or POSIX pipe before the corresponding authorization and proposal records ($e_{\text{prop}}$, $e_{\text{auth}}$) have been durably flushed via `fsync()` to non-volatile storage. Because local solid-state drives and distributed storage engines exhibit write latencies ranging from 2 to 30 milliseconds, asynchronous dispatch creates a window of vulnerability between tool invocation and log durability.
 
-::: {#callout-def-vol3-phantom-mutation .callout-definition title="Definition 10.5: Phantom mutation hazard"}
 Let an external tool action $a_{\text{ext}}$ possess irreversible side effects on external system state $\mathcal{W}_{\text{ext}}$. An agent supervisor commits a *phantom mutation violation* if it dispatches $a_{\text{ext}}$ before the intent records ($e_{\text{prop}}, e_{\text{auth}}$) are durably flushed via synchronous storage barrier to non-volatile persistence:
 $$t_{\text{dispatch}}(a_{\text{ext}}) < t_{\text{fsync}}(e_{\text{auth}})$$
 If the host fails at $t_{\text{fail}} \in [t_{\text{dispatch}}, t_{\text{fsync}}]$:
@@ -1354,7 +1372,6 @@ If the host fails at $t_{\text{fail}} \in [t_{\text{dispatch}}, t_{\text{fsync}}
 1. The operating system page cache is destroyed, erasing all trace of $e_{\text{prop}}$ and $e_{\text{auth}}$.
 2. The external state reflects the mutation: $\mathcal{W}_{\text{ext}}' = \text{Apply}(\mathcal{W}_{\text{ext}}, a_{\text{ext}})$.
 3. Upon recovery, the supervisor resumes from turn $t-1$, deduces the action was never attempted, and re-dispatches $a_{\text{ext}}$, causing duplicate execution of non-idempotent operations.
-:::
 
 If the host machine experiences a power failure, kernel panic, or container eviction during this asynchronous interval, the volatile operating system page cache containing the intent record is annihilated. The external environment, however, has already processed the mutation: an API call has deducted funds from an account, a cloud provider has provisioned an unmonitored compute cluster, or a filesystem system call has unlinked a directory. Upon reboot, the recovery supervisor inspects the non-volatile WAL, finds no record that the mutating action was ever attempted, and re-executes the trajectory from the last durable checkpoint.
 
@@ -1378,7 +1395,6 @@ Furthermore, dynamic inference optimizations such as continuous batching, variab
 
 Autonomous software engineering and diagnostic agents routinely execute compilers, test runners, and system diagnostic utilities (`make -j64`, `pytest --verbose`, `tcpdump`) that generate hundreds of megabytes of raw terminal telemetry per turn. Naively capturing these uncompressed, verbose output streams directly into the primary relational database or embedded log-structured merge-tree (LSM-tree) rapidly degrades storage infrastructure.
 
-::: {#callout-def-vol3-compaction-stall .callout-definition title="Definition 10.6: Unbounded telemetry compaction stall"}
 When an agent supervisor captures unpruned tool telemetry streams (such as raw compiler logs or test execution traces of size $S_{\text{raw}} \ge 100\ \text{MB}$) directly into an embedded LSM-tree write-ahead log:
 
 1. Write throughput saturates the active memory memtable ($\text{MemTable}_{\text{active}}$), triggering immediate flushing to Level 0 SSTables.
@@ -1387,7 +1403,6 @@ When an agent supervisor captures unpruned tool telemetry streams (such as raw c
    where $T_i$ represents the tier amplification factor.
 3. The storage engine enforces a write stall to prevent unbounded SSTable accumulation, freezing the main agent control plane and inflating $P_{99}$ latency by orders of magnitude.
 4. Transient terminal output floods the host page cache, evicting active Agent Control Blocks and model context buffers.
-:::
 
 Because primary transaction stores are engineered for low-latency indexing rather than bulk binary object storage, appending hundreds of megabytes of unstructured text causes massive write amplification ($\text{WAF}_{\text{db}}$). In LSM-tree engines like RocksDB, excessive write volume triggers cascading compaction stalls across Level 0 and Level 1 SSTables, causing the 99th-percentile ($P_{99}$) operational latency of the entire supervisor control plane to spike from milliseconds to tens of seconds. Furthermore, raw diagnostic streams populate the operating system page cache with transient terminal characters and ANSI escape sequences, evicting active Agent Control Blocks and index pages from host memory.
 

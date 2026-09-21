@@ -64,50 +64,28 @@ The inflection point from conversational chatbots to autonomous agents fundament
 In Multi-Head Attention (MHA), $H_{\text{kv}} = H_{\text{q}}$, maintaining separate key and value heads for every query head. In Multi-Query Attention (MQA), $H_{\text{kv}} = 1$, collapsing all key and value projections into a single shared head. Grouped-Query Attention (GQA) groups query heads into $H_{\text{kv}} = H_{\text{q}} / G$ clusters, providing an intermediate design that dramatically curbs KV memory while preserving modeling expressiveness.
 :::
 
-To understand why this memory footprint accumulates, we must confront the physical boundary of the foundation model itself. Operating under zero ambient authority ($A=0$), the foundation model is an unprivileged statistical predictor executing purely functional forward tensor operations; it possesses no persistent internal registers, no ambient storage, and no autonomous background threads. Autoregressive token generation proceeds in discrete, sequential steps. At generation step $t$, the host runtime feeds the newly predicted token $x_t$ into the network. Within each transformer layer, this token's hidden state vector is mapped through three learned linear projections to yield a query vector $q_t \in \mathbb{R}^{d_{\text{head}}}$, a key vector $k_t \in \mathbb{R}^{d_{\text{head}}}$, and a value vector $v_t \in \mathbb{R}^{d_{\text{head}}}$ for each attention head. The scaled dot-product attention mechanism computes an output representation by evaluating:
+In @sec-vol3-processor-tokenization, we established the tensor geometry of the Key-Value (KV) cache, demonstrating that avoiding quadratic $O(S^2)$ recomputation requires preserving intermediate projection vectors in accelerator High-Bandwidth Memory (HBM).[^fn-kv-cache-geometry] For an active context containing $S$ tokens across a concurrent batch of $B$ agent trajectories, aggregate attention state scales linearly as $\text{Mem}_{\text{batch}} = B \cdot S \cdot \text{Mem}_{\text{token}}$, where $\text{Mem}_{\text{token}} = 2 \cdot L \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot P$.
 
-$$\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{Q K^T}{\sqrt{d_{\text{head}}}}\right)V$$
+[^fn-kv-cache-geometry]: **KV Cache Geometry**: See @sec-vol3-processor-tokenization for the mathematical derivation of Key-Value tensor projections across transformer layers and attention heads. This chapter addresses the physical virtualization of these blocks on accelerator silicon.
 
-For the newly arriving token at position $t$, its query vector $q_t$ must compute an inner product against the key vectors of *all* prior positions $i \in \{1, \dots, t\}$ to produce the attention distribution, which is subsequently used to compute a weighted sum over all corresponding value vectors $v_i$. Herein lies the central systems confrontation: although the prior tokens $x_1, \dots, x_{t-1}$ do not change, their key and value representations are strictly required to evaluate the attention distribution at step $t$. If the serving system does not persist these intermediate $k_i$ and $v_i$ vectors, generating token $t$ requires passing the entire prefix of $t$ tokens through the network from scratch. Across a generation sequence of length $S$, this recomputation strategy incurs an aggregate computational cost scaling quadratically as $\mathcal{O}(S^2)$ in forward-pass tensor operations.
+In @sec-vol3-processor, this cache was analyzed under an idealized systems assumption: that the runtime allocates a contiguous physical memory buffer for each sequence. On physical accelerator hardware, however, this assumption fails catastrophically. Because an autonomous agent's execution horizon is non-deterministic—terminating after three turns or continuing for fifty tool interactions—contiguous memory allocators must pre-allocate physical buffers sized for the worst-case context length ($S_{\max}$). When actual trajectories terminate early or grow dynamically, this contiguous strategy induces severe internal and external memory fragmentation.
 
-To eliminate this redundant computational overhead, inference runtimes allocate a physical buffer in accelerator High Bandwidth Memory (HBM) known as the *Key-Value (KV) cache*. During the initial context ingestion—the prefill phase—the runtime computes and stores the key and value projections for all prompt tokens. During subsequent autoregressive decoding steps, the runtime computes $q_t$, $k_t$, and $v_t$ solely for the single newly generated token, appends $k_t$ and $v_t$ to the persistent physical cache, and reads all historical keys and values from HBM to evaluate the attention equation. This optimization converts the per-token computational complexity of attention from $\mathcal{O}(t)$ back to an efficient matrix-vector evaluation. However, the runtime does not eliminate the physical cost; it merely shifts the burden from computational arithmetic to memory capacity.
+::: {#nbk-05-sizing-the-attention-state-for .callout-notebook title="Sizing the attention state for a 70-billion parameter model"}
+Consider an inference cluster serving an open-weights 70-billion parameter model structured with the canonical architectural parameters from @sec-vol3-processor-tokenization ($L=80$ layers, $H_{\text{q}}=64$ query heads, $H_{\text{kv}}=8$ GQA key-value heads, head dimension $d_{\text{head}}=128$, and 16-bit `bfloat16` precision with $P=2\text{ bytes}$).
 
-The memory footprint of this retained attention state is governed strictly by the structural geometry of the underlying model and the numerical precision of the stored floating-point tensors. For a transformer model with $L$ layers, $H_{\text{kv}}$ key-value heads per layer, an attention head dimension of $d_{\text{head}}$, and a tensor storage precision of $P$ bytes per element, each individual token requires an immutable quantum of physical cache memory across the network:
-
-$$\text{Mem}_{\text{token}} = 2 \cdot L \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot P \quad \left(\frac{\text{bytes}}{\text{token}}\right)$$
-
-The factor of 2 accounts for the two distinct tensor projections: the key tensor and the value tensor. For a single active sequence spanning an accumulated context length of $S$ tokens, the physical memory consumed by its KV cache is:
-
-$$\text{Mem}_{\text{seq}} = S \cdot \text{Mem}_{\text{token}} = 2 \cdot S \cdot L \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot P$$
-
-When an inference service hosts a concurrent batch of $B$ independent agent trajectories, each operating at an average context length of $S$, the aggregate accelerator memory allocated exclusively to attention state scales linearly across all dimensions:
-
-$$\text{Mem}_{\text{batch}} = B \cdot S \cdot \text{Mem}_{\text{token}}$$
-
-The structural evolution of transformer architectures from Multi-Head Attention (MHA) to Multi-Query Attention (MQA) and Grouped-Query Attention (GQA) directly reflects this physical memory wall. In classical Multi-Head Attention, the number of key-value heads equals the number of query heads ($H_{\text{kv}} = H_{\text{q}}$), meaning that an 8,192-dimensional hidden state projected across 64 heads allocates 64 distinct key heads and 64 value heads at every layer. Under MHA, the KV cache footprint quickly eclipses the static weight memory of the model itself. To alleviate this bottleneck, modern frontier architectures implement Grouped-Query Attention, wherein multiple query heads share a single key-value head group ($H_{\text{kv}} = H_{\text{q}} / G$, where $G$ is the group size). By reducing $H_{\text{kv}}$ by a factor of $G$ (typically 4 or 8), GQA compresses the physical cache footprint per token by the exact same ratio, enabling the host runtime to pack substantially more concurrent agent trajectories into physical HBM without sacrificing the modeling expressiveness provided by independent query heads.
-
-::: {#exmp-05-sizing-the-attention-state-for .callout-example title="Sizing the attention state for a 70-billion parameter model"}
-Consider an inference cluster serving an open-weights 70-billion parameter model structured with the following architectural parameters:
-
-- Layers ($L$): 80
-- Query heads ($H_{\text{q}}$): 64
-- Key-Value heads ($H_{\text{kv}}$): 8 (Grouped-Query Attention with group size $G = 8$)
-- Head dimension ($d_{\text{head}}$): 128
-- Storage precision ($P$): 2 bytes (16-bit brain floating-point, `bfloat16`)
-
-Using the physical derivation:
-$$\text{Mem}_{\text{token}} = 2 \cdot 80 \cdot 8 \cdot 128 \cdot 2 = 327,680 \text{ bytes/token} = 320 \text{ KiB/token}$$
+Applying the token footprint formulated in @sec-vol3-processor-tokenization:
+$$\text{Mem}_{\text{token}} = 2 \cdot 80 \cdot 8 \cdot 128 \cdot 2\text{ B} = 320\text{ KiB/token}$$
 
 Now evaluate the physical memory footprint across three realistic agent context regimes:
 
 1. **Standard Turn ($S = 8,192$ tokens):**
-   $$\text{Mem}_{\text{seq}} = 8,192 \cdot 327,680 \text{ B} = 2,684,354,560 \text{ B} \approx 2.50 \text{ GiB}$$
+   $$\text{Mem}_{\text{seq}} = 8{,}192 \cdot 320\text{ KiB} \approx 2.50\text{ GiB}$$
 
 2. **Deep Diagnostic Trajectory ($S = 32,768$ tokens):**
-   $$\text{Mem}_{\text{seq}} = 32,768 \cdot 327,680 \text{ B} = 10,737,418,240 \text{ B} \approx 10.00 \text{ GiB}$$
+   $$\text{Mem}_{\text{seq}} = 32{,}768 \cdot 320\text{ KiB} \approx 10.00\text{ GiB}$$
 
 3. **Repository-Scale Context ($S = 131,072$ tokens):**
-   $$\text{Mem}_{\text{seq}} = 131,072 \cdot 327,680 \text{ B} = 42,949,672,960 \text{ B} \approx 40.00 \text{ GiB}$$
+   $$\text{Mem}_{\text{seq}} = 131{,}072 \cdot 320\text{ KiB} \approx 40.00\text{ GiB}$$
 
 Had this model been designed using Multi-Head Attention ($H_{\text{kv}} = 64$), the memory consumption would scale eightfold: a single 131,072-token sequence would demand $320.00 \text{ GiB}$ of physical memory purely for its key-value projections—an allocation that exceeds the entire onboard memory capacity of four 80 GB NVIDIA H100 GPUs combined.
 :::
@@ -254,7 +232,7 @@ Finally, the *Effective KV Cache Occupancy* $\eta_{\text{effective}}(t)$ defines
 
 $$\eta_{\text{effective}}(t) = \frac{M_{\text{useful}}(t)}{M_{\text{pool}}}$$
 
-::: {#exmp-05-quantifying-contiguous-kv-cache-fragmentation .callout-example title="Quantifying contiguous KV cache fragmentation on an NVIDIA H100"}
+::: {#nbk-05-quantifying-contiguous-kv-cache-fragmentation .callout-notebook title="Quantifying contiguous KV cache fragmentation on an NVIDIA H100"}
 **Setting:** Consider an NVIDIA H100 SXM5 accelerator equipped with $M_{\text{device}} = 80 \text{ GiB}$ ($85{,}899{,}345{,}920 \text{ bytes}$) of High Bandwidth Memory (HBM3), delivering $3.35 \text{ TB/s}$ of memory bandwidth. The system serves a Llama-3-70B model using 16-bit half-precision weights (BF16, $P = 2 \text{ bytes}$). The model features $L = 80$ transformer layers, a hidden dimension of $d_{\text{model}} = 8{,}192$, and uses Grouped-Query Attention (GQA) with $H_{\text{kv}} = 8$ key-value heads, each with head dimension $d_{\text{head}} = 128$. The maximum supported context length is $S_{\max} = 16{,}384$ tokens.
 
 **Parameter and KV Footprint:**
@@ -298,13 +276,30 @@ The request is rejected or blocked in an admission queue. Despite having more th
 
 Empirical evaluations of production inference services corroborate these analytical limits. In their seminal characterization of LLM serving systems, @kwon2023vllm demonstrated that across production workloads serving conversational and code-generation models, conventional serving runtimes achieved effective memory occupancies $\eta_{\text{effective}}$ between only $20\%$ and $40\%$. The remaining $60\%$ to $80\%$ of accelerator memory was lost entirely to internal reservation slack and external fragmentation holes.
 
-This efficiency ceiling exposes the fundamental flaw of contiguous memory architectures for autoregressive inference. Contiguous allocators treat the KV cache as a classical monolithic tensor whose physical layout must mirror its logical structure. As long as token positions along the sequence dimension $t$ are bound to contiguous offsets in physical memory, serving systems remain trapped between the Scylla of static over-reservation and the Charybdis of external fragmentation. What architectural representation can decouple the logical growth of an active sequence from its physical placement in accelerator memory, permitting tokens to scatter across non-contiguous physical boundaries without sacrificing the efficiency of parallel attention computation?
+::: {#chk-05-memory-fragmentation .callout-checkpoint title="Evaluating memory fragmentation in attention caches"}
+Before analyzing paged virtual memory abstractions for KV caches, verify your understanding of physical memory allocation limits:
+
+- [ ] **Internal fragmentation**: Why does reserving worst-case sequence capacity $S_{\max}$ upfront leave up to 80 percent of accelerator High-Bandwidth Memory unutilized?
+- [ ] **External fragmentation**: How does dynamic contiguous allocation cause memory allocation failures even when total free HBM exceeds the requested tensor size?
+- [ ] **Allocation efficiency**: Under what conditions does the KV allocation efficiency metric $\eta_{\text{alloc}}$ collapse during multi-turn agent deliberation?
+- [ ] **Physical-to-logical coupling**: What architectural bottleneck makes contiguous KV tensors incapable of supporting branching execution without deep tensor copies?
+:::
 
 ## Paged KV Allocation {#sec-vol3-kvcache-pagedattention}
 
 Every dynamic memory allocator facing unpredictable request lifetimes confronts the classic virtual memory dilemma identified in early time-sharing operating systems: forcing dynamically growing data structures to occupy contiguous physical addresses inevitably forces an unacceptable trade-off between preemptive over-reservation and external memory fragmentation. When an inference runtime hosts dozens of concurrent generation requests, allocating contiguous memory chunks for each sequence's key-value (KV) projections turns the accelerator's High Bandwidth Memory (HBM) into a fractured grid of unusable gaps. Because autoregressive decode emits one token at a time until an unpredictable terminal token arrives, the runtime cannot forecast whether a trajectory will terminate after twelve tokens or expand to eight thousand. A contiguous allocator attempting to grow a sequence in place must either reserve the worst-case context window upfront—leaving up to 80 percent of accelerator memory idle—or periodically reallocate and physically copy gigabytes of tensor state across internal buses to coalesce contiguous spans.
 
 **Paged KV allocation** solves this physical dilemma by importing the foundational operating system abstraction of virtual paging directly into the accelerator memory hierarchy [@kwon2023vllm]. By decoupling the logical token sequence from its physical storage layout, the serving engine partitions the KV cache into uniform, fixed-size physical memory blocks scattered across non-contiguous HBM frames. A per-sequence block table translates logical sequence positions to physical block addresses dynamically on every generation step, eliminating external fragmentation entirely while bounding internal waste to the unused tail slots of the final block. Crucially, this level of indirection transforms branching trajectories—such as tree-of-thought exploration, parallel candidate generation, and tool-assisted deliberation—from expensive deep tensor copies into constant-time, reference-counted pointer manipulation through Copy-on-Write.
+
+::: {#dfn-paged-kv-cache .callout-definition title="Paged attention KV-cache block table"}
+
+***Paged attention KV-cache block table***\index{Paged attention!block table definition}\index{KV cache!block table definition} is a hardware-abstracted page mapping structure $T: l \mapsto p$ that translates logical token sequence indices $l = \lfloor t/B \rfloor$ into non-contiguous physical tensor frames $p \in [0, N_{\text{pool}}-1]$ resident in accelerator High-Bandwidth Memory (HBM).
+
+1.  **Significance**: Decouples the dynamic, non-deterministic token expansion of agent trajectories from rigid physical memory allocations, eliminating external fragmentation and enabling zero-copy tree branching via Copy-on-Write (CoW).
+2.  **Distinction**: Unlike contiguous tensor allocation (which pre-reserves worst-case context lengths $S_{\max}$ and strands up to 80 percent of accelerator memory in unwritten reservations), a paged block table allocates fixed-size physical blocks ($B$ tokens) on demand and bounds memory waste strictly to final-block internal fragmentation $\mathbb{E}[\Delta_{\text{tail}}] = (B-1)/2$.
+3.  **Common pitfall**: Selecting a block size $B$ that is too small ($B < 8$), which inflates block table indirection metadata and causes warp divergence during GEMV memory coalescing, or too large ($B > 64$), which amplifies internal fragmentation and degrades sharing granularity across branching rollouts.
+
+:::
 
 ::: {.column-margin}
 **Virtual Memory Analogy:**
@@ -377,7 +372,7 @@ def calculate_cache_utilization(batch_size, avg_seq_len, b_size, m_token):
 
 Empirical profiling demonstrates that $B = 16$ and $B = 32$ occupy the optimal sweet spot for current GPU microarchitectures. At $B = 16$, the contiguous tensor payload within each block ($16 \times d_{\text{head}} \times b_{\text{elem}}$ bytes per head) is sufficiently large to saturate 128-byte memory bus transactions, achieving over $95\%$ of theoretical HBM read bandwidth during decode attention kernels. Simultaneously, the tail waste remains bounded to an average of $7.5$ tokens per stream, translating to negligible capacity loss across large production batches.
 
-::: {#exmp-05-sizing-physical-blocks-for-a .callout-example title="Sizing physical blocks for a 70B parameter model"}
+::: {#nbk-05-sizing-physical-blocks-for-a .callout-notebook title="Sizing physical blocks for a 70B parameter model"}
 Consider serving an open-weights 70B parameter model using Grouped-Query Attention (GQA). The architecture features $L = 80$ layers, $H_Q = 64$ query heads, $H_{\text{kv}} = 8$ key-value heads, head dimension $d_{\text{head}} = 128$, and runs in BF16 precision ($b_{\text{elem}} = 2$ bytes). The serving engine distributes the model across an 8-GPU node using tensor parallelism degree $TP = 8$.
 
 First, calculate the memory footprint per token on a single GPU. With $TP = 8$, the $H_{\text{kv}} = 8$ key-value heads are partitioned evenly across the 8 GPUs, resulting in $H_{\text{kv, GPU}} = 1$ key-value head per layer per GPU:
@@ -490,6 +485,10 @@ To minimize tree depth and CPU traversal latency, modern inference runtimes such
 
 As formalized in @tbl-radix-node-schema, the Radix tree serves as an authoritative index over the physical block pool. When a request completes its generation cycle, the serving runtime does not return its physical blocks to the global free list. Instead, it transitions the reference count of the corresponding leaf node to zero, marking the physical blocks as dormant. The blocks remain mapped in accelerator HBM, ready to be immediately re-attached if a subsequent request traverses the same prefix path.
 
+::: {#dfn-radix-prefix-cache .callout-definition title="Radix prefix cache"}
+A hierarchical tree structure that indexes physical key-value cache blocks against token sequences, compressing non-branching token paths to enable constant-time prefix lookups, cross-request cache reuse, and leaf-first LRU memory reclamation.
+:::
+
 ### Longest prefix matching
 
 ::: {.column-margin}
@@ -520,26 +519,21 @@ The runtime must resolve this partial-block dilemma through one of two architect
 
 In production runtimes, block-aligned truncation consistently outperforms Copy-on-Write allocation. On modern accelerator architectures (such as NVIDIA H100 or AMD MI300X), the host overhead of dispatching a memory-copy kernel to duplicate a handful of tokens—coupled with memory bus synchronization barriers—exceeds the time required to evaluate those same tokens inside a high-throughput fused GEMM prefill kernel. Consequently, production Radix allocators enforce a strict block boundary invariant: only fully packed blocks of size $B$ are inherited across requests, while sub-block tails are recomputed during the initial prefill phase.
 
-::: {#exmp-05-ttft-and-compute-savings-from .callout-example title="TTFT and compute savings from radix prefix reuse"}
+::: {#nbk-05-ttft-and-compute-savings-from .callout-notebook title="TTFT and compute savings from radix prefix reuse"}
 Consider an autonomous coding agent operating on an 8-GPU tensor-parallel node hosting a 70-billion parameter dense model ($N = 70 \times 10^9$). The model utilizes Grouped-Query Attention (GQA) with $L = 80$ layers, $H_Q = 64$ query heads, $H_{\text{kv}} = 8$ key-value heads, and a head dimension of $d_{\text{head}} = 128$, represented in 16-bit brain floating-point format ($b_{\text{elem}} = 2$ bytes).
 
 The agent's standard system instruction, formatting rules, and tool definition schema comprise an invariant prefix of $S_{\text{prefix}} = 4{,}096$ tokens.
 
 **1. Physical KV Memory Footprint:**
-The memory consumed by storing the key and value tensors for a single token across all layers is:
-$$m_{\text{token}} = 2 \times L \times H_{\text{kv}} \times d_{\text{head}} \times b_{\text{elem}}$$
-$$m_{\text{token}} = 2 \times 80 \times 8 \times 128 \times 2 = 327{,}680 \text{ bytes} = 320 \text{ KiB/token}$$
-For the 4,096-token prefix, the aggregate physical KV cache footprint is:
-$$M_{\text{KV}} = 4{,}096 \times 320 \text{ KiB} = 1{,}310{,}720 \text{ KiB} = 1.25 \text{ GiB}$$
-Distributed across the 8 GPUs via tensor parallelism, this footprint requires only $160 \text{ MiB}$ of HBM per accelerator.
+Applying the physical GQA tensor footprint established in @sec-vol3-processor-tokenization ($m_{\text{token}} = 320\text{ KiB/token}$):
+$$M_{\text{KV}} = S_{\text{prefix}} \cdot m_{\text{token}} = 4{,}096 \times 320\text{ KiB} = 1{,}310{,}720\text{ KiB} = 1.25\text{ GiB}$$
+Distributed across the 8 GPUs via tensor parallelism, this footprint requires only $160\text{ MiB}$ of HBM per accelerator.
 
 **2. Prefill Compute Savings:**
-Evaluating the prefill phase requires performing matrix multiplications across the model's weights for each input token. The arithmetic cost for the linear layers (projections and feed-forward networks) is approximately $2N$ floating-point operations (FLOPs) per token:
-$$\text{FLOPs}_{\text{linear}} = 2 \times (70 \times 10^9) \times 4{,}096 \approx 5.734 \times 10^{14} \text{ FLOPs} = 573.4 \text{ TFLOPs}$$
-The self-attention quadratic computation adds:
-$$\text{FLOPs}_{\text{attn}} = 4 \times L \times (H_Q \times d_{\text{head}}) \times S_{\text{prefix}}^2$$
-$$\text{FLOPs}_{\text{attn}} = 4 \times 80 \times 8{,}192 \times (4{,}096)^2 \approx 4.40 \times 10^{13} \text{ FLOPs} = 44.0 \text{ TFLOPs}$$
-$$\text{FLOPs}_{\text{total}} = 573.4 + 44.0 = 617.4 \text{ TFLOPs}$$
+Applying the foundation engine Roofline model from @sec-vol3-processor-cost, evaluating prompt context requires $2N$ FLOPs per token for linear projections plus the quadratic self-attention component ($4 \cdot L \cdot d_{\text{model}} \cdot S_{\text{prefix}}^2$):
+$$\text{FLOPs}_{\text{linear}} = 2 \cdot (70 \times 10^9) \cdot 4{,}096 \approx 5.734 \times 10^{14}\text{ FLOPs} = 573.4\text{ TFLOPs}$$
+$$\text{FLOPs}_{\text{attn}} = 4 \cdot 80 \cdot 8{,}192 \cdot (4{,}096)^2 \approx 4.40 \times 10^{13}\text{ FLOPs} = 44.0\text{ TFLOPs}$$
+$$\text{FLOPs}_{\text{total}} = \text{FLOPs}_{\text{linear}} + \text{FLOPs}_{\text{attn}} = 573.4 + 44.0 = 617.4\text{ TFLOPs}$$
 
 **3. Latency Impact:**
 The 8-GPU H100 node provides an aggregate theoretical dense BF16 peak of $8 \times 989 = 7{,}912 \text{ TFLOPS}$. At a realistic Model Flops Utilization (MFU) of $45\%$ for tensor-parallel prefill at batch size 1, the sustained cluster compute throughput is:
@@ -588,11 +582,9 @@ This leaf-first traversal guarantees that the root and high-level branch nodes�
 
 ### Branch invalidation mechanics
 
-The foundational premise of prefix caching is that token sequence identity implies key-value state identity. This equivalence holds strictly because autoregressive transformer architectures enforce a lower-triangular causal attention mask:
+The foundational premise of prefix caching is that token sequence identity implies key-value state identity. This equivalence holds strictly because autoregressive transformer architectures enforce a lower-triangular causal attention mask (formulated in @sec-vol3-processor).[^fn-causal-mask-invalidation]
 
-$$\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q} \mathbf{K}^T}{\sqrt{d_{\text{head}}}} + \mathbf{M}\right) \mathbf{V}$$
-
-where $M_{ij} = 0$ for $j \le i$ and $M_{ij} = -\infty$ for $j > i$.
+[^fn-causal-mask-invalidation]: **Causal Mask Invariant**: See @sec-vol3-processor for the mathematical definition of causal attention masking $\text{softmax}(\mathbf{Q}\mathbf{K}^T/\sqrt{d_{\text{head}}} + \mathbf{M})\mathbf{V}$. Here, this causal dependency establishes that token modifications at index $k$ invalidate all downstream cached blocks $t \ge k$.
 
 Because of the causal mask, the key vector $\mathbf{k}_t$ and value vector $\mathbf{v}_t$ computed at token index $t$ are mathematically invariant to any tokens positioned at indices $j > t$. However, the converse property is severe: $\mathbf{k}_t$ and $\mathbf{v}_t$ are functions of the complete preceding sequence $\mathbf{t}_{[0:t]}$. In deep multi-layer transformers, residual connections and multi-head attention propagate representations across all preceding token positions. Consequently, if a single token at index $k$ is altered ($t_k \to t'_k$), every key and value vector at all subsequent positions $t \ge k$ across all layers $l \in [1, L]$ is fundamentally altered.
 
@@ -736,7 +728,7 @@ The timing dynamics and scheduling contrast between monolithic execution and chu
 ![](images/svg/chunked_prefill_scheduling_timeline.svg)
 :::
 
-::: {#exmp-05-quantitative-interference-and-chunk-budgeting .callout-example title="Quantitative interference and chunk budgeting"}
+::: {#nbk-05-quantitative-interference-and-chunk-budgeting .callout-notebook title="Quantitative interference and chunk budgeting"}
 An inference engine runs on an accelerator delivering $T_{\text{peak}} = 800\text{ TFLOPS}$ ($8 \times 10^{14}\text{ FLOPs/s}$) dense 16-bit matrix compute and $B_{\text{mem}} = 3.0\text{ TB/s}$ ($3 \times 10^{12}\text{ Bytes/s}$) HBM bandwidth. The served model has $P = 70\text{ billion}$ parameters stored in 16-bit precision, occupying $2P = 140\text{ GB}$ of memory. The engine is actively servicing $B_{\text{decode}} = 32$ decode streams. An agent submits a new prompt with $S_{\text{prompt}} = 4{,}096$ tokens.
 
 **Question 1: What is the execution latency and ITL spike under monolithic run-to-completion scheduling?**
@@ -770,9 +762,14 @@ Instead of a catastrophic 1,195 ms freeze followed by fast decode, all 32 active
 
 Chunked prefill demonstrates that memory-bound and compute-bound workloads can be paired to optimize total accelerator resource utilization. By sizing the token chunk $C_{\text{chunk}}$ such that $t_{\text{comp}} \approx t_{\text{mem}}$, the scheduler reaches the balance point where the memory bus and the tensor cores complete their work at the same time, maximizing overall tokens generated per second across the cluster.
 
----
+::: {#chk-05-paged-attention .callout-checkpoint title="Evaluating paged allocation and chunked prefill"}
+Before analyzing memory offloading, retention, and swapping policies, verify your understanding of paged attention mechanics:
 
-While chunked prefill balances active prefills against active decodes during continuous token generation, agentic systems exhibit a distinct operational pattern: *long idle pauses*. When an agent model finishes generating a tool call—such as a sandboxed terminal execution, a web search query, or an interactive confirmation prompt to a human supervisor—the generation loop stops entirely. The model engine performs no forward passes for that sequence while awaiting the external environment's response. Yet, the physical KV cache blocks containing thousands of tokens of accumulated conversation and tool outputs remain pinned in accelerator HBM. If the serving runtime allows these physical blocks to sit resident across multi-second or multi-minute execution pauses, the accelerator rapidly runs out of memory, rejecting new requests or thrashing active batches. How should an inference system manage physical attention state when a trajectory suspends execution—should it retain the blocks, evict them entirely, offload them across the host bus to main memory, or discard them and rely on recomputation?
+- [ ] **Virtual block mapping**: How does the PagedAttention block table translate non-contiguous physical pages into a contiguous logical sequence during self-attention?
+- [ ] **Copy-on-write branching**: Why does reference-counted block sharing enable branching deliberation search with $O(1)$ memory allocation overhead?
+- [ ] **Prefix caching**: How does Radix tree indexing eliminate redundant prompt prefill computation across multi-turn agent interactions?
+- [ ] **Chunked prefill co-scheduling**: How does interleaving prompt prefill chunks with active decode batches prevent inter-token latency (ITL) spikes?
+:::
 
 ## Retain, Evict, Recompute, or Offload {#sec-vol3-kvcache-swapping}
 
@@ -825,7 +822,7 @@ $$m_{\text{token}} = 2 \cdot L \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot b
 
 For a trajectory paused at sequence length $S$, the total memory footprint of its physical attention state is $M_{\text{KV}} = S \cdot m_{\text{token}}$.
 
-Now evaluate the time required to reconstruct this state via recomputation versus streaming it over an interconnect. When evicting and recomputing, the accelerator must evaluate a prefill forward pass over $S$ tokens. In modern decoder-only architectures, the computational cost of the prefill phase is dominated by matrix multiplications across linear projections and feed-forward networks, requiring approximately $2 P$ floating-point operations per token, plus the quadratic attention cost $4 L S^2 d_{\text{model}}$. For typical context lengths up to thirty-two thousand tokens, the linear parameter term dominates. Given an accelerator cluster executing prefill with an effective sustained compute throughput $R_{\text{prefill}}$ (in FLOPs per second, accounting for Model FLOPs Utilization or MFU), the recomputation latency is:
+Now evaluate the time required to reconstruct this state via recomputation versus streaming it over an interconnect. When evicting and recomputing, the accelerator must evaluate a prefill forward pass over $S$ tokens. In modern decoder-only architectures, the computational cost of the prefill phase is dominated by matrix multiplications across linear projections and feed-forward networks, requiring approximately $2 P$ floating-point operations per token, plus the quadratic attention cost $4 L S^2 d_{\text{model}}$. For typical context lengths up to thirty-two thousand tokens, the linear parameter term dominates. Given an accelerator cluster executing prefill with an effective sustained compute throughput $R_{\text{prefill}}$ (in FLOPs per second, accounting for model FLOPs utilization or MFU), the recomputation latency is:
 
 $$T_{\text{recomp}}(S) \approx \frac{2 P \cdot S}{R_{\text{prefill}}}$$
 
@@ -864,7 +861,15 @@ $$T_{\text{wait}}^* \approx \frac{2 \cdot M_{\text{KV}}}{B_{\text{pcie}}} \cdot 
 
 where $\Delta T_{\text{stall}}$ represents the latency penalty the scheduler is willing to tolerate on the resumed step. When memory capacity is constrained ($\mu_{\text{HBM}} \gg \mu_{\text{DRAM}}$), $T_{\text{wait}}^*$ approaches the round-trip transfer time.
 
-::: {#exmp-05-sizing-the-break-even-frontier-for .callout-example title="Sizing the break-even frontier for a 70-billion parameter trajectory"}
+::: {#psp-05-the-tyranny-of-the-idle-agent .callout-perspective title="The tyranny of the idle agent and the KV residency tax"}
+In traditional request-response inference serving, GPU memory residency is brief and deterministic: requests stream in, decode tokens sequentially, and release their allocations immediately upon emitting a terminal delimiter. Agentic loops break this operational model entirely by introducing prolonged, asynchronous I/O pauses. When an agent invokes a mutating tool—such as launching a test container, executing a multi-file compilation, or waiting for human confirmation—forward token generation halts for seconds or minutes.
+
+During these pauses, retaining gigabytes of Key-Value state in High-Bandwidth Memory imposes an exorbitant idle residency tax. An $80\text{ GB}$ H100 GPU hosting sixteen concurrent paused agents can find its entire memory capacity locked by dormant trajectories that emit zero tokens, starving active decodes and triggering head-of-line blocking. Yet simply evicting these blocks forces an equally punitive recomputation tax: re-evaluating thousands of prefix tokens on resumption wastes precious tensor core cycles and spikes Time to First Token.
+
+**Systems insight**: High-Bandwidth Memory is an ephemeral execution stage, not an archival storage medium. Dependable agent runtimes conquer the residency tax by decoupling execution from retention—treating GPU memory as an L1 attention cache that is proactively paged to host DRAM or NVMe via asynchronous DMA the instant an agent yields control to an external effector.
+:::
+
+::: {#nbk-05-sizing-the-break-even-frontier-for .callout-notebook title="Sizing the break-even frontier for a 70-billion parameter trajectory"}
 Consider an agentic coding service executing a 70-billion parameter dense model ($P = 70 \times 10^9$) configured with Grouped-Query Attention (GQA). The architecture features $L = 80$ layers, $H_{\text{kv}} = 8$ key-value heads, head dimension $d_{\text{head}} = 128$, and operates in 16-bit half-precision ($b_{\text{elem}} = 2\text{ bytes}$). The serving node executes across an 8-GPU tensor-parallel group connected via PCIe Gen5 x16 to host memory, yielding an aggregate sustained transfer bandwidth of $B_{\text{pcie}} = 50\text{ GB/s}$. The GPU subsystem sustains an aggregate prefill throughput of $R_{\text{prefill}} = 400\text{ TFLOPs/s}$ ($4.0 \times 10^{14}\text{ FLOPs/s}$).
 
 An active agent generates a git diff and dispatches a compiler check at sequence length $S = 16{,}384$ tokens.
@@ -996,7 +1001,7 @@ $$M_{\text{KV}}^{\text{demand}} = \left( S_{\text{shared}} + B \cdot \left( (1 -
 
 where $\text{Pool}_{\text{headroom}}$ represents a mandatory margin of free physical blocks maintained by the allocator to prevent allocation failure during burst decode steps.
 
-::: {#exmp-05-sizing-hbm-for-multi-turn-agent .callout-example title="Sizing HBM for multi-turn agent swarms on an 8-GPU node"}
+::: {#nbk-05-sizing-hbm-for-multi-turn-agent .callout-notebook title="Sizing HBM for multi-turn agent swarms on an 8-GPU node"}
 Consider an enterprise agent cluster deployed to run continuous code-refactoring agents using a 70-billion parameter model ($N_{\text{params}} = 70 \times 10^9$) equipped with Grouped-Query Attention. The architectural parameters are $L = 80$ layers, $H_q = 64$ query heads, $H_{\text{kv}} = 8$ key-value heads, and $d_{\text{head}} = 128$. All model weights and KV states are hosted in 16-bit bfloat16 precision ($b_{\text{weight}} = b_{\text{elem}} = 2\text{ bytes}$). The serving node consists of an 8-GPU NVIDIA H100 SXM5 server with 80 GB of HBM3 per GPU ($C_{\text{HBM}} = 80\text{ GB} = 80 \times 10^9\text{ bytes}$, yielding $640\text{ GB}$ aggregate node memory). Tensor parallelism is configured across all eight GPUs ($TP = 8, PP = 1$).
 
 **Step 1: Compute Static Memory Allocation per GPU**
@@ -1111,13 +1116,9 @@ Durable semantic state belongs strictly within the host supervisor's determinist
 
 When an autonomous agent trajectory pauses its autoregressive generation to invoke an external tool, dispatch a subagent, or await human authorization, the host supervisor must decide the physical disposition of that sequence's KV cache. A pervasive pitfall in agent serving deployments is holding these physical KV blocks pinned in accelerator High-Bandwidth Memory (HBM) indefinitely, under the assumption that preserving residency avoids the latency penalty of recomputing the prompt when the external call returns.
 
-The failure mode of this policy is stranded capacity. Consider a standard open-weights foundation model ($L = 80$ layers, $H_{\text{kv}} = 8$ key-value heads under Grouped-Query Attention, head dimension $d_{\text{head}} = 128$, operating at 16-bit half precision with element size $b_{\text{elem}} = 2$ bytes). The physical memory footprint per token is:
+The failure mode of this policy is stranded capacity. Consider our canonical 70-billion parameter GQA foundation model ($m_{\text{token}} \approx 320\text{ KiB/token}$, as formulated in @sec-vol3-processor-tokenization). An agent engaged in a complex repository refactoring trajectory with an active context length of $S = 32{,}768$ tokens immobilizes:
 
-$$m_{\text{token}} = 2 \times L \times H_{\text{kv}} \times d_{\text{head}} \times b_{\text{elem}} = 2 \times 80 \times 8 \times 128 \times 2 = 327{,}680\text{ bytes} \approx 320\text{ KiB/token}$$
-
-An agent engaged in a complex repository refactoring trajectory with an active context length of $S = 32{,}768$ tokens immobilizes:
-
-$$M_{\text{KV}} = 320\text{ KiB} \times 32{,}768 = 10{,}485{,}760\text{ KiB} = 10\text{ GiB}$$
+$$M_{\text{KV}} = S \cdot m_{\text{token}} = 32{,}768 \times 320\text{ KiB} = 10{,}485{,}760\text{ KiB} = 10\text{ GiB}$$
 
 If this agent dispatches an asynchronous integration test suite inside an isolated sandbox container requiring $T_{\text{wait}} = 45\text{ seconds}$ to complete, holding that allocation resident strands 10 GB of scarce accelerator capacity for three-quarters of a minute. On an accelerator provisioned with 80 GB of HBM, this single dormant trajectory monopolizes 12.5 percent of total physical memory without performing a single floating-point operation.
 

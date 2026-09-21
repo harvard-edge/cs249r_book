@@ -83,6 +83,16 @@ When naive agent runtimes attempt to manage trajectories as ad-hoc Python corout
 
 **The trajectory process requires a formal kernel abstraction: the Agent Control Block (ACB).** Analogous to the operating system PCB, the ACB is the canonical, host-managed descriptor that reifies an agent's existence within the supervisory control plane. It decouples the supervisory metadata required to govern, schedule, and account for a task from the internal token sequences and tensor allocations of the underlying model. By maintaining an explicit ACB, the supervisory runtime can suspend an execution, revoke tool privileges, reassign KV-cache allocation leases, enforce financial ceilings, or migrate a trajectory across physical compute nodes without inspecting prompt text or altering model weights.
 
+::: {#dfn-agent-control-block .callout-definition title="Agent Control Block"}
+
+***Agent Control Block***\index{Agent Control Block!definition}\index{Checkpointing!Agent Control Block definition} is the canonical host-managed kernel descriptor that reifies an agent trajectory within the supervisory control plane, encapsulating identity, lifecycle phase, generation parameters, memory subsystem handles, resource ledgers, and capability leases.
+
+1.  **Significance**: Decouples supervisory orchestration, scheduling, and accounting from transient accelerator allocations and model weights, allowing the host runtime to suspend, migrate, or preempt trajectories without parsing prompt strings.
+2.  **Distinction**: Unlike classical operating system Process Control Blocks (which track hardware registers, virtual memory page tables, and file descriptors for synchronous binaries), the ACB governs non-deterministic inference rollouts, KV-cache prefix handles, tool leases, and external sandbox lifecycles under Zero Ambient Authority ($A=0$).
+3.  **Common pitfall**: Managing long-running trajectories through raw in-memory coroutine variables or unstructured database records, making state recovery impossible when distributed host nodes fail or worker processes restart.
+
+:::
+
 ### Anatomy of the Agent Control Block {#sec-vol3-acb-anatomy}
 
 The Agent Control Block resides in host memory under the exclusive ownership of the supervisory control plane. Neither the foundation model nor the unprivileged tool execution sandbox can read or mutate the ACB directly; all modifications occur through supervisory system calls or control-plane signal traps. Structurally, the ACB aggregates six orthogonal domains of execution metadata: process identification, lifecycle state, generation parameters, memory subsystem pointers, resource accounting ledgers, and security capabilities.
@@ -148,7 +158,7 @@ The capability attenuation set implements Saltzer's principle of protection unde
 
 When the agent proposes a tool call—for example, invoking `fs_write` on `/etc/hosts`—the supervisor intercepts the request, reads the `cap_token_ref` from the calling trajectory's ACB, and verifies that the capability array contains an unexpired token granting write access to that path. If the token is absent, malformed, or attenuated to read-only access, the supervisor traps the violation at the boundary, records a permission fault in the ACB's event stream, and rejects the tool invocation without touching the underlying operating system.
 
-::: {#exmp-09-control-plane-descriptor-footprint-vs .callout-example title="Control plane descriptor footprint vs. tensor state overhead"}
+::: {#nbk-09-control-plane-descriptor-footprint-vs .callout-notebook title="Control plane descriptor footprint vs. tensor state overhead"}
 Consider an enterprise agent cluster hosting $N = 10{,}000$ concurrent trajectories on a single supervisory management node. Each trajectory operates over an average context length of $L = 32{,}768$ tokens using a foundation model with $H = 64$ layers, an attention head dimension $D = 128$, and $N_{\text{kv}} = 8$ key-value heads under Grouped-Query Attention (GQA), running with 16-bit half-precision floats (2 bytes per element).
 
 **1. Physical KV-Cache Allocation per Trajectory:**
@@ -207,7 +217,24 @@ Instead, process migration reduces to an atomic snapshot of the ACB and its refe
 
 Treating the Agent Control Block as an explicit, first-class kernel object transforms agent management from brittle scripting into rigorous systems engineering. However, an administrative descriptor is only as reliable as the rules that govern its mutation. If any component of the host runtime could alter an ACB's phase arbitrarily—transitioning an agent from `WAITING_ESCROW` directly to `RUNNING` without human authorization, or moving an agent from `TERMINATED` back to `RUNNABLE` after resources have been reclaimed—the supervisory plane would rapidly accumulate zombie processes, corrupted memory allocations, and leaked credentials.
 
-To maintain system integrity, the supervisory control plane must enforce a formal operational lifecycle over the ACB. What formal state machine dictates the valid transitions of an Agent Control Block across its operational lifetime, and what guard conditions must the supervisor evaluate before permitting a trajectory to advance from one execution state to the next?
+::: {#psp-09-the-while-loop-fallacy .callout-perspective title="The while-loop fallacy and the need for supervisory control"}
+In prototype engineering, an autonomous agent is almost universally implemented as an iterative Python loop: while not done, generate a continuation, parse a tool invocation, execute the function, and append the result. This architectural pattern commits the while-loop fallacy: confusing an unmanaged user-space thread with an operating system process.
+
+In classical systems programming, an unmanaged thread cannot preempt itself, cannot meter its own memory consumption, cannot safely trap asynchronous cancellation signals, and cannot survive a host power failure. When an agent implemented as a raw loop executes a blocking network call or triggers an out-of-memory kernel panic, the entire execution context in volatile memory vanishes. There is no supervisor to capture partial progress, no capability mask to restrict privilege escalation, and no mechanism to prevent orphaned child processes from lingering indefinitely in the operating system.
+
+Transforming stochastic models into dependable systems requires separating the unprivileged inference worker from the supervisory control plane. By reifying execution state into an explicit Agent Control Block (ACB) and Write-Ahead Log (WAL), the host runtime decouples task progression from volatile worker threads. The supervisor meters resource consumption across hard multi-dimensional ceilings, intercepts out-of-band signals at turn boundaries, and persists verified milestones—ensuring that agent execution can be paused, inspected, migrated, and recovered with the guarantees of an authentic operating system kernel.
+
+**Systems insight**: A foundation model generates tokens, but only an external supervisor can guarantee process termination, fault isolation, and resource accounting. Building production agentic platforms requires treating the agent loop as an unprivileged process governed by an authoritative kernel.
+:::
+
+::: {#chk-09-agent-control-block .callout-checkpoint title="Evaluating the Agent Control Block architecture"}
+Before examining trajectory state machines and lifecycle transitions, verify your understanding of ACB abstractions:
+
+- [ ] **State encapsulation**: How does separating the fixed-size ACB descriptor from dynamic context and KV cache buffers enable zero-copy process migration?
+- [ ] **Lease management**: Why must the `kv_lease_id` be released when an agent yields compute allocations during long-running tool I/O?
+- [ ] **Monotonic turn counters**: How do strictly increasing generation counters prevent replay attacks and observation-crossing race conditions?
+- [ ] **Memory indirection**: Why does the ACB store memory pointers rather than embedding large prompt buffers directly inside the control structure?
+:::
 
 ## Trajectory Lifecycle States {#sec-vol3-controlplane-statemachine}
 
@@ -223,6 +250,10 @@ When an agent runtime treats process lifecycle as an unverified enumeration or a
 ### The formal trajectory state space
 
 Building dependable supervisory software requires modeling the agent lifecycle not as an arbitrary graph of callbacks, but as a hierarchical statechart in the tradition of David Harel [@harel1987]. Harel demonstrated that complex reactive systems collapse into unmanageable combinatorial explosions unless states are grouped into orthogonal superstates with well-defined entry, exit, and transition invariants. In an agent supervisory plane, every trajectory process exists within an operational state space $\mathcal{S}$ composed of nine discrete operational phases, clustered into four architectural superstates: *Provisioning*, *Active Processing*, *Suspended Quorum*, and *Teardown & Terminal*, as formalized in @fig-vol3-acb-lifecycle.
+
+::: {#dfn-supervisory-state-machine .callout-definition title="Supervisory state machine"}
+A formal finite state machine implemented within the host control plane that governs the lifecycle, execution privileges, and resource transitions of an agent process, ensuring that stochastic model outputs cannot bypass operational invariants or violate state transitions.
+:::
 
 ::: {#fig-vol3-acb-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**Agent Control Block Lifecycle State Machine**: Formal finite state machine governing an Agent Control Block across its operational lifetime. The state space is partitioned into four orthogonal superstates: *Provisioning* (`INITIALIZING`), *Active Processing* (`RUNNABLE`, `RUNNING`, `PREEMPTED`), *Suspended Quorum* (`WAITING_IO`, `WAITING_ESCROW`), and *Teardown & Terminal* (`TERMINATING`, `TERMINATED_SUCCESS`, `TERMINATED_FAILURE`). Solid blue and amber directed edges represent deterministic forward dispatch and suspension transitions; green edges represent verified returns; dashed lines trace asynchronous evictions, approvals, and fault cancellations." fig-alt="Hierarchical finite state machine diagram detailing the transitions among nine ACB operational phases across four superstates, showing entry guards, yield paths, preemption corridors, and terminal states."}
 ![](images/svg/ch09-acb-lifecycle.svg)
@@ -269,7 +300,7 @@ $$\delta(\text{WAIT\_IO}, e_{\text{tool\_return}}, g_{\text{match}}) = \text{RUN
 
 This guard prevents a notorious class of distributed race conditions known as *observation crossing*. Suppose an agent with an aggressive execution timeout issues a long-running compile command. If the supervisor times out the operation, marks the tool invocation as aborted, and returns an synthetic error to the agent, a late-arriving completion message from the compile sandbox must be discarded. Without the $g_{\text{match}}$ predicate, a late packet arriving while the agent is generating its next step could be improperly injected into the context window, causing prompt desynchronization and invalid BPE token alignment.
 
-::: {#callout-def-vol3-observation-crossing-resolution .callout-note title="Observation crossing resolution protocol"}
+::: {#not-09-observation-crossing-resolution .callout-note title="Observation crossing resolution protocol"}
 When an asynchronous execution worker responds after its assigned timeout deadline, the supervisor resolves the race condition through the following sequence:
 
 1. **Call Issuance ($t_0$):** Trajectory in state `RUNNING` dispatches tool request with identifier $e.\text{call\_id} = \text{0x4A}$. State transitions to `WAITING_IO`, recording $\text{pending\_io\_id} = \text{0x4A}$.
@@ -298,7 +329,7 @@ $$\delta(\text{TERMINATED\_SUCCESS}, e, g) = \emptyset \quad \text{and} \quad \d
 
 Once an agent enters a terminal state, its Agent Control Block transitions into a read-only historical record. No subsequent event—whether a delayed network packet, an administrative override, or a retry attempt—can re-activate an ACB. If the supervisory control plane decides to retry a failed trajectory, it must instantiate an entirely new Agent Control Block with a fresh identifier, a new capability domain, and an isolated sandbox root. This immutability guarantees that diagnostic post-mortems and cryptographic audit trails reflect an unpolluted, monotonic record of execution.
 
-::: {#exmp-09-supervisory-state-transition-latency-vs .callout-example title="Supervisory state transition latency vs. inference overhead"}
+::: {#nbk-09-supervisory-state-transition-latency-vs .callout-notebook title="Supervisory state transition latency vs. inference overhead"}
 A common concern in supervisory systems design is whether rigorous state machine validation introduces unacceptable runtime overhead. Let us calculate the computational cost of an atomic state transition in a high-throughput agent supervisor and compare it to the underlying inference and execution latency.
 
 Consider an agent running a trajectory of $S = 50$ reasoning steps. Each step requires five discrete state machine transitions:
@@ -541,7 +572,14 @@ $$t_{\text{offload}} = \frac{M_{\text{KV}}}{B_{\text{PCIe}}} = \frac{2.684 \text
 Transferring the cache consumes less than $42\text{ ms}$. Thus, the supervisor can fully evacuate the GPU memory allocation during `SIGPAUSE`, hold the trajectory suspended in host memory indefinitely at near-zero operating cost, and restore it via `SIGRESUME` in an equivalent $41.9\text{ ms}$ window upon wake-up.
 :::
 
-The ability to suspend, resume, and cleanly interrupt trajectories transforms an agent system from an unconstrained script into a governable process runtime. Trapping signals at turn boundaries shields both model context and external filesystems from partial-mutation corruption. However, external signals represent only one side of the scheduling equation. When an agent is not being actively interrupted by an operator, but is instead blocked waiting on slow network tools, high-latency compilation jobs, or remote web services, keeping its execution context bound to high-cost hardware resources is equally untenable. How does the supervisory runtime enable an agent process to voluntarily yield its hardware compute allocations without forfeiting its position in the broader execution lifecycle?
+::: {#chk-09-supervisory-state-machine .callout-checkpoint title="Evaluating supervisory state transitions and signals"}
+Before examining cooperative process yielding and multi-dimensional scheduling, verify your understanding of supervisory lifecycle invariants:
+
+- [ ] **Tool return invariant**: Why must late completion packets arriving after timeout expiration be dropped rather than injected into active context?
+- [ ] **Escrow quarantine**: Under what guard condition may a trajectory in `WAITING_ESCROW` transition to `RUNNABLE`?
+- [ ] **Signal trapping**: Why must asynchronous operator signals like `SIGPAUSE` and `SIGCANCEL` be deferred to turn boundaries rather than interrupting mid-token decode?
+- [ ] **Terminal cleanup**: What supervisory actions ensure that container sandboxes and virtual filesystems are purged when an ACB reaches `TERMINATED_FAILURE`?
+:::
 
 ## Cooperative Process Yielding {#sec-vol3-controlplane-yielding}
 
@@ -657,7 +695,7 @@ The event-driven reactivation sequence proceeds through four deterministic steps
 3. **Pending Signal and State Validation:** Before marking the agent as runnable, the supervisor evaluates the ACB's pending signal bitmask. If an administrative `SIGINT` or `SIGKILL` arrived while the agent was parked in `WAITING_IO`, the observation is recorded in the audit log, but the ACB bypasses re-execution and transitions directly to `TERMINATING`. If no signals are pending, the ACB transitions from `WAITING_IO` to `RUNNABLE`.
 4. **Runqueue Dispatch:** The supervisor enqueues the ACB descriptor onto the priority runqueue. The trajectory is now ready to contend for a worker thread and an inference slot to begin step $k+1$.
 
-::: {#exmp-09-quantifying-worker-scalability-and-memory .callout-example title="Quantifying worker scalability and memory efficiency under cooperative yielding"}
+::: {#nbk-09-quantifying-worker-scalability-and-memory .callout-notebook title="Quantifying worker scalability and memory efficiency under cooperative yielding"}
 A production AI engineering platform operates an agent supervisory cluster deployed on host nodes equipped with 64 AMD EPYC CPU cores and $256\text{ GiB}$ of DDR5 system memory ($B_{\text{host}} = 300\text{ GB/s}$). The node serves concurrent software engineering agents interacting with containerized execution sandboxes.
 
 Empirical profiling of the agent workload yields the following operational parameters:
@@ -812,7 +850,7 @@ $$\mathbf{c}_{k+1} = \mathbf{c}_k \parallel \mathbf{a}_k \parallel \mathbf{o}_k^
 
 Finally, the supervisor reenqueues the ACB onto the active scheduler queue. Providing the unprivileged model with an explicit causal signal during the subsequent autoregressive decode iteration allows the model to adapt—generating an alternative, lower-privilege plan, logging the blockage, or cleanly terminating its task hierarchy without corrupting external state.
 
-::: {#exmp-09-memory-seconds-and-sizing-of-escrow .callout-example title="Memory-seconds and sizing of escrow suspension pools"}
+::: {#nbk-09-memory-seconds-and-sizing-of-escrow .callout-notebook title="Memory-seconds and sizing of escrow suspension pools"}
 Consider an enterprise agent cluster hosting $N = 10{,}000$ active customer support trajectories. Across operational traces, trajectories encounter a high-consequence mutation requiring human escrow once every $20$ turns. Trajectories execute at an average turn generation time of $\tau_{\text{turn}} = 2.5\text{ s}$.
 
 Human operator review exhibits a median latency of $\bar{\tau}_{\text{human}} = 180\text{ s}$ ($3\text{ minutes}$), with an expiration lease set to $\tau_{\text{escrow}} = 600\text{ s}$ ($10\text{ minutes}$). We evaluate the physical memory footprint under two architectural choices:
@@ -999,7 +1037,7 @@ When all $S_{\max}$ sandboxes are in the `ASSIGNED` state, incoming tool executi
 2. *Class 2: Automated Task Remediation ($w = 2$):* Continuous-integration agents repairing compilation failures, broken test suites, or git merge conflicts.
 3. *Class 3: Background Batch Indexing ($w = 1$):* Offline code search indexing, synthetic data generation, and benchmark evaluation sweeps.
 
-::: {#exmp-09-wdrr-quantum-allocation-and-inference .callout-example title="WDRR quantum allocation and inference rate saturation"}
+::: {#nbk-09-wdrr-quantum-allocation-and-inference .callout-notebook title="WDRR quantum allocation and inference rate saturation"}
 Consider a single-node agent host server equipped with 32 CPU threads and $64\text{ GiB}$ of physical RAM, arbitrating access to an upstream model endpoint capped at an aggregate rate limit of $R_{\text{TPM}} = 120\text{,}000\text{ tokens/minute}$ ($2\text{,}000\text{ tokens/second}$). The runtime allocates $M_{\text{sandbox\_limit}} = 2\text{ GiB}$ per container sandbox, with $M_{\text{supervisor}} + M_{\text{buffer}} = 16\text{ GiB}$, establishing a maximum concurrency of:
 
 $$S_{\max} = \frac{64 - 16}{2} = 24\text{ concurrent sandboxes}$$
@@ -1117,7 +1155,7 @@ $$C_{\text{cost}}^{(k)} = C_{\text{cost}}^{(k-1)} + \left( p_{\text{prefill}} \c
 
 Here, $n_{\text{prefill}}^{(k)}$, $n_{\text{cache}}^{(k)}$, and $n_{\text{decode}}^{(k)}$ represent the uncached prompt tokens, cached prefix tokens, and generated completion tokens processed in turn $k$, with corresponding unit prices $p_{\text{prefill}}$, $p_{\text{cache}}$, and $p_{\text{decode}}$ (typically denominated in dollars per million tokens). The term $c_{\text{tool}}(t_{k,j})$ captures direct third-party invocation tariffs for external API calls, paid search engines, or specialized cloud functions executed during the turn's tool phase.
 
-::: {#exmp-09-multi-dimensional-accounting-and-prefix-cache .callout-example title="Multi-dimensional accounting and prefix cache pricing dynamics"}
+::: {#nbk-09-multi-dimensional-accounting-and-prefix-cache .callout-notebook title="Multi-dimensional accounting and prefix cache pricing dynamics"}
 **Scenario:** An autonomous agent executes an iterative software debugging trajectory over $k = 50$ turns against a frontier model runtime. The supervisor initializes the trajectory with the following hard ceilings:
 $$\mathbf{B} = \langle K_{\text{steps}}=80, N_{\text{tokens}}=1.5 \times 10^6, T_{\text{wall}}=900\text{ s}, C_{\text{cost}}=\$3.00, M_{\text{sandboxes}}=2 \rangle$$
 
@@ -1202,7 +1240,7 @@ Under Defensive Quarantine, the model is physically prevented from damaging host
 
 Finally, upon reaching **Phase 4: Hard Preemptive Termination** ($\rho_k \ge 1.00$), the supervisor halts execution deterministically. The control plane cancels pending inference generation, dispatches `SIGKILL` to all associated containerized sandbox processes, and transitions the ACB to `TERMINATED_FAILURE` tagged with the precise failure descriptor `ERR_BUDGET_EXHAUSTED(dimension_i)`. The runtime flushes the Write-Ahead Log (WAL) to durable storage, retains sandbox filesystem snapshots for diagnostic analysis, and returns partial artifacts to the calling user alongside a transparent accounting audit trail.
 
-::: {#callout-def-vol3-bounding-polytope .callout-note title="Multi-dimensional resource bounding polytope"}
+::: {#not-09-bounding-polytope .callout-note title="Multi-dimensional resource bounding polytope"}
 Let the agent consumption vector at turn $k$ be $\mathbf{u}_k = (u_{k,1}, u_{k,2}, \dots, u_{k,D}) \in \mathbb{R}^D_{\ge 0}$, measuring cumulative resource usage across $D$ dimensions (e.g., prompt tokens, decode tokens, tool executions, and financial expenditure). The supervisory operating space is bounded by the convex polytope:
 
 $$\mathcal{P}_{\text{admissible}} = \left\{ \mathbf{u} \in \mathbb{R}^D_{\ge 0} \;\middle|\; \forall i \in \{1,\dots,D\}, \; u_i \le B_i \right\}$$

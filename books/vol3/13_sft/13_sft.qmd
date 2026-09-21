@@ -86,13 +86,15 @@ A parallel failure occurs when serialization engines fail to maintain strict cau
 ![](images/svg/trajectory_serialization_pipeline.svg)
 :::
 
-In an autonomous architecture, dependable systems cannot be built on statistical sequence likelihood alone. In 1970, Edsger W. Dijkstra observed that *"Program testing can be used to show the presence of bugs, but never to show their absence"* [@dijkstra1970structured]. In agent systems, this principle defines the verification boundary: the host supervisor must never accept model self-reports of completion. The only dependable evidence of task progress is verifiable, empirical execution side effects—POSIX return codes, compiler diagnostics, and sealed unit test passes. Trajectory serialization must therefore faithfully preserve authentic empirical evidence. If a serialization script sanitizes logs by deleting nonzero exit codes, stripping compiler stack traces, or replacing real runtime errors with polite natural language summaries, it corrupts the policy's capacity to learn error recovery. The model must observe exact failure tokens in order to learn the corrective transitions demonstrated in fault-injected recovery traces.
+In an autonomous architecture, dependable systems cannot be built on statistical sequence likelihood alone.[^fn-dijkstra-testing-sft] Applying Dijkstra's testing principle (introduced in @sec-vol3-intro-operational-incident), the host supervisor must never accept model self-reports of completion; the only dependable evidence of task progress is verifiable, empirical execution side effects—POSIX return codes, compiler diagnostics, and sealed unit test passes. Trajectory serialization must therefore faithfully preserve authentic empirical evidence. If a serialization script sanitizes logs by deleting nonzero exit codes, stripping compiler stack traces, or replacing real runtime errors with polite natural language summaries, it corrupts the policy's capacity to learn error recovery. The model must observe exact failure tokens in order to learn the corrective transitions demonstrated in fault-injected recovery traces.
+
+[^fn-dijkstra-testing-sft]: **Testing Principle in SFT**: See @sec-vol3-intro-operational-incident for the foundational formulation of Dijkstra's testing principle; in supervised adaptation, this requires preserving raw execution exit codes in training traces so policies learn authentic recovery transitions.
 
 Simultaneously, the serialization engine must decouple meaningful empirical evidence from volatile environmental noise. Raw terminal streams from interactive containers are riddled with ANSI escape sequences (`\x1b[32m`), cursor positioning directives, carriage returns (`\r`), dynamic process IDs (PIDs), and non-deterministic clock times. These tokens carry zero causal invariant signal; if left unhygienic, they consume precious context window budget and force the model to allocate gradient capacity to predicting pseudorandom terminal noise. To preserve the integrity of the learning signal without exhausting the context budget, a production serialization pipeline enforces three continuous normalization transformations. First, ANSI and terminal control code stripping purges raw terminal escape sequences, cursor movements, and line resets while preserving indentation, semantic whitespace, and line breaks. Second, schema canonicalization deterministically sorts JSON dictionary keys, standardizes numeric representations, and enforces consistent delimiter spacing, ensuring that identical operational payloads map onto identical token sequences across disparate runs. Third, budgeted structural folding addresses tool outputs that exceed token limits, such as voluminous compiler dumps, directory trees, or database query results. Because naive head truncation erases the initial execution command and naive tail truncation discards critical exit codes and terminal stack traces, structural folding retains both the leading command invocation lines and the trailing diagnostic error frames, replacing intermediate redundant output lines with an explicit, deterministic placeholder token, such as `[... 1,420 lines folded ...]`.
 
 Furthermore, high-performing agent policies execute test-time deliberation to decompose goals, verify preconditions, and format tool call payloads before dispatching actions. The serialization contract must structurally separate internal reasoning from executable syntax. By wrapping deliberation inside explicit `<|thought|>` and `<|end_thought|>` delimiters and tool calls inside `<|call:tool_name|>` and `<|end_call|>`, the serialization format establishes clean syntactic boundaries. As detailed in the end-to-end flow of @fig-vol3-serialization-pipeline, Stage 1 captures the raw, asynchronous runtime ledger containing out-of-order events, process IDs, and ANSI escape sequences. Stage 2 executes the four-pass hygiene compiler, enforcing strict causal monotonicity ($t < T_k$), stripping non-deterministic noise, injecting non-decomposable role delimiters (`<|start_sys|>`, `<|start_asst|>`), and isolating internal deliberation from RPC payloads. Stage 3 emits the final contiguous 1D causal token sequence $\mathbf{x}_{1:S}$, establishing an invariant autoregressive order where each token $x_t$ attends strictly to its historical causal prefix without temporal leakage.
 
-::: {#exmp-13-memory-footprint-and-accelerator-throughput .callout-example title="Trajectory sanitization systems footprint"}
+::: {#nbk-13-memory-footprint-and-accelerator-throughput .callout-notebook title="Trajectory sanitization systems footprint"}
 **Problem:** An engineering team adapts an 8-billion parameter dense foundation model ($N = 8 \times 10^9$) across a curated corpus of 5,000 multi-turn software engineering trajectories collected from containerized SWE-bench execution fixtures. Training executes on an 8-GPU node of NVIDIA H100 SXM5 GPUs (80 GB HBM3 per GPU, 3.35 TB/s memory bandwidth, 989 TFLOPS peak dense BF16 compute).
 
 The raw, unsanitized trajectory corpus contains full interactive terminal logs, unparsed ANSI escapes, non-deterministic PIDs, and verbose compiler dumps. The mean raw sequence length is $\bar{L}_{\text{raw}} = 24{,}576$ tokens. Because of voluminous tool outputs, 35 percent of trajectories (1,750 traces) exceed the maximum context window of $L_{\max} = 32{,}768$ tokens, forcing the unhygienic data loader to apply naive tail truncation that clips the terminal unit test results and compensating actions.
@@ -192,6 +194,16 @@ A common misconception in training systems engineering is that setting $m_t = 0$
 
 This principle of selective gradient backpropagation was established by @schick2023toolformer in *Toolformer*. In that work, language models learned self-supervised tool usage by filtering candidate API invocations through an execution verification filter, computing loss exclusively over the inserted API call tokens and the subsequent task completion tokens. Applying loss over the external environment's response syntax was explicitly avoided, establishing that tool-augmented reasoning requires isolating the model's active decision surface from external state feedback.
 
+::: {#dfn-action-loss-masking .callout-definition title="Action-targeted loss masking"}
+
+***Action-targeted loss masking***\index{Action-targeted loss masking!definition}\index{Supervised fine-tuning!loss masking definition} is a selective backpropagation gating function $m_t \in \{0, 1\}$ in trajectory training that restricts cross-entropy gradient calculation strictly to policy-generated deliberation and action tokens ($x_t \in \mathcal{T}_{\text{rationale}} \cup \mathcal{T}_{\text{action}}$) while setting $m_t = 0$ over system prompts and environment observations.
+
+1.  **Significance**: Prevents gradient dilution and role conflation by ensuring parameter updates optimize action proposal and schema compliance rather than squandering finite capacity attempting to simulate deterministic external operating systems, compilers, or network APIs.
+2.  **Distinction**: Unlike standard causal language modeling (which computes unmasked cross-entropy uniformly across all tokens in the sequence), action-targeted loss masking treats prompt instructions and environment observations strictly as conditioning context via self-attention while zeroing their backward loss gradient $\frac{\partial \mathcal{L}}{\partial z_t} = \mathbf{0}$.
+3.  **Common pitfall**: Masking out the terminal end-of-turn delimiter token (`</tool_call>` or `<|eot_id|>`), which deprives the policy of gradients for yielding control back to the host supervisor, causing infinite autoregressive generation loops and runaway simulation during live deployment.
+
+:::
+
 ### Capacity allocation
 
 Why must masking follow the objective so strictly? The necessity arises from the finite representational capacity of the model's parameter tensors and the fundamental distinction between an action policy and a transition model. In any foundation model parameterized by weights $\theta$, parameter capacity governs how many distinct statistical relationships, syntactic rules, and cross-domain heuristics can be retained without catastrophic interference. When an engineering team applies unmasked fine-tuning to software engineering trajectories, they inadvertently task the network with solving two completely different learning objectives simultaneously:
@@ -274,7 +286,7 @@ The following unified diff illustrates the operational difference in model behav
 
 In the negative trace, the model trained without loss masking emitted a tool call and immediately hallucinated plausible test outputs within its own generation stream. The host supervisor detected that the agent attempted to advance its internal state without executing the command in the physical sandbox, aborting the trajectory. In the positive trace, the action-targeted model emitted its structured action, terminated its turn with the active `</tool_call>` delimiter, and yielded control to the host supervisor, ensuring verifiable, sandboxed execution.
 
-::: {#exmp-13-gradient-budget-and-compute-allocation .callout-example title="Compute allocation under action masking"}
+::: {#nbk-13-gradient-budget-and-compute-allocation .callout-notebook title="Compute allocation under action masking"}
 An engineering team is fine-tuning a 70-billion-parameter dense model ($N = 70 \times 10^9$) on software engineering trajectories using an accelerator cluster. The context window is configured to $S_{\max} = 16\text{K} = 16,384$ tokens.
 
 A representative trajectory in the training set exhibits the following profile across its multi-turn interaction:
@@ -317,7 +329,14 @@ $$\text{Memory}_{\text{masked\_logits}} = 2,360 \times 128,000 \times 2\text{ by
 Selective logit projection yields an immediate $85.6\%$ reduction in logit activation memory (a savings of $3.59\text{ GB}$ per sequence), while eliminating $2 \times (16,384 - 2,360) \times 8,192 \times 128,000 \approx 29.4\text{ TFLOPs}$ of unnecessary matrix multiplication in the output projection layer for every training step.
 :::
 
-When assembling batches of masked trajectories with wildly varying token lengths, how do we normalize loss across heterogeneous samples and pack sequences into fixed accelerator buffers without context cross-talk?
+::: {#chk-13-loss-masking .callout-checkpoint title="Evaluating action-targeted loss masking"}
+Before analyzing sequence packing and batching isolation, verify your understanding of loss masking mechanics:
+
+- [ ] **Loss targets**: Why must cross-entropy loss gradients be computed exclusively on agent actions and rationales while masking environment observations ($m_t = 0$)?
+- [ ] **Capacity allocation**: How does computing loss over external tool observations cause the policy to waste parameter capacity modeling compiler output syntax?
+- [ ] **Boundary delimiters**: Why must control tokens such as `<|im_start|>` and `<|im_end|>` be included in the loss mask?
+- [ ] **Logit projection memory**: How does gathering active hidden states before unembedding reduce peak accelerator activation memory during backpropagation?
+:::
 
 ## Sequence Packing Isolation {#sec-vol3-sft-batching}
 
@@ -378,6 +397,10 @@ Sequence packing eliminates this structural inefficiency by concatenating multip
 $$\sum_{k=1}^K L_k \le S_{\text{pack}}$$
 
 By assembling multiple trajectories into each allocated row, the effective token utilization of the accelerator buffer rises from under $20\%$ to greater than $98\%$. The non-computational padding is confined strictly to the residual margin at the terminal boundary of the packed buffer: $S_{\text{pack}} - \sum_{k=1}^K L_k$.
+
+::: {#dfn-sequence-packing .callout-definition title="Sequence packing"}
+A training optimization and data preconditioning mechanism that concatenates multiple independent variable-length sequences or agent execution traces into a single continuous tensor buffer of fixed capacity $S_{\text{pack}}$. By eliminating zero-gradient padding tokens, sequence packing maximizes accelerator compute density and memory bandwidth utilization while requiring 2D block-diagonal attention masking and position identifier resets to prevent cross-trajectory contamination.
+:::
 
 ::: {#nbk-13-packing-efficiency-and-compute-throughput .callout-notebook title="Sequence packing on an 8-GPU node"}
 An engineering team is fine-tuning an 8-billion parameter model ($d_{\text{model}} = 4,096$, $L = 32$ layers) on an 8-GPU node equipped with NVIDIA H100 SXM5 accelerators (80 GB HBM3 per GPU). The training dataset contains 20,000 agent trajectories. The empirical sequence length distribution has a mean $\mu = 2,800$ tokens, a standard deviation $\sigma = 1,900$ tokens, and a maximum length of $15,800$ tokens. The buffer limit is configured to $S_{\max} = 16,384$ tokens.
@@ -568,7 +591,7 @@ $$J(\pi_\theta) - J(\pi^*) \le \sum_{t=1}^N \mathbb{E}_{s \sim d_{\pi_\theta}^t}
 
 By training the policy to recover from the off-manifold states it actually encounters during execution, the error growth is bounded strictly linearly with the horizon $N$, transforming an unstable open-loop predictor into a dependable closed-loop controller.
 
-::: {#exmp-13-quantifying-trajectory-collapse-and-dagger .callout-example title="Trajectory collapse and DAgger recovery"}
+::: {#nbk-13-quantifying-trajectory-collapse-and-dagger .callout-notebook title="Trajectory collapse and DAgger recovery"}
 Consider an autonomous agent tasked with an end-to-end Python dependency migration and refactoring pipeline across an enterprise repository. The task requires $N = 50$ discrete tool invocations (directory discovery, AST parsing, modifying build targets, updating virtual environments, running test suites, and resolving runtime exceptions).
 
 The agent is driven by a 70-billion parameter model deployed on an 8-way NVIDIA H100 SXM5 node ($80\text{ GB}$ HBM3 per GPU). Each step processes an average input context of $16,384$ tokens and generates an action payload of $256$ tokens. The model achieves an offline validation accuracy of $98\%$ on nominal human demonstrations ($\epsilon = 0.02$).
@@ -656,7 +679,14 @@ When this synthesized trajectory is serialized into the training corpus, action-
 
 By systematically exposing the model to thousands of structured fault-and-recovery sequences, the policy builds robust internal representations across off-nominal states. Rather than treating an error returncode as an unmodeled catastrophe, the adapted network processes the diagnostic tokens as a standard conditioning prompt that activates dedicated self-healing routines.
 
-When training datasets are expanded to include multi-turn recovery sequences, fault-injection traces, and full tool schema descriptions, sequence lengths rapidly expand from a few thousand tokens to 32,768 or 65,536 tokens. Under standard full-parameter backpropagation with AdamW, storing the model weights, gradients, optimizer momentum buffers, and intermediate attention activations for an 8-billion or 70-billion parameter model quickly exceeds the physical high-bandwidth memory (HBM) capacity of even an 8-way H100 accelerator node. When training large models on long-context multi-turn trajectories, how do we fit backpropagation into physical accelerator memory?
+::: {#chk-13-trajectory-packing .callout-checkpoint title="Evaluating sequence packing and exposure bias"}
+Before analyzing parameter-efficient memory bounds and activation checkpointing, verify your understanding of batching and distribution drift:
+
+- [ ] **Attention contamination**: Why must block-diagonal 2D attention masks be enforced when packing multiple independent trajectories into a single sequence?
+- [ ] **Position resets**: How does resetting rotary position embeddings (RoPE) at trajectory boundaries prevent false cross-sequence positional dependencies?
+- [ ] **Exposure bias**: Why does training exclusively on human or teacher-generated actions cause error compounding during autonomous multi-turn rollouts?
+- [ ] **DAgger mechanics**: How does interactive dataset aggregation with expert relabeling stabilize policy execution on off-nominal environment states?
+:::
 
 ## Parameter-Efficient Memory Bounds {#sec-vol3-sft-peft}
 
@@ -770,7 +800,7 @@ By combining low-rank parameter adaptation with selective activation checkpointi
 
 : **Accelerator Memory Breakdown for Agent Adaptation**: Comprehensive accelerator memory breakdown across model scales and context lengths under Full SFT, LoRA, and QLoRA configurations with selective activation checkpointing. Values assume micro-batch size $B=1$ and FlashAttention-2 integration. {#tbl-vol3-sft-memory-breakdown}
 
-::: {#exmp-13-high-bandwidth-memory-budgeting-for-an .callout-example title="HBM budgeting for an agent policy"}
+::: {#nbk-13-high-bandwidth-memory-budgeting-for-an .callout-notebook title="HBM budgeting for an agent policy"}
 Consider designing an adaptation job for a 32-billion parameter model ($L = 64$, $d_{\text{model}} = 5120$, $d_{\text{ffn}} = 27392$, 40 attention heads) trained on packed tool trajectories up to $T = 32{,}768$ tokens with per-device batch size $B=1$. The team must decide whether to provision an 8-way H100 node or execute the fine-tuning run on a single 80 GB H100 accelerator.
 
 **Step 1: Calculate Static Memory for Full SFT vs. LoRA vs. QLoRA**
@@ -909,7 +939,7 @@ The fourth operator is *Schema-Dropout* ($\mathcal{P}_{\text{drop}}$). Real-worl
 
 : **Schema Regularization Operators for Trajectory Adaptation**: Mathematical transformations, mitigated failure modes, and training overheads across perturbation operators. {#tbl-vol3-schema-perturbation-operators}
 
-::: {#exmp-13-attention-entropy-and-memory-footprint .callout-example title="Attention entropy under distractor scaling"}
+::: {#nbk-13-attention-entropy-and-memory-footprint .callout-notebook title="Attention entropy under distractor scaling"}
 Consider fine-tuning a 70-billion-parameter policy ($L = 80$ layers, $d_{\text{model}} = 8192$, $n_{\text{heads\_kv}} = 8$ key-value heads, $d_{\text{head}} = 128$) using grouped-query attention. The base context includes a system prompt and conversation history totaling $S_{\text{base}} = 2048$ tokens, which defines 3 active tools occupying an average of 150 tokens each ($S_{\text{tools}} = 450$ tokens).
 
 To train tool discrimination, the compiler injects $K_{\text{distractor}} = 8$ distractor tool schemas, expanding the prompt by:
@@ -1034,6 +1064,14 @@ Despite exhibiting a significantly *worse* validation cross-entropy ($1.62$ vs. 
 :::
 
 The divergence illustrated in the worked example stems from the fundamental gap between passive pattern matching and closed-loop control. In an operating system, optimizing the CPU scheduler solely to maximize instruction-cache hit rates can result in severe thread starvation and priority inversion. Similarly, optimizing an agent policy solely for token-level predictive certainty produces a model that is confident along nominal trajectories but brittle when confronted with dynamic runtime environments. Robust systems engineering requires a multi-dimensional scorecard that evaluates the model along its true operational axes.
+
+::: {#psp-13-the-imitation-trap-in-agent-sft .callout-perspective title="The imitation trap in agent policy adaptation"}
+In classical statistical language modeling, minimizing token-level cross-entropy loss ($\mathcal{L}_{\text{CE}}$) reliably tracks downstream capability because language generation is predominantly open-loop: slight perturbations in phrasing rarely invalidate subsequent sentence completions. In agentic systems operating inside closed-loop execution environments, however, optimizing an unconstrained token-level log-loss falls into what systems researchers identify as the **imitation trap**.
+
+Autoregressive cross-entropy under teacher forcing evaluates how accurately a policy predicts historical demonstration tokens when conditioned on an infallible prefix. In production execution, teacher forcing vanishes. The agent must autoregressively condition on its own prior emissions and external environment observations. Because agent correctness is a non-linear, step-function property—a single malformed quote in an invocation payload crashes the shell or invalidates the JSON parser—offline log-loss suffers from severe structural blind spots. A policy can slash its cross-entropy by achieving near-certainty on thousands of boilerplate formatting characters, high-frequency syntax tokens, and repetitive reasoning prefixes, yet remain fundamentally incompetent at making critical, branch-point decisions.
+
+Worse, nominal demonstration datasets teach the model only how to behave when all preceding steps were correct. Because held-out validation sets mirror this pristine distribution, low validation perplexity provides zero mathematical assurance that the policy can withstand environmental stochasticity, parse diagnostic compiler errors, or formulate compensatory actions. When an agent trained via unadorned imitation encounters an unmodeled runtime failure, covariate shift drives the policy into off-nominal states where it has received zero gradient signal, triggering catastrophic trajectory collapse. A robust agent policy cannot be produced by maximizing predictive certainty over the happy path; it demands an engineering shift from passive token imitation to interactive, closed-loop credit assignment that directly penalizes execution failure and reinforces systematic recovery.
+:::
 
 ### The multi-dimensional evaluation scorecard {#sec-vol3-sft-eval-scorecard}
 
@@ -1262,7 +1300,7 @@ To maximize hardware throughput on Tensor Core architectures, sequence packing u
 $$U_{\text{pack}} = \frac{\sum_{k=1}^K T_k}{B_{\text{global}} \cdot S_{\max}} \times 100\%$$
 In unpadded naive batching, where trajectories of median length $2.4\text{k}$ tokens are padded to $32\text{k}$ with zeros, $U_{\text{pack}}$ drops below $10\%$. More than $90\%$ of matrix multiplication cycles compute arithmetic over mask zeros. Dynamic bin packing packs multiple non-interacting trajectories into each sequence, driving $U_{\text{pack}} \ge 96\%$ and multiplying real-world training throughput by nearly an order of magnitude.
 
-::: {#exmp-13-sft-accelerator-budget-for-a .callout-example title="SFT accelerator budget for a 70B policy"}
+::: {#nbk-13-sft-accelerator-budget-for-a .callout-notebook title="SFT accelerator budget for a 70B policy"}
 **Scenario:** An engineering team adapts a 70-billion-parameter foundation model ($L = 80, d_{\text{model}} = 8192, d_{\text{ff}} = 28{,}672$) on a cluster node containing 8 $\times$ NVIDIA H100 SXM5 GPUs (80 GB HBM3 per GPU, 989 TFLOP/s bfloat16 dense Tensor Core peak). The training dataset contains $10^8$ tokens of curated multi-turn agent trajectories. The adaptation configuration sets context window $S_{\max} = 32{,}768$, batch size per GPU $b = 1$, and gradient accumulation steps $= 8$, yielding an effective global batch size of $B_{\text{global}} = 8 \times 1 \times 8 = 64$ sequences ($\approx 2.1 \times 10^6$ tokens per parameter update). LoRA rank is $r = 64$ with $\alpha = 128$, targeted at all seven linear projections ($W_q, W_k, W_v, W_o, W_{\text{gate}}, W_{\text{up}}, W_{\text{down}}$). Full activation checkpointing is enabled.
 
 **1. Calculate Trainable Parameters ($N_{\text{train}}$):**

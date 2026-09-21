@@ -59,9 +59,21 @@ In an agentic architecture, we observe a modern design precedent: "everything is
 
 The absolute necessity of this supervisory runtime becomes evident when examining the failure modes of unmediated execution. A naive implementation might treat the model's text generation as a direct command stream, passing raw generated strings directly into an `eval()` interpreter or a POSIX shell. Such an unmediated architecture immediately collides with the open-loop failure wall. First, free-form text generation is inherently vulnerable to lexical perturbations: misplaced quotation marks, unescaped shell metacharacters, malformed argument lists, and hallucinated command-line flags inevitably corrupt the string, causing downstream interpreters to abort with unhandled syntax faults. Second, and far more insidiously, unmediated execution suffers from an irreconcilable epistemic gap. A neural foundation model possesses no direct perception of the external universe; its internal parameters represent frozen historical associations. If an agent attempts to manipulate an external environment in an open loop—emitting a sequence of speculative operations without pausing to observe intermediate physical feedback—its internal state estimates rapidly diverge from the physical reality of the host system. A missing file, a transient 503 HTTP gateway timeout, or a subtle compiler type error renders every subsequent planned operation invalid. Unobserved execution errors compound exponentially across multi-step execution graphs, rapidly driving the trajectory into degenerative hallucination or catastrophic corruption of external state.
 
-To arrest this exponential error compounding, the agent runtime must enforce closed-loop execution grounded in empirical verification. Decades ago, Edsger Dijkstra observed that program testing can be used to show the presence of bugs, but never to show their absence. In agentic engineering, this principle takes on an inverted operational significance: while a foundation model's internal deliberation can never mathematically guarantee the correctness of a proposed modification, external deterministic execution provides the only authoritative mechanism to verify whether an operation actually succeeded or failed. The model hypothesizes; the physical computing environment decides. Implementing this empirical feedback loop requires complete mediation—a foundational security principle established by Jerome Saltzer and Michael Schroeder (1975), dictating that every access to every resource must be validated along an unbypassable path. In the agentic tool subsystem, complete mediation is realized through a deterministic four-stage tool execution lifecycle:
+To arrest this exponential error compounding, the agent runtime must enforce closed-loop execution grounded in empirical verification.[^fn-dijkstra-testing-actuation] In accordance with Dijkstra's testing principle (introduced in @sec-vol3-intro-operational-incident), a foundation model's internal deliberation can never mathematically guarantee the correctness of an actuation proposal; external deterministic execution provides the only authoritative mechanism to verify whether an operation actually succeeded or failed. The model hypothesizes; the physical computing environment decides. Implementing this empirical feedback loop requires complete mediation—a foundational security principle established by Jerome Saltzer and Michael Schroeder (1975), dictating that every access to every resource must be validated along an unbypassable path. In the agentic tool subsystem, complete mediation is realized through a deterministic four-stage tool execution lifecycle:
+
+[^fn-dijkstra-testing-actuation]: **Testing Principle in Actuation**: As established in @sec-vol3-intro-operational-incident, deterministic test harnesses provide empirical falsification across the actuation boundary, distinguishing observed evidence from model hallucination.
 
 First, during *proposal validation against schema*, the host runtime intercepts the candidate token stream emitted by the model, parses the serialized payload across the memory boundary, and rigorously validates the proposed arguments against a pre-registered interface schema. Syntactic malformations, missing required fields, and out-of-bounds types are rejected at the memory boundary before any network socket is opened or external process spawned. Second, during *permission and capability gating*, the runtime acts as an authoritative reference monitor under the principle of Zero Ambient Authority ($A=0$). Even if a model proposes a syntactically flawless command, the runtime verifies whether the active agent session holds explicit capability grants for the targeted operation, enforcing read-only constraints, path sandboxing policies, and rate limits. Third, during *dispatched execution*, the validated and authorized operation is delegated to an isolated external driver or RPC endpoint. The runtime manages network timeouts, monitors execution latencies, and tracks process handles without stalling the primary supervisory loop. Fourth, during *observation normalization and context staging*, the runtime captures the raw, heterogeneous telemetry produced by the external environment—standard output streams, exit codes, diagnostic traces, or structured JSON responses. It sanitizes control characters, enforces backpressure and strict token truncation boundaries to prevent accelerator context exhaustion, and wraps the result in an authoritative observation envelope that is staged back into the model's working memory context.
+
+::: {#dfn-complete-mediation .callout-definition title="Complete mediation"}
+
+***Complete mediation***\index{Complete mediation!definition}\index{Tool actuation!complete mediation definition} is an architectural security invariant requiring that every candidate token emission proposing environment mutation traverse an unbypassable supervisory verification pipeline prior to physical execution.
+
+1.  **Significance**: Guarantees that unprivileged stochastic model emissions cannot bypass capability checks, tamper with host processes, or execute unvetted side effects, enforcing Zero Ambient Authority ($A=0$) across physical environment boundaries.
+2.  **Distinction**: Unlike classical operating system syscall mediation (which checks static UID/GID bits across synchronous context switches), agentic complete mediation verifies dynamic schema conformity, cryptographic capability leases, and idempotency replay tokens before dispatching to isolated execution sandboxes.
+3.  **Common pitfall**: Relying on prompt steering ("You must not execute dangerous shell commands") or unmediated wrapper scripts, which allows prompt injection or tool hallucination to compromise host resources directly.
+
+:::
 
 The complete mediation architecture governing tool actuation is systematized across protection rings in @fig-vol3-ai-system-call-boundary. In Ring 3 (User Space), the unprivileged foundation model operates under Zero Ambient Authority ($A=0$), generating candidate tool tokens that are held in an escrow register rather than executing directly against host operating system interfaces. When a complete tool invocation sequence is emitted, the register asserts an AI system call software trap (`SYS_TOOL_CALL`), yielding control across the privilege boundary into Ring 0 (Supervisor Space). The host supervisor routes the candidate payload through four sequential verification gates: (1) a Grammar DFA Filter that enforces schema-constrained logit masking ($P(\text{syntax\_err}) = 0$); (2) a Strict ABI Deserializer that hydrates typed structs while validating memory bounds; (3) a Capability and Lease Checker that validates cryptographic HMAC tokens and path allowlists to defeat directory traversal exploits; and (4) an Idempotency and Replay Engine that inspects the trajectory nonce $k_{\text{idem}}$ against write-ahead storage. Only after passing all four gates does the supervisor dispatch authorized calls into isolated execution domains (such as Firecracker microVMs, gVisor containers, or enterprise API gateways). Once physical actuation concludes, the resulting observation stream and exit code return upward via a `SYSRET` transition, resuming the unprivileged model with an authoritative observation envelope staged in working memory. In parallel, @tbl-vol3-tool-descriptors systematizes this structural duality, comparing the classic UNIX file descriptor architecture with the agentic tool descriptor table.
 
@@ -206,7 +218,7 @@ Consider a runtime managing a catalog of $M = 50$ distinct tools. If each tool s
 $$T_{\text{catalog}} = M \times S = 50 \times 300 = 15,000\text{ tokens}$$
 These $15,000$ tokens must be prefilled before the model can process the user's initial query, and they must remain resident in accelerator memory across every turn of the agentic interaction.
 
-::: {#exmp-07-memory-footprint-and-prefill-latency .callout-example title="Memory footprint and prefill latency of static tool catalogs"}
+::: {#nbk-07-memory-footprint-and-prefill-latency .callout-notebook title="Memory footprint and prefill latency of static tool catalogs"}
 Consider an enterprise agent runtime orchestrating tasks using a static catalog of $M = 50$ tools ($15,000$ tokens total) served by an open-weights model with $P = 70.6 \times 10^9$ parameters (such as Llama-3-70B) deployed on an 8-GPU NVIDIA H100 SXM5 node.
 
 The model utilizes Grouped-Query Attention (GQA) with $L = 80$ transformer layers, $H_q = 64$ query heads, $H_{kv} = 8$ key-value heads, and a head dimension of $D_h = 128$. Compute operations and KV cache activations use 16-bit precision ($b = 2\text{ bytes per element}$).
@@ -322,7 +334,7 @@ For distributed enterprise environments, the protocol supports remote networked 
 
 This physical decoupling introduces a substantial systems tax. Network round-trip times (RTT), TCP handshakes, TLS session negotiation, packet fragmentation across Maximum Transmission Units (MTUs), and reverse-proxy buffering introduce tens to hundreds of milliseconds of latency overhead per tool invocation. In an iterative agentic loop requiring dozens of sequential tool dispatches to resolve a complex task, this latency overhead rapidly outstrips the token generation latency of the underlying inference engine.
 
-::: {#exmp-07-latency-and-cpu-overhead-across .callout-example title="Latency and CPU overhead across MCP transports"}
+::: {#nbk-07-latency-and-cpu-overhead-across .callout-notebook title="Latency and CPU overhead across MCP transports"}
 Consider an agent runtime executing a code-analysis task. The model issues a candidate tool call to search a repository, resulting in a structured JSON-RPC observation payload of exactly $64\text{ KB}$ ($65{,}536\text{ bytes}$). We evaluate the physical transfer latency and host CPU overhead across two distinct transport topologies: a local UNIX Domain Socket versus an intra-data center HTTP/SSE transport secured via TLS 1.3.
 
 **System Parameters:**
@@ -374,7 +386,24 @@ To preserve system integrity, the host agent runtime must enforce a sovereign au
 
 This architectural division directly reflects the End-to-End Argument in System Design formulated by Saltzer, Reed, and Clark in 1984. The communication protocol (MCP) provides a uniform mechanism for moving bits and structuring RPC requests between endpoints. However, the critical functions of the system—correctness, security, permission enforcement, and task invariant verification—can only be completely and correctly implemented by the endpoint that understands the full application semantics: the sovereign host runtime. An external server cannot verify whether an action aligns with the user's broader task goal; the transport channel cannot verify whether an action violates least privilege. The host runtime retains exclusive responsibility for mediating every transition from candidate token to external effect.
 
-When these tool invocations cross process or network boundaries and encounter partial failures, this mediation faces an even harder challenge. If a network connection abruptly severs or an intermediate proxy times out during a mutating `tools/call` dispatch, the runtime is plunged into operational uncertainty: Did the remote server complete the mutation before the connection dropped, or did the network fail before the server processed the request? Retransmitting the request blindly risks executing catastrophic duplicate side effects, while abandoning it risks desynchronizing the agent's internal state from physical reality. Resolving this dilemma requires transitioning from transport protocol framing to the mechanics of application-level execution idempotency.
+::: {#psp-07-the-illusion-of-schema-enforcement .callout-perspective title="The illusion of schema enforcement and the end-to-end actuation problem"}
+Modern tool-use frameworks often treat structural schema validation as a security boundary: if a generated tool call validates against its JSON Schema specification, the runtime treats the action as safe to dispatch. This conflates syntactic structure with operational authorization.
+
+An unprivileged foundation model generates text; it does not comprehend system security boundaries. A JSON schema can guarantee that an argument named `target_path` is a string, but it cannot verify whether that string resolves to `../../etc/shadow` through path traversal, whether the target branch in a git command is protected, or whether a database deletion violates organizational retention policies. Passing a syntactically valid payload to a subprocess without host mediation merely automates the exploitation of ambient system privileges.
+
+Furthermore, actuation safety is strictly bidirectional. When an external tool completes execution, its output stream returns as untrusted data into the model's context window. An uninspected observation payload containing indirect prompt injections can reprogram the agent's deliberative loop on the subsequent turn—turning an innocent tool read into an adversarial takeover.
+
+**Systems insight**: Tool schemas define serialization grammar, not execution safety. Complete mediation requires that the host runtime acts as a sovereign reference monitor: validating capability leases on egress before touching the OS, and sanitizing observation streams on ingress before exposing tokens to the neural processor.
+:::
+
+::: {#chk-07-complete-mediation .callout-checkpoint title="Evaluating tool schemas and complete mediation"}
+Before analyzing idempotent execution mechanics, verify your understanding of tool contracts and host authorization:
+
+- [ ] **Schema validation**: Why must parameter validation (types, ranges, path traversals) execute strictly on the host supervisor before reaching child processes?
+- [ ] **Capability tiers**: How does partitioning actions into read-only ($C_0$), reversible ($C_1$), and irreversible ($C_2$) tiers prevent unrecoverable side effects?
+- [ ] **Transport boundaries**: Why does an RPC protocol like MCP fail to satisfy complete mediation without host-level authorization?
+- [ ] **Observation injection**: What sanitization steps prevent untrusted tool output streams from injecting adversarial prompt instructions into future turns?
+:::
 
 ## Idempotent Action Execution {#sec-vol3-actuation-idempotency}
 
@@ -392,6 +421,10 @@ When a host supervisor dispatches a mutating tool request across a process or ne
 An operation $f: S \to S$ operating on system state $S$ is algebraically idempotent if and only if:
 $$f(f(s)) = f(s) \quad \forall s \in S$$
 In distributed systems, an RPC interface is idempotent if the side effects of $N > 1$ identical requests are identical to the side effects of a single request ($N = 1$).
+:::
+
+::: {#dfn-idempotent-action .callout-definition title="Idempotent action"}
+An environmental actuation whose repeated application produces the exact same system state as a single execution ($f(f(s)) = f(s)$), guaranteeing that transport retries under timeout ambiguity cannot induce duplicate mutations.
 :::
 
 ### The indeterminate state under network failure
@@ -484,7 +517,7 @@ $$T_{\text{lease}} > \tau_{\text{timeout}} + \delta_{\text{drift}} + \tau_{\text
 
 where $\delta_{\text{drift}}$ accounts for the maximum allowable clock skew between nodes, and $\tau_{\text{proc\_max}}$ represents the upper bound on server-side processing latency before an execution is aborted.
 
-::: {#exmp-07-quantifying-actuation-blast-radius-and .callout-example title="Quantifying actuation blast radius and lease bounds"}
+::: {#nbk-07-quantifying-actuation-blast-radius-and .callout-notebook title="Quantifying actuation blast radius and lease bounds"}
 **Scenario:** An agent runtime manages a cluster of 50 autonomous workers interacting with an external infrastructure provisioning API.
 
 **Empirical Parameters:**
@@ -581,7 +614,7 @@ The interaction between an agent runtime and its external tools exhibits a funda
 
 When an agent runtime blindly ingests an unbounded observation stream into the context array, the cost is paid directly in accelerator memory and compute. In modern Transformer runtimes, context consumption is not merely an abstract limit on sequence length; it dictates the physical allocation of physical memory blocks within the serving system's PagedAttention pool. Every admitted observation token must be projected into key and value tensors and stored in the accelerator's HBM for the duration of the agent's multi-turn trajectory.
 
-::: {#exmp-07-physical-memory-and-compute-overhead .callout-example title="Physical memory and compute overhead of untruncated ingestion"}
+::: {#nbk-07-physical-memory-and-compute-overhead .callout-notebook title="Physical memory and compute overhead of untruncated ingestion"}
 Consider an autonomous agent executing a software verification task using an unprivileged runtime supervisor. The model issues a compact command: `pytest -v tests/unit/`. The command triggers a regression suite that runs $4,500$ unit tests, generating $24\text{ MB}$ of stdout across $520,000$ lines.
 
 Assume standard Byte-Pair Encoding (BPE) yields approximately $4\text{ bytes}$ per token, converting the $24\text{ MB}$ stream into:
@@ -776,7 +809,7 @@ A second, more severe source of stream inflation arises from carriage return (`\
 
 To resolve this visual redundancy into clean textual observations, the sanitization pipeline models a virtual one-dimensional line buffer. When the parser encounters printable characters, it writes them into the buffer at the current virtual cursor position, advancing the cursor scalar. When the parser encounters `\r` without an immediate `\n`, it resets the virtual cursor position to column zero without clearing the line buffer. Subsequent characters overwrite the contents of the buffer at their respective column offsets. Only when a true line feed (`\n`) or stream EOF occurs does the runtime commit the contents of the line buffer to the sanitized observation record. This collapses hundreds of transient visual frames into the single, final state of the line, eliminating up to 99 percent of raw byte volume while preserving the authoritative terminal state.
 
-::: {#exmp-07-token-inflation-and-prefill-overhead .callout-example title="Token inflation and prefill overhead from unsanitized progress streams"}
+::: {#nbk-07-token-inflation-and-prefill-overhead .callout-notebook title="Token inflation and prefill overhead from unsanitized progress streams"}
 Consider an agent tool executing a remote artifact download. Over a 30-second duration, the process emits an updating progress bar at 20 Hz, generating 600 total update cycles. Each update consists of an ANSI cursor positioning code (6 bytes), an SGR green color marker (5 bytes), a 60-character progress bar string (`[=========> ] 45% 450MB/1000MB`), an SGR reset code (4 bytes), and a carriage return `\r` (1 byte), totaling 76 bytes per frame.
 
 **Raw Pipe Byte Volume:**
@@ -868,7 +901,14 @@ Finally, when the observation stream exceeds the physical or logical budget $B_{
 
 To prevent these epistemic failures, the normalization pipeline envelopes truncated observations with deterministic, standardized headers and footers. The header explicitly declares that truncation occurred, states the exact token and line bounds enforced, clarifies whether the preserved window represents the head or the tail of the stream, and directs the model to the unexpurgated log file saved on disk (as illustrated in @lst-vol3-observation-sanitization). Armed with this structured envelope, the model recognizes that missing context is an artifact of runtime resource governance rather than a target environment failure, allowing it to issue targeted pagination commands or inspect specific log slices deliberately.
 
-Deterministic stream sanitization guarantees that observations entering the context window are bounded, free of terminal presentation noise, and explicitly grounded in operating system status. Yet this normalization pipeline assumes a synchronous execution model: the foundation model halts generation, the runtime dispatches a child process, the supervisor blocks until execution completes, and the sanitized output is appended to the prompt for the next turn. In production agent architectures, this synchronous assumption breaks down. A comprehensive unit test suite may execute for three minutes; a container build or static analysis pass may require twenty minutes; an external web scrape or data warehouse query may run for hours. If the agent runtime blocks its inference loop on long-running tasks, it pins valuable accelerator memory, locks KV caches, and leaves the model incapable of coordinating concurrent operations. How can an agent runtime decouple execution latency from inference scheduling without abandoning execution guarantees? We turn next to the mechanics of asynchronous tool dispatch.
+::: {#chk-07-idempotency-recovery .callout-checkpoint title="Evaluating idempotency and observation sanitization"}
+Before examining asynchronous dispatch and background process governance, verify your understanding of tool fault recovery:
+
+- [ ] **Timeout ambiguity**: Why does a network timeout during a mutating RPC dispatch yield zero information regarding remote server execution?
+- [ ] **Idempotency keys**: How do cryptographically unique execution tokens prevent duplicate mutations during automatic client retries?
+- [ ] **Reconciliation probes**: When an external API lacks native idempotency support, what probe sequence verifies remote state before retrying?
+- [ ] **Truncation envelopes**: Why must observation stream truncation append structured metadata headers instead of silently cutting raw text?
+:::
 
 ## Asynchronous Tool Dispatch {#sec-vol3-actuation-async}
 
@@ -949,7 +989,7 @@ Once a task executes asynchronously in the background, the runtime requires an a
 
 The first paradigm, *model-driven busy-polling*, is an anti-pattern that emerges when developers expose a polling tool (such as `get_job_status(job_id)`) and prompt the foundation model to check repeatedly until the task completes. Under this pattern, every single status check triggers a complete autoregressive inference turn. The serving engine must process the entire accumulated trajectory history ($S_{\text{ctx}}$ tokens) during prefill, and the model must decode dozens of tokens to generate the polling tool call and acknowledge the pending state. In long-running tasks, this burns millions of tokens purely to query an unchanged boolean state.
 
-::: {#exmp-07-token-cost-and-inference-overhead .callout-example title="Token cost and inference overhead of busy-polling vs. event-driven wakeup"}
+::: {#nbk-07-token-cost-and-inference-overhead .callout-notebook title="Token cost and inference overhead of busy-polling vs. event-driven wakeup"}
 **Problem:** An agent initiates an integration test suite that executes for $T = 300\text{ s}$ ($5\text{ minutes}$). The current conversation context length is $S_{\text{ctx}} = 32{,}768\text{ tokens}$. We compare two architectures:
 
 1. *Model-Driven Busy-Polling:* The model queries `get_job_status` every $\Delta t = 5\text{ s}$. Each poll turn generates $40\text{ tokens}$ of tool invocation, the runtime returns $50\text{ tokens}$ of pending status ("Job running, elapsed: 45s"), and the model generates $30\text{ tokens}$ acknowledging the wait ($120\text{ tokens}$ added per turn).
@@ -1086,7 +1126,7 @@ $$H(P_{\text{tool}}) = -\sum_{i=1}^{N} P(t_i \mid \mathcal{C}) \log_2 P(t_i \mid
 
 High entropy in the tool-routing distribution manifests empirically as tool-selection error $\epsilon_{\text{select}}$, where the model hallucinates non-existent tool names, invents phantom arguments by blending signatures across distinct tools, or selects a sub-optimal endpoint that fails to satisfy the task. While larger, frontier-class dense models possess sufficient representational capacity to disambiguate larger catalogs than smaller quantized models, performance does not scale indefinitely. Above a workload-dependent saturation threshold, expanding the catalog degrades task completion rates: the model becomes overwhelmed by competing schema descriptions, while the latency of the prefill stage increases proportionally with $S_{\text{schema}}$.
 
-::: {#exmp-07-quantifying-kv-cache-memory-and .callout-example title="Quantifying KV cache memory and throughput tax across tool catalogs"}
+::: {#nbk-07-quantifying-kv-cache-memory-and .callout-notebook title="Quantifying KV cache memory and throughput tax across tool catalogs"}
 Consider an agent system deployed on an 8-GPU node running a 70-billion parameter foundation model using Grouped-Query Attention (GQA). The architecture specifies $L = 80$ transformer layers, a hidden dimension $d_{\text{model}} = 8192$, and $n_{\text{kv}} = 8$ key-value heads per layer, with a head dimension of $d_{\text{head}} = 128$. All activations are held in 16-bit precision ($\text{FP16}$, 2 bytes per element).
 
 The memory allocated to store the KV cache for a single token across all layers is:

@@ -70,11 +70,7 @@ To construct dependable systems around foundation models, computer systems engin
 
 : **The Machine Learning Systems Rosetta Stone**: Translating statistical abstractions into operating systems and architectural primitives. {#tbl-vol3-ml-systems-rosetta}
 
-::: {.column-margin}
-**Zero Ambient Authority ($A=0$):** A foundational systems security principle where an unprivileged execution unit possesses no native ambient rights to inspect, mutate, or allocate external system resources. Every privileged operation requires explicit supervisor mediation, capability verification, and policy enforcement.
-:::
-
-The defining systems reality of foundation model execution is **Zero Ambient Authority** ($A = 0$). When a model autoregressively generates the text string `rm -rf /` or emits a structured JSON object requesting the deletion of a database table, exactly zero bytes on the host operating system are altered. The generated string is not an executing process; it is merely an array of integer token identifiers resident in high-bandwidth memory (HBM) on a GPU or TPU. The token array is transferred across an interconnect bus, decoded into characters by an inference daemon, and deposited into a user-space memory buffer managed by the host agent supervisor. The candidate output resides entirely in memory escrow. It has no ambient authority to modify host memory, invoke operating system primitives via `sys_call_table`, allocate network sockets, or manipulate peripheral devices.
+The defining systems reality of foundation model execution is **Zero Ambient Authority** ($A = 0$). When a model autoregressively generates the text string `rm -rf /` or emits a structured JSON object requesting the deletion of a database table, exactly zero bytes on the host operating system are altered. The generated string is not an executing process; it is merely an array of integer token identifiers resident in high-bandwidth memory (HBM) on an accelerator board. The token array is transferred across an interconnect bus, decoded into characters by an inference daemon, and deposited into a user-space memory buffer managed by the host agent supervisor. The candidate output resides entirely in memory escrow. It has no ambient authority to modify host memory, invoke operating system primitives via `sys_call_table`, allocate network sockets, or manipulate peripheral devices.
 
 This physical boundary separates the modern agent runtime into a clean three-tier architecture (@fig-vol3-three-tier-architecture). At the foundation sits the **Neural Core**, consisting of dense matrix-multiplication hardware units (such as GPU Streaming Multiprocessors or TPU Tensor Cores) executing low-level tensor contractions over static parameter matrices $\mathbf{\Theta}$ resident in high-bandwidth memory (HBM). Mediating access to the Neural Core is the **Inference Service Daemon**, a high-performance system service (such as vLLM, SGLang, or an optimized vendor runtime) that manages physical accelerator allocation, schedules batched inference requests, manages key-value tensor memory via PagedAttention, and coordinates the autoregressive generation loop. Finally, running in host user space sits the **Host Agent Runtime**, the authoritative supervisor. The host runtime owns the environmental state, holds administrative credentials, stages the model context, enforces hardware resource and latency budgets, and validates all candidate outputs before granting them execution authority.
 
@@ -84,9 +80,29 @@ As mapped in @fig-vol3-three-tier-architecture, these tiers are separated by phy
 ![](images/svg/ch02-three-tier-architecture.svg)
 :::
 
+::: {#dfn-zero-ambient-authority .callout-definition title="Zero ambient authority"}
+
+***Zero ambient authority***\index{Zero ambient authority!definition}\index{Privilege separation!zero ambient authority definition} ($A = 0$) is the foundational systems security invariant wherein an unprivileged execution unit—specifically a foundation model core—possesses zero native rights to inspect, mutate, or allocate external system resources: $\text{Privileges}(\pi_\theta) = \emptyset$.
+
+1.  **Significance**: Guarantees that raw token predictions emitted by accelerator matrix multiplication units remain in host memory escrow, preventing unverified model outputs from directly modifying persistent filesystems, invoking kernel syscalls, or executing network I/O.
+2.  **Distinction**: Unlike classical operating system processes that inherit the ambient permissions of their user context (UID/GID), a stochastic model core has zero ambient capability; every privileged operation requires explicit supervisor interception, schema validation, capability checking, and sandboxed dispatch.
+3.  **Common pitfall**: Granting ambient credentials or raw system access to agent processes (such as mounting host root directories into containers or passing unrestricted API keys into system prompts), allowing prompt injection or hallucinated actions to compromise host infrastructure.
+
+:::
+
 The architectural distinction between classical processors and neural inference engines dictates an entirely different approach to fault tolerance. Classical hardware systems are predominantly **fail-stop**: when a physical component suffers an irrecoverable fault, or when a program attempts an operation that violates hardware invariants, execution halts immediately and unambiguously. The failure is observable, localized, and verifiable. Foundation models, by contrast, are fundamentally **fail-plausible**. The training objective of an autoregressive model—minimizing cross-entropy loss over vast corpora of natural language and code—forces the network to model human surface fluency.
 
 When a model encounters a problem beyond its capability, an ambiguous context, or an internally contradictory prompt, it does not halt execution, raise a trap, or return an error code. Instead, its internal probability distribution shifts toward tokens that maximize surface plausibility. The engine smoothly emits syntactically pristine, beautifully formatted, yet entirely fabricated or dangerous output. A code generation model will emit an implementation that compiles cleanly, references non-existent third-party APIs with convincing package names, and produces catastrophic runtime corruptions. The model operates under an irreconcilable **epistemic gap**: statistical likelihood within the learned parameter distribution $\mathcal{P}(Y \mid X; \mathbf{\Theta})$ does not correspond to operational truth in the external physical world.
+
+::: {#dfn-fail-plausible-fault .callout-definition title="Fail-plausible fault"}
+
+***Fail-plausible fault***\index{Fail-plausible fault!definition}\index{Fault model!fail-plausible definition} is an execution fault regime wherein an unprivileged neural execution core emits an action proposal $a_{\text{prop}} \sim \pi_\theta(\cdot \mid c_t)$ that satisfies syntactic grammar $\mathcal{L}(G)$ and executes within the environment returning exit code 0, yet transitions environment state outside the semantic specification envelope ($s_t \in \mathcal{I} \implies s_{t+1} \notin \mathcal{I}$).
+
+1.  **Significance**: Proves why conventional software monitoring and distributed watchdogs (`if (exit_code != 0) retry()`) fail in agentic systems, as surface-level fluency and successful process exits routinely mask catastrophic semantic regressions.
+2.  **Distinction**: Unlike Fail-Stop faults (where a component crashes overtly and halts execution deterministically) or Byzantine faults (where an adversarial node intentionally deviates across network channels), fail-plausible faults arise from statistical likelihood optimization over frozen training distributions ungrounded in physical environment state.
+3.  **Common pitfall**: Relying on process return codes or model self-reported completion ("I have verified the bug is resolved") as evidence of success; dependable operation requires supervisory fencing and external verification oracles that validate physical state deltas.
+
+:::
 
 This epistemic gap exposes the critical systems error known as the **Delivery Fallacy**. In naive software implementations, an agent system dispatches an HTTP request to an inference service, receives an `HTTP 200 OK` response status, successfully parses the response body as JSON, and directly commits the action. This conflates transport delivery with task completion. An `HTTP 200 OK` indicates only that the transport layer successfully transmitted packets across the network interface and that the inference daemon completed its generation loop without crashing. It conveys zero information regarding whether the model resolved the task, experienced context truncation, suffered an internal safety refusal, or produced a hallucinated capability request.
 
@@ -104,7 +120,7 @@ The physical boundary between the host supervisor and the neural core also impos
 
 A quantitative analysis of the interconnect traffic reveals why logit sampling must reside entirely on the accelerator, making the token ID the irreducible atomic unit of exchange across the host interface.
 
-::: {#exmp-logit-interconnect-bottleneck .callout-example title="The logit interconnect bottleneck"}
+::: {#nbk-logit-interconnect-bottleneck .callout-notebook title="The logit interconnect bottleneck"}
 **Problem:** Consider an inference service serving an open-weight foundation model with a modern vocabulary size of $|V| = 128{,}000$ subword tokens. The inference service hosts an active concurrent batch of $B = 64$ streams running on a single accelerator board connected via a standard PCIe 4.0 $\times 16$ interconnect. Each generation stream produces output at an average decode rate of $R = 40\text{ tokens/second}$.
 
 Calculate the continuous interconnect bandwidth required if the accelerator transmits raw 16-bit floating-point logits (`fp16`, 2 bytes per logit) back to the host CPU for sampling, versus transmitting discrete 32-bit integer token identifiers (`uint32`, 4 bytes per token). Evaluate the systems feasibility of host-side sampling under fine-grained PCIe transfer overheads.
@@ -135,7 +151,14 @@ $$\frac{256{,}000\text{ bytes}}{4\text{ bytes}} = 64{,}000\times$$
 This reduction transforms an interconnect traffic jam into a negligible stream of 10.24 KB/s, freeing the host-accelerator interconnect for large model weight updates and input context ingestion. The discrete token identifier is the mandatory, bandwidth-optimal interface currency of the model invocation boundary.
 :::
 
-Because the physical boundary demands that communication between the host supervisor and the neural engine be denominated in discrete token streams, the entire system depends on how external information is converted into these discrete units. Before a single prompt string, source code repository, or tool specification can cross this invocation threshold and enter the tensor contraction pipelines of the neural core, the host runtime must serialize variable-length human text and binary data into discrete integer sequences. This brings us to the foundational data-encoding layer of the machine learning inference engine: how are continuous sequences of text transformed into the discrete integer tokens that populate the accelerator's physical memory buffers?
+::: {#chk-02-stochastic-processor-boundary .callout-checkpoint title="Evaluating stochastic processor boundaries"}
+Before analyzing discrete token representation, verify your architectural understanding of stochastic execution tiers and host boundaries:
+
+- [ ] **Ambient authority**: Why does an autoregressively generated command string resident in accelerator memory possess zero ambient privilege until explicit host dispatch?
+- [ ] **Failure semantics**: How do the systems implications of fail-plausible neural emissions differ from the fail-stop error contracts of classical CPUs?
+- [ ] **Interconnect bandwidth**: Why is performing logit sampling and top-$p$/top-$k$ reduction directly on accelerator silicon orders of magnitude more bandwidth-efficient than transferring raw logit tensors across PCIe?
+- [ ] **End-to-end verification**: Under what conditions can an inference daemon or neural self-checker guarantee soundness for execution invariants?
+:::
 
 ## Discrete Token Representation {#sec-vol3-processor-tokenization}
 
@@ -235,10 +258,14 @@ If an unmanaged context ingestion pipeline pushes $S$ beyond $S_{\max} - K_{\max
 
 As illustrated in the truncated trace above, hitting a physical context boundary terminates generation mid-stream. In a structured tool invocation, the output terminates with unclosed quotes, missing closing braces, and truncated parameters. If this partial string is naively forwarded to an external JSON parser or shell environment, the system fails unpredictably. A corrupted command string might execute an unintended destructive operation, or a deserializer crash might trigger an unhandled exception in the agent supervisor.
 
-This failure mode establishes the *Quarantining Invariant*:
+This failure mode establishes the *Quarantining Invariant*: under Zero Ambient Authority ($A=0$), any candidate output generated under an exhausted context budget (`finish_reason == "length"`) or missing structural termination delimiters must be treated as an untrusted, corrupted artifact. The host supervisor must quarantine the candidate token stream, refuse to pass the payload to external execution sandboxes, and discard any proposed state mutations.
 
-::: {#chk-02-context-exhaustion-quarantine .callout-checkpoint title="Context exhaustion and quarantine"}
-Under Zero Ambient Authority ($A=0$), any candidate output generated under an exhausted context budget (`finish_reason == "length"`) or missing structural termination delimiters must be treated as an untrusted, corrupted artifact. The host supervisor must quarantine the candidate token stream, refuse to pass the payload to external execution sandboxes, and discard any proposed state mutations.
+::: {#chk-02-context-exhaustion-quarantine .callout-checkpoint title="Context exhaustion and quarantine invariants"}
+Before staging candidate model outputs for environment dispatch, verify the runtime handling of truncated generation boundaries:
+
+- [ ] **Length termination**: Why must any candidate payload returned with `finish_reason == "length"` be unconditionally quarantined rather than partially executed?
+- [ ] **Syntactic closure**: How does dispatching a partially parsed JSON payload or unclosed shell command violate the host isolation boundary?
+- [ ] **State rollback**: What mechanisms ensure that proposed state mutations from an incomplete generation turn are discarded before triggering downstream effects?
 :::
 
 When a generation boundary fault occurs, the host runtime must either invoke an explicit context compaction strategy (such as pruning older tool execution turns) or surface an unrecoverable resource exhaustion fault to the user. An unverified, partially generated token stream must never cross the isolation boundary into an active operating system environment.
@@ -273,7 +300,7 @@ $$\text{Mem}_{\text{KV}}(S) = S \cdot \text{Mem}_{\text{KV,token}}$$
 
 This linear memory scaling creates an unforgiving systems constraint: on accelerator hardware, context length translates directly into physical capacity saturation.
 
-::: {#exmp-02-kv-cache-memory-explosion .callout-example title="KV cache memory explosion in a 128k long-context serving node"}
+::: {#nbk-02-kv-cache-memory-explosion .callout-notebook title="KV cache memory explosion in a 128k long-context serving node"}
 Consider an agentic coding assistant deployed on a frontier model whose architecture matches Llama-3-70B. The network parameters are:
 
 - Layer depth: $L = 80$
@@ -467,7 +494,7 @@ Top-$k$ applies a rigid rank ceiling regardless of certainty. Top-$p$ dynamicall
     $$\mathcal{V}_p = \arg\min_{\mathcal{S} \subseteq \mathcal{V}} |\mathcal{S}| \quad \text{subject to} \quad \sum_{v \in \mathcal{S}} P(v \mid x_{1:S}, y_{<t}) \ge p$$
     All tokens outside $\mathcal{V}_p$ have their logits masked to $-\infty$, and the remaining scores are renormalized. Under high certainty, $|\mathcal{V}_p|$ naturally collapses to one or two tokens; under high entropy, $|\mathcal{V}_p|$ expands to accommodate the broad candidate pool.
 
-::: {#exmp-02-logit-scaling-and-truncation-on .callout-example title="Logit scaling and truncation on the vocabulary Simplex"}
+::: {#nbk-02-logit-scaling-and-truncation-on .callout-notebook title="Logit scaling and truncation on the vocabulary Simplex"}
 Consider a reduced vocabulary $\mathcal{V} = \{v_1, v_2, v_3, v_4, v_5\}$ where an execution step emits unnormalized logits $\mathbf{z}_t = [12.0, 10.5, 9.0, 6.0, 3.0]$. We examine the resulting probability distributions across three distinct runtime sampling configurations.
 
 **Step 1: Baseline Softmax at Unit Temperature ($\tau = 1.0$)**
@@ -577,40 +604,17 @@ Because each evaluation step incurs an independent probability of sampling error
 In 1984, Saltzer, Reed, and Clark articulated the *End-to-End Argument in System Design*: a function that requires complete correctness cannot be implemented solely inside the lower-level communication or generation mechanism; it can only be reliably implemented with the assistance of the application endpoints that possess full domain knowledge. In agent architectures, the foundation model is an intermediate hypothesis generator. True invariant closure can only be achieved at the host runtime endpoint, using deterministic verification tools that possess ground-truth authority over the system environment. In formal methods terminology, a deterministic software validator (such as a compiler, linter, or schema parser) provides *soundness* with respect to checked invariants: it guarantees zero false approvals on invalid payloads ($P(\text{PASS} \mid \text{Defective}) = 0$). An autoregressive neural self-checker provides neither soundness nor completeness: it routinely approves invalid payloads (false positives) while rejecting valid yet novel structures (false negatives), rendering it fundamentally defective as a systems reference monitor.
 
 ::: {#psp-02-the-fallacy-of-correlated-self-verification .callout-perspective title="The fallacy of correlated self-verification"}
-**Problem:**
-An agent runtime stages an emitted configuration payload $\mathbf{y}$ consisting of $K = 128$ tokens. Due to imperfect training distribution coverage, the model has an operational error rate of $\epsilon = 0.18$ (18 percent of generated payloads violate runtime invariants).
-To catch errors before execution, an engineer considers two verification strategies:
+When designing verification pipelines for agentic systems, engineers often attempt to eliminate defective outputs by prompting the foundation model to review its own generated artifacts. This strategy commits a fundamental systems fallacy: statistical self-verification with correlated failure modes cannot establish invariant closure.
 
-1. *Autoregressive Self-Verification:* The runtime prompts the same model to review the payload. Because the evaluator shares parameter weights $\Theta$ with the generator, it exhibits correlated bias: while its true positive rate on valid payloads is $0.85$, its false positive rate on invalid payloads is $\alpha_{\text{model}} = 0.65$ (it mistakenly validates 65 percent of its own defective outputs).
-2. *Deterministic External Linter:* A host-side static analysis tool checks the payload against schema constraints. The linter has a true positive rate of $1.00$ and a false positive rate on invalid payloads of $\alpha_{\text{ext}} = 0.00$.
+Consider an agent runtime where candidate execution payloads exhibit an operational defect rate $\epsilon = 0.18$ (18 percent of generated payloads violate runtime invariants). If the runtime asks the generating model $\mathbf{f}_\Theta$ to audit its own output, the reviewer shares parameter weights, tokenization boundaries, and pretraining biases with the generator. Even if the reviewer exhibits an apparent true positive rate of $0.85$ on valid payloads, its shared failure surface produces a high false positive rate on invalid artifacts ($\alpha_{\text{model}} = P(\text{PASS} \mid \text{Defective}) = 0.65$). Applying Bayes' theorem to find the posterior defect rate:
 
-Calculate the posterior probability that a staged payload is actually invalid given that it passed the verification check ($P(\text{Defective} \mid \text{PASS})$) under both strategies.
+$$P(\text{Defective} \mid \text{PASS}) = \frac{\alpha_{\text{model}} \cdot \epsilon}{\alpha_{\text{model}} \cdot \epsilon + P(\text{PASS} \mid \text{Valid}) \cdot (1 - \epsilon)} = \frac{0.65 \times 0.18}{(0.65 \times 0.18) + (0.85 \times 0.82)} \approx 14.37\%$$
 
-**Solution:**
-Let $D$ represent the event that the payload is defective ($P(D) = \epsilon = 0.18$), and let $V$ represent the event that the payload is valid ($P(V) = 1 - \epsilon = 0.82$). Let $\text{PASS}$ denote the verification gate approving the candidate.
+Even after explicit neural self-verification, more than 14 out of every 100 approved actions remain defective—an unacceptable failure rate for production systems infrastructure.
 
-Using Bayes' theorem, the probability that an approved payload is defective is:
+By contrast, a deterministic external validator (such as a compiler, linter, or formal schema parser) enforces soundness over checked invariants ($\alpha_{\text{ext}} = 0.00$), driving $P(\text{Defective} \mid \text{PASS})$ to strictly $0\%$.
 
-$$P(D \mid \text{PASS}) = \frac{P(\text{PASS} \mid D) \cdot P(D)}{P(\text{PASS} \mid D) \cdot P(D) + P(\text{PASS} \mid V) \cdot P(V)}$$
-
-*Case 1: Autoregressive Self-Verification.*
-We have $P(\text{PASS} \mid D) = \alpha_{\text{model}} = 0.65$, and $P(\text{PASS} \mid V) = 0.85$.
-Substituting the values:
-
-$$P(\text{PASS}) = (0.65 \times 0.18) + (0.85 \times 0.82) = 0.1170 + 0.6970 = 0.8140$$
-
-$$P(D \mid \text{PASS}) = \frac{0.1170}{0.8140} \approx 0.1437 \quad (14.37\%)$$
-
-Even after passing autoregressive self-verification, more than 14 out of every 100 executed commands remain defective, an unacceptable failure rate for critical system infrastructure.
-
-*Case 2: Deterministic External Linter.*
-Here, $P(\text{PASS} \mid D) = \alpha_{\text{ext}} = 0.00$, and $P(\text{PASS} \mid V) = 1.00$.
-
-$$P(\text{PASS}) = (0.00 \times 0.18) + (1.00 \times 0.82) = 0.8200$$
-
-$$P(D \mid \text{PASS}) = \frac{0.00 \times 0.18}{0.8200} = 0.0000 \quad (0.00\%)$$
-
-The deterministic external gate eliminates defective candidates completely on the checked invariant, demonstrating that invariant closure requires an external ground-truth authority.
+**Systems insight**: Invariant closure is a property of the environment boundary, not the generation engine. Autoregressive self-review can refine surface natural language explanations, but only deterministic external arbiters possessing ground-truth execution authority can enforce correctness.
 :::
 
 ### The deterministic verification perimeter
@@ -678,13 +682,13 @@ As traced along the timeline of @fig-vol3-streaming-token-cancellation, token de
 
 Nominal streaming continues until step $t=96$, where the unprivileged model emits an unauthorized instruction or illegal terminal (`"DROP"`). The host stream consumer evaluates the automaton transition $\delta^*(q_{95}, y_{96}) = \emptyset$; encountering an undefined transition immediately triggers an **Invariant Violation Trap**. Rather than waiting passively for the remaining generation budget to exhaust, the host supervisor executes two coordinated actions: it purges the quarantined escrow buffer (guaranteeing zero unauthorized side effects reach real effectors) and dispatches an immediate `HTTP/2 RST_STREAM` cancellation frame carrying error code `CANCEL` across the socket.
 
-The systems consequence of this early cancellation on accelerator silicon is immediate and profound. Upon receiving the cancellation frame, the inference daemon aborts the decode worker thread, evicts the sequence identifier from the continuous batch scheduler, and releases all physical KV cache pages back to the accelerator's memory allocator. As derived in \ref{exmp-02-memory-and-bandwidth-reclamation-via}, reclaiming physical memory at step $t=96$ rather than permitting an errant generation to run through $K_{\max} = 4{,}096$ frees over $1.22\text{ GiB}$ of HBM and eliminates $4{,}000$ subsequent memory-bus shuttles of the 140 GB parameter weights.
+The systems consequence of this early cancellation on accelerator silicon is immediate and profound. Upon receiving the cancellation frame, the inference daemon aborts the decode worker thread, evicts the sequence identifier from the continuous batch scheduler, and releases all physical KV cache pages back to the accelerator's memory allocator. As derived in \ref{nbk-02-memory-and-bandwidth-reclamation-via}, reclaiming physical memory at step $t=96$ rather than permitting an errant generation to run through $K_{\max} = 4{,}096$ frees over $1.22\text{ GiB}$ of HBM and eliminates $4{,}000$ subsequent memory-bus shuttles of the 140 GB parameter weights.
 
 ::: {#fig-vol3-streaming-token-cancellation fig-env="figure" fig-pos="htb" fig-cap="**Streaming Token Validation and Transport Cancellation Protocol**: Incremental token streaming across HTTP/2 or gRPC multiplexed channels enables the host runtime to validate candidate sequences on-the-fly. At decode steps $t=1$ and $t=2$, sampled tokens cross the network socket in DATA frames, where an incremental partial-validation state machine validates syntax prefixes and holds candidates in host memory escrow. When step $t=96$ emits an illegal token sequence violating schema invariants, the host immediately dispatches an `HTTP/2 RST_STREAM` cancellation frame. The inference service terminates the decode worker thread, evicts the request from the continuous batch queue, and instantly deallocates physical KV cache pages from GPU high-bandwidth memory." fig-alt="Systems protocol sequence diagram between Host Agent Runtime and Inference Service & Neural Core across an HTTP/2 transport boundary. As incremental tokens stream across the socket, an invariant violation at step t=96 triggers an immediate RST_STREAM cancellation frame, terminating the GPU decode loop and freeing 1.22 GB of KV cache memory in HBM."}
 ![](images/svg/streaming_token_cancellation.svg)
 :::
 
-::: {#exmp-02-memory-and-bandwidth-reclamation-via .callout-example title="Memory and bandwidth reclamation via early stream cancellation"}
+::: {#nbk-02-memory-and-bandwidth-reclamation-via .callout-notebook title="Memory and bandwidth reclamation via early stream cancellation"}
 Consider a host agent supervising an invocation of a 70-billion parameter model utilizing Grouped-Query Attention (GQA). The model architecture features $L = 80$ transformer layers, an internal head dimension of $d = 128$, and $H_{KV} = 8$ key-value heads. Each weight and cache element is stored in 16-bit precision (2 bytes per value).
 
 First, we calculate the physical KV cache memory consumed by a single token across all layers:
@@ -796,8 +800,18 @@ where $\delta^*$ denotes the extended transition function evaluated over the com
 | `EXPECT_KEY`            | `{"`                  | Alphanumeric key, closing quote (`"`) | `"id"`, `"status"`, `"name"` | `123`, `true`, `[`, `{`        |
 | `EXPECT_COLON`          | `{"id"`               | Whitespace, colon (`:`)               | `":"`, `": "`, `" : "`       | `","`, `"}"`, `"id"`, `true`   |
 | `EXPECT_VALUE_INT`      | `{"id": `             | Digits, minus sign (`-`)              | `"0"`, `"42"`, `"-1"`        | `"true"`, `"\"admin\""`, `","` |
-| `EXPECT_COMMA_OR_END`   | `{"id": 42`           | Comma (`,`), closing brace (`}`)      | `","`, `"}"`, `",\n  "`      | `"43"`, `":"`, `"id"`          |
+
 : **Automaton Grammar States and Token Masking**: Transition states, structural terminals, and permissible versus forbidden candidate tokens during constrained JSON decoding. {#tbl-vol3-automaton-grammar-states}
+
+::: {#dfn-grammar-constrained-decoding .callout-definition title="Grammar-constrained decoding"}
+
+***Grammar-constrained decoding***\index{Grammar-constrained decoding!definition}\index{Logit masking!grammar constraint definition} is a synchronous logit-filtering protocol wherein an unprivileged model's next-token distribution is mathematically restricted to a formal grammar $G$ via state-dependent logit masking $M_i(q_t) \in \{0, -\infty\}$.
+
+1.  **Significance**: Guarantees that sampled tokens conform to formal structural grammars (such as JSON Schema, SQL ASTs, or Python grammars) with probability $1.0$ directly at the logit surface, eliminating syntactic parse failures.
+2.  **Distinction**: Unlike post-hoc validation (which allows malformed tokens to be sampled and subsequently rejects or retries the entire generation), grammar-constrained decoding injects negative infinity biases to invalid vocabulary indices in GPU SRAM before softmax reduction.
+3.  **Common pitfall**: Executing automaton state transitions on the host CPU with synchronous PCIe interrupts per decode step, introducing multi-millisecond bus transfer stalls that degrade token generation throughput by an order of magnitude.
+
+:::
 
 At autoregressive decode step $t$, the transformer model evaluates its unprivileged forward pass $\mathbf{f}_{\mathbf{\Theta}}$, computing the unnormalized logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$ at the unembedding layer. Prior to applying the softmax operator or sampling a token, the serving runtime injects a logit mask vector $\mathbf{M}(q_t) \in \{0, -\infty\}^{|\mathcal{V}|}$ determined by the current parser state $q_t$:
 
@@ -840,7 +854,7 @@ $$\mathbf{B}(q) \in \{0, 1\}^{\lceil |\mathcal{V}| / 64 \rceil}$$
 
 where each 64-bit unsigned integer represents the validity of 64 contiguous vocabulary token IDs. For an open-weights architecture with $|\mathcal{V}| = 131{,}072$ tokens, the bitmask for a single automaton state requires exactly $131{,}072 / 8 = 16{,}384\text{ bytes}$ ($16\text{ KiB}$). If a target schema compiles into an automaton with $|Q| = 512$ distinct states, the entire transition and validity table occupies $512 \times 16\text{ KiB} = 8\text{ MiB}$ of contiguous memory.
 
-::: {#exmp-02-memory-footprint-and-transfer-latency .callout-example title="Memory footprint and transfer latency of grammar bitmasks"}
+::: {#nbk-02-memory-footprint-and-transfer-latency .callout-notebook title="Memory footprint and transfer latency of grammar bitmasks"}
 Consider serving a 70-billion parameter foundation model on an NVIDIA H100 SXM5 accelerator ($80\text{ GiB}$ HBM3 with $3.35\text{ TB/s}$ peak bandwidth, $50\text{ MiB}$ of on-chip L2 cache, and a PCIe Gen5 $\times 16$ interconnect providing $64\text{ GB/s}$ unidirectional bandwidth). The vocabulary contains $|\mathcal{V}| = 131{,}072$ tokens ($16\text{ KiB}$ per state bitmask). An agent runtime enforces a structured JSON response schema that compiles into a DFA with $|Q| = 512$ states.
 
 **1. Memory Footprint and Cache Residency:**
@@ -910,7 +924,14 @@ Once the model is forced into the schema's opening brace, it advances to the man
 
 To mitigate schema forcing, the host runtime must design robust schemas that explicitly provide syntactically valid escape routes, such as union types permitting structured error objects (`{"status": "error", "code": int, "message": str}`). Even then, the host supervisor must treat every grammar-constrained payload as an untrusted candidate hypothesis. In conformance with the End-to-End Argument, structural logit masking serves solely as an optimization to streamline serialization; invariant verification and semantic validation remain the authoritative responsibility of external software gates.
 
-Even when grammar-constrained decoding successfully eliminates syntax errors and candidate sequences parse cleanly into structured memory, the host agent runtime must confront the physical cost of generating each token. Every decode step, whether masked by a pushdown automaton or sampled from an unconstrained vocabulary, requires loading tens of billions of model parameters across the accelerator's memory bus. What physical bottlenecks govern this execution, and why does the wall-clock latency of processing the prompt differ fundamentally from the latency of generating output tokens? To answer these questions, we must turn from token representations and syntactic masks to the physical execution profile of accelerator silicon, examining the dual computational regimes of prompt prefill and token decode.
+::: {#chk-02-schema-constrained-decoding .callout-checkpoint title="Evaluating schema-constrained decoding"}
+Before evaluating accelerator serving mechanics and memory bandwidth constraints, verify your understanding of structured generation trade-offs:
+
+- [ ] **Grammar masking**: How does pushdown automaton (PDA) logit masking guarantee syntax conformance at the vocabulary level?
+- [ ] **Schema forcing**: Under what operational conditions does aggressive logit truncation suppress legitimate epistemic uncertainty signals and induce semantic hallucination?
+- [ ] **Escape routes**: Why must structured tool-call schemas explicitly incorporate typed error variants (such as union types) rather than strictly forcing successful return shapes?
+- [ ] **Verification boundary**: Why does schema-constrained decoding fail to satisfy the end-to-end argument for semantic data integrity?
+:::
 
 ## Accelerator Serving Latency {#sec-vol3-processor-cost}
 
@@ -1020,7 +1041,7 @@ On-chip SRAM cache memory on modern accelerators is physically constrained by si
 
 To generate a single output token, the accelerator must transfer the entire 70-gigabyte model across the bus, load the weights into local registers, compute the inner products with the single token activation vector, and discard the weights from local register storage to make room for the subsequent layer's parameter tensors. To generate the next token, the hardware repeats the entire sequence from scratch.
 
-::: {#exmp-02-roofline-bound .callout-example title="The Roofline bound on single-token generation"}
+::: {#nbk-02-roofline-bound .callout-notebook title="The Roofline bound on single-token generation"}
 Consider a foundation model with $P = 70 \times 10^9$ parameters quantized to 8-bit precision (FP8, storing 1 byte per parameter, yielding an in-memory footprint of $70 \times 10^9\text{ bytes}$). The model executes on an accelerator with a peak memory bandwidth of $\beta = 3.35\text{ TB/s}$ ($3.35 \times 10^{12}\text{ bytes/s}$) and a peak matrix compute ceiling of $\pi = 989\text{ TFLOP/s}$ ($9.89 \times 10^{14}\text{ FLOP/s}$). We seek to calculate the theoretical minimum inter-token latency for an agent running at batch size $B = 1$.
 
 First, calculate the time required purely to shuttle the model parameters across the memory bus from HBM into SRAM:
@@ -1154,7 +1175,7 @@ Here, $\text{exec}$ executes the parsed payload inside an isolated workspace, an
 
 Optimizing an interface exclusively for Level 1 or Level 2 metrics while neglecting Level 3 represents a fundamental architectural error. The following worked example illustrates how an interface engineered for structural simplicity can paralyze an accelerator cluster while lowering verified task closure.
 
-::: {#exmp-02-quantitative-interface-evaluation-under-an .callout-example title="Quantitative interface evaluation under an invariant budget"}
+::: {#nbk-02-quantitative-interface-evaluation-under-an .callout-notebook title="Quantitative interface evaluation under an invariant budget"}
 **Problem Statement:**
 An agent engineering team is deploying an unprivileged 70-billion-parameter foundation model on an NVIDIA H100 SXM5 accelerator node to resolve code defects in an enterprise repository. The physical hardware parameters and model serving characteristics are:
 

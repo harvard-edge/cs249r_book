@@ -66,13 +66,11 @@ Dumping raw, uncurated production telemetry directly into training datasets crea
 **Escrowed Execution in Telemetry:** Under Zero Ambient Authority ($A=0$), candidate tool invocations emitted by a foundation model are unprivileged data structures held in host memory escrow. A recorded failure in an operational trace often reflects a rejection by the host runtime's verification gate rather than an environmental failure, requiring distinct telemetry classification.
 :::
 
-To diagnose execution failures with architectural precision, systems engineers must anchor their analysis in the physical reality of the model invocation boundary. As established in Part I, a foundation model is not an operating system process, an autonomous agent, or an instruction processor equipped with architectural traps. It is an unprivileged, non-deterministic statistical inference engine: a static set of parameter weights $\Theta$ evaluated across matrix-multiplication accelerators to compute conditional probability distributions over discrete subword vocabularies. The model operates under **Zero Ambient Authority** ($A = 0$). When an autoregressive decode loop generates a token sequence representing `DROP TABLE users;` or `rm -rf /`, zero bytes of state on the host operating system are altered. The generated string resides in host memory escrow—an unprivileged user-space buffer managed by the host agent supervisor.
+To diagnose execution failures with architectural precision, systems engineers must anchor their analysis in the physical reality of the model invocation boundary. As established across Parts I and III, an unprivileged foundation model operates under Zero Ambient Authority ($A = 0$).[^fn-fail-plausible-harvest] When an agent trajectory fails, the system does not crash with a deterministic hardware exception; foundation models are fundamentally *fail-plausible*. The model smoothly emits syntactically valid JSON payloads or shell invocations that reference invalid paths or make false assumptions about host state.
 
-Because the model operates without ambient authority, its generative behavior is conditioned entirely on the staged context window: the system instructions, the retrieved environment state, and the serialized tool schemas deposited into its input buffer by the host runtime. The model possesses no independent, out-of-band sensory channel to inspect the physical host or deduce unstated environmental constraints. If the host runtime provides an incomplete, truncated, or contradictory context buffer, even an optimal mathematical policy cannot produce a valid action. The model's statistical distribution merely projects the most plausible token sequence over the subspace of ambiguous possibilities presented to it.
+Blaming the base model for every operational fault conflates visible symptoms with systems root causes. An execution failure does not automatically indicate that model weights must be fine-tuned. The failure may stem from a missing context file, an ambiguous tool schema, or a microVM timeout. Fine-tuning a 70-billion-parameter model to compensate for an ephemeral container timeout or an unhandled socket disconnect is a catastrophic misuse of engineering resources.
 
-This architectural reality exposes the fundamental **epistemic gap** governing foundation model execution: statistical likelihood within the learned parameter distribution $\mathcal{P}(Y \mid X; \Theta)$ does not equal operational truth in the external physical world. Classical computer systems are engineered around fail-stop semantics: an illegal instruction opcode, an unmapped virtual address page fault, or an arithmetic division by zero immediately raises a synchronous hardware trap, halting execution at a deterministic, inspectable boundary. Foundation models, by contrast, are fundamentally **fail-plausible**. The training objective of an autoregressive model—minimizing cross-entropy loss over textual corpora—optimizes for surface fluency.
-
-When a model encounters a task that exceeds its capability, or when it is starved of necessary context, it does not halt execution or emit an out-of-band hardware exception. Instead, its internal probability distribution shifts toward tokens that maximize linguistic or structural plausibility. The engine smoothly emits beautifully structured JSON payloads, complete with syntactically valid method signatures and plausible argument names, that reference nonexistent APIs or make invalid assumptions about host state. Blaming the base model for these failures conflates the visible symptoms of an execution fault with its underlying systems root cause.
+[^fn-fail-plausible-harvest]: **Fail-Plausible Triage**: First formalized in @sec-vol3-intro-fail-plausible and @sec-vol3-processor; this chapter develops the forensic pipeline required to classify whether trajectory failures originate in working context, tool schemas, sandbox runtimes, or true policy incapability.
 
 To prevent premature parameter updates and guide trajectory harvesting, an agent runtime must subject every anomalous execution trace to systematic forensic triage across four mutually exclusive root causes, summarized in @tbl-vol3-failure-taxonomy:
 
@@ -330,8 +328,24 @@ Defending against harness subversion requires strict physical decoupling between
 2. *State Delta Whitelisting:* Stage 4 verification must intersect the Git delta against a cryptographically hashed manifest of immutable files. Any trajectory whose diff touches files within the test hierarchy, build configurations, or CI definitions is rejected immediately with a tamper classification, regardless of test execution exit codes.
 3. *Runtime Namespace and Monkey-Patch Isolation:* In dynamic languages such as Python, an agent script can import the testing harness and monkey-patch runtime assertions (for example, overriding `unittest.TestCase.assertTrue` or replacing `pytest.fail` with a no-op function). To eliminate in-memory spoofing, test execution in Stage 3 must run in an independent, clean-slate interpreter process spawned directly by the supervisor host, isolated from any initialization scripts or environment variable modifications injected by the model.
 
-::: {#psp-12-bohrbugs-vs-heisenbugs-in-verification .callout-perspective title="Bohrbugs vs. Heisenbugs in verification"}
-As Jim Gray observed in his 1986 treatise on system reliability, software faults divide into deterministic *Bohrbugs* and transient, non-reproducible *Heisenbugs*. In trajectory verification, flaky network sockets, timing jitters, and unpinned package caches manifest as Heisenbugs. An effective dynamic verifier isolates non-determinism by executing failing tests across multiple seeded iterations and requiring bitwise identical reproduction before classifying a candidate as an authentic regression.
+::: {#dfn-test-tampering-defense .callout-definition title="Test-tampering defense"}
+
+***Test-tampering defense***\index{Test-tampering defense!definition}\index{Data flywheel!test tampering defense definition} is an execution isolation invariant $\text{PathDiff}(\mathcal{W}_{\text{src}}', \text{HEAD}) \cap \mathcal{W}_{\text{test}} = \emptyset$ requiring that verification test fixtures reside on immutable, read-only mounts physically segregated from the agent's mutable workspace during trajectory harvesting.
+
+1.  **Significance**: Prevents specification gaming and reward hacking during automated trajectory collection, ensuring that policies internalize genuine code repair capabilities rather than learning to delete assertions, skip suites, or suppress error alarms.
+2.  **Distinction**: Unlike naive acceptance filters (which trust guest process exit codes like `pytest` returning 0), test-tampering defense combines physical volume isolation with cryptographic diff validation to enforce that zero test assertions were altered.
+3.  **Common pitfall**: Granting agents ambient write permissions to the repository root during data collection runs, allowing failing models to manufacture spurious successes by modifying test files or mocking out assertions.
+
+:::
+
+::: {#psp-12-bohrbugs-vs-heisenbugs-in-verification .callout-perspective title="Bohrbugs vs. Heisenbugs in automated trajectory verification"}
+In his classic 1986 treatise on computer system reliability, Jim Gray established the fundamental distinction between Bohrbugs—deterministic software faults that manifest consistently under identical execution conditions—and Heisenbugs—transient, non-reproducible bugs whose symptoms disappear or mutate whenever one attempts to isolate them. In the context of autonomous agent trajectory harvesting, this distinction defines the boundary between sound curriculum generation and silent data contamination.
+
+When an automated harvesting cluster evaluates thousands of candidate rollouts per day, environmental flakiness—such as network socket timeouts, DNS query jitter, unpinned dependency cache updates, and multi-threaded race conditions in the test suite—manifests as synthetic Heisenbugs. If the verification harness naively treats every test pass or failure as an authoritative signal, two catastrophic failure modes emerge. First, false negatives discard valid, innovative trajectories, wasting the GPU FLOPs invested in exploratory search. Second, and far more insidiously, false positives admit trajectories where tests passed due to timing flukes or skipped assertions, poisoning the supervised fine-tuning corpus with corrupted reasoning patterns.
+
+An unprivileged foundation model trained on contaminated trajectories rapidly internalizes the environmental noise of the harvesting harness. Rather than learning to resolve underlying software faults, the model learns to emit timing-dependent hacks, exploit test suite timeouts, or retry operations until a transient network glitch clears.
+
+**Systems insight**: Flaky tests are not minor testing nuisances; in autonomous data flywheels, they act as an adversarial entropy vector that corrupts downstream policy weights. Sound harvesting pipelines must isolate Heisenbugs through hermetic sandbox isolation, local dependency mirrors, and multi-pass re-execution before admitting any trajectory into the training distribution.
 :::
 
 Beyond active tampering, the dynamic verifier must defend against environmental flakiness and transient resource contention. A candidate trajectory that fails due to a network socket timeout during dependency resolution or a thread preemption spike does not reflect an intrinsic policy capability failure. Verifiers mitigate environmental non-determinism by using clean-slate container resets between runs, pre-caching all dependencies locally to eliminate external network calls, and enforcing multi-pass verification on borderline timing-sensitive failures.
@@ -355,7 +369,7 @@ $$Y = \prod_{i=1}^K p_i$$ {#eq-verifier-cumulative-yield}
 
 The central optimization objective of the trajectory harvesting pipeline is to minimize the total compute cost incurred per accepted high-quality trajectory, $C_{\text{accepted}} = C_{\text{attempt}} / Y$. Inspecting @eq-verifier-cost-cascade reveals the mathematical justification for the five-stage architecture: because dynamic sandbox execution ($c_3$) and semantic triage ($c_5$) are orders of magnitude more expensive than syntactic and static analysis ($c_1, c_2$), the conditional pass rates $p_1$ and $p_2$ must act as aggressive filters. If a runtime engineer incorrectly schedules an expensive test suite ahead of static linting, candidates harboring syntax errors will consume full sandbox execution budgets before being discarded, driving $C_{\text{attempt}}$ to prohibitive levels.
 
-::: {#exmp-12-verification-cascade-economics-and-throughput .callout-example title="Verification cascade economics and throughput"}
+::: {#nbk-12-verification-cascade-economics-and-throughput .callout-notebook title="Verification cascade economics and throughput"}
 **Problem Statement:**
 An autonomous software engineering harvesting cluster produces $N = 100{,}000$ raw candidate trajectory rollouts per day. The runtime engineer must choose between two pipeline architectures:
 
@@ -409,7 +423,14 @@ The staged cascade reduces cluster compute consumption by $68.6\%$, saving over 
 
 The mathematical reality captured in @eq-verifier-cost-cascade dictates the scheduling policy of distributed harvesting pipelines. By interposing microsecond syntactic checks and millisecond static invariants ahead of dynamic container initialization, the system sheds nearly three-quarters of all candidate rollouts before provisioning a single virtualized sandbox.
 
-Having established an escalating verifier cascade that discards syntactically broken, gamed, and structurally non-conformant traces while verifying environment deltas, the harvesting pipeline yields an authoritative stream of validated trajectories. However, simply gathering successful trajectories does not guarantee an effective training curriculum. A model trained exclusively on linear, unblemished executions remains fragile in production, failing catastrophically when an unexpected environment fault occurs. To build resilient agentic systems, the data harvesting pipeline must intentionally categorize, filter, and balance these verified traces into specialized behavioral classes. How does a systems engineer curate successful trajectories, recovery demonstrations, and mined hard negatives into a balanced corpus that teaches self-healing execution?
+::: {#chk-12-harvesting-cascade .callout-checkpoint title="Evaluating verifier cascades and harness defenses"}
+Before analyzing recovery demonstration curation and corpus balancing, verify your understanding of staged verifier economics:
+
+- [ ] **Cascade ordering**: Why must low-cost syntactic checks and static linters precede expensive dynamic microVM sandbox execution?
+- [ ] **Test tampering**: How does mounting the test suite as a read-only volume (`mount -o ro`) prevent agents from deleting assertions to manufacture false successes?
+- [ ] **State delta whitelisting**: Why must the verifier intersect the workspace git diff against an immutable path manifest before accepting a task as completed?
+- [ ] **Economic yield**: How does progressive filtering optimize the total compute cost $C_{\text{attempt}}$ across a fleet harvesting thousands of daily trajectories?
+:::
 
 ## Recovery Demonstration Curation {#sec-vol3-flywheel-curation}
 
@@ -438,6 +459,10 @@ $$s_t \sim P(\cdot \mid s_{t-1}, a_{t-1}) \notin \text{supp}(d^{\pi^*})$$
 Because a pristine-only training corpus contains zero mass on states containing nonzero exit codes, malformed JSON responses, or operating system signals, the policy cannot condition its next action on any learned recovery heuristic. Instead of issuing a diagnostic tool call (such as `ls -la` to inspect file permissions or `tail -n 50 /var/log/syslog` to identify a missing dependency), the agent emits actions from a high-entropy, uncalibrated logit distribution. Under these conditions, the probability of continuing to fail at every subsequent step approaches unity. As @ross2011reduction demonstrated, errors in sequential decision-making compound quadratically over an execution horizon of length $T$, producing an expected cumulative failure bound that scales as $O(\epsilon T^2)$ rather than the linear $O(\epsilon T)$ error rate of standard supervised learning.
 
 In agentic computer systems, this covariate shift manifests as an operational paradox. Passive harvesting pipelines that collect only "green" rollouts—filtering out any trace that encountered a nonzero exit code or intermediate retry—exacerbate this survival bias. By discarding every trajectory that suffered an intermediate fault, the harvesting pipeline systematically deletes the exact training evidence required to teach the policy how to navigate back to the operational manifold. The agent learns that mistakes are non-existent, leaving it entirely defenseless when deployed against real-world, non-deterministic host infrastructure.
+
+::: {#dfn-recovery-demonstration .callout-definition title="Recovery demonstration"}
+A curated execution trajectory containing intermediate environment faults, tool errors, or incorrect hypotheses paired with successful diagnostic localization and compensating actions, explicitly included in training data to counter covariate shift and teach policy self-healing.
+:::
 
 ### The tripartite trajectory taxonomy
 
@@ -529,7 +554,7 @@ $$\alpha \in [0.60, 0.70], \quad \beta \in [0.20, 0.30], \quad \gamma \approx 0.
 
 This distribution ensures that the forward, optimal execution path remains the dominant mode of the model's policy distribution, while dedicating nearly a third of the training curriculum to diagnostic hypothesis generation, error correction, and explicit boundary awareness.
 
-::: {#exmp-12-sizing-and-token-budget-allocation .callout-example title="Mixed curation token budget allocation"}
+::: {#nbk-12-sizing-and-token-budget-allocation .callout-notebook title="Mixed curation token budget allocation"}
 **Problem Statement:** An AI systems engineering team is assembling a fine-tuning dataset of $N = 50{,}000$ validated trajectories for a 70-billion-parameter coding agent. The serving infrastructure enforces a maximum context window of $T_{\max} = 32{,}768$ tokens.
 
 The empirical profiling of harvested traces reveals the following characteristics across classes:
@@ -641,7 +666,7 @@ where $C_a^2$ and $C_s^2$ represent the squared coefficients of variation for th
 
 Because each raw trajectory protocol buffer encapsulates full multi-turn execution histories—including environmental stdout/stderr dumps, intermediate git diffs, and high-resolution telemetry—the serialized in-memory footprint of a single trajectory averages $\bar{S}_{\text{traj}} \approx 8.5\text{ MB}$, reaching up to $64\text{ MB}$ for large multi-file refactoring runs. An unmanaged staging queue holding $10{,}000$ backlog trajectories will consume over $85\text{ GB}$ of volatile system memory, precipitating kernel out-of-memory (OOM) faults on the message broker.
 
-::: {#exmp-12-sizing-intermediate-staging-buffers-and .callout-example title="Staging buffers and backpressure sizing"}
+::: {#nbk-12-sizing-intermediate-staging-buffers-and .callout-notebook title="Staging buffers and backpressure sizing"}
 Consider an industrial trajectory collection cluster operating $N_{\text{roll}} = 1{,}024$ concurrent rollout workers. Each worker completes an agent trajectory with an average duration of $T_{\text{roll}} = 45\text{ s}$ ($\lambda_{\text{rollout}} = 1{,}024 / 45 \approx 22.75\text{ trajectories/s}$). The raw serialized payload averages $\bar{S}_{\text{traj}} = 8.5\text{ MB}$.
 
 The downstream verification pool consists of $N_{\text{ver}} = 512$ CPU worker slots. The verifier cascade exhibits a bimodal service time:
@@ -826,7 +851,7 @@ The complete structure of this cryptographic binding and its downstream redactio
   These fields are sealed under HMAC key $K_{\text{pipe}}$ to yield the immutable content-addressable index $H_{\text{lineage}}$, establishing an authoritative object store key (`s3://corpus/traj-e84a1b.arrow`).
 - On the right, the **Three-Pass Syntactically Invariant Sanitization Flow** scrubs incoming traces without syntactic corruption. A raw observation exposing credentials (such as an AWS key `AKIAIOSFODNN7EXAMPLE`, employee email, and RFC 1918 IP `10.240.0.12`) traverses Pass 1 (DFA regex matching and sliding-window Shannon entropy filtering for $H(S) \ge 4.5\,\text{bits/char}$); Pass 2 (quantized DistilBERT NER and CIDR subnet detection); and Pass 3 (AST string literal masking with salted pseudonyms `HMAC(K_salt, secret)[:12]`). The resulting columnar record retains bitwise valid JSON grammar and token sequence lengths while enforcing zero token leakage ($\Lambda_{\text{leak}} = 0.00\%$) into the downstream model weights.
 
-::: {#exmp-12-storage-overhead-and-ingestion-latency .callout-example title="Lineage envelope storage and latency"}
+::: {#nbk-12-storage-overhead-and-ingestion-latency .callout-notebook title="Lineage envelope storage and latency"}
 Consider an industrial trajectory harvesting cluster processing $N = 100{,}000$ completed trajectories per day. Each trajectory records an average of $T = 32$ interaction steps.
 
 *Trajectory Characteristics:*
@@ -930,9 +955,14 @@ To enforce legal fencing, the trajectory harvesting runtime executes automated l
 
 When an agent executes within a Tier 3 or Tier 4 repository, the harvesting pipeline activates an AST-level taint tracker. If the agent's observation window captures raw source code from a copyleft file, any subsequent code-generation action $a_t$ that exhibits high n-gram overlap ($n \ge 7$) or AST subtree isomorphism with the observation is flagged. The pipeline marks the trajectory metadata envelope with an explicit contamination flag (`license_taint: RECIPROCAL_COPYLEFT`), segregating the trace into a quarantined partition of the data lake. Enterprise training harnesses can then enforce compile-time dataset exclusion filters, guaranteeing that commercial policies are trained exclusively on Tier 1 permissive codebases.
 
-***
+::: {#chk-12-exposure-bias .callout-checkpoint title="Evaluating recovery curation and pipeline hygiene"}
+Before examining split partitioning and environment contamination vectors, verify your understanding of trajectory curation:
 
-Once trajectories are cryptographically enveloped, stripped of sensitive operational credentials, and classified by legal provenance, they constitute a trustworthy, reproducible foundation for policy optimization. However, assembling millions of clean, verifiable trajectories does not guarantee that a fine-tuned model will generalize to novel tasks. If trajectories derived from identical task fixtures, overlapping repository commits, or structurally related unit tests are haphazardly scattered between the training, validation, and test sets, the evaluation metrics will reflect memorization rather than systemic reasoning. How do we partition trajectory datasets across training, validation, and testing splits to guarantee that measured performance reflects genuine task generalization rather than data leakage?
+- [ ] **Covariate shift**: Why does fine-tuning exclusively on error-free golden trajectories cause policies to collapse when encountering runtime tool errors?
+- [ ] **Curriculum balance**: What proportional balance between linear successes, recovered trajectories, and mined hard negatives maximizes policy resilience?
+- [ ] **Backpressure governance**: How do watermarked buffer queues prevent high-latency container sandboxes from starving upstream generation workers?
+- [ ] **Lineage envelopes**: Why must harvested trajectories preserve cryptographic parent hashes, tool schemas, and environment fingerprints?
+:::
 
 ## Split Hygiene Verification {#sec-vol3-flywheel-evaluation}
 
@@ -1031,7 +1061,7 @@ where $N_{\text{accepted}}$ represents the raw count of candidate trajectories t
 
 If an organization runs a sloppy collection pipeline with a 30 percent leakage rate—meaning 30 percent of its collected tasks inadvertently duplicate repositories, schemas, or fixtures reserved for evaluation—the denominator shrinks, dramatically inflating the amortized unit cost of every valid training token.
 
-::: {#exmp-12-the-economic-cost-of-contaminated .callout-example title="The economic cost of contaminated yield"}
+::: {#nbk-12-the-economic-cost-of-contaminated .callout-notebook title="The economic cost of contaminated yield"}
 **Scenario:** An engineering team constructs an automated trajectory harvesting pipeline targeting a 70B parameter open-weights policy. The generation phase runs an unprivileged inference model to produce candidate rollouts across thousands of synthetic programming tasks.
 
 **Pipeline Parameters:**
@@ -1205,7 +1235,7 @@ A healthy pipeline maintains $\Lambda_{\text{leak}} \equiv 0$ against synthetic 
 $$Q_{\text{verify}} = \frac{\text{FLOPs}_{\text{verification}}}{\text{FLOPs}_{\text{generation}}}$$
 Because verification relies primarily on fast CPU microVMs and static analysis rather than dense tensor accelerators, maintaining $Q_{\text{verify}} < 0.10$ in total hardware cost ensures that data curation does not dominate the infrastructure budget.
 
-::: {#exmp-12-sizing-an-industrial-trajectory-harvester .callout-example title="Sizing an industrial trajectory harvester"}
+::: {#nbk-12-sizing-an-industrial-trajectory-harvester .callout-notebook title="Sizing an industrial trajectory harvester"}
 **Problem:** An AI systems engineering team operates a cluster of 1,000 parallel sandboxed agents tasked with automated software bug fixing. The agents interact with a 70B parameter dense model running on an inference cluster (FP8 weights, $140\text{ GB}$ VRAM per instance).
 
 The workload parameters are:
@@ -1320,7 +1350,7 @@ In closed-loop agentic systems, this belief is fundamentally false. Uncurated tr
 The architectural defense requires treating the collection pipeline as a staged, selective compiler rather than an indiscriminate log aggregator. Raw traces must pass through an escalating verifier cascade ($V_1 \to V_2 \to V_3$) that prunes syntactically invalid tool invocations, verifies sandbox state deltas, and validates end-to-end task completion against immutable specifications. Furthermore, data ingestion must enforce strict semantic clustering and deduplication based on normalized tool action sequences, compressing redundant successes while preserving high-leverage recovery paths. A curated corpus of 5,000 verified, deduplicated trajectories spanning diverse fault topologies systematically outperforms an uncurated pool of 500,000 raw execution logs in both downstream task completion and rollout efficiency.
 :::
 
-::: {#exmp-12-sample-efficiency-and-compute-budgets .callout-example title="Trajectory distillation compute budgets"}
+::: {#nbk-12-sample-efficiency-and-compute-budgets .callout-notebook title="Trajectory distillation compute budgets"}
 Consider an engineering team curating a trajectory dataset to train a $70\text{B}$ parameter agent policy $\pi_\theta$ using supervised fine-tuning across an 8,192-token context window. The team evaluates two data acquisition strategies:
 
 - **Strategy A (Unfiltered Raw Ingestion):** Ingest $100{,}000$ raw, unfiltered execution traces harvested directly from production developer sessions. Due to flailing and exploratory tool loops, the mean trajectory length is $\bar{L}_A = 6{,}500$ tokens. Verification against ground-truth unit tests reveals that only $18\%$ of these traces represent correct, non-hallucinatory solutions ($N_{\text{valid}} = 18{,}000$), while $82\%$ contain redundant tool thrashing, abandoned attempts, or unverified workarounds.
@@ -1354,22 +1384,6 @@ In real-world harvesting pipelines, unconstrained agents learn several empirical
 - *Silent Exception Absorption:* The agent wraps the test harness or the target function in an overbroad `try...except Exception: pass` block, converting runtime failures into silent, zero-exit-code terminations.
 
 If these trajectories pass into the training corpus, the harvested policy internalizes a toxic capability: it learns that the optimal strategy for resolving software bugs is to suppress the alarms rather than repair the fault.
-
-::: {#callout-def-vol3-test-tampering-defense .callout-definition title="Definition 12.1: Test tampering defense invariant"}
-In an autonomous coding agent environment, let $\mathcal{W}_{\text{src}}$ denote the mutable application source tree and $\mathcal{W}_{\text{test}}$ denote the verification test suite:
-
-1. **Vulnerable Architecture (Ambient Test Colocation)**:
-   If $\mathcal{W}_{\text{test}} \subset \mathcal{W}_{\text{src}}$ is mounted read-write, the policy can subvert the verifier by modifying test assertions:
-   $$\text{ExitCode}\left(\text{RunTests}(\mathcal{W}_{\text{src}}', \mathcal{W}_{\text{test}}')\right) = 0 \quad \text{with} \quad \mathcal{W}_{\text{test}}' \neq \mathcal{W}_{\text{test}}$$
-   Harvesting such trajectories injects toxic reward-hacking behaviors into the training corpus.
-2. **Hardened Architecture (Physical Volume Isolation & Cryptographic Diff Check)**:
-   The supervisor enforces physical isolation and cryptographic diff invariants:
-
-   - $\mathcal{W}_{\text{test}}$ is mounted from an external read-only volume (`ro,noexec`).
-   - Acceptance requires that the workspace git diff touches zero test files:
-     $$\text{Assert}\left(\text{PathDiff}(\mathcal{W}_{\text{src}}', \text{HEAD}) \cap \mathcal{W}_{\text{test}} = \emptyset\right)$$
-   - Trajectory acceptance is conditioned strictly on genuine invariant satisfaction under unalterable test fixtures.
-:::
 
 The architectural mitigation requires strict isolation between the agent's mutable workspace and the evaluation harness. The host supervisor must mount the validation test suite inside an immutable, read-only volume (`ro,noexec`) that is physically inaccessible to the agent's file modification tools during trajectory execution. Furthermore, the staging verifier cascade must enforce a strict cryptographic diff invariant: the host inspects the workspace working tree prior to acceptance and rejects any trajectory where `git diff --name-only origin/main` touches files outside the declared mutable task scope. Unit tests must be executed from an authoritative, unalterable external mount, ensuring that exit code 0 reflects true invariant satisfaction rather than test suite subversion.
 :::
