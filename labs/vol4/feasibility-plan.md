@@ -3,7 +3,7 @@
 **Audience:** Postdoctoral Researcher (Andrea, ETH Zurich) & Lab Staff
 **Status:** Canonical Engineering Implementation Checklist & Qualification Plan
 **Target Platform:** Arduino UNO Q ("Unikue" QRB2210 Linux + STM32U585 MCU) · Seeed Studio SO-101 6-DoF Arm · Hugging Face LeRobot · SmolVLA & ACT Models
-**Reference Curriculum:** [Master Landing Page](README.md) · [Course Syllabus](syllabus.md) · [12-Competency Matrix](student-competencies.md) · [Capstone Studio](lab-capstone-studio.md)
+**Reference Curriculum:** [Master Landing Page](README.md) · [Course Syllabus](syllabus.md) · [Staff Master Plan (Sep–Dec 2026)](staff-implementation-plan.md) · [12-Competency Matrix](student-competencies.md) · [Capstone Studio](lab-capstone-studio.md)
 
 ---
 
@@ -156,7 +156,7 @@ Once the single station passes all Gate Tests and Lab Qualifications, prepare th
 
 ---
 
-## 6. Phase 4: Risk Mitigation & Fallback Matrix
+## 6. Phase 4: Risk Mitigation & Fallback Matrix {#sec-fallbacks}
 
 If specific technical blockers arise during bench bring-up, apply these pre-authorized fallbacks:
 
