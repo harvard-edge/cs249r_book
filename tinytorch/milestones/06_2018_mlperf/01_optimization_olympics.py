@@ -651,42 +651,6 @@ def replay_prefixes(model, tokens, Tensor, cache=None):
     return np.stack(logits, axis=1)
 
 
-def render_tradeoff_chart(title, x_label, y_label, points, frontier_keys, width=44, height=6):
-    """Render an ASCII/Unicode scatter plot for a single benchmark division."""
-    xs = [p[1] for p in points]
-    ys = [p[2] for p in points]
-    min_x, max_x = min(xs), max(xs)
-    min_y, max_y = min(ys), max(ys)
-
-    span_x = max_x - min_x if max_x > min_x else (max_x if max_x > 0 else 1.0)
-    span_y = max_y - min_y if max_y > min_y else (max_y if max_y > 0 else 1.0)
-
-    pad_x = span_x * 0.18
-    pad_y = span_y * 0.18
-    plot_min_x, plot_max_x = max(0.0, min_x - pad_x), max_x + pad_x
-    plot_min_y, plot_max_y = max(0.0, min_y - pad_y), max_y + pad_y
-
-    grid = [[' ' for _ in range(width)] for _ in range(height)]
-
-    for name, x, y in points:
-        gx = int((x - plot_min_x) / (plot_max_x - plot_min_x) * (width - 1)) if plot_max_x > plot_min_x else 0
-        gy = int((y - plot_min_y) / (plot_max_y - plot_min_y) * (height - 1)) if plot_max_y > plot_min_y else 0
-        gy = (height - 1) - gy
-        gx = max(0, min(width - 1, gx))
-        gy = max(0, min(height - 1, gy))
-        grid[gy][gx] = '★' if name in frontier_keys else '●'
-
-    lines = []
-    lines.append(f"  [bold cyan]{title}[/bold cyan]")
-    lines.append(f"  {y_label[:5]:>5} ┌" + "─" * width + "┐")
-    for row_idx, row in enumerate(grid):
-        val_y = plot_max_y - (row_idx / (height - 1)) * (plot_max_y - plot_min_y)
-        prefix = f"{val_y:5.1f} │" if row_idx == 0 or row_idx == height - 1 or row_idx == height // 2 else "      │"
-        lines.append(f"{prefix}" + "".join(row) + "│")
-    lines.append("        └" + "─" * width + "┘")
-    lines.append(f"        {plot_min_x:<6.1f}" + " " * (width - 16) + f"{plot_max_x:>6.1f} {x_label}")
-    lines.append("        Legend: [bold green]★[/bold green] Pareto frontier    [dim]●[/dim] Dominated candidate")
-    return "\n".join(lines)
 
 
 def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
@@ -750,11 +714,6 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
         t1.add_row(r[0], f"{r[1]:,} B", r[3], f"{res['mean_latency']:.3f} ± {res['std_latency']:.3f} ms", f"{res['p95_latency']:.3f} ms", status_str)
     console.print(t1)
 
-    mlp_plot_pts = [(r[0], r[1] / 1024.0, r[4]) for r in mlp_records]
-    console.print(render_tradeoff_chart(
-        "Division 1 (MLP): Memory Footprint (KB) vs Test Accuracy (%)",
-        "KB", "Acc%", mlp_plot_pts, mlp_frontier
-    ))
 
     # -------------------------------------------------------------------------
     # DIVISION 2: Spatial Vision & Compute — SimpleCNN (Spatial, Compute-Bound)
@@ -824,11 +783,6 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
         t2.add_row(r[0], f"{r[1]:,} B", r[3], f"{res.mean:.3f} ± {res.std:.3f} ms", f"{res.percentile(95):.3f} ms", status_str)
     console.print(t2)
 
-    cnn_plot_pts = [(r[0], r[1] / 1024.0, r[4]) for r in cnn_records]
-    console.print(render_tradeoff_chart(
-        "Division 2 (CNN): Memory Footprint (KB) vs Signal Fidelity (%)",
-        "KB", "Fid%", cnn_plot_pts, cnn_frontier
-    ))
 
     # -------------------------------------------------------------------------
     # DIVISION 3: Generative LLM Serving — TinyGPT (Autoregressive, Prefix-Bound)
@@ -918,11 +872,6 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune, measurements,
         t3.add_row(r[0], f"{r[1]:,} B", r[3], f"{res.mean:.3f} ± {res.std:.3f} ms", f"{res.percentile(95):.3f} ms", status_str)
     console.print(t3)
 
-    gpt_plot_pts = [(r[0], r[2].mean, r[1] / 1024.0) for r in gpt_records]
-    console.print(render_tradeoff_chart(
-        "Division 3 (TinyGPT): Replay Latency (ms) vs Memory Footprint (KB)",
-        "ms", "KB", gpt_plot_pts, gpt_frontier
-    ))
 
     # -------------------------------------------------------------------------
     # CROSS-DIVISION SYSTEMS SYNTHESIS
