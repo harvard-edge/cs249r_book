@@ -20,7 +20,7 @@ Welcome to Module 13! You're about to synthesize everything you've built across 
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Autograd engine (`Tensor`), non-linear activations (`GELU`), feed-forward primitives (`Linear`), subword tokenization (`BPETokenizer`), positional embeddings (`EmbeddingLayer`), and multi-head attention (`MultiHeadAttention`).
-**You'll Build**: Numerically stable layer normalization (`LayerNorm`), 4× expansion feed-forward networks (`MLP`), complete residual blocks (`TransformerBlock`), and full autoregressive generative models (`GPT`).
+**You'll Build**: Numerically stable layer normalization (`LayerNorm`), 4× expansion feed-forward networks (`MLP`), complete residual blocks (`TransformerBlock`), and standalone autoregressive generation utilities (`sample_next_token`, `generate`).
 **You'll Enable**: Profiling and roofline optimization (`14_profiling`), post-training quantization (`15_quantization`), and key-value memory caching (`18_memoization`).
 
 <div align="center">
@@ -33,7 +33,7 @@ Welcome to Module 13! You're about to synthesize everything you've built across 
 |:---|:---|:---|:---|
 | **Modules 01–08** | Foundation & Training | `Tensor`, `Function`, `Linear`, `GELU`, `SGD`, `Adam`, `Trainer` | Completed |
 | **Modules 09–12** | Representations & Attention | `Conv2d`, `BPETokenizer`, `EmbeddingLayer`, `MultiHeadAttention` | Completed |
-| **Module 13** | **Transformer Stack & GPT** | `LayerNorm`, `MLP`, `TransformerBlock`, `GPT` | **Active Subsystem** |
+| **Module 13** | **Transformer Stack & Generation** | `LayerNorm`, `MLP`, `TransformerBlock`, `sample_next_token`, `generate` | **Active Subsystem** |
 | **Modules 14–20** | Systems & Acceleration | `Profiler`, `INT8Linear`, `KVCache`, `TinyGPT` | Downstream Consumers |
 
 ## 🎯 Learning Objectives
@@ -41,7 +41,7 @@ By the end of this module, you will:
 1. **Implement Numerically Stable Layer Normalization**: Standardize per-token feature vectors with a two-pass mean-then-variance computation and learnable affine restoration parameters ($\gamma, \beta$).
 2. **Construct Two-Layer MLP Expansion Blocks**: Build a $d_{\text{embed}} \to 4d_{\text{embed}} \to d_{\text{embed}}$ feed-forward channel projection with smooth GELU gating.
 3. **Assemble the Pre-LN Transformer Block**: Route clean residual highway streams through attention and MLP off-ramps to preserve unobstructed gradient backpropagation.
-4. **Build Full Autoregressive GPT Models**: Stack $N$ transformer blocks with learned positional embeddings and causal autoregressive masking.
+4. **Implement Autoregressive Generation & Sampling**: Build standalone token sampling with temperature scaling and autoregressive decoding loops.
 5. **Analyze LLM Parameter Scaling & Memory Footprints**: Calculate exact parameter allocations across attention and FFN layers and derive the quadratic memory scaling law.
 
 ---
@@ -51,11 +51,11 @@ By the end of this module, you will:
 | Artifact | Path / Location | Export Target | Primary Symbols |
 |:---|:---|:---|:---|
 | **Notebook** | `modules/13_transformers/transformers.ipynb` | Interactive Learning | Exploratory code, assertions, benchmarks |
-| **Core Source** | `src/13_transformers/13_transformers.py` | `tinytorch.core.transformers` | `LayerNorm`, `MLP`, `TransformerBlock`, `GPT`, `create_causal_mask` |
+| **Core Source** | `src/13_transformers/13_transformers.py` | `tinytorch.core.transformers` | `LayerNorm`, `MLP`, `TransformerBlock`, `create_causal_mask`, `sample_next_token`, `generate` |
 
 ```python
 # How to use this module:
-from tinytorch.core.transformers import LayerNorm, MLP, TransformerBlock, GPT, create_causal_mask
+from tinytorch.core.transformers import LayerNorm, MLP, TransformerBlock, create_causal_mask, sample_next_token, generate
 ```
 
 ---
@@ -77,7 +77,7 @@ from tinytorch.core.transformers import LayerNorm, MLP, TransformerBlock, GPT, c
 #| export
 
 import numpy as np
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 rng = np.random.default_rng(7)
 
@@ -228,7 +228,7 @@ Each component serves a specific purpose:
 - **LayerNorm**: Stabilizes training and normalizes activations
 - **MLP**: Provides non-linear transformation and "thinking" capacity
 - **TransformerBlock**: Combines attention with MLP using residual connections
-- **GPT**: Complete autoregressive language model for text generation
+- **Autoregressive Generation**: Standalone token sampling and autoregressive decoding loops
 """
 
 # %% [markdown]
@@ -945,352 +945,197 @@ $$P(w_i) = \frac{\exp(z_i / T)}{\sum_{j=1}^V \exp(z_j / T)}$$
 Two notes on that table. The $4\times$ expansion this module builds is an empirical convention, not a law, and the newest models have already left it. Llama 3's $d_{\text{ff}} = 14{,}336$ is $3.5d$ rather than $4d$ because SwiGLU splits the up-projection across three matrices instead of two, so a smaller width holds the same parameter budget. Llama 3 8B also needs more than $16\text{ GB}$ in practice, since $16\text{ GB}$ is exactly its FP16 weights with nothing left for the KV cache or activations.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "gpt", "solution": true}
+# # %% [markdown]
+r"""
+## 🎲 Autoregressive Generation & Token Sampling
+
+Language models generate text by iteratively predicting the probability distribution of the next token, sampling a token, and appending it to the sequence context.
+
+In accordance with the **LEGO Bricks Principle**, generation logic is decoupled from neural network layers. Any sequence model implementing a `.forward()` method can be driven by these standalone inference utilities.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "sample-next-token", "solution": true}
 #| export
-class GPT:
+def sample_next_token(logits: np.ndarray, temperature: float = 1.0, rng: Any = None) -> int:
     """
-    Complete GPT (Generative Pre-trained Transformer) model.
+    Sample one token from vocabulary logits using temperature scaling.
 
-    This combines embeddings, positional encoding, multiple transformer blocks,
-    and a language modeling head for text generation.
+    Args:
+        logits: Unnormalized model logits, shape (1, vocab_size) or (vocab_size,)
+        temperature: Sampling temperature (T >= 0). T=0 is greedy argmax.
+        rng: Optional random number generator (defaults to module rng)
+
+    Returns:
+        Sampled token index as an integer.
     """
+    ### BEGIN SOLUTION role="scaffold"
+    # Apply temperature scaling
+    if not np.isfinite(temperature) or temperature < 0:
+        raise ValueError("temperature must be finite and nonnegative")
+    flat_logits = np.asarray(logits, dtype=np.float64).reshape(-1)
+    if temperature == 0:
+        return int(np.argmax(flat_logits))
+    # Center in float64 before division so tiny temperatures cannot turn
+    # the largest logit into infinity. Negative overflow means zero mass.
+    centered_logits = flat_logits - np.max(flat_logits)
+    with np.errstate(over="ignore", under="ignore"):
+        scaled_logits = centered_logits / temperature
+        exp_logits = np.exp(scaled_logits)
 
-    def __init__(self, vocab_size: int, embed_dim: int, num_layers: int, num_heads: int,
-                 max_seq_len: int = 1024):
-        """
-        Initialize complete GPT model.
+    # Convert to probabilities (softmax with numerical stability)
+    probs = exp_logits / np.sum(exp_logits)
 
-        TODO: Set up all components of the GPT architecture
+    generator = rng if rng is not None else globals().get("rng", np.random.default_rng(7))
+    # Sample next token from probability distribution
+    next_token = generator.choice(len(flat_logits), p=probs)
+    return int(next_token)
+    ### END SOLUTION
 
-        APPROACH:
-        1. Token embedding layer to convert tokens to vectors
-        2. Positional embedding to add position information
-        3. Stack of transformer blocks (the main computation)
-        4. Final layer norm and language modeling head
-
-        GPT ARCHITECTURE:
-        tokens → embedding → + pos_embedding →
-                transformer_blocks → layer_norm → lm_head → logits
-
-        EXAMPLE:
-        >>> model = GPT(vocab_size=1000, embed_dim=256, num_layers=6, num_heads=8)
-        >>> tokens = Tensor(rng.integers(0, 1000, (2, 10)))  # (batch, seq)
-        >>> logits = model.forward(tokens)
-        >>> assert logits.shape == (2, 10, 1000)  # (batch, seq, vocab)
-
-        HINTS:
-        - Positional embeddings are learned, not fixed sinusoidal
-        - Final layer norm stabilizes training
-        - Language modeling head is a separate Linear(embed_dim, vocab_size) layer
-          (weight tying with the token embedding is a production optimization not implemented here)
-        """
-        ### BEGIN SOLUTION role="scaffold"
-        self.vocab_size = vocab_size
-        self.embed_dim = embed_dim
-        self.num_layers = num_layers
-        self.num_heads = num_heads
-        self.max_seq_len = max_seq_len
-
-        # Embedding layer
-        self.embedding_layer = EmbeddingLayer(vocab_size, embed_dim, max_seq_len)
-
-        # Stack of transformer blocks
-        self.blocks = []
-        for _ in range(num_layers):
-            block = TransformerBlock(embed_dim, num_heads)
-            self.blocks.append(block)
-
-        # Final layer normalization
-        self.ln_f = LayerNorm(embed_dim)
-
-        # Language modeling head (projects to vocabulary)
-        self.lm_head = Linear(embed_dim, vocab_size, bias=False)
-        ### END SOLUTION
-
-    def forward(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
-        """
-        Forward pass through GPT model.
-
-        start_pos is the position of the first token (0 for a whole sequence).
-        Module 18's KV cache will feed one token at a time and pass the number of
-        tokens already cached, so the embedding layer gives it the right position.
-
-        TODO: Implement the complete GPT forward pass
-
-        APPROACH:
-        1. Get token + positional embeddings from the embedding layer (pass start_pos)
-        2. Build the causal mask with _create_causal_mask(seq_len)
-        3. Pass x and the mask through all transformer blocks in order
-        4. Apply final layer norm and the language modeling head
-
-        COMPUTATION FLOW:
-        tokens → embed + pos_embed → blocks → ln_f → lm_head → logits
-
-        CAUSAL MASKING:
-        For autoregressive generation, we need to prevent tokens from
-        seeing future tokens. This is handled by the attention mask.
-
-        HINT: Pass start_pos to the embedding layer; it slices the positions from there
-        """
-        ### BEGIN SOLUTION role="scaffold"
-        batch_size, seq_len = tokens.shape
-
-        # Pass tokens to embedding layer to get token embeddings and positional embeddings
-        x = self.embedding_layer.forward(tokens, start_pos)
-
-        # Create causal mask for autoregressive generation
-        mask = self._create_causal_mask(seq_len)
-
-        # Pass through transformer blocks
-        for block in self.blocks:
-            x = block.forward(x, mask)
-
-        # Final layer normalization
-        x = self.ln_f.forward(x)
-
-        # Language modeling head
-        logits = self.lm_head.forward(x)
-
-        return logits
-        ### END SOLUTION
-
-    def __call__(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
-        """Allows the GPT model to be called like a function."""
-        return self.forward(tokens, start_pos)
-
-    def _create_causal_mask(self, seq_len: int) -> Tensor:
-        """Create causal mask to prevent attending to future positions."""
-        ### BEGIN SOLUTION role="scaffold"
-        # Same binary convention as create_causal_mask: 1 = attend, 0 = block
-        return create_causal_mask(seq_len)
-        ### END SOLUTION
-
-    def _sample_next_token(self, logits: np.ndarray, temperature: float = 1.0) -> int:
-        """
-        Sample one token from vocabulary logits using temperature scaling.
-
-        TODO: Implement temperature-controlled token sampling
-
-        APPROACH:
-        1. Reject negative/nonfinite temperatures; zero chooses the largest logit
-        2. Subtract the largest logit, then divide by positive temperature
-        3. Apply softmax to get probabilities (higher temperature = more random)
-        4. Sample one token index from the probability distribution
-
-        EXAMPLE:
-        >>> logits = np.array([[1.0, 2.0, 3.0]])  # Raw model output
-        >>> token = model._sample_next_token(logits, temperature=1.0)
-        >>> assert 0 <= token < 3  # Valid token index
-
-        HINT: Use np.exp(x - max(x)) / sum(np.exp(x - max(x))) for stable softmax
-        """
-        ### BEGIN SOLUTION role="scaffold"
-        # Apply temperature scaling
-        if not np.isfinite(temperature) or temperature < 0:
-            raise ValueError("temperature must be finite and nonnegative")
-        if temperature == 0:
-            return int(np.argmax(logits[0]))
-        # Center in float64 before division so tiny temperatures cannot turn
-        # the largest logit into infinity. Negative overflow means zero mass.
-        centered_logits = np.asarray(logits, dtype=np.float64)
-        centered_logits = centered_logits - np.max(centered_logits, axis=-1, keepdims=True)
-        with np.errstate(over="ignore", under="ignore"):
-            scaled_logits = centered_logits / temperature
-            exp_logits = np.exp(scaled_logits)
-
-        # Convert to probabilities (softmax with numerical stability)
-        probs = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
-
-        # Sample next token from probability distribution. Draw from the width of the
-        # logits row, not self.vocab_size, so a caller can hand in a bare logits array.
-        next_token = rng.choice(logits.shape[-1], p=probs[0])
-        return int(next_token)
-        ### END SOLUTION
-
-    def generate(self, prompt_tokens: Tensor, max_new_tokens: int = 50,
-                 temperature: float = 1.0) -> Tensor:
-        """
-        Generate text autoregressively by repeatedly sampling next tokens.
-
-        TODO: Implement the autoregressive generation loop
-
-        APPROACH:
-        1. Start with one nonempty prompt, shape (1, sequence); require a
-           nonnegative integer generation length that fits max_seq_len
-        2. For each new position:
-           - Run forward pass to get logits
-           - Extract last-position logits (next token prediction)
-           - Call _sample_next_token to pick the next token
-           - Append to sequence
-        3. Return generated sequence
-
-        EXAMPLE:
-        >>> model = GPT(vocab_size=100, embed_dim=64, num_layers=2, num_heads=4)
-        >>> prompt = Tensor([[1, 2, 3]])  # Some token sequence
-        >>> generated = model.generate(prompt, max_new_tokens=5)
-        >>> assert generated.shape[1] == 3 + 5  # original + new tokens
-
-        HINT: Use self._sample_next_token(last_logits, temperature) for sampling
-        """
-        ### BEGIN SOLUTION role="scaffold"
-        if len(prompt_tokens.shape) != 2 or prompt_tokens.shape[0] != 1 or prompt_tokens.shape[1] == 0:
-            raise ValueError("generate expects one nonempty prompt with shape (1, sequence)")
-        if not isinstance(max_new_tokens, (int, np.integer)) or max_new_tokens < 0:
-            raise ValueError("max_new_tokens must be a nonnegative integer")
-        if prompt_tokens.shape[1] + max_new_tokens > self.max_seq_len:
-            raise ValueError("Prompt plus generated tokens exceeds max_seq_len")
-        current_tokens = Tensor(prompt_tokens.data.copy())
-
-        for _ in range(max_new_tokens):
-            # Get logits for current sequence
-            logits = self.forward(current_tokens)
-
-            # Get logits for last position (next token prediction)
-            last_logits = logits.data[:, -1, :]  # (batch_size, vocab_size)
-
-            # Sample next token using helper
-            next_token_id = self._sample_next_token(last_logits, temperature)
-
-            # Append to sequence
-            next_token = np.array([[next_token_id]])
-            current_tokens = Tensor(np.concatenate([current_tokens.data, next_token], axis=1))
-
-        return current_tokens
-        ### END SOLUTION
-
-    def parameters(self) -> List[Tensor]:
-        """Return all learnable parameters."""
-        params = []
-        params.extend(self.embedding_layer.parameters())
-
-        for block in self.blocks:
-            params.extend(block.parameters())
-
-        params.extend(self.ln_f.parameters())
-        params.extend(self.lm_head.parameters())
-
-        return params
-
-# Public alias, not dead code: tests/cli/test_release_regressions.py requires TinyGPT in
-# this module's __all__, and the roadmap tables in Modules 12 and 13 name the model that way.
-TinyGPT = GPT
-
-# %% [markdown]
-"""
-### 🧪 Unit Test: GPT Model
-
-This test validates our complete GPT implementation.
-
-**What we're testing**: Model forward pass, shape consistency, generation capability
-**Why it matters**: This is the complete language model that ties everything together
-**Expected**: Correct output shapes, generation works, parameter counting
-"""
-
-# %% nbgrader={"grade": true, "grade_id": "test-gpt", "locked": true, "points": 20}
-def test_unit_gpt():
-    """🧪 Test GPT model implementation."""
-    print("🧪 Unit Test: GPT Model...")
-
-    # Test small GPT model
-    vocab_size = 100
-    embed_dim = 64
-    num_layers = 2
-    num_heads = 4
-
-    model = GPT(vocab_size, embed_dim, num_layers, num_heads)
-
-    # Test forward pass
-    batch_size, seq_len = 2, 8
-    tokens = Tensor(rng.integers(0, vocab_size, (batch_size, seq_len)))
-    logits = model.forward(tokens)
-
-    # Check output shape
-    expected_shape = (batch_size, seq_len, vocab_size)
-    assert logits.shape == expected_shape
-
-    # Test generation
-    prompt = Tensor(rng.integers(0, vocab_size, (1, 5)))
-    generated = model.generate(prompt, max_new_tokens=3)
-
-    # Check generation shape
-    assert generated.shape == (1, 8)  # 5 prompt + 3 new tokens
-
-    # Test parameter counting
-    params = model.parameters()
-    assert len(params) > 10  # Should have many parameters from all components
-
-    # Test different model sizes
-    larger_model = GPT(vocab_size=200, embed_dim=128, num_layers=4, num_heads=8)
-    test_tokens = Tensor(rng.integers(0, 200, (1, 10)))
-    larger_logits = larger_model.forward(test_tokens)
-    assert larger_logits.shape == (1, 10, 200)
-
-    print("✅ GPT model works correctly!")
-
-if __name__ == "__main__":
-    test_unit_gpt()
 
 # %% [markdown]
 r"""
 ### 🧪 Unit Test: Token Sampling
 
-This test validates the `_sample_next_token` helper that handles temperature-controlled
-token sampling, separated from the generation loop for clarity.
-
-### Token Sampling Pipeline
-
-| Execution Stage | Transformation Operation | Mathematical Formula | Numerical Example |
-| :--- | :--- | :--- | :--- |
-| **1. Unnormalized Logits** | Raw output projection | $\mathbf{z}$ | `[1.0, 2.0, 3.0]` |
-| **2. Temperature Scaling** | Dynamic variance scaling | $\tilde{\mathbf{z}} = \mathbf{z} / T$ | Modulates entropy and sharpness |
-| **3. Stable Softmax** | Numerical max subtraction | $p_i = \frac{e^{\tilde{z}_i - \max(\tilde{\mathbf{z}})}}{\sum_j e^{\tilde{z}_j - \max(\tilde{\mathbf{z}})}}$ | `[0.09, 0.24, 0.67]` |
-| **4. Categorical Choice** | Stochastic token sampling | $t \sim \text{Categorical}(\mathbf{p})$ | Sampled token index $\in [0, V-1]$ |
-
+This test validates `sample_next_token` across greedy decoding (temperature=0) and stochastic temperature regimes.
 
 **What we're testing**: Temperature scaling, softmax probability output, valid token range
 **Why it matters**: Sampling quality controls generation coherence and creativity
 **Expected**: Valid token indices, probabilities sum to 1, temperature affects distribution
 """
 
-# %% nbgrader={"grade": true, "grade_id": "gpt-sample-token", "locked": true, "points": 5}
+# %% nbgrader={"grade": true, "grade_id": "test-sample-next-token", "locked": true, "points": 10}
 def test_unit_sample_next_token():
-    """🧪 Test _sample_next_token implementation."""
+    """🧪 Test sample_next_token implementation."""
     print("🧪 Unit Test: Token Sampling...")
 
-    # Create a small model just to access _sample_next_token
-    model = GPT(vocab_size=5, embed_dim=32, num_layers=1, num_heads=2)
-
-    # Test 1: Output is a valid token index
     logits = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]])
-    token = model._sample_next_token(logits, temperature=1.0)
+    token = sample_next_token(logits, temperature=1.0)
     assert isinstance(token, (int, np.integer)), f"Expected int, got {type(token)}"
     assert 0 <= token < 5, f"Token {token} out of range [0, 5)"
 
-    # Inspect the distribution passed to the sampler instead of asserting
-    # that random draws never select a rare but valid token.
     from unittest.mock import Mock, patch
     sampler = Mock()
     sampler.choice.return_value = 4
-    with patch.dict(model._sample_next_token.__globals__, {"rng": sampler}):
+    with patch.dict(sample_next_token.__globals__, {"rng": sampler}):
         for temperature in (0.01, 1.0, 2.0):
-            assert model._sample_next_token(logits, temperature) == 4
+            assert sample_next_token(logits, temperature) == 4
             probabilities = sampler.choice.call_args.kwargs["p"]
             expected = np.exp((logits[0] - logits.max()) / temperature)
             expected /= expected.sum()
             np.testing.assert_allclose(probabilities, expected)
-            assert sampler.choice.call_args.args == (model.vocab_size,)
+            assert sampler.choice.call_args.args == (5,)
 
         uniform_logits = np.ones((1, 5))
-        model._sample_next_token(uniform_logits, temperature=2.0)
+        sample_next_token(uniform_logits, temperature=2.0)
         np.testing.assert_allclose(sampler.choice.call_args.kwargs["p"], np.full(5, 0.2))
 
-    # Zero temperature is genuinely deterministic greedy decoding.
-    assert model._sample_next_token(logits, temperature=0) == 4
+    # Zero temperature is deterministic greedy decoding
+    assert sample_next_token(logits, temperature=0) == 4
 
     print("✅ Token sampling works correctly!")
 
 if __name__ == "__main__":
     test_unit_sample_next_token()
+
+
+# %% [markdown]
+r"""
+## 🔤 Autoregressive Generation Loop
+
+The `generate()` function drives any causal language model token-by-token.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "generate-tokens", "solution": true}
+#| export
+def generate(model: Any, prompt_tokens: Tensor, max_new_tokens: int = 50,
+             temperature: float = 1.0, max_seq_len: int = 1024, rng: Any = None) -> Tensor:
+    """
+    Generate text autoregressively by repeatedly sampling next tokens from a model.
+
+    Args:
+        model: Any sequence model with a forward(tokens) -> logits method
+        prompt_tokens: Prompt token IDs, shape (1, seq_len)
+        max_new_tokens: Number of tokens to generate
+        temperature: Sampling temperature
+        max_seq_len: Maximum supported sequence length
+        rng: Optional random number generator (defaults to module rng)
+
+    Returns:
+        Tensor of shape (1, prompt_len + max_new_tokens)
+    """
+    ### BEGIN SOLUTION role="scaffold"
+    if len(prompt_tokens.shape) != 2 or prompt_tokens.shape[0] != 1 or prompt_tokens.shape[1] == 0:
+        raise ValueError("generate expects one nonempty prompt with shape (1, sequence)")
+    if not isinstance(max_new_tokens, (int, np.integer)) or max_new_tokens < 0:
+        raise ValueError("max_new_tokens must be a nonnegative integer")
+    if prompt_tokens.shape[1] + max_new_tokens > max_seq_len:
+        raise ValueError("Prompt plus generated tokens exceeds max_seq_len")
+    current_tokens = Tensor(prompt_tokens.data.copy())
+
+    for _ in range(max_new_tokens):
+        # Forward pass to get logits for current sequence
+        logits = model.forward(current_tokens)
+
+        # Extract last position logits: (1, vocab_size)
+        last_logits = logits.data[:, -1, :]
+
+        # Sample next token
+        next_token_id = sample_next_token(last_logits, temperature, rng=rng)
+
+        # Append to sequence
+        next_token = np.array([[next_token_id]])
+        current_tokens = Tensor(np.concatenate([current_tokens.data, next_token], axis=1))
+
+    return current_tokens
+    ### END SOLUTION
+
+
+# %% [markdown]
+r"""
+### 🧪 Unit Test: Autoregressive Generation
+
+This test validates the standalone `generate` utility using a deterministic mock sequence model.
+
+**What we're testing**: Token-by-token autoregressive loop, sequence expansion, prompt preservation
+**Why it matters**: Drives any causal language model to produce continuous text
+**Expected**: Output shape is (1, prompt_len + max_new_tokens), prompt prefix preserved
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-generate", "locked": true, "points": 15}
+def test_unit_generate():
+    """🧪 Test generate implementation with mock sequence model."""
+    print("🧪 Unit Test: Autoregressive Generation...")
+
+    class MockSequenceModel:
+        def __init__(self, vocab_size=10):
+            self.vocab_size = vocab_size
+
+        def forward(self, tokens, start_pos=0):
+            batch_size, seq_len = tokens.shape
+            # Predict token 7 deterministically at every position
+            logits = np.zeros((batch_size, seq_len, self.vocab_size), dtype=np.float32)
+            logits[:, :, 7] = 10.0
+            return Tensor(logits)
+
+    model = MockSequenceModel(vocab_size=10)
+    prompt = Tensor([[1, 2, 3]])
+    generated = generate(model, prompt, max_new_tokens=4, temperature=0.0)
+
+    assert generated.shape == (1, 7), f"Expected shape (1, 7), got {generated.shape}"
+    np.testing.assert_array_equal(generated.data[0], [1, 2, 3, 7, 7, 7, 7])
+
+    print("✅ Autoregressive generation works correctly!")
+
+if __name__ == "__main__":
+    test_unit_generate()
+
+# %% nbgrader={"grade": false, "grade_id": "export-models", "solution": false}
+#| export
+# Re-export model architectures for downstream compatibility
+try:
+    from tinytorch.models.transformer import GPT, TinyGPT
+except ImportError:
+    pass
 
 # %% [markdown]
 """
@@ -1340,6 +1185,7 @@ def demonstrate_transformer_integration():
     """
     print("🔗 Integration Demo: Complete Language Model Pipeline")
     print("Building a mini-GPT for character-level text generation")
+    from tinytorch.models.transformer import GPT
 
     # Create a small vocabulary (character-level)
     vocab = list("abcdefghijklmnopqrstuvwxyz .")
@@ -1381,7 +1227,7 @@ def demonstrate_transformer_integration():
     print("\nGeneration demo:")
     print(f"Prompt: '{prompt_text}'")
 
-    generated = model.generate(prompt, max_new_tokens=8, temperature=1.0)
+    generated = generate(model, prompt, max_new_tokens=8, temperature=1.0)
     generated_text = ''.join([idx_to_char[idx] for idx in generated.data[0]])
 
     print(f"Generated: '{generated_text}'")
@@ -1446,6 +1292,7 @@ def analyze_parameter_scaling():
     """📊 Analyze how parameter count scales with embedding dimension."""
     print("📊 Analyzing Parameter Scaling in Transformers...")
     print("Understanding why model size affects performance and cost\n")
+    from tinytorch.models.transformer import GPT
 
     # Vary ONE dimension. The earlier version doubled embed_dim and grew num_layers at
     # the same time, so neither variable's effect could be read off the output.
@@ -1549,13 +1396,15 @@ def test_module():
     test_unit_layer_norm()
     test_unit_mlp()
     test_unit_transformer_block()
-    test_unit_gpt()
     test_unit_sample_next_token()
+    test_unit_generate()
 
     print("\nRunning integration scenarios...")
 
-    # Test complete transformer training scenario
-    print("🧪 Integration Test: Full Training Pipeline...")
+    # Test complete transformer pipeline scenario
+    print("🧪 Integration Test: Full Generation Pipeline...")
+
+    from tinytorch.models.transformer import GPT
 
     # Create model and data
     vocab_size = 50
@@ -1578,11 +1427,11 @@ def test_module():
     prompt = Tensor(rng.integers(0, vocab_size, (1, 8)))
 
     # Conservative generation
-    conservative = model.generate(prompt, max_new_tokens=5, temperature=0.1)
+    conservative = generate(model, prompt, max_new_tokens=5, temperature=0.1)
     assert conservative.shape == (1, 13)
 
     # Creative generation
-    creative = model.generate(prompt, max_new_tokens=5, temperature=2.0)
+    creative = generate(model, prompt, max_new_tokens=5, temperature=2.0)
     assert creative.shape == (1, 13)
 
     # Test parameter counting consistency
@@ -1755,7 +1604,7 @@ Congratulations! You've built the complete transformer architecture that powers 
 - Built LayerNorm for stable training across deep transformer networks
 - Implemented MLP (feed-forward) networks with GELU activation and 4x expansion
 - Created complete TransformerBlock with self-attention, residual connections, and pre-norm architecture
-- Built full GPT model with embeddings, positional encoding, and autoregressive generation
+- Implemented decoupled autoregressive token generation with temperature scaling
 - Discovered attention memory scaling and parameter distribution patterns
 - All tests pass ✅ (validated by `test_module()`)
 

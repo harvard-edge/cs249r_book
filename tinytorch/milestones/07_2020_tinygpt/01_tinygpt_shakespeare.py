@@ -85,9 +85,17 @@ if str(project_root) not in sys.path:
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.losses import CrossEntropyLoss
 from tinytorch.core.optimizers import AdamW
-from tinytorch.core.dataloader import Dataset, DataLoader
+from tinytorch.core.dataloader import TensorDataset, DataLoader
+from tinytorch.core.training import Trainer
 from tinytorch.core.tokenization import CharTokenizer, BPETokenizer
-from tinytorch.core.transformers import TinyGPT
+from tinytorch.core.embeddings import EmbeddingLayer
+from tinytorch.core.layers import Linear
+from tinytorch.core.transformers import (
+    LayerNorm,
+    TransformerBlock,
+    create_causal_mask,
+    generate,
+)
 from milestones.data_manager import DatasetManager
 
 # Rich for terminal UI
@@ -112,24 +120,79 @@ def press_enter_to_continue():
         console.print()
 
 
-class TextWindowDataset(Dataset):
-    """Slices a 1D token stream into autoregressive (input, target) pairs shifted by 1."""
+class TinyGPT:
+    """
+    Complete Decoder-Only Generative Pretrained Transformer (TinyGPT).
 
-    def __init__(self, token_ids, seq_len=32, stride=8):
-        self.inputs = []
-        self.targets = []
-        n_tokens = len(token_ids)
-        for start in range(0, n_tokens - seq_len, stride):
-            self.inputs.append(token_ids[start : start + seq_len])
-            self.targets.append(token_ids[start + 1 : start + seq_len + 1])
-        self.inputs = np.array(self.inputs, dtype=np.int64)
-        self.targets = np.array(self.targets, dtype=np.int64)
+    Assembled entirely from TinyTorch LEGO bricks:
+      1. Token + Learned Positional Embeddings: Module 11 (EmbeddingLayer)
+      2. Causal Multi-Head Self-Attention: Module 12 (MultiHeadAttention inside TransformerBlock)
+      3. Feed-Forward Expansion (4x) with GELU: Module 02 & 03 (MLP inside TransformerBlock)
+      4. Deep Pre-LayerNorm Residual Highway: Module 13 (TransformerBlock)
+      5. Final Layer Normalization: Module 13 (LayerNorm)
+      6. Un-embedding Vocabulary Projection: Module 03 (Linear)
+    """
 
-    def __len__(self):
-        return len(self.inputs)
+    def __init__(
+        self,
+        vocab_size: int,
+        embed_dim: int = 64,
+        num_layers: int = 2,
+        num_heads: int = 4,
+        max_seq_len: int = 64,
+    ):
+        self.vocab_size = vocab_size
+        self.embed_dim = embed_dim
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.max_seq_len = max_seq_len
 
-    def __getitem__(self, idx):
-        return Tensor(self.inputs[idx]), Tensor(self.targets[idx])
+        # Token + Positional Embeddings (Module 11)
+        self.embedding_layer = EmbeddingLayer(vocab_size, embed_dim, max_seq_len)
+
+        # Stack of Pre-LN Transformer Blocks (Module 13)
+        self.blocks = [
+            TransformerBlock(embed_dim, num_heads) for _ in range(num_layers)
+        ]
+
+        # Final Layer Normalization (Module 13)
+        self.ln_f = LayerNorm(embed_dim)
+
+        # LM Head (Module 03): projects hidden state back to vocabulary logits
+        self.lm_head = Linear(embed_dim, vocab_size, bias=False)
+
+    def forward(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
+        """Forward pass: [B, S] -> [B, S, V]."""
+        batch_size, seq_len = tokens.shape
+
+        # Token + positional embeddings
+        x = self.embedding_layer.forward(tokens, start_pos)
+
+        # Causal autoregressive mask
+        mask = create_causal_mask(seq_len)
+
+        # Stacked transformer blocks
+        for block in self.blocks:
+            x = block.forward(x, mask)
+
+        # Final LayerNorm & LM Head projection
+        x = self.ln_f.forward(x)
+        logits = self.lm_head.forward(x)
+
+        return logits
+
+    def __call__(self, tokens: Tensor, start_pos: int = 0) -> Tensor:
+        return self.forward(tokens, start_pos)
+
+    def parameters(self) -> list:
+        """Return all learnable parameters across all subsystems."""
+        params = []
+        params.extend(self.embedding_layer.parameters())
+        for block in self.blocks:
+            params.extend(block.parameters())
+        params.extend(self.ln_f.parameters())
+        params.extend(self.lm_head.parameters())
+        return params
 
 
 def build_model(vocab_size, embed_dim=64, num_layers=2, num_heads=4, max_seq_len=64):
@@ -145,41 +208,13 @@ def build_model(vocab_size, embed_dim=64, num_layers=2, num_heads=4, max_seq_len
     return model, total_params
 
 
-def train_epoch(model, dataloader, optimizer, loss_fn, vocab_size):
-    """Run one training epoch with teacher forcing and autograd updates."""
-    total_loss = 0.0
-    total_tokens = 0
-
-    for batch_x, batch_y in dataloader:
-        batch_size, seq_len = batch_x.shape
-
-        # Forward pass: [B, S] -> [B, S, V]
-        logits = model.forward(batch_x)
-
-        # Reshape to 2D for CrossEntropyLoss: [B*S, V] vs [B*S]
-        logits_2d = logits.reshape(-1, vocab_size)
-        target_1d = batch_y.reshape(-1)
-
-        loss = loss_fn(logits_2d, target_1d)
-
-        # Autograd backward pass & AdamW step
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-
-        total_loss += loss.data * (batch_size * seq_len)
-        total_tokens += batch_size * seq_len
-
-    return total_loss / max(total_tokens, 1)
-
-
 def generate_continuation(model, tokenizer, prompt, max_new_tokens=40, temperature=0.8):
     """Autoregressively extend prompt tokens using TinyGPT's generation loop."""
     prompt_ids = tokenizer.encode(prompt)
     if not prompt_ids:
         prompt_ids = [1]  # fallback
     prompt_tensor = Tensor(np.array([prompt_ids]))
-    generated_tensor = model.generate(prompt_tensor, max_new_tokens=max_new_tokens, temperature=temperature)
+    generated_tensor = generate(model, prompt_tensor, max_new_tokens=max_new_tokens, temperature=temperature)
     generated_ids = generated_tensor.data[0].tolist()
     return tokenizer.decode(generated_ids)
 
@@ -231,7 +266,16 @@ def run_milestone(args=None):
     # Build sequence dataset (crop text to ~30k tokens for fast CPU convergence)
     train_tokens = tokens[: min(len(tokens), 35000)]
     seq_len = 32
-    dataset = TextWindowDataset(train_tokens, seq_len=seq_len, stride=8)
+    stride = 8
+
+    inputs = []
+    targets = []
+    for start in range(0, len(train_tokens) - seq_len, stride):
+        inputs.append(train_tokens[start : start + seq_len])
+        targets.append(train_tokens[start + 1 : start + seq_len + 1])
+    x_tensor = Tensor(np.array(inputs, dtype=np.int32))
+    y_tensor = Tensor(np.array(targets, dtype=np.int32))
+    dataset = TensorDataset(x_tensor, y_tensor)
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
     console.print(f"  Slices created  : [cyan]{len(dataset):,} training windows[/cyan] (seq_len={seq_len})")
 
@@ -267,6 +311,7 @@ def run_milestone(args=None):
     # ─────────────────────────────────────────────────────────────────────────
     optimizer = AdamW(model.parameters(), lr=1e-3, weight_decay=0.01)
     loss_fn = CrossEntropyLoss()
+    trainer = Trainer(model, optimizer, loss_fn)
 
     console.print("[bold]🚀 Training TinyGPT from Scratch (Next-Token Prediction)...[/bold]")
 
@@ -284,7 +329,7 @@ def run_milestone(args=None):
         task = progress.add_task("[cyan]Training epochs...", total=epochs)
 
         for epoch in range(epochs):
-            loss = train_epoch(model, dataloader, optimizer, loss_fn, vocab_size)
+            loss = trainer.train_epoch(dataloader)
             perplexity = np.exp(min(loss, 20.0))
             history.append((epoch + 1, loss, perplexity))
             progress.update(task, advance=1, description=f"[cyan]Epoch {epoch+1}/{epochs} - Loss: {loss:.4f} (PPL: {perplexity:.1f})")
@@ -342,7 +387,7 @@ def run_milestone(args=None):
     console.print()
     if passed:
         console.print(Panel.fit(
-            f"[bold green]🏆 MILESTONE 07 PASSED: TINYGPT CONVERGED & GENERATING![/bold green]\n\n"
+            f"[bold green]🏆 MILESTONE ACHIEVED: TINYGPT CONVERGED & GENERATING![/bold green]\n\n"
             f"  • Initial Loss : {initial_loss:.4f}\n"
             f"  • Final Loss   : [bold green]{final_loss:.4f}[/bold green] (reduction: -{loss_drop:.2f})\n"
             f"  • Model Status : Syntactically coherent autoregressive text generated!\n\n"

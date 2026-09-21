@@ -60,10 +60,13 @@ def main() -> int:
     with tempfile.TemporaryDirectory(dir=ROOT, prefix="tinytorch-reference-") as tmp:
         sandbox = Path(tmp)
         package = sandbox / "tinytorch"
-        for subdir in ("", "core", "perf"):
+        for subdir in ("", "core", "perf", "models"):
             target = package / subdir
             target.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(ROOT / "tinytorch" / subdir / "__init__.py", target / "__init__.py")
+            if (ROOT / "tinytorch" / subdir / "__init__.py").exists():
+                shutil.copyfile(ROOT / "tinytorch" / subdir / "__init__.py", target / "__init__.py")
+        if (ROOT / "tinytorch" / "models").exists():
+            shutil.copytree(ROOT / "tinytorch" / "models", package / "models", dirs_exist_ok=True)
         for source in sources:
             notebook = sandbox / f"{source.stem}.ipynb"
             jupytext.write(jupytext.read(source), notebook)

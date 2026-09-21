@@ -535,7 +535,7 @@ class CrossEntropyFunction(Function):
         TODO: Implement cross-entropy loss with numerical stability
 
         APPROACH:
-        1. Require nonempty logits (batch, classes) and targets (batch,)
+        1. Require nonempty logits (..., classes) and targets (...)
         2. Check targets are finite integers with 0 <= t < num_classes,
            then compute log-softmax of logits (numerically stable)
         3. Select log-probabilities for correct classes
@@ -558,23 +558,30 @@ class CrossEntropyFunction(Function):
         - Return negative mean: -np.mean(selected_log_probs)
         """
         ### BEGIN SOLUTION
-        if logits.ndim != 2 or logits.size == 0 or targets.shape != (logits.shape[0],):
-            raise ValueError("CrossEntropyLoss requires nonempty logits (batch, classes) and targets (batch,)")
+        if logits.ndim < 2 or logits.size == 0 or targets.shape != logits.shape[:-1]:
+            raise ValueError("CrossEntropyLoss requires nonempty logits (..., classes) and targets (...)")
         if not np.all(np.isfinite(targets)) or np.any(targets != np.floor(targets)):
             raise ValueError("CrossEntropyLoss targets must be finite integer class indices")
 
-        batch_size, num_classes = logits.shape
-        out_of_range = (targets < 0) | (targets >= num_classes)
+        num_classes = logits.shape[-1]
+        if num_classes == 0:
+            raise ValueError("CrossEntropyLoss requires nonempty logits (..., classes) and targets (...)")
+
+        flat_logits = logits.reshape(-1, num_classes)
+        flat_targets = targets.reshape(-1)
+        batch_size = flat_logits.shape[0]
+
+        out_of_range = (flat_targets < 0) | (flat_targets >= num_classes)
         if np.any(out_of_range):
-            bad_values = np.unique(targets[out_of_range])
+            bad_values = np.unique(flat_targets[out_of_range])
             raise ValueError(
                 f"CrossEntropyLoss target index out of range: {bad_values.tolist()}\n"
                 f"  Valid range for {num_classes} classes is [0, {num_classes - 1}]"
             )
 
         # Validate before casting: conversion would silently truncate fractional labels.
-        target_indices = targets.astype(int)
-        log_probs = LogSoftmax().forward(logits)
+        target_indices = flat_targets.astype(int)
+        log_probs = LogSoftmax().forward(flat_logits)
 
         # Select correct class log-probabilities using advanced indexing
         selected_log_probs = log_probs[np.arange(batch_size), target_indices]
