@@ -485,6 +485,10 @@ To minimize tree depth and CPU traversal latency, modern inference runtimes such
 
 As formalized in @tbl-radix-node-schema, the Radix tree serves as an authoritative index over the physical block pool. When a request completes its generation cycle, the serving runtime does not return its physical blocks to the global free list. Instead, it transitions the reference count of the corresponding leaf node to zero, marking the physical blocks as dormant. The blocks remain mapped in accelerator HBM, ready to be immediately re-attached if a subsequent request traverses the same prefix path.
 
+::: {#dfn-radix-prefix-cache .callout-definition title="Radix prefix cache"}
+A hierarchical tree structure that indexes physical key-value cache blocks against token sequences, compressing non-branching token paths to enable constant-time prefix lookups, cross-request cache reuse, and leaf-first LRU memory reclamation.
+:::
+
 ### Longest prefix matching
 
 ::: {.column-margin}
@@ -856,6 +860,14 @@ If $T_{\text{wait}} \le \frac{2 M_{\text{KV}}}{B_{\text{pcie}}}$, the engine can
 $$T_{\text{wait}}^* \approx \frac{2 \cdot M_{\text{KV}}}{B_{\text{pcie}}} \cdot \left( \frac{\mu_{\text{HBM}}}{\mu_{\text{HBM}} - \mu_{\text{DRAM}}} \right) + \Delta T_{\text{stall}}$$
 
 where $\Delta T_{\text{stall}}$ represents the latency penalty the scheduler is willing to tolerate on the resumed step. When memory capacity is constrained ($\mu_{\text{HBM}} \gg \mu_{\text{DRAM}}$), $T_{\text{wait}}^*$ approaches the round-trip transfer time.
+
+::: {#psp-05-the-tyranny-of-the-idle-agent .callout-perspective title="The tyranny of the idle agent and the KV residency tax"}
+In traditional request-response inference serving, GPU memory residency is brief and deterministic: requests stream in, decode tokens sequentially, and release their allocations immediately upon emitting a terminal delimiter. Agentic loops break this operational model entirely by introducing prolonged, asynchronous I/O pauses. When an agent invokes a mutating tool—such as launching a test container, executing a multi-file compilation, or waiting for human confirmation—forward token generation halts for seconds or minutes.
+
+During these pauses, retaining gigabytes of Key-Value state in High-Bandwidth Memory imposes an exorbitant idle residency tax. An $80\text{ GB}$ H100 GPU hosting sixteen concurrent paused agents can find its entire memory capacity locked by dormant trajectories that emit zero tokens, starving active decodes and triggering head-of-line blocking. Yet simply evicting these blocks forces an equally punitive recomputation tax: re-evaluating thousands of prefix tokens on resumption wastes precious tensor core cycles and spikes Time to First Token.
+
+**Systems insight**: High-Bandwidth Memory is an ephemeral execution stage, not an archival storage medium. Dependable agent runtimes conquer the residency tax by decoupling execution from retention—treating GPU memory as an L1 attention cache that is proactively paged to host DRAM or NVMe via asynchronous DMA the instant an agent yields control to an external effector.
+:::
 
 ::: {#nbk-05-sizing-the-break-even-frontier-for .callout-notebook title="Sizing the break-even frontier for a 70-billion parameter trajectory"}
 Consider an agentic coding service executing a 70-billion parameter dense model ($P = 70 \times 10^9$) configured with Grouped-Query Attention (GQA). The architecture features $L = 80$ layers, $H_{\text{kv}} = 8$ key-value heads, head dimension $d_{\text{head}} = 128$, and operates in 16-bit half-precision ($b_{\text{elem}} = 2\text{ bytes}$). The serving node executes across an 8-GPU tensor-parallel group connected via PCIe Gen5 x16 to host memory, yielding an aggregate sustained transfer bandwidth of $B_{\text{pcie}} = 50\text{ GB/s}$. The GPU subsystem sustains an aggregate prefill throughput of $R_{\text{prefill}} = 400\text{ TFLOPs/s}$ ($4.0 \times 10^{14}\text{ FLOPs/s}$).
