@@ -1,6 +1,6 @@
 # Volume IV staff build brief: prove the kit before teaching it
 
-**Audience:** Postdoctoral researcher and teaching staff. **Status:** Supporting hardware notes for the proposed UNO Q spring seminar. Start with the [feasibility plan](feasibility-plan.md), then use this page for one-axis fallback details if the SO-101 command path cannot be reproduced. The [student competency checklist](student-competencies.md) defines what the course must teach; the [course operating plan](course-architecture.md) defines the student milestones. Build and measure one complete station before reproducing a class set. The [candidate parts list](kit-bom.md) is a purchasing aid, not evidence that the parts work together.
+**Audience:** Postdoctoral researcher and teaching staff. **Status:** Supporting hardware notes for the proposed UNO Q spring seminar. Start with the [feasibility plan](feasibility-plan.md), then use this page for one-axis fallback details if the SO-101 command path cannot be reproduced. The [student competency checklist](../curriculum/student-competencies.md) defines what the course must teach; the [course operating plan](../curriculum/course-architecture.md) defines the student milestones. Build and measure one complete station before reproducing a class set. The [candidate parts list](kit-bom.md) is a purchasing aid, not evidence that the parts work together.
 
 ## Priority pilot: SO-101 course station
 
@@ -8,7 +8,7 @@ Return four demonstrations in sequence: native LeRobot calibration, teleoperatio
 
 ## One-axis fallback assignment
 
-Deliver a reproducible tabletop station in which a versioned Hugging Face model runs locally on the UNO Q's Qualcomm QRB2210, influences a bounded physical action, and uses the observed result to choose again. The STM32U585 owns the actuator pins and can refuse a proposal. A person can remove motor power independently. This is the minimum [Physical AI scope test](../../books/vol4/01_boundary/01_boundary.qmd): learned model, consequential physical feedback, and delegated actuator authority.
+Deliver a reproducible tabletop station in which a versioned Hugging Face model runs locally on the UNO Q's Qualcomm QRB2210, influences a bounded physical action, and uses the observed result to choose again. The STM32U585 owns the actuator pins and can refuse a proposal. A person can remove motor power independently. This is the minimum [Physical AI scope test](../../../books/vol4/01_boundary/01_boundary.qmd): learned model, consequential physical feedback, and delegated actuator authority.
 
 The fallback task is a **slow, one-axis visual follower**. A fixed camera sees a soft pointer and a hand-placed target within a marked arc. The Qualcomm side estimates the target and proposes one small step; the MCU permits or refuses it, drives the axis, and reports measured position. The next frame shows whether pointer error fell. Move the target to a new position between action cycles and repeat. Start with a stationary target after each placement so the measured camera and inference cadence sets a fair task speed.
 
@@ -36,7 +36,7 @@ In parallel with the class-kit work, return a **SmolVLA-on-UNO-Q feasibility rep
 
 ## How this becomes a course rather than one demo
 
-The first six weekly labs each own one reusable component. Andrea should complete these experiments personally and turn each test above into a student handout with a starting state, prediction, deliberate failure, measured result, and artifact that the next lab consumes. The [lab sequence](lab-sequence.md) expands the experiments.
+The first six weekly labs each own one reusable component. Andrea should complete these experiments personally and turn each test above into a student handout with a starting state, prediction, deliberate failure, measured result, and artifact that the next lab consumes. The [lab sequence](../labs/lab-sequence.md) expands the experiments.
 
 | Week | Component students master | Artifact carried forward |
 |---:|:---|:---|
@@ -55,7 +55,7 @@ The two simulators have distinct teaching jobs. The small Python model exposes e
 
 Inventory the delivered [Seeed SO-101 Pro assembled kit](https://www.seeedstudio.com/SO-101-Assembled-Kit-Pro-p-6691.html): count leader and follower arms, cameras, controllers, cables, power supplies, and spare servos rather than assuming a packout from the product name. Follow the official [LeRobot SO-101 setup](https://huggingface.co/docs/lerobot/so101) to identify the motor-bus USB ports, configure IDs, calibrate joint positions, and record a short teleoperated episode if the required leader or other input device is present. Use those episodes for a staff-prepared [ACT](https://huggingface.co/docs/lerobot/act) action-chunking lab; provision workstation compute and an offline replay path for students without physical arm time.
 
-Draw the actual command path before connecting the arm to a Qualcomm board. Seeed documents a UART servo bus behind a USB controller. The stock LeRobot host can command motors through that controller, so the UNO Q MCU cannot claim per-joint veto merely because it is connected to the same system. Test an STM32-to-servo command route first on one guarded, unloaded servo, then on the full arm, with no live direct host-to-servo bypass. Measure refusal, readback, cutoff, reset, and command timing. A motor-power interlock proves emergency cutoff, not independent permission for each action. Return a measured recommendation for the [arm-centered curriculum](so101-uno-q-course.md) and the local SmolVLA trial; retain the one-axis reference station if the STM32 route cannot be reproduced.
+Draw the actual command path before connecting the arm to a Qualcomm board. Seeed documents a UART servo bus behind a USB controller. The stock LeRobot host can command motors through that controller, so the UNO Q MCU cannot claim per-joint veto merely because it is connected to the same system. Test an STM32-to-servo command route first on one guarded, unloaded servo, then on the full arm, with no live direct host-to-servo bypass. Measure refusal, readback, cutoff, reset, and command timing. A motor-power interlock proves emergency cutoff, not independent permission for each action. Return a measured recommendation for the [arm-centered curriculum](../curriculum/so101-uno-q-course.md) and the local SmolVLA trial; retain the one-axis reference station if the STM32 route cannot be reproduced.
 
 ## VLA and pendulum decision
 

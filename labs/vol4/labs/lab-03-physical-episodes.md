@@ -1,9 +1,9 @@
 # Lab 3: Teleoperation, LeRobot Dataset & Action Taps
 
 **Schedule:** Weeks 4–5 | **Part:** [Part II: Teaching the Machine](module-2-teaching-the-machine.md)
-**Required Textbook Reading:** [Chapter 5: Physical Data](../../books/vol4/05_data/05_data.qmd) & [Chapter 7: Closed-Loop Evaluation](../../books/vol4/07_evaluation/07_evaluation.qmd)
+**Required Textbook Reading:** [Chapter 5: Physical Data](../../../books/vol4/05_data/05_data.qmd) & [Chapter 7: Closed-Loop Evaluation](../../../books/vol4/07_evaluation/07_evaluation.qmd)
 **Target Competencies:** `[ ] B1 Physical Dataset Engineering & Multi-Tap Logging`
-**Milestone Alignment:** Contributes to [Milestone 2](syllabus.md#sec-milestones) (End of Week 6)
+**Milestone Alignment:** Contributes to [Milestone 2](../curriculum/syllabus.md#sec-milestones) (End of Week 6)
 
 ---
 
@@ -16,9 +16,9 @@ How do we collect demonstration data from human teleoperation that accurately ca
 
 | Component | Station Function | Technical Details | Visual Reference |
 |:---|:---|:---|:---:|
-| **Seeed SO-101 Arm** | Follower arm under teleoperation | 6-DoF, STS3215 serial servos, resting pose return | <img src="assets/images/so101-follower.png" alt="SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Logitech C270 Webcam** | Tabletop manipulation arena video capture | Overhead mount, 30 FPS RGB, synchronized with joint states | <img src="assets/images/logitech-c270-webcam.png" alt="Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Arduino UNO Q Board** | Multi-tap telemetry logger & bus interface | Logs `a_req`, `a_map`, `a_enf`, `a_meas` across inter-core RPC | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Seeed SO-101 Arm** | Follower arm under teleoperation | 6-DoF, STS3215 serial servos, resting pose return | <img src="../assets/images/so101-follower.png" alt="SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Logitech C270 Webcam** | Tabletop manipulation arena video capture | Overhead mount, 30 FPS RGB, synchronized with joint states | <img src="../assets/images/logitech-c270-webcam.png" alt="Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Arduino UNO Q Board** | Multi-tap telemetry logger & bus interface | Logs `a_req`, `a_map`, `a_enf`, `a_meas` across inter-core RPC | <img src="../assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
 
 1. **Follower Arm:** Seeed SO-101 6-DoF arm connected to the Arduino UNO Q.
 2. **Teleoperation Input:** Leader arm, USB gamepad (Xbox / Logitech), or keyboard teleoperator connected to the workstation or UNO Q.
@@ -105,4 +105,4 @@ To receive credit for Lab 3:
 1. [ ] **Clean Dataset Artifact:** Present a valid LeRobot Dataset v3 containing 30 demonstration episodes with zero corrupted frames.
 2. [ ] **4-Action-Tap Logging Proof:** Open one Parquet file and prove that `action`, `action_enforced`, and `action_measured` are logged as distinct, synchronized columns.
 3. [ ] **Dataset Card Documentation:** Submit a completed Dataset Card detailing recording conditions, camera resolution, lighting lux, and train/val/test split rationale.
-*Staff signs off `[ ] B1` on the team's [Competency Card](student-competencies.md).*
+*Staff signs off `[ ] B1` on the team's [Competency Card](../curriculum/student-competencies.md).*

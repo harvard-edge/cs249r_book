@@ -1,9 +1,9 @@
 # Lab 8: Fault Injection & Fail-Safe Cutoffs
 
 **Schedule:** Week 11 | **Part:** [Part IV: Governing the Machine](module-4-governing-the-machine.md)
-**Required Textbook Reading:** [Chapter 15: Adversarial Verification](../../books/vol4/15_verification/15_verification.qmd) & [Chapter 16: Safe Release](../../books/vol4/16_release/16_release.qmd)
+**Required Textbook Reading:** [Chapter 15: Adversarial Verification](../../../books/vol4/15_verification/15_verification.qmd) & [Chapter 16: Safe Release](../../../books/vol4/16_release/16_release.qmd)
 **Target Competencies:** `[ ] D2 Real-Time Safety Governor & Fault Isolation`
-**Milestone Alignment:** Concludes [Milestone 4](syllabus.md#sec-milestones) (End of Week 11)
+**Milestone Alignment:** Concludes [Milestone 4](../curriculum/syllabus.md#sec-milestones) (End of Week 11)
 
 ---
 
@@ -16,10 +16,10 @@ What happens when the host computer freezes, the camera is disconnected, or the 
 
 | Component | Role in Fault & Release Testing | Fault Injection Mode | Visual Reference |
 |:---|:---|:---|:---:|
-| **Arduino UNO Q Board** | Dual-silicon brain running Linux runtime & STM32 watchdog | Process suspension (`kill -STOP`), RPC buffer overflow | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Logitech C270 Webcam** | Visual perception sensor | Live physical USB disconnect during trajectory execution | <img src="assets/images/logitech-c270-webcam.png" alt="Logitech C270 Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Seeed SO-101 6-DoF Arm** | Physical plant under active load | Table collision veto, watchdog freeze, unpowered gravity drop | <img src="assets/images/so101-follower.png" alt="SO-101 Robot Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Switched 7.4V DC Rail** | Isolated motor power rail | Live power disconnect while logic telemetry continues uninterrupted | <img src="assets/images/feetech-sts3215-bus-ports.jpg" alt="Motor Bus Power Ports" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Arduino UNO Q Board** | Dual-silicon brain running Linux runtime & STM32 watchdog | Process suspension (`kill -STOP`), RPC buffer overflow | <img src="../assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Logitech C270 Webcam** | Visual perception sensor | Live physical USB disconnect during trajectory execution | <img src="../assets/images/logitech-c270-webcam.png" alt="Logitech C270 Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Seeed SO-101 6-DoF Arm** | Physical plant under active load | Table collision veto, watchdog freeze, unpowered gravity drop | <img src="../assets/images/so101-follower.png" alt="SO-101 Robot Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Switched 7.4V DC Rail** | Isolated motor power rail | Live power disconnect while logic telemetry continues uninterrupted | <img src="../assets/images/feetech-sts3215-bus-ports.jpg" alt="Motor Bus Power Ports" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
 
 1. **Controller Board:** Arduino UNO Q (Qualcomm Linux MPU + STM32U585 MCU).
 2. **Motor Power Rail:** Switched 7.4V/5A DC motor power supply sharing a common star ground with the Arduino UNO Q.
@@ -88,4 +88,4 @@ To receive credit for Lab 8 and complete Milestone 4:
 1. [ ] **Watchdog Timeout Proof:** Demonstrate that suspending the Linux process halts the arm within $150\text{ ms}$ with zero anomalous motion.
 2. [ ] **Zero Backlog Audit:** Prove that resuming the suspended process does not execute stale buffered movements.
 3. [ ] **Motor Power Cutoff Verification:** Switch off the 7.4V motor power supply during active motion, proving immediate motor cutoff while system telemetry continues logging.
-*Staff signs off `[ ] D2` on the team's [Competency Card](student-competencies.md).*
+*Staff signs off `[ ] D2` on the team's [Competency Card](../curriculum/student-competencies.md).*

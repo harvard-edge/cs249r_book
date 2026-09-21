@@ -4,8 +4,8 @@
 **Target Audience:** Postdoctoral Researcher (Andrea, ETH Zurich) & Course Instruction Staff
 **Course Lead:** Prof. Vijay Janapa Reddi
 **Target Semester:** Spring 2027 Studio Launch
-**Target Hardware:** Arduino UNO Q (Qualcomm QRB2210 Linux + STM32U585 MCU) · Seeed Studio SO-101 6-DoF Follower Arm · Hugging Face LeRobot · SmolVLA & ACT
-**Core Reference Architecture:** [Master Landing Page](README.md) · [Course Syllabus](syllabus.md) · [Pre-Flight Guide](feasibility-plan.md) · [12-Competency Matrix](student-competencies.md)
+**Target Platform:** Arduino UNO Q ("Unikue" Qualcomm QRB2210 Linux + STM32U585 MCU) · Seeed Studio SO-101 Arm · Hugging Face LeRobot · SmolVLA & ACT
+**Core Reference Architecture:** [Master Landing Page](../README.md) · [Course Syllabus](../curriculum/syllabus.md) · [Pre-Flight Guide](feasibility-plan.md) · [12-Competency Matrix](../curriculum/student-competencies.md)
 
 ---
 
@@ -27,7 +27,7 @@ This studio teaches students to build and evaluate physical AI systems across tw
 Students build, measure, and defend the **Causal Permission Boundary** connecting the two processors over an internal RPC bridge with zero unmonitored host bypass.
 :::
 
-![The Dual-Brain Architecture of Physical AI: Asymmetric Cognition vs. Deterministic Governance](assets/images/vol4-dual-brain-architecture.svg)
+![The Dual-Brain Architecture of Physical AI: Asymmetric Cognition vs. Deterministic Governance](../assets/images/vol4-dual-brain-architecture.svg)
 
 The primary objectives for this 13-week execution window:
 1. **Week 1 Planning & Bench Preparation:** Finalize the master curriculum plan, audit the Bill of Materials (BOM), allocate dedicated workbench space at ETH Zurich, and verify electrical power rails before unboxing.
@@ -42,7 +42,7 @@ The primary objectives for this 13-week execution window:
 
 The 13-week schedule is organized into six logical phases across five sprints, shifting physical assembly into Week 2 to allow Week 1 to focus entirely on architecture alignment, BOM audit, and bench preparation:
 
-![Volume IV Physical AI Studio: 13-Week Staff Implementation Roadmap](assets/images/vol4-staff-roadmap.svg)
+![Volume IV Physical AI Studio: 13-Week Staff Implementation Roadmap](../assets/images/vol4-staff-roadmap.svg)
 
 ---
 
@@ -54,16 +54,16 @@ The studio relies on an open, modular, and safety-hardened hardware stack design
 
 | Component Image | System Pillar & Hardware | Key Technical Specifications | Core Function in Studio |
 |:---:|:---|:---|:---|
-| <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;"> | **Dual-Silicon Compute**<br>`Arduino UNO Q` | • Qualcomm QRB2210 Linux Application MPU (Debian)<br>• STM32U585 Real-Time Microcontroller (160 MHz ARM Cortex-M33)<br>• OpenAMP RPMsg shared-SRAM inter-core bridge<br>• Dedicated 45W USB-PD logic power | Runs Hugging Face LeRobot and SmolVLA/ACT neural policies on Linux; delegates physical motor bounds and safety governance to STM32. |
-| <img src="assets/images/so101-follower.png" alt="Seeed Studio SO-101" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;"> | **Manipulator Plant**<br>`Seeed Studio SO-101 Pro` | • 6-DoF open-source follower arm linkage<br>• Rigid benchtop clamp mount (zero tip under load)<br>• Parallel-jaw gripper end-effector<br>• $300 \times 200\text{ mm}$ marked manipulation workspace | Provides the physical body for imitation learning, human teleoperation demonstration recording, and autonomous block reach. |
-| <img src="assets/images/feetech-sts3215-servo.jpg" alt="Feetech STS3215" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;"> | **Smart Serial Actuator**<br>`Feetech STS3215 Bus Servo` | • 19 kg·cm stall torque at 7.4V<br>• 12-bit contactless magnetic angle encoder<br>• 1 Mbps half-duplex UART daisy-chain protocol<br>• Real-time angular position and load telemetry readback | Translates commanded joint action chunks ($a_{\text{enf}}$) into calibrated physical motion and returns measured angles ($a_{\text{meas}}$). |
-| <img src="assets/images/logitech-c270-webcam.png" alt="Logitech C270 Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;"> | **Vision Sensor**<br>`Logitech C270 HD Webcam` | • 720p 30 Hz RGB video ingestion via Linux V4L2<br>• Mounted 40 cm overhead at 45° oblique perspective<br>• AprilTag 36h11 extrinsic calibration target<br>• Locked exposure and white balance to avoid visual drift | Ingests sensory frames $o_t \in \mathbb{R}^{3 \times 224 \times 224}$ for closed-loop visual feedback and dynamic disturbance recovery. |
+| <img src="../assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;"> | **Dual-Silicon Compute**<br>`Arduino UNO Q` | • Qualcomm QRB2210 Linux Application MPU (Debian)<br>• STM32U585 Real-Time Microcontroller (160 MHz ARM Cortex-M33)<br>• OpenAMP RPMsg shared-SRAM inter-core bridge<br>• Dedicated 45W USB-PD logic power | Runs Hugging Face LeRobot and SmolVLA/ACT neural policies on Linux; delegates physical motor bounds and safety governance to STM32. |
+| <img src="../assets/images/so101-follower.png" alt="Seeed Studio SO-101" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;"> | **Manipulator Plant**<br>`Seeed Studio SO-101 Pro` | • 6-DoF open-source follower arm linkage<br>• Rigid benchtop clamp mount (zero tip under load)<br>• Parallel-jaw gripper end-effector<br>• $300 \times 200\text{ mm}$ marked manipulation workspace | Provides the physical body for imitation learning, human teleoperation demonstration recording, and autonomous block reach. |
+| <img src="../assets/images/feetech-sts3215-servo.jpg" alt="Feetech STS3215" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;"> | **Smart Serial Actuator**<br>`Feetech STS3215 Bus Servo` | • 19 kg·cm stall torque at 7.4V<br>• 12-bit contactless magnetic angle encoder<br>• 1 Mbps half-duplex UART daisy-chain protocol<br>• Real-time angular position and load telemetry readback | Translates commanded joint action chunks ($a_{\text{enf}}$) into calibrated physical motion and returns measured angles ($a_{\text{meas}}$). |
+| <img src="../assets/images/logitech-c270-webcam.png" alt="Logitech C270 Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;"> | **Vision Sensor**<br>`Logitech C270 HD Webcam` | • 720p 30 Hz RGB video ingestion via Linux V4L2<br>• Mounted 40 cm overhead at 45° oblique perspective<br>• AprilTag 36h11 extrinsic calibration target<br>• Locked exposure and white balance to avoid visual drift | Ingests sensory frames $o_t \in \mathbb{R}^{3 \times 224 \times 224}$ for closed-loop visual feedback and dynamic disturbance recovery. |
 
 ### Complete Bench Rigging & Electrical Bus Interface
 
 Before assembling the physical arm or connecting motor power, review the electrical wiring schematic. The architecture uses clean galvanic separation between digital computing logic and high-current actuator power:
 
-![Physical Bench Rigging & Electrical Bus Interface](assets/images/vol4-bench-wiring-harness.svg)
+![Physical Bench Rigging & Electrical Bus Interface](../assets/images/vol4-bench-wiring-harness.svg)
 
 ::: {.callout-note}
 ### Dual Power Supply Engineering Rationale
@@ -84,7 +84,7 @@ To ensure bulletproof reliability and avoid mysterious CPU brownout resets:
 #### Week 1 (Sep 21 – Sep 25, 2026): Master Plan Alignment & Bench Preparation
 * **Primary Objective:** Finalize the master execution plan, complete the BOM inventory, allocate the physical workbench, and verify laboratory power systems.
 * **Tasks:**
-  - [ ] Review master curriculum architecture: [Master Landing Page](README.md), [Course Syllabus](syllabus.md), [Pre-Flight Guide](feasibility-plan.md), [8 Lab Briefs](lab-01-boundary.md), and [Capstone Studio](lab-capstone-studio.md).
+  - [ ] Review master curriculum architecture: [Master Landing Page](../README.md), [Course Syllabus](../curriculum/syllabus.md), [Pre-Flight Guide](feasibility-plan.md), [8 Lab Briefs](../labs/lab-01-boundary.md), and [Capstone Studio](../labs/lab-capstone-studio.md).
   - [ ] Inventory delivered hardware packages: Seeed Studio SO-101 Pro arm kit, Arduino UNO Q (4GB RAM), 45W USB-PD power supply, USB 3.0 powered hub, Logitech C270 camera, 7.4V/5A DC motor power supply, UART level-shifter, and wiring harnesses.
   - [ ] Dedicate a clean $120 \times 80\text{ cm}$ workbench at ETH Zurich with rigid table-edge clamping surface, overhead camera mount fixture, and anti-static mat.
   - [ ] Bench-test the regulated 7.4V DC motor supply and 45W USB-PD adapter with a digital multimeter to confirm clean voltage levels and common star-ground reference.

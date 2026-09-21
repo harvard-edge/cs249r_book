@@ -40,7 +40,7 @@
 
 ## Exit check
 
-The team's notebook links one run ID to the initial observation, learned proposal, MCU decision, measured move or refusal, changed scene, new observation, revised decision, and task outcome. Record the next experiment and any discrepancy. The instructor-facing [competency matrix](../student-competencies.md) states which capability this lab exercises.
+The team's notebook links one run ID to the initial observation, learned proposal, MCU decision, measured move or refusal, changed scene, new observation, revised decision, and task outcome. Record the next experiment and any discrepancy. The instructor-facing [competency matrix](../../curriculum/student-competencies.md) states which capability this lab exercises.
 
 **Qualified by:** [first staff member, date, trace]<br>
 **Reproduced by:** [second staff member, date, trace]

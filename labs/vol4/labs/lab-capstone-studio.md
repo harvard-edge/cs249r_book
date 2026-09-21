@@ -1,9 +1,9 @@
 # Capstone Project Studio: Physical Release Defense
 
 **Schedule:** Weeks 12–14 (3 Full Weeks Dedicated Studio)
-**Required Textbook Reading:** Complete Volume IV Synthesis ([Chapters 1–17](../../books/vol4/index.qmd))
+**Required Textbook Reading:** Complete Volume IV Synthesis ([Chapters 1–17](../../../books/vol4/index.qmd))
 **Target Competencies:** `[ ] D3 Physical Release Defense & Evidence Dossier` *(Full 12-Card Mastery)*
-**Milestone Deliverable:** [Milestone 5](syllabus.md#sec-milestones) (End of Week 14) — *Capstone System Defense & Physical Release Dossier*
+**Milestone Deliverable:** [Milestone 5](../curriculum/syllabus.md#sec-milestones) (End of Week 14) — *Capstone System Defense & Physical Release Dossier*
 
 ---
 
@@ -87,6 +87,6 @@ To achieve course graduation and Milestone 5 completion:
 1. [ ] **20-Trial Execution:** Complete 20 witnessed physical trials with zero unhandled collisions or hardware crashes.
 2. [ ] **Physical Release Dossier:** Submit an approved, auditable Claim-Argument-Evidence release dossier.
 3. [ ] **Oral Defense:** Every team member successfully defends their individual causal trace.
-4. [ ] **Complete Competency Mastery:** All 12 competencies (A1–A3, B1–B3, C1–C3, D1–D3) signed off on the [Competency Card](student-competencies.md).
+4. [ ] **Complete Competency Mastery:** All 12 competencies (A1–A3, B1–B3, C1–C3, D1–D3) signed off on the [Competency Card](../curriculum/student-competencies.md).
 
 > **A Note on Engineering Integrity:** A team that concludes their system **should NOT be released** for production due to measured timing or reliability limitations—and provides rigorous physical evidence supporting that conclusion—receives full honors. Proving where a physical system fails is the hallmark of a true systems engineer.

@@ -10,7 +10,7 @@ To demonstrate mastery of Physical AI systems, a student team must produce a ver
 
 $$\text{Physical State } (s_t) \longrightarrow \text{Observation } (I_t, q_t) \longrightarrow \text{Learned Proposal } (a_{\text{req}}) \longrightarrow \text{MCU Permission } (a_{\text{enf}}) \longrightarrow \text{Actuation } (a_{\text{meas}}) \longrightarrow \text{New Observation } (I_{t+1}, q_{t+1}) \longrightarrow \text{Revised Decision}$$
 
-The final system must satisfy the three conditions of the book's [scope test](../../books/vol4/01_boundary/01_boundary.qmd):
+The final system must satisfy the three conditions of the book's [scope test](../../../books/vol4/01_boundary/01_boundary.qmd):
 1. **A Learned Decision:** A model whose output is conditioned on high-dimensional physical observations, not a hardcoded trajectory.
 2. **Consequential Physical Feedback:** Action changes the world, and subsequent decisions must respond to the actual measured state produced by prior motion or disturbance.
 3. **Delegated Actuator Authority:** Low-level actuation executes within an independent microcontroller permission boundary capable of vetoing proposals in real time.

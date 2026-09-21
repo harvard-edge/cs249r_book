@@ -1,11 +1,11 @@
 # Part II / Module 2: Teaching the Machine
 
 **Schedule:** Weeks 4–6
-**Milestone Deliverable:** [Milestone 2](syllabus.md#sec-milestones) (End of Week 6) — *Validated Demonstration Dataset & Edge-Ready SmolVLA / ACT Policy on Qualcomm Linux*
+**Milestone Deliverable:** [Milestone 2](../curriculum/syllabus.md#sec-milestones) (End of Week 6) — *Validated Demonstration Dataset & Edge-Ready SmolVLA / ACT Policy on Qualcomm Linux*
 **Required Textbook Reading:**
-- [Chapter 5: Physical Data](../../books/vol4/05_data/05_data.qmd)
-- [Chapter 6: Policy Training](../../books/vol4/06_training/06_training.qmd)
-- [Chapter 7: Closed-Loop Evaluation](../../books/vol4/07_evaluation/07_evaluation.qmd)
+- [Chapter 5: Physical Data](../../../books/vol4/05_data/05_data.qmd)
+- [Chapter 6: Policy Training](../../../books/vol4/06_training/06_training.qmd)
+- [Chapter 7: Closed-Loop Evaluation](../../../books/vol4/07_evaluation/07_evaluation.qmd)
 **Associated Studio Labs:** [Lab 3: Teleoperation, LeRobot Dataset & Action Taps](lab-03-physical-episodes.md) & [Lab 4: Deterministic Baseline & SmolVLA/ACT Export](lab-04-baseline-and-learning.md)
 **Target Competency Card Items:** `[ ] B1`, `[ ] B2`, `[ ] B3`
 
@@ -72,4 +72,4 @@ By the end of Week 6, each team submits their **Milestone 2 Packet**:
 1. **Curated LeRobot Dataset:** Replayable LeRobot Dataset v3 on Hugging Face Hub (or local disk) with 30 episodes, complete Dataset Card, and documented 4-action-tap schema.
 2. **Baseline Comparison Report:** Performance benchmark comparing the deterministic scripted baseline against teleoperated human demonstrations.
 3. **Quantized Edge Model Artifact:** Pinned ONNX model checkpoint running on the Qualcomm QRB2210 with verified latency and memory profiling traces.
-4. **Competency Sign-Off:** Verified sign-off for **B1, B2, and B3** on the team's [Competency Card](student-competencies.md).
+4. **Competency Sign-Off:** Verified sign-off for **B1, B2, and B3** on the team's [Competency Card](../curriculum/student-competencies.md).

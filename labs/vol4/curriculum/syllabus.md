@@ -27,10 +27,10 @@ Each bench station provides an integrated physical and computational workstation
 
 | Component | Role in Lab Bench Station | Technical Specification | Visual Reference |
 |:---|:---|:---|:---:|
-| **Arduino UNO Q ("Unikue")** | Dual-silicon brain: Linux MPU + Real-time MCU | Qualcomm QRB2210 (Debian Linux) + STM32U585 MCU, inter-core RPC, hardware watchdog | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q Board" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Seeed Studio SO-101 Arm** | 6-DoF physical robot manipulator | 6 revolute joints, 3D-printed rigid structure, calibrated workspace boundary | <img src="assets/images/so101-follower.png" alt="Seeed Studio SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Feetech STS3215 Smart Servos** | Daisy-chained serial bus actuators | 12-bit magnetic encoder ($0.088^\circ$), 19 kg·cm stall torque @ 7.4V, 1 Mbps TTL UART | <img src="assets/images/feetech-sts3215-servo.jpg" alt="Feetech STS3215 Servo" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Dual Power Infrastructure** | Decoupled logic and motor power rails | 45W USB-C PD (Logic) + Dedicated 7.4V/5A DC (Servos) with common star ground | <img src="assets/images/feetech-sts3215-bus-ports.jpg" alt="Dual Daisy-Chain Bus Ports" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Arduino UNO Q ("Unikue")** | Dual-silicon brain: Linux MPU + Real-time MCU | Qualcomm QRB2210 (Debian Linux) + STM32U585 MCU, inter-core RPC, hardware watchdog | <img src="../assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q Board" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Seeed Studio SO-101 Arm** | 6-DoF physical robot manipulator | 6 revolute joints, 3D-printed rigid structure, calibrated workspace boundary | <img src="../assets/images/so101-follower.png" alt="Seeed Studio SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Feetech STS3215 Smart Servos** | Daisy-chained serial bus actuators | 12-bit magnetic encoder ($0.088^\circ$), 19 kg·cm stall torque @ 7.4V, 1 Mbps TTL UART | <img src="../assets/images/feetech-sts3215-servo.jpg" alt="Feetech STS3215 Servo" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Dual Power Infrastructure** | Decoupled logic and motor power rails | 45W USB-C PD (Logic) + Dedicated 7.4V/5A DC (Servos) with common star ground | <img src="../assets/images/feetech-sts3215-bus-ports.jpg" alt="Dual Daisy-Chain Bus Ports" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
 
 1. **The Dual-Brain Compute Board (Arduino UNO Q "Unikue"):**
    * *Qualcomm Dragonwing QRB2210 MPU:* Quad-core 64-bit ARM Cortex-A53 running Debian Linux. Ingests USB video frames, runs quantized ONNX policy inference, and packages action chunk proposals ($a_{\text{req}}$).
@@ -53,7 +53,7 @@ Each bench station provides an integrated physical and computational workstation
    * *ACT (Action Chunking with Transformers):* Multi-step joint trajectory prediction policy.
 4. **Edge Runtime:** ONNX Runtime / INT8 quantization optimized for Qualcomm ARM Cortex-A53 execution providers.
 
-![Arduino UNO Q Dual-Silicon Architecture and Safety Boundary](assets/images/vol4-uno-q-dual-core-architecture.svg)
+![Arduino UNO Q Dual-Silicon Architecture and Safety Boundary](../assets/images/vol4-uno-q-dual-core-architecture.svg)
 
 ---
 
@@ -61,13 +61,13 @@ Each bench station provides an integrated physical and computational workstation
 
 1. **The Dual-Brain Architecture as Core Systems Pedagogy:** Physical AI cannot be solved by a single monolithic computing environment. High-capacity foundation policies demand a complex, probabilistic Linux application environment (Brain 1: Qualcomm QRB2210 MPU), while mechanical actuators demand hard real-time determinism, microsecond bus control, and physical safety guarantees (Brain 2: STM32U585 MCU). Students learn to construct, benchmark, and defend this fundamental architectural boundary across every lab.
 
-![The Dual-Brain Architecture of Physical AI: Asymmetric Cognition vs. Deterministic Governance](assets/images/vol4-dual-brain-architecture.svg)
+![The Dual-Brain Architecture of Physical AI: Asymmetric Cognition vs. Deterministic Governance](../assets/images/vol4-dual-brain-architecture.svg)
 
 2. **Bench-First Studio Learning:** There are no passive lecture halls. Conceptual systems principles are grounded immediately in physical experiments at the bench.
 3. **The S·P·A Causal Feedback Loop:** Every physical episode connects:
    $$\text{Sense (Camera/Telemetry)} \longrightarrow \text{Propose (Linux VLA)} \longrightarrow \text{Permit (STM32 MCU)} \longrightarrow \text{Act (SO-101 Servos)}$$
 
-![The Physical AI Sense-Propose-Permit-Act Loop](assets/images/vol4-physical-ai-loop.svg)
+![The Physical AI Sense-Propose-Permit-Act Loop](../assets/images/vol4-physical-ai-loop.svg)
 
 4. **The Three-Part Scope Test:** A lab submission is rejected if it merely runs a classifier on a screen or wires a model to an unmonitored hardcoded script. Action must be learned, consequential, and permitted by an independent safety boundary.
 5. **Adversarial Verification:** You do not prove a physical AI system works by recording a cherry-picked 5-second video. You prove it by allowing instructors and peer teams to introduce physical disturbances (lighting drops, target displacements, obstacle obstacles) and measuring whether the system recovers or safely abstains.
@@ -155,18 +155,18 @@ Because actuators impart physical momentum and electrical current:
 
 Formal instruction spans **Weeks 1–11 (8 focused labs)**, followed by the **3-week Capstone Project Studio (Weeks 12–14)**:
 
-![Volume IV Physical AI Studio 14-Week Curriculum Map](assets/images/vol4-course-structure-map.svg)
+![Volume IV Physical AI Studio 14-Week Curriculum Map](../assets/images/vol4-course-structure-map.svg)
 
 ### Detailed Lab Directory:
-* **[Lab 1: The Causal Boundary & Servo Bus Bring-Up](lab-01-boundary.md) (Weeks 1–2):** Chapters 1 & 2 $\to$ Checks A1, D1.
-* **[Lab 2: Multi-Modal Sensing & The Inter-Core Bridge](lab-02-body-and-sensors.md) (Week 3):** Chapters 3 & 4 $\to$ Checks A2, A3.
-* **[Lab 3: Teleoperation, LeRobot Dataset & Action Taps](lab-03-physical-episodes.md) (Weeks 4–5):** Chapters 5 & 7 $\to$ Checks B1.
-* **[Lab 4: Deterministic Baseline & SmolVLA/ACT Export](lab-04-baseline-and-learning.md) (Week 6):** Chapter 6 $\to$ Checks B2, B3.
-* **[Lab 5: Autonomous Closed-Loop Reach on UNO Q](lab-05-local-feedback-loop.md) (Weeks 7–8):** Chapters 8, 11, 13 $\to$ Checks C1.
-* **[Lab 6: Action Horizons, Language & Disturbances](lab-06-action-chunks.md) (Week 9):** Chapters 10 & 12 $\to$ Checks C2, C3.
-* **[Lab 7: The Microcontroller Safety Governor](lab-07-authority-under-fault.md) (Week 10):** Chapters 12 & 14 $\to$ Checks D1.
-* **[Lab 8: Fault Injection & Fail-Safe Cutoffs](lab-08-verification-and-release.md) (Week 11):** Chapters 15 & 16 $\to$ Checks D2.
-* **[Capstone Project Studio & Release Defense](lab-capstone-studio.md) (Weeks 12–14):** Chapters 1–17 $\to$ Checks D3.
+* **[Lab 1: The Causal Boundary & Servo Bus Bring-Up](../labs/lab-01-boundary.md) (Weeks 1–2):** Chapters 1 & 2 $\to$ Checks A1, D1.
+* **[Lab 2: Multi-Modal Sensing & The Inter-Core Bridge](../labs/lab-02-body-and-sensors.md) (Week 3):** Chapters 3 & 4 $\to$ Checks A2, A3.
+* **[Lab 3: Teleoperation, LeRobot Dataset & Action Taps](../labs/lab-03-physical-episodes.md) (Weeks 4–5):** Chapters 5 & 7 $\to$ Checks B1.
+* **[Lab 4: Deterministic Baseline & SmolVLA/ACT Export](../labs/lab-04-baseline-and-learning.md) (Week 6):** Chapter 6 $\to$ Checks B2, B3.
+* **[Lab 5: Autonomous Closed-Loop Reach on UNO Q](../labs/lab-05-local-feedback-loop.md) (Weeks 7–8):** Chapters 8, 11, 13 $\to$ Checks C1.
+* **[Lab 6: Action Horizons, Language & Disturbances](../labs/lab-06-action-chunks.md) (Week 9):** Chapters 10 & 12 $\to$ Checks C2, C3.
+* **[Lab 7: The Microcontroller Safety Governor](../labs/lab-07-authority-under-fault.md) (Week 10):** Chapters 12 & 14 $\to$ Checks D1.
+* **[Lab 8: Fault Injection & Fail-Safe Cutoffs](../labs/lab-08-verification-and-release.md) (Week 11):** Chapters 15 & 16 $\to$ Checks D2.
+* **[Capstone Project Studio & Release Defense](../labs/lab-capstone-studio.md) (Weeks 12–14):** Chapters 1–17 $\to$ Checks D3.
 
 ---
 

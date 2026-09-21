@@ -1,9 +1,9 @@
 # Lab 2: Multi-Modal Sensing & The Inter-Core Bridge
 
 **Schedule:** Week 3 | **Part:** [Part I: The Machine Anatomy](module-1-machine-anatomy.md)
-**Required Textbook Reading:** [Chapter 3: The Cognitive Brain](../../books/vol4/03_brain/03_brain.qmd) & [Chapter 4: The Nervous System](../../books/vol4/04_nervous/04_nervous.qmd)
+**Required Textbook Reading:** [Chapter 3: The Cognitive Brain](../../../books/vol4/03_brain/03_brain.qmd) & [Chapter 4: The Nervous System](../../../books/vol4/04_nervous/04_nervous.qmd)
 **Target Competencies:** `[ ] A2 Multi-Modal Sensing & Calibration`, `[ ] A3 Feedback Timing & Latency`
-**Milestone Alignment:** Concludes [Milestone 1](syllabus.md#sec-milestones) (End of Week 3)
+**Milestone Alignment:** Concludes [Milestone 1](../curriculum/syllabus.md#sec-milestones) (End of Week 3)
 
 ---
 
@@ -16,16 +16,16 @@ How does an embodied system integrate disparate sensory modalities across asynch
 
 | Component | Function in Lab 2 | Interface & Protocol | Visual Reference |
 |:---|:---|:---|:---:|
-| **Logitech C270 Webcam** | Overhead workspace visual sensing | UVC USB 2.0, 720p @ 30 FPS, rigid overhead clamp mount | <img src="assets/images/logitech-c270-webcam.png" alt="Logitech C270 Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Feetech STS3215 Bus Ports** | Inter-servo daisy-chain communications | Dual 3-pin ports, TTL half-duplex UART @ 1 Mbps | <img src="assets/images/feetech-sts3215-bus-ports.jpg" alt="STS3215 Bus Ports" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Arduino UNO Q Board** | Multi-modal edge computer & bridge master | Qualcomm Linux (V4L2 vision) + STM32U585 MCU (STS3215 bus) | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Logitech C270 Webcam** | Overhead workspace visual sensing | UVC USB 2.0, 720p @ 30 FPS, rigid overhead clamp mount | <img src="../assets/images/logitech-c270-webcam.png" alt="Logitech C270 Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Feetech STS3215 Bus Ports** | Inter-servo daisy-chain communications | Dual 3-pin ports, TTL half-duplex UART @ 1 Mbps | <img src="../assets/images/feetech-sts3215-bus-ports.jpg" alt="STS3215 Bus Ports" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Arduino UNO Q Board** | Multi-modal edge computer & bridge master | Qualcomm Linux (V4L2 vision) + STM32U585 MCU (STS3215 bus) | <img src="../assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
 
 1. **Compute Board:** Arduino UNO Q with Qualcomm Debian Linux booted and USB webcam attached.
 2. **Camera:** Standard 720p UVC USB webcam mounted on a rigid overhead clamp pointing down at the workspace.
 3. **Calibration Target:** Printed OpenCV checkerboard or ArUco board fixture placed flat on the table.
 4. **Arm Station:** Seeed SO-101 arm connected to the STM32 MCU via the internal RPC bridge.
 
-![Physical Bench Rigging & Electrical Power Isolation Harness](assets/images/vol4-bench-wiring-harness.svg){#fig-bench-harness width=100%}
+![Physical Bench Rigging & Electrical Power Isolation Harness](../assets/images/vol4-bench-wiring-harness.svg)
 
 ---
 
@@ -91,4 +91,4 @@ To receive credit for Lab 2 and complete Milestone 1:
 1. [ ] **Extrinsic Matrix Validation:** Present the calculated $T_{\text{cam}}^{\text{base}}$ matrix and demonstrate that reprojected pixel coordinates match physical fingertip touch within 3 mm.
 2. [ ] **Synchronized Stream Proof:** Display a live visualization showing synchronized RGB video alongside real-time 6-axis joint angle telemetry ($I_t, q_t$).
 3. [ ] **Loop Latency Histogram:** Submit a histogram of 1,000 RPC round-trip latencies proving transport delay $< 1.5\text{ ms}$.
-*Staff signs off `[ ] A2` and `[ ] A3` on the team's [Competency Card](student-competencies.md).*
+*Staff signs off `[ ] A2` and `[ ] A3` on the team's [Competency Card](../curriculum/student-competencies.md).*
