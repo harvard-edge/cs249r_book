@@ -9,12 +9,30 @@
 
 Training neural networks with Stochastic Gradient Descent (SGD) requires balancing gradient accuracy with computational tractability. Computing the true gradient across an entire dataset of millions of samples before every update is computationally prohibitive. Conversely, updating parameters on single samples produces high-variance, noisy gradient trajectories. Mini-batching resolves this tension: it yields stable empirical gradient estimates while random shuffling breaks autocorrelation between consecutive training steps.
 
-From a systems and framework perspective, the data pipeline sets a floor on step time: an accelerator that finishes its arithmetic before the next batch arrives sits idle. An ML framework must address three core architectural responsibilities:
-1. **Separation of concerns**: Decouple dataset storage and random-access sample indexing (`Dataset`) from batching, shuffling, and memory collation logic (`DataLoader`).
-2. **Memory packing and tensor collation**: Pack individual scattered samples into contiguous, row-major tensor batches $(B, \dots)$ that modern BLAS and GEMM compute kernels require for high throughput.
-3. **Epoch orchestration**: Draw a fresh permutation of sample indices every epoch, reproducible when the caller seeds Python's `random` module, and deliver the final partial batch when the dataset size is not a multiple of the batch size.
+In PyTorch, data loading and batching are encapsulated in a standard iterator abstraction:
 
-This chapter builds TinyTorch's data loading pipeline, establishing the contiguous batch stream that feeds the forward passes of @sec-layers and powers the end-to-end training loop in @sec-training.
+```python
+import torch
+from torch.utils.data import TensorDataset, DataLoader
+
+# Dataset of 100 feature vectors and labels
+features = torch.randn(100, 16)
+labels = torch.randint(0, 2, (100,))
+dataset = TensorDataset(features, labels)
+
+# Batching, shuffling, and iterator orchestration
+loader = DataLoader(dataset, batch_size=32, shuffle=True)
+for batch_x, batch_y in loader:
+    print("Batch shape:", batch_x.shape, batch_y.shape)  # (32, 16), (32,)
+    break
+```
+
+Underneath that clean `for` loop, the data pipeline coordinates three crucial systems responsibilities:
+1. **Index permutation without data duplication:** To shuffle the dataset at the start of every epoch, the loader permutes an array of integer indices rather than copying or rearranging the underlying feature tensors in memory.
+2. **Batch collation into contiguous memory:** The collate function extracts individual sample tensors and stacks them into a single contiguous row-major batch tensor $(B, \dots)$ so vectorized matrix-multiplication kernels can process them at high arithmetic throughput.
+3. **Iterator state and boundary handling:** The runtime manages epoch cursor state, gracefully yielding the final partial batch when the dataset size is not an exact multiple of the batch size.
+
+This chapter builds TinyTorch's data loading pipeline, establishing the contiguous batch stream that feeds the forward passes of @sec-layers and powers the end-to-end training loop in @sec-training. Before building this pipeline, we must inspect the performance and convergence penalties incurred when data is fed naively.
 
 ![TinyTorch's synchronous data path. TensorDataset implements indexed sample access; DataLoader selects indices and its iterator fetches and stacks the corresponding fields. The caller receives one tuple of Tensor batches, and the final batch may be short.](assets/images/diagrams/05_dataloader-diag-1.svg){#fig-dataloader-pipeline fig-alt="Dataset interface and TensorDataset feed DataLoader index selection, followed by synchronous sample retrieval and stacking, then a training loop."}
 

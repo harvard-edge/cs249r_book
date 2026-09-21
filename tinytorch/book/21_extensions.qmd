@@ -7,19 +7,40 @@
 :::
 
 
-Every module so far bottoms out in NumPy. When TinyTorch multiplies two matrices, it hands the arrays to `np.matmul`, and a library someone else wrote does the arithmetic. This chapter goes one level down. TinyTorch ships three optional extensions in `tinytorch.extensions`, each a small piece of code that runs a kernel outside NumPy:
+Every module so far bottoms out in NumPy. When TinyTorch multiplies two matrices, it hands the arrays to `np.matmul`, and a library someone else wrote does the arithmetic. This chapter goes one level down: leaving interpreted Python runtimes to compile and execute custom kernels directly on physical hardware.
 
-1. **C++ through `ctypes`**: a tiled matrix multiply and a fused bias-plus-GELU, compiled on your machine the first time you call them.
-2. **Triton**: the same fused bias-plus-GELU written as a GPU kernel for NVIDIA hardware.
-3. **PyTorch MPS**: a matrix multiply handed to the GPU of an Apple M-series chip.
+In industrial deep learning, writing custom C++ or GPU kernels is bridged through PyTorch's native extension mechanisms:
 
-None of the twenty modules depends on these extensions, and each falls back to NumPy when its compiler, library, or hardware is missing (@fig-extension-paths). The C++ kernels need only a compiler. The two GPU paths need PyTorch, which TinyTorch itself never imports, so you install it separately to try them.
+```python
+import torch
+from torch.utils.cpp_extension import load_inline
 
-The measurements in this chapter come from one machine, an Apple M5 Max laptop. The C++ library there is built single-threaded, because Apple's compiler ships without the OpenMP runtime the kernel would use to spread work across cores. Your absolute numbers will differ. The ratios between them are what the chapter is about.
+# Compiling and invoking a native C++ extension directly from Python
+cpp_source = """
+torch::Tensor fused_gelu_cpp(torch::Tensor x) {
+    return torch::gelu(x);
+}
+"""
+custom_ext = load_inline(
+    name="custom_ext",
+    cpp_sources=cpp_source,
+    functions=["fused_gelu_cpp"]
+)
+
+x = torch.randn(1024, 1024)
+out = custom_ext.fused_gelu_cpp(x)
+```
+
+Underneath that inline extension, the runtime crosses the boundary between high-level Python and physical machine code:
+1. **Foreign Function Interface (FFI) pointer passing:** The runtime extracts the physical DRAM address pointer (`data_ptr`) from the Tensor descriptor and passes it across the language boundary without duplicating memory.
+2. **Native machine compilation:** A C++ compiler (such as Clang or GCC) compiles source code into a shared library (`.so` or `.dylib`), emitting vectorized SIMD instructions (AVX-512 or ARM NEON).
+3. **Hardware accelerator dispatch:** On GPUs, kernels written in Triton or CUDA bypass interpreted runtime overhead completely, allocating threadblocks and shared memory tiles directly on hardware streaming multiprocessors.
+
+TinyTorch ships three optional extensions in `tinytorch.extensions`: C++ through `ctypes`, Triton on NVIDIA GPUs, and PyTorch MPS on Apple Silicon (@fig-extension-paths). Before building these extensions, we must examine why high-level Python loops forfeit hardware speed and why compiled control is necessary.
 
 ![**Four ways to run an operation on a TinyTorch Tensor.** The modules use NumPy. The extensions reach the CPU's vector units directly through compiled C++, or move the data to a GPU and back.](assets/images/diagrams/21_extension-paths.svg){#fig-extension-paths fig-alt="A TinyTorch Tensor at the top branches to four routes: NumPy, C++ through ctypes, PyTorch MPS, and Triton. NumPy and C++ run on the CPU, MPS on the Apple GPU, and Triton on an NVIDIA GPU. The two GPU routes copy data in and out. Each extension falls back to NumPy."}
 
-## The Problem
+---
 
 ::: {.column-margin}
 **↩ Jump back:** @sec-acceleration

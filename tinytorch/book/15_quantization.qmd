@@ -9,12 +9,29 @@
 
 Standard neural network training uses 32-bit floating-point (FP32) arithmetic, but serving large models on edge devices and production servers is heavily constrained by memory capacity, memory bandwidth, and power consumption. Post-training quantization (PTQ) addresses these limits by representing 32-bit floating-point weights and activations as 8-bit integers (INT8). Packed one byte per value, INT8 weights need a quarter of the FP32 storage. Whether they also run faster depends on hardware with integer matrix units, and whether accuracy survives depends on how well the integer grid covers each tensor's values.
 
-From a systems and framework perspective, quantization maps continuous real numbers onto discrete integer grids through affine transformations:
-1. **Affine quantization arithmetic**: Deriving scale ($S$) and zero-point ($Z$) parameters ($q = \text{round}(x/S) + Z$) across symmetric and asymmetric mapping schemes.
-2. **Integer accumulation**: How an integer matrix multiply widens 8-bit products into 32-bit accumulators to prevent overflow, shown in a book-only comparison against TinyTorch's float path.
-3. **Dequantization and calibration**: Scaling integers back to floating point, choosing each tensor's range from sample data, and measuring the error against the FP32 result.
+In PyTorch, quantizing a tensor to 8-bit integers is achieved with explicit scale and zero-point parameters:
 
-This chapter constructs TinyTorch's quantization engine. It simulates INT8 by keeping integer codes in float32 arrays and multiplying in float32, so it measures numerical fidelity and models the packed storage a real INT8 runtime would use, without realizing that saving itself.
+```python
+import torch
+
+x = torch.randn(4, 4)
+
+# Quantize continuous float32 into 8-bit signed integers
+scale, zero_point = 0.05, 0
+q_x = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=torch.qint8)
+dequant = q_x.dequantize()
+
+print("Original FP32:\n", x[0, :2])
+print("Quantized INT8 codes:\n", q_x.int_repr()[0, :2])
+print("Reconstructed FP32:\n", dequant[0, :2])
+```
+
+Underneath that transformation, the runtime executes an affine mapping between continuous real numbers and discrete hardware bytes:
+1. **Affine coordinate mapping:** The engine maps real values onto discrete integers through $q = \text{round}(x / S) + Z$ and clamps values to $[-128, 127]$, balancing dynamic range against rounding precision.
+2. **Fourfold memory bandwidth reduction:** Packing numbers into single-byte representations reduces memory footprint by $4\times$, quadrupling cache line occupancy and slashing the memory-bus traffic diagnosed in @sec-profiling.
+3. **Integer widening in arithmetic units:** While storage uses 8-bit integers, matrix units widen intermediate products into 32-bit accumulators (INT32) to prevent numerical overflow during dot products, before rescaling back to floating point.
+
+This chapter constructs TinyTorch's quantization engine. It simulates INT8 by keeping integer codes in float32 arrays and multiplying in float32, measuring numerical fidelity and modeling the packed storage an industrial runtime uses. Before building the quantization formulas, we must inspect the memory traffic bottleneck that makes 32-bit floats so costly at inference.
 
 ::: {#fig-quantization-geometry fig-env="figure" fig-pos="htb" fig-cap="**Quantization and storage**: A scale and zero point map floats to integer codes and reconstruct rounded values. Packed storage uses one byte per code; TinyTorch wraps codes in float32 arrays." fig-alt="Three boxes connect floating-point values, affine integer codes from minus 128 through 127, and reconstructed floats. Separate boxes distinguish packed storage from TinyTorch float32 execution."}
 ![](assets/images/diagrams/15_quantization-diag-1.svg)

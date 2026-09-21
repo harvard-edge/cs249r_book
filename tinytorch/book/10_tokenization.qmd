@@ -9,12 +9,26 @@
 
 Language models operate over discrete symbolic text, yet neural networks compute strictly over continuous floating-point vectors. The fundamental challenge of natural language processing is bridging this representational divide: how do we convert variable-length human text into structured numerical sequences? Character-level tokenization produces long sequences, and attention's cost grows with the square of sequence length; word-level tokenization creates large vocabularies that have no ID for an unseen word.
 
-From a systems and framework perspective, Byte-Pair Encoding (BPE) is the usual compromise: iteratively merging the most frequent adjacent character pairs into subwords, compressing common words into single tokens while preserving subword components for rare terms. Implementing a tokenizer requires solving three problems:
-1. **Vocabulary and merge table data structures**: Counting adjacent pairs, recording merges in the order they were learned, and replaying that ordered list to encode new text.
-2. **Unknown input**: Deciding what happens to a character the training text never contained. TinyTorch's character base vocabulary maps it to a reserved `<UNK>` ID, which is lossy; production tokenizers start from the 256 byte values instead, so every string can be represented.
-3. **Round trips**: Knowing what decoding recovers. Known characters come back; unknown ones return as `<UNK>`, and because encoding splits text into words, runs of spaces and line breaks come back as single spaces.
+In modern deep learning, subword tokenization turns strings into integer token arrays in a single method call:
 
-This chapter constructs TinyTorch's BPE tokenization engine, establishing the text ingestion bridge that feeds the embedding tables in @sec-embeddings and powers language modeling in @sec-transformers.
+```python
+from transformers import AutoTokenizer
+
+tokenizer = AutoTokenizer.from_pretrained("gpt2")
+text = "Machine learning systems from scratch"
+tokens = tokenizer.encode(text)
+
+print("Token IDs:", tokens)      # [35890, 4673, 3131, 422, 9081]
+print("Subwords:", [tokenizer.decode([t]) for t in tokens])
+# ['Machine', ' learning', ' systems', ' from', ' scratch']
+```
+
+Underneath that simple call, the tokenizer executes a statistical compression algorithm:
+1. **Ordered merge rule traversal:** The engine breaks text into base characters, then iteratively scans and merges the most frequent adjacent pairs according to a pre-trained priority table, compressing common words into single integer IDs.
+2. **Elimination of out-of-vocabulary tokens:** By starting from 256 raw byte representations or base characters and building subwords hierarchically, the tokenizer can represent any arbitrary text without failing on novel or misspelled words.
+3. **Sequence length compression:** Subword chunking reduces sequence lengths by $3\times$ to $4\times$ compared to character-level representations, directly mitigating the quadratic $O(S^2)$ memory and compute costs of downstream attention layers.
+
+This chapter constructs TinyTorch's BPE tokenization engine, establishing the text ingestion bridge that feeds the embedding tables in @sec-embeddings and powers language modeling in @sec-transformers. Before building the merge algorithm, we must inspect why naive character-level and word-level strategies fail in opposite directions.
 
 ---
 

@@ -7,16 +7,36 @@
 :::
 
 
-Performance claims in machine learning systems, such as "this optimization provides a $3\times$ speedup", cannot be checked without a stated, reproducible benchmarking method. Naive timing using basic wall-clock timers produces misleading results contaminated by Python interpreter overhead, cache cold starts, asynchronous execution queues, and operating system noise.
+Performance claims in machine learning systems, such as *"this optimization provides a $3\times$ speedup"*, cannot be checked without a stated, reproducible benchmarking method. Naive timing using basic wall-clock timers produces misleading results contaminated by Python interpreter overhead, cache cold starts, asynchronous execution queues, and operating system noise.
 
-From a framework and systems standpoint, a trustworthy benchmarking harness needs a few controls:
-1. **Warmup**: Running untimed iterations first, so one-time costs such as cold caches, first allocations, and (in runtimes that have one) just-in-time compilation are not counted as steady-state latency.
-2. **High-resolution monotonic timing**: Measuring with a monotonic clock (`time.perf_counter`)[^fn-perf-counter-monotonic] and, on asynchronous hardware, waiting for queued work to finish before reading it.
-3. **Statistical distribution reporting**: Reporting the spread as well as the mean, with standard deviation and latency percentiles (P50, P90, P99), alongside throughput in samples per second.
+In production engineering, a reliable benchmark protocol requires explicit synchronization and statistical aggregation:
 
-[^fn-perf-counter-monotonic]: **Monotonic clocks versus wall-clock time**: Standard Python `time.time()` reads the operating system's calendar wall clock, which is subject to Network Time Protocol (NTP) slews, clock synchronization jumps, and leap seconds; an NTP correction during a benchmark run can yield negative or falsely inflated durations. In contrast, `time.perf_counter()` accesses a monotonic hardware counter (such as the invariant Time Stamp Counter `RDTSC` on x86-64 or `CNTVCT_EL0` on ARM64) that is guaranteed never to move backward and offers nanosecond-level resolution undisturbed by system clock changes.
+```python
+import torch
+import time
 
-This chapter builds TinyTorch's benchmarking suite, establishing the rigorous empirical measurement standards required for the Capstone evaluation in @sec-capstone.
+x = torch.randn(2048, 2048)
+
+# 1. Warm-up iterations: prime caches and trigger JIT/library compilation
+for _ in range(5):
+    _ = x @ x
+
+# 2. Synchronized monotonic measurement
+times = []
+for _ in range(20):
+    t0 = time.perf_counter()
+    _ = x @ x
+    times.append((time.perf_counter() - t0) * 1000)  # Convert to ms
+
+print(f"Median: {torch.tensor(times).median():.2f} ms")
+```
+
+Underneath that careful loop, a valid systems benchmark enforces several physical and statistical controls:
+1. **Warmup isolation:** Untimed initial iterations prime instruction and data caches, trigger one-time allocator pools, and allow dynamically loaded BLAS routines to configure threads, preventing cold-start outliers from skewing steady-state performance.
+2. **High-resolution monotonic timing:** Using hardware monotonic counters (`time.perf_counter()`) avoids the clock slews and negative durations that plague calendar wall-clock timers (`time.time()`).
+3. **Distributional reporting over single-number averages:** Measuring variance across multiple runs reveals tail latency spikes (P90, P99) caused by operating system context switching, memory garbage collection, and thermal throttling.
+
+This chapter builds TinyTorch's benchmarking suite, establishing the rigorous empirical measurement standards required for the Capstone evaluation in @sec-capstone. Before building our harness, we must inspect the common traps that make naive timing misleading.
 
 ![Fix the workload and model mode, warm up, and retain repeated timings. Report the distribution alongside quality checks, keeping storage estimates distinct from measured allocations.](assets/images/diagrams/19_benchmarking-diag-1.svg){#fig-benchmarking-pipeline}
 

@@ -9,12 +9,27 @@
 
 In machine learning systems, optimizing without measurement is guesswork. As models scale from millions to billions of parameters, understanding where execution time and memory are spent is essential. A practitioner must be able to inspect a model architecture and quantitatively predict its resource requirements: how many FLOPs does a forward pass consume, how much memory is dedicated to parameters versus activations, and what hardware limits govern execution speed?
 
-From a framework and systems standpoint, profiling provides the formal accounting tools necessary to diagnose computational bottlenecks:
-1. **Parameter and memory accounting**: Counting parameter bytes, measuring the new allocations a forward pass makes, and estimating what gradients and optimizer state would add.
-2. **FLOP arithmetic and operational intensity**: Counting floating-point operations from layer shapes and dividing by bytes moved to get operational intensity.
-3. **The Roofline model**: Placing an operation's intensity against a machine's two ceilings to bound its attainable speed and to ask whether it is **memory-bandwidth bound** (limited by memory bus throughput) or **compute-bound** (limited by arithmetic units). The profiler's own label is a heuristic, and the chapter says where it can mislead.
+In PyTorch, runtime execution and operator bottlenecks are inspected with the built-in profiler:
 
-This chapter establishes TinyTorch's profiling harness, providing the analytical and empirical diagnostic foundations that guide all performance optimizations in Part III.
+```python
+import torch
+from torch.profiler import profile, ProfilerActivity
+
+x = torch.randn(1024, 1024)
+
+# Profile operator execution time and tensor allocations
+with profile(activities=[ProfilerActivity.CPU], record_shapes=True) as prof:
+    y = torch.relu(x @ x)
+
+print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=5))
+```
+
+Underneath that profiling report, the systems profiler tracks the fundamental physical reality of computation:
+1. **Operator runtime attribution:** The profiler hooks into dispatcher call-sites to measure the wall-clock execution time and kernel launch overheads of individual layers and functions.
+2. **Memory traffic accounting:** The engine tracks buffer allocations, peak memory residency, and memory deallocations, distinguishing persistent parameter storage from transient activation buffers.
+3. **Operational intensity and hardware bounds:** By comparing floating-point arithmetic (FLOPs) against memory moved across the bus (bytes), the profiler grounds operations in the **Roofline Model**, diagnosing whether an operator is **memory-bandwidth bound** (stalled on DRAM) or **compute-bound** (saturating ALUs).
+
+This chapter establishes TinyTorch's profiling harness, providing the analytical and empirical diagnostic foundations that guide all performance optimizations in Part III. Before building our profiling tools, we must examine why naive arithmetic counting fails to predict execution time.
 
 ![The roofline model. Performance rises with arithmetic intensity along the bandwidth ceiling until it reaches the compute ceiling; the corner where they meet is the ridge point.](assets/images/diagrams/14_profiling-diag-1.svg){#fig-roofline-model}
 

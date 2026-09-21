@@ -9,12 +9,29 @@
 
 Elementwise operations such as addition, scaling, and activation functions do little arithmetic per value. In an eager runtime that executes one operation at a time, each operation writes a full intermediate array that the next one reads back, so a chain of them can spend more time moving arrays through memory than computing on them.
 
-From a framework and systems standpoint, **operator fusion** and **tiling** are the two standard answers, one reducing intermediate arrays and the other reusing data while it is still close to the processor:
-1. **Eliminating memory round-trips**: Combining sequential elementwise operations into one pass, as a compiled kernel would, so intermediates need not be written out and read back.
-2. **Reuse before eviction**: Keeping values in registers or cache while they are still needed, which a compiled kernel or a tiled loop can arrange and a sequence of NumPy calls cannot guarantee.
-3. **The memory traffic ledger**: Counting logical array reads and writes, which for the eight-operation GELU come to nine times those of an ideal single pass. That ratio compares two models; it is not the measured traffic of either NumPy helper.
+In modern PyTorch, compiler backends (like `torch.compile`) automate hardware acceleration by fusing operators into a single compiled kernel:
 
-This chapter writes a GELU expressed with fewer temporary Tensors and a tiled matrix multiply in NumPy, then times both. The names describe how each computation is expressed; only the timing says what changed.
+```python
+import torch
+
+# Eager execution: 2 separate kernel launches, 1 intermediate DRAM buffer
+def eager_op(x, bias):
+    return torch.relu(x + bias)
+
+# Compiled execution: Inductor fuses add + relu into a single pass
+compiled_op = torch.compile(eager_op)
+
+x = torch.randn(2048, 2048)
+bias = torch.randn(2048)
+out = compiled_op(x, bias)
+```
+
+Underneath that simple compilation decorator, the runtime executes two fundamental hardware optimizations:
+1. **Operator fusion:** In eager execution, `x + bias` writes an entire 16 MB float32 tensor to DRAM, only for `relu` to immediately read those bytes back. Fusing the two operations keeps values in processor registers, eliminating the round-trip memory traffic entirely.
+2. **Cache tiling for data reuse:** For matrix multiplication, partitioning large matrices into small blocks ($64 \times 64$) that fit within high-speed L1/L2 cache prevents cache lines from being prematurely evicted to main memory.
+3. **Stride-conscious memory access:** Aligning iteration loops with contiguous row-major memory strides prevents the catastrophic cache thrashing caused by strided column-major traversals.
+
+This chapter writes a GELU expressed with fewer temporary Tensors and a tiled matrix multiply in NumPy, then times both. Before building these accelerated patterns, we must inspect the latency penalty that unfused memory traffic and unaligned strides impose on hardware.
 
 ::: {#fig-kernel-fusion fig-env="figure" fig-pos="htb" fig-cap="**Three NumPy execution paths**: Vectorized multiplication delegates to a library, the GELU helpers retain different intermediate arrays, and tiled multiplication explicitly accumulates block products. Every comparison checks values before measuring time." fig-alt="Three boxes labeled vectorized matmul, GELU expressions, and tiled matmul point to a shared output-check and measurement box."}
 ![](assets/images/diagrams/17_acceleration-diag-1.svg)

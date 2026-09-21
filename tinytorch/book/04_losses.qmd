@@ -7,14 +7,28 @@
 :::
 
 
-A neural network produces raw, unbounded scores across possible outputs, but learning requires a scalar objective that quantifies prediction error: how far is the model's prediction from ground truth? Different learning tasks require distinct mathematical loss formulations. Mean squared error for continuous regression, binary cross-entropy for probabilities, and categorical cross-entropy for multi-class classification.
+A neural network produces raw, unbounded scores across possible outputs, but learning requires a scalar objective that quantifies prediction error: how far is the model's prediction from ground truth? Different learning tasks require distinct mathematical loss formulations: mean squared error for continuous regression, binary cross-entropy for probabilities, and categorical cross-entropy for multi-class classification.
 
-From a framework and systems standpoint, a loss function is a tensor reduction operator: it ingests high-dimensional batch predictions and ground-truth targets and collapses them into a single scalar that drives gradient descent. However, implementing loss functions on physical hardware exposes the harsh reality of IEEE 754 floating-point arithmetic. Textbook mathematical formulas frequently suffer from catastrophic numerical instability:
-1. **Exponential overflow**: Exponentiating large positive raw scores ($e^{1000}$) overflows float32 dynamic range to `+inf`, causing division to produce `nan`.
-2. **Logarithmic underflow**: Taking the logarithm of probabilities near zero ($\log(0)$) underflows to `-inf`.
-3. **Stable composition**: Computing cross-entropy through a max-shifted log-softmax, so the exponentials never overflow and the logarithm never sees zero, rather than exponentiating, normalizing, and taking a logarithm as separate steps.
+In PyTorch, computing cross-entropy on multi-class logits is a single stable function call:
 
-This chapter constructs TinyTorch's loss library, defusing the numerical traps of cross-entropy to provide stable scalar objectives that @sec-autograd and @sec-optimizers turn into parameter updates.
+```python
+import torch
+import torch.nn.functional as F
+
+# Logits with large values that would overflow naive exponentials
+logits = torch.tensor([[2.0, 1.0, 0.1], [1000.0, 1001.0, 1002.0]])
+targets = torch.tensor([0, 2])
+
+loss = F.cross_entropy(logits, targets)
+print("Stable scalar loss:", loss.item())  # 0.4076, no NaN or Inf!
+```
+
+Underneath that single call, the runtime protects computation from the hazards of IEEE 754 floating-point arithmetic:
+1. **The LogSumExp max-subtraction shift:** In raw float32, $e^{1000}$ immediately overflows to `+inf`, causing division to produce `nan`. The runtime secretly subtracts the row maximum ($\max_j z_j$) before exponentiation, bounding all exponents to $\le 0$ so they never overflow.
+2. **Operator fusion across softmax and log-likelihood:** Rather than materializing separate intermediate probability tensors through Softmax and then passing them to a logarithm, the kernel fuses them into a single pass to eliminate intermediate memory traffic.
+3. **Analytic gradient simplification:** Fusing the operations simplifies the backward gradient algebraically to $(p_i - y_i)$, avoiding catastrophic cancellation when computing derivatives.
+
+This chapter constructs TinyTorch's loss library, defusing the numerical traps of cross-entropy to provide stable scalar objectives that @sec-autograd and @sec-optimizers turn into parameter updates. Before building the stable implementation, we must inspect how textbook mathematical recipes immediately fail in float32.
 
 @Fig-loss-stability contrasts a direct exponential with the max-shifted path. The worked trace will follow each intermediate value through the implementation.
 

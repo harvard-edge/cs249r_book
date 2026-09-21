@@ -9,12 +9,27 @@
 
 Quantization shrinks each stored number; compression reduces how many numbers a model keeps or computes with. Pruning zeroes the weights or whole neurons that matter least, low-rank factorization replaces a weight matrix with two thin ones, and knowledge distillation trains a small student to match a large teacher's full output distribution, including the probabilities it assigns to wrong classes.
 
-From a framework and systems standpoint, each technique raises a different question:
-1. **Pruning and representation**: Zeroing individual weights by magnitude, or whole neurons by the norm of their weights, and recognizing that a zeroed weight in a dense array saves neither storage nor arithmetic until the representation changes.
-2. **Low-rank factorization**: Truncating a singular value decomposition, and computing the rank below which the two factors store and multiply fewer numbers than the matrix they replace.
-3. **Distillation loss**: Softening teacher and student logits with a temperature $T > 1$ and combining their Kullback-Leibler (KL) divergence with the ordinary cross-entropy. TinyTorch omits the optional $T^2$ factor, so changing $T$ also changes the gradient scale.
+In PyTorch, applying magnitude-based pruning is an effortless one-liner:
 
-This chapter implements TinyTorch's compression tools and measures what each one changes, since a smaller parameter count is a saving only when storage or execution actually uses fewer numbers.
+```python
+import torch
+import torch.nn.utils.prune as prune
+
+layer = torch.nn.Linear(128, 128)
+
+# Prune 50% of connections with smallest magnitude
+prune.l1_unstructured(layer, name="weight", amount=0.5)
+
+print("Sparsity ratio:", (layer.weight == 0).float().mean().item())  # 0.5
+print("Tensor storage shape:", layer.weight.shape)                   # (128, 128)
+```
+
+Underneath that simple call, the systems reality of compression reveals critical nuances:
+1. **The dense array illusion:** A pruned tensor with 50% zeros in a dense float32 array still occupies exactly the same memory footprint and performs the same number of arithmetic multiplications. Dense GEMM kernels do not check for zeros before multiplying.
+2. **Mask indirection overhead:** Pruning frameworks maintain auxiliary binary masks alongside original weights, temporarily *increasing* memory consumption until weights are pruned permanently.
+3. **Structured vs. low-rank dimension reduction:** To achieve actual speedups without specialized sparse hardware, compression must either prune whole structured channels or factorize weight matrices via low-rank SVD ($W \approx U V$), physically reducing matrix dimensions and arithmetic counts.
+
+This chapter implements TinyTorch's compression tools (pruning, SVD factorization, and knowledge distillation) and measures what each one changes. Before building these techniques, we must inspect the systems trap of dense zeroed weights.
 
 ::: {#fig-compression-spectrum fig-env="figure" fig-pos="htb" fig-cap="**Compression representations**: Both pruning functions preserve dense array dimensions. Low-rank approximation returns three factors; a caller must retain and use them to benefit from their smaller storage." fig-alt="Three panels show scattered zero weights, zeroed output columns, and SVD factors with shapes M by r, r, and r by N."}
 ![](assets/images/diagrams/16_compression-diag-1.svg)

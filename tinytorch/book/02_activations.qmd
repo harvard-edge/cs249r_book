@@ -9,12 +9,26 @@
 
 The core premise of deep learning is the ability to learn complex, non-linear representations from data. Yet if a neural network consists solely of linear transformations, matrix multiplications and bias additions, it suffers a fatal mathematical collapse: the composition of any number of linear maps is itself just a single linear map ($\mathbf{W}_2(\mathbf{W}_1 \mathbf{x} + \mathbf{b}_1) + \mathbf{b}_2 = \mathbf{W}_{\text{eff}}\mathbf{x} + \mathbf{b}_{\text{eff}}$). Without non-linearity, a 100-layer deep network has no more expressive power than a single linear layer. To bend representation space and learn intricate decision boundaries, deep architectures require **activation functions**.
 
-From a framework and systems standpoint, activation functions introduce a distinct operational class. While tensor operations in @sec-tensors established physical 1D memory buffers and strided coordinate views, activations are shape-preserving, elementwise or reduction operators executed at immense scale. Building an activation engine forces the systems architect to resolve three core concerns:
-1. **Operator abstraction**: How does the runtime apply mathematical transformations to underlying buffers through a uniform, composable boundary (`Function.apply`)?
-2. **Memory traffic**: An elementwise activation performs a few arithmetic operations for every value it reads and writes, so its arithmetic intensity is low, and on hardware with fast arithmetic its cost is usually set by moving the array rather than computing on it (@sec-profiling makes this precise).
-3. **The autograd contract**: Each activation must preserve the necessary forward state so that reverse-mode automatic differentiation (@sec-autograd) can compute local derivatives during backpropagation.
+In PyTorch, applying an activation function is a concise one-liner:
 
-This chapter builds the non-linear foundation of TinyTorch, implementing the core activation zoo (ReLU, Sigmoid, Tanh, GELU, and Softmax) and establishing the contracts that allow @sec-layers to stack them into deep, trainable neural networks.
+```python
+import torch
+import torch.nn.functional as F
+
+x = torch.tensor([-2.0, -0.5, 0.0, 1.5])
+relu_out = F.relu(x)
+gelu_out = F.gelu(x)
+
+print("ReLU:", relu_out)  # [0.0, 0.0, 0.0, 1.5]
+print("GELU:", gelu_out)  # [-0.0454, -0.1543, 0.0, 1.3996]
+```
+
+Underneath that simple call, the runtime coordinates three distinct systems concerns:
+1. **Elementwise 1D kernel execution:** The runtime dispatches an elementwise unary kernel across the contiguous float32 buffer, reading input values and writing transformed activations into a newly allocated output tensor of identical shape and strides.
+2. **Memory-bandwidth saturation:** Because an activation performs only a few arithmetic operations per float read and written, its arithmetic intensity is low. On modern accelerators with fast FP32 units, the wall-clock execution time is dominated almost entirely by the memory bus bandwidth required to move bytes to and from DRAM.
+3. **The autograd contract and saved state:** The runtime must record the operator on the autograd tape and preserve either the forward inputs or a boolean bitmask (`x > 0` for ReLU) so that reverse-mode automatic differentiation can compute exact gradients during backpropagation.
+
+This chapter builds the non-linear foundation of TinyTorch, implementing the core activation zoo (ReLU, Sigmoid, Tanh, GELU, and Softmax) through `Function.apply`. Before building these operators, we must inspect the mathematical collapse that occurs when non-linearities are omitted.
 
 ![Independent activation results for the same input. The first four functions act element by element; Softmax normalizes across the vector. The GELU row shows TinyTorch’s sigmoid approximation.](assets/images/diagrams/02_activations-diag-1.svg){#fig-activation-zoo fig-alt="Five independent rows transform the same vector [-1, 0, 1] into separate results of shape (3,). ReLU returns [0, 0, 1]; sigmoid, tanh, and sigmoid-GELU preserve per-element correspondence. Softmax returns approximately [0.0900, 0.2447, 0.6652], summing to one. Inputs remain unchanged."}
 

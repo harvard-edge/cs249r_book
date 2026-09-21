@@ -9,12 +9,28 @@
 
 Deep learning models are not solitary mathematical equations; they are modular compositions of stateful, parameterized building blocks. As architectures grow in depth, raw tensor math must be organized into clean modules that bundle weights, biases, and forward computation rules. Furthermore, deep networks require systematic numerical initialization to prevent signal variance from vanishing or exploding across layers, as well as distinct operational behaviors during training versus inference (such as stochastic zeroing in Dropout).
 
-From a framework and systems perspective, a **layer** represents the critical boundary between *persistent model state* and *ephemeral activations*. Trainable parameters live across iterations in persistent memory buffers, while input and output activations are temporary tensors allocated and freed during each pass. A framework must solve three architectural obligations:
-1. **State management and parameter discovery**: How to hierarchically register child parameters (`parameters()`) so optimizers can locate every trainable weight exactly once.
-2. **Modular container orchestration**: How to pipeline layers sequentially (`Sequential`), automatically threading forward arguments and training mode flags through child layers.
-3. **Variance-preserving initialization**: How to scale initial weights by fan-in (LeCun's rule, which this module uses, and its He and Xavier relatives) so that activation variance neither grows nor shrinks from one layer to the next at initialization.
+In PyTorch, defining and executing a parameterized layer takes only a few lines:
 
-Building upon the memory buffers of @sec-tensors and activations of @sec-activations, this chapter encapsulates stateful parameters into reusable, composable layer blocks.
+```python
+import torch
+import torch.nn as nn
+
+# Linear projection layer with variance-scaled initialization
+layer = nn.Linear(in_features=784, out_features=128)
+x = torch.randn(32, 784)  # Batch of 32 vectors
+y = layer(x)               # Forward: y = x @ W^T + b
+
+print("Weight shape:", layer.weight.shape)  # (128, 784)
+print("Bias shape:", layer.bias.shape)      # (128,)
+print("Output shape:", y.shape)             # (32, 128)
+```
+
+Underneath that clean interface, the framework resolves several fundamental systems responsibilities:
+1. **Persistent state versus ephemeral activations:** The layer creates persistent parameter tensors (`weight` and `bias`) that live across training iterations, distinct from the transient activation tensors allocated during each forward step.
+2. **Variance-scaled parameter initialization:** Rather than initializing weights with raw unscaled random noise (which causes activations to explode or vanish exponentially with depth), the constructor scales initial weight variance inversely with fan-in.
+3. **Hierarchical parameter discovery:** The layer registers its weights in an internal container hierarchy so optimizers can traverse the model and retrieve all trainable parameters in a single call (`model.parameters()`).
+
+Building upon the memory buffers of @sec-tensors and activations of @sec-activations, this chapter encapsulates stateful parameters into reusable, composable layer blocks. Before building these abstractions, we must inspect what breaks when multi-layer networks are implemented with raw, unmanaged tensors.
 
 ![**A shared layer interface**: Linear owns parameters, Dropout changes behavior with the training argument, and Sequential composes their forward calls and collects parameters.](assets/images/diagrams/03_layers-diag-1.svg){#fig-layers-container}
 

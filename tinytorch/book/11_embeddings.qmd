@@ -9,12 +9,30 @@
 
 Discrete token IDs are arbitrary categorical integers with no intrinsic geometric relationship; token 1542 is not mathematically "closer" to token 1543 than to token 50000. Feeding raw integers into linear layers incorrectly imposes ordinal magnitude on categorical labels. To enable semantic reasoning, discrete token IDs must be mapped into continuous, high-dimensional vector spaces where geometric distance reflects semantic similarity, complemented by positional encodings that supply critical sequence order.
 
-From a framework and systems standpoint, an **embedding layer** is functionally a hardware memory gather operation: a sparse lookup into a large weight table of shape $(V, D)$. Implementing embedding layers in an ML runtime introduces distinct architectural considerations:
-1. **Gather instead of one-hot projection**: Looking up embedding rows directly rather than multiplying by a one-hot matrix with a column for every vocabulary entry, which would build $V$ values per token to select one row.
-2. **Gradient routing via scatter-add**: During the backward pass, gradients for repeated token IDs within a batch must be accumulated into shared embedding rows with an unbuffered scatter-add (`np.add.at`), because a plain indexed `+=` counts a repeated ID only once.
-3. **Positional encoding injection**: Adding learned or fixed sinusoidal coordinate vectors to token representations to restore sequence position information destroyed by permutation-invariant architectures.
+In PyTorch, looking up token embeddings and injecting positional information is achieved in a few expressive lines:
 
-This chapter constructs TinyTorch's embedding subsystem, converting discrete token sequences into continuous representation tensors $(B, S, D)$ ready for self-attention in @sec-attention.
+```python
+import torch
+import torch.nn as nn
+
+vocab_size, d_model = 1000, 64
+token_embed = nn.Embedding(vocab_size, d_model)
+pos_embed = nn.Embedding(512, d_model)  # Maximum context length 512
+
+token_ids = torch.tensor([[42, 108, 999]])  # 1 sequence of 3 tokens
+positions = torch.arange(3).unsqueeze(0)
+
+# Combine token semantic features with positional coordinates
+x = token_embed(token_ids) + pos_embed(positions)
+print("Representation tensor shape:", x.shape)  # (1, 3, 64)
+```
+
+Underneath that simple addition, the runtime manages several low-level memory and gradient dynamics:
+1. **Direct table gathering over one-hot matrix multiplication:** Rather than materializing massive, sparse one-hot matrices containing millions of zeros and executing bloated matrix multiplies, the embedding layer performs an efficient row-gather operation directly into physical DRAM.
+2. **Positional coordinate injection:** Because attention mechanisms treat inputs as an unordered set, the runtime adds positional vectors directly into token representations, ensuring that the model can distinguish *"dog bites man"* from *"man bites dog"*.
+3. **Scatter-add gradient accumulation:** In the backward pass, when identical token IDs appear multiple times within a batch, their gradients must be accumulated into shared table rows using an unbuffered scatter-add (`np.add.at`), preventing subsequent occurrences from overwriting earlier derivatives.
+
+This chapter constructs TinyTorch's embedding subsystem, converting discrete token sequences into continuous representation tensors $(B, S, D)$ ready for self-attention in @sec-attention. Before building the embedding table, we must inspect why feeding raw integers fails and why one-hot matrices are computationally prohibitive.
 
 ![The embedding pipeline. A token ID selects one row of the embedding table; the row for that token's position is added; the sum is the vector the rest of the network sees.](assets/images/diagrams/11_embeddings-diag-1.svg){#fig-embeddings-pipeline}
 

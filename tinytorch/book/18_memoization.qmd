@@ -9,12 +9,30 @@
 
 Autoregressive text generation produces output one token at a time: each generated token is appended to the context, and the extended sequence is passed back to the model. In a naive implementation, every step reruns the model over the whole prefix, recomputing the keys and values of tokens whose keys and values have not changed. Over $S$ generated tokens, the projection work grows as $O(S^2)$ and the attention scores as $O(S^3)$.
 
-From a systems and framework perspective, the **Key-Value (KV) cache** removes that recomputation:
-1. **Static buffer pre-allocation**: Pre-allocating persistent tensor memory buffers for attention keys and values up to the maximum sequence length, avoiding costly dynamic reallocations.
-2. **Moving write cursor**: Incrementing a sequential write pointer to store only the new token's key and value projections during each decode step.
-3. **Asymptotic step reduction**: Cutting each step's projection work from $t$ rows to one and its score work from $t^2$ entries to $t$. Decode does not become constant-time, because each new token still attends over every cached position.
+In modern transformer inference libraries, this recomputation is avoided by enabling Key-Value caching:
 
-This chapter constructs TinyTorch's KV cache, checks that cached and full-prefix attention agree within floating-point tolerance, and then measures generation time for both.
+```python
+import torch
+from transformers import AutoModelForCausalLM
+
+model = AutoModelForCausalLM.from_pretrained("gpt2")
+
+# Autoregressive forward pass with KV caching enabled
+input_ids = torch.tensor([[50256]])  # Initial prompt token
+outputs = model(input_ids, use_cache=True)
+
+# Inspect cached Key and Value states across all decoder blocks
+past_key_values = outputs.past_key_values
+print("Cached layers count:", len(past_key_values))
+print("Key cache shape per layer:", past_key_values[0][0].shape)  # (B, H, S, d_k)
+```
+
+Underneath that simple flag, the runtime manages a dedicated memory buffer system:
+1. **Static buffer pre-allocation:** The runtime pre-allocates contiguous memory buffers for Key and Value projections up to the maximum context window, avoiding expensive dynamic memory reallocations at every generated token.
+2. **Single-token projection and moving write cursor:** At each decode step, only the newest single token is projected through $W_Q, W_K, W_V$. The new key and value vectors are written into the cache at the current sequence index cursor, leaving previous keys and values untouched.
+3. **Asymptotic latency reduction:** Caching cuts per-step projection cost from $O(t)$ rows to a single row, dropping cumulative sequence projection work from $O(S^2)$ to $O(S)$.
+
+This chapter constructs TinyTorch's KV cache, checks that cached and full-prefix attention agree within floating-point tolerance, and then measures generation time for both. Before building the cache, we must inspect the staggering arithmetic waste of un-cached generation.
 
 ::: {#fig-kv-cache fig-env="figure" fig-pos="htb" fig-cap="**The KV cache**: Each step writes one new key and value per head and layer, then attends over the growing prefix. Reserved capacity stays fixed while the number of keys read increases." fig-alt="A current-token box points to static per-layer key and value buffers. A row of slots marks earlier positions, a highlighted current position, and unused capacity. Lower boxes show the attention equation and cache memory formula."}
 ![](assets/images/diagrams/18_memoization-diag-1.svg)

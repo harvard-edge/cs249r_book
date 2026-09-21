@@ -20,13 +20,28 @@ A deep learning model is an organized dataflow pipeline where tensors fulfill th
 
 A **tensor** is thus a multidimensional array of numerical values organized along a defined sequence of coordinate axes. A single number is a scalar (a 0-dimensional tensor); an ordered list of numbers is a vector (1-dimensional); a rectangular grid is a matrix (2-dimensional); and higher-order tensors represent batches of sequence or spatial data. The tensor's **shape** is an integer tuple specifying how many entries each dimension contains.
 
-In deep learning mathematics and whiteboard diagrams, tensors appear as abstract multidimensional objects. But physical hardware, the CPU or GPU memory subsystem, has no concept of multidimensional grids. Memory is a flat, one-dimensional ribbon of sequential byte addresses in physical DRAM. A machine learning framework's first and most critical job is therefore **stratified memory management**: projecting multidimensional coordinates onto a one-dimensional address space, and executing structural operations like slicing, broadcasting, and transpositions without duplicating millions of floating-point numbers across the memory bus.
+In everyday deep learning, creating, reshaping, and indexing tensors in PyTorch feels instantaneous and effortless:
 
-Take the six values `[[1, 2, 3], [4, 5, 6]]`. Adding `[10, 20, 30]` should produce `[[11, 22, 33], [14, 25, 36]]`; transposing should produce `[[1, 4], [2, 5], [3, 6]]`. The first operation changes the values. The second changes which coordinates name them. A framework must represent both computations and decide whether their results share storage with the input.
+```python
+import torch
 
-A computer stores numbers at memory addresses, so a matrix needs a rule that translates a row and column into an address. A **stride** is the distance between entries along one dimension. With rows stored consecutively, moving right in our matrix skips one value and moving down skips three. Exchanging those distances lets an array read the transpose without moving the six values.
+# Create a 2D tensor and inspect its memory layout
+x = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+y = x.t()  # Transpose: rows become columns
 
-Module 01 uses two levels of this mechanism. NumPy describes arrays with shapes and strides; its **views** are array objects that reinterpret existing storage. TinyTorch wraps arrays in `Tensor` objects, and its constructor copies into a fresh float32 buffer. Consequently, `np.transpose(x.data)` shares storage with `x`, while `x.transpose()` does not. The operation path in @fig-tensor-strides locates this copying boundary. Following addition and transpose through `Function.apply` will give us the interface that every later chapter uses.
+print("x shape:", x.shape, "strides:", x.stride())        # (2, 3), strides: (3, 1)
+print("y shape:", y.shape, "strides:", y.stride())        # (3, 2), strides: (1, 3)
+print("Shares storage?", x.data_ptr() == y.data_ptr())    # True! Zero-copy view
+```
+
+Underneath that simple snippet, a sophisticated memory management engine is operating:
+1. **Flat 1D physical storage:** The physical DRAM or GPU memory subsystem has no concept of multidimensional grids. Memory is a flat, one-dimensional ribbon of sequential byte addresses. The framework allocates a contiguous block of six 32-bit floats (24 bytes) in physical memory.
+2. **Strided coordinate translation:** Instead of rearranging numbers in memory when transposing `x` to `y`, the framework performs **zero data copies**. It merely swaps the *strides* from `(3, 1)` to `(1, 3)`. The transposed tensor is an ephemeral view pointing to the identical underlying memory address (`data_ptr`).
+3. **Storage versus view decoupling:** The logical coordinate system $(i, j)$ is completely decoupled from the physical byte layout. Stride arithmetic translates logical coordinates into physical byte offsets on the fly.
+
+Module 01 builds this mechanism from first principles. NumPy describes arrays with shapes and strides; its **views** are array objects that reinterpret existing storage. TinyTorch wraps arrays in `Tensor` objects, and its constructor copies into a fresh float32 buffer. Consequently, `np.transpose(x.data)` shares storage with `x`, while `x.transpose()` does not. The operation path in @fig-tensor-strides locates this copying boundary. Following addition and transpose through `Function.apply` will give us the interface that every later chapter uses.
+
+Building this abstraction presents our first fundamental systems engineering challenge. If we implement arrays naively using native high-level language constructs like Python nested lists, memory footprints explode by nearly an order of magnitude and hardware caches thrash helplessly across pointer chains.
 
 ![Tensor operations pass arrays through Function.apply and wrap the result in independent storage. The Tensor also reserves fields that @sec-autograd will use for gradients.](assets/images/diagrams/01_tensor-diag-1.svg){#fig-tensor-strides fig-alt="Input Tensor, Function.apply, and result Tensor form a sequence. NumPy computes the result, then Tensor construction copies its storage."}
 

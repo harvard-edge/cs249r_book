@@ -9,14 +9,27 @@
 
 Supervised machine learning is the practical execution of empirical risk minimization: repeatedly exposing a parameterized model to training data, evaluating loss, computing gradients, and steering weights toward optimal generalization. However, learning is not a loose script; it is a precisely choreographed state machine where data pipelines, forward models, autograd graphs, and optimizers interact in lockstep.
 
-From a framework and systems standpoint, the training engine coordinates execution lifecycles and memory boundaries across five non-negotiable phases:
-1. **Gradient zeroing (`zero_grad()`)**: Clearing accumulated gradients from the previous step, which backward would otherwise add to without warning.
-2. **Forward evaluation**: Pipelining batch inputs through model layers to compute predictions and scalar losses.
-3. **Backward tape execution**: Traversing the autograd DAG to populate parameter `.grad` fields, then releasing the graph so intermediate activations can be reclaimed.
-4. **Gradient clipping and optimization**: Bounding global gradient $L_2$ norms to prevent numerical divergence, followed by the optimizer's parameter updates.
-5. **Epoch and batch boundary accounting**: Correctly weighting partial remainder batches so update trajectories reflect true sample-weighted empirical risk.
+In PyTorch, the fundamental training step is a five-line contract:
 
-This chapter synthesizes the foundational modules of @sec-tensors through @sec-optimizers into the unified `Trainer` engine, establishing the end-to-end execution loop of TinyTorch.
+```python
+import torch
+
+for epoch in range(num_epochs):
+    for batch_x, batch_y in loader:
+        optimizer.zero_grad()               # 1. Clear residual gradients
+        outputs = model(batch_x)            # 2. Forward pass
+        loss = criterion(outputs, batch_y)  # 3. Evaluate loss
+        loss.backward()                     # 4. Backward differentiation
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()                    # 5. Update parameter weights
+```
+
+Underneath that rhythmic sequence, the framework orchestrates complex state transitions and memory lifecycles:
+1. **The accumulation invariant:** Because autograd accumulates derivatives into leaf buffers (`param.grad += ...`), `.grad` buffers never clear themselves. Omitting `optimizer.zero_grad()` causes subsequent batch gradients to pile on top of earlier ones, corrupting update trajectories into runaway sums.
+2. **Global gradient norm bounding:** Gradient clipping computes the collective $L_2$ norm across all registered parameter tensors ($\sqrt{\sum \|\mathbf{g}_i\|_2^2}$) and rescales gradients if they exceed a threshold, preventing sudden loss explosions.
+3. **Graph detachment and metric memory safety:** To track running training loss without exhausting GPU memory, the loop extracts scalar metrics with `loss.item()`, severing the computation graph reference so intermediate activations can be reclaimed.
+
+This chapter synthesizes the foundational modules of @sec-tensors through @sec-optimizers into the unified `Trainer` engine, establishing the end-to-end execution loop of TinyTorch. Before building this engine, we must inspect the silent failures that occur when any link in this five-step chain is broken.
 
 ::: {#fig-training-pipeline fig-env="figure" fig-pos="htb" fig-cap="**An accumulation window**: Forward, loss, and backward repeat while parameters stay fixed. At the window boundary, the Trainer averages by actual samples, optionally clips, updates parameters, and clears gradients." fig-alt="Two rows of three boxes. The upper row connects forward pass, scalar batch-mean loss, and sample-weighted backward. The lower row connects gradient averaging, optional clipping, and update followed by clearing. A note includes the final partial window."}
 ![](assets/images/diagrams/08_training-diag-1.svg)

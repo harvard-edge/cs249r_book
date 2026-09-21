@@ -9,12 +9,30 @@
 
 The foundational algorithm of modern deep learning is backpropagation: computing the exact partial derivative of a scalar loss with respect to every trainable weight in a network via the multivariable chain rule. These gradients tell the optimizer precisely how to adjust millions of parameters to decrease error.
 
-From a framework and systems standpoint, calculating derivatives manually or through symbolic algebra does not scale to dynamic neural networks with complex branching and control flow. Numerical finite differences are equally impractical, requiring $O(N)$ forward passes that would make training computationally impossible. A production autograd engine must solve several critical systems challenges:
-1. **Dynamic tape recording**: Record an execution Directed Acyclic Graph (DAG) during the forward pass, capturing operations (`Function.apply`), input-output tensor relationships, and saved intermediate activations.
-2. **Reverse topological traversal**: Walk the recorded computation tape in exact reverse topological order, ensuring every consumer contributes its gradient before an intermediate tensor passes its accumulated derivative upstream.
-3. **Memory lifetime and mutation safety**: Accumulate gradients into leaf parameters (`param.grad += ...`), release the graph's links once backward has used them so intermediates can be reclaimed, and keep code from mutating a saved tensor in place before backward reads it. TinyTorch does not detect such a mutation; the chapter shows what it corrupts.
+In PyTorch, automatic differentiation is an effortless four-line ritual:
 
-This chapter constructs TinyTorch's reverse-mode automatic differentiation engine, connecting the forward computations of @sec-tensors through @sec-dataloader with the backward gradient updates required by @sec-optimizers.
+```python
+import torch
+
+# Leaf parameters requiring gradients
+x = torch.tensor([[1.0, 2.0]], requires_grad=True)
+W = torch.tensor([[0.5, -0.5], [1.0, 0.5]], requires_grad=True)
+
+# Forward pass and scalar loss
+loss = torch.relu(x @ W).sum()
+
+# Backward automatic differentiation
+loss.backward()
+
+print("Gradient dL/dW:\n", W.grad)
+```
+
+Underneath that clean surface, the framework executes a sophisticated runtime engine:
+1. **Dynamic tape recording:** As `x @ W`, `relu`, and `sum` execute during the forward pass, the runtime dynamically allocates operational graph nodes, constructing a Directed Acyclic Graph (DAG) that records parent-child dependencies and saves intermediate activations needed for local derivatives.
+2. **Reverse topological traversal:** Calling `loss.backward()` triggers a topological sort of the graph from the scalar loss node back to the leaf inputs, guaranteeing that every downstream consumer contributes its partial derivative before an upstream tensor propagates its accumulated gradient.
+3. **In-place accumulation and memory cleanup:** Gradients accumulate in-place directly into leaf `.grad` buffers (`param.grad += ...`), while non-leaf intermediate graph edges are unhooked so the runtime can immediately reclaim activation memory.
+
+This chapter constructs TinyTorch's reverse-mode automatic differentiation engine, connecting the forward computations of @sec-tensors through @sec-dataloader with the backward gradient updates required by @sec-optimizers. Before building this engine, we must inspect why naive numerical or manual alternatives fail.
 
 ::: {#fig-autograd-dag fig-env="figure" fig-pos="htb" fig-cap="**Forward records and backward contributions**: The upper row computes y = x × x and L = y + x. In the lower row, addition contributes 1 directly to x; multiplication contributes 3 through each input position. All three contributions are needed for the gradient of 7." fig-alt="Two rows show x=3, y=9, L=12 above a backward seed of 1, an addition step, and multiplication contributions 3+3 with total dx=7."}
 ![](assets/images/diagrams/06_autograd-diag-1.svg)

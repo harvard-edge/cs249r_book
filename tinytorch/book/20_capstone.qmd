@@ -9,12 +9,31 @@
 
 Real-world machine learning systems engineering is never about applying a single optimization in isolation; it is an exercise in multi-objective trade-offs. An optimization that doubles inference speed is unacceptable if it drops accuracy below the task's floor, and a compression technique that reduces storage can still lose if it adds latency. The systems engineer must synthesize multiple optimizations into a coherent, balanced production pipeline.
 
-From a framework and systems standpoint, the Capstone integrates the full optimization arsenal developed across Part III:
-1. **A decode-step cost model**: Predicting how INT8 quantization, low-rank factorization, kernel fusion, and the KV cache each change one TinyGPT decode step, and why multiplying each lever's solo speedup can mispredict what the levers do together.
-2. **Measured trade-offs**: Benchmarking a baseline and a candidate model for accuracy, stored size, and latency, and placing candidates on the trade-off curve among the three.
-3. **Verification and scorecard reporting**: Checking a candidate's outputs and accuracy against the baseline before its speed or size counts, then writing the comparison into a submission report.
+In production serving engines, optimizing an end-to-end generative pipeline composes multiple acceleration levers into a single loop:
 
-This chapter combines Part III's measurements and models into one report, with each claimed gain traced to the lever that produced it.
+```python
+import torch
+
+# The end-to-end optimized generation pipeline:
+# Tokenization -> Embedding -> Quantized Transformer Blocks -> KV-Cached Autoregression
+def generate_tokens(model, prompt_ids, max_new_tokens=20):
+    input_ids = prompt_ids
+    past_key_values = None
+    for _ in range(max_new_tokens):
+        # Forward pass using cached past key-values and quantized weights
+        outputs = model(input_ids, past_key_values=past_key_values, use_cache=True)
+        next_token = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
+        input_ids = next_token  # Feed only the single newest token
+        past_key_values = outputs.past_key_values
+    return input_ids
+```
+
+Underneath that end-to-end generation loop, the systems engineer must navigate complex trade-offs and non-linear interactions:
+1. **The Amdahl's Law bottleneck:** Individual optimizations (INT8 quantization, kernel fusion, and KV caching) do not multiply independently. Once the KV cache eliminates redundant attention projections, remaining runtime is dominated by MLP blocks, and optimizing memory traffic buys smaller incremental gains.
+2. **Quality regression bounds:** Compressing parameters or applying low-rank SVD perturbs floating-point numerical outputs. Any speedup claim is invalid unless candidate model accuracy is strictly evaluated against the baseline ground truth.
+3. **The Pareto trade-off surface:** A systems deployment scorecard must balance accuracy, persistent memory footprint, and latency percentiles (P50, P99), identifying configurations that lie on the optimal trade-off frontier.
+
+This chapter combines Part III's measurements and models into one checkable report, tracing each claimed gain to the architectural lever that produced it. Before synthesizing our candidate models, we must inspect the reporting traps that arise when isolated speedups are combined naively.
 
 ![**An optimization needs a comparison**: Preserve the baseline and workload, transform a candidate, recheck quality, and measure its actual arrays and execution before recording the comparison.](assets/images/diagrams/20_capstone-diag-1.svg){#fig-capstone-stack fig-alt="Baseline model and workload lead to a transformed candidate and a quality and timing check. Lower panels compare against the same baseline and record measured evidence."}
 

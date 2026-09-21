@@ -7,14 +7,30 @@
 :::
 
 
-Fixed-window convolutions and sequential recurrent networks struggle to model long-range context and dynamic token interactions. A word's meaning in natural language depends heavily on distant context: in "the server crashed because it overheated," resolving what "it" refers to requires the model to route information dynamically across the sequence. **Scaled dot-product attention** solves this by allowing every token to dynamically query, weigh, and aggregate representations from all other tokens in parallel.
+Fixed-window convolutions and sequential recurrent networks struggle to model long-range context and dynamic token interactions. A word's meaning in natural language depends heavily on distant context: in *"the server crashed because it overheated"*, resolving what *"it"* refers to requires the model to route information dynamically across the sequence. **Scaled dot-product attention** solves this by allowing every token to dynamically query, weigh, and aggregate representations from all other tokens in parallel.
 
-From a systems and framework perspective, multi-head attention introduces one of the most computationally demanding and memory-intensive operations in modern deep learning:
-1. **The quadratic memory cliff**: Computing all-to-all query-key similarity matrices incurs an $O(S^2)$ memory and compute footprint, making sequence length $S$ a dominant factor in GPU memory allocation.
-2. **Autoregressive causal masking**: Enforcing causality in generative decoders by setting future attention weights to $-\infty$ prior to softmax, ensuring tokens cannot look ahead during training.
-3. **Multi-head projection splitting and concatenation**: Projecting input vectors into query, key, and value subspaces, reshaping tensors into multi-head views $(B, H, S, d_k)$, computing parallel scaled dot-products, and projecting concatenated outputs back to hidden dimension $D$.
+In modern PyTorch, scaled dot-product attention is invoked in a single functional call:
 
-This chapter builds TinyTorch's multi-head causal attention engine, laying the core communication mechanism that powers the Transformer architecture in @sec-transformers.
+```python
+import torch
+import torch.nn.functional as F
+
+# Batch of 1, 4 heads, sequence length 8, head dimension 16
+q = torch.randn(1, 4, 8, 16)
+k = torch.randn(1, 4, 8, 16)
+v = torch.randn(1, 4, 8, 16)
+
+# Scaled dot-product attention with causal autoregressive masking
+out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+print("Attention output shape:", out.shape)  # (1, 4, 8, 16)
+```
+
+Underneath that compact functional call, the runtime coordinates multiple linear algebra stages:
+1. **The quadratic all-to-all similarity matrix ($Q K^T$):** The engine multiplies query and key projections across all heads simultaneously, materializing an $(S \times S)$ score matrix per head. This creates the characteristic $O(S^2)$ quadratic memory and compute footprint that defines transformer scaling.
+2. **Variance scaling ($1/\sqrt{d_k}$):** As the head dimension $d_k$ grows, dot products scale proportionally in variance. Scaling by $1/\sqrt{d_k}$ keeps logits in a moderate range, preventing Softmax from saturating into near-zero gradients.
+3. **Causal autoregressive masking:** In generative decoders, future tokens must remain invisible. The runtime injects an upper-triangular mask of $-\infty$ prior to Softmax, forcing future attention probabilities to exactly zero without branching logic.
+
+This chapter builds TinyTorch's multi-head causal attention engine, laying the core communication mechanism that powers the Transformer architecture in @sec-transformers. Before building the multi-head projection pipeline, we must inspect why naive row averaging fails to capture contextual relationships.
 
 ---
 

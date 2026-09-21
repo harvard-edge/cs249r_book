@@ -9,12 +9,28 @@
 
 Stacking attention layers directly leads to gradient instability and signal degradation as network depth increases. To build scalable, multi-layer foundation models, attention must be organized into a robust, repeating architectural block. The **Transformer decoder block** stabilizes deep sequence processing by combining causal multi-head attention with position-wise feed-forward networks (MLPs), Pre-Layer Normalization (Pre-LN), and residual skip connections.
 
-From a framework and systems standpoint, the Transformer block acts as an information highway: the residual connection passes signals directly through network depth without attenuation, while sub-layers compute additive feature updates. Implementing a full Transformer (TinyGPT) requires coordinating multiple runtime contracts:
-1. **Pre-LN residual path**: Applying layer normalization before the attention and MLP sub-layers, so the residual stream itself stays unnormalized and gives gradients an identity path from the output back to every block.
-2. **Balanced parameter allocation**: Allocating parameter and FLOP budgets between attention projections ($4D^2$) and MLP feed-forward expansions ($8D^2$).
-3. **End-to-end model composition**: Stacking $N$ identical blocks, connecting token and position embeddings at the input, and projecting final hidden states through a vocabulary head to produce next-token logit distributions of shape $(B, S, V)$.
+In PyTorch, a full transformer block is declared and composed in standard modules:
 
-This chapter synthesizes the components of Part II into TinyGPT, TinyTorch's flagship generative language model, setting the stage for text generation in @sec-milestone-2.
+```python
+import torch
+import torch.nn as nn
+
+# Standard Transformer Decoder Layer (Self-Attention + MLP + Pre-LN)
+layer = nn.TransformerDecoderLayer(d_model=64, nhead=4, dim_feedforward=256, batch_first=True)
+
+x = torch.randn(2, 8, 64)       # Batch of 2, sequence length 8, hidden dim 64
+memory = torch.randn(2, 8, 64)  # Context memory
+out = layer(x, memory)
+
+print("Decoder block output shape:", out.shape)  # (2, 8, 64)
+```
+
+Underneath that composable layer block, the runtime balances multiple structural and gradient invariants:
+1. **The Pre-LN residual highway:** By applying layer normalization to the inputs of each sub-layer rather than their outputs (Pre-LN), the main residual stream remains unnormalized. This creates an unhindered identity highway for gradients during backpropagation.
+2. **Balanced compute and parameter allocation:** The block balances parameter capacity between token communication (multi-head attention, $4D^2$ parameters) and channel-wise feature transformation (the two-layer feed-forward MLP with a $4\times$ expansion, $8D^2$ parameters).
+3. **End-to-end logit projection:** Stacking $N$ identical blocks and projecting the final hidden states through a vocabulary linear head produces next-token logit distributions of shape $(B, S, V)$.
+
+This chapter synthesizes the components of Part II into TinyGPT, TinyTorch's flagship generative language model, setting the stage for text generation in @sec-milestone-2. Before assembling the model, we must inspect what happens when deep attention networks lack residual pathways and layer normalization.
 
 ::: {#fig-transformer-arch fig-env="figure" fig-pos="htb" fig-cap="**Composing a transformer**: Each block adds two learned updates to the residual stream. The complete GPT stacks these blocks before a final normalization and a separate vocabulary projection." fig-alt="Two panels show a Pre-LN block with two bypass arrows around attention and MLP branches, and a GPT path from token and position embeddings through N blocks to logits of shape B by S by V."}
 ![](assets/images/diagrams/13_transformers-diag-1.svg)

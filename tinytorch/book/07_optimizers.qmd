@@ -9,12 +9,27 @@
 
 Gradient descent is the engine that drives neural learning, but raw gradients alone are often insufficient to train deep models effectively. High-dimensional loss landscapes are characterized by ill-conditioned ravines, saddle points, and extreme curvature variations where gradients are steep in some directions and nearly flat in others. Plain gradient descent oscillates uncontrollably across canyon walls while making glacial progress along the valley floor toward the optimum.
 
-From a systems and framework perspective, an optimizer is a manager of per-parameter state. While automatic differentiation (@sec-autograd) computes raw gradient vectors, the optimizer must translate those derivatives into stable parameter trajectories:
-1. **State buffer allocation**: Track persistent auxiliary moment buffers for each parameter. Momentum stores velocity vectors ($m_t$), while adaptive algorithms like Adam and AdamW maintain running estimates of both first and uncentered second moments ($v_t$), doubling or tripling the runtime memory footprint of model parameters.
-2. **Decoupled weight decay (AdamW)**: Separate $L_2$ regularization weight shrinkage from adaptive gradient moment scaling, preventing weights with large historical gradients from evading regularization.
-3. **Stable parameter identity**: Replace each parameter's values while keeping the same `Tensor` object, so the model and the optimizer continue to refer to one shared parameter.
+In PyTorch, optimizing parameters is encapsulated in an optimizer object with a two-method protocol:
 
-This chapter builds TinyTorch's optimization suite (SGD with momentum, Adam, and AdamW), providing the parameter update engine that drives the unified training loop in @sec-training.
+```python
+import torch
+
+model = torch.nn.Linear(10, 2)
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
+
+# Inside the training iteration:
+optimizer.zero_grad()                   # 1. Clear residual gradient buffers
+loss = model(torch.randn(4, 10)).sum()  # 2. Forward pass
+loss.backward()                         # 3. Accumulate gradients
+optimizer.step()                        # 4. Update parameter trajectories
+```
+
+Underneath that straightforward step, the optimizer coordinates extensive per-parameter state:
+1. **Auxiliary moment buffer tracking:** For every registered parameter, adaptive optimizers allocate and maintain persistent first-moment (momentum $m_t$) and second-moment (uncentered variance $v_t$) tensors, tripling the parameter memory footprint.
+2. **Bias correction during early iterations:** Because running moments are initialized to zeros, early estimates are biased toward zero. The runtime computes exponential decay correction factors ($1 - \beta_1^t$ and $1 - \beta_2^t$) to rescale steps during initial warm-up.
+3. **Decoupled weight decay (AdamW):** Rather than adding $L_2$ penalties to the gradient (which distorts moment estimates), the optimizer directly shrinks weight values ($W \leftarrow W(1 - \eta \lambda)$) independently of the adaptive gradient scale.
+
+This chapter builds TinyTorch's optimization suite (SGD with momentum, Adam, and AdamW), providing the parameter update engine that drives the unified training loop in @sec-training. Before building these algorithms, we must examine why plain gradient descent fails on stretched loss surfaces.
 
 ---
 
