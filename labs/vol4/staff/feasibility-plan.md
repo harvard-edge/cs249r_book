@@ -3,7 +3,7 @@
 **Audience:** Postdoctoral Researcher (Andrea, ETH Zurich) & Lab Staff
 **Status:** Canonical Engineering Implementation Checklist & Qualification Plan
 **Target Platform:** Arduino UNO Q ("Unikue" QRB2210 Linux + STM32U585 MCU) · Seeed Studio SO-101 6-DoF Arm · Hugging Face LeRobot · SmolVLA & ACT Models
-**Reference Curriculum:** [Master Landing Page](README.md) · [Course Syllabus](syllabus.md) · [Staff Master Plan (Sep–Dec 2026)](staff-implementation-plan.md) · [12-Competency Matrix](student-competencies.md) · [Capstone Studio](lab-capstone-studio.md)
+**Reference Curriculum:** [Master Landing Page](../README.md) · [Course Syllabus](../curriculum/syllabus.md) · [Staff Master Plan (Sep–Dec 2026)](staff-implementation-plan.md) · [12-Competency Matrix](../curriculum/student-competencies.md) · [Capstone Studio](../labs/lab-capstone-studio.md)
 
 ---
 
@@ -41,9 +41,9 @@ Complete these physical build steps and verify electrical safety before powering
   - Plug the UVC webcam into a USB-A port on the hub; verify Linux recognizes the device at `/dev/video0`.
   - Connect the single-wire half-duplex UART communication line from the STS3215 servo bus to the STM32U585 USART pins via the level-shifter circuit.
 
-![Arduino UNO Q Dual-Silicon Architecture and Safety Boundary](assets/images/vol4-uno-q-dual-core-architecture.svg)
+![Arduino UNO Q Dual-Silicon Architecture and Safety Boundary](../assets/images/vol4-uno-q-dual-core-architecture.svg)
 
-![Physical Bench Rigging & Electrical Power Isolation Harness](assets/images/vol4-bench-wiring-harness.svg)
+![Physical Bench Rigging & Electrical Power Isolation Harness](../assets/images/vol4-bench-wiring-harness.svg)
 
 ---
 
@@ -120,18 +120,18 @@ Before publishing student labs or ordering additional stations, you must success
 
 For each lab in the 14-week curriculum, Andrea must execute the student protocol end-to-end, identify potential pitfalls, and prepare the "Gold Standard" starter assets:
 
-![Volume IV Physical AI Studio 14-Week Curriculum Map](assets/images/vol4-course-structure-map.svg)
+![Volume IV Physical AI Studio 14-Week Curriculum Map](../assets/images/vol4-course-structure-map.svg)
 
 | Lab & Title | Pre-Flight Tasks for Andrea ("Student Zero") | Required Staff Deliverables for Students |
 |:---|:---|:---|
-| **[Lab 1: Causal Boundary](lab-01-boundary.md)** | • Wire dual power rails, common ground, and UART bus.<br>• Verify independent power rail isolation.<br>• Clock cold boot and reset settling times. | • `wiring_diagram_golden.pdf`<br>• `board_pinout_reference.md`<br>• `lab01_boundary_check.py` |
-| **[Lab 2: Sensing & Bridge](lab-02-body-and-sensors.md)** | • Calibrate camera intrinsic/extrinsics using AprilTag.<br>• Test STM32 joint angle readback accuracy ($\pm 1.5^\circ$).<br>• Benchmark inter-core RPC throughput ($> 50\text{ Hz}$). | • `calibrate_camera.py`<br>• `test_bridge_latency.py`<br>• `camera_v4l2_config.sh` |
-| **[Lab 3: Teleop & Datasets](lab-03-physical-episodes.md)** | • Record 10 pick-and-place episodes into LeRobot v2 format.<br>• Validate synchronized storage of RGB frames and joint taps.<br>• Verify HDF5/parquet schema compatibility. | • `teleop_record.py`<br>• `dataset_golden_10ep/`<br>• `inspect_dataset.py` |
-| **[Lab 4: Baseline & Policy Export](lab-04-baseline-and-learning.md)** | • Train baseline ACT policy on workstation (Colab/cluster).<br>• Quantize trained PyTorch checkpoint to ONNX INT8.<br>• Build deterministic heuristic reach baseline. | • `train_act_baseline.py`<br>• `export_onnx_quantized.py`<br>• `pretrained_act_int8.onnx` |
-| **[Lab 5: Autonomous Reach](lab-05-local-feedback-loop.md)** | • Deploy ONNX model natively to Qualcomm Linux.<br>• Execute untethered autonomous reach to randomized targets.<br>• Record 4-tap telemetry trace (`a_req`, `a_map`, `a_enf`, `a_meas`). | • `pai_edge_runtime.py`<br>• `telemetry_logger.py`<br>• `sample_reach_trace.csv` |
-| **[Lab 6: Action Horizons](lab-06-action-chunks.md)** | • Benchmark chunk horizons $K \in \{1, 8, 16, 32\}$.<br>• Test physical obstacle disturbance mid-reach.<br>• Run language conditioning prompt comparison on SmolVLA. | • `benchmark_chunking.py`<br>• `disturbance_eval.py`<br>• `smolvla_eval_harness.py` |
-| **[Lab 7: MCU Safety Governor](lab-07-authority-under-fault.md)** | • Program STM32 velocity clamp and table collision geofence.<br>• Inject table-crash and over-speed commands via Python.<br>• Measure real-time veto reaction latency ($< 5\text{ ms}$). | • `stm32_governor_firmware/`<br>• `inject_table_crash.py`<br>• `veto_audit_golden.csv` |
-| **[Lab 8: Fault Injection](lab-08-verification-and-release.md)** | • Program $150\text{ ms}$ hardware SysTick watchdog on MCU.<br>• Inject Linux process freezes (`kill -STOP`) and camera dropouts.<br>• Prove zero stale command backlog execution upon restart. | • `stm32_watchdog_firmware/`<br>• `fault_injection_suite.py`<br>• `recovery_verification.py` |
+| **[Lab 1: Causal Boundary](../labs/lab-01-boundary.md)** | • Wire dual power rails, common ground, and UART bus.<br>• Verify independent power rail isolation.<br>• Clock cold boot and reset settling times. | • `wiring_diagram_golden.pdf`<br>• `board_pinout_reference.md`<br>• `lab01_boundary_check.py` |
+| **[Lab 2: Sensing & Bridge](../labs/lab-02-body-and-sensors.md)** | • Calibrate camera intrinsic/extrinsics using AprilTag.<br>• Test STM32 joint angle readback accuracy ($\pm 1.5^\circ$).<br>• Benchmark inter-core RPC throughput ($> 50\text{ Hz}$). | • `calibrate_camera.py`<br>• `test_bridge_latency.py`<br>• `camera_v4l2_config.sh` |
+| **[Lab 3: Teleop & Datasets](../labs/lab-03-physical-episodes.md)** | • Record 10 pick-and-place episodes into LeRobot v2 format.<br>• Validate synchronized storage of RGB frames and joint taps.<br>• Verify HDF5/parquet schema compatibility. | • `teleop_record.py`<br>• `dataset_golden_10ep/`<br>• `inspect_dataset.py` |
+| **[Lab 4: Baseline & Policy Export](../labs/lab-04-baseline-and-learning.md)** | • Train baseline ACT policy on workstation (Colab/cluster).<br>• Quantize trained PyTorch checkpoint to ONNX INT8.<br>• Build deterministic heuristic reach baseline. | • `train_act_baseline.py`<br>• `export_onnx_quantized.py`<br>• `pretrained_act_int8.onnx` |
+| **[Lab 5: Autonomous Reach](../labs/lab-05-local-feedback-loop.md)** | • Deploy ONNX model natively to Qualcomm Linux.<br>• Execute untethered autonomous reach to randomized targets.<br>• Record 4-tap telemetry trace (`a_req`, `a_map`, `a_enf`, `a_meas`). | • `pai_edge_runtime.py`<br>• `telemetry_logger.py`<br>• `sample_reach_trace.csv` |
+| **[Lab 6: Action Horizons](../labs/lab-06-action-chunks.md)** | • Benchmark chunk horizons $K \in \{1, 8, 16, 32\}$.<br>• Test physical obstacle disturbance mid-reach.<br>• Run language conditioning prompt comparison on SmolVLA. | • `benchmark_chunking.py`<br>• `disturbance_eval.py`<br>• `smolvla_eval_harness.py` |
+| **[Lab 7: MCU Safety Governor](../labs/lab-07-authority-under-fault.md)** | • Program STM32 velocity clamp and table collision geofence.<br>• Inject table-crash and over-speed commands via Python.<br>• Measure real-time veto reaction latency ($< 5\text{ ms}$). | • `stm32_governor_firmware/`<br>• `inject_table_crash.py`<br>• `veto_audit_golden.csv` |
+| **[Lab 8: Fault Injection](../labs/lab-08-verification-and-release.md)** | • Program $150\text{ ms}$ hardware SysTick watchdog on MCU.<br>• Inject Linux process freezes (`kill -STOP`) and camera dropouts.<br>• Prove zero stale command backlog execution upon restart. | • `stm32_watchdog_firmware/`<br>• `fault_injection_suite.py`<br>• `recovery_verification.py` |
 
 ---
 

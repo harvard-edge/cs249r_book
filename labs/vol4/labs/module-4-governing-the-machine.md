@@ -2,14 +2,14 @@
 
 **Schedule:** Weeks 10–14 (Weeks 10–11: Classroom Instruction · Weeks 12–14: Dedicated Capstone Studio)
 **Milestone Deliverables:**
-- [Milestone 4](syllabus.md#sec-milestones) (End of Week 11) — *Certified Governed Station Under Fault Injection*
-- [Milestone 5](syllabus.md#sec-milestones) (End of Week 14) — *Capstone System Defense & Physical Release Dossier*
+- [Milestone 4](../curriculum/syllabus.md#sec-milestones) (End of Week 11) — *Certified Governed Station Under Fault Injection*
+- [Milestone 5](../curriculum/syllabus.md#sec-milestones) (End of Week 14) — *Capstone System Defense & Physical Release Dossier*
 **Required Textbook Reading:**
-- [Chapter 12: Safety Enforcement](../../books/vol4/12_enforcement/12_enforcement.qmd)
-- [Chapter 14: Supervisory Intervention](../../books/vol4/14_intervention/14_intervention.qmd)
-- [Chapter 15: Adversarial Verification](../../books/vol4/15_verification/15_verification.qmd)
-- [Chapter 16: Safe Release](../../books/vol4/16_release/16_release.qmd)
-- [Chapter 17: The Epistemic Frontier](../../books/vol4/17_frontier/17_frontier.qmd)
+- [Chapter 12: Safety Enforcement](../../../books/vol4/12_enforcement/12_enforcement.qmd)
+- [Chapter 14: Supervisory Intervention](../../../books/vol4/14_intervention/14_intervention.qmd)
+- [Chapter 15: Adversarial Verification](../../../books/vol4/15_verification/15_verification.qmd)
+- [Chapter 16: Safe Release](../../../books/vol4/16_release/16_release.qmd)
+- [Chapter 17: The Epistemic Frontier](../../../books/vol4/17_frontier/17_frontier.qmd)
 **Associated Studio Labs:**
 - [Lab 7: The Microcontroller Safety Governor](lab-07-authority-under-fault.md) (Week 10)
 - [Lab 8: Fault Injection & Fail-Safe Cutoffs](lab-08-verification-and-release.md) (Week 11)

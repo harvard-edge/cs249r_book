@@ -1,9 +1,9 @@
 # Lab 1: The Causal Boundary & Servo Bus Bring-Up
 
 **Schedule:** Weeks 1–2 | **Part:** [Part I: The Machine Anatomy](module-1-machine-anatomy.md)
-**Required Textbook Reading:** [Chapter 1: The Causal Boundary](../../books/vol4/01_boundary/01_boundary.qmd) & [Chapter 2: The Physical Body](../../books/vol4/02_body/02_body.qmd)
+**Required Textbook Reading:** [Chapter 1: The Causal Boundary](../../../books/vol4/01_boundary/01_boundary.qmd) & [Chapter 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd)
 **Target Competencies:** `[ ] A1 Plant Mechanics & Safe Envelope`, `[ ] D1 Hardware Authority Routing`
-**Milestone Alignment:** Contributes to [Milestone 1](syllabus.md#sec-milestones) (End of Week 3)
+**Milestone Alignment:** Contributes to [Milestone 1](../curriculum/syllabus.md#sec-milestones) (End of Week 3)
 
 ---
 
@@ -16,10 +16,10 @@ Where does computational authority end and physical delegation begin? If a host 
 
 | Component | Station Role | Specification | Image |
 |:---|:---|:---|:---:|
-| **Seeed Studio SO-101 Arm** | 6-DoF follower arm for physical manipulation | 6 active joints, STS3215 bus servos, rigid 3D-printed arm links | <img src="assets/images/so101-follower.png" alt="SO-101 6-DoF Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Arduino UNO Q ("Unikue")** | Dual-silicon brain: Linux MPU (Qualcomm) + Real-time MCU (STM32U585) | Dedicated inter-core RPC, hardware watchdog, half-duplex UART bus master | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Feetech STS3215 Servos** | Daisy-chained smart actuators | 12-bit magnetic encoder ($0.088^\circ$ res), 19 kg·cm torque @ 7.4V, 1 Mbps TTL UART | <img src="assets/images/feetech-sts3215-servo.jpg" alt="Feetech STS3215 Servo" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Dual Power Rails** | Electrical isolation: 45W USB-PD (Logic) + Dedicated 7.4V/5A DC (Servos) | Common star ground at UNO Q GND pin; zero brownout cross-talk | <img src="assets/images/feetech-sts3215-bus-ports.jpg" alt="Dual Daisy-Chain Bus Ports" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Seeed Studio SO-101 Arm** | 6-DoF follower arm for physical manipulation | 6 active joints, STS3215 bus servos, rigid 3D-printed arm links | <img src="../assets/images/so101-follower.png" alt="SO-101 6-DoF Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Arduino UNO Q ("Unikue")** | Dual-silicon brain: Linux MPU (Qualcomm) + Real-time MCU (STM32U585) | Dedicated inter-core RPC, hardware watchdog, half-duplex UART bus master | <img src="../assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Feetech STS3215 Servos** | Daisy-chained smart actuators | 12-bit magnetic encoder ($0.088^\circ$ res), 19 kg·cm torque @ 7.4V, 1 Mbps TTL UART | <img src="../assets/images/feetech-sts3215-servo.jpg" alt="Feetech STS3215 Servo" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Dual Power Rails** | Electrical isolation: 45W USB-PD (Logic) + Dedicated 7.4V/5A DC (Servos) | Common star ground at UNO Q GND pin; zero brownout cross-talk | <img src="../assets/images/feetech-sts3215-bus-ports.jpg" alt="Dual Daisy-Chain Bus Ports" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
 
 1. **Actuator Station:** Seeed Studio SO-101 6-DoF arm mounted securely to the tabletop baseplate.
 2. **Controller Board:** Arduino UNO Q ("Unikue") powered via USB-C PD (45W).
@@ -27,11 +27,11 @@ Where does computational authority end and physical delegation begin? If a host 
 4. **Isolated Power:** Regulated 7.4V/5A DC motor power supply with a toggle switch, sharing a common star ground with the Arduino UNO Q.
 5. **Initial State:** Motor power supply switch **OFF (Disarmed)**. Arm in resting, folded configuration.
 
-![Bench Wiring Harness: Dual Power Isolation & Inter-Core Safety Routing](assets/images/vol4-bench-wiring-harness.svg){#fig-wiring-harness width=100%}
+![Bench Wiring Harness: Dual Power Isolation & Inter-Core Safety Routing](../assets/images/vol4-bench-wiring-harness.svg)
 
-![The Physical AI Sense-Propose-Permit-Act Loop](assets/images/vol4-physical-ai-loop.svg){#fig-loop width=100%}
+![The Physical AI Sense-Propose-Permit-Act Loop](../assets/images/vol4-physical-ai-loop.svg)
 
-![Arduino UNO Q Dual-Silicon Architecture and Safety Boundary](assets/images/vol4-uno-q-dual-core-architecture.svg){#fig-dual-arch width=100%}
+![Arduino UNO Q Dual-Silicon Architecture and Safety Boundary](../assets/images/vol4-uno-q-dual-core-architecture.svg)
 
 ---
 
@@ -91,4 +91,4 @@ To receive credit for Lab 1, demonstrate the following live to the instructor:
 1. [ ] **Authority Route Proof:** Show the physical wiring diagram and prove that disconnecting the STM32 stops all motor communication.
 2. [ ] **Measured Operating Envelope Table:** Present the measured travel limits ($\theta_{\min}, \theta_{\max}$) for all 6 joints and the calibrated resting rest pose.
 3. [ ] **Power-Off & Re-Arm Trace:** Demonstrate switching off the 7.4V motor power supply during active motion, observing a safe passive drop, restoring power, and proving zero uncommanded motion occurs.
-*Staff signs off `[ ] A1` and `[ ] D1` on the team's [Competency Card](student-competencies.md).*
+*Staff signs off `[ ] A1` and `[ ] D1` on the team's [Competency Card](../curriculum/student-competencies.md).*

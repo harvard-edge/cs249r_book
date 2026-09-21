@@ -1,9 +1,9 @@
 # Lab 5: Autonomous Closed-Loop Reach on UNO Q
 
 **Schedule:** Weeks 7–8 | **Part:** [Part III: Running the Machine](module-3-running-the-machine.md)
-**Required Textbook Reading:** [Chapter 8: Sensor Perception](../../books/vol4/08_perception/08_perception.qmd), [Chapter 11: Trajectory Planning](../../books/vol4/11_planning/11_planning.qmd) & [Chapter 13: Silicon Placement](../../books/vol4/13_placement/13_placement.qmd)
+**Required Textbook Reading:** [Chapter 8: Sensor Perception](../../../books/vol4/08_perception/08_perception.qmd), [Chapter 11: Trajectory Planning](../../../books/vol4/11_planning/11_planning.qmd) & [Chapter 13: Silicon Placement](../../../books/vol4/13_placement/13_placement.qmd)
 **Target Competencies:** `[ ] C1 Closed-Loop Autonomous Action`
-**Milestone Alignment:** Contributes to [Milestone 3](syllabus.md#sec-milestones) (End of Week 9)
+**Milestone Alignment:** Contributes to [Milestone 3](../curriculum/syllabus.md#sec-milestones) (End of Week 9)
 
 ---
 
@@ -16,9 +16,9 @@ Can a trained neural policy run completely untethered on edge silicon, closing t
 
 | Component | Station Function | Technical Details | Visual Reference |
 |:---|:---|:---|:---:|
-| **Arduino UNO Q Board** | Untethered edge computer | Runs ONNX runtime on Linux MPU & safety bridge on STM32 MCU | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Seeed SO-101 Arm** | Physical manipulation follower arm | Executes closed-loop reach entirely without workstation tether | <img src="assets/images/so101-follower.png" alt="SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Logitech C270 Webcam** | Live optical feedback | 30 FPS USB video streaming directly into Qualcomm Linux V4L2 | <img src="assets/images/logitech-c270-webcam.png" alt="Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Arduino UNO Q Board** | Untethered edge computer | Runs ONNX runtime on Linux MPU & safety bridge on STM32 MCU | <img src="../assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Seeed SO-101 Arm** | Physical manipulation follower arm | Executes closed-loop reach entirely without workstation tether | <img src="../assets/images/so101-follower.png" alt="SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Logitech C270 Webcam** | Live optical feedback | 30 FPS USB video streaming directly into Qualcomm Linux V4L2 | <img src="../assets/images/logitech-c270-webcam.png" alt="Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
 
 1. **Edge Board:** Arduino UNO Q running standalone (Qualcomm Linux MPU + STM32 MCU).
 2. **Network Connection:** Disconnected or headless network (zero tethering to a workstation during task execution).
@@ -100,4 +100,4 @@ To receive credit for Lab 5:
 1. [ ] **Witnessed Untethered Reach:** Demonstrate a live autonomous reach on the SO-101 arm running entirely from the Arduino UNO Q without host PC intervention.
 2. [ ] **Physical Task Completion:** The arm must successfully make contact with the block placed at a staff-selected arbitrary position within the envelope.
 3. [ ] **End-to-End Latency Profile:** Submit a verified latency breakdown showing total loop execution time $< 100\text{ ms}$.
-*Staff signs off `[ ] C1` on the team's [Competency Card](student-competencies.md).*
+*Staff signs off `[ ] C1` on the team's [Competency Card](../curriculum/student-competencies.md).*

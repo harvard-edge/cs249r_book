@@ -1,12 +1,12 @@
 # Part I / Module 1: The Machine Anatomy
 
 **Schedule:** Weeks 1–3
-**Milestone Deliverable:** [Milestone 1](syllabus.md#sec-milestones) (End of Week 3) — *Station Charter, Calibrated Operating Envelope & Authority Route*
+**Milestone Deliverable:** [Milestone 1](../curriculum/syllabus.md#sec-milestones) (End of Week 3) — *Station Charter, Calibrated Operating Envelope & Authority Route*
 **Required Textbook Reading:**
-- [Chapter 1: The Causal Boundary](../../books/vol4/01_boundary/01_boundary.qmd)
-- [Chapter 2: The Physical Body](../../books/vol4/02_body/02_body.qmd)
-- [Chapter 3: The Cognitive Brain](../../books/vol4/03_brain/03_brain.qmd)
-- [Chapter 4: The Nervous System](../../books/vol4/04_nervous/04_nervous.qmd)
+- [Chapter 1: The Causal Boundary](../../../books/vol4/01_boundary/01_boundary.qmd)
+- [Chapter 2: The Physical Body](../../../books/vol4/02_body/02_body.qmd)
+- [Chapter 3: The Cognitive Brain](../../../books/vol4/03_brain/03_brain.qmd)
+- [Chapter 4: The Nervous System](../../../books/vol4/04_nervous/04_nervous.qmd)
 **Associated Studio Labs:** [Lab 1: Causal Boundary & Servo Bus Bring-Up](lab-01-boundary.md) & [Lab 2: Multi-Modal Sensing & The Inter-Core Bridge](lab-02-body-and-sensors.md)
 **Target Competency Card Items:** `[ ] A1`, `[ ] A2`, `[ ] A3`, `[ ] D1`
 
@@ -73,4 +73,4 @@ By the end of Week 3, each team submits their **Milestone 1 Packet**:
 3. **Project Task Charter:**
    - 1-page description of the team's chosen semester manipulation task.
    - Definition of the **independent task outcome metric** (how success is physically verified beyond joint encoder readback).
-4. **Competency Sign-Off:** Verified sign-off for **A1, A2, A3, and D1** on the team's [Competency Card](student-competencies.md).
+4. **Competency Sign-Off:** Verified sign-off for **A1, A2, A3, and D1** on the team's [Competency Card](../curriculum/student-competencies.md).

@@ -2,7 +2,7 @@
 
 **Status:** Canonical Staff Architecture and Studio Blueprint
 **Target Platform:** Arduino UNO Q ("Unikue" QRB2210 Linux + STM32U585) · Seeed Studio SO-101 6-DoF Arm · Hugging Face LeRobot · SmolVLA & ACT Models
-**Reference Curriculum:** [Master Landing Page](README.md) · [Course Syllabus](syllabus.md) · [12-Competency Matrix](student-competencies.md) · [Postdoc Pre-Flight Guide](feasibility-plan.md) · [Capstone Studio](lab-capstone-studio.md)
+**Reference Curriculum:** [Master Landing Page](../README.md) · [Course Syllabus](../curriculum/syllabus.md) · [12-Competency Matrix](../curriculum/student-competencies.md) · [Postdoc Pre-Flight Guide](../staff/feasibility-plan.md) · [Capstone Studio](lab-capstone-studio.md)
 
 ---
 

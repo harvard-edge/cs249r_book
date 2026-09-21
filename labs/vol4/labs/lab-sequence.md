@@ -1,6 +1,6 @@
 # Volume IV: buildable lab sequence
 
-**Status:** One-axis fallback assignment blueprint, not a released student kit. The proposed primary course is the [SO-101 sequence](so101-uno-q-course.md) under the [course operating plan](course-architecture.md). This reference sequence remains available if the SO-101 STM32-to-servo command path does not work. The [staff build brief](staff-build-brief.md) states what must work before release; the [candidate kit](kit-bom.md) lists station parts and modular attachments. Numeric motion and timing limits must come from a pilot on the exact station.
+**Status:** One-axis fallback assignment blueprint, not a released student kit. The proposed primary course is the [SO-101 sequence](../curriculum/so101-uno-q-course.md) under the [course operating plan](../curriculum/course-architecture.md). This reference sequence remains available if the SO-101 STM32-to-servo command path does not work. The [staff build brief](../staff/staff-build-brief.md) states what must work before release; the [candidate kit](../staff/kit-bom.md) lists station parts and modular attachments. Numeric motion and timing limits must come from a pilot on the exact station.
 
 ## One station, one reference task
 

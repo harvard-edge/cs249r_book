@@ -1,9 +1,9 @@
 # Lab 4: Deterministic Baseline & SmolVLA/ACT Export
 
 **Schedule:** Week 6 | **Part:** [Part II: Teaching the Machine](module-2-teaching-the-machine.md)
-**Required Textbook Reading:** [Chapter 6: Policy Training](../../books/vol4/06_training/06_training.qmd)
+**Required Textbook Reading:** [Chapter 6: Policy Training](../../../books/vol4/06_training/06_training.qmd)
 **Target Competencies:** `[ ] B2 Deterministic Baseline Benchmarking`, `[ ] B3 Edge Model Profiling & Resource Budgets`
-**Milestone Alignment:** Concludes [Milestone 2](syllabus.md#sec-milestones) (End of Week 6)
+**Milestone Alignment:** Concludes [Milestone 2](../curriculum/syllabus.md#sec-milestones) (End of Week 6)
 
 ---
 
@@ -16,9 +16,9 @@ Why do we use machine learning instead of classical control? Does a learned neur
 
 | Component | Station Function | Technical Role | Visual Reference |
 |:---|:---|:---|:---:|
-| **Arduino UNO Q Board** | Edge inference target | Qualcomm QRB2210 running INT8 quantized ONNX policy | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Seeed SO-101 Arm** | Physical validation plant | 6-DoF execution of scripted baseline vs. learned policy | <img src="assets/images/so101-follower.png" alt="SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
-| **Logitech C270 Webcam** | Visual observation source | Real-time workspace frames fed to baseline CV & neural policy | <img src="assets/images/logitech-c270-webcam.png" alt="Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Arduino UNO Q Board** | Edge inference target | Qualcomm QRB2210 running INT8 quantized ONNX policy | <img src="../assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Seeed SO-101 Arm** | Physical validation plant | 6-DoF execution of scripted baseline vs. learned policy | <img src="../assets/images/so101-follower.png" alt="SO-101 Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Logitech C270 Webcam** | Visual observation source | Real-time workspace frames fed to baseline CV & neural policy | <img src="../assets/images/logitech-c270-webcam.png" alt="Webcam" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
 
 1. **Workstation / GPU Server:** Machine learning training environment equipped with PyTorch and LeRobot.
 2. **Edge Board:** Arduino UNO Q with Qualcomm Debian Linux.
@@ -94,4 +94,4 @@ To receive credit for Lab 4 and complete Milestone 2:
 1. [ ] **Baseline Benchmark Data:** Present the 10-trial performance log of the deterministic baseline controller detailing its limitations.
 2. [ ] **Edge Execution Proof:** Execute live inference of the ONNX policy on the Qualcomm Linux processor on the UNO Q, demonstrating inference execution time $< 100\text{ ms}$.
 3. [ ] **Memory & Latency Trace:** Submit a profiling report showing memory usage $< 150\text{ MB}$ and stable 10 Hz action chunk generation.
-*Staff signs off `[ ] B2` and `[ ] B3` on the team's [Competency Card](student-competencies.md).*
+*Staff signs off `[ ] B2` and `[ ] B3` on the team's [Competency Card](../curriculum/student-competencies.md).*

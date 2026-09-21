@@ -44,7 +44,7 @@ For each numbered step above, add: **Result; exact build and software revisions;
 
 ## Weekly lab preparation
 
-For each [lab brief](../lab-blueprints.md), record **ready / ready with replay / needs revision**, a link to the example student artifact, active bench minutes, and what Andrea had to supply or fix. Prioritize labs 1–6, 10, and 14. Record station booking needs and any exercise that cannot fit the class period.
+For each [lab brief](../../labs/lab-blueprints.md), record **ready / ready with replay / needs revision**, a link to the example student artifact, active bench minutes, and what Andrea had to supply or fix. Prioritize labs 1–6, 10, and 14. Record station booking needs and any exercise that cannot fit the class period.
 
 ## Trial protocol and result
 

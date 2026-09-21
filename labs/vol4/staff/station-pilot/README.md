@@ -117,7 +117,7 @@ First replay synthetic proposals with the servo bus disconnected. Write the expe
 
 Verify the MCU log and output-enable state for each. Then connect **one unloaded, guarded servo** through the qualified interface and repeat with the minimum measured travel. Finally extend the same route to the arm, rechecking calibration, gripper, cutoff, and reset. No alternate host cable may reach the live servo bus in governed mode.
 
-**Save and check:** circuit and wiring photographs; firmware and adapter revisions; synthetic refusal matrix; one-servo and arm traces containing requested, mapped, enforced, and measured action; cutoff and no-queued-motion video; second-person reproduction notes. If the STM32-to-servo route does not work, do not claim STM32-controlled arm actions; test the [one-axis fallback](../lab-sequence.md).
+**Save and check:** circuit and wiring photographs; firmware and adapter revisions; synthetic refusal matrix; one-servo and arm traces containing requested, mapped, enforced, and measured action; cutoff and no-queued-motion video; second-person reproduction notes. If the STM32-to-servo route does not work, do not claim STM32-controlled arm actions; test the [one-axis fallback](../../labs/lab-sequence.md).
 
 ## Step 4 — Run a learned action policy locally on the Q
 

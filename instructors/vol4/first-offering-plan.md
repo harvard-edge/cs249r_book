@@ -4,7 +4,7 @@ draft: true
 
 # First-offering teaching plan
 
-**Status:** Instructor and teaching-assistant planning note. The [student page](README.md) gives the course outline; the [syllabus draft](syllabus.qmd) gives the provisional assessment. Confirm the timetable and station capacity after the [hardware feasibility pilot](../../labs/vol4/feasibility-plan.md).
+**Status:** Instructor and teaching-assistant planning note. The [student page](README.md) gives the course outline; the [syllabus draft](syllabus.qmd) gives the provisional assessment. Confirm the timetable and station capacity after the [hardware feasibility pilot](../../labs/vol4/staff/feasibility-plan.md).
 
 ## Recommendation
 
@@ -39,4 +39,4 @@ This keeps the physical AI standard intact. Every capstone still needs a learned
 |---|---|---|
 | Set the conceptual scope and capstone standard; chair the seminar; review the four milestone rubrics and unresolved project decisions; join the loop, authority, and final defenses. | Qualify and maintain the station before term; prepare one reusable bench card per week from the lab briefs; lead supervised labs and bench checks; organize bookings, spares, replay traces, and first-pass milestone feedback. | Operate within the approved envelope; maintain one shared notebook; collect and interpret physical evidence; present rotating traces; assemble four milestone packets and the final report. |
 
-Before enrollment, Andrea should work through the [lab feasibility plan](../../labs/vol4/feasibility-plan.md) as a student would, reproduce the local policy → MCU permission → physical action → new observation path, time a full student-style lab session, and report how many teams one station and one supervisor can support. The [one-station bench notes](../../labs/vol4/station-pilot/README.md) are available for technical investigation. If capacity is small, cap enrollment or add support. The course should not depend on Vijay debugging student USB, firmware, or arm calibration problems during the term.
+Before enrollment, Andrea should work through the [lab feasibility plan](../../labs/vol4/staff/feasibility-plan.md) as a student would, reproduce the local policy → MCU permission → physical action → new observation path, time a full student-style lab session, and report how many teams one station and one supervisor can support. The [one-station bench notes](../../labs/vol4/staff/station-pilot/README.md) are available for technical investigation. If capacity is small, cap enrollment or add support. The course should not depend on Vijay debugging student USB, firmware, or arm calibration problems during the term.

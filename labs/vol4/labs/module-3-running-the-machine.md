@@ -1,14 +1,14 @@
 # Part III / Module 3: Running the Machine
 
 **Schedule:** Weeks 7–9
-**Milestone Deliverable:** [Milestone 3](syllabus.md#sec-milestones) (End of Week 9) — *Autonomous Closed-Loop Manipulation Under Disturbance*
+**Milestone Deliverable:** [Milestone 3](../curriculum/syllabus.md#sec-milestones) (End of Week 9) — *Autonomous Closed-Loop Manipulation Under Disturbance*
 **Required Textbook Reading:**
-- [Chapter 8: Sensor Perception](../../books/vol4/08_perception/08_perception.qmd)
-- [Chapter 9: Spatial Memory](../../books/vol4/09_memory/09_memory.qmd)
-- [Chapter 10: Grounded Intent](../../books/vol4/10_intent/10_intent.qmd)
-- [Chapter 11: Trajectory Planning](../../books/vol4/11_planning/11_planning.qmd)
-- [Chapter 12: Safety Enforcement](../../books/vol4/12_enforcement/12_enforcement.qmd)
-- [Chapter 13: Silicon Placement](../../books/vol4/13_placement/13_placement.qmd)
+- [Chapter 8: Sensor Perception](../../../books/vol4/08_perception/08_perception.qmd)
+- [Chapter 9: Spatial Memory](../../../books/vol4/09_memory/09_memory.qmd)
+- [Chapter 10: Grounded Intent](../../../books/vol4/10_intent/10_intent.qmd)
+- [Chapter 11: Trajectory Planning](../../../books/vol4/11_planning/11_planning.qmd)
+- [Chapter 12: Safety Enforcement](../../../books/vol4/12_enforcement/12_enforcement.qmd)
+- [Chapter 13: Silicon Placement](../../../books/vol4/13_placement/13_placement.qmd)
 **Associated Studio Labs:** [Lab 5: Autonomous Closed-Loop Reach on UNO Q](lab-05-local-feedback-loop.md) & [Lab 6: Action Horizons, Language & Disturbances](lab-06-action-chunks.md)
 **Target Competency Card Items:** `[ ] C1`, `[ ] C2`, `[ ] C3`
 
@@ -56,4 +56,4 @@ By the end of Week 9, each team submits their **Milestone 3 Packet**:
 1. **Witnessed Autonomous Reach Demo:** Live demonstration of the SO-101 completing the reach/manipulation task running entirely on the UNO Q without host PC control.
 2. **Disturbance Recovery Trace:** Telemetry log showing the mid-reach target displacement, the fresh observation timestamp, the revised action chunk proposal, and successful physical acquisition.
 3. **Horizon & Latency Benchmark:** Comparative report analyzing chunk sizes ($K=1$ vs $16$) and latency budgets.
-4. **Competency Sign-Off:** Verified sign-off for **C1, C2, and C3** on the team's [Competency Card](student-competencies.md).
+4. **Competency Sign-Off:** Verified sign-off for **C1, C2, and C3** on the team's [Competency Card](../curriculum/student-competencies.md).
