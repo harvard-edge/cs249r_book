@@ -20,7 +20,7 @@ Why do we use machine learning instead of classical control? Does a learned neur
 
 ---
 
-### 3. Step-by-Step Bench Protocol
+### 3. Step-by-Step Protocol
 
 #### Step 1: Deterministic Baseline Implementation
 1. Write a non-learned scripted controller: detect the colored block using OpenCV color thresholding or contour centroid estimation from the camera frame.
@@ -76,13 +76,13 @@ Record the performance table comparing the deterministic baseline against the of
 
 ---
 
-### 6. Common Hardware Pitfalls & Debugging
+### 6. Common Pitfalls & Debugging
 * ⚠️ **Memory Exhaustion on 2GB Boards:** If PyTorch is imported directly on a 2GB RAM UNO Q, the OS may trigger the Out-Of-Memory (OOM) killer. Always run inference using lightweight **ONNX Runtime**, not full PyTorch, on the edge board.
 * ⚠️ **Normalization Mismatch:** Ensure camera images fed to the ONNX model are normalized with the exact same mean and standard deviation vectors used during training.
 
 ---
 
-### 7. Bench Sign-Off Criteria (The Exit Check)
+### 7. Sign-Off Criteria (The Exit Check)
 To receive credit for Lab 4 and complete Milestone 2:
 1. [ ] **Baseline Benchmark Data:** Present the 10-trial performance log of the deterministic baseline controller detailing its limitations.
 2. [ ] **Edge Execution Proof:** Execute live inference of the ONNX policy on the Qualcomm Linux processor on the UNO Q, demonstrating inference execution time $< 100\text{ ms}$.

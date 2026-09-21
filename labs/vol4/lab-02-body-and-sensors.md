@@ -20,7 +20,7 @@ How does an embodied system integrate disparate sensory modalities across asynch
 
 ---
 
-### 3. Step-by-Step Bench Protocol
+### 3. Step-by-Step Protocol
 
 #### Step 1: Camera Ingestion & Linux V4L2 Bring-Up
 1. Log into the Qualcomm Linux terminal on the UNO Q.
@@ -71,13 +71,13 @@ Capture 10 repeated commanded reach poses. For each pose, log:
 
 ---
 
-### 6. Common Hardware Pitfalls & Debugging
+### 6. Common Pitfalls & Debugging
 * ⚠️ **Rolling Shutter Warp:** Cheap USB webcams use rolling shutters. Rapid arm movements will cause visual distortion. Always calibrate and evaluate poses when the arm is settled or moving smoothly.
 * ⚠️ **Clock Drift Between Cores:** Qualcomm Linux uses a POSIX clock (`CLOCK_MONOTONIC`), while the STM32 uses a hardware SysTick timer. Perform a timestamp sync handshake at bridge initialization to correlate timestamps.
 
 ---
 
-### 7. Bench Sign-Off Criteria (The Exit Check)
+### 7. Sign-Off Criteria (The Exit Check)
 To receive credit for Lab 2 and complete Milestone 1:
 1. [ ] **Extrinsic Matrix Validation:** Present the calculated $T_{\text{cam}}^{\text{base}}$ matrix and demonstrate that reprojected pixel coordinates match physical fingertip touch within 3 mm.
 2. [ ] **Synchronized Stream Proof:** Display a live visualization showing synchronized RGB video alongside real-time 6-axis joint angle telemetry ($I_t, q_t$).

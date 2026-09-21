@@ -20,7 +20,7 @@ What happens when the host computer freezes, the camera is disconnected, or the 
 
 ---
 
-### 3. Step-by-Step Bench Protocol
+### 3. Step-by-Step Protocol
 
 #### Step 1: Communication Watchdog Implementation
 1. Program a hardware SysTick watchdog timer on the STM32 MCU ($T_{\text{watchdog}} = 150\text{ ms}$).
@@ -68,13 +68,13 @@ Capture the complete telemetry trace during an injected watchdog timeout:
 
 ---
 
-### 6. Common Hardware Pitfalls & Debugging
+### 6. Common Pitfalls & Debugging
 * ⚠️ **UART Buffer Overflow:** When a receiver stops processing, Linux UART buffers can fill up with hundreds of bytes. Upon resumption, reading stale buffer data will cause erratic behavior. Always explicitly flush the input buffer (`tcflush(fd, TCIFLUSH)`) on rearm.
 * ⚠️ **E-Stop Induced Brownout:** Cutting high inductive motor currents abruptly can cause inductive kickback spikes. Ensure flyback suppression diodes or snubbers are present across the motor power rail.
 
 ---
 
-### 7. Bench Sign-Off Criteria (The Exit Check)
+### 7. Sign-Off Criteria (The Exit Check)
 To receive credit for Lab 8 and complete Milestone 4:
 1. [ ] **Watchdog Timeout Proof:** Demonstrate that suspending the Linux process halts the arm within $150\text{ ms}$ with zero anomalous motion.
 2. [ ] **Zero Backlog Audit:** Prove that resuming the suspended process does not execute stale buffered movements.

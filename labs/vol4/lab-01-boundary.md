@@ -21,7 +21,7 @@ Where does computational authority end and physical delegation begin? If a host 
 
 ---
 
-### 3. Step-by-Step Bench Protocol
+### 3. Step-by-Step Protocol
 
 #### Step 1: Physical Authority & Power Audit
 1. Inspect the station wiring. Trace every cable from the power strip to the arm.
@@ -66,13 +66,13 @@ Log an elevation move in CSV format and verify that $a_{\text{meas}}$ converges 
 
 ---
 
-### 6. Common Hardware Pitfalls & Debugging
+### 6. Common Pitfalls & Debugging
 * ⚠️ **TTL Half-Duplex Contention:** The STS3215 bus uses a single bi-directional data line. If the STM32 driver does not disable its transmitter before reading, bus collisions will corrupt packets. Ensure the direction-control pin timing is exact.
 * ⚠️ **Voltage Sag under Multi-Servo Stall:** If multiple servos draw stall current simultaneously (>1.5A each), poorly regulated supplies will dip, causing the STM32 or servos to brown-out reset. Ensure logic power is completely decoupled from motor power.
 
 ---
 
-### 7. Bench Sign-Off Criteria (The Exit Check)
+### 7. Sign-Off Criteria (The Exit Check)
 To receive credit for Lab 1, demonstrate the following live to the instructor:
 1. [ ] **Authority Route Proof:** Show the physical wiring diagram and prove that disconnecting the STM32 stops all motor communication.
 2. [ ] **Measured Operating Envelope Table:** Present the measured travel limits ($\theta_{\min}, \theta_{\max}$) for all 6 joints and the calibrated resting rest pose.

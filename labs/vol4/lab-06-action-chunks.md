@@ -19,7 +19,7 @@ How far into the future can an embodied model predict open-loop actions before p
 
 ---
 
-### 3. Step-by-Step Bench Protocol
+### 3. Step-by-Step Protocol
 
 #### Step 1: Action Chunk Horizon Benchmarking
 1. Evaluate the policy across four different action chunk horizon lengths:
@@ -66,13 +66,13 @@ Record the multi-tap telemetry trace of a successful disturbance recovery:
 
 ---
 
-### 6. Common Hardware Pitfalls & Debugging
+### 6. Common Pitfalls & Debugging
 * ⚠️ **Chunk Horizon Lag:** If $K$ is set too large ($K > 32$), the robot will appear sluggish to react to moving objects because it is committed to executing the old pre-computed trajectory.
 * ⚠️ **Re-Planning Jitter:** Re-planning too frequently with high-variance policies can cause the arm to stutter. Use temporal ensemble averaging (exponential moving average over overlapping chunks) to smooth transitions.
 
 ---
 
-### 7. Bench Sign-Off Criteria (The Exit Check)
+### 7. Sign-Off Criteria (The Exit Check)
 To receive credit for Lab 6 and complete Milestone 3:
 1. [ ] **Horizon Analysis Report:** Present the comparative tracking error and smoothness curves across chunk sizes ($K=1, 8, 16, 32$).
 2. [ ] **Language Conditioning Proof:** Demonstrate that changing the language prompt on the identical scene produces divergent, verified physical arm paths.

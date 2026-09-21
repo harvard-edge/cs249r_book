@@ -20,7 +20,7 @@ Can a trained neural policy run completely untethered on edge silicon, closing t
 
 ---
 
-### 3. Step-by-Step Bench Protocol
+### 3. Step-by-Step Protocol
 
 #### Step 1: Autonomous Loop Integration
 1. Assemble the autonomous runtime script on Qualcomm Linux (`pai_edge_runtime.py`):
@@ -82,13 +82,13 @@ Record the full multi-tap trace of an untethered autonomous reach:
 
 ---
 
-### 6. Common Hardware Pitfalls & Debugging
+### 6. Common Pitfalls & Debugging
 * ⚠️ **Headless Camera Exposure Shifts:** When running headless without an interactive GUI, ensure auto-exposure does not hunt or oscillate between frames. Lock camera exposure and white balance using `v4l2-ctl -c exposure_auto=1`.
 * ⚠️ **Thread Starvation:** Ensure camera capture runs in a separate thread from policy inference so that V4L2 buffers do not drop frames while the neural model computes.
 
 ---
 
-### 7. Bench Sign-Off Criteria (The Exit Check)
+### 7. Sign-Off Criteria (The Exit Check)
 To receive credit for Lab 5:
 1. [ ] **Witnessed Untethered Reach:** Demonstrate a live autonomous reach on the SO-101 arm running entirely from the Arduino UNO Q without host PC intervention.
 2. [ ] **Physical Task Completion:** The arm must successfully make contact with the block placed at a staff-selected arbitrary position within the envelope.

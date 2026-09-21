@@ -82,7 +82,7 @@ Following the 20 physical trials, each team member is examined individually by t
 
 ---
 
-### 6. Bench Sign-Off & Graduation Criteria
+### 6. Sign-Off & Graduation Criteria
 To achieve course graduation and Milestone 5 completion:
 1. [ ] **20-Trial Execution:** Complete 20 witnessed physical trials with zero unhandled collisions or hardware crashes.
 2. [ ] **Physical Release Dossier:** Submit an approved, auditable Claim-Argument-Evidence release dossier.

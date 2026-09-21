@@ -20,7 +20,7 @@ How do we collect demonstration data from human teleoperation that accurately ca
 
 ---
 
-### 3. Step-by-Step Bench Protocol
+### 3. Step-by-Step Protocol
 
 #### Step 1: LeRobot Teleoperation Configuration
 1. Initialize the LeRobot environment on Qualcomm Linux or the host workstation.
@@ -87,13 +87,13 @@ Verify that the plots display:
 
 ---
 
-### 6. Common Hardware Pitfalls & Debugging
+### 6. Common Pitfalls & Debugging
 * ⚠️ **Deadzone and Drift:** Cheap gamepads have stick drift. Calibrate an intentional 5% deadzone in software so the arm does not creep when the controller is idle.
 * ⚠️ **Teleoperator Inconsistency:** Ensure the human operator moves at consistent, moderate speeds. Demonstrations with wild speed variations confuse imitation learning policies.
 
 ---
 
-### 7. Bench Sign-Off Criteria (The Exit Check)
+### 7. Sign-Off Criteria (The Exit Check)
 To receive credit for Lab 3:
 1. [ ] **Clean Dataset Artifact:** Present a valid LeRobot Dataset v3 containing 30 demonstration episodes with zero corrupted frames.
 2. [ ] **4-Action-Tap Logging Proof:** Open one Parquet file and prove that `action`, `action_enforced`, and `action_measured` are logged as distinct, synchronized columns.

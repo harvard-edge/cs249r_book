@@ -205,7 +205,7 @@ What fundamental systems relationship are we measuring or proving on hardware to
 ### 2. Hardware Setup
 Required wiring, power supply verification, camera framing, and initial arm rest pose.
 
-### 3. Step-by-Step Bench Protocol
+### 3. Step-by-Step Protocol
 Executable terminal commands, LeRobot CLI invocations, and calibration scripts.
 
 ### 4. The Disturbance & Failure Test
@@ -214,9 +214,9 @@ The specific physical perturbation or injected software fault required for this 
 ### 5. Multi-Tap Telemetry Trace
 Logging requirements for a_req, a_map, a_enf, and a_meas.
 
-### 6. Common Hardware Pitfalls & Debugging
+### 6. Common Pitfalls & Debugging
 Known timing traps, baud rate mismatches, lighting pitfalls, and motor stall warnings.
 
-### 7. Bench Sign-Off Criteria (The Exit Check)
+### 7. Sign-Off Criteria (The Exit Check)
 The exact observable physical proof required for the instructor to sign the Competency Card.
 ```

@@ -20,7 +20,7 @@ How do we mathematically and physically ensure that an unverified, probabilistic
 
 ---
 
-### 3. Step-by-Step Bench Protocol
+### 3. Step-by-Step Protocol
 
 #### Step 1: Programming the STM32 Permission Barrier
 1. Open the STM32 firmware project in Arduino App Lab / STM32Cube.
@@ -86,13 +86,13 @@ Capture the multi-tap telemetry stream during a velocity clamping event:
 
 ---
 
-### 6. Common Hardware Pitfalls & Debugging
+### 6. Common Pitfalls & Debugging
 * ⚠️ **Forward Kinematics Latency on MCU:** Computing full trigonometric forward kinematics on an MCU can be slow if floating-point hardware is not utilized. Ensure the Cortex-M33 hardware FPU is enabled in compiler flags.
 * ⚠️ **Deadband Chatter at Limits:** When clamping at boundaries, ensure a hysteresis deadband is implemented so the arm does not oscillate on the edge of the barrier.
 
 ---
 
-### 7. Bench Sign-Off Criteria (The Exit Check)
+### 7. Sign-Off Criteria (The Exit Check)
 To receive credit for Lab 7:
 1. [ ] **MCU Firmware Verification:** Present the STM32 firmware source code showing the velocity clamping and table collision geofence implementations.
 2. [ ] **Live Veto Demonstration:** The instructor injects an out-of-bounds command and a table-crash proposal. The MCU must reject both proposals in real time.
