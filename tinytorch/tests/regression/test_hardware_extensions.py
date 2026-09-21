@@ -8,6 +8,7 @@ Verifies:
 5. Latency benchmarking and performance evaluation
 """
 
+import platform
 import shutil
 import time
 import pytest
@@ -45,7 +46,10 @@ class TestHardwareExtensions:
             err_msg="SIMD GEMM output diverges from NumPy reference",
         )
 
-    @pytest.mark.skipif(shutil.which("c++") is None, reason="no C++ compiler on PATH")
+    @pytest.mark.skipif(
+        shutil.which("c++") is None or platform.system() == "Windows",
+        reason="no Unix C++ compiler on PATH or Windows platform",
+    )
     def test_simd_library_builds(self):
         """With a compiler present, the C++ path must really load, not fall back silently."""
         assert has_simd_support(), simd_build_info().get("error")
