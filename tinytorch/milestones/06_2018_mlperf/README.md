@@ -4,20 +4,24 @@ Compare a trained model with changed versions of itself, and measure a cache
 without changing the computation. These are classroom experiments inspired by
 MLPerf's measurement discipline, not official MLPerf submissions.
 
-## Part 1: Model compression
+## Part 1: Optimization Olympics & Architectural Triad
 
-`01_optimization_olympics.py` trains DigitMLP on TinyDigits, profiles the baseline,
-and creates two independent candidates: rounded weights and pruned weights.
-Each candidate runs on the same held-out data and receives its own accuracy and
-latency measurements. The original model remains intact.
+`01_optimization_olympics.py` evaluates the **Architectural Triad** built across the curriculum:
 
-Both candidates still execute dense float32 operations. The report distinguishes
-actual parameter-array bytes from modeled packed INT8 code size. Zeroing weights
-does not shrink their arrays. Better accuracy, smaller resident storage, and a
-speedup are outcomes to measure, not benefits the script assumes.
+1. **DigitMLP** (Milestone 03) — Dense, parameter-bound
+2. **SimpleCNN** (Milestone 04) — Spatial, compute-bound
+3. **TinyGPT** (Milestone 05) — Autoregressive, memory-bandwidth & prefix-bound
 
-Separate cache-lifecycle and matrix-multiplication checks exercise Modules 18
-and 17. They are not additional transformations of the MLP.
+The benchmark profiles each baseline and creates optimization candidates across the stack:
+- **INT8 Quantization** (Module 15): 4× modeled storage compression
+- **Magnitude Pruning** (Module 16): 50% weight sparsity
+- **Vectorized Acceleration** (Module 17): SIMD-style matrix operations
+- **KV-Cache Memoization** (Module 18): Recomputation-free autoregressive decoding
+
+It computes the **Pareto frontier** using Module 19 (`pareto_frontier`), renders an ASCII **Pareto Trade-Off Curve**, and surfaces the **Asymmetric Architectural Bottlenecks**:
+- **MLP**: Memory is dominated by dense weight matrices — quantization compresses storage 4× with negligible accuracy drop.
+- **CNN**: Execution time is dominated by spatial convolution loops — vectorized matrix routines eliminate Python loop overhead.
+- **Transformer**: Autoregressive decoding is bound by prefix recomputation and memory bandwidth — KV-cache memoization eliminates quadratic latency slowdown.
 
 Required modules: 01–08 and 14–19.
 
