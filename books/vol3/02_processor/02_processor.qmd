@@ -71,11 +71,13 @@ To construct dependable systems around foundation models, computer systems engin
 : **The Machine Learning Systems Rosetta Stone**: Translating statistical abstractions into operating systems and architectural primitives. {#tbl-vol3-ml-systems-rosetta}
 
 ::: {#dfn-zero-ambient-authority .callout-definition title="Zero ambient authority"}
-**Zero Ambient Authority** ($A = 0$) is the foundational systems security invariant wherein an unprivileged execution unit—specifically a foundation model core—possesses zero native rights to inspect, mutate, or allocate external system resources:
 
-$$\text{Privileges}(\pi_\theta) = \emptyset$$
+***Zero ambient authority***\index{Zero ambient authority!definition}\index{Privilege separation!zero ambient authority definition} ($A = 0$) is the foundational systems security invariant wherein an unprivileged execution unit—specifically a foundation model core—possesses zero native rights to inspect, mutate, or allocate external system resources: $\text{Privileges}(\pi_\theta) = \emptyset$.
 
-Candidate token emissions (such as shell commands or RPC invocations) reside strictly in host memory escrow. Every privileged operation requires explicit supervisor interception, capability verification, schema validation, and sandboxed dispatch before physical host state can be altered.
+1.  **Significance**: Guarantees that raw token predictions emitted by accelerator matrix multiplication units remain in host memory escrow, preventing unverified model outputs from directly modifying persistent filesystems, invoking kernel syscalls, or executing network I/O.
+2.  **Distinction**: Unlike classical operating system processes that inherit the ambient permissions of their user context (UID/GID), a stochastic model core has zero ambient capability; every privileged operation requires explicit supervisor interception, schema validation, capability checking, and sandboxed dispatch.
+3.  **Common pitfall**: Granting ambient credentials or raw system access to agent processes (such as mounting host root directories into containers or passing unrestricted API keys into system prompts), allowing prompt injection or hallucinated actions to compromise host infrastructure.
+
 :::
 
 The defining systems reality of foundation model execution is **Zero Ambient Authority** ($A = 0$). When a model autoregressively generates the text string `rm -rf /` or emits a structured JSON object requesting the deletion of a database table, exactly zero bytes on the host operating system are altered. The generated string is not an executing process; it is merely an array of integer token identifiers resident in high-bandwidth memory (HBM) on an accelerator board. The token array is transferred across an interconnect bus, decoded into characters by an inference daemon, and deposited into a user-space memory buffer managed by the host agent supervisor. The candidate output resides entirely in memory escrow. It has no ambient authority to modify host memory, invoke operating system primitives via `sys_call_table`, allocate network sockets, or manipulate peripheral devices.
@@ -91,6 +93,16 @@ As mapped in @fig-vol3-three-tier-architecture, these tiers are separated by phy
 The architectural distinction between classical processors and neural inference engines dictates an entirely different approach to fault tolerance. Classical hardware systems are predominantly **fail-stop**: when a physical component suffers an irrecoverable fault, or when a program attempts an operation that violates hardware invariants, execution halts immediately and unambiguously. The failure is observable, localized, and verifiable. Foundation models, by contrast, are fundamentally **fail-plausible**. The training objective of an autoregressive model—minimizing cross-entropy loss over vast corpora of natural language and code—forces the network to model human surface fluency.
 
 When a model encounters a problem beyond its capability, an ambiguous context, or an internally contradictory prompt, it does not halt execution, raise a trap, or return an error code. Instead, its internal probability distribution shifts toward tokens that maximize surface plausibility. The engine smoothly emits syntactically pristine, beautifully formatted, yet entirely fabricated or dangerous output. A code generation model will emit an implementation that compiles cleanly, references non-existent third-party APIs with convincing package names, and produces catastrophic runtime corruptions. The model operates under an irreconcilable **epistemic gap**: statistical likelihood within the learned parameter distribution $\mathcal{P}(Y \mid X; \mathbf{\Theta})$ does not correspond to operational truth in the external physical world.
+
+::: {#dfn-fail-plausible-fault .callout-definition title="Fail-plausible fault"}
+
+***Fail-plausible fault***\index{Fail-plausible fault!definition}\index{Fault model!fail-plausible definition} is an execution fault regime wherein an unprivileged neural execution core emits an action proposal $a_{\text{prop}} \sim \pi_\theta(\cdot \mid c_t)$ that satisfies syntactic grammar $\mathcal{L}(G)$ and executes within the environment returning exit code 0, yet transitions environment state outside the semantic specification envelope ($s_t \in \mathcal{I} \implies s_{t+1} \notin \mathcal{I}$).
+
+1.  **Significance**: Proves why conventional software monitoring and distributed watchdogs (`if (exit_code != 0) retry()`) fail in agentic systems, as surface-level fluency and successful process exits routinely mask catastrophic semantic regressions.
+2.  **Distinction**: Unlike Fail-Stop faults (where a component crashes overtly and halts execution deterministically) or Byzantine faults (where an adversarial node intentionally deviates across network channels), fail-plausible faults arise from statistical likelihood optimization over frozen training distributions ungrounded in physical environment state.
+3.  **Common pitfall**: Relying on process return codes or model self-reported completion ("I have verified the bug is resolved") as evidence of success; dependable operation requires supervisory fencing and external verification oracles that validate physical state deltas.
+
+:::
 
 This epistemic gap exposes the critical systems error known as the **Delivery Fallacy**. In naive software implementations, an agent system dispatches an HTTP request to an inference service, receives an `HTTP 200 OK` response status, successfully parses the response body as JSON, and directly commits the action. This conflates transport delivery with task completion. An `HTTP 200 OK` indicates only that the transport layer successfully transmitted packets across the network interface and that the inference daemon completed its generation loop without crashing. It conveys zero information regarding whether the model resolved the task, experienced context truncation, suffered an internal safety refusal, or produced a hallucinated capability request.
 
@@ -804,11 +816,13 @@ where $\delta^*$ denotes the extended transition function evaluated over the com
 : **Automaton Grammar States and Token Masking**: Transition states, structural terminals, and permissible versus forbidden candidate tokens during constrained JSON decoding. {#tbl-vol3-automaton-grammar-states}
 
 ::: {#dfn-grammar-constrained-decoding .callout-definition title="Grammar-constrained decoding"}
-**Grammar-Constrained Decoding** is a synchronous logit-filtering protocol wherein an unprivileged model's next-token distribution is mathematically restricted to a formal grammar $G$ via state-dependent logit masking:
 
-$$M_i(q_t) = \begin{cases} 0 & \text{if } i \in \mathcal{V}_{\text{valid}}(q_t) \\ -\infty & \text{if } i \notin \mathcal{V}_{\text{valid}}(q_t) \end{cases}$$
+***Grammar-constrained decoding***\index{Grammar-constrained decoding!definition}\index{Logit masking!grammar constraint definition} is a synchronous logit-filtering protocol wherein an unprivileged model's next-token distribution is mathematically restricted to a formal grammar $G$ via state-dependent logit masking $M_i(q_t) \in \{0, -\infty\}$.
 
-where $q_t \in Q$ represents the active state of an execution automaton $\mathcal{M}_G$, and $\mathcal{V}_{\text{valid}}(q_t)$ denotes the subset of vocabulary tokens whose byte encodings produce valid transitions: $\delta^*(q_t, \mathbf{b}^{(i)}) \neq \emptyset$. Normalized probabilities over masked logits $\mathbf{z}_t' = \mathbf{z}_t + \mathbf{M}(q_t)$ guarantee that sampled tokens satisfy the target formal grammar with probability $1.0$ at the logit surface.
+1.  **Significance**: Guarantees that sampled tokens conform to formal structural grammars (such as JSON Schema, SQL ASTs, or Python grammars) with probability $1.0$ directly at the logit surface, eliminating syntactic parse failures.
+2.  **Distinction**: Unlike post-hoc validation (which allows malformed tokens to be sampled and subsequently rejects or retries the entire generation), grammar-constrained decoding injects negative infinity biases to invalid vocabulary indices in GPU SRAM before softmax reduction.
+3.  **Common pitfall**: Executing automaton state transitions on the host CPU with synchronous PCIe interrupts per decode step, introducing multi-millisecond bus transfer stalls that degrade token generation throughput by an order of magnitude.
+
 :::
 
 At autoregressive decode step $t$, the transformer model evaluates its unprivileged forward pass $\mathbf{f}_{\mathbf{\Theta}}$, computing the unnormalized logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$ at the unembedding layer. Prior to applying the softmax operator or sampling a token, the serving runtime injects a logit mask vector $\mathbf{M}(q_t) \in \{0, -\infty\}^{|\mathcal{V}|}$ determined by the current parser state $q_t$:

@@ -633,16 +633,13 @@ Brian Kernighan (1979) observed that *"debugging is twice as hard as writing the
 Historical trajectory reconstruction provides the foundation for *non-destructive time-travel debugging*. Because the event log records every interaction at the supervisor-model and supervisor-sandbox boundaries, the developer can treat trajectory time as an addressable, scrubbable dimension. A developer can mount an archival trajectory, select any turn $t \in [0, T_{\max}]$, and reconstruct the exact in-memory representation of $\text{ACB}_t$.
 
 ::: {#dfn-time-travel-replay .callout-definition title="Checkpoint-delta time-travel replay"}
-Given a historical trajectory spanning $T$ turns with periodic base snapshots $\mathcal{S} = \{\mathbf{S}_0, \mathbf{S}_k, \mathbf{S}_{2k}, \dots\}$ where $k$ is the checkpoint stride, and an ordered write-ahead log of deterministic events $\mathcal{E} = \langle e_1, e_2, \dots, e_T \rangle$:
 
-Any arbitrary historical state $\mathbf{S}_t$ ($t \in [0, T]$) is reconstructible without forward side effects via the bounded left-fold operator:
-$$\mathbf{S}_t = \text{Fold}\left(\mathbf{S}_{\lfloor t/k \rfloor \cdot k}, \langle e_{(\lfloor t/k \rfloor \cdot k) + 1}, \dots, e_t \rangle\right)$$
-where the replay engine:
+***Checkpoint-delta time-travel replay***\index{Time-travel replay!definition}\index{Interrupts!time-travel replay definition} is a deterministic state reconstruction operator $\mathbf{S}_t = \text{Fold}(\mathbf{S}_{\text{anchor}}, \Delta\mathcal{E})$ that recovers arbitrary historical agent control blocks by folding sequential event deltas over the nearest preceding snapshot in sandboxed copy-on-write memory without forward side effects.
 
-1. Selects the nearest preceding snapshot $\mathbf{S}_{\text{anchor}} = \mathbf{S}_{\lfloor t/k \rfloor \cdot k}$.
-2. Maps $\mathbf{S}_{\text{anchor}}$ into a sandboxed, copy-on-write memory buffer.
-3. Sequentially applies exactly $m = t - (\lfloor t/k \rfloor \cdot k) < k$ transition deltas without issuing external system calls.
-4. Bounds worst-case random access retrieval latency to $\mathcal{O}(k)$ event evaluations.
+1.  **Significance**: Enables non-destructive post-mortem debugging, context window inspection, and speculative what-if branching without re-executing expensive or irreversible environment mutations.
+2.  **Distinction**: Unlike naive full-history event replay (which incurs $O(t)$ deserialization and re-computation latency from $t=0$) or continuous full snapshotting (which exhausts storage bandwidth), checkpoint-delta replay bounds random-access reconstruction latency to $O(k)$ event applications where $k$ is the snapshot stride.
+3.  **Common pitfall**: Allowing replayed events to issue live external system calls or network RPCs during historical reconstruction, which corrupts live external databases and breaks replay isolation.
+
 :::
 
 Time-travel navigation leverages the checkpoint-delta index. To inspect the agent state at turn $t = 35$, the debugger locates the nearest preceding snapshot $\mathbf{S}_{20}$, deserializes the control block, and folds the 15 intervening event pairs from $\mathcal{E}_{20 \to 35}$. The developer can then execute non-destructive diagnostic queries against the reconstructed state:
@@ -705,14 +702,14 @@ Under IEEE 754 arithmetic, addition is not associative: $(a \oplus b) \oplus c \
 
 The second and more pernicious source of entropy arises from floating-point non-associativity in parallel GPU reduction kernels. High-performance matrix multiplication (GEMM) and fused multi-head attention kernels execute parallel reductions across thousands of streaming multiprocessor (SM) threads. As formalized by David Goldberg (1991), floating-point addition under IEEE 754 standards does not satisfy mathematical associativity. In parallel reduction trees where thread warps schedule dynamically based on DRAM bank contention, cache hits, and clock throttling, the exact summation order of partial products varies from run to run. Consequently, even when evaluating an identical prompt prefix at greedy decoding ($T=0$), the raw logit values for vocabulary tokens can drift by small floating-point epsilons ($\sim 10^{-6}$ to $10^{-4}$). If the two highest-ranking candidate tokens have logit margins smaller than this micro-architectural drift, the greedy `argmax` operator flips. A single flipped token alters the key-value context for all subsequent decode steps, leading to complete trajectory divergence within a handful of generated words.
 
-::: {#dfn-entropy-strata .callout-definition title="The strata of replay non-determinism"}
-During offline trajectory replay, divergences between recording time $t_{\text{rec}}$ and replay time $t_{\text{rep}}$ originate across three distinct architectural strata:
+::: {#dfn-entropy-strata .callout-definition title="Strata of replay non-determinism"}
 
-1. **Host OS Stratum (Kernel & Process State)**: Wall-clock timers (`gettimeofday`), process identifiers (`getpid`), filesystem inode traversal order, and thread scheduling interleavings.
-2. **Inference Stratum (Floating-Point Hardware & Scheduling)**: Non-associative parallel summation in GPU GEMM kernels, warp arrival race conditions, compiler target differences, and asynchronous `atomicAdd` logit drift triggering greedy argmax flips.
-3. **Environment Stratum (External Services & Tool APIs)**: Dynamic network responses, remote server clocks, mutable database state, and nondeterministic external web payloads.
+***Strata of replay non-determinism***\index{Replay non-determinism!definition}\index{Entropy strata!definition} are the hierarchical architectural layers—encompassing host operating system state, accelerator floating-point scheduling, and external environment APIs—where latent entropy enters execution to cause trajectory divergence during replay.
 
-A runtime achieves *strict replay fidelity* if and only if all three strata are mediated by deterministic virtual escrow buffers, as categorized in @tbl-vol3-nondeterminism-mitigation.
+1.  **Significance**: Identifies and isolates every non-deterministic boundary condition required to achieve bit-exact reproduction of autonomous agent execution paths across diverse hardware targets.
+2.  **Distinction**: Unlike classical software debugging (which assumes that identical source code and pinned PRNG seeds yield bit-exact CPU executions), neural agent replay must account for non-associative parallel GPU reduction order and dynamic prompt timestamp injections.
+3.  **Common pitfall**: Assuming that greedy decoding ($T=0$) guarantees deterministic replay across heterogeneous GPU clusters; warp scheduling races and sub-epsilon floating-point drift can flip argmax logits and trigger exponential trajectory divergence.
+
 :::
 
 The third stratum involves dynamic host operating system state leaked into prompts and control structures. Agent supervisors frequently inject metadata into system prompts, tool schemas, or scratchpads: current wall-clock timestamps via `time.time()`, host process identifiers via `getpid()`, local file paths, or random correlation identifiers via `uuid.uuid4()`. When a supervisor passes dynamic timestamps into an LLM context, the model conditions its reasoning on values that can never naturally repeat during subsequent execution. Furthermore, file system iterators that traverse directory trees without explicit collation return directory entries in raw inode order, which varies across file systems, container instances, and operating system kernels.

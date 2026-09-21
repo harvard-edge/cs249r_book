@@ -147,17 +147,14 @@ $$S'_0 \equiv_{\text{semantic}} S_0 \iff \forall \phi \in \Phi_{\text{invariants
 
 where $\Phi_{\text{invariants}}$ is the set of system invariants governing resource allocations, file integrity, access control privileges, and process boundaries.
 
-::: {#dfn-semantic-compensation .callout-definition title="Semantic compensation duality"}
-Let $\mathcal{W}$ denote external world state, $T_i$ denote an external tool action that transitions state from $\mathbf{S}_{i-1}$ to $\mathbf{S}_i$, and $C_i$ denote its corresponding compensating action:
+::: {#dfn-semantic-compensation .callout-definition title="Semantic compensation"}
 
-1. **Physical Rollback (Impossible under External Side Effects)**:
-   Requires physical time-reversal to undo external observations and network mutations:
-   $$\mathbf{S}_{i-1} \xrightarrow{\quad T_i \quad} \mathbf{S}_i \xrightarrow{\quad \text{Rollback} \quad} \mathbf{S}_{i-1}$$
-   Violated when $T_i$ crosses process or network boundaries (e.g. cloud provisioning, external emails, database commits).
-2. **Semantic Compensation (Forward Mutating Equivalence)**:
-   Applies an active forward compensating operation $C_i$ that transitions system state to $\mathbf{S}_{i-1}'$:
-   $$\mathbf{S}_{i-1} \xrightarrow{\quad T_i \quad} \mathbf{S}_i \xrightarrow{\quad C_i \quad} \mathbf{S}_{i-1}'$$
-   where $\mathbf{S}_{i-1}' \not\equiv \mathbf{S}_{i-1}$ physically (e.g. invoice cancellation receipt exists), but $\mathbf{S}_{i-1}' \equiv_{\text{semantic}} \mathbf{S}_{i-1}$ under system invariants $\Phi_{\text{invariants}}$.
+***Semantic compensation***\index{Semantic compensation!definition}\index{Scheduling!semantic compensation definition} is a forward-mutating recovery operation $C_i$ that transitions external environment state to a new state $\mathbf{S}_{i-1}'$ that is semantically equivalent to $\mathbf{S}_{i-1}$ with respect to core system invariants, rather than attempting physical rollback.
+
+1.  **Significance**: Enables transactional fault recovery across non-invertible, distributed tool interactions (such as cloud provisioning, message publishing, or billing APIs) where classical physical rollbacks are physically impossible.
+2.  **Distinction**: Unlike database rollback (which restores exact bit-level disk pages from an undo log), semantic compensation executes an active forward compensating transaction (such as deleting a provisioned pod or issuing an account credit) that restores invariant equilibrium despite leaving historical audit artifacts.
+3.  **Common pitfall**: Authoring non-idempotent compensating operations that fail or produce orphaned duplicate side effects when retried across transient network disconnects.
+
 :::
 
 To illustrate, consider three canonical archetypes of compensating actions encountered in production agent runtimes:
@@ -972,12 +969,14 @@ To operationalize this, the supervisor maintains a directed provenance graph tra
 
 $$\tau(a) \in \{\text{UNTAINTED}, \text{SUSPECT}, \text{TAINTED}, \text{CLEARED}\}$$
 
-::: {#dfn-taint-propagation .callout-definition title="Dynamic taint propagation and mediation"}
-Let agent trajectory $\mathcal{T}_k$ produce a set of shared artifacts $\mathcal{A}_k = \{a_1, a_2, \dots\}$. Upon quarantine of $\mathcal{T}_k$ at turn $t_{\text{fault}}$, the runtime supervisor assigns taint labels:
-$$\tau(a) = \begin{cases} \text{TAINTED}, & \text{if } a \text{ was emitted by } \mathcal{T}_k \text{ during tainted epoch} \\ \text{UNTAINTED}, & \text{otherwise} \end{cases}$$
-For any peer agent $\mathcal{T}_{\text{peer}}$ attempting access via read operation $\text{Read}(a)$:
-$$\text{MediationGateway}(\mathcal{T}_{\text{peer}}, a) = \begin{cases} a, & \text{if } \tau(a) \in \{\text{UNTAINTED}, \text{CLEARED}\} \\ \text{Throw } \texttt{ArtifactQuarantinedException}, & \text{if } \tau(a) = \text{TAINTED} \end{cases}$$
-guaranteeing that Byzantine or corrupted outputs cannot cascade across multi-agent boundaries.
+::: {#dfn-taint-propagation .callout-definition title="Dynamic taint propagation"}
+
+***Dynamic taint propagation***\index{Dynamic taint propagation!definition}\index{Taint tracking!definition} is an authoritative lineage-tracking protocol wherein the host supervisor flags all intermediate artifacts and state modifications emitted by a failing or compromised agent trajectory as tainted, intercepting downstream peer accesses to quarantine cascading failures.
+
+1.  **Significance**: Prevents Byzantine or hallucinated outputs generated during compromised trajectory epochs from silently poisoning downstream peer agents, shared filesystems, or persistent data stores.
+2.  **Distinction**: Unlike static dataflow analysis (which inspects code ASTs ahead of time), dynamic taint propagation maintains a live directed provenance graph during runtime execution, binding cryptographic artifact hashes to trajectory lifecycle states.
+3.  **Common pitfall**: Clearing taint tags based purely on model self-verification ("I have checked the output and it is clean") rather than independent, out-of-band verification harnesses or human operator clearance.
+
 :::
 
 When $\mathcal{T}_k$ is quarantined, the supervisor marks all $a \in \mathcal{A}_k$ produced within the taint epoch as $\text{TAINTED}$ in the central runtime state store. Downstream agents operating within the multi-agent system interact with shared resources through an unprivileged mediation gateway. When peer agent $\mathcal{T}_{\text{peer}}$ attempts to read artifact $a$, the mediation gateway intercepts the read request, verifies the artifact's metadata against the taint registry, and blocks access, returning an `ArtifactQuarantinedException`.

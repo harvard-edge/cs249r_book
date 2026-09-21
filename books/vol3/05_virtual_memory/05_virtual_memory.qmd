@@ -284,6 +284,16 @@ Every dynamic memory allocator facing unpredictable request lifetimes confronts 
 
 **Paged KV allocation** solves this physical dilemma by importing the foundational operating system abstraction of virtual paging directly into the accelerator memory hierarchy [@kwon2023vllm]. By decoupling the logical token sequence from its physical storage layout, the serving engine partitions the KV cache into uniform, fixed-size physical memory blocks scattered across non-contiguous HBM frames. A per-sequence block table translates logical sequence positions to physical block addresses dynamically on every generation step, eliminating external fragmentation entirely while bounding internal waste to the unused tail slots of the final block. Crucially, this level of indirection transforms branching trajectories—such as tree-of-thought exploration, parallel candidate generation, and tool-assisted deliberation—from expensive deep tensor copies into constant-time, reference-counted pointer manipulation through Copy-on-Write.
 
+::: {#dfn-paged-kv-cache .callout-definition title="Paged attention KV-cache block table"}
+
+***Paged attention KV-cache block table***\index{Paged attention!block table definition}\index{KV cache!block table definition} is a hardware-abstracted page mapping structure $T: l \mapsto p$ that translates logical token sequence indices $l = \lfloor t/B \rfloor$ into non-contiguous physical tensor frames $p \in [0, N_{\text{pool}}-1]$ resident in accelerator High-Bandwidth Memory (HBM).
+
+1.  **Significance**: Decouples the dynamic, non-deterministic token expansion of agent trajectories from rigid physical memory allocations, eliminating external fragmentation and enabling zero-copy tree branching via Copy-on-Write (CoW).
+2.  **Distinction**: Unlike contiguous tensor allocation (which pre-reserves worst-case context lengths $S_{\max}$ and strands up to 80 percent of accelerator memory in unwritten reservations), a paged block table allocates fixed-size physical blocks ($B$ tokens) on demand and bounds memory waste strictly to final-block internal fragmentation $\mathbb{E}[\Delta_{\text{tail}}] = (B-1)/2$.
+3.  **Common pitfall**: Selecting a block size $B$ that is too small ($B < 8$), which inflates block table indirection metadata and causes warp divergence during GEMV memory coalescing, or too large ($B > 64$), which amplifies internal fragmentation and degrades sharing granularity across branching rollouts.
+
+:::
+
 ::: {.column-margin}
 **Virtual Memory Analogy:**
 In classical operating systems, page tables map contiguous virtual addresses to non-contiguous physical DRAM frames. In PagedAttention, block tables map continuous token sequence positions $t \in [0, S-1]$ to non-contiguous physical tensor buffers allocated from an on-device HBM block pool.
