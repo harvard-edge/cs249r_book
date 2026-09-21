@@ -3135,6 +3135,26 @@ def fmt_torque(quantity, *, unit=None, precision=None, commas=False):
     )
 
 
+def fmt_torque_rate(quantity, *, unit=None, precision=None, commas=False):
+    """Format torque-rate quantities for prose (N·m/s), e.g. a steering-torque ramp."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_torque_rate() requires a Pint Quantity.")
+    rate_dim = (1 * (ureg.newton * ureg.meter / ureg.second)).dimensionality
+    if (1 * quantity).dimensionality != rate_dim:
+        raise ValueError(f"fmt_torque_rate unit must have torque-rate dimensionality (N·m/s), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.newton * ureg.meter / ureg.second)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        unit_label="N·m/s",
+        trim_trailing_zeros=auto_precision,
+    )
+
 def fmt_velocity(quantity, *, unit=None, precision=None, commas=False):
     """Format velocity/speed quantities for prose (m/s, km/h, mph)."""
     if not isinstance(quantity, ureg.Quantity):
