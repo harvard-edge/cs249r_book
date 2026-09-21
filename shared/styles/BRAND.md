@@ -30,7 +30,7 @@ When rebranding, grep for the hex code and update each:
 
 ### Hand-written CSS (not SCSS)
 
-- [`books/shared/assets/styles/epub.css`](../../books/shared/assets/styles/epub.css), `epub-vol1.css`, `epub-vol2.css`
+- [`books/vol1/styles/epub.css`](../../books/vol1/styles/epub.css), [`books/vol2/styles/epub.css`](../../books/vol2/styles/epub.css), [`books/vol3/styles/epub.css`](../../books/vol3/styles/epub.css), [`books/vol4/styles/epub.css`](../../books/vol4/styles/epub.css)
 - [`site/landing.css`](../../site/landing.css), [`landing-v3.css`](../../site/landing-v3.css)
 - [`site/about/about.css`](../../site/about/about.css), [`site/community/community.css`](../../site/community/community.css), [`site/newsletter/newsletter.css`](../../site/newsletter/newsletter.css)
 - TinyTorch site: SCSS at [`tinytorch/guide/assets/styles/style.scss`](../../tinytorch/guide/assets/styles/style.scss) and [`dark-mode.scss`](../../tinytorch/guide/assets/styles/dark-mode.scss)
@@ -50,7 +50,7 @@ independent subsite builds; future cleanup should refactor each to
 - [`kits/assets/styles/style.scss`](../../kits/assets/styles/style.scss)
 - [`slides/assets/styles/style.scss`](../../slides/assets/styles/style.scss)
 - [`mlsysim/docs/styles/style.scss`](../../mlsysim/docs/styles/style.scss)
-- [`books/shared/assets/styles/style-vol1.scss`](../../books/shared/assets/styles/style-vol1.scss) · [`books/shared/assets/styles/style-vol2.scss`](../../books/shared/assets/styles/style-vol2.scss)
+- [`books/vol1/styles/style.scss`](../../books/vol1/styles/style.scss) · [`books/vol2/styles/style.scss`](../../books/vol2/styles/style.scss) · [`books/vol3/styles/style.scss`](../../books/vol3/styles/style.scss) · [`books/vol4/styles/style.scss`](../../books/vol4/styles/style.scss)
 
 ### Other surfaces
 

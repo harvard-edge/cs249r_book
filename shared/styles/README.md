@@ -70,7 +70,7 @@ Concretely:
 3. `partials/_tokens.scss` and the rest of the partials assume those
    semantic variables already exist.
 4. A site entrypoint (e.g. `style-site.scss` or
-   [`books/shared/assets/styles/style-vol1.scss`](../../books/shared/assets/styles/style-vol1.scss))
+   [`books/vol1/styles/style.scss`](../../books/vol1/styles/style.scss))
    imports the theme first, then `_tokens`, then any partials it needs.
 5. Dark-mode entrypoints (`dark-mode-*.scss`) re-import the theme so
    `$accent-dark` is in scope, then layer dark-only rules.
@@ -84,8 +84,10 @@ with this layering.
 | Subsite          | Light entry | Dark entry |
 |------------------|-------------|------------|
 | Site (landing/about/community/newsletter) | [`shared/styles/style-site.scss`](style-site.scss) | [`shared/styles/dark-mode-site.scss`](dark-mode-site.scss) |
-| Book Vol I       | [`books/shared/assets/styles/style-vol1.scss`](../../books/shared/assets/styles/style-vol1.scss) | [`books/shared/assets/styles/dark-mode-vol1.scss`](../../books/shared/assets/styles/dark-mode-vol1.scss) |
-| Book Vol II      | [`books/shared/assets/styles/style-vol2.scss`](../../books/shared/assets/styles/style-vol2.scss) | [`books/shared/assets/styles/dark-mode-vol2.scss`](../../books/shared/assets/styles/dark-mode-vol2.scss) |
+| Book Vol I       | [`books/vol1/styles/style.scss`](../../books/vol1/styles/style.scss) | [`books/vol1/styles/dark-mode.scss`](../../books/vol1/styles/dark-mode.scss) |
+| Book Vol II      | [`books/vol2/styles/style.scss`](../../books/vol2/styles/style.scss) | [`books/vol2/styles/dark-mode.scss`](../../books/vol2/styles/dark-mode.scss) |
+| Book Vol III     | [`books/vol3/styles/style.scss`](../../books/vol3/styles/style.scss) | [`books/vol3/styles/dark-mode.scss`](../../books/vol3/styles/dark-mode.scss) |
+| Book Vol IV      | [`books/vol4/styles/style.scss`](../../books/vol4/styles/style.scss) | [`books/vol4/styles/dark-mode.scss`](../../books/vol4/styles/dark-mode.scss) |
 | Labs             | [`labs/assets/styles/style.scss`](../../labs/assets/styles/style.scss) | [`labs/assets/styles/dark-mode.scss`](../../labs/assets/styles/dark-mode.scss) |
 | Kits             | [`kits/assets/styles/style.scss`](../../kits/assets/styles/style.scss) | [`kits/assets/styles/dark-mode.scss`](../../kits/assets/styles/dark-mode.scss) |
 | Slides           | [`slides/assets/styles/style.scss`](../../slides/assets/styles/style.scss) | [`slides/assets/styles/dark-mode.scss`](../../slides/assets/styles/dark-mode.scss) |
