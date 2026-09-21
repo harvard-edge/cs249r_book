@@ -70,11 +70,15 @@ To construct dependable systems around foundation models, computer systems engin
 
 : **The Machine Learning Systems Rosetta Stone**: Translating statistical abstractions into operating systems and architectural primitives. {#tbl-vol3-ml-systems-rosetta}
 
-::: {.column-margin}
-**Zero Ambient Authority ($A=0$):** A foundational systems security principle where an unprivileged execution unit possesses no native ambient rights to inspect, mutate, or allocate external system resources. Every privileged operation requires explicit supervisor mediation, capability verification, and policy enforcement.
+::: {#dfn-zero-ambient-authority .callout-definition title="Zero ambient authority"}
+**Zero Ambient Authority** ($A = 0$) is the foundational systems security invariant wherein an unprivileged execution unit—specifically a foundation model core—possesses zero native rights to inspect, mutate, or allocate external system resources:
+
+$$\text{Privileges}(\pi_\theta) = \emptyset$$
+
+Candidate token emissions (such as shell commands or RPC invocations) reside strictly in host memory escrow. Every privileged operation requires explicit supervisor interception, capability verification, schema validation, and sandboxed dispatch before physical host state can be altered.
 :::
 
-The defining systems reality of foundation model execution is **Zero Ambient Authority** ($A = 0$). When a model autoregressively generates the text string `rm -rf /` or emits a structured JSON object requesting the deletion of a database table, exactly zero bytes on the host operating system are altered. The generated string is not an executing process; it is merely an array of integer token identifiers resident in high-bandwidth memory (HBM) on a GPU or TPU. The token array is transferred across an interconnect bus, decoded into characters by an inference daemon, and deposited into a user-space memory buffer managed by the host agent supervisor. The candidate output resides entirely in memory escrow. It has no ambient authority to modify host memory, invoke operating system primitives via `sys_call_table`, allocate network sockets, or manipulate peripheral devices.
+The defining systems reality of foundation model execution is **Zero Ambient Authority** ($A = 0$). When a model autoregressively generates the text string `rm -rf /` or emits a structured JSON object requesting the deletion of a database table, exactly zero bytes on the host operating system are altered. The generated string is not an executing process; it is merely an array of integer token identifiers resident in high-bandwidth memory (HBM) on an accelerator board. The token array is transferred across an interconnect bus, decoded into characters by an inference daemon, and deposited into a user-space memory buffer managed by the host agent supervisor. The candidate output resides entirely in memory escrow. It has no ambient authority to modify host memory, invoke operating system primitives via `sys_call_table`, allocate network sockets, or manipulate peripheral devices.
 
 This physical boundary separates the modern agent runtime into a clean three-tier architecture (@fig-vol3-three-tier-architecture). At the foundation sits the **Neural Core**, consisting of dense matrix-multiplication hardware units (such as GPU Streaming Multiprocessors or TPU Tensor Cores) executing low-level tensor contractions over static parameter matrices $\mathbf{\Theta}$ resident in high-bandwidth memory (HBM). Mediating access to the Neural Core is the **Inference Service Daemon**, a high-performance system service (such as vLLM, SGLang, or an optimized vendor runtime) that manages physical accelerator allocation, schedules batched inference requests, manages key-value tensor memory via PagedAttention, and coordinates the autoregressive generation loop. Finally, running in host user space sits the **Host Agent Runtime**, the authoritative supervisor. The host runtime owns the environmental state, holds administrative credentials, stages the model context, enforces hardware resource and latency budgets, and validates all candidate outputs before granting them execution authority.
 
@@ -796,8 +800,16 @@ where $\delta^*$ denotes the extended transition function evaluated over the com
 | `EXPECT_KEY`            | `{"`                  | Alphanumeric key, closing quote (`"`) | `"id"`, `"status"`, `"name"` | `123`, `true`, `[`, `{`        |
 | `EXPECT_COLON`          | `{"id"`               | Whitespace, colon (`:`)               | `":"`, `": "`, `" : "`       | `","`, `"}"`, `"id"`, `true`   |
 | `EXPECT_VALUE_INT`      | `{"id": `             | Digits, minus sign (`-`)              | `"0"`, `"42"`, `"-1"`        | `"true"`, `"\"admin\""`, `","` |
-| `EXPECT_COMMA_OR_END`   | `{"id": 42`           | Comma (`,`), closing brace (`}`)      | `","`, `"}"`, `",\n  "`      | `"43"`, `":"`, `"id"`          |
+
 : **Automaton Grammar States and Token Masking**: Transition states, structural terminals, and permissible versus forbidden candidate tokens during constrained JSON decoding. {#tbl-vol3-automaton-grammar-states}
+
+::: {#dfn-grammar-constrained-decoding .callout-definition title="Grammar-constrained decoding"}
+**Grammar-Constrained Decoding** is a synchronous logit-filtering protocol wherein an unprivileged model's next-token distribution is mathematically restricted to a formal grammar $G$ via state-dependent logit masking:
+
+$$M_i(q_t) = \begin{cases} 0 & \text{if } i \in \mathcal{V}_{\text{valid}}(q_t) \\ -\infty & \text{if } i \notin \mathcal{V}_{\text{valid}}(q_t) \end{cases}$$
+
+where $q_t \in Q$ represents the active state of an execution automaton $\mathcal{M}_G$, and $\mathcal{V}_{\text{valid}}(q_t)$ denotes the subset of vocabulary tokens whose byte encodings produce valid transitions: $\delta^*(q_t, \mathbf{b}^{(i)}) \neq \emptyset$. Normalized probabilities over masked logits $\mathbf{z}_t' = \mathbf{z}_t + \mathbf{M}(q_t)$ guarantee that sampled tokens satisfy the target formal grammar with probability $1.0$ at the logit surface.
+:::
 
 At autoregressive decode step $t$, the transformer model evaluates its unprivileged forward pass $\mathbf{f}_{\mathbf{\Theta}}$, computing the unnormalized logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$ at the unembedding layer. Prior to applying the softmax operator or sampling a token, the serving runtime injects a logit mask vector $\mathbf{M}(q_t) \in \{0, -\infty\}^{|\mathcal{V}|}$ determined by the current parser state $q_t$:
 

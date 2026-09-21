@@ -83,6 +83,12 @@ When naive agent runtimes attempt to manage trajectories as ad-hoc Python corout
 
 **The trajectory process requires a formal kernel abstraction: the Agent Control Block (ACB).** Analogous to the operating system PCB, the ACB is the canonical, host-managed descriptor that reifies an agent's existence within the supervisory control plane. It decouples the supervisory metadata required to govern, schedule, and account for a task from the internal token sequences and tensor allocations of the underlying model. By maintaining an explicit ACB, the supervisory runtime can suspend an execution, revoke tool privileges, reassign KV-cache allocation leases, enforce financial ceilings, or migrate a trajectory across physical compute nodes without inspecting prompt text or altering model weights.
 
+::: {#dfn-agent-control-block .callout-definition title="The Agent Control Block (ACB)"}
+An **Agent Control Block (ACB)** is the canonical, host-managed kernel data structure that reifies an agent trajectory within the supervisory control plane:
+$$\text{ACB} = \langle \text{id}_{\tau}, \mathcal{S}_{\text{life}}, \mathbf{\Theta}_{\text{gen}}, \mathbf{P}_{\text{mem}}, \mathbf{u}_k, \mathcal{M}_{\text{cap}} \rangle$$
+decoupling supervisory governance (process identity, lifecycle state, generation envelope, memory handles, multi-dimensional resource accounting, and capability tokens) from the underlying inference engine's volatile tensor weights and KV-cache allocations. Neither the stochastic model core nor unprivileged tool sandboxes may directly access or mutate the ACB; all state transitions are mediated exclusively by the host supervisor.
+:::
+
 ### Anatomy of the Agent Control Block {#sec-vol3-acb-anatomy}
 
 The Agent Control Block resides in host memory under the exclusive ownership of the supervisory control plane. Neither the foundation model nor the unprivileged tool execution sandbox can read or mutate the ACB directly; all modifications occur through supervisory system calls or control-plane signal traps. Structurally, the ACB aggregates six orthogonal domains of execution metadata: process identification, lifecycle state, generation parameters, memory subsystem pointers, resource accounting ledgers, and security capabilities.
@@ -269,7 +275,7 @@ $$\delta(\text{WAIT\_IO}, e_{\text{tool\_return}}, g_{\text{match}}) = \text{RUN
 
 This guard prevents a notorious class of distributed race conditions known as *observation crossing*. Suppose an agent with an aggressive execution timeout issues a long-running compile command. If the supervisor times out the operation, marks the tool invocation as aborted, and returns an synthetic error to the agent, a late-arriving completion message from the compile sandbox must be discarded. Without the $g_{\text{match}}$ predicate, a late packet arriving while the agent is generating its next step could be improperly injected into the context window, causing prompt desynchronization and invalid BPE token alignment.
 
-::: {#dfn-observation-crossing-resolution .callout-definition title="Observation crossing resolution protocol"}
+::: {#psp-observation-crossing-resolution .callout-perspective title="Observation crossing resolution protocol"}
 When an asynchronous execution worker responds after its assigned timeout deadline, the supervisor resolves the race condition through the following sequence:
 
 1. **Call Issuance ($t_0$):** Trajectory in state `RUNNING` dispatches tool request with identifier $e.\text{call\_id} = \text{0x4A}$. State transitions to `WAITING_IO`, recording $\text{pending\_io\_id} = \text{0x4A}$.
@@ -1202,7 +1208,7 @@ Under Defensive Quarantine, the model is physically prevented from damaging host
 
 Finally, upon reaching **Phase 4: Hard Preemptive Termination** ($\rho_k \ge 1.00$), the supervisor halts execution deterministically. The control plane cancels pending inference generation, dispatches `SIGKILL` to all associated containerized sandbox processes, and transitions the ACB to `TERMINATED_FAILURE` tagged with the precise failure descriptor `ERR_BUDGET_EXHAUSTED(dimension_i)`. The runtime flushes the Write-Ahead Log (WAL) to durable storage, retains sandbox filesystem snapshots for diagnostic analysis, and returns partial artifacts to the calling user alongside a transparent accounting audit trail.
 
-::: {#dfn-bounding-polytope .callout-definition title="Multi-dimensional resource bounding polytope"}
+::: {#psp-bounding-polytope .callout-perspective title="Multi-dimensional resource bounding polytope"}
 Let the agent consumption vector at turn $k$ be $\mathbf{u}_k = (u_{k,1}, u_{k,2}, \dots, u_{k,D}) \in \mathbb{R}^D_{\ge 0}$, measuring cumulative resource usage across $D$ dimensions (e.g., prompt tokens, decode tokens, tool executions, and financial expenditure). The supervisory operating space is bounded by the convex polytope:
 
 $$\mathcal{P}_{\text{admissible}} = \left\{ \mathbf{u} \in \mathbb{R}^D_{\ge 0} \;\middle|\; \forall i \in \{1,\dots,D\}, \; u_i \le B_i \right\}$$
