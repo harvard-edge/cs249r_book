@@ -1,21 +1,22 @@
-# Milestone 07: The Generative LLM Revolution (2020)
+# Milestone 07: The Generative LLM Revolution (2020–2022)
 
 ## Historical Context
 
-In 2020, Brown et al. (OpenAI) published **"Language Models are Few-Shot Learners,"** introducing GPT-3. Rather than training models for specific classification tasks, GPT proved that scaling autoregressive next-token prediction produces emergent, general-purpose language capabilities.
+In 2020, Brown et al. (OpenAI) published **"Language Models are Few-Shot Learners,"** introducing GPT-3. Rather than training models for specific classification tasks, GPT proved that scaling autoregressive next-token prediction produces emergent, general-purpose language capabilities. In late 2022, OpenAI launched **ChatGPT**, demonstrating to the world that this generative transformer foundation could interact seamlessly with human thought.
 
+Behind ChatGPT sits this exact mathematical and systems engine:
 - **Generative Pre-training**: Unified diverse language tasks into autoregressive sequence completion.
 - **Causal Self-Attention**: Prevents future token leakage via lower-triangular causal masks.
 - **End-to-End Autograd**: Hundreds of thousands of parameters receive analytical gradients through stacked Transformer blocks.
-- **Emergent Cadences**: Synthesizes structured theatrical dialogue from simple character-level statistics.
+- **Systems Serving Efficiency**: Foundation for KV-caching (Module 18) and quantization (Module 15) that make real-time interaction possible.
 
-Now, bring together all 20 modules of TinyTorch to train `TinyGPT` from scratch and generate Shakespearean text!
+Now, bring together all 20 modules of TinyTorch to train `TinyGPT` from scratch on Shakespeare!
 
 ## What You're Building
 
 **Primary milestone (what `tito milestone run 07` executes):**
 1. **Tokenization**: Encode raw Shakespeare text with YOUR `CharTokenizer`.
-2. **Dataset & Batching**: Slice text streams into autoregressive (input, target) shifted pairs with YOUR `TextWindowDataset` and `DataLoader`.
+2. **Dataset & Batching**: Slice text streams into autoregressive (input, target) shifted pairs with YOUR `TensorDataset` and `DataLoader`.
 3. **Architecture**: Build a Pre-LN Causal Transformer Decoder with Token + Learned Positional Embeddings, Causal `MultiHeadAttention`, and GELU MLP blocks.
 4. **Optimization**: Train with `CrossEntropyLoss` and `AdamW` using reverse-mode autograd.
 5. **Autoregressive Generation**: Seed prompts (`"First Citizen:"`, `"ROMEO:"`, `"KING:"`) and extend them token-by-token with temperature sampling.

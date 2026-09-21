@@ -247,6 +247,11 @@ loss.backward()
 - ✅ Benchmarking reports reproducible performance metrics
 - ✅ KV caching demonstrates generation speedup
 
+### 7. **Generative LLM Revolution (TinyGPT)** (2020–2022)
+- ✅ Train decoder-only transformer from scratch on Shakespeare
+- ✅ Next-token prediction loss drops steadily (< 1.0)
+- ✅ Autoregressively generates coherent text (foundation of ChatGPT)
+
 ## Fair Comparisons
 
 ### MLP vs CNN (Digits)

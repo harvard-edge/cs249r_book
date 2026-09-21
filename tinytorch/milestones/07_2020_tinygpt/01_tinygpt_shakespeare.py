@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """
-The Generative LLM Revolution (2020) - TinyGPT on Shakespeare
-============================================================
+The Generative LLM Revolution (2020–2022) - TinyGPT & The Foundation of ChatGPT
+=============================================================================
 
 📚 HISTORICAL CONTEXT:
 In 2020, Brown et al. (OpenAI) published "Language Models are Few-Shot Learners,"
-introducing GPT-3. Rather than training models for specific classification tasks,
-GPT proved that autoregressive next-token prediction at scale produces emergent,
-general-purpose language capabilities.
+introducing GPT-3 and proving that autoregressive next-token prediction at scale
+produces emergent, general-purpose language reasoning. In late 2022, OpenAI launched
+ChatGPT, bringing this exact generative pretraining foundation into everyday life.
+
+Behind ChatGPT sits this exact mathematical and systems engine:
+1. Autoregressive Next-Token Prediction: Teacher forcing with CrossEntropyLoss.
+2. Causal Self-Attention: Masked attention preventing future token leakage.
+3. Pre-LayerNorm Residual Highway: Clean gradient propagation through deep blocks.
+4. Systems Serving Efficiency: The KV-cache (Module 18) and quantization (Module 15)
+   that make generative sampling fast and interactive in production.
 
 🎯 MILESTONE 07: TRAIN TINYGPT FROM SCRATCH & GENERATE TEXT
 In this capstone milestone, YOU bring together all 20 modules of TinyTorch:
@@ -28,6 +35,7 @@ In this capstone milestone, YOU bring together all 20 modules of TinyTorch:
   Module 05 (DataLoader)    : YOUR mini-batch DataLoader
   Module 06 (Autograd)      : YOUR reverse-mode computational graph
   Module 07 (Optimizers)    : YOUR AdamW optimizer
+  Module 08 (Training)      : YOUR Trainer training loop
   Module 10 (Tokenization)  : YOUR Tokenizer
   Module 11 (Embeddings)    : YOUR Token + Learned Positional Embeddings
   Module 12 (Attention)     : YOUR Causal Multi-Head Attention
@@ -224,7 +232,7 @@ def run_milestone(args=None):
     args = args or argparse.Namespace()
     sample_only = getattr(args, "quick", False) or getattr(args, "sample", False)
     custom_prompt = getattr(args, "prompt", "First Citizen:")
-    temperature = getattr(args, "temperature", 0.8)
+    temperature = getattr(args, "temperature", 0.6)
     epochs = getattr(args, "epochs", 12)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -232,10 +240,11 @@ def run_milestone(args=None):
     # ─────────────────────────────────────────────────────────────────────────
     console.print()
     console.print(Panel.fit(
-        "[bold cyan]MILESTONE 07: THE GENERATIVE LLM REVOLUTION (2020)[/bold cyan]\n\n"
-        "[yellow]Train TinyGPT from scratch on Shakespeare and generate text![/yellow]\n\n"
+        "[bold cyan]MILESTONE 07: THE GENERATIVE LLM REVOLUTION (2020–2022)[/bold cyan]\n\n"
+        "[yellow]Train TinyGPT from scratch on Shakespeare — the foundation of ChatGPT![/yellow]\n\n"
         "• Model: Causal Pre-LN Transformer Decoder (Vaswani et al. / GPT-2 / GPT-3)\n"
         "• Autograd: All Q, K, V projections and MLP weights receive reverse gradients\n"
+        "• Systems: Parallel teacher-forcing training; foundation for KV-cache serving\n"
         "• Target Workload: Autoregressive Next-Token Prediction on TinyShakespeare",
         border_style="cyan",
         title="TinyTorch Capstone",
@@ -266,7 +275,7 @@ def run_milestone(args=None):
     # Build sequence dataset (crop text to ~30k tokens for fast CPU convergence)
     train_tokens = tokens[: min(len(tokens), 35000)]
     seq_len = 32
-    stride = 8
+    stride = 4
 
     inputs = []
     targets = []
@@ -309,7 +318,7 @@ def run_milestone(args=None):
     # ─────────────────────────────────────────────────────────────────────────
     # 5. TRAINING LOOP
     # ─────────────────────────────────────────────────────────────────────────
-    optimizer = AdamW(model.parameters(), lr=1e-3, weight_decay=0.01)
+    optimizer = AdamW(model.parameters(), lr=2e-3, weight_decay=0.01)
     loss_fn = CrossEntropyLoss()
     trainer = Trainer(model, optimizer, loss_fn)
 
@@ -391,9 +400,11 @@ def run_milestone(args=None):
             f"  • Initial Loss : {initial_loss:.4f}\n"
             f"  • Final Loss   : [bold green]{final_loss:.4f}[/bold green] (reduction: -{loss_drop:.2f})\n"
             f"  • Model Status : Syntactically coherent autoregressive text generated!\n\n"
-            "You have constructed and trained an end-to-end generative LLM\n"
+            "You have constructed and trained the core generative engine of ChatGPT\n"
             "using exclusively the runtime, autograd, and neural network primitives\n"
-            "you wrote from scratch in TinyTorch!",
+            "you wrote from scratch in TinyTorch!\n\n"
+            "[dim]In Modules 14–19, you'll optimize this model with KV caching (Module 18),\n"
+            "INT8 quantization (Module 15), and hardware acceleration (Module 17).[/dim]",
             border_style="green",
             title="Success!",
         ))

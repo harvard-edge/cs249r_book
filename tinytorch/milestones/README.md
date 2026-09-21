@@ -102,14 +102,14 @@ milestones/
 ├── 04_1998_cnn/            # Milestone 04: LeNet CNN
 ├── 05_2017_transformer/    # Milestone 05: Attention Mechanism
 ├── 06_2018_mlperf/         # Milestone 06: Optimization Olympics
-├── 07_2020_tinygpt/        # Milestone 07: Generative LLM (TinyGPT)
+├── 07_2020_tinygpt/        # Milestone 07: Generative LLM (TinyGPT & ChatGPT Foundation)
 └── data_manager.py         # Shared dataset management utility
 ```
 
 ## The Journey
 
 <p align="center">
-  <img src="journey.svg" alt="Milestone progression from Perceptron (1958) through Transformer (2017) to Generative LLM (2020)" width="640">
+  <img src="journey.svg" alt="Milestone progression from Perceptron (1958) through Transformer (2017) to Generative LLM (2020–2022)" width="640">
 </p>
 
 ## Success Criteria
@@ -122,7 +122,7 @@ Each milestone has specific success criteria. Passing means your implementation 
 - **Milestone 04**: TinyDigits achieves 90%+ accuracy with CNN
 - **Milestone 05**: Pass all three attention challenges (95%+ accuracy)
 - **Milestone 06**: Part 1 completes optimization pipeline, Part 2 shows KV cache speedup
-- **Milestone 07**: TinyGPT loss decreases steadily (< 2.50) and generates coherent text
+- **Milestone 07**: TinyGPT loss decreases steadily (< 2.50) and generates coherent text (ChatGPT foundation)
 
 ## Troubleshooting
 

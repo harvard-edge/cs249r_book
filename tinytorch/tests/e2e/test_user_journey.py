@@ -135,6 +135,7 @@ class TestQuickVerification:
 
         # Check milestone directories
         assert (milestones_dir / "01_1958_perceptron").exists(), "Milestone 01 missing"
+        assert (milestones_dir / "07_2020_tinygpt").exists(), "Milestone 07 missing"
 
     @pytest.mark.quick
     def test_tinytorch_package_importable(self):
@@ -247,7 +248,7 @@ class TestMilestoneFlow:
         assert code == 0
 
         # Check for expected milestones
-        expected = ["Perceptron", "XOR", "MLP", "CNN", "Transformer"]
+        expected = ["Perceptron", "XOR", "MLP", "CNN", "Transformer", "MLPerf", "Generative LLM"]
         found = sum(1 for m in expected if m in stdout)
         assert found >= 3, f"Expected milestones not shown. Got: {stdout}"
 

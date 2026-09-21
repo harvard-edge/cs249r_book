@@ -42,7 +42,7 @@ take several minutes.
 | 04 | CNN Revolution (1998) | `04_1998_cnn/01_lecun_tinydigits.py` | Convolutions on TinyDigits |
 | 05 | Transformer Era (2017) | `05_2017_transformer/01_vaswani_attention.py` | Attention sequence task |
 | 06 | MLPerf Benchmarks (2018) | `06_2018_mlperf/*.py` | Optimization and speedup demos |
-| 07 | Generative LLM (2020) | `07_2020_tinygpt/01_tinygpt_shakespeare.py` | TinyGPT autoregressive language modeling |
+| 07 | Generative LLM (2020–2022) | `07_2020_tinygpt/01_tinygpt_shakespeare.py` | TinyGPT autoregressive language modeling (foundation of ChatGPT) |
 
 ## Required Setup
 

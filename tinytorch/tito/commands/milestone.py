@@ -157,11 +157,11 @@ MILESTONE_SCRIPTS = {
         "id": "07",
         "name": "Generative LLM (2020)",
         "year": 2020,
-        "title": "TinyGPT: Autoregressive Language Modeling",
+        "title": "TinyGPT: Autoregressive Language Modeling (ChatGPT Foundation)",
         "script": "milestones/07_2020_tinygpt/01_tinygpt_shakespeare.py",
-        "required_modules": [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13],
+        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13],
         "description": "Train TinyGPT from scratch on Shakespeare and generate text",
-        "historical_context": "Brown et al. (GPT-3) proved emergent generation from next-token prediction",
+        "historical_context": "Brown et al. (GPT-3, 2020) and ChatGPT (2022) proved emergent generation from autoregressive scale",
         "emoji": "✨"
     }
 }
@@ -1120,9 +1120,11 @@ class MilestoneCommand(BaseCommand):
         """Handle milestone list command - show available milestones."""
         console = self.console
 
+        min_year = min(m["year"] for m in MILESTONE_SCRIPTS.values())
+        max_year = max(m["year"] for m in MILESTONE_SCRIPTS.values())
         console.print(Panel(
             "[bold cyan]🏆 TinyTorch Milestones[/bold cyan]\n\n"
-            "[dim]Recreate ML history from 1958 to 2020[/dim]",
+            f"[dim]Recreate ML history from {min_year} to {max_year}[/dim]",
             title="Available Milestones",
             border_style="bright_cyan"
         ))

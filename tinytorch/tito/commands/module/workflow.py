@@ -12,7 +12,7 @@ import subprocess
 import sys
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from rich.panel import Panel
 from rich.text import Text
@@ -376,19 +376,20 @@ class ModuleWorkflowCommand(BaseCommand):
         info_table.add_row("📊 Progress", f"{len(completed)}/{len(module_mapping)} modules completed")
 
         # Check for milestone unlocks
-        milestone_info = self._get_milestone_for_module(module_num)
-        if milestone_info:
-            mid, mname, required = milestone_info
-            if module_num in required:
-                completed_nums = {
-                    int(str(module).split("_", 1)[0])
-                    for module in completed
-                    if str(module).split("_", 1)[0].isdigit()
-                }
-                modules_left = len([r for r in required if r not in completed_nums and r >= module_num])
-                if modules_left <= 3:
-                    info_table.add_row("🏆 Milestone", f"[magenta]{mid} - {mname}[/magenta]")
-                    info_table.add_row("", f"[dim]{modules_left} modules until unlock[/dim]")
+        milestones = self._get_milestones_for_module(module_num)
+        if milestones:
+            completed_nums = {
+                int(str(module).split("_", 1)[0])
+                for module in completed
+                if str(module).split("_", 1)[0].isdigit()
+            }
+            for mid, mname, required in milestones:
+                if module_num in required:
+                    modules_left = len([r for r in required if r not in completed_nums and r >= module_num])
+                    if modules_left <= 3:
+                        info_table.add_row("🏆 Milestone", f"[magenta]{mid} - {mname}[/magenta]")
+                        unit = "module" if modules_left == 1 else "modules"
+                        info_table.add_row("", f"[dim]{modules_left} {unit} until unlock[/dim]")
 
         self.console.print(info_table)
         self.console.print()
@@ -461,16 +462,22 @@ class ModuleWorkflowCommand(BaseCommand):
             project_root=self.config.project_root,
         )
 
-    def _get_milestone_for_module(self, module_num: int) -> Optional[tuple]:
-        """Get the milestone this module contributes to."""
+    def _get_milestones_for_module(self, module_num: int) -> List[tuple]:
+        """Get all milestones this module contributes to."""
         from ..milestone import MILESTONE_SCRIPTS, _required_modules_for
 
+        matching = []
         for mid, milestone in sorted(MILESTONE_SCRIPTS.items()):
             required = _required_modules_for(milestone)
             if module_num in required:
-                return (mid, milestone["name"], required)
+                matching.append((mid, milestone["name"], required))
 
-        return None
+        return matching
+
+    def _get_milestone_for_module(self, module_num: int) -> Optional[tuple]:
+        """Get the primary milestone this module contributes to."""
+        milestones = self._get_milestones_for_module(module_num)
+        return milestones[0] if milestones else None
 
     def _get_export_path_for_module(self, module_name: str) -> str:
         """Return the generated package path for a module based on default_exp."""

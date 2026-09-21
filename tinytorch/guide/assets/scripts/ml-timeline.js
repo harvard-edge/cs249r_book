@@ -70,6 +70,17 @@ document.addEventListener('DOMContentLoaded', function() {
             modules: "After Modules 14-19", expectedResults: "Whatever you measure; no ratio is guaranteed",
             commands: ["tito milestone run mlperf"],
             url: "milestones/06_mlperf.html"
+        },
+        tinygpt: {
+            year: "2020–2022", title: "TinyGPT & Generative LLM", researcher: "Brown et al. (GPT-3) & ChatGPT",
+            subtitle: "Autoregressive next-token prediction powers modern generative AI",
+            achievement: "Generative language modeling and coherent text synthesis",
+            architecture: "Tokens → Embeddings → Causal MHA + MLP → ... → LM Head → Autoregressive Sampling",
+            whatYouBuild: ["Causal multi-head self-attention with lower-triangular masking", "Pre-LN transformer decoder blocks", "YOUR complete stack trains from scratch and writes Shakespeare"],
+            systemsInsights: ["Pretraining: Teacher forcing allows O(1) parallel sequence loss calculation", "Inference: Generation is memory-bandwidth bound, demanding KV caching (Module 18)", "Convergence: AdamW with weight decay enables stable deep transformer training"],
+            modules: "After Modules 01-08, 10-13", expectedResults: "Cross-entropy loss < 1.0, coherent Shakespeare text generated",
+            commands: ["tito milestone run 07"], northStar: true,
+            url: "milestones/07_tinygpt.html"
         }
     };
 
