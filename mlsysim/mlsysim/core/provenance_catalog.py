@@ -467,6 +467,9 @@ WAREHOUSE_MOBILE_MANIPULATOR = _est(
         "20 ms setpoint period, chunk horizon 16, 0.70 sustained DRAM efficiency, "
         "1.0 m/s free-space TCP limit. The WarehouseAMR record calls 300 kg gross, so "
         "the loaded mass is an upper bound."
+        " Control rail: 24 V nominal is a design choice; the 21.5 V depleted-battery "
+        "voltage, 60 mOhm shared harness resistance, and 18.0 V point-of-load "
+        "regulator dropout are illustrative."
     ),
     verified="2026-09-21",
 )
@@ -481,6 +484,8 @@ WAREHOUSE_AISLE_SCENARIO = _est(
         "lease, margin, aisle speed, heartbeat, enforcer deadline, handover speed, and "
         "the slow-down speeds before a takeover request are design choices. The human "
         "approach speed carries ISO_13855_APPROACH_SPEED."
+        " The 70 A coincident control-rail transient (inference burst plus drive "
+        "motors on the door threshold) is illustrative."
     ),
     verified="2026-09-21",
 )
@@ -492,6 +497,7 @@ LOCKSTEP_SAFETY_MCU_REFERENCE = _est(
         "Not a single product. 400 MHz x 2 FLOP/cycle peak, 4 MiB on-chip flash, "
         "1 MiB tightly coupled SRAM, about 1 W; values are representative of the "
         "class, not a datasheet."
+        " The registry clock_rate (400 MHz) is the upper end of the class."
     ),
     verified="2026-09-21",
 )

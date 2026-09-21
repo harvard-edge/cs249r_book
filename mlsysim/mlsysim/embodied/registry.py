@@ -236,6 +236,10 @@ class MobileManipulators(Registry):
         chunk_horizon=16,                                      # chosen
         dram_efficiency=0.70,                                  # sustained fraction of peak
         tcp_speed_limit=1.0 * (ureg.meter / ureg.second),      # chosen free-space limit
+        control_rail_nominal=24.0 * ureg.volt,                 # chosen control-rail voltage
+        control_rail_battery_low=21.5 * ureg.volt,             # illustrative depleted battery
+        control_rail_resistance=60.0 * ureg.milliohm,          # illustrative harness resistance
+        control_rail_dropout=18.0 * ureg.volt,                 # illustrative regulator dropout
         metadata=Metadata(provenance=pc.WAREHOUSE_MOBILE_MANIPULATOR),
     )
 
@@ -292,6 +296,7 @@ class SiteScenarios(Registry):
         t_takeover_out_of_loop=2.0 * ureg.second,              # illustrative out-of-loop takeover
         v_takeover_in_loop=1.2 * (ureg.meter / ureg.second),   # chosen slow-down before an in-loop request
         v_takeover_out_of_loop=0.3 * (ureg.meter / ureg.second),  # chosen crawl before an out-of-loop request
+        i_rail_transient=70.0 * ureg.ampere,                   # illustrative coincident inference + drive transient
         metadata=Metadata(provenance=pc.WAREHOUSE_AISLE_SCENARIO),
     )
 

@@ -17,6 +17,11 @@ class ComputeCore(BaseModel):
     # classes that have no SM concept (MCUs, TPUs). Pairs with the per-SM memory
     # fields below to derive chip-level totals (e.g. register file across the die).
     sm_count: Optional[int] = None
+    # Core clock frequency. Lets cycle arithmetic (e.g. an MCU task's cycle
+    # count) come from the registry instead of from a FLOP-per-cycle assumption
+    # on peak_flops. Populated where a device's clock is stated; absent (None)
+    # for entries whose source gives only aggregate throughput.
+    clock_rate: Optional[Quantity] = None
 
     @field_validator("peak_flops", mode="after")
     @classmethod
@@ -30,6 +35,17 @@ class ComputeCore(BaseModel):
             key: require_unit_family(val, ureg.flop / ureg.second, f"precision_flops[{key!r}]", "operation")
             for key, val in v.items()
         }
+
+    @field_validator("clock_rate", mode="after")
+    @classmethod
+    def _validate_clock_rate(cls, v):
+        q = require_dimensionality(v, 1 / ureg.second, "clock_rate")
+        if q is None:
+            return None
+        # FLOP/s shares the 1/time dimension; require an explicit hertz unit.
+        if not any("hertz" in name for name in q.units._units):
+            raise ValueError(f"clock_rate must use hertz units; got {q.units}")
+        return q
 
 class MemoryHierarchy(BaseModel):
     """

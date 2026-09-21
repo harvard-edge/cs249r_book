@@ -105,6 +105,11 @@ class MobileManipulatorPlatform(BaseModel):
     chunk_horizon: int
     dram_efficiency: float
     tcp_speed_limit: Quantity               # m/s
+    # 24 V control rail shared by the application processor and the permission MCU
+    control_rail_nominal: Quantity          # V
+    control_rail_battery_low: Quantity      # V, battery at the low end of its discharge
+    control_rail_resistance: Quantity       # ohm, shared harness resistance
+    control_rail_dropout: Quantity          # V, point-of-load regulator dropout
     metadata: Metadata = Field(default_factory=Metadata)
 
     @field_validator("onboard_payload_capacity", mode="after")
@@ -148,6 +153,19 @@ class MobileManipulatorPlatform(BaseModel):
         if not 0.0 < v <= 1.0:
             raise ValueError(f"dram_efficiency must be in (0, 1]; got {v}")
         return v
+
+    @field_validator(
+        "control_rail_nominal", "control_rail_battery_low", "control_rail_dropout",
+        mode="after",
+    )
+    @classmethod
+    def _validate_voltage(cls, v, info):
+        return require_dimensionality(v, ureg.volt, info.field_name)
+
+    @field_validator("control_rail_resistance", mode="after")
+    @classmethod
+    def _validate_resistance(cls, v, info):
+        return require_dimensionality(v, ureg.ohm, info.field_name)
 
     @property
     def unloaded_mass(self):
@@ -220,6 +238,9 @@ class EmbodiedSiteScenario(BaseModel):
     t_takeover_out_of_loop: Quantity
     v_takeover_in_loop: Quantity
     v_takeover_out_of_loop: Quantity
+    # coincident current transient on the shared control rail (inference burst
+    # plus drive motors climbing the cage-door threshold)
+    i_rail_transient: Quantity
     metadata: Metadata = Field(default_factory=Metadata)
 
     @field_validator(
@@ -277,6 +298,11 @@ class EmbodiedSiteScenario(BaseModel):
         if not 0.0 < v < 1.0:
             raise ValueError(f"{info.field_name} must be in (0, 1); got {v}")
         return v
+
+    @field_validator("i_rail_transient", mode="after")
+    @classmethod
+    def _validate_current(cls, v, info):
+        return require_dimensionality(v, ureg.ampere, info.field_name)
 
     @property
     def a_brake(self):
