@@ -112,13 +112,13 @@ def build():
 
     # --- subtitle block -----------------------------------------------------
     p.append(
-        f'<text x="{L}" y="1020" xml:space="preserve">'
+        f'<text x="{L}" y="1045" xml:space="preserve">'
         f'<tspan font-family="{SERIF}" font-size="82" font-style="italic" fill="{SUB_C}">Don\'t just </tspan>'
         f'<tspan font-family="{MONO}" font-size="70" font-weight="bold" fill="{TITLE_C}">import torch</tspan>'
         f'<tspan font-family="{SERIF}" font-size="82" font-style="italic" fill="{SUB_C}">. Build it.</tspan>'
         f'</text>'
     )
-    p.append(_t(L, 1110, "From Tensors to Hardware-Accelerated Transformers", SANS, 42, TEXT_C, ls=1))
+    p.append(_t(L, 1135, "From Tensors to Hardware-Accelerated Transformers", SANS, 42, TEXT_C, ls=1))
 
     # --- header divider bar -------------------------------------------------
     p.append(_t(L, 1330, "THE FULL RUNTIME STACK", MONO, 28, TEXT_C, ls=6))
