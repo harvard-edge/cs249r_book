@@ -1,17 +1,94 @@
-# Lab 1 — Where is the physical AI boundary?
+# Lab 1: The Causal Boundary & Servo Bus Bring-Up
 
-**Status:** Draft student lab brief. Andrea will try this exercise on the kit and record the student artifact, time required, starter materials, and any changes in the [feasibility plan](feasibility-plan.md). Staff will set motion limits and reset instructions from the tested station before releasing the handout.
+**Schedule:** Weeks 1–2 | **Part:** [Part I: The Machine Anatomy](module-1-machine-anatomy.md)
+**Required Textbook Reading:** [Chapter 1: The Causal Boundary](../../books/vol4/01_boundary/01_boundary.qmd) & [Chapter 2: The Physical Body](../../books/vol4/02_body/02_body.qmd)
+**Target Competencies:** `[ ] A1 Plant Mechanics & Safe Envelope`, `[ ] D1 Hardware Authority Routing`
+**Milestone Alignment:** Contributes to [Milestone 1](syllabus.md#sec-milestones) (End of Week 3)
 
-**Read before class:** [Chapter 1: The Causal Boundary](../../books/vol4/01_boundary/01_boundary.qmd).
+---
 
-**Start from:** station schematic and isolated motor power.
+### 1. The Physical Question
+Where does computational authority end and physical delegation begin? If a host computer or neural network issues an erroneous command, what hardware mechanisms guarantee that the machine fails safely without causing physical damage or uncommanded motion?
 
-## Experiment
+---
 
-With motor power isolated, inventory the camera, Qualcomm Linux, Bridge, STM32, servo bus, and cutoff. Trace one hypothetical proposal and identify every component that can cause motion. Observe boot, disconnect, and power-off behavior on the qualified station.
+### 2. Hardware Setup
 
-## Submit and exit check
+| Component | Station Role | Specification | Image |
+|:---|:---|:---|:---:|
+| **Seeed Studio SO-101 Arm** | 6-DoF follower arm for physical manipulation | 6 active joints, STS3215 bus servos, rigid 3D-printed arm links | <img src="assets/images/so101-follower.png" alt="SO-101 6-DoF Arm" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Arduino UNO Q ("Unikue")** | Dual-silicon brain: Linux MPU (Qualcomm) + Real-time MCU (STM32U585) | Dedicated inter-core RPC, hardware watchdog, half-duplex UART bus master | <img src="assets/images/arduino-uno-q.jpg" alt="Arduino UNO Q" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Feetech STS3215 Servos** | Daisy-chained smart actuators | 12-bit magnetic encoder ($0.088^\circ$ res), 19 kg·cm torque @ 7.4V, 1 Mbps TTL UART | <img src="assets/images/feetech-sts3215-servo.jpg" alt="Feetech STS3215 Servo" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
+| **Dual Power Rails** | Electrical isolation: 45W USB-PD (Logic) + Dedicated 7.4V/5A DC (Servos) | Common star ground at UNO Q GND pin; zero brownout cross-talk | <img src="assets/images/feetech-sts3215-bus-ports.jpg" alt="Dual Daisy-Chain Bus Ports" style="max-height: 115px; max-width: 140px; object-fit: contain; display: block; margin: auto;" /> |
 
-Submit a power and command diagram, safe-state observations, and one counterexample in which a model output would not establish physical AI. Pass when the team can identify the only live actuator command route and the measured safe state. This starts **C1, C6, C13**.
+1. **Actuator Station:** Seeed Studio SO-101 6-DoF arm mounted securely to the tabletop baseplate.
+2. **Controller Board:** Arduino UNO Q ("Unikue") powered via USB-C PD (45W).
+3. **Bus Interface:** Half-duplex TTL serial bus connecting the STM32U585 MCU (TX/RX pin pair) to the first Feetech STS3215 smart servo.
+4. **Isolated Power:** Regulated 7.4V/5A DC motor power supply with a toggle switch, sharing a common star ground with the Arduino UNO Q.
+5. **Initial State:** Motor power supply switch **OFF (Disarmed)**. Arm in resting, folded configuration.
 
-**Carry forward:** authority diagram and observed safe state. Keep the raw trace and artifact revision so the next lab can reconstruct this result.
+![Bench Wiring Harness: Dual Power Isolation & Inter-Core Safety Routing](assets/images/vol4-bench-wiring-harness.svg){#fig-wiring-harness width=100%}
+
+![The Physical AI Sense-Propose-Permit-Act Loop](assets/images/vol4-physical-ai-loop.svg){#fig-loop width=100%}
+
+![Arduino UNO Q Dual-Silicon Architecture and Safety Boundary](assets/images/vol4-uno-q-dual-core-architecture.svg){#fig-dual-arch width=100%}
+
+---
+
+### 3. Step-by-Step Protocol
+
+#### Step 1: Physical Authority & Power Audit
+1. Inspect the station wiring. Trace every cable from the power strip to the arm.
+2. Verify that the **only** electrical connection to the STS3215 servo bus originates from the STM32 microcontroller header.
+3. Confirm that no direct USB-to-UART bridge connects the host workstation to the servo bus.
+
+#### Step 2: Servo Enumeration & Firmware Bring-Up
+1. Flash the staff-provided baseline motion firmware to the STM32 MCU via the Arduino IDE / App Lab CLI.
+2. Open the STM32 serial monitor at 115200 baud. Energize motor power via the physical toggle switch.
+3. Run the enumeration command:
+   ```bash
+   uno-q-cli bus scan --baud 1000000
+   ```
+4. Verify that all 6 STS3215 servos respond with their programmed IDs (`1` to `6`), firmware versions, and current voltages.
+
+#### Step 3: Zero-Homing & Mechanical Envelope Characterization
+1. Use the physical calibration jig to align each joint to its zero-angle mechanical detent.
+2. Record the raw 12-bit optical/magnetic encoder counts for each joint.
+3. Slowly articulate each joint by hand across its full physical travel range. Measure and record:
+   * $\theta_{i,\min}$ and $\theta_{i,\max}$ in mechanical degrees.
+   * Hard physical stop angles vs. allowable software travel bounds.
+4. Flash the calibrated soft limits into the STM32 non-volatile configuration memory.
+
+---
+
+### 4. The Disturbance & Failure Test
+1. **Power-Off Drop Test:** Command the arm to a stable elevated test pose (Joint 2 @ $45^\circ$, Joint 3 @ $45^\circ$). While elevated, switch off the 7.4V motor power supply.
+   * *Observation:* Record the mechanical drop trajectory as gravity pulls the unpowered links down. Verify that no mechanical binding or violent snapping occurs.
+2. **Re-Power Surge Audit:** With the arm now resting in an arbitrary fallen position, flip the motor power switch back ON.
+   * *Pass Criteria:* The arm must remain completely limp and passive. The servos must **never** violently jerk, snap to zero, or execute pre-stored moves upon power restoration until an explicit arming handshake is sent from the console.
+
+---
+
+### 5. Multi-Tap Telemetry Trace
+In this lab, establish the fundamental telemetry schema that will log the four action taps across the entire semester:
+* $a_{\text{req}}$: Target joint vector requested by software.
+* $a_{\text{map}}$: Mapped target joint angles bounded by calibration limits.
+* $a_{\text{enf}}$: Command permitted by the STM32 MCU.
+* $a_{\text{meas}}$: Actual position feedback read back from the STS3215 encoder registers.
+
+Log an elevation move in CSV format and verify that $a_{\text{meas}}$ converges to $a_{\text{enf}}$ within $\pm 0.5^\circ$.
+
+---
+
+### 6. Common Pitfalls & Debugging
+* ⚠️ **TTL Half-Duplex Contention:** The STS3215 bus uses a single bi-directional data line. If the STM32 driver does not disable its transmitter before reading, bus collisions will corrupt packets. Ensure the direction-control pin timing is exact.
+* ⚠️ **Voltage Sag under Multi-Servo Stall:** If multiple servos draw stall current simultaneously (>1.5A each), poorly regulated supplies will dip, causing the STM32 or servos to brown-out reset. Ensure logic power is completely decoupled from motor power.
+
+---
+
+### 7. Sign-Off Criteria (The Exit Check)
+To receive credit for Lab 1, demonstrate the following live to the instructor:
+1. [ ] **Authority Route Proof:** Show the physical wiring diagram and prove that disconnecting the STM32 stops all motor communication.
+2. [ ] **Measured Operating Envelope Table:** Present the measured travel limits ($\theta_{\min}, \theta_{\max}$) for all 6 joints and the calibrated resting rest pose.
+3. [ ] **Power-Off & Re-Arm Trace:** Demonstrate switching off the 7.4V motor power supply during active motion, observing a safe passive drop, restoring power, and proving zero uncommanded motion occurs.
+*Staff signs off `[ ] A1` and `[ ] D1` on the team's [Competency Card](student-competencies.md).*

@@ -1,77 +1,180 @@
-# Feasibility plan for the Volume IV labs
+# Postdoc Pre-Flight Implementation & Qualification Guide
 
-**Andrea:** Use the [course page](../../instructors/vol4/README.md), [syllabus](../../instructors/vol4/syllabus.qmd), and linked lab briefs as the proposed class. You have an Arduino UNO Q, an SO-101 arm, and Hugging Face LeRobot. Try the labs as if we had already written the student handouts. Find out which exercises a small team could actually do, what we would have to supply, and what needs to change. You do not need to write fourteen polished handouts now.
+**Audience:** Postdoctoral Researcher (Andrea, ETH Zurich) & Lab Staff
+**Status:** Canonical Engineering Implementation Checklist & Qualification Plan
+**Target Platform:** Arduino UNO Q ("Unikue" QRB2210 Linux + STM32U585 MCU) · Seeed Studio SO-101 6-DoF Arm · Hugging Face LeRobot · SmolVLA & ACT Models
+**Reference Curriculum:** [Master Landing Page](README.md) · [Course Syllabus](syllabus.md) · [Staff Master Plan (Sep–Dec 2026)](staff-implementation-plan.md) · [12-Competency Matrix](student-competencies.md) · [Capstone Studio](lab-capstone-studio.md)
 
-For each lab, make the smallest convincing example yourself. Save the artifact a student would produce, note how long it took, and mark **works / works with changes / does not work yet / not tried**. If something fails, say what you tried and what you would try next. The detailed [one-station bench notes](station-pilot/README.md) are a technical reference when you need to investigate hardware; they do not define the student curriculum.
+---
 
-## What the labs are building toward
+## 1. Executive Mandate: Prove the Bench Before Teaching It
 
-Students should finish with a system that **senses a physical state, uses a learned model to propose an action, allows the microcontroller to permit or refuse it, acts, measures what happened, and decides again from a new observation**. The common starting example is a slow SO-101 reach toward a soft target. After the first move, someone shifts the target or causes an incomplete move. The next proposal must respond to the observed result or abstain. Students compare that behavior with a simple scripted rule.
+Andrea, your primary mission before the semester begins is to **build, verify, and qualify one "Golden Reference Station"** from raw hardware to untethered physical AI execution. You must act as **"Student Zero"** across all 8 labs, verifying that every exercise functions deterministically, producing the gold-standard artifacts, and isolating hardware failure modes before students arrive.
 
-This is how the labs exercise the book rather than becoming a model deployment course: early labs establish body, sensing, and physical data; middle labs test learned decisions against real motion, timing, and simulation; later labs test permission, recovery, intervention, and the evidence behind a final claim. The [competency matrix](student-competencies.md) names the abilities students should carry to another robot or simulator.
+Students should finish this course with an autonomous embodied system that **senses physical reality via vision, uses a learned model to propose multi-joint action chunks, delegates safety authority to an on-board microcontroller to permit or clamp motion, measures true kinematic outcomes, and revises its next decision from closed-loop feedback**.
 
-Training and simulation may run on a workstation. The required local loop asks for a **learned action policy on the UNO Q's Qualcomm side** and physical action that the STM32 can refuse. The stock LeRobot SO-101 USB connection is useful for collecting data, but it does not by itself put the STM32 in the motor command path. Find out whether that arrangement can be built and taught on this kit. Treat local SmolVLA as an experiment until its memory and timing are measured; it is not needed for the first feedback loop.
+Do not attempt to write sixteen different handouts or build custom motor shields. The hardware kit is fixed:
+1. **The Board:** Arduino UNO Q (Qualcomm QRB2210 Linux MPU + STM32U585 real-time MCU).
+2. **The Body:** Seeed Studio SO-101 6-DoF arm (STS3215 smart serial bus servos) + $20 standard UVC USB webcam.
+3. **The Software/Model Spine:** Hugging Face LeRobot (Python API) + SmolVLA / ACT action-chunking policies.
 
-## Try the proposed labs
+---
 
-The [syllabus](../../instructors/vol4/syllabus.qmd) supplies the weekly readings and meeting format. Each linked brief explains the fuller student exercise. Try each one on a single station and answer the question under it.
+## 2. Phase 0: Physical Bench Assembly & Hardware Bring-Up
 
-1. **[Lab 1 — Boundary and authority](lab-01-boundary.md)**
-   - Students show the sensor, processor, motor, and power paths and the arm's state when stopped.
-   - Andrea checks whether the command path and safe state are reproducible, and lists missing parts.
-2. **[Lab 2 — Body and sensors](lab-02-body-and-sensors.md)**
-   - Students calibrate camera and arm feedback, compare requested with measured motion, and define a project task.
-   - Andrea checks whether a usable workspace, uncertainty, and sensor loss can be measured in one lab.
-3. **[Lab 3 — Action permission](lab-03-action-permission.md)**
-   - Students send valid and invalid proposals and show what the STM32 permits or refuses before motion.
-   - Andrea checks whether the STM32 can control the SO-101 motor path without a live host bypass, or identifies a simpler setup.
-4. **[Lab 4 — Physical episodes](lab-04-physical-episodes.md)**
-   - Students record and replay an episode linking observation, requested action, permission, measured motion, and outcome.
-   - Andrea checks whether LeRobot data and MCU events can be joined to reconstruct one trial.
-5. **[Lab 5 — Baseline and learning](lab-05-baseline-and-learning.md)**
-   - Students hold out data, inspect a learned action policy, and compare it with a scripted rule on matched starts.
-   - Andrea checks whether a small dataset, model, and baseline can be supplied and used within the allotted time.
-6. **[Lab 6 — Local feedback loop](lab-06-local-feedback-loop.md)**
-   - Students run a learned action policy on the UNO Q, move with MCU permission, observe a changed scene, then revise or abstain.
-   - Andrea checks whether this complete sequence works on the kit and what every team would need to reproduce it.
-7. **[Lab 7 — Simulation gap](lab-07-simulation-gap.md)**
-   - Students use the same starts and actions in two simulators and on hardware, then explain a measured difference.
-   - Andrea checks whether two workable simulations and matching physical traces can be supplied.
-8. **[Lab 8 — Action chunks](lab-08-action-chunks.md)**
-   - Students compare an ACT action chunk with a policy that observes between moves, including a changed scene.
-   - Andrea checks whether a supplied checkpoint and a practical physical trial fit the lab time.
-9. **[Lab 9 — Language and placement](lab-09-language-and-placement.md)**
-   - Students test whether a task-matched language-conditioned model changes actions and whether its runtime fits the task.
-   - Andrea measures SmolVLA on the board and identifies a useful workstation or recorded comparison if it cannot run locally.
-10. **[Lab 10 — Authority under fault](lab-10-authority-under-fault.md)**
-    - Students show refusal of stale or excessive requests, cutoff behavior, and no old motion after restart.
-    - Andrea checks whether students can inject these faults safely and observe both logs and physical behavior.
-11. **[Lab 11 — Incomplete motion](lab-11-incomplete-motion.md)**
-    - Students detect that the arm or object did something different from the command, then correct or abstain.
-    - Andrea finds a repeatable, harmless disturbance whose outcome students can measure.
-12. **[Lab 12 — Human correction](lab-12-human-correction.md)**
-    - Students record a correction and compare physical results before and after a documented change.
-    - Andrea tests whether correction fits the week or whether this time should be used for project repair.
-13. **[Lab 13 — Rehearsal and release case](lab-13-release-case.md)**
-    - Students freeze the system and trial procedure, exchange a fault case, and explain evidence for a bounded claim.
-    - Andrea checks whether another team can run the project from its instructions.
-14. **[Lab 14 — Capstone trial](lab-14-capstone-trial.md)**
-    - Students run unfamiliar physical trials, compare with the rule, and defend the full sense → propose → permit → act → observe → revise trace.
-    - Andrea checks whether raw evidence, including failures and abstentions, is enough to score the outcome.
+Complete these physical build steps and verify electrical safety before powering on digital electronics:
 
-Weeks 1–6 give everyone the same starting system. After that, teams use the labs to investigate their own project question. Weeks 8–9 offer a choice of deeper study; week 12 can be repair; week 13 is rehearsal. Only weeks **2, 6, 10, and 14** need graded submissions. Test whether this rhythm is realistic rather than turning every row into a separate assignment.
+- [ ] **SO-101 Arm Mechanical Assembly:**
+  - Assemble the 6-DoF follower arm using the Seeed Studio SO-101 Pro kit.
+  - Verify mechanical backlash and free range of motion on all 6 joints ($J_1$ base yaw to $J_6$ gripper).
+  - Securely clamp the arm baseplate to the lab workbench using heavy-duty C-clamps. The arm must not tip or rock under maximum payload and full acceleration.
+- [ ] **Camera & Workspace Rigging:**
+  - Mount the standard UVC USB webcam (Logitech C270 or equivalent) on a rigid, vibration-isolated gooseneck arm overlooking the manipulation stage at an oblique angle ($45^\circ$, $40\text{ cm}$ distance).
+  - Define a marked physical workspace boundary ($300\text{ mm} \times 200\text{ mm}$) on the bench surface using high-contrast tape.
+  - Set up diffused, flicker-free LED task lighting to prevent exposure fluctuations.
+- [ ] **Electrical Power Harness & Dedicated Rail:**
+  - Connect a regulated external DC bench power supply ($7.4\text{V}$, $5\text{A}$ rating) dedicated exclusively to the STS3215 servo rail.
+  - Verify that the motor power supply delivers stable $7.4\text{V}$ without voltage sag under multi-joint motion.
+  - **CRITICAL:** Tie the DC motor power ground and Arduino UNO Q ground together into a solid star-ground. **NEVER** draw motor current through the UNO Q headers.
+- [ ] **Dual-Core Board & Bus Communication:**
+  - Power the Arduino UNO Q via its USB-C port using an official 45W USB-PD adapter through the powered USB-C hub.
+  - Plug the UVC webcam into a USB-A port on the hub; verify Linux recognizes the device at `/dev/video0`.
+  - Connect the single-wire half-duplex UART communication line from the STS3215 servo bus to the STM32U585 USART pins via the level-shifter circuit.
 
-## What to send back
+![Arduino UNO Q Dual-Silicon Architecture and Safety Boundary](assets/images/vol4-uno-q-dual-core-architecture.svg){#fig-dual-arch width=100%}
 
-For **each lab**, send a short entry in this form:
+![Physical Bench Rigging & Electrical Power Isolation Harness](assets/images/vol4-bench-wiring-harness.svg){#fig-bench-harness width=100%}
 
-- **Result:** works / works with changes / does not work yet / not tried.
-- **What you tried:** the task, kit and software used, and approximate active lab time.
-- **Student artifact:** a link to the example trace, episode, model output, measurement, or physical video. A failed attempt is useful evidence.
-- **What we would supply:** starter code, checkpoint, dataset, fixture, simulator, fault script, or staff setup.
-- **What should change:** the smallest revision that would make the exercise teach its intended concept.
-- **Next experiment:** if unresolved, what you will try, which part or support it needs, and when you expect an answer.
+---
 
-Also return one short station summary: actual parts and per-station cost; what standard LeRobot already does; whether a learned action policy runs locally on the Q; whether the STM32 can control or refuse the arm's live commands; whether the changed-scene feedback loop works; and how many teams can share a station. Show one other person trying the instructions. Keep the raw evidence linked so we can judge the claims.
+## 3. Phase 1: The Four Go/No-Go Hardware Gate Tests
 
-If the SO-101 cannot support STM32-controlled actions, tell us whether a [one-axis station](lab-sequence.md) can teach that part while the arm teaches LeRobot data and policy work. If local learned action inference does not run on the Q, state that directly so we can revise the hardware or course objective before giving students the lab.
+Before publishing student labs or ordering additional stations, you must successfully pass and log these four sequential technical gates:
+
+```
+[ Gate A: Native LeRobot Teleop ]
+       │ (Pass: Arm moves via standard HF LeRobot scripts)
+       ▼
+[ Gate B: 1-Joint MCU Interceptor ]
+       │ (Pass: STM32 intercepts UART, rejects invalid commands)
+       ▼
+[ Gate C: 6-DoF Governed Arm ]
+       │ (Pass: UnoQMotorsBus adapter runs full arm under MCU bounds)
+       ▼
+[ Gate D: Untethered Closed-Loop Reach ]
+         (Pass: Qualcomm Linux runs INT8 policy at < 100 ms latency)
+```
+
+### Gate A: Native LeRobot USB Teleoperation
+- [ ] Connect the SO-101 arm to a development workstation using the standard USB BusLinker adapter.
+- [ ] Install Hugging Face LeRobot (`pip install lerobot`).
+- [ ] Run the official LeRobot joint calibration utility:
+  ```bash
+  python -m lerobot.scripts.control_robot calibrate --robot.type=so101
+  ```
+- [ ] Record a 60-second teleoperation sequence (leader arm or keyboard teleop) and execute episode replay (`lerobot-replay`).
+- **Success Criteria:** Arm smoothly mirrors teleoperated commands with zero servo jitter or dropped packets.
+
+### Gate B: Single-Joint STM32 Safety Interceptor
+- [ ] Disconnect joint 1 (base yaw) from the host USB BusLinker. Connect its serial data line to the STM32U585 USART header.
+- [ ] Flash baseline interceptor firmware to the STM32 via Arduino App Lab.
+- [ ] Write a 40-line Python test script on Qualcomm Linux that sends velocity requests across the inter-core Bridge (`/dev/ttyRPMSG` or Arduino RPC).
+- [ ] Transmit three test requests:
+  1. A valid $10^\circ$ rotation at $20^\circ/\text{s}$ $\to$ **STM32 must permit and forward to motor**.
+  2. An unsafe $90^\circ$ step requesting $300^\circ/\text{s}$ velocity $\to$ **STM32 must clamp velocity to $45^\circ/\text{s}$ max**.
+  3. An out-of-bounds target position ($220^\circ$) $\to$ **STM32 must refuse motion and enter safe hold**.
+- **Success Criteria:** The STM32 deterministically filters commands; no software bypass can cause unpermitted physical motion.
+
+### Gate C: Full 6-DoF Governed Arm Integration
+- [ ] Connect all 6 SO-101 joints to the governed STM32 bus line.
+- [ ] Implement the minimal LeRobot custom motor bus adapter (`UnoQMotorsBus`) in Python:
+  - Methods: `connect()`, `disconnect()`, `write("Goal_Position", targets)`, `read("Present_Position")`.
+  - The adapter packages joint targets into a lightweight binary struct (`a_req`) and sends it over inter-core RPC.
+  - The STM32 evaluates joint limit tables and a simple Cartesian table-collision geofence ($z_{\text{tool}} \ge 15\text{ mm}$), writes permitted targets (`a_enf`) to the STS3215 bus, reads measured positions (`a_meas`), and returns them over RPC.
+- [ ] Execute standard LeRobot control commands through the governed adapter:
+  ```bash
+  python -m lerobot.scripts.control_robot teleoperate --robot.type=so101_unoq
+  ```
+- **Success Criteria:** All 6 joints operate smoothly through LeRobot while the STM32 intercepts and vetoes any command that would collide with the table surface.
+
+### Gate D: Untethered Closed-Loop Reach on Qualcomm Linux
+- [ ] Export a trained ACT or SmolVLA policy checkpoint to ONNX INT8 format.
+- [ ] Transfer the model file (`policy_int8.onnx`) and Python inference runtime (`pai_edge_runtime.py`) to the Qualcomm Linux storage.
+- [ ] Unplug the USB cable connecting the UNO Q to the host PC. The board must run completely untethered on its USB-PD power supply.
+- [ ] Place a soft foam block inside the marked workspace.
+- [ ] Launch the autonomous edge runtime on Qualcomm Linux via SSH over Wi-Fi:
+  ```bash
+  python pai_edge_runtime.py --model policy_int8.onnx --rate 30
+  ```
+- [ ] Measure end-to-end loop timing across 50 consecutive frames:
+  - $t_{\text{capture}} \le 25\text{ ms}$
+  - $t_{\text{infer}} \le 45\text{ ms}$ (INT8 quantized policy on QRB2210 CPU/NPU)
+  - $t_{\text{bridge}} \le 5\text{ ms}$
+  - $t_{\text{mcu}} \le 2\text{ ms}$
+  - **Total Loop Latency:** $T_{\text{total}} \le 80\text{ ms}$ ($> 12.5\text{ Hz}$ closed-loop bandwidth).
+- **Success Criteria:** The physical arm autonomously reaches and touches the target block without tethered host assistance; total latency stays strictly below $100\text{ ms}$.
+
+---
+
+## 4. Phase 2: "Student Zero" Lab Qualification Runs (Labs 1–8)
+
+For each lab in the 14-week curriculum, Andrea must execute the student protocol end-to-end, identify potential pitfalls, and prepare the "Gold Standard" starter assets:
+
+![Volume IV Physical AI Studio 14-Week Curriculum Map](assets/images/vol4-course-structure-map.svg)
+
+| Lab & Title | Pre-Flight Tasks for Andrea ("Student Zero") | Required Staff Deliverables for Students |
+|:---|:---|:---|
+| **[Lab 1: Causal Boundary](lab-01-boundary.md)** | • Wire dual power rails, common ground, and UART bus.<br>• Verify independent power rail isolation.<br>• Clock cold boot and reset settling times. | • `wiring_diagram_golden.pdf`<br>• `board_pinout_reference.md`<br>• `lab01_boundary_check.py` |
+| **[Lab 2: Sensing & Bridge](lab-02-body-and-sensors.md)** | • Calibrate camera intrinsic/extrinsics using AprilTag.<br>• Test STM32 joint angle readback accuracy ($\pm 1.5^\circ$).<br>• Benchmark inter-core RPC throughput ($> 50\text{ Hz}$). | • `calibrate_camera.py`<br>• `test_bridge_latency.py`<br>• `camera_v4l2_config.sh` |
+| **[Lab 3: Teleop & Datasets](lab-03-physical-episodes.md)** | • Record 10 pick-and-place episodes into LeRobot v2 format.<br>• Validate synchronized storage of RGB frames and joint taps.<br>• Verify HDF5/parquet schema compatibility. | • `teleop_record.py`<br>• `dataset_golden_10ep/`<br>• `inspect_dataset.py` |
+| **[Lab 4: Baseline & Policy Export](lab-04-baseline-and-learning.md)** | • Train baseline ACT policy on workstation (Colab/cluster).<br>• Quantize trained PyTorch checkpoint to ONNX INT8.<br>• Build deterministic heuristic reach baseline. | • `train_act_baseline.py`<br>• `export_onnx_quantized.py`<br>• `pretrained_act_int8.onnx` |
+| **[Lab 5: Autonomous Reach](lab-05-local-feedback-loop.md)** | • Deploy ONNX model natively to Qualcomm Linux.<br>• Execute untethered autonomous reach to randomized targets.<br>• Record 4-tap telemetry trace (`a_req`, `a_map`, `a_enf`, `a_meas`). | • `pai_edge_runtime.py`<br>• `telemetry_logger.py`<br>• `sample_reach_trace.csv` |
+| **[Lab 6: Action Horizons](lab-06-action-chunks.md)** | • Benchmark chunk horizons $K \in \{1, 8, 16, 32\}$.<br>• Test physical obstacle disturbance mid-reach.<br>• Run language conditioning prompt comparison on SmolVLA. | • `benchmark_chunking.py`<br>• `disturbance_eval.py`<br>• `smolvla_eval_harness.py` |
+| **[Lab 7: MCU Safety Governor](lab-07-authority-under-fault.md)** | • Program STM32 velocity clamp and table collision geofence.<br>• Inject table-crash and over-speed commands via Python.<br>• Measure real-time veto reaction latency ($< 5\text{ ms}$). | • `stm32_governor_firmware/`<br>• `inject_table_crash.py`<br>• `veto_audit_golden.csv` |
+| **[Lab 8: Fault Injection](lab-08-verification-and-release.md)** | • Program $150\text{ ms}$ hardware SysTick watchdog on MCU.<br>• Inject Linux process freezes (`kill -STOP`) and camera dropouts.<br>• Prove zero stale command backlog execution upon restart. | • `stm32_watchdog_firmware/`<br>• `fault_injection_suite.py`<br>• `recovery_verification.py` |
+
+---
+
+## 5. Phase 3: Golden System Image & Bench Duplication
+
+Once the single station passes all Gate Tests and Lab Qualifications, prepare the infrastructure for the full student cohort:
+
+- [ ] **Qualcomm Linux Golden SD Card Image:**
+  - Build a clean Ubuntu/Debian rootfs image for the UNO Q QRB2210.
+  - Pre-install dependencies: Python 3.10+, PyTorch ARM64, ONNX Runtime, Hugging Face LeRobot (pinned release), OpenCV, NumPy, V4L2-utils, Git.
+  - Pre-clone student course repository and baseline model checkpoints into `/home/arduino/course/`.
+  - Configure automatic Wi-Fi joining for the university lab network and fixed static hostname (`unoq-station-XX.local`).
+  - Compress and store the golden `.img` file on the lab server for quick flashing.
+- [ ] **STM32 Pre-Flashed Baseline Binary:**
+  - Create the standard Arduino App Lab sketch containing the inter-core RPC listener, STS3215 bus driver, and hardware watchdog timer.
+  - Verify that freshly unboxed UNO Q boards can be flashed with this baseline in $< 2\text{ minutes}$.
+- [ ] **Spare Parts Buffer & Tooling Kit:**
+  - 4x spare STS3215 smart servos (pre-addressed IDs 1 through 6).
+  - 2x backup Logitech C270 USB webcams.
+  - 3x spare 7.4V/5A DC motor power supplies.
+  - Set of 3D-printed spare brackets, gripper jaws, and base clamps.
+  - 2x digital multimeters and logic analyzers (for UART bus debugging).
+
+---
+
+## 6. Phase 4: Risk Mitigation & Fallback Matrix {#sec-fallbacks}
+
+If specific technical blockers arise during bench bring-up, apply these pre-authorized fallbacks:
+
+| Failure / Risk Event | Primary Diagnostic | Pre-Approved Fallback Action |
+|:---|:---|:---|
+| **SmolVLA inference latency is too slow on QRB2210 CPU ($> 200\text{ ms}$)** | Profile ONNX execution breakdown (vision encoder vs LLM backbone). | **Fallback to ACT (Action Chunking with Transformers):** ACT uses a lightweight ResNet/MobileNet visual backbone + small transformer decoder, executing in $< 35\text{ ms}$ on ARM64 INT8. Reserve SmolVLA for workstation analysis in Lab 6. |
+| **Camera frame drops or V4L2 buffer overflow** | Check whether OpenCV capture is running synchronously in the inference thread. | **Separate Capture Thread:** Run frame acquisition in a dedicated background daemon with double-buffering, locking camera exposure via `v4l2-ctl -c exposure_auto=1`. |
+| **Inter-core Bridge latency jitter ($> 15\text{ ms}$)** | High serialization overhead from JSON-RPC. | **Raw Binary RPC:** Switch inter-core messaging to a fixed 24-byte C struct (`float a_req[6]`) transmitted over raw UART shared memory (`/dev/ttyRPMSG`). |
+| **STS3215 servo thermal shutdown during teleop** | Measure servo casing temperature after 20 minutes continuous teleoperation. | **Duty Cycle Clamping:** Add software current limit in STM32 firmware and adhere passive aluminum heatsinks to shoulder ($J_2$) and elbow ($J_3$) servos. |
+
+---
+
+## 7. Weekly Reporting Protocol for Andrea
+
+At the conclusion of each lab qualification pass, send a structured report to the teaching team containing:
+
+1. **Status:** `[WORKS]` / `[WORKS WITH CHANGES]` / `[BLOCKED]`
+2. **Artifact Evidence:** Link to the generated telemetry CSV, LeRobot dataset slice, or video recording.
+3. **Starter Pack Adjustments:** List of starter scripts, configuration defaults, or fixtures that must be supplied.
+4. **Next Milestone:** Target completion date for the next phase.
