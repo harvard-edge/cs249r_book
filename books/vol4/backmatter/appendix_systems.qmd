@@ -6,20 +6,20 @@ This appendix collects the embedded timing, memory, power, and actuator models u
 
 Consult this appendix when diagnosing physical systems bottlenecks, timing jitter, electrical rail instability, or hardware interface boundaries across chapters in this book:
 
-| When you encounter this systems symptom                              | Consult                         | For this quantitative tool                                             |
-|----------------------------------------------------------------------|---------------------------------|------------------------------------------------------------------------|
-| A real-time safety task misses periodic execution deadlines          | @sec-appendix-systems-timers    | Worst-case execution time (WCET) and Response Time Analysis (RTA)      |
-| A software deadlock or kernel panic freezes actuator control loops   | @sec-appendix-systems-timers    | Watchdog detection and separately measured stop-path response          |
-| Inverter bridge MOSFETs burn out or trip overcurrent protections     | @sec-appendix-systems-inverters | Microcontroller PWM complementary timers and dead-time insertion       |
-| Heavy neural inference bursts induce compute brownout resets         | @sec-appendix-systems-droop     | Inductive voltage droop ($L dI/dt$) and alpha-power gate delay         |
-| High-rate sensor DMA streams cause safety threads to miss deadlines  | @sec-appendix-systems-dram      | DRAM bank-conflict penalties and non-preemptive burst queuing          |
-| Sensor fusion streams suffer temporal registration skew under motion | @sec-appendix-systems-ptp       | PTP hardware timestamping and bounded clock conversion                 |
-| Shared memory queues between Linux and MCU return torn or stale data | @sec-appendix-systems-ipc       | SoC hardware mailboxes, RPMSG, and hardware memory barriers            |
-| Joint actuators fail to track sudden torque reversals or overheat    | @sec-appendix-systems-actuators | Stator electrical time constants ($L/R$) and lumped thermal ODEs       |
-| Emergency braking spikes DC bus voltage and damages power silicon    | @sec-appendix-systems-power     | Regenerative capacitive energy surges and dynamic brake choppers       |
-| Shared serial buses experience queuing and message jitter            | @sec-appendix-systems-fieldbus  | CAN FD priority blocking, EtherCAT cycle budgets, and bounded seqlocks |
-| Monocular 3D bounding boxes distort and depth covariance diverges    | @sec-appendix-systems-vision    | Pinhole intrinsic projection and metric unprojection covariance        |
-| A mobile base breaches clearance buffers under surface wetness       | @sec-appendix-systems-stopping  | Kinematic stopping envelopes, information age lag, and velocity clamps |
+| When you encounter this systems symptom                                     | Consult                         | For this quantitative tool                                                            |
+|-----------------------------------------------------------------------------|---------------------------------|---------------------------------------------------------------------------------------|
+| A real-time safety task misses periodic execution deadlines                 | @sec-appendix-systems-timers    | Worst-case execution time (WCET) and Response Time Analysis (RTA)                     |
+| A software deadlock or kernel panic freezes actuator control loops          | @sec-appendix-systems-timers    | Watchdog detection and separately measured stop-path response                         |
+| Inverter bridge MOSFETs burn out or trip overcurrent protections            | @sec-appendix-systems-inverters | Microcontroller PWM complementary timers and dead-time insertion                      |
+| Heavy neural inference bursts induce compute brownout resets                | @sec-appendix-systems-droop     | Inductive voltage droop ($L dI/dt$) and alpha-power gate delay                        |
+| High-rate sensor DMA streams cause safety threads to miss deadlines         | @sec-appendix-systems-dram      | DRAM bank-conflict penalties and non-preemptive burst queuing                         |
+| Sensor fusion streams suffer temporal registration skew under motion        | @sec-appendix-systems-ptp       | PTP hardware timestamping and bounded clock conversion                                |
+| Shared memory queues between Linux and MCU return torn or stale data        | @sec-appendix-systems-ipc       | SoC hardware mailboxes, RPMSG, and hardware memory barriers                           |
+| Joint actuators fail to track sudden torque reversals, chatter, or overheat | @sec-appendix-systems-actuators | Stator $L/R$ constants, thermal ODEs, and reflected rotor jerk limits                 |
+| Emergency braking spikes DC bus voltage and damages power silicon           | @sec-appendix-systems-power     | Regenerative capacitive energy surges and dynamic brake choppers                      |
+| Shared serial buses experience queuing and message jitter                   | @sec-appendix-systems-fieldbus  | CAN FD priority blocking, EtherCAT cycle budgets, and bounded seqlocks                |
+| Monocular 3D bounding boxes distort and depth covariance diverges           | @sec-appendix-systems-vision    | Pinhole intrinsic projection, Zhang's calibration, and metric unprojection covariance |
+| A mobile base breaches clearance buffers under surface wetness              | @sec-appendix-systems-stopping  | Kinematic stopping envelopes, information age lag, and velocity clamps                |
 
 ## Real-Time Timers, Watchdogs, and Schedulability {#sec-appendix-systems-timers}
 
@@ -196,6 +196,28 @@ An above-continuous torque may be permitted transiently if the device's temperat
 
 [^fn-sys-motor-heating]: **Stator Thermal Time Constants**\index{Actuator!stator thermal dynamics}: Resistive Joule heating elevates motor phase winding temperatures during continuous high-torque maneuvers. Because copper electrical resistivity increases linearly with temperature, hot windings exhibit higher resistance, reducing torque output under terminal voltage saturation. Exceeding winding insulation temperature limits breaks down dielectric coatings, causing inter-turn short circuits and irreversible actuator destruction.
 
+### Reflected rotor inertia and angular jerk limits {#sec-appendix-systems-rotor-jerk}
+
+Geared electromagnetic actuators amplify delivered motor torque while multiplying rotor inertia at the joint output. For a transmission with gear reduction ratio $N = \omega_{\text{motor}} / \omega_{\text{joint}}$, kinetic energy conservation dictates the reflected inertia acting at the output link:\index{Reflected rotor inertia!kinetic energy derivation}\index{Angular jerk!electromechanical limits}
+$$ E_k = \frac{1}{2} J_{\text{rotor}} \omega_{\text{motor}}^2 + \frac{1}{2} J_{\text{load}} \omega_{\text{joint}}^2 = \frac{1}{2} (J_{\text{load}} + N^2 J_{\text{rotor}}) \dot{q}^2 $$
+The effective rotational inertia seen at joint coordinate $q$ is:
+$$ J_{\text{eff}} = J_{\text{load}} + N^2 J_{\text{rotor}} $$
+The joint equation of motion under motor electromagnetic torque $\tau_{\text{motor}}$ is:
+$$ \ddot{q} = \frac{N \tau_{\text{motor}} - \tau_{\text{ext}}}{J_{\text{load}} + N^2 J_{\text{rotor}}} $$
+Differentiating $\ddot{q}$ with respect to gear ratio $N$ at zero external load yields:
+$$ \frac{\partial \ddot{q}}{\partial N} = \frac{\tau_{\text{motor}} (J_{\text{load}} - N^2 J_{\text{rotor}})}{(J_{\text{load}} + N^2 J_{\text{rotor}})^2} $$
+Setting $\frac{\partial \ddot{q}}{\partial N} = 0$ yields the **inertia-matching ratio** $N^* = \sqrt{J_{\text{load}} / J_{\text{rotor}}}$. When $N > N^*$, counter-intuitively, increasing the gear ratio decreases delivered joint acceleration because the motor spends the majority of its torque accelerating its own rotor rather than the link.
+
+#### Dynamic angular jerk and torque slew limits
+
+Angular jerk $j_{\text{joint}}(t) = \dddot{q}(t)$ measures the time rate of change of joint acceleration:
+$$ j_{\text{joint}}(t) = \frac{N}{J_{\text{load}} + N^2 J_{\text{rotor}}} \frac{d\tau_{\text{motor}}(t)}{dt} $$
+Electromagnetic torque relates to stator quadrature current via torque constant $K_t$: $\tau_{\text{motor}} = K_t I_q$. From the stator electrical dynamics in this section, current slew rate is bounded by winding inductance $L_{\text{phase}}$:
+$$ \frac{d\tau_{\text{motor}}}{dt} = K_t \frac{dI_q}{dt} = \frac{K_t}{L_{\text{phase}}} \left( V_{\text{terminal}} - K_e \omega_m - R_{\text{phase}} I_q \right) $$
+Under maximum DC bus terminal voltage saturation $V_{\max}$, the physical upper bound on delivered angular jerk is:
+$$ |j_{\max}| \le \frac{N K_t (V_{\max} - K_e \omega_m)}{L_{\text{phase}} (J_{\text{load}} + N^2 J_{\text{rotor}})} $$
+When an unprivileged neural policy outputs a step torque discontinuity $\Delta \boldsymbol{\tau}$ across discrete timesteps, the commanded derivative $\frac{d\tau}{dt} \to \infty$ cannot be delivered instantaneously by physical silicon. The inverter enters hard voltage saturation, causing steep current slew ($dI/dt$), intense thermal stress on power MOSFETs, and shock loads across gear-tooth contact flanks ($\sigma_b \propto W_t / (b m Y)$). Synchronous pre-actuation invariant filters evaluate numerical torque derivatives $(\boldsymbol{\tau}[k] - \boldsymbol{\tau}[k-1]) / \Delta t$ to ensure requested actions remain within allowable jerk envelopes before latching power stages.
+
 ## DC Bus Power Distribution and Energy Absorption {#sec-appendix-systems-power}
 
 A robotic platform's electrical power distribution network must supply acceleration surges and absorb regenerative braking energy across finite bus capacitance and harness impedance.
@@ -275,6 +297,41 @@ $$
 Transforming this 3D point into the robot body frame via rigid extrinsic transform $\mathbf{T}_{bc} = [\mathbf{R}_{bc}, \mathbf{p}_{bc}; \mathbf{0}^\top, 1]$ yields the spatial body covariance:
 $$ \mathbf{\Sigma}_b = \mathbf{R}_{bc} \mathbf{\Sigma}_c \mathbf{R}_{bc}^\top + \mathbf{\Sigma}_{\text{ext}} $$
 where $\mathbf{\Sigma}_{\text{ext}}$ models independent extrinsic uncertainty under this first-order approximation; correlations require the corresponding cross terms. A probabilistic clearance buffer may scale with $\sqrt{\lambda_{\max}(\mathbf{\Sigma}_b)}$ at a declared tail risk. A deterministic permission check instead needs a justified bounded-error envelope; covariance alone does not give a worst-case bound.
+
+### Zhang's planar homography and camera calibration
+
+Zhang's calibration technique computes the camera intrinsic matrix $\mathbf{K}$ by observing a planar calibration rig (such as a checkerboard pattern) across $N \ge 3$ distinct orientations [@zhang2000flexible]. Without loss of generality, assume the model plane lies on $Z = 0$ in world coordinates. A 3D model point $\mathbf{M} = [X, Y, 0, 1]^\top$ maps to a 2D image point $\tilde{\mathbf{u}} = [u, v, 1]^\top$ through a $3 \times 3$ planar homography matrix $\mathbf{H}$:\index{Zhang's calibration!homography matrix}\index{Camera calibration!absolute conic}
+$$
+s \begin{bmatrix} u \\ v \\ 1 \end{bmatrix} = \mathbf{K} \begin{bmatrix} \mathbf{r}_1 & \mathbf{r}_2 & \mathbf{r}_3 & \mathbf{t} \end{bmatrix} \begin{bmatrix} X \\ Y \\ 0 \\ 1 \end{bmatrix} = \mathbf{K} \begin{bmatrix} \mathbf{r}_1 & \mathbf{r}_2 & \mathbf{t} \end{bmatrix} \begin{bmatrix} X \\ Y \\ 1 \end{bmatrix} = \mathbf{H} \begin{bmatrix} X \\ Y \\ 1 \end{bmatrix}
+$$
+where $\mathbf{H} = [\mathbf{h}_1 \; \mathbf{h}_2 \; \mathbf{h}_3] = \lambda \mathbf{K} [\mathbf{r}_1 \; \mathbf{r}_2 \; \mathbf{t}]$ with arbitrary nonzero scalar $\lambda$.
+
+#### Orthogonality constraints on the absolute conic
+
+Because the rotation vectors $\mathbf{r}_1$ and $\mathbf{r}_2$ are orthonormal columns of an $SO(3)$ matrix ($\mathbf{r}_1^\top \mathbf{r}_2 = 0$ and $\|\mathbf{r}_1\| = \|\mathbf{r}_2\| = 1$), inverting $\mathbf{K}$ yields:
+$$
+\mathbf{r}_1 = \frac{1}{\lambda} \mathbf{K}^{-1} \mathbf{h}_1, \quad \mathbf{r}_2 = \frac{1}{\lambda} \mathbf{K}^{-1} \mathbf{h}_2
+$$
+Imposing orthonormality on $\mathbf{r}_1$ and $\mathbf{r}_2$ defines two fundamental algebraic constraints per homography:
+$$
+\mathbf{h}_1^\top \mathbf{K}^{-\top} \mathbf{K}^{-1} \mathbf{h}_2 = 0
+$$
+$$
+\mathbf{h}_1^\top \mathbf{K}^{-\top} \mathbf{K}^{-1} \mathbf{h}_1 - \mathbf{h}_2^\top \mathbf{K}^{-\top} \mathbf{K}^{-1} \mathbf{h}_2 = 0
+$$
+The symmetric matrix $\mathbf{B} = \mathbf{K}^{-\top} \mathbf{K}^{-1}$ represents the image of the absolute conic (IAC):
+$$
+\mathbf{B} = \begin{bmatrix} B_{11} & B_{12} & B_{13} \\ B_{12} & B_{22} & B_{23} \\ B_{13} & B_{23} & B_{33} \end{bmatrix}
+$$
+Defining the 6-vector $\mathbf{b} = [B_{11}, B_{12}, B_{22}, B_{13}, B_{23}, B_{33}]^\top$, each quadratic term $\mathbf{h}_i^\top \mathbf{B} \mathbf{h}_j$ can be rewritten as the linear inner product $\mathbf{v}_{ij}^\top \mathbf{b}$, where:
+$$
+\mathbf{v}_{ij} = \begin{bmatrix} h_{i1}h_{j1} \\ h_{i1}h_{j2} + h_{i2}h_{j1} \\ h_{i2}h_{j2} \\ h_{i3}h_{j1} + h_{i1}h_{j3} \\ h_{i3}h_{j2} + h_{i2}h_{j3} \\ h_{i3}h_{j3} \end{bmatrix}
+$$
+The two constraints per observed orientation become the linear system:
+$$
+\begin{bmatrix} \mathbf{v}_{12}^\top \\ (\mathbf{v}_{11} - \mathbf{v}_{22})^\top \end{bmatrix} \mathbf{b} = \mathbf{0}
+$$
+Stacking $N \ge 3$ images forms the homogeneous system $\mathbf{V} \mathbf{b} = \mathbf{0}$, where $\mathbf{V} \in \mathbb{R}^{2N \times 6}$. The right singular vector of $\mathbf{V}$ corresponding to the smallest singular value provides $\mathbf{b}$ up to a scale factor. The intrinsic parameters $(f_x, f_y, c_x, c_y)$ and skew $\gamma$ are then uniquely extracted via Cholesky factorization of $\mathbf{B}$. This closed-form linear solution initializes the non-linear Levenberg–Marquardt optimization minimizing reprojection residuals over all observed fiducial corners.
 
 ## Kinematic Stopping Envelopes and Information Age Lag {#sec-appendix-systems-stopping}
 
