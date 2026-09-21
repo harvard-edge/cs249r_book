@@ -484,39 +484,41 @@ def press_enter_to_continue():
             pass
         console.print()
 
-def render_pareto_chart(records, frontier_names):
-    """Render an ASCII/Unicode scatter plot of Memory (KB) vs Latency (ms)."""
-    plot_points = {}
-    for r in records:
-        key = f"{r[0]}: {r[1]}"
-        plot_points[key] = (r[3], r[2] / 1024.0)  # (latency_ms, memory_kb)
+def render_tradeoff_chart(title, x_label, y_label, points, frontier_keys, width=44, height=6):
+    """Render an ASCII/Unicode scatter plot for a single benchmark division."""
+    xs = [p[1] for p in points]
+    ys = [p[2] for p in points]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
 
-    width = 54
-    height = 11
-    max_x = max(p[0] for p in plot_points.values()) * 1.15
-    max_y = max(p[1] for p in plot_points.values()) * 1.15
+    span_x = max_x - min_x if max_x > min_x else (max_x if max_x > 0 else 1.0)
+    span_y = max_y - min_y if max_y > min_y else (max_y if max_y > 0 else 1.0)
+
+    pad_x = span_x * 0.18
+    pad_y = span_y * 0.18
+    plot_min_x, plot_max_x = max(0.0, min_x - pad_x), max_x + pad_x
+    plot_min_y, plot_max_y = max(0.0, min_y - pad_y), max_y + pad_y
 
     grid = [[' ' for _ in range(width)] for _ in range(height)]
 
-    for key, (x, y) in plot_points.items():
-        gx = int(x / max_x * (width - 1)) if max_x > 0 else 0
-        gy = int(y / max_y * (height - 1)) if max_y > 0 else 0
+    for name, x, y in points:
+        gx = int((x - plot_min_x) / (plot_max_x - plot_min_x) * (width - 1)) if plot_max_x > plot_min_x else 0
+        gy = int((y - plot_min_y) / (plot_max_y - plot_min_y) * (height - 1)) if plot_max_y > plot_min_y else 0
         gy = (height - 1) - gy
         gx = max(0, min(width - 1, gx))
         gy = max(0, min(height - 1, gy))
-        is_p = key in frontier_names
-        grid[gy][gx] = '★' if is_p else '●'
+        grid[gy][gx] = '★' if name in frontier_keys else '●'
 
     lines = []
-    lines.append("   [bold cyan]Memory (KB) vs Latency (ms) Trade-Off Curve[/bold cyan]")
-    lines.append("   KB ┌" + "─" * width + "┐")
+    lines.append(f"  [bold cyan]{title}[/bold cyan]")
+    lines.append(f"  {y_label[:5]:>5} ┌" + "─" * width + "┐")
     for row_idx, row in enumerate(grid):
-        val_y = max_y - (row_idx / (height - 1)) * max_y
-        prefix = f"{val_y:5.1f} │" if row_idx % 3 == 0 or row_idx == height - 1 else "      │"
+        val_y = plot_max_y - (row_idx / (height - 1)) * (plot_max_y - plot_min_y)
+        prefix = f"{val_y:5.1f} │" if row_idx == 0 or row_idx == height - 1 or row_idx == height // 2 else "      │"
         lines.append(f"{prefix}" + "".join(row) + "│")
-    lines.append("  0.0 └" + "─" * width + "┘")
-    lines.append(f"      0.0" + " " * (width - 14) + f"{max_x:5.1f} ms")
-    lines.append("      Legend: [bold green]★[/bold green] Pareto-optimal frontier    [dim]●[/dim] Dominated candidate")
+    lines.append("        └" + "─" * width + "┘")
+    lines.append(f"        {plot_min_x:<6.1f}" + " " * (width - 16) + f"{plot_max_x:>6.1f} {x_label}")
+    lines.append("        Legend: [bold green]★[/bold green] Pareto frontier    [dim]●[/dim] Dominated candidate")
     return "\n".join(lines)
 
 
@@ -525,28 +527,65 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune,
                             SimpleCNN, GPT, pareto_frontier,
                             enable_kv_cache, disable_kv_cache, Tensor):
     """
-    Step 7: Multi-Architecture Triad Benchmark & Pareto Frontier.
+    Step 7: The Three MLPerf Benchmark Divisions & Workload-Specific Trade-Offs.
 
-    Compare MLP, CNN, and Transformer across the optimization stack:
-    - DigitMLP: Dense classification (Parameter-bound)
-    - SimpleCNN: Spatial feature extraction (Compute-bound)
-    - TinyGPT: Autoregressive language modeling (Decoding/Bandwidth-bound)
+    Evaluates three distinct categories across their natural physical constraints:
+    - Division 1 (Dense MLP): Memory Footprint vs Accuracy
+    - Division 2 (Spatial CNN): Model Size vs Accuracy
+    - Division 3 (Autoregressive GPT): Step Latency vs Memory Footprint
     """
     console.print(Panel(
-        "[bold cyan]🏆 STEP 7: Architectural Triad & Pareto Frontier[/bold cyan]\n"
-        "Benchmarking the three landmark architectures: DigitMLP, SimpleCNN, and TinyGPT\n"
-        "Analyzing how different systems bottlenecks dictate optimization strategies",
-        border_style="cyan"
+        "[bold magenta]╔══════════════════════════════════════════════════════════════════════╗[/bold magenta]\n"
+        "[bold magenta]║[/bold magenta] [bold]🏆 STEP 7: THREE MLPERF BENCHMARK DIVISIONS                          [/bold][bold magenta]║[/bold magenta]\n"
+        "[bold magenta]║[/bold magenta] Three distinct workload categories. Three distinct systems bottlenecks.[bold magenta]║[/bold magenta]\n"
+        "[bold magenta]╚══════════════════════════════════════════════════════════════════════╝[/bold magenta]",
+        border_style="bright_magenta"
     ))
 
     profiler = Profiler()
 
-    # 1. DigitMLP
+    # -------------------------------------------------------------------------
+    # DIVISION 1: Edge & Embedded Inference — DigitMLP (Dense, Parameter-Bound)
+    # -------------------------------------------------------------------------
     mlp_bytes = mlp_baseline['param_bytes']
     mlp_lat = mlp_baseline['latency_ms']
     mlp_q_bytes = mlp_quant['quant_size']
+    mlp_acc = mlp_baseline['baseline_acc']
+    mlp_q_acc = mlp_quant['quant_acc']
+    mlp_p_acc = mlp_prune['pruned_acc']
 
-    # 2. SimpleCNN
+    mlp_records = [
+        ('Baseline FP32', mlp_bytes, mlp_lat, f"{mlp_acc:.1f}%", mlp_acc, 100.0 - mlp_acc),
+        ('INT8 Quantized', mlp_q_bytes, mlp_lat, f"{mlp_q_acc:.1f}%", mlp_q_acc, 100.0 - mlp_q_acc),
+        ('50% Pruned', mlp_bytes, mlp_lat, f"{mlp_p_acc:.1f}%", mlp_p_acc, 100.0 - mlp_p_acc),
+    ]
+    mlp_pts = {r[0]: (r[1] / 1024.0, r[5]) for r in mlp_records}
+    mlp_frontier = set(pareto_frontier(mlp_pts, (True, True)))
+
+    console.print("\n[bold cyan]📍 DIVISION 1: Edge & Embedded Inference — DigitMLP (Dense)[/bold cyan]")
+    console.print("[dim]   Primary Bottleneck: Dense weight memory capacity (SRAM/Flash footprint)[/dim]")
+
+    t1 = Table(box=box.ROUNDED)
+    t1.add_column("Candidate", style="yellow")
+    t1.add_column("Memory Footprint", justify="right")
+    t1.add_column("Accuracy", justify="center")
+    t1.add_column("Latency", justify="right")
+    t1.add_column("Status", justify="center")
+    for r in mlp_records:
+        is_p = r[0] in mlp_frontier
+        status_str = "[bold green]★ Pareto[/bold green]" if is_p else "[dim]● Dominated[/dim]"
+        t1.add_row(r[0], f"{r[1]:,} B", r[3], f"{r[2]:.3f} ms", status_str)
+    console.print(t1)
+
+    mlp_plot_pts = [(r[0], r[1] / 1024.0, r[4]) for r in mlp_records]
+    console.print(render_tradeoff_chart(
+        "Division 1 (MLP): Memory Footprint (KB) vs Accuracy (%)",
+        "KB", "Acc%", mlp_plot_pts, mlp_frontier
+    ))
+
+    # -------------------------------------------------------------------------
+    # DIVISION 2: Spatial Vision & Compute — SimpleCNN (Spatial, Compute-Bound)
+    # -------------------------------------------------------------------------
     cnn = SimpleCNN()
     cnn_bytes = sum(p.data.nbytes for p in cnn.parameters())
     cnn_in = Tensor(np.zeros((1, 1, 8, 8), dtype=np.float32))
@@ -554,7 +593,38 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune,
     cnn_q = Quantizer.quantize_model(cnn)
     cnn_q_bytes = int(cnn_bytes / cnn_q['compression_ratio'])
 
-    # 3. TinyGPT
+    cnn_records = [
+        ('Baseline FP32', cnn_bytes, cnn_lat, '91.5%', 91.5, 8.5),
+        ('INT8 Quantized', cnn_q_bytes, cnn_lat, '91.0%', 91.0, 9.0),
+        ('50% Pruned', cnn_bytes, cnn_lat, '90.5%', 90.5, 9.5),
+    ]
+    cnn_pts = {r[0]: (r[1] / 1024.0, r[5]) for r in cnn_records}
+    cnn_frontier = set(pareto_frontier(cnn_pts, (True, True)))
+
+    console.print("\n[bold cyan]📍 DIVISION 2: Spatial Vision & Compute — SimpleCNN (Spatial)[/bold cyan]")
+    console.print("[dim]   Primary Bottleneck: 2D sliding convolution loops & spatial feature extraction[/dim]")
+
+    t2 = Table(box=box.ROUNDED)
+    t2.add_column("Candidate", style="yellow")
+    t2.add_column("Memory Footprint", justify="right")
+    t2.add_column("Accuracy", justify="center")
+    t2.add_column("Latency", justify="right")
+    t2.add_column("Status", justify="center")
+    for r in cnn_records:
+        is_p = r[0] in cnn_frontier
+        status_str = "[bold green]★ Pareto[/bold green]" if is_p else "[dim]● Dominated[/dim]"
+        t2.add_row(r[0], f"{r[1]:,} B", r[3], f"{r[2]:.3f} ms", status_str)
+    console.print(t2)
+
+    cnn_plot_pts = [(r[0], r[1] / 1024.0, r[4]) for r in cnn_records]
+    console.print(render_tradeoff_chart(
+        "Division 2 (CNN): Memory Footprint (KB) vs Accuracy (%)",
+        "KB", "Acc%", cnn_plot_pts, cnn_frontier
+    ))
+
+    # -------------------------------------------------------------------------
+    # DIVISION 3: Generative LLM Serving — TinyGPT (Autoregressive, Prefix-Bound)
+    # -------------------------------------------------------------------------
     gpt = GPT(vocab_size=28, embed_dim=32, num_layers=2, num_heads=2, max_seq_len=32)
     gpt_bytes = sum(p.data.nbytes for p in gpt.parameters())
     gpt_in = Tensor(np.array([[1, 2, 3, 4]]))
@@ -562,67 +632,50 @@ def step_7_triad_and_pareto(mlp_baseline, mlp_quant, mlp_prune,
     gpt_q = Quantizer.quantize_model(gpt)
     gpt_q_bytes = int(gpt_bytes / gpt_q['compression_ratio'])
 
-    # Measure single-step cached generation
     cache = enable_kv_cache(gpt)
     gpt_cached_lat = profiler.measure_latency(gpt, Tensor(np.array([[5]])), warmup=2, iterations=5)
     disable_kv_cache(gpt)
 
-    records = [
-        ('DigitMLP', 'Baseline FP32', mlp_bytes, mlp_lat, f"{mlp_baseline['baseline_acc']:.1f}% Acc", 'Parameter-bound', 100.0 - mlp_baseline['baseline_acc']),
-        ('DigitMLP', 'INT8 Quantized', mlp_q_bytes, mlp_lat, f"{mlp_quant['quant_acc']:.1f}% Acc", 'Parameter-bound', 100.0 - mlp_quant['quant_acc']),
-        ('DigitMLP', '50% Pruned', mlp_bytes, mlp_lat, f"{mlp_prune['pruned_acc']:.1f}% Acc", 'Parameter-bound', 100.0 - mlp_prune['pruned_acc']),
-        ('SimpleCNN', 'Baseline FP32', cnn_bytes, cnn_lat, '91.5% Acc', 'Compute-bound (Spatial)', 8.5),
-        ('SimpleCNN', 'INT8 Quantized', cnn_q_bytes, cnn_lat, '91.0% Acc', 'Compute-bound (Spatial)', 9.0),
-        ('SimpleCNN', '50% Pruned', cnn_bytes, cnn_lat, '90.5% Acc', 'Compute-bound (Spatial)', 9.5),
-        ('TinyGPT', 'Baseline FP32', gpt_bytes, gpt_lat * 4.0, '4.2 PPL', 'Prefix Recompute O(N²)', 20.0),
-        ('TinyGPT', 'INT8 Quantized', gpt_q_bytes, gpt_lat * 4.0, '4.3 PPL', 'Bandwidth-bound', 20.5),
-        ('TinyGPT', 'KV-Cached (Mod 18)', gpt_bytes, gpt_cached_lat, '4.2 PPL', 'O(1) Step Decoding', 20.0),
-        ('TinyGPT', 'Full Stack (Quant+Cache)', gpt_q_bytes, gpt_cached_lat, '4.3 PPL', 'Production Serving', 20.5),
+    gpt_records = [
+        ('Baseline FP32 (Recompute)', gpt_bytes, gpt_lat * 4.0, '4.2 PPL', 4.2),
+        ('INT8 Quantized (Recompute)', gpt_q_bytes, gpt_lat * 4.0, '4.3 PPL', 4.3),
+        ('KV-Cached (Mod 18)', gpt_bytes, gpt_cached_lat, '4.2 PPL', 4.2),
+        ('Full Stack (Quant+Cache)', gpt_q_bytes, gpt_cached_lat, '4.3 PPL', 4.3),
     ]
+    gpt_pts = {r[0]: (r[2], r[1] / 1024.0, r[4]) for r in gpt_records}
+    gpt_frontier = set(pareto_frontier(gpt_pts, (True, True, True)))
 
-    # Compute Pareto frontier per architecture
-    frontier_names = set()
-    for arch in ['DigitMLP', 'SimpleCNN', 'TinyGPT']:
-        arch_pts = {f"{r[0]}: {r[1]}": (r[3], r[2] / 1024.0, r[6]) for r in records if r[0] == arch}
-        arch_frontier = pareto_frontier(arch_pts, (True, True, True))
-        frontier_names.update(arch_frontier)
+    console.print("\n[bold cyan]📍 DIVISION 3: Generative LLM Serving — TinyGPT (Autoregressive)[/bold cyan]")
+    console.print("[dim]   Primary Bottleneck: O(N²) causal prefix recomputation & DRAM weight streaming[/dim]")
 
-    # Render MLPerf Scorecard
-    scorecard = Table(title="🏆 Architectural Triad MLPerf Scorecard", box=box.ROUNDED)
-    scorecard.add_column("Architecture", style="bold cyan")
-    scorecard.add_column("Candidate", style="yellow")
-    scorecard.add_column("Memory", justify="right")
-    scorecard.add_column("Latency", justify="right")
-    scorecard.add_column("Quality", justify="center")
-    scorecard.add_column("Primary Bottleneck", style="dim")
-    scorecard.add_column("Status", justify="center")
-
-    for r in records:
-        key = f"{r[0]}: {r[1]}"
-        is_p = key in frontier_names
+    t3 = Table(box=box.ROUNDED)
+    t3.add_column("Serving Strategy", style="yellow")
+    t3.add_column("Memory Footprint", justify="right")
+    t3.add_column("Step Latency", justify="right")
+    t3.add_column("Quality", justify="center")
+    t3.add_column("Status", justify="center")
+    for r in gpt_records:
+        is_p = r[0] in gpt_frontier
         status_str = "[bold green]★ Pareto[/bold green]" if is_p else "[dim]● Dominated[/dim]"
-        scorecard.add_row(
-            r[0], r[1],
-            f"{r[2]:,} B",
-            f"{r[3]:.3f} ms",
-            r[4],
-            r[5],
-            status_str
-        )
-    console.print(scorecard)
+        t3.add_row(r[0], f"{r[1]:,} B", f"{r[2]:.3f} ms", r[3], status_str)
+    console.print(t3)
 
-    # Render Pareto Curve
-    chart_str = render_pareto_chart(records, frontier_names)
-    console.print(Panel(chart_str, title="🧭 Pareto Frontier & Trade-Off Curve", border_style="green"))
+    gpt_plot_pts = [(r[0], r[2], r[1] / 1024.0) for r in gpt_records]
+    console.print(render_tradeoff_chart(
+        "Division 3 (TinyGPT): Step Latency (ms) vs Memory Footprint (KB)",
+        "ms", "KB", gpt_plot_pts, gpt_frontier
+    ))
 
-    # Systems Insights
+    # -------------------------------------------------------------------------
+    # CROSS-DIVISION SYSTEMS SYNTHESIS
+    # -------------------------------------------------------------------------
     console.print(Panel(
-        "[bold]💡 Key Systems Takeaway — Asymmetric Architectural Bottlenecks:[/bold]\n\n"
-        "• [cyan]DigitMLP (1986):[/cyan] Dense weights dominate memory. [green]INT8 Quantization (4× smaller)[/green] and [green]Pruning (50% zeros)[/green] give massive storage compression with almost zero accuracy loss.\n"
-        "• [cyan]SimpleCNN (1998):[/cyan] Spatial sliding loops dominate execution time. [green]Vectorized/SIMD matrix multiplication[/green] eliminates Python loop overhead.\n"
-        "• [cyan]TinyGPT (2017–2022):[/cyan] Autoregressive decoding is bottlenecked by prefix recomputation. [green]KV-Cache memoization[/green] eliminates quadratic latency slowdown, enabling real-time token streaming.",
+        "[bold]💡 Key Systems Takeaway — Optimization is Workload-Specific:[/bold]\n\n"
+        "• [cyan]Dense MLP (Edge):[/cyan] Dominated by weight storage. [green]INT8 Quantization (4× smaller)[/green] yields the Pareto sweet spot with zero accuracy penalty.\n"
+        "• [cyan]Spatial CNN (Vision):[/cyan] Dominated by spatial convolution loops. [green]SIMD vectorization and INT8[/green] form the multi-objective Pareto frontier.\n"
+        "• [cyan]Autoregressive GPT (LLM):[/cyan] Bottlenecked by prefix recomputation and memory bandwidth. [green]KV-Cache memoization[/green] eliminates quadratic latency slowdown, and pairing it with [green]INT8 quantization[/green] unlocks production-grade serving.",
         border_style="bright_blue",
-        title="🔬 Architectural Bottleneck Analysis"
+        title="🔬 Cross-Division Systems Synthesis"
     ))
 
 

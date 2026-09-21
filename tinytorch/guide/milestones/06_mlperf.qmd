@@ -94,52 +94,100 @@ tito milestone run 06 --part 2   # speed up transformer generation with the KV c
 
 ## Expected Results
 
-### Part 1: Architectural Triad MLPerf Scorecard
+### Part 1: Three MLPerf Benchmark Divisions
 
-@tbl-milestone-06-triad-scorecard presents the multi-objective evaluation of the architectural triad across candidates.
+MLPerf organizes workloads into distinct benchmark divisions because different machine learning domains face fundamentally different systems constraints. You evaluate the three architectures in their own divisions:
 
-| Architecture | Candidate | Memory | Latency | Quality | Primary Bottleneck | Status |
-|:---|:---|---:|---:|:---|:---|:---|
-| **DigitMLP** | Baseline FP32 | 9,640 B | 0.023 ms | 86.5% Acc | Parameter-bound (Dense) | ● Dominated |
-| **DigitMLP** | INT8 Quantized | 2,442 B | 0.023 ms | 86.5% Acc | Parameter-bound (Dense) | ★ **Pareto** |
-| **DigitMLP** | 50% Pruned | 9,640 B | 0.023 ms | 86.0% Acc | Parameter-bound (Dense) | ● Dominated |
-| **SimpleCNN** | Baseline FP32 | 2,664 B | 1.636 ms | 91.5% Acc | Compute-bound (Spatial) | ★ **Pareto** |
-| **SimpleCNN** | INT8 Quantized | 714 B | 1.636 ms | 91.0% Acc | Compute-bound (Spatial) | ★ **Pareto** |
-| **SimpleCNN** | 50% Pruned | 2,664 B | 1.636 ms | 90.5% Acc | Compute-bound (Spatial) | ● Dominated |
-| **TinyGPT** | Baseline FP32 | 113,152 B | 0.960 ms | 4.2 PPL | Prefix Recompute $O(N^2)$ | ● Dominated |
-| **TinyGPT** | INT8 Quantized | 28,584 B | 0.960 ms | 4.3 PPL | Bandwidth-bound | ● Dominated |
-| **TinyGPT** | KV-Cached (Mod 18) | 113,152 B | 0.219 ms | 4.2 PPL | $O(1)$ Step Decoding | ★ **Pareto** |
-| **TinyGPT** | Full Stack (Quant+Cache) | 28,584 B | 0.219 ms | 4.3 PPL | Production Serving | ★ **Pareto** |
+#### Division 1: Edge & Embedded Inference — `DigitMLP` (Dense)
 
-: **Architectural Triad MLPerf Scorecard across independent optimization candidates.** {#tbl-milestone-06-triad-scorecard}
+Primary Bottleneck: Dense weight memory capacity (SRAM/Flash storage footprint).
 
-### Pareto Frontier & Trade-Off Curve
+@tbl-milestone-06-mlp-scorecard reports the candidates for `DigitMLP`.
 
-The benchmark evaluates each candidate using `pareto_frontier` from Module 19. A configuration is **Pareto-optimal** ($\bigstar$) if no other configuration achieves strictly better metrics in one dimension without sacrificing another.
+| Candidate | Memory Footprint | Accuracy | Latency | Status |
+|:---|---:|:---:|---:|:---:|
+| **Baseline FP32** | 9,640 B | 86.5% | 0.023 ms | ● Dominated |
+| **INT8 Quantized** | 2,442 B | 86.5% | 0.023 ms | ★ **Pareto** |
+| **50% Pruned** | 9,640 B | 86.0% | 0.023 ms | ● Dominated |
+
+: **Division 1 (MLP) Scorecard.** {#tbl-milestone-06-mlp-scorecard}
 
 ```
-       Memory (KB) vs Latency (ms) Trade-Off Curve
-   KB ┌──────────────────────────────────────────────────────┐
-127.1 │                                                      │
-      │                                                      │
-      │      ★                    ●                          │
- 89.0 │                                                      │
-      │                                                      │
-      │                                                      │
- 50.8 │                                                      │
-      │                                                      │
-      │      ★                    ●                          │
- 12.7 │                                                      │
-  0.0 │●                                             ●       │
-  0.0 └──────────────────────────────────────────────────────┘
-      0.0                                          1.9 ms
-      Legend: ★ Pareto-optimal frontier    ● Dominated candidate
+  Division 1 (MLP): Memory Footprint (KB) vs Accuracy (%)
+   Acc% ┌────────────────────────────────────────────┐
+ 86.6 │                                            │
+      │     ★                               ●      │
+      │                                            │
+ 86.2 │                                            │
+      │                                            │
+ 85.9 │                                     ●      │
+        └────────────────────────────────────────────┘
+        1.1                                 10.7 KB
+        Legend: ★ Pareto frontier    ● Dominated candidate
 ```
 
-Notice the key insight: **Pareto frontiers are architecture-specific**:
-- On `DigitMLP`, INT8 Quantization strictly dominates baseline FP32 because it yields $3.95\times$ compression with zero degradation in accuracy.
-- On `SimpleCNN`, Baseline FP32 and INT8 Quantization form the frontier: FP32 preserves maximum top-line accuracy (91.5%), while INT8 offers ultra-compact footprint (714 B) at 91.0% accuracy.
-- On `TinyGPT`, the KV-Cached and Full Stack (Quant + Cache) configurations form the frontier: caching removes the quadratic latency penalty of prefix recomputation, and quantization compresses the weight memory footprint by $3.96\times$.
+**Division 1 Takeaway:** Fully connected feed-forward models are memory-bound by weight parameters. INT8 Quantization slashes memory by $3.95\times$ with zero accuracy penalty, strictly dominating baseline FP32. Unstructured pruning zeros weights but cannot reduce resident memory without sparse storage encodings (e.g., CSR).
+
+#### Division 2: Spatial Vision & Compute — `SimpleCNN` (Spatial)
+
+Primary Bottleneck: 2D sliding convolution loops and spatial feature extraction throughput.
+
+@tbl-milestone-06-cnn-scorecard reports the candidates for `SimpleCNN`.
+
+| Candidate | Memory Footprint | Accuracy | Latency | Status |
+|:---|---:|:---:|---:|:---:|
+| **Baseline FP32** | 2,664 B | 91.5% | 1.208 ms | ★ **Pareto** |
+| **INT8 Quantized** | 714 B | 91.0% | 1.208 ms | ★ **Pareto** |
+| **50% Pruned** | 2,664 B | 90.5% | 1.208 ms | ● Dominated |
+
+: **Division 2 (CNN) Scorecard.** {#tbl-milestone-06-cnn-scorecard}
+
+```
+  Division 2 (CNN): Memory Footprint (KB) vs Accuracy (%)
+   Acc% ┌────────────────────────────────────────────┐
+ 91.7 │                                            │
+      │                                     ★      │
+      │                                            │
+ 90.9 │     ★                                      │
+      │                                            │
+ 90.3 │                                     ●      │
+        └────────────────────────────────────────────┘
+        0.4                                  2.9 KB
+        Legend: ★ Pareto frontier    ● Dominated candidate
+```
+
+**Division 2 Takeaway:** Convolutional networks have a modest parameter footprint (2.6 KB) but high computational intensity. Baseline FP32 and INT8 Quantization form the Pareto frontier: FP32 delivers maximum accuracy (91.5%), while INT8 provides an ultra-compact footprint (714 B) with minimal accuracy degradation.
+
+#### Division 3: Generative LLM Serving — `TinyGPT` (Autoregressive)
+
+Primary Bottleneck: $O(N^2)$ causal prefix recomputation and DRAM weight streaming during token decoding.
+
+@tbl-milestone-06-gpt-scorecard reports the serving strategies for `TinyGPT`.
+
+| Serving Strategy | Memory Footprint | Step Latency | Quality | Status |
+|:---|---:|---:|:---:|:---:|
+| **Baseline FP32 (Recompute)** | 113,152 B | 0.973 ms | 4.2 PPL | ● Dominated |
+| **INT8 Quantized (Recompute)** | 28,584 B | 0.973 ms | 4.3 PPL | ● Dominated |
+| **KV-Cached (Mod 18)** | 113,152 B | 0.209 ms | 4.2 PPL | ★ **Pareto** |
+| **Full Stack (Quant+Cache)** | 28,584 B | 0.209 ms | 4.3 PPL | ★ **Pareto** |
+
+: **Division 3 (TinyGPT) Scorecard.** {#tbl-milestone-06-gpt-scorecard}
+
+```
+  Division 3 (TinyGPT): Step Latency (ms) vs Memory Footprint (KB)
+     KB ┌────────────────────────────────────────────┐
+125.4 │                                            │
+      │     ★                               ●      │
+      │                                            │
+ 58.0 │                                            │
+      │                                            │
+ 13.0 │     ★                               ●      │
+        └────────────────────────────────────────────┘
+        0.1                                  1.1 ms
+        Legend: ★ Pareto frontier    ● Dominated candidate
+```
+
+**Division 3 Takeaway:** Autoregressive generation is fundamentally throttled by prefix recomputation. KV-Cache memoization eliminates quadratic prefix processing ($4.4\times$ faster step decoding), while INT8 quantization compresses weight memory bandwidth by $4\times$. The two combined (`Full Stack`) represent the industry-standard serving configuration.
 
 ### Part 2: Generation Speedup
 

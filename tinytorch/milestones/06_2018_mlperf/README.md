@@ -4,24 +4,26 @@ Compare a trained model with changed versions of itself, and measure a cache
 without changing the computation. These are classroom experiments inspired by
 MLPerf's measurement discipline, not official MLPerf submissions.
 
-## Part 1: Optimization Olympics & Architectural Triad
+## Part 1: Optimization Olympics across Three Benchmark Divisions
 
-`01_optimization_olympics.py` evaluates the **Architectural Triad** built across the curriculum:
+`01_optimization_olympics.py` evaluates three distinct architectural categories across their natural physical constraints:
 
-1. **DigitMLP** (Milestone 03) — Dense, parameter-bound
-2. **SimpleCNN** (Milestone 04) — Spatial, compute-bound
-3. **TinyGPT** (Milestone 05) — Autoregressive, memory-bandwidth & prefix-bound
+1. **Division 1: Edge & Embedded Inference — `DigitMLP` (Dense, Parameter-Bound)**
+   - Primary constraint: Weight storage capacity in SRAM/Flash.
+   - Evaluates: FP32 Baseline, INT8 Quantization (4× smaller), 50% Magnitude Pruning.
+   - Trade-off curve: Memory Footprint (KB) vs. Classification Accuracy (%).
 
-The benchmark profiles each baseline and creates optimization candidates across the stack:
-- **INT8 Quantization** (Module 15): 4× modeled storage compression
-- **Magnitude Pruning** (Module 16): 50% weight sparsity
-- **Vectorized Acceleration** (Module 17): SIMD-style matrix operations
-- **KV-Cache Memoization** (Module 18): Recomputation-free autoregressive decoding
+2. **Division 2: Spatial Vision & Compute — `SimpleCNN` (Spatial, Compute-Bound)**
+   - Primary constraint: Spatial convolution loops and compute throughput.
+   - Evaluates: FP32 Baseline, INT8 Quantization, 50% Magnitude Pruning.
+   - Trade-off curve: Memory Footprint (KB) vs. Classification Accuracy (%).
 
-It computes the **Pareto frontier** using Module 19 (`pareto_frontier`), renders an ASCII **Pareto Trade-Off Curve**, and surfaces the **Asymmetric Architectural Bottlenecks**:
-- **MLP**: Memory is dominated by dense weight matrices — quantization compresses storage 4× with negligible accuracy drop.
-- **CNN**: Execution time is dominated by spatial convolution loops — vectorized matrix routines eliminate Python loop overhead.
-- **Transformer**: Autoregressive decoding is bound by prefix recomputation and memory bandwidth — KV-cache memoization eliminates quadratic latency slowdown.
+3. **Division 3: Generative LLM Serving — `TinyGPT` (Autoregressive, Prefix-Bound)**
+   - Primary constraint: $O(N^2)$ prefix recomputation and DRAM weight streaming.
+   - Evaluates: Full Prefix Recompute, INT8 Quantization, KV-Cache Memoization, Full Stack (Quant + Cache).
+   - Trade-off curve: Step Latency (ms) vs. Memory Footprint (KB).
+
+Each division computes its own **Pareto frontier** using Module 19 (`pareto_frontier`) and plots a tailored ASCII trade-off curve, illustrating why optimization strategies must match the workload category.
 
 Required modules: 01–08 and 14–19.
 
