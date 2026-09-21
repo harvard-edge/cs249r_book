@@ -27,7 +27,7 @@ This studio teaches students to build and evaluate physical AI systems across tw
 Students build, measure, and defend the **Causal Permission Boundary** connecting the two processors over an internal RPC bridge with zero unmonitored host bypass.
 :::
 
-![The Dual-Brain Architecture of Physical AI: Asymmetric Cognition vs. Deterministic Governance](assets/images/vol4-dual-brain-architecture.svg){#fig-dual-brain width=100%}
+![The Dual-Brain Architecture of Physical AI: Asymmetric Cognition vs. Deterministic Governance](assets/images/vol4-dual-brain-architecture.svg)
 
 The primary objectives for this 13-week execution window:
 1. **Week 1 Planning & Bench Preparation:** Finalize the master curriculum plan, audit the Bill of Materials (BOM), allocate dedicated workbench space at ETH Zurich, and verify electrical power rails before unboxing.
@@ -42,7 +42,7 @@ The primary objectives for this 13-week execution window:
 
 The 13-week schedule is organized into six logical phases across five sprints, shifting physical assembly into Week 2 to allow Week 1 to focus entirely on architecture alignment, BOM audit, and bench preparation:
 
-![Volume IV Physical AI Studio: 13-Week Staff Implementation Roadmap](assets/images/vol4-staff-roadmap.svg){#fig-staff-roadmap width=100%}
+![Volume IV Physical AI Studio: 13-Week Staff Implementation Roadmap](assets/images/vol4-staff-roadmap.svg)
 
 ---
 
@@ -63,7 +63,7 @@ The studio relies on an open, modular, and safety-hardened hardware stack design
 
 Before assembling the physical arm or connecting motor power, review the electrical wiring schematic. The architecture uses clean galvanic separation between digital computing logic and high-current actuator power:
 
-![Physical Bench Rigging & Electrical Bus Interface](assets/images/vol4-bench-wiring-harness.svg){#fig-bench-harness width=100%}
+![Physical Bench Rigging & Electrical Bus Interface](assets/images/vol4-bench-wiring-harness.svg)
 
 ::: {.callout-note}
 ### Dual Power Supply Engineering Rationale
