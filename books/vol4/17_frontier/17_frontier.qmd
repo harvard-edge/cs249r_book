@@ -108,18 +108,13 @@ alpha = 1.0 - confidence
 fleet_units = 100
 t_cycle_days = 90.0
 hours_per_day = 24.0
-hours_per_year = 8766  # total hours in a year
 
 c_shield_assumed = 0.9999  # class-specific interception coverage needs separate evidence
 p_hw_assumed = 0.0  # illustration only; hardware and common-cause risk need evidence
 proposal_events_hypothetical = 0  # separate counterfactual-oracle proposal log
 proposal_exposure_hours_hypothetical = 216000.0
 
-# ┌── 2. COMPUTE (Astronomical exposure vs shield decomposition) ───────
-n_astronomical_hours = calc_empirical_testing_exposure(p_target, confidence=confidence)
-machine_years_astronomical = n_astronomical_hours.magnitude / hours_per_year
-fleet_calendar_years = machine_years_astronomical / fleet_units
-
+# ┌── 2. COMPUTE (Fleet record vs shield decomposition) ────────────────
 # Quarterly cycle exposure: zero observed system events bound the integrated system rate.
 t_cycle_hours = t_cycle_days * hours_per_day
 n_cycle_hours = fleet_units * t_cycle_hours
@@ -140,9 +135,6 @@ c_required_cycle = 1.0 - (p_target - p_hw_assumed) / p_proposal_upper_hypothetic
 test_overrun_days = t_test_days - t_cycle_days
 
 # ┌── 3. GUARDS (Statistical bounds & invariance checks) ──────────────
-check(abs(n_astronomical_hours.magnitude - 2.9957e9) < 1e7, f"Unexpected astronomical exposure: {n_astronomical_hours}")
-check(abs(machine_years_astronomical - 341744.0) < 500.0, f"Unexpected machine years: {machine_years_astronomical}")
-check(abs(fleet_calendar_years - 3417.4) < 10.0, f"Unexpected fleet calendar years: {fleet_calendar_years}")
 check(abs(n_cycle_hours - 216000.0) < 1.0, f"Unexpected cycle hours: {n_cycle_hours}")
 check(abs(p_system_observed_upper - 1.3869e-5) < 1e-8, f"Unexpected system rate: {p_system_observed_upper}")
 check(abs(ratio_empirical_to_target - 13869.0) < 10.0, f"Unexpected ratio: {ratio_empirical_to_target}")
@@ -158,11 +150,6 @@ check(test_overrun_days > 34.0, f"Unexpected 90-day overrun: {test_overrun_days}
 # ┌── 4. OUTPUT (Canonical formatting) ────────────────────────────────
 class ArchitecturalShieldDilution:
     p_target_sci_str = fmt_sci(p_target)
-    n_astronomical_sci_str = fmt_sci(n_astronomical_hours.magnitude)
-    n_astronomical_sci_1dec_str = fmt_sci(n_astronomical_hours.magnitude, precision=1)
-    machine_years_str = fmt_int(round(machine_years_astronomical), commas=True)
-    machine_years_k_str = fmt_int(round(machine_years_astronomical / 1000.0) * 1000, commas=True)
-    fleet_calendar_years_str = fmt_int(round(fleet_calendar_years))
 
     n_cycle_sci_str = fmt_sci(n_cycle_hours, precision=2)
     p_emp_sci_str = fmt_sci(p_system_observed_upper, precision=3)
@@ -180,67 +167,9 @@ class ArchitecturalShieldDilution:
     test_overrun_days_str = fmt(test_overrun_days, precision=1)
 ```
 
-Before counting hours, define the event, exposed population, operating conditions, rate target $\lambda$, confidence level $1-\alpha$, and dependence assumptions. For the illustrative $10^{-9}\text{ h}^{-1}$ target,[^fn-std-sil4-testing] a stationary homogeneous Poisson model gives $P(N(n)=0\mid\lambda)=e^{-\lambda n}$. With zero events, the one-sided upper rate is $\lambda_U=-\ln\alpha/n$; reaching $\lambda_U\le\lambda$ requires @eq-frontier-zero-failure-exposure:
-$$n \ge \frac{-\ln \alpha}{p}$$ {#eq-frontier-zero-failure-exposure}
-Evaluating @eq-frontier-zero-failure-exposure for $p = 10^{-9}\text{ failures/h}$ at 95 percent confidence ($\alpha = 0.05$) yields $n \ge -\ln(0.05) / 10^{-9} \approx$ `{python} ArchitecturalShieldDilution.n_astronomical_sci_str` hours. Accumulating `{python} ArchitecturalShieldDilution.n_astronomical_sci_1dec_str` operating hours without a single observed failure requires approximately `{python} ArchitecturalShieldDilution.machine_years_str` machine-years of continuous execution ($1\text{ year} = 8{,}766\text{ h}$). For an operational fleet of $M = 100$ physical units running continuously, accumulating this empirical exposure requires $T_{\text{fleet}} \approx$ `{python} ArchitecturalShieldDilution.fleet_calendar_years_str` calendar years (@fig-17-epistemic-limits, panel b). This threshold represents the **astronomical exposure wall**\index{Astronomical exposure wall!definition}: the mathematical scaling limit where a rare rate target requires exposure inversely proportional to that target, beyond this fleet’s proposed release interval (for the statistical derivation under Poisson and binomial models, see @sec-appendix-ml-exposure).[^fn-math-astronomical-wall] @Fig-17-exposure-scaling extends that relation across the full range of target rates, and the curve is the argument: because required exposure grows as the reciprocal of the probability being bounded, each additional order of magnitude of claimed safety costs an order of magnitude more operating time than the last.
+This section uses an illustrative system target of $10^{-9}\text{ h}^{-1}$. The value is a teaching choice, not a threshold that a standard assigns to this machine. Under a stationary Poisson model, zero events in $n$ fleet-hours bound the rate at about $3/n$ with 95 percent confidence,[^fn-math-exposure-updates] so operating hours alone leave that target far out of reach. The remaining question is what a shield between proposal and actuation can add to the claim, and which of its premises need evidence of their own.
 
-[^fn-std-sil4-testing]: **Scope of the Rate**\index{IEC 61508!SIL 4 testing}: The $10^{-9}\text{ h}^{-1}$ rate is an illustrative system hazard target here. The IEC 61508 high-demand SIL 4 dangerous-failure band is $\ge10^{-9}$ to $<10^{-8}\text{ h}^{-1}$ in the [UK HSE functional-safety guide](https://www.hse.gov.uk/offshore/assets/docs/functional-safety-inspection-guide.pdf); it does not prescribe this chapter's target for every machine.
-
-[^fn-math-astronomical-wall]: **Evidence Across Updates**\index{Astronomical exposure wall!retraining reset}: An updated model may alter the proposal distribution. Earlier data can be pooled only with a justified configuration-equivalence and exposure argument; an update does not automatically erase every observation. The Poisson model also requires a defensible treatment of shared fleet conditions and correlated faults.
-
-::: {#fig-17-exposure-scaling fig-env="figure" fig-pos="htb" fig-cap="**Astronomical exposure wall**: Required failure-free exposure hours against target failure probability per hour, under a Poisson zero-event model at 95 percent confidence, with the equivalent machine-years on the opposing axis. Certifying $10^{-9}$ per hour demands roughly three billion failure-free hours, which this fleet cannot accumulate within its 90-day update interval." fig-alt="Log-log chart with an inverted horizontal axis showing required failure-free test hours rising as the target failure probability falls. A marked point at ten to the minus ninth per hour sits at roughly three billion hours, annotated as the astronomical exposure wall, with a second axis giving the equivalent machine-years."}
-
-```{python}
-#| echo: false
-import pandas as pd
-import matplotlib.pyplot as plt
-from mlsysim import viz
-
-data = pd.read_csv("vol4/17_frontier/data/exposure_scaling.csv")
-
-fig, ax1, COLORS, plt = viz.setup_plot(figsize=(8, 5))
-
-ax1.plot(data["target_failure_rate"], data["required_exposure_hours"], linewidth=2.5, color=COLORS["RedLine"])
-
-ax1.set_xscale("log")
-ax1.set_yscale("log")
-ax1.invert_xaxis()
-
-ax1.set_xlabel("Target Failure Probability ($p$) per hour", fontweight="bold")
-ax1.set_ylabel("Required Failure-Free Hours ($n$)", color=COLORS["RedLine"], fontweight="bold")
-ax1.tick_params(axis='y', labelcolor=COLORS["RedLine"])
-
-# Annotate the astronomical limit
-threshold_p = 1e-9
-threshold_n = 2.9957 / threshold_p
-
-ax1.axvline(x=threshold_p, color="black", linestyle="--", alpha=0.5)
-ax1.axhline(y=threshold_n, color=COLORS["RedLine"], linestyle="--", alpha=0.5)
-ax1.plot(threshold_p, threshold_n, marker="o", markersize=8, color=COLORS["RedLine"])
-
-ax1.annotate(
-    "Astronomical Exposure Wall\n$p = 10^{-9}$, $n \\approx 3 \\times 10^9$ h",
-    xy=(threshold_p, threshold_n),
-    xytext=(1e-7, 1e10),
-    arrowprops=dict(facecolor='black', arrowstyle="->", alpha=0.7),
-    fontsize=10,
-    backgroundcolor="white",
-)
-
-ax2 = ax1.twinx()
-ax2.set_yscale("log")
-ax2.set_ylim(ax1.get_ylim()[0] / (24 * 365.25), ax1.get_ylim()[1] / (24 * 365.25))
-ax2.set_ylabel("Required Machine-Years", color=COLORS["primary"], fontweight="bold")
-ax2.tick_params(axis='y', labelcolor=COLORS["primary"])
-
-ax1.margins(x=0.14, y=0.14)
-plt.tight_layout()
-
-plt.show()
-plt.close()
-```
-
-:::
+[^fn-math-exposure-updates]: **Evidence Across Updates**\index{Exposure wall!retraining reset}: An updated model may alter the proposal distribution. Earlier data can be pooled only with a justified configuration-equivalence and exposure argument; an update does not automatically erase every observation. The Poisson model also requires a defensible treatment of shared fleet conditions and correlated faults.
 
 ::: {#nbk-frontier-fleet-exposure-and-shielded-decomposition .callout-notebook title="Fleet exposure and a conditional shield calculation"}
 
@@ -263,14 +192,13 @@ The relation requires a valid proposal oracle, timely detection, actuator author
 
 [^fn-hw-fault-registers]: **Physical Trip Path**\index{Hardware fault register!trip}: Some configured comparator and gate-driver paths can remove commanded torque without waiting for the host scheduler. The pin response, drive behavior, mechanical stopping time, and clearance must be measured for the particular plant. Torque removal alone may permit coasting or gravity-driven motion.
 
-::: {#chk-frontier-astronomical-exposure-wall-and-fleet-scaling .callout-checkpoint title="Exposure wall and distinct event rates"}
+::: {#chk-frontier-conditional-shield-claims .callout-checkpoint title="Conditional shield claims"}
 
-Before accepting fleet-scale statistical evidence for rare physical hazards, verify your understanding of exposure models, Poisson assumptions, and decomposed safety warrants:
+Before crediting a shield with part of a rare-hazard claim, verify that you can separate the events each record counts and the evidence each warrant needs:
 
 - [ ] **Fleet evidence scope**: Which event does the zero-incident fleet record bound, and why can it not measure prevented hazardous proposals?
-- [ ] **Statistical assumptions**: What stationary Poisson and fleet-dependence assumptions underlie $-\ln(0.05)/T$?
 - [ ] **Decomposed warrants**: For a named hazard class, what separate proposal, interception, hardware, and common-cause evidence would justify @eq-frontier-shielded-hazard?
-- [ ] **Exposure deficit**: Why does the illustrative 90-day proposal scenario with $c=0.9999$ still miss $10^{-9}\text{ h}^{-1}$?
+- [ ] **Coverage shortfall**: Why does the illustrative 90-day proposal scenario with $c=0.9999$ still miss $10^{-9}\text{ h}^{-1}$?
 
 :::
 
@@ -282,7 +210,7 @@ A planetary rover provides a different example. A long Earth–Mars communicatio
 
 ## A Residual-Claims Register {#sec-frontier-residual-claims-register}
 
-An unproven premise remains even if an engineer omits it from a safety report. When empirical testing cannot establish a safety bound, the unproven premise enters a formal **residual-claims register**\index{Residual-claims register!definition}. This auditable engineering ledger maps every unproven premise or unmonitored invariant to its missing physical observable, its active containment or operating restriction, an accountable human owner, and a predeclared closure test. An engineering team cannot treat an unverified physical assumption as an unwritten risk or temporary convenience. Without these four components, an unresolved claim is an open release claim.
+An unproven premise remains even if an engineer omits it from a safety report. The **residual-claims register**\index{Residual-claims register!definition} consumes the release manifest of @sec-release-manifest, taking from it every premise the release left open or unsupported. An open entry restricts authority until its predeclared closure test passes. The register maps each such premise, and every unmonitored invariant, to its missing physical observable, its active containment or operating restriction, an accountable human owner, and a predeclared closure test. An engineering team cannot treat an unverified physical assumption as an unwritten risk or temporary convenience. Without these four components, an unresolved claim is an open release claim.
 
 Each entry links the unsupported claim to the specific unmeasurable physical observable. In an embodied system with physical authority over mass, a learned policy fails to settle a safety property because sensors cannot transduce the relevant environmental state, the computing substrate cannot process the measurement within the control deadline, or the physical interaction cannot be observed before contact occurs. An engineer must define the **missing observable**\index{Missing observable!definition} with physical precision rather than statistical abstractions. Characterizing an unknown failure as an "out-of-distribution latent state" provides no actionable signal for an enforcement loop to trigger a physical intervention. By contrast, stating an unmeasured surface friction coefficient, an undetected optical flare across a camera lens array, or an unobservable micro-fracture in an actuator housing identifies the exact physical deficit. Naming the missing observable establishes the boundary where learned inference stops and physical uncertainty begins.
 
@@ -396,7 +324,7 @@ The specified reactive path misses the 15 ms fracture deadline; the passive exam
 
 Legged robots face a related uncertainty on rubble: a camera can show the shape of a block without measuring how it will bear a footstep. A contact response therefore needs measured joint, sensing, and support limits; a photographed course alone cannot establish millisecond reflex timing, torque capacity, or a safe fall. Passive foot mechanics may help under tested load conditions. @Fig-17-humanoid-disaster-rubble shows the geometry that makes this hard, a field of loose and stacked cinderblocks in which every candidate foothold carries a load-bearing capacity that no camera reports.
 
-::: {#fig-17-humanoid-disaster-rubble fig-env="figure" fig-pos="H" fig-cap="**Rubble support uncertainty**: A humanoid test platform steps among cinderblocks at the 2015 DARPA Robotics Challenge. The image shows irregular support geometry; it does not measure block strength, controller rate, joint torque, or recovery time. U.S. Navy photograph (public domain)." fig-alt="A humanoid test robot places a foot among loose and stacked cinderblocks. Rails, exposed mechanisms, and an uneven test surface are visible. The image does not show the strength of the blocks or the robot's control response."}
+::: {#fig-17-humanoid-disaster-rubble fig-env="figure" fig-pos="H" fig-cap="**Rubble support uncertainty**: A humanoid test platform steps among cinderblocks at the 2015 DARPA Robotics Challenge (@sec-brain-cognitive-vulnerabilities). The image shows irregular support geometry; it does not measure block strength, controller rate, joint torque, or recovery time. U.S. Navy photograph (public domain)." fig-alt="A humanoid test robot places a foot among loose and stacked cinderblocks. Rails, exposed mechanisms, and an uneven test surface are visible. The image does not show the strength of the blocks or the robot's control response."}
 ![](images/jpg/fig17_real_humanoid_disaster_rubble.jpg){width="85%" fig-alt="A humanoid test robot places a foot among loose and stacked cinderblocks. Rails, exposed mechanisms, and an uneven test surface are visible. The image does not show the strength of the blocks or the robot's control response."}
 :::
 
@@ -599,7 +527,7 @@ A manipulator's rotor magnets degrade\index{Flux degradation} during repeated du
 
 **Fallacy**: *Empirical fleet testing can statistically validate ultra-rare catastrophic failure rates in open-world environments.*
 
-A delivery-vehicle developer presents $500{,}000\text{ hours}$ without accidents to support a claimed catastrophic rate of $p \le 10^{-9}/\text{hour}$ at 95 percent confidence. The stated zero-failure bound requires $n \ge 3.0 \times 10^9\text{ h}$ under its exposure assumptions, far beyond the submitted record. Correlated fleet conditions and configuration changes require an argument about which observations are applicable. The record cannot support the proposed rate merely because no accident occurred. Release must narrow the claim or provide additional architectural evidence for bounded physical authority, with explicit assumptions and validation of the protective mechanism. Calling that mechanism deterministic does not itself close the evidence gap.
+A delivery-vehicle developer presents $500{,}000\text{ hours}$ without accidents to support a claimed catastrophic rate of $p \le 10^{-9}/\text{hour}$ at 95 percent confidence. Zero events bound a rate only at about three divided by the exposure hours (@sec-evaluation-trial-limits), so this record supports a rate thousands of times higher than the one claimed. Correlated fleet conditions and configuration changes require an argument about which observations are applicable. The record cannot support the proposed rate merely because no accident occurred. Release must narrow the claim or provide additional architectural evidence for bounded physical authority, with explicit assumptions and validation of the protective mechanism. Calling that mechanism deterministic does not itself close the evidence gap.
 
 :::
 
@@ -630,7 +558,7 @@ At the causal boundary\index{Causal boundary} (@sec-boundary-causal-boundary), a
 * **Residual Claims Must Constrain Operating Authority:** Empirical verification cannot test the full combinatorial open world. A **Residual-Claims Register**\index{Residual-Claims Register} identifies unsupported premises, the restrictions or containment measures proposed for them, and the evidence needed to justify those measures; where that justification is unavailable, operation must be withheld.
 * **Observational Indistinguishability Demands Structural Containment:** When safe and catastrophic physical states emit identical pre-harm sensor signals ($y_A(t) \equiv y_B(t)$) until the reaction window is exhausted ($t_{\text{distinguish}} + \tau_{\text{det}} + \tau_{\text{act}} > t_{\text{harm}}$), a detector using those signals cannot distinguish them in time. Passive compliance\index{Passive compliance}, slip clutches\index{Slip clutches}, or velocity restrictions\index{Velocity restrictions} must then be evaluated against the hazard rather than assumed sufficient.
 * **The Exposure Wall Limits Empirical Assurance:** The exposure wall of @sec-evaluation-trial-limits puts a rare-hazard rate beyond the reach of any practical failure-free campaign. That limit motivates combining empirical evidence with architectural isolation\index{Architectural isolation} and runtime enforcement\index{Runtime enforcement}, whose coverage and physical assumptions must also be justified.
-* **The Proposal–Permission Architectural Invariant:** A learned model may propose actions; a separately validated permission path owns actuator admission and state-dependent fallback. Its processor and cycle time are chosen from measured plant deadlines.
+* **The Proposal Boundary Invariant:** A learned model may propose actions; a separately validated permission path owns actuator admission and state-dependent fallback. Its processor and cycle time are chosen from measured plant deadlines.
 * **Delay Consumes Physical Margin:** While a machine moves, computational delay\index{Computational delay} consumes clearance ($\Delta x = \int v \, dt$), and released kinetic energy\index{Kinetic energy} ($\frac{1}{2}mv^2$) cannot be recalled. The operating argument must account for detection, response time (including SerDes bandwidth\index{SerDes bandwidth} and bus jitter\index{Bus jitter}), and the mechanical body's ability to safely dissipate that kinetic energy within the hazard-assessed envelope; ISO 10218 / ISO/TS 15066 apply where their industrial robot scope fits\index{ISO/TS 15066}.
 :::
 

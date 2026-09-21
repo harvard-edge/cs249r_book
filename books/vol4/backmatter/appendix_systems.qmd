@@ -1,25 +1,26 @@
 # Systems and Hardware {#sec-appendix-systems}
 
-This appendix collects the embedded timing, memory, power, and actuator models used throughout this book. Each bound depends on a specified device, workload, and operating envelope; the equations identify what must be measured before a physical deadline can be claimed.
+This appendix collects the embedded timing, memory, power, and actuator models used throughout this book, together with the byte layouts of records that cross the proposal boundary. Each bound depends on a specified device, workload, and operating envelope; the equations identify what must be measured before a physical deadline can be claimed.
 
 ## How to Use This Appendix
 
 Consult this appendix when diagnosing physical systems bottlenecks, timing jitter, electrical rail instability, or hardware interface boundaries across chapters in this book:
 
-| When you encounter this systems symptom                                     | Consult                         | For this quantitative tool                                                            |
-|-----------------------------------------------------------------------------|---------------------------------|---------------------------------------------------------------------------------------|
-| A real-time safety task misses periodic execution deadlines                 | @sec-appendix-systems-timers    | Worst-case execution time (WCET) and Response Time Analysis (RTA)                     |
-| A software deadlock or kernel panic freezes actuator control loops          | @sec-appendix-systems-timers    | Watchdog detection and separately measured stop-path response                         |
-| Inverter bridge MOSFETs burn out or trip overcurrent protections            | @sec-appendix-systems-inverters | Microcontroller PWM complementary timers and dead-time insertion                      |
-| Heavy neural inference bursts induce compute brownout resets                | @sec-appendix-systems-droop     | Inductive voltage droop ($L dI/dt$) and alpha-power gate delay                        |
-| High-rate sensor DMA streams cause safety threads to miss deadlines         | @sec-appendix-systems-dram      | DRAM bank-conflict penalties and non-preemptive burst queuing                         |
-| Sensor fusion streams suffer temporal registration skew under motion        | @sec-appendix-systems-ptp       | PTP hardware timestamping and bounded clock conversion                                |
-| Shared memory queues between Linux and MCU return torn or stale data        | @sec-appendix-systems-ipc       | SoC hardware mailboxes, RPMSG, and hardware memory barriers                           |
-| Joint actuators fail to track sudden torque reversals, chatter, or overheat | @sec-appendix-systems-actuators | Stator $L/R$ constants, thermal ODEs, and reflected rotor jerk limits                 |
-| Emergency braking spikes DC bus voltage and damages power silicon           | @sec-appendix-systems-power     | Regenerative capacitive energy surges and dynamic brake choppers                      |
-| Shared serial buses experience queuing and message jitter                   | @sec-appendix-systems-fieldbus  | CAN FD priority blocking, EtherCAT cycle budgets, and bounded seqlocks                |
-| Monocular 3D bounding boxes distort and depth covariance diverges           | @sec-appendix-systems-vision    | Pinhole intrinsic projection, Zhang's calibration, and metric unprojection covariance |
-| A mobile base breaches clearance buffers under surface wetness              | @sec-appendix-systems-stopping  | Kinematic stopping envelopes, information age lag, and velocity clamps                |
+| When you encounter this systems symptom                                     | Consult                            | For this quantitative tool                                                            |
+|-----------------------------------------------------------------------------|------------------------------------|---------------------------------------------------------------------------------------|
+| A real-time safety task misses periodic execution deadlines                 | @sec-appendix-systems-timers       | Worst-case execution time (WCET) and Response Time Analysis (RTA)                     |
+| A software deadlock or kernel panic freezes actuator control loops          | @sec-appendix-systems-timers       | Watchdog detection and separately measured stop-path response                         |
+| Inverter bridge MOSFETs burn out or trip overcurrent protections            | @sec-appendix-systems-inverters    | Microcontroller PWM complementary timers and dead-time insertion                      |
+| Heavy neural inference bursts induce compute brownout resets                | @sec-appendix-systems-droop        | Inductive voltage droop ($L dI/dt$) and alpha-power gate delay                        |
+| High-rate sensor DMA streams cause safety threads to miss deadlines         | @sec-appendix-systems-dram         | DRAM bank-conflict penalties and non-preemptive burst queuing                         |
+| Sensor fusion streams suffer temporal registration skew under motion        | @sec-appendix-systems-ptp          | PTP hardware timestamping and bounded clock conversion                                |
+| Shared memory queues between Linux and MCU return torn or stale data        | @sec-appendix-systems-ipc          | SoC hardware mailboxes, RPMSG, and hardware memory barriers                           |
+| Joint actuators fail to track sudden torque reversals, chatter, or overheat | @sec-appendix-systems-actuators    | Stator $L/R$ constants, thermal ODEs, and reflected rotor jerk limits                 |
+| Emergency braking spikes DC bus voltage and damages power silicon           | @sec-appendix-systems-power        | Regenerative capacitive energy surges and dynamic brake choppers                      |
+| Shared serial buses experience queuing and message jitter                   | @sec-appendix-systems-fieldbus     | CAN FD priority blocking, EtherCAT cycle budgets, and bounded seqlocks                |
+| Monocular 3D bounding boxes distort and depth covariance diverges           | @sec-appendix-systems-vision       | Pinhole intrinsic projection, Zhang's calibration, and metric unprojection covariance |
+| A mobile base breaches clearance buffers under surface wetness              | @sec-appendix-systems-stopping     | Kinematic stopping envelopes, information age lag, and velocity clamps                |
+| A record must be laid out for a fixed-size mailbox or log                   | @sec-appendix-systems-wire-formats | Proposal header fields, time units, and integrity fields                              |
 
 ## Real-Time Timers, Watchdogs, and Schedulability {#sec-appendix-systems-timers}
 
@@ -230,7 +231,7 @@ These terms cannot simply be added as simultaneous peaks without a circuit and w
 
 ### Regenerative braking surges and chopper sizing
 
-During controlled regenerative deceleration, some mechanical kinetic energy $E_k=\frac12mv_0^2$ (linear) or $E_k=\frac12J_{\text{load}}\dot q_0^2$ (rotational) may return through the inverter. If the battery cannot accept it and an assumed fraction $\eta_{\text{regen}}$ reaches the local bus capacitor $C_{\text{bus}}$ before another sink acts, the ideal capacitor relation is:\index{Regenerative braking!chopper resistor}
+During controlled regenerative deceleration, some mechanical kinetic energy $E_k=\frac12mv^2$ (linear) or $E_k=\frac12J_{\text{load}}\dot q_0^2$ (rotational) may return through the inverter. If the battery cannot accept it and an assumed fraction $\eta_{\text{regen}}$ reaches the local bus capacitor $C_{\text{bus}}$ before another sink acts, the ideal capacitor relation is:\index{Regenerative braking!chopper resistor}
 $$ \Delta E_C = \frac{1}{2} C_{\text{bus}} \left( V_{\text{final}}^2 - V_{\text{initial}}^2 \right) = \eta_{\text{regen}} E_k $$
 $$ V_{\text{final}} = \sqrt{ V_{\text{initial}}^2 + \frac{2 \eta_{\text{regen}} E_k}{C_{\text{bus}}} } $$
 For an implementation with an active **brake chopper**, the resistor and switch must absorb the modeled peak power and pulse energy when $V_{\text{bus}}\ge V_{\text{clamp}}$:[^fn-sys-brake-chopper]
@@ -271,6 +272,57 @@ A **sequence counter** marks a single writer's publication in progress with an o
    - Accept only if $S_1=S_2$ and both are even, and the copied frame passes integrity, timestamp, and lease checks. Otherwise retain the last validated local command only while its lease and stopping margin permit; then enter the MCU-owned fallback.
 
 The reader's one-attempt execution time can be bounded on the target hardware; success probability depends on the writer's schedule and cannot be inferred from payload size alone. Conventional Linux seqlock readers may retry, as the [kernel documentation](https://docs.kernel.org/locking/seqlock.html) shows, but a real-time permission gate cannot use an unbounded retry loop.
+
+```pseudocode
+#| label: algo-lock-free-trajectory
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+
+\begin{algorithm}
+\caption{Single-Slot Trajectory Seqlock Baseline}
+\begin{algorithmic}
+\Require proposal $P$ (proposal header with $\text{sequence\_id}$, $\text{t\_evidence\_ns}$, $\text{sync\_error\_ns}$, $\text{t\_expire\_ns}$; waypoints $\mathbf{w}_{1..K}$; $\text{crc32}$), scratch buffer $B_{\text{scratch}}$ and previously validated active spline $B_{\text{active}}$ in static SRAM, shared SRAM mailbox $(c_{\text{seq}}, \text{Slot}_{\text{shared}})$, current time $t_{\text{now}}$ and evidence-age budget $t_{\text{age,max}}$ (the largest admissible $t_{\text{age}}$), both on the permission processor's clock
+\Ensure promoted validated chunk in $B_{\text{active}}$ or rejection with $B_{\text{active}}$ unchanged
+\Statex
+\Function{PublishActionChunk}{$P$}
+    \State $c_{\text{curr}} \gets \Call{AtomicLoadExplicit}{c_{\text{seq}}, \text{memory\_order\_relaxed}}$
+    \State $\Call{AtomicStoreExplicit}{c_{\text{seq}}, c_{\text{curr}} + 1, \text{memory\_order\_relaxed}}$ \Comment{mark odd: write in progress}
+    \State $\Call{HardwareMemoryBarrier}{\text{DMB\_OSHST}}$ \Comment{outer-shareable store barrier pushes counter}
+    \State $\Call{CopyMemory}{\text{Slot}_{\text{shared}}.\text{payload}, P, \text{sizeof}(P)}$ \Comment{copy multi-word trajectory}
+    \State $\Call{HardwareMemoryBarrier}{\text{DMB\_OSH}}$ \Comment{outer-shareable full barrier: payload visible}
+    \State $\Call{AtomicStoreExplicit}{c_{\text{seq}}, c_{\text{curr}} + 2, \text{memory\_order\_release}}$ \Comment{mark even: publish committed}
+\EndFunction
+\Statex
+\Function{LatchLatestActionChunk}{$B_{\text{scratch}}, B_{\text{active}}, t_{\text{now}}$}
+    \State $c_{\text{start}} \gets \Call{AtomicLoadExplicit}{c_{\text{seq}}, \text{memory\_order\_acquire}}$ \Comment{load initial counter (ARM LDAR acquire)}
+    \If{$c_{\text{start}}$ is odd}
+        \State \Return $\text{STATUS\_WRITER\_ACTIVE}$ \Comment{writer active; retain prior spline}
+    \EndIf
+    \State $\Call{HardwareMemoryBarrier}{\text{DMB\_OSHLD}}$ \Comment{explicit barrier: prevent payload reads hoisting before counter}
+    \State $\Call{CopyMemory}{B_{\text{scratch}}, \text{Slot}_{\text{shared}}.\text{payload}, \text{sizeof}(\text{Payload})}$ \Comment{tentative copy; active spline unchanged}
+    \State $\Call{HardwareMemoryBarrier}{\text{DMB\_OSHLD}}$ \Comment{LDAR cannot prevent prior reads sinking; DMB forces payload reads before $c_{\text{end}}$}
+    \State $c_{\text{end}} \gets \Call{AtomicLoadExplicit}{c_{\text{seq}}, \text{memory\_order\_acquire}}$ \Comment{re-read sequence counter}
+    \If{$c_{\text{start}} \ne c_{\text{end}}$}
+        \State \Return $\text{STATUS\_TORN\_READ}$ \Comment{concurrent write detected}
+    \EndIf
+    \If{$\Call{ComputeCrc32}{B_{\text{scratch}}} \ne B_{\text{scratch}}.\text{crc32}$}
+        \State \Return $\text{STATUS\_CHECKSUM\_INVALID}$
+    \EndIf
+    \If{$t_{\text{now}} \ge B_{\text{scratch}}.\text{t\_expire\_ns}$}
+        \State \Return $\text{STATUS\_LEASE\_EXPIRED}$ \Comment{expiry is absolute; the reader may only shorten it}
+    \EndIf
+    \If{$t_{\text{now}} - B_{\text{scratch}}.\text{t\_evidence\_ns} + B_{\text{scratch}}.\text{sync\_error\_ns} > t_{\text{age,max}}$}
+        \State \Return $\text{STATUS\_EVIDENCE\_STALE}$ \Comment{conversion error is added to every age}
+    \EndIf
+    \State $B_{\text{active}} \gets B_{\text{scratch}}$ \Comment{promote only after sequence, CRC, expiry, and evidence-age checks}
+    \State \Return $\text{STATUS\_VALID\_LATCHED}$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+```
+
+@Sec-nervous-cadences exchanges the proposal header and its chunk payload through this mailbox; @sec-appendix-systems-wire-header gives their byte layout.
 
 ## Camera Projective Geometry and Covariance Propagation {#sec-appendix-systems-vision}
 
@@ -335,33 +387,59 @@ Stacking $N \ge 3$ images forms the homogeneous system $\mathbf{V} \mathbf{b} = 
 
 ## Kinematic Stopping Envelopes and Information Age Lag {#sec-appendix-systems-stopping}
 
-Halting an embodied machine transporting mass $m$ at velocity $v_0$ requires balancing sensorimotor information freshness and mechanical braking deceleration.
+Halting an embodied machine transporting mass $m$ at speed $v$ requires balancing sensorimotor information freshness and mechanical braking deceleration.
 
 ### Sensorimotor information age and lag distance
 
-For a specified hazard detector and stop path, let $\tau_{\text{pre}}$ bound the time from the physical state represented by the evidence until validated braking deceleration begins:\index{Kinematic stopping distance!information age}
-$$ \tau_{\text{pre}} = t_{\text{age}} + t_{\text{detect}} + t_{\text{compute}} + t_{\text{bus}} + t_{\text{brake-onset}} $$
+For a specified hazard detector and stop path, let $\tau_{\text{delay}}$ bound the time from the physical state represented by the evidence until validated braking deceleration begins:\index{Kinematic stopping distance!information age}
+$$ \tau_{\text{delay}} = t_{\text{age}} + t_{\text{detect}} + t_{\text{compute}} + T_{\text{bus}} + T_{\text{act}} $$
 where:
 
 - $t_{\text{age}}$ converts the evidence timestamp to the controller clock and includes exposure/readout and clock error.
 - $t_{\text{detect}}$ bounds recognition or lease-expiry detection.
 - $t_{\text{compute}}$ is the admitted stop decision, including any required input transfer.
-- $t_{\text{bus}}$ bounds command dispatch and network queuing.
-- $t_{\text{brake-onset}}$ ends when the measured actuator begins delivering the specified deceleration, not when a command register is written.
+- $T_{\text{bus}}$ bounds command dispatch and network queuing.
+- $T_{\text{act}}$ ends when the measured actuator begins delivering the specified deceleration, not when a command register is written.
 
-Under the explicit simplifying assumption that speed cannot increase before brake onset, the pre-brake travel is bounded by $d_{\text{lag}}=v_0\tau_{\text{pre}}$. If propulsion or a slope can increase speed, use its validated acceleration bound in this interval instead.
+Under the explicit simplifying assumption that speed cannot increase before brake onset, the pre-brake travel is bounded by $d_{\text{lag}}=v\,\tau_{\text{delay}}$. If propulsion or a slope can increase speed, use its validated acceleration bound in this interval instead.
 
 ### Braking dynamics and friction limits
 
-Tire-floor friction and actuator torque place upper limits on achievable deceleration; $a\le\mu g$ does not establish what braking the machine will deliver.\index{Braking!friction limit} Let $a_{\text{floor}}>0$ be a validated lower bound on *achieved* deceleration throughout the stop, for the declared load, temperature, slope, brake condition, and surface. A justified friction floor $\mu_{\text{floor}}$ may support that bound, but does not replace brake tests. With constant or stronger braking after onset, and a nonnegative clearance allowance $\epsilon_d$ for state and tracking error,
-$$ d_{\text{stop,bound}}(v_0)=v_0\tau_{\text{pre}}+\frac{v_0^2}{2a_{\text{floor}}}+\epsilon_d. $$
-Motion is admitted only when $d_{\text{stop,bound}}(v_0)\le d_{\text{clear,lower}}$, where $d_{\text{clear,lower}}$ is a validated lower bound on available path clearance. The sampled controller must reserve intersample travel and a state-matched stop before the viable region is lost.
+Tire-floor friction and actuator torque place upper limits on achievable deceleration; $a\le\mu g$ does not establish what braking the machine will deliver.\index{Braking!friction limit} Let $a_{\text{brake}}>0$ be a validated lower bound on *achieved* deceleration throughout the stop, for the declared load, temperature, slope, brake condition, and surface. A justified friction floor $\mu_{\text{floor}}$ may support that bound, but does not replace brake tests. With constant or stronger braking after onset, a localization bound $\delta_{\text{loc}}$, a fixed protective clearance $\delta_{\text{margin}}$, and a tracking-error bound $\epsilon_{\text{track}}$,
+$$ d_{\text{stop}}(v)=v\,\tau_{\text{delay}}+\frac{v^2}{2a_{\text{brake}}}+\delta_{\text{loc}}+\delta_{\text{margin}}+\epsilon_{\text{track}}. $$
+Motion is admitted only when $d_{\text{stop}}(v)\le D_{\text{clear}}$, where $D_{\text{clear}}$ is taken as a validated lower bound on available path clearance. This is the inset stopping distance that @sec-enforcement-stopping-envelopes defends. The sampled controller must reserve intersample travel and a state-matched stop before the viable region is lost.
 
 ### Kinetic energy derating and friction collapse
 
-In an ideal friction-limited model, lowering $\mu$ from $\mu_{\text{nom}}$ to a positive $\mu_{\text{fault}}$ changes the braking-distance ratio to $\mu_{\text{nom}}/\mu_{\text{fault}}$.\index{Velocity clamp!kinetic derating} That ratio is illustrative; actual deceleration can also be limited by brake hardware or control. If surface friction is not sensed in time, derive $a_{\text{floor}}$ from a controlled surface condition and inspection schedule, exclude degraded surfaces, or withhold motion. For the constant-speed pre-brake model above, solving the clearance inequality gives
-$$ v_{\text{clamp}}=-a_{\text{floor}}\tau_{\text{pre}}+\sqrt{(a_{\text{floor}}\tau_{\text{pre}})^2+2a_{\text{floor}}(d_{\text{clear,lower}}-\epsilon_d)}. $$
-This clamp is valid only when $d_{\text{clear,lower}}>\epsilon_d$, the braking and timing lower bounds hold, and the speed bound is enforced before entering the hazard corridor. No positive clamp follows if the available deceleration floor is unknown or zero.
+In an ideal friction-limited model, lowering $\mu$ from $\mu_{\text{nom}}$ to a positive $\mu_{\text{fault}}$ changes the braking-distance ratio to $\mu_{\text{nom}}/\mu_{\text{fault}}$.\index{Velocity clamp!kinetic derating} That ratio is illustrative; actual deceleration can also be limited by brake hardware or control. If surface friction is not sensed in time, derive $a_{\text{brake}}$ from a controlled surface condition and inspection schedule, exclude degraded surfaces, or withhold motion. For the constant-speed pre-brake model above, solving the clearance inequality gives
+$$ v_{\text{clamp}}=-a_{\text{brake}}\tau_{\text{delay}}+\sqrt{(a_{\text{brake}}\tau_{\text{delay}})^2+2a_{\text{brake}}\left(D_{\text{clear}}-\delta_{\text{loc}}-\delta_{\text{margin}}-\epsilon_{\text{track}}\right)}. $$
+This clamp is valid only when $D_{\text{clear}}$ exceeds the three fixed allowances, the braking and timing lower bounds hold, and the speed bound is enforced before entering the hazard corridor. No positive clamp follows if the available deceleration floor is unknown or zero.
+
+## Wire Formats for the Record Chain {#sec-appendix-systems-wire-formats}
+
+The chapters name each record's fields by meaning and state the invariant the record enforces. This section gives the byte layouts for records that must fit a fixed-size mailbox or log. Every time field is an unsigned 64-bit count of nanoseconds on the permission processor's monotonic clock, and `sync_error_ns` carries the conversion bound for evidence captured on another clock. The clock and integrity policies themselves belong to @sec-nervous-cadences; the layouts here fix the algorithm for each integrity job. Corruption detection uses a CRC-32 (IEEE 802.3) over header and payload, lineage uses a SHA-256 digest of the consumed record, and authority uses HMAC-SHA-256 on operator commands, a keyed hash chain on the forensic log, and Ed25519 signatures on offline evidence and release artifacts.
+
+### Proposal header and chunk payload {#sec-appendix-systems-wire-header}
+
+Every proposal that crosses the proposal boundary opens with the same header, and `payload_kind` selects the payload that follows. @Tbl-appendix-systems-wire-header lays out the header with the minimal chunk payload of @sec-nervous-cadences. The chunk carries kinematic setpoints only. Torque is computed on the permission side, where the tracker derives it from the admitted reference, so a learned proposal never names a motor torque.
+
+| Field              | Scalar type       | Unit                       | Invariant and description                                                                                   |
+|:-------------------|:------------------|:---------------------------|:------------------------------------------------------------------------------------------------------------|
+| `sequence_id`      | `uint64_t`        | dimensionless              | Strictly increasing per producer; a record not newer than the last accepted one is rejected.                |
+| `t_evidence_ns`    | `uint64_t`        | ns, permission clock       | Capture epoch of the oldest evidence the proposal rests on, converted to the permission processor's clock.  |
+| `sync_error_ns`    | `uint32_t`        | ns                         | Bound on that conversion's error; added to every age the reader checks.                                     |
+| `t_issue_ns`       | `uint64_t`        | ns, permission clock       | Time the producer published the record.                                                                     |
+| `t_expire_ns`      | `uint64_t`        | ns, permission clock       | Requested absolute expiry, no later than the chunk lease allows; the permission path may only shorten it.   |
+| `parent_digest`    | `uint8_t[32]`     | SHA-256                    | Digest of the record this proposal was derived from.                                                        |
+| `frame_id`         | `uint64_t`        | dimensionless              | Transform-tree key and calibration revision of the setpoints' frame.                                        |
+| `payload_kind`     | `uint16_t`        | enumeration                | `CHUNK` for this payload; `INTENT`, `TRAJECTORY`, and `OPERATOR` select the other payloads.                 |
+| `payload_len`      | `uint16_t`        | bytes                      | Payload length; bounds the parser before any payload byte is read.                                          |
+| `num_waypoints`    | `uint16_t`        | dimensionless              | Chunk horizon count ($K \in [16, 50]$).                                                                     |
+| `joint_positions`  | `float32[K][N_j]` | radians ($\text{rad}$)     | Commanded joint angles within the reach limits ($q_{\min} \le q \le q_{\max}$).                             |
+| `joint_velocities` | `float32[K][N_j]` | radians/s ($\text{rad/s}$) | Commanded joint velocities within certified ceilings ($\lVert \dot{\mathbf{q}} \rVert \le \dot{q}_{\max}$). |
+| `crc32`            | `uint32_t`        | checksum                   | Last field; IEEE 802.3 CRC-32 over all preceding bytes.                                                     |
+
+: **Proposal header and chunk payload**: Field layout, scalar types, units, and invariants for a chunk proposal exchanged through the seqlock mailbox of @algo-lock-free-trajectory. All times are nanoseconds on the permission processor's monotonic clock. {#tbl-appendix-systems-wire-header tbl-colwidths="[18,16,20,46]"}
 
 ## Further Reading
 
