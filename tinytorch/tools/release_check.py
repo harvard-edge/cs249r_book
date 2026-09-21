@@ -812,7 +812,7 @@ def g_journey():
         "code='\\n'.join(''.join(c['source']) for c in nb['cells'] if c['cell_type']=='code'); "
         "exec(compile(code,str(p),'exec'),{'__name__':'__main__'})"
     )
-    with tempfile.TemporaryDirectory(prefix="tinytorch-progression-") as tmp:
+    with tempfile.TemporaryDirectory(dir=ROOT, prefix="tinytorch-progression-") as tmp:
         package = pathlib.Path(tmp) / "tinytorch"
         for subdir in ("", "core", "perf"):
             target = package / subdir

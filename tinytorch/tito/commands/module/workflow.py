@@ -1552,7 +1552,8 @@ if missing:
             self.console.print(f"[dim]📦 Exporting {notebook_path.name} → tinytorch/{relative_target}[/dim]")
             # nbdev may succeed without producing anything. A fresh directory
             # prevents a previous export from masquerading as this notebook's work.
-            with tempfile.TemporaryDirectory(prefix="tinytorch-export-") as staging:
+            # Use dir=root to prevent cross-drive ValueError on Windows CI (D: vs C:).
+            with tempfile.TemporaryDirectory(dir=root, prefix="tinytorch-export-") as staging:
                 nb_export(notebook_path, lib_path=Path(staging))
                 produced = Path(staging) / relative_target
                 if not produced.is_file():

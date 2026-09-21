@@ -17,6 +17,15 @@ def test_invalid_common_hyperparameters_fail_before_mutating_parameter(optimizer
     assert not parameter.requires_grad
 
 
+@pytest.mark.parametrize("optimizer_cls", [SGD, Adam, AdamW])
+def test_optimizer_preserves_frozen_parameter_requires_grad(optimizer_cls):
+    frozen_param = Tensor([1.0, 2.0], requires_grad=False)
+    active_param = Tensor([3.0, 4.0], requires_grad=True)
+    optimizer = optimizer_cls([frozen_param, active_param])
+    assert not frozen_param.requires_grad
+    assert active_param.requires_grad
+
+
 @pytest.mark.parametrize("optimizer_cls", [Adam, AdamW])
 @pytest.mark.parametrize("kwargs", [
     {"betas": (1.0, 0.999)}, {"betas": (0.9, -0.1)},

@@ -57,7 +57,7 @@ def main() -> int:
     if len(sources) != 20:
         print(f"Expected 20 source modules, found {len(sources)}", file=sys.stderr)
         return 1
-    with tempfile.TemporaryDirectory(prefix="tinytorch-reference-") as tmp:
+    with tempfile.TemporaryDirectory(dir=ROOT, prefix="tinytorch-reference-") as tmp:
         sandbox = Path(tmp)
         package = sandbox / "tinytorch"
         for subdir in ("", "core", "perf"):

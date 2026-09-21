@@ -210,8 +210,8 @@ class Optimizer:
         1. Store parameters as a list for iteration
         2. Reject a duplicated parameter: the same tensor listed twice would get
            two state slots and be stepped twice per update
-        3. Mark every parameter requires_grad=True; give it a grad attribute
-           (set to None) only if it has none yet
+        3. Give each parameter a grad attribute (set to None) only if it has
+           none yet, preserving existing requires_grad configuration
         4. Initialize step counter for algorithms that need it
 
         EXAMPLE:
@@ -231,10 +231,9 @@ class Optimizer:
         if len({id(param) for param in self.params}) != len(self.params):
             raise ValueError("Optimizer parameters must not contain duplicates")
 
-        # Every parameter must take part in autograd. Do NOT reset param.grad:
+        # Parameters track gradients through layer definitions. Do NOT reset param.grad:
         # a caller may have run backward() before building the optimizer.
         for param in self.params:
-            param.requires_grad = True
             if not hasattr(param, 'grad'):
                 param.grad = None
         self.step_count = 0  # For algorithms that need step counting
@@ -413,12 +412,17 @@ def test_unit_optimizer_base():
     assert param1.grad is None
     assert param2.grad is None
 
-    # A tensor that was not already tracking gradients is still accepted: the
-    # constructor sets requires_grad itself. What it does reject is a duplicate.
-    regular_param = Tensor([1.0])
+    # An optimizer preserves parameter requires_grad settings (so frozen layers
+    # remain frozen). What the constructor does reject is a duplicate parameter.
+    regular_param = Tensor([1.0], requires_grad=True)
     opt = Optimizer([regular_param])
     assert len(opt.params) == 1
     assert regular_param.requires_grad
+
+    frozen_param = Tensor([2.0], requires_grad=False)
+    opt_frozen = Optimizer([frozen_param])
+    assert len(opt_frozen.params) == 1
+    assert not frozen_param.requires_grad
 
     try:
         Optimizer([regular_param, regular_param])
