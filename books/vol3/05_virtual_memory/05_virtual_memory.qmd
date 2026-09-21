@@ -70,7 +70,7 @@ In @sec-vol3-processor-tokenization, we established the tensor geometry of the K
 
 In @sec-vol3-processor, this cache was analyzed under an idealized systems assumption: that the runtime allocates a contiguous physical memory buffer for each sequence. On physical accelerator hardware, however, this assumption fails catastrophically. Because an autonomous agent's execution horizon is non-deterministic—terminating after three turns or continuing for fifty tool interactions—contiguous memory allocators must pre-allocate physical buffers sized for the worst-case context length ($S_{\max}$). When actual trajectories terminate early or grow dynamically, this contiguous strategy induces severe internal and external memory fragmentation.
 
-::: {#exmp-05-sizing-the-attention-state-for .callout-example title="Sizing the attention state for a 70-billion parameter model"}
+::: {#nbk-05-sizing-the-attention-state-for .callout-notebook title="Sizing the attention state for a 70-billion parameter model"}
 Consider an inference cluster serving an open-weights 70-billion parameter model structured with the canonical architectural parameters from @sec-vol3-processor-tokenization ($L=80$ layers, $H_{\text{q}}=64$ query heads, $H_{\text{kv}}=8$ GQA key-value heads, head dimension $d_{\text{head}}=128$, and 16-bit `bfloat16` precision with $P=2\text{ bytes}$).
 
 Applying the token footprint formulated in @sec-vol3-processor-tokenization:
@@ -232,7 +232,7 @@ Finally, the *Effective KV Cache Occupancy* $\eta_{\text{effective}}(t)$ defines
 
 $$\eta_{\text{effective}}(t) = \frac{M_{\text{useful}}(t)}{M_{\text{pool}}}$$
 
-::: {#exmp-05-quantifying-contiguous-kv-cache-fragmentation .callout-example title="Quantifying contiguous KV cache fragmentation on an NVIDIA H100"}
+::: {#nbk-05-quantifying-contiguous-kv-cache-fragmentation .callout-notebook title="Quantifying contiguous KV cache fragmentation on an NVIDIA H100"}
 **Setting:** Consider an NVIDIA H100 SXM5 accelerator equipped with $M_{\text{device}} = 80 \text{ GiB}$ ($85{,}899{,}345{,}920 \text{ bytes}$) of High Bandwidth Memory (HBM3), delivering $3.35 \text{ TB/s}$ of memory bandwidth. The system serves a Llama-3-70B model using 16-bit half-precision weights (BF16, $P = 2 \text{ bytes}$). The model features $L = 80$ transformer layers, a hidden dimension of $d_{\text{model}} = 8{,}192$, and uses Grouped-Query Attention (GQA) with $H_{\text{kv}} = 8$ key-value heads, each with head dimension $d_{\text{head}} = 128$. The maximum supported context length is $S_{\max} = 16{,}384$ tokens.
 
 **Parameter and KV Footprint:**
@@ -355,7 +355,7 @@ def calculate_cache_utilization(batch_size, avg_seq_len, b_size, m_token):
 
 Empirical profiling demonstrates that $B = 16$ and $B = 32$ occupy the optimal sweet spot for current GPU microarchitectures. At $B = 16$, the contiguous tensor payload within each block ($16 \times d_{\text{head}} \times b_{\text{elem}}$ bytes per head) is sufficiently large to saturate 128-byte memory bus transactions, achieving over $95\%$ of theoretical HBM read bandwidth during decode attention kernels. Simultaneously, the tail waste remains bounded to an average of $7.5$ tokens per stream, translating to negligible capacity loss across large production batches.
 
-::: {#exmp-05-sizing-physical-blocks-for-a .callout-example title="Sizing physical blocks for a 70B parameter model"}
+::: {#nbk-05-sizing-physical-blocks-for-a .callout-notebook title="Sizing physical blocks for a 70B parameter model"}
 Consider serving an open-weights 70B parameter model using Grouped-Query Attention (GQA). The architecture features $L = 80$ layers, $H_Q = 64$ query heads, $H_{\text{kv}} = 8$ key-value heads, head dimension $d_{\text{head}} = 128$, and runs in BF16 precision ($b_{\text{elem}} = 2$ bytes). The serving engine distributes the model across an 8-GPU node using tensor parallelism degree $TP = 8$.
 
 First, calculate the memory footprint per token on a single GPU. With $TP = 8$, the $H_{\text{kv}} = 8$ key-value heads are partitioned evenly across the 8 GPUs, resulting in $H_{\text{kv, GPU}} = 1$ key-value head per layer per GPU:
@@ -498,7 +498,7 @@ The runtime must resolve this partial-block dilemma through one of two architect
 
 In production runtimes, block-aligned truncation consistently outperforms Copy-on-Write allocation. On modern accelerator architectures (such as NVIDIA H100 or AMD MI300X), the host overhead of dispatching a memory-copy kernel to duplicate a handful of tokens—coupled with memory bus synchronization barriers—exceeds the time required to evaluate those same tokens inside a high-throughput fused GEMM prefill kernel. Consequently, production Radix allocators enforce a strict block boundary invariant: only fully packed blocks of size $B$ are inherited across requests, while sub-block tails are recomputed during the initial prefill phase.
 
-::: {#exmp-05-ttft-and-compute-savings-from .callout-example title="TTFT and compute savings from radix prefix reuse"}
+::: {#nbk-05-ttft-and-compute-savings-from .callout-notebook title="TTFT and compute savings from radix prefix reuse"}
 Consider an autonomous coding agent operating on an 8-GPU tensor-parallel node hosting a 70-billion parameter dense model ($N = 70 \times 10^9$). The model utilizes Grouped-Query Attention (GQA) with $L = 80$ layers, $H_Q = 64$ query heads, $H_{\text{kv}} = 8$ key-value heads, and a head dimension of $d_{\text{head}} = 128$, represented in 16-bit brain floating-point format ($b_{\text{elem}} = 2$ bytes).
 
 The agent's standard system instruction, formatting rules, and tool definition schema comprise an invariant prefix of $S_{\text{prefix}} = 4{,}096$ tokens.
@@ -707,7 +707,7 @@ The timing dynamics and scheduling contrast between monolithic execution and chu
 ![](images/svg/chunked_prefill_scheduling_timeline.svg)
 :::
 
-::: {#exmp-05-quantitative-interference-and-chunk-budgeting .callout-example title="Quantitative interference and chunk budgeting"}
+::: {#nbk-05-quantitative-interference-and-chunk-budgeting .callout-notebook title="Quantitative interference and chunk budgeting"}
 An inference engine runs on an accelerator delivering $T_{\text{peak}} = 800\text{ TFLOPS}$ ($8 \times 10^{14}\text{ FLOPs/s}$) dense 16-bit matrix compute and $B_{\text{mem}} = 3.0\text{ TB/s}$ ($3 \times 10^{12}\text{ Bytes/s}$) HBM bandwidth. The served model has $P = 70\text{ billion}$ parameters stored in 16-bit precision, occupying $2P = 140\text{ GB}$ of memory. The engine is actively servicing $B_{\text{decode}} = 32$ decode streams. An agent submits a new prompt with $S_{\text{prompt}} = 4{,}096$ tokens.
 
 **Question 1: What is the execution latency and ITL spike under monolithic run-to-completion scheduling?**
@@ -835,7 +835,7 @@ $$T_{\text{wait}}^* \approx \frac{2 \cdot M_{\text{KV}}}{B_{\text{pcie}}} \cdot 
 
 where $\Delta T_{\text{stall}}$ represents the latency penalty the scheduler is willing to tolerate on the resumed step. When memory capacity is constrained ($\mu_{\text{HBM}} \gg \mu_{\text{DRAM}}$), $T_{\text{wait}}^*$ approaches the round-trip transfer time.
 
-::: {#exmp-05-sizing-the-break-even-frontier-for .callout-example title="Sizing the break-even frontier for a 70-billion parameter trajectory"}
+::: {#nbk-05-sizing-the-break-even-frontier-for .callout-notebook title="Sizing the break-even frontier for a 70-billion parameter trajectory"}
 Consider an agentic coding service executing a 70-billion parameter dense model ($P = 70 \times 10^9$) configured with Grouped-Query Attention (GQA). The architecture features $L = 80$ layers, $H_{\text{kv}} = 8$ key-value heads, head dimension $d_{\text{head}} = 128$, and operates in 16-bit half-precision ($b_{\text{elem}} = 2\text{ bytes}$). The serving node executes across an 8-GPU tensor-parallel group connected via PCIe Gen5 x16 to host memory, yielding an aggregate sustained transfer bandwidth of $B_{\text{pcie}} = 50\text{ GB/s}$. The GPU subsystem sustains an aggregate prefill throughput of $R_{\text{prefill}} = 400\text{ TFLOPs/s}$ ($4.0 \times 10^{14}\text{ FLOPs/s}$).
 
 An active agent generates a git diff and dispatches a compiler check at sequence length $S = 16{,}384$ tokens.
@@ -967,7 +967,7 @@ $$M_{\text{KV}}^{\text{demand}} = \left( S_{\text{shared}} + B \cdot \left( (1 -
 
 where $\text{Pool}_{\text{headroom}}$ represents a mandatory margin of free physical blocks maintained by the allocator to prevent allocation failure during burst decode steps.
 
-::: {#exmp-05-sizing-hbm-for-multi-turn-agent .callout-example title="Sizing HBM for multi-turn agent swarms on an 8-GPU node"}
+::: {#nbk-05-sizing-hbm-for-multi-turn-agent .callout-notebook title="Sizing HBM for multi-turn agent swarms on an 8-GPU node"}
 Consider an enterprise agent cluster deployed to run continuous code-refactoring agents using a 70-billion parameter model ($N_{\text{params}} = 70 \times 10^9$) equipped with Grouped-Query Attention. The architectural parameters are $L = 80$ layers, $H_q = 64$ query heads, $H_{\text{kv}} = 8$ key-value heads, and $d_{\text{head}} = 128$. All model weights and KV states are hosted in 16-bit bfloat16 precision ($b_{\text{weight}} = b_{\text{elem}} = 2\text{ bytes}$). The serving node consists of an 8-GPU NVIDIA H100 SXM5 server with 80 GB of HBM3 per GPU ($C_{\text{HBM}} = 80\text{ GB} = 80 \times 10^9\text{ bytes}$, yielding $640\text{ GB}$ aggregate node memory). Tensor parallelism is configured across all eight GPUs ($TP = 8, PP = 1$).
 
 **Step 1: Compute Static Memory Allocation per GPU**
