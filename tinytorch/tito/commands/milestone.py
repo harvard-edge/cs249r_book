@@ -38,11 +38,11 @@ MILESTONE_ALIASES = {
     "mlp": "03",
     "cnn": "04",
     "transformer": "05",
+    "tinygpt": "05",
+    "gpt": "05",
+    "shakespeare": "05",
     "mlperf": "06",
     "olympics": "06",
-    "tinygpt": "07",
-    "gpt": "07",
-    "shakespeare": "07",
 }
 
 # Milestone-to-script mapping for tito milestone run command
@@ -122,11 +122,25 @@ MILESTONE_SCRIPTS = {
         "id": "05",
         "name": "Transformer Era (2017)",
         "year": 2017,
-        "title": "Attention is All You Need",
-        "script": "milestones/05_2017_transformer/01_vaswani_attention.py",
-        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13],  # Full training + Embeddings, Attention, Transformers
-        "description": "Prove attention works with sequence reversal",
-        "historical_context": "Vaswani et al. revolutionized NLP",
+        "title": "TinyGPT: Autoregressive Language Modeling (ChatGPT Foundation)",
+        "default_part": 1,
+        "scripts": [
+            {
+                "name": "TinyGPT (Shakespeare)",
+                "script": "milestones/05_2017_transformer/01_tinygpt_shakespeare.py",
+                "description": "Train TinyGPT from scratch on Shakespeare and generate text",
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
+            },
+            {
+                "name": "Sequence Routing",
+                "script": "milestones/05_2017_transformer/02_vaswani_attention.py",
+                "description": "Prove attention mechanism on sequence reversal and copying",
+                "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13]
+            }
+        ],
+        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13],  # TinyGPT training requirements
+        "description": "Train TinyGPT from scratch on Shakespeare and generate text",
+        "historical_context": "Vaswani et al. (2017) and the Generative LLM revolution (2020–2022) proved transformers and emergent autoregressive scaling",
         "emoji": "🤖"
     },
     "06": {
@@ -152,17 +166,6 @@ MILESTONE_SCRIPTS = {
         "description": "Compress and accelerate your neural network",
         "historical_context": "MLPerf standardized ML benchmarks",
         "emoji": "🏆"
-    },
-    "07": {
-        "id": "07",
-        "name": "Generative LLM (2020)",
-        "year": 2020,
-        "title": "TinyGPT: Autoregressive Language Modeling (ChatGPT Foundation)",
-        "script": "milestones/07_2020_tinygpt/01_tinygpt_shakespeare.py",
-        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13],
-        "description": "Train TinyGPT from scratch on Shakespeare and generate text",
-        "historical_context": "Brown et al. (GPT-3, 2020) and ChatGPT (2022) proved emergent generation from autoregressive scale",
-        "emoji": "✨"
     }
 }
 
@@ -194,18 +197,13 @@ MILESTONE_ACHIEVEMENT_HIGHLIGHTS = {
     ],
     "05": [
         "Every line of code: YOUR implementations",
-        "Every attention weight: YOUR MultiHeadAttention",
-        "Every gradient: YOUR autograd",
+        "Every attention score: YOUR Causal MultiHeadAttention",
+        "Every token generated: YOUR autoregressive loop (ChatGPT foundation)",
     ],
     "06": [
         "Every line of code: YOUR implementations",
         "Every candidate measured: YOUR quantization and compression",
         "Every gradient: YOUR autograd",
-    ],
-    "07": [
-        "Every line of code: YOUR implementations",
-        "Every attention score: YOUR Causal MultiHeadAttention",
-        "Every gradient and weight update: YOUR Autograd & AdamW",
     ],
 }
 
@@ -607,7 +605,7 @@ class MilestoneCommand(BaseCommand):
         )
         run_parser.add_argument(
             'milestone_id',
-            help='Milestone ID (01-07) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt)'
+            help='Milestone ID (01-06) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt)'
         )
         run_parser.add_argument(
             '--part',
@@ -627,7 +625,7 @@ class MilestoneCommand(BaseCommand):
         )
         info_parser.add_argument(
             'milestone_id',
-            help='Milestone ID (01-07) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt)'
+            help='Milestone ID (01-06) or name (perceptron, xor, mlp, cnn, transformer, mlperf, tinygpt)'
         )
 
         # Status subcommand

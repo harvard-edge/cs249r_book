@@ -40,9 +40,8 @@ take several minutes.
 | 02 | XOR Crisis (1969) | `02_1969_xor/01_xor_crisis.py` | Single-layer XOR limitation |
 | 03 | MLP Revival (1986) | `02_xor_solved.py`, `01_rumelhart_tinydigits.py` | Hidden layers plus TinyDigits |
 | 04 | CNN Revolution (1998) | `04_1998_cnn/01_lecun_tinydigits.py` | Convolutions on TinyDigits |
-| 05 | Transformer Era (2017) | `05_2017_transformer/01_vaswani_attention.py` | Attention sequence task |
+| 05 | Transformer Era (2017) | `05_2017_transformer/01_tinygpt_shakespeare.py` | TinyGPT Shakespeare training & generation (ChatGPT foundation) |
 | 06 | MLPerf Benchmarks (2018) | `06_2018_mlperf/*.py` | Optimization and speedup demos |
-| 07 | Generative LLM (2020–2022) | `07_2020_tinygpt/01_tinygpt_shakespeare.py` | TinyGPT autoregressive language modeling (foundation of ChatGPT) |
 
 ## Required Setup
 

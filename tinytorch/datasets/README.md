@@ -29,7 +29,7 @@ datasets/
 - **Purpose:** Fast, offline conversational text for attention and GPT-style experiments
 
 ### TinyShakespeare (Sample)
-- **Used by:** Milestone 07 (TinyGPT autoregressive language modeling)
+- **Used by:** Milestone 05 (Transformer Era: TinyGPT autoregressive language modeling)
 - **Contents:** Curated excerpt from William Shakespeare's plays
 - **Format:** Plain text, character-level friendly
 - **Size:** ~21 KB

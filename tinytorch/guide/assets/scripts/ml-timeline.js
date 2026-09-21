@@ -50,37 +50,26 @@ document.addEventListener('DOMContentLoaded', function() {
             url: "milestones/04_cnn.html"
         },
         transformer: {
-            year: "2017", title: "Transformer Era", researcher: "Vaswani et al.",
-            subtitle: "Attention mechanism launches the LLM revolution (GPT, BERT, ChatGPT)",
-            achievement: "Self-attention for language understanding",
-            architecture: "Tokens → Embeddings → Attention → FFN → ... → Attention → Output",
-            whatYouBuild: ["Self-attention mechanisms", "Autoregressive text generation", "YOUR attention implementation generates language"],
-            systemsInsights: ["Memory: O(n²) attention requires careful management", "Compute: Highly parallelizable", "Architecture: Long-range dependencies"],
-            modules: "After Modules 02-13", expectedResults: "Loss < 1.5, coherent responses to questions",
-            commands: ["tito milestone run transformer"],
-            url: "milestones/05_transformer.html"
-        },
-        olympics: {
-            year: "2018", title: "MLPerf Torch Olympics", researcher: "MLCommons (founded 2018)",
-            subtitle: "Systematic optimization becomes essential as models grow larger",
-            achievement: "Production-ready optimization",
-            architecture: "Profile → Compress → Accelerate",
-            whatYouBuild: ["Performance profiling and bottleneck analysis", "Model compression (quantization + pruning)", "Inference acceleration (KV-cache + batching)"],
-            systemsInsights: ["Memory: quantization packs weights up to 4× smaller; pruning zeroes weights without shrinking the array", "Speed: KV-cache and batching can speed generation up, and a small workload can get slower", "Workflow: Systematic 'measure → optimize → validate' methodology"],
-            modules: "After Modules 14-19", expectedResults: "Whatever you measure; no ratio is guaranteed",
-            commands: ["tito milestone run mlperf"],
-            url: "milestones/06_mlperf.html"
-        },
-        tinygpt: {
-            year: "2020–2022", title: "TinyGPT & Generative LLM", researcher: "Brown et al. (GPT-3) & ChatGPT",
-            subtitle: "Autoregressive next-token prediction powers modern generative AI",
-            achievement: "Generative language modeling and coherent text synthesis",
+            year: "2017–2022", title: "Transformer Era (TinyGPT)", researcher: "Vaswani et al. & Brown et al.",
+            subtitle: "Self-attention and autoregressive language modeling power modern generative AI (ChatGPT)",
+            achievement: "Generative LLM trained from scratch on Shakespeare",
             architecture: "Tokens → Embeddings → Causal MHA + MLP → ... → LM Head → Autoregressive Sampling",
             whatYouBuild: ["Causal multi-head self-attention with lower-triangular masking", "Pre-LN transformer decoder blocks", "YOUR complete stack trains from scratch and writes Shakespeare"],
             systemsInsights: ["Pretraining: Teacher forcing allows O(1) parallel sequence loss calculation", "Inference: Generation is memory-bandwidth bound, demanding KV caching (Module 18)", "Convergence: AdamW with weight decay enables stable deep transformer training"],
             modules: "After Modules 01-08, 10-13", expectedResults: "Cross-entropy loss < 1.0, coherent Shakespeare text generated",
-            commands: ["tito milestone run 07"], northStar: true,
-            url: "milestones/07_tinygpt.html"
+            commands: ["tito milestone run 05", "tito milestone run transformer", "tito milestone run tinygpt"],
+            url: "milestones/05_transformer.html"
+        },
+        olympics: {
+            year: "2018–Present", title: "MLPerf Benchmarks", researcher: "MLCommons (founded 2018)",
+            subtitle: "Systematic optimization becomes essential as models grow larger",
+            achievement: "Production-ready optimization & KV-cache acceleration",
+            architecture: "Profile → Compress → Accelerate",
+            whatYouBuild: ["Performance profiling and bottleneck analysis", "Model compression (quantization + pruning)", "Inference acceleration (KV-cache + batching)"],
+            systemsInsights: ["Memory: quantization packs weights up to 4× smaller; pruning zeroes weights without shrinking the array", "Speed: KV-cache speeds up autoregressive generation by eliminating O(S²) prefix recomputation", "Workflow: Systematic 'measure → optimize → validate' methodology"],
+            modules: "After Modules 14-19", expectedResults: "Quantization 4× compression, measurable KV-cache speedup",
+            commands: ["tito milestone run 06", "tito milestone run mlperf"],
+            url: "milestones/06_mlperf.html"
         }
     };
 

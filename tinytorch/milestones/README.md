@@ -55,22 +55,15 @@ After completing a set of modules, you unlock the ability to run a milestone. Ea
       <td>05</td>
       <td><b>Transformer Era</b></td>
       <td>2017</td>
-      <td>01-08, 11-13</td>
-      <td>Prove attention with reversal, copy, and mixed sequence tasks</td>
+      <td>01-08, 10-13</td>
+      <td>Train TinyGPT on Shakespeare and generate text autoregressively</td>
     </tr>
     <tr>
       <td>06</td>
       <td><b>MLPerf Benchmarks</b></td>
       <td>2018</td>
-      <td>01-08, 14-19</td>
-      <td>Optimize and benchmark your neural networks</td>
-    </tr>
-    <tr>
-      <td>07</td>
-      <td><b>Generative LLM</b></td>
-      <td>2020</td>
-      <td>01-07, 10-13</td>
-      <td>Train TinyGPT on Shakespeare and generate text autoregressively</td>
+      <td>01-08, 11-19</td>
+      <td>Optimize, quantize, and accelerate TinyGPT with KV-cache</td>
     </tr>
   </tbody>
 </table>
@@ -81,12 +74,12 @@ After completing a set of modules, you unlock the ability to run a milestone. Ea
 # List available milestones and your progress
 tito milestone list
 
-# Run a specific milestone (all parts)
-tito milestone run 03
+# Run a specific milestone (default part)
+tito milestone run 05
 
 # Run a specific part of a multi-part milestone
-tito milestone run 03 --part 1  # Part 1: XOR Solved
-tito milestone run 03 --part 2  # Part 2: TinyDigits
+tito milestone run 05 --part 1  # Part 1: TinyGPT (Shakespeare)
+tito milestone run 05 --part 2  # Part 2: Attention Sequence Routing
 
 # Get detailed info about a milestone
 tito milestone info 05
@@ -100,16 +93,15 @@ milestones/
 ├── 02_1969_xor/            # Milestone 02: XOR Problem
 ├── 03_1986_mlp/            # Milestone 03: Backpropagation MLP
 ├── 04_1998_cnn/            # Milestone 04: LeNet CNN
-├── 05_2017_transformer/    # Milestone 05: Attention Mechanism
-├── 06_2018_mlperf/         # Milestone 06: Optimization Olympics
-├── 07_2020_tinygpt/        # Milestone 07: Generative LLM (TinyGPT & ChatGPT Foundation)
+├── 05_2017_transformer/    # Milestone 05: Transformer Era (TinyGPT & Attention)
+├── 06_2018_mlperf/         # Milestone 06: Optimization Olympics & KV-cache Speedup
 └── data_manager.py         # Shared dataset management utility
 ```
 
 ## The Journey
 
 <p align="center">
-  <img src="journey.svg" alt="Milestone progression from Perceptron (1958) through Transformer (2017) to Generative LLM (2020–2022)" width="640">
+  <img src="journey.svg" alt="Milestone progression from Perceptron (1958) to Transformer Era (2017–2022) and MLPerf Benchmarks" width="640">
 </p>
 
 ## Success Criteria
@@ -120,9 +112,8 @@ Each milestone has specific success criteria. Passing means your implementation 
 - **Milestone 02**: Demonstrates XOR is unsolvable with single layer (75% max accuracy)
 - **Milestone 03**: Part 1 solves XOR (100% accuracy), Part 2 achieves 85%+ on TinyDigits
 - **Milestone 04**: TinyDigits achieves 90%+ accuracy with CNN
-- **Milestone 05**: Pass all three attention challenges (95%+ accuracy)
-- **Milestone 06**: Part 1 completes optimization pipeline, Part 2 shows KV cache speedup
-- **Milestone 07**: TinyGPT loss decreases steadily (< 2.50) and generates coherent text (ChatGPT foundation)
+- **Milestone 05**: Part 1 trains TinyGPT on Shakespeare (loss < 2.50, generates text); Part 2 passes sequence challenges
+- **Milestone 06**: Part 1 completes optimization pipeline, Part 2 shows KV-cache speedup on TinyGPT
 
 ## Troubleshooting
 

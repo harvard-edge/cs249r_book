@@ -261,7 +261,7 @@ class DatasetManager:
         return (train_data, train_labels), (test_data, test_labels)
 
     def get_tinyshakespeare(self, sample_only=False):
-        """Download and prepare TinyShakespeare dataset for Milestone 07.
+        """Download and prepare TinyShakespeare dataset for Milestone 05.
 
         Args:
             sample_only: If True, return the offline bundled sample (no download).
@@ -271,7 +271,7 @@ class DatasetManager:
         """
         sample_path = Path(__file__).resolve().parent.parent / "datasets" / "tinyshakespeare" / "tinyshakespeare_sample.txt"
         if not sample_path.exists():
-            sample_path = Path(__file__).parent / "07_2020_tinygpt" / "data" / "tinyshakespeare_sample.txt"
+            sample_path = Path(__file__).parent / "05_2017_transformer" / "data" / "tinyshakespeare_sample.txt"
 
         if sample_only and sample_path.exists():
             with open(sample_path, 'r', encoding='utf-8') as f:

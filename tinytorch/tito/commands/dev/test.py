@@ -837,7 +837,7 @@ class DevTestCommand(BaseCommand):
         - After Module 03: Milestones 01, 02 (Perceptron, XOR Crisis)
         - After Module 08: Milestone 03 (MLP Revival)
         - After Module 09: Milestone 04 (CNN Revolution)
-        - After Module 13: Milestones 05, 07 (Transformer Era, Generative LLM)
+        - After Module 13: Milestone 05 (Transformer Era - TinyGPT)
         - After Module 19: Milestone 06 (MLPerf)
         """
         import shutil
@@ -853,7 +853,7 @@ class DevTestCommand(BaseCommand):
             "03": ["01", "02"],  # After Layers: Perceptron, XOR Crisis
             "08": ["03"],        # After Training: MLP Revival
             "09": ["04"],        # After Convolutions: CNN Revolution
-            "13": ["05", "07"],  # After Transformers: Transformer Era, Generative LLM (TinyGPT)
+            "13": ["05"],        # After Transformers: Transformer Era (TinyGPT)
             "19": ["06"],        # After Benchmarking: MLPerf
         }
 

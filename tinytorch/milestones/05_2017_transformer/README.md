@@ -1,21 +1,24 @@
-# Milestone 05: The Transformer Era (2017)
+# Milestone 05: The Transformer Era (2017–2022)
 
 ## Historical Context
 
-In 2017, Vaswani et al. published **"Attention Is All You Need,"** showing that attention mechanisms alone (no RNNs, no convolutions!) could achieve state-of-the-art results on sequence tasks. This breakthrough:
+In 2017, Vaswani et al. published **"Attention Is All You Need,"** showing that attention mechanisms alone (no recurrence, no convolutions!) could achieve state-of-the-art results on sequence tasks. In 2020, Brown et al. (OpenAI) published **"Language Models are Few-Shot Learners"** (GPT-3), proving that autoregressive next-token prediction at scale produces emergent, general-purpose reasoning. In late 2022, OpenAI launched **ChatGPT**, demonstrating to the entire world that this generative transformer foundation could interact seamlessly with human thought.
 
-- Replaced RNNs/LSTMs for sequence modeling
-- Enabled parallel training (unlike sequential RNNs)
-- Scaled to massive datasets and model sizes
-- Launched the era of GPT, BERT, and modern LLMs
+Behind modern LLMs sits this exact mathematical and systems engine:
+1. **Autoregressive Next-Token Prediction:** Teacher forcing with CrossEntropyLoss.
+2. **Causal Self-Attention:** Masked attention preventing future token leakage.
+3. **Pre-LayerNorm Residual Highway:** Clean gradient propagation through deep blocks.
+4. **Systems Serving Efficiency:** The KV-cache (Module 18) and quantization (Module 15) that make generative sampling fast and interactive in production.
 
-Transformers didn't just improve NLP - they unified vision, language, and multimodal AI. Now it's your turn to build one from scratch using YOUR Tiny🔥Torch!
+Now it's your turn to train TinyGPT from scratch on Shakespeare using YOUR Tiny🔥Torch!
 
 ## What You're Building
 
-**Primary milestone (what `tito milestone run 05` executes):** prove YOUR attention and transformer stack on **three synthetic sequence challenges** in a single script—reversal, copying, and prefix-controlled mixed tasks (see script docstring for details).
+**Part 1 (`01_tinygpt_shakespeare.py` - Default):**
+Train **TinyGPT** from scratch on Shakespeare. Brings together your tokenization, embeddings, causal multi-head self-attention, stacked transformer decoder blocks, cross-entropy loss, and autoregressive generation loop with temperature and top-k sampling.
 
-**Shipped language data:** the **TinyTalks** conversational Q&A corpus lives under `datasets/tinytalks/` (see that README) for character-level / transformer experiments and teaching materials. The checked-in milestone script uses in-script synthetic data so you can validate attention without extra file dependencies.
+**Part 2 (`02_vaswani_attention.py` - Attention Proof):**
+Prove your attention mechanism on three synthetic sequence challenges (reversal, copying, prefix-controlled mixed tasks) without external data dependencies.
 
 ## Required Modules
 
@@ -33,79 +36,64 @@ Transformers didn't just improve NLP - they unified vision, language, and multim
 <tr><td><b>Module 01</b></td><td>Tensor</td><td>YOUR data structure with autograd</td></tr>
 <tr><td><b>Module 02</b></td><td>Activations</td><td>YOUR ReLU/GELU activations</td></tr>
 <tr><td><b>Module 03</b></td><td>Layers</td><td>YOUR Linear layers</td></tr>
-<tr><td><b>Module 04</b></td><td>Losses</td><td>YOUR CrossEntropyLoss</td></tr>
-<tr><td><b>Module 05</b></td><td>DataLoader</td><td>YOUR data batching</td></tr>
+<tr><td><b>Module 04</b></td><td>Losses</td><td>YOUR CrossEntropyLoss (sequence-shaped)</td></tr>
+<tr><td><b>Module 05</b></td><td>DataLoader</td><td>YOUR Dataset/DataLoader batching</td></tr>
 <tr><td><b>Module 06</b></td><td>Autograd</td><td>YOUR automatic differentiation</td></tr>
-<tr><td><b>Module 07</b></td><td>Optimizers</td><td>YOUR Adam optimizer</td></tr>
+<tr><td><b>Module 07</b></td><td>Optimizers</td><td>YOUR AdamW optimizer</td></tr>
+<tr><td><b>Module 08</b></td><td>Training</td><td>YOUR Trainer training loop</td></tr>
+<tr><td><b>Module 10</b></td><td>Tokenization</td><td>YOUR Tokenizer</td></tr>
 <tr><td><b>Module 11</b></td><td>Embeddings</td><td>YOUR token + positional embeddings</td></tr>
 <tr><td><b>Module 12</b></td><td>Attention</td><td>YOUR multi-head self-attention</td></tr>
-<tr><td><b>Module 13</b></td><td>Transformers</td><td>YOUR LayerNorm + TransformerBlock + GPT</td></tr>
+<tr><td><b>Module 13</b></td><td>Transformers</td><td>YOUR LayerNorm + TransformerBlock + TinyGPT</td></tr>
 </tbody>
 </table>
 
-## Milestone Script (canonical)
-
-### `01_vaswani_attention.py`
-
-**Purpose:** PROVE your attention mechanism works on structured sequence tasks (reversal, copy, mixed).
-
-- **Dataset:** Synthetic sequences generated in-script (no separate download)
-- **Success criteria:** See script header (typically ~95% / ~95% / ~90% on the three challenges)
+## Running the Milestone
 
 **Run via TITO (recommended):**
 
 ```bash
+# Runs Part 1 (TinyGPT on Shakespeare) by default
 tito milestone run 05
+
+# Or use convenience aliases:
+tito milestone run transformer
+tito milestone run tinygpt
 ```
 
-**Or directly:**
+**Run Part 2 (Attention Sequence Routing):**
 
 ```bash
-cd milestones/05_2017_transformer
-python 01_vaswani_attention.py
+tito milestone run 05 --part 2
 ```
 
-`python 01_vaswani_attention.py --help` lists optional flags (embedding dim, layers, heads, etc.).
+**Or run directly:**
 
-### TinyTalks (`datasets/tinytalks/`)
+```bash
+# Part 1: TinyGPT
+python3 milestones/05_2017_transformer/01_tinygpt_shakespeare.py --quick
 
-Conversational Q&A text for transformer teaching and extensions—**not** required for `tito milestone run 05` as configured today. Documentation: `datasets/tinytalks/README.md`.
+# Part 2: Sequence tasks
+python3 milestones/05_2017_transformer/02_vaswani_attention.py
+```
 
 ## Expected Results
 
-| Phase | Task | What “good” looks like |
-|-------|------|-------------------------|
-| 1 | Reversal | High accuracy; anti-diagonal attention pattern |
-| 2 | Copy | High accuracy; identity-style pattern |
-| 3 | Mixed | Respects `[R]` vs `[C]` prefix |
-
-## Key Learning: Why Attention Revolutionized AI
-
-Transformers solve fundamental RNN limitations: sequential bottlenecks, vanishing signal, fixed hidden-state capacity. Attention lets every position attend to every other in parallel—scaled up, that is the core of GPT-style models.
-
-## Running the Milestone
-
-```bash
-tito milestone run 05
-```
-
-## Further Reading
-
-- **The Paper**: Vaswani et al. (2017). ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762)
-- **Illustrated Transformer**: http://jalammar.github.io/illustrated-transformer/
-- **GPT Evolution**: Radford et al. [GPT-1 (2018)](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf), [GPT-2 (2019)](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf), and [GPT-3 (2020)](https://arxiv.org/abs/2005.14165)
-- **BERT**: Devlin et al. (2018). ["BERT: Pre-training of Deep Bidirectional Transformers"](https://arxiv.org/abs/1810.04805)
+| Part | Script | Task | Success Criteria |
+|------|--------|------|------------------|
+| 1 (Default) | `01_tinygpt_shakespeare.py` | Shakespeare Next-Token Prediction | Loss drops from ~3.0 to < 1.0 (PPL < 3.0); generates coherent verse |
+| 2 (Optional) | `02_vaswani_attention.py` | Synthetic Reversal / Copy / Mixed | High accuracy (>95% reversal, >95% copy, >90% mixed) |
 
 ## Achievement Unlocked
 
 After completing this milestone, you'll understand:
-- How self-attention computes context-aware representations
-- Why transformers parallelize better than RNNs
-- What positional embeddings do (give position information)
-- How GPT-style autoregressive generation builds on these ideas
+- How causal self-attention computes context-aware representations without future leakage
+- Why teacher forcing trains all sequence positions in parallel
+- How temperature and top-k sampling turn raw logits into generative prose
+- Why autoregressive decode creates the prefix recomputation bottleneck that Part III will optimize
 
 **You've validated the architecture powering modern AI!**
 
 ---
 
-**Note for Next Milestone:** You can now BUILD transformers, but can you OPTIMIZE them for production? Milestone 06 (MLPerf) teaches systematic optimization: profiling → compression → acceleration!
+**Note for Next Milestone:** You can now BUILD generative transformers, but can you OPTIMIZE them for production? Milestone 06 (MLPerf Benchmarks) teaches systematic optimization: profiling → compression → KV-cache acceleration on TinyGPT!

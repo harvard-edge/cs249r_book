@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-The Generative LLM Revolution (2020–2022) - TinyGPT & The Foundation of ChatGPT
+The Transformer Era (2017–2022) - TinyGPT & The Foundation of ChatGPT
 =============================================================================
 
 📚 HISTORICAL CONTEXT:
-In 2020, Brown et al. (OpenAI) published "Language Models are Few-Shot Learners,"
+In 2017, Vaswani et al. published "Attention Is All You Need," introducing the
+Transformer. In 2020, Brown et al. (OpenAI) published "Language Models are Few-Shot Learners,"
 introducing GPT-3 and proving that autoregressive next-token prediction at scale
 produces emergent, general-purpose language reasoning. In late 2022, OpenAI launched
 ChatGPT, bringing this exact generative pretraining foundation into everyday life.
@@ -16,7 +17,7 @@ Behind ChatGPT sits this exact mathematical and systems engine:
 4. Systems Serving Efficiency: The KV-cache (Module 18) and quantization (Module 15)
    that make generative sampling fast and interactive in production.
 
-🎯 MILESTONE 07: TRAIN TINYGPT FROM SCRATCH & GENERATE TEXT
+🎯 MILESTONE 05: TRAIN TINYGPT FROM SCRATCH & GENERATE TEXT
 In this capstone milestone, YOU bring together all 20 modules of TinyTorch:
 - Tokenizing text with YOUR Tokenizer
 - Projecting into continuous space with YOUR Embeddings
@@ -240,14 +241,14 @@ def run_milestone(args=None):
     # ─────────────────────────────────────────────────────────────────────────
     console.print()
     console.print(Panel.fit(
-        "[bold cyan]MILESTONE 07: THE GENERATIVE LLM REVOLUTION (2020–2022)[/bold cyan]\n\n"
+        "[bold cyan]MILESTONE 05: THE TRANSFORMER ERA (2017–2022)[/bold cyan]\n\n"
         "[yellow]Train TinyGPT from scratch on Shakespeare — the foundation of ChatGPT![/yellow]\n\n"
         "• Model: Causal Pre-LN Transformer Decoder (Vaswani et al. / GPT-2 / GPT-3)\n"
         "• Autograd: All Q, K, V projections and MLP weights receive reverse gradients\n"
         "• Systems: Parallel teacher-forcing training; foundation for KV-cache serving\n"
         "• Target Workload: Autoregressive Next-Token Prediction on TinyShakespeare",
         border_style="cyan",
-        title="TinyTorch Capstone",
+        title="TinyTorch Architecture Tier",
     ))
     press_enter_to_continue()
 
@@ -411,7 +412,7 @@ def run_milestone(args=None):
         return 0
     else:
         console.print(Panel.fit(
-            f"[bold red]❌ MILESTONE 07 FAILED: LOSS DID NOT MEET CONVERGENCE GATE[/bold red]\n\n"
+            f"[bold red]❌ MILESTONE 05 FAILED: LOSS DID NOT MEET CONVERGENCE GATE[/bold red]\n\n"
             f"  • Expected final loss < 2.50, got {final_loss:.4f}",
             border_style="red",
             title="Needs Tuning",
@@ -420,7 +421,7 @@ def run_milestone(args=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Milestone 07: TinyGPT on TinyShakespeare")
+    parser = argparse.ArgumentParser(description="Milestone 05: TinyGPT on TinyShakespeare")
     parser.add_argument("--quick", "--sample", action="store_true", help="Run on offline sample dataset")
     parser.add_argument("--prompt", type=str, default="First Citizen:", help="Seed prompt for text generation")
     parser.add_argument("--temperature", "--temp", type=float, default=0.8, help="Sampling temperature")
