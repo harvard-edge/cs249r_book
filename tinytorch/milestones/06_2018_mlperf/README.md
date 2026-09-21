@@ -16,12 +16,12 @@ MLPerf's measurement discipline, not official MLPerf submissions.
 2. **Division 2: Spatial Vision & Compute — `SimpleCNN` (Spatial, Compute-Bound)**
    - Primary constraint: Spatial convolution loops and compute throughput.
    - Evaluates: FP32 Baseline, INT8 Quantization, 50% Magnitude Pruning.
-   - Trade-off curve: Memory Footprint (KB) vs. Classification Accuracy (%).
+   - Trade-off curve: Memory Footprint (KB) vs. Output Signal Fidelity (%).
 
 3. **Division 3: Generative LLM Serving — `TinyGPT` (Autoregressive, Prefix-Bound)**
    - Primary constraint: $O(N^2)$ prefix recomputation and DRAM weight streaming.
    - Evaluates: Full Prefix Recompute, INT8 Quantization, KV-Cache Memoization, Full Stack (Quant + Cache).
-   - Trade-off curve: Step Latency (ms) vs. Memory Footprint (KB).
+   - Trade-off curve: Replay Latency (ms) vs. Memory Footprint (KB).
 
 Each division computes its own **Pareto frontier** using Module 19 (`pareto_frontier`) and plots a tailored ASCII trade-off curve, illustrating why optimization strategies must match the workload category.
 
