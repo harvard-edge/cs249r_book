@@ -18,6 +18,15 @@ This master plan governs the 13-week physical implementation, hardware bring-up,
 To ensure every student station operates flawlessly when the studio launches in Spring 2027, the instruction team acts as **Student Zero**. Before any student touches the bench, staff personally unboxes, mounts, wires, programs, and qualifies every single component, lab brief, and automated test.
 :::
 
+::: {.callout-important}
+### The Core Pedagogical Thesis: Teaching the Dual-Brain Architecture
+The defining intellectual contribution of the Volume IV studio is teaching students to navigate the fundamental asymmetry of Physical AI:
+1. **The Cognitive Brain (Qualcomm QRB2210 Linux MPU):** High-capacity, probabilistic foundation neural policies (SmolVLA, ACT) that ingest sensory camera streams ($I_t$) and propose multi-step action trajectory chunks ($a_{\text{req}}$).
+2. **The Safety Governor (STM32U585 Real-Time MCU):** Deterministic, hard real-time safety invariants (velocity saturation clamping $\omega_i \le 45^\circ/\text{s}$, geometric table geofencing $z_{\text{tool}} \ge 15\text{ mm}$, and $150\text{ ms}$ communication watchdogs) that arbitrate, permit, or veto proposals ($a_{\text{enf}}$) before they reach physical motor coils ($a_{\text{meas}}$).
+
+Students do not merely train models in isolation or write bare-metal motor drivers; they build, measure, and defend the **Causal Permission Boundary** connecting the two brains over an internal RPC bridge with zero unmonitored host bypass.
+:::
+
 The primary objectives for this 13-week execution window:
 1. **Week 1 Planning & Bench Preparation:** Finalize the master curriculum plan, audit the Bill of Materials (BOM), allocate dedicated workbench space at ETH Zurich, and verify electrical power rails before unboxing.
 2. **Hardware Bring-Up & Gate Qualification:** Assemble, wire, verify, and qualify one complete **Golden Reference Station**, passing the **Four Technical Go/No-Go Gate Tests (Gates A–D)**.
