@@ -50,7 +50,7 @@ A robot trajectory reflects the machine's behavior. Joint geometry and friction 
 
 ## Endogenous Experience {#sec-data-endogenous-experience}
 
-An autonomous mobile manipulator can grasp objects in a hundred training demonstrations but drift during its first physical deployment. One possible cause is *endogenous experience*.[^fn-data-causal-loop] In a fixed offline vision dataset, the model's prediction does not change the next stored example. Here, an executed action changes the body's trajectory, camera pose, and contacts, thereby changing later observations ($s_{t+1} \sim P(s \mid s_t, a_t)$).
+A policy trained on a hundred clean teleoperated demonstrations of the warehouse mobile manipulator opening its spring-latched cage door can still fail at the latch on its first autonomous attempt. One possible cause is *endogenous experience*.[^fn-data-causal-loop] In a fixed offline vision dataset, the model's prediction does not change the next stored example. Here, an executed action changes the body's trajectory, camera pose, and contacts, thereby changing later observations ($s_{t+1} \sim P(s \mid s_t, a_t)$).
 
 [^fn-data-causal-loop]: **Causal Boundary**\index{Causal boundary!thermodynamic constraint}: The causal boundary between computation and physics was established in @sec-boundary-causal-boundary. In an embodied system, computation acquires physical consequence because state evolution depends causally on motor actuation. Consequently, policy actions actively perturb the distribution of future observations ($s_{t+1} \sim P(s \mid s_t, a_t)$), invalidating the independent and identically distributed (i.i.d.) assumptions of disembodied machine learning.
 
@@ -184,12 +184,7 @@ Because the collecting entity dictates how the machine approaches the environmen
 
 A common error in physical machine learning is treating each recorded control step as an independent experience. When a joint controller logs state-action pairs at $50\text{ Hz}$, one hour of continuous recording produces $180{,}000\text{ steps}$. Multiplying sample frequency by recording time yields large step counts, but adjacent steps exhibit extreme temporal autocorrelation. Two camera frames logged $20\text{ ms}$ apart differ by sub-millimeter end-effector displacements and minor sensor noise. Distributional coverage scales with the count of independent task episodes and distinct physical configurations, not with the sampling clock. An archive containing $100{,}000\text{ steps}$ distributed across five hundred distinct workpiece positions and lighting conditions provides vastly broader support than $1{,}000{,}000\text{ steps}$ logged during a single continuous demonstration where the end-effector engaged a workpiece at a single bench location.
 
-Evaluating the throughput of a physical collection campaign requires calculating the usable episode yield from the mechanical and operational parameters of the workcell. Consider an analytical example of an articulated manipulator collecting contact demonstrations for a precision assembly task. Let an attempt require an average duration $t_{\text{att}} = 20\text{ s}$. After each attempt, the cell must return to a valid initial state, requiring the manipulator to transit home and an automated fixture to reset the workpiece, adding a reset duration $t_{\text{rst}} = 15\text{ s}$. The total cycle time for a single attempt is $t_{\text{cyc}} = t_{\text{att}} + t_{\text{rst}} = 35\text{ s}$. In one wall-clock hour ($3600\text{ s}$), a single rig completes at most $102\text{ attempts}$. Physical collection suffers from trial failures where workpieces slip, parts jam, or safety watchdogs trip on excessive contact force. If the trial failure rate is 25 percent, and post-collection validation rejects an additional 10 percent of logs due to camera occlusion or dropped network packets, the retention rate is:
-$$R = (1 - 0.25) \times (1 - 0.10) = 0.675.$$
-The usable episode yield for a single rig is:
-$$Y_{\text{usable}} = \left\lfloor\frac{3600\text{ s}}{t_{\text{cyc}}}\right\rfloor \times R = 102 \times 0.675 \approx 68.8\text{ usable episodes per hour}.$$
-
-If training a policy requires $5000\text{ validated episodes}$ to achieve target success rates across geometric variations, collecting that data on one workstation requires $72.7\text{ hours}$ of active execution time. Across those $72.7\text{ hours}$, the machine executes $7415\text{ physical cycles}$, subjecting gearbox teeth to repeated directional reversals, stressing flex cables inside articulated joints through thousands of bends, and accumulating thermal load in motor windings under sustained stall currents. Operating three parallel collection rigs increases the throughput to approximately $206.4\text{ usable episodes per hour}$ and compresses calendar time to $24.2\text{ hours}$, but it scales hardware wear and maintenance linearly across three sets of mechanical transmissions and sensors.
+The throughput of a physical collection campaign is set by the mechanics of the cell rather than by its sampling clock. Every attempt is followed by a reset that returns the scene to a valid initial state, a fraction of attempts fail during the trial or are rejected in post-collection validation, and every cycle, successful or not, adds directional reversals to the gearboxes and bends to the flex cables inside the joints. The usable yield $Y_{\text{usable}}$ is therefore the attempt rate multiplied by the retention rate, while the wear bill is paid per attempt rather than per usable episode. @Sec-data-teleop-costs budgets both for the machine's door-opening campaign.
 
 ::: {.column-margin .margin-pointer}
 ↳ **Downstream:** Usable demonstration yield ($Y_{\text{usable}}$) sets the sample efficiency requirements for trial-based learning in @sec-training-learning-by-trial.
@@ -216,145 +211,163 @@ When a contact misalignment occurs at time $t$, the operator sees the error at $
 #| label: calc-data-multi-camera-ingestion
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ MULTI-CAMERA TELEOPERATION INGESTION BUDGET (LEGO): 'Ingestion budget' refers to constraints on data flow and processing capacity in multi-camera teleoperation systems. It encompasses data throughput, processing power, and memory limitations, critical for real-time performance in embedded systems.
+# │ MULTI-CAMERA TELEOPERATION INGESTION BUDGET (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# This section examines data processing integration in physical AI systems. Machine learning involves algorithms that enable systems to learn from data, embedded systems are specialized computing devices designed for specific tasks, and control mechanisms are techniques used to manage the behavior of dynamic systems. Understanding the interrelation of these three domains is crucial for effective integration in physical AI systems.
-# │ Context: @nbk-data-ingestion-bandwidth-storage-budgets-multi-camera
-# Multi-camera systems involve the use of multiple cameras to capture data from different angles or perspectives. This approach challenges camera synchronization, critical for accurate data ingestion. Managing bandwidth and storage budgets requires understanding these challenges, as combined data from multiple sources significantly increases processing and storage volume.
-# │ Goal:    Size sustained telemetry ingestion rate and NVMe storage footprint.
-# │ Show:    'BW_total' denotes total bandwidth: 968.01 MB/s for 1080p and 553.29 MB/s for 720p, yielding a data transfer rate of 3.48 TB/hr. Bandwidth is crucial for an AI system's efficiency in processing video data in real-time, especially for applications needing rapid data handling and low latency.
-# │ How:     'Multimodal stream aggregation' in Physical AI systems combines data from RGB (color images), depth (distance measurements), kinematics (motion data), and tactile (touch feedback) to understand the environment. Each modality contributes: RGB offers visual context, depth enables spatial awareness, kinematics tracks movement, and tactile feedback reveals interactions. Integrating these modalities is essential for creating a comprehensive understanding of the environment. However, it presents challenges: data synchronization can cause processing delays; bandwidth management may saturate bus bandwidth; and real-time processing requires careful consideration of jitter bounds and worst-case execution times for timely responses.
+# │ Context: @nbk-data-ingestion-bandwidth-storage-budgets-multi-camera,
+# │          @chk-data-logging-bandwidth-saturation
+# │ Goal:    Size the raw ingestion rate and storage of one teleoperated
+# │          door-opening session on the warehouse mobile manipulator.
+# │ Show:    Per-camera raw rates, the 9-axis kinematic stream, the total, the
+# │          hourly and per-shift storage, and the 8x-compressed rate against
+# │          SATA and Gen4 NVMe write bandwidth.
+# │ How:     Camera geometry and frame rates from the registry (navigation
+# │          IMX477, wrist IMX296, two external RealSense D435i); axis count and
+# │          logging rate from RM; calc_teleop_ingestion_budget per camera group.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt_bandwidth, fmt_memory, fmt_qty, fmt_int, check
+from mlsysim.fmt import fmt_bandwidth, fmt_memory, fmt_frequency, fmt_int, fmt_multiple, fmt_percent, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
 
 class MultiCameraIngestionBudget:
-    """Telemetry bandwidth and storage sizing for multi-modal teleoperation rigs."""
+    """Raw telemetry bandwidth and storage for the machine's teleoperation sessions."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    num_cameras = 4
-    fps_video = 30.0
-    bytes_per_px_rgb = 3
-    bytes_per_px_depth = 2
+    cam_nav = RM.nav_camera  # category: datasheet
+    cam_wrist = RM.wrist_camera  # category: datasheet
+    cam_ext = Sensors.Camera.Intel_RealSense_D435i  # category: datasheet
+    n_ext = 2  # scenario assumption; category: chosen
+    bytes_per_px_rgb = 3  # 24-bit RGB after debayering; category: chosen
+    bytes_per_px_depth = 2  # uint16 depth aligned to the color frame; category: chosen
 
-    # Kinematics: 14-DoF leader/follower logged at 1000 Hz (128 bytes/step)
-    bw_kin = 128 * byte * 1000 / second
-    # Tactile: 2 dual-finger fingertip arrays logged at 100 Hz (2048 bytes/step)
-    bw_tac = 2048 * byte * 100 / second
+    n_axes = RM.servo_axes  # 2 base + 7 arm
+    f_log = RM.permission_rate  # kinematics logged every permission tick
+    values_per_axis = 6  # position, velocity (a_meas), torque, a_req, a_cmd, a_enf; category: chosen
+    bytes_per_value = 4  # float32; category: chosen
+    bytes_timestamp = 8  # one 64-bit timestamp per step; category: chosen
+
+    shift_hours = 8.0  # scenario assumption; category: chosen
+    compression_ratio = 8.0  # intra-frame video codec; category: illustrative
+    bw_sata = Systems.Storage.SataSsd.bandwidth  # category: datasheet
+    bw_nvme = Hardware.Tech.Storage.NvmeGen4.bandwidth  # category: datasheet
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    # High-resolution capture (1080p RGB, 720p Depth)
-    res_1080p = calc_teleop_ingestion_budget(
-        num_cameras=num_cameras,
-        rgb_width=1920,
-        rgb_height=1080,
-        rgb_fps=fps_video,
-        rgb_bytes_per_pixel=bytes_per_px_rgb,
-        depth_width=1280,
-        depth_height=720,
-        depth_fps=fps_video,
-        depth_bytes_per_pixel=bytes_per_px_depth,
-        kinematics_bytes_per_sec=bw_kin,
-        tactile_bytes_per_sec=bw_tac,
-    )
-    bw_rgb_1080p = res_1080p["bw_rgb"]
-    bw_depth_1080p = res_1080p["bw_depth"]
-    bw_vision_1080p = res_1080p["bw_vision"]
-    bw_total_1080p = res_1080p["bw_total"]
-    storage_hour_1080p = res_1080p["storage_per_hour"]
+    bytes_per_step = n_axes * values_per_axis * bytes_per_value + bytes_timestamp
+    bw_kin = (bytes_per_step * byte * f_log).to(MB / second)
 
-    # Standard resolution capture (720p RGB, 720p Depth)
-    res_720p = calc_teleop_ingestion_budget(
-        num_cameras=num_cameras,
-        rgb_width=1280,
-        rgb_height=720,
-        rgb_fps=fps_video,
+    res_nav = calc_teleop_ingestion_budget(
+        num_cameras=1,
+        rgb_width=cam_nav.resolution_width,
+        rgb_height=cam_nav.resolution_height,
+        rgb_fps=cam_nav.frame_rate.to(hertz).magnitude,
         rgb_bytes_per_pixel=bytes_per_px_rgb,
-        depth_width=1280,
-        depth_height=720,
-        depth_fps=fps_video,
-        depth_bytes_per_pixel=bytes_per_px_depth,
         kinematics_bytes_per_sec=bw_kin,
-        tactile_bytes_per_sec=bw_tac,
     )
-    bw_rgb_720p = res_720p["bw_rgb"]
-    bw_total_720p = res_720p["bw_total"]
-    storage_hour_720p = res_720p["storage_per_hour"]
+    res_wrist = calc_teleop_ingestion_budget(
+        num_cameras=1,
+        rgb_width=cam_wrist.resolution_width,
+        rgb_height=cam_wrist.resolution_height,
+        rgb_fps=cam_wrist.frame_rate.to(hertz).magnitude,
+        rgb_bytes_per_pixel=bytes_per_px_rgb,
+    )
+    res_ext = calc_teleop_ingestion_budget(
+        num_cameras=n_ext,
+        rgb_width=cam_ext.resolution_width,
+        rgb_height=cam_ext.resolution_height,
+        rgb_fps=cam_ext.frame_rate.to(hertz).magnitude,
+        rgb_bytes_per_pixel=bytes_per_px_rgb,
+        depth_width=cam_ext.resolution_width,
+        depth_height=cam_ext.resolution_height,
+        depth_fps=cam_ext.frame_rate.to(hertz).magnitude,
+        depth_bytes_per_pixel=bytes_per_px_depth,
+    )
 
-    # Shift aggregation (5 workstations, 8-hour shift)
-    num_workstations = 5
-    shift_hours = 8.0
-    storage_shift_720p = storage_hour_720p * (num_workstations * shift_hours)
+    bw_nav = res_nav["bw_rgb"]
+    bw_wrist = res_wrist["bw_rgb"]
+    bw_ext_rgb = res_ext["bw_rgb"]
+    bw_ext_depth = res_ext["bw_depth"]
+    bw_ext = res_ext["bw_vision"]
+    bw_total = (res_nav["bw_total"] + res_wrist["bw_total"] + res_ext["bw_total"]).to(MB / second)
+    storage_hour = (res_nav["storage_per_hour"] + res_wrist["storage_per_hour"] + res_ext["storage_per_hour"]).to(TB)
+    storage_shift = (storage_hour * shift_hours).to(TB)
+
+    nav_over_sata = (bw_nav / bw_sata).to("").magnitude
+    kin_share = (bw_kin / bw_total).to("").magnitude
+    bw_compressed = (bw_total / compression_ratio).to(MB / second)
+    storage_hour_compressed = (storage_hour / compression_ratio).to(TB)
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
-    check(abs(bw_rgb_1080p.to(MB / second).magnitude - 746.50) < 0.2, "Unexpected 1080p RGB rate")
-    check(abs(bw_depth_1080p.to(MB / second).magnitude - 221.18) < 0.2, "Unexpected 720p Depth rate")
-    check(abs(bw_total_1080p.to(MB / second).magnitude - 968.01) < 0.2, "Unexpected total 1080p bandwidth")
-    check(abs(storage_hour_1080p.to(TB).magnitude - 3.48) < 0.05, "Unexpected hourly storage")
-    check(abs(bw_total_720p.to(MB / second).magnitude - 553.29) < 0.2, "Unexpected total 720p bandwidth")
-    check(abs(storage_shift_720p.to(TB).magnitude - 79.67) < 0.5, "Unexpected shift storage")
+    check(n_axes == 9, "The machine logs 9 axes (2 base, 7 arm)")
+    check(bytes_per_step == 224, "Unexpected kinematic record size")
+    check(abs(bw_kin.to(MB / second).magnitude - 0.224) < 1e-9, "Unexpected kinematic rate")
+    check(abs(bw_nav.to(MB / second).magnitude - 2219.44) < 0.01, "Unexpected navigation-camera rate")
+    check(abs(bw_wrist.to(MB / second).magnitude - 279.94) < 0.01, "Unexpected wrist-camera rate")
+    check(abs(bw_ext.to(MB / second).magnitude - 622.08) < 0.01, "Unexpected external-camera rate")
+    check(abs(bw_total.to(MB / second).magnitude - 3121.68) < 0.01, "Unexpected total ingestion rate")
+    check(abs(storage_hour.to(TB).magnitude - 11.24) < 0.005, "Unexpected hourly storage")
+    check(abs(storage_shift.to(TB).magnitude - 89.91) < 0.01, "Unexpected shift storage")
+    check(bw_total < bw_nvme, "Raw ingestion must fit Gen4 NVMe write bandwidth")
+    check(3.9 < nav_over_sata < 4.1, "Navigation camera alone should be about four times SATA")
+    check(kin_share < 1e-4, "Kinematic stream should be under 0.01 percent of the bytes")
+    check(abs(bw_compressed.to(MB / second).magnitude - 390.2) < 0.1, "Unexpected compressed rate")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
-    num_cams_str = fmt_int(num_cameras)
-    bw_rgb_1080p_str = fmt_bandwidth(bw_rgb_1080p, unit=MB / second, precision=2)
-    bw_depth_1080p_str = fmt_bandwidth(bw_depth_1080p, unit=MB / second, precision=2)
-    bw_vision_1080p_str = fmt_bandwidth(bw_vision_1080p, unit=MB / second, precision=2)
-    bw_vision_1080p_gb_str = fmt_bandwidth(bw_vision_1080p, unit=GB / second, precision=3)
-    bw_kin_str = fmt_bandwidth(bw_kin, unit=MB / second, precision=3)
-    bw_tac_str = fmt_bandwidth(bw_tac, unit=MB / second, precision=3)
-    bw_total_1080p_str = fmt_bandwidth(bw_total_1080p, unit=MB / second, precision=2)
-    bw_total_1080p_gb_str = fmt_bandwidth(bw_total_1080p, unit=GB / second, precision=3)
-    storage_hour_1080p_str = fmt_memory(storage_hour_1080p, unit=TB, precision=2)
+    nav_w_str = fmt_int(cam_nav.resolution_width, commas=False)
+    nav_h_str = fmt_int(cam_nav.resolution_height, commas=False)
+    nav_fps_str = fmt_frequency(cam_nav.frame_rate, precision=0)
+    wrist_w_str = fmt_int(cam_wrist.resolution_width, commas=False)
+    wrist_h_str = fmt_int(cam_wrist.resolution_height, commas=False)
+    wrist_fps_str = fmt_frequency(cam_wrist.frame_rate, precision=0)
+    ext_w_str = fmt_int(cam_ext.resolution_width, commas=False)
+    ext_h_str = fmt_int(cam_ext.resolution_height, commas=False)
+    ext_fps_str = fmt_frequency(cam_ext.frame_rate, precision=0)
+    n_ext_str = fmt_int(n_ext)
+    n_axes_str = fmt_int(n_axes)
+    f_log_str = fmt_frequency(f_log, unit=ureg.kilohertz, precision=0)
+    bytes_per_step_str = fmt_int(bytes_per_step)
 
-    bw_rgb_720p_str = fmt_bandwidth(bw_rgb_720p, unit=MB / second, precision=1)
-    bw_total_720p_str = fmt_bandwidth(bw_total_720p, unit=MB / second, precision=1)
-    storage_hour_720p_str = fmt_memory(storage_hour_720p, unit=TB, precision=2)
-    storage_shift_720p_str = fmt_memory(storage_shift_720p, unit=TB, precision=1)
+    bw_nav_str = fmt_bandwidth(bw_nav, unit=MB / second, precision=2)
+    bw_wrist_str = fmt_bandwidth(bw_wrist, unit=MB / second, precision=2)
+    bw_ext_rgb_str = fmt_bandwidth(bw_ext_rgb, unit=MB / second, precision=2)
+    bw_ext_depth_str = fmt_bandwidth(bw_ext_depth, unit=MB / second, precision=2)
+    bw_ext_str = fmt_bandwidth(bw_ext, unit=MB / second, precision=2)
+    bw_kin_str = fmt_bandwidth(bw_kin, unit=MB / second, precision=2)
+    bw_total_str = fmt_bandwidth(bw_total, unit=MB / second, precision=2)
+    bw_total_gb_str = fmt_bandwidth(bw_total, unit=GB / second, precision=2)
+    storage_hour_str = fmt_memory(storage_hour, unit=TB, precision=2)
+    storage_shift_str = fmt_memory(storage_shift, unit=TB, precision=1)
+    shift_hours_str = fmt_int(int(shift_hours))
+
+    bw_sata_str = fmt_bandwidth(bw_sata, unit=MB / second, precision=0)
+    bw_nvme_str = fmt_bandwidth(bw_nvme, unit=GB / second, precision=0)
+    nav_over_sata_mult_str = fmt_multiple(nav_over_sata, precision=1)
+    kin_share_str = fmt_percent(kin_share, precision=3)
+    compression_mult_str = fmt_multiple(compression_ratio, precision=0)
+    bw_compressed_str = fmt_bandwidth(bw_compressed, unit=MB / second, precision=1)
+    storage_hour_compressed_str = fmt_memory(storage_hour_compressed, unit=TB, precision=2)
 ```
 
 ::: {#nbk-data-ingestion-bandwidth-storage-budgets-multi-camera .callout-notebook title="Multi-camera ingestion and storage budgets"}
-**Question**: What is the sustained data ingestion rate, NVMe storage bandwidth, and daily storage consumption for a bimanual leader-follower teleoperation rig capturing multi-modal demonstration data for physical imitation learning?
+**Question**: What sustained ingestion rate and storage does one teleoperated door-opening session on the warehouse mobile manipulator generate when every camera and every axis is logged raw?
 
-**Parameters**:
+**Parameters** (camera geometry is datasheet; logging formats are chosen; see the Reader Guide):
 
-- **Perception:** `{python} MultiCameraIngestionBudget.num_cams_str` active stereo RGB-D cameras (2 static eye-to-hand environment cameras + 2 wrist eye-in-hand cameras):
-  - RGB streams: $1920 \times 1080\text{ px}$ at $30\text{ Hz}$, $24\text{ bits/px}$ ($3\text{ bytes/px}$).
-  - Depth streams: $1280 \times 720\text{ px}$ at $30\text{ Hz}$, $16\text{ bits/px}$ (raw `uint16` depth in millimeters, $2\text{ bytes/px}$).
-- **Kinematics & dynamics:** 2 leader arms + 2 follower arms (14-DoF total):
-  - Joint positions $\mathbf{q}$, velocities $\dot{\mathbf{q}}$, commanded torques $\boldsymbol{\tau}_{\text{cmd}}$, measured torques $\boldsymbol{\tau}_{\text{meas}}$, and 4-stream action tuples logged at $1000\text{ Hz}$ ($128\text{ bytes/step}$).
-- **Tactile & haptics:** 2 dual-finger fingertip tactile sensor arrays ($16 \times 16$ pressure taxels $\times 2\text{ bytes} \times 4\text{ pads} = 2048\text{ bytes/step}$) logged at $100\text{ Hz}$.
+- **Navigation camera:** `{python} MultiCameraIngestionBudget.nav_w_str` by `{python} MultiCameraIngestionBudget.nav_h_str` px at `{python} MultiCameraIngestionBudget.nav_fps_str`, logged as 24-bit RGB ($3\text{ bytes/px}$).
+- **Wrist camera:** `{python} MultiCameraIngestionBudget.wrist_w_str` by `{python} MultiCameraIngestionBudget.wrist_h_str` px at `{python} MultiCameraIngestionBudget.wrist_fps_str`, logged the same way.
+- **External cameras:** `{python} MultiCameraIngestionBudget.n_ext_str` RGB-D cameras viewing the door, color at `{python} MultiCameraIngestionBudget.ext_w_str` by `{python} MultiCameraIngestionBudget.ext_h_str` px and `{python} MultiCameraIngestionBudget.ext_fps_str`, with depth aligned to the color frame as raw `uint16` millimeters ($2\text{ bytes/px}$).
+- **Kinematics:** `{python} MultiCameraIngestionBudget.n_axes_str` axes (two base wheels, seven arm joints) logged at `{python} MultiCameraIngestionBudget.f_log_str`. Each step stores, for every axis, position and velocity (the measured response $a_{\text{meas}}$), measured torque, and the requested, mapped, and enforced commands as 32-bit values, plus one 64-bit timestamp, for `{python} MultiCameraIngestionBudget.bytes_per_step_str` bytes per step.
 
 **Calculation**:
 
-1. **Raw video bandwidth:**
-   $$\text{BW}_{\text{RGB}} = 4 \times (1920 \times 1080 \times 3\text{ bytes}) \times 30\text{ s}^{-1} = 4 \times 6.2208\text{ MB} \times 30 = 746.50\text{ MB/s}.$$
-   $$\text{BW}_{\text{Depth}} = 4 \times (1280 \times 720 \times 2\text{ bytes}) \times 30\text{ s}^{-1} = 4 \times 1.8432\text{ MB} \times 30 = 221.18\text{ MB/s}.$$
-   The combined vision bandwidth is $\text{BW}_{\text{Vision, total}} =$ `{python} MultiCameraIngestionBudget.bw_rgb_1080p_str` $+$ `{python} MultiCameraIngestionBudget.bw_depth_1080p_str` $=$ `{python} MultiCameraIngestionBudget.bw_vision_1080p_str` $\approx$ `{python} MultiCameraIngestionBudget.bw_vision_1080p_gb_str`.
-
-2. **Kinematic and tactile bandwidth:**
-   $$\text{BW}_{\text{Kinematics}} = 128\text{ bytes} \times 1000\text{ s}^{-1} = 0.128\text{ MB/s}.$$
-   $$\text{BW}_{\text{Tactile}} = 2048\text{ bytes} \times 100\text{ s}^{-1} = 0.205\text{ MB/s}.$$
-   Evaluating the sensor taps yields $\text{BW}_{\text{Kinematics}} =$ `{python} MultiCameraIngestionBudget.bw_kin_str` and $\text{BW}_{\text{Tactile}} =$ `{python} MultiCameraIngestionBudget.bw_tac_str`.
-
-3. **Total sustained ingestion rate:**
-   Aggregating all streams gives $\text{BW}_{\text{total}} =$ `{python} MultiCameraIngestionBudget.bw_total_1080p_str` $\approx$ `{python} MultiCameraIngestionBudget.bw_total_1080p_gb_str`.
-
-4. **Hourly and shift storage consumption:**
-   Sustained ingestion accumulates uncompressed telemetry at `{python} MultiCameraIngestionBudget.storage_hour_1080p_str`.
-   When recording at a standard $1280 \times 720$ RGB target (`{python} MultiCameraIngestionBudget.bw_rgb_720p_str`) alongside depth (`{python} MultiCameraIngestionBudget.bw_depth_1080p_str`) with synchronous 4-stream metadata, sustained ingestion requires **`{python} MultiCameraIngestionBudget.bw_total_720p_str`**, accumulating **`{python} MultiCameraIngestionBudget.storage_hour_720p_str`** of uncompressed telemetry.
-   Across an 8-hour collection shift with 5 parallel workstations, the raw telemetry ingestion generates:
-   $$\text{Storage}_{\text{shift}} = 5 \times (1.99\text{ TB/hr} \times 8\text{ hr}) = 79.6\text{ TB per shift}.$$
-   yielding `{python} MultiCameraIngestionBudget.storage_shift_720p_str` per shift.
+1. **Raw video bandwidth:** the navigation camera streams `{python} MultiCameraIngestionBudget.bw_nav_str` and the wrist camera `{python} MultiCameraIngestionBudget.bw_wrist_str`. The external pair adds `{python} MultiCameraIngestionBudget.bw_ext_rgb_str` of color and `{python} MultiCameraIngestionBudget.bw_ext_depth_str` of depth, `{python} MultiCameraIngestionBudget.bw_ext_str` in all.
+2. **Kinematic bandwidth:** `{python} MultiCameraIngestionBudget.bytes_per_step_str` bytes per step at `{python} MultiCameraIngestionBudget.f_log_str` is `{python} MultiCameraIngestionBudget.bw_kin_str`.
+3. **Total sustained ingestion rate:** the streams sum to `{python} MultiCameraIngestionBudget.bw_total_str`, about `{python} MultiCameraIngestionBudget.bw_total_gb_str`.
+4. **Hourly and shift storage consumption:** uncompressed telemetry accumulates at `{python} MultiCameraIngestionBudget.storage_hour_str` per hour, or `{python} MultiCameraIngestionBudget.storage_shift_str` across a `{python} MultiCameraIngestionBudget.shift_hours_str`-hour collection shift on one machine.
 
 **Systems insight**:
-A high-capacity data acquisition workstation cannot log uncompressed multi-view streams over standard USB 3.0 buses (capped at $400\text{ MB/s}$ real-world throughput) or write to SATA SSDs (capped at $550\text{ MB/s}$). Ingesting `{python} MultiCameraIngestionBudget.bw_total_720p_str` to `{python} MultiCameraIngestionBudget.bw_total_1080p_str` requires dedicated PCIe Gen4 NVMe storage (capable of $>5000\text{ MB/s}$ sequential writes) or hardware-accelerated NVENC video compression (H.265 intra-frame at CRF 18, compressing streams $8\times$ to $\approx 69.2\text{--}92.5\text{ MB/s}$ / $249\text{--}333\text{ GB/hr}$) to prevent OS buffer overruns and silent frame drops.
-:::
-
-::: {.column-margin}
-![](images/svg/margin_sensory_ingestion_bandwidth_ladder.svg){width="100%" fig-alt="Vertical ladder comparing camera raw bandwidth against USB, SATA, and NVMe bus ceilings."}
-
-*Multi-camera raw telemetry overwhelms legacy storage interfaces, requiring direct PCIe NVMe logging.*
+The navigation camera alone writes `{python} MultiCameraIngestionBudget.nav_over_sata_mult_str` what a SATA SSD sustains (`{python} MultiCameraIngestionBudget.bw_sata_str`). The full session fits within a Gen4 NVMe drive's `{python} MultiCameraIngestionBudget.bw_nvme_str`, but only by consuming storage at `{python} MultiCameraIngestionBudget.storage_hour_str` per hour. Intra-frame video compression at an illustrative `{python} MultiCameraIngestionBudget.compression_mult_str` brings the rate to about `{python} MultiCameraIngestionBudget.bw_compressed_str` (`{python} MultiCameraIngestionBudget.storage_hour_compressed_str` per hour) at the cost of encoder latency and artifacts in the frames the policy will train on. The kinematic stream, which carries all four action taps, is `{python} MultiCameraIngestionBudget.kin_share_str` percent of the bytes. The record that preserves the causal chain is the cheapest stream to log, so a logger that drops data under buffer pressure must never drop it first.
 :::
 
 Sustained multi-camera ingestion directly bypasses operating-system page caches to maintain predictable write throughput.[^fn-data-nvme-direct]
@@ -365,10 +378,10 @@ Sustained multi-camera ingestion directly bypasses operating-system page caches 
 
 Before analyzing bilateral teleoperation dynamics, verify your understanding of multi-modal data acquisition rates and storage bus limits:
 
-- [ ] **Ingestion throughput vs. storage**: Can you explain why uncompressed 4-camera 1080p RGB-D ingestion ($968\text{ MB/s}$) instantly saturates both USB 3.0 ($400\text{ MB/s}$) and SATA SSD ($550\text{ MB/s}$) write interfaces?
+- [ ] **Ingestion throughput vs. storage**: Can you explain why the machine's uncompressed four-camera ingestion (`{python} MultiCameraIngestionBudget.bw_total_str`) overwhelms a SATA SSD (`{python} MultiCameraIngestionBudget.bw_sata_str`), and which single stream accounts for most of it?
 - [ ] **Buffer exhaustion dynamics**: Can you describe how kernel memory ring buffers behave when sustained ingestion bandwidth exceeds secondary storage write limits, and why frames drop silently without raising I/O exceptions?
-- [ ] **Compression vs. fidelity trade-offs**: Can you distinguish the computational latency and visual artifact trade-offs of intra-frame NVENC H.265 compression ($8\times$ reduction to $\approx 92\text{ MB/s}$) versus raw uncompressed frame logging?
-- [ ] **Ingestion capacity estimate**: For a 5-workstation bimanual collection cell operating across an 8-hour shift, estimate the uncompressed telemetry volume. How many 4 TB NVMe U.2 drives are consumed per shift before deduplication or compression?
+- [ ] **Compression vs. fidelity trade-offs**: Can you distinguish the computational latency and visual artifact trade-offs of intra-frame video compression (`{python} MultiCameraIngestionBudget.compression_mult_str` reduction to about `{python} MultiCameraIngestionBudget.bw_compressed_str`) versus raw uncompressed frame logging?
+- [ ] **Ingestion capacity estimate**: For one machine logging raw across a `{python} MultiCameraIngestionBudget.shift_hours_str`-hour shift, estimate the uncompressed telemetry volume. How many 4 TB NVMe drives are consumed per shift before deduplication or compression?
 
 *High-bandwidth physical data capture requires co-designing sensor polling frequencies, bus topologies, and hardware compression to avoid silent data starvation.*
 :::
@@ -414,20 +427,27 @@ During demonstration collection, logging teleoperation streams merely as unstruc
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ DEMONSTRATION YIELD & ACTUATOR FATIGUE SIZING (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @tbl-05-collection-budget
-# │ Goal:    Estimate retained demonstrations and gear/cable wear per campaign.
-# │ Show:    Expected retained episodes per shift and campaign wear budget.
-# │ How:     Floor active time / cycle time, apply retention, then count cycles.
+# │ Context: @sec-data-teleop-costs, @tbl-05-collection-budget
+# │ Goal:    Estimate retained door-opening demonstrations and wrist gear/cable
+# │          wear per campaign on the warehouse mobile manipulator.
+# │ Show:    Expected retained episodes per session and campaign wear budget;
+# │          the latch tripwire that ends a failed attempt.
+# │ How:     Floor active time / cycle time (one opening plus one re-latch),
+# │          apply retention, then count cycles. Tripwire from AISLE.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt_time, fmt_qty, fmt_int, check
 
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
 class DemonstrationYieldFatigue:
     """Facility operational yield and mechanical component wear budgeting."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    f_trip = AISLE.f_latch_tripwire  # category: illustrative
     t_sched = 60.0 * minute
     t_motion = 35.0 * minute
     t_att = 25.0 * second
@@ -470,6 +490,7 @@ class DemonstrationYieldFatigue:
     check(abs(overhead_factor - 4.07) < 0.05, "Unexpected facility overhead ratio")
     check(gear_cycles == 102942, "Unexpected cumulative gear cycles")
     check(cable_cycles == 58824, "Unexpected cumulative cable bends")
+    check(abs(f_trip.to(newton).magnitude - 15.0) < 1e-9, "Latch tripwire should be 15 N")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
     n_raw_str = fmt_int(n_raw_attempts)
@@ -483,9 +504,10 @@ class DemonstrationYieldFatigue:
     cable_cycles_str = fmt_int(cable_cycles, commas=True)
     gear_fatigue_pct_str = fmt_percent(gear_fatigue_pct / 100.0, precision=1)
     cable_fatigue_pct_str = fmt_percent(cable_fatigue_pct / 100.0, precision=1)
+    f_trip_str = fmt_qty(f_trip, newton, precision=0)
 ```
 
-Translating scheduled collection shifts into usable training data requires budgeting for setup overhead, ergonomics, cycle times, and quality attrition. Consider the precision peg-in-hole assembly task across a declared single session of $T_{\text{sched}} = 60.0\text{ min}$ ($3600\text{ s}$). After cell startup, sensor calibration, and mandatory operator rest breaks, the remaining active motion window is $T_{\text{motion}} = 35.0\text{ min}$ ($2100\text{ s}$). With an attempt duration of $t_{\text{att}} = 25.0\text{ s}$ and a fixture reset duration of $t_{\text{rst}} = 15.0\text{ s}$ ($t_{\text{cyc}} = 40.0\text{ s}$), the workstation executes at most $N_{\text{att}} = \lfloor 2100\text{ s} / 40.0\text{ s} \rfloor =$ `{python} DemonstrationYieldFatigue.n_raw_str` raw attempts per session. Accounting for in-trial failures (20 percent) and post-collection quality filtering (15 percent) gives a net retention rate of $R = (1 - 0.20) \times (1 - 0.15) = 0.68$, so the `{python} DemonstrationYieldFatigue.n_raw_str` raw attempts yield $N_{\text{usable}} = 52 \times 0.68 \approx$ `{python} DemonstrationYieldFatigue.n_usable_str` usable episodes. Across the session, this produces $884\text{ s}$, or approximately `{python} DemonstrationYieldFatigue.t_yield_str` of validated demonstration data (a `{python} DemonstrationYieldFatigue.yield_pct_str` percent net session yield).[^fn-data-demonstration-yield] Reaching a benchmark target of $5000\text{ validated episodes}$ requires $5000 / 35.36 \approx$ `{python} DemonstrationYieldFatigue.t_sched_campaign_str` scheduled operator hours across `{python} DemonstrationYieldFatigue.n_total_str` physical attempts, scaling collection schedules by a `{python} DemonstrationYieldFatigue.overhead_factor_mult_str` facility-to-yield overhead factor.
+Translating scheduled collection shifts into usable training data requires budgeting for setup overhead, ergonomics, cycle times, and quality attrition. Consider one declared session of the campaign that teaches the mobile manipulator to open the spring-latched cage door, lasting $T_{\text{sched}} = 60.0\text{ min}$ ($3600\text{ s}$). After startup, sensor calibration, and mandatory operator rest breaks, the remaining active motion window is $T_{\text{motion}} = 35.0\text{ min}$ ($2100\text{ s}$). Each attempt is one teleoperated door opening of $t_{\text{att}} = 25.0\text{ s}$, and each reset is one re-latch of the door by its fixture, $t_{\text{rst}} = 15.0\text{ s}$ ($t_{\text{cyc}} = 40.0\text{ s}$), so the machine executes at most $N_{\text{att}} = \lfloor 2100\text{ s} / 40.0\text{ s} \rfloor =$ `{python} DemonstrationYieldFatigue.n_raw_str` raw attempts per session. Accounting for in-trial failures (20 percent) and post-collection quality filtering (15 percent) gives a net retention rate of $R = (1 - 0.20) \times (1 - 0.15) = 0.68$, so the `{python} DemonstrationYieldFatigue.n_raw_str` raw attempts yield $N_{\text{usable}} = 52 \times 0.68 \approx$ `{python} DemonstrationYieldFatigue.n_usable_str` usable episodes. Across the session, this produces $884\text{ s}$, or approximately `{python} DemonstrationYieldFatigue.t_yield_str` of validated demonstration data (a `{python} DemonstrationYieldFatigue.yield_pct_str` percent net session yield).[^fn-data-demonstration-yield] Reaching a benchmark target of $5000\text{ validated episodes}$ requires $5000 / 35.36 \approx$ `{python} DemonstrationYieldFatigue.t_sched_campaign_str` scheduled operator hours across `{python} DemonstrationYieldFatigue.n_total_str` physical attempts, scaling collection schedules by a `{python} DemonstrationYieldFatigue.overhead_factor_mult_str` facility-to-yield overhead factor.
 
 ::: {#psp-data-facility-to-yield .callout-perspective title="The 4-to-1 facility-to-yield ratio"}
 Never budget physical demonstration campaigns by scheduled facility hours. Due to sensor calibration, workpiece re-fixturing, operator ergonomics, and post-collection QA filtering, one hour of scheduled robot cell time yields at most 15 minutes of validated, defect-free trajectory data (a $4:1$ overhead factor).
@@ -493,20 +515,20 @@ Never budget physical demonstration campaigns by scheduled facility hours. Due t
 
 [^fn-data-demonstration-yield]: **Demonstration Yield**\index{Teleoperation!demonstration yield}: The ratio of kinematically valid, task-successful trajectory duration to total scheduled facility time. In precision robotics, resets, calibration nulling, and operator fatigue reduce net demonstration yield to under 25 percent of clock time.
 
-Hardware degradation during collection depends on the accumulation of physical cycles and directional stress reversals rather than elapsed wall-clock time. Consider the wrist joint of an articulated arm equipped with a strain-wave harmonic drive and internal routing flex cables. In an analytical wear model, the harmonic gear transmission carries a rated fatigue life of $L_{\text{gear}} = 5{,}000{,}000\text{ stress cycles}$ under rated output torque, and the internal cable bundle is rated for $L_{\text{cable}} = 200{,}000\text{ bending cycles}$. During the $25.0\text{ s}$ execution of a peg-insertion attempt, contact alignment and search motions introduce an average of $n_{\text{gear}} = 14\text{ torque reversals}$ and $n_{\text{cable}} = 6\text{ joint flex cycles}$. Resetting the rig adds an additional $2\text{ full flex cycles}$ during the return stroke. To collect $5000\text{ validated episodes}$ at a net retention rate of $R = 0.68$, the hardware must execute $N_{\text{total}} = 5000 / 0.68 \approx$ `{python} DemonstrationYieldFatigue.n_total_str` physical attempts. Across these `{python} DemonstrationYieldFatigue.n_total_str` attempts, the wrist transmission sustains $7353 \times 14 =$ `{python} DemonstrationYieldFatigue.gear_cycles_str` stress cycles, consuming `{python} DemonstrationYieldFatigue.gear_fatigue_pct_str` percent of its rated fatigue life. Concurrently, the internal cable bundle undergoes $7353 \times (6 + 2) =$ `{python} DemonstrationYieldFatigue.cable_cycles_str` bending cycles, consuming `{python} DemonstrationYieldFatigue.cable_fatigue_pct_str` percent of its total service life on a single dataset collection campaign. If three collection campaigns run sequentially on the same rig without replacement, the flex cable reaches 88.2 percent of its fatigue limit, risking conductor strand breakage and intermittent signal loss that corrupt sensor streams. Compute the mechanical wear budget from cycle counts and load reversals to schedule component replacement before hardware failure invalidates collection sessions. The operational time breakdown and mechanical wear budget across a declared $60\text{ min}$ teleoperation session are synthesized in @tbl-05-collection-budget.
+Hardware degradation during collection depends on the accumulation of physical cycles and directional stress reversals rather than elapsed wall-clock time. Consider the wrist joint of the machine's arm, with its strain-wave harmonic drive and internal routing flex cables. In an analytical wear model, the harmonic gear transmission carries a rated fatigue life of $L_{\text{gear}} = 5{,}000{,}000\text{ stress cycles}$ under rated output torque, and the internal cable bundle is rated for $L_{\text{cable}} = 200{,}000\text{ bending cycles}$. During the $25.0\text{ s}$ door opening, finding the handle, releasing the latch, and swinging the door introduce an average of $n_{\text{gear}} = 14\text{ torque reversals}$ and $n_{\text{cable}} = 6\text{ joint flex cycles}$. The arm's return stroke while the door re-latches adds $2\text{ full flex cycles}$. To collect $5000\text{ validated episodes}$ at a net retention rate of $R = 0.68$, the hardware must execute $N_{\text{total}} = 5000 / 0.68 \approx$ `{python} DemonstrationYieldFatigue.n_total_str` physical attempts. Across these `{python} DemonstrationYieldFatigue.n_total_str` attempts, the wrist transmission sustains $7353 \times 14 =$ `{python} DemonstrationYieldFatigue.gear_cycles_str` stress cycles, consuming `{python} DemonstrationYieldFatigue.gear_fatigue_pct_str` percent of its rated fatigue life. Concurrently, the internal cable bundle undergoes $7353 \times (6 + 2) =$ `{python} DemonstrationYieldFatigue.cable_cycles_str` bending cycles, consuming `{python} DemonstrationYieldFatigue.cable_fatigue_pct_str` percent of its total service life on a single dataset collection campaign. If three collection campaigns run sequentially on the same machine without replacement, the flex cable reaches 88.2 percent of its fatigue limit, risking conductor strand breakage and intermittent signal loss that corrupt sensor streams. Compute the mechanical wear budget from cycle counts and load reversals to schedule component replacement before hardware failure invalidates collection sessions. The operational time breakdown and mechanical wear budget across a declared $60\text{ min}$ teleoperation session are synthesized in @tbl-05-collection-budget.
 
-| Session Stage / Activity         | Allocated Duration ($\Delta t$)         | Wall-Clock Share (\%) | Physical Operation & Control State                                                                          | Hardware Stress & Wear Mechanism                                                                                                              | Net Trajectory Output ($N_{\text{episodes}}$ / $T_{\text{yield}}$) |
-|:---------------------------------|:----------------------------------------|:----------------------|:------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------|
-| **Cell Startup & Bus Sync**      | $8.0\text{ min}$ ($480\text{ s}$)       | $13.3\%$              | Bus synchronization (EtherCAT/CANopen), safety watchdog verification, optical homing                        | Power-on electrical inrush; thermal warm-up in motor windings and sensor bridges                                                              | $N = 0\text{ ep}$, $0.0\text{ min}$ yield                          |
-| **Sensor Calibration & Nulling** | $7.0\text{ min}$ ($420\text{ s}$)       | $11.7\%$              | Camera intrinsic/extrinsic sweep, 6-axis F/T gravity bias nulling, tactile matrix zeroing                   | Static holding torque; sensor bridge thermal stabilization; zero dynamic gear wear                                                            | $N = 0\text{ ep}$, $0.0\text{ min}$ yield                          |
-| **Operator Rest & Ergonomics**   | $10.0\text{ min}$ ($600\text{ s}$)      | $16.7\%$              | Mandatory operator breaks to mitigate visual fatigue, cognitive saturation, and tremor drift                | Passive standby; electromagnetic brakes engaged or zero-velocity holding current                                                              | $N = 0\text{ ep}$, $0.0\text{ min}$ yield                          |
-| **Physical Scene Resets**        | $13.0\text{ min}$ ($780\text{ s}$)      | $21.7\%$              | Part unclamping, receptacle clearing, peg re-fixturing, manipulator return stroke ($15.0\text{ s/attempt}$) | $52\text{ return strokes} \times 2\text{ bends} = 104\text{ cable flex cycles}$; zero contact payload                                         | $N = 0\text{ ep}$, $0.0\text{ min}$ yield                          |
-| **Active Teleoperated Attempts** | $21.67\text{ min}$ ($1300\text{ s}$)    | $36.1\%$              | Real-time human teleoperation guiding peg approach, chamfer search, and insertion ($25.0\text{ s/attempt}$) | $52 \times 14 = 728\text{ torque reversals}$ on harmonic drive; $52 \times 6 = 312\text{ cable flex cycles}$; contact loads $\le 15\text{ N}$ | $N = 52\text{ raw attempts}$, $21.67\text{ min}$ gross motion      |
-| **In-Trial Failures (Labeled)**  | $-4.33\text{ min}$ ($-260\text{ s}$)    | $-7.2\%$              | Part slippage, jamming, watchdog force trip ($F_N > 15.0\text{ N}$), dropped pegs ($20\%$ loss)             | High-force contact transients; abrasive wear on gripper silicone pads                                                                         | $-10.4\text{ ep}$ from success yield; valid logs kept              |
-| **Post-Collection QA Filtering** | $-2.60\text{ min}$ ($-156\text{ s}$)    | $-4.3\%$              | Offline filtering: link latency $>100\text{ ms}$, visual occlusion, operator hesitation ($15\%$ loss)       | Zero hardware wear (offline computational validation pass)                                                                                    | $-6.24\text{ ep}$ discarded                                        |
-| **Net Validated Dataset Yield**  | **$14.73\text{ min}$** ($884\text{ s}$) | **$24.6\%$**          | High-quality synchronized multi-modal trajectories ($s_t, a_t$) admitted into training buffer               | Consumes $2.1\%$ of wrist gear life and $29.4\%$ of internal flex cable life per $5000\text{ episode}$ campaign                               | **$N_{\text{usable}} = 35.36$** episodes                           |
+| Session Stage / Activity         | Allocated Duration ($\Delta t$)         | Wall-Clock Share (\%) | Physical Operation & Control State                                                                             | Hardware Stress & Wear Mechanism                                                                                                                                                  | Net Trajectory Output ($N_{\text{episodes}}$ / $T_{\text{yield}}$) |
+|:---------------------------------|:----------------------------------------|:----------------------|:---------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------|
+| **Cell Startup & Bus Sync**      | $8.0\text{ min}$ ($480\text{ s}$)       | $13.3\%$              | Bus synchronization (EtherCAT/CANopen), safety watchdog verification, optical homing                           | Power-on electrical inrush; thermal warm-up in motor windings and sensor bridges                                                                                                  | $N = 0\text{ ep}$, $0.0\text{ min}$ yield                          |
+| **Sensor Calibration & Nulling** | $7.0\text{ min}$ ($420\text{ s}$)       | $11.7\%$              | Camera intrinsic/extrinsic sweep, joint-torque bias nulling, encoder homing                                    | Static holding torque; sensor bridge thermal stabilization; zero dynamic gear wear                                                                                                | $N = 0\text{ ep}$, $0.0\text{ min}$ yield                          |
+| **Operator Rest & Ergonomics**   | $10.0\text{ min}$ ($600\text{ s}$)      | $16.7\%$              | Mandatory operator breaks to mitigate visual fatigue, cognitive saturation, and tremor drift                   | Passive standby; electromagnetic brakes engaged or zero-velocity holding current                                                                                                  | $N = 0\text{ ep}$, $0.0\text{ min}$ yield                          |
+| **Physical Scene Resets**        | $13.0\text{ min}$ ($780\text{ s}$)      | $21.7\%$              | Door closed and re-latched by its fixture, arm return stroke ($15.0\text{ s/attempt}$)                         | $52\text{ return strokes} \times 2\text{ bends} = 104\text{ cable flex cycles}$; zero contact payload                                                                             | $N = 0\text{ ep}$, $0.0\text{ min}$ yield                          |
+| **Active Teleoperated Attempts** | $21.67\text{ min}$ ($1300\text{ s}$)    | $36.1\%$              | Real-time human teleoperation guiding handle approach, latch release, and door swing ($25.0\text{ s/attempt}$) | $52 \times 14 = 728\text{ torque reversals}$ on harmonic drive; $52 \times 6 = 312\text{ cable flex cycles}$; contact loads below `{python} DemonstrationYieldFatigue.f_trip_str` | $N = 52\text{ raw attempts}$, $21.67\text{ min}$ gross motion      |
+| **In-Trial Failures (Labeled)**  | $-4.33\text{ min}$ ($-260\text{ s}$)    | $-7.2\%$              | Handle slip, latch bind, contact tripwire above `{python} DemonstrationYieldFatigue.f_trip_str` ($20\%$ loss)  | High-force contact transients; abrasive wear on gripper silicone pads                                                                                                             | $-10.4\text{ ep}$ from success yield; valid logs kept              |
+| **Post-Collection QA Filtering** | $-2.60\text{ min}$ ($-156\text{ s}$)    | $-4.3\%$              | Offline filtering: link latency $>100\text{ ms}$, visual occlusion, operator hesitation ($15\%$ loss)          | Zero hardware wear (offline computational validation pass)                                                                                                                        | $-6.24\text{ ep}$ discarded                                        |
+| **Net Validated Dataset Yield**  | **$14.73\text{ min}$** ($884\text{ s}$) | **$24.6\%$**          | High-quality synchronized multi-modal trajectories ($s_t, a_t$) admitted into training buffer                  | Consumes $2.1\%$ of wrist gear life and $29.4\%$ of internal flex cable life per $5000\text{ episode}$ campaign                                                                   | **$N_{\text{usable}} = 35.36$** episodes                           |
 
-: **Physical demonstration collection budget breakdown across a scheduled 60-minute session**: Partitioning of facility clock time, active motion yield, quality filtering losses, and mechanical component fatigue across collection stages for a precision peg-in-hole assembly workcell ($T_{\text{sched}} = 60.0\text{ min}$, $N_{\text{att}} = 52\text{ attempts}$, nominal attempt $t_{\text{att}} = 25.0\text{ s}$, reset $t_{\text{rst}} = 15.0\text{ s}$). The nominal hour yields only $14.73\text{ min}$ of retained demonstration data (24.6 percent net yield), while imposing significant cumulative fatigue on mechanical transmissions and wiring flex lines. {#tbl-05-collection-budget tbl-colwidths="[16,16,18,18,16,16]"}
+: **Physical demonstration collection budget breakdown across a scheduled 60-minute session**: Partitioning of facility clock time, active motion yield, quality filtering losses, and mechanical component fatigue across collection stages for the mobile manipulator's door-opening campaign ($T_{\text{sched}} = 60.0\text{ min}$, $N_{\text{att}} = 52\text{ attempts}$, nominal attempt $t_{\text{att}} = 25.0\text{ s}$, reset $t_{\text{rst}} = 15.0\text{ s}$). The nominal hour yields only $14.73\text{ min}$ of retained demonstration data (24.6 percent net yield), while imposing significant cumulative fatigue on mechanical transmissions and wiring flex lines. {#tbl-05-collection-budget tbl-colwidths="[16,16,18,18,16,16]"}
 
 The expected 10.4 in-trial failures reduce *successful-demonstration* yield. When their telemetry is valid, retain them as labeled failure or intervention records; exclude only invalid recordings from the archive.
 
@@ -581,7 +603,52 @@ When a hazardous or boundary state does not appear in a training dataset, an eng
 
 Each mechanism produces an identical zero count in a scenario cell, yet treating them identically leads to incorrect conclusions about policy stability.
 
-Human takeovers and automated disengagements introduce a selection trap into fleet data. An intervention occurs precisely when the autonomous policy has entered a region of state space that it handles poorly, causing tracking error or model uncertainty to exceed an operational threshold. Because disengagements are triggered by failing rollouts, the collected intervention data is not drawn from the nominal state distribution of the task. If a safety driver intervenes when a mobile robot drifts $0.15\text{ m}$ outside its lane corridor at $2.0\text{ m/s}$, the trajectory recorded after the takeover captures an expert recovering from an edge case disturbance. The distribution of states visited during these rescues, denoted $d^{\text{takeover}}$, is conditioned on policy failure rather than standard task execution. Treating intervention logs as if they were drawn from the nominal distribution $d^{\pi^*}$ distorts the training distribution toward states that only exist because the prior policy failed.
+```{python}
+#| label: calc-data-aisle-takeover-drift
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AISLE TAKEOVER DRIFT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-data-intervention-recovery (selection-trap paragraph)
+# │ Goal:    Place the takeover example on the running machine in its aisle.
+# │ Show:    Lateral drift that trips the side-clearance monitor, at the
+# │          in-loop takeover speed the machine slows to before asking.
+# │ How:     Clearance and takeover speed from AISLE; the monitor threshold is
+# │          a chapter-local fraction of the clearance.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_length, fmt_velocity, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class AisleTakeoverDrift:
+    """Remote-assistant takeover when the lateral monitor trips inside the side clearance."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    side_clearance = AISLE.side_clearance  # category: illustrative
+    v_takeover = AISLE.v_takeover_in_loop  # category: chosen
+    monitor_fraction = 2 / 3  # category: chosen (chapter-local monitor threshold)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    drift = side_clearance * monitor_fraction
+    margin_left = side_clearance - drift
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    check(abs(side_clearance.to(ureg.meter).magnitude - 0.15) < 1e-9, "Side clearance should be 0.15 m")
+    check(drift < side_clearance, "Monitor must trip before the base reaches the rack face")
+    check(abs(drift.to(ureg.meter).magnitude - 0.10) < 1e-9, "Monitor threshold should be 0.10 m")
+    check(abs(v_takeover.to(ureg.meter / ureg.second).magnitude - 1.2) < 1e-9, "In-loop takeover speed should be 1.2 m/s")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    drift_str = fmt_length(drift, unit=ureg.meter, precision=2)
+    clearance_str = fmt_length(side_clearance, unit=ureg.meter, precision=2)
+    margin_left_str = fmt_length(margin_left, unit=ureg.meter, precision=2)
+    v_takeover_str = fmt_velocity(v_takeover, precision=1)
+```
+
+Human takeovers and automated disengagements introduce a selection trap into fleet data. An intervention occurs precisely when the autonomous policy has entered a region of state space that it handles poorly, causing tracking error or model uncertainty to exceed an operational threshold. Because disengagements are triggered by failing rollouts, the collected intervention data is not drawn from the nominal state distribution of the task. Suppose the mobile manipulator drifts `{python} AisleTakeoverDrift.drift_str` toward a rack inside its `{python} AisleTakeoverDrift.clearance_str` side clearance. The lateral monitor trips, and because the machine never requests in-loop help at aisle speed (@sec-intervention), it first slows to `{python} AisleTakeoverDrift.v_takeover_str` and then asks a remote assistant, who takes over with `{python} AisleTakeoverDrift.margin_left_str` of clearance left. The trajectory recorded after the takeover captures an expert recovering from an edge case disturbance. The distribution of states visited during these rescues, denoted $d^{\text{takeover}}$, is conditioned on policy failure rather than standard task execution. Treating intervention logs as if they were drawn from the nominal distribution $d^{\pi^*}$ distorts the training distribution toward states that only exist because the prior policy failed.
 
 Appending a rescued episode directly to a behavioral cloning dataset can make unsafe policy commands look like expert demonstrations. Before takeover, the learned policy may issue commands that increase heading error or contact force; after takeover, the expert issues corrective commands from states the learner visited. Those drift states are valuable for Dataset Aggregation (DAgger) when the expert can label a safe action there. The unsafe policy commands must remain attributed to the learner and excluded as expert imitation targets. Recovery after takeover is a separate expert sequence, with its own authority and timestamps.
 
@@ -748,7 +815,67 @@ Whether collected on a single dedicated workcell or pooled across diverse robot 
 
 ## How Datasets Go Wrong {#sec-data-failure-modes}
 
-A physical dataset lacks internal markers to indicate what it fails to measure. When an engineer inspects a static corpus of logged robot interactions, standard distribution metrics like feature variance, sample density, and covariance evaluate only the states the machine actually reached. They cannot detect states the machine never encountered. Consider an empirical dataset $\mathcal{D} = \{(\mathbf{s}_k, \mathbf{a}_k)\}$ collected during peg-in-hole assembly, where all recorded contact forces fall within $f_z \in [0.5, 2.0]\text{ N}$ and lateral offsets within $\Delta x \in [-1.5, 1.5]\text{ mm}$. If Deployment Requirement A defines a nominal scenario ledger $\mathcal{S}_{\text{req}, A}$ bounded by $f_z \le 2.0\text{ N}$ and $|\Delta x| \le 1.5\text{ mm}$, the dataset appears fully populated. If Deployment Requirement B instead specifies $\mathcal{S}_{\text{req}, B}$ with $f_z \le 8.0\text{ N}$ and $|\Delta x| \le 5.0\text{ mm}$ to account for pallet tolerances, $\mathcal{D}$ leaves large regions of the required state space completely unvisited. Yet $\mathcal{D}$ itself is identical in both cases. Because the recorded data distribution does not change when the deployment specification expands, internal analysis of $\mathcal{D}$ cannot establish whether coverage is sufficient. Coverage failure is an external mismatch between the scenario ledger $\mathcal{S}_{\text{req}}$ partitioned into discrete evaluation cells and the empirical visitation distribution $\mathcal{S}_{\text{obs}}$. Without an independent, external specification of $\mathcal{S}_{\text{req}}$, coverage failure cannot be detected.
+```{python}
+#| label: calc-data-latch-scenario-ledger
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LATCH SCENARIO LEDGER (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-data-failure-modes (opening paragraph)
+# │ Goal:    Show that one door-opening dataset looks complete against a
+# │          nominal ledger and mostly empty against the ledger the door needs.
+# │ Show:    Plate offset {nominal, +3, -3 mm} x approach {0.03, 0.10 m/s};
+# │          demonstrations only in (nominal, 0.03 m/s); 5 of 6 cells at zero.
+# │ How:     Approach speeds and tripwire from AISLE; plate offsets and the
+# │          logged offset band are chapter-local scenario inputs.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_length, fmt_velocity, fmt_qty, check, MarkdownStr
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class LatchScenarioLedger:
+    """Scenario-ledger join for the cage-door latch demonstrations."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    v_guarded = AISLE.v_latch_approach  # category: illustrative
+    v_fast = AISLE.v_latch_high  # category: illustrative
+    f_trip = AISLE.f_latch_tripwire  # category: illustrative
+    plate_offset = 3.0 * ureg.millimeter  # scenario assumption; category: illustrative
+    logged_offset = 0.5 * ureg.millimeter  # scenario assumption; category: illustrative
+    offsets = [0.0 * ureg.millimeter, plate_offset, -plate_offset]
+    speeds = [v_guarded, v_fast]
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    # Demonstrated cells: the plate within the logged band and the guarded speed.
+    n_cells = len(offsets) * len(speeds)
+    n_supported = 0
+    for _d in offsets:
+        for _v in speeds:
+            if abs(_d) <= logged_offset and _v == v_guarded:
+                n_supported += 1
+    n_zero = n_cells - n_supported
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    check(abs(v_guarded.to(ureg.meter / ureg.second).magnitude - 0.03) < 1e-9, "Guarded approach should be 0.03 m/s")
+    check(abs(v_fast.to(ureg.meter / ureg.second).magnitude - 0.10) < 1e-9, "Unsupported approach should be 0.10 m/s")
+    check(abs(f_trip.to(ureg.newton).magnitude - 15.0) < 1e-9, "Latch tripwire should be 15 N")
+    check(n_cells == 6 and n_supported == 1 and n_zero == 5, "Ledger should have one supported cell of six")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    v_guarded_str = fmt_velocity(v_guarded, precision=2)
+    v_fast_str = fmt_velocity(v_fast, precision=2)
+    f_trip_str = fmt_qty(f_trip, ureg.newton, precision=0)
+    plate_offset_str = fmt_length(plate_offset, unit=ureg.millimeter, precision=0)
+    logged_offset_str = fmt_length(logged_offset, unit=ureg.millimeter, precision=1)
+    _words = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
+    n_cells_str = MarkdownStr(_words[n_cells])
+    n_zero_str = MarkdownStr(_words[n_zero])
+```
+
+A physical dataset lacks internal markers to indicate what it fails to measure. When an engineer inspects a static corpus of logged robot interactions, standard distribution metrics like feature variance, sample density, and covariance evaluate only the states the machine actually reached. They cannot detect states the machine never encountered. Consider the empirical dataset $\mathcal{D} = \{(\mathbf{s}_k, \mathbf{a}_k)\}$ from the mobile manipulator's door-opening campaign. Every retained episode approaches the strike plate at the guarded `{python} LatchScenarioLedger.v_guarded_str` with the plate within $\pm$`{python} LatchScenarioLedger.logged_offset_str` of its nominal position, and every retained successful episode keeps its contact force below the `{python} LatchScenarioLedger.f_trip_str` tripwire. If Deployment Requirement A defines a scenario ledger $\mathcal{S}_{\text{req}, A}$ holding only the nominal plate at the guarded speed, the dataset appears fully populated. If Deployment Requirement B crosses three plate positions (nominal and displaced by $\pm$`{python} LatchScenarioLedger.plate_offset_str`) with two approach speeds (`{python} LatchScenarioLedger.v_guarded_str` and `{python} LatchScenarioLedger.v_fast_str`), $\mathcal{S}_{\text{req}, B}$ has `{python} LatchScenarioLedger.n_cells_str` cells, and $\mathcal{D}$ populates only the nominal plate at the guarded speed. The displaced-plate cells and the `{python} LatchScenarioLedger.v_fast_str` cells hold zero demonstrations. Yet $\mathcal{D}$ itself is identical in both cases. Because the recorded data distribution does not change when the deployment specification expands, internal analysis of $\mathcal{D}$ cannot establish whether coverage is sufficient. Coverage failure is an external mismatch between the scenario ledger $\mathcal{S}_{\text{req}}$ partitioned into discrete evaluation cells and the empirical visitation distribution $\mathcal{S}_{\text{obs}}$. Without an independent, external specification of $\mathcal{S}_{\text{req}}$, coverage failure cannot be detected. For the latch campaign, the `{python} LatchScenarioLedger.n_zero_str` empty cells therefore travel with the dataset into @sec-training as its known absences.
 
 When training data originates from human teleoperation, the data collection policy drifts over time as human operators adapt to the interface. Early in a collection campaign, an operator moves deliberately, introducing corrective sub-movements and pauses while searching for visual cues. After hundreds of repetitions, the same operator develops muscle memory, increasing speed, rounding corners, and executing aggressive feedforward maneuvers. In an analytical example of $500$ teleoperated assembly demonstrations gathered over two weeks, median completion time drops from $12.4\text{ s}$ in the first $50$ episodes to $5.8\text{ s}$ in the final $50$, while the $P_{99}$ commanded angular velocity (how violently the operator whips the joystick) increases from $0.42\text{ rad/s}$ to $1.85\text{ rad/s}$. The resulting late-stage demonstrations rely on dynamic momentum and precise timing that the physical robot cannot replicate when running under closed-loop latency at deployment. Detecting operator drift requires partitioning the dataset into sliding temporal windows and comparing shifts in episode duration, corrective jerk count, mean command magnitude, and teleoperation intervention rate. If these metrics drift across windows, treating the dataset as an identically distributed sample pool injects multi-modal, non-stationary behavior into the policy, meaning the robot might randomly hesitate or jerk depending on which part of the operator's learning curve it decides to mimic.
 

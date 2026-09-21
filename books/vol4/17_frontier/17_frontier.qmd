@@ -52,15 +52,134 @@ The opening chapter asked what a machine must guarantee before a learned proposa
 
 ## Epistemic Limits {#sec-frontier-epistemic-limits}
 
-A pallet jack with a weeping hydraulic line crosses one aisle of the site where the warehouse mobile manipulator works, and it leaves a clear film of fluid on the concrete. The machine's stopping budget assumes that the floor can supply the friction its credible deceleration needs, and on dry concrete it can. Under the film it may not, and neither the navigation camera nor the lidar can tell the film from dry floor. The permission path can meet every deadline, the chunk lease can expire on time, and the brake can engage on schedule while the stop still runs past the rack end, because the term that failed is a premise that no sensor on the machine reports. The missing evidence is the local friction floor before braking begins. That premise did not become open when the film appeared. The machine's normal aisle speed rested on it all along, on the dry floor as well, and nothing had measured it there either.
+A pallet jack with a weeping hydraulic line crosses one aisle of the site where the warehouse mobile manipulator works, and it leaves a clear film of fluid on the concrete. The machine's stopping budget assumes that the floor can supply the friction its credible deceleration needs, and on dry concrete it can. Under the film it may not, and neither the navigation camera nor the lidar can tell the film from dry floor. The permission path can meet every deadline, the chunk lease can expire on time, and the brake can engage on schedule while the stop still runs past the rack end, because the term that failed is a premise that no sensor on the machine reports. The missing evidence is the local friction floor before braking begins.
 
-<!-- PASS3: Fill from RM/AISLE per canon §7.3. Credible deceleration is min(a_brake, mu*g); on dry concrete (AISLE.mu_dry) a_brake binds, below mu_min = a_brake/g friction binds; the clear film is AISLE.mu_oil_film. State in one sentence, with the cell's values, that the normal-mode aisle speed (AISLE.v_aisle) already rested on this premise. The register entry at the residual-claims register section carries the inspected-floor ceiling (AISLE.mu_inspected_floor) and the restricted mode. No number may be typed here by hand. -->
+```{python}
+#| label: calc-frontier-oil-film
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE OIL FILM ON THE AISLE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-frontier-epistemic-limits (the premise behind the aisle
+# │          speed), @sec-frontier-residual-claims-register (the two register
+# │          entries and @tbl-17-claims-register), @sec-frontier-failures-
+# │          without-detectors (detection latency against the spare margin),
+# │          @sec-frontier-fallacies-pitfalls (the vision-only pitfall).
+# │
+# │ Goal:    Show that the 1.3 m/s normal mode always rested on a friction
+# │          floor that no sensor on the machine reports.
+# │ Show:    the friction the credible deceleration needs; the stop on a clear
+# │          film against the clear distance; the inspected-floor ceiling and
+# │          restricted mode; the zero-failure closure test; the walking-person
+# │          ceiling; the time the spare margin buys.
+# │ How:     credible deceleration a = min(a_brake, mu g); the finished budget
+# │          (C2 stop, all three overheads) at the aisle speed; its ceiling as
+# │          the positive root with a_eff = a / 1.5; zero-failure sample size.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class OilFilm:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
+    g = (1 * ureg.standard_gravity).to(ureg.meter / ureg.second**2)  # physical constant
+    a_brake = AISLE.a_brake  # category: illustrative (credible deceleration, dry floor)
+    mu_dry = AISLE.mu_dry  # category: illustrative (dry concrete)
+    mu_insp = AISLE.mu_inspected_floor  # category: illustrative (inspected floor)
+    mu_oil = AISLE.mu_oil_film  # category: illustrative (clear hydraulic film)
+    v_aisle = AISLE.v_aisle  # category: chosen (normal-mode aisle speed)
+    d_clear = AISLE.d_clear  # category: illustrative (rack-end clear distance)
+    tau_delay = AISLE.tau_delay  # category: derived (total pre-brake delay)
+    overhead = AISLE.fixed_overhead  # category: derived (delta_loc + delta_margin + eps_track)
+    v_h = AISLE.v_human_approach  # category: datasheet (ISO 13855 walking speed)
+    v_restricted = 1.0 * ureg.meter / ureg.second  # category: chosen (scenario assumption: restricted mode on inspected floors)
+    p_miss_target = 0.001  # category: chosen (detector miss-rate bound for closure)
+    n_contrast = 1000  # category: illustrative (a smaller zero-miss campaign, for contrast)
+    confidence = 0.95  # category: chosen (one-sided confidence level)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
+    mu_min = (a_brake / g).to(ureg.dimensionless).magnitude
+    a_dry = min(a_brake, mu_dry * g)
+    a_insp = min(a_brake, mu_insp * g)
+    a_oil = min(a_brake, mu_oil * g)
+
+    # finished budget at the aisle speed: v tau + 0.75 v^2/a (C2 stop) + overhead
+    budget_aisle = (v_aisle * tau_delay + calc_c2_stop_suffix(v_aisle, a_dry)["distance"] + overhead).to(ureg.meter)
+    spare_aisle = (d_clear - budget_aisle).to(ureg.millimeter)
+    t_latest = (spare_aisle / v_aisle).to(ms)
+    stop_oil = (v_aisle * tau_delay + calc_c2_stop_suffix(v_aisle, a_oil)["distance"] + overhead).to(ureg.meter)
+
+    # ceilings: positive root of the finished budget with a_eff = a / 1.5
+    margin_loc = AISLE.delta_loc + AISLE.eps_track
+    ceiling_dry = calc_max_permitted_velocity(d_clear, tau_delay, a_dry / 1.5, margin_loc, AISLE.delta_margin)
+    ceiling_insp = calc_max_permitted_velocity(d_clear, tau_delay, a_insp / 1.5, margin_loc, AISLE.delta_margin)
+
+    n_closure = calc_zero_failure_sample_size(1.0 - p_miss_target, confidence=confidence)
+    p_miss_contrast = 1.0 - calc_clopper_pearson_zero_failure_bound(n_contrast, confidence=confidence)
+
+    # walking person (@sec-memory-belief-through-occlusion):
+    # v tau + 0.75 v^2/a + v_h (tau + 1.5 v/a) + overhead = d_clear
+    qa = 0.75 / a_brake
+    qb = tau_delay + 1.5 * v_h / a_brake
+    qc = v_h * tau_delay - (d_clear - overhead)
+    v_walk = ((-qb + (qb**2 - 4 * qa * qc) ** 0.5) / (2 * qa)).to(ureg.meter / ureg.second)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
+    check(abs(mu_min - 0.204) < 5e-4, f"Friction floor should be 0.204, got {mu_min}.")
+    check(a_dry == a_brake and mu_dry > mu_min, "On dry concrete the brakes, not friction, must bind.")
+    check(mu_oil < mu_min and mu_insp < mu_min, "On the film and on an inspected floor friction must bind.")
+    check(abs(a_insp.to(ureg.meter / ureg.second**2).magnitude - 1.1768) < 5e-4, f"Inspected-floor deceleration should be 1.18 m/s², got {a_insp}.")
+    check(abs(budget_aisle.to(ureg.millimeter).magnitude - 997.43) < 5e-3, f"Budget at 1.3 m/s should be 997.43 mm, got {budget_aisle}.")
+    check(abs(spare_aisle.to(ureg.millimeter).magnitude - 102.57) < 5e-3, f"Spare at 1.3 m/s should be 102.57 mm, got {spare_aisle}.")
+    check(abs(t_latest.to(ms).magnitude - 78.9) < 5e-2, f"T_latest should be 78.9 ms, got {t_latest}.")
+    check(abs(ceiling_dry.to(ureg.meter / ureg.second).magnitude - 1.3898) < 5e-5, f"Dry-floor ceiling should be 1.3898 m/s, got {ceiling_dry}.")
+    check(
+        abs(ceiling_insp.to(ureg.meter / ureg.second).magnitude - 1.0947) < 5e-5, f"Inspected-floor ceiling should be 1.0947 m/s, got {ceiling_insp}."
+    )
+    check(
+        v_restricted < ceiling_insp < v_aisle < ceiling_dry,
+        "Restricted mode must sit under the inspected ceiling, and the aisle speed under the dry ceiling.",
+    )
+    check(abs(stop_oil.to(ureg.meter).magnitude - 2.95) < 5e-3, f"Finished budget on the film should be 2.95 m, got {stop_oil}.")
+    check(abs(a_oil.to(ureg.meter / ureg.second**2).magnitude - 0.49) < 5e-3, f"Film deceleration should be 0.49 m/s², got {a_oil}.")
+    check(stop_oil > 2 * d_clear, f"On the film the stop from the aisle speed must exceed twice the clear distance, got {stop_oil}.")
+    check(n_closure == 2995, f"Zero-failure closure test should need 2,995 trials, got {n_closure}.")
+    check(abs(p_miss_contrast - 0.002991) < 5e-7, f"1,000 zero-miss trials should bound the miss rate at 0.002991, got {p_miss_contrast}.")
+    check(abs(v_walk.to(ureg.meter / ureg.second).magnitude - 0.4620) < 5e-5, f"Walking-person ceiling should be 0.462 m/s, got {v_walk}.")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
+    a_brake_str = fmt_acceleration(a_brake, precision=0)
+    mu_min_str = fmt(mu_min, precision=3)
+    mu_dry_str = fmt(mu_dry, precision=2)
+    mu_insp_str = fmt(mu_insp, precision=2)
+    mu_oil_str = fmt(mu_oil, precision=2)
+    a_insp_str = fmt_acceleration(a_insp, precision=2)
+    a_oil_str = fmt_acceleration(a_oil, precision=2)
+    v_aisle_str = fmt_velocity(v_aisle, precision=1)
+    d_clear_str = fmt_length(d_clear, unit=ureg.meter, precision=2)
+    budget_aisle_str = fmt_length(budget_aisle, unit=ureg.meter, precision=3)
+    spare_aisle_str = fmt_length(spare_aisle, unit=ureg.millimeter, precision=1)
+    t_latest_str = fmt_latency(t_latest, unit=ms, precision=1)
+    stop_oil_str = fmt_length(stop_oil, unit=ureg.meter, precision=2)
+    ceiling_insp_str = fmt_velocity(ceiling_insp, precision=2)
+    v_restricted_str = fmt_velocity(v_restricted, precision=0)
+    n_closure_str = fmt_int(n_closure, commas=True)
+    n_contrast_str = fmt_int(n_contrast, commas=True)
+    p_miss_contrast_str = fmt(p_miss_contrast, precision=6)
+    p_miss_target_pct_str = fmt_percent(p_miss_target, precision=1, style="prose")
+    p_miss_target_sym_str = fmt_percent(p_miss_target, precision=1, style="symbol")
+    confidence_pct_str = fmt_percent(confidence, precision=0, style="prose")
+    confidence_sym_str = fmt_percent(confidence, precision=0, style="symbol")
+    v_h_str = fmt_velocity(v_h, precision=1)
+    v_walk_str = fmt_velocity(v_walk, precision=2)
+```
+
+The release decision of @sec-release-safety-cases-claims already met this premise. Its claim C3, braking traction, was refused on the book's own evidence and handed to this chapter as an open premise. The machine's credible deceleration is the smaller of what its brakes deliver and what the floor supplies, $a = \min(a_{\text{brake}}, \mu g)$. The `{python} OilFilm.a_brake_str` credible deceleration that @sec-body-kinetic-momentum set needs a friction coefficient of at least `{python} OilFilm.mu_min_str`. Dry concrete, at an illustrative $\mu$ of `{python} OilFilm.mu_dry_str` (see the Reader Guide), supplies far more, so the brakes bind. The clear film, at $\mu$ = `{python} OilFilm.mu_oil_str`, supplies only `{python} OilFilm.a_oil_str`, and friction binds. At the `{python} OilFilm.v_aisle_str` aisle speed, the finished budget grows from `{python} OilFilm.budget_aisle_str` to `{python} OilFilm.stop_oil_str` against a `{python} OilFilm.d_clear_str` clear distance. The friction premise did not become open when the film appeared. The normal mode that @sec-enforcement-stopping-envelopes chose rested on that friction floor on every aisle, the dry ones included, and nothing had measured it there either.
 
 @Sec-boundary asked what a machine must guarantee before a proposal becomes physical work. The records built since give the answer, and it is conditional.
 
 Every engineering method has a boundary where its guarantees expire. The physical wall of @sec-boundary-bedrock-laws is one such boundary, because a larger learned model cannot reduce the travel that its own delay costs the machine. Ashby's law of requisite variety [@ashby1956introduction] names another, since a controller cannot regulate a disturbance that its sensors cannot perceive. On the mobile manipulator the oil film is such a disturbance. The arm's contact limit at the door latch rests on a premise of the same kind, a stiff wrist mount, and fatigue cracking in that mount can add compliance that stores strain energy and releases it as a force peak the joint torque sensors never register. A chemical flow regulator that holds line pressure below its limit depends on an undrifted pressure transducer, and deposition on the diaphragm can drift that reference until the loop regulates against a phantom reading while the true pressure exceeds the limit.
-
-<!-- PASS3: If the canon adds a computed consequence here (stopping distance on the film against D_clear), compute it in a LEGO cell from RM/AISLE; the old hand-typed 0.49 m / 0.76 m / 1.06 m / 0.80 m figures were removed in Pass 1. -->
 
 In each case the machine can leave its assumed conditions while its telemetry remains nominal. Successful trials cannot close such a gap, because the exposure wall that @sec-evaluation-trial-limits derives places a rare-hazard rate beyond any practical failure-free campaign. The safety case must name the missing premise, restrict operation while it remains open, and state what evidence could close it.
 
@@ -214,53 +333,53 @@ An unproven premise remains even if an engineer omits it from a safety report. T
 
 Each entry links the unsupported claim to the specific unmeasurable physical observable. In an embodied system with physical authority over mass, a learned policy fails to settle a safety property because sensors cannot transduce the relevant environmental state, the computing substrate cannot process the measurement within the control deadline, or the physical interaction cannot be observed before contact occurs. An engineer must define the **missing observable**\index{Missing observable!definition} with physical precision rather than statistical abstractions. Characterizing an unknown failure as an "out-of-distribution latent state" provides no actionable signal for an enforcement loop to trigger a physical intervention. By contrast, stating an unmeasured surface friction coefficient, an undetected optical flare across a camera lens array, or an unobservable micro-fracture in an actuator housing identifies the exact physical deficit. Naming the missing observable establishes the boundary where learned inference stops and physical uncertainty begins.
 
-In an analytical example, consider a $450\text{ kg}$ transport robot on depot concrete. Its proposed stopping claim assumes local tire–floor friction that a forward camera cannot establish beneath a clear oil film. With $v=0.9\text{ m/s}$ and the example's $17.1\text{ ms}$ response delay, $d=v\tau+v^2/(2\mu g)$ is about $0.36\text{ m}$ if $\mu\ge0.12$ is a validated floor. At $\mu=0.05$, braking alone is $0.826\text{ m}$ and the full stop is about $0.841\text{ m}$, exceeding the $0.50\text{ m}$ clearance. The proposed speed clamp is therefore conditional on measured or controlled floor conditions; it cannot establish safety on an unbounded oil slick. A lateral limit of $1.0\text{ m/s}^2$ also exceeds $\mu g$ at $\mu=0.05$.
+The oil film gives the mobile manipulator its first entry. The premise is that every aisle floor supplies a friction coefficient of at least `{python} OilFilm.mu_min_str`, the value its credible deceleration needs. The missing observable is the friction beneath a clear film, which the navigation camera and the lidar cannot tell from dry concrete. The stop from the aisle speed that fits the clear distance on a dry floor overruns it on the film, so any speed limit the entry imposes is conditional on measured or controlled floor conditions and cannot establish safety on an unbounded film.
 
-An open entry requires an **operational response**\index{Operational response!definition}. For this depot, the operators can inspect and control the floor to support a friction lower bound, maintain physical separation barriers, and admit the $0.9\text{ m/s}$ restricted mode only within that validated envelope. If the lower bound cannot be supported, the release must exclude the route or withhold motion. The firmware limit reduces kinetic energy, but the response delay, achievable braking, and available clearance remain separate premises.[^fn-math-velocity-clamp]
+An open entry requires an **operational response**\index{Operational response!definition}. For the aisles, the response is a restricted mode of `{python} OilFilm.v_restricted_str` on floors under the site's inspection regime. An inspected floor supports $\mu \ge$ `{python} OilFilm.mu_insp_str`, which gives a credible deceleration of `{python} OilFilm.a_insp_str` and a ceiling of `{python} OilFilm.ceiling_insp_str`, so the restricted mode sits below its ceiling. A route that the inspection regime does not cover is excluded, or the machine is withheld from it. The speed limit reduces kinetic energy, but the response delay, achievable braking, and available clearance remain separate premises.[^fn-math-velocity-clamp]
 
 [^fn-math-velocity-clamp]: **Velocity Kinetic Derating**\index{Velocity clamp!kinetic derating}: $E_k=mv^2/2$ decreases quadratically with speed. Stopping distance still depends on a validated braking floor and total response delay; a speed register alone cannot compensate for arbitrarily low friction.
 
-The restricted mode needs an owner able to keep its physical premises true. The drivetrain lead controls the signed velocity and braking configuration; the depot operations manager maintains the inspected floor and separated walkways. Both record the inspection interval and the condition that withdraws permission. A claim about friction cannot be maintained by a firmware speed setting alone.
+The restricted mode needs an owner able to keep its physical premises true. Site operations owns this entry through its spill procedure for pallet-jack routes, which sets the inspection interval and names the condition that withdraws permission. The signed speed limit on the permission path enforces the restriction, but a claim about friction cannot be maintained by a speed setting alone.
 
-Every entry needs a **closure test**\index{Closure test!definition} declared before collecting data. For the depot, a candidate forward oil-film sensor must identify the specified contaminants early enough that the complete detection, permission, and braking path fits the measured clearance. A zero-miss result in 1,000 independent trials gives only a one-sided 95 percent miss-probability upper bound of $1-0.05^{1/1000}\approx0.002991$. Establishing a bound at or below $0.001$ under the same Bernoulli assumptions requires at least 2,995 independent, failure-free trials. The trial distribution, distance, latency, false alarms, and friction after detection must be declared. A wheel-slip reflex can limit later motion but cannot prove pre-contact friction. Only a validated end-to-end detector and stopping result could justify lifting the route restriction.
+Every entry needs a **closure test**\index{Closure test!definition} declared before collecting data. For the film, the test is a floor-film detector whose miss rate is bounded at `{python} OilFilm.p_miss_target_pct_str` by `{python} OilFilm.n_closure_str` failure-free trials on seeded films (@sec-evaluation-trial-limits); until it passes, the restriction holds. A smaller campaign falls short. Zero misses in `{python} OilFilm.n_contrast_str` independent trials bound the miss probability only at `{python} OilFilm.p_miss_contrast_str` with `{python} OilFilm.confidence_pct_str` confidence. The detector must also report the film early enough that detection, permission, and braking together fit the clear distance, and the trial distribution, detection distance, latency, false alarms, and friction after detection must be declared in advance. A wheel-slip reflex can limit later motion but cannot establish friction before the wheels reach the film.
+
+The same aisle carries a second entry. The stopping budget protects a static obstacle, and @sec-memory-belief-through-occlusion showed that a person who keeps walking toward the machine through the whole stop would hold it to `{python} OilFilm.v_walk_str` at the rack end. The premise is that no person approaches the rack end during a stop, and the missing observable is presence in the cross aisle the rack hides. The site's crossing rule, a floor-marked crossing plus a rack-end presence sensor, is the restriction, and site operations owns it. The closure test qualifies the presence sensor by the same zero-failure sizing.
 
 Specifying a closure test forces an engineering organization to determine whether a gap can be resolved with improved instrumentation and testing, or whether it represents a permanent unobservable state. When a closure test requires a physical transducer that is unavailable or cannot meet the response deadline, the register entry remains open. The operational restriction remains until the evidence changes. The danger arises when an organization treats an unclosable entry as a temporary backlog item, assuming that every physical failure mode can eventually be trapped by an onboard runtime detector.
 
-The structured anatomy of these register entries is formalized across representative physical AI archetypes in @tbl-17-claims-register, illustrating how unmonitored hazards are systematically bounded by operational constraints until falsifiable closure tests are satisfied.
+@Tbl-17-claims-register sets the two entries side by side. Each row carries the four components the register requires, so either entry can be audited without the prose around it.
 
 \Needspace{31\baselineskip}
 
-| Claim and missing state                                                                         | Hazard mechanism                                                                                                                                        | Active containment and owner                                                                                                                                                                                   | Predeclared closure test                                                                                                                                                                                                            |
-|:------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Transport robot**: $d_{\rm stop}\le0.50\text{ m}$; local $\mu$ beneath clear oil is unknown.  | At $0.9\text{ m/s}$ and a $17.1\text{ ms}$ delay, the modeled stop is $\approx0.36\text{ m}$ at $\mu=0.12$ but $\approx0.841\text{ m}$ at $\mu=0.05$.   | Restrict speed only where inspection and floor controls support $\mu\ge0.12$; otherwise use barriers or withhold motion. *Owners*: drivetrain and depot operations leads.                                      | Characterize an independent forward contaminant sensor and full stop across a declared film distribution; at least 2,995 zero-miss independent trials for a 95% upper miss probability $\le0.001$, plus timing and clearance tests. |
-| **Ceramic gripper**: brittle workpiece voids are not visible before contact.                    | With $k=500\text{ N/mm}$ and jaw speed $2\text{ mm/s}$, force rises $1000\text{ N/s}$ and reaches a $15\text{ N}$ fracture threshold at $15\text{ ms}$. | A calibrated $6\text{ N}$ preload, $2.5\text{ N/mm}$ compliant spring, and $3\text{ mm}$ hard stroke would limit the modeled force to $13.5\text{ N}$ if that force path is maintained. *Owner*: tooling lead. | Inspect internal voids with an independently validated method, or test the passive force path across the specified stroke, temperature, and wear envelope.                                                                          |
-| **Flow regulator**: diaphragm zero-point drift is not observable from its own pressure reading. | A biased reading can permit true manifold pressure to exceed the configured limit.                                                                      | Independently rated pressure relief and scheduled zero checks. *Owners*: process safety and plant reliability leads.                                                                                           | Compare two independently calibrated **pressure** channels in kPa, with a justified $5\text{ kPa}$ disparity threshold and tested response. A flow meter would need a validated pressure–flow model.                                |
-| **Indoor drone**: visual features disappear during lighting transitions.                        | Pose error can grow before a visual policy recovers.                                                                                                    | Restrict flight to a validated clearance and illumination envelope, with a platform-tested landing or hover response. *Owner*: flight autonomy lead.                                                           | Demonstrate bounded state-estimate error and actuator response over a declared blackout distribution; a proposed event camera alone is not proof.                                                                                   |
+| Claim and missing state                                                                                                                | Hazard mechanism                                                                                                                                                                                                                                                      | Active containment and owner                                                                                                                                                                                                                                | Predeclared closure test                                                                                                                                                                                                                                                                       |
+|:---------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Braking traction**: every aisle floor supplies $\mu \ge$ `{python} OilFilm.mu_min_str`; friction beneath a clear film is unobserved. | At $\mu$ = `{python} OilFilm.mu_oil_str` the credible deceleration falls to `{python} OilFilm.a_oil_str`, and the finished budget at `{python} OilFilm.v_aisle_str` grows to `{python} OilFilm.stop_oil_str` against a `{python} OilFilm.d_clear_str` clear distance. | `{python} OilFilm.v_restricted_str` on inspected floors ($\mu \ge$ `{python} OilFilm.mu_insp_str`, ceiling `{python} OilFilm.ceiling_insp_str`); uninspected routes excluded. *Owner*: site operations, through the spill procedure for pallet-jack routes. | A floor-film detector with a miss rate of at most `{python} OilFilm.p_miss_target_sym_str` at `{python} OilFilm.confidence_sym_str` confidence, from `{python} OilFilm.n_closure_str` failure-free seeded-film trials, plus timing and clearance tests; the restriction holds until it passes. |
+| **Walking person**: no person approaches the rack end during a stop; presence in the hidden cross aisle is unobserved.                 | A person walking at `{python} OilFilm.v_h_str` through the whole stop would hold the machine to `{python} OilFilm.v_walk_str` at the rack end.                                                                                                                        | The crossing rule, a floor-marked crossing plus a rack-end presence sensor. *Owner*: site operations.                                                                                                                                                       | Qualify the presence sensor by the same zero-failure sizing, `{python} OilFilm.n_closure_str` failure-free trials for a `{python} OilFilm.p_miss_target_sym_str` miss bound.                                                                                                                   |
 
-: **Residual-claims register matrix**: Auditable ledger of unproven physical premises across representative physical AI archetypes. For each open claim, the register defines the missing physical observable, the physical hazard mechanism, the active operational containment enforced by the nervous system or mechanical hardware, the accountable human owners, and the falsifiable closure test required to retire the operational restriction. {#tbl-17-claims-register tbl-colwidths="[22,24,26,28]"}
+: **Residual-claims register for the aisle**: The two open premises behind the mobile manipulator's aisle speed. For each, the register names the missing physical observable, the hazard it permits, the operating restriction and its accountable owner, and the predeclared closure test that would retire the restriction. {#tbl-17-claims-register tbl-colwidths="[22,24,26,28]"}
 
 To ensure auditable tracking of unmonitored invariants across software deployments and physical revisions, safety-critical systems represent open residual claims through a formal, structured data contract (@tbl-17-residual-claims-schema). The abstract schema below defines the mandatory fields, scalar types, physical SI units, and structural invariants required for every unresolved physical assumption:
 
 \Needspace{27\baselineskip}
 
-| Manifest Category           | Parameter & Type                   | Physical Unit          | Invariant & Operational Contract                                                                      |
-|:----------------------------|:-----------------------------------|:-----------------------|:------------------------------------------------------------------------------------------------------|
-| **Manifest Header**         | `system_identifier` (`str`)        | —                      | Unique embodied platform ID (e.g., `AMR-450-DEPOT`)                                                   |
-| **Manifest Header**         | `hardware_build_rev` (`str`)       | —                      | Target silicon and chassis revision (`HW-REV-3.2`)                                                    |
-| **Manifest Header**         | `software_digest` (`str`)          | —                      | Cryptographic binary hash (SHA-256)                                                                   |
-| **Manifest Header**         | `validity_limit_hours` (`float`)   | hours                  | Configured operating window before review                                                             |
-| **Residual Claims**         | `entry_id` (`str`)                 | —                      | Unique claim tag (e.g., `CLAIM-FRIC-001`)                                                             |
-| **Residual Claims**         | `target_safety_claim` (`str`)      | —                      | Explicit safety invariant ($d_{\text{stop}} \le 0.50\text{ m}$)                                       |
-| **Residual Claims**         | `missing_observable` (`str`)       | SI units               | Unmeasured physical state (e.g., surface friction $\mu$)                                              |
-| **Physical Hazard**         | `governing_law` (`str`)            | —                      | Newton-Euler, Navier-Stokes, Joule heating                                                            |
-| **Physical Hazard**         | `time_to_harm` (`float`)           | seconds                | Time from unmodeled transition to irreversible yield                                                  |
-| **Operational Containment** | `containment_type` (`enum`)        | —                      | `FIRMWARE_PARAM_CLAMP`, `PASSIVE_MECHANICAL`, or `OPERATING_RESTRICTION`; validate the selected limit |
-| **Operational Containment** | `authority_limit` (`float`)        | $\text{m/s}, \text{N}$ | Hard numeric setpoint ceiling ($v_{\max}, F_{\max}$)                                                  |
-| **Operational Containment** | `kinetic_energy_ceiling` (`float`) | $\text{J}$             | Maximum allowable kinetic energy under fault ($E_k \le E_{\max}$)                                     |
-| **Assurance & Inspection**  | `proof_test_interval` (`float`)    | hours                  | Scheduled test interval; evidence between tests still depends on the operating restriction            |
-| **Predeclared Closure**     | `closure_modality` (`str`)         | —                      | Transducer technology or formal method required                                                       |
-| **Predeclared Closure**     | `sample_trials` (`int`)            | count                  | Case-specific independent exposure (2,995 zero misses for a 95% upper miss rate $\le0.001$)           |
-| **Predeclared Closure**     | `confidence_level` (`float`)       | —                      | Declared confidence level (95% in the worked detector test)                                           |
+| Manifest Category           | Parameter & Type                   | Physical Unit          | Invariant & Operational Contract                                                                                                                                                             |
+|:----------------------------|:-----------------------------------|:-----------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Manifest Header**         | `system_identifier` (`str`)        | —                      | Unique embodied platform ID (e.g., `WMM-AISLE-01`)                                                                                                                                           |
+| **Manifest Header**         | `hardware_build_rev` (`str`)       | —                      | Target silicon and chassis revision (`HW-REV-3.2`)                                                                                                                                           |
+| **Manifest Header**         | `software_digest` (`str`)          | —                      | Cryptographic binary hash (SHA-256)                                                                                                                                                          |
+| **Manifest Header**         | `validity_limit_hours` (`float`)   | hours                  | Configured operating window before review                                                                                                                                                    |
+| **Residual Claims**         | `entry_id` (`str`)                 | —                      | Unique claim tag (e.g., `CLAIM-FRIC-001`)                                                                                                                                                    |
+| **Residual Claims**         | `target_safety_claim` (`str`)      | —                      | Explicit safety invariant ($d_{\text{stop}} \le D_{\text{clear}}$)                                                                                                                           |
+| **Residual Claims**         | `missing_observable` (`str`)       | SI units               | Unmeasured physical state (e.g., surface friction $\mu$)                                                                                                                                     |
+| **Physical Hazard**         | `governing_law` (`str`)            | —                      | Newton-Euler, Navier-Stokes, Joule heating                                                                                                                                                   |
+| **Physical Hazard**         | `time_to_harm` (`float`)           | seconds                | Time from unmodeled transition to irreversible yield                                                                                                                                         |
+| **Operational Containment** | `containment_type` (`enum`)        | —                      | `FIRMWARE_PARAM_CLAMP`, `PASSIVE_MECHANICAL`, or `OPERATING_RESTRICTION`; validate the selected limit                                                                                        |
+| **Operational Containment** | `authority_limit` (`float`)        | $\text{m/s}, \text{N}$ | Hard numeric setpoint ceiling ($v_{\max}, F_{\max}$)                                                                                                                                         |
+| **Operational Containment** | `kinetic_energy_ceiling` (`float`) | $\text{J}$             | Maximum allowable kinetic energy under fault ($E_k \le E_{\max}$)                                                                                                                            |
+| **Assurance & Inspection**  | `proof_test_interval` (`float`)    | hours                  | Scheduled test interval; evidence between tests still depends on the operating restriction                                                                                                   |
+| **Predeclared Closure**     | `closure_modality` (`str`)         | —                      | Transducer technology or formal method required                                                                                                                                              |
+| **Predeclared Closure**     | `sample_trials` (`int`)            | count                  | Case-specific independent exposure (`{python} OilFilm.n_closure_str` zero misses for a `{python} OilFilm.confidence_sym_str` upper miss rate $\le$ `{python} OilFilm.p_miss_target_sym_str`) |
+| **Predeclared Closure**     | `confidence_level` (`float`)       | —                      | Declared confidence level (`{python} OilFilm.confidence_sym_str` in the worked detector test)                                                                                                |
 
 : **Epistemic residual-claims register**: Concrete data schema for residual claims. {#tbl-17-residual-claims-schema tbl-colwidths="[20,24,18,38]"}
 
@@ -274,7 +393,7 @@ An auditable residual-claims register turns unsupported physical assumptions int
 
 ## Failures Without Detectors {#sec-frontier-failures-without-detectors}
 
-A runtime detector is itself a physical subsystem. To operate as a **practical detector**\index{Practical detector!definition}, it must satisfy three coupled parameters: comprehensive coverage across the failure distribution, a bounded false-alarm rate, and a detection latency strictly shorter than the physical system's time-to-harm\index{Time-to-harm!definition}. If a mobile transport base traveling at $1.5\text{ m/s}$ requires $180\text{ ms}$ of braking actuation to avoid colliding with an obstacle, a perception pipeline requiring $250\text{ ms}$ of sensor aggregation and compute latency is not a detector for that hazard. It is a post-incident logging mechanism. Producing an accurate classification label after crossing an irreversible threshold generates diagnostic evidence but cannot serve as a runtime safeguard.
+A runtime detector is itself a physical subsystem. To operate as a **practical detector**\index{Practical detector!definition}, it must satisfy three coupled parameters: comprehensive coverage across the failure distribution, a bounded false-alarm rate, and a detection latency strictly shorter than the physical system's time-to-harm\index{Time-to-harm!definition}. At the `{python} OilFilm.v_aisle_str` aisle speed, the finished stopping budget of @tbl-enforcement-stopping-budget leaves the mobile manipulator `{python} OilFilm.spare_aisle_str` of its clear distance unspent, which the machine covers in `{python} OilFilm.t_latest_str` (@sec-intervention-authority-transitions). A detector for a person at the rack end that adds more than that to the observation path is not a detector for that hazard. It is a post-incident logging mechanism. Producing an accurate classification label after crossing an irreversible threshold generates diagnostic evidence but cannot serve as a runtime safeguard.
 
 The fundamental limit of runtime detection arises from observational indistinguishability. Consider two physical states of the world, $S_A$ and $S_B$. In state $S_A$, a commanded actuator trajectory $u(t)$ is safe. In state $S_B$, the identical trajectory $u(t)$ causes structural damage or human injury, requiring the nervous system to intervene and execute a stopping reflex. The dynamics of the body impose a hard deadline $t_{\text{deadline}}$, determined by actuator response time and system momentum, after which physical contact or mechanical yield cannot be prevented. If the telemetry history $y(t)$ provided by onboard instrumentation is identical for $S_A$ and $S_B$ across the entire interval $t \le t_{\text{deadline}}$, no algorithm operating on those observations can reliably distinguish the benign state from the hazardous one. Identical traces rule out a state-specific response before that deadline. A conservative action chosen for both states or a passive mechanical limit may still protect them, if its own clearance and force assumptions are valid.
 
@@ -511,7 +630,7 @@ Some hazards are unobservable through available sensors, and some claims require
 
 **Pitfall**: *Relying on vision-based perception alone when the physical hazard is observationally indistinguishable.*
 
-A pallet robot approaches a transparent hydraulic-fluid spill that its available cameras and range sensors cannot distinguish from dry concrete, producing observational indistinguishability\index{Observational indistinguishability}. After the wheels enter the patch, the sudden drop in friction causes the wheels to spin without grip. This slip reveals the changed surface, but the physical loss of deceleration authority means stopping distance has already expanded to $2.51\text{ m}$ against $0.80\text{ m}$ of clearance. A visually clear path does not establish the required friction for the admitted speed. The operating envelope must account for that unobserved condition through defensible speed restrictions or independently validated sensing. The residual-claims register must retain the friction assumption and its containment measure instead of treating missing visual evidence as evidence of traction.
+The mobile manipulator approaches a transparent hydraulic-fluid film that its navigation camera and lidar cannot distinguish from dry concrete, producing observational indistinguishability\index{Observational indistinguishability}. After the wheels enter the film, the sudden drop in friction causes them to spin without grip. This slip reveals the changed surface, but the loss of deceleration authority means the finished budget at the aisle speed has already grown to `{python} OilFilm.stop_oil_str` against the `{python} OilFilm.d_clear_str` clear distance. A visually clear path does not establish the required friction for the admitted speed. The operating envelope must account for that unobserved condition through defensible speed restrictions or independently validated sensing. The residual-claims register must retain the friction assumption and its containment measure instead of treating missing visual evidence as evidence of traction.
 
 :::
 

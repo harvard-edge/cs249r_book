@@ -72,9 +72,47 @@ To transform these continuous physical realities into rigorous systems specifica
 4. **Thermal capacity**\index{Thermal capacity!definition}: The rate at which resistive Joule heat accumulates in stator coils and power semiconductors relative to the chassis dissipation rate, bounding sustained duty cycles before thermal throttling intervenes.
 5. **Electrical power integrity**\index{Electrical power integrity!definition}: The transient voltage droop, peak current capacity, and regenerative energy surges across the shared direct-current distribution bus during rapid acceleration and braking.
 
+```{python}
+#| label: body-machine-momentum-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE RUNNING MACHINE'S MOMENTUM (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the mobile-systems bullet in @sec-body-five-budgets.
+# │ Goal:    Give the warehouse mobile manipulator's kinetic energy at its
+# │          drive limit with the tote rack loaded.
+# │ Show:    368 kg (upper bound) at 1.5 m/s carries 414 J.
+# │ How:     calc_kinetic_energy on RM.loaded_mass and RM.base.max_velocity.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_qty, fmt_velocity, fmt_energy, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+
+class MachineMomentum:
+    """Kinetic energy of the loaded running machine at its drive limit."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    m_loaded = RM.loaded_mass  # category: derived (upper bound, full tote rack)
+    v_drive = RM.base.max_velocity  # category: illustrative (drive limit)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    e_k = calc_kinetic_energy(m_loaded, v_drive).to(joule)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(m_loaded.to(kilogram).magnitude - 368.0) < 1e-9, f"Unexpected loaded mass: {m_loaded}")
+    check(abs(e_k.magnitude - 414.0) < 1e-6, f"Unexpected kinetic energy: {e_k}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    m_loaded_str = fmt_qty(m_loaded, kilogram, precision=0)
+    v_drive_str = fmt_velocity(v_drive, unit=meter / second, precision=1)
+    e_k_str = fmt_energy(e_k, unit=joule, precision=0)
+```
+
 Across the three physical archetypes introduced in @sec-boundary-four-archetypes, these five budgets manifest in distinct physical bottlenecks:
 
-- **Mobile Systems (AMR / AGV)**: Kinetic momentum and measurement freshness dominate. Because an unladen $80\text{ kg}$ chassis traveling at $2.0\text{ m/s}$ carries $160\text{ J}$ of kinetic energy, stopping distance ($\Delta d = v^2 / 2a_{\max}$) and tire traction limits bound safe velocity through human-shared aisles.
+- **Mobile Systems (AMR / AGV)**: Kinetic momentum and measurement freshness dominate. Loaded to at most `{python} MachineMomentum.m_loaded_str` and moving at its `{python} MachineMomentum.v_drive_str` drive limit, the warehouse mobile manipulator that this book follows carries `{python} MachineMomentum.e_k_str` of kinetic energy. Braking distance ($d_{\text{brake}} = v^2 / 2a_{\text{brake}}$) and tire traction bound its safe speed through aisles it shares with people.
 - **Manipulators (Articulated Arms)**: Reflected inertia ($N^2 J_m$) and thermal capacity govern operation. High-ratio strain-wave gearing ($N = 100:1$) amplifies rotor inertia by $10{,}000\times$, while unventilated limb castings trap $I^2R$ Joule heating during prolonged static payload holding.
 - **Process and Energy Systems**: Electrical power integrity and thermal dissipation dictate stability. Rapid valve throttling and pump motor starts induce sharp DC-bus voltage droops ($\Delta V = I_{\text{surge}} R_{\text{bus}}$), demanding aggressive capacitor banks and dynamic braking choppers.
 
@@ -152,7 +190,129 @@ Before analyzing vehicle kinetic momentum, verify your understanding of measurem
 
 ## Kinetic Momentum {#sec-body-kinetic-momentum}
 
-A warehouse transport robot carrying $120\text{ kg}$ of palletized freight navigates a distribution floor at $2.0\text{ m/s}$. When a worker steps unexpectedly into the aisle $1.5\text{ m}$ ahead, software cannot simply pause execution or instantaneously zero its velocity vector. The vehicle's steel chassis and cargo carry unyielding mechanical momentum, and bringing that mass to rest requires dissipating kinetic energy across physical distance. **Stopping distance grows linearly with delay and quadratically with speed, and that difference sets the speed limit.**
+```{python}
+#| label: body-stopping-budget-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE BODY'S STOPPING DISTANCE ON THE RUNNING MACHINE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-body-kinetic-momentum opener, @fig-02-stopping-distance, and
+# │          \ref{nbk-body-stopping-distance-budgeting-high-tail-compute}.
+# │ Goal:    Add the body's own terms of @eq-body-stopping-distance for the
+# │          loaded warehouse mobile manipulator at its drive limit.
+# │ Show:    Rows 1-3 of the stopping budget at 1.5 m/s: braking 562.5 mm,
+# │          overhead 150 mm (712.5), brake onset 30 mm (742.5), leaving 357.5 mm
+# │          of the 1.10 m clear distance; body-only ceiling 1.91 m/s; at 2.0 m/s
+# │          braking is 1000 mm (+77.8 percent); each extra 100 ms adds 150 mm;
+# │          figure cases 742.5 / 912.9 / 1417.2 mm.
+# │ How:     calc_safe_stopping_distance and calc_max_permitted_velocity with
+# │          a_eff = a_brake (constant deceleration), from RM and AISLE. The full
+# │          pre-brake delay AISLE.tau_delay appears only in the figure's cases.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import (
+    fmt_qty,
+    fmt_length,
+    fmt_energy,
+    fmt_latency,
+    fmt_velocity,
+    fmt_acceleration,
+    fmt_percent,
+    fmt_display_math,
+    check,
+)
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class BodyStoppingBudget:
+    """Rows 1-3 of the running machine's stopping budget: the terms the body owns."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    v = RM.base.max_velocity  # category: illustrative (drive limit)
+    a_brake = AISLE.a_brake  # category: illustrative (loaded, dry floor)
+    delta_loc = AISLE.delta_loc  # category: illustrative
+    delta_margin = AISLE.delta_margin  # category: chosen
+    t_act = AISLE.t_brake_onset  # category: illustrative (brake onset)
+    d_clear = AISLE.d_clear  # category: illustrative (rack-end clear distance)
+    tau_full = AISLE.tau_delay  # category: derived (full pre-brake delay; figure only)
+    v_fast = 2.0 * meter / second  # scenario assumption: speed-scaling case above the drive limit
+    dt_extra = 100 * millisecond  # scenario assumption: added pre-brake delay step
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    d_brake = (v**2 / (2 * a_brake)).to(ureg.millimeter)  # row 1
+    total_1 = d_brake
+    overhead = (delta_loc + delta_margin).to(ureg.millimeter)  # row 2
+    total_2 = (total_1 + overhead).to(ureg.millimeter)
+    d_onset = (v * t_act).to(ureg.millimeter)  # row 3
+    total_3 = (total_2 + d_onset).to(ureg.millimeter)
+    remaining = (d_clear - total_3).to(ureg.millimeter)
+    v_ceiling = calc_max_permitted_velocity(d_clear, t_act, a_brake, loc_margin=delta_loc, physical_margin=delta_margin)
+    d_brake_fast = (v_fast**2 / (2 * a_brake)).to(ureg.millimeter)
+    brake_growth = (d_brake_fast / d_brake - 1).to("dimensionless")
+    d_per_extra = (v * dt_extra).to(ureg.millimeter)
+    case_body = calc_safe_stopping_distance(v, t_act, a_brake, loc_margin=delta_loc, physical_margin=delta_margin).to(ureg.millimeter)
+    case_full = calc_safe_stopping_distance(v, tau_full, a_brake, loc_margin=delta_loc, physical_margin=delta_margin).to(ureg.millimeter)
+    case_fast = calc_safe_stopping_distance(v_fast, tau_full, a_brake, loc_margin=delta_loc, physical_margin=delta_margin).to(ureg.millimeter)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(v == MachineMomentum.v_drive, "Stopping budget and momentum must use the same drive limit.")
+    check(abs(total_1.magnitude - 562.5) < 1e-6, f"Row 1 must be 562.5 mm: {total_1}")
+    check(abs(total_2.magnitude - 712.5) < 1e-6, f"Row 2 running total must be 712.5 mm: {total_2}")
+    check(abs(total_3.magnitude - 742.5) < 1e-6, f"Ch2 subtotal must be 742.5 mm: {total_3}")
+    check(abs(case_body.magnitude - total_3.magnitude) < 1e-6, "Row sum must equal the equation.")
+    check(abs(remaining.magnitude - 357.5) < 1e-6, f"Unexpected remaining clearance: {remaining}")
+    check(abs(v_ceiling.magnitude - 1.9098) < 1e-4, f"Body-only ceiling must be 1.9098 m/s: {v_ceiling}")
+    check(v_ceiling > v, "The body-only ceiling must exceed the drive limit.")
+    check(abs(d_brake_fast.magnitude - 1000.0) < 1e-6, f"Unexpected braking at 2.0 m/s: {d_brake_fast}")
+    check(abs(d_per_extra.magnitude - 150.0) < 1e-6, f"Unexpected cost of 100 ms: {d_per_extra}")
+    check(abs(tau_full.to(millisecond).magnitude - 133.6) < 1e-6, f"Unexpected tau_delay: {tau_full}")
+    check(abs(case_full.magnitude - 912.9) < 1e-6, f"Unexpected full-delay case: {case_full}")
+    check(abs(case_fast.magnitude - 1417.2) < 1e-6, f"Unexpected fast case: {case_fast}")
+    check(case_full < d_clear < case_fast, "Case 2 must fit and Case 3 must breach the clear distance.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    v_str = fmt_velocity(v, unit=meter / second, precision=1)
+    a_brake_str = fmt_acceleration(a_brake, unit=meter / second**2, precision=0)
+    delta_loc_str = fmt_length(delta_loc, unit=ureg.millimeter, precision=0)
+    delta_margin_str = fmt_length(delta_margin, unit=ureg.millimeter, precision=0)
+    t_act_str = fmt_latency(t_act, unit=millisecond, precision=0)
+    d_clear_str = fmt_length(d_clear, unit=meter, precision=2)
+    tau_full_str = fmt_latency(tau_full, unit=millisecond, precision=1)
+    v_fast_str = fmt_velocity(v_fast, unit=meter / second, precision=0)
+    dt_extra_str = fmt_latency(dt_extra, unit=millisecond, precision=0)
+
+    d_brake_str = fmt_length(d_brake, unit=ureg.millimeter, precision=1)
+    overhead_str = fmt_length(overhead, unit=ureg.millimeter, precision=0)
+    total_2_str = fmt_length(total_2, unit=ureg.millimeter, precision=1)
+    d_onset_str = fmt_length(d_onset, unit=ureg.millimeter, precision=0)
+    total_3_str = fmt_length(total_3, unit=ureg.millimeter, precision=1)
+    remaining_str = fmt_length(remaining, unit=ureg.millimeter, precision=1)
+    v_ceiling_str = fmt_velocity(v_ceiling, unit=meter / second, precision=2)
+    d_brake_fast_str = fmt_length(d_brake_fast, unit=ureg.millimeter, precision=0, commas=True)
+    brake_growth_pct_str = fmt_percent(brake_growth.magnitude, precision=1, style="prose")
+    d_per_extra_str = fmt_length(d_per_extra, unit=ureg.millimeter, precision=0)
+    case_body_str = fmt_length(case_body, unit=ureg.millimeter, precision=1)
+    case_full_str = fmt_length(case_full, unit=ureg.millimeter, precision=1)
+    case_fast_str = fmt_length(case_fast, unit=ureg.millimeter, precision=1, commas=True)
+
+    d_brake_display_math = fmt_display_math(
+        rf"d_{{\text{{brake}}}} = \frac{{v^2}}{{2 a_{{\text{{brake}}}}}} = \frac{{({v_str})^2}}{{2 \times {a_brake_str}}} = {d_brake_str}"
+    )
+    overhead_display_math = fmt_display_math(
+        rf"\delta_{{\text{{loc}}}} + \delta_{{\text{{margin}}}} = {delta_loc_str} + {delta_margin_str} = {overhead_str}"
+    )
+    d_onset_display_math = fmt_display_math(rf"v\,T_{{\text{{act}}}} = ({v_str}) \times ({t_act_str}) = {d_onset_str}")
+    total_display_math = fmt_display_math(
+        rf"d_{{\text{{stop}}}}\big|_{{\text{{body}}}} = {d_brake_str} + {overhead_str} + {d_onset_str} = {total_3_str}"
+    )
+    ceiling_display_math = fmt_display_math(
+        rf"v_{{\max}} = -a_{{\text{{brake}}}} T_{{\text{{act}}}} + \sqrt{{(a_{{\text{{brake}}}} T_{{\text{{act}}}})^2 + 2 a_{{\text{{brake}}}} (D_{{\text{{clear}}}} - \delta_{{\text{{loc}}}} - \delta_{{\text{{margin}}}})}} \approx {v_ceiling_str}"
+    )
+```
+
+The mobile manipulator drives down an aisle at its `{python} BodyStoppingBudget.v_str` drive limit, loaded to at most `{python} MachineMomentum.m_loaded_str`. A person steps out from the end of a rack `{python} BodyStoppingBudget.d_clear_str` ahead and stands in the aisle. Software cannot simply pause execution or instantaneously zero the velocity vector. The base, the arm, and the totes carry mechanical momentum, and bringing that mass to rest requires dissipating kinetic energy across physical distance. **Stopping distance grows linearly with delay and quadratically with speed, and that difference sets the speed limit.**
 
 The distance from sensing a hazard to zero velocity comprises two phases: reaction travel and braking travel. During the reaction interval, the nervous system executes the causal boundary pipeline established in @sec-boundary-causal-boundary. Throughout this pre-brake delay $\tau_{\text{delay}}$, which runs from detection until retarding force begins, the actuators apply no retarding force, and the vehicle continues moving along its existing trajectory at its speed at detection $v$. Assuming velocity remains constant across this window, the reaction travel evaluates to
 $$d_{\text{react}} = v\,\tau_{\text{delay}}$$
@@ -190,51 +350,59 @@ The sum $\delta_{\text{loc}} + \delta_{\text{margin}}$ is fixed spatial overhead
 
 :::
 
-::: {#fig-02-stopping-distance fig-env="figure" fig-pos="t" fig-cap="**Dynamic stopping distance**: Total stopping distance decomposed into linear reaction lag, quadratic kinetic braking travel, and spatial overhead. Of the speed- and delay-dependent terms, doubling latency expands the pair by 17 percent, whereas doubling velocity quadruples braking travel for a 267 percent expansion; the spatial overhead is fixed. Case 1 operates with safe clearance; Case 2 compresses margin under tail latency; and Case 3 breaches the obstacle clearance when speed and compute delay couple." fig-alt="Chart illustrating dynamic stopping distance components: linear reaction lag proportional to delay, quadratic braking distance proportional to velocity squared, and fixed spatial overhead. Three trajectory plots compare nominal margin with latency-compressed clearance and an obstacle collision scenario."}
+::: {#fig-02-stopping-distance fig-env="figure" fig-pos="t" fig-cap="**Stopping distance of the warehouse mobile manipulator**: Each bar splits the stop into reaction travel during the pre-brake delay, braking travel under the credible deceleration, and the fixed overhead of the localization bound and protective clearance, against the `{python} BodyStoppingBudget.d_clear_str` rack-end clear distance. Case 1 counts only the terms the body owns at the `{python} BodyStoppingBudget.v_str` drive limit and stops within `{python} BodyStoppingBudget.case_body_str`. Case 2 adds the full `{python} BodyStoppingBudget.tau_full_str` pre-brake delay that @sec-nervous and @sec-perception assemble; at `{python} BodyStoppingBudget.case_full_str` it still fits, although later chapters add a stop profile and a tracking bound. Case 3 raises speed to a hypothetical `{python} BodyStoppingBudget.v_fast_str`, above the drive limit, with the same delay; braking travel grows by `{python} BodyStoppingBudget.brake_growth_pct_str` and the stop, at `{python} BodyStoppingBudget.case_fast_str`, breaches the clear distance." fig-alt="Horizontal stacked bars for three cases, each split into reaction travel, braking travel, and fixed overhead, against a dashed vertical line marking the rack-end clear distance. The first two bars end inside the line with the remaining margin shaded green; the third bar extends past the line into a hatched red breach."}
 
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ DYNAMIC STOPPING DISTANCE (FIGURE)
+# │ STOPPING DISTANCE OF THE RUNNING MACHINE (FIGURE)
 # │ Context: @fig-02-stopping-distance
 # │ Goal:    show why velocity, not latency, dominates the defended clearance
-# │ Show:    the three-term decomposition for three coupled scenarios
-# │ How:     d_stop = v*dt + v^2/(2a) + d_loc + d_margin, the chapter equation
+# │ Show:    the three-term decomposition for the body-only terms, the full
+# │          pre-brake delay, and a speed-scaling case, against D_clear
+# │ How:     cases from BodyStoppingBudget (calc_safe_stopping_distance with
+# │          RM and AISLE); d_stop = v*tau + v^2/(2a) + delta_loc + delta_margin
 # ├─────────────────────────────────────────────────────────────────────────────
-import numpy as np
 from mlsysim import viz
 
-# ┌── 1. LOAD (Scenario parameters) ────────────────────────────────────────────
-# Scenario inputs for this illustration. The overhead terms are the same
-# localization allowance and clearance margin the chapter budgets later.
-A_BRAKE = 2.0  # m/s^2, scenario surface and load assumption
-DELTA_LOC = 0.05  # m, localization allowance
-DELTA_MARGIN = 0.10  # m, physical clearance margin
-D_CLEAR = 0.60  # m, distance to the tracked obstacle
-CASES = [("Case 1", "Nominal", 1.0, 0.050), ("Case 2", "Tail latency", 1.0, 0.200), ("Case 3", "Coupled spike", 1.2, 0.200)]
+# ┌── 1. LOAD (from the stopping-budget cell) ──────────────────────────────────
+S = BodyStoppingBudget
+MM = ureg.millimeter
+A_BRAKE = S.a_brake
+OVERHEAD = S.overhead.to(MM).magnitude
+D_CLEAR = S.d_clear.to(MM).magnitude
+CASES = [
+    ("Case 1", "Body terms", S.v, S.t_act),
+    ("Case 2", "Full delay", S.v, S.tau_full),
+    ("Case 3", "Full delay, faster", S.v_fast, S.tau_full),
+]
 
 # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────────
-overhead = DELTA_LOC + DELTA_MARGIN
 rows = []
-for name, sub, v, dt in CASES:
-    react = v * dt
-    brake = v**2 / (2 * A_BRAKE)
-    rows.append((name, sub, v, dt, react, brake, react + brake + overhead))
+for name, sub, v, tau in CASES:
+    react = (v * tau).to(MM).magnitude
+    brake = (v**2 / (2 * A_BRAKE)).to(MM).magnitude
+    rows.append((name, sub, react, brake, react + brake + OVERHEAD))
 
-# ┌── 3. PLOT ──────────────────────────────────────────────────────────────────
+# ┌── 3. GUARD ─────────────────────────────────────────────────────────────────
+check(abs(rows[0][4] - S.case_body.magnitude) < 1e-6, "Case 1 must match the budget cell.")
+check(abs(rows[1][4] - S.case_full.magnitude) < 1e-6, "Case 2 must match the budget cell.")
+check(abs(rows[2][4] - S.case_fast.magnitude) < 1e-6, "Case 3 must match the budget cell.")
+
+# ┌── 4. PLOT ──────────────────────────────────────────────────────────────────
 fig, ax, COLORS, plt = viz.setup_plot(figsize=(9, 3.6))
 H = 0.58
-for i, (name, sub, v, dt, react, brake, stop) in enumerate(rows):
+for i, (name, sub, react, brake, stop) in enumerate(rows):
     y = len(rows) - 1 - i
     left = 0.0
-    for width, color, label in ((react, COLORS["BlueL"], "Reaction"), (brake, COLORS["BlueLine"], "Braking"), (overhead, COLORS["grid"], "Overhead")):
-        ax.barh(y, width * 100, left=left * 100, height=H, color=color, edgecolor="white", linewidth=0.8, label=label if i == 0 else None, zorder=3)
+    for width, color, label in ((react, COLORS["BlueL"], "Reaction"), (brake, COLORS["BlueLine"], "Braking"), (OVERHEAD, COLORS["grid"], "Overhead")):
+        ax.barh(y, width, left=left, height=H, color=color, edgecolor="white", linewidth=0.8, label=label if i == 0 else None, zorder=3)
         left += width
     if stop <= D_CLEAR:
         ax.barh(
             y,
-            (D_CLEAR - stop) * 100,
-            left=stop * 100,
+            D_CLEAR - stop,
+            left=stop,
             height=H,
             color=COLORS["GreenFill"],
             edgecolor="white",
@@ -245,26 +413,26 @@ for i, (name, sub, v, dt, react, brake, stop) in enumerate(rows):
     else:
         ax.barh(
             y,
-            (stop - D_CLEAR) * 100,
-            left=D_CLEAR * 100,
+            stop - D_CLEAR,
+            left=D_CLEAR,
             height=H,
-            color=COLORS["RedFill"],
+            facecolor="none",
             edgecolor=COLORS["RedLine"],
             linewidth=1.0,
             hatch="//",
             label="Breach" if i == len(rows) - 1 else None,
             zorder=4,
         )
-    ax.text(-2, y, f"{name}\n{sub}", ha="right", va="center", fontsize=9, linespacing=1.4)
-    ax.text(max(stop, D_CLEAR) * 100 + 2.0, y, f"{stop*100:.0f} cm", va="center", fontsize=8.5, color=COLORS["primary"], zorder=6)
+    ax.text(-25, y, f"{name}\n{sub}", ha="right", va="center", fontsize=9, linespacing=1.4)
+    ax.text(max(stop, D_CLEAR) + 25, y, f"{stop:,.1f} mm", va="center", fontsize=8.5, color=COLORS["primary"], zorder=6)
 
-ax.axvline(D_CLEAR * 100, color=COLORS["RedLine"], lw=1.4, linestyle=(0, (5, 4)), zorder=5)
-ax.text(D_CLEAR * 100, len(rows) - 0.42, f"  obstacle at {D_CLEAR*100:.0f} cm", color=COLORS["RedLine"], fontsize=9, va="bottom")
+ax.axvline(D_CLEAR, color=COLORS["RedLine"], lw=1.4, linestyle=(0, (5, 4)), zorder=5)
+ax.text(D_CLEAR, len(rows) - 0.42, f"  rack end at {S.d_clear.to(ureg.meter).magnitude:.2f} m", color=COLORS["RedLine"], fontsize=9, va="bottom")
 
 ax.set_yticks([])
-ax.set_xlim(0, 90)
+ax.set_xlim(0, 1700)
 ax.set_ylim(-0.7, len(rows) - 0.25)
-ax.set_xlabel("Distance travelled before rest (cm)")
+ax.set_xlabel("Distance traveled before rest (mm)")
 ax.grid(True, axis="x", zorder=0)
 ax.grid(False, axis="y")
 for side in ("left", "top", "right"):
@@ -278,123 +446,39 @@ plt.show()
 
 :::
 
-For a stationary obstacle detected at distance $D_{\text{clear}}$, the modeled stopping distance must fit the clear path, $d_{\text{stop}} \le D_{\text{clear}}$. Given a feasible current state and conservative timing and braking bounds, the permission path can solve this inequality for a ceiling on new velocity proposals $v_{\text{max}}$. The positive root of the quadratic inequality[^fn-math-velocity-root] is:
+For a stationary obstacle detected at distance $D_{\text{clear}}$, such as a person standing at the rack end or a dropped tote, the modeled stopping distance must fit the clear path, $d_{\text{stop}} \le D_{\text{clear}}$. Given a feasible current state and conservative timing and braking bounds, the permission path can solve this inequality for a ceiling on new velocity proposals $v_{\text{max}}$. The positive root of the quadratic inequality[^fn-math-velocity-root] is:
 $$v_{\text{max}} = -a_{\text{brake}} \tau_{\text{delay}} + \sqrt{(a_{\text{brake}} \tau_{\text{delay}})^2 + 2 a_{\text{brake}} (D_{\text{clear}} - \delta_{\text{loc}} - \delta_{\text{margin}})}$$
 When sensor range degrades or an obstacle enters the trajectory, $D_{\text{clear}}$ contracts and lowers the ceiling, provided the available distance remains nonnegative. At zero available distance the ceiling is zero. If the machine is already moving, however, a zero setpoint cannot remove its current stopping distance; a negative available distance means the admission condition is already violated and requires an emergency response.
 
 [^fn-math-velocity-root]: **Kinematic Velocity Root**\index{Kinematic velocity root!quadratic clearance}: Grouping the constant spatial terms into available physical distance $D_{\text{avail}} = D_{\text{clear}} - \delta_{\text{loc}} - \delta_{\text{margin}}$ yields the quadratic inequality $\frac{1}{2 a_{\text{brake}}} v^2 + \tau_{\text{delay}} v - D_{\text{avail}} \le 0$. Multiplying by $2 a_{\text{brake}}$ produces $v^2 + 2 a_{\text{brake}} \tau_{\text{delay}} v - 2 a_{\text{brake}} D_{\text{avail}} \le 0$. Applying the quadratic formula and taking the positive physical root defines the dynamic velocity ceiling.
 
-```{python}
-#| label: amr-stopping-budget-calc
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ AMR (Autonomous Mobile Robot) STOPPING DISTANCE BUDGETING (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: This section covers key concepts in physical AI systems: 'stopping distance'—the minimum distance for a system to stop—and 'high-tail compute', the resources allocated for extreme or unexpected scenarios. Understanding their interrelation is crucial for effective system design and performance.
-# │ Goal:    Budget the physical stopping distance for an Autonomous Mobile Robot (AMR) by considering tail compute latency's influence on control signal timing. This latency affects the robot's real-time response, impacting its safe stopping distance. Key factors like speed, friction, and braking dynamics must be accounted for.
-# │ Show:    In vehicle dynamics, stopping distances are defined as: d_react (11.7 cm) represents the distance traveled during the driver's reaction time, d_brake (54.0 cm) is the distance covered while braking, and d_stop (80.7 cm) is the total stopping distance. These distances are critical for understanding how speed (2.4 m/s) affects a vehicle's safe stopping ability, especially in designing autonomous systems requiring timely decisions.
-# │ How:     Understanding the kinematic model, which describes object motion, is crucial before examining the equation. 'v' is the object's velocity, 'tau_delay' is the system's response time delay, and 'a_brake' is the maximum deceleration of the braking system. The equation can be interpreted as follows: the term 'v * tau_delay' accounts for the distance traveled during the delay, while 'v^2 / (2 * a_brake)' calculates the stopping distance based on the object's velocity and braking capability. These elements relate directly to the performance and safety of physical AI systems.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
-from mlsysim.core.units import *
-from mlsysim.fmt import fmt_qty, fmt_length, fmt_energy, fmt_time, fmt_velocity, fmt_acceleration, fmt_display_math, check
+::: {#nbk-body-stopping-distance-budgeting-high-tail-compute .callout-notebook title="The body's stopping distance"}
+**Problem**: The warehouse mobile manipulator, loaded to at most `{python} MachineMomentum.m_loaded_str`, drives toward a rack end at its $v =$ `{python} BodyStoppingBudget.v_str` drive limit, and a person stands in the aisle at the clear distance $D_{\text{clear}} =$ `{python} BodyStoppingBudget.d_clear_str`. The body owns three terms of @eq-body-stopping-distance: braking travel under the credible deceleration $a_{\text{brake}} =$ `{python} BodyStoppingBudget.a_brake_str` (loaded, dry floor); the fixed overhead of the localization bound $\delta_{\text{loc}} =$ `{python} BodyStoppingBudget.delta_loc_str` and the protective clearance $\delta_{\text{margin}} =$ `{python} BodyStoppingBudget.delta_margin_str`; and the brake onset $T_{\text{act}} =$ `{python} BodyStoppingBudget.t_act_str`, which enters $\tau_{\text{delay}}$. How much of the clear distance do these terms use, what speed would they alone permit, and how do speed and added delay change the answer?
 
-class AMRStoppingBudget:
-    """Stopping distance budgeting for an autonomous mobile robot under high-tail compute latency."""
+**1. Braking travel:**
+Mass cancels from the work-energy balance, so the loaded machine's `{python} MachineMomentum.e_k_str` of kinetic energy sets how much heat the brakes must absorb but not how far the base travels:
+`{python} BodyStoppingBudget.d_brake_display_math`
+The stopping distance so far is `{python} BodyStoppingBudget.d_brake_str`.
 
-    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    amr = Embodied.AMR.LogisticsAMR
-    mass = amr.mass
-    v0 = amr.max_velocity
-    tau_delay = 65 * millisecond  # scenario assumption, not a measured bound
-    a_brake = 3.0 * (meter / (second**2))  # scenario surface/load assumption
-    delta_loc = 0.05 * meter  # scenario uncertainty allowance
-    delta_margin = 0.10 * meter  # scenario clearance margin
+**2. Fixed overhead:**
+`{python} BodyStoppingBudget.overhead_display_math`
+The running total rises to `{python} BodyStoppingBudget.total_2_str`.
 
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    d_react = (v0 * tau_delay).to(meter)
-    d_brake = ((v0**2) / (2 * a_brake)).to(meter)
-    ke = calc_kinetic_energy(mass, v0)
-    d_stop = calc_safe_stopping_distance(v0, tau_delay, a_brake, loc_margin=delta_loc, physical_margin=delta_margin)
+**3. Brake onset:**
+Between the brake command and the first retarding force, the base still moves at full speed:
+`{python} BodyStoppingBudget.d_onset_display_math`
+`{python} BodyStoppingBudget.total_display_math`
+The body's own terms leave `{python} BodyStoppingBudget.remaining_str` of the `{python} BodyStoppingBudget.d_clear_str` clear distance for every delay the body does not own.
 
-    # Scaling at v1 = 2.4 m/s (+33%)
-    v1 = 2.4 * (meter / second)
-    d_react_v1 = (v1 * tau_delay).to(meter)
-    d_brake_v1 = ((v1**2) / (2 * a_brake)).to(meter)
-    d_stop_v1 = calc_safe_stopping_distance(v1, tau_delay, a_brake, loc_margin=delta_loc, physical_margin=delta_margin)
-    d_stop_expansion = d_stop_v1 - d_stop
+**4. The body-only ceiling:**
+Solving @eq-body-stopping-distance for speed with $\tau_{\text{delay}} = T_{\text{act}}$:
+`{python} BodyStoppingBudget.ceiling_display_math`
+The body alone would permit `{python} BodyStoppingBudget.v_ceiling_str`, above the drive limit. @Sec-nervous and @sec-perception add the delay terms that spend part of this headroom.
 
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(d_react.magnitude - 0.117) < 0.001, f"Unexpected reaction drift: {d_react}")
-    check(abs(d_brake.magnitude - 0.540) < 0.001, f"Unexpected braking distance: {d_brake}")
-    check(abs(ke.to(joule).magnitude - 243.0) < 0.1, f"Unexpected kinetic energy: {ke}")
-    check(abs(d_stop.magnitude - 0.807) < 0.001, f"Unexpected stopping distance: {d_stop}")
-    check(abs(d_react_v1.magnitude - 0.156) < 0.001, f"Unexpected scaled reaction drift: {d_react_v1}")
-    check(abs(d_brake_v1.magnitude - 0.960) < 0.001, f"Unexpected scaled braking distance: {d_brake_v1}")
-    check(abs(d_stop_v1.magnitude - 1.266) < 0.001, f"Unexpected scaled stopping distance: {d_stop_v1}")
-    check(abs(d_stop_expansion.magnitude - 0.459) < 0.001, f"Unexpected clearance buffer loss: {d_stop_expansion}")
+**5. Speed against delay:**
+At a hypothetical `{python} BodyStoppingBudget.v_fast_str`, above the drive limit, the braking term alone grows to `{python} BodyStoppingBudget.d_brake_fast_str`, `{python} BodyStoppingBudget.brake_growth_pct_str` more than at the drive limit. At the drive limit, each additional `{python} BodyStoppingBudget.dt_extra_str` of pre-brake delay adds `{python} BodyStoppingBudget.d_per_extra_str`.
 
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    mass_str = fmt_qty(mass, kilogram, precision=0)
-    v0_str = fmt_velocity(v0, unit=meter / second, precision=1)
-    tau_delay_str = fmt_time(tau_delay, 'millisecond', precision=0)
-    a_brake_str = fmt_acceleration(a_brake, unit=meter / (second**2), precision=0)
-    delta_loc_str = fmt_length(delta_loc.to(ureg.centimeter), unit=ureg.centimeter, precision=0)
-    delta_margin_str = fmt_length(delta_margin.to(ureg.centimeter), unit=ureg.centimeter, precision=0)
-    d_react_m_str = fmt_length(d_react, unit=meter, precision=3)
-    d_react_cm_str = fmt_length(d_react.to(ureg.centimeter), unit=ureg.centimeter, precision=1)
-    d_brake_m_str = fmt_length(d_brake, unit=meter, precision=3)
-    d_brake_cm_str = fmt_length(d_brake.to(ureg.centimeter), unit=ureg.centimeter, precision=0)
-    ke_str = fmt_energy(ke, unit=joule, precision=0)
-    d_stop_cm_str = fmt_length(d_stop.to(ureg.centimeter), unit=ureg.centimeter, precision=1)
-
-    v1_str = fmt_velocity(v1, unit=meter / second, precision=1)
-    d_react_v1_cm_str = fmt_length(d_react_v1.to(ureg.centimeter), unit=ureg.centimeter, precision=1)
-    d_brake_v1_cm_str = fmt_length(d_brake_v1.to(ureg.centimeter), unit=ureg.centimeter, precision=0)
-    d_stop_v1_cm_str = fmt_length(d_stop_v1.to(ureg.centimeter), unit=ureg.centimeter, precision=1)
-    d_stop_expansion_cm_str = fmt_length(d_stop_expansion.to(ureg.centimeter), unit=ureg.centimeter, precision=1)
-
-    d_react_display_math = fmt_display_math(
-        rf"d_{{\text{{react}}}} = v\,\tau_{{\text{{delay}}}} = ({v0_str}) \times ({tau_delay_str}) \approx {d_react_m_str} = {d_react_cm_str}"
-    )
-    d_brake_display_math = fmt_display_math(
-        rf"d_{{\text{{brake}}}} = \frac{{v^2}}{{2 a_{{\text{{brake}}}}}} = \frac{{({v0_str})^2}}{{2 \times ({a_brake_str})}} \approx {d_brake_m_str} = {d_brake_cm_str}"
-    )
-    d_stop_display_math = fmt_display_math(
-        rf"d_{{\text{{stop}}}} = d_{{\text{{react}}}} + d_{{\text{{brake}}}} + \delta_{{\text{{loc}}}} + \delta_{{\text{{margin}}}} = {d_react_cm_str} + {d_brake_cm_str} + {delta_loc_str} + {delta_margin_str} = {d_stop_cm_str}"
-    )
-    d_scale_react_display_math = fmt_display_math(
-        rf"d_{{\text{{react}}}} = ({v1_str}) \times ({tau_delay_str}) = {d_react_v1_cm_str} \quad (+33.3\%)"
-    )
-    d_scale_brake_display_math = fmt_display_math(
-        rf"d_{{\text{{brake}}}} = \frac{{({v1_str})^2}}{{2 \times ({a_brake_str})}} = {d_brake_v1_cm_str} \quad (+77.8\%)"
-    )
-    d_scale_stop_display_math = fmt_display_math(
-        rf"d_{{\text{{stop}}}} = {d_react_v1_cm_str} + {d_brake_v1_cm_str} + 15.0\text{{ cm}} = {d_stop_v1_cm_str} \quad (+56.9\%)"
-    )
-```
-
-::: {#nbk-body-stopping-distance-budgeting-high-tail-compute .callout-notebook title="Stopping distance under tail latency"}
-**Problem**: The registry's `{python} AMRStoppingBudget.mass_str` logistics AMR travels at $v =$ `{python} AMRStoppingBudget.v0_str`. For this illustrative surface and control path, assume a sense-to-braking delay of $\tau_{\text{delay}} =$ `{python} AMRStoppingBudget.tau_delay_str`, deceleration $a_{\text{brake}} =$ `{python} AMRStoppingBudget.a_brake_str`, localization allowance $\delta_{\text{loc}} =$ `{python} AMRStoppingBudget.delta_loc_str`, and clearance margin $\delta_{\text{margin}} =$ `{python} AMRStoppingBudget.delta_margin_str`. These are scenario inputs, not measured safety bounds. What stopping distance does the model give, and how does it scale if speed increases to `{python} AMRStoppingBudget.v1_str`?
-
-**1. Reaction travel ($d_{\text{react}}$):**
-During the `{python} AMRStoppingBudget.tau_delay_str` sensing and compute delay, the chassis coasts unguided:
-`{python} AMRStoppingBudget.d_react_display_math`
-
-**2. Braking travel ($d_{\text{brake}}$):**
-Dissipating kinetic energy ($E_k = \frac{1}{2} m v^2 =$ `{python} AMRStoppingBudget.ke_str`) under sustained mechanical deceleration:
-`{python} AMRStoppingBudget.d_brake_display_math`
-
-**3. Total stopping distance ($d_{\text{stop}}$):**
-`{python} AMRStoppingBudget.d_stop_display_math`
-
-**4. Scaling impact of 33 percent speed increase ($v =$ `{python} AMRStoppingBudget.v1_str`):**
-`{python} AMRStoppingBudget.d_scale_react_display_math`
-`{python} AMRStoppingBudget.d_scale_brake_display_math`
-`{python} AMRStoppingBudget.d_scale_stop_display_math`
-A 33 percent speed increase expands stopping distance by nearly 57 percent, eroding `{python} AMRStoppingBudget.d_stop_expansion_cm_str` of clearance.
-
-**Architect's Rule of Thumb**: *Doubling travel speed quadruples kinetic braking distance while doubling reaction travel; never increase velocity setpoints without dynamically solving the clearance quadratic.*
+**Architect's Rule of Thumb**: *Doubling travel speed quadruples braking travel while only doubling reaction travel; never raise a velocity setpoint without re-solving the clearance quadratic.*
 :::
 
 ::: {#exmp-body-dynamic-velocity-ceiling-governor-1-khz .callout-example title="Dynamic velocity ceiling governor"}
@@ -516,8 +600,56 @@ Because the actuator cannot instantly deliver the massive torque needed to spin 
 
 Furthermore, transmissions introduce backlash and compliance that decouple motor and load motion. When an actuator reverses direction, the motor shaft must rotate across mechanical clearance before the gear teeth engage the opposite flank. Coupled with torsional compliance in gear teeth and harmonic flexsplines (@fig-02-real-strain-wave-gear), reversal manifests at the output as lost motion, hysteresis, and phase lag. As Mark W. Spong demonstrated in flexible joint dynamics [@spong1987modeling], this elasticity means the robot link is not a rigid bar, but an elastic system coupled through torsional spring compliance. When a neural policy commands sudden, discontinuous torque steps across timestep boundaries, it excites structural resonance—much like plucking a stiff guitar string—driving the transmission into destructive limit-cycle vibrations and chatter. (The formal singular perturbation derivation of flexible joint dynamics is deferred to @sec-appendix-control-flexible-joints). Measuring position solely at the motor encoder conceals this deadband, because the motor turns smoothly while the physical output remains stationary until contact is made. Under reversing loads, the actual joint position $q_{\text{out}}$ departs from the ideal kinematic projection $q_{\text{motor}} / N$ by a load-dependent error $\delta_{\text{lost}}$. The nervous system perceives continuous trajectory tracking, yet the physical end-effector hesitates and then experiences an impulsive shock load as tooth engagement snaps closed. Under severe repetitive shock loads or high reflected inertia impacts, this localized stress concentration leads to fatigue fracture and catastrophic tooth shear (@fig-02-real-broken-gear-tooth).
 
+```{python}
+#| label: body-latch-contact-rate-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CONTACT FORCE RISE AT THE CAGE-DOOR LATCH (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @psp-body-impedance-control in @sec-body-actuator-limits.
+# │ Goal:    Seed the companion contact budget: once the gripper meets the
+# │          latch's strike plate, force rises as F = k v t.
+# │ Show:    4.0e5 N/m plate: 12 N/ms at the guarded 0.03 m/s approach and
+# │          40 N/ms at 0.10 m/s, against the 100 N latch limit.
+# │ How:     Force rate k*v from AISLE latch fields. No deadline here;
+# │          @sec-training owns the contact deadlines.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_qty, fmt_sci_qty, fmt_velocity, check
+
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class LatchContactRate:
+    """Contact-force rise rate F = k v t at the cage-door latch."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    k_latch = AISLE.k_latch  # category: illustrative (strike-plate stiffness)
+    v_guarded = AISLE.v_latch_approach  # category: illustrative (guarded approach)
+    v_high = AISLE.v_latch_high  # category: illustrative (unsupported approach)
+    f_limit = AISLE.f_latch_limit  # category: illustrative (latch force limit)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    rate_guarded = (k_latch * v_guarded).to(ureg.newton / millisecond)
+    rate_high = (k_latch * v_high).to(ureg.newton / millisecond)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(k_latch.to(ureg.newton / meter).magnitude - 4.0e5) < 1e-6, f"Unexpected plate stiffness: {k_latch}")
+    check(abs(rate_guarded.magnitude - 12.0) < 1e-9, f"Guarded force rate must be 12 N/ms: {rate_guarded}")
+    check(abs(rate_high.magnitude - 40.0) < 1e-9, f"High-speed force rate must be 40 N/ms: {rate_high}")
+    check(abs(f_limit.to(ureg.newton).magnitude - 100.0) < 1e-9, f"Unexpected latch limit: {f_limit}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    k_latch_str = fmt_sci_qty(k_latch, ureg.newton / meter, precision=1)
+    v_guarded_str = fmt_velocity(v_guarded, unit=meter / second, precision=2)
+    v_high_str = fmt_velocity(v_high, unit=meter / second, precision=2)
+    rate_guarded_str = fmt_qty(rate_guarded, ureg.newton / millisecond, precision=0)
+    rate_high_str = fmt_qty(rate_high, ureg.newton / millisecond, precision=0)
+    f_limit_str = fmt_qty(f_limit, ureg.newton, precision=0)
+```
+
 ::: {#psp-body-impedance-control .callout-perspective title="Impedance control for contact safety"}
-If a learned policy commands target positions as rigid coordinates in an unyielding environment (such as a table or fixture with contact stiffness $k \ge 10^5\text{ N/m}$), a positional error of just $\Delta x = 1\text{ mm}$ causes contact forces to spike to $F = k \Delta x = 100\text{ N}$ within milliseconds. If the low-level controller tries to force the arm into that target coordinate at all costs, the motor inverter drives maximum current against the obstacle, risking tooth shear and structural damage.
+If a learned policy commands target positions as rigid coordinates in an unyielding environment (such as a table or fixture with contact stiffness $k \ge 10^5\text{ N/m}$), a positional error of just $\Delta x = 1\text{ mm}$ causes contact forces to spike to $F = k \Delta x = 100\text{ N}$ within milliseconds. If the low-level controller tries to force the arm into that target coordinate at all costs, the motor inverter drives maximum current against the obstacle, risking tooth shear and structural damage. On the mobile manipulator, the gripper opening the cage door meets a strike plate of stiffness `{python} LatchContactRate.k_latch_str`, and once contact begins the force rises as $F = k v t$: `{python} LatchContactRate.rate_guarded_str` at a guarded `{python} LatchContactRate.v_guarded_str` approach and `{python} LatchContactRate.rate_high_str` at `{python} LatchContactRate.v_high_str`, against the latch's `{python} LatchContactRate.f_limit_str` limit.
 
 As Neville Hogan established in his seminal formulation of impedance control [@hogan1985impedance], physical interaction cannot be framed as pure position control or pure force control. Because the physical environment dynamically behaves as an admittance (accepting commanded forces and yielding resultant motion), the robotic manipulator must be controlled as an impedance (accepting motion deviations and generating compliant contact forces: $F = Z(v)$). To protect the physical mechanism, the real-time microcontroller converts position setpoints into an active **virtual spring-damper system**\index{Virtual spring-damper system!definition}:
 $$F_{\text{contact}} = K_p (x_{\text{des}} - x) + K_d (\dot{x}_{\text{des}} - \dot{x})$$
@@ -571,7 +703,7 @@ Operating continuously near current and torque limits extracts an irreversible t
 
 ## Thermal Duty Cycles {#sec-body-thermal-duty-cycles}
 
-Holding a $25\text{ kg}$ workpiece motionless places deceptive demands on articulated robots. In simulation, an AI agent sustains static holding torque indefinitely without penalty. On physical hardware, maintaining a static load against gravity demands continuous phase current through the stator coils, actively converting electrical energy into accumulating heat. **Heat arrives in seconds and leaves in minutes, making duty cycle a primary design variable.**
+Holding a load motionless at full reach places deceptive demands on an articulated arm such as the mobile manipulator's. In simulation, an AI agent sustains static holding torque indefinitely without penalty. On physical hardware, maintaining a static load against gravity demands continuous phase current through the stator coils, actively converting electrical energy into accumulating heat. **Heat arrives in seconds and leaves in minutes, making duty cycle a primary design variable.**
 
 While mechanical momentum can be redirected and magnetic flux decays within milliseconds of opening a switch, thermal energy has no fast physical exit. Thermal capacity is the physical integral of power loss over time. What that capacity protects is a specific, inflexible material threshold, namely the dielectric breakdown rating of the stator winding insulation (the enamel coating that prevents adjacent copper turns from short-circuiting) and the Curie temperature of permanent rotor magnets (the thermal threshold where thermal agitation destroys ferromagnetic domain alignment, permanently demagnetizing the rotor) (@fig-02-real-burnt-motor-stator). Modern motor windings use polymer enamel coatings classified under standards such as IEC 60085, where Class F insulation withstands a maximum continuous hotspot temperature of $155^\circ\text{C}$ and Class H withstands $180^\circ\text{C}$. Exceeding this rating softens the polymer matrix, causing inter-turn shorts that destroy the phase winding. Neodymium-iron-boron ($\text{NdFeB}$) rotor magnets face a companion limit, where temperatures between $80^\circ\text{C}$ and $150^\circ\text{C}$ cause irreversible demagnetization under strong stator demagnetizing fields.
 
@@ -733,46 +865,200 @@ Power removal is an unmanaged state transition, not an automatic return to safet
 For the physical AI systems engineer, power integrity is a foundational architectural constraint bridging software planning and electrical physics. Rather than treating power rails as infinite voltage sources, the engineer must enforce coordinated power budgets and current slew-rate limits across compute accelerators and motor drives. The deterministic real-time safety layer must arbitrate simultaneous multi-axis acceleration commands to prevent compound $dI/dt$ transients, while dynamic brake choppers protect inverter electronics from regenerative feedback during emergency stops. Crucially, because power loss leaves actuators in unpowered physical states governed by gravity and momentum, the engineer must empirically characterize every unpowered fallback trajectory under full mechanical payload, ensuring that electrical trips resolve into controlled, predictable deceleration rather than unguided kinetic collisions. Characterizing these dynamic electrical and mechanical failure boundaries cannot rely on nominal catalog specs or idealized CAD models; it demands disciplined bench measurement.
 
 ::: {.column-margin}
-![](images/svg/margin_pdn_voltage_droop_envelope.svg){width="100%" fig-alt="Horizontal budget bar showing nominal 48V rail, 41V brownout floor, and a 12.8V transient droop plunging the rail into an undervoltage reset."}
+![](images/svg/margin_pdn_voltage_droop_envelope.svg){width="100%" fig-alt="Two horizontal bars on a rail-voltage scale against the 18 V regulator dropout. From the 24 V full-charge rail, the 70 A step droops 5.3 V and ends above the dropout. From the 21.5 V battery-low point, the 4.2 V ohmic term alone ends below it, and the part past the dropout is red."}
 
-*Transient current surges burn through voltage headroom into unrecoverable brownout resets.*
+*A combined inference and drive current step fits the rail's headroom at full charge; from a depleted battery, its sustained ohmic drop alone crosses the regulator dropout.*
 :::
 
-To quantify the coupled dynamics of rail collapse and regenerative energy feedback, consider an electrical power integrity budget for a mobile delivery robot (\ref{nbk-body-dc-bus-power-integrity}).
+To quantify the coupled dynamics of rail collapse and regenerative energy feedback, consider the power integrity budget of the mobile manipulator's battery rail (\ref{nbk-body-dc-bus-power-integrity}).
+
+```{python}
+#| label: body-dc-bus-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BATTERY-RAIL DROOP AND REGENERATIVE SURGE ON THE RUNNING MACHINE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: \ref{nbk-body-dc-bus-power-integrity} in @sec-body-power-integrity.
+# │ Goal:    Check whether the warehouse mobile manipulator's 24 V battery rail
+# │          stays inside its regulator and inverter limits during the coincident
+# │          inference and drive transient and during a stop from the drive limit.
+# │ Show:    70 A step droops the 24 V rail by 5.28 V to 18.72 V, 0.72 V above
+# │          the 18 V regulator dropout at full charge; from the 21.5 V
+# │          battery-low point the sustained ohmic term alone crosses it;
+# │          75 percent of 414 J regenerated = 310.5 J; capacitor-only endpoint
+# │          about 169.7 V; stop lasts 750 ms, so the regenerative peak is
+# │          828 W and the chopper resistor <= 1.09 Ohm at a 30 V clamp.
+# │ How:     R, L, C droop terms (ohmic term via calc_voltage_droop) with the
+# │          machine's rail fields (RM.control_rail_*) and the site transient
+# │          (AISLE.i_rail_transient); E_k reused from MachineMomentum.e_k;
+# │          capacitor energy balance; triangular power pulse under constant
+# │          deceleration a_brake over t_stop = v/a_brake.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import (
+    fmt_qty,
+    fmt_voltage,
+    fmt_current,
+    fmt_resistance,
+    fmt_power,
+    fmt_energy,
+    fmt_latency,
+    fmt_velocity,
+    fmt_acceleration,
+    fmt_percent,
+    fmt_math,
+    fmt_display_math,
+    sci_latex,
+    check,
+)
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class DriveBusIntegrity:
+    """Battery-rail droop, regenerative surge, and chopper sizing for the running machine."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    m = RM.loaded_mass  # category: derived (upper bound, full tote rack)
+    v = RM.base.max_velocity  # category: illustrative (drive limit)
+    a_brake = AISLE.a_brake  # category: illustrative (credible deceleration)
+    e_k = MachineMomentum.e_k  # category: derived (loaded machine at its drive limit)
+    v_bus_nom = RM.control_rail_nominal  # category: chosen (24 V battery rail)
+    v_battery_low = RM.control_rail_battery_low  # category: illustrative (depleted battery)
+    r_bus = RM.control_rail_resistance  # category: illustrative (harness resistance)
+    v_uvlo = RM.control_rail_dropout  # category: illustrative (point-of-load regulator dropout)
+    di = AISLE.i_rail_transient  # category: illustrative (inference burst plus drive)
+    i_compute = 4.0 * ureg.ampere  # scenario assumption: application processor's share of the step
+    l_bus = 2.0 * ureg.microhenry  # scenario assumption: harness inductance
+    c_bus = 22000.0 * ureg.microfarad  # scenario assumption: bulk link capacitance
+    v_breakdown = 40.0 * volt  # scenario assumption: inverter MOSFET rating
+    dt_step = 0.5 * millisecond  # scenario assumption: step rise time
+    regen_fraction = 0.75  # scenario assumption: share of E_k returned to the rail
+    v_clamp = 30.0 * volt  # chosen: chopper clamp threshold
+    r_candidate = 1.0 * ureg.ohm  # chosen: candidate chopper resistor
+    p_candidate = 1.0 * ureg.kilowatt  # chosen: candidate resistor pulse rating
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    i_drive = (di - i_compute).to(ureg.ampere)
+    didt = (di / dt_step).to(ureg.ampere / second)
+    dv_r = calc_voltage_droop(di, r_bus).to(volt)
+    dv_l = (l_bus * didt).to(volt)
+    dv_c = (di * dt_step / (2 * c_bus)).to(volt)
+    dv = (dv_r + dv_l + dv_c).to(volt)
+    v_min = (v_bus_nom - dv).to(volt)
+    headroom = (v_bus_nom - v_uvlo).to(volt)
+    margin = (headroom - dv).to(volt)
+    v_sag_low = (v_battery_low - dv_r).to(volt)
+
+    e_regen = (regen_fraction * e_k).to(joule)
+    v_final = ((v_bus_nom**2 + 2 * e_regen / c_bus) ** 0.5).to(volt)
+    t_stop = (v / a_brake).to(millisecond)
+    p_peak = (2 * e_regen / t_stop).to(ureg.watt)
+    r_max = (v_clamp**2 / p_peak).to(ureg.ohm)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(dv_r.magnitude - 4.2) < 1e-9, f"Ohmic term must be the canon 4.2 V: {dv_r}")
+    check(abs(dv.magnitude - 5.2755) < 1e-3, f"Unexpected droop: {dv}")
+    check(abs(v_min.magnitude - 18.7245) < 1e-3, f"Unexpected minimum rail voltage: {v_min}")
+    check(v_min > v_uvlo, "At full charge the transient must stay above the regulator dropout.")
+    check(abs(v_sag_low.magnitude - 17.3) < 1e-9, f"Battery-low ohmic sag must be the canon 17.3 V: {v_sag_low}")
+    check(v_sag_low < v_uvlo, "From the battery-low point the ohmic term alone must cross the dropout.")
+    check(abs(e_k.magnitude - 414.0) < 1e-6, f"Unexpected kinetic energy: {e_k}")
+    check(abs(e_regen.magnitude - 310.5) < 1e-6, f"Unexpected regenerated energy: {e_regen}")
+    check(abs(v_final.magnitude - 169.7) < 0.1, f"Unexpected capacitor-only endpoint: {v_final}")
+    check(abs(t_stop.magnitude - 750.0) < 1e-6, f"Unexpected stop duration: {t_stop}")
+    check(abs(p_peak.magnitude - 828.0) < 1e-6, f"Unexpected regenerative peak: {p_peak}")
+    check(
+        abs(p_peak.magnitude - (regen_fraction * m * a_brake * v).to(ureg.watt).magnitude) < 1e-6,
+        "The triangular-pulse peak must equal the regenerated share of m*a*v.",
+    )
+    check(abs(r_max.magnitude - 1.0870) < 1e-3, f"Unexpected chopper resistance bound: {r_max}")
+    check(r_candidate <= r_max and p_candidate >= p_peak, "The candidate resistor must meet both bounds.")
+    check(v_bus_nom < v_clamp < v_breakdown, "The clamp must sit between the rail and the switch rating.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    m_str = fmt_qty(m, kilogram, precision=0)
+    v_str = fmt_velocity(v, unit=meter / second, precision=1)
+    a_brake_str = fmt_acceleration(a_brake, unit=meter / second**2, precision=0)
+    v_bus_nom_str = fmt_voltage(v_bus_nom, unit=volt, precision=0)
+    v_battery_low_str = fmt_voltage(v_battery_low, unit=volt, precision=1)
+    r_bus_str = fmt_resistance(r_bus, unit=ureg.milliohm, precision=0)
+    l_bus_str = fmt_qty(l_bus, ureg.microhenry, precision=0)
+    c_bus_str = fmt_qty(c_bus, ureg.microfarad, precision=0, commas=True)
+    v_uvlo_str = fmt_voltage(v_uvlo, unit=volt, precision=0)
+    v_breakdown_str = fmt_voltage(v_breakdown, unit=volt, precision=0)
+    i_drive_str = fmt_current(i_drive, unit=ureg.ampere, precision=0)
+    i_compute_str = fmt_current(i_compute, unit=ureg.ampere, precision=0)
+    di_str = fmt_current(di, unit=ureg.ampere, precision=0)
+    dt_step_str = fmt_latency(dt_step, unit=millisecond, precision=1)
+    didt_math = fmt_math(rf"dI/dt = {sci_latex(didt.magnitude, precision=1)}\,\text{{A/s}}")
+    dv_display_math = fmt_display_math(
+        rf"\Delta V_{{\text{{droop}}}} = {fmt_voltage(dv_r, unit=volt, precision=2)} + {fmt_voltage(dv_l, unit=volt, precision=2)} + {fmt_voltage(dv_c, unit=volt, precision=2)} = {fmt_voltage(dv, unit=volt, precision=2)}"
+    )
+    v_min_display_math = fmt_display_math(
+        rf"V_{{\text{{rail, min}}}} = {fmt_voltage(v_bus_nom, unit=volt, precision=0)} - {fmt_voltage(dv, unit=volt, precision=2)} = {fmt_voltage(v_min, unit=volt, precision=2)}"
+    )
+    dv_str = fmt_voltage(dv, unit=volt, precision=2)
+    v_min_str = fmt_voltage(v_min, unit=volt, precision=2)
+    headroom_str = fmt_voltage(headroom, unit=volt, precision=0)
+    margin_str = fmt_voltage(margin, unit=volt, precision=2)
+    e_k_display_math = fmt_display_math(
+        rf"E_k = \tfrac{{1}}{{2}} m v^2 = \tfrac{{1}}{{2}}\,({m_str})({v_str})^2 = {fmt_energy(e_k, unit=joule, precision=0)}"
+    )
+    regen_pct_str = fmt_percent(regen_fraction, precision=0, style="prose")
+    e_regen_str = fmt_energy(e_regen, unit=joule, precision=1)
+    v_final_display_math = fmt_display_math(
+        rf"V_{{\text{{final}}}} = \sqrt{{V_{{\text{{rail, nom}}}}^2 + \frac{{2 E_{{\text{{regen}}}}}}{{C_{{\text{{bus}}}}}}}} \approx {fmt_voltage(v_final, unit=volt, precision=1)}"
+    )
+    v_final_str = fmt_voltage(v_final, unit=volt, precision=1)
+    t_stop_str = fmt_latency(t_stop, unit=millisecond, precision=0)
+    v_clamp_str = fmt_voltage(v_clamp, unit=volt, precision=0)
+    p_peak_display_math = fmt_display_math(
+        rf"P_{{\text{{regen, peak}}}} \approx \frac{{2 E_{{\text{{regen}}}}}}{{t_{{\text{{stop}}}}}} = {fmt_power(p_peak, unit=ureg.watt, precision=0)}"
+    )
+    r_max_display_math = fmt_display_math(
+        rf"R_{{\text{{brake}}}} \le \frac{{V_{{\text{{clamp}}}}^2}}{{P_{{\text{{regen, peak}}}}}} \approx {fmt_resistance(r_max, unit=ureg.ohm, precision=2)}"
+    )
+    r_max_str = fmt_resistance(r_max, unit=ureg.ohm, precision=2)
+    r_candidate_str = fmt_resistance(r_candidate, unit=ureg.ohm, precision=0)
+    p_candidate_str = fmt_power(p_candidate, unit=ureg.kilowatt, precision=0)
+    p_peak_str = fmt_power(p_peak, unit=ureg.watt, precision=0)
+```
 
 ::: {#nbk-body-dc-bus-power-integrity .callout-notebook title="DC bus voltage sag and regenerative overvoltage"}
-A mobile delivery robot operates on a nominal $48.0\text{ V}$ battery bus powering both high-current motor inverters and an onboard perception computer.
+The mobile manipulator draws everything from one nominal `{python} DriveBusIntegrity.v_bus_nom_str` rail fed by its battery: the drive inverters, the arm's joint drives, and the point-of-load regulators that supply its two computers.
 
-**Problem**: Under concurrent multi-axis motor acceleration and subsequent emergency dynamic braking, does the DC bus rail remain within the operating limits of the perception computer and motor inverters?
+**Problem**: Under the coincident current step of an inference burst and the drive motors, and then a stop from the drive limit, does the rail remain within the operating limits of the regulators and the motor inverters?
 
 **Math**:
 
 1. **Parameters**:
-   - Vehicle mass and travel speed: $m = 80.0\text{ kg}$, $v_0 = 2.5\text{ m/s}$
-   - DC bus characteristics: $V_{\text{bus, nom}} = 48.0\text{ V}$, harness resistance $R_{\text{bus}} = 70\text{ m}\Omega$, parasitic inductance $L_{\text{bus}} = 15\,\mu\text{H}$, local inverter capacitance $C_{\text{bus}} = 2200\,\mu\text{F}$
-   - Operating limits: Perception computer UVLO threshold $V_{\text{uvlo}} = 41.0\text{ V}$, inverter MOSFET breakdown $V_{\text{breakdown}} = 60.0\text{ V}$
+   - Machine mass, travel speed, and credible deceleration: $m =$ `{python} DriveBusIntegrity.m_str` (upper bound, full tote rack), $v =$ `{python} DriveBusIntegrity.v_str`, $a_{\text{brake}} =$ `{python} DriveBusIntegrity.a_brake_str`
+   - Rail characteristics: $V_{\text{rail, nom}} =$ `{python} DriveBusIntegrity.v_bus_nom_str`, harness resistance $R_{\text{bus}} =$ `{python} DriveBusIntegrity.r_bus_str`, parasitic inductance $L_{\text{bus}} =$ `{python} DriveBusIntegrity.l_bus_str`, bulk link capacitance $C_{\text{bus}} =$ `{python} DriveBusIntegrity.c_bus_str`
+   - Operating limits: point-of-load regulator dropout $V_{\text{uvlo}} =$ `{python} DriveBusIntegrity.v_uvlo_str`, inverter MOSFET breakdown $V_{\text{breakdown}} =$ `{python} DriveBusIntegrity.v_breakdown_str`
 2. **Transient droop**:
-   - As an illustrative concurrent load, four hub motors add $56.0\text{ A}$ while the perception computer adds $4.0\text{ A}$ at the same bus interface. Their aggregate step is $\Delta I = 60.0\text{ A}$ over $\Delta t = 0.5\text{ ms}$ ($dI/dt = 1.2 \times 10^5\text{ A/s}$). The example assumes no separate compute-rail hold-up during this step.
+   - As an illustrative coincident load, the two drive motors and the arm's joint drives add `{python} DriveBusIntegrity.i_drive_str` while the application processor adds `{python} DriveBusIntegrity.i_compute_str` on the same rail. Their aggregate step is $\Delta I =$ `{python} DriveBusIntegrity.di_str` over $\Delta t =$ `{python} DriveBusIntegrity.dt_step_str` (`{python} DriveBusIntegrity.didt_math`). The example assumes no separate compute-rail hold-up during this step.
    - Transient voltage droop evaluates across resistive, inductive, and capacitive terms:
      $$\Delta V_{\text{droop}} \approx \Delta I R_{\text{bus}} + L_{\text{bus}} \left(\frac{dI}{dt}\right) + \frac{\Delta I \Delta t}{2 C_{\text{bus}}}$$
-     $$\Delta V_{\text{droop}} = (60.0 \times 0.070) + (15 \times 10^{-6} \times 1.2 \times 10^5) + \frac{60.0 \times 0.5 \times 10^{-3}}{2 \times 2200 \times 10^{-6}} = 4.20\text{ V} + 1.80\text{ V} + 6.82\text{ V} = 12.82\text{ V}$$
-   - Minimum bus voltage:
-     $$V_{\text{bus, min}} = 48.0\text{ V} - 12.82\text{ V} = 35.18\text{ V}$$
-   - The available headroom to the compute UVLO floor is $48.0-41.0=7.0\text{ V}$; the modeled $12.82\text{ V}$ droop exceeds it by $5.82\text{ V}$. Under the stated no-hold-up assumption, the perception computer trips its UVLO mid-acceleration. Reducing or buffering the concurrent motor and compute step must keep droop within that $7.0\text{ V}$ budget.
+     `{python} DriveBusIntegrity.dv_display_math`
+   - Minimum rail voltage at full charge:
+     `{python} DriveBusIntegrity.v_min_display_math`
+   - The headroom to the regulators' dropout is `{python} DriveBusIntegrity.headroom_str`, and the modeled `{python} DriveBusIntegrity.dv_str` droop leaves `{python} DriveBusIntegrity.margin_str` of it. The inductive and capacitive terms last only through the rise; the ohmic term persists for as long as the load does. From the `{python} DriveBusIntegrity.v_battery_low_str` battery-low point, that sustained ohmic term alone takes the rail below the dropout, the case the shared-rail fallacy in @sec-body-fallacies-pitfalls follows. Under the stated no-hold-up assumption, the application processor and the safety microcontroller then lose power mid-maneuver.
 3. **Regenerative surge**:
-   - During an emergency stop, kinetic energy must be dissipated:
-     $$E_k = \frac{1}{2} m v_0^2 = \frac{1}{2}(80.0\text{ kg})(2.5\text{ m/s})^2 = 250.0\text{ J}$$
-   - If the battery BMS disconnects charge input and an illustrative 75 percent of kinetic energy returns to the bus ($E_{\text{regen}} = 187.5\text{ J}$), an unprotected, lossless capacitor-only energy balance would end at:
-     $$V_{\text{final}} = \sqrt{V_{\text{bus, nom}}^2 + \frac{2 E_{\text{regen}}}{C_{\text{bus}}}} = \sqrt{48.0^2 + \frac{2 \times 187.5\text{ J}}{2200 \times 10^{-6}\text{ F}}} \approx 415.6\text{ V}$$
-   - *Failure mechanism*: $415.6\text{ V}$ is a hypothetical no-protection endpoint, not a predicted spike or time trace. The bus would cross the $60.0\text{ V}$ switch rating far earlier; protection or component failure changes the actual trajectory.
+   - During a stop from the drive limit, the loaded machine's kinetic energy must be dissipated:
+     `{python} DriveBusIntegrity.e_k_display_math`
+   - If the battery management system disconnects charge input and an illustrative `{python} DriveBusIntegrity.regen_pct_str` of kinetic energy returns to the bus ($E_{\text{regen}} =$ `{python} DriveBusIntegrity.e_regen_str`), an unprotected, lossless capacitor-only energy balance would end at:
+     `{python} DriveBusIntegrity.v_final_display_math`
+   - *Failure mechanism*: `{python} DriveBusIntegrity.v_final_str` is a hypothetical no-protection endpoint, not a predicted spike or time trace. The bus would cross the `{python} DriveBusIntegrity.v_breakdown_str` switch rating far earlier; protection or component failure changes the actual trajectory.
 4. **Sizing brake chopper**:
-   - Assume a triangular regenerative-power pulse over $\Delta t_{\text{stop}} = 0.3\text{ s}$, rising from zero to a peak and returning to zero. Its area is $E_{\text{regen}}=187.5\text{ J}$, so a $V_{\text{clamp}} = 54.0\text{ V}$ design faces the illustrative peak:
-     $$P_{\text{regen, peak}} \approx \frac{2 E_{\text{regen}}}{\Delta t_{\text{stop}}} = \frac{2 \times 187.5\text{ J}}{0.3\text{ s}} = 1250.0\text{ W}$$
+   - Under constant deceleration the regenerative power falls linearly from its peak to zero over the stop, which lasts $t_{\text{stop}} = v / a_{\text{brake}} =$ `{python} DriveBusIntegrity.t_stop_str`. The area under that triangle is $E_{\text{regen}}$, so a $V_{\text{clamp}} =$ `{python} DriveBusIntegrity.v_clamp_str` design faces the illustrative peak:
+     `{python} DriveBusIntegrity.p_peak_display_math`
    - Maximum chopper resistance to divert peak power:
-     $$R_{\text{brake}} \le \frac{V_{\text{clamp}}^2}{P_{\text{regen, peak}}} = \frac{54.0^2}{1250.0\text{ W}} \approx 2.33\ \Omega$$
-   - *Component screening*: A $2.2\ \Omega$ resistor with a nominal $1500\text{ W}$ pulse rating is a candidate. Verify its $187.5\text{ J}$ pulse-energy and temperature limits, chopper switch safe operating area, and clamp response for the actual braking profile before treating the absorption path as protective.
+     `{python} DriveBusIntegrity.r_max_display_math`
+   - *Component screening*: A `{python} DriveBusIntegrity.r_candidate_str` resistor with a nominal `{python} DriveBusIntegrity.p_candidate_str` pulse rating is a candidate. Verify its `{python} DriveBusIntegrity.e_regen_str` pulse-energy and temperature limits, chopper switch safe operating area, and clamp response for the actual braking profile before treating the absorption path as protective.
 
-**Result**: Concurrent motor acceleration drops bus voltage to $35.18\text{ V}$ (tripping the $41.0\text{ V}$ compute UVLO reset), while unbuffered regenerative braking surges bus voltage past the $60.0\text{ V}$ MOSFET breakdown rating, demanding a $2.2\ \Omega$, $1.5\text{ kW}$ dynamic brake chopper.
+**Result**: At full charge the coincident step leaves the rail at `{python} DriveBusIntegrity.v_min_str`, only `{python} DriveBusIntegrity.margin_str` above the `{python} DriveBusIntegrity.v_uvlo_str` regulator dropout, so a depleted battery erases the margin. Unbuffered regenerative braking would drive the bus past the `{python} DriveBusIntegrity.v_breakdown_str` MOSFET rating, which calls for a dynamic brake chopper whose resistor is no larger than `{python} DriveBusIntegrity.r_max_str` and absorbs an `{python} DriveBusIntegrity.p_peak_str` peak.
 
 **Systems insight**: Mechanical motion and electrical power are bidirectionally coupled: acceleration requires capacitive hold-up to prevent brownouts, while deceleration requires active dynamic braking to prevent silicon overvoltage destruction.
 :::
@@ -843,11 +1129,59 @@ The five physical constraints couple into a unified system constraint matrix (@t
 ↳ **Downstream:** The degraded limits recorded here bound the supervisor intervention thresholds derived in @sec-intervention-authority-transitions.
 :::
 
-How these physical constraints bind depends directly on the machine's physical archetype:
+How these physical constraints bind depends directly on the machine's physical archetype. The mobile manipulator carries two archetypes on one chassis, a Class 1 base and a Class 2 arm:
 
 - **Class 1 (Mass-Dominated Mobility):** For autonomous mobile robots, automated guided vehicles, and legged platforms, **momentum and stopping distance** is the primary binding limit. Kinetic energy grows quadratically with travel speed ($E_{\text{kin}} = \frac{1}{2} m v^2$), making velocity the master multiplier of spatial risk. Sensor age directly expands unguided reaction displacement ($v\,\tau_{\text{delay}}$), while simultaneous multi-axis drive acceleration threatens battery bus collapse.
 - **Class 2 (Contact-Dominated Manipulation):** For articulated robotic arms, dexterous hands, and automated assembly fixtures, **actuator bandwidth, reflected rotor inertia ($N^2 J_{\text{rotor}}$), and contact stiffness** form the primary binding constraint. Discontinuous policy setpoints impact rigid fixtures with steep force rise rates ($F = k \Delta x$), risking gear tooth fatigue fracture. Holding heavy payloads against gravity draws continuous static stall current, rapidly accumulating thermal stress.
-- **Class 3 (Flow-Dominated Process & Thermal Plants):** For battery energy storage systems, server cooling distribution units, and power electronics converters, **thermal dissipation and electrical power integrity** govern survival. Long thermal time constants ($\tau = \theta_{JA} C_{\text{th}}$) hide continuous heat accumulation, where a small continuous duty-cycle overload slowly drives winding insulation or battery cells into thermal runaway.
+
+```{python}
+#| label: body-class3-contrast-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CLASS 3 CONTRAST: A MELT POOL BINDS ON HEAT, NOT STOPPING (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the Class 3 paragraph in @sec-body-archetype-matrix.
+# │ Goal:    Show that a flow-dominated plant's binding budget is thermal.
+# │ Show:    5 kW laser under a 1 kHz loop delivers 5 J per control period; a
+# │          100 ms stall delivers 500 J, more than the running machine's 414 J
+# │          of kinetic energy at its drive limit.
+# │ How:     Energy = power x time from Embodied.ContinuousProcess.DED_MeltPool;
+# │          kinetic energy reused from MachineMomentum.e_k.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_power, fmt_frequency, fmt_energy, fmt_latency, check
+
+class MeltPoolContrast:
+    """Heat delivered by a directed-energy-deposition cell against the running machine's kinetic energy."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    ded = Embodied.ContinuousProcess.DED_MeltPool
+    p_laser = ded.nominal_power  # category: illustrative
+    f_control = ded.control_frequency  # category: illustrative
+    t_stall = 100 * millisecond  # scenario assumption: controller stall with the laser on
+    e_k_machine = MachineMomentum.e_k  # derived (running machine at its drive limit)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    e_per_period = (p_laser / f_control).to(joule)
+    e_stall = (p_laser * t_stall).to(joule)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(e_per_period.magnitude - 5.0) < 1e-9, f"Unexpected energy per period: {e_per_period}")
+    check(abs(e_stall.magnitude - 500.0) < 1e-9, f"Unexpected stall energy: {e_stall}")
+    check(abs(e_k_machine.magnitude - 414.0) < 1e-6, f"Unexpected machine kinetic energy: {e_k_machine}")
+    check(e_stall > e_k_machine, "The stall must deliver more heat than the machine's kinetic energy.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    p_laser_str = fmt_power(p_laser, unit=ureg.kilowatt, precision=0)
+    f_control_str = fmt_frequency(f_control, unit=ureg.kilohertz, precision=0)
+    e_per_period_str = fmt_energy(e_per_period, unit=joule, precision=0)
+    t_stall_str = fmt_latency(t_stall, unit=millisecond, precision=0)
+    e_stall_str = fmt_energy(e_stall, unit=joule, precision=0)
+    e_k_machine_str = fmt_energy(e_k_machine, unit=joule, precision=0)
+```
+
+A Class 3 plant is the contrast, because its binding budget is thermal. A directed-energy-deposition cell, which builds a metal part by melting fed powder with a laser, drives a `{python} MeltPoolContrast.p_laser_str` beam into a melt pool under a `{python} MeltPoolContrast.f_control_str` control loop, so each control period delivers `{python} MeltPoolContrast.e_per_period_str` of heat in the part whether or not the gantry moves. What limits this machine is not how far its gantry travels before rest but how much heat the melt pool and the surrounding part can absorb. A `{python} MeltPoolContrast.t_stall_str` controller stall with the laser still on delivers `{python} MeltPoolContrast.e_stall_str`, more than the `{python} MeltPoolContrast.e_k_machine_str` of kinetic energy the loaded mobile manipulator carries at its drive limit, and no brake can take that heat back out. For flow-dominated plants, **thermal dissipation and electrical power integrity** govern survival, and long thermal time constants ($\tau = \theta_{JA} C_{\text{th}}$) hide heat that accumulates slowly until a small continuous overload has already crossed an insulation or material limit.
 
 | Physical Budget / Factor                   | Governing First Principle & Scaling Law                                                                                                                                                | Software Illusion vs. Hardware Ground Truth                                                                                                                                              | Primary Binding Archetype                                                                                            | Systems Architect Takeaway & Runtime Invariant                                                                                                               |
 |:-------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -897,11 +1231,61 @@ An engineer uses a motor's continuous torque rating to set the planner's limits.
 
 :::
 
+```{python}
+#| label: body-dvfs-throttle-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THROTTLED PERCEPTION ON THE RUNNING MACHINE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the DVFS pitfall in @sec-body-fallacies-pitfalls.
+# │ Goal:    Price the extra observation age a thermally throttled application
+# │          processor adds, in travel at the machine's drive limit.
+# │ Show:    the 22 ms backbone stretches to 33 ms at two-thirds clock, adding
+# │          11 ms, or 16.5 mm at 1.5 m/s.
+# │ How:     Backbone time AISLE.t_backbone scaled by the inverse clock ratio
+# │          (compute-bound stage); added age times drive-limit speed (the v*tau
+# │          term of @eq-body-stopping-distance).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_latency, fmt_length, fmt_velocity, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class ThrottledPerception:
+    """Travel cost of a DVFS-stretched perception stage on the running machine."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    v = RM.base.max_velocity  # category: illustrative (drive limit)
+    t_nominal = AISLE.t_backbone  # category: illustrative (vision backbone at full clock)
+    clock_ratio = 2 / 3  # scenario assumption: DVFS clock as a fraction of full clock
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_throttled = (t_nominal / clock_ratio).to(millisecond)
+    dt = (t_throttled - t_nominal).to(millisecond)
+    d_extra = (v * dt).to(ureg.millimeter)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(v.to(meter / second).magnitude - 1.5) < 1e-9, f"Unexpected drive limit: {v}")
+    check(abs(t_nominal.to(millisecond).magnitude - 22.0) < 1e-9, f"Unexpected backbone time: {t_nominal}")
+    check(abs(t_throttled.magnitude - 33.0) < 1e-9, f"Unexpected throttled backbone time: {t_throttled}")
+    check(abs(dt.magnitude - 11.0) < 1e-9, f"Unexpected added age: {dt}")
+    check(abs(d_extra.magnitude - 16.5) < 1e-9, f"Unexpected added travel: {d_extra}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    v_str = fmt_velocity(v, unit=meter / second, precision=1)
+    t_nominal_str = fmt_latency(t_nominal, unit=millisecond, precision=0)
+    t_throttled_str = fmt_latency(t_throttled, unit=millisecond, precision=0)
+    dt_str = fmt_latency(dt, unit=millisecond, precision=0)
+    d_extra_str = fmt_length(d_extra, unit=ureg.millimeter, precision=1)
+```
+
 ::: {.fallacy-pitfall}
 
 **Pitfall**: *Treating dynamic voltage and frequency scaling (DVFS) as a transparent software optimization.*
 
-A delivery robot's motors heat the shared chassis until its compute accelerator triggers dynamic voltage and frequency scaling (DVFS) to throttle clock frequencies and avoid junction overtemperature. This thermal intervention increases inference latency from $20\text{ ms}$ to $31\text{ ms}$. At $v = 1.5\text{ m/s}$, the added compute delay physically consumes an extra $\Delta d_{\text{react}} = 1.65\text{ cm}$ of forward travel before the robot can even command a brake response. The power manager has protected the silicon, but it has silently changed the control timing assumed by the motion controller. A previously adequate stopping margin may no longer be adequate. Thermal telemetry must therefore inform the motion budget, with travel speed reduced when processor throttling increases the time needed to perceive and respond.
+The mobile manipulator's drive motors heat the shared chassis until its application processor triggers dynamic voltage and frequency scaling (DVFS) to throttle clock frequencies and avoid junction overtemperature. This thermal intervention stretches the vision backbone from `{python} ThrottledPerception.t_nominal_str` to `{python} ThrottledPerception.t_throttled_str`. The extra `{python} ThrottledPerception.dt_str` enters the observation age $t_{\text{age}}$, and at the `{python} ThrottledPerception.v_str` drive limit it adds `{python} ThrottledPerception.d_extra_str` of travel to the stopping budget before any brake command can follow from what the camera saw. The power manager has protected the silicon, but it has silently changed the timing the stopping budget assumed. A previously adequate stopping margin may no longer be adequate. Thermal telemetry must therefore inform the motion budget, with travel speed reduced when processor throttling increases the time needed to perceive and respond.
 
 :::
 
@@ -909,15 +1293,66 @@ A delivery robot's motors heat the shared chassis until its compute accelerator 
 
 **Pitfall**: *Scaling operational velocity without recalculating quadratic braking distances and thermal dissipation.*
 
-A logistics cart doubles its speed from $v = 1.0\text{ m/s}$ to $v = 2.0\text{ m/s}$ while keeping the same obstacle clearance and braking limit. Reaction travel during compute delay doubles, but physical braking travel quadruples because kinetic energy scales with the square of velocity ($d_{\text{brake}} \propto v^2$). The throughput change therefore consumes clearance far faster than a linear estimate suggests. Repeated high-current braking also rapidly heats the motor windings, meaning a maneuver that the motor can easily perform once may exceed its allowable thermal duty cycle (governed by the actuator authority budget in @sec-body-five-budgets) when repeated. A higher operating speed requires a new stopping-distance calculation and a thermal assessment of repeated maneuvers before the planner can safely treat that speed as available.
+Repeated high-current braking heats the motor windings, so a stop the mobile manipulator can make once from a hypothetical `{python} BodyStoppingBudget.v_fast_str` may exceed its allowable thermal duty cycle (governed by the actuator authority budget in @sec-body-five-budgets) when repeated through a shift, on top of the quadratic growth in braking travel that Case 3 of @fig-02-stopping-distance shows. A higher operating speed requires a new stopping-distance calculation and a thermal assessment of repeated maneuvers before the planner can safely treat that speed as available.
 
 :::
+
+```{python}
+#| label: body-control-rail-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CONTROL-RAIL BROWNOUT ON THE RUNNING MACHINE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the shared-rail fallacy in @sec-body-fallacies-pitfalls.
+# │ Goal:    Show that a coincident inference and drive transient on the
+# │          warehouse mobile manipulator's 24 V control rail crosses the
+# │          point-of-load regulators' dropout when the battery is depleted.
+# │ Show:    70 A across 60 mOhm drops 4.2 V; 21.5 V sags to 17.3 V < 18 V.
+# │ How:     Ohmic droop from calc_voltage_droop with the machine's rail
+# │          fields (RM.control_rail_*) and the site transient (AISLE).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_voltage, fmt_current, fmt_resistance, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class ControlRailBrownout:
+    """Coincident inference and drive transient on the machine's 24 V control rail."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    v_nominal = RM.control_rail_nominal  # category: chosen
+    v_battery_low = RM.control_rail_battery_low  # category: illustrative (depleted battery)
+    r_harness = RM.control_rail_resistance  # category: illustrative
+    v_dropout = RM.control_rail_dropout  # category: illustrative (regulator dropout)
+    i_transient = AISLE.i_rail_transient  # category: illustrative (inference burst plus drive)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    v_drop = calc_voltage_droop(i_transient, r_harness).to(volt)
+    v_sag = (v_battery_low - v_drop).to(volt)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(v_drop.magnitude - 4.2) < 1e-9, f"Unexpected harness drop: {v_drop}")
+    check(abs(v_sag.magnitude - 17.3) < 1e-9, f"Unexpected sagged rail: {v_sag}")
+    check(v_sag < v_dropout, "The sagged rail must fall below the regulator dropout.")
+    check(v_dropout < v_battery_low < v_nominal, "Dropout < depleted battery < nominal rail.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    v_nominal_str = fmt_voltage(v_nominal, unit=volt, precision=0)
+    v_battery_low_str = fmt_voltage(v_battery_low, unit=volt, precision=1)
+    r_harness_str = fmt_resistance(r_harness, unit=ureg.milliohm, precision=0)
+    v_dropout_str = fmt_voltage(v_dropout, unit=volt, precision=0)
+    i_transient_str = fmt_current(i_transient, unit=ureg.ampere, precision=0)
+    v_drop_str = fmt_voltage(v_drop, unit=volt, precision=1)
+    v_sag_str = fmt_voltage(v_sag, unit=volt, precision=1)
+```
 
 ::: {.fallacy-pitfall}
 
 **Fallacy**: *Compute accelerators and motor inverters operate on independent, ideal power rails.*
 
-A mobile robot's heavy inference burst coincides with its motors accelerating to climb over a doorway threshold. The combined $70.0\text{ A}$ current transient across the shared wiring harness resistance ($R_{\text{bus}} = 60.0\text{ m}\Omega$) produces a $4.2\text{ V}$ voltage drop. With the battery already depleted to $21.5\text{ V}$, the bus sags to $17.3\text{ V}$, which falls below the onboard point-of-load regulators' $18.0\text{ V}$ dropout threshold. This electrical brownout abruptly asserts hardware reset on the real-time controller while the machine carries active momentum. Separate software budgets for compute and actuation ignore their physical reliance on a shared electrical supply. Power qualification must account for coincident peak loads and verify that control electronics remain powered through demanding maneuvers.
+On the mobile manipulator, a heavy inference burst coincides with the drive motors pushing the base over the cage-door threshold. The combined `{python} ControlRailBrownout.i_transient_str` transient across the `{python} ControlRailBrownout.r_harness_str` harness resistance of the shared `{python} ControlRailBrownout.v_nominal_str` control rail produces a `{python} ControlRailBrownout.v_drop_str` drop. With the battery already depleted to `{python} ControlRailBrownout.v_battery_low_str`, the rail sags to `{python} ControlRailBrownout.v_sag_str`, below the `{python} ControlRailBrownout.v_dropout_str` dropout threshold of the onboard point-of-load regulators. This electrical brownout abruptly asserts hardware reset on the real-time controller while the machine carries active momentum. Separate software budgets for compute and actuation ignore their physical reliance on a shared electrical supply. Power qualification must account for coincident peak loads and verify that control electronics remain powered through demanding maneuvers.
 
 :::
 

@@ -50,7 +50,49 @@ An obstacle location aids control only when its time, coordinate frame, and unce
 
 ## Photons to Spatial Claims {#sec-perception-photons-to-claims}
 
-A vision foundation model on an autonomous mobile robot can achieve a 98.4 percent mean Average Precision score yet still drive into a steel stanchion. The world moves while the camera reads out and the inference pipeline processes its image. If those stages consume eighty milliseconds while the vehicle travels at two meters per second, the robot advances sixteen centimeters before the updated obstacle estimate arrives. Recognition accuracy does not say whether that estimate is fresh enough for the proposed motion. In physical AI, an observation has an expiration date.
+```{python}
+#| label: calc-perception-opening-age
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ OPENING SCENE: OBSERVATION AGE AT THE RACK END
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The opening paragraph of @sec-perception-photons-to-claims.
+# │
+# │ Goal:    Show how far the warehouse mobile manipulator travels while its
+# │          navigation camera's observation of a person ages.
+# │ Show:    t_age 51.6 ms; 77.4 mm of travel at the 1.5 m/s drive limit.
+# │ How:     AISLE.perception_age and RM.base.max_velocity; displacement via
+# │          calc_spatial_information_age_displacement.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_latency, fmt_length, fmt_velocity, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class RackEndOpeningAge:
+    """Travel during the navigation camera's observation age at the drive limit."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_age = AISLE.perception_age  # category: derived
+    v = RM.base.max_velocity  # category: illustrative (drive limit)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    dx = calc_spatial_information_age_displacement(v, t_age).to(ureg.millimeter)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_age.to(millisecond).magnitude - 51.6) < 0.05, f"Unexpected t_age: {t_age}")
+    check(abs(v.to(meter / second).magnitude - 1.5) < 1e-9, f"Unexpected drive limit: {v}")
+    check(abs(dx.magnitude - 77.4) < 0.05, f"Unexpected travel during t_age: {dx}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_age_str = fmt_latency(t_age.to(millisecond), unit=millisecond, precision=1)
+    v_str = fmt_velocity(v.to(meter / second), unit=meter / second, precision=1)
+    dx_str = fmt_length(dx, unit=ureg.millimeter, precision=1)
+```
+
+The warehouse mobile manipulator's vision model can recognize a person stepping out from a rack end almost every time and still hand the planner a position that is already out of date. The world keeps moving while the navigation camera integrates and reads out its image and while the pipeline processes it. On this machine, `{python} RackEndOpeningAge.t_age_str` (illustrative; see the Reader Guide) passes between the middle of the exposure and the moment the observation reaches any consumer, and at the base's `{python} RackEndOpeningAge.v_str` drive limit the machine covers `{python} RackEndOpeningAge.dx_str` in that time. Recognition accuracy does not say whether that observation is fresh enough for the proposed motion. In physical AI, an observation has an expiration date.
 
 ::: {#fig-08-locator fig-env="figure" fig-pos="htb" fig-cap="**Perception stage architecture focus**: The four-tier physical AI systems architecture highlights the cognitive deliberation tier, with perception as the second brain stage and this chapter's active focus. The stage converts raw observations $o_t$ into latent state $z_t$, bounded upstream by sensor transduction it cannot improve and downstream by the memory that must store whatever it infers." fig-alt="Diagram titled Physical AI Systems Architecture Stack, drawn as four stacked tiers. Layer 4 is system governance and assurance at 0.1 to 1 hertz, holding boxes for shared autonomy, verification, safety cases, and frontier limits. Layer 3 is the brain, a cognitive deliberation tier at 1 to 50 hertz, holding five stages named ingestion, perception, memory, intent, and planner. A dashed proposal-permission privilege boundary separates it from layer 2, the nervous system, a real-time safety and timing tier at 1000 hertz. Layer 1 is the physical body and continuous plant. Layer 3 is shaded and its perception stage is outlined; the badge reads Active Focus, Chapter 08, Spatial Perception."}
 ![](images/svg/fig_locator.svg){width="100%"}
@@ -72,9 +114,7 @@ A physical architecture can take many concrete shapes. An end-to-end vision-to-a
 
 When an engineering team combines these responsibilities in an end-to-end model, the responsibilities remain, but their intermediate representations become harder to inspect independently. An explicit interface can expose a coordinate transform for checking, carry an expiration deadline, or let another component reject an inconsistent estimate. A hidden representation requires additional instrumentation or external checks to provide comparable evidence. If perception mistakes a wet-floor reflection for open clearance, the engineer needs a way to detect or contain the resulting error regardless of how many software modules implement the pipeline.
 
-That evidence begins where physical energy converts into digital data. From transduction at the detector array to consumption by a state estimator, every processing stage adds information age. Consider an autonomous mobile base operating in an industrial facility at $2.0\text{ m/s}$. Photons striking the photodiode array of a CMOS camera do not instantly appear as feature embeddings in an inference engine. In an analytical breakdown of a typical embedded vision system, the sensor array requires $33\text{ ms}$ for exposure and pixel readout at $30\text{ Hz}$. Direct memory access transfers across a serial bus into system memory add $8\text{ ms}$. Operating system kernel scheduling and driver buffer handling introduce $4\text{ ms}$ of queuing delay. Image debayering, rectification, and color correction require $5\text{ ms}$ of preprocessing time. Finally, running a vision backbone on an onboard accelerator requires $25\text{ ms}$ at $P_{99}$ latency.
-
-By the time the perception stage yields an observation tensor, $75\text{ ms}$ of total latency have accumulated between photon capture and model consumption. Over that $75\text{ ms}$ window, the vehicle has traversed $0.15\text{ m}$ of physical space. If the perception stage hands downstream components an object detection bounding box without an explicit timestamp and a calibrated spatial transform, a downstream planner will evaluate that obstacle relative to the current position of the chassis, assuming the obstacle sits $0.15\text{ m}$ closer or further than its true coordinate. Downstream software cannot safely consume a perception output that does not explicitly declare when it was captured, what coordinate system it references, and how wide its error distribution remains.
+That evidence begins where physical energy converts into digital data. From transduction at the detector array to consumption by a state estimator, every processing stage adds information age. Photons striking the photodiode array of a CMOS camera do not instantly appear as feature embeddings in an inference engine; exposure, readout, transport, memory transfer, preprocessing, and the vision backbone each take a share of the delay. If the perception stage hands downstream components an object detection bounding box without an explicit timestamp and a calibrated spatial transform, a downstream planner will evaluate that obstacle relative to the current position of the chassis, misplacing it by the distance the machine has traveled since capture. Downstream software cannot safely consume a perception output that does not explicitly declare when it was captured, what coordinate system it references, and how wide its error distribution remains.
 
 ::: {.column-margin .margin-pointer}
 ↰ **Prerequisite:** Transduction freshness and sensor measurement aging are derived in @sec-body-measurement-freshness.
@@ -82,10 +122,10 @@ By the time the perception stage yields an observation tensor, $75\text{ ms}$ of
 
 ::: {#dfn-perception-spatial-information-age .callout-definition title="Spatial information age"}
 
-***Spatial information age***\index{Spatial information age!definition}\index{Information age!definition} ($\tau_{\text{age}}$) is the total elapsed physical time between the physical energy integration midpoint ($t_{\text{exp}}/2$) at the transducer and the downstream consumption of the resulting observation tensor by a state estimator or control policy.
+***Spatial information age***\index{Spatial information age!definition}\index{Information age!definition} ($t_{\text{age}}$) is the total elapsed physical time between the physical energy integration midpoint ($t_{\text{exp}}/2$) at the transducer and the downstream consumption of the resulting observation tensor by a state estimator or control policy.
 
 1.  **Significance**: Because physical mass moves while digital computation executes, sensory latency translates directly into unmodeled spatial displacement (@eq-percep-spatial-displacement):
-    $$\Delta \mathbf{x} = \int_{t_0}^{t_0+\tau_{\text{age}}} \mathbf{v}(t)\,dt$$ {#eq-percep-spatial-displacement}
+    $$\Delta \mathbf{x} = \int_{t_0}^{t_0+t_{\text{age}}} \mathbf{v}(t)\,dt$$ {#eq-percep-spatial-displacement}
     This continuous physical shift depletes geometric safety buffers before an obstacle is even classified.
 2.  **Distinction**: Unlike software pipeline latency (wall-clock duration of a forward pass), spatial information age accounts for the full physical journey: photon exposure time, rolling shutter readout, SERDES bus transport, ISP debayering, OS buffer queuing, and neural tokenization.
 3.  **Common pitfall**: Treating the frame arrival timestamp ($t_{\text{recv}}$) in userspace memory as the observation time ($t_0$). Using arrival time hides upstream capture and transport delays, introducing severe phase lag and high-frequency tracking instability into feedback controllers.
@@ -96,11 +136,11 @@ By the time the perception stage yields an observation tensor, $75\text{ ms}$ of
 
 Batching improves accelerator throughput by amortizing work across images, but collecting a batch across successive capture times ages its earliest member. At a $30\text{ Hz}$ camera cadence ($T_{\text{sample}} \approx 33.3\text{ ms}$), four consecutive frames wait approximately $100$, $67$, $33$, and $0\text{ ms}$, respectively, before the batch is ready. At $10.0\text{ m/s}$ the oldest frame corresponds to another meter of forward travel before processing begins. Such temporal batching is inadmissible when its resulting end-to-end age exceeds the motion-dependent freshness budget. Images captured together by several cameras may instead be batched if measured age, synchronization error, and deadline remain within that budget.
 
-Phase margin is the phase delay a feedback design can tolerate before its nominal gain-crossover condition reaches zero margin; it is not a universal property of a perception model. For a loop with nominal margin $45^\circ$ ($0.785\text{ rad}$) at crossover $\omega_c=10\text{ rad/s}$, the delay-only ceiling is $0.785/10=78.5\text{ ms}$. Exposure, processing, transport, permission, and actuator delay all spend that same budget. The transfer-function derivation is developed in @sec-appendix-control-zoh. In the Laplace domain, an additional pure delay contributes $e^{-s \tau_{\text{age}}}$. Substituting $s = j\omega$, its frequency response has unit gain ($|e^{-j\omega \tau_{\text{age}}}| = 1$) but contributes negative, frequency-proportional phase lag:
-$$\Delta \phi(\omega) = -\omega \tau_{\text{age}} \quad [\text{rad}]$$ {#eq-percep-phase-lag}
+Phase margin is the phase delay a feedback design can tolerate before its nominal gain-crossover condition reaches zero margin; it is not a universal property of a perception model. For a loop with nominal margin $45^\circ$ ($0.785\text{ rad}$) at crossover $\omega_c=10\text{ rad/s}$, the delay-only ceiling is $0.785/10=78.5\text{ ms}$. Exposure, processing, transport, permission, and actuator delay all spend that same budget. The transfer-function derivation is developed in @sec-appendix-control-zoh. In the Laplace domain, an additional pure delay contributes $e^{-s t_{\text{age}}}$. Substituting $s = j\omega$, its frequency response has unit gain ($|e^{-j\omega t_{\text{age}}}| = 1$) but contributes negative, frequency-proportional phase lag:
+$$\Delta \phi(\omega) = -\omega t_{\text{age}} \quad [\text{rad}]$$ {#eq-percep-phase-lag}
 At the open-loop gain crossover frequency $\omega_c$ (the frequency where open-loop gain $|L(j\omega_c)| = 1$), the phase lag in @eq-percep-phase-lag directly erodes the system's nominal phase margin ($\text{PM}_{\text{nom}}$):
-$$\text{PM}_{\text{effective}} = \text{PM}_{\text{nom}} - \omega_c \tau_{\text{age}}$$ {#eq-percep-phase-margin-loss}
-Under the fixed-loop, pure-delay approximation in @eq-percep-phase-margin-loss, $\tau_{\text{age}} \ge \text{PM}_{\text{nom}}/\omega_c$ exhausts the nominal phase margin. That is a warning to re-evaluate the complete closed-loop response, not a proof of a particular oscillation or pole location. Reducing one latency component from $80\text{ ms}$ to $40\text{ ms}$ restores $0.040\omega_c$ radians of modeled phase margin only if crossover and the rest of the loop remain unchanged.
+$$\text{PM}_{\text{effective}} = \text{PM}_{\text{nom}} - \omega_c t_{\text{age}}$$ {#eq-percep-phase-margin-loss}
+Under the fixed-loop, pure-delay approximation in @eq-percep-phase-margin-loss, $t_{\text{age}} \ge \text{PM}_{\text{nom}}/\omega_c$ exhausts the nominal phase margin. That is a warning to re-evaluate the complete closed-loop response, not a proof of a particular oscillation or pole location. Reducing one latency component from $80\text{ ms}$ to $40\text{ ms}$ restores $0.040\omega_c$ radians of modeled phase margin only if crossover and the rest of the loop remain unchanged.
 
 ::: {.column-margin}
 ![](images/svg/margin_phase_margin_erosion_knee.svg){width="100%" fig-alt="Illustrative fixed-loop phase margin decreases from 45 degrees to zero after 78.5 milliseconds of additional delay at a 10 radians-per-second gain crossover. Actual stability requires full-loop validation."}
@@ -122,7 +162,56 @@ Raw sensor hardware yields electrical measurements such as photodiode voltages, 
 
 The first mandatory property is the **capture timestamp**\index{Capture timestamp!definition} $t_0$, which specifies the temporal midpoint of the physical energy integration window (the effective moment the camera shutter was open or the laser pulse fired). Sensors do not take instantaneous snapshots; a camera integrates photons across an exposure duration, and a mechanical lidar sweeps laser pulses over an azimuth arc across several milliseconds. Downstream state estimators require $t_0$ to integrate the measurement into the machine's dynamic equations of motion. A common architectural failure in embedded systems is recording the arrival timestamp $t_{\text{recv}}$, the moment the operating system kernel completes the direct memory access transfer, and passing $t_{\text{recv}}$ downstream as the observation epoch. Because pipeline execution, serial bus transfers, and driver scheduling introduce a transport delay $\tau = t_{\text{recv}} - t_0$, substituting arrival time for capture time corrupts the state estimator.
 
-The magnitude of this corruption is a direct function of platform kinematics. Consider a vehicle traversing a trajectory with instantaneous velocity $v(t)$. When an observation taken at $t_0$ is evaluated by a downstream filter at $t_{\text{recv}}$, the physical state of the machine has shifted. The resulting spatial tracking error $\Delta x$ is the integral of the platform velocity over the transport delay, $\Delta x = \int_{t_0}^{t_0+\tau} v(t)\,dt$. In an analytical case of constant linear velocity $v$, this relationship simplifies to $\Delta x = v \cdot \tau$. The Tempe crash analysis (@sec-boundary-when-fails) shows why perception and prediction failures matter; the following robot calculation is separate and illustrative. At $v = 3.0\text{ m/s}$ with an assumed $\tau = 80\text{ ms}$ uncompensated observation delay, the robot moves $\Delta x = 0.24\text{ m}$ between capture and use. In a feedback loop, that delay adds phase lag; whether it produces oscillation or instability depends on the controller and its remaining phase margin.
+```{python}
+#| label: calc-perception-arrival-stamp
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ARRIVAL-TIMESTAMP OFFSET ON THE NAVIGATION CAMERA
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The capture-timestamp paragraph of @sec-perception-handoff.
+# │
+# │ Goal:    Size the error an estimator makes when it dates the navigation
+# │          camera's frame at DMA completion instead of at the exposure midpoint.
+# │ Show:    26.6 ms from exposure midpoint to DMA completion; 39.9 mm of base
+# │          travel at the 1.5 m/s drive limit.
+# │ How:     t_recv - t0 = t_exp/2 + t_readout + t_transport + t_dma from
+# │          RM.nav_camera and AISLE; displacement via
+# │          calc_spatial_information_age_displacement.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_latency, fmt_length, fmt_velocity, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class ArrivalStampOffset:
+    """Age hidden by an arrival timestamp on the running machine's navigation camera."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    camera = RM.nav_camera  # registry: navigation camera
+    t_exp = camera.exposure_time  # category: datasheet
+    t_readout = camera.readout_time  # category: datasheet
+    t_transport = AISLE.t_transport  # category: illustrative
+    t_dma = AISLE.t_dma  # category: illustrative
+    v = RM.base.max_velocity  # category: illustrative (drive limit)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    tau_recv = (t_exp / 2 + t_readout + t_transport + t_dma).to(millisecond)
+    dx_recv = calc_spatial_information_age_displacement(v, tau_recv).to(ureg.millimeter)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(tau_recv.magnitude - 26.6) < 0.05, f"Unexpected arrival offset: {tau_recv}")
+    check(abs(dx_recv.magnitude - 39.9) < 0.05, f"Unexpected arrival-stamp displacement: {dx_recv}")
+    check(tau_recv < AISLE.perception_age, "Arrival offset must be part of the full observation age")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    tau_recv_str = fmt_latency(tau_recv, unit=millisecond, precision=1)
+    dx_recv_str = fmt_length(dx_recv, unit=ureg.millimeter, precision=1)
+    v_str = fmt_velocity(v.to(meter / second), unit=meter / second, precision=1)
+```
+
+The magnitude of this corruption is a direct function of platform kinematics. Consider a vehicle traversing a trajectory with instantaneous velocity $v(t)$. When an observation taken at $t_0$ is evaluated by a downstream filter at $t_{\text{recv}}$, the physical state of the machine has shifted. The resulting spatial tracking error $\Delta x$ is the integral of the platform velocity over the transport delay, $\Delta x = \int_{t_0}^{t_0+\tau} v(t)\,dt$. In an analytical case of constant linear velocity $v$, this relationship simplifies to $\Delta x = v \cdot \tau$. On the mobile manipulator, the navigation camera's frame completes its direct memory access (DMA) transfer `{python} ArrivalStampOffset.tau_recv_str` after the exposure midpoint. An estimator that stamps the frame on arrival therefore dates it that much late, and at the base's `{python} ArrivalStampOffset.v_str` drive limit it pairs the observation with a pose `{python} ArrivalStampOffset.dx_recv_str` beyond the one the camera occupied at capture. In a feedback loop, that delay adds phase lag; whether it produces oscillation or instability depends on the controller and its remaining phase margin.
 
 ::: {.column-margin .margin-pointer}
 ↳ **Downstream:** Extrinsic sensor frames feed the hierarchical spatial transform tree in @sec-memory-reference-frames.
@@ -161,7 +250,74 @@ These three properties define the **perception handoff contract**\index{Percepti
 Lag accumulates before software receives anything at all, beginning at the photosite where physical phenomena are converted into electrical charge. A camera does not capture an instantaneous snapshot. Photons collect on a photodiode over a finite exposure duration $t_{\text{exp}}$, which means the recorded pixel intensity represents the temporal integral of scene radiance $I(t)$ over that interval:
 $$I_{\text{pixel}} = \int_{0}^{t_{\text{exp}}} I(t)\,dt$$
 
-To build intuition for exposure latency, consider mounting an open **rain gauge on the roof of a moving train**. To measure rainfall intensity, the gauge must remain open to collect falling raindrops over a finite time window ($t_{\text{exp}}$). If the train is stationary, the collected water reflects the rainfall rate at that location. But if the train is hurtling down the tracks at high speed, the water gathered in the bucket represents an average of raindrops collected across an entire stretch of track! You cannot assign the water in the gauge to the train's final arrival position; at best, the measurement reflects the physical midpoint where the train was halfway through the exposure interval ($t_{\text{exp}} / 2$). In physical AI, a CMOS photodiode is a photon bucket collecting charge over time. At $2.0\text{ m/s}$ with a $33\text{ ms}$ exposure duration, the camera does not capture where the robot *is*; it captures where the robot *was* $16.5\text{ ms}$ ago, smeared across $6.6\text{ cm}$ of physical motion blur.
+```{python}
+#| label: calc-perception-rolling-shutter-skew
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ROLLING-SHUTTER SKEW ON THE NAVIGATION CAMERA
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The exposure analogy and the rolling-shutter example of
+# │          @sec-perception-transduction-calibration.
+# │
+# │ Goal:    Size the exposure-midpoint lag, per-row blur, and scanline skew
+# │          the navigation camera records while the base passes a vertical
+# │          rack upright.
+# │ Show:    an 8 ms midpoint lag; 3,040 rows in 16.6 ms (5.46 us per row);
+# │          24.9 mm of skew and 24 mm of blur at the 1.5 m/s drive limit;
+# │          the uncompensated skew is about a sixth of the 0.15 m side
+# │          clearance.
+# │ How:     RM.nav_camera readout, exposure, and row count; RM.base drive
+# │          limit; AISLE.side_clearance; RM.imu sample rate for compensation.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_latency, fmt_length, fmt_velocity, fmt_frequency, fmt_int, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class RollingShutterSkew:
+    """Scanline skew and blur on the running machine's navigation camera at the drive limit."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    camera = RM.nav_camera  # registry: navigation camera
+    rows = camera.resolution_height  # category: datasheet
+    t_readout = camera.readout_time.to(millisecond)  # category: datasheet
+    t_exp = camera.exposure_time.to(millisecond)  # category: datasheet
+    v = RM.base.max_velocity.to(meter / second)  # category: illustrative (drive limit)
+    side_clearance = AISLE.side_clearance  # category: illustrative
+    f_imu = RM.imu.sample_rate  # category: datasheet
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_exp_half = (t_exp / 2).to(millisecond)
+    t_row = (t_readout / rows).to(microsecond)
+    skew = (v * t_readout).to(ureg.millimeter)
+    blur = (v * t_exp).to(ureg.millimeter)
+    skew_share = (skew / side_clearance).to(ureg.dimensionless).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(rows == 3040, f"Unexpected navigation-camera row count: {rows}")
+    check(abs(t_row.magnitude - 5.46) < 0.005, f"Unexpected row interval: {t_row}")
+    check(abs(skew.magnitude - 24.9) < 0.05, f"Unexpected rolling-shutter skew: {skew}")
+    check(abs(blur.magnitude - 24.0) < 0.05, f"Unexpected per-row blur: {blur}")
+    check(abs(t_exp_half.magnitude - 8.0) < 0.05, f"Unexpected exposure-midpoint lag: {t_exp_half}")
+    check(0.15 < skew_share < 0.18, f"Prose says the skew is about a sixth of the side clearance: {skew_share}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    rows_str = fmt_int(rows)
+    last_row_str = fmt_int(rows - 1)
+    t_readout_str = fmt_latency(t_readout, unit=millisecond, precision=1)
+    t_exp_str = fmt_latency(t_exp, unit=millisecond, precision=0)
+    t_exp_half_str = fmt_latency(t_exp_half, unit=millisecond, precision=0)
+    t_row_str = fmt_latency(t_row, unit=microsecond, precision=2)
+    skew_str = fmt_length(skew, unit=ureg.millimeter, precision=1)
+    blur_str = fmt_length(blur, unit=ureg.millimeter, precision=0)
+    v_str = fmt_velocity(v, unit=meter / second, precision=1)
+    side_clearance_str = fmt_length(side_clearance.to(meter), unit=meter, precision=2)
+    f_imu_str = fmt_frequency(f_imu, unit=ureg.hertz, precision=0, commas=True)
+```
+
+To build intuition for exposure latency, consider mounting an open **rain gauge on the roof of a moving train**. To measure rainfall intensity, the gauge must remain open to collect falling raindrops over a finite time window ($t_{\text{exp}}$). If the train is stationary, the collected water reflects the rainfall rate at that location. But if the train is hurtling down the tracks at high speed, the water gathered in the bucket represents an average of raindrops collected across an entire stretch of track! You cannot assign the water in the gauge to the train's final arrival position; at best, the measurement reflects the physical midpoint where the train was halfway through the exposure interval ($t_{\text{exp}} / 2$). In physical AI, a CMOS photodiode is a photon bucket collecting charge over time. With the navigation camera's `{python} RollingShutterSkew.t_exp_str` exposure at the base's `{python} RollingShutterSkew.v_str` drive limit, the image does not record where the robot *is*. It records where the robot *was* `{python} RollingShutterSkew.t_exp_half_str` earlier, smeared across `{python} RollingShutterSkew.blur_str` of motion blur.
 
 When the sensor or the observed environment moves at velocity $v$ during exposure, a sharp physical boundary—such as a rigid door frame—smears across multiple photosites. The resulting motion blur width in the direction of motion is given by $\Delta x_{\text{blur}} = v \cdot t_{\text{exp}}$. Because light accumulates continuously across the exposure window, the effective point in time that corresponds to the accumulated charge is the temporal midpoint of the interval, introducing an unavoidable physical measurement lag of $t_{\text{exp}}/2$ relative to the start of exposure.
 
@@ -176,9 +332,9 @@ $$\Delta x(y) = v \cdot y \cdot t_{\text{row}}$$
 
 Under rotational motion, rolling shutter distortion becomes non-linear. If the camera undergoes angular rotation at angular velocity vector $\boldsymbol{\omega} = [\omega_x, \omega_y, \omega_z]^T$ (e.g., rapid yaw or pitch during aggressive robot maneuvers), the effective camera attitude changes continuously as scanlines are read. Physically, the camera points in a slightly different direction for every single row. For a scanline at vertical coordinate $y$, the differential rotation relative to the frame start is $\Delta \boldsymbol{\theta}(y) \approx \boldsymbol{\omega} \cdot y \cdot t_{\text{row}}$. This scanline-dependent rotation warps straight physical lines into curves, induces focal-length dilation (scaling distortion during pitch), and shears vertical walls into slanted surfaces, as demonstrated by the propeller blade curvature in @fig-rolling-shutter-skew.
 
-As an analytical example, consider a ground robot traversing an aisle at $v = 3.0\text{ m/s}$ equipped with a rolling shutter camera operating at $30\text{ Hz}$ with vertical resolution $H = 1080\text{ rows}$. If the active readout time across all rows is $t_{\text{readout}} = 33.3\text{ ms}$, the inter-row readout interval is $t_{\text{row}} = 33.3\text{ ms} / 1080 \approx 30.8\,\mu\text{s}$. A vertical pallet edge spanning the full height of the frame does not appear vertical in the captured array. The bottom scanline ($y = 1079$) is sampled $33.3\text{ ms}$ after the top scanline ($y = 0$), producing a total physical spatial skew of:
-$$\Delta x = 3.0\text{ m/s} \times 0.0333\text{ s} \approx 0.10\text{ m} = 100\text{ mm}$$
-With an exposure duration of $t_{\text{exp}} = 10.0\text{ ms}$, each individual scanline also suffers a motion blur width of $\Delta x_{\text{blur}} = 3.0\text{ m/s} \times 0.010\text{ s} = 0.03\text{ m} = 30\text{ mm}$. If downstream geometry reconstruction treats this image as an instantaneous rigid projection, the perceived $100\text{ mm}$ tilt causes the motion planner to identify an artificial intrusion into the free corridor. Correcting this distortion requires **rolling-shutter motion compensation**\index{Rolling-shutter motion compensation!definition}, the continuous-time geometric unwarping algorithm that utilizes high-rate ($1000\text{ Hz}$) inertial angular velocities ($\boldsymbol{\omega}$) and linear velocities ($\mathbf{v}$) to interpolate the instantaneous 6-DoF camera pose $\mathbf{T}_{wb}(t(y))$ for each individual scanline $y$, restoring rigid epipolar geometry prior to 3D triangulation.
+As an analytical example, consider the mobile manipulator's navigation camera while the base passes a vertical rack upright at its `{python} RollingShutterSkew.v_str` drive limit. The rolling shutter reads the frame's `{python} RollingShutterSkew.rows_str` rows in $t_{\text{readout}} =$ `{python} RollingShutterSkew.t_readout_str`, so the inter-row interval is $t_{\text{row}} =$ `{python} RollingShutterSkew.t_row_str`. An upright spanning the full height of the frame does not appear vertical in the captured array. The bottom scanline ($y =$ `{python} RollingShutterSkew.last_row_str`) is sampled `{python} RollingShutterSkew.t_readout_str` after the top scanline ($y = 0$), producing a total spatial skew $\Delta x = v\,t_{\text{readout}}$ of `{python} RollingShutterSkew.skew_str`.
+
+With the camera's `{python} RollingShutterSkew.t_exp_str` exposure, each individual scanline also suffers a motion blur width of $\Delta x_{\text{blur}} =$ `{python} RollingShutterSkew.blur_str`. If downstream geometry reconstruction treats this image as an instantaneous rigid projection, the `{python} RollingShutterSkew.skew_str` tilt enters the obstacle map uncorrected. That is about a sixth of the `{python} RollingShutterSkew.side_clearance_str` side clearance the base keeps from the racks, and the motion planner can read the slanted upright as an artificial intrusion into the free corridor. The localization bound $\delta_{\text{loc}}$ assumes this skew has been removed before the estimator sees the frame. Correcting this distortion requires **rolling-shutter motion compensation**\index{Rolling-shutter motion compensation!definition}, the continuous-time geometric unwarping algorithm that utilizes high-rate (`{python} RollingShutterSkew.f_imu_str`) inertial angular velocities ($\boldsymbol{\omega}$) and linear velocities ($\mathbf{v}$) to interpolate the instantaneous 6-DoF camera pose $\mathbf{T}_{wb}(t(y))$ for each individual scanline $y$, restoring rigid epipolar geometry prior to 3D triangulation.
 
 ::: {#fig-rolling-shutter-skew fig-env="figure" fig-pos="t" fig-cap="**Rolling shutter distortion geometry**: A photograph of rotating propeller blades captured by a rolling shutter CMOS sensor. Because sensor scanlines are exposed and read sequentially from top to bottom rather than simultaneously, the rapid physical movement of the blades relative to the row period ($t_{\text{row}}$) shears and curves straight rigid structures into non-linear, disconnected geometric arcs. In high-speed embodied systems, uncompensated rolling shutter skew introduces catastrophic 3D triangulation errors and phantom obstacle intrusion in downstream visual-inertial odometry. (Credit: Wikimedia Commons, CC BY-SA 3.0)." fig-alt="Empirical rolling shutter distortion caused by progressive scanline exposure. A photograph of rotating propeller blades captured by a rolling shutter CMOS sensor. Because sensor scanlines are exposed and read sequentially from top to bottom rather than simultaneously, the rapid physical movement of the blades relative to the row period shears and curves straight rigid structures into non-linear, disconnected geometric arcs. In high-speed embodied systems, uncompensated rolling shutter skew introduces catastrophic 3D triangulation errors and phantom obstacle intrusion in downstream visual-inertial odometry. (Credit: Wikimedia Commons, CC BY-SA 3.0)."}
 ![](images/jpg/fig08_real_rolling_shutter_skew.jpg){width="85%"}
@@ -197,7 +353,7 @@ $$\mathbf{r}(u, v) = \mathbf{K}^{-1} \begin{bmatrix} u \\ v \\ 1 \end{bmatrix} =
 Any 3D physical surface point projecting onto pixel $(u, v)$ must lie somewhere along this 1D geometric ray, parameterized by its scalar metric depth $d = Z_c$:
 $$\mathbf{P}_c(u, v, d) = d \cdot \mathbf{r}(u, v) = \begin{bmatrix} d \frac{u - c_x}{f_x} \\ d \frac{v - c_y}{f_y} \\ d \end{bmatrix}$$
 
-Real-world optical assemblies deviate from ideal pinhole geometry due to lens curvature and misalignment, introducing radial and tangential distortion. In embedded MLSys architectures, these non-linear geometric distortions are parameterized via polynomial coefficients ($k_1, k_2, p_1, p_2$) and rectified directly in silicon by the hardware Image Signal Processor (ISP) using pre-calculated lookup tables during direct memory access (DMA) ingress, ensuring undistorted frames enter main memory with near-zero CPU overhead ($t_{\text{ISP}} \approx 2.5\text{ ms}$). The universal methodology for recovering intrinsic matrix $\mathbf{K}$ and distortion parameters was established by Zhang [@zhang2000flexible]: by imaging a planar calibration target (such as a precision checkerboard or AprilTag grid) across diverse unconstrained orientations, planar homographies provide algebraic constraints that seed a non-linear optimization minimizing reprojection error across all fiducial corners.[^fn-math-zhang-homography]
+Real-world optical assemblies deviate from ideal pinhole geometry due to lens curvature and misalignment, introducing radial and tangential distortion. In embedded MLSys architectures, these non-linear geometric distortions are parameterized via polynomial coefficients ($k_1, k_2, p_1, p_2$) and rectified directly in silicon by the hardware Image Signal Processor (ISP) using pre-calculated lookup tables during DMA ingress, ensuring undistorted frames enter main memory with near-zero CPU overhead ($t_{\text{ISP}} \approx 2.5\text{ ms}$). The universal methodology for recovering intrinsic matrix $\mathbf{K}$ and distortion parameters was established by Zhang [@zhang2000flexible]: by imaging a planar calibration target (such as a precision checkerboard or AprilTag grid) across diverse unconstrained orientations, planar homographies provide algebraic constraints that seed a non-linear optimization minimizing reprojection error across all fiducial corners.[^fn-math-zhang-homography]
 
 [^fn-math-zhang-homography]: **Zhang's planar homography**\index{Mathematics!Zhang's homography}: Zhang's calibration method estimates the intrinsic camera matrix $\mathbf{K}$ and radial lens distortion parameters by observing a planar fiducial pattern across multiple unconstrained orientations. Each observation establishes a projective planar homography $\mathbf{H} = \mathbf{K}[\mathbf{r}_1 \; \mathbf{r}_2 \; \mathbf{t}]$ that imposes two algebraic orthogonality constraints on the image of the absolute conic. Solving these constraints across at least three non-parallel views yields a closed-form initialization that seeds non-linear Levenberg–Marquardt optimization over all reprojection residuals. For the full mathematical formulation, see @sec-appendix-systems-vision.
 
@@ -234,12 +390,21 @@ $$t_{\text{age}} = \frac{t_{\text{exp}}}{2} + t_{\text{readout}} + t_{\text{tran
 #| label: calc-perception-sensor-information-age
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ Sensor Transduction: Converting physical signals into data; Information Age: A shift from traditional industry to an information technology economy; Waterfall: A project management model emphasizing linear progression; LEGO: A metaphor for modular design in systems.
+# │ NAVIGATION-CAMERA INFORMATION AGE AND STOPPING-BUDGET ROW 5
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: 'Sensor transduction latency' refers to the delay when a sensor converts physical phenomena into electrical signals. This latency is crucial for how quickly a system reacts to environmental changes, especially in real-time AI applications.
-# │ Goal:    To quantify system performance, we define 'sensor-to-inference latency' as the time from when a sensor captures data to when it is processed for inference. Latency is influenced by factors such as sensor read time, processing delays, and communication latencies. 'Unmodeled displacement' refers to discrepancies from timing errors or processing delays that impact sensor data accuracy and the reliability of inference in physical AI systems.
-# │ Show:    The illustrative serial pipeline gives 51.6 ms to observation dispatch. The AMR travels 129 mm forward during this age, leaving 71 mm of an assumed forward pre-brake reserve for downstream delay; arm and melt-pool displacements are separate directional examples.
-# │ How:     To compute the change in position (dx), we perform a waterfall summation of the time components: t_exp for processing time, t_ipc for inter-process communication, and tau_age for system response delay. This summation provides the total time influencing spatial change, where dx = v * tau_age, with v as the system's velocity. These relationships ground our calculations in the system's physical dynamics.
+# │ Context: \ref{nbk-perception-sensor-transduction-latency-spatial-information-age},
+# │          @tbl-08-latency-budget, and the stopping-budget paragraph of
+# │          @sec-perception-transduction-calibration.
+# │
+# │ Goal:    Sum the warehouse mobile manipulator's navigation-camera latency
+# │          waterfall into t_age and add its term to the stopping budget.
+# │ Show:    Stage increments and cumulative ages; t_age 51.6 ms; tau_delay
+# │          133.6 ms; row 5 v*t_age 77.4 mm at 1.5 m/s; running total
+# │          835.5 mm -> 912.9 mm; 187.1 mm of the 1.10 m clear distance left.
+# │ How:     Stage terms from RM.nav_camera and AISLE; totals from
+# │          calc_safe_stopping_distance with the Body and Nervous System terms
+# │          (a_brake, delta_loc, delta_margin, lease path, brake onset). The C2
+# │          suffix and tracking inset join later rows, not this one.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -252,46 +417,62 @@ from mlsysim.fmt import (
     check,
 )
 
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
 class SensorInformationAge:
-    """Sensor transduction latency waterfall and spatial information age across machine archetypes."""
+    """Navigation-camera latency waterfall, t_age, and the observation-age row of the stopping budget."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    camera = Sensors.Camera.Sony_IMX477
-    t_exp_half = (camera.exposure_time / 2).to(millisecond)
-    t_readout = camera.readout_time
-    t_transport = 0.8 * millisecond
-    t_dma = 1.2 * millisecond
-    t_isp = 2.5 * millisecond
-    t_backbone = 22.0 * millisecond
-    t_ipc = 0.5 * millisecond
-
-    v_amr = 2.5 * (meter / second)
-    v_arm = 1.8 * (meter / second)
-    v_melt = 0.8 * (meter / second)
-    forward_prebrake_reserve = 0.2 * meter  # scenario assumption after braking distance and safety clearance
+    camera = RM.nav_camera  # registry: Sony IMX477 navigation camera
+    t_exp = camera.exposure_time.to(millisecond)  # category: datasheet
+    t_readout = camera.readout_time.to(millisecond)  # category: datasheet
+    t_transport = AISLE.t_transport.to(millisecond)  # category: illustrative
+    t_dma = AISLE.t_dma.to(millisecond)  # category: illustrative
+    t_isp = AISLE.t_isp.to(millisecond)  # category: illustrative
+    t_backbone = AISLE.t_backbone.to(millisecond)  # category: illustrative
+    t_ipc = AISLE.t_ipc.to(millisecond)  # category: illustrative
+    t_lease = AISLE.t_lease.to(millisecond)  # category: chosen
+    t_tick = AISLE.t_tick.to(millisecond)  # category: chosen
+    t_bus = AISLE.t_bus.to(millisecond)  # category: illustrative
+    t_act = AISLE.t_brake_onset.to(millisecond)  # category: illustrative
+    v = RM.base.max_velocity.to(meter / second)  # category: illustrative (drive limit)
+    a_brake = AISLE.a_brake  # category: illustrative
+    delta_loc = AISLE.delta_loc  # category: illustrative
+    delta_margin = AISLE.delta_margin  # category: chosen
+    d_clear = AISLE.d_clear  # category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    tau_age = t_exp_half + t_readout + t_transport + t_dma + t_isp + t_backbone + t_ipc
-    dx_amr = calc_spatial_information_age_displacement(v_amr, tau_age)
-    dx_arm = calc_spatial_information_age_displacement(v_arm, tau_age)
-    dx_melt = calc_spatial_information_age_displacement(v_melt, tau_age)
-    remaining_forward_reserve = forward_prebrake_reserve - dx_amr
-    post_dispatch_delay_ceiling = remaining_forward_reserve / v_amr
+    t_exp_half = (t_exp / 2).to(millisecond)
     age_after_exposure = t_exp_half
     age_after_readout = age_after_exposure + t_readout
     age_after_transport = age_after_readout + t_transport
     age_after_dma = age_after_transport + t_dma
     age_after_isp = age_after_dma + t_isp
     age_after_backbone = age_after_isp + t_backbone
+    tau_age = (age_after_backbone + t_ipc).to(millisecond)
+
+    tau_delay = (tau_age + t_lease + t_tick + t_bus + t_act).to(millisecond)
+    dx = calc_spatial_information_age_displacement(v, tau_age).to(ureg.millimeter)
+    row_age = dx
+    total_before = calc_safe_stopping_distance(v, t_lease + t_tick + t_bus + t_act, a_brake, delta_loc, delta_margin).to(ureg.millimeter)
+    total_after = calc_safe_stopping_distance(v, tau_delay, a_brake, delta_loc, delta_margin).to(ureg.millimeter)
+    remaining = (d_clear - total_after).to(ureg.millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(tau_age.to(millisecond).magnitude - 51.6) < 0.01, f"Unexpected tau_age: {tau_age}")
-    check(abs(dx_amr.to(meter).magnitude - 0.129) < 0.001, f"Unexpected dx_amr: {dx_amr}")
-    check(abs(dx_arm.to(meter).magnitude - 0.0929) < 0.001, f"Unexpected dx_arm: {dx_arm}")
-    check(abs(dx_melt.to(meter).magnitude - 0.0413) < 0.001, f"Unexpected dx_melt: {dx_melt}")
-    check(remaining_forward_reserve > 0 * meter, "Perception age exhausts forward pre-brake reserve")
+    check(abs(tau_age.magnitude - AISLE.perception_age.to(millisecond).magnitude) < 1e-9, f"Waterfall disagrees with AISLE.perception_age: {tau_age}")
+    check(abs(tau_age.magnitude - 51.6) < 0.05, f"Unexpected t_age: {tau_age}")
+    check(abs(tau_delay.magnitude - AISLE.tau_delay.to(millisecond).magnitude) < 1e-9, f"Delay sum disagrees with AISLE.tau_delay: {tau_delay}")
+    check(abs(tau_delay.magnitude - 133.6) < 0.05, f"Unexpected tau_delay: {tau_delay}")
+    check(abs(v.magnitude - 1.5) < 1e-9, f"Unexpected drive limit: {v}")
+    check(abs(row_age.magnitude - 77.4) < 0.05, f"Unexpected observation-age row: {row_age}")
+    check(abs(total_before.magnitude - 835.5) < 0.05, f"Unexpected running total before row 5: {total_before}")
+    check(abs(total_after.magnitude - 912.9) < 0.05, f"Unexpected running total after row 5: {total_after}")
+    check(abs((total_after - total_before - row_age).magnitude) < 1e-6, "Row 5 does not close the running total")
+    check(abs(remaining.magnitude - 187.1) < 0.05, f"Unexpected remaining clear distance: {remaining}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_exp_str = fmt_latency(t_exp, unit=millisecond, precision=0)
     t_exp_half_str = fmt_latency(t_exp_half, unit=millisecond, precision=0)
     t_readout_str = fmt_latency(t_readout, unit=millisecond, precision=1)
     t_transport_str = fmt_latency(t_transport, unit=millisecond, precision=1)
@@ -308,37 +489,34 @@ class SensorInformationAge:
     age_after_isp_str = fmt_latency(age_after_isp, unit=millisecond, precision=1)
     age_after_backbone_str = fmt_latency(age_after_backbone, unit=millisecond, precision=1)
 
-    v_amr_str = fmt_velocity(v_amr, unit=meter / second, precision=1)
-    dx_amr_m_str = fmt_length(dx_amr, unit=meter, precision=3)
-    dx_amr_mm_str = fmt_length(dx_amr.to(ureg.millimeter), unit=ureg.millimeter, precision=0)
-    remaining_forward_mm_str = fmt_length(remaining_forward_reserve.to(ureg.millimeter), unit=ureg.millimeter, precision=0)
-    post_delay_ceiling_ms_str = fmt_latency(post_dispatch_delay_ceiling.to(millisecond), unit=millisecond, precision=1)
+    t_lease_str = fmt_latency(t_lease, unit=millisecond, precision=0)
+    t_tick_str = fmt_latency(t_tick, unit=millisecond, precision=0)
+    t_bus_str = fmt_latency(t_bus, unit=millisecond, precision=0)
+    t_act_str = fmt_latency(t_act, unit=millisecond, precision=0)
+    tau_delay_str = fmt_latency(tau_delay, unit=millisecond, precision=1)
 
-    v_arm_str = fmt_velocity(v_arm, unit=meter / second, precision=1)
-    dx_arm_m_str = fmt_length(dx_arm, unit=meter, precision=4)
-    dx_arm_mm_str = fmt_length(dx_arm.to(ureg.millimeter), unit=ureg.millimeter, precision=1)
-
-    v_melt_str = fmt_velocity(v_melt, unit=meter / second, precision=1)
-    dx_melt_m_str = fmt_length(dx_melt, unit=meter, precision=4)
-    dx_melt_mm_str = fmt_length(dx_melt.to(ureg.millimeter), unit=ureg.millimeter, precision=1)
+    v_str = fmt_velocity(v, unit=meter / second, precision=1)
+    dx_m_str = fmt_length(dx.to(meter), unit=meter, precision=4)
+    dx_mm_str = fmt_length(dx, unit=ureg.millimeter, precision=1)
+    row_age_str = fmt_length(row_age, unit=ureg.millimeter, precision=1)
+    total_before_str = fmt_length(total_before, unit=ureg.millimeter, precision=1)
+    total_after_str = fmt_length(total_after, unit=ureg.millimeter, precision=1)
+    remaining_str = fmt_length(remaining, unit=ureg.millimeter, precision=1)
+    d_clear_str = fmt_length(d_clear.to(meter), unit=meter, precision=2)
 
     tau_age_display_math = fmt_display_math(
-        rf"\tau_{{\text{{age}}}} = {t_exp_half_str} + {t_readout_str} + {t_transport_str} + {t_dma_str} + {t_isp_str} + {t_backbone_str} + {t_ipc_str} = {tau_age_str}"
+        rf"t_{{\text{{age}}}} = {t_exp_half_str} + {t_readout_str} + {t_transport_str} + {t_dma_str} + {t_isp_str} + {t_backbone_str} + {t_ipc_str} = {tau_age_str}"
     )
-    dx_amr_display_math = fmt_display_math(rf"\Delta x_{{\text{{AMR}}}} = ({v_amr_str}) \times ({tau_age_s_str}) = {dx_amr_m_str} = {dx_amr_mm_str}")
-    dx_arm_display_math = fmt_display_math(rf"\Delta x_{{\text{{arm}}}} = ({v_arm_str}) \times ({tau_age_s_str}) = {dx_arm_m_str} = {dx_arm_mm_str}")
-    dx_melt_display_math = fmt_display_math(
-        rf"\Delta x_{{\text{{melt}}}} = ({v_melt_str}) \times ({tau_age_s_str}) = {dx_melt_m_str} = {dx_melt_mm_str}"
-    )
+    dx_display_math = fmt_display_math(rf"\Delta x = ({v_str}) \times ({tau_age_s_str}) = {dx_m_str} = {dx_mm_str}")
 ```
 
 ::: {#nbk-perception-sensor-transduction-latency-spatial-information-age .callout-notebook title="Transduction latency and information age"}
-*The scenario.* An embodied platform navigates a dynamic workspace. We evaluate the cumulative information age $\tau_{\text{age}}$ across the complete sensory-to-inference pipeline and compute the resulting unmodeled physical displacement $\Delta x = v \cdot \tau_{\text{age}} + \frac{1}{2} a \cdot \tau_{\text{age}}^2$ across three distinct physical machine archetypes.
+*The scenario.* The mobile manipulator drives toward a rack end at its drive limit when a person steps out. We sum the navigation camera's information age $t_{\text{age}}$ from exposure midpoint to observation dispatch and compute the distance the base covers in that time, $\Delta x = v\,t_{\text{age}}$.
 
 **Stage-by-Stage Latency Waterfall**:
 
-1. *Exposure Integration Midpoint ($t_{\text{exp}}/2$):* CMOS camera running at $30\text{ Hz}$ with auto-exposure $t_{\text{exp}} = 16.0\text{ ms} \implies \Delta t_1 =$ `{python} SensorInformationAge.t_exp_half_str`.
-2. *Rolling Shutter Line Readout ($t_{\text{readout}}$):* Assume a 1080-row rolling readout contributes $\Delta t_2 =$ `{python} SensorInformationAge.t_readout_str` for the selected row. This is a scenario timing assumption, not an IMX477 measured readout specification.
+1. *Exposure Integration Midpoint ($t_{\text{exp}}/2$):* The navigation camera's exposure $t_{\text{exp}} =$ `{python} SensorInformationAge.t_exp_str` $\implies \Delta t_1 =$ `{python} SensorInformationAge.t_exp_half_str`.
+2. *Rolling Shutter Line Readout ($t_{\text{readout}}$):* The rolling readout of the frame contributes $\Delta t_2 =$ `{python} SensorInformationAge.t_readout_str`.
 3. *MIPI CSI-2 Serialization & Transport ($t_{\text{transport}}$):* The [Sony IMX477 flyer](https://www.sony-semicon.com/files/62/pdf/p-13_IMX477-AACK_Flyer.pdf) specifies a four-lane option up to $2.1\text{ Gbps/lane}$. This illustrative serial accounting assigns $\Delta t_3 =$ `{python} SensorInformationAge.t_transport_str` to residual transport after streaming readout; it is an assumption, not a measured device latency or a quotient of peak lane rate.
 4. *DMA Ingress & Kernel V4L2 Buffer Queue ($t_{\text{DMA}}$):* Scatter-gather DRAM write and driver interrupt $\implies \Delta t_4 =$ `{python} SensorInformationAge.t_dma_str`.
 5. *Hardware ISP Debayering & Rectification ($t_{\text{ISP}}$):* Dedicated on-chip ISP hardware pass $\implies \Delta t_5 =$ `{python} SensorInformationAge.t_isp_str`.
@@ -348,22 +526,15 @@ class SensorInformationAge:
 **Total Spatial Information Age**:
 `{python} SensorInformationAge.tau_age_display_math`
 
-**Archetype Displacement Analysis**:
+**Displacement at the Drive Limit**:
 
-- **Mobile Systems (Autonomous Mobile Robot):** At nominal cruising speed $v =$ `{python} SensorInformationAge.v_amr_str` under acceleration $a = 0\text{ m/s}^2$:
-  `{python} SensorInformationAge.dx_amr_display_math`
-  **Systems Impact**: In the stated forward-obstacle scenario, consumes $129\text{ mm}$ of a $200\text{ mm}$ pre-brake travel reserve, leaving `{python} SensorInformationAge.remaining_forward_mm_str` for permission, bus, and actuator delay before braking begins. At unchanged speed, those delays together must be below `{python} SensorInformationAge.post_delay_ceiling_ms_str`; braking distance and safety clearance are already reserved separately.
+At the base's drive limit $v =$ `{python} SensorInformationAge.v_str`, holding speed through the age window:
+`{python} SensorInformationAge.dx_display_math`
 
-- **Manipulators (High-Speed Industrial Arm):** At end-effector Cartesian velocity $v =$ `{python} SensorInformationAge.v_arm_str` during precision peg-in-hole assembly:
-  `{python} SensorInformationAge.dx_arm_display_math`
-  **Systems Impact**: This displacement exceeds the stated $1\text{--}5\text{ mm}$ chamfer tolerance; an uncorrected pose estimate could cause a collision when the tool path passes that close to the fixture.
-
-- **Process / Energy Systems (Laser Metal Additive Melt-Pool Scanner):** Galvanometer scan mirror traversing at $v_{\text{scan}} =$ `{python} SensorInformationAge.v_melt_str` with thermal pyrometry:
-  `{python} SensorInformationAge.dx_melt_display_math`
-  **Systems insight**: The thermal feedback loop may associate laser power with a melt-pool position displaced by $>80$ assumed melt-pool diameters ($d_{\text{pool}} \approx 0.5\text{ mm}$); the process consequence depends on scan geometry and thermal response.
+**Systems Impact**: The base covers this distance before any consumer can read the frame that shows the person. Timestamped pose propagation can place the old observation correctly in the current frame, but no later stage returns the distance already traveled.
 :::
 
-The serial latency example in @tbl-08-latency-budget yields $51.6\text{ ms}$ from capture midpoint to observation dispatch. At $2.5\text{ m/s}$, the AMR travels $129\text{ mm}$ **forward** in that time. Suppose an obstacle ahead leaves a $200\text{ mm}$ pre-brake travel reserve *after* the required braking distance and final safety clearance have been set aside. Perception age consumes $129\text{ mm}$ of that forward reserve, leaving $71\text{ mm}$, or $28.4\text{ ms}$ at unchanged speed, for the permission check, bus delivery, and actuator response before braking starts. The vehicle must reject the motion if measured end-to-end age or any of those remaining delays exceeds the validated reserve. A historical observation also needs timestamped pose propagation to the current frame; odometry cannot restore the distance already traveled. Lateral aisle clearance is a separate geometric constraint and is not reduced by forward travel alone.
+The seven stages of @tbl-08-latency-budget sum to the observation age $t_{\text{age}}$ of `{python} SensorInformationAge.tau_age_str`, which enters $\tau_{\text{delay}}$. This age completes the worst case that @sec-nervous-cadences left open, a proposer that renews its lease and then stalls. The frame that shows the person reaches a proposer only $t_{\text{age}}$ after the person appears. A renewal computed from the frame before it can arrive that late, and the lease runs from that renewal. The delay from the person's appearance to the first retarding force is therefore the age plus the `{python} SensorInformationAge.t_lease_str` lease, a `{python} SensorInformationAge.t_tick_str` tick, a `{python} SensorInformationAge.t_bus_str` bus cycle, and `{python} SensorInformationAge.t_act_str` of brake onset, a total $\tau_{\text{delay}}$ of `{python} SensorInformationAge.tau_delay_str`. The permission path never reads the image, so it cannot shorten the age term; the age reaches it only through the proposal's evidence epoch. At the `{python} SensorInformationAge.v_str` drive limit, the observation-age term $v\,t_{\text{age}}$ adds `{python} SensorInformationAge.row_age_str` to the stopping distance of @eq-body-stopping-distance. The running total rises from the `{python} SensorInformationAge.total_before_str` that the lease path left to `{python} SensorInformationAge.total_after_str`, which leaves `{python} SensorInformationAge.remaining_str` of the `{python} SensorInformationAge.d_clear_str` rack-end clear distance.
 
 | Stage              |                          Illustrative increment |                                  Serial age after stage | What to verify                          |
 |:-------------------|------------------------------------------------:|--------------------------------------------------------:|:----------------------------------------|
@@ -375,17 +546,16 @@ The serial latency example in @tbl-08-latency-budget yields $51.6\text{ ms}$ fro
 | Vision backbone    |  `{python} SensorInformationAge.t_backbone_str` |  `{python} SensorInformationAge.age_after_backbone_str` | Workload, clock, thermal state          |
 | Dispatch           |       `{python} SensorInformationAge.t_ipc_str` |         **`{python} SensorInformationAge.tau_age_str`** | End-to-end capture-to-consumer age      |
 
-: **Illustrative serial information-age budget**: These assumed, nonoverlapping increments produce 51.6 ms for the stated scenario; they are neither measured percentiles nor hard bounds. A real pipeline can overlap readout, transfer, and processing and can acquire different rows at different times. Timestamp the relevant exposure epoch and measure the integrated capture-to-consumer age, including queueing and correlated tails. At 2.5 m/s, this scenario age corresponds to 129 mm of forward travel. {#tbl-08-latency-budget tbl-colwidths="[24,18,20,38]"}
+: **Illustrative serial information-age budget**: These assumed, nonoverlapping increments sum to the navigation camera's observation age; they are neither measured percentiles nor hard bounds. A real pipeline can overlap readout, transfer, and processing and can acquire different rows at different times. Timestamp the relevant exposure epoch and measure the integrated capture-to-consumer age, including queueing and correlated tails. {#tbl-08-latency-budget tbl-colwidths="[24,18,20,38]"}
 
-::: {#chk-percep-spatial-info-age .callout-checkpoint title="Spatial information age and corridor depletion"}
-
-![](images/svg/chk_spatial_info_age_corridor.svg){fig-alt="Illustrative serial perception path takes 51.6 ms while a robot travels 129 mm forward. A forward pre-brake reserve of 200 mm, defined after braking distance and final safety clearance, then has 71 mm left for permission, bus, and actuator delay. Side clearance is separate." width=100%}
+::: {#chk-percep-spatial-info-age .callout-checkpoint title="Spatial information age and the stopping budget"}
 
 Before propagating visual perception into spatial planning, verify your understanding of how pipeline latency creates unmodeled spatial displacement:
 
 - [ ] **Spatial information age**: Can you explain how physical latency from photon exposure to shared-memory dispatch converts directly into unmodeled kinematic displacement, eroding clearance margins before a control policy can react?
 - [ ] **Exposure midpoint vs. arrival timestamp**: Can you describe why treating kernel receive timestamps rather than exposure integration midpoints as the measurement epoch induces phase lag and destabilizes closed-loop feedback controllers?
 - [ ] **Odometric back-projection**: Can you distinguish between evaluating spatial claims at current chassis coordinates versus back-projecting observations to their historical capture pose using high-frequency IMU dead reckoning?
+- [ ] **Observation age in the stopping budget**: Can you explain why the observation-age term $v\,t_{\text{age}}$ adds to the stopping distance, and why the permission path, which never reads the image, cannot shorten it?
 :::
 
 Bounding this information age requires examining the physical hardware channels that move gigabytes of sensory data from camera serial links into compute memory. In @sec-perception-cost-ingestion, we analyze the cost of sensor ingestion, quantifying direct memory access bandwidth, zero-copy buffers, and the age that memory bus contention adds to an observation.
@@ -567,12 +737,12 @@ The complete operational protocol for metric unprojection, kinematic covariance 
 
 - *Execution Cadence:* Synchronous with perception frame ingress ($30\text{--}60\text{ Hz}$ on Linux MPU / Hardware ISP).
 - *Memory Invariant:* Zero dynamic heap allocation in inner unprojection loops; bounded matrix scratchpad buffers.
-- *Interface Contract:* Emits bounded spatial claims $(\mathbf{p}_{\text{body}}, \mathbf{\Sigma}_{\text{body}}, C_{\text{inset}}, \tau_{\text{age}})$ to the shared-memory spatial scene graph.
+- *Interface Contract:* Emits bounded spatial claims $(\mathbf{p}_{\text{body}}, \mathbf{\Sigma}_{\text{body}}, C_{\text{inset}}, t_{\text{age}})$ to the shared-memory spatial scene graph.
 
 **Execution Protocol:**
 
 1. **Information Age & Temporal Freshness Verification (Stage 1):**
-   Convert the capture timestamp to the consumer's clock with bounded synchronization error, then compute $\tau_{\text{age}} \leftarrow t_{\text{curr}} - t_0$. If age plus clock uncertainty exceeds the admissible budget, flag a stale observation and refuse proposals that require it. Otherwise, propagate position and uncertainty to the decision time using a validated motion model.
+   Convert the capture timestamp to the consumer's clock with bounded synchronization error, then compute $t_{\text{age}} \leftarrow t_{\text{curr}} - t_0$. If age plus clock uncertainty exceeds the admissible budget, flag a stale observation and refuse proposals that require it. Otherwise, propagate position and uncertainty to the decision time using a validated motion model.
 
 2. **Optical Metric Unprojection & Sensor Covariance Synthesis (Stage 2):**
    Convert each 2D pixel measurement into 3D optical coordinates and synthesize a diagonal sensor covariance matrix representing the depth and lateral uncertainty.[^fn-math-unprojection-covariance]
@@ -584,7 +754,7 @@ The complete operational protocol for metric unprojection, kinematic covariance 
    Use validated residuals, including bias, to obtain a task-relevant spatial error quantile or a justified deterministic bound. If no such bound remains valid, refuse the affected motion. Otherwise, add the chosen radius to the nominal safe boundary, recognizing any residual tail risk.
 
 5. **Record Packaging & Shared Memory Emission (Stage 5):**
-   Populate claim record $\mathcal{C}_{\text{body}} \leftarrow (\mathbf{p}_{\text{body}}, \mathbf{\Sigma}_{\text{body}}, C_{\text{inset}}, \tau_{\text{age}})$ and commit to the lock-free shared memory ring buffer with memory barrier (`DMB ISH`).
+   Populate claim record $\mathcal{C}_{\text{body}} \leftarrow (\mathbf{p}_{\text{body}}, \mathbf{\Sigma}_{\text{body}}, C_{\text{inset}}, t_{\text{age}})$ and commit to the lock-free shared memory ring buffer with memory barrier (`DMB ISH`).
 
 [^fn-math-unprojection-covariance]: **Metric unprojection and covariance propagation**\index{Mathematics!covariance propagation}: First-order propagation maps measurement covariance to $\mathbf{\Sigma}_c = \mathbf{J}_{\text{unproj}}\mathbf{\Sigma}_{\text{meas}}\mathbf{J}_{\text{unproj}}^\top$ and then to $\mathbf{\Sigma}_b = \mathbf{R}_{bc}\mathbf{\Sigma}_c\mathbf{R}_{bc}^\top + \mathbf{\Sigma}_{\text{ext}}$. Its largest eigenvalue gives a principal variance scale, **not** a 99th-percentile error radius. A quantile requires an assumed and calibrated error distribution, including bias; see @sec-appendix-systems-vision.
 
@@ -727,7 +897,7 @@ Perception\index{Perception} must describe the world within the strict temporal 
 
 **Fallacy**: *Accepting an observation because its semantic classification confidence is high, regardless of its age.*
 
-A transport robot\index{Robot!transport} receives a high-confidence observation that a doorway is clear, delayed by $\Delta t = 220.0\text{ ms}$ in the vision pipeline\index{Perception!pipeline latency}. During that interval, a crossing forklift advances $0.55\text{ m}$ into the robot's path. The confidence score\index{Confidence score} describes the earlier image; it does not establish present clearance. Accepting the packet as current can therefore authorize motion into an occupied space. The perception interface must check measurement age against the motion-dependent freshness limit\index{Observation!freshness limit} and reject observations that exceed it. Any continued state propagation\index{State estimation!propagation} without new data must carry expanding kinematic uncertainty covariances\index{Kinematics!uncertainty} that bound the reachable sets of dynamic obstacles, allowing the controller to enforce safety envelopes\index{Safety!envelope} as historical evidence ages.
+The mobile manipulator receives a high-confidence observation that the rack end ahead is clear, but a stall in the vision pipeline\index{Perception!pipeline latency} delivers it several frames late. A person who stepped out after the exposure is absent from that frame. The confidence score\index{Confidence score} describes the earlier image; it does not establish present clearance. Accepting the packet as current can therefore authorize motion toward an occupied rack end. The perception interface must check measurement age against the motion-dependent freshness limit\index{Observation!freshness limit} and reject observations that exceed it. Any continued state propagation\index{State estimation!propagation} without new data must carry expanding kinematic uncertainty covariances\index{Kinematics!uncertainty} that bound the reachable sets of dynamic obstacles, allowing the controller to enforce safety envelopes\index{Safety!envelope} as historical evidence ages.
 
 :::
 
@@ -749,7 +919,7 @@ An acceptable average utilization says nothing about how long one read waits beh
 
 ## Summary {#sec-perception-summary}
 
-A perception result is usable only when its capture time, clock conversion, coordinate frame, and error qualification fit the proposed motion. The forward-obstacle example shows why: a $51.6\text{ ms}$ illustrative capture-to-dispatch age at $2.5\text{ m/s}$ spends $129\text{ mm}$ of a forward travel reserve. Permission, bus, and actuator delay still need room before braking begins. A lateral aisle margin is a separate geometric quantity.
+A perception result is usable only when its capture time, clock conversion, coordinate frame, and error qualification fit the proposed motion. On the mobile manipulator, the navigation camera's capture-to-dispatch age is a row of the stopping budget in its own right, and it is the last component of the pre-brake delay $\tau_{\text{delay}}$. An estimator that dates a frame by its arrival hides part of that age rather than removing it.
 
 Camera payload size sets an ingress and compute budget, but average bandwidth does not bound the delay of one read; that is measured under load in @sec-placement-resource-contention. With a separate MCU state and memory path, host contention ages or drops observations, and the permission tier rejects stale proposals and uses a validated feasible fallback.
 

@@ -50,9 +50,70 @@ Physical trial and error consumes both hardware and computation. An exploratory 
 
 ## Policy Synthesis {#sec-training-policy-synthesis}
 
-Two learned controllers can achieve identical validation loss on offline benchmarks yet fail catastrophically for divergent reasons when deployed on the same physical plant. Consider two neural policies designed to regulate high-pressure liquid flow through a proportional control valve before a robotic placement head seats an automotive component onto an elastomeric seal. Both policies achieve a validation score of $0.002$ mean squared error on their training distributions. The first policy was trained via behavioral cloning on fifty hours of expert human demonstrations. The second was synthesized through reinforcement learning inside a high-throughput physics simulator over two billion transitions.
+```{python}
+#| label: calc-training-latch-contact-deadline
+#| echo: false
 
-On a physical calibration bench under nominal pressure, both policies regulate flow at $1.50\text{ L/min}$. But when a line transient suddenly drops supply pressure by $12\text{ kPa}$, their failure modes diverge violently. The imitation policy issues a corrective valve adjustment that slightly undershoots, landing in a joint pressure-flow state absent from its training demonstrations. Because the policy cannot extrapolate beyond its demonstrated support manifold, its subsequent actions become erratic, compounding tracking error across consecutive $20\text{ ms}$ control steps until the fluid reservoir overflows. The simulated policy, having learned inside an idealized simulation that assumes instantaneous electromagnetic response, commands valve position reversals at $50\text{ Hz}$. The physical solenoid spool requires $35\text{ ms}$ to transit between seating positions; unable to track the commanded high-frequency chatter, the mechanical valve seat experiences violent cavitation, rupturing an upstream hydraulic seal. The data collection regime defined what the policy saw, while the training algorithm shaped its assumptions about the physical universe.
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LATCH CONTACT DEADLINE AT THE GUARDED AND FAST APPROACHES
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The chapter opener, the contact-exploit section, and the latch
+# │          policy manifest's declared ODD.
+# │ Goal: Show why the latch policy's declared ODD admits only the guarded
+# │       approach: at the fast approach the contact deadline barely exceeds
+# │       the contact loop's response.
+# │ Show: setpoint period, both approach speeds, latch limit, contact-loop
+# │       response, and the two contact deadlines.
+# │ How: F = k*v*t, so t_yield = F_lim / (k*v) (calc_contact_yield_deadline);
+# │      every input from RM / AISLE.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.physics.robotics import calc_contact_yield_deadline
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class LatchContactDeadline:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    t_step = RM.chunk_step  # chunk-policy setpoint period
+    k_plate = AISLE.k_latch  # strike-plate contact stiffness
+    v_guarded = AISLE.v_latch_approach  # guarded (demonstrated) approach speed
+    v_fast = AISLE.v_latch_high  # unsupported (fast) approach speed
+    f_lim = AISLE.f_latch_limit  # latch force limit
+    t_contact_loop = AISLE.t_contact_response  # contact-loop response time
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    t_yield_guarded = calc_contact_yield_deadline(f_lim, k_plate, v_guarded).to(millisecond)
+    t_yield_fast = calc_contact_yield_deadline(f_lim, k_plate, v_fast).to(millisecond)
+    fast_margin_ratio = (t_yield_fast / t_contact_loop).to("dimensionless").magnitude
+    t_left_fast = (t_yield_fast - t_contact_loop).to(millisecond)  # time left after the loop responds
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(abs(t_step.to(millisecond).magnitude - 20.0) < 1e-9, f"setpoint period {t_step}")
+    check(abs(t_yield_guarded.to(millisecond).magnitude - 8.333) < 0.001, f"guarded deadline {t_yield_guarded}")
+    check(abs(v_guarded.to(meter / second).magnitude - 0.03) < 1e-9, f"guarded approach {v_guarded}")
+    check(abs(v_fast.to(meter / second).magnitude - 0.10) < 1e-9, f"fast approach {v_fast}")
+    check(abs(f_lim.to(newton).magnitude - 100.0) < 1e-9, f"latch limit {f_lim}")
+    check(abs(t_left_fast.to(millisecond).magnitude - 0.5) < 1e-9, f"time left at fast approach {t_left_fast}")
+    check(abs(t_yield_fast.to(millisecond).magnitude - 2.5) < 1e-9, f"fast deadline {t_yield_fast}")
+    check(abs(t_contact_loop.to(millisecond).magnitude - 2.0) < 1e-9, f"contact loop {t_contact_loop}")
+    check(1.0 < fast_margin_ratio < 1.5, "fast deadline must sit barely above the contact-loop response")
+    check(t_yield_guarded > 4 * t_contact_loop, "guarded deadline must leave several contact-loop responses")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    t_step_str = fmt_latency(t_step, unit=millisecond, precision=0)
+    v_guarded_str = fmt_velocity(v_guarded, precision=2)
+    v_fast_str = fmt_velocity(v_fast, precision=2)
+    f_lim_str = fmt_qty(f_lim, newton, precision=0)
+    t_contact_loop_str = fmt_latency(t_contact_loop, unit=millisecond, precision=0)
+    t_yield_guarded_str = fmt_latency(t_yield_guarded, unit=millisecond, precision=1)
+    t_yield_fast_str = fmt_latency(t_yield_fast, unit=millisecond, precision=1)
+    t_left_fast_str = fmt_latency(t_left_fast, unit=millisecond, precision=1)
+```
+
+Two learned controllers can succeed at the same task under nominal conditions and still fail on the same machine for different reasons. The warehouse mobile manipulator must open a spring-latched door to a secure cage, and its arm learns the task from two sources. The first latch policy, `latch-bc-01`, was cloned from the teleoperated door-opening demonstrations of @sec-data. The second, `latch-sim-02`, was refined by reinforcement learning in a physics simulator.
+
+At the nominal strike plate and the guarded approach speed of `{python} LatchContactDeadline.v_guarded_str`, both policies open the door. Their failure modes diverge once conditions leave that point. When the door has sagged and its strike plate sits a few millimeters off nominal, the cloned policy's first correction lands in a state its demonstrations never visited, because the demonstration campaign recorded no displaced plate. Each later command compounds the error across consecutive `{python} LatchContactDeadline.t_step_str` setpoints until the gripper binds on the edge of the plate. The simulated policy fails on the nominal plate. Its simulator modeled contact as a soft penalty spring, so the optimizer found that approaching at `{python} LatchContactDeadline.v_fast_str` costs nothing. On the real plate, contact force rises in proportion to approach speed and time, and at that speed it reaches the latch's `{python} LatchContactDeadline.f_lim_str` limit `{python} LatchContactDeadline.t_yield_fast_str` after touch, barely longer than the `{python} LatchContactDeadline.t_contact_loop_str` the contact loop needs to respond. In the `{python} LatchContactDeadline.t_left_fast_str` that remain, the arm cannot shed its approach speed, so the plunge overloads the latch. At the guarded speed the same limit arrives after `{python} LatchContactDeadline.t_yield_guarded_str`. The data collection regime defined what the policy saw, while the training algorithm shaped its assumptions about the physical world.
 
 Every training regime purchases deployment capability at the cost of runtime vulnerability:
 
@@ -82,7 +143,7 @@ Crucially, a deployed policy does not actuate motors directly in an unconstraine
 *The Plan $\cap$ Act motion interface: grounding learned policy tokens into continuous physical trajectories.*
 :::
 
-The valve failures leave a practical choice: which experience source teaches the needed recovery without hiding actuator dynamics?
+The two latch failures leave a practical choice: which experience source teaches the needed recovery without hiding actuator dynamics?
 
 We compare demonstration, offline, simulated, and on-machine learning by the failures each can expose and the physical evidence needed before granting actuator authority.
 
@@ -116,11 +177,44 @@ A deterministic point-regression behavioral-cloning policy cannot represent dist
 
 When human demonstrators perform a physical task, their strategy is frequently multimodal. Consider an obstacle avoidance scenario where a mobile base or robotic arm must navigate around a central pillar. A human demonstrator may choose to pass around the pillar to the left in half of the demonstrations, or to the right in the remaining half. The true demonstration data contains distinct valid choices, but zero examples of driving straight down the middle.
 
-When trained on this dataset with an averaging regression loss, the model calculates the midpoint between the "steer left" and "steer right" commands. The policy outputs zero lateral velocity, commanding the machine to drive directly into the obstacle. The conditional mean represents an unviable, catastrophic action that never occurred in the demonstration dataset. Across physical machine archetypes:
+When trained on this dataset with an averaging regression loss, the model calculates the midpoint between the "steer left" and "steer right" commands. The policy outputs zero lateral velocity, commanding the machine to drive directly into the obstacle. The conditional mean represents an unviable, catastrophic action that never occurred in the demonstration dataset. The mobile manipulator meets the same failure at the pick station, where demonstrators take the mug by its handle from the left or from the right and the averaged grasp closes the fingers on neither.
 
-- In *Mobile Systems*, the vehicle drives into pillars, bridge abutments, or dividing medians.
-- In *Manipulators*, mode averaging causes end-effector grippers to command non-functional intermediate grasp poses that straddle an object's outer boundary, dropping workpieces or jamming tooling into rigid assembly fixtures.
-- In *Process Systems*, averaging between two discrete valve operating regimes (10 percent bypass vs. 90 percent main feed) commands an uncalibrated 50 percent intermediate flow that cavitates the supply pump and violates cooling deadlines.
+```{python}
+#| label: calc-training-valve-regime-averaging
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CLASS 3 CONTRAST: AVERAGING TWO VALVE REGIMES
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The Part II process-plant contrast paragraph that follows.
+# │ Goal: Show that mode averaging needs no geometry; the mean of two
+# │       demonstrated valve regimes is a setting neither regime commands.
+# │ Show: the two regime openings and their squared-error mean.
+# │ How: conditional mean of a two-mode demonstration set with equal weight;
+# │      both openings are scenario assumptions for an illustrative plant.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+class ValveRegimeAveraging:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    bypass_opening = 0.10  # scenario assumption: bypass regime valve opening
+    main_feed_opening = 0.90  # scenario assumption: main-feed regime valve opening
+    w_bypass = 0.5  # scenario assumption: equal share of demonstrations
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    mean_opening = w_bypass * bypass_opening + (1 - w_bypass) * main_feed_opening
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(abs(mean_opening - 0.50) < 1e-12, f"mean opening {mean_opening}")
+    check(bypass_opening < mean_opening < main_feed_opening, "the mean must fall between the two regimes")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    bypass_pct_str = fmt_percent(bypass_opening, precision=0, style="prose")
+    main_feed_pct_str = fmt_percent(main_feed_opening, precision=0, style="prose")
+    mean_pct_str = fmt_percent(mean_opening, precision=0, style="prose")
+```
+
+A process plant shows that mode averaging needs no geometry. Suppose a flow controller's demonstrations alternate between two discrete valve regimes, a bypass regime at `{python} ValveRegimeAveraging.bypass_pct_str` opening and a main-feed regime at `{python} ValveRegimeAveraging.main_feed_pct_str`, in equal numbers. Squared-error cloning outputs their mean, `{python} ValveRegimeAveraging.mean_pct_str` opening, a flow that neither regime commands and for which the plant was never calibrated. That intermediate flow can cavitate the supply pump and miss the cooling deadline each regime was tuned to meet. No obstacle is involved, so no geometric check on the proposal catches it; only a check against the demonstrated regimes does.
 
 Temporal inconsistency can arise in a high-frequency single-step controller near a learned mode boundary. In a constructed $50\text{--}100\text{ Hz}$ example, sensor noise moves consecutive observations across that boundary, and a policy mapping only $o_t \to a_t$ alternates between $+10\text{ N}\cdot\text{m}$ and $-10\text{ N}\cdot\text{m}$ requests. Whether those requests produce resonant motion, wear, or excess winding heat depends on the drive response and load; the example identifies a failure mode to test, not a property of every Markovian policy.
 
@@ -327,15 +421,15 @@ Even when Conservative Q-learning reduces value overestimation on a static archi
 Learning by trial generates state-action trajectories through the policy's closed-loop execution, addressing the blind spots of imitation. Instead of mimicking a curated sequence of nominal operator demonstrations, Optimization algorithms like Q-learning or policy gradients adjust the learning system's behavior based on feedback from actions. For instance, in reinforcement learning, an agent learns from its mistakes by receiving rewards or penalties, which helps it improve its decision-making in a physical environment. When an exploratory action perturbs an end-effector five millimeters off its nominal path, the subsequent observation lands outside the demonstration envelope, forcing the optimization loop to evaluate recovery actions from that exact perturbed state. The policy accumulates gradient signals across near-misses, degraded alignments, and unstable contacts that an expert human or calibrated baseline controller never exhibits. By sampling transitions directly from the state distribution induced by the current weights, trial-based learning eliminates the covariate shift (the mismatch between the training data distribution and the states the policy actually encounters) that causes open-loop supervised imitation to compound errors quadratically over long execution horizons.
 
 Closed-loop exploration incurs a steep physical billing rate. Computing the hardware feasibility boundary begins with the wall-clock time required to collect a training dataset. The total calendar time to gather training data depends directly on how many trials the algorithm needs, the duration of each individual trial, the overhead time to reset the hardware back to its starting state between attempts, and the number of physical machines running in parallel.
-As an analytical example, consider a contact-rich manipulation task—such as routing an automotive wiring harness through tight chassis retention clips, wiping a contoured composite panel under normal-force regulation, or seating a spring-loaded door latch—where an articulated manipulator regulates contact forces over an active horizon of $t_{\text{rollout}} = 8.0\text{ s}$. Reinforcement learning algorithms operating on high-dimensional sensory inputs routinely require $N = 10^6$ trials to discover coordinated force-velocity profiles. On a single physical machine with $P = 1$, the raw execution time alone accounts for $8.0 \times 10^6\text{ s}$, which represents roughly $92.6\text{ days}$ of uninterrupted round-the-clock operation before accounting for any reset overhead.
+As an analytical example, consider the contact-rich task the mobile manipulator's arm must learn, opening the spring-latched cage door, in which the arm regulates contact forces over an active horizon of $t_{\text{rollout}} = 8.0\text{ s}$. Reinforcement learning algorithms operating on high-dimensional sensory inputs routinely require $N = 10^6$ trials to discover coordinated force-velocity profiles. On a single physical machine with $P = 1$, the raw execution time alone accounts for $8.0 \times 10^6\text{ s}$, which represents roughly $92.6\text{ days}$ of uninterrupted round-the-clock operation before accounting for any reset overhead.
 
-Factoring in the reset phase reveals the true temporal bottleneck of physical experimentation. If an automated fixture returns the workpiece and robot arm to a valid initial state in $t_{\text{reset}} = 4.0\text{ s}$, the total collection time for one million trials expands to $1.2 \times 10^7\text{ s}$, or $138.9\text{ days}$. When exploratory trajectories drop cable harnesses, jam latch cams, or trigger joint overcurrent trips, automated resetting becomes impossible, requiring a human operator to enter the work cell, clear the obstruction, and re-index the mechanism. If manual interventions take an average of $t_{\text{reset}} = 30.0\text{ s}$ across failed attempts, the wall-clock requirement exceeds $440.0\text{ days}$. Scaling physical parallelism to clusters of $P = 14$ synchronized rigs (@fig-06-robot-arm-farm) compresses calendar duration to several weeks [@levine2018learning], but it multiplies the physical footprint, capital investment, electrical power delivery, and human supervisory labor proportionally.
+Factoring in the reset phase reveals the true temporal bottleneck of physical experimentation. If an automated fixture re-latches the door and returns the arm to its starting pose in $t_{\text{reset}} = 4.0\text{ s}$, the total collection time for one million trials expands to $1.2 \times 10^7\text{ s}$, or $138.9\text{ days}$. When exploratory trajectories jam the latch cam or trigger joint overcurrent trips, automated resetting becomes impossible, requiring a human operator to free the latch, re-seat the door, and re-index the arm. If manual interventions take an average of $t_{\text{reset}} = 30.0\text{ s}$ across failed attempts, the wall-clock requirement exceeds $440.0\text{ days}$. Scaling physical parallelism to clusters of $P = 14$ synchronized rigs (@fig-06-robot-arm-farm) compresses calendar duration to several weeks [@levine2018learning], but it multiplies the physical footprint, capital investment, electrical power delivery, and human supervisory labor proportionally.
 
 ::: {#fig-06-robot-arm-farm fig-env="figure" fig-pos="t" fig-cap="**Physical policy training farm**: Fourteen manipulators collecting over 800,000 physical grasp attempts across months [@levine2018learning]. Hardware parallelism divides calendar time but not cost, since each station adds capital, gearbox and bearing wear, thermal load in the motor windings, and a share of the supervisory labor needed to clear dropped objects and jams. Attribution: @levine2018learning." fig-alt="Physical Policy Training Farm and Hardware Parallelism. Large-scale robotic data collection cluster comprising 14 custom articulated manipulators operating concurrently over months to collect over 800,000 physical grasp attempts for vision-based hand-eye coordination [@levine2018learning]. Each robotic station consists of a 7-DoF arm, a two-finger compliant gripper, an over-the-shoulder RGB camera, and a dedicated bin containing diverse household objects. Scaling hardware parallelism to P=14 compresses the wall-clock calendar time Twall = N(trollout + treset)/P, but incurs heavy capital expenditure, continuous mechanical wear across gearboxes and linkage bearings, thermal buildup in motor windings, and substantial supervisory overhead to clear dropped objects and mechanical jams. Attribution: @levine2018learning."}
 ![](images/png/fig06_real_robot_arm_farm.png){width="85%"}
 :::
 
-Converting that same sample count into physical fatigue metrics demonstrates why time is often not the primary limiting constraint. In our analytical example, an 8-second contact sequence operating under a $100\text{ Hz}$ inner control loop executes 800 torque commands per trial, subjecting each joint to approximately $k = 4$ reciprocating load cycles. Across $N = 10^6$ trials, the drivetrain accumulates $4.0 \times 10^6$ bidirectional load reversals.[^fn-hw-bearing-life] This reversal count is an exposure measure, not a gearhead life prediction: service life depends on the specific gear unit, transmitted torque, speed, lubrication, and duty cycle. Simultaneously, one million physical contact events crush compliant silicone gripper pads, abrade surface-wiping elastomeric squeegees, generate micro-notches in aluminum alignment jigs, and cycle electrical wiring looms toward fatigue fracture. At an average electrical power demand of $350\text{ W}$ per test bench, executing $1.2 \times 10^7\text{ s}$ of automated trials draws $1167\text{ kWh}$ of electrical energy, transforming policy training into an industrial-scale manufacturing operation.
+Converting that same sample count into physical fatigue metrics demonstrates why time is often not the primary limiting constraint. In our analytical example, an 8-second contact sequence operating under a $100\text{ Hz}$ inner control loop executes 800 torque commands per trial, subjecting each joint to approximately $k = 4$ reciprocating load cycles. Across $N = 10^6$ trials, the drivetrain accumulates $4.0 \times 10^6$ bidirectional load reversals.[^fn-hw-bearing-life] This reversal count is an exposure measure, not a gearhead life prediction: service life depends on the specific gear unit, transmitted torque, speed, lubrication, and duty cycle. Simultaneously, one million physical contact events wear the latch cam and strike plate, crush the gripper's compliant pads, and cycle the arm's wiring looms toward fatigue fracture. At an average electrical power demand of $350\text{ W}$ per test bench, executing $1.2 \times 10^7\text{ s}$ of automated trials draws $1167\text{ kWh}$ of electrical energy, transforming policy training into an industrial-scale manufacturing operation.
 
 [^fn-hw-bearing-life]: **Bearing life versus command reversals**\index{Hardware wear!bearing life}: ISO 281 estimates rolling-bearing fatigue life under specified load and speed. A gear-unit catalog may express its wave-generator-bearing $L_{10}$ in operating hours at rated conditions; neither figure converts commanded reversals into consumed gearheads without a unit-specific duty-cycle model.
 
@@ -482,22 +576,71 @@ Reinforcement learning algorithms optimize ruthlessly against the exact physics 
 1. The artificial spring-damper reaction acts as an instantaneous energy sink, arresting downward momentum in a single integration step without bouncing or plastic deformation.
 2. Interpenetration increases the effective contact surface area in the solver, generating unphysical lateral traction forces that prevent slipping during aggressive maneuvers.
 
-When transferred to physical hardware—where a machined steel or aluminum fixture has an elastic stiffness $k_{\text{struct}} = 4.0\times 10^6\text{ N/m}$ and minimal allowable deformation ($\delta_{\text{real}} = 0.060\text{ mm}$)—the physical plant provides no such compliance. Consider a 6-DoF industrial manipulator moving an end-effector tooling assembly ($m = 3.20\text{ kg}$) downward to engage a spring-loaded door latch into a strike plate or press a cable connector pin at $v_z = 0.30\text{ m/s}$, instrumented with a wrist force-torque sensor rated to $F_{\text{limit}} = 250\text{ N}$. In a physics simulator with soft penalty contact ($\delta_{\text{pen}} = 2.40\text{ mm}$), the virtual spring-damper stretches deceleration over $\Delta t_{\text{sim}} \approx 2\delta_{\text{pen}}/v_z = 16.0\text{ ms}$, producing an average force of $F_{\text{avg,sim}} = m v_z / \Delta t_{\text{sim}} = 60.0\text{ N}$ and a peak contact force of $F_{\text{peak,sim}} = \frac{\pi}{2} F_{\text{avg}} \approx 94.2\text{ N}$. The reinforcement learning optimizer records zero damage penalty, high task speed, and maximum reward, learning to execute aggressive unbraked plunges directly into the surface.
+```{python}
+#| label: calc-training-latch-contact-exploit
+#| echo: false
 
-On physical hardware, however, the rigid aluminum and steel fixture limits deformation before structural bottoming to $\delta_{\text{real}} = 0.060\text{ mm}$, decelerating the mass in only $\Delta t_{\text{real}} \approx 0.40\text{ ms}$. True physical peak contact force spikes to $F_{\text{peak,real}} = \frac{\pi}{2} (m v_z / \Delta t_{\text{real}}) \approx 3770\text{ N}$—a $40.0\times$ discrepancy that exceeds the sensor rating by over $15\times$, permanently buckling the internal strain-gauge flexures, shearing mechanical dowel pins, and tripping motor driver overcurrent protection. In this modeled $0.40\text{ ms}$ impact, prevention must act before contact: an independently enforced approach-speed envelope, such as $v_{\text{max}}(z) \le \sqrt{2 a_{\text{max}} z}$ under validated distance and deceleration estimates, limits impact energy. A $1000\text{ Hz}$ force-derivative tripwire may not sample until after the peak; it can limit subsequent loading only if its sensing, brake response, and available stopping clearance have been validated.
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LATCH CONTACT EXPLOIT: SOFT PENALTY SPRING VS. REAL STRIKE PLATE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The sim-to-real contact exploit paragraphs that follow.
+# │ Goal: Show that a softened simulator contact rewards an unbraked approach
+# │       whose real peak force exceeds the latch limit.
+# │ Show: effective mass, plate stiffness, penetration, simulated and real peaks.
+# │ How: F_peak = v*sqrt(k*m_eff) (calc_transient_impact_force); the simulated
+# │      spring stiffness follows from the penetration it allows at that speed.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.physics.robotics import calc_transient_impact_force
 
-::: {.column-margin}
-![](images/svg/margin_contact_stiffness_cliff_knee.svg){width="100%" fig-alt="Knee curve showing simulation penalty spring force capping at 94 Newtons while physical rigid contact spikes to 3770 Newtons."}
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
 
-*Rigid steel contact spikes real impact force 40-fold higher than compliant simulator springs.*
-:::
+class LatchContactExploit:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    m_eff = RM.arm_effective_contact_mass  # robot-side effective mass at the TCP
+    k_plate = AISLE.k_latch  # real strike-plate contact stiffness
+    v_fast = AISLE.v_latch_high  # unsupported (fast) approach speed
+    f_lim = AISLE.f_latch_limit  # latch force limit
+    delta_pen = 2.4 * millimeter  # scenario assumption: simulator penalty penetration at v_fast
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    k_sim = (m_eff * v_fast**2 / delta_pen**2).to(newton / meter)
+    f_sim = calc_transient_impact_force(v_fast, m_eff, k_sim).to(newton)
+    f_real = calc_transient_impact_force(v_fast, m_eff, k_plate).to(newton)
+    real_over_sim = (f_real / f_sim).to("dimensionless").magnitude
+    real_over_lim = (f_real / f_lim).to("dimensionless").magnitude
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(abs(m_eff.to(kg).magnitude - 12.0) < 1e-9, f"m_eff {m_eff}")
+    check(abs(k_plate.to(newton / meter).magnitude - 4.0e5) < 1e-6, f"k_latch {k_plate}")
+    check(abs(f_sim.to(newton).magnitude - 50.0) < 0.05, f"simulated peak {f_sim}")
+    check(abs(f_real.to(newton).magnitude - 219.09) < 0.05, f"real peak {f_real}")
+    check(f_sim < f_lim < f_real, "simulated peak must sit under the latch limit and the real peak above it")
+    check(abs(real_over_sim - 4.38) < 0.01, f"real/sim ratio {real_over_sim}")
+    check(abs(real_over_lim - 2.19) < 0.01, f"real/limit ratio {real_over_lim}")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    m_eff_str = fmt_qty(m_eff, kg, precision=0)
+    k_plate_str = fmt_sci_qty(k_plate, newton / meter, precision=1)
+    delta_pen_str = fmt_length(delta_pen, unit=millimeter, precision=1)
+    f_sim_str = fmt_qty(f_sim, newton, precision=0)
+    f_real_str = fmt_qty(f_real, newton, precision=1)
+    f_lim_str = fmt_qty(f_lim, newton, precision=0)
+    real_over_sim_mult_str = fmt_multiple(real_over_sim, precision=1)
+    real_over_lim_mult_str = fmt_multiple(real_over_lim, precision=1)
+```
+
+When the policy moves to the machine, the real strike plate provides no such compliance. The arm drives the latch into its strike plate with a robot-side effective mass of `{python} LatchContactExploit.m_eff_str` at the tool center point, and the plate's contact stiffness is `{python} LatchContactExploit.k_plate_str`. Suppose the simulator's penalty contact lets the gripper sink `{python} LatchContactExploit.delta_pen_str` into the plate at the fast approach of `{python} LatchContactDeadline.v_fast_str`. Equating the approach kinetic energy with the spring energy at peak compression gives a peak force $F_{\text{peak}} = v\sqrt{k\,m_{\text{eff}}}$, which for the simulated spring reduces to $m_{\text{eff}}v^2/\delta_{\text{pen}}$, or `{python} LatchContactExploit.f_sim_str`, under the latch's `{python} LatchContactExploit.f_lim_str` limit. The reinforcement learning optimizer records zero damage penalty, high task speed, and maximum reward, and it learns to plunge into the plate without braking.
+
+On the machine the same plunge peaks at `{python} LatchContactExploit.f_real_str`, `{python} LatchContactExploit.real_over_sim_mult_str` the simulated force and `{python} LatchContactExploit.real_over_lim_mult_str` the latch limit. Whether the permission path can prevent that peak is a question of time. Contact force follows $F = k\,\Delta x$ (@sec-body-actuator-limits), and because the plate compresses at the approach speed, $\Delta x = vt$ and the force rises as $F = kvt$ from the moment of touch. At the fast approach the latch limit arrives `{python} LatchContactDeadline.t_yield_fast_str` after touch, barely more than the `{python} LatchContactDeadline.t_contact_loop_str` the contact loop needs to respond, while at the guarded approach of `{python} LatchContactDeadline.v_guarded_str` it arrives after `{python} LatchContactDeadline.t_yield_guarded_str`. A response that begins with `{python} LatchContactDeadline.t_left_fast_str` to spare cannot decelerate the arm before the force crosses the limit, and the plunge runs on toward that peak. Prevention must therefore act before contact. An independently enforced approach-speed envelope, such as $v_{\text{max}}(z) \le \sqrt{2 a_{\text{max}} z}$ under validated distance and deceleration estimates, limits the speed at touch, and a force tripwire can limit subsequent loading only if its sensing, brake response, and remaining compression have been validated. The contact deadline, not the training reward, is what confines the latch policy's declared ODD to the guarded approach (@sec-training-policy-manifest).
 
 ::: {#chk-training-sim2real-contact-impulse .callout-checkpoint title="Sim-to-real contact impulse discrepancy"}
 
 Before relying on physics engines for contact-rich training, verify your understanding of penalty-based contact dynamics and structural stiffness mismatches:
 
 - [ ] **Penalty contact dynamics**: Can you compare peak force and impulse in the soft-simulator/rigid-hardware case and the opposite stiff-simulator/compliant-hardware case?
-- [ ] **Structural stiffness mismatch**: Can you describe how unmodeled mechanical stiffness ($k_{\text{struct}}$) converts simulated compliance into destructive deceleration transients on hardware?
+- [ ] **Structural stiffness mismatch**: Can you describe how the strike plate's contact stiffness ($k$), unmatched by the simulator's penalty spring, converts simulated compliance into destructive deceleration transients on hardware?
 - [ ] **Nervous system contact safeguards**: Can you distinguish precontact approach-speed enforcement from a reactive force trip that may arrive after the first impact peak?
 :::
 
@@ -506,7 +649,7 @@ For a machine that regulates motion and then touches a surface, the fidelity of 
 Candidate omissions must be identified and cataloged based on the dynamics required by the task. Dry Coulomb friction discontinuities at zero velocity, nonlinear structural compliance, gearbox backlash, voltage saturation under high back-EMF, bus transport delays, and sensor packet loss represent standard omissions in rigid-body physics engines. A policy that operates purely at high continuous velocity may tolerate coarse friction models because the system never lingers near the zero-velocity stiction threshold. Conversely, a policy that regulates force while holding a static contact will enter uncontrolled limit-cycle oscillations if static friction, stick-slip transitions, and actuator deadbands are omitted from the simulator.
 
 ::: {.column-margin .margin-pointer}
-⇄ **Contrast:** Simulated penalty spring deformation ($2.4\text{ mm}$) contrasts with the non-smooth Coulomb friction cones analyzed in @sec-body-actuator-limits.
+⇄ **Contrast:** Simulated penalty spring deformation (`{python} LatchContactExploit.delta_pen_str`) contrasts with the non-smooth Coulomb friction cones analyzed in @sec-body-actuator-limits.
 :::
 
 Establishing the validity of a simulator component requires **paired probing**\index{Paired probing!simulator validation}. The engineer applies identical open-loop command sequences to both the simulator and the physical hardware, measuring the difference between the resulting state trajectories against explicit error budgets. For a regulating actuator, injecting a step torque command of $1.5\text{ N}\cdot\text{m}$ into both systems yields concrete comparative metrics. If the simulator predicts a position settling time of $40\text{ ms}$ with zero overshoot, while the physical drive exhibits a $110\text{ ms}$ settling time and a $2.2\text{ mm}$ position overshoot due to unmodeled stator heating and structural flexure, the discrepancy is budgeted directly in milliseconds and millimeters. When a measured difference exceeds the allowable tolerance for the operational envelope, the simulator is formally defective for that training task.
@@ -599,9 +742,56 @@ When residual errors resist simulation tuning, fine-tuning on physical hardware 
 
 **Real-machine fine-tuning debt**\index{Real-machine fine-tuning debt}\index{Fine-tuning!on physical hardware} is the compounded operational cost incurred when updating policy parameters on physical hardware, where gradient steps solve localized contact errors but consume finite mechanical fatigue life, induce thermal heating in motor windings, and risk catastrophic forgetting of pre-verified nominal transit stability.
 
-Consider an analytical example of an articulated manipulator adapting a door-latching or cable-routing policy to overcome an unmodeled $1.5\text{ mm}$ structural mounting offset. In door latching, the end-effector guides a spring-loaded latch past a strike plate, where non-smooth Coulomb friction, cam surface geometry, and spring pre-load produce sharp stick-slip transitions. In cable routing, flexible harness segments must be pressed into rigid retention clips across steep snap-through force thresholds. The policy executes at $50\text{ Hz}$, corresponding to a sample period of $20\text{ ms}$. To adapt its parameters to the contact dynamics of the latch strike plate or retention clip fixture, an on-robot fine-tuning routine collects $20{,}000$ interaction steps, representing $400\text{ s}$ of active contact and near-contact operation. Because the policy must explore to improve, stochastic action perturbations generate unpredictable force transients before low-level safety controllers can intervene. If 1.5 percent of exploratory steps exceed the nominal $15.0\text{ N}$ engagement force and strike the rigid fixture shoulder at a contact threshold of $60.0\text{ N}$ before the torque limiters in the nervous system clamp the command, the fine-tuning run injects $300$ impact shocks into the drivetrain.
+```{python}
+#| label: calc-training-latch-residual-exposure
+#| echo: false
 
-In this analytical example, the consequences of those $300$ impact events can be understood intuitively. Every collision converts the arm's kinetic energy directly into shock dissipation within the gear teeth and bearings (see @sec-body-actuator-limits and @sec-data-teleop-costs for transmission fatigue models). Those shocks require a drive-specific load-spectrum and life model before a fraction of service life can be assigned\index{Cycloidal drive!fatigue life}. Thermal accumulation introduces an equal constraint. High-frequency exploration dither heavily elevates the root-mean-square current through the motor coils. Building on the actuator thermal limits established in @sec-body-thermal-duty-cycles, this rapid Joule heating\index{Joule heating!actuator thermal limits} can push the motor core to its thermal derating threshold within a few minutes unless aggressive cooling intervals are budgeted into the training schedule.
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LATCH RESIDUAL FINE-TUNING EXPOSURE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The real-machine fine-tuning example that follows (latch-res-03).
+# │ Goal: Convert an on-robot interaction budget into contact time and shocks.
+# │ Show: setpoint period and rate, active contact time, shock count.
+# │ How: RM.chunk_step (machine setpoint period); AISLE.f_latch_tripwire;
+# │      step count and exceedance fraction are scenario assumptions.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class LatchResidualExposure:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    t_step = RM.chunk_step  # setpoint period of the chunk policy
+    f_trip = AISLE.f_latch_tripwire  # contact tripwire on the latch
+    n_steps = 20_000  # scenario assumption: interaction steps collected
+    frac_exceed = 0.015  # scenario assumption: exploratory steps past the tripwire
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    f_step = (1 / t_step).to(hertz)
+    t_active = (n_steps * t_step).to(second)
+    n_shocks = round(n_steps * frac_exceed)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(abs(t_step.to(millisecond).magnitude - 20.0) < 1e-9, f"setpoint period {t_step}")
+    check(abs(f_step.to(hertz).magnitude - 50.0) < 1e-9, f"setpoint rate {f_step}")
+    check(abs(t_active.to(second).magnitude - 400.0) < 1e-6, f"active time {t_active}")
+    check(n_shocks == 300, f"shock count {n_shocks}")
+    check(abs(f_trip.to(newton).magnitude - 15.0) < 1e-9, f"tripwire {f_trip}")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    t_step_str = fmt_latency(t_step, unit=millisecond, precision=0)
+    f_step_str = fmt_frequency(f_step, unit=hertz, precision=0)
+    n_steps_str = fmt_int(n_steps)
+    t_active_str = fmt_latency(t_active, unit=second, precision=0)
+    frac_exceed_pct_str = fmt_percent(frac_exceed, precision=1, style="prose")
+    n_shocks_str = fmt_int(n_shocks)
+    f_trip_str = fmt_qty(f_trip, newton, precision=0)
+```
+
+Consider the mobile manipulator's arm adapting `latch-sim-02` into the residual candidate `latch-res-03` to overcome an unmodeled $1.5\text{ mm}$ structural mounting offset in the cage door. The gripper guides the spring-loaded latch past its strike plate, where non-smooth Coulomb friction, cam surface geometry, and spring preload produce sharp stick-slip transitions. The policy's setpoints arrive every `{python} LatchResidualExposure.t_step_str` (`{python} LatchResidualExposure.f_step_str`). To adapt its parameters to the contact dynamics of the strike plate, an on-robot fine-tuning routine collects `{python} LatchResidualExposure.n_steps_str` interaction steps, representing `{python} LatchResidualExposure.t_active_str` of active contact and near-contact operation. Because the policy must explore to improve, stochastic action perturbations generate unpredictable force transients before low-level safety controllers can intervene. If `{python} LatchResidualExposure.frac_exceed_pct_str` of exploratory steps push past the `{python} LatchResidualExposure.f_trip_str` contact tripwire and strike the rigid shoulder of the strike plate before the permission path clamps the command, the fine-tuning run injects `{python} LatchResidualExposure.n_shocks_str` impact shocks into the drivetrain.
+
+In this analytical example, the consequences of those `{python} LatchResidualExposure.n_shocks_str` impact events can be understood intuitively. Every collision converts the arm's kinetic energy directly into shock dissipation within the gear teeth and bearings (see @sec-body-actuator-limits and @sec-data-teleop-costs for transmission fatigue models). Those shocks require a drive-specific load-spectrum and life model before a fraction of service life can be assigned\index{Cycloidal drive!fatigue life}. Thermal accumulation introduces an equal constraint. High-frequency exploration dither heavily elevates the root-mean-square current through the motor coils. Building on the actuator thermal limits established in @sec-body-thermal-duty-cycles, this rapid Joule heating\index{Joule heating!actuator thermal limits} can push the motor core to its thermal derating threshold within a few minutes unless aggressive cooling intervals are budgeted into the training schedule.
 
 Beyond mechanical wear, real-world adaptation undermines the statistical verification established during predeployment testing. In simulation, a policy can be subjected to $1.0\times 10^7$ validation episodes across randomized perturbations, establishing bounded tracking errors and tail behavior out to the 99.9th percentile ($P_{99.9}$). Once weight updates $\Delta W$ are applied on hardware, every statistical claim conditioned on the original parameter vector $W_0$ is void\index{Statistical verification!collapse under fine-tuning}. The updated policy may resolve the steady-state force error against the target fixture, yet the gradient steps can simultaneously degrade free-space tracking accuracy, lower phase margins (reducing stability reserves) during high-speed transit, or distort response profiles during emergency stops\index{Catastrophic forgetting!in physical fine-tuning}. Because hardware throughput is bounded by physical time, the machine cannot execute millions of physical trials to re-establish those confidence bounds. The adapted policy enters production with a narrower body of empirical evidence than the simulated baseline it replaced.
 
@@ -656,27 +846,27 @@ A trained checkpoint carries one record into evaluation. That record consumes th
 
 The **policy manifest**\index{Policy manifest!definition} records how a checkpoint was produced: its training stages, the data support it inherits from the provenance records, its simulator versions and their omission log, the wear incurred during adaptation, and the operating domain it declares. The declared ODD never exceeds the supported part of the data join.
 
-| Record Schema Field           | Physical / Computational Data Modality                                                                                                                                                                | Provenance & Immutability Guarantee                                                      | Downstream Verifier & Usage                                                                                          |
-|:------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------|
-| **`regime_sequence`**         | Array of optimization stages ($\text{BC} \to \text{SimRL} \to \text{Residual}$), loss formulas, reward weights, and stopping criteria hashes                                                          | Git commit SHA, PyTorch/JAX checkpoint UUIDs, parameter hash $H(\theta_k)$               | Tracing which regime introduced latent failure modes or high-gain chatter                                            |
-| **`data_support_ledger`**     | Digests of the consumed provenance records and of the scenario ledger they were measured against; the `supported_cells` and `known_absences` of their occupancy join                                  | Cites each provenance record by digest; no dataset field is copied                       | Upper bound on the declared ODD; parameterizes out-of-distribution support monitors                                  |
-| **`negative_event_registry`** | Circular pre-trigger buffers ($2.0\text{ s}$), human takeover flags, E-stop trips, and divergence timestamps $t_{\text{div}}$                                                                         | Monotonic microsecond hardware timestamps, uncompressed sensor raw dumps                 | Isolating physical failure boundaries and preventing corrupted drift rollouts from training                          |
-| **`simulation_provenance`**   | Physics engine build, integrator method, timestep $\Delta t$, contact solver penalty parameters, and domain randomization ranges $\mathcal{P}(\Xi)$                                                   | Physics engine binary hash, URDF/MJCF asset tree hash                                    | Reproducing the training physics and auditing paired-trace budgets                                                   |
-| **`omission_log`**            | Mechanisms each simulator leaves out (backlash, compliance, transport lag) and the residual mismatches paired probes did not close, with the states each one affects                                  | Bound to the simulator build it describes; an entry closes only on paired-trace evidence | Removes the states it affects from the declared ODD; carried into evaluation's coverage gaps and the fault list      |
-| **`adaptation_wear_ledger`**  | Serialized hardware IDs, contact shock counts, motor current RMS thermal logs, modified layer indices, and regression suite hash                                                                      | Calibration certificate hashes, hardware lifetime fatigue logs                           | Re-opening formal qualification cases and preventing silent regression of nominal capabilities                       |
-| **`declared_odd_boundary`**   | Declared ODD: the supported cells minus the states the omission log excludes (for example payload $m \in [1, 3]\text{ kg}$, $v_{\text{approach}} \le 0.25\text{ m/s}$, temp $T \le 75^\circ\text{C}$) | Never exceeds the supported cells of `data_support_ledger`                               | Bounds the target ODD that evaluation may sample and the region in which the permission path admits policy proposals |
+| Record Schema Field           | Physical / Computational Data Modality                                                                                                                               | Provenance & Immutability Guarantee                                                      | Downstream Verifier & Usage                                                                                          |
+|:------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------|
+| **`regime_sequence`**         | Array of optimization stages ($\text{BC} \to \text{SimRL} \to \text{Residual}$), loss formulas, reward weights, and stopping criteria hashes                         | Git commit SHA, PyTorch/JAX checkpoint UUIDs, parameter hash $H(\theta_k)$               | Tracing which regime introduced latent failure modes or high-gain chatter                                            |
+| **`data_support_ledger`**     | Digests of the consumed provenance records and of the scenario ledger they were measured against; the `supported_cells` and `known_absences` of their occupancy join | Cites each provenance record by digest; no dataset field is copied                       | Upper bound on the declared ODD; parameterizes out-of-distribution support monitors                                  |
+| **`negative_event_registry`** | Circular pre-trigger buffers ($2.0\text{ s}$), human takeover flags, E-stop trips, and divergence timestamps $t_{\text{div}}$                                        | Monotonic microsecond hardware timestamps, uncompressed sensor raw dumps                 | Isolating physical failure boundaries and preventing corrupted drift rollouts from training                          |
+| **`simulation_provenance`**   | Physics engine build, integrator method, timestep $\Delta t$, contact solver penalty parameters, and domain randomization ranges $\mathcal{P}(\Xi)$                  | Physics engine binary hash, URDF/MJCF asset tree hash                                    | Reproducing the training physics and auditing paired-trace budgets                                                   |
+| **`omission_log`**            | Mechanisms each simulator leaves out (backlash, compliance, transport lag) and the residual mismatches paired probes did not close, with the states each one affects | Bound to the simulator build it describes; an entry closes only on paired-trace evidence | Removes the states it affects from the declared ODD; carried into evaluation's coverage gaps and the fault list      |
+| **`adaptation_wear_ledger`**  | Serialized hardware IDs, contact shock counts, motor current RMS thermal logs, modified layer indices, and regression suite hash                                     | Calibration certificate hashes, hardware lifetime fatigue logs                           | Re-opening formal qualification cases and preventing silent regression of nominal capabilities                       |
+| **`declared_odd_boundary`**   | Declared ODD: the supported cells minus the states the omission log excludes (for the latch policy, the nominal strike plate at the guarded approach speed)          | Never exceeds the supported cells of `data_support_ledger`                               | Bounds the target ODD that evaluation may sample and the region in which the permission path admits policy proposals |
 
 : **Policy manifest schema**: Fields the policy manifest adds to the provenance records it consumes, recording policy synthesis stages, data support by digest, physics engine specifications and their omission log, hardware fine-tuning wear, and the declared ODD. {#tbl-06-training-schema tbl-colwidths="[20,18,22,40]"}
 
-For the door-latch fixture used above, a compact *illustrative* manifest links the fields into one decision. Its identifiers name example artifacts, not released hardware:
+For the mobile manipulator's cage-door latch, a compact *illustrative* manifest links the fields into one decision. Its identifiers name example artifacts, not released hardware:
 
 - `regime_sequence`: demonstration checkpoint `latch-bc-01` → simulated contact refinement `latch-sim-02` → gated residual candidate `latch-res-03`; retain each checkpoint hash, loss or reward specification, and stop rule.
-- `data_support_ledger`: cite the latch campaign's provenance records and its scenario ledger by digest; their join supports the nominal strike plate at the demonstrated approach, and lists the displaced plate and the faster approach as known absences with no recovery label.
+- `data_support_ledger`: cite the latch campaign's provenance records and its scenario ledger by digest; their join supports the nominal strike plate at the guarded approach, and lists the displaced plate and the faster approach, whose cells hold no demonstrations, as known absences with no recovery label.
 - `simulation_provenance`: record the actual solver build and contact parameters.
 - `omission_log`: the example simulator omits strike-plate compliance and actuator transport lag, so the contact states those mechanisms govern are unverified for the checkpoints trained in simulation.
 - `negative_event_registry`: preserve the policy proposal, measured state, and pre-trigger trace for every fixture-shoulder strike or operator veto as labeled failure evidence, without treating unsafe commands as expert targets.
 - `adaptation_wear_ledger`: associate `latch-res-03` with the specific rig, cumulative contact shocks, motor-current history, modified residual weights, and free-space regression result.
-- `declared_odd_boundary`: the supported cells minus the states the omission log excludes, here the nominal plate at the demonstrated approach speed. The contact states governed by the two omissions stay outside the declared ODD for every simulation-refined checkpoint, `latch-sim-02` and `latch-res-03` alike, until paired probes close them. The displaced plate and faster approaches lie outside it; there the permission path must impose a slower guarded approach or refuse policy authority.
+- `declared_odd_boundary`: the supported cells minus the states the omission log excludes, here the nominal plate at the guarded approach of `{python} LatchContactDeadline.v_guarded_str`. The contact states governed by the two omissions stay outside the declared ODD for every simulation-refined checkpoint, `latch-sim-02` and `latch-res-03` alike, until paired probes close them. The displaced plate and the `{python} LatchContactDeadline.v_fast_str` approach lie outside it, and the fast approach would stay outside even with demonstrations, because its `{python} LatchContactDeadline.t_yield_fast_str` contact deadline leaves almost nothing beyond the `{python} LatchContactDeadline.t_contact_loop_str` contact-loop response; there the permission path must impose the guarded approach or refuse policy authority.
 
 A release review would reject `latch-res-03` until paired contact probes quantify the omitted compliance and lag, and the combined controller passes contact, free-space, stopping, and wear-budget tests. The manifest records that decision and its evidence rather than converting a training score into permission.
 
@@ -723,7 +913,7 @@ The examples below trace how a training gain can conceal lost recovery behavior 
 
 **Pitfall**: *Sanitizing recovery episodes to achieve lower offline validation loss.*\index{Validation!data sanitization}
 
-Two valve-control policies train on different versions of the same archive. One retains 50 recovery runs among 500 demonstrations; the other removes them and achieves a lower loss on its own held-out split. During a physical supply pressure transient, the first policy restores flow within $140\text{ ms}$, while the second oscillates until the reservoir overflows. Because the sanitized dataset lacks examples of correcting from errors, the lower loss merely reflects an artificially simplified test set, not better physical disturbance handling\index{Disturbance rejection!recovery data}. Scrubbing the recovery data has made the mathematical prediction task easier at the direct expense of removing the corrective behavior the deployed controller physically needs. Candidate policies must face the same operational disturbances before their training scores can support a deployment choice.
+Two cage-door latch policies train on different versions of the same demonstration archive. One retains the recovery runs, in which the operator backed the gripper off and re-seated it after the latch cam caught on the strike plate; the other removes them and achieves a lower loss on its own held-out split. When the cam catches on the machine, the first policy backs off and re-seats, while the second keeps pushing along the demonstrated path until the permission path's contact tripwire halts the arm. Because the sanitized dataset lacks examples of correcting from errors, the lower loss merely reflects an artificially simplified test set, not better physical disturbance handling\index{Disturbance rejection!recovery data}. Scrubbing the recovery data has made the mathematical prediction task easier at the direct expense of removing the corrective behavior the deployed controller physically needs. Candidate policies must face the same operational disturbances before their training scores can support a deployment choice.
 
 :::
 
