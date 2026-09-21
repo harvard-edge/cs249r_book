@@ -313,11 +313,18 @@ To prevent stochastic execution from inducing catastrophic host mutation, an age
 
 Conventional POSIX systems enforce access control through Access Control Lists (ACLs) evaluated against ambient credentials. When a process issues an `open()`, `unlink()`, or `connect()` system call, the kernel inspects the effective user ID ($euid$) and group ID ($egid$) stored in the calling process's kernel credential structure. Authority is *ambient*: it is implicitly associated with the execution context rather than being explicitly designated at the point of invocation. In an interactive environment where human developers manually inspect commands before executing them, ambient authority offers convenience. In an autonomous agentic runtime, ambient authority creates an existential vulnerability known as the *confused deputy problem*.
 
-::: {.callout-checkpoint title="Ambient authority versus confused deputy vulnerability"}
-- **Ambient Access Control (Classical ACL):**
-  $$\text{Process } (\text{euid}=1000) \xrightarrow{\texttt{open("/etc/shadow")}} [\text{Kernel ACL Check}: \text{euid} \stackrel{?}{=} 0] \implies \textbf{DENIED}$$
-- **Confused Deputy in Agentic Runtimes:**
-  $$\text{Untrusted Injected Context} \xrightarrow{\text{"Read API Key"}} [\text{Supervisor } (\text{euid}=1000)] \xrightarrow{\texttt{open("~/.aws/credentials")}} \textbf{ALLOWED}$$
+Under classical access control, the operating system evaluates ambient credentials:
+$$\text{Process } (\text{euid}=1000) \xrightarrow{\texttt{open("/etc/shadow")}} [\text{Kernel ACL Check}: \text{euid} \stackrel{?}{=} 0] \implies \textbf{DENIED}$$
+In an unmediated agentic runtime, however, the supervisor becomes a confused deputy:
+$$\text{Untrusted Injected Context} \xrightarrow{\text{"Read API Key"}} [\text{Supervisor } (\text{euid}=1000)] \xrightarrow{\texttt{open("~/.aws/credentials")}} \textbf{ALLOWED}$$
+
+::: {#chk-08-confused-deputy-defense .callout-checkpoint title="Evaluating ambient authority and confused deputy defenses"}
+Before evaluating capability-based delegation models, verify your understanding of ambient authority vulnerabilities:
+
+- [ ] **Ambient authority**: Why does executing tool calls under the supervisor's host UID/GID turn the runtime into a confused deputy?
+- [ ] **Injection coercion**: How can an untrusted string retrieved from an external repository coerce a privileged supervisor into leaking host credentials?
+- [ ] **Complete mediation**: Why does inspecting tool arguments with static string filters fail to satisfy complete mediation at the filesystem boundary?
+- [ ] **Capability attenuation**: How does passing restricted file descriptors or scoped tokens prevent child processes from accessing parent namespaces?
 :::
 
 When a foundation model constructs a tool call, it operates as an unprivileged planner proposing candidate state transitions ($A=0$). If the host supervisor accepts a tool invocation such as `read_file(path="/Users/alice/.ssh/id_rsa")` and executes it directly against the local filesystem, the supervisor acts as a confused deputy. The supervisor holds the ambient authority of user `alice`, but the intent driving the invocation originated from an unverified inference trajectory that may have ingested untrusted data from an external website, an issue tracker, or a compromised source file. The operating system cannot distinguish between an intentional read issued by the human developer and a coerced read triggered by an adversarial prompt injection.
@@ -782,7 +789,14 @@ The 64 cores absorb the entire initialization overhead in $\frac{0.25}{64} \appr
 **Systems Engineering Takeaway:** When tools can be compiled to WebAssembly, Wasm provides orders-of-magnitude improvements in memory density and cold-start latency over microVMs. However, if the verification suite requires executing unmodified Python scripts importing native C-extensions (such as Pandas or Torch), the runtime must fall back to microVMs or container sandboxes despite their steep resource footprint.
 :::
 
-While WebAssembly provides an efficient capability-bounded execution harness for pure algorithms and compatible toolchains, real-world programming agents frequently require access to a mutable filesystem—creating configuration files, building codebases, running linters, and modifying source repositories. If an agent operates within a microVM or container to support native POSIX execution, how do we grant it an isolated, high-performance workspace without duplicating gigabytes of repository data for every single run or risking permanent damage to the host's base disk image? The answer lies in virtualizing storage through copy-on-write filesystem overlays.
+::: {#chk-08-sandboxing-substrates .callout-checkpoint title="Evaluating sandboxing substrates and virtualization boundaries"}
+Before examining copy-on-write filesystems and network isolation, verify your understanding of execution substrates:
+
+- [ ] **Kernel attack surface**: Why does running untrusted agent commands in Linux containers share kernel vulnerability surfaces that MicroVMs hardware-isolate?
+- [ ] **Hardware trap overhead**: How do Extended Page Tables (EPT/NPT) and VM exits protect the host hypervisor at the cost of cold-start latency?
+- [ ] **Linear memory bounds**: Under what workload constraints is WebAssembly (Wasm/WASI) superior to MicroVMs, and when does native C-extension compatibility force full virtualization?
+- [ ] **Jailer defense-in-depth**: Why does Firecracker run microVM processes inside chroot, cgroup, and seccomp jailers rather than relying solely on KVM?
+:::
 
 ## Copy-on-Write Filesystem Overlays {#sec-vol3-virtualization-cow}
 
@@ -852,14 +866,7 @@ When an agent execution thread issues an `open(path, flags)` system call with wr
 4. **Descriptor Binding:** The agent process file descriptor is bound exclusively to the newly provisioned upper inode. The binding to the lower baseline inode is permanently severed.
 :::
 
-When an agent opens an existing lower file with write intent (`O_WRONLY`, `O_RDWR`, or `truncate`), the kernel intercepts the operation via `ovl_copy_up`. Because the lower file is immutable, the kernel must replicate the target file into the writable layer before user space can alter a single byte:
-
-1. **Staging Allocation:** The kernel creates a temporary inode inside `workdir` on the upper backing filesystem, matching the permissions, ownership (`uid`/`gid`), and extended attributes of the target file in `lowerdir`.
-2. **Payload Replication:** The kernel reads all data blocks from the lower file and writes them sequentially to the staged file in `workdir`.
-3. **Atomic Activation:** The kernel issues an atomic directory `rename()` call to move the staged file from `workdir` into its canonical relative path within `upperdir`.
-4. **Descriptor Binding:** The file descriptor requested by user space is bound to the newly created upper inode. The relationship to the lower inode is severed for all subsequent write operations.
-
-The copy-up mechanism introduces a classic systems latency trap: *copy-up amplification*. If an agent modifies a single 4-byte integer in an uncompressed 2 GB database file, binary index, or model checkpoint located in `lowerdir`, the initiating write syscall stalls while the kernel reads and writes the entire 2 GB payload across the host storage bus.
+Because atomic copy-up requires replicating the entire target file into the writable layer before user space can alter a single byte, it introduces a classic systems latency trap: *copy-up amplification*. If an agent modifies a single 4-byte integer in an uncompressed 2 GB database file, binary index, or model checkpoint located in `lowerdir`, the initiating write syscall stalls while the kernel reads and writes the entire 2 GB payload across the host storage bus.
 
 ::: {.column-margin}
 Copy-up breaks POSIX inode identity invariants: once a file undergoes copy-up, its `st_ino` and `st_dev` metadata change, potentially confusing build systems or linters that rely on inode numbers to track hard links and file identities across builds.

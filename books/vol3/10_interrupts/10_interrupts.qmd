@@ -296,7 +296,14 @@ $$e_{A, \text{prop}} \prec e_{A, \text{auth}} \prec e_{A, \text{flush}} \prec a_
 
 The fact that $e_{A, \text{flush}}$ and $e_{B, \text{flush}}$ were physically written to flash within the exact same NVMe block write does not alter the causal independence of $\mathcal{T}_A$ and $\mathcal{T}_B$. Because neither thread dispatches its network RPC until the shared storage barrier completes, neither trajectory can produce a phantom mutation in the physical world.
 
-Strict adherence to the Write-Ahead Logging invariant guarantees that upon crash recovery, the reconstruction engine possesses an unbroken, mathematically sound audit trail: every external mutation surviving in the real world corresponds to a committed authorization record on disk. However, as an agent trajectory progresses through hundreds or thousands of steps, the size of this append-only log expands monotonically. Rebuilding the operational Agent Control Block ($\text{ACB}$) after an unexpected crash by sequentially reading and evaluating thousands of historical events from turn zero introduces unacceptable recovery latency. How an agent supervisor bounds this recovery overhead without incurring continuous disk write amplification is the governing question of periodic state checkpointing.
+::: {#chk-10-wal-invariants .callout-checkpoint title="Evaluating write-ahead logging invariants and event sourcing"}
+Before analyzing periodic state checkpointing and incremental delta encoding, verify your understanding of write-ahead logging:
+
+- [ ] **Logging order**: Why does the causal chain $e_{\text{prop}} \prec e_{\text{auth}} \prec e_{\text{flush}} \prec a_{\text{ext}} \prec e_{\text{obs}}$ strictly forbid dispatching actions before `fsync()` completes?
+- [ ] **Phantom mutations**: How does a node failure between asynchronous network dispatch and disk commit induce irreconcilable state divergence?
+- [ ] **Group commit**: How does batching storage barriers across concurrent trajectories amortize NVMe sync latency without violating individual causal ordering?
+- [ ] **Event sourcing**: Why does retaining only periodic snapshots of active prompt context discard essential forensic and security audit trails?
+:::
 
 ## Periodic State Checkpointing {#sec-vol3-persistence-checkpointing}
 
@@ -809,7 +816,14 @@ $$D_{\text{KL}}(P_{\text{live}} \parallel P_{\text{replay}}) = \sum_{w \in \math
 
 By establishing strict virtualization boundaries around wall-clocks, trapping PRNG entropy, escrowing external tool observations, and measuring logit-level divergence, the runtime guarantees that diagnostic analysis operates with mathematical precision. An engineer can bisect a failing trajectory, inspect intermediate supervisor state transitions, and verify algorithmic invariants without being misled by floating-point hardware races or drifting external APIs.
 
-Sealing ambient entropy channels transforms an executing trajectory into a closed, self-contained computational state defined entirely by its serialized Agent Control Block ($\text{ACB}_t$), its append-only event stream $\mathcal{E}$, and its isolated sandbox state overlays. Because the runtime no longer depends on static physical host bindings, local hardware clocks, or unrepeatable GPU reduction schedules, an active trajectory becomes fully portable across space and time. If a worker node experiences physical hardware failure, thermal throttling, or spot-instance preemption, the supervisor can detach this serialized state package and reconstruct the running task on a completely different physical machine without loss of execution integrity. How does a distributed runtime coordinate the live migration of an active trajectory across physical cluster nodes without dropping inflight RPCs or duplicating external side effects?
+::: {#chk-10-time-travel-debugging .callout-checkpoint title="Evaluating historical replay and non-determinism diagnostics"}
+Before examining live trajectory migration protocols, verify your understanding of trajectory reconstruction:
+
+- [ ] **Replay asymmetry**: Why does re-playing recorded event tokens through supervisor logic cost orders of magnitude less compute than re-invoking the neural core?
+- [ ] **Floating-point non-determinism**: How does the non-associativity of GPU floating-point reductions cause greedy decode ($\tau = 0$) to diverge across runs?
+- [ ] **Ambient entropy virtualization**: Which external inputs (timestamps, UUIDs, filesystem ordering) must be recorded in the event stream to guarantee deterministic replay?
+- [ ] **Trace-driven verification**: Under what conditions should debugging use recorded event playback instead of regenerating model completions?
+:::
 
 ## Live Trajectory Migration {#sec-vol3-persistence-migration}
 
@@ -1343,7 +1357,6 @@ Architecturally, the active context window is merely a lossy, ephemeral projecti
 
 In pursuit of low interaction latency, runtime developers frequently commit the classic write-ahead logging violation: dispatching a mutating tool action $a_{\text{ext}}$ across a network socket or POSIX pipe before the corresponding authorization and proposal records ($e_{\text{prop}}$, $e_{\text{auth}}$) have been durably flushed via `fsync()` to non-volatile storage. Because local solid-state drives and distributed storage engines exhibit write latencies ranging from 2 to 30 milliseconds, asynchronous dispatch creates a window of vulnerability between tool invocation and log durability.
 
-::: {#chk-10-phantom-mutation .callout-checkpoint title="Phantom mutation hazard"}
 Let an external tool action $a_{\text{ext}}$ possess irreversible side effects on external system state $\mathcal{W}_{\text{ext}}$. An agent supervisor commits a *phantom mutation violation* if it dispatches $a_{\text{ext}}$ before the intent records ($e_{\text{prop}}, e_{\text{auth}}$) are durably flushed via synchronous storage barrier to non-volatile persistence:
 $$t_{\text{dispatch}}(a_{\text{ext}}) < t_{\text{fsync}}(e_{\text{auth}})$$
 If the host fails at $t_{\text{fail}} \in [t_{\text{dispatch}}, t_{\text{fsync}}]$:
@@ -1351,7 +1364,6 @@ If the host fails at $t_{\text{fail}} \in [t_{\text{dispatch}}, t_{\text{fsync}}
 1. The operating system page cache is destroyed, erasing all trace of $e_{\text{prop}}$ and $e_{\text{auth}}$.
 2. The external state reflects the mutation: $\mathcal{W}_{\text{ext}}' = \text{Apply}(\mathcal{W}_{\text{ext}}, a_{\text{ext}})$.
 3. Upon recovery, the supervisor resumes from turn $t-1$, deduces the action was never attempted, and re-dispatches $a_{\text{ext}}$, causing duplicate execution of non-idempotent operations.
-:::
 
 If the host machine experiences a power failure, kernel panic, or container eviction during this asynchronous interval, the volatile operating system page cache containing the intent record is annihilated. The external environment, however, has already processed the mutation: an API call has deducted funds from an account, a cloud provider has provisioned an unmonitored compute cluster, or a filesystem system call has unlinked a directory. Upon reboot, the recovery supervisor inspects the non-volatile WAL, finds no record that the mutating action was ever attempted, and re-executes the trajectory from the last durable checkpoint.
 
@@ -1375,7 +1387,6 @@ Furthermore, dynamic inference optimizations such as continuous batching, variab
 
 Autonomous software engineering and diagnostic agents routinely execute compilers, test runners, and system diagnostic utilities (`make -j64`, `pytest --verbose`, `tcpdump`) that generate hundreds of megabytes of raw terminal telemetry per turn. Naively capturing these uncompressed, verbose output streams directly into the primary relational database or embedded log-structured merge-tree (LSM-tree) rapidly degrades storage infrastructure.
 
-::: {#chk-10-compaction-stall .callout-checkpoint title="Unbounded telemetry compaction stall"}
 When an agent supervisor captures unpruned tool telemetry streams (such as raw compiler logs or test execution traces of size $S_{\text{raw}} \ge 100\ \text{MB}$) directly into an embedded LSM-tree write-ahead log:
 
 1. Write throughput saturates the active memory memtable ($\text{MemTable}_{\text{active}}$), triggering immediate flushing to Level 0 SSTables.
@@ -1384,7 +1395,6 @@ When an agent supervisor captures unpruned tool telemetry streams (such as raw c
    where $T_i$ represents the tier amplification factor.
 3. The storage engine enforces a write stall to prevent unbounded SSTable accumulation, freezing the main agent control plane and inflating $P_{99}$ latency by orders of magnitude.
 4. Transient terminal output floods the host page cache, evicting active Agent Control Blocks and model context buffers.
-:::
 
 Because primary transaction stores are engineered for low-latency indexing rather than bulk binary object storage, appending hundreds of megabytes of unstructured text causes massive write amplification ($\text{WAF}_{\text{db}}$). In LSM-tree engines like RocksDB, excessive write volume triggers cascading compaction stalls across Level 0 and Level 1 SSTables, causing the 99th-percentile ($P_{99}$) operational latency of the entire supervisor control plane to spike from milliseconds to tens of seconds. Furthermore, raw diagnostic streams populate the operating system page cache with transient terminal characters and ANSI escape sequences, evicting active Agent Control Blocks and index pages from host memory.
 

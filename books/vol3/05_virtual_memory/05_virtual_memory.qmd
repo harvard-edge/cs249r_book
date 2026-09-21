@@ -276,7 +276,14 @@ The request is rejected or blocked in an admission queue. Despite having more th
 
 Empirical evaluations of production inference services corroborate these analytical limits. In their seminal characterization of LLM serving systems, @kwon2023vllm demonstrated that across production workloads serving conversational and code-generation models, conventional serving runtimes achieved effective memory occupancies $\eta_{\text{effective}}$ between only $20\%$ and $40\%$. The remaining $60\%$ to $80\%$ of accelerator memory was lost entirely to internal reservation slack and external fragmentation holes.
 
-This efficiency ceiling exposes the fundamental flaw of contiguous memory architectures for autoregressive inference. Contiguous allocators treat the KV cache as a classical monolithic tensor whose physical layout must mirror its logical structure. As long as token positions along the sequence dimension $t$ are bound to contiguous offsets in physical memory, serving systems remain trapped between the Scylla of static over-reservation and the Charybdis of external fragmentation. What architectural representation can decouple the logical growth of an active sequence from its physical placement in accelerator memory, permitting tokens to scatter across non-contiguous physical boundaries without sacrificing the efficiency of parallel attention computation?
+::: {#chk-05-memory-fragmentation .callout-checkpoint title="Evaluating memory fragmentation in attention caches"}
+Before analyzing paged virtual memory abstractions for KV caches, verify your understanding of physical memory allocation limits:
+
+- [ ] **Internal fragmentation**: Why does reserving worst-case sequence capacity $S_{\max}$ upfront leave up to 80 percent of accelerator High-Bandwidth Memory unutilized?
+- [ ] **External fragmentation**: How does dynamic contiguous allocation cause memory allocation failures even when total free HBM exceeds the requested tensor size?
+- [ ] **Allocation efficiency**: Under what conditions does the KV allocation efficiency metric $\eta_{\text{alloc}}$ collapse during multi-turn agent deliberation?
+- [ ] **Physical-to-logical coupling**: What architectural bottleneck makes contiguous KV tensors incapable of supporting branching execution without deep tensor copies?
+:::
 
 ## Paged KV Allocation {#sec-vol3-kvcache-pagedattention}
 
@@ -751,9 +758,14 @@ Instead of a catastrophic 1,195 ms freeze followed by fast decode, all 32 active
 
 Chunked prefill demonstrates that memory-bound and compute-bound workloads can be paired to optimize total accelerator resource utilization. By sizing the token chunk $C_{\text{chunk}}$ such that $t_{\text{comp}} \approx t_{\text{mem}}$, the scheduler reaches the balance point where the memory bus and the tensor cores complete their work at the same time, maximizing overall tokens generated per second across the cluster.
 
----
+::: {#chk-05-paged-attention .callout-checkpoint title="Evaluating paged allocation and chunked prefill"}
+Before analyzing memory offloading, retention, and swapping policies, verify your understanding of paged attention mechanics:
 
-While chunked prefill balances active prefills against active decodes during continuous token generation, agentic systems exhibit a distinct operational pattern: *long idle pauses*. When an agent model finishes generating a tool call—such as a sandboxed terminal execution, a web search query, or an interactive confirmation prompt to a human supervisor—the generation loop stops entirely. The model engine performs no forward passes for that sequence while awaiting the external environment's response. Yet, the physical KV cache blocks containing thousands of tokens of accumulated conversation and tool outputs remain pinned in accelerator HBM. If the serving runtime allows these physical blocks to sit resident across multi-second or multi-minute execution pauses, the accelerator rapidly runs out of memory, rejecting new requests or thrashing active batches. How should an inference system manage physical attention state when a trajectory suspends execution—should it retain the blocks, evict them entirely, offload them across the host bus to main memory, or discard them and rely on recomputation?
+- [ ] **Virtual block mapping**: How does the PagedAttention block table translate non-contiguous physical pages into a contiguous logical sequence during self-attention?
+- [ ] **Copy-on-write branching**: Why does reference-counted block sharing enable branching deliberation search with $O(1)$ memory allocation overhead?
+- [ ] **Prefix caching**: How does Radix tree indexing eliminate redundant prompt prefill computation across multi-turn agent interactions?
+- [ ] **Chunked prefill co-scheduling**: How does interleaving prompt prefill chunks with active decode batches prevent inter-token latency (ITL) spikes?
+:::
 
 ## Retain, Evict, Recompute, or Offload {#sec-vol3-kvcache-swapping}
 
@@ -806,7 +818,7 @@ $$m_{\text{token}} = 2 \cdot L \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot b
 
 For a trajectory paused at sequence length $S$, the total memory footprint of its physical attention state is $M_{\text{KV}} = S \cdot m_{\text{token}}$.
 
-Now evaluate the time required to reconstruct this state via recomputation versus streaming it over an interconnect. When evicting and recomputing, the accelerator must evaluate a prefill forward pass over $S$ tokens. In modern decoder-only architectures, the computational cost of the prefill phase is dominated by matrix multiplications across linear projections and feed-forward networks, requiring approximately $2 P$ floating-point operations per token, plus the quadratic attention cost $4 L S^2 d_{\text{model}}$. For typical context lengths up to thirty-two thousand tokens, the linear parameter term dominates. Given an accelerator cluster executing prefill with an effective sustained compute throughput $R_{\text{prefill}}$ (in FLOPs per second, accounting for Model FLOPs Utilization or MFU), the recomputation latency is:
+Now evaluate the time required to reconstruct this state via recomputation versus streaming it over an interconnect. When evicting and recomputing, the accelerator must evaluate a prefill forward pass over $S$ tokens. In modern decoder-only architectures, the computational cost of the prefill phase is dominated by matrix multiplications across linear projections and feed-forward networks, requiring approximately $2 P$ floating-point operations per token, plus the quadratic attention cost $4 L S^2 d_{\text{model}}$. For typical context lengths up to thirty-two thousand tokens, the linear parameter term dominates. Given an accelerator cluster executing prefill with an effective sustained compute throughput $R_{\text{prefill}}$ (in FLOPs per second, accounting for model FLOPs utilization or MFU), the recomputation latency is:
 
 $$T_{\text{recomp}}(S) \approx \frac{2 P \cdot S}{R_{\text{prefill}}}$$
 

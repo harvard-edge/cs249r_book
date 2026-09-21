@@ -217,7 +217,14 @@ Instead, process migration reduces to an atomic snapshot of the ACB and its refe
 
 Treating the Agent Control Block as an explicit, first-class kernel object transforms agent management from brittle scripting into rigorous systems engineering. However, an administrative descriptor is only as reliable as the rules that govern its mutation. If any component of the host runtime could alter an ACB's phase arbitrarily—transitioning an agent from `WAITING_ESCROW` directly to `RUNNING` without human authorization, or moving an agent from `TERMINATED` back to `RUNNABLE` after resources have been reclaimed—the supervisory plane would rapidly accumulate zombie processes, corrupted memory allocations, and leaked credentials.
 
-To maintain system integrity, the supervisory control plane must enforce a formal operational lifecycle over the ACB. What formal state machine dictates the valid transitions of an Agent Control Block across its operational lifetime, and what guard conditions must the supervisor evaluate before permitting a trajectory to advance from one execution state to the next?
+::: {#chk-09-agent-control-block .callout-checkpoint title="Evaluating the Agent Control Block architecture"}
+Before examining trajectory state machines and lifecycle transitions, verify your understanding of ACB abstractions:
+
+- [ ] **State encapsulation**: How does separating the fixed-size ACB descriptor from dynamic context and KV cache buffers enable zero-copy process migration?
+- [ ] **Lease management**: Why must the `kv_lease_id` be released when an agent yields compute allocations during long-running tool I/O?
+- [ ] **Monotonic turn counters**: How do strictly increasing generation counters prevent replay attacks and observation-crossing race conditions?
+- [ ] **Memory indirection**: Why does the ACB store memory pointers rather than embedding large prompt buffers directly inside the control structure?
+:::
 
 ## Trajectory Lifecycle States {#sec-vol3-controlplane-statemachine}
 
@@ -551,7 +558,14 @@ $$t_{\text{offload}} = \frac{M_{\text{KV}}}{B_{\text{PCIe}}} = \frac{2.684 \text
 Transferring the cache consumes less than $42\text{ ms}$. Thus, the supervisor can fully evacuate the GPU memory allocation during `SIGPAUSE`, hold the trajectory suspended in host memory indefinitely at near-zero operating cost, and restore it via `SIGRESUME` in an equivalent $41.9\text{ ms}$ window upon wake-up.
 :::
 
-The ability to suspend, resume, and cleanly interrupt trajectories transforms an agent system from an unconstrained script into a governable process runtime. Trapping signals at turn boundaries shields both model context and external filesystems from partial-mutation corruption. However, external signals represent only one side of the scheduling equation. When an agent is not being actively interrupted by an operator, but is instead blocked waiting on slow network tools, high-latency compilation jobs, or remote web services, keeping its execution context bound to high-cost hardware resources is equally untenable. How does the supervisory runtime enable an agent process to voluntarily yield its hardware compute allocations without forfeiting its position in the broader execution lifecycle?
+::: {#chk-09-supervisory-state-machine .callout-checkpoint title="Evaluating supervisory state transitions and signals"}
+Before examining cooperative process yielding and multi-dimensional scheduling, verify your understanding of supervisory lifecycle invariants:
+
+- [ ] **Tool return invariant**: Why must late completion packets arriving after timeout expiration be dropped rather than injected into active context?
+- [ ] **Escrow quarantine**: Under what guard condition may a trajectory in `WAITING_ESCROW` transition to `RUNNABLE`?
+- [ ] **Signal trapping**: Why must asynchronous operator signals like `SIGPAUSE` and `SIGCANCEL` be deferred to turn boundaries rather than interrupting mid-token decode?
+- [ ] **Terminal cleanup**: What supervisory actions ensure that container sandboxes and virtual filesystems are purged when an ACB reaches `TERMINATED_FAILURE`?
+:::
 
 ## Cooperative Process Yielding {#sec-vol3-controlplane-yielding}
 

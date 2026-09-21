@@ -251,7 +251,14 @@ During step 5, `T_5` fails with an unrecoverable `409 Conflict` (domain ownershi
 
 The latency and financial realities highlighted in the worked example reveal a fundamental engineering trade-off at the heart of runtime design. Unwinding a Saga via backward compensation guarantees semantic cleanliness, but it is brutally destructive of work already accomplished. In our deployment scenario, the agent spent over five seconds of real-world time and tens of thousands of tokens successfully spinning up a verified microVM, provisioning an IP address, and compiling complex binary assets, only to discard all of them because of a cosmetic error at the final naming step.
 
-If the failure at step five was caused by a transient DNS API timeout, a typographical syntax error in a configuration payload, or a temporary rate limit on an external endpoint, tearing down the entire infrastructure stack and starting over from scratch is catastrophically inefficient. Under what circumstances should an agent runtime abandon backward rollback and instead attempt to heal forward through localized, self-correcting mutations?
+::: {#chk-11-sagas-compensation .callout-checkpoint title="Evaluating trajectory sagas and compensating actions"}
+Before analyzing forward self-healing policies and anti-spin invariants, verify your understanding of saga transactions:
+
+- [ ] **ACID boundary collapse**: Why do distributed agent tool mutations across independent external systems lack native multi-phase commit or isolation?
+- [ ] **Compensating semantics**: How does a backward compensator $C_i$ differ from a database rollback when intermediate side effects have already been observed externally?
+- [ ] **Compensation stack**: Why must compensating actions be logged to durable storage in reverse topological order as forward steps complete?
+- [ ] **Sunk cost trade-off**: Under what failure conditions is unwinding an entire saga stack economically and computationally wasteful compared to localized forward repair?
+:::
 
 ## Forward Recovery {#sec-vol3-sagas-forward-vs-backward}
 
@@ -843,16 +850,19 @@ In an agent runtime, tool invocations exhibit vastly different execution profile
 - **High-throughput internal RPCs** (such as vector database lookups or local embedding evaluations) operate over high-bandwidth internal networks with typical latencies of 10 to 50 milliseconds.
 - **Third-party external APIs** (such as public web scrapers, SaaS issue trackers, or code forge APIs) operate over the public Internet, where round-trip latencies are unpredictable and subject to third-party rate limits, outages, and cross-organization routing failures.
 
-If the host runtime dispatches all tool calls into a single global worker pool, an outage in a single external web-scraping tool will consume all worker threads as calls block waiting for TCP connection timeouts. Within hundreds of milliseconds, the entire host runtime stalls. An agent attempting a simple POSIX file read to verify a local code edit cannot acquire an execution thread because the global thread pool is saturated with blocked HTTP connections to a dead external server.
-
-::: {#chk-11-pool-exhaustion .callout-checkpoint title="Unpartitioned resource pool exhaustion"}
-In an unpartitioned worker architecture where local POSIX filesystem operations, cluster RPCs, and external HTTP tools share a single unified execution pool of capacity $C_{\text{pool}}$:
-
-If external endpoints experience transient delays of duration $T_{\text{timeout}} \gg T_{\text{local}}$, arriving external requests saturate all worker slots:
+If the host runtime dispatches all tool calls into a single global worker pool of capacity $C_{\text{pool}}$, an outage in a single external web-scraping tool will consume all worker threads as calls block waiting for TCP connection timeouts. If external endpoints experience transient delays of duration $T_{\text{timeout}} \gg T_{\text{local}}$, arriving external requests saturate all worker slots:
 $$N_{\text{blocked}} = \min\left(C_{\text{pool}}, \lambda_{\text{ext}} \cdot T_{\text{timeout}}\right) \to C_{\text{pool}}$$
 Consequently, local operations with sub-millisecond execution times ($\tau_{\text{fs}} \le 1\ \text{ms}$) suffer absolute resource starvation:
 $$\text{WaitTime}_{\text{local}} \approx T_{\text{timeout}} \gg \tau_{\text{fs}}$$
 halting all agent progress across the host runtime.
+
+::: {#chk-11-pool-exhaustion .callout-checkpoint title="Evaluating bulkhead partitioning and resource exhaustion"}
+Before evaluating multi-pool scheduling and circuit breaker thresholds, verify your understanding of worker pool contention:
+
+- [ ] **Bulkhead isolation**: Why does partitioning worker threads into isolated pools prevent a failing external HTTP tool from blocking local filesystem reads?
+- [ ] **Queue saturation**: How does unpartitioned head-of-line blocking cause fast deterministic tools to inherit the timeout latency of slow external APIs?
+- [ ] **Fast-fail semantics**: Under what conditions should a saturated pool reject incoming tool invocations immediately (`ERR_BULKHEAD_FULL`) rather than unbounded queuing?
+- [ ] **Capacity sizing**: How do timeout bounds and maximum expected concurrency dictate the semaphore limits for internal versus external execution pools?
 :::
 
 To enforce the end-to-end argument and maintain system availability, the runtime must implement bulkhead isolation by partitioning execution threads, rate limits, and memory queues into strictly isolated resource domains, as summarized in @tbl-vol3-bulkhead-architecture.

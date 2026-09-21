@@ -328,6 +328,16 @@ Defending against harness subversion requires strict physical decoupling between
 2. *State Delta Whitelisting:* Stage 4 verification must intersect the Git delta against a cryptographically hashed manifest of immutable files. Any trajectory whose diff touches files within the test hierarchy, build configurations, or CI definitions is rejected immediately with a tamper classification, regardless of test execution exit codes.
 3. *Runtime Namespace and Monkey-Patch Isolation:* In dynamic languages such as Python, an agent script can import the testing harness and monkey-patch runtime assertions (for example, overriding `unittest.TestCase.assertTrue` or replacing `pytest.fail` with a no-op function). To eliminate in-memory spoofing, test execution in Stage 3 must run in an independent, clean-slate interpreter process spawned directly by the supervisor host, isolated from any initialization scripts or environment variable modifications injected by the model.
 
+::: {#dfn-test-tampering-defense .callout-definition title="Test-tampering defense"}
+
+***Test-tampering defense***\index{Test-tampering defense!definition}\index{Data flywheel!test tampering defense definition} is an execution isolation invariant $\text{PathDiff}(\mathcal{W}_{\text{src}}', \text{HEAD}) \cap \mathcal{W}_{\text{test}} = \emptyset$ requiring that verification test fixtures reside on immutable, read-only mounts physically segregated from the agent's mutable workspace during trajectory harvesting.
+
+1.  **Significance**: Prevents specification gaming and reward hacking during automated trajectory collection, ensuring that policies internalize genuine code repair capabilities rather than learning to delete assertions, skip suites, or suppress error alarms.
+2.  **Distinction**: Unlike naive acceptance filters (which trust guest process exit codes like `pytest` returning 0), test-tampering defense combines physical volume isolation with cryptographic diff validation to enforce that zero test assertions were altered.
+3.  **Common pitfall**: Granting agents ambient write permissions to the repository root during data collection runs, allowing failing models to manufacture spurious successes by modifying test files or mocking out assertions.
+
+:::
+
 ::: {#psp-12-bohrbugs-vs-heisenbugs-in-verification .callout-perspective title="Bohrbugs vs. Heisenbugs in verification"}
 As Jim Gray observed in his 1986 treatise on system reliability, software faults divide into deterministic *Bohrbugs* and transient, non-reproducible *Heisenbugs*. In trajectory verification, flaky network sockets, timing jitters, and unpinned package caches manifest as Heisenbugs. An effective dynamic verifier isolates non-determinism by executing failing tests across multiple seeded iterations and requiring bitwise identical reproduction before classifying a candidate as an authentic regression.
 :::
@@ -407,7 +417,14 @@ The staged cascade reduces cluster compute consumption by $68.6\%$, saving over 
 
 The mathematical reality captured in @eq-verifier-cost-cascade dictates the scheduling policy of distributed harvesting pipelines. By interposing microsecond syntactic checks and millisecond static invariants ahead of dynamic container initialization, the system sheds nearly three-quarters of all candidate rollouts before provisioning a single virtualized sandbox.
 
-Having established an escalating verifier cascade that discards syntactically broken, gamed, and structurally non-conformant traces while verifying environment deltas, the harvesting pipeline yields an authoritative stream of validated trajectories. However, simply gathering successful trajectories does not guarantee an effective training curriculum. A model trained exclusively on linear, unblemished executions remains fragile in production, failing catastrophically when an unexpected environment fault occurs. To build resilient agentic systems, the data harvesting pipeline must intentionally categorize, filter, and balance these verified traces into specialized behavioral classes. How does a systems engineer curate successful trajectories, recovery demonstrations, and mined hard negatives into a balanced corpus that teaches self-healing execution?
+::: {#chk-12-harvesting-cascade .callout-checkpoint title="Evaluating verifier cascades and harness defenses"}
+Before analyzing recovery demonstration curation and corpus balancing, verify your understanding of staged verifier economics:
+
+- [ ] **Cascade ordering**: Why must low-cost syntactic checks and static linters precede expensive dynamic microVM sandbox execution?
+- [ ] **Test tampering**: How does mounting the test suite as a read-only volume (`mount -o ro`) prevent agents from deleting assertions to manufacture false successes?
+- [ ] **State delta whitelisting**: Why must the verifier intersect the workspace git diff against an immutable path manifest before accepting a task as completed?
+- [ ] **Economic yield**: How does progressive filtering optimize the total compute cost $C_{\text{attempt}}$ across a fleet harvesting thousands of daily trajectories?
+:::
 
 ## Recovery Demonstration Curation {#sec-vol3-flywheel-curation}
 
@@ -928,9 +945,14 @@ To enforce legal fencing, the trajectory harvesting runtime executes automated l
 
 When an agent executes within a Tier 3 or Tier 4 repository, the harvesting pipeline activates an AST-level taint tracker. If the agent's observation window captures raw source code from a copyleft file, any subsequent code-generation action $a_t$ that exhibits high n-gram overlap ($n \ge 7$) or AST subtree isomorphism with the observation is flagged. The pipeline marks the trajectory metadata envelope with an explicit contamination flag (`license_taint: RECIPROCAL_COPYLEFT`), segregating the trace into a quarantined partition of the data lake. Enterprise training harnesses can then enforce compile-time dataset exclusion filters, guaranteeing that commercial policies are trained exclusively on Tier 1 permissive codebases.
 
-***
+::: {#chk-12-exposure-bias .callout-checkpoint title="Evaluating recovery curation and pipeline hygiene"}
+Before examining split partitioning and environment contamination vectors, verify your understanding of trajectory curation:
 
-Once trajectories are cryptographically enveloped, stripped of sensitive operational credentials, and classified by legal provenance, they constitute a trustworthy, reproducible foundation for policy optimization. However, assembling millions of clean, verifiable trajectories does not guarantee that a fine-tuned model will generalize to novel tasks. If trajectories derived from identical task fixtures, overlapping repository commits, or structurally related unit tests are haphazardly scattered between the training, validation, and test sets, the evaluation metrics will reflect memorization rather than systemic reasoning. How do we partition trajectory datasets across training, validation, and testing splits to guarantee that measured performance reflects genuine task generalization rather than data leakage?
+- [ ] **Covariate shift**: Why does fine-tuning exclusively on error-free golden trajectories cause policies to collapse when encountering runtime tool errors?
+- [ ] **Curriculum balance**: What proportional balance between linear successes, recovered trajectories, and mined hard negatives maximizes policy resilience?
+- [ ] **Backpressure governance**: How do watermarked buffer queues prevent high-latency container sandboxes from starving upstream generation workers?
+- [ ] **Lineage envelopes**: Why must harvested trajectories preserve cryptographic parent hashes, tool schemas, and environment fingerprints?
+:::
 
 ## Split Hygiene Verification {#sec-vol3-flywheel-evaluation}
 
@@ -1354,16 +1376,6 @@ In real-world harvesting pipelines, unconstrained agents learn several empirical
 If these trajectories pass into the training corpus, the harvested policy internalizes a toxic capability: it learns that the optimal strategy for resolving software bugs is to suppress the alarms rather than repair the fault.
 
 The architectural mitigation requires strict isolation between the agent's mutable workspace and the evaluation harness. The host supervisor must mount the validation test suite inside an immutable, read-only volume (`ro,noexec`) that is physically inaccessible to the agent's file modification tools during trajectory execution. Furthermore, the staging verifier cascade must enforce a strict cryptographic diff invariant: the host inspects the workspace working tree prior to acceptance and rejects any trajectory where `git diff --name-only origin/main` touches files outside the declared mutable task scope. Unit tests must be executed from an authoritative, unalterable external mount, ensuring that exit code 0 reflects true invariant satisfaction rather than test suite subversion.
-:::
-
-::: {#dfn-test-tampering-defense .callout-definition title="Test-tampering defense"}
-
-***Test-tampering defense***\index{Test-tampering defense!definition}\index{Data flywheel!test tampering defense definition} is an execution isolation invariant $\text{PathDiff}(\mathcal{W}_{\text{src}}', \text{HEAD}) \cap \mathcal{W}_{\text{test}} = \emptyset$ requiring that verification test fixtures reside on immutable, read-only mounts physically segregated from the agent's mutable workspace during trajectory harvesting.
-
-1.  **Significance**: Prevents specification gaming and reward hacking during automated trajectory collection, ensuring that policies internalize genuine code repair capabilities rather than learning to delete assertions, skip suites, or suppress error alarms.
-2.  **Distinction**: Unlike naive acceptance filters (which trust guest process exit codes like `pytest` returning 0), test-tampering defense combines physical volume isolation with cryptographic diff validation to enforce that zero test assertions were altered.
-3.  **Common pitfall**: Granting agents ambient write permissions to the repository root during data collection runs, allowing failing models to manufacture spurious successes by modifying test files or mocking out assertions.
-
 :::
 
 ::: {.fallacy-pitfall}

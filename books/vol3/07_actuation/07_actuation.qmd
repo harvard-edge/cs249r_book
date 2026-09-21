@@ -386,7 +386,14 @@ To preserve system integrity, the host agent runtime must enforce a sovereign au
 
 This architectural division directly reflects the End-to-End Argument in System Design formulated by Saltzer, Reed, and Clark in 1984. The communication protocol (MCP) provides a uniform mechanism for moving bits and structuring RPC requests between endpoints. However, the critical functions of the system—correctness, security, permission enforcement, and task invariant verification—can only be completely and correctly implemented by the endpoint that understands the full application semantics: the sovereign host runtime. An external server cannot verify whether an action aligns with the user's broader task goal; the transport channel cannot verify whether an action violates least privilege. The host runtime retains exclusive responsibility for mediating every transition from candidate token to external effect.
 
-When these tool invocations cross process or network boundaries and encounter partial failures, this mediation faces an even harder challenge. If a network connection abruptly severs or an intermediate proxy times out during a mutating `tools/call` dispatch, the runtime is plunged into operational uncertainty: Did the remote server complete the mutation before the connection dropped, or did the network fail before the server processed the request? Retransmitting the request blindly risks executing catastrophic duplicate side effects, while abandoning it risks desynchronizing the agent's internal state from physical reality. Resolving this dilemma requires transitioning from transport protocol framing to the mechanics of application-level execution idempotency.
+::: {#chk-07-complete-mediation .callout-checkpoint title="Evaluating tool schemas and complete mediation"}
+Before analyzing idempotent execution mechanics, verify your understanding of tool contracts and host authorization:
+
+- [ ] **Schema validation**: Why must parameter validation (types, ranges, path traversals) execute strictly on the host supervisor before reaching child processes?
+- [ ] **Capability tiers**: How does partitioning actions into read-only ($C_0$), reversible ($C_1$), and irreversible ($C_2$) tiers prevent unrecoverable side effects?
+- [ ] **Transport boundaries**: Why does an RPC protocol like MCP fail to satisfy complete mediation without host-level authorization?
+- [ ] **Observation injection**: What sanitization steps prevent untrusted tool output streams from injecting adversarial prompt instructions into future turns?
+:::
 
 ## Idempotent Action Execution {#sec-vol3-actuation-idempotency}
 
@@ -880,7 +887,14 @@ Finally, when the observation stream exceeds the physical or logical budget $B_{
 
 To prevent these epistemic failures, the normalization pipeline envelopes truncated observations with deterministic, standardized headers and footers. The header explicitly declares that truncation occurred, states the exact token and line bounds enforced, clarifies whether the preserved window represents the head or the tail of the stream, and directs the model to the unexpurgated log file saved on disk (as illustrated in @lst-vol3-observation-sanitization). Armed with this structured envelope, the model recognizes that missing context is an artifact of runtime resource governance rather than a target environment failure, allowing it to issue targeted pagination commands or inspect specific log slices deliberately.
 
-Deterministic stream sanitization guarantees that observations entering the context window are bounded, free of terminal presentation noise, and explicitly grounded in operating system status. Yet this normalization pipeline assumes a synchronous execution model: the foundation model halts generation, the runtime dispatches a child process, the supervisor blocks until execution completes, and the sanitized output is appended to the prompt for the next turn. In production agent architectures, this synchronous assumption breaks down. A comprehensive unit test suite may execute for three minutes; a container build or static analysis pass may require twenty minutes; an external web scrape or data warehouse query may run for hours. If the agent runtime blocks its inference loop on long-running tasks, it pins valuable accelerator memory, locks KV caches, and leaves the model incapable of coordinating concurrent operations. How can an agent runtime decouple execution latency from inference scheduling without abandoning execution guarantees? We turn next to the mechanics of asynchronous tool dispatch.
+::: {#chk-07-idempotency-recovery .callout-checkpoint title="Evaluating idempotency and observation sanitization"}
+Before examining asynchronous dispatch and background process governance, verify your understanding of tool fault recovery:
+
+- [ ] **Timeout ambiguity**: Why does a network timeout during a mutating RPC dispatch yield zero information regarding remote server execution?
+- [ ] **Idempotency keys**: How do cryptographically unique execution tokens prevent duplicate mutations during automatic client retries?
+- [ ] **Reconciliation probes**: When an external API lacks native idempotency support, what probe sequence verifies remote state before retrying?
+- [ ] **Truncation envelopes**: Why must observation stream truncation append structured metadata headers instead of silently cutting raw text?
+:::
 
 ## Asynchronous Tool Dispatch {#sec-vol3-actuation-async}
 
