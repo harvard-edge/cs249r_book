@@ -1,0 +1,404 @@
+# Inference and Systems Hardware Foundations {#sec-vol3-appendix-inference}
+
+Foundation model inference and agentic execution are governed by the physics of accelerator memory bandwidth, the geometry of attention key-value caches, and the dynamics of stochastic waiting lines. This appendix provides the quantitative reference models, memory scaling equations, queuing formulations, and hardware baselines that anchor the systems engineering across this book. By consolidating these physical derivations into a single reference resource, the volume's core chapters can focus directly on agentic software architecture, stateful trajectory control planes, and policy adaptation while giving readers the exact mathematical tools needed to calculate accelerator utilization, budget KV-cache memory, size multi-agent serving queues, and audit trajectory latency.
+
+## How to Use This Appendix {.unnumbered}
+
+This appendix is a quantitative reference for the hardware and serving constraints that bind agentic machine learning systems. Consult the relevant section when encountering these operational symptoms or systems sizing questions in @tbl-appdx-inference-lookup:
+
+| If you are diagnosing or sizing...                                                  | Jump to...                               | Reference payoff                                                                                       |
+|:------------------------------------------------------------------------------------|:-----------------------------------------|:-------------------------------------------------------------------------------------------------------|
+| Underutilized Tensor Cores or low single-token decode throughput                    | @sec-vol3-appendix-inference-roofline    | The Roofline model, ridge point derivation, and the single-batch parameter shuttle floor               |
+| Accelerator out-of-memory (OOM) faults or context memory budgeting                  | @sec-vol3-appendix-inference-kv-cache    | The $2LH_{\text{kv}}d_{\text{head}}b$ tensor geometry derivation, GQA scaling, and tool-wait stranding |
+| Queue buildup, memory exhaustion under concurrency, or tool latency inflation       | @sec-vol3-appendix-inference-queueing    | Little's Law with tool-wait residency, continuous batching, and memory-headroom sizing                 |
+| Inconsistent distributed state or partial failure across non-atomic external tools  | @sec-vol3-appendix-inference-distributed | Two-Phase Commit limitations, compensating Saga invariants, and Write-Ahead Logging (ARIES)            |
+| System assumptions, accelerator hardware specifications, or interconnect bandwidths | @sec-vol3-appendix-inference-assumptions | Standard reference constants for A100, H100, H200, and B200 accelerators                               |
+
+: **Symptom-to-Foundation Lookup Index**: Diagnostic entry points into the inference and systems hardware foundations. {#tbl-appdx-inference-lookup}
+
+## The accelerator roofline model and serving regimes {#sec-vol3-appendix-inference-roofline}
+
+Accelerator performance is bounded by two distinct physical limits: raw arithmetic computation rate (measured in floating-point operations per second, FLOP/s) and memory interface transfer bandwidth (measured in bytes per second, Bytes/s). The Williams-Waterman-Patterson Roofline model [@williams2009] captures this interaction by plotting attainable execution performance as a function of operational intensity.
+
+### The roofline formulation and ridge point
+
+Let $\pi$ denote the peak theoretical compute throughput of the accelerator (FLOP/s), and let $\beta$ denote the peak bandwidth of the memory subsystem feeding the compute units (Bytes/s). For modern deep learning accelerators, $\beta$ represents High-Bandwidth Memory (HBM) bandwidth.
+
+The **operational intensity** (also termed **arithmetic intensity**) $\mathcal{I}$ is defined in @eq-appdx-operational-intensity as the ratio of arithmetic work executed to data transferred across the memory interface:
+
+$$\mathcal{I} = \frac{\text{Total Floating-Point Operations (FLOPs)}}{\text{Total Memory Traffic (Bytes)}} \quad \left[\frac{\text{FLOPs}}{\text{Byte}}\right]$$ {#eq-appdx-operational-intensity}
+
+The attainable performance $P$ of a numerical kernel on the accelerator is bounded by the upper envelope in @eq-appdx-roofline-envelope:
+
+$$P = \min\left( \pi, \; \mathcal{I} \cdot \beta \right) \quad \left[\frac{\text{FLOPs}}{\text{second}}\right]$$ {#eq-appdx-roofline-envelope}
+
+The intersection of the sloped memory-bandwidth line ($P = \mathcal{I} \cdot \beta$) and the flat compute-saturation ceiling ($P = \pi$) defines the **hardware ridge point** $\mathcal{I}^*$ in @eq-appdx-ridge-point:
+
+$$\mathcal{I}^* = \frac{\pi}{\beta} \quad \left[\frac{\text{FLOPs}}{\text{Byte}}\right]$$ {#eq-appdx-ridge-point}
+
+The ridge point demarcates two distinct operational regimes:
+
+1. **Memory-Bandwidth Bound ($\mathcal{I} < \mathcal{I}^*$):** Attainable performance is strictly capped by $P = \mathcal{I} \cdot \beta < \pi$. The compute units spend cycles stalled waiting for operands to arrive from HBM. Adding more arithmetic execution units yields zero throughput gain unless memory bandwidth $\beta$ is increased or operational intensity $\mathcal{I}$ is improved.
+2. **Compute Bound ($\mathcal{I} \ge \mathcal{I}^*$):** The memory bus supplies operands sufficiently fast to keep the arithmetic units fully saturated. Attainable performance reaches the hardware ceiling $P = \pi$.
+
+The hardware ridge points across accelerator generations are collected in @tbl-appdx-accelerator-ridge-points.
+
+| Accelerator Hardware | Memory Type | HBM Bandwidth ($\beta$) | BF16/FP16 Tensor Ceiling ($\pi$) | FP8 Tensor Ceiling ($\pi$) | BF16 Ridge Point ($\mathcal{I}^*$) | FP8 Ridge Point ($\mathcal{I}^*$) |
+|:---------------------|:------------|:------------------------|:---------------------------------|:---------------------------|:-----------------------------------|:----------------------------------|
+| **NVIDIA A100 SXM4** | HBM2e       | $2{,}039\text{ GB/s}$   | $312\text{ TFLOP/s}$             | N/A                        | $153.0\text{ FLOP/B}$              | N/A                               |
+| **NVIDIA H100 SXM5** | HBM3        | $3{,}350\text{ GB/s}$   | $989\text{ TFLOP/s}$             | $1{,}979\text{ TFLOP/s}$   | $295.2\text{ FLOP/B}$              | $590.7\text{ FLOP/B}$             |
+| **NVIDIA H200 SXM5** | HBM3e       | $4{,}800\text{ GB/s}$   | $989\text{ TFLOP/s}$             | $1{,}979\text{ TFLOP/s}$   | $206.0\text{ FLOP/B}$              | $412.3\text{ FLOP/B}$             |
+| **NVIDIA B200**      | HBM3e       | $8{,}000\text{ GB/s}$   | $2{,}250\text{ TFLOP/s}$         | $4{,}500\text{ TFLOP/s}$   | $281.3\text{ FLOP/B}$              | $562.5\text{ FLOP/B}$             |
+
+: **Accelerator Hardware Compute Ceilings and Ridge Points**: Theoretical peak performance, memory bandwidth, and operational ridge points across accelerator generations. Dense matrix operations without structural sparsity. {#tbl-appdx-accelerator-ridge-points}
+
+### The serving duality: Prefill (GEMM) versus decode (GEMV)
+
+Transformer inference comprises two structurally opposite computational phases with wildly divergent operational intensities:
+
+#### 1. Context prefill phase (GEMM)
+
+In the prefill phase, the serving system processes the prompt context of length $S$ tokens in parallel. Let $N$ be the model's active parameter count, and let $b$ be the numerical precision in bytes per parameter ($b=2$ for 16-bit floating point, $b=1$ for 8-bit floating point).
+
+Evaluating the feed-forward and projection layers for $S$ tokens concurrently requires performing matrix-matrix multiplication:
+
+$$\text{Arithmetic Operations} \approx 2 \cdot N \cdot S \quad [\text{FLOPs}]$$
+
+To execute these operations, the model weights ($N \cdot b$ bytes) are transferred across the memory bus into on-chip SRAM once. Amortized across all $S$ tokens, the operational intensity is given by @eq-appdx-prefill-intensity:
+
+$$\mathcal{I}_{\text{prefill}} \approx \frac{2 \cdot N \cdot S}{N \cdot b} = \frac{2 \cdot S}{b} \quad \left[\frac{\text{FLOPs}}{\text{Byte}}\right]$$ {#eq-appdx-prefill-intensity}
+
+For a prompt context of $S = 4{,}096$ tokens evaluated at 16-bit precision ($b = 2\text{ bytes}$):
+
+$$\mathcal{I}_{\text{prefill}} \approx \frac{2 \times 4{,}096}{2} = 4{,}096\text{ FLOPs/Byte}$$
+
+Because $4{,}096\text{ FLOPs/Byte} \gg \mathcal{I}^* = 295.2\text{ FLOPs/Byte}$ on an NVIDIA H100 GPU, the prefill phase operates deeply within the compute-bound plateau of the Roofline envelope. The accelerator's Tensor Cores achieve near-peak utilization ($>85\%$), and prefill duration is governed by arithmetic throughput $\pi$ per @eq-appdx-prefill-time:
+
+$$T_{\text{prefill}} \approx \frac{2 \cdot N \cdot S}{\pi} \quad [\text{seconds}]$$ {#eq-appdx-prefill-time}
+
+#### 2. Autoregressive decode phase (GEMV)
+
+In the decode phase, the model generates output tokens one by one. For an unbatched generation session (batch size $B=1$), generating a single token requires passing a single token activation vector through the entire network.
+
+The arithmetic work required to generate one token is:
+
+$$\text{Arithmetic Operations} \approx 2 \cdot N \cdot 1 \quad [\text{FLOPs}]$$
+
+However, to compute this single token, every weight in the neural network ($N \cdot b$ bytes) must be read from off-chip HBM into the streaming multiprocessors (SMs), so operational intensity collapses to @eq-appdx-decode-intensity:
+
+$$\mathcal{I}_{\text{decode}}(B=1) \approx \frac{2 \cdot N \cdot 1}{N \cdot b} = \frac{2}{b} \quad \left[\frac{\text{FLOPs}}{\text{Byte}}\right]$$ {#eq-appdx-decode-intensity}
+
+For 16-bit precision ($b=2$), $\mathcal{I}_{\text{decode}} = 1.0\text{ FLOP/Byte}$. For 8-bit precision ($b=1$), $\mathcal{I}_{\text{decode}} = 2.0\text{ FLOPs/Byte}$.
+
+Comparing $\mathcal{I}_{\text{decode}} = 1.0\text{ FLOP/Byte}$ against the H100 ridge point $\mathcal{I}^* = 295.2\text{ FLOPs/Byte}$ reveals that unbatched decode operates at less than $0.34\%$ of the accelerator's peak compute capacity. The remaining $99.66\%$ of Tensor Core capability is permanently idle, throttled by the rate at which bits can be pulled across the HBM bus.
+
+### The single-batch parameter shuttle floor
+
+Because decode is strictly memory-bandwidth bound at small batch sizes, the minimum physical time required to generate a single token is fundamentally dictated by the time required to shuttle all model parameters across the memory bus once.
+
+Let $N$ be the model parameter count, $b$ be the precision in bytes, and $\beta$ be the memory bandwidth. The **parameter shuttle floor** $t_{\text{shuttle}}$ in @eq-appdx-shuttle-floor establishes the absolute physical lower bound on per-token generation latency:
+
+$$t_{\text{decode}}(B=1) \ge t_{\text{shuttle}} = \frac{N \cdot b}{\beta} \quad [\text{seconds/token}]$$ {#eq-appdx-shuttle-floor}
+
+Equivalently, the maximum theoretical decode throughput for an unbatched request is capped by @eq-appdx-shuttle-throughput:
+
+$$\text{Throughput}_{\max}(B=1) = \frac{1}{t_{\text{shuttle}}} = \frac{\beta}{N \cdot b} \quad \left[\frac{\text{tokens}}{\text{second}}\right]$$ {#eq-appdx-shuttle-throughput}
+
+| Model Parameter Count ($N$) | Precision ($b$)     | Model Size ($N \cdot b$) | NVIDIA A100 ($\beta = 2.04\text{ TB/s}$) | NVIDIA H100 ($\beta = 3.35\text{ TB/s}$) | NVIDIA H200 ($\beta = 4.80\text{ TB/s}$) | NVIDIA B200 ($\beta = 8.00\text{ TB/s}$)  |
+|:----------------------------|:--------------------|:-------------------------|:-----------------------------------------|:-----------------------------------------|:-----------------------------------------|:------------------------------------------|
+| **8B (Dense)**              | FP16 ($2\text{ B}$) | $16\text{ GB}$           | $7.85\text{ ms}$ ($127\text{ tok/s}$)    | $4.78\text{ ms}$ ($209\text{ tok/s}$)    | $3.33\text{ ms}$ ($300\text{ tok/s}$)    | $2.00\text{ ms}$ ($500\text{ tok/s}$)     |
+| **8B (Dense)**              | FP8 ($1\text{ B}$)  | $8\text{ GB}$            | $3.92\text{ ms}$ ($255\text{ tok/s}$)    | $2.39\text{ ms}$ ($418\text{ tok/s}$)    | $1.67\text{ ms}$ ($600\text{ tok/s}$)    | $1.00\text{ ms}$ ($1{,}000\text{ tok/s}$) |
+| **70B (Dense)**             | FP16 ($2\text{ B}$) | $140\text{ GB}$          | $68.66\text{ ms}$ ($14.6\text{ tok/s}$)  | $41.79\text{ ms}$ ($23.9\text{ tok/s}$)  | $29.17\text{ ms}$ ($34.3\text{ tok/s}$)  | $17.50\text{ ms}$ ($57.1\text{ tok/s}$)   |
+| **70B (Dense)**             | FP8 ($1\text{ B}$)  | $70\text{ GB}$           | $34.33\text{ ms}$ ($29.1\text{ tok/s}$)  | $20.90\text{ ms}$ ($47.9\text{ tok/s}$)  | $14.58\text{ ms}$ ($68.6\text{ tok/s}$)  | $8.75\text{ ms}$ ($114.3\text{ tok/s}$)   |
+
+: **Single-Batch Parameter Shuttle Floors Across Accelerator Generations**: Minimum physical time and maximum throughput per token for unbatched decode ($B=1$) across parameter scales and memory interfaces. Sized for single-node tensor parallelism where aggregate $\beta$ equals the combined bus bandwidth. {#tbl-appdx-shuttle-floors}
+
+The values in @tbl-appdx-shuttle-floors demonstrate why engineering agentic systems requires strict control over generated token counts. When an agent produces hundreds of tokens of extraneous stream-of-consciousness text or redundant verbosity, it directly converts memory bandwidth into operational delay.
+
+## Attention cache geometry and memory architecture {#sec-vol3-appendix-inference-kv-cache}
+
+Autoregressive transformer generation relies on retaining previously computed intermediate Key ($\mathbf{K}$) and Value ($\mathbf{V}$) activation tensors in accelerator memory. Without this key-value (KV) cache, calculating attention for token $t$ would require recomputing all prior keys and values from token $1$ to $t-1$, incurring quadratic $\mathcal{O}(T^2)$ computational overhead.
+
+### First-principles derivation of key-value cache footprint
+
+Consider a decoder-only Transformer with the following structural architectural parameters:
+
+- $L$: number of transformer layers.
+- $H_{\text{q}}$: number of query attention heads.
+- $H_{\text{kv}}$: number of key-value attention heads.
+- $d_{\text{head}}$: dimensionality of each attention head ($d_{\text{head}} = d_{\text{model}} / H_{\text{q}}$).
+- $b$: storage precision in bytes per element ($b=2$ for FP16/BF16, $b=1$ for FP8, $b=0.5$ for INT4).
+
+At every generation step $t$, the network computes a key vector $\mathbf{k}_t^{(l, h)} \in \mathbb{R}^{d_{\text{head}}}$ and a value vector $\mathbf{v}_t^{(l, h)} \in \mathbb{R}^{d_{\text{head}}}$ for each layer $l \in \{1, \dots, L\}$ and each KV head $h \in \{1, \dots, H_{\text{kv}}\}$.
+
+The memory allocated per token stored in the KV cache, $m_{\text{token}}$, is derived in @eq-appdx-kv-cache-token-size as:
+
+$$\begin{aligned}
+m_{\text{token}} &= \sum_{l=1}^L \sum_{h=1}^{H_{\text{kv}}} \left( \operatorname{sizeof}(\mathbf{k}_t) + \operatorname{sizeof}(\mathbf{v}_t) \right) \\
+&= L \cdot H_{\text{kv}} \cdot \left( d_{\text{head}} \cdot b + d_{\text{head}} \cdot b \right) \\
+&= 2 \cdot L \cdot H_{\text{kv}} \cdot d_{\text{head}} \cdot b \quad \left[\frac{\text{Bytes}}{\text{token}}\right]
+\end{aligned}$$ {#eq-appdx-kv-cache-token-size}
+
+The factor of $2$ represents the structural necessity of storing both the Key tensor and the Value tensor.
+
+### Attention head architectures: MHA, MQA, and GQA
+
+The ratio of query heads to key-value heads defines three distinct attention architectures, compared across context horizons in @tbl-appdx-kv-cache-scaling:
+
+1. **Multi-Head Attention (MHA):** $H_{\text{kv}} = H_{\text{q}}$. Each query head has its own dedicated key and value head. Memory footprint is maximal.
+2. **Multi-Query Attention (MQA):** $H_{\text{kv}} = 1$. All $H_{\text{q}}$ query heads share a single key head and a single value head per layer. Memory footprint is minimized by a factor of $H_{\text{q}}$.
+3. **Grouped-Query Attention (GQA):** $H_{\text{kv}} = H_{\text{q}} / G$, where $G$ is the group size (typically $G=8$). Query heads are partitioned into groups sharing a single key and value head. GQA achieves a sweet spot: it slashes KV-cache memory requirements by $G\times$ while matching the empirical quality of full MHA.
+
+| Architecture      | Model Parameters ($N$) | Layers ($L$) | Query Heads ($H_{\text{q}}$) | KV Heads ($H_{\text{kv}}$) | Head Dim ($d_{\text{head}}$) | Precision ($b$)     | Cache per Token ($m_{\text{token}}$)         | Context Footprint ($T=16\text{k}$) | Context Footprint ($T=128\text{k}$) |
+|:------------------|:-----------------------|:-------------|:-----------------------------|:---------------------------|:-----------------------------|:--------------------|:---------------------------------------------|:-----------------------------------|:------------------------------------|
+| **Llama-1 (MHA)** | 65B                    | 80           | 64                           | 64                         | 128                          | FP16 ($2\text{ B}$) | $2{,}621{,}440\text{ B}$ ($2.50\text{ MiB}$) | $40.0\text{ GB}$                   | $320.0\text{ GB}$                   |
+| **Llama-2 (GQA)** | 70B                    | 80           | 64                           | 8                          | 128                          | FP16 ($2\text{ B}$) | $327{,}680\text{ B}$ ($320\text{ KiB}$)      | $5.0\text{ GB}$                    | $40.0\text{ GB}$                    |
+| **Llama-3 (GQA)** | 70B                    | 80           | 64                           | 8                          | 128                          | FP8 ($1\text{ B}$)  | $163{,}840\text{ B}$ ($160\text{ KiB}$)      | $2.5\text{ GB}$                    | $20.0\text{ GB}$                    |
+| **Llama-3 (GQA)** | 8B                     | 32           | 32                           | 8                          | 128                          | FP16 ($2\text{ B}$) | $131{,}072\text{ B}$ ($128\text{ KiB}$)      | $2.0\text{ GB}$                    | $16.0\text{ GB}$                    |
+| **Llama-3 (GQA)** | 8B                     | 32           | 32                           | 8                          | 128                          | FP8 ($1\text{ B}$)  | $65{,}536\text{ B}$ ($64\text{ KiB}$)        | $1.0\text{ GB}$                    | $8.0\text{ GB}$                     |
+
+: **Key-Value Cache Memory Scaling Across Model Architectures**: Exact memory required per token and resulting total cache footprint for $16\text{k}$ and $128\text{k}$ context horizons across attention variants. {#tbl-appdx-kv-cache-scaling}
+
+For a sequence of total context length $T$ tokens (comprising both prompt and generated tokens), the physical KV cache memory required by a single active session is modeled by @eq-appdx-kv-cache-total:
+
+$$M_{\text{KV}}(T) = T \cdot m_{\text{token}} \quad [\text{Bytes}]$$ {#eq-appdx-kv-cache-total}
+
+### Space-time memory occupancy and tool-wait stranding
+
+In conventional chat-serving workloads, memory occupancy is transient: the system generates a burst of tokens and immediately frees or evicts the cache. In an agentic system, however, the execution loop alternates between token generation and external tool actuation (such as compiling code, running unit tests, executing SQL queries, or making external HTTP requests).
+
+Let $t_{\text{wait}}$ denote the elapsed duration of an external tool call. If the agent runtime maintains a synchronous connection to the serving engine without evicting or offloading the session, the model's KV cache remains pinned inside physical accelerator HBM for the entire duration of $t_{\text{wait}}$.
+
+We define the **space-time memory occupancy** $O_{\text{mem}}$ of a tool invocation as the integral of allocated KV cache memory over the tool wait interval, formalized in @eq-appdx-spacetime-occupancy:
+
+$$O_{\text{mem}} = \int_0^{t_{\text{wait}}} M_{\text{KV}}(t) \, dt = M_{\text{KV}} \cdot t_{\text{wait}} \quad [\text{Byte-seconds}]$$ {#eq-appdx-spacetime-occupancy}
+
+Consider an 8-GPU NVIDIA H100 SXM5 node ($640\text{ GB}$ total HBM3) serving a 70B parameter model partitioned across Tensor Parallelism $TP=8$. The static model weights consume $140\text{ GB}$, leaving $500\text{ GB}$ of dynamic memory across the node for KV cache pages.
+
+If an agent executing a trajectory with context length $T = 64{,}000$ tokens ($M_{\text{KV}} = 64{,}000 \times 320\text{ KiB} = 20.48\text{ GB}$) executes a long compilation task requiring $t_{\text{wait}} = 45\text{ seconds}$:
+
+$$O_{\text{mem}} = 20.48\text{ GB} \times 45\text{ s} = 921.6\text{ GB-seconds}$$
+
+The financial cost of this stranded capacity is directly calculable from the hourly node reservation price $C_{\text{node}}$ (typically $\approx \$24.00/\text{hour} = \$0.00667/\text{second}$ for an 8xH100 node):
+
+$$\text{Cost}_{\text{stranded}} = \frac{M_{\text{KV}}}{M_{\text{dynamic\_node}}} \cdot C_{\text{node}} \cdot t_{\text{wait}} = \frac{20.48}{500} \times \$0.00667 \times 45 = \$0.0123 \quad \text{per tool call}$$
+
+In an enterprise software engineering agent that performs 30 compilation and test runs over a multi-turn debugging trajectory, tool-wait stranding burns:
+
+$$30 \times \$0.0123 = \$0.369 \quad \text{per trajectory}$$
+
+While a few tens of cents appears modest for a single run, at an operational scale of $100{,}000$ daily trajectories, synchronous tool waiting strands over $\$36{,}900$ per day in idle silicon capacity while directly choking cluster serving throughput.
+
+### Virtual memory paging: PagedAttention block tables
+
+To resolve external and internal memory fragmentation, modern inference runtimes partition the physical KV cache into fixed-size physical blocks (PagedAttention [@kwon2023]).
+
+Let $B_s$ denote the block size in tokens (typically $B_s = 16$ or $B_s = 32$). The physical memory allocated to each block is defined in @eq-appdx-block-size:
+
+$$S_{\text{block}} = B_s \cdot m_{\text{token}} \quad [\text{Bytes}]$$ {#eq-appdx-block-size}
+
+The serving engine maintains a virtual memory page table for each active trajectory. When a new token is generated, if the current logical block is full, the runtime requests a free physical block from a global pool.
+
+PagedAttention bounds internal memory fragmentation to strictly the unused tail of the final block, as expressed in @eq-appdx-internal-fragmentation:
+
+$$\text{Internal Fragmentation} \le \frac{B_s - 1}{2} \cdot m_{\text{token}} \quad [\text{Bytes/sequence}]$$ {#eq-appdx-internal-fragmentation}
+
+For $B_s = 16$, the expected internal fragmentation per sequence is approximately $7.5 \times m_{\text{token}}$, which represents less than $4\%$ memory waste for sequences longer than $500$ tokens, compared to $>60\%$ memory waste in contiguous pre-allocated memory pools.
+
+Furthermore, PagedAttention enables **prefix caching** through Radix trees: system instructions, repository file trees, and shared few-shot examples are cached as immutable physical blocks. Subsequent generation sessions that share an identical prefix reuse existing physical memory frames through copy-on-write page table mapping, entirely bypassing prompt prefill GEMM operations.
+
+## Trajectory queueing dynamics and continuous batching {#sec-vol3-appendix-inference-queueing}
+
+Serving agentic systems introduces complex queueing dynamics because agent trajectories possess variable, multi-turn lifecycles interrupted by external I/O delays.
+
+### Little's Law and tool-wait concurrency inflation
+
+In queueing theory, Little's Law (@eq-appdx-littles-law) states that the long-term average number of active requests in a stationary queueing system $L$ is equal to the long-term average arrival rate $\lambda$ multiplied by the average time a request spends in the system $W$:
+
+$$L = \lambda \cdot W$$ {#eq-appdx-littles-law}
+
+In standard conversational LLM serving, the residence time $W_{\text{chat}}$ consists solely of prompt prefill and token generation:
+
+$$W_{\text{chat}} = T_{\text{prefill}} + T_{\text{decode}} \approx 2\text{ to }10\text{ seconds}$$
+
+In an agentic system, however, a trajectory comprises $N_{\text{turns}}$ sequential reasoning steps. Each step entails model generation followed by external tool execution, yielding total residence time $W_{\text{agent}}$ in @eq-appdx-agent-residence-time:
+
+$$W_{\text{agent}} = \sum_{i=1}^{N_{\text{turns}}} \left( T_{\text{prefill}, i} + T_{\text{decode}, i} + T_{\text{tool}, i} \right) \quad [\text{seconds}]$$ {#eq-appdx-agent-residence-time}
+
+Because external tools involve operating system processes, compilers, network API round-trips, and sandboxed test suites, tool execution time dominates: $T_{\text{tool}} \gg T_{\text{decode}}$. A software engineering trajectory requiring 15 turns frequently exhibits an aggregate residence time of:
+
+$$W_{\text{agent}} \approx 15 \times (1\text{s prefill} + 3\text{s decode} + 20\text{s tool}) = 360\text{ seconds (6 minutes)}$$
+
+Applying Little's Law demonstrates the **tool-wait concurrency inflation**: to support an incoming task arrival rate of just $\lambda = 2\text{ tasks/second}$, the system must sustain:
+
+$$L = 2\text{ tasks/s} \times 360\text{ s} = 720\text{ concurrent active trajectories}$$
+
+If each trajectory maintains an average context of $\bar{T} = 32{,}000$ tokens in a 70B model ($10\text{ GB}$ KV cache per session), holding these sessions concurrently in accelerator memory would require:
+
+$$720 \times 10\text{ GB} = 7{,}200\text{ GB of HBM3 (90 NVIDIA H100 GPUs)}$$
+
+This calculation underscores why agentic architectures mandate **asynchronous state eviction**: when an agent enters a tool wait, its KV cache must either be evicted to host DRAM, serialized to persistent storage, or discarded with reliance on Radix prefix caching for prompt reconstruction upon return.
+
+### Continuous batching and iteration-level scheduling
+
+Classical deep learning inference grouped requests into static batches, holding execution until the slowest sequence in the batch completed generation. In agentic workloads with high output-length variance, static batching collapses compute utilization because short generations sit idle, padded with dummy tokens, while awaiting long trajectories.
+
+**Continuous batching** (also known as **iteration-level scheduling** [@yu2022orca]) operates at the granularity of individual token iterations:
+
+1. At iteration step $t$, the serving scheduler selects all active requests that are currently in their decode phase and executes a batched GEMV kernel.
+2. If any sequence emits an end-of-sequence token (`<EOS>`) or a tool invocation boundary, it immediately departs the batch, freeing its allocated page frames.
+3. Newly arrived requests or returning tool observation prompts enter the batch at the next iteration step.
+
+To prevent long prompt prefill operations from monopolizing the Tensor Cores and causing latency spikes for active decodes, modern engines employ **chunked prefill** [@agrawal2023sarathi]. A long prompt of $S = 8{,}192$ tokens is sliced into chunks of size $C = 512$ tokens. In each iteration, the scheduler pairs a 512-token prefill chunk with the active decode batch, saturating compute capacity without violating Time-to-First-Token (TTFT) and Inter-Token-Latency (ITL) service-level objectives (SLOs).
+
+### Memory-headroom batch sizing
+
+Let $M_{\text{dynamic}}$ denote the total accelerator memory available for dynamic KV cache allocation after subtracting static model weights ($N \cdot b$) and runtime execution workspace ($M_{\text{runtime}}$) per @eq-appdx-mdynamic:
+
+$$M_{\text{dynamic}} = M_{\text{HBM}} - (N \cdot b) - M_{\text{runtime}} \quad [\text{Bytes}]$$ {#eq-appdx-mdynamic}
+
+For an average trajectory context length of $\bar{T}$ tokens, the maximum number of concurrent agent sessions that can be held in accelerator memory simultaneously without triggering eviction or out-of-memory faults is bounded by @eq-appdx-max-batch:
+
+$$B_{\max} = \left\lfloor \frac{M_{\text{dynamic}}}{\bar{T} \cdot m_{\text{token}}} \right\rfloor$$ {#eq-appdx-max-batch}
+
+When arrival bursts push active concurrency beyond $B_{\max}$, the serving scheduler must enforce one of two preemption policies:
+
+1. **Swap-to-Host:** Physical KV blocks are transferred across the PCIe Gen5 bus ($\approx 64\text{ GB/s}$ effective) to host CPU DRAM. Resuming requires reading the blocks back over PCIe.
+2. **Recomputation:** The physical KV blocks are dropped entirely. When scheduled again, the engine re-evaluates the prompt context via a GEMM prefill pass.
+
+The decision boundary between swapping and recomputation depends on the ratio of PCIe transfer latency to GEMM compute latency, formalized in @eq-appdx-recompute-condition:
+
+$$\text{Choose Recompute if } \quad \frac{2 \cdot N \cdot T}{\pi} < \frac{T \cdot m_{\text{token}}}{\text{BW}_{\text{PCIe}}}$$ {#eq-appdx-recompute-condition}
+
+## Distributed reliability and Saga foundations {#sec-vol3-appendix-inference-distributed}
+
+In classical transactional databases, distributed multi-step workflows enforce Atomicity, Consistency, Isolation, and Durability (ACID) using the **Two-Phase Commit (2PC)** protocol. In agentic machine learning systems, however, 2PC breaks down completely across the tool boundary.
+
+### The breakdown of two-phase commit in agent workflows
+
+Two-Phase Commit requires a centralized coordinator to execute two synchronous voting phases across all participating resource managers:
+
+1. **Prepare Phase:** The coordinator asks all participants to acquire local locks and promise that they can commit their local changes.
+2. **Commit Phase:** If all participants vote affirmatively, the coordinator commands all participants to commit. If any participant declines, all participants roll back.
+
+Two-Phase Commit is physically impossible for autonomous agent tool execution due to three fundamental systems barriers:
+
+1. **Absence of Transaction Handles in External Systems:** Real-world agent effectors—such as Bash shells, git repositories, compilers, public cloud APIs (e.g., AWS S3, GitHub Issues), and third-party SaaS endpoints—do not implement XA-compliant distributed transaction interfaces. An agent executing `rm -rf file.txt` or calling `stripe.charges.create()` cannot "prepare" the operation; the operation executes immediately and mutates reality.
+2. **Intractable Lock Holding Durations:** Holding locks across distributed resources while an agent deliberates or queries a stochastic foundation model would cause catastrophic lock contention. With model generation latencies spanning seconds, holding database locks during LLM inference leads directly to distributed deadlocks and cascade timeouts.
+3. **Non-Deterministic Failure Modes:** Unlike relational database engines that fail with predictable error codes, agent actions fail through semantic divergence, sandbox crashes, network partitions, and API rate limits.
+
+### The saga pattern: Forward execution and compensating actions
+
+To achieve reliable multi-turn execution across non-ACID boundaries, agentic systems implement the **Saga pattern** [@garciamolina1987sagas].
+
+A Saga models an agent trajectory as a collection of $n$ discrete, localized transactions:
+
+$$\mathcal{T} = \left( T_1, T_2, \dots, T_n \right)$$
+
+For every transaction $T_i$ that executes a non-read-only external mutation, the system defines an associated **compensating transaction** $C_i$:
+
+$$\mathcal{C} = \left( C_1, C_2, \dots, C_{n-1} \right)$$
+
+The compensating transaction $C_i$ semantically undoes the side effects of transaction $T_i$. For example:
+
+- If $T_i$ creates a directory (`mkdir -p src/utils`), $C_i$ removes that directory (`rm -rf src/utils`).
+- If $T_i$ applies a git patch (`git apply fix.patch`), $C_i$ reverses the patch (`git apply -R fix.patch`).
+- If $T_i$ reserves a cloud VM, $C_i$ terminates that VM.
+
+During forward execution, the agent runtime invokes transactions sequentially:
+
+$$T_1 \longrightarrow T_2 \longrightarrow \dots \longrightarrow T_k$$
+
+If transaction $T_k$ fails (or if a downstream verification harness detects an invariant violation), the runtime aborts the forward trajectory and initiates **backward recovery**, executing compensations in reverse chronological order:
+
+$$C_{k-1} \longrightarrow C_{k-2} \longrightarrow \dots \longrightarrow C_1$$
+
+Backward recovery restores the environment to an invariant-consistent state without requiring distributed locks.
+
+### Mathematical invariants of compensating transactions
+
+For an agentic Saga orchestrator to guarantee eventual consistency, compensating transactions must satisfy two formal mathematical properties:
+
+1. **Idempotency:** Because network connections to tools and external APIs can fail mid-transmission, compensation requests may be dispatched multiple times during recovery. A compensating transaction must produce identical environmental state regardless of whether it is applied once or $m$ times (@eq-appdx-saga-idempotence):
+   $$C_i(C_i(s)) = C_i(s) \quad \forall s \in \mathcal{S}$$ {#eq-appdx-saga-idempotence}
+
+2. **The Pivot Step ($T_{\text{pivot}}$):** In any extended trajectory, certain operations are physically irreversible (e.g., transmitting an email to an end customer, executing an immutable blockchain transaction, or formatting a production drive). The transaction that executes this irreversible action is the **pivot transaction** $T_{\text{pivot}}$:
+   - All transactions before the pivot ($T_i < T_{\text{pivot}}$) must be compensable.
+   - Once $T_{\text{pivot}}$ commits, the Saga cannot roll back. All downstream transactions ($T_j > T_{\text{pivot}}$) must be designed to retry until they achieve forward completion.
+
+### Write-ahead logging (ARIES adaptation)
+
+To survive process crashes, power failures, and supervisor restarts, the agent runtime maintains a durable, append-only **Write-Ahead Log (WAL)** grounded in the classical ARIES recovery principles [@mohan1992aries].
+
+The fundamental axiom of agent trajectory persistence is the **Write-Ahead Logging Rule**:
+
+$$\text{Log}(T_i) \xrightarrow{\text{fsync}} \text{Non-Volatile Disk} \quad \text{BEFORE} \quad \text{Dispatch}(T_i) \to \text{External Effector}$$
+
+Every log record in the trajectory WAL is assigned a monotonically increasing **Log Sequence Number (LSN)**:
+
+$$\operatorname{LSN}_{t} > \operatorname{LSN}_{t-1}$$
+
+Each log record contains:
+
+- $\operatorname{LSN}$: unique identifier of the entry.
+- $\operatorname{PrevLSN}$: pointer to the previous record for this trajectory (enabling reverse-traversal during compensation).
+- $\operatorname{Type}$: record category (`ACTION_DISPATCH`, `OBSERVATION_RECEIVE`, `CHECKPOINT`, `COMPENSATE`).
+- $\operatorname{Payload}$: structured JSON payload (tool name, parameters, return codes, state diffs).
+
+During crash recovery, the runtime executes a three-phase recovery protocol:
+
+1. **Analysis Phase:** Scan the WAL forward from the latest valid snapshot checkpoint to identify active trajectories and determine uncommitted actions.
+2. **Redo Phase (Repeating History):** Replay all logged actions and observations to reconstruct the exact internal Agent Control Block (ACB) state up to the instant of the crash.
+3. **Undo Phase:** For trajectories that did not reach a committed state, traverse backward using $\operatorname{PrevLSN}$ pointers, dispatching compensating actions $C_i$ to clean up abandoned sandbox side effects.
+
+## Standard hardware assumptions and reference constants {#sec-vol3-appendix-inference-assumptions}
+
+The calculations throughout this book rely on canonical hardware assumptions. When auditing chapter derivations or substituting cluster specifications, use the standard values collected in @tbl-appdx-hardware-constants, @tbl-appdx-interconnect-constants, and @tbl-appdx-latency-hierarchy.
+
+| Parameter                 | Symbol              | NVIDIA A100 SXM4             | NVIDIA H100 SXM5             | NVIDIA H200 SXM5             | NVIDIA B200                      |
+|:--------------------------|:--------------------|:-----------------------------|:-----------------------------|:-----------------------------|:---------------------------------|
+| **HBM Capacity**          | $M_{\text{HBM}}$    | $80\text{ GB}$ (HBM2e)       | $80\text{ GB}$ (HBM3)        | $141\text{ GB}$ (HBM3e)      | $192\text{ GB}$ (HBM3e)          |
+| **HBM Bandwidth**         | $\beta$             | $2{,}039\text{ GB/s}$        | $3{,}350\text{ GB/s}$        | $4{,}800\text{ GB/s}$        | $8{,}000\text{ GB/s}$            |
+| **Peak FP32 Vector**      | $\pi_{\text{FP32}}$ | $19.5\text{ TFLOP/s}$        | $67\text{ TFLOP/s}$          | $67\text{ TFLOP/s}$          | $90\text{ TFLOP/s}$              |
+| **Peak BF16 Tensor**      | $\pi_{\text{BF16}}$ | $312\text{ TFLOP/s}$         | $989\text{ TFLOP/s}$         | $989\text{ TFLOP/s}$         | $2{,}250\text{ TFLOP/s}$         |
+| **Peak FP8 Tensor**       | $\pi_{\text{FP8}}$  | N/A                          | $1{,}979\text{ TFLOP/s}$     | $1{,}979\text{ TFLOP/s}$     | $4{,}500\text{ TFLOP/s}$         |
+| **Peak INT8 Tensor**      | $\pi_{\text{INT8}}$ | $624\text{ TOPS}$            | $1{,}979\text{ TOPS}$        | $1{,}979\text{ TOPS}$        | $4{,}500\text{ TOPS}$            |
+| **Thermal Design Power**  | $\text{TDP}$        | $400\text{ W}$               | $700\text{ W}$               | $700\text{ W}$               | $1{,}000\text{ W}$               |
+| **Host Interface**        | —                   | PCIe Gen4 x16                | PCIe Gen5 x16                | PCIe Gen5 x16                | PCIe Gen5 x16                    |
+| **Scale-Up Interconnect** | —                   | NVLink-3 ($600\text{ GB/s}$) | NVLink-4 ($900\text{ GB/s}$) | NVLink-4 ($900\text{ GB/s}$) | NVLink-5 ($1{,}800\text{ GB/s}$) |
+
+: **Standard Accelerator Reference Specifications**: Physical hardware capabilities for deep learning training and inference accelerators. Dense tensor compute rates without structured sparsity. {#tbl-appdx-hardware-constants}
+
+| Interconnect Layer       | Topology / Bus Type      | Unidirectional Bandwidth             | Bidirectional Bandwidth               | Typical Transfer Latency |
+|:-------------------------|:-------------------------|:-------------------------------------|:--------------------------------------|:-------------------------|
+| **PCIe Gen4 x16**        | Host-to-Device Bus       | $31.5\text{ GB/s}$                   | $63.0\text{ GB/s}$                    | $1.5\ \mu\text{s}$       |
+| **PCIe Gen5 x16**        | Host-to-Device Bus       | $63.0\text{ GB/s}$                   | $126.0\text{ GB/s}$                   | $1.0\ \mu\text{s}$       |
+| **NVLink-3 (A100)**      | Intra-Node GPU Crossbar  | $300\text{ GB/s}$                    | $600\text{ GB/s}$                     | $500\text{ ns}$          |
+| **NVLink-4 (H100/H200)** | Intra-Node GPU Crossbar  | $450\text{ GB/s}$                    | $900\text{ GB/s}$                     | $400\text{ ns}$          |
+| **NVLink-5 (B200)**      | Intra-Node GPU Crossbar  | $900\text{ GB/s}$                    | $1{,}800\text{ GB/s}$                 | $300\text{ ns}$          |
+| **InfiniBand HDR**       | Scale-Out Cluster Fabric | $200\text{ Gb/s}$ ($25\text{ GB/s}$) | $400\text{ Gb/s}$ ($50\text{ GB/s}$)  | $1.2\ \mu\text{s}$       |
+| **InfiniBand NDR**       | Scale-Out Cluster Fabric | $400\text{ Gb/s}$ ($50\text{ GB/s}$) | $800\text{ Gb/s}$ ($100\text{ GB/s}$) | $5.0\ \mu\text{s}$       |
+
+: **Standard Interconnect and Fabric Bandwidths**: Communication bandwidths and transfer latencies across accelerator buses and scale-out fabrics. {#tbl-appdx-interconnect-constants}
+
+| System Component / Boundary       | Substrate                     | Representative Latency                 | Systems Significance for Agents         |
+|:----------------------------------|:------------------------------|:---------------------------------------|:----------------------------------------|
+| **Accelerator Register File**     | On-Chip SRAM                  | $\approx 1\text{ ns}$                  | Single-cycle math operands              |
+| **Accelerator L2 Cache**          | On-Chip SRAM ($50\text{ MB}$) | $\approx 10\text{ ns}$                 | Intermediate activation reuse           |
+| **Accelerator HBM3**              | Off-Chip 3D Stacked           | $\approx 50\text{ to }100\text{ ns}$   | Single-batch parameter shuttle boundary |
+| **Host CPU DRAM**                 | Main Memory (DDR5)            | $\approx 100\text{ ns}$                | Agent Control Block host storage        |
+| **PCIe Gen5 Transfer**            | I/O Bus                       | $\approx 1\text{ to }5\ \mu\text{s}$   | KV cache host swap-to-device            |
+| **Local NVMe SSD Read**           | Solid-State Drive             | $\approx 10\text{ to }50\ \mu\text{s}$ | Cold trajectory checkpoint reload       |
+| **Local NVMe SSD fsync**          | Journaled Storage             | $\approx 1\text{ to }5\text{ ms}$      | WAL append persistence boundary         |
+| **Local Process Fork / Exec**     | Linux Kernel POSIX            | $\approx 1\text{ to }5\text{ ms}$      | Native OS command invocation            |
+| **MicroVM Spawn (Firecracker)**   | KVM Hypervisor                | $\approx 5\text{ to }15\text{ ms}$     | Ephemeral sandboxed tool execution      |
+| **Container Spawn (Docker/runC)** | Linux Namespaces / cgroups    | $\approx 200\text{ to }500\text{ ms}$  | Heavy sandbox container instantiation   |
+| **Datacenter Intra-Rack RTT**     | Top-of-Rack Switch            | $\approx 10\text{ to }50\ \mu\text{s}$ | Disaggregated serving RPCs              |
+| **SaaS REST API Round-Trip**      | Public Internet HTTPS         | $\approx 50\text{ to }300\text{ ms}$   | External tool actuation latency         |
+| **Full Build & Test Compilation** | Multi-Core Host CPU           | $\approx 5\text{ to }60\text{ s}$      | Heavyweight agent tool task duration    |
+
+: **The Latency Hierarchy of Agentic Systems**: Representative operational latencies spanning physical silicon registers to long-duration software effectors. {#tbl-appdx-latency-hierarchy}
+
+---
+
+Together, these physical models define the governing laws of machine learning systems execution. Whether budgeting context memory for long-horizon agent trajectories, sizing continuous batching queues under heavy-tailed tool delays, or engineering crash-consistent write-ahead logs for external sandboxes, systems engineers build reliable autonomous runtimes by grounding their designs in the physical limits of memory bandwidth, operational intensity, and distributed failure boundaries.
