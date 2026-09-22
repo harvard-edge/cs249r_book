@@ -28,14 +28,16 @@ format:
 
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
-\vspace{1em}
-\resizebox{\linewidth}{!}{\mlphysicalstackfull{100}{20}{20}{20}{20}}
+\resizebox{0.92\linewidth}{!}{\mlphysicalstackfull{100}{20}{20}{20}{20}}
+\caption{The five-level machine stack with the Brain level highlighted.}
 \end{marginfigure}
 :::
 
 _Why can a policy that succeeds in every simulated trial break the hardware on its first real contact?_
 
-Physical trial and error consumes hardware as well as computation. An exploratory action can overheat a motor or overload a transmission before the policy receives any feedback, so most learning moves to demonstrations and simulation, and each source leaves its own assumptions in the weights. Demonstrations teach only the states the demonstrator visited, a squared-error loss blends valid choices into an action no one demonstrated, and a simulator teaches whatever its contact model and its zero-delay timing permit, including shortcuts that real contact punishes within milliseconds. None of these assumptions is visible in a training score, and all of them travel with the trained policy onto the machine. Training a physical policy therefore means choosing the experience source that fits the data's support, measuring where the simulator departs from the plant, and recording the conditions under which the resulting policy may be trusted. Any assumption left out of that record is settled at the causal boundary, where the first command that relies on it delivers energy the machine cannot take back.
+Physical trial and error consumes hardware as well as computation. An exploratory action can overheat a motor coil, collapse battery voltage, or overload a transmission before a policy receives meaningful reward feedback. Consequently, physical policy synthesis shifts predominantly to offline demonstrations and high-throughput physics simulators. Yet each experience source leaves distinct, unmodeled inductive biases in the learned neural weights. Demonstrations cover only nominal visited trajectories, naive regression losses average distinct multimodal solutions into unviable interpolated actions, and simulation solvers reward non-physical contact shortcuts that hardware instantly punishes.
+
+None of these discrepancies appear in offline training metrics, yet all of them accompany the weights onto the machine. Deploying learned policies safely requires selecting training regimes matched to dataset support, measuring where numerical solvers depart from real-world plant dynamics across friction, compliance, and latency, and rigorously bounding where the policy remains valid. Any unmodeled assumption left unchecked in software is ultimately settled at the causal boundary, where commands deliver electromagnetic energy and irreversible mechanical work that software can never recall.
 
 {{< pagebreak >}}
 
@@ -197,6 +199,18 @@ A mode boundary also produces a timing failure, temporal inconsistency in a high
 
 Mode averaging is a failure at a single observation. Behavioral cloning has a second failure that appears only when the policy runs in closed loop. Its own errors move the machine off the states its demonstrations cover, where the loss supplied no training signal, which is how `latch-bc-01` binds on the sagged door. Under principle \ref{pri-vol4-endogenous-drift}, the policy's own actions choose which states it visits next, so a fixed archive cannot anticipate them, and for expert-only cloning the worst-case cost grows with the square of the horizon (@eq-data-quadratic-drift, developed in @sec-data-endogenous-experience). A low validation loss on held-out demonstrations therefore measures accuracy only on states the demonstrator visited; it says nothing about how the policy returns once displaced. Corrective aggregation labels the learner's own states and, under its expert-labeling assumptions, reduces that growth to linear (@sec-data-intervention-recovery), but on a physical machine those states are reached by running an unverified policy, which can strike a fixture or damage a transmission before a supervisor intervenes.
 
+::: {#dfn-training-compounding-rollout-error .callout-definition title="Compounding rollout error"}
+
+***Compounding rollout error***\index{Compounding rollout error!definition}\index{Behavioral cloning!error accumulation} is the quadratic accumulation of closed-loop tracking drift incurred when an open-loop supervised policy executes sequentially on a physical dynamical plant, bounded in expectation by:
+$$J(\pi) - J(\pi^*) \le \mathcal{O}(T^2 \epsilon)$$
+where $T$ is the task execution horizon and $\epsilon = \mathbb{E}_{\mathbf{s} \sim d_{\pi^*}} [\mathbb{I}(\pi(\mathbf{s}) \ne \pi^*(\mathbf{s}))]$ is the single-step policy error rate on the demonstration distribution $d_{\pi^*}$.
+
+1.  **Significance**: Proves that minimizing single-step prediction error on offline demonstrations is fundamentally insufficient for closed-loop stability; any nonzero error rate $\epsilon > 0$ eventually drives physical state outside demonstrated support.
+2.  **Distinction**: Unlike static supervised learning where validation error scales linearly with sample count, compounding rollout error couples policy mistakes with environmental physics, turning small initial trajectory deviations into irreversible state divergence.
+3.  **Common pitfall**: Assuming low offline validation loss on held-out demonstration splits translates to high closed-loop task success, ignoring that offline datasets contain zero examples of returning to nominal support once perturbed.
+
+:::
+
 ### What action chunking changes—and what it leaves unresolved
 
 Action chunking (\ref{dfn-brain-action-chunking}) can improve temporal coherence and reduce proposal frequency in generative architectures such as diffusion policies and Action Chunking with Transformers (ACT). It can also address the alternation in the mode-boundary example above. A chunking policy that predicts $H$ future actions $\mathbf{a}_{t:t+H-1}$ at once improves execution through three mechanisms:
@@ -220,6 +234,8 @@ A point-regression decoder averages distinct valid actions into an invalid comma
 :::
 
 The step count is the cost that reaches the control deadline. A diffusion decoder produces each chunk by repeated denoising, and every step is a full evaluation of the noise-prediction action head, so inference time scales with the number of steps (the refinement term of the chunk latency in @sec-brain-cognitive-pipeline). Under the step counts and per-step times assumed in @sec-appendix-ml-diffusion, a many-step denoising diffusion implicit model (DDIM) sampler overruns the `{python} LatchContactDeadline.t_step_str` setpoint period when it runs synchronously, while a few-step flow-matching sampler fits within it, provided those few steps meet the task's action-quality criterion. A decoder that cannot meet the period synchronously runs asynchronously. The application processor refreshes a chunk buffer at a lower rate, and the permission path reads the newest chunk at its own rate, checks its freshness, and falls back when it expires, so actuation never waits on the proposer. The machine's own chunk policy is this asynchronous case. It renews its chunk every `{python} LatchContactDeadline.t_chunk_str`, so its inference deadline is that chunk period, and the `{python} LatchContactDeadline.t_step_str` setpoint period only paces playback of the setpoints inside the chunk.
+
+As detailed in @fig-diffusion-policy-architecture (@sec-appendix-ml-diffusion), the policy conditions on an observation history of images and joint states to iteratively denoise an action chunk $\mathbf{A}^0 \in \mathbb{R}^{K \times D_a}$ from pure Gaussian noise. Rather than executing the entire prediction horizon, the machine dispatches an execution horizon to the real-time microcontroller before receding-horizon re-planning occurs. The formal dual-rate pipeline—coupling asynchronous reverse-diffusion on the host with deterministic spline interpolation, rate-limiting, and safety clamping on the microcontroller—is developed in @algo-diffusion-policy-trajectory (@sec-appendix-ml-diffusion).
 
 ::: {.column-margin .margin-pointer}
 ↳ **Downstream:** Hardware placement of multi-rate action chunk buffers across the application processor and the safety microcontroller is engineered in @sec-placement-two-paths-one-die.

@@ -744,6 +744,111 @@ class Sensors(Registry):
     )
 
 
+class PhysicalAIRates(Registry):
+    """Execution frequency and period hierarchy across the five physical AI machine levels."""
+
+    IntentLo = sourced_qty(1.0 * ureg.Hz, pc.PHYSICAL_AI_NUMBERS,
+        name="Intent loop frequency low", description="Lower bound on deliberative intent planning rate.")
+    IntentHi = sourced_qty(5.0 * ureg.Hz, pc.PHYSICAL_AI_NUMBERS,
+        name="Intent loop frequency high", description="Upper bound on deliberative intent planning rate.")
+    ChunkLo = sourced_qty(10.0 * ureg.Hz, pc.PHYSICAL_AI_NUMBERS,
+        name="Chunk policy frequency low", description="Lower bound on action chunk trajectory proposal rate.")
+    ChunkHi = sourced_qty(50.0 * ureg.Hz, pc.PHYSICAL_AI_NUMBERS,
+        name="Chunk policy frequency high", description="Upper bound on action chunk trajectory proposal rate.")
+    PermissionRate = sourced_qty(1000.0 * ureg.Hz, pc.PHYSICAL_AI_NUMBERS,
+        name="Permission loop frequency", description="Canonical permission loop and runtime safety barrier rate.")
+    CurrentLoopLo = sourced_qty(10.0 * ureg.kHz, pc.PHYSICAL_AI_NUMBERS,
+        name="Current loop frequency low", description="Lower bound on motor field-oriented current control rate.")
+    CurrentLoopHi = sourced_qty(25.0 * ureg.kHz, pc.PHYSICAL_AI_NUMBERS,
+        name="Current loop frequency high", description="Upper bound on motor field-oriented current control rate.")
+    GateSwitchingLo = sourced_qty(50.0 * ureg.kHz, pc.PHYSICAL_AI_NUMBERS,
+        name="Inverter PWM switching frequency low", description="Lower bound on power MOSFET switching frequency.")
+    GateSwitchingHi = sourced_qty(200.0 * ureg.kHz, pc.PHYSICAL_AI_NUMBERS,
+        name="Inverter PWM switching frequency high", description="Upper bound on power MOSFET switching frequency.")
+
+
+class PhysicalAIKinematics(Registry):
+    """Kinetic translation rates and stopping clearance conversions."""
+
+    BlindTravelRate1mps = sourced_qty(1.0 * (ureg.millimeter / ureg.ms), pc.PHYSICAL_AI_NUMBERS,
+        name="Blind travel rate at 1 m/s", description="Kinetic blind travel conversion at 1 m/s: 1 mm per ms.")
+    BlindTravelRate10mps = sourced_qty(10.0 * (ureg.millimeter / ureg.ms), pc.PHYSICAL_AI_NUMBERS,
+        name="Blind travel rate at 10 m/s", description="Kinetic blind travel conversion at 10 m/s: 10 mm (1 cm) per ms.")
+    BlindTravelRate30mps = sourced_qty(30.0 * (ureg.millimeter / ureg.ms), pc.PHYSICAL_AI_NUMBERS,
+        name="Blind travel rate at 30 m/s", description="Kinetic blind travel conversion at 30 m/s (108 km/h): 30 mm (3 cm) per ms.")
+    IsoApproachSpeed = sourced_qty(1.6 * (ureg.meter / ureg.second), pc.ISO_13855_APPROACH_SPEED,
+        name="ISO 13855 walking approach speed", description="Standard human walking approach speed K.")
+
+
+class PhysicalAIThermal(Registry):
+    """Thermal time constants across compute silicon and electromechanical actuators."""
+
+    TauSiliconJunction = sourced_qty(5.0 * ureg.ms, pc.THERMAL_CONSTANTS_ELECTROMECHANICAL,
+        name="Silicon junction thermal time constant", description="Adiabatic heating time constant for semiconductor die.")
+    TauSiliconPackage = sourced_qty(30.0 * ureg.second, pc.THERMAL_CONSTANTS_ELECTROMECHANICAL,
+        name="Silicon heatsink thermal time constant", description="Convective dissipation time constant for SoC heatsinks.")
+    TauMotorStator = sourced_qty(120.0 * ureg.second, pc.THERMAL_CONSTANTS_ELECTROMECHANICAL,
+        name="Motor stator winding thermal time constant", description="Copper winding resistive Joule heating time constant.")
+    TauMotorFrame = sourced_qty(1200.0 * ureg.second, pc.THERMAL_CONSTANTS_ELECTROMECHANICAL,
+        name="Motor frame thermal time constant", description="Bulk stator casing and mechanical frame thermal dissipation time constant.")
+    TauBatteryPack = sourced_qty(600.0 * ureg.second, pc.THERMAL_CONSTANTS_ELECTROMECHANICAL,
+        name="Battery pack thermal time constant", description="Thermal mass time constant for lithium-ion battery cells.")
+
+
+class PhysicalAISafety(Registry):
+    """Statistical bounds, exposure walls, and functional safety failure rate targets."""
+
+    RuleOfThreeMultiplier = sourced(3, pc.RULE_OF_THREE_SAFETY,
+        name="Rule of Three Poisson factor", description="Factor 3 for upper 95% Poisson confidence bound with zero events.")
+    TargetFailureRateSIL3 = sourced_qty(1e-7 / _hour, pc.IEC_61508_SIL_3,
+        name="IEC 61508 SIL 3 / PL e target failure rate", description="Target probability of dangerous failure per hour for SIL 3.")
+    TargetFailureRateASILD = sourced_qty(1e-8 / _hour, pc.ISO_26262_ASIL_D,
+        name="ISO 26262 ASIL D target failure rate", description="Target probability of dangerous failure per hour (10 FIT) for automotive ASIL D.")
+    HumanFatalCrashMiles = sourced(1e8, pc.PHYSICAL_AI_NUMBERS,
+        name="Human fatal crash miles", description="Approximate vehicle miles traveled per fatal crash in human driving.")
+
+
+class PhysicalAIBuses(Registry):
+    """Fieldbus and network communication latencies, jitter, and determinism profiles."""
+
+    EtherCatJitter = sourced_qty(1.0 * ureg.microsecond, pc.ETHERCAT_STANDARD,
+        name="EtherCAT cycle jitter", description="Worst-case cycle jitter for hardware cut-through EtherCAT fieldbus.")
+    EtherCatCycle = sourced_qty(1.0 * ureg.ms, pc.ETHERCAT_STANDARD,
+        name="EtherCAT cycle period", description="Canonical EtherCAT real-time servo cycle period.")
+    CanFdLatency = sourced_qty(250.0 * ureg.microsecond, pc.CAN_FD_SPECIFICATION,
+        name="CAN-FD frame transit latency", description="Nominal frame transit latency on 5 Mbps CAN-FD bus.")
+    CanFdJitter = sourced_qty(150.0 * ureg.microsecond, pc.CAN_FD_SPECIFICATION,
+        name="CAN-FD arbitration jitter", description="Worst-case priority-inversion and non-preemptive queueing jitter.")
+    WifiLatencyNominal = sourced_qty(15.0 * ureg.ms, pc.PHYSICAL_AI_NUMBERS,
+        name="Wi-Fi round-trip latency nominal", description="Nominal unloaded Wi-Fi 6 round-trip ping latency.")
+    WifiLatencyP99 = sourced_qty(150.0 * ureg.ms, pc.PHYSICAL_AI_NUMBERS,
+        name="Wi-Fi round-trip latency P99", description="Tail latency on wireless links under contention or RF fade.")
+
+
+class PhysicalAICompute(Registry):
+    """Edge memory bandwidth and VLA action chunk amortization anchors."""
+
+    EdgeMemoryBandwidthOrin = sourced_qty(204.8 * GB / second, pc.PHYSICAL_AI_NUMBERS,
+        name="Jetson AGX Orin peak memory bandwidth", description="Theoretical 256-bit LPDDR5 memory bandwidth.")
+    EdgeMemorySustainedOrin = sourced_qty(140.0 * GB / second, pc.PHYSICAL_AI_NUMBERS,
+        name="Jetson AGX Orin sustained bandwidth", description="Achievable sustained DRAM streaming bandwidth (~70% efficiency).")
+    VlaParameters7B = sourced(7e9, pc.PHYSICAL_AI_NUMBERS,
+        name="7B VLA parameter count", description="Parameter count for OpenVLA / Octo class models.")
+    VlaChunkHorizon = sourced(16, pc.PHYSICAL_AI_NUMBERS,
+        name="Action chunk horizon", description="Typical action chunk sequence length emitted by chunk policies.")
+
+
+class PhysicalAINumbers(Registry):
+    """Authoritative physical AI reference numbers and operational anchors (Volume IV)."""
+
+    Rates = PhysicalAIRates
+    Kinematics = PhysicalAIKinematics
+    Thermal = PhysicalAIThermal
+    Safety = PhysicalAISafety
+    Buses = PhysicalAIBuses
+    Compute = PhysicalAICompute
+
+
 class ReferenceStats(Registry):
     """Registry namespace for non-executable real-world scenario statistics."""
 
@@ -765,3 +870,11 @@ class ReferenceStats(Registry):
     MobilePower = MobilePower
     PhoneBattery = PhoneBattery
     Sensors = Sensors
+    PhysicalAIRates = PhysicalAIRates
+    PhysicalAIKinematics = PhysicalAIKinematics
+    PhysicalAIThermal = PhysicalAIThermal
+    PhysicalAISafety = PhysicalAISafety
+    PhysicalAIBuses = PhysicalAIBuses
+    PhysicalAICompute = PhysicalAICompute
+    PhysicalAI = PhysicalAINumbers
+

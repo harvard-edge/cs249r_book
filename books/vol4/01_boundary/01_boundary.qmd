@@ -28,14 +28,16 @@ format:
 
 ::: {.content-visible when-format="pdf"}
 \begin{marginfigure}
-\vspace{1em}
-\resizebox{\linewidth}{!}{\mlphysicalstackfull{20}{20}{20}{100}{20}}
+\resizebox{0.92\linewidth}{!}{\mlphysicalstackfull{20}{20}{20}{100}{20}}
+\caption{The five-level machine stack with the Boundary level highlighted.}
 \end{marginfigure}
 :::
 
 _What must a machine guarantee before a learned model's proposal becomes physical work?_
 
-A learned policy may select actions the machine cannot safely execute. Once a command reaches a motor, current generates torque and moving mass carries momentum. Canceling the computation cannot undo that motion. As a robot's software processes observations, its physical chassis continues coasting toward an obstacle. Every millisecond of computational delay consumes physical space, irreversibly shrinking the available braking envelope. Prediction accuracy alone cannot determine if an action should proceed. The system must check proposed movement against physical limits and retain authority to reject commands that exceed them, even when the learned policy is late or wrong, and that authority is only as sound as the evidence behind those limits. Physical AI architecture links the Brain's proposals to the Nervous System's timing and enforcement and to the Body's capacity to move, absorb energy, and stop, so that nothing crosses the causal boundary without a check that finished in time.
+A learned policy may select actions the machine cannot safely execute. Once a command reaches a motor, current generates torque and moving mass carries momentum. Canceling the computation cannot undo that motion. As a robot's software processes observations, its physical chassis continues coasting toward an obstacle. Every millisecond of computational delay consumes physical space, irreversibly shrinking the available braking envelope. Prediction accuracy alone cannot determine if an action should proceed; a policy with 99.9 percent benchmark precision still commands catastrophic collisions when scaled across thousands of operating hours in unconstrained physical environments.
+
+Physical artificial intelligence resolves this tension by structuring the machine across five distinct operating levels. High-capacity learned models residing in the Brain propose candidate trajectories, but between statistical proposals and physical execution sits the causal boundary: the definitive interface where digital bits command motor currents. The Brain holds proposal authority, while the deterministic Nervous System retains hard real-time execution authority to verify commands against the Body's measured kinematic and thermal limits. When a learned policy experiences tail latency, memory exhaustion, or semantic error, the Nervous System arrests motion via a verified stopping suffix before the machine exhausts its clearance budget.
 
 ::: {.column-margin .margin-pointer}
 ↳ **Downstream:** The plant limits behind the causal boundary are measured and recorded in @sec-body-measuring-limits.
@@ -333,38 +335,64 @@ Once digital commands transition into mechanical work, the state change becomes 
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt, fmt_frequency, check
+from mlsysim.fmt import fmt, fmt_frequency, fmt_length, check, MarkdownStr
 
 class MachineLevelRates:
     """Pinned level rates of the five-level machine (chosen values, not measurements)."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    intent_lo = 1 * hertz  # category: chosen (intent model, lower bound)
-    intent_hi = 5 * hertz  # category: chosen (intent model, upper bound)
-    chunk_lo = 10 * hertz  # category: chosen (chunk policy, lower bound)
-    chunk_hi = 50 * hertz  # category: chosen (chunk policy, upper bound)
+    intent_lo = ReferenceStats.PhysicalAIRates.IntentLo  # category: chosen (intent model, lower bound)
+    intent_hi = ReferenceStats.PhysicalAIRates.IntentHi  # category: chosen (intent model, upper bound)
+    chunk_lo = ReferenceStats.PhysicalAIRates.ChunkLo  # category: chosen (chunk policy, lower bound)
+    chunk_hi = ReferenceStats.PhysicalAIRates.ChunkHi  # category: chosen (chunk policy, upper bound)
     permission_example = (
         Embodied.MobileManipulator.WarehouseMobileManipulator.permission_rate
     )  # category: chosen (running machine, one implementation)
-    current_lo = 10 * ureg.kilohertz  # category: chosen (current loop, lower bound)
-    current_hi = 25 * ureg.kilohertz  # category: chosen (current loop, upper bound)
+    current_lo = ReferenceStats.PhysicalAIRates.CurrentLoopLo  # category: chosen (current loop, lower bound)
+    current_hi = ReferenceStats.PhysicalAIRates.CurrentLoopHi  # category: chosen (current loop, upper bound)
+    switching_lo = ReferenceStats.PhysicalAIRates.GateSwitchingLo  # category: chosen (switching frequency, lower bound)
+    switching_hi = ReferenceStats.PhysicalAIRates.GateSwitchingHi  # category: chosen (switching frequency, upper bound)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    intent_period_lo = (1 / intent_hi).to(millisecond)
+    intent_period_hi = (1 / intent_lo).to(millisecond)
+    chunk_period_lo = (1 / chunk_hi).to(millisecond)
+    chunk_period_hi = (1 / chunk_lo).to(millisecond)
     permission_period = (1 / permission_example).to(millisecond)
+    current_period_lo = (1 / current_hi).to(microsecond)
+    current_period_hi = (1 / current_lo).to(microsecond)
+    switching_period_lo = (1 / switching_hi).to(microsecond)
+    switching_period_hi = (1 / switching_lo).to(microsecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(intent_hi < chunk_lo, "The intent-model band must sit below the chunk-policy band.")
     check(chunk_hi < permission_example < current_lo, "The permission loop must sit between the chunk policy and the current loop.")
     check(abs(permission_period.magnitude - 1.0) < 1e-9, "A 1 kHz loop has a 1 ms period.")
+    check(current_lo < switching_lo, "Inverter switching frequency must exceed current loop frequency.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    intent_to_str = f"{fmt(intent_lo.magnitude, precision=0)} to {fmt_frequency(intent_hi, unit=hertz, precision=0)}"
-    chunk_to_str = f"{fmt(chunk_lo.magnitude, precision=0)} to {fmt_frequency(chunk_hi, unit=hertz, precision=0)}"
-    current_to_str = f"{fmt(current_lo.magnitude, precision=0)} to {fmt_frequency(current_hi, unit=ureg.kilohertz, precision=0)}"
-    intent_range_str = f"{fmt(intent_lo.magnitude, precision=0)}–{fmt_frequency(intent_hi, unit=hertz, precision=0)}"
-    chunk_range_str = f"{fmt(chunk_lo.magnitude, precision=0)}–{fmt_frequency(chunk_hi, unit=hertz, precision=0)}"
-    current_range_str = f"{fmt(current_lo.magnitude, precision=0)}–{fmt_frequency(current_hi, unit=ureg.kilohertz, precision=0)}"
+    intent_to_str = MarkdownStr(f"{fmt(intent_lo.magnitude, precision=0)} to {fmt_frequency(intent_hi, unit=hertz, precision=0)}")
+    chunk_to_str = MarkdownStr(f"{fmt(chunk_lo.magnitude, precision=0)} to {fmt_frequency(chunk_hi, unit=hertz, precision=0)}")
+    current_to_str = MarkdownStr(f"{fmt(current_lo.magnitude, precision=0)} to {fmt_frequency(current_hi, unit=ureg.kilohertz, precision=0)}")
+    intent_range_str = MarkdownStr(f"{fmt(intent_lo.magnitude, precision=0)}–{fmt_frequency(intent_hi, unit=hertz, precision=0)}")
+    chunk_range_str = MarkdownStr(f"{fmt(chunk_lo.magnitude, precision=0)}–{fmt_frequency(chunk_hi, unit=hertz, precision=0)}")
+    current_range_str = MarkdownStr(f"{fmt(current_lo.magnitude, precision=0)}–{fmt_frequency(current_hi, unit=ureg.kilohertz, precision=0)}")
+    switching_range_str = MarkdownStr(
+        f"{fmt(switching_lo.to(ureg.kilohertz).magnitude, precision=0)}–{fmt_frequency(switching_hi, unit=ureg.kilohertz, precision=0)}"
+    )
     permission_str = fmt_frequency(permission_example, unit=ureg.kilohertz, precision=0)
+
+    intent_period_str = MarkdownStr(f"{fmt(intent_period_lo.magnitude, precision=0)}–{fmt(intent_period_hi.magnitude, precision=0)} ms")
+    chunk_period_str = MarkdownStr(f"{fmt(chunk_period_lo.magnitude, precision=0)}–{fmt(chunk_period_hi.magnitude, precision=0)} ms")
+    permission_period_str = MarkdownStr(f"{fmt(permission_period.magnitude, precision=0)} ms")
+    current_period_str = MarkdownStr(f"{fmt(current_period_lo.magnitude, precision=0)}–{fmt(current_period_hi.magnitude, precision=0)} µs")
+    switching_period_str = MarkdownStr(f"{fmt(switching_period_lo.magnitude, precision=0)}–{fmt(switching_period_hi.magnitude, precision=0)} µs")
+
+    intent_blind_str = MarkdownStr(f"{fmt(intent_period_lo.magnitude, precision=0)}–{fmt(intent_period_hi.magnitude, precision=0)} mm")
+    chunk_blind_str = MarkdownStr(f"{fmt(chunk_period_lo.magnitude, precision=0)}–{fmt(chunk_period_hi.magnitude, precision=0)} mm")
+    permission_blind_str = fmt_length(1 * millimeter, unit=millimeter, precision=0)
+    current_blind_str = MarkdownStr(f"{fmt(current_period_lo.magnitude, precision=0)}–{fmt(current_period_hi.magnitude, precision=0)} µm")
+    switching_blind_str = MarkdownStr(f"{fmt(switching_period_lo.magnitude, precision=0)}–{fmt(switching_period_hi.magnitude, precision=0)} µm")
 ```
 
 Physical AI inherits the learned model of advisory machine learning and the actuator of classical control, and with them a combination of failure modes that neither field faces alone (@tbl-01-paradigm-comparison).
@@ -697,6 +725,18 @@ The margin stack that opens every chapter draws the same five levels (@fig-01-lo
 :::
 
 This organization operationalizes Rodney Brooks's principles of situatedness and subsumption [@brooks1986robust; @brooks1991intelligence], in which fast reactive layers protect the plant directly from sensory feedback while high-level deliberative goals modulate behavior across verified contract boundaries. For diagnosing a failure, a sense–plan–act decomposition locates the earliest broken contract; @sec-appendix-spa develops it as a playbook.
+
+The five levels span five orders of magnitude in operational frequency and latency (@tbl-physical-ai-rate-hierarchy). At the top, deliberative foundation models plan at human reaction scales (`{python} MachineLevelRates.intent_range_str`); at the bottom, power electronic inverters switch stator currents at tens to hundreds of kilohertz (`{python} MachineLevelRates.switching_range_str`). Bridging these extremes is the physical reality that latency is distance: every millisecond of uninspected delay in a machine moving at $1\text{ m/s}$ produces $1\text{ mm}$ of unrecoverable blind travel.
+
+| Machine Level                   | Frequency Band                                   | Cycle Period                                       | Blind Travel at 1 m/s                             | Architectural Role & Dominant Constraint                 |
+|:--------------------------------|:-------------------------------------------------|:---------------------------------------------------|:--------------------------------------------------|:---------------------------------------------------------|
+| **Brain (Deliberation)**        | `{python} MachineLevelRates.intent_range_str`    | `{python} MachineLevelRates.intent_period_str`     | `{python} MachineLevelRates.intent_blind_str`     | Multimodal VLA reasoning; compute- and memory-bound      |
+| **Brain (Action Chunking)**     | `{python} MachineLevelRates.chunk_range_str`     | `{python} MachineLevelRates.chunk_period_str`      | `{python} MachineLevelRates.chunk_blind_str`      | Reactive trajectory generation; bandwidth amortized      |
+| **Nervous System (Permission)** | `{python} MachineLevelRates.permission_str`      | `{python} MachineLevelRates.permission_period_str` | `{python} MachineLevelRates.permission_blind_str` | Barrier certificates & stopping envelopes; deadline hard |
+| **Body (Current Loop)**         | `{python} MachineLevelRates.current_range_str`   | `{python} MachineLevelRates.current_period_str`    | `{python} MachineLevelRates.current_blind_str`    | FOC stator current & torque control; inductive $L/R$     |
+| **Body (Inverter Switching)**   | `{python} MachineLevelRates.switching_range_str` | `{python} MachineLevelRates.switching_period_str`  | `{python} MachineLevelRates.switching_blind_str`  | MOSFET gate drive & dead time; $L dI/dt$ droop           |
+
+: **Latency and Rate Numbers for Physical AI Systems**: Order-of-magnitude frequencies, cycle periods, and kinetic translation rates across the five machine levels that dictate physical feasibility. Spanning five frequency decades, from sub-microsecond MOSFET switching up to second-scale foundation model deliberation, these physical constraints dictate how computational delay converts into irreversible mechanical motion. For a comprehensive quick-reference including thermal time constants, edge rooflines, bus jitter, and statistical safety bounds, see @sec-appendix-systems-numbers-to-know. {#tbl-physical-ai-rate-hierarchy tbl-colwidths="[18,18,18,18,28]"}
 
 ::: {.column-margin .margin-pointer}
 ↳ **Downstream:** The Brain's committed trajectory is built in @sec-planning-continuous-trajectories.

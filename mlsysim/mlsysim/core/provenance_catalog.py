@@ -1411,3 +1411,68 @@ MFU_INFERENCE_BATCHED_LIT = _lit(
     url="https://proceedings.mlsys.org/paper_files/paper/2023/hash/c4be71ab8d24cdfb45e3d06dbfca2780-Abstract-mlsys2023.html",
     notes="0.40 is an upper illustrative bound for large-batch inference, not batch-1.",
 )
+
+PHYSICAL_AI_NUMBERS = _est(
+    "prov:physical-ai-numbers",
+    "Physical AI systems rate hierarchy and engineering orders of magnitude (Volume IV)",
+    notes=(
+        "Standard multi-rate execution bands across deliberative intent (1-5 Hz), "
+        "reactive chunk policy (10-50 Hz), safety permission path (1 kHz), and "
+        "motor field-oriented current control (10-25 kHz); kinetic blind travel "
+        "conversion (1 mm/ms at 1 m/s; 1 cm/ms at 10 m/s; 3 cm/ms at 30 m/s); "
+        "edge VLA memory streaming and action chunk amortization."
+    ),
+    verified="2026-09-22",
+)
+
+ISO_26262_ASIL_D = _ds(
+    "prov:iso-26262-asil-d",
+    "ISO 26262-5:2018 Road vehicles - Functional safety - Part 5: Product development at the hardware level",
+    "https://www.iso.org/standard/68387.html",
+    verified="2026-09-22",
+    notes="ASIL D hardware target probabilistic metric for random hardware failures (PMHF) < 10 FIT (10^-8 / hour).",
+)
+
+IEC_61508_SIL_3 = _ds(
+    "prov:iec-61508-sil-3",
+    "IEC 61508-1:2010 Functional safety of electrical/electronic/programmable electronic safety-related systems",
+    "https://webstore.iec.ch/publication/5515",
+    verified="2026-09-22",
+    notes="SIL 3 high demand / continuous mode probability of dangerous failure per hour (PFH) target 10^-8 to 10^-7 / hour; matches ISO 13849 PL e.",
+)
+
+RULE_OF_THREE_SAFETY = _lit(
+    "prov:rule-of-three-safety",
+    "Hanley, J. A., & Lippman-Hand, A. (1983). If nothing goes wrong, is everything all right? Interpreting zero numerators. JAMA, 249(13), 1743-1745.",
+    url="https://doi.org/10.1001/jama.1983.03330370053031",
+    verified="2026-09-22",
+    notes="Rule of Three: 95% upper confidence bound for a Poisson event rate with zero observed occurrences in n trials is approximately 3/n.",
+)
+
+ETHERCAT_STANDARD = _ds(
+    "prov:ethercat-standard",
+    "ETG.1000 EtherCAT Specification, EtherCAT Technology Group",
+    "https://www.ethercat.org",
+    verified="2026-09-22",
+    notes="Deterministic industrial Ethernet fieldbus with hardware cut-through forwarding, cycle jitter < 1 us, typical cycle times 100 us to 1 ms.",
+)
+
+CAN_FD_SPECIFICATION = _ds(
+    "prov:can-fd-specification",
+    "ISO 11898-1:2015 Road vehicles - Controller area network (CAN) - Part 1: Data link layer and physical signalling",
+    "https://www.iso.org/standard/63648.html",
+    verified="2026-09-22",
+    notes="CAN with Flexible Data-Rate (CAN-FD) up to 5-8 Mbps payload bit rate; non-preemptive arbitration introduces frame queueing and blocking jitter.",
+)
+
+THERMAL_CONSTANTS_ELECTROMECHANICAL = _est(
+    "prov:thermal-constants-electromechanical",
+    "Representative thermal time constants for robotic electromechanical drive trains and compute silicon",
+    notes=(
+        "Adiabatic silicon junction heating tau ~ 1-10 ms; heat sink convective dissipation "
+        "tau ~ 10-60 s; motor stator copper winding Joule heating tau ~ 30-180 s; "
+        "motor casing/frame bulk thermal mass tau ~ 10-30 min; lithium-ion battery pack "
+        "tau ~ 5-20 min. Values reflect typical orders of magnitude across industrial and mobile robotics."
+    ),
+    verified="2026-09-22",
+)
