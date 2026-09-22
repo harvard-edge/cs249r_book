@@ -2392,6 +2392,7 @@ def fmt_power(
     approx=False,
     lower_bound=False,
     upper_bound=False,
+    per=None,
 ):
     """Auto-scale power quantities for prose (W, kW, MW, GW)."""
     if not isinstance(quantity, ureg.Quantity):
@@ -2408,6 +2409,7 @@ def fmt_power(
         approx=approx,
         lower_bound=lower_bound,
         upper_bound=upper_bound,
+        per=per,
         trim_trailing_zeros=auto_precision,
     )
 
@@ -2421,6 +2423,7 @@ def fmt_energy(
     approx=False,
     lower_bound=False,
     upper_bound=False,
+    per=None,
 ):
     """Auto-scale energy quantities for prose (J, Wh, kWh, MWh, GWh)."""
     if not isinstance(quantity, ureg.Quantity):
@@ -2437,6 +2440,7 @@ def fmt_energy(
         approx=approx,
         lower_bound=lower_bound,
         upper_bound=upper_bound,
+        per=per,
         trim_trailing_zeros=auto_precision,
     )
 
@@ -2450,6 +2454,7 @@ def fmt_bandwidth(
     approx=False,
     lower_bound=False,
     upper_bound=False,
+    per=None,
 ):
     """Auto-scale bandwidth for prose (MB/s, GB/s, TB/s)."""
     if not isinstance(quantity, ureg.Quantity):
@@ -2466,6 +2471,7 @@ def fmt_bandwidth(
         approx=approx,
         lower_bound=lower_bound,
         upper_bound=upper_bound,
+        per=per,
         trim_trailing_zeros=auto_precision,
     )
 
@@ -2479,6 +2485,7 @@ def fmt_flop_rate(
     approx=False,
     lower_bound=False,
     upper_bound=False,
+    per=None,
 ):
     """Auto-scale FLOP throughput for prose (GFLOP/s through ZFLOP/s)."""
     if not isinstance(quantity, ureg.Quantity):
@@ -2495,6 +2502,7 @@ def fmt_flop_rate(
         approx=approx,
         lower_bound=lower_bound,
         upper_bound=upper_bound,
+        per=per,
         trim_trailing_zeros=auto_precision,
     )
 
@@ -2901,7 +2909,18 @@ def fmt_specific_heat(quantity, *, unit=None, precision=None, commas=False):
     )
 
 
-def fmt_memory(quantity, *, unit=None, precision=None, commas=False, binary=False):
+def fmt_memory(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    binary=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+    per=None,
+):
     """Auto-scale memory sizes for prose."""
     if not isinstance(quantity, ureg.Quantity):
         raise TypeError("fmt_memory() requires a Pint Quantity.")
@@ -2911,7 +2930,17 @@ def fmt_memory(quantity, *, unit=None, precision=None, commas=False, binary=Fals
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
-    return fmt_qty(q, display_unit, precision=p, commas=commas, trim_trailing_zeros=auto_precision)
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        per=per,
+        trim_trailing_zeros=auto_precision,
+    )
 
 
 def _memory_capacity_unit_label(display_unit):

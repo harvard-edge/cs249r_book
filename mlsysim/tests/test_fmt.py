@@ -1181,11 +1181,13 @@ class TestDomainFormatters:
 
     def test_fmt_memory_scales(self):
         from mlsysim.fmt import fmt_memory
-        from mlsysim.core.units import GB, byte
+        from mlsysim.core.units import GB, byte, watt
 
         out = fmt_memory(14 * GB, precision=0, commas=False)
         assert out == "14 GB"
         assert fmt_memory(4 * byte, unit=byte, precision=0, commas=False) == "4 bytes"
+        assert fmt_memory(100 * GB, unit=GB, precision=0, per="day") == "100 GB/day"
+        assert fmt_power(500 * watt, unit=watt, precision=0, per="node") == "500 W/node"
 
     def test_fmt_memory_capacity_preserves_binary_magnitude_with_vendor_label(self):
         from mlsysim.core.units import GB, GiB, KiB, MiB
