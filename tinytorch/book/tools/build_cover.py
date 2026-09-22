@@ -202,24 +202,41 @@ def build():
     )
     p.append(_t(cap_x, ly + n + 44, "Full TinyGPT Architecture · MLPerf Benchmark Olympics", SANS, 25, TEXT_C))
 
-    # Community Expansion Ports (Branching out from Capstone)
+    # Community Expansion Ports converging to PyTorch Ecosystem
     node_out_x = cap_x + cap_w
     node_out_y = ly + n/2
     
     # Label for the branches
-    p.append(_t(node_out_x + 230, ly + n + 44, "COMMUNITY LABS &amp; EXTENSIONS", SANS, 22, TITLE_C, weight="bold", anchor="middle", ls=2))
+    p.append(_t(node_out_x + 200, ly + n + 44, "COMMUNITY LABS &amp; EXTENSIONS", SANS, 22, TITLE_C, weight="bold", anchor="middle", ls=2))
+    
+    # Converging target node (PyTorch Ecosystem)
+    pt_x = node_out_x + 450
+    pt_y = node_out_y
     
     # 1. Straight right
-    p.append(f'<path d="M {node_out_x} {node_out_y} L {node_out_x + 100} {node_out_y}" fill="none" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" marker-end="url(#arr)"/>')
+    p.append(f'<path d="M {node_out_x} {node_out_y} L {node_out_x + 100} {node_out_y}" fill="none" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" />')
     p.append(_t(node_out_x + 130, node_out_y + 8, "LoRA / PEFT", MONO, 26, ACCENT, weight="bold"))
+    p.append(f'<path d="M {node_out_x + 350} {node_out_y} L {pt_x - 12} {node_out_y}" fill="none" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" marker-end="url(#arr)"/>')
 
     # 2. Up and right
-    p.append(f'<path d="M {node_out_x} {node_out_y} L {node_out_x + 40} {node_out_y} Q {node_out_x + 60} {node_out_y} {node_out_x + 60} {node_out_y - 30} L {node_out_x + 60} {node_out_y - 50} Q {node_out_x + 60} {node_out_y - 70} {node_out_x + 80} {node_out_y - 70} L {node_out_x + 100} {node_out_y - 70}" fill="none" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" marker-end="url(#arr)"/>')
+    p.append(f'<path d="M {node_out_x} {node_out_y} L {node_out_x + 40} {node_out_y} Q {node_out_x + 60} {node_out_y} {node_out_x + 60} {node_out_y - 30} L {node_out_x + 60} {node_out_y - 50} Q {node_out_x + 60} {node_out_y - 70} {node_out_x + 80} {node_out_y - 70} L {node_out_x + 100} {node_out_y - 70}" fill="none" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" />')
     p.append(_t(node_out_x + 130, node_out_y - 70 + 8, "Torch.Compile", MONO, 26, ACCENT, weight="bold"))
+    p.append(f'<path d="M {node_out_x + 350} {node_out_y - 70} L {pt_x - 80} {node_out_y - 70} Q {pt_x - 60} {node_out_y - 70} {pt_x - 60} {node_out_y - 50} L {pt_x - 60} {node_out_y - 30} Q {pt_x - 60} {node_out_y} {pt_x - 40} {node_out_y} L {pt_x - 12} {node_out_y}" fill="none" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" marker-end="url(#arr)"/>')
 
     # 3. Down and right
-    p.append(f'<path d="M {node_out_x} {node_out_y} L {node_out_x + 40} {node_out_y} Q {node_out_x + 60} {node_out_y} {node_out_x + 60} {node_out_y + 30} L {node_out_x + 60} {node_out_y + 50} Q {node_out_x + 60} {node_out_y + 70} {node_out_x + 80} {node_out_y + 70} L {node_out_x + 100} {node_out_y + 70}" fill="none" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" marker-end="url(#arr)"/>')
+    p.append(f'<path d="M {node_out_x} {node_out_y} L {node_out_x + 40} {node_out_y} Q {node_out_x + 60} {node_out_y} {node_out_x + 60} {node_out_y + 30} L {node_out_x + 60} {node_out_y + 50} Q {node_out_x + 60} {node_out_y + 70} {node_out_x + 80} {node_out_y + 70} L {node_out_x + 100} {node_out_y + 70}" fill="none" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" />')
     p.append(_t(node_out_x + 130, node_out_y + 70 + 8, "Distributed", MONO, 26, ACCENT, weight="bold"))
+    p.append(f'<path d="M {node_out_x + 350} {node_out_y + 70} L {pt_x - 80} {node_out_y + 70} Q {pt_x - 60} {node_out_y + 70} {pt_x - 60} {node_out_y + 50} L {pt_x - 60} {node_out_y + 30} Q {pt_x - 60} {node_out_y} {pt_x - 40} {node_out_y} L {pt_x - 12} {node_out_y}" fill="none" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" marker-end="url(#arr)"/>')
+
+    # The Final PyTorch Node
+    pt_w, pt_h = 320, 124
+    p.append(f'<rect x="{pt_x}" y="{pt_y - pt_h/2}" width="{pt_w}" height="{pt_h}" rx="8" fill="{BOX_BG}" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="10,6"/>')
+    p.append(
+        f'<text x="{pt_x + pt_w/2}" y="{pt_y + 18}" text-anchor="middle" xml:space="preserve">'
+        f'<tspan font-family="{SERIF}" font-size="52" font-weight="bold" fill="{TITLE_C}">PyTorch</tspan>'
+        f'</text>'
+    )
+    p.append(_t(pt_x, pt_y + pt_h/2 + 44, "The Production Ecosystem", SANS, 25, TEXT_C))
 
     # --- author -------------------------------------------------------------
     p.append(f'<rect x="{L}" y="2780" width="120" height="4" fill="{ACCENT}"/>')
