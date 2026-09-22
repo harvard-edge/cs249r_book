@@ -33,22 +33,23 @@ title: "Grounded Intent"
 
 _What must an autonomous goal carry to prevent a slow reasoning model from driving a machine into a situation that no longer exists?_
 
-A semantic request like 'retrieve the tool' specifies an outcome but leaves physical decisions—path, force, and duration—unresolved. Because the physical scene changes while a slow reasoning model deliberates, we cannot blindly execute its delayed output. A goal that was reachable when proposed can become obstructed before execution, even when the model's interpretation of the request was correct. Intent must connect a task to an admissible region of physical action and a deadline. When that deadline passes, continued motion cannot depend on the same delayed model noticing that its proposal has expired. The execution layer needs enough information to withdraw permission and enter a defined fallback on its own. Grounded intent links the Brain's task choices to the Body's changing constraints through an interface that grants the Nervous System bounded authority to act.
+A semantic request like 'retrieve the tool' specifies an outcome but leaves the physical decisions of path, force, and duration unresolved. Because the physical scene changes while a slow reasoning model deliberates, we cannot blindly execute its delayed output. A goal that was reachable when proposed can become obstructed before execution, even when the model's interpretation of the request was correct. Intent must connect a task to an admissible region of physical action and a deadline. When that deadline passes, continued motion cannot depend on the same delayed model noticing that its proposal has expired. The execution layer needs enough information to withdraw permission and enter a defined fallback on its own. Grounded intent links the Brain's task choices to the Body's changing constraints through an interface that grants the Nervous System bounded authority to act.
 
 {{< pagebreak >}}
 
 ::: {.callout-learning-objectives}
 
-- Construct grounded goal records with spatial tolerances, motion limits, and finite validity windows
-- Set goal validity windows from scene dynamics and the physical response needed before expiry
-- Evaluate whether a proposed goal is reachable within the machine's physical and temporal limits
-- Design goal expiration that revokes motion permission even when the issuing process cannot cancel it
+- Construct an intent lease from a belief record, with a goal region, error envelope, task tolerance, and effort ceilings
+- Derive a target-evidence horizon from task tolerance and target drift, and distinguish it from the stopping deadline
+- Decide when grounding ambiguity or a wrong-object premise requires refusal rather than admission
+- Evaluate whether a proposed goal is reachable within its remaining evidence window
+- Design lease expiry that revokes motion authority even when the issuing process cannot cancel it
 
 :::
 
 ## Grounded Affordances {#sec-intent-grounded-affordances}
 
-High-level directives like "pick up the blue vial" or "clear the conveyor junction" specify outcomes but leave path, force, and deadline unresolved. A motor inverter accepts electrical commands, not language. Vision-Language-Action (VLA) models [@brohan2023rt1; @brohan2023rt2] can propose actions or targets, but their update cadence depends on the model and hardware and may be much slower than local control. If a target moves during inference, a stale proposal can consume clearance. The system therefore needs dated geometric evidence, bounded requests, and an independent permission path that can withdraw authority while the model is silent.
+When the warehouse mobile manipulator is told to "pick the red mug" from the takeaway conveyor, the directive specifies an outcome but leaves path, force, and deadline unresolved. A motor inverter accepts electrical commands, not language. Vision-Language-Action (VLA) models [@brohan2023rt1; @brohan2023rt2] can propose actions or targets, but their update cadence depends on the model and hardware and may be much slower than local control. If a target moves during inference, a stale proposal can consume clearance. The system therefore needs dated geometric evidence, bounded requests, and an independent permission path that can withdraw authority while the model is silent.
 
 ::: {.column-margin .margin-pointer}
 ↰ **Prerequisite:** Persistent spatial object states and bounding volumes are tracked in @sec-memory-spatial-state-schema.
@@ -74,13 +75,7 @@ This fundamental challenge is the modern robotics manifestation of what Harnad t
 
 :::
 
-That permission must remain bounded in time. @Fig-intent-frequency-gap gives a schedule in which a slow deliberative model, local tracker, permission loop, and drive run at different rates. A conveyor target whose evidence expires within tens of milliseconds (@sec-intent-goals-expire) cannot be renewed by a model updating every $200\text{--}1000\text{ ms}$ (illustrative; see the Reader Guide); a separate validated local observation path or task pause is required.
-
-::: {.column-margin}
-![](images/svg/margin_operating_frequency_ladder.svg){width="100%" fig-alt="A second machine schedule with drive, control, perception, planning, and VLA rates from 20 kilohertz down to 0.5 hertz; these rates differ from the four-rate chart in the main text."}
-
-*An illustrative second machine schedule. Its five rates differ from the four-rate chart in the main text.*
-:::
+Whatever the model proposes must also remain bounded in time. @Fig-intent-frequency-gap gives a schedule in which a slow deliberative model, local tracker, permission loop, and drive run at different rates. A conveyor target whose evidence expires within tens of milliseconds (@sec-intent-goals-expire) cannot be renewed by a model updating every $200\text{--}1000\text{ ms}$ (illustrative; see the Reader Guide); a separate validated local observation path or task pause is required.
 
 ::: {#fig-intent-frequency-gap fig-env="figure" fig-pos="htb" fig-cap="**Multi-rate schedule**: Four illustrative rates show why a deliberative proposal cannot act as a motor or permission-loop heartbeat. The schedule does not relate model size to frequency. The local tracker can renew target evidence only if its sensor and error bounds are independently validated." fig-alt="Horizontal log-scale chart of four frequencies: drive current loop 20 kilohertz, independent permission loop 1 kilohertz, local target tracker 50 hertz, and deliberative proposal 2 hertz."}
 
@@ -111,17 +106,13 @@ plt.close()
 
 :::
 
-Across the proposal boundary, the Linux MPU proposes a dated **intent record** and requested validity window.[^fn-intent-intercore-channel] In the running implementation, the independent MCU grants a bounded interval only after checking current limits and stopping feasibility. A host stall then prevents fresh proposals, so the local timer revokes tracking without waiting for a cancellation packet. Deceleration can protect clearance only if its total response was budgeted before the motion was admitted.
+Across the proposal boundary, the Linux MPU sends a dated **intent proposal** with a requested validity window.[^fn-intent-intercore-channel] In the running implementation, the independent MCU grants a bounded interval only after checking current limits and stopping feasibility. A host stall then prevents fresh proposals, so the local timer revokes tracking without waiting for a cancellation packet. Deceleration can protect clearance only if its total response was budgeted before the motion was admitted.
 
 ::: {.column-margin .margin-pointer}
 ↰ **Prerequisite:** The proposal boundary and the permission path are defined in @sec-boundary-machine-model.
 :::
 
-In this proposed interface, each intent packet from the learned MPU requests three bounds for the independent permission controller to check against configured limits and the current physical state:
-
-1. **3D spatial tolerance region**\index{Intent record!spatial tolerance region}: This term refers to an explicit target pose defined in the mathematical space known as $SE(3)$, which represents the set of all possible positions and orientations in three-dimensional space. The spatial tolerance region includes a bounded metric tolerance volume, which defines the allowable dispersion within which the low-level controller can maneuver without compromising stability or safety.
-2. **Expiring temporal lease (TTL)**\index{Intent record!temporal lease}: An explicit time-to-live $\tau$ measured in milliseconds. If no renewal packet arrives before the deadline passes, hardware timers automatically revoke motion authority.
-3. **Admissible command and force limits**\index{Intent record!force limits}: Explicit dynamic limits that cap the peak velocity ($v_{\max}$), acceleration ($a_{\max}$), and contact wrench ($F_{\max}$) the machine may exert while pursuing the target.
+In this proposed interface, each intent proposal from the learned MPU requests three bounds, which the independent permission controller checks against configured limits and the current physical state. The first is a target pose in $SE(3)$, the space of three-dimensional positions and orientations, with a spatial tolerance region\index{Intent record!spatial tolerance region} around it. The second is an expiring validity window\index{Intent record!temporal lease}, after which a local timer revokes motion authority unless a renewal has arrived. The third is a set of effort limits\index{Intent record!force limits} on peak velocity ($v_{\max}$), acceleration ($a_{\max}$), and contact wrench ($F_{\max}$) while the machine pursues the target.
 
 [^fn-intent-intercore-channel]: **Inter-core communication across the proposal boundary**\index{Inter-core communication!RPMSG}\index{Proposal boundary!inter-core communication}: RPMSG over a statically bounded shared SRAM ring is one transport for proposals crossing to the permission path. An independent timer can detect loss of host renewals despite a host kernel panic; the complete detection-to-brake response still needs validated bus, sensing, drive, and actuator timing. See @sec-enforcement-authority-refuse and @sec-appendix-systems-ipc.
 
@@ -129,9 +120,7 @@ Grounding an open-ended directive therefore requires a proposal that carries the
 
 ## What Intent Hands Over {#sec-intent-handoff}
 
-Every autonomous action delivered across the causal boundary (@sec-boundary-causal-boundary) needs a checkable proposal before the permission path accepts it. Instead of streaming continuous joint trajectories or raw voltages, the Brain issues a **conceptual intent contract** requesting bounded operational authority over space, time, and effort.
-
-The **conceptual intent contract** states the checks: target tolerance, evidence validity, requested effort, and a feasible fallback. @Sec-intent-lease names the record that carries those requests and their belief-record lineage. The permission path grants authority only after validating them against independent limits and current state.
+When the arm reaches for the red mug, the Brain sends neither joint trajectories nor winding voltages across the proposal boundary. It requests bounded authority over space, time, and effort, and the permission path must be able to check every part of that request before it grants any of it. The checks are target tolerance, evidence validity, requested effort, and a feasible fallback, and each exists because a delayed proposal can fail in a different way. @Sec-intent-lease names the record that carries those requests and their belief-record lineage.
 
 ```{python}
 #| label: calc-intent-lease-duration-collision-exposure
@@ -308,7 +297,7 @@ The three models below answer different questions. A stopping calculation needs 
 
 1. **The base in the aisle:** The machine runs the aisle at `{python} IntentLeaseArchetypes.v_aisle_str`. Once its stopping budget is complete (@sec-enforcement-stopping-envelopes), that speed leaves `{python} IntentLeaseArchetypes.spare_aisle_str` of the `{python} IntentLeaseArchetypes.d_clear_str` clear distance unspent. Suppose the application processor stalls and the base holds its last proposal for `{python} IntentLeaseArchetypes.t_stall_base_str` instead of braking when the `{python} IntentLeaseArchetypes.t_lease_str` chunk lease lapses. The extra `{python} IntentLeaseArchetypes.stall_extra_str` of travel adds `{python} IntentLeaseArchetypes.stall_added_str` to the stop and overruns the spare by `{python} IntentLeaseArchetypes.stall_breach_str`.
 2. **The arm at the cage door:** At the guarded approach speed of `{python} IntentLeaseArchetypes.v_latch_str` against the `{python} IntentLeaseArchetypes.k_latch_str` strike plate of the spring-latched door, modeled force rises at `{python} IntentLeaseArchetypes.df_dt_nms_str`. A `{python} IntentLeaseArchetypes.f_trip_str` tripwire and `{python} IntentLeaseArchetypes.t_contact_str` contact-loop response yield `{python} IntentLeaseArchetypes.f_at_brake_onset_n_str` **when the brake command begins**; force keeps rising while the arm decelerates. Staying under the `{python} IntentLeaseArchetypes.f_lim_str` latch limit leaves only `{python} IntentLeaseArchetypes.x_remaining_str` of further compression, so the arm must decelerate at about `{python} IntentLeaseArchetypes.a_arm_str` and stop within about `{python} IntentLeaseArchetypes.t_arm_stop_str`. Whether the arm can brake that hard from the approach is an open premise, which only arm stopping trials can settle. Unbraked motion for `{python} IntentLeaseArchetypes.t_stall_arm_str` advances `{python} IntentLeaseArchetypes.delta_x_unbounded_mm_str` and gives `{python} IntentLeaseArchetypes.f_unbounded_n_str` in the linear-spring model, far past the latch limit.
-3. **Thermal process:** For an illustrative lumped capacitance of $900\text{ J/K}$ and uncompensated $3600\text{ W}$ input, temperature rises at `{python} IntentLeaseArchetypes.dt_dt_ks_str`. A chosen $2\text{ K}$ task overshoot allowance is consumed in `{python} IntentLeaseArchetypes.tau_bess_ms_str`; ten seconds at the same net heat input yields a `{python} IntentLeaseArchetypes.delta_t_rise_k_str` modeled rise.
+3. **A process-plant contrast:** A heated process has no braking distance, but its setpoint's authority lapses the same way, spent as temperature rather than travel. For an illustrative lumped capacitance of $900\text{ J/K}$ and uncompensated $3600\text{ W}$ input, temperature rises at `{python} IntentLeaseArchetypes.dt_dt_ks_str`. A chosen $2\text{ K}$ task overshoot allowance is consumed in `{python} IntentLeaseArchetypes.tau_bess_ms_str`, so a heater setpoint whose proposer stalls must lose authority well inside that interval; ten seconds at the same net heat input yields a `{python} IntentLeaseArchetypes.delta_t_rise_k_str` modeled rise.
 :::
 
 These three examples clarify the division of authority. High-level reasoning can propose a target, time window, and effort ceiling. The independent permission path determines which limits are admissible from measured state, configured ceilings, and a feasible fallback. Local control then tracks only an admitted proposal and withdraws authority on invalid evidence or expiry. This resembles the priority separation of the **subsumption architecture**\index{Subsumption architecture}[^fn-ai-subsumption-intent] [@brooks1986robust].
@@ -367,10 +356,6 @@ When a vision-language model sees multiple candidate objects, an argmax can hide
 
 Formally, **open-vocabulary grounding ambiguity**\index{Grounding!ambiguity} is the condition where multimodal feature projections yield multi-peak posterior distributions, overlapping geometric hypotheses, or unresolvable evidential ties across candidate physical referents ($H(\mathbf{z}) > H_{\text{thresh}}$), requiring an explicit grounding refusal (`ERR_GROUNDING_AMBIGUITY`) rather than optimistic argmax tie-breaking.
 
-::: {#psp-intent-ambiguity-refusal .callout-perspective title="Ambiguity demands refusal"}
-An argmax hides an evidential tie. In a physical task, an admitted target at the wrong coordinate can move mass toward the wrong object. When calibrated ambiguity exceeds the task threshold, refuse that proposal and use the independently validated fallback.
-:::
-
 ::: {#ws-intent-autort-hallucination-constitution .callout-war-story title="AutoRT task filtering and supervision (2024)"}
 **Context**: AutoRT used language models to propose and filter tasks for mobile manipulators in office environments [@ahn2023autort]. The authors collected 77,000 robot episodes with a fleet of more than 20 robots.
 
@@ -408,19 +393,21 @@ To evaluate how different open-vocabulary perceptual frontends interface with de
 
 : **Grounding representations and admission questions**: Outputs from different model families require different conversions before a physical permission check. {#tbl-10-grounding-paradigms tbl-colwidths="[18,24,24,34]"}
 
+Whatever its source, a grounded target is also a claim about a moment. The red mug that the model selected correctly at capture keeps moving with the conveyor, so a proposal that was right when issued becomes wrong with no change to its contents. It must therefore carry a deadline that the permission path can enforce without the model.
+
 ::: {#chk-intent-grounding-ambiguity .callout-checkpoint title="Open-vocabulary grounding and ambiguity refusal"}
 
 Before admitting an unverified semantic hypothesis to the physical trajectory pipeline, verify your understanding of how multimodal proposals are geometrically bounded and evidentially gated:
 
 - [ ] **Affordance feasibility gating**: Can you explain what SayCan's learned skill-success score ranks and which physical checks still belong to an independent permission path?
 - [ ] **Spatial token quantization**: Can you distinguish 256-bin robot action tokens from image-location tokens and calculate the nearest-bin error of a hypothetical metric target encoder?
-- [ ] **Grounding ambiguity refusal**: Can you distinguish between optimistic argmax tie-breaking in digital web search versus mandatory grounding refusal (`ERR_GROUNDING_AMBIGUITY`) when posterior entropy exceeds safety thresholds in physical AI?
+- [ ] **Grounding ambiguity refusal**: Can you distinguish between optimistic argmax tie-breaking in a digital recommendation versus mandatory grounding refusal (`ERR_GROUNDING_AMBIGUITY`) when posterior entropy exceeds safety thresholds in physical AI?
 
 :::
 
 ## Goals That Expire {#sec-intent-goals-expire}
 
-An intent lease must expire autonomously, because the same software fault requiring cancellation may prevent the abort signal from being sent. An explicit abort requires a working sender, scheduler, and communication path. If a learned model stalls, an independent countdown can withdraw that proposal's tracking authority without waiting for the model. This adapts the lease primitive of @gray1989leases to a physical controller: expiry triggers a separately validated fallback, whose ability to stop before a hazard depends on current state, clearance, actuator authority, and total response delay.[^fn-hw-watchdog-rtt]
+Suppose the application processor hangs while the arm reaches for the red mug. The fault that makes cancellation necessary is the same fault that stops the cancellation from being sent, because an explicit abort requires a working sender, scheduler, and communication path. An intent lease must therefore expire on its own. This is principle \ref{pri-vol4-proposal-permission} applied to a goal. The permission path owns a fallback it can execute without the proposer, so an independent countdown withdraws the stalled proposal's tracking authority without waiting for the model. This adapts the lease primitive of @gray1989leases to a physical controller: expiry triggers a separately validated fallback, whose ability to stop before a hazard depends on current state, clearance, actuator authority, and total response delay.[^fn-hw-watchdog-rtt]
 
 ::: {.column-margin .margin-pointer}
 ↰ **Prerequisite:** Kinetic momentum budgets and stopping distance constraints originate in @sec-body-kinetic-momentum.
@@ -455,7 +442,7 @@ In the running MPU/MCU implementation, the host sends a proposal over a bounded 
 
 On expiry, the independent controller withdraws the proposal's authority and selects a previously validated response\index{Safety!deterministic terminal state} for the measured load and contact mode. An active position hold needs torque and can protect a suspended payload; controlled deceleration needs brake capability and clearance; torque disable can be suitable for some drives but can release a load or leave momentum uncontrolled. The proposer may request a mode, but it cannot choose the terminal action for the MCU. Admission fails when no response remains feasible from the current state.
 
-Executing an expiring lease safely assumes that the commanded geometric proposal is actually achievable by the physical body. If a proposed coordinate lies beyond kinematic reach\index{Kinematics!workspace reachability} or demands joint velocities that exceed actuator limits\index{Actuator!velocity limits} during the lease window, granting the lease wastes control authority and risks triggering hardware fault trips—such as blowing a digital fuse when a motor attempts to draw excessive current to achieve an impossible speed. Determining whether a goal is kinematically and dynamically admissible belongs before the trajectory generator accepts the lease, establishing a physical filter between high-level intent and motion execution.
+Executing an expiring lease safely assumes that the commanded geometric proposal is actually achievable by the physical body. If a proposed coordinate lies beyond kinematic reach\index{Kinematics!workspace reachability} or demands joint velocities that exceed actuator limits\index{Actuator!velocity limits} during the lease window, granting the lease wastes control authority and can trip the drive's overcurrent protection as a motor draws excessive current toward an impossible speed. Determining whether a goal is kinematically and dynamically admissible belongs before the trajectory generator accepts the lease, establishing a physical filter between high-level intent and motion execution.
 
 ## Admissible Goal Sets {#sec-intent-admissible-goal-sets}
 
@@ -468,10 +455,6 @@ Filtering a goal against the physical capability of the machine belongs at the i
 Cheap workspace and bounding-volume checks can reject obvious failures before trajectory optimization (@fig-10-lease-dynamics-tradeoff, panel b). Passing a bounding sphere or scalar transit test is only a necessary prefilter: joint orientation, swept obstacles, torque, thermal state, unknown space, and stopping clearance still require a checked path and permission decision.
 
 [^fn-math-workspace-manifold]: **Kinematic workspace boundaries and singularities**\index{Kinematics!workspace boundaries}: The kinematic workspace defines the continuous manifold of task-space poses attainable by the manipulator given link geometry and joint travel limits. Near workspace boundaries and internal singular configurations, the kinematic Jacobian $\mathbf{J}(\mathbf{q})$ loses rank, requiring infinite joint velocities to maintain finite Cartesian end-effector motion. Enforcing workspace manifold filters at the ingestion stage prevents trajectory optimizers from driving actuators into kinematic lockup.
-
-::: {#psp-intent-reject-at-ingestion .callout-perspective title="Reject at the ingestion gate"}
-A cheap workspace or static-occupancy prefilter can reject some impossible targets before a more costly trajectory search.
-:::
 
 A target that lies within the static kinematic workspace\index{Kinematics!workspace} may still be physically unachievable within the operational window. Static reachability establishes only that the mechanism is geometrically long enough to touch the target coordinate if given infinite time. **Dynamic reachability**\index{Dynamic reachability} is the physical condition wherein an end effector can physically transition from its instantaneous initial state $(\mathbf{p}_0, \mathbf{v}_0)$ to a target $SE(3)$\index{SE(3)} pose within the remaining lease validity duration $\tau = t_{\text{exp}} - t_{\text{now}}$, while strictly respecting actuator velocity ceilings ($v_{\max}$), acceleration limits ($a_{\max}$), jerk constraints ($j_{\max}$), and thermal torque limits.
 
@@ -516,7 +499,7 @@ Early reachability filters remove known impossible targets; the planner and the 
 
 ## How Intent Goes Wrong {#sec-intent-failure-modes}
 
-When a vision-language model\index{Vision-language model} outputs an $\text{SE}(3)$ target pose\index{SE(3) Kinematics} for a physical manipulator, that pose can fail in several distinct ways. It may be a hallucinated target generated from visual attention patterns on reflective background textures. It may be a stale target representing an object that a human coworker bumped or displaced an illustrative $300\text{ ms}$ earlier while the camera pipeline was buffering frames. It may be a reference ambiguity where the model arbitrarily selects one of two identical machined parts on a tray without resolving which one the task requires. Or it may stem from an out-of-distribution scene shift, such as unexpected lighting or dust on an optical lens, that degrades the spatial prediction accuracy of the network. Despite differing causal origins, both hallucinated targets and stale correct targets fail downstream in the same way.
+When a vision-language model\index{Vision-language model} outputs an $\text{SE}(3)$ target pose\index{SE(3) Kinematics} for a physical manipulator, that pose can fail in several distinct ways. It may be a hallucinated target generated from visual attention patterns on reflective background textures. It may be a stale target representing an object that a human coworker bumped or displaced an illustrative $300\text{ ms}$ earlier while the camera pipeline was buffering frames. It may be a reference ambiguity where the model arbitrarily selects one of two identical machined parts on a tray without resolving which one the task requires. Or it may stem from an out-of-distribution scene shift, such as unexpected lighting or dust on an optical lens, that degrades the spatial prediction accuracy of the network. Despite their different causes, all four arrive downstream in the same form.
 
 The planner receives a dated target proposal, not an actuator command. A pose on an empty location may lead to a futile reach; a pose inside an occupied fixture may lead to contact if the later path and permission checks fail. The wrong-object case is different: geometry can be valid while the selected object is semantically wrong. The independent permission path therefore checks what it can measure—freshness, coverage, geometry, current state, and actuator limits—without claiming to verify the task's meaning.
 
@@ -536,7 +519,7 @@ A fresh depth observation can reject a proposed grasp whose required object evid
 
 : **Grounding failure modes and their evidence limits**: Each check addresses a different failure class. The table separates proposal rejection from a response to an already moving plant. {#tbl-10-grounding-failure-modes tbl-colwidths="[19,27,25,29]"}
 
-The proposed target must carry its spatial bounds, provenance, and expiry. A rejected proposal returns a reason to the learned layer; an admitted proposal remains subject to independent permission checks as the plant moves.
+Every row of the table therefore requires the proposal to carry its spatial bounds, the provenance of its evidence, and its expiry, in a form the permission path can check without the model. A rejected proposal returns a reason to the learned layer; an admitted proposal remains subject to independent permission checks as the plant moves. The proposal carries those fields across the proposal boundary, and the record the permission path grants from it is the intent lease.
 
 ## The Intent Lease {#sec-intent-lease}
 
@@ -592,7 +575,7 @@ Before examining the fallacies and pitfalls of grounded autonomy, verify your un
 
 ## Fallacies and Pitfalls {#sec-intent-fallacies-pitfalls}
 
-An intent can become unsafe despite unchanged contents. Local checks\index{Local checks!authority withdrawal} must withdraw tracking authority when the goal's temporal validity window expires or its physical justification dissolves, even when no status updates or abort packets arrive across the SerDes bus\index{SerDes!bus timeout}.
+Each mistake in this section trusts an upstream message to arrive, or to mean what it says. Local checks\index{Local checks!authority withdrawal} must withdraw tracking authority when the goal's temporal validity window expires or its physical justification dissolves, even when no status updates or abort packets arrive from the application processor.
 
 ::: {.fallacy-pitfall}
 
@@ -622,25 +605,28 @@ The machine's application processor undergoes thermal derating\index{Thermal der
 
 **Fallacy**: *Neural networks can resolve bimodal spatial ambiguity by averaging candidate target locations.*
 
-The machine sees two identical red mugs set an illustrative $35.0\text{ mm}$ apart on the takeaway conveyor and receives their spatial mean as a grasp target. The midpoint lies in empty space, so averaging has destroyed the $SE(3)$\index{SE(3)!target precision} distinction the task requires. In this example, the reported state covariance expands beyond the permitted targeting uncertainty\index{Uncertainty!covariance expansion}, allowing the admission gate\index{Admission gate!rejection} to reject the proposal and maintain a hold. That check is useful only when the estimate correctly captures bimodal ambiguity\index{Bimodal ambiguity!spatial}. The intent interface must preserve statistical uncertainty rather than collapse competing object hypotheses into an apparently precise Cartesian coordinate, and the local controller must defer the pick when the resulting target distribution cannot meet its physical admission bounds.
+The machine sees two identical red mugs set an illustrative $35.0\text{ mm}$ apart on the takeaway conveyor and receives their spatial mean as a grasp target. The midpoint lies in empty space, so averaging has destroyed the $SE(3)$\index{SE(3)!target precision} distinction the task requires. Both mugs are real, so this is not the sensor disagreement that an innovation gate catches before fusion (@sec-memory-fallacies-pitfalls). Each hypothesis alone is sharp, and a gate applied to either one passes. In this example, the averaged estimate's reported covariance expands beyond the permitted targeting uncertainty\index{Uncertainty!covariance expansion}, allowing the admission gate\index{Admission gate!rejection} to reject the proposal and maintain a hold. That check is useful only when the estimate correctly captures bimodal ambiguity\index{Bimodal ambiguity!spatial}. The intent interface must preserve statistical uncertainty rather than collapse competing object hypotheses into an apparently precise Cartesian coordinate, and the local controller must defer the pick when the resulting target distribution cannot meet its physical admission bounds.
 
 :::
 
 ## Summary {#sec-intent-summary}
 
-A learned model proposes a dated target and an uncertainty description. The independent permission path checks the target's evidence age, configured motion bounds, current state, path clearance, and feasible fallback before applying motion. The target-evidence horizon $\tau_{\text{evidence}}\le(r_{\text{tol}}-e_0)/v_{\text{drift}}$ limits how long the target estimate may be used under its stated drift bound. It does not provide time to stop. A separate total-delay and braking check must fit within the available physical clearance.
+A learned model proposes a dated target and an uncertainty description. The record the permission path grants from that proposal is the intent lease, which takes its evidence epoch and parent from the belief record of @sec-memory and grants a target and effort ceilings with an expiry. The independent permission path checks the target's evidence age, configured motion bounds, current state, path clearance, and feasible fallback before applying motion. The target-evidence horizon $\tau_{\text{evidence}}\le(r_{\text{tol}}-e_0)/v_{\text{drift}}$ limits how long the target estimate may be used under its stated drift bound. It does not provide time to stop. A separate total-delay and braking check must fit within the available physical clearance.
 
-The `{python} IntentLeaseArchetypes.tau_untracked_str` conveyor example makes the cadence constraint concrete: a model that updates every $200\text{--}1000\text{ ms}$ cannot maintain that target record by itself. A qualified local tracker can refresh it from new evidence and lengthen the horizon to `{python} IntentLeaseArchetypes.tau_tracked_str`, leaving the machine's `{python} IntentLeaseArchetypes.f_intent_str` intent model only to re-confirm which target is meant; otherwise the machine slows, pauses, or refuses the task. Expiry revokes the proposal's tracking authority and invokes a response validated for the measured state. It cannot undo motion already executed.
+The red mug on the conveyor makes the cadence constraint concrete. Its untracked evidence lasts `{python} IntentLeaseArchetypes.tau_untracked_str`, and the machine's `{python} IntentLeaseArchetypes.f_intent_str` intent model, refreshing every `{python} IntentLeaseArchetypes.t_intent_period_str`, cannot maintain that target by itself. A qualified local tracker can refresh it from new evidence and lengthen the horizon to `{python} IntentLeaseArchetypes.tau_tracked_str`, leaving the intent model only to re-confirm which mug is meant; otherwise the machine slows, pauses, or refuses the task. Expiry revokes the proposal's tracking authority and invokes a response validated for the measured state. It cannot undo motion already executed.
 
 An early reachability lower bound rejects some impossible requests before full trajectory planning. Passing it does not decide semantic correctness, collision-free motion, or a safe stop. The wrong-object case remains a semantic failure even when geometry and timing checks pass. Conversely, a force trip after contact limits later loading only according to the measured response and available actuator authority; precontact limits are needed to bound the first impact.
 
-::: {.callout-takeaways title="Grounded intent at the permission boundary"}
-* **Proposal:** The Brain supplies a target, evidence epoch, error envelope, task tolerances, and requested expiry; it does not write actuator setpoints.
-* **Evidence deadline:** Target drift and task tolerance set a finite validity horizon under a declared validity region. A fresh timestamp does not make a target correct.
-* **Motion deadline:** The permission path separately budgets sensing, communication, enforcement, actuator delay, and braking distance for the current state and clearance.
-* **Refusal:** Ambiguous identity, stale evidence, insufficient reachability, or infeasible stopping can each reject a proposal. Each check has its own evidence limit.
+::: {.callout-takeaways title="Grounded intent at the proposal boundary"}
+* **A lease grants a target, never a path:** The Brain supplies a target, evidence epoch, error envelope, task tolerances, and requested expiry, and it writes no actuator setpoints. The permission path admits a target and effort ceilings that expire at the earliest of the evidence horizon, the lease ceiling, and the stop deadline.
+* **Evidence expires with drift:** Target drift and task tolerance set a finite validity horizon under a declared validity region. A fresh timestamp does not make a target correct, and only fresh evidence, never a faster model, renews it.
+* **The evidence deadline is not the motion deadline:** The permission path separately budgets sensing, communication, enforcement, actuator delay, and braking distance for the current state and clearance.
+* **Geometry cannot verify meaning:** A confident grounding to the wrong object can pass every coordinate, reachability, and force check. That premise needs its own task evidence, because the permission path cannot settle it.
+* **Refusal is an admissible outcome:** Ambiguous identity, stale evidence, insufficient reachability, or infeasible stopping can each reject a proposal, and a structured rejection tells the proposer what to change. Each check has its own evidence limit.
 :::
 
+Grounded intent is the third law, that proposal is not permission, applied to a request whose meaning the permission path cannot check. For a goal, the law holds only when the proposal carries its own expiry, sized from target drift and task tolerance, so that an independent countdown withdraws authority a stalled model could never cancel. What the chapter adds to the law is evidence age on a moving target, and refusal as the permission path's answer to a semantic premise it cannot settle.
+
 ::: {.callout-chapter-connection title="From intent leases to trajectory planning"}
-The intent boundary turns an uncertain semantic request into a dated geometric proposal\index{SE(3) Kinematics}. Ambiguity and wrong-target risk can remain, so the permission path admits motion only within checked evidence, effort, and stopping limits. The next decision, developed in @sec-planning, is a trajectory that reaches an admitted target with feasible jerk, torque, path clearance, and time while preserving a checked fallback.
+An admitted lease names a dated target\index{SE(3) Kinematics}, but the trajectory that reaches it arrives in chunks, and the next chunk is still in flight while the current one executes. @Sec-planning takes the lease as its input and asks what the machine does when that next chunk is late, which requires every committed trajectory to keep the admitted target reachable within feasible jerk, torque, and clearance, with a stop that remains executable from every state it can reach.
 :::
