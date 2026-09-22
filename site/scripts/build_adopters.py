@@ -82,8 +82,22 @@ def monogram(name: str, short: str | None) -> str:
 
 
 def teaching() -> list[dict]:
-    out = []
+    """Curated schools, one entry per domain.
+
+    The intake workflow appends a new block for every submitted course, so a
+    school can appear more than once in adopters.yml; its courses merge here.
+    """
+    out: list[dict] = []
+    by_domain: dict[str, dict] = {}
     for s in yaml.safe_load(DATA.read_text(encoding="utf-8"))["schools"]:
+        if s["domain"] in by_domain:
+            prev = by_domain[s["domain"]]
+            urls = {c.get("url") for c in prev["courses"]}
+            prev["courses"] += [{"title": c["title"], "term": str(c["term"]) if c.get("term") else None,
+                                 "url": c.get("url")} for c in s.get("courses", []) if c.get("url") not in urls]
+            if prev["kind"] == "acknowledged" and s["kind"] != "acknowledged":
+                prev["kind"] = s["kind"]
+            continue
         logo = LOGO_DIR / f"{s['domain']}.png"
         out.append({
             "name": s["name"], "short": s.get("short"), "domain": s["domain"],
@@ -95,6 +109,7 @@ def teaching() -> list[dict]:
             "courses": [{"title": c["title"], "term": str(c["term"]) if c.get("term") else None,
                          "url": c.get("url")} for c in s.get("courses", [])],
         })
+        by_domain[s["domain"]] = out[-1]
     return out
 
 
