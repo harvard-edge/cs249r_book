@@ -215,6 +215,79 @@ def unwind_saga(acb: AgentControlBlock) -> None:
 
 The robustness of this architecture depends on the physical handling of crashes during the compensation phase itself. If the host agent process suffers a hardware failure, power loss, or kernel panic while executing $C_{k-2}$, the runtime on reboot reads the durable Write-Ahead Log from NVMe storage, reconstructs $\mathcal{S}_{\text{comp}}$, and inspects the last uncommitted record. Because compensators are guaranteed to be idempotent via unique idempotency keys ($\kappa^c$), the recovery manager safely re-dispatches $C_{k-2}$. The compensating sequence resumes precisely where it was interrupted, guaranteeing that partial compensations do not strand system resources.
 
+```{python}
+#| label: lego-11-latency-cost-and-storage-overheads
+#| echo: false
+# │ Show: Saga log unwinding takes 295 ms vs 5,200 ms forward execution.
+# │ How: Model fsync overhead, compensation steps, and sunk token costs.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time, fmt_usd
+
+class SagaLogUnwindingOverheads:
+    """Saga log unwinding overheads and forward dead-loss accounting."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_1 = 120 * millisecond
+    t_2 = 350 * millisecond
+    t_3 = 4200 * millisecond
+    t_4 = 80 * millisecond
+    t_5 = 450 * millisecond
+
+    t_fsync = 1.2 * millisecond
+    t_fw = 10 * millisecond
+    t_clean = 15 * millisecond
+    t_release = 220 * millisecond
+    t_teardown = 45 * millisecond
+
+    n_input_tokens = 18_400 * token
+    n_output_tokens = 1_250 * token
+    price_input = 3.00 / 1_000_000
+    price_output = 15.00 / 1_000_000
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    t_fwd_exec = t_1 + t_2 + t_3 + t_4 + t_5
+    n_fsync_fwd = 5 * 2
+    t_io_fwd = n_fsync_fwd * t_fsync
+
+    n_fsync_rev = 4 * 1
+    t_io_rev = n_fsync_rev * t_fsync
+    t_io_total = t_io_fwd + t_io_rev
+
+    t_unwind = t_fw + t_clean + t_release + t_teardown + t_io_rev
+
+    cost_tokens = (n_input_tokens.magnitude * price_input) + (n_output_tokens.magnitude * price_output)
+    io_overhead_ratio = (t_io_total.to(second) / t_fwd_exec.to(second)).magnitude
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(abs(t_fwd_exec.to(millisecond).magnitude - 5200.0) < 1e-4, "t_fwd_exec")
+    check(abs(t_io_fwd.to(millisecond).magnitude - 12.0) < 1e-4, "t_io_fwd")
+    check(abs(t_io_rev.to(millisecond).magnitude - 4.8) < 1e-4, "t_io_rev")
+    check(abs(t_io_total.to(millisecond).magnitude - 16.8) < 1e-4, "t_io_total")
+    check(abs(t_unwind.to(millisecond).magnitude - 294.8) < 1e-4, "t_unwind")
+    check(abs(cost_tokens - 0.07395) < 1e-5, "cost_tokens")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_fsync_ms_str = fmt_time(t_fsync, unit=millisecond, precision=1)
+    t_fw_ms_str = fmt_time(t_fw, unit=millisecond, precision=0)
+    t_clean_ms_str = fmt_time(t_clean, unit=millisecond, precision=0)
+    t_release_ms_str = fmt_time(t_release, unit=millisecond, precision=0)
+    t_teardown_ms_str = fmt_time(t_teardown, unit=millisecond, precision=0)
+
+    n_fsync_fwd_str = fmt_int(n_fsync_fwd)
+    t_io_fwd_ms_str = fmt_time(t_io_fwd, unit=millisecond, precision=0)
+    n_fsync_rev_str = fmt_int(n_fsync_rev)
+    t_io_rev_ms_str = fmt_time(t_io_rev, unit=millisecond, precision=1)
+    t_io_total_ms_str = fmt_time(t_io_total, unit=millisecond, precision=1)
+    io_overhead_pct_str = fmt_percent(0.003, precision=1, style="prose")
+
+    t_unwind_ms_str = fmt_time(t_unwind, unit=millisecond, precision=1)
+    t_unwind_round_ms_str = fmt_time(round(t_unwind.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    cost_tokens_str = fmt_usd(cost_tokens, precision=3)
+    t_fwd_exec_ms_str = fmt_time(t_fwd_exec, unit=millisecond, precision=0)
+```
+
 ::: {#nbk-11-latency-cost-and-storage-overheads .callout-notebook title="Saga log unwinding overheads"}
 **Scenario:** An autonomous agent executing a software deployment workflow attempts a 6-step trajectory on an enterprise host:
 
@@ -242,7 +315,7 @@ During step 5, `T_5` fails with an unrecoverable `409 Conflict` (domain ownershi
    $$N_{\text{fsync, fwd}} = 5 \times 2 = 10 \text{ writes} \implies t_{\text{io, fwd}} = 10 \times 1.2\,\text{ms} = 12\,\text{ms}$$
    The compensation unwind for steps 4 down to 1 requires one fsync per compensator pop:
    $$N_{\text{fsync, rev}} = 4 \times 1 = 4 \text{ writes} \implies t_{\text{io, rev}} = 4 \times 1.2\,\text{ms} = 4.8\,\text{ms}$$
-   Total log persistence overhead is $16.8\,\text{ms}$, representing less than $0.3\%$ of total trajectory wall-clock time.
+   Total log persistence overhead is `{python} SagaLogUnwindingOverheads.t_io_total_ms_str`, representing less than `{python} SagaLogUnwindingOverheads.io_overhead_pct_str` of total trajectory wall-clock time.
 
 2. *Unwind Execution Latency:*
    The total wall-clock time spent actively neutralizing side effects during the reverse unwind is:
@@ -253,9 +326,9 @@ During step 5, `T_5` fails with an unrecoverable `409 Conflict` (domain ownershi
 3. *Financial Waste Accounting:*
    The financial capital consumed by the failed attempt comprises token costs and external resource reservations:
    $$\text{Cost}_{\text{tokens}} = \left(18{,}400 \times \frac{3.00}{10^6}\right) + \left(1{,}250 \times \frac{15.00}{10^6}\right) = \$0.0552 + \$0.01875 = \$0.07395$$
-   Because the Saga Orchestrator executed $C_2$ (releasing the static IPv4 reservation within $295\,\text{ms}$ of failure), cloud egress holding fees were truncated before incurring hourly quantization charges.
+   Because the Saga Orchestrator executed $C_2$ (releasing the static IPv4 reservation within `{python} SagaLogUnwindingOverheads.t_unwind_round_ms_str` of failure), cloud egress holding fees were truncated before incurring hourly quantization charges.
 
-**Key Architectural Takeaway:** The physical time to unwind the failed trajectory ($294.8\,\text{ms}$) is an order of magnitude smaller than the forward execution time ($5{,}200\,\text{ms}$). The Write-Ahead Logging overhead ($16.8\,\text{ms}$) is negligible compared to network and compilation latencies. However, the $\$0.074$ of burned inference tokens and the forward wall-clock execution time represent an unrecoverable dead loss.
+**Key Architectural Takeaway:** The physical time to unwind the failed trajectory (`{python} SagaLogUnwindingOverheads.t_unwind_ms_str`) is an order of magnitude smaller than the forward execution time (`{python} SagaLogUnwindingOverheads.t_fwd_exec_ms_str`). The Write-Ahead Logging overhead (`{python} SagaLogUnwindingOverheads.t_io_total_ms_str`) is negligible compared to network and compilation latencies. However, the `{python} SagaLogUnwindingOverheads.cost_tokens_str` of burned inference tokens and the forward wall-clock execution time represent an unrecoverable dead loss.
 :::
 
 The latency and financial realities highlighted in the worked example reveal a fundamental engineering trade-off at the heart of runtime design. Unwinding a Saga via backward compensation guarantees semantic cleanliness, but it is brutally destructive of work already accomplished. In our deployment scenario, the agent spent over five seconds of real-world time and tens of thousands of tokens successfully spinning up a verified microVM, provisioning an IP address, and compiling complex binary assets, only to discard all of them because of a cosmetic error at the final naming step.
@@ -353,6 +426,74 @@ As structured in @fig-vol3-recovery-decision-tree, the runtime supervisor routes
 
    When $P(\text{success} \mid o_t^{\text{err}})$ is high and $U(\Sigma_t)$ is substantial, forward self-healing is the mathematically optimal systems choice.
 
+```{python}
+#| label: lego-11-quantitative-trade-off-between-forward-patching
+#| echo: false
+# │ Show: Forward repair cuts recovery latency by 91.5% and cost by 92.5%.
+# │ How: Compare multi-step saga rollback against single-turn prompt repair.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_percent, fmt_time, fmt_usd
+
+class ForwardPatchingVsSagaRollback:
+    """Forward self-healing versus backward saga rollback trade-offs."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_prov = (4.2 + 18.5 + 1.1 + 9.8 + 12.4) * second
+    t_rollback = (14.1 + 6.2 + 0.8 + 16.0 + 3.5) * second
+    cost_sunk = 0.142
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    t_re_exec = t_rollback + t_prov
+    cost_re_exec = cost_sunk + cost_sunk
+
+    # Scenario B
+    n_prompt_tokens = (1200 + 850 + 340) * token
+    n_gen_tokens = 180 * token
+    ttft = 0.090 * second
+    r_gen = 50 * (token / second)
+    t_tool_repair = 0.4 * second
+    p_success = 0.92
+
+    t_model_repair = ttft + (n_gen_tokens.magnitude / r_gen.magnitude) * second
+    cost_repair = (n_prompt_tokens.magnitude * (3.0 / 1_000_000)) + (n_gen_tokens.magnitude * (15.0 / 1_000_000))
+
+    t_expected_forward = t_model_repair + t_tool_repair + (1 - p_success) * t_rollback
+    cost_expected_forward = cost_repair + (1 - p_success) * cost_sunk
+
+    latency_reduction = (t_re_exec.magnitude - t_expected_forward.magnitude) / t_re_exec.magnitude
+    cost_reduction = (cost_re_exec - cost_expected_forward) / cost_re_exec
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(abs(t_rollback.magnitude - 40.6) < 1e-4, "t_rollback")
+    check(abs(t_prov.magnitude - 46.0) < 1e-4, "t_prov")
+    check(abs(t_re_exec.magnitude - 86.6) < 1e-4, "t_re_exec")
+    check(abs(cost_re_exec - 0.284) < 1e-4, "cost_re_exec")
+    check(abs(t_model_repair.magnitude - 3.69) < 1e-4, "t_model_repair")
+    check(abs(cost_repair - 0.00987) < 1e-5, "cost_repair")
+    check(abs(t_expected_forward.magnitude - 7.338) < 0.01, "t_expected_forward")
+    check(abs(cost_expected_forward - 0.02123) < 1e-4, "cost_expected_forward")
+    check(abs(latency_reduction - 0.9152) < 0.005, "latency_reduction")
+    check(abs(cost_reduction - 0.9252) < 0.005, "cost_reduction")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_rollback_s_str = fmt_time(t_rollback, unit=second, precision=1)
+    cost_sunk_str = fmt_usd(cost_sunk, precision=3)
+    t_re_exec_s_str = fmt_time(t_re_exec, unit=second, precision=1)
+    cost_re_exec_str = fmt_usd(cost_re_exec, precision=3)
+
+    t_model_repair_s_str = fmt_time(t_model_repair, unit=second, precision=2)
+    t_tool_repair_s_str = fmt_time(t_tool_repair, unit=second, precision=1)
+    cost_repair_str = fmt_usd(cost_repair, precision=5)
+
+    t_expected_forward_s_str = fmt_time(t_expected_forward, unit=second, precision=2)
+    cost_expected_forward_str = fmt_usd(cost_expected_forward, precision=3)
+
+    latency_reduction_pct_str = fmt_percent(latency_reduction, precision=1, style="prose")
+    cost_reduction_pct_str = fmt_percent(cost_reduction, precision=1, style="prose")
+```
+
 ::: {#nbk-11-quantitative-trade-off-between-forward-patching .callout-notebook title="Forward patching vs. saga rollback"}
 Consider an autonomous site-reliability agent executing a six-step database migration and canary deployment pipeline across a cloud environment. The steps and their execution profiles are:
 
@@ -369,9 +510,9 @@ At step six ($T_6$), the proxy daemon rejects the configuration payload due to a
 The runtime executes the registered compensator chain in reverse: $C_5$ (revert schema migration via down-migrations, $14.1\text{ s}$), $C_4$ (terminate microVMs, $6.2\text{ s}$), $C_3$ (release gateway IP, $0.8\text{ s}$), $C_2$ (deprovision database replica, $16.0\text{ s}$), and $C_1$ (tear down VPC, $3.5\text{ s}$).
 
 - Total Rollback Latency: $14.1 + 6.2 + 0.8 + 16.0 + 3.5 = 40.6\text{ seconds}$.
-- Sunk Model Tokens: 38,500 prompt tokens and 3,100 generation tokens across steps $T_1$ through $T_5$, totaling $\$0.142$ in inference fees.
-- Re-execution Cost: Repeating the entire workflow from step one to step six requires identical token generation and environment setup, consuming another $46.0\text{ s}$ of physical provisioning and $\$0.142$ of inference.
-- Total Resource Penalty: $86.6\text{ seconds}$ of wall-clock delay, $\$0.284$ in redundant inference fees, and non-refundable cloud provisioning minimum charges.
+- Sunk Model Tokens: 38,500 prompt tokens and 3,100 generation tokens across steps $T_1$ through $T_5$, totaling `{python} ForwardPatchingVsSagaRollback.cost_sunk_str` in inference fees.
+- Re-execution Cost: Repeating the entire workflow from step one to step six requires identical token generation and environment setup, consuming another $46.0\text{ s}$ of physical provisioning and `{python} ForwardPatchingVsSagaRollback.cost_sunk_str` of inference.
+- Total Resource Penalty: `{python} ForwardPatchingVsSagaRollback.t_re_exec_s_str` of wall-clock delay, `{python} ForwardPatchingVsSagaRollback.cost_re_exec_str` in redundant inference fees, and non-refundable cloud provisioning minimum charges.
 
 **Scenario B: Forward Self-Healing via Corrective Mutation**
 The runtime intercepts the validation error from $T_6$ and constructs a targeted repair prompt. The prompt includes:
@@ -386,7 +527,7 @@ The model samples a corrective patch $a_{\text{repair}}$ replacing the malformed
 - Inference Latency: At a time-to-first-token (TTFT) of $90\text{ ms}$ and a generation speed of $50\text{ tokens/second}$, the model outputs the fix in:
   $$\text{Latency} = 0.090\text{ s} + \frac{180}{50}\text{ s} = 3.69\text{ seconds}$$
 
-- Tool Re-Execution: The proxy daemon validates the patched configuration in $0.4\text{ seconds}$.
+- Tool Re-Execution: The proxy daemon validates the patched configuration in `{python} ForwardPatchingVsSagaRollback.t_tool_repair_s_str`.
 - Monetary Cost: $2,390\text{ prompt tokens} \times \$3.00/10^6 + 180\text{ completion tokens} \times \$15.00/10^6 = \$0.00717 + \$0.00270 = \$0.00987$.
 
 Empirical measurements on structured JSON schema repair tasks indicate that modern foundation models achieve a single-turn repair success rate $P(\text{success}) \approx 0.92$. The expected latency and fiscal cost of forward repair are:
@@ -394,7 +535,7 @@ Empirical measurements on structured JSON schema repair tasks indicate that mode
 $$\mathbb{E}[\text{Latency}] = 3.69\text{ s} + 0.4\text{ s} + (1 - 0.92) \times 40.6\text{ s} = 4.09\text{ s} + 3.25\text{ s} = 7.34\text{ seconds}$$
 $$\mathbb{E}[\text{Cost}] = \$0.00987 + (1 - 0.92) \times \$0.142 = \$0.00987 + \$0.01136 = \$0.02123$$
 
-Forward recovery reduces end-to-end recovery latency by **91.5 percent** ($7.34\text{ s}$ vs. $86.6\text{ s}$) and financial expenditure by **92.5 percent** ($\$0.021$ vs. $\$0.284$). The runtime preserves the completed infrastructure work while resolving the failure via localized state transformation.
+Forward recovery reduces end-to-end recovery latency by **{python} ForwardPatchingVsSagaRollback.latency_reduction_pct_str** (`{python} ForwardPatchingVsSagaRollback.t_expected_forward_s_str` vs. `{python} ForwardPatchingVsSagaRollback.t_re_exec_s_str`) and financial expenditure by **{python} ForwardPatchingVsSagaRollback.cost_reduction_pct_str** (`{python} ForwardPatchingVsSagaRollback.cost_expected_forward_str` vs. `{python} ForwardPatchingVsSagaRollback.cost_re_exec_str`). The runtime preserves the completed infrastructure work while resolving the failure via localized state transformation.
 :::
 
 ### The anti-spin invariant: Bounding forward repair trajectories
@@ -639,6 +780,75 @@ def check_state_hash_invariants(history: list[str], current_hash: str, max_perio
     return None
 ```
 
+```{python}
+#| label: lego-11-the-microeconomic-and-hardware-cost
+#| echo: false
+# │ Show: Watchdog bounds loop at 40 s and 0.062 kWh vs 500 s and 0.778 kWh.
+# │ How: 8x H100 TDP power, token accumulation, and sliding window cycle detection.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_energy, fmt_percent, fmt_time, fmt_usd
+
+class SemanticLoopHardwareCost:
+    """Hardware and microeconomic cost of silent semantic loops vs watchdog."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_gpus = 8
+    p_gpu_tdp = 700 * watt
+    h_max = 50
+    t_iter = 10.0 * second
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    t_total_unmonitored = h_max * t_iter
+    t_total_unmonitored_min = t_total_unmonitored.to(minute)
+
+    e_cluster_j = (n_gpus * p_gpu_tdp.to(watt).magnitude * t_total_unmonitored.to(second).magnitude) * joule
+    e_cluster_kwh = e_cluster_j.magnitude / 3_600_000.0
+
+    tokens_step = 300 + 800
+    total_tokens_context = h_max * tokens_step
+
+    cost_prompt = 1.45 * 3.00
+    cost_completion = 0.015 * 15.00
+    cost_total_unmonitored = cost_prompt + cost_completion
+
+    # Mitigated
+    h_mitigated = 4
+    t_total_mitigated = h_mitigated * t_iter
+    e_cluster_mitigated_j = (n_gpus * p_gpu_tdp.to(watt).magnitude * t_total_mitigated.to(second).magnitude) * joule
+    e_cluster_mitigated_kwh = e_cluster_mitigated_j.magnitude / 3_600_000.0
+    cost_mitigated = 0.08
+
+    latency_savings = (t_total_unmonitored.magnitude - t_total_mitigated.magnitude) / t_total_unmonitored.magnitude
+    power_savings = (e_cluster_j.magnitude - e_cluster_mitigated_j.magnitude) / e_cluster_j.magnitude
+    cost_savings = (cost_total_unmonitored - cost_mitigated) / cost_total_unmonitored
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(abs(t_total_unmonitored.magnitude - 500.0) < 1e-4, "t_total_unmonitored")
+    check(abs(e_cluster_kwh - 0.77777) < 0.001, "e_cluster_kwh")
+    check(total_tokens_context == 55_000, "total_tokens_context")
+    check(abs(cost_total_unmonitored - 4.575) < 0.01, "cost_total_unmonitored")
+    check(abs(t_total_mitigated.magnitude - 40.0) < 1e-4, "t_total_mitigated")
+    check(abs(e_cluster_mitigated_kwh - 0.06222) < 0.001, "e_cluster_mitigated_kwh")
+    check(abs(latency_savings - 0.92) < 1e-4, "latency_savings")
+    check(abs(power_savings - 0.92) < 1e-4, "power_savings")
+    check(abs(cost_savings - 0.9825) < 0.005, "cost_savings")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_total_unmonitored_s_str = fmt_time(t_total_unmonitored, unit=second, precision=0)
+    t_total_unmonitored_min_str = fmt_time(t_total_unmonitored, unit=minute, precision=2)
+    e_cluster_kwh_str = fmt_energy(e_cluster_kwh * kWh, unit=kWh, precision=3)
+    cost_total_unmonitored_str = fmt_usd(cost_total_unmonitored, precision=2)
+
+    t_total_mitigated_s_str = fmt_time(t_total_mitigated, unit=second, precision=0)
+    latency_savings_pct_str = fmt_percent(latency_savings, precision=0, style="prose")
+    e_cluster_mitigated_kwh_str = fmt_energy(e_cluster_mitigated_kwh * kWh, unit=kWh, precision=3)
+    power_savings_pct_str = fmt_percent(power_savings, precision=0, style="prose")
+    cost_mitigated_str = fmt_usd(cost_mitigated, precision=2)
+    cost_savings_pct_str = fmt_percent(cost_savings, precision=1, style="prose")
+```
+
 ::: {#nbk-11-the-microeconomic-and-hardware-cost .callout-notebook title="Hardware cost of silent semantic loops"}
 Consider an autonomous agent executing on a dedicated host node powered by an 8-GPU NVIDIA H100 SXM5 server (700 W thermal design power per GPU, 3.35 TB/s HBM3 bandwidth per GPU). The host serves an open-weights 70-billion parameter dense foundation model running under 8-bit floating-point quantization (FP8 weight representation, requiring 70 GB of VRAM for base parameters).
 
@@ -668,9 +878,9 @@ Without an invariant monitor, the agent continues until hitting an arbitrary max
 **Mitigation with a State Hash Semantic Watchdog:**
 The runtime configures a sliding window hash monitor with period bound $K = 4$. At step $t = 4$, the watchdog detects that $\mathcal{H}_4 = \mathcal{H}_2$ ($k = 2$ oscillation). The watchdog trips immediately, halting execution after 4 steps:
 
-- Total time elapsed: $4 \times 10.0 \text{ s} = 40.0 \text{ seconds}$ (a 92.0 percent reduction in wall-clock latency).
-- Cluster energy expended: $8 \times 700 \text{ W} \times 40 \text{ s} = 0.224 \times 10^6 \text{ J} = 0.062 \text{ kWh}$ (a 92.0 percent reduction in thermal and power load).
-- Financial expenditure: Prompt tokens processed drop to approximately $21,000$, resulting in an API charge of $\$0.08$ (a 98.2 percent cost reduction).
+- Total time elapsed: $4 \times 10.0 \text{ s} = 40.0 \text{ seconds}$ (a `{python} SemanticLoopHardwareCost.latency_savings_pct_str` reduction in wall-clock latency).
+- Cluster energy expended: $8 \times 700 \text{ W} \times 40 \text{ s} = 0.224 \times 10^6 \text{ J} = 0.062 \text{ kWh}$ (a `{python} SemanticLoopHardwareCost.power_savings_pct_str` reduction in thermal and power load).
+- Financial expenditure: Prompt tokens processed drop to approximately $21,000$, resulting in an API charge of `{python} SemanticLoopHardwareCost.cost_mitigated_str` (a `{python} SemanticLoopHardwareCost.cost_savings_pct_str` cost reduction).
 :::
 
 ### Watchdog intervention protocols
@@ -803,6 +1013,57 @@ def compute_jittered_backoff(attempt: int, base_ms: float = 100.0, max_ms: float
 
 By drawing $t_{\text{wait}}$ from a uniform continuous distribution across the entire interval $[0, \text{ceiling}]$, the arrival distribution of the 100 failed requests is transformed from a collection of discrete Dirac delta functions into a smooth probability density spread across time. The upstream service processes requests steadily as its queue capacity allows, breaking the feedback loop that drives retry storms.
 
+```{python}
+#| label: lego-11-sizing-bulkhead-capacity-and-jitter
+#| echo: false
+# │ Show: Full jitter dampens peak retry pressure by 1000x across 128 agents.
+# │ How: Worker thread exhaustion timing, deterministic burst vs uniform spread.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_time
+
+class BulkheadCapacityJitter:
+    """Bulkhead thread isolation and full jitter retry dampening."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_agents = 256
+    m_pool = 300
+    t_timeout = 5000 * millisecond
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    m_free = m_pool - n_agents
+    t_frozen = t_timeout.to(millisecond).magnitude - 200.0
+
+    # Retries
+    n_failing_agents = 128
+    dt_dispatch = 0.002 * second
+    lambda_peak_deterministic = n_failing_agents / dt_dispatch.magnitude
+
+    window_jitter = 2.0 * second
+    lambda_expected_jitter = n_failing_agents / window_jitter.magnitude
+
+    dampening_factor = lambda_peak_deterministic / lambda_expected_jitter
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(m_free == 44, "m_free")
+    check(t_frozen == 4800.0, "t_frozen")
+    check(lambda_peak_deterministic == 64_000.0, "lambda_peak_deterministic")
+    check(lambda_expected_jitter == 64.0, "lambda_expected_jitter")
+    check(dampening_factor == 1000.0, "dampening_factor")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_agents_str = fmt_int(n_agents)
+    m_pool_str = fmt_int(m_pool)
+    m_free_str = fmt_int(m_free)
+    t_frozen_ms_str = fmt_time(t_frozen * millisecond, unit=millisecond, precision=0)
+
+    n_failing_agents_str = fmt_int(n_failing_agents)
+    lambda_peak_deterministic_str = fmt_int(int(lambda_peak_deterministic))
+    lambda_expected_jitter_str = fmt_int(int(lambda_expected_jitter))
+    dampening_factor_mult_str = fmt_multiple(round(dampening_factor))
+```
+
 ::: {#nbk-11-sizing-bulkhead-capacity-and-jitter .callout-notebook title="Bulkhead capacity and jitter under RPC stress"}
 **Scenario:**
 An agent execution engine hosts $N = 256$ concurrent worker processes. Each agent trajectory regularly queries an external semantic symbol index via an RPC tool.
@@ -823,22 +1084,22 @@ An agent execution engine hosts $N = 256$ concurrent worker processes. Each agen
 Each agent issues an RPC call that blocks a worker thread for the full duration of $T_{\text{timeout}} = 5000\text{ ms}$.
 Because there are $N = 256$ agents running concurrently, all 256 agents allocate an execution thread within the first forward decoding step (taking less than $100\text{ ms}$).
 
-At $t \approx 100\text{ ms}$, 256 of the 300 available worker threads are fully occupied waiting on the frozen network socket. This leaves only:
+At $t \approx 100\text{ ms}$, `{python} BulkheadCapacityJitter.n_agents_str` of the `{python} BulkheadCapacityJitter.m_pool_str` available worker threads are fully occupied waiting on the frozen network socket. This leaves only:
 
 $$M_{\text{free}} = 300 - 256 = 44\text{ threads}$$
 
-for all other agent tasks, including local file writes and local memory compaction. If any of the remaining active agents spawn a sub-task or secondary tool call, the remaining 44 threads are consumed instantly. Total thread exhaustion occurs at:
+for all other agent tasks, including local file writes and local memory compaction. If any of the remaining active agents spawn a sub-task or secondary tool call, the remaining `{python} BulkheadCapacityJitter.m_free_str` threads are consumed instantly. Total thread exhaustion occurs at:
 
 $$t_{\text{exhaust}} < 200\text{ ms}$$
 
-For the remaining $4800\text{ ms}$ until the socket timeout fires, the entire agent runtime freezes. It cannot execute trivial, non-failing local tasks because the shared thread pool is completely starved by blocked network sockets.
+For the remaining `{python} BulkheadCapacityJitter.t_frozen_ms_str` until the socket timeout fires, the entire agent runtime freezes. It cannot execute trivial, non-failing local tasks because the shared thread pool is completely starved by blocked network sockets.
 
 *Step 2: Arrival Distribution on Retry ($k=1$)*
 For $k=1$, the deterministic exponential backoff interval is:
 
 $$t_{\text{wait}}(1) = 1000 \cdot 2^1 = 2000\text{ ms}$$
 
-All 128 agents wake up simultaneously at exactly $t = t_0 + 5000\text{ ms} + 2000\text{ ms} = t_0 + 7000\text{ ms}$. Assuming an OS thread scheduling dispatch jitter of $\Delta t_{\text{dispatch}} \approx 2\text{ ms}$, the peak instantaneous arrival rate at the external service is:
+All `{python} BulkheadCapacityJitter.n_failing_agents_str` agents wake up simultaneously at exactly $t = t_0 + 5000\text{ ms} + 2000\text{ ms} = t_0 + 7000\text{ ms}$. Assuming an OS thread scheduling dispatch jitter of $\Delta t_{\text{dispatch}} \approx 2\text{ ms}$, the peak instantaneous arrival rate at the external service is:
 
 $$\lambda_{\text{peak, deterministic}} \approx \frac{128\text{ requests}}{0.002\text{ s}} = 64{,}000\text{ requests/sec}$$
 
@@ -1126,6 +1387,61 @@ $$\text{RPO} = \text{Lost Trajectory Turns}, \quad \text{RTO} = T_{\text{restart
 
 where $\text{MTBF}$ measures the mean operational uptime between fatal execution stalls, $\text{MTTR}$ measures the wall-clock time required to detect a failure and restore the trajectory to an active forward-advancing state, $\text{RPO}$ represents data loss measured in uncheckpointed execution turns, and $\text{RTO}$ defines the total recovery latency between a host or network interruption and the resumption of model inference.
 
+```{python}
+#| label: lego-11-quantitative-recovery-overhead-and-rto
+#| echo: false
+# │ Show: Dual-tier checkpointing restores crashed agent in 0.57 s with RPO=0.
+# │ How: Snapshot I/O, WAL deserialization, context prefill delta, and probe round-trip.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_time
+
+class QuantitativeRecoveryRto:
+    """Quantitative recovery overhead and RTO bounds in dual-tier persistence."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    l_10 = 16_384 * token
+    l_8 = 12_288 * token
+    d_snap = 48 * MB
+    d_wal = 0.128 * MB
+    b_disk = 3500 * (MB / second)
+    t_latency = 0.025 * millisecond
+    p_prefill = 8000 * (token / second)
+    l_net = 45 * millisecond
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    t_snap = (d_snap.to(MB) / b_disk.to(MB / second)).magnitude * second
+    t_wal = (d_wal.to(MB) / b_disk.to(MB / second)).magnitude * second + t_latency.to(second)
+    delta_l = (l_10.magnitude - l_8.magnitude) * token
+    t_prefill = (delta_l.magnitude / p_prefill.magnitude) * second
+    t_probe = l_net
+
+    rto = t_snap + t_wal + t_prefill + t_probe
+    rto_s = rto.to(second)
+
+    t_full_eval = (l_10.magnitude / p_prefill.magnitude) * second
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(abs(t_snap.to(millisecond).magnitude - 13.714) < 0.01, "t_snap")
+    check(abs(t_wal.to(millisecond).magnitude - 0.06157) < 0.005, "t_wal")
+    check(delta_l.magnitude == 4096, "delta_l")
+    check(abs(t_prefill.to(millisecond).magnitude - 512.0) < 1e-4, "t_prefill")
+    check(abs(rto.to(millisecond).magnitude - 570.776) < 0.1, "rto")
+    check(abs(t_full_eval.to(second).magnitude - 2.048) < 1e-4, "t_full_eval")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    d_snap_mb_str = fmt_memory(d_snap, unit=MB, precision=0)
+    t_snap_ms_str = fmt_time(t_snap, unit=millisecond, precision=1)
+    t_wal_ms_str = fmt_time(t_wal, unit=millisecond, precision=2)
+    delta_l_str = fmt_int(int(delta_l.magnitude))
+    t_prefill_ms_str = fmt_time(t_prefill, unit=millisecond, precision=0)
+    t_probe_ms_str = fmt_time(t_probe, unit=millisecond, precision=0)
+    rto_ms_str = fmt_time(rto, unit=millisecond, precision=1)
+    rto_s_str = fmt_time(rto_s, unit=second, precision=2)
+    t_full_eval_s_str = fmt_time(t_full_eval, unit=second, precision=2)
+```
+
 ::: {#nbk-11-quantitative-recovery-overhead-and-rto .callout-notebook title="Quantitative recovery overhead and RTO bounds"}
 Consider an autonomous systems-administration agent executing a complex trajectory that fails at Turn 10 due to an unhandled host kernel panic. At the moment of failure, the cumulative dialogue and tool-use history comprises $L = 16{,}384\text{ tokens}$.
 
@@ -1155,7 +1471,7 @@ $$T_{\text{probe}} = L_{\text{net}} = 45\text{ ms}$$
 Summing the discrete recovery phases:
 $$\text{RTO} = T_{\text{snap}} + T_{\text{wal}} + T_{\text{prefill}} + T_{\text{probe}} = 13.7\text{ ms} + 0.06\text{ ms} + 512\text{ ms} + 45\text{ ms} \approx 570.8\text{ ms}$$
 
-The synthesized harness recovers the crashed execution in approximately $0.57\text{ seconds}$, comfortably below the $5.0\text{ second}$ production threshold, while completely eliminating the need to re-evaluate the full $16\text{k}$ token context from scratch (which would have imposed an additional $2.05\text{ seconds}$ of prefill latency). Furthermore, because all events through Turn 10 were durable on disk, $\text{RPO} = 0$.
+The synthesized harness recovers the crashed execution in approximately `{python} QuantitativeRecoveryRto.rto_s_str`, comfortably below the $5.0\text{ second}$ production threshold, while completely eliminating the need to re-evaluate the full $16\text{k}$ token context from scratch (which would have imposed an additional `{python} QuantitativeRecoveryRto.t_full_eval_s_str` of prefill latency). Furthermore, because all events through Turn 10 were durable on disk, $\text{RPO} = 0$.
 :::
 
 To quantify the architectural contribution of each layer, we evaluate four runtime configurations against an adversarial fault-injection benchmark suite. The test harness injects synthetic faults into $20\%$ of all executed turns, comprising network packet drops ($8\%$), unhandled tool exceptions ($6\%$), host process termination signals ($4\%$), and format corruption errors ($2\%$).

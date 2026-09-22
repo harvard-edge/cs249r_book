@@ -208,8 +208,77 @@ To mitigate this multi-tenant interference, modern serving runtimes (such as Sar
 - Each prefill chunk is co-scheduled in a batch alongside active decode tokens, co-locating compute-bound GEMMs alongside memory-bound GEMVs to achieve high Tensor Core utilization without starvation.
 - While chunked prefill successfully bounds ITL spikes for decoding streams, it stretches the wall-clock completion of the agent's prefill across $\lceil M / C_{\text{chunk}} \rceil$ serving iterations, reinforcing why active context compaction at the host runtime level is an indispensable prerequisite for cluster goodput.
 
+```{python}
+#| label: lego-04-prefill-compute-scaling-and-latency
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PREFILL COMPUTE SCALING AND LATENCY ON ACCELERATOR HARDWARE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-04-prefill-compute-scaling-and-latency
+# │ Goal: Quantify prefill FLOPs, quadratic attention fraction, and TTFT across context sizes.
+# │ Show: 8x context expansion increases FLOPs by 22x; attention shifts from 25% to 73% of compute.
+# │ How: Linear projections scale as 24*M*L*d^2; self-attention scales quadratically as 4*M^2*L*d.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_multiple
+
+class PrefillComputeScaling:
+    """Prefill compute scaling and latency on accelerator hardware."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    p_params = 8e9
+    n_layers = 32
+    d_model = 4096
+    m1 = 8_192
+    m2 = 65_536
+    p_peak = 989 * (TFLOP / second)
+    mfu = 0.50
+    n_turns = 30
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    expansion_ratio = int(m2 / m1)
+    p_effective = mfu * p_peak
+
+    # Policy A
+    f_linear_a = 24 * m1 * n_layers * (d_model**2)
+    f_attention_a = 4 * (m1**2) * n_layers * d_model
+    f_prefill_a = f_linear_a + f_attention_a
+    pct_attn_a = f_attention_a / f_prefill_a
+    ttft_a = (f_prefill_a * flop / p_effective).to(second)
+
+    # Policy B
+    f_linear_b = 24 * m2 * n_layers * (d_model**2)
+    f_attention_b = 4 * (m2**2) * n_layers * d_model
+    f_prefill_b = f_linear_b + f_attention_b
+    pct_attn_b = f_attention_b / f_prefill_b
+    ttft_b = (f_prefill_b * flop / p_effective).to(second)
+
+    compute_factor = round(f_prefill_b / f_prefill_a)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(expansion_ratio == 8, "expansion_ratio")
+    check(abs(f_linear_a - 1.055e14) < 1e12, "f_linear_a")
+    check(abs(f_attention_a - 3.518e13) < 1e11, "f_attention_a")
+    check(abs(pct_attn_a - 0.250) < 0.005, "pct_attn_a")
+    check(abs(ttft_a.to(millisecond).magnitude - 285) < 2, "ttft_a")
+    check(abs(pct_attn_b - 0.727) < 0.005, "pct_attn_b")
+    check(abs(ttft_b.magnitude - 6.26) < 0.05, "ttft_b")
+    check(compute_factor == 22, "compute_factor")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    m1_str = fmt_int(m1)
+    m2_str = fmt_int(m2)
+    expansion_ratio_mult_str = fmt_multiple(expansion_ratio, precision=0)
+    expansion_ratio_int_str = fmt_int(expansion_ratio)
+    compute_factor_int_str = fmt_int(compute_factor)
+    pct_attn_a_str = fmt_percent(pct_attn_a, precision=0, style="prose")
+    pct_attn_b_str = fmt_percent(round(pct_attn_b * 100) / 100, precision=0, style="prose")
+    n_turns_str = fmt_int(n_turns)
+```
+
 ::: {#nbk-04-prefill-compute-scaling-and-latency .callout-notebook title="Prefill compute scaling and latency on accelerator hardware"}
-**Problem:** An autonomous software agent is evaluated under two different working context staging policies using an 8-billion parameter foundation model ($L = 32$ layers, hidden dimension $d = 4096$). Policy A enforces strict context compaction, staging an average working context of $M_1 = 8{,}192$ tokens. Policy B dumps raw compiler outputs and uncurated directory traces, staging an uncompacted context of $M_2 = 65{,}536$ tokens ($8\times$ expansion).
+**Problem:** An autonomous software agent is evaluated under two different working context staging policies using an 8-billion parameter foundation model ($L = 32$ layers, hidden dimension $d = 4096$). Policy A enforces strict context compaction, staging an average working context of $M_1 =$ `{python} PrefillComputeScaling.m1_str` tokens. Policy B dumps raw compiler outputs and uncurated directory traces, staging an uncompacted context of $M_2 =$ `{python} PrefillComputeScaling.m2_str` tokens (`{python} PrefillComputeScaling.expansion_ratio_mult_str` expansion).
 
 The runtime executes inference on a dedicated NVIDIA H100 SXM5 GPU delivering a theoretical peak throughput of $\mathcal{P}_{\text{peak}} = 989\text{ TFLOP/s}$ ($9.89 \times 10^{14}\text{ FLOP/s}$) in 16-bit precision. In prefill GEMM operations, the engine achieves an average model FLOPs utilization (MFU) of $50\%$, yielding an effective compute throughput of:
 
@@ -221,7 +290,7 @@ Compute the total prefill FLOPs, the fraction of compute consumed by quadratic a
 
 **Solution:**
 
-**1. Evaluation of Policy A ($M_1 = 8{,}192$ tokens):**
+**1. Evaluation of Policy A ($M_1 =$ `{python} PrefillComputeScaling.m1_str` tokens):**
 
 *Linear Projection FLOPs:*
 $$F_{\text{linear}} = 24 \times 8192 \times 32 \times (4096)^2 \approx 1.055 \times 10^{14}\text{ FLOPs} = 105.5\text{ TFLOPs}$$
@@ -240,7 +309,7 @@ $$\text{TTFT}_A = \frac{1.407 \times 10^{14}\text{ FLOPs}}{4.945 \times 10^{14}\
 
 ---
 
-**2. Evaluation of Policy B ($M_2 = 65{,}536$ tokens):**
+**2. Evaluation of Policy B ($M_2 =$ `{python} PrefillComputeScaling.m2_str` tokens):**
 
 *Linear Projection FLOPs ($8\times$ increase):*
 $$F_{\text{linear}} = 24 \times 65536 \times 32 \times (4096)^2 \approx 8.444 \times 10^{14}\text{ FLOPs} = 844.4\text{ TFLOPs}$$
@@ -260,7 +329,7 @@ $$\text{TTFT}_B = \frac{3.096 \times 10^{15}\text{ FLOPs}}{4.945 \times 10^{14}\
 ---
 
 **Systems Takeaway:**
-Expanding the context window by a factor of 8 ($8\text{k} \to 64\text{k}$) increases total prefill compute by a factor of 22 ($140.7\text{ TFLOPs} \to 3{,}096.2\text{ TFLOPs}$). The accelerator shifts from a linear-projection-dominated workload (where attention accounts for only 25 percent of FLOPs) into an attention-dominated quadratic regime (where attention accounts for nearly 73 percent of FLOPs). For an agent executing a 30-turn interactive debugging loop, Policy B introduces over three minutes ($30 \times 6.26\text{ s} \approx 188\text{ s}$) of pure prefill pipeline latency, compared to under nine seconds for Policy A, while consuming 22 times more energy on the accelerator cluster.
+Expanding the context window by a factor of `{python} PrefillComputeScaling.expansion_ratio_int_str` ($8\text{k} \to 64\text{k}$) increases total prefill compute by a factor of `{python} PrefillComputeScaling.compute_factor_int_str` ($140.7\text{ TFLOPs} \to 3{,}096.2\text{ TFLOPs}$). The accelerator shifts from a linear-projection-dominated workload (where attention accounts for only `{python} PrefillComputeScaling.pct_attn_a_str` of FLOPs) into an attention-dominated quadratic regime (where attention accounts for nearly `{python} PrefillComputeScaling.pct_attn_b_str` of FLOPs). For an agent executing a `{python} PrefillComputeScaling.n_turns_str`-turn interactive debugging loop, Policy B introduces over three minutes ($30 \times 6.26\text{ s} \approx 188\text{ s}$) of pure prefill pipeline latency, compared to under nine seconds for Policy A, while consuming `{python} PrefillComputeScaling.compute_factor_int_str` times more energy on the accelerator cluster.
 :::
 
 To break this quadratic scaling wall and compress the memory footprint of long context sequences, frontier model architectures move beyond Grouped-Query Attention to low-rank latent attention projections, as illustrated in @fig-vol3-multi-head-latent-attention.
@@ -378,14 +447,92 @@ Because cached attention state is reusable only up to the first token that diffe
 
 A common implementation error involves placing dynamic execution metadata—such as the current system time, an incrementing turn counter, or a unique request UUID—at the very top of the system prompt. Placing a 10-token timestamp header at index $0$ guarantees a total cache miss on every invocation: because token indices $0$ through $9$ change on every turn, the prefix match length $k$ drops to zero, forcing the engine to recompute the entire prompt from scratch. Moving that same 10-token timestamp to the Leaf zone preserves a cache hit across all preceding Root and Trunk tokens.
 
+```{python}
+#| label: lego-04-quantitative-impact-of-prefix-layout
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUANTITATIVE IMPACT OF PREFIX LAYOUT ON PREFILL AMORTIZATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-04-quantitative-impact-of-prefix-layout
+# │ Goal: Contrast prefill compute and latency under unstable vs prefix-cached prompt layouts.
+# │ Show: Stable layout achieves a 75.6% compute reduction and 4.1x speedup, saving 7.7 min over 20 turns.
+# │ How: Model prefill FLOPs per turn with zero caching vs prefix hits on immutable root and trunk.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time, fmt_multiple
+
+class PrefixLayoutAmortization:
+    """Quantitative impact of prefix layout on prefill amortization."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_turns = 20
+    n_params = 70e9
+    l_ctx = 32_768
+    l_root = 4_096
+    l_trunk = 24_576
+    l_leaf = 4_096
+    pi_prefill = 150 * (TFLOP / second)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    l_trunk_and_leaf = l_trunk + l_leaf
+    flops_per_token = 2 * n_params
+
+    # Case 1: Unstable layout
+    flops_unstable_turn = flops_per_token * l_ctx
+    total_flops_unstable = t_turns * flops_unstable_turn
+    t_unstable_turn = (flops_unstable_turn * flop / pi_prefill).to(second)
+    t_unstable = (total_flops_unstable * flop / pi_prefill).to(second)
+
+    # Case 2: Stable layout
+    n_cold_turns = 1
+    n_mutation_turns = 2
+    n_cached_turns = t_turns - n_cold_turns - n_mutation_turns
+
+    flops_turn1 = flops_per_token * l_ctx
+    flops_mutation = flops_per_token * l_trunk_and_leaf
+    flops_cached = flops_per_token * l_leaf
+
+    total_flops_stable = n_cold_turns * flops_turn1 + n_mutation_turns * flops_mutation + n_cached_turns * flops_cached
+    t_stable = (total_flops_stable * flop / pi_prefill).to(second)
+
+    pct_savings = (total_flops_unstable - total_flops_stable) / total_flops_unstable
+    speedup = total_flops_unstable / total_flops_stable
+    time_saved = t_unstable - t_stable
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(t_turns == 20, "t_turns")
+    check(n_cached_turns == 17, "n_cached_turns")
+    check(abs(t_unstable_turn.magnitude - 30.58) < 0.1, "t_unstable_turn")
+    check(abs(t_unstable.magnitude - 611.6) < 1.0, "t_unstable")
+    check(abs(t_stable.magnitude - 149.1) < 1.0, "t_stable")
+    check(abs(pct_savings - 0.756) < 0.005, "pct_savings")
+    check(abs(speedup - 4.10) < 0.1, "speedup")
+    check(abs(time_saved.to(minute).magnitude - 7.7) < 0.2, "time_saved")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_turns_str = fmt_int(t_turns)
+    l_ctx_str = fmt_int(l_ctx)
+    l_root_str = fmt_int(l_root)
+    l_trunk_str = fmt_int(l_trunk)
+    l_leaf_str = fmt_int(l_leaf)
+    l_trunk_and_leaf_str = fmt_int(l_trunk_and_leaf)
+    n_cached_turns_str = fmt_int(n_cached_turns)
+    t_unstable_s_str = fmt_time(t_unstable, unit=second, precision=1)
+    t_unstable_min_str = fmt_time(t_unstable, unit=minute, precision=1)
+    pct_savings_str = fmt_percent(pct_savings, precision=1, style="prose")
+    speedup_mult_str = fmt_multiple(speedup, precision=1)
+    time_saved_min_str = fmt_time(time_saved, unit=minute, precision=1)
+```
+
 ::: {#nbk-04-quantitative-impact-of-prefix-layout .callout-notebook title="Quantitative impact of prefix layout on prefill amortization"}
-Consider an autonomous coding agent executing a debugging task over a trajectory of $T = 20$ turns. The host supervisor interacts with a 70-billion parameter dense model ($P = 70 \times 10^9$) operating at a context length of $L = 32{,}768$ tokens.
+Consider an autonomous coding agent executing a debugging task over a trajectory of $T =$ `{python} PrefixLayoutAmortization.t_turns_str` turns. The host supervisor interacts with a 70-billion parameter dense model ($P = 70 \times 10^9$) operating at a context length of $L =$ `{python} PrefixLayoutAmortization.l_ctx_str` tokens.
 
 The logical working set decomposes into three components:
 
-- Static Root directives and tool schemas: $L_{\text{root}} = 4{,}096$ tokens.
-- Trunk workspace files and plan state: $L_{\text{trunk}} = 24{,}576$ tokens. We assume the workspace is modified on turns $t=7$ and $t=14$, invalidating the Trunk cache at those two boundaries, but remains stable across all other turns.
-- Leaf observations and scratchpad notes: $L_{\text{leaf}} = 4{,}096$ tokens, replaced or appended on every turn.
+- Static Root directives and tool schemas: $L_{\text{root}} =$ `{python} PrefixLayoutAmortization.l_root_str` tokens.
+- Trunk workspace files and plan state: $L_{\text{trunk}} =$ `{python} PrefixLayoutAmortization.l_trunk_str` tokens. We assume the workspace is modified on turns $t=7$ and $t=14$, invalidating the Trunk cache at those two boundaries, but remains stable across all other turns.
+- Leaf observations and scratchpad notes: $L_{\text{leaf}} =$ `{python} PrefixLayoutAmortization.l_leaf_str` tokens, replaced or appended on every turn.
 
 We evaluate two staging policies:
 
@@ -393,28 +540,28 @@ We evaluate two staging policies:
 2. *Stable Layout:* The supervisor stages the immutable Root at index $0$, followed by the Trunk, and places all dynamic timestamps and observations exclusively within the Leaf.
 
 **Case 1: Unstable Layout (Zero Cache Hits)**
-Because token index $0$ mutates on every invocation, the prefix match length is $k = 0$ for all $20$ turns. In accordance with the foundation engine Roofline model established in @sec-vol3-processor-cost, the prefill engine processes all $L = 32{,}768$ tokens on every turn without cache reuse:
+Because token index $0$ mutates on every invocation, the prefix match length is $k = 0$ for all `{python} PrefixLayoutAmortization.t_turns_str` turns. In accordance with the foundation engine Roofline model established in @sec-vol3-processor-cost, the prefill engine processes all $L =$ `{python} PrefixLayoutAmortization.l_ctx_str` tokens on every turn without cache reuse:
 $$\text{FLOPs per turn} = 2 \cdot P \cdot L = 2 \cdot (70 \times 10^9) \cdot 32{,}768 \approx 4.587 \times 10^{15}\text{ FLOPs}$$
 $$\text{Total Trajectory Prefill FLOPs} = 20 \cdot 4.587 \times 10^{15} \approx 9.175 \times 10^{16}\text{ FLOPs}$$
 
 On an accelerator serving system delivering an effective sustained prefill throughput of $\Pi_{\text{prefill}} = 150\text{ TFLOPs/s}$ ($1.5 \times 10^{14}\text{ FLOPs/s}$), the prefill duration per turn evaluates to:
 $$\text{Latency}_{\text{unstable}} = \frac{4.587 \times 10^{15}\text{ FLOPs}}{1.5 \times 10^{14}\text{ FLOPs/s}} \approx 30.58\text{ seconds}$$
-Across 20 turns, the cumulative time spent strictly computing prompt prefills is approximately $611.6\text{ seconds}$ ($10.2\text{ minutes}$).
+Across `{python} PrefixLayoutAmortization.t_turns_str` turns, the cumulative time spent strictly computing prompt prefills is approximately `{python} PrefixLayoutAmortization.t_unstable_s_str` (`{python} PrefixLayoutAmortization.t_unstable_min_str`).
 
 **Case 2: Stable Layout (Prefix Caching Enabled)**
 
-- On Turn 1 (cold start), the engine computes all $32{,}768$ tokens: $4.587 \times 10^{15}\text{ FLOPs}$.
-- On Turns 7 and 14, the Trunk mutates. The Root ($4{,}096$ tokens) hits the cache, but the Trunk and Leaf ($28{,}672$ tokens) must be prefilled:
+- On Turn 1 (cold start), the engine computes all `{python} PrefixLayoutAmortization.l_ctx_str` tokens: $4.587 \times 10^{15}\text{ FLOPs}$.
+- On Turns 7 and 14, the Trunk mutates. The Root (`{python} PrefixLayoutAmortization.l_root_str` tokens) hits the cache, but the Trunk and Leaf (`{python} PrefixLayoutAmortization.l_trunk_and_leaf_str` tokens) must be prefilled:
   $$\text{FLOPs}_{\text{mutation}} = 2 \times (70 \times 10^9) \times 28{,}672 \approx 4.014 \times 10^{15}\text{ FLOPs}$$
 
-- On the remaining $17$ turns, both the Root and the Trunk ($28{,}672$ tokens) hit the cache. The engine prefills only the dynamic Leaf ($4{,}096$ tokens):
+- On the remaining `{python} PrefixLayoutAmortization.n_cached_turns_str` turns, both the Root and the Trunk (`{python} PrefixLayoutAmortization.l_trunk_and_leaf_str` tokens) hit the cache. The engine prefills only the dynamic Leaf (`{python} PrefixLayoutAmortization.l_leaf_str` tokens):
   $$\text{FLOPs}_{\text{cached}} = 2 \times (70 \times 10^9) \times 4{,}096 \approx 5.734 \times 10^{14}\text{ FLOPs}$$
 
 Summing the computational cost across the trajectory:
 $$\text{Total FLOPs}_{\text{stable}} = (1 \times 4.587 \times 10^{15}) + (2 \times 4.014 \times 10^{15}) + (17 \times 5.734 \times 10^{14}) \approx 2.236 \times 10^{16}\text{ FLOPs}$$
 $$\text{Total Prefill Latency}_{\text{stable}} = \frac{2.236 \times 10^{16}\text{ FLOPs}}{1.5 \times 10^{14}\text{ FLOPs/s}} \approx 149.1\text{ seconds}$$
 
-Structuring the prompt to maintain prefix stability reduces total prefill compute and latency by $75.6\%$ (a $4.1\times$ throughput speedup), saving over $7.7\text{ minutes}$ of execution delay across a single 20-step trajectory.
+Structuring the prompt to maintain prefix stability reduces total prefill compute and latency by `{python} PrefixLayoutAmortization.pct_savings_str` (a `{python} PrefixLayoutAmortization.speedup_mult_str` throughput speedup), saving over `{python} PrefixLayoutAmortization.time_saved_min_str` of execution delay across a single `{python} PrefixLayoutAmortization.t_turns_str`-step trajectory.
 :::
 
 Maintaining layout stability introduces an architectural trade-off against *attention recency*. Because transformer models exhibit recency bias and position-dependent degradation, placing instructions at the root of a 32,000-token prompt positions them far from the generation boundary at the tail. If an agent struggles to adhere to complex constraints when those constraints are separated from the decode point by tens of thousands of tokens, runtime designers may be tempted to duplicate key instructions at the very end of the Leaf zone.
@@ -577,10 +724,85 @@ Within the volatile middle zone, the runtime deploys *semantic anchors*. A seman
 
 When compaction is triggered, the supervisor identifies contiguous blocks of unanchored historical turns, aggregates them into episodic chunks of length $C$, and compacts each chunk into a structured progress record. If the middle zone fills with compacted records over an extended trajectory, the runtime initiates *hierarchical chunk summarization*: multiple first-order chunk summaries are merged into higher-order epochal summaries, ensuring that the total token footprint of the middle zone remains asymptotically bounded.
 
+```{python}
+#| label: lego-04-token-budget-compaction-and-roofline
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TOKEN BUDGET COMPACTION AND ROOFLINE PREFILL SAVINGS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-04-token-budget-compaction-and-roofline
+# │ Goal: Dimension KV cache memory reclamation and prefill speedup via multi-stage compaction.
+# │ Show: Compacting 96 Ki to 24 Ki tokens frees 22.50 GiB VRAM and cuts prefill latency by 7.78x.
+# │ How: Calculate GQA KV bytes per token; compute projection and attention FLOPs under sustained MFU.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_multiple, fmt_memory_capacity
+
+class TokenBudgetCompaction:
+    """Token budget compaction and Roofline prefill savings."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_params = 70e9
+    n_layers = 80
+    d_model = 8192
+    h_kv = 8
+    d_k = 128
+    bytes_per_elem = 2 * byte
+    p_effective = 494.5 * (TFLOP / second)
+
+    n_raw = 98_304
+    lossless_strip = 30 * 1024
+    structured_prune = 25 * 1024
+    semantic_reclaim = 17 * 1024
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    n_compact = n_raw - (lossless_strip + structured_prune + semantic_reclaim)
+    bytes_per_token = 2 * (n_layers * h_kv * d_k * bytes_per_elem)
+
+    mem_raw = (n_raw * bytes_per_token).to(GiB)
+    mem_compact = (n_compact * bytes_per_token).to(GiB)
+    delta_memory = mem_raw - mem_compact
+
+    # FLOPs
+    flops_proj_raw = 2 * n_params * n_raw
+    flops_attn_raw = 4 * n_layers * d_model * (n_raw**2)
+    flops_total_raw = flops_proj_raw + flops_attn_raw
+    t_prefill_raw = (flops_total_raw * flop / p_effective).to(second)
+
+    flops_proj_compact = 2 * n_params * n_compact
+    flops_attn_compact = 4 * n_layers * d_model * (n_compact**2)
+    flops_total_compact = flops_proj_compact + flops_attn_compact
+    t_prefill_compact = (flops_total_compact * flop / p_effective).to(second)
+
+    speedup = (t_prefill_raw / t_prefill_compact).magnitude
+    time_saved = t_prefill_raw - t_prefill_compact
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(n_compact == 24_576, "n_compact")
+    check(bytes_per_token.magnitude == 327_680, "bytes_per_token")
+    check(abs(mem_raw.magnitude - 30.00) < 0.1, "mem_raw")
+    check(abs(mem_compact.magnitude - 7.50) < 0.1, "mem_compact")
+    check(abs(delta_memory.magnitude - 22.50) < 0.1, "delta_memory")
+    check(abs(t_prefill_raw.magnitude - 78.99) < 0.1, "t_prefill_raw")
+    check(abs(t_prefill_compact.magnitude - 10.15) < 0.1, "t_prefill_compact")
+    check(abs(speedup - 7.78) < 0.05, "speedup")
+    check(abs(time_saved.magnitude - 68.84) < 0.5, "time_saved")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_raw_str = fmt_int(n_raw)
+    n_compact_str = fmt_int(n_compact)
+    delta_memory_gib_str = fmt_memory_capacity(delta_memory, unit=GiB, precision=2)
+    speedup_mult_str = fmt_multiple(speedup, precision=2)
+    time_saved_floor = int(math.floor(time_saved.magnitude)) * second
+    time_saved_s_str = fmt_time(time_saved_floor, unit=second, precision=0)
+```
+
 ::: {#nbk-04-token-budget-compaction-and-roofline .callout-notebook title="Token budget compaction and Roofline prefill savings"}
 Consider an autonomous software engineering agent running on a dedicated host backed by an NVIDIA H100 SXM5 GPU (3.35 TB/s HBM3 memory bandwidth, 989 TFLOPS peak half-precision Tensor Core throughput). The agent runtime uses a 70-billion parameter dense transformer model with $L = 80$ layers, hidden dimension $d = 8192$, and Grouped-Query Attention (GQA) with $h_{\text{kv}} = 8$ KV heads and head dimension $d_k = 128$. The logical context capacity is configured to $M = 128\text{ Ki tokens}$ ($131{,}072$ tokens).
 
-**Problem:** Over an active debugging trajectory of 45 turns, the uncompressed transcript accumulates $N_{\text{raw}} = 96\text{ Ki tokens}$ ($98{,}304$ tokens). The runtime compaction pipeline processes this transcript:
+**Problem:** Over an active debugging trajectory of 45 turns, the uncompressed transcript accumulates $N_{\text{raw}} = 96\text{ Ki tokens}$ (`{python} TokenBudgetCompaction.n_raw_str` tokens). The runtime compaction pipeline processes this transcript:
 
 1. Lossless filtering strips $30\text{ Ki tokens}$ of redundant diff context, terminal formatting, and superseded file reads.
 2. Structured extraction prunes $25\text{ Ki tokens}$ of verbose build and package management logs into structured diagnostic frames.
@@ -600,19 +822,19 @@ The KV cache memory consumption per token across all $L$ layers under GQA is:
 $$\text{Bytes per token} = 2 \times (\text{Key} + \text{Value}) = 2 \times (L \times h_{\text{kv}} \times d_k \times 2\text{ bytes})$$
 $$\text{Bytes per token} = 2 \times (80 \times 8 \times 128 \times 2) = 327{,}680\text{ bytes} \approx 320\text{ KiB/token}$$
 
-For the uncompressed context ($N_{\text{raw}} = 98{,}304$ tokens):
+For the uncompressed context ($N_{\text{raw}} =$ `{python} TokenBudgetCompaction.n_raw_str` tokens):
 $$\text{Memory}_{\text{raw}} = 98{,}304 \times 327{,}680\text{ bytes} \approx 32.21\times 10^9\text{ bytes} \approx 30.00\text{ GiB}$$
 
-For the compacted context ($N_{\text{compact}} = 24{,}576$ tokens):
+For the compacted context ($N_{\text{compact}} =$ `{python} TokenBudgetCompaction.n_compact_str` tokens):
 $$\text{Memory}_{\text{compact}} = 24{,}576 \times 327{,}680\text{ bytes} \approx 8.05\times 10^9\text{ bytes} \approx 7.50\text{ GiB}$$
 
 $$\Delta \text{Memory} = 30.00\text{ GiB} - 7.50\text{ GiB} = 22.50\text{ GiB reclaimed}$$
-Compaction frees $22.50\text{ GiB}$ of physical GPU VRAM, preventing out-of-memory crashes and permitting larger batch sizes or extended generation lengths.
+Compaction frees `{python} TokenBudgetCompaction.delta_memory_gib_str` of physical GPU VRAM, preventing out-of-memory crashes and permitting larger batch sizes or extended generation lengths.
 
 *Part 2: Prefill Computation and Latency Savings*
 The computational cost of the prefill phase consists of two terms: the linear parameter projections ($\approx 2 \cdot P \cdot N$) and the quadratic self-attention projections ($\approx 4 \cdot L \cdot d \cdot N^2$ operations).
 
-For $N_{\text{raw}} = 98{,}304$:
+For $N_{\text{raw}} =$ `{python} TokenBudgetCompaction.n_raw_str`:
 $$\text{FLOPs}_{\text{proj}} = 2 \times (70 \times 10^9) \times 98{,}304 \approx 13.76\times 10^{15}\text{ FLOPs} = 13.76\text{ PFLOPs}$$
 $$\text{FLOPs}_{\text{attn}} = 4 \times 80 \times 8192 \times (98{,}304)^2 \approx 25.30\times 10^{15}\text{ FLOPs} = 25.30\text{ PFLOPs}$$
 $$\text{FLOPs}_{\text{total, raw}} = 13.76 + 25.30 = 39.06\text{ PFLOPs}$$
@@ -620,14 +842,14 @@ $$\text{FLOPs}_{\text{total, raw}} = 13.76 + 25.30 = 39.06\text{ PFLOPs}$$
 At $494.5\text{ TFLOPS}$ sustained throughput:
 $$t_{\text{prefill, raw}} = \frac{39.06 \times 10^{15}\text{ FLOPs}}{494.5 \times 10^{12}\text{ FLOPs/sec}} \approx 78.99\text{ seconds}$$
 
-For $N_{\text{compact}} = 24{,}576$:
+For $N_{\text{compact}} =$ `{python} TokenBudgetCompaction.n_compact_str`:
 $$\text{FLOPs}_{\text{proj}} = 2 \times (70 \times 10^9) \times 24{,}576 \approx 3.44\times 10^{15}\text{ FLOPs} = 3.44\text{ PFLOPs}$$
 $$\text{FLOPs}_{\text{attn}} = 4 \times 80 \times 8192 \times (24{,}576)^2 \approx 1.58\times 10^{15}\text{ FLOPs} = 1.58\text{ PFLOPs}$$
 $$\text{FLOPs}_{\text{total, compact}} = 3.44 + 1.58 = 5.02\text{ PFLOPs}$$
 
 $$t_{\text{prefill, compact}} = \frac{5.02 \times 10^{15}\text{ FLOPs}}{494.5 \times 10^{12}\text{ FLOPs/sec}} \approx 10.15\text{ seconds}$$
 
-Compaction delivers a $7.78\times$ reduction in prefill latency (saving over 68 seconds of blocking host time per turn), primarily driven by the quadratic reduction in self-attention matrix operations over long context sequences.
+Compaction delivers a `{python} TokenBudgetCompaction.speedup_mult_str` reduction in prefill latency (saving over `{python} TokenBudgetCompaction.time_saved_s_str` of blocking host time per turn), primarily driven by the quadratic reduction in self-attention matrix operations over long context sequences.
 :::
 
 While bounded compaction algorithms successfully manage token budget pressures across medium-length trajectories, reactive eviction exhibits fundamental limits over prolonged task horizons. Continually distilling unstructured episodic chunks inevitably degrades the fine-grained causal chain of actions, and higher-order recursive summaries compound semantic drift. When a complex software engineering task extends across dozens of files and hundreds of speculative actions, the runtime supervisor cannot rely solely on rolling window eviction. To sustain coherence across arbitrary task lifespans without cumulative degradation, the systems architecture must transition from reactive context compaction to durable, structured checkpointing—a transition that requires formalizing state persistence through explicit verifiable checkpoints.
@@ -702,8 +924,93 @@ def audit_checkpoint(raw_trace: list[Event], chk: CheckpointSchema) -> bool:
 
 The verification logic above demonstrates the programmatic gating enforced by the host supervisor. Because this check executes as native host code outside the inference engine, it runs in sub-millisecond time and requires zero neural evaluation. If `audit_checkpoint` returns `False`, the host runtime rejects the candidate checkpoint, injects an explicit error diagnostic into the active context ("Error: Proposed checkpoint contradicted tool result for call_id..."), and forces the model to regenerate the state tuple under constrained decoding.
 
+```{python}
+#| label: lego-04-quantitative-checkpoint-auditing-and-prefill
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUANTITATIVE CHECKPOINT AUDITING AND PREFILL RECLAIM (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-04-quantitative-checkpoint-auditing-and-prefill
+# │ Goal: Evaluate latency reduction, memory recovery, and host CPU audit overhead of structured checkpoints.
+# │ Show: Compressing 112k to 3.5k tokens yields 66.7x speedup and 36.41 GB HBM recovery; CPU audit takes 1.8 ms (<1.4%).
+# │ How: Contrast 8-GPU tensor-parallel prefill FLOPs and KV memory for raw context vs hydrated checkpoint.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time, fmt_multiple, fmt_memory_capacity
+
+class CheckpointAuditingPrefill:
+    """Quantitative checkpoint auditing and prefill reclaim."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_gpus = 8
+    p_peak_per_gpu = 1975 * (TFLOP / second)
+    mfu_prefill = 0.45
+    d_model = 8192
+    n_layers = 80
+    n_heads = 64
+    d_head = 128
+    n_kv_heads = 8
+    bytes_per_elem = 2 * byte
+
+    l_raw = 114_688
+    l_chk = 1_536
+    l_tail = 2_048
+    t_audit = 1.8 * millisecond
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    p_effective = n_gpus * p_peak_per_gpu * mfu_prefill
+    l_hydrated = l_chk + l_tail
+
+    # Raw
+    flops_gemm_raw = 48 * n_layers * (d_model**2) * l_raw
+    flops_attn_raw = 4 * n_layers * d_model * (l_raw**2)
+    flops_total_raw = flops_gemm_raw + flops_attn_raw
+    t_prefill_raw = (flops_total_raw * flop / p_effective).to(second)
+    mem_kv_raw = (4 * byte * n_layers * (n_kv_heads * d_head) * l_raw).to(GB)
+
+    # Checkpoint
+    flops_gemm_chk = 48 * n_layers * (d_model**2) * l_hydrated
+    flops_attn_chk = 4 * n_layers * d_model * (l_hydrated**2)
+    flops_total_chk = flops_gemm_chk + flops_attn_chk
+    t_prefill_chk = (flops_total_chk * flop / p_effective).to(second)
+    mem_kv_chk = (4 * byte * n_layers * (n_kv_heads * d_head) * l_hydrated).to(GB)
+
+    # Summary
+    compression_ratio = l_raw / l_hydrated
+    speedup_latency = (t_prefill_raw / t_prefill_chk).magnitude
+    t_saved = t_prefill_raw - t_prefill_chk
+    mem_reclaimed = mem_kv_raw - mem_kv_chk
+    concurrency_increase = int(compression_ratio)
+    audit_overhead_pct = (t_audit.to(second) / t_prefill_chk).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(l_hydrated == 3584, "l_hydrated")
+    check(abs(t_prefill_raw.magnitude - 9.00) < 0.1, "t_prefill_raw")
+    check(abs(t_prefill_chk.magnitude - 0.135) < 0.01, "t_prefill_chk")
+    check(abs(compression_ratio - 32.0) < 0.1, "compression_ratio")
+    check(abs(speedup_latency - 66.7) < 0.5, "speedup_latency")
+    check(abs(t_saved.magnitude - 8.865) < 0.05, "t_saved")
+    check(abs(mem_reclaimed.magnitude - 36.41) < 0.1, "mem_reclaimed")
+    check(abs(audit_overhead_pct - 0.0133) < 0.002, "audit_overhead_pct")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    l_raw_str = fmt_int(l_raw)
+    l_chk_str = fmt_int(l_chk)
+    l_tail_str = fmt_int(l_tail)
+    t_prefill_raw_s_str = fmt_time(t_prefill_raw, unit=second, precision=2)
+    t_prefill_chk_s_str = fmt_time(t_prefill_chk, unit=second, precision=3)
+    speedup_latency_mult_str = fmt_multiple(speedup_latency, precision=1)
+    t_saved_s_str = fmt_time(t_saved, unit=second, precision=3)
+    mem_reclaimed_gb_str = fmt_memory_capacity(mem_reclaimed, unit=GB, precision=2)
+    compression_ratio_mult_str = fmt_multiple(compression_ratio, precision=0)
+    concurrency_increase_mult_str = fmt_multiple(concurrency_increase, precision=0)
+    t_audit_ms_str = fmt_time(t_audit, unit=millisecond, precision=1)
+    audit_overhead_pct_str = fmt_percent(audit_overhead_pct, precision=1, style="prose")
+```
+
 ::: {#nbk-04-quantitative-checkpoint-auditing-and-prefill .callout-notebook title="Quantitative checkpoint auditing and prefill reclaim"}
-Consider an autonomous software engineering agent executing a multi-file refactoring task on a large repository. Over 48 turns of tool interactions, the raw context buffer accumulates $L_{\text{raw}} = 114\text{,}688$ tokens ($112\text{k}$ tokens), consisting of compiler outputs, source diffs, and directory listings.
+Consider an autonomous software engineering agent executing a multi-file refactoring task on a large repository. Over 48 turns of tool interactions, the raw context buffer accumulates $L_{\text{raw}} =$ `{python} CheckpointAuditingPrefill.l_raw_str` tokens ($112\text{k}$ tokens), consisting of compiler outputs, source diffs, and directory listings.
 
 The agent runs on a host server backed by an 8-GPU tensor-parallel cluster of NVIDIA H100 SXM5 accelerators ($1975\text{ TFLOP/s}$ dense FP16 per GPU, $3.35\text{ TB/s}$ HBM3 bandwidth). The model employs a standard Transformer architecture ($d_{\text{model}} = 8192$, $N_{\text{layers}} = 80$, $N_{\text{heads}} = 64$, $d_{\text{head}} = 128$). We evaluate the computational and financial impact of checkpointing versus maintaining the uncompacted context.
 
@@ -721,7 +1028,7 @@ The physical KV cache memory required to stage this context in 16-bit precision 
 $$\text{Memory}_{\text{KV}} = 2 \times 2\text{ bytes} \times N_{\text{layers}} \times (N_{\text{kv\_heads}} \times d_{\text{head}}) \times L_{\text{raw}} = 4 \times 80 \times 1024 \times 114\text{,}688 \approx 37.58\text{ GB}$$
 
 **2. Prefill Compute and Memory of the Verified Checkpoint:**
-The runtime prompts the model to distill the history into a structured checkpoint $\mathcal{S}_{\text{checkpoint}}$, yielding $L_{\text{chk}} = 1\text{,}536$ tokens ($1.5\text{k}$ tokens), alongside an active working tail of the most recent 2 turns ($L_{\text{tail}} = 2\text{,}048$ tokens). The hydrated context length becomes:
+The runtime prompts the model to distill the history into a structured checkpoint $\mathcal{S}_{\text{checkpoint}}$, yielding $L_{\text{chk}} =$ `{python} CheckpointAuditingPrefill.l_chk_str` tokens ($1.5\text{k}$ tokens), alongside an active working tail of the most recent 2 turns ($L_{\text{tail}} =$ `{python} CheckpointAuditingPrefill.l_tail_str` tokens). The hydrated context length becomes:
 $$L_{\text{hydrated}} = L_{\text{chk}} + L_{\text{tail}} = 3\text{,}584\text{ tokens}$$
 
 Recomputing the prefill FLOPs for $L_{\text{hydrated}}$:
@@ -735,10 +1042,10 @@ $$\text{Memory}_{\text{KV, chk}} = 4 \times 80 \times 1024 \times 3584 \approx 1
 
 **3. Quantitative Summary:**
 
-- **Token Compression Ratio:** $\frac{114\text{,}688}{3\text{,}584} = 32.0\times$
-- **Prefill Latency Reduction:** From $9.00\text{ s}$ to $0.135\text{ s}$ ($66.7\times$ speedup, eliminating $8.865\text{ s}$ of blocking GPU time per turn).
-- **HBM Footprint Reclamation:** $37.58\text{ GB} - 1.17\text{ GB} = 36.41\text{ GB}$ saved per batch instance, allowing a $32\times$ increase in concurrent serving concurrency on identical physical hardware.
-- **Verification Overhead:** The deterministic audit in `audit_checkpoint` parses the 48-event JSON log in host memory in $1.8\text{ ms}$ on a standard CPU core—less than $1.4\%$ of the single-turn prefill time—completely preventing the propagation of corrupted milestones into the compacted state.
+- **Token Compression Ratio:** $\frac{114\text{,}688}{3\text{,}584} =$ `{python} CheckpointAuditingPrefill.compression_ratio_mult_str`
+- **Prefill Latency Reduction:** From `{python} CheckpointAuditingPrefill.t_prefill_raw_s_str` to `{python} CheckpointAuditingPrefill.t_prefill_chk_s_str` (`{python} CheckpointAuditingPrefill.speedup_latency_mult_str` speedup, eliminating `{python} CheckpointAuditingPrefill.t_saved_s_str` of blocking GPU time per turn).
+- **HBM Footprint Reclamation:** $37.58\text{ GB} - 1.17\text{ GB} =$ `{python} CheckpointAuditingPrefill.mem_reclaimed_gb_str` saved per batch instance, allowing a `{python} CheckpointAuditingPrefill.concurrency_increase_mult_str` increase in concurrent serving concurrency on identical physical hardware.
+- **Verification Overhead:** The deterministic audit in `audit_checkpoint` parses the 48-event JSON log in host memory in `{python} CheckpointAuditingPrefill.t_audit_ms_str` on a standard CPU core—less than `{python} CheckpointAuditingPrefill.audit_overhead_pct_str` of the single-turn prefill time—completely preventing the propagation of corrupted milestones into the compacted state.
 :::
 
 The quantitative benefits of checkpointing extend beyond raw compute savings. By enforcing strict verification before context eviction, the host runtime eliminates the compounding failure rate of long trajectories, ensuring that the model's forward reasoning is grounded exclusively in verified state transitions.
@@ -902,13 +1209,69 @@ Conversely, preserving the KV cache by leaving historical turns untouched forces
 **Systems insight**: Context management in agentic architectures is not a prompt styling exercise; it is an unyielding trade-off between physical accelerator cache reuse and epistemic coherence. Robust runtimes bridge this gap through out-of-band tombstoning and dependency-aware just-in-time rehydration, never trusting the neural engine to intuit when the world beneath it has shifted.
 :::
 
+```{python}
+#| label: lego-04-latency-and-compute-roofline-of
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LATENCY AND COMPUTE ROOFLINE OF CONTEXT INVALIDATION STRATEGIES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-04-latency-and-compute-roofline-of
+# │ Goal: Compare prefill latency of hard prefix eviction vs append-only semantic tombstoning.
+# │ Show: Semantic tombstoning reduces prefill latency from 1,704 ms to 8.9 ms (191x speedup).
+# │ How: Hard eviction triggers recompute from split point; append-only preserves KV prefix hits.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_multiple
+
+class ContextInvalidationRoofline:
+    """Latency and compute Roofline of context invalidation strategies."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    p_params = 70e9
+    s_ctx = 28_672
+    tokens_read = 850
+    l_split = 4_200
+    p_peak = 3350 * (TFLOP / second)
+    efficiency = 0.60
+    n_delta = 128
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    p_effective = efficiency * p_peak
+
+    # Strategy A: Hard eviction
+    n_recompute_hard = s_ctx - l_split
+    flops_hard = 2 * p_params * n_recompute_hard
+    t_hard = (flops_hard * flop / p_effective).to(second)
+
+    # Strategy B: Semantic tombstoning (append-only)
+    flops_tomb = 2 * p_params * n_delta
+    t_tomb = (flops_tomb * flop / p_effective).to(second)
+
+    speedup = (t_hard / t_tomb).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(n_recompute_hard == 24_472, "n_recompute_hard")
+    check(abs(t_hard.magnitude - 1.704) < 0.01, "t_hard")
+    check(abs(t_tomb.to(millisecond).magnitude - 8.9) < 0.1, "t_tomb")
+    check(abs(speedup - 191.0) < 2.0, "speedup")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    tokens_read_str = fmt_int(tokens_read)
+    t_hard_ms = int(t_hard.to(millisecond).magnitude) * millisecond
+    t_hard_ms_str = fmt_time(t_hard_ms, unit=millisecond, precision=0, commas=True)
+    t_tomb_ms_str = fmt_time(t_tomb, unit=millisecond, precision=1)
+    speedup_mult_str = fmt_multiple(round(speedup), precision=0)
+    t_hard_s_str = fmt_time(t_hard, unit=second, precision=1)
+```
+
 ::: {#nbk-04-latency-and-compute-roofline-of .callout-notebook title="Latency and compute Roofline of context invalidation strategies"}
-Consider an agent debugging an operating system kernel repository. The conversation trajectory has reached Turn 12, accumulating a logical working context of $S = 28\text{,}672$ tokens. In Turn 3, the agent read a device driver header `include/net/nic.h` (850 tokens). In Turn 11, the agent applied a patch modifying `include/net/nic.h`.
+Consider an agent debugging an operating system kernel repository. The conversation trajectory has reached Turn 12, accumulating a logical working context of $S = 28\text{,}672$ tokens. In Turn 3, the agent read a device driver header `include/net/nic.h` (`{python} ContextInvalidationRoofline.tokens_read_str` tokens). In Turn 11, the agent applied a patch modifying `include/net/nic.h`.
 
 We evaluate the system performance on an NVIDIA H100 SXM5 GPU (3,350 TFLOPS FP8 Tensor Core peak, 3.35 TB/s HBM3 memory bandwidth) running a 70-billion parameter dense foundation model (FP8 quantized weights, $P = 70 \times 10^9$ parameters).
 
 **Strategy A: Hard Eviction**
-The runtime excises the 850 tokens of `include/net/nic.h` from Turn 3.
+The runtime excises the `{python} ContextInvalidationRoofline.tokens_read_str` tokens of `include/net/nic.h` from Turn 3.
 Because the excision occurs near the beginning of the context, the shared prefix hash breaks at token position $L_{\text{split}} = 4\text{,}200$.
 The physical serving engine (e.g., vLLM or SGLang) can only reuse the KV cache for the first 4,200 tokens; it must recompute the prefill for the remaining $28\text{,}672 - 4\text{,}200 = 24\text{,}472$ tokens.
 
@@ -919,7 +1282,7 @@ At an achieved hardware compute efficiency of 60 percent of the theoretical FP8 
 $$T_{\text{prefill, Hard}} = \frac{3.426 \times 10^{15} \text{ FLOPs}}{2.010 \times 10^{15} \text{ FLOPs/sec}} \approx 1.704 \text{ seconds}$$
 
 **Strategy B: Semantic Tombstoning**
-The runtime replaces the 850-token file excerpt in Turn 3 with a 24-token semantic tombstone:
+The runtime replaces the `{python} ContextInvalidationRoofline.tokens_read_str`-token file excerpt in Turn 3 with a 24-token semantic tombstone:
 `"[OBSERVATION INVALIDATED: include/net/nic.h mutated by Action #11. Refer to fresh tool reads.]"`
 Because this modification still alters the historical prefix at token 4,200, an in-place edit would also invalidate downstream KV cache blocks.
 
@@ -929,7 +1292,7 @@ $$\text{FLOPs} = 2 \times (70 \times 10^9) \times 128 = 1.792 \times 10^{13} \te
 $$T_{\text{prefill, Tombstone}} = \frac{1.792 \times 10^{13}}{2.010 \times 10^{15}} \approx 0.0089 \text{ seconds} = 8.9 \text{ milliseconds}$$
 
 **Trade-off Analysis:**
-Append-only tombstoning reduces prefill latency from **1,704 ms to 8.9 ms**—a **191$\times$ speedup**—by preserving KV cache reuse. However, it incurs an attention tax: the model's attention heads must actively suppress the 850 stale tokens still present in the prompt prefix by attending to the invalidation record at the tail. If the model exhibits high attention distraction, the runtime must pay the 1.7-second prefill penalty of Hard Eviction to guarantee semantic purity.
+Append-only tombstoning reduces prefill latency from **`{python} ContextInvalidationRoofline.t_hard_ms_str` to `{python} ContextInvalidationRoofline.t_tomb_ms_str`**—a **`{python} ContextInvalidationRoofline.speedup_mult_str` speedup**—by preserving KV cache reuse. However, it incurs an attention tax: the model's attention heads must actively suppress the `{python} ContextInvalidationRoofline.tokens_read_str` stale tokens still present in the prompt prefix by attending to the invalidation record at the tail. If the model exhibits high attention distraction, the runtime must pay the `{python} ContextInvalidationRoofline.t_hard_s_str` prefill penalty of Hard Eviction to guarantee semantic purity.
 :::
 
 The tension between prefill compute efficiency and semantic purity represents a core architectural trade-off of agent context management. When an agent operates over short horizons or interacts with small source trees, aggressive JIT refreshing and hard context purging minimize the probability of hallucination. But as working contexts approach long horizons ($S > 32\text{,}768$ tokens) and prefill latencies begin to dominate the user experience, runtimes must rely on structured tombstoning and precise dependency tracking to maintain operational coherence without triggering catastrophic KV cache thrashing.
@@ -1011,16 +1374,78 @@ The data in @tbl-vol3-context-evaluation demonstrates why naive metrics are dece
 
 Conversely, the naive sliding window eliminates stale errors ($\epsilon_{\text{stale}} = 0.06$) by dropping old history entirely, but its task completion rate collapses to $0.18$ due to the catastrophic loss of foundational constraints established in early turns ($R_{\text{assoc}} = 0.12$). Only structured checkpointing with explicit dependency-tracked tombstoning maintains high completion rates by simultaneously bounding stale state and preserving critical invariant needles.
 
-::: {#nbk-04-quantifying-working-set-efficiency-and-compaction .callout-notebook title="Quantifying working-set efficiency and compaction trade-offs"}
-Consider an autonomous systems repair agent executing an incident remediation trajectory over $T = 30$ turns.
+```{python}
+#| label: lego-04-quantifying-working-set-efficiency-and-compaction
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUANTIFYING WORKING-SET EFFICIENCY AND COMPACTION TRADE-OFFS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-04-quantifying-working-set-efficiency-and-compaction
+# │ Goal: Dimension trajectory context growth, compaction compliance, and reliability trade-offs.
+# │ Show: Structured checkpointing ensures budget compliance and bounds wasted turns to 1.8 vs 18.
+# │ How: Calculate uncompacted volume; assess compaction retention probability and error penalty.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_multiple
 
-- The raw trajectory generates an average of $2\text{,}400$ tokens per turn (comprising shell outputs, log traces, and diffs), producing an uncompressed history of:
+class WorkingSetEfficiency:
+    """Quantifying working-set efficiency and compaction trade-offs."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_turns = 30
+    tokens_per_turn = 2400
+    s_max = 16_384
+
+    cr_a = 6.0
+    p_omit_a = 0.15
+    eps_stale_a = 0.20
+    penalty_turns = 3
+
+    cr_b = 3.5
+    eps_stale_b = 0.02
+    s_b_pruned = 14_500
+    cycle_interval = 5
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    s_raw = n_turns * tokens_per_turn
+    s_a = int(s_raw / cr_a)
+    s_b = int(round(s_raw / cr_b))
+
+    n_cycles = int(n_turns / cycle_interval)
+    p_retain_a = (1.0 - p_omit_a) ** n_cycles
+
+    wasted_turns_a = int(n_turns * eps_stale_a * penalty_turns)
+    wasted_turns_b = n_turns * eps_stale_b * penalty_turns
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(s_raw == 72_000, "s_raw")
+    check(s_a == 12_000, "s_a")
+    check(s_b == 20_571, "s_b")
+    check(n_cycles == 6, "n_cycles")
+    check(abs(p_retain_a - 0.377) < 0.005, "p_retain_a")
+    check(wasted_turns_a == 18, "wasted_turns_a")
+    check(abs(wasted_turns_b - 1.8) < 0.01, "wasted_turns_b")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_turns_str = fmt_int(n_turns)
+    tokens_per_turn_str = fmt_int(tokens_per_turn)
+    s_max_str = fmt_int(s_max)
+    cr_a_mult_str = fmt_multiple(cr_a, precision=0)
+    cr_b_mult_str = fmt_multiple(cr_b, precision=1)
+    s_b_pruned_str = fmt_int(s_b_pruned)
+```
+
+::: {#nbk-04-quantifying-working-set-efficiency-and-compaction .callout-notebook title="Quantifying working-set efficiency and compaction trade-offs"}
+Consider an autonomous systems repair agent executing an incident remediation trajectory over $T =$ `{python} WorkingSetEfficiency.n_turns_str` turns.
+
+- The raw trajectory generates an average of `{python} WorkingSetEfficiency.tokens_per_turn_str` tokens per turn (comprising shell outputs, log traces, and diffs), producing an uncompressed history of:
   $$S_{\text{raw}} = 30 \times 2\text{,}400 = 72\text{,}000 \text{ tokens}$$
 
-- The host system limits the active working set to $S_{\max} = 16\text{,}384$ tokens.
+- The host system limits the active working set to $S_{\max} =$ `{python} WorkingSetEfficiency.s_max_str` tokens.
 - We evaluate two context management policies:
-  1. **Policy A (Lossy Narrative Compaction):** Every 5 turns, an auxiliary prompt summarizes historical actions and tool outputs into an unstructured narrative paragraph, achieving an average compression ratio of $C_r = 6.0$. However, compaction introduces a $15\%$ per-compaction probability of omitting minor operational constraints (e.g., specific environment flags or path parameters), and carries a stale-state error frequency of $\epsilon_{\text{stale}} = 0.20$.
-  2. **Policy B (Structured State Checkpointing with Invalidation):** Maintains an explicit JSON state delta, exact file diffs, and tombstones for invalidated observations, achieving $C_r = 3.5$. Constraint retention is guaranteed via deterministic schema validation ($100\%$ retention of tracked environment flags), and invalidation rules suppress stale references to $\epsilon_{\text{stale}} = 0.02$.
+  1. **Policy A (Lossy Narrative Compaction):** Every 5 turns, an auxiliary prompt summarizes historical actions and tool outputs into an unstructured narrative paragraph, achieving an average compression ratio of $C_r =$ `{python} WorkingSetEfficiency.cr_a_mult_str`. However, compaction introduces a $15\%$ per-compaction probability of omitting minor operational constraints (e.g., specific environment flags or path parameters), and carries a stale-state error frequency of $\epsilon_{\text{stale}} = 0.20$.
+  2. **Policy B (Structured State Checkpointing with Invalidation):** Maintains an explicit JSON state delta, exact file diffs, and tombstones for invalidated observations, achieving $C_r =$ `{python} WorkingSetEfficiency.cr_b_mult_str`. Constraint retention is guaranteed via deterministic schema validation ($100\%$ retention of tracked environment flags), and invalidation rules suppress stale references to $\epsilon_{\text{stale}} = 0.02$.
 
 **Analysis 1: Context Budget Compliance**
 
@@ -1029,7 +1454,7 @@ Consider an autonomous systems repair agent executing an incident remediation tr
 
 - Policy B staged size at Turn 30:
   $$S_B = \frac{72\text{,}000}{3.5} \approx 20\text{,}571 \text{ tokens} > S_{\max}$$
-Because Policy B exceeds $S_{\max}$, the runtime must evict secondary observational logs (retaining only the structural state deltas, active file boundaries, and tombstones), bringing the staged working set to exactly $S_B' = 14\text{,}500$ tokens while preserving all primary constraints.
+Because Policy B exceeds $S_{\max}$, the runtime must evict secondary observational logs (retaining only the structural state deltas, active file boundaries, and tombstones), bringing the staged working set to exactly $S_B' =$ `{python} WorkingSetEfficiency.s_b_pruned_str` tokens while preserving all primary constraints.
 
 **Analysis 2: Operational Reliability Across Horizons**
 Across 6 compaction cycles ($30 / 5 = 6$), the probability that Policy A retains *all* critical constraints is:
@@ -1039,7 +1464,7 @@ $$\text{Wasted Turns}_A = 30 \times \epsilon_{\text{stale}} \times 3 = 30 \times
 Policy B incurs:
 $$\text{Wasted Turns}_B = 30 \times 0.02 \times 3 = 1.8 \text{ turns}$$
 
-Even though Policy A achieved a higher compression ratio ($6.0\times$ vs. $3.5\times$), its operational efficiency is destroyed by constraint forgetting and stale-state execution loops. Policy B delivers superior systems dependability under an identical physical context constraint.
+Even though Policy A achieved a higher compression ratio (`{python} WorkingSetEfficiency.cr_a_mult_str` vs. `{python} WorkingSetEfficiency.cr_b_mult_str`), its operational efficiency is destroyed by constraint forgetting and stale-state execution loops. Policy B delivers superior systems dependability under an identical physical context constraint.
 :::
 
 ### The compaction-fidelity dilemma: Lossiness versus constraint retention

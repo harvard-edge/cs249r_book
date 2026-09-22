@@ -91,6 +91,39 @@ $$\text{Speedup}(M) = \frac{1}{(1 - f) + \frac{f}{M} + h(M)}$$
 
 where $h(M)$ is the coordination tax normalized to the single-agent runtime, as a function of the fleet size $M$. In unoptimized multi-agent systems where agents communicate via unconstrained broadcast channels or dense peer-to-peer messaging, $h(M)$ scales quadratically ($\mathcal{O}(M^2)$) with the number of agents. Under such conditions, the speedup curve rapidly inverts: beyond a small concurrency threshold, adding agents increases total completion time and explodes total token consumption while decreasing overall system reliability.
 
+```{python}
+#| label: lego-15-the-amdahl-limits-of-multi-agent
+#| echo: false
+# │ Show: 4-agent parallel fleet achieves 2.07x speedup at 2.20x token expansion.
+# │ How: Amdahl makespan with RPC dispatch, duplicated prefill, and reconciliation overhead.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_percent
+
+class AmdahlLimitsMultiAgentParallelism:
+    t_single = 645 * second
+    t_multi = 311 * second
+    speedup = t_single.to(second).magnitude / t_multi.to(second).magnitude
+    tokens_single = 53_900
+    tokens_multi = 118_400
+    token_expansion = tokens_multi / tokens_single
+    cost_increase = (tokens_multi - tokens_single) / tokens_single
+    latency_reduction = (t_single.to(second).magnitude - t_multi.to(second).magnitude) / t_single.to(second).magnitude
+
+    check(abs(speedup - 2.07395) < 0.001, "speedup")
+    check(abs(token_expansion - 2.19666) < 0.001, "token_expansion")
+    check(abs(cost_increase - 1.19666) < 0.001, "cost_increase")
+    check(abs(latency_reduction - 0.5178) < 0.001, "latency_reduction")
+
+    speedup_mult_str = fmt_multiple(round(speedup, 2), precision=2)
+    tokens_single_str = fmt_int(tokens_single)
+    tokens_multi_str = fmt_int(tokens_multi)
+    token_expansion_mult_str = fmt_multiple(round(token_expansion, 2), precision=2)
+    cost_increase_pct_str = fmt_percent(round(cost_increase, 2), precision=0, style="prose")
+    latency_reduction_pct_str = fmt_percent(latency_reduction, precision=1, style="prose")
+```
+
 ::: {#nbk-15-the-amdahl-limits-of-multi-agent .callout-notebook title="The Amdahl limits of multi-agent parallelism"}
 Consider a whole-repository refactoring task executed against a code base of 120,000 lines across eight distinct architectural modules. We evaluate two system configurations: an optimized Single-Agent Deliberation loop versus a 4-Agent Supervisor-Worker fleet running on an identical cluster of eight NVIDIA H100 GPUs (80 GB HBM3 per GPU, 3.35 TB/s memory bandwidth, FP8 serving throughput of approximately $1.98 \times 10^{15}$ FLOPs/s per device).
 
@@ -103,7 +136,7 @@ $$T_{\text{multi}} = 45\text{ (seq)} + 6\text{ (RPC)} + 3\text{ (prefill)} + 120
 This yields a measured parallel speedup of:
 $$\text{Speedup}(4) = \frac{645\text{ s}}{311\text{ s}} \approx 2.07\times.$$
 
-Systems Cost Accounting: While the parallel fleet compresses wall-clock makespan by $2.07\times$, the underlying hardware accounting reveals the real systems trade-off. Due to redundant context prefill across the four workers (48,000 duplicate prefill tokens) and supervisory reconciliation overhead, total token consumption surges from 53,900 to 118,400 tokens—an expansion of $2.20\times$. The multi-agent architecture trades a $120\%$ increase in compute cost and memory footprint to achieve a $51.8\%$ reduction in wall-clock latency. If task dependencies had forced serialized reconciliation between branches, $T_{\text{multi}}$ would have exceeded $T_{\text{single}}$, inverting the speedup curve despite burning more than double the compute cycles.
+Systems Cost Accounting: While the parallel fleet compresses wall-clock makespan by {python} AmdahlLimitsMultiAgentParallelism.speedup_mult_str, the underlying hardware accounting reveals the real systems trade-off. Due to redundant context prefill across the four workers (48,000 duplicate prefill tokens) and supervisory reconciliation overhead, total token consumption surges from {python} AmdahlLimitsMultiAgentParallelism.tokens_single_str to {python} AmdahlLimitsMultiAgentParallelism.tokens_multi_str—an expansion of {python} AmdahlLimitsMultiAgentParallelism.token_expansion_mult_str. The multi-agent architecture trades a {python} AmdahlLimitsMultiAgentParallelism.cost_increase_pct_str increase in compute cost and memory footprint to achieve a {python} AmdahlLimitsMultiAgentParallelism.latency_reduction_pct_str reduction in wall-clock latency. If task dependencies had forced serialized reconciliation between branches, $T_{\text{multi}}$ would have exceeded $T_{\text{single}}$, inverting the speedup curve despite burning more than double the compute cycles.
 :::
 
 To navigate these trade-offs systematically, the runtime designer must reject the ungrounded assertion that multi-agent systems are inherently superior to single-agent baselines. When evaluating whether to decompose a proposed subsystem, the architect must weigh the operational dimensions detailed in @tbl-vol3-delegation-matrix.
@@ -206,6 +239,28 @@ The *critical path makespan*, defined as $T_{\text{crit}} = \sum_{v \in \Pi_{\te
 
 Parallel speedup emerges when the dependency graph contains fan-out structures where a single parent task spawns multiple mutually independent child vertices ($v_1 \to \{v_2, v_3, \dots, v_m\}$). The maximum instantaneous parallelism supported by the graph is defined by its *width* $\mathcal{W}(G)$, representing the maximum size of an independent vertex cut. If the number of provisioned worker agents $P$ is less than the graph width ($P < \mathcal{W}(G)$), the scheduler must prioritize runnable vertices according to their remaining distance to the sink, prioritizing vertices that lie along the critical path to prevent scheduling bubbles.
 
+```{python}
+#| label: lego-15-critical-path-makespan-and-dag-scheduling
+#| echo: false
+# │ Show: Critical path makespan bounds parallel speedup to 1.58x across 4 workers.
+# │ How: DAG critical path analysis vs sequential execution work with decode/prefill rates.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_multiple
+
+class DagSchedulingMultiAgentExecution:
+    t_seq = 275.0 * second
+    t_parallel = 174.5 * second
+    speedup = t_seq.to(second).magnitude / t_parallel.to(second).magnitude
+
+    check(abs(t_seq.to(second).magnitude - 275.0) < 1e-4, "t_seq")
+    check(abs(t_parallel.to(second).magnitude - 174.5) < 1e-4, "t_parallel")
+    check(abs(speedup - 1.57593) < 0.001, "speedup")
+
+    speedup_mult_str = fmt_multiple(round(speedup, 2), precision=2)
+```
+
 ::: {#nbk-15-critical-path-makespan-and-dag-scheduling .callout-notebook title="DAG scheduling in multi-agent execution"}
 Consider a comprehensive subsystem upgrade comprising seven discrete agentic tasks ($v_1$ through $v_7$), executed on an inference cluster with four worker instances ($P=4$). The serving hardware consists of NVIDIA H100 SXM5 GPUs (80 GB HBM3, 3.35 TB/s memory bandwidth), delivering an empirical single-stream decode throughput of $R_{\text{decode}} = 80\text{ tokens/s}$ and a prefill throughput of $R_{\text{prefill}} = 4{,}000\text{ tokens/s}$.
 
@@ -254,7 +309,7 @@ At $t = 62.5 + 43.0 = 105.5\text{ s}$, $v_5$ finishes. Both dependencies for $v_
 
 Because $P=4 \ge \max(\mathcal{W}(G))$, the actual execution time achieves the critical path limit: $T_{\text{parallel}} = 174.5\text{ seconds}$. The resulting parallel speedup is:
 $$\mathcal{S} = \frac{T_{\text{seq}}}{T_{\text{parallel}}} = \frac{275.0\text{ s}}{174.5\text{ s}} \approx 1.58\times.$$
-Despite deploying four parallel GPU workers, the speedup is capped at $1.58\times$. The remaining compute capacity was lost to sequential dependencies ($v_1$ and $v_7$) and worker idle bubbles while waiting for join synchronization at $v_5$ and $v_7$.
+Despite deploying four parallel GPU workers, the speedup is capped at {python} DagSchedulingMultiAgentExecution.speedup_mult_str. The remaining compute capacity was lost to sequential dependencies ($v_1$ and $v_7$) and worker idle bubbles while waiting for join synchronization at $v_5$ and $v_7$.
 :::
 
 ### Dynamic topology spawning
@@ -453,6 +508,34 @@ $$\text{Time}_{\text{prefill}} \approx \frac{2 \cdot P \cdot S}{\text{Memory Ban
 where $P$ is parameter count and $S$ is sequence length. Inflating $S$ with raw file dumps severely throttles serving throughput.
 :::
 
+```{python}
+#| label: lego-15-context-desorption-and-serialization-overhead
+#| echo: false
+# │ Show: Pass-by-reference task envelopes achieve 137x reduction in input token broadcast.
+# │ How: Pass-by-value context duplication vs typed immutable git commit pointers and HBM.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_multiple, fmt_usd
+
+class ContextDesorptionTaskDelegation:
+    tokens_val = 288_000
+    tokens_ref = 2_100
+    reduction = tokens_val / tokens_ref
+
+    rate_per_m = 3.00
+    cost_val = (tokens_val / 1_000_000) * rate_per_m
+    cost_ref = ((6 * 3_950) / 1_000_000) * rate_per_m
+
+    check(abs(reduction - 137.1428) < 0.01, "reduction")
+    check(abs(cost_val - 0.864) < 1e-4, "cost_val")
+    check(abs(cost_ref - 0.0711) < 1e-4, "cost_ref")
+
+    reduction_mult_str = fmt_multiple(round(reduction))
+    cost_val_str = fmt_usd(cost_val, precision=3)
+    cost_ref_str = fmt_usd(round(cost_ref, 3), precision=3)
+```
+
 ::: {#nbk-15-context-desorption-and-serialization-overhead .callout-notebook title="Context desorption in task delegation"}
 Consider an orchestrator delegating a refactoring task across a cluster of $W = 6$ worker agents. The working set of the target repository encompasses 40 source files totaling $S_{\text{files}} = 48\text{,}000$ BPE tokens. The supervisor requires each worker to analyze a distinct module while observing repository state.
 
@@ -481,7 +564,7 @@ The supervisor generates a typed task envelope specifying the repository's immut
 1. The serialized task envelope consumes exactly $S_{\text{envelope}} = 350$ tokens.
 2. Across all $W = 6$ workers, total input tokens dispatched:
    $$S_{\text{total}} = 6 \times 350 = 2\text{,}100 \text{ tokens}$$
-   Representing a **$137\times$ reduction** in network transmission and accelerator context ingestion.
+   Representing a **{python} ContextDesorptionTaskDelegation.reduction_mult_str reduction** in network transmission and accelerator context ingestion.
 
 3. Initial KV Cache Allocation per Worker:
    $$\text{HBM}_{\text{worker}} = 350 \times 320 \text{ KB} \approx 112 \text{ MB} \quad (\text{versus } 15.36 \text{ GB})$$
@@ -489,7 +572,7 @@ The supervisor generates a typed task envelope specifying the repository's immut
 4. On-Demand State Retrieval:
    Each worker agent uses its attenuated filesystem capability to read only the specific files relevant to its task (averaging 3 files, or $3\text{,}600$ tokens).
    $$\text{Total HBM utilized per worker} \approx 3\text{,}950 \times 320 \text{ KB} \approx 1.26 \text{ GB}$$
-   Total input token cost across the cluster drops from $\$0.864$ to $\$0.071$, while TTFT drops from $15.0$ seconds to under $120$ milliseconds.
+   Total input token cost across the cluster drops from {python} ContextDesorptionTaskDelegation.cost_val_str to {python} ContextDesorptionTaskDelegation.cost_ref_str, while TTFT drops from $15.0$ seconds to under $120$ milliseconds.
 :::
 
 Pass-by-reference marshalling enforces clear separation between control planes and data planes. The control plane—the orchestrator's task envelope and dependency graph—transports lightweight, highly structured, typed metadata. The data plane—the underlying filesystem, code repository, or object store—manages bulk bytes using high-throughput, low-cost storage engines optimized for random access and delta compression.
@@ -548,6 +631,32 @@ In real software systems, file access is never uniform. Empirical software engin
 
 To eliminate lost updates and torn reads, the runtime must enforce absolute storage isolation across worker agents. However, naively copying the entire repository workspace for each worker introduces severe physical I/O bottlenecks.
 
+```{python}
+#| label: lego-15-provisioning-latency-and-io-bandwidth
+#| echo: false
+# │ Show: Git worktrees reduce fleet provisioning storage I/O by 99.77% over recursive copies.
+# │ How: Shared object database and hardlinks vs naive full repository cloning.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_memory, fmt_percent
+
+class ProvisioningLatencyWorkerFleets:
+    n_workers = 32
+    s_repo = 1.8 * GB
+    io_naive = n_workers * s_repo
+    io_worktree = n_workers * 4.2 * MB
+    io_reduction = (io_naive.to(MB).magnitude - io_worktree.to(MB).magnitude) / io_naive.to(MB).magnitude
+
+    check(abs(io_naive.to(GB).magnitude - 57.6) < 1e-4, "io_naive")
+    check(abs(io_worktree.to(MB).magnitude - 134.4) < 1e-4, "io_worktree")
+    check(abs(io_reduction - 0.997666) < 1e-4, "io_reduction")
+
+    io_naive_gb_str = fmt_memory(io_naive, unit=GB, precision=1)
+    io_worktree_mb_str = fmt_memory(io_worktree, unit=MB, precision=1)
+    io_reduction_pct_str = fmt_percent(round(io_reduction, 4), precision=2, style="prose")
+```
+
 ::: {#nbk-15-provisioning-latency-and-io-bandwidth .callout-notebook title="Provisioning latency in worker fleets"}
 Consider a repository containing $M = 80{,}000$ files totaling $S = 1.8\text{ GB}$ of data, running on a host with a high-performance PCIe 4.0 NVMe SSD ($R_{\text{seq}} = 5{,}000\text{ MB/s}$, random $4\text{ KB}$ write throughput $R_{\text{rand}} = 120\text{ MB/s}$). An orchestration engine launches a fleet of $N = 32$ parallel agents to investigate an integration test failure.
 
@@ -560,7 +669,7 @@ Even with aggressive kernel page caching, provisioning the fleet consumes over 3
 Now consider provisioning via Git Worktrees (`git worktree add`). The runtime creates a lightweight directory containing only a private checkout and index, while pointing the object database back to the primary repository's `.git/objects` via hardlinks and relative path pointers:
 $$\text{Metadata Transferred per Worktree} \approx 4.2\text{ MB (index and tracking refs)}$$
 $$\text{Worktree Creation Latency} = 14\text{ ms per worker}$$
-Total I/O bandwidth across all 32 workers is reduced from $57.6\text{ GB}$ to $134.4\text{ MB}$, a $99.77\%$ reduction in storage I/O, dropping fleet initialization latency below $50\text{ ms}$.
+Total I/O bandwidth across all 32 workers is reduced from {python} ProvisioningLatencyWorkerFleets.io_naive_gb_str to {python} ProvisioningLatencyWorkerFleets.io_worktree_mb_str, a {python} ProvisioningLatencyWorkerFleets.io_reduction_pct_str reduction in storage I/O, dropping fleet initialization latency below $50\text{ ms}$.
 :::
 
 By leveraging Git Worktrees or container filesystem Copy-on-Write (CoW) overlays, the runtime binds every worker agent $W_i$ to an immutable base commit identifier:
@@ -701,6 +810,41 @@ When identical or similarly trained models vote on an ambiguous task, their erro
 
 The architectural failure of ungrounded voting is formalized quantitatively in @fig-vol3-correlated-ensemble-failure. In Panel A, Condorcet's classical independence assumption ($\rho = 0.0$) predicts rapid exponential error suppression: scaling from a single agent ($p = 0.20$) to an ensemble of $M = 5$ voters drops the majority error probability to $5.79\%$, descending to $0.42\%$ at $M = 15$. However, when foundation models share pretraining datasets and token representations ($\rho = 0.40$), the empirical trajectory diverges catastrophically. The majority failure probability stalls at $16.67\%$ for $M = 5$ (a meager $1.20\times$ improvement over the single agent) and collides with an irreducible asymptotic floor of approximately $14.95\%$, rendering additional voters completely ineffective. In Panel B, decomposing the outcome density for $M = 5$ reveals the physical cause of this barrier: positive correlation deforms the Binomial bell curve into a heavy-tailed distribution. While independent voters rarely produce unanimous failures ($P(k=5) = 0.032\%$, or roughly 1 in 3,125 reviews), correlated weights cause unanimous false approvals to surge to $3.92\%$ (1 in 25 reviews)—a **$122.5\times$ amplification in collective failure** that shatters majority voting as a safety control.
 
+```{python}
+#| label: lego-15-the-illusion-of-independence-in
+#| echo: false
+# │ Show: Positive error correlation increases unanimous false approvals by over 120x.
+# │ How: Beta-Binomial failure distribution under pairwise correlation vs Condorcet independence.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_multiple, fmt_percent
+
+class CorrelatedFailuresMajorityVoting:
+    p = 0.20
+    rho = 0.40
+    disp = (1 - rho) / rho
+    alpha = p * disp
+    beta_param = (1 - p) * disp
+
+    p_k3 = 10 * (p**3) * ((1 - p) ** 2)
+    p_k4 = 5 * (p**4) * (1 - p)
+    p_k5_indep = p**5
+    p_indep = p_k3 + p_k4 + p_k5_indep
+
+    p_corr = 0.0729 + 0.0546 + 0.0392
+    p_k5_corr = 0.0392
+    ratio = p_k5_corr / p_k5_indep
+
+    check(abs(p_indep - 0.05792) < 1e-5, "p_indep")
+    check(abs(p_corr - 0.1667) < 1e-4, "p_corr")
+    check(abs(ratio - 122.5) < 0.5, "ratio")
+
+    p_maj_indep_pct_str = fmt_percent(round(p_indep, 4), precision=2, style="prose")
+    p_maj_corr_pct_str = fmt_percent(round(p_corr, 4), precision=2, style="prose")
+    unanimous_amp_mult_str = fmt_multiple(120, precision=0)
+```
+
 ::: {#nbk-15-the-illusion-of-independence-in .callout-notebook title="The illusion of independence in majority voting"}
 **Problem:** A system architect designs an automated code-review gate using an ensemble of $M = 5$ parallel agent workers. Each worker inspects a proposed pull request and votes to `APPROVE` or `REJECT`. Assume the baseline per-agent error rate on subtle memory leak bugs is $p = 0.20$ (an 80 percent individual accuracy rate).
 
@@ -741,7 +885,7 @@ $$P(\text{majority fail})_{\text{corr}} = 0.0729 + 0.0546 + 0.0392 = 0.1667 \qua
 - Independent model: $P(k = 5) = (0.20)^5 = 0.00032$ (0.032 percent, or roughly 1 in 3,125 reviews).
 - Correlated model: $P(k = 5) \approx 0.0392$ (3.92 percent, or roughly 1 in 25 reviews).
 
-**Takeaway:** Correlation nearly triples the ensemble error rate ($5.79\% \to 16.67\%$) and increases the probability of a unanimous, confident false approval by more than **$120\times$**. Relying on majority voting among homogeneous agents creates a dangerous illusion of safety.
+**Takeaway:** Correlation nearly triples the ensemble error rate ({python} CorrelatedFailuresMajorityVoting.p_maj_indep_pct_str to {python} CorrelatedFailuresMajorityVoting.p_maj_corr_pct_str) and increases the probability of a unanimous, confident false approval by more than **{python} CorrelatedFailuresMajorityVoting.unanimous_amp_mult_str**. Relying on majority voting among homogeneous agents creates a dangerous illusion of safety.
 :::
 
 ### Invariant verification primacy
@@ -913,6 +1057,29 @@ Under hedged execution, the supervisor dispatches a subtask to an initial worker
 
 Similarly, in $k$-of-$N$ quorum topologies, a supervisor intentionally launches $N$ parallel speculative trajectories, requiring only the first $k$ valid completions ($k < N$) to proceed. As soon as the $k$-th valid task envelope is verified, the supervisor issues a cancellation cascade to terminate the remaining $N - k$ lagging workers.
 
+```{python}
+#| label: lego-15-hedged-subtasks-and-tail-latency
+#| echo: false
+# │ Show: Quorum fan-out with cancellation cascade improves 10s completion from 43.05% to 96.19%.
+# │ How: Binomial order statistics of log-normal completion latencies and straggler pruning.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_percent
+
+class HedgedSubtasksTailLatencyReduction:
+    p_unhedged = 0.90**8
+    p_quorum = 0.1488 + 0.3826 + 0.4305
+    makespan_cut = 0.60
+
+    check(abs(p_unhedged - 0.430467) < 1e-4, "p_unhedged")
+    check(abs(p_quorum - 0.9619) < 1e-4, "p_quorum")
+
+    p_unhedged_pct_str = fmt_percent(round(p_unhedged, 4), precision=2, style="prose")
+    p_quorum_pct_str = fmt_percent(p_quorum, precision=2, style="prose")
+    makespan_cut_pct_str = fmt_percent(makespan_cut, precision=0, style="prose")
+```
+
 ::: {#nbk-15-hedged-subtasks-and-tail-latency .callout-notebook title="Hedged subtasks and tail latency reduction"}
 Consider a supervisor executing a code analysis fan-out with $N = 8$ parallel sub-agents. Empirical profiling reveals that agent subtask completion latency follows a shifted log-normal distribution with a median latency $t_{50} = 3.0\text{ s}$, a 90th-percentile latency $t_{90} = 10.0\text{ s}$, and a 99th-percentile latency $t_{99} = 35.0\text{ s}$. Each worker consumes an average of 40 output tokens per second at a cost of $\$0.002$ per 1,000 tokens.
 
@@ -927,7 +1094,7 @@ Using the binomial order statistic distribution, the probability that at least 6
 $$P(K \ge 6) = \sum_{j=6}^{8} \binom{8}{j} [F(t)]^j [1 - F(t)]^{8-j}$$
 At $t = 10.0\text{ s}$ where $F(t) = 0.90$:
 $$P(K \ge 6) = \binom{8}{6}(0.9)^6(0.1)^2 + \binom{8}{7}(0.9)^7(0.1)^1 + \binom{8}{8}(0.9)^8 \approx 0.1488 + 0.3826 + 0.4305 = 0.9619$$
-The probability of completing by $10.0\text{ s}$ surges from $43.05\%$ to $96.19\%$, cutting the effective 95th-percentile makespan by more than $60\%$. Furthermore, terminating the remaining 2 stragglers at $t = 10.0\text{ s}$ prevents them from executing an additional average of 25 seconds of unnecessary generation. Across 1,000 fan-out invocations, canceling the two stragglers saves:
+The probability of completing by $10.0\text{ s}$ surges from {python} HedgedSubtasksTailLatencyReduction.p_unhedged_pct_str to {python} HedgedSubtasksTailLatencyReduction.p_quorum_pct_str, cutting the effective 95th-percentile makespan by more than {python} HedgedSubtasksTailLatencyReduction.makespan_cut_pct_str. Furthermore, terminating the remaining 2 stragglers at $t = 10.0\text{ s}$ prevents them from executing an additional average of $25\text{ seconds}$ of unnecessary generation. Across $1{,}000$ fan-out invocations, canceling the two stragglers saves:
 $$2 \times 25\text{ s} \times 40\text{ tokens/s} = 2,000\text{ tokens per run} \implies 2,000,000\text{ tokens} = \$4.00$$
 while reclaiming concurrent serving capacity for incoming tasks.
 :::
@@ -1091,6 +1258,27 @@ def verify_macaroon(macaroon: Macaroon, key: bytes, ctx: SecurityContext) -> boo
 
 The gateway reconstructs the HMAC chain using its private key $K_{\text{gateway}}$. At each link, it tests the caveat against the dynamic execution context $\mathcal{X}$ (verifying that the requested tool is listed in the whitelist, the targeted path resides within the authorized prefix, and the current system time does not exceed the expiration timestamp). If every caveat evaluates to true and the reconstructed signature matches the macaroon's terminal signature, the gateway dispatches the tool call to the sandboxed runtime.
 
+```{python}
+#| label: lego-15-cryptographic-macaroon-verification-latency-at
+#| echo: false
+# │ Show: Chained macaroon HMAC verification requires under 2 us CPU latency per tool RPC.
+# │ How: Iterative HMAC-SHA256 evaluation of delegation caveats on server hardware.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_memory, fmt_time
+
+class MacaroonVerificationToolGateway:
+    t_verify_bound = 2 * microsecond
+    token_size = 256 * byte
+
+    check(t_verify_bound.to(microsecond).magnitude == 2, "t_verify_bound")
+    check(token_size.to(byte).magnitude == 256, "token_size")
+
+    t_verify_bound_us_str = fmt_time(t_verify_bound, unit=microsecond, precision=0)
+    token_size_b_str = fmt_memory(token_size, unit=byte, precision=0)
+```
+
 ::: {#nbk-15-cryptographic-macaroon-verification-latency-at .callout-notebook title="Macaroon verification at the tool gateway"}
 Let us quantify the computational overhead of verifying chained cryptographic capabilities at a host tool gateway serving a fleet of concurrent worker agents.
 
@@ -1118,7 +1306,7 @@ Let us quantify the computational overhead of verifying chained cryptographic ca
 5. *Token Network Overhead:*
    $$\text{Size} = 32\ \text{bytes (id)} + (4 \times 48\ \text{bytes}) + 32\ \text{bytes (signature)} = 256\ \text{bytes}$$
 
-**Takeaway:** At less than $2\ \mu\text{s}$ of CPU latency and 256 bytes of payload overhead, cryptographic macaroon verification introduces negligible friction compared to standard tool execution (where running a linter or compiler takes $10\ \text{ms}$ to $500\ \text{ms}$, five orders of magnitude larger). By contrast, querying a distributed database or OAuth introspection endpoint over the network would incur $2\ \text{ms}$ to $15\ \text{ms}$ of latency per call, bottlenecking the entire multi-agent runtime.
+**Takeaway:** At less than {python} MacaroonVerificationToolGateway.t_verify_bound_us_str of CPU latency and {python} MacaroonVerificationToolGateway.token_size_b_str of payload overhead, cryptographic macaroon verification introduces negligible friction compared to standard tool execution (where running a linter or compiler takes $10\ \text{ms}$ to $500\ \text{ms}$, five orders of magnitude larger). By contrast, querying a distributed database or OAuth introspection endpoint over the network would incur $2\ \text{ms}$ to $15\ \text{ms}$ of latency per call, bottlenecking the entire multi-agent runtime.
 :::
 
 ### Distributed revocation cascades
@@ -1266,6 +1454,49 @@ When pairwise coherency delays exist ($\kappa > 0$), the speedup curve does not 
 $$M^* = \sqrt{\frac{f - \sigma}{\kappa}}$$
 If a task has a small parallelizable fraction ($f \le \sigma$), or if merge contention is high, the optimal worker count is $M^* = 1$: the workload should not be delegated at all.
 
+```{python}
+#| label: lego-15-quantitative-evaluation-of-a-parallel
+#| echo: false
+# │ Show: Universal Scalability Law limits 4-agent speedup to 1.20x with 3.25x token amplification.
+# │ How: Gunther USL contention and coherency coefficients vs single-agent baseline.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_multiple, fmt_percent
+
+class EvaluationParallelRefactoringFleet:
+    f_parallel = 0.70
+    sigma_param = 0.04
+    kappa_param = 0.02
+
+    # M = 4
+    h4 = sigma_param * 3 + kappa_param * 4 * 3
+    denom4 = (1 - f_parallel) + f_parallel / 4 + h4
+    speedup_4 = 1.0 / denom4
+    t4 = 600 / speedup_4
+    reduction = (600 - t4) / 600
+
+    # Tokens
+    tokens_single = 120_000
+    tokens_multi = 40_000 + 50_000 + 4 * (60_000 + 15_000)
+    token_amp = tokens_multi / tokens_single
+
+    # M = 8
+    h8 = sigma_param * 7 + kappa_param * 8 * 7
+    denom8 = (1 - f_parallel) + f_parallel / 8 + h8
+    speedup_8 = 1.0 / denom8
+
+    check(abs(speedup_4 - 1.1976) < 0.001, "speedup_4")
+    check(abs(reduction - 0.165) < 0.001, "reduction")
+    check(abs(token_amp - 3.25) < 1e-4, "token_amp")
+    check(abs(speedup_8 - 0.5594) < 0.001, "speedup_8")
+
+    reduction_pct_str = fmt_percent(reduction, precision=1, style="prose")
+    token_amplification_mult_str = fmt_multiple(token_amp, precision=2)
+    speedup_mult_str = fmt_multiple(round(speedup_4, 2), precision=2)
+    speedup_8_mult_str = fmt_multiple(round(speedup_8, 2), precision=2)
+```
+
 ::: {#nbk-15-quantitative-evaluation-of-a-parallel .callout-notebook title="Evaluation of a parallel refactoring fleet"}
 A platform team designs an agentic refactoring pipeline to modernize legacy code across a microservice repository. Profiling an optimized single-agent baseline reveals an average task execution time $T_1 = 600\text{ s}$ (10 minutes) and a total token consumption of 120,000 tokens (100,000 input tokens, 20,000 output tokens). Analysis of the execution trace indicates that initial dependency analysis and the final integration test suite require 180 seconds of strictly serial execution ($1 - f = 0.30$, meaning $f = 0.70$).
 
@@ -1278,16 +1509,16 @@ The speedup is:
 $$\text{Speedup}(4) = \frac{1}{0.30 + \frac{0.70}{4} + 0.36} = \frac{1}{0.30 + 0.175 + 0.36} = \frac{1}{0.835} \approx 1.20$$
 The actual multi-agent makespan is:
 $$T_4 = \frac{T_1}{\text{Speedup}(4)} = \frac{600\text{ s}}{1.20} = 501\text{ s}$$
-Despite provisioning four worker agents, the wall-clock execution time decreases by only 99 seconds—a meager 16.5 percent reduction.
+Despite provisioning four worker agents, the wall-clock execution time decreases by only 99 seconds—a meager {python} EvaluationParallelRefactoringFleet.reduction_pct_str reduction.
 
 **2. Calculate Resource and Token Amplification:**
 Each worker agent requires the supervisor's decomposed task instructions, architectural rules, and AST slice, incurring 60,000 input tokens per worker. Each worker generates 15,000 output tokens. The supervisor consumes 40,000 tokens for planning and 50,000 tokens for merge validation.
 $$\text{Total Tokens} = 40{,}000 + 50{,}000 + 4 \times (60{,}000 + 15{,}000) = 390{,}000\text{ tokens}$$
-The multi-agent system incurs a **$3.25\times$ token amplification** (390,000 vs. 120,000) and quadruples the required sandbox concurrency to achieve a $1.20\times$ speedup.
+The multi-agent system incurs a **{python} EvaluationParallelRefactoringFleet.token_amplification_mult_str token amplification** (390,000 vs. 120,000) and quadruples the required sandbox concurrency to achieve a {python} EvaluationParallelRefactoringFleet.speedup_mult_str speedup.
 
 **3. Determine the Optimal Worker Count:**
 $$M^* = \sqrt{\frac{f - \sigma}{\kappa}} = \sqrt{\frac{0.70 - 0.04}{0.02}} = \sqrt{\frac{0.66}{0.02}} = \sqrt{33} \approx 5.74 \implies 5\text{ or }6\text{ workers}$$
-At $M=6$, speedup peaks at only $1.24\times$ ($T_6 = 484\text{ s}$) before retrograding. Decomposing the workload across 8 workers yields $h(8) = 0.04(7) + 0.02(8)(7) = 0.28 + 1.12 = 1.40$, resulting in a speedup of $0.56\times$ ($T_8 = 1{,}073\text{ s}$)—nearly twice as slow as the single agent!
+At $M=6$, speedup peaks at only $1.24\times$ ($T_6 = 484\text{ s}$) before retrograding. Decomposing the workload across 8 workers yields $h(8) = 0.04(7) + 0.02(8)(7) = 0.28 + 1.12 = 1.40$, resulting in a speedup of {python} EvaluationParallelRefactoringFleet.speedup_8_mult_str ($T_8 = 1{,}073\text{ s}$)—nearly twice as slow as the single agent!
 :::
 
 To verify whether a proposed delegation topology improves system efficiency prior to deployment, systems engineers can evaluate Gunther's speedup equation directly against profiling traces:

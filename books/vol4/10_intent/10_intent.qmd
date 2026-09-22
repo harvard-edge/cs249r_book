@@ -136,13 +136,18 @@ from mlsysim.fmt import (
     fmt_velocity,
     fmt_acceleration,
     fmt_frequency,
-    fmt_qty,
+    fmt_force,
+    fmt_force_rate,
+    fmt_heat_capacity,
+    fmt_power,
+    fmt_temperature,
+    fmt_temperature_rate,
     fmt_sci_qty,
     check,
 )
 from mlsysim.physics.robotics import (
     calc_target_evidence_horizon,
-    calc_tripwire_contact_force_accumulation,
+    calc_latch_contact_stopping_profile,
     calc_contact_force,
     calc_process_thermal_runaway_lease,
 )
@@ -160,20 +165,18 @@ d_target_offset = 300.0 * millimeter  # category: illustrative (scenario assumpt
 # Class 3 contrast: a lumped heat capacity and task overshoot limit.
 c_thermal_bess = 900.0 * joule / kelvin  # category: illustrative
 p_heat_in = 3600.0 * watt  # category: illustrative
-delta_t_overshoot_max = 2.0 * kelvin  # category: chosen (task overshoot allowance)
-delta_t_stall_bess = 10.0 * second  # category: illustrative
+delta_t_overshoot_max = 2.0 * kelvin  # category: illustrative (2 K rise headroom)
+delta_t_stall_bess = 10.0 * second  # category: illustrative (10 s unmitigated heating)
 
 # ┌── 2. EXECUTE: evidence horizons, mug intent lapse, latch contact, thermal ──
-# Mug on the conveyor: untracked and tracked target-evidence horizons. Both
-# horizons charge the 3 mm initial error against the 15 mm tolerance.
-grasp_error_budget = (AISLE.grasp_tolerance - AISLE.grasp_initial_error).to(millimeter)
-tau_ev_untracked = calc_target_evidence_horizon(AISLE.grasp_tolerance, AISLE.grasp_initial_error, AISLE.v_conveyor).to(millisecond)
-tau_ev_tracked = ((2 * grasp_error_budget / AISLE.a_conveyor_slip) ** 0.5).to(millisecond)
-t_intent_period = (1 / RM.intent_rate).to(millisecond)
+tau_ev_untracked = calc_target_evidence_horizon(AISLE.grasp_initial_error, AISLE.grasp_tolerance, AISLE.v_conveyor)
+tau_ev_tracked = calc_target_evidence_horizon(AISLE.grasp_initial_error, AISLE.grasp_tolerance, a=AISLE.a_conveyor_slip)
+tau_ev_slow_drift = calc_target_evidence_horizon(AISLE.grasp_initial_error, AISLE.grasp_tolerance, v_drift_slow)
+grasp_error_budget = AISLE.grasp_tolerance - AISLE.grasp_initial_error
+t_intent_period = (1.0 / RM.intent_rate).to(millisecond)
 err_at_intent_period = (AISLE.grasp_initial_error + AISLE.v_conveyor * t_intent_period).to(millimeter)
 err_excess_at_period = (err_at_intent_period - AISLE.grasp_tolerance).to(millimeter)
 t_tail_overrun = (t_intent_tail - tau_ev_untracked).to(millisecond)
-tau_ev_slow_drift = calc_target_evidence_horizon(AISLE.grasp_tolerance, AISLE.grasp_initial_error, v_drift_slow).to(millisecond)
 
 # Dynamic reachability: the TCP speed ceiling bounds the reach inside the tracked
 # horizon, and a proposal farther away fails the transit lower bound.
@@ -189,11 +192,12 @@ err_stalled_tracked = (AISLE.grasp_initial_error + 0.5 * AISLE.a_conveyor_slip *
 t_arm_onset_after_expiry = (AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
 
 # Latch contact: force at brake command, then the arm stop that keeps it under the limit.
-df_dt = (AISLE.k_latch * AISLE.v_latch_approach).to(newton / second)
-f_at_brake_onset = calc_tripwire_contact_force_accumulation(AISLE.f_latch_tripwire, AISLE.k_latch, AISLE.v_latch_approach, AISLE.t_contact_response)
-x_remaining = ((AISLE.f_latch_limit - f_at_brake_onset) / AISLE.k_latch).to(millimeter)
-a_arm_needed = (AISLE.v_latch_approach**2 / (2 * x_remaining)).to(meter / second**2)
-t_arm_stop = (AISLE.v_latch_approach / a_arm_needed).to(millisecond)
+latch_profile = calc_latch_contact_stopping_profile(scenario=AISLE)
+df_dt = latch_profile["df_dt"]
+f_at_brake_onset = latch_profile["f_at_brake_onset"]
+x_remaining = latch_profile["x_remaining"]
+a_arm_needed = latch_profile["a_arm_needed"]
+t_arm_stop = latch_profile["t_arm_stop"]
 delta_x_unbounded = (AISLE.v_latch_approach * delta_t_stall_arm).to(millimeter)
 f_unbounded = calc_contact_force(AISLE.k_latch, delta_x_unbounded)
 
@@ -262,27 +266,27 @@ class IntentLeaseArchetypes:
     # Latch contact
     k_latch_str = fmt_sci_qty(AISLE.k_latch, newton / meter, precision=1)
     v_latch_str = fmt_velocity(AISLE.v_latch_approach, unit=meter / second, precision=2)
-    f_trip_str = fmt_qty(AISLE.f_latch_tripwire, newton, precision=0)
+    f_trip_str = fmt_force(AISLE.f_latch_tripwire, precision=0)
     t_contact_str = fmt_latency(AISLE.t_contact_response, unit=millisecond, precision=0)
-    df_dt_nms_str = fmt_qty(df_dt, newton / millisecond, precision=0)
-    f_at_brake_onset_n_str = fmt_qty(f_at_brake_onset, newton, precision=0)
-    f_lim_str = fmt_qty(AISLE.f_latch_limit, newton, precision=0)
+    df_dt_nms_str = fmt_force_rate(df_dt, unit=newton / millisecond, precision=0)
+    f_at_brake_onset_n_str = fmt_force(f_at_brake_onset, precision=0)
+    f_lim_str = fmt_force(AISLE.f_latch_limit, precision=0)
     x_remaining_str = fmt_length(round(x_remaining.magnitude, 2) * millimeter, unit=millimeter, precision=2)
     a_arm_str = fmt_acceleration(round(a_arm_needed.magnitude) * meter / second**2, unit=meter / second**2, precision=0)
     t_arm_stop_str = fmt_latency(round(t_arm_stop.magnitude) * millisecond, unit=millisecond, precision=0)
     t_stall_arm_str = fmt_latency(delta_t_stall_arm, unit=millisecond, precision=0)
     delta_x_unbounded_mm_str = fmt_length(delta_x_unbounded, unit=millimeter, precision=0)
-    f_unbounded_n_str = fmt_qty(f_unbounded, newton, precision=0, commas=True)
+    f_unbounded_n_str = fmt_force(f_unbounded, precision=0, commas=True)
     # Permission loop
     f_permission_str = fmt_frequency(RM.permission_rate, unit=ureg.kHz, precision=0)
     # Class 3 contrast
-    c_thermal_str = fmt_qty(c_thermal_bess, joule / kelvin, precision=0)
-    p_heat_str = fmt_qty(p_heat_in, watt, precision=0)
-    dt_overshoot_str = fmt_qty(delta_t_overshoot_max, kelvin, precision=0)
+    c_thermal_str = fmt_heat_capacity(c_thermal_bess, unit=joule / kelvin, precision=0)
+    p_heat_str = fmt_power(p_heat_in, unit=watt, precision=0)
+    dt_overshoot_str = fmt_temperature(delta_t_overshoot_max, unit=kelvin, precision=0)
     t_stall_bess_str = fmt_latency(delta_t_stall_bess, unit=second, precision=0)
-    dt_dt_ks_str = fmt_qty(dt_dt_bess, kelvin / second, precision=0)
+    dt_dt_ks_str = fmt_temperature_rate(dt_dt_bess, unit=kelvin / second, precision=0)
     tau_bess_ms_str = fmt_latency(tau_thermal_overshoot, unit=millisecond, precision=0)
-    delta_t_rise_k_str = fmt_qty(delta_temp_after_stall_bess, kelvin, precision=0)
+    delta_t_rise_k_str = fmt_temperature(delta_temp_after_stall_bess, unit=kelvin, precision=0)
 ```
 
 In physical manipulation, an isolated coordinate is incomplete. In Gibson's sense, an affordance is an action-relative relation among geometry, robot reach, and contact limits [@gibson1979ecological]. The intent proposal therefore requests a target pose in $SE(3)$, the space of three-dimensional positions and orientations, and a **task tolerance region**\index{Tolerance region!3D spatial}\index{Intent record!spatial tolerance region} within which the task counts as complete. This tolerance differs from the estimator's covariance, which describes uncertainty about the target. For the machine's mug grasp, the approved task profile allows `{python} IntentLeaseArchetypes.r_tol_str` of translational error. A controller can then terminate within that region rather than integrating forever toward an exact noisy point; it still checks that estimated target error fits inside the tolerance.

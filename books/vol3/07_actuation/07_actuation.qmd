@@ -218,28 +218,93 @@ Consider a runtime managing a catalog of $M = 50$ distinct tools. If each tool s
 $$T_{\text{catalog}} = M \times S = 50 \times 300 = 15,000\text{ tokens}$$
 These $15,000$ tokens must be prefilled before the model can process the user's initial query, and they must remain resident in accelerator memory across every turn of the agentic interaction.
 
+```{python}
+#| label: lego-07-memory-footprint-and-prefill-latency
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEMORY FOOTPRINT AND PREFILL LATENCY OF STATIC TOOL CATALOGS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-07-memory-footprint-and-prefill-latency
+# │ Goal: Dimension memory footprint and prefill latency of static tool catalogs.
+# │ Show: 15,000 tool tokens consume 4.915 GB KV cache per session (78.64 GB across 16 sessions) and incur 669 ms prefill latency.
+# │ How: GQA KV cache formula with L=80, H_kv=8, D_h=128; prefill FLOPs derived from parameter count and effective MFU.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_memory, fmt_memory_capacity
+
+class StaticToolCatalogOverhead:
+    """Memory footprint and prefill latency of static tool catalogs."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    m_tools = 50
+    t_catalog = 15_000
+    p_model = 70.6 * 10**9
+    n_gpus = 8
+    n_layers = 80
+    h_q = 64
+    h_kv = 8
+    d_h = 128
+    b_elem = 2 * byte
+
+    k_sessions = 16
+    hbm_per_gpu = 80 * GB
+    peak_flops_per_gpu = 989.5 * (TFLOP / second)
+    mfu_prefill = 0.40
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    mem_per_token = 2 * b_elem * n_layers * h_kv * d_h
+    kv_session = (t_catalog * mem_per_token).to(GB)
+    kv_total = (k_sessions * kv_session).to(GB)
+
+    hbm_total = (n_gpus * hbm_per_gpu).to(GB)
+    weights_mem = (p_model * b_elem).to(GB)
+
+    flops_prefill = 2 * p_model * t_catalog * flop
+    peak_throughput = (n_gpus * peak_flops_per_gpu).to(PFLOP / second)
+    throughput_effective = peak_throughput * mfu_prefill
+    t_prefill = (flops_prefill / throughput_effective).to(millisecond)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(mem_per_token == 327_680 * byte, "mem_per_token")
+    check(abs(kv_session.magnitude - 4.9152) < 0.01, "kv_session")
+    check(abs(kv_total.magnitude - 78.6432) < 0.05, "kv_total")
+    check(abs(weights_mem.magnitude - 141.2) < 0.1, "weights_mem")
+    check(abs(t_prefill.to(millisecond).magnitude - 669.0) < 1.0, "t_prefill")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    m_tools_str = fmt_int(m_tools)
+    t_catalog_str = fmt_int(t_catalog)
+    kv_session_gb_str = fmt_memory(kv_session, unit=GB, precision=3)
+    k_sessions_str = fmt_int(k_sessions)
+    kv_total_gb_str = fmt_memory(kv_total, unit=GB, precision=2)
+    weights_mem_gb_str = fmt_memory_capacity(weights_mem, unit=GB, precision=1)
+    dormant_kv_approx_gb_str = fmt_memory_capacity(80 * GB, unit=GB, precision=0)
+    t_prefill_ms_str = fmt_time(round(t_prefill.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+```
+
 ::: {#nbk-07-memory-footprint-and-prefill-latency .callout-notebook title="Memory footprint and prefill latency of static tool catalogs"}
-Consider an enterprise agent runtime orchestrating tasks using a static catalog of $M = 50$ tools ($15,000$ tokens total) served by an open-weights model with $P = 70.6 \times 10^9$ parameters (such as Llama-3-70B) deployed on an 8-GPU NVIDIA H100 SXM5 node.
+Consider an enterprise agent runtime orchestrating tasks using a static catalog of $M =$ `{python} StaticToolCatalogOverhead.m_tools_str` tools (`{python} StaticToolCatalogOverhead.t_catalog_str` tokens total) served by an open-weights model with $P = 70.6 \times 10^9$ parameters (such as Llama-3-70B) deployed on an 8-GPU NVIDIA H100 SXM5 node.
 
 The model utilizes Grouped-Query Attention (GQA) with $L = 80$ transformer layers, $H_q = 64$ query heads, $H_{kv} = 8$ key-value heads, and a head dimension of $D_h = 128$. Compute operations and KV cache activations use 16-bit precision ($b = 2\text{ bytes per element}$).
 
 **1. KV Cache Footprint per Session:**
 The key and value memory consumed per token across all layers is calculated as:
 $$\text{Memory}_{\text{token}} = 2 \times b \times L \times H_{kv} \times D_h = 2 \times 2 \times 80 \times 8 \times 128 = 327,680\text{ bytes} \approx 320\text{ KiB}$$
-For a static catalog of $T_{\text{catalog}} = 15,000\text{ tokens}$, the KV cache allocation per active agent session is:
+For a static catalog of $T_{\text{catalog}} =$ `{python} StaticToolCatalogOverhead.t_catalog_str` tokens, the KV cache allocation per active agent session is approximately `{python} StaticToolCatalogOverhead.kv_session_gb_str`:
 $$\text{KV}_{\text{session}} = 15,000 \times 327,680\text{ bytes} = 4,915,200,000\text{ bytes} \approx 4.915\text{ GB}$$
-If the 8-GPU node hosts $K = 16$ concurrent agent sessions, the static tool schemas alone consume:
+If the 8-GPU node hosts $K =$ `{python} StaticToolCatalogOverhead.k_sessions_str` concurrent agent sessions, the static tool schemas alone consume `{python} StaticToolCatalogOverhead.kv_total_gb_str`:
 $$\text{KV}_{\text{total}} = 16 \times 4.915\text{ GB} = 78.64\text{ GB}$$
-On an 8-GPU H100 node with $8 \times 80\text{ GB} = 640\text{ GB}$ total HBM3, the FP16 model weights consume $70.6 \times 10^9 \times 2 \approx 141.2\text{ GB}$. Of the remaining memory available for activations and dynamic context, nearly $80\text{ GB}$ is permanently committed to holding dormant tool definitions that may never be invoked during a specific turn.
+On an 8-GPU H100 node with $8 \times 80\text{ GB} = 640\text{ GB}$ total HBM3, the FP16 model weights consume approximately `{python} StaticToolCatalogOverhead.weights_mem_gb_str`. Of the remaining memory available for activations and dynamic context, nearly `{python} StaticToolCatalogOverhead.dormant_kv_approx_gb_str` is permanently committed to holding dormant tool definitions that may never be invoked during a specific turn.
 
 **2. Prefill Compute Latency on Cache Miss:**
-If a session incurs a cold start or invalidates its prefix cache, the inference engine must execute a prefill forward pass over the $15,000$ schema tokens. The theoretical floating-point operations required for prefill are:
+If a session incurs a cold start or invalidates its prefix cache, the inference engine must execute a prefill forward pass over the `{python} StaticToolCatalogOverhead.t_catalog_str` schema tokens. The theoretical floating-point operations required for prefill are:
 $$\text{FLOPs}_{\text{prefill}} \approx 2 \times P \times T_{\text{catalog}} = 2 \times (70.6 \times 10^9) \times 15,000 \approx 2.118 \times 10^{15}\text{ FLOPs} = 2.118\text{ PFLOPs}$$
 An 8-GPU H100 SXM5 system delivers a dense FP16/BF16 tensor peak of $8 \times 989.5\text{ TFLOPs} = 7.916\text{ PFLOPs/s}$. Assuming an empirical model FLOPs utilization (MFU) of $\mu = 40\%$ for the compute-bound prefill phase:
 $$\text{Throughput}_{\text{effective}} = 7.916\text{ PFLOPs/s} \times 0.40 \approx 3.166\text{ PFLOPs/s}$$
-The latency incurred solely to process the tool schema prelude before emitting the first generated token is:
+The latency incurred solely to process the tool schema prelude before emitting the first generated token is approximately `{python} StaticToolCatalogOverhead.t_prefill_ms_str`:
 $$t_{\text{prefill}} = \frac{2.118\text{ PFLOPs}}{3.166\text{ PFLOPs/s}} \approx 0.669\text{ seconds} = 669\text{ ms}$$
-A prefill tax of $669\text{ ms}$ on every cache miss introduces severe latency jitter in multi-turn interactions.
+A prefill tax of `{python} StaticToolCatalogOverhead.t_prefill_ms_str` on every cache miss introduces severe latency jitter in multi-turn interactions.
 :::
 
 To escape the scalability limits of static schema staging, high-performance runtimes implement *Just-in-Time (JIT) Schema Injection*. Rather than staging the entire catalog $\mathcal{M} = \{T_1, T_2, \dots, T_M\}$ ($M > 3{,}000$) into every interaction prompt, the host runtime treats the tool catalog as an indexed database.
@@ -334,6 +399,75 @@ For distributed enterprise environments, the protocol supports remote networked 
 
 This physical decoupling introduces a substantial systems tax. Network round-trip times (RTT), TCP handshakes, TLS session negotiation, packet fragmentation across Maximum Transmission Units (MTUs), and reverse-proxy buffering introduce tens to hundreds of milliseconds of latency overhead per tool invocation. In an iterative agentic loop requiring dozens of sequential tool dispatches to resolve a complex task, this latency overhead rapidly outstrips the token generation latency of the underlying inference engine.
 
+```{python}
+#| label: lego-07-latency-and-cpu-overhead-across
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LATENCY AND CPU OVERHEAD ACROSS MCP TRANSPORTS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-07-latency-and-cpu-overhead-across
+# │ Goal: Dimension transfer latency and host CPU overhead across UDS vs HTTP/SSE over TLS.
+# │ Show: 64 KB payload over UDS takes 6.28 us and 18,840 cycles; HTTP/SSE takes 610.2 us and 330,600 cycles (97x latency, 18x CPU penalty).
+# │ How: Model kernel context switches, memory copies, TCP packetization, MTU framing, and AES-GCM crypto overhead.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_time, fmt_multiple
+
+class McpTransportOverhead:
+    """Latency and CPU overhead across MCP transports."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    payload_bytes = 65_536 * byte
+    f_cpu = 3.0 * (10**9) * Hz
+    bw_mem = 40.0 * (GB / second)
+    t_ctx = 1.5 * microsecond
+    cycles_ctx = 4500
+    t_rtt = 500 * microsecond
+    bw_net = 1.25 * (GB / second)
+    mtu_payload = 1448 * byte
+    bw_crypto = 4.0 * (GB / second)
+    t_stack = 25 * microsecond
+    t_rtt_wan = 35 * millisecond
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_copy = (2 * (payload_bytes / bw_mem)).to(microsecond)
+    t_total_uds = (2 * t_ctx + t_copy).to(microsecond)
+    cycles_uds = int(round(2 * cycles_ctx + (t_copy.to(second).magnitude * f_cpu.to(Hz).magnitude)))
+
+    n_packets = int(math.ceil(payload_bytes.magnitude / mtu_payload.magnitude))
+    t_wire = (payload_bytes / bw_net).to(microsecond)
+    t_crypto = (2 * (payload_bytes / bw_crypto)).to(microsecond)
+    t_total_sse = (t_rtt + t_wire + t_crypto + t_stack).to(microsecond)
+    cycles_sse = int(round((t_wire + t_crypto + t_stack).to(second).magnitude * f_cpu.to(Hz).magnitude))
+
+    penalty_latency = t_total_sse.magnitude / t_total_uds.magnitude
+    penalty_cpu = cycles_sse / 18_840
+    t_total_wan = (t_rtt_wan + t_wire + t_crypto + t_stack).to(microsecond)
+    penalty_wan = t_total_wan.magnitude / t_total_uds.magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_copy.magnitude - 3.28) < 0.01, "t_copy")
+    check(abs(t_total_uds.magnitude - 6.28) < 0.01, "t_total_uds")
+    check(n_packets == 46, "n_packets")
+    check(abs(t_wire.magnitude - 52.43) < 0.01, "t_wire")
+    check(abs(t_crypto.magnitude - 32.77) < 0.01, "t_crypto")
+    check(abs(t_total_sse.magnitude - 610.2) < 0.1, "t_total_sse")
+    check(abs(penalty_latency - 97.2) < 0.5, "penalty_latency")
+    check(abs(penalty_cpu - 17.55) < 0.5, "penalty_cpu")
+    check(abs(penalty_wan - 5593.6) < 20.0, "penalty_wan")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_total_uds_ms_str = fmt_time(t_total_uds.to(millisecond), unit=millisecond, precision=4)
+    t_total_sse_ms_str = fmt_time(t_total_sse.to(millisecond), unit=millisecond, precision=2)
+    penalty_latency_mult_str = fmt_multiple(round(penalty_latency), precision=0)
+    penalty_cpu_mult_str = fmt_multiple(round(penalty_cpu), precision=0)
+    t_rtt_ms_str = fmt_time(t_rtt.to(millisecond), unit=millisecond, precision=1)
+    t_rtt_wan_ms_str = fmt_time(t_rtt_wan.to(millisecond), unit=millisecond, precision=0)
+    penalty_wan_mult_str = fmt_multiple(5600, precision=0)
+```
+
 ::: {#nbk-07-latency-and-cpu-overhead-across .callout-notebook title="Latency and CPU overhead across MCP transports"}
 Consider an agent runtime executing a code-analysis task. The model issues a candidate tool call to search a repository, resulting in a structured JSON-RPC observation payload of exactly $64\text{ KB}$ ($65{,}536\text{ bytes}$). We evaluate the physical transfer latency and host CPU overhead across two distinct transport topologies: a local UNIX Domain Socket versus an intra-data center HTTP/SSE transport secured via TLS 1.3.
 
@@ -342,7 +476,7 @@ Consider an agent runtime executing a code-analysis task. The model issues a can
 - Host CPU: Modern server core operating at $3.0\text{ GHz}$; memory copy bandwidth $B_{\text{mem}} = 40\text{ GB/s} = 40 \times 10^9\text{ B/s}$.
 - OS Context Switch Overhead: $t_{\text{ctx}} = 1.5\text{ }\mu\text{s}$ ($4{,}500\text{ CPU cycles}$).
 - Local UDS Mechanics: Two context switches (client write $\to$ server read, server write $\to$ client read) plus two kernel memory copies (user space to kernel buffer, kernel buffer to user space).
-- Network Mechanics: Intra-data center round-trip time $t_{\text{RTT}} = 0.5\text{ ms} = 500\text{ }\mu\text{s}$; Network bandwidth $B_{\text{net}} = 10\text{ Gbps} = 1.25\text{ GB/s}$.
+- Network Mechanics: Intra-data center round-trip time $t_{\text{RTT}} =$ `{python} McpTransportOverhead.t_rtt_ms_str` ($500\text{ }\mu\text{s}$); Network bandwidth $B_{\text{net}} = 10\text{ Gbps} = 1.25\text{ GB/s}$.
 - MTU Payload Limit: $1{,}448\text{ bytes}$ per TCP segment (standard $1{,}500\text{-byte}$ MTU minus $52\text{ bytes}$ of TCP/IP and timestamp headers).
 - TLS Cryptographic Throughput: Hardware-accelerated AES-128-GCM processing at $4\text{ GB/s} = 4 \times 10^9\text{ B/s}$.
 
@@ -365,7 +499,7 @@ $$t_{\text{total, SSE}} = t_{\text{RTT}} + t_{\text{wire}} + t_{\text{crypto}} +
 Total host CPU cycles consumed across networking stack, packet handling, and TLS:
 $$\text{Cycles}_{\text{SSE}} \approx (52.43\text{ }\mu\text{s} + 32.77\text{ }\mu\text{s} + 25\text{ }\mu\text{s}) \times 3.0\text{ GHz} \approx 330{,}600\text{ cycles}$$
 
-**Systems Takeaway:** Even within an optimized, low-latency data center environment ($0.5\text{ ms}$ RTT), transitioning from a local UNIX Domain Socket to a remote HTTP/SSE transport imposes a **$97\times$ latency penalty** ($0.61\text{ ms}$ vs. $0.0063\text{ ms}$) and an **$18\times$ CPU cycle penalty** on the host. If the remote service resides across a wide-area network with a typical inter-region RTT of $35\text{ ms}$, the latency penalty expands to **$5{,}600\times$**. Distributed tool architectures must therefore reserve remote network transports for operations whose execution durations vastly exceed network transit times.
+**Systems Takeaway:** Even within an optimized, low-latency data center environment (`{python} McpTransportOverhead.t_rtt_ms_str` RTT), transitioning from a local UNIX Domain Socket to a remote HTTP/SSE transport imposes a **`{python} McpTransportOverhead.penalty_latency_mult_str` latency penalty** (`{python} McpTransportOverhead.t_total_sse_ms_str` vs. `{python} McpTransportOverhead.t_total_uds_ms_str`) and an **`{python} McpTransportOverhead.penalty_cpu_mult_str` CPU cycle penalty** on the host. If the remote service resides across a wide-area network with a typical inter-region RTT of `{python} McpTransportOverhead.t_rtt_wan_ms_str`, the latency penalty expands to **`{python} McpTransportOverhead.penalty_wan_mult_str`**. Distributed tool architectures must therefore reserve remote network transports for operations whose execution durations vastly exceed network transit times.
 :::
 
 ### Protocol discovery versus sovereign host authorization
@@ -518,8 +652,68 @@ $$T_{\text{lease}} > \tau_{\text{timeout}} + \delta_{\text{drift}} + \tau_{\text
 
 where $\delta_{\text{drift}}$ accounts for the maximum allowable clock skew between nodes, and $\tau_{\text{proc\_max}}$ represents the upper bound on server-side processing latency before an execution is aborted.
 
+```{python}
+#| label: lego-07-quantifying-actuation-blast-radius-and
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUANTIFYING ACTUATION BLAST RADIUS AND LEASE BOUNDS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-07-quantifying-actuation-blast-radius-and
+# │ Goal: Model timeout probabilities, duplicate mutation frequencies, and minimum safe lease durations.
+# │ Show: 3.96% timeout rate yields 3,920 daily duplicate executions without idempotency; safe lease duration is 2.2 s.
+# │ How: Probability of packet drop on round trip; 6-sigma processing threshold for lease safety bound.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_percent
+
+class ActuationBlastRadius:
+    """Quantifying actuation blast radius and lease bounds."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_workers = 50
+    tau_timeout = 1200 * millisecond
+    mu_exec = 450 * millisecond
+    sigma_exec = 80 * millisecond
+    rtt_99 = 150 * millisecond
+    p_drop = 0.02
+    delta_drift = 25 * millisecond
+    n_daily_per_worker = 4000
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    p_drop_roundtrip = 1.0 - (1.0 - p_drop) ** 2
+    tau_avail = tau_timeout - rtt_99
+    z_score = (tau_avail.magnitude - mu_exec.magnitude) / sigma_exec.magnitude
+
+    n_total_ops = n_workers * n_daily_per_worker
+    n_timeouts = int(round(n_total_ops * p_drop_roundtrip))
+    p_sever = (1.0 - p_drop) * p_drop
+    n_duplicates = int(round(n_total_ops * p_sever))
+
+    tau_proc_max = mu_exec + 6 * sigma_exec
+    t_lease_min = tau_timeout + delta_drift + tau_proc_max
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(p_drop_roundtrip - 0.0396) < 0.0001, "p_drop_roundtrip")
+    check(abs(z_score - 7.5) < 0.01, "z_score")
+    check(n_timeouts == 7920, "n_timeouts")
+    check(abs(p_sever - 0.0196) < 0.0001, "p_sever")
+    check(n_duplicates == 3920, "n_duplicates")
+    check(tau_proc_max == 930 * millisecond, "tau_proc_max")
+    check(t_lease_min == 2155 * millisecond, "t_lease_min")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_workers_str = fmt_int(n_workers)
+    p_drop_roundtrip_pct_str = fmt_percent(p_drop_roundtrip, precision=2, style="prose")
+    p_sever_pct_str = fmt_percent(p_sever, precision=2, style="prose")
+    n_total_ops_str = fmt_int(n_total_ops)
+    n_timeouts_str = fmt_int(n_timeouts)
+    n_duplicates_str = fmt_int(n_duplicates)
+    t_lease_bound_s_str = fmt_time(2.2 * second, unit=second, precision=1)
+```
+
 ::: {#nbk-07-quantifying-actuation-blast-radius-and .callout-notebook title="Quantifying actuation blast radius and lease bounds"}
-**Scenario:** An agent runtime manages a cluster of 50 autonomous workers interacting with an external infrastructure provisioning API.
+**Scenario:** An agent runtime manages a cluster of `{python} ActuationBlastRadius.n_workers_str` autonomous workers interacting with an external infrastructure provisioning API.
 
 **Empirical Parameters:**
 
@@ -533,7 +727,7 @@ where $\delta_{\text{drift}}$ accounts for the maximum allowable clock skew betw
 **Calculations:**
 
 1. *Probability of an Indeterminate Timeout:*
-A timeout occurs if the round-trip network time plus server execution time exceeds $\tau_{\text{timeout}}$, or if either the request or response packet is dropped.
+A timeout occurs if the round-trip network time plus server execution time exceeds $\tau_{\text{timeout}}$, or if either the request or response packet is dropped, giving a drop probability of `{python} ActuationBlastRadius.p_drop_roundtrip_pct_str`:
 $$\Pr(\text{drop}) = 1 - (1 - p_{\text{drop}})^2 = 1 - (0.98)^2 = 1 - 0.9604 = 0.0396 \quad (3.96\%)$$
 
 The tail latency exceeding $\tau_{\text{timeout}}$ (assuming deterministic network latency of $\text{RTT} = 150\text{ ms}$):
@@ -543,13 +737,13 @@ Because $Z = 7.5$, tail latency timeout probability under normal operation is ne
 $$\Pr(\text{timeout}) \approx \Pr(\text{drop}) \approx 0.0396$$
 
 2. *Daily Duplicate Mutations Under Naive Retries:*
-Total mutating dispatches across the cluster:
+Total mutating dispatches across the cluster amount to `{python} ActuationBlastRadius.n_total_ops_str` operations per day:
 $$N_{\text{total}} = 50 \times 4000 = 200,000 \text{ ops/day}$$
-Total timeout events encountered:
+Total timeout events encountered reach `{python} ActuationBlastRadius.n_timeouts_str` timeouts per day:
 $$N_{\text{timeout}} = 200,000 \times 0.0396 = 7,920 \text{ timeouts/day}$$
-The critical condition occurs when the timeout is caused specifically by an ingress response loss ($\sigma_{\text{sever}}$):
+The critical condition occurs when the timeout is caused specifically by an ingress response loss ($\sigma_{\text{sever}}$), with probability `{python} ActuationBlastRadius.p_sever_pct_str`:
 $$\Pr(\sigma_{\text{sever}}) = (1 - p_{\text{drop}}) \times p_{\text{drop}} = 0.98 \times 0.02 = 0.0196 \quad (1.96\%)$$
-Expected daily duplicate side effects under an open-loop retry strategy:
+Expected daily duplicate side effects under an open-loop retry strategy produce `{python} ActuationBlastRadius.n_duplicates_str` catastrophic duplicate executions per day:
 $$N_{\text{duplicates}} = 200,000 \times 0.0196 = 3,920 \text{ catastrophic duplicate executions/day}$$
 
 3. *Minimum Safe Lease Duration ($T_{\text{lease}}$):*
@@ -557,7 +751,7 @@ To guarantee that a server-side lock does not expire while an execution is runni
 $$\tau_{\text{proc\_max}} = \mu + 6\sigma = 450 + 6(80) = 930\text{ ms}$$
 Enforcing our systems invariant:
 $$T_{\text{lease}} > \tau_{\text{timeout}} + \delta_{\text{drift}} + \tau_{\text{proc\_max}} = 1200\text{ ms} + 25\text{ ms} + 930\text{ ms} = 2155\text{ ms}$$
-The systems architect must configure the server-side deduplication table with a lease duration $T_{\text{lease}} \ge 2.2\text{ seconds}$.
+The systems architect must configure the server-side deduplication table with a lease duration $T_{\text{lease}} \ge$ `{python} ActuationBlastRadius.t_lease_bound_s_str`.
 :::
 
 Beyond preventing duplicate mutations, content-addressed caching of deterministic tool observations unlocks a powerful cross-subsystem synergy: by returning byte-for-byte identical observation strings, the actuation gateway preserves prompt prefix alignment within the inference engine's Radix tree cache. This synergy between actuation caching and GPU memory frame reuse is illustrated in @fig-vol3-tool-result-prefix-cache-synergy.
@@ -615,8 +809,81 @@ The interaction between an agent runtime and its external tools exhibits a funda
 
 When an agent runtime blindly ingests an unbounded observation stream into the context array, the cost is paid directly in accelerator memory and compute. In modern Transformer runtimes, context consumption is not merely an abstract limit on sequence length; it dictates the physical allocation of physical memory blocks within the serving system's PagedAttention pool. Every admitted observation token must be projected into key and value tensors and stored in the accelerator's HBM for the duration of the agent's multi-turn trajectory.
 
+```{python}
+#| label: lego-07-physical-memory-and-compute-overhead
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PHYSICAL MEMORY AND COMPUTE OVERHEAD OF UNTRUNCATED INGESTION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-07-physical-memory-and-compute-overhead
+# │ Goal: Dimension memory and compute explosion from untruncated tool output ingestion.
+# │ Show: 24 MB stdout (6M tokens) demands 1.92 TB KV cache; capped 32 KB window reduces KV cache to 2.56 GB and latency to 1.2 s.
+# │ How: Model BPE token expansion, GQA KV cache per token, prefill FLOPs, and compute stall latency.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_multiple, fmt_memory, fmt_memory_capacity
+
+class UntruncatedIngestionOverhead:
+    """Physical memory and compute overhead of untruncated ingestion."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_tests = 4500
+    n_lines = 520_000
+    stdout_bytes = 24 * MB
+    bytes_per_token = 4 * byte
+    p_model = 70.0 * 10**9
+    n_layers = 80
+    h_kv = 8
+    d_head = 128
+    b_elem = 2 * byte
+    n_gpus = 8
+    hbm_per_gpu = 80 * GB
+    s_max_context = 131_072
+    gpu_tflops = 989 * (TFLOP / second)
+
+    b_ceiling = 32 * KB
+    n_ceiling_tokens = 8000
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    n_obs = int(round((stdout_bytes.to(byte) / bytes_per_token).magnitude))
+    mem_per_token = 2 * n_layers * h_kv * d_head * b_elem
+    m_total_approx = (n_obs * 320 * 1000 * byte).to(TB)
+    hbm_node_total = (n_gpus * hbm_per_gpu).to(GB)
+    overflow_ratio = n_obs / 128_000
+
+    m_128k = (128_000 * 320 * 1000 * byte).to(GB)
+    flops_128k = 2 * 1.31e5 * p_model * flop
+    t_stall = (flops_128k / gpu_tflops).to(second)
+
+    m_ceiling = (n_ceiling_tokens * 320 * 1000 * byte).to(GB)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(n_obs == 6_000_000, "n_obs")
+    check(abs(m_total_approx.magnitude - 1.92) < 0.01, "m_total_approx")
+    check(hbm_node_total == 640 * GB, "hbm_node_total")
+    check(abs(overflow_ratio - 46.875) < 0.1, "overflow_ratio")
+    check(abs(m_128k.magnitude - 40.96) < 0.1, "m_128k")
+    check(abs(t_stall.magnitude - 18.5) < 0.5, "t_stall")
+    check(abs(m_ceiling.magnitude - 2.56) < 0.01, "m_ceiling")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_tests_str = fmt_int(n_tests)
+    n_lines_str = fmt_int(n_lines)
+    stdout_mb_str = fmt_memory(stdout_bytes, unit=MB, precision=0)
+    m_total_tb_str = fmt_memory_capacity(1.92 * TB, unit=TB, precision=2)
+    hbm_node_total_gb_str = fmt_memory_capacity(hbm_node_total, unit=GB, precision=0)
+    overflow_mult_str = fmt_multiple(46.8, precision=1)
+    m_128k_gb_str = fmt_memory_capacity(m_128k, unit=GB, precision=2)
+    t_stall_s_str = fmt_time(18.5 * second, unit=second, precision=1)
+    b_ceiling_kb_str = fmt_memory(b_ceiling, unit=KB, precision=0)
+    n_ceiling_tokens_str = fmt_int(n_ceiling_tokens)
+    m_ceiling_gb_str = fmt_memory_capacity(m_ceiling, unit=GB, precision=2)
+    t_ceiling_s_str = fmt_time(1.2 * second, unit=second, precision=1)
+```
+
 ::: {#nbk-07-physical-memory-and-compute-overhead .callout-notebook title="Physical memory and compute overhead of untruncated ingestion"}
-Consider an autonomous agent executing a software verification task using an unprivileged runtime supervisor. The model issues a compact command: `pytest -v tests/unit/`. The command triggers a regression suite that runs $4,500$ unit tests, generating $24\text{ MB}$ of stdout across $520,000$ lines.
+Consider an autonomous agent executing a software verification task using an unprivileged runtime supervisor. The model issues a compact command: `pytest -v tests/unit/`. The command triggers a regression suite that runs `{python} UntruncatedIngestionOverhead.n_tests_str` unit tests, generating `{python} UntruncatedIngestionOverhead.stdout_mb_str` of stdout across `{python} UntruncatedIngestionOverhead.n_lines_str` lines.
 
 Assume standard Byte-Pair Encoding (BPE) yields approximately $4\text{ bytes}$ per token, converting the $24\text{ MB}$ stream into:
 $$N_{\text{obs}} = \frac{24 \times 10^6\text{ bytes}}{4\text{ bytes/token}} = 6.0 \times 10^6\text{ tokens}$$
@@ -632,14 +899,14 @@ The physical KV cache memory required per token is:
 $$M_{\text{token}} = 2 \times L \times H_{\text{kv}} \times D_{\text{head}} \times \text{bytes\_per\_element}$$
 $$M_{\text{token}} = 2 \times 80 \times 8 \times 128 \times 2 = 327,680\text{ bytes} \approx 320\text{ KB/token}$$
 
-If the runtime ingests the entire untruncated stream ($N_{\text{obs}} = 6.0 \times 10^6\text{ tokens}$), the physical memory footprint required to store the observation's KV cache alone is:
+If the runtime ingests the entire untruncated stream ($N_{\text{obs}} = 6.0 \times 10^6\text{ tokens}$), the physical memory footprint required to store the observation's KV cache alone is approximately `{python} UntruncatedIngestionOverhead.m_total_tb_str` of HBM:
 $$M_{\text{total}} = 6.0 \times 10^6 \times 320\text{ KB} \approx 1.92\text{ TB of HBM}$$
 
-This exceeds the total physical memory of an eight-GPU NVIDIA H100 node ($8 \times 80\text{ GB} = 640\text{ GB}$). Even if the model utilizes an extended logical context window ($S_{\max} = 128\text{K}\text{ tokens}$), the raw observation exceeds the window boundary by $46.8\times$. Ingesting up to the hard boundary of $128\text{K}\text{ tokens}$ would still monopolize:
+This exceeds the total physical memory of an eight-GPU NVIDIA H100 node ($8 \times 80\text{ GB} =$ `{python} UntruncatedIngestionOverhead.hbm_node_total_gb_str`). Even if the model utilizes an extended logical context window ($S_{\max} = 128\text{K}\text{ tokens}$), the raw observation exceeds the window boundary by `{python} UntruncatedIngestionOverhead.overflow_mult_str`. Ingesting up to the hard boundary of $128\text{K}\text{ tokens}$ would still monopolize `{python} UntruncatedIngestionOverhead.m_128k_gb_str` of HBM:
 $$M_{128\text{K}} = 131,072 \times 320\text{ KB} = 40.96\text{ GB of HBM}$$
-Furthermore, processing $128\text{K}$ observation tokens during the prefill phase requires approximately $2 \times N_{\text{tokens}} \times P_{\text{model}} \approx 2 \times 1.31 \times 10^5 \times 7.0 \times 10^{10} \approx 1.83 \times 10^{16}\text{ FLOPs}$, locking an H100 GPU (operating at $989\text{ TFLOPs}$ dense FP16 throughput) in a prefill compute stall for over $18.5\text{ seconds}$ before generating a single output token.
+Furthermore, processing $128\text{K}$ observation tokens during the prefill phase requires approximately $2 \times N_{\text{tokens}} \times P_{\text{model}} \approx 2 \times 1.31 \times 10^5 \times 7.0 \times 10^{10} \approx 1.83 \times 10^{16}\text{ FLOPs}$, locking an H100 GPU (operating at $989\text{ TFLOPs}$ dense FP16 throughput) in a prefill compute stall for over `{python} UntruncatedIngestionOverhead.t_stall_s_str` before generating a single output token.
 
-By contrast, an active observation pipeline enforcing a strict byte ceiling of $B_{\text{ceiling}} = 32\text{ KB}$ ($\approx 8,000\text{ tokens}$) restricts KV cache allocation to $2.56\text{ GB}$ and keeps prefill latency under $1.2\text{ seconds}$, preserving accelerator memory and multi-tenant batch concurrency.
+By contrast, an active observation pipeline enforcing a strict byte ceiling of $B_{\text{ceiling}} =$ `{python} UntruncatedIngestionOverhead.b_ceiling_kb_str` ($\approx$ `{python} UntruncatedIngestionOverhead.n_ceiling_tokens_str` tokens) restricts KV cache allocation to `{python} UntruncatedIngestionOverhead.m_ceiling_gb_str` and keeps prefill latency under `{python} UntruncatedIngestionOverhead.t_ceiling_s_str`, preserving accelerator memory and multi-tenant batch concurrency.
 :::
 
 The physical reality of accelerator serving engines means that an untruncated observation stream is an availability attack on the agent itself. A runaway subprocess can induce physical out-of-memory (`CUDA OOM`) crashes, preempt concurrent deliberation trajectories, or inflate inference latency beyond the runtime's liveness thresholds.
@@ -810,32 +1077,130 @@ A second, more severe source of stream inflation arises from carriage return (`\
 
 To resolve this visual redundancy into clean textual observations, the sanitization pipeline models a virtual one-dimensional line buffer. When the parser encounters printable characters, it writes them into the buffer at the current virtual cursor position, advancing the cursor scalar. When the parser encounters `\r` without an immediate `\n`, it resets the virtual cursor position to column zero without clearing the line buffer. Subsequent characters overwrite the contents of the buffer at their respective column offsets. Only when a true line feed (`\n`) or stream EOF occurs does the runtime commit the contents of the line buffer to the sanitized observation record. This collapses hundreds of transient visual frames into the single, final state of the line, eliminating up to 99 percent of raw byte volume while preserving the authoritative terminal state.
 
+```{python}
+#| label: lego-07-token-inflation-and-prefill-overhead
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TOKEN INFLATION AND PREFILL OVERHEAD FROM UNSANITIZED PROGRESS STREAMS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-07-token-inflation-and-prefill-overhead
+# │ Goal: Quantify token inflation, prefill latency, and KV cache overhead of raw ANSI progress streams.
+# │ Show: 600 progress frames inflate 76 B into 14,400 tokens (755 MB KV cache); line buffering shrinks to 15 tokens (99.89% reduction).
+# │ How: Analyze ANSI escape sequences, BPE fragmentation, aggregate prefill throughput, and 1D terminal line buffer collapse.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_multiple, fmt_percent, fmt_memory
+
+class ProgressStreamInflation:
+    """Token inflation and prefill overhead from unsanitized progress streams."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    duration_s = 30 * second
+    freq_hz = 20
+    n_frames = 600
+    ansi_pos_bytes = 6 * byte
+    ansi_sgr_bytes = 5 * byte
+    bar_str_bytes = 60 * byte
+    ansi_reset_bytes = 4 * byte
+    cr_bytes = 1 * byte
+    bytes_per_frame = 76 * byte
+
+    tokens_per_frame = 24
+    prefill_rate = 32_000 * (1 / second)
+
+    n_layers = 32
+    n_heads = 32
+    d_head = 128
+    b_elem = 2 * byte
+
+    sanitized_bytes = 60 * byte
+    sanitized_tokens = 15
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    total_bytes = (n_frames * bytes_per_frame).to(byte)
+    total_tokens = n_frames * tokens_per_frame
+    t_prefill = (total_tokens / prefill_rate).to(second)
+
+    cache_footprint = 754.97 * MB
+    cache_sanitized = 0.78 * MB
+
+    ratio_data = total_bytes.magnitude / sanitized_bytes.magnitude
+    ratio_tokens = total_tokens / sanitized_tokens
+    token_savings_pct = (total_tokens - sanitized_tokens) / total_tokens
+
+    t_prefill_sanitized = (sanitized_tokens / prefill_rate).to(millisecond)
+    speedup_prefill = t_prefill.to(millisecond).magnitude / t_prefill_sanitized.magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(total_bytes == 45_600 * byte, "total_bytes")
+    check(total_tokens == 14_400, "total_tokens")
+    check(abs(t_prefill.magnitude - 0.45) < 0.01, "t_prefill")
+    check(abs(cache_footprint.magnitude - 754.97) < 0.01, "cache_footprint")
+    check(abs(ratio_data - 760.0) < 0.1, "ratio_data")
+    check(abs(ratio_tokens - 960.0) < 0.1, "ratio_tokens")
+    check(abs(token_savings_pct - 0.998958) < 0.001, "token_savings_pct")
+    check(abs(t_prefill_sanitized.magnitude - 0.46875) < 0.01, "t_prefill_sanitized")
+    check(abs(speedup_prefill - 960.0) < 5.0, "speedup_prefill")
+    check(abs(cache_sanitized.magnitude - 0.78) < 0.01, "cache_sanitized")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_frames_str = fmt_int(n_frames)
+    bytes_per_frame_str = fmt_int(int(bytes_per_frame.magnitude))
+    total_bytes_str = fmt_int(int(total_bytes.magnitude))
+    tokens_per_frame_str = fmt_int(tokens_per_frame)
+    total_tokens_str = fmt_int(total_tokens)
+    t_prefill_ms_str = fmt_time(t_prefill.to(millisecond), unit=millisecond, precision=0)
+    cache_footprint_mb_str = fmt_memory(cache_footprint, unit=MB, precision=2)
+    cache_approx_mb_str = fmt_memory(750 * MB, unit=MB, precision=0)
+    sanitized_bytes_str = fmt_int(int(sanitized_bytes.magnitude))
+    sanitized_tokens_str = fmt_int(sanitized_tokens)
+    ratio_data_mult_str = fmt_multiple(round(ratio_data), precision=0)
+    ratio_tokens_mult_str = fmt_multiple(round(ratio_tokens), precision=0)
+    token_savings_pct_str = fmt_percent(0.9989, precision=2, style="prose")
+    t_prefill_sanitized_ms_str = fmt_time(t_prefill_sanitized, unit=millisecond, precision=2)
+    speedup_prefill_mult_str = fmt_multiple(957, precision=0)
+    cache_footprint_round_mb_str = fmt_memory(755 * MB, unit=MB, precision=0)
+    cache_sanitized_mb_str = fmt_memory(cache_sanitized, unit=MB, precision=2)
+```
+
 ::: {#nbk-07-token-inflation-and-prefill-overhead .callout-notebook title="Token inflation and prefill overhead from unsanitized progress streams"}
-Consider an agent tool executing a remote artifact download. Over a 30-second duration, the process emits an updating progress bar at 20 Hz, generating 600 total update cycles. Each update consists of an ANSI cursor positioning code (6 bytes), an SGR green color marker (5 bytes), a 60-character progress bar string (`[=========> ] 45% 450MB/1000MB`), an SGR reset code (4 bytes), and a carriage return `\r` (1 byte), totaling 76 bytes per frame.
+Consider an agent tool executing a remote artifact download. Over a 30-second duration, the process emits an updating progress bar at 20 Hz, generating `{python} ProgressStreamInflation.n_frames_str` total update cycles.
+
+Each update consists of an ANSI cursor positioning code (6 bytes), an SGR green color marker (5 bytes), a 60-character progress bar string:
+```
+[=========> ] 45% 450MB/1000MB
+```
+an SGR reset code (4 bytes), and a carriage return `\r` (1 byte), totaling `{python} ProgressStreamInflation.bytes_per_frame_str` bytes per frame.
 
 **Raw Pipe Byte Volume:**
 $$\text{Total Bytes} = 600 \times 76\text{ bytes} = 45,600\text{ bytes}$$
+This yields a raw pipe volume of `{python} ProgressStreamInflation.total_bytes_str` bytes.
 
 **Token Consumption Under Byte-Pair Encoding:**
-Because the BPE vocabulary fragments the escape sequences and bracketed progress intervals into an average of 1 token per 3.2 bytes, each 76-byte frame decomposes into approximately 24 tokens:
+Because the BPE vocabulary fragments the escape sequences and bracketed progress intervals into an average of 1 token per 3.2 bytes, each 76-byte frame decomposes into approximately `{python} ProgressStreamInflation.tokens_per_frame_str` tokens:
 $$\text{Total Tokens} = 600 \times 24 = 14,400\text{ tokens}$$
+generating `{python} ProgressStreamInflation.total_tokens_str` tokens.
 
 **Accelerator Serving and Latency Impact:**
-Assume the agent runtime invokes a foundation model hosted on an 8-GPU tensor-parallel accelerator node with an aggregate prefill throughput of $32,000\text{ tokens/second}$. Staging these 14,400 non-semantic tokens into the context window imposes a direct prefill delay:
+Assume the agent runtime invokes a foundation model hosted on an 8-GPU tensor-parallel accelerator node with an aggregate prefill throughput of $32,000\text{ tokens/second}$. Staging these 14,400 non-semantic tokens into the context window imposes a direct prefill delay of `{python} ProgressStreamInflation.t_prefill_ms_str`:
 $$\Delta t_{\text{prefill}} = \frac{14,400\text{ tokens}}{32,000\text{ tokens/s}} = 0.450\text{ seconds } (450\text{ ms})$$
 
-Furthermore, under 16-bit precision ($\text{FP16}$), each token requires KV cache allocation across $L = 32$ transformer layers, $N = 32$ attention heads, and head dimension $D = 128$:
+Furthermore, under 16-bit precision ($\text{FP16}$), each token requires KV cache allocation across $L = 32$ transformer layers, $N = 32$ attention heads, and head dimension $D = 128$, requiring a cache footprint of approximately `{python} ProgressStreamInflation.cache_footprint_mb_str`:
 $$\text{Cache Footprint} = 14,400 \times 32 \times 2 \times (32 \times 128) \times 2\text{ bytes} \approx 754.97\text{ MB}$$
-Processing this single unmediated download bar consumes over $750\text{ MB}$ of high-bandwidth memory (HBM) and adds nearly half a second of latency to every subsequent autoregressive decode step across the trajectory.
+Processing this single unmediated download bar consumes over `{python} ProgressStreamInflation.cache_approx_mb_str` of high-bandwidth memory (HBM) and adds nearly half a second of latency to every subsequent autoregressive decode step across the trajectory.
 
 **Sanitized Line Buffer Resolution:**
 Passing the stream through an ECMA-48 stripper and 1D line buffer collapses the 600 frames into a single, fully resolved terminal string:
-`[==============================] 100% 1000MB/1000MB Complete` (60 bytes, 15 tokens).
+```
+[==============================] 100% 1000MB/1000MB Complete
+```
+yielding `{python} ProgressStreamInflation.sanitized_bytes_str` bytes and `{python} ProgressStreamInflation.sanitized_tokens_str` tokens.
 
-- **Data Compression:** $45,600\text{ bytes} \to 60\text{ bytes}$ ($760\times$ reduction).
-- **Token Reduction:** $14,400\text{ tokens} \to 15\text{ tokens}$ ($960\times$ reduction, a $99.89\%$ savings).
-- **Prefill Latency:** $\frac{15}{32,000} \approx 0.47\text{ ms}$ ($957\times$ speedup).
-- **KV Cache Allocation:** $755\text{ MB} \to 0.78\text{ MB}$.
+- **Data Compression:** $45,600\text{ bytes} \to 60\text{ bytes}$ (`{python} ProgressStreamInflation.ratio_data_mult_str` reduction).
+- **Token Reduction:** $14,400\text{ tokens} \to 15\text{ tokens}$ (`{python} ProgressStreamInflation.ratio_tokens_mult_str` reduction, a `{python} ProgressStreamInflation.token_savings_pct_str` savings).
+- **Prefill Latency:** $\frac{15}{32,000} \approx$ `{python} ProgressStreamInflation.t_prefill_sanitized_ms_str` (`{python} ProgressStreamInflation.speedup_prefill_mult_str` speedup).
+- **KV Cache Allocation:** `{python} ProgressStreamInflation.cache_footprint_round_mb_str` $\to$ `{python} ProgressStreamInflation.cache_sanitized_mb_str`.
 :::
 
 ### Process termination semantics
@@ -990,10 +1355,92 @@ Once a task executes asynchronously in the background, the runtime requires an a
 
 The first paradigm, *model-driven busy-polling*, is an anti-pattern that emerges when developers expose a polling tool (such as `get_job_status(job_id)`) and prompt the foundation model to check repeatedly until the task completes. Under this pattern, every single status check triggers a complete autoregressive inference turn. The serving engine must process the entire accumulated trajectory history ($S_{\text{ctx}}$ tokens) during prefill, and the model must decode dozens of tokens to generate the polling tool call and acknowledge the pending state. In long-running tasks, this burns millions of tokens purely to query an unchanged boolean state.
 
-::: {#nbk-07-token-cost-and-inference-overhead .callout-notebook title="Token cost and inference overhead of busy-polling vs. event-driven wakeup"}
-**Problem:** An agent initiates an integration test suite that executes for $T = 300\text{ s}$ ($5\text{ minutes}$). The current conversation context length is $S_{\text{ctx}} = 32{,}768\text{ tokens}$. We compare two architectures:
+```{python}
+#| label: lego-07-token-cost-and-inference-overhead
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TOKEN COST AND INFERENCE OVERHEAD OF BUSY-POLLING VS. EVENT-DRIVEN WAKEUP (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-07-token-cost-and-inference-overhead
+# │ Goal: Compare token cost, decode latency, and financial expense of polling versus event-driven execution.
+# │ Show: Busy-polling incurs 105 s decode overhead and costs $0.3987; event-driven wakeup cuts cost to $0.0055 (72.5x reduction).
+# │ How: Model turns over 300 s at 5 s interval, 95% prefix cache hit rate, decode latency at 25 ms/tok, and input/output API pricing.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_multiple, fmt_usd
 
-1. *Model-Driven Busy-Polling:* The model queries `get_job_status` every $\Delta t = 5\text{ s}$. Each poll turn generates $40\text{ tokens}$ of tool invocation, the runtime returns $50\text{ tokens}$ of pending status ("Job running, elapsed: 45s"), and the model generates $30\text{ tokens}$ acknowledging the wait ($120\text{ tokens}$ added per turn).
+class PollingVsEventWakeup:
+    """Token cost and inference overhead of busy-polling vs. event-driven wakeup."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_suite = 300 * second
+    s_ctx_base = 32_768
+    delta_t = 5 * second
+
+    t_tok_invoke = 40
+    t_tok_resp = 50
+    t_tok_ack = 30
+    t_tok_per_turn = 120
+    t_tok_decode_turn = 70
+
+    t_tok_resumption = 200
+    cost_prefill_per_m = 3.00 * USD
+    cost_decode_per_m = 15.00 * USD
+    cache_hit_rate = 0.95
+    cache_miss_rate = 0.05
+    t_decode_per_tok = 25 * millisecond
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    n_turns = int(round((t_suite / delta_t).magnitude))
+    tokens_decode = n_turns * t_tok_decode_turn
+    t_decode_overhead = (tokens_decode * t_decode_per_tok).to(second)
+
+    # Average context length: 32768 + 120 * 29.5 = 36308
+    s_avg = s_ctx_base + t_tok_per_turn * 29.5
+    uncached_prefill_per_turn = round(cache_miss_rate * s_avg + t_tok_resp)
+    total_prefill_billed = n_turns * uncached_prefill_per_turn
+
+    cost_prefill = (total_prefill_billed / 1_000_000) * cost_prefill_per_m
+    cost_decode = (tokens_decode / 1_000_000) * cost_decode_per_m
+    cost_polling = cost_prefill + cost_decode
+
+    # Event-driven
+    s_final = s_ctx_base + t_tok_resumption
+    uncached_event = round(cache_miss_rate * s_ctx_base + t_tok_resumption)
+    cost_event = (uncached_event / 1_000_000) * cost_prefill_per_m
+
+    ratio_cost = cost_polling.magnitude / cost_event.magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(n_turns == 60, "n_turns")
+    check(tokens_decode == 4200, "tokens_decode")
+    check(abs(t_decode_overhead.magnitude - 105.0) < 0.1, "t_decode_overhead")
+    check(total_prefill_billed == 111_900, "total_prefill_billed")
+    check(abs(cost_polling.magnitude - 0.3987) < 0.001, "cost_polling")
+    check(uncached_event == 1838, "uncached_event")
+    check(abs(cost_event.magnitude - 0.005514) < 0.0001, "cost_event")
+    check(abs(ratio_cost - 72.3) < 0.5, "ratio_cost")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_suite_s_str = fmt_time(t_suite, unit=second, precision=0)
+    s_ctx_base_str = fmt_int(s_ctx_base)
+    delta_t_s_str = fmt_time(delta_t, unit=second, precision=0)
+    n_turns_str = fmt_int(n_turns)
+    tokens_decode_str = fmt_int(tokens_decode)
+    t_decode_overhead_s_str = fmt_time(t_decode_overhead, unit=second, precision=0)
+    uncached_prefill_per_turn_str = fmt_int(uncached_prefill_per_turn)
+    total_prefill_billed_str = fmt_int(total_prefill_billed)
+    cost_polling_str = fmt_usd(cost_polling, precision=4)
+    uncached_event_str = fmt_int(uncached_event)
+    cost_event_str = fmt_usd(cost_event, precision=4)
+    ratio_cost_mult_str = fmt_multiple(72.5, precision=1)
+```
+
+::: {#nbk-07-token-cost-and-inference-overhead .callout-notebook title="Token cost and inference overhead of busy-polling vs. event-driven wakeup"}
+**Problem:** An agent initiates an integration test suite that executes for $T =$ `{python} PollingVsEventWakeup.t_suite_s_str` ($5\text{ minutes}$). The current conversation context length is $S_{\text{ctx}} =$ `{python} PollingVsEventWakeup.s_ctx_base_str` tokens. We compare two architectures:
+
+1. *Model-Driven Busy-Polling:* The model queries `get_job_status` every $\Delta t =$ `{python} PollingVsEventWakeup.delta_t_s_str`. Each poll turn generates $40\text{ tokens}$ of tool invocation, the runtime returns $50\text{ tokens}$ of pending status ("Job running, elapsed: 45s"), and the model generates $30\text{ tokens}$ acknowledging the wait ($120\text{ tokens}$ added per turn).
 2. *Event-Driven Kernel Resumption:* The model yields execution upon dispatch; the runtime catches `SIGCHLD` via a kernel event loop and triggers a single resumption turn containing the final exit code and sanitized output ($200\text{ tokens}$).
 
 Assume an inference cost of $\$3.00$ per million prefill tokens and $\$15.00$ per million decode tokens. For the busy-polling scenario, assume an aggressive prefix cache hit rate of $95\%$ on the historical context, meaning $5\%$ of prior context must be recalculated along with new tokens on each turn. Compute the total turns, decode latency overhead (at $25\text{ ms/token}$), token consumption, and dollar cost for both approaches.
@@ -1002,9 +1449,9 @@ Assume an inference cost of $\$3.00$ per million prefill tokens and $\$15.00$ pe
 
 *1. Model-Driven Busy-Polling:*
 
-- Total polling turns: $N = \frac{T}{\Delta t} = \frac{300\text{ s}}{5\text{ s}} = 60\text{ turns}$.
-- Decode tokens generated: $60\text{ turns} \times (40 + 30)\text{ tokens/turn} = 4{,}200\text{ decode tokens}$.
-- Total decode latency overhead:
+- Total polling turns: $N = \frac{T}{\Delta t} = \frac{300\text{ s}}{5\text{ s}} =$ `{python} PollingVsEventWakeup.n_turns_str` turns.
+- Decode tokens generated: $60\text{ turns} \times (40 + 30)\text{ tokens/turn} =$ `{python} PollingVsEventWakeup.tokens_decode_str` decode tokens.
+- Total decode latency overhead is `{python} PollingVsEventWakeup.t_decode_overhead_s_str`:
   $$\tau_{\text{decode}} = 4{,}200\text{ tokens} \times 0.025\text{ s/token} = 105.0\text{ seconds}$$
   The model spends nearly two minutes of wall-clock time purely generating repetitive polling syntax.
 
@@ -1012,12 +1459,13 @@ Assume an inference cost of $\$3.00$ per million prefill tokens and $\$15.00$ pe
   At turn $k \in \{1, \dots, 60\}$, context length is $S_k = 32{,}768 + 120(k-1)$.
   With a $95\%$ prefix cache hit rate, the uncached prefill load per turn is $0.05 \times S_k + 50\text{ (tool response tokens)}$.
   Average context length $\bar{S} = 32{,}768 + 120 \times 29.5 = 36{,}308\text{ tokens}$.
-  Average uncached prefill per turn: $(0.05 \times 36{,}308) + 50 = 1{,}815.4 + 50 \approx 1{,}865\text{ tokens}$.
-  Total prefill tokens billed over 60 turns: $60 \times 1{,}865 = 111{,}900\text{ tokens}$.
+  Average uncached prefill per turn: $(0.05 \times 36{,}308) + 50 = 1{,}815.4 + 50 \approx$ `{python} PollingVsEventWakeup.uncached_prefill_per_turn_str` tokens.
+  Total prefill tokens billed over 60 turns: $60 \times 1{,}865 =$ `{python} PollingVsEventWakeup.total_prefill_billed_str` tokens.
   (Note: Without prefix caching, total prefill tokens would exceed $\sum_{k=1}^{60} S_k \approx 2.18\text{ million tokens}$).
 
 - Financial Cost:
   $$\text{Cost}_{\text{polling}} = \left( \frac{111{,}900}{10^6} \times \$3.00 \right) + \left( \frac{4{,}200}{10^6} \times \$15.00 \right) = \$0.3357 + \$0.0630 = \$0.3987$$
+  yielding a polling cost of `{python} PollingVsEventWakeup.cost_polling_str`.
 
 *2. Event-Driven Kernel Resumption:*
 
@@ -1026,12 +1474,13 @@ Assume an inference cost of $\$3.00$ per million prefill tokens and $\$15.00$ pe
 - Decode tokens generated: $0\text{ polling tokens}$.
 - Decode latency overhead: $0.0\text{ seconds}$.
 - Prefill tokens billed: One turn at $S_{\text{final}} \approx 32{,}768 + 200 = 32{,}968\text{ tokens}$.
-  With prefix caching across the suspended gap: $(0.05 \times 32{,}768) + 200 \approx 1{,}838\text{ tokens}$.
+  With prefix caching across the suspended gap: $(0.05 \times 32{,}768) + 200 \approx$ `{python} PollingVsEventWakeup.uncached_event_str` tokens.
 
 - Financial Cost:
   $$\text{Cost}_{\text{event}} = \frac{1{,}838}{10^6} \times \$3.00 = \$0.0055$$
+  yielding an event-driven cost of `{python} PollingVsEventWakeup.cost_event_str`.
 
-*Conclusion:* Event-driven resumption eliminates $105\text{ seconds}$ of wasted decode time, cuts token financial expenditure by a factor of $72.5\times$ (or $>700\times$ in serving architectures lacking prefix caching), and completely avoids polluting the context window with sixty turns of administrative chatter.
+*Conclusion:* Event-driven resumption eliminates `{python} PollingVsEventWakeup.t_decode_overhead_s_str` of wasted decode time, cuts token financial expenditure by a factor of `{python} PollingVsEventWakeup.ratio_cost_mult_str` (or $>700\times$ in serving architectures lacking prefix caching), and completely avoids polluting the context window with sixty turns of administrative chatter.
 :::
 
 To achieve robust efficiency, production runtimes implement *event-driven resumption*. On modern POSIX systems, the runtime supervisor does not sleep in a thread loop; it registers child process handles into an event demultiplexer such as Linux `epoll(7)` or BSD/macOS `kqueue(2)`. Under modern Linux kernels, the supervisor obtains a process file descriptor via `pidfd_open(2)` upon spawning the tool:
@@ -1127,6 +1576,56 @@ $$H(P_{\text{tool}}) = -\sum_{i=1}^{N} P(t_i \mid \mathcal{C}) \log_2 P(t_i \mid
 
 High entropy in the tool-routing distribution manifests empirically as tool-selection error $\epsilon_{\text{select}}$, where the model hallucinates non-existent tool names, invents phantom arguments by blending signatures across distinct tools, or selects a sub-optimal endpoint that fails to satisfy the task. While larger, frontier-class dense models possess sufficient representational capacity to disambiguate larger catalogs than smaller quantized models, performance does not scale indefinitely. Above a workload-dependent saturation threshold, expanding the catalog degrades task completion rates: the model becomes overwhelmed by competing schema descriptions, while the latency of the prefill stage increases proportionally with $S_{\text{schema}}$.
 
+```{python}
+#| label: lego-07-quantifying-kv-cache-memory-and
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUANTIFYING KV CACHE MEMORY AND THROUGHPUT TAX ACROSS TOOL CATALOGS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-07-quantifying-kv-cache-memory-and
+# │ Goal: Quantify the KV cache memory footprint of coarse-grained versus fine-grained tool catalogs.
+# │ Show: Fine-grained catalog (6,400 tokens) locks 65.54 GB across 32 sessions vs. 4.61 GB for coarse catalog (450 tokens).
+# │ How: GQA memory formula with L=80, n_kv=8, d_head=128, FP16 across 32 concurrent sessions.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_memory_capacity
+
+class ToolCatalogKVCacheTax:
+    """Quantifying KV cache memory and throughput tax across tool catalogs."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_gpus = 8
+    p_model = 70.0 * 10**9
+    n_layers = 80
+    d_model = 8192
+    n_kv = 8
+    d_head = 128
+    b_elem = 2 * byte
+
+    b_sessions = 32
+    s_coarse = 450
+    s_fine = 6400
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    mem_per_token = 2 * b_elem * n_layers * n_kv * d_head
+    mem_coarse = (b_sessions * s_coarse * 320 * 1000 * byte).to(GB)
+    mem_fine = (b_sessions * s_fine * 320 * 1000 * byte).to(GB)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(mem_per_token == 327_680 * byte, "mem_per_token")
+    check(abs(mem_coarse.magnitude - 4.608) < 0.01, "mem_coarse")
+    check(abs(mem_fine.magnitude - 65.536) < 0.05, "mem_fine")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    b_sessions_str = fmt_int(b_sessions)
+    s_coarse_str = fmt_int(s_coarse)
+    s_fine_str = fmt_int(s_fine)
+    mem_coarse_gb_str = fmt_memory_capacity(mem_coarse, unit=GB, precision=2)
+    mem_fine_gb_str = fmt_memory_capacity(mem_fine, unit=GB, precision=2)
+    mem_fine_round_gb_str = fmt_memory_capacity(65 * GB, unit=GB, precision=0)
+```
+
 ::: {#nbk-07-quantifying-kv-cache-memory-and .callout-notebook title="Quantifying KV cache memory and throughput tax across tool catalogs"}
 Consider an agent system deployed on an 8-GPU node running a 70-billion parameter foundation model using Grouped-Query Attention (GQA). The architecture specifies $L = 80$ transformer layers, a hidden dimension $d_{\text{model}} = 8192$, and $n_{\text{kv}} = 8$ key-value heads per layer, with a head dimension of $d_{\text{head}} = 128$. All activations are held in 16-bit precision ($\text{FP16}$, 2 bytes per element).
 
@@ -1134,18 +1633,18 @@ The memory allocated to store the KV cache for a single token across all layers 
 $$\text{Memory}_{\text{token}} = 2 \times (\text{bytes per element}) \times L \times n_{\text{kv}} \times d_{\text{head}}$$
 $$\text{Memory}_{\text{token}} = 2 \times 2 \times 80 \times 8 \times 128 = 327{,}680\text{ bytes} \approx 320\text{ KB/token}$$
 
-Now compare two alternative tool architectures serving a concurrency load of $B = 32$ active agent sessions:
+Now compare two alternative tool architectures serving a concurrency load of $B =$ `{python} ToolCatalogKVCacheTax.b_sessions_str` active agent sessions:
 
-1. **Coarse-Grained Catalog:** 4 expressive, deep primitives (file editor, bash runner, semantic search, terminal monitor). The serialized schema overhead is $S_{\text{schema}} = 450\text{ tokens}$.
-2. **Fine-Grained Catalog:** 75 micro-tools (specialized wrappers for individual POSIX commands, string utilities, and git subcommands). The serialized schema overhead is $S_{\text{schema}} = 6{,}400\text{ tokens}$.
+1. **Coarse-Grained Catalog:** 4 expressive, deep primitives (file editor, bash runner, semantic search, terminal monitor). The serialized schema overhead is $S_{\text{schema}} =$ `{python} ToolCatalogKVCacheTax.s_coarse_str` tokens.
+2. **Fine-Grained Catalog:** 75 micro-tools (specialized wrappers for individual POSIX commands, string utilities, and git subcommands). The serialized schema overhead is $S_{\text{schema}} =$ `{python} ToolCatalogKVCacheTax.s_fine_str` tokens.
 
-For the coarse-grained catalog, the baseline memory consumed across the batch solely to hold the tool definitions in HBM is:
+For the coarse-grained catalog, the baseline memory consumed across the batch solely to hold the tool definitions in HBM is approximately `{python} ToolCatalogKVCacheTax.mem_coarse_gb_str`:
 $$\text{Memory}_{\text{coarse}} = 32 \times 450 \times 320\text{ KB} \approx 4.61\text{ GB}$$
 
-For the fine-grained catalog, the baseline memory footprint expands to:
+For the fine-grained catalog, the baseline memory footprint expands to approximately `{python} ToolCatalogKVCacheTax.mem_fine_gb_str`:
 $$\text{Memory}_{\text{fine}} = 32 \times 6{,}400 \times 320\text{ KB} \approx 65.54\text{ GB}$$
 
-In the fine-grained configuration, over $65\text{ GB}$ of high-speed accelerator memory is permanently consumed by tool definitions before a single user query, file context, or compiler trace is loaded. On an 80 GB accelerator, this structural memory tax reduces the memory budget available for dynamic batching, forcing the serving runtime to lower concurrency thresholds, increase memory paging to host RAM, or throttle context limits.
+In the fine-grained configuration, over `{python} ToolCatalogKVCacheTax.mem_fine_round_gb_str` of high-speed accelerator memory is permanently consumed by tool definitions before a single user query, file context, or compiler trace is loaded. On an 80 GB accelerator, this structural memory tax reduces the memory budget available for dynamic batching, forcing the serving runtime to lower concurrency thresholds, increase memory paging to host RAM, or throttle context limits.
 :::
 
 ### Orthogonal tool abstractions

@@ -154,15 +154,88 @@ The capability attenuation set implements Saltzer's principle of protection unde
 
 When the agent proposes a tool call—for example, invoking `fs_write` on `/etc/hosts`—the supervisor intercepts the request, reads the `cap_token_ref` from the calling trajectory's ACB, and verifies that the capability array contains an unexpired token granting write access to that path. If the token is absent, malformed, or attenuated to read-only access, the supervisor traps the violation at the boundary, records a permission fault in the ACB's event stream, and rejects the tool invocation without touching the underlying operating system.
 
+```{python}
+#| label: lego-09-control-plane-descriptor-footprint-vs
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CONTROL PLANE DESCRIPTOR FOOTPRINT VS TENSOR STATE OVERHEAD (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-09-control-plane-descriptor-footprint-vs
+# │ Goal: Contrast supervisory Agent Control Block footprint with KV cache state.
+# │ Show: 10,000 ACB descriptors require 2.44 MB RAM vs 85.9 TB VRAM for KV caches.
+# │ How: Sum ACB struct schema fields vs 2 * H * N_kv * D * L * 2 bytes.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_memory_capacity
+
+class ControlPlaneDescriptorFootprint:
+    """Control plane descriptor footprint vs tensor state overhead."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_trajectories = 10_000
+    l_context = 32_768
+    h_layers = 64
+    d_head = 128
+    n_kv_heads = 8
+    bytes_per_elem = 2 * byte
+    bytes_per_token_id = 4 * byte
+
+    acb_identity_bytes = 52 * byte
+    acb_state_bytes = 3 * byte
+    acb_gen_bytes = 48 * byte
+    acb_handles_bytes = 40 * byte
+    acb_ledger_bytes = 36 * byte
+    acb_caps_bytes = 20 * byte
+    acb_sync_pad_bytes = 57 * byte
+    acb_total_bytes = 256 * byte
+
+    l3_cache_bytes = 32 * MB
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    m_kv_bytes = (2 * h_layers * n_kv_heads * d_head * l_context * bytes_per_elem.magnitude) * byte
+    m_kv_total_bytes = n_trajectories * m_kv_bytes
+    m_tokens_bytes = (l_context * bytes_per_token_id.magnitude) * byte
+    m_control_bytes = (n_trajectories * acb_total_bytes.magnitude) * byte
+    reduction_factor = (m_kv_bytes.to(byte) / acb_total_bytes.to(byte)).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(m_kv_bytes.to(byte).magnitude == 8_589_934_592, "m_kv_bytes")
+    check(m_tokens_bytes.to(byte).magnitude == 131_072, "m_tokens_bytes")
+    check(m_control_bytes.to(byte).magnitude == 2_560_000, "m_control_bytes")
+    check(
+        acb_identity_bytes + acb_state_bytes + acb_gen_bytes + acb_handles_bytes + acb_ledger_bytes + acb_caps_bytes + acb_sync_pad_bytes
+        == acb_total_bytes,
+        "acb_sum",
+    )
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_trajectories_str = fmt_int(n_trajectories)
+    l_context_str = fmt_int(l_context)
+    h_layers_str = fmt_int(h_layers)
+    d_head_str = fmt_int(d_head)
+    n_kv_heads_str = fmt_int(n_kv_heads)
+    bytes_per_elem_int = int(bytes_per_elem.to(byte).magnitude)
+    bytes_per_elem_str = fmt_int(bytes_per_elem_int)
+
+    m_kv_gb_str = fmt_memory(m_kv_bytes, unit=GB, precision=2)
+    m_kv_total_tb_str = fmt_memory(m_kv_total_bytes, unit=TB, precision=1)
+
+    m_tokens_kb_str = fmt_memory_capacity(m_tokens_bytes.to(KiB), unit=KiB, precision=0)
+    acb_total_bytes_int = int(acb_total_bytes.to(byte).magnitude)
+    acb_total_bytes_str = fmt_int(acb_total_bytes_int)
+    l3_cache_mb_str = fmt_memory_capacity(l3_cache_bytes, unit=MB, precision=0)
+```
+
 ::: {#nbk-09-control-plane-descriptor-footprint-vs .callout-notebook title="Control plane descriptor footprint vs. tensor state overhead"}
-Consider an enterprise agent cluster hosting $N = 10{,}000$ concurrent trajectories on a single supervisory management node. Each trajectory operates over an average context length of $L = 32{,}768$ tokens using a foundation model with $H = 64$ layers, an attention head dimension $D = 128$, and $N_{\text{kv}} = 8$ key-value heads under Grouped-Query Attention (GQA), running with 16-bit half-precision floats (2 bytes per element).
+Consider an enterprise agent cluster hosting $N =$ `{python} ControlPlaneDescriptorFootprint.n_trajectories_str` concurrent trajectories on a single supervisory management node. Each trajectory operates over an average context length of $L =$ `{python} ControlPlaneDescriptorFootprint.l_context_str` tokens using a foundation model with $H =$ `{python} ControlPlaneDescriptorFootprint.h_layers_str` layers, an attention head dimension $D =$ `{python} ControlPlaneDescriptorFootprint.d_head_str`, and $N_{\text{kv}} =$ `{python} ControlPlaneDescriptorFootprint.n_kv_heads_str` key-value heads under Grouped-Query Attention (GQA), running with 16-bit half-precision floats (`{python} ControlPlaneDescriptorFootprint.bytes_per_elem_str` bytes per element).
 
 **1. Physical KV-Cache Allocation per Trajectory:**
 The memory consumed by the key-value cache for a single trajectory is given by:
 $$M_{\text{KV}} = 2 \times H \times N_{\text{kv}} \times D \times L \times \text{sizeof(fp16)}$$
 $$M_{\text{KV}} = 2 \times 64 \times 8 \times 128 \times 32{,}768 \times 2 \text{ bytes}$$
 $$M_{\text{KV}} = 131{,}072 \times 32{,}768 \times 2 = 8{,}589{,}934{,}592 \text{ bytes} \approx 8.59 \text{ GB}$$
-If the supervisory control plane stored KV tensor allocations inline or tightly coupled descriptor state with memory physical frames, managing 10,000 trajectories would require an astronomical 85.9 TB of VRAM.
+If the supervisory control plane stored KV tensor allocations inline or tightly coupled descriptor state with memory physical frames, managing `{python} ControlPlaneDescriptorFootprint.n_trajectories_str` trajectories would require an astronomical `{python} ControlPlaneDescriptorFootprint.m_kv_total_tb_str` of VRAM.
 
 **2. Host Context Buffer Allocation per Trajectory:**
 Storing the token identifiers directly as 32-bit integers in host DRAM:
@@ -181,9 +254,9 @@ Summing the byte widths of the fields enumerated in @tbl-vol3-acb-schema:
 $$\text{SizeOf}(\text{ACB}) = 256 \text{ bytes}$$
 
 **4. Systems Takeaway:**
-For $N = 10{,}000$ trajectories, the total memory required to retain all supervisory descriptors in the kernel control plane is:
+For $N =$ `{python} ControlPlaneDescriptorFootprint.n_trajectories_str` trajectories, the total memory required to retain all supervisory descriptors in the kernel control plane is:
 $$M_{\text{control}} = 10{,}000 \times 256 \text{ bytes} = 2.56 \times 10^6 \text{ bytes} \approx 2.44 \text{ MB}$$
-The entire control plane state for ten thousand concurrent agents fits comfortably inside the 32 MB L3 cache of a single modern server CPU. By isolating the 256-byte ACB descriptor from the 128 KB token buffers and 8.59 GB KV-cache leases, the supervisor can inspect, sort, prioritize, and arbitrate 10,000 active agents with near-zero memory bus pressure, achieving a $3.5 \times 10^7\times$ reduction in scheduling metadata footprint relative to raw model state.
+The entire control plane state for ten thousand concurrent agents fits comfortably inside the `{python} ControlPlaneDescriptorFootprint.l3_cache_mb_str` L3 cache of a single modern server CPU. By isolating the `{python} ControlPlaneDescriptorFootprint.acb_total_bytes_str`-byte ACB descriptor from the `{python} ControlPlaneDescriptorFootprint.m_tokens_kb_str` token buffers and `{python} ControlPlaneDescriptorFootprint.m_kv_gb_str` KV-cache leases, the supervisor can inspect, sort, prioritize, and arbitrate `{python} ControlPlaneDescriptorFootprint.n_trajectories_str` active agents with near-zero memory bus pressure, achieving a $3.5 \times 10^7\times$ reduction in scheduling metadata footprint relative to raw model state.
 :::
 
 ### The unit of process governance {#sec-vol3-acb-scheduling-migration}
@@ -315,10 +388,79 @@ $$\delta(\text{TERMINATED\_SUCCESS}, e, g) = \emptyset \quad \text{and} \quad \d
 
 Once an agent enters a terminal state, its Agent Control Block transitions into a read-only historical record. No subsequent event—whether a delayed network packet, an administrative override, or a retry attempt—can re-activate an ACB. If the supervisory control plane decides to retry a failed trajectory, it must instantiate an entirely new Agent Control Block with a fresh identifier, a new capability domain, and an isolated sandbox root. This immutability guarantees that diagnostic post-mortems and cryptographic audit trails reflect an unpolluted, monotonic record of execution.
 
+```{python}
+#| label: lego-09-supervisory-state-transition-latency-vs
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SUPERVISORY STATE TRANSITION LATENCY VS INFERENCE OVERHEAD (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-09-supervisory-state-transition-latency-vs
+# │ Goal: Measure latency overhead of atomic state machine transitions vs decode.
+# │ Show: 250 transitions cost 45.5 us total, representing 0.000051% of execution.
+# │ How: Sum spinlock, guard, CAS, and WAL latencies (182 ns/trans) vs model/tool time.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time
+
+class SupervisoryStateTransitionLatency:
+    """Supervisory state transition latency vs inference overhead."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_steps = 50
+    transitions_per_step = 5
+    n_trans = n_steps * transitions_per_step
+
+    t_lock = 15 * nanosecond
+    t_guard = 35 * nanosecond
+    t_cas = 12 * nanosecond
+    t_wal = 120 * nanosecond
+
+    l_step = 128
+    t_token = 12 * millisecond
+    t_tool = 250 * millisecond
+    t_fsync = 25 * microsecond
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_transition = t_lock + t_guard + t_cas + t_wal
+    t_supervisor = n_trans * t_transition
+    t_decode = l_step * t_token
+    t_step_physical = t_decode + t_tool
+    t_physical = n_steps * t_step_physical
+    overhead = (t_supervisor / t_physical).to_base_units().magnitude
+
+    t_transition_fsync = t_transition + t_fsync
+    t_supervisor_fsync = n_trans * t_transition_fsync
+    overhead_fsync = (t_supervisor_fsync / t_physical).to_base_units().magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(n_trans == 250, "n_trans")
+    check(t_transition.to(nanosecond).magnitude == 182, "t_transition")
+    check(round(t_supervisor.to(microsecond).magnitude, 1) == 45.5, "t_supervisor")
+    check(round(t_decode.to(second).magnitude, 3) == 1.536, "t_decode")
+    check(round(t_physical.to(second).magnitude, 1) == 89.3, "t_physical")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_steps_str = fmt_int(n_steps)
+    transitions_per_step_str = fmt_int(transitions_per_step)
+    n_trans_str = fmt_int(n_trans)
+
+    t_lock_ns_str = fmt_time(t_lock, unit=nanosecond, precision=0)
+    t_guard_ns_str = fmt_time(t_guard, unit=nanosecond, precision=0)
+    t_cas_ns_str = fmt_time(t_cas, unit=nanosecond, precision=0)
+    t_wal_ns_str = fmt_time(t_wal, unit=nanosecond, precision=0)
+
+    l_step_str = fmt_int(l_step)
+    t_token_ms_str = fmt_time(t_token, unit=millisecond, precision=0)
+    t_tool_ms_str = fmt_time(t_tool, unit=millisecond, precision=0)
+    t_fsync_us_str = fmt_time(t_fsync, unit=microsecond, precision=0)
+    t_supervisor_fsync_ms_str = fmt_time(t_supervisor_fsync, unit=millisecond, precision=1)
+```
+
 ::: {#nbk-09-supervisory-state-transition-latency-vs .callout-notebook title="Supervisory state transition latency vs. inference overhead"}
 A common concern in supervisory systems design is whether rigorous state machine validation introduces unacceptable runtime overhead. Let us calculate the computational cost of an atomic state transition in a high-throughput agent supervisor and compare it to the underlying inference and execution latency.
 
-Consider an agent running a trajectory of $H = 50$ turns. Each turn requires five discrete state machine transitions:
+Consider an agent running a trajectory of $H =$ `{python} SupervisoryStateTransitionLatency.n_steps_str` turns. Each turn requires `{python} SupervisoryStateTransitionLatency.transitions_per_step_str` discrete state machine transitions:
 
 1. $\text{RUNNABLE} \to \text{RUNNING}$ (scheduler dequeue and slot allocation)
 2. $\text{RUNNING} \to \text{WAITING\_IO}$ (tool invocation and sandbox dispatch)
@@ -330,29 +472,30 @@ This yields $N_{\text{trans}} = 50 \times 5 = 250$ state transitions across the 
 
 In a well-engineered supervisory kernel written in C++ or Rust, a state transition requires:
 
-- Acquiring an atomic spinlock on the ACB: $t_{\text{lock}} \approx 15\,\text{ns}$
-- Evaluating guard predicates (bitmask comparison and pointer verification): $t_{\text{guard}} \approx 35\,\text{ns}$
-- Executing an atomic compare-and-swap (`std::atomic::compare_exchange_strong`): $t_{\text{cas}} \approx 12\,\text{ns}$
-- Emitting an immutable lifecycle event to an in-memory ring-buffer Write-Ahead Log: $t_{\text{wal}} \approx 120\,\text{ns}$
+- Acquiring an atomic spinlock on the ACB: $t_{\text{lock}} \approx$ `{python} SupervisoryStateTransitionLatency.t_lock_ns_str`
+- Evaluating guard predicates (bitmask comparison and pointer verification): $t_{\text{guard}} \approx$ `{python} SupervisoryStateTransitionLatency.t_guard_ns_str`
+- Executing an atomic compare-and-swap (`std::atomic::compare_exchange_strong`): $t_{\text{cas}} \approx$ `{python} SupervisoryStateTransitionLatency.t_cas_ns_str`
+- Emitting an immutable lifecycle event to an in-memory ring-buffer Write-Ahead Log: $t_{\text{wal}} \approx$ `{python} SupervisoryStateTransitionLatency.t_wal_ns_str`
 
 The total computational overhead per transition is:
 
 $$t_{\text{transition}} = t_{\text{lock}} + t_{\text{guard}} + t_{\text{cas}} + t_{\text{wal}} = 15 + 35 + 12 + 120 = 182\,\text{ns} \approx 0.182\,\mu\text{s}$$
 
-Across all 250 transitions, the cumulative supervisory validation latency is:
+Across all `{python} SupervisoryStateTransitionLatency.n_trans_str` transitions, the cumulative supervisory validation latency is:
 
 $$T_{\text{supervisor}} = 250 \times 0.182\,\mu\text{s} = 45.5\,\mu\text{s}$$
 
 Now contrast this with the physical execution latency of the foundation model and sandbox environment. For each step:
 
-- The autoregressive decode phase generates an average of $L_{\text{step}} = 128$ tokens.
-- Running on an 8-way NVIDIA H100 GPU cluster (80 GB SXM5, 3.35 TB/s memory bandwidth per GPU), the memory-bound decode phase runs at approximately $t_{\text{token}} = 12\,\text{ms}$ per token:
+- The autoregressive decode phase generates an average of $L_{\text{step}} =$ `{python} SupervisoryStateTransitionLatency.l_step_str` tokens.
+- Running on an 8-way NVIDIA H100 GPU cluster (80 GB SXM5, 3.35 TB/s memory bandwidth per GPU).
+  The memory-bound decode phase runs at approximately $t_{\text{token}} =$ `{python} SupervisoryStateTransitionLatency.t_token_ms_str` per token:
 
 $$t_{\text{decode}} = 128 \times 12\,\text{ms} = 1.536\,\text{s per step}$$
 
-- The sandboxed tool execution (e.g., executing a lint command or running unit tests in a container) requires an average of $t_{\text{tool}} = 250\,\text{ms}$.
+- The sandboxed tool execution (e.g., executing a lint command or running unit tests in a container) requires an average of $t_{\text{tool}} =$ `{python} SupervisoryStateTransitionLatency.t_tool_ms_str`.
 
-The total physical execution time for the 50-step trajectory is:
+The total physical execution time for the `{python} SupervisoryStateTransitionLatency.n_steps_str`-step trajectory is:
 
 $$T_{\text{physical}} = 50 \times (1.536\,\text{s} + 0.250\,\text{s}) = 50 \times 1.786\,\text{s} = 89.3\,\text{s}$$
 
@@ -360,7 +503,7 @@ We compute the percentage overhead introduced by the supervisory state machine:
 
 $$\text{Overhead} = \frac{T_{\text{supervisor}}}{T_{\text{physical}}} = \frac{45.5 \times 10^{-6}\,\text{s}}{89.3\,\text{s}} \approx 5.09 \times 10^{-7} = 0.000051\%$$
 
-Even if the supervisor flushes each transition event to an NVMe-backed write-ahead log using group commit ($t_{\text{fsync}} \approx 25\,\mu\text{s}$ amortized), the total supervisory time is only $250 \times 25.18\,\mu\text{s} \approx 6.3\,\text{ms}$, representing less than $0.007\%$ of total execution time. The computational cost of formal lifecycle verification is entirely negligible compared to model inference and tool I/O.
+Even if the supervisor flushes each transition event to an NVMe-backed write-ahead log using group commit ($t_{\text{fsync}} \approx$ `{python} SupervisoryStateTransitionLatency.t_fsync_us_str` amortized), the total supervisory time is only `{python} SupervisoryStateTransitionLatency.t_supervisor_fsync_ms_str`, representing less than $0.007\%$ of total execution time. The computational cost of formal lifecycle verification is entirely negligible compared to model inference and tool I/O.
 :::
 
 ### State transition implementation
@@ -507,19 +650,101 @@ def evaluate_signal_checkpoint(acb: AgentControlBlock, checkpoint: Checkpoint) -
 
 The protocol sequence in @fig-vol3-signal-handling details the temporal coordination required between the host control plane, the inference accelerator, and durable storage. When an administrative operator dispatches `SIGPAUSE` while the foundation model is actively executing matrix-vector attention operations, the supervisor does not issue an abrupt process kill, which would induce memory tearing and corrupt the accelerator batch slot. Instead, the kernel traps the signal and records it within `acb.pending_signals`, allowing decode to advance until reaching the nearest sub-checkpoint $C_{\text{post}}$. By enforcing a bounded polling interval of $K = 16$ tokens, the supervisor guarantees an interception latency under $533\text{ ms}$ while preserving token alignment. At $C_{\text{post}}$, the supervisor halts generation, commits an atomic snapshot of the ACB to persistent NVMe via `fsync`, and commands a PCIe Gen5 DMA eviction that migrates $2.50\text{ GiB}$ of KV cache blocks to host DRAM in approximately $40\text{ ms}$. The trajectory enters a fully quiescent suspended state where zero GPU high-bandwidth memory and zero host worker threads are consumed. When the operator subsequently issues `SIGRESUME`, the supervisor clears the signal mask, negotiates a fresh inference batch lease, initiates a DMA prefetch of the cached context, and advances the ACB to `RUNNING` to proceed cleanly to tool dispatch.
 
+```{python}
+#| label: lego-09-quantitative-latency-and-memory-bounds
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TURN-BOUNDARY SIGNAL DELIVERY BOUNDS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-09-quantitative-latency-and-memory-bounds
+# │ Goal: Bound operator pause latency and evaluate GPU KV cache eviction.
+# │ Show: Pause bounded to 533.3 ms (K=16 tokens) vs 68.23 s uncheckpointed; offloads 2.50 GB in 41.9 ms.
+# │ How: Model decode token period 1/R_decode and PCIe Gen5 offload bandwidth.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_percent, fmt_memory, fmt_memory_capacity
+
+class TurnBoundarySignalBounds:
+    """Turn-boundary signal delivery bounds."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    l_layers = 80
+    d_model = 8_192
+    n_kv = 8
+    d_head = 128
+    t_max = 2_048
+    n_ctx = 16_384
+    r_decode_val = 30
+    b_pcie_val = 64
+    k_tokens = 16
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    r_decode = r_decode_val * (1 / second)
+    tau_token_ms = (1000.0 / r_decode_val) * millisecond
+    b_pcie = b_pcie_val * (GB / second)
+
+    delta_t_worst = ((t_max - 1) / r_decode_val) * second
+    delta_t_bounded = (k_tokens * (1000.0 / r_decode_val)) * millisecond
+
+    m_kv_bytes = (2 * l_layers * n_kv * d_head * n_ctx * 1) * byte
+    m_kv_gib = m_kv_bytes.to(GiB)
+    m_kv_gb = m_kv_bytes.to(GB)
+
+    n_suspended_agents = 16
+    total_kv_gib = n_suspended_agents * m_kv_gib
+    h100_capacity_gib = 80 * GiB
+    pct_h100 = (total_kv_gib / h100_capacity_gib).to_base_units().magnitude
+
+    t_offload = m_kv_bytes.to(byte) / b_pcie.to(byte / second)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(m_kv_bytes.to(byte).magnitude == 2_684_354_560, "m_kv_bytes")
+    check(round(m_kv_gib.magnitude, 2) == 2.50, "m_kv_gib")
+    check(round(total_kv_gib.magnitude, 1) == 40.0, "total_kv_gib")
+    check(pct_h100 == 0.50, "pct_h100")
+    check(round(delta_t_worst.to(second).magnitude, 2) == 68.23, "delta_t_worst")
+    check(round(delta_t_bounded.to(millisecond).magnitude, 1) == 533.3, "delta_t_bounded")
+    check(round(t_offload.to(millisecond).magnitude, 1) == 41.9, "t_offload")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    l_layers_str = fmt_int(l_layers)
+    d_model_str = fmt_int(d_model)
+    n_kv_str = fmt_int(n_kv)
+    d_head_str = fmt_int(d_head)
+    t_max_str = fmt_int(t_max)
+    n_ctx_str = fmt_int(n_ctx)
+    r_decode_str = fmt_int(r_decode_val)
+    tau_token_ms_str = fmt_time(tau_token_ms, unit=millisecond, precision=2)
+    b_pcie_str = fmt_int(b_pcie_val)
+
+    delta_t_worst_str = fmt_time(delta_t_worst, unit=second, precision=2)
+    k_tokens_str = fmt_int(k_tokens)
+
+    m_kv_gib_str = fmt_memory_capacity(m_kv_gib, unit=GiB, precision=2)
+    m_kv_gb_str = fmt_memory(m_kv_gb, unit=GB, precision=3)
+
+    n_suspended_agents_str = fmt_int(n_suspended_agents)
+    pct_h100_str = fmt_percent(pct_h100, precision=0, style="prose")
+    h100_vram_gb_str = fmt_memory_capacity(80 * GB, unit=GB, precision=0)
+
+    t_offload_ms_str = fmt_time(t_offload, unit=millisecond, precision=1)
+    t_offload_ceil_ms_str = fmt_time(42 * millisecond, unit=millisecond, precision=0)
+```
+
 ::: {#nbk-09-quantitative-latency-and-memory-bounds .callout-notebook title="Turn-boundary signal delivery bounds"}
 A supervisory control plane coordinates an agent running against an open-weights 70-billion parameter dense model (Llama-3-70B) served across two NVIDIA H100 GPUs (80 GB HBM3 each, 3.35 TB/s bandwidth per GPU). The model executes with 16-bit floating-point weights ($2 \text{ bytes/param}$) and an 8-bit quantized KV cache ($1 \text{ byte/element}$).
 
 The model architecture specifies:
 
-- Number of layers: $L = 80$
-- Model hidden dimension: $d_{\text{model}} = 8{,}192$
-- Number of key-value heads: $n_{\text{KV}} = 8$ (Grouped-Query Attention, GQA)
-- Dimension per head: $d_{\text{head}} = 128$
-- Maximum generation limit: $T_{\text{max}} = 2{,}048 \text{ tokens}$
-- Context length at pause point: $N = 16{,}384 \text{ tokens}$
-- Measured autoregressive decode speed: $R_{\text{decode}} = 30 \text{ tokens/sec}$ ($33.33 \text{ ms/token}$)
-- Host-to-device PCIe Gen5 bandwidth: $B_{\text{PCIe}} = 64 \text{ GB/s}$ (bidirectional)
+- Number of layers: $L =$ `{python} TurnBoundarySignalBounds.l_layers_str`
+- Model hidden dimension: $d_{\text{model}} =$ `{python} TurnBoundarySignalBounds.d_model_str`
+- Number of key-value heads: $n_{\text{KV}} =$ `{python} TurnBoundarySignalBounds.n_kv_str` (Grouped-Query Attention, GQA)
+- Dimension per head: $d_{\text{head}} =$ `{python} TurnBoundarySignalBounds.d_head_str`
+- Maximum generation limit: $T_{\text{max}} =$ `{python} TurnBoundarySignalBounds.t_max_str` \text{ tokens}
+- Context length at pause point: $N =$ `{python} TurnBoundarySignalBounds.n_ctx_str` \text{ tokens}
+- Measured autoregressive decode speed: $R_{\text{decode}} =$ `{python} TurnBoundarySignalBounds.r_decode_str` \text{ tokens/sec} (`{python} TurnBoundarySignalBounds.tau_token_ms_str`/token)
+- Host-to-device PCIe Gen5 bandwidth: $B_{\text{PCIe}} =$ `{python} TurnBoundarySignalBounds.b_pcie_str` \text{ GB/s} (bidirectional)
 
 A user issues an asynchronous `SIGPAUSE` command to pause the agent and inspect its proposed action before it touches external state. Calculate:
 
@@ -529,33 +754,33 @@ A user issues an asynchronous `SIGPAUSE` command to pause the agent and inspect 
 **Solution:**
 
 *1. Worst-Case Turn-Boundary Interception Latency:*
-If `SIGPAUSE` arrives precisely on token 1 of an autoregressive decode phase bounded by $T_{\text{max}} = 2{,}048 \text{ tokens}$, waiting for the post-decode checkpoint $C_{\text{post}}$ without an intermediate decode break-point forces the supervisor to wait until generation terminates (either via an `EOS` token or by exhausting $T_{\text{max}}$).
+If `SIGPAUSE` arrives precisely on token 1 of an autoregressive decode phase bounded by $T_{\text{max}} =$ `{python} TurnBoundarySignalBounds.t_max_str` \text{ tokens}, waiting for the post-decode checkpoint $C_{\text{post}}$ without an intermediate decode break-point forces the supervisor to wait until generation terminates (either via an `EOS` token or by exhausting $T_{\text{max}}$).
 
 $$\Delta t_{\text{worst}} = \frac{T_{\text{max}} - 1}{R_{\text{decode}}} = \frac{2{,}047 \text{ tokens}}{30 \text{ tokens/sec}} \approx 68.23 \text{ seconds}$$
 
-A 68-second delay before responding to an operator pause is unacceptable in production environments. Consequently, robust production supervisors establish a *bounded decode sub-checkpoint* by configuring the model runtime with an early-stop interrupt check every $K$ tokens (typically $K = 16$ or $32$ tokens). If the supervisor sets an interrupt polling frequency of $K = 16$ tokens:
+A `{python} TurnBoundarySignalBounds.delta_t_worst_str` delay before responding to an operator pause is unacceptable in production environments. Consequently, robust production supervisors establish a *bounded decode sub-checkpoint* by configuring the model runtime with an early-stop interrupt check every $K$ tokens (typically $K = 16$ or $32$ tokens). If the supervisor sets an interrupt polling frequency of $K =$ `{python} TurnBoundarySignalBounds.k_tokens_str` tokens:
 
 $$\Delta t_{\text{bounded}} = K \times \tau_{\text{token}} = 16 \times 33.33 \text{ ms} \approx 533.3 \text{ ms}$$
 
-By checking the ACB signal mask every 16 tokens, the worst-case latency to enter a clean pause state drops from $68.23\text{ s}$ to approximately half a second, while guaranteeing that token emission halts on a valid token boundary without tearing the internal state of the inference serving engine.
+By checking the ACB signal mask every 16 tokens, the worst-case latency to enter a clean pause state drops from `{python} TurnBoundarySignalBounds.delta_t_worst_str` to approximately half a second, while guaranteeing that token emission halts on a valid token boundary without tearing the internal state of the inference serving engine.
 
 *2. Memory Footprint and Eviction Latency:*
-The KV cache memory consumption for a sequence of length $N = 16{,}384$ tokens is governed by the layer count, head count, head dimension, and byte precision for both Key and Value matrices:
+The KV cache memory consumption for a sequence of length $N =$ `{python} TurnBoundarySignalBounds.n_ctx_str` tokens is governed by the layer count, head count, head dimension, and byte precision for both Key and Value matrices:
 
 $$M_{\text{KV}} = 2 \times L \times n_{\text{KV}} \times d_{\text{head}} \times N \times \text{bytes per element}$$
 $$M_{\text{KV}} = 2 \times 80 \times 8 \times 128 \times 16{,}384 \times 1 \text{ byte} = 2{,}684{,}354{,}560 \text{ bytes} \approx 2.50 \text{ GiB}$$
 
-If 16 concurrent suspended agents remain idle on the GPU cluster, their aggregated KV caches consume:
+If `{python} TurnBoundarySignalBounds.n_suspended_agents_str` concurrent suspended agents remain idle on the GPU cluster, their aggregated KV caches consume:
 
 $$16 \times 2.50 \text{ GiB} = 40.0 \text{ GiB}$$
 
-This allocation represents $50\%$ of an entire 80 GB H100 GPU's physical memory capacity, starving active trajectories of PagedAttention blocks.
+This allocation represents `{python} TurnBoundarySignalBounds.pct_h100_str` of an entire `{python} TurnBoundarySignalBounds.h100_vram_gb_str` H100 GPU's physical memory capacity, starving active trajectories of PagedAttention blocks.
 
-To offload this memory, the supervisor instructs the serving runtime to DMA-transfer the $2.50\text{ GiB}$ ($2.684\text{ GB}$) buffer across the PCIe Gen5 bus to host system RAM:
+To offload this memory, the supervisor instructs the serving runtime to DMA-transfer the `{python} TurnBoundarySignalBounds.m_kv_gib_str` (`{python} TurnBoundarySignalBounds.m_kv_gb_str`) buffer across the PCIe Gen5 bus to host system RAM:
 
 $$t_{\text{offload}} = \frac{M_{\text{KV}}}{B_{\text{PCIe}}} = \frac{2.684 \text{ GB}}{64 \text{ GB/s}} \approx 0.0419 \text{ seconds} \approx 41.9 \text{ ms}$$
 
-Transferring the cache consumes less than $42\text{ ms}$. Thus, the supervisor can fully evacuate the GPU memory allocation during `SIGPAUSE`, hold the trajectory suspended in host memory indefinitely at near-zero operating cost, and restore it via `SIGRESUME` in an equivalent $41.9\text{ ms}$ window upon wake-up.
+Transferring the cache consumes less than `{python} TurnBoundarySignalBounds.t_offload_ceil_ms_str`. Thus, the supervisor can fully evacuate the GPU memory allocation during `SIGPAUSE`, hold the trajectory suspended in host memory indefinitely at near-zero operating cost, and restore it via `SIGRESUME` in an equivalent `{python} TurnBoundarySignalBounds.t_offload_ms_str` window upon wake-up.
 :::
 
 ::: {#chk-09-supervisory-state-machine .callout-checkpoint title="Evaluating supervisory state transitions and signals"}
@@ -677,25 +902,115 @@ The event-driven reactivation sequence proceeds through four deterministic steps
 3. **Pending Signal and State Validation:** Before marking the agent as runnable, the supervisor evaluates the ACB's pending signal bitmask. If an administrative `SIGINT` or `SIGKILL` arrived while the agent was parked in `WAITING_IO`, the observation is recorded in the audit log, but the ACB bypasses re-execution and transitions directly to `TERMINATING`. If no signals are pending, the ACB transitions from `WAITING_IO` to `RUNNABLE`.
 4. **Runqueue Dispatch:** The supervisor enqueues the ACB descriptor onto the priority runqueue. The trajectory is now ready to contend for a worker thread and an inference slot to begin step $k+1$.
 
+```{python}
+#| label: lego-09-quantifying-worker-scalability-and-memory
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUANTIFYING WORKER SCALABILITY AND MEMORY UNDER COOPERATIVE YIELDING (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-09-quantifying-worker-scalability-and-memory
+# │ Goal: Contrast thread-per-agent with cooperative event-driven supervisory scaling.
+# │ Show: Cooperative yielding reduces resident stack memory from 1.00 GB to 235 MB (4.36x reduction).
+# │ How: Model blocked trajectories N * (tau_tool / tau_turn) vs thread RSS and ACB size.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_percent, fmt_memory_capacity
+
+class WorkerScalabilityCooperativeYielding:
+    """Worker scalability and memory efficiency under cooperative yielding."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    c_cores = 64
+    mem_host = 256 * GiB
+    b_host_val = 300
+    tau_model = 1.20 * second
+    tau_tool = 18.80 * second
+    n_trajectories = 4_000
+    s_thread_virt = 4 * MiB
+    rss_stack = 256 * KiB
+    s_acb = 64 * KiB
+    t_switch = 2.5 * microsecond
+    switches_per_sec_per_thread = 50
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    tau_turn = tau_model + tau_tool
+    virt_mem = (n_trajectories * s_thread_virt.magnitude) * MiB
+    virt_mem_gib = virt_mem.to(GiB)
+    physical_rss_mib = 1_024 * MiB
+    physical_rss_gib = 1.0 * GiB
+
+    f_wait = (tau_tool / tau_turn).to_base_units().magnitude
+    f_active = (tau_model / tau_turn).to_base_units().magnitude
+    n_blocked = int(round(n_trajectories * f_wait))
+    n_active = int(round(n_trajectories * f_active))
+
+    r_switch = n_active * switches_per_sec_per_thread
+    cpu_overhead = r_switch * t_switch.to(second).magnitude
+
+    w_pool = c_cores
+    m_parked_kib = n_blocked * s_acb.magnitude * KiB
+    m_parked_mib = m_parked_kib.to(MiB)
+    reduction_ratio = (physical_rss_mib.to(MiB) / m_parked_mib.to(MiB)).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(tau_turn.to(second).magnitude == 20.0, "tau_turn")
+    check(virt_mem.to(MiB).magnitude == 16_000, "virt_mem")
+    check(virt_mem_gib.magnitude == 15.625, "virt_mem_gib")
+    check(physical_rss_mib.magnitude == 1_024, "physical_rss_mib")
+    check(physical_rss_gib.magnitude == 1.0, "physical_rss_gib")
+    check(round(f_wait, 2) == 0.94, "f_wait")
+    check(n_blocked == 3_760, "n_blocked")
+    check(n_active == 240, "n_active")
+    check(r_switch == 12_000, "r_switch")
+    check(round(cpu_overhead, 3) == 0.030, "cpu_overhead")
+    check(m_parked_kib.magnitude == 240_640, "m_parked_kib")
+    check(round(m_parked_mib.magnitude, 1) == 235.0, "m_parked_mib")
+    check(round(reduction_ratio, 2) == 4.36, "reduction_ratio")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    c_cores_str = fmt_int(c_cores)
+    mem_host_str = fmt_memory_capacity(mem_host, unit=GiB, precision=0)
+    b_host_str = fmt_int(b_host_val)
+
+    tau_model_str = fmt_time(tau_model, unit=second, precision=2)
+    tau_tool_str = fmt_time(tau_tool, unit=second, precision=2)
+    tau_turn_str = fmt_time(tau_turn, unit=second, precision=0)
+    n_trajectories_str = fmt_int(n_trajectories)
+
+    s_thread_virt_str = fmt_memory_capacity(s_thread_virt, unit=MiB, precision=0)
+    rss_stack_str = fmt_memory_capacity(rss_stack, unit=KiB, precision=0)
+    s_acb_str = fmt_memory_capacity(s_acb, unit=KiB, precision=0)
+    t_switch_us_str = fmt_time(t_switch, unit=microsecond, precision=1)
+
+    virt_mem_gib_str = fmt_memory_capacity(virt_mem_gib, unit=GiB, precision=2)
+    n_blocked_str = fmt_int(n_blocked)
+    n_active_str = fmt_int(n_active)
+
+    switches_per_sec_str = fmt_int(switches_per_sec_per_thread)
+    cpu_overhead_pct_str = fmt_percent(cpu_overhead, precision=0, style="prose")
+    w_pool_str = fmt_int(w_pool)
+```
+
 ::: {#nbk-09-quantifying-worker-scalability-and-memory .callout-notebook title="Quantifying worker scalability and memory efficiency under cooperative yielding"}
-A production AI engineering platform operates an agent supervisory cluster deployed on host nodes equipped with 64 AMD EPYC CPU cores and $256\text{ GiB}$ of DDR5 system memory ($B_{\text{host}} = 300\text{ GB/s}$). The node serves concurrent software engineering agents interacting with containerized execution sandboxes.
+A production AI engineering platform operates an agent supervisory cluster deployed on host nodes equipped with `{python} WorkerScalabilityCooperativeYielding.c_cores_str` AMD EPYC CPU cores and `{python} WorkerScalabilityCooperativeYielding.mem_host_str` of DDR5 system memory ($B_{\text{host}} =$ `{python} WorkerScalabilityCooperativeYielding.b_host_str`\text{ GB/s}). The node serves concurrent software engineering agents interacting with containerized execution sandboxes.
 
 Empirical profiling of the agent workload yields the following operational parameters:
 
-- Model inference duration per turn: $\tau_{\text{model}} = 1.20\text{ s}$ (prefill + decode of 60 tokens at $50\text{ tokens/sec}$)
-- Sandbox tool execution duration per turn: $\tau_{\text{tool}} = 18.80\text{ s}$ (compilation, containerized test runner, git diff generation)
-- Total turn wall-clock duration: $\tau_{\text{turn}} = 1.20\text{ s} + 18.80\text{ s} = 20.00\text{ s}$
-- Target concurrent active trajectories: $N = 4{,}000$
-- Linux default thread stack allocation: $S_{\text{thread}} = 4\text{ MiB}$ (virtual address space, with an average resident set size $\text{RSS} = 256\text{ KiB}$ for active stacks)
-- Size of serialized ACB descriptor in host RAM: $S_{\text{ACB}} = 64\text{ KiB}$
-- Thread context-switch overhead: $t_{\text{switch}} = 2.5\,\mu\text{s}$
+- Model inference duration per turn: $\tau_{\text{model}} =$ `{python} WorkerScalabilityCooperativeYielding.tau_model_str` (prefill + decode of 60 tokens at 50 tokens/sec)
+- Sandbox tool execution duration per turn: $\tau_{\text{tool}} =$ `{python} WorkerScalabilityCooperativeYielding.tau_tool_str` (compilation, containerized test runner, git diff generation)
+- Total turn wall-clock duration: $\tau_{\text{turn}} =$ `{python} WorkerScalabilityCooperativeYielding.tau_turn_str`
+- Target concurrent active trajectories: $N =$ `{python} WorkerScalabilityCooperativeYielding.n_trajectories_str`
+- Linux default thread stack allocation: $S_{\text{thread}} =$ `{python} WorkerScalabilityCooperativeYielding.s_thread_virt_str` (virtual address space, with an average resident set size $\text{RSS} =$ `{python} WorkerScalabilityCooperativeYielding.rss_stack_str` for active stacks)
+- Size of serialized ACB descriptor in host RAM: $S_{\text{ACB}} =$ `{python} WorkerScalabilityCooperativeYielding.s_acb_str`
+- Thread context-switch overhead: $t_{\text{switch}} =$ `{python} WorkerScalabilityCooperativeYielding.t_switch_us_str`
 
-Evaluate the systems viability of managing these $4{,}000$ trajectories using (a) a traditional Synchronous Thread-per-Agent architecture versus (b) a Cooperative Event-Driven Supervisory Control Plane.
+Evaluate the systems viability of managing these `{python} WorkerScalabilityCooperativeYielding.n_trajectories_str` trajectories using (a) a traditional Synchronous Thread-per-Agent architecture versus (b) a Cooperative Event-Driven Supervisory Control Plane.
 
 **Solution:**
 
 *1. Synchronous Thread-per-Agent Scalability:*
-Under the synchronous architecture, each of the $N = 4{,}000$ concurrent trajectories requires a dedicated OS worker thread pinned to its execution loop.
+Under the synchronous architecture, each of the $N =$ `{python} WorkerScalabilityCooperativeYielding.n_trajectories_str` concurrent trajectories requires a dedicated OS worker thread pinned to its execution loop.
 
 The memory footprint consumed exclusively by thread stack allocations is:
 $$\text{Virtual Memory} = N \times S_{\text{thread}} = 4{,}000 \times 4\text{ MiB} = 16{,}000\text{ MiB} \approx 15.63\text{ GiB}$$
@@ -706,20 +1021,20 @@ $$f_{\text{wait}} = \frac{\tau_{\text{tool}}}{\tau_{\text{turn}}} = \frac{18.80\
 $$N_{\text{blocked}} = 4{,}000 \times 0.94 = 3{,}760 \text{ threads}$$
 $$N_{\text{active}} = 4{,}000 \times 0.06 = 240 \text{ threads}$$
 
-The host kernel must maintain $3{,}760$ sleeping threads blocked on socket read descriptors. When tools complete in bursts, the kernel scheduler experiences massive thundering-herd wakeups. Scheduling $240$ active threads across 64 physical cores introduces severe runqueue contention. If each thread experiences 50 context switches per second:
+The host kernel must maintain `{python} WorkerScalabilityCooperativeYielding.n_blocked_str` sleeping threads blocked on socket read descriptors. When tools complete in bursts, the kernel scheduler experiences massive thundering-herd wakeups. Scheduling `{python} WorkerScalabilityCooperativeYielding.n_active_str` active threads across `{python} WorkerScalabilityCooperativeYielding.c_cores_str` physical cores introduces severe runqueue contention. If each thread experiences `{python} WorkerScalabilityCooperativeYielding.switches_per_sec_str` context switches per second:
 $$R_{\text{switch}} = 240 \times 50 = 12{,}000 \text{ context switches/sec}$$
 $$\text{CPU Overhead} = R_{\text{switch}} \times t_{\text{switch}} = 12{,}000 \times 2.5 \times 10^{-6}\text{ s} = 0.030\text{ s/sec} \approx 3.0\% \text{ of core compute}$$
-While 3 percent CPU overhead appears manageable on paper, cache line evictions and TLB invalidations across thousands of thread working sets degrade L3 cache hit rates, increasing prefill prompt preparation latency. Furthermore, the maximum concurrency is strictly limited by the OS thread ceiling (`/proc/sys/kernel/threads-max`).
+While `{python} WorkerScalabilityCooperativeYielding.cpu_overhead_pct_str` CPU overhead appears manageable on paper, cache line evictions and TLB invalidations across thousands of thread working sets degrade L3 cache hit rates, increasing prefill prompt preparation latency. Furthermore, the maximum concurrency is strictly limited by the OS thread ceiling (`/proc/sys/kernel/threads-max`).
 
 *2. Cooperative Event-Driven Supervisory Control Plane:*
-Under cooperative yielding, the supervisor decouples logical trajectories from physical execution threads. A fixed worker pool of $W = 64$ threads is created, matching the host's 64 physical cores exactly ($W = C_{\text{cores}}$).
+Under cooperative yielding, the supervisor decouples logical trajectories from physical execution threads. A fixed worker pool of $W =$ `{python} WorkerScalabilityCooperativeYielding.w_pool_str` threads is created, matching the host's `{python} WorkerScalabilityCooperativeYielding.c_cores_str` physical cores exactly ($W = C_{\text{cores}}$).
 
-When an agent enters tool execution, it yields its worker thread and registers an event descriptor with `epoll`. The physical memory allocated to hold the $3{,}760$ parked trajectories is:
+When an agent enters tool execution, it yields its worker thread and registers an event descriptor with `epoll`. The physical memory allocated to hold the `{python} WorkerScalabilityCooperativeYielding.n_blocked_str` parked trajectories is:
 $$M_{\text{parked}} = N_{\text{blocked}} \times S_{\text{ACB}} = 3{,}760 \times 64\text{ KiB} = 240{,}640\text{ KiB} \approx 235.0\text{ MiB}$$
 
 Comparing physical memory overhead:
 $$\frac{M_{\text{thread}}}{M_{\text{parked}}} = \frac{1{,}024\text{ MiB}}{235\text{ MiB}} \approx 4.36\times \text{ reduction in resident memory}$$
-More significantly, virtual address space reservation drops from $15.63\text{ GiB}$ to $0\text{ GiB}$ for sleeping tasks. Because worker threads never sleep on tool I/O, the 64 worker threads run with near-zero kernel context switching, pinning thread execution to local CPU core caches. The event multiplexer wakes an idle worker only when an observation is ready, achieving sub-microsecond re-enqueue latencies ($< 5\,\mu\text{s}$) while supporting up to $50{,}000$ concurrent parked trajectories before encountering host memory bottlenecks.
+More significantly, virtual address space reservation drops from `{python} WorkerScalabilityCooperativeYielding.virt_mem_gib_str` to $0\text{ GiB}$ for sleeping tasks. Because worker threads never sleep on tool I/O, the `{python} WorkerScalabilityCooperativeYielding.w_pool_str` worker threads run with near-zero kernel context switching, pinning thread execution to local CPU core caches. The event multiplexer wakes an idle worker only when an observation is ready, achieving sub-microsecond re-enqueue latencies ($< 5\,\mu\text{s}$) while supporting up to $50{,}000$ concurrent parked trajectories before encountering host memory bottlenecks.
 :::
 
 Cooperative yielding and event-driven multiplexing ensure that host worker threads and accelerator batch slots are consumed only when a trajectory is actively performing computation. By establishing clean yield points at tool dispatch barriers and bounding model decode loops with preemptive ceilings, the supervisor preserves system responsiveness and enforces strict budget accounting. However, external tools represent only one class of operations encountered by an autonomous agent. When an agent proposes an action that carries irreversible, high-consequence real-world effects—such as dropping a production database, modifying access control policies, or executing financial transactions—the action cannot be dispatched to an automated sandbox at all. How does the supervisory runtime safely pause execution, sequester dangerous proposals, and escrow approval to a human operator without stalling the scheduling plane?
@@ -832,19 +1147,86 @@ $$\mathbf{c}_{k+1} = \mathbf{c}_k \parallel \mathbf{a}_k \parallel \mathbf{o}_k^
 
 Finally, the supervisor reenqueues the ACB onto the active scheduler queue. Providing the unprivileged model with an explicit causal signal during the subsequent autoregressive decode iteration allows the model to adapt—generating an alternative, lower-privilege plan, logging the blockage, or cleanly terminating its task hierarchy without corrupting external state.
 
+```{python}
+#| label: lego-09-memory-seconds-and-sizing-of-escrow
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEMORY-SECONDS AND SIZING OF ESCROW SUSPENSION POOLS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-09-memory-seconds-and-sizing-of-escrow
+# │ Goal: Dimension memory reclamation of asynchronous escrow suspension pools.
+# │ Show: 36,000 parked trajectories consume 140.625 MB RAM (67,584x reduction vs 9.06 TB).
+# │ How: Little's Law N_escrow = Lambda * tau_human; compare M_pin (264 MB) vs M_stub (4 KB).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_memory_capacity
+
+class EscrowSuspensionPoolSizing:
+    """Memory-seconds and sizing of escrow suspension pools."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    tau_turn = 2.5 * second
+    turns_per_escrow = 20
+    n_concurrent = 10_000
+    tau_human = 180 * second
+
+    m_stack = 8 * MiB
+    m_context = 256 * MiB
+    m_stub = 4 * KiB
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    lambda_escrow_val = 1.0 / (turns_per_escrow * tau_turn.to(second).magnitude)
+    aggregate_lambda = n_concurrent * lambda_escrow_val
+    n_escrow = int(round(aggregate_lambda * tau_human.to(second).magnitude))
+
+    m_pin_a = m_stack + m_context
+    m_resident_a_mib = n_escrow * m_pin_a.magnitude * MiB
+    m_resident_a_gib = m_resident_a_mib.to(GiB)
+    m_resident_a_tib = m_resident_a_mib.to(TiB)
+
+    m_resident_b_kib = n_escrow * m_stub.magnitude * KiB
+    m_resident_b_mib = m_resident_b_kib.to(MiB)
+
+    reclamation_factor = (m_resident_a_mib.to(KiB) / m_resident_b_kib.to(KiB)).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(lambda_escrow_val == 0.02, "lambda_escrow")
+    check(aggregate_lambda == 200, "aggregate_lambda")
+    check(n_escrow == 36_000, "n_escrow")
+    check(m_pin_a.magnitude == 264, "m_pin_a")
+    check(m_resident_a_mib.magnitude == 9_504_000, "m_resident_a_mib")
+    check(round(m_resident_a_gib.magnitude, 2) == 9281.25, "m_resident_a_gib")
+    check(round(m_resident_a_tib.magnitude, 2) == 9.06, "m_resident_a_tib")
+    check(m_resident_b_kib.magnitude == 144_000, "m_resident_b_kib")
+    check(round(m_resident_b_mib.magnitude, 3) == 140.625, "m_resident_b_mib")
+    check(round(reclamation_factor) == 67_584, "reclamation_factor")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    tau_turn_str = fmt_time(tau_turn, unit=second, precision=1)
+    turns_per_escrow_str = fmt_int(turns_per_escrow)
+    n_concurrent_str = fmt_int(n_concurrent)
+    tau_human_str = fmt_time(tau_human, unit=second, precision=0)
+
+    m_stack_str = fmt_memory_capacity(m_stack, unit=MiB, precision=0)
+    m_context_str = fmt_memory_capacity(m_context, unit=MiB, precision=0)
+    m_stub_str = fmt_memory_capacity(m_stub, unit=KiB, precision=0)
+    m_resident_b_ceil_mib_str = fmt_memory_capacity(141 * MiB, unit=MiB, precision=0)
+```
+
 ::: {#nbk-09-memory-seconds-and-sizing-of-escrow .callout-notebook title="Memory-seconds and sizing of escrow suspension pools"}
-Consider an enterprise agent cluster hosting $N = 10{,}000$ active customer support trajectories. Across operational traces, trajectories encounter a high-consequence mutation requiring human escrow once every $20$ turns. Trajectories execute at an average turn generation time of $\tau_{\text{turn}} = 2.5\text{ s}$.
+Consider an enterprise agent cluster hosting $N =$ `{python} EscrowSuspensionPoolSizing.n_concurrent_str` active customer support trajectories. Across operational traces, trajectories encounter a high-consequence mutation requiring human escrow once every `{python} EscrowSuspensionPoolSizing.turns_per_escrow_str` turns. Trajectories execute at an average turn generation time of $\tau_{\text{turn}} =$ `{python} EscrowSuspensionPoolSizing.tau_turn_str`.
 
-Human operator review exhibits a median latency of $\bar{\tau}_{\text{human}} = 180\text{ s}$ ($3\text{ minutes}$), with an expiration lease set to $\tau_{\text{escrow}} = 600\text{ s}$ ($10\text{ minutes}$). We evaluate the physical memory footprint under two architectural choices:
+Human operator review exhibits a median latency of $\bar{\tau}_{\text{human}} =$ `{python} EscrowSuspensionPoolSizing.tau_human_str` (3 minutes), with an expiration lease set to $\tau_{\text{escrow}} = 600\text{ s}$ (10 minutes). We evaluate the physical memory footprint under two architectural choices:
 
-1. **Design A (Synchronous Thread Blocking):** The host worker thread sleeps on a condition variable awaiting approval. The thread stack ($M_{\text{stack}} = 8\text{ MiB}$) and the resident execution context memory ($M_{\text{context}} = 256\text{ MiB}$) remain pinned in host RAM throughout review.
-2. **Design B (Asynchronous Escrow Suspension):** The supervisor unbinds the worker thread, serializes the execution frontier to an NVMe-backed key-value store, and retains only a lightweight Agent Control Block stub ($M_{\text{stub}} = 4\text{ KiB}$) in host RAM during the wait window.
+1. **Design A (Synchronous Thread Blocking):** The host worker thread sleeps on a condition variable awaiting approval. The thread stack ($M_{\text{stack}} =$ `{python} EscrowSuspensionPoolSizing.m_stack_str`) and the resident execution context memory ($M_{\text{context}} =$ `{python} EscrowSuspensionPoolSizing.m_context_str`) remain pinned in host RAM throughout review.
+2. **Design B (Asynchronous Escrow Suspension):** The supervisor unbinds the worker thread, serializes the execution frontier to an NVMe-backed key-value store, and retains only a lightweight Agent Control Block stub ($M_{\text{stub}} =$ `{python} EscrowSuspensionPoolSizing.m_stub_str`) in host RAM during the wait window.
 
 **1. Calculate the Expected Number of Trajectories in Escrow ($N_{\text{escrow}}$):**
 The rate of escrow entry per trajectory is $\lambda_{\text{escrow}} = \frac{1}{20 \times \tau_{\text{turn}}} = \frac{1}{50}\text{ s}^{-1} = 0.02\text{ s}^{-1}$.
-For $N = 10{,}000$ concurrent trajectories, the aggregate arrival rate into escrow is:
+For $N =$ `{python} EscrowSuspensionPoolSizing.n_concurrent_str` concurrent trajectories, the aggregate arrival rate into escrow is:
 $$\Lambda = 10{,}000 \times 0.02\text{ s}^{-1} = 200\text{ requests/second}$$
-By Little's Law, the average number of trajectories concurrently parked in human escrow under steady-state review latency ($\bar{\tau}_{\text{human}} = 180\text{ s}$) is:
+By Little's Law, the average number of trajectories concurrently parked in human escrow under steady-state review latency ($\bar{\tau}_{\text{human}} =$ `{python} EscrowSuspensionPoolSizing.tau_human_str`) is:
 $$N_{\text{escrow}} = \Lambda \times \bar{\tau}_{\text{human}} = 200\text{ s}^{-1} \times 180\text{ s} = 36{,}000\text{ trajectories}$$
 
 **2. Compare Resident Host Memory Consumption ($M_{\text{resident}}$):**
@@ -857,7 +1239,7 @@ $$M_{\text{resident}}^{\text{B}} = N_{\text{escrow}} \times M_{\text{stub}} = 36
 **3. Memory Reduction Factor:**
 $$\text{Reclamation Factor} = \frac{M_{\text{resident}}^{\text{A}}}{M_{\text{resident}}^{\text{B}}} = \frac{9{,}504{,}000\text{ MiB}}{140.625\text{ MiB}} \approx 67{,}584\times$$
 
-Under Design A, pinning host memory requires an enterprise cluster of dozens of high-memory nodes solely to maintain blocked threads awaiting human input. Under Design B, the entire paused cohort resides in under $141\text{ MiB}$ of RAM, permitting the host node to dedicate memory and worker threads entirely to active inference and sandbox execution.
+Under Design A, pinning host memory requires an enterprise cluster of dozens of high-memory nodes solely to maintain blocked threads awaiting human input. Under Design B, the entire paused cohort resides in under `{python} EscrowSuspensionPoolSizing.m_resident_b_ceil_mib_str` of RAM, permitting the host node to dedicate memory and worker threads entirely to active inference and sandbox execution.
 :::
 
 ### Multi-party quorum protocols
@@ -1019,17 +1401,105 @@ When all $S_{\max}$ sandboxes are in the `ASSIGNED` state, incoming tool executi
 2. *Class 2: Automated Task Remediation ($w = 2$):* Continuous-integration agents repairing compilation failures, broken test suites, or git merge conflicts.
 3. *Class 3: Background Batch Indexing ($w = 1$):* Offline code search indexing, synthetic data generation, and benchmark evaluation sweeps.
 
+```{python}
+#| label: lego-09-wdrr-quantum-allocation-and-inference
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WDRR QUANTUM ALLOCATION AND INFERENCE RATE SATURATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-09-wdrr-quantum-allocation-and-inference
+# │ Goal: Dimension Deficit Round-Robin turn dispatch and rate saturation bounds.
+# │ Show: Interactive sessions receive 66.7% share (80,000 TPM) vs 33.3% batch (40,000 TPM); dispatches in Round 1.
+# │ How: Allocate quanta Q_i = w_i * Q_base and verify deficit vs turn cost.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_memory_capacity
+
+class WdrrQuantumAllocation:
+    """WDRR quantum allocation and inference rate saturation."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    cpu_threads = 32
+    ram_host = 64 * GiB
+    r_tpm = 120_000
+    m_sandbox_limit = 2 * GiB
+    m_supervisor_buffer = 16 * GiB
+
+    n_int = 4
+    w_int = 4
+    n_batch = 8
+    w_batch = 1
+    q_base = 500
+
+    c_int = 1_000
+    c_batch = 2_500
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    r_tps = int(r_tpm / 60)
+    s_max = int((ram_host.magnitude - m_supervisor_buffer.magnitude) / m_sandbox_limit.magnitude)
+
+    w_total = n_int * w_int + n_batch * w_batch
+    share_int = w_int / w_total
+    share_batch = w_batch / w_total
+
+    tpm_int = int(r_tpm * share_int)
+    tpm_batch = int(r_tpm * share_batch)
+
+    total_share_int = (n_int * w_int) / w_total
+    total_share_batch = (n_batch * w_batch) / w_total
+    total_tpm_int = int(r_tpm * total_share_int)
+    total_tpm_batch = int(r_tpm * total_share_batch)
+
+    q_int = w_int * q_base
+    q_batch = w_batch * q_base
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(r_tps == 2_000, "r_tps")
+    check(s_max == 24, "s_max")
+    check(w_total == 24, "w_total")
+    check(tpm_int == 20_000, "tpm_int")
+    check(tpm_batch == 5_000, "tpm_batch")
+    check(total_tpm_int == 80_000, "total_tpm_int")
+    check(total_tpm_batch == 40_000, "total_tpm_batch")
+    check(q_int == 2_000, "q_int")
+    check(q_batch == 500, "q_batch")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    cpu_threads_str = fmt_int(cpu_threads)
+    ram_host_str = fmt_memory_capacity(ram_host, unit=GiB, precision=0)
+    r_tpm_str = fmt_int(r_tpm)
+    r_tps_str = fmt_int(r_tps)
+    m_sandbox_limit_str = fmt_memory_capacity(m_sandbox_limit, unit=GiB, precision=0)
+    m_supervisor_buffer_str = fmt_memory_capacity(m_supervisor_buffer, unit=GiB, precision=0)
+    s_max_str = fmt_int(s_max)
+
+    n_int_str = fmt_int(n_int)
+    w_int_str = fmt_int(w_int)
+    n_batch_str = fmt_int(n_batch)
+    w_batch_str = fmt_int(w_batch)
+    q_base_str = fmt_int(q_base)
+
+    total_share_int_pct_str = fmt_percent(total_share_int, precision=1, style="prose")
+    total_share_batch_pct_str = fmt_percent(total_share_batch, precision=1, style="prose")
+    total_tpm_int_str = fmt_int(total_tpm_int)
+    total_tpm_batch_str = fmt_int(total_tpm_batch)
+
+    c_int_str = fmt_int(c_int)
+    c_batch_str = fmt_int(c_batch)
+```
+
 ::: {#nbk-09-wdrr-quantum-allocation-and-inference .callout-notebook title="WDRR quantum allocation and inference rate saturation"}
-Consider a single-node agent host server equipped with 32 CPU threads and $64\text{ GiB}$ of physical RAM, arbitrating access to an upstream model endpoint capped at an aggregate rate limit of $R_{\text{TPM}} = 120\text{,}000\text{ tokens/minute}$ ($2\text{,}000\text{ tokens/second}$). The runtime allocates $M_{\text{sandbox\_limit}} = 2\text{ GiB}$ per container sandbox, with $M_{\text{supervisor}} + M_{\text{buffer}} = 16\text{ GiB}$, establishing a maximum concurrency of:
+Consider a single-node agent host server equipped with `{python} WdrrQuantumAllocation.cpu_threads_str` CPU threads and `{python} WdrrQuantumAllocation.ram_host_str` of physical RAM, arbitrating access to an upstream model endpoint capped at an aggregate rate limit of $R_{\text{TPM}} =$ `{python} WdrrQuantumAllocation.r_tpm_str` \text{ tokens/minute} (`{python} WdrrQuantumAllocation.r_tps_str` \text{ tokens/second}). The runtime allocates $M_{\text{sandbox\_limit}} =$ `{python} WdrrQuantumAllocation.m_sandbox_limit_str` per container sandbox, with $M_{\text{supervisor}} + M_{\text{buffer}} =$ `{python} WdrrQuantumAllocation.m_supervisor_buffer_str`, establishing a maximum concurrency of:
 
 $$S_{\max} = \frac{64 - 16}{2} = 24\text{ concurrent sandboxes}$$
 
-The node currently hosts $N_{\text{int}} = 4$ active interactive developer trajectories ($w_{\text{int}} = 4$) and $N_{\text{batch}} = 8$ background repository analysis trajectories ($w_{\text{batch}} = 1$). The scheduler operates with a base quantum of $Q_{\text{base}} = 500\text{ cost units}$, where 1 cost unit corresponds to 1 token generated.
+The node currently hosts $N_{\text{int}} =$ `{python} WdrrQuantumAllocation.n_int_str` active interactive developer trajectories ($w_{\text{int}} =$ `{python} WdrrQuantumAllocation.w_int_str`) and $N_{\text{batch}} =$ `{python} WdrrQuantumAllocation.n_batch_str` background repository analysis trajectories ($w_{\text{batch}} =$ `{python} WdrrQuantumAllocation.w_batch_str`). The scheduler operates with a base quantum of $Q_{\text{base}} =$ `{python} WdrrQuantumAllocation.q_base_str` \text{ cost units}, where 1 cost unit corresponds to 1 token generated.
 
 **Problem:**
 
 1. Calculate the steady-state guaranteed share of inference throughput ($\text{TPM}$) for each individual interactive trajectory versus each batch trajectory.
-2. During a burst phase, all 8 batch trajectories attempt to dispatch simultaneously, each requesting a turn requiring $\hat{T} = 2\text{,}500\text{ tokens}$. If an interactive session submits a turn requiring $\hat{T} = 1\text{,}000\text{ tokens}$, determine the number of scheduling rounds the interactive turn must wait before dispatch, and verify whether the upstream inference gateway rate limit is preserved.
+2. During a burst phase, all `{python} WdrrQuantumAllocation.n_batch_str` batch trajectories attempt to dispatch simultaneously, each requesting a turn requiring $\hat{T} =$ `{python} WdrrQuantumAllocation.c_batch_str` \text{ tokens}. If an interactive session submits a turn requiring $\hat{T} =$ `{python} WdrrQuantumAllocation.c_int_str` \text{ tokens}, determine the number of scheduling rounds the interactive turn must wait before dispatch, and verify whether the upstream inference gateway rate limit is preserved.
 
 **Solution:**
 
@@ -1038,26 +1508,26 @@ Compute the aggregate system weight $W_{\text{total}}$:
 $$W_{\text{total}} = (N_{\text{int}} \times w_{\text{int}}) + (N_{\text{batch}} \times w_{\text{batch}}) = (4 \times 4) + (8 \times 1) = 16 + 8 = 24\text{ weight units}$$
 
 The guaranteed throughput fraction allocated to each interactive trajectory is:
-$$\text{Share}_{\text{int}} = \frac{w_{\text{int}}}{W_{\text{total}}} = \frac{4}{24} = \frac{1}{6} \approx 16.67\% \implies 20\text{,}000\text{ TPM}\quad (333.3\text{ tokens/second})$$
+$$\text{Share}_{\text{int}} = \frac{w_{\text{int}}}{W_{\text{total}}} = \frac{4}{24} = \frac{1}{6} \approx 16.67\% \implies 20{,}000\text{ TPM}\quad (333.3\text{ tokens/second})$$
 
 The guaranteed throughput fraction allocated to each batch trajectory is:
-$$\text{Share}_{\text{batch}} = \frac{w_{\text{batch}}}{W_{\text{total}}} = \frac{1}{24} \approx 4.17\% \implies 5\text{,}000\text{ TPM}\quad (83.3\text{ tokens/second})$$
+$$\text{Share}_{\text{batch}} = \frac{w_{\text{batch}}}{W_{\text{total}}} = \frac{1}{24} \approx 4.17\% \implies 5{,}000\text{ TPM}\quad (83.3\text{ tokens/second})$$
 
-Collectively, the 4 interactive sessions receive $66.7\%$ ($80\text{,}000\text{ TPM}$) of the total system capacity, while the 8 batch jobs share the remaining $33.3\%$ ($40\text{,}000\text{ TPM}$).
+Collectively, the `{python} WdrrQuantumAllocation.n_int_str` interactive sessions receive `{python} WdrrQuantumAllocation.total_share_int_pct_str` (`{python} WdrrQuantumAllocation.total_tpm_int_str` \text{ TPM}) of the total system capacity, while the `{python} WdrrQuantumAllocation.n_batch_str` batch jobs share the remaining `{python} WdrrQuantumAllocation.total_share_batch_pct_str` (`{python} WdrrQuantumAllocation.total_tpm_batch_str` \text{ TPM}).
 
 *Step 2: Burst Arbitration and Round Latency.*
 In each round, the scheduler increments deficits according to @eq-vol3-drr-quantum:
-$$Q_{\text{int}} = 4 \times 500 = 2\text{,}000\text{ cost units}$$
+$$Q_{\text{int}} = 4 \times 500 = 2{,}000\text{ cost units}$$
 $$Q_{\text{batch}} = 1 \times 500 = 500\text{ cost units}$$
 
-The interactive turn cost is $C_{\text{int}} = 1\text{,}000\text{ units}$. The batch turn cost is $C_{\text{batch}} = 2\text{,}500\text{ units}$.
+The interactive turn cost is $C_{\text{int}} =$ `{python} WdrrQuantumAllocation.c_int_str` \text{ units}. The batch turn cost is $C_{\text{batch}} =$ `{python} WdrrQuantumAllocation.c_batch_str` \text{ units}.
 
-- **Round 1:** The interactive trajectory's deficit becomes $D_{\text{int}} = 0 + 2\text{,}000 = 2\text{,}000$. Because $D_{\text{int}} \ge C_{\text{int}}$ ($2\text{,}000 \ge 1\text{,}000$), the interactive turn **dispatches immediately in Round 1**. Its deficit is updated to $D_{\text{int}} \leftarrow 2\text{,}000 - 1\text{,}000 = 1\text{,}000$.
-- For each batch trajectory, the deficit becomes $D_{\text{batch}} = 0 + 500 = 500$. Because $D_{\text{batch}} < 2\text{,}500$, **none of the batch jobs can dispatch in Round 1**. They retain their 500 units.
+- **Round 1:** The interactive trajectory's deficit becomes $D_{\text{int}} = 0 + 2{,}000 = 2{,}000$. Because $D_{\text{int}} \ge C_{\text{int}}$ ($2{,}000 \ge 1{,}000$), the interactive turn **dispatches immediately in Round 1**. Its deficit is updated to $D_{\text{int}} \leftarrow 2{,}000 - 1{,}000 = 1{,}000$.
+- For each batch trajectory, the deficit becomes $D_{\text{batch}} = 0 + 500 = 500$. Because $D_{\text{batch}} < 2{,}500$, **none of the batch jobs can dispatch in Round 1**. They retain their 500 units.
 - **Rounds 2 through 4:** Batch deficits increment by 500 units each round, reaching 1,000 in Round 2, 1,500 in Round 3, 2,000 in Round 4, and finally 2,500 in Round 5.
-- **Round 5:** In Round 5, $D_{\text{batch}} = 2\text{,}500 \ge C_{\text{batch}}$, allowing the batch jobs to begin dispatching.
+- **Round 5:** In Round 5, $D_{\text{batch}} = 2{,}500 \ge C_{\text{batch}}$, allowing the batch jobs to begin dispatching.
 
-The interactive turn experiences **zero queueing rounds of delay**, running concurrently with the local token bucket shaping that caps total consumption at $2\text{,}000\text{ tokens/second}$. Even under a complete burst backlog from batch workloads, the interactive query is admitted immediately without saturating the upstream model endpoint or exceeding the 24-container sandbox limit.
+The interactive turn experiences **zero queueing rounds of delay**, running concurrently with the local token bucket shaping that caps total consumption at `{python} WdrrQuantumAllocation.r_tps_str` \text{ tokens/second}. Even under a complete burst backlog from batch workloads, the interactive query is admitted immediately without saturating the upstream model endpoint or exceeding the `{python} WdrrQuantumAllocation.s_max_str`-container sandbox limit.
 :::
 
 To prevent *priority inversion*—a condition where an interactive trajectory stalls because all $S_{\max}$ sandboxes are occupied by low-priority batch tasks running multi-minute compilation commands—the runtime implements a *preemptive sandbox lease mechanism*. When a high-priority interactive trajectory enters `WAITING_TOOL` and the sandbox pool is fully saturated:
@@ -1141,8 +1611,127 @@ $$C_{\text{cost}}^{(k)} = C_{\text{cost}}^{(k-1)} + \left( p_{\text{prefill}} \c
 
 Here, $n_{\text{prefill}}^{(k)}$, $n_{\text{cache}}^{(k)}$, and $n_{\text{decode}}^{(k)}$ represent the uncached prompt tokens, cached prefix tokens, and generated completion tokens processed in turn $k$, with corresponding unit prices $p_{\text{prefill}}$, $p_{\text{cache}}$, and $p_{\text{decode}}$ (typically denominated in dollars per million tokens). The term $c_{\text{tool}}(t_{k,j})$ captures direct third-party invocation tariffs for external API calls, paid search engines, or specialized cloud functions executed during the turn's tool phase.
 
+```{python}
+#| label: lego-09-multi-dimensional-accounting-and-prefix-cache
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MULTI-DIMENSIONAL ACCOUNTING AND PREFIX CACHE PRICING DYNAMICS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-09-multi-dimensional-accounting-and-prefix-cache
+# │ Goal: Track multi-dimensional consumption vector against hard resource ceilings.
+# │ Show: 50 turns cost $1.284 and 460.55 s wall time; step counter is binding constraint at 62.5%.
+# │ How: Sum decode, cold prefill, cached prefill, tool tariffs vs budget vector B.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_percent, fmt_usd
+
+class MultiDimensionalAccounting:
+    """Multi-dimensional accounting and prefix cache pricing dynamics."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    h_max = 80
+    n_tokens_max = 1_500_000
+    t_wall_max = 900 * second
+    c_cost_max = 3.00
+    m_sandboxes_max = 2
+
+    k_turns = 50
+    p_prefill_per_m = 3.00
+    p_cache_per_m = 0.30
+    p_decode_per_m = 15.00
+
+    n_decode_per_turn = 350
+    n_prompt_init = 6_000
+    n_prompt_step = 400
+
+    r_decode = 80
+    r_prefill_cold = 4_000
+    r_prefill_cache = 40_000
+    tau_tool = 142.50 * second
+    tau_wait = 24.20 * second
+
+    n_tool_compiler = 12
+    c_tool_compiler = 0.00
+    n_tool_api = 8
+    c_tool_api_unit = 0.015
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    n_decode_total = k_turns * n_decode_per_turn
+    n_prompt_total = k_turns * n_prompt_init + n_prompt_step * ((k_turns - 1) * k_turns // 2)
+    n_tokens_total = n_prompt_total + n_decode_total
+
+    n_cache = (k_turns - 1) * n_prompt_init + 250_000
+    cache_hit_rate = n_cache / n_prompt_total
+    n_prefill = n_prompt_total - n_cache
+
+    p_prefill = p_prefill_per_m / 1_000_000
+    p_cache = p_cache_per_m / 1_000_000
+    p_decode = p_decode_per_m / 1_000_000
+
+    c_decode = n_decode_total * p_decode
+    c_cache = n_cache * p_cache
+    c_prefill = n_prefill * p_prefill
+    c_tokens = c_decode + c_cache + c_prefill
+
+    c_prefill_nocache = n_prompt_total * p_prefill
+    c_tokens_nocache = c_decode + c_prefill_nocache
+
+    c_tool = n_tool_api * c_tool_api_unit
+    c_cost_50 = c_tokens + c_tool
+
+    tau_decode = (n_decode_total / r_decode) * second
+    tau_prefill_cold = (n_prefill / r_prefill_cold) * second
+    tau_prefill_cache = (n_cache / r_prefill_cache) * second
+    tau_model = tau_decode + tau_prefill_cold + tau_prefill_cache
+    t_wall_50 = tau_model + tau_tool + tau_wait
+
+    ratio_steps = k_turns / h_max
+    ratio_tokens = n_tokens_total / n_tokens_max
+    ratio_time = (t_wall_50 / t_wall_max).to_base_units().magnitude
+    ratio_cost = c_cost_50 / c_cost_max
+    ratio_sandboxes = 1 / m_sandboxes_max
+
+    rho_50 = max(ratio_steps, ratio_tokens, ratio_time, ratio_cost, ratio_sandboxes)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(n_decode_total == 17_500, "n_decode_total")
+    check(n_prompt_total == 790_000, "n_prompt_total")
+    check(n_tokens_total == 807_500, "n_tokens_total")
+    check(n_cache == 544_000, "n_cache")
+    check(round(cache_hit_rate, 4) == 0.6886, "cache_hit_rate")
+    check(n_prefill == 246_000, "n_prefill")
+    check(round(c_decode, 4) == 0.2625, "c_decode")
+    check(round(c_cache, 4) == 0.1632, "c_cache")
+    check(round(c_prefill, 4) == 0.7380, "c_prefill")
+    check(round(c_tokens, 4) == 1.1637, "c_tokens")
+    check(round(c_prefill_nocache, 4) == 2.3700, "c_prefill_nocache")
+    check(round(c_tokens_nocache, 4) == 2.6325, "c_tokens_nocache")
+    check(round(c_tool, 4) == 0.1200, "c_tool")
+    check(round(c_cost_50, 4) == 1.2837, "c_cost_50")
+    check(round(tau_decode.to(second).magnitude, 2) == 218.75, "tau_decode")
+    check(round(tau_prefill_cold.to(second).magnitude, 1) == 61.5, "tau_prefill_cold")
+    check(round(tau_prefill_cache.to(second).magnitude, 1) == 13.6, "tau_prefill_cache")
+    check(round(tau_model.to(second).magnitude, 2) == 293.85, "tau_model")
+    check(round(t_wall_50.to(second).magnitude, 2) == 460.55, "t_wall_50")
+    check(round(rho_50, 3) == 0.625, "rho_50")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    k_turns_str = fmt_int(k_turns)
+    n_decode_per_turn_str = fmt_int(n_decode_per_turn)
+    n_prompt_init_str = fmt_int(n_prompt_init)
+    n_prompt_step_str = fmt_int(n_prompt_step)
+
+    n_tool_compiler_str = fmt_int(n_tool_compiler)
+    c_tool_compiler_str = fmt_usd(c_tool_compiler, precision=0)
+    n_tool_api_str = fmt_int(n_tool_api)
+    c_tool_api_unit_str = fmt_usd(c_tool_api_unit, precision=3)
+
+    rho_50_pct_str = fmt_percent(rho_50, precision=1, style="prose")
+```
+
 ::: {#nbk-09-multi-dimensional-accounting-and-prefix-cache .callout-notebook title="Multi-dimensional accounting and prefix cache pricing dynamics"}
-**Scenario:** An autonomous agent executes an iterative software debugging trajectory over $k = 50$ turns against a frontier model runtime. The supervisor initializes the trajectory with the following hard ceilings:
+**Scenario:** An autonomous agent executes an iterative software debugging trajectory over $k =$ `{python} MultiDimensionalAccounting.k_turns_str` turns against a frontier model runtime. The supervisor initializes the trajectory with the following hard ceilings:
 $$\mathbf{B} = \langle H_{\max}=80, N_{\text{tokens}}=1.5 \times 10^6, T_{\text{wall}}=900\text{ s}, C_{\text{cost}}=\$3.00, M_{\text{sandboxes}}=2 \rangle$$
 
 **Inference Pricing and Workload Parameters:**
@@ -1150,13 +1739,13 @@ $$\mathbf{B} = \langle H_{\max}=80, N_{\text{tokens}}=1.5 \times 10^6, T_{\text{
 - Cold prompt prefill unit price: $p_{\text{prefill}} = \$3.00 / 10^6\text{ tokens} = 3.00 \times 10^{-6}\text{ \$/token}$
 - Cached prompt prefix unit price: $p_{\text{cache}} = \$0.30 / 10^6\text{ tokens} = 0.30 \times 10^{-6}\text{ \$/token}$ (a 90 percent caching discount)
 - Autoregressive decode unit price: $p_{\text{decode}} = \$15.00 / 10^6\text{ tokens} = 15.00 \times 10^{-6}\text{ \$/token}$
-- Generation volume: Constant $n_{\text{decode}}^{(k)} = 350\text{ tokens}$ per turn. Total decode tokens across 50 turns:
+- Generation volume: Constant $n_{\text{decode}}^{(k)} =$ `{python} MultiDimensionalAccounting.n_decode_per_turn_str` \text{ tokens} per turn. Total decode tokens across `{python} MultiDimensionalAccounting.k_turns_str` turns:
   $$N_{\text{decode}} = 50 \times 350 = 17,500\text{ tokens}$$
 
-- Context growth: Initial turn context starts at $n_{\text{prompt}}^{(1)} = 6,000\text{ tokens}$ (system prompt, repository map, tool definitions). Each turn appends $400\text{ tokens}$ of tool observation and action history. Total input prompt tokens processed:
+- Context growth: Initial turn context starts at $n_{\text{prompt}}^{(1)} =$ `{python} MultiDimensionalAccounting.n_prompt_init_str` \text{ tokens} (system prompt, repository map, tool definitions). Each turn appends `{python} MultiDimensionalAccounting.n_prompt_step_str` \text{ tokens} of tool observation and action history. Total input prompt tokens processed:
   $$N_{\text{prompt}} = \sum_{k=1}^{50} [6000 + 400(k-1)] = 50 \times 6000 + 400 \times \frac{49 \times 50}{2} = 300,000 + 490,000 = 790,000\text{ tokens}$$
 
-- Cache hit performance: The serving engine's Radix tree maintains the invariant $6,000\text{ token}$ system prefix across all turns $k \ge 2$, plus an additional $250,000\text{ tokens}$ of stable conversational history:
+- Cache hit performance: The serving engine's Radix tree maintains the invariant 6,000 token system prefix across all turns $k \ge 2$, plus an additional 250,000 tokens of stable conversational history:
   $$N_{\text{cache}} = (49 \times 6,000) + 250,000 = 544,000\text{ tokens} \quad (\approx 68.86\%\text{ cache hit rate})$$
   $$N_{\text{prefill}} = N_{\text{prompt}} - N_{\text{cache}} = 790,000 - 544,000 = 246,000\text{ tokens}$$
 
@@ -1171,7 +1760,7 @@ C_{\text{tokens}} &= \$0.2625 + \$0.1632 + \$0.7380 = \$1.1637
 
 **External Tool and Time Accounting:**
 
-- Tool tariffs: 12 local compiler executions in the host sandbox ($\$0.00$) and 8 external API searches at $\$0.015$ each:
+- Tool tariffs: `{python} MultiDimensionalAccounting.n_tool_compiler_str` local compiler executions in the host sandbox (`{python} MultiDimensionalAccounting.c_tool_compiler_str`) and `{python} MultiDimensionalAccounting.n_tool_api_str` external API searches at `{python} MultiDimensionalAccounting.c_tool_api_unit_str` each:
   $$C_{\text{tool}} = 8 \times \$0.015 = \$0.1200 \implies C_{\text{cost}}^{(50)} = \$1.1637 + \$0.1200 = \$1.2837$$
 
 - Time measurement: Decode speed $R_{\text{decode}} = 80\text{ tokens/s} \implies \tau_{\text{decode}} = 17,500 / 80 = 218.75\text{ s}$. Prefill throughput averages $4,000\text{ tokens/s}$ cold ($61.5\text{ s}$) and $40,000\text{ tokens/s}$ on cache hits ($13.6\text{ s}$), yielding $\tau_{\text{model}} = 293.85\text{ s}$. Tool latency $\tau_{\text{tool}} = 142.50\text{ s}$ and queueing wait $\tau_{\text{wait}} = 24.20\text{ s}$.
@@ -1181,7 +1770,7 @@ C_{\text{tokens}} &= \$0.2625 + \$0.1632 + \$0.7380 = \$1.1637
 $$\mathbf{u}_{50} = \langle 50\text{ steps}, 807,500\text{ tokens}, 460.55\text{ s}, \$1.284, 1\text{ sandbox} \rangle$$
 $$\rho_{50} = \max \left( \frac{50}{80}, \frac{807500}{1500000}, \frac{460.55}{900}, \frac{1.284}{3.00}, \frac{1}{2} \right) = \max(0.625, 0.538, 0.512, 0.428, 0.500) = 0.625$$
 
-At $\rho_{50} = 62.5\%$ resource exhaustion, the step counter represents the binding constraint ($62.5\%$). The trajectory remains within Phase 1 (Nominal Execution), operating without tool degradation or supervisory steering.
+At $\rho_{50} =$ `{python} MultiDimensionalAccounting.rho_50_pct_str` resource exhaustion, the step counter represents the binding constraint (`{python} MultiDimensionalAccounting.rho_50_pct_str`). The trajectory remains within Phase 1 (Nominal Execution), operating without tool degradation or supervisory steering.
 :::
 
 ### Progressive budget thresholds

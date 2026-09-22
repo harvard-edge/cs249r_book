@@ -92,37 +92,121 @@ $$\text{ACB}_t = \text{fold}(\text{ACB}_0, \mathcal{E}) = \delta(\delta(\dots \d
 
 where $\delta: (\text{ACB}_{k-1}, e_k) \to \text{ACB}_k$ is a pure, deterministic state transition function implemented in the host supervisor. If an operational node crashes at turn $t$, recovery does not require neural inference. The runtime reads the sequential event stream $\mathcal{E}$ from persistent storage, executes the transition function $\delta$ across the log entries, and reconstructs the bit-exact in-memory $\text{ACB}_t$ in milliseconds. The model is never re-invoked for historical turns (principle \ref{pri-vol3-intent-before-effect}); past decisions and observed outcomes are read back from the durable log.
 
+```{python}
+#| label: lego-10-storage-io-amplification-and-recovery
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STORAGE I/O AMPLIFICATION AND RECOVERY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-10-storage-io-amplification-and-recovery
+# │ Goal: Quantify flash write amplification and state recovery latency.
+# │ Show: Event sourcing reduces flash wear from 24 MB to 1.58 MB with 1.5 ms recovery.
+# │ How: Model payload per turn, database vs log WAF, and read/fold recovery latencies.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_latency, fmt_memory, fmt_time
+
+class StorageIoAmplificationRecovery:
+    """Storage I/O amplification and recovery in event-sourced vs in-place engines."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_turns = 100
+    s_proposal = 2 * KB
+    s_auth = 0.5 * KB
+    s_dispatch = 0.5 * KB
+    s_obs = 12 * KB
+
+    waf_in_place = 16
+    waf_append = 1.05
+
+    b_seq_read = 5000 * (MB / second)
+    t_rand_write = 25 * microsecond
+    t_write_in_place_per_turn = 2.5 * millisecond
+    t_fsync = 30 * microsecond
+    t_fold_per_event = 12 * microsecond
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    s_turn = s_proposal + s_auth + s_dispatch + s_obs
+    s_total = n_turns * s_turn
+
+    bytes_written_in_place = n_turns * s_turn * waf_in_place
+    t_blocking_in_place = n_turns * t_write_in_place_per_turn
+
+    bytes_written_append = s_total * waf_append
+
+    t_read = (s_total.to(MB) / b_seq_read.to(MB / second)).magnitude * second
+    t_fold = n_turns * t_fold_per_event
+    t_recovery = t_read + t_fold
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(s_turn.to(KB).magnitude == 15.0, "s_turn")
+    check(s_total.to(MB).magnitude == 1.5, "s_total")
+    check(bytes_written_in_place.to(MB).magnitude == 24.0, "bytes_written_in_place")
+    check(bytes_written_append.to(MB).magnitude == 1.575, "bytes_written_append")
+    check(t_blocking_in_place.to(millisecond).magnitude == 250.0, "t_blocking_in_place")
+    check(abs(t_read.to(millisecond).magnitude - 0.3) < 1e-4, "t_read")
+    check(abs(t_fold.to(millisecond).magnitude - 1.2) < 1e-4, "t_fold")
+    check(abs(t_recovery.to(millisecond).magnitude - 1.5) < 1e-4, "t_recovery")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_turns_str = fmt_int(n_turns)
+    s_proposal_kb_str = fmt_memory(s_proposal, unit=KB, precision=0)
+    s_auth_kb_str = fmt_memory(s_auth, unit=KB, precision=1)
+    s_dispatch_kb_str = fmt_memory(s_dispatch, unit=KB, precision=1)
+    s_obs_kb_str = fmt_memory(s_obs, unit=KB, precision=0)
+    s_turn_kb_str = fmt_memory(s_turn, unit=KB, precision=0)
+    s_total_mb_str = fmt_memory(s_total, unit=MB, precision=1)
+
+    waf_in_place_str = fmt_int(waf_in_place)
+    bytes_written_in_place_mb_str = fmt_memory(bytes_written_in_place, unit=MB, precision=0)
+    t_write_in_place_ms_str = fmt_time(t_write_in_place_per_turn, unit=millisecond, precision=1)
+    t_blocking_in_place_ms_str = fmt_time(t_blocking_in_place, unit=millisecond, precision=0)
+
+    bytes_written_append_mb_str = fmt_memory(bytes_written_append, unit=MB, precision=3)
+    t_fsync_us_str = fmt_time(t_fsync, unit=microsecond, precision=0)
+
+    t_read_ms_str = fmt_time(t_read, unit=millisecond, precision=1)
+    t_fold_us_str = fmt_time(t_fold_per_event, unit=microsecond, precision=0)
+    t_fold_ms_str = fmt_time(t_fold, unit=millisecond, precision=1)
+    t_recovery_ms_str = fmt_time(t_recovery, unit=millisecond, precision=1)
+```
+
 ::: {#nbk-10-storage-io-amplification-and-recovery .callout-notebook title="Storage I/O amplification and recovery time in event-sourced vs. in-place trajectory engines"}
-Consider an autonomous agent executing an extensive debugging trajectory across $N = 100$ turns. In each turn, the supervisor records the model's action proposal ($2\text{ KB}$), policy authorization metadata ($0.5\text{ KB}$), tool dispatch metadata ($0.5\text{ KB}$), and the raw sandboxed observation consisting of compiler diagnostics and unified file diffs ($12\text{ KB}$). The total payload per turn is:
+Consider an autonomous agent executing an extensive debugging trajectory across $N =$ `{python} StorageIoAmplificationRecovery.n_turns_str` turns. In each turn, the supervisor records the model's action proposal (`{python} StorageIoAmplificationRecovery.s_proposal_kb_str`), policy authorization metadata (`{python} StorageIoAmplificationRecovery.s_auth_kb_str`), tool dispatch metadata (`{python} StorageIoAmplificationRecovery.s_dispatch_kb_str`), and the raw sandboxed observation consisting of compiler diagnostics and unified file diffs (`{python} StorageIoAmplificationRecovery.s_obs_kb_str`). The total payload per turn is:
 
 $$S_{\text{turn}} = 2\text{ KB} + 0.5\text{ KB} + 0.5\text{ KB} + 12\text{ KB} = 15\text{ KB}$$
 
-Over 100 turns, the raw data volume generated by the trajectory is:
+Over `{python} StorageIoAmplificationRecovery.n_turns_str` turns, the raw data volume generated by the trajectory is:
 
 $$S_{\text{total}} = 100 \times 15\text{ KB} = 1.5\text{ MB}$$
 
-We compare the physical storage overhead and recovery performance of two architectural approaches on an enterprise NVMe solid-state drive (PCIe Gen 5, $4\text{ KB}$ sector size, sustained sequential read bandwidth $B_{\text{seq}} = 5{,}000\text{ MB/s}$, random $4\text{ KB}$ write latency $T_{\text{rand}} = 25\ \mu\text{s}$):
+We compare the physical storage overhead and recovery performance of two architectural approaches on an enterprise NVMe solid-state drive:
+
+- PCIe Gen 5 with $4\text{ KB}$ sector size
+- Sustained sequential read bandwidth $B_{\text{seq}} = 5{,}000\text{ MB/s}$
+- Random $4\text{ KB}$ write latency $T_{\text{rand}} = 25\ \mu\text{s}$
 
 **Case 1: Mutable In-Place Relational/Document Storage**
-The supervisor maintains a single JSON document or relational row for the trajectory, updating it in place on every turn. Because document updates modify existing pages within a B-tree storage engine, each $15\text{ KB}$ turn triggers random writes across the table space, the write-ahead log of the database engine itself, and secondary indexes (e.g., indexed by `agent_id`, `status`, and `updated_at`). In a typical relational or document database handling random updates, the system-level Write Amplification Factor ($\text{WAF}_{\text{db}}$) ranges from 12 to 25 due to page dirties, double-write buffers, and journal synchronization. Assuming a conservative $\text{WAF}_{\text{db}} = 16$:
+The supervisor maintains a single JSON document or relational row for the trajectory, updating it in place on every turn. Because document updates modify existing pages within a B-tree storage engine, each `{python} StorageIoAmplificationRecovery.s_turn_kb_str` turn triggers random writes across the table space, the write-ahead log of the database engine itself, and secondary indexes (e.g., indexed by `agent_id`, `status`, and `updated_at`). In a typical relational or document database handling random updates, the system-level Write Amplification Factor ($\text{WAF}_{\text{db}}$) ranges from 12 to 25 due to page dirties, double-write buffers, and journal synchronization. Assuming a conservative $\text{WAF}_{\text{db}} =$ `{python} StorageIoAmplificationRecovery.waf_in_place_str`:
 
 $$\text{Bytes Written}_{\text{in-place}} = 100 \times 15\text{ KB} \times 16 = 24.0\text{ MB}$$
 
-Furthermore, each in-place update requires synchronous page-level locking and random I/O coordination, introducing an average write latency of $2.5\text{ ms}$ per turn when accounting for filesystem journal flushing, totaling $250\text{ ms}$ of cumulative blocking delay across the trajectory. Crucially, if the host crashes during turn 75, the intermediate reasoning steps and observations from turns 1 through 74 have been overwritten; the database stores only the latest state, destroying causal history.
+Furthermore, each in-place update requires synchronous page-level locking and random I/O coordination, introducing an average write latency of `{python} StorageIoAmplificationRecovery.t_write_in_place_ms_str` per turn when accounting for filesystem journal flushing, totaling `{python} StorageIoAmplificationRecovery.t_blocking_in_place_ms_str` of cumulative blocking delay across the trajectory. Crucially, if the host crashes during turn 75, the intermediate reasoning steps and observations from turns 1 through 74 have been overwritten; the database stores only the latest state, destroying causal history.
 
 **Case 2: Log-Structured Append-Only Event Stream**
 The supervisor appends event records sequentially to an open trajectory log file. Modern filesystems and NVMe controllers handle sequential appends with near-optimal efficiency. Because writes are purely append-only, flash translation layers (FTL) avoid read-modify-write cycles, yielding a write amplification factor close to unity ($\text{WAF}_{\text{log}} \approx 1.05$ accounting for filesystem inode updates):
 
 $$\text{Bytes Written}_{\text{append}} = 1.5\text{ MB} \times 1.05 = 1.575\text{ MB}$$
 
-Sequential write transfer time for a $15\text{ KB}$ chunk across the PCIe bus takes less than $3.5\ \mu\text{s}$. The write overhead is dominated entirely by the operating system's non-volatile flush barrier (`fsync()`), which takes approximately $30\ \mu\text{s}$ on modern enterprise drives with power-loss protection (PLP).
+Sequential write transfer time for a `{python} StorageIoAmplificationRecovery.s_turn_kb_str` chunk across the PCIe bus takes less than $3.5\ \mu\text{s}$. The write overhead is dominated entirely by the operating system's non-volatile flush barrier (`fsync()`), which takes approximately `{python} StorageIoAmplificationRecovery.t_fsync_us_str` on modern enterprise drives with power-loss protection (PLP).
 
 **Crash Recovery Calculation**
-Suppose the host process experiences a panic at turn $t = 100$. To recover the exact control state using event sourcing, the recovering supervisor sequentially reads the entire $1.5\text{ MB}$ event log from disk into memory. The physical I/O read time is:
+Suppose the host process experiences a panic at turn $t = 100$. To recover the exact control state using event sourcing, the recovering supervisor sequentially reads the entire `{python} StorageIoAmplificationRecovery.s_total_mb_str` event log from disk into memory. The physical I/O read time is:
 
 $$T_{\text{read}} = \frac{1.5\text{ MB}}{5{,}000\text{ MB/s}} = 0.0003\text{ s} = 0.3\text{ ms}$$
 
-The CPU then executes the transition function $\delta$ across the 100 event records. Deserializing structured binary event records (e.g., via Protocol Buffers or FlatBuffers) and folding them into the in-memory $\text{ACB}$ takes approximately $12\ \mu\text{s}$ per event on a modern server CPU:
+The CPU then executes the transition function $\delta$ across the 100 event records. Reading the log requires `{python} StorageIoAmplificationRecovery.t_read_ms_str`, and folding event records into the in-memory $\text{ACB}$ takes approximately `{python} StorageIoAmplificationRecovery.t_fold_us_str` per event (`{python} StorageIoAmplificationRecovery.t_fold_ms_str` total):
 
 $$T_{\text{fold}} = 100 \times 12\ \mu\text{s} = 1.2\text{ ms}$$
 
@@ -130,7 +214,7 @@ The total time required to reconstruct the complete in-memory supervisor state i
 
 $$T_{\text{recovery}} = T_{\text{read}} + T_{\text{fold}} = 0.3\text{ ms} + 1.2\text{ ms} = 1.5\text{ ms}$$
 
-Event sourcing achieves an order-of-magnitude reduction in total physical flash wear ($1.575\text{ MB}$ vs. $24.0\text{ MB}$ written) while enabling deterministic recovery of the entire 100-turn trajectory in $1.5\text{ ms}$ without issuing a single inference call to the foundation model.
+Event sourcing achieves an order-of-magnitude reduction in total physical flash wear (`{python} StorageIoAmplificationRecovery.bytes_written_append_mb_str` vs. `{python} StorageIoAmplificationRecovery.bytes_written_in_place_mb_str` written) while enabling deterministic recovery of the entire 100-turn trajectory in `{python} StorageIoAmplificationRecovery.t_recovery_ms_str` without issuing a single inference call to the foundation model.
 :::
 
 **This separation between the immutable log and operational projections satisfies the foundational systems requirements of complete auditability, verifiable provenance, and replayability.** Under invariant closure (principle \ref{pri-invariant-closure}), the model's self-report carries no evidential weight, and the event log is what makes external validation possible after the fact. By preserving the complete, immutable sequence of raw model outputs, policy checks, and environment responses, the event log acts as a tamper-evident black box for autonomous systems. If an agent encounters a regression, developers and automated analysis tools can inspect the exact causal lineage of the failure. Downstream compliance systems can verify whether an agent adhered to safety constraints by verifying the cryptographic integrity of the event stream. Most importantly, decoupling the state projection from storage guarantees that the agent's runtime state can be serialized, inspected, branched, or migrated across physical compute nodes without loss of fidelity.
@@ -219,20 +303,83 @@ To close this vulnerability window, the runtime must invoke an explicit operatin
 
 Even an operating system sync call, however, must be evaluated against modern drive controller architectures. Contemporary enterprise NVMe SSDs contain internal volatile DRAM caches designed to buffer writes and maintain flash translation layer (FTL) address mappings. A naive drive controller might acknowledge a write as soon as it hits its internal drive RAM. To guarantee genuine durability, the operating system's filesystem and block layers must transmit an explicit NVMe Flush command (Opcode `0x35`) or utilize Force Unit Access (FUA) flags on block writes. These commands instruct the drive controller to flush its internal volatile cache to non-volatile flash cells (or verify that its internal supercapacitors are charged to provide power-loss protection) before signaling completion back to the host kernel. Only when this hardware-level barrier completes does `fsync()` return, establishing the precondition $e_{\text{flush}}$ required for safe network transmission.
 
+```{python}
+#| label: lego-10-latency-and-throughput-cost-of
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LATENCY AND THROUGHPUT COST OF SYNCHRONOUS DISK BARRIERS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-10-latency-and-throughput-cost-of
+# │ Goal: Contrast local NVMe vs cloud EBS synchronous fdatasync barrier impacts.
+# │ Show: Local NVMe incurs 2.12% overhead vs 44.99% for cloud block storage.
+# │ How: Model write, sync, exec, and net latencies and maximum dispatch rates.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_latency, fmt_percent, fmt_rate, fmt_time
+
+class LatencyThroughputDiskBarriers:
+    """Latency and throughput cost of synchronous disk barriers."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_write = 1.2 * microsecond
+    t_sync = 85 * microsecond
+    t_net = 12 * millisecond
+    t_ebs = 1.8 * millisecond
+    t_exec = 4.0 * millisecond
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_base = t_write + t_exec
+    t_total_nvme = t_write + t_sync + t_exec
+    overhead_nvme = (t_sync / t_base).to("dimensionless").magnitude
+
+    t_total_ebs = t_write + t_ebs + t_exec
+    overhead_ebs = (t_ebs / t_base).to("dimensionless").magnitude
+
+    r_max_nvme = 1.0 / t_sync.to(second).magnitude
+    r_max_ebs = 1.0 / t_ebs.to(second).magnitude
+
+    t_turn_ebs_net = t_ebs + t_net
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(overhead_nvme - 0.02124) < 1e-4, "overhead_nvme")
+    check(abs(overhead_ebs - 0.44986) < 1e-4, "overhead_ebs")
+    check(int(r_max_nvme) == 11764, "r_max_nvme")
+    check(int(r_max_ebs) == 555, "r_max_ebs")
+    check(abs(t_turn_ebs_net.to(millisecond).magnitude - 13.8) < 1e-4, "t_turn_ebs_net")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_write_us_str = fmt_time(t_write, unit=microsecond, precision=1)
+    t_sync_us_str = fmt_time(t_sync, unit=microsecond, precision=0)
+    t_net_ms_str = fmt_time(t_net, unit=millisecond, precision=0)
+    t_ebs_ms_str = fmt_time(t_ebs, unit=millisecond, precision=1)
+    t_exec_ms_str = fmt_time(t_exec, unit=millisecond, precision=0)
+
+    overhead_nvme_pct_str = fmt_percent(overhead_nvme, precision=2, style="prose")
+    overhead_ebs_pct_str = fmt_percent(overhead_ebs, precision=2, style="prose")
+
+    r_max_nvme_str = fmt_int(int(r_max_nvme))
+    r_max_ebs_str = fmt_int(int(r_max_ebs))
+
+    impact_net_nvme_pct_str = fmt_percent(0.007, precision=1, style="prose")
+    impact_net_ebs_pct_str = fmt_percent(0.13, precision=0, style="prose")
+    t_turn_ebs_net_ms_str = fmt_time(t_turn_ebs_net, unit=millisecond, precision=1)
+```
+
 ::: {#nbk-10-latency-and-throughput-cost-of .callout-notebook title="Latency and throughput cost of synchronous disk barriers"}
 Consider an autonomous software engineering agent deployed on an enterprise server. The agent executes tasks by interacting with a local sandboxed file system, running unit tests, and dispatching code review comments to a remote Git hosting platform.
 
 **Hardware Specifications:**
 
 - **Compute:** Dual-socket host executing concurrent agent worker processes.
-- **Primary Storage (Enterprise NVMe SSD):** Local PCIe 4.0 x4 drive. Uncached sequential `write()` to page cache: $t_{\text{write}} = 1.2\ \mu\text{s}$. Synchronous `fdatasync()` barrier (including controller cache flush): $t_{\text{sync}} = 85\ \mu\text{s}$.
-- **Network Interface:** 25 GbE interface. Network round-trip time to external Git API: $t_{\text{net}} = 12\ \text{ms}$.
-- **Alternative Cloud Storage (Network Block Store):** Attached cloud volume (e.g., AWS EBS gp3). Synchronous `fdatasync()` barrier: $t_{\text{ebs}} = 1.8\ \text{ms}$.
+- **Primary Storage (Enterprise NVMe SSD):** Local PCIe 4.0 x4 drive. Uncached sequential `write()` to page cache: $t_{\text{write}} =$ `{python} LatencyThroughputDiskBarriers.t_write_us_str`. Synchronous `fdatasync()` barrier (including controller cache flush): $t_{\text{sync}} =$ `{python} LatencyThroughputDiskBarriers.t_sync_us_str`.
+- **Network Interface:** 25 GbE interface. Network round-trip time to external Git API: $t_{\text{net}} =$ `{python} LatencyThroughputDiskBarriers.t_net_ms_str`.
+- **Alternative Cloud Storage (Network Block Store):** Attached cloud volume (e.g., AWS EBS gp3). Synchronous `fdatasync()` barrier: $t_{\text{ebs}} =$ `{python} LatencyThroughputDiskBarriers.t_ebs_ms_str`.
 
 **Problem 1: Latency Overhead per Mutating Turn**\
 Suppose an agent trajectory requires issuing an authorized shell command to delete an obsolete build artifact (`rm -rf build/`).
 
-1. Calculate the percentage latency overhead added by the storage barrier when running on the local enterprise NVMe drive versus the cloud block volume, assuming the local tool execution takes $t_{\text{exec}} = 4.0\ \text{ms}$.
+1. Calculate the percentage latency overhead added by the storage barrier when running on the local enterprise NVMe drive versus the cloud block volume, assuming the local tool execution takes $t_{\text{exec}} =$ `{python} LatencyThroughputDiskBarriers.t_exec_ms_str`.
 2. Calculate the theoretical maximum action dispatch rate ($R_{\max}$) for a single-threaded agent process bound to sequential operations on both storage configurations.
 
 **Solution:**\
@@ -244,11 +391,15 @@ For the cloud network block volume:
 $$\text{Total Turn Latency} = t_{\text{write}} + t_{\text{ebs}} + t_{\text{exec}} = 0.0012\ \text{ms} + 1.8\ \text{ms} + 4.0\ \text{ms} = 5.8012\ \text{ms}$$
 $$\text{Overhead}_{\text{EBS}} = \frac{t_{\text{ebs}}}{t_{\text{write}} + t_{\text{exec}}} = \frac{1.8\ \text{ms}}{4.0012\ \text{ms}} \approx 44.99\%$$
 
+Local NVMe adds `{python} LatencyThroughputDiskBarriers.overhead_nvme_pct_str` overhead, whereas EBS adds `{python} LatencyThroughputDiskBarriers.overhead_ebs_pct_str`.
+
 2. The theoretical maximum dispatch throughput for a strictly sequential, single-threaded execution loop without tool execution latency is bounded entirely by the I/O barrier:
 $$R_{\max, \text{NVMe}} = \frac{1}{t_{\text{sync}}} = \frac{1}{85 \times 10^{-6}\ \text{s}} \approx 11,764\ \text{dispatches/sec}$$
 $$R_{\max, \text{EBS}} = \frac{1}{t_{\text{ebs}}} = \frac{1}{1.8 \times 10^{-3}\ \text{s}} \approx 555\ \text{dispatches/sec}$$
 
-When external network interactions are factored in ($t_{\text{net}} = 12\ \text{ms}$), the relative impact of the local NVMe barrier drops to less than $0.7\%$, demonstrating that local synchronous logging adds negligible overhead relative to wide-area network latency. However, on cloud block storage, the 1.8 ms synchronization barrier accounts for over $13\%$ of the total 13.8 ms turn time, posing a severe bottleneck if hundreds of concurrent agent threads contend on the same storage volume.
+This yields `{python} LatencyThroughputDiskBarriers.r_max_nvme_str` dispatches per second for NVMe versus `{python} LatencyThroughputDiskBarriers.r_max_ebs_str` dispatches per second for EBS.
+
+When external network interactions are factored in ($t_{\text{net}} =$ `{python} LatencyThroughputDiskBarriers.t_net_ms_str`), the relative impact of the local NVMe barrier drops to less than `{python} LatencyThroughputDiskBarriers.impact_net_nvme_pct_str`, demonstrating that local synchronous logging adds negligible overhead relative to wide-area network latency. However, on cloud block storage, the `{python} LatencyThroughputDiskBarriers.t_ebs_ms_str` synchronization barrier accounts for over `{python} LatencyThroughputDiskBarriers.impact_net_ebs_pct_str` of the total `{python} LatencyThroughputDiskBarriers.t_turn_ebs_net_ms_str` turn time, posing a severe bottleneck if hundreds of concurrent agent threads contend on the same storage volume.
 :::
 
 ### Amortizing barrier latency via group commit
@@ -375,6 +526,64 @@ If any delta segment in the recovery chain suffers bit-rot, cryptographic signat
 
 Selecting the temporal interval between consecutive checkpoints represents a classical systems dilemma. If the supervisor checkpoints too frequently, the runtime expends its computational budget serializing data structures, locking concurrent queues, and waiting on non-volatile storage barriers, thereby throttling end-to-end agent throughput. Conversely, if the supervisor checkpoints too infrequently, any hardware crash, network partition, or out-of-memory kernel eviction forces the recovery engine to replay a vast log of historical operations. During replay, the system incurs significant recomputation latency and wastes valuable token and compute budgets re-evaluating deterministic operations.
 
+```{python}
+#| label: lego-10-young-daly-cadence
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ YOUNG-DALY OPTIMAL CHECKPOINT CADENCE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-10-young-daly-cadence
+# │ Goal: Evaluate Young first-order vs Daly higher-order optimal checkpoint intervals.
+# │ Show: For 4h MTBF and 30s snapshot, Young gives 15.5 min vs Daly 15.0 min.
+# │ How: Compute T_opt = sqrt(2 * delta_snap * MTBF) and compare with Daly expansion.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time
+
+class YoungDalyOptimalCadence:
+    """Young-Daly optimal checkpoint cadence comparison."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    mtbf = 14_400 * second
+    delta_snap = 30 * second
+    delta_rec = 60 * second
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    mtbf_s = mtbf.to(second).magnitude
+    delta_snap_s = delta_snap.to(second).magnitude
+    delta_rec_s = delta_rec.to(second).magnitude
+
+    t_young_approx_s = math.sqrt(2 * delta_snap_s * mtbf_s)
+    t_young_approx = t_young_approx_s * second
+
+    t_young_exact_s = t_young_approx_s - delta_snap_s
+    t_young_exact = t_young_exact_s * second
+
+    t_daly_s = math.sqrt(2 * delta_snap_s * (mtbf_s + delta_rec_s)) + delta_snap_s * ((1.0 / 3.0) * math.sqrt(2 * delta_snap_s / mtbf_s) - 1.0)
+    t_daly = t_daly_s * second
+
+    discrepancy = abs(t_daly_s - t_young_exact_s) / t_young_exact_s
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_young_approx_s - 929.516) < 0.01, "t_young_approx")
+    check(abs(t_young_exact_s - 899.516) < 0.01, "t_young_exact")
+    check(abs(t_daly_s - 902.096) < 0.01, "t_daly")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    mtbf_hr_str = fmt_time(mtbf, unit=hour, precision=0)
+    mtbf_s_str = fmt_time(mtbf, unit=second, precision=0)
+    delta_snap_s_str = fmt_time(delta_snap, unit=second, precision=0)
+    delta_rec_s_str = fmt_time(delta_rec, unit=second, precision=0)
+
+    t_young_approx_s_str = fmt_time(t_young_approx, unit=second, precision=1)
+    t_young_approx_min_str = fmt_time(t_young_approx, unit=minute, precision=1)
+    t_daly_s_str = fmt_time(t_daly, unit=second, precision=1)
+    t_daly_min_str = fmt_time(t_daly, unit=minute, precision=1)
+    discrepancy_pct_str = fmt_percent(discrepancy, precision=2, style="prose")
+```
+
 ::: {#nbk-10-young-daly-cadence .callout-notebook title="Young-Daly optimal checkpoint cadence"}
 Let $\text{MTBF}$ denote the mean time between failures across the execution environment, $\delta_{\text{snap}}$ denote the snapshot write and storage barrier latency during which agent execution is throttled, and $\delta_{\text{rec}}$ denote the fixed state restoration overhead upon reboot.
 
@@ -382,6 +591,10 @@ Under a Poisson failure process where crashes occur uniformly at random with arr
 $$T_{\text{opt}} = \sqrt{2 \cdot \delta_{\text{snap}} \cdot \text{MTBF}} - \delta_{\text{snap}} \approx \sqrt{2 \cdot \delta_{\text{snap}} \cdot \text{MTBF}} \quad (\text{for } \delta_{\text{snap}} \ll \text{MTBF})$$
 Accounting for second-order recovery recomputation costs and restart latency $\delta_{\text{rec}}$, Daly's higher-order formulation yields:
 $$T_{\text{opt}}^{\text{Daly}} = \sqrt{2 \cdot \delta_{\text{snap}} \cdot \left(\text{MTBF} + \delta_{\text{rec}}\right)} + \delta_{\text{snap}} \cdot \left(\frac{1}{3}\sqrt{\frac{2\delta_{\text{snap}}}{\text{MTBF}}} - 1\right)$$
+
+**Numerical Evaluation:**
+For a representative agent deployment with $\text{MTBF} =$ `{python} YoungDalyOptimalCadence.mtbf_hr_str` (`{python} YoungDalyOptimalCadence.mtbf_s_str`), snapshot latency $\delta_{\text{snap}} =$ `{python} YoungDalyOptimalCadence.delta_snap_s_str`, and restart latency $\delta_{\text{rec}} =$ `{python} YoungDalyOptimalCadence.delta_rec_s_str`:
+Young's approximation yields $T_{\text{opt}} \approx$ `{python} YoungDalyOptimalCadence.t_young_approx_s_str` (`{python} YoungDalyOptimalCadence.t_young_approx_min_str`), while Daly's formulation yields $T_{\text{opt}}^{\text{Daly}} \approx$ `{python} YoungDalyOptimalCadence.t_daly_s_str` (`{python} YoungDalyOptimalCadence.t_daly_min_str`), a difference of `{python} YoungDalyOptimalCadence.discrepancy_pct_str`.
 :::
 
 To establish the mathematically optimal checkpoint interval, we adapt the classical fault-tolerance models formulated by J. W. Young (1974) and extended by John T. Daly (2006) for high-performance computing systems. Let $\text{MTBF}$ represent the Mean Time Between Failures of the execution environment, encompassing host hardware faults, container evictions, spot instance terminations, and unhandled sandbox panics. Let $\delta_{\text{snap}}$ denote the total wall-clock time required to serialize, flush, and confirm a state snapshot to persistent storage, during which active agent execution is paused or throttled. Let $T$ represent the checkpoint interval (the time elapsed between the completion of one checkpoint and the initiation of the next).
@@ -423,10 +636,88 @@ In practice, an agent supervisor does not measure time purely in continuous wall
 
 $$\tau_{\text{opt}} = \left\lceil \frac{T_{\text{opt}}}{\mu_{\text{turn}}} \right\rceil = \left\lceil \frac{\sqrt{2 \cdot \delta_{\text{snap}} \cdot \text{MTBF}}}{\mu_{\text{turn}}} \right\rceil$$ {#eq-vol3-turn-cadence}
 
-::: {#nbk-10-optimal-checkpoint-cadence-on-nvme .callout-notebook title="Optimal checkpoint cadence on NVMe versus network block storage"}
-Consider an autonomous software engineering agent deployed on an ephemeral cloud instance. The agent executes complex multi-file refactoring workflows where each turn averages $\mu_{\text{turn}} = 12\text{ seconds}$ (dominated by remote LLM inference and local test execution). The environment exhibits an estimated $\text{MTBF} = 4\text{ hours} = 14{,}400\text{ seconds}$ due to aggressive spot-instance preemption and container host recycles.
+```{python}
+#| label: lego-10-optimal-checkpoint-cadence-on-nvme
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ OPTIMAL CHECKPOINT CADENCE ON NVME VS NETWORK STORAGE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-10-optimal-checkpoint-cadence-on-nvme
+# │ Goal: Contrast optimal checkpoint cadence across NVMe and network storage.
+# │ Show: NVMe yields 2-turn cadence (0.17% overhead) vs 30-turn cadence (2.50%) on network.
+# │ How: Apply Young's formula with turn duration discretization and overhead sums.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_percent, fmt_time
 
-The supervisor maintains an $\text{ACB}$ and execution context that produces a serialized snapshot payload of $32\text{ MiB}$ per checkpoint. We evaluate two distinct persistence storage tiers:
+class OptimalCheckpointCadenceNvme:
+    """Optimal checkpoint cadence on NVMe vs network block storage."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    mu_turn = 12 * second
+    mtbf = 14_400 * second
+    s_snapshot = 32 * MB
+
+    b_nvme_seq = 1600 * (MB / second)
+    delta_snap_nvme = (s_snapshot.to(MB) / b_nvme_seq.to(MB / second)).magnitude * second
+    delta_snap_net = 4.5 * second
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    mtbf_s = mtbf.to(second).magnitude
+    mu_turn_s = mu_turn.to(second).magnitude
+
+    # Tier 1 NVMe
+    delta_snap_nvme_s = delta_snap_nvme.to(second).magnitude
+    t_opt_nvme_s = math.sqrt(2 * delta_snap_nvme_s * mtbf_s)
+    t_opt_nvme = t_opt_nvme_s * second
+    tau_opt_nvme = math.ceil(t_opt_nvme_s / mu_turn_s)
+    u_nvme = (delta_snap_nvme_s / t_opt_nvme_s) + (t_opt_nvme_s / (2 * mtbf_s))
+
+    # Tier 2 Network
+    delta_snap_net_s = delta_snap_net.to(second).magnitude
+    t_opt_net_s = math.sqrt(2 * delta_snap_net_s * mtbf_s)
+    t_opt_net = t_opt_net_s * second
+    tau_opt_net = math.ceil(t_opt_net_s / mu_turn_s)
+    u_net = (delta_snap_net_s / t_opt_net_s) + (t_opt_net_s / (2 * mtbf_s))
+
+    waste_2turn_net = delta_snap_net_s / t_opt_nvme_s
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(delta_snap_nvme_s - 0.020) < 1e-4, "delta_snap_nvme")
+    check(abs(t_opt_nvme_s - 24.0) < 1e-4, "t_opt_nvme")
+    check(tau_opt_nvme == 2, "tau_opt_nvme")
+    check(abs(u_nvme - 0.0016666) < 1e-4, "u_nvme")
+
+    check(abs(t_opt_net_s - 360.0) < 1e-4, "t_opt_net")
+    check(tau_opt_net == 30, "tau_opt_net")
+    check(abs(u_net - 0.025) < 1e-4, "u_net")
+    check(abs(waste_2turn_net - 0.1875) < 1e-4, "waste_2turn_net")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    mu_turn_s_str = fmt_time(mu_turn, unit=second, precision=0)
+    mtbf_hr_str = fmt_time(mtbf, unit=hour, precision=0)
+    mtbf_s_str = fmt_time(mtbf, unit=second, precision=0)
+    s_snapshot_mb_str = fmt_memory(s_snapshot, unit=MB, precision=0)
+
+    delta_snap_nvme_ms_str = fmt_time(delta_snap_nvme, unit=millisecond, precision=0)
+    t_opt_nvme_s_str = fmt_time(t_opt_nvme, unit=second, precision=0)
+    tau_opt_nvme_str = fmt_int(tau_opt_nvme)
+    u_nvme_pct_str = fmt_percent(u_nvme, precision=3, style="prose")
+
+    delta_snap_net_s_str = fmt_time(delta_snap_net, unit=second, precision=1)
+    t_opt_net_s_str = fmt_time(t_opt_net, unit=second, precision=0)
+    t_opt_net_min_str = fmt_time(t_opt_net, unit=minute, precision=0)
+    tau_opt_net_str = fmt_int(tau_opt_net)
+    u_net_pct_str = fmt_percent(u_net, precision=2, style="prose")
+    waste_2turn_net_pct_str = fmt_percent(waste_2turn_net, precision=2, style="prose")
+```
+
+::: {#nbk-10-optimal-checkpoint-cadence-on-nvme .callout-notebook title="Optimal checkpoint cadence on NVMe versus network block storage"}
+Consider an autonomous software engineering agent deployed on an ephemeral cloud instance. The agent executes complex multi-file refactoring workflows where each turn averages $\mu_{\text{turn}} =$ `{python} OptimalCheckpointCadenceNvme.mu_turn_s_str` (dominated by remote LLM inference and local test execution). The environment exhibits an estimated $\text{MTBF} =$ `{python} OptimalCheckpointCadenceNvme.mtbf_hr_str` (`{python} OptimalCheckpointCadenceNvme.mtbf_s_str`) due to aggressive spot-instance preemption and container host recycles.
+
+The supervisor maintains an $\text{ACB}$ and execution context that produces a serialized snapshot payload of `{python} OptimalCheckpointCadenceNvme.s_snapshot_mb_str` per checkpoint. We evaluate two distinct persistence storage tiers:
 
 **Tier 1: Direct-Attached NVMe Flash.** The runtime writes serialized snapshots to local NVMe storage using direct I/O (`O_DIRECT`). The storage tier sustains a sequential write bandwidth of $1.6\text{ GiB/s}$, yielding a snapshot commit latency of:
 $$\delta_{\text{snap, NVMe}} = \frac{32\text{ MiB}}{1600\text{ MiB/s}} = 0.020\text{ seconds} \ (20\text{ ms})$$
@@ -435,8 +726,9 @@ Applying Young's formula (@eq-vol3-young-formula):
 $$T_{\text{opt}} = \sqrt{2 \cdot 0.020\text{ s} \cdot 14{,}400\text{ s}} = \sqrt{576} = 24.0\text{ seconds}$$
 Converting to interaction turns via @eq-vol3-turn-cadence:
 $$\tau_{\text{opt}} = \left\lceil \frac{24.0\text{ s}}{12\text{ s}} \right\rceil = 2\text{ turns}$$
-On high-speed local NVMe, the supervisor should commit a snapshot every 2 turns. The fractional runtime overhead introduced by this aggressive checkpointing is:
+On high-speed local NVMe, with commit latency `{python} OptimalCheckpointCadenceNvme.delta_snap_nvme_ms_str` and optimal interval `{python} OptimalCheckpointCadenceNvme.t_opt_nvme_s_str`, the supervisor should commit a snapshot every `{python} OptimalCheckpointCadenceNvme.tau_opt_nvme_str` turns. The fractional runtime overhead introduced by this aggressive checkpointing is:
 $$\mathcal{U} = \frac{0.020}{24} + \frac{24}{2 \cdot 14{,}400} = 0.00083 + 0.00083 = 0.166\%$$
+This introduces `{python} OptimalCheckpointCadenceNvme.u_nvme_pct_str` overhead.
 
 **Tier 2: Network-Attached Object Store.** The runtime transmits snapshots over a shared gigabit virtual interface to a remote object store. Due to TLS handshakes, multi-part HTTP POST overhead, and network transit, the effective snapshot commit latency rises to:
 $$\delta_{\text{snap, Network}} = 4.5\text{ seconds}$$
@@ -445,9 +737,9 @@ Applying Young's formula:
 $$T_{\text{opt}} = \sqrt{2 \cdot 4.5\text{ s} \cdot 14{,}400\text{ s}} = \sqrt{129{,}600} = 360.0\text{ seconds} \ (6\text{ minutes})$$
 Converting to interaction turns:
 $$\tau_{\text{opt}} = \left\lceil \frac{360.0\text{ s}}{12\text{ s}} \right\rceil = 30\text{ turns}$$
-On the higher-latency network tier, the supervisor must back off its checkpoint cadence to once every 30 turns. The total fractional overhead rises to:
+On the higher-latency network tier with commit latency `{python} OptimalCheckpointCadenceNvme.delta_snap_net_s_str` and optimal interval `{python} OptimalCheckpointCadenceNvme.t_opt_net_s_str` (`{python} OptimalCheckpointCadenceNvme.t_opt_net_min_str`), the supervisor must back off its checkpoint cadence to once every `{python} OptimalCheckpointCadenceNvme.tau_opt_net_str` turns. The total fractional overhead rises to:
 $$\mathcal{U} = \frac{4.5}{360} + \frac{360}{28{,}800} = 0.0125 + 0.0125 = 2.50\%$$
-Attempting to maintain the 2-turn cadence over the network store would waste $4.5 / 24 = 18.75\%$ of all execution time purely waiting on network I/O barriers.
+This totals `{python} OptimalCheckpointCadenceNvme.u_net_pct_str` overhead. Attempting to maintain the 2-turn cadence over the network store would waste `{python} OptimalCheckpointCadenceNvme.waste_2turn_net_pct_str` of all execution time purely waiting on network I/O barriers.
 :::
 
 The mathematical model underscores a critical operational principle: checkpoint cadence must dynamically adapt to physical storage capabilities. If an agent runtime detects storage congestion or network interface throttling, it must dynamically scale the interval parameter $\tau$ upward to prevent checkpoint queuing from starving forward execution progress.
@@ -603,41 +895,126 @@ During live execution, memory escrow holds unverified candidate actions until a 
 
 If the supervisor's state transition logic attempts to establish a live network connection or emit an unrecorded tool action during replay, the verification interceptor raises an invariant violation, because replay must dispatch no tool calls and emit no effects. The presence of any unlogged side effect indicates that the supervisor's code has drifted from the version that authored the trace, or that an unrecorded source of entropy was allowed to influence the live control flow.
 
+```{python}
+#| label: lego-10-recovery-latency-and-compute-savings
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RECOVERY LATENCY AND COMPUTE SAVINGS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-10-recovery-latency-and-compute-savings
+# │ Goal: Contrast deterministic trajectory reconstruction with neural re-execution.
+# │ Show: Deterministic replay recovers state in 38.2 ms vs 17.5 min re-exec (27,486x).
+# │ How: Model snapshot read, log read, event folding vs prefill and decode times.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_latency, fmt_memory, fmt_multiple, fmt_rate, fmt_time
+
+class RecoveryLatencyComputeSavings:
+    """Recovery latency and compute savings in trajectory reconstruction."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_fail = 150
+    t_checkpoint = 100
+    delta_turns = 50
+    n_events = 150
+    l_context = 48_000 * token
+    s_snapshot = 64 * MB
+    b_read_nvme = 3200 * (MB / second)
+
+    s_event_avg = 4 * KB
+    s_log_suffix = 600 * KB
+    t_fold_per_event = 0.12 * millisecond
+
+    r_prefill = 3000 * (token / second)
+    t_decode_per_token = 25 * millisecond
+    n_decode_tokens = 200 * token
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_snap_read_s = (s_snapshot.to(MB) / b_read_nvme.to(MB / second)).magnitude
+    t_snap_read = t_snap_read_s * second
+
+    t_log_read_s = (s_log_suffix.to(MB) / b_read_nvme.to(MB / second)).magnitude
+    t_log_read = t_log_read_s * second
+
+    t_event_fold_s = n_events * t_fold_per_event.to(second).magnitude
+    t_event_fold = t_event_fold_s * second
+
+    t_recon = t_snap_read + t_log_read + t_event_fold
+
+    t_prefill_per_turn_s = l_context.magnitude / r_prefill.magnitude
+    t_prefill_per_turn = t_prefill_per_turn_s * second
+
+    t_decode_per_turn_s = n_decode_tokens.magnitude * t_decode_per_token.to(second).magnitude
+    t_decode_per_turn = t_decode_per_turn_s * second
+
+    t_turn_total = t_prefill_per_turn + t_decode_per_turn
+    t_re_exec = delta_turns * t_turn_total
+
+    speedup = t_re_exec.to(second).magnitude / t_recon.to(second).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_snap_read.to(millisecond).magnitude - 20.0) < 1e-4, "t_snap_read")
+    check(abs(t_log_read.to(millisecond).magnitude - 0.1875) < 1e-4, "t_log_read")
+    check(abs(t_event_fold.to(millisecond).magnitude - 18.0) < 1e-4, "t_event_fold")
+    check(abs(t_recon.to(millisecond).magnitude - 38.1875) < 1e-4, "t_recon")
+    check(abs(t_prefill_per_turn.to(second).magnitude - 16.0) < 1e-4, "t_prefill_per_turn")
+    check(abs(t_decode_per_turn.to(second).magnitude - 5.0) < 1e-4, "t_decode_per_turn")
+    check(abs(t_turn_total.to(second).magnitude - 21.0) < 1e-4, "t_turn_total")
+    check(abs(t_re_exec.to(second).magnitude - 1050.0) < 1e-4, "t_re_exec")
+    check(abs(speedup - 27495.8) < 10.0, "speedup")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_fail_str = fmt_int(t_fail)
+    t_checkpoint_str = fmt_int(t_checkpoint)
+    delta_turns_str = fmt_int(delta_turns)
+    n_events_str = fmt_int(n_events)
+    l_context_str = fmt_int(int(l_context.magnitude))
+
+    s_snapshot_mb_str = fmt_memory(s_snapshot, unit=MB, precision=0)
+    s_log_suffix_kb_str = fmt_memory(s_log_suffix, unit=KB, precision=0)
+    t_fold_per_event_ms_str = fmt_time(t_fold_per_event, unit=millisecond, precision=2)
+
+    t_recon_ms_str = fmt_time(t_recon, unit=millisecond, precision=1)
+    t_re_exec_min_str = fmt_time(t_re_exec, unit=minute, precision=1)
+    speedup_mult_str = fmt_multiple(round(speedup))
+```
+
 ::: {#nbk-10-recovery-latency-and-compute-savings .callout-notebook title="Recovery latency and compute savings in trajectory reconstruction"}
-Consider an autonomous coding agent that failed at turn $t = 150$ due to a transient worker node kernel panic. The trajectory maintained an active context window of $L = 48,000$ tokens. The system recorded periodic checkpoints every $K = 50$ turns. The nearest checkpoint was taken at turn $\tau = 100$.
+Consider an autonomous coding agent that failed at turn $t =$ `{python} RecoveryLatencyComputeSavings.t_fail_str` due to a transient worker node kernel panic. The trajectory maintained an active context window of $L =$ `{python} RecoveryLatencyComputeSavings.l_context_str` tokens. The system recorded periodic checkpoints every $K =$ `{python} RecoveryLatencyComputeSavings.delta_turns_str` turns. The nearest checkpoint was taken at turn $	au =$ `{python} RecoveryLatencyComputeSavings.t_checkpoint_str`.
 
 **Physical Parameters:**
 
-- Serialized checkpoint size $|\mathbf{S}_{100}|$: $64\text{ MB}$ (includes serialized ACB, tokenizer cache, and sandbox filesystem overlay metadata).
-- NVMe read bandwidth: $3.2\text{ GB/s}$ ($3,200\text{ MB/s}$).
-- Event log delta count: $n = 50$ turns ($150$ raw events: 50 model completions, 50 authorizations, 50 observations).
-- Average event record size: $4\text{ KB}$ (total event log suffix size: $600\text{ KB}$).
-- Supervisor event fold latency: $0.12\text{ ms}$ per event on an AMD EPYC 9654 host processor.
-- Upstream inference service characteristics: Frontier model prefill processing rate of $3,000\text{ tokens/s}$ at batch size 1; average decode latency of $25\text{ ms/token}$; average completion length of $200\text{ tokens}$ per turn.
+- Serialized checkpoint size $|\mathbf{S}_{100}|$: `{python} RecoveryLatencyComputeSavings.s_snapshot_mb_str` (includes serialized ACB, tokenizer cache, and sandbox filesystem overlay metadata).
+- NVMe read bandwidth: $3.2	ext{ GB/s}$ ($3,200	ext{ MB/s}$).
+- Event log delta count: $n =$ `{python} RecoveryLatencyComputeSavings.delta_turns_str` turns (`{python} RecoveryLatencyComputeSavings.n_events_str` raw events: 50 model completions, 50 authorizations, 50 observations).
+- Average event record size: $4	ext{ KB}$ (total event log suffix size: `{python} RecoveryLatencyComputeSavings.s_log_suffix_kb_str`).
+- Supervisor event fold latency: `{python} RecoveryLatencyComputeSavings.t_fold_per_event_ms_str` per event on an AMD EPYC 9654 host processor.
+- Upstream inference service characteristics: Frontier model prefill processing rate of $3,000	ext{ tokens/s}$ at batch size 1; average decode latency of $25	ext{ ms/token}$; average completion length of $200	ext{ tokens}$ per turn.
 
-**Trajectory Reconstruction Latency ($T_{\text{recon}}$):**
-$$\begin{aligned}
-T_{\text{snap\_read}} &= \frac{64\text{ MB}}{3,200\text{ MB/s}} = 0.020\text{ s} = 20.0\text{ ms} \\
-T_{\text{log\_read}} &= \frac{0.6\text{ MB}}{3,200\text{ MB/s}} \approx 0.0002\text{ s} = 0.2\text{ ms} \\
-T_{\text{event\_fold}} &= 150 \times 0.12\text{ ms} = 18.0\text{ ms} \\
-T_{\text{recon}} &= T_{\text{snap\_read}} + T_{\text{log\_read}} + T_{\text{event\_fold}} = 20.0 + 0.2 + 18.0 = 38.2\text{ ms}
+**Trajectory Reconstruction Latency ($T_{	ext{recon}}$):**
+$$egin{aligned}
+T_{	ext{snap\_read}} &= rac{64	ext{ MB}}{3,200	ext{ MB/s}} = 0.020	ext{ s} = 20.0	ext{ ms} \
+T_{	ext{log\_read}} &= rac{0.6	ext{ MB}}{3,200	ext{ MB/s}} pprox 0.0002	ext{ s} = 0.2	ext{ ms} \
+T_{	ext{event\_fold}} &= 150 	imes 0.12	ext{ ms} = 18.0	ext{ ms} \
+T_{	ext{recon}} &= T_{	ext{snap\_read}} + T_{	ext{log\_read}} + T_{	ext{event\_fold}} = 20.0 + 0.2 + 18.0 = 38.2	ext{ ms}
 \end{aligned}$$
 
-**Hypothetical Stochastic Re-Execution Latency ($T_{\text{re-exec}}$):**
+**Hypothetical Stochastic Re-Execution Latency ($T_{	ext{re-exec}}$):**
 Re-executing the 50 turns through the live model requires recomputing prefill and generating completions across all intermediate turns:
-$$\begin{aligned}
-T_{\text{prefill\_per\_turn}} &\approx \frac{48,000\text{ tokens}}{3,000\text{ tokens/s}} = 16.0\text{ s} \\
-T_{\text{decode\_per\_turn}} &= 200\text{ tokens} \times 0.025\text{ s/token} = 5.0\text{ s} \\
-T_{\text{turn\_total}} &= 16.0\text{ s} + 5.0\text{ s} = 21.0\text{ s} \\
-T_{\text{re-exec}} &= 50 \times 21.0\text{ s} = 1,050.0\text{ s} \approx 17.5\text{ minutes}
+$$egin{aligned}
+T_{	ext{prefill\_per\_turn}} &pprox rac{48,000	ext{ tokens}}{3,000	ext{ tokens/s}} = 16.0	ext{ s} \
+T_{	ext{decode\_per\_turn}} &= 200	ext{ tokens} 	imes 0.025	ext{ s/token} = 5.0	ext{ s} \
+T_{	ext{turn\_total}} &= 16.0	ext{ s} + 5.0	ext{ s} = 21.0	ext{ s} \
+T_{	ext{re-exec}} &= 50 	imes 21.0	ext{ s} = 1,050.0	ext{ s} pprox 17.5	ext{ minutes}
 \end{aligned}$$
 
 **Conclusion:**
-Deterministic trajectory reconstruction restores the agent control block in $38.2\text{ ms}$, achieving a speedup of:
+Deterministic trajectory reconstruction restores the agent control block in `{python} RecoveryLatencyComputeSavings.t_recon_ms_str`, achieving a speedup of:
 
-$$\text{Speedup} = \frac{1,050.0\text{ s}}{0.0382\text{ s}} \approx 27,486\times$$
+$$	ext{Speedup} = rac{1,050.0	ext{ s}}{0.0382	ext{ s}} pprox 27,486	imes$$
 
-Reconstruction completely eliminates $17.5$ minutes of GPU idle time, saves tens of dollars in API billing, and introduces zero risk of non-deterministic branching or duplicate environmental side effects.
+Reconstruction yields a `{python} RecoveryLatencyComputeSavings.speedup_mult_str` acceleration, completely eliminates `{python} RecoveryLatencyComputeSavings.t_re_exec_min_str` of GPU idle time, saves tens of dollars in API billing, and introduces zero risk of non-deterministic branching or duplicate environmental side effects.
 :::
 
 ### Non-destructive post-mortem debugging
@@ -957,50 +1334,143 @@ The supervisor addresses this by enforcing *declarative channel virtualization*.
 
 From the perspective of the external tool service, the migration appears simply as a momentary network keep-alive pause followed by an authenticated session resumption.
 
+```{python}
+#| label: lego-10-calculating-migration-budgets-under-hard
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CALCULATING MIGRATION BUDGETS UNDER HARD PREEMPTION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-10-calculating-migration-budgets-under-hard
+# │ Goal: Evaluate multi-phase state migration latency under 30s preemption.
+# │ Show: End-to-end migration completes in 4.59 s, leaving >25 s safety margin.
+# │ How: Sum quiescence, serialization/compression, network xfer, and restore latencies.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_latency, fmt_memory, fmt_percent, fmt_time
+
+class MigrationBudgetsPreemption:
+    """Calculating migration budgets under hard preemption deadlines."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    delta_t_evac = 30 * second
+    s_acb = 128 * KB
+    s_wal = 4.5 * MB
+    s_upper = 280 * MB
+    s_base = 14 * GB
+
+    b_net = 125 * (MB / second)
+    util_net = 0.20
+    b_avail = 100 * (MB / second)
+    b_disk_read = 1.5 * (GB / second)
+    r_comp = 2.1
+    c_rate = 400 * (MB / second)
+
+    t_tool = 1.8 * second
+    t_freeze = 15 * millisecond
+
+    t_acb_ser = 3 * millisecond
+    t_wal_sync = 8 * millisecond
+
+    t_mount = 0.45 * second
+    b_decomp = 1200 * (MB / second)
+    t_rebind = 0.12 * second
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    # Step 1: Quiescence
+    t_quiesce = t_tool + t_freeze
+
+    # Step 2: Serialization and Compression
+    t_comp = (s_upper.to(MB) / c_rate.to(MB / second)).magnitude * second
+    s_comp = (s_upper.to(MB).magnitude / r_comp) * MB
+    s_total = s_acb.to(MB) + s_wal.to(MB) + s_comp
+    t_ser = t_acb_ser + t_wal_sync + t_comp
+
+    # Step 3: Network Transfer
+    t_xfer = (s_total.to(MB).magnitude / b_avail.to(MB / second).magnitude) * second
+
+    # Step 4: Destination Restoration
+    t_decomp = (s_comp.to(MB).magnitude / b_decomp.to(MB / second).magnitude) * second
+    t_restore = t_mount + t_decomp + t_rebind
+
+    # Step 5: Total Migration Latency
+    t_migration = t_quiesce + t_ser + t_xfer + t_restore
+    safety_margin = delta_t_evac - t_migration
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_quiesce.to(second).magnitude - 1.815) < 1e-4, "t_quiesce")
+    check(abs(t_comp.to(second).magnitude - 0.70) < 1e-4, "t_comp")
+    check(abs(s_comp.to(MB).magnitude - 133.3333) < 1e-3, "s_comp")
+    check(abs(s_total.to(MB).magnitude - 137.96) < 1e-2, "s_total")
+    check(abs(t_ser.to(second).magnitude - 0.711) < 1e-4, "t_ser")
+    check(abs(t_xfer.to(second).magnitude - 1.38) < 1e-2, "t_xfer")
+    check(abs(t_decomp.to(second).magnitude - 0.11111) < 1e-3, "t_decomp")
+    check(abs(t_restore.to(second).magnitude - 0.68111) < 1e-3, "t_restore")
+    check(abs(t_migration.to(second).magnitude - 4.5867) < 1e-2, "t_migration")
+    check(safety_margin.to(second).magnitude > 25.0, "safety_margin")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    delta_t_evac_s_str = fmt_time(delta_t_evac, unit=second, precision=0)
+    s_acb_kb_str = fmt_memory(s_acb, unit=KB, precision=0)
+    s_wal_mb_str = fmt_memory(s_wal, unit=MB, precision=1)
+    s_upper_mb_str = fmt_memory(s_upper, unit=MB, precision=0)
+    s_base_gb_str = fmt_memory(s_base, unit=GB, precision=0)
+
+    t_quiesce_s_str = fmt_time(t_quiesce, unit=second, precision=3)
+    t_comp_s_str = fmt_time(t_comp, unit=second, precision=1)
+    s_comp_mb_str = fmt_memory(s_comp, unit=MB, precision=2)
+    s_total_mb_str = fmt_memory(s_total, unit=MB, precision=2)
+    t_xfer_s_str = fmt_time(t_xfer, unit=second, precision=2)
+    t_restore_s_str = fmt_time(t_restore, unit=second, precision=2)
+    t_migration_s_str = fmt_time(t_migration, unit=second, precision=2)
+```
+
 ::: {#nbk-10-calculating-migration-budgets-under-hard .callout-notebook title="Calculating migration budgets under hard preemption deadlines"}
-Consider an autonomous coding agent executing on a Google Cloud Spot VM that receives an ACPI preemption warning providing an evacuation window of $\Delta t_{\text{evac}} = 30\text{ seconds}$.
+Consider an autonomous coding agent executing on a Google Cloud Spot VM that receives an ACPI preemption warning providing an evacuation window of $\Delta t_{\text{evac}} =$ `{python} MigrationBudgetsPreemption.delta_t_evac_s_str`.
 
 The agent operates with the following physical footprint:
 
-- An Agent Control Block ($\text{ACB}_t$) of size $S_{\text{ACB}} = 128\text{ KiB}$.
-- An unflushed local event log tail of size $S_{\text{WAL}} = 4.5\text{ MiB}$.
-- An OverlayFS `upperdir` containing dirty source edits, a compiled Rust binary, and test artifacts totaling $S_{\text{upper}} = 280\text{ MiB}$.
-- The base container image is $14\text{ GiB}$ (pre-cached on the destination node).
+- An Agent Control Block ($	ext{ACB}_t$) of size $S_{	ext{ACB}} =$ `{python} MigrationBudgetsPreemption.s_acb_kb_str`.
+- An unflushed local event log tail of size $S_{	ext{WAL}} =$ `{python} MigrationBudgetsPreemption.s_wal_mb_str`.
+- An OverlayFS `upperdir` containing dirty source edits, a compiled Rust binary, and test artifacts totaling $S_{	ext{upper}} =$ `{python} MigrationBudgetsPreemption.s_upper_mb_str`.
+- The base container image is `{python} MigrationBudgetsPreemption.s_base_gb_str` (pre-cached on the destination node).
 
-The host is connected to an enterprise data center network fabric offering an effective outbound bandwidth of $B_{\text{net}} = 1\text{ Gbps}$ ($125\text{ MB/s}$), operating at an average network utilization of 20 percent background load (yielding $B_{\text{avail}} = 100\text{ MB/s}$). The local NVMe disk subsystem reads at $1.5\text{ GB/s}$. LZ4 compression achieves an average compression ratio of $r = 2.1:1$ on the compilation and source artifacts, operating at a compression throughput of $C_{\text{rate}} = 400\text{ MB/s}$.
+The host is connected to an enterprise data center network fabric offering an effective outbound bandwidth of $B_{	ext{net}} = 1	ext{ Gbps}$ ($125	ext{ MB/s}$), operating at an average network utilization of 20 percent background load (yielding $B_{	ext{avail}} = 100	ext{ MB/s}$). The local NVMe disk subsystem reads at $1.5	ext{ GB/s}$. LZ4 compression achieves an average compression ratio of $r = 2.1:1$ on the compilation and source artifacts, operating at a compression throughput of $C_{	ext{rate}} = 400	ext{ MB/s}$.
 
-Let us calculate the total migration latency $T_{\text{migration}}$ and determine whether the evacuation succeeds within the 30-second budget:
+Let us calculate the total migration latency $T_{	ext{migration}}$ and determine whether the evacuation succeeds within the 30-second budget:
 
-**Step 1: Quiescence and Drainage Latency ($t_{\text{quiesce}}$)**
-The agent is currently awaiting an in-flight compiler check. The tool completes within $t_{\text{tool}} = 1.8\text{ seconds}$. The cgroup freezer suspends all container processes in $t_{\text{freeze}} = 15\text{ ms}$.
-$$t_{\text{quiesce}} = 1.8\text{ s} + 0.015\text{ s} = 1.815\text{ seconds}$$
+**Step 1: Quiescence and Drainage Latency ($t_{	ext{quiesce}}$)**
+The agent is currently awaiting an in-flight compiler check. The tool completes within $t_{	ext{tool}} = 1.8	ext{ seconds}$. The cgroup freezer suspends all container processes in $t_{	ext{freeze}} = 15	ext{ ms}$.
+$$t_{	ext{quiesce}} = 1.8	ext{ s} + 0.015	ext{ s} = 1.815	ext{ seconds}$$
+Quiescence completes in `{python} MigrationBudgetsPreemption.t_quiesce_s_str`.
 
-**Step 2: Serialization and Compression Latency ($t_{\text{ser}}$)**
-Serializing the $\text{ACB}_t$ takes $3\text{ ms}$. Flushing the WAL requires an `fsync()` taking $8\text{ ms}$.
-Compressing the $280\text{ MiB}$ `upperdir` delta:
-$$t_{\text{comp}} = \frac{280\text{ MiB}}{400\text{ MB/s}} = 0.70\text{ seconds}$$
-Compressed size of the filesystem delta:
-$$S_{\text{comp}} = \frac{280\text{ MiB}}{2.1} \approx 133.33\text{ MiB}$$
-Total payload to transmit across the network fabric:
-$$S_{\text{total}} = S_{\text{ACB}} + S_{\text{WAL}} + S_{\text{comp}} = 0.125\text{ MiB} + 4.5\text{ MiB} + 133.33\text{ MiB} = 137.96\text{ MiB}$$
+**Step 2: Serialization and Compression Latency ($t_{	ext{ser}}$)**
+Serializing the $	ext{ACB}_t$ takes $3	ext{ ms}$. Flushing the WAL requires an `fsync()` taking $8	ext{ ms}$.
+Compressing the $280	ext{ MB}$ `upperdir` delta takes `{python} MigrationBudgetsPreemption.t_comp_s_str`:
+$$t_{	ext{comp}} = rac{280	ext{ MB}}{400	ext{ MB/s}} = 0.70	ext{ seconds}$$
+Compressed size of the filesystem delta is `{python} MigrationBudgetsPreemption.s_comp_mb_str`:
+$$S_{	ext{comp}} = rac{280	ext{ MB}}{2.1} pprox 133.33	ext{ MB}$$
+Total payload to transmit across the network fabric is `{python} MigrationBudgetsPreemption.s_total_mb_str`:
+$$S_{	ext{total}} = S_{	ext{ACB}} + S_{	ext{WAL}} + S_{	ext{comp}} = 0.125	ext{ MB} + 4.5	ext{ MB} + 133.33	ext{ MB} = 137.96	ext{ MB}$$
 
-**Step 3: Network Transfer Latency ($t_{\text{xfer}}$)**
-Transmitting the compressed payload over the available network bandwidth:
-$$t_{\text{xfer}} = \frac{137.96\text{ MiB}}{100\text{ MB/s}} = 1.38\text{ seconds}$$
+**Step 3: Network Transfer Latency ($t_{	ext{xfer}}$)**
+Transmitting the compressed payload over the available network bandwidth takes `{python} MigrationBudgetsPreemption.t_xfer_s_str`:
+$$t_{	ext{xfer}} = rac{137.96	ext{ MB}}{100	ext{ MB/s}} = 1.38	ext{ seconds}$$
 
-**Step 4: Destination Restoration and Re-binding ($t_{\text{restore}}$)**
+**Step 4: Destination Restoration and Re-binding ($t_{	ext{restore}}$)**
 On the destination worker node:
 
-- Container initialization and mounting the pre-cached `lowerdir` with the unpacked `upperdir`: $t_{\text{mount}} = 0.45\text{ seconds}$.
-- Decompressing the $133.33\text{ MiB}$ delta at $1.2\text{ GB/s}$: $t_{\text{decomp}} = 0.11\text{ seconds}$.
-- Deserializing the $\text{ACB}_t$, replaying the trailing $4.5\text{ MiB}$ WAL events, and acquiring new tool socket leases: $t_{\text{rebind}} = 0.12\text{ seconds}$.
-$$t_{\text{restore}} = 0.45\text{ s} + 0.11\text{ s} + 0.12\text{ s} = 0.68\text{ seconds}$$
+- Container initialization and mounting the pre-cached `lowerdir` with the unpacked `upperdir`: $t_{	ext{mount}} = 0.45	ext{ seconds}$.
+- Decompressing the $133.33	ext{ MB}$ delta at $1.2	ext{ GB/s}$: $t_{	ext{decomp}} = 0.11	ext{ seconds}$.
+- Deserializing the $	ext{ACB}_t$, replaying the trailing $4.5	ext{ MB}$ WAL events, and acquiring new tool socket leases: $t_{	ext{rebind}} = 0.12	ext{ seconds}$.
+$$t_{	ext{restore}} = 0.45	ext{ s} + 0.11	ext{ s} + 0.12	ext{ s} = 0.68	ext{ seconds}$$
+Restoration completes in `{python} MigrationBudgetsPreemption.t_restore_s_str`.
 
 **Step 5: Total Migration Latency Evaluation**
 Summing the distinct phases:
-$$T_{\text{migration}} = t_{\text{quiesce}} + t_{\text{ser}} + t_{\text{xfer}} + t_{\text{restore}} = 1.815 + 0.711 + 1.380 + 0.680 = 4.586\text{ seconds}$$
+$$T_{	ext{migration}} = t_{	ext{quiesce}} + t_{	ext{ser}} + t_{	ext{xfer}} + t_{	ext{restore}} = 1.815 + 0.711 + 1.380 + 0.680 = 4.586	ext{ seconds}$$
 
-Because $T_{\text{migration}} = 4.59\text{ seconds} \ll \Delta t_{\text{evac}} = 30\text{ seconds}$, the tripartite migration completes comfortably within the preemption envelope, leaving a safety margin of more than 25 seconds before the cloud provider reclaims the hardware.
+Because $T_{	ext{migration}}$ of `{python} MigrationBudgetsPreemption.t_migration_s_str` remains far below the preemption deadline, the tripartite migration completes comfortably within the preemption envelope, leaving a safety margin of more than 25 seconds before the cloud provider reclaims the hardware.
 :::
 
 ### Fencing token protocols
@@ -1102,39 +1572,144 @@ Under this transformation, the compaction worker strips the vast internal expans
 
 Crucially, the compaction worker computes a cryptographic digest $h = \text{SHA-256}(\Phi_{\text{raw}})$ of the original, uncompacted observation payload prior to truncation. This hash is permanently recorded alongside the pruned record. If an auditor, a security supervisor, or an automated evaluator later questions whether the summarized tool output genuinely reflected the sandboxed system's behavior, the runtime can verify any external copy of the original log against the immutable cryptographic digest stored in the trajectory's causal spine.
 
+```{python}
+#| label: lego-10-storage-compaction-economics-across-an
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STORAGE COMPACTION ECONOMICS ACROSS AN ENTERPRISE FLEET (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-10-storage-compaction-economics-across-an
+# │ Goal: Quantify raw vs compacted storage footprints and costs across 2,500 agents.
+# │ Show: Epistemic pruning yields 19.19x reduction (94.8% savings), shrinking archive to 963 GB.
+# │ How: Model turn sizes, daily/monthly/annual volumes, and cold tier compression.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_latency, fmt_memory, fmt_multiple, fmt_percent
+
+class StorageCompactionEconomics:
+    """Storage compaction economics across an enterprise fleet."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_agents = 2_500
+    t_turns_per_day = 180
+
+    s_prompt = 12 * KB
+    s_gen = 2 * KB
+    s_call = 1 * KB
+    s_obs = 350 * KB
+
+    days_per_month = 30
+    days_per_year = 360
+    replication_factor = 3
+
+    s_error_trace = 4 * KB
+    s_sha256 = 32 * byte
+    r_cold_comp = 3.2
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    s_turn_raw = s_prompt + s_gen + s_call + s_obs
+    daily_turns = n_agents * t_turns_per_day
+
+    vol_raw_day = daily_turns * s_turn_raw
+    vol_raw_month = (vol_raw_day.to(GB).magnitude * days_per_month) * GB
+    vol_raw_year = (vol_raw_day.to(GB).magnitude * days_per_year) * GB
+    vol_raw_replicated = (vol_raw_year.to(TB).magnitude * replication_factor) * TB
+
+    s_obs_compact = s_error_trace + s_sha256.to(KB)
+    s_turn_compact = s_prompt + s_gen + s_call + s_obs_compact
+
+    vol_compact_day = daily_turns * s_turn_compact
+    vol_compact_month = (vol_compact_day.to(GB).magnitude * days_per_month) * GB
+
+    compaction_ratio = vol_raw_day.to(GB).magnitude / vol_compact_day.to(GB).magnitude
+    space_savings = 1.0 - (1.0 / compaction_ratio)
+
+    vol_cold_annual = (vol_raw_year.to(TB).magnitude / (compaction_ratio * r_cold_comp)) * TB
+    n_annual_turns = n_agents * t_turns_per_day * 365
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(s_turn_raw.to(KB).magnitude == 365.0, "s_turn_raw")
+    check(abs(vol_raw_day.to(GB).magnitude - 164.25) < 1e-3, "vol_raw_day")
+    check(abs(vol_raw_month.to(TB).magnitude - 4.9275) < 1e-3, "vol_raw_month")
+    check(abs(vol_raw_year.to(TB).magnitude - 59.13) < 0.1, "vol_raw_year")
+    check(abs(vol_raw_replicated.to(TB).magnitude - 177.3) < 0.5, "vol_raw_replicated")
+
+    check(abs(s_obs_compact.to(KB).magnitude - 4.032) < 1e-4, "s_obs_compact")
+    check(abs(s_turn_compact.to(KB).magnitude - 19.032) < 1e-3, "s_turn_compact")
+    check(abs(vol_compact_day.to(GB).magnitude - 8.5644) < 1e-3, "vol_compact_day")
+    check(abs(vol_compact_month.to(GB).magnitude - 256.932) < 1.0, "vol_compact_month")
+    check(abs(compaction_ratio - 19.178) < 0.05, "compaction_ratio")
+    check(abs(space_savings - 0.9478) < 0.005, "space_savings")
+    check(abs(vol_cold_annual.to(GB).magnitude - 963.0) < 5.0, "vol_cold_annual")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_agents_str = fmt_int(n_agents)
+    t_turns_per_day_str = fmt_int(t_turns_per_day)
+
+    s_prompt_kb_str = fmt_memory(s_prompt, unit=KB, precision=0)
+    s_gen_kb_str = fmt_memory(s_gen, unit=KB, precision=0)
+    s_call_kb_str = fmt_memory(s_call, unit=KB, precision=0)
+    s_obs_kb_str = fmt_memory(s_obs, unit=KB, precision=0)
+    s_turn_raw_kb_str = fmt_memory(s_turn_raw, unit=KB, precision=0)
+
+    vol_raw_day_gb_str = fmt_memory(vol_raw_day, unit=GB, precision=2)
+    vol_raw_month_tb_str = fmt_memory(vol_raw_month, unit=TB, precision=2)
+    vol_raw_year_tb_str = fmt_memory(vol_raw_year, unit=TB, precision=1)
+    vol_raw_replicated_tb_str = fmt_memory(vol_raw_replicated, unit=TB, precision=1)
+
+    s_error_trace_kb_str = fmt_memory(s_error_trace, unit=KB, precision=0)
+    s_obs_compact_kb_str = fmt_memory(s_obs_compact, unit=KB, precision=3)
+    s_turn_compact_kb_str = fmt_memory(s_turn_compact, unit=KB, precision=2)
+
+    vol_compact_day_gb_str = fmt_memory(vol_compact_day, unit=GB, precision=2)
+    vol_compact_month_gb_str = fmt_memory(vol_compact_month, unit=GB, precision=1)
+
+    compaction_ratio_mult_str = fmt_multiple(compaction_ratio, precision=2)
+    space_savings_pct_str = fmt_percent(space_savings, precision=1, style="prose")
+
+    r_cold_comp_mult_str = fmt_multiple(r_cold_comp, precision=1)
+    vol_cold_annual_gb_str = fmt_memory(round(vol_cold_annual.to(GB).magnitude) * GB, unit=GB, precision=0)
+    n_annual_turns_str = fmt_int(int(n_annual_turns / 1_000_000))
+```
+
 ::: {#nbk-10-storage-compaction-economics-across-an .callout-notebook title="Storage compaction economics across an enterprise fleet"}
-Consider an enterprise agent cluster supporting $N = 2{,}500$ concurrent autonomous software development agents. Each agent executes an average of $T = 180$ turns per day.
+Consider an enterprise agent cluster supporting $N =$ `{python} StorageCompactionEconomics.n_agents_str` concurrent autonomous software development agents. Each agent executes an average of $T =$ `{python} StorageCompactionEconomics.t_turns_per_day_str` turns per day.
 
 *Baseline Parameters:*
 
-- Model prompt context metadata: $S_{\text{prompt}} = 12\text{ KB}$ per turn.
-- Model generation payload: $S_{\text{gen}} = 2\text{ KB}$ per turn.
-- Tool invocation parameters: $S_{\text{call}} = 1\text{ KB}$ per turn.
-- Raw tool observation output (compilers, git diffs, test runners): $S_{\text{obs}} = 350\text{ KB}$ per turn.
-- Uncompacted event size: $S_{\text{turn}} = 12 + 2 + 1 + 350 = 365\text{ KB}$ per turn.
+- Model prompt context metadata: $S_{	ext{prompt}} =$ `{python} StorageCompactionEconomics.s_prompt_kb_str` per turn.
+- Model generation payload: $S_{	ext{gen}} =$ `{python} StorageCompactionEconomics.s_gen_kb_str` per turn.
+- Tool invocation parameters: $S_{	ext{call}} =$ `{python} StorageCompactionEconomics.s_call_kb_str` per turn.
+- Raw tool observation output (compilers, git diffs, test runners): $S_{	ext{obs}} =$ `{python} StorageCompactionEconomics.s_obs_kb_str` per turn.
+- Uncompacted event size: $S_{	ext{turn}} = 12 + 2 + 1 + 350 =$ `{python} StorageCompactionEconomics.s_turn_raw_kb_str` per turn.
 
 *Daily Ingestion Footprint:*
 
-$$\text{Volume}_{\text{raw}} = 2{,}500 \times 180 \times 365\text{ KB} \approx 164.25\text{ GB/day} \approx 4.93\text{ TB/month}$$
+$$	ext{Volume}_{	ext{raw}} = 2{,}500 	imes 180 	imes 365	ext{ KB} pprox 164.25	ext{ GB/day} pprox 4.93	ext{ TB/month}$$
 
-Over a standard one-year compliance retention window, maintaining raw uncompacted logs requires $59.1\text{ TB}$ of capacity. When replicated threefold for high availability across distributed nodes, the infrastructure must provision $177.3\text{ TB}$ of high-IOPS block storage.
+This generates `{python} StorageCompactionEconomics.vol_raw_day_gb_str` per day (`{python} StorageCompactionEconomics.vol_raw_month_tb_str` per month). Over a standard one-year compliance retention window, maintaining raw uncompacted logs requires `{python} StorageCompactionEconomics.vol_raw_year_tb_str` of capacity. When replicated threefold for high availability across distributed nodes, the infrastructure must provision `{python} StorageCompactionEconomics.vol_raw_replicated_tb_str` of high-IOPS block storage.
 
 *Compacted Parameters (Hot-to-Warm Demotion after 24 Hours):*
-The compaction engine applies epistemic pruning to $S_{\text{obs}}$. The runtime retains the exit code, a $4\text{ KB}$ extracted error trace, and a $32\text{ byte}$ SHA-256 digest:
+The compaction engine applies epistemic pruning to $S_{	ext{obs}}$. The runtime retains the exit code, a `{python} StorageCompactionEconomics.s_error_trace_kb_str` extracted error trace, and a $32	ext{ byte}$ SHA-256 digest:
 
-$$S_{\text{obs, compact}} = 4.032\text{ KB}$$
+$$S_{	ext{obs, compact}} = 4.032	ext{ KB}$$
 
-$$S_{\text{turn, compact}} = 12 + 2 + 1 + 4.032 \approx 19.03\text{ KB}$$
+$$S_{	ext{turn, compact}} = 12 + 2 + 1 + 4.032 pprox 19.03	ext{ KB}$$
+
+This yields `{python} StorageCompactionEconomics.s_obs_compact_kb_str` per observation and `{python} StorageCompactionEconomics.s_turn_compact_kb_str` per turn.
 
 *Compacted Footprint:*
 
-$$\text{Volume}_{\text{compact}} = 2{,}500 \times 180 \times 19.03\text{ KB} \approx 8.56\text{ GB/day} \approx 256.8\text{ GB/month}$$
+$$	ext{Volume}_{	ext{compact}} = 2{,}500 	imes 180 	imes 19.03	ext{ KB} pprox 8.56	ext{ GB/day} pprox 256.8	ext{ GB/month}$$
+
+Daily compacted volume totals `{python} StorageCompactionEconomics.vol_compact_day_gb_str` (`{python} StorageCompactionEconomics.vol_compact_month_gb_str` per month).
 
 *Storage Compaction Ratio:*
 
-$$\text{Ratio} = \frac{164.25\text{ GB/day}}{8.56\text{ GB/day}} \approx 19.19\times \text{ reduction } (94.8\% \text{ space savings})$$
+$$	ext{Ratio} = rac{164.25	ext{ GB/day}}{8.56	ext{ GB/day}} pprox 19.19	imes 	ext{ reduction } (94.8\% 	ext{ space savings})$$
 
-When demoted to the Cold Tier after thirty days, the columnar Parquet representation with Zstandard compression achieves an additional $3.2\times$ compression factor on the structured text, shrinking the annual compliance archive from $59.1\text{ TB}$ to just $963\text{ GB}$. A single terabyte of cold object storage easily accommodates the entire corporate history of $164$ million autonomous operational turns.
+Epistemic pruning achieves a `{python} StorageCompactionEconomics.compaction_ratio_mult_str` reduction (`{python} StorageCompactionEconomics.space_savings_pct_str` space savings). When demoted to the Cold Tier after thirty days, the columnar Parquet representation with Zstandard compression achieves an additional `{python} StorageCompactionEconomics.r_cold_comp_mult_str` compression factor on the structured text, shrinking the annual compliance archive from $59.1	ext{ TB}$ to just `{python} StorageCompactionEconomics.vol_cold_annual_gb_str`. A single terabyte of cold object storage easily accommodates the entire corporate history of `{python} StorageCompactionEconomics.n_annual_turns_str` million autonomous operational turns.
 :::
 
 ### Cryptographic shredding governance
@@ -1226,50 +1801,152 @@ $$\text{WAF}_{\text{LSM}} = 1 + T \times k$$ {#eq-vol3-waf-lsm}
 
 For an LSM-tree maintaining 4 levels with $T=10$, the total lifetime write amplification reaches $\text{WAF}_{\text{LSM}} \approx 1 + 10 \times 4 = 41$. However, unlike B-tree page updates, LSM compaction writes are purely asynchronous, batched, and executed using large, sequential multi-megabyte I/O requests. The critical path of model execution observes only the low-latency, sequential WAL append. The storage subsystem can absorb high burst rates without stalling the agent runtime, provided background compaction throughput matches the aggregate event generation rate.
 
+```{python}
+#| label: lego-10-io-bottlenecks-and-write-amplification
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ I/O BOTTLENECKS AND WRITE AMPLIFICATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-10-io-bottlenecks-and-write-amplification
+# │ Goal: Contrast SQLite B-tree vs RocksDB LSM-tree write amplification & endurance.
+# │ Show: RocksDB absorbs 31x WAF at 96.88 MB/s (3.03% bus) without lock serialization.
+# │ How: Model IOPS, lock duration, WAF, annual write TB, and bus utilization.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_bandwidth, fmt_int, fmt_latency, fmt_memory, fmt_percent, fmt_rate, fmt_time
+
+class IoBottlenecksWriteAmplification:
+    """I/O bottlenecks and write amplification in synchronous trajectory logging."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_workers = 128
+    lambda_turn_rate = 400
+    e_prop = 1.2 * KB
+    e_auth = 0.3 * KB
+    e_obs = 6.5 * KB
+
+    b_seq_max = 3200 * (MB / second)
+    iops_max = 75_000
+    t_sync = 35 * microsecond
+    dwpd = 1.0
+    drive_capacity = 3.84 * TB
+    drive_lifespan_years = 5
+
+    events_per_turn = 3
+    page_size = 4 * KB
+    writes_per_event = 2
+
+    t_ratio = 10
+    k_levels = 3
+    waf_ingest = 1.0
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    s_turn = e_prop + e_auth + e_obs
+    throughput_logical_kb = lambda_turn_rate * s_turn.to(KB).magnitude * (KB / second)
+    throughput_logical_mb_s = throughput_logical_kb.magnitude / 1024.0
+
+    iops_btree = lambda_turn_rate * events_per_turn * writes_per_event
+    t_locked_s = lambda_turn_rate * events_per_turn * t_sync.to(second).magnitude
+    t_locked = t_locked_s * second
+    lock_pct = t_locked_s
+
+    bandwidth_btree_kb = iops_btree * page_size.to(KB).magnitude * (KB / second)
+    bandwidth_btree_mb_s = bandwidth_btree_kb.magnitude / 1024.0
+    waf_btree = bandwidth_btree_mb_s / throughput_logical_mb_s
+
+    bytes_annual_btree_tb = (bandwidth_btree_mb_s * 86_400 * 365) / 1_000_000.0
+    bytes_5yr_btree_tb = bytes_annual_btree_tb * drive_lifespan_years
+    warranty_limit_tb = drive_capacity.to(TB).magnitude * dwpd * 365 * drive_lifespan_years
+
+    waf_compaction = t_ratio * k_levels
+    waf_total_lsm = waf_ingest + waf_compaction
+    bandwidth_lsm_mb_s = throughput_logical_mb_s * waf_total_lsm
+    bus_util_lsm = bandwidth_lsm_mb_s / b_seq_max.to(MB / second).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(s_turn.to(KB).magnitude == 8.0, "s_turn")
+    check(throughput_logical_mb_s == 3.125, "throughput_logical_mb_s")
+    check(iops_btree == 2400, "iops_btree")
+    check(abs(t_locked_s - 0.042) < 1e-4, "t_locked_s")
+    check(abs(lock_pct - 0.042) < 1e-4, "lock_pct")
+    check(bandwidth_btree_mb_s == 9.375, "bandwidth_btree_mb_s")
+    check(waf_btree == 3.0, "waf_btree")
+    check(abs(bytes_annual_btree_tb - 295.65) < 0.1, "bytes_annual_btree_tb")
+    check(abs(bytes_5yr_btree_tb - 1478.25) < 1.0, "bytes_5yr_btree_tb")
+    check(abs(warranty_limit_tb - 7008.0) < 1.0, "warranty_limit_tb")
+
+    check(waf_compaction == 30, "waf_compaction")
+    check(waf_total_lsm == 31.0, "waf_total_lsm")
+    check(bandwidth_lsm_mb_s == 96.875, "bandwidth_lsm_mb_s")
+    check(abs(bus_util_lsm - 0.03027) < 1e-4, "bus_util_lsm")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_workers_str = fmt_int(n_workers)
+    lambda_turn_rate_str = fmt_int(lambda_turn_rate)
+    e_prop_kb_str = fmt_memory(e_prop, unit=KB, precision=1)
+    e_auth_kb_str = fmt_memory(e_auth, unit=KB, precision=1)
+    e_obs_kb_str = fmt_memory(e_obs, unit=KB, precision=1)
+    s_turn_kb_str = fmt_memory(s_turn, unit=KB, precision=0)
+
+    iops_btree_str = fmt_int(iops_btree)
+    t_locked_s_str = fmt_time(t_locked, unit=second, precision=3)
+    lock_pct_str = fmt_percent(lock_pct, precision=1, style="prose")
+
+    waf_btree_str = fmt_int(int(waf_btree))
+    bytes_annual_btree_tb_str = fmt_memory(bytes_annual_btree_tb * TB, unit=TB, precision=1)
+    bytes_5yr_btree_tb_str = fmt_memory(round(bytes_5yr_btree_tb) * TB, unit=TB, precision=0)
+    warranty_limit_tb_str = fmt_memory(round(warranty_limit_tb) * TB, unit=TB, precision=0)
+
+    waf_compaction_str = fmt_int(waf_compaction)
+    waf_total_lsm_str = fmt_int(int(waf_total_lsm))
+    bus_util_lsm_pct_str = fmt_percent(bus_util_lsm, precision=2, style="prose")
+```
+
 ::: {#nbk-10-io-bottlenecks-and-write-amplification .callout-notebook title="I/O bottlenecks and write amplification in synchronous trajectory logging"}
 **Problem Statement:**
-Consider a high-density compute node hosting 128 concurrent agent worker processes. Each agent trajectory executes an interactive loop generating turns at an aggregate rate of $\lambda = 400\text{ turns/second}$ across the entire host. Each turn produces three distinct events: an action proposal $e_{\text{prop}}$ ($1.2\text{ KB}$), an authorization decision $e_{\text{auth}}$ ($0.3\text{ KB}$), and an execution observation payload $e_{\text{obs}}$ ($6.5\text{ KB}$), totaling a logical payload of $S_{\text{turn}} = 8.0\text{ KB}$ per turn. The host is equipped with an enterprise PCIe 4.0 NVMe SSD with the following specifications:
+Consider a high-density compute node hosting `{python} IoBottlenecksWriteAmplification.n_workers_str` concurrent agent worker processes. Each agent trajectory executes an interactive loop generating turns at an aggregate rate of $\lambda =$ `{python} IoBottlenecksWriteAmplification.lambda_turn_rate_str` turns per second across the entire host. Each turn produces three distinct events: an action proposal $e_{	ext{prop}}$ (`{python} IoBottlenecksWriteAmplification.e_prop_kb_str`), an authorization decision $e_{	ext{auth}}$ (`{python} IoBottlenecksWriteAmplification.e_auth_kb_str`), and an execution observation payload $e_{	ext{obs}}$ (`{python} IoBottlenecksWriteAmplification.e_obs_kb_str`), totaling a logical payload of $S_{	ext{turn}} =$ `{python} IoBottlenecksWriteAmplification.s_turn_kb_str` per turn. The host is equipped with an enterprise PCIe 4.0 NVMe SSD with the following specifications:
 
-- Maximum sustained sequential write bandwidth: $B_{\text{seq}} = 3,200\text{ MB/s}$
-- Maximum random write throughput ($4\text{ KB}$ blocks): $IOPS_{\max} = 75,000\text{ IOPS}$
-- Synchronous write sync latency: $t_{\text{sync}} = 35\ \mu\text{s}$
-- Flash endurance rating: $1.0\text{ Drive Writes Per Day (DWPD)}$ on a $3.84\text{ TB}$ drive over 5 years.
+- Maximum sustained sequential write bandwidth: $B_{	ext{seq}} = 3,200	ext{ MB/s}$
+- Maximum random write throughput ($4	ext{ KB}$ blocks): $IOPS_{\max} = 75,000	ext{ IOPS}$
+- Synchronous write sync latency: $t_{	ext{sync}} = 35\ \mu	ext{s}$
+- Flash endurance rating: $1.0	ext{ Drive Writes Per Day (DWPD)}$ on a $3.84	ext{ TB}$ drive over 5 years.
 
 Evaluate the system feasibility and drive lifespan under two distinct persistence implementations:
 
-1. **Implementation A (Naive B-Tree):** Each event is flushed synchronously as an individual transaction to an embedded relational SQLite database with $4\text{ KB}$ pages, operating with direct disk synchronization (`PRAGMA synchronous = FULL`) and double-write buffering.
+1. **Implementation A (Naive B-Tree):** Each event is flushed synchronously as an individual transaction to an embedded relational SQLite database with $4	ext{ KB}$ pages, operating with direct disk synchronization (`PRAGMA synchronous = FULL`) and double-write buffering.
 2. **Implementation B (Embedded LSM-Tree):** Events are written to an embedded RocksDB instance configured with sequential WAL appends, grouped commits, and leveled compaction ($T=10$, $k=3$ levels).
 
 **Solution:**
 
 *Step 1: Compute the logical write rate.*
-$$\text{Throughput}_{\text{logical}} = \lambda \times S_{\text{turn}} = 400\text{ turns/s} \times 8.0\text{ KB} = 3,200\text{ KB/s} = 3.125\text{ MB/s}$$
+$$	ext{Throughput}_{	ext{logical}} = \lambda 	imes S_{	ext{turn}} = 400	ext{ turns/s} 	imes 8.0	ext{ KB} = 3,200	ext{ KB/s} = 3.125	ext{ MB/s}$$
 
 *Step 2: Evaluate Implementation A (Naive B-Tree).*
-Each turn consists of 3 distinct events. Because events arrive asynchronously from 128 concurrent threads, each event requires a separate transaction commit dirtying an independent $4\text{ KB}$ leaf page in the B-tree. With double-write buffering, each event commit requires at least two $4\text{ KB}$ page writes:
-$$\text{Physical IOPS}_{\text{BTree}} = \lambda \times 3\text{ events/turn} \times 2\text{ writes/event} = 400 \times 3 \times 2 = 2,400\text{ random IOPS}$$
-While $2,400\text{ IOPS}$ is well within the drive's peak rating of $75,000\text{ IOPS}$, consider the synchronous commit latency. SQLite's single-writer lock serializes these transactions. The aggregate time spent holding the lock per second across all events is:
-$$T_{\text{locked}} = 400\text{ turns/s} \times 3\text{ transactions/turn} \times t_{\text{sync}} = 1,200 \times 35\ \mu\text{s} = 42,000\ \mu\text{s} = 0.042\text{ seconds}$$
-Under ideal uniform scheduling, this consumes $4.2\%$ of available write time. However, in-flight page splits, B-tree lock contention, and OS scheduler jitter cause thread convoys. In practice, lock contention on SQLite causes the 99th-percentile commit latency to balloon past $20\text{ ms}$, stalling the model execution loop.
+Each turn consists of 3 distinct events. Because events arrive asynchronously from 128 concurrent threads, each event requires a separate transaction commit dirtying an independent $4	ext{ KB}$ leaf page in the B-tree. With double-write buffering, each event commit requires at least two $4	ext{ KB}$ page writes:
+$$	ext{Physical IOPS}_{	ext{BTree}} = \lambda 	imes 3	ext{ events/turn} 	imes 2	ext{ writes/event} = 400 	imes 3 	imes 2 = 2,400	ext{ random IOPS}$$
+This demands `{python} IoBottlenecksWriteAmplification.iops_btree_str` random IOPS. While $2,400	ext{ IOPS}$ is well within the drive's peak rating of $75,000	ext{ IOPS}$, consider the synchronous commit latency. SQLite's single-writer lock serializes these transactions. The aggregate time spent holding the lock per second across all events is:
+$$T_{	ext{locked}} = 400	ext{ turns/s} 	imes 3	ext{ transactions/turn} 	imes t_{	ext{sync}} = 1,200 	imes 35\ \mu	ext{s} = 42,000\ \mu	ext{s} = 0.042	ext{ seconds}$$
+Under ideal uniform scheduling, holding the lock for `{python} IoBottlenecksWriteAmplification.t_locked_s_str` consumes `{python} IoBottlenecksWriteAmplification.lock_pct_str` of available write time. However, in-flight page splits, B-tree lock contention, and OS scheduler jitter cause thread convoys. In practice, lock contention on SQLite causes the 99th-percentile commit latency to balloon past $20	ext{ ms}$, stalling the model execution loop.
 
 Now calculate drive endurance under Implementation A:
-$$\text{Bandwidth}_{\text{BTree}} = 2,400\text{ writes/s} \times 4\text{ KB} = 9,600\text{ KB/s} = 9.375\text{ MB/s}$$
-$$\text{WAF}_{\text{BTree}} = \frac{9.375\text{ MB/s}}{3.125\text{ MB/s}} = 3.0$$
+$$	ext{Bandwidth}_{	ext{BTree}} = 2,400	ext{ writes/s} 	imes 4	ext{ KB} = 9,600	ext{ KB/s} = 9.375	ext{ MB/s}$$
+$$	ext{WAF}_{	ext{BTree}} = rac{9.375	ext{ MB/s}}{3.125	ext{ MB/s}} = 3.0$$
 Annual physical writes to the drive:
-$$\text{Bytes}_{\text{annual}} = 9.375\text{ MB/s} \times 86,400\text{ s/day} \times 365\text{ days} \approx 295.6\text{ TB/year}$$
-Over 5 years, total writes equal $1,478\text{ TB}$, well below the drive's rated warranty limit ($3.84\text{ TB} \times 1.0\text{ DWPD} \times 365 \times 5 = 7,008\text{ TB}$). While the flash endurance survives, the single-writer lock contention renders Implementation A unusable for sub-millisecond execution loops.
+$$	ext{Bytes}_{	ext{annual}} = 9.375	ext{ MB/s} 	imes 86,400	ext{ s/day} 	imes 365	ext{ days} pprox 295.6	ext{ TB/year}$$
+With a write amplification of `{python} IoBottlenecksWriteAmplification.waf_btree_str`, annual writes equal `{python} IoBottlenecksWriteAmplification.bytes_annual_btree_tb_str`. Over 5 years, total writes equal `{python} IoBottlenecksWriteAmplification.bytes_5yr_btree_tb_str`, well below the drive's rated warranty limit (`{python} IoBottlenecksWriteAmplification.warranty_limit_tb_str`). While the flash endurance survives, the single-writer lock contention renders Implementation A unusable for sub-millisecond execution loops.
 
 *Step 3: Evaluate Implementation B (Embedded LSM-Tree).*
 In RocksDB, multiple concurrent write threads execute lock-free appends into an in-memory queue, which a single leader thread flushes to the sequential WAL file in a single batched `fdatasync()` operation. The synchronous write path incurs an ingestion write amplification of:
-$$\text{WAF}_{\text{ingest}} \approx 1.0$$
+$$	ext{WAF}_{	ext{ingest}} pprox 1.0$$
 Background compaction across $k=3$ levels with $T=10$ incurs a steady-state compaction write amplification:
-$$\text{WAF}_{\text{compaction}} = T \times k = 10 \times 3 = 30$$
-Total write amplification is $\text{WAF}_{\text{total}} = 1 + 30 = 31$.
+$$	ext{WAF}_{	ext{compaction}} = T 	imes k = 10 	imes 3 = 30$$
+Compaction amplification equals `{python} IoBottlenecksWriteAmplification.waf_compaction_str`. Total write amplification is $	ext{WAF}_{	ext{total}} = 1 + 30 = 31$, yielding a combined factor of `{python} IoBottlenecksWriteAmplification.waf_total_lsm_str`.
 The physical bandwidth consumed on the NVMe drive is:
-$$\text{Bandwidth}_{\text{RocksDB}} = 3.125\text{ MB/s} \times 31 = 96.875\text{ MB/s}$$
+$$	ext{Bandwidth}_{	ext{RocksDB}} = 3.125	ext{ MB/s} 	imes 31 = 96.875	ext{ MB/s}$$
 Comparing this against the drive's sequential write ceiling:
-$$\text{Bus Utilization} = \frac{96.875\text{ MB/s}}{3,200\text{ MB/s}} \approx 3.03\%$$
-Because RocksDB executes compaction writes using large, sequential $2\text{ MB}$ block I/Os, it consumes virtually zero random IOPS budget. Group commit keeps the $P_{99}$ synchronous latency of $e_{\text{flush}}$ strictly under $0.6\text{ ms}$, successfully isolating the model execution loop from physical storage bottlenecks.
+$$	ext{Bus Utilization} = rac{96.875	ext{ MB/s}}{3,200	ext{ MB/s}} pprox 3.03\%$$
+Bus utilization settles at `{python} IoBottlenecksWriteAmplification.bus_util_lsm_pct_str`. Because RocksDB executes compaction writes using large, sequential $2	ext{ MB}$ block I/Os, it consumes virtually zero random IOPS budget. Group commit keeps the $P_{99}$ synchronous latency of $e_{	ext{flush}}$ strictly under $0.6	ext{ ms}$, successfully isolating the model execution loop from physical storage bottlenecks.
 :::
 
 To verify the physical disparity between sequential log appending and random page updates empirically, runtimes benchmark write throughput across storage backends using microbenchmarks that isolate synchronous NVMe durability barriers. The following Python benchmark illustrates how an append-only log achieves orders-of-magnitude lower sync latency than a transactional B-tree under identical operating system flush semantics:

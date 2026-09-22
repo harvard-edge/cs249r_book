@@ -394,6 +394,8 @@ def _coerce_unit(display_unit):
     """Return a Pint Unit from a Pint unit-like object or unit string."""
     if isinstance(display_unit, str):
         return ureg.Unit(display_unit)
+    if isinstance(display_unit, ureg.Quantity):
+        return display_unit.units
     return display_unit
 
 
@@ -2328,6 +2330,20 @@ def _pick_emissions_unit(qty):
     return metric_ton
 
 
+def _pick_mass_unit(qty):
+    """Auto-select gram, kilogram, or metric ton for prose mass display."""
+    from .core.units import gram, kilogram, metric_ton
+
+    q = qty.to(gram)
+    mag = abs(q.magnitude)
+    if mag < 1e3:
+        return gram
+    kg = q.to(kilogram).magnitude
+    if kg < 1e3:
+        return kilogram
+    return metric_ton
+
+
 def _pick_carbon_intensity_unit(qty):
     from .core.units import gram, kWh
 
@@ -2376,6 +2392,7 @@ def fmt_power(
     approx=False,
     lower_bound=False,
     upper_bound=False,
+    per=None,
 ):
     """Auto-scale power quantities for prose (W, kW, MW, GW)."""
     if not isinstance(quantity, ureg.Quantity):
@@ -2392,6 +2409,7 @@ def fmt_power(
         approx=approx,
         lower_bound=lower_bound,
         upper_bound=upper_bound,
+        per=per,
         trim_trailing_zeros=auto_precision,
     )
 
@@ -2405,6 +2423,7 @@ def fmt_energy(
     approx=False,
     lower_bound=False,
     upper_bound=False,
+    per=None,
 ):
     """Auto-scale energy quantities for prose (J, Wh, kWh, MWh, GWh)."""
     if not isinstance(quantity, ureg.Quantity):
@@ -2421,6 +2440,7 @@ def fmt_energy(
         approx=approx,
         lower_bound=lower_bound,
         upper_bound=upper_bound,
+        per=per,
         trim_trailing_zeros=auto_precision,
     )
 
@@ -2434,6 +2454,7 @@ def fmt_bandwidth(
     approx=False,
     lower_bound=False,
     upper_bound=False,
+    per=None,
 ):
     """Auto-scale bandwidth for prose (MB/s, GB/s, TB/s)."""
     if not isinstance(quantity, ureg.Quantity):
@@ -2450,6 +2471,7 @@ def fmt_bandwidth(
         approx=approx,
         lower_bound=lower_bound,
         upper_bound=upper_bound,
+        per=per,
         trim_trailing_zeros=auto_precision,
     )
 
@@ -2463,6 +2485,7 @@ def fmt_flop_rate(
     approx=False,
     lower_bound=False,
     upper_bound=False,
+    per=None,
 ):
     """Auto-scale FLOP throughput for prose (GFLOP/s through ZFLOP/s)."""
     if not isinstance(quantity, ureg.Quantity):
@@ -2479,6 +2502,7 @@ def fmt_flop_rate(
         approx=approx,
         lower_bound=lower_bound,
         upper_bound=upper_bound,
+        per=per,
         trim_trailing_zeros=auto_precision,
     )
 
@@ -2610,11 +2634,46 @@ def fmt_illuminance(quantity, *, unit=None, precision=None, commas=False):
     )
 
 
-def fmt_temperature(quantity, *, unit=None, precision=None, commas=False):
-    """Format absolute temperatures, defaulting to degrees Celsius."""
+def _temperature_unit_label(display_unit):
+    unit_str = str(display_unit)
+    if unit_str in ("K", "kelvin"):
+        return "K"
+    if "°C" in unit_str or "degC" in unit_str or "celsius" in unit_str.lower():
+        return "°C"
+    if "°F" in unit_str or "degF" in unit_str or "fahrenheit" in unit_str.lower():
+        return "°F"
+    return None
+
+
+def _temperature_rate_unit_label(display_unit):
+    unit_str = str(display_unit)
+    if "K" in unit_str or "kelvin" in unit_str:
+        return "K/s"
+    if "°C" in unit_str or "degC" in unit_str or "celsius" in unit_str.lower():
+        return "°C/s"
+    if "°F" in unit_str or "degF" in unit_str or "fahrenheit" in unit_str.lower():
+        return "°F/s"
+    return None
+
+
+def fmt_temperature(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format absolute temperatures, defaulting to degrees Celsius (or Kelvin if input is in K)."""
     if not isinstance(quantity, ureg.Quantity):
         raise TypeError("fmt_temperature() requires a Pint Quantity.")
-    display_unit = _coerce_unit(unit) if unit is not None else ureg.degC
+    if unit is not None:
+        display_unit = _coerce_unit(unit)
+    else:
+        q_units = str(quantity.units)
+        display_unit = ureg.kelvin if ("kelvin" in q_units or q_units == "K") else ureg.degC
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
@@ -2623,18 +2682,34 @@ def fmt_temperature(quantity, *, unit=None, precision=None, commas=False):
         display_unit,
         precision=p,
         commas=commas,
-        unit_label="°C",
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=_temperature_unit_label(display_unit),
         trim_trailing_zeros=auto_precision,
     )
 
 
-def fmt_temperature_rate(quantity, *, unit=None, precision=None, commas=False):
-    """Format temperature-change rates, defaulting to degrees Celsius per second."""
+def fmt_temperature_rate(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format temperature-change rates, defaulting to degrees Celsius per second (or K/s)."""
     if not isinstance(quantity, ureg.Quantity):
         raise TypeError("fmt_temperature_rate() requires a Pint Quantity.")
     from .core.units import second
 
-    display_unit = _coerce_unit(unit) if unit is not None else ureg.delta_degC / second
+    if unit is not None:
+        display_unit = _coerce_unit(unit)
+    else:
+        q_units = str(quantity.units)
+        display_unit = (ureg.kelvin / second) if ("kelvin" in q_units or "K" in q_units) else (ureg.delta_degC / second)
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
@@ -2643,7 +2718,10 @@ def fmt_temperature_rate(quantity, *, unit=None, precision=None, commas=False):
         display_unit,
         precision=p,
         commas=commas,
-        unit_label="°C/s",
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=_temperature_rate_unit_label(display_unit),
         trim_trailing_zeros=auto_precision,
     )
 
@@ -2885,7 +2963,18 @@ def fmt_specific_heat(quantity, *, unit=None, precision=None, commas=False):
     )
 
 
-def fmt_memory(quantity, *, unit=None, precision=None, commas=False, binary=False):
+def fmt_memory(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    binary=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+    per=None,
+):
     """Auto-scale memory sizes for prose."""
     if not isinstance(quantity, ureg.Quantity):
         raise TypeError("fmt_memory() requires a Pint Quantity.")
@@ -2895,7 +2984,17 @@ def fmt_memory(quantity, *, unit=None, precision=None, commas=False, binary=Fals
     q = quantity.to(display_unit)
     auto_precision = precision is None
     p = _resolve_display_precision(q.magnitude, precision)
-    return fmt_qty(q, display_unit, precision=p, commas=commas, trim_trailing_zeros=auto_precision)
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        per=per,
+        trim_trailing_zeros=auto_precision,
+    )
 
 
 def _memory_capacity_unit_label(display_unit):
@@ -3155,6 +3254,7 @@ def fmt_torque_rate(quantity, *, unit=None, precision=None, commas=False):
         trim_trailing_zeros=auto_precision,
     )
 
+
 def fmt_torque_constant(quantity, *, unit=None, precision=None, commas=False):
     """Format a motor torque constant for prose (N·m/A)."""
     if not isinstance(quantity, ureg.Quantity):
@@ -3175,6 +3275,155 @@ def fmt_torque_constant(quantity, *, unit=None, precision=None, commas=False):
         trim_trailing_zeros=auto_precision,
     )
 
+
+def fmt_force(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format force quantities for prose (N, kN, mN)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_force() requires a Pint Quantity.")
+    force_dim = (1 * ureg.newton).dimensionality
+    if (1 * quantity).dimensionality != force_dim:
+        raise ValueError(f"fmt_force unit must have force dimensionality (N), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else ureg.newton
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_label = "N" if display_unit == ureg.newton else None
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_force_rate(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format force-rate quantities for prose (N/s, N/ms), e.g. braking or clamp ramps."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_force_rate() requires a Pint Quantity.")
+    rate_dim = (1 * (ureg.newton / ureg.second)).dimensionality
+    if (1 * quantity).dimensionality != rate_dim:
+        raise ValueError(f"fmt_force_rate unit must have force-rate dimensionality (N/s), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.newton / ureg.second)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_label = None
+    try:
+        if abs((1 * display_unit).to(ureg.newton / ureg.second).magnitude - 1) < 1e-12:
+            unit_label = "N/s"
+        elif abs((1 * display_unit).to(ureg.newton / ureg.millisecond).magnitude - 1) < 1e-12:
+            unit_label = "N/ms"
+    except Exception:
+        unit_label = None
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_mass(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Auto-scale mass quantities for prose (g, kg, t)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_mass() requires a Pint Quantity.")
+    mass_dim = (1 * ureg.kilogram).dimensionality
+    if (1 * quantity).dimensionality != mass_dim:
+        raise ValueError(f"fmt_mass unit must have mass dimensionality, got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else _pick_mass_unit(quantity)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_angular_velocity(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format angular velocity quantities for prose (rad/s, deg/s, rpm)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_angular_velocity() requires a Pint Quantity.")
+    ang_vel_dim = (1 * (ureg.radian / ureg.second)).dimensionality
+    if (1 * quantity).dimensionality != ang_vel_dim:
+        raise ValueError(f"fmt_angular_velocity unit must have angular velocity dimensionality (angle/time), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.radian / ureg.second)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_label = None
+    try:
+        if abs((1 * display_unit).to(ureg.radian / ureg.second).magnitude - 1) < 1e-12:
+            unit_label = "rad/s"
+        elif abs((1 * display_unit).to(ureg.degree / ureg.second).magnitude - 1) < 1e-12:
+            unit_label = "deg/s"
+        elif str(display_unit) in {"rpm", "revolutions_per_minute"} or display_unit == ureg.Unit("rpm"):
+            unit_label = "rpm"
+    except Exception:
+        unit_label = None
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
 def fmt_velocity(quantity, *, unit=None, precision=None, commas=False):
     """Format velocity/speed quantities for prose (m/s, km/h, mph)."""
     if not isinstance(quantity, ureg.Quantity):
@@ -3291,6 +3540,529 @@ def fmt_token_rate(
         lower_bound=lower_bound,
         upper_bound=upper_bound,
         allow_negative=allow_negative,
+    )
+
+
+def fmt_thermal_resistance(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format thermal resistance quantities for prose (K/W, °C/W)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_thermal_resistance() requires a Pint Quantity.")
+    res_dim = (1 * (ureg.kelvin / ureg.watt)).dimensionality
+    if (1 * quantity).dimensionality != res_dim:
+        raise ValueError(f"fmt_thermal_resistance unit must have thermal resistance dimensionality (temperature/power), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.kelvin / ureg.watt)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_str = str(display_unit)
+    if "°C" in unit_str or "degC" in unit_str:
+        unit_label = "°C/W"
+    else:
+        unit_label = "K/W"
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_heat_capacity(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format heat capacity quantities for prose (J/K, kJ/K)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_heat_capacity() requires a Pint Quantity.")
+    cap_dim = (1 * (ureg.joule / ureg.kelvin)).dimensionality
+    if (1 * quantity).dimensionality != cap_dim:
+        raise ValueError(f"fmt_heat_capacity unit must have heat capacity dimensionality (energy/temperature), got {quantity}.")
+    if unit is not None:
+        display_unit = _coerce_unit(unit)
+    else:
+        base_mag = abs(quantity.to(ureg.joule / ureg.kelvin).magnitude)
+        display_unit = (ureg.kilojoule / ureg.kelvin) if base_mag >= 1000.0 else (ureg.joule / ureg.kelvin)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_str = str(display_unit)
+    if "kilo" in unit_str or "kJ" in unit_str:
+        unit_label = "kJ/K"
+    else:
+        unit_label = "J/K"
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_density(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format density quantities for prose (kg/m³, g/cm³)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_density() requires a Pint Quantity.")
+    density_dim = (1 * (ureg.kilogram / (ureg.meter**3))).dimensionality
+    if (1 * quantity).dimensionality != density_dim:
+        raise ValueError(f"fmt_density unit must have density dimensionality (mass/volume), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.kilogram / (ureg.meter**3))
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_label = "kg/m³" if display_unit == (ureg.kilogram / (ureg.meter**3)) else None
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_mass_flow(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format mass flow rate quantities for prose (kg/s, kg/h)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_mass_flow() requires a Pint Quantity.")
+    flow_dim = (1 * (ureg.kilogram / ureg.second)).dimensionality
+    if (1 * quantity).dimensionality != flow_dim:
+        raise ValueError(f"fmt_mass_flow unit must have mass flow dimensionality (mass/time), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.kilogram / ureg.second)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_label = "kg/s" if display_unit == (ureg.kilogram / ureg.second) else None
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+fmt_mass_flow_rate = fmt_mass_flow
+
+
+def fmt_volumetric_flow(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format volumetric flow rate quantities for prose (m³/s, L/s)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_volumetric_flow() requires a Pint Quantity.")
+    flow_dim = (1 * ((ureg.meter**3) / ureg.second)).dimensionality
+    if (1 * quantity).dimensionality != flow_dim:
+        raise ValueError(f"fmt_volumetric_flow unit must have volumetric flow dimensionality (volume/time), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else ((ureg.meter**3) / ureg.second)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_label = "m³/s" if display_unit == ((ureg.meter**3) / ureg.second) else None
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+fmt_flow_rate = fmt_volumetric_flow
+
+
+def fmt_charge(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format electric charge or battery capacity for prose (mAh, Ah, C)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_charge() requires a Pint Quantity.")
+    charge_dim = (1 * (ureg.ampere * ureg.second)).dimensionality
+    if (1 * quantity).dimensionality != charge_dim:
+        raise ValueError(f"fmt_charge unit must have electric charge dimensionality (current·time), got {quantity}.")
+    if unit is not None:
+        display_unit = _coerce_unit(unit)
+    else:
+        mag_mah = abs(quantity.to(ureg.milliampere_hour).magnitude)
+        display_unit = ureg.ampere_hour if mag_mah >= 1000.0 else ureg.milliampere_hour
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_str = str(display_unit)
+    if "milliampere_hour" in unit_str or "mAh" in unit_str:
+        unit_label = "mAh"
+    elif "ampere_hour" in unit_str or "Ah" in unit_str:
+        unit_label = "Ah"
+    elif "coulomb" in unit_str or "C" in unit_str:
+        unit_label = "C"
+    else:
+        unit_label = None
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+fmt_battery_capacity = fmt_charge
+
+
+def fmt_angle(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format planar angle quantities for prose (rad, mrad, deg)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_angle() requires a Pint Quantity.")
+    try:
+        quantity.to(ureg.radian)
+    except Exception:
+        raise ValueError(f"fmt_angle unit must be an angle (rad, deg), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else ureg.radian
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_str = str(display_unit)
+    if unit_str in ("radian", "rad"):
+        unit_label = "rad"
+    elif unit_str in ("milliradian", "mrad"):
+        unit_label = "mrad"
+    elif unit_str in ("degree", "deg"):
+        unit_label = "deg"
+    else:
+        unit_label = None
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_inductance(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format electrical inductance quantities for prose (µH, mH, H)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_inductance() requires a Pint Quantity.")
+    ind_dim = (1 * ureg.henry).dimensionality
+    if (1 * quantity).dimensionality != ind_dim:
+        raise ValueError(f"fmt_inductance unit must have inductance dimensionality (H), got {quantity}.")
+    if unit is not None:
+        display_unit = _coerce_unit(unit)
+    else:
+        mag_h = abs(quantity.to(ureg.henry).magnitude)
+        if mag_h < 1e-3:
+            display_unit = ureg.microhenry
+        elif mag_h < 1.0:
+            display_unit = ureg.millihenry
+        else:
+            display_unit = ureg.henry
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_str = str(display_unit)
+    if "microhenry" in unit_str or "μH" in unit_str or "µH" in unit_str or "uH" in unit_str:
+        unit_label = "μH"
+    elif "millihenry" in unit_str or "mH" in unit_str:
+        unit_label = "mH"
+    elif "henry" in unit_str or unit_str == "H":
+        unit_label = "H"
+    else:
+        unit_label = None
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_capacitance(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format electrical capacitance quantities for prose (pF, nF, μF, mF, F)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_capacitance() requires a Pint Quantity.")
+    cap_dim = (1 * ureg.farad).dimensionality
+    if (1 * quantity).dimensionality != cap_dim:
+        raise ValueError(f"fmt_capacitance unit must have capacitance dimensionality (F), got {quantity}.")
+    if unit is not None:
+        display_unit = _coerce_unit(unit)
+    else:
+        mag_f = abs(quantity.to(ureg.farad).magnitude)
+        if mag_f < 1e-6:
+            display_unit = ureg.nanofarad
+        elif mag_f < 1e-3:
+            display_unit = ureg.microfarad
+        elif mag_f < 1.0:
+            display_unit = ureg.millifarad
+        else:
+            display_unit = ureg.farad
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_str = str(display_unit)
+    if "picofarad" in unit_str or "pF" in unit_str:
+        unit_label = "pF"
+    elif "nanofarad" in unit_str or "nF" in unit_str:
+        unit_label = "nF"
+    elif "microfarad" in unit_str or "μF" in unit_str or "µF" in unit_str or "uF" in unit_str:
+        unit_label = "μF"
+    elif "millifarad" in unit_str or "mF" in unit_str:
+        unit_label = "mF"
+    elif "farad" in unit_str or unit_str == "F":
+        unit_label = "F"
+    else:
+        unit_label = None
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_power_rate(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format power ramp rate quantities for prose (W/s, kW/s, MW/s, GW/s)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_power_rate() requires a Pint Quantity.")
+    rate_dim = (1 * (ureg.watt / ureg.second)).dimensionality
+    if (1 * quantity).dimensionality != rate_dim:
+        raise ValueError(f"fmt_power_rate unit must have power ramp rate dimensionality (power/time), got {quantity}.")
+    if unit is not None:
+        display_unit = _coerce_unit(unit)
+    else:
+        mag_w = abs(quantity.to(ureg.watt / ureg.second).magnitude)
+        if mag_w >= 1e9:
+            display_unit = ureg.gigawatt / ureg.second
+        elif mag_w >= 1e6:
+            display_unit = ureg.megawatt / ureg.second
+        elif mag_w >= 1e3:
+            display_unit = ureg.kilowatt / ureg.second
+        else:
+            display_unit = ureg.watt / ureg.second
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_str = str(display_unit)
+    if "gigawatt" in unit_str or "GW" in unit_str:
+        unit_label = "GW/s"
+    elif "megawatt" in unit_str or "MW" in unit_str:
+        unit_label = "MW/s"
+    elif "kilowatt" in unit_str or "kW" in unit_str:
+        unit_label = "kW/s"
+    elif "watt" in unit_str or "W" in unit_str:
+        unit_label = "W/s"
+    else:
+        unit_label = None
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_stiffness(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format mechanical stiffness quantities for prose (N/m, N/mm)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_stiffness() requires a Pint Quantity.")
+    stiff_dim = (1 * (ureg.newton / ureg.meter)).dimensionality
+    if (1 * quantity).dimensionality != stiff_dim:
+        raise ValueError(f"fmt_stiffness unit must have stiffness dimensionality (force/length), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.newton / ureg.meter)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_str = str(display_unit)
+    if "millimeter" in unit_str or "mm" in unit_str:
+        unit_label = "N/mm"
+    else:
+        unit_label = "N/m"
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_volume(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format 3D volume quantities for prose (m³, L, mL, cm³)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_volume() requires a Pint Quantity.")
+    vol_dim = (1 * (ureg.meter**3)).dimensionality
+    if (1 * quantity).dimensionality != vol_dim:
+        raise ValueError(f"fmt_volume unit must have volume dimensionality (length³), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.meter**3)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_str = str(display_unit)
+    if "liter" in unit_str or unit_str == "L":
+        unit_label = "L"
+    elif "milliliter" in unit_str or "mL" in unit_str:
+        unit_label = "mL"
+    elif "centimeter" in unit_str or "cm" in unit_str:
+        unit_label = "cm³"
+    else:
+        unit_label = "m³"
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
     )
 
 
