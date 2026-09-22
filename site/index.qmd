@@ -478,6 +478,27 @@ format:
     <p class="mls-map-countries"><span class="mls-map-countries-label">Top countries:</span> {{stats.top_countries}}</p>
   </div>
 
+  <!-- Taught at: one row of course cards drifting past, each a link to its
+       course page, in a fresh random order and from a random starting point
+       on each visit. One row, not two: opposing motions compete for the eye
+       and the course line needs a steady row to be read.
+       Rendered in the browser from adopters.json (embedded at post-render by
+       scripts/build_adopters.py, then refreshed from /adopters.json on load),
+       so the scheduled refresh updates it without a rebuild. -->
+  <div class="mls-taught" id="mls-taught">
+    <div class="mls-taught-head">
+      <p class="mls-taught-eyebrow">TAUGHT AT</p>
+      <button class="mls-taught-toggle" type="button" aria-pressed="false" aria-label="Pause scrolling">
+        <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><rect class="i-pause" x="2" y="1.5" width="2.6" height="9" rx=".6"/><rect class="i-pause" x="7.4" y="1.5" width="2.6" height="9" rx=".6"/><path class="i-play" d="M3 1.6v8.8l7.2-4.4z"/></svg>
+      </button>
+    </div>
+    <div class="mls-taught-viewport">
+      <ul class="mls-taught-row" aria-live="off"></ul>
+    </div>
+    <p class="mls-taught-caption"><a href="community/courses.html">See the courses&nbsp;&rarr;</a><span class="mls-taught-sep" aria-hidden="true">&middot;</span><a href="community/courses.html?view=schools">Is your school here?</a></p>
+  </div>
+  <!-- adopters:strip -->
+
   <div class="mls-impact-bottom">
 
     <!-- Reach as instrument readings: monospace tabular numerals under small
@@ -535,6 +556,78 @@ document.querySelectorAll('.mls-scroll-indicator').forEach(ind => {
     }
   });
 });
+
+// ── Taught at ─────────────────────────────────────────────────────────────
+// A ticker of courses, not a logo wall: each card names the school and the
+// course that assigns the book, and links to that course's page. A course
+// code is what tells a visiting instructor a peer actually teaches from it.
+// Acknowledged early adopters without a public course stay on the adopters
+// page. Order is shuffled per visit. The track holds the list twice and
+// slides by exactly one copy, so the loop has no seam.
+//
+// Motion is always stoppable: hover, keyboard focus, a touch, or the pause
+// button (WCAG 2.2.2 for motion longer than five seconds). Readers who ask
+// for reduced motion get a still row they can scroll themselves.
+(function () {
+  const root = document.getElementById('mls-taught');
+  const embedded = document.getElementById('adp-data');
+  if (!root || !embedded) return;
+  const rows = [...root.querySelectorAll('.mls-taught-row')];
+  const toggle = root.querySelector('.mls-taught-toggle');
+  const PX_PER_S = 30;   // slow enough to read a course line as it passes
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+  function card(s, dup) {
+    const c = s.courses[0];
+    const course = esc(c.title) + (c.term ? ` <span class="mls-tk-term">${esc(c.term)}</span>` : '');
+    const href = c.url ? esc(c.url) : 'community/courses.html';
+    return `<li${dup ? ' aria-hidden="true"' : ''}><a class="mls-tk" href="${href}" target="_blank" rel="noopener"${dup ? ' tabindex="-1"' : ''}>` +
+      `<span class="mls-taught-mark${s.logo ? '' : ' mls-taught-mark--mono'}">${
+        s.logo ? `<img src="community/${esc(s.logo)}" alt="" loading="lazy" width="26" height="26">` : esc(s.mono)}</span>` +
+      `<span class="mls-tk-text"><b>${esc(s.name)}</b><span class="mls-tk-course">${course}</span>` +
+      `<span class="mls-tk-where">${esc(s.city)}, ${esc(s.country)}</span></span></a></li>`;
+  }
+
+  function render(data) {
+    const pool = shuffle((data.teaching || []).filter(s => s.courses && s.courses.length));
+    if (!pool.length) return;
+    // The track holds the list twice and slides by one copy, so the loop has
+    // no seam. Duration follows the track length for a constant speed; a
+    // random negative delay starts each visit at a different school.
+    rows.forEach(row => {
+      row.innerHTML = pool.map(s => card(s, false)).join('') + pool.map(s => card(s, true)).join('');
+    });
+    requestAnimationFrame(() => {
+      rows.forEach(row => {
+        const dur = Math.max(30, row.scrollWidth / 2 / PX_PER_S);
+        row.style.setProperty('--mls-taught-dur', dur.toFixed(1) + 's');
+        row.style.animationDelay = (-Math.random() * dur).toFixed(1) + 's';
+      });
+      root.classList.add('is-rolling');
+    });
+  }
+
+  function setPaused(on) {
+    root.classList.toggle('is-paused', on);
+    toggle.setAttribute('aria-pressed', String(on));
+    toggle.setAttribute('aria-label', on ? 'Resume scrolling' : 'Pause scrolling');
+  }
+  toggle.addEventListener('click', () => setPaused(!root.classList.contains('is-paused')));
+  // A touch holds the ticker still long enough to read and tap a card.
+  let touchTimer = null;
+  root.addEventListener('touchstart', () => {
+    root.classList.add('is-touched');
+    clearTimeout(touchTimer);
+    touchTimer = setTimeout(() => root.classList.remove('is-touched'), 5000);
+  }, {passive: true});
+
+  try { render(JSON.parse(embedded.textContent)); } catch (e) { /* keep the empty row */ }
+  fetch('adopters.json?t=' + Date.now())
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(render)
+    .catch(err => console.warn('[mlsysbook] adopters refresh failed, showing build-time list:', err));
+})();
 
 // Stats refresh on every page load from two sources.
 //

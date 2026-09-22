@@ -1,25 +1,363 @@
 # Systems and Hardware {#sec-appendix-systems}
 
-This appendix collects the embedded timing, memory, power, and actuator models used throughout this book. Each bound depends on a specified device, workload, and operating envelope; the equations identify what must be measured before a physical deadline can be claimed.
+This appendix collects the embedded timing, memory, power, and actuator models used throughout this book, together with the byte layouts of records that cross the proposal boundary. Each bound depends on a specified device, workload, and operating envelope; the equations identify what must be measured before a physical deadline can be claimed.
 
 ## How to Use This Appendix
 
 Consult this appendix when diagnosing physical systems bottlenecks, timing jitter, electrical rail instability, or hardware interface boundaries across chapters in this book:
 
-| When you encounter this systems symptom                                     | Consult                         | For this quantitative tool                                                            |
-|-----------------------------------------------------------------------------|---------------------------------|---------------------------------------------------------------------------------------|
-| A real-time safety task misses periodic execution deadlines                 | @sec-appendix-systems-timers    | Worst-case execution time (WCET) and Response Time Analysis (RTA)                     |
-| A software deadlock or kernel panic freezes actuator control loops          | @sec-appendix-systems-timers    | Watchdog detection and separately measured stop-path response                         |
-| Inverter bridge MOSFETs burn out or trip overcurrent protections            | @sec-appendix-systems-inverters | Microcontroller PWM complementary timers and dead-time insertion                      |
-| Heavy neural inference bursts induce compute brownout resets                | @sec-appendix-systems-droop     | Inductive voltage droop ($L dI/dt$) and alpha-power gate delay                        |
-| High-rate sensor DMA streams cause safety threads to miss deadlines         | @sec-appendix-systems-dram      | DRAM bank-conflict penalties and non-preemptive burst queuing                         |
-| Sensor fusion streams suffer temporal registration skew under motion        | @sec-appendix-systems-ptp       | PTP hardware timestamping and bounded clock conversion                                |
-| Shared memory queues between Linux and MCU return torn or stale data        | @sec-appendix-systems-ipc       | SoC hardware mailboxes, RPMSG, and hardware memory barriers                           |
-| Joint actuators fail to track sudden torque reversals, chatter, or overheat | @sec-appendix-systems-actuators | Stator $L/R$ constants, thermal ODEs, and reflected rotor jerk limits                 |
-| Emergency braking spikes DC bus voltage and damages power silicon           | @sec-appendix-systems-power     | Regenerative capacitive energy surges and dynamic brake choppers                      |
-| Shared serial buses experience queuing and message jitter                   | @sec-appendix-systems-fieldbus  | CAN FD priority blocking, EtherCAT cycle budgets, and bounded seqlocks                |
-| Monocular 3D bounding boxes distort and depth covariance diverges           | @sec-appendix-systems-vision    | Pinhole intrinsic projection, Zhang's calibration, and metric unprojection covariance |
-| A mobile base breaches clearance buffers under surface wetness              | @sec-appendix-systems-stopping  | Kinematic stopping envelopes, information age lag, and velocity clamps                |
+| When you encounter this systems symptom                                                           | Consult                               | For this quantitative tool                                                            |
+|---------------------------------------------------------------------------------------------------|---------------------------------------|---------------------------------------------------------------------------------------|
+| A real-time safety task misses periodic execution deadlines                                       | @sec-appendix-systems-timers          | Worst-case execution time (WCET) and Response Time Analysis (RTA)                     |
+| A software deadlock or kernel panic freezes actuator control loops                                | @sec-appendix-systems-timers          | Watchdog detection and separately measured stop-path response                         |
+| Inverter bridge MOSFETs burn out or trip overcurrent protections                                  | @sec-appendix-systems-inverters       | Microcontroller PWM complementary timers and dead-time insertion                      |
+| Heavy neural inference bursts induce compute brownout resets                                      | @sec-appendix-systems-droop           | Inductive voltage droop ($L dI/dt$) and alpha-power gate delay                        |
+| High-rate sensor DMA streams cause safety threads to miss deadlines                               | @sec-appendix-systems-dram            | DRAM bank-conflict penalties and non-preemptive burst queuing                         |
+| Sensor fusion streams suffer temporal registration skew under motion                              | @sec-appendix-systems-ptp             | PTP hardware timestamping and bounded clock conversion                                |
+| Shared memory queues between Linux and the safety microcontroller (MCU) return torn or stale data | @sec-appendix-systems-ipc             | SoC hardware mailboxes, RPMSG, and hardware memory barriers                           |
+| Joint actuators fail to track sudden torque reversals, chatter, or overheat                       | @sec-appendix-systems-actuators       | Stator $L/R$ constants, thermal ODEs, and reflected rotor jerk limits                 |
+| Emergency braking spikes DC bus voltage and damages power silicon                                 | @sec-appendix-systems-power           | Regenerative capacitive energy surges and dynamic brake choppers                      |
+| Shared serial buses experience queuing and message jitter                                         | @sec-appendix-systems-fieldbus        | CAN FD priority blocking, EtherCAT cycle budgets, and bounded seqlocks                |
+| Monocular 3D bounding boxes distort and depth covariance diverges                                 | @sec-appendix-systems-vision          | Pinhole intrinsic projection, Zhang's calibration, and metric unprojection covariance |
+| A mobile base breaches clearance buffers under surface wetness                                    | @sec-appendix-systems-stopping        | Kinematic stopping envelopes, information age lag, and velocity clamps                |
+| A record must be laid out for a fixed-size mailbox or log                                         | @sec-appendix-systems-wire-formats    | Proposal and record byte layouts; manifest and register field orders                  |
+| A handover, fault trial, or release gate must be implemented step by step                         | @sec-appendix-systems-wire-formats    | Authority-transfer, fault-injection, and release-gate protocols beside their records  |
+| You need rapid order-of-magnitude physical anchors across time, kinetics, thermal, and risk       | @sec-appendix-systems-numbers-to-know | Rate hierarchy, blind travel conversions, thermal constants, and exposure walls       |
+
+## Numbers to Know in Physical AI {#sec-appendix-systems-numbers-to-know}
+
+```{python}
+#| label: appendix-systems-numbers-to-know
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NUMBERS TO KNOW IN PHYSICAL AI (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-appendix-systems-numbers-to-know, @tbl-numbers-rate-hierarchy,
+# │          @tbl-numbers-kinematics, @tbl-numbers-edge-compute, @tbl-numbers-thermal,
+# │          @tbl-numbers-safety, and @tbl-numbers-buses.
+# │ Goal: Centralize foundational orders of magnitude across rate hierarchies,
+# │       kinetic stopping, edge memory streaming, thermal dynamics, statistical safety,
+# │       and real-time fieldbuses.
+# │ Show: Formatted physical reference figures sourced directly from mlsysim.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import (
+    fmt,
+    fmt_int,
+    fmt_frequency,
+    fmt_latency,
+    fmt_length,
+    fmt_velocity,
+    fmt_acceleration,
+    fmt_percent,
+    fmt_memory,
+    fmt_params,
+    fmt_bandwidth,
+    check,
+    MarkdownStr,
+)
+from decimal import Decimal, ROUND_HALF_UP
+
+class PhysicalNumbersToKnow:
+    """Namespace for physical AI reference numbers, rate hierarchies, and scaling laws."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    R = ReferenceStats.PhysicalAIRates
+    K = ReferenceStats.PhysicalAIKinematics
+    T = ReferenceStats.PhysicalAIThermal
+    S = ReferenceStats.PhysicalAISafety
+    B = ReferenceStats.PhysicalAIBuses
+    C = ReferenceStats.PhysicalAICompute
+
+    # Rates
+    intent_lo = R.IntentLo
+    intent_hi = R.IntentHi
+    chunk_lo = R.ChunkLo
+    chunk_hi = R.ChunkHi
+    permission = R.PermissionRate
+    current_lo = R.CurrentLoopLo
+    current_hi = R.CurrentLoopHi
+    switching_lo = R.GateSwitchingLo
+    switching_hi = R.GateSwitchingHi
+
+    # Kinematics & Platforms
+    _MPS = meter / second
+    _MPS2 = meter / second**2
+    hum_v = 1.0 * _MPS
+    hum_a = 4.0 * _MPS2
+    rm_v = 1.5 * _MPS
+    rm_a = 2.0 * _MPS2
+    bot_v = 6.0 * _MPS
+    bot_a = 4.5 * _MPS2
+    av_v = 30.0 * _MPS
+    av_a = 7.0 * _MPS2
+
+    tau_50 = 50 * millisecond
+    tau_200 = 200 * millisecond
+
+    # Compute & Memory
+    vla_params_7b = C.VlaParameters7B
+    vla_params_14b = 14e9 * param
+    dram_bw = C.EdgeMemorySustainedOrin
+    chunk_horizon = C.VlaChunkHorizon
+
+    # Safety
+    rule_of_three = S.RuleOfThreeMultiplier
+    lambda_asild = S.TargetFailureRateASILD
+    lambda_sil3 = S.TargetFailureRateSIL3
+    lambda_robotaxi = 1e-6 / hour
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    # Rates & Periods
+    intent_t_lo = (1 / intent_hi).to(millisecond)
+    intent_t_hi = (1 / intent_lo).to(millisecond)
+    chunk_t_lo = (1 / chunk_hi).to(millisecond)
+    chunk_t_hi = (1 / chunk_lo).to(millisecond)
+    perm_t = (1 / permission).to(millisecond)
+    curr_t_lo = (1 / current_hi).to(microsecond)
+    curr_t_hi = (1 / current_lo).to(microsecond)
+    sw_t_lo = (1 / switching_hi).to(microsecond)
+    sw_t_hi = (1 / switching_lo).to(microsecond)
+
+    # Kinematics
+    hum_blind_50 = (hum_v * tau_50).to(millimeter)
+    hum_blind_200 = (hum_v * tau_200).to(millimeter)
+    hum_stop_200 = calc_safe_stopping_distance(hum_v, tau_200, hum_a).to(millimeter)
+    hum_share_200 = (hum_blind_200 / hum_stop_200).to("dimensionless").magnitude
+
+    rm_blind_50 = (rm_v * tau_50).to(millimeter)
+    rm_blind_200 = (rm_v * tau_200).to(millimeter)
+    rm_stop_200_raw = calc_safe_stopping_distance(rm_v, tau_200, rm_a).to(millimeter)
+    rm_stop_200 = float(Decimal(repr(rm_stop_200_raw.magnitude)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)) * millimeter
+    rm_share_200 = (rm_blind_200 / rm_stop_200_raw).to("dimensionless").magnitude
+
+    bot_blind_50 = (bot_v * tau_50).to(millimeter)
+    bot_blind_200 = (bot_v * tau_200).to(meter)
+    bot_stop_200 = calc_safe_stopping_distance(bot_v, tau_200, bot_a).to(meter)
+    bot_share_200 = (bot_blind_200 / bot_stop_200).to("dimensionless").magnitude
+
+    av_blind_50 = (av_v * tau_50).to(meter)
+    av_blind_200 = (av_v * tau_200).to(meter)
+    av_stop_200 = calc_safe_stopping_distance(av_v, tau_200, av_a).to(meter)
+    av_share_200 = (av_blind_200 / av_stop_200).to("dimensionless").magnitude
+
+    # Edge Compute (DRAM streaming time = Footprint / Sustained Bandwidth)
+    fp16_bytes = 2 * byte / param
+    int8_bytes = 1 * byte / param
+    int4_bytes = 0.5 * byte / param
+
+    footprint_7b_fp16 = (vla_params_7b * fp16_bytes).to(GB)
+    footprint_7b_int8 = (vla_params_7b * int8_bytes).to(GB)
+    footprint_7b_int4 = (vla_params_7b * int4_bytes).to(GB)
+    footprint_14b_int8 = (vla_params_14b * int8_bytes).to(GB)
+
+    time_7b_fp16 = (footprint_7b_fp16 / dram_bw).to(millisecond)
+    time_7b_int8 = (footprint_7b_int8 / dram_bw).to(millisecond)
+    time_7b_int4 = (footprint_7b_int4 / dram_bw).to(millisecond)
+    time_14b_int8 = (footprint_14b_int8 / dram_bw).to(millisecond)
+
+    rate_single_7b_fp16 = (1 / time_7b_fp16).to(hertz)
+    rate_single_7b_int8 = (1 / time_7b_int8).to(hertz)
+    rate_single_7b_int4 = (1 / time_7b_int4).to(hertz)
+    rate_single_14b_int8 = (1 / time_14b_int8).to(hertz)
+
+    rate_chunk_7b_fp16 = rate_single_7b_fp16 * chunk_horizon
+    rate_chunk_7b_int8 = rate_single_7b_int8 * chunk_horizon
+    rate_chunk_7b_int4 = rate_single_7b_int4 * chunk_horizon
+    rate_chunk_14b_int8 = rate_single_14b_int8 * chunk_horizon
+
+    # Safety bounds (N = 3 / lambda)
+    hours_asild = (rule_of_three / lambda_asild).to(hour)
+    hours_sil3 = (rule_of_three / lambda_sil3).to(hour)
+    hours_robotaxi = (rule_of_three / lambda_robotaxi).to(hour)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(intent_hi < chunk_lo, "Intent band sits below chunk band.")
+    check(chunk_hi < permission < current_lo, "Permission loop sits between chunk policy and current loop.")
+    check(current_hi < switching_lo, "Current loop sits below inverter switching.")
+    check(abs(perm_t.magnitude - 1.0) < 1e-9, "1 kHz has 1 ms period.")
+    check(abs(time_7b_fp16.magnitude - 100.0) < 1e-3, "14 GB / 140 GB/s is 100 ms.")
+    check(abs(time_7b_int8.magnitude - 50.0) < 1e-3, "7 GB / 140 GB/s is 50 ms.")
+    check(abs(time_7b_int4.magnitude - 25.0) < 1e-3, "3.5 GB / 140 GB/s is 25 ms.")
+    check(abs(hours_asild.magnitude - 3e8) < 1.0, "ASIL D hours: 3e8.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    intent_freq_str = MarkdownStr(f"{fmt(intent_lo.magnitude, precision=0)}–{fmt_frequency(intent_hi, unit=hertz, precision=0)}")
+    chunk_freq_str = MarkdownStr(f"{fmt(chunk_lo.magnitude, precision=0)}–{fmt_frequency(chunk_hi, unit=hertz, precision=0)}")
+    perm_freq_str = fmt_frequency(permission, unit=ureg.kilohertz, precision=0)
+    curr_freq_str = MarkdownStr(f"{fmt(current_lo.magnitude, precision=0)}–{fmt_frequency(current_hi, unit=ureg.kilohertz, precision=0)}")
+    sw_freq_str = MarkdownStr(
+        f"{fmt(switching_lo.to(ureg.kilohertz).magnitude, precision=0)}–{fmt_frequency(switching_hi, unit=ureg.kilohertz, precision=0)}"
+    )
+
+    intent_period_str = MarkdownStr(f"{fmt(intent_t_lo.magnitude, precision=0)}–{fmt(intent_t_hi.magnitude, precision=0)} ms")
+    chunk_period_str = MarkdownStr(f"{fmt(chunk_t_lo.magnitude, precision=0)}–{fmt(chunk_t_hi.magnitude, precision=0)} ms")
+    perm_period_str = MarkdownStr(f"{fmt(perm_t.magnitude, precision=0)} ms")
+    curr_period_str = MarkdownStr(f"{fmt(curr_t_lo.magnitude, precision=0)}–{fmt(curr_t_hi.magnitude, precision=0)} µs")
+    sw_period_str = MarkdownStr(f"{fmt(sw_t_lo.magnitude, precision=0)}–{fmt(sw_t_hi.magnitude, precision=0)} µs")
+
+    intent_blind_str = MarkdownStr(f"{fmt(intent_t_lo.magnitude, precision=0)}–{fmt(intent_t_hi.magnitude, precision=0)} mm")
+    chunk_blind_str = MarkdownStr(f"{fmt(chunk_t_lo.magnitude, precision=0)}–{fmt(chunk_t_hi.magnitude, precision=0)} mm")
+    perm_blind_str = fmt_length(1 * millimeter, unit=millimeter, precision=0)
+    curr_blind_str = MarkdownStr(f"{fmt(curr_t_lo.magnitude, precision=0)}–{fmt(curr_t_hi.magnitude, precision=0)} µm")
+    sw_blind_str = MarkdownStr(f"{fmt(sw_t_lo.magnitude, precision=0)}–{fmt(sw_t_hi.magnitude, precision=0)} µm")
+
+    hum_v_str = MarkdownStr(f"{fmt_velocity(hum_v, unit=_MPS)} ({fmt_velocity(hum_v, unit=kilometer/hour)})")
+    rm_v_str = MarkdownStr(f"{fmt_velocity(rm_v, unit=_MPS)} ({fmt_velocity(rm_v, unit=kilometer/hour)})")
+    bot_v_str = MarkdownStr(f"{fmt_velocity(bot_v, unit=_MPS)} ({fmt_velocity(bot_v, unit=kilometer/hour)})")
+    av_v_str = MarkdownStr(f"{fmt_velocity(av_v, unit=_MPS)} ({fmt_velocity(av_v, unit=kilometer/hour)})")
+
+    hum_a_str = MarkdownStr(
+        f"{fmt_acceleration(hum_a, unit=_MPS2)} ({fmt((hum_a/ureg.standard_gravity).to('dimensionless').magnitude, precision=2, suffix=' g')})"
+    )
+    rm_a_str = MarkdownStr(
+        f"{fmt_acceleration(rm_a, unit=_MPS2)} ({fmt((rm_a/ureg.standard_gravity).to('dimensionless').magnitude, precision=2, suffix=' g')})"
+    )
+    bot_a_str = MarkdownStr(
+        f"{fmt_acceleration(bot_a, unit=_MPS2)} ({fmt((bot_a/ureg.standard_gravity).to('dimensionless').magnitude, precision=2, suffix=' g')})"
+    )
+    av_a_str = MarkdownStr(
+        f"{fmt_acceleration(av_a, unit=_MPS2)} ({fmt((av_a/ureg.standard_gravity).to('dimensionless').magnitude, precision=2, suffix=' g')})"
+    )
+
+    hum_blind_50_str = fmt_length(hum_blind_50, unit=millimeter, precision=0)
+    hum_blind_200_str = fmt_length(hum_blind_200, unit=millimeter, precision=0)
+    hum_stop_200_str = MarkdownStr(
+        f"{fmt_length(hum_stop_200, unit=millimeter, precision=0)} ({fmt_percent(hum_share_200, precision=1, style='symbol')})"
+    )
+
+    rm_blind_50_str = fmt_length(rm_blind_50, unit=millimeter, precision=0)
+    rm_blind_200_str = fmt_length(rm_blind_200, unit=millimeter, precision=0)
+    rm_stop_200_str = MarkdownStr(
+        f"{fmt_length(rm_stop_200, unit=millimeter, precision=0)} ({fmt_percent(rm_share_200, precision=1, style='symbol')})"
+    )
+
+    bot_blind_50_str = fmt_length(bot_blind_50, unit=millimeter, precision=0)
+    bot_blind_200_str = fmt_length(bot_blind_200, unit=meter, precision=1)
+    bot_stop_200_str = MarkdownStr(f"{fmt_length(bot_stop_200, unit=meter, precision=1)} ({fmt_percent(bot_share_200, precision=1, style='symbol')})")
+
+    av_blind_50_str = fmt_length(av_blind_50, unit=meter, precision=1)
+    av_blind_200_str = fmt_length(round(av_blind_200.to(meter).magnitude) * meter, unit=meter, precision=0)
+    av_stop_200_str = MarkdownStr(
+        f"{fmt_length(round(av_stop_200.to(meter).magnitude, 1) * meter, unit=meter, precision=1)} ({fmt_percent(av_share_200, precision=1, style='symbol')})"
+    )
+
+    fp_7b_fp16_str = fmt_memory(footprint_7b_fp16, unit=GB, precision=0)
+    fp_7b_int8_str = fmt_memory(footprint_7b_int8, unit=GB, precision=0)
+    fp_7b_int4_str = fmt_memory(footprint_7b_int4, unit=GB, precision=1)
+    fp_14b_int8_str = fmt_memory(footprint_14b_int8, unit=GB, precision=0)
+
+    t_7b_fp16_str = fmt_latency(time_7b_fp16, unit=millisecond, precision=0)
+    t_7b_int8_str = fmt_latency(time_7b_int8, unit=millisecond, precision=0)
+    t_7b_int4_str = fmt_latency(time_7b_int4, unit=millisecond, precision=0)
+    t_14b_int8_str = fmt_latency(time_14b_int8, unit=millisecond, precision=0)
+
+    rate_s_7b_fp16_str = fmt_frequency(rate_single_7b_fp16, unit=hertz, precision=0)
+    rate_s_7b_int8_str = fmt_frequency(rate_single_7b_int8, unit=hertz, precision=0)
+    rate_s_7b_int4_str = fmt_frequency(rate_single_7b_int4, unit=hertz, precision=0)
+    rate_s_14b_int8_str = fmt_frequency(rate_single_14b_int8, unit=hertz, precision=0)
+
+    rate_c_7b_fp16_str = fmt_frequency(rate_chunk_7b_fp16, unit=hertz, precision=0)
+    rate_c_7b_int8_str = fmt_frequency(rate_chunk_7b_int8, unit=hertz, precision=0)
+    rate_c_7b_int4_str = fmt_frequency(rate_chunk_7b_int4, unit=hertz, precision=0)
+    rate_c_14b_int8_str = fmt_frequency(rate_chunk_14b_int8, unit=hertz, precision=0)
+```
+
+Just as Jeff Dean's "Latency Numbers Every Programmer Should Know"[^fn-sys-jeff-dean] shaped distributed systems and classical machine learning systems grounded software performance in memory bandwidth and arithmetic intensity, physical AI systems engineers require a corresponding quantitative intuition spanning computation, kinetics, thermal dissipation, and functional safety. In physical AI, software latency is not merely waiting time; it translates directly into irreversible kinetic momentum, uninspected travel distance, and thermodynamic heat accumulation in motor stators and compute silicon.
+
+This section compiles the foundational order-of-magnitude numbers, scaling laws, and engineering rules of thumb that govern cyber-physical machine design. All numbers are single-sourced from `mlsysim`. Memorize the relationships; use the specific numbers as sanity checks.
+
+[^fn-sys-jeff-dean]: **Jeff Dean**\index{Dean, Jeff!latency numbers}: Google Senior Fellow and systems architect. His latency numbers originally presented with Peter Norvig around 2010 established the canonical latency hierarchy across storage, memory, and network tiers [@scott2012latency]. Physical AI extends this hierarchy down into electromechanical actuators, stopping kinematics, and thermal time constants.
+
+::: {#psp-appendix-systems-three-numbers .callout-perspective title="Three physical numbers that matter most"}
+
+* **Kinetic equivalence: $1\text{ ms} = 1\text{ mm}$ (at $1\text{ m/s}$)**: At a nominal robotic speed of $1\text{ m/s}$, every single millisecond of perception, inference, or fieldbus latency translates into exactly $1\text{ mm}$ of blind travel before retarding torque can be applied. At highway velocity ($30\text{ m/s}$), each millisecond is $3\text{ cm}$. In physical systems, software latency is not waiting time; it is physical displacement.
+* **Thermal divergence: $\tau_{\text{silicon}} \sim 1\text{ ms}$ vs. $\tau_{\text{stator}} \sim 100\text{ s}$**: Semiconductor junctions heat adiabatically within milliseconds during deep neural network bursts, precipitating voltage droop or thermal throttling before heat spreaders react. In contrast, electromagnetic stator windings heat over tens to hundreds of seconds, tolerating transient overcurrent for aggressive maneuvers but accumulating thermal energy that eventually limits sustained torque.
+* **The exposure wall: $N = 3 / \lambda$**: Proving an ultra-low catastrophic failure rate of $10^{-8}/\text{hour}$ (ISO 26262 ASIL D) requires $3 \times 10^8$ failure-free operational hours under the Poisson Rule of Three [@hanley1983nothing]. Statistical empirical testing of learned end-to-end models cannot cross this exposure wall without deterministic runtime permission envelopes and formal safety filters.
+
+:::
+
+### Rate and latency hierarchy across machine levels
+
+Control rates in physical AI rise steeply from the deliberative brain down to the physical body (@tbl-numbers-rate-hierarchy). Deliberative multimodal models (VLAs) operate at human reaction scales ($1\text{--}5\text{ Hz}$). Action chunking models emit future trajectory waypoints at $10\text{--}50\text{ Hz}$. Beneath the proposal boundary, the permission path enforces safety barriers at $1\text{ kHz}$. At the lowest levels, power electronic current loops and PWM switching operate at tens to hundreds of kilohertz to maintain electromagnetic flux and drive torque. For real-time timer schedulability and response-time analysis, see @sec-appendix-systems-timers; for inverter gate switching and dead-time modeling, see @sec-appendix-systems-inverters.
+
+| Machine Level                   | Frequency Band                                   | Cycle Period                                       | Blind Travel at 1 m/s                             | Architectural Mechanism & Bound                                                   |
+|:--------------------------------|:-------------------------------------------------|:---------------------------------------------------|:--------------------------------------------------|:----------------------------------------------------------------------------------|
+| **Brain (Deliberation)**        | `{python} PhysicalNumbersToKnow.intent_freq_str` | `{python} PhysicalNumbersToKnow.intent_period_str` | `{python} PhysicalNumbersToKnow.intent_blind_str` | Multimodal VLA reasoning; memory- and compute-bound                               |
+| **Brain (Action Chunking)**     | `{python} PhysicalNumbersToKnow.chunk_freq_str`  | `{python} PhysicalNumbersToKnow.chunk_period_str`  | `{python} PhysicalNumbersToKnow.chunk_blind_str`  | Action chunk diffusion/transformer decoding; amortized                            |
+| **Nervous System (Permission)** | `{python} PhysicalNumbersToKnow.perm_freq_str`   | `{python} PhysicalNumbersToKnow.perm_period_str`   | `{python} PhysicalNumbersToKnow.perm_blind_str`   | Control barrier certificates, stopping envelopes, lease watchdog                  |
+| **Body (Current Loop)**         | `{python} PhysicalNumbersToKnow.curr_freq_str`   | `{python} PhysicalNumbersToKnow.curr_period_str`   | `{python} PhysicalNumbersToKnow.curr_blind_str`   | Field-oriented current control (FOC), torque tracking, stator flux                |
+| **Body (Inverter Switching)**   | `{python} PhysicalNumbersToKnow.sw_freq_str`     | `{python} PhysicalNumbersToKnow.sw_period_str`     | `{python} PhysicalNumbersToKnow.sw_blind_str`     | Power MOSFET gate drive, dead-time insertion ($t_{\text{dead}}$), inductive droop |
+
+: **Rate and Latency Hierarchy Across the Five Machine Levels**: Spanning five frequency decades from sub-microsecond MOSFET gate switching up to second-scale foundation model deliberation. Every frequency band imposes a hard cycle period and an uninspected physical travel distance at nominal speed ($1\text{ m/s}$). {#tbl-numbers-rate-hierarchy tbl-colwidths="[18,16,16,18,32]"}
+
+### Kinetic translation and safe stopping envelopes
+
+Total stopping distance $d_{\text{stop}} = v \cdot \tau_{\text{delay}} + v^2 / (2 a_{\text{brake}})$ combines the linear blind travel accrued during computational delay and the quadratic mechanical braking distance (@tbl-numbers-kinematics). As platform speed increases, absolute blind travel expands rapidly, consuming entire clearance margins before deceleration can begin. For multi-axis kinematic chains, jerk-bounded trajectories, and information-age lag derivations, see @sec-appendix-systems-stopping.
+
+| Platform Archetype               | Nominal Velocity $v$                       | Braking Decel $a$                          | Blind Travel ($\tau=50\text{ ms}$)                | Blind Travel ($\tau=200\text{ ms}$)                | Total Stop ($\tau=200\text{ ms}$)                 |
+|:---------------------------------|:-------------------------------------------|:-------------------------------------------|:--------------------------------------------------|:---------------------------------------------------|:--------------------------------------------------|
+| **Humanoid / Quadruped**         | `{python} PhysicalNumbersToKnow.hum_v_str` | `{python} PhysicalNumbersToKnow.hum_a_str` | `{python} PhysicalNumbersToKnow.hum_blind_50_str` | `{python} PhysicalNumbersToKnow.hum_blind_200_str` | `{python} PhysicalNumbersToKnow.hum_stop_200_str` |
+| **Warehouse Mobile Manipulator** | `{python} PhysicalNumbersToKnow.rm_v_str`  | `{python} PhysicalNumbersToKnow.rm_a_str`  | `{python} PhysicalNumbersToKnow.rm_blind_50_str`  | `{python} PhysicalNumbersToKnow.rm_blind_200_str`  | `{python} PhysicalNumbersToKnow.rm_stop_200_str`  |
+| **Urban Delivery Robot**         | `{python} PhysicalNumbersToKnow.bot_v_str` | `{python} PhysicalNumbersToKnow.bot_a_str` | `{python} PhysicalNumbersToKnow.bot_blind_50_str` | `{python} PhysicalNumbersToKnow.bot_blind_200_str` | `{python} PhysicalNumbersToKnow.bot_stop_200_str` |
+| **Autonomous Vehicle (Highway)** | `{python} PhysicalNumbersToKnow.av_v_str`  | `{python} PhysicalNumbersToKnow.av_a_str`  | `{python} PhysicalNumbersToKnow.av_blind_50_str`  | `{python} PhysicalNumbersToKnow.av_blind_200_str`  | `{python} PhysicalNumbersToKnow.av_stop_200_str`  |
+
+: **Kinetic Translation Across Platform Archetypes**: Pre-brake delay converts into unrecoverable physical travel before braking force begins. Stopping distance $d_{\text{stop}} = v \cdot \tau_{\text{delay}} + v^2 / (2 a_{\text{brake}})$ combines linear blind travel and quadratic braking distance. {#tbl-numbers-kinematics tbl-colwidths="[20,16,16,16,16,16]"}
+
+### Edge memory bandwidth and action chunk amortization
+
+Large multimodal foundation models on edge system-on-chip (SoC) architectures are memory-bandwidth bound during autoregressive generation (@tbl-numbers-edge-compute). Streaming a 7-billion-parameter model over a sustained $140\text{ GB/s}$ LPDDR5 interface limits single-step generation to $10\text{--}20\text{ Hz}$. Predicting action chunks of length $H=16$ amortizes the weight streaming transfer over multiple future control steps, lifting effective control bandwidth into the hundreds of hertz. For DRAM bank organization, conflict penalties, and interconnect arbitration under concurrent DMA traffic, see @sec-appendix-systems-dram.
+
+| Model & Precision  | Parameters | Memory Footprint                                 | DRAM Read Time ($140\text{ GB/s}$)              | Single-Step Max Rate                                 | Chunk Rate ($H=16$)                                             |
+|:-------------------|:-----------|:-------------------------------------------------|:------------------------------------------------|:-----------------------------------------------------|:----------------------------------------------------------------|
+| **VLA-7B (FP16)**  | 7.0B       | `{python} PhysicalNumbersToKnow.fp_7b_fp16_str`  | `{python} PhysicalNumbersToKnow.t_7b_fp16_str`  | `{python} PhysicalNumbersToKnow.rate_s_7b_fp16_str`  | `{python} PhysicalNumbersToKnow.rate_c_7b_fp16_str` equivalent  |
+| **VLA-7B (INT8)**  | 7.0B       | `{python} PhysicalNumbersToKnow.fp_7b_int8_str`  | `{python} PhysicalNumbersToKnow.t_7b_int8_str`  | `{python} PhysicalNumbersToKnow.rate_s_7b_int8_str`  | `{python} PhysicalNumbersToKnow.rate_c_7b_int8_str` equivalent  |
+| **VLA-7B (INT4)**  | 7.0B       | `{python} PhysicalNumbersToKnow.fp_7b_int4_str`  | `{python} PhysicalNumbersToKnow.t_7b_int4_str`  | `{python} PhysicalNumbersToKnow.rate_s_7b_int4_str`  | `{python} PhysicalNumbersToKnow.rate_c_7b_int4_str` equivalent  |
+| **VLA-14B (INT8)** | 14.0B      | `{python} PhysicalNumbersToKnow.fp_14b_int8_str` | `{python} PhysicalNumbersToKnow.t_14b_int8_str` | `{python} PhysicalNumbersToKnow.rate_s_14b_int8_str` | `{python} PhysicalNumbersToKnow.rate_c_14b_int8_str` equivalent |
+
+: **Edge Memory Bandwidth and Action Chunk Amortization**: Autoregressive token decoding on edge accelerators (such as Jetson AGX Orin at $140\text{ GB/s}$ sustained DRAM bandwidth) is memory-bandwidth bound. Predicting action chunks ($H$ steps) amortizes the weight transfer over multiple execution cycles, enabling high effective control frequencies. {#tbl-numbers-edge-compute tbl-colwidths="[18,14,16,18,16,18]"}
+
+### Thermal time constants across compute and electromechanics
+
+Thermal dissipation follows an exponential relaxation $T(t) = T_{\text{amb}} + \Delta T_{\max} (1 - e^{-t/\tau_{\text{th}}})$ with time constants spanning five orders of magnitude (@tbl-numbers-thermal). Silicon junctions overheat within milliseconds during computational bursts, demanding microsecond-scale DVFS and PDN droop management. In contrast, electromagnetic stator windings heat over minutes, allowing transient torque overdrive if bounded by an $I^2 t$ thermal watchdog. For first-order thermal differential equations and stator winding degradation limits, see @sec-appendix-systems-actuators; for regenerative energy absorption on DC power buses, see @sec-appendix-systems-power.
+
+| Subsystem Component         | Physical Mechanism                       | Thermal Time Constant $\tau_{\text{th}}$ | Critical Failure Mode                                     | Safety Mitigation                            |
+|:----------------------------|:-----------------------------------------|:-----------------------------------------|:----------------------------------------------------------|:---------------------------------------------|
+| **Silicon Junction (Die)**  | Transistor channel self-heating          | 1–10 ms                                  | Gate delay stretch, brownout, thermal trip                | Rapid frequency throttling, PDN decoupling   |
+| **SoC Heat Sink / Package** | Convective heat spreader dissipation     | 10–60 s                                  | Package thermal saturation, sustained throttling          | Active fan modulation, workload migration    |
+| **Motor Stator Windings**   | Copper resistive Joule heating ($I^2 R$) | 30–180 s                                 | Insulation breakdown (Class H $180^\circ\text{C}$), short | $I^2 t$ thermal protection, current derating |
+| **Motor Frame / Housing**   | Bulk metallic casing heat conduction     | 10–30 min                                | Structural deformation, bearing grease loss               | Natural convection, passive cooling fins     |
+| **Traction Battery Pack**   | Electrochemical cell internal resistance | 5–20 min                                 | Thermal runaway ($> 60^\circ\text{C}$), fire              | Liquid cooling loop, charge/discharge cutoff |
+
+: **Thermal Time Constants Across Compute and Electromechanical Subsystems**: Thermal inertia spans five orders of magnitude. Adiabatic heating in semiconductor junctions causes rapid thermal throttling within milliseconds, while copper motor windings integrate electrical energy over tens to hundreds of seconds. {#tbl-numbers-thermal tbl-colwidths="[20,18,16,22,24]"}
+
+### Statistical safety bounds and exposure walls
+
+Under the Poisson Rule of Three [@hanley1983nothing], demonstrating that a physical system achieves a catastrophic failure rate target $\lambda$ with $95\text{ percent}$ confidence without observing a single failure requires testing for $N = 3 / \lambda$ operational hours (@tbl-numbers-safety). Meeting the ultra-dependable thresholds demanded by automotive functional safety (ISO 26262 ASIL D, $\lambda < 10^{-8}/\text{hour}$ [@iso26262]) requires 300 million failure-free hours—a scale that renders end-to-end black-box statistical validation mathematically impossible without deterministic runtime permission envelopes. For proposal and manifest wire formats supporting runtime safety contracts, see @sec-appendix-systems-wire-formats.
+
+| Safety Standard / Regime       | Target Failure Rate $\lambda$ | Equivalent FIT ($10^{-9}/\text{h}$) | Required 0-Failure Hours ($N=3/\lambda$)              | Engineering Implication                                                        |
+|:-------------------------------|:------------------------------|:------------------------------------|:------------------------------------------------------|:-------------------------------------------------------------------------------|
+| **ISO 26262 ASIL D**           | $< 10^{-8}/\text{hour}$       | $< 10\text{ FIT}$                   | $300,000,000\text{ hours}$ ($3 \times 10^8\text{ h}$) | Empirically untestable by fleet testing alone; requires formal safety barriers |
+| **IEC 61508 SIL 3 / PL e**     | $< 10^{-7}/\text{hour}$       | $< 100\text{ FIT}$                  | $30,000,000\text{ hours}$ ($3 \times 10^7\text{ h}$)  | Dual-channel lockstep hardware, diverse software monitoring                    |
+| **Commercial Robotaxi Target** | $< 10^{-6}/\text{hour}$       | $< 1,000\text{ FIT}$                | $3,000,000\text{ hours}$ ($3 \times 10^6\text{ h}$)   | Human driver baseline equivalence ($1$ fatality per $10^8\text{ miles}$)       |
+| **Industrial Cobot (PL d)**    | $< 10^{-6}/\text{hour}$       | $< 1,000\text{ FIT}$                | $3,000,000\text{ hours}$ ($3 \times 10^6\text{ h}$)   | Force and power limiting, speed-and-separation monitoring                      |
+
+: **Functional Safety Standards and Statistical Testing Exposure Walls**: Required failure-free operating hours to establish safety targets at $95\text{ percent}$ confidence via the Rule of Three ($N = 3 / \lambda$). Purely statistical end-to-end testing cannot prove catastrophic safety without deterministic runtime guarantees. {#tbl-numbers-safety tbl-colwidths="[20,16,18,22,24]"}
+
+### Fieldbus latencies, jitter, and determinism
+
+Communication buses exhibit sharp divides in latency and jitter (@tbl-numbers-buses). Industrial fieldbuses like EtherCAT achieve sub-microsecond jitter via dedicated hardware cut-through processing. In contrast, non-deterministic arbitration and shared wireless channels introduce tail latencies that exceed the reaction deadlines of high-speed electromechanical machines. For IEEE 1588 PTP hardware timestamping bounds, see @sec-appendix-systems-ptp; for CAN-FD priority arbitration and EtherCAT cycle budgets, see @sec-appendix-systems-fieldbus.
+
+| Bus / Network Technology       | Nominal Transit Latency                | Worst-Case Jitter                    | Determinism Mechanism                               | Primary Machine Role                                                |
+|:-------------------------------|:---------------------------------------|:-------------------------------------|:----------------------------------------------------|:--------------------------------------------------------------------|
+| **EtherCAT (ETG.1000)**        | $100\,\mu\text{s}\text{--}1\text{ ms}$ | $< 1\,\mu\text{s}$                   | Hardware cut-through on-the-fly frame processing    | Synchronous joint servo drive & sensor feedback (Body/Nervous)      |
+| **CAN-FD (ISO 11898-1)**       | $100\text{--}500\,\mu\text{s}$         | $50\text{--}200\,\mu\text{s}$        | Bitwise non-destructive priority arbitration        | Distributed sensors, legacy actuator controllers (Nervous/Body)     |
+| **TSN Ethernet (802.1Qbv)**    | $10\text{--}100\,\mu\text{s}$          | $< 5\,\mu\text{s}$                   | Time-aware shaper with scheduled transmission gates | High-bandwidth sensor ingress (lidar/cameras) to SoC (Boundary)     |
+| **Standard IP / UDP Ethernet** | $0.5\text{--}5\text{ ms}$              | $1\text{--}20\text{ ms}$             | Best-effort CSMA/CD; FIFO queueing                  | Asynchronous logging, inter-node telemetry (Brain)                  |
+| **Wi-Fi 6 / 5G URLLC**         | $5\text{--}20\text{ ms}$               | $10\text{--}500\text{ ms}$ (RF fade) | Wireless packet retransmission, contention window   | High-level fleet dispatch, cloud mission updates (World/Governance) |
+
+: **Communication Bus Latencies, Jitter, and Real-Time Determinism**: Comparison of onboard fieldbuses and wireless networks. Hard real-time control requires sub-microsecond jitter, while wireless telemetry exhibits multi-millisecond tail latency that precludes off-board closed-loop safety intervention. {#tbl-numbers-buses tbl-colwidths="[18,16,16,22,28]"}
 
 ## Real-Time Timers, Watchdogs, and Schedulability {#sec-appendix-systems-timers}
 
@@ -83,7 +421,7 @@ Stretching $t_{\text{prop}}$ reduces setup slack. A timing failure occurs only i
 
 ## DRAM Contention and Interconnect Arbitration {#sec-appendix-systems-dram}
 
-In shared-memory multi-core system-on-chip (SoC) platforms, direct memory access (DMA) transfers and vision prefetching compete with real-time safety monitors for memory controller command queues and physical DRAM banks.
+In shared-memory multi-core SoC platforms, direct memory access (DMA) transfers and vision prefetching compete with the permission path for memory controller command queues and physical DRAM banks.
 
 ### DRAM bank organization and conflict latency
 
@@ -129,7 +467,7 @@ The slave estimates the mapping to the master domain by subtracting $O$. Asymmet
 
 Software timestamping includes operating-system dispatch and queue variation, which must be measured for the selected network stack.
 
-PTP-capable hardware can timestamp near the Ethernet PHY or MAC boundary, reducing host-dispatch error.[^fn-sys-ptp-timestamps] It does not by itself establish a submicrosecond end-to-end clock bound; topology, asymmetry, synchronization interval, timestamp location, and MCU clock conversion must be characterized.
+PTP-capable hardware can timestamp near the Ethernet PHY or media access control (MAC) boundary, reducing host-dispatch error.[^fn-sys-ptp-timestamps] It does not by itself establish a submicrosecond end-to-end clock bound; topology, asymmetry, synchronization interval, timestamp location, and MCU clock conversion must be characterized.
 
 [^fn-sys-ptp-timestamps]: **Hardware Timestamping**\index{Precision Time Protocol!hardware timestamping}: A compatible PHY or MAC timestamps frames closer to the wire than a software interrupt handler. Hardware timestamping removes one source of dispatch variation, while path asymmetry and clock conversion remain. Timestamp uncertainty belongs in the physical belief record and permission budget.
 
@@ -152,15 +490,15 @@ Linux [RPMsg](https://docs.kernel.org/staging/rpmsg.html) is a virtio-based mess
 
 Weak memory ordering and noncoherent caches can let a receiver observe a notification without a current payload unless the producer and consumer follow one published protocol:\index{Memory barrier!instruction ordering}
 ```c
-// Core A (Application Processor)
-shared_buffer->target_torque = 15.0f; // Store 1: Payload
-mailbox_doorbell = 1;                 // Store 2: Interrupt trigger
+// Core A (Application Processor); q_target and q_cmd are joint_target_t structs
+shared_buffer->q_target = q_cmd; // Store 1: Payload (struct copy)
+mailbox_doorbell = 1;            // Store 2: Interrupt trigger
 ```
-If the CPU or interconnect reorders Store 2 ahead of Store 1, Core B receives the interrupt before the new torque setpoint is committed to physical memory, reading stale or invalid data.
+If the CPU or interconnect reorders Store 2 ahead of Store 1, Core B receives the interrupt before the new joint target is committed to physical memory, reading stale or invalid data.
 
 A data memory barrier can order accesses within its selected shareability domain:[^fn-sys-memory-barriers]
 ```c
-shared_buffer->target_torque = 15.0f;
+shared_buffer->q_target = q_cmd; // Struct copy of the joint targets
 __asm__ volatile("dmb ish" ::: "memory"); // Only if both peers share this domain
 mailbox_doorbell = 1;
 ```
@@ -230,7 +568,7 @@ These terms cannot simply be added as simultaneous peaks without a circuit and w
 
 ### Regenerative braking surges and chopper sizing
 
-During controlled regenerative deceleration, some mechanical kinetic energy $E_k=\frac12mv_0^2$ (linear) or $E_k=\frac12J_{\text{load}}\dot q_0^2$ (rotational) may return through the inverter. If the battery cannot accept it and an assumed fraction $\eta_{\text{regen}}$ reaches the local bus capacitor $C_{\text{bus}}$ before another sink acts, the ideal capacitor relation is:\index{Regenerative braking!chopper resistor}
+During controlled regenerative deceleration, some mechanical kinetic energy $E_k=\frac12mv^2$ (linear) or $E_k=\frac12J_{\text{load}}\dot q_0^2$ (rotational) may return through the inverter. If the battery cannot accept it and an assumed fraction $\eta_{\text{regen}}$ reaches the local bus capacitor $C_{\text{bus}}$ before another sink acts, the ideal capacitor relation is:\index{Regenerative braking!chopper resistor}
 $$ \Delta E_C = \frac{1}{2} C_{\text{bus}} \left( V_{\text{final}}^2 - V_{\text{initial}}^2 \right) = \eta_{\text{regen}} E_k $$
 $$ V_{\text{final}} = \sqrt{ V_{\text{initial}}^2 + \frac{2 \eta_{\text{regen}} E_k}{C_{\text{bus}}} } $$
 For an implementation with an active **brake chopper**, the resistor and switch must absorb the modeled peak power and pulse energy when $V_{\text{bus}}\ge V_{\text{clamp}}$:[^fn-sys-brake-chopper]
@@ -268,9 +606,60 @@ A **sequence counter** marks a single writer's publication in progress with an o
 2. **Reader Protocol**:
    - Read $S_1$ with acquire ordering. If it is odd, reject this publication without waiting.
    - Make one bounded copy to scratch memory using the platform's required load ordering, then read $S_2$.
-   - Accept only if $S_1=S_2$ and both are even, and the copied frame passes integrity, timestamp, and lease checks. Otherwise retain the last validated local command only while its lease and stopping margin permit; then enter the MCU-owned fallback.
+   - Accept only if $S_1=S_2$ and both are even, and the copied frame passes integrity, timestamp, and lease checks. Otherwise retain the last validated local command only while its lease and stopping margin permit; then enter the state-matched fallback.
 
 The reader's one-attempt execution time can be bounded on the target hardware; success probability depends on the writer's schedule and cannot be inferred from payload size alone. Conventional Linux seqlock readers may retry, as the [kernel documentation](https://docs.kernel.org/locking/seqlock.html) shows, but a real-time permission gate cannot use an unbounded retry loop.
+
+```pseudocode
+#| label: algo-lock-free-trajectory
+#| pdf-line-number: true
+#| pdf-right-comment: false
+#| html-comment-delimiter: "▷"
+
+\begin{algorithm}
+\caption{Single-Slot Trajectory Seqlock Baseline}
+\begin{algorithmic}
+\Require proposal $P$ (proposal header with $\text{sequence\_id}$, $\text{t\_evidence\_ns}$, $\text{sync\_error\_ns}$, $\text{t\_expire\_ns}$; waypoints $\mathbf{w}_{1..K}$; $\text{crc32}$), scratch buffer $B_{\text{scratch}}$ and previously validated active spline $B_{\text{active}}$ in static SRAM, shared SRAM mailbox $(c_{\text{seq}}, \text{Slot}_{\text{shared}})$, current time $t_{\text{now}}$ and evidence-age budget $t_{\text{age,max}}$ (the largest admissible $t_{\text{age}}$), both on the safety microcontroller's clock
+\Ensure promoted validated chunk in $B_{\text{active}}$ or rejection with $B_{\text{active}}$ unchanged
+\Statex
+\Function{PublishActionChunk}{$P$}
+    \State $c_{\text{curr}} \gets \Call{AtomicLoadExplicit}{c_{\text{seq}}, \text{memory\_order\_relaxed}}$
+    \State $\Call{AtomicStoreExplicit}{c_{\text{seq}}, c_{\text{curr}} + 1, \text{memory\_order\_relaxed}}$ \Comment{mark odd: write in progress}
+    \State $\Call{HardwareMemoryBarrier}{\text{DMB\_OSHST}}$ \Comment{outer-shareable store barrier pushes counter}
+    \State $\Call{CopyMemory}{\text{Slot}_{\text{shared}}.\text{payload}, P, \text{sizeof}(P)}$ \Comment{copy multi-word trajectory}
+    \State $\Call{HardwareMemoryBarrier}{\text{DMB\_OSH}}$ \Comment{outer-shareable full barrier: payload visible}
+    \State $\Call{AtomicStoreExplicit}{c_{\text{seq}}, c_{\text{curr}} + 2, \text{memory\_order\_release}}$ \Comment{mark even: publish committed}
+\EndFunction
+\Statex
+\Function{LatchLatestActionChunk}{$B_{\text{scratch}}, B_{\text{active}}, t_{\text{now}}$}
+    \State $c_{\text{start}} \gets \Call{AtomicLoadExplicit}{c_{\text{seq}}, \text{memory\_order\_acquire}}$ \Comment{load initial counter (ARM LDAR acquire)}
+    \If{$c_{\text{start}}$ is odd}
+        \State \Return $\text{STATUS\_WRITER\_ACTIVE}$ \Comment{writer active; retain prior spline}
+    \EndIf
+    \State $\Call{HardwareMemoryBarrier}{\text{DMB\_OSHLD}}$ \Comment{explicit barrier: prevent payload reads hoisting before counter}
+    \State $\Call{CopyMemory}{B_{\text{scratch}}, \text{Slot}_{\text{shared}}.\text{payload}, \text{sizeof}(\text{Payload})}$ \Comment{tentative copy; active spline unchanged}
+    \State $\Call{HardwareMemoryBarrier}{\text{DMB\_OSHLD}}$ \Comment{LDAR cannot prevent prior reads sinking; DMB forces payload reads before $c_{\text{end}}$}
+    \State $c_{\text{end}} \gets \Call{AtomicLoadExplicit}{c_{\text{seq}}, \text{memory\_order\_acquire}}$ \Comment{re-read sequence counter}
+    \If{$c_{\text{start}} \ne c_{\text{end}}$}
+        \State \Return $\text{STATUS\_TORN\_READ}$ \Comment{concurrent write detected}
+    \EndIf
+    \If{$\Call{ComputeCrc32}{B_{\text{scratch}}} \ne B_{\text{scratch}}.\text{crc32}$}
+        \State \Return $\text{STATUS\_CHECKSUM\_INVALID}$
+    \EndIf
+    \If{$t_{\text{now}} \ge B_{\text{scratch}}.\text{t\_expire\_ns}$}
+        \State \Return $\text{STATUS\_LEASE\_EXPIRED}$ \Comment{expiry is absolute; the reader may only shorten it}
+    \EndIf
+    \If{$t_{\text{now}} - B_{\text{scratch}}.\text{t\_evidence\_ns} + B_{\text{scratch}}.\text{sync\_error\_ns} > t_{\text{age,max}}$}
+        \State \Return $\text{STATUS\_EVIDENCE\_STALE}$ \Comment{conversion error is added to every age}
+    \EndIf
+    \State $B_{\text{active}} \gets B_{\text{scratch}}$ \Comment{promote only after sequence, CRC, expiry, and evidence-age checks}
+    \State \Return $\text{STATUS\_VALID\_LATCHED}$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+```
+
+@Sec-nervous-cadences exchanges the proposal header and its chunk payload through this mailbox; @sec-appendix-systems-wire-header gives their byte layout.
 
 ## Camera Projective Geometry and Covariance Propagation {#sec-appendix-systems-vision}
 
@@ -335,33 +724,337 @@ Stacking $N \ge 3$ images forms the homogeneous system $\mathbf{V} \mathbf{b} = 
 
 ## Kinematic Stopping Envelopes and Information Age Lag {#sec-appendix-systems-stopping}
 
-Halting an embodied machine transporting mass $m$ at velocity $v_0$ requires balancing sensorimotor information freshness and mechanical braking deceleration.
+Halting an embodied machine transporting mass $m$ at speed $v$ requires balancing sensorimotor information freshness and mechanical braking deceleration.
 
 ### Sensorimotor information age and lag distance
 
-For a specified hazard detector and stop path, let $\tau_{\text{pre}}$ bound the time from the physical state represented by the evidence until validated braking deceleration begins:\index{Kinematic stopping distance!information age}
-$$ \tau_{\text{pre}} = t_{\text{age}} + t_{\text{detect}} + t_{\text{compute}} + t_{\text{bus}} + t_{\text{brake-onset}} $$
+For a specified hazard detector and stop path, let $\tau_{\text{delay}}$ bound the time from the physical state represented by the evidence until validated braking deceleration begins:\index{Kinematic stopping distance!observation age}
+$$ \tau_{\text{delay}} = t_{\text{age}} + t_{\text{detect}} + t_{\text{compute}} + T_{\text{bus}} + T_{\text{act}} $$
 where:
 
 - $t_{\text{age}}$ converts the evidence timestamp to the controller clock and includes exposure/readout and clock error.
 - $t_{\text{detect}}$ bounds recognition or lease-expiry detection.
 - $t_{\text{compute}}$ is the admitted stop decision, including any required input transfer.
-- $t_{\text{bus}}$ bounds command dispatch and network queuing.
-- $t_{\text{brake-onset}}$ ends when the measured actuator begins delivering the specified deceleration, not when a command register is written.
+- $T_{\text{bus}}$ bounds command dispatch and network queuing.
+- $T_{\text{act}}$ ends when the measured actuator begins delivering the specified deceleration, not when a command register is written.
 
-Under the explicit simplifying assumption that speed cannot increase before brake onset, the pre-brake travel is bounded by $d_{\text{lag}}=v_0\tau_{\text{pre}}$. If propulsion or a slope can increase speed, use its validated acceleration bound in this interval instead.
+Under the explicit simplifying assumption that speed cannot increase before brake onset, the blind travel is bounded by $d_{\text{blind}}=v\,\tau_{\text{delay}}$. If propulsion or a slope can increase speed, use its validated acceleration bound in this interval instead.
 
 ### Braking dynamics and friction limits
 
-Tire-floor friction and actuator torque place upper limits on achievable deceleration; $a\le\mu g$ does not establish what braking the machine will deliver.\index{Braking!friction limit} Let $a_{\text{floor}}>0$ be a validated lower bound on *achieved* deceleration throughout the stop, for the declared load, temperature, slope, brake condition, and surface. A justified friction floor $\mu_{\text{floor}}$ may support that bound, but does not replace brake tests. With constant or stronger braking after onset, and a nonnegative clearance allowance $\epsilon_d$ for state and tracking error,
-$$ d_{\text{stop,bound}}(v_0)=v_0\tau_{\text{pre}}+\frac{v_0^2}{2a_{\text{floor}}}+\epsilon_d. $$
-Motion is admitted only when $d_{\text{stop,bound}}(v_0)\le d_{\text{clear,lower}}$, where $d_{\text{clear,lower}}$ is a validated lower bound on available path clearance. The sampled controller must reserve intersample travel and a state-matched stop before the viable region is lost.
+Tire-floor friction and actuator torque place upper limits on achievable deceleration; $a\le\mu g$ does not establish what braking the machine will deliver.\index{Braking!friction limit} Let $a_{\text{brake}}>0$ be a validated lower bound on *achieved* deceleration throughout the stop, for the declared load, temperature, slope, brake condition, and surface. A justified friction floor $\mu_{\text{floor}}$ may support that bound, but does not replace brake tests. With constant or stronger braking after onset, a localization bound $\delta_{\text{loc}}$, a fixed protective clearance $\delta_{\text{margin}}$, and a tracking-error bound $\epsilon_{\text{track}}$,
+$$ d_{\text{stop}}(v)=v\,\tau_{\text{delay}}+\frac{v^2}{2a_{\text{brake}}}+\delta_{\text{loc}}+\delta_{\text{margin}}+\epsilon_{\text{track}}. $$
+Motion is admitted only when $d_{\text{stop}}(v)\le D_{\text{clear}}$, where $D_{\text{clear}}$ is taken as a validated lower bound on available path clearance. This is the inset stopping distance that @sec-enforcement-stopping-envelopes defends. The sampled controller must reserve intersample travel and a state-matched stop before the viable region is lost.
 
 ### Kinetic energy derating and friction collapse
 
-In an ideal friction-limited model, lowering $\mu$ from $\mu_{\text{nom}}$ to a positive $\mu_{\text{fault}}$ changes the braking-distance ratio to $\mu_{\text{nom}}/\mu_{\text{fault}}$.\index{Velocity clamp!kinetic derating} That ratio is illustrative; actual deceleration can also be limited by brake hardware or control. If surface friction is not sensed in time, derive $a_{\text{floor}}$ from a controlled surface condition and inspection schedule, exclude degraded surfaces, or withhold motion. For the constant-speed pre-brake model above, solving the clearance inequality gives
-$$ v_{\text{clamp}}=-a_{\text{floor}}\tau_{\text{pre}}+\sqrt{(a_{\text{floor}}\tau_{\text{pre}})^2+2a_{\text{floor}}(d_{\text{clear,lower}}-\epsilon_d)}. $$
-This clamp is valid only when $d_{\text{clear,lower}}>\epsilon_d$, the braking and timing lower bounds hold, and the speed bound is enforced before entering the hazard corridor. No positive clamp follows if the available deceleration floor is unknown or zero.
+In an ideal friction-limited model, lowering $\mu$ from $\mu_{\text{nom}}$ to a positive $\mu_{\text{fault}}$ changes the braking-distance ratio to $\mu_{\text{nom}}/\mu_{\text{fault}}$.\index{Velocity clamp!kinetic derating} That ratio is illustrative; actual deceleration can also be limited by brake hardware or control. If surface friction is not sensed in time, derive $a_{\text{brake}}$ from a controlled surface condition and inspection schedule, exclude degraded surfaces, or withhold motion. For the constant-speed pre-brake model above, solving the clearance inequality gives
+$$ v_{\text{clamp}}=-a_{\text{brake}}\tau_{\text{delay}}+\sqrt{(a_{\text{brake}}\tau_{\text{delay}})^2+2a_{\text{brake}}\left(D_{\text{clear}}-\delta_{\text{loc}}-\delta_{\text{margin}}-\epsilon_{\text{track}}\right)}. $$
+This clamp is valid only when $D_{\text{clear}}$ exceeds the three fixed allowances, the braking and timing lower bounds hold, and the speed bound is enforced before entering the hazard corridor. No positive clamp follows if the available deceleration floor is unknown or zero.
+
+## Wire Formats for the Record Chain {#sec-appendix-systems-wire-formats}
+
+The chapters name each record's fields by meaning and state the invariant the record enforces. This section gives the byte layouts for records that must fit a fixed-size mailbox or log, and the canonical field order for the offline records that are stored and bound by digest. Every absolute time is an unsigned 64-bit count of nanoseconds on the safety microcontroller's monotonic clock, every duration is an unsigned count of nanoseconds, and `sync_error_ns` carries the conversion bound for evidence captured on another clock. The clock and integrity policies themselves belong to @sec-nervous-cadences; the layouts here fix the algorithm for each integrity job. Corruption detection uses a CRC-32 (IEEE 802.3) over header and payload, lineage uses a SHA-256 digest of the consumed record, and authority uses HMAC-SHA-256 on operator commands, a keyed hash chain on the forensic log, and Ed25519 signatures on fault records and release artifacts. The authority, fault, and release records are each followed by the protocol that writes or checks them.
+
+Fixed layouts are little-endian and packed in the order listed. Offsets are hexadecimal byte positions from the start of the record, and every multibyte field sits on its natural alignment, so no field needs hidden padding. A field whose length depends on a count comes after every fixed field, and its offset is written in terms of that count. The record itself carries $K$ waypoints, $N_j$ commanded joints, $K_b$ barrier constraints, and $K_a$ approach channels; the static authority manifest fixes $N_c$ command components and $N_s$ state components. Offline records (placement, fault, release) are identified by the SHA-256 digest of their canonical encoding, and the record that consumes one stores that digest under the consumed record's name.
+
+### Proposal header and chunk payload {#sec-appendix-systems-wire-header}
+
+Every proposal that crosses the proposal boundary opens with the same header, and `payload_kind` selects the payload that follows at `0x50`. @Tbl-appendix-systems-wire-header lays out the header with the minimal chunk payload of @sec-nervous-cadences. The chunk carries kinematic setpoints only. Torque is computed on the permission side, where the tracker derives it from the admitted reference, so a learned proposal never names a motor torque.
+
+| Offset                 | Field              | Scalar type       | Unit                 | Invariant and check                                                                                          |
+|:-----------------------|:-------------------|:------------------|:---------------------|:-------------------------------------------------------------------------------------------------------------|
+| `0x00`                 | `sequence_id`      | `uint64_t`        | dimensionless        | Strictly increasing per producer; a record not newer than the last accepted one is rejected.                 |
+| `0x08`                 | `t_evidence_ns`    | `uint64_t`        | ns, permission clock | Capture epoch of the oldest evidence the proposal rests on, converted to the safety microcontroller's clock. |
+| `0x10`                 | `t_issue_ns`       | `uint64_t`        | ns, permission clock | Time the producer published the record.                                                                      |
+| `0x18`                 | `t_expire_ns`      | `uint64_t`        | ns, permission clock | Requested absolute expiry, no later than the chunk lease allows; the permission path may only shorten it.    |
+| `0x20`                 | `frame_id`         | `uint64_t`        | dimensionless        | Transform-tree key and calibration revision of the setpoints' frame.                                         |
+| `0x28`                 | `parent_digest`    | `uint8_t[32]`     | SHA-256              | Digest of the record this proposal was derived from; establishes lineage, authenticates nothing.             |
+| `0x48`                 | `sync_error_ns`    | `uint32_t`        | ns                   | Bound on the evidence time's conversion error; added to every age the reader checks.                         |
+| `0x4C`                 | `payload_kind`     | `uint16_t`        | enumeration          | `CHUNK` for this payload; `INTENT`, `TRAJECTORY`, and `OPERATOR` select the other payloads.                  |
+| `0x4E`                 | `payload_len`      | `uint16_t`        | bytes                | Payload length; bounds the parser before any payload byte is read.                                           |
+| `0x50`                 | `num_waypoints`    | `uint16_t`        | count                | Chunk horizon $K$; a count outside the configured range is rejected.                                         |
+| `0x52`                 | `num_joints`       | `uint8_t`         | count                | Commanded joints $N_j$; must equal the configured count, and `payload_len` must equal $4+8KN_j$.             |
+| `0x53`                 | reserved           | `uint8_t`         | —                    | Zero.                                                                                                        |
+| `0x54`                 | `joint_positions`  | `float32[K][N_j]` | rad                  | Commanded joint angles within the reach limits ($q_{\min} \le q \le q_{\max}$).                              |
+| `0x54` + $4KN_j$       | `joint_velocities` | `float32[K][N_j]` | rad/s                | Commanded joint velocities within certified ceilings ($\lVert \dot{\mathbf{q}} \rVert \le \dot{q}_{\max}$).  |
+| `0x50` + `payload_len` | `crc32`            | `uint32_t`        | checksum             | Last field; IEEE 802.3 CRC-32 over all preceding bytes.                                                      |
+
+: **Proposal header and chunk payload**: Field offsets, scalar types, units, and invariants for a chunk proposal exchanged through the seqlock mailbox of @algo-lock-free-trajectory. The header occupies `0x00`–`0x4F` in every proposal; the other payload layouts in this section begin at `0x50`. {#tbl-appendix-systems-wire-header tbl-colwidths="[14,17,14,14,41]"}
+
+### Intent payload {#sec-appendix-systems-wire-intent}
+
+The intent lease of @sec-intent-lease travels under the proposal header with `payload_kind` set to `INTENT` (@tbl-appendix-systems-wire-intent). Three header fields take specific meanings. `t_evidence_ns` is the parent belief record's evidence epoch, never its estimate epoch; `parent_digest` is that belief record's digest, which the permission path matches against a retained record; and `t_expire_ns` is the requested expiry, which the permission path shortens to the earliest of the evidence horizon, its configured lease ceiling, and the stop deadline. The six `bounds` values are three conservative position-error envelopes and three task tolerances in the base frame named by `frame_id`. They are not an encoding of a covariance, and the producer must justify any conversion from its covariance estimate, including calibration bias and the declared tail risk.
+
+| Offset        | Field              | Scalar type  | Unit               | Invariant and check                                                                                                               |
+|:--------------|:-------------------|:-------------|:-------------------|:----------------------------------------------------------------------------------------------------------------------------------|
+| `0x00`–`0x4F` | proposal header    | as above     | as above           | @Tbl-appendix-systems-wire-header, with `payload_kind` = `INTENT`.                                                                |
+| `0x50`        | `target_pose`      | `float64[7]` | m; unit quaternion | Base-frame position and orientation; finite values, normalized quaternion, workspace prefilter.                                   |
+| `0x88`        | `bounds`           | `float32[6]` | m                  | Error envelope $e_{x,y,z}$, then task tolerance $r_{x,y,z}$; $0 \le e_i \le r_i$, each checked against the approved task profile. |
+| `0xA0`        | `wrench_request`   | `float32[6]` | N; N·m             | Three requested forces and three torques; clamped or rejected against independent task and actuator limits.                       |
+| `0xB8`        | `terminal_request` | `uint32_t`   | enumeration        | Requested terminal mode; the permission path selects a feasible approved response from the current load and contact state.        |
+| `0xBC`        | `crc32`            | `uint32_t`   | checksum           | IEEE 802.3 CRC-32 over all preceding bytes.                                                                                       |
+
+: **Intent payload**: The intent lease as a proposal-header payload. Orientation tolerances and contact-mode rules come from an independently approved task profile; the quaternion is the proposed orientation only. {#tbl-appendix-systems-wire-intent tbl-colwidths="[13,17,13,15,42]"}
+
+### Trajectory payload {#sec-appendix-systems-wire-trajectory}
+
+The trajectory record of @sec-planning-trajectory-contract replaces the chunk on the running machine and travels under the same proposal header, with `payload_kind` set to `TRAJECTORY` and `parent_digest` set to the digest of the active intent lease (@tbl-appendix-systems-wire-trajectory). The header's `t_expire_ns` carries the chunk lease; the intent's own expiry comes from the lease that `parent_digest` identifies. The setpoint samples and the assumptions sidecar travel outside this fixed part. The permission path verifies `sidecar_digest` over both, validates the complete candidate in staging memory, and latches the admitted setpoints and stop suffix in protected memory before tracking begins.
+
+| Offset           | Field              | Scalar type       | Unit                 | Invariant and check                                                                                              |
+|:-----------------|:-------------------|:------------------|:---------------------|:-----------------------------------------------------------------------------------------------------------------|
+| `0x00`–`0x4F`    | proposal header    | as above          | as above             | @Tbl-appendix-systems-wire-header, with `payload_kind` = `TRAJECTORY`.                                           |
+| `0x50`           | `sample_period_ns` | `uint32_t`        | ns                   | Setpoint cadence $\Delta t_{\text{step}}$; must match the configured decoder.                                    |
+| `0x54`           | `num_samples`      | `uint16_t`        | count                | Nominal setpoints in the digested sample payload; bounds its size.                                               |
+| `0x56`           | `num_joints`       | `uint8_t`         | count                | Commanded joints $N_j$; must equal the configured count.                                                         |
+| `0x57`           | `payload_version`  | `uint8_t`         | enumeration          | Decoder version; an unknown version is rejected.                                                                 |
+| `0x58`           | `t_start_ns`       | `uint64_t`        | ns, permission clock | First nominal sample.                                                                                            |
+| `0x60`           | `t_commit_ns`      | `uint64_t`        | ns, permission clock | Latest entry into the matched stop suffix; $t_{\text{commit}}=t_{\text{stop\_end}}-T_{\text{stop}}$.             |
+| `0x68`           | `t_plan_exp_ns`    | `uint64_t`        | ns, permission clock | End of the nominal setpoints.                                                                                    |
+| `0x70`           | `t_stop_end_ns`    | `uint64_t`        | ns, permission clock | Protected stop completion; $t_{\text{start}}\le t_{\text{commit}}<t_{\text{plan\_exp}}<t_{\text{stop\_end}}$.    |
+| `0x78`           | `sidecar_digest`   | `uint8_t[32]`     | SHA-256              | Digest over the setpoint samples and the assumptions sidecar; binds content.                                     |
+| `0x98`           | `seam_state`       | `float32[3][N_j]` | rad; rad/s; rad/s²   | Entry state $(q,\dot q,\ddot q)$ of each joint.                                                                  |
+| `0x98` + $12N_j$ | `stop_suffix`      | `float32[6][N_j]` | quintic coefficients | One quintic stop per joint; must be resident and feasible from every state reachable before $t_{\text{commit}}$. |
+| `0x98` + $36N_j$ | `crc32`            | `uint32_t`        | checksum             | IEEE 802.3 CRC-32 over all preceding bytes.                                                                      |
+
+: **Trajectory payload**: The trajectory record as a proposal-header payload. The four deadlines are absolute times on the safety microcontroller's clock; the variable-length setpoint samples and the assumptions sidecar are bound by `sidecar_digest` and validated before activation. {#tbl-appendix-systems-wire-trajectory tbl-colwidths="[14,16,14,15,41]"}
+
+### Enforcement record {#sec-appendix-systems-wire-enforcement}
+
+The enforcement record of @sec-enforcement-telemetry is configuration, not a proposal, so it carries no proposal header (@tbl-appendix-systems-wire-enforcement). Three digests name what the record rests on: the evaluation record, the limit records behind the stopping envelope, and the validity region. Each threshold names the fallback-ladder rung that a failed check selects. Where the rung depends on whether the body is moving, the row names both, `STOP` in motion and `HOLD` at standstill. A proposal refused while the active lease holds selects no rung, because the setpoints already admitted stay in force until that lease lapses.
+
+| Offset               | Field                      | Scalar type       | Unit                                 | Check, and the rung a failure selects                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+|:---------------------|:---------------------------|:------------------|:-------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `0x00`               | `evaluation_record_digest` | `uint8_t[32]`     | SHA-256                              | Evaluation record whose runtime monitor specifications become this record's monitor channels.                                                                                                                                                                                                                                                                                                                                                                                         |
+| `0x20`               | `limit_record_digest`      | `uint8_t[32]`     | SHA-256                              | Canonical list of the limit records whose braking, onset, and actuator limits parameterize $d_{\text{stop}}(v)$.                                                                                                                                                                                                                                                                                                                                                                      |
+| `0x40`               | `validity_region_digest`   | `uint8_t[32]`     | SHA-256                              | `validity_region`, the plant-parameter bounds the thresholds rest on. On the mobile manipulator it covers the arm at the door, where it equals the target ODD, and at the packing station through the mug pick and the handover approach. Each base configuration, normal or restricted, loads as its own enforcement record, so this field holds the region digest of that configuration and its friction premise. A live state outside it that the machine observes selects `STOP`. |
+| `0x60`               | `loop_period_ns`           | `uint32_t`        | ns                                   | Permission-loop period $T_{\text{loop}}$; the placement record's `nominal_period_ns` must equal it.                                                                                                                                                                                                                                                                                                                                                                                   |
+| `0x64`               | `deadline_ns`              | `uint32_t`        | ns                                   | Permission-path deadline inside the tick; a cycle at risk of overrunning it selects `HOLD`.                                                                                                                                                                                                                                                                                                                                                                                           |
+| `0x68`               | `evidence_age_ceiling_ns`  | `uint32_t`        | ns                                   | Refusal threshold of the evidence-epoch check, the budgeted observation age plus the clock-conversion bound. A proposal whose upper evidence age exceeds it is refused, and the permission path shortens `t_expire_ns` to at most `t_evidence_ns` plus the ceiling minus `sync_error_ns`. A proposal whose `sequence_id` is not newer is refused; an expired lease selects `STOP` in motion and `HOLD` at standstill.                                                                 |
+| `0x6C`               | `watchdog_timeout_ns`      | `uint32_t`        | ns                                   | The self-watchdog is fed only after a completed tick; expiry requests `INHIBIT` through the independently wired trip.                                                                                                                                                                                                                                                                                                                                                                 |
+| `0x70`               | `t_stop_ns`                | `uint32_t`        | ns                                   | Stopping-time bound from the maximum admitted speed; a reference that leaves less clearance than $\epsilon_{\text{track}} + v_{\max} t_{\text{stop}}$ selects `STOP`.                                                                                                                                                                                                                                                                                                                 |
+| `0x74`               | `pos_tracking_bound`       | `float32`         | m                                    | $\lvert x_{\text{meas}} - r_{\text{cmd}} \rvert \le \epsilon_{\text{track}}$; `STOP` above it.                                                                                                                                                                                                                                                                                                                                                                                        |
+| `0x78`               | `pos_critical_bound`       | `float32`         | m                                    | $\lvert x_{\text{meas}} - r_{\text{cmd}} \rvert \le \epsilon_{\text{crit}}$, with $\epsilon_{\text{crit}} > \epsilon_{\text{track}}$; `STOP` above it.                                                                                                                                                                                                                                                                                                                                |
+| `0x7C`               | `vel_ceiling_limit`        | `float32`         | rad/s                                | $\lvert \dot{q} \rvert \le \dot{q}_{\max}$; `PROJECT` (QP clamp).                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `0x80`               | `torque_slew_ceiling`      | `float32`         | N·m/s                                | $\lvert \dot{\tau} \rvert \le \dot{\tau}_{\max}$; `PROJECT` (slew limiter).                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `0x84`               | `actuator_curr_limit`      | `float32`         | A                                    | $\lvert I_{\text{phase}} \rvert \le I_{\text{peak}}$; `STOP`.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `0x88`               | `dc_bus_overvolt_thresh`   | `float32`         | V                                    | $V_{\text{bus}} \le V_{\text{max\_safe}}$; `STOP`, with the brake chopper absorbing returned energy.                                                                                                                                                                                                                                                                                                                                                                                  |
+| `0x8C`               | `num_barriers`             | `uint16_t`        | count                                | Barrier constraints $K_b$; must equal the configured count.                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `0x8E`               | `num_approach_channels`    | `uint16_t`        | count                                | Approach channels $K_a$; must equal the configured count.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `0x90`               | `cbf_barrier_params`       | `float32[K_b][2]` | normalized distance; $\text{s}^{-1}$ | Margin $\delta_k$ and class-$\mathcal{K}$ rate $\alpha_k$ of each barrier; $h_k(\mathbf{x}) \ge \delta_k$, else `PROJECT`, or `STOP` when no feasible input remains.                                                                                                                                                                                                                                                                                                                  |
+| `0x90` + $8K_b$      | `approach_channel_ids`     | `uint32_t[K_a]`   | enumeration                          | Zone and activation condition of each channel, drawn from the validity region, such as the tool point inside the door zone or `accept_item` held.                                                                                                                                                                                                                                                                                                                                     |
+| `0x90` + $8K_b+4K_a$ | `approach_ceilings`        | `float32[K_a]`    | m/s                                  | Ceiling on tool-point approach speed while its channel is active; a faster proposal takes `PROJECT` (QP clamp), and the channel that bound it is logged.                                                                                                                                                                                                                                                                                                                              |
+| `0x90` + $8K_b+8K_a$ | `crc32`                    | `uint32_t`        | checksum                             | IEEE 802.3 CRC-32 over all preceding bytes; a mismatch rejects the stored record, and no motion is admitted until a valid copy loads.                                                                                                                                                                                                                                                                                                                                                 |
+
+: **Enforcement record**: Thresholds of the permission path with the fallback-ladder rung each failed check selects, and digests of the evaluation record, limit records, and validity region the thresholds rest on. The record is configuration and telemetry; it adds no packet to the proposal stream. {#tbl-appendix-systems-wire-enforcement tbl-colwidths="[15,22,12,13,38]"}
+
+### Placement record {#sec-appendix-systems-wire-placement}
+
+The placement record of @sec-placement-hardware-allocation is offline evidence with a fixed header and a linked test ledger (@tbl-appendix-systems-wire-placement). It carries no signature of its own; the signed release manifest binds it through `placement_record_digest`. `enforcement_record_digest` names the enforcement record whose `deadline_ns` was tested, and `test_ledger_digest` identifies the external ledger that states the declared worst-case execution time the loaded test must not exceed, together with distributions, sample counts, test conditions, mitigations, and untested states. A maximum that has not been measured is stored as all ones, never zero, the same unavailable-value convention the fault record uses.
+
+| Offset | Field                        | Scalar type   | Unit            | Invariant and check                                                                                                                          |
+|:-------|:-----------------------------|:--------------|:----------------|:---------------------------------------------------------------------------------------------------------------------------------------------|
+| `0x00` | `execution_domain_id`        | `uint64_t`    | enumeration     | Must match the declared topology (application processor, NPU, GPU, MCU, lockstep controller).                                                |
+| `0x08` | `privilege_and_ring`         | `uint64_t`    | privilege level | Proposer at EL0; enforcer at EL1 or above, or in the secure world.                                                                           |
+| `0x10` | `nominal_period_ns`          | `uint32_t`    | ns              | Enforcer tick; equal to the enforcement record's `loop_period_ns`.                                                                           |
+| `0x14` | `hard_deadline_ns`           | `uint32_t`    | ns              | The permission path's deadline inside the tick; equal to the enforcement record's `deadline_ns`.                                             |
+| `0x18` | `unloaded_observed_max_ns`   | `uint64_t`    | ns              | Largest response observed without competing load; a sample maximum, not a WCET.                                                              |
+| `0x20` | `loaded_observed_max_ns`     | `uint64_t`    | ns              | Largest response under the declared load; all ones until a loaded test runs. Independence stands only while it is at most the declared WCET. |
+| `0x28` | `shared_axi_channel_qos`     | `uint64_t`    | configured QoS  | Arbitration priority per claimant; controller semantics verified by register capture and a stress test.                                      |
+| `0x30` | `max_pdn_droop_thermal_trip` | `uint32_t[2]` | mV; m°C         | Configured rail-droop and thermal trip thresholds; the ledger records the tests behind them.                                                 |
+| `0x38` | `hardware_mitigation_flags`  | `uint8_t[32]` | bitfield        | Active mitigations, such as a TCM snapshot, memory partitioning, or an isolated rail; register-locked after boot.                            |
+| `0x58` | `enforcement_record_digest`  | `uint8_t[32]` | SHA-256         | Enforcement record whose `loop_period_ns` and `deadline_ns` this record tests.                                                               |
+| `0x78` | `test_ledger_digest`         | `uint8_t[32]` | SHA-256         | External test ledger, including the model and firmware digests under test.                                                                   |
+
+: **Placement record header**: Configuration values and observed maxima, with digests linking the tested enforcement record and the external test ledger. The header alone does not establish freedom from interference. {#tbl-appendix-systems-wire-placement tbl-colwidths="[9,26,13,14,38]"}
+
+### Authority record and operator payload {#sec-appendix-systems-wire-authority}
+
+The authority record of @sec-intervention-authority-log has two runtime layouts. A network operator's command is a proposal-header payload (@tbl-appendix-systems-wire-operator), and it is the one proposal whose sender's identity confers authority, so it carries an HMAC-SHA-256 tag under the operator role's key. The static authority manifest fixes each role's channel grant, the command's component count, order, and units, and the key custody.
+
+| Offset          | Field                    | Scalar type    | Unit         | Invariant and check                                                               |
+|:----------------|:-------------------------|:---------------|:-------------|:----------------------------------------------------------------------------------|
+| `0x00`–`0x4F`   | proposal header          | as above       | as above     | @Tbl-appendix-systems-wire-header, with `payload_kind` = `OPERATOR`.              |
+| `0x50`          | `nonce`                  | `uint64_t`     | —            | Never repeated within a key's lifetime; a repeated nonce is rejected as a replay. |
+| `0x58`          | `requested_channel_mask` | `uint16_t`     | bitfield     | Channels requested; must lie within the role's grant in the static manifest.      |
+| `0x5A`          | `operator_role_id`       | `uint8_t`      | enumeration  | Role whose key produced `mac`.                                                    |
+| `0x5B`          | reserved                 | `uint8_t`      | —            | Zero.                                                                             |
+| `0x5C`          | `command`                | `float32[N_c]` | per manifest | Requested command components in manifest order, admitted like any other proposal. |
+| `0x5C` + $4N_c$ | `mac`                    | `uint8_t[32]`  | HMAC-SHA-256 | Tag over all preceding bytes; an invalid tag locks out the channel.               |
+| `0x7C` + $4N_c$ | `crc32`                  | `uint32_t`     | checksum     | IEEE 802.3 CRC-32 over all preceding bytes.                                       |
+
+: **Operator payload**: A network operator's command under the proposal header. The tag authenticates the role; the permission path still admits the command by its content. {#tbl-appendix-systems-wire-operator tbl-colwidths="[13,22,13,13,39]"}
+
+The forensic authority record (@tbl-appendix-systems-wire-authority) is a log record written once per tick, not a packet. Its time is on the safety microcontroller's clock; the mapping that relates it to PTP and calendar time, with its error bound, lives in the static manifest together with the vector lengths, units, and component order. Each record's `chain_link` is an HMAC-SHA-256, under the log key, over the previous record's link and this record's preceding fields, so an altered or deleted record breaks every later link.
+
+| Offset                | Field                    | Scalar type    | Unit                 | Recorded evidence and limit                                                                                                                |
+|:----------------------|:-------------------------|:---------------|:---------------------|:-------------------------------------------------------------------------------------------------------------------------------------------|
+| `0x00`                | `t_mcu_ns`               | `uint64_t`     | ns, permission clock | Event time of this tick's decision.                                                                                                        |
+| `0x08`                | `actuator_channel_mask`  | `uint16_t`     | bitfield             | Channels to which this decision applies; bus and DMA permissions enforce write scope.                                                      |
+| `0x0A`                | `preempt_trigger_code`   | `uint16_t`     | enumeration          | Request, timeout, enabling-device loss, or protective input cause.                                                                         |
+| `0x0C`                | `authority_state`        | `uint8_t`      | enumeration          | `AUTO`, `PEND`, `BLEND`, `MAN`, `FALLBACK`, or `PROTECTIVE`.                                                                               |
+| `0x0D`                | `fallback_rung`          | `uint8_t`      | enumeration          | `PROJECT`, `HOLD`, `STOP`, or `INHIBIT` when the state is `FALLBACK`; `NONE` otherwise.                                                    |
+| `0x0E`                | `operator_role_id`       | `uint8_t`      | enumeration          | Authenticated source role, interpreted against the static manifest.                                                                        |
+| `0x0F`                | reserved                 | `uint8_t`      | —                    | Zero.                                                                                                                                      |
+| `0x10`                | `blend_factor_alpha`     | `float32`      | dimensionless        | Progress in $[0,1]$ of the enforcer-owned blending profile.                                                                                |
+| `0x14`                | `policy_proposed_cmd`    | `float32[N_c]` | per manifest         | Command components before permission; not a motor write.                                                                                   |
+| `0x14` + $4N_c$       | `enforcer_clamped_cmd`   | `float32[N_c]` | per manifest         | Components admitted after the current constraint check.                                                                                    |
+| `0x14` + $8N_c$       | `actuator_delivered_cmd` | `float32[N_c]` | per manifest         | Dispatched setpoint components; delivery at the drive needs separate evidence.                                                             |
+| `0x14` + $12N_c$      | `measured_plant_state`   | `float32[N_s]` | per manifest         | Sampled state components, with sensor timing in the manifest.                                                                              |
+| `0x14` + $12N_c+4N_s$ | `chain_link`             | `uint8_t[32]`  | HMAC-SHA-256         | Keyed link over the previous link and this record's preceding fields; evidence of tampering only while the key and anchor stay in custody. |
+
+: **Forensic authority record**: One record per tick of the permission loop. A missing record is a gap in the chain, never an implied pass, and the record is a sampled decision trace, not proof of delivered force or contact. {#tbl-appendix-systems-wire-authority tbl-colwidths="[16,21,12,13,38]"}
+
+### Authority-transfer protocol {#sec-appendix-systems-authority-protocol}
+
+Used in @sec-intervention-authority-transitions and @sec-intervention-bumpless-transfer. The protocol runs in the enforcer's $1\text{ kHz}$ loop on the safety microcontroller, where the four-phase handshake, integrator pre-biasing, and the $C^2$ quintic blend become one sequence of per-state steps. Each tick writes the forensic authority record of @tbl-appendix-systems-wire-authority under the state names used below.
+
+**Cadence and invariants.**
+
+- *Execution cadence:* Hard real-time periodic timer interrupt ($f = 1\text{ kHz}$, period $T_{\text{loop}} = 1.0\text{ ms}$, hardware timing jitter $< 1.0\,\mu\text{s}$).
+- *Memory invariant:* Zero dynamic heap allocation (`malloc`/`free` forbidden; all state variables, mailboxes, and circular log buffers statically pre-allocated in DTCM SRAM).
+- *Hardware authority:* Exclusive write of the admitted setpoints staged for the next EtherCAT frame to the drives, and of the safe torque off (STO)\index{Safe torque off} hardware cutoffs.
+
+**Execution protocol.**
+
+1. Sample and validate plant state, available stopping reserve, independent protective inputs, and the current authority lease. An independent protective input selects its validated, state-matched stop path of @sec-enforcement-fallback-ladder.
+2. In `AUTO`, a manual request or policy handover request enters `PEND`; the policy may propose only while its existing permission remains valid. Set $T_{\text{timeout}}$ to the smaller of the protocol ceiling and clearance-derived deadline. No later than the last permission tick before $T_{\text{timeout}}$, transfer to the state-matched fallback. An invalid network packet is rejected and logged, not interpreted as a stop request.
+3. In `PEND`, verify the operator credential, nonce, enabling input, target freshness, actuator limits, and full transfer-plus-stop clearance. On `ACK`, at the next qualified **Commit** tick, revoke the policy execution token on the masked channels, latch $\mathbf u_0$ as its last *admitted* command, latch a checked human target $\mathbf u_1$, and set `BLEND`. The enforcer remains the only actuator writer. If admission fails, retain or enter the independently validated fallback.
+4. In `BLEND`, evaluate $s=\min(1,(t-t_0)/T)$ and $\alpha(s)=6s^5-15s^4+10s^3$. The enforcer proposes $\mathbf u_{\text{blend}}=(1-\alpha)\mathbf u_0+\alpha\mathbf u_1$, then checks that candidate against current state, torque/rate, and stopping limits before dispatch. These are **latched endpoints**, not simultaneous live policy and human actuator streams. If the lease, clearance, or tracking assumption fails, use the state-matched fallback. At $s=1$ with a live manual lease, set `MAN` and confirm that state to the operator.
+5. In `MAN`, the enforcer checks each live human proposal. Lease expiry or enabling-device loss revokes manual proposals and transfers to the validated fallback. Log request, ACK, commit, candidate, admitted command, measured response, and clock uncertainty separately; the bounded high-rate record must not block the control tick.
+
+### Fault record {#sec-appendix-systems-wire-fault}
+
+The fault record of @sec-verification-fault-manifest is offline evidence, a fixed header signed with Ed25519 that links to the retained evidence bundle by digest (@tbl-appendix-systems-wire-fault). The fault-ledger root that the release manifest binds is computed over the canonical encodings of these headers. `envelope_point` has a per-machine definition in the versioned fault-class manifest; for the mobile manipulator its four values are aisle speed (m/s), payload (kg), floor friction coefficient, and ambient temperature (K).
+
+| Offset | Field                   | Scalar type   | Unit            | Purpose and interpretation                                                               |
+|:-------|:------------------------|:--------------|:----------------|:-----------------------------------------------------------------------------------------|
+| `0x00` | `trial_id`              | `uint64_t`    | —               | Unique trial identifier in the versioned ledger.                                         |
+| `0x08` | `claim_ref_id`          | `uint32_t`    | index           | Precommitted physical claim and its units.                                               |
+| `0x0C` | `envelope_point`        | `float32[4]`  | per manifest    | Declared operating point of the trial.                                                   |
+| `0x1C` | `fault_injection_mode`  | `uint16_t`    | enumeration     | Injected fault class.                                                                    |
+| `0x1E` | `injection_target_node` | `uint16_t`    | enumeration     | Hardware boundary receiving the injection.                                               |
+| `0x20` | `fault_magnitude`       | `float32`     | per fault class | Injection amplitude; its unit is fixed by the fault-class manifest.                      |
+| `0x24` | `t_det_ns`              | `uint32_t`    | ns              | Fault trigger to detector assertion.                                                     |
+| `0x28` | `t_takeover_ns`         | `uint32_t`    | ns              | Fault trigger to measured takeover; subtract `t_det_ns` for the post-detection interval. |
+| `0x2C` | `stl_robustness_rho`    | `float32`     | claim's unit    | Raw signed margin for `claim_ref_id`; other predicate margins remain in the bundle.      |
+| `0x30` | `verdict_status`        | `uint8_t`     | enumeration     | `PASS`, `FAIL`, `INVALID`, or `UNOBSERVABLE`.                                            |
+| `0x31` | reserved                | `uint8_t[3]`  | —               | Zero.                                                                                    |
+| `0x34` | `oracle_digest`         | `uint8_t[32]` | SHA-256         | Immutable predicate and oracle configuration.                                            |
+| `0x54` | `evidence_digest`       | `uint8_t[32]` | SHA-256         | Separately retained trial evidence bundle.                                               |
+| `0x74` | `signature`             | `uint8_t[64]` | Ed25519         | Signature over all preceding bytes; the key identifier is in the versioned manifest.     |
+
+: **Fault-record header**: The fixed part of one fault trial. The linked evidence bundle carries fault duration, hardware and software build identifiers, raw trace references and clock domains, detector identity, every margin value and scale, the measured physical outcome, secondary anomalies, and partial traces for non-pass verdicts. {#tbl-appendix-systems-wire-fault tbl-colwidths="[9,23,13,14,41]"}
+
+For a trial aborted before injection, detector time, takeover time, and robustness margin are unavailable rather than zero. The layout stores all ones (`0xFFFFFFFF`) in an unavailable `uint32_t` time slot and a canonical quiet NaN in an unavailable `float32` margin slot, and the signed evidence bundle records a validity flag for each measured field and why it is absent. The oracle checks those flags and the verdict before doing arithmetic, and excludes unavailable slots from pass counts and from latency or margin statistics. The versioned manifest fixes the NaN bit pattern so that hashing remains reproducible.
+
+### Fault-injection protocol {#sec-appendix-systems-fault-protocol}
+
+Used in @sec-verification-hardware-fault-injection. The protocol runs one hardware-in-the-loop trial on target silicon, from the precondition audit to the signed header of @tbl-appendix-systems-wire-fault, and every exit it takes sets one value of that header's `verdict_status`.
+
+**Substrate and invariants.**
+
+- *Execution substrate:* Hard real-time field-programmable gate array (FPGA) plant rig and testbed orchestrator ($f = 1\text{ kHz}$, hardware timestamping jitter $< 500\text{ ns}$).
+- *Memory invariant:* Pre-allocated static DMA buffers in the host test orchestrator; zero runtime dynamic heap allocation on the safety microcontroller.
+- *Safety interlock authority:* Independent optical or laser truth sensors wired to hardware crowbar relays capable of cutting target actuator power within $2.0\text{ ms}$ of a physical envelope breach.
+
+**Execution protocol.**
+
+1. **Precondition audit (stage 1).**
+   Sample baseline environmental sensors via $\mathcal{I}_{\text{truth}}$ (temperature, rail voltage, and wheel speed). Compare each measurement with its declared same-unit tolerance; do not take one norm across kelvin, volts, and meters per second. If any precondition fails, log `ERR_PRECONDITION_OUT_OF_SPEC`, set the verdict to `INVALID`, and abort.
+
+2. **Synchronization and steady-state arming (stage 2).**
+   Arm the FPGA plant simulator, power up the target two-processor system, and start the periodic control loop ($1\text{ kHz}$). Establish a synchronized reference clock across the logic analyzer, FPGA plant, and truth digitizers via a $10\text{ MHz}$ PXI clock. Allow the physical plant state $\mathbf{x}(t)$ to stabilize in the nominal operating envelope for $t_{\text{settle}} = 2.000\text{ s}$. If baseline tracking error $\|e_{\text{track}}\| > \epsilon_{\text{nom}}$, assert `ERR_BENCH_INSTABILITY`, set the verdict to `INVALID`, and abort.
+
+3. **Fault injection trigger (stage 3).**
+   At monotonic test epoch $t_{\text{inject}}$, the hardware test orchestrator asserts the trigger line to the inline injection rig:
+
+   - *Proposer stall (F1):* The orchestrator kills the chunk-policy task one tick after a lease renewal.
+   - *Sensor latency or bias (F2):* An FPGA interceptor latches a navigation-camera frame or holds a stale encoder payload while preserving its valid hardware timestamp.
+   - *Frame loss (F3):* A fieldbus disturbance node drops or corrupts EtherCAT frames at a drive's slave port.
+   - *Control-rail droop (F4a):* A programmable electronic load draws the F4a transient of @tbl-15-fault-classification from the shared control rail at its battery-low point for $\Delta t_{\text{duration}} = 5.0\text{ ms}$, while an independent digitizer records the permission rail and the permission path's heartbeat.
+   - *Permission-rail feed loss (F4b):* A solid-state switch opens the permission rail's feed as the resident stop from the inspected-floor ceiling begins.
+   - *Actuator mechanical stall:* A four-quadrant dynamometer applies step counter-torque $\tau_{\text{stall}} = 3.5 \times \tau_{\text{rated}}$.
+
+   Record the injection timestamp $t_{\text{fault\_start}} \leftarrow t_{\text{now}}$ in nanoseconds on the reference clock.
+
+4. **Enforcer response and takeover audit (stage 4).**
+   Monitor the target MCU's safety enforcer pins, CAN bus telemetry, and gate-driver PWM lines via an isolated logic analyzer:
+
+   - Detect assertion of the non-maskable interrupt (NMI) or diagnostic flag: $t_{\text{det}} \leftarrow t_{\text{now}} \implies \Delta t_{\text{det}} = t_{\text{det}} - t_{\text{fault\_start}}$.
+   - Detect hardware multiplexer preemption of the motor driver: $t_{\text{takeover}} \leftarrow t_{\text{now}} \implies \Delta t_{\text{takeover}} = t_{\text{takeover}} - t_{\text{fault\_start}}$.
+   - Detect the physical plant's transition to its safe bounded regime: $t_{\text{bounded}} \leftarrow t_{\text{now}} \implies \Delta t_{\text{bounded}} = t_{\text{bounded}} - t_{\text{fault\_start}}$.
+
+   If the external containment rig trips on a structural envelope breach, the hardware crowbar cuts actuator power; assert `ERR_PHYSICAL_BREACH` and carry the trial to stage 5, where the violated containment predicate returns `FAIL`.
+
+5. **Robustness evaluation and ledger serialization (stage 5).**
+   Ingest the truth trajectory $\mathbf{x}_{\text{obs}}(t)$ from independent instrumentation over the declared trial window. If required truth frames are missing, set the verdict to `UNOBSERVABLE` and retain the partial trace. For an observable trial, compute each precommitted predicate's signed margin in its own unit, as the STL robustness of @sec-appendix-ml-stl defines it.
+   Return `PASS` only when every required margin is nonnegative and both measured fault-to-detection and fault-to-drive-takeover times satisfy their declared bounds; otherwise return `FAIL`. A dimensionless aggregate may be computed only after predeclared per-predicate normalization. Link the fixed fault-record header to the variable-length evidence bundle by digest, sign the header under the specified custody scheme, and retain both.
+
+### Release manifest {#sec-appendix-systems-wire-release}
+
+The release manifest of @sec-release-manifest is a signed offline artifact, not a mailbox record, so it has a canonical encoding in place of fixed offsets. Fields appear in the order that @tbl-appendix-systems-wire-release lists, each variable-length field carries a length prefix, and the adjudicator's Ed25519 signature covers the encoding of every preceding field. Every digest is SHA-256. The expiry is the one calendar time in the record chain, and it is checked against a tamper-resistant real-time clock rather than the safety microcontroller's monotonic clock.
+
+| Field                       | Encoding                                             | Binds                                                                                                        | Check before permission                                                                 |
+|:----------------------------|:-----------------------------------------------------|:-------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------|
+| `claim_manifest_id`         | `uint8_t[16]` UUID                                   | Top-level safety claim                                                                                       | Linked to the root node of the signed argument graph.                                   |
+| `argument_digest`           | `uint8_t[32]`                                        | Complete claim–argument–evidence graph                                                                       | Matches the graph the adjudicator reviewed.                                             |
+| `policy_weights_digest`     | `uint8_t[32]`                                        | Learned model weights                                                                                        | Mismatch refuses release.                                                               |
+| `enforcer_bitstream_digest` | `uint8_t[32]`                                        | Enforcer logic image                                                                                         | Mismatch refuses release.                                                               |
+| `rtos_kernel_digest`        | `uint8_t[32]`                                        | Real-time kernel image and drivers                                                                           | Verified by the hardware root of trust at power-on.                                     |
+| `calib_trace_pointers`      | length-prefixed list of signed evidence references   | Calibration certificates                                                                                     | Missing or stale evidence refuses unless a separately signed restricted case covers it. |
+| `fault_ledger_root`         | `uint8_t[32]`                                        | Signed fault-record headers (@sec-appendix-systems-wire-fault)                                               | Missing, unauthenticated, or mismatched ledger refuses.                                 |
+| `authority_record_digest`   | `uint8_t[32]`                                        | Static authority manifest and the forensic log's initial chain anchor (@sec-appendix-systems-wire-authority) | Mismatch refuses release.                                                               |
+| `placement_record_digest`   | `uint8_t[32]`                                        | Placement record (@sec-appendix-systems-wire-placement)                                                      | Mismatch refuses release.                                                               |
+| `evaluation_record_digest`  | `uint8_t[32]`                                        | Evaluation record                                                                                            | Mismatch refuses release.                                                               |
+| `verdict_classification`    | `uint8_t` enumeration                                | `UNCOND`, `COND`, or `REFUSE`                                                                                | Selects the permitted operating envelope.                                               |
+| `standing_conditions`       | length-prefixed array of (premise, check rate, trip) | Physical premises checked in operation                                                                       | Checked on every permission tick; an unknown premise takes the assessed stop.           |
+| `telemetry_drift_budget`    | length-prefixed task-specific limits and triggers    | Tracking and timing drift                                                                                    | A bound violation revokes; a trend prompts inspection.                                  |
+| `verdict_expiry`            | UTC calendar time (ISO 8601)                         | Validity period of the verdict                                                                               | A real-time clock reading past the expiry voids the permit.                             |
+| `lifecycle_budget`          | `uint64_t[2]` (hours, cycles)                        | Wear allowance                                                                                               | An exceeded budget or an invalid counter refuses motion.                                |
+| `adjudicator_signature`     | key identifier plus `uint8_t[64]` Ed25519 signature  | The whole manifest                                                                                           | Verifies under an authorized, unrevoked adjudicator key.                                |
+
+: **Release manifest**: Canonical field order of the signed release artifact. A new signed version can supersede a manifest only after the current physical conditions are checked, and the hardware root anchors keys rather than storing mutable digests. {#tbl-appendix-systems-wire-release tbl-colwidths="[21,25,24,30]"}
+
+### Release-gate protocol {#sec-appendix-systems-release-protocol}
+
+Used in @sec-release-manifest. Before the motor power stages are energized, the release gate attests the silicon state, verifies the manifest of @tbl-appendix-systems-wire-release and its image digests, and audits the standing conditions, in the order below.
+
+**Substrate and signature.** The hardware root of trust anchors an authorized, revocable adjudicator verification-key chain. Protected storage holds the signed manifest and signed evidence graph. The signature covers every versioned manifest field, including the identity of the signing key, and the verifier checks the key chain and its revocation state before trusting the signature. The individually signed fault records of @sec-appendix-systems-wire-fault enter the manifest as one digest over the complete ledger in its declared order. The verifier checks each record signature, the ordering, completeness, and that root against the reviewed evidence index. A digest alone establishes neither record validity nor test adequacy.
+
+**Fail-closed authorization.** Begin with `Permit_gate = 0` and the physical plant in its assessed nonoperating state. All returned decisions use the signed enum `UNCOND`, `COND`, or `REFUSE`; an implementation may log a reason code separately.
+
+1. Verify the adjudicator key chain and revocation status, the manifest signature, expiry, signed operating-hour and cycle budgets, and every active image digest. Any invalid, missing, or expired item returns `REFUSE`. A different software bank requires its own signed case and a new check of physical conditions.
+2. Authenticate the complete fault ledger and calibration references against the signed graph. A missing ledger, bad record signature, or root mismatch returns `REFUSE`, even if the manifest says `UNCOND`. Stale calibration also returns `REFUSE` under the full case. It can support `COND` only when a *separately signed* restricted case explicitly covers that calibration state and all of its evidence and limits still validate.
+3. Check the state-dependent standing conditions, including brake test, separation, timebase, and monitoring health. `KNOWN_FALSE` and `UNKNOWN` both return `REFUSE` while retaining distinct logged causes. Apply the approved state-matched stop or hold of @sec-enforcement-fallback-ladder.
+4. If every check passes and the signed verdict is `UNCOND`, load the signed full envelope and return `UNCOND`. If every restricted condition passes under a signed `COND` case, load its signed reduced envelope and return `COND`. A signed `REFUSE` case or any other state returns `REFUSE`. In both operating modes the learned policy only *proposes* actions; the independent enforcer checks each candidate and controls actuator permission. Force trip thresholds must include measured detection and response headroom below the contact criterion.
+
+### Residual-claims register {#sec-appendix-systems-wire-residual-claims}
+
+The residual-claims register of @sec-frontier-residual-claims-register tracks every physical premise the release rests on but does not observe, so that an open claim is carried across software deployments and hardware revisions. Like the release manifest, it is an offline artifact whose mandatory fields (@tbl-appendix-systems-wire-residual-claims) follow a canonical order rather than fixed offsets.
+
+\Needspace{27\baselineskip}
+
+| Manifest Category           | Field                    | Physical Unit          | Invariant & Operational Contract                                                                                                 |
+|:----------------------------|:-------------------------|:-----------------------|:---------------------------------------------------------------------------------------------------------------------------------|
+| **Manifest Header**         | `system_identifier`      | —                      | Unique embodied platform ID (e.g., `WMM-AISLE-01`)                                                                               |
+| **Manifest Header**         | `hardware_build_rev`     | —                      | Target silicon and chassis revision (`HW-REV-3.2`)                                                                               |
+| **Manifest Header**         | `software_digest`        | —                      | Digest of the released binary                                                                                                    |
+| **Manifest Header**         | `validity_limit_hours`   | hours                  | Configured operating window before review                                                                                        |
+| **Residual Claims**         | `entry_id`               | —                      | Unique claim tag (e.g., `CLAIM-FRIC-001`)                                                                                        |
+| **Residual Claims**         | `target_safety_claim`    | —                      | Explicit safety invariant ($d_{\text{stop}} \le D_{\text{clear}}$)                                                               |
+| **Residual Claims**         | `missing_observable`     | SI units               | Unmeasured physical state (e.g., surface friction $\mu$)                                                                         |
+| **Physical Hazard**         | `governing_law`          | —                      | Newton-Euler, Navier-Stokes, Joule heating                                                                                       |
+| **Physical Hazard**         | `time_to_harm`           | seconds                | Time from unmodeled transition to irreversible yield                                                                             |
+| **Operational Containment** | `containment_type`       | —                      | `FIRMWARE_PARAM_CLAMP`, `PASSIVE_MECHANICAL`, or `OPERATING_RESTRICTION`; validate the selected limit                            |
+| **Operational Containment** | `authority_limit`        | $\text{m/s}, \text{N}$ | Hard numeric setpoint ceiling ($v_{\max}, F_{\max}$)                                                                             |
+| **Operational Containment** | `kinetic_energy_ceiling` | $\text{J}$             | Maximum allowable kinetic energy under fault ($E_k \le E_{\max}$)                                                                |
+| **Assurance & Inspection**  | `proof_test_interval`    | hours                  | Scheduled test interval; evidence between tests still depends on the operating restriction                                       |
+| **Predeclared Closure**     | `closure_modality`       | —                      | Transducer technology or formal method required                                                                                  |
+| **Predeclared Closure**     | `sample_trials`          | count                  | Case-specific independent exposure, sized by the zero-failure rule of @sec-appendix-ml-exposure for the declared miss-rate bound |
+| **Predeclared Closure**     | `confidence_level`       | —                      | Declared one-sided confidence level of that bound                                                                                |
+
+: **Epistemic residual-claims register**: Canonical field order of the register. The header binds it to one platform, build, and operating window; each entry must carry its claim, the missing observable, the hazard and its time to harm, the containment that holds meanwhile, and the predeclared test that would close it. {#tbl-appendix-systems-wire-residual-claims tbl-colwidths="[20,24,18,38]"}
 
 ## Further Reading
 

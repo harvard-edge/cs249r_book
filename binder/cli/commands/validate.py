@@ -677,6 +677,8 @@ class ValidateCommand:
                        "not a Purpose heading or hook question"),
         ],
         "code": [
+            Scope("exec", "_run_code_exec",
+                  note="execute all {python} cells to verify zero runtime errors", default=True),
             Scope("inline-order", "_run_inline_ref_order",
                   note="inline {python} references must not appear before their defining cell"),
             Scope("python-echo", "_run_python_echo",
@@ -4958,6 +4960,42 @@ class ValidateCommand:
         return ValidationRunResult(
             name="markdown-list-spacing",
             description="Check bold lead-in paragraphs before Markdown lists",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Python Code Block Live Execution Verification
+    # ------------------------------------------------------------------
+
+    def _run_code_exec(self, root: Path) -> ValidationRunResult:
+        """Execute all {python} blocks in QMD files to verify zero runtime errors."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        try:
+            from cli.checks.code_exec import check_code_exec
+        except ImportError:
+            from binder.cli.checks.code_exec import check_code_exec
+
+        for f in files:
+            exec_issues = check_code_exec(f)
+            for ei in exec_issues:
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(f),
+                        line=ei.line,
+                        code="python_exec_error",
+                        message=ei.message,
+                        severity="error",
+                        context=ei.context,
+                    )
+                )
+
+        return ValidationRunResult(
+            name="exec",
+            description=f"Python cell execution ({len(files)} files)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),

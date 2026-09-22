@@ -182,6 +182,62 @@ mount -t overlay overlay \
   /mnt/sandbox/merged
 ```
 
+```{python}
+#| label: lego-12-storage-io-and-reset-latency
+#| echo: false
+# │ Show: CoW OverlayFS cuts write bandwidth by 121.3x and recovers 1,117 worker-hours.
+# │ How: Model cold re-cloning vs ephemeral upper layer mutation throughput.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_bandwidth, fmt_int, fmt_multiple
+
+class RolloutClusterStorageResetLatency:
+    """Storage I/O bandwidth and reset latency in rollout harvesting clusters."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    w_workers = 512
+    s_repo = 2.4 * GB
+    t_exec = 120 * second
+    t_cold = 12 * second
+    delta_mut = 18 * MB
+    t_cow = 65 * millisecond
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    # Cold
+    tau_cold = t_exec + t_cold
+    r_cold = (w_workers / tau_cold.to(second).magnitude) * (1 / second)
+    b_cold = (r_cold.magnitude * s_repo.to(GB).magnitude) * (GB / second)
+    idle_cold = t_cold.to(second).magnitude / tau_cold.to(second).magnitude
+    wasted_hours = w_workers * idle_cold * 24
+
+    # CoW
+    tau_cow = t_exec + t_cow
+    r_cow = (w_workers / tau_cow.to(second).magnitude) * (1 / second)
+    b_cow = (r_cow.magnitude * delta_mut.to(MB).magnitude) * (MB / second)
+    idle_cow = t_cow.to(second).magnitude / tau_cow.to(second).magnitude
+
+    bandwidth_ratio = (b_cold.to(MB / second) / b_cow.to(MB / second)).magnitude
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(abs(tau_cold.to(second).magnitude - 132.0) < 1e-4, "tau_cold")
+    check(abs(r_cold.magnitude - 3.87878) < 0.001, "r_cold")
+    check(abs(b_cold.to(GB / second).magnitude - 9.309) < 0.01, "b_cold")
+    check(abs(idle_cold - 0.0909) < 0.001, "idle_cold")
+    check(abs(wasted_hours - 1117.09) < 1.0, "wasted_hours")
+
+    check(abs(tau_cow.to(second).magnitude - 120.065) < 1e-4, "tau_cow")
+    check(abs(r_cow.magnitude - 4.264) < 0.001, "r_cow")
+    check(abs(b_cow.to(MB / second).magnitude - 76.758) < 0.01, "b_cow")
+    check(abs(idle_cow - 0.000541) < 0.0001, "idle_cow")
+    check(abs(bandwidth_ratio - 121.27) < 0.2, "bandwidth_ratio")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    b_cold_gb_s_str = fmt_bandwidth(b_cold, unit=GB / second, precision=2)
+    wasted_hours_str = fmt_int(round(wasted_hours))
+    bandwidth_ratio_mult_str = fmt_multiple(bandwidth_ratio, precision=1)
+```
+
 ::: {#nbk-12-storage-io-and-reset-latency .callout-notebook title="Rollout cluster storage I/O and latency"}
 **Problem Statement:** An AI engineering team operates a distributed trajectory harvesting cluster containing $W = 512$ parallel rollout workers. Each worker runs on an independent CPU core driving an unprivileged execution sandbox against a standard enterprise software fixture (repository size $S_{\text{repo}} = 2.4\text{ GB}$). An average trajectory episode consists of $T = 15$ interaction turns and completes in $T_{\text{exec}} = 120\text{ seconds}$.
 
@@ -202,9 +258,9 @@ $$R_{\text{cold}} = \frac{W}{\tau_{\text{cold}}} = \frac{512}{132\text{ s}} \app
 Every reset requires writing the full repository size $S_{\text{repo}} = 2.4\text{ GB}$. The sustained aggregate write bandwidth demanded from the local storage subsystem is:
 $$B_{\text{cold}} = R_{\text{cold}} \times S_{\text{repo}} = 3.879\text{ s}^{-1} \times 2.4\text{ GB} \approx 9.31\text{ GB/s}$$
 
-A sustained write throughput of $9.31\text{ GB/s}$ exhausts the PCIe bus and write endurance of standard enterprise NVMe arrays, inducing extreme I/O wait queues. Furthermore, the worker idle time spent waiting on disk resets is:
+A sustained write throughput of `{python} RolloutClusterStorageResetLatency.b_cold_gb_s_str` exhausts the PCIe bus and write endurance of standard enterprise NVMe arrays, inducing extreme I/O wait queues. Furthermore, the worker idle time spent waiting on disk resets is:
 $$\text{Idle Fraction}_{\text{cold}} = \frac{t_{\text{cold}}}{\tau_{\text{cold}}} = \frac{12}{132} \approx 9.09\%$$
-Over a 24-hour run, the cluster wastes $512 \times 0.0909 \times 24 \approx 1,117\text{ worker-hours}$ purely writing duplicate bytes to disk.
+Over a 24-hour run, the cluster wastes `{python} RolloutClusterStorageResetLatency.wasted_hours_str` worker-hours purely writing duplicate bytes to disk.
 
 *Case 2: Copy-on-Write (CoW) Architecture*
 The total cycle time for a single episode under CoW is:
@@ -219,7 +275,7 @@ $$B_{\text{cow}} = R_{\text{cow}} \times \Delta_{\text{mut}} = 4.264\text{ s}^{-
 The worker idle time drops to:
 $$\text{Idle Fraction}_{\text{cow}} = \frac{0.065}{120.065} \approx 0.054\%$$
 
-**Systems Takeaway:** The CoW architecture reduces storage write bandwidth by a factor of $\frac{9,310\text{ MB/s}}{76.75\text{ MB/s}} \approx 121.3\times$, eliminates NVMe drive burnout, and recovers over $1,100$ worker-hours per day of idle compute capacity. Sub-second reset harnesses represent a mandatory mechanical requirement for large-scale trajectory harvesting.
+**Systems Takeaway:** The CoW architecture reduces storage write bandwidth by a factor of `{python} RolloutClusterStorageResetLatency.bandwidth_ratio_mult_str`, eliminates NVMe drive burnout, and recovers over $1,100$ worker-hours per day of idle compute capacity. Sub-second reset harnesses represent a mandatory mechanical requirement for large-scale trajectory harvesting.
 :::
 
 ### Task matrix stratification
@@ -372,6 +428,62 @@ $$Y = \prod_{i=1}^K p_i$$ {#eq-verifier-cumulative-yield}
 
 The central optimization objective of the trajectory harvesting pipeline is to minimize the total compute cost incurred per accepted high-quality trajectory, $C_{\text{accepted}} = C_{\text{attempt}} / Y$. Inspecting @eq-verifier-cost-cascade reveals the mathematical justification for the five-stage architecture: because dynamic sandbox execution ($c_3$) and semantic triage ($c_5$) are orders of magnitude more expensive than syntactic and static analysis ($c_1, c_2$), the conditional pass rates $p_1$ and $p_2$ must act as aggressive filters. If a runtime engineer incorrectly schedules an expensive test suite ahead of static linting, candidates harboring syntax errors will consume full sandbox execution budgets before being discarded, driving $C_{\text{attempt}}$ to prohibitive levels.
 
+```{python}
+#| label: lego-12-verification-cascade-economics-and-throughput
+#| echo: false
+# │ Show: Staged cascade cuts verifier compute by 68.6%, saving 191 core-hours/day.
+# │ How: Microsecond AST checks and static filters shed 74% before microVM sandbox.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+class VerificationCascadeEconomicsThroughput:
+    """Verification cascade economics and compute throughput optimization."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_rollouts = 100_000
+    c_1 = 0.00005 * second
+    p_1 = 0.65
+    c_2 = 0.12 * second
+    p_2 = 0.40
+    c_3 = 8.5 * second
+    p_3 = 0.25
+    c_4 = 0.45 * second
+    p_4 = 0.85
+    c_5 = 15.0 * second
+    p_5 = 0.70
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    y_yield = p_1 * p_2 * p_3 * p_4 * p_5
+    n_accepted = 3867
+
+    c_naive = c_3 + (p_3 * c_2) + (p_3 * p_2 * c_5)
+    t_naive = n_rollouts * c_naive
+    t_naive_hours = t_naive.to(hour).magnitude
+
+    c_cascade = c_1 + (p_1 * c_2) + (p_1 * p_2 * c_3) + (p_1 * p_2 * p_3 * c_4) + (p_1 * p_2 * p_3 * p_4 * c_5)
+    t_cascade = n_rollouts * c_cascade
+    t_cascade_hours = t_cascade.to(hour).magnitude
+
+    compute_savings = (t_naive.magnitude - t_cascade.magnitude) / t_naive.magnitude
+    core_hours_saved = t_naive_hours - t_cascade_hours
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(abs(y_yield - 0.038675) < 1e-6, "y_yield")
+    check(abs(c_naive.to(second).magnitude - 10.03) < 1e-4, "c_naive")
+    check(abs(t_naive_hours - 278.61) < 0.1, "t_naive_hours")
+    check(abs(c_cascade.to(second).magnitude - 3.14605) < 1e-4, "c_cascade")
+    check(abs(t_cascade_hours - 87.39) < 0.1, "t_cascade_hours")
+    check(abs(compute_savings - 0.6863) < 0.001, "compute_savings")
+    check(abs(core_hours_saved - 191.22) < 0.5, "core_hours_saved")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_accepted_str = fmt_int(n_accepted)
+    compute_savings_pct_str = fmt_percent(compute_savings, precision=1, style="prose")
+    core_hours_saved_str = fmt_int(round(core_hours_saved))
+```
+
 ::: {#nbk-12-verification-cascade-economics-and-throughput .callout-notebook title="Verification cascade economics and throughput"}
 **Problem Statement:**
 An autonomous software engineering harvesting cluster produces $N = 100{,}000$ raw candidate trajectory rollouts per day. The runtime engineer must choose between two pipeline architectures:
@@ -394,7 +506,7 @@ Calculate the expected compute time per raw attempt ($C_{\text{attempt}}$), the 
 *Step 1: Compute the cumulative yield $Y$.*
 The final acceptance yield across all five stages is:
 $$Y = p_1 \times p_2 \times p_3 \times p_4 \times p_5 = 0.65 \times 0.40 \times 0.25 \times 0.85 \times 0.70 = 0.038675 \quad (3.87\%)$$
-Out of $100{,}000$ attempts, exactly $3{,}867$ trajectories are promoted to the training corpus.
+Out of $100{,}000$ attempts, exactly `{python} VerificationCascadeEconomicsThroughput.n_accepted_str` trajectories are promoted to the training corpus.
 
 *Step 2: Evaluate the Naive Monolithic Architecture.*
 In the naive pipeline, every raw proposal immediately incurs the dynamic sandbox cost ($c_3 = 8.5\,\text{s}$). Only proposals that pass Stage 3 ($25\%$) proceed to the remaining stages. The expected cost per attempt is:
@@ -421,7 +533,7 @@ $$T_{\text{cascade}} = 100{,}000 \times 3.146\,\text{s} = 314{,}605\,\text{s} \a
 
 *Step 4: Compute the Systems Differential.*
 $$\text{Compute Savings} = \frac{T_{\text{naive}} - T_{\text{cascade}}}{T_{\text{naive}}} = \frac{1{,}003{,}000 - 314{,}605}{1{,}003{,}000} = \frac{688{,}395}{1{,}003{,}000} \approx 68.6\%$$
-The staged cascade reduces cluster compute consumption by $68.6\%$, saving over $191$ core-hours per day while accepting the exact same set of $3{,}867$ validated trajectories.
+The staged cascade reduces cluster compute consumption by `{python} VerificationCascadeEconomicsThroughput.compute_savings_pct_str`, saving over `{python} VerificationCascadeEconomicsThroughput.core_hours_saved_str` core-hours per day while accepting the exact same set of `{python} VerificationCascadeEconomicsThroughput.n_accepted_str` validated trajectories.
 :::
 
 The mathematical reality captured in @eq-verifier-cost-cascade dictates the scheduling policy of distributed harvesting pipelines. By interposing microsecond syntactic checks and millisecond static invariants ahead of dynamic container initialization, the system sheds nearly three-quarters of all candidate rollouts before provisioning a single virtualized sandbox.
@@ -591,6 +703,62 @@ $$\alpha \in [0.60, 0.70], \quad \beta \in [0.20, 0.30], \quad \gamma \approx 0.
 
 This distribution ensures that the forward, optimal execution path remains the dominant mode of the model's policy distribution, while dedicating nearly a third of the training curriculum to diagnostic hypothesis generation, error correction, and explicit boundary awareness.
 
+```{python}
+#| label: lego-12-sizing-and-token-budget-allocation
+#| echo: false
+# │ Show: Recovery traces generate 44.97% of supervised tokens despite 25% trace count.
+# │ How: Model pristine, recovery, and hard negative sequence length distribution.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_percent
+
+class MixedCurationTokenBudgetAllocation:
+    """Mixed curation token budget allocation and training sequence economics."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_total = 50_000
+    alpha = 0.65
+    beta = 0.25
+    gamma = 0.10
+
+    l_p = 7200 * token
+    l_r = 18_500 * token
+    l_n = 9800 * token
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    n_pristine = int(n_total * alpha)
+    n_recover = int(n_total * beta)
+    n_negative = int(n_total * gamma)
+
+    v_pristine = (n_pristine * l_p.magnitude) * token
+    v_recover = (n_recover * l_r.magnitude) * token
+    v_negative = (n_negative * l_n.magnitude) * token
+    v_total = v_pristine + v_recover + v_negative
+
+    share_recover = v_recover.magnitude / v_total.magnitude
+
+    s_packed = (v_total.magnitude * 2) * byte
+    s_packed_gb = s_packed.to(GB)
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(n_pristine == 32_500, "n_pristine")
+    check(n_recover == 12_500, "n_recover")
+    check(n_negative == 5_000, "n_negative")
+    check(v_pristine.magnitude == 234_000_000, "v_pristine")
+    check(v_recover.magnitude == 231_250_000, "v_recover")
+    check(v_negative.magnitude == 49_000_000, "v_negative")
+    check(v_total.magnitude == 514_250_000, "v_total")
+    check(abs(share_recover - 0.4497) < 0.001, "share_recover")
+    check(abs(s_packed_gb.magnitude - 1.0285) < 0.001, "s_packed_gb")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_total_str = fmt_int(n_total)
+    n_recover_str = fmt_int(n_recover)
+    share_recover_pct_str = fmt_percent(share_recover, precision=2, style="prose")
+    s_packed_gb_str = fmt_memory(s_packed_gb, unit=GB, precision=3)
+```
+
 ::: {#nbk-12-sizing-and-token-budget-allocation .callout-notebook title="Mixed curation token budget allocation"}
 **Problem Statement:** An AI systems engineering team is assembling a fine-tuning dataset of $N = 50{,}000$ validated trajectories for a 70-billion-parameter coding agent. The serving infrastructure enforces a maximum context window of $T_{\max} = 32{,}768$ tokens.
 
@@ -631,9 +799,9 @@ $$\text{Share}_{\text{recover}} = \frac{231.25}{514.25} \approx 44.97\%$$
 $$\text{Share}_{\text{negative}} = \frac{49.00}{514.25} \approx 9.53\%$$
 
 *Step 3: Systems Implication and Economic Analysis*\
-Although recovery traces constitute only $25\%$ of the raw trajectory count ($12{,}500$ out of $50{,}000$), their diagnostic verbosity and extended turn count cause them to generate $44.97\%$ of all supervised training tokens.
+Although recovery traces constitute only $25\%$ of the raw trajectory count (`{python} MixedCurationTokenBudgetAllocation.n_recover_str` out of `{python} MixedCurationTokenBudgetAllocation.n_total_str`), their diagnostic verbosity and extended turn count cause them to generate `{python} MixedCurationTokenBudgetAllocation.share_recover_pct_str` of all supervised training tokens.
 
-At a standard float16 representation (2 bytes per parameter/token gradient footprint in data loaders), the dataset occupies over $1.028\text{ GB}$ of packed token storage. More critically, the variance in sequence length ($\bar{L}_{\text{r}} = 18{,}500$ vs. $\bar{L}_{\text{p}} = 7{,}200$) imposes substantial memory-packing challenges during distributed training. If batches are padded naively to the longest sequence in the micro-batch, batches containing recovery traces will incur severe tail-padding overhead. The training pipeline must therefore implement dynamic sequence packing (e.g., concatenated multi-trajectory packing with cross-attention masking) to maintain high tensor-core utilization during gradient updates.
+At a standard float16 representation (2 bytes per parameter/token gradient footprint in data loaders), the dataset occupies over `{python} MixedCurationTokenBudgetAllocation.s_packed_gb_str` of packed token storage. More critically, the variance in sequence length ($\bar{L}_{\text{r}} = 18{,}500$ vs. $\bar{L}_{\text{p}} = 7{,}200$) imposes substantial memory-packing challenges during distributed training. If batches are padded naively to the longest sequence in the micro-batch, batches containing recovery traces will incur severe tail-padding overhead. The training pipeline must therefore implement dynamic sequence packing (e.g., concatenated multi-trajectory packing with cross-attention masking) to maintain high tensor-core utilization during gradient updates.
 :::
 
 Curating this balanced, tripartite corpus guarantees that the resulting policy learns both forward execution momentum and diagnostic fault resilience. However, realizing this curation strategy at scale introduces a massive systems challenge. Generating tens of thousands of candidate rollouts, executing them across stateful environments, injecting synchronized OS-level perturbations, and evaluating each trace against a multi-stage verifier cascade requires an industrial compute architecture. How do we design an asynchronous distributed infrastructure capable of executing, isolating, and harvesting thousands of stateful agent trajectories concurrently without pipeline stalls or cross-talk contamination?
@@ -754,6 +922,66 @@ where $C_a^2$ and $C_s^2$ represent the squared coefficients of variation for th
 
 Because each raw trajectory protocol buffer encapsulates full multi-turn execution histories—including environmental stdout/stderr dumps, intermediate git diffs, and high-resolution telemetry—the serialized in-memory footprint of a single trajectory averages $\bar{S}_{\text{traj}} \approx 8.5\text{ MB}$, reaching up to $64\text{ MB}$ for large multi-file refactoring runs. An unmanaged staging queue holding $10{,}000$ backlog trajectories will consume over $85\text{ GB}$ of volatile system memory, precipitating kernel out-of-memory (OOM) faults on the message broker.
 
+```{python}
+#| label: lego-12-sizing-intermediate-staging-buffers-and
+#| echo: false
+# │ Show: Staging buffer caps queue at 3,855 traces with high watermark at 2,891.
+# │ How: Model rollout rate, nominal vs degraded verification, and RAM growth.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int
+
+class StagingBuffersBackpressureSizing:
+    """Staging buffer memory exhaustion and backpressure queue sizing."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_roll = 1024
+    t_roll = 45 * second
+    lambda_rollout = n_roll / t_roll.to(second).magnitude
+    s_traj = 8.5 * MB
+    n_ver = 512
+    p_fast = 0.75
+    t_fast = 2.5 * second
+    p_slow = 0.25
+    t_slow = 60.0 * second
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    t_verify_mean = (p_fast * t_fast.to(second).magnitude) + (p_slow * t_slow.to(second).magnitude)
+    mu_verify = n_ver / t_verify_mean
+    rho = lambda_rollout / mu_verify
+
+    # Degraded
+    t_timeout = 120.0 * second
+    mu_degraded = n_ver / t_timeout.to(second).magnitude
+    rho_degraded = lambda_rollout / mu_degraded
+    delta_lambda = lambda_rollout - mu_degraded
+    dm_dt = delta_lambda * s_traj.to(MB).magnitude
+
+    m_max = 32 * 1024 * MB
+    t_exhaust_s = m_max.to(MB).magnitude / dm_dt
+    t_exhaust_min = t_exhaust_s / 60.0
+    q_max = m_max.to(MB).magnitude / s_traj.to(MB).magnitude
+    q_high = round(0.75 * q_max)
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(abs(lambda_rollout - 22.755) < 0.01, "lambda_rollout")
+    check(abs(t_verify_mean - 16.875) < 1e-4, "t_verify_mean")
+    check(abs(mu_verify - 30.34) < 0.01, "mu_verify")
+    check(abs(rho - 0.750) < 0.005, "rho")
+    check(abs(mu_degraded - 4.267) < 0.01, "mu_degraded")
+    check(abs(rho_degraded - 5.333) < 0.01, "rho_degraded")
+    check(abs(delta_lambda - 18.488) < 0.01, "delta_lambda")
+    check(abs(dm_dt - 157.15) < 0.2, "dm_dt")
+    check(abs(t_exhaust_s - 208.5) < 0.5, "t_exhaust_s")
+    check(abs(t_exhaust_min - 3.48) < 0.05, "t_exhaust_min")
+    check(round(q_max) == 3855, "q_max")
+    check(q_high == 2891, "q_high")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    q_high_str = fmt_int(q_high)
+```
+
 ::: {#nbk-12-sizing-intermediate-staging-buffers-and .callout-notebook title="Staging buffers and backpressure sizing"}
 Consider an industrial trajectory collection cluster operating $N_{\text{roll}} = 1{,}024$ concurrent rollout workers. Each worker completes an agent trajectory with an average duration of $T_{\text{roll}} = 45\text{ s}$ ($\lambda_{\text{rollout}} = 1{,}024 / 45 \approx 22.75\text{ trajectories/s}$). The raw serialized payload averages $\bar{S}_{\text{traj}} = 8.5\text{ MB}$.
 
@@ -794,7 +1022,7 @@ $$T_{\text{exhaust}} = \frac{32 \times 1{,}024\text{ MB}}{157.08\text{ MB/s}} \a
 To prevent catastrophic system failure, the pipeline must enforce an absolute queue depth threshold:
 $$Q_{\max} = \frac{M_{\max}}{\bar{S}_{\text{traj}}} = \frac{32 \times 1{,}024\text{ MB}}{8.5\text{ MB}} \approx 3{,}855\text{ trajectories}$$
 
-Setting a high-water mark at $Q_{\text{high}} = 0.75 \times Q_{\max} \approx 2{,}890\text{ trajectories}$ allows the backpressure controller to immediately halt task leasing at the Task Dispatcher, forcing rollout workers to pause execution before the broker exhausts physical memory.
+Setting a high-water mark at $Q_{\text{high}} = 0.75 \times Q_{\max} \approx$ `{python} StagingBuffersBackpressureSizing.q_high_str` trajectories allows the backpressure controller to immediately halt task leasing at the Task Dispatcher, forcing rollout workers to pause execution before the broker exhausts physical memory.
 :::
 
 To protect the system from memory exhaustion and cascading worker failure, the harvesting architecture implements a dual-watermark **closed-loop backpressure controller**. The controller monitors the instantaneous queue depth $Q_{\text{current}}$ of the verification staging buffer:
@@ -939,6 +1167,56 @@ The complete structure of this cryptographic binding and its downstream redactio
   These fields are sealed under HMAC key $K_{\text{pipe}}$ to yield the immutable content-addressable index $H_{\text{lineage}}$, establishing an authoritative object store key (`s3://corpus/traj-e84a1b.arrow`).
 - On the right, the **Three-Pass Syntactically Invariant Sanitization Flow** scrubs incoming traces without syntactic corruption. A raw observation exposing credentials (such as an AWS key `AKIAIOSFODNN7EXAMPLE`, employee email, and RFC 1918 IP `10.240.0.12`) traverses Pass 1 (DFA regex matching and sliding-window Shannon entropy filtering for $H(S) \ge 4.5\,\text{bits/char}$); Pass 2 (quantized DistilBERT NER and CIDR subnet detection); and Pass 3 (AST string literal masking with salted pseudonyms `HMAC(K_salt, secret)[:12]`). The resulting columnar record retains bitwise valid JSON grammar and token sequence lengths while enforcing zero token leakage ($\Lambda_{\text{leak}} = 0.00\%$) into the downstream model weights.
 
+```{python}
+#| label: lego-12-storage-overhead-and-ingestion-latency
+#| echo: false
+# │ Show: Lineage envelope adds 2.32% storage overhead with 65.2 us SHA-256 latency.
+# │ How: Merkle tree intermediate node digests, environment hashes, and streaming.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_percent, fmt_time, MarkdownStr
+
+class LineageEnvelopeStorageLatency:
+    """Cryptographic lineage envelope storage overhead and hashing throughput."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_traj = 100_000
+    t_steps = 32
+    s_gen = 2048 * byte
+    s_obs = 1536 * byte
+    s_raw = (t_steps * (s_gen.magnitude + s_obs.magnitude)) * byte
+    s_raw_kb = s_raw.to(KB)
+
+    s_envelope = (160 + 96 + 256 + 2016 + 128) * byte
+    s_envelope_kb = s_envelope.to(KB)
+    overhead_ratio = s_envelope.magnitude / s_raw.magnitude
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    total_raw_gb_day = (n_traj * s_raw.to(GB).magnitude) * (GB / day)
+    total_env_gb_day = (n_traj * s_envelope.to(GB).magnitude) * (GB / day)
+
+    s_combined = s_raw + s_envelope
+    b_hash = 1.8 * 1e9 * (byte / second)
+    t_hash = (s_combined.magnitude / b_hash.magnitude) * second
+    t_hash_us = t_hash.to(microsecond)
+    throughput = 1.0 / t_hash.to(second).magnitude
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(s_raw.magnitude == 114_688, "s_raw")
+    check(s_envelope.magnitude == 2656, "s_envelope")
+    check(abs(overhead_ratio - 0.023158) < 0.0001, "overhead_ratio")
+    check(abs(total_raw_gb_day.magnitude - 11.4688) < 0.01, "total_raw_gb_day")
+    check(abs(total_env_gb_day.magnitude - 0.2656) < 0.01, "total_env_gb_day")
+    check(abs(t_hash_us.magnitude - 65.19) < 0.1, "t_hash_us")
+    check(throughput > 15_000, "throughput")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    total_raw_gb_day_str = MarkdownStr(f"{total_raw_gb_day.magnitude:.2f} GB/day")
+    total_env_gb_day_str = MarkdownStr(f"{total_env_gb_day.magnitude:.2f} GB/day")
+    throughput_str = fmt_int(round(throughput))
+```
+
 ::: {#nbk-12-storage-overhead-and-ingestion-latency .callout-notebook title="Lineage envelope storage and latency"}
 Consider an industrial trajectory harvesting cluster processing $N = 100{,}000$ completed trajectories per day. Each trajectory records an average of $T = 32$ interaction steps.
 
@@ -959,12 +1237,12 @@ $$S_{\text{envelope}} = 160 + 96 + 256 + 2{,}016 + 128 = 2{,}656\text{ bytes} \a
 
 *Relative Storage Overhead:*
 $$\text{Overhead Ratio} = \frac{S_{\text{envelope}}}{S_{\text{raw}}} = \frac{2{,}656}{114{,}688} \approx 2.32\%$$
-Across $100{,}000$ daily trajectories, the total raw payload is $11.47\text{ GB/day}$, and the cryptographic lineage envelope accounts for merely $0.27\text{ GB/day}$.
+Across $100{,}000$ daily trajectories, the total raw payload is `{python} LineageEnvelopeStorageLatency.total_raw_gb_day_str`, and the cryptographic lineage envelope accounts for merely `{python} LineageEnvelopeStorageLatency.total_env_gb_day_str`.
 
 *Verification Throughput:*
 Computing SHA-256 digests on modern AVX-512 or ARMv8-A Cryptography Extension hardware achieves throughput exceeding $1.8\text{ GB/s}$ per CPU core. Hashing the raw $117.34\text{ KB}$ combined trace and envelope requires:
 $$t_{\text{hash}} = \frac{117.34 \times 10^3\text{ bytes}}{1.8 \times 10^9\text{ bytes/s}} \approx 6.52 \times 10^{-5}\text{ s} = 65.2\ \mu\text{s}$$
-A single dedicated validation thread can cryptographically seal over $15{,}000$ trajectories per second, introducing negligible latency into the ingestion pipeline.
+A single dedicated validation thread can cryptographically seal over `{python} LineageEnvelopeStorageLatency.throughput_str` trajectories per second, introducing negligible latency into the ingestion pipeline.
 :::
 
 ### Secret sanitization
@@ -1149,6 +1427,62 @@ where $N_{\text{accepted}}$ represents the raw count of candidate trajectories t
 
 If an organization runs a sloppy collection pipeline with a 30 percent leakage rate—meaning 30 percent of its collected tasks inadvertently duplicate repositories, schemas, or fixtures reserved for evaluation—the denominator shrinks, dramatically inflating the amortized unit cost of every valid training token.
 
+```{python}
+#| label: lego-12-the-economic-cost-of-contaminated
+#| echo: false
+# │ Show: 25% evaluation leakage inflates cost by 33.3% and wastes $22,917 on 50k traces.
+# │ How: Amortize generation, verification, and sanitization across usable yield.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_usd
+
+class ContaminatedYieldEconomics:
+    """Economic cost of contaminated evaluation leakage in trajectory harvesting."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    price_token = 0.75 / 1_000_000
+    n_tokens_rollout = 40_000
+    k_attempts = 5
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    c_gen_attempt = n_tokens_rollout * price_token
+    c_generation = k_attempts * c_gen_attempt
+
+    c_ver_attempt = 0.020
+    c_verification = k_attempts * c_ver_attempt
+
+    c_san_attempt = 0.005
+    c_sanitization = k_attempts * c_san_attempt
+
+    c_task = c_generation + c_verification + c_sanitization
+    n_accepted_per_100 = 20
+    c_nominal = (100 * c_task) / n_accepted_per_100
+
+    leakage_a = 0.25
+    c_usable_a = (100 * c_task) / (n_accepted_per_100 * (1 - leakage_a))
+
+    leakage_b = 0.00
+    c_usable_b = (100 * c_task) / (n_accepted_per_100 * (1 - leakage_b))
+
+    cost_increase = (c_usable_a - c_usable_b) / c_usable_b
+    waste_50k = 50_000 * (c_usable_a - c_usable_b)
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(abs(c_generation - 0.150) < 1e-4, "c_generation")
+    check(abs(c_verification - 0.100) < 1e-4, "c_verification")
+    check(abs(c_sanitization - 0.025) < 1e-4, "c_sanitization")
+    check(abs(c_task - 0.275) < 1e-4, "c_task")
+    check(abs(c_nominal - 1.375) < 1e-4, "c_nominal")
+    check(abs(c_usable_a - 1.8333) < 0.001, "c_usable_a")
+    check(abs(c_usable_b - 1.375) < 1e-4, "c_usable_b")
+    check(abs(cost_increase - 0.3333) < 0.001, "cost_increase")
+    check(abs(waste_50k - 22916.6) < 100.0, "waste_50k")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    waste_50k_str = fmt_usd(round(waste_50k), precision=0)
+```
+
 ::: {#nbk-12-the-economic-cost-of-contaminated .callout-notebook title="The economic cost of contaminated yield"}
 **Scenario:** An engineering team constructs an automated trajectory harvesting pipeline targeting a 70B parameter open-weights policy. The generation phase runs an unprivileged inference model to produce candidate rollouts across thousands of synthetic programming tasks.
 
@@ -1182,7 +1516,7 @@ If an organization runs a sloppy collection pipeline with a 30 percent leakage r
 **Conclusion:**
 Incurring a 25 percent leakage rate increases the effective unit cost of training data by:
 $$\frac{\$1.833 - \$1.375}{\$1.375} = +33.3\%$$
-For a production run targeting 50,000 usable trajectories, Regime A wastes $\$22,900$ in lost inference and compute cycles solely due to downstream split hygiene purges. Rigorous upfront partitioning is an economic necessity, not merely an academic formality.
+For a production run targeting 50,000 usable trajectories, Regime A wastes `{python} ContaminatedYieldEconomics.waste_50k_str` in lost inference and compute cycles solely due to downstream split hygiene purges. Rigorous upfront partitioning is an economic necessity, not merely an academic formality.
 :::
 
 ***
@@ -1323,6 +1657,70 @@ A healthy pipeline maintains $\Lambda_{\text{leak}} \equiv 0$ against synthetic 
 $$Q_{\text{verify}} = \frac{\text{FLOPs}_{\text{verification}}}{\text{FLOPs}_{\text{generation}}}$$
 Because verification relies primarily on fast CPU microVMs and static analysis rather than dense tensor accelerators, maintaining $Q_{\text{verify}} < 0.10$ in total hardware cost ensures that data curation does not dominate the infrastructure budget.
 
+```{python}
+#| label: lego-12-sizing-an-industrial-trajectory-harvester
+#| echo: false
+# │ Show: 122 CPU workers verify 50k traces for $0.0165/trace vs $0.2952 generation.
+# │ How: Model V1-V3 cascade work, 14.11% yield, and 24-hour throughput limits.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_percent
+
+class IndustrialTrajectoryHarvesterSizing:
+    """Industrial trajectory harvester compute sizing and verification economics."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_generated = 50_000
+    p_1 = 0.60
+    p_2 = 0.30
+    p_3 = 0.80
+    p_4 = 0.98
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    eta_yield = p_1 * p_2 * p_3 * p_4
+    n_accepted = round(n_generated * eta_yield)
+
+    w_1 = n_generated * 0.001
+    w_2 = (n_generated * p_1) * 0.05
+    w_3 = (n_generated * p_1 * p_2) * 0.15
+    w_san = (n_generated * p_1 * p_2 * p_3) * 0.002
+    w_total = w_1 + w_2 + w_3 + w_san
+
+    workers_required = math.ceil(w_total / 24.0)
+
+    rate_cpu = 0.04
+    cost_verify = w_total * rate_cpu
+    cost_verify_per_accepted = cost_verify / n_accepted
+
+    w_gpu = n_generated * (1.0 / 60.0)
+    rate_gpu = 2.50
+    cost_generation = w_gpu * rate_gpu
+    cost_gen_per_accepted = cost_generation / n_accepted
+
+    cost_total_per_accepted = cost_gen_per_accepted + cost_verify_per_accepted
+    verify_fraction = cost_verify_per_accepted / cost_total_per_accepted
+    defective_eliminated = 1.0 - eta_yield
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(abs(eta_yield - 0.14112) < 1e-5, "eta_yield")
+    check(n_accepted == 7056, "n_accepted")
+    check(abs(w_total - 2914.4) < 0.1, "w_total")
+    check(workers_required == 122, "workers_required")
+    check(abs(cost_verify - 116.576) < 0.01, "cost_verify")
+    check(abs(cost_verify_per_accepted - 0.01652) < 0.0001, "cost_verify_per_accepted")
+    check(abs(cost_generation - 2083.33) < 0.1, "cost_generation")
+    check(abs(cost_gen_per_accepted - 0.2952) < 0.001, "cost_gen_per_accepted")
+    check(abs(cost_total_per_accepted - 0.3117) < 0.001, "cost_total_per_accepted")
+    check(abs(verify_fraction - 0.053) < 0.001, "verify_fraction")
+    check(abs(defective_eliminated - 0.85888) < 0.001, "defective_eliminated")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    verify_fraction_pct_str = fmt_percent(verify_fraction, precision=1, style="prose")
+    defective_eliminated_pct_str = fmt_percent(defective_eliminated, precision=1, style="prose")
+```
+
 ::: {#nbk-12-sizing-an-industrial-trajectory-harvester .callout-notebook title="Sizing an industrial trajectory harvester"}
 **Problem:** An AI systems engineering team operates a cluster of 1,000 parallel sandboxed agents tasked with automated software bug fixing. The agents interact with a 70B parameter dense model running on an inference cluster (FP8 weights, $140\text{ GB}$ VRAM per instance).
 
@@ -1382,7 +1780,7 @@ $$\text{Workers}_{\text{required}} = \frac{2,914.4\text{ CPU-hours}}{24\text{ ho
 
 Total cost per clean, accepted, verified trajectory:
 $$\text{Cost}_{\text{total}} = \$0.2952 + \$0.0165 = \$0.3117$$
-Notice that verification represents only $\frac{0.0165}{0.3117} \approx 5.3\%$ of total pipeline expenditure, yet it eliminates $85.9\%$ of defective, misleading, or toxic training data.
+Notice that verification represents only `{python} IndustrialTrajectoryHarvesterSizing.verify_fraction_pct_str` of total pipeline expenditure, yet it eliminates `{python} IndustrialTrajectoryHarvesterSizing.defective_eliminated_pct_str` of defective, misleading, or toxic training data.
 :::
 
 ---
@@ -1438,6 +1836,47 @@ In closed-loop agentic systems, this belief is fundamentally false. Uncurated tr
 The architectural defense requires treating the collection pipeline as a staged, selective compiler rather than an indiscriminate log aggregator. Raw traces must pass through an escalating verifier cascade ($V_1 \to V_2 \to V_3$) that prunes syntactically invalid tool invocations, verifies sandbox state deltas, and validates end-to-end task completion against immutable specifications. Furthermore, data ingestion must enforce strict semantic clustering and deduplication based on normalized tool action sequences, compressing redundant successes while preserving high-leverage recovery paths. A curated corpus of 5,000 verified, deduplicated trajectories spanning diverse fault topologies systematically outperforms an uncurated pool of 500,000 raw execution logs in both downstream task completion and rollout efficiency.
 :::
 
+```{python}
+#| label: lego-12-sample-efficiency-and-compute-budgets
+#| echo: false
+# │ Show: Staged verification cuts training compute by 29.5x with 43.6% zero-shot pass.
+# │ How: Compare 100k raw traces at 6.5k tokens vs 10k curated traces at 2.2k tokens.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_multiple, fmt_percent
+
+class TrajectoryDistillationComputeBudgets:
+    """Training compute footprint and sample efficiency in trajectory distillation."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    p_params = 70 * 10**9
+    flops_per_token = 6 * p_params
+
+    n_a = 100_000
+    l_a = 6500 * token
+    tokens_a = n_a * l_a.magnitude
+    compute_a = flops_per_token * tokens_a
+
+    n_b = 10_000
+    l_b = 2200 * token
+    tokens_b = n_b * l_b.magnitude
+    compute_b = flops_per_token * tokens_b
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    compute_ratio = compute_a / compute_b
+    fraction_b = compute_b / compute_a
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(abs(compute_a - 2.73e20) < 1e18, "compute_a")
+    check(abs(compute_b - 9.24e18) < 1e16, "compute_b")
+    check(abs(compute_ratio - 29.545) < 0.1, "compute_ratio")
+    check(abs(fraction_b - 0.03385) < 0.001, "fraction_b")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    fraction_b_upper_pct_str = fmt_percent(0.04, precision=0, style="prose")
+```
+
 ::: {#nbk-12-sample-efficiency-and-compute-budgets .callout-notebook title="Trajectory distillation compute budgets"}
 Consider an engineering team curating a trajectory dataset to train a $70\text{B}$ parameter agent policy $\pi_\theta$ using supervised fine-tuning across an 8,192-token context window. The team evaluates two data acquisition strategies:
 
@@ -1454,7 +1893,7 @@ Strategy B reduces the training compute budget by a factor of:
 
 $$\frac{\text{Compute}_A}{\text{Compute}_B} = \frac{2.73 \times 10^{20}}{9.24 \times 10^{18}} \approx 29.5\times$$
 
-Despite using less than $4\%$ of the training compute, Strategy B exposes the policy to $7{,}000$ verified recovery transitions compared to near-zero structured recovery transitions in Strategy A (where errors are abandoned rather than systematically rectified). When deployed to an out-of-distribution evaluation benchmark of 500 repository-level tasks, the policy fine-tuned on Strategy B achieves a $43.6\%$ zero-shot task completion rate with an average of $8.4$ tool calls per task. The policy trained on Strategy A achieves only $19.2\%$ completion, requiring an average of $27.1$ tool calls due to learned exploratory looping, while frequently exceeding the maximum context budget $T_{\max}$. High-yield, verified data density dominates raw token quantity.
+Despite using less than `{python} TrajectoryDistillationComputeBudgets.fraction_b_upper_pct_str` of the training compute, Strategy B exposes the policy to $7{,}000$ verified recovery transitions compared to near-zero structured recovery transitions in Strategy A (where errors are abandoned rather than systematically rectified). When deployed to an out-of-distribution evaluation benchmark of 500 repository-level tasks, the policy fine-tuned on Strategy B achieves a $43.6\%$ zero-shot task completion rate with an average of $8.4$ tool calls per task. The policy trained on Strategy A achieves only $19.2\%$ completion, requiring an average of $27.1$ tool calls due to learned exploratory looping, while frequently exceeding the maximum context budget $T_{\max}$. High-yield, verified data density dominates raw token quantity.
 :::
 
 ::: {.fallacy-pitfall}

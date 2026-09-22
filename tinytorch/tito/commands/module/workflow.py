@@ -92,6 +92,12 @@ class ModuleWorkflowCommand(BaseCommand):
             action='store_true',
             help='Create notebook but skip opening Jupyter (for CI/testing)'
         )
+        start_parser.add_argument(
+            '--exercise', '--assignment',
+            action='store_true',
+            dest='exercise',
+            help='Create notebook with solution holes/stubs to implement (for self-assessment)'
+        )
 
         # VIEW command - just open the notebook
         view_parser = subparsers.add_parser(
@@ -197,6 +203,12 @@ class ModuleWorkflowCommand(BaseCommand):
             action='store_true',
             help='Skip confirmation prompts'
         )
+        reset_parser.add_argument(
+            '--exercise', '--assignment',
+            action='store_true',
+            dest='exercise',
+            help='Reset to student exercise notebook with implementation stubs',
+        )
 
         # STATUS command - show progress
         status_parser = subparsers.add_parser(
@@ -243,12 +255,14 @@ class ModuleWorkflowCommand(BaseCommand):
 
     # Module mapping and normalization now imported from core.modules
 
-    def start_module(self, module_number: str, no_jupyter: bool = False) -> int:
+    def start_module(self, module_number: str, no_jupyter: bool = False, exercise: bool = False) -> int:
         """Start working on a module with prerequisite checking and visual feedback.
         
         Args:
             module_number: The module to start (e.g., "01", "02")
             no_jupyter: If True, create notebook but don't open Jupyter (for CI/testing)
+            exercise: If True, create notebook with exercise stubs for self-assessment.
+                      Default (False) provides full working solutions for early preview.
         """
         from rich import box
         from rich.table import Table
@@ -273,11 +287,14 @@ class ModuleWorkflowCommand(BaseCommand):
         # recreate-from-src/ logic below instead.
         if self.is_module_started(normalized):
             if (self.config.project_root / "modules" / module_name).exists():
-                self.console.print(f"[yellow]⚠️  Module {normalized} already started[/yellow]")
-                self.console.print(f"💡 Did you mean: [bold cyan]tito module resume {normalized}[/bold cyan]")
-                return 1
-            self.console.print(f"[yellow]⚠️  Module {normalized} was started before, but its notebook is missing[/yellow]")
-            self.console.print(f"[cyan]🔁 Recreating it from source...[/cyan]")
+                if not exercise:
+                    self.console.print(f"[yellow]⚠️  Module {normalized} already started[/yellow]")
+                    self.console.print(f"💡 Did you mean: [bold cyan]tito module resume {normalized}[/bold cyan]")
+                    return 1
+                self.console.print(f"[cyan]🔁 Recreating module {normalized} with exercise stubs...[/cyan]")
+            else:
+                self.console.print(f"[yellow]⚠️  Module {normalized} was started before, but its notebook is missing[/yellow]")
+                self.console.print(f"[cyan]🔁 Recreating it from source...[/cyan]")
 
         # Check prerequisites - all previous modules must be completed
         progress = self.get_progress_data()
@@ -302,44 +319,24 @@ class ModuleWorkflowCommand(BaseCommand):
                 ))
                 self.console.print()
 
-                # Show prerequisites table
-                prereq_table = Table(
-                    title="Prerequisites Required",
-                    show_header=True,
-                    header_style="bold yellow",
-                    box=box.SIMPLE
-                )
-                prereq_table.add_column("Module", style="cyan", width=8)
-                prereq_table.add_column("Name", style="bold", width=20)
-                prereq_table.add_column("Status", width=15, justify="center")
+                # Show missing prerequisites table
+                table = Table(title="Missing Prerequisites", box=box.SIMPLE)
+                table.add_column("Module", style="cyan")
+                table.add_column("Name", style="white")
 
                 for prereq_num, prereq_name in missing_prereqs:
-                    prereq_table.add_row(
-                        prereq_num,
-                        prereq_name,
-                        "[red]❌ Not Complete[/red]"
-                    )
+                    table.add_row(prereq_num, prereq_name)
 
-                self.console.print(prereq_table)
+                self.console.print(table)
                 self.console.print()
-
-                # Show what to do next
-                first_missing = missing_prereqs[0][0]
-                self.console.print(f"💡 Next: [bold cyan]tito module start {first_missing}[/bold cyan]")
-                self.console.print(f"   Complete modules in order to build your ML framework progressively")
-
+                self.console.print("💡 [bold]Next step:[/bold] Run [cyan]tito module status[/cyan] to see your progress")
                 return 1
 
-        # Prerequisites met! Check if module needs to be created from src/
-        # Notebooks are in modules/ directory, not src/ (which is modules_dir in config).
-        # Check for the notebook file itself, not just the directory: a directory
-        # can exist but be empty if a previous conversion attempt failed partway
-        # (e.g. jupytext wasn't on PATH yet), and directory-existence alone would
-        # then make this look already done, silently skipping regeneration.
+        # Check if module notebook exists, create if not (or recreate if --exercise requested)
         module_dir = self.config.project_root / "modules" / module_name
         short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
         notebook_file = module_dir / f"{short_name}.ipynb"
-        if not notebook_file.exists():
+        if not notebook_file.exists() or exercise:
             # Create module from src/ using export
             src_dir = self.config.project_root / "src" / module_name
             if not src_dir.exists():
@@ -347,7 +344,8 @@ class ModuleWorkflowCommand(BaseCommand):
                 return 1
 
             self.console.print(f"[cyan]📝 Creating module from source...[/cyan]")
-            if not self._create_module_from_src(module_name):
+            tier = "student" if exercise else None
+            if not self._create_module_from_src(module_name, release_tier=tier):
                 self.console.print(f"[red]❌ Failed to create module {module_name}[/red]")
                 return 1
             self.console.print(f"[green]✅ Module {normalized} ready![/green]")
@@ -362,6 +360,22 @@ class ModuleWorkflowCommand(BaseCommand):
             box=box.ROUNDED
         ))
         self.console.print()
+
+        # Early Preview Callout: when shipping full working solutions
+        if not exercise:
+            self.console.print(Panel(
+                "[bold cyan]📌 TinyTorch Early Preview Edition[/bold cyan]\n\n"
+                "We're actively preparing the interactive exercise tracks for the upcoming classroom release.\n"
+                "For now, modules ship with [bold]full working solutions intact[/bold]!\n\n"
+                "You're welcome to explore the code, run the unit tests, and experiment with the implementations—\n"
+                "reading and running working systems code is part of the learning process.\n\n"
+                f"[dim]Want to practice implementing the components yourself? Re-run with:[/dim] "
+                f"[cyan]tito module start {normalized} --exercise[/cyan]",
+                title="[bold yellow]Welcome to TinyTorch[/bold yellow]",
+                border_style="yellow",
+                box=box.ROUNDED
+            ))
+            self.console.print()
 
         # Show module info table
         info_table = Table(
@@ -437,16 +451,16 @@ class ModuleWorkflowCommand(BaseCommand):
 
         return self._open_jupyter(module_name)
 
-    def _create_module_from_src(self, module_name: str) -> bool:
-        """Create the student notebook in modules/ from src/.
+    def _create_module_from_src(self, module_name: str, release_tier: Optional[str] = None) -> bool:
+        """Create the module notebook in modules/ from src/.
 
-        Uses the same jupytext conversion as 'tito dev export', then clears the
-        student-core solution regions to nbgrader's stub, following the student
-        release tier (scaffold regions stay solved). Nothing is exported to the
-        package here; `tito module complete` exports whatever the student writes.
+        Default (release_tier=None) provides the full working reference notebook
+        matching the original source, with solution markers (### BEGIN/END SOLUTION)
+        and all educational walkthroughs (APPROACH, EXAMPLE, HINTS) intact.
 
-        CI checks the student notebook before filling in reference solutions
-        through `tito dev export`.
+        'student' (via --exercise) clears student-core solution regions to
+        nbgrader stubs with clear # BEGIN / # END delimiters, while keeping
+        scaffold clean of stale TODO/HINTS comments.
         """
         from ..export_utils import convert_py_to_notebook
 
@@ -458,7 +472,7 @@ class ModuleWorkflowCommand(BaseCommand):
             src_path,
             self.venv_path,
             self.console,
-            student=True,
+            release_tier=release_tier,
             project_root=self.config.project_root,
         )
 
@@ -561,7 +575,7 @@ class ModuleWorkflowCommand(BaseCommand):
         if not pid_file.exists():
             return None
         try:
-            pid = int(pid_file.read_text().strip())
+            pid = int(pid_file.read_text(encoding='utf-8').strip())
         except (ValueError, OSError):
             return None
 
@@ -709,7 +723,7 @@ class ModuleWorkflowCommand(BaseCommand):
 
             pid_file = self._jupyter_pid_file()
             pid_file.parent.mkdir(parents=True, exist_ok=True)
-            pid_file.write_text(str(process.pid))
+            pid_file.write_text(str(process.pid), encoding='utf-8')
 
             # Give Jupyter a moment to start and capture the URL
             time.sleep(2)
@@ -2001,7 +2015,8 @@ if missing:
             if args.module_command == 'start':
                 return self.start_module(
                     args.module_number,
-                    no_jupyter=getattr(args, 'no_jupyter', False)
+                    no_jupyter=getattr(args, 'no_jupyter', False),
+                    exercise=getattr(args, 'exercise', False),
                 )
             elif args.module_command == 'view':
                 return self.view_module(args.module_number)

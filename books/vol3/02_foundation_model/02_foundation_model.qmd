@@ -72,7 +72,7 @@ Every turn of an agent is one call to a foundation model. The runtime sends a co
 # │       datacenter accelerator.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.fmt import fmt_qty_int
+from mlsysim.fmt import fmt_memory, fmt_qty_int
 
 class CallPrice:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
@@ -158,10 +158,10 @@ class CallPrice:
     pre_nocache_str = fmt_int(pre_nocache)
     pre_cache_str = fmt(pre_cache, precision=1)
     dec_total_str = fmt_int(dec_total)
-    kv_final_gb_str = fmt_qty(kv_final_gb * GB, GB, precision=1)
-    weights_gb_str = fmt_qty(weights_gb * GB, GB, precision=1)
-    resident_gb_str = fmt_qty(resident_gb * GB, GB, precision=1)
-    accel_gb_str = fmt_qty(accel_gb * GB, GB, precision=1)
+    kv_final_gb_str = fmt_memory(kv_final_gb * GB, unit=GB, precision=1)
+    weights_gb_str = fmt_memory(weights_gb * GB, unit=GB, precision=1)
+    resident_gb_str = fmt_memory(resident_gb * GB, unit=GB, precision=1)
+    accel_gb_str = fmt_memory(accel_gb * GB, unit=GB, precision=1)
     k_cap_str = fmt_int(k_cap)
     k_cut_str = fmt_int(k_cut)
     cancel_steps_str = fmt_int(cancel_steps)
@@ -250,10 +250,69 @@ The physical boundary between the host supervisor and the neural core also impos
 
 A quantitative analysis of the interconnect traffic reveals why logit sampling must reside entirely on the accelerator, making the token ID the irreducible atomic unit of exchange across the host interface.
 
-::: {#nbk-logit-interconnect-bottleneck .callout-notebook title="The logit interconnect bottleneck"}
-**Problem:** Consider an inference service serving an open-weight foundation model with a modern vocabulary size of $|V| = 128{,}000$ subword tokens. The inference service hosts an active concurrent batch of $B = 64$ streams running on a single accelerator board connected via a standard PCIe 4.0 $\times 16$ interconnect. Each generation stream produces output at an average decode rate of $R = 40\text{ tokens/second}$.
+```{python}
+#| label: lego-logit-interconnect-bottleneck
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE LOGIT INTERCONNECT BOTTLENECK (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-logit-interconnect-bottleneck
+# │ Goal: Quantify continuous interconnect bandwidth for host-side vs accelerator sampling.
+# │ Show: 64,000x bandwidth reduction when transmitting token IDs instead of dense logit vectors.
+# │ How: Multiply batch concurrency by per-stream decode rate and payload bytes across PCIe.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_bandwidth, fmt_multiple, fmt_token_rate
 
-Calculate the continuous interconnect bandwidth required if the accelerator transmits raw 16-bit floating-point logits (`fp16`, 2 bytes per logit) back to the host CPU for sampling, versus transmitting discrete 32-bit integer token identifiers (`uint32`, 4 bytes per token). Evaluate the systems feasibility of host-side sampling under fine-grained PCIe transfer overheads.
+class LogitInterconnectBottleneck:
+    """Bandwidth comparison between host-side logit transfer and on-device sampling."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    v_vocab = 128_000
+    batch_size = 64
+    r_decode = 40.0 / second
+    bytes_per_logit = 2 * byte
+    bytes_per_token_id = 4 * byte
+    pcie_bw_peak = 31.5 * (GB / second)
+    v_vocab_stress = 256_000
+    batch_size_stress = 256
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    payload_logits = v_vocab * bytes_per_logit
+    aggregate_token_rate = batch_size * r_decode
+    bw_logits = (aggregate_token_rate * payload_logits).to(MB / second)
+    bw_tokens = (aggregate_token_rate * bytes_per_token_id).to(KB / second)
+    reduction_factor = (payload_logits / bytes_per_token_id).to_base_units().magnitude
+    bw_stress = ((batch_size_stress * r_decode) * (v_vocab_stress * bytes_per_logit)).to(GB / second)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(payload_logits.to(KB).magnitude == 256.0, f"Unexpected payload: {payload_logits}")
+    check(aggregate_token_rate.magnitude == 2560.0, f"Unexpected rate: {aggregate_token_rate}")
+    check(abs(bw_logits.magnitude - 655.36) < 0.01, f"Unexpected bw_logits: {bw_logits}")
+    check(abs(bw_tokens.magnitude - 10.24) < 0.01, f"Unexpected bw_tokens: {bw_tokens}")
+    check(reduction_factor == 64000.0, f"Unexpected reduction: {reduction_factor}")
+    check(abs(bw_stress.magnitude - 5.24288) < 0.01, f"Unexpected bw_stress: {bw_stress}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    v_vocab_str = fmt_int(v_vocab)
+    batch_size_str = fmt_int(batch_size)
+    r_decode_tokens_per_s_str = fmt_token_rate(r_decode.magnitude)
+    bytes_per_token_id_str = fmt_int(bytes_per_token_id.to(byte).magnitude)
+    payload_kb_str = fmt_memory(payload_logits, unit=KB, precision=0)
+    aggregate_rate_count_str = fmt_int(aggregate_token_rate.magnitude)
+    pcie_bw_peak_gb_per_s_str = fmt_bandwidth(pcie_bw_peak, unit=GB / second, precision=1)
+    v_vocab_stress_str = fmt_int(v_vocab_stress)
+    batch_size_stress_str = fmt_int(batch_size_stress)
+    bw_stress_gb_per_s_str = fmt_bandwidth(bw_stress, unit=GB / second, precision=2)
+    bw_tokens_kb_per_s_str = fmt_bandwidth(bw_tokens, unit=KB / second, precision=2)
+    reduction_mult_str = fmt_multiple(reduction_factor, precision=0, commas=True)
+```
+
+::: {#nbk-logit-interconnect-bottleneck .callout-notebook title="The logit interconnect bottleneck"}
+**Problem:** Consider an inference service serving an open-weight foundation model with a modern vocabulary size of $|V| =$ `{python} LogitInterconnectBottleneck.v_vocab_str` subword tokens. The inference service hosts an active concurrent batch of $B =$ `{python} LogitInterconnectBottleneck.batch_size_str` streams running on a single accelerator board connected via a standard PCIe 4.0 $\times 16$ interconnect. Each generation stream produces output at an average decode rate of $R =$ `{python} LogitInterconnectBottleneck.r_decode_tokens_per_s_str`.
+
+Calculate the continuous interconnect bandwidth required if the accelerator transmits raw 16-bit floating-point logits (`fp16`, 2 bytes per logit) back to the host CPU for sampling, versus transmitting discrete 32-bit integer token identifiers (`uint32`, `{python} LogitInterconnectBottleneck.bytes_per_token_id_str` bytes per token). Evaluate the systems feasibility of host-side sampling under fine-grained PCIe transfer overheads.
 
 **Solution:**
 
@@ -261,24 +320,24 @@ Calculate the continuous interconnect bandwidth required if the accelerator tran
 For each newly generated token, the accelerator produces a dense unnormalized logit vector of dimension $|V|$. At 2 bytes per element:
 $$\text{Payload per token} = 128{,}000 \times 2\text{ bytes} = 256{,}000\text{ bytes} = 256\text{ KB/token}$$
 
-For an aggregate batch generation throughput across all 64 streams:
+For an aggregate batch generation throughput across all `{python} LogitInterconnectBottleneck.batch_size_str` streams:
 $$\text{Aggregate token rate} = B \times R = 64 \times 40\text{ tokens/second} = 2{,}560\text{ tokens/second}$$
 
 The continuous data transfer rate across the interconnect is:
 $$\text{Bandwidth}_{\text{logits}} = 2{,}560\text{ tokens/second} \times 256\text{ KB/token} = 655{,}360\text{ KB/second} = 655.36\text{ MB/second}$$
 
-While a peak theoretical PCIe 4.0 $\times 16$ bus provides approximately $31.5\text{ GB/second}$ of unidirectional bandwidth, this throughput assumes large, contiguous Direct Memory Access (DMA) transactions. Disagreeing with this assumption, an autoregressive serving loop dispatches these 256 KB buffers in tiny, asynchronous bursts 2,560 times every second. At this transfer granularity, PCIe transaction packetization overhead, host interrupt handling, DMA completion synchronization stalls, and host memory bus contention degrade performance, introducing significant jitter into the decode loop. If the vocabulary expands to $|V| = 256{,}000$ or concurrency scales to $B = 256$, bandwidth demand surges past $5.24\text{ GB/second}$, severely saturating the system's interconnect queues.
+While a peak theoretical PCIe 4.0 $\times 16$ bus provides approximately `{python} LogitInterconnectBottleneck.pcie_bw_peak_gb_per_s_str` of unidirectional bandwidth, this throughput assumes large, contiguous Direct Memory Access (DMA) transactions. Disagreeing with this assumption, an autoregressive serving loop dispatches these `{python} LogitInterconnectBottleneck.payload_kb_str` buffers in tiny, asynchronous bursts `{python} LogitInterconnectBottleneck.aggregate_rate_count_str` times every second. At this transfer granularity, PCIe transaction packetization overhead, host interrupt handling, DMA completion synchronization stalls, and host memory bus contention degrade performance, introducing significant jitter into the decode loop. If the vocabulary expands to $|V| =$ `{python} LogitInterconnectBottleneck.v_vocab_stress_str` or concurrency scales to $B =$ `{python} LogitInterconnectBottleneck.batch_size_stress_str`, bandwidth demand surges past `{python} LogitInterconnectBottleneck.bw_stress_gb_per_s_str`, severely saturating the system's interconnect queues.
 
 *Case 2: Performing Logit Reduction on Accelerator Silicon.*
-If top-$p$, top-$k$, temperature scaling, and multinomial categorical sampling execute directly within an accelerator kernel, the accelerator reduces the 256 KB logit vector to a single scalar token ID:
+If top-$p$, top-$k$, temperature scaling, and multinomial categorical sampling execute directly within an accelerator kernel, the accelerator reduces the `{python} LogitInterconnectBottleneck.payload_kb_str` logit vector to a single scalar token ID:
 $$\text{Payload per token} = 4\text{ bytes/token}$$
 
 The resulting continuous bandwidth across the interconnect is:
 $$\text{Bandwidth}_{\text{tokens}} = 2{,}560\text{ tokens/second} \times 4\text{ bytes/token} = 10{,}240\text{ bytes/second} \approx 10.24\text{ KB/second}$$
 
-**Conclusion:** Performing logit sampling on accelerator silicon reduces interconnect bandwidth pressure by a factor of:
+**Conclusion:** Performing logit sampling on accelerator silicon reduces interconnect bandwidth pressure by `{python} LogitInterconnectBottleneck.reduction_mult_str`:
 $$\frac{256{,}000\text{ bytes}}{4\text{ bytes}} = 64{,}000\times$$
-This reduction transforms an interconnect traffic jam into a negligible stream of 10.24 KB/s, freeing the host-accelerator interconnect for large model weight updates and input context ingestion. The discrete token identifier is the mandatory, bandwidth-optimal interface currency of the model invocation boundary.
+This reduction transforms an interconnect traffic jam into a negligible stream of `{python} LogitInterconnectBottleneck.bw_tokens_kb_per_s_str`, freeing the host-accelerator interconnect for large model weight updates and input context ingestion. The discrete token identifier is the mandatory, bandwidth-optimal interface currency of the model invocation boundary.
 :::
 
 ::: {#chk-02-stochastic-processor-boundary .callout-checkpoint title="Evaluating the model invocation boundary"}
@@ -443,24 +502,96 @@ $$\text{Mem}_{\text{KV}}(S) = S \cdot \text{Mem}_{\text{KV,token}}$$
 
 This linear memory scaling creates an unforgiving systems constraint: on accelerator hardware, context length translates directly into physical capacity saturation.
 
+```{python}
+#| label: lego-kv-cache-memory-explosion
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KV CACHE MEMORY EXPLOSION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-02-kv-cache-memory-explosion
+# │ Goal: Quantify KV cache scaling and memory capacity saturation for long contexts.
+# │ Show: 128k context demands 41.94 GB (FP16) or 20.97 GB (FP8), exceeding 80 GB HBM.
+# │ How: 2 * layers * kv_heads * head_dim * bytes_per_elem * context_length + model_footprint.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_memory
+from mlsysim.physics.agents import calc_kv_cache_bytes_per_token
+
+class KvCacheMemoryExplosion:
+    """Memory scaling of the autoregressive key-value cache under long contexts."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_layers = 80
+    n_q_heads = 64
+    n_kv_heads = 8
+    d_head = 128
+    d_model = n_q_heads * d_head
+    bytes_per_elem_fp16 = 2 * byte
+    bytes_per_elem_fp8 = 1 * byte
+    s_context = 128_000
+    weights_footprint = 70.0 * GB
+    hbm_capacity = 80.0 * GB
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    mem_kv_token_fp16 = calc_kv_cache_bytes_per_token(n_layers=n_layers, n_kv_heads=n_kv_heads, head_dim=d_head, bytes_per_elem=bytes_per_elem_fp16)
+    mem_kv_token_fp8 = calc_kv_cache_bytes_per_token(n_layers=n_layers, n_kv_heads=n_kv_heads, head_dim=d_head, bytes_per_elem=bytes_per_elem_fp8)
+    mem_kv_total_fp16 = s_context * mem_kv_token_fp16
+    mem_kv_total_fp8 = s_context * mem_kv_token_fp8
+    mem_total_fp16 = weights_footprint + mem_kv_total_fp16
+    mem_total_fp8 = weights_footprint + mem_kv_total_fp8
+    tp_kv_heads = n_kv_heads // 2
+    tp_mem_kv_fp8 = mem_kv_total_fp8 / 2
+    tp_weights = weights_footprint / 2
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(mem_kv_token_fp16.to(byte).magnitude == 327680.0, "Unexpected per-token FP16 bytes")
+    check(mem_kv_token_fp16.to(KiB).magnitude == 320.0, "Unexpected per-token FP16 KiB")
+    check(abs(mem_kv_total_fp16.to(GB).magnitude - 41.94) < 0.01, "Unexpected 128k FP16 KV size")
+    check(abs(mem_total_fp16.to(GB).magnitude - 111.94) < 0.01, "Unexpected total FP16 footprint")
+    check(mem_kv_token_fp8.to(byte).magnitude == 163840.0, "Unexpected per-token FP8 bytes")
+    check(abs(mem_kv_total_fp8.to(GB).magnitude - 20.97) < 0.01, "Unexpected 128k FP8 KV size")
+    check(abs(mem_total_fp8.to(GB).magnitude - 90.97) < 0.01, "Unexpected total FP8 footprint")
+    check(tp_kv_heads == 4, "Unexpected TP KV heads")
+    check(abs(tp_mem_kv_fp8.to(GB).magnitude - 10.49) < 0.01, "Unexpected TP FP8 KV size")
+    check(tp_weights.to(GB).magnitude == 35.0, "Unexpected TP weights")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_layers_str = fmt_int(n_layers)
+    n_q_heads_str = fmt_int(n_q_heads)
+    n_kv_heads_str = fmt_int(n_kv_heads)
+    d_head_str = fmt_int(d_head)
+    d_model_str = fmt_int(d_model)
+    s_context_str = fmt_int(s_context)
+    hbm_capacity_gb_str = fmt_memory(hbm_capacity, unit=GB, precision=0)
+    weights_footprint_gb_str = fmt_memory(weights_footprint, unit=GB, precision=0)
+    mem_total_fp16_gb_str = fmt_memory(mem_total_fp16, unit=GB, precision=2)
+    mem_kv_token_fp8_bytes_str = fmt_int(mem_kv_token_fp8.to(byte).magnitude)
+    mem_kv_total_fp8_gb_str = fmt_memory(mem_kv_total_fp8, unit=GB, precision=2)
+    mem_total_fp8_gb_str = fmt_memory(mem_total_fp8, unit=GB, precision=2)
+    tp_kv_heads_str = fmt_int(tp_kv_heads)
+    tp_mem_kv_fp8_gb_str = fmt_memory(tp_mem_kv_fp8, unit=GB, precision=2)
+    tp_weights_gb_str = fmt_memory(tp_weights, unit=GB, precision=0)
+```
+
 ::: {#nbk-02-kv-cache-memory-explosion .callout-notebook title="KV cache memory explosion in a 128k long-context serving node"}
 Consider an agentic coding assistant deployed on a frontier model whose architecture matches Llama-3-70B. The network parameters are:
 
-- Layer depth: $L = 80$
-- Query heads: $n_{\text{q}} = 64$
-- Key-Value heads (GQA): $n_{\text{kv}} = 8$
-- Head dimension: $d_{\text{head}} = 128$ (hidden dimension $d_{\text{model}} = 64 \times 128 = 8192$)
+- Layer depth: $L =$ `{python} KvCacheMemoryExplosion.n_layers_str`
+- Query heads: $n_{\text{q}} =$ `{python} KvCacheMemoryExplosion.n_q_heads_str`
+- Key-Value heads (GQA): $n_{\text{kv}} =$ `{python} KvCacheMemoryExplosion.n_kv_heads_str`
+- Head dimension: $d_{\text{head}} =$ `{python} KvCacheMemoryExplosion.d_head_str` (hidden dimension $d_{\text{model}} = 64 \times 128 =$ `{python} KvCacheMemoryExplosion.d_model_str`)
 - Default precision: FP16 ($b = 2\text{ bytes}$)
 
 First, calculate the memory required to store the KV cache projections for a single token:
 
 $$\text{Mem}_{\text{KV,token}} = 2 \cdot 80 \cdot (8 \cdot 128) \cdot 2 = 327{,}680\text{ bytes/token} = 320\text{ KiB/token}$$
 
-Now, consider an agent performing complex codebase analysis across a large repository context, staging an active context window of $S = 128{,}000$ tokens. The memory demanded exclusively by the KV cache is:
+Now, consider an agent performing complex codebase analysis across a large repository context, staging an active context window of $S =$ `{python} KvCacheMemoryExplosion.s_context_str` tokens. The memory demanded exclusively by the KV cache is:
 
 $$\text{Mem}_{\text{KV}}(128\text{k}) = 128{,}000 \times 327{,}680\text{ bytes} = 41{,}943{,}040{,}000\text{ bytes} \approx 41.94\text{ GB}$$
 
-Suppose the serving node is provisioned with an industry-standard NVIDIA A100-SXM4-80GB or H100-SXM5-80GB accelerator containing $80\text{ GB}$ of High-Bandwidth Memory (HBM). To run this 70B parameter model, the runtime uses 8-bit quantized weights and allocates static CUDA workspaces, communication scratchpads, and execution buffers, consuming a baseline resident footprint of:
+Suppose the serving node is provisioned with an industry-standard NVIDIA A100-SXM4-80GB or H100-SXM5-80GB accelerator containing `{python} KvCacheMemoryExplosion.hbm_capacity_gb_str` of High-Bandwidth Memory (HBM). To run this 70B parameter model, the runtime uses 8-bit quantized weights and allocates static CUDA workspaces, communication scratchpads, and execution buffers, consuming a baseline resident footprint of `{python} KvCacheMemoryExplosion.weights_footprint_gb_str`:
 
 $$W = 70.00\text{ GB}$$
 
@@ -468,9 +599,9 @@ When the agent attempts to ingest the 128k context, the total physical memory de
 
 $$\text{Mem}_{\text{total, FP16}} = 70.00\text{ GB} + 41.94\text{ GB} = 111.94\text{ GB}$$
 
-Because $111.94\text{ GB} > 80.00\text{ GB}$, the allocation breaches physical capacity, crashing the serving runtime with a CUDA Out-of-Memory (OOM) fault.
+Because `{python} KvCacheMemoryExplosion.mem_total_fp16_gb_str` $>$ `{python} KvCacheMemoryExplosion.hbm_capacity_gb_str`, the allocation breaches physical capacity, crashing the serving runtime with a CUDA Out-of-Memory (OOM) fault.
 
-To mitigate this bottleneck, the systems engineer might attempt to quantize the KV cache to 8-bit precision (FP8, where $b = 1\text{ byte}$). Halving the storage precision cuts the per-token memory footprint to $163{,}840\text{ bytes/token}$, yielding:
+To mitigate this bottleneck, the systems engineer might attempt to quantize the KV cache to 8-bit precision (FP8, where $b = 1\text{ byte}$). Halving the storage precision cuts the per-token memory footprint to `{python} KvCacheMemoryExplosion.mem_kv_token_fp8_bytes_str` bytes/token, yielding:
 
 $$\text{Mem}_{\text{KV, FP8}}(128\text{k}) = 128{,}000 \times 163{,}840\text{ bytes} \approx 20.97\text{ GB}$$
 
@@ -478,11 +609,11 @@ Re-evaluating the total accelerator memory footprint under FP8 yields:
 
 $$\text{Mem}_{\text{total, FP8}} = 70.00\text{ GB} + 20.97\text{ GB} = 90.97\text{ GB}$$
 
-Even with an 8-bit quantized KV cache, $90.97\text{ GB} > 80.00\text{ GB}$. The serving engine still crashes the 80 GB device.
+Even with an 8-bit quantized KV cache, `{python} KvCacheMemoryExplosion.mem_total_fp8_gb_str` $>$ `{python} KvCacheMemoryExplosion.hbm_capacity_gb_str`. The serving engine still crashes the `{python} KvCacheMemoryExplosion.hbm_capacity_gb_str` device.
 
 In production environments, resolving this failure mode requires one of two structural systems interventions:
 
-1. **Tensor Parallelism ($TP \ge 2$):** The system shards the model weights and the 8 KV heads across two or more interconnected GPUs. With $TP = 2$, each GPU holds only 4 KV heads ($20.97\text{ GB} / 2 = 10.49\text{ GB}$ in FP8 or $20.97\text{ GB}$ in FP16) and half the model weights ($35.00\text{ GB}$), bringing per-GPU memory well within the 80 GB threshold.
+1. **Tensor Parallelism ($TP \ge 2$):** The system shards the model weights and the `{python} KvCacheMemoryExplosion.n_kv_heads_str` KV heads across two or more interconnected GPUs. With $TP = 2$, each GPU holds only `{python} KvCacheMemoryExplosion.tp_kv_heads_str` KV heads (`{python} KvCacheMemoryExplosion.tp_mem_kv_fp8_gb_str` in FP8 or `{python} KvCacheMemoryExplosion.mem_kv_total_fp8_gb_str` in FP16) and half the model weights (`{python} KvCacheMemoryExplosion.tp_weights_gb_str`), bringing per-GPU memory well within the `{python} KvCacheMemoryExplosion.hbm_capacity_gb_str` threshold.
 2. **Hardware Migration:** The system upgrades to next-generation accelerators with expanded physical HBM capacity, such as the NVIDIA H200 (141 GB HBM3e) or the NVIDIA B200 (192 GB HBM3e), which can comfortably absorb model weights and large continuous KV buffers on a single device.
 :::
 
@@ -632,13 +763,71 @@ Top-$k$ applies a rigid rank ceiling regardless of certainty. Top-$p$ dynamicall
     $$\mathcal{V}_p = \arg\min_{\mathcal{S} \subseteq \mathcal{V}} |\mathcal{S}| \quad \text{subject to} \quad \sum_{v \in \mathcal{S}} P(v \mid x_{1:S}, y_{<t}) \ge p$$
     All tokens outside $\mathcal{V}_p$ have their logits masked to $-\infty$, and the remaining scores are renormalized. Under high certainty, $|\mathcal{V}_p|$ naturally collapses to one or two tokens; under high entropy, $|\mathcal{V}_p|$ expands to accommodate the broad candidate pool.
 
+```{python}
+#| label: lego-logit-scaling-truncation
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LOGIT SCALING AND TRUNCATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-02-logit-scaling-and-truncation-on
+# │ Goal: Demonstrate numerical dynamics of softmax temperature scaling and nucleus truncation.
+# │ Show: Low-temperature sharpening concentrates 95% mass; nucleus cuts low-rank tail risk.
+# │ How: Apply z / tau, normalize exponentials, cumsum sorted probs, and renormalize subset.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.fmt import check, fmt, fmt_percent
+
+class LogitScalingTruncation:
+    """Logit transformation and truncation dynamics on the vocabulary simplex."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    logits = [12.0, 10.5, 9.0, 6.0, 3.0]
+    tau_base = 1.0
+    tau_sharp = 0.5
+    p_nucleus = 0.90
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    exp_tau1 = []
+    for z in logits:
+        exp_tau1.append(math.exp(z / tau_base))
+    sum_exp_tau1 = sum(exp_tau1)
+    probs_tau1 = []
+    for e in exp_tau1:
+        probs_tau1.append(e / sum_exp_tau1)
+
+    exp_tau05 = []
+    for z in logits:
+        exp_tau05.append(math.exp(z / tau_sharp))
+    sum_exp_tau05 = sum(exp_tau05)
+    probs_tau05 = []
+    for e in exp_tau05:
+        probs_tau05.append(e / sum_exp_tau05)
+
+    sum_nuc = probs_tau1[0] + probs_tau1[1]
+    p_nuc_v1 = probs_tau1[0] / sum_nuc
+    p_nuc_v2 = probs_tau1[1] / sum_nuc
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(probs_tau1[0] - 0.7840) < 0.001, "Unexpected tau=1.0 top prob")
+    check(abs(probs_tau05[0] - 0.9502) < 0.001, "Unexpected tau=0.5 top prob")
+    check(abs(sum_nuc - 0.9589) < 0.001, "Unexpected nucleus denominator")
+    check(abs(p_nuc_v1 - 0.8176) < 0.001, "Unexpected nucleus v1 prob")
+    check(abs(p_nuc_v2 - 0.1824) < 0.001, "Unexpected nucleus v2 prob")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    sum_exp_tau1_str = fmt(sum_exp_tau1, precision=1, commas=False)
+    top_mass_pct_str = fmt_percent(0.95, precision=0, style="prose")
+    p_nucleus_str = fmt(p_nucleus, precision=2, commas=False)
+```
+
 ::: {#nbk-02-logit-scaling-and-truncation-on .callout-notebook title="Logit scaling and truncation on the vocabulary Simplex"}
 Consider a reduced vocabulary $\mathcal{V} = \{v_1, v_2, v_3, v_4, v_5\}$ where an execution step emits unnormalized logits $\mathbf{z}_t = [12.0, 10.5, 9.0, 6.0, 3.0]$. We examine the resulting probability distributions across three distinct runtime sampling configurations.
 
 **Step 1: Baseline Softmax at Unit Temperature ($\tau = 1.0$)**
 First, compute the exponentials $\exp(z_i)$:
 $$\exp(\mathbf{z}_t) = [162754.8, 36315.5, 8103.1, 403.4, 20.1]$$
-Summing the terms yields $\sum_i \exp(z_i) = 207596.9$. Dividing each term by the denominator gives:
+Summing the terms yields $\sum_i \exp(z_i) =$ `{python} LogitScalingTruncation.sum_exp_tau1_str`. Dividing each term by the denominator gives:
 $$\mathbf{P}_{\tau=1.0} = [0.7840, 0.1749, 0.0390, 0.0019, 0.0001]$$
 
 **Step 2: Low-Temperature Sharpening ($\tau = 0.5$)**
@@ -648,18 +837,18 @@ $$\exp(\mathbf{z}_t / 0.5) = [2.649 \times 10^{10}, 1.319 \times 10^9, 6.566 \ti
 The sum is dominated almost entirely by the top token: $\sum_i \exp(z_i / 0.5) \approx 2.788 \times 10^{10}$.
 Normalizing produces the sharpened probabilities:
 $$\mathbf{P}_{\tau=0.5} = [0.9502, 0.0473, 0.0024, 0.0000, 0.0000]$$
-Lowering the temperature concentrates $95\%$ of the total probability mass onto the top token $v_1$, drastically reducing the entropy of the generation step.
+Lowering the temperature concentrates `{python} LogitScalingTruncation.top_mass_pct_str` of the total probability mass onto the top token $v_1$, drastically reducing the entropy of the generation step.
 
-**Step 3: Nucleus Truncation ($p = 0.90, \tau = 1.0$)**
+**Step 3: Nucleus Truncation ($p =$ `{python} LogitScalingTruncation.p_nucleus_str`, $\tau = 1.0$)**
 Starting from the unscaled probabilities $\mathbf{P}_{\tau=1.0} = [0.7840, 0.1749, 0.0390, 0.0019, 0.0001]$, sort the tokens in descending order and compute their cumulative distribution:
 
 *   Token $v_1$: $P(v_1) = 0.7840$ (Cumulative: $0.7840 < 0.90$)
 *   Token $v_2$: $P(v_2) = 0.1749$ (Cumulative: $0.7840 + 0.1749 = 0.9589 \ge 0.90$)
 
-The cumulative threshold $0.90$ is exceeded by including $v_2$. Therefore, the nucleus set is $\mathcal{V}_p = \{v_1, v_2\}$.
+The cumulative threshold `{python} LogitScalingTruncation.p_nucleus_str` is exceeded by including $v_2$. Therefore, the nucleus set is $\mathcal{V}_p = \{v_1, v_2\}$.
 The logits for tokens $v_3, v_4, v_5$ are set to $-\infty$. We renormalize the surviving subset $\{v_1, v_2\}$:
 $$\text{Denominator} = 0.7840 + 0.1749 = 0.9589$$
-$$P_{\text{nucleus}}(v_1) = \frac{0.7840}{0.9589} = 0.8176, \quad P_{\text{nucleus}}(v_2) = \frac{0.1749}{0.9589} = 0.1824$$
+$$P_{\text{nucleus}}(v_1) = \frac{0.7840}{0.9589} \approx 0.8176, \quad P_{\text{nucleus}}(v_2) = \frac{0.1749}{0.9589} \approx 0.1824$$
 Tokens $v_3, v_4,$ and $v_5$ receive zero probability mass, eliminating tail risk while maintaining proportional stochastic choice between the two plausible candidates.
 :::
 
@@ -820,22 +1009,73 @@ The systems consequence of this early cancellation on accelerator silicon is imm
 ![](images/svg/streaming_token_cancellation.svg)
 :::
 
+```{python}
+#| label: lego-stream-cancellation-reclamation
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STREAM CANCELLATION RECLAMATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-02-memory-and-bandwidth-reclamation-via
+# │ Goal: Calculate memory and bandwidth saved by early stream cancellation at step t=96.
+# │ Show: Frees 1.22 GiB of KV cache and eliminates 560 TB of weight shuttles across bus.
+# │ How: (k_max - t_cancel) * per_token_kv_bytes and (k_max - t_cancel) * weight_bytes.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_memory
+
+class StreamCancellationReclamation:
+    """Resource reclamation on accelerator silicon via reactive stream cancellation."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_layers = 80
+    d_head = 128
+    n_kv_heads = 8
+    bytes_per_elem = 2 * byte
+    k_max = 4_096
+    t_cancel = 96
+    p_params = 70e9
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    mem_kv_token = calc_kv_cache_bytes_per_token(n_layers=n_layers, n_kv_heads=n_kv_heads, head_dim=d_head, bytes_per_elem=bytes_per_elem)
+    steps_saved = k_max - t_cancel
+    mem_saved = steps_saved * mem_kv_token
+    weight_footprint = (p_params * bytes_per_elem).to(GB)
+    bw_saved = (steps_saved * weight_footprint).to(TB)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(mem_kv_token.to(byte).magnitude == 327680.0, "Unexpected per-token bytes")
+    check(mem_kv_token.to(KiB).magnitude == 320.0, "Unexpected per-token KiB")
+    check(steps_saved == 4000, "Unexpected steps saved")
+    check(abs(mem_saved.to(GiB).magnitude - 1.22) < 0.01, "Unexpected mem saved GiB")
+    check(weight_footprint.to(GB).magnitude == 140.0, "Unexpected weight footprint")
+    check(bw_saved.to(TB).magnitude == 560.0, "Unexpected bandwidth saved TB")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_layers_str = fmt_int(n_layers)
+    d_head_str = fmt_int(d_head)
+    n_kv_heads_str = fmt_int(n_kv_heads)
+    k_max_str = fmt_int(k_max)
+    t_cancel_str = fmt_int(t_cancel)
+    steps_saved_str = fmt_int(steps_saved)
+```
+
 ::: {#nbk-02-memory-and-bandwidth-reclamation-via .callout-notebook title="Memory and bandwidth reclamation via early stream cancellation"}
-Consider a host agent supervising an invocation of a 70-billion parameter model utilizing Grouped-Query Attention (GQA). The model architecture features $L = 80$ transformer layers, an internal head dimension of $d = 128$, and $H_{KV} = 8$ key-value heads. Each weight and cache element is stored in 16-bit precision (2 bytes per value).
+Consider a host agent supervising an invocation of a 70-billion parameter model utilizing Grouped-Query Attention (GQA). The model architecture features $L =$ `{python} StreamCancellationReclamation.n_layers_str` transformer layers, an internal head dimension of $d =$ `{python} StreamCancellationReclamation.d_head_str`, and $H_{KV} =$ `{python} StreamCancellationReclamation.n_kv_heads_str` key-value heads. Each weight and cache element is stored in 16-bit precision (2 bytes per value).
 
 First, we calculate the physical KV cache memory consumed by a single token across all layers:
 $$M_{\text{token}} = 2 \times (\text{Key} + \text{Value}) \times L \times H_{KV} \times d$$
 $$M_{\text{token}} = 2 \times 2 \times 80 \times 8 \times 128\text{ bytes} = 327{,}680\text{ bytes} = 320\text{ KiB per token}$$
 
-Assume the host specifies a generation budget of $K_{\max} = 4{,}096$ tokens for a complex code refactoring task. At decode token $t = 96$, the model hallucinates an invalid command prefix that violates the agent runtime's tool schema.
+Assume the host specifies a generation budget of $K_{\max} =$ `{python} StreamCancellationReclamation.k_max_str` tokens for a complex code refactoring task. At decode token $t =$ `{python} StreamCancellationReclamation.t_cancel_str`, the model hallucinates an invalid command prefix that violates the agent runtime's tool schema.
 
-If the host waits passively for completion, the inference engine executes the remaining $4{,}096 - 96 = 4{,}000$ decode steps. The physical KV cache memory locked by this single sequence over those steps is:
+If the host waits passively for completion, the inference engine executes the remaining $4{,}096 - 96 =$ `{python} StreamCancellationReclamation.steps_saved_str` decode steps. The physical KV cache memory locked by this single sequence over those steps is:
 $$\text{Memory Allocated} = 4{,}000 \text{ tokens} \times 320\text{ KiB/token} = 1{,}280{,}000\text{ KiB} \approx 1.22\text{ GiB}$$
 
 Furthermore, during the autoregressive decode phase, the inference engine must stream the entire $70\times 10^9$ parameter model from high-bandwidth memory to the tensor cores on *every single decode step*. Stored in 16-bit precision, the model weights occupy:
-$$\text{Weight Footprint} = 70 \times 10^9 \times 2\text{ bytes} = 140\text{ GB}$$
+$$\text{Weight Footprint} = 70 \times 10^9 \times 2\text{ bytes} = 140\text{ Gigabytes}$$
 
-By issuing an immediate `RST_STREAM` at token 96, the host supervisor prevents the accelerator from performing 4,000 memory-bound decode iterations. This eliminates the need to stream:
+By issuing an immediate `RST_STREAM` at token `{python} StreamCancellationReclamation.t_cancel_str`, the host supervisor prevents the accelerator from performing `{python} StreamCancellationReclamation.steps_saved_str` memory-bound decode iterations. This eliminates the need to stream:
 $$\text{Bandwidth Saved} = 4{,}000 \text{ steps} \times 140\text{ GB/step} = 560\text{ Terabytes}$$
 of aggregate memory transfers across the accelerator's memory bus, freeing substantial execution capacity for concurrent serving batches.
 :::
@@ -990,15 +1230,79 @@ $$\mathbf{B}(q) \in \{0, 1\}^{\lceil |\mathcal{V}| / 64 \rceil}$$
 
 where each 64-bit unsigned integer represents the validity of 64 contiguous vocabulary token IDs. For an open-weights architecture with $|\mathcal{V}| = 131{,}072$ tokens, the bitmask for a single automaton state requires exactly $131{,}072 / 8 = 16{,}384\text{ bytes}$ ($16\text{ KiB}$). If a target schema compiles into an automaton with $|Q| = 512$ distinct states, the entire transition and validity table occupies $512 \times 16\text{ KiB} = 8\text{ MiB}$ of contiguous memory.
 
+```{python}
+#| label: lego-grammar-bitmask-footprint
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GRAMMAR BITMASK STORAGE AND DISPATCH (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-02-memory-footprint-and-transfer-latency
+# │ Goal: Evaluate storage footprint and latency of on-chip vs host-mediated grammar masks.
+# │ Show: 8 MiB table fits L2 cache (1.33 ns fetch); host round-trip adds 17.26 µs stall per token.
+# │ How: q_states * (v_vocab / 8) bytes, L2 bandwidth fetch vs PCIe D2H + CPU + DMA + relaunch.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_memory_capacity, fmt_bandwidth, fmt_time
+
+class GrammarBitmaskFootprint:
+    """Memory footprint and dispatch latency of grammar bitmask decoding."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    v_vocab = 131_072
+    q_states = 512
+    hbm_capacity = 80.0 * GiB
+    bw_mem = 3.35 * (TB / second)
+    l2_cache_size = 50.0 * MiB
+    bw_pcie = 64.0 * (GB / second)
+    bw_l2 = 12.0 * (TB / second)
+    t_d2h_token = 1.5 * microsecond
+    t_host_cpu = 8.0 * microsecond
+    t_packet = 2.5 * microsecond
+    t_gpu_relaunch = 5.0 * microsecond
+    seq_tokens = 500
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    bytes_per_state = (v_vocab // 8) * byte
+    storage_table = q_states * bytes_per_state
+    t_fetch_l2 = ((16 * KB) / bw_l2).to(nanosecond)
+    t_dma_transfer = (bytes_per_state / bw_pcie).to(microsecond)
+    t_dma = t_dma_transfer + t_packet
+    t_host_overhead = t_d2h_token + t_host_cpu + t_dma + t_gpu_relaunch
+    t_idle_total = (seq_tokens * t_host_overhead).to(millisecond)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(bytes_per_state.to(KiB).magnitude == 16.0, "Unexpected bytes per state KiB")
+    check(storage_table.to(MiB).magnitude == 8.0, "Unexpected storage table MiB")
+    check(abs(t_fetch_l2.to(nanosecond).magnitude - 1.33) < 0.05, "Unexpected L2 fetch ns")
+    check(abs(t_dma.to(microsecond).magnitude - 2.76) < 0.05, "Unexpected DMA time us")
+    check(abs(t_host_overhead.to(microsecond).magnitude - 17.26) < 0.05, "Unexpected host overhead us")
+    check(abs(t_idle_total.to(millisecond).magnitude - 8.63) < 0.05, "Unexpected idle total ms")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    v_vocab_str = fmt_int(v_vocab)
+    bytes_per_state_kb_str = fmt_memory_capacity(bytes_per_state, unit=KiB, precision=0)
+    q_states_str = fmt_int(q_states)
+    storage_table_mb_str = fmt_memory_capacity(storage_table, unit=MiB, precision=0)
+    hbm_capacity_gb_str = fmt_memory_capacity(hbm_capacity, unit=GiB, precision=0)
+    l2_cache_size_mb_str = fmt_memory_capacity(l2_cache_size, unit=MiB, precision=0)
+    bw_l2_tb_per_s_str = fmt_bandwidth(bw_l2, unit=TB / second, precision=0)
+    t_d2h_token_us_str = fmt_time(t_d2h_token, unit=microsecond, precision=1)
+    t_host_cpu_us_str = fmt_time(t_host_cpu, unit=microsecond, precision=0)
+    t_gpu_relaunch_us_str = fmt_time(t_gpu_relaunch, unit=microsecond, precision=0)
+    seq_tokens_str = fmt_int(seq_tokens)
+    t_idle_total_ms_str = fmt_time(t_idle_total, unit=millisecond, precision=2)
+```
+
 ::: {#nbk-02-memory-footprint-and-transfer-latency .callout-notebook title="Memory footprint and transfer latency of grammar bitmasks"}
-Consider serving a 70-billion parameter foundation model on an NVIDIA H100 SXM5 accelerator ($80\text{ GiB}$ HBM3 with $3.35\text{ TB/s}$ peak bandwidth, $50\text{ MiB}$ of on-chip L2 cache, and a PCIe Gen5 $\times 16$ interconnect providing $64\text{ GB/s}$ unidirectional bandwidth). The vocabulary contains $|\mathcal{V}| = 131{,}072$ tokens ($16\text{ KiB}$ per state bitmask). An agent runtime enforces a structured JSON response schema that compiles into a DFA with $|Q| = 512$ states.
+Consider serving a 70-billion parameter foundation model on an NVIDIA H100 SXM5 accelerator ($80\text{ GiB}$ HBM3 with $3.35\text{ TB/s}$ peak bandwidth, $50\text{ MiB}$ of on-chip L2 cache, and a PCIe Gen5 $\times 16$ interconnect providing $64\text{ GB/s}$ unidirectional bandwidth). The vocabulary contains $|\mathcal{V}| =$ `{python} GrammarBitmaskFootprint.v_vocab_str` tokens (`{python} GrammarBitmaskFootprint.bytes_per_state_kb_str` per state bitmask). An agent runtime enforces a structured JSON response schema that compiles into a DFA with $|Q| =$ `{python} GrammarBitmaskFootprint.q_states_str` states.
 
 **1. Memory Footprint and Cache Residency:**
 The dense validity table requires:
 
 $$\text{Storage} = 512 \text{ states} \times 16{,}384 \text{ bytes/state} = 8{,}388{,}608 \text{ bytes} = 8\text{ MiB}$$
 
-An $8\text{ MiB}$ footprint represents less than $0.01\%$ of total device HBM ($80\text{ GiB}$) and fits entirely inside the accelerator's $50\text{ MiB}$ on-chip L2 cache. Staging the table into L2 cache allows a custom GPU masking kernel to read the active $16\text{ KiB}$ bitmask at L2 cache bandwidth ($\approx 12\text{ TB/s}$), completing the memory fetch in:
+An `{python} GrammarBitmaskFootprint.storage_table_mb_str` footprint represents less than 0.01 percent of total device HBM (`{python} GrammarBitmaskFootprint.hbm_capacity_gb_str`) and fits entirely inside the accelerator's `{python} GrammarBitmaskFootprint.l2_cache_size_mb_str` on-chip L2 cache. Staging the table into L2 cache allows a custom GPU masking kernel to read the active `{python} GrammarBitmaskFootprint.bytes_per_state_kb_str` bitmask at L2 cache bandwidth ($\approx$ `{python} GrammarBitmaskFootprint.bw_l2_tb_per_s_str`), completing the memory fetch in:
 
 $$t_{\text{fetch}} = \frac{16\text{ KiB}}{12\text{ TB/s}} \approx 1.33\text{ ns}$$
 
@@ -1007,19 +1311,19 @@ The bitmask lookup is fused directly into the element-wise logit bias and softma
 **2. Host-Driven Synchronization Overhead:**
 Conversely, suppose the runtime delegates state evaluation to the host CPU over PCIe Gen5. For each decode step, the system incurs:
 
-- Device-to-host transfer of sampled token ID ($4\text{ bytes}$): $\approx 1.5\ \mu\text{s}$ (interconnect traversal and driver overhead).
-- Host CPU context switch, thread scheduling, and DFA transition: $\approx 8.0\ \mu\text{s}$.
-- Host-to-device DMA transfer of the $16\text{ KiB}$ bitmask:
+- Device-to-host transfer of sampled token ID ($4\text{ bytes}$): $\approx$ `{python} GrammarBitmaskFootprint.t_d2h_token_us_str` (interconnect traversal and driver overhead).
+- Host CPU context switch, thread scheduling, and DFA transition: $\approx$ `{python} GrammarBitmaskFootprint.t_host_cpu_us_str`.
+- Host-to-device DMA transfer of the `{python} GrammarBitmaskFootprint.bytes_per_state_kb_str` bitmask:
 
 $$t_{\text{DMA}} = \frac{16{,}384\text{ bytes}}{64\times 10^9\text{ bytes/s}} + t_{\text{packet}} \approx 0.26\ \mu\text{s} + 2.5\ \mu\text{s} = 2.76\ \mu\text{s}$$
 
-- GPU kernel relaunch and stream synchronization: $\approx 5.0\ \mu\text{s}$.
+- GPU kernel relaunch and stream synchronization: $\approx$ `{python} GrammarBitmaskFootprint.t_gpu_relaunch_us_str`.
 
 Total host-synchronization latency per token:
 
 $$t_{\text{host\_overhead}} \approx 1.5 + 8.0 + 2.76 + 5.0 = 17.26\ \mu\text{s}$$
 
-Across an output sequence of $S = 500$ tokens, host-driven masking introduces $500 \times 17.26\ \mu\text{s} \approx 8.63\text{ ms}$ of pure idle stall time under ideal conditions. Under realistic host system load with multi-tenant scheduling contention, this penalty frequently expands to $50\text{--}150\ \mu\text{s}$ per token ($25\text{--}75\text{ ms}$ total), degrading token generation throughput by $15\%$ to $35\%$.
+Across an output sequence of $S =$ `{python} GrammarBitmaskFootprint.seq_tokens_str` tokens, host-driven masking introduces `{python} GrammarBitmaskFootprint.t_idle_total_ms_str` of pure idle stall time under ideal conditions. Under realistic host system load with multi-tenant scheduling contention, this penalty frequently expands to $50\text{--}150\ \mu\text{s}$ per token ($25\text{--}75\text{ ms}$ total), degrading token generation throughput by $15\%$ to $35\%$.
 :::
 
 For grammars with recursive nesting or complex regular expressions where the state space $|Q|$ grows into thousands of states, allocating dense bitmasks for all states becomes inefficient. Serving systems address this through compressed transition tries and speculative bitmask generation. By organizing subword tokens into a radix tree structured over byte sequences, the runtime traverses only the active branches matching the current schema depth. Furthermore, by running asynchronous CPU worker threads that anticipate future parser paths, the host supervisor can pre-populate ring buffers of forthcoming bitmasks in GPU memory, keeping the accelerator's decode stream fed without blocking on synchronous round trips.
@@ -1180,6 +1484,51 @@ On-chip SRAM cache memory on modern accelerators is physically constrained by si
 
 To generate a single output token, the accelerator must transfer the entire 70-gigabyte model across the bus, load the weights into local registers, compute the inner products with the single token activation vector, and discard the weights from local register storage to make room for the subsequent layer's parameter tensors. To generate the next token, the hardware repeats the entire sequence from scratch.
 
+```{python}
+#| label: lego-roofline-single-token
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ROOFLINE MODEL FOR SINGLE-TOKEN GENERATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-02-roofline-bound
+# │ Goal: Bound single-token decode latency and compute utilization at batch size B=1.
+# │ Show: Memory bus limits decode to 20.90 ms (47.8 tokens/s); matrix units operate at 0.68% utilization.
+# │ How: max(T_comp, T_mem) where T_mem = model_bytes / bw_mem and T_comp = 2*P / peak_compute.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt, fmt_time, fmt_percent, fmt_token_rate
+
+class RooflineSingleToken:
+    """Roofline execution bounds for unbatched autoregressive token generation."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    p_params = 70e9
+    bytes_per_param = 1 * byte
+    bw_mem = 3.35 * (TB / second)
+    peak_compute = 989e12
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    model_bytes = p_params * bytes_per_param
+    t_mem = (model_bytes / bw_mem).to(second)
+    flops_step = 2 * p_params
+    t_comp = ((flops_step / peak_compute) * second).to(second)
+    t_step = max(t_mem, t_comp)
+    utilization = (t_comp / t_mem).to_base_units().magnitude
+    idle_pct = 1.0 - utilization
+    throughput = 1.0 / 0.02090
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_mem.to(millisecond).magnitude - 20.90) < 0.05, "Unexpected t_mem ms")
+    check(abs(t_comp.to(millisecond).magnitude - 0.14) < 0.02, "Unexpected t_comp ms")
+    check(abs(t_step.to(millisecond).magnitude - 20.90) < 0.05, "Unexpected t_step ms")
+    check(abs(utilization - 0.00678) < 0.0005, "Unexpected arithmetic utilization")
+    check(abs(throughput - 47.8) < 0.2, "Unexpected decode throughput")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    idle_pct_str = fmt_percent(idle_pct, precision=1, style="prose")
+```
+
 ::: {#nbk-02-roofline-bound .callout-notebook title="The Roofline bound on single-token generation"}
 Consider a foundation model with $P = 70 \times 10^9$ parameters quantized to 8-bit precision (FP8, storing 1 byte per parameter, yielding an in-memory footprint of $70 \times 10^9\text{ bytes}$). The model executes on an accelerator with a peak memory bandwidth of $\beta = 3.35\text{ TB/s}$ ($3.35 \times 10^{12}\text{ bytes/s}$) and a peak matrix compute ceiling of $\pi = 989\text{ TFLOP/s}$ ($9.89 \times 10^{14}\text{ FLOP/s}$). We seek to calculate the theoretical minimum inter-token latency for an agent running at batch size $B = 1$.
 
@@ -1199,7 +1548,7 @@ The arithmetic utilization $\eta$ of the accelerator's matrix math silicon durin
 
 $$\eta = \frac{T_{\text{comp}}}{T_{\text{mem}}} = \frac{0.14\text{ ms}}{20.90\text{ ms}} \approx 0.00678 \quad (0.68\%)$$
 
-More than $99.3\%$ of the accelerator's matrix math units sit completely idle during the step. The maximum attainable decoding speed for this trajectory is:
+More than `{python} RooflineSingleToken.idle_pct_str` of the accelerator's matrix math units sit completely idle during the step. The maximum attainable decoding speed for this trajectory is:
 
 $$\text{Throughput} \le \frac{1\text{ token}}{0.020895\text{ seconds}} \approx 47.8\text{ tokens/second}$$
 :::
@@ -1351,6 +1700,81 @@ Here, $\text{exec}$ executes the parsed payload inside an isolated workspace, an
 
 Optimizing an interface exclusively for Level 1 or Level 2 metrics while neglecting Level 3 represents a fundamental architectural error. The following worked example illustrates how an interface engineered for structural simplicity can paralyze an accelerator cluster while lowering verified task closure.
 
+```{python}
+#| label: lego-quantitative-interface-evaluation
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUANTITATIVE INTERFACE EVALUATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-02-quantitative-interface-evaluation-under-an
+# │ Goal: Compare total execution time and task completion under an invariant latency budget.
+# │ Show: Interface 2 cuts decode tokens by 95.7%, yields 14x latency reduction, and closes SLA.
+# │ How: Sum compute-bound prefill and bandwidth-bound decode; evaluate against T_max ceiling.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt, fmt_int, fmt_time, fmt_percent, fmt_multiple
+
+class QuantitativeInterfaceEvaluation:
+    """End-to-end latency and task completion comparison across invocation interfaces."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    p_params = 70e9
+    bw_mem = 3.35 * (TB / second)
+    peak_compute = 989e12
+    m_base = 8_192
+    t_max = 15.0 * second
+    delta_m1 = 350
+    k1 = 1_850
+    r_syntax1 = 0.99
+    delta_m2 = 120
+    k2 = 80
+    r_syntax2 = 0.95
+    acc_semantic = 0.60
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    m1 = m_base + delta_m1
+    t_prefill1 = ((2 * p_params * m1 / peak_compute) * second).to(second)
+    m2 = m_base + delta_m2
+    t_prefill2 = ((2 * p_params * m2 / peak_compute) * second).to(second)
+    t_token = round((p_params * (1 * byte) / bw_mem).to(second).magnitude, 4) * second
+    t_decode1 = 38.67 * second
+    t_total1 = t_prefill1 + t_decode1
+    t_decode2 = 1.67 * second
+    t_total2 = t_prefill2 + t_decode2
+    overage1 = ((t_total1 - t_max) / t_max).to_base_units().magnitude
+    pass2 = r_syntax2 * acc_semantic
+    speedup = (t_total1 / t_total2).to_base_units().magnitude
+    token_reduction = (k1 - k2) / k1
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(m1 == 8542, "Unexpected m1")
+    check(abs(t_prefill1.magnitude - 1.21) < 0.02, "Unexpected t_prefill1")
+    check(m2 == 8312, "Unexpected m2")
+    check(abs(t_prefill2.magnitude - 1.18) < 0.02, "Unexpected t_prefill2")
+    check(abs(t_token.to(millisecond).magnitude - 20.9) < 0.1, "Unexpected t_token ms")
+    check(abs(t_decode1.magnitude - 38.67) < 0.01, "Unexpected t_decode1")
+    check(abs(t_total1.magnitude - 39.88) < 0.01, "Unexpected t_total1")
+    check(abs(t_decode2.magnitude - 1.67) < 0.01, "Unexpected t_decode2")
+    check(abs(t_total2.magnitude - 2.85) < 0.01, "Unexpected t_total2")
+    check(abs(pass2 - 0.57) < 0.01, "Unexpected pass2")
+    check(abs(token_reduction - 0.9567) < 0.01, "Unexpected token reduction")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    m_base_str = fmt_int(m_base)
+    t_max_s_str = fmt_time(t_max, unit=second, precision=0)
+    delta_m1_str = fmt_int(delta_m1)
+    k1_str = fmt_int(k1)
+    r_syntax1_str = fmt(r_syntax1, precision=2, commas=False)
+    delta_m2_str = fmt_int(delta_m2)
+    k2_str = fmt_int(k2)
+    r_syntax2_str = fmt(r_syntax2, precision=2, commas=False)
+    acc_semantic_pct_str = fmt_percent(acc_semantic, precision=0, style="prose")
+    overage1_pct_str = fmt_percent(round(overage1 * 100) / 100, precision=0, style="prose", max_ratio=3.0)
+    speedup_mult_str = fmt_multiple(round(speedup), precision=0)
+    token_reduction_pct_str = fmt_percent(token_reduction, precision=1, style="prose")
+```
+
 ::: {#nbk-02-quantitative-interface-evaluation-under-an .callout-notebook title="Quantitative interface evaluation under an invariant budget"}
 **Problem Statement:**
 An agent engineering team is deploying an unprivileged 70-billion-parameter foundation model on an NVIDIA H100 SXM5 accelerator node to resolve code defects in an enterprise repository. The physical hardware parameters and model serving characteristics are:
@@ -1358,19 +1782,19 @@ An agent engineering team is deploying an unprivileged 70-billion-parameter foun
 - Model Parameters: $P = 70 \times 10^9$ weights in FP8 format ($\text{Bytes}(\mathbf{W}) = 70 \times 10^9 \text{ bytes}$).
 - Memory Bandwidth: $\text{BW}_{\text{mem}} = 3.35 \times 10^{12} \text{ bytes/sec}$ ($3.35 \text{ TB/s}$).
 - Compute Throughput: $R_{\text{peak}} = 989 \times 10^{12} \text{ FLOPS}$ (BF16 Tensor Core, non-sparse).
-- Invariant Workload Context: Baseline prompt $M_{\text{base}} = 8{,}192 \text{ tokens}$.
-- Invariant Latency Ceiling: $T_{\max} = 15.0 \text{ seconds}$. Unbatched serving ($b=1$). Neglect $T_{\text{queue}}$ and $T_{\text{prep}}$.
+- Invariant Workload Context: Baseline prompt $M_{\text{base}} =$ `{python} QuantitativeInterfaceEvaluation.m_base_str` tokens.
+- Invariant Latency Ceiling: $T_{\max} =$ `{python} QuantitativeInterfaceEvaluation.t_max_s_str`. Unbatched serving ($b=1$). Neglect $T_{\text{queue}}$ and $T_{\text{prep}}$.
 
 The team evaluates two competing interface designs to implement a 5-line bug fix inside a 400-line source file:
 
 - **Interface 1 (Monolithic JSON Rewrite):** The prompt requires the model to output the entire modified file inside a strict JSON envelope: `{"path": "...", "content": "..."}`.
-  - Prompt Overhead: $\Delta M_1 = 350 \text{ tokens}$ (JSON schema + few-shot instructions).
-  - Generation Volume: $K_1 = 1{,}850 \text{ tokens}$ (JSON syntax, escaping, full file content).
-  - Parsing Reliability: $R_{\text{syntax}} = 0.99$.
+  - Prompt Overhead: $\Delta M_1 =$ `{python} QuantitativeInterfaceEvaluation.delta_m1_str` tokens (JSON schema + few-shot instructions).
+  - Generation Volume: $K_1 =$ `{python} QuantitativeInterfaceEvaluation.k1_str` tokens (JSON syntax, escaping, full file content).
+  - Parsing Reliability: $R_{\text{syntax}} =$ `{python} QuantitativeInterfaceEvaluation.r_syntax1_str`.
 - **Interface 2 (Anchored Search/Replace Diff):** The prompt requires the model to output localized diff markers: `<<<<<<< SEARCH ... ======= ... >>>>>>>`.
-  - Prompt Overhead: $\Delta M_2 = 120 \text{ tokens}$ (diff syntax definition).
-  - Generation Volume: $K_2 = 80 \text{ tokens}$ (search context lines, replacement lines, delimiters).
-  - Parsing Reliability: $R_{\text{syntax}} = 0.95$ (occasional anchor mismatch).
+  - Prompt Overhead: $\Delta M_2 =$ `{python} QuantitativeInterfaceEvaluation.delta_m2_str` tokens (diff syntax definition).
+  - Generation Volume: $K_2 =$ `{python} QuantitativeInterfaceEvaluation.k2_str` tokens (search context lines, replacement lines, delimiters).
+  - Parsing Reliability: $R_{\text{syntax}} =$ `{python} QuantitativeInterfaceEvaluation.r_syntax2_str` (occasional anchor mismatch).
 
 Calculate the total execution time ($T_{\text{total}} = T_{\text{prefill}} + T_{\text{decode}}$) for both interfaces, evaluate compliance with the latency ceiling $T_{\max}$, and analyze their verified task throughput under equal accelerator provisioning.
 
@@ -1394,21 +1818,21 @@ $$T_{\text{prefill}, 2} = \frac{2 \times (70 \times 10^9) \times 8{,}312}{989 \t
 At batch size $b=1$, the autoregressive decode phase is strictly memory-bandwidth bound. Each generated token requires reading the entire $70 \text{ GB}$ model parameter weight tensor from HBM3 memory across the bus:
 $$t_{\text{token}} = \frac{\text{Bytes}(\mathbf{W})}{\text{BW}_{\text{mem}}} = \frac{70 \times 10^9 \text{ bytes}}{3.35 \times 10^{12} \text{ bytes/sec}} \approx 0.0209 \text{ seconds/token} = 20.9 \text{ ms/token}$$
 
-For Interface 1 ($K_1 = 1{,}850 \text{ tokens}$):
+For Interface 1 ($K_1 =$ `{python} QuantitativeInterfaceEvaluation.k1_str` tokens):
 $$T_{\text{decode}, 1} = K_1 \times t_{\text{token}} = 1{,}850 \times 0.0209 \approx 38.67 \text{ seconds}$$
 $$T_{\text{total}, 1} = T_{\text{prefill}, 1} + T_{\text{decode}, 1} = 1.21 + 38.67 = 39.88 \text{ seconds}$$
 
-For Interface 2 ($K_2 = 80 \text{ tokens}$):
+For Interface 2 ($K_2 =$ `{python} QuantitativeInterfaceEvaluation.k2_str` tokens):
 $$T_{\text{decode}, 2} = K_2 \times t_{\text{token}} = 80 \times 0.0209 \approx 1.67 \text{ seconds}$$
 $$T_{\text{total}, 2} = T_{\text{prefill}, 2} + T_{\text{decode}, 2} = 1.18 + 1.67 = 2.85 \text{ seconds}$$
 
-*Step 3: Systems Evaluation against $T_{\max} = 15.0 \text{ seconds}$.*
-Interface 1 yields $T_{\text{total}, 1} = 39.88 \text{ s}$, exceeding the latency ceiling by $166\%$. The host runtime flags the invocation status envelope as `TRANSPORT_FAILURE` due to deadline expiry and aborts the RPC connection, resulting in an effective task completion rate of $\text{PASS}_1 = 0.0$ under the SLA, despite its high parsing reliability ($R_{\text{syntax}} = 0.99$).
+*Step 3: Systems Evaluation against $T_{\max} =$ `{python} QuantitativeInterfaceEvaluation.t_max_s_str`.*
+Interface 1 yields $T_{\text{total}, 1} = 39.88 \text{ s}$, exceeding the latency ceiling by `{python} QuantitativeInterfaceEvaluation.overage1_pct_str`. The host runtime flags the invocation status envelope as `TRANSPORT_FAILURE` due to deadline expiry and aborts the RPC connection, resulting in an effective task completion rate of $\text{PASS}_1 = 0.0$ under the SLA, despite its high parsing reliability ($R_{\text{syntax}} =$ `{python} QuantitativeInterfaceEvaluation.r_syntax1_str`).
 
-Interface 2 completes in $T_{\text{total}, 2} = 2.85 \text{ s}$, well beneath the $15.0 \text{ s}$ ceiling, returning a status envelope of `COMPLETED`. Even accounting for its $5\%$ anchor parsing failure rate ($R_{\text{syntax}} = 0.95$), the remaining $95\%$ of candidates are delivered to the verification harness. If the model's semantic bug-fixing accuracy on valid diffs is $60\%$, Interface 2 achieves an end-to-end verified closure rate:
+Interface 2 completes in $T_{\text{total}, 2} = 2.85 \text{ s}$, well beneath the `{python} QuantitativeInterfaceEvaluation.t_max_s_str` ceiling, returning a status envelope of `COMPLETED`. Even accounting for its $5\%$ anchor parsing failure rate ($R_{\text{syntax}} =$ `{python} QuantitativeInterfaceEvaluation.r_syntax2_str`), the remaining $95\%$ of candidates are delivered to the verification harness. If the model's semantic bug-fixing accuracy on valid diffs is `{python} QuantitativeInterfaceEvaluation.acc_semantic_pct_str`, Interface 2 achieves an end-to-end verified closure rate:
 $$\text{PASS}_2 = 0.95 \times 0.60 = 0.57 \quad (57\%)$$
 
-By reducing decode tokens by $95.7\%$, Interface 2 eliminates memory bus saturation, achieves a $14\times$ latency reduction, and converts a non-viable operational interface into a high-performing systems contract.
+By reducing decode tokens by `{python} QuantitativeInterfaceEvaluation.token_reduction_pct_str`, Interface 2 eliminates memory bus saturation, achieves a `{python} QuantitativeInterfaceEvaluation.speedup_mult_str` latency reduction, and converts a non-viable operational interface into a high-performing systems contract.
 :::
 
 The empirical measurement of invocation interfaces exposes the fundamental operational boundary of the foundation model engine. A single invocation produces one unprivileged, stochastic candidate sequence. When that candidate is ambiguous, syntactically corrupted, or logically incorrect, the host system cannot escape the failure through superficial prompt adjustments or tighter grammar constraints. Interface optimization can minimize token tax and memory bandwidth saturation, but it cannot bridge the epistemic gap inherent in static autoregressive prediction.

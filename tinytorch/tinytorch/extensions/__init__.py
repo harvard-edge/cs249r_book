@@ -22,3 +22,15 @@ __all__ = [
     "mps_matmul",
     "has_mps_support",
 ]
+
+# Ecosystem Extensions (Chapter 22)
+try:
+    from .lora import LoRALinear
+    from .loss_scaler import LossScaler
+except ImportError:
+    pass
+try:
+    from .checkpoint import checkpoint
+    from .compile import compile_graph
+except ImportError:
+    pass

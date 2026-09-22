@@ -111,12 +111,35 @@ where trajectory steps $N$ are bounded by $N \le N_{\max}$ to terminate infinite
 
 Model-based graders sit outside this contract. A second model prompted to score a transcript against a rubric measures rhetorical plausibility, and Zheng et al. [-@zheng2023judging] document three systematic distortions in such judges, a self-preference bias toward outputs from their own model family, a verbosity bias toward long and elaborate answers over concise correct ones, and a position bias in pairwise comparisons. A judge also reads only tokens. It cannot inspect a filesystem, query a write-ahead log, or run a regression suite, so it adds no closure evidence level of its own (@sec-vol3-intro-closure-evidence). Graders therefore remain advisory, confined to open-ended criteria such as documentation readability, code idiomaticity, or user intent alignment, where no algorithmic oracle can be constructed. Even there, their scores must be calibrated against human expert ground truth using inter-annotator agreement metrics (such as Cohen's $\kappa$ or Spearman's $\rho$), and they must be given grounded evidence (the state delta $\Delta S$ and execution logs) rather than raw conversational transcripts.
 
+```{python}
+#| label: lego-16-evaluating-the-four-layer-contract-on
+#| echo: false
+# │ Show: Multi-layer task contract exposes lock contention and partial state write.
+# │ How: Layer 1 JSON syntax, Layer 2 execution invariants, Layer 3 state deltas, Layer 4 budgets.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_percent, fmt_time
+
+class EvaluatingFourLayerTaskContract:
+    t_limit = 120.0 * second
+    t_task = 142.6 * second
+    overrun_s = (t_task - t_limit).to(second).magnitude
+    overrun_ratio = overrun_s / t_limit.to(second).magnitude
+
+    check(abs(overrun_s - 22.6) < 1e-4, "overrun_s")
+    check(abs(overrun_ratio - 0.18833) < 0.001, "overrun_ratio")
+
+    overrun_s_str = fmt_time(overrun_s * second, unit=second, precision=1)
+    overrun_pct_str = fmt_percent(overrun_ratio, precision=1, style="prose")
+```
+
 ::: {#nbk-16-evaluating-the-four-layer-contract-on .callout-notebook title="Evaluating the four-layer task contract"}
 Consider an autonomous database administrator agent tasked with executing an online schema migration against a sharded PostgreSQL cluster: adding a composite index on `(tenant_id, created_at)` to an `audit_events` table containing 12,000,000 records, backfilling a non-null `status` column, and validating query latency against a service-level objective (SLO). The host supervisor executes the agent under an automated evaluation harness and inspects the resulting trajectory across the four contract layers.
 
-Under Layer 1 (Syntactic Validity), the agent emits an initial tool invocation payload serialized as a JSON object: `run_migration(shard_id="shard-04", ddl_statement="...", backfill_batch_size=5000)`. The runtime intercepts the payload in memory escrow and dispatches it to a JSON Schema validator. The schema confirms that `shard_id` resolves to a known cluster endpoint, `ddl_statement` parses as a valid SQL string without dangling delimiters, and `backfill_batch_size` is an integer within the permitted range $[100, 10000]$. Verification completes in 0.4 ms. Layer 1 records an unqualified pass.
+Under Layer 1 (Syntactic Validity), the agent emits an initial tool invocation payload serialized as a JSON object: `run_migration(shard_id="shard-04", ddl_statement="...", backfill_batch_size=5000)`. The runtime intercepts the payload in memory escrow and dispatches it to a JSON Schema validator. The schema confirms that `shard_id` resolves to a known cluster endpoint, `ddl_statement` parses as a valid SQL string without dangling delimiters, and `backfill_batch_size` is an integer within the permitted range $[100, 10000]$. Verification completes in $0.4\text{ ms}$. Layer 1 records an unqualified pass.
 
-Under Layer 2 (Execution Invariants), the runtime dispatches the DDL command to the database engine within a containerized session. The shell wrapper intercepts the execution and reports an operating system return code of `exit == 0`. However, inspection of the captured standard error stream (`stderr`) reveals an operational violation: `WARNING: concurrent transaction lock acquisition timed out after 30000ms; falling back to non-concurrent CREATE INDEX`. The tool wrapper, designed to report process completion, caught the process exit and passed the return code 0 to the supervisor without flagging the warning. In reality, the non-concurrent fallback acquired an exclusive table lock (`AccessExclusiveLock`) on the 12-million-row table for 41.2 seconds, queuing 1,840 incoming client queries and causing connection pool saturation. Although the process completed with zero exit code, Layer 2 execution invariants were breached.
+Under Layer 2 (Execution Invariants), the runtime dispatches the DDL command to the database engine within a containerized session. The shell wrapper intercepts the execution and reports an operating system return code of `exit == 0`. However, inspection of the captured standard error stream (`stderr`) reveals an operational violation: `WARNING: concurrent transaction lock acquisition timed out after 30000ms; falling back to non-concurrent CREATE INDEX`. The tool wrapper, designed to report process completion, caught the process exit and passed the return code 0 to the supervisor without flagging the warning. In reality, the non-concurrent fallback acquired an exclusive table lock (`AccessExclusiveLock`) on the 12-million-row table for $41.2\text{ seconds}$, queuing $1{,}840$ incoming client queries and causing connection pool saturation. Although the process completed with zero exit code, Layer 2 execution invariants were breached.
 
 Under Layer 3 (State Delta Verification), the evaluation harness quantifies the persistent environmental transformation $\Delta S = S_{\text{post}} - S_{\text{pre}}$. The harness inspects the relational catalog (`pg_indexes`) and verifies that the composite index exists. It then executes an automated verification test suite consisting of five deterministic SQL assertion queries. The test suite fails on the fourth assertion:
 
@@ -136,7 +159,7 @@ $$C_{\text{task}} = 14{,}200\text{ prompt tokens} + 3{,}150\text{ completion tok
 
 $$N_{\text{steps}} = 6 \le 10 \quad (\text{PASS})$$
 
-The trajectory breached the maximum latency threshold by $22.6\text{ seconds}$ ($18.8\%$ overrun) due to the table lock contention.
+The trajectory breached the maximum latency threshold by {python} EvaluatingFourLayerTaskContract.overrun_s_str ({python} EvaluatingFourLayerTaskContract.overrun_pct_str overrun) due to the table lock contention.
 
 Systems Accounting: The agent achieved flawless syntactic validity (Layer 1) and generated a polite, reassuring narrative that convinced a model judge. However, it violated operational execution invariants by locking production tables (Layer 2), corrupted persistent database state through incomplete batch execution (Layer 3), and exceeded wall-clock latency budgets (Layer 4). Evaluating an autonomous agent via conversational telemetry or process exit codes certifies an operational failure as a production success; only an explicit multi-layer contract enforces correctness.
 :::
@@ -194,6 +217,28 @@ To render large-scale agent evaluation computationally tractable, hermetic gyms 
 
 The agent reads directly from the immutable golden base layer at raw storage bus speeds. When the agent writes or modifies a file, the storage driver allocates new physical blocks exclusively within the transient upper layer. Once the trajectory completes and the oracle evaluates the resulting state delta, the supervisor tears down the sandbox by simply unmounting the overlay and discarding the upper layer metadata—an operation that completes in tens of milliseconds, regardless of the size of the underlying base image.
 
+```{python}
+#| label: lego-16-storage-io-and-reset-amortization
+#| echo: false
+# │ Show: Copy-on-write snapshotting delivers 102x reset speedup and 150x less write I/O.
+# │ How: Transient overlay mounts vs sequential 12 GB directory duplication across 64 workers.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_multiple, fmt_time
+
+class StorageIoResetAmortization:
+    t_reset_naive = 4.8 * second
+    t_reset_cow = 0.047 * second
+    speedup = t_reset_naive.to(second).magnitude / t_reset_cow.to(second).magnitude
+
+    check(abs(speedup - 102.127) < 0.01, "speedup")
+
+    t_reset_naive_s_str = fmt_time(t_reset_naive, unit=second, precision=1)
+    t_reset_cow_s_str = fmt_time(t_reset_cow, unit=second, precision=3)
+    speedup_mult_str = fmt_multiple(round(speedup))
+```
+
 ::: {#nbk-16-storage-io-and-reset-amortization .callout-notebook title="Storage I/O and reset amortization"}
 Consider an evaluation cluster with $W = 64$ parallel worker slots running an evaluation sweep of $N = 2,500$ tasks from a software engineering benchmark. Each task requires a Linux environment containing a full C++ toolchain, Python virtual environments, pre-indexed git trees, and database binaries, totaling $S_{\text{env}} = 12\text{ GB}$ of uncompressed disk state.
 
@@ -209,7 +254,7 @@ With 64 concurrent workers, the aggregate write demand during resets is $64 \tim
 **Case 2: Copy-on-Write Snapshotting (OverlayFS / Btrfs Snapshot)**
 Provisioning an OverlayFS upper directory requires creating an empty working directory and issuing a single `mount` syscall. The snapshot creation time is dominated by inode allocation and directory dentry initialization:
 $$T_{\text{create, CoW}} \approx 15\text{ ms} = 0.015\text{ seconds}$$
-During the task, only the modified blocks are written to the upper layer ($S_{\Delta} = 80\text{ MB}$). At the end of the task, tearing down the environment requires an `umount` syscall and a recursive removal of the 80 MB upper directory:
+During the task, only the modified blocks are written to the upper layer ($S_{\Delta} = 80\text{ MB}$). At the end of the task, tearing down the environment requires an `umount` syscall and a recursive removal of the $80\text{ MB}$ upper directory:
 $$T_{\text{teardown, CoW}} = \frac{S_{\Delta}}{B_{\text{write}}} = \frac{0.08\text{ GB}}{2.5\text{ GB/s}} \approx 32\text{ ms} = 0.032\text{ seconds}$$
 The total reset overhead per task is:
 $$T_{\text{reset, CoW}} = T_{\text{create, CoW}} + T_{\text{teardown, CoW}} = 0.015\text{ s} + 0.032\text{ s} = 0.047\text{ seconds}$$
@@ -217,7 +262,7 @@ Total data written to storage across the sweep:
 $$D_{\text{total, CoW}} = N \times S_{\Delta} = 2,500 \times 0.08\text{ GB} = 200\text{ GB}$$
 Storage write volume is reduced by a factor of:
 $$\frac{D_{\text{total, naive}}}{D_{\text{total, CoW}}} = \frac{30,000\text{ GB}}{200\text{ GB}} = 150\times$$
-Reset latency drops from $4.8\text{ seconds}$ to $0.047\text{ seconds}$, yielding a $102\times$ speedup and eliminating storage bus saturation across the 64-worker evaluation fleet.
+Reset latency drops from {python} StorageIoResetAmortization.t_reset_naive_s_str to {python} StorageIoResetAmortization.t_reset_cow_s_str, yielding a {python} StorageIoResetAmortization.speedup_mult_str speedup and eliminating storage bus saturation across the 64-worker evaluation fleet.
 :::
 
 ### Benchmark contamination hazards
@@ -669,6 +714,40 @@ def execute_traced_tool(cmd: list[str], parent_span: Span) -> tuple[int, str]:
 
 The preceding implementation demonstrates this boundary traversal. The runtime extracts the active trace context from the `parent_span`, injects the W3C `traceparent` representation into the process environment dictionary, and wraps the execution within a dedicated `agent.tool` span. Crucially, the span records the physical tool name, argument schema, process return code, and payload byte size. If the process encounters a nonzero exit code or terminal exception, the failure is bound directly to the active span through `record_exception`, preserving the exact execution context without truncating the surrounding trace hierarchy.
 
+```{python}
+#| label: lego-16-critical-path-latency-and-bottleneck
+#| echo: false
+# │ Show: Critical path decomposition shows tool execution and inference dominate latency.
+# │ How: Summing causal span durations across retrieval, generation, sandbox, and fan-out.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_percent
+
+class CriticalPathLatencyDecomposition:
+    t_wall = 18.25
+    t_crit = 17.26
+    t_orchestration = t_wall - t_crit
+    pct_orchestration = t_orchestration / t_wall
+
+    pct_tool = 6.20 / t_crit
+    pct_model = (3.39 + 3.74) / t_crit
+    pct_barrier = 3.85 / t_crit
+    pct_retrieval = 0.08 / t_crit
+
+    check(abs(pct_tool - 0.3592) < 0.001, "pct_tool")
+    check(abs(pct_model - 0.4131) < 0.001, "pct_model")
+    check(abs(pct_barrier - 0.2230) < 0.001, "pct_barrier")
+    check(abs(pct_retrieval - 0.0046) < 0.001, "pct_retrieval")
+    check(abs(pct_orchestration - 0.0542) < 0.001, "pct_orchestration")
+
+    pct_tool_str = fmt_percent(round(pct_tool, 3), precision=1, style="prose")
+    pct_model_str = fmt_percent(round(pct_model, 3), precision=1, style="prose")
+    pct_barrier_str = fmt_percent(round(pct_barrier, 3), precision=1, style="prose")
+    pct_retrieval_str = fmt_percent(round(pct_retrieval, 3), precision=1, style="prose")
+    pct_orchestration_str = fmt_percent(round(pct_orchestration, 3), precision=1, style="prose")
+```
+
 ::: {#nbk-16-critical-path-latency-and-bottleneck .callout-notebook title="Critical path latency decomposition"}
 Consider an autonomous coding agent that executes a 5-step loop: retrieving documentation, generating a code patch, executing a test suite in a container sandbox, fanning out review requests to two subagents in parallel, and synthesizing the final pull request.
 
@@ -712,14 +791,14 @@ To determine whether the agent's performance is compute-bound, I/O-bound, or coo
 $$T_{\text{crit}} = t_1 + t_2 + t_3 + \max(t_{4a}, t_{4b}) + t_5$$
 $$T_{\text{crit}} = 0.08\text{ s} + 3.39\text{ s} + 6.20\text{ s} + 3.85\text{ s} + 3.74\text{ s} = 17.26\text{ s}$$
 
-The remaining latency ($T_{\text{wall}} - T_{\text{crit}} = 18.25\text{ s} - 17.26\text{ s} = 0.99\text{ s}$, or $5.4\%$) represents host runtime orchestration overhead (JSON serialization, process context switching, and RPC queue wait times).
+The remaining latency ($T_{\text{wall}} - T_{\text{crit}} = 18.25\text{ s} - 17.26\text{ s} = 0.99\text{ s}$, or {python} CriticalPathLatencyDecomposition.pct_orchestration_str) represents host runtime orchestration overhead (JSON serialization, process context switching, and RPC queue wait times).
 
 Decomposing the critical path reveals the governing operational bottleneck:
 
-- Sandboxed tool execution accounts for $35.9\%$ ($6.20\text{ s}$) of critical path time.
-- Neural model inference accounts for $41.3\%$ ($3.39\text{ s} + 3.74\text{ s} = 7.13\text{ s}$).
-- Multi-agent coordination barrier accounts for $22.3\%$ ($3.85\text{ s}$).
-- Vector retrieval accounts for only $0.5\%$ ($0.08\text{ s}$).
+- Sandboxed tool execution accounts for {python} CriticalPathLatencyDecomposition.pct_tool_str ($6.20\text{ s}$) of critical path time.
+- Neural model inference accounts for {python} CriticalPathLatencyDecomposition.pct_model_str ($3.39\text{ s} + 3.74\text{ s} = 7.13\text{ s}$).
+- Multi-agent coordination barrier accounts for {python} CriticalPathLatencyDecomposition.pct_barrier_str ($3.85\text{ s}$).
+- Vector retrieval accounts for only {python} CriticalPathLatencyDecomposition.pct_retrieval_str ($0.08\text{ s}$).
 
 Without distributed tracing, an engineer might intuitively attempt to optimize retrieval latency or upgrade GPU hardware. The trace data definitively disproves both intuitions: memory retrieval is negligible, and inference is dominated by tool execution and parallel subagent latency. Optimizing the system requires addressing the sandbox I/O overhead in Step 3 and the straggler latency of Subagent B in Step 4.
 :::
@@ -788,6 +867,28 @@ that an anomalous behavior leaves almost no forensic footprint across the entire
 
 Head-based sampling forces a false dichotomy between storage insolvency and diagnostic blindness. The fundamental architectural defect of head-based sampling in agentic systems is that the decision to retain telemetry is executed under maximal uncertainty: at turn $t=0$, before the non-deterministic policy has committed its first action, encountered its first tool error, or drifted into an infinite execution loop.
 
+```{python}
+#| label: lego-16-telemetry-ingestion-inverted-economics
+#| echo: false
+# │ Show: Tail-based sampling slashes agent telemetry ingestion by 93.1% (14.5x reduction).
+# │ How: In-memory escrow retention of anomalies vs blind head-based sampling discard rates.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_multiple
+
+class TelemetryIngestionInvertedEconomics:
+    v_full = 336.0
+    v_tail = 23.2
+    data_reduction = 1.0 - (v_tail / v_full)
+    reduction_ratio = v_full / v_tail
+
+    check(abs(data_reduction - 0.93095) < 0.001, "data_reduction")
+    check(abs(reduction_ratio - 14.4827) < 0.01, "reduction_ratio")
+
+    reduction_mult_str = fmt_multiple(round(reduction_ratio, 1), precision=1)
+```
+
 ::: {#nbk-16-telemetry-ingestion-inverted-economics .callout-notebook title="Telemetry ingestion inverted economics"}
 Consider an autonomous software engineering agent deployment executing 10,000 tasks per hour across a distributed worker cluster.
 
@@ -827,7 +928,7 @@ Consider an autonomous software engineering agent deployment executing 10,000 ta
 - Ingestion reduction relative to full logging:
   $$\text{Data Reduction} = 1 - \frac{23.2}{336} = 93.1\%$$
 
-By retaining telemetry based on terminal execution properties rather than initial randomization, the tail-based architecture achieves a $14.5\times$ storage reduction while capturing $100\%$ of all operational failures and performance anomalies.
+By retaining telemetry based on terminal execution properties rather than initial randomization, the tail-based architecture achieves a {python} TelemetryIngestionInvertedEconomics.reduction_mult_str storage reduction while capturing $100\%$ of all operational failures and performance anomalies.
 :::
 
 ### Tail-based routing policies
@@ -1253,6 +1354,23 @@ A rise in $I_{\text{rate}}$ serves as a sensitive leading indicator of alignment
 
 Finally, *Mean Time to Recovery* (MTTR) in agentic systems accounts for both traffic draining and state restoration. If a canary failure corrupts external systems before the circuit breaker trips, recovery requires executing Saga compensating transactions (@sec-vol3-failure-recovery) to reverse partial modifications. Monitoring the full MTTR ensures that automated release systems account for both the speed of the software rollback and the latency of physical state reconciliation.
 
+```{python}
+#| label: lego-16-sizing-canary-traffic-and-circuit
+#| echo: false
+# │ Show: Managed canary deployment limits blast radius, preventing 95% of excess failures.
+# │ How: Wald SPRT sample size and detection latency under 5% traffic routing vs full rollout.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_percent
+
+class SizingCanaryTrafficCircuitBreaker:
+    excess_reduction = 80.45 / 84.69
+    check(abs(excess_reduction - 0.9499) < 0.001, "excess_reduction")
+
+    reduction_pct_str = fmt_percent(0.95, precision=0, style="prose")
+```
+
 ::: {#nbk-16-sizing-canary-traffic-and-circuit .callout-notebook title="Sizing canary traffic and circuit breaker MTTR"}
 **Problem Formulation**
 An enterprise software engineering agent fleet processes incoming bug repair tasks at an arrival rate of $\lambda = 60$ trajectories per hour. The verified baseline production runtime $\pi_{\text{base}}$ maintains a verified completion rate of $q_{\text{base}} = 0.90$.
@@ -1330,7 +1448,7 @@ Routing traffic through the managed canary boundary prevents:
 
 $$\Delta_{\text{failures}} = 141.15 - 60.70 = 80.45 \text{ task failures}$$
 
-The staged canary deployment reduces excess customer-impacting failures by:
+The staged canary deployment reduces excess customer-impacting failures by {python} SizingCanaryTrafficCircuitBreaker.reduction_pct_str:
 
 $$\frac{141.15 - 60.70}{141.15 - 56.46} = \frac{80.45}{84.69} \approx 95.0\%$$
 
@@ -1485,6 +1603,23 @@ where $M = \frac{1}{2}(P_{\text{base}} + P_{\text{cand}})$. The criterion requir
 
 $$\mathcal{C}_{\text{drift}} \iff D_{\text{JS}}(P_{\text{base}} \parallel P_{\text{cand}}) \le \kappa_{\max}$$
 
+```{python}
+#| label: lego-16-automated-canary-verification-and-release
+#| echo: false
+# │ Show: Candidate runtime satisfies non-inferiority accuracy gate and throughput bounds.
+# │ How: Wilson score lower bounds and empirical throughput degradation vs production baseline.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_percent
+
+class CanaryVerificationReleaseGates:
+    deg_rounded = (0.03347 - 0.03071) / 0.03347
+    check(abs(deg_rounded - 0.08246) < 0.001, "deg_rounded")
+
+    throughput_deg_pct_str = fmt_percent(0.0824, precision=2, style="prose")
+```
+
 ::: {#nbk-16-automated-canary-verification-and-release .callout-notebook title="Canary verification and release gates"}
 An engineering team operates an autonomous database migration agent. The current production baseline runtime ($M_{\text{base}}$) was evaluated across $N_{\text{base}} = 1000$ trials in a hermetic gym, achieving $k_{\text{base}} = 820$ verified task completions ($\hat{p}_{\text{base}} = 0.820$). The cumulative wall-clock execution time across all 1000 trials was $24{,}500\,\text{s}$, yielding an empirical baseline verified throughput of:
 
@@ -1524,7 +1659,7 @@ The condition is satisfied, so the candidate is non-inferior within the $\delta_
 **Step 2: Evaluate the throughput degradation criterion ($\mathcal{C}_{\text{throughput}}$).**
 $$\text{Allowable Throughput Threshold} = (1 - 0.10) \cdot 0.03347 = 0.03012\,\text{tasks/s}$$
 $$\text{Observed Candidate Throughput} = 0.03071\,\text{tasks/s}$$
-Because $0.03071 \ge 0.03012$, the candidate satisfies the throughput criterion (exhibiting an $8.24\%$ degradation, safely within the $10\%$ tolerance budget).
+Because $0.03071 \ge 0.03012$, the candidate satisfies the throughput criterion (exhibiting an {python} CanaryVerificationReleaseGates.throughput_deg_pct_str degradation, safely within the $10\%$ tolerance budget).
 
 **Step 3: Evaluate latency, safety, and drift criteria.**
 

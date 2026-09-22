@@ -428,6 +428,44 @@ $$\eta_{\text{static}} = \frac{\mathbb{E}[M_{\text{useful}}]}{M(S_{\max})} = \fr
 
 When an agent runtime serves a mixture of tasks—such as code completion, conversational turn-taking, and tool calling—the median sequence length $\text{Med}(S)$ is typically a small fraction of $S_{\max}$. For an application configured with $S_{\max} = 32{,}768$ tokens where the average completed trajectory consumes $\mathbb{E}[S] = 2{,}048$ tokens, the expected allocation efficiency is less than $6.25\%$. The remaining $93.75\%$ of the allocated physical memory sits completely unwritten, held in escrow for tokens that are never sampled. Because accelerator memory is strictly bounded, this artificial inflation of per-request footprint restricts concurrency to a handful of concurrent streams, throttling aggregate request throughput.
 
+```{python}
+#| echo: false
+#| label: kv-static-reservation-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WORST-CASE RESERVATION EFFICIENCY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-kvcache-fragmentation prose; PagedWaste compares against it.
+# │
+# │ Goal: Show how little of a worst-case reservation an average trajectory uses.
+# │ Show: 6.25 percent used, 93.75 percent idle; 48 reservations fill the pool.
+# │ How: Scenario mean and cap (illustrative, not a measured trace); pool and
+# │      bytes/token from KvGeometry.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+class StaticReservation:
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    s_max = 32_768  # scenario: deployment context cap
+    mean_tokens = 2_048  # scenario: mean trajectory length
+    _bpt = KvGeometry.bytes_per_token
+    _pool = KvGeometry.kv_pool
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    efficiency = mean_tokens / s_max
+    reservations = int((_pool / (s_max * _bpt)).to("").magnitude)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(abs(efficiency - 0.0625) < 1e-9, f"Expected 6.25 percent, got {efficiency}")
+    check(reservations == 48, f"Expected 48 reservations, got {reservations}")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    s_max_str = fmt_int(s_max)
+    mean_tokens_str = fmt_int(mean_tokens)
+    efficiency_pct_str = fmt_percent(efficiency, precision=2, style="prose")
+    waste_pct_str = fmt_percent(1 - efficiency, precision=2, style="prose")
+    reservations_str = fmt_int(reservations)
+```
+
 An alternative engineering approach attempts dynamic contiguous reallocation, mirroring the behavior of variable-capacity array structures such as C++'s `std::vector`. The runtime begins by allocating a small contiguous buffer matching the prompt length $S_{\text{prompt}}$. As the autoregressive loop emits tokens that exceed current capacity, the engine allocates a larger contiguous extent, copies the accumulated KV cache entries from the old buffer to the new buffer, and frees the original allocation.
 
 The dynamic resizing timeline and memory overhead are illustrated in @fig-vol3-contiguous-realloc across three discrete execution stages. In Step 1, as soon as the initial buffer of capacity $N$ is exhausted, the host runtime invokes `cudaMalloc` to allocate an expanded $2N$-slot buffer, introducing control-plane synchronization latency that stalls kernel dispatch. In Step 2, the runtime issues a device-to-device memory copy across the internal HBM bus to transfer historical key-value projections into the new extent; during this transfer window, both the $N$-slot and $2N$-slot buffers must reside concurrently in device memory, inducing a transient $3.0\times$ surge over initial baseline usage. Finally, in Step 3, calling `cudaFree` releases the obsolete $N$-slot buffer, stranding an isolated external fragmentation hole that cannot be coalesced without full-memory compaction.

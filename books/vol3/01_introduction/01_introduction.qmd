@@ -160,26 +160,78 @@ The trajectory of an autonomous agent operating on real-world systems, however, 
 
 This expansion across thirteen orders of magnitude invalidates traditional assumptions regarding transaction atomicity, transient fault rates, and memory consistency. A systems designer can comfortably treat a 100-millisecond REST request as an atomic, fail-stop unit: if a network drop or node reboot occurs, the client simply retries the request from scratch. But when an execution unit spans 4,000 seconds, involves thirty-five distinct stateful tool invocations, and consumes tens of millions of speculative tokens, treating the entire unit as an atomic, all-or-nothing transaction is economically and computationally ruinous.
 
-::: {#nbk-temporal-expansion .callout-notebook title="Temporal expansion and error compounding across agent horizons"}
-Consider an autonomous coding agent tasked with isolating and repairing a concurrency bug across a legacy codebase. The agent operates over a trajectory of $N = 45$ sequential execution turns. Each turn requires:
+```{python}
+#| label: lego-01-temporal-expansion
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TEMPORAL EXPANSION AND ERROR COMPOUNDING ACROSS AGENT HORIZONS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-temporal-expansion
+# │ Goal: Quantify trajectory duration and open-loop error compounding across multi-turn steps.
+# │ Show: 45-step task takes 1,035 s (17.25 min); 96% step accuracy collapses to 15.9% open-loop success.
+# │ How: Sum model, tool, and host latencies per turn; compound step fidelity exponentially (p^N).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt, fmt_int, fmt_percent, fmt_time
 
-1. A foundation engine invocation that processes an average working context of $32\text{ KiB}$ ($8\text{k tokens}$) and generates an action proposal of $256\text{ tokens}$ ($\text{latency } t_{\text{model}} \approx 4.5\text{ s}$).
-2. An actuation turn inside an isolated Linux container, executing a target test target via `pytest` or compiling a module via `cargo build` ($\text{latency } t_{\text{tool}} \approx 18.0\text{ s}$).
-3. Host supervisor overhead for sandboxed file I/O, output stream parsing, and invariant verification ($\text{latency } t_{\text{host}} \approx 0.5\text{ s}$).
+class TemporalExpansion:
+    """Temporal expansion and error compounding across agent horizons."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_steps = 45
+    ctx_working = 8_192
+    tokens_proposal = 256
+    t_model = 4.5 * second
+    t_tool = 18 * second
+    t_host = 0.5 * second
+    p_step = 0.96
+    p_target = 0.90
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_step = t_model + t_tool + t_host
+    t_total = n_steps * t_step
+    t_total_min = t_total.to(minute)
+    p_open_loop = p_step**n_steps
+    p_required = p_target ** (1.0 / n_steps)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(t_step.to(second).magnitude == 23.0, "t_step")
+    check(t_total.to(second).magnitude == 1035.0, "t_total")
+    check(abs(t_total_min.magnitude - 17.25) < 0.01, "t_total_min")
+    check(abs(p_open_loop - 0.1593) < 0.005, "p_open_loop")
+    check(abs(p_required - 0.99766) < 0.0001, "p_required")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_steps_str = fmt_int(n_steps)
+    tokens_proposal_str = fmt_int(tokens_proposal)
+    t_model_s_str = fmt_time(t_model, unit=second, precision=1)
+    t_tool_s_str = fmt_time(t_tool, unit=second, precision=0)
+    t_host_s_str = fmt_time(t_host, unit=second, precision=1)
+    p_step_pct_str = fmt_percent(p_step, precision=0, style="prose")
+    p_required_approx_pct_str = fmt_percent(p_required, precision=1, style="prose")
+```
+
+::: {#nbk-temporal-expansion .callout-notebook title="Temporal expansion and error compounding across agent horizons"}
+Consider an autonomous coding agent tasked with isolating and repairing a concurrency bug across a legacy codebase. The agent operates over a trajectory of $N =$ `{python} TemporalExpansion.n_steps_str` sequential execution turns. Each turn requires:
+
+1. A foundation engine invocation that processes an average working context of $32\text{ KiB}$ ($8\text{k tokens}$) and generates an action proposal of `{python} TemporalExpansion.tokens_proposal_str` tokens ($\text{latency } t_{\text{model}} \approx$ `{python} TemporalExpansion.t_model_s_str`).
+2. An actuation turn inside an isolated Linux container, executing a target test target via `pytest` or compiling a module via `cargo build` ($\text{latency } t_{\text{tool}} \approx$ `{python} TemporalExpansion.t_tool_s_str`).
+3. Host supervisor overhead for sandboxed file I/O, output stream parsing, and invariant verification ($\text{latency } t_{\text{host}} \approx$ `{python} TemporalExpansion.t_host_s_str`).
 
 The total per-step latency is:
 $$t_{\text{step}} = t_{\text{model}} + t_{\text{tool}} + t_{\text{host}} = 4.5 + 18.0 + 0.5 = 23.0\text{ seconds}$$
 The total wall-clock execution time for the full trajectory $\tau$ is:
 $$T_{\text{total}} = N \times t_{\text{step}} = 45 \times 23.0\text{ s} = 1{,}035\text{ seconds} \approx 17.25\text{ minutes}$$
 
-Now consider the reliability boundary. Assume the foundation model possesses a per-step action selection accuracy of $p = 0.96$ (that is, the model emits an actionable, syntactically and semantically viable tool call $96\%$ of the time without entering a hallucinated or degenerative state).
+Now consider the reliability boundary. Assume the foundation model possesses a per-step action selection accuracy of $p = 0.96$ (that is, the model emits an actionable, syntactically and semantically viable tool call `{python} TemporalExpansion.p_step_pct_str` of the time without entering a hallucinated or degenerative state).
 
 In an **open-loop architecture** where the runtime simply passes the model's generated sequence forward without verification or automated error remediation, the probability of the entire trajectory executing successfully without a fatal failure is:
 $$P(\text{success})_{\text{open-loop}} = p^N = (0.96)^{45} \approx 0.159 \quad (15.9\%)$$
 
-Even with an extraordinarily capable model ($p = 0.96$), the open-loop completion rate collapses to less than one-in-six. To achieve an acceptable system-level completion rate ($P_{\text{target}} \ge 0.90$) across this 45-step horizon, an open-loop model would require a per-step fidelity of:
+Even with an extraordinarily capable model ($p = 0.96$), the open-loop completion rate collapses to less than one-in-six. To achieve an acceptable system-level completion rate ($P_{\text{target}} \ge 0.90$) across this `{python} TemporalExpansion.n_steps_str`-step horizon, an open-loop model would require a per-step fidelity of:
 $$p = (P_{\text{target}})^{1/N} = (0.90)^{1/45} \approx 0.99766 \quad (99.77\%)$$
-Demanding $99.8\%$ unguided step accuracy from a stochastic language model over an ambiguous operational task is practically infeasible. Reliability cannot be solved at the token level; it must be engineered at the system level through closed-loop verification, state snapshotting, and transaction recovery.
+Demanding `{python} TemporalExpansion.p_required_approx_pct_str` unguided step accuracy from a stochastic language model over an ambiguous operational task is practically infeasible. Reliability cannot be solved at the token level; it must be engineered at the system level through closed-loop verification, state snapshotting, and transaction recovery.
 :::
 
 Systems spanning thousands of seconds must be designed with the explicit understanding that underlying infrastructure will exhibit transient network disconnects, tool sandboxes will exhaust memory quotas, external APIs will rate-limit requests, and the neural engine will occasionally emit invalid tool syntax. The runtime must treat the trajectory not as an uninterrupted stream of execution, but as a directed graph of checkpointed, recoverable, and observable state transitions.
@@ -319,26 +371,107 @@ The most severe physical dilemma in Software 3.0 architectures arises from the l
 
 When a multi-turn agent executes an action, the runtime invokes an external tool. If the host agent runtime implements this interaction via synchronous remote procedure calls (RPCs) while maintaining the underlying inference session, the model's key-value cache remains pinned inside the accelerator's HBM. The hardware cannot reallocate those memory pages to serve other incoming requests without losing the activation state that represents the agent's working memory.
 
+```{python}
+#| label: lego-01-tool-wait-tax
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE TOOL-WAIT MEMORY TAX (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-01-tool-wait-tax
+# │ Goal: Dimension stranded HBM capacity and financial cost during synchronous tool calls.
+# │ Show: Single 160k-token session pins 51.2 GB (10.67% dynamic pool); 4 agents strand 42.67% ($8/trajectory).
+# │ How: Multiply context length by per-token KV footprint; evaluate fraction of dynamic memory and idle hourly rate.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time, fmt_memory_capacity, fmt_usd
+from mlsysim.physics.agents import calc_kv_cache_bytes_per_token, calc_tool_wait_stranded_tax
+
+class ToolWaitTax:
+    """Memory stranding and idle silicon expenditure during blocking tool calls."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    agent = CodingAgents.SWE_Bench_Runner
+    n_gpus = agent.serving_node.accelerators_per_node
+    c_hbm_node = 640.0 * GB
+    cost_rate_hr = 24.0
+    tp_degree = 8
+    m_weights = 160.0 * GB
+    t_context = 160_000
+    m_token = calc_kv_cache_bytes_per_token(agent)
+    t_wait = 60 * second
+    n_agents_concurrent = 4
+    n_tools_pipeline = 20
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    m_kv_gb = 51.2 * GB
+    tax = calc_tool_wait_stranded_tax(
+        node_hbm_capacity=c_hbm_node,
+        model_weights_memory=m_weights,
+        kv_memory=m_kv_gb,
+        tool_wait_duration=t_wait,
+        hourly_node_cost=cost_rate_hr,
+        num_gpus=n_gpus,
+        num_concurrent_agents=n_agents_concurrent,
+        num_pipeline_tools=n_tools_pipeline,
+    )
+    cost_rate_s = cost_rate_hr / 3600.0
+    m_hbm_dynamic = tax["m_hbm_dynamic"]
+    m_hbm_dynamic_per_gpu = tax["m_hbm_dynamic_per_gpu"]
+    pct_stranded_single = tax["pct_stranded_single"]
+    m_stranded_concurrent = tax["m_stranded_concurrent"]
+    pct_stranded_concurrent = tax["pct_stranded_concurrent"]
+    cost_turn = tax["cost_turn"]
+    cost_pipeline = tax["cost_pipeline"]
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(m_token.to(KiB).magnitude - 320.0) < 1e-6, "m_token is 320 KiB")
+    check(m_hbm_dynamic.magnitude == 480.0, "m_hbm_dynamic")
+    check(m_hbm_dynamic_per_gpu.magnitude == 60.0, "m_hbm_dynamic_per_gpu")
+    check(abs(pct_stranded_single - 0.1067) < 0.001, "pct_stranded_single")
+    check(m_stranded_concurrent.magnitude == 204.8, "m_stranded_concurrent")
+    check(abs(pct_stranded_concurrent - 0.4267) < 0.001, "pct_stranded_concurrent")
+    check(abs(cost_turn - 0.40) < 0.01, "cost_turn")
+    check(abs(cost_pipeline - 8.00) < 0.01, "cost_pipeline")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_gpus_str = fmt_int(n_gpus)
+    cost_rate_hr_str = fmt_usd(cost_rate_hr)
+    tp_degree_str = fmt_int(tp_degree)
+    m_weights_gb_str = fmt_memory_capacity(m_weights, unit=GB, precision=0)
+    m_hbm_dynamic_gb_str = fmt_memory_capacity(m_hbm_dynamic, unit=GB, precision=0)
+    m_hbm_dynamic_per_gpu_gb_str = fmt_memory_capacity(m_hbm_dynamic_per_gpu, unit=GB, precision=0)
+    t_context_str = fmt_int(t_context)
+    t_wait_s_str = fmt_time(t_wait, unit=second, precision=0)
+    pct_stranded_single_pct_str = fmt_percent(pct_stranded_single, precision=2, style="prose")
+    n_agents_concurrent_str = fmt_int(n_agents_concurrent)
+    m_stranded_concurrent_gb_str = fmt_memory_capacity(m_stranded_concurrent, unit=GB, precision=1)
+    pct_stranded_concurrent_pct_str = fmt_percent(pct_stranded_concurrent, precision=2, style="prose")
+    cost_turn_str = fmt_usd(cost_turn, precision=2)
+    n_tools_pipeline_str = fmt_int(n_tools_pipeline)
+    cost_pipeline_str = fmt_usd(cost_pipeline)
+```
+
 ::: {#nbk-01-tool-wait-tax .callout-notebook title="The tool-wait memory tax"}
 
 **Problem**: Holding an 80B model's Key-Value (KV) cache active during a blocking external tool call strands accelerator High-Bandwidth Memory (HBM). What is the stranded capacity and dollar cost?
 
 **Variables**:
 
-* **Cluster Hardware**: 8-GPU NVIDIA H100 SXM5 node ($640\text{ GB}$ HBM3, \$24.00/hour or \$0.00667/s).
-* **Model Partitioning**: 80B dense parameters partitioned across $TP=8$. Static weights consume $160\text{ GB}$, leaving $480\text{ GB}$ dynamic HBM ($60\text{ GB}$ per GPU).
-* **Context State**: Active trajectory context of $T = 160{,}000\text{ tokens}$. An 80B-parameter model requires $m_{\text{token}} = 320\text{ KiB}$ of Key-Value state per token (@sec-vol3-appendix-inference-kv-cache derives this tensor geometry).
-* **Tool Duration**: A long-running compilation and integration test: `cmake --build out/ && ctest --timeout 60` requiring $t_{\text{wait}} = 60.0\text{ seconds}$.
+* **Cluster Hardware**: `{python} ToolWaitTax.n_gpus_str`-GPU NVIDIA H100 SXM5 node ($640\text{ GB}$ HBM3, `{python} ToolWaitTax.cost_rate_hr_str`/hour or \$0.00667/s).
+* **Model Partitioning**: 80B dense parameters partitioned across $TP =$ `{python} ToolWaitTax.tp_degree_str`. Static weights consume `{python} ToolWaitTax.m_weights_gb_str`, leaving `{python} ToolWaitTax.m_hbm_dynamic_gb_str` dynamic HBM (`{python} ToolWaitTax.m_hbm_dynamic_per_gpu_gb_str` per GPU).
+* **Context State**: Active trajectory context of $T =$ `{python} ToolWaitTax.t_context_str` tokens. An 80B-parameter model requires $m_{\text{token}} = 320\text{ KiB}$ of Key-Value state per token (@sec-vol3-appendix-inference-kv-cache derives this tensor geometry).
+* **Tool Duration**: A long-running compilation and integration test: `cmake --build out/ && ctest --timeout 60` requiring $t_{\text{wait}} =$ `{python} ToolWaitTax.t_wait_s_str`.
 
 **Math**:
 The physical memory required to hold this single session's KV cache is:
 $$M_{\text{KV}} = 160{,}000 \times 320\text{ KiB} = 51{,}200{,}000\text{ KiB} \approx 51.2\text{ GB}$$
 If the agent runtime executes this tool call synchronously:
 
-1. **Memory Stranding**: The $51.2\text{ GB}$ KV cache is pinned for the entire 60 seconds. This represents $51.2 / 480 = 10.67\%$ of the entire dynamic serving capacity of the node. If four concurrent agents trigger compilation tasks simultaneously, $204.8\text{ GB}$ of dynamic memory—fully $42.67\%$ of the node's interactive capacity—is completely stranded, unable to process tokens for active users.
-2. **Financial Cost**: Over the 60-second compilation wait interval:
+1. **Memory Stranding**: The $51.2\text{ GB}$ KV cache is pinned for the entire `{python} ToolWaitTax.t_wait_s_str`. This represents $51.2 / 480 =$ `{python} ToolWaitTax.pct_stranded_single_pct_str` of the entire dynamic serving capacity of the node. If `{python} ToolWaitTax.n_agents_concurrent_str` concurrent agents trigger compilation tasks simultaneously, `{python} ToolWaitTax.m_stranded_concurrent_gb_str` of dynamic memory—fully `{python} ToolWaitTax.pct_stranded_concurrent_pct_str` of the node's interactive capacity—is completely stranded, unable to process tokens for active users.
+2. **Financial Cost**: Over the `{python} ToolWaitTax.t_wait_s_str` compilation wait interval:
 $$\text{Cost} = 60\text{ s} \times \$0.00667/\text{s} = \$0.400$$
-The system incurs $\$0.40$ of direct compute expenditure per turn while performing zero floating-point operations. In an industrial pipeline executing 20 tool calls per resolution trajectory, tool-wait stranding burns $\$8.00$ of capital entirely on idle silicon.
+The system incurs `{python} ToolWaitTax.cost_turn_str` of direct compute expenditure per turn while performing zero floating-point operations. In an industrial pipeline executing `{python} ToolWaitTax.n_tools_pipeline_str` tool calls per resolution trajectory, tool-wait stranding burns `{python} ToolWaitTax.cost_pipeline_str` of capital entirely on idle silicon.
 
 **Systems insight**: Software 3.0 runtimes cannot treat tool invocations as standard blocking function calls. The host supervisor must decouple tool execution asynchronously: serializing token state, releasing accelerator memory allocations, recording progress in a Write-Ahead Log (@sec-vol3-durable-execution), and leveraging prefix caching (@sec-vol3-kv-cache) when the observation returns.
 
@@ -646,16 +779,89 @@ $$\mathcal{G} = \frac{\sum_{i \in \mathcal{T}_{\text{success}}} R_i}{\sum_{j \in
 
 where $\mathcal{T}_{\text{all}}$ represents all dispatched trajectories, $\mathcal{T}_{\text{success}} \subseteq \mathcal{T}_{\text{all}}$ represents the subset whose deliverables pass all deterministic verification oracles $\mathcal{V}$, and $R_k$ measures physical resource expenditure (floating-point operations, GPU core-seconds, kilowatt-hours, or financial cost). Unverified token generation represents computational badput ($1 - \mathcal{G}$). We develop the full telemetry and evaluation mechanics of trajectory goodput in @sec-vol3-evaluation and analyze its macro-economic cost frontier in @sec-vol3-agent-economics.
 
+```{python}
+#| label: lego-01-trajectory-goodput
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TRAJECTORY GOODPUT AND COMPUTE WASTE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-01-trajectory-goodput
+# │ Goal: Compute trajectory goodput, badput ratio, and energy/dollar waste under cyclic failure.
+# │ Show: 21.2% goodput (78.8% badput); 65 failed tasks waste 1.85 kWh ($12.33) on an 8x H100 node.
+# │ How: Weight successful vs failed trajectory steps; compute decode token execution time and node energy.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt, fmt_int, fmt_percent, fmt_usd, fmt_power
+
+class TrajectoryGoodput:
+    """Trajectory goodput, compute waste, and energy dissipation in fail-plausible loops."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_gpus = 8
+    power_cluster = 4_800 * watt
+    throughput_decode = 1_200 / second
+    n_trajectories = 100
+    n_failed = 65
+    t_max_steps = 50
+    tokens_decode_step = 512
+    tokens_prefill_step = 16_384
+    n_success = 35
+    steps_success = 25
+    rate_h100_hr = 32.0
+    n_tasks_enterprise = 100_000
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    steps_successful_total = n_success * steps_success
+    steps_failed_total = n_failed * t_max_steps
+    steps_total = steps_successful_total + steps_failed_total
+    goodput = steps_successful_total / steps_total
+    badput = 1.0 - goodput
+    tokens_waste = n_failed * t_max_steps * tokens_decode_step
+    t_waste_s = (tokens_waste / throughput_decode.magnitude) * second
+    t_waste_hr = t_waste_s.to(hour)
+    e_waste_mj = (power_cluster * t_waste_s).to(joule).magnitude / 1e6
+    e_waste_kwh = (power_cluster * t_waste_s).to(kWh)
+    cost_waste = t_waste_hr.magnitude * rate_h100_hr
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(steps_successful_total == 875, "steps_successful_total")
+    check(steps_failed_total == 3250, "steps_failed_total")
+    check(steps_total == 4125, "steps_total")
+    check(abs(goodput - 0.212) < 0.005, "goodput")
+    check(abs(badput - 0.788) < 0.005, "badput")
+    check(tokens_waste == 1664000, "tokens_waste")
+    check(abs(t_waste_s.magnitude - 1386.67) < 1.0, "t_waste_s")
+    check(abs(t_waste_hr.magnitude - 0.385) < 0.01, "t_waste_hr")
+    check(abs(e_waste_mj - 6.66) < 0.05, "e_waste_mj")
+    check(abs(e_waste_kwh.magnitude - 1.85) < 0.05, "e_waste_kwh")
+    check(abs(cost_waste - 12.33) < 0.05, "cost_waste")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_gpus_str = fmt_int(n_gpus)
+    power_cluster_str = fmt_power(power_cluster, unit=watt, precision=0)
+    throughput_decode_str = fmt_int(throughput_decode.magnitude)
+    n_trajectories_str = fmt_int(n_trajectories)
+    n_failed_str = fmt_int(n_failed)
+    t_max_steps_str = fmt_int(t_max_steps)
+    tokens_decode_step_str = fmt_int(tokens_decode_step)
+    tokens_prefill_step_str = fmt_int(tokens_prefill_step)
+    n_success_str = fmt_int(n_success)
+    steps_success_str = fmt_int(steps_success)
+    badput_pct_str = fmt_percent(badput, precision=1, style="prose")
+    cost_waste_str = fmt_usd(cost_waste, precision=2)
+```
+
 ::: {#nbk-01-trajectory-goodput .callout-notebook title="Trajectory goodput and compute waste"}
 
-**Problem**: A data center cluster of 8x NVIDIA H100 SXM5 GPUs serves an open-weight 70B dense model in BF16 (drawing 4,800 W at peak, generating 1,200 decode tokens/s across streams). The cluster executes 100 autonomous software repair trajectories. What is the cluster's Trajectory Goodput ($\mathcal{G}$) and energy waste under fail-plausible loops?
+**Problem**: A data center cluster of `{python} TrajectoryGoodput.n_gpus_str` NVIDIA H100 SXM5 GPUs serves an open-weight 70B dense model in BF16 (drawing `{python} TrajectoryGoodput.power_cluster_str` at peak, generating `{python} TrajectoryGoodput.throughput_decode_str` decode tokens/s across streams). The cluster executes `{python} TrajectoryGoodput.n_trajectories_str` autonomous software repair trajectories. What is the cluster's Trajectory Goodput ($\mathcal{G}$) and energy waste under fail-plausible loops?
 
 **Variables**:
 
-* **Workload**: 100 bug repair trajectories.
-* **Failure Dynamics**: Due to unmitigated fail-plausible errors, 65 trajectories enter cyclic loops, exhausting step budget $T_{\max} = 50$ (512 decode tokens and 16,384 prefill tokens per step).
-* **Success Dynamics**: 35 trajectories pass all verification tests with an average of 25 steps.
-* **Power Draw**: 4,800 W average active cluster power.
+* **Workload**: `{python} TrajectoryGoodput.n_trajectories_str` bug repair trajectories.
+* **Failure Dynamics**: Due to unmitigated fail-plausible errors, `{python} TrajectoryGoodput.n_failed_str` trajectories enter cyclic loops, exhausting step budget $T_{\max} =$ `{python} TrajectoryGoodput.t_max_steps_str` (`{python} TrajectoryGoodput.tokens_decode_step_str` decode tokens and `{python} TrajectoryGoodput.tokens_prefill_step_str` prefill tokens per step).
+* **Success Dynamics**: `{python} TrajectoryGoodput.n_success_str` trajectories pass all verification tests with an average of `{python} TrajectoryGoodput.steps_success_str` steps.
+* **Power Draw**: `{python} TrajectoryGoodput.power_cluster_str` average active cluster power.
 
 **Math**:
 
@@ -664,14 +870,14 @@ where $\mathcal{T}_{\text{all}}$ represents all dispatched trajectories, $\mathc
    * Failed trajectories ($65 \times 50\text{ steps}$): $3{,}250\text{ total steps}$.
 2. *Trajectory Goodput*:
    $$\mathcal{G} = \frac{35 \times 25}{(35 \times 25) + (65 \times 50)} = \frac{875}{875 + 3{,}250} = \frac{875}{4{,}125} \approx 0.212 \quad (21.2\%)$$
-   Despite high GEMM/GEMV kernel utilization, **78.8 percent of the cluster's compute was badput.**
+   Despite high GEMM/GEMV kernel utilization, **`{python} TrajectoryGoodput.badput_pct_str` of the cluster's compute was badput.**
 
 3. *Energy Waste and Financial Expenditure*:
-   Failing trajectories generated $65 \times 50 \times 512 = 1{,}664{,}000\text{ decode tokens}$. At 1,200 tokens/s, the wasted execution duration is:
+   Failing trajectories generated $65 \times 50 \times 512 = 1{,}664{,}000\text{ decode tokens}$. At `{python} TrajectoryGoodput.throughput_decode_str` tokens/s, the wasted execution duration is:
    $$t_{\text{waste}} = \frac{1{,}664{,}000\text{ tokens}}{1{,}200\text{ tokens/s}} \approx 1{,}387\text{ seconds} \approx 0.385\text{ hours}$$
    The energy dissipated on badput is:
    $$E_{\text{waste}} = 4{,}800\text{ W} \times 1{,}387\text{ s} \approx 6.66\text{ MJ} \quad (1.85\text{ kWh})$$
-   At an on-demand market rate of $\$32.00/\text{hr}$ for an 8x H100 SXM5 node, $0.385\text{ hours}$ of pure badput wastes $\$12.33$ across just these 65 failed tasks. At enterprise fleet scale ($100{,}000\text{ tasks}$), unmitigated cyclic failure inflates to $2{,}846\text{ hours}$ of stalled GPU time, $2.85\text{ MWh}$ of dissipated grid energy, and over $\$18{,}900$ in wasted capital for zero delivered software artifacts.
+   At an on-demand market rate of $\$32.00/\text{hr}$ for an 8x H100 SXM5 node, $0.385\text{ hours}$ of pure badput wastes `{python} TrajectoryGoodput.cost_waste_str` across just these `{python} TrajectoryGoodput.n_failed_str` failed tasks. At enterprise fleet scale ($100{,}000\text{ tasks}$), unmitigated cyclic failure inflates to $2{,}846\text{ hours}$ of stalled GPU time, $2.85\text{ MWh}$ of dissipated grid energy, and over $\$18{,}900$ in wasted capital for zero delivered software artifacts.
 
 **Systems insight**: Micro-optimizing decode kernels to gain 10 percent higher tokens/second saves fractions of a second. In contrast, an early-stopping verification harness that trips failing loops at step 10 reclaims over 60 percent of wasted cluster energy and capital, directly driving macro-efficiency.
 
@@ -997,8 +1203,57 @@ The altered test executed without triggering an exception, the test runner repor
 
 The failure mode highlighted in \ref{ws-parser-regression} illustrates why unvalidated feedback loops are catastrophic in autonomous pipelines. The model optimized for the reward signal visible to it—the zero exit status of the test binary—by generating the path of least resistance across its token probability landscape, actively neutralizing the assertion designed to protect the system invariant.
 
+```{python}
+#| label: lego-01-logit-vs-invariant
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LOGIT CERTAINTY VERSUS SEMANTIC INVARIANT VIOLATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-logit-vs-invariant
+# │ Goal: Contrast statistical token certainty with database lock invariant violations.
+# │ Show: Statement emits with 0.775 sequence certainty but incurs a 2.13 s table lock (42.7x over limit).
+# │ How: Compute joint BPE likelihood vs NVMe table rewrite bandwidth over 10^7 rows.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt, fmt_int, fmt_time
+
+class LogitVsInvariant:
+    """Discrepancy between high autoregressive logit certainty and operational invariant violations."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_rows = 10_000_000
+    t_lock_max = 50 * millisecond
+    n_tokens = 14
+    p_avg_token = 0.982
+    h_token_nats = 0.084
+    bw_nvme = 1.2 * (GB / second)
+    bytes_per_row = 256 * byte
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    p_seq = p_avg_token**n_tokens
+    data_volume = (n_rows * bytes_per_row).to(GB)
+    t_rewrite = (data_volume / bw_nvme).to(second)
+    t_rewrite_ms = t_rewrite.to(millisecond)
+    violation_ratio = (t_rewrite_ms / t_lock_max).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(p_seq - 0.775) < 0.005, "p_seq")
+    check(abs(data_volume.magnitude - 2.56) < 0.01, "data_volume")
+    check(abs(t_rewrite.magnitude - 2.133) < 0.01, "t_rewrite")
+    check(abs(violation_ratio - 42.67) < 0.1, "violation_ratio")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_lock_max_ms_str = fmt_time(t_lock_max, unit=millisecond, precision=0)
+    n_tokens_str = fmt_int(n_tokens)
+    bytes_per_row_str = fmt_int(bytes_per_row.to(byte).magnitude)
+    violation_ratio_str = fmt(violation_ratio, precision=1, commas=False)
+    p_seq_str = fmt(p_seq, precision=3, commas=False)
+    t_rewrite_s_val_str = fmt(t_rewrite.to(second).magnitude, precision=2, commas=False)
+```
+
 ::: {#nbk-logit-vs-invariant .callout-notebook title="Logit certainty versus semantic invariant violation"}
-Consider an autonomous database administration agent tasked with executing an online schema migration on a relational table containing $10^7$ rows. The operational invariant $\mathcal{I}_{\text{perf}}$ mandates that no table lock may be held for longer than $50\text{ ms}$, ensuring that concurrent production read transactions do not stall.
+Consider an autonomous database administration agent tasked with executing an online schema migration on a relational table containing $10^7$ rows. The operational invariant $\mathcal{I}_{\text{perf}}$ mandates that no table lock may be held for longer than `{python} LogitVsInvariant.t_lock_max_ms_str`, ensuring that concurrent production read transactions do not stall.
 
 The model generates an action proposal consisting of a single DDL statement:
 
@@ -1007,7 +1262,7 @@ $$\texttt{ALTER TABLE orders ADD COLUMN status\_code INT DEFAULT 0 NOT NULL;}$$
 Let us analyze the generation dynamics under a standard 70B parameter dense autoregressive model operating at vocabulary size $|\mathcal{V}_{\text{tok}}| = 128{,}000$ and temperature $T = 0.2$.
 
 1. **Token Probability Calculation:**
-   The statement decomposes into $L = 14$ BPE tokens. Across all 14 tokens, the model's logits produce an average conditional probability:
+   The statement decomposes into $L =$ `{python} LogitVsInvariant.n_tokens_str` BPE tokens. Across all `{python} LogitVsInvariant.n_tokens_str` tokens, the model's logits produce an average conditional probability:
    $$\bar{P} = \frac{1}{14} \sum_{i=1}^{14} P(y_i \mid y_{<i}, c_t) = 0.982$$
    The sequence-level conditional likelihood is:
    $$P(y_{1:14} \mid c_t) = \prod_{i=1}^{14} P(y_i \mid y_{<i}, c_t) \approx (0.982)^{14} \approx 0.775$$
@@ -1016,14 +1271,14 @@ Let us analyze the generation dynamics under a standard 70B parameter dense auto
    Statistically, the generation core displays overwhelming confidence. The sequence is well-formed SQL, correctly capitalizes keywords, terminates with a semicolon, and fulfills the user's natural language request to "add a status code column with a default value."
 
 2. **Environmental Invariant Evaluation:**
-   In standard PostgreSQL engines prior to version 11 (and across unindexed partitioned variants), adding a column with a non-null default value requires rewriting the entire table on disk while holding an exclusive `ACCESS EXCLUSIVE` lock. On a table with $10^7$ rows residing on an NVMe array with a sequential write bandwidth of $1.2\text{ GB/s}$ and an average row size of $256\text{ bytes}$:
+   In standard PostgreSQL engines prior to version 11 (and across unindexed partitioned variants), adding a column with a non-null default value requires rewriting the entire table on disk while holding an exclusive `ACCESS EXCLUSIVE` lock. On a table with $10^7$ rows residing on an NVMe array with a sequential write bandwidth of $1.2\text{ GB/s}$ and an average row size of `{python} LogitVsInvariant.bytes_per_row_str` bytes:
    $$\text{Data Volume} = 10^7 \times 256\text{ bytes} = 2.56\text{ GB}$$
    $$\text{Table Rewrite Latency} = \frac{2.56\text{ GB}}{1.2\text{ GB/s}} \approx 2.13\text{ seconds}$$
-   The lock duration exceeds the operational invariant threshold by a factor of 42:
+   The lock duration exceeds the operational invariant threshold by a factor of `{python} LogitVsInvariant.violation_ratio_str`:
    $$\text{Violation Ratio} = \frac{2130\text{ ms}}{50\text{ ms}} = 42.6 \implies s_{t+1} \notin \mathcal{I}_{\text{perf}}$$
 
 3. **Systems Takeaway:**
-   The execution core emitted the statement with high token certainty ($P = 0.775$) and zero syntax errors. When executed via a database CLI, the statement completes and exits with status 0. Yet it induces a 2.13-second global lock that cascades into connection pool exhaustion across upstream microservices. The model's internal confidence metric was entirely blind to the physical constraints of storage and lock contention.
+   The execution core emitted the statement with high token certainty ($P =$ `{python} LogitVsInvariant.p_seq_str`) and zero syntax errors. When executed via a database CLI, the statement completes and exits with status 0. Yet it induces a `{python} LogitVsInvariant.t_rewrite_s_val_str`-second global lock that cascades into connection pool exhaustion across upstream microservices. The model's internal confidence metric was entirely blind to the physical constraints of storage and lock contention.
 :::
 
 ### Context poisoning dynamics {#sec-vol3-intro-context-poisoning}
@@ -1222,13 +1477,77 @@ Within the enforced envelope, the agent's internal monologue and self-reported c
 
 the host runtime must treat this string as an unverified assertion. In accordance with Dijkstra's empirical verification principle, program execution and external testing can demonstrate the presence of operational defects, but an agent's self-affirmation can never prove their absence. If the task contract requires query latency under 10 milliseconds, the host supervisor must demand verifiable telemetry—such as an executed benchmark harness outputting p99 latency distributions across ten thousand iterations—before transitioning the task state from active execution to verification closure.
 
+```{python}
+#| label: lego-01-blast-radius-containment
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BLAST-RADIUS AND COST CONTAINMENT UNDER FAIL-PLAUSIBLE LOOPS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-blast-radius-containment
+# │ Goal: Bound financial exposure under fail-plausible retry loops via hard invariants.
+# │ Show: Mechanical escrow bounds spend to $4.98 at step 24 (94.7% reduction vs. $93.31 unbounded).
+# │ How: Accumulate per-step prompt/completion token pricing up to escrow cap C_max.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_usd, fmt_time
+
+class BlastRadiusContainment:
+    """Financial blast-radius containment under fail-plausible retry loops."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    k_context = 64_000
+    l_completion = 1_024
+    price_input_per_m = 3.00
+    price_output_per_m = 15.00
+    n_steps_unbounded = 450
+    t_max_steps = 25
+    c_max = 5.00
+    n_step_stop = 24
+    t_timeout = 4 * hour
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    cost_input_unbounded = n_steps_unbounded * k_context * (price_input_per_m / 1e6)
+    cost_output_unbounded = n_steps_unbounded * l_completion * (price_output_per_m / 1e6)
+    cost_total_unbounded = cost_input_unbounded + cost_output_unbounded
+    tokens_total_unbounded = n_steps_unbounded * (k_context + l_completion)
+    cost_per_step = (k_context * price_input_per_m / 1e6) + (l_completion * price_output_per_m / 1e6)
+    cost_cumulative_24 = n_step_stop * cost_per_step
+    cost_projected_25 = cost_cumulative_24 + cost_per_step
+    cost_bounded = cost_cumulative_24
+    reduction_pct = 1.0 - (cost_bounded / cost_total_unbounded)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(cost_input_unbounded - 86.40) < 0.01, "cost_input_unbounded")
+    check(abs(cost_output_unbounded - 6.912) < 0.01, "cost_output_unbounded")
+    check(abs(cost_total_unbounded - 93.312) < 0.01, "cost_total_unbounded")
+    check(tokens_total_unbounded == 29_260_800, "tokens_total_unbounded")
+    check(abs(cost_per_step - 0.20736) < 0.0001, "cost_per_step")
+    check(abs(cost_cumulative_24 - 4.97664) < 0.0001, "cost_cumulative_24")
+    check(abs(cost_projected_25 - 5.184) < 0.001, "cost_projected_25")
+    check(abs(reduction_pct - 0.9467) < 0.001, "reduction_pct")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    k_context_str = fmt_int(k_context)
+    l_completion_str = fmt_int(l_completion)
+    price_input_per_m_str = fmt_usd(price_input_per_m)
+    price_output_per_m_str = fmt_usd(price_output_per_m)
+    n_steps_unbounded_str = fmt_int(n_steps_unbounded)
+    t_max_steps_str = fmt_int(t_max_steps)
+    c_max_str = fmt_usd(c_max)
+    cost_bounded_str = fmt_usd(cost_bounded, precision=2)
+    reduction_pct_str = fmt_percent(reduction_pct, precision=1, style="prose")
+    n_step_stop_str = fmt_int(n_step_stop)
+    t_timeout_hr_str = fmt_time(t_timeout, unit=hour, precision=0)
+```
+
 ::: {#nbk-blast-radius-containment .callout-notebook title="Blast-radius and cost containment under fail-plausible loops"}
-A software engineering team deploys an autonomous debugging agent driven by a foundation model $\pi_\theta$. The agent operates with an average context size of $K = 64{,}000$ tokens per step. The API pricing structure costs $\$3.00$ per million prompt tokens and $\$15.00$ per million completion tokens. On each step, the model ingests the context and emits an average tool call completion of $L = 1{,}024$ tokens.
+A software engineering team deploys an autonomous debugging agent driven by a foundation model $\pi_\theta$. The agent operates with an average context size of $K =$ `{python} BlastRadiusContainment.k_context_str` tokens per step. The API pricing structure costs `{python} BlastRadiusContainment.price_input_per_m_str` per million prompt tokens and `{python} BlastRadiusContainment.price_output_per_m_str` per million completion tokens. On each step, the model ingests the context and emits an average tool call completion of $L =$ `{python} BlastRadiusContainment.l_completion_str` tokens.
 
 During an automated run, the agent encounters an unhandled runtime exception in an external test harness. Because the error trace is ambiguous, the model enters a fail-plausible retry loop: on each iteration, it re-reads the codebase, makes an identical trivial modification to a comment, and re-invokes the failing test harness.
 
 **Scenario A: Advisory Termination (Model-Governed)**
-The system prompt contains the advisory directive: *"If you cannot solve the bug after five attempts, halt and inform the user."* However, due to attention dilution over long contexts, the model loses track of its iteration count and runs unchecked until reaching an external platform timeout of 4 hours, executing $N = 450$ steps.
+The system prompt contains the advisory directive: *"If you cannot solve the bug after five attempts, halt and inform the user."* However, due to attention dilution over long contexts, the model loses track of its iteration count and runs unchecked until reaching an external platform timeout of `{python} BlastRadiusContainment.t_timeout_hr_str`, executing $N =$ `{python} BlastRadiusContainment.n_steps_unbounded_str` steps.
 
 Calculate the cost exposure and compute waste:
 $$\text{Input Cost} = 450 \times 64{,}000 \times \frac{\$3.00}{10^6} = 450 \times 0.064 \times \$3.00 = \$86.40$$
@@ -1239,13 +1558,13 @@ $$\text{Total Tokens Billed} = 450 \times (64{,}000 + 1{,}024) \approx 29.26 \ti
 **Scenario B: Mechanical Invariant Closure (Runtime-Governed)**
 The host supervisor enforces invariant closure via two hard runtime limits:
 
-1. Hard Step Invariant: $T_{\max} = 25$ steps.
-2. Hard Financial Escrow: Token bucket budget capped at $C_{\max} = \$5.00$.
+1. Hard Step Invariant: $T_{\max} =$ `{python} BlastRadiusContainment.t_max_steps_str` steps.
+2. Hard Financial Escrow: Token bucket budget capped at $C_{\max} =$ `{python} BlastRadiusContainment.c_max_str`.
 
 The runtime evaluates the cost accumulator after each invocation:
 $$\text{Step Cost} = \left(64{,}000 \times \frac{\$3.00}{10^6}\right) + \left(1{,}024 \times \frac{\$15.00}{10^6}\right) = \$0.192 + \$0.01536 = \$0.20736$$
 
-At step $t = 24$, the cumulative expenditure reaches:
+At step $t =$ `{python} BlastRadiusContainment.n_step_stop_str`, the cumulative expenditure reaches:
 $$C_{24} = 24 \times \$0.20736 = \$4.97664$$
 
 When the model emits action proposal $a_{25}$, the supervisor calculates projected cost:
@@ -1254,7 +1573,7 @@ $$C_{\text{projected}} = \$4.97664 + \$0.20736 = \$5.184 > C_{\max}$$
 The supervisor halts execution immediately:
 $$\mathcal{I}(a_{25}, \mathcal{S}_{\text{sys}}) = \bot \quad [\texttt{FAULT\_BUDGET\_EXHAUSTED}]$$
 
-The process is terminated, the workspace diff is reverted via the write-ahead log, and the total financial expenditure is strictly bounded to $\$4.98$. Mechanical invariant closure reduces financial blast radius by $94.7\%$ and limits execution steps from 450 to 24, regardless of the model's internal confusion.
+The process is terminated, the workspace diff is reverted via the write-ahead log, and the total financial expenditure is strictly bounded to `{python} BlastRadiusContainment.cost_bounded_str`. Mechanical invariant closure reduces financial blast radius by `{python} BlastRadiusContainment.reduction_pct_str` and limits execution steps from `{python} BlastRadiusContainment.n_steps_unbounded_str` to `{python} BlastRadiusContainment.n_step_stop_str`, regardless of the model's internal confusion.
 :::
 
 :::
@@ -1477,20 +1796,90 @@ $$S_{\text{trajectory}} = \frac{1}{(1 - f_{\text{model}}) + \frac{f_{\text{model
 
 When agentic tasks involve substantial compilation, testing, or environment resets, $T_{\text{tool}}$ and $T_{\text{runtime}}$ dominate the execution profile, driving $f_{\text{model}}$ down. In such systems, even an infinitely fast inference engine ($S_{\text{model}} \to \infty$) yields a trajectory speedup bounded by $1 / (1 - f_{\text{model}})$. Systems engineers cannot optimize agent performance solely by chasing tokens-per-second; they must profile and optimize the entire execution stack.
 
+```{python}
+#| label: lego-01-amdahl-accounting
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TRAJECTORY WALL-CLOCK AND AMDAHL LATENCY ACCOUNTING (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-amdahl-accounting
+# │ Goal: Dimension wall-clock bottlenecks and speedups under Amdahl's Law for agent execution.
+# │ Show: Model is 22.14% of runtime; 3.5x faster GPU yields 1.188x trajectory speedup vs 2.092x via toolchain caching.
+# │ How: Profile prefill, decode, tool execution, and host runtime across multi-turn turns.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time, fmt_multiple
+
+class AmdahlAccounting:
+    """Amdahl's law and wall-clock latency accounting in agent execution loops."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    h_turns = 8
+    s_prefill_tokens = 18_000
+    t_prefill = 140 * millisecond
+    t_decode = 4_950 * millisecond
+    t_tool = 16.2 * second
+    t_runtime = 1.4 * second
+    t_wait = 0.3 * second
+    s_model_speedup = 3.5
+    t_tool_optimized = 4.2 * second
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_model_step = (t_prefill + t_decode).to(second)
+    t_step = (t_model_step + t_tool + t_wait + t_runtime).to(second)
+    t_task = (h_turns * t_step).to(second)
+    t_model_total = (h_turns * t_model_step).to(second)
+    f_model = (t_model_total / t_task).magnitude
+    f_non_model = 1.0 - f_model
+    s_trajectory_model = 1.0 / (f_non_model + (f_model / s_model_speedup))
+    s_trajectory_max = 1.0 / f_non_model
+    t_step_new = (t_model_step + t_tool_optimized + t_wait + t_runtime).to(second)
+    t_task_new = (h_turns * t_step_new).to(second)
+    s_trajectory_tool = (t_task / t_task_new).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_model_step.magnitude - 5.09) < 0.01, "t_model_step")
+    check(abs(t_step.magnitude - 22.99) < 0.01, "t_step")
+    check(abs(t_task.magnitude - 183.92) < 0.05, "t_task")
+    check(abs(t_model_total.magnitude - 40.72) < 0.05, "t_model_total")
+    check(abs(f_model - 0.2214) < 0.001, "f_model")
+    check(abs(f_non_model - 0.7786) < 0.001, "f_non_model")
+    check(abs(s_trajectory_model - 1.188) < 0.005, "s_trajectory_model")
+    check(abs(s_trajectory_max - 1.284) < 0.005, "s_trajectory_max")
+    check(abs(t_step_new.magnitude - 10.99) < 0.01, "t_step_new")
+    check(abs(t_task_new.magnitude - 87.92) < 0.05, "t_task_new")
+    check(abs(s_trajectory_tool - 2.092) < 0.005, "s_trajectory_tool")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    h_turns_str = fmt_int(h_turns)
+    s_prefill_tokens_str = fmt_int(s_prefill_tokens)
+    t_prefill_ms_str = fmt_time(t_prefill, unit=millisecond, precision=0)
+    t_decode_ms_str = fmt_time(t_decode, unit=millisecond, precision=0)
+    t_tool_s_str = fmt_time(t_tool, unit=second, precision=1)
+    t_runtime_s_str = fmt_time(t_runtime, unit=second, precision=1)
+    t_wait_s_str = fmt_time(t_wait, unit=second, precision=1)
+    s_model_speedup_mult_str = fmt_multiple(s_model_speedup, precision=1)
+    t_tool_optimized_s_str = fmt_time(t_tool_optimized, unit=second, precision=1)
+    f_non_model_pct_str = fmt_percent(f_non_model, precision=2, style="prose")
+    s_trajectory_max_mult_str = fmt_multiple(s_trajectory_max, precision=3)
+    s_trajectory_tool_mult_str = fmt_multiple(s_trajectory_tool, precision=3)
+```
+
 ::: {#nbk-amdahl-accounting .callout-notebook title="Trajectory wall-clock and Amdahl latency accounting"}
 **Problem:**
-An autonomous coding agent executes a bug-repair task over a trajectory of $H = 8$ turns. The system runs an open-weights 70B parameter dense model served across an 8-GPU node (NVIDIA H100 SXM5, aggregate memory bandwidth $26.8\text{ TB/s}$, FP8 Tensor Cores).
+An autonomous coding agent executes a bug-repair task over a trajectory of $H =$ `{python} AmdahlAccounting.h_turns_str` turns. The system runs an open-weights 70B parameter dense model served across an 8-GPU node (NVIDIA H100 SXM5, aggregate memory bandwidth $26.8\text{ TB/s}$, FP8 Tensor Cores).
 
 Profile telemetry collects the following per-step averages:
 
-- Context prefill averages 18,000 tokens ($T_{\text{prefill}} = 140\text{ ms}$).
-- Decode generation averages 450 tokens at $11\text{ ms/token}$ ($T_{\text{decode}} = 4,950\text{ ms}$).
-- The local software environment compiles an altered C++ module and executes targeted regression tests, averaging $T_{\text{tool}} = 16.2\text{ s}$ per step.
-- Host runtime overhead (container snapshotting, diff extraction, sandbox verification) averages $T_{\text{runtime}} = 1.4\text{ s}$ per step.
-- External wait latency averages $T_{\text{wait}} = 0.3\text{ s}$ per step.
+- Context prefill averages `{python} AmdahlAccounting.s_prefill_tokens_str` tokens ($T_{\text{prefill}} =$ `{python} AmdahlAccounting.t_prefill_ms_str`).
+- Decode generation averages 450 tokens at $11\text{ ms/token}$ ($T_{\text{decode}} =$ `{python} AmdahlAccounting.t_decode_ms_str`).
+- The local software environment compiles an altered C++ module and executes targeted regression tests, averaging $T_{\text{tool}} =$ `{python} AmdahlAccounting.t_tool_s_str` per step.
+- Host runtime overhead (container snapshotting, diff extraction, sandbox verification) averages $T_{\text{runtime}} =$ `{python} AmdahlAccounting.t_runtime_s_str` per step.
+- External wait latency averages $T_{\text{wait}} =$ `{python} AmdahlAccounting.t_wait_s_str` per step.
 1. Compute the total task wall-clock duration $T_{\text{task}}$ and the model fraction $f_{\text{model}}$.
-2. An infrastructure team proposes replacing the GPU cluster with next-generation accelerators that speed up model inference by $3.5\times$ ($S_{\text{model}} = 3.5$). Compute the resulting trajectory speedup $S_{\text{trajectory}}$.
-3. Alternatively, a systems team proposes caching compilation artifacts (`ccache`) and running an incremental test-runner, reducing average tool execution time from $16.2\text{ s}$ to $4.2\text{ s}$ ($S_{\text{tool}} = 3.86$). Compute the trajectory speedup achieved by this software engineering optimization.
+2. An infrastructure team proposes replacing the GPU cluster with next-generation accelerators that speed up model inference by `{python} AmdahlAccounting.s_model_speedup_mult_str` ($S_{\text{model}} = 3.5$). Compute the resulting trajectory speedup $S_{\text{trajectory}}$.
+3. Alternatively, a systems team proposes caching compilation artifacts (`ccache`) and running an incremental test-runner, reducing average tool execution time from `{python} AmdahlAccounting.t_tool_s_str` to `{python} AmdahlAccounting.t_tool_optimized_s_str` ($S_{\text{tool}} = 3.86$). Compute the trajectory speedup achieved by this software engineering optimization.
 
 ---
 
@@ -1503,13 +1892,13 @@ $$T_{\text{model}}^{(k)} = T_{\text{prefill}} + T_{\text{decode}} = 0.140\text{ 
 Calculate the total per-step latency:
 $$T_{\text{step}} = T_{\text{model}}^{(k)} + T_{\text{tool}}^{(k)} + T_{\text{wait}}^{(k)} + T_{\text{runtime}}^{(k)} = 5.09\text{ s} + 16.20\text{ s} + 0.30\text{ s} + 1.40\text{ s} = 22.99\text{ s}$$
 
-Across the full $H = 8$ turn trajectory:
+Across the full $H =$ `{python} AmdahlAccounting.h_turns_str` turn trajectory:
 $$T_{\text{task}} = 8 \times 22.99\text{ s} = 183.92\text{ s} \quad (\approx 3\text{ minutes, } 4\text{ seconds})$$
 
 The total model inference time across the trajectory is $8 \times 5.09\text{ s} = 40.72\text{ s}$. The model fraction is:
 $$f_{\text{model}} = \frac{40.72\text{ s}}{183.92\text{ s}} \approx 0.2214 \quad (22.14\%)$$
 
-Non-model operations account for $1 - f_{\text{model}} = 77.86\%$ of total execution time.
+Non-model operations account for $1 - f_{\text{model}} =$ `{python} AmdahlAccounting.f_non_model_pct_str` of total execution time.
 
 **Step 2: Inference Hardware Acceleration**
 Applying Amdahl's Law for $S_{\text{model}} = 3.5$:
@@ -1518,15 +1907,17 @@ $$S_{\text{trajectory}} = \frac{1}{(1 - 0.2214) + \frac{0.2214}{3.5}} = \frac{1}
 Accelerating the neural core by $350\%$ yields only an $18.8\%$ reduction in total wall-clock time ($T_{\text{task}}$ drops from $183.92\text{ s}$ to $154.83\text{ s}$). Even an infinitely fast model ($S_{\text{model}} \to \infty$) achieves a maximum speedup of:
 $$S_{\text{trajectory}}^{\max} = \frac{1}{0.7786} \approx 1.284\times$$
 
+Even an infinitely fast model achieves `{python} AmdahlAccounting.s_trajectory_max_mult_str` maximum speedup.
+
 **Step 3: Toolchain and Systems Optimization**
-Reducing tool execution time to $4.2\text{ s}$ leaves model, wait, and runtime latencies unchanged:
+Reducing tool execution time to `{python} AmdahlAccounting.t_tool_optimized_s_str` leaves model, wait, and runtime latencies unchanged:
 $$T_{\text{step, new}} = 5.09\text{ s} + 4.20\text{ s} + 0.30\text{ s} + 1.40\text{ s} = 10.99\text{ s}$$
 $$T_{\text{task, new}} = 8 \times 10.99\text{ s} = 87.92\text{ s}$$
 
 The resulting trajectory speedup is:
 $$S_{\text{trajectory}} = \frac{183.92\text{ s}}{87.92\text{ s}} \approx 2.092\times$$
 
-Optimizing the host toolchain delivers a $2.09\times$ speedup ($109\%$ throughput improvement), outperforming the GPU hardware upgrade by more than a factor of five while requiring zero additional accelerator capital expenditure.
+Optimizing the host toolchain delivers a `{python} AmdahlAccounting.s_trajectory_tool_mult_str` speedup ($109\%$ throughput improvement), outperforming the GPU hardware upgrade by more than a factor of five while requiring zero additional accelerator capital expenditure.
 :::
 
 :::
@@ -1827,15 +2218,70 @@ The accelerator cannot act as an autonomous host. Modern GPUs and TPUs lack gene
 
 This architectural boundary imposes a non-trivial latency and memory tax. During token generation, the host runtime transmits token IDs to the accelerator, where the model performs iterative autoregressive decode passes. Each generated token requires reading the model weights and the entire accumulated KV cache from accelerator High-Bandwidth Memory (HBM) to on-chip registers. Once a tool proposal delimiter is sampled, the candidate string must be copied back over the bus to host DRAM, where the runtime supervisor parses the payload, validates security policies, and dispatches the execution into a sandboxed environment.
 
-::: {#nbk-accelerator-host-boundary .callout-notebook title="Latency and memory across the accelerator-host boundary"}
-Consider an enterprise coding agent deployed on a host server equipped with host CPUs, 512 GB of DRAM, and an 80 GB HBM3 GPU serving a 70B parameter model with Grouped-Query Attention ($L=80, H_{KV}=8, d_{\text{head}}=128$, 16-bit precision).
+```{python}
+#| label: lego-01-accelerator-host-boundary
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LATENCY AND MEMORY ACROSS THE ACCELERATOR-HOST BOUNDARY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-accelerator-host-boundary
+# │ Goal: Profile memory footprint and execution phase latencies across the accelerator-host boundary.
+# │ Show: 34,816-token session pins 10.62 GiB (13.2% of 80 GB GPU); decode is 97.6% of step duration.
+# │ How: Contrast HBM KV cache reservation against host mediation and sandbox execution latencies.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time, fmt_memory_capacity
 
-At step $t = 30$ of a trajectory, the agent has accumulated an active context length of $34{,}816\text{ tokens}$ (initial system instructions, previous tool invocations, and test traces). The model generates a 128-token tool command, which the host supervisor validates, writes to a Write-Ahead Log (WAL), and executes inside an isolated container test suite.
+class AcceleratorHostBoundary:
+    """Latency and memory distribution across the accelerator-host boundary."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    dram_capacity = 512 * GB
+    gpu_hbm = 80 * GB
+    t_context = 34_816
+    m_token = 320 * KiB
+    t_decode = 1920.0 * millisecond
+    t_tool = 45.0 * millisecond
+    t_runtime = 1.4 * millisecond
+    t_bus = 0.01 * millisecond
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    m_kv_gb = 11.14 * GB
+    m_kv_gib = 10.62 * GiB
+    pct_pinned = 0.132
+    t_total_turn = t_decode + t_tool + t_runtime + t_bus
+    pct_decode = (t_decode / t_total_turn).magnitude
+    pct_tool = (t_tool / t_total_turn).magnitude
+    pct_runtime = (t_runtime / t_total_turn).magnitude
+    t_mediation_total = (t_tool + t_runtime).to(millisecond)
+    pct_mediation = (t_mediation_total / t_total_turn).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_total_turn.magnitude - 1966.41) < 0.5, "t_total_turn")
+    check(abs(pct_decode - 0.976) < 0.005, "pct_decode")
+    check(abs(pct_tool - 0.023) < 0.005, "pct_tool")
+    check(abs(t_mediation_total.magnitude - 46.4) < 0.1, "t_mediation_total")
+    check(abs(pct_mediation - 0.024) < 0.005, "pct_mediation")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    dram_capacity_gb_str = fmt_memory_capacity(dram_capacity, unit=GB, precision=0)
+    gpu_hbm_gb_str = fmt_memory_capacity(gpu_hbm, unit=GB, precision=0)
+    t_context_str = fmt_int(t_context)
+    pct_pinned_pct_str = fmt_percent(pct_pinned, precision=1, style="prose")
+    t_mediation_total_ms_str = fmt_time(t_mediation_total, unit=millisecond, precision=1)
+    pct_mediation_pct_str = fmt_percent(pct_mediation, precision=1, style="prose")
+```
+
+::: {#nbk-accelerator-host-boundary .callout-notebook title="Latency and memory across the accelerator-host boundary"}
+Consider an enterprise coding agent deployed on a host server equipped with host CPUs, `{python} AcceleratorHostBoundary.dram_capacity_gb_str` of DRAM, and an `{python} AcceleratorHostBoundary.gpu_hbm_gb_str` HBM3 GPU serving a 70B parameter model with Grouped-Query Attention ($L=80, H_{KV}=8, d_{\text{head}}=128$, 16-bit precision).
+
+At step $t = 30$ of a trajectory, the agent has accumulated an active context length of `{python} AcceleratorHostBoundary.t_context_str` tokens (initial system instructions, previous tool invocations, and test traces). The model generates a 128-token tool command, which the host supervisor validates, writes to a Write-Ahead Log (WAL), and executes inside an isolated container test suite.
 
 **1. Memory Footprint:**
 Using the $320\text{ KiB/token}$ Key-Value cache footprint established in \ref{nbk-01-tool-wait-tax}, the physical accelerator memory pinned by this single trajectory's attention history is:
 $$M_{\text{KV}} = 34{,}816\text{ tokens} \times 320\text{ KiB/token} \approx 11.14\text{ GB } (10.62\text{ GiB})$$
-This single session pins over $13.2\%$ of the GPU's entire 80 GB device memory solely for historical activations, constraining concurrent serving capacity.
+This single session pins over `{python} AcceleratorHostBoundary.pct_pinned_pct_str` of the GPU's entire `{python} AcceleratorHostBoundary.gpu_hbm_gb_str` device memory solely for historical activations, constraining concurrent serving capacity.
 
 **2. Latency Breakdown of an Execution Turn:**
 Where does time go during a single mediated tool step? The breakdown in @tbl-vol3-turn-latency-breakdown quantifies each phase:
@@ -1849,7 +2295,7 @@ Where does time go during a single mediated tool step? The breakdown in @tbl-vol
 | **Total Step Latency**          | **Whole Machine**              | **$1{,}966.4\text{ ms}$** | **$100.0\%$** | **Dominated by neural token generation**                         |
 : **Turn Step Latency Breakdown**: Latency contribution across model autoregressive decode, sandboxed tool execution, host runtime mediation, and bus transfer. {#tbl-vol3-turn-latency-breakdown}
 
-**Systems insight:** Interconnect bus transfer latency is negligible. Host runtime supervision and security verification ($46.4\text{ ms}$) add less than $2.4\%$ overhead to the turn. The dominant physical bottleneck of the agentic execution loop is the computational and memory bandwidth cost of generating tokens over an expanding context working set.
+**Systems insight:** Interconnect bus transfer latency is negligible. Host runtime supervision and security verification (`{python} AcceleratorHostBoundary.t_mediation_total_ms_str`) add less than `{python} AcceleratorHostBoundary.pct_mediation_pct_str` overhead to the turn. The dominant physical bottleneck of the agentic execution loop is the computational and memory bandwidth cost of generating tokens over an expanding context working set.
 :::
 
 Understanding this quantitative boundary clarifies the central design trade-off of agentic machine learning systems. Accelerators are exceptionally efficient at dense matrix transformations, but every token emitted carries a tangible memory allocation and latency cost. The host runtime must therefore act as an aggressive memory manager and traffic controller: pruning obsolete observations from context memory, caching deterministic prefix blocks, and isolating unprivileged tool executions so that expensive neural generation is directed solely toward high-value task progression.

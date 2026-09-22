@@ -931,13 +931,13 @@ class DevTestCommand(BaseCommand):
             else:
                 console.print(f"  [dim]Module {module_num} ({module_name})...[/dim]")
 
-            # Step A: tito module start --no-jupyter (creates notebook from src/)
+            # Step A: tito module start --exercise --no-jupyter (creates exercise notebook from src/)
             if ci_mode:
-                print(f"  │  → Step 1: tito module start {module_num} --no-jupyter", end=" ", flush=True)
+                print(f"  │  → Step 1: tito module start {module_num} --exercise --no-jupyter", end=" ", flush=True)
             try:
                 result = subprocess.run(
                     [sys.executable, str(project_root / "bin" / "tito"),
-                     "module", "start", module_num, "--no-jupyter"],
+                     "module", "start", module_num, "--exercise", "--no-jupyter"],
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
