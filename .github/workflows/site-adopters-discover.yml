@@ -1,0 +1,69 @@
+name: '🌐 Landing Site · 🔎 Course Discovery'
+
+# =============================================================================
+# Weekly search for courses that use the book → one review issue
+# =============================================================================
+#
+# Searches GitHub for repositories that link, name, or fork the book, keeps
+# those with real course evidence (a course code of their own, or an
+# academic owner), and drops anything already in site/community/adopters.yml
+# or reported in an earlier "[Course discovery]" issue. If anything is left,
+# it opens one issue listing the candidates for a maintainer to review.
+#
+# Nothing here changes the site: real courses are added through the
+# "Add your course" form (which opens a PR) or by editing adopters.yml.
+#
+# Code search across public repositories needs a personal or fine-grained
+# token. Set a DISCOVERY_TOKEN secret (public, read-only access is enough);
+# without it the run uses GITHUB_TOKEN, skips code search, and says so in
+# the issue.
+# =============================================================================
+
+on:
+  schedule:
+    - cron: '23 7 * * 1'   # Mondays, 07:23 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: adopters-discover
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    name: '🔎 Find candidate courses'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ vars.PYTHON_VERSION || '3.12' }}
+
+      - name: 📦 Install dependencies
+        run: pip install pyyaml
+
+      - name: 🔎 Search
+        id: search
+        env:
+          GITHUB_TOKEN: ${{ secrets.DISCOVERY_TOKEN || secrets.GITHUB_TOKEN }}
+        run: python3 site/scripts/adopters_discover.py --out discovery.md
+
+      - name: 📝 Open the review issue
+        if: steps.search.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COUNT: ${{ steps.search.outputs.count }}
+        run: |
+          gh issue create \
+            --title "[Course discovery] $COUNT possible course(s), week of $(date -u +%Y-%m-%d)" \
+            --body-file discovery.md \
+            --label "area: website"
