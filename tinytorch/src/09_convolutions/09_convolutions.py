@@ -2985,7 +2985,7 @@ Congratulations! You have built the complete spatial computing foundation of Tin
 ### Ready for Next Steps
 All spatial primitives export to `tinytorch.core.spatial` and integrate directly into TinyTorch's autograd engine. Images are now a first-class input to TinyTorch, alongside the plain vectors you started with in Module 01.
 
-Export with: `tito dev export 09`
+Export with: `tito module complete 09`
 
 **Next**: Module 10 will turn raw text into token IDs with `BPETokenizer`, opening the second input modality that Modules 11 through 13 build a transformer on!
 """
