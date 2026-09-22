@@ -48,6 +48,9 @@ By the end of this module, you will:
 
 ## 📦 Where This Code Lives in the Final Package
 
+**Learning Side:** You work in `modules/13_transformers/transformers.ipynb`  
+**Building Side:** Code exports to `tinytorch.core.transformers`
+
 | Artifact | Path / Location | Export Target | Primary Symbols |
 |:---|:---|:---|:---|
 | **Notebook** | `modules/13_transformers/transformers.ipynb` | Interactive Learning | Exploratory code, assertions, benchmarks |

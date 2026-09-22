@@ -35,7 +35,12 @@ RELEASE_TIERS = ("student", "challenge", "instructor")
 VALID_SOLUTION_ROLES = {"core", "scaffold", "challenge", "instructor"}
 
 # nbgrader's ClearSolutions defaults: code_stub["python"] and text_stub.
-CODE_STUB = "# YOUR CODE HERE\nraise NotImplementedError()"
+CODE_STUB = (
+    "# YOUR CODE HERE\n"
+    "# BEGIN\n"
+    "raise NotImplementedError() #delete this line\n"
+    "# END"
+)
 TEXT_STUB = "YOUR ANSWER HERE"
 
 
@@ -88,6 +93,32 @@ def strip_exercise_scaffold(source: str) -> str:
     return DOCSTRING_RE.sub(trim, source)
 
 
+def _strip_preceding_docstring(out: List[str]) -> None:
+    """Find the docstring immediately preceding the solution region in ``out`` and strip its scaffold tail."""
+    idx = len(out) - 1
+    while idx >= 0 and not out[idx].strip():
+        idx -= 1
+    if idx < 0:
+        return
+    end_line = out[idx]
+    quote_match = re.search(r"(\"\"\"|''')\s*$", end_line)
+    if not quote_match:
+        return
+    q = quote_match.group(1)
+    if end_line.count(q) >= 2 and len(end_line.strip()) > len(q):
+        doc_text = out[idx]
+        stripped = strip_exercise_scaffold(doc_text)
+        out[idx:idx + 1] = stripped.split("\n")
+    else:
+        start_idx = idx - 1
+        while start_idx >= 0 and q not in out[start_idx]:
+            start_idx -= 1
+        if start_idx >= 0:
+            doc_text = "\n".join(out[start_idx:idx + 1])
+            stripped = strip_exercise_scaffold(doc_text)
+            out[start_idx:idx + 1] = stripped.split("\n")
+
+
 def apply_release_tier(source: str, release_tier: str) -> Tuple[str, List[str]]:
     """Apply the release-role policy to one cell's source.
 
@@ -119,6 +150,8 @@ def apply_release_tier(source: str, release_tier: str) -> Tuple[str, List[str]]:
                 role = "core"
             action = solution_role_action(role, release_tier)
             in_solution = True
+            if release_tier != "instructor" and action == "keep":
+                _strip_preceding_docstring(out)
             if action == "strip":
                 saw_strip = True
                 out.append(line)
