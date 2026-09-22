@@ -553,10 +553,10 @@ capability_svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1150 70
 </svg>'''
 
 # Paths
-occ_path = str(Path(__file__).resolve().parent.parent) + "/books/vol3/15_multi_agent/images/svg/fig-vol3-occ-worktrees.svg"
-ensemble_path1 = str(Path(__file__).resolve().parent.parent) + "/books/vol3/15_multi_agent/images/svg/vol3/ch15/fig-vol3-correlated-ensemble-failure.svg"
-ensemble_path2 = str(Path(__file__).resolve().parent.parent) + "/books/vol3/15_multi_agent/images/svg/fig-vol3-correlated-ensemble-failure.svg"
-capability_path = str(Path(__file__).resolve().parent.parent) + "/books/vol3/15_multi_agent/images/svg/capability-attenuation-tree.svg"
+occ_path = str(Path(__file__).resolve().parent.parent) + "/books/vol3/16_multi_agent/images/svg/fig-vol3-occ-worktrees.svg"
+ensemble_path1 = str(Path(__file__).resolve().parent.parent) + "/books/vol3/16_multi_agent/images/svg/vol3/ch15/fig-vol3-correlated-ensemble-failure.svg"
+ensemble_path2 = str(Path(__file__).resolve().parent.parent) + "/books/vol3/16_multi_agent/images/svg/fig-vol3-correlated-ensemble-failure.svg"
+capability_path = str(Path(__file__).resolve().parent.parent) + "/books/vol3/16_multi_agent/images/svg/capability-attenuation-tree.svg"
 
 # Write OCC SVG
 with open(occ_path, "w", encoding="utf-8") as f:

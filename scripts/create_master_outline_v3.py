@@ -346,7 +346,7 @@ Every chapter transition in this book is governed by an explicit handoff:
 :::
 
 #### Section 2.1: The Model Invocation Boundary [stage-setter]
-- **Heading & Anchor:** `## The Model Invocation Boundary {#sec-vol3-processor-role}`
+- **Heading & Anchor:** `## The Model Invocation Boundary {#sec-vol3-foundation-model-role}`
 - **The Single Key Point:** The foundation model is an unprivileged inference engine that maps staged token sequences to candidate probability distributions; the host agent runtime is the authoritative supervisor that owns context staging, execution limits, and action verification.
 - **Pedagogical Arc:**
   1. *The Systems Contrast:* Classical deterministic CPU (fixed ISA, registers, MMU hardware traps on segfaults) vs. Generative Model (parameterized function approximator, weights $\Theta$, no registers, no hardware traps).
@@ -363,7 +363,7 @@ Every chapter transition in this book is governed by an explicit handoff:
 - **Causal Bridge to 2.2:** Before data can cross into this inference engine, how must it be formatted, discretized, and staged?
 
 #### Section 2.2: Discrete Tokenization and Sequence Representation [core]
-- **Heading & Anchor:** `## Discrete Tokenization and Sequence Representation {#sec-vol3-processor-tokenization}`
+- **Heading & Anchor:** `## Discrete Tokenization and Sequence Representation {#sec-vol3-foundation-model-tokenization}`
 - **The Single Key Point:** A tokenizer is a statistical byte serializer between strings and integer indices; its subwords clash with programming language ASTs and introduce a significant serialization tax on structured tool calls.
 - **Pedagogical Arc:**
   1. *The Lexing Boundary:* Why words fail on open-vocabulary code ($OOV$), why characters cause an unacceptable $16\times$ explosion in attention compute ($O(S^2)$), and how BPE subwords achieve the systems sweet spot.
@@ -379,7 +379,7 @@ Every chapter transition in this book is governed by an explicit handoff:
 - **Causal Bridge to 2.3:** Once staged as an integer token array in GPU memory, how does the model compute its next token?
 
 #### Section 2.3: Autoregressive Generation and the Serving Loop [core]
-- **Heading & Anchor:** `## Autoregressive Generation and the Serving Loop {#sec-vol3-processor-autoregressive}`
+- **Heading & Anchor:** `## Autoregressive Generation and the Serving Loop {#sec-vol3-foundation-model-autoregressive}`
 - **The Single Key Point:** Generating a sequence requires an iterative serving loop that repeatedly evaluates the model forward pass and samples a token, creating an irreducibly serial causal dependency along one output path.
 - **Pedagogical Arc:**
   1. *Autoregressive Factorization:* Decomposing sequence probability $P(y_{1:K}\mid x) = \prod_{t=1}^K P(y_t\mid x, y_{<t})$.
@@ -394,7 +394,7 @@ Every chapter transition in this book is governed by an explicit handoff:
 - **Causal Bridge to 2.4:** What are the physical hardware constraints that govern the speed and cost of this autoregressive execution loop?
 
 #### Section 2.4: Prefill, Decode, and Accelerator Hardware Physics [core]
-- **Heading & Anchor:** `## Prefill, Decode, and Accelerator Hardware Physics {#sec-vol3-processor-cost}`
+- **Heading & Anchor:** `## Prefill, Decode, and Accelerator Hardware Physics {#sec-vol3-foundation-model-cost}`
 - **The Single Key Point:** Model invocation latency is split between compute-bound prompt prefill and memory-bandwidth-bound token decode; single-batch agent trajectories are physically bounded by the HBM parameter shuttle.
 - **Pedagogical Arc:**
   1. *The Physical Mental Model:* The Sports Car Engine vs. Narrow Straw analogy. Accelerators possess massive compute capacity (hundreds of TFLOPs), but finite memory bandwidth (a few TB/s from HBM).
@@ -414,7 +414,7 @@ Every chapter transition in this book is governed by an explicit handoff:
 - **Causal Bridge to 2.5:** Knowing that every decode token is physically expensive and memory-bound, how can the host runtime guarantee that emitted tokens adhere strictly to valid syntax without wasting budget?
 
 #### Section 2.5: Constraining the Output: Grammar-Guided Decoding [core]
-- **Heading & Anchor:** `## Constraining the Output: Grammar-Guided Decoding {#sec-vol3-processor-grammar-constrained}`
+- **Heading & Anchor:** `## Constraining the Output: Grammar-Guided Decoding {#sec-vol3-foundation-model-grammar-constrained}`
 - **The Single Key Point:** Grammar-constrained decoding enforces structural syntax via decode-time logit masking on the accelerator, guaranteeing valid format while leaving semantic truth completely unverified.
 - **Pedagogical Arc:**
   1. *The Need for Deterministic Structure:* Why autonomous agents fail when emitting free-form markdown for tool calls; JSON Schema and typed function calling standards.
@@ -428,7 +428,7 @@ Every chapter transition in this book is governed by an explicit handoff:
 - **Causal Bridge to 2.6:** How does the host system formalize its calls to the model to enforce limits, handle streaming, and detect failures?
 
 #### Section 2.6: The Invocation Contract and Status Envelopes [core]
-- **Heading & Anchor:** `## The Invocation Contract and Status Envelopes {#sec-vol3-processor-contract}`
+- **Heading & Anchor:** `## The Invocation Contract and Status Envelopes {#sec-vol3-foundation-model-contract}`
 - **The Single Key Point:** Robust agent systems govern model calls through a typed RPC contract with explicit token and latency ceilings, streaming early cancellation, and a normalized status envelope.
 - **Pedagogical Arc:**
   1. *The Typed Request Specification:* The RPC parameters: prompt tokens $\mathbf{x}$, model identifier, sampling parameters ($\tau, p$), generation ceiling $K_{\max}$, deadline $T_{\max}$, stop delimiters, and schema grammar $\mathcal{G}$.
@@ -445,7 +445,7 @@ Every chapter transition in this book is governed by an explicit handoff:
 - **Causal Bridge to 2.7:** When an invocation returns `COMPLETED` with structurally valid code, what does that establish about the code's real-world correctness?
 
 #### Section 2.7: Verification Boundaries: Likelihood Versus Operational Truth [core]
-- **Heading & Anchor:** `## Verification Boundaries: Likelihood Versus Operational Truth {#sec-vol3-processor-continuations}`
+- **Heading & Anchor:** `## Verification Boundaries: Likelihood Versus Operational Truth {#sec-vol3-foundation-model-continuations}`
 - **The Single Key Point:** Sequence likelihood does not establish operational correctness; model outputs are unverified hypotheses requiring host validation before mutating state.
 - **Pedagogical Arc:**
   1. *Likelihood vs. Correctness:* High probability reflects statistical typicality in training data, not factual truth or execution safety.
@@ -461,7 +461,7 @@ Every chapter transition in this book is governed by an explicit handoff:
 - **Causal Bridge to 2.8:** Given these verification requirements and execution costs, how should systems engineers evaluate competing invocation interfaces?
 
 #### Section 2.8: Systems Benchmarking of Invocation Interfaces [synthesis]
-- **Heading & Anchor:** `## Systems Benchmarking of Invocation Interfaces {#sec-vol3-processor-interface-design}`
+- **Heading & Anchor:** `## Systems Benchmarking of Invocation Interfaces {#sec-vol3-foundation-model-interface-design}`
 - **The Single Key Point:** Invocation interfaces must be evaluated by downstream verified task success under equal resource budgets, not by superficial fluency or parsing speed.
 - **Pedagogical Arc:**
   1. *Controlled Systems Benchmarking:* Holding model weights, repository fixtures, and compute budgets constant while varying interface contracts.
@@ -480,7 +480,7 @@ Every chapter transition in this book is governed by an explicit handoff:
   - 🛑 **DO NOT** describe containerized sandbox implementations or microVMs (Deferred to Chapter 08).
 
 #### Fallacies and Pitfalls [fallacies]
-`## Fallacies and Pitfalls {#sec-vol3-processor-fallacies}`
+`## Fallacies and Pitfalls {#sec-vol3-foundation-model-fallacies}`
 - **Fallacy 1:** *One model response is one forward pass.* (Refutation: Prefill evaluates prompt tokens in parallel; decode requires $K$ sequential forward passes, each serializing across HBM memory bus transfers).
 - **Pitfall 1:** *Treating a completed invocation as a completed task.* (Refutation: An HTTP `200 OK` or `Completed` status verifies only that the decode loop terminated normally, conveying zero guarantee of correctness or regression test passage).
 - **Fallacy 2:** *Valid JSON means a safe and correct tool call.* (Refutation: Grammar constraints enforce character syntax at the logit surface; they do not verify file existence, logical correctness, or security permissions).
@@ -488,7 +488,7 @@ Every chapter transition in this book is governed by an explicit handoff:
 - **Fallacy 3:** *Models have internal hardware traps.* (Refutation: A model forward pass is a continuous matrix multiplication pipeline; syntax errors and hallucinations are statistical outputs, not hardware interrupts or MMU faults).
 
 #### Summary & Chapter Connection [summary]
-`## Summary {#sec-vol3-processor-summary}`
+`## Summary {#sec-vol3-foundation-model-summary}`
 - **Authoritative Synthesis:** One model invocation is a bounded learned computation mapping staged token inputs to candidate proposals via serialized autoregressive generation. The neural core possesses zero ambient authority. The agent runtime manages context, limits, status envelopes, and external verification.
 - `::: {.callout-takeaways title="Core Systems Principles of the Model Invocation Boundary"}`
   1. *Tokens are the discrete integer currency and vocabulary gather indices of the foundation model.*
