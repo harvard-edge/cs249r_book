@@ -173,11 +173,15 @@ def test_l020_warns_on_domain_unit_in_fmt_qty():
             "books/vol1/foo/foo.qmd",
             """```{python}
 bw_str = fmt_qty(bw, GB / second, precision=0)
+f_str = fmt_qty(f, newton, precision=1)
+m_str = fmt_qty(m, kilogram, precision=0)
+w_str = fmt_qty(w, radian / second, precision=1)
 ```""",
         )
         issues = lint_file(qmd, root)
         assert "L020" in _rules(issues)
-        assert any(i.severity == "warning" for i in issues if i.rule == "L020")
+        assert len([i for i in issues if i.rule == "L020"]) == 4
+        assert all(i.severity == "warning" for i in issues if i.rule == "L020")
 
 
 def test_full_book_lint_with_baseline():

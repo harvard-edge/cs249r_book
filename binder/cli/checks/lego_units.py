@@ -45,7 +45,9 @@ DOMAIN_FMT_ASSIGN = re.compile(
     r"^\s*(?P<name>\w+_str)\s*=\s*(?:fmt_power|fmt_energy|fmt_bandwidth|fmt_memory|fmt_emissions|"
     r"fmt_latency|fmt_area|fmt_heat_flux|fmt_flop_rate|fmt_flops|fmt_ops_rate|fmt_arithmetic_intensity|"
     r"fmt_energy_per_byte|fmt_energy_per_bit|fmt_energy_per_flop|fmt_energy_per_op|"
-    r"fmt_compute_efficiency|fmt_length|fmt_carbon_intensity)\s*\(",
+    r"fmt_compute_efficiency|fmt_length|fmt_carbon_intensity|"
+    r"fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|"
+    r"fmt_velocity|fmt_acceleration|fmt_voltage|fmt_current|fmt_resistance|fmt_torque|fmt_torque_rate)\s*\(",
     re.M,
 )
 MASG_TO_CLOSED = re.compile(
@@ -59,7 +61,11 @@ FMT_QTY_DOMAIN_UNIT = re.compile(
     r"\bfmt_qty\s*\([^;\n]+?,\s*(?:unit\s*=\s*)?(?:"
     r"[TGKM]B\s*/\s*(?:second|s)|[TGKM]bps|[PEGT]FLOPs?\s*/\s*(?:second|s)|flops_per_second|"
     r"(?<![/\w])(?:W|kW|MW|GW|watt|kilowatt|megawatt)(?!\s*/\s*s)(?![a-zA-Z0-9_])|"
-    r"(?<![/\w])(?:GB|MB|KB|TB|gigabyte|terabyte|megabyte|kilobyte)(?!\s*/\s*s)(?![a-zA-Z0-9_]))\b"
+    r"(?<![/\w])(?:GB|MB|KB|TB|gigabyte|terabyte|megabyte|kilobyte)(?!\s*/\s*s)(?![a-zA-Z0-9_])|"
+    r"(?<![/\w])(?:newton|kilonewton)(?!\s*/)(?![a-zA-Z0-9_])|"
+    r"newton\s*/\s*(?:second|millisecond|s|ms)|"
+    r"(?<![/\w])(?:kilogram|gram|metric_ton)(?!\s*/)(?![a-zA-Z0-9_])|"
+    r"(?:radian|deg)\s*/\s*(?:second|s)|(?<![/\w])rpm(?![a-zA-Z0-9_]))\b"
 )
 RAW_FMT_SUFFIX = re.compile(
     r"fmt\s*\([^)]*suffix\s*=\s*['\"]\s*(?:GB|TB|MB|kWh|MWh|TFLOP|W|MW|ms|s)\b"
@@ -172,7 +178,7 @@ def lint_file(path: Path, root: Path) -> list[LintIssue]:
                 if not re.search(r"/\s*(?:[TGKM]B|byte)", line.split("fmt_qty")[-1]):
                     issues.append(LintIssue(
                         "L020", rel, lineno,
-                        "Prefer domain formatter (fmt_bandwidth, fmt_memory, fmt_power, fmt_flop_rate) over fmt_qty.",
+                        "Prefer domain formatter (fmt_bandwidth, fmt_memory, fmt_power, fmt_flop_rate, fmt_force, fmt_force_rate, fmt_mass, fmt_angular_velocity) over fmt_qty.",
                     ))
 
         for match in L014_CLOSED_FMT.finditer(block):
