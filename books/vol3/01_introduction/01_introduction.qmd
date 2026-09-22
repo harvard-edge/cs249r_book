@@ -346,23 +346,20 @@ The system incurs $\$0.40$ of direct compute expenditure per turn while performi
 
 This quantitative reality forces Software 3.0 runtimes to abandon synchronous execution models. An agent runtime cannot treat tool invocations as standard blocking function calls. Instead, the runtime architecture must decouple inference from execution across three distinct systems mechanisms. First, through *asynchronous context eviction*, when a long-running tool command is dispatched, the runtime serializes the logical token state, releases the physical memory allocated to the session's attention caches inside the inference engine, and marks the accelerator capacity as reclaimable for concurrent serving workloads. Second, through *prefix caching and re-hydration*, when the tool execution completes and returns an observation, the runtime reschedules the session, leveraging preserved prompt prefixes to reconstruct intermediate attention states without re-evaluating earlier sequence tokens from scratch. Third, through *speculative local verification*, fast, deterministic checks such as static linters and abstract syntax tree validators run directly on the host controller processor to intercept syntactic failures in milliseconds, avoiding the latency and memory overhead of dispatching a full containerized test execution.
 
-Software 3.0 is therefore defined not by the elimination of traditional systems engineering, but by its intensification. The presence of an unprivileged, stochastic policy at the core of the execution loop mandates rigorous, deterministic supervision. The runtime supervisor must arbitrate access to hardware accelerators, virtualize memory across volatile HBM and persistent host storage, enforce security boundaries around untrusted tool outputs, and verify system invariants before declaring a task complete.
+The fundamental contrast in execution flow between traditional inference and an autonomous agent loop is visualized in @fig-vol3-agent-execution-timeline. In traditional model serving (top), inference runs as an uninterrupted burst of continuous token generation where accelerator tensor cores achieve near-100 percent utilization. In contrast, an autonomous agent trajectory (bottom) is severely fragmented: the agent spends 420 seconds (82.4 percent of makespan) blocked on non-neural host operations—Docker workspace initialization, ripgrep workspace indexing, and pytest suite compilation. In a synchronous runtime, these tool waits keep accelerator memory pinned while the server chassis idles.
 
-The empirical manifestation of this physical boundary is mapped in @fig-vol3-agent-systems-tax. Profiling an autonomous coding agent executing a benchmark task on SWE-bench Verified reveals the striking magnitude of the **Agent Systems Tax**: across an 8.5-minute repair trajectory, non-neural host operations—isolated Docker workspace setup (8.1 kJ, 6.9 percent), file indexing and ripgrep queries (16.8 kJ, 14.4 percent), and pytest suite compilation and verification (56.1 kJ, 48.0 percent)—account for fully **69.3 percent** of total AC mains electrical energy consumption (81.0 kJ) and **82.4 percent** of wall-clock makespan. Pure neural token generation on accelerator tensor cores consumes only **30.7 percent** of energy (35.9 kJ) and **17.6 percent** of runtime. Furthermore, during the 420 seconds spent in host execution, synchronous tool waiting strands up to 51.2 GB of GPU HBM while the server chassis draws continuous idle baseline power. This empirical profile mathematically confirms the central thesis: autonomous agent performance, reliability, and operating costs are dominated by host operating system orchestration, virtualization sandboxes, and verification harnesses, rather than neural model scaling alone.
-
-::: {#fig-vol3-agent-systems-tax fig-env="figure" fig-pos="htb" fig-cap="**The Agent Systems Tax**: Measured execution and AC mains electrical energy profile of an autonomous code repair trajectory on SWE-bench Verified. (Panel A) Execution timeline contrasting traditional single-burst LLM inference against an autonomous multi-turn agent loop, where synchronous tool waits strand accelerator memory while the host chassis draws baseline idle-wait power. (Panel B) Empirical energy breakdown across an 8.5-minute task: non-neural host operations (pytest verification, file search, container setup) consume 69.3 percent of total AC mains energy (81.0 kJ), while pure neural inference on GPU tensor cores accounts for only 30.7 percent (35.9 kJ). (Panel C) Software 3.0 systems balance matrix highlighting the 2.26× energy imbalance and why agency is fundamentally a computer systems engineering discipline." fig-alt="Three-panel diagram showing the Agent Systems Tax. Panel A compares a continuous green bar for traditional LLM inference against a segmented timeline for an autonomous agent loop with alternating green neural think bursts and long gray and red tool execution phases, with a red bracket indicating 420 seconds of memory stranding. Panel B displays horizontal bars for energy consumption: Pytest Compilation at 48.0 percent in red, Neural Token Generation at 30.7 percent in green, File Search at 14.4 percent in dark slate, and Docker Boot at 6.9 percent in light slate. Panel C presents a summary card with badges showing 69.3 percent Host Systems Tax and 30.7 percent Neural Inference, accompanied by runtime ratios and the core architectural thesis."}
+::: {#fig-vol3-agent-execution-timeline fig-env="figure" fig-pos="htb" fig-cap="**Autonomous Agent Loop Execution Timeline**: Comparison of continuous accelerator token generation in traditional stateless serving against the fragmented timeline of an autonomous agent trajectory on SWE-bench Verified. While stateless inference sustains continuous accelerator tensor core utilization, the agent loop spends 420 seconds (82.4 percent of makespan) waiting on non-neural host operations—Docker container boot, ripgrep workspace indexing, and pytest suite compilation. In a synchronous runtime, these tool waits keep accelerator memory pinned while the server chassis draws continuous idle-wait power." fig-alt="Execution timeline comparing traditional model serving against an autonomous agent loop. The top green bar represents traditional serving with continuous token generation and near-100 percent accelerator utilization. The bottom segmented bar illustrates an 8.5-minute autonomous agent loop with alternating green neural think bursts and long gray and red tool execution phases, with a dashed red bracket indicating 420 seconds of non-neural tool waits that strand accelerator high-bandwidth memory."}
 
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ AGENT SYSTEMS TAX (FIGURE)
+# │ AUTONOMOUS AGENT LOOP EXECUTION TIMELINE (FIGURE)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-vol3-agent-systems-tax—execution timeline and energy breakdown
+# │ Context: @fig-vol3-agent-execution-timeline—execution timeline trace
 # │
-# │ Goal: Contrast neural inference vs. non-neural host systems tax in agents.
-# │ Show: 69.3 percent AC energy and 82.4 percent time in non-neural host tasks;
-# │       420s of stranded GPU HBM during tool waits.
-# │ How: Multi-panel plot with timeline, bar chart, and systems balance matrix.
+# │ Goal: Contrast continuous token generation against fragmented agent loops.
+# │ Show: 420s of non-neural tool waits stranding GPU memory during trajectories.
+# │ How: Dual-bar Gantt execution trace with tool category phases.
 # └─────────────────────────────────────────────────────────────────────────────
 import sys
 from pathlib import Path
@@ -372,38 +369,34 @@ for p in [Path(".").resolve(), Path("../..").resolve(), Path("../../..").resolve
         sys.path.insert(0, str(p))
         break
 
-import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import numpy as np
+import matplotlib.pyplot as plt
 from binder.tools.figures import style as book_style
 
 book_style.set_book_style()
 
-fig = plt.figure(figsize=(10.5, 6.2))
+fig = plt.figure(figsize=(10.0, 3.4))
+ax = fig.add_subplot(1, 1, 1)
+ax.axis("off")
 
-gs = fig.add_gridspec(
-    2, 2, height_ratios=[1.0, 1.25], width_ratios=[1.4, 0.95], hspace=0.45, wspace=0.26, top=0.92, bottom=0.08, left=0.08, right=0.96
+ax.set_xlim(-10, 610)
+ax.set_ylim(-0.4, 3.2)
+
+ax.text(
+    0,
+    3.05,
+    "Autonomous Agent Loop Execution Timeline (SWE-bench Verified Trajectory)",
+    fontsize=10.5,
+    fontweight="bold",
+    ha="left",
 )
 
-ax_top = fig.add_subplot(gs[0, :])
-ax_bar = fig.add_subplot(gs[1, 0])
-ax_card = fig.add_subplot(gs[1, 1])
-
-for ax in [ax_top, ax_card]:
-    ax.axis("off")
-
-# Panel A: Execution Timeline Trace
-ax_top.set_xlim(-10, 610)
-ax_top.set_ylim(-0.4, 3.4)
-
-ax_top.text(0, 3.25, "Panel A: Execution Timeline — Stateless Inference vs. Autonomous Agent Loop", fontsize=10.5, fontweight="bold", ha="left")
-
-ax_top.text(0, 2.70, "Traditional LLM Query (Stateless Inference)", fontsize=8.8, fontweight="bold")
-rect_llm = patches.Rectangle((0, 2.05), 510, 0.50, linewidth=1.0, edgecolor="#166534", facecolor="#16A34A")
-ax_top.add_patch(rect_llm)
-ax_top.text(
+ax.text(0, 2.50, "Traditional Model Serving (Stateless Inference)", fontsize=8.8, fontweight="bold")
+rect_llm = patches.Rectangle((0, 1.85), 510, 0.48, linewidth=1.0, edgecolor="#166534", facecolor="#16A34A")
+ax.add_patch(rect_llm)
+ax.text(
     255,
-    2.30,
+    2.09,
     "Continuous Token Generation (GPU Tensor Cores Active, ~100% Accelerator Utilization)",
     ha="center",
     va="center",
@@ -411,9 +404,9 @@ ax_top.text(
     fontsize=8.0,
     fontweight="bold",
 )
-ax_top.text(520, 2.30, "100% Neural Compute\nZero Tool Wait", ha="left", va="center", color="#166534", fontsize=7.8, fontweight="bold")
+ax.text(520, 2.09, "100% Neural Compute\nZero Tool Wait", ha="left", va="center", color="#166534", fontsize=7.8, fontweight="bold")
 
-ax_top.text(0, 1.55, "Autonomous Agent Loop (SWE-bench Verified 8.5-Minute Trajectory)", fontsize=8.8, fontweight="bold")
+ax.text(0, 1.35, "Autonomous Agent Loop (SWE-bench Verified 8.5-Minute Trajectory)", fontsize=8.8, fontweight="bold")
 
 phases = [
     (0, 45, "Docker Boot\n& Setup", "#E2E8F0", "#334155", "Host OS"),
@@ -425,17 +418,26 @@ phases = [
 ]
 
 for x_start, width, label, fc, tc, sub in phases:
-    rect = patches.Rectangle((x_start, 0.85), width, 0.52, linewidth=1.0, edgecolor="#0F172A" if sub == "GPU" else "#94A3B8", facecolor=fc)
-    ax_top.add_patch(rect)
-    ax_top.text(x_start + width / 2.0, 1.11, label, ha="center", va="center", color=tc, fontsize=7.0 if width < 50 else 7.6, fontweight="bold")
+    rect = patches.Rectangle((x_start, 0.65), width, 0.52, linewidth=1.0, edgecolor="#0F172A" if sub == "GPU" else "#94A3B8", facecolor=fc)
+    ax.add_patch(rect)
+    ax.text(
+        x_start + width / 2.0,
+        0.91,
+        label,
+        ha="center",
+        va="center",
+        color=tc,
+        fontsize=7.0 if width < 50 else 7.6,
+        fontweight="bold",
+    )
 
-ax_top.plot([0, 510], [0.55, 0.55], color="#DC2626", linestyle="--", linewidth=1.4)
-ax_top.plot([0, 0], [0.47, 0.63], color="#DC2626", linewidth=1.4)
-ax_top.plot([510, 510], [0.47, 0.63], color="#DC2626", linewidth=1.4)
-ax_top.text(
+ax.plot([0, 510], [0.38, 0.38], color="#DC2626", linestyle="--", linewidth=1.3)
+ax.plot([0, 0], [0.30, 0.46], color="#DC2626", linewidth=1.3)
+ax.plot([510, 510], [0.30, 0.46], color="#DC2626", linewidth=1.3)
+ax.text(
     255,
-    0.16,
-    "Host Systems Tax & Memory Stranding: 420s of non-neural host operations strand GPU HBM (KV cache pinned) while host draws 140–220W",
+    0.05,
+    "Synchronous Tool Wait & Memory Stranding: 420s of non-neural host operations strand GPU HBM (KV cache pinned) while server idles",
     ha="center",
     va="center",
     color="#B91C1C",
@@ -444,80 +446,107 @@ ax_top.text(
     bbox=dict(boxstyle="round,pad=0.35", fc="#FEF2F2", ec="#FECACA", lw=0.8),
 )
 
-# Panel B: Measured Electrical Energy Breakdown
+plt.tight_layout()
+plt.show()
+plt.close()
+```
+:::
+
+Software 3.0 is therefore defined not by the elimination of traditional systems engineering, but by its intensification. The presence of an unprivileged, stochastic policy at the core of the execution loop mandates rigorous, deterministic supervision. The runtime supervisor must arbitrate access to hardware accelerators, virtualize memory across volatile HBM and persistent host storage, enforce security boundaries around untrusted tool outputs, and verify system invariants before declaring a task complete.
+
+The empirical consequence of this physical boundary is mapped in @fig-vol3-agent-systems-tax. Profiling an autonomous coding agent executing a benchmark task on SWE-bench Verified reveals the striking magnitude of the **Agent Systems Tax**: across an 8.5-minute repair trajectory, non-neural host operations—isolated Docker workspace setup (8.1 kJ, 6.9 percent), file indexing and ripgrep queries (16.8 kJ, 14.4 percent), and pytest suite compilation and verification (56.1 kJ, 48.0 percent)—account for fully **69.3 percent** of total AC mains electrical energy consumption (81.0 kJ) and **82.4 percent** of wall-clock makespan. Pure neural token generation on accelerator tensor cores consumes only **30.7 percent** of energy (35.9 kJ) and **17.6 percent** of runtime. This empirical profile mathematically confirms the central thesis: autonomous agent performance, reliability, and operating costs are dominated by host operating system orchestration, virtualization sandboxes, and verification harnesses, rather than neural model scaling alone.
+
+::: {#fig-vol3-agent-systems-tax fig-env="figure" fig-pos="htb" fig-cap="**The Agent Systems Tax**: Measured AC mains electrical energy and wall-clock execution time breakdown across subsystems during an 8.5-minute autonomous code repair trajectory on SWE-bench Verified. (Left) AC electrical energy consumption: non-neural host operations (pytest verification, file search, container setup) consume 69.3 percent of total energy (81.0 kJ), while pure neural inference on GPU tensor cores accounts for only 30.7 percent (35.9 kJ). (Right) Wall-clock time distribution: tool execution and sandbox management account for 82.4 percent of makespan (420 seconds), while active token generation represents only 17.6 percent (90 seconds)." fig-alt="Two-panel horizontal bar chart illustrating the Agent Systems Tax. The left panel shows electrical energy share: Pytest Verification at 48.0 percent in red, Neural Token Generation at 30.7 percent in green, File Search at 14.4 percent in slate, and Docker Boot at 6.9 percent in light slate, summing to 69.3 percent host energy. The right panel shows wall-clock execution time share: Pytest Verification at 50.0 percent (255 seconds), File Search at 23.5 percent (120 seconds), Neural Token Generation at 17.6 percent (90 seconds), and Docker Boot at 8.8 percent (45 seconds), summing to 82.4 percent host time."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE AGENT SYSTEMS TAX (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-vol3-agent-systems-tax—energy and time breakdown
+# │
+# │ Goal: Quantify non-neural host operations vs. neural token generation.
+# │ Show: 69.3 percent AC energy and 82.4 percent wall time in non-neural host tasks.
+# │ How: Dual-panel horizontal bar charts for energy (kJ) and time (s).
+# └─────────────────────────────────────────────────────────────────────────────
+import sys
+from pathlib import Path
+
+for p in [Path(".").resolve(), Path("../..").resolve(), Path("../../..").resolve()]:
+    if (p / "binder").exists():
+        sys.path.insert(0, str(p))
+        break
+
+import matplotlib.pyplot as plt
+import numpy as np
+from binder.tools.figures import style as book_style
+
+book_style.set_book_style()
+
+fig, (ax_en, ax_tm) = plt.subplots(1, 2, figsize=(10.5, 3.8))
+
 categories = [
-    "Docker Boot & Workspace Setup",
-    "File Search & Ripgrep Indexing",
-    "Neural Token Generation (GPU)",
-    "Pytest Compilation & Verification",
+    "Docker Boot & Workspace",
+    "File Search & Ripgrep",
+    "Neural Token Generation",
+    "Pytest Verification",
 ]
-durations = [45, 120, 90, 255]
-power_watts = [180, 140, 399, 220]
 energies_kj = [8.1, 16.8, 35.9, 56.1]
-total_energy_kj = sum(energies_kj)
-percentages = [e / total_energy_kj * 100.0 for e in energies_kj]
+total_en = sum(energies_kj)
+percentages_en = [e / total_en * 100.0 for e in energies_kj]
+
+durations_s = [45, 120, 90, 255]
+total_tm = sum(durations_s)
+percentages_tm = [d / total_tm * 100.0 for d in durations_s]
 
 y_pos = np.arange(len(categories))
 bar_colors = ["#94A3B8", "#64748B", "#16A34A", "#CB202D"]
 
-bars = ax_bar.barh(y_pos, percentages, color=bar_colors, edgecolor="#1E293B", linewidth=0.8, height=0.55, zorder=3)
+# Left: Energy
+bars_en = ax_en.barh(y_pos, percentages_en, color=bar_colors, edgecolor="#1E293B", linewidth=0.8, height=0.52, zorder=3)
+ax_en.set_xlim(0, 68)
+ax_en.set_yticks(y_pos)
+ax_en.set_yticklabels(categories, fontsize=8.0, fontweight="bold")
+ax_en.set_xlabel("Share of Total AC Mains Energy (%)", fontsize=8.5, fontweight="bold")
+ax_en.set_title("AC Mains Electrical Energy Breakdown\n(116.9 kJ Total: 69.3% Host vs. 30.7% GPU)", fontsize=9.5, fontweight="bold", pad=8)
+ax_en.grid(axis="x", linestyle="--", linewidth=0.5, color="#CBD5E1", alpha=0.7, zorder=1)
+ax_en.spines["top"].set_visible(False)
+ax_en.spines["right"].set_visible(False)
 
-ax_bar.set_xlim(0, 62)
-ax_bar.set_yticks(y_pos)
-ax_bar.set_yticklabels(categories, fontsize=8.0, fontweight="bold")
-ax_bar.set_xlabel("Share of Total AC Mains Electrical Energy (%)", fontsize=8.5, fontweight="bold")
-ax_bar.set_title("Panel B: Measured AC Electrical Energy (116.9 kJ Total)", fontsize=10.0, fontweight="bold", pad=8)
+for bar, pct, kj in zip(bars_en, percentages_en, energies_kj):
+    w = bar.get_width()
+    ax_en.text(
+        w + 1.2,
+        bar.get_y() + bar.get_height() / 2.0,
+        f"{pct:.1f}%\n({kj:.1f} kJ)",
+        va="center",
+        ha="left",
+        fontsize=7.2,
+        fontweight="bold",
+    )
 
-ax_bar.grid(axis="x", linestyle="--", linewidth=0.5, color="#CBD5E1", alpha=0.7, zorder=1)
-ax_bar.spines["top"].set_visible(False)
-ax_bar.spines["right"].set_visible(False)
+# Right: Time
+bars_tm = ax_tm.barh(y_pos, percentages_tm, color=bar_colors, edgecolor="#1E293B", linewidth=0.8, height=0.52, zorder=3)
+ax_tm.set_xlim(0, 68)
+ax_tm.set_yticks(y_pos)
+ax_tm.set_yticklabels([])
+ax_tm.set_xlabel("Share of Total Wall-Clock Time (%)", fontsize=8.5, fontweight="bold")
+ax_tm.set_title("Wall-Clock Execution Time Breakdown\n(510s / 8.5 min Total: 82.4% Host vs. 17.6% GPU)", fontsize=9.5, fontweight="bold", pad=8)
+ax_tm.grid(axis="x", linestyle="--", linewidth=0.5, color="#CBD5E1", alpha=0.7, zorder=1)
+ax_tm.spines["top"].set_visible(False)
+ax_tm.spines["right"].set_visible(False)
 
-for i, (bar, pct, kj, dur, w) in enumerate(zip(bars, percentages, energies_kj, durations, power_watts)):
-    w_val = bar.get_width()
-    ax_bar.text(w_val + 1.2, i, f"{pct:.1f}% ({kj:.1f} kJ)\n{dur}s @ {w}W", va="center", ha="left", fontsize=7.2, fontweight="bold")
-
-# Panel C: Systems Balance Card
-ax_card.set_xlim(0, 10)
-ax_card.set_ylim(0, 10)
-
-card_bg = patches.Rectangle((0.2, 0.2), 9.6, 9.6, facecolor="#F8FAFC", edgecolor="#CBD5E1", linewidth=1.2)
-ax_card.add_patch(card_bg)
-
-ax_card.text(5.0, 9.15, "Panel C: Software 3.0 Systems Balance", ha="center", va="top", fontsize=9.8, fontweight="bold")
-
-badge_host = patches.Rectangle((0.8, 6.7), 4.0, 1.8, facecolor="#FEE2E2", edgecolor="#FECACA", linewidth=1.0)
-ax_card.add_patch(badge_host)
-ax_card.text(2.8, 8.0, "Host Systems Tax", ha="center", va="center", fontsize=7.6, fontweight="bold", color="#991B1B")
-ax_card.text(2.8, 7.2, "69.3%", ha="center", va="center", fontsize=15.0, fontweight="bold", color="#B91C1C")
-
-badge_gpu = patches.Rectangle((5.2, 6.7), 4.0, 1.8, facecolor="#DCFCE7", edgecolor="#BBF7D0", linewidth=1.0)
-ax_card.add_patch(badge_gpu)
-ax_card.text(7.2, 8.0, "Neural Inference", ha="center", va="center", fontsize=7.6, fontweight="bold", color="#166534")
-ax_card.text(7.2, 7.2, "30.7%", ha="center", va="center", fontsize=15.0, fontweight="bold", color="#15803D")
-
-bullets = [
-    ("• Wall-Clock Time:", "82.4% Host  vs.  17.6% GPU"),
-    ("• Energy Imbalance:", "2.26× Non-Neural Energy Footprint"),
-    ("• Host Effectors:", "Pytest, Ripgrep, Docker, Git"),
-    ("• Memory Stranded:", "51.2 GB HBM pinned during tests"),
-]
-
-y_start = 5.7
-for label, val in bullets:
-    ax_card.text(0.9, y_start, f"{label} {val}", ha="left", va="center", fontsize=7.6, fontweight="bold", color="#1E293B")
-    y_start -= 0.65
-
-thesis_box = patches.Rectangle((0.7, 0.4), 8.6, 2.5, facecolor="#EFF6FF", edgecolor="#BFDBFE", linewidth=0.8)
-ax_card.add_patch(thesis_box)
-thesis_title = "THE ARCHITECTURAL THESIS:"
-thesis_body = (
-    "Autonomous agents are fundamentally a computer\n"
-    "systems discipline. Optimizing neural token decode\n"
-    "addresses less than one-third of the energy and\n"
-    "less than one-fifth of the latency of agentic loops."
-)
-ax_card.text(1.0, 2.65, thesis_title, ha="left", va="top", fontsize=7.2, fontweight="bold", color="#1E40AF")
-ax_card.text(1.0, 2.25, thesis_body, ha="left", va="top", fontsize=7.0, color="#1E293B", linespacing=1.2)
+for bar, pct, dur in zip(bars_tm, percentages_tm, durations_s):
+    w = bar.get_width()
+    ax_tm.text(
+        w + 1.2,
+        bar.get_y() + bar.get_height() / 2.0,
+        f"{pct:.1f}%\n({dur}s)",
+        va="center",
+        ha="left",
+        fontsize=7.2,
+        fontweight="bold",
+    )
 
 plt.tight_layout()
 plt.show()
