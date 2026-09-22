@@ -8,9 +8,16 @@
 
 The core of TinyTorch—its tensor striding, autograd engine, and execution loop—is intentionally kept small. This minimalism is not a limitation; it is an architectural feature.
 
-In traditional machine learning education, students consume massive frameworks as black boxes. In TinyTorch, the framework is the foundation, and you are the architect. Because operations inherit from a clean `Function` base class and neural networks inherit from a clean `Module` base class, TinyTorch is explicitly designed to be extended. You do not need to rewrite the core engine to test a new systems theory; you only need to plug into it.
+In traditional machine learning education, students consume massive frameworks as black boxes. In TinyTorch, the framework is the foundation, and you are the architect. Because operations inherit from a clean `Function` base class and neural networks inherit from a clean `Layer` base class, TinyTorch is explicitly designed to be extended. You do not need to rewrite the core engine to test a new systems theory; you only need to plug into it.
 
 To prove this, we will not just describe how TinyTorch can be extended. We will actually implement two of the most important systems extensions in modern machine learning: **Low-Rank Adaptation (LoRA)** and **Mixed Precision Loss Scaling**.
+
+
+::: {.column-margin}
+![](assets/images/diagrams/22_eco-margin-source.svg){width="100%" fig-alt="Source code mapping card for the Ecosystem chapter: files in tinytorch/extensions/, imported as tinytorch.extensions, hand-written rather than exported."}
+
+*Source Code Mapping: the extensions live in `tinytorch/extensions/` and are the one part of the package not exported from `src/`.*
+:::
 
 ## Extension 1: Parameter-Efficient Fine-Tuning (LoRA)
 
@@ -21,30 +28,34 @@ To prove this, we will not just describe how TinyTorch can be extended. We will 
 Because TinyTorch's `Module` class natively registers parameters, and `Tensor` respects `requires_grad=False` during the backward pass, we can implement LoRA as a standalone extension in just a few lines of Python:
 
 ```python
-from tinytorch.nn import Module
-from tinytorch.core import Tensor
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Layer
+import numpy as np
 
-class LoRALinear(Module):
-    def __init__(self, in_features, out_features, rank=4):
+class LoRALinear(Layer):
+    def __init__(self, in_features: int, out_features: int, rank: int = 4):
         super().__init__()
         # 1. The frozen pre-trained weights
-        self.weight = Tensor.uniform(out_features, in_features, requires_grad=False)
-        self.bias = Tensor.zeros(out_features, requires_grad=False)
+        self.weight = Tensor(
+            np.random.randn(in_features, out_features) / np.sqrt(in_features),
+            requires_grad=False
+        )
+        self.bias = Tensor(np.zeros(out_features), requires_grad=False)
 
         # 2. The low-rank adapter matrices (these are trained!)
-        # A maps from in_features down to the bottleneck rank
-        self.A = Tensor.uniform(rank, in_features, requires_grad=True)
-        # B maps from the bottleneck rank back up to out_features
-        self.B = Tensor.zeros(out_features, rank, requires_grad=True)
+        self.A = Tensor(
+            np.random.randn(in_features, rank) / np.sqrt(in_features),
+            requires_grad=True
+        )
+        self.B = Tensor(np.zeros((rank, out_features)), requires_grad=True)
 
-    def forward(self, x):
-        # Standard forward pass: x @ W^T + b
-        base = x.matmul(self.weight.transpose()) + self.bias
+    def forward(self, x: Tensor) -> Tensor:
+        # Standard forward pass: x @ W + b
+        base = x.matmul(self.weight) + self.bias
 
-        # Adapter forward pass: (x @ A^T) @ B^T
-        adapter = x.matmul(self.A.transpose()).matmul(self.B.transpose())
+        # Adapter forward pass: (x @ A) @ B
+        adapter = x.matmul(self.A).matmul(self.B)
 
-        # The autograd tape automatically merges gradients where they sum!
         return base + adapter
 ```
 
