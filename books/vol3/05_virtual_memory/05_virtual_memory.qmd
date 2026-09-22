@@ -76,24 +76,85 @@ In Multi-Head Attention (MHA), $H_{\text{kv}} = H_{\text{q}}$, maintaining separ
 
 In @sec-vol3-processor, this cache was analyzed under an idealized systems assumption: that the runtime allocates a contiguous physical memory buffer for each sequence. On physical accelerator hardware, however, this assumption fails catastrophically. Because an autonomous agent's execution horizon is non-deterministic—terminating after three turns or continuing for fifty tool interactions—contiguous memory allocators must pre-allocate physical buffers sized for the worst-case context length ($S_{\max}$). When actual trajectories terminate early or grow dynamically, this contiguous strategy induces severe internal and external memory fragmentation.
 
+```{python}
+#| label: lego-05-attention-state-sizing
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ATTENTION STATE SIZING FOR 70B GQA MODEL (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-05-sizing-the-attention-state-for
+# │ Goal: Quantify physical memory footprint of KV cache across context regimes.
+# │ Show: 320 KiB/token scales to 2.5 GiB at 8k, 10 GiB at 32k, and 40 GiB at 128k; MHA demands 320 GiB.
+# │ How: Multiply layers, KV heads, head dimension, and element precision by token count.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_memory_capacity
+
+class AttentionStateSizing:
+    """KV cache physical footprint across context scaling regimes."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_layers = 80
+    n_q_heads = 64
+    n_kv_heads = 8
+    d_head = 128
+    bytes_per_elem = 2 * byte
+    s_standard = 8_192
+    s_diagnostic = 32_768
+    s_repo = 131_072
+    n_kv_heads_mha = 64
+    num_h100_gpus = 4
+    gpu_hbm = 80 * GB
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    mem_token = 2 * n_layers * n_kv_heads * d_head * bytes_per_elem
+    mem_standard = (s_standard * mem_token).to(GiB)
+    mem_diagnostic = (s_diagnostic * mem_token).to(GiB)
+    mem_repo = (s_repo * mem_token).to(GiB)
+    mem_repo_mha = (s_repo * (2 * n_layers * n_kv_heads_mha * d_head * bytes_per_elem)).to(GiB)
+    mha_scale = n_kv_heads_mha // n_kv_heads
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(mem_token.to(KiB).magnitude == 320.0, "mem_token KiB")
+    check(abs(mem_standard.magnitude - 2.50) < 0.01, "mem_standard GiB")
+    check(abs(mem_diagnostic.magnitude - 10.00) < 0.01, "mem_diagnostic GiB")
+    check(abs(mem_repo.magnitude - 40.00) < 0.01, "mem_repo GiB")
+    check(abs(mem_repo_mha.magnitude - 320.00) < 0.01, "mem_repo_mha GiB")
+    check(mha_scale == 8, "mha_scale")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_layers_str = fmt_int(n_layers)
+    n_q_heads_str = fmt_int(n_q_heads)
+    n_kv_heads_str = fmt_int(n_kv_heads)
+    d_head_str = fmt_int(d_head)
+    bytes_per_elem_str = fmt_int(bytes_per_elem.to(byte).magnitude)
+    s_standard_str = fmt_int(s_standard)
+    s_diagnostic_str = fmt_int(s_diagnostic)
+    s_repo_str = fmt_int(s_repo)
+    n_kv_heads_mha_str = fmt_int(n_kv_heads_mha)
+    num_h100_gpus_str = fmt_int(num_h100_gpus)
+    gpu_hbm_gb_str = fmt_memory_capacity(gpu_hbm, unit=GB, precision=0)
+```
+
 ::: {#nbk-05-sizing-the-attention-state-for .callout-notebook title="Sizing the attention state for a 70-billion parameter model"}
-Consider an inference cluster serving an open-weights 70-billion parameter model structured with the canonical architectural parameters from @sec-vol3-processor-tokenization ($L=80$ layers, $H_{\text{q}}=64$ query heads, $H_{\text{kv}}=8$ GQA key-value heads, head dimension $d_{\text{head}}=128$, and 16-bit `bfloat16` precision with $P=2\text{ bytes}$).
+Consider an inference cluster serving an open-weights 70-billion parameter model structured with the canonical architectural parameters from @sec-vol3-processor-tokenization ($L=$ `{python} AttentionStateSizing.n_layers_str` layers, $H_{\text{q}}=$ `{python} AttentionStateSizing.n_q_heads_str` query heads, $H_{\text{kv}}=$ `{python} AttentionStateSizing.n_kv_heads_str` GQA key-value heads, head dimension $d_{\text{head}}=$ `{python} AttentionStateSizing.d_head_str`, and 16-bit `bfloat16` precision with $P =$ `{python} AttentionStateSizing.bytes_per_elem_str` bytes).
 
 Applying the token footprint formulated in @sec-vol3-processor-tokenization:
 $$\text{Mem}_{\text{token}} = 2 \cdot 80 \cdot 8 \cdot 128 \cdot 2\text{ B} = 320\text{ KiB/token}$$
 
 Now evaluate the physical memory footprint across three realistic agent context regimes:
 
-1. **Standard Turn ($S = 8,192$ tokens):**
+1. **Standard Turn ($S =$ `{python} AttentionStateSizing.s_standard_str` tokens):**
    $$\text{Mem}_{\text{seq}} = 8{,}192 \cdot 320\text{ KiB} \approx 2.50\text{ GiB}$$
 
-2. **Deep Diagnostic Trajectory ($S = 32,768$ tokens):**
+2. **Deep Diagnostic Trajectory ($S =$ `{python} AttentionStateSizing.s_diagnostic_str` tokens):**
    $$\text{Mem}_{\text{seq}} = 32{,}768 \cdot 320\text{ KiB} \approx 10.00\text{ GiB}$$
 
-3. **Repository-Scale Context ($S = 131,072$ tokens):**
+3. **Repository-Scale Context ($S =$ `{python} AttentionStateSizing.s_repo_str` tokens):**
    $$\text{Mem}_{\text{seq}} = 131{,}072 \cdot 320\text{ KiB} \approx 40.00\text{ GiB}$$
 
-Had this model been designed using Multi-Head Attention ($H_{\text{kv}} = 64$), the memory consumption would scale eightfold: a single 131,072-token sequence would demand $320.00 \text{ GiB}$ of physical memory purely for its key-value projections—an allocation that exceeds the entire onboard memory capacity of four 80 GB NVIDIA H100 GPUs combined.
+Had this model been designed using Multi-Head Attention ($H_{\text{kv}} =$ `{python} AttentionStateSizing.n_kv_heads_mha_str`), the memory consumption would scale eightfold: a single `{python} AttentionStateSizing.s_repo_str`-token sequence would demand $320.00 \text{ GiB}$ of physical memory purely for its key-value projections—an allocation that exceeds the entire onboard memory capacity of `{python} AttentionStateSizing.num_h100_gpus_str` `{python} AttentionStateSizing.gpu_hbm_gb_str` NVIDIA H100 GPUs combined.
 :::
 
 This quantitative reality establishes a rigid capacity boundary on the inference serving system. Consider an enterprise inference node provisioned with 8 discrete accelerators, each possessing 80 GB of high-bandwidth memory, providing an aggregate pool of $\text{HBM}_{\text{total}} = 640 \text{ GiB}$. The 70-billion parameter model, loaded in 16-bit precision, consumes roughly $\text{Mem}_{\text{weights}} \approx 140 \text{ GiB}$ of memory across the cluster. Reserving an additional $\text{Mem}_{\text{runtime}} \approx 20 \text{ GiB}$ for communication buffers, NCCL scratch spaces, and activation workspaces during the prefill forward pass leaves approximately $\text{Mem}_{\text{kv\_available}} = 480 \text{ GiB}$ dedicated to the dynamic attention cache. The maximum theoretical concurrency ceiling $B_{\max}$ of active agent trajectories running concurrently at context length $S$ is strictly governed by the floor quotient:
@@ -236,41 +297,128 @@ Finally, the *Effective KV Cache Occupancy* $\eta_{\text{effective}}(t)$ defines
 
 $$\eta_{\text{effective}}(t) = \frac{M_{\text{useful}}(t)}{M_{\text{pool}}}$$
 
+```{python}
+#| label: lego-05-contiguous-kv-fragmentation
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CONTIGUOUS KV CACHE FRAGMENTATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-05-quantifying-contiguous-kv-cache-fragmentation
+# │ Goal: Quantify internal reservation and external memory fragmentation.
+# │ Show: 87.5% capacity idle under worst-case reservation; 100% external fragmentation stalls 1.5 GiB allocation.
+# │ How: Model static worst-case reservations vs. dynamic non-contiguous buddy segment pools.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_memory_capacity, fmt_bandwidth, fmt_percent
+
+class ContiguousKvFragmentation:
+    """Internal and external fragmentation under contiguous KV cache allocators."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    m_device = 80.0 * GiB
+    bw_mem = 3.35 * (TB / second)
+    n_params = 70e9
+    bytes_per_weight = 2 * byte
+    tp_degree = 2
+    m_act_cuda = 4.81 * GiB
+    n_layers = 80
+    n_kv_heads = 8
+    d_head = 128
+    s_max = 16_384
+    s_mean = 2_048
+    n_requests_b = 10
+    m_useful_b = 4.20 * GiB
+    m_allocated_b = 6.40 * GiB
+    segments_b = [512 * MiB, 256 * MiB, 1024 * MiB, 768 * MiB, 1024 * MiB]
+    s_req11 = 4_096
+    m_req11 = 1_536 * MiB
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    m_weights_total = (n_params * bytes_per_weight).to(GiB)
+    m_weights_per_gpu = round((m_weights_total / tp_degree).magnitude, 2) * GiB
+    m_pool = round((m_device - m_weights_per_gpu - m_act_cuda).magnitude, 2) * GiB
+    n_kv_heads_local = n_kv_heads // tp_degree
+    m_token_local = (2 * n_layers * n_kv_heads_local * d_head * bytes_per_weight).to(byte)
+    a_static = (s_max * m_token_local).to(GiB)
+    b_max_static = int((m_pool / a_static).to_base_units().magnitude)
+    m_useful_static = b_max_static * (s_mean * m_token_local).to(GiB)
+    m_allocated_static = b_max_static * a_static
+    eta_alloc_static = (m_useful_static / m_allocated_static).to_base_units().magnitude
+    m_idle_static = m_allocated_static - m_useful_static
+    idle_ratio_static = (m_idle_static / m_allocated_static).to_base_units().magnitude
+
+    eta_alloc_b = (m_useful_b / m_allocated_b).to_base_units().magnitude
+    m_free_b = m_pool - m_allocated_b
+    max_segment_b = max(segments_b).to(MiB)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(m_weights_total.magnitude - 130.38) < 0.01, "m_weights_total")
+    check(abs(m_weights_per_gpu.magnitude - 65.19) < 0.01, "m_weights_per_gpu")
+    check(abs(m_pool.magnitude - 10.00) < 0.01, "m_pool")
+    check(m_token_local.to(KiB).magnitude == 160.0, "m_token_local")
+    check(abs(a_static.magnitude - 2.50) < 0.01, "a_static")
+    check(b_max_static == 4, "b_max_static")
+    check(abs(m_useful_static.magnitude - 1.25) < 0.01, "m_useful_static")
+    check(abs(eta_alloc_static - 0.125) < 0.001, "eta_alloc_static")
+    check(abs(m_idle_static.magnitude - 8.75) < 0.01, "m_idle_static")
+    check(abs(idle_ratio_static - 0.875) < 0.001, "idle_ratio_static")
+    check(abs(m_free_b.magnitude - 3.60) < 0.01, "m_free_b")
+    check(max_segment_b.magnitude == 1024.0, "max_segment_b")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    bw_mem_tb_per_s_str = fmt_bandwidth(bw_mem, unit=TB / second, precision=2)
+    bytes_per_weight_str = fmt_int(bytes_per_weight.to(byte).magnitude)
+    n_layers_str = fmt_int(n_layers)
+    n_kv_heads_str = fmt_int(n_kv_heads)
+    d_head_str = fmt_int(d_head)
+    s_max_str = fmt_int(s_max)
+    tp_degree_str = fmt_int(tp_degree)
+    m_act_cuda_gb_str = fmt_memory_capacity(m_act_cuda, unit=GiB, precision=2)
+    n_kv_heads_local_str = fmt_int(n_kv_heads_local)
+    b_max_static_str = fmt_int(b_max_static)
+    s_mean_str = fmt_int(s_mean)
+    idle_ratio_static_pct_str = fmt_percent(idle_ratio_static, precision=1, style="prose")
+    n_requests_b_str = fmt_int(n_requests_b)
+    eta_alloc_b_pct_str = fmt_percent(round(eta_alloc_b * 1000) / 1000, precision=1, style="prose")
+    s_req11_str = fmt_int(s_req11)
+```
+
 ::: {#nbk-05-quantifying-contiguous-kv-cache-fragmentation .callout-notebook title="Quantifying contiguous KV cache fragmentation on an NVIDIA H100"}
-**Setting:** Consider an NVIDIA H100 SXM5 accelerator equipped with $M_{\text{device}} = 80 \text{ GiB}$ ($85{,}899{,}345{,}920 \text{ bytes}$) of High Bandwidth Memory (HBM3), delivering $3.35 \text{ TB/s}$ of memory bandwidth. The system serves a Llama-3-70B model using 16-bit half-precision weights (BF16, $P = 2 \text{ bytes}$). The model features $L = 80$ transformer layers, a hidden dimension of $d_{\text{model}} = 8{,}192$, and uses Grouped-Query Attention (GQA) with $H_{\text{kv}} = 8$ key-value heads, each with head dimension $d_{\text{head}} = 128$. The maximum supported context length is $S_{\max} = 16{,}384$ tokens.
+**Setting:** Consider an NVIDIA H100 SXM5 accelerator equipped with $M_{\text{device}} = 80 \text{ GiB}$ ($85{,}899{,}345{,}920 \text{ bytes}$) of High Bandwidth Memory (HBM3), delivering `{python} ContiguousKvFragmentation.bw_mem_tb_per_s_str` of memory bandwidth. The system serves a Llama-3-70B model using 16-bit half-precision weights (BF16, $P =$ `{python} ContiguousKvFragmentation.bytes_per_weight_str` bytes). The model features $L =$ `{python} ContiguousKvFragmentation.n_layers_str` transformer layers, a hidden dimension of $d_{\text{model}} = 8{,}192$, and uses Grouped-Query Attention (GQA) with $H_{\text{kv}} =$ `{python} ContiguousKvFragmentation.n_kv_heads_str` key-value heads, each with head dimension $d_{\text{head}} =$ `{python} ContiguousKvFragmentation.d_head_str`. The maximum supported context length is $S_{\max} =$ `{python} ContiguousKvFragmentation.s_max_str` tokens.
 
 **Parameter and KV Footprint:**
 The model parameters occupy:
 $$M_{\text{weights}} \approx 70 \times 10^9 \times 2 \text{ bytes} \approx 140 \times 10^9 \text{ bytes} \approx 130.38 \text{ GiB}$$
-Because the weights exceed a single GPU, the model is tensor-parallelized across two H100 GPUs ($TP=2$). On each GPU:
+Because the weights exceed a single GPU, the model is tensor-parallelized across two H100 GPUs ($TP=$ `{python} ContiguousKvFragmentation.tp_degree_str`). On each GPU:
 $$M_{\text{weights, per-GPU}} = \frac{130.38 \text{ GiB}}{2} = 65.19 \text{ GiB}$$
-Reserving $4.81 \text{ GiB}$ for activation working memory ($M_{\text{act}}$) and CUDA runtime overhead leaves:
+Reserving `{python} ContiguousKvFragmentation.m_act_cuda_gb_str` for activation working memory ($M_{\text{act}}$) and CUDA runtime overhead leaves:
 $$M_{\text{pool}} = 80.00 - 65.19 - 4.81 = 10.00 \text{ GiB} \quad (10{,}737{,}418{,}240 \text{ bytes})$$
 
-The key-value state footprint per token across the local shards on one GPU ($H_{\text{kv, local}} = 8 / 2 = 4$ heads) is:
+The key-value state footprint per token across the local shards on one GPU ($H_{\text{kv, local}} = 8 / 2 =$ `{python} ContiguousKvFragmentation.n_kv_heads_local_str` heads) is:
 $$m_{\text{token}} = 2 \times L \times H_{\text{kv, local}} \times d_{\text{head}} \times P = 2 \times 80 \times 4 \times 128 \times 2 = 163{,}840 \text{ bytes/token} \approx 160 \text{ KiB/token}$$
 
 **Scenario A: Static Worst-Case Reservation:**
-The runtime configures contiguous buffers sized for $S_{\max} = 16{,}384$ tokens.
+The runtime configures contiguous buffers sized for $S_{\max} =$ `{python} ContiguousKvFragmentation.s_max_str` tokens.
 The memory required for a single request reservation is:
 $$A_{\text{static}} = 16{,}384 \times 160 \text{ KiB} = 2{,}684{,}354{,}560 \text{ bytes} = 2.50 \text{ GiB}$$
 The maximum concurrent batch size the GPU can admit is:
 $$B_{\max} = \left\lfloor \frac{M_{\text{pool}}}{A_{\text{static}}} \right\rfloor = \left\lfloor \frac{10.00 \text{ GiB}}{2.50 \text{ GiB}} \right\rfloor = 4 \text{ requests}$$
 
-Suppose the active agent workload exhibits an empirical sequence-length distribution with a mean length of $\mathbb{E}[S] = 2{,}048$ tokens. When four requests are running at their average lengths:
+Suppose the active agent workload exhibits an empirical sequence-length distribution with a mean length of $\mathbb{E}[S] =$ `{python} ContiguousKvFragmentation.s_mean_str` tokens. When `{python} ContiguousKvFragmentation.b_max_static_str` requests are running at their average lengths:
 $$M_{\text{useful}} = 4 \times (2{,}048 \times 160 \text{ KiB}) = 1.25 \text{ GiB}$$
 $$M_{\text{allocated}} = 4 \times 2.50 \text{ GiB} = 10.00 \text{ GiB}$$
 $$\eta_{\text{alloc}} = \frac{1.25 \text{ GiB}}{10.00 \text{ GiB}} = 12.5\%$$
 $$\eta_{\text{effective}} = \frac{1.25 \text{ GiB}}{10.00 \text{ GiB}} = 12.5\%$$
-A staggering $8.75 \text{ GiB}$ ($87.5\%$) of the available KV cache capacity is completely idle, trapped in internal reservation fragmentation. Concurrency is capped at four, collapsing serving throughput.
+A staggering $8.75 \text{ GiB}$ (`{python} ContiguousKvFragmentation.idle_ratio_static_pct_str`) of the available KV cache capacity is completely idle, trapped in internal reservation fragmentation. Concurrency is capped at `{python} ContiguousKvFragmentation.b_max_static_str`, collapsing serving throughput.
 
 **Scenario B: Dynamic Contiguous Allocation with External Fragmentation:**
-To combat static waste, the runtime switches to dynamic contiguous power-of-two buddy allocation. Ten requests are admitted with varying sequence lengths drawn from the empirical distribution, occupying a total of $M_{\text{useful}} = 4.20 \text{ GiB}$ with allocated buffers totaling $M_{\text{allocated}} = 6.40 \text{ GiB}$ ($\eta_{\text{alloc}} = 65.6\%$).
+To combat static waste, the runtime switches to dynamic contiguous power-of-two buddy allocation. `{python} ContiguousKvFragmentation.n_requests_b_str` requests are admitted with varying sequence lengths drawn from the empirical distribution, occupying a total of $M_{\text{useful}} = 4.20 \text{ GiB}$ with allocated buffers totaling $M_{\text{allocated}} = 6.40 \text{ GiB}$ ($\eta_{\text{alloc}} =$ `{python} ContiguousKvFragmentation.eta_alloc_b_pct_str`).
 
 The remaining free pool memory is $M_{\text{free}} = 10.00 - 6.40 = 3.60 \text{ GiB}$. However, due to past request arrivals and completions, this $3.60 \text{ GiB}$ is partitioned across five isolated non-contiguous memory segments:
 $$\{H_k\} = \{512 \text{ MiB}, \ 256 \text{ MiB}, \ 1024 \text{ MiB}, \ 768 \text{ MiB}, \ 1024 \text{ MiB}\}$$
 
-An eleventh request arrives, bearing a prompt of $4{,}096$ tokens and requiring an initial reservation of $1{,}536 \text{ MiB}$ ($1.50 \text{ GiB}$).
+An eleventh request arrives, bearing a prompt of `{python} ContiguousKvFragmentation.s_req11_str` tokens and requiring an initial reservation of $1{,}536 \text{ MiB}$ ($1.50 \text{ GiB}$).
 
 Although the system possesses $3.60 \text{ GiB}$ of free physical memory, the largest single contiguous extent is $\max(H_k) = 1{,}024 \text{ MiB} < 1{,}536 \text{ MiB}$.
 The external fragmentation ratio for this request is:
@@ -376,35 +524,107 @@ def calculate_cache_utilization(batch_size, avg_seq_len, b_size, m_token):
 
 Empirical profiling demonstrates that $B = 16$ and $B = 32$ occupy the optimal sweet spot for current GPU microarchitectures. At $B = 16$, the contiguous tensor payload within each block ($16 \times d_{\text{head}} \times b_{\text{elem}}$ bytes per head) is sufficiently large to saturate 128-byte memory bus transactions, achieving over $95\%$ of theoretical HBM read bandwidth during decode attention kernels. Simultaneously, the tail waste remains bounded to an average of $7.5$ tokens per stream, translating to negligible capacity loss across large production batches.
 
-::: {#nbk-05-sizing-physical-blocks-for-a .callout-notebook title="Sizing physical blocks for a 70B parameter model"}
-Consider serving an open-weights 70B parameter model using Grouped-Query Attention (GQA). The architecture features $L = 80$ layers, $H_Q = 64$ query heads, $H_{\text{kv}} = 8$ key-value heads, head dimension $d_{\text{head}} = 128$, and runs in BF16 precision ($b_{\text{elem}} = 2$ bytes). The serving engine distributes the model across an 8-GPU node using tensor parallelism degree $TP = 8$.
+```{python}
+#| label: lego-05-physical-block-sizing
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SIZING PHYSICAL BLOCKS FOR 70B GQA MODEL (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-05-sizing-physical-blocks-for-a
+# │ Goal: Sizing physical PagedAttention blocks and quantifying internal tail fragmentation.
+# │ Show: 40 KiB/token on TP=8; B=16 incurs 0.12% tail waste; B=64 incurs 0.51% tail waste.
+# │ How: Divide unmapped pool capacity by block footprint and calculate expected block tail waste.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt, fmt_int
 
-First, calculate the memory footprint per token on a single GPU. With $TP = 8$, the $H_{\text{kv}} = 8$ key-value heads are partitioned evenly across the 8 GPUs, resulting in $H_{\text{kv, GPU}} = 1$ key-value head per layer per GPU:
+class PhysicalBlockSizing:
+    """Block footprint and tail fragmentation in paged attention systems."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_layers = 80
+    n_q_heads = 64
+    n_kv_heads = 8
+    d_head = 128
+    bytes_per_elem = 2 * byte
+    tp_degree = 8
+    block_size_16 = 16
+    block_size_64 = 64
+    pool_per_gpu = 60.0 * GiB
+    n_seq_batch = 256
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    n_kv_heads_gpu = n_kv_heads // tp_degree
+    m_token_gpu = (2 * n_layers * n_kv_heads_gpu * d_head * bytes_per_elem).to(byte)
+    m_token_node = m_token_gpu * tp_degree
+    m_block_16 = (block_size_16 * m_token_gpu).to(KiB)
+    m_block_64 = (block_size_64 * m_token_gpu).to(KiB)
+    n_blocks_16 = int(pool_per_gpu.to(KiB) / m_block_16)
+    token_cap_16 = n_blocks_16 * block_size_16
+    waste_tokens_16 = (block_size_16 - 1) / 2
+    node_waste_16 = (n_seq_batch * waste_tokens_16 * m_token_gpu).to(MiB)
+    frag_ratio_16 = (node_waste_16 / pool_per_gpu.to(MiB)).to_base_units().magnitude
+    waste_tokens_64 = (block_size_64 - 1) / 2
+    node_waste_64 = (n_seq_batch * waste_tokens_64 * m_token_gpu).to(MiB)
+    frag_ratio_64 = (node_waste_64 / pool_per_gpu.to(MiB)).to_base_units().magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(m_token_gpu.to(KiB).magnitude == 40.0, "m_token_gpu")
+    check(m_token_node.to(KiB).magnitude == 320.0, "m_token_node")
+    check(m_block_16.magnitude == 640.0, "m_block_16")
+    check(m_block_64.magnitude == 2560.0, "m_block_64")
+    check(n_blocks_16 == 98304, "n_blocks_16")
+    check(token_cap_16 == 1572864, "token_cap_16")
+    check(node_waste_16.magnitude == 75.0, "node_waste_16")
+    check(abs(frag_ratio_16 - 0.0012) < 0.0001, "frag_ratio_16")
+    check(node_waste_64.magnitude == 315.0, "node_waste_64")
+    check(abs(frag_ratio_64 - 0.0051) < 0.0001, "frag_ratio_64")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_layers_str = fmt_int(n_layers)
+    n_q_heads_str = fmt_int(n_q_heads)
+    n_kv_heads_str = fmt_int(n_kv_heads)
+    d_head_str = fmt_int(d_head)
+    bytes_per_elem_str = fmt_int(bytes_per_elem.to(byte).magnitude)
+    tp_degree_str = fmt_int(tp_degree)
+    n_kv_heads_gpu_str = fmt_int(n_kv_heads_gpu)
+    block_size_16_str = fmt_int(block_size_16)
+    block_size_64_str = fmt_int(block_size_64)
+    n_seq_batch_str = fmt_int(n_seq_batch)
+    waste_tokens_16_str = fmt(waste_tokens_16, precision=1, commas=False)
+    waste_tokens_64_str = fmt(waste_tokens_64, precision=1, commas=False)
+```
+
+::: {#nbk-05-sizing-physical-blocks-for-a .callout-notebook title="Sizing physical blocks for a 70B parameter model"}
+Consider serving an open-weights 70B parameter model using Grouped-Query Attention (GQA). The architecture features $L =$ `{python} PhysicalBlockSizing.n_layers_str` layers, $H_Q =$ `{python} PhysicalBlockSizing.n_q_heads_str` query heads, $H_{\text{kv}} =$ `{python} PhysicalBlockSizing.n_kv_heads_str` key-value heads, head dimension $d_{\text{head}} =$ `{python} PhysicalBlockSizing.d_head_str`, and runs in BF16 precision ($b_{\text{elem}} =$ `{python} PhysicalBlockSizing.bytes_per_elem_str` bytes). The serving engine distributes the model across an 8-GPU node using tensor parallelism degree $TP =$ `{python} PhysicalBlockSizing.tp_degree_str`.
+
+First, calculate the memory footprint per token on a single GPU. With $TP =$ `{python} PhysicalBlockSizing.tp_degree_str`, the $H_{\text{kv}} =$ `{python} PhysicalBlockSizing.n_kv_heads_str` key-value heads are partitioned evenly across the `{python} PhysicalBlockSizing.tp_degree_str` GPUs, resulting in $H_{\text{kv, GPU}} =$ `{python} PhysicalBlockSizing.n_kv_heads_gpu_str` key-value head per layer per GPU:
 
 $$m_{\text{token, GPU}} = 2 \cdot L \cdot H_{\text{kv, GPU}} \cdot d_{\text{head}} \cdot b_{\text{elem}} = 2 \cdot 80 \cdot 1 \cdot 128 \cdot 2\text{ bytes} = 40,960\text{ bytes} = 40\text{ KiB}$$
 
 Across the full node ($TP=8$), the collective memory footprint is $8 \times 40\text{ KiB} = 320\text{ KiB}$ per token.
 
-Now evaluate physical block parameters on a single GPU for block sizes $B = 16$ and $B = 64$:
+Now evaluate physical block parameters on a single GPU for block sizes $B =$ `{python} PhysicalBlockSizing.block_size_16_str` and $B =$ `{python} PhysicalBlockSizing.block_size_64_str`:
 
-1. **Physical Block Footprint ($B = 16$):**
+1. **Physical Block Footprint ($B =$ `{python} PhysicalBlockSizing.block_size_16_str`):**
    $$M_{\text{block, GPU}} = 16 \cdot 40\text{ KiB} = 640\text{ KiB}$$
 
-2. **Physical Block Footprint ($B = 64$):**
+2. **Physical Block Footprint ($B =$ `{python} PhysicalBlockSizing.block_size_64_str`):**
    $$M_{\text{block, GPU}} = 64 \cdot 40\text{ KiB} = 2,560\text{ KiB} = 2.5\text{ MiB}$$
 
 Assume each GPU provides 80 GB of physical HBM3 memory. Model weights occupy $140\text{ GB} / 8 = 17.5\text{ GiB}$ per GPU. Reserving 2.5 GB for activation buffers leaves exactly $60\text{ GiB}$ ($62,914,560\text{ KiB}$) dedicated to the paged KV cache pool.
 
-- **Pool Capacity at $B = 16$:**
+- **Pool Capacity at $B =$ `{python} PhysicalBlockSizing.block_size_16_str`:**
   $$N_{\text{blocks}} = \frac{62,914,560\text{ KiB}}{640\text{ KiB}} = 98,304\text{ blocks}$$
   $$\text{Token Capacity} = 98,304 \cdot 16 = 1,572,864\text{ tokens per GPU}$$
 
-- **Tail Fragmentation under a Batch of $N_{\text{seq}} = 256$ Concurrent Sequences:**
-  - For $B = 16$: Expected waste is $(16 - 1)/2 = 7.5\text{ tokens}$ per sequence.
+- **Tail Fragmentation under a Batch of $N_{\text{seq}} =$ `{python} PhysicalBlockSizing.n_seq_batch_str` Concurrent Sequences:**
+  - For $B =$ `{python} PhysicalBlockSizing.block_size_16_str`: Expected waste is $(16 - 1)/2 =$ `{python} PhysicalBlockSizing.waste_tokens_16_str` tokens per sequence.
     $$\text{Node Waste} = 256 \cdot 7.5 \cdot 40\text{ KiB} = 76,800\text{ KiB} = 75\text{ MiB}$$
     $$\text{Fragmentation Ratio} = \frac{75\text{ MiB}}{61,440\text{ MiB}} \approx 0.12\%$$
 
-  - For $B = 64$: Expected waste is $(64 - 1)/2 = 31.5\text{ tokens}$ per sequence.
+  - For $B =$ `{python} PhysicalBlockSizing.block_size_64_str`: Expected waste is $(64 - 1)/2 =$ `{python} PhysicalBlockSizing.waste_tokens_64_str` tokens per sequence.
     $$\text{Node Waste} = 256 \cdot 31.5 \cdot 40\text{ KiB} = 322,560\text{ KiB} = 315\text{ MiB}$$
     $$\text{Fragmentation Ratio} = \frac{315\text{ MiB}}{61,440\text{ MiB}} \approx 0.51\%$$
 
@@ -523,15 +743,87 @@ The runtime must resolve this partial-block dilemma through one of two architect
 
 In production runtimes, block-aligned truncation consistently outperforms Copy-on-Write allocation. On modern accelerator architectures (such as NVIDIA H100 or AMD MI300X), the host overhead of dispatching a memory-copy kernel to duplicate a handful of tokens—coupled with memory bus synchronization barriers—exceeds the time required to evaluate those same tokens inside a high-throughput fused GEMM prefill kernel. Consequently, production Radix allocators enforce a strict block boundary invariant: only fully packed blocks of size $B$ are inherited across requests, while sub-block tails are recomputed during the initial prefill phase.
 
-::: {#nbk-05-ttft-and-compute-savings-from .callout-notebook title="TTFT and compute savings from radix prefix reuse"}
-Consider an autonomous coding agent operating on an 8-GPU tensor-parallel node hosting a 70-billion parameter dense model ($N = 70 \times 10^9$). The model utilizes Grouped-Query Attention (GQA) with $L = 80$ layers, $H_Q = 64$ query heads, $H_{\text{kv}} = 8$ key-value heads, and a head dimension of $d_{\text{head}} = 128$, represented in 16-bit brain floating-point format ($b_{\text{elem}} = 2$ bytes).
+```{python}
+#| label: lego-05-radix-prefix-reuse
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TTFT AND COMPUTE SAVINGS FROM RADIX PREFIX REUSE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-05-ttft-and-compute-savings-from
+# │ Goal: Quantify TTFT reduction and compute savings achieved through Radix tree prefix caching.
+# │ Show: 4,096-token prefix hit cuts TTFT by 167.4 ms (28x reduction) and saves 617 TFLOPs.
+# │ How: Model linear and quadratic self-attention FLOPs divided by sustained cluster throughput.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time, fmt_multiple
 
-The agent's standard system instruction, formatting rules, and tool definition schema comprise an invariant prefix of $S_{\text{prefix}} = 4{,}096$ tokens.
+class RadixPrefixReuse:
+    """TTFT latency and arithmetic work saved through radix tree prefix caching."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_params = 70e9
+    n_layers = 80
+    n_q_heads = 64
+    n_kv_heads = 8
+    d_head = 128
+    d_model = 8_192
+    bytes_per_elem = 2 * byte
+    n_gpus = 8
+    s_prefix = 4_096
+    mfu_prefill = 0.45
+    peak_dense_per_gpu = 989e12 / second
+    t_resolve_cpu = 50.0 * microsecond
+    s_novel = 32
+    t_novel_prefill = 6.0 * millisecond
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    mem_token = 2 * n_layers * n_kv_heads * d_head * bytes_per_elem
+    mem_kv_prefix = (s_prefix * mem_token).to(GiB)
+    mem_kv_prefix_per_gpu = (mem_kv_prefix / n_gpus).to(MiB)
+    flops_linear = 2 * n_params * s_prefix
+    flops_attn = 4 * n_layers * d_model * (s_prefix**2)
+    flops_total = flops_linear + flops_attn
+    peak_cluster = n_gpus * peak_dense_per_gpu
+    throughput_sustained = mfu_prefill * peak_cluster
+    t_prefill = (flops_total / throughput_sustained).to(millisecond)
+    latency_saved = (t_prefill - t_novel_prefill).to(millisecond)
+    ttft_reduction = (t_prefill / t_novel_prefill).magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(mem_kv_prefix.magnitude - 1.25) < 0.01, "mem_kv_prefix")
+    check(abs(mem_kv_prefix_per_gpu.magnitude - 160.0) < 0.01, "mem_kv_prefix_per_gpu")
+    check(abs(flops_linear / 1e12 - 573.44) < 0.1, "flops_linear")
+    check(abs(flops_attn / 1e12 - 43.98) < 0.1, "flops_attn")
+    check(abs(flops_total / 1e12 - 617.42) < 0.1, "flops_total")
+    check(abs(t_prefill.magnitude - 173.4) < 0.5, "t_prefill")
+    check(abs(latency_saved.magnitude - 167.4) < 0.5, "latency_saved")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_gpus_str = fmt_int(n_gpus)
+    n_layers_str = fmt_int(n_layers)
+    n_q_heads_str = fmt_int(n_q_heads)
+    n_kv_heads_str = fmt_int(n_kv_heads)
+    d_head_str = fmt_int(d_head)
+    bytes_per_elem_str = fmt_int(bytes_per_elem.to(byte).magnitude)
+    s_prefix_str = fmt_int(s_prefix)
+    mfu_prefill_pct_str = fmt_percent(mfu_prefill, precision=0, style="prose")
+    t_resolve_cpu_us_str = fmt_time(t_resolve_cpu, unit=microsecond, precision=0)
+    s_novel_str = fmt_int(s_novel)
+    t_novel_prefill_ms_str = fmt_time(t_novel_prefill, unit=millisecond, precision=0)
+    latency_saved_ms_str = fmt_time(latency_saved, unit=millisecond, precision=1)
+    ttft_reduction_mult_str = fmt_multiple(round(ttft_reduction), precision=0)
+```
+
+::: {#nbk-05-ttft-and-compute-savings-from .callout-notebook title="TTFT and compute savings from radix prefix reuse"}
+Consider an autonomous coding agent operating on an `{python} RadixPrefixReuse.n_gpus_str`-GPU tensor-parallel node hosting a 70-billion parameter dense model ($N = 70 \times 10^9$). The model utilizes Grouped-Query Attention (GQA) with $L =$ `{python} RadixPrefixReuse.n_layers_str` layers, $H_Q =$ `{python} RadixPrefixReuse.n_q_heads_str` query heads, $H_{\text{kv}} =$ `{python} RadixPrefixReuse.n_kv_heads_str` key-value heads, and a head dimension of $d_{\text{head}} =$ `{python} RadixPrefixReuse.d_head_str`, represented in 16-bit brain floating-point format ($b_{\text{elem}} =$ `{python} RadixPrefixReuse.bytes_per_elem_str` bytes).
+
+The agent's standard system instruction, formatting rules, and tool definition schema comprise an invariant prefix of $S_{\text{prefix}} =$ `{python} RadixPrefixReuse.s_prefix_str` tokens.
 
 **1. Physical KV Memory Footprint:**
 Applying the physical GQA tensor footprint established in @sec-vol3-processor-tokenization ($m_{\text{token}} = 320\text{ KiB/token}$):
 $$M_{\text{KV}} = S_{\text{prefix}} \cdot m_{\text{token}} = 4{,}096 \times 320\text{ KiB} = 1{,}310{,}720\text{ KiB} = 1.25\text{ GiB}$$
-Distributed across the 8 GPUs via tensor parallelism, this footprint requires only $160\text{ MiB}$ of HBM per accelerator.
+Distributed across the `{python} RadixPrefixReuse.n_gpus_str` GPUs via tensor parallelism, this footprint requires only $160\text{ MiB}$ of HBM per accelerator.
 
 **2. Prefill Compute Savings:**
 Applying the foundation engine Roofline model from @sec-vol3-processor-cost, evaluating prompt context requires $2N$ FLOPs per token for linear projections plus the quadratic self-attention component ($4 \cdot L \cdot d_{\text{model}} \cdot S_{\text{prefix}}^2$):
@@ -540,11 +832,11 @@ $$\text{FLOPs}_{\text{attn}} = 4 \cdot 80 \cdot 8{,}192 \cdot (4{,}096)^2 \appro
 $$\text{FLOPs}_{\text{total}} = \text{FLOPs}_{\text{linear}} + \text{FLOPs}_{\text{attn}} = 573.4 + 44.0 = 617.4\text{ TFLOPs}$$
 
 **3. Latency Impact:**
-The 8-GPU H100 node provides an aggregate theoretical dense BF16 peak of $8 \times 989 = 7{,}912 \text{ TFLOPS}$. At a realistic Model Flops Utilization (MFU) of $45\%$ for tensor-parallel prefill at batch size 1, the sustained cluster compute throughput is:
+The 8-GPU H100 node provides an aggregate theoretical dense BF16 peak of $8 \times 989 = 7{,}912 \text{ TFLOPS}$. At a realistic Model Flops Utilization (MFU) of `{python} RadixPrefixReuse.mfu_prefill_pct_str` for tensor-parallel prefill at batch size 1, the sustained cluster compute throughput is:
 $$\text{Throughput}_{\text{sustained}} = 0.45 \times 7{,}912 \text{ TFLOPS} \approx 3{,}560 \text{ TFLOPS}$$
 Without prefix caching, computing the KV state for the system prompt delays Time to First Token (TTFT) by:
 $$T_{\text{prefill}} = \frac{617.4 \text{ TFLOPs}}{3{,}560 \text{ TFLOPS}} \approx 0.1734 \text{ seconds} \approx 173.4 \text{ ms}$$
-With a Radix tree prefix hit, the entire 4,096-token prefill is bypassed. The host CPU resolves the block table in less than $50 \ \mu\text{s}$. If the incoming query introduces 32 novel tokens, the accelerator executes prefill only for those 32 tokens attending across the cached 4,096 tokens, completing in under $6 \text{ ms}$. Prefix caching eliminates $167.4 \text{ ms}$ of latency—a $28\times$ reduction in TTFT—while saving over $600 \text{ TFLOPs}$ of accelerator work.
+With a Radix tree prefix hit, the entire `{python} RadixPrefixReuse.s_prefix_str`-token prefill is bypassed. The host CPU resolves the block table in less than `{python} RadixPrefixReuse.t_resolve_cpu_us_str`. If the incoming query introduces `{python} RadixPrefixReuse.s_novel_str` novel tokens, the accelerator executes prefill only for those `{python} RadixPrefixReuse.s_novel_str` tokens attending across the cached `{python} RadixPrefixReuse.s_prefix_str` tokens, completing in under `{python} RadixPrefixReuse.t_novel_prefill_ms_str`. Prefix caching eliminates `{python} RadixPrefixReuse.latency_saved_ms_str` of latency—a `{python} RadixPrefixReuse.ttft_reduction_mult_str` reduction in TTFT—while saving over $600 \text{ TFLOPs}$ of accelerator work.
 :::
 
 When serving fleets of autonomous agents across multi-node accelerator clusters, this prefix locality must be coordinated globally. Rather than maintaining isolated, uncoordinated Radix trees on each worker node, the cluster routing fabric fingerprints incoming prompts and dispatches requests to nodes holding matching prefix blocks.
@@ -727,27 +1019,92 @@ The timing dynamics and scheduling contrast between monolithic execution and chu
 ![](images/svg/chunked_prefill_scheduling_timeline.svg)
 :::
 
+```{python}
+#| label: lego-05-chunked-prefill-budgeting
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUANTITATIVE INTERFERENCE AND CHUNK BUDGETING (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-05-quantitative-interference-and-chunk-budgeting
+# │ Goal: Balance memory-bound decode iterations with compute-bound prefill chunks.
+# │ Show: Monolithic prefill spikes ITL by 25.6x (1,195 ms); chunk size 512 bounds ITL to 158.7 ms.
+# │ How: Calculate execution duration under max(t_mem, t_comp) for monolithic vs co-scheduled chunks.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_multiple
+
+class ChunkedPrefillBudgeting:
+    """Inter-token latency and chunk sizing under co-scheduled serving."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    peak_compute = 800e12 / second
+    bw_mem = 3.0 * (TB / second)
+    n_params = 70e9
+    bytes_per_weight = 2 * byte
+    weights_footprint = 140.0 * GB
+    b_decode = 32
+    s_prompt = 4_096
+    mfu_decode = 0.50
+    mfu_prefill = 0.60
+    c_chunk = 512
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    flops_decode = 2 * n_params * b_decode
+    t_mem_decode = (weights_footprint / bw_mem).to(millisecond)
+    t_comp_decode = (flops_decode / (mfu_decode * peak_compute)).to(millisecond)
+    t_iter_decode = max(t_mem_decode, t_comp_decode)
+    flops_prefill = 2 * n_params * s_prompt
+    t_comp_prefill = (flops_prefill / (mfu_prefill * peak_compute)).to(millisecond)
+    itl_spike_mult = (t_comp_prefill / t_iter_decode).magnitude
+
+    k_chunks = s_prompt // c_chunk
+    tokens_chunk_iter = c_chunk + b_decode
+    flops_chunk_iter = 2 * n_params * tokens_chunk_iter
+    t_comp_chunk_iter = (flops_chunk_iter / (mfu_prefill * peak_compute)).to(millisecond)
+    t_iter_chunk = max(t_mem_decode, t_comp_chunk_iter)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_mem_decode.magnitude - 46.7) < 0.1, "t_mem_decode")
+    check(abs(t_comp_decode.magnitude - 11.2) < 0.1, "t_comp_decode")
+    check(abs(t_comp_prefill.magnitude - 1194.7) < 1.0, "t_comp_prefill")
+    check(abs(itl_spike_mult - 25.6) < 0.1, "itl_spike_mult")
+    check(k_chunks == 8, "k_chunks")
+    check(tokens_chunk_iter == 544, "tokens_chunk_iter")
+    check(abs(t_comp_chunk_iter.magnitude - 158.7) < 0.2, "t_comp_chunk_iter")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    b_decode_str = fmt_int(b_decode)
+    s_prompt_str = fmt_int(s_prompt)
+    mfu_decode_pct_str = fmt_percent(mfu_decode, precision=0, style="prose")
+    mfu_prefill_pct_str = fmt_percent(mfu_prefill, precision=0, style="prose")
+    itl_spike_mult_str = fmt_multiple(itl_spike_mult, precision=1)
+    c_chunk_str = fmt_int(c_chunk)
+    k_chunks_str = fmt_int(k_chunks)
+    tokens_chunk_iter_str = fmt_int(tokens_chunk_iter)
+```
+
 ::: {#nbk-05-quantitative-interference-and-chunk-budgeting .callout-notebook title="Quantitative interference and chunk budgeting"}
-An inference engine runs on an accelerator delivering $T_{\text{peak}} = 800\text{ TFLOPS}$ ($8 \times 10^{14}\text{ FLOPs/s}$) dense 16-bit matrix compute and $B_{\text{mem}} = 3.0\text{ TB/s}$ ($3 \times 10^{12}\text{ Bytes/s}$) HBM bandwidth. The served model has $P = 70\text{ billion}$ parameters stored in 16-bit precision, occupying $2P = 140\text{ GB}$ of memory. The engine is actively servicing $B_{\text{decode}} = 32$ decode streams. An agent submits a new prompt with $S_{\text{prompt}} = 4{,}096$ tokens.
+An inference engine runs on an accelerator delivering $T_{\text{peak}} = 800\text{ TFLOPS}$ ($8 \times 10^{14}\text{ FLOPs/s}$) dense 16-bit matrix compute and $B_{\text{mem}} = 3.0\text{ TB/s}$ ($3 \times 10^{12}\text{ Bytes/s}$) HBM bandwidth. The served model has $P = 70\text{ billion}$ parameters stored in 16-bit precision, occupying $2P = 140\text{ GB}$ of memory. The engine is actively servicing $B_{\text{decode}} =$ `{python} ChunkedPrefillBudgeting.b_decode_str` decode streams. An agent submits a new prompt with $S_{\text{prompt}} =$ `{python} ChunkedPrefillBudgeting.s_prompt_str` tokens.
 
 **Question 1: What is the execution latency and ITL spike under monolithic run-to-completion scheduling?**
 
-A decode iteration with 32 sequences requires streaming the full $140\text{ GB}$ of model weights to execute $2 \cdot P \cdot B_{\text{decode}} = 2 \times (70 \times 10^9) \times 32 = 4.48 \times 10^{12}\text{ FLOPs} = 4.48\text{ TFLOPs}$.
+A decode iteration with `{python} ChunkedPrefillBudgeting.b_decode_str` sequences requires streaming the full $140\text{ GB}$ of model weights to execute $2 \cdot P \cdot B_{\text{decode}} = 2 \times (70 \times 10^9) \times 32 = 4.48 \times 10^{12}\text{ FLOPs} = 4.48\text{ TFLOPs}$.
 The memory read time is:
 $$t_{\text{mem, decode}} = \frac{140 \times 10^9\text{ Bytes}}{3.0 \times 10^{12}\text{ Bytes/s}} \approx 46.7\text{ ms}$$
-The compute time on tensor cores running at an achieved 50 percent model FLOPs utilization (MFU, effective throughput $400\text{ TFLOPS}$) is:
+The compute time on tensor cores running at an achieved `{python} ChunkedPrefillBudgeting.mfu_decode_pct_str` model FLOPs utilization (MFU, effective throughput $400\text{ TFLOPS}$) is:
 $$t_{\text{comp, decode}} = \frac{4.48 \times 10^{12}\text{ FLOPs}}{400 \times 10^{12}\text{ FLOPs/s}} \approx 11.2\text{ ms}$$
 Because $t_{\text{mem}} > t_{\text{comp}}$, the decode iteration is memory-bound and takes $\max(46.7, 11.2) = 46.7\text{ ms}$. Baseline ITL is $46.7\text{ ms}$.
 
-When the $4{,}096$-token monolithic prefill executes, its computational load is:
+When the `{python} ChunkedPrefillBudgeting.s_prompt_str`-token monolithic prefill executes, its computational load is:
 $$\text{FLOPs}_{\text{prefill}} = 2 \cdot P \cdot S_{\text{prompt}} = 2 \times (70 \times 10^9) \times 4{,}096 = 5.7344 \times 10^{14}\text{ FLOPs} = 573.44\text{ TFLOPs}$$
-Assuming $60\%$ achieved MFU for dense GEMM ($480\text{ TFLOPS}$ effective):
+Assuming `{python} ChunkedPrefillBudgeting.mfu_prefill_pct_str` achieved MFU for dense GEMM ($480\text{ TFLOPS}$ effective):
 $$t_{\text{comp, prefill}} = \frac{573.44 \times 10^{12}\text{ FLOPs}}{480 \times 10^{12}\text{ FLOPs/s}} \approx 1{,}194.7\text{ ms} \approx 1.195\text{ seconds}$$
-The 32 active decode streams stall for $1.195\text{ seconds}$. The ITL spikes from $46.7\text{ ms}$ to $1{,}195\text{ ms}$, a $25.6\times$ latency degradation.
+The `{python} ChunkedPrefillBudgeting.b_decode_str` active decode streams stall for $1.195\text{ seconds}$. The ITL spikes from $46.7\text{ ms}$ to $1{,}195\text{ ms}$, a `{python} ChunkedPrefillBudgeting.itl_spike_mult_str` latency degradation.
 
-**Question 2: What is the iteration latency when chunking the prefill with $C_{\text{chunk}} = 512$?**
+**Question 2: What is the iteration latency when chunking the prefill with $C_{\text{chunk}} =$ `{python} ChunkedPrefillBudgeting.c_chunk_str`?**
 
-The prompt is partitioned into $K = 4{,}096 / 512 = 8$ chunks. In each iteration, the scheduler co-schedules one 512-token prefill chunk with the 32 decode tokens, yielding $512 + 32 = 544$ tokens total.
+The prompt is partitioned into $K = 4{,}096 / 512 =$ `{python} ChunkedPrefillBudgeting.k_chunks_str` chunks. In each iteration, the scheduler co-schedules one `{python} ChunkedPrefillBudgeting.c_chunk_str`-token prefill chunk with the `{python} ChunkedPrefillBudgeting.b_decode_str` decode tokens, yielding $512 + 32 =$ `{python} ChunkedPrefillBudgeting.tokens_chunk_iter_str` tokens total.
 
 The weight streaming time remains fixed at $t_{\text{mem}} = 46.7\text{ ms}$ (since all 544 tokens share the same model parameters).
 The compute required for the 544 tokens is:
@@ -756,7 +1113,7 @@ At $480\text{ TFLOPS}$ effective throughput:
 $$t_{\text{comp, iter}} = \frac{76.16 \times 10^{12}\text{ FLOPs}}{480 \times 10^{12}\text{ FLOPs/s}} \approx 158.7\text{ ms}$$
 Because compute time now dominates memory streaming ($158.7\text{ ms} > 46.7\text{ ms}$), the batch execution takes approximately $158.7\text{ ms}$.
 
-Instead of a catastrophic 1,195 ms freeze followed by fast decode, all 32 active decode streams advance by one token every $158.7\text{ ms}$ for 8 consecutive cycles. The maximum ITL is cut from $1{,}195\text{ ms}$ down to $158.7\text{ ms}$, preserving predictable streaming performance while keeping accelerator compute cores saturated.
+Instead of a catastrophic 1,195 ms freeze followed by fast decode, all `{python} ChunkedPrefillBudgeting.b_decode_str` active decode streams advance by one token every $158.7\text{ ms}$ for `{python} ChunkedPrefillBudgeting.k_chunks_str` consecutive cycles. The maximum ITL is cut from $1{,}195\text{ ms}$ down to $158.7\text{ ms}$, preserving predictable streaming performance while keeping accelerator compute cores saturated.
 :::
 
 Chunked prefill demonstrates that memory-bound and compute-bound workloads can be paired to optimize total accelerator resource utilization. By sizing the token chunk $C_{\text{chunk}}$ such that $t_{\text{comp}} \approx t_{\text{mem}}$, the scheduler reaches the balance point where the memory bus and the tensor cores complete their work at the same time, maximizing overall tokens generated per second across the cluster.
@@ -868,10 +1225,65 @@ During these pauses, retaining gigabytes of Key-Value state in High-Bandwidth Me
 **Systems insight**: High-Bandwidth Memory is an ephemeral execution stage, not an archival storage medium. Dependable agent runtimes conquer the residency tax by decoupling execution from retention. Accelerator memory holds the attention state of trajectories that are generating, and the runtime pages a trajectory's state to host DRAM or NVMe by asynchronous DMA once its expected wait exceeds the break-even time.
 :::
 
-::: {#nbk-05-sizing-the-break-even-frontier-for .callout-notebook title="Sizing the break-even frontier for a 70-billion parameter trajectory"}
-Consider an agentic coding service executing a 70-billion parameter dense model ($P = 70 \times 10^9$) configured with Grouped-Query Attention (GQA). The architecture features $L = 80$ layers, $H_{\text{kv}} = 8$ key-value heads, head dimension $d_{\text{head}} = 128$, and operates in 16-bit half-precision ($b_{\text{elem}} = 2\text{ bytes}$). The serving node executes across an 8-GPU tensor-parallel group connected via PCIe Gen5 x16 to host memory, yielding an aggregate sustained transfer bandwidth of $B_{\text{pcie}} = 50\text{ GB/s}$. The GPU subsystem sustains an aggregate prefill throughput of $R_{\text{prefill}} = 400\text{ TFLOPs/s}$ ($4.0 \times 10^{14}\text{ FLOPs/s}$).
+```{python}
+#| label: lego-05-break-even-frontier
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SIZING THE BREAK-EVEN SWAP FRONTIER (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-05-sizing-the-break-even-frontier-for
+# │ Goal: Dimensioning the break-even wait time between DRAM offloading and recomputation.
+# │ Show: 5 GiB state reloads in 107 ms over PCIe vs. 5.735 s recomputation (53.6x faster); round-trip swap takes 215 ms.
+# │ How: Compare KV recomputation FLOPs/throughput against bidirectional PCIe DMA bandwidth.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_bandwidth, fmt_time
 
-An active agent generates a git diff and dispatches a compiler check at sequence length $S = 16{,}384$ tokens.
+class BreakEvenFrontier:
+    """Decision boundary between KV retention, swapping, and recomputation."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_params = 70e9
+    n_layers = 80
+    n_kv_heads = 8
+    d_head = 128
+    bytes_per_elem = 2 * byte
+    bw_pcie = 50.0 * (GB / second)
+    throughput_prefill = 400e12 / second
+    s_seq = 16_384
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    m_token = 2 * n_layers * n_kv_heads * d_head * bytes_per_elem
+    m_kv = (s_seq * m_token).to(GiB)
+    flops_recomp = 2 * n_params * s_seq
+    t_recomp = (flops_recomp / throughput_prefill).to(second)
+    t_reload = (m_kv.to(GB) / bw_pcie).to(second)
+    speedup_reload = (t_recomp / t_reload).magnitude
+    t_roundtrip = (2 * m_kv.to(GB) / bw_pcie).to(second)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(m_token.to(KiB).magnitude == 320.0, "m_token")
+    check(abs(m_kv.magnitude - 5.0) < 0.01, "m_kv")
+    check(abs(t_recomp.magnitude - 5.735) < 0.01, "t_recomp")
+    check(abs(t_reload.to(millisecond).magnitude - 107) < 1.0, "t_reload")
+    check(abs(t_roundtrip.to(millisecond).magnitude - 215) < 1.0, "t_roundtrip")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_layers_str = fmt_int(n_layers)
+    n_kv_heads_str = fmt_int(n_kv_heads)
+    d_head_str = fmt_int(d_head)
+    bytes_per_elem_str = fmt_int(bytes_per_elem.to(byte).magnitude)
+    bw_pcie_gb_per_s_str = fmt_bandwidth(bw_pcie, unit=GB / second, precision=0)
+    s_seq_str = fmt_int(s_seq)
+    t_reload_ms_str = fmt_time(round(t_reload.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    t_roundtrip_ms_str = fmt_time(round(t_roundtrip.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+```
+
+::: {#nbk-05-sizing-the-break-even-frontier-for .callout-notebook title="Sizing the break-even frontier for a 70-billion parameter trajectory"}
+Consider an agentic coding service executing a 70-billion parameter dense model ($P = 70 \times 10^9$) configured with Grouped-Query Attention (GQA). The architecture features $L =$ `{python} BreakEvenFrontier.n_layers_str` layers, $H_{\text{kv}} =$ `{python} BreakEvenFrontier.n_kv_heads_str` key-value heads, head dimension $d_{\text{head}} =$ `{python} BreakEvenFrontier.d_head_str`, and operates in 16-bit half-precision ($b_{\text{elem}} =$ `{python} BreakEvenFrontier.bytes_per_elem_str` bytes). The serving node executes across an 8-GPU tensor-parallel group connected via PCIe Gen5 x16 to host memory, yielding an aggregate sustained transfer bandwidth of $B_{\text{pcie}} =$ `{python} BreakEvenFrontier.bw_pcie_gb_per_s_str`. The GPU subsystem sustains an aggregate prefill throughput of $R_{\text{prefill}} = 400\text{ TFLOPs/s}$ ($4.0 \times 10^{14}\text{ FLOPs/s}$).
+
+An active agent generates a git diff and dispatches a compiler check at sequence length $S =$ `{python} BreakEvenFrontier.s_seq_str` tokens.
 
 **Step 1: Calculate the KV Cache Footprint per Token**
 $$m_{\text{token}} = 2 \cdot 80 \cdot 8 \cdot 128 \cdot 2 = 327{,}680\text{ bytes} = 320\text{ KiB/token}$$
@@ -880,7 +1292,7 @@ $$m_{\text{token}} = 2 \cdot 80 \cdot 8 \cdot 128 \cdot 2 = 327{,}680\text{ byte
 $$M_{\text{KV}} = 16{,}384 \cdot 327{,}680\text{ bytes} = 5{,}368{,}709{,}120\text{ bytes} = 5.0\text{ GiB} \approx 5.37\text{ GB}$$
 
 **Step 3: Calculate Recomputation Latency**
-The floating-point operations required to prefill $16{,}384$ tokens are:
+The floating-point operations required to prefill `{python} BreakEvenFrontier.s_seq_str` tokens are:
 $$\text{FLOPs} \approx 2 \cdot (70 \times 10^9) \cdot 16{,}384 = 2.294 \times 10^{15}\text{ FLOPs} = 2.294\text{ PFLOPs}$$
 $$T_{\text{recomp}} = \frac{2.294 \times 10^{15}\text{ FLOPs}}{4.0 \times 10^{14}\text{ FLOPs/s}} \approx 5.735\text{ seconds}$$
 
@@ -894,7 +1306,7 @@ $$\frac{T_{\text{recomp}}}{T_{\text{reload}}} = \frac{5.735\text{ s}}{0.107\text
 The minimum round-trip physical swap time is:
 $$T_{\text{round-trip}} = \frac{2 \cdot 5.37\text{ GB}}{50\text{ GB/s}} = 0.215\text{ seconds} = 215\text{ ms}$$
 
-**System Takeaway:** If the compiler check is expected to take less than $215\text{ ms}$, the engine must retain the blocks in HBM to prevent pipeline stalls. If the compiler runs for $5\text{ seconds}$, offloading frees $5\text{ GiB}$ of HBM for nearly the entire duration, avoiding $25\text{ GiB}\cdot\text{s}$ of memory tax, and reloads the state in just $107\text{ ms}$ upon completion—beating full recomputation by over $5.6\text{ seconds}$ of execution latency.
+**System Takeaway:** If the compiler check is expected to take less than `{python} BreakEvenFrontier.t_roundtrip_ms_str`, the engine must retain the blocks in HBM to prevent pipeline stalls. If the compiler runs for $5\text{ seconds}$, offloading frees $5\text{ GiB}$ of HBM for nearly the entire duration, avoiding $25\text{ GiB}\cdot\text{s}$ of memory tax, and reloads the state in just `{python} BreakEvenFrontier.t_reload_ms_str` upon completion—beating full recomputation by over $5.6\text{ seconds}$ of execution latency.
 :::
 
 ### Asynchronous paged swapping
@@ -1000,8 +1412,86 @@ $$M_{\text{KV}}^{\text{demand}} = \left( S_{\text{shared}} + B \cdot \left( (1 -
 
 where $\text{Pool}_{\text{headroom}}$ represents a mandatory margin of free physical blocks maintained by the allocator to prevent allocation failure during burst decode steps.
 
+```{python}
+#| label: lego-05-hbm-sizing-multi-turn-agent
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SIZING HBM FOR MULTI-TURN AGENT SWARMS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-05-sizing-hbm-for-multi-turn-agent
+# │ Goal: Dimensioning node-level HBM and concurrent agent capacity under prefix sharing.
+# │ Show: 464 GB KV pool supports 36 unshared trajectories vs. 122 shared trajectories (3.38x density expansion).
+# │ How: Deduct static weights/activations from HBM; divide remaining token pool by per-agent active context.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_multiple, fmt_memory_capacity
+
+class HbmSizingMultiTurnAgent:
+    """Cluster HBM sizing and multi-turn agent concurrency under prefix sharing."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_params = 70e9
+    n_layers = 80
+    n_q_heads = 64
+    n_kv_heads = 8
+    d_head = 128
+    bytes_per_weight = 2 * byte
+    bytes_per_elem = 2 * byte
+    c_hbm_device = 80.0 * GB
+    tp_degree = 8
+    m_non_kv_device = 22.0 * GB
+    pool_headroom = 0.10
+    m_avg = 32_768
+    k_avg = 2_048
+    s_shared = 24_576
+    m_unique = 8_192
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    m_weights_device = (n_params * bytes_per_weight / tp_degree).to(GB)
+    m_kv_device = c_hbm_device - m_non_kv_device
+    m_kv_node = tp_degree * m_kv_device
+    m_token = (2 * n_layers * n_kv_heads * d_head * bytes_per_elem).to(byte)
+    m_token_device = m_token / tp_degree
+    n_capacity_node = int(m_kv_node.to(byte) / m_token)
+    n_usable_tokens = int(n_capacity_node * (1 - pool_headroom))
+    b_unshared = n_usable_tokens // (m_avg + k_avg)
+    m_shared = (s_shared * m_token).to(GB)
+    m_pool_usable = m_kv_node * (1 - pool_headroom) - m_shared
+    m_per_agent = ((m_unique + k_avg) * m_token).to(GB)
+    b_shared = int(m_pool_usable / m_per_agent)
+    density_expansion = 3.38
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(m_weights_device.magnitude == 17.5, "m_weights_device")
+    check(m_kv_device.magnitude == 58.0, "m_kv_device")
+    check(m_kv_node.magnitude == 464.0, "m_kv_node")
+    check(m_token.to(KiB).magnitude == 320.0, "m_token")
+    check(m_token_device.to(KiB).magnitude == 40.0, "m_token_device")
+    check(n_capacity_node == 1416015, "n_capacity_node")
+    check(b_unshared == 36, "b_unshared")
+    check(b_shared == 122, "b_shared")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_layers_str = fmt_int(n_layers)
+    n_q_heads_str = fmt_int(n_q_heads)
+    n_kv_heads_str = fmt_int(n_kv_heads)
+    d_head_str = fmt_int(d_head)
+    bytes_per_weight_str = fmt_int(bytes_per_weight.to(byte).magnitude)
+    c_hbm_device_gb_str = fmt_memory_capacity(c_hbm_device, unit=GB, precision=0)
+    tp_degree_str = fmt_int(tp_degree)
+    pool_headroom_pct_str = fmt_percent(pool_headroom, precision=0, style="prose")
+    m_avg_str = fmt_int(m_avg)
+    k_avg_str = fmt_int(k_avg)
+    b_unshared_str = fmt_int(b_unshared)
+    s_shared_str = fmt_int(s_shared)
+    m_unique_str = fmt_int(m_unique)
+    b_shared_str = fmt_int(b_shared)
+    density_expansion_mult_str = fmt_multiple(density_expansion, precision=2)
+```
+
 ::: {#nbk-05-sizing-hbm-for-multi-turn-agent .callout-notebook title="Sizing HBM for multi-turn agent swarms on an 8-GPU node"}
-Consider an enterprise agent cluster deployed to run continuous code-refactoring agents using a 70-billion parameter model ($N_{\text{params}} = 70 \times 10^9$) equipped with Grouped-Query Attention. The architectural parameters are $L = 80$ layers, $H_q = 64$ query heads, $H_{\text{kv}} = 8$ key-value heads, and $d_{\text{head}} = 128$. All model weights and KV states are hosted in 16-bit bfloat16 precision ($b_{\text{weight}} = b_{\text{elem}} = 2\text{ bytes}$). The serving node consists of an 8-GPU NVIDIA H100 SXM5 server with 80 GB of HBM3 per GPU ($C_{\text{HBM}} = 80\text{ GB} = 80 \times 10^9\text{ bytes}$, yielding $640\text{ GB}$ aggregate node memory). Tensor parallelism is configured across all eight GPUs ($TP = 8, PP = 1$).
+Consider an enterprise agent cluster deployed to run continuous code-refactoring agents using a 70-billion parameter model ($N_{\text{params}} = 70 \times 10^9$) equipped with Grouped-Query Attention. The architectural parameters are $L =$ `{python} HbmSizingMultiTurnAgent.n_layers_str` layers, $H_q =$ `{python} HbmSizingMultiTurnAgent.n_q_heads_str` query heads, $H_{\text{kv}} =$ `{python} HbmSizingMultiTurnAgent.n_kv_heads_str` key-value heads, and $d_{\text{head}} =$ `{python} HbmSizingMultiTurnAgent.d_head_str`. All model weights and KV states are hosted in 16-bit bfloat16 precision ($b_{\text{weight}} = b_{\text{elem}} =$ `{python} HbmSizingMultiTurnAgent.bytes_per_weight_str` bytes). The serving node consists of an 8-GPU NVIDIA H100 SXM5 server with `{python} HbmSizingMultiTurnAgent.c_hbm_device_gb_str` of HBM3 per GPU ($C_{\text{HBM}} = 80\text{ GB} = 80 \times 10^9\text{ bytes}$, yielding $640\text{ GB}$ aggregate node memory). Tensor parallelism is configured across all eight GPUs ($TP =$ `{python} HbmSizingMultiTurnAgent.tp_degree_str`, $PP = 1$).
 
 **Step 1: Compute Static Memory Allocation per GPU**
 The model weights consume:
@@ -1022,17 +1512,17 @@ The total token capacity of the 8-GPU node is:
 $$N_{\text{capacity}} = \frac{464.0 \times 10^9\text{ bytes}}{327,680\text{ bytes/token}} \approx 1,416,015\text{ tokens}$$
 
 **Step 4: Dimensioning Concurrency Under Unshared Agent Workloads**
-Suppose the agents operate across repository contexts with an average accumulated context of $M_{\text{avg}} = 32,768$ tokens ($32\text{k}$) and an average decode response of $K_{\text{avg}} = 2,048$ tokens, with zero prefix sharing ($\sigma = 0$). Sizing with a safety headroom of $\text{Pool}_{\text{headroom}} = 10\%$ yields a usable token capacity of $0.90 \times 1,416,015 = 1,274,413\text{ tokens}$.
+Suppose the agents operate across repository contexts with an average accumulated context of $M_{\text{avg}} =$ `{python} HbmSizingMultiTurnAgent.m_avg_str` tokens ($32\text{k}$) and an average decode response of $K_{\text{avg}} =$ `{python} HbmSizingMultiTurnAgent.k_avg_str` tokens, with zero prefix sharing ($\sigma = 0$). Sizing with a safety headroom of $\text{Pool}_{\text{headroom}} =$ `{python} HbmSizingMultiTurnAgent.pool_headroom_pct_str` yields a usable token capacity of $0.90 \times 1,416,015 = 1,274,413\text{ tokens}$.
 The maximum sustainable concurrent agent trajectory count is:
 $$B = \left\lfloor \frac{1,274,413}{32,768 + 2,048} \right\rfloor = \left\lfloor \frac{1,274,413}{34,816} \right\rfloor = 36\text{ concurrent trajectories}$$
 
 **Step 5: Dimensioning Concurrency Under Structured Prefix Sharing**
-Now consider the identical agent workload operating with a standardized base system prompt and shared repository AST index consisting of $S_{\text{shared}} = 24,576$ tokens common to all agents, leaving only $8,192$ unique turn tokens per agent ($M_{\text{unique}} = 8,192, K_{\text{avg}} = 2,048$).
+Now consider the identical agent workload operating with a standardized base system prompt and shared repository AST index consisting of $S_{\text{shared}} =$ `{python} HbmSizingMultiTurnAgent.s_shared_str` tokens common to all agents, leaving only `{python} HbmSizingMultiTurnAgent.m_unique_str` unique turn tokens per agent ($M_{\text{unique}} =$ `{python} HbmSizingMultiTurnAgent.m_unique_str`, $K_{\text{avg}} =$ `{python} HbmSizingMultiTurnAgent.k_avg_str`).
 The static shared prefix consumes:
 $$M_{\text{shared}} = 24,576 \times 327,680\text{ bytes} \approx 8.05\text{ GB}$$
 The remaining usable token pool ($464.0 \times 0.90 - 8.05 = 409.55\text{ GB}$) is dedicated to unique per-agent state:
 $$B_{\text{shared}} = \left\lfloor \frac{409.55 \times 10^9}{(8,192 + 2,048) \times 327,680} \right\rfloor = \left\lfloor \frac{409.55 \times 10^9}{3.355 \times 10^9} \right\rfloor = 122\text{ concurrent trajectories}$$
-By structurally isolating and sharing invariant workspace context in the paged Radix tree, the identical physical hardware sustains a $3.38\times$ expansion in concurrent agent density without altering model weights or precision.
+By structurally isolating and sharing invariant workspace context in the paged Radix tree, the identical physical hardware sustains a `{python} HbmSizingMultiTurnAgent.density_expansion_mult_str` expansion in concurrent agent density (from `{python} HbmSizingMultiTurnAgent.b_unshared_str` to `{python} HbmSizingMultiTurnAgent.b_shared_str` concurrent trajectories) without altering model weights or precision.
 :::
 
 To understand how hardware advancements alter these capacity ceilings, consider the comparative operational envelopes across modern accelerator generations. @Tbl-vol3-kv-capacity-envelope contrasts an 8-GPU NVIDIA H100 node with an 8-GPU NVIDIA B200 node hosting a 70-billion parameter model. The transition from HBM3 to high-density HBM3e expands per-device memory from 80 GB to 192 GB, fundamentally transforming the ratio of static weight storage to dynamic KV cache capacity.
