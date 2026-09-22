@@ -4,7 +4,21 @@ engine: jupyter
 
 # Formal Systems Invariants {#sec-vol3-appendix-math}
 
-This appendix provides the rigorous mathematical formalisms and theoretical derivations that underpin the agentic systems principles discussed in the main text. By migrating these algebraic formulations here, the core chapters remain focused on high-level systems architecture and physical engineering constraints, while still providing the necessary theoretical depth for advanced readers and researchers.
+The chapters state many results in one line, with the intuition an engineer needs to apply them, and leave the derivation for readers who want to check it or extend it. This appendix collects those derivations: the formal model of a trajectory, the conditions under which a runtime can guarantee that a loop ends, the statistics behind evaluation and release decisions, the mathematics of verification cadence, credit assignment, and imitation error, and the limits of voting and of high-dimensional retrieval. Each section states its result, derives it, and names the chapter that uses it, so a reader can move between the argument in the main text and the proof here without reading either in full.
+
+## How to Use This Appendix {.unnumbered}
+
+Consult the section whose question matches the one in front of you.
+
+- **When you need the formal model of what an agent observes and decides**, use @sec-vol3-appendix-math-pomdp.
+- **When you need to prove that a runtime's budgets and progress checks end every loop**, use @sec-vol3-appendix-math-lyapunov.
+- **When you need to reason about how taint combines as untrusted data enters a context**, use @sec-vol3-appendix-math-lattice.
+- **When long trajectories delay short ones, or trajectory lengths look heavy-tailed**, use @sec-vol3-appendix-math-queueing and @sec-vol3-appendix-math-pareto.
+- **When you need to choose how often to verify or checkpoint**, use @sec-vol3-appendix-math-verification and @sec-vol3-appendix-math-daly.
+- **When you need the estimators and tests behind evaluation and release gates**, use @sec-vol3-appendix-math-bootstrap, @sec-vol3-appendix-math-pass-at-k, and @sec-vol3-appendix-math-sprt.
+- **When you need the gradients or error bounds behind training on trajectories**, use @sec-vol3-appendix-math-lora, @sec-vol3-appendix-math-rl, @sec-vol3-appendix-math-credit-assignment, and @sec-vol3-appendix-math-compounding-error.
+- **When you need the limits of voting, multi-agent speedup, or escalation thresholds**, use @sec-vol3-appendix-math-correlated-quorum, @sec-vol3-appendix-math-amdahl, and @sec-vol3-appendix-math-escalation.
+- **When you need the mathematics of constrained decoding, repository ranking, low-rank compression, or high-dimensional search**, use @sec-vol3-appendix-math-dfa, @sec-vol3-appendix-math-pagerank, @sec-vol3-appendix-math-svd, and @sec-vol3-appendix-math-curse-dimensionality.
 
 ## POMDP Formalization of Trajectories {#sec-vol3-appendix-math-pomdp}
 
@@ -26,7 +40,7 @@ Because the agent cannot directly inspect the complete state $s \in \mathcal{S}$
 
 $$b_t = (x_0, a_0, o_0, x_1, a_1, o_1, \dots, x_t)$$
 
-where $x_t$ denotes internal model thoughts and reasoning tokens. This formalism underpins the necessity of directed acyclic graphs (DAGs) of execution in agentic systems, as detailed in @sec-vol3-test-time-compute.
+where $x_t$ denotes the reasoning tokens the model generated at step $t$. The belief is built from what the agent has seen, not from what the environment now contains, so it can be stale the moment a tool or another writer changes the environment. That gap is why the runtime, not the model, is responsible for invalidating stale observations (@sec-vol3-context-engineering-context-rot), and why a plan is treated as a revisable hypothesis rather than a fixed program (@sec-vol3-test-time-compute-planning-revision).
 
 ## Lyapunov Liveness Verification {#sec-vol3-appendix-math-lyapunov}
 
@@ -44,7 +58,7 @@ where:
 - $T_{\text{budget}} - T_{\text{consumed},t}$ is the remaining token and financial compute balance.
 - $\mathcal{D}_{\text{goal}}(S_t, S^*)$ is a metric measuring distance to goal state completion.
 
-If an agent executes an action that fails to reduce $\mathcal{D}_{\text{goal}}$, the step and token budget terms enforce that $V(t)$ strictly decreases. When $V(t) \le 0$, the runtime intercepts execution and triggers deterministic termination handlers as discussed in the main text.
+If an agent executes an action that fails to reduce $\mathcal{D}_{\text{goal}}$, the step and token budget terms still make $V(t)$ strictly decrease. When $V(t) \le 0$, the runtime ends the trajectory. The budget terms are the per-trajectory ceilings of @sec-vol3-controlplane-accounting, and the distance term is the environment-based progress signal of @sec-vol3-sagas-watchdogs. Because the budget terms alone guarantee termination, the distance term matters for detecting a loop early rather than for ending it.
 
 ## Information Flow Security Lattice {#sec-vol3-appendix-math-lattice}
 
@@ -59,38 +73,38 @@ In an autonomous agent runtime, we define two orthogonal label dimensions: **Sec
 $$\text{Trusted} \sqsubset \text{Untrusted}$$
 
 * A user prompt authored by the verified system operator carries label $\tau = \text{Trusted}$.
-* Any text ingested from the external environment—including web pages, GitHub issues, pull request diffs, compiler stderr traces, and database records—carries label $\tau = \text{Untrusted}$.
+* Any text ingested from the environment, including web pages, issue comments, pull request diffs, compiler error output, and database records, carries label $\tau = \text{Untrusted}$.
 
-During autoregressive context assembly, every segment $x_i$ in the agent context window $C_t$ has an associated taint tag $\tau(x_i)$. The cumulative context taint $\tau(C_t)$ is the join across all constituent tokens:
+During context assembly, every segment $x_i$ in the agent context window $C_t$ has an associated taint tag $\tau(x_i)$. The cumulative context taint $\tau(C_t)$ is the join across all constituent tokens:
 
 $$\tau(C_t) = \bigsqcup_{i=1}^{|C_t|} \tau(x_i)$$
 
-If a single untrusted document enters the context window, the cumulative context transitions to $\tau(C_t) = \text{Untrusted}$. This formalism rigorously enforces dynamic capability revocation, as discussed in @sec-vol3-sandboxes-threat-model.
+If a single untrusted document enters the context window, the cumulative context transitions to $\tau(C_t) = \text{Untrusted}$. Because the join is monotone, taint can only be cleared by a step outside the model, such as a quarantined reader that returns typed fields, and never by further context. @Sec-vol3-sandboxes-taint applies this rule to decide which tool calls may accept an argument derived from a tainted context.
 
 ## Heavy-Tailed Queueing Theory {#sec-vol3-appendix-math-queueing}
 
-When task variance is unbounded, classical queueing models completely collapse. In an $M/G/1$ queue governed by the Pollaczek-Khinchine formula, the mean waiting time in the queue is directly proportional to the second moment of service time $\mathbb{E}[S^2]$:
+Queueing delay depends on the variability of service times, not only on their mean. In an $M/G/1$ queue, the Pollaczek-Khinchine formula makes the mean wait proportional to the second moment of the service time $\mathbb{E}[S^2]$:
 
 $$\mathbb{E}[W_{\text{queue}}] = \frac{\lambda \mathbb{E}[S^2]}{2 (1 - \rho)}$$
 
-Under heavy-tailed Pareto workloads, $\mathbb{E}[S^2] \to \infty$. In practical clusters, this mathematical reality manifests as catastrophic Head-of-Line (HoL) blocking: when a standard First-In-First-Out (FIFO) queue schedules a 200-step agent, it monopolizes accelerator resources for tens of minutes, causing queue backpressure that delays hundreds of quick 2-step tasks. This necessitates the specialized admission control and scheduling techniques outlined in @sec-vol3-failure-recovery.
+Under heavy-tailed service times, $\mathbb{E}[S^2]$ is very large or unbounded (@sec-vol3-appendix-math-pareto). In a cluster this appears as head-of-line blocking. When a first-in, first-out queue admits a 200-step trajectory, that trajectory holds its worker, sandbox, and cache memory for tens of minutes, and hundreds of two-step tasks behind it wait. Separating long trajectories from short ones, by priority lanes or by admission limits per class, is the remedy developed in @sec-vol3-controlplane-scheduling and @sec-vol3-agent-economics-capacity.
 
 ## Heavy-Tailed Pareto Service Times {#sec-vol3-appendix-math-pareto}
 
-Unlike stateless large language model (LLM) requests which follow predictable Gaussian or Poisson arrival distributions, multi-step agent trajectories exhibit severe heavy-tailed behavior. The probability that an agent task requires $N$ steps is modeled by a Pareto distribution:
+A single model call has a length bounded by its output ceiling. A trajectory's length in steps has no such bound, because the number of turns depends on what the agent finds, and trajectory lengths are often modeled as heavy-tailed. A Pareto model makes the consequence precise. The probability that a task requires more than $x$ steps is
 
 $$\mathbb{P}(N > x) \approx \left( \frac{x_{\min}}{x} \right)^\alpha \quad \text{for } x \ge x_{\min}$$
 
 where $x_{\min} \ge 1$ is the minimum task length, and $\alpha$ is the Pareto tail index.
 
-In real-world agent clusters, empirical measurements reveal tail indices in the range $1.0 < \alpha < 1.4$. Because $\alpha \le 2$, the theoretical variance of the service time distribution is strictly infinite:
+The tail index $\alpha$ must be estimated from a workload's own trajectory lengths. Whenever $\alpha \le 2$, the variance of the step count is infinite:
 
 $$\operatorname{Var}(N) = \begin{cases}
 \infty & \text{if } 1 < \alpha \le 2 \\
 \text{undefined} & \text{if } \alpha \le 1
 \end{cases}$$
 
-This infinite variance fundamentally invalidates traditional FIFO scheduling mechanisms.
+With infinite variance, the mean wait in @sec-vol3-appendix-math-queueing is unbounded however low the utilization, and sample means of trajectory length converge slowly, so capacity plans and budget ceilings should be set from measured percentiles rather than from averages (principle \ref{pri-vol3-heavy-tailed-scheduling}).
 
 ## LoRA Matrix Decomposition {#sec-vol3-appendix-math-lora}
 
@@ -104,7 +118,7 @@ During forward computation on an input activation vector $x$:
 
 $$h = W_0 x + \Delta W x = W_0 x + \frac{\alpha}{r} B (A x)$$
 
-Matrix $A$ is initialized from a Gaussian distribution $\mathcal{N}(0, \sigma^2)$, while matrix $B$ is initialized to zero, ensuring that $\Delta W = 0$ at the start of training. This mathematical decomposition allows agentic systems to dynamically swap small adapter matrices (representing different tool capabilities) in and out of GPU memory with sub-millisecond latency, as explored in @sec-vol3-fine-tuning-peft.
+Matrix $A$ is initialized from a Gaussian distribution $\mathcal{N}(0, \sigma^2)$, while matrix $B$ is initialized to zero, ensuring that $\Delta W = 0$ at the start of training. Because the adapter holds $r(d + k)$ parameters instead of $dk$, a serving system can hold one copy of the base model and many small adapters, one per agent role, which is the deployment pattern of @sec-vol3-fine-tuning-peft.
 
 During backward propagation, gradients of the scalar loss $\mathcal{L}$ with respect to the adapter projection matrices $A$ and $B$ are computed using the matrix chain rule:
 
@@ -126,11 +140,11 @@ When optimizing policies such as in GRPO, the objective function constrains dive
 
 $$D_{\text{KL}}(\pi_\theta \parallel \pi_{\text{ref}}) = \frac{\pi_{\text{ref}}(o_{i,t} \mid q, o_{i,<t})}{\pi_\theta(o_{i,t} \mid q, o_{i,<t})} - \log \frac{\pi_{\text{ref}}(o_{i,t} \mid q, o_{i,<t})}{\pi_\theta(o_{i,t} \mid q, o_{i,<t})} - 1$$
 
-This penalty enforces that the optimized policy $\pi_\theta$ does not deviate too far from the foundational knowledge encoded in the base model $\pi_{\text{ref}}$, as discussed in @sec-vol3-rlvr-grpo.
+The penalty keeps the optimized policy $\pi_\theta$ close to the reference model $\pi_{\text{ref}}$, which limits how far optimization can drift toward outputs the reward scores well but the reference model would rarely produce (@sec-vol3-rlvr-grpo). It lowers the risk of reward hacking without removing it; isolating the verifier is what removes the most direct routes (@sec-vol3-rlvr-sandboxing).
 
 ## Credit Assignment Variance in Trajectory Optimization {#sec-vol3-appendix-math-credit-assignment}
 
-In sequential trajectory optimization, assigning credit to individual actions governs the sample efficiency of training and the speculative waste of test-time search.
+How credit for an outcome is assigned to the individual actions of a trajectory sets how many rollouts training needs.
 
 Let an agent trajectory of horizon $T$ be denoted by $\tau = (s_0, a_1, s_1, \dots, a_T, s_T)$. In an Outcome Reward Model (ORM), credit is provided as a scalar terminal reward $R_{\text{ORM}}(\tau) \in [0, 1]$ conditioned on task completion at leaf state $s_T$. Under policy gradient optimization (REINFORCE), the gradient estimator with baseline $b$ is:
 
@@ -144,7 +158,7 @@ where $\mathbf{\psi}_t = \nabla_\theta \log \pi_\theta(a_t \mid s_{t-1})$ and $\
 
 $$\operatorname{Var}\left(g_{\text{ORM}}\right) = \mathcal{O}\left(T^2\right)$$
 
-This $\mathcal{O}(T^2)$ variance explosion means that as reasoning trajectories grow to hundreds of tokens or tool interactions, the signal-to-noise ratio of policy gradients collapses, requiring an exponential number of rollout trajectories to distinguish valid intermediate deductions from fatal reasoning errors.
+This $\mathcal{O}(T^2)$ growth means that as trajectories grow to hundreds of turns, the signal-to-noise ratio of the policy gradient falls, and the number of rollouts needed for a gradient of given precision grows with the square of the horizon.
 
 Conversely, a Process Reward Model (PRM) supplies dense, localized step rewards $r_t = r_{\text{PRM}}(s_{t-1}, a_t)$. Under localized credit assignment, the policy gradient uses the step advantage $\hat{A}_t = \sum_{k=t}^T \gamma^{k-t} r_k - V(s_{t-1})$:
 
@@ -154,13 +168,13 @@ By the law of total expectation and causality, future rewards are conditionally 
 
 $$\operatorname{Var}\left(g_{\text{PRM}}\right) = \mathcal{O}\left(\frac{T}{1 - \gamma}\right) = \mathcal{O}(T)$$
 
-The linear scaling $\mathcal{O}(T)$ under PRMs fundamentally explains why step-level supervision achieves sample efficiency gains of several orders of magnitude over sparse terminal rewards in multi-step deliberation tasks, as discussed in @sec-vol3-test-time-compute.
+The linear scaling under step-level rewards is the formal reason dense, per-step signals can make credit assignment over long trajectories more sample-efficient than a single terminal reward. It holds only if the step rewards are accurate; a learned step scorer with its own errors trades variance for bias, which is the trade @sec-vol3-rlvr-credit weighs.
 
 ## Continuous Cost Functions for Verification {#sec-vol3-appendix-math-verification}
 
-The economics of system execution dictates that we cannot verify an agent after every single micro-action. We formalize this trade-off using a continuous cost function.
+Verifying after every step is too expensive, and verifying only at the end lets an early error waste every step after it. A cost function makes the trade explicit.
 
-Let $N$ denote the total trajectory length in steps. Let $K$ denote the number of verification checkpoints scheduled across the trajectory. The total compute and latency cost of an agent task is modeled as:
+Let $N$ denote the total trajectory length in steps. Let $K$ denote the number of verification points scheduled across the trajectory. The total compute and latency cost of an agent task is modeled as:
 
 $$C_{\text{total}} = N \cdot C_{\text{gen}} + K \cdot C_{\text{ver}} + \mathbb{E}[N_{\text{wasted}}] \cdot C_{\text{gen}} + \mathbb{E}[N_{\text{rollback}}] \cdot C_{\text{rollback}}$$
 
@@ -171,11 +185,11 @@ where:
 * $\mathbb{E}[N_{\text{wasted}}]$ is the expected number of steps executed between the occurrence of an error and its detection.
 * $C_{\text{rollback}}$ is the overhead of rewinding state.
 
-The optimal checkpoint cadence $K^*$ balances the marginal cost of verification against the expected cost of discarded forward progress:
+The optimal number of verifications $K^*$ balances the marginal cost of verification against the expected cost of discarded forward progress:
 
 $$K^* = N \sqrt{\frac{\lambda_{\text{error}} \cdot C_{\text{gen}}}{2 \cdot C_{\text{ver}}}}$$
 
-where $\lambda_{\text{error}}$ is the per-step error arrival rate. The checkpoint count grows linearly with trajectory length, which is another way of saying that the optimal checkpoint *interval* does not depend on how long the trajectory runs:
+where $\lambda_{\text{error}}$ is the per-step error arrival rate. The number of verifications grows linearly with trajectory length, which is another way of saying that the optimal verification *interval* does not depend on how long the trajectory runs:
 
 $$\frac{N}{K^*} = \sqrt{\frac{2 \cdot C_{\text{ver}}}{\lambda_{\text{error}} \cdot C_{\text{gen}}}}$$
 
@@ -183,7 +197,7 @@ A runtime therefore sets its cadence from the verification tax and the environme
 
 ### Analytical minimization of discrete block latency
 
-In @sec-vol3-test-time-compute-bounded-search, execution latency over $N$ steps partitioned into blocks of length $m$ with per-step reliability $p$ and per-block verification latency $T_{\text{ver}}$ is modeled discretely as:
+The same trade can be modeled discretely. Partition a run of $N$ steps into blocks of $m$ steps, verify at the end of each block, and restart a block whenever verification fails. With per-step reliability $p$, step time $T_{\text{step}}$, and per-block verification time $T_{\text{ver}}$, the expected time is
 
 $$T(m) = \frac{N}{m} \cdot \frac{m \cdot T_{\text{step}} + T_{\text{ver}}}{p^m} = N \cdot p^{-m} \left( T_{\text{step}} + \frac{T_{\text{ver}}}{m} \right)$$
 
@@ -205,25 +219,25 @@ When the failure rate $(1 - p)$ is small, the constant term $\frac{T_{\text{ver}
 
 $$m^* \approx \sqrt{\frac{T_{\text{ver}}}{(1 - p) T_{\text{step}}}}$$
 
-When accounting for unrecoverable branch restarts and state rollbacks (where each failure incurs an expected penalty of $m/2$ wasted steps), the exact factor of 2 matches Young's classical checkpointing formula [@young1974; @daly2006]:
+If a failure is instead detected where it occurs and costs on average the $m/2$ steps since the last verification, rather than the whole block, the same balance produces the factor of 2 in Young's checkpointing formula [@young1974; @daly2006]:
 
 $$m^* \approx \sqrt{\frac{2 \cdot T_{\text{ver}}}{(1 - p) \cdot T_{\text{step}}}}$$
 
-This equivalence confirms that optimal verification cadence in test-time deliberation is structurally identical to optimal checkpoint scheduling in fault-tolerant distributed computing.
+The optimal verification cadence is therefore the same square-root law that sets checkpoint intervals in fault-tolerant computing, and @sec-vol3-persistence-checkpointing uses it in that form (@eq-vol3-young-formula).
 
 ## PageRank Symbol Graphing for Repository Maps {#sec-vol3-appendix-math-pagerank}
 
-To construct an optimal repository map within a tight token budget, agent runtimes model the codebase as a directed graph $G = (V, E)$ of symbol definitions and references. The system computes the personalized PageRank vector $\mathbf{r} \in \mathbb{R}^{|V|}$ over $G$:
+To build a compact repository map within a token budget, a runtime can model the codebase as a directed graph $G = (V, E)$ of symbol definitions and references. The system computes the personalized PageRank vector $\mathbf{r} \in \mathbb{R}^{|V|}$ over $G$:
 
 $$\mathbf{r} = (1 - d) \mathbf{p} + d A^T D^{-1} \mathbf{r}$$
 
 where $d \approx 0.85$ is the damping factor, $A$ is the adjacency matrix, $D$ is the degree matrix, and $\mathbf{p}$ is a personalization preference vector initialized to bias toward files mentioned in the user's issue description or recent git diffs.
 
-By sorting symbols in descending order of PageRank score $\mathbf{r}_i$ and greedily packing them, systems guarantee that the most topologically central and task-relevant architectural abstractions are exposed to the agent's context window, as discussed in @sec-vol3-persistent-graphrag.
+Sorting symbols by score and packing them greedily until the budget is spent favors the definitions most referenced by, and closest to, the files the task names. @Sec-vol3-persistent-graphrag uses this ranking for graph retrieval over code, and @sec-vol3-long-term-memory-agentic-retrieval pre-stages such a map before the agent searches.
 
 ## Statistical Significance and Monte Carlo Bootstrapping {#sec-vol3-appendix-math-bootstrap}
 
-Due to inherent hardware and execution non-determinism, detecting true agent capability improvements requires rigorous statistical testing.
+An agent's outcome on a task varies from run to run (@sec-vol3-evaluation-resampling), so a measured improvement is evidence only when it exceeds what that variation could produce by chance.
 
 The required sample size $N$ to detect an effect size $\Delta p = p_2 - p_1$ with statistical significance $\alpha$ and statistical power $1 - \beta$ is formally governed by the two-proportion hypothesis test:
 
@@ -238,7 +252,7 @@ where $\bar{p} = (p_1 + p_2) / 2$, $z_{1 - \alpha/2}$ is the standard normal cri
 # │ WORKED SAMPLE SIZE FOR THE TWO-PROPORTION TEST (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: The worked example below the displayed equation, and the matching
-# │          claim in @sec-vol3-evaluation-gyms.
+# │          claim in @sec-vol3-evaluation-wilson.
 # │
 # │ Goal: Evaluate the equation above for the rates the appendix quotes, so
 # │       the appendix and the chapter that cites it cannot disagree.
@@ -275,15 +289,15 @@ class BootstrapSampleSize:
 
 For an agent baseline success rate $p_1$ of `{python} BootstrapSampleSize.p1_str` and a targeted improvement to a $p_2$ of `{python} BootstrapSampleSize.p2_str` with $\alpha = 0.05$ and $\beta = 0.20$, the required $N$ is `{python} BootstrapSampleSize.required_str` tasks per arm.
 
-Furthermore, because trajectory metrics follow heavy-tailed non-Gaussian distributions, classical parametric distributions fail. Runtimes employ non-parametric **Monte Carlo Bootstrapping** (@efron1994bootstrap) by drawing $B$ bootstrap resamples with replacement and computing the empirical percentile confidence interval:
+Metrics such as cost or turns per trajectory are often heavy-tailed, so intervals that assume a normal distribution can mislead. The nonparametric bootstrap [@efron1994bootstrap] avoids that assumption by drawing $B$ bootstrap resamples with replacement and computing the empirical percentile confidence interval:
 
 $$[\theta_{\text{lower}}, \theta_{\text{upper}}] = \left[ \hat{\theta}^*_{\lfloor 0.025 B \rfloor}, \; \hat{\theta}^*_{\lfloor 0.975 B \rfloor} \right]$$
 
-This ensures that system updates are statistically valid before production deployment, as discussed in @sec-vol3-evaluation-gyms.
+@Sec-vol3-evaluation-wilson uses these intervals, and the sample-size formula above, to decide how many tasks an evaluation needs before a difference can be trusted.
 
 ## Deterministic Finite Automata and Grammar-Constrained Logit Decoding {#sec-vol3-appendix-math-dfa}
 
-Grammar-constrained logit decoding enforces formal language compliance at the GPU tensor layer by compiling a context-free grammar or regular JSON schema into a Deterministic Finite Automaton (DFA) [@willard2023outlines].
+Grammar-constrained decoding (@sec-vol3-foundation-model-grammar-constrained) enforces formal-language compliance at each sampling step by compiling a regular grammar, such as one derived from a JSON schema, into a deterministic finite automaton (DFA) [@willard2023outlines]. Context-free grammars need a pushdown automaton, but the masking argument below is unchanged.
 
 Formally, let the target grammar be compiled into a DFA 5-tuple:
 
@@ -307,7 +321,7 @@ At generation step $t$, let the automaton reside in state $q_t \in Q$ after cons
 
 $$\mathcal{V}_{\text{valid}}(q_t) = \left\{ v \in \mathcal{V} \;\middle|\; \delta^*(q_t, s(v)) \ne \bot \right\}$$
 
-Prior to the GPU softmax kernel, the unnormalized logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$ is transformed elementwise:
+Before the softmax, the unnormalized logit vector $\mathbf{z}_t \in \mathbb{R}^{|\mathcal{V}|}$ is transformed elementwise:
 
 $$z_{t, v}' = \begin{cases} z_{t, v} & \text{if } v \in \mathcal{V}_{\text{valid}}(q_t) \\ -\infty & \text{if } v \notin \mathcal{V}_{\text{valid}}(q_t) \end{cases}$$
 
@@ -319,11 +333,11 @@ Because $\exp(-\infty) = 0$, the probability of sampling any token $v \notin \ma
 
 $$\forall v \notin \mathcal{V}_{\text{valid}}(q_t), \quad \Pr(x_t = v \mid x_{<t}) = 0$$
 
-By induction over the sequence length, every completed generation trajectory $x_{1:T}$ ending in $q_T \in F$ is guaranteed to belong to the formal language $\mathcal{L}(\mathcal{D})$ accepted by the grammar. At runtime, the transition matrix is precomputed into a compressed bitmask tensor $\mathbf{M} \in \{0, 1\}^{|Q| \times \lceil |\mathcal{V}| / 32 \rceil}$, allowing a GPU warp to determine validity in $\mathcal{O}(1)$ time using a single 32-bit bitwise AND instruction (`__ballot_sync`), bypassing costly host-side parsing as discussed in @sec-vol3-tool-calling.
+By induction over the sequence length, every completed generation $x_{1:T}$ ending in $q_T \in F$ belongs to the formal language $\mathcal{L}(\mathcal{D})$ accepted by the grammar. The guarantee is syntactic only; a string in the language can still name a file that does not exist or do the wrong thing. At runtime the valid sets are precomputed into a bitmask per automaton state, $\mathbf{M} \in \{0, 1\}^{|Q| \times |\mathcal{V}|}$, so the mask for a step is one table lookup. @Sec-vol3-appendix-inference-decode-loop sizes that table and explains why it must sit beside the sampler.
 
 ## Higher-Order Daly Checkpoint Cadence Derivation {#sec-vol3-appendix-math-daly}
 
-In @sec-vol3-agent-harness, the optimal checkpoint interval is derived from first principles using Young's balanced trade-off between checkpoint save overhead and recompute waste:
+@Sec-vol3-persistence-checkpointing sets the checkpoint interval with Young's first-order balance between checkpoint overhead and lost work (@eq-vol3-young-formula):
 
 $$T_{\text{opt}} = \sqrt{2 \cdot T_{\text{save}} \cdot M_{\text{MTBF}}}$$
 
@@ -345,11 +359,11 @@ Substituting $\lambda = 1 / M_{\text{MTBF}}$ yields Daly's higher-order analytic
 
 $$T_{\text{opt}}^{\text{Daly}} = \sqrt{2 \cdot T_{\text{save}} \cdot M_{\text{MTBF}}} \cdot \left[ 1 + \frac{1}{3}\sqrt{\frac{T_{\text{save}}}{2 M_{\text{MTBF}}}} \right] - T_{\text{save}}$$
 
-In typical machine learning agent deployments where checkpoint serialization latency is much smaller than the mean time between failures ($T_{\text{save}} \ll M_{\text{MTBF}}$, such as $T_{\text{save}} = 2.5\text{ s}$ versus $M_{\text{MTBF}} = 1{,}600\text{ s}$), the second-order perturbation term $\frac{1}{3}\sqrt{\frac{T_{\text{save}}}{2 M_{\text{MTBF}}}} \approx \frac{1}{3}\sqrt{0.00078} \approx 0.0093$ represents an adjustment of less than 1 percent. Consequently, Young's first-principles geometric mean provides an exceptionally robust operational rule of thumb for systems runtime schedulers.
+When checkpointing is fast relative to the time between failures ($T_{\text{save}} \ll M_{\text{MTBF}}$), the correction is small. For example, with $T_{\text{save}} = 2.5\text{ s}$ and $M_{\text{MTBF}} = 1{,}600\text{ s}$, the second-order term $\frac{1}{3}\sqrt{\frac{T_{\text{save}}}{2 M_{\text{MTBF}}}} \approx \frac{1}{3}\sqrt{0.00078} \approx 0.0093$ changes the interval by less than 1 percent, so Young's first-order formula is the practical rule for agent runtimes, whose checkpoints are small next to their failure intervals.
 
 ## Unbiased Pass@$k$ Combinatorial Derivation and Numerical Stability {#sec-vol3-appendix-math-pass-at-k}
 
-When evaluating stochastic generative models and multi-step agents, drawing $k$ samples per task and counting empirical passes introduces severe sample bias unless thousands of trajectories are generated per task. @chen2021evaluating introduced the unbiased Pass@$k$ estimator by framing evaluation as hyper-geometric sampling without replacement.
+Estimating pass@$k$ by plugging a task's observed success rate $\hat{p} = c/n$ into $1 - (1 - \hat{p})^k$ is biased when $n$ is small. @chen2021evaluating derived an unbiased estimator by treating evaluation as sampling $k$ of the $n$ attempts without replacement.
 
 Let $n$ denote the total number of candidate trajectories generated and evaluated for a given benchmark task ($n \ge k$), and let $c$ denote the number of trajectories that successfully satisfy the verification oracle ($0 \le c \le n$).
 
@@ -383,67 +397,57 @@ Exponentiating and subtracting from unity yields the standard runtime formulatio
 
 $$1 - \frac{\binom{n - c}{k}}{\binom{n}{k}} = 1 - \exp\left( \sum_{i=1}^k \ln\left( \frac{n - c - k + i}{n - k + i} \right) \right)$$
 
-This formulation enables stable computation for arbitrary rollout counts (e.g., $n = 1{,}000, k = 100$) in $\mathcal{O}(k)$ time with zero precision degradation, as discussed in @sec-vol3-evaluation-gyms.
+This formulation computes the estimator stably for large rollout counts (for example, $n = 1{,}000$ and $k = 100$) in $\mathcal{O}(k)$ time. @Sec-vol3-test-time-compute-pass-at-k reads pass@$k$ as the ceiling of best-of-$k$ selection, and @sec-vol3-evaluation-pass-k reports it beside pass$^k$.
+
+### The reliability estimator pass$^k$
+
+Pass@$k$ asks whether at least one of $k$ runs succeeds. Reliability asks whether all $k$ do. Drawing $k$ of the $n$ runs without replacement, all $k$ succeed only if all are drawn from the $c$ successes, so the unbiased estimator is
+
+$$\text{pass}^k = \mathbb{E}_{\text{tasks}}\left[ \frac{\binom{c}{k}}{\binom{n}{k}} \right] = \mathbb{E}_{\text{tasks}}\left[ \prod_{i=0}^{k-1} \frac{c - i}{n - i} \right]$$
+
+which is zero whenever $c < k$ and matches @eq-pass-pow-k. The product form avoids overflow in the same way as the telescoping product above. For a task with independent per-run success probability $p$, $\text{pass}@k = 1 - (1-p)^k$ rises with $k$ while $\text{pass}^k = p^k$ falls, which is why the two diverge as $k$ grows and why an agent's potential and its reliability must be reported separately.
 
 ## Wald's Sequential Probability Ratio Test (SPRT) Decision Boundaries {#sec-vol3-appendix-math-sprt}
 
-In @sec-vol3-evaluation-releases, canary routing decisions are governed by Wald's Sequential Probability Ratio Test (SPRT) [@wald1945sequential]. This derivation establishes the exact log-likelihood formulation and the absorbing boundary thresholds $A$ and $B$.
+@Sec-vol3-evaluation-releases decides whether to promote or roll back a canary with Wald's sequential probability ratio test [@wald1945sequential]. This section derives the test's statistic and its two stopping boundaries in the chapter's convention.
 
-Let $X_1, X_2, \dots, X_m$ denote a sequence of independent and identically distributed Bernoulli trials representing consecutive canary trajectory outcomes, where $X_i = 1$ indicates a trajectory failure (or quality regression) with probability $p$, and $X_i = 0$ indicates a verified success with probability $1 - p$.
+Let $x_1, x_2, \dots$ be the outcomes of successive canary trajectories, with $x_i = 1$ for an accepted task and $x_i = 0$ otherwise, independent with success probability $p$. The test compares
 
-We test the composite null hypothesis against the alternative:
+$$H_0: p = p_0 \quad (\text{the acceptable success rate}), \qquad H_1: p = p_1 = p_0 - \Delta \quad (\text{the degraded rate the gate must catch})$$
 
-$$H_0: p = p_0 \quad (\text{nominal failure rate}), \qquad H_1: p = p_1 \quad (\text{degraded failure rate, } p_1 > p_0)$$
+A single outcome has probability $P(x \mid p) = p^{x} (1 - p)^{1 - x}$. After $n$ trajectories with $d_n$ accepted, the log-likelihood ratio in favor of $H_0$ is
 
-The probability mass function of an individual trial under parameter $p$ is:
+$$\Lambda_n = \sum_{i=1}^n \ln \frac{P(x_i \mid p_0)}{P(x_i \mid p_1)} = d_n \ln \frac{p_0}{p_1} + (n - d_n) \ln \frac{1 - p_0}{1 - p_1}$$
 
-$$P(X_i \mid p) = p^{X_i} (1 - p)^{1 - X_i}$$
+Each success adds $\ln(p_0/p_1) > 0$ and each failure adds $\ln\big((1-p_0)/(1-p_1)\big) < 0$, so $\Lambda_n$ is a random walk that drifts upward under $H_0$ and downward under $H_1$. The test promotes when $\Lambda_n \ge A$, rolls back when $\Lambda_n \le B$, and otherwise keeps sampling.
 
-For $m$ independent observations with $k = \sum_{i=1}^m X_i$ total observed failures and $m - k$ successes, the joint likelihood ratio $\Lambda_m$ is:
+### Deriving the boundaries
 
-$$\Lambda_m = \frac{\prod_{i=1}^m P(X_i \mid p_1)}{\prod_{i=1}^m P(X_i \mid p_0)} = \frac{p_1^k (1 - p_1)^{m - k}}{p_0^k (1 - p_0)^{m - k}} = \left( \frac{p_1}{p_0} \right)^k \left( \frac{1 - p_1}{1 - p_0} \right)^{m - k}$$
+Let $\alpha$ be the probability of promoting a degraded candidate, $\Pr(\text{promote} \mid H_1)$, and $\beta$ the probability of rolling back a good one, $\Pr(\text{roll back} \mid H_0)$. Let $\Omega_P$ be the set of outcome sequences that end in promotion. Every sequence $\mathbf{x} \in \Omega_P$ satisfies $P(\mathbf{x} \mid H_0) \ge e^{A} P(\mathbf{x} \mid H_1)$, so summing over $\Omega_P$,
 
-Taking the natural logarithm transforms the multiplicative likelihood into an additive cumulative sum:
+$$1 - \beta = \sum_{\mathbf{x} \in \Omega_P} P(\mathbf{x} \mid H_0) \ge e^{A} \sum_{\mathbf{x} \in \Omega_P} P(\mathbf{x} \mid H_1) = e^{A} \alpha \quad\Longrightarrow\quad A \le \ln\frac{1 - \beta}{\alpha}$$
 
-$$\ln \Lambda_m = k \ln\left( \frac{p_1}{p_0} \right) + (m - k) \ln\left( \frac{1 - p_1}{1 - p_0} \right)$$
+Symmetrically, every sequence $\mathbf{x}$ in the rollback set $\Omega_R$ satisfies $P(\mathbf{x} \mid H_0) \le e^{B} P(\mathbf{x} \mid H_1)$, so
 
-### Derivation of absorbing boundaries $A$ and $B$
+$$\beta = \sum_{\mathbf{x} \in \Omega_R} P(\mathbf{x} \mid H_0) \le e^{B} \sum_{\mathbf{x} \in \Omega_R} P(\mathbf{x} \mid H_1) = e^{B} (1 - \alpha) \quad\Longrightarrow\quad B \ge \ln\frac{\beta}{1 - \alpha}$$
 
-Let $\alpha$ denote the target Type I error rate ($\Pr(\text{reject } H_0 \mid H_0 \text{ true})$) and $\beta$ denote the target Type II error rate ($\Pr(\text{accept } H_0 \mid H_1 \text{ true})$).
+Neglecting the overshoot when $\Lambda_n$ crosses a boundary, Wald's approximation sets the boundaries at these limits:
 
-Let $\Omega_1 \subset \{0, 1\}^m$ denote the set of all sample paths leading to the rejection of $H_0$ (crossing upper threshold $A$). By definition of the test:
+$$A = \ln\frac{1 - \beta}{\alpha}, \qquad B = \ln\frac{\beta}{1 - \alpha}$$
 
-$$\alpha = \sum_{\mathbf{x} \in \Omega_1} P(\mathbf{x} \mid H_0)$$
+which are the boundaries @sec-vol3-evaluation-releases uses. Because the overshoot only makes the realized error rates smaller, the test is conservative.
 
-Because every path $\mathbf{x} \in \Omega_1$ satisfies $\Lambda_m(\mathbf{x}) \ge A$, we have $P(\mathbf{x} \mid H_1) \ge A \cdot P(\mathbf{x} \mid H_0)$. Summing over all paths in $\Omega_1$:
+### Expected length of the test
 
-$$1 - \beta = \sum_{\mathbf{x} \in \Omega_1} P(\mathbf{x} \mid H_1) \ge A \sum_{\mathbf{x} \in \Omega_1} P(\mathbf{x} \mid H_0) = A \cdot \alpha$$
+Each step adds $z_i = \ln\big(P(x_i \mid p_0)/P(x_i \mid p_1)\big)$. Under the degraded rate, $\mathbb{E}_{p_1}[z] = p_1 \ln(p_0/p_1) + (1 - p_1) \ln\big((1-p_0)/(1-p_1)\big) < 0$, and by Wald's identity the expected number of canary trajectories before a decision is
 
-Rearranging gives the upper stopping bound:
+$$\mathbb{E}_{p_1}[N] \approx \frac{(1 - \alpha) B + \alpha A}{\mathbb{E}_{p_1}[z]}$$
 
-$$A \le \frac{1 - \beta}{\alpha}$$
-
-Similarly, let $\Omega_0$ denote the set of sample paths leading to the acceptance of $H_0$ (crossing lower threshold $B$). For every path $\mathbf{x} \in \Omega_0$, $\Lambda_m(\mathbf{x}) \le B$, which implies $P(\mathbf{x} \mid H_1) \le B \cdot P(\mathbf{x} \mid H_0)$. Summing over $\Omega_0$:
-
-$$\beta = \sum_{\mathbf{x} \in \Omega_0} P(\mathbf{x} \mid H_1) \le B \sum_{\mathbf{x} \in \Omega_0} P(\mathbf{x} \mid H_0) = B (1 - \alpha)$$
-
-Rearranging gives the lower stopping bound:
-
-$$B \ge \frac{\beta}{1 - \alpha}$$
-
-Neglecting the infinitesimal overshoot at the boundary crossings (Wald's approximation), we define the operational decision thresholds:
-
-$$A = \frac{1 - \beta}{\alpha}, \qquad B = \frac{\beta}{1 - \alpha}$$
-
-The sequential canary router evaluates $\ln \Lambda_m$ after every trajectory:
-
-- If $\ln \Lambda_m \ge \ln A$: abort the canary rollout immediately.
-- If $\ln \Lambda_m \le \ln B$: promote the canary policy to the next traffic tier.
-- If $\ln B < \ln \Lambda_m < \ln A$: continue sampling.
+The worked canary in @sec-vol3-evaluation-releases evaluates this expression. Because the canary receives only a share of traffic, the expected number of trajectories converts into hours of exposure, which is what sets the canary's traffic share.
 
 ## Truncated SVD and Low-Rank Attention Approximations {#sec-vol3-appendix-math-svd}
 
-In low-rank attention compression and Multi-Head Latent Attention (MLA), the serving runtime approximates high-dimensional Key and Value activation matrices via truncated Singular Value Decomposition (SVD).
+Low-rank compression of the attention state is one of the model-design levers that lower the bytes stored per token (@sec-vol3-kvcache-geometry). Its mathematical basis is the truncated singular value decomposition (SVD) of the key and value matrices.
 
 Let $\mathbf{K}^{(l)} \in \mathbb{R}^{S \times d_{\text{head}}}$ denote the uncompressed Key activation matrix for layer $l$ across an active sequence of $S$ tokens. The singular value decomposition factors $\mathbf{K}^{(l)}$ into orthogonal singular vectors:
 
@@ -463,7 +467,7 @@ The fraction of total activation energy preserved by the rank-$r$ subspace proje
 
 $$\eta_r = \frac{\sum_{i=1}^r \sigma_i^2}{\sum_{i=1}^{d_{\text{head}}} \sigma_i^2}$$
 
-In foundation model attention layers, the empirical spectrum of Key and Value activation matrices exhibits steep power-law singular value decay ($\sigma_j \propto j^{-\alpha}$ where $\alpha > 1$). Retaining rank $r = d_{\text{head}} / 4$ typically captures over $98\%$ of the total spectral energy ($\eta_r > 0.98$). This ensures that reconstructed attention dot products $\mathbf{q}_i^T \hat{\mathbf{k}}_k \approx (\mathbf{q}_i \mathbf{V}_r) (\mathbf{c}_{K, k})^T$ preserve ranking order with provably bounded perturbation, as applied in @sec-vol3-kv-cache.
+When the singular values decay steeply, a rank well below $d_{\text{head}}$ preserves most of the energy, and the error in every reconstructed attention score $\mathbf{q}^T \hat{\mathbf{k}}$ is bounded by $\|\mathbf{q}\|_2$ times the largest discarded singular value. How steeply the spectrum decays, and therefore what rank a model tolerates, must be measured per model and per layer; compression that looks free on average can still change which earlier tokens a step attends to most.
 
 ## Quadratic Compounding Error in Trajectory Imitation {#sec-vol3-appendix-math-compounding-error}
 
@@ -498,9 +502,9 @@ recovering the optimal linear scaling bound as explored in @sec-vol3-fine-tuning
 
 ## Optimal Supervisory Escalation Thresholds under Asymmetric Damage {#sec-vol3-appendix-math-escalation}
 
-In autonomous agent runtime scheduling (@sec-vol3-durable-execution), determining when to escalate an action across the Reversibility Boundary to human inspection rather than attempting automated recovery is formulated as an asymmetric binary decision problem under uncertainty.
+Deciding whether a proposed action should wait at an approval gate (@sec-vol3-controlplane-hitl) rather than run automatically is a binary decision under uncertainty with asymmetric costs.
 
-Let $a \in \mathcal{A}$ denote a candidate action proposed by the neural policy. The true outcome state is binary: success ($Y = 0$) or catastrophic invariant failure ($Y = 1$). The runtime possesses an empirical failure probability estimator $\hat{p} = \mathbb{P}(Y = 1 \mid \mathbf{x}, a) \in [0, 1]$ parameterized by context $\mathbf{x}$ (e.g., model logit entropy, tool reflection error counts, or domain classification).
+Let $a \in \mathcal{A}$ denote a candidate action proposed by the model. The true outcome state is binary: success ($Y = 0$) or catastrophic invariant failure ($Y = 1$). The runtime has an estimate $\hat{p} = \mathbb{P}(Y = 1 \mid \mathbf{x}, a) \in [0, 1]$ computed from features $\mathbf{x}$ it can observe, such as the action's authority level, recent error counts, or the task's domain.
 
 We define the loss matrix $\mathbf{L}(d, y)$ for decision $d \in \{\text{Auto}, \text{Escalate}\}$ and outcome $y \in \{0, 1\}$:
 
@@ -529,44 +533,30 @@ Using the upper confidence bound $p_{\text{UCB}}(\hat{p}, \alpha) \approx \hat{p
 
 $$d^* = \text{Escalate} \iff p_{\text{UCB}}(\hat{p}, \alpha) > \frac{C_{\text{human}}}{C_{\text{blast}}}$$
 
-This guarantees that as uncertainty $\sigma_p$ increases in unfamiliar execution domains, the agent autonomously attenuates authority and retreats to human supervision, preserving system safety invariants without requiring manual rule tuning.
+As the uncertainty $\sigma_p$ grows, in domains the estimator has seen little of, the rule escalates more actions without manual retuning. The rule decides when to ask for approval; it does not replace the gate for irreversible actions, which @sec-vol3-sagas-pivot requires regardless of $\hat{p}$.
 
 ## Multi-Agent Amdahl's Law Stationary Root Analysis {#sec-vol3-appendix-math-amdahl}
 
-In @sec-vol3-multi-agent, the effective parallel speedup of an $M$-agent fleet subject to linear provisioning overhead $\beta$ and quadratic synchronization tax $\alpha$ is given by:
+@Sec-vol3-multiagent-need bounds the speedup of splitting a task across $M$ agents with Amdahl's law plus a coordination tax (@eq-vol3-multiagent-speedup):
 
-$$S(M) = \frac{1}{D(M)} = \frac{1}{s + \frac{1 - s}{M} + \alpha M^2 + \beta M}$$
+$$\text{Speedup}(M) = \frac{1}{D(M)}, \qquad D(M) = (1 - f) + \frac{f}{M} + \sigma (M - 1) + \kappa M (M - 1)$$
 
-where $s \in (0, 1]$ is the irreducible serial fraction, $\alpha > 0$ is the synchronization coefficient, and $\beta > 0$ is the provisioning coefficient.
+where $f \in (0, 1]$ is the fraction of the work that divides across agents, $\sigma \ge 0$ the contention coefficient, and $\kappa \ge 0$ the coherency coefficient, with $\sigma + \kappa > 0$. This section shows that the speedup has a single peak and locates it.
 
-To find the optimal concurrency $M^*$ that maximizes $S(M)$, we minimize the denominator $D(M)$ over $M > 0$. Differentiating with respect to $M$:
+Maximizing the speedup means minimizing $D(M)$ over $M > 0$. Differentiating,
 
-$$\frac{d D(M)}{d M} = -\frac{1 - s}{M^2} + 2\alpha M + \beta$$
+$$\frac{d D}{d M} = -\frac{f}{M^2} + \sigma + \kappa (2M - 1)$$
 
-Setting the derivative to zero yields the stationary condition:
+and setting the derivative to zero gives the stationary condition
 
-$$2\alpha M + \beta = \frac{1 - s}{M^2} \implies 2\alpha M^3 + \beta M^2 - (1 - s) = 0$$
+$$P(M) = 2\kappa M^3 + (\sigma - \kappa) M^2 - f = 0$$
 
-Let $P(M) = 2\alpha M^3 + \beta M^2 - (1 - s)$. We establish the existence and uniqueness of the optimal fleet boundary $M^*$:
+1. **Exactly one positive root.** The coefficients of $P(M)$, in order, are $2\kappa$, $\sigma - \kappa$, $0$, and $-f$. Whether $\sigma - \kappa$ is positive or negative, the sequence of nonzero signs changes exactly once, so by Descartes' rule of signs $P$ has exactly one positive real root $M^*$. When $\kappa = 0$ the condition reduces to $\sigma M^2 = f$, so $M^* = \sqrt{f / \sigma}$.
+2. **The root is the global optimum.** The second derivative,
+   $$\frac{d^2 D}{d M^2} = \frac{2f}{M^3} + 2\kappa,$$
+   is positive for every $M > 0$, so $D$ is strictly convex, $M^*$ is its unique minimum, and $M^*$ maximizes the speedup.
 
-1. **Existence and Uniqueness:** The coefficients of $P(M)$ are $a_3 = 2\alpha > 0$, $a_2 = \beta > 0$, $a_1 = 0$, and $a_0 = -(1 - s) < 0$. The sequence of signs is $(+, +, 0, -)$, which exhibits exactly one sign change. By Descartes' Rule of Signs, $P(M)$ has strictly one positive real root $M^* \in (0, \infty)$.
-2. **Global Minimum of $D(M)$:** Evaluating the second derivative of the denominator:
-   $$\frac{d^2 D(M)}{d M^2} = \frac{2(1 - s)}{M^3} + 2\alpha$$
-   Because $s < 1$, $\alpha > 0$, and $M > 0$, we have $d^2 D(M) / d M^2 > 0$ everywhere on $(0, \infty)$. The denominator function $D(M)$ is strictly convex, guaranteeing that $M^*$ is a unique global minimum of $D(M)$, and therefore the unique global maximum of $S(M)$.
-
-To obtain the closed-form solution, we transform the cubic equation into depressed form via the Tschirnhaus substitution $M = y - \frac{\beta}{6\alpha}$:
-
-$$y^3 + p y + q = 0$$
-
-where:
-
-$$p = -\frac{\beta^2}{12 \alpha^2}, \quad q = \frac{\beta^3}{108 \alpha^3} - \frac{1 - s}{2\alpha}$$
-
-Cardano's formula yields the unique positive real root:
-
-$$M^* = \sqrt[3]{-\frac{q}{2} + \sqrt{\frac{q^2}{4} + \frac{p^3}{27}}} + \sqrt[3]{-\frac{q}{2} - \sqrt{\frac{q^2}{4} + \frac{p^3}{27}}} - \frac{\beta}{6\alpha}$$
-
-In production cluster sizing, evaluating $P(M)$ numerically across integer candidate fleet sizes ($M \in \{1, 2, \dots, 32\}$) is computationally instantaneous and avoids numerical precision issues in cubic radical evaluation.
+Two consequences matter for design. With $\kappa > 0$, the speedup does not plateau; past $M^*$ it falls, because the pairwise term grows as $M^2$ while the gain $f/M$ shrinks. And a split pays at all only if $D(M) < 1$ for some $M > 1$, which is the third deployment gate of @sec-vol3-multiagent-evaluation. In practice $M^*$ is found by evaluating $D(M)$ at the small integers a team would actually deploy, with $\sigma$ and $\kappa$ fitted from measured runs at two or three fleet sizes.
 
 ## Correlated Failures in Multi-Agent Quorum Voting {#sec-vol3-appendix-math-correlated-quorum}
 
@@ -592,7 +582,7 @@ Taking the infinite ensemble limit:
 
 $$\lim_{M \to \infty} P_{\text{majority}}(M) = (1 - \rho_{\text{blind}}) \cdot 1 = 1 - \rho_{\text{blind}} < 1$$
 
-Even with an infinite quorum of neural voters, the collective accuracy is strictly bounded by $1 - \rho_{\text{blind}}$. When $\rho_{\text{blind}} = 0.15$, majority voting cannot exceed $85\%$ reliability, regardless of compute budget or agent count. This proves that neural quorum voting cannot eliminate correlated hallucinations, establishing why deterministic software oracles must strictly gate all external state transitions, as discussed in @sec-vol3-multi-agent.
+Even with an infinite quorum of neural voters, the collective accuracy is strictly bounded by $1 - \rho_{\text{blind}}$. When $\rho_{\text{blind}} = 0.15$, majority voting cannot exceed $85\%$ reliability, regardless of compute budget or agent count. Voting among models that share blind spots cannot remove the errors they share, which is why a deterministic check, not a vote, decides what is committed (@sec-vol3-multiagent-consensus).
 
 ## High-Dimensional Measure Concentration and the Curse of Dimensionality {#sec-vol3-appendix-math-curse-dimensionality}
 
