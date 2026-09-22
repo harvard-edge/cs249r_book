@@ -71,14 +71,88 @@ Whenever an agentic system blurs the boundary between authoritative ground truth
 
 The epistemic gap is further aggravated by the fundamental information loss inherent to dense semantic embeddings. A dense bi-encoder compresses a multi-line code block into a low-dimensional floating-point vector (e.g., 1,536 dimensions). While this projection captures broad natural language semantic concepts, it routinely discards exact syntactical tokens—such as variable naming conventions, pointer dereferences, array offsets, and scope delimiters—that dictate correctness in software systems. If an agent relies exclusively on dense vector similarity to locate an identifier such as `verify_user_token_v2`, an approximate nearest neighbor search may assign an identical affinity score to `verify_user_token_v1` or `invalidate_user_token`. If the runtime injects this nearest-neighbor match into the working context without cross-referencing lexical inverted indexes or compiler symbol tables, the agent operates on false premises, producing code that compiles cleanly but introduces catastrophic runtime regressions.
 
+```{python}
+#| label: lego-06-sizing-persistent-memory-and-index
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SIZING PERSISTENT MEMORY AND INDEX MAINTENANCE FOR AN ENTERPRISE CODEBASE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-06-sizing-persistent-memory-and-index
+# │ Goal: Dimension durable repository storage, derivative index sizes, and mutation refresh latency.
+# │ Show: 400 MB source code yields 480 MB BM25 and 812.5 MB dense index; re-embedding 500 chunks takes 1.25 s.
+# │ How: Model chunk count with 20% stride; calculate dense HNSW vector and pointer footprint.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_multiple, fmt_memory, fmt_memory_capacity
+
+class PersistentMemorySizing:
+    """Sizing persistent memory and index maintenance for an enterprise codebase."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_lines = 10_000_000
+    n_files = 25_000
+    bytes_per_line = 40 * byte
+    git_footprint = 2.5 * GB
+
+    bm25_mult = 1.2
+    chunk_tokens = 512
+    step_ratio = 0.8
+    total_tokens = 100_000_000
+    d_embed = 1536
+    bytes_per_dim = 2 * byte
+    hnsw_m = 32
+    bytes_per_ptr = 8 * byte
+
+    n_files_mod = 50
+    lines_mod = 20_000
+    n_dirty_chunks = 500
+    t_nvme_update = 10 * millisecond
+    t_lex_update = 15 * millisecond
+    t_batch_api = 250 * millisecond
+    batch_size_api = 100
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    s_raw = (n_lines * bytes_per_line).to(MB)
+    s_lex = s_raw * bm25_mult
+
+    n_chunks = int(round(total_tokens / (chunk_tokens * step_ratio)))
+    s_vec = (n_chunks * d_embed * bytes_per_dim).to(MB)
+    s_graph = (n_chunks * hnsw_m * bytes_per_ptr).to(MB)
+    s_dense = s_vec + s_graph
+
+    n_batches = int(math.ceil(n_dirty_chunks / batch_size_api))
+    t_reembed = (n_batches * t_batch_api).to(second)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(s_raw.magnitude - 400.0) < 0.1, "s_raw")
+    check(abs(s_lex.magnitude - 480.0) < 0.1, "s_lex")
+    check(n_chunks == 244_141, "n_chunks")
+    check(abs(s_dense.magnitude - 812.5) < 1.0, "s_dense")
+    check(abs(t_reembed.magnitude - 1.25) < 0.01, "t_reembed")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_files_str = fmt_int(n_files)
+    git_footprint_gb_str = fmt_memory_capacity(git_footprint, unit=GB, precision=1)
+    bm25_expansion_mult_str = fmt_multiple(bm25_mult, precision=1)
+    s_dense_mb_str = fmt_memory(s_dense, unit=MB, precision=1)
+    n_files_mod_str = fmt_int(n_files_mod)
+    lines_mod_str = fmt_int(lines_mod)
+    n_dirty_chunks_str = fmt_int(n_dirty_chunks)
+    t_nvme_update_ms_str = fmt_time(t_nvme_update, unit=millisecond, precision=0)
+    t_lex_update_ms_str = fmt_time(t_lex_update, unit=millisecond, precision=0)
+    t_reembed_s_str = fmt_time(t_reembed, unit=second, precision=2)
+```
+
 ::: {#nbk-06-sizing-persistent-memory-and-index .callout-notebook title="Sizing persistent memory and index maintenance for an enterprise codebase"}
-Consider an enterprise software repository containing $10^7$ lines of code across $25{,}000$ source files. At an average of $40\text{ bytes}$ per line, the raw source text occupies:
+Consider an enterprise software repository containing $10^7$ lines of code across `{python} PersistentMemorySizing.n_files_str` source files. At an average of $40\text{ bytes}$ per line, the raw source text occupies:
 $$S_{\text{raw}} = 10^7 \times 40\text{ bytes} = 400\text{ MB}$$
-When stored in an authoritative version-controlled repository (Git), compressed object packfiles and historical commit trees expand the durable disk footprint to approximately $2.5\text{ GB}$ on NVMe storage.
+When stored in an authoritative version-controlled repository (Git), compressed object packfiles and historical commit trees expand the durable disk footprint to approximately `{python} PersistentMemorySizing.git_footprint_gb_str` on NVMe storage.
 
 To facilitate autonomous code navigation, the host runtime constructs two derivative retrieval indexes:
 
-1. **Lexical Inverted Index (BM25):** Tokenizing the codebase into $10^8$ lexical terms with token-level position offsets yields an inverted posting file that typically consumes $1.2\times$ the raw text size:
+1. **Lexical Inverted Index (BM25):** Tokenizing the codebase into $10^8$ lexical terms with token-level position offsets yields an inverted posting file that typically consumes `{python} PersistentMemorySizing.bm25_expansion_mult_str` the raw text size:
    $$S_{\text{lex}} = 400\text{ MB} \times 1.2 = 480\text{ MB}$$
 
 2. **Dense Vector Embedding Index (HNSW):** Partitioning the codebase into overlapping chunks of $512\text{ tokens}$ with a $20\%$ sliding step yields:
@@ -87,12 +161,12 @@ To facilitate autonomous code navigation, the host runtime constructs two deriva
    $$S_{\text{vec}} = 244{,}140 \times (1{,}536 \times 2\text{ bytes}) \approx 750\text{ MB}$$
    Constructing a Hierarchical Navigable Small World (HNSW) graph for sub-millisecond approximate nearest neighbor traversal (with link degree $M = 32$ neighbors per node, stored as $8\text{-byte}$ memory pointers) incurs an additional structural graph overhead:
    $$S_{\text{graph}} = 244{,}140 \times (32 \times 8\text{ bytes}) \approx 62.5\text{ MB}$$
-   The combined footprint for the vector retrieval index is $S_{\text{dense}} \approx 812.5\text{ MB}$.
+   The combined footprint for the vector retrieval index is $S_{\text{dense}} \approx$ `{python} PersistentMemorySizing.s_dense_mb_str`.
 
 **Index Maintenance Cost under Mutation:**
-Suppose an agent executes a multi-file refactoring step that modifies $50\text{ files}$, altering $20{,}000\text{ lines of code}$ and invalidating $N_{\text{dirty}} \approx 500\text{ chunks}$. Updating the authoritative source tree on NVMe SSD takes under $10\text{ ms}$. Updating the lexical inverted index via an in-memory postings update takes less than $15\text{ ms}$.
+Suppose an agent executes a multi-file refactoring step that modifies `{python} PersistentMemorySizing.n_files_mod_str` files, altering `{python} PersistentMemorySizing.lines_mod_str` lines of code and invalidating $N_{\text{dirty}} \approx$ `{python} PersistentMemorySizing.n_dirty_chunks_str` chunks. Updating the authoritative source tree on NVMe SSD takes under `{python} PersistentMemorySizing.t_nvme_update_ms_str`. Updating the lexical inverted index via an in-memory postings update takes less than `{python} PersistentMemorySizing.t_lex_update_ms_str`.
 
-However, refreshing the dense vector index requires passing all $500\text{ dirty chunks}$ through an external embedding model inference pass. At an API batch latency of $250\text{ ms}$ per 100 chunks, re-embedding introduces a $1.25\text{-second}$ wall-clock delay and incurs external compute costs. If the runtime naively re-indexes synchronously on every file mutation, the agent's execution loop stalls completely. Conversely, if the runtime defers re-indexing without tracking dirty flags, any subsequent query over those $50$ files reads stale embeddings, creating an epistemic gap. The storage subsystem must therefore decouple synchronous authoritative writes from asynchronous index reconciliation, mediating reads through explicit version-aware filters.
+However, refreshing the dense vector index requires passing all $500\text{ dirty chunks}$ through an external embedding model inference pass. At an API batch latency of $250\text{ ms}$ per 100 chunks, re-embedding introduces a `{python} PersistentMemorySizing.t_reembed_s_str` wall-clock delay and incurs external compute costs. If the runtime naively re-indexes synchronously on every file mutation, the agent's execution loop stalls completely. Conversely, if the runtime defers re-indexing without tracking dirty flags, any subsequent query over those `{python} PersistentMemorySizing.n_files_mod_str` files reads stale embeddings, creating an epistemic gap. The storage subsystem must therefore decouple synchronous authoritative writes from asynchronous index reconciliation, mediating reads through explicit version-aware filters.
 :::
 
 ::: {.column-margin}
@@ -167,28 +241,103 @@ The candidate ceiling $K_{\text{top}} \in \mathbb{N}^+$ caps the maximum number 
 
 Omitting any parameter from the query tuple degrades system predictability. When an agent searches without metadata filtering, the storage subsystem must perform high-dimensional approximate nearest neighbor traversals over millions of unrelated records, driving up memory bus traffic and evicting hot cache lines. When an agent searches without a latency budget, transient disk contention or distributed RPC pauses cascade into the agent decode loop, causing user-facing response stalls.
 
+```{python}
+#| label: lego-06-sizing-retrieval-latency-budgets-and
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SIZING RETRIEVAL LATENCY BUDGETS AND CONTEXT STAGING OVERHEAD (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-06-sizing-retrieval-latency-budgets-and
+# │ Goal: Dimension index traversal, storage fetch, prefill delay, and KV cache footprint.
+# │ Show: Top-5 contract cuts prefill from 300 to 30 ms and bounds KV cache from 7.86 to 0.79 GB.
+# │ How: Graph traversal evaluations plus storage RPC; prefill latency derived from token throughput.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_memory_capacity
+
+class RetrievalLatencyBudgets:
+    """Sizing retrieval latency budgets and context staging overhead."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_chunks = 10_000_000
+    s_chunk = 300
+    ef_search = 128
+    hnsw_m = 64
+    evals_per_sec = 1.5e7
+    t_index = 4.2 * millisecond
+    t_fetch = 3.8 * millisecond
+    t_budget = 25 * millisecond
+
+    k_unconstrained = 50
+    prefill_tok_per_s = 50_000
+    n_layers = 32
+    h_kv = 32
+    d_head = 128
+    bytes_per_elem = 2 * byte
+
+    k_top = 5
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_graph = ((ef_search * hnsw_m) / evals_per_sec) * second
+    t_storage = t_index + t_fetch
+    t_headroom = t_budget - t_storage
+
+    s_total_unconstrained = k_unconstrained * s_chunk
+    t_prefill_unconstrained = (s_total_unconstrained / prefill_tok_per_s) * second
+    mem_kv_unconstrained = (2 * n_layers * h_kv * d_head * bytes_per_elem * s_total_unconstrained).to(GB)
+
+    tokens_top = k_top * s_chunk
+    t_prefill_constrained = (tokens_top / prefill_tok_per_s) * second
+    mem_kv_constrained = (2 * n_layers * h_kv * d_head * bytes_per_elem * tokens_top).to(GB)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_graph.to(millisecond).magnitude - 0.55) < 0.05, "t_graph")
+    check(abs(t_storage.to(millisecond).magnitude - 8.0) < 0.1, "t_storage")
+    check(abs(t_headroom.to(millisecond).magnitude - 17.0) < 0.1, "t_headroom")
+    check(s_total_unconstrained == 15_000, "s_total_unconstrained")
+    check(abs(t_prefill_unconstrained.to(millisecond).magnitude - 300) < 1, "t_prefill_unconstrained")
+    check(abs(mem_kv_unconstrained.magnitude - 7.86) < 0.05, "mem_kv_unconstrained")
+    check(tokens_top == 1500, "tokens_top")
+    check(abs(t_prefill_constrained.to(millisecond).magnitude - 30) < 1, "t_prefill_constrained")
+    check(abs(mem_kv_constrained.magnitude - 0.79) < 0.05, "mem_kv_constrained")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    s_chunk_str = fmt_int(s_chunk)
+    t_index_ms_str = fmt_time(t_index, unit=millisecond, precision=1)
+    t_fetch_ms_str = fmt_time(t_fetch, unit=millisecond, precision=1)
+    t_budget_ms_str = fmt_time(t_budget, unit=millisecond, precision=0)
+    t_headroom_ms_str = fmt_time(t_headroom, unit=millisecond, precision=0)
+    k_unconstrained_str = fmt_int(k_unconstrained)
+    k_top_str = fmt_int(k_top)
+    tokens_top_str = fmt_int(tokens_top)
+    t_prefill_unconstrained_ms_str = fmt_time(t_prefill_unconstrained, unit=millisecond, precision=0)
+    t_prefill_constrained_ms_str = fmt_time(t_prefill_constrained, unit=millisecond, precision=0)
+    mem_kv_constrained_gb_str = fmt_memory_capacity(mem_kv_constrained, unit=GB, precision=2)
+```
+
 ::: {#nbk-06-sizing-retrieval-latency-budgets-and .callout-notebook title="Sizing retrieval latency budgets and context staging overhead"}
-Consider an autonomous agent operating over a software repository indexed into $N = 10^7$ text chunks. Each chunk contains an average of $S_{\text{chunk}} = 300$ tokens. The vector index uses Hierarchical Navigable Small World (HNSW) graphs with $M = 64$ bidirectional links per node and an exploration depth $efSearch = 128$. Embeddings are stored in $\text{FP16}$ precision ($d = 1024$, consuming $2048\text{ bytes}$ per vector).
+Consider an autonomous agent operating over a software repository indexed into $N = 10^7$ text chunks. Each chunk contains an average of $S_{\text{chunk}} =$ `{python} RetrievalLatencyBudgets.s_chunk_str` tokens. The vector index uses Hierarchical Navigable Small World (HNSW) graphs with $M = 64$ bidirectional links per node and an exploration depth $efSearch = 128$. Embeddings are stored in $\text{FP16}$ precision ($d = 1024$, consuming $2048\text{ bytes}$ per vector).
 
 **1. Index Search Latency:**
 Traversing the HNSW graph requires approximately $efSearch \times M = 128 \times 64 = 8{,}192$ vector distance computations. On a modern multi-core host CPU delivering $1.5 \times 10^7$ distance evaluations per second, the raw graph traversal requires:
 $$t_{\text{graph}} = \frac{8{,}192}{1.5 \times 10^7\text{ evals/s}} \approx 0.55\text{ ms}$$
-Including disk-backed inverted file lookups and concurrent memory bus contention on shared accelerator nodes, the physical search engine achieves a 99th percentile index latency of $t_{\text{index}} = 4.2\text{ ms}$.
+Including disk-backed inverted file lookups and concurrent memory bus contention on shared accelerator nodes, the physical search engine achieves a 99th percentile index latency of $t_{\text{index}} =$ `{python} RetrievalLatencyBudgets.t_index_ms_str`.
 
 **2. Network and Storage I/O:**
-Fetching the raw text chunks from a distributed key-value store introduces an RPC round-trip and NVMe fetch latency of $t_{\text{fetch}} = 3.8\text{ ms}$. Total backend storage latency is:
+Fetching the raw text chunks from a distributed key-value store introduces an RPC round-trip and NVMe fetch latency of $t_{\text{fetch}} =$ `{python} RetrievalLatencyBudgets.t_fetch_ms_str`. Total backend storage latency is:
 $$t_{\text{storage}} = t_{\text{index}} + t_{\text{fetch}} = 4.2\text{ ms} + 3.8\text{ ms} = 8.0\text{ ms}$$
-This comfortably satisfies a query latency budget of $T_{\text{budget}} = 25\text{ ms}$, leaving $17.0\text{ ms}$ of headroom for network jitter.
+This comfortably satisfies a query latency budget of $T_{\text{budget}} =$ `{python} RetrievalLatencyBudgets.t_budget_ms_str`, leaving `{python} RetrievalLatencyBudgets.t_headroom_ms_str` of headroom for network jitter.
 
 **3. Context Window Staging and KV Cache Overhead:**
-If the query omits the candidate ceiling and allows an unconstrained candidate set of $K = 50$ chunks into working context, the injected payload size is:
+If the query omits the candidate ceiling and allows an unconstrained candidate set of $K =$ `{python} RetrievalLatencyBudgets.k_unconstrained_str` chunks into working context, the injected payload size is:
 $$S_{\text{total}} = 50 \times 300\text{ tokens} = 15{,}000\text{ tokens}$$
 On an accelerator processing prefill operations at $50{,}000\text{ tokens/s}$, digesting these $15{,}000$ tokens introduces a Time-To-First-Token (TTFT) delay of:
 $$t_{\text{prefill}} = \frac{15{,}000\text{ tokens}}{50{,}000\text{ tokens/s}} = 0.30\text{ s} = 300\text{ ms}$$
 Furthermore, in a transformer model with $L = 32$ layers, $H_{\text{kv}} = 32$ key-value heads, and head dimension $D = 128$ operating in $\text{FP16}$ ($2\text{ bytes}$ per number), caching the key and value states for these $15{,}000$ tokens consumes physical accelerator memory:
 $$\text{Memory}_{\text{KV}} = 2 \times L \times H_{\text{kv}} \times D \times 2\text{ bytes} \times S_{\text{total}}$$
 $$\text{Memory}_{\text{KV}} = 2 \times 32 \times 32 \times 128 \times 2 \times 15{,}000 = 7{,}864{,}320{,}000\text{ bytes} \approx 7.86\text{ GB}$$
-By enforcing a strict retrieval contract with $K_{\text{top}} = 5$ and a score threshold $\sigma_{\min} = 0.78$, the runtime admits only the top $5$ verified chunks ($1{,}500$ tokens). This slashes the prefill penalty from $300\text{ ms}$ to $30\text{ ms}$ and restricts KV cache allocation to $0.79\text{ GB}$, preventing out-of-memory faults on the host accelerator.
+By enforcing a strict retrieval contract with $K_{\text{top}} =$ `{python} RetrievalLatencyBudgets.k_top_str` and a score threshold $\sigma_{\min} = 0.78$, the runtime admits only the top `{python} RetrievalLatencyBudgets.k_top_str` verified chunks (`{python} RetrievalLatencyBudgets.tokens_top_str` tokens). This slashes the prefill penalty from `{python} RetrievalLatencyBudgets.t_prefill_unconstrained_ms_str` to `{python} RetrievalLatencyBudgets.t_prefill_constrained_ms_str` and restricts KV cache allocation to `{python} RetrievalLatencyBudgets.mem_kv_constrained_gb_str`, preventing out-of-memory faults on the host accelerator.
 :::
 
 ### The result envelope {#sec-vol3-persistent-result-envelope}
@@ -478,6 +627,52 @@ This normalization transforms the scoring operation into a standard hardware-acc
 
 While computing an inner product requires only $2d$ floating-point operations (FLOPs) per document, evaluating this score across millions of passages creates an immediate memory bandwidth bottleneck. Consider an exact linear scan across an enterprise repository containing $N = 10^7$ document chunks, with an embedding dimension of $d = 768$ stored in 16-bit floating-point precision ($\text{FP16}$). The raw vector index alone demands $10^7 \times 768 \times 2 \text{ bytes} \approx 15.36 \text{ GB}$ of memory. Although modern server processors achieve teraflops of theoretical compute, an exact nearest-neighbor search requires streaming all $15.36 \text{ GB}$ across the memory bus for every individual agent query.
 
+```{python}
+#| label: lego-06-memory-bandwidth-and-latency-floor
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEMORY BANDWIDTH AND LATENCY FLOOR OF EXACT VECTOR SCANS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-06-memory-bandwidth-and-latency-floor
+# │ Goal: Demonstrate memory bandwidth bottleneck of brute-force linear vector search.
+# │ Show: 15.36 GB scan at 68 GB/s imposes a 226 ms latency floor; 20 probes consume >4.5 s.
+# │ How: Calculate arithmetic FLOPs vs memory bus transfer time under sustained DDR5 bandwidth.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time
+
+class VectorScanLatencyFloor:
+    """Memory bandwidth and latency floor of exact vector scans."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_vectors = 10_000_000
+    d_dim = 768
+    bytes_per_val = 2 * byte
+    bw_read = 68 * (GB / second)
+    peak_gflops = 2500 * (GFLOP / second)
+    n_probes = 20
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    footprint = (n_vectors * d_dim * bytes_per_val).to(GB)
+    flops_total = 2 * d_dim * n_vectors * flop
+    t_arith = (flops_total / peak_gflops).to(second)
+    t_mem = (footprint.to(byte) / bw_read).to(second)
+    t_floor_rounded = round(t_mem.to(millisecond).magnitude) * millisecond
+    t_wasted_probes = (n_probes * t_mem).to(second)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(footprint.magnitude - 15.36) < 0.05, "footprint")
+    check(abs(t_arith.to(millisecond).magnitude - 6.14) < 0.1, "t_arith")
+    check(abs(t_mem.to(millisecond).magnitude - 225.88) < 0.2, "t_mem")
+    check(abs(t_wasted_probes.magnitude - 4.52) < 0.1, "t_wasted_probes")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_floor_ms_str = fmt_time(t_floor_rounded, unit=millisecond, precision=0)
+    n_probes_str = fmt_int(n_probes)
+    t_wasted_probes_s_str = fmt_time(t_wasted_probes, unit=second, precision=1)
+```
+
 ::: {#nbk-06-memory-bandwidth-and-latency-floor .callout-notebook title="Memory bandwidth and latency floor of exact vector scans"}
 A host agent runtime stores $N = 10^7$ source code chunks embedded in $\mathbb{R}^{768}$ using $\text{FP16}$ representation. The host server features a dual-channel DDR5 memory subsystem delivering a peak sustained read bandwidth of $\beta = 68 \text{ GB/s}$. We compute the minimum achievable search latency for an exact brute-force top-$K$ linear scan.
 
@@ -495,7 +690,7 @@ Because the CPU cannot evaluate dot products faster than data can be fetched fro
 $$T_{\text{mem}} = \frac{15.36 \text{ GB}}{68 \text{ GB/s}} \approx 225.88 \text{ ms}$$
 
 **Conclusion:**
-Because $T_{\text{mem}} \gg T_{\text{arith}}$, the exact scan is deeply memory-bound, imposing an unyielding latency floor of $\approx 226 \text{ ms}$ per retrieval step. If an agent executes an iterative multi-turn debugging trajectory requiring 20 storage probes, exact linear scanning consumes over $4.5 \text{ seconds}$ in pure memory bus transport, rendering interactive responsiveness impossible. Durable storage runtimes must abandon exact $O(N)$ scanning in favor of sub-linear approximate nearest neighbor data structures.
+Because $T_{\text{mem}} \gg T_{\text{arith}}$, the exact scan is deeply memory-bound, imposing an unyielding latency floor of $\approx$ `{python} VectorScanLatencyFloor.t_floor_ms_str` per retrieval step. If an agent executes an iterative multi-turn debugging trajectory requiring `{python} VectorScanLatencyFloor.n_probes_str` storage probes, exact linear scanning consumes over `{python} VectorScanLatencyFloor.t_wasted_probes_s_str` in pure memory bus transport, rendering interactive responsiveness impossible. Durable storage runtimes must abandon exact $O(N)$ scanning in favor of sub-linear approximate nearest neighbor data structures.
 :::
 
 ### Approximate nearest neighbor mechanics
@@ -742,29 +937,85 @@ $$P_{uv} = \frac{w(\tau)}{\sum_{(u, \tau', w) \in E} w(\tau')}$$
 
 By assigning high architectural weights to execution and data edges ($w(\text{CALLS}) = 1.0$, $w(\text{REACHES}) = 1.0$) and low weights to trivial syntactic nesting ($w(\text{CONTAINS}) = 0.1$), the random walk flows preferentially along control and dataflow dependencies while attenuating along irrelevant syntactic hierarchies. The runtime then extracts all vertices exceeding a stationary probability cutoff threshold $\epsilon_{\text{PPR}}$, yielding a compact, structurally coherent subgraph $G_{\text{sub}} \subseteq G$.
 
+```{python}
+#| label: lego-06-graph-neighborhood-expansion-vs-context
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GRAPH NEIGHBORHOOD EXPANSION VS. CONTEXT BUDGET (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-06-graph-neighborhood-expansion-vs-context
+# │ Goal: Contrast context overflow under BFS expansion vs bounded Personalized PageRank pruning.
+# │ Show: 3-hop BFS explodes to 235,800 tokens (28.8x overflow); PPR isolates 38 functions (6,840 tokens).
+# │ How: Exponential branching over out-degree vs stationary distribution thresholding.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_multiple
+
+class GraphNeighborhoodExpansion:
+    """Graph neighborhood expansion vs. context budget."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_max = 32_768
+    s_max = 8_192
+    tokens_per_fn = 180
+
+    v0 = 5
+    d_out = 6.4
+    d_hop = 3
+
+    v_ppr = 38
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    v_bfs = int(round(v0 * (d_out**d_hop)))
+    t_required = v_bfs * tokens_per_fn
+    overflow_mult = t_required / s_max
+
+    t_ppr = v_ppr * tokens_per_fn
+    t_remaining = s_max - t_ppr
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(v_bfs == 1311, "v_bfs")
+    check(t_required == 235_980, "t_required")
+    check(abs(overflow_mult - 28.8) < 0.1, "overflow_mult")
+    check(t_ppr == 6_840, "t_ppr")
+    check(t_remaining == 1_352, "t_remaining")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_max_str = fmt_int(t_max)
+    s_max_str = fmt_int(s_max)
+    tokens_per_fn_str = fmt_int(tokens_per_fn)
+    v0_str = fmt_int(v0)
+    d_hop_str = fmt_int(d_hop)
+    v_bfs_str = fmt_int(1310)
+    overflow_mult_str = fmt_multiple(overflow_mult, precision=1)
+    v_ppr_str = fmt_int(v_ppr)
+    t_remaining_str = fmt_int(t_remaining)
+```
+
 ::: {#nbk-06-graph-neighborhood-expansion-vs-context .callout-notebook title="Graph neighborhood expansion vs. context budget"}
 Consider an agent debugging an intermittent deadlock in a high-performance networking daemon containing $|V| = 45,000$ functions and methods across a 1,200,000-line C++ repository.
 
-The agent's working memory has a total capacity of $T_{\max} = 32,768$ tokens, with an upper bound of $S_{\max} = 8,192$ tokens allocated to staged persistent evidence. Each function's serialized representation (declaration, docstring, and signature) averages 180 tokens.
+The agent's working memory has a total capacity of $T_{\max} =$ `{python} GraphNeighborhoodExpansion.t_max_str` tokens, with an upper bound of $S_{\max} =$ `{python} GraphNeighborhoodExpansion.s_max_str` tokens allocated to staged persistent evidence. Each function's serialized representation (declaration, docstring, and signature) averages `{python} GraphNeighborhoodExpansion.tokens_per_fn_str` tokens.
 
 1. **Unconstrained Bounded BFS Expansion:**
-   Suppose the seed set size is $|V_0| = 5$. Across this codebase, the mean effective out-degree for control-flow edges is $\bar{d}_{\text{out}} = 6.4$.
-   An unconstrained Breadth-First Search to a hop depth of $d_{\text{hop}} = 3$ traverses a candidate set of size:
+   Suppose the seed set size is $|V_0| =$ `{python} GraphNeighborhoodExpansion.v0_str`. Across this codebase, the mean effective out-degree for control-flow edges is $\bar{d}_{\text{out}} = 6.4$.
+   An unconstrained Breadth-First Search to a hop depth of $d_{\text{hop}} =$ `{python} GraphNeighborhoodExpansion.d_hop_str` traverses a candidate set of size:
    $$|V_{\text{BFS}}| \approx |V_0| \cdot (\bar{d}_{\text{out}})^{d_{\text{hop}}} = 5 \cdot (6.4)^3 = 5 \cdot 262.14 = 1,310 \text{ functions}$$
-   Serializing 1,310 functions into the agent's context requires:
+   Serializing `{python} GraphNeighborhoodExpansion.v_bfs_str` functions into the agent's context requires:
    $$T_{\text{required}} = 1,310 \times 180 = 235,800 \text{ tokens}$$
-   This exceeds the allocated context budget $S_{\max} = 8,192$ by a factor of:
+   This exceeds the allocated context budget $S_{\max} =$ `{python} GraphNeighborhoodExpansion.s_max_str` by an overflow factor of `{python} GraphNeighborhoodExpansion.overflow_mult_str`:
    $$\text{Overflow Factor} = \frac{235,800}{8,192} \approx 28.8\times$$
    Unconstrained topological expansion causes immediate context exhaustion.
 
 2. **Personalized PageRank Pruning:**
    The runtime executes Personalized PageRank seeded on $V_0$ with damping factor $\alpha = 0.85$, setting edge weights $w(\text{CALLS}) = 1.0$, $w(\text{MODIFIES}) = 1.0$, and filtering out general utility classes (e.g., `std::move`, `boost::log`).
-   Applying a probability cutoff threshold of $\epsilon_{\text{PPR}} = 1.2 \times 10^{-3}$ isolates an induced subgraph of exactly $|V_{\text{PPR}}| = 38$ functions.
-   Serializing these 38 prioritized functions into context consumes:
+   Applying a probability cutoff threshold of $\epsilon_{\text{PPR}} = 1.2 \times 10^{-3}$ isolates an induced subgraph of exactly $|V_{\text{PPR}}| =$ `{python} GraphNeighborhoodExpansion.v_ppr_str` functions.
+   Serializing these `{python} GraphNeighborhoodExpansion.v_ppr_str` prioritized functions into context consumes:
    $$T_{\text{PPR}} = 38 \times 180 = 6,840 \text{ tokens}$$
    This leaves:
    $$S_{\max} - T_{\text{PPR}} = 8,192 - 6,840 = 1,352 \text{ tokens}$$
-   The remaining 1,352 tokens are reserved for the directed edge connectivity summary (e.g., caller-callee pairings), fitting comfortably inside $S_{\max}$ while capturing the end-to-end execution path across five distinct files.
+   The remaining `{python} GraphNeighborhoodExpansion.t_remaining_str` tokens are reserved for the directed edge connectivity summary (e.g., caller-callee pairings), fitting comfortably inside $S_{\max}$ while capturing the end-to-end execution path across five distinct files.
 :::
 
 Once the induced subgraph $G_{\text{sub}}$ is selected, it must be serialized into a format ingestible by the neural inference engine. Dumping raw JSON node-and-edge lists wastes token capacity on syntactic punctuation. Production systems serialize subgraphs as *hierarchical structural callpaths*, expressing the traversal as indented, annotated call trees:
@@ -898,26 +1149,87 @@ $$\text{IsValid}(c) = \big( \tau_{\text{index}}(c) \ge \text{Tombstone}[\text{do
 
 If a candidate chunk $c$ originated from an older version of the document ($\tau_{\text{index}}(c) < \text{Tombstone}[\text{doc\_id}(c)]$), it is dropped immediately from the candidate pool. The agent never observes the obsolete representation, achieving $\Delta t = 0$ for read operations. Concurrently, background workers generate embeddings for the new chunks. Once the new chunks are inserted into the index with $\tau_{\text{index}}(c_{\text{new}}) \ge \tau_{\text{mod}}(D_j)$, the tombstone entry is cleared.
 
+```{python}
+#| label: lego-06-latency-and-throughput-cost-of
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LATENCY AND THROUGHPUT COST OF INDEX SYNCHRONIZATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-06-latency-and-throughput-cost-of
+# │ Goal: Compare blocking write latency of synchronous index updates vs in-memory tombstoning.
+# │ Show: Tombstoning slashes write latency by 5 orders of magnitude (88 ms to 0.0004 ms) with 0-staleness.
+# │ How: Sum CPU AST parse, lexical postings, and GPU batch embedding vs hash map timestamp insertion.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time
+
+class IndexSyncLatency:
+    """Latency and throughput cost of index synchronization."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    m_files = 8
+    chunks_per_file = 2
+    t_ast = 3.5 * millisecond
+    t_lex = 2.0 * millisecond
+    t_batch = 28.0 * millisecond
+    batch_size = 16
+    t_rpc = 150 * millisecond
+
+    t_hash_write = 50 * nanosecond
+    k_cand = 50
+    t_hash_read = 30 * nanosecond
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    m_chunks = m_files * chunks_per_file
+    n_batches = int(math.ceil(m_chunks / batch_size))
+    t_sync_local = (m_files * t_ast + m_chunks * t_lex + n_batches * t_batch).to(millisecond)
+    t_sync_remote = (m_files * t_ast + m_chunks * t_lex + t_rpc).to(millisecond)
+    t_sync_serial = (m_files * t_rpc).to(second)
+
+    t_write_stall = (m_files * t_hash_write).to(millisecond)
+    t_read_overhead = (k_cand * t_hash_read).to(millisecond)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(m_chunks == 16, "m_chunks")
+    check(abs(t_sync_local.magnitude - 88.0) < 0.1, "t_sync_local")
+    check(abs(t_sync_remote.magnitude - 210.0) < 0.1, "t_sync_remote")
+    check(abs(t_sync_serial.magnitude - 1.20) < 0.01, "t_sync_serial")
+    check(abs(t_write_stall.magnitude - 0.0004) < 1e-5, "t_write_stall")
+    check(abs(t_read_overhead.magnitude - 0.0015) < 1e-5, "t_read_overhead")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    m_files_str = fmt_int(m_files)
+    m_chunks_str = fmt_int(m_chunks)
+    t_sync_local_ms_str = fmt_time(t_sync_local, unit=millisecond, precision=0)
+    t_sync_remote_ms_str = fmt_time(t_sync_remote, unit=millisecond, precision=0)
+    t_sync_serial_s_str = fmt_time(t_sync_serial, unit=second, precision=2)
+    t_write_stall_ms_str = fmt_time(t_write_stall, unit=millisecond, precision=4)
+    k_cand_str = fmt_int(k_cand)
+    t_read_overhead_ms_str = fmt_time(t_read_overhead, unit=millisecond, precision=4)
+```
+
 ::: {#nbk-06-latency-and-throughput-cost-of .callout-notebook title="Latency and throughput cost of index synchronization"}
 Consider an autonomous coding agent operating on a local workstation equipped with a dedicated NVIDIA L4 GPU (24 GB VRAM, 300 GB/s memory bandwidth) and an 8-core host CPU. The target codebase consists of $N = 10,000$ files averaging 1,200 tokens each. Documents are chunked into 512-token segments with 128-token overlap ($C = 4$ chunks per file).
 
 The dense vector store uses 1024-dimensional float16 embeddings. Local embedding inference via an optimized model (`bge-large-en-v1.5`) exhibits a forward-pass latency of $t_{\text{emb}} = 12\text{ ms}$ for batch size $B=1$, and $t_{\text{batch}} = 28\text{ ms}$ for batch size $B=16$. CPU-based tree-sitter AST parsing requires $t_{\text{ast}} = 3.5\text{ ms}$ per file, and lexical index updates require $t_{\text{lex}} = 2.0\text{ ms}$ per chunk.
 
-**The Workload:** The agent executes an automated refactoring tool that modifies $M = 8$ files simultaneously. Each file has changes affecting 2 chunks, generating a total of $M_{\text{chunks}} = 16$ dirty chunks.
+**The Workload:** The agent executes an automated refactoring tool that modifies $M =$ `{python} IndexSyncLatency.m_files_str` files simultaneously. Each file has changes affecting 2 chunks, generating a total of $M_{\text{chunks}} =$ `{python} IndexSyncLatency.m_chunks_str` dirty chunks.
 
 **Case A: Synchronous Incremental Re-indexing**
 The agent tool call blocks while the host CPU and GPU execute the full update pipeline:
 $$T_{\text{sync}} = M \cdot t_{\text{ast}} + M_{\text{chunks}} \cdot t_{\text{lex}} + \left\lceil \frac{M_{\text{chunks}}}{B=16} \right\rceil \cdot t_{\text{batch}}$$
 $$T_{\text{sync}} = (8 \times 3.5\text{ ms}) + (16 \times 2.0\text{ ms}) + (1 \times 28.0\text{ ms}) = 28\text{ ms} + 32\text{ ms} + 28\text{ ms} = 88\text{ ms}$$
 
-If embedding inference relies on a remote cloud API subject to network round-trip times ($t_{\text{rpc}} \approx 150\text{ ms}$ per request), this blocking penalty spikes to $28\text{ ms} + 32\text{ ms} + 150\text{ ms} = 210\text{ ms}$. If calls are serialized per file without client-side batching, latency reaches $8 \times 150\text{ ms} = 1.20\text{ seconds}$, visibly stalling the decode loop.
+If embedding inference relies on a remote cloud API subject to network round-trip times ($t_{\text{rpc}} \approx 150\text{ ms}$ per request), this blocking penalty spikes to $28\text{ ms} + 32\text{ ms} + 150\text{ ms} =$ `{python} IndexSyncLatency.t_sync_remote_ms_str`. If calls are serialized per file without client-side batching, latency reaches $8 \times 150\text{ ms} =$ `{python} IndexSyncLatency.t_sync_serial_s_str`, visibly stalling the decode loop.
 
 **Case B: Tombstoning with Read-Time Filtering**
 
-1. *Write Path Overhead:* The tool updates an in-memory hash table mapping the 8 file identifiers to current nanosecond timestamps. At 50 ns per insertion, the total write stall is $8 \times 50\text{ ns} = 400\text{ ns} = 0.0004\text{ ms}$. Control returns to the agent instantly.
-2. *Read Path Overhead:* A subsequent query generates $K_{\text{cand}} = 50$ candidates via HNSW graph traversal. The read filter performs 50 hash lookups against the tombstone registry. At 30 ns per lookup, the verification overhead is $50 \times 30\text{ ns} = 1.5\ \mu\text{s} = 0.0015\text{ ms}$.
+1. *Write Path Overhead:* The tool updates an in-memory hash table mapping the `{python} IndexSyncLatency.m_files_str` file identifiers to current nanosecond timestamps. At 50 ns per insertion, the total write stall is $8 \times 50\text{ ns} = 400\text{ ns} =$ `{python} IndexSyncLatency.t_write_stall_ms_str`. Control returns to the agent instantly.
+2. *Read Path Overhead:* A subsequent query generates $K_{\text{cand}} =$ `{python} IndexSyncLatency.k_cand_str` candidates via HNSW graph traversal. The read filter performs 50 hash lookups against the tombstone registry. At 30 ns per lookup, the verification overhead is $50 \times 30\text{ ns} = 1.5\ \mu\text{s} =$ `{python} IndexSyncLatency.t_read_overhead_ms_str`.
 
-Tombstoning reduces write-path latency by five orders of magnitude ($88\text{ ms} \to 0.0004\text{ ms}$) while maintaining mathematical zero-staleness ($\Delta t = 0$), completely shielding the model from pre-mutation content without stalling execution.
+Tombstoning reduces write-path latency by five orders of magnitude (`{python} IndexSyncLatency.t_sync_local_ms_str` $\to$ `{python} IndexSyncLatency.t_write_stall_ms_str`) while maintaining mathematical zero-staleness ($\Delta t = 0$), completely shielding the model from pre-mutation content without stalling execution.
 :::
 
 ### The self-contradiction trap
@@ -1055,6 +1367,53 @@ $$\alpha_{\text{storage}} = \frac{\text{Size}_{\text{Inverted Index}} + \text{Si
 
 : **Persistent Memory Subsystem Benchmark**: Architectural comparison of persistent memory subsystems on a 50,000-file repository benchmark. Recall is measured on exact identifier and structural dependency lookups; task success reflects multi-step bug localization and repair. {#tbl-vol3-retrieval-comparison}
 
+```{python}
+#| label: lego-06-quantitative-trade-offs-in-storage-amplification
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUANTITATIVE TRADE-OFFS IN STORAGE AMPLIFICATION AND INDEXING THROUGHPUT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-06-quantitative-trade-offs-in-storage-amplification
+# │ Goal: Dimension storage amplification and incremental re-indexing latency across architectures.
+# │ Show: Arch A (BM25+AST) expands storage 1.36x and re-indexes in 34 ms vs Arch B 10.44x and 672 ms.
+# │ How: Calculate postings and graph edges vs high-dimensional vectors and HNSW link pointers.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_multiple
+
+class StorageAmplificationTradeoffs:
+    """Quantitative trade-offs in storage amplification and indexing throughput."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_files_mod = 15
+    rate_bm25 = 1250
+    rate_ast = 680
+    rate_emb = 50
+    chunks_mod = 33
+
+    alpha_a = 1.36
+    alpha_b = 10.44
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_reindex_a = (n_files_mod / rate_bm25 + n_files_mod / rate_ast) * second
+    t_reindex_b = (n_files_mod / rate_bm25 + chunks_mod / rate_emb) * second
+
+    t_reindex_a_ms = round(t_reindex_a.to(millisecond).magnitude) * millisecond
+    t_reindex_b_ms = round(t_reindex_b.to(millisecond).magnitude) * millisecond
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_reindex_a.to(millisecond).magnitude - 34.06) < 0.5, "t_reindex_a")
+    check(abs(t_reindex_b.to(millisecond).magnitude - 672.0) < 0.5, "t_reindex_b")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_files_mod_str = fmt_int(n_files_mod)
+    t_reindex_a_ms_str = fmt_time(t_reindex_a_ms, unit=millisecond, precision=0)
+    t_reindex_b_ms_str = fmt_time(t_reindex_b_ms, unit=millisecond, precision=0)
+    alpha_a_mult_str = fmt_multiple(alpha_a, precision=2)
+    alpha_b_mult_str = fmt_multiple(alpha_b, precision=2)
+```
+
 ::: {#nbk-06-quantitative-trade-offs-in-storage-amplification .callout-notebook title="Quantitative trade-offs in storage amplification and indexing throughput"}
 A software engineering agent workspace manages a medium-sized repository consisting of $N = 50{,}000$ source files containing a total of $10^7$ tokens. The average file length is 200 tokens ($800\text{ bytes}$ of raw ASCII text), yielding a raw corpus size of:
 
@@ -1067,13 +1426,13 @@ The engineering team must select between two persistent storage architectures:
 
 **Problem 1: Compute the Storage Amplification Factor ($\alpha_{\text{storage}}$) for both architectures.**
 
-For Architecture A:
+For Architecture A, yielding a storage amplification factor of `{python} StorageAmplificationTradeoffs.alpha_a_mult_str`:
 $$\text{Size}_{\text{BM25}} = 10^7 \times 0.8\text{ bytes} = 8.0\text{ MB}$$
 $$\text{Size}_{\text{Graph}} = 50{,}000 \times 4 \times 32\text{ bytes} = 6.4\text{ MB}$$
 $$\text{Size}_{\text{Total, A}} = 40.0\text{ MB (corpus)} + 8.0\text{ MB} + 6.4\text{ MB} = 54.4\text{ MB}$$
 $$\alpha_{\text{storage, A}} = \frac{54.4\text{ MB}}{40.0\text{ MB}} = 1.36\times$$
 
-For Architecture B:
+For Architecture B, yielding a storage amplification factor of `{python} StorageAmplificationTradeoffs.alpha_b_mult_str`:
 $$\text{Size}_{\text{BM25}} = 8.0\text{ MB}$$
 $$\text{Size}_{\text{Vectors}} = 111{,}111 \times 768 \times 4\text{ bytes} = 341.3\text{ MB}$$
 $$\text{Size}_{\text{HNSW}} = 111{,}111 \times 256\text{ bytes} = 28.4\text{ MB}$$
@@ -1090,7 +1449,7 @@ $$T_{\text{reindex, A}} = \frac{15}{1{,}250} + \frac{15}{680} = 0.012\text{ s} +
 Under Architecture B, the 15 modified files contain approximately $15 \times 2.22 = 33$ chunks that must be re-embedded:
 $$T_{\text{reindex, B}} = \frac{15}{1{,}250} + \frac{33}{50} = 0.012\text{ s} + 0.660\text{ s} = 672\text{ ms}$$
 
-Architecture A completes re-indexing in $34\text{ ms}$ (imperceptible within an interactive loop), while Architecture B imposes a $672\text{ ms}$ synchronization delay before the subsequent reasoning step can safely dispatch a query against the modified files.
+Architecture A completes re-indexing in `{python} StorageAmplificationTradeoffs.t_reindex_a_ms_str` (imperceptible within an interactive loop), while Architecture B imposes a `{python} StorageAmplificationTradeoffs.t_reindex_b_ms_str` synchronization delay before the subsequent reasoning step can safely dispatch a query against the modified files.
 :::
 
 ### The distractor dilemma
