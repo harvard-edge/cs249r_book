@@ -59,7 +59,7 @@ CANONICAL_STR_CALL = re.compile(
     r"|fmt_decibel|fmt_illuminance|fmt_temperature|fmt_temperature_rate"
     r"|fmt_arithmetic_intensity|fmt_compute_efficiency|fmt_length"
     r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
-    r"|fmt_frequency|fmt_acceleration|fmt_velocity|fmt_torque|fmt_jerk"
+    r"|fmt_frequency|fmt_acceleration|fmt_velocity|fmt_torque|fmt_torque_rate|fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_jerk"
     r"|fmt_inertia|fmt_voltage|fmt_current|fmt_resistance"
     r"|MarkdownStr)\s*\("
 )
@@ -136,6 +136,8 @@ FMT_FAMILY_USE = re.compile(
     r"|fmt_decibel|fmt_illuminance|fmt_temperature|fmt_temperature_rate"
     r"|fmt_arithmetic_intensity|fmt_compute_efficiency|fmt_length"
     r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
+    r"|fmt_frequency|fmt_acceleration|fmt_velocity|fmt_torque|fmt_torque_rate|fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_jerk"
+    r"|fmt_inertia|fmt_voltage|fmt_current|fmt_resistance"
     r"|fmt_sci|fmt_frac|sci_latex|MarkdownStr|check)\s*\("
 )
 
@@ -163,17 +165,19 @@ MLSYSIM_STAR_IMPORT = re.compile(r"\bfrom\s+mlsysim\s+import\s+\*")
 # _FALLBACK is used only when mlsysim cannot be imported (so the check still
 # runs in a bare environment); it lists the names verified as really exported.
 _MLSYSIM_STAR_FALLBACK = frozenset({
-    "MarkdownStr", "check", "fmt", "fmt_area", "fmt_arithmetic_intensity",
-    "fmt_bandwidth", "fmt_carbon_intensity", "fmt_compute_efficiency",
-    "fmt_count", "fmt_count_range", "fmt_display_math", "fmt_emissions",
-    "fmt_energy", "fmt_energy_per_op", "fmt_eur", "fmt_flop_rate", "fmt_flops",
-    "fmt_fps", "fmt_heat_flux", "fmt_int", "fmt_latency", "fmt_length",
-    "fmt_magnitude", "fmt_memory", "fmt_multiple", "fmt_multiple_range",
-    "fmt_ops_rate", "fmt_params", "fmt_percent", "fmt_percent_range",
-    "fmt_power", "fmt_pp", "fmt_qty", "fmt_qty_range", "fmt_range", "fmt_rate",
-    "fmt_ratio", "fmt_sci_qty", "fmt_specific_heat", "fmt_text", "fmt_time",
-    "fmt_time_range", "fmt_tokens", "fmt_usd", "fmt_usd_range", "fmt_water",
-    "fmt_water_intensity", "fmt_water_rate",
+    "MarkdownStr", "check", "fmt", "fmt_acceleration", "fmt_angular_velocity", "fmt_area",
+    "fmt_arithmetic_intensity", "fmt_bandwidth", "fmt_carbon_intensity",
+    "fmt_compute_efficiency", "fmt_count", "fmt_count_range", "fmt_current",
+    "fmt_display_math", "fmt_emissions", "fmt_energy", "fmt_energy_per_op", "fmt_eur",
+    "fmt_flop_rate", "fmt_flops", "fmt_force", "fmt_force_rate", "fmt_fps",
+    "fmt_frequency", "fmt_heat_flux", "fmt_inertia", "fmt_int", "fmt_jerk",
+    "fmt_latency", "fmt_length", "fmt_magnitude", "fmt_mass", "fmt_memory",
+    "fmt_multiple", "fmt_multiple_range", "fmt_ops_rate", "fmt_params",
+    "fmt_percent", "fmt_percent_range", "fmt_power", "fmt_pp", "fmt_qty",
+    "fmt_qty_range", "fmt_range", "fmt_rate", "fmt_ratio", "fmt_resistance",
+    "fmt_sci_qty", "fmt_specific_heat", "fmt_text", "fmt_time", "fmt_time_range",
+    "fmt_token_rate", "fmt_tokens", "fmt_torque", "fmt_usd", "fmt_usd_range",
+    "fmt_velocity", "fmt_voltage", "fmt_water", "fmt_water_intensity", "fmt_water_rate",
 })
 
 

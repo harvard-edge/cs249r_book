@@ -394,6 +394,8 @@ def _coerce_unit(display_unit):
     """Return a Pint Unit from a Pint unit-like object or unit string."""
     if isinstance(display_unit, str):
         return ureg.Unit(display_unit)
+    if isinstance(display_unit, ureg.Quantity):
+        return display_unit.units
     return display_unit
 
 
@@ -2328,6 +2330,20 @@ def _pick_emissions_unit(qty):
     return metric_ton
 
 
+def _pick_mass_unit(qty):
+    """Auto-select gram, kilogram, or metric ton for prose mass display."""
+    from .core.units import gram, kilogram, metric_ton
+
+    q = qty.to(gram)
+    mag = abs(q.magnitude)
+    if mag < 1e3:
+        return gram
+    kg = q.to(kilogram).magnitude
+    if kg < 1e3:
+        return kilogram
+    return metric_ton
+
+
 def _pick_carbon_intensity_unit(qty):
     from .core.units import gram, kWh
 
@@ -3131,6 +3147,156 @@ def fmt_torque(quantity, *, unit=None, precision=None, commas=False):
         precision=p,
         commas=commas,
         unit_label="N·m",
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_force(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format force quantities for prose (N, kN, mN)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_force() requires a Pint Quantity.")
+    force_dim = (1 * ureg.newton).dimensionality
+    if (1 * quantity).dimensionality != force_dim:
+        raise ValueError(f"fmt_force unit must have force dimensionality (N), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else ureg.newton
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_label = "N" if display_unit == ureg.newton else None
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_force_rate(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format force-rate quantities for prose (N/s, N/ms), e.g. braking or clamp ramps."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_force_rate() requires a Pint Quantity.")
+    rate_dim = (1 * (ureg.newton / ureg.second)).dimensionality
+    if (1 * quantity).dimensionality != rate_dim:
+        raise ValueError(f"fmt_force_rate unit must have force-rate dimensionality (N/s), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.newton / ureg.second)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_label = None
+    try:
+        if abs((1 * display_unit).to(ureg.newton / ureg.second).magnitude - 1) < 1e-12:
+            unit_label = "N/s"
+        elif abs((1 * display_unit).to(ureg.newton / ureg.millisecond).magnitude - 1) < 1e-12:
+            unit_label = "N/ms"
+    except Exception:
+        unit_label = None
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_mass(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Auto-scale mass quantities for prose (g, kg, t)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_mass() requires a Pint Quantity.")
+    mass_dim = (1 * ureg.kilogram).dimensionality
+    if (1 * quantity).dimensionality != mass_dim:
+        raise ValueError(f"fmt_mass unit must have mass dimensionality, got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else _pick_mass_unit(quantity)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        trim_trailing_zeros=auto_precision,
+    )
+
+
+def fmt_angular_velocity(
+    quantity,
+    *,
+    unit=None,
+    precision=None,
+    commas=False,
+    approx=False,
+    lower_bound=False,
+    upper_bound=False,
+):
+    """Format angular velocity quantities for prose (rad/s, deg/s, rpm)."""
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError("fmt_angular_velocity() requires a Pint Quantity.")
+    ang_vel_dim = (1 * (ureg.radian / ureg.second)).dimensionality
+    if (1 * quantity).dimensionality != ang_vel_dim:
+        raise ValueError(f"fmt_angular_velocity unit must have angular velocity dimensionality (angle/time), got {quantity}.")
+    display_unit = _coerce_unit(unit) if unit is not None else (ureg.radian / ureg.second)
+    q = quantity.to(display_unit)
+    auto_precision = precision is None
+    p = _resolve_display_precision(q.magnitude, precision)
+    unit_label = None
+    try:
+        if abs((1 * display_unit).to(ureg.radian / ureg.second).magnitude - 1) < 1e-12:
+            unit_label = "rad/s"
+        elif abs((1 * display_unit).to(ureg.degree / ureg.second).magnitude - 1) < 1e-12:
+            unit_label = "deg/s"
+        elif str(display_unit) in {"rpm", "revolutions_per_minute"} or display_unit == ureg.Unit("rpm"):
+            unit_label = "rpm"
+    except Exception:
+        unit_label = None
+    return fmt_qty(
+        q,
+        display_unit,
+        precision=p,
+        commas=commas,
+        approx=approx,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+        unit_label=unit_label,
         trim_trailing_zeros=auto_precision,
     )
 

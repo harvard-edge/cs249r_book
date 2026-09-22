@@ -57,6 +57,7 @@ from .fmt import (
     fmt_water_rate, fmt_water_intensity, fmt_latency,
     fmt_frequency, fmt_acceleration, fmt_torque, fmt_velocity, fmt_jerk,
     fmt_inertia, fmt_voltage, fmt_current, fmt_resistance, fmt_token_rate,
+    fmt_force, fmt_force_rate, fmt_mass, fmt_angular_velocity,
     fmt_energy_per_op,
     assert_qty_close, check, MarkdownStr,
 )

@@ -1424,3 +1424,49 @@ class TestPhysicalAIFormatters:
         assert fmt_resistance(0.05 * ohm, precision=2) == "0.05 Ω"
         assert fmt_resistance(50 * milliohm, unit=milliohm, precision=0) == "50 mΩ"
 
+    def test_fmt_force(self):
+        from mlsysim.fmt import fmt_force
+        from mlsysim.core.units import newton, ureg, meter
+        assert fmt_force(120.0 * newton, precision=0) == "120 N"
+        assert fmt_force(15.5 * newton, precision=1) == "15.5 N"
+        assert fmt_force(2.5 * ureg.kilonewton, unit=ureg.kilonewton, precision=1) == "2.5 kN"
+        with pytest.raises(TypeError, match="requires a Pint Quantity"):
+            fmt_force(120)
+        with pytest.raises(ValueError, match="force dimensionality"):
+            fmt_force(5 * meter)
+
+    def test_fmt_force_rate(self):
+        from mlsysim.fmt import fmt_force_rate
+        from mlsysim.core.units import newton, second, millisecond, meter
+        assert fmt_force_rate(500 * (newton / second), precision=0) == "500 N/s"
+        assert fmt_force_rate(10 * (newton / millisecond), unit=newton / millisecond, precision=0) == "10 N/ms"
+        with pytest.raises(TypeError, match="requires a Pint Quantity"):
+            fmt_force_rate(500)
+        with pytest.raises(ValueError, match="force-rate dimensionality"):
+            fmt_force_rate(5 * meter)
+
+    def test_fmt_mass(self):
+        from mlsysim.fmt import fmt_mass
+        from mlsysim.core.units import gram, kilogram, metric_ton, meter
+        assert fmt_mass(250 * gram, precision=0) == "250 g"
+        assert fmt_mass(15.5 * kilogram, precision=1) == "15.5 kg"
+        assert fmt_mass(2500 * kilogram, precision=1) == "2.5 t"
+        assert fmt_mass(1500 * gram, unit=kilogram, precision=1) == "1.5 kg"
+        assert fmt_mass(2 * metric_ton, unit=kilogram, precision=0, commas=True) == "2,000 kg"
+        with pytest.raises(TypeError, match="requires a Pint Quantity"):
+            fmt_mass(25)
+        with pytest.raises(ValueError, match="mass dimensionality"):
+            fmt_mass(5 * meter)
+
+    def test_fmt_angular_velocity(self):
+        from mlsysim.fmt import fmt_angular_velocity
+        from mlsysim.core.units import radian, second, ureg, meter
+        assert fmt_angular_velocity(3.14 * (radian / second), precision=2) == "3.14 rad/s"
+        assert fmt_angular_velocity(10 * (radian / second), precision=0) == "10 rad/s"
+        assert fmt_angular_velocity(180 * (ureg.degree / second), unit=ureg.degree / second, precision=0) == "180 deg/s"
+        assert fmt_angular_velocity(3000 * ureg("rpm"), unit=ureg("rpm"), precision=0, commas=True) == "3,000 rpm"
+        with pytest.raises(TypeError, match="requires a Pint Quantity"):
+            fmt_angular_velocity(10)
+        with pytest.raises(ValueError, match="angular velocity dimensionality"):
+            fmt_angular_velocity(5 * meter)
+
