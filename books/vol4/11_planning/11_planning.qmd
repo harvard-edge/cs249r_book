@@ -127,7 +127,91 @@ Momentum, a long inference tail, and a seam that must stay continuous together d
 
 For a two-joint arm, one pair of joint angles $(q_1,q_2)$ is one point in **configuration space**\index{Configuration space!definition} $\mathcal{C}$. An obstacle excludes some angle pairs, leaving $\mathcal{C}_{\mathrm{free}}=\mathcal{C}\setminus\mathcal{C}_{\mathrm{obs}}$. A curve through that free set says where the arm may move, but not how quickly it may move or whether its motors can supply the required torque [@lozanoperez1983spatial]. A **trajectory**\index{Executable trajectory!definition} assigns time to the curve and exposes $\mathbf{x}(t)=[\mathbf{q}(t)^T,\dot{\mathbf{q}}(t)^T,\ddot{\mathbf{q}}(t)^T]^T$. The planner proposes that time-indexed reference, and the permission path checks it before any setpoint reaches the drive. The tracking controller interpolates an admitted reference at its configured cadence; the enforcer checks current state and limits during execution. A geometric path alone supplies neither timing nor fallback clearance.
 
-The trajectory record names its coordinate frame $\mathcal{F}$, evidence time $t_0$, initial reference state, and four deadlines in the **MCU monotonic clock domain**: nominal tracking begins at $t_{\mathrm{start}}$, the nominal setpoints end at $t_{\mathrm{plan\_exp}}$, replacement closes at $t_{\mathrm{commit}}$, and the admitted stop finishes at $t_{\mathrm{stop\_end}}$. It also links to the active intent expiry $t_{\mathrm{intent\_exp}}$. Conversion from the sensor and host clocks carries a bounded error. The permission path permits nominal **TRACK** only while the intent and plan are valid. Without a successor it transfers to MCU-owned **STOP** no later than $t_{\mathrm{commit}}$; the protected stop may finish after the intent's tracking permission expires. Earlier lease expiry or unexpected invalidation requires a separate state-matched MCU fallback, because the suffix matched at $t_{\mathrm{commit}}$ cannot be played from an arbitrary earlier state.
+```{python}
+#| label: calc-planning-lease-rule
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ONE CHUNK LEASE FOR BOTH BODIES: THE ARM'S LEASE PATH AND CEILING
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-planning-handoff (TRACK/STOP paragraph),
+# │          @sec-planning-trajectory-contract (record expiry, filled record).
+# │
+# │ Goal:    Charge the arm's stop from the last admitted chunk when the
+# │          shared chunk lease lapses, and bound the lease by commitment.
+# │ Show:    60 ms lease, renewed every 50 ms; lease path 60 + 1 + 1 + 20 =
+# │          82 ms, 82 mm at 1.0 m/s; with the 150 mm C2 stop, 232 mm of
+# │          300 mm, leaving 68 mm against 90 mm on the commitment path;
+# │          lease ceiling 300 - 22 = 278 ms.
+# │ How:     AISLE lease, tick, bus, and brake onset (charged as the arm's
+# │          onset, conservative); RM TCP limit; calc_c2_stop_suffix. The arm's
+# │          worked deadlines and clearance are defined here and read by
+# │          calc-planning-arm-timeline and calc-planning-c2-stop-clearance.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import ureg, millisecond
+from mlsysim.fmt import check, fmt_latency, fmt_length, fmt_velocity
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class PlanningLeaseRule:
+    """The shared chunk lease applied to the arm: lease path and commitment ceiling."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    t_lease = AISLE.t_lease  # category: chosen; chunk lease (@sec-nervous-cadences), registry
+    f_renew = RM.chunk_rate  # category: chosen; admitted-chunk renewal rate, registry
+    t_tick = AISLE.t_tick  # category: derived; permission-loop period, registry
+    t_bus = AISLE.t_bus  # category: illustrative; fieldbus cycle, registry
+    t_onset = AISLE.t_brake_onset  # category: illustrative; brake onset, charged as the arm's onset
+    v_arm = RM.tcp_speed_limit  # category: chosen; free-space TCP limit, registry
+    t_blend = 240 * millisecond  # category: chosen; preferred blend deadline
+    t_commit = 300 * millisecond  # category: chosen; physical suffix onset
+    t_arm_stop = 300 * millisecond  # category: illustrative; arm stop duration
+    d_arm_clear = 300 * ureg.millimeter  # category: illustrative; obstacle clearance
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    t_renew = (1 / f_renew).to(millisecond)
+    t_lease_slack = (t_lease - t_renew).to(millisecond)
+    t_dispatch = (t_tick + t_bus + t_onset).to(millisecond)
+    t_lease_path = (t_lease + t_dispatch).to(millisecond)
+    d_lease_path = (v_arm * t_lease_path).to(ureg.millimeter)
+    arm_stop_dist = calc_c2_stop_suffix(v_arm, (1.5 * v_arm / t_arm_stop).to(ureg.meter / ureg.second**2))["distance"].to(ureg.millimeter)
+    lease_total = d_lease_path + arm_stop_dist
+    lease_margin = d_arm_clear - lease_total
+    commit_margin = d_arm_clear - (v_arm * (t_commit - t_blend)).to(ureg.millimeter) - arm_stop_dist
+    t_lease_max = (t_commit - t_dispatch).to(millisecond)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(abs(t_lease.to(millisecond).magnitude - 60.0) < 1e-9, "chunk lease changed")
+    check(abs(t_renew.magnitude - 50.0) < 1e-9, "renewal period changed")
+    check(t_renew < t_lease, "lease no longer outlasts one renewal period")
+    check(abs(t_lease_slack.magnitude - 10.0) < 1e-9, "lease slack beyond one renewal period changed")
+    check(abs(t_lease_path.magnitude - 82.0) < 1e-9, "arm lease path changed")
+    check(abs(d_lease_path.magnitude - 82.0) < 1e-9, "arm lease-path travel changed")
+    check(abs(arm_stop_dist.magnitude - 150.0) < 1e-9, "arm C2 stop distance changed")
+    check(abs(lease_total.magnitude - 232.0) < 1e-9, "arm lease-path stop total changed")
+    check(abs(lease_margin.magnitude - 68.0) < 1e-9, "arm lease-path margin changed")
+    check(abs(commit_margin.magnitude - 90.0) < 1e-9, "arm commitment-path margin changed")
+    check(lease_margin < commit_margin, "lease path no longer the tighter arm case")
+    check(abs(t_lease_max.magnitude - 278.0) < 1e-9, "arm lease ceiling changed")
+    check(t_lease < t_lease_max, "chunk lease exceeds the arm's commitment ceiling")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    t_lease_str = fmt_latency(t_lease, unit=millisecond)
+    t_renew_str = fmt_latency(t_renew, unit=millisecond)
+    t_lease_slack_str = fmt_latency(t_lease_slack, unit=millisecond)
+    t_lease_path_str = fmt_latency(t_lease_path, unit=millisecond)
+    d_lease_path_str = fmt_length(d_lease_path, unit=ureg.millimeter)
+    v_arm_str = fmt_velocity(v_arm)
+    arm_stop_dist_str = fmt_length(arm_stop_dist, unit=ureg.millimeter)
+    lease_total_str = fmt_length(lease_total, unit=ureg.millimeter)
+    lease_margin_str = fmt_length(lease_margin, unit=ureg.millimeter)
+    commit_margin_str = fmt_length(commit_margin, unit=ureg.millimeter)
+    d_arm_clear_str = fmt_length(d_arm_clear, unit=ureg.millimeter)
+    t_lease_max_str = fmt_latency(t_lease_max, unit=millisecond)
+```
+
+The trajectory record names its coordinate frame $\mathcal{F}$, evidence time $t_0$, initial reference state, and four deadlines in the **MCU monotonic clock domain**: nominal tracking begins at $t_{\mathrm{start}}$, the nominal setpoints end at $t_{\mathrm{plan\_exp}}$, replacement closes at $t_{\mathrm{commit}}$, and the admitted stop finishes at $t_{\mathrm{stop\_end}}$. It also links to the active intent expiry $t_{\mathrm{intent\_exp}}$. Conversion from the sensor and host clocks carries a bounded error. The permission path permits nominal **TRACK** only while the intent and plan are valid, so the intent's expiry ends TRACK at once, whatever the record's own deadlines allow. Because the chunk policy proposes base velocity and arm joint targets together, a second clock also bounds TRACK, one chunk lease (@sec-nervous-cadences) that governs both bodies, and only an admitted chunk renews it, every `{python} PlanningLeaseRule.t_renew_str` on this machine. When the lease lapses `{python} PlanningLeaseRule.t_lease_str` after the last admission, each body enters its own state-matched stop, the base its resident $C^2$ suffix and the arm a separately validated MCU fallback, because the arm's suffix matched at $t_{\mathrm{commit}}$ cannot be played from an arbitrary earlier state. An intent expiry or a fault that invalidates the path before $t_{\mathrm{commit}}$ sends the arm to that same fallback. Adding one permission tick, one bus cycle, and brake onset puts the arm's stop onset `{python} PlanningLeaseRule.t_lease_path_str` after the last admission, or `{python} PlanningLeaseRule.d_lease_path_str` of travel at its `{python} PlanningLeaseRule.v_arm_str` TCP limit. With its `{python} PlanningLeaseRule.arm_stop_dist_str` stop, that uses `{python} PlanningLeaseRule.lease_total_str` of an illustrative `{python} PlanningLeaseRule.d_arm_clear_str` clearance and leaves `{python} PlanningLeaseRule.lease_margin_str`, against `{python} PlanningLeaseRule.commit_margin_str` when the stop begins at commitment (@sec-planning-behavior-seam). Commitment in turn caps the lease. Stop onset must come by $t_{\mathrm{commit}}$, so on this arm the lease may run at most `{python} PlanningLeaseRule.t_lease_max_str`. Only a lease run near that ceiling lets a record reach $t_{\mathrm{commit}}$ without a successor; such a record transfers to MCU-owned **STOP** on the suffix matched there, which remains its protected stop and may finish after the intent's tracking permission expires. On this machine the `{python} PlanningLeaseRule.t_lease_str` lease lapses long before commitment, so the lease path is the one a stalled proposer actually takes.
 
 The initial reference state matters because the plant keeps moving during inference, so a chunk anchored to the pose the host sampled would start behind the arm. Before admission, the MCU compares the candidate seam with its current encoder state, checks position, velocity, and acceleration, and either admits a feasible bridge or retains the active plan and fallback. Projecting the active *reference* forward helps form a candidate, but it is not a measurement of the plant.
 
@@ -141,7 +225,7 @@ Structuring the plan handoff as a bounded, hardware-grounded contract shifts the
 
 ## From Goal to Trajectory {#sec-planning-goal-to-trajectory}
 
-The intent lease for the mug grants a goal region and effort ceilings (@sec-intent-lease), but no actuator can execute a region. A goal defines where the machine should arrive or what constraint it should satisfy, without providing joint velocities, torque bounds, intermediate kinematic states, or a continuous time schedule to move physical mass through space. The tracking controller requires a trajectory, which assigns concrete state targets, feedforward actuation terms, and explicit timestamps across a bounded temporal interval. If a learned policy could evaluate multimodal state observations and output valid motor currents instantaneously at the hardware control period ($1000\text{ Hz}$), planning as an architectural stage would not exist; the machine would operate purely as a high-frequency feedback controller. In physical systems, learned neural policies require tens or hundreds of milliseconds to compute a motion sequence, while the tracking controller and the permission path below the proposal boundary (@sec-boundary-machine-model) must execute deterministically every few milliseconds. A plan assigns time and physical limits to a goal; the independent permission path decides whether its proposed motion may run.
+The intent lease for the mug, which the arm takes from the conveyor for the coworker at the packing station, grants a goal region and effort ceilings (@sec-intent-lease), but no actuator can execute a region. A goal defines where the machine should arrive or what constraint it should satisfy, without providing joint velocities, torque bounds, intermediate kinematic states, or a continuous time schedule to move physical mass through space. The tracking controller requires a trajectory, which assigns concrete state targets, feedforward actuation terms, and explicit timestamps across a bounded temporal interval. If a learned policy could evaluate multimodal state observations and output valid motor currents instantaneously at the hardware control period ($1000\text{ Hz}$), planning as an architectural stage would not exist; the machine would operate purely as a high-frequency feedback controller. In physical systems, learned neural policies require tens or hundreds of milliseconds to compute a motion sequence, while the tracking controller and the permission path below the proposal boundary (@sec-boundary-machine-model) must execute deterministically every few milliseconds. A plan assigns time and physical limits to a goal; the independent permission path decides whether its proposed motion may run.
 
 Classical sampling-based planners answer the geometric half of this problem. A probabilistic roadmap\index{Probabilistic roadmap} [@kavraki1996probabilistic] or a rapidly-exploring random tree\index{Rapidly-exploring random tree} [@lavalle1998rapidly] searches $\mathcal{C}_{\text{free}}$ for a collision-free path without building an explicit model of the obstacles. A path from such a search, like a chunk from a learned policy, still carries no timing, no derivatives at its ends, and no stop, and those are what this chapter supplies.
 
@@ -252,9 +336,9 @@ class PlanningArmTimeline:
     f_renew = RM.chunk_rate  # category: chosen; chunk renewal rate, registry
     q_latency = 160 * millisecond  # category: chosen; design-tail replacement-latency target
     t_reserve = 20 * millisecond  # category: chosen; admission reserve
-    t_stop = 300 * millisecond  # category: illustrative; arm stop duration
-    t_blend = 240 * millisecond  # category: chosen; preferred blend deadline
-    t_commit = 300 * millisecond  # category: chosen; physical suffix onset
+    t_stop = PlanningLeaseRule.t_arm_stop  # category: illustrative; arm stop duration, calc-planning-lease-rule
+    t_blend = PlanningLeaseRule.t_blend  # category: chosen; preferred blend deadline, calc-planning-lease-rule
+    t_commit = PlanningLeaseRule.t_commit  # category: chosen; physical suffix onset, calc-planning-lease-rule
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
     f_step = (1 / t_period).to("hertz")
@@ -307,48 +391,9 @@ class PlanningArmTimeline:
 
 The complete duration in @eq-plan-action-chunk-horizon includes the stop suffix. The machine's chunk policy emits a setpoint every `{python} PlanningArmTimeline.t_period_str` (the setpoint period $\Delta t_{\text{step}}$), `{python} PlanningArmTimeline.n_horizon_str` to a chunk, so one chunk carries `{python} PlanningArmTimeline.t_plan_exp_str` of nominal motion. For the conveyor-tracking arm, a chosen request delay of `{python} PlanningArmTimeline.t_request_str`, replacement target of `{python} PlanningArmTimeline.q_latency_str`, and reserve of `{python} PlanningArmTimeline.t_reserve_str`, with a separately checked `{python} PlanningArmTimeline.t_stop_str` stop, require at least `{python} PlanningArmTimeline.t_record_min_str` of complete motion authority, or `{python} PlanningArmTimeline.n_record_min_str` setpoint-period **duration equivalents**. This does not mean `{python} PlanningArmTimeline.n_record_min_str` stored setpoints: $N$ in the record counts only nominal samples; the stop is represented by its separately validated polynomial coefficients.
 
-The chunk policy sends its next request `{python} PlanningArmTimeline.t_renew_str` after a chunk starts (@sec-brain-cognitive-pipeline); the chosen request delay is `{python} PlanningArmTimeline.request_slack_str` longer, so the bound still holds for a request that leaves late by up to that much. The replacement target is a design-tail quantile of the whole replacement path, so it sits well beyond both the policy's `{python} PlanningArmTimeline.t_chunk_str` P99 pass and the `{python} PlanningReplacementLedger.t_sum_str` stage ledger. The nominal replacement deadline must be at least `{python} PlanningArmTimeline.t_replace_min_str` from start; the worked `{python} PlanningArmTimeline.t_commit_str` commitment below leaves `{python} PlanningArmTimeline.commit_slack_str` beyond that target. A `{python} PlanningArmTimeline.t_replace_min_str` *total* authority horizon would omit the stop runway. In the worked arm, the chunk's nominal setpoints end at `{python} PlanningArmTimeline.t_plan_exp_str` and the admitted stop completes at `{python} PlanningArmTimeline.t_stop_end_str`, so the complete authority window spans `{python} PlanningArmTimeline.n_window_str` setpoint-period duration equivalents.
+The chunk policy sends its next request `{python} PlanningArmTimeline.t_renew_str` after each chunk starts (@sec-brain-cognitive-pipeline), so in steady operation several requests are in flight at once, an admitted chunk arrives every `{python} PlanningArmTimeline.t_renew_str`, and their latencies overlap; the chosen request delay is `{python} PlanningArmTimeline.request_slack_str` longer, so the bound still holds for a request that leaves late by up to that much. The replacement target is a design-tail quantile of the whole replacement path, so it sits well beyond both the policy's `{python} PlanningArmTimeline.t_chunk_str` P99 pass and the `{python} PlanningReplacementLedger.t_sum_str` stage ledger. The nominal replacement deadline must be at least `{python} PlanningArmTimeline.t_replace_min_str` from start; the worked `{python} PlanningArmTimeline.t_commit_str` commitment below leaves `{python} PlanningArmTimeline.commit_slack_str` beyond that target. This window is the arm's limit rather than its operating case. The shared lease of @sec-planning-handoff lapses once an admission falls more than `{python} PlanningLeaseRule.t_lease_slack_str` behind its slot, so a replacement that takes the full design tail ends in the arm's state-matched stop long before the blend deadline, and the window instead sets how long any lease may run on this arm. A `{python} PlanningArmTimeline.t_replace_min_str` *total* authority horizon would omit the stop runway. In the worked arm, the chunk's nominal setpoints end at `{python} PlanningArmTimeline.t_plan_exp_str` and the admitted stop completes at `{python} PlanningArmTimeline.t_stop_end_str`, so the complete authority window spans `{python} PlanningArmTimeline.n_window_str` setpoint-period duration equivalents.
 
-```{python}
-#| label: calc-planning-conveyor-evidence
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ TRACKED EVIDENCE HORIZON FOR THE MUG ON THE CONVEYOR
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-planning-goal-to-trajectory (evidence-age paragraph).
-# │
-# │ Goal:    Bound how long one observation of the tracked mug stays usable.
-# │ Show:    residual slip, grasp tolerance, and the ~245 ms horizon.
-# │ How:     AISLE registry fields; t = sqrt(2 r_tol / a_slip).
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
-from mlsysim.core.units import ureg, millisecond
-from mlsysim.fmt import check, fmt_latency, fmt_length, fmt_acceleration
-
-AISLE = Embodied.Scenario.WarehouseAisle
-
-class PlanningConveyorEvidence:
-    """Time for residual conveyor slip to consume the grasp tolerance."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────
-    a_slip = AISLE.a_conveyor_slip  # category: illustrative; residual slip after local tracking
-    r_tol = AISLE.grasp_tolerance  # category: illustrative; grasp tolerance
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────
-    t_ev = ((2 * r_tol / a_slip) ** 0.5).to(millisecond)
-    t_ev_ms = round(t_ev.magnitude) * millisecond  # whole-millisecond display
-
-    # ┌── 3. GUARD (Invariants) ────────────────────
-    check(abs(t_ev.magnitude - 244.95) < 5e-3, "tracked evidence horizon changed")
-    check(t_ev < PlanningArmTimeline.t_commit, "horizon no longer ends before the worked commitment")
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────
-    a_slip_str = fmt_acceleration(a_slip)
-    r_tol_str = fmt_length(r_tol, unit=ureg.millimeter)
-    t_ev_str = fmt_latency(t_ev_ms, unit=millisecond)
-```
-
-This timing lower bound competes with target-evidence age. With the conveyor's residual slip of `{python} PlanningConveyorEvidence.a_slip_str` after local tracking and the `{python} PlanningConveyorEvidence.r_tol_str` grasp tolerance, $\Delta x=\tfrac12a_{\mathrm{slip}}t^2$ reaches the tolerance in about `{python} PlanningConveyorEvidence.t_ev_str`. A single observation cannot justify nominal tracking to the `{python} PlanningArmTimeline.t_commit_str` commitment. The machine needs a qualified local tracker and fresh intent evidence before that limit; otherwise TRACK ends at evidence expiry and the MCU uses its separately validated state-matched stop. Extending a target timestamp because the compute tail is long would invert the permission rule.
+This timing lower bound competes with target-evidence age. Even under a qualified local tracker, where only the conveyor's residual slip carries the mug away from the tracker's prediction, @sec-intent-goals-expire finds that one observation stays inside the grasp tolerance for less time than the `{python} PlanningArmTimeline.t_commit_str` commitment. A single observation therefore cannot justify nominal tracking to commitment. The tracker must deliver fresh evidence before its horizon ends; otherwise TRACK ends at evidence expiry and the MCU uses its separately validated state-matched stop. Extending a target timestamp because the compute tail is long would invert the permission rule.
 
 When a generative policy serves as the planner, iterative score evaluation and denoising steps govern the shape of this latency distribution. The internal mechanics of diffusion schedules, attention caching, and token generation sit below the first budgetable quantity of the physical AI system. The systems interface therefore treats the learned model strictly as a stochastic producer of motion chunks characterized by an empirical latency profile and an output horizon $N$. In physical hardware deployments of receding-horizon action chunking, the execution buffer absorbs inference latency while allowing the controller to react dynamically to disturbances (@fig-11-action-chunking-trace). Sizing $N$ against a validated latency distribution lowers the risk of a late replacement; the protected stop handles a miss.
 
@@ -372,7 +417,7 @@ The projected seam in @eq-plan-execution-delay-gap is useful for constructing a 
 
 :::
 
-The horizon now answers to two clocks. It must be long enough that a design-tail replacement lands before commitment with the stop still behind it, and the evidence behind the target must stay fresh for as long as TRACK runs. A replacement that arrives in time, however, secures only the plan's continuity in time. The setpoints it carries must also lie within what the joints can deliver and join the mechanism's actual velocity and acceleration at the seam.
+The horizon now answers to two clocks. It must be long enough that a design-tail replacement could land before commitment with the stop still behind it, the window that caps the lease, and the evidence behind the target must stay fresh for as long as TRACK runs. A replacement that arrives in time, however, secures only the plan's continuity in time. The setpoints it carries must also lie within what the joints can deliver and join the mechanism's actual velocity and acceleration at the seam.
 
 ::: {#chk-plan-action-chunk-horizon-tail .callout-checkpoint title="Action chunk horizon and tail latency budgeting"}
 
@@ -511,9 +556,9 @@ A related physical failure arises from output chatter in learned policy proposal
 
 ## Behavior at the Seam {#sec-planning-behavior-seam}
 
-Suppose the arm is reaching toward the mug and the preferred blend deadline $t_{\mathrm{blend}}$ passes with no replacement admitted. The arm keeps moving, and every millisecond the MCU waits is travel its stop can no longer use. The four deadlines of @sec-planning-handoff, compared in the MCU monotonic clock with $t_{\mathrm{intent\_exp}}$, now decide what happens. A replacement may still be admitted until $t_{\mathrm{commit}}$, the entry of the matched stop suffix, whose duration is $T_{\mathrm{stop}}=t_{\mathrm{stop\_end}}-t_{\mathrm{commit}}$. It must pass the full admission check before that cutoff; a late host progress report has no authority.
+Suppose the chunk policy stalls while the arm is reaching toward the mug. On this machine the shared lease ends the wait `{python} PlanningLeaseRule.t_lease_str` after the last admission, and the arm enters its state-matched stop along the lease path of @sec-planning-handoff. The record's own deadlines decide how long any lease could be allowed to run, because until the stop begins the arm keeps moving, and every millisecond the MCU waits is travel its stop can no longer use. Let the lease run to its ceiling, then, so that the preferred blend deadline $t_{\mathrm{blend}}$ passes with no replacement admitted. The four deadlines of @sec-planning-handoff, compared in the MCU monotonic clock with $t_{\mathrm{intent\_exp}}$, now decide what happens. A replacement may still be admitted until $t_{\mathrm{commit}}$, the entry of the matched stop suffix, whose duration is $T_{\mathrm{stop}}=t_{\mathrm{stop\_end}}-t_{\mathrm{commit}}$. It must pass the full admission check before that cutoff; a late host progress report has no authority.
 
-The two authority modes of @sec-planning-handoff divide that interval. TRACK follows the admitted nominal path only while the plan and intent evidence remain valid. If no successor is admitted before commitment, the MCU enters STOP and follows the suffix already latched in protected memory, which may finish after $t_{\mathrm{intent\_exp}}$ because it no longer pursues the target. If intent expires or a fault invalidates the path *before* the matched commitment state, the MCU uses a separately validated state-matched baseline; playing the suffix designed for a later state would violate its seam conditions. Admission therefore checks stopping clearance from all reachable pre-commit states and the specific suffix entry at commitment.
+The two authority modes of @sec-planning-handoff divide that interval. TRACK follows the admitted nominal path only while the plan and intent evidence remain valid. If no successor is admitted before commitment, the MCU enters STOP and follows the suffix already latched in protected memory, which may finish after $t_{\mathrm{intent\_exp}}$ because it no longer pursues the target. If the lease lapses, intent expires, or a fault invalidates the path *before* the matched commitment state, the MCU uses a separately validated state-matched baseline; playing the suffix designed for a later state would violate its seam conditions. Admission therefore checks stopping clearance from all reachable pre-commit states and the specific suffix entry at commitment.
 
 For a cruise entry with $q(t_{\mathrm{commit}})=q_c$, speed $v_c>0$, and zero entry acceleration, a $C^2$ position-and-velocity-matched stop over duration $T$ uses $u=(t-t_{\mathrm{commit}})/T$:
 
@@ -532,16 +577,16 @@ Differentiating @eq-plan-c2-stopping-suffix gives speed $v_c(1-3u^2+2u^3)$ and a
 # │
 # │ Goal:    Size the C2 suffix for the arm and the base and add its term to the
 # │          base's stopping budget.
-# │ Show:    Arm 150 mm suffix and 90 mm margin; base 1125 ms / 843.75 mm at
-# │          1.5 m/s, +281.25 mm, running total 1194.15 mm past 1.10 m;
-# │          975 ms / 633.75 mm at 1.3 m/s; 200 ms late commitment breaches by
-# │          157.4 mm.
+# │ Show:    Arm 150 mm suffix and 90 mm margin; a lease run 200 ms past
+# │          commitment breaches the 300 mm clearance by 110 mm; base
+# │          1125 ms / 843.75 mm at 1.5 m/s, +281.25 mm, running total
+# │          1194.15 mm past 1.10 m.
 # │ How:     RM/AISLE registry fields; calc_c2_stop_suffix for each suffix;
 # │          calc_safe_stopping_distance with a_brake (Ch8 total) and with
 # │          a_eff = a_brake/1.5 (Ch11 total).
 # │
-# │ Note:    The 1.3 m/s spare adds eps_track, the inset that @sec-enforcement
-# │          adds; the Ch12 table owns the finished budget.
+# │ Note:    No aisle-speed value appears here; @sec-enforcement owns the
+# │          finished budget (canon round 3, F6).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import ureg, millisecond
@@ -560,17 +605,15 @@ class PlanningC2Stop:
     t_commit = PlanningArmTimeline.t_commit  # category: chosen
     t_plan_exp = PlanningArmTimeline.t_plan_exp  # category: derived
     t_arm_stop = PlanningArmTimeline.t_stop  # category: illustrative
-    d_arm_clear = 300 * ureg.millimeter  # category: illustrative; obstacle clearance
-    # Base: the aisle stop at the rack end.
+    d_arm_clear = PlanningLeaseRule.d_arm_clear  # category: illustrative; obstacle clearance, calc-planning-lease-rule
+    t_wait = 200 * millisecond  # category: illustrative; tracking authority run past commitment
+    # Base: the stop at the rack end.
     v_drive = RM.base.max_velocity  # category: illustrative; registry drive limit
-    v_aisle = AISLE.v_aisle  # category: chosen; aisle speed
     a_brake = AISLE.a_brake  # category: illustrative; credible deceleration, loaded, dry floor
     tau_delay = AISLE.tau_delay  # category: derived; total pre-brake delay
     delta_loc = AISLE.delta_loc  # category: illustrative
     delta_margin = AISLE.delta_margin  # category: chosen
-    eps_track = AISLE.eps_track  # category: illustrative; tracking inset (@sec-enforcement)
     d_clear = AISLE.d_clear  # category: illustrative; rack-end clear distance
-    t_wait = 200 * millisecond  # category: illustrative; nominal setpoints run past commitment
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
     a_arm_peak = (1.5 * v_arm / t_arm_stop).to(ureg.meter / ureg.second**2)
@@ -580,18 +623,15 @@ class PlanningC2Stop:
     arm_total = arm_cruise + arm_stop_dist
     arm_margin = d_arm_clear - arm_total
     t_stop_end = (t_commit + arm_suffix["duration"]).to(millisecond)
+    late_cruise_arm = (v_arm * t_wait).to(ureg.millimeter)
+    late_breach_arm = late_cruise_arm - arm_margin
 
     c2_drive = calc_c2_stop_suffix(v_drive, a_brake)
-    c2_aisle = calc_c2_stop_suffix(v_aisle, a_brake)
     brake_const = (v_drive**2 / (2 * a_brake)).to(ureg.millimeter)
     c2_increment = c2_drive["distance"].to(ureg.millimeter) - brake_const
     total_prev = calc_safe_stopping_distance(v_drive, tau_delay, a_brake, delta_loc, delta_margin).to(ureg.millimeter)
     total_new = calc_safe_stopping_distance(v_drive, tau_delay, a_brake / 1.5, delta_loc, delta_margin).to(ureg.millimeter)
     excess = total_new - d_clear.to(ureg.millimeter)
-    finished_aisle = (calc_safe_stopping_distance(v_aisle, tau_delay, a_brake / 1.5, delta_loc, delta_margin) + eps_track).to(ureg.millimeter)
-    spare_aisle = d_clear.to(ureg.millimeter) - finished_aisle
-    late_cruise = (v_aisle * t_wait).to(ureg.millimeter)
-    late_breach = late_cruise - spare_aisle
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(a_arm_peak.magnitude - 5.0) < 1e-9, "arm suffix peak changed")
@@ -602,19 +642,23 @@ class PlanningC2Stop:
     check(abs(t_stop_end.magnitude - 600.0) < 1e-9, "arm stop end changed")
     check(t_stop_end == PlanningArmTimeline.t_stop_end, "C2 arm stop end disagrees with the timeline cell")
     check(t_blend < t_commit < t_plan_exp < t_stop_end, "arm deadline order broken")
+    check(
+        abs(arm_stop_dist.magnitude - PlanningLeaseRule.arm_stop_dist.to(ureg.millimeter).magnitude) < 1e-9,
+        "arm stop disagrees with the lease-rule cell",
+    )
+    check(
+        abs(arm_margin.magnitude - PlanningLeaseRule.commit_margin.to(ureg.millimeter).magnitude) < 1e-9,
+        "arm margin disagrees with the lease-rule cell",
+    )
+    check(abs(late_cruise_arm.magnitude - 200.0) < 1e-9, "late-commitment arm cruise changed")
+    check(abs(late_breach_arm.magnitude - 110.0) < 1e-9, "late-commitment arm breach changed")
     check(abs(c2_drive["duration"].to(millisecond).magnitude - 1125.0) < 1e-9, "C2 duration at drive limit changed")
     check(abs(c2_drive["distance"].to(ureg.millimeter).magnitude - 843.75) < 1e-9, "C2 distance at drive limit changed")
-    check(abs(c2_aisle["duration"].to(millisecond).magnitude - 975.0) < 1e-9, "C2 duration at aisle speed changed")
-    check(abs(c2_aisle["distance"].to(ureg.millimeter).magnitude - 633.75) < 1e-9, "C2 distance at aisle speed changed")
     check(abs(brake_const.magnitude - 562.5) < 1e-9, "constant-deceleration braking changed")
     check(abs(c2_increment.magnitude - 281.25) < 1e-9, "C2 budget increment changed")
     check(abs(total_prev.magnitude - 912.9) < 5e-3, "Ch8 running total changed")
     check(abs(total_new.magnitude - 1194.15) < 5e-3, "Ch11 running total changed")
     check(abs(excess.magnitude - 94.15) < 5e-3, "excess over clear distance changed")
-    check(abs(finished_aisle.magnitude - 997.43) < 5e-3, "finished budget at aisle speed changed")
-    check(abs(spare_aisle.magnitude - 102.57) < 5e-3, "spare at aisle speed changed")
-    check(abs(late_cruise.magnitude - 260.0) < 1e-9, "late-commitment cruise changed")
-    check(abs(late_breach.magnitude - 157.43) < 5e-3, "late-commitment breach changed")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
     v_arm_str = fmt_velocity(v_arm)
@@ -630,39 +674,23 @@ class PlanningC2Stop:
     arm_margin_str = fmt_length(arm_margin, unit=ureg.millimeter)
     d_arm_clear_str = fmt_length(d_arm_clear, unit=ureg.millimeter)
     v_drive_str = fmt_velocity(v_drive)
-    v_aisle_str = fmt_velocity(v_aisle)
     a_brake_str = fmt_acceleration(a_brake)
     c2_drive_time_str = fmt_latency(c2_drive["duration"], unit=millisecond, commas=True)
     c2_drive_dist_str = fmt_length(c2_drive["distance"], unit=ureg.millimeter, precision=2)
-    c2_aisle_time_str = fmt_latency(c2_aisle["duration"], unit=millisecond)
-    c2_aisle_dist_str = fmt_length(c2_aisle["distance"], unit=ureg.millimeter, precision=2)
     brake_const_str = fmt_length(brake_const, unit=ureg.millimeter, precision=1)
     c2_increment_str = fmt_length(c2_increment, unit=ureg.millimeter, precision=2)
     total_prev_str = fmt_length(total_prev, unit=ureg.millimeter, precision=1)
     total_new_str = fmt_length(total_new, unit=ureg.millimeter, precision=2)
     d_clear_str = fmt_length(d_clear, unit=ureg.meter, precision=2)
     excess_str = fmt_length(excess, unit=ureg.millimeter, precision=2)
-    spare_aisle_str = fmt_length(spare_aisle, unit=ureg.millimeter, precision=1)
     t_wait_str = fmt_latency(t_wait, unit=millisecond)
-    late_cruise_str = fmt_length(late_cruise, unit=ureg.millimeter)
-    late_breach_str = fmt_length(late_breach, unit=ureg.millimeter, precision=1)
+    late_cruise_arm_str = fmt_length(late_cruise_arm, unit=ureg.millimeter)
+    late_breach_arm_str = fmt_length(late_breach_arm, unit=ureg.millimeter)
 ```
 
-In the worked arm case, the blend deadline is `{python} PlanningC2Stop.t_blend_str`, matched commitment `{python} PlanningC2Stop.t_commit_str`, nominal setpoint end `{python} PlanningC2Stop.t_plan_exp_str`, and stop end `{python} PlanningC2Stop.t_stop_end_str`, so $T$ is `{python} PlanningC2Stop.t_arm_stop_str`. At the arm's `{python} PlanningC2Stop.v_arm_str` TCP speed limit, the suffix's peak deceleration is `{python} PlanningC2Stop.a_arm_peak_str` and it travels `{python} PlanningC2Stop.arm_stop_dist_str`. From the `{python} PlanningC2Stop.t_blend_str` clearance check to physical brake onset at `{python} PlanningC2Stop.t_commit_str`, continued cruise uses `{python} PlanningC2Stop.arm_cruise_str`; the full `{python} PlanningC2Stop.arm_total_str` leaves `{python} PlanningC2Stop.arm_margin_str` of an illustrative `{python} PlanningC2Stop.d_arm_clear_str` obstacle clearance. Sensing and model error must still come out of that geometric margin. The stated `{python} PlanningC2Stop.t_commit_str` is **physical suffix onset**: the MCU must close replacement admission and pretrigger any communication or actuator delay $\delta$ by that instant minus $\delta$. If it does not, add $v_c\delta$ of travel and shift the stop end; the `{python} PlanningC2Stop.arm_margin_str` margin is then smaller. Intent tracking may expire at `{python} PlanningC2Stop.t_plan_exp_str` while MCU STOP continues to `{python} PlanningC2Stop.t_stop_end_str`. The case assumes, as @sec-planning-goal-to-trajectory requires, that fresh target evidence reaches the local tracker before the `{python} PlanningConveyorEvidence.t_ev_str` evidence horizon; without it, TRACK ends at that horizon and the state-matched baseline stops the arm. @Fig-11-seam-timeline-fallback places those instants on a single axis and separates the two ownership regimes, so the point where nominal reference tracking ends can be read against the separately authorized stop that carries the arm to rest.
+In the worked arm case, the blend deadline is `{python} PlanningC2Stop.t_blend_str`, matched commitment `{python} PlanningC2Stop.t_commit_str`, nominal setpoint end `{python} PlanningC2Stop.t_plan_exp_str`, and stop end `{python} PlanningC2Stop.t_stop_end_str`, so $T$ is `{python} PlanningC2Stop.t_arm_stop_str`. At the arm's `{python} PlanningC2Stop.v_arm_str` TCP speed limit, the suffix's peak deceleration is `{python} PlanningC2Stop.a_arm_peak_str` and it travels `{python} PlanningC2Stop.arm_stop_dist_str`. From the `{python} PlanningC2Stop.t_blend_str` clearance check to physical brake onset at `{python} PlanningC2Stop.t_commit_str`, continued cruise uses `{python} PlanningC2Stop.arm_cruise_str`; the full `{python} PlanningC2Stop.arm_total_str` leaves `{python} PlanningC2Stop.arm_margin_str` of an illustrative `{python} PlanningC2Stop.d_arm_clear_str` obstacle clearance. Sensing and model error must still come out of that geometric margin. The stated `{python} PlanningC2Stop.t_commit_str` is **physical suffix onset**: the MCU must close replacement admission and pretrigger any communication or actuator delay $\delta$ by that instant minus $\delta$. If it does not, add $v_c\delta$ of travel and shift the stop end; the `{python} PlanningC2Stop.arm_margin_str` margin is then smaller. Intent tracking may expire at `{python} PlanningC2Stop.t_plan_exp_str` while MCU STOP continues to `{python} PlanningC2Stop.t_stop_end_str`. The case assumes, as @sec-planning-goal-to-trajectory requires, that fresh target evidence reaches the local tracker before the tracked evidence horizon of @sec-intent-goals-expire; without it, TRACK ends at that horizon and the state-matched baseline stops the arm. @Fig-11-seam-timeline-fallback places those instants on a single axis and separates the two ownership regimes, so the point where nominal reference tracking ends can be read against the separately authorized stop that carries the arm to rest.
 
-<!-- fig-alt below hand-types values because fig-alt cannot hold inline python. Keep them in sync with these cell outputs:
-     "240 milliseconds" = PlanningC2Stop.t_blend_str
-     "300"              = PlanningC2Stop.t_commit_str
-     "320"              = PlanningC2Stop.t_plan_exp_str
-     "600"              = PlanningC2Stop.t_stop_end_str -->
-
-::: {#fig-11-seam-timeline-fallback fig-env="figure" fig-pos="t" fig-cap="**Nominal tracking and MCU-owned stop**: The worked arm permits a checked replacement before the `{python} PlanningC2Stop.t_commit_str` physical stop onset. Nominal references would end at `{python} PlanningC2Stop.t_plan_exp_str`, while the separately authorized, $C^2$ stop reaches rest at `{python} PlanningC2Stop.t_stop_end_str`. The suffix is matched to the commitment state; earlier invalidation needs a state-matched MCU baseline. All deadlines use the MCU monotonic clock, and physical clearance includes the full response and stop." fig-alt="Timeline distinguishes preferred blend at 240 milliseconds, physical stop commitment at 300, nominal setpoint end at 320, and MCU stop end at 600. A second panel shows tracking transferring to a protected stopping state when no replacement is admitted. The stop can continue after nominal or intent tracking permission ends."}
-![](images/svg/fig11_seam_timeline_fallback.svg){width="100%"}
-:::
-
-The base of the mobile manipulator stops the same way, and for a reason of its own. The loaded tote rack tolerates the machine's credible deceleration only if that deceleration is reached gradually; a stop that begins and ends at zero acceleration costs half again the distance of an abrupt one at the same peak. That cost now enters the stopping budget. At the drive limit of `{python} PlanningC2Stop.v_drive_str`, a suffix that peaks at the credible `{python} PlanningC2Stop.a_brake_str` lasts `{python} PlanningC2Stop.c2_drive_time_str` and travels `{python} PlanningC2Stop.c2_drive_dist_str`, against the `{python} PlanningC2Stop.brake_const_str` of constant-deceleration braking in @eq-body-stopping-distance. The suffix therefore adds `{python} PlanningC2Stop.c2_increment_str` to the budget that @sec-perception-transduction-calibration left at `{python} PlanningC2Stop.total_prev_str`, for a running total of `{python} PlanningC2Stop.total_new_str`. That total passes the `{python} PlanningC2Stop.d_clear_str` rack-end clear distance by `{python} PlanningC2Stop.excess_str`. With a stop the tote rack tolerates, the machine can no longer run at its drive limit and still stop short of a person who has stepped out at the rack end. This is the stopping condition of principle \ref{pri-vol4-irreversibility} with one more measured term, because a stop the load can tolerate is a longer stop and the distance it adds comes out of the same clear distance.
-
-At the `{python} PlanningC2Stop.v_aisle_str` aisle speed that @sec-enforcement-stopping-envelopes sets after adding the tracking inset, the same suffix lasts `{python} PlanningC2Stop.c2_aisle_time_str` and travels `{python} PlanningC2Stop.c2_aisle_dist_str`, and the budget with that inset leaves `{python} PlanningC2Stop.spare_aisle_str` of the clear distance. Commitment decides whether that margin survives. If the MCU waited `{python} PlanningC2Stop.t_wait_str` past commitment for the nominal setpoints to end, cruise would add `{python} PlanningC2Stop.late_cruise_str` before the same stop and breach the clear distance by `{python} PlanningC2Stop.late_breach_str`. A later stop must still match its actual entry state; this counterfactual holds cruise speed constant only to show the lost clearance. A machine that waits that long may already occupy a state from which no admissible control avoids the person.
+On the arm, commitment decides whether the `{python} PlanningC2Stop.arm_margin_str` margin survives. A lease `{python} PlanningC2Stop.t_wait_str` longer than the arm's `{python} PlanningLeaseRule.t_lease_max_str` ceiling would let tracking run that far past commitment, and cruise at the TCP limit would add `{python} PlanningC2Stop.late_cruise_arm_str` before the same stop and breach the `{python} PlanningC2Stop.d_arm_clear_str` clearance by `{python} PlanningC2Stop.late_breach_arm_str`. A later stop must still match its actual entry state; this counterfactual holds cruise speed constant only to show the lost clearance. An arm that waits that long may already occupy a state from which no admissible control avoids the obstacle.
 
 ::: {#dfn-planning-inevitable-collision-state .callout-definition title="Inevitable collision state"}
 
@@ -676,19 +704,31 @@ where $\mathcal{U}$ denotes the admissible control input set bounded by actuator
 
 :::
 
+<!-- fig-alt below hand-types values because fig-alt cannot hold inline python. Keep them in sync with these cell outputs:
+     "240 milliseconds" = PlanningC2Stop.t_blend_str
+     "300"              = PlanningC2Stop.t_commit_str
+     "320"              = PlanningC2Stop.t_plan_exp_str
+     "600"              = PlanningC2Stop.t_stop_end_str -->
+
+::: {#fig-11-seam-timeline-fallback fig-env="figure" fig-pos="t" fig-cap="**Nominal tracking and MCU-owned stop**: The worked arm permits a checked replacement before the `{python} PlanningC2Stop.t_commit_str` physical stop onset. Nominal references would end at `{python} PlanningC2Stop.t_plan_exp_str`, while the separately authorized, $C^2$ stop reaches rest at `{python} PlanningC2Stop.t_stop_end_str`. The suffix is matched to the commitment state; earlier invalidation needs a state-matched MCU baseline. All deadlines use the MCU monotonic clock, and physical clearance includes the full response and stop." fig-alt="Timeline distinguishes preferred blend at 240 milliseconds, physical stop commitment at 300, nominal setpoint end at 320, and MCU stop end at 600. A second panel shows tracking transferring to a protected stopping state when no replacement is admitted. The stop can continue after nominal or intent tracking permission ends."}
+![](images/svg/fig11_seam_timeline_fallback.svg){width="100%"}
+:::
+
+The base of the mobile manipulator stops the same way, and for a reason of its own. The loaded tote rack tolerates the machine's credible deceleration only if that deceleration is reached gradually; a stop that begins and ends at zero acceleration costs half again the distance of an abrupt one at the same peak. That cost now enters the stopping budget. At the drive limit of `{python} PlanningC2Stop.v_drive_str`, a suffix that peaks at the credible `{python} PlanningC2Stop.a_brake_str` lasts `{python} PlanningC2Stop.c2_drive_time_str` and travels `{python} PlanningC2Stop.c2_drive_dist_str`, against the `{python} PlanningC2Stop.brake_const_str` of constant-deceleration braking in @eq-body-stopping-distance. The suffix therefore adds `{python} PlanningC2Stop.c2_increment_str` to the budget that @sec-perception-transduction-calibration left at `{python} PlanningC2Stop.total_prev_str`, for a running total of `{python} PlanningC2Stop.total_new_str`. That total passes the `{python} PlanningC2Stop.d_clear_str` rack-end clear distance by `{python} PlanningC2Stop.excess_str`. This is the stopping condition of principle \ref{pri-vol4-irreversibility} with one more measured term, because a stop the load can tolerate is a longer stop and the distance it adds comes out of the same clear distance. With such a stop the machine can no longer run at its drive limit and still stop short of a person who has stepped out at the rack end. Of the budget's terms, only speed is left to give that distance back, and @sec-enforcement-stopping-envelopes sets it once the last term is in.
+
 A replacement received after the preferred blend deadline can still be admitted only if its full bridge and suffix validate before the commitment cutoff. A compressed bridge can raise acceleration and torque; the MCU evaluates its polynomial extrema and current encoder discrepancy before latching it. If the check cannot finish, it keeps the current plan and executes STOP. A candidate received after commitment cannot retrospectively restore the spent runway.
 
 The planner proposes the suffix, but the MCU validates and latches its coefficients and immutable assumptions into protected local memory **before** nominal motion begins. At commitment, the MCU selects that resident path without reading host DRAM. A host crash, bus stall, or corrupted shared packet therefore does not erase the stop. If the measured state falls outside the latched suffix's entry region, the MCU uses the separately validated baseline appropriate to that state; torque disable or a spring brake is not a universal substitute for a controlled stop, especially with a suspended load.
 
 The admission and fallback decisions in @tbl-11-seam-fallback-hierarchy are distinct from an emergency power cut.
 
-| State                      | Trigger                                                             | MCU action and required evidence                                                                                                                     |
-|:---------------------------|:--------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------|
-| TRACK, ordinary handoff    | Replacement passes the complete admission check before commitment.  | Latch the new nominal path and its own stop, then transfer at a checked $C^2$ seam.                                                                  |
-| TRACK, late candidate      | Candidate arrives after preferred blend but before commitment.      | Admit only if the compressed bridge, full path, stop, and timing still fit; otherwise keep the current record.                                       |
-| STOP, matched suffix       | No successor admitted by commitment.                                | MCU follows its protected suffix from the validated entry state; target tracking may expire while STOP continues.                                    |
-| STOP, earlier invalidation | Intent expiry, contact, state mismatch, or fault before commitment. | MCU selects a separately validated state-matched baseline with reserved clearance.                                                                   |
-| Fault response             | Controlled stop cannot be assured from measured state.              | Use the machine-specific risk response (which may include drive inhibit, brake, or compliance) only under its validated load and timing assumptions. |
+| State                      | Trigger                                                                          | MCU action and required evidence                                                                                                                     |
+|:---------------------------|:---------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| TRACK, ordinary handoff    | Replacement passes the complete admission check before commitment.               | Latch the new nominal path and its own stop, then transfer at a checked $C^2$ seam.                                                                  |
+| TRACK, late candidate      | Candidate arrives after preferred blend but before commitment.                   | Admit only if the compressed bridge, full path, stop, and timing still fit; otherwise keep the current record.                                       |
+| STOP, matched suffix       | No successor admitted by commitment.                                             | MCU follows its protected suffix from the validated entry state; target tracking may expire while STOP continues.                                    |
+| STOP, earlier invalidation | Lease lapse, intent expiry, contact, state mismatch, or fault before commitment. | MCU selects a separately validated state-matched baseline with reserved clearance.                                                                   |
+| Fault response             | Controlled stop cannot be assured from measured state.                           | Use the machine-specific risk response (which may include drive inhibit, brake, or compliance) only under its validated load and timing assumptions. |
 
 : **Tracking and MCU-owned fallback decisions**: Full candidate admission is $O(N)$ for $N$ samples and precedes commitment; the per-tick state check is bounded separately. A host crash does not remove a latched MCU stop. TRACK is the nominal mode; STOP is the stop rung of the fallback ladder in @sec-enforcement-fallback-ladder. {#tbl-11-seam-fallback-hierarchy tbl-colwidths="[18,29,53]"}
 
@@ -700,7 +740,7 @@ Before committing an autonomous machine to an action chunk, verify your understa
 
 - [ ] **Deadline distinction**: Can you distinguish nominal setpoint end, physical stop completion, and target-evidence expiry?
 - [ ] **Continuous entry**: Why would a constant-deceleration switch fail $C^2$ matching at zero-acceleration cruise entry?
-- [ ] **Clearance and latency**: The base's `{python} PlanningC2Stop.spare_aisle_str` margin at the aisle speed already charges the reserved pre-brake delay. Where must an unreserved delay $\delta$ beyond it be charged, and how much of that margin does $v\delta$ consume?
+- [ ] **Clearance and latency**: The arm's `{python} PlanningC2Stop.arm_margin_str` margin already charges cruise from the blend deadline to commitment. Where must an unreserved delay $\delta$ beyond it be charged, and how much of that margin does $v_c\delta$ consume?
 
 :::
 
@@ -739,11 +779,51 @@ Each time the chunk policy proposes `{python} PlanningArmTimeline.n_horizon_str`
 
 Physical feasibility depends on the scene and load used to validate the plan. The immutable sidecar therefore identifies obstacle-map epochs, payload and friction assumptions, limits, validator version, measured margin, and the source observation. A digest in the fixed header binds both setpoints and sidecar. The sidecar's payload and friction assumptions must lie inside the target ODD of @sec-evaluation-logs; the permission path revokes TRACK when live state leaves them. A recorded margin is evidence for a stated scene, not a permanent safety flag. Solver seed and model hash belong in the audit sidecar for reproducibility where the toolchain supports it, not in the servo's per-tick path.
 
-On this machine the chunk policy's output is the nominal part of each trajectory record: this chapter adds the seam state, the four deadlines, and the matched stop suffix, so the permission path admits one stream, and the chunk lease of @sec-nervous-cadences becomes the record's expiry. The record's fixed header groups its fields by purpose. Lineage fields give a sequence number, the evidence time $t_0$, and the digest of the parent intent lease. Timing fields give the four deadlines of @sec-planning-handoff. Seam fields give the frame, each joint's entry state $(q,\dot q,\ddot q)$, and the stop-suffix coefficients. Content fields give the payload kind and size and one digest over the setpoint payload and the sidecar. All time fields are absolute MCU-monotonic nanoseconds after a validated bounded conversion. The active intent record, referenced by digest, supplies $t_{\mathrm{intent\_exp}}$ separately. A variable-length setpoint payload and immutable provenance/assumption sidecar are outside the fixed header. The MCU verifies their digest, validates the complete bounded candidate in staging memory, then latches the admitted payload and suffix in protected memory before TRACK. The payload digest binds content, and the parent digest binds lineage. The record carries no keyed tag, because the permission path admits a proposal by its content rather than its origin (@sec-nervous-cadences).
+On this machine the chunk policy's output is the nominal part of each trajectory record: this chapter adds the seam state, the four deadlines, and the matched stop suffix, so the permission path admits one stream, and the record's tracking authority ends `{python} PlanningLeaseRule.t_lease_str` after the last admitted chunk (the chunk lease of @sec-nervous-cadences) or at its own commitment deadline, whichever comes first. The record's fixed header groups its fields by purpose. Lineage fields give a sequence number, the evidence time $t_0$, and the digest of the parent intent lease. Timing fields give the four deadlines of @sec-planning-handoff. Seam fields give the frame, each joint's entry state $(q,\dot q,\ddot q)$, and the stop-suffix coefficients. Content fields give the payload kind and size and one digest over the setpoint payload and the sidecar. All time fields are absolute MCU-monotonic nanoseconds after a validated bounded conversion. The active intent record, referenced by digest, supplies $t_{\mathrm{intent\_exp}}$ separately. A variable-length setpoint payload and immutable provenance/assumption sidecar are outside the fixed header. The MCU verifies their digest, validates the complete bounded candidate in staging memory, then latches the admitted payload and suffix in protected memory before TRACK. The payload digest binds content, and the parent digest binds lineage. The record carries no keyed tag, because the permission path admits a proposal by its content rather than its origin (@sec-nervous-cadences).
 
 ::: {.column-margin .margin-pointer}
 ↳ **Byte layout:** The trajectory record's field offsets and sizes are given in @sec-appendix-systems-wire-trajectory.
 :::
+
+```{python}
+#| label: calc-planning-record-trace
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FILLED TRAJECTORY RECORD FOR THE REACH TOWARD THE MUG
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-planning-trajectory-contract (filled record paragraph).
+# │
+# │ Goal:    Gather the worked record's field values from the cells that own
+# │          them and add the one sidecar value no earlier cell holds.
+# │ Show:    3 kg payload bound; 16 x 20 ms = 320 ms nominal end.
+# │ How:     RM arm payload capacity; the other fields read
+# │          PlanningLeaseRule, PlanningArmTimeline, and PlanningC2Stop.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import kilogram
+from mlsysim.fmt import check, fmt_qty
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+
+class PlanningRecordTrace:
+    """Sidecar payload bound for the worked trajectory record."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────
+    m_payload = RM.arm.payload_capacity  # category: datasheet; arm payload capacity, registry
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────
+    t_nominal = (PlanningArmTimeline.n_horizon * PlanningArmTimeline.t_period).to(PlanningArmTimeline.t_plan_exp.units)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────
+    check(abs(m_payload.to(kilogram).magnitude - 3.0) < 1e-9, "arm payload capacity changed")
+    check(t_nominal == PlanningArmTimeline.t_plan_exp, "nominal end disagrees with horizon x period")
+    check(PlanningLeaseRule.lease_total <= PlanningLeaseRule.d_arm_clear, "lease-path stop no longer inside the clearance")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────
+    m_payload_str = fmt_qty(m_payload, kilogram, precision=0)
+```
+
+Filled in for one reach toward the mug, the record is the timeline of @fig-11-seam-timeline-fallback with its fields named. Its parent is the mug's intent lease, bound by digest; its frame is the machine's base frame, and every time field is in the MCU monotonic clock. The timing fields hold the `{python} PlanningArmTimeline.t_blend_str` blend deadline, the `{python} PlanningArmTimeline.t_commit_str` commitment, the `{python} PlanningArmTimeline.t_plan_exp_str` nominal end that `{python} PlanningArmTimeline.n_horizon_str` setpoints at `{python} PlanningArmTimeline.t_period_str` give, and the `{python} PlanningArmTimeline.t_stop_end_str` stop end. The seam fields hold a `{python} PlanningC2Stop.t_arm_stop_str` $C^2$ suffix that peaks at `{python} PlanningC2Stop.a_arm_peak_str` and brings the arm to rest from its `{python} PlanningC2Stop.v_arm_str` TCP limit in `{python} PlanningC2Stop.arm_stop_dist_str`. While the record is in force, the `{python} PlanningLeaseRule.t_lease_str` chunk lease bounds its tracking, a lapse leads to the state-matched stop along a path that uses `{python} PlanningLeaseRule.lease_total_str` of the `{python} PlanningLeaseRule.d_arm_clear_str` clearance, and commitment caps that lease at `{python} PlanningLeaseRule.t_lease_max_str`. The sidecar declares a payload of at most `{python} PlanningRecordTrace.m_payload_str`, free space until the grasp, and a scene inside the target ODD. Each field is one the permission path checks at admission or monitors on every tick, without asking the planner what it meant.
 
 The deadline relation is $t_{\mathrm{commit}}=t_{\mathrm{stop\_end}}-T_{\mathrm{stop}}$, with $t_{\mathrm{start}}\le t_{\mathrm{commit}}<t_{\mathrm{plan\_exp}}<t_{\mathrm{stop\_end}}$ in the worked case. The MCU applies these deadlines under the TRACK and STOP rules of @sec-planning-handoff, and a header timestamp cannot make a mismatched suffix safe. A log records evidence, request, validation, admission, activation, transfer, and stop-completion times in a common converted domain so actual response delay can be measured.
 
@@ -803,15 +883,15 @@ A gantry travels at $v = 2.0\text{ m/s}$ with deceleration limited to $a_{\mathr
 
 ## Summary {#sec-planning-summary}
 
-A trajectory is a timed proposal, and what shapes it is the case in which the next one is late. An inference-latency quantile is a scheduling risk target, not a safety certificate. It sets how often the machine should expect a late replacement, and the resident stop is what the machine does when one comes due. Two clocks bound the horizon from opposite sides. The compute tail pushes the commitment point later, while target evidence expires on its own schedule; on the conveyor, one observation of the mug is good for about `{python} PlanningConveyorEvidence.t_ev_str`, less than the worked `{python} PlanningArmTimeline.t_commit_str` commitment, so tracking that long needs fresh evidence rather than a later timestamp.
+A trajectory is a timed proposal, and what shapes it is the case in which the next one is late. An inference-latency quantile is a scheduling risk target, not a safety certificate. It sets how often the machine should expect a late replacement, and the resident stop is what the machine does when one comes due. Two clocks bound the horizon from opposite sides. The compute tail pushes the commitment point later, while target evidence expires on its own schedule; on the conveyor, even a tracked observation of the mug expires before the worked `{python} PlanningArmTimeline.t_commit_str` commitment (@sec-intent-goals-expire), so tracking that long needs fresh evidence rather than a later timestamp.
 
-Commitment is where these results meet. A replacement must pass full admission before $t_{\mathrm{commit}}$, not merely before the last nominal setpoint, and without one the MCU enters STOP and plays the $C^2$ suffix it latched before motion began; invalidation before commitment needs a state-matched baseline instead. The worked arm's `{python} PlanningC2Stop.arm_cruise_str` of cruise and `{python} PlanningC2Stop.arm_stop_dist_str` suffix leave `{python} PlanningC2Stop.arm_margin_str` of geometric margin before uncertainty and unreserved delay. On the mobile manipulator's base, the suffix the tote rack tolerates raises the stopping budget at the drive limit to `{python} PlanningC2Stop.total_new_str`, past the `{python} PlanningC2Stop.d_clear_str` rack-end clear distance.
+Commitment is where these results meet. A replacement must pass full admission before $t_{\mathrm{commit}}$, not merely before the last nominal setpoint. On this machine the shared `{python} PlanningLeaseRule.t_lease_str` lease ends a stall long before then and sends the arm to its state-matched stop with `{python} PlanningLeaseRule.lease_margin_str` of clearance left; commitment caps that lease at `{python} PlanningLeaseRule.t_lease_max_str`, and a record that reaches commitment without a successor plays the $C^2$ suffix the MCU latched before motion began. The worked arm's `{python} PlanningC2Stop.arm_cruise_str` of cruise and `{python} PlanningC2Stop.arm_stop_dist_str` suffix leave `{python} PlanningC2Stop.arm_margin_str` of geometric margin before uncertainty and unreserved delay. On the mobile manipulator's base, the suffix the tote rack tolerates raises the stopping budget at the drive limit to `{python} PlanningC2Stop.total_new_str`, past the `{python} PlanningC2Stop.d_clear_str` rack-end clear distance.
 
 The trajectory record carries these decisions to the permission path. It names the intent lease it consumes, states its four deadlines in the MCU monotonic clock, and holds the seam state and the stop coefficients, so the MCU can admit it by content and latch the stop before TRACK begins. $C^2$ continuity removes reference jumps at the seam; it does not bound the bridge's interior jerk, torque, or clearance, which admission checks against the actual drive.
 
 ::: {.callout-takeaways title="Timed motion and independent stopping"}
 * **A latency quantile is a risk target**: The design-tail replacement target allocates the risk of a late plan and never certifies arrival, so every admitted trajectory carries a resident stop for the miss.
-* **Commit before the runway is spent**: Admission closes at $t_{\mathrm{commit}}$, the deadline chosen so the matched stop still fits. On the base at aisle speed, waiting `{python} PlanningC2Stop.t_wait_str` longer breaches the clear distance by `{python} PlanningC2Stop.late_breach_str`.
+* **Commit before the runway is spent**: Admission closes at $t_{\mathrm{commit}}$, the deadline chosen so the matched stop still fits, and commitment caps the chunk lease that ends a stall first. On the arm, a lease run `{python} PlanningC2Stop.t_wait_str` past commitment breaches the `{python} PlanningC2Stop.d_arm_clear_str` clearance by `{python} PlanningC2Stop.late_breach_arm_str`.
 * **Evidence age and the compute tail pull apart**: A long tail pushes commitment later while target evidence expires on its own clock. Tracking past the evidence horizon needs a fresh observation, never a stretched timestamp.
 * **A gentle stop is a longer stop**: A $C^2$ stop at the same peak deceleration travels half again the constant-deceleration distance, and on the mobile manipulator adding that term carries the budget past the rack-end clear distance at the drive limit.
 * **The stage that first sees a failure owns it**: An invalid chunk, an infeasible seam, and a changed world first become visible at admission, at the handover, and during motion, so each stage holds its own signal and its own time budget for rejecting the plan.

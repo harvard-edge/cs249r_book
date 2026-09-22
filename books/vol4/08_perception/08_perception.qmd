@@ -717,22 +717,71 @@ $$\mathcal{O} = \langle t_{\text{capture}}, \epsilon_{\text{sync}}, \text{frame\
 
 :::
 
-| Record field                               | Meaning                                                           | Consumer check                                                            |
-|:-------------------------------------------|:------------------------------------------------------------------|:--------------------------------------------------------------------------|
-| `capture_timestamp_ns`, `capture_clock_id` | Exposure midpoint in one shared, monotonic capture clock          | Convert to MCU time with a valid bounded-skew mapping before checking age |
-| `sync_error_ns`                            | Bound on capture-to-MCU clock conversion error                    | Add to worst-case age; refuse if missing or expired                       |
-| `sequence_index`                           | Monotonic camera frame counter                                    | Detect gaps and reordering                                                |
-| `sensor_frame_id`                          | Transform-tree key and calibration revision                       | Select the valid extrinsic transform                                      |
-| `tensor_payload`                           | Format, dimensions, length, and buffer                            | Validate bounds and record checksum before reading                        |
-| `spatial_covariance`                       | Positive-semidefinite spatial error scale                         | Use with separately calibrated bias and tail bounds                       |
-| `calibration_metadata`                     | Intrinsics, extrinsics, coefficients, temperature, validity range | Reject calibration outside its validated region                           |
-| `provenance_digest`                        | SHA-256 of firmware and model revisions                           | Match the approved build; this is not payload integrity                   |
-| `payload_crc32`                            | CRC over serialized header (excluding this field) and payload     | Detect accidental record corruption; not authentication                   |
-| `health_bitmask`                           | Hardware and perception validity flags                            | Refuse claims with safety-critical faults                                 |
+```{python}
+#| label: calc-perception-nav-observation-record
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NAVIGATION-CAMERA OBSERVATION RECORD, FILLED
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The filled column of @tbl-08-observation-record-schema and the
+# │          clock-conversion paragraph that follows it.
+# │
+# │ Goal:    Fill the observation record for the mobile manipulator's
+# │          navigation camera and size the consumer's upper age at dispatch.
+# │ Show:    age at dispatch 51.6 ms; clock-conversion bound 0.2 ms; upper
+# │          age 51.8 ms; frame counter at 60 Hz.
+# │ How:     AISLE.perception_age (the latency waterfall above); eps_sync is a
+# │          chapter LOAD value that the spatial-belief record of @sec-memory
+# │          reuses; RM.nav_camera frame rate.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_latency, fmt_frequency, check
 
-: **Physical AI observation record schema**: Compact fields needed to date and frame a claim, evaluate its uncertainty, and check the bytes and generating revision. A keyed authenticator is a separate requirement if the threat model includes malicious modification. {#tbl-08-observation-record-schema tbl-colwidths="[25,35,40]"}
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
 
-The fields in @tbl-08-observation-record-schema date each observation and its generating revision. All cameras in this example latch exposure midpoints in a shared monotonic capture domain; the timestamp is **not** nanoseconds since the UNIX epoch. If the MCU has a different clock, a synchronization service supplies a versioned conversion $t_{\text{MCU}}=a t_{\text{capture}}+b$, its validity interval, and a measured error bound $\epsilon_{\text{sync}}$. The consumer uses the upper age estimate $t_{\text{MCU,now}}-t_{\text{MCU,capture}}+\epsilon_{\text{sync}}$ and refuses an observation if the conversion is invalid or its age exceeds the motion budget. A rolling-shutter claim must also identify the row or region whose acquisition time it represents. `sequence_index` detects missing frames independently of clock conversion.
+class NavObservationRecord:
+    """Filled observation record for the running machine's navigation camera."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    camera = RM.nav_camera  # category: datasheet (registry: Sony IMX477 navigation camera)
+    f_frame = camera.frame_rate  # category: datasheet
+    t_age = AISLE.perception_age.to(millisecond)  # category: derived
+    eps_sync = 0.2 * millisecond  # category: illustrative (capture-to-MCU clock-conversion bound; reused by @sec-memory)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    upper_age = (t_age + eps_sync).to(millisecond)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_age.magnitude - 51.6) < 0.05, f"Unexpected age at dispatch: {t_age}")
+    check(abs(eps_sync.to(millisecond).magnitude - 0.2) < 1e-9, f"Unexpected clock-conversion bound: {eps_sync}")
+    check(abs(upper_age.magnitude - 51.8) < 0.05, f"Unexpected upper age at dispatch: {upper_age}")
+    check(abs(f_frame.to(ureg.hertz).magnitude - 60.0) < 1e-9, f"Unexpected navigation-camera frame rate: {f_frame}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_age_str = fmt_latency(t_age, unit=millisecond, precision=1)
+    eps_sync_str = fmt_latency(eps_sync.to(millisecond), unit=millisecond, precision=1)
+    upper_age_str = fmt_latency(upper_age, unit=millisecond, precision=1)
+    f_frame_str = fmt_frequency(f_frame, unit=ureg.hertz, precision=0)
+```
+
+| Record field                               | Meaning                                                           | Consumer check                                                            | Navigation camera                                                                                                           |
+|:-------------------------------------------|:------------------------------------------------------------------|:--------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------|
+| `capture_timestamp_ns`, `capture_clock_id` | Exposure midpoint in one shared, monotonic capture clock          | Convert to MCU time with a valid bounded-skew mapping before checking age | Exposure midpoint on clock `cam_nav`; dispatched `{python} NavObservationRecord.t_age_str` later (@tbl-08-latency-budget)   |
+| `sync_error_ns`                            | Bound on capture-to-MCU clock conversion error                    | Add to worst-case age; refuse if missing or expired                       | `{python} NavObservationRecord.eps_sync_str`, so the upper age at dispatch is `{python} NavObservationRecord.upper_age_str` |
+| `sequence_index`                           | Monotonic camera frame counter                                    | Detect gaps and reordering                                                | One count per frame at `{python} NavObservationRecord.f_frame_str`                                                          |
+| `sensor_frame_id`                          | Transform-tree key and calibration revision                       | Select the valid extrinsic transform                                      | `nav_cam` with its calibration revision                                                                                     |
+| `tensor_payload`                           | Format, dimensions, length, and buffer                            | Validate bounds and record checksum before reading                        |                                                                                                                             |
+| `spatial_covariance`                       | Positive-semidefinite spatial error scale                         | Use with separately calibrated bias and tail bounds                       |                                                                                                                             |
+| `calibration_metadata`                     | Intrinsics, extrinsics, coefficients, temperature, validity range | Reject calibration outside its validated region                           |                                                                                                                             |
+| `provenance_digest`                        | SHA-256 of firmware and model revisions                           | Match the approved build; this is not payload integrity                   |                                                                                                                             |
+| `payload_crc32`                            | CRC over serialized header (excluding this field) and payload     | Detect accidental record corruption; not authentication                   |                                                                                                                             |
+| `health_bitmask`                           | Hardware and perception validity flags                            | Refuse claims with safety-critical faults                                 | Synchronization-loss, link, transport, and saturation bits; input-support bits from @sec-evaluation-limits                  |
+
+: **Physical AI observation record schema**: Compact fields needed to date and frame a claim, evaluate its uncertainty, and check the bytes and generating revision. The last column fills the fields this chapter computes for the mobile manipulator's navigation camera; only its clock-conversion bound is illustrative. A keyed authenticator is a separate requirement if the threat model includes malicious modification. {#tbl-08-observation-record-schema tbl-colwidths="[25,22,25,28]"}
+
+The fields in @tbl-08-observation-record-schema date each observation and its generating revision. All cameras in this example latch exposure midpoints in a shared monotonic capture domain; the timestamp is **not** nanoseconds since the UNIX epoch. If the MCU has a different clock, a synchronization service supplies a versioned conversion $t_{\text{MCU}}=a t_{\text{capture}}+b$, its validity interval, and a measured error bound $\epsilon_{\text{sync}}$. The consumer uses the upper age estimate $t_{\text{MCU,now}}-t_{\text{MCU,capture}}+\epsilon_{\text{sync}}$ and refuses an observation if the conversion is invalid or that upper age exceeds the motion-dependent freshness budget. For the navigation camera's `{python} NavObservationRecord.eps_sync_str` bound, the upper age already stands at `{python} NavObservationRecord.upper_age_str` when the record leaves dispatch. A rolling-shutter claim must also identify the row or region whose acquisition time it represents. `sequence_index` detects missing frames independently of clock conversion.
 
 The transform key and calibration revision anchor metric coordinates.[^fn-hw-thermal-drift] `spatial_covariance` describes second moments, so a clearance decision additionally needs a validated residual quantile or hard error bound, including bias. The firmware/model digest supports version provenance; `payload_crc32` detects accidental changes to the actual header and payload after serialization. Neither a checksum nor a build hash proves semantic truth, and neither authenticates an adversarial producer without a keyed check.
 

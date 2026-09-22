@@ -126,8 +126,8 @@ When the arm reaches for the red mug, the Brain sends neither joint trajectories
 #| label: calc-intent-lease-duration-collision-exposure
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────┐
-# │ The running machine's intent horizons, a base stall against the finished   │
-# │ stopping budget, the latch contact at brake command, and the Class 3 plant. │
+# │ The running machine's intent horizons, the mug intent lapse and its arm     │
+# │ stop onset, the latch contact at brake command, and the Class 3 plant.      │
 # └─────────────────────────────────────────────────────────────────────────────┘
 from mlsysim import *
 from mlsysim.core.units import *
@@ -142,8 +142,6 @@ from mlsysim.fmt import (
     check,
 )
 from mlsysim.physics.robotics import (
-    calc_safe_stopping_distance,
-    calc_c2_stop_suffix,
     calc_target_evidence_horizon,
     calc_tripwire_contact_force_accumulation,
     calc_contact_force,
@@ -154,7 +152,7 @@ from mlsysim.physics.robotics import (
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
 AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; lease chosen)
 
-delta_t_stall_base = 200.0 * millisecond  # category: illustrative (proposer stall before any brake)
+delta_t_stall_intent = 200.0 * millisecond  # category: illustrative (stalled proposer holds the mug target)
 delta_t_stall_arm = 200.0 * millisecond  # category: illustrative (unbraked contact interval)
 v_drift_slow = 20.0 * millimeter / second  # category: illustrative (slow-drift case in the figure)
 t_intent_tail = 650.0 * millisecond  # category: illustrative (high-tail intent inference, as in the figure)
@@ -165,33 +163,24 @@ p_heat_in = 3600.0 * watt  # category: illustrative
 delta_t_overshoot_max = 2.0 * kelvin  # category: chosen (task overshoot allowance)
 delta_t_stall_bess = 10.0 * second  # category: illustrative
 
-# ┌── 2. EXECUTE: evidence horizons, base stall, latch contact, thermal plant ──
-# Mug on the conveyor: untracked and tracked target-evidence horizons.
+# ┌── 2. EXECUTE: evidence horizons, mug intent lapse, latch contact, thermal ──
+# Mug on the conveyor: untracked and tracked target-evidence horizons. Both
+# horizons charge the 3 mm initial error against the 15 mm tolerance.
+grasp_error_budget = (AISLE.grasp_tolerance - AISLE.grasp_initial_error).to(millimeter)
 tau_ev_untracked = calc_target_evidence_horizon(AISLE.grasp_tolerance, AISLE.grasp_initial_error, AISLE.v_conveyor).to(millisecond)
-tau_ev_tracked = ((2 * AISLE.grasp_tolerance / AISLE.a_conveyor_slip) ** 0.5).to(millisecond)
+tau_ev_tracked = ((2 * grasp_error_budget / AISLE.a_conveyor_slip) ** 0.5).to(millisecond)
 t_intent_period = (1 / RM.intent_rate).to(millisecond)
 err_at_intent_period = (AISLE.grasp_initial_error + AISLE.v_conveyor * t_intent_period).to(millimeter)
 err_excess_at_period = (err_at_intent_period - AISLE.grasp_tolerance).to(millimeter)
 t_tail_overrun = (t_intent_tail - tau_ev_untracked).to(millisecond)
 tau_ev_slow_drift = calc_target_evidence_horizon(AISLE.grasp_tolerance, AISLE.grasp_initial_error, v_drift_slow).to(millisecond)
 
-# Base stall: the finished budget at aisle speed. The resident stop is the C2
-# suffix, so a_eff is a_brake scaled by the suffix's distance penalty over a
-# constant-deceleration stop at the same peak deceleration.
-c2_stop_aisle = calc_c2_stop_suffix(AISLE.v_aisle, AISLE.a_brake)
-d_const_decel_aisle = (AISLE.v_aisle**2 / (2 * AISLE.a_brake)).to(meter)
-c2_distance_factor = (c2_stop_aisle["distance"] / d_const_decel_aisle).to(ureg.dimensionless).magnitude
-a_eff = AISLE.a_brake / c2_distance_factor
-budget_aisle = calc_safe_stopping_distance(AISLE.v_aisle, AISLE.tau_delay, a_eff, AISLE.delta_loc + AISLE.eps_track, AISLE.delta_margin).to(
-    millimeter
-)
-spare_aisle = (AISLE.d_clear - budget_aisle).to(millimeter)
-stall_extra_delay = (delta_t_stall_base - AISLE.t_lease).to(millisecond)
-budget_stalled = calc_safe_stopping_distance(
-    AISLE.v_aisle, AISLE.tau_delay + stall_extra_delay, a_eff, AISLE.delta_loc + AISLE.eps_track, AISLE.delta_margin
-).to(millimeter)
-stall_added = (budget_stalled - budget_aisle).to(millimeter)
-stall_breach = (budget_stalled - AISLE.d_clear).to(millimeter)
+# Mug intent lapse: a stalled proposer holds the target; untracked drift at the
+# conveyor speed, tracked drift from residual slip only; arm stop onset after
+# intent expiry is one permission tick, one bus cycle, and the brake onset.
+err_stalled_untracked = (AISLE.grasp_initial_error + AISLE.v_conveyor * delta_t_stall_intent).to(millimeter)
+err_stalled_tracked = (AISLE.grasp_initial_error + 0.5 * AISLE.a_conveyor_slip * delta_t_stall_intent**2).to(millimeter)
+t_arm_onset_after_expiry = (AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
 
 # Latch contact: force at brake command, then the arm stop that keeps it under the limit.
 df_dt = (AISLE.k_latch * AISLE.v_latch_approach).to(newton / second)
@@ -210,17 +199,17 @@ delta_temp_after_stall_bess = (dt_dt_bess * delta_t_stall_bess).to(kelvin)
 
 # ┌── 3. GUARD: canon values quoted in the prose ──────────────────────────────
 check(abs(tau_ev_untracked.magnitude - 60.0) < 1e-6, "Untracked mug horizon is 60 ms")
-check(abs(tau_ev_tracked.magnitude - 244.95) < 5e-3, "Tracked mug horizon is 245 ms")
+check(abs(tau_ev_tracked.magnitude - 219.09) < 5e-3, "Tracked mug horizon is 219 ms")
+check(abs(grasp_error_budget.magnitude - 12.0) < 1e-6, "Mug error budget is 12 mm")
+check(abs(err_stalled_untracked.magnitude - 43.0) < 1e-6, "Stalled untracked target sits 43 mm off")
+check(abs(err_stalled_tracked.magnitude - 13.0) < 1e-6, "Stalled tracked target sits 13 mm off")
+check(abs(t_arm_onset_after_expiry.magnitude - 22.0) < 1e-6, "Arm stop onset within 22 ms of intent expiry")
+check(abs(RM.tcp_speed_limit.to(meter / second).magnitude - 1.0) < 1e-9, "TCP speed ceiling is 1.0 m/s")
 check(abs(t_intent_period.magnitude - 200.0) < 1e-6, "5 Hz intent period is 200 ms")
 check(abs(err_at_intent_period.magnitude - 43.0) < 1e-6, "Error at the intent period")
 check(abs(tau_ev_slow_drift.magnitude - 600.0) < 1e-6, "Slow-drift horizon in the figure")
 check(abs(t_tail_overrun.magnitude - 590.0) < 1e-6, "Tail overrun past the untracked horizon is 590 ms")
 check(abs(AISLE.t_lease.to(millisecond).magnitude - 60.0) < 1e-9, "Chunk lease is 60 ms")
-check(abs(c2_distance_factor - 1.5) < 1e-9, "C2 suffix stops in 1.5x the constant-deceleration distance")
-check(abs(budget_aisle.magnitude - 997.43) < 5e-3, "Finished budget at 1.3 m/s")
-check(abs(spare_aisle.magnitude - 102.57) < 5e-3, "Spare at 1.3 m/s")
-check(abs(stall_added.magnitude - 182.0) < 1e-6, "200 ms stall adds 182 mm at 1.3 m/s")
-check(abs(stall_breach.magnitude - 79.43) < 5e-3, "Stall overruns the spare by 79.4 mm")
 check(abs(f_at_brake_onset.to(newton).magnitude - 39.0) < 1e-9, "Force at brake command")
 check(abs(x_remaining.magnitude - 0.1525) < 5e-5, "Latch compression left is 0.15 mm")
 check(abs(a_arm_needed.magnitude - 2.95) < 5e-3, "Arm stop premise is about 3 m/s^2 (2.95)")
@@ -248,15 +237,13 @@ class IntentLeaseArchetypes:
     tau_slow_drift_str = fmt_latency(tau_ev_slow_drift, unit=millisecond, precision=0)
     t_intent_tail_str = fmt_latency(t_intent_tail, unit=millisecond, precision=0)
     t_tail_overrun_str = fmt_latency(round(t_tail_overrun.magnitude) * millisecond, unit=millisecond, precision=0)
-    # Base stall against the finished budget
-    v_aisle_str = fmt_velocity(AISLE.v_aisle, unit=meter / second, precision=1)
-    d_clear_str = fmt_length(AISLE.d_clear, unit=meter, precision=2)
-    t_lease_str = fmt_latency(AISLE.t_lease, unit=millisecond, precision=0)
-    spare_aisle_str = fmt_length(round(spare_aisle.magnitude, 1) * millimeter, unit=millimeter, precision=1)
-    t_stall_base_str = fmt_latency(delta_t_stall_base, unit=millisecond, precision=0)
-    stall_extra_str = fmt_latency(stall_extra_delay, unit=millisecond, precision=0)
-    stall_added_str = fmt_length(stall_added, unit=millimeter, precision=0)
-    stall_breach_str = fmt_length(round(stall_breach.magnitude, 1) * millimeter, unit=millimeter, precision=1)
+    # Mug intent lapse and the admitted mug lease
+    err_budget_str = fmt_length(grasp_error_budget, unit=millimeter, precision=0)
+    t_stall_intent_str = fmt_latency(delta_t_stall_intent, unit=millisecond, precision=0)
+    err_stalled_untracked_str = fmt_length(err_stalled_untracked, unit=millimeter, precision=0)
+    err_stalled_tracked_str = fmt_length(err_stalled_tracked, unit=millimeter, precision=0)
+    t_arm_onset_str = fmt_latency(t_arm_onset_after_expiry, unit=millisecond, precision=0)
+    v_tcp_str = fmt_velocity(RM.tcp_speed_limit.to(meter / second))
     # Latch contact
     k_latch_str = fmt_sci_qty(AISLE.k_latch, newton / meter, precision=1)
     v_latch_str = fmt_velocity(AISLE.v_latch_approach, unit=meter / second, precision=2)
@@ -283,19 +270,19 @@ Spatial validity in the physical world is transient. A physical goal therefore c
 
 [^fn-std-iso-watchdog]: **Hardware watchdog safety monitors**\index{Hardware!watchdog timer}\index{Safety standards!ISO 13849}: A safety design can use an independently clocked watchdog to detect missed renewals and initiate a validated response without the host. Safe Torque Off removes drive torque; it does not by itself hold a suspended load or stop moving mass within a specified clearance.
 
-[^fn-anti-async-abort]: **Asynchronous Safety Event Dispatch**\index{Antipatterns!asynchronous safety cancellation}: Relying on asynchronous cancellation messages or network event dispatch to abort motion introduces non-deterministic queue serialization delays, and every millisecond of that delay is unbraked travel at the base's aisle speed. A local countdown can revoke tracking authority on missed renewal.
+[^fn-anti-async-abort]: **Asynchronous Safety Event Dispatch**\index{Antipatterns!asynchronous safety cancellation}: Relying on asynchronous cancellation messages or network event dispatch to abort motion introduces non-deterministic queue serialization delays, and every millisecond of that delay is unbraked travel at the base's drive limit. A local countdown can revoke tracking authority on missed renewal.
 
 A target bounded in space and time is hazardous if the controller is allowed unlimited physical effort. The intent packet therefore requests ceilings on contact force, joint velocity, and power. A model may place a target slightly behind the surface it must touch because of stereo disparity error; a stiff position controller can then command excessive restoring torque. For the arm's guarded approach to the spring-latched cage door, the proposal might request the `{python} IntentLeaseArchetypes.f_trip_str` tripwire as its contact-force ceiling, well below the `{python} IntentLeaseArchetypes.f_lim_str` latch limit, and the `{python} IntentLeaseArchetypes.v_latch_str` approach speed as its speed cap. The permission path compares each request with independently configured actuator and task ceilings, then admits only a feasible subset. The low-level **impedance controller**\index{Impedance controller}[^fn-ctrl-impedance-intent] enforces the admitted limits.
 
 [^fn-ctrl-impedance-intent]: **Mechanical impedance regulation**\index{Control systems!impedance control}: Impedance control regulates the relation between contact force and motion through effective mass, damping, and stiffness. It can reduce loads within a validated contact regime; the first impact and peak force still depend on approach speed, passive compliance, sensing, and actuator response.
 
-Omitting any of these three bounds leaves a machine exposed during communication dropouts or perception stalls. Stopping distance grows linearly with the delay before braking and quadratically with speed (@eq-body-stopping-distance). The delay component a stalled proposer can lengthen is the time its last proposal keeps authority. On the warehouse mobile manipulator that time is the chunk lease of @sec-nervous-cadences, which enters $\tau_{\text{delay}}$. The intent lease is a different object. It bounds how long a target stays justified, and its expiry withdraws the target without adding a term to the brake's delay. Clearance holds only if an independently checked obstacle boundary lies beyond the stopping distance, with model and sensing margins added.
+Omitting any of these three bounds leaves a machine exposed during communication dropouts or perception stalls. Stopping distance grows linearly with the delay before braking and quadratically with speed (@eq-body-stopping-distance). The delay component a stalled proposer can lengthen is the time its last proposal keeps authority. On the warehouse mobile manipulator that time is the chunk lease of @sec-nervous-cadences, which enters $\tau_{\text{delay}}$. The intent lease is a different object. It bounds how long a target stays justified, and its expiry withdraws the target and ends tracking at once, without adding a term to the base's stopping budget. Clearance holds only if an independently checked obstacle boundary lies beyond the stopping distance, with model and sensing margins added.
 
 ::: {#nbk-intent-lease-duration-collision-exposure-tradeoff-across .callout-notebook title="Lapsed authority and physical response"}
 
 The three models below answer different questions. A stopping calculation needs the total delay to brake onset and the deceleration available from the *current* state.
 
-1. **The base in the aisle:** The machine runs the aisle at `{python} IntentLeaseArchetypes.v_aisle_str`. Once its stopping budget is complete (@sec-enforcement-stopping-envelopes), that speed leaves `{python} IntentLeaseArchetypes.spare_aisle_str` of the `{python} IntentLeaseArchetypes.d_clear_str` clear distance unspent. Suppose the application processor stalls and the base holds its last proposal for `{python} IntentLeaseArchetypes.t_stall_base_str` instead of braking when the `{python} IntentLeaseArchetypes.t_lease_str` chunk lease lapses. The extra `{python} IntentLeaseArchetypes.stall_extra_str` of travel adds `{python} IntentLeaseArchetypes.stall_added_str` to the stop and overruns the spare by `{python} IntentLeaseArchetypes.stall_breach_str`.
+1. **The mug intent lapse:** The arm reaches for the red mug under an intent admitted without local tracking. At `{python} IntentLeaseArchetypes.v_conveyor_str` the conveyor consumes the `{python} IntentLeaseArchetypes.err_budget_str` between the `{python} IntentLeaseArchetypes.e0_str` initial error and the `{python} IntentLeaseArchetypes.r_tol_str` tolerance in `{python} IntentLeaseArchetypes.tau_untracked_str`, so by the drift bound of @sec-intent-goals-expire the target's evidence expires then. Suppose the application processor stalls. A target held for `{python} IntentLeaseArchetypes.t_stall_intent_str` by the stalled proposer would sit `{python} IntentLeaseArchetypes.err_stalled_untracked_str` from the mug. The lease does not wait for the proposer. At `{python} IntentLeaseArchetypes.tau_untracked_str` the intent expires, the arm's tracking authority ends, and the arm enters a stop matched to its current state, with onset within `{python} IntentLeaseArchetypes.t_arm_onset_str` (one permission tick, one bus cycle, and the brake onset). The chunk lease of @sec-nervous-cadences is the backstop if that expiry is never observed. Under local tracking the same `{python} IntentLeaseArchetypes.t_stall_intent_str` leaves the target `{python} IntentLeaseArchetypes.err_stalled_tracked_str` off, inside the tolerance, because the tracked horizon is `{python} IntentLeaseArchetypes.tau_tracked_str`; tracking is what makes the `{python} IntentLeaseArchetypes.f_intent_str` intent refresh viable.
 2. **The arm at the cage door:** At the guarded approach speed of `{python} IntentLeaseArchetypes.v_latch_str` against the `{python} IntentLeaseArchetypes.k_latch_str` strike plate of the spring-latched door, modeled force rises at `{python} IntentLeaseArchetypes.df_dt_nms_str`. A `{python} IntentLeaseArchetypes.f_trip_str` tripwire and `{python} IntentLeaseArchetypes.t_contact_str` contact-loop response yield `{python} IntentLeaseArchetypes.f_at_brake_onset_n_str` **when the brake command begins**; force keeps rising while the arm decelerates. Staying under the `{python} IntentLeaseArchetypes.f_lim_str` latch limit leaves only `{python} IntentLeaseArchetypes.x_remaining_str` of further compression, so the arm must decelerate at about `{python} IntentLeaseArchetypes.a_arm_str` and stop within about `{python} IntentLeaseArchetypes.t_arm_stop_str`. Whether the arm can brake that hard from the approach is an open premise, which only arm stopping trials can settle. Unbraked motion for `{python} IntentLeaseArchetypes.t_stall_arm_str` advances `{python} IntentLeaseArchetypes.delta_x_unbounded_mm_str` and gives `{python} IntentLeaseArchetypes.f_unbounded_n_str` in the linear-spring model, far past the latch limit.
 3. **A process-plant contrast:** A heated process has no braking distance, but its setpoint's authority lapses the same way, spent as temperature rather than travel. For an illustrative lumped capacitance of $900\text{ J/K}$ and uncompensated $3600\text{ W}$ input, temperature rises at `{python} IntentLeaseArchetypes.dt_dt_ks_str`. A chosen $2\text{ K}$ task overshoot allowance is consumed in `{python} IntentLeaseArchetypes.tau_bess_ms_str`, so a heater setpoint whose proposer stalls must lose authority well inside that interval; ten seconds at the same net heat input yields a `{python} IntentLeaseArchetypes.delta_t_rise_k_str` modeled rise.
 :::
@@ -380,7 +367,7 @@ Consider a gripper target with nominal base-frame position $\mathbf{p}_0=[0.450,
 
 A detection with a large uncertainty estimate can be rejected by a configured statistical gate. A confident grounding to the wrong physical entity can pass that gate. Suppose the takeaway conveyor carries a thin-walled red glass jar beside the red mug, and the vision-language model assigns an illustrative 99.2 percent confidence score to the jar when instructed to "pick the red mug." The model emits a sharp, low-variance geometric proposal centered on the glass. The trajectory planner receives the coordinate, computes an $SE(3)$ inverse kinematics solution, verifies joint limits, and confirms that the path clears all obstacles in the static environment map. The permission path may find the proposed motion within its configured geometric and force bounds. If those bounds allow the grip force the ceramic mug needs, a smooth, geometrically valid trajectory can crush the glass despite passing the checks.
 
-This failure reveals the boundary between what the permission path can verify and what it must accept as an unvalidated premise. The permission path checks coordinate bounds, kinematic reachability, joint torque limits, and geometric collisions against known occupancy grids. Those physical checks do not establish that the coordinate names the intended object. Semantic classification needs separate task evidence, and the wrong-object risk remains even when every declared bound holds. The mechanics of multimodal feature extraction, cross-attention alignment, and open-vocabulary phrase grounding belong to the computer vision and language literature [@kamath2021mdetr; @gu2022open; @radford2021learning; @liu2023grounding]. A physical AI architecture consumes these models without relying on their internal activations for safety. The responsibility of the systems engineering contract is to govern the boundary where these models meet the physical machine, requiring a tolerance region, ambiguity test, and evidence deadline before a proposal can enter the independent motion-permission check.
+This failure reveals the boundary between what the permission path can verify and what it must accept as an unvalidated premise. The permission path checks coordinate bounds, kinematic reachability, joint torque limits, and geometric collisions against known occupancy grids. Those physical checks do not establish that the coordinate names the intended object. Semantic classification needs separate task evidence, and the wrong-object risk remains even when every declared bound holds. The premise that the grasped object is the named object therefore lies outside the permission path's reach, and it travels with the mug into the handover branch of the release case (@sec-release-case-worked-full) and into the register of claims the machine's evidence leaves open (@sec-frontier-residual-claims-register). The mechanics of multimodal feature extraction, cross-attention alignment, and open-vocabulary phrase grounding belong to the computer vision and language literature [@kamath2021mdetr; @gu2022open; @radford2021learning; @liu2023grounding]. A physical AI architecture consumes these models without relying on their internal activations for safety. The responsibility of the systems engineering contract is to govern the boundary where these models meet the physical machine, requiring a tolerance region, ambiguity test, and evidence deadline before a proposal can enter the independent motion-permission check.
 
 To evaluate how different open-vocabulary perceptual frontends interface with deterministic systems contracts, @tbl-10-grounding-paradigms compares the dominant architectural categories of language grounding.
 
@@ -424,9 +411,7 @@ If a validated disturbance acceleration bound $a_{\text{dist}}$ is also needed, 
 
 For the red mug on the takeaway conveyor, the grounded target moves at `{python} IntentLeaseArchetypes.v_conveyor_str`. A `{python} IntentLeaseArchetypes.r_tol_str` grasp tolerance and `{python} IntentLeaseArchetypes.e0_str` initial error leave a `{python} IntentLeaseArchetypes.tau_untracked_str` **target-evidence horizon** by @eq-intent-lease-drift-bound. Stretching the horizon to the `{python} IntentLeaseArchetypes.t_intent_period_str` refresh period of the machine's `{python} IntentLeaseArchetypes.f_intent_str` intent model would let modeled target error reach `{python} IntentLeaseArchetypes.err_at_period_str`, or `{python} IntentLeaseArchetypes.err_excess_str` beyond the tolerance. That arithmetic shows invalid targeting, not a proven collision without path geometry. The intent model, whose inference alone takes `{python} IntentLeaseArchetypes.t_intent_infer_str`, cannot by itself refresh a `{python} IntentLeaseArchetypes.tau_untracked_str` target for continuous motion. Without a qualified tracker the conveyor must slow or pause, or the task must be refused. At `{python} IntentLeaseArchetypes.v_drift_slow_str` drift the same bound gives a `{python} IntentLeaseArchetypes.tau_slow_drift_str` evidence horizon (@fig-10-lease-dynamics-tradeoff).
 
-A qualified local tracker changes the arithmetic. It re-measures the mug on every frame and follows the conveyor's velocity, so the capture error $e_0$ does not carry forward, and the tracker's qualification bounds its own position error to a value small enough to neglect against the tolerance. Only the residual slip of `{python} IntentLeaseArchetypes.a_slip_str` then moves the target away from the tracker's prediction, and setting $\frac12a_{\text{slip}}t^2=r_{\text{tol}}$ stretches the horizon to $\sqrt{2r_{\text{tol}}/a_{\text{slip}}}$, or `{python} IntentLeaseArchetypes.tau_tracked_str`. The tracker renews that evidence at its own rate, so the tracker's period plus latency is what must fit inside the horizon. The intent model only re-confirms which mug is meant, and each renewal it sends carries the tracker's fresh evidence rather than the frame the model last read. Local tracking therefore makes a `{python} IntentLeaseArchetypes.f_intent_str` intent refresh viable on this conveyor.
-
-Whichever horizon applies is the ceiling on the intent lease for this target (@sec-intent-lease). The untracked `{python} IntentLeaseArchetypes.tau_untracked_str` horizon has the same value as the chunk lease of @sec-nervous-cadences, but the two are different objects. The horizon bounds the intent lease on this target, the chunk lease is sized from the chunk period and the stopping budget, and neither value sets the other.
+A qualified local tracker changes the arithmetic. It re-measures the mug on every frame and follows the conveyor's velocity, so the conveyor speed no longer drives the error. The same `{python} IntentLeaseArchetypes.e0_str` initial error is still charged against the tolerance, which leaves `{python} IntentLeaseArchetypes.err_budget_str` for the residual slip of `{python} IntentLeaseArchetypes.a_slip_str` to consume. Setting $e_0+\frac12a_{\text{slip}}t^2=r_{\text{tol}}$ stretches the horizon to $\sqrt{2(r_{\text{tol}}-e_0)/a_{\text{slip}}}$, or `{python} IntentLeaseArchetypes.tau_tracked_str`. The tracker renews that evidence at its own rate, so the tracker's period plus latency is what must fit inside the horizon. The intent model only re-confirms which mug is meant, and each renewal it sends carries the tracker's fresh evidence rather than the frame the model last read. Local tracking therefore makes a `{python} IntentLeaseArchetypes.f_intent_str` intent refresh viable on this conveyor, and whichever horizon applies caps the intent lease on this target (@sec-intent-lease), independently of the chunk lease of @sec-nervous-cadences even where the two values coincide.
 
 ::: {#fig-10-lease-dynamics-tradeoff fig-env="figure" fig-pos="t" fig-cap="**Target-evidence horizon and early filters**: Panel (a) plots the bound $\tau_{\text{evidence}}\le(r_{\text{tol}}-e_0)/v_{\text{drift}}$; its green region means only that the target remains within the task tolerance. A 650 ms high-tail inference cannot renew the 60 ms conveyor case. Panel (b) shows early rejection stages that precede the full path and stopping checks." fig-alt="Panel (a): target-evidence validity versus drift speed, with 600 milliseconds at 20 millimeters per second and 60 milliseconds at 200 millimeters per second for a 15-millimeter tolerance and 3-millimeter initial error. Green means target evidence remains within this model's tolerance, not that motion is safe. Panel (b): sequence and evidence check, workspace prefilter, dynamic lower-bound check, and ambiguity gate leading to the planner. Full path and stopping clearance remain separate checks."}
 ![](images/svg/fig10_lease_dynamics_tradeoff.svg){width="100%"}
@@ -561,6 +546,8 @@ One implementation follows this bounded admission sequence:
 4. **Authority latch:** Store only the MCU-approved target, effort ceilings, expiry no later than the evidence deadline, and selected fallback. Arm the local timer for the admitted interval. The untrusted requested expiry and terminal mode do not control the drive directly.
 5. **Runtime check:** On each configured control tick and relevant hardware fault event, compare measured state with the admitted limits. On evidence expiry, missed renewal, or an observed violation, revoke the proposal and start the previously validated response. The ensuing braking and hold have their own measured delay and physical margin.
 
+Filled in for the red mug, the lease admitted for the pick carries six entries. Its parent is the belief record of the mug's handle, matched by digest and evidence epoch. Its goal is the handle pose, with a `{python} IntentLeaseArchetypes.e0_str` error envelope inside a `{python} IntentLeaseArchetypes.r_tol_str` task tolerance. Its evidence horizon is `{python} IntentLeaseArchetypes.tau_untracked_str` when the target rests on the capture alone and `{python} IntentLeaseArchetypes.tau_tracked_str` under the qualified tracker. Its effort ceiling is the arm's `{python} IntentLeaseArchetypes.v_tcp_str` tool-center-point speed limit; it carries no item-specific force ceiling, because none is registered for the mug. The configured task and actuator ceilings still bound the wrench, and fragility is handled by the site's control of which items reach the conveyor, not by the controller. Its requested terminal mode is grasp, then hold for the handover, although the MCU still selects the fallback from its approved responses. Its expiry is the earliest of that evidence horizon, the configured lease ceiling, and the stop deadline.
+
 This record gives @sec-verification a concrete interface for fault-injection tests: corrupted quaternions, stale capture records, oversize force requests, and incompatible terminal requests should be rejected under the tested state and timing conditions.
 
 ::: {#chk-intent-wire-schema-watchdogs .callout-checkpoint title="Expiring intent and fallback authority"}
@@ -575,13 +562,13 @@ Before examining the fallacies and pitfalls of grounded autonomy, verify your un
 
 ## Fallacies and Pitfalls {#sec-intent-fallacies-pitfalls}
 
-Each mistake in this section trusts an upstream message to arrive, or to mean what it says. Local checks\index{Local checks!authority withdrawal} must withdraw tracking authority when the goal's temporal validity window expires or its physical justification dissolves, even when no status updates or abort packets arrive from the application processor.
+Each mistake in this section trusts an upstream message to mean more than it does. Local checks\index{Local checks!authority withdrawal} must refuse a target, or withdraw tracking authority over one, when its evidence expires or its physical justification dissolves, and they must decide on evidence the proposer does not control, even while its messages remain well formed and confident.
 
 ::: {.fallacy-pitfall}
 
-**Fallacy**: *Upstream host crashes or hangs will reliably emit cancellation packets to downstream actuators.*
+**Fallacy**: *A renewal computed from the same stale frame is a valid renewal.*
 
-The machine's arm approaches the cage door under a `{python} IntentLeaseArchetypes.t_lease_str` chunk lease (@sec-nervous-cadences). The application processor deadlocks and sends neither a renewal nor an error packet. Continuing the last trajectory leaves the arm pressing on toward the latch, while abruptly removing stator current\index{Stator current!abrupt removal} can let the arm drop under gravity onto the latch through a sudden loss of holding torque. The real-time controller needs a local expiry check\index{Lease!temporal expiry} and an achievable transition to controlled deceleration and a gravity compensation hold\index{Gravity compensation!hold state}. Its response cannot depend on cooperation from the failed host. Lease duration, detection delay, and the stopping distance\index{Kinematics!stopping distance} must be budgeted together so that communication timeouts revoke authority while the machine still has sufficient clearance to decelerate into the validated holding state.
+The machine's intent model re-reads its last wrist-camera frame of the red mug and sends a renewal with a newer sequence number, a later issue time, and the same pose. Every field a keepalive would check has advanced, yet no image has been captured since the evidence that justified the target, and the mug has kept moving at `{python} IntentLeaseArchetypes.v_conveyor_str`. Because the lease dates its evidence by the belief record's evidence epoch\index{Lease!evidence epoch}, not by the renewal's issue time, the MCU matches the renewal's parent digest and epoch to the retained record, finds the epoch unchanged, and keeps counting age from the original capture. The target still expires `{python} IntentLeaseArchetypes.tau_untracked_str` after that capture. A controller that dated evidence by message arrival would let a stream of well-formed renewals hold an obsolete target indefinitely, turning the drift hazard of @sec-intent-goals-expire from a single late inference into a standing condition.
 
 :::
 
@@ -595,9 +582,9 @@ The machine's arm lowers its gripper toward the red mug under an intent with the
 
 ::: {.fallacy-pitfall}
 
-**Pitfall**: *Oscillating between emergency braking trips and uncontrolled execution during inference latency jitter.*
+**Fallacy**: *A confident grounding needs no refusal path.*
 
-The machine's application processor undergoes thermal derating\index{Thermal derating!coprocessor}, delaying chunk renewals beyond the `{python} IntentLeaseArchetypes.t_lease_str` chunk lease. Repeated hard braking and immediate restarts can excite payload oscillation\index{Payload!oscillation} through gearbox compliance\index{Gearbox!compliance}, while automatically extending the lease would allow motion on stale proposals. The controller must reserve enough remaining authority to decelerate along a jerk-limited\index{Trajectory!jerk-limited} ($C^2$-continuous) trajectory and enter a stationary hold. It can then wait for a valid renewal without alternating between full execution and abrupt bus-jitter-induced\index{Latency!bus jitter} stops. The lease and stopping horizon must shape normal degradation behavior, so predictable latency variation does not repeatedly trigger a mechanical emergency maneuver.
+A design that sends only low-confidence proposals to the ambiguity test treats the model's score as evidence about the scene, when it is the model's report about itself. The glass jar beside the red mug in @sec-intent-request-to-proposal arrives with a high score and a tight geometric envelope, so a score-gated design skips the test exactly where the test was needed. The refusal path\index{Refusal!confident grounding} must run on every proposal and must draw on evidence the model does not produce. A check that the pick window holds exactly one object refuses the jar-beside-mug scene whatever the score. What such a check cannot see, a lone jar arriving where the mug should be, remains a premise the permission path names rather than settles, and the site's feed procedure, which admits to the conveyor only items on the station's declared list, is what contains it.
 
 :::
 

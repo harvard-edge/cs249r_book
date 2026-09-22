@@ -50,7 +50,7 @@ A robot trajectory reflects the machine that produced it. Joint geometry and fri
 
 ## Endogenous Experience {#sec-data-endogenous-experience}
 
-A policy trained on a hundred clean teleoperated demonstrations of the warehouse mobile manipulator opening its spring-latched cage door can still fail at the latch on its first autonomous attempt. One possible cause is *endogenous experience*.[^fn-data-causal-loop] In a fixed offline vision dataset, the model's prediction does not change the next stored example. Here, an executed action changes the body's trajectory, camera pose, and contacts, thereby changing later observations ($s_{t+1} \sim P(s \mid s_t, a_t)$).
+A policy trained on the retained demonstrations of a door-opening campaign, clean teleoperated openings of the warehouse mobile manipulator's spring-latched cage door, can still fail at the latch on its first autonomous attempt. One possible cause is *endogenous experience*.[^fn-data-causal-loop] In a fixed offline vision dataset, the model's prediction does not change the next stored example. Here, an executed action changes the body's trajectory, camera pose, and contacts, thereby changing later observations ($s_{t+1} \sim P(s \mid s_t, a_t)$).
 
 [^fn-data-causal-loop]: **Causal Boundary**\index{Causal boundary!thermodynamic constraint}: The causal boundary between computation and physics was established in @sec-boundary-causal-boundary. In an embodied system, computation acquires physical consequence because state evolution depends causally on motor actuation. Consequently, policy actions actively perturb the distribution of future observations ($s_{t+1} \sim P(s \mid s_t, a_t)$), invalidating the independent and identically distributed (i.i.d.) assumptions of disembodied machine learning.
 
@@ -448,10 +448,13 @@ class DemonstrationYieldFatigue:
     check(gear_cycles == 102942, "Unexpected cumulative gear cycles")
     check(cable_cycles == 58824, "Unexpected cumulative cable bends")
     check(abs(f_trip.to(newton).magnitude - 15.0) < 1e-9, "Latch tripwire should be 15 N")
+    check(n_campaign_target == 5000, "Campaign target should be 5,000 retained demonstrations")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
     n_raw_str = fmt_int(n_raw_attempts)
     n_usable_str = fmt(n_usable, precision=2)
+    retention_str = fmt(retention_rate, precision=2)
+    n_target_str = fmt_int(n_campaign_target, commas=True)
     t_yield_str = fmt_time(t_yield, unit=minute, precision=2)
     yield_pct_str = fmt_percent(yield_pct / 100.0, precision=1)
     n_total_str = fmt_int(n_total_attempts, commas=True)
@@ -560,52 +563,7 @@ When a hazardous or boundary state does not appear in a training dataset, an eng
 
 Each mechanism produces an identical zero count in a scenario cell, yet treating them identically leads to incorrect conclusions about policy stability.
 
-```{python}
-#| label: calc-data-aisle-takeover-drift
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ AISLE TAKEOVER DRIFT (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-data-intervention-recovery (selection-trap paragraph)
-# │ Goal:    Place the takeover example on the running machine in its aisle.
-# │ Show:    Lateral drift that trips the side-clearance monitor, at the
-# │          in-loop takeover speed the machine slows to before asking.
-# │ How:     Clearance and takeover speed from AISLE; the monitor threshold is
-# │          a chapter-local fraction of the clearance.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
-from mlsysim.core.units import *
-from mlsysim.fmt import fmt_length, fmt_velocity, check
-
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator
-AISLE = Embodied.Scenario.WarehouseAisle
-
-class AisleTakeoverDrift:
-    """Remote-assistant takeover when the lateral monitor trips inside the side clearance."""
-
-    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    side_clearance = AISLE.side_clearance  # category: illustrative
-    v_takeover = AISLE.v_takeover_in_loop  # category: chosen
-    monitor_fraction = 2 / 3  # category: chosen (chapter-local monitor threshold)
-
-    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    drift = side_clearance * monitor_fraction
-    margin_left = side_clearance - drift
-
-    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
-    check(abs(side_clearance.to(ureg.meter).magnitude - 0.15) < 1e-9, "Side clearance should be 0.15 m")
-    check(drift < side_clearance, "Monitor must trip before the base reaches the rack face")
-    check(abs(drift.to(ureg.meter).magnitude - 0.10) < 1e-9, "Monitor threshold should be 0.10 m")
-    check(abs(v_takeover.to(ureg.meter / ureg.second).magnitude - 1.2) < 1e-9, "In-loop takeover speed should be 1.2 m/s")
-
-    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
-    drift_str = fmt_length(drift, unit=ureg.meter, precision=2)
-    clearance_str = fmt_length(side_clearance, unit=ureg.meter, precision=2)
-    margin_left_str = fmt_length(margin_left, unit=ureg.meter, precision=2)
-    v_takeover_str = fmt_velocity(v_takeover, precision=1)
-```
-
-Human takeovers and automated disengagements introduce a selection trap into fleet data. An intervention occurs precisely when the autonomous policy has entered a region of state space that it handles poorly, causing tracking error or model uncertainty to exceed an operational threshold. Because disengagements are triggered by failing rollouts, the collected intervention data is not drawn from the nominal state distribution of the task. Suppose the mobile manipulator drifts `{python} AisleTakeoverDrift.drift_str` toward a rack inside its `{python} AisleTakeoverDrift.clearance_str` side clearance. The lateral monitor trips, and because the machine never requests in-loop help at aisle speed (@sec-intervention), it first slows to `{python} AisleTakeoverDrift.v_takeover_str` and then asks a remote assistant, who takes over with `{python} AisleTakeoverDrift.margin_left_str` of clearance left. The trajectory recorded after the takeover captures an expert recovering from an edge case disturbance. The distribution of states visited during these rescues, denoted $d^{\text{takeover}}$, is conditioned on policy failure rather than standard task execution. Treating intervention logs as if they were drawn from the nominal distribution $d^{\pi^*}$ distorts the training distribution toward states that only exist because the prior policy failed.
+Human takeovers and automated disengagements introduce a selection trap into fleet data. An intervention occurs precisely when the autonomous policy has entered a region of state space that it handles poorly, causing tracking error or model uncertainty to exceed an operational threshold. Because disengagements are triggered by failing rollouts, the collected intervention data is not drawn from the nominal state distribution of the task. A trajectory recorded after such a takeover captures an expert recovering from an edge case disturbance. The distribution of states visited during these rescues, denoted $d^{\text{takeover}}$, is conditioned on policy failure rather than standard task execution. Treating intervention logs as if they were drawn from the nominal distribution $d^{\pi^*}$ distorts the training distribution toward states that only exist because the prior policy failed.
 
 Appending a rescued episode directly to a behavioral cloning dataset can make unsafe policy commands look like expert demonstrations. Before takeover, the learned policy may issue commands that increase heading error or contact force; after takeover, the expert issues corrective commands from states the learner visited. Those drift states are valuable for Dataset Aggregation (DAgger) when the expert can label a safe action there. The unsafe policy commands must remain attributed to the learner and excluded as expert imitation targets. Recovery after takeover is a separate expert sequence, with its own authority and timestamps.
 
@@ -865,11 +823,17 @@ Every trajectory in the training corpus must identify its collection source, col
 
 A physical machine cannot be identified by a generic model name. The data record specifies the individual plant through its extrinsic and intrinsic sensor calibrations, action contract, motor drive firmware revisions, and component wear state. Replaceable contact surfaces alter the governing dynamics. A parallel-jaw gripper fitted with compliant $30\text{ A}$ durometer silicone pads (which compress easily like a soft rubber eraser) generates contact compliance and friction characteristics that differ entirely from the same gripper fitted with worn $60\text{ A}$ polyurethane pads (which are firmer like a shoe sole) under identical joint commands. Maintenance milestones, such as cable retensioning, drive belt replacements, gearbox swaps, and camera remounts, are logged directly into the machine state record. If an arm underwent joint recalibration between morning and afternoon collection shifts, the dataset must expose that boundary so downstream training does not attempt to resolve two conflicting kinematic mappings into a single policy.
 
-Accounting for dataset volume requires explicit denominators across both time and trial counts. Reporting only the count of retained frames or successful episodes obscures the true yield of the collection process. The data record tracks scheduled cell time, active motion time, attempted episodes, retained successes, retained task failures, excluded recordings, and the count of independent physical task configurations. In an illustrative example of a precision peg-insertion campaign scheduled for $40.0\text{ h}$ of cell time, $28.5\text{ h}$ of net motion time produces 1000 total attempts across 12 distinct workpiece fixtures. The resulting tally records 820 retained successes (an 82 percent nominal success yield), 110 retained task failures containing recovery attempts, and 70 excluded recordings rejected due to telemetry drops. Dividing motion time by attempted episodes yields an average cycle budget of $102.6\text{ s}$ per attempt, exposing the actual operational pacing and the proportion of time spent resetting the physical environment.
+Accounting for dataset volume requires explicit denominators across both time and trial counts, because a count of retained frames or successful episodes hides the yield of the process that produced them. The record therefore tracks scheduled cell time, active motion time, attempted episodes, retained successes, retained task failures, excluded recordings, and the count of independent physical task configurations, so that every attempt reconciles against a retained or an excluded episode and the time spent resetting the physical scene stays visible.
 
 A single action column in a dataset conceals the filtering between request and response, so the record keeps all four action taps of \ref{dfn-data-four-stream-action-tap-tuple} at every control step. Logged alongside boolean override flags, truncation markers, and numeric exclusion codes, the taps reveal where the collector commanded kinematically impossible motions, where the permission path intervened, and where tracking lag separated command from execution. Discarding the intermediate representations leaves the training pipeline unable to distinguish between an intentional human demonstration and an action heavily modified by the permission path.
 
-Every physical dataset supports only part of the ODD, and the data record must explicitly catalog both its supported cells and its known absences. The supported cells state the conditions the dataset actually covers, encompassing payload masses between $0.10\text{ kg}$ and $1.50\text{ kg}$, ambient illumination from $300\text{ lx}$ to $1200\text{ lx}$, workbench surface friction coefficients, and workpiece dimensional tolerances. Known absences define what was omitted or unattempted: unvisited workspace volumes, approach angles outside a $30^\circ$ cone, ambient temperatures outside the range of $18^\circ\text{C}$ to $26^\circ\text{C}$, excluded failure modes such as unrecoverable motor stalls, missing operators who did not participate in the shift, and hardware embodiments that lack kinematic parity (such as robots with slightly different arm lengths or joint limits). Stating what is absent prevents an engineer from treating the absence of training failures as evidence of policy competence. The complete metadata schema and physical contract fields required to preserve this dataset provenance are formalized in @tbl-05-provenance-schema, defining the metadata structures, calibration contracts, multi-stream action tap points, and support boundaries required before any trajectory is admitted into training pipelines.
+Every physical dataset supports only part of the ODD, so the record catalogs both its supported cells and its known absences, and stating what is absent keeps an engineer from treating the absence of training failures as evidence of policy competence. Filled in for the latch campaign, with each field group and the admission check it supports listed in @tbl-05-provenance-schema, the record reads:
+
+- **Denominators:** `{python} DemonstrationYieldFatigue.n_raw_str` attempts per scheduled session at a net retention rate of `{python} DemonstrationYieldFatigue.retention_str`, so `{python} DemonstrationYieldFatigue.n_target_str` retained successful demonstrations cost `{python} DemonstrationYieldFatigue.n_total_str` attempts over `{python} DemonstrationYieldFatigue.t_sched_campaign_str` of scheduled cell time.
+- **Retention rule:** an attempt whose contact force crosses the `{python} DemonstrationYieldFatigue.f_trip_str` tripwire ends there and is kept as a labeled failure, outside the demonstration count, when its telemetry is valid; a recording that fails quality filtering is excluded with its exclusion code.
+- **Scenario ledger:** plate offset (nominal, +`{python} LatchScenarioLedger.plate_offset_str`, −`{python} LatchScenarioLedger.plate_offset_str`) crossed with approach speed (`{python} LatchScenarioLedger.v_guarded_str`, `{python} LatchScenarioLedger.v_fast_str`), `{python} LatchScenarioLedger.n_cells_str` cells, held in the record as a digest rather than as a copy.
+- **`supported_cells`:** the nominal plate at `{python} LatchScenarioLedger.v_guarded_str`, the only cell the retained demonstrations occupy.
+- **`known_absences`:** the other `{python} LatchScenarioLedger.n_zero_str` cells, every displaced plate and every approach at `{python} LatchScenarioLedger.v_fast_str`.
 
 \Needspace{28\baselineskip}
 

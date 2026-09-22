@@ -55,7 +55,7 @@ A robot among people must interpret changing surroundings and propose actions be
 
 ## The Embodied Brain {#sec-brain-embodied}
 
-The warehouse mobile manipulator can meet all electrical and thermal budgets yet still fail when its arm grasps an unfamiliar ceramic mug from the moving conveyor at the pick station. The motor drives remain well within their continuous torque ratings, the voltage distribution rails show zero droop, and the joint velocities remain below physical limits. Yet the machine drops the object or crushes the ceramic rim because low-level motor physics cannot determine what the object is, where its structural affordances lie, or how to reach around clutter. A model output in a purely advisory display can be reviewed before it affects the world. Here, a cognitive proposal can automatically influence moving mass. A mistaken proposal can lead to unsafe kinetic energy if the execution path accepts it, so permission must be checked independently. The central dilemma of embodied cognition is that high-capacity neural models are inherently stochastic, computationally expensive, and prone to semantic hallucinations, yet they must orchestrate physical bodies whose collisions cannot be recalled (the first law, @sec-boundary-bedrock-laws).
+The warehouse mobile manipulator can meet all electrical and thermal budgets yet still fail at a task as ordinary as taking an unfamiliar ceramic mug from the moving conveyor at the pick station and handing it to the coworker at the packing station. The motor drives remain well within their continuous torque ratings, the control rail holds its voltage at full charge, and the joint velocities remain below physical limits. Yet the machine drops the object or crushes the ceramic rim because low-level motor physics cannot determine what the object is, where its structural affordances lie, or how to reach around clutter. A model output in a purely advisory display can be reviewed before it affects the world. Here, a cognitive proposal can automatically influence moving mass. A mistaken proposal can lead to unsafe kinetic energy if the execution path accepts it, so permission must be checked independently. The central dilemma of embodied cognition is that high-capacity neural models are inherently stochastic, computationally expensive, and prone to semantic hallucinations, yet they must orchestrate physical bodies whose collisions cannot be recalled (the first law, @sec-boundary-bedrock-laws).
 
 The Brain is therefore an unprivileged deliberation engine that may only propose (\ref{dfn-boundary-proposal-boundary}). On the mobile manipulator it holds two learned proposers, an intent model that revises goals at $1\text{--}5\text{ Hz}$ and a chunk policy that emits short sequences of future setpoints at $10\text{--}50\text{ Hz}$, and the permission path may refuse anything either one proposes. That protection holds only while the limits, the state estimate, and the fallback it relies on remain valid.
 
@@ -196,7 +196,7 @@ Each stage of this pipeline is paid for in memory traffic. Every patch token mus
 
 At the pick station the mobile manipulator's arm consumes a new setpoint every few tens of milliseconds, while the mug it is reaching for keeps moving along the conveyor. Whatever model proposes those setpoints must settle two questions. The first is how often it can produce a proposal on the application processor the machine actually has; the second is how long each proposal stays true once the mug has moved. The answers explain why the machine carries two learned proposers rather than one.
 
-Four stages turn camera frames into those proposals (@fig-cognitive-pipeline), and Part III develops each one. Here they matter only for what each hands downstream and how quickly that goes stale. Perception begins by tokenizing the sensor streams, the ingestion box of the figure, and grounds what it recognizes in metric coordinates relative to the base, so that the mug becomes a pose and a graspable handle rather than a label;[^fn-brain-metric-grounding] its output ages from the moment of capture, and @sec-perception turns that age into a contract. Memory carries those estimates through occlusion and must let each one expire when the evidence behind it does (@sec-memory). Intent decomposes a task such as "take the ceramic mug off the conveyor and put it in the tote" into subgoals, and because the mug moves while the intent model deliberates, it hands the planner a target that expires, an intent lease\index{Intent lease!temporal contract} (@sec-intent-lease). Planning converts that target into candidate setpoints for the base and the arm, the proposals the permission path will judge (@sec-planning). All four stages run on the application processor, and all four draw on the same memory bus, which is where the machine's cadence is decided.
+Four stages turn camera frames into those proposals (@fig-cognitive-pipeline), and Part III develops each one. Here they matter only for what each hands downstream and how quickly that goes stale. Perception begins by tokenizing the sensor streams, the ingestion box of the figure, and grounds what it recognizes in metric coordinates relative to the base, so that the mug becomes a pose and a graspable handle rather than a label;[^fn-brain-metric-grounding] its output ages from the moment of capture, and @sec-perception turns that age into a contract. Memory carries those estimates through occlusion and must let each one expire when the evidence behind it does (@sec-memory). Intent decomposes a task such as "take the ceramic mug off the conveyor and hand it to the coworker at the packing station" into subgoals, and because the mug moves while the intent model deliberates, it hands the planner a target that expires, an intent lease\index{Intent lease!temporal contract} (@sec-intent-lease). Planning converts that target into candidate setpoints for the base and the arm, the proposals the permission path will judge (@sec-planning). All four stages run on the application processor, and all four draw on the same memory bus, which is where the machine's cadence is decided.
 
 [^fn-brain-metric-grounding]: **Metric Spatial Grounding**\index{Metric spatial grounding}\index{Special Euclidean group!SE(3) grounding}: While disembodied AI operates over discrete semantic tokens, physical AI must ground those semantics in the Special Euclidean group $SE(3)$, mapping entities to metric distances (meters) and spatial orientations (quaternions) relative to the robot's base coordinate frame. Failing to maintain this metric grounding causes neural policies to emit kinematically impossible Cartesian paths that breach actuator workspace boundaries.
 
@@ -561,11 +561,11 @@ Retained context adds to the pressure the notebook began to measure. Counting la
 # │ Context: the conveyor-pick paragraph in @sec-brain-cognitive-pipeline
 # │ Goal:    size the chunk the mobile manipulator's arm executes against the
 # │          mug's drift on the moving conveyor
-# │ Show:    the 245 ms tracked evidence horizon; the 90 ms open-loop span
+# │ Show:    the 219 ms tracked evidence horizon; the 90 ms open-loop span
 # │          (50 ms replanning period plus 40 ms inference) inside it; the
 # │          16-step, 320 ms chunk as a supply buffer that would breach the
 # │          grasp tolerance if executed to its end
-# │ How:     tau_ev = sqrt(2 r_tol / a_slip); open-loop span = 1/f_chunk +
+# │ How:     tau_ev = sqrt(2 (r_tol - e_0) / a_slip); open-loop span = 1/f_chunk +
 # │          t_chunk; drift = a_slip T^2 / 2
 # └─────────────────────────────────────────────────────────────────────────────
 import math
@@ -583,13 +583,14 @@ class ConveyorChunkSizing:
     v_conv = AISLE.v_conveyor  # category: illustrative
     a_slip = AISLE.a_conveyor_slip  # category: illustrative
     r_tol = AISLE.grasp_tolerance  # category: chosen
+    e_0 = AISLE.grasp_initial_error  # category: illustrative
     chunk_rate = RM.chunk_rate  # category: chosen
     chunk_latency = RM.chunk_inference_latency  # category: illustrative
     chunk_step = RM.chunk_step  # category: chosen
     chunk_horizon = RM.chunk_horizon  # category: chosen
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    tau_ev = ((2 * r_tol / a_slip) ** 0.5).to(millisecond)
+    tau_ev = ((2 * (r_tol - e_0) / a_slip) ** 0.5).to(millisecond)
     chunk_period = (1 / chunk_rate).to(millisecond)
     open_loop = (chunk_period + chunk_latency).to(millisecond)
     h_min = math.ceil((open_loop / chunk_step).to("dimensionless").magnitude)
@@ -599,7 +600,7 @@ class ConveyorChunkSizing:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(v_conv.to("m/s").magnitude - 0.20) < 1e-9, f"Conveyor speed drifted: {v_conv}")
-    check(abs(tau_ev.magnitude - 244.95) < 0.05, f"Tracked evidence horizon drifted: {tau_ev}")
+    check(abs(tau_ev.magnitude - 219.09) < 5e-3, f"Tracked evidence horizon drifted: {tau_ev}")
     check(abs(chunk_period.magnitude - 50.0) < 1e-9, f"Chunk period drifted: {chunk_period}")
     check(abs(open_loop.magnitude - 90.0) < 1e-9, f"Open-loop span drifted: {open_loop}")
     check(open_loop < tau_ev, "The open-loop span must sit inside the evidence horizon")
@@ -607,13 +608,14 @@ class ConveyorChunkSizing:
     check(chunk_horizon == 16, f"Chunk horizon drifted: {chunk_horizon}")
     check(abs(chunk_span.magnitude - 320.0) < 1e-9, f"Chunk span drifted: {chunk_span}")
     check(chunk_span > tau_ev, "The full chunk must outlast the evidence horizon (buffer, not plan)")
-    check(drift_full > r_tol, "Executing the whole chunk open-loop must breach the grasp tolerance")
+    check(e_0 + drift_full > r_tol, "Executing the whole chunk open-loop must breach the grasp tolerance")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
     v_conv_str = fmt_velocity(v_conv, unit="m/s", precision=2)
     a_slip_str = fmt_acceleration(a_slip, precision=2)
     r_tol_str = fmt_length(r_tol, unit=millimeter, precision=0)
-    tau_ev_rounded = round(tau_ev.magnitude) * millisecond  # whole-ms display; the guard pins 244.95 ms
+    e_0_str = fmt_length(e_0, unit=millimeter, precision=0)
+    tau_ev_rounded = round(tau_ev.magnitude) * millisecond  # whole-ms display; the guard pins 219.09 ms
     tau_ev_str = fmt_latency(tau_ev_rounded, unit=millisecond, precision=0)
     chunk_period_str = fmt_latency(chunk_period, unit=millisecond, precision=0)
     chunk_latency_str = fmt_latency(chunk_latency, unit=millisecond, precision=0)
@@ -626,7 +628,7 @@ class ConveyorChunkSizing:
     drift_full_str = fmt_length(drift_full, unit=millimeter, precision=1)
 ```
 
-Once synthesized, action chunks must be executed without letting the target drift out of reach. At the pick station, the mobile manipulator's arm takes the mug from a conveyor moving at `{python} ConveyorChunkSizing.v_conv_str`. Local tracking of the mug removes the belt's steady motion, but residual slip can still accelerate the target at `{python} ConveyorChunkSizing.a_slip_str`, so a segment executed open-loop for a time $T$ drifts by $\frac{1}{2} a_{\text{slip}} T^2$ and reaches the `{python} ConveyorChunkSizing.r_tol_str` grasp tolerance after the tracked evidence horizon $\tau_{\text{ev}} = \sqrt{2 r_{\text{tol}} / a_{\text{slip}}} \approx$ `{python} ConveyorChunkSizing.tau_ev_str`. The chunk policy replans every `{python} ConveyorChunkSizing.chunk_period_str` and needs up to `{python} ConveyorChunkSizing.chunk_latency_str` to do so, so while renewals arrive on time the arm executes no more than `{python} ConveyorChunkSizing.open_loop_str` of motion from one observation, which drifts only `{python} ConveyorChunkSizing.drift_open_loop_str` and sits well inside the tracked evidence horizon. That same span sets the minimum supply, because a chunk shorter than `{python} ConveyorChunkSizing.h_min_str` setpoints would leave the arm waiting for its successor. The machine's chunk carries `{python} ConveyorChunkSizing.chunk_horizon_str` setpoints at `{python} ConveyorChunkSizing.chunk_step_str` spacing, `{python} ConveyorChunkSizing.chunk_span_str` of motion, longer than the tracked evidence horizon; executed open-loop to its end, it would drift `{python} ConveyorChunkSizing.drift_full_str`, past the tolerance. The setpoints beyond the next replanning instant are therefore a supply buffer, consumed only when renewals stop, and the lease derived in @sec-nervous-cadences ends execution long before that buffer runs out. Overlapping chunks and temporal ensembling then keep the executed motion smooth across each renewal.
+Once synthesized, action chunks must be executed without letting the target drift out of reach. At the pick station, the mobile manipulator's arm takes the mug from a conveyor moving at `{python} ConveyorChunkSizing.v_conv_str`. Local tracking of the mug removes the belt's steady motion, but residual slip can still accelerate the target at `{python} ConveyorChunkSizing.a_slip_str`, so a segment executed open-loop for a time $T$ drifts by $\frac{1}{2} a_{\text{slip}} T^2$. Added to the `{python} ConveyorChunkSizing.e_0_str` initial error $e_0$ of the handle estimate, that drift reaches the `{python} ConveyorChunkSizing.r_tol_str` grasp tolerance after the tracked evidence horizon $\tau_{\text{ev}} = \sqrt{2 (r_{\text{tol}} - e_0) / a_{\text{slip}}} \approx$ `{python} ConveyorChunkSizing.tau_ev_str`. The chunk policy replans every `{python} ConveyorChunkSizing.chunk_period_str` and needs up to `{python} ConveyorChunkSizing.chunk_latency_str` to do so, so while renewals arrive on time the arm executes no more than `{python} ConveyorChunkSizing.open_loop_str` of motion from one observation, which drifts only `{python} ConveyorChunkSizing.drift_open_loop_str` and sits well inside the tracked evidence horizon. That same span sets the minimum supply, because a chunk shorter than `{python} ConveyorChunkSizing.h_min_str` setpoints would leave the arm waiting for its successor. The machine's chunk carries `{python} ConveyorChunkSizing.chunk_horizon_str` setpoints at `{python} ConveyorChunkSizing.chunk_step_str` spacing, `{python} ConveyorChunkSizing.chunk_span_str` of motion, longer than the tracked evidence horizon; executed open-loop to its end, it would drift `{python} ConveyorChunkSizing.drift_full_str`, past the tolerance. The setpoints beyond the next replanning instant are therefore a supply buffer, consumed only when renewals stop, and the lease derived in @sec-nervous-cadences ends execution long before that buffer runs out. Overlapping chunks and temporal ensembling then keep the executed motion smooth across each renewal.
 
 ::: {.column-margin .margin-pointer}
 ↳ **Downstream:** Bounded action chunk proposals are filtered against forward-invariant barriers in @sec-enforcement-safe-sets-conditional-permission.
@@ -760,9 +762,9 @@ A delivery robot observes reflective tarps over traffic cones. Every $50.0\text{
 
 ::: {.fallacy-pitfall}
 
-**Fallacy**: *Numerically valid and smooth intent proposals can safely be executed after their lease expires.*
+**Fallacy**: *A numerically valid and smooth action chunk can safely be executed whenever it arrives.*
 
-The mobile manipulator's chunk policy proposes an arm trajectory toward the mug on the conveyor. Host scheduling delays delivery past the proposal's expiry, while residual belt slip has carried the mug toward the edge of the grasp tolerance. The trajectory remains smooth and numerically valid, but the observation that justified it no longer describes where the mug is. Executing it could close the gripper on the rim or knock the mug from the belt. The permission path must reject the expired proposal and leave control with the validated local response (the expiry that every intent lease carries, @sec-intent-lease). Smoothness describes the proposed command; temporal validity determines whether the machine may still act on it.
+The mobile manipulator's chunk policy proposes an arm trajectory toward the mug on the conveyor. Host scheduling delays delivery, while residual belt slip has carried the mug toward the edge of the grasp tolerance. The trajectory remains smooth and numerically valid, but the observation that justified it no longer describes where the mug is. Executing it could close the gripper on the rim or knock the mug from the belt. Once the delay outlasts the chunk lease of @sec-nervous-cadences, the lease ends the stalled policy's authority and the arm enters its validated fallback stop instead of waiting, and when the delayed trajectory finally arrives, the observation it was computed from is too old for the permission path to admit it. Smoothness describes the proposed command; temporal validity determines whether the machine may still act on it.
 
 :::
 

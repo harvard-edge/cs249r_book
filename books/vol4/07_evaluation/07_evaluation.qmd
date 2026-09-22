@@ -60,13 +60,16 @@ Successful demonstrations show what occurred during trials, not all conditions f
 # │ Context: chapter opener, @sec-evaluation-logs, and the lease fallacy.
 # │ Show: the evaluated campaign (latch task, base stopped) and the machine
 # │       values the chapter quotes: approach speed, latch limit, rack
-# │       capacity, chunk period, and chunk lease.
+# │       capacity, chunk period, and chunk lease; plus the Part II funnel
+# │       the completed record carries (ledger cells, supported cells,
+# │       known absences, manifest omissions).
 # │ How: registry fields of the warehouse mobile manipulator and its aisle;
-# │      the standoff is the only chapter-local input.
+# │      the standoff and the ledger counts (from @sec-data and
+# │      @sec-training) are chapter-local inputs.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt_length, fmt_velocity, fmt_latency, fmt_qty, fmt_frequency, check
+from mlsysim.fmt import fmt_length, fmt_velocity, fmt_latency, fmt_qty, fmt_frequency, check, MarkdownStr
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
@@ -81,9 +84,16 @@ class EvalMachine:
     rack_capacity = RM.onboard_payload_capacity  # category: chosen; tote-rack capacity
     chunk_rate = RM.chunk_rate  # category: chosen; chunk policy rate
     t_lease = AISLE.t_lease  # category: chosen; chunk lease
+    n_plate_positions = 3  # category: illustrative; nominal and two displaced plates, the scenario ledger of @sec-data
+    ledger_speeds = [AISLE.v_latch_approach, AISLE.v_latch_high]  # category: illustrative; the ledger's two approach speeds
+    n_supported = 1  # category: illustrative; the nominal plate at the guarded approach (LatchScenarioLedger in @sec-data)
+    n_omissions = 2  # category: illustrative; soft penalty contact and missing transport lag, the manifest's omission log
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     chunk_period = (1 / chunk_rate).to(millisecond)
+    n_speeds = len(ledger_speeds)
+    n_cells = n_plate_positions * n_speeds
+    n_absences = n_cells - n_supported
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(v_approach.to(ureg.meter / ureg.second).magnitude - 0.03) < 1e-9, "Guarded approach is not 0.03 m/s")
@@ -92,6 +102,8 @@ class EvalMachine:
     check(abs(chunk_period.to(millisecond).magnitude - 50.0) < 1e-9, "Chunk period is not 50 ms")
     check(abs(t_lease.to(millisecond).magnitude - 60.0) < 1e-9, "Chunk lease is not 60 ms")
     check(chunk_period < t_lease, "Chunk period must fit inside the lease")
+    check(n_cells == 6 and n_supported == 1 and n_absences == 5, "Ledger should have one supported cell of six (matches @sec-data)")
+    check(n_omissions == 2, "Manifest omission log holds two unclosed departures (matches @sec-training)")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
     standoff_str = fmt_length(standoff, precision=0)
@@ -101,9 +113,16 @@ class EvalMachine:
     chunk_rate_str = fmt_frequency(chunk_rate)
     chunk_period_str = fmt_latency(chunk_period)
     t_lease_str = fmt_latency(t_lease)
+    _words = {1: "one", 2: "two", 3: "three", 5: "five", 6: "six"}
+    n_plate_positions_str = MarkdownStr(_words[n_plate_positions])
+    n_speeds_str = MarkdownStr(_words[n_speeds])
+    n_cells_str = MarkdownStr(_words[n_cells])
+    n_supported_str = MarkdownStr(_words[n_supported])
+    n_absences_str = MarkdownStr(_words[n_absences])
+    n_omissions_str = MarkdownStr(_words[n_omissions])
 ```
 
-Fresh from the offline training pipeline, a latch policy checkpoint recorded in the policy manifest of @sec-training-policy-manifest is flashed onto the warehouse mobile manipulator. In initial validation, the machine completes twenty consecutive runs of its door task. Each run starts with the base `{python} EvalMachine.standoff_str` (illustrative; see the Reader Guide) from the spring-latched cage door; the base drives in and stops, and with the base at rest the arm unlatches and opens the door at the `{python} EvalMachine.v_approach_str` guarded approach, without a contact-limit trip or a human intervention. Its empirical sample success rate is $\hat{p} = 1.00$ (100 percent). In standard software testing, a flawless benchmark score is celebrated as definitive validation. In Physical AI systems engineering, that record leaves the deployment decision unresolved: twenty clean runs establish a bounded statistical lower limit, leaving substantial uncertainty about unobserved failures.
+Fresh from the offline training pipeline, `latch-bc-01`, the checkpoint the policy manifest of @sec-training-policy-manifest declares evaluable, is flashed onto the warehouse mobile manipulator. In initial validation, the machine completes twenty consecutive runs of its door task. Each run starts with the base `{python} EvalMachine.standoff_str` (illustrative; see the Reader Guide) from the spring-latched cage door; the base drives in and stops, and with the base at rest the arm unlatches and opens the door at the `{python} EvalMachine.v_approach_str` guarded approach, without a contact-limit trip or a human intervention. Its empirical sample success rate is $\hat{p} = 1.00$ (100 percent). In standard software testing, a flawless benchmark score is celebrated as definitive validation. In Physical AI systems engineering, that record leaves the deployment decision unresolved: twenty clean runs establish a bounded statistical lower limit, leaving substantial uncertainty about unobserved failures.
 
 In traditional software benchmarking, estimating failure rates relies on asymptotic approximations. If an engineer applies the familiar Wald confidence interval ($p \pm z \sqrt{\hat{p}(1-\hat{p})/n}$) to twenty zero-failure trials, the variance collapses to zero, producing a degenerate confidence interval of $[1.0, 1.0]$. The formula falsely assures the team that the machine is 100 percent reliable with absolute certainty.
 
@@ -254,7 +273,7 @@ class AisleDrift:
     """Closed-loop drift of a biased navigation policy on the running machine's aisle."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = AISLE.v_aisle  # category: chosen; aisle speed
+    v = RM.base.max_velocity  # category: illustrative; drive limit
     clearance = AISLE.side_clearance  # category: illustrative; side clearance each side
     aisle_width = AISLE.aisle_width  # category: illustrative; site geometry
     aisle_length = AISLE.aisle_length  # category: illustrative; site geometry
@@ -270,12 +289,12 @@ class AisleDrift:
     aisle_fraction = (x_impact / aisle_length).to(ureg.dimensionless).magnitude
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
-    check(abs(v.to(ureg.meter / ureg.second).magnitude - 1.3) < 1e-9, "Aisle speed is not 1.3 m/s")
+    check(abs(v.to(ureg.meter / ureg.second).magnitude - 1.5) < 1e-9, "Drive limit is not 1.5 m/s")
     check(abs(clearance.to(ureg.meter).magnitude - 0.15) < 1e-9, "Side clearance is not 0.15 m")
     check(abs(((aisle_width - machine_width) / 2 - clearance).to(ureg.meter).magnitude) < 1e-9, "Side clearance must equal (aisle - machine) / 2")
     check(abs(aisle_length.to(ureg.meter).magnitude - 30.0) < 1e-9, "Aisle length is not 30 m")
     check(abs(x_impact.to(ureg.meter).magnitude - 8.6) < 0.05, "Clearance should be spent in about 8.6 m")
-    check(abs(t_impact.to(ureg.second).magnitude - 6.6) < 0.05, "Clearance should be spent in about 6.6 s")
+    check(abs(t_impact.to(ureg.second).magnitude - 5.73) < 0.005, "Clearance should be spent in about 5.7 s")
     check(aisle_fraction < 1 / 3, "Prose says less than a third of the aisle")
     check(abs(heading_offset_deg - 1.0) < 1e-12, "Prose, fig-cap, and fig-alt state a 1.0 degree heading offset")
     check(abs(angular_mse.magnitude - 3.05e-4) < 5e-7, "fig-alt states an angular MSE of 3.05e-4 rad^2")
@@ -294,13 +313,13 @@ class AisleDrift:
     angular_mse_eq = fmt_math(rf"\text{{MSE}}_\theta = ({fmt(eps, precision=5)})^2 \approx {sci_latex(angular_mse.magnitude)}\text{{ rad}}^2")
 ```
 
-Open-loop evaluation tests actions along the demonstrator's state trajectory; a policy with low offline prediction error can fail when its biased proposals are admitted to physical motion, because its own actions carry it off the states it was trained on. This is the endogenous-data principle (\ref{pri-vol4-endogenous-drift}); @sec-data-endogenous-experience developed its consequence for data, and evaluation must measure it on the machine. The door campaign cannot show the effect, because its base stands still while the arm works, so the example comes from the same machine's navigation stack rather than from the latch policy under evaluation. The base drives a `{python} AisleDrift.aisle_length_str` aisle at the `{python} AisleDrift.v_str` aisle speed, and the nominal expert demonstration follows the centerline with heading $\theta^* = 0\text{ rad}$ and lateral offset $y^* = 0\text{ m}$. Suppose the candidate navigation policy has a systematic heading bias of $\epsilon_\theta = 1.0^\circ$ (`{python} AisleDrift.eps_rad_str`) on every step, and the permission path admits each of these proposals because none is infeasible on its own.
+Open-loop evaluation tests actions along the demonstrator's state trajectory; a policy with low offline prediction error can fail when its biased proposals are admitted to physical motion, because its own actions carry it off the states it was trained on. This is the endogenous-data principle (\ref{pri-vol4-endogenous-drift}); @sec-data-endogenous-experience developed its consequence for data, and evaluation must measure it on the machine. The door campaign cannot show the effect, because its base stands still while the arm works, so the example comes from the same machine's navigation stack rather than from the latch policy under evaluation. The base drives a `{python} AisleDrift.aisle_length_str` aisle at its `{python} AisleDrift.v_str` drive limit, and the nominal expert demonstration follows the centerline with heading $\theta^* = 0\text{ rad}$ and lateral offset $y^* = 0\text{ m}$. Suppose the candidate navigation policy has a systematic heading bias of $\epsilon_\theta = 1.0^\circ$ (`{python} AisleDrift.eps_rad_str`) on every step, and the permission path admits each of these proposals because none is infeasible on its own.
 
 In an open-loop evaluation, the policy receives the demonstrator state $s_t^* = (x_t^*, 0, 0)$ at each step and predicts a forward velocity with a $1.0^\circ$ steering offset. The offline scoring pipeline records a mean absolute angular error of $1.0^\circ$ (`{python} AisleDrift.eps_rad_str`) and an extremely low mean squared error of `{python} AisleDrift.angular_mse_eq`.[^fn-math-openloop-mse] In closed-loop execution, however, because the machine physically moves based on previously admitted commands, uncorrected heading errors compound continuously over time. Under planar unicycle kinematics ($\dot{y} = v \sin \theta \approx v \epsilon_\theta$), this persistent angular offset integrates into a cumulative lateral displacement:
 $$y(t) = \int_0^t v \sin \epsilon_\theta \, d\tau \approx v \epsilon_\theta t$$
 The base is `{python} AisleDrift.machine_width_str` wide in a `{python} AisleDrift.aisle_width_str` aisle, which leaves $W_{\text{clear}} =$ `{python} AisleDrift.clearance_cm_str` of side clearance to the rack on each side, and the drift spends that clearance at
 $$t_{\text{impact}} = \frac{W_{\text{clear}}}{v \sin \epsilon_\theta},$$
-which at the aisle speed is `{python} AisleDrift.t_impact_str`, after `{python} AisleDrift.x_impact_str` of travel and less than a third of the way down the aisle.[^fn-math-closedloop-lateral] Without an additional clearance barrier, the base strikes the rack before completing the transit. This deterministic trial fails despite the small open-loop angular error.
+which at the drive limit is `{python} AisleDrift.t_impact_str`, after `{python} AisleDrift.x_impact_str` of travel and less than a third of the way down the aisle.[^fn-math-closedloop-lateral] Without an additional clearance barrier, the base strikes the rack before completing the transit. This deterministic trial fails despite the small open-loop angular error.
 
 [^fn-math-openloop-mse]: **Metric scale masking in regression loss**\index{Evaluation!metric masking}: Aggregating squared steering errors across thousands of validation frames obscures severe, intermittent directional mistakes. A single localized prediction spike of $15^\circ$ is mathematically washed out when averaged across miles of straight highway data. A brief angular spike can matter if its integrated motion exhausts clearance before the independent permission path responds; the outcome requires a plant and timing model.
 
@@ -327,16 +346,16 @@ The mapping between offline scores and physical task performance is not a simple
 <!-- fig-alt below hand-types values because fig-alt cannot hold inline python. Keep them in sync with these cell outputs:
      "one-degree heading offset"          = AisleDrift.heading_offset_deg (1.0)
      "3.05 times 10 to the minus four"    = AisleDrift.angular_mse_math (the fig-cap and prose use it inline)
-     "1.3 meters per second"              = AisleDrift.v_str
+     "1.5 meters per second"              = AisleDrift.v_str (RM.base.max_velocity, the drive limit)
      "15-centimeter side clearance"       = AisleDrift.clearance_cm_str
-     "about 6.6 seconds"                  = AisleDrift.t_impact_str
+     "about 5.7 seconds"                  = AisleDrift.t_impact_str
      "8.6 meters along the aisle"         = AisleDrift.x_impact_str
-     Guards in calc-evaluation-aisle-heading-drift pin 1.0 degree, 3.05e-4 rad^2, 1.3 m/s, 0.15 m, 6.6 s, and 8.6 m.
+     Guards in calc-evaluation-aisle-heading-drift pin 1.0 degree, 3.05e-4 rad^2, 1.5 m/s, 0.15 m, 5.7 s, and 8.6 m.
      The 1.0 degree offset is also hand-typed as $1.0^\circ$ in the closed-loop-dynamics prose, the fig-cap, the
      unicycle paragraph, the metric-drift paragraph, and the takeaways; the guard pins it.
      The figure cell below recomputes theta**2 for its panel label from the same heading_offset_deg. -->
 
-::: {#fig-07-open-vs-closed-loop fig-env="figure" fig-pos="t" fig-cap="**Open versus closed loop divergence**: A persistent $1.0^\circ$ heading offset gives `{python} AisleDrift.angular_mse_math` angular mean squared error on recorded centerline states. On the mobile manipulator's aisle, the navigation stack's admitted motion with that fixed heading drifts linearly and reaches the `{python} AisleDrift.clearance_str` side clearance after `{python} AisleDrift.t_impact_str` at the `{python} AisleDrift.v_str` aisle speed. The example concerns the navigation stack, not the latch policy under evaluation." fig-alt="Two-panel aisle example. Left: recorded-state replay scores a constant one-degree heading offset with angular mean squared error 3.05 times 10 to the minus four radians squared and resets the next input to the recorded centerline. Right: if that heading persists in a physical rollout at 1.3 meters per second, lateral drift grows linearly and reaches the 15-centimeter side clearance after about 6.6 seconds, 8.6 meters along the aisle. Policy proposals pass through the permission path before the plant moves."}
+::: {#fig-07-open-vs-closed-loop fig-env="figure" fig-pos="t" fig-cap="**Open versus closed loop divergence**: A persistent $1.0^\circ$ heading offset gives `{python} AisleDrift.angular_mse_math` angular mean squared error on recorded centerline states. On the mobile manipulator's aisle, the navigation stack's admitted motion with that fixed heading drifts linearly and reaches the `{python} AisleDrift.clearance_str` side clearance after `{python} AisleDrift.t_impact_str` at the `{python} AisleDrift.v_str` drive limit. The example concerns the navigation stack, not the latch policy under evaluation." fig-alt="Two-panel aisle example. Left: recorded-state replay scores a constant one-degree heading offset with angular mean squared error 3.05 times 10 to the minus four radians squared and resets the next input to the recorded centerline. Right: if that heading persists in a physical rollout at 1.5 meters per second, lateral drift grows linearly and reaches the 15-centimeter side clearance after about 5.7 seconds, 8.6 meters along the aisle. Policy proposals pass through the permission path before the plant moves."}
 
 ```{python}
 #| echo: false
@@ -360,7 +379,7 @@ COLORS = viz.COLORS
 # ┌── 1. LOAD (Scenario parameters) ────────────────────────────────────────────
 HEADING_OFFSET_DEG = AisleDrift.heading_offset_deg  # category: illustrative; from the LEGO cell
 CLEARANCE_M = AisleDrift.clearance.to(ureg.meter).magnitude  # category: illustrative; AISLE.side_clearance
-SPEED_MS = AisleDrift.v.to(ureg.meter / ureg.second).magnitude  # category: chosen; AISLE.v_aisle
+SPEED_MS = AisleDrift.v.to(ureg.meter / ureg.second).magnitude  # category: illustrative; RM.base.max_velocity (drive limit)
 REACH_M = 10.0  # category: chosen; plot extent, the first third of the aisle
 
 # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────────
@@ -496,16 +515,77 @@ While selecting an appropriate evidence regime clarifies what each test can prov
 
 ## Physical Trial Limits {#sec-evaluation-trial-limits}
 
-A physical trial consumes more than the simulated step or log-replay time. It consumes wall-clock time, stresses mechanical linkages, heats motor windings, and risks physical damage to the hardware. Consider the mobile manipulator qualifying a navigation policy on an illustrative $50\text{ m}$ test-cell course at a nominal $1.0\text{ m/s}$. The active run occupies $50\text{ s}$. Budgeting the trial by active run time ignores the physical mechanics of the test cell:
+```{python}
+#| label: calc-evaluation-door-cycle
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WALL-CLOCK COST OF THE DOOR CAMPAIGN (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-evaluation-trial-limits, @nbk-evaluation-statistical-scaling-high-reliability-assurance,
+# │          @fig-07-confidence-bounds, and @tbl-07-confidence-bounds.
+# │ Show: one door trial's test-cell time (run plus reset) and what the
+# │       opening campaign and a 99.9 percent campaign occupy at that cycle.
+# │ How: T_cycle = t_run + t_reset; T_campaign = n * T_cycle, with n from
+# │      calc_zero_failure_sample_size.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_time, fmt_int, check, MarkdownStr
 
-- *Active Navigation Transit:* $50\text{ m} / 1.0\text{ m/s} = 50\text{ s}$.
-- *Return & Starting Pose Reset:* Autonomous or teleoperated return to initial dock waypoint consumes $120\text{ s}$.
-- *Telemetry Flush & Sensor Re-Zeroing:* Committing high-rate ring buffers to NVMe storage and re-calibrating IMU biases consumes $30\text{ s}$.
-- *Actuator Thermal Rest Window:* Building on the actuator thermal limits established in @sec-body-thermal-duty-cycles, dissipating Joule heating ($I^2 R$) to respect the $80^\circ\text{C}$ insulation ceiling requires $60\text{ s}$.
+class DoorCycle:
+    """Test-cell time per door trial and per zero-failure campaign."""
 
-The true wall-clock cost of one $50\text{ s}$ physical trial is approximately $4.33\text{ minutes}$.[^fn-math-trial-cost] Completing one hundred runs requires over $7.2\text{ hours}$ of continuous test cell occupancy and $14.4\text{ person-hours}$ from two safety operators monitoring manual emergency stops.
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_run = 25.0 * ureg.second  # category: illustrative; drive-in from the standoff, stop, guarded unlatch and swing
+    t_reset = 15.0 * ureg.second  # category: illustrative; re-latch, return to the standoff, telemetry flush
+    n_opening = 20  # category: illustrative; the opening campaign's clean runs
+    confidence = 0.95  # category: chosen; one-sided confidence level
+    p_target = 0.999  # category: chosen; success lower limit the section argues toward
+    n_operators = 2  # category: illustrative; safety operators watching each run
+    table_n = (10, 20, 50, 100, 250, 500, 1000, 2995)  # category: chosen; rows of @tbl-07-confidence-bounds
 
-[^fn-math-trial-cost]: **Physical trial cycle budget**\index{Trial budget!wall-clock cost}: The total duration of a physical trial includes transit, automated docking, telemetry serialization, and thermal rest windows: $T_{\text{trial}} = 50\text{ s} + 120\text{ s} + 30\text{ s} + 60\text{ s} = 260\text{ s} \approx 4.33\text{ minutes}$. In multi-trial qualification campaigns, the overhead of re-zeroing sensors and cooling actuator windings accounts for over 80 percent of total test cell occupancy. Neglecting these reset phases produces unrealistic testing timelines and tempts teams to truncate cooldown intervals, causing thermal non-stationarity across runs.
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_cycle = (t_run + t_reset).to(ureg.second)
+    n_target = calc_zero_failure_sample_size(p_target, confidence=confidence)
+    t_opening = (n_opening * t_cycle).to(minute)
+    t_target = (n_target * t_cycle).to(ureg.hour)
+    t_target_days = t_target.to(ureg.day)
+    t_target_operator = t_target * n_operators
+    shifts_target = (t_target_operator / (8.0 * ureg.hour)).to(ureg.dimensionless).magnitude
+    table_hours = [n * c for n, c in zip(table_n, [t_cycle.to(ureg.hour)] * len(table_n))]  # zip: class scope is not visible inside the comprehension
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    check(abs(t_cycle.to(ureg.second).magnitude - 40.0) < 1e-9, "Door cycle should be 40 s")
+    check(n_target == 2995, "Zero-failure trials for a 99.9 percent lower limit should be 2,995")
+    check(abs(t_opening.to(minute).magnitude - 13.33) < 0.005, "Twenty runs should take about 13.3 min")
+    check(abs(t_target.to(ureg.hour).magnitude - 33.28) < 0.005, "2,995 runs should take about 33.3 h")
+    check(abs(t_target_operator.to(ureg.hour).magnitude - 66.56) < 0.01, "Two operators should spend about 66.6 h")
+    check(8 < shifts_target < 9, "Prose says over eight eight-hour shifts")
+    check(table_n[-1] == n_target, "Last table row must be the 99.9 percent sample size")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    t_run_str = fmt_time(t_run, unit=ureg.second, precision=0)
+    t_reset_str = fmt_time(t_reset, unit=ureg.second, precision=0)
+    t_cycle_str = fmt_time(t_cycle, unit=ureg.second, precision=0)
+    t_opening_str = fmt_time(t_opening, unit=minute, precision=1)
+    t_target_str = fmt_time(t_target, unit=ureg.hour, precision=1)
+    t_target_days_str = fmt_time(t_target_days, unit=ureg.day, precision=1, style="word")
+    t_target_operator_str = fmt_time(t_target_operator, unit=ureg.hour, precision=1)
+    shifts_floor_str = MarkdownStr({8: "eight", 9: "nine"}[int(shifts_target)])
+    n_operators_str = MarkdownStr({2: "two", 3: "three"}[n_operators])
+    h_10_str = fmt_time(table_hours[0], unit=ureg.hour, precision=1)
+    h_20_str = fmt_time(table_hours[1], unit=ureg.hour, precision=1)
+    h_50_str = fmt_time(table_hours[2], unit=ureg.hour, precision=1)
+    h_100_str = fmt_time(table_hours[3], unit=ureg.hour, precision=1)
+    h_250_str = fmt_time(table_hours[4], unit=ureg.hour, precision=1)
+    h_500_str = fmt_time(table_hours[5], unit=ureg.hour, precision=1)
+    h_1000_str = fmt_time(table_hours[6], unit=ureg.hour, precision=1)
+    h_2995_str = fmt_time(table_hours[7], unit=ureg.hour, precision=1)
+```
+
+A physical trial consumes more than the simulated step or log-replay time. It consumes wall-clock time, stresses mechanical linkages, heats motor windings, and risks physical damage to the hardware. The door campaign shows how the cost accumulates. In one run the base drives in from its `{python} EvalMachine.standoff_str` standoff and stops, and the arm then unlatches at the `{python} EvalMachine.v_approach_str` guarded approach and swings the door open, which together occupy `{python} DoorCycle.t_run_str` of the test cell (illustrative). The reset that makes the next run an independent draw re-latches the door, returns the base to its standoff, and flushes the run's telemetry, adding `{python} DoorCycle.t_reset_str` (illustrative), so each trial costs `{python} DoorCycle.t_cycle_str`.[^fn-math-trial-cost] At that cycle the twenty clean runs that opened the chapter took `{python} DoorCycle.t_opening_str`, while the `{python} ClopperPearsonZeroFailure.n_req_999_str` runs a 99.9 percent success lower limit requires would hold the cell for `{python} DoorCycle.t_target_str` of continuous occupancy, before the arm's windings take any thermal rest (@sec-body-thermal-duty-cycles) and before the safety operators watching each run are counted.
+
+[^fn-math-trial-cost]: **Physical trial cycle budget**\index{Trial budget!wall-clock cost}: The duration of a physical trial includes the reset as well as the run, $T_{\text{trial}} = t_{\text{run}} + t_{\text{reset}} =$ `{python} DoorCycle.t_run_str` $+$ `{python} DoorCycle.t_reset_str` $=$ `{python} DoorCycle.t_cycle_str` for the door. Budgeting by active run time alone produces unrealistic testing timelines and tempts teams to truncate reset and cooldown intervals, which causes thermal non-stationarity across runs.
 
 The physical plant changes while these trials accumulate. Statistical evaluation assumes that repeated trials are independent and identically distributed draws from a stationary data-generating process. On physical machinery, mechanical wear can violate stationarity. Repeated runs can change gearhead backlash, wheel radius, and tire friction; the rate and magnitude require measurement on the test hardware. Structural joints loosen, damping characteristics change, and motor commutator brushes abrade. If monitored hardware parameters shift during a long campaign, the policy may encounter a different plant than in the first trial. Pooling results across one thousand trials treats a nonstationary progression of degrading hardware states as if it were a repeated test of a single invariant machine. Early successes do not guarantee that the worn machine can execute the same trajectory, and late failures often reflect physical degradation rather than an algorithmic deficiency.
 
@@ -543,7 +623,7 @@ The mismatch between physical trial budgets and rare-event claims makes the choi
 
 For this zero-failure worked example, we choose the exact one-sided Clopper-Pearson method\index{Clopper-Pearson method} [@clopper1934use]. Inverting this binomial limit gives the minimum iid zero-failure trial count needed for a specified success lower confidence limit.[^fn-math-required-trials]
 
-[^fn-math-required-trials]: **Required zero-failure sample bound**\index{Clopper-Pearson method!sample size bound}: Inverting the cumulative binomial relation $(p_{\text{target}})^n \le \alpha$ determines the minimum number of consecutive zero-failure trials required to establish a one-sided success lower limit at confidence level $1-\alpha$: $n = \lceil \ln\alpha / \ln p_{\text{target}} \rceil$. Establishing a 99.9 percent one-sided success lower limit ($p_{\text{target}} = 0.999$) at 95 percent confidence requires $n = 2{,}995$ consecutive error-free runs. At $260\text{ s}$ per trial, this example occupies $216.3\text{ h}$ of test-cell time.
+[^fn-math-required-trials]: **Required zero-failure sample bound**\index{Clopper-Pearson method!sample size bound}: Inverting the cumulative binomial relation $(p_{\text{target}})^n \le \alpha$ determines the minimum number of consecutive zero-failure trials required to establish a one-sided success lower limit at confidence level $1-\alpha$: $n = \lceil \ln\alpha / \ln p_{\text{target}} \rceil$. Establishing a 99.9 percent one-sided success lower limit ($p_{\text{target}} = 0.999$) at 95 percent confidence requires $n = 2{,}995$ consecutive error-free runs. At the door's `{python} DoorCycle.t_cycle_str` cycle, this campaign occupies `{python} DoorCycle.t_target_str` of test-cell time.
 
 ::: {#dfn-evaluation-empirical-safety-margin .callout-definition title="Empirical physical safety margin"}
 
@@ -557,11 +637,11 @@ $$p_{\text{lower}} = \alpha^{1/n} \quad (\text{for zero observed failures at con
 :::
 
 ::: {#nbk-evaluation-statistical-scaling-high-reliability-assurance .callout-notebook title="Statistical scaling of assurance"}
-**Problem**: Suppose an evaluation target calls for a one-sided $P_{99.9}$ success lower limit ($p_{\text{target}} = 0.999$) at 95 percent confidence ($\alpha = 0.05$). If each physical trial requires $T_{\text{trial}} = 260\text{ s}$, how many zero-failure runs and how much wall-clock testing time are required?
+**Problem**: Suppose an evaluation target calls for a one-sided $P_{99.9}$ success lower limit ($p_{\text{target}} = 0.999$) at 95 percent confidence ($\alpha = 0.05$). If each door trial requires $T_{\text{trial}} =$ `{python} DoorCycle.t_cycle_str`, how many zero-failure runs and how much wall-clock testing time are required?
 
-**Calculations**: Using the Clopper-Pearson bound formula, meeting this statistical target after zero failures requires $n = \lceil\ln(0.05)/\ln(0.999)\rceil = 2{,}995$ consecutive zero-failure trials. At $260\text{ s}$ per trial, this demands $T_{\text{total}} = 2{,}995 \times 260\text{ s} \approx 216.31\text{ hours}$ ($9.01\text{ days}$) of continuous testing. With a 2-operator safety protocol, this consumes $216.31 \times 2 \approx 432.6$ operator hours, or over $54$ eight-hour shifts.
+**Calculations**: Using the Clopper-Pearson bound formula, meeting this statistical target after zero failures requires $n = \lceil\ln(0.05)/\ln(0.999)\rceil = 2{,}995$ consecutive zero-failure trials. At `{python} DoorCycle.t_cycle_str` per trial, this demands $T_{\text{total}} =$ `{python} ClopperPearsonZeroFailure.n_req_999_str` $\times$ `{python} DoorCycle.t_cycle_str` $\approx$ `{python} DoorCycle.t_target_str` (`{python} DoorCycle.t_target_days_str`) of continuous testing. With a `{python} DoorCycle.n_operators_str`-operator safety protocol, this consumes `{python} DoorCycle.t_target_operator_str` of operator time, or over `{python} DoorCycle.shifts_floor_str` eight-hour shifts.
 
-**Systems insight**: Establishing a 99.9 percent one-sided success lower confidence limit by this method requires nearly $3{,}000$ iid zero-failure trials and over nine continuous 24-hour days of test cell occupancy. The campaign must track wear and recalibration throughout; a component replacement or changing dynamics may require a new population definition rather than pooling incompatible runs.
+**Systems insight**: Establishing a 99.9 percent one-sided success lower confidence limit by this method requires nearly $3{,}000$ iid zero-failure trials. Even on a cycle as short as the door's, that is `{python} DoorCycle.t_target_days_str` of continuous test-cell occupancy, and a task with a longer cycle scales the occupancy in proportion. The campaign must track wear and recalibration throughout; a component replacement or changing dynamics may require a new population definition rather than pooling incompatible runs.
 :::
 
 ```{python}
@@ -691,7 +771,7 @@ from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt_int, fmt_length, fmt_velocity, fmt_time, fmt_math, sci_latex, fmt, check
 
-AISLE = Embodied.Scenario.WarehouseAisle
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 
 class MtbfCampaign:
     """Zero-failure mission campaign that bounds a 1e-4 per hour rate on one machine."""
@@ -699,7 +779,7 @@ class MtbfCampaign:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     confidence = 0.95  # category: chosen; one-sided confidence level
     rate = 1e-4 / ureg.hour  # category: chosen; teaching target (MTBF 10,000 h)
-    v = AISLE.v_aisle  # category: chosen; aisle speed
+    v = RM.base.max_velocity  # category: illustrative; drive limit
     t_mission = 360.0 * ureg.second  # category: illustrative; one retrieval mission
     t_reset = 120.0 * ureg.second  # category: illustrative; dock recharge and telemetry reset
     d_wheel = 0.20 * ureg.meter  # category: illustrative; drive-wheel diameter
@@ -717,12 +797,13 @@ class MtbfCampaign:
     rev_ratio = n_rev / l10_rev
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
-    check(abs(v.to(ureg.meter / ureg.second).magnitude - 1.3) < 1e-9, "Aisle speed is not 1.3 m/s")
+    check(abs(v.to(ureg.meter / ureg.second).magnitude - 1.5) < 1e-9, "Drive limit is not 1.5 m/s")
     check(abs(t_continuous.to(ureg.hour).magnitude - 29957) < 1, "Continuous exposure should be about 29,957 h")
     check(abs(n_req - 299572) < 2, "Zero-failure missions should be about 299,572")
     check(abs(t_calendar.to(ureg.hour).magnitude - 39943) < 1, "Calendar time should be about 39,943 h")
-    check(abs(d_mission.to(ureg.meter).magnitude - 468) < 1e-6, "Mission distance should be 468 m")
-    check(abs(n_rev - 2.23e8) < 0.01e8, "Wheel revolutions should be about 2.23e8")
+    check(abs(d_mission.to(ureg.meter).magnitude - 540) < 1e-6, "Mission distance should be 540 m")
+    check(abs(n_rev - 2.57e8) < 0.01e8, "Wheel revolutions should be about 2.57e8")
+    check(abs(rev_ratio - 5.15) < 0.005, "Wheel total should be about 5.15 times the L10 rating")
     check(rev_ratio > 4, "Prose says the wheel total exceeds the L10 rating several times over")
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
@@ -742,13 +823,16 @@ class MtbfCampaign:
     t_mission_h_str = fmt_time(t_mission, unit=ureg.hour, precision=2)
 ```
 
-Consider the warehouse mobile manipulator under a site requirement of a critical failure rate $\lambda \le 1.0\times 10^{-4}\text{ failures/hour}$ (Mean Time Between Critical Failures $\text{MTBF} \ge 10{,}000\text{ hours}$) at 95 percent statistical confidence ($\alpha = 0.05$). Each retrieval mission takes $t_{\text{mission}} =$ `{python} MtbfCampaign.t_mission_str` (`{python} MtbfCampaign.t_mission_h_str`) and covers `{python} MtbfCampaign.d_mission_str` at the `{python} MtbfCampaign.v_str` aisle speed. Automated dock recharge and telemetry reset add $t_{\text{reset}} =$ `{python} MtbfCampaign.t_reset_str`, for `{python} MtbfCampaign.t_cycle_str` per trial cycle. The drive-wheel diameter is $D_{\text{wheel}} =$ `{python} MtbfCampaign.d_wheel_str`, and the drive gearhead carries an illustrative $L_{10}$ bearing fatigue rating of $5.0\times 10^7\text{ revolutions}$.
+Consider the warehouse mobile manipulator under a site requirement of a critical failure rate $\lambda \le 1.0\times 10^{-4}\text{ failures/hour}$ (Mean Time Between Critical Failures $\text{MTBF} \ge 10{,}000\text{ hours}$) at 95 percent statistical confidence ($\alpha = 0.05$). Each retrieval mission takes $t_{\text{mission}} =$ `{python} MtbfCampaign.t_mission_str` (`{python} MtbfCampaign.t_mission_h_str`) and covers `{python} MtbfCampaign.d_mission_str` at the `{python} MtbfCampaign.v_str` drive limit. Automated dock recharge and telemetry reset add $t_{\text{reset}} =$ `{python} MtbfCampaign.t_reset_str`, for `{python} MtbfCampaign.t_cycle_str` per trial cycle. The drive-wheel diameter is $D_{\text{wheel}} =$ `{python} MtbfCampaign.d_wheel_str`, and the drive gearhead carries an illustrative $L_{10}$ bearing fatigue rating of $5.0\times 10^7\text{ revolutions}$.
 
 Under continuous Poisson arrivals, certifying failure rate $\lambda$ at confidence $1-\alpha$ without observing any failures demands continuous exposure time $T_{\text{continuous}} = -\ln(\alpha)/\lambda$, which at this target is `{python} MtbfCampaign.t_continuous_str` hours (`{python} MtbfCampaign.yr_continuous_str` years). Discretizing this requirement into missions with per-trial failure budget $p_{\text{fail}} \le \lambda \cdot t_{\text{mission}} = 1.0\times 10^{-5}$ ($p_{\text{target,success}} \ge 0.99999$) requires $N_{\text{req}} = \ln(\alpha)/\ln(p_{\text{target,success}})$, or `{python} MtbfCampaign.n_req_str` consecutive zero-failure trials. On a single physical rig, executing these trials at `{python} MtbfCampaign.t_cycle_str` per cycle consumes `{python} MtbfCampaign.t_calendar_str` hours (`{python} MtbfCampaign.yr_calendar_str` years) and accumulates $N_{\text{rev}} = (N_{\text{req}} \cdot v \cdot t_{\text{mission}}) / (\pi D_{\text{wheel}}) \approx$ `{python} MtbfCampaign.n_rev_math` wheel revolutions. The wheel-rotation total is `{python} MtbfCampaign.rev_ratio_str` times that rating, but the comparison holds only after the drivetrain ratio maps wheel revolutions to bearing revolutions, and $L_{10}$ is a population-life statistic at specified load and speed, not a destruction deadline. A campaign of this length must therefore plan maintenance and component replacement, and record each one, before it may pool trials.
 
 The $N_{\text{req}}$ above is the zero-failure case of the one-sided Clopper-Pearson bound, whose success lower limit rises only as $\alpha^{1/n}$ with trial count $n$. At practical budgets of tens or thousands of runs, that limit stays far below the high-assurance targets a release requires (@fig-07-confidence-bounds).
 
-::: {#fig-07-confidence-bounds fig-env="figure" fig-pos="t" fig-cap="**Confidence bounds and testing budgets**: One-sided Clopper-Pearson success lower limits after zero failures at 90, 95, and 99 percent confidence. At 95 percent confidence, 20 iid runs give an 86.1 percent success lower limit and a 13.9 percent failure upper limit under the tested distribution. Reaching a 99.9 percent success lower limit requires 2,995 zero-failure draws under the same assumptions, or 216.3 hours at the 260-second cycle." fig-alt="Success lower confidence limits rise with zero-failure trial count. The 95 percent curve is 86.1 percent at 20 trials and 99.9 percent at 2,995 trials; its complementary failure upper limits are 13.9 and 0.1 percent. A separate test-time scale uses 260 seconds per run."}
+<!-- fig-alt below hand-types the door-cycle values because fig-alt cannot hold inline python. Keep them in sync:
+     "33.3 hours" = DoorCycle.t_target_str; "40 seconds" = DoorCycle.t_cycle_str (guards in calc-evaluation-door-cycle). -->
+
+::: {#fig-07-confidence-bounds fig-env="figure" fig-pos="t" fig-cap="**Confidence bounds and testing budgets**: One-sided Clopper-Pearson success lower limits after zero failures at 90, 95, and 99 percent confidence. At 95 percent confidence, 20 iid runs give an 86.1 percent success lower limit and a 13.9 percent failure upper limit under the tested distribution. Reaching a 99.9 percent success lower limit requires 2,995 zero-failure draws under the same assumptions, or `{python} DoorCycle.t_target_str` at the `{python} DoorCycle.t_cycle_str` door cycle." fig-alt="Success lower confidence limits rise with zero-failure trial count. The 95 percent curve is 86.1 percent at 20 trials and 99.9 percent at 2,995 trials; its complementary failure upper limits are 13.9 and 0.1 percent. The 2,995-trial annotation converts to 33.3 hours at 40 seconds per door run."}
 
 ```{python}
 #| echo: false
@@ -767,7 +851,7 @@ fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 4.2))
 # ┌── 1. LOAD (Scenario parameters) ────────────────────────────────────────────
 CONFIDENCES = (0.90, 0.95, 0.99)  # category: chosen; plotted confidence levels
 TARGET = 0.999  # category: chosen; the success lower limit the chapter argues toward
-CYCLE_SECONDS = 260.0  # category: illustrative; physical cycle time per trial
+CYCLE_SECONDS = DoorCycle.t_cycle.to(ureg.second).magnitude  # category: illustrative; door cycle from calc-evaluation-door-cycle
 REFERENCE_CONFIDENCE = 0.95  # category: chosen; the level both annotations read off
 
 # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────────
@@ -813,18 +897,18 @@ plt.show()
 
 Even 1,000 zero-failure runs leave the 95 percent lower limit short of a 99.9 percent target (@tbl-07-confidence-bounds).
 
-| Zero-failure trials $n$ | 90% lower success limit | 95% lower success limit | 99% lower success limit | 95% upper failure limit | Test time at 260 s/run | Interpretation under iid test draws                |
-|:------------------------|------------------------:|------------------------:|------------------------:|------------------------:|-----------------------:|:---------------------------------------------------|
-| 10                      |                  79.43% |                  74.11% |                  63.10% |                  25.89% |                  0.7 h | Wide uncertainty; no observed failures             |
-| 20                      |                  89.13% |                  86.09% |                  79.43% |                  13.91% |                  1.4 h | Bound applies only to the sampled distribution     |
-| 50                      |                  95.50% |                  94.18% |                  91.20% |                   5.82% |                  3.6 h | More evidence; untested conditions remain          |
-| 100                     |                  97.72% |                  97.05% |                  95.50% |                   2.95% |                  7.2 h | No deployment permission follows from the interval |
-| 250                     |                  99.08% |                  98.81% |                  98.17% |                   1.19% |                 18.1 h | Check hardware and sampling stationarity           |
-| 500                     |                  99.54% |                  99.40% |                  99.08% |                   0.60% |                 36.1 h | Bound remains tied to declared conditions          |
-| 1,000                   |                  99.77% |                  99.70% |                  99.54% |                   0.30% |                 72.2 h | Below a 99.9% lower-limit target                   |
-| 2,995                   |                  99.92% |                  99.90% |                  99.85% |                   0.10% |                216.3 h | Meets that statistical target if assumptions hold  |
+| Zero-failure trials $n$ | 90% lower success limit | 95% lower success limit | 99% lower success limit | 95% upper failure limit |         Test time at door cycle | Interpretation under iid test draws                |
+|:------------------------|------------------------:|------------------------:|------------------------:|------------------------:|--------------------------------:|:---------------------------------------------------|
+| 10                      |                  79.43% |                  74.11% |                  63.10% |                  25.89% |   `{python} DoorCycle.h_10_str` | Wide uncertainty; no observed failures             |
+| 20                      |                  89.13% |                  86.09% |                  79.43% |                  13.91% |   `{python} DoorCycle.h_20_str` | Bound applies only to the sampled distribution     |
+| 50                      |                  95.50% |                  94.18% |                  91.20% |                   5.82% |   `{python} DoorCycle.h_50_str` | More evidence; untested conditions remain          |
+| 100                     |                  97.72% |                  97.05% |                  95.50% |                   2.95% |  `{python} DoorCycle.h_100_str` | No deployment permission follows from the interval |
+| 250                     |                  99.08% |                  98.81% |                  98.17% |                   1.19% |  `{python} DoorCycle.h_250_str` | Check hardware and sampling stationarity           |
+| 500                     |                  99.54% |                  99.40% |                  99.08% |                   0.60% |  `{python} DoorCycle.h_500_str` | Bound remains tied to declared conditions          |
+| 1,000                   |                  99.77% |                  99.70% |                  99.54% |                   0.30% | `{python} DoorCycle.h_1000_str` | Below a 99.9% lower-limit target                   |
+| 2,995                   |                  99.92% |                  99.90% |                  99.85% |                   0.10% | `{python} DoorCycle.h_2995_str` | Meets that statistical target if assumptions hold  |
 
-: **One-sided binomial confidence limits after zero failures**: Success lower limits are $\alpha^{1/n}$ and the corresponding failure upper limit is $1-0.05^{1/n}$. Test times use the 260-second cycle. {#tbl-07-confidence-bounds tbl-colwidths="[11,12,12,12,13,12,28]"}
+: **One-sided binomial confidence limits after zero failures**: Success lower limits are $\alpha^{1/n}$ and the corresponding failure upper limit is $1-0.05^{1/n}$. Test times use the `{python} DoorCycle.t_cycle_str` door cycle. {#tbl-07-confidence-bounds tbl-colwidths="[11,12,12,12,13,12,28]"}
 
 These physical and statistical ceilings force an unavoidable architectural conclusion: physical AI safety cannot rest on statistical confidence in unconstrained model weights. When the exposure required to validate an autonomous policy cannot be purchased through physical testing because of wall-clock time, mechanical wear, and safety hazards, systems engineering mandates two foundational strategies:
 
@@ -970,7 +1054,7 @@ The statistical specification defines the point estimator, confidence method, no
 
 Consider the twenty-run door campaign that opened this chapter. The latch policy opened the cage door twenty times from the `{python} EvalMachine.standoff_str` standoff at the `{python} EvalMachine.v_approach_str` guarded approach, with the base stopped and no supervisor intervention. Rather than applying the degenerate Wald interval $[1.0, 1.0]$, an engineer audits this record against the exact Clopper-Pearson bounds established in @sec-evaluation-trial-limits and tabulated in @tbl-07-confidence-bounds, confirming a 95 percent lower confidence bound of $p_{\text{lower}} \approx$ `{python} ClopperPearsonZeroFailure.p_lower_pct_str` percent.
 
-The completed record exposes the structural limits of the claim. As derived in @tbl-07-confidence-bounds, `{python} ClopperPearsonZeroFailure.failure_upper_pct_str` percent is the one-sided upper confidence limit on failure probability under the tested iid distribution. The coverage gap catalog then names two gaps the campaign inherited rather than closed. The strike plate sat at its nominal position in every run, so the twenty clean runs never displaced the plate, and the displaced-plate cells that held zero demonstrations in @sec-data-failure-modes hold zero trials as well. The base also carried nothing in its `{python} EvalMachine.rack_capacity_str` tote rack, so the record says nothing about the loaded machine. The record shows why twenty successful runs cannot support a high-reliability claim, and it gives a fixed basis for refusing any assertion that the policy is ready for unmonitored deployment.
+The completed record exposes the structural limits of the claim, and it shows how far the evidence narrowed on its way through Part II. The scenario ledger of @sec-data-failure-modes crossed `{python} EvalMachine.n_plate_positions_str` strike-plate positions with `{python} EvalMachine.n_speeds_str` approach speeds, `{python} EvalMachine.n_cells_str` cells in all, and the retained demonstrations supported `{python} EvalMachine.n_supported_str`, the nominal plate at the guarded approach. The policy manifest made that cell the declared ODD of `latch-bc-01`, the target ODD took in the whole cell, the twenty clean runs were drawn from it, and they bound the failure probability there at `{python} ClopperPearsonZeroFailure.failure_upper_pct_str` percent, the one-sided upper confidence limit under the tested iid distribution (@tbl-07-confidence-bounds). Everything that narrowing left out enters the coverage gap catalog as a gap the campaign inherited rather than closed. The `{python} EvalMachine.n_absences_str` cells that held zero demonstrations hold zero trials as well, and the catalog inherits the manifest's omission log, whose `{python} EvalMachine.n_omissions_str` unclosed simulator omissions, the soft penalty contact and the missing transport lag, bar this record from being reused for any checkpoint refined in simulation. The trials add a gap of their own, because the base carried nothing in its `{python} EvalMachine.rack_capacity_str` tote rack, so the record says nothing about the loaded machine. The record shows why twenty successful runs cannot support a high-reliability claim, and it gives a fixed basis for refusing any assertion that the policy is ready for unmonitored deployment.
 
 An evaluation record does not certify that an autonomous machine is safe. It establishes the empirical boundaries and statistical uncertainty of a single learned component operating under controlled conditions. In @sec-verification, the verification argument ingests these evaluation records as formal evidence nodes, combining policy bounds with evidence for the physical guardrails and the permission path's latencies to evaluate whether the integrated machine satisfies its operational safety case.
 

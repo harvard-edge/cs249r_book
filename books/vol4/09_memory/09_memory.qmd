@@ -430,18 +430,19 @@ When direct sensing fails, a physical AI system uses an internal transition mode
 # │ RACK-END BELIEF THROUGH OCCLUSION
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-memory-belief-through-occlusion (rack-end belief expiry and
-# │          the walking-person ceiling), @sec-memory-rate-belief-decay (worked
+# │          the walking-person term), @sec-memory-rate-belief-decay (worked
 # │          roots), @sec-memory-summary (expiry is physical).
 # │
 # │ Goal:    Show that memory cannot certify an occluded rack end as clear, so
 # │          the stopping budget protects only a static obstacle.
 # │ Show:    belief expiry against the navigation camera's frame period and
 # │          observation age; the running total memory leaves unchanged; the
-# │          walking-person speed ceiling.
+# │          walking-person term at the drive limit against the clear distance.
 # │ How:     Linear growth e(t) = delta_loc + v_h t against delta_margin; the
 # │          running total from the RM/AISLE terms at the drive limit; the
-# │          ceiling as the positive root of the finished budget (C2 stop,
-# │          all three overheads) plus v_h (tau_delay + T_stop).
+# │          walking term v_h (tau_delay + v / a_brake) for a constant-
+# │          deceleration stop at the drive limit (the C2 suffix is Ch11's, and
+# │          the speed ceiling this term implies is computed in Ch12).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
@@ -459,7 +460,6 @@ class RackEndBelief:
     v_drive = RM.base.max_velocity  # category: illustrative (drive limit)
     a_brake = AISLE.a_brake  # category: illustrative (credible deceleration)
     tau_delay = AISLE.tau_delay  # category: derived (total pre-brake delay)
-    overhead = AISLE.fixed_overhead  # category: derived (delta_loc + delta_margin + eps_track)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
     t_exp = ((delta_margin - delta_loc) / v_h).to(millisecond)
@@ -474,17 +474,11 @@ class RackEndBelief:
         delta_margin,
     ).to(ureg.millimeter)
 
-    # walking person: v tau + d_stop(v) + v_h (tau + T_stop(v)) + overhead = d_clear.
-    # The C2 suffix has d_stop proportional to v^2 and T_stop proportional to v,
-    # so evaluating it at unit speed yields the quadratic's coefficients.
-    v_unit = 1.0 * ureg.meter / ureg.second
-    stop_unit = calc_c2_stop_suffix(v_unit, a_brake)
-    qa = stop_unit["distance"] / v_unit**2
-    qb = tau_delay + v_h * stop_unit["duration"] / v_unit
-    qc = v_h * tau_delay - (d_clear - overhead)
-    v_walk = ((-qb + (qb**2 - 4 * qa * qc) ** 0.5) / (2 * qa)).to(ureg.meter / ureg.second)
-    stop_walk = calc_c2_stop_suffix(v_walk, a_brake)
-    d_walk = (v_walk * tau_delay + stop_walk["distance"] + v_h * (tau_delay + stop_walk["duration"]) + overhead).to(ureg.meter)
+    # walking person: a person approaching at v_h for the whole stop adds
+    # v_h (tau_delay + T_stop); at the drive limit with a constant-deceleration
+    # stop, T_stop = v / a_brake.
+    t_stop_const = (v_drive / a_brake).to(ureg.second)
+    d_walk_term = (v_h * (tau_delay + t_stop_const)).to(ureg.meter)
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(t_exp.to(millisecond).magnitude - 31.25) < 1e-9, f"Rack-end belief expiry should be 31.25 ms, got {t_exp}.")
@@ -492,10 +486,8 @@ class RackEndBelief:
     check(t_exp < t_age, "The belief must expire before perception dispatches its supporting frame.")
     check(abs(t_age.to(millisecond).magnitude - 51.6) < 1e-9, f"Observation age should be 51.6 ms, got {t_age}.")
     check(abs(running_total.to(ureg.millimeter).magnitude - 912.9) < 5e-3, f"Running total after Ch8 should be 912.9 mm, got {running_total}.")
-    check(abs(v_walk.to(ureg.meter / ureg.second).magnitude - 0.4620) < 5e-5, f"Walking-person ceiling should be 0.462 m/s, got {v_walk}.")
-    check(
-        abs((d_walk - d_clear).to(ureg.millimeter).magnitude) < 1e-6, "At the walking-person ceiling the budget must fill the clear distance exactly."
-    )
+    check(abs(d_walk_term.to(ureg.meter).magnitude - 1.41) < 5e-3, f"Walking term at the drive limit should be 1.41 m, got {d_walk_term}.")
+    check(d_walk_term > d_clear, "The walking term alone must exceed the rack-end clear distance.")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
     delta_loc_str = fmt_length(delta_loc, unit=ureg.millimeter, precision=0)
@@ -506,7 +498,8 @@ class RackEndBelief:
     frame_period_str = fmt_latency(frame_period, unit=millisecond, precision=1)
     t_age_str = fmt_latency(t_age, unit=millisecond, precision=1)
     running_total_str = fmt_length(running_total, unit=ureg.millimeter, precision=1)
-    v_walk_str = fmt_velocity(v_walk, precision=2)
+    v_drive_str = fmt_velocity(v_drive, precision=1)
+    d_walk_term_str = fmt_length(d_walk_term, unit=ureg.meter, precision=2)
 ```
 
 This distinction becomes critical at the end of a rack. The warehouse mobile manipulator drives its aisle toward a rack end, where a person can step out into the illustrative `{python} RackEndBelief.d_clear_str` clear distance $D_{\text{clear}}$ that the stopping budget defends. As the base closes on the rack end, the rack itself hides the cross aisle from the navigation camera. Whatever the camera last saw past the rack end now survives only in memory, and the question is how long that record may vouch that the cross aisle is still empty.
@@ -519,7 +512,7 @@ At the rack end the terms are the machine's own. The initial error is the locali
 
 Nothing in the software marks the moment of expiry. The map still shows the cross aisle free, and the estimator still publishes a well-formed record, yet the prediction has stopped functioning as evidence. Memory therefore cannot certify an occluded rack end as clear, nor can the frame that feeds it, and the region stays unknown. The stopping budget protects a static obstacle at $D_{\text{clear}}$, a person who has already stepped out or a dropped tote, and memory adds a deadline to that budget but no distance. The running total at the drive limit stays at the `{python} RackEndBelief.running_total_str` that @sec-perception-transduction-calibration left.
 
-A person who keeps walking toward the machine during the whole stop is a different obstacle. A safety-distance calculation counts that approach as $v_h(\tau_{\text{delay}} + T_{\text{stop}})$, the walking speed applied over the entire time from detection to standstill. With that term added to the finished budget of @sec-enforcement-stopping-envelopes, the machine could not exceed `{python} RackEndBelief.v_walk_str` at this rack end. The site handles the approaching person with a crossing rule instead, a floor-marked crossing plus a rack-end presence sensor (both chosen), and @sec-frontier-residual-claims-register records the premise the rule rests on. Whatever the speed, the permission path must refuse any proposal whose clearance relies on remembered emptiness past the belief's deadline.
+A person who keeps walking toward the machine during the whole stop is a different obstacle. A safety-distance calculation counts that approach as $v_h(\tau_{\text{delay}} + T_{\text{stop}})$, the walking speed applied over the entire time from detection to standstill. At the `{python} RackEndBelief.v_drive_str` drive limit, where a constant-deceleration stop lasts $T_{\text{stop}} = v/a_{\text{brake}}$, that term alone comes to `{python} RackEndBelief.d_walk_term_str`, more than the entire `{python} RackEndBelief.d_clear_str` clear distance before any other distance in the budget is counted. The site therefore handles the approaching person with a crossing rule that site operations owns, a floor-marked crossing and a rack-end presence sensor. @Sec-frontier-residual-claims-register records the premise the rule rests on. Whatever crossing rule the site adopts, the permission path must refuse any proposal whose clearance relies on remembered emptiness past the belief's deadline.
 
 ::: {#dfn-memory-belief-invalidation-horizon .callout-definition title="Belief state invalidation horizon"}
 
@@ -557,11 +550,93 @@ The stochastic model behind that propagation separates three mechanisms of decay
 
 [^fn-math-nonsmooth-contact]: **Non-smooth contact dynamics**\index{Dynamics!non-smooth contact}: Physical surface contact introduces set-valued Coulomb friction and non-smooth stick-slip transitions that break linear covariance propagation models. Transitioning between stick and slip modes injects discontinuous velocity steps that invalidate continuous kinematic drift bounds. Managing these contact regime transitions requires hybrid state estimators that switch between distinct error growth matrices upon detecting normal force thresholds.
 
-Consider the mobile manipulator's arm guiding a gripper finger into the latch-release slot of the spring-latched cage door. In the final approach the finger hides the slot from the wrist camera, and the finger must stay within $E_{\max} = 1.0\text{ mm}$ of the slot's centerline (@fig-uncertainty-growth). Assume illustrative bounds within the arm's validated operating region: initial position error at most $E_0 = 0.1\text{ mm}$, unobserved velocity error at most $v_{\text{drift}} = 12.0\text{ mm/s}$, and acceleration disturbance at most $a_{\text{dist}} = 50\text{ mm/s}^2$. Position error then follows the growth law of @eq-mem-occlusion-expansion.
+```{python}
+#| label: calc-memory-latch-slot-belief
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LATCH-SLOT FINGER BELIEF
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-memory-rate-belief-decay (quadratic root, tightened slot,
+# │          constant-velocity overrun), @fig-uncertainty-growth (plot inputs),
+# │          @sec-memory-spatial-state-schema (the filled belief record).
+# │
+# │ Goal:    Show that unmodeled forces shorten a belief's life faster than
+# │          tolerance shrinks, and fill the chapter's belief record on the
+# │          machine's own arm.
+# │ Show:    the invalidation horizon of the finger in the latch-release slot;
+# │          the horizon for a tighter slot; what a constant-velocity estimator
+# │          would admit; the clock-conversion bound the record carries.
+# │ How:     E(t) = E0 + v_drift t + a_dist t^2 / 2; each horizon is the
+# │          positive root of E(t) = E_max.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.fmt import fmt_math, fmt_magnitude, fmt_qty_int
 
-Evaluating this growth bound with the stated parameters yields $E(\Delta t) = 0.1 + 12.0 \Delta t + 25.0 (\Delta t)^2$, with $\Delta t$ in seconds and $E(\Delta t)$ in millimeters. Setting $E(\Delta t) = E_{\max} = 1.0\text{ mm}$ gives the quadratic equation $25.0 (\Delta t)^2 + 12.0 \Delta t - 0.9 = 0$. The single positive real root gives $\Delta t = 0.066\text{ s}$ ($66\text{ ms}$), so a proposal depending on this belief must expire by $66\text{ ms}$. If the slot were machined to a clearance of $E_{\max} = 0.30\text{ mm}$, the allowable unobserved duration shrinks to $\Delta t \approx 16.1\text{ ms}$ ($25.0 (\Delta t)^2 + 12.0 \Delta t - 0.20 = 0$). Tightening mechanical tolerance by $3.3\times$ shrinks the allowable unobserved duration by $4.1\times$, requiring sensor re-acquisition or compliant impedance holding within that shorter window. In contrast, if an estimator naively assumes constant velocity ($a_{\text{dist}} = 0$), it predicts a valid horizon of $\Delta t_{\text{linear}} = 0.90 / 12.0 = 75\text{ ms}$. At $\Delta t = 75\text{ ms}$, the modeled bound reaches $E(0.075) = 1.141\text{ mm}$, exceeding the clearance by 14.1 percent. A constant-velocity-only admission rule would keep accepting the estimate for 9 ms beyond the bounded-model deadline; whether contact occurs depends on the path and geometry.
+class LatchSlotBelief:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
+    e0 = 0.1 * ureg.millimeter  # category: illustrative (initial error at the wrist capture)
+    v_drift = 12.0 * ureg.millimeter / ureg.second  # category: illustrative (unobserved velocity error bound)
+    a_dist = 50.0 * ureg.millimeter / ureg.second**2  # category: illustrative (disturbance acceleration bound)
+    e_max = 1.0 * ureg.millimeter  # category: illustrative (latch-release slot tolerance)
+    e_max_tight = 0.30 * ureg.millimeter  # category: illustrative (tighter machined slot)
+    eps_sync = 0.2 * millisecond  # category: illustrative (clock-conversion bound, @sec-perception-observation-contract)
 
-::: {#fig-uncertainty-growth fig-env="figure" fig-pos="t" fig-cap="**Belief uncertainty and invalidation horizon**: Spatial error bound $E(\\Delta t)$ of a gripper finger entering the cage door's latch-release slot, expanding quadratically under unobserved forward propagation until intersecting the slot clearance $E_{\\max} = 1.0\\text{ mm}$ at invalidation horizon $t_{\\text{exp}} = 66\\text{ ms}$. A lower lifecycle timeline marks transitions from valid through degraded to expired operational regimes. Belief has a shelf life governed by physical disturbance dynamics; sensor re-acquisition resets the evidence clock, whereas republishing cached matrices conceals physical drift." fig-alt="Belief uncertainty growth and invalidation horizon plot. Spatial error bound E(Δt) plotted against elapsed time Δt since last measurement. The quadratic curve expands from E0 = 0.1 mm to intersect task clearance E_max at invalidation horizon t_exp = 66 ms. Below the time axis, an operational regime bar indicates valid, degraded, and expired intervals."}
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
+    def _root(e0, v, a, e_max):
+        qa, qb, qc = a / 2, v, e0 - e_max
+        return ((-qb + (qb**2 - 4 * qa * qc) ** 0.5) / (2 * qa)).to(millisecond)
+
+    t_exp = _root(e0, v_drift, a_dist, e_max)
+    t_exp_tight = _root(e0, v_drift, a_dist, e_max_tight)
+    tol_ratio = (e_max / e_max_tight).to(ureg.dimensionless).magnitude
+    horizon_ratio = (t_exp / t_exp_tight).to(ureg.dimensionless).magnitude
+    t_linear = ((e_max - e0) / v_drift).to(millisecond)
+    e_linear = (e0 + v_drift * t_linear + a_dist * t_linear**2 / 2).to(ureg.millimeter)
+    overshoot = (e_linear / e_max - 1).to(ureg.dimensionless).magnitude
+    t_extra = (t_linear - t_exp).to(millisecond)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
+    check(abs(t_exp.magnitude - 65.9) < 0.05, f"Latch-slot expiry should be 65.9 ms, got {t_exp}.")
+    check(abs(t_exp_tight.magnitude - 16.1) < 0.05, f"Tight-slot expiry should be 16.1 ms, got {t_exp_tight}.")
+    check(horizon_ratio > tol_ratio, "The horizon must shrink faster than the tolerance.")
+    check(abs(t_linear.magnitude - 75.0) < 1e-9, f"Constant-velocity horizon should be 75 ms, got {t_linear}.")
+    check(abs(e_linear.magnitude - 1.1406) < 1e-3, f"Bound at the constant-velocity horizon should be 1.141 mm, got {e_linear}.")
+    check(t_extra.magnitude > 0, "The constant-velocity rule must admit the belief past its bounded deadline.")
+    check(
+        abs(eps_sync.to(millisecond).magnitude - 0.2) < 1e-9, f"Clock-conversion bound should match the perception contract's 0.2 ms, got {eps_sync}."
+    )
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
+    e0_str = fmt_length(e0, unit=ureg.millimeter, precision=1)
+    v_drift_str = fmt_velocity(v_drift, unit=ureg.millimeter / ureg.second, precision=0)
+    a_dist_str = fmt_acceleration(a_dist, unit=ureg.millimeter / ureg.second**2, precision=0)
+    e_max_str = fmt_length(e_max, unit=ureg.millimeter, precision=0)
+    e_max_tight_str = fmt_length(e_max_tight, unit=ureg.millimeter, precision=2)
+    t_exp_str = fmt_qty_int(t_exp, millisecond)
+    t_exp_tight_str = fmt_latency(t_exp_tight, unit=millisecond, precision=1)
+    tol_ratio_mult_str = fmt_multiple(tol_ratio, precision=1)
+    horizon_ratio_mult_str = fmt_multiple(horizon_ratio, precision=1)
+    t_linear_str = fmt_latency(t_linear, unit=millisecond, precision=0)
+    e_linear_str = fmt_length(e_linear, unit=ureg.millimeter, precision=3)
+    overshoot_str = fmt_percent(overshoot, precision=1, style="prose")
+    t_extra_str = fmt_qty_int(t_extra, millisecond)
+    eps_sync_str = fmt_latency(eps_sync, unit=millisecond, precision=1)
+
+    _e0 = fmt_magnitude(e0, ureg.millimeter, precision=1)
+    _v = fmt_magnitude(v_drift, ureg.millimeter / ureg.second, precision=0)
+    _half_a = fmt_magnitude(a_dist / 2, ureg.millimeter / ureg.second**2, precision=0)
+    _a = fmt_magnitude(a_dist, ureg.millimeter / ureg.second**2, precision=0)
+    growth_math = fmt_math(rf"E(\Delta t) = {_e0} + {_v}\,\Delta t + {_half_a}\,(\Delta t)^2")
+    quad_math = fmt_math(rf"{_half_a}\,(\Delta t)^2 + {_v}\,\Delta t - {fmt_magnitude(e_max - e0, ureg.millimeter, precision=1)} = 0")
+    quad_tight_math = fmt_math(rf"{_half_a}\,(\Delta t)^2 + {_v}\,\Delta t - {fmt_magnitude(e_max_tight - e0, ureg.millimeter, precision=1)} = 0")
+    growth_law_math = fmt_math(rf"E(t) = {_e0}\text{{ mm}} + ({_v}\text{{ mm/s}})\,t + \tfrac12({_a}\text{{ mm/s}}^2)\,t^2")
+```
+
+Consider the mobile manipulator's arm guiding a gripper finger into the latch-release slot of the spring-latched cage door. In the final approach the finger hides the slot from the wrist camera, and the finger must stay within `{python} LatchSlotBelief.e_max_str` of the slot's centerline, the task tolerance $E_{\max}$ (@fig-uncertainty-growth). Assume illustrative bounds within the arm's validated operating region: initial position error $E_0$ at most `{python} LatchSlotBelief.e0_str`, unobserved velocity error $v_{\text{drift}}$ at most `{python} LatchSlotBelief.v_drift_str`, and acceleration disturbance $a_{\text{dist}}$ at most `{python} LatchSlotBelief.a_dist_str`. Position error then follows the growth law of @eq-mem-occlusion-expansion.
+
+Evaluating this growth bound with the stated parameters yields `{python} LatchSlotBelief.growth_math`, with $\Delta t$ in seconds and $E(\Delta t)$ in millimeters. Setting $E(\Delta t) = E_{\max}$ gives the quadratic equation `{python} LatchSlotBelief.quad_math`. Its single positive real root is `{python} LatchSlotBelief.t_exp_str`, so a proposal depending on this belief must expire by then. If the slot were machined to a clearance of `{python} LatchSlotBelief.e_max_tight_str`, the allowable unobserved duration shrinks to `{python} LatchSlotBelief.t_exp_tight_str` (`{python} LatchSlotBelief.quad_tight_math`). Tightening mechanical tolerance by `{python} LatchSlotBelief.tol_ratio_mult_str` shrinks the allowable unobserved duration by `{python} LatchSlotBelief.horizon_ratio_mult_str`, requiring sensor re-acquisition or compliant impedance holding within that shorter window. In contrast, if an estimator naively assumes constant velocity ($a_{\text{dist}} = 0$), it predicts a valid horizon of $(E_{\max} - E_0)/v_{\text{drift}}$, or `{python} LatchSlotBelief.t_linear_str`. At that elapsed time the modeled bound reaches `{python} LatchSlotBelief.e_linear_str`, exceeding the clearance by `{python} LatchSlotBelief.overshoot_str`. A constant-velocity-only admission rule would keep accepting the estimate for `{python} LatchSlotBelief.t_extra_str` beyond the bounded-model deadline; whether contact occurs depends on the path and geometry.
+
+::: {#fig-uncertainty-growth fig-env="figure" fig-pos="t" fig-cap="**Belief uncertainty and invalidation horizon**: Spatial error bound $E(\\Delta t)$ of a gripper finger entering the cage door's latch-release slot, expanding quadratically under unobserved forward propagation until intersecting the slot clearance $E_{\\max} = 1\\text{ mm}$ at invalidation horizon $t_{\\text{exp}} = 66\\text{ ms}$. A lower lifecycle timeline marks transitions from valid through degraded to expired operational regimes. Belief has a shelf life governed by physical disturbance dynamics; sensor re-acquisition resets the evidence clock, whereas republishing cached matrices conceals physical drift." fig-alt="Belief uncertainty growth and invalidation horizon plot. Spatial error bound E(Δt) plotted against elapsed time Δt since last measurement. The quadratic curve expands from E0 = 0.1 mm to intersect task clearance E_max = 1 mm at invalidation horizon t_exp = 66 ms. Below the time axis, an operational regime bar indicates valid, degraded, and expired intervals."}
 
 ```{python}
 #| echo: false
@@ -577,10 +652,16 @@ import numpy as np
 from mlsysim import viz
 
 # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────────
-E0 = 0.1  # mm, residual error at the last observation  # category: illustrative
-V_DIST = 12.0  # mm/s, bounded disturbance velocity  # category: illustrative
-A_DIST = 25.0  # mm/s^2, half the bounded disturbance acceleration (a_dist / 2)  # category: illustrative
-E_MAX = 1.0  # mm, task clearance  # category: illustrative
+E0 = LatchSlotBelief.e0.to(
+    ureg.millimeter
+).magnitude  # mm, residual error at the last observation  # category: illustrative (@sec-memory-rate-belief-decay cell)
+V_DIST = LatchSlotBelief.v_drift.to(
+    ureg.millimeter / ureg.second
+).magnitude  # mm/s, bounded disturbance velocity  # category: illustrative (as above)
+A_DIST = (
+    (LatchSlotBelief.a_dist / 2).to(ureg.millimeter / ureg.second**2).magnitude
+)  # mm/s^2, half the bounded disturbance acceleration (a_dist / 2)  # category: illustrative (as above)
+E_MAX = LatchSlotBelief.e_max.to(ureg.millimeter).magnitude  # mm, task clearance  # category: illustrative (as above)
 
 # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────────
 bounded = lambda dt: E0 + V_DIST * dt + A_DIST * dt**2
@@ -598,7 +679,7 @@ fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 4.2))
 ax.plot(dt * 1000, bounded(dt), color=COLORS["BlueLine"], lw=2.4, label="bounded growth  $E(\\Delta t)$", zorder=4)
 ax.plot(dt * 1000, linear(dt), color=COLORS["primary"], lw=1.6, ls=(0, (6, 3)), label="constant-velocity estimate", zorder=3)
 ax.axhline(E_MAX, color=COLORS["RedLine"], lw=1.4, ls=(0, (5, 4)), zorder=3)
-ax.text(2, E_MAX * 1.03, f"task clearance $E_{{\\max}}$ = {E_MAX:.1f} mm", color=COLORS["RedLine"], fontsize=9, va="bottom")
+ax.text(2, E_MAX * 1.03, f"task clearance $E_{{\\max}}$ = {E_MAX:.0f} mm", color=COLORS["RedLine"], fontsize=9, va="bottom")
 
 ax.plot([t_exp * 1000], [E_MAX], "o", ms=7, color=COLORS["BlueLine"], zorder=6)
 ax.vlines(t_exp * 1000, 0, E_MAX, color=COLORS["BlueLine"], lw=1.0, ls=(0, (1, 2)), zorder=3)
@@ -636,7 +717,7 @@ plt.show()
 
 :::
 
-An estimator's internal **covariance matrix**\index{Covariance matrix} reflects its stochastic model, not a measured hard maximum. A safety argument has two different choices. A **bounded-disturbance** growth law needs justified limits on initial error, velocity, acceleration, clock conversion, and mode changes; then the `{python} RackEndBelief.t_exp_str` rack-end root and the 66 ms latch-slot root are conditional worst-case deadlines within that region. Alternatively, staged dropouts and external ground truth can calibrate a specified residual quantile (for example $P_{99}$ or $P_{99.9}$) under a named test distribution. That yields a probabilistic admission limit with a one-percent or 0.1-percent tail before other model and coverage errors. The record and consumer must declare which regime applies, monitor its validity region, and refuse dependent motion or choose a validated feasible fallback when evidence exceeds it.
+An estimator's internal **covariance matrix**\index{Covariance matrix} reflects its stochastic model, not a measured hard maximum. A safety argument has two different choices. A **bounded-disturbance** growth law needs justified limits on initial error, velocity, acceleration, clock conversion, and mode changes; then the `{python} RackEndBelief.t_exp_str` rack-end root and the `{python} LatchSlotBelief.t_exp_str` latch-slot root are conditional worst-case deadlines within that region. Alternatively, staged dropouts and external ground truth can calibrate a specified residual quantile (for example $P_{99}$ or $P_{99.9}$) under a named test distribution. That yields a probabilistic admission limit with a one-percent or 0.1-percent tail before other model and coverage errors. The record and consumer must declare which regime applies, monitor its validity region, and refuse dependent motion or choose a validated feasible fallback when evidence exceeds it.
 
 Either regime yields the same kind of deadline, because the invalidation horizon of \ref{dfn-memory-belief-invalidation-horizon} asks only when the declared bound first reaches the task tolerance, whatever model produced the bound. Expiry is therefore neither an arbitrary communication watchdog timer nor a fixed $100\text{ ms}$ heuristic chosen for scheduling convenience. It is a physical deadline dictated by the intersection of task geometry, actuator authority, and disturbance dynamics. When the last valid observation occurs at timestamp $t_0$, the belief carries an absolute expiration timestamp $t_{\mathrm{deadline}} = t_0 + t_{\mathrm{exp}}$, and beyond it downstream control loops cannot assume the estimated pose lies within the required mechanical clearance.
 
@@ -703,31 +784,31 @@ Preventing stale, misattributed, and unbounded estimates from compromising the p
 
 ## The Spatial State Schema {#sec-memory-spatial-state-schema}
 
-A consumer cannot reconstruct physical meaning from a position tensor alone. The spatial belief record of \ref{dfn-memory-spatial-belief-contract} consumes the observation contracts of @sec-perception-observation-contract, keeping each observation's capture epoch, clock identifier, and conversion bound, so the permission controller can convert the capture clock to its own monotonic clock with a bounded error before it evaluates age. To these the record adds four fields that only memory knows. An estimate epoch dates the latest computation and stays apart from the evidence epoch, which dates the last physical measurement; an uncertainty-growth bound states how fast error accumulates without new evidence; a validity region states where that bound holds; and an expiry states when the belief stops being admissible. Prediction advances state but never renews evidence; `VALID` returns only with a fresh observation. The record below is an **illustrative bounded-disturbance record** for a tactile insertion.
+A consumer cannot reconstruct physical meaning from a position tensor alone. The spatial belief record of \ref{dfn-memory-spatial-belief-contract} consumes the observation contracts of @sec-perception-observation-contract, keeping each observation's capture epoch, clock identifier, and conversion bound, so the permission controller can convert the capture clock to its own monotonic clock with a bounded error before it evaluates age. To these the record adds four fields that only memory knows. An estimate epoch dates the latest computation and stays apart from the evidence epoch, which dates the last physical measurement; an uncertainty-growth bound states how fast error accumulates without new evidence; a validity region states where that bound holds; and an expiry states when the belief stops being admissible. A record is `VALID` while fresh observations constrain it and turns `DEGRADED` once they stop and prediction alone keeps its bound inside tolerance; it becomes `EXPIRED` when that bound reaches tolerance or the machine leaves the validity region, and `UNOBSERVABLE` when the sensors cannot constrain the quantity at all (@sec-memory-state-estimation-bounds). Prediction can only age a record toward `EXPIRED`, and `VALID` returns only with a fresh observation. @Tbl-09-invalidation-epochs fills the record for the latch-slot finger of @sec-memory-rate-belief-decay, a bounded-disturbance belief whose bounds are illustrative.
 
 \Needspace{28\baselineskip}
 
-| Field                              | Example record value                                                                                                                   | Consumer check                                                                           |
-|:-----------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------|
-| Entity and quantity                | `peg_17`, lateral position                                                                                                             | Match the target entity and task quantity                                                |
-| Value and SI unit                  | `0.142 m`                                                                                                                              | Decode as meters, not millimeters or force                                               |
-| Frame                              | `assembly_frame`, transform revision `T42`                                                                                             | Resolve a time-valid transform chain                                                     |
-| Evidence epoch                     | `10.000 s` on capture clock `cam_A`                                                                                                    | Preserve across prediction and republishing                                              |
-| Estimate epoch                     | `10.005 s` on capture clock `cam_A`                                                                                                    | Date the propagated estimate; do not renew evidence                                      |
-| Clock conversion                   | Versioned $t_{\text{MCU}}=a t_{\text{capture}}+b$, error at most `0.2 ms`                                                              | Refuse if conversion expires; add error to upper age                                     |
-| Initial error                      | $E_0=0.00005\text{ m}$                                                                                                                 | Check the initial bound against calibration                                              |
-| Growth law                         | $E(t)=E_0+(0.001\text{ m/s})t+\tfrac12(0.005\text{ m/s}^2)t^2$                                                                         | Compare at evidence age with the task's lateral tolerance                                |
-| Validity region                    | Arm acceleration at most `2.0 m/s²`; contact mode unchanged; residual drift and acceleration bounds above validated within this region | Expire immediately on a mode or residual-bound violation                                 |
-| Expiry                             | $t_0+t_{\mathrm{exp}}$, the evidence epoch plus the time at which the growth law reaches the task's lateral tolerance                  | Refuse dependent proposals once expiry passes; a later estimate epoch does not extend it |
-| Provenance                         | Observation ID, sensor/calibration revision, estimator build hash                                                                      | Match approved sources; hash is version provenance, not payload integrity                |
-| Lifecycle                          | `VALID`, `DEGRADED`, `EXPIRED`, or `UNOBSERVABLE`                                                                                      | Never restore `VALID` without fresh physical evidence                                    |
-| Map cell evidence, when applicable | Per-cell capture epoch and free/occupied/unknown state                                                                                 | Check **every** cell used by the candidate path; unknown stays unknown                   |
+| Field                              | Example record value                                                                                                                            | Consumer check                                                                           |
+|:-----------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------|
+| Entity and quantity                | Gripper finger relative to the latch-release slot, lateral offset from the slot centerline                                                      | Match the target entity and task quantity                                                |
+| Value and SI unit                  | Lateral offset, stored in meters; the bounds below are shown in millimeters for reading                                                         | Decode as meters, not millimeters or force                                               |
+| Frame                              | `latch_slot` frame, with the transform revision of the wrist-camera calibration                                                                 | Resolve a time-valid transform chain                                                     |
+| Evidence epoch                     | $t_0$, the last wrist-camera capture before the finger occludes the slot, on the wrist camera's capture clock                                   | Preserve across prediction and republishing                                              |
+| Estimate epoch                     | Latest propagation of the offset, on the same capture clock                                                                                     | Date the propagated estimate; do not renew evidence                                      |
+| Clock conversion                   | Versioned $t_{\text{MCU}}=a t_{\text{capture}}+b$, error at most `{python} LatchSlotBelief.eps_sync_str` (@sec-perception-observation-contract) | Refuse if conversion expires; add error to upper age                                     |
+| Initial error                      | $E_0$ = `{python} LatchSlotBelief.e0_str`                                                                                                       | Check the initial bound against calibration                                              |
+| Growth law                         | `{python} LatchSlotBelief.growth_law_math`                                                                                                      | Compare at evidence age with the slot tolerance                                          |
+| Validity region                    | Arm acceleration and contact mode unchanged since $t_0$; drift and disturbance bounds above validated within this region                        | Expire immediately on a mode or residual-bound violation                                 |
+| Expiry                             | $t_0$ + `{python} LatchSlotBelief.t_exp_str`, where the growth law reaches the `{python} LatchSlotBelief.e_max_str` slot tolerance              | Refuse dependent proposals once expiry passes; a later estimate epoch does not extend it |
+| Provenance                         | Wrist-camera observation ID, calibration revision, estimator build hash                                                                         | Match approved sources; hash is version provenance, not payload integrity                |
+| Lifecycle                          | `VALID` at capture, `DEGRADED` once the finger occludes the slot, `EXPIRED` at $t_0$ + `{python} LatchSlotBelief.t_exp_str`                     | Never restore `VALID` without fresh physical evidence                                    |
+| Map cell evidence, when applicable | Not used by this record; a map belief such as the rack-end cross aisle carries a per-cell capture epoch and free/occupied/unknown state         | Check **every** cell used by the candidate path; unknown stays unknown                   |
 
-: **Complete spatial-belief record**: Value, unit, entity, frame, two epochs, clock conversion, error model, validity region, expiry, provenance, and lifecycle travel together. A map publication timestamp is separate from each cell's evidence epoch and cannot refresh an occluded region. {#tbl-09-invalidation-epochs tbl-colwidths="[23,39,38]"}
+: **Complete spatial-belief record**: Value, unit, entity, frame, two epochs, clock conversion, error model, validity region, expiry, provenance, and lifecycle travel together. A later estimate epoch dates a computation, not a measurement, and cannot extend expiry past $t_0 + t_{\text{exp}}$. {#tbl-09-invalidation-epochs tbl-colwidths="[23,39,38]"}
 
-The record in @tbl-09-invalidation-epochs separates publication time from cell evidence. The consumer converts the capture epoch, includes clock-error margin, checks status and validity region, and evaluates $E(t)$ against the proposed motion's tolerance. Passing these checks admits the belief to the **separate permission decision**; it does not actuate the robot. On expiry or unobservability, the controller rejects dependent proposals and selects a validated fallback whose braking, hold, or search behavior remains physically feasible.
+The record in @tbl-09-invalidation-epochs keeps the evidence epoch apart from the estimate epoch and anchors expiry to $t_0$, so repeated propagation cannot lengthen the belief's life. The consumer converts the capture epoch, includes clock-error margin, checks status and validity region, and evaluates $E(t)$ against the proposed motion's tolerance. Passing these checks admits the belief to the **separate permission decision**; it does not actuate the robot. On expiry or unobservability, the controller rejects dependent proposals and selects a validated fallback whose braking, hold, or search behavior remains physically feasible.
 
-A voxel map also has a publication time, but that time does not date each voxel. A path query checks the evidence age and state of every occupancy or clearance cell it uses, including gaps marked unknown. A new scan on the far side of the workcell cannot renew a cell hidden behind the robot. Negative free-space evidence updates only cells actually traversed by a valid ray; it does not clear a volume behind its terminal return.
+A voxel map has a publication time, but that time does not date each voxel and cannot refresh an occluded region. A path query checks the evidence age and state of every occupancy or clearance cell it uses, including gaps marked unknown. A new scan on the far side of the workcell cannot renew a cell hidden behind the robot. Negative free-space evidence updates only cells actually traversed by a valid ray; it does not clear a volume behind its terminal return.
 
 ::: {#chk-mem-observability-state-schema .callout-checkpoint title="Belief expiry, observability, and the belief record"}
 

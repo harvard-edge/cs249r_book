@@ -537,7 +537,7 @@ The current in $\tau = K_t I$ is only the torque-producing part of the stator cu
 Headroom limits how fast the current can rise; the drive electronics limit how much of it can flow at all. Power inverters enforce a maximum current ceiling $I_{\text{max}}$ to protect switching transistors from thermal destruction and to prevent ferromagnetic saturation in the stator core. When the motor drives a mechanical transmission with gear reduction ratio $N$ and transmission efficiency $\eta$, the ceiling on delivered output torque is:
 $$\tau_{\text{out, max}} = \eta N K_t I_{\text{max}}$$
 
-When a high-level policy demands $120\text{ N}\cdot\text{m}$ of braking torque to avoid an obstacle, it assumes the motor drive will deliver it. But on real hardware, inverter current limits ($I_{\max} = 25\text{ A}$) and gear efficiency cap peak output torque at $85\text{ N}\cdot\text{m}$. The missing $35\text{ N}\cdot\text{m}$ is silently clipped at the power stage. Because the software planner remains unaware of the current clamp, the machine's actual stopping distance expands beyond its calculated safety boundary.
+The clamp answers the question the stopping budget left open, whether the drives can deliver $a_{\text{brake}}$ when the permission path demands it, and it answers silently. A braking demand above $\tau_{\text{out, max}}$ is clipped at the power stage without any report to the software that issued it, so the base decelerates more gently than the stopping distance assumed and comes to rest beyond its calculated boundary. The credible deceleration therefore holds only for the drive current limits configured when it was established, and a firmware change to $I_{\max}$ withdraws it until it is measured again, a dependence that @sec-body-measuring-limits writes into the conditions of its limit record.
 
 Transmissions introduce a severe mechanical asymmetry that software planners routinely ignore. To deliver high torque from a compact motor, robot joints rely on gear reductions with ratios $N$ ranging from $50:1$ to $160:1$. While gear reduction scales delivered torque linearly by $N$, it forces the motor rotor to spin $N$ times faster than the joint.
 
@@ -816,7 +816,45 @@ The opposite boundary occurs during deceleration, when kinetic energy stored in 
 
 When bus voltage crosses an undervoltage threshold under peak acceleration, the electrical fault cascades into a mechanical failure through hardware supervisor resets. A supply rail dropping below the undervoltage lockout threshold causes voltage supervisors to pull the hardware reset line on microcontrollers and motor gate drivers. Microcontroller clocks halt immediately, volatile register configurations vanish, and digital communication buses drop into high-impedance states. However, an acceleration command issued by the policy just before the reset remains physically active in the hardware state until the gate driver stage collapses. If the gate driver enters a high-impedance unpowered state, phase current ceases and the motor produces zero electromagnetic torque. The physical body, carrying velocity and momentum from the preceding command, coasts ballistically under gravity and inertia, colliding with workpieces or joint hardstops. If the driver instead defaults to shorting low-side MOSFETs for dynamic braking, back-electromotive force ($e_{\text{bemf}} = K_e \omega$) creates an immediate, violent counter-torque that jerks the mechanics at the joint limits.
 
-Power removal is an unmanaged state transition, not an automatic return to safety. Engineers frequently assume that dropping bus power or tripping an undervoltage circuit brings a machine to a safe halt. In physical reality, cutting electrical power leaves an actuator in one of three unpowered states, namely free coasting, phase-short dynamic braking, or spring-engaged mechanical braking. Each state enforces a distinct mechanical behavior. An electromechanical friction brake requires $30\text{ ms}$ to $80\text{ ms}$ for its mechanical spring to overcome magnetic coil decay and engage its friction pads, during which gravity accelerates an overhead arm downward. Phase-short dynamic braking acts like viscous fluid damping, providing resistance proportional to velocity but generating zero holding torque at zero speed. Free coasting simply allows gravity to accelerate unconstrained joints without any resistance. The trajectory a machine follows after an electrical cutoff must be measured under full mechanical payload, not deduced from circuit diagrams. The choice of which safe fallback state the machine should enter belongs to system safety architecture in @sec-enforcement, but the physical dynamics of an unpowered joint are unalterable mechanical constraints of the body.
+```{python}
+#| label: body-spring-brake-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SPRING-BRAKE ENGAGEMENT ON THE RUNNING MACHINE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the unpowered-states paragraph in @sec-body-power-integrity.
+# │ Goal:    Give the interval after coil decay during which a spring-applied
+# │          brake on any of the machine's nine axes has not yet engaged.
+# │ Show:    30 ms to 80 ms.
+# │ How:     RM.spring_brake_engage_min and RM.spring_brake_engage_max.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt_latency, check
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+
+class SpringBrake:
+    """Spring-brake engagement window after coil decay."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_engage_min = RM.spring_brake_engage_min  # category: illustrative (fast end)
+    t_engage_max = RM.spring_brake_engage_max  # category: illustrative (slow end)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_window = (t_engage_max - t_engage_min).to(millisecond)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(t_engage_min.to(millisecond).magnitude - 30.0) < 1e-9, f"Unexpected fast engage: {t_engage_min}")
+    check(abs(t_engage_max.to(millisecond).magnitude - 80.0) < 1e-9, f"Unexpected slow engage: {t_engage_max}")
+    check(t_window.magnitude > 0, "The slow end must follow the fast end.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_engage_min_str = fmt_latency(t_engage_min, unit=millisecond, precision=0)
+    t_engage_max_str = fmt_latency(t_engage_max, unit=millisecond, precision=0)
+```
+
+Power removal is an unmanaged state transition, not an automatic return to safety. Engineers frequently assume that dropping bus power or tripping an undervoltage circuit brings a machine to a safe halt. In physical reality, cutting electrical power leaves an actuator in one of three unpowered states, namely free coasting, phase-short dynamic braking, or spring-engaged mechanical braking. Each state enforces a distinct mechanical behavior. An electromechanical friction brake requires `{python} SpringBrake.t_engage_min_str` to `{python} SpringBrake.t_engage_max_str` for its mechanical spring to overcome magnetic coil decay and engage its friction pads, during which gravity accelerates an overhead arm downward. Phase-short dynamic braking acts like viscous fluid damping, providing resistance proportional to velocity but generating zero holding torque at zero speed. Free coasting simply allows gravity to accelerate unconstrained joints without any resistance. The trajectory a machine follows after an electrical cutoff must be measured under full mechanical payload, not deduced from circuit diagrams. The choice of which safe fallback state the machine should enter belongs to system safety architecture in @sec-enforcement, but the physical dynamics of an unpowered joint are unalterable mechanical constraints of the body.
 
 For the physical AI systems engineer, power integrity is a foundational architectural constraint bridging software planning and electrical physics. Rather than treating power rails as infinite voltage sources, the engineer must enforce coordinated power budgets and current slew-rate limits across compute accelerators and motor drives. The permission path must arbitrate simultaneous multi-axis acceleration commands to prevent compound $dI/dt$ transients, while dynamic brake choppers protect inverter electronics from regenerative feedback during emergency stops. Characterizing these dynamic electrical and mechanical failure boundaries cannot rely on nominal catalog specs or idealized CAD models; it demands disciplined bench measurement.
 
@@ -957,6 +995,7 @@ class DriveBusIntegrity:
     )
     dv_str = fmt_voltage(dv, unit=volt, precision=2)
     v_min_str = fmt_voltage(v_min, unit=volt, precision=2)
+    v_sag_low_str = fmt_voltage(v_sag_low, unit=volt, precision=1)
     headroom_str = fmt_voltage(headroom, unit=volt, precision=0)
     margin_str = fmt_voltage(margin, unit=volt, precision=2)
     e_k_display_math = fmt_display_math(
@@ -982,7 +1021,7 @@ class DriveBusIntegrity:
 ```
 
 ::: {#nbk-body-dc-bus-power-integrity .callout-notebook title="DC bus voltage sag and regenerative overvoltage"}
-The mobile manipulator draws everything from one nominal `{python} DriveBusIntegrity.v_bus_nom_str` rail fed by its battery: the drive inverters, the arm's joint drives, and the point-of-load regulators that supply its two computers.
+The mobile manipulator's battery feeds one nominal `{python} DriveBusIntegrity.v_bus_nom_str` control rail that carries the drive inverters, the arm's joint drives, and the point-of-load regulators that supply its application processor.
 
 **Problem**: Under the coincident current step of an inference burst and the drive motors, and then a stop from the drive limit, does the rail remain within the operating limits of the regulators and the motor inverters?
 
@@ -999,7 +1038,7 @@ The mobile manipulator draws everything from one nominal `{python} DriveBusInteg
      `{python} DriveBusIntegrity.dv_display_math`
    - Minimum rail voltage at full charge:
      `{python} DriveBusIntegrity.v_min_display_math`
-   - The headroom to the regulators' dropout is `{python} DriveBusIntegrity.headroom_str`, and the modeled `{python} DriveBusIntegrity.dv_str` droop leaves `{python} DriveBusIntegrity.margin_str` of it. The inductive and capacitive terms last only through the rise; the ohmic term persists for as long as the load does. From the `{python} DriveBusIntegrity.v_battery_low_str` battery-low point, that sustained ohmic term alone takes the rail below the dropout, and the application processor and the safety microcontroller lose power mid-maneuver. The shared-rail fallacy in @sec-body-fallacies-pitfalls follows this case.
+   - The headroom to the regulators' dropout is `{python} DriveBusIntegrity.headroom_str`, and the modeled `{python} DriveBusIntegrity.dv_str` droop leaves `{python} DriveBusIntegrity.margin_str` of it. The inductive and capacitive terms last only through the rise, but the ohmic term persists for as long as the load does, and the shared-rail fallacy in @sec-body-fallacies-pitfalls follows it from a depleted battery.
 3. **Regenerative surge**:
    - During a stop from the drive limit, the loaded machine's kinetic energy must be dissipated:
      `{python} DriveBusIntegrity.e_k_display_math`
@@ -1050,7 +1089,93 @@ The absence of a failure during testing establishes a statistical bound on the f
 
 For the physical AI systems engineer, empirical characterization is not a one-time validation checkbox but a standing record that must be re-established as the machine ages. In deployed fleets, physical limits are non-stationary over operational time, a process called **lifecycle degradation**\index{Lifecycle degradation!definition}. Brake pad friction glazing and tire tread wear degrade the sustainable deceleration limit $a_{\text{brake}}$ by 15 to 30 percent; chemical aging in lithium-ion battery packs increases internal DC bus impedance $R_{\text{bus}}$, exacerbating voltage droop ($\Delta V_{\text{droop}}$) during dynamic maneuvers; and mechanical gear tooth wear widens backlash clearance $\delta_{\text{lost}}$.
 
-A limit whose violation can cause damage is kept not as a bare number but as a **limit record**\index{Limit record!definition} with six elements: the value or empirical distribution, with its sample count and the tail percentiles it reports; the operating conditions under which it was established, which are the context listed earlier plus the surface for any limit that depends on traction; the measurement uncertainty of the instruments that captured it, together with each instrument's observation point and bandwidth; an engineering margin separating the operating target from the breakdown threshold; a runtime detector, such as a phase-current sensor, an optical interrupter, or a supply-rail monitor, that catches an excursion while the machine runs; and its provenance, which names the evidence category and the instrument or model that produced the value. No number governs a decision unless its record names its conditions and category, and a limit lapses when its conditions change. Each degradation mechanism above changes those conditions, so a deployed machine re-establishes its records by periodic recalibration rather than trusting the values measured at commissioning. The saturation duration against which the Schiaparelli lander's inertial unit had been accepted was such a limit, and the lander's loss in 2016 shows what follows when a limit's conditions are exceeded in operation and nothing downstream checks the result.
+```{python}
+#| label: body-limit-records-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TWO LIMIT RECORDS ON THE RUNNING MACHINE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-02-limit-record in @sec-body-measuring-limits, and the rail
+# │          decision in @sec-body-archetype-matrix.
+# │ Goal:    Fill the six elements of a limit record for the credible
+# │          deceleration and for the control rail's regulator dropout.
+# │ Show:    a_brake 2.0 m/s^2, binding only on floors with mu >= 0.204, loaded
+# │          to at most 368 kg, 100 mm protective clearance; dropout 18 V,
+# │          0.72 V margin at full charge, valid only with the permission path
+# │          on its isolated rail held up for 2.0 s (70 W, 2.025 F, 140 J).
+# │ How:     mu_min = a_brake / g; store C = 2 P t / (V_low^2 - V_dropout^2)
+# │          from RM.permission_rail_holdup_capacitance. The hold-up's basis
+# │          (the longest commanded stop) is derived in @sec-enforcement.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt, fmt_qty, fmt_length, fmt_latency, fmt_power, fmt_energy, fmt_voltage, fmt_acceleration, check, MarkdownStr
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+
+class LimitRecords:
+    """The a_brake record and the control-rail dropout record for the running machine."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    a_brake = AISLE.a_brake  # category: illustrative (credible low tail, loaded, dry floor)
+    m_loaded = RM.loaded_mass  # category: derived (upper bound, full tote rack)
+    delta_margin = AISLE.delta_margin  # category: chosen (protective clearance)
+    imu_name = RM.imu.name  # category: sourced (the machine's IMU part)
+    v_dropout = RM.control_rail_dropout  # category: illustrative (regulator dropout)
+    v_battery_low = RM.control_rail_battery_low  # category: illustrative (depleted battery)
+    holdup = RM.permission_rail_holdup  # category: chosen (permission-rail hold-up)
+    p_rail = RM.permission_rail_load  # category: illustrative (permission-path load)
+    c_store = RM.permission_rail_holdup_capacitance  # category: derived (store sized for the hold-up)
+    margin_full = DriveBusIntegrity.margin  # category: derived (full-charge margin under the 70 A step)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    mu_min = (a_brake / ureg.standard_gravity).to("dimensionless").magnitude
+    e_store = (p_rail * holdup).to(joule)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(a_brake.to(meter / second**2).magnitude - 2.0) < 1e-9, f"Unexpected a_brake: {a_brake}")
+    check(abs(m_loaded.to(kilogram).magnitude - 368.0) < 1e-9, f"Unexpected loaded mass: {m_loaded}")
+    check(abs(mu_min - 0.204) < 5e-4, f"Friction premise must be 0.204: {mu_min}")
+    check(abs(delta_margin.to(ureg.millimeter).magnitude - 100.0) < 1e-9, f"Unexpected margin: {delta_margin}")
+    check(abs(v_dropout.to(volt).magnitude - 18.0) < 1e-9, f"Unexpected dropout: {v_dropout}")
+    check(abs(holdup.to(second).magnitude - 2.0) < 1e-9, f"Hold-up must be 2.0 s: {holdup}")
+    check(abs(p_rail.to(ureg.watt).magnitude - 70.0) < 1e-9, f"Rail load must be 70 W: {p_rail}")
+    check(abs(c_store.to(ureg.farad).magnitude - 2.025) < 5e-4, f"Store must be 2.025 F: {c_store}")
+    check(abs(e_store.magnitude - 140.0) < 1e-9, f"Store energy must be 140 J: {e_store}")
+    check(
+        abs((0.5 * c_store * (v_battery_low**2 - v_dropout**2)).to(joule).magnitude - e_store.magnitude) < 1e-6,
+        "The store's usable energy between battery-low and dropout must equal load x hold-up.",
+    )
+    check(abs(margin_full.to(volt).magnitude - 0.7245) < 1e-3, f"Unexpected full-charge margin: {margin_full}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    imu_name_str = MarkdownStr(imu_name)
+    a_brake_str = fmt_acceleration(a_brake, unit=meter / second**2, precision=0)
+    m_loaded_str = fmt_qty(m_loaded, kilogram, precision=0)
+    mu_min_str = fmt(mu_min, precision=3)
+    delta_margin_str = fmt_length(delta_margin, unit=ureg.millimeter, precision=0)
+    v_dropout_str = fmt_voltage(v_dropout, unit=volt, precision=0)
+    holdup_str = fmt_latency(holdup, unit=second, precision=0)
+    p_rail_str = fmt_power(p_rail, unit=ureg.watt, precision=0)
+    c_store_str = fmt_qty(c_store, ureg.farad, precision=3)
+    margin_full_str = fmt_voltage(margin_full, unit=volt, precision=2)
+```
+
+A limit whose violation can cause damage is kept not as a bare number but as a **limit record**\index{Limit record!definition} with six elements, which @tbl-02-limit-record defines and fills in for two limits of the mobile manipulator: the credible deceleration on which its stopping distance rests, and the dropout of the regulators on its shared control rail.
+
+| Element         | What the record states                                                                                                                               | Credible deceleration $a_{\text{brake}}$                                                                                                                                             | Control-rail regulator dropout                                                                                                                                                                                                                                                                                                            |
+|:----------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Value**       | The value or empirical distribution, with its sample count and the tail percentiles it reports                                                       | `{python} LimitRecords.a_brake_str`, taken as the credible low tail of loaded stops; no samples yet, since the value is illustrative                                                 | `{python} LimitRecords.v_dropout_str` at the point-of-load regulators; no samples yet, since the value is illustrative                                                                                                                                                                                                                    |
+| **Conditions**  | The context listed earlier under which it was established, plus the surface for any limit that depends on traction                                   | Loaded to at most `{python} LimitRecords.m_loaded_str`; dry floor with $\mu \ge$ `{python} LimitRecords.mu_min_str`; drive current limits as configured; tires at commissioning wear | A crossing resets only the application processor while the permission path runs on its isolated rail with at least `{python} LimitRecords.holdup_str` of hold-up (a `{python} LimitRecords.c_store_str` store for its `{python} LimitRecords.p_rail_str` load); the regulators on that isolated rail are assumed to have the same dropout |
+| **Uncertainty** | The measurement uncertainty of each instrument, with its observation point and bandwidth                                                             | Not established                                                                                                                                                                      | Not established                                                                                                                                                                                                                                                                                                                           |
+| **Margin**      | The engineering margin separating the operating target from the breakdown threshold                                                                  | None on the value; the `{python} LimitRecords.delta_margin_str` protective clearance $\delta_{\text{margin}}$ absorbs its error                                                      | `{python} LimitRecords.margin_full_str` at full charge under the coincident step; none from a depleted battery                                                                                                                                                                                                                            |
+| **Detector**    | The runtime check that catches an excursion while the machine runs, such as a phase-current sensor, an optical interrupter, or a supply-rail monitor | Deceleration monitor comparing commanded with measured deceleration from the wheel encoders and the `{python} LimitRecords.imu_name_str` inertial unit, on every stop                | Rail-voltage monitor on the shared rail, whose undervoltage flag the permission path answers with a stop                                                                                                                                                                                                                                  |
+| **Provenance**  | The evidence category and the instrument or model that produced the value                                                                            | Illustrative, from the base's class profile; to be replaced by loaded stopping trials                                                                                                | Illustrative, from the machine's profile; to be replaced by a rail characterization under coincident load                                                                                                                                                                                                                                 |
+
+: **The limit record on the mobile manipulator**: The six elements of a limit record, filled in for the credible deceleration that sets the stopping distance and for the regulator dropout that bounds the shared control rail. Neither value has an established uncertainty, so both remain illustrative until the named measurements replace them. {#tbl-02-limit-record tbl-colwidths="[12,28,30,30]"}
+
+No number governs a decision unless its record names its conditions and category, and a limit lapses when its conditions change. Each degradation mechanism above changes those conditions, so a deployed machine re-establishes its records by periodic recalibration rather than trusting the values measured at commissioning. The saturation duration against which the Schiaparelli lander's inertial unit had been accepted was such a limit, and the lander's loss in 2016 shows what follows when a limit's conditions are exceeded in operation and nothing downstream checks the result.
 
 ::: {#ws-body-2016-schiaparelli-imu-saturation .callout-war-story title="ExoMars Schiaparelli IMU saturation and altitude collapse (2016)"}
 **Context**: On October 19, 2016, the European Space Agency's ExoMars Schiaparelli lander executed its atmospheric entry and descent toward the Martian surface, relying on an onboard Guidance, Navigation, and Control (GNC) computer to fuse Inertial Measurement Unit (IMU) gyroscopes with a Doppler radar altimeter [@esa2017schiaparelli].
@@ -1068,7 +1193,7 @@ Measured and recorded one at a time, the five limits describe the body budget by
 
 ## Which Budget Binds First {#sec-body-archetype-matrix}
 
-A single command from the chunk policy to accelerate the loaded mobile manipulator spends from all five budgets at once. It rests on a camera frame that is already aging, it adds kinetic energy that the brakes must later remove, it accelerates reflected rotor inertia through the drive gearing, it deposits Joule heat in windings that shed it only over minutes, and it draws current from the rail that also feeds the application processor and the permission path. @Tbl-02-cross-archetype-matrix sets the five budgets side by side, with the law that governs each, the assumption a policy trained in software makes about it, the archetype it binds first, and the invariant the permission path enforces.
+A single command from the chunk policy to accelerate the loaded mobile manipulator spends from all five budgets at once. It rests on a camera frame that is already aging, it adds kinetic energy that the brakes must later remove, it accelerates reflected rotor inertia through the drive gearing, it deposits Joule heat in windings that shed it only over minutes, and it draws current from the rail that also feeds the application processor. @Tbl-02-cross-archetype-matrix sets the five budgets side by side, with the law that governs each, the assumption a policy trained in software makes about it, the archetype it binds first, and the invariant the permission path enforces.
 
 ::: {.column-margin .margin-pointer}
 ↳ **Downstream:** The degraded limits recorded here bound the supervisor intervention thresholds derived in @sec-intervention-authority-transitions.
@@ -1138,7 +1263,7 @@ A Class 3 plant binds on heat rather than on stopping distance. A directed-energ
 
 : **Cross-archetype physical constraint matrix**: Systematic mapping of the five non-negotiable physical constraints to their governing laws, software illusions, archetype failure modes, and deterministic systems engineering takeaways. {#tbl-02-cross-archetype-matrix tbl-colwidths="[18,20,24,18,20]"}
 
-The table separates the budgets, but the machine does not. Heat from the drives can throttle the application processor and lengthen the observation age that the stopping distance assumed, and a depleted battery can turn a routine current step into a reset of the permission path; the pitfalls that follow price both on the mobile manipulator. The full coupling, in which the body's stopping distance sets the lease the permission path grants and that lease sets what the Brain must supply, is worked once for Part I in @sec-nervous-coupled-budget.
+The table separates the budgets, but the machine does not, and on the mobile manipulator one of them binds before the others. Of the margins computed on the machine, the stopping distance at the `{python} BodyStoppingBudget.v_str` drive limit still keeps `{python} BodyStoppingBudget.remaining_str` of the clear distance, while the shared control rail at the `{python} DriveBusIntegrity.v_battery_low_str` battery-low point keeps none, because the `{python} DriveBusIntegrity.di_str` coincident step sags it to `{python} DriveBusIntegrity.v_sag_low_str`, below the `{python} DriveBusIntegrity.v_uvlo_str` dropout of its regulators. The rail is the first budget a single command can exhaust, and the design answer is to take the permission path off it. The safety microcontroller, the drive logic, and the spring-brake coils run on an isolated rail that a local store holds up for a chosen `{python} LimitRecords.holdup_str`, long enough to outlast the longest stop the permission path can command (@sec-enforcement-stopping-envelopes sizes that stop). A brownout of the shared rail then resets the application processor, while the permission path rides through it, flags the undervoltage, and stops the machine. Heat couples the budgets too, since drive heat can throttle the application processor and lengthen the observation age that the stopping distance assumed; the pitfalls that follow price both couplings on the mobile manipulator. The full coupling, in which the body's stopping distance sets the lease the permission path grants and that lease sets what the Brain must supply, is worked once for Part I in @sec-nervous-coupled-budget.
 
 ## Fallacies and Pitfalls {#sec-body-fallacies-pitfalls}
 
@@ -1289,7 +1414,7 @@ class ControlRailBrownout:
 
 **Fallacy**: *Compute accelerators and motor inverters operate on independent, ideal power rails.*
 
-On the mobile manipulator, a heavy inference burst coincides with the drive motors pushing the base over the cage-door threshold. The combined `{python} ControlRailBrownout.i_transient_str` transient across the `{python} ControlRailBrownout.r_harness_str` harness resistance of the shared `{python} ControlRailBrownout.v_nominal_str` control rail produces a `{python} ControlRailBrownout.v_drop_str` drop. With the battery already depleted to `{python} ControlRailBrownout.v_battery_low_str`, the rail sags to `{python} ControlRailBrownout.v_sag_str`, below the `{python} ControlRailBrownout.v_dropout_str` dropout threshold of the onboard point-of-load regulators. This electrical brownout abruptly asserts hardware reset on the safety microcontroller while the machine carries active momentum. Separate software budgets for compute and actuation ignore their physical reliance on a shared electrical supply. Power qualification must account for coincident peak loads and verify that control electronics remain powered through demanding maneuvers.
+On the mobile manipulator, a heavy inference burst coincides with the drive motors pushing the base over the cage-door threshold. The combined `{python} ControlRailBrownout.i_transient_str` transient across the `{python} ControlRailBrownout.r_harness_str` harness resistance of the shared `{python} ControlRailBrownout.v_nominal_str` control rail produces a `{python} ControlRailBrownout.v_drop_str` drop. With the battery already depleted to `{python} ControlRailBrownout.v_battery_low_str`, the rail sags to `{python} ControlRailBrownout.v_sag_str`, below the `{python} ControlRailBrownout.v_dropout_str` dropout threshold of the onboard point-of-load regulators, and the application processor resets. Had the safety microcontroller shared that rail, the same brownout would have reset it too while the machine carried active momentum, leaving the base and arm to the unpowered states of @sec-body-power-integrity instead of a commanded stop. Separate software budgets for compute and actuation ignore their physical reliance on a shared electrical supply. Power qualification must account for coincident peak loads, and the controller that stops the machine must stay powered through them, which is why the permission path runs on an isolated, held-up rail (@sec-body-archetype-matrix).
 
 :::
 
@@ -1318,7 +1443,7 @@ Each budget enters the permission path as a bound, not a typical value. An obser
 * **Speed sets the stopping envelope**: Reaction travel grows linearly with pre-brake delay and braking travel quadratically with speed, so the admissible speed is the positive root of $d_{\text{stop}} \le D_{\text{clear}}$, recomputed whenever clearance or delay changes.
 * **Gearing trades torque for responsiveness**: A gear ratio $N$ multiplies reflected rotor inertia by $N^2$. Past the inertia-matching ratio, more gearing delivers less joint acceleration and concentrates impact stress in the gear teeth.
 * **Heat is an integral state**: Joule loss arrives in seconds and leaves over minutes, and copper's temperature coefficient feeds it back. A peak-torque rating means nothing without its initial temperature, duration, ambient, and recovery time.
-* **The supply rail is shared**: The drives, the application processor, and the permission path draw on one rail, so a coincident current step can reset the controller that was meant to stop the machine, and an unclamped regenerative stop can destroy the inverter that brakes it.
+* **The supply rail is shared**: The drives and the application processor draw on one rail, so a coincident current step from a depleted battery can cross its regulators' dropout, and an unclamped regenerative stop can destroy the inverter that brakes it. The controller that must stop the machine therefore runs on its own rail, held up long enough that a brownout of the shared rail cannot reset it before the stop completes.
 * **A limit is a record, not a number**: A limit governs a decision only with its conditions, uncertainty, margin, detector, and evidence category, and it lapses when wear, heat, a new payload, or a new build changes those conditions. Every later record in the book extends this one.
 :::
 
