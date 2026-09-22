@@ -81,13 +81,13 @@ Knowing the evidence epoch $t_0$ establishes elapsed time $\Delta t = t - t_0$, 
 
 The minimum record fields necessary for a consumer to evaluate a stored state can be derived directly from the requirement to bound current error. Let $E(\Delta t)$ represent the upper bound of the discrepancy between the stored value and true physical state after an elapsed time $\Delta t = t - t_0$. If an estimator establishes a state at time $t_0$ with an initial uncertainty bound\index{Uncertainty bound} $E_0$, and external disturbances or unmodeled velocities cause the true state to diverge at a maximum rate $r$, the upper bound on error at current time $t$ obeys the linear expansion\index{Error expansion} $E(\Delta t) = E_0 + r\,\Delta t$. At the rack end, $E_0$ is the machine's localization error and $r$ is the walking speed of the person the rack may hide; @sec-memory-belief-through-occlusion evaluates that law. Omitting either term leaves the consumer unable to compute $E(\Delta t)$, so an initial bound and an expansion rate are both structurally required fields of the record.
 
-Expressing uncertainty through physical bounds and expansion rates distinguishes a physical AI belief from a probabilistic confidence score. An object detection network might output a class confidence of $0.94$, but a downstream position controller cannot convert a unitless probability into a safe actuator displacement margin (i.e., how far the arm can physically move before risking a collision). A confidence score of $0.94$ provides no information about whether an obstacle boundary is uncertain by $2.0\text{ mm}$ or by $200\text{ mm}$, nor does it indicate how rapidly that boundary moves when occlusion occurs. A physical memory record must express its initial bound $E_0$ and expansion rate $r$ in concrete physical dimensions such as meters, radians, or newtons per second. Furthermore, these rates are valid only within a declared validity region, such as a maximum assumed acceleration or a verified contact friction coefficient. If physical operating conditions leave that region, the expansion rate no longer holds, and the belief record must be treated as invalid.
+Expressing uncertainty through physical bounds and expansion rates distinguishes a physical AI belief from a probabilistic confidence score. An object detection network might output a class confidence of $0.94$, but that softmax score is not calibrated evidence (@sec-brain-cognitive-vulnerabilities), and a downstream position controller cannot convert a unitless probability into a safe actuator displacement margin (i.e., how far the arm can physically move before risking a collision). A confidence score of $0.94$ provides no information about whether an obstacle boundary is uncertain by $2.0\text{ mm}$ or by $200\text{ mm}$, nor does it indicate how rapidly that boundary moves when occlusion occurs. A physical memory record must express its initial bound $E_0$ and expansion rate $r$ in concrete physical dimensions such as meters, radians, or newtons per second. Furthermore, these rates are valid only within a declared validity region, such as a maximum assumed acceleration or a verified contact friction coefficient. If physical operating conditions leave that region, the expansion rate no longer holds, and the belief record must be treated as invalid.
 
 When memory hands over a tuple containing value, reference frame, evidence epoch $t_0$, initial bound $E_0$, and growth rate $r$, the consumer executes a deterministic verification step before applying the data to physical control. The consumer possesses a task tolerance $E_{\max}$ dictated by the physical task. When the arm guides a gripper finger into the latch-release slot of the cage door, for instance, the slot's clearance sets $E_{\max}$, and positional uncertainty must stay below it. Upon reading the belief record at current time $t_{\text{now}}$, the consumer calculates the elapsed time $\Delta t = t_{\text{now}} - t_0$, evaluates the present error bound $E(\Delta t) = E_0 + r \Delta t$, and compares the result directly against $E_{\max}$. If $E(\Delta t) \le E_{\max}$, the belief passes this expiry check and can enter the independent motion-permission check. Otherwise the dependent proposal is refused; the controller selects a validated hold, search, or stop response only when it remains feasible.
 
 ::: {#dfn-memory-spatial-belief-contract .callout-definition title="Spatial belief record"}
 
-***Spatial belief record***\index{Spatial belief record!definition}\index{Belief record!definition} is a typed record that binds an identified physical quantity and SI unit to a frame, acquisition and estimate epochs, clock conversion, initial error, growth law, validity region, expiry, provenance, and lifecycle status. These fields let a consumer evaluate freshness before a separate motion-permission check.
+***Spatial belief record***\index{Spatial belief record!definition}\index{Belief record!definition} is a typed record that binds an identified physical quantity and SI unit to a frame, evidence and estimate epochs, clock conversion, initial error, growth law, validity region, expiry, provenance, and lifecycle status. These fields let a consumer evaluate freshness before a separate motion-permission check.
 
 1.  **Significance**: A state without an error bound and growth rate cannot be safely evaluated by downstream controllers. As time elapses ($\Delta t = t_{\text{now}} - t_0$), unobserved motion or sensor drift widens the spatial error bound ($E(\Delta t) = E_0 + r \Delta t$). When that bound exceeds the task tolerance ($E(\Delta t) > E_{\max}$), the record expires, requiring the permission path to reject dependent proposals and choose a feasible validated response.
 2.  **Distinction**: Unlike a unitless classification probability (such as $P(\text{object}) = 0.94$), a spatial belief record provides physically grounded metric units (meters, radians) and explicit time-decay mechanics.
@@ -113,7 +113,44 @@ Even when a system records true acquisition epochs, physical AI architectures re
 
 [^fn-hw-ptp-canfd]: **Fieldbus clock synchronization jitter**\index{Fieldbus!synchronization jitter}: Fieldbus architectures exhibit distinct hardware clock synchronization bounds: IEEE 1588 PTP over Ethernet achieves $\delta t < 1.0\,\mu\text{s}$, EtherCAT Distributed Clocks achieve $<100\text{ ns}$ hardware SYNC0 jitter, and CAN-FD bit-phase synchronization yields $\pm 10\text{--}50\,\mu\text{s}$. Because spatial uncertainty scales with target relative velocity ($e_{\text{sync}} = v_{\text{rel}} \delta t$), microsecond-level synchronization is essential to keep temporal errors within micrometer mechanical budgets. Uncalibrated clock drift between distributed sensor and motor nodes degrades multi-axis tool coordination, inducing high-frequency chatter in joint torque loops.
 
-Real physical systems never sample all relevant state variables simultaneously. In an illustrative cycle, a tactile array might latch normal force readings at $t_1 = 12.0\text{ ms}$, an optical tracking camera might finish sensor integration at $t_2 = 18.5\text{ ms}$, and joint optical encoders might sample angular positions at $t_3 = 21.0\text{ ms}$. These observations occur at different epochs and cannot be combined through direct algebraic operations. Fusing a camera observation at $t_2$ with an encoder observation at $t_3$ requires the consumer to project one state across the temporal gap $\Delta t = |t_3 - t_2| = 2.5\text{ ms}$ using explicit kinematic models and bounded velocities (for example, propagating the historical camera observation along the joint velocity vector to reconcile it with the instantaneous encoder reading). Without the true acquisition epoch for each individual signal, the alignment calculation cannot determine the sign or magnitude of $\Delta t$. Extrapolating state without an accurate epoch causes the fusion algorithm to compute spatial offsets from fictitious temporal baselines, compounding errors across every fusion cycle.
+```{python}
+#| label: calc-memory-epoch-alignment
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ILLUSTRATIVE SAMPLING EPOCHS FOR FUSION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-memory-state-epoch (three sensors latch at different epochs).
+# │
+# │ Goal:    Show that fusing two observations requires projecting one across
+# │          the gap between their acquisition epochs.
+# │ Show:    tactile 12 ms, camera 18.5 ms, encoders 21 ms; camera-to-encoder
+# │          gap 2.5 ms.
+# │ How:     Illustrative epochs in one cycle; the gap is |t3 - t2|.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.fmt import fmt_latency, check
+
+class MemoryEpochAlignment:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
+    t1 = 12.0 * millisecond  # category: illustrative (tactile array latches force)
+    t2 = 18.5 * millisecond  # category: illustrative (camera finishes integration)
+    t3 = 21.0 * millisecond  # category: illustrative (encoders sample angles)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
+    gap = abs(t3 - t2).to(millisecond)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
+    check(t1 < t2 < t3, "The illustrative epochs must be in sampling order.")
+    check(abs(gap.magnitude - 2.5) < 1e-9, "Camera-to-encoder gap is 2.5 ms.")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
+    t1_str = fmt_latency(t1, unit=millisecond, precision=0)
+    t2_str = fmt_latency(t2, unit=millisecond, precision=1)
+    t3_str = fmt_latency(t3, unit=millisecond, precision=0)
+    gap_str = fmt_latency(gap, unit=millisecond, precision=1)
+```
+
+Real physical systems never sample all relevant state variables simultaneously. In an illustrative cycle, a tactile array might latch normal force readings at $t_1 =$ `{python} MemoryEpochAlignment.t1_str`, an optical tracking camera might finish sensor integration at $t_2 =$ `{python} MemoryEpochAlignment.t2_str`, and joint optical encoders might sample angular positions at $t_3 =$ `{python} MemoryEpochAlignment.t3_str`. These observations occur at different epochs and cannot be combined through direct algebraic operations. Fusing a camera observation at $t_2$ with an encoder observation at $t_3$ requires the consumer to project one state across the temporal gap $\Delta t = |t_3 - t_2| =$ `{python} MemoryEpochAlignment.gap_str` using explicit kinematic models and bounded velocities (for example, propagating the historical camera observation along the joint velocity vector to reconcile it with the instantaneous encoder reading). Without the true acquisition epoch for each individual signal, the alignment calculation cannot determine the sign or magnitude of $\Delta t$. Extrapolating state without an accurate epoch causes the fusion algorithm to compute spatial offsets from fictitious temporal baselines, compounding errors across every fusion cycle.
 
 With these epochs and the clock-synchronization bound carried in the record of @sec-memory-handoff, the consumer computes the elapsed duration between the evidence epoch and the execution deadline, evaluates the worst-case expansion of the error bound, and determines whether the state remains within task tolerances. Handing over a state without its acquisition epoch leaves the consumer blind to transport delays and scheduling jitter, turning deterministic control into open-loop guesswork. Because physical geometry also changes as bodies move through space, spatial transforms between reference frames are subject to the same temporal decay, carrying their own distinct evidence epochs.
 
@@ -127,7 +164,7 @@ A transform also spans several machine words, so a reader racing a writer can se
 ![](images/svg/fig09_canonical_robot_frame_tree.svg){width="100%"}
 :::
 
-The cost of an expired transform is direct spatial displacement (@fig-frame-staleness-error). Applying the delay-as-distance principle from @sec-body to kinematics, uncompensated latency translates directly into geometric positioning error through the lever arm of the linkages. For the rigorous cross-product derivation of this kinematic error propagation, see @sec-appendix-control-spatial.
+The cost of an expired transform is direct spatial displacement (@fig-frame-staleness-error). Applying the age-as-displacement relation of @sec-perception-photons-to-claims to kinematics, uncompensated latency translates directly into geometric positioning error through the lever arm of the linkages. For the rigorous cross-product derivation of this kinematic error propagation, see @sec-appendix-control-spatial.
 
 ```{python}
 #| label: calc-memory-latch-transform-staleness
@@ -572,21 +609,70 @@ class MachineExpiryRoots:
 | Latch-slot finger        | `{python} MachineExpiryRoots.latch_growth_math` | `{python} MachineExpiryRoots.latch_limit_str` | `{python} MachineExpiryRoots.latch_root_str` | Refuse the insertion; hold compliantly or reacquire the slot        |
 | Coworker beside the arm  | `{python} MachineExpiryRoots.cw_growth_math`    |    `{python} MachineExpiryRoots.cw_limit_str` |    `{python} MachineExpiryRoots.cw_root_str` | Revoke dependent arm motion; stop only if braking clearance remains |
 
-: **Belief-expiry roots on the machine**: Each root solves $E(t)=E_{\max}$ for that belief's error model and task limit. The coworker's initial error is illustrative and its tolerance chosen, while its speed is the same walking-speed bound as the rack end, so both person rows grow linearly. The last column names the response the root would trigger. {#tbl-09-belief-decay-horizons tbl-colwidths="[20,28,14,12,26]"}
+: **Belief-expiry roots on the machine**: Each root solves $E(t)=E_{\max}$ for that belief's error model and task limit. The coworker's initial error is illustrative and its tolerance chosen, while its speed is the same walking-speed bound as the rack end, so both person rows grow linearly. The last column names the response the root would trigger. The record for the mug-handle belief that @sec-intent consumes is filled in @sec-memory-spatial-state-schema. {#tbl-09-belief-decay-horizons tbl-colwidths="[20,28,14,12,26]"}
 
 Every root in this section trusts the growth law it was computed from. A growth law is only as good as the machine's ability to catch its failures, through a residual at reacquisition or a staged dropout test, and some errors produce no residual at all because no sensor on the machine can see them.
 
 ## When the Estimator Cannot Know {#sec-memory-state-estimation-bounds}
 
-An illustrative strain gauge on a robot's end-effector reads a steady $5.0\text{ N}$, a reading that fits any true contact force once an unknown bias is allowed. An estimator, or a learned model, that predicts that force with confidence has not shown the force is observable. In state estimation, a state trajectory is **observable**\index{Observable} if and only if the history of available sensor outputs over a finite time window uniquely determines the initial state of the machine, so that distinct physical trajectories produce distinct sensor trajectories rather than indistinguishable measurement sequences. When two distinct physical state histories produce the exact same sequence of sensor readings, no mathematical operation, filter, or neural network running anywhere in the machine can determine which physical trajectory the body actually followed. The machine receives identical bitstreams from its sensor interfaces across both realities.
+```{python}
+#| label: calc-memory-bias-drift
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ILLUSTRATIVE STRAIN-GAUGE BIAS DRIFT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-memory-state-estimation-bounds (unobservable sensor bias).
+# │
+# │ Goal:    Show a confident estimate drifting along an unobservable subspace.
+# │ Show:    5 N reading; 0.2 N/min thermal drift over 15 min shifts the bias
+# │          by 3 N, so the true force is 2 N, 60 percent below nominal.
+# │ How:     Illustrative reading, drift rate, and span; shift = rate x span.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import ureg
+from mlsysim.fmt import fmt, fmt_qty, fmt_int, check
 
-To see why predictability differs from observability, follow that end-effector as it regulates contact force against a rigid surface. Let the true normal contact force be $x(t)$, and let the strain-gauge conditioning electronics introduce an unknown, slowly changing sensor bias $b(t)$. The raw measurement delivered to the estimator at each sample interval is $y(t) = x(t) + b(t)$. Suppose the sensor outputs a constant stream $y(t) = 5.0\text{ N}$. This observation is satisfied by a true physical force $x(t) = 5.0\text{ N}$ with zero offset $b(t) = 0.0\text{ N}$. It is equally satisfied by a true force $x(t) = 2.0\text{ N}$ with a sensor bias $b(t) = 3.0\text{ N}$, or by $x(t) = 0.0\text{ N}$ with a bias $b(t) = 5.0\text{ N}$. For any arbitrary offset trajectory $\Delta(t)$, the state pair $(x(t) - \Delta(t), b(t) + \Delta(t))$ produces the exact same measurement sequence $y(t)$. The difference between the true force and the sensor offset lies in an **unobservable subspace**\index{Unobservable subspace} of the measurement system—a structural blind spot where physical variations perfectly cancel each other out in the sensor data.
+class MemoryBiasDrift:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
+    y_read = 5.0 * newton  # category: illustrative (steady strain-gauge reading)
+    sigma_claim = 0.05 * newton  # category: illustrative (estimator's reported P99 bound)
+    drift_rate = 0.2 * newton / minute  # category: illustrative (thermoelastic bias drift)
+    span = 15 * minute  # category: illustrative (drift interval)
+    t_excite = 40 * millisecond  # category: illustrative (deliberate contact break)
+    f_sample = 1000 * hertz  # category: illustrative (strain-gauge sample rate)
 
-Because the measurement stream cannot distinguish between physical load and sensor drift, an estimator must rely on prior assumptions about how each state evolves. If a Kalman filter or a learned recurrent estimator is configured with a belief that the sensor offset $b(t)$ is static with near-zero variance, it attributes every variation in $y(t)$ to changes in true contact force $x(t)$. As new samples arrive at $1000\text{ Hz}$, the filter incorporates the incoming data, repeatedly updating its internal state. Because the incoming measurements match the forward projection of the state dynamics, the calculated state covariance contracts, and the estimator reports an increasingly narrow uncertainty bound, publishing an estimate of $5.0\text{ N} \pm 0.05\text{ N}$ at $P_{99}$. Meanwhile, Joule heating ($I^2 R$) in the joint stator coils (@sec-body-thermal-duty-cycles) warms the sensor bridge (altering the metal's electrical resistance as it expands), causing the physical bias $b(t)$ to drift at a thermoelastic rate of $0.2\text{ N/min}$. Over $15\text{ min}$, $b(t)$ shifts by $3.0\text{ N}$. The true force on the surface has fallen from $5.0\text{ N}$ to $2.0\text{ N}$, yet the estimator reports high confidence in a state that has drifted by 60 percent of its nominal value.
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
+    shift = (drift_rate * span).to(newton)
+    x_true = (y_read - shift).to(newton)
+    pct = (shift / y_read).to("dimensionless").magnitude * 100
 
-The downstream control policy responds to this false certainty by commanding motor torques to maintain what it believes is a $5.0\text{ N}$ preload. Because the true force is only $2.0\text{ N}$, the friction force at the contact patch drops below the shear load of the workpiece, causing the part to slip from the gripper and fall into the tooling fixture. This failure occurs without triggering a single internal software diagnostic. The estimator monitors its innovation sequence\index{Innovation sequence}, the innovation of @sec-memory-belief-through-occlusion evaluated at every sample between incoming measurements $y(t)$ and predicted measurements $\hat{y}(t)$. In this drift scenario, the estimator predicted $\hat{y}(t) = \hat{x}(t) + \hat{b}(t) = 5.0\text{ N}$, and the physical sensor returned $y(t) = 5.0\text{ N}$. The innovation is zero at every time step. An innovation check measures only whether the physical sensors disagree with the forward projection of the internal state. It cannot expose an unobservable error mode, because along the unobservable manifold the sensor output is invariant to the drift.
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
+    check(abs(shift.magnitude - 3.0) < 1e-9, "Bias shift is 3 N.")
+    check(abs(x_true.magnitude - 2.0) < 1e-9, "True force falls to 2 N.")
+    check(abs(pct - 60.0) < 1e-9, "Drift is 60 percent of nominal.")
 
-Recovering observability requires the system architecture to provide an additional constraint that breaks the symmetry along the unobservable subspace. An engineering design accomplishes this in one of three ways. First, independent sensing can introduce a second measurement channel with different failure physics, such as monitoring joint motor current or an optical deflection sensor that does not share the strain gauge's thermal sensitivity. Second, the machine can perform deliberate physical excitation, commanding the gripper to briefly break contact with the workpiece for $40\text{ ms}$, creating a known boundary condition of $x(t) = 0.0\text{ N}$ where the measured sensor value directly exposes $b(t)$. Third, the machine can rely on periodic external anchoring, bringing the tool into contact with a calibrated reference load cell during scheduled tool-change cycles to reset the bias estimate.
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
+    y_str = fmt_qty(y_read, newton, precision=0)
+    zero_str = fmt_qty(0 * newton, newton, precision=0)
+    sigma_str = fmt_qty(sigma_claim, newton, precision=2)
+    rate_str = fmt(drift_rate.magnitude, precision=1)
+    span_str = fmt_int(span.magnitude)
+    shift_str = fmt_qty(shift, newton, precision=0)
+    x_true_str = fmt_qty(x_true, newton, precision=0)
+    pct_str = fmt_int(pct)
+    t_excite_str = fmt_int(t_excite.to(millisecond).magnitude)
+    f_sample_str = fmt_int(f_sample.to(hertz).magnitude)
+```
+
+An illustrative strain gauge on a robot's end-effector reads a steady `{python} MemoryBiasDrift.y_str`, a reading that fits any true contact force once an unknown bias is allowed. An estimator, or a learned model, that predicts that force with confidence has not shown the force is observable. In state estimation, a state trajectory is **observable**\index{Observable} if and only if the history of available sensor outputs over a finite time window uniquely determines the initial state of the machine, so that distinct physical trajectories produce distinct sensor trajectories rather than indistinguishable measurement sequences. When two distinct physical state histories produce the exact same sequence of sensor readings, no mathematical operation, filter, or neural network running anywhere in the machine can determine which physical trajectory the body actually followed. The machine receives identical bitstreams from its sensor interfaces across both realities.
+
+To see why predictability differs from observability, follow that end-effector as it regulates contact force against a rigid surface. Let the true normal contact force be $x(t)$, and let the strain-gauge conditioning electronics introduce an unknown, slowly changing sensor bias $b(t)$. The raw measurement delivered to the estimator at each sample interval is $y(t) = x(t) + b(t)$. Suppose the sensor outputs a constant stream $y(t) =$ `{python} MemoryBiasDrift.y_str`. This observation is satisfied by a true physical force $x(t) =$ `{python} MemoryBiasDrift.y_str` with zero offset $b(t) =$ `{python} MemoryBiasDrift.zero_str`. It is equally satisfied by a true force $x(t) =$ `{python} MemoryBiasDrift.x_true_str` with a sensor bias $b(t) =$ `{python} MemoryBiasDrift.shift_str`, or by $x(t) =$ `{python} MemoryBiasDrift.zero_str` with a bias $b(t) =$ `{python} MemoryBiasDrift.y_str`. For any arbitrary offset trajectory $\Delta(t)$, the state pair $(x(t) - \Delta(t), b(t) + \Delta(t))$ produces the exact same measurement sequence $y(t)$. The difference between the true force and the sensor offset lies in an **unobservable subspace**\index{Unobservable subspace} of the measurement system, a structural blind spot where physical variations perfectly cancel each other out in the sensor data.
+
+Because the measurement stream cannot distinguish between physical load and sensor drift, an estimator must rely on prior assumptions about how each state evolves. If a Kalman filter or a learned recurrent estimator is configured with a belief that the sensor offset $b(t)$ is static with near-zero variance, it attributes every variation in $y(t)$ to changes in true contact force $x(t)$. As new samples arrive at `{python} MemoryBiasDrift.f_sample_str` $\text{Hz}$, the filter incorporates the incoming data, repeatedly updating its internal state. Because the incoming measurements match the forward projection of the state dynamics, the calculated state covariance contracts, and the estimator reports an increasingly narrow uncertainty bound, publishing an estimate of `{python} MemoryBiasDrift.y_str` $\pm$ `{python} MemoryBiasDrift.sigma_str` at $P_{99}$. Meanwhile, Joule heating ($I^2 R$) in the joint stator coils (@sec-body-thermal-duty-cycles) warms the sensor bridge (altering the metal's electrical resistance as it expands), causing the physical bias $b(t)$ to drift at a thermoelastic rate of `{python} MemoryBiasDrift.rate_str` $\text{N/min}$. Over `{python} MemoryBiasDrift.span_str` $\text{min}$, $b(t)$ shifts by `{python} MemoryBiasDrift.shift_str`. The true force on the surface has fallen from `{python} MemoryBiasDrift.y_str` to `{python} MemoryBiasDrift.x_true_str`, yet the estimator reports high confidence in a state that has drifted by `{python} MemoryBiasDrift.pct_str` percent of its nominal value.
+
+The downstream control policy responds to this false certainty by commanding motor torques to maintain what it believes is a `{python} MemoryBiasDrift.y_str` preload. Because the true force is only `{python} MemoryBiasDrift.x_true_str`, the friction force at the contact patch drops below the shear load of the workpiece, causing the part to slip from the gripper and fall into the tooling fixture. This failure occurs without triggering a single internal software diagnostic. The estimator monitors its innovation sequence\index{Innovation sequence}, the innovation of @sec-memory-belief-through-occlusion evaluated at every sample between incoming measurements $y(t)$ and predicted measurements $\hat{y}(t)$. In this drift scenario, the estimator predicted $\hat{y}(t) = \hat{x}(t) + \hat{b}(t) =$ `{python} MemoryBiasDrift.y_str`, and the physical sensor returned $y(t) =$ `{python} MemoryBiasDrift.y_str`. The innovation is zero at every time step. An innovation check measures only whether the physical sensors disagree with the forward projection of the internal state. It cannot expose an unobservable error mode, because along the unobservable manifold the sensor output is invariant to the drift.
+
+Recovering observability requires the system architecture to provide an additional constraint that breaks the symmetry along the unobservable subspace. An engineering design accomplishes this in one of three ways. First, independent sensing can introduce a second measurement channel with different failure physics, such as monitoring joint motor current or an optical deflection sensor that does not share the strain gauge's thermal sensitivity. Second, the machine can perform deliberate physical excitation, commanding the gripper to briefly break contact with the workpiece for `{python} MemoryBiasDrift.t_excite_str` $\text{ms}$, creating a known boundary condition of $x(t) =$ `{python} MemoryBiasDrift.zero_str` where the measured sensor value directly exposes $b(t)$. Third, the machine can rely on periodic external anchoring, bringing the tool into contact with a calibrated reference load cell during scheduled tool-change cycles to reset the bias estimate.
 
 When a physical state cannot be constrained by complementary sensing or active excitation, the estimator must treat that state as unobservable and refuse to publish false precision. The estimation layer must mark the corresponding state dimensions as unavailable, or widen their error bound according to the worst-case physical drift rate of the underlying hardware rather than the contracted covariance of a filtering algorithm. Formal observability analysis for linear and nonlinear dynamic systems is an established foundation of control theory, treated rigorously by @kalman1960new for linear state spaces and by @hermann1977nonlinear for nonlinear systems via **Lie derivatives**\index{Lie derivatives} (see @sec-appendix-control-covariance). A systems engineer does not rederive these rank conditions at runtime. The engineering task is to identify which physical states lack full observability rank under the current sensor suite, and to enforce that the state interface never reports statistical convergence on an unconstrained degree of freedom.
 
@@ -594,11 +680,55 @@ The observability and convergence results of state estimation come from control 
 
 ## How Belief Goes Wrong {#sec-memory-failure-modes}
 
-A camera stops delivering frames, yet a transport node keeps republishing its last transform with the current time, and a downstream controller's $5\text{ ms}$ publish-time freshness check passes every copy. That failure differs in kind from a camera that simply falls silent, and the difference sorts every estimation failure into one of two forms. In a **loud failure**\index{Loud failure}, a component halts execution, drops a communication packet, clears an output buffer, or asserts an explicit error bit. Downstream consumers immediately observe the absence of data or the cleared validity flag, enabling a validated fallback, such as a hold, stop, or compliant mode, when one remains feasible. In a **silent failure**\index{Silent failure}, the memory layer continues to publish a complete, numerically well-formed state record with valid status bits, low variance indicators, and continuous timestamps, while the numbers inside the record diverge from the physical configuration of the machine. Downstream control loops consume these corrupted records without raising an exception, computing feedback corrections against a phantom geometry. Because physical actuators execute commands derived from these valid-looking records, such as driving an arm toward a target that now intersects a wall, silent state corruption can deliver force across the causal boundary of @sec-boundary-causal-boundary before any software monitor registers an anomaly.[^fn-std-amr-occlusion]
+```{python}
+#| label: calc-memory-frozen-transform
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ILLUSTRATIVE FROZEN-TRANSFORM TIMELINE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-memory-failure-modes (loud and silent failures, frozen
+# │          transform).
+# │
+# │ Goal:    Show a republished stale transform passing a publish-time check
+# │          while tracking error grows.
+# │ Show:    1 ms republish period (1000 Hz); 5 ms freshness threshold; sensor
+# │          lost at 10 ms; 0.5 m/s object motion gives 50 mm in 100 ms.
+# │ How:     Illustrative timeline; error = speed x elapsed time.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.fmt import fmt, fmt_int, check
+
+class MemoryFrozenTransform:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────
+    t_repub = 1 * millisecond  # category: illustrative (middleware republish period)
+    tau_max = 5 * millisecond  # category: illustrative (publish-time freshness threshold)
+    t_loss = 10 * millisecond  # category: illustrative (sensor stops producing evidence)
+    v_obj = 0.5 * meter / second  # category: illustrative (object speed)
+    t_window = 100 * millisecond  # category: illustrative (elapsed time with static transform)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
+    f_repub = (1 / t_repub).to(hertz)
+    err = (v_obj * t_window).to(millimeter)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
+    check(t_repub < tau_max, "A republished copy must pass the freshness threshold.")
+    check(abs(err.magnitude - 50.0) < 1e-9, "Tracking error is 50 mm.")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────────
+    t_repub_str = fmt_int(t_repub.to(millisecond).magnitude)
+    tau_max_str = fmt_int(tau_max.to(millisecond).magnitude)
+    t_loss_str = fmt_int(t_loss.to(millisecond).magnitude)
+    f_repub_str = fmt_int(f_repub.magnitude)
+    v_obj_str = fmt(v_obj.magnitude, precision=1)
+    t_window_str = fmt_int(t_window.to(millisecond).magnitude)
+    err_str = fmt_int(err.magnitude)
+```
+
+A camera stops delivering frames, yet a transport node keeps republishing its last transform with the current time, and a downstream controller's `{python} MemoryFrozenTransform.tau_max_str` $\text{ms}$ publish-time freshness check passes every copy. That failure differs in kind from a camera that simply falls silent, and the difference sorts every estimation failure into one of two forms. In a **loud failure**\index{Loud failure}, a component halts execution, drops a communication packet, clears an output buffer, or asserts an explicit error bit. Downstream consumers immediately observe the absence of data or the cleared validity flag, enabling a validated fallback, such as a hold, stop, or compliant mode, when one remains feasible. In a **silent failure**\index{Silent failure}, the memory layer continues to publish a complete, numerically well-formed state record with valid status bits, low variance indicators, and continuous timestamps, while the numbers inside the record diverge from the physical configuration of the machine. Downstream control loops consume these corrupted records without raising an exception, computing feedback corrections against a phantom geometry. Because physical actuators execute commands derived from these valid-looking records, such as driving an arm toward a target that now intersects a wall, silent state corruption can deliver force across the causal boundary of @sec-boundary-causal-boundary before any software monitor registers an anomaly.[^fn-std-amr-occlusion]
 
 [^fn-std-amr-occlusion]: **AMR Safety Standards**\index{AMR Safety Standards}: ISO 3691-4 addresses safety requirements for driverless industrial trucks and their systems. Occlusion and stopping distance are assessed for each design's operating domain and sensor and actuator configuration, not taken as universal values.
 
-The republishing hazard of @sec-memory-preserving-belief has a name, the **frozen transform**\index{Frozen transform}, and it is the most deceptive silent failure because a stale spatial snapshot, republished with current timestamps, masks a dead sensor. In an illustrative timeline, an optical tracking node computes a transformation matrix $T_{\text{camera}}^{\text{object}}$ at timestamp $t_0 = 0\text{ ms}$. If the optical sensor disconnects, drops frames, or suffers thread starvation at $t = 10\text{ ms}$, the underlying tracking algorithm ceases to produce new spatial evidence. If the message-passing middleware or an intermediate transport node retains the last computed matrix in an unexpired buffer and republishes it at a loop rate of $1000\text{ Hz}$, generating a new transmission timestamp $t_k = t_0 + k \cdot (1\text{ ms})$, the temporal provenance of the measurement is erased. A downstream tracking controller verifies freshness by computing data age as $\Delta t = t_{\text{now}} - t_{\text{msg}}$. Because the publisher stamped the message with the current system clock, $\Delta t$ evaluates to less than $1\text{ ms}$, satisfying a strict freshness threshold of $\tau_{\text{max}} = 5\text{ ms}$. The controller accepts the transform as current evidence. If the physical object moves at $0.5\text{ m/s}$ while the transform remains static, the controller accumulates $50\text{ mm}$ of spatial tracking error in $100\text{ ms}$, yet reports zero estimated tracking divergence.
+The republishing hazard of @sec-memory-preserving-belief has a name, the **frozen transform**\index{Frozen transform}, and it is the most deceptive silent failure because a stale spatial snapshot, republished with current timestamps, masks a dead sensor. In an illustrative timeline, an optical tracking node computes a transformation matrix $T_{\text{camera}}^{\text{object}}$ at timestamp $t_0 = 0\text{ ms}$. If the optical sensor disconnects, drops frames, or suffers thread starvation at $t =$ `{python} MemoryFrozenTransform.t_loss_str` $\text{ms}$, the underlying tracking algorithm ceases to produce new spatial evidence. If the message-passing middleware or an intermediate transport node retains the last computed matrix in an unexpired buffer and republishes it at a loop rate of `{python} MemoryFrozenTransform.f_repub_str` $\text{Hz}$, generating a new transmission timestamp $t_k = t_0 + k\,T_{\text{rep}}$ with $T_{\text{rep}} =$ `{python} MemoryFrozenTransform.t_repub_str` $\text{ms}$, the temporal provenance of the measurement is erased. A downstream tracking controller verifies freshness by computing data age as $\Delta t = t_{\text{now}} - t_{\text{msg}}$. Because the publisher stamped the message with the current system clock, $\Delta t$ evaluates to less than `{python} MemoryFrozenTransform.t_repub_str` $\text{ms}$, satisfying a strict freshness threshold of $\tau_{\text{max}} =$ `{python} MemoryFrozenTransform.tau_max_str` $\text{ms}$. The controller accepts the transform as current evidence. If the physical object moves at `{python} MemoryFrozenTransform.v_obj_str` $\text{m/s}$ while the transform remains static, the controller accumulates `{python} MemoryFrozenTransform.err_str` $\text{mm}$ of spatial tracking error in `{python} MemoryFrozenTransform.t_window_str` $\text{ms}$, yet reports zero estimated tracking divergence.
 
 **Phantom-object tracks**\index{Phantom-object tracks} arise when the estimator decouples the lifetime of spatial coordinates from the lifetime of existence evidence. A perception module maintains an object track comprising a kinematic state vector $\mathbf{x} = [p, v]^T$ (encoding spatial position and velocity) and an existence probability $p_{\text{exist}} \in [0, 1]$ (encoding confidence that the object is physically real). When the physical object is removed from the workspace or an occlusion begins, raw detector hits drop to zero. If the estimation layer continues to propagate $\mathbf{x}$ forward using process dynamics while existence probability decay is governed by a long time constant (for instance, an illustrative decay under which $p_{\text{exist}}$ remains above an operating threshold for $1500\text{ ms}$ without reinforcement), the tracker maintains a persistent phantom entity. The path planner routes the manipulator around empty space, or an automated grasping routine closes its fingers on an empty coordinate. Detecting a phantom track cannot rely on passive measurement absence. It requires negative evidence (@sec-memory-scene-attention-buffers), where a line-of-sight sensor sweeps the volume and confirms that the expected occupancy is empty, or an unfulfilled contact expectation when a force sensor registers zero load at the predicted contact boundary.[^fn-std-ul-iso]
 
@@ -694,7 +824,7 @@ A consumer of either record converts the capture epoch to its own clock, adds th
 
 Before turning to the fallacies that arise when valid records are trusted too far, verify your understanding of evidence epochs, belief expiry, observability limits, and the belief record:
 
-- [ ] **Epoch classification**: Can you distinguish the acquisition epoch ($t_0$) from the estimate epoch ($t_{\text{est}}$) and the publication epoch ($t_{\text{pub}}$), and explain why stamping an estimate with its publication time hides the displacement accumulated since capture?
+- [ ] **Epoch classification**: Can you distinguish the evidence (acquisition) epoch ($t_0$) from the estimate epoch ($t_{\text{est}}$) and the publication epoch ($t_{\text{pub}}$), and explain why stamping an estimate with its publication time hides the displacement accumulated since capture?
 - [ ] **Physical invalidation horizon**: Can you explain why the shelf life of a spatial belief during occlusion is set by task clearance and bounded disturbance rather than by a software timeout, and why a constant-velocity extrapolation admits the belief past its deadline?
 - [ ] **Unobservable manifold hazards**: Can you explain why zero innovation ($y - \hat{y} = 0$) fails to detect sensor bias drift caused by motor thermal heating ($I^2 R$ Joule heating) along an unobservable degree of freedom?
 - [ ] **State lifecycle state machine**: Can you trace the deterministic transitions between `VALID`, `DEGRADED`, `EXPIRED`, and `UNOBSERVABLE`, explaining why a state record must never revert to `VALID` without a fresh hardware evidence epoch $t_0$?
@@ -785,5 +915,5 @@ Two kinds of error hide from the checks a consumer can run. A frozen transform o
 The third law requires the permission path to decide each action on state whose age is known (principle \ref{pri-vol4-proposal-permission}), and spatial memory gives that age its definition, counting it from the evidence epoch of the last physical measurement rather than from the estimate epoch of the latest computation. Space that no valid ray has crossed has no evidence epoch at all, so it reaches the permission path as unknown, with no age that could make it clear. A known age is still not a license. It means something only through the growth law that turns it into an error bound, and however exactly the age is known, the permission path must refuse the state at the deadline where that bound reaches the task tolerance.
 
 ::: {.callout-chapter-connection title="From valid beliefs to bounded goals"}
-What may a valid belief authorize? Memory rules only on validity. It can say that a remembered object lies within a stated bound until a stated deadline, but it cannot say what the machine should do about that object. In @sec-intent, a human goal, taking the mug from the conveyor, becomes an intent lease that consumes the belief record of the mug's handle, carries that belief's evidence epoch forward as its own evidence horizon, and grants a bounded target with effort limits, never a path, for no longer than the evidence beneath it supports.
+What may a valid belief authorize? Memory rules only on validity. It can say that a remembered object lies within a stated bound until a stated deadline, but it cannot say what the machine should do about that object. In @sec-intent, a human goal, taking the mug from the conveyor, becomes an intent lease that consumes the belief record of the mug's handle, carries that belief's evidence epoch forward as its own evidence time, caps its expiry at that belief's horizon, and grants a bounded target with effort limits, never a path, for no longer than the evidence beneath it supports.
 :::
