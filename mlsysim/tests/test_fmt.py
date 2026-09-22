@@ -64,6 +64,38 @@ from mlsysim.fmt import (
     fmt_usd,
     fmt_usd_range,
     fmt_val,
+    fmt_force,
+    fmt_force_rate,
+    fmt_mass,
+    fmt_angular_velocity,
+    fmt_velocity,
+    fmt_jerk,
+    fmt_inertia,
+    fmt_voltage,
+    fmt_current,
+    fmt_resistance,
+    fmt_token_rate,
+    fmt_acceleration,
+    fmt_frequency,
+    fmt_latency,
+    fmt_torque,
+    fmt_torque_rate,
+    fmt_torque_constant,
+    fmt_math,
+    fmt_frac,
+    fmt_thermal_resistance,
+    fmt_heat_capacity,
+    fmt_density,
+    fmt_mass_flow,
+    fmt_volumetric_flow,
+    fmt_charge,
+    fmt_battery_capacity,
+    fmt_angle,
+    fmt_inductance,
+    fmt_capacitance,
+    fmt_power_rate,
+    fmt_stiffness,
+    fmt_volume,
 )
 
 
@@ -1243,6 +1275,102 @@ class TestDomainFormatters:
             fmt_usd_range(10_000, 30_000, scale="K", commas=False, repeat_symbol=False)
             == "\\$10K\u201330K"
         )
+
+    def test_fmt_temperature_kelvin_and_celsius(self):
+        from mlsysim.core.units import K
+
+        assert fmt_temperature(ureg.Quantity(80, ureg.degC), precision=0, commas=False) == "80 °C"
+        assert fmt_temperature(10 * K, precision=0, commas=False) == "10 K"
+        assert fmt_temperature(10 * K, unit=K, precision=0, commas=False) == "10 K"
+
+    def test_fmt_temperature_rate_kelvin_and_celsius(self):
+        from mlsysim.core.units import K, second
+
+        assert (
+            fmt_temperature_rate(1 * ureg.delta_degC / second, precision=0, commas=False)
+            == "1 °C/s"
+        )
+        assert fmt_temperature_rate(2.5 * (K / second), precision=1, commas=False) == "2.5 K/s"
+
+    def test_fmt_thermal_resistance(self):
+        from mlsysim.core.units import K, watt
+
+        assert fmt_thermal_resistance(1.5 * (K / watt), precision=1, commas=False) == "1.5 K/W"
+        with pytest.raises(ValueError, match="thermal resistance dimensionality"):
+            fmt_thermal_resistance(10 * watt)
+
+    def test_fmt_heat_capacity(self):
+        from mlsysim.core.units import J, K, kJ
+
+        assert fmt_heat_capacity(500 * (J / K), precision=0, commas=False) == "500 J/K"
+        assert fmt_heat_capacity(2.4 * (kJ / K), precision=1, commas=False) == "2.4 kJ/K"
+        assert fmt_heat_capacity(2400 * (J / K), precision=1, commas=False) == "2.4 kJ/K"
+
+    def test_fmt_density(self):
+        from mlsysim.core.units import kg, meter
+
+        assert fmt_density(1.2 * (kg / (meter**3)), precision=1, commas=False) == "1.2 kg/m³"
+        with pytest.raises(ValueError, match="density dimensionality"):
+            fmt_density(10 * kg)
+
+    def test_fmt_mass_and_flow(self):
+        from mlsysim.core.units import kg, second
+
+        assert fmt_mass_flow(0.5 * (kg / second), precision=1, commas=False) == "0.5 kg/s"
+
+    def test_fmt_volumetric_flow(self):
+        from mlsysim.core.units import meter, second
+
+        assert (
+            fmt_volumetric_flow(0.04 * ((meter**3) / second), precision=2, commas=False)
+            == "0.04 m³/s"
+        )
+
+    def test_fmt_charge_and_battery_capacity(self):
+        assert fmt_charge(4500 * ureg.milliampere_hour, precision=1, commas=False) == "4.5 Ah"
+        assert fmt_battery_capacity(500 * ureg.milliampere_hour, precision=0, commas=False) == "500 mAh"
+        assert fmt_charge(4500 * ureg.milliampere_hour, unit=ureg.milliampere_hour, precision=0, commas=False) == "4500 mAh"
+
+    def test_fmt_angle(self):
+        from mlsysim.core.units import radian
+
+        assert fmt_angle(1.57 * radian, precision=2, commas=False) == "1.57 rad"
+        assert fmt_angle(90 * ureg.degree, unit=ureg.degree, precision=0, commas=False) == "90 deg"
+
+    def test_fmt_inductance_and_capacitance(self):
+        assert fmt_inductance(2.2 * ureg.microhenry, precision=1, commas=False) == "2.2 μH"
+        assert fmt_capacitance(100 * ureg.microfarad, precision=0, commas=False) == "100 μF"
+
+    def test_fmt_power_rate(self):
+        from mlsysim.core.units import second
+
+        assert (
+            fmt_power_rate(0.25 * (ureg.gigawatt / second), unit=ureg.gigawatt / second, precision=2, commas=False)
+            == "0.25 GW/s"
+        )
+        assert (
+            fmt_power_rate(0.25 * (ureg.gigawatt / second), precision=0, commas=False)
+            == "250 MW/s"
+        )
+
+    def test_fmt_stiffness_and_volume(self):
+        from mlsysim.core.units import meter, newton
+
+        assert fmt_stiffness(1500 * (newton / meter), precision=0, commas=True) == "1,500 N/m"
+        assert fmt_volume(2.5 * (meter**3), precision=1, commas=False) == "2.5 m³"
+
+    def test_fmt_robotics_and_kinematics(self):
+        from mlsysim.core.units import meter, second, newton, ampere
+
+        assert fmt_acceleration(9.8 * (meter / (second**2)), precision=1, commas=False) == "9.8 m/s²"
+        assert fmt_frequency(100 * ureg.hertz, precision=0, commas=False) == "100 Hz"
+        assert fmt_latency(15 * ureg.millisecond, precision=0, commas=False) == "15 ms"
+        assert fmt_torque(50 * (newton * meter), precision=0, commas=False) == "50 N·m"
+        assert fmt_torque_rate(100 * (newton * meter / second), precision=0, commas=False) == "100 N·m/s"
+        assert fmt_torque_constant(0.2 * (newton * meter / ampere), precision=1, commas=False) == "0.2 N·m/A"
+        assert fmt_token_rate(150, precision=0, commas=False) == "150 tokens/s"
+        assert fmt_math(r"\alpha + \beta") == "$\\alpha + \\beta$"
+        assert fmt_frac(1, 4) == "$\\frac{1}{4}$"
 
 
 class TestAuditRepairs:

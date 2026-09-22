@@ -97,7 +97,7 @@ For the mobile manipulator, the release question is whether the evidence meets t
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt, fmt_velocity, fmt_length, fmt_qty, fmt_latency, check
+from mlsysim.fmt import fmt, fmt_velocity, fmt_length, fmt_mass, fmt_force, fmt_latency, check
 from mlsysim.physics.robotics import calc_max_permitted_velocity, calc_c2_stop_suffix
 
 # ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
@@ -117,25 +117,26 @@ def _a_eff(a_peak):
 
 # ┌── 2. EXECUTE: ceilings and friction bands ───────────────────────────────────
 a_eff = _a_eff(AISLE.a_brake)  # C2 stop suffix as an equivalent constant deceleration
-v_ceiling = calc_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, a_eff, AISLE.delta_loc + AISLE.eps_track, AISLE.delta_margin).to(
-    meter / second
-)
+overhead_loc = AISLE.delta_loc + AISLE.eps_track
+v_ceiling = calc_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, a_eff, overhead_loc, AISLE.delta_margin).to(meter / second)
 mu_min = (AISLE.a_brake / g_std).to("dimensionless").magnitude
 a_inspected = min(AISLE.a_brake, (AISLE.mu_inspected_floor * g_std).to(meter / second**2))
-v_inspected_ceiling = calc_max_permitted_velocity(
-    AISLE.d_clear, AISLE.tau_delay, _a_eff(a_inspected), AISLE.delta_loc + AISLE.eps_track, AISLE.delta_margin
-).to(meter / second)
+v_inspected_ceiling = calc_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, _a_eff(a_inspected), overhead_loc, AISLE.delta_margin).to(
+    meter / second
+)
 v_handover_ceiling = (AISLE.f_contact_criterion / (AISLE.k_contact_human * RM.arm_effective_contact_mass) ** 0.5).to(meter / second)
 
 # ┌── 3. GUARD: canon values quoted in the prose and the table ──────────────────
-check(abs(v_ceiling.magnitude - 1.3898) < 5e-5, "Aisle ceiling is 1.39 m/s")
-check(AISLE.v_aisle < v_ceiling, "Chosen aisle speed sits under the ceiling")
-check(abs(mu_min - 0.204) < 5e-4, "Friction needed for a_brake is 0.204")
-check(abs(v_inspected_ceiling.magnitude - 1.0947) < 5e-5, "Inspected-floor ceiling is 1.09 m/s")
-check(v_restricted < v_inspected_ceiling, "Restricted mode sits below the inspected-floor ceiling")
-check(abs(v_handover_ceiling.magnitude - 0.1179) < 5e-5, "Handover ceiling is 0.118 m/s")
+check(abs(v_ceiling.magnitude - 1.3898) < 5e-5, "Unconditional aisle speed ceiling is 1.39 m/s")
+check(AISLE.v_aisle < v_ceiling, "Chosen aisle speed sits under its ceiling")
+check(abs(mu_min - 0.204) < 5e-4, "Friction floor is 0.204")
+check(mu_min < AISLE.mu_dry, "Dry concrete exceeds the friction floor")
+check(mu_min > AISLE.mu_inspected_floor, "Inspected floor requires speed restriction")
+check(abs(v_inspected_ceiling.magnitude - 1.0947) < 5e-5, "Restricted ceiling on inspected floors is 1.09 m/s")
+check(v_restricted < v_inspected_ceiling, "Chosen restricted mode sits under its ceiling")
+check(abs(v_handover_ceiling.magnitude - 0.1179) < 5e-5, "Coworker handover speed ceiling is 0.118 m/s")
 check(AISLE.v_handover < v_handover_ceiling, "Chosen handover speed sits under its ceiling")
-check(abs(RM.loaded_mass.to(kilogram).magnitude - 368.0) < 1e-9, "Loaded mass is 368 kg")
+check(abs(RM.loaded_mass.to(kilogram).magnitude - 368.0) < 1e-9, "Running-machine loaded mass is 368 kg")
 check(AISLE.v_takeover_in_loop < AISLE.v_aisle, "Slow-down before an in-loop takeover")
 check(AISLE.mu_oil_film < AISLE.mu_inspected_floor < mu_min < AISLE.mu_dry, "Friction bands are ordered")
 check(abs(AISLE.v_aisle.to(meter / second).magnitude - 1.3) < 1e-9, "Signed aisle speed 1.3 m/s")
@@ -143,7 +144,8 @@ check(abs(AISLE.d_clear.to(meter).magnitude - 1.10) < 1e-9, "Clear distance 1.10
 check(abs(AISLE.v_takeover_in_loop.to(meter / second).magnitude - 1.2) < 1e-9, "In-loop takeover slow-down 1.2 m/s")
 check(abs(AISLE.v_takeover_out_of_loop.to(meter / second).magnitude - 0.3) < 1e-9, "Out-of-loop takeover slow-down 0.3 m/s")
 check(abs(AISLE.t_tick.to(millisecond).magnitude - 1.0) < 1e-9, "Permission tick 1 ms")
-check(abs(RM.onboard_payload_capacity.to(kilogram).magnitude - 50.0) < 1e-9, "Tote-rack capacity 50 kg")
+check(AISLE.t_tick < AISLE.t_lease, "Servo tick sits inside the chunk lease")
+check(abs(RM.onboard_payload_capacity.to(kilogram).magnitude - 50.0) < 1e-9, "Tote-rack capacity is 50 kg")
 check(
     abs(AISLE.mu_dry - 0.60) < 1e-9 and abs(AISLE.mu_inspected_floor - 0.12) < 1e-9 and abs(AISLE.mu_oil_film - 0.05) < 1e-9,
     "Friction bands 0.60, 0.12, 0.05",
@@ -164,8 +166,8 @@ class ReleaseEnvelope:
     v_takeover_in_str = fmt_velocity(AISLE.v_takeover_in_loop, unit=meter / second, precision=1)
     v_takeover_out_str = fmt_velocity(AISLE.v_takeover_out_of_loop, unit=meter / second, precision=1)
     t_tick_str = fmt_latency(AISLE.t_tick, unit=millisecond, precision=0)
-    payload_str = fmt_qty(RM.onboard_payload_capacity, kilogram, precision=0)
-    m1_str = fmt_qty(RM.loaded_mass, kilogram, precision=0)
+    payload_str = fmt_mass(RM.onboard_payload_capacity, unit=kilogram, precision=0)
+    m1_str = fmt_mass(RM.loaded_mass, unit=kilogram, precision=0)
     mu_min_str = fmt(round(mu_min, 3), precision=3)
     mu_dry_str = fmt(AISLE.mu_dry, precision=2)
     mu_inspected_str = fmt(AISLE.mu_inspected_floor, precision=2)
@@ -175,12 +177,12 @@ class ReleaseEnvelope:
     d_clear_str = fmt_length(AISLE.d_clear, unit=meter, precision=2)
     v_latch_str = fmt_velocity(AISLE.v_latch_approach, unit=meter / second, precision=2)
     v_latch_high_str = fmt_velocity(AISLE.v_latch_high, unit=meter / second, precision=2)
-    f_trip_str = fmt_qty(AISLE.f_latch_tripwire, newton, precision=0)
+    f_trip_str = fmt_force(AISLE.f_latch_tripwire, precision=0)
     t_contact_str = fmt_latency(AISLE.t_contact_response, unit=millisecond, precision=0)
-    f_latch_limit_str = fmt_qty(AISLE.f_latch_limit, newton, precision=0)
+    f_latch_limit_str = fmt_force(AISLE.f_latch_limit, precision=0)
     v_handover_str = fmt_velocity(AISLE.v_handover, unit=meter / second, precision=2)
     v_handover_ceiling_str = fmt_velocity(round(v_handover_ceiling.magnitude, 3) * meter / second, unit=meter / second, precision=3)
-    f_contact_str = fmt_qty(AISLE.f_contact_criterion, newton, precision=0)
+    f_contact_str = fmt_force(AISLE.f_contact_criterion, precision=0)
 ```
 
 A release case is scoped by the operating envelope, the target ODD paired with the machine's own internal conditions. An unconditional (`UNCOND`) verdict authorizes the whole operating envelope (@sec-verification-operating-envelope), a conditional (`COND`) verdict a named part of it, and a refusal (`REFUSE`) none.\index{Operational design domain!release verdicts} For the mobile manipulator, the operating envelope admits aisle travel at up to `{python} ReleaseEnvelope.v_aisle_str` (chosen; see the Reader Guide) with the tote rack loaded to at most `{python} ReleaseEnvelope.payload_str`, on floors surveyed to a friction coefficient of at least `{python} ReleaseEnvelope.mu_min_str`, past rack ends with at least `{python} ReleaseEnvelope.d_clear_str` of clear distance. It admits door approaches at `{python} ReleaseEnvelope.v_latch_str` and item handovers to the coworker at `{python} ReleaseEnvelope.v_handover_str`.
@@ -234,7 +236,19 @@ A defensible release claim states its plant, contact geometry, and fault set.[^f
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt_qty, fmt_multiple, fmt_latency, fmt_acceleration, fmt_length, fmt_velocity, fmt_percent, fmt_sci_qty, check
+from mlsysim.fmt import (
+    fmt_mass,
+    fmt_stiffness,
+    fmt_force,
+    fmt_multiple,
+    fmt_latency,
+    fmt_acceleration,
+    fmt_length,
+    fmt_velocity,
+    fmt_percent,
+    fmt_sci_qty,
+    check,
+)
 from mlsysim.physics.robotics import calc_safe_stopping_distance, calc_transient_impact_force, calc_c2_stop_suffix
 
 # ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
@@ -283,14 +297,14 @@ check(abs(a_shortfall_pct - 13.9) < 0.1, "A 14 percent deceleration shortfall fi
 
 # ┌── 4. OUTPUT: rendered values ────────────────────────────────────────────────
 class BiomechanicalImpactEnvelope:
-    m_eff_str = fmt_qty(m_eff, kilogram, precision=0)
+    m_eff_str = fmt_mass(m_eff, unit=kilogram, precision=0)
     v_tcp_str = fmt_velocity(RM.tcp_speed_limit, unit=meter / second, precision=0)
-    k_h_str = fmt_qty(AISLE.k_contact_human, newton / meter, precision=0, commas=True)
-    f_tcp_str = fmt_qty(round(f_at_tcp_limit.magnitude) * newton, newton, precision=0)
+    k_h_str = fmt_stiffness(AISLE.k_contact_human, unit=newton / meter, precision=0, commas=True)
+    f_tcp_str = fmt_force(round(f_at_tcp_limit.magnitude) * newton, precision=0)
     f_ratio_mult_str = fmt_multiple(f_ratio, precision=1)
-    f_limit_str = fmt_qty(AISLE.f_contact_criterion, newton, precision=0)
+    f_limit_str = fmt_force(AISLE.f_contact_criterion, precision=0)
     v_handover_str = fmt_velocity(AISLE.v_handover, unit=meter / second, precision=2)
-    f_handover_str = fmt_qty(f_at_handover, newton, precision=1)
+    f_handover_str = fmt_force(f_at_handover, precision=1)
     v_handover_ceiling_str = fmt_velocity(round(v_handover_ceiling.magnitude, 3) * meter / second, unit=meter / second, precision=3)
     v_aisle_str = fmt_velocity(AISLE.v_aisle, unit=meter / second, precision=1)
     d_clear_str = fmt_length(AISLE.d_clear, unit=meter, precision=2)
@@ -414,7 +428,7 @@ The weakest link governs every claim-argument-evidence tree. A safety case is no
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt, fmt_qty, fmt_latency, fmt_acceleration, fmt_length, fmt_velocity, check
+from mlsysim.fmt import fmt, fmt_force, fmt_mass, fmt_latency, fmt_acceleration, fmt_length, fmt_velocity, check
 from mlsysim.physics.robotics import (
     calc_safe_stopping_distance,
     calc_tripwire_contact_force_accumulation,
@@ -486,14 +500,14 @@ class ReleaseClaims:
     budget_str = fmt_length(round(budget_aisle.magnitude, 1) * millimeter, unit=millimeter, precision=1)
     v_aisle_str = fmt_velocity(AISLE.v_aisle, unit=meter / second, precision=1)
     d_clear_str = fmt_length(AISLE.d_clear, unit=meter, precision=2)
-    f_cmd_str = fmt_qty(f_cmd, newton, precision=0)
+    f_cmd_str = fmt_force(f_cmd, precision=0)
     x_remaining_str = fmt_length(round(x_remaining.magnitude, 2) * millimeter, unit=millimeter, precision=2)
     a_arm_str = fmt_acceleration(round(a_arm_needed.magnitude) * meter / second**2, unit=meter / second**2, precision=0)
-    f_latch_limit_str = fmt_qty(AISLE.f_latch_limit, newton, precision=0)
-    f_handover_str = fmt_qty(f_handover, newton, precision=1)
+    f_latch_limit_str = fmt_force(AISLE.f_latch_limit, precision=0)
+    f_handover_str = fmt_force(f_handover, precision=1)
     v_handover_str = fmt_velocity(AISLE.v_handover, unit=meter / second, precision=2)
-    f_contact_str = fmt_qty(AISLE.f_contact_criterion, newton, precision=0)
-    m1_str = fmt_qty(RM.loaded_mass, kilogram, precision=0)
+    f_contact_str = fmt_force(AISLE.f_contact_criterion, precision=0)
+    m1_str = fmt_mass(RM.loaded_mass, unit=kilogram, precision=0)
     t_renewal_to_onset_str = fmt_latency(t_renewal_to_onset, unit=millisecond, precision=0)
     wcet_str = fmt_latency(AISLE.enforcer_wcet, unit=microsecond, precision=0)
     deadline_str = fmt_latency(AISLE.enforcer_deadline, unit=microsecond, precision=0)
@@ -587,7 +601,7 @@ None of the three verdicts is a permanent grant. Linkages develop backlash, fric
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt, fmt_qty, fmt_length, check
+from mlsysim.fmt import fmt, fmt_mass, fmt_length, check
 
 # ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
@@ -607,7 +621,7 @@ check(abs(AISLE.eps_track.to(millimeter).magnitude - 40.0) < 1e-9, "Tracking bou
 class ReleaseStandingPremises:
     mu_min_str = fmt(round(mu_min, 3), precision=3)
     mu_dry_str = fmt(AISLE.mu_dry, precision=2)
-    payload_str = fmt_qty(RM.onboard_payload_capacity, kilogram, precision=0)
+    payload_str = fmt_mass(RM.onboard_payload_capacity, unit=kilogram, precision=0)
     eps_track_str = fmt_length(AISLE.eps_track, unit=millimeter, precision=0)
 ```
 
@@ -647,7 +661,7 @@ The same three states govern the evidence behind each premise. A trial marked `U
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt_energy, fmt_qty, fmt_length, fmt_velocity, fmt_latency, check
+from mlsysim.fmt import fmt_energy, fmt_mass, fmt_length, fmt_velocity, fmt_latency, check
 from mlsysim.physics.robotics import calc_kinetic_energy
 
 # ┌── 1. LOAD: the running machine, plus one chapter-local input ────────────────
@@ -671,7 +685,7 @@ check(abs(t_monitor_response.magnitude - 22.0) < 1e-9, "Enforcer tick + bus + br
 
 # ┌── 4. OUTPUT ─────────────────────────────────────────────────────────────────
 class ReleaseBlindTravel:
-    m1_str = fmt_qty(RM.loaded_mass, kilogram, precision=0)
+    m1_str = fmt_mass(RM.loaded_mass, unit=kilogram, precision=0)
     v_aisle_str = fmt_velocity(AISLE.v_aisle, unit=meter / second, precision=1)
     e_k_str = fmt_energy(round(e_k_loaded.magnitude) * joule, unit=joule, precision=0)
     travel_per_ms_str = fmt_length(travel_per_ms, unit=millimeter, precision=1)
@@ -720,7 +734,7 @@ A verdict therefore stands only while each of its standing conditions is known-t
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim.fmt import fmt, fmt_qty, fmt_sci_qty, fmt_latency, fmt_acceleration, fmt_length, fmt_velocity, check
+from mlsysim.fmt import fmt, fmt_force, fmt_sci_qty, fmt_latency, fmt_acceleration, fmt_length, fmt_velocity, check
 from mlsysim.physics.robotics import (
     calc_safe_stopping_distance,
     calc_max_permitted_velocity,
@@ -789,15 +803,15 @@ class ReleaseWorkedVerdict:
     # Door branch of C1
     v_latch_str = fmt_velocity(AISLE.v_latch_approach, unit=meter / second, precision=2)
     k_latch_str = fmt_sci_qty(AISLE.k_latch, newton / meter, precision=1)
-    f_trip_str = fmt_qty(AISLE.f_latch_tripwire, newton, precision=0)
+    f_trip_str = fmt_force(AISLE.f_latch_tripwire, precision=0)
     t_contact_str = fmt_latency(AISLE.t_contact_response, unit=millisecond, precision=0)
-    f_cmd_str = fmt_qty(f_cmd_lo, newton, precision=0)
-    f_latch_limit_str = fmt_qty(AISLE.f_latch_limit, newton, precision=0)
+    f_cmd_str = fmt_force(f_cmd_lo, precision=0)
+    f_latch_limit_str = fmt_force(AISLE.f_latch_limit, precision=0)
     x_remaining_str = fmt_length(round(x_rem_lo.magnitude, 2) * millimeter, unit=millimeter, precision=2)
     a_arm_str = fmt_acceleration(round(a_arm_lo.magnitude) * meter / second**2, unit=meter / second**2, precision=0)
     t_arm_stop_str = fmt_latency(round(t_arm_stop.magnitude) * millisecond, unit=millisecond, precision=0)
     v_latch_high_str = fmt_velocity(AISLE.v_latch_high, unit=meter / second, precision=2)
-    f_cmd_high_str = fmt_qty(f_cmd_hi, newton, precision=0)
+    f_cmd_high_str = fmt_force(f_cmd_hi, precision=0)
     a_arm_high_str = fmt_acceleration(a_arm_hi, unit=meter / second**2, precision=0)
     # Other branches
     budget_str = fmt_length(round(budget_aisle.magnitude, 1) * millimeter, unit=millimeter, precision=1)
@@ -820,7 +834,7 @@ class ReleaseWorkedVerdict:
     t_chunk_str = fmt_latency(RM.chunk_inference_latency, unit=millisecond, precision=0)
     t_lease_str = fmt_latency(AISLE.t_lease, unit=millisecond, precision=0)
     v_handover_str = fmt_velocity(AISLE.v_handover, unit=meter / second, precision=2)
-    f_handover_str = fmt_qty(f_handover, newton, precision=1)
+    f_handover_str = fmt_force(f_handover, precision=1)
     v_restricted_str = fmt_velocity(v_restricted, unit=meter / second, precision=0)
     v_aisle_str = fmt_velocity(AISLE.v_aisle, unit=meter / second, precision=1)
 ```

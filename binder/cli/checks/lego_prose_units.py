@@ -39,14 +39,19 @@ CLASS = re.compile(r"^class\s+(\w+)", re.M)
 # Closed export assignments in LEGO OUTPUT sections.
 CLOSED_DOMAIN_FMT = re.compile(
     r"^\s*(?P<name>\w+_str)\s*=\s*"
-    r"(?:fmt_qty|fmt_power|fmt_energy|fmt_bandwidth|fmt_memory|fmt_emissions|"
+    r"(?:fmt_qty|fmt_power|fmt_energy|fmt_bandwidth|fmt_memory|fmt_memory_capacity|fmt_emissions|"
     r"fmt_latency|fmt_percent|fmt_rate|fmt_fps|fmt_usd|fmt_eur|fmt_time|fmt_tokens|fmt_params|"
-    r"fmt_area|fmt_heat_flux|fmt_flop_rate|fmt_flops|fmt_ops_rate|fmt_arithmetic_intensity|"
+    r"fmt_area|fmt_heat_flux|fmt_specific_heat|fmt_flop_rate|fmt_flops|fmt_ops_rate|fmt_arithmetic_intensity|"
     r"fmt_energy_per_byte|fmt_energy_per_bit|fmt_energy_per_flop|fmt_energy_per_op|"
     r"fmt_compute_efficiency|fmt_length|fmt_carbon_intensity|fmt_throughput|"
+    r"fmt_water|fmt_water_rate|fmt_water_intensity|fmt_token_rate|"
     r"fmt_temperature|fmt_temperature_rate|fmt_decibel|fmt_illuminance|"
-    r"fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_torque|fmt_torque_rate|fmt_velocity|"
-    r"fmt_sci_qty)\s*\(",
+    r"fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|"
+    r"fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_velocity|fmt_acceleration|"
+    r"fmt_voltage|fmt_current|fmt_resistance|fmt_jerk|fmt_inertia|fmt_frequency|"
+    r"fmt_thermal_resistance|fmt_heat_capacity|fmt_density|fmt_mass_flow|fmt_mass_flow_rate|"
+    r"fmt_volumetric_flow|fmt_flow_rate|fmt_charge|fmt_battery_capacity|fmt_angle|fmt_inductance|fmt_capacitance|fmt_power_rate|"
+    r"fmt_stiffness|fmt_volume|fmt_sci_qty)\s*\(",
     re.M | re.I,
 )
 CLOSED_NAME_OPEN_FMT = re.compile(

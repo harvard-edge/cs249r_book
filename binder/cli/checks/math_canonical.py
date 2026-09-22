@@ -61,6 +61,9 @@ CANONICAL_STR_CALL = re.compile(
     r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
     r"|fmt_frequency|fmt_acceleration|fmt_velocity|fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_jerk"
     r"|fmt_inertia|fmt_voltage|fmt_current|fmt_resistance"
+    r"|fmt_thermal_resistance|fmt_heat_capacity|fmt_density|fmt_mass_flow|fmt_mass_flow_rate"
+    r"|fmt_volumetric_flow|fmt_flow_rate|fmt_charge|fmt_battery_capacity|fmt_angle|fmt_inductance|fmt_capacitance|fmt_power_rate"
+    r"|fmt_stiffness|fmt_volume"
     r"|MarkdownStr)\s*\("
 )
 CANONICAL_MATH_CALL = re.compile(
@@ -131,13 +134,16 @@ FMT_FAMILY_USE = re.compile(
     r"|fmt_magnitude|fmt_text|fmt_display_math"
     r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency|fmt_area|fmt_heat_flux|fmt_specific_heat"
     r"|fmt_memory_capacity"
-    r"|fmt_params|fmt_tokens|fmt_flop_rate|fmt_flops|fmt_ops_rate"
+    r"|fmt_params|fmt_tokens|fmt_token_rate|fmt_flop_rate|fmt_flops|fmt_ops_rate"
     r"|fmt_sci_flops|fmt_energy_per_flop|fmt_energy_per_op|fmt_energy_per_byte|fmt_energy_per_bit"
     r"|fmt_decibel|fmt_illuminance|fmt_temperature|fmt_temperature_rate"
     r"|fmt_arithmetic_intensity|fmt_compute_efficiency|fmt_length"
     r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
-    r"|fmt_frequency|fmt_acceleration|fmt_velocity|fmt_torque|fmt_torque_rate|fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_jerk"
+    r"|fmt_frequency|fmt_acceleration|fmt_velocity|fmt_torque|fmt_torque_rate|fmt_torque_constant|fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_jerk"
     r"|fmt_inertia|fmt_voltage|fmt_current|fmt_resistance"
+    r"|fmt_thermal_resistance|fmt_heat_capacity|fmt_density|fmt_mass_flow|fmt_mass_flow_rate"
+    r"|fmt_volumetric_flow|fmt_flow_rate|fmt_charge|fmt_battery_capacity|fmt_angle|fmt_inductance|fmt_capacitance|fmt_power_rate"
+    r"|fmt_stiffness|fmt_volume"
     r"|fmt_sci|fmt_frac|sci_latex|MarkdownStr|check)\s*\("
 )
 
@@ -165,19 +171,25 @@ MLSYSIM_STAR_IMPORT = re.compile(r"\bfrom\s+mlsysim\s+import\s+\*")
 # _FALLBACK is used only when mlsysim cannot be imported (so the check still
 # runs in a bare environment); it lists the names verified as really exported.
 _MLSYSIM_STAR_FALLBACK = frozenset({
-    "MarkdownStr", "check", "fmt", "fmt_acceleration", "fmt_angular_velocity", "fmt_area",
-    "fmt_arithmetic_intensity", "fmt_bandwidth", "fmt_carbon_intensity",
-    "fmt_compute_efficiency", "fmt_count", "fmt_count_range", "fmt_current",
-    "fmt_display_math", "fmt_emissions", "fmt_energy", "fmt_energy_per_op", "fmt_eur",
-    "fmt_flop_rate", "fmt_flops", "fmt_force", "fmt_force_rate", "fmt_fps",
-    "fmt_frequency", "fmt_heat_flux", "fmt_inertia", "fmt_int", "fmt_jerk",
-    "fmt_latency", "fmt_length", "fmt_magnitude", "fmt_mass", "fmt_memory",
-    "fmt_multiple", "fmt_multiple_range", "fmt_ops_rate", "fmt_params",
-    "fmt_percent", "fmt_percent_range", "fmt_power", "fmt_pp", "fmt_qty",
-    "fmt_qty_range", "fmt_range", "fmt_rate", "fmt_ratio", "fmt_resistance",
-    "fmt_sci_qty", "fmt_specific_heat", "fmt_text", "fmt_time", "fmt_time_range",
-    "fmt_token_rate", "fmt_tokens", "fmt_torque", "fmt_usd", "fmt_usd_range",
-    "fmt_velocity", "fmt_voltage", "fmt_water", "fmt_water_intensity", "fmt_water_rate",
+    "MarkdownStr", "assert_qty_close", "check", "fmt", "fmt_acceleration", "fmt_angle",
+    "fmt_angular_velocity", "fmt_area", "fmt_arithmetic_intensity", "fmt_bandwidth",
+    "fmt_battery_capacity", "fmt_capacitance", "fmt_carbon_intensity", "fmt_charge",
+    "fmt_compute_efficiency", "fmt_count", "fmt_count_range", "fmt_current", "fmt_decibel",
+    "fmt_density", "fmt_display_math", "fmt_emissions", "fmt_energy", "fmt_energy_per_bit",
+    "fmt_energy_per_byte", "fmt_energy_per_flop", "fmt_energy_per_op", "fmt_eur",
+    "fmt_flop_rate", "fmt_flops", "fmt_flow_rate", "fmt_force", "fmt_force_rate", "fmt_fps",
+    "fmt_frac", "fmt_frequency", "fmt_heat_capacity", "fmt_heat_flux", "fmt_illuminance",
+    "fmt_inductance", "fmt_inertia", "fmt_int", "fmt_jerk", "fmt_latency", "fmt_length",
+    "fmt_magnitude", "fmt_mass", "fmt_mass_flow", "fmt_mass_flow_rate", "fmt_math",
+    "fmt_memory", "fmt_memory_capacity", "fmt_multiple", "fmt_multiple_range", "fmt_ops_rate",
+    "fmt_params", "fmt_percent", "fmt_percent_range", "fmt_power", "fmt_power_rate",
+    "fmt_pp", "fmt_qty", "fmt_qty_int", "fmt_qty_range", "fmt_range", "fmt_rate", "fmt_ratio",
+    "fmt_resistance", "fmt_sci", "fmt_sci_flops", "fmt_sci_qty", "fmt_specific_heat",
+    "fmt_stiffness", "fmt_temperature", "fmt_temperature_rate", "fmt_text",
+    "fmt_thermal_resistance", "fmt_time", "fmt_time_range", "fmt_token_rate", "fmt_tokens",
+    "fmt_torque", "fmt_torque_constant", "fmt_torque_rate", "fmt_unit", "fmt_usd",
+    "fmt_usd_range", "fmt_val", "fmt_velocity", "fmt_voltage", "fmt_volume",
+    "fmt_volumetric_flow", "fmt_water", "fmt_water_intensity", "fmt_water_rate",
 })
 
 
