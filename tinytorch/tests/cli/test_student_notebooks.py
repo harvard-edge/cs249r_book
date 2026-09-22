@@ -67,7 +67,13 @@ class TestStudentNotebookPolicy:
         assert make_student_notebook(notebook) == []
 
         source = notebook["cells"][0]["source"]
-        assert source == "def add_one(x):\n    # YOUR CODE HERE\n    raise NotImplementedError()\n"
+        assert source == (
+            "def add_one(x):\n"
+            "    # YOUR CODE HERE\n"
+            "    # BEGIN\n"
+            "    raise NotImplementedError() #delete this line\n"
+            "    # END\n"
+        )
         compile(source, "<cell>", "exec")
 
     def test_scaffold_region_stays_solved_without_markers(self):
@@ -107,6 +113,35 @@ class TestStudentNotebookPolicy:
         errors = make_student_notebook(notebook)
 
         assert any("without matching END SOLUTION" in error for error in errors)
+
+    def test_mixed_cell_strips_scaffold_docstring_but_preserves_core_docstring(self):
+        source = (
+            "class Ops:\n"
+            "    def add(self, a, b):\n"
+            '        """Add numbers.\n\n        TODO: Implement add\n\n        HINT: Use +\n        """\n'
+            "        ### BEGIN SOLUTION\n"
+            "        return a + b\n"
+            "        ### END SOLUTION\n\n"
+            "    def sub(self, a, b):\n"
+            '        """Subtract numbers.\n\n        TODO: Implement sub\n\n        HINT: Use -\n        """\n'
+            '        ### BEGIN SOLUTION role="scaffold"\n'
+            "        return a - b\n"
+            "        ### END SOLUTION\n"
+        )
+        notebook = {"cells": [_cell(source)]}
+        assert make_student_notebook(notebook) == []
+
+        cell_source = notebook["cells"][0]["source"]
+        # add is core: it must have the stub AND its docstring must keep TODO/HINT
+        assert "TODO: Implement add" in cell_source
+        assert "HINT: Use +" in cell_source
+        assert "# YOUR CODE HERE\n        # BEGIN\n        raise NotImplementedError() #delete this line\n        # END" in cell_source
+
+        # sub is scaffold: code stays, but TODO/HINT must be stripped!
+        assert "return a - b" in cell_source
+        assert "TODO: Implement sub" not in cell_source
+        assert "HINT: Use -" not in cell_source
+        assert "Subtract numbers." in cell_source
 
 
 @pytest.mark.parametrize("source_file", SOURCE_MODULES, ids=[p.parent.name for p in SOURCE_MODULES])

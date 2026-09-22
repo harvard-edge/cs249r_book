@@ -138,8 +138,13 @@ def validate_notebook_integrity(notebook_path: Path) -> Dict:
         }
 
 
-def _write_student_notebook(reference_file: Path, notebook_file: Path, console) -> bool:
-    """Clear student-core solutions from reference_file and write notebook_file.
+def _write_student_notebook(
+    reference_file: Path,
+    notebook_file: Path,
+    console,
+    release_tier: str = "student",
+) -> bool:
+    """Clear solutions according to release_tier and write notebook_file.
 
     Writes nothing unless every solution marker is gone afterwards, so a
     malformed region can never leak a reference implementation to a learner.
@@ -153,10 +158,10 @@ def _write_student_notebook(reference_file: Path, notebook_file: Path, console) 
         return False
 
     notebook = nbformat.read(str(reference_file), as_version=4)
-    errors = make_student_notebook(notebook, release_tier="student")
+    errors = make_student_notebook(notebook, release_tier=release_tier)
     leftovers = cells_with_solution_markers(notebook)
     if errors or leftovers:
-        console.print("[red]❌ Could not remove the reference solutions from this module:[/red]")
+        console.print(f"[red]❌ Could not prepare the {release_tier} notebook for this module:[/red]")
         for error in errors:
             console.print(f"[red]  • {error}[/red]")
         for index in leftovers:
@@ -164,7 +169,8 @@ def _write_student_notebook(reference_file: Path, notebook_file: Path, console) 
         return False
 
     nbformat.write(notebook, str(notebook_file))
-    console.print("[dim]✂️  Reference solutions replaced with stubs for you to implement[/dim]")
+    if release_tier == "student":
+        console.print("[dim]✂️  Reference solutions replaced with stubs for you to implement[/dim]")
     return True
 
 
@@ -174,18 +180,20 @@ def convert_py_to_notebook(
     console,
     *,
     student: bool = False,
+    release_tier: Optional[str] = None,
     project_root: Optional[Path] = None,
 ) -> bool:
     """Convert src/<module>.py to modules/<module>.ipynb using jupytext.
 
-    ``student=False`` (``tito dev export``) keeps the full reference, solution
-    markers included, so the package build matches the source of truth.
+    ``student=False`` and ``release_tier=None`` (``tito dev export``) keeps the full
+    reference, solution markers included, so the package build matches the source of truth.
 
-    ``student=True`` (``tito module start``, ``resume``, ``reset``) clears every
-    student-core solution region to nbgrader's stub before the notebook reaches
-    modules/, so a learner never receives the answers (#1684). The reference
-    conversion lands in a temporary directory first; if clearing fails, no
-    notebook is written.
+    ``release_tier='instructor'`` (default for ``tito module start`` preview) keeps all
+    reference code while cleanly removing marker lines.
+
+    ``student=True`` or ``release_tier='student'`` (``tito module start --exercise``)
+    clears every student-core solution region to nbgrader's stub before the notebook
+    reaches modules/, so a learner can practice implementing components.
 
     ``project_root`` defaults to the tinytorch checkout this module lives in.
     """
@@ -229,10 +237,13 @@ def convert_py_to_notebook(
         else:
             console.print(f"[dim]🔧 Using system jupytext: {jupytext_path}[/dim]")
 
+        tier = release_tier or ("student" if student else None)
+        apply_tier = tier is not None
+
         with tempfile.TemporaryDirectory(prefix="tito-notebook-") as tmp:
-            # A student notebook is converted beside the target first, so the
-            # full reference never sits in modules/ even for a moment.
-            output_file = Path(tmp) / notebook_file.name if student else notebook_file
+            # If applying a release tier, convert beside the target first so
+            # raw un-processed files never sit in modules/.
+            output_file = Path(tmp) / notebook_file.name if apply_tier else notebook_file
             console.print(f"[dim]⚙️  Running: {jupytext_path} --to ipynb {dev_file.name} --output {output_file}[/dim]")
             result = subprocess.run(
                 [jupytext_path, "--to", "ipynb", str(dev_file), "--output", str(output_file)],
@@ -247,7 +258,7 @@ def convert_py_to_notebook(
                     console.print(f"[red]Error: {result.stderr.strip()}[/red]")
                 return False
 
-            if student and not _write_student_notebook(output_file, notebook_file, console):
+            if apply_tier and not _write_student_notebook(output_file, notebook_file, console, release_tier=tier):
                 return False
 
         validation = validate_notebook_integrity(notebook_file)

@@ -317,6 +317,14 @@ class NBGraderCommand(BaseCommand):
             "# TinyTorch validates marker metadata during staging. Allow written\n"
             "# reflection cells to be stripped without assigning manual-grade points.\n"
             "c.ClearSolutions.enforce_metadata = False\n"
+            'c.ClearSolutions.code_stub = {\n'
+            '    "python": (\n'
+            '        "# YOUR CODE HERE\\n"\n'
+            '        "# BEGIN\\n"\n'
+            '        "raise NotImplementedError() #delete this line\\n"\n'
+            '        "# END"\n'
+            '    )\n'
+            '}\n'
             "c.ExecutePreprocessor.timeout = 120\n"
         )
 
