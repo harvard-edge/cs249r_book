@@ -166,9 +166,9 @@ When agent sequences are short ($S = 8,192$), the cluster comfortably hosts $B_{
 
 Tool waits make the bottleneck worse. @Sec-vol3-intro-memory-stranding priced this pressure, the tool-wait memory tax, for one paused session on the same node. While a tool runs, the trajectory's attention state sits idle in accelerator memory, and the serving system must choose between holding tens of gigabytes that other trajectories need and moving or discarding them at the price of a reload or a full prefill when the observation returns. The model cannot make that choice. Memory is a resource bound, and the invariant closure principle (\ref{pri-invariant-closure}) places resource bounds in the runtime below the model, so the serving system owns the decision. It returns in @sec-vol3-kvcache-swapping once paging is in place.
 
-The physical scale of this dilemma is visualized in @fig-vol3-kv-cache-memory-wall. Between 2018 and 2026, frontier language model context windows exploded by over 4,000×, expanding from GPT-1's 512 tokens to Gemini 1.5 and 2.0's 2,097,152 tokens (left). While this expansion enables agents to ingest entire codebases and retain extensive tool interactions, it crashes directly into the physical memory ceilings of hardware accelerators (right). At a 16-bit footprint of $320\text{ KiB}$ per token, a single 70B model trajectory ($B=1$) at 128,000 tokens pins 40 GB of High-Bandwidth Memory (half an NVIDIA H100 accelerator). At 1,000,000 tokens, that single trajectory commands 320 GB of KV cache—exceeding the 80 GB capacity of an entire H100 GPU by 4.0× and exceeding even next-generation 192 GB B200 accelerators by 1.7×. When four concurrent agents run at this horizon ($B=4$), aggregate KV memory demands surge past 1.28 TB, overwhelming entire multi-GPU clusters. This **KV cache memory wall** transforms memory allocation from a background implementation detail into the primary governor of agent scalability, necessitating virtual memory abstractions, dynamic block paging, and hierarchical offloading.
+The physical scale of this dilemma is visualized in @fig-vol3-kv-cache-memory-wall. As plotted in the left panel of @fig-vol3-kv-cache-memory-wall, frontier language model context windows expanded over 4,000-fold between 2018 and 2026, growing from GPT-1's 512 tokens to Gemini 1.5 and 2.0's 2,097,152 tokens. While this expansion enables agents to ingest entire codebases and retain extensive tool interactions, it crashes directly into the physical memory ceilings of hardware accelerators shown in the right panel. At a 16-bit footprint of $320\text{ KiB}$ per token, a single 70B model trajectory ($B=1$) at 128,000 tokens pins 40 GB of High-Bandwidth Memory (half an NVIDIA H100 accelerator). At 1,000,000 tokens, that single trajectory commands 320 GB of KV cache—exceeding the 80 GB capacity of an entire H100 GPU by 4.0× and exceeding even next-generation 192 GB B200 accelerators by 1.7×. When four concurrent agents run at this horizon ($B=4$), aggregate KV memory demands surge past 1.28 TB, overwhelming entire multi-GPU clusters. This **KV cache memory wall** transforms memory allocation from a background implementation detail into the primary governor of agent scalability, necessitating virtual memory abstractions, dynamic block paging, and hierarchical offloading.
 
-::: {#fig-vol3-kv-cache-memory-wall fig-env="figure" fig-pos="htb" fig-cap="**The KV Cache Memory Wall**: Context window expansion across frontier language models (2018–2026) and the resulting physical memory wall versus accelerator hardware ceilings. (Left) Historical context window capacity showing a 4,000× explosion from GPT-1 (512 tokens) to Gemini 1.5 and 2.0 (2,097,152 tokens). (Right) Key-value cache memory scaling for 70B grouped-query and 8B dense architectures across context horizons, contrasted against hardware memory limits (V100 32 GB, A100/H100 80 GB, H200 141 GB, B200 192 GB, and an eight-accelerator H100 node with a 480 GB dynamic pool). At one million tokens, a single 70B trajectory requires 320 GB of KV state, surpassing single-device capacities and necessitating PagedAttention and hierarchical offloading." fig-alt="Two-panel visualization of the KV cache memory wall. The left panel plots maximum context window length on a logarithmic scale from 2018 to 2026, showing an upward frontier envelope from GPT-1 at 512 tokens through GPT-3, GPT-4, Claude 2, Claude 3, up to Gemini 1.5 and 2.0 at 2,097,152 tokens. The right panel plots KV cache memory in gigabytes on a log-log scale against context length from 1,000 to two million tokens for 70B and 8B models, intersected by horizontal dashed lines representing physical memory limits of V100, H100, H200, B200, and an 8-GPU H100 cluster. A shaded red zone highlights the physical memory wall above 80 GB, with callouts indicating 40 GB at 128,000 tokens and 320 GB at one million tokens for a single 70B sequence."}
+::: {#fig-vol3-kv-cache-memory-wall fig-env="figure" fig-pos="htb" fig-cap="**The KV Cache Memory Wall**: Context window expansion across frontier language models (2018–2026) and the resulting physical memory wall versus accelerator hardware ceilings. The left panel shows the 4,000-fold expansion in context window capacity from GPT-1 (512 tokens) to Gemini 1.5 and 2.0 (2,097,152 tokens). The right panel shows key-value cache memory scaling for 70B grouped-query and 8B dense architectures across context horizons, contrasted against hardware memory limits (V100 32 GB, A100/H100 80 GB, H200 141 GB, B200 192 GB, and an eight-accelerator H100 node with a 480 GB dynamic pool). At one million tokens, a single 70B trajectory requires 320 GB of KV state, surpassing single-device capacities and necessitating PagedAttention and hierarchical offloading." fig-alt="Two-panel visualization of the KV cache memory wall. The left panel plots maximum context window length on a logarithmic scale from 2018 to 2026, showing an upward frontier envelope from GPT-1 at 512 tokens through GPT-3, GPT-4, Claude 2, Claude 3, up to Gemini 1.5 and 2.0 at 2,097,152 tokens. The right panel plots KV cache memory in gigabytes on a log-log scale against context length from 1,000 to two million tokens for 70B and 8B models, intersected by horizontal dashed lines representing physical memory limits of V100, H100, H200, B200, and an 8-GPU H100 cluster. A shaded red zone highlights the physical memory wall above 80 GB, with callouts indicating 40 GB at 128,000 tokens and 320 GB at one million tokens for a single 70B sequence."}
 
 ```{python}
 #| echo: false
@@ -197,9 +197,9 @@ from binder.tools.figures import style as book_style
 
 book_style.set_book_style()
 
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13.6, 6.8))
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13.6, 6.2))
 
-# Panel A: Context Window Expansion (2018–2026)
+# Subplot 1: Context Window Expansion (2018–2026)
 envelope = [
     (2018.5, 512, "GPT-1 (512)", "early", "left", "bottom", (6, 4)),
     (2019.2, 1024, "GPT-2 (1k)", "early", "right", "bottom", (-6, 6)),
@@ -214,7 +214,8 @@ envelope = [
 ]
 
 other_models = [
-    (2024.5, 131072, "LLaMA-3.1 (128k)", "frontier", "left", "top", (8, -8)),
+    (2023.9, 128000, "GPT-4 Turbo (128k)", "frontier", "right", "bottom", (-55, -12)),
+    (2024.5, 131072, "Llama 3.1 (128k)", "frontier", "left", "top", (8, -6)),
     (2025.2, 2097152, "Gemini 2.0 Flash (2M)", "long", "left", "bottom", (8, 4)),
 ]
 
@@ -227,7 +228,7 @@ colors = {
 
 env_years = [m[0] for m in envelope]
 env_tokens = [m[1] for m in envelope]
-ax1.plot(env_years, env_tokens, color="#818CF8", linestyle="-", linewidth=2.0, alpha=0.85, zorder=2, label="Frontier Context Envelope")
+ax1.plot(env_years, env_tokens, color="#818CF8", linestyle="-", linewidth=2.0, alpha=0.85, zorder=2, label="Frontier context envelope")
 
 for yr, tok, label, cat, ha, va, (dx, dy) in envelope:
     c = colors[cat]
@@ -264,22 +265,21 @@ for yr, tok, label, cat, ha, va, (dx, dy) in other_models:
     )
 
 ax1.axvspan(2018.0, 2021.5, color="#F1F5F9", alpha=0.5, zorder=1)
-ax1.text(2019.5, 300, "Static Window Era\n(≤2k Tokens)", fontsize=8.0, color="#64748B", ha="center", style="italic")
+ax1.text(2019.5, 300, "Static window era\n(≤2k tokens)", fontsize=8.0, color="#64748B", ha="center", style="italic")
 
 ax1.axvspan(2021.5, 2023.8, color="#E0F2FE", alpha=0.35, zorder=1)
-ax1.text(2022.65, 300, "Early Agentic Era\n(4k–32k Tokens)", fontsize=8.0, color="#0369A1", ha="center", style="italic")
+ax1.text(2022.65, 300, "Early agentic era\n(4k–32k tokens)", fontsize=8.0, color="#0369A1", ha="center", style="italic")
 
 ax1.axvspan(2023.8, 2026.0, color="#EDE9FE", alpha=0.4, zorder=1)
-ax1.text(2024.9, 300, "Repository Scale\n(100k–2M Tokens)", fontsize=8.0, color="#6D28D9", ha="center", style="italic")
+ax1.text(2024.9, 300, "Repository scale\n(100k–2M tokens)", fontsize=8.0, color="#6D28D9", ha="center", style="italic")
 
 ax1.set_yscale("log")
 ax1.set_xlim(2018.0, 2026.0)
 ax1.set_ylim(200, 6_000_000)
 ax1.set_yticks([512, 2048, 8192, 32768, 131072, 524288, 2097152])
 ax1.set_yticklabels(["512", "2k", "8k", "32k", "128k", "512k", "2M"], fontsize=8.5)
-ax1.set_xlabel("Release Year", fontsize=9.5, fontweight="bold")
-ax1.set_ylabel("Maximum Context Window Length (Tokens, Log Scale)", fontsize=9.5, fontweight="bold")
-ax1.set_title("Historical Context Window Expansion\n(4,000× Capacity Explosion in 7 Years)", fontsize=11.0, fontweight="bold", pad=12)
+ax1.set_xlabel("Release year", fontsize=9.5, fontweight="bold")
+ax1.set_ylabel("Maximum context window length (tokens, log scale)", fontsize=9.5, fontweight="bold")
 
 ax1.grid(True, which="both", linestyle="--", linewidth=0.5, color="#CBD5E1", alpha=0.7, zorder=1)
 ax1.spines["top"].set_visible(False)
@@ -289,14 +289,14 @@ ax1.legend(loc="upper left", fontsize=7.8, framealpha=0.92, edgecolor="#CBD5E1")
 ax1.text(
     2018.3,
     1_400_000,
-    "4,000× Context Growth:\n512 → 2,097,152 Tokens",
+    "4,000-fold context growth:\n512 → 2,097,152 tokens",
     fontsize=8.2,
     fontweight="bold",
     color="#6D28D9",
     bbox=dict(boxstyle="round,pad=0.35", fc="#F5F3FF", ec="#DDD6FE", lw=0.9),
 )
 
-# Panel B: The KV Cache Memory Wall vs Hardware HBM Ceilings
+# Subplot 2: The KV Cache Memory Wall vs Hardware HBM Ceilings
 ctx_range = np.logspace(3, np.log10(2097152), 200)
 
 m_tok_70b = 320.0 / (1024.0 * 1024.0)
@@ -306,16 +306,16 @@ kv_70b_b1 = ctx_range * m_tok_70b
 kv_70b_b4 = ctx_range * m_tok_70b * 4.0
 kv_8b_b1 = ctx_range * m_tok_8b
 
-ax2.plot(ctx_range, kv_70b_b1, color="#CB202D", linewidth=2.2, label="70B GQA Model (Batch=1)", zorder=4)
-ax2.plot(ctx_range, kv_70b_b4, color="#A51C30", linewidth=1.8, linestyle=":", label="70B GQA Model (Batch=4)", zorder=4)
-ax2.plot(ctx_range, kv_8b_b1, color="#006395", linewidth=2.0, linestyle="-.", label="8B Dense Model (Batch=1)", zorder=4)
+ax2.plot(ctx_range, kv_70b_b1, color="#CB202D", linewidth=2.2, label="70B GQA model (batch=1)", zorder=4)
+ax2.plot(ctx_range, kv_70b_b4, color="#A51C30", linewidth=1.8, linestyle=":", label="70B GQA model (batch=4)", zorder=4)
+ax2.plot(ctx_range, kv_8b_b1, color="#006395", linewidth=2.0, linestyle="-.", label="8B dense model (batch=1)", zorder=4)
 
 hw_ceilings = [
     (32, "NVIDIA V100 (32 GB)", "#64748B", ":", 1200, 1.10),
     (80, "NVIDIA A100 / H100 (80 GB HBM)", "#D97706", "--", 1200, 1.10),
     (141, "NVIDIA H200 (141 GB HBM3e)", "#B45309", "-.", 1200, 1.10),
     (192, "NVIDIA B200 (192 GB HBM3e)", "#059669", "--", 1200, 1.10),
-    (480, "8× H100 Node Available KV Pool (480 GB dynamic)", "#7C3AED", "-", 1200, 1.10),
+    (480, "8× H100 node available KV pool (480 GB dynamic)", "#7C3AED", "-", 1200, 1.10),
 ]
 
 for limit, label, col, ls, x_pos, y_mult in hw_ceilings:
@@ -334,7 +334,7 @@ ax2.axhspan(80, 2500, color="#FEE2E2", alpha=0.25, zorder=1)
 ax2.text(
     6500,
     1400,
-    "PHYSICAL HBM MEMORY WALL\nSingle-GPU Capacity Exceeded",
+    "PHYSICAL HBM MEMORY WALL\nSingle-GPU capacity exceeded",
     color="#991B1B",
     fontsize=8.0,
     fontweight="bold",
@@ -344,7 +344,7 @@ ax2.text(
 
 ax2.scatter([1048576], [320.0], color="#CB202D", s=90, zorder=6, edgecolors="#0F172A")
 ax2.annotate(
-    "1M Tokens (70B, B=1):\n320.0 GB KV Cache\n(4.0× Entire H100 HBM)",
+    "1M tokens (70B, batch=1):\n320.0 GB KV cache\n(4.0× entire H100 HBM)",
     (1048576, 320.0),
     xytext=(-175, 45),
     textcoords="offset points",
@@ -358,7 +358,7 @@ ax2.annotate(
 
 ax2.scatter([131072], [40.0], color="#CB202D", s=70, zorder=6, edgecolors="#0F172A")
 ax2.annotate(
-    "128k Tokens (70B):\n40.0 GB KV Cache\n(50% of H100 HBM)",
+    "128k tokens (70B):\n40.0 GB KV cache\n(50% of H100 HBM)",
     (131072, 40.0),
     xytext=(25, -35),
     textcoords="offset points",
@@ -378,9 +378,8 @@ ax2.set_xticks([1000, 4000, 16000, 64000, 256000, 1048576, 2097152])
 ax2.set_xticklabels(["1k", "4k", "16k", "64k", "256k", "1M", "2M"], fontsize=8.5)
 ax2.set_yticks([0.1, 1, 10, 80, 192, 480, 1000])
 ax2.set_yticklabels(["0.1 GB", "1 GB", "10 GB", "80 GB", "192 GB", "480 GB", "1 TB"], fontsize=8.5)
-ax2.set_xlabel("Context Length (Tokens, Log Scale)", fontsize=9.5, fontweight="bold")
-ax2.set_ylabel("KV Cache Memory Footprint (Gigabytes, Log Scale)", fontsize=9.5, fontweight="bold")
-ax2.set_title("The KV Cache Memory Wall\n(Scaling vs. Accelerator Hardware Ceilings)", fontsize=11.0, fontweight="bold", pad=12)
+ax2.set_xlabel("Context length (tokens, log scale)", fontsize=9.5, fontweight="bold")
+ax2.set_ylabel("KV cache memory footprint (gigabytes, log scale)", fontsize=9.5, fontweight="bold")
 
 ax2.grid(True, which="both", linestyle="--", linewidth=0.5, color="#CBD5E1", alpha=0.7, zorder=1)
 ax2.spines["top"].set_visible(False)
