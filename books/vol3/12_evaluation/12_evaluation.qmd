@@ -77,9 +77,9 @@ $$\Delta S = S_{\text{post}} - S_{\text{pre}}$$
 
 where $S_{\text{pre}}$ and $S_{\text{post}}$ are the persistent environment state before and after the trajectory. Jimenez et al. [-@jimenez2024swebench] built this rule into repository-repair evaluation. The grader ignores the agent's explanation, applies the agent's diff to a clean checkout, and runs tests that the original bug made fail (fail-to-pass) together with tests that passed before the change (pass-to-pass). A patch that fixes the bug and breaks something else scores zero, however well it is described.
 
-Layer 4 turns the budgets of @sec-vol3-controlplane-accounting into acceptance criteria. Using the duration accounting of @sec-vol3-intro-duration-accounting over the trajectory's $N$ turns, a trajectory is within budget only if
+Layer 4 turns the budgets of @sec-vol3-controlplane-accounting into acceptance criteria. Using the duration accounting of @sec-vol3-intro-duration-accounting over the trajectory's $H$ turns, a trajectory is within budget only if
 
-$$T_{\text{task}} = \sum_{t=1}^N \left( T_{\text{model}, t} + T_{\text{tool}, t} + T_{\text{wait}, t} + T_{\text{runtime}, t} \right) \le T_{\max}, \qquad C_{\text{task}} \le C_{\max}, \qquad N \le N_{\max}$$
+$$T_{\text{task}} = \sum_{t=1}^H \left( T_{\text{model}, t} + T_{\text{tool}, t} + T_{\text{wait}, t} + T_{\text{runtime}, t} \right) \le T_{\max}, \qquad C_{\text{task}} \le C_{\max}, \qquad H \le H_{\max}$$
 
 where $C_{\text{task}}$ is the trajectory's token or dollar cost. A correct result that cost fifty dollars against a two-dollar ceiling is a failed task, not a slow success. The authority half of Layer 4 checks that every effect went through a granted tool within the sandbox the task was given.
 
@@ -209,7 +209,7 @@ On a 150-task repair suite, release candidate A solves 82 tasks (54.7 percent) a
 
 ### Why repeated runs disagree {#sec-vol3-evaluation-resampling}
 
-Setting the sampling temperature to zero does not make an agent repeatable (@sec-vol3-foundation-model-autoregressive). The serving system can compute slightly different logits for the same prompt when batch composition changes, and when the two most likely tokens are nearly tied, that difference changes the chosen token. One changed token early in a fifty-turn trajectory changes every later turn. The environment adds its own variation. Concurrent tool calls can return in different orders, so two runs build different prompts from the same observations, and a simulated user samples its replies. Replay divergence in the durable log is the same phenomenon seen after the fact (@sec-vol3-persistence-non-determinism).
+Setting the sampling temperature to zero does not make an agent repeatable. The serving system itself is not bit-exact (@sec-vol3-foundation-model-autoregressive), one changed token early in a fifty-turn trajectory changes every later turn, and @sec-vol3-persistence-non-determinism catalogs the other ways a rerun departs from its recording. An evaluation adds sources of its own, such as concurrent tool calls that return in different orders and a simulated user that samples its replies.
 
 An evaluation therefore has two sources of variance:
 
@@ -464,8 +464,8 @@ Attribution is the discipline of telling those cases apart. Without it, every fa
 
 Attribution starts by reconstructing what the model saw at each turn. The durable log already records every message, tool call, result, model version, and sampling setting (@sec-vol3-persistence-event-sourcing), and the replay machinery of @sec-vol3-persistence-replay can re-drive a trajectory from it. Evaluation uses that machinery in two modes, each answering a different question.
 
-1. *Playback* re-drives the harness from the recorded model outputs and tool results, without calling the model or any tool. It checks the runtime's own logic, such as budget accounting, schema validation, and state transitions. If the harness mishandled a recorded event, playback reproduces the fault at no model cost.
-2. *Model replay* rebuilds the context the model saw at the failing turn, calls the model again, and serves every tool call from the recorded results instead of executing it. It asks whether the model, given exactly that context, tends to make the same proposal.
+1. *Strict replay* (@sec-vol3-persistence-replay) re-drives the harness from the recorded model outputs and tool results, without calling the model or any tool. It checks the runtime's own logic, such as budget accounting, schema validation, and state transitions. If the harness mishandled a recorded event, strict replay reproduces the fault at no model cost.
+2. *Model replay* rebuilds the context the model saw at the failing turn, calls the model again, and serves every tool call from the recorded results instead of executing it, a one-turn counterfactual branch with nothing changed. It asks whether the model, given exactly that context, tends to make the same proposal.
 
 ::: {.column-margin}
 Replaying against live services is not replay. External state has moved on, and mutating calls would repeat their effects.
@@ -526,7 +526,7 @@ Every retained failure that ends in a confirmed cause adds a task to the suite, 
 
 Check that you can assign a failure to its cause before gating a release on the evidence.
 
-- [ ] **Replay modes**: Which question does playback answer, and which does model replay answer?
+- [ ] **Replay modes**: Which question does strict replay answer, and which does model replay answer?
 - [ ] **Reproduction in distribution**: Why must a failing turn be replayed many times rather than once?
 - [ ] **Attribution order**: Why are context, tool, runtime, and environment causes ruled out before a failure is attributed to the model?
 - [ ] **Ablation**: What would it take to show that a prompt warning, rather than a tool fix, resolves an incident?
@@ -618,7 +618,7 @@ The verified completion rate is the per-trajectory acceptance test counted over 
 
 $$q = \frac{1}{N} \sum_{i=1}^N \mathbf{1}\left(\text{Verify}(s_T^{(i)}) = 1 \;\land\; \text{Cost}(\tau_i) \le C_{\max} \;\land\; T_i \le T_{\max}\right)$$
 
-It is the operational form of the accepted task, and it is the quantity trajectory goodput\index{Trajectory goodput} counts (@sec-vol3-intro-macro-vs-micro-efficiency). Only accepted tasks deliver value, so every resource spent on the rest is charged to them (principle \ref{pri-vol3-trajectory-goodput}).
+It is the operational form of the accepted task, and it is the quantity trajectory goodput\index{Trajectory goodput} counts (@sec-vol3-intro-macro-vs-micro-efficiency). Only accepted tasks deliver value, so every resource spent on the rest is charged to them, an accounting @sec-vol3-agent-economics turns into cost per accepted task.
 
 The intervention rate, $I_{\text{rate}} = (N_{\text{pause}} + N_{\text{steer}} + N_{\text{abort}}) / N$, counts how often people had to step in through the approval path of @sec-vol3-controlplane-hitl. It often rises before $q$ falls, because operators absorb the failures that the completion rate would otherwise show.
 
@@ -722,7 +722,7 @@ Evaluation turns the question of whether an agent works into measurements the ag
 
 :::
 
-This chapter put causal and statistical release evidence (principle \ref{pri-vol3-release-evidence}) into operation. The composite gate's accuracy term counts verified state changes over independent tasks with a stated interval, the trace ties each failure to the calls that caused it, and replay was shown to reproduce recorded observations exactly but model output only in distribution, which is why attribution replays a failing turn many times. The worked gate also showed where that evidence stops, since a sample large enough to show a candidate is no worse can be far too small to show it is better. The verified completion rate gave trajectory goodput (principle \ref{pri-vol3-trajectory-goodput}) its per-trajectory acceptance test, so the accepted task that later parts price and train on is now something a runtime can count.
+This chapter put causal and statistical release evidence (principle \ref{pri-vol3-release-evidence}) into operation. The composite gate's accuracy term counts verified state changes over independent tasks with a stated interval, the trace ties each failure to the calls that caused it, and replay was shown to reproduce recorded observations exactly but model output only in distribution, which is why attribution replays a failing turn many times. The worked gate also showed where that evidence stops, since a sample large enough to show a candidate is no worse can be far too small to show it is better. The verified completion rate gave trajectory goodput (@sec-vol3-intro-macro-vs-micro-efficiency) its per-trajectory acceptance test, so the accepted task that later parts train on and price is now something a runtime can count.
 
 ::: {.callout-chapter-connection title="From evaluation to learning from trajectories"}
 

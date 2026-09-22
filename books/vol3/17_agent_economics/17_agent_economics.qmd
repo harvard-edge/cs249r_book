@@ -485,7 +485,7 @@ The turn in @fig-vol3-critical-path-waterfall takes `{python} CriticalPath.w_tot
 
 ### Critical paths from traces
 
-A trajectory's trace (@sec-vol3-evaluation-tracing) records every model call, tool call, sandbox operation, and wait as a span with a start time, a duration, and a parent. Real trajectories branch, retry, and run tools in parallel, so the spans form a directed acyclic graph $G = (V, E)$ in which an edge $(u, v)$ means $v$ could not start until $u$ finished. The time of the trajectory is the length of its longest path,
+A trajectory's trace (@sec-vol3-evaluation-tracing) records every model call, tool call, sandbox operation, and wait as a span with a start time, a duration, and a parent. Real trajectories branch, retry, and run tools in parallel, so the spans form a directed acyclic graph in which an edge $(u, v)$ means $v$ could not start until $u$ finished. It is the task graph of @sec-vol3-multiagent-topologies at the finer grain of single calls, and as there, the time of the trajectory is the length of its longest path,
 
 $$T_{\text{critical}} = \max_{\pi \in \Pi} \sum_{v \in \pi} t(v)$$ {#eq-vol3-critical-path}
 
@@ -533,7 +533,7 @@ The third is ending tool runs early. A test suite streams its results, and the f
 
 ### When speculative decoding pays {#sec-vol3-agent-economics-speculative}
 
-When the trace does show generation on the critical path, as it does for long patches and long plans, faster generation becomes worth buying, and speculative decoding is the standard way to buy it. A small draft model proposes several tokens, and the target model checks all of them in one pass, keeping the prefix it agrees with (@sec-vol3-foundation-model-autoregressive). Because generation for a single stream is bounded by memory bandwidth, not arithmetic (principle \ref{pri-vol3-memory-bandwidth-decoding}), checking several tokens costs about as much time as generating one, and an acceptance rule makes the output distribution identical to the target model's [@leviathan2023fast; @chen2023accelerating]. The derivation of both facts is in @sec-vol3-appendix-inference-roofline. The agent engineer's question is only when the technique pays.
+When the trace does show generation on the critical path, as it does for long patches and long plans, faster generation becomes worth buying, and speculative decoding is the standard way to buy it. A small draft model proposes several tokens, and the target model checks all of them in one pass, keeping the prefix it agrees with (@sec-vol3-foundation-model-autoregressive). Because generation for a single stream is bounded by memory bandwidth, not arithmetic (principle \ref{pri-vol3-memory-bandwidth-decoding}), checking several tokens costs about as much time as generating one, and an acceptance rule makes the output distribution identical to the target model's [@leviathan2023fast; @chen2023accelerating]. @Sec-vol3-appendix-inference-roofline derives the first fact and @sec-vol3-appendix-inference-decode-loop the acceptance rule behind the second. The agent engineer's question is only when the technique pays.
 
 If the draft proposes $\gamma$ tokens per round, a draft token costs a fraction $r$ of a target step, and the target accepts $\bar{\alpha}$ draft tokens per round on average, each round advances $\bar{\alpha} + 1$ tokens in the time of $\gamma r + 1$ target steps, so the speedup is
 
@@ -791,7 +791,7 @@ A team sizes its agent platform the way it sized its chat service, from the rate
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ TRAJECTORY CONCURRENCY, TAILS, AND PROVIDER RATE LIMITS (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: The concurrency, tail, and rate-limit paragraphs of
+# │ Context: The concurrency, Kingman, tail, and rate-limit paragraphs of
 # │          @sec-vol3-agent-economics-capacity.
 # │
 # │ Goal: Show that a provider's token-per-minute limit caps the rate of
@@ -812,8 +812,14 @@ class TrajectoryCapacity:
     tok_call = 30_000  # scenario: input tokens per call
     life_min = 20.0  # scenario: trajectory lifetime, minutes
     tpm_limit = 2_000_000  # scenario: provider tokens-per-minute limit
+    ca2 = 2.0  # scenario: squared coefficient of variation, bursty call arrivals
+    cs2 = 4.0  # scenario: squared coefficient of variation, generation lengths
+    rho_lo, rho_hi = 0.70, 0.90  # scenario: serving utilization, below and near the knee
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    var_factor = (ca2 + cs2) / 2
+    wait_lo = var_factor * rho_lo / (1 - rho_lo)  # Kingman wait, in mean service times
+    wait_hi = var_factor * rho_hi / (1 - rho_hi)
     p_hit = 1 - (1 - p_tail) ** n_calls
     tok_traj = calls * tok_call
     demand = lam * tok_traj
@@ -825,8 +831,16 @@ class TrajectoryCapacity:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0.2 < p_hit < 0.3, "About a quarter of trajectories should meet a tail delay")
     check(0.8 < util < 1.0, "Demand should sit just under the provider limit")
+    check(wait_hi > 3 * wait_lo, "Queueing delay must rise steeply between the two utilizations")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    ca2_str = fmt_int(ca2)
+    cs2_str = fmt_int(cs2)
+    var_factor_str = fmt_int(var_factor)
+    rho_lo_str = fmt_percent(rho_lo, precision=0)
+    rho_hi_str = fmt_percent(rho_hi, precision=0)
+    wait_lo_str = fmt_int(wait_lo)
+    wait_hi_str = fmt_int(wait_hi)
     n_calls_str = fmt_int(n_calls)
     p_tail_str = fmt(p_tail, precision=2)
     p_hit_str = fmt(p_hit, precision=2)
@@ -850,7 +864,11 @@ $$L_{\text{traj}} = \lambda_{\text{traj}} \cdot \mathbb{E}[T_{\text{traj}}]$$ {#
 
 where $\lambda_{\text{traj}}$ is the rate at which trajectories start and $\mathbb{E}[T_{\text{traj}}]$ is their mean lifetime. Sizing sandboxes, runtime workers, and cache memory from the call rate and call duration, rather than from @eq-vol3-trajectory-concurrency, undercounts concurrency by the ratio of trajectory lifetime to call duration, which is two to three orders of magnitude. What a trajectory holds while it waits is a design choice. @Sec-vol3-kvcache-swapping decides whether its attention state stays resident, is evicted and recomputed, or is offloaded during a tool wait, and @sec-vol3-appendix-inference-queueing derives how tool waits inflate concurrency.
 
-Two consequences follow from how trajectories issue calls. Calls arrive in correlated bursts, when a trajectory fans out tool calls or a coordinator launches subagents, and their service times range from a few tokens to thousands. Queueing delay grows with that variability and rises steeply as utilization approaches saturation, so capacity is provisioned to run below the knee of the utilization curve (@sec-vol3-appendix-inference-queueing). Tail delays also compound along a trajectory. A trajectory of `{python} TrajectoryCapacity.n_calls_str` serial calls, each of which meets a 99th-percentile delay with probability `{python} TrajectoryCapacity.p_tail_str`, meets at least one such delay with probability `{python} TrajectoryCapacity.p_hit_str`, so a fleet sized for good mean latency still delivers slow trajectories routinely [@dean2013tail].
+Two consequences follow from how trajectories issue calls. Calls arrive in correlated bursts, when a trajectory fans out tool calls or a coordinator launches subagents, and their service times range from a few tokens to thousands. Queueing delay grows with that variability and rises steeply as utilization approaches saturation. Kingman's approximation for a single queue (@eq-vol3-kingman-gg1) puts a number on both effects. The mean wait is about
+
+$$W_q \approx \frac{c_a^2 + c_s^2}{2} \cdot \frac{\rho}{1 - \rho} \cdot \mathbb{E}[S]$$ {#eq-vol3-kingman-gg1}
+
+where $c_a^2$ and $c_s^2$ are the squared coefficients of variation of the time between calls and of the calls' service times, $\rho$ is utilization, and $\mathbb{E}[S]$ is the mean service time. With bursty arrivals ($c_a^2 =$ `{python} TrajectoryCapacity.ca2_str`) and generation lengths with $c_s^2 =$ `{python} TrajectoryCapacity.cs2_str`, the variability factor alone is `{python} TrajectoryCapacity.var_factor_str`. A serving pool at `{python} TrajectoryCapacity.rho_lo_str` percent utilization then makes the average call wait about `{python} TrajectoryCapacity.wait_lo_str` service times, and at `{python} TrajectoryCapacity.rho_hi_str` percent about `{python} TrajectoryCapacity.wait_hi_str`. Capacity is therefore provisioned to run below the knee of the utilization curve. Tail delays also compound along a trajectory, the serial counterpart of the fan-out stragglers of @sec-vol3-multiagent-backpressure. A trajectory of `{python} TrajectoryCapacity.n_calls_str` serial calls, each of which meets a 99th-percentile delay with probability `{python} TrajectoryCapacity.p_tail_str`, meets at least one such delay with probability `{python} TrajectoryCapacity.p_hit_str`, so a fleet sized for good mean latency still delivers slow trajectories routinely [@dean2013tail].
 
 ### Provider rate limits
 
@@ -1103,7 +1121,7 @@ A team with a working agent is tempted to point it at every task. @Sec-vol3-intr
 
 The four questions of @sec-vol3-intro-workflow-vs-loop place a task by its three H·S·A exposures (@sec-vol3-intro-hsa) and by the closure evidence (@sec-vol3-intro-closure-evidence) the runtime can collect for it. Each has a price that this chapter can now state.
 
-*Horizon* is priced in time and in the odds ratio. Every turn adds critical-path time and re-sent context, and a task with a deadline of a second or two cannot afford a loop whose turns each take seconds. Longer horizons also compound per-step failure, so a task whose natural length is many turns needs either a high per-step success rate or checkpoints of verified progress to keep $(1-\alpha)/\alpha$ small.
+*Horizon* is priced in time and in the odds ratio. Every turn adds critical-path time and re-sent context, and a task with a deadline of a second or two cannot afford a loop whose turns each take seconds. Longer horizons also compound per-step failure, so a task whose natural length is many turns needs either a high per-step success rate or verified intermediate milestones to keep $(1-\alpha)/\alpha$ small.
 
 *State* is priced in context. A transformation from input to output with no state to carry is a single call, and wrapping it in a loop adds re-sent context and failure modes without adding value. A task that must observe and change a workspace pays for the context growth of @sec-vol3-agent-economics-caching on every turn, and the cache layout and compaction policy decide how much.
 

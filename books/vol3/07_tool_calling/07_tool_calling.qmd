@@ -251,13 +251,13 @@ The runtime applies the grant at two moments. Before the model sees anything, it
 - **$A_2$ (retry-safe or compensable external action)** changes an external system in a way that can be retried safely or undone, such as provisioning an instance that can later be released. Every timeout must be settled before any retry (@sec-vol3-tool-calling-idempotency).
 - **$A_3$ (irreversible external action)** cannot be undone, such as dropping a table or sending a payment. It is held for explicit approval before dispatch, which the harness manages (@sec-vol3-controlplane-hitl).
 
-Credentials follow the same rule. The runtime attaches them to an authorized call on the way out and never places them in the model's context, where any later call could copy them into an argument. How the credentials themselves are scoped, narrowed, and brokered belongs to containment, in @sec-vol3-sandboxes.
+Credentials follow the same rule. The runtime attaches them to an authorized call on the way out and never places them in the model's context, where any later call could copy them into an argument. How the credentials themselves are scoped, narrowed, and brokered belongs to containment (@sec-vol3-sandboxes-credential-brokering).
 
 ### Tool-description poisoning
 
 The second problem in the opening example is subtler. A tool's description is text the model reads alongside its instructions, and the model has no reliable way to tell a description that documents a tool from one that issues orders. A server can exploit this in three ways. It can embed instructions in a description, as `search_issues` did. It can register a tool whose name shadows a trusted tool from another server. It can change a description after a person has reviewed and approved the server, using the list-changed notification to swap a benign description for a malicious one. All three are forms of indirect prompt injection, in which instructions arrive through content the agent processes rather than from its user [@greshake2023not].
 
-The runtime's defenses split along the line that invariant closure draws. Some lower the probability that a poisoned description steers the model. The runtime can namespace tool names by server so no server can shadow another's tools, pin each approved descriptor by hash and require re-approval when it changes, and show reviewers the full description text rather than a summary. None of these guarantees that the model ignores a malicious sentence. The guarantee comes from the grant. A poisoned description can steer the model toward a proposal, but the proposal still passes argument checks and the authority check before anything runs, so a description cannot widen what the session may do. It can still misuse what the session already may do, for instance by coaxing a permitted read of a secret into a permitted outbound request, and closing that path requires tracking where data came from and where it may flow, which @sec-vol3-sandboxes develops.
+The runtime's defenses split along the line that invariant closure draws. Some lower the probability that a poisoned description steers the model. The runtime can namespace tool names by server so no server can shadow another's tools, pin each approved descriptor by hash and require re-approval when it changes, and show reviewers the full description text rather than a summary. None of these guarantees that the model ignores a malicious sentence. The guarantee comes from the grant. A poisoned description can steer the model toward a proposal, but the proposal still passes argument checks and the authority check before anything runs, so a description cannot widen what the session may do. It can still misuse what the session already may do, for instance by coaxing a permitted read of a secret into a permitted outbound request, and closing that path requires tracking where data came from and where it may flow, which @sec-vol3-sandboxes-taint develops.
 
 Observations returning from tools raise the same issue in the other direction. A search result or a fetched page is untrusted text entering the next model call. Bounding it and labeling its provenance (@sec-vol3-context-engineering-staging) makes it less likely to be read as instruction, but no transformation of text makes the model immune to it.
 
@@ -663,8 +663,9 @@ Model-driven polling gives the model a `get_job_status` tool and lets it check u
 # │       a single resumption call when the runtime is notified of completion.
 # │ Show: Poll count, decode tokens and time, billed input tokens, cost of each
 # │       design, and their ratio.
-# │ How:  Each poll re-reads the context at the cached rate plus the new status
-# │       tokens; context grows by one poll exchange per poll.
+# │ How:  Each poll re-reads the context, cached tokens billed at a fraction of
+# │       the uncached price, plus the new status tokens; context grows by one
+# │       poll exchange per poll.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
@@ -679,6 +680,7 @@ class PollingBudget:
     final_result_tokens = 200  # scenario assumption: shaped completion observation
     cache_hit = 0.95  # scenario assumption: prefix-cache hit rate on prior context
     input_price_per_mtok = 3.00  # scenario assumption: $ per million uncached input tokens
+    cached_fraction_price = 0.10  # scenario assumption: cached input billed at this fraction
     output_price_per_mtok = 15.00  # scenario assumption: $ per million output tokens
     decode_s_per_token = 0.025  # scenario assumption: decode time per output token
 
@@ -690,9 +692,12 @@ class PollingBudget:
     mean_context = context_tokens + tokens_added_per_poll * (polls - 1) / 2
     uncached_per_poll = (1 - cache_hit) * mean_context + poll_result_tokens
     prefill_tokens = polls * uncached_per_poll
-    cost_polling = prefill_tokens / 1e6 * input_price_per_mtok + decode_tokens / 1e6 * output_price_per_mtok
+    cached_tokens = polls * cache_hit * mean_context
+    billed_input = prefill_tokens + cached_fraction_price * cached_tokens
+    cost_polling = billed_input / 1e6 * input_price_per_mtok + decode_tokens / 1e6 * output_price_per_mtok
     event_prefill_tokens = (1 - cache_hit) * context_tokens + final_result_tokens
-    cost_event = event_prefill_tokens / 1e6 * input_price_per_mtok
+    event_billed_input = event_prefill_tokens + cached_fraction_price * cache_hit * context_tokens
+    cost_event = event_billed_input / 1e6 * input_price_per_mtok
     cost_ratio = cost_polling / cost_event
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -709,6 +714,7 @@ class PollingBudget:
     final_result_tokens_str = fmt_int(final_result_tokens)
     cache_hit_str = fmt_percent(cache_hit, style="prose")
     input_price_str = fmt_usd(input_price_per_mtok)
+    cached_fraction_str = fmt_percent(cached_fraction_price, style="prose")
     output_price_str = fmt_usd(output_price_per_mtok)
     decode_ms_per_token_str = fmt_latency(Q_(decode_s_per_token * 1000, 'ms'), unit='ms', precision=0, commas=True)
     polls_str = fmt_int(polls)
@@ -716,6 +722,7 @@ class PollingBudget:
     decode_s_str = fmt_time(Q_(decode_s, 's'), unit='s', precision=0)
     uncached_per_poll_str = fmt_int(uncached_per_poll)
     prefill_tokens_str = fmt_int(prefill_tokens)
+    cached_tokens_str = fmt_int(cached_tokens)
     cost_polling_str = fmt_usd(cost_polling, precision=2)
     event_prefill_tokens_str = fmt_int(event_prefill_tokens)
     cost_event_str = fmt_usd(cost_event, precision=4)
@@ -723,11 +730,11 @@ class PollingBudget:
 ```
 
 ::: {#nbk-07-token-cost-and-inference-overhead .callout-notebook title="Polling versus event-driven resumption"}
-**Problem**: An agent starts an integration suite that runs for `{python} PollingBudget.job_s_str` with `{python} PollingBudget.context_tokens_str` tokens of context. Under polling, the model checks every `{python} PollingBudget.poll_interval_s_str`, emitting a `{python} PollingBudget.poll_call_tokens_str`-token status call and a `{python} PollingBudget.poll_ack_tokens_str`-token acknowledgment around a `{python} PollingBudget.poll_result_tokens_str`-token status result. Prior context hits the prefix cache `{python} PollingBudget.cache_hit_str` of the time. Input costs `{python} PollingBudget.input_price_str` and output `{python} PollingBudget.output_price_str` per million tokens, and decoding takes `{python} PollingBudget.decode_ms_per_token_str` per token. How do polling and a single event-driven resumption compare?
+**Problem**: An agent starts an integration suite that runs for `{python} PollingBudget.job_s_str` with `{python} PollingBudget.context_tokens_str` tokens of context. Under polling, the model checks every `{python} PollingBudget.poll_interval_s_str`, emitting a `{python} PollingBudget.poll_call_tokens_str`-token status call and a `{python} PollingBudget.poll_ack_tokens_str`-token acknowledgment around a `{python} PollingBudget.poll_result_tokens_str`-token status result. Prior context hits the prefix cache `{python} PollingBudget.cache_hit_str` of the time. Input costs `{python} PollingBudget.input_price_str` and output `{python} PollingBudget.output_price_str` per million tokens, cached input is billed at `{python} PollingBudget.cached_fraction_str` of the input price, and decoding takes `{python} PollingBudget.decode_ms_per_token_str` per token. How do polling and a single event-driven resumption compare?
 
-**Polling.** The job spans `{python} PollingBudget.polls_str` polls. They decode `{python} PollingBudget.decode_tokens_str` tokens, about `{python} PollingBudget.decode_s_str` of generation spent on status checks. Each poll re-reads the growing context, billing about `{python} PollingBudget.uncached_per_poll_str` uncached input tokens, or `{python} PollingBudget.prefill_tokens_str` in all. The total is `{python} PollingBudget.cost_polling_str`.
+**Polling.** The job spans `{python} PollingBudget.polls_str` polls. They decode `{python} PollingBudget.decode_tokens_str` tokens, about `{python} PollingBudget.decode_s_str` of generation spent on status checks. Each poll re-reads the growing context, about `{python} PollingBudget.uncached_per_poll_str` uncached input tokens per poll, or `{python} PollingBudget.prefill_tokens_str` in all, plus `{python} PollingBudget.cached_tokens_str` cached tokens at the discounted rate. The total is `{python} PollingBudget.cost_polling_str`.
 
-**Event-driven.** The runtime is notified when the job exits and makes one model call with a `{python} PollingBudget.final_result_tokens_str`-token result, billing `{python} PollingBudget.event_prefill_tokens_str` uncached input tokens and costing `{python} PollingBudget.cost_event_str`.
+**Event-driven.** The runtime is notified when the job exits and makes one model call with a `{python} PollingBudget.final_result_tokens_str`-token result, billing `{python} PollingBudget.event_prefill_tokens_str` uncached input tokens plus one cached read of the context, and costing `{python} PollingBudget.cost_event_str`.
 
 **Takeaway**: Polling costs `{python} PollingBudget.cost_ratio_mult_str` as much for one `{python} PollingBudget.job_s_str` job, and the gap grows with job length and context size. It also leaves `{python} PollingBudget.polls_str` status exchanges in the history for every later call to re-read, a cost the per-job figure omits.
 :::
@@ -879,5 +886,5 @@ A tool call is where an agent's proposal first becomes an effect, and the model 
 This chapter built the first two Part III principles into the tool-call loop. The typed action contract (principle \ref{pri-vol3-strict-action-abi}) became a host-owned descriptor, a closed schema with structured errors, and a per-call grant that no server advertisement can widen. Settlement before retry (principle \ref{pri-vol3-exactly-once-settlement}) became deterministic idempotency keys, an in-flight lease sized to outlast the timeout, and reconciliation probes for endpoints without keys. Both apply the invariant closure principle (\ref{pri-invariant-closure}) at the tool boundary, where model-side measures such as clear descriptions lower the probability of a bad call and only the runtime's checks prevent its effect, and where an exit status of zero shows that a process ended, not that the task succeeded.
 
 ::: {.callout-chapter-connection title="From authorized calls to contained code"}
-What does a granted call reach once its code starts running? The grant decided that `run_tests` may run in this workspace. It did not decide what the test suite's own code, a shell command, or a model-written program can touch once it executes, and it cannot stop a poisoned observation from turning a permitted read into a permitted but harmful send. @Sec-vol3-sandboxes bounds that reach below the model. It starts from the threat model for prompt injection, then builds capabilities and brokered credentials, an isolation envelope sized to the code and the task's authority, a resettable workspace, and egress control, priced in the start-up latency and memory each costs.
+What does a granted call reach once its code starts running? The grant decided that `run_tests` may run in this workspace. It did not decide what the test suite's own code, a shell command, or a model-written program can touch once it executes, and it cannot stop a poisoned observation from turning a permitted read into a permitted but harmful send. @Sec-vol3-sandboxes bounds that reach below the model. It starts from the threat model for prompt injection, then builds capabilities and brokered credentials, an isolation envelope sized to the code and the task's authority, a resettable workspace, and egress and dataflow controls, priced in the start-up latency and memory each costs.
 :::

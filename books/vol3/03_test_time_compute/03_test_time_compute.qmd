@@ -46,6 +46,264 @@ One model call returns one proposal, and on a hard decision that proposal is oft
 
 :::
 
+```{python}
+#| label: calc-vol3-test-time-compute-scenarios
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TEST-TIME COMPUTE SCENARIOS PRICED AT ONE DECODE RATE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: nbk-03-probe-versus-generation, nbk-03-matched-budget-axes,
+# │          nbk-03-compute-allocation-and-latency-trade-offs,
+# │          nbk-03-strategy-comparison, the budget pitfall, and the
+# │          takeaways.
+# │
+# │ Goal: Price every worked example in this chapter at the same single-stream
+# │       decode rate as the worked estimate of @sec-vol3-foundation-model-cost,
+# │       so the two chapters of Part I never quote different per-token times.
+# │ Show: Latencies, token totals, dollar costs, and cost per accepted task for
+# │       each notebook.
+# │ How:  Decode floor = weight bytes / memory bandwidth (batch of one), the
+# │       same derivation and registry entries (Llama-3.1-70B, H100, 8-bit
+# │       weights) as ch2's CallPrice cell. Prices, token counts, check times,
+# │       and success rates are scenario inputs. Prefill time is ignored, as
+# │       the notebooks state.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.fmt import fmt_qty_int
+import math
+
+class TTC:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    model = Models.Language.Llama3_70B
+    accel = Hardware.Cloud.H100
+    weight_bytes = 1  # 8-bit weights, bytes per parameter (same as ch2)
+    price_in = 2.0  # scenario: dollars per million input tokens
+    price_out = 10.0  # scenario: dollars per million output tokens
+
+    # Probe versus a longer answer (stale-read diagnosis)
+    k_answer = 1_024  # scenario: output tokens in the one-shot answer
+    k_commit = 16  # scenario: token at which the answer commits to H1
+    probe_s = 0.040  # scenario: concurrency probe run time in the sandbox
+    p_h1 = 0.75  # scenario: prior on the heartbeat hypothesis
+
+    # One decision, three allocations (ring-buffer race)
+    p_axes = 4_096  # scenario: prompt tokens
+    k_depth = 4_096  # scenario: output tokens for the single long generation
+    n_breadth = 4  # scenario: parallel candidates
+    k_cand = 1_024  # scenario: output tokens per candidate or round
+    rounds = 3  # scenario: feedback rounds
+    check_s = 1.5  # scenario: compile plus race detector per round
+    report_tok = 340  # scenario: tokens in each race-detector report
+
+    # Best-of-16 versus beam search with a step verifier
+    steps = 4  # scenario: reasoning steps in a patch
+    step_tok = 128  # scenario: output tokens per step
+    n_bon = 16  # scenario: best-of-N width
+    beam_b = 4  # scenario: retained prefixes
+    beam_m = 3  # scenario: extensions per prefix
+    prm_s = 0.015  # scenario: PRM time to score one step
+    prm_price = 0.50  # scenario: PRM dollars per million input tokens
+    test_s = 0.5  # scenario: one sandboxed test run
+    test_par = 8  # scenario: test runs in parallel
+
+    # Three strategies on one repair workload
+    k_attempt = 1_000  # scenario: output tokens per attempt
+    test_eval_s = 10.0  # scenario: one sealed test run
+    p_single = 0.40  # scenario: pass probability of one attempt
+    n_bo8 = 8  # scenario: best-of-N width
+    n_eff_bo8 = 3  # scenario: independent attempts the 8 correlated candidates are worth
+    p_revise = 0.35  # scenario: pass probability of a revision after a failing report
+    deadline_s = 75  # scenario: per-task deadline
+
+    # Budget pitfall (tree search with a step verifier)
+    pf_steps = 12  # scenario: generated steps
+    pf_step_tok = 512  # scenario: output tokens per step
+    pf_ctx = 4_096  # scenario: starting context
+    pf_leaves = 4  # scenario: leaves tested
+    pf_start_s = 4.5  # scenario: sandbox start time
+    pf_run_s = 35.0  # scenario: sandbox test time
+    pf_par = 2  # scenario: sandboxes in parallel
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    params = model.parameters.to(ureg.count).magnitude
+    bw = accel.memory.bandwidth.to(ureg.byte / ureg.second).magnitude
+    t_tok = params * weight_bytes / bw  # seconds per output token, batch of one
+
+    # Probe
+    ans_s = k_answer * t_tok
+    ans_usd = k_answer * price_out / 1e6
+    after_tok = k_answer - k_commit
+    after_s = after_tok * t_tok
+    after_share = after_tok / k_answer
+    entropy = -(p_h1 * math.log2(p_h1) + (1 - p_h1) * math.log2(1 - p_h1))
+    probe_ratio = ans_s / probe_s
+
+    # Axes
+    a_lat = k_depth * t_tok
+    a_usd = (p_axes * price_in + k_depth * price_out) / 1e6
+    b_lat = k_cand * t_tok
+    b_in = n_breadth * p_axes
+    b_out = n_breadth * k_cand
+    b_usd = (b_in * price_in + b_out * price_out) / 1e6
+    c_growth = k_cand + report_tok  # tokens carried forward per round
+    c_prompts = [p_axes, p_axes + c_growth, p_axes + 2 * c_growth]
+    c_in = sum(c_prompts)
+    c_out = rounds * k_cand
+    c_usd = (c_in * price_in + c_out * price_out) / 1e6
+    c_round_s = k_cand * t_tok
+    c_lat = rounds * (c_round_s + check_s)
+    depth_vs_breadth = a_lat / b_lat
+
+    # Ledger: best-of-16 versus beam
+    bon_tok = steps * step_tok
+    bon_out = n_bon * bon_tok
+    bon_usd = bon_out * price_out / 1e6
+    bon_dec_s = bon_tok * t_tok
+    bon_waves = math.ceil(n_bon / test_par)
+    bon_test_s = bon_waves * test_s
+    bon_lat = bon_dec_s + bon_test_s
+    segs = []
+    retained = 1
+    for _ in range(steps):
+        ext = retained * beam_m
+        segs.append(ext)
+        retained = min(beam_b, ext)
+    beam_segs = sum(segs)
+    beam_out = beam_segs * step_tok
+    beam_usd = beam_out * price_out / 1e6
+    beam_prm_usd = beam_out * prm_price / 1e6
+    beam_dec_s = steps * step_tok * t_tok
+    beam_score_s = steps * prm_s
+    beam_test_s = math.ceil(beam_b / test_par) * test_s
+    beam_lat = beam_dec_s + beam_score_s + beam_test_s
+    beam_saving = 1 - beam_out / bon_out
+
+    # Strategies
+    att_s = k_attempt * t_tok
+    round_s = att_s + test_eval_s
+    sa_p = p_single
+    sa_ceff = k_attempt / sa_p
+    sa_usd = sa_ceff * price_out / 1e6
+    sb_p = 1 - (1 - p_single) ** n_eff_bo8
+    sb_spend = n_bo8 * k_attempt
+    sb_ceff = sb_spend / sb_p
+    sb_usd = sb_ceff * price_out / 1e6
+    fail1 = 1 - p_single
+    fail_r = 1 - p_revise
+    sc_p = 1 - fail1 * fail_r * fail_r
+    sc_rounds = 1 + fail1 + fail1 * fail_r
+    sc_spend = sc_rounds * k_attempt
+    sc_ceff = sc_spend / sc_p
+    sc_usd = sc_ceff * price_out / 1e6
+    sc_lat = sc_rounds * round_s
+    sc_worst = 3 * round_s
+    sc_third = fail1 * fail_r
+    c_vs_b = sc_ceff / sb_ceff
+    c_vs_a = sc_ceff / sa_ceff - 1
+
+    # Pitfall
+    pf_gen = pf_steps * pf_step_tok
+    pf_prefix = pf_ctx + pf_step_tok
+    pf_prm = pf_steps * pf_prefix
+    pf_prm_ratio = pf_prm / pf_gen
+    pf_sandbox_s = pf_leaves * (pf_start_s + pf_run_s) / pf_par
+    pf_gen_s = pf_gen * t_tok
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(0.015 < t_tok < 0.030, f"Decode floor should match ch2's worked estimate (about 21 ms), got {t_tok*1e3:.1f} ms")
+    check(after_share > 0.95, "Nearly all of the one-shot answer should elaborate the unchecked premise")
+    check(b_lat < c_lat < a_lat, "Breadth should be fastest and depth slowest in the axes notebook")
+    check(abs(bon_lat - beam_lat) / bon_lat < 0.15, "Best-of-16 and beam should have similar latency")
+    check(round_s < sc_lat < deadline_s < sc_worst, "Two feedback rounds must fit the deadline and three must not")
+    check(2 * round_s <= deadline_s, "The second feedback round must finish inside the deadline")
+    check(sc_ceff < sb_ceff and sc_ceff > sa_ceff, "Feedback should cost more per accepted task than one attempt and less than best-of-8")
+    check(pf_prm_ratio > 5, "The PRM should read several times the generator's output in the pitfall")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_tok_ms_str = fmt_qty(t_tok * second, ms, precision=1)
+    price_in_str = fmt_int(price_in)
+    price_out_str = fmt_int(price_out)
+
+    k_answer_str = fmt_int(k_answer)
+    k_commit_str = fmt_int(k_commit)
+    ans_time_str = fmt(ans_s, precision=1)
+    ans_usd_str = fmt(ans_usd, precision=3)
+    after_tok_str = fmt_int(after_tok)
+    after_time_str = fmt(after_s, precision=1)
+    after_share_str = fmt_int(after_share * 100)
+    entropy_str = fmt(entropy, precision=2)
+    probe_time_str = fmt_int(probe_s * 1000)
+    probe_ratio_str = fmt_int(round(probe_ratio, -1))
+
+    p_axes_str = fmt_int(p_axes)
+    k_depth_str = fmt_int(k_depth)
+    k_cand_str = fmt_int(k_cand)
+    n_breadth_str = fmt_int(n_breadth)
+    check_time_str = fmt(check_s, precision=1)
+    report_tok_str = fmt_int(report_tok)
+    a_lat_str = fmt_int(a_lat)
+    a_usd_str = fmt(a_usd, precision=3)
+    b_lat_str = fmt_int(b_lat)
+    b_in_str = fmt_int(b_in)
+    b_out_str = fmt_int(b_out)
+    b_usd_str = fmt(b_usd, precision=3)
+    c_p1_str = fmt_int(c_prompts[0])
+    c_p2_str = fmt_int(c_prompts[1])
+    c_p3_str = fmt_int(c_prompts[2])
+    c_in_str = fmt_int(c_in)
+    c_out_str = fmt_int(c_out)
+    c_usd_str = fmt(c_usd, precision=3)
+    c_round_time_str = fmt(c_round_s, precision=1)
+    c_lat_str = fmt_int(c_lat)
+    depth_vs_breadth_str = fmt_int(depth_vs_breadth)
+
+    bon_tok_str = fmt_int(bon_tok)
+    bon_out_str = fmt_int(bon_out)
+    bon_usd_str = fmt(bon_usd, precision=3)
+    bon_dec_time_str = fmt(bon_dec_s, precision=1)
+    bon_waves_str = fmt_int(bon_waves)
+    bon_test_time_str = fmt_int(bon_test_s)
+    bon_lat_str = fmt(bon_lat, precision=1)
+    beam_s1_str = fmt_int(segs[0])
+    beam_s2_str = fmt_int(segs[1])
+    beam_s3_str = fmt_int(segs[2])
+    beam_segs_str = fmt_int(beam_segs)
+    beam_out_str = fmt_int(beam_out)
+    beam_usd_str = fmt(beam_usd, precision=3)
+    beam_prm_usd_str = fmt(beam_prm_usd, precision=3)
+    beam_dec_time_str = fmt(beam_dec_s, precision=1)
+    beam_score_time_str = fmt(beam_score_s, precision=2)
+    beam_lat_str = fmt(beam_lat, precision=1)
+    beam_saving_str = fmt_int(beam_saving * 100)
+
+    k_attempt_str = fmt_int(k_attempt)
+    att_time_str = fmt_int(att_s)
+    round_time_str = fmt_int(round_s)
+    deadline_str = fmt_int(deadline_s)
+    sa_ceff_str = fmt_int(sa_ceff)
+    sa_usd_str = fmt(sa_usd, precision=3)
+    sb_p_str = fmt(sb_p, precision=2)
+    sb_spend_str = fmt_int(sb_spend)
+    sb_ceff_str = fmt_int(round(sb_ceff, -2))
+    sb_usd_str = fmt(sb_usd, precision=2)
+    sc_p_str = fmt(sc_p, precision=2)
+    sc_rounds_str = fmt(sc_rounds, precision=2)
+    sc_spend_str = fmt_int(sc_spend)
+    sc_ceff_str = fmt_int(round(sc_ceff, -1))
+    sc_usd_str = fmt(sc_usd, precision=3)
+    sc_lat_str = fmt_int(sc_lat)
+    sc_worst_str = fmt_int(sc_worst)
+    sc_third_str = fmt_int(sc_third * 100)
+    c_vs_a_str = fmt_int(c_vs_a * 100)
+
+    pf_gen_str = fmt_int(pf_gen)
+    pf_prefix_str = fmt_int(pf_prefix)
+    pf_prm_str = fmt_int(pf_prm)
+    pf_prm_ratio_str = fmt_int(pf_prm_ratio)
+    pf_sandbox_time_str = fmt_int(pf_sandbox_s)
+    pf_gen_time_str = fmt_int(pf_gen_s)
+```
+
 ## Why One Proposal Is Not Enough {#sec-vol3-test-time-compute-insufficient-response}
 
 ::: {.column-margin}
@@ -70,17 +328,17 @@ Asking the model to reconsider fails for the same reason. A second pass over the
 
 ::: {#nbk-03-probe-versus-generation .callout-notebook title="A probe versus a longer answer"}
 
-**Problem**: In the stale-read diagnosis, how much generation does a 40 ms discriminating probe replace?
+**Problem**: In the stale-read diagnosis, how much generation does a `{python} TTC.probe_time_str` ms discriminating probe replace?
 
-**Variables**: These are scenario assumptions. The serving endpoint decodes at $t_{\text{tok}} = 20$ ms per output token and charges \$10 per million output tokens (@sec-vol3-foundation-model-cost explains where such rates come from). The model's answer runs to $K = 1{,}024$ output tokens and commits to $H_1$ at token 16. The prior is $P(H_1) = 0.75$ and $P(H_2) = 0.25$. The probe runs for 40 ms on a CPU in the sandbox and returns about 60 tokens of output, which the next call reads as input.
+**Variables**: The model decodes at the single-stream floor of @sec-vol3-foundation-model-cost, $t_{\text{tok}} \approx$ `{python} TTC.t_tok_ms_str` per output token. The rest are scenario assumptions. The endpoint charges \$`{python} TTC.price_out_str` per million output tokens. The model's answer runs to $K =$ `{python} TTC.k_answer_str` output tokens and commits to $H_1$ at token `{python} TTC.k_commit_str`. The prior is $P(H_1) = 0.75$ and $P(H_2) = 0.25$. The probe runs for `{python} TTC.probe_time_str` ms on a CPU in the sandbox and returns about 60 tokens of output, which the next call reads as input.
 
-**Math**: The full answer takes $1{,}024 \times 20\text{ ms} \approx 20.5$ s and costs $1{,}024 \times \$10 / 10^6 \approx \$0.010$. Everything after token 16 elaborates an unchecked premise, which is $1{,}008$ tokens, or $20.2$ s and 98 percent of the generation. Before the probe, the runtime's uncertainty over the two hypotheses is
+**Math**: The full answer takes about `{python} TTC.ans_time_str` s and costs about \$`{python} TTC.ans_usd_str`. Everything after token `{python} TTC.k_commit_str` elaborates an unchecked premise, which is `{python} TTC.after_tok_str` tokens, or `{python} TTC.after_time_str` s and `{python} TTC.after_share_str` percent of the generation. Before the probe, the runtime's uncertainty over the two hypotheses is
 
 $$H = -\left(0.75 \log_2 0.75 + 0.25 \log_2 0.25\right) \approx 0.81\text{ bits}$$
 
-The probe falsifies one hypothesis, which takes the uncertainty to zero. The long answer leaves it at $0.81$ bits, because its content does not depend on which defect is present.
+The probe falsifies one hypothesis, which takes the uncertainty to zero. The long answer leaves it at `{python} TTC.entropy_str` bits, because its content does not depend on which defect is present.
 
-**Systems insight**: The probe costs about 1/500 of the generation's wall-clock time and resolves all of the uncertainty that the generation resolves none of. Neither costs much in dollars; the expensive outcome is a wrong patch deployed. The runtime should buy evidence per second, not tokens per second.
+**Systems insight**: The probe costs about 1/`{python} TTC.probe_ratio_str` of the generation's wall-clock time and resolves all of the uncertainty that the generation resolves none of. Neither costs much in dollars; the expensive outcome is a wrong patch deployed. The runtime should buy evidence per second, not tokens per second.
 
 :::
 
@@ -116,7 +374,7 @@ Depth is also the most serial axis. Each token waits for the one before it, so t
 
 $$T_{\text{wall}}^{\text{depth}} \approx t_{\text{prefill}}(P) + K \cdot t_{\text{tok}}$$
 
-where $P$ is the prompt length and $t_{\text{tok}}$ the per-token decode time. Decode time scales with output length, and output tokens are the expensive ones (@sec-vol3-foundation-model-cost), so depth buys its gains with the costliest resource the call has.
+where $P$ is the prompt length and $t_{\text{tok}}$ the per-token decode time, which is @eq-vol3-call-latency with the queue left out. Decode time scales with output length, and output tokens are the expensive ones (@sec-vol3-foundation-model-cost), so depth buys its gains with the costliest resource the call has.
 
 What depth does not buy is outside information. The only inputs to a long generation are the prompt and the weights. If either carries the error, a longer generation gives the model more room to rationalize it, and the chance that an unchecked chain stays correct falls with every step it adds.
 
@@ -124,7 +382,7 @@ What depth does not buy is outside information. The only inputs to a long genera
 
 Most depth in current systems is trained in rather than prompted. **Reasoning models**\index{Reasoning model} are trained with reinforcement learning on tasks whose answers can be checked, such as mathematics with known answers and code with tests, and they learn to produce long intermediate traces that propose, check, and backtrack within one generation [@openai2024o1; @deepseekai2025deepseekr1]. Three consequences follow for the runtime.
 
-First, reasoning tokens are output tokens. They are decoded and billed like any other output, and a hard problem can emit many thousands of them before the visible answer begins. Second, the call surface exposes that spend as a control. The reasoning-token budget field caps how much depth one call may use (@sec-vol3-foundation-model-contract), which makes depth a per-call allocation the runtime owns rather than a fixed property of the model. Third, trained reasoning still draws only on the prompt and the weights. A reasoning model can recheck its arithmetic inside the trace, but it cannot observe whether a patch passes a test it never ran. Training moves the depth axis a long way without supplying the external evidence of the feedback axis.
+First, reasoning tokens are output tokens, decoded and metered like any other (@sec-vol3-foundation-model-contract), and a hard problem can emit many thousands of them before the visible answer begins. Second, the call surface exposes that spend as a control. The reasoning-token budget field caps how much depth one call may use, which makes depth a per-call allocation the runtime owns rather than a fixed property of the model. Third, trained reasoning still draws only on the prompt and the weights. A reasoning model can recheck its arithmetic inside the trace, but it cannot observe whether a patch passes a test it never ran. Training moves the depth axis a long way without supplying the external evidence of the feedback axis.
 
 Because depth is a per-call budget, it can be allocated by difficulty. @snell2024scaling found that the best use of a fixed test-time budget depends on how hard the problem is for the model. Easy problems gain little beyond the first attempt, problems of intermediate difficulty gain most from revision or search, and the hardest may not gain at all. A runtime approximates that allocation with cheap signals it can observe before committing the large budget: whether two or three short samples agree, whether a fast static check passes, and how tasks of the same class have gone before. Decisions whose cheap signals agree get a small reasoning budget and one candidate. Decisions whose signals disagree get a larger budget or a search. Decisions that remain unresolved after a bounded spend are escalated rather than given more tokens.
 
@@ -180,17 +438,17 @@ Breadth is fastest, depth spends the fewest input tokens, and feedback is the on
 
 ::: {#nbk-03-matched-budget-axes .callout-notebook title="One decision, three allocations"}
 
-**Scenario**: An agent must patch a lock-free ring buffer that contains a memory-ordering race. The prompt is $P = 4{,}096$ tokens. Scenario assumptions: decode runs at $t_{\text{tok}} = 10$ ms per output token, a small batch of parallel streams decodes at nearly the same per-token rate as one stream, and the endpoint charges \$2 per million input tokens and \$10 per million output tokens with no prefix caching. Prefill time is small next to decode at these lengths and is ignored (@sec-vol3-foundation-model-cost).
+**Scenario**: An agent must patch a lock-free ring buffer that contains a memory-ordering race. The prompt is $P =$ `{python} TTC.p_axes_str` tokens. Decode runs at the single-stream floor of @sec-vol3-foundation-model-cost, about `{python} TTC.t_tok_ms_str` per output token, and a small batch of parallel streams decodes at nearly the same per-token rate as one stream. Scenario assumptions: the endpoint charges \$`{python} TTC.price_in_str` per million input tokens and \$`{python} TTC.price_out_str` per million output tokens with no prefix caching. Prefill time is small next to decode at these lengths and is ignored.
 
-**Option A (depth)**: One generation of $4{,}096$ output tokens. Latency is $4{,}096 \times 10\text{ ms} \approx 41$ s. Cost is $4{,}096 \times \$2/10^6 + 4{,}096 \times \$10/10^6 \approx \$0.049$. The answer argues at length that the design is correct and ships the race.
+**Option A (depth)**: One generation of `{python} TTC.k_depth_str` output tokens. Latency is about `{python} TTC.a_lat_str` s, and cost is about \$`{python} TTC.a_usd_str`. The answer argues at length that the design is correct and ships the race.
 
-**Option B (breadth)**: Four candidates of $1{,}024$ tokens each, generated in parallel. Latency is $1{,}024 \times 10\text{ ms} \approx 10$ s. Each candidate is a separate call that reads the prompt, so input is $4 \times 4{,}096 = 16{,}384$ tokens and output is $4{,}096$ tokens, for about \$0.074. All four candidates omit the same barrier.
+**Option B (breadth)**: `{python} TTC.n_breadth_str` candidates of `{python} TTC.k_cand_str` tokens each, generated in parallel. Latency is about `{python} TTC.b_lat_str` s. Each candidate is a separate call that reads the prompt, so input is `{python} TTC.b_in_str` tokens and output is `{python} TTC.b_out_str` tokens, for about \$`{python} TTC.b_usd_str`. All four candidates omit the same barrier.
 
-**Option C (feedback)**: Three rounds of $1{,}024$ tokens. After each round the sandbox compiles the candidate and runs a race detector in $t_{\text{check}} = 1.5$ s, returning a 340-token report. Prompts grow from $4{,}096$ to $5{,}460$ to $6{,}824$ tokens, so input totals $16{,}380$ tokens and output $3{,}072$ tokens, for about \$0.063. Latency is $3 \times (10.2 + 1.5)\text{ s} \approx 35$ s. The round-2 report names the unordered store, and round 3 passes.
+**Option C (feedback)**: Three rounds of `{python} TTC.k_cand_str` tokens. After each round the sandbox compiles the candidate and runs a race detector in $t_{\text{check}} =$ `{python} TTC.check_time_str` s, returning a `{python} TTC.report_tok_str`-token report. Prompts grow from `{python} TTC.c_p1_str` to `{python} TTC.c_p2_str` to `{python} TTC.c_p3_str` tokens, so input totals `{python} TTC.c_in_str` tokens and output `{python} TTC.c_out_str` tokens, for about \$`{python} TTC.c_usd_str`. Latency is three rounds of `{python} TTC.c_round_time_str` s of decode plus the check, about `{python} TTC.c_lat_str` s. The round-2 report names the unordered store, and round 3 passes.
 
-**Math**: Cost per accepted task divides spend by accepted tasks. Options A and B spend \$0.049 and \$0.074 for zero accepted patches, so their cost per accepted task is unbounded. Option C spends \$0.063 for one.
+**Math**: Cost per accepted task divides spend by accepted tasks. Options A and B spend \$`{python} TTC.a_usd_str` and \$`{python} TTC.b_usd_str` for zero accepted patches, so their cost per accepted task is unbounded. Option C spends \$`{python} TTC.c_usd_str` for one.
 
-**Systems insight**: Breadth was four times faster than depth and depth used the fewest input tokens, but only feedback bought evidence about the defect, so only feedback produced an accepted task. Price test-time compute per accepted task, not per call.
+**Systems insight**: Breadth was `{python} TTC.depth_vs_breadth_str` times faster than depth and depth used the fewest input tokens, but only feedback bought evidence about the defect, so only feedback produced an accepted task. Price test-time compute per accepted task, not per call.
 
 :::
 
@@ -506,13 +764,13 @@ $C_{\text{gen}}$ counts the generator's input and output tokens across all branc
 
 ::: {#nbk-03-compute-allocation-and-latency-trade-offs .callout-notebook title="Best-of-16 versus beam search with a step verifier"}
 
-**Scenario**: A coding agent needs a patch built in four reasoning steps of 128 tokens each. Scenario assumptions: the generator decodes at $t_{\text{tok}} = 10$ ms per output token and a small batch decodes at nearly the one-stream rate; generator output costs \$10 per million tokens; a small PRM scores one 128-token step in 15 ms and costs \$0.50 per million input tokens; a sandboxed test run takes 0.5 s, with 8 runs in parallel.
+**Scenario**: A coding agent needs a patch built in four reasoning steps of 128 tokens each. The generator decodes at about `{python} TTC.t_tok_ms_str` per output token (@sec-vol3-foundation-model-cost), and a small batch decodes at nearly the one-stream rate. Scenario assumptions: generator output costs \$`{python} TTC.price_out_str` per million tokens; a small PRM scores one 128-token step in 15 ms and costs \$0.50 per million input tokens; a sandboxed test run takes 0.5 s, with 8 runs in parallel.
 
-**Option A (best-of-16)**: Sixteen complete candidates of 512 tokens, decoded as one batch. Output is $16 \times 512 = 8{,}192$ tokens, or about \$0.082. Decode takes $512 \times 10\text{ ms} \approx 5.1$ s. All 16 candidates are tested in two waves of 8, adding 1.0 s, so latency is about 6.1 s and the search uses 16 sandbox runs.
+**Option A (best-of-16)**: Sixteen complete candidates of `{python} TTC.bon_tok_str` tokens, decoded as one batch. Output is `{python} TTC.bon_out_str` tokens, or about \$`{python} TTC.bon_usd_str`. Decode takes about `{python} TTC.bon_dec_time_str` s. All 16 candidates are tested in `{python} TTC.bon_waves_str` waves of 8, adding `{python} TTC.bon_test_time_str` s, so latency is about `{python} TTC.bon_lat_str` s and the search uses 16 sandbox runs.
 
-**Option B (beam, $B = 4$, $M = 3$)**: Step 1 expands the root into 3 extensions, step 2 expands those 3 into 9, and steps 3 and 4 expand 4 retained prefixes into 12 each, for $3 + 9 + 12 + 12 = 36$ step segments. Output is $36 \times 128 = 4{,}608$ tokens, or about \$0.046. The PRM reads the same $4{,}608$ tokens for about \$0.002. Decode takes four sequential steps of $128 \times 10\text{ ms}$, about 5.1 s; scoring adds $4 \times 15\text{ ms} = 0.06$ s; testing the 4 survivors in one wave adds 0.5 s. Latency is about 5.7 s with 4 sandbox runs.
+**Option B (beam, $B = 4$, $M = 3$)**: Step 1 expands the root into `{python} TTC.beam_s1_str` extensions, step 2 expands those into `{python} TTC.beam_s2_str`, and steps 3 and 4 expand 4 retained prefixes into `{python} TTC.beam_s3_str` each, for `{python} TTC.beam_segs_str` step segments. Output is `{python} TTC.beam_out_str` tokens, or about \$`{python} TTC.beam_usd_str`. The PRM reads the same `{python} TTC.beam_out_str` tokens for about \$`{python} TTC.beam_prm_usd_str`. Decode takes four sequential steps of 128 tokens, about `{python} TTC.beam_dec_time_str` s; scoring adds `{python} TTC.beam_score_time_str` s; testing the 4 survivors in one wave adds 0.5 s. Latency is about `{python} TTC.beam_lat_str` s with 4 sandbox runs.
 
-**Math**: Beam search generates $1 - 4{,}608 / 8{,}192 \approx 44$ percent fewer output tokens and uses a quarter of the sandbox runs, at similar latency.
+**Math**: Beam search generates about `{python} TTC.beam_saving_str` percent fewer output tokens and uses a quarter of the sandbox runs, at similar latency.
 
 **Systems insight**: Early step scoring pays for itself here because the PRM is small and scores short steps. The PRM only decides which prefixes to keep; the four survivors are still accepted or rejected by the tests. When the step verifier is as large as the generator and re-reads long prefixes, its tokens can exceed the generator's, and the ledger reverses.
 
@@ -594,23 +852,23 @@ Spend can be counted in tokens or dollars. A strategy that raises success from 4
 
 **False acceptance rate** is the fraction of submitted candidates that the runtime's gate accepted and that later proved wrong. It measures silent failure. A strategy that fails loudly lets the runtime retry, compensate, or ask a person, while one that fails silently commits bad state that later steps build on.
 
-Benchmarks for these measurements should grade with checks the agent could not see. Repository-repair benchmarks built from real issues and graded by hidden tests [@jimenez2024swebench] are the model. A strategy evaluated on visible tests is partly evaluated on its ability to fit them.
+Benchmarks for these measurements should grade with checks the agent could not see, the hidden-test practice of @sec-vol3-test-time-compute-verification. A strategy evaluated on visible tests is partly evaluated on its ability to fit them.
 
 ### A worked comparison
 
 ::: {#nbk-03-strategy-comparison .callout-notebook title="Three strategies on one repair workload"}
 
-**Scenario**: A repair service handles tasks with a 60-second deadline. Scenario assumptions: one attempt is $1{,}000$ output tokens at $t_{\text{tok}} = 20$ ms, or 20 s; one sealed test run takes 10 s; a single attempt passes with probability $p = 0.40$; output costs \$10 per million tokens, and input cost is left out for simplicity.
+**Scenario**: A repair service handles tasks with a `{python} TTC.deadline_str`-second deadline. One attempt is `{python} TTC.k_attempt_str` output tokens, which at the single-stream rate of @sec-vol3-foundation-model-cost takes about `{python} TTC.att_time_str` s. Scenario assumptions: one sealed test run takes 10 s; a single attempt passes with probability $p = 0.40$; output costs \$`{python} TTC.price_out_str` per million tokens, and input cost is left out for simplicity.
 
-**Option A (single attempt)**: $P(\text{accepted}) = 0.40$. Spend is $1{,}000$ tokens, so $C_{\text{eff}} = 1{,}000 / 0.40 = 2{,}500$ tokens, about \$0.025. Latency is $20 + 10 = 30$ s.
+**Option A (single attempt)**: $P(\text{accepted}) = 0.40$. Spend is `{python} TTC.k_attempt_str` tokens, so $C_{\text{eff}} =$ `{python} TTC.sa_ceff_str` tokens, about \$`{python} TTC.sa_usd_str`. Latency is one attempt plus one test, about `{python} TTC.round_time_str` s.
 
-**Option B (best-of-8, sealed tests as selector)**: The eight candidates are correlated and behave like three independent attempts, so $P(\text{accepted}) = 1 - 0.6^3 \approx 0.78$. Because the selector is the sealed suite itself, this equals the pass@8 ceiling. Spend is $8{,}000$ tokens, so $C_{\text{eff}} \approx 8{,}000 / 0.78 \approx 10{,}200$ tokens, about \$0.10. Candidates and tests run in parallel, so latency stays near 30 s, using 8 sandbox runs.
+**Option B (best-of-8, sealed tests as selector)**: The eight candidates are correlated and behave like three independent attempts, so $P(\text{accepted}) = 1 - 0.6^3 \approx$ `{python} TTC.sb_p_str`. Because the selector is the sealed suite itself, this equals the pass@8 ceiling. Spend is `{python} TTC.sb_spend_str` tokens, so $C_{\text{eff}} \approx$ `{python} TTC.sb_ceff_str` tokens, about \$`{python} TTC.sb_usd_str`. Candidates and tests run in parallel, so latency stays near `{python} TTC.round_time_str` s, using 8 sandbox runs.
 
-**Option C (feedback, up to three rounds)**: After a failure, the test report raises each revision's pass probability to $0.35$. Then $P(\text{accepted}) = 1 - 0.6 \times 0.65 \times 0.65 \approx 0.75$. Expected rounds are $1 + 0.6 + 0.6 \times 0.65 = 1.99$, so expected spend is $1{,}990$ tokens and $C_{\text{eff}} \approx 1{,}990 / 0.75 \approx 2{,}670$ tokens, about \$0.027. Each round takes 30 s, so the expected latency is about 60 s and the worst case 90 s.
+**Option C (feedback, up to three rounds)**: After a failure, the test report raises each revision's pass probability to $0.35$. Then $P(\text{accepted}) = 1 - 0.6 \times 0.65 \times 0.65 \approx$ `{python} TTC.sc_p_str`. Expected rounds are $1 + 0.6 + 0.6 \times 0.65 =$ `{python} TTC.sc_rounds_str`, so expected spend is `{python} TTC.sc_spend_str` tokens and $C_{\text{eff}} \approx$ `{python} TTC.sc_ceff_str` tokens, about \$`{python} TTC.sc_usd_str`. Each round takes about `{python} TTC.round_time_str` s, so the expected latency is about `{python} TTC.sc_lat_str` s and the worst case `{python} TTC.sc_worst_str` s.
 
-**Math**: Option C reaches nearly the success rate of Option B at about a quarter of its cost per accepted task, and costs only about 7 percent more per accepted task than a single attempt. Option C also breaks the 60-second deadline in its third round, which occurs on $0.6 \times 0.65 = 39$ percent of tasks.
+**Math**: Option C reaches nearly the success rate of Option B at about a quarter of its cost per accepted task, and costs only about `{python} TTC.c_vs_a_str` percent more per accepted task than a single attempt. Option C also breaks the `{python} TTC.deadline_str`-second deadline in its third round, which occurs on `{python} TTC.sc_third_str` percent of tasks.
 
-**Systems insight**: No strategy wins on every axis. Under the 60-second deadline, Option B is the only one that reaches about 0.78 success; with a relaxed deadline, feedback nearly matches it at a quarter of the cost. Raw accuracy cannot rank the three, because they spend different budgets; cost per accepted task at the deadline puts them on one scale.
+**Systems insight**: No strategy wins on every axis. Under the `{python} TTC.deadline_str`-second deadline, Option B is the only one that reaches about `{python} TTC.sb_p_str` success; with a relaxed deadline, feedback nearly matches it at a quarter of the cost. Raw accuracy cannot rank the three, because they spend different budgets; cost per accepted task at the deadline puts them on one scale.
 
 :::
 
@@ -627,11 +885,7 @@ Test-time compute invites intuitions from numerical optimization and from classi
 ::: {.fallacy-pitfall}
 **Fallacy:** *More reasoning tokens automatically mean more correct decisions.*
 
-Engineers used to iterative solvers expect a longer generation to converge, the way more iterations of Newton's method shrink the error. Generation has no such contraction. Each token is conditioned on the prompt, the weights, and the tokens already emitted:
-
-$$P(y_1, \dots, y_K \mid \mathbf{x}) = \prod_{t=1}^{K} P(y_t \mid \mathbf{x}, y_{<t})$$
-
-If an early token commits to a false premise, later tokens are optimized to stay consistent with it, and in the absence of an external observation the continuation cannot gain information about the true answer. Trained reasoning models shift this curve, because they learned to check and backtrack within the trace, but they still reason only over what the prompt and weights contain. The runtime's defense is to make depth conditional on evidence. It caps the reasoning budget by difficulty (@sec-vol3-test-time-compute-reasoning-models), asks for intermediate claims that a tool can test, and stops a branch whose claims cannot be checked instead of paying for more tokens to elaborate it.
+Engineers used to iterative solvers expect a longer generation to converge, the way more iterations of Newton's method shrink the error. Generation has no such contraction. Each token is conditioned on the prompt, the weights, and the tokens already emitted (@eq-autoregressive-factorization), and nothing in that product pulls the sequence back toward a correct answer. If an early token commits to a false premise, later tokens are optimized to stay consistent with it, and in the absence of an external observation the continuation cannot gain information about the true answer. Trained reasoning models shift this curve, because they learned to check and backtrack within the trace, but they still reason only over what the prompt and weights contain. The runtime's defense is to make depth conditional on evidence. It caps the reasoning budget by difficulty (@sec-vol3-test-time-compute-reasoning-models), asks for intermediate claims that a tool can test, and stops a branch whose claims cannot be checked instead of paying for more tokens to elaborate it.
 :::
 
 ::: {.fallacy-pitfall}
@@ -649,7 +903,7 @@ A learned verifier, an LLM judge, or a test runner that checks only exit codes r
 ::: {.fallacy-pitfall}
 **Pitfall:** *Omitting verifier, tool, and branch-state work from the budget.*
 
-Budgets written as candidates times output tokens times price miss most of what a search spends. Consider a tree search that generates 12 steps of 512 tokens, $6{,}144$ generator tokens in all, from a $4{,}096$-token context, and scores each step with a PRM that must re-read the whole $4{,}608$-token prefix. The PRM reads $12 \times 4{,}608 = 55{,}296$ tokens, about nine times what the generator wrote. Testing the four leaves in sandboxes that take 4.5 s to start and 35 s to run, two at a time, adds $4 \times 39.5 / 2 = 79$ s, compared with about 123 s of generation at 20 ms per token. Every open branch also holds its context in the serving system while it waits (@sec-vol3-kv-cache). A search budget must meter each resource separately, as a vector of ceilings
+Budgets written as candidates times output tokens times price miss most of what a search spends. Consider a tree search that generates 12 steps of 512 tokens, `{python} TTC.pf_gen_str` generator tokens in all, from a 4,096-token context, and scores each step with a PRM that must re-read the whole `{python} TTC.pf_prefix_str`-token prefix. The PRM reads `{python} TTC.pf_prm_str` tokens, about `{python} TTC.pf_prm_ratio_str` times what the generator wrote. Testing the four leaves in sandboxes that take 4.5 s to start and 35 s to run, two at a time, adds `{python} TTC.pf_sandbox_time_str` s, compared with about `{python} TTC.pf_gen_time_str` s of generation at the single-stream rate of @sec-vol3-foundation-model-cost. Every open branch also holds its context in the serving system while it waits (@sec-vol3-kv-cache). A search budget must meter each resource separately, as a vector of ceilings
 
 $$\mathbf{B} = \left\langle T_{\text{wall}}^{\max},\; C_{\text{gen}}^{\max},\; C_{\text{verif}}^{\max},\; N_{\text{branch}}^{\max},\; N_{\text{sandbox}}^{\max} \right\rangle$$
 
@@ -662,7 +916,7 @@ Test-time compute is the runtime's option to spend more on one decision before i
 
 ::: {.callout-takeaways title="Buy evidence, not confidence"}
 
-* **Only evidence pays**: Extra inference raises verified success only when it brings in an observation that separates valid candidates from invalid ones. A 40 ms probe that falsifies a hypothesis can be worth more than 20 s of generation that cannot.
+* **Only evidence pays**: Extra inference raises verified success only when it brings in an observation that separates valid candidates from invalid ones. A `{python} TTC.probe_time_str` ms probe that falsifies a hypothesis can be worth more than `{python} TTC.ans_time_str` s of generation that cannot.
 * **Depth is a budget the runtime allocates**: Reasoning models make depth a per-call reasoning-token budget billed as output. Allocate it by difficulty from cheap signals, and escalate unresolved decisions rather than raising the budget without limit.
 * **The selector sets the ceiling**: Breadth's best case is pass@$k$, which assumes a perfect selector, and correlated samples lower even that. At low base rates a verifier with 98 percent accuracy can leave two of every three accepted candidates invalid.
 * **Learned verifiers rank; sealed checks commit**: Search against a learned verifier or judge selects for its errors, and a small exploit rate becomes near-certain discovery at large $N$. Only deterministic checks the candidate cannot modify may gate a commit.

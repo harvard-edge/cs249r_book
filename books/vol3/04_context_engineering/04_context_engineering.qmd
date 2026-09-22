@@ -109,11 +109,7 @@ Controlled measurements show that where the evidence sits matters as much as how
 
 Fidelity is one side of the budget and price is the other. @Sec-vol3-foundation-model-cost prices one call, and three of its results matter here. Every call re-sends its entire context, so a token staged on turn one is paid for on every later turn in which it remains. The time before the first output token grows with the number of input tokens the server must process, and grows faster than linearly at long lengths (@sec-vol3-appendix-inference-roofline). A longer context also occupies more serving memory for as long as the trajectory runs, including while the agent waits on a tool (@sec-vol3-kv-cache).
 
-The first result compounds over a trajectory. Let $L_0$ be the tokens present on the first turn and $\Delta$ the tokens a turn appends, a tool call plus its result. An append-only transcript carries $L_t = L_0 + (t-1)\Delta$ tokens on turn $t$, so the input a trajectory of $T$ turns sends in total is
-
-$$C_{\text{in}}(T) = \sum_{t=1}^{T} L_t = T L_0 + \frac{T(T-1)}{2}\,\Delta$$
-
-The second term grows with the square of the horizon. Doubling the number of turns roughly quadruples the input a long trajectory sends, even though each turn adds the same amount. The quadratic term is why input tokens dominate the cost of a trajectory although each output token is priced higher, and why any policy that bounds $L_t$ changes the growth from quadratic to linear in the number of turns. Prefix caching lowers the price of the re-sent part, but only when the re-sent tokens are identical from call to call, which is a layout question taken up in @sec-vol3-context-engineering-staging.
+The first result compounds over a trajectory. An append-only transcript grows by a fixed amount each turn, so the total input it sends grows with the square of the number of turns (@eq-vol3-trajectory-resend), and doubling the horizon roughly quadruples the bill even though each turn adds the same amount. That quadratic term is why input tokens dominate the cost of a trajectory although each output token is priced higher. For context engineering the growth law matters less than the lever it exposes. Let $L_t$ be the tokens staged on turn $t$. A policy that holds every $L_t$ under a fixed budget, however long the trajectory runs, sends at most that budget per turn, so total input grows linearly in the number of turns instead of quadratically. Prefix caching lowers the price of the re-sent part, but only when the re-sent tokens are identical from call to call, which is a layout question taken up in @sec-vol3-context-engineering-staging.
 
 ### The budget as an allocation
 
@@ -189,8 +185,8 @@ Some changes break the prefix by design, and the harness should make them rarely
 # │ PRICE OF A CONTEXT LAYOUT ACROSS ONE TRAJECTORY (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: \ref{nbk-04-quantitative-impact-of-prefix-layout} in
-# │          @sec-vol3-context-engineering-staging, and the volatile-header
-# │          pitfall in @sec-vol3-context-engineering-fallacies.
+# │          @sec-vol3-context-engineering-staging, and the compaction-cadence
+# │          and volatile-header pitfalls in @sec-vol3-context-engineering-fallacies.
 # │
 # │ Goal: Price the same trajectory under an unstable layout (per-call field at
 # │       the head) and a cache-stable layout (per-call field in the leaf).
@@ -302,7 +298,7 @@ The last assembly decision is when content enters the context at all. A harness 
 Before moving on to compaction, check that the budget and layout decisions are clear.
 
 - [ ] **Usable vs. nominal context**: Why does a needle-in-a-haystack score overstate the context an agent can use?
-- [ ] **Trajectory input**: Why does the total input of an append-only trajectory grow with the square of its horizon?
+- [ ] **Bounded input**: How does holding each call's staged tokens under a fixed budget change the growth of a trajectory's total input with its horizon?
 - [ ] **Zone layout**: Which zone would you place a per-call timestamp in, and what does placing it in the root cost?
 - [ ] **Framing limits**: What does wrapping tool results in provenance tags buy against injected instructions, and what must supply the guarantee?
 - [ ] **Tool-list stability**: How can a harness restrict tools during one phase of a trajectory without rewriting its prefix?
@@ -398,7 +394,7 @@ A useful record has five fields, each preventing a distinct failure:
 
 $$\mathcal{R} = \langle \mathcal{G}, \mathcal{C}, h, \Omega, \mathcal{P} \rangle$$
 
-The *goal* $\mathcal{G}$ is the task's objective, success condition, and scope, copied from the task specification and never rewritten. The *completed steps* $\mathcal{C}$ are an ordered list of actions, each paired with its observed outcome and the evidence for it, such as an exit code, a test result, or the hash of an applied patch. The *hypothesis* $h$ is the agent's current working theory of the fault, bounded in length. The *constraints* $\Omega$ are the rules every later step must respect, including negative ones ("do not change the public interface in `include/channel.h`"). The *artifact pointers* $\mathcal{P}$ are, paths with content hashes and line ranges, to the files the agent has inspected or changed, so the record refers to content rather than copying it. @Tbl-vol3-progress-record-schema lists what each field prevents and how the runtime checks it.
+The *goal* $\mathcal{G}$ is the task's objective, success condition, and scope, copied from the task specification and never rewritten. The *completed steps* $\mathcal{C}$ are an ordered list of actions, each paired with its observed outcome and the evidence for it, such as an exit code, a test result, or the hash of an applied patch. The *hypothesis* $h$ is the agent's current working theory of the fault, bounded in length. The *constraints* $\Omega$ are the rules every later step must respect, including negative ones ("do not change the public interface in `include/channel.h`"). The *artifact pointers* $\mathcal{P}$ are paths, with content hashes and line ranges, to the files the agent has inspected or changed, so the record refers to content rather than copying it. @Tbl-vol3-progress-record-schema lists what each field prevents and how the runtime checks it.
 
 | Field                     | Type                 | Source                               | Failure it prevents                                   | Runtime check                                      |
 |:--------------------------|:---------------------|:-------------------------------------|:------------------------------------------------------|:---------------------------------------------------|
@@ -591,18 +587,12 @@ Measured this way, context management stops being a matter of prompt style and b
 
 ## Fallacies and Pitfalls {#sec-vol3-context-engineering-fallacies}
 
-Context policies fail most often through intuitions carried over from long-document question answering or from memory hierarchies, neither of which has an environment that changes under the reader. The items below are the ones that recur.
+Context policies fail most often through intuitions carried over from single-call prompting, where nothing is re-sent, nothing is reused from the previous call, and the environment never changes under the reader. The items below are the ones that recur once the call becomes a trajectory.
 
 ::: {.fallacy-pitfall}
-**Fallacy:** *A larger context window removes the need to choose what the model sees.*
+**Pitfall:** *Compacting a little on every turn.*
 
-A larger window raises the limit, not the usable context. Accuracy on evidence placed in the interior of a long input drops well before the window is full [@liu2024lost], every staged token is re-sent and re-paid on every turn, and total input grows with the square of the horizon (@sec-vol3-context-engineering-physics). A large window also holds more stale and poisoned content, not less. Selection remains necessary. A larger window only moves the point at which its absence becomes impossible to ignore.
-:::
-
-::: {.fallacy-pitfall}
-**Fallacy:** *The context window and the KV cache are two levels of one cache.*
-
-They are different objects with different owners. The context is the sequence of tokens the harness chooses for a call. The KV cache is attention state the serving system derives from that sequence, valid only for an exact prefix (principle \ref{pri-vol3-prefix-coherence}). Nothing moves between them like a cache line between levels. Removing or editing a token in the middle of the context does not leave the later attention state reusable; it invalidates everything after the edit. The harness controls the cache only indirectly, through layout, and @sec-vol3-kv-cache covers how the serving system holds and shares that state.
+A harness that trims a few hundred tokens from the history on every turn keeps each call close to its budget and looks frugal. Every compaction rewrites tokens after the root, however, so each of those turns forfeits the cached prefix from the rewrite onward (principle \ref{pri-vol3-prefix-coherence}), and a summarizing rung adds a model call on top. In the trajectory priced in napkin math \ref{nbk-04-quantitative-impact-of-prefix-layout}, a turn whose trunk is rewritten prefills `{python} ContextLayoutPrice.suffix_tokens_str` tokens where an append-only turn prefills `{python} ContextLayoutPrice.leaf_tokens_str`. Compacting in one batch when the context reaches a high watermark, down to a low one (@sec-vol3-context-engineering-compaction), pays that forfeit once per interval instead of once per turn.
 :::
 
 ::: {.fallacy-pitfall}

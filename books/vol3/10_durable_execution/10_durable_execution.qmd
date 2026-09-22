@@ -172,7 +172,108 @@ That cost sets the cadence. Let $\delta$ be the time a checkpoint pauses the tra
 
 $$T^{\ast} \approx \sqrt{2\,\delta\,M}$$ {#eq-vol3-young-formula}
 
-Daly refines @eq-vol3-young-formula when $\delta$ is not small relative to $M$ [@daly2006]. Dividing $T^{\ast}$ by the mean turn time converts it into a cadence in turns. The formula's lesson for agents is qualitative. A copy-on-write checkpoint costs little next to a turn that spends seconds in a model call, and workers that are preempted often have a short $M$, so the optimum is usually every few turns rather than every few hundred.
+Daly refines @eq-vol3-young-formula when $\delta$ is not small relative to $M$ [@daly2006]. Dividing $T^{\ast}$ by the mean turn time converts it into a cadence in turns, and pricing the lost turns in tokens shows what a wrong cadence costs.
+
+```{python}
+#| label: calc-vol3-durable-checkpoint-cadence
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHECKPOINT CADENCE IN TURNS AND DOLLARS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-vol3-persistence-checkpointing, the worked estimate after
+# │          @eq-vol3-young-formula.
+# │
+# │ Goal: Convert the first-order optimal checkpoint interval into turns for a
+# │       trajectory on preemptible workers, and show that checkpointing every
+# │       turn and every hundred turns both cost several times the optimum.
+# │ Show: Optimal interval in seconds and turns; overhead (checkpoint pauses
+# │       plus expected lost work) at three cadences; expected redo per crash
+# │       in turns, minutes, and dollars; the one-time resume prefill.
+# │ How:  Overhead U(T) = delta/T + T/(2M). A crash loses T/2 of work on
+# │       average. Redone turns re-send a warm prefix at the cached price.
+# │       All inputs are illustrative scenario assumptions (no real price list,
+# │       model, or cloud is named); prices match the harness budget example.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import fmt, fmt_int, fmt_usd, fmt_percent, check
+
+class CheckpointCadence:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    turn_s = 12.0  # scenario: mean turn time (model call plus tool run), seconds
+    mtbf_h = 4.0  # scenario: mean time between worker failures (preemptible pool), hours
+    delta_s = 0.5  # scenario: checkpoint pause (record flush plus copy-on-write snapshot), seconds
+    ctx = 40_000  # scenario: context re-sent per turn at the time of the crash, tokens
+    k_out = 350  # scenario: output tokens per reply
+    p_in = 3.00  # scenario: dollars per million uncached input tokens
+    p_cache = 0.30  # scenario: dollars per million cached input tokens
+    p_out = 15.00  # scenario: dollars per million output tokens
+    every_turn = 1  # alternative cadence: checkpoint every turn
+    rare_turns = 100  # alternative cadence: checkpoint every hundred turns
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    mtbf_s = mtbf_h * 3600
+    t_opt = math.sqrt(2 * delta_s * mtbf_s)
+    turns_opt = t_opt / turn_s
+
+    def _overhead(t, delta_s=delta_s, mtbf_s=mtbf_s):
+        return delta_s / t + t / (2 * mtbf_s)
+
+    u_opt = _overhead(t_opt)
+    u_every = _overhead(every_turn * turn_s)
+    u_rare = _overhead(rare_turns * turn_s)
+
+    resume_usd = ctx * p_in / 1e6  # one cold prefill of the rebuilt context
+    turn_redo_usd = (ctx * p_cache + k_out * p_out) / 1e6  # one redone turn, prefix warm
+    redo_opt_turns = turns_opt / 2
+    redo_rare_turns = rare_turns / 2
+    redo_opt_usd = redo_opt_turns * turn_redo_usd
+    redo_rare_usd = redo_rare_turns * turn_redo_usd
+    redo_opt_min = redo_opt_turns * turn_s / 60
+    redo_rare_min = redo_rare_turns * turn_s / 60
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(turns_opt - round(turns_opt)) < 1e-9, "Scenario chosen so the optimum is a whole number of turns")
+    check(u_every > 4 * u_opt and u_rare > 4 * u_opt, "Both extreme cadences should cost several times the optimum")
+    check(u_opt < 0.01, "At the optimum, checkpoints plus lost work should cost under one percent of the run")
+    check(redo_rare_usd > 5 * redo_opt_usd, "Rare checkpoints should multiply the redo bill")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    turn_str = fmt_int(turn_s)
+    mtbf_h_str = fmt_int(mtbf_h)
+    delta_str = fmt(delta_s, precision=1)
+    mtbf_total_str = fmt_int(mtbf_s, commas=True)
+    t_opt_str = fmt_int(t_opt)
+    turns_opt_str = fmt_int(turns_opt)
+    u_opt_str = fmt_percent(u_opt, precision=2, style="prose")
+    u_every_str = fmt_percent(u_every, precision=1, style="prose")
+    u_rare_str = fmt_percent(u_rare, precision=1, style="prose")
+    rare_turns_str = fmt_int(rare_turns)
+    ctx_str = fmt_int(ctx, commas=True)
+    k_out_str = fmt_int(k_out)
+    resume_usd_str = fmt_usd(resume_usd, precision=2)
+    redo_opt_turns_str = fmt_int(redo_opt_turns)
+    redo_rare_turns_str = fmt_int(redo_rare_turns)
+    redo_opt_usd_str = fmt_usd(redo_opt_usd, precision=2)
+    redo_rare_usd_str = fmt_usd(redo_rare_usd, precision=2)
+    redo_opt_min_str = fmt_int(redo_opt_min)
+    redo_rare_min_str = fmt_int(redo_rare_min)
+```
+
+::: {#nbk-10-checkpoint-cadence .callout-notebook title="Choosing a checkpoint cadence in turns"}
+
+**Problem**: A coding agent runs on a pool of preemptible workers whose mean time between failures is `{python} CheckpointCadence.mtbf_h_str` hours. A turn takes `{python} CheckpointCadence.turn_str` s on average, and a checkpoint (flushing the record and taking a copy-on-write workspace snapshot at a turn boundary) pauses the trajectory for `{python} CheckpointCadence.delta_str` s. At the time of a crash the context holds `{python} CheckpointCadence.ctx_str` tokens and each reply has `{python} CheckpointCadence.k_out_str` output tokens, priced as in the budget example of @sec-vol3-controlplane-accounting. The inputs are illustrative. How often should the harness checkpoint, and what does a crash cost at that cadence and at a much rarer one?
+
+**Cadence**: With $\delta$ = `{python} CheckpointCadence.delta_str` s and $M$ = `{python} CheckpointCadence.mtbf_total_str` s, @eq-vol3-young-formula gives $T^{\ast} = \sqrt{2\,\delta\,M}$ = `{python} CheckpointCadence.t_opt_str` s, which is `{python} CheckpointCadence.turns_opt_str` turns.
+
+**Overhead**: The share of the run spent on pauses and lost work is $\delta/T + T/(2M)$. At the optimum it is `{python} CheckpointCadence.u_opt_str`. Checkpointing every turn raises it to `{python} CheckpointCadence.u_every_str`, almost all of it pauses, and checkpointing every `{python} CheckpointCadence.rare_turns_str` turns also costs `{python} CheckpointCadence.u_rare_str`, almost all of it lost work.
+
+**Crash cost**: Any resume pays one cold prefill of the rebuilt context, about `{python} CheckpointCadence.resume_usd_str`. On top of that, a crash loses half an interval on average. At the optimum that is `{python} CheckpointCadence.redo_opt_turns_str` turns, about `{python} CheckpointCadence.redo_opt_min_str` minute and `{python} CheckpointCadence.redo_opt_usd_str` of tokens with the prefix warm. Checkpointing every `{python} CheckpointCadence.rare_turns_str` turns instead, a crash loses `{python} CheckpointCadence.redo_rare_turns_str` turns, about `{python} CheckpointCadence.redo_rare_min_str` minutes and `{python} CheckpointCadence.redo_rare_usd_str`, and every redone turn is a fresh sample that can wander from the path the log recorded.
+
+**Systems insight**: The overhead curve is flat near its minimum and steep at both ends, so the cadence need only be right within a factor of two or so. What moves it is the ratio of checkpoint cost to failure rate. A slower snapshot store raises $\delta$ and pushes the optimum out, and a more volatile worker pool shortens $M$ and pulls it in. The dollar bill of a crash is small; the larger cost of redone turns is that they are new samples, which is why the log keeps every reply the model already produced.
+
+:::
+
+A copy-on-write checkpoint costs little next to a turn that spends seconds in a model call, and preemptible workers have a short $M$, so the optimum is usually every few turns rather than every few hundred.
 
 Four moments call for a checkpoint regardless of the formula, because each is a point the trajectory will want to return to or must not lose:
 

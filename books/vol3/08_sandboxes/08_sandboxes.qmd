@@ -56,7 +56,7 @@ A coding agent is asked to fix a failing test in a service repository. On turn s
 *Authority bounded beneath the model, limiting what code can change, read, and send.*
 :::
 
-The model reads its system prompt, its tool schemas, and the README it fetched a moment earlier as one sequence of tokens, and nothing in that sequence marks which tokens may issue commands. This is indirect prompt injection [@greshake2023not], and the introduction already named it. Provenance tags and quarantine framing (@sec-vol3-context-engineering-staging, @sec-vol3-persistent-quarantine) tell the model which text is untrusted and lower the probability that it follows a planted instruction, but they cannot make following one impossible. Benchmark suites that plant instructions inside tool outputs [@zhan2024injecagent; @debenedetti2024agentdojo] accordingly report attack success as a rate, and they find that rate above zero for the models and prompt-level defenses they evaluate. The same proposal can also arrive with no attacker at all. A sampled `rm -rf` aimed one directory too high, or a migration run against the wrong database, is an unsafe proposal the model produced under entirely benign conditions [@amodei2016concrete]. In both cases the grant of @sec-vol3-tool-calling-mcp did its job. It decided that this session may call `run_shell`, and it could not see what the command inside the call would reach once it ran. That reach is what this chapter bounds.
+The model reads its system prompt, its tool schemas, and the README it fetched a moment earlier as one sequence of tokens, and nothing in that sequence marks which tokens may issue commands. This is indirect prompt injection [@greshake2023not], which @sec-vol3-intro-prompt-injection named. Provenance tags and quarantine framing (@sec-vol3-context-engineering-staging, @sec-vol3-persistent-quarantine) tell the model which text is untrusted and lower the probability that it follows a planted instruction, but they cannot make following one impossible. Benchmark suites that plant instructions inside tool outputs [@zhan2024injecagent; @debenedetti2024agentdojo] accordingly report attack success as a rate, and they find that rate above zero for the models and prompt-level defenses they evaluate. The same proposal can also arrive with no attacker at all. A sampled `rm -rf` aimed one directory too high, or a migration run against the wrong database, is an unsafe proposal the model produced under entirely benign conditions [@amodei2016concrete]. In both cases the grant of @sec-vol3-tool-calling-mcp did its job. It decided that this session may call `run_shell`, and it could not see what the command inside the call would reach once it ran. That reach is what this chapter bounds.
 
 Three conditions made the README attack work. The agent could reach private data (the credentials file), it read untrusted content that could steer its proposals (the README), and it had a channel for sending data out (an unrestricted network route). Remove any one and the attack has nowhere to go. An agent that holds no secrets has nothing to leak, an agent that reads no untrusted text receives no planted instructions, and an agent with no outbound channel cannot deliver what it read. A useful coding agent must read the internet and must touch real repositories, so the runtime rarely removes a condition outright. It shrinks each one instead, and the chapter follows that plan. Capabilities and credential brokering (@sec-vol3-sandboxes-least-privilege) keep private data out of the sandbox. The isolation envelope (@sec-vol3-sandboxes-microvms) and the workspace inside it (@sec-vol3-sandboxes-cow) bound what code can touch. Egress control (@sec-vol3-sandboxes-network) narrows the network channel, and taint tracking (@sec-vol3-sandboxes-taint) keeps untrusted text from choosing where data goes through the tools that remain. Pools and their reset contract (@sec-vol3-sandboxes-pooling) make all of this cheap enough that no one is tempted to switch it off.
 
@@ -72,18 +72,18 @@ Three conditions made the README attack work. The agent could reach private data
 
 ### Blast radius by authority level {#sec-vol3-sandboxes-blast-radius}
 
-The authority levels of @sec-vol3-intro-hsa rank what a task may do to the world, and each level leaves a different blast radius when a proposal is wrong. @Tbl-vol3-sandboxes-authority-radius pairs each level with what can go wrong and with the containment it obligates.
+The authority levels of @sec-vol3-intro-hsa rank what a task may do to the world, and each level leaves a different blast radius when a proposal is wrong. @Sec-vol3-tool-calling-mcp set what the grant demands at each level before a call runs. @Tbl-vol3-sandboxes-authority-radius supplies the other half, pairing each level with what can go wrong once the call's code runs and with the containment that level obligates.
 
-| Authority level                   | What a wrong proposal can damage                                      | Containment the runtime must supply                                                    |
-|:----------------------------------|:----------------------------------------------------------------------|:---------------------------------------------------------------------------------------|
-| **$A_0$ (read access)**           | Confidentiality: anything read can leave through any outbound channel | Scoped read capabilities, no secrets in the sandbox, default-deny egress, taint checks |
-| **$A_1$ (sandbox mutation)**      | Only the discardable workspace, and only while the envelope holds     | An isolation envelope, a copy-on-write workspace, reset between tenants                |
-| **$A_2$ (reversible external)**   | External systems, reached through credentials                         | Brokered, scoped credentials plus settlement and compensation                          |
-| **$A_3$ (irreversible external)** | External systems, permanently                                         | All of the above plus an approval gate that no sandboxed code path can bypass          |
+| Authority level                                | What a wrong proposal can damage                                      | Containment the runtime must supply                                                    |
+|:-----------------------------------------------|:----------------------------------------------------------------------|:---------------------------------------------------------------------------------------|
+| **$A_0$ (read access)**                        | Confidentiality: anything read can leave through any outbound channel | Scoped read capabilities, no secrets in the sandbox, default-deny egress, taint checks |
+| **$A_1$ (sandboxed mutation)**                 | Only the discardable workspace, and only while the envelope holds     | An isolation envelope, a copy-on-write workspace, reset between tenants                |
+| **$A_2$ (retry-safe or compensable external)** | External systems, reached through credentials                         | Brokered, scoped credentials plus settlement and compensation                          |
+| **$A_3$ (irreversible external)**              | External systems, permanently                                         | All of the above plus an approval gate that no sandboxed code path can bypass          |
 
 : **Blast Radius by Authority Level**: Each authority level of the H·S·A exposures pairs with what a wrong proposal can damage and with the containment the runtime must supply before any code runs. {#tbl-vol3-sandboxes-authority-radius}
 
-Two rows deserve emphasis because they are where designs most often under-provision. Read access is not a zero blast radius. An $A_0$ agent that can read credentials or customer records can leak them through anything it sends outward, including an ordinary tool argument. At the other end, a sandbox cannot make an $A_3$ action safe. A payment or a production migration takes effect outside any envelope, so the sandbox's job is only to guarantee that no code path inside it can reach such an action except through the approval gate of @sec-vol3-controlplane-hitl. The $A_2$ row depends on settlement (@sec-vol3-tool-calling-idempotency) and compensation (@sec-vol3-failure-recovery) as much as on containment.
+Two rows deserve emphasis because they are where designs most often under-provision. Read access is not a zero blast radius (@sec-vol3-intro-hsa), and the README attack shows the mechanism, since it mutated nothing and needed only a read followed by a send. At the other end, a sandbox cannot make an $A_3$ action safe. A payment or a production migration takes effect outside any envelope, so the sandbox's job is only to guarantee that no code path inside it can reach such an action except through the approval gate of @sec-vol3-controlplane-hitl. The $A_2$ row depends on settlement (@sec-vol3-tool-calling-idempotency) and compensation (@sec-vol3-failure-recovery) as much as on containment.
 
 Containment beneath the model (principle \ref{pri-vol3-zero-trust-sandboxing}) turns the table into a design rule. Every dispatched action runs inside an envelope enforced by a layer below the code it contains, and nothing inside that envelope reaches the host, another tenant, or the network except through channels the runtime controls. The invariant closure principle (\ref{pri-invariant-closure}) explains why the rule is stated this way. A model-side measure such as framing, safety fine-tuning, or a guard classifier lowers the probability of a bad proposal, while only a mechanical check below the model bounds what the proposal can do.
 
@@ -230,17 +230,123 @@ A **bytecode sandbox** such as WebAssembly [@haas2017bringing] confines code to 
 
 : **Isolation Envelopes for Agent Code**: Four envelopes compared by what untrusted code shares with the host, what it can run, and the order of magnitude of its start cost. {#tbl-vol3-isolation-taxonomy}
 
-The choice follows from three properties of the action. The first is the code it runs. Pure computation fits a bytecode sandbox, arbitrary Linux programs need a user-space kernel or a microVM, and only trusted code belongs in a shared-kernel container. The second is the authority it holds. At $A_1$ the envelope is the entire guarantee, so model-written code gets its own kernel, while at $A_2$ and $A_3$ the envelope must be paired with brokering and gates, since it cannot contain an external effect. The third is duration, the horizon exposure at work. A microVM's start cost would dominate a three-millisecond regular-expression call, but it is negligible across a forty-minute coding trajectory that reuses the same envelope for hundreds of turns. The three workloads that opened the section therefore land in three places. The regular-expression tool runs in a fresh bytecode sandbox per call, the coding agent holds one microVM for its whole trajectory, and the customer binary runs in a microVM that holds no credentials and has egress denied.
+```{python}
+#| label: calc-vol3-sandbox-envelope-amortization
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MICROVM START COST PER CALL VS. PER TRAJECTORY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The duration argument in @sec-vol3-sandboxes-envelope-choice.
+# │
+# │ Goal: Show that the same microVM start cost dominates a millisecond tool
+# │       call and vanishes across a long coding trajectory.
+# │ Show: Start cost as a multiple of one short call, and as a share of one
+# │       trajectory that reuses the envelope.
+# │ How:  Snapshot-restore latency from the illustrative MLSysIM coding-agent
+# │       sandbox profile, divided by each workload's duration.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+class EnvelopeAmortization:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    t_restore = Agents.Coding.SWE_Bench_Runner.sandbox_snapshot_restore_latency  # fresh microVM from snapshot
+    t_regex_call = 3 * ms  # scenario assumption: one regular-expression tool call
+    t_trajectory = 40 * minute  # scenario assumption: one multi-turn coding trajectory
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    per_call_multiple = (t_restore / t_regex_call).to("dimensionless").magnitude
+    per_trajectory_share = (t_restore / t_trajectory).to("dimensionless").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(per_call_multiple > 1, "Start cost must exceed the short call for the contrast to hold")
+    check(per_trajectory_share < 1e-3, "Start cost must be negligible across the trajectory")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_restore_str = fmt(t_restore, unit="ms", precision=0)
+    t_regex_call_str = fmt(t_regex_call, unit="ms", precision=0)
+    t_trajectory_str = fmt_int(t_trajectory.magnitude)
+    per_call_mult_str = fmt_multiple(per_call_multiple)
+    per_trajectory_share_str = fmt_percent(per_trajectory_share, precision=4, style="prose")
+```
+
+The choice follows from three properties of the action. The first is the code it runs. Pure computation fits a bytecode sandbox, arbitrary Linux programs need a user-space kernel or a microVM, and only trusted code belongs in a shared-kernel container. The second is the authority it holds. At $A_1$ the envelope is the entire guarantee, so model-written code gets its own kernel, while at $A_2$ and $A_3$ the envelope must be paired with brokering and gates, since it cannot contain an external effect. The third is duration, the horizon exposure at work. Restoring a microVM from its snapshot takes about `{python} EnvelopeAmortization.t_restore_str` ms in the illustrative coding-agent sandbox profile this chapter uses, `{python} EnvelopeAmortization.per_call_mult_str` the work of a `{python} EnvelopeAmortization.t_regex_call_str` ms regular-expression call, yet only `{python} EnvelopeAmortization.per_trajectory_share_str` of a `{python} EnvelopeAmortization.t_trajectory_str`-minute coding trajectory that reuses the same envelope for hundreds of turns. The three workloads that opened the section therefore land in three places. The regular-expression tool runs in a fresh bytecode sandbox per call, the coding agent holds one microVM for its whole trajectory, and the customer binary runs in a microVM that holds no credentials and has egress denied.
 
 An envelope bounds what a process can touch. A coding agent's work, however, lives in files that must survive from one turn to the next, and the envelope alone says nothing about where those files come from or where they go.
 
 ## The Agent Workspace {#sec-vol3-sandboxes-cow}
 
-On turn twelve a coding agent edits three files, on turn thirty-one it runs the test suite, and on turn forty the harness collects its change. Running every tool call in a fresh sandbox would discard the edits between turns. Running the trajectory in the developer's own checkout would let a stray `rm -rf` destroy the ground truth that other trajectories and people depend on. Copying the repository and toolchain for every trajectory preserves both, but it moves gigabytes and costs seconds per trajectory, and thirty-two parallel trajectories multiply those bytes thirty-two times. The workspace is the task's $S_2$ state in the terms of @sec-vol3-intro-hsa, artifacts carried across turns inside a sandbox the runtime can discard, and it needs a cheaper construction than any of the three.
+On turn twelve a coding agent edits three files, on turn thirty-one it runs the test suite, and on turn forty the harness collects its change. Running every tool call in a fresh sandbox would discard the edits between turns. Running the trajectory in the developer's own checkout would let a stray `rm -rf` destroy the ground truth that other trajectories and people depend on. Copying the repository and toolchain for every trajectory preserves both, but it moves gigabytes per trajectory, and parallel trajectories multiply those bytes by their number. The workspace is the task's $S_2$ state in the terms of @sec-vol3-intro-hsa, artifacts carried across turns inside a sandbox the runtime can discard, and it needs a cheaper construction than any of the three.
 
 A copy-on-write overlay provides it. A read-only base image, holding the repository at a fixed commit together with its toolchain and installed dependencies, is shared by every trajectory working on that task. Each trajectory gets its own writable upper layer stacked on top. A read falls through to the base image, so unchanged files are served from one copy in the host page cache no matter how many trajectories read them. The first write to a file copies it into the upper layer, and a deletion records a marker in the upper layer that hides the base file. Starting a workspace therefore costs a mount rather than a copy, and at the end the upper layer holds exactly what the trajectory changed, which is also the diff it produced.
 
-Copy-on-write has one trap worth planning for. The copy happens at file granularity, so appending a single line to a large binary fixture copies the whole fixture into the upper layer, and many trajectories doing so at once saturate the host's storage bandwidth. Marking large fixtures read-only, keeping large data outside the image, or using block-level snapshots for data-heavy tasks keeps a one-line write from costing a gigabyte.
+Copy-on-write has one trap worth planning for. The copy happens at file granularity, so appending a single line to a large binary fixture copies the whole fixture into the upper layer, and many trajectories doing so at once saturate the host's storage bandwidth. Marking large fixtures read-only, keeping large data outside the image, or using block-level snapshots for data-heavy tasks keeps a one-line write from costing a gigabyte. Notebook \ref{nbk-08-workspace-copy-vs-overlay} prices the three cases for one evaluation host.
+
+```{python}
+#| label: calc-vol3-sandbox-workspace-cost
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COPYING VS. OVERLAYING A WORKSPACE, AND THE COPY-UP TRAP (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The workspace worked example in @sec-vol3-sandboxes-cow.
+# │
+# │ Goal: Compare the bytes written and the time to start parallel trajectory
+# │       workspaces by full copy and by copy-on-write overlay, and price one
+# │       small append to a large fixture under copy-up.
+# │ Show: Bytes written and minimum write time for each design.
+# │ How:  Bytes divided by the sequential bandwidth of one local NVMe drive
+# │       (a lower bound, since writes are no faster than sequential reads).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+class WorkspaceCost:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    disk_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth  # one local NVMe drive, sequential
+    trajectories = 32  # scenario assumption: parallel trajectories on one host
+    base_image = 2.4 * GB  # scenario assumption: repository, toolchain, and dependencies
+    written = 40 * MB  # scenario assumption: edits and build outputs per trajectory
+    fixture = 1.2 * GB  # scenario assumption: binary test fixture in the base image
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    copy_bytes = (trajectories * base_image).to("GB")
+    copy_time = (copy_bytes / disk_bw).to("s")
+    overlay_bytes = (trajectories * written).to("GB")
+    overlay_time = (overlay_bytes / disk_bw).to("s")
+    trap_bytes = (trajectories * fixture).to("GB")
+    trap_time = (trap_bytes / disk_bw).to("s")
+    copy_vs_overlay = (copy_bytes / overlay_bytes).to("dimensionless").magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(overlay_bytes < copy_bytes, "The overlay must write less than a full copy")
+    check(trap_bytes > overlay_bytes, "One copy-up of the fixture must dwarf the trajectory's own writes")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    disk_bw_str = fmt(disk_bw.to("GB/s"), precision=0)
+    trajectories_str = fmt_int(trajectories)
+    base_image_str = fmt(base_image.magnitude, precision=1)
+    written_str = fmt_int(written.magnitude)
+    fixture_str = fmt(fixture.magnitude, precision=1)
+    copy_bytes_str = fmt(copy_bytes.magnitude, precision=1)
+    copy_time_str = fmt_int(copy_time.magnitude)
+    overlay_bytes_str = fmt(overlay_bytes.magnitude, precision=2)
+    overlay_time_str = fmt(overlay_time.magnitude, precision=2)
+    trap_bytes_str = fmt(trap_bytes.magnitude, precision=1)
+    trap_time_str = fmt(trap_time.magnitude, precision=1)
+    copy_vs_overlay_str = fmt_int(copy_vs_overlay)
+```
+
+::: {#nbk-08-workspace-copy-vs-overlay .callout-notebook title="Starting parallel workspaces, and the copy-up trap"}
+
+**Problem**: An evaluation host starts `{python} WorkspaceCost.trajectories_str` coding trajectories at once on the same task. The base image, holding the repository, its toolchain, and its dependencies, is `{python} WorkspaceCost.base_image_str` GB, and each trajectory writes about `{python} WorkspaceCost.written_str` MB of edits and build outputs. The image also contains a `{python} WorkspaceCost.fixture_str` GB binary test fixture. The workspaces sit on one local NVMe drive that moves about `{python} WorkspaceCost.disk_bw_str` GB/s sequentially. What does each design write, and how long does the disk take at best?
+
+**Full copy.** Every trajectory copies the image before its first turn, `{python} WorkspaceCost.copy_bytes_str` GB in all, which keeps the disk busy for at least `{python} WorkspaceCost.copy_time_str` s before any agent runs and holds `{python} WorkspaceCost.trajectories_str` redundant copies in the page cache.
+
+**Overlay.** Starting a workspace is a mount, and only what the trajectories write reaches the disk, `{python} WorkspaceCost.overlay_bytes_str` GB over the whole run, about `{python} WorkspaceCost.overlay_time_str` s of disk time and `{python} WorkspaceCost.copy_vs_overlay_str` times fewer bytes than the copy.
+
+**Copy-up trap.** If a test script appends one line to the fixture, every trajectory copies the whole fixture into its upper layer. Together they write `{python} WorkspaceCost.trap_bytes_str` GB, a stall of at least `{python} WorkspaceCost.trap_time_str` s caused by a one-line write.
+
+**Systems insight**: The overlay makes starting a workspace nearly free and makes its cost track what the agent changes, not what it can see. Its one failure mode scales with the size of the files an agent touches, so large fixtures belong outside the writable path.
+
+:::
 
 ### Leases per trajectory, reset per tenant {#sec-vol3-sandboxes-lease}
 
