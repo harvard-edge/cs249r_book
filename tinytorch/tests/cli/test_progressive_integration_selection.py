@@ -60,10 +60,10 @@ def test_inline_command_rejects_empty_notebook(tmp_path):
     source = tmp_path / "src" / "01_tensor" / "01_tensor.py"
     source.parent.mkdir(parents=True)
     source.write_text("#| default_exp core.tensor\ndef test_unit_tensor():\n    pass\n"
-                      "def test_module():\n    test_unit_tensor()\n")
+                      "def test_module():\n    test_unit_tensor()\n", encoding="utf-8")
     notebook = tmp_path / "modules" / "01_tensor" / "tensor.ipynb"
     notebook.parent.mkdir(parents=True)
-    notebook.write_text(json.dumps({"cells": []}))
+    notebook.write_text(json.dumps({"cells": []}), encoding="utf-8")
     command = ModuleTestCommand(CLIConfig.from_project_root(tmp_path))
     passed, output = command.run_inline_tests("01_tensor", "01")
     assert not passed
@@ -77,10 +77,10 @@ def test_inline_command_rejects_tests_that_are_never_called(tmp_path):
             "def test_module():\n    test_unit_tensor()\n")
     source = tmp_path / "src" / "01_tensor" / "01_tensor.py"
     source.parent.mkdir(parents=True)
-    source.write_text(code)
+    source.write_text(code, encoding="utf-8")
     notebook = tmp_path / "modules" / "01_tensor" / "tensor.ipynb"
     notebook.parent.mkdir(parents=True)
-    notebook.write_text(json.dumps({"cells": [{"cell_type": "code", "source": code}]}))
+    notebook.write_text(json.dumps({"cells": [{"cell_type": "code", "source": code}]}), encoding="utf-8")
     command = ModuleTestCommand(CLIConfig.from_project_root(tmp_path))
     passed, output = command.run_inline_tests("01_tensor", "01")
     assert not passed

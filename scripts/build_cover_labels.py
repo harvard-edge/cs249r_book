@@ -472,7 +472,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '02_processor',
+        'slug': '02_foundation_model',
         'prefix': 'processor',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -485,7 +485,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '03_deliberation',
+        'slug': '03_test_time_compute',
         'prefix': 'deliberation',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -498,7 +498,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '04_working_sets',
+        'slug': '04_context_engineering',
         'prefix': 'working_sets',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -511,7 +511,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '05_virtual_memory',
+        'slug': '05_kv_cache',
         'prefix': 'virtual_memory',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -524,7 +524,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '06_episodic_memory',
+        'slug': '06_long_term_memory',
         'prefix': 'episodic_memory',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -576,7 +576,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '10_interrupts',
+        'slug': '10_durable_execution',
         'prefix': 'interrupts',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -589,7 +589,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '11_scheduling',
+        'slug': '11_failure_recovery',
         'prefix': 'scheduling',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -602,7 +602,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '12_data_flywheel',
+        'slug': '13_trajectory_curation',
         'prefix': 'data_flywheel',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -615,7 +615,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '13_sft',
+        'slug': '14_fine_tuning',
         'prefix': 'sft',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -628,7 +628,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '14_rlvr',
+        'slug': '15_rlvr',
         'prefix': 'rlvr',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -641,7 +641,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '15_multi_agent',
+        'slug': '16_multi_agent',
         'prefix': 'multi_agent',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -654,7 +654,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '16_observability',
+        'slug': '12_evaluation',
         'prefix': 'observability',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -667,7 +667,7 @@ VOL3_CHAPTERS = [
         ]
     },
     {
-        'slug': '17_tokenomics',
+        'slug': '17_agent_economics',
         'prefix': 'tokenomics',
         'font': FONT_ARIAL_BOLD,
         'labels': [
@@ -703,8 +703,8 @@ VOL4_CHAPTERS = [
         'font': FONT_HELVETICA,
         'labels': [
             {'text': 'brain', 'pill': (240, 150), 'targ': (240, 320), 'border': '#1A4D3E', 'color': '#1A4D3E'},
-            {'text': 'causal boundary', 'pill': (890, 220), 'targ': (890, 560), 'border': '#9B2226', 'color': '#9B2226'},
-            {'text': 'nervous system', 'pill': (695, 360), 'targ': (695, 520), 'border': '#1A4D3E', 'color': '#1A4D3E'},
+            {'text': 'causal boundary', 'pill': (890, 220), 'targ': (890, 455), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'nervous system', 'pill': (695, 285), 'targ': (695, 520), 'border': '#1A4D3E', 'color': '#1A4D3E'},
             {'text': 'body', 'pill': (1150, 170), 'targ': (1150, 320), 'border': '#1A4D3E', 'color': '#1A4D3E'},
             {'text': 'sensor feedback return', 'pill': (480, 700), 'targ': (480, 560), 'border': '#1A4D3E', 'color': '#1A4D3E'},
         ]
@@ -720,7 +720,7 @@ VOL4_CHAPTERS = [
             {'text': 'optical encoder disc', 'pill': (440, 100), 'targ': (675, 155), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'kinematic arm linkage', 'pill': (880, 80), 'targ': (820, 210), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'stopping envelope', 'pill': (1180, 150), 'targ': (1110, 210), 'border': '#9B2226', 'color': '#9B2226'},
-            {'text': 'contact friction cones', 'pill': (1140, 310), 'targ': (1100, 310), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'contact friction cones', 'pill': (870, 483), 'targ': (1043, 392), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'parallel jaw gripper', 'pill': (1200, 460), 'targ': (1030, 310), 'border': '#1C4E4F', 'color': '#1C4E4F'},
         ]
     },
@@ -731,7 +731,7 @@ VOL4_CHAPTERS = [
         'labels': [
             {'text': 'multimodal perception rays', 'pill': (240, 140), 'targ': (420, 190), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'cognitive token lattice', 'pill': (260, 360), 'targ': (640, 270), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'beveled glass housing', 'pill': (680, 70), 'targ': (760, 210), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': 'beveled glass housing', 'pill': (680, 70), 'targ': (801, 154), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'proposal aperture', 'pill': (1120, 360), 'targ': (800, 360), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'prospective action chunk', 'pill': (1160, 600), 'targ': (990, 510), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'thermal dissipation fins', 'pill': (440, 700), 'targ': (760, 520), 'border': '#1C4E4F', 'color': '#1C4E4F'},
@@ -742,13 +742,13 @@ VOL4_CHAPTERS = [
         'prefix': 'nervous',
         'font': FONT_HELVETICA,
         'labels': [
-            {'text': 'deterministic 1 khz clock', 'pill': (440, 80), 'targ': (710, 220), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': 'deterministic 1 kHz clock', 'pill': (440, 80), 'targ': (710, 220), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'jitter-bound envelope', 'pill': (960, 90), 'targ': (830, 160), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'seqlock proposal mailbox', 'pill': (200, 480), 'targ': (420, 400), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'cbf reflex filter', 'pill': (420, 660), 'targ': (690, 372), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'CBF reflex filter', 'pill': (420, 660), 'targ': (690, 372), 'border': '#9B2226', 'color': '#9B2226'},
             {'text': 'shielded fieldbus ring', 'pill': (1180, 210), 'targ': (1050, 260), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'machined heatsink fins', 'pill': (1180, 440), 'targ': (850, 400), 'border': '#1C4E4F', 'color': '#1C4E4F'},
-            {'text': 'sensor feedback return', 'pill': (960, 720), 'targ': (750, 560), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': 'sensor feedback return', 'pill': (960, 720), 'targ': (780, 580), 'border': '#1C4E4F', 'color': '#1C4E4F'},
         ]
     },
     {
@@ -759,7 +759,7 @@ VOL4_CHAPTERS = [
             {'text': 'bilateral haptic master', 'pill': (240, 260), 'targ': (440, 360), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'overhead sensor mast', 'pill': (560, 80), 'targ': (690, 130), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'stereo vision cone', 'pill': (880, 160), 'targ': (760, 240), 'border': '#1C4E4F', 'color': '#1C4E4F'},
-            {'text': '6-dof follower arm', 'pill': (1160, 260), 'targ': (960, 340), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': '6-DoF follower arm', 'pill': (1160, 260), 'targ': (960, 340), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'manipulation workpiece', 'pill': (1180, 520), 'targ': (816, 457), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'action stream conduit', 'pill': (240, 580), 'targ': (580, 500), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'timestamp sync logger', 'pill': (700, 740), 'targ': (710, 600), 'border': '#9B2226', 'color': '#9B2226'},
@@ -771,10 +771,10 @@ VOL4_CHAPTERS = [
         'font': FONT_HELVETICA,
         'labels': [
             {'text': 'virtual physics digital twin', 'pill': (240, 160), 'targ': (420, 310), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'randomized friction cones', 'pill': (240, 480), 'targ': (394, 490), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'randomized friction cones', 'pill': (240, 560), 'targ': (301, 434), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'domain randomization prism', 'pill': (700, 80), 'targ': (700, 320), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'physical quadruped plant', 'pill': (1160, 200), 'targ': (1000, 360), 'border': '#1C4E4F', 'color': '#1C4E4F'},
-            {'text': 'dynamometer treadmill', 'pill': (1180, 480), 'targ': (940, 600), 'border': '#1A4D3E', 'color': '#1A4D3E'},
+            {'text': 'dynamometer treadmill', 'pill': (1200, 640), 'targ': (940, 600), 'border': '#1A4D3E', 'color': '#1A4D3E'},
             {'text': 'real-time sensor telemetry', 'pill': (760, 740), 'targ': (770, 560), 'border': '#2EC4B6', 'color': '#2EC4B6'},
         ]
     },
@@ -785,7 +785,7 @@ VOL4_CHAPTERS = [
         'labels': [
             {'text': 'optical mocap tower', 'pill': (200, 180), 'targ': (348, 275), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'retroreflective constellation', 'pill': (480, 80), 'targ': (618, 290), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'dynamometer baseplate', 'pill': (260, 640), 'targ': (570, 440), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'dynamometer baseplate', 'pill': (260, 640), 'targ': (620, 480), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'safety perimeter rail', 'pill': (190, 480), 'targ': (380, 480), 'border': '#9B2226', 'color': '#9B2226'},
             {'text': 'confidence ledger cylinder', 'pill': (1160, 680), 'targ': (885, 545), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'tracking ray cone', 'pill': (1160, 240), 'targ': (850, 310), 'border': '#1C4E4F', 'color': '#1C4E4F'},
@@ -797,7 +797,7 @@ VOL4_CHAPTERS = [
         'font': FONT_HELVETICA,
         'labels': [
             {'text': 'stereo optical baseline', 'pill': (360, 70), 'targ': (620, 140), 'border': '#1C4E4F', 'color': '#1C4E4F'},
-            {'text': 'micro-lidar point cloud', 'pill': (880, 80), 'targ': (720, 230), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'micro-lidar point cloud', 'pill': (1120, 60), 'targ': (720, 230), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'metrology step artifact', 'pill': (200, 260), 'targ': (550, 360), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'extrinsic calibration frame', 'pill': (220, 500), 'targ': (635, 415), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'latency drift vector', 'pill': (480, 720), 'targ': (712, 545), 'border': '#9B2226', 'color': '#9B2226'},
@@ -812,7 +812,7 @@ VOL4_CHAPTERS = [
         'labels': [
             {'text': 'octree voxel grid', 'pill': (180, 320), 'targ': (341, 438), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'occlusion barrier', 'pill': (560, 70), 'targ': (568, 224), 'border': '#1C4E4F', 'color': '#1C4E4F'},
-            {'text': 'spatial belief decay', 'pill': (820, 90), 'targ': (752, 240), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'spatial belief decay', 'pill': (1000, 55), 'targ': (752, 240), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'temporal lease ledger', 'pill': (1140, 160), 'targ': (1079, 278), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'stale token eviction', 'pill': (1160, 710), 'targ': (958, 567), 'border': '#9B2226', 'color': '#9B2226'},
         ]
@@ -825,7 +825,7 @@ VOL4_CHAPTERS = [
             {'text': 'task token projection', 'pill': (740, 60), 'targ': (735, 120), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'kinematic reachability dome', 'pill': (200, 160), 'targ': (380, 180), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'spatial tolerance cylinder', 'pill': (240, 440), 'targ': (690, 380), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'aerospace bracket workpiece', 'pill': (320, 680), 'targ': (640, 500), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': 'aerospace bracket workpiece', 'pill': (320, 680), 'targ': (725, 470), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'countdown lease ring dial', 'pill': (1140, 160), 'targ': (765, 265), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'insertion affordance cone', 'pill': (1140, 360), 'targ': (886, 280), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'expiration tripwire', 'pill': (1140, 560), 'targ': (940, 500), 'border': '#9B2226', 'color': '#9B2226'},
@@ -836,13 +836,13 @@ VOL4_CHAPTERS = [
         'prefix': 'planning',
         'font': FONT_HELVETICA,
         'labels': [
-            {'text': 'bldc outrunner cutaway', 'pill': (220, 180), 'targ': (380, 285), 'border': '#1C4E4F', 'color': '#1C4E4F'},
-            {'text': '3d polynomial spline', 'pill': (240, 440), 'targ': (540, 350), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'BLDC outrunner cutaway', 'pill': (220, 180), 'targ': (380, 285), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': '3D polynomial spline', 'pill': (240, 440), 'targ': (540, 350), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'aerodynamic thrust cones', 'pill': (400, 720), 'targ': (560, 520), 'border': '#2EC4B6', 'color': '#2EC4B6'},
             {'text': 'spatial obstacle ring', 'pill': (740, 80), 'targ': (730, 170), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'prospective waypoint chunk', 'pill': (1140, 180), 'targ': (880, 205), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'hover-recovery stopping suffix', 'pill': (1140, 360), 'targ': (1010, 260), 'border': '#9B2226', 'color': '#9B2226'},
-            {'text': 'terminal landing perch', 'pill': (1180, 540), 'targ': (1040, 480), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': 'terminal landing perch', 'pill': (1180, 540), 'targ': (1043, 400), 'border': '#1C4E4F', 'color': '#1C4E4F'},
         ]
     },
     {
@@ -855,7 +855,7 @@ VOL4_CHAPTERS = [
             {'text': 'emergency brake interlock', 'pill': (280, 640), 'targ': (635, 470), 'border': '#9B2226', 'color': '#9B2226'},
             {'text': 'prohibited hazard boundary', 'pill': (1160, 180), 'targ': (980, 200), 'border': '#9B2226', 'color': '#9B2226'},
             {'text': 'candidate proposal vector', 'pill': (1160, 340), 'targ': (910, 250), 'border': '#0090B0', 'color': '#0090B0'},
-            {'text': 'cbf-qp projected vector', 'pill': (1160, 500), 'targ': (910, 325), 'border': '#D97706', 'color': '#D97706'},
+            {'text': 'CBF-QP projected vector', 'pill': (1160, 500), 'targ': (910, 325), 'border': '#D97706', 'color': '#D97706'},
         ]
     },
     {
@@ -863,12 +863,12 @@ VOL4_CHAPTERS = [
         'prefix': 'placement',
         'font': FONT_HELVETICA,
         'labels': [
-            {'text': '3d memory stacks', 'pill': (190, 140), 'targ': (270, 240), 'border': '#1C4E4F', 'color': '#1C4E4F'},
-            {'text': 'cognitive npu cluster', 'pill': (200, 340), 'targ': (520, 350), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': '3D memory stacks', 'pill': (190, 140), 'targ': (270, 240), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': 'cognitive NPU cluster', 'pill': (190, 372), 'targ': (520, 350), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'thermal dissipation fins', 'pill': (360, 60), 'targ': (468, 144), 'border': '#1C4E4F', 'color': '#1C4E4F'},
-            {'text': 'deterministic mcu enclave', 'pill': (1160, 260), 'targ': (925, 356), 'border': '#1C4E4F', 'color': '#1C4E4F'},
+            {'text': 'deterministic MCU enclave', 'pill': (1160, 260), 'targ': (925, 356), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'shared crossbar bus', 'pill': (380, 720), 'targ': (538, 464), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'qos isolation trench', 'pill': (720, 750), 'targ': (588, 564), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'QoS isolation trench', 'pill': (720, 750), 'targ': (588, 564), 'border': '#9B2226', 'color': '#9B2226'},
         ]
     },
     {
@@ -881,7 +881,7 @@ VOL4_CHAPTERS = [
             {'text': 'steer-by-wire rack & pinion', 'pill': (240, 520), 'targ': (540, 410), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'tire contact friction ellipses', 'pill': (360, 720), 'targ': (690, 540), 'border': '#D97706', 'color': '#D97706'},
             {'text': 'electric traction motor', 'pill': (1160, 160), 'targ': (825, 240), 'border': '#1C4E4F', 'color': '#1C4E4F'},
-            {'text': 'timestamped intervention relay', 'pill': (1140, 300), 'targ': (900, 280), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'timestamped intervention relay', 'pill': (1215, 370), 'targ': (900, 280), 'border': '#9B2226', 'color': '#9B2226'},
             {'text': 'human steering override', 'pill': (1180, 440), 'targ': (730, 275), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'kinetic authority clutch', 'pill': (1180, 580), 'targ': (685, 310), 'border': '#D97706', 'color': '#D97706'},
         ]
@@ -904,9 +904,9 @@ VOL4_CHAPTERS = [
         'font': FONT_HELVETICA,
         'labels': [
             {'text': 'evidence telemetry pipelines', 'pill': (280, 680), 'targ': (473, 549), 'border': '#1C4E4F', 'color': '#1C4E4F'},
-            {'text': 'gsn argument hierarchy', 'pill': (480, 220), 'targ': (691, 379), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'GSN argument hierarchy', 'pill': (270, 200), 'targ': (691, 379), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'deployment authorization seal', 'pill': (722, 60), 'targ': (710, 175), 'border': '#D97706', 'color': '#D97706'},
-            {'text': 'certified envelope threshold', 'pill': (1160, 320), 'targ': (875, 410), 'border': '#9B2226', 'color': '#9B2226'},
+            {'text': 'certified envelope threshold', 'pill': (1220, 470), 'targ': (1065, 430), 'border': '#9B2226', 'color': '#9B2226'},
             {'text': 'revocation interlock', 'pill': (1120, 680), 'targ': (888, 524), 'border': '#9B2226', 'color': '#9B2226'},
         ]
     },
@@ -915,7 +915,7 @@ VOL4_CHAPTERS = [
         'prefix': 'frontier',
         'font': FONT_HELVETICA,
         'labels': [
-            {'text': 'tripartite physical stack', 'pill': (200, 140), 'targ': (390, 253), 'border': '#0090B0', 'color': '#0090B0'},
+            {'text': 'machine stack', 'pill': (200, 140), 'targ': (390, 253), 'border': '#0090B0', 'color': '#0090B0'},
             {'text': 'actuator body housing', 'pill': (340, 680), 'targ': (528, 454), 'border': '#1C4E4F', 'color': '#1C4E4F'},
             {'text': 'containment barrier', 'pill': (1180, 220), 'targ': (949, 307), 'border': '#9B2226', 'color': '#9B2226'},
             {'text': 'exploratory horizon prism', 'pill': (880, 60), 'targ': (869, 179), 'border': '#D97706', 'color': '#D97706'},
@@ -982,9 +982,12 @@ def render_chapter(vol_name, ch):
     # Base image for final composition
     if has_2x_base:
         im_base = Image.open(base_print_path).convert('RGB')
-        out_w, out_h = im_base.size # 2800, 1600
-        # Supersample overlay by 2x of 2800x1600 = 5600x3200 (scale 4 relative to 1400x800)
-        scale = 4
+        out_w, out_h = im_base.size
+        # Label coordinates are authored in 1400x800 space and the overlay is
+        # supersampled 2x, so the scale follows the real base width: 4 for a
+        # 2800x1600 print master, 2 for a 1400x800 one. (2026-09-22: a fixed 4
+        # doubled every label position on 1400-wide print bases.)
+        scale = 2 * out_w // 1400
         font_size_1x = 28
     else:
         im_base = Image.open(base_1x_path).convert('RGB')
@@ -1080,52 +1083,82 @@ def render_chapter(vol_name, ch):
     print(f"Generated [{vol_name}] {slug} -> {out_png}")
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Generate publication-quality labeled isometric blueprint chapter openers")
+    parser.add_argument('--vol1', action='store_true', help="Render Volume 1")
+    parser.add_argument('--vol2', action='store_true', help="Render Volume 2")
+    parser.add_argument('--vol3', action='store_true', help="Render Volume 3")
+    parser.add_argument('--vol4', action='store_true', help="Render Volume 4")
+    parser.add_argument('--all', action='store_true', help="Render all volumes")
+    args = parser.parse_args()
+
+    explicit = any([args.vol1, args.vol2, args.vol3, args.vol4, args.all])
+    if explicit:
+        run_vol1 = args.vol1 or args.all
+        run_vol2 = args.vol2 or args.all
+        run_vol3 = args.vol3 or args.all
+        run_vol4 = args.vol4 or args.all
+    else:
+        # Auto-detect existing volume directories
+        run_vol1 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol1', '01_introduction'))
+        run_vol2 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol2', '01_introduction'))
+        run_vol3 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol3', '07_checkpointing'))
+        run_vol4 = os.path.exists(os.path.join(REPO_ROOT, 'books', 'vol4', '01_boundary'))
+
     print("=" * 70)
-    print("Pre-validating all configurations across Volumes 1, 2, 3, and 4...")
+    print("Pre-validating configurations...")
     print("=" * 70)
     
-    for ch in VOL1_CHAPTERS:
-        validate_chapter('vol1', ch)
-    print("✓ Volume 1 validation passed: 0 color words, 0 line crossings.")
-    
-    for ch in VOL2_CHAPTERS:
-        validate_chapter('vol2', ch)
-    print("✓ Volume 2 validation passed: 0 color words, 0 line crossings.")
-    
-    for ch in VOL3_CHAPTERS:
-        validate_chapter('vol3', ch)
-    print("✓ Volume 3 validation passed: 0 color words, 0 line crossings.")
-    
-    for ch in VOL4_CHAPTERS:
-        validate_chapter('vol4', ch)
-    print("✓ Volume 4 validation passed: 0 color words, 0 line crossings.")
-    
-    print("\n" + "=" * 70)
-    print("Rendering Volume 1 blueprints with 4x supersampling (2800x1600 print)...")
-    print("=" * 70)
-    for ch in VOL1_CHAPTERS:
-        render_chapter('vol1', ch)
+    if run_vol1:
+        for ch in VOL1_CHAPTERS:
+            validate_chapter('vol1', ch)
+        print("✓ Volume 1 validation passed: 0 color words, 0 line crossings.")
         
-    print("\n" + "=" * 70)
-    print("Rendering Volume 2 blueprints with 4x supersampling (2800x1600 print)...")
-    print("=" * 70)
-    for ch in VOL2_CHAPTERS:
-        render_chapter('vol2', ch)
+    if run_vol2:
+        for ch in VOL2_CHAPTERS:
+            validate_chapter('vol2', ch)
+        print("✓ Volume 2 validation passed: 0 color words, 0 line crossings.")
         
-    print("\n" + "=" * 70)
-    print("Rendering Volume 3 blueprints with 2x supersampling (1400x800)...")
-    print("=" * 70)
-    for ch in VOL3_CHAPTERS:
-        render_chapter('vol3', ch)
+    if run_vol3:
+        for ch in VOL3_CHAPTERS:
+            validate_chapter('vol3', ch)
+        print("✓ Volume 3 validation passed: 0 color words, 0 line crossings.")
         
-    print("\n" + "=" * 70)
-    print("Rendering Volume 4 blueprints with 2x supersampling (1400x800)...")
-    print("=" * 70)
-    for ch in VOL4_CHAPTERS:
-        render_chapter('vol4', ch)
+    if run_vol4:
+        for ch in VOL4_CHAPTERS:
+            validate_chapter('vol4', ch)
+        print("✓ Volume 4 validation passed: 0 color words, 0 line crossings.")
         
+    if run_vol1:
+        print("\n" + "=" * 70)
+        print("Rendering Volume 1 blueprints with 4x supersampling (2800x1600 print)...")
+        print("=" * 70)
+        for ch in VOL1_CHAPTERS:
+            render_chapter('vol1', ch)
+            
+    if run_vol2:
+        print("\n" + "=" * 70)
+        print("Rendering Volume 2 blueprints with 4x supersampling (2800x1600 print)...")
+        print("=" * 70)
+        for ch in VOL2_CHAPTERS:
+            render_chapter('vol2', ch)
+            
+    if run_vol3:
+        print("\n" + "=" * 70)
+        print("Rendering Volume 3 blueprints with 2x supersampling (1400x800)...")
+        print("=" * 70)
+        for ch in VOL3_CHAPTERS:
+            render_chapter('vol3', ch)
+            
+    if run_vol4:
+        print("\n" + "=" * 70)
+        print("Rendering Volume 4 blueprints with 2x supersampling (1400x800)...")
+        print("=" * 70)
+        for ch in VOL4_CHAPTERS:
+            render_chapter('vol4', ch)
+            
     print("\n" + "=" * 70)
-    print("All 68 chapter blueprints across 4 volumes successfully generated with 0 defects.")
+    print("Blueprint generation complete.")
     print("=" * 70)
 
 if __name__ == '__main__':

@@ -17,7 +17,7 @@ class NBGraderValidator:
     def __init__(self, module_path: Path):
         self.module_path = module_path
         self.module_name = module_path.stem
-        self.content = module_path.read_text()
+        self.content = module_path.read_text(encoding='utf-8')
         self.lines = self.content.split('\n')
         self.issues = []
         self.grade_ids = []
@@ -510,7 +510,7 @@ if __name__ == "__main__":
     # Save results to JSON
     output_file = args.output
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    with output_file.open('w') as f:
+    with output_file.open('w', encoding='utf-8') as f:
         json.dump(results, f, indent=2)
 
     print(f"\nDetailed results saved to: {output_file}")

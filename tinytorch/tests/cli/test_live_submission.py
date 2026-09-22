@@ -76,7 +76,7 @@ class TestLiveCommunitySync:
             "last_worked": "01",
             "last_completed": "01",
             "last_updated": "2026-06-16T22:32:26"
-        }))
+        }), encoding="utf-8")
         
         self.milestones_file = self.tito_dir / "milestones.json"
         self.milestones_file.write_text(json.dumps({
@@ -85,7 +85,7 @@ class TestLiveCommunitySync:
             "unlock_dates": {},
             "completion_dates": {},
             "total_unlocked": 0
-        }))
+        }), encoding="utf-8")
         
         self.config = CLIConfig(
             project_root=tmp_path,

@@ -11,6 +11,7 @@ from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
 from rich.align import Align
 from typing import Optional
 import sys
+import time
 
 from .theme import Theme
 
@@ -38,7 +39,7 @@ def print_banner(compact: bool = False):
         banner_text.append("Tiny", style=Theme.BRAND_ACCENT)
         banner_text.append("🔥", style=Theme.BRAND_FLAME)
         banner_text.append("TORCH", style=Theme.BRAND_PRIMARY)
-        banner_text.append(": Don't import it. Build it.", style=Theme.DIM)
+        banner_text.append(": Don't just import Torch. Build it.", style=Theme.DIM)
         console.print(Panel(banner_text, style=Theme.BORDER_DEFAULT, padding=(1, 2)))
 
 def print_compact_banner():
@@ -49,10 +50,10 @@ def print_compact_banner():
     banner_text.append("Tiny", style=Theme.BRAND_ACCENT)
     banner_text.append("\n🔥", style=Theme.BRAND_FLAME)
     banner_text.append("TORCH", style=Theme.BRAND_PRIMARY)
-    banner_text.append(": Don't import it. Build it.", style=Theme.DIM)
+    banner_text.append(": Don't just import Torch. Build it.", style=Theme.DIM)
     console.print(Panel(banner_text, style=Theme.BORDER_DEFAULT, padding=(1, 2)))
 
-def print_ascii_logo(compact: bool = False):
+def print_ascii_logo(compact: bool = False, animate: bool = False):
     """Print the clean, minimal ASCII art TinyTorch logo."""
     console = get_console()
 
@@ -104,21 +105,53 @@ def print_ascii_logo(compact: bool = False):
         logo_text.append("\n")
 
     # Add tagline with flame (aligned under TORCH)
-    logo_text.append("\n           🔥 Don't import it. Build it.", style=TAGLINE_COLOR)
+    logo_text.append("\n       🔥 Don't just import Torch. Build it.", style=TAGLINE_COLOR)
     logo_text.append("\n")
 
     # Combine logo and tagline
     full_content = Text()
     full_content.append(logo_text)
 
-    # Display centered with rich styling
-    console.print()
-    console.print(Panel(
-        Align.center(full_content),
-        border_style=Theme.BORDER_DEFAULT,
-        padding=(1, 2)
-    ))
-    console.print()
+    if animate:
+        from rich.live import Live
+        current_text = Text()
+        
+        # Display an empty panel first
+        console.print()
+        
+        with Live(Panel(Align.center(current_text), border_style=Theme.BORDER_DEFAULT, padding=(1, 2)), refresh_per_second=20, console=console) as live:
+            # Animate lines one by one
+            for i, line in enumerate(logo_lines):
+                if i == 0:
+                    current_text.append(line, style=FLAME_COLOR)
+                elif 1 <= i <= 5:
+                    for char in line:
+                        if char in 'TINY':
+                            current_text.append(char, style=TINY_COLOR)
+                        else:
+                            current_text.append(char, style=TORCH_COLOR)
+                else:
+                    current_text.append(line, style=TORCH_COLOR)
+                current_text.append("\n")
+                
+                live.update(Panel(Align.center(current_text), border_style=Theme.BORDER_DEFAULT, padding=(1, 2)))
+                time.sleep(0.08)
+                
+            # Pause before tagline
+            time.sleep(0.3)
+            current_text.append("\n       🔥 Don't just import Torch. Build it.", style=TAGLINE_COLOR)
+            current_text.append("\n")
+            time.sleep(0.1)
+        console.print()
+    else:
+        # Display centered with rich styling normally
+        console.print()
+        console.print(Panel(
+            Align.center(full_content),
+            border_style=Theme.BORDER_DEFAULT,
+            padding=(1, 2)
+        ))
+        console.print()
 
 def print_compact_ascii_logo():
     """Print the compact ASCII art TinyTorch logo - same as main logo now."""

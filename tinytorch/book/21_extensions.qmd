@@ -1,4 +1,4 @@
-# Extensions: Leaving NumPy {#sec-extensions}
+# Extending TinyTorch: Hardware and Ecosystems {#sec-extensions}
 
 ::: {.column-margin}
 ![](assets/images/diagrams/21_framework-you-are-here.svg){width="100%" fig-alt="TinyTorch execution datapath blueprint highlighting the Extensions chapter between the TinyTorch software stack and the hardware."}
@@ -6,6 +6,8 @@
 *Framework Blueprint: the optional extensions call compiled kernels from TinyTorch, one level below NumPy.*
 :::
 
+
+## Native Hardware Extensions
 
 Every module so far bottoms out in NumPy. When TinyTorch multiplies two matrices, it hands the arrays to `np.matmul`, and a library someone else wrote does the arithmetic. This chapter goes one level down: leaving interpreted Python runtimes to compile and execute custom kernels directly on physical hardware.
 
@@ -270,9 +272,173 @@ The invariant to carry out of the book is the one this chapter tested on its own
 
 [^fn-triton-compiler-swizzling]: In traditional CUDA C++, the programmer must explicitly partition thread grids, choreograph intra-warp shuffles, manage shared memory (`__shared__`) buffers, and apply hand-tuned index swizzling permutations to avoid bank conflicts across the 32 hardware memory banks. Triton operates at a higher abstraction: the developer writes SPMD block-level tensor algorithms, and the Triton compiler automatically generates coalesced global memory transactions, bank-conflict-free shared memory layouts, and asynchronous copy pipelines (`cp.async` on NVIDIA Ampere/Hopper).
 
-## Further reading
+## Further Reading
 
-- Goto and van de Geijn (2008), [Anatomy of high-performance matrix multiplication](https://doi.org/10.1145/1356052.1356053), *ACM TOMS*. Register blocking and packing, the two techniques that separate `simd_matmul` from a tuned library.
-- Van Zee and van de Geijn (2015), [BLIS: a framework for rapidly instantiating BLAS functionality](https://doi.org/10.1145/2764454), *ACM TOMS*. How a matrix library is built from one small hand-tuned kernel.
-- Tillet, Kung, and Cox (2019), [Triton: an intermediate language and compiler for tiled neural network computations](https://doi.org/10.1145/3315508.3329973), *MAPL*. The design behind the block programs in `triton_gelu.py`.
+- **Goto and van de Geijn** (2008). "[Anatomy of high-performance matrix multiplication](https://doi.org/10.1145/1356052.1356053)." *ACM TOMS*. Register blocking and packing, the two techniques that separate `simd_matmul` from a tuned library.
+- **Van Zee and van de Geijn** (2015). "[BLIS: a framework for rapidly instantiating BLAS functionality](https://doi.org/10.1145/2764454)." *ACM TOMS*. How a matrix library is built from one small hand-tuned kernel.
+- **Tillet, Kung, and Cox** (2019). "[Triton: an intermediate language and compiler for tiled neural network computations](https://doi.org/10.1145/3315508.3329973)." *MAPL*. The design behind the block programs in `triton_gelu.py`.
 - The Python documentation for [`ctypes`](https://docs.python.org/3/library/ctypes.html), which covers loading libraries, declaring argument types, and passing buffers.
+
+
+## The Systems Ecosystem {#sec-ecosystem}
+
+::: {.column-margin}
+![](assets/images/diagrams/22_eco-margin-source.svg){width="100%" fig-alt="Source code mapping card for the Ecosystem chapter: files in tinytorch/extensions/, imported as tinytorch.extensions, hand-written rather than exported."}
+
+*Source Code Mapping: the extensions live in `tinytorch/extensions/` and are the one part of the package not exported from `src/`.*
+:::
+
+::: {.column-margin}
+![](assets/images/diagrams/22_framework-you-are-here.svg){width="100%" fig-alt="TinyTorch execution datapath blueprint highlighting the Ecosystem chapter connecting the core framework to production scale."}
+
+*Framework Blueprint: The ecosystem extends the core stack to handle production-scale constraints.*
+:::
+
+The core of TinyTorch—its tensor striding, autograd engine, and execution loop—is intentionally kept small. This minimalism is not a limitation; it is an architectural feature.
+
+In traditional machine learning education, students consume massive frameworks as black boxes. In TinyTorch, the framework is the foundation, and you are the architect. Because operations inherit from a clean `Function` base class and neural networks inherit from a clean `Layer` base class, TinyTorch is explicitly designed to be extended. You do not need to rewrite the core engine to test a new systems theory; you only need to plug into it.
+
+To prove this, we will not just describe how TinyTorch can be extended. We will actually implement four of the most important systems extensions in modern machine learning.
+
+### Extension 1: Activation Checkpointing
+
+**The Systems Problem:** In the Autograd chapter, you saw the memory cost of saving tensors for the backward pass. Storing all intermediate activations causes out-of-memory (OOM) errors on large networks.
+
+**The Solution:** Gradient Checkpointing (or activation recomputation) drops the forward activations from memory and recomputes them on the fly during the backward pass. This exact trick allowed models to scale to billions of parameters before multi-GPU training was ubiquitous.
+
+**The TinyTorch Implementation:** Because TinyTorch explicitly exposes the `Function` abstraction and the `no_grad` context manager, students can learn this without modifying the core autograd engine. By writing a simple wrapper function, they can intercept the forward pass (disabling gradient tracking to save memory) and manually re-trigger it during the backward pass, intuitively bridging the gap between algorithmic theory and memory management.
+
+```python
+from tinytorch.core.tensor import Tensor, Function
+from tinytorch.core.autograd import no_grad
+
+def checkpoint(function, *args):
+    class CheckpointFunction(Function):
+        def forward(self, *numpy_arrays):
+            # Run forward pass WITHOUT tracking gradients to save memory
+            with no_grad():
+                out_tensor = function(*self.inputs)
+            return out_tensor.data
+
+        def backward(self, grad_output):
+            # Detach inputs so they act as graph leaves
+            detached_inputs = [Tensor(t.data, requires_grad=t.requires_grad) for t in self.inputs]
+
+            # Recompute the forward pass WITH gradients enabled
+            recomputed_out = function(*detached_inputs)
+
+            # Trigger the local backward pass
+            recomputed_out.backward(Tensor(grad_output))
+
+            # Return the gradients of the inputs
+            return tuple(x.grad if x.grad is not None else None for x in detached_inputs)
+
+    return CheckpointFunction.apply(*args)
+```
+
+### Extension 2: Parameter-Efficient Fine-Tuning (LoRA)
+
+**The Systems Problem:** Fine-tuning a 10-billion parameter model requires updating 10-billion optimizer momentums. If you use Adam, you need 8 bytes per parameter (momentum + variance), plus 4 bytes for gradients, plus the weights themselves. This saturates GPU memory.
+
+**The Solution:** LoRA freezes the primary weights of the model and injects two small, low-rank matrices ($A$ and $B$) alongside them. We bypass the memory wall of optimizer states because we don't store Adam momentum for the frozen weights.
+
+**The TinyTorch Implementation:** In massive frameworks, LoRA is often hidden behind complex configuration files. In TinyTorch, students learn the exact mechanics by subclassing `Layer`, initializing frozen and trainable `Tensor` objects, and defining the matrix multiplications. Because TinyTorch natively respects the `requires_grad=False` flag, the optimizer automatically ignores the frozen weights, giving students a tactile understanding of how parameter-efficient fine-tuning saves memory.
+
+```python
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Layer
+import numpy as np
+
+class LoRALinear(Layer):
+    def __init__(self, in_features: int, out_features: int, rank: int = 4):
+        super().__init__()
+        # 1. The frozen pre-trained weights
+        self.weight = Tensor(
+            np.random.randn(in_features, out_features) / np.sqrt(in_features),
+            requires_grad=False
+        )
+        self.bias = Tensor(np.zeros(out_features), requires_grad=False)
+
+        # 2. The low-rank adapter matrices (these are trained!)
+        self.A = Tensor(
+            np.random.randn(in_features, rank) / np.sqrt(in_features),
+            requires_grad=True
+        )
+        self.B = Tensor(np.zeros((rank, out_features)), requires_grad=True)
+
+    def forward(self, x: Tensor) -> Tensor:
+        # Standard forward pass: x @ W + b
+        base = x.matmul(self.weight) + self.bias
+
+        # Adapter forward pass: (x @ A) @ B
+        adapter = x.matmul(self.A).matmul(self.B)
+
+        return base + adapter
+```
+
+### Extension 3: Graph Capture and Fusion
+
+**The Systems Problem:** TinyTorch (like early PyTorch) uses a dynamic, define-by-run tape. The biggest shift in modern frameworks is capturing that dynamic tape into a static graph (IR) and fusing the operations so they don't bounce back and forth to DRAM.
+
+**The Solution:** We can write a toy compiler that takes a TinyTorch graph and fuses operations into a single loop, demystifying the `torch.compile` era.
+
+**The TinyTorch Implementation:** Graph tracing often feels like black magic. By passing a dummy `TracedNode` through a TinyTorch function, students can capture the execution graph and generate a single fused Python kernel. This simple exercise demystifies exactly how modern frameworks like PyTorch 2.0 capture define-by-run code and compile it into static, highly optimized loops.
+
+```python
+class TracedNode:
+    def __init__(self, name):
+        self.name = name
+    def __add__(self, other):
+        return TracedNode(f"({self.name} + {other.name})")
+    def __mul__(self, other):
+        return TracedNode(f"({self.name} * {other.name})")
+
+def compile_graph(func, *input_names):
+    # 1. Tracing phase: pass dummy nodes through the function
+    traced_inputs = [TracedNode(name) for name in input_names]
+    output = func(*traced_inputs)
+
+    # 2. Code generation phase: fuse into a single fast loop
+    code = f"def fused_kernel({', '.join(input_names)}):\n"
+    code += f"    # Fused by TinyTorch Compiler\n"
+    code += f"    return {output.name}\n"
+    return code
+```
+
+### Extension 4: Mixed Precision Training
+
+**The Systems Problem:** Training in FP16/BF16 halves memory bandwidth requirements. However, small gradient values drop below the smallest positive normal number in FP16, silently underflowing to exactly zero and destroying the backward pass.
+
+**The Solution:** We multiply the loss by a massive constant before calling `.backward()` to prevent underflow, then unscale them before the optimizer step. This is a classic, hard-core systems engineering problem.
+
+**The TinyTorch Implementation:** Instead of relying on an opaque `autocast` API, students can write a `LossScaler` class. Because TinyTorch optimizers explicitly track their parameters in `optimizer.params`, students can manually traverse the gradients and unscale them before the optimizer steps. This provides a direct, hands-on lesson in numerical stability and floating-point arithmetic constraint.
+
+```python
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.optimizers import Optimizer
+
+class LossScaler:
+    def __init__(self, scale: float = 65536.0):
+        self.scale = scale
+
+    def backward(self, loss: Tensor):
+        # Multiply the loss to protect gradients from underflow
+        scaled_loss = loss * self.scale
+        scaled_loss.backward()
+
+    def unscale_(self, optimizer: Optimizer):
+        # Traverse the registered parameters and divide the gradients back down
+        for p in optimizer.params:
+            if p.grad is not None:
+                p.grad = p.grad / self.scale
+```
+
+## The Contrib Model: Scaling the Curriculum
+
+The core book spine (Chapters 1–20) is a perfectly paced semester-long arc. If you keep adding to the core book, it becomes the very thing it's trying not to be: an encyclopedia like the PyTorch codebase itself.
+
+Here is how you scale the curriculum:
+
+1. **The Core vs. The "Contrib" Labs**: Treat the book as the immutable "Standard Library". Treat these new ideas (Distributed, LoRA, Speculative Decoding) as modular "Advanced Labs" or "Extensions" that live outside the main book narrative.
+2. **Let your students and TAs build it**: If you have an active classroom or an open-source community, turn these exact ideas into RFCs (Requests for Comment) on GitHub. Tell your best graduate students or Teaching Fellows: "Your final project is to design the TinyTorch LoRA lab."
+3. **The "xv6" Model**: MIT's xv6 scaled because professors at other universities wrote assignments for it (like adding a custom scheduler or a new file system). If you keep the core of TinyTorch small, clean, and stable, the community will build the extensions for you.

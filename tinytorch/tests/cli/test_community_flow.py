@@ -37,7 +37,7 @@ class TestCommunitySyncFlow:
             "last_completed": "02",
             "last_updated": "2026-06-16T22:32:26"
         }
-        progress_file.write_text(json.dumps(progress_data))
+        progress_file.write_text(json.dumps(progress_data), encoding="utf-8")
 
         milestones_file = tito_dir / "milestones.json"
         milestone_data = {
@@ -47,7 +47,7 @@ class TestCommunitySyncFlow:
             "completion_dates": {"01": "2026-06-16T22:32:26"},
             "total_unlocked": 1
         }
-        milestones_file.write_text(json.dumps(milestone_data))
+        milestones_file.write_text(json.dumps(milestone_data), encoding="utf-8")
 
         config = CLIConfig(
             project_root=tmp_path,

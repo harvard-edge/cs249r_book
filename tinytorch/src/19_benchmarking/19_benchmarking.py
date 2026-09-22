@@ -20,6 +20,10 @@ Welcome to Module 19! In this module, we transition from individual optimization
 
 ## 🔗 Prerequisites & Progress
 
+**You've Built**: The full neural network stack (Modules 01–13) and the optimization tier including profiling (`14_profiling`), INT8 quantization (`15_quantization`), pruning (`16_compression`), vector acceleration (`17_acceleration`), and KV caching (`18_memoization`).
+**You'll Build**: Statistically sound benchmarking harnesses (`Benchmark`, `BenchmarkSuite`, `BenchmarkResult`), standard error and Student-$t$ confidence intervals, an MLPerf compliance runner, and multi-objective Pareto frontier analysis (`pareto_frontier`).
+**You'll Enable**: Empirical, reproducible performance verification that rigorously proves the speedup, memory, and accuracy trade-offs across all your optimizations before the capstone synthesis.
+
 <div align="center">
   <img src="benchmarking_blueprint.svg" width="380px" alt="TinyTorch Framework Blueprint: Module 19 Benchmarking" />
 </div>
@@ -2113,7 +2117,7 @@ def benchsuite_generate_report(self) -> str:
     # Save report
     report_text = "\n".join(report_lines)
     report_path = self.output_dir / 'benchmark_report.md'
-    with open(report_path, 'w') as f:
+    with open(report_path, 'w', encoding='utf-8') as f:
         f.write(report_text)
 
     print(f"📄 Report saved to {report_path}")
@@ -4644,7 +4648,7 @@ Congratulations! You have built a professional, statistically rigorous benchmark
 ### Ready for Next Steps
 Your benchmarking framework completes the Optimization Tier. Every component, from Tensors, Autograd, Convolutions, and Transformers to Quantization, Acceleration, Memoization, and Benchmarking, is now verified.
 
-Export with: `tito dev export 19`
+Export with: `tito module complete 19`
 
 **Next**: Module 20 (Capstone) will integrate every single concept into an end-to-end production ML system!
 """

@@ -53,6 +53,9 @@ from mlsysim.physics.robotics import (
     calc_target_evidence_horizon,
     calc_intent_drift_lease,
     calc_process_thermal_runaway_lease,
+    calc_c2_effective_deceleration,
+    calc_latch_contact_stopping_profile,
+    calc_scenario_stopping_budget,
 )
 
 
@@ -597,3 +600,58 @@ def test_process_thermal_runaway_lease():
     )
     assert res["rate_of_rise"].to("K/s").magnitude == pytest.approx(4.0, rel=1e-3)
     assert res["tau_lease"].to("ms").magnitude == pytest.approx(500.0, rel=1e-3)
+
+
+def test_calc_c2_effective_deceleration():
+    a_peak = Q_("2.0 m/s^2")
+    a_eff = calc_c2_effective_deceleration(a_peak)
+    assert a_eff.to("m/s^2").magnitude == pytest.approx(2.0 / 1.5, rel=1e-6)
+
+    # Rejection of invalid acceleration
+    with pytest.raises(ValueError, match="peak_deceleration"):
+        calc_c2_effective_deceleration(Q_("-1.0 m/s^2"))
+
+
+def test_calc_latch_contact_stopping_profile():
+    from mlsysim import Embodied
+    AISLE = Embodied.Scenario.WarehouseAisle
+
+    # Approach at guarded approach speed (0.03 m/s)
+    res_lo = calc_latch_contact_stopping_profile(
+        approach_velocity=AISLE.v_latch_approach,
+        tripwire_force=AISLE.f_latch_tripwire,
+        latch_stiffness=AISLE.k_latch,
+        response_time=AISLE.t_contact_response,
+        force_limit=AISLE.f_latch_limit,
+    )
+    assert res_lo["df_dt"].to("N/s").magnitude == pytest.approx(12000.0, rel=1e-3)
+    assert res_lo["f_at_brake_onset"].to("N").magnitude == pytest.approx(39.0, rel=1e-6)
+    assert res_lo["x_remaining"].to("mm").magnitude == pytest.approx(0.1525, rel=1e-4)
+    assert res_lo["a_arm_needed"].to("m/s^2").magnitude == pytest.approx(2.9508, rel=1e-3)
+    assert res_lo["t_arm_stop"].to("ms").magnitude == pytest.approx(10.167, rel=1e-3)
+
+    # Inferring from scenario directly
+    res_inferred = calc_latch_contact_stopping_profile(scenario=AISLE)
+    assert res_inferred["f_at_brake_onset"] == res_lo["f_at_brake_onset"]
+
+    # High approach speed (0.10 m/s)
+    res_hi = calc_latch_contact_stopping_profile(
+        approach_velocity=AISLE.v_latch_high,
+        scenario=AISLE,
+    )
+    assert res_hi["f_at_brake_onset"].to("N").magnitude == pytest.approx(95.0, rel=1e-6)
+    assert res_hi["x_remaining"].to("mm").magnitude == pytest.approx(0.0125, rel=1e-4)
+    assert res_hi["a_arm_needed"].to("m/s^2").magnitude == pytest.approx(400.0, rel=1e-4)
+
+
+def test_calc_scenario_stopping_budget():
+    from mlsysim import Embodied
+    AISLE = Embodied.Scenario.WarehouseAisle
+
+    budget_info = calc_scenario_stopping_budget(AISLE)
+    assert budget_info["budget"].to("mm").magnitude == pytest.approx(997.43, rel=1e-4)
+    assert budget_info["spare"].to("mm").magnitude == pytest.approx(102.57, rel=1e-4)
+    assert budget_info["v_ceiling"].to("m/s").magnitude == pytest.approx(1.3898, rel=1e-3)
+    assert budget_info["a_eff"].to("m/s^2").magnitude == pytest.approx(2.0 / 1.5, rel=1e-4)
+    assert budget_info["tau_delay"].to("ms").magnitude == pytest.approx(133.6, rel=1e-3)
+

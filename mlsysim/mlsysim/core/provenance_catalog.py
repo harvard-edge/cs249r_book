@@ -454,6 +454,76 @@ HEAVY_AMR = _est(
     verified="2026-09-18",
 )
 
+# Volume IV running machine (added 2026-09-21, vol4 flow canon section 3.3).
+WAREHOUSE_MOBILE_MANIPULATOR = _est(
+    "prov:warehouse-mobile-manipulator",
+    "Representative warehouse mobile manipulator: WarehouseAMR base, Panda arm, "
+    "Jetson AGX Orin application processor, lockstep safety MCU",
+    notes=(
+        "Composite of existing registry entries; component values carry their own "
+        "records. Illustrative or chosen here: 50 kg tote-rack capacity, 1.00 m "
+        "footprint width, 1 kHz permission loop, 20 kHz current loop, 1 ms EtherCAT "
+        "cycle, 9 servo axes, 5 Hz / 160 ms intent model, 20 Hz / 40 ms chunk policy, "
+        "20 ms setpoint period, chunk horizon 16, 0.70 sustained DRAM efficiency, "
+        "1.0 m/s free-space TCP limit. The WarehouseAMR record calls 300 kg gross, so "
+        "the loaded mass is an upper bound."
+        " Control rail: 24 V nominal is a design choice; the 21.5 V depleted-battery "
+        "voltage, 60 mOhm shared harness resistance, and 18.0 V point-of-load "
+        "regulator dropout are illustrative."
+        " Permission-path rail isolated and held up (round-3 D15): isolated from the "
+        "application processor's supply and held up by a supercapacitor store behind "
+        "an ideal-diode controller, feeding the safety MCU, drive-logic and gate-driver "
+        "supplies, encoder interfaces, and all spring-brake coils. The 2.0 s hold-up is "
+        "a design choice; the 70 W permission-path load and the 30-80 ms spring-brake "
+        "engage window are illustrative. The permission loads are assumed to share the "
+        "18.0 V regulator dropout."
+    ),
+    verified="2026-09-21",
+)
+
+WAREHOUSE_AISLE_SCENARIO = _est(
+    "prov:warehouse-aisle-scenario",
+    "Illustrative warehouse aisle site scenario: delay, clearance, friction, contact, "
+    "and conveyor budget terms for the warehouse mobile manipulator",
+    notes=(
+        "No row is measured. Clearances, delays, friction coefficients, latch, "
+        "conveyor, coworker-contact, and remote-takeover times are illustrative; the "
+        "lease, margin, aisle speed, heartbeat, enforcer deadline, handover speed, and "
+        "the slow-down speeds before a takeover request are design choices. The human "
+        "approach speed carries ISO_13855_APPROACH_SPEED."
+        " The 70 A coincident control-rail transient (inference burst plus drive "
+        "motors on the door threshold) is illustrative."
+    ),
+    verified="2026-09-21",
+)
+
+LOCKSTEP_SAFETY_MCU_REFERENCE = _est(
+    "prov:lockstep-safety-mcu-reference",
+    "Reference-class dual-core lockstep real-time MCU (200–400 MHz class)",
+    notes=(
+        "Not a single product. 400 MHz x 2 FLOP/cycle peak, 4 MiB on-chip flash, "
+        "1 MiB tightly coupled SRAM, about 1 W; values are representative of the "
+        "class, not a datasheet."
+        " The registry clock_rate (400 MHz) is the upper end of the class."
+    ),
+    verified="2026-09-21",
+)
+
+ISO_13855_APPROACH_SPEED = _ds(
+    "prov:iso-13855-approach-speed",
+    "ISO 13855:2010 walking approach speed K = 1600 mm/s, applied over the whole "
+    "stopping time T in S = K*T + C",
+    "https://www.iso.org/standard/42845.html",
+    verified="2026-09-21",
+    notes=(
+        "ISO 13855:2010 (Safety of machinery: positioning of safeguards with respect "
+        "to the approach speeds of parts of the human body); the URL is that edition. "
+        "The standard's text is paywalled, so the value was checked against secondary "
+        "sources that quote it, not the standard itself, and not against the 2024 "
+        "edition."
+    ),
+)
+
 AUTONOMOUS_VEHICLE_ROBOTAXI = _est(
     "prov:autonomous-vehicle-robotaxi",
     "Representative Level 4 robotaxi class profile (not a single vehicle)",
@@ -1340,4 +1410,69 @@ MFU_INFERENCE_BATCHED_LIT = _lit(
     "Pope et al. (2023); batched inference MFU upper illustrative bound",
     url="https://proceedings.mlsys.org/paper_files/paper/2023/hash/c4be71ab8d24cdfb45e3d06dbfca2780-Abstract-mlsys2023.html",
     notes="0.40 is an upper illustrative bound for large-batch inference, not batch-1.",
+)
+
+PHYSICAL_AI_NUMBERS = _est(
+    "prov:physical-ai-numbers",
+    "Physical AI systems rate hierarchy and engineering orders of magnitude (Volume IV)",
+    notes=(
+        "Standard multi-rate execution bands across deliberative intent (1-5 Hz), "
+        "reactive chunk policy (10-50 Hz), safety permission path (1 kHz), and "
+        "motor field-oriented current control (10-25 kHz); kinetic blind travel "
+        "conversion (1 mm/ms at 1 m/s; 1 cm/ms at 10 m/s; 3 cm/ms at 30 m/s); "
+        "edge VLA memory streaming and action chunk amortization."
+    ),
+    verified="2026-09-22",
+)
+
+ISO_26262_ASIL_D = _ds(
+    "prov:iso-26262-asil-d",
+    "ISO 26262-5:2018 Road vehicles - Functional safety - Part 5: Product development at the hardware level",
+    "https://www.iso.org/standard/68387.html",
+    verified="2026-09-22",
+    notes="ASIL D hardware target probabilistic metric for random hardware failures (PMHF) < 10 FIT (10^-8 / hour).",
+)
+
+IEC_61508_SIL_3 = _ds(
+    "prov:iec-61508-sil-3",
+    "IEC 61508-1:2010 Functional safety of electrical/electronic/programmable electronic safety-related systems",
+    "https://webstore.iec.ch/publication/5515",
+    verified="2026-09-22",
+    notes="SIL 3 high demand / continuous mode probability of dangerous failure per hour (PFH) target 10^-8 to 10^-7 / hour; matches ISO 13849 PL e.",
+)
+
+RULE_OF_THREE_SAFETY = _lit(
+    "prov:rule-of-three-safety",
+    "Hanley, J. A., & Lippman-Hand, A. (1983). If nothing goes wrong, is everything all right? Interpreting zero numerators. JAMA, 249(13), 1743-1745.",
+    url="https://doi.org/10.1001/jama.1983.03330370053031",
+    verified="2026-09-22",
+    notes="Rule of Three: 95% upper confidence bound for a Poisson event rate with zero observed occurrences in n trials is approximately 3/n.",
+)
+
+ETHERCAT_STANDARD = _ds(
+    "prov:ethercat-standard",
+    "ETG.1000 EtherCAT Specification, EtherCAT Technology Group",
+    "https://www.ethercat.org",
+    verified="2026-09-22",
+    notes="Deterministic industrial Ethernet fieldbus with hardware cut-through forwarding, cycle jitter < 1 us, typical cycle times 100 us to 1 ms.",
+)
+
+CAN_FD_SPECIFICATION = _ds(
+    "prov:can-fd-specification",
+    "ISO 11898-1:2015 Road vehicles - Controller area network (CAN) - Part 1: Data link layer and physical signalling",
+    "https://www.iso.org/standard/63648.html",
+    verified="2026-09-22",
+    notes="CAN with Flexible Data-Rate (CAN-FD) up to 5-8 Mbps payload bit rate; non-preemptive arbitration introduces frame queueing and blocking jitter.",
+)
+
+THERMAL_CONSTANTS_ELECTROMECHANICAL = _est(
+    "prov:thermal-constants-electromechanical",
+    "Representative thermal time constants for robotic electromechanical drive trains and compute silicon",
+    notes=(
+        "Adiabatic silicon junction heating tau ~ 1-10 ms; heat sink convective dissipation "
+        "tau ~ 10-60 s; motor stator copper winding Joule heating tau ~ 30-180 s; "
+        "motor casing/frame bulk thermal mass tau ~ 10-30 min; lithium-ion battery pack "
+        "tau ~ 5-20 min. Values reflect typical orders of magnitude across industrial and mobile robotics."
+    ),
+    verified="2026-09-22",
 )

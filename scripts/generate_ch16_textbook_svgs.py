@@ -12,7 +12,7 @@ Clean rectangular functional blocks, clear dataflow, formal interfaces, minimal 
 import os
 import math
 
-OUT_DIR = "books/vol3/16_observability/images/svg"
+OUT_DIR = "books/vol3/12_evaluation/images/svg"
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # ==============================================================================

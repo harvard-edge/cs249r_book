@@ -47,6 +47,12 @@ class ModuleResetCommand(BaseCommand):
             action="store_true",
             help="Skip confirmation prompts"
         )
+        parser.add_argument(
+            "--exercise", "--assignment",
+            action="store_true",
+            dest="exercise",
+            help="Reset to student exercise notebook with implementation stubs",
+        )
 
     def _prompt_for_module(self) -> Optional[str]:
         """Prompt user to select a module to reset."""
@@ -95,7 +101,7 @@ class ModuleResetCommand(BaseCommand):
             console.print()
             return False
 
-    def _reset_single_module(self, module_number: str) -> int:
+    def _reset_single_module(self, module_number: str, exercise: bool = False) -> int:
         """Reset a single module by recreating notebook from src/."""
         console = self.console
         module_mapping = get_module_mapping()
@@ -118,10 +124,11 @@ class ModuleResetCommand(BaseCommand):
         console.print(f"[cyan]Resetting module {normalized}: {module_name}[/cyan]")
         console.print()
 
-        # Convert src/ to a student notebook in modules/ (solutions cleared, #1684)
+        # Convert src/ to notebook in modules/
+        tier = "student" if exercise else None
         success = convert_py_to_notebook(
             src_path, self.venv_path, console,
-            student=True, project_root=self.config.project_root,
+            release_tier=tier, project_root=self.config.project_root,
         )
 
         if success:
@@ -145,10 +152,11 @@ class ModuleResetCommand(BaseCommand):
             console.print(f"[red]Failed to reset module {module_name}[/red]")
             return 1
 
-    def _reset_all_modules(self) -> int:
+    def _reset_all_modules(self, exercise: bool = False) -> int:
         """Reset all modules to pristine state."""
         console = self.console
         module_mapping = get_module_mapping()
+        tier = "student" if exercise else None
 
         console.print()
         console.print(
@@ -177,7 +185,7 @@ class ModuleResetCommand(BaseCommand):
 
             success = convert_py_to_notebook(
                 src_path, self.venv_path, console,
-                student=True, project_root=self.config.project_root,
+                release_tier=tier, project_root=self.config.project_root,
             )
             if success:
                 console.print(f"[green]  ✓ {module_name} reset[/green]")
@@ -275,6 +283,7 @@ class ModuleResetCommand(BaseCommand):
     def run(self, args: Namespace) -> int:
         """Execute the reset command."""
         console = self.console
+        exercise = getattr(args, 'exercise', False)
 
         # Handle --all (reset all modules)
         if getattr(args, 'all', False):
@@ -282,7 +291,7 @@ class ModuleResetCommand(BaseCommand):
                 if not self._confirm_reset("This will reset ALL modules and clear all progress."):
                     console.print("[cyan]Reset cancelled.[/cyan]")
                     return 0
-            return self._reset_all_modules()
+            return self._reset_all_modules(exercise=exercise)
 
         # Get module number (prompt if not provided)
         module_number = args.module_number
@@ -309,4 +318,4 @@ class ModuleResetCommand(BaseCommand):
                 console.print("[cyan]Reset cancelled.[/cyan]")
                 return 0
 
-        return self._reset_single_module(module_number)
+        return self._reset_single_module(module_number, exercise=exercise)

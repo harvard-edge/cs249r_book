@@ -100,7 +100,7 @@ fsm_svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 490" width
 </svg>
 """
 
-with open("books/vol3/11_scheduling/images/svg/circuit_breaker_state_machine.svg", "w") as f:
+with open("books/vol3/11_failure_recovery/images/svg/circuit_breaker_state_machine.svg", "w") as f:
     f.write(fsm_svg)
 
 # 2. semantic-watchdog-oscillation.svg
@@ -208,7 +208,7 @@ watchdog_svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 480" 
 </svg>
 """
 
-with open("books/vol3/11_scheduling/images/svg/semantic-watchdog-oscillation.svg", "w") as f:
+with open("books/vol3/11_failure_recovery/images/svg/semantic-watchdog-oscillation.svg", "w") as f:
     f.write(watchdog_svg)
 
 # 3. recovery-decision-tree.svg
@@ -342,7 +342,7 @@ decision_svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 580" 
 </svg>
 """
 
-with open("books/vol3/11_scheduling/images/svg/recovery-decision-tree.svg", "w") as f:
+with open("books/vol3/11_failure_recovery/images/svg/recovery-decision-tree.svg", "w") as f:
     f.write(decision_svg)
 
 # 4. fig-vol3-fault-tolerant-synthesis.svg
@@ -471,7 +471,7 @@ synthesis_svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560"
 </svg>
 """
 
-with open("books/vol3/11_scheduling/images/svg/fig-vol3-fault-tolerant-synthesis.svg", "w") as f:
+with open("books/vol3/11_failure_recovery/images/svg/fig-vol3-fault-tolerant-synthesis.svg", "w") as f:
     f.write(synthesis_svg)
 
 print("Regenerated all 4 SVGs with clean layouts.")

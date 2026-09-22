@@ -30,6 +30,7 @@ from typing import Dict, Type, Optional, List
 # only way to actually fix the encoding for this process.
 if sys.platform == "win32" or os.name == "nt":
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    os.environ.setdefault("PYTHONUTF8", "1")
     for _stream in (sys.stdout, sys.stderr):
         if hasattr(_stream, "reconfigure"):
             _stream.reconfigure(encoding="utf-8", errors="replace")
@@ -80,7 +81,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('tito-cli.log'),
+        logging.FileHandler('tito-cli.log', encoding='utf-8'),
         logging.StreamHandler(sys.stderr)
     ]
 )
@@ -191,7 +192,7 @@ class TinyTorchCLI:
 
         welcome_text = f"""[{Theme.EMPHASIS}]🎓 LEARNING APPROACH[/{Theme.EMPHASIS}]
 
-[bold]Don't import it. Build it.[/bold]
+[bold]Don't just import Torch. Build it.[/bold]
 
 The learning cycle for each module:
   [{Theme.SUCCESS}]1.[/{Theme.SUCCESS}] Start a module: [{Theme.INFO}]tito module start 01[/{Theme.INFO}]
@@ -249,7 +250,7 @@ The learning cycle for each module:
         """Create the main argument parser."""
         parser = argparse.ArgumentParser(
             prog="tito",
-            description="Tiny🔥Torch CLI - Build ML systems from scratch",
+            description="Tiny🔥Torch CLI - Don't just import Torch. Build it.",
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog=self._generate_epilog()
         )
@@ -325,7 +326,7 @@ The learning cycle for each module:
             table.add_row(cmd_name, cmd.description)
 
         self.console.print()
-        self.console.print(f"[{Theme.SECTION}]Tiny🔥Torch CLI[/{Theme.SECTION}] - Build ML systems from scratch")
+        self.console.print(f"[{Theme.SECTION}]Tiny🔥Torch CLI[/{Theme.SECTION}] - Don't just import Torch. Build it.")
         self.console.print()
         self.console.print(f"[{Theme.EMPHASIS}]Usage:[/{Theme.EMPHASIS}] [{Theme.INFO}]tito[/{Theme.INFO}] [{Theme.OPTION}]COMMAND[/{Theme.OPTION}] [{Theme.DIM}][OPTIONS][/{Theme.DIM}]")
         self.console.print()
@@ -436,7 +437,8 @@ The learning cycle for each module:
             # Handle no command
             if not parsed_args.command:
                 # Show ASCII logo first
-                print_ascii_logo()
+                is_first = self._is_first_run()
+                print_ascii_logo(animate=is_first)
 
                 # Show first-run welcome (only once, ever)
                 self._show_first_run_welcome()

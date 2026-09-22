@@ -14,6 +14,7 @@ the child <img src>, making the enlarged-view link resolve correctly.
 Fixes: https://github.com/harvard-edge/cs249r_book/issues/1795
 """
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -52,14 +53,19 @@ def fix_lightbox_hrefs(html_path: Path) -> int:
 
 
 def main() -> None:
+    # Quarto runs post-render scripts with QUARTO_PROJECT_OUTPUT_DIR set; use it.
+    # 2026-09-22: the old default resolved relative to this file, which after the
+    # move under books/ pointed at books/shared/, found no HTML, and reported
+    # "no mismatches" on every build, so every TikZ lightbox 404'd.
     if len(sys.argv) > 1:
         build_dir = Path(sys.argv[1])
+    elif os.environ.get("QUARTO_PROJECT_OUTPUT_DIR"):
+        build_dir = Path(os.environ["QUARTO_PROJECT_OUTPUT_DIR"])
     else:
-        script_dir = Path(__file__).resolve().parent
-        project_dir = script_dir.parent
-        build_dir = project_dir / "_build"
-        if not build_dir.exists():
-            build_dir = project_dir
+        books_dir = Path(__file__).resolve().parents[2]
+        build_dir = books_dir / "_build"
+    if not build_dir.is_dir():
+        sys.exit(f"[fix-lightbox] build directory not found: {build_dir}")
 
     html_files = sorted(build_dir.rglob("*.html"))
     total_fixes = 0

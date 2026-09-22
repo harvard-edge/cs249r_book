@@ -165,6 +165,25 @@ ef_str = fmt_qty(peak_flops / tdp, TFLOPs / second / watt, unit_label="TFLOP/s")
         assert "L011" not in _rules(issues)
 
 
+def test_l020_warns_on_domain_unit_in_fmt_qty():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        qmd = _write_qmd(
+            root,
+            "books/vol1/foo/foo.qmd",
+            """```{python}
+bw_str = fmt_qty(bw, GB / second, precision=0)
+f_str = fmt_qty(f, newton, precision=1)
+m_str = fmt_qty(m, kilogram, precision=0)
+w_str = fmt_qty(w, radian / second, precision=1)
+```""",
+        )
+        issues = lint_file(qmd, root)
+        assert "L020" in _rules(issues)
+        assert len([i for i in issues if i.rule == "L020"]) == 4
+        assert all(i.severity == "warning" for i in issues if i.rule == "L020")
+
+
 def test_full_book_lint_with_baseline():
     """Production corpus: warnings allowed only via baseline (Phase 8½-A)."""
     baseline = ROOT / "binder/tools/audit/lego_units_baseline.json"

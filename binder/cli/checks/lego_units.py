@@ -26,7 +26,7 @@ class LintIssue:
 
 RULES = (
     "L001", "L002", "L003", "L004", "L006", "L007", "L008", "L009",
-    "L011", "L014", "L015", "L016", "L019",
+    "L011", "L014", "L015", "L016", "L019", "L020",
 )
 
 L014_CLOSED_FMT = re.compile(
@@ -42,10 +42,16 @@ FMT_QTY_ASSIGN = re.compile(
     re.M,
 )
 DOMAIN_FMT_ASSIGN = re.compile(
-    r"^\s*(?P<name>\w+_str)\s*=\s*(?:fmt_power|fmt_energy|fmt_bandwidth|fmt_memory|fmt_emissions|"
-    r"fmt_latency|fmt_area|fmt_heat_flux|fmt_flop_rate|fmt_flops|fmt_ops_rate|fmt_arithmetic_intensity|"
+    r"^\s*(?P<name>\w+_str)\s*=\s*(?:fmt_power|fmt_energy|fmt_bandwidth|fmt_memory|fmt_memory_capacity|fmt_emissions|"
+    r"fmt_latency|fmt_area|fmt_heat_flux|fmt_specific_heat|fmt_flop_rate|fmt_flops|fmt_ops_rate|fmt_arithmetic_intensity|"
     r"fmt_energy_per_byte|fmt_energy_per_bit|fmt_energy_per_flop|fmt_energy_per_op|"
-    r"fmt_compute_efficiency|fmt_length|fmt_carbon_intensity)\s*\(",
+    r"fmt_compute_efficiency|fmt_length|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity|"
+    r"fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|"
+    r"fmt_velocity|fmt_acceleration|fmt_voltage|fmt_current|fmt_resistance|fmt_torque|fmt_torque_rate|fmt_torque_constant|"
+    r"fmt_temperature|fmt_temperature_rate|fmt_decibel|fmt_illuminance|fmt_jerk|fmt_inertia|fmt_frequency|fmt_token_rate|"
+    r"fmt_thermal_resistance|fmt_heat_capacity|fmt_density|fmt_mass_flow|fmt_mass_flow_rate|"
+    r"fmt_volumetric_flow|fmt_flow_rate|fmt_charge|fmt_battery_capacity|fmt_angle|fmt_inductance|fmt_capacitance|fmt_power_rate|"
+    r"fmt_stiffness|fmt_volume)\s*\(",
     re.M,
 )
 MASG_TO_CLOSED = re.compile(
@@ -54,6 +60,16 @@ MASG_TO_CLOSED = re.compile(
 )
 FMT_QTY_SCALAR = re.compile(
     r"fmt_qty\s*\(\s*\w+\.(?:m_as\s*\(|to\([^)]+\)\.magnitude)"
+)
+FMT_QTY_DOMAIN_UNIT = re.compile(
+    r"\bfmt_qty\s*\([^;\n]+?,\s*(?:unit\s*=\s*)?(?:"
+    r"[TGKM]B\s*/\s*(?:second|s)|[TGKM]bps|[PEGT]FLOPs?\s*/\s*(?:second|s)|flops_per_second|"
+    r"(?<![/\w])(?:W|kW|MW|GW|watt|kilowatt|megawatt)(?!\s*/\s*s)(?![a-zA-Z0-9_])|"
+    r"(?<![/\w])(?:GB|MB|KB|TB|gigabyte|terabyte|megabyte|kilobyte)(?!\s*/\s*s)(?![a-zA-Z0-9_])|"
+    r"(?<![/\w])(?:newton|kilonewton)(?!\s*/)(?![a-zA-Z0-9_])|"
+    r"newton\s*/\s*(?:second|millisecond|s|ms)|"
+    r"(?<![/\w])(?:kilogram|gram|metric_ton)(?!\s*/)(?![a-zA-Z0-9_])|"
+    r"(?:radian|deg)\s*/\s*(?:second|s)|(?<![/\w])rpm(?![a-zA-Z0-9_]))\b"
 )
 RAW_FMT_SUFFIX = re.compile(
     r"fmt\s*\([^)]*suffix\s*=\s*['\"]\s*(?:GB|TB|MB|kWh|MWh|TFLOP|W|MW|ms|s)\b"
@@ -162,6 +178,12 @@ def lint_file(path: Path, root: Path) -> list[LintIssue]:
                     "Use .to(unit).magnitude instead of .m_as() in LEGO cells.",
                     severity="error",
                 ))
+            if FMT_QTY_DOMAIN_UNIT.search(line):
+                if not re.search(r"/\s*(?:[TGKM]B|byte)", line.split("fmt_qty")[-1]):
+                    issues.append(LintIssue(
+                        "L020", rel, lineno,
+                        "Prefer domain formatter (fmt_bandwidth, fmt_memory, fmt_power, fmt_flop_rate, fmt_force, fmt_force_rate, fmt_mass, fmt_angular_velocity) over fmt_qty.",
+                    ))
 
         for match in L014_CLOSED_FMT.finditer(block):
             lineno = base_line + block[: match.start()].count("\n")

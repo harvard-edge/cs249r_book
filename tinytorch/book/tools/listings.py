@@ -53,7 +53,7 @@ def module_source(module: str = None, path: str = None) -> str:
         source = SRC / module / f"{module}.py"
     if not source.exists():
         raise FileNotFoundError(f"no source at {source}")
-    text = source.read_text()
+    text = source.read_text(encoding="utf-8")
     # Drop cell headers and nbdev directives; they are not Python.
     lines = [l for l in text.split("\n") if not l.startswith("# %%") and not l.startswith("#|")]
     return "\n".join(lines)
@@ -185,7 +185,7 @@ def extract_c(path: str, symbol: str) -> str:
     source = BOOK.parent / path
     if not source.exists():
         raise FileNotFoundError(f"no source at {source}")
-    lines = source.read_text().split("\n")
+    lines = source.read_text(encoding="utf-8").split("\n")
     sig = re.compile(r"^\S.*\b" + re.escape(symbol) + r"\s*\(")
     for start, line in enumerate(lines):
         if sig.match(line) and not line.rstrip().endswith(";"):
@@ -221,7 +221,7 @@ def extract(module: str, symbol: str, elide=(), keep_scaffold=False, doc="first"
 
 def load_manifest():
     import yaml  # PyYAML ships with the book toolchain
-    entries = yaml.safe_load(MANIFEST.read_text()) or []
+    entries = yaml.safe_load(MANIFEST.read_text(encoding="utf-8")) or []
     for e in entries:
         for key in ("target", "symbol"):
             if key not in e:
@@ -260,12 +260,12 @@ def main(argv=None):
             missing.append(f"{entry['target']}: {entry.get('module') or entry.get('path')}::{entry['symbol']} ({e})")
             continue
         if args.check:
-            if not target.exists() or target.read_text() != text:
+            if not target.exists() or target.read_text(encoding="utf-8") != text:
                 stale.append(entry["target"])
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
-            if not target.exists() or target.read_text() != text:
-                target.write_text(text)
+            if not target.exists() or target.read_text(encoding="utf-8") != text:
+                target.write_text(text, encoding="utf-8")
                 print("wrote", entry["target"])
     if missing:
         print("MISSING SYMBOLS (rename in src/ without updating the chapter?):", file=sys.stderr)

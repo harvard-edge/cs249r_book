@@ -1,6 +1,6 @@
 import os
 
-svg_dir = "books/vol3/13_sft/images/svg"
+svg_dir = "books/vol3/14_fine_tuning/images/svg"
 
 # 1. ch13-block-diagonal-mask.svg
 mask_svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 480" width="100%" height="100%">

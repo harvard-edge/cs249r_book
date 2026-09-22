@@ -22,22 +22,22 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Map of chapter number to directory and prefix
 CHAPTER_MAP = {
     1: ("01_introduction", "vol3_introduction"),
-    2: ("02_processor", "vol3_processor"),
-    3: ("03_deliberation", "vol3_deliberation"),
-    4: ("04_working_sets", "vol3_working_sets"),
-    5: ("05_virtual_memory", "vol3_virtual_memory"),
-    6: ("06_episodic_memory", "vol3_episodic_memory"),
-    7: ("07_actuation", "vol3_actuation"),
-    8: ("08_virtualization", "vol3_virtualization"),
-    9: ("09_checkpointing", "vol3_checkpointing"),
-    10: ("10_interrupts", "vol3_interrupts"),
-    11: ("11_scheduling", "vol3_scheduling"),
-    12: ("12_data_flywheel", "vol3_data_flywheel"),
-    13: ("13_sft", "vol3_sft"),
-    14: ("14_rlvr", "vol3_rlvr"),
-    15: ("15_multi_agent", "vol3_multi_agent"),
-    16: ("16_observability", "vol3_observability"),
-    17: ("17_tokenomics", "vol3_tokenomics"),
+    2: ("02_foundation_model", "vol3_processor"),
+    3: ("03_test_time_compute", "vol3_deliberation"),
+    4: ("04_context_engineering", "vol3_working_sets"),
+    5: ("05_kv_cache", "vol3_virtual_memory"),
+    6: ("06_long_term_memory", "vol3_episodic_memory"),
+    7: ("07_tool_calling", "vol3_actuation"),
+    8: ("08_sandboxes", "vol3_virtualization"),
+    9: ("09_agent_harness", "vol3_checkpointing"),
+    10: ("10_durable_execution", "vol3_interrupts"),
+    11: ("11_failure_recovery", "vol3_scheduling"),
+    12: ("13_trajectory_curation", "vol3_data_flywheel"),
+    13: ("14_fine_tuning", "vol3_sft"),
+    14: ("15_rlvr", "vol3_rlvr"),
+    15: ("16_multi_agent", "vol3_multi_agent"),
+    16: ("12_evaluation", "vol3_observability"),
+    17: ("17_agent_economics", "vol3_tokenomics"),
     18: ("18_conclusion", "vol3_conclusion"),
 }
 
@@ -497,7 +497,7 @@ def gen_ch08(dst_dir: Path):
         log_pos = 0.06 + 0.92 * (np.log10(val) / np.log10(500))
         ax.barh(y, 1.0, height=bar_h, color="#F1F5F9", left=0.0)
         ax.barh(y, log_pos, height=bar_h, color=col, left=0.0)
-    ax.text(0.0, 0.015, "*Compromised: state leak (A > 0)", fontsize=3.6, color=CRIMSON, style="italic")
+    ax.text(0.0, 0.015, "*Compromised: state leak", fontsize=3.6, color=CRIMSON, style="italic")
     ax.set_xlim(-0.02, 1.02); ax.set_ylim(-0.02, 1.02)
     fig.savefig(dst_dir / "vol3_virtualization_margin_004.svg", format="svg", bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)

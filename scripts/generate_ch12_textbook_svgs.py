@@ -1,7 +1,7 @@
 import os
 
 # Ensure symlinks are replaced with actual SVG files
-svg_dir = "books/vol3/12_data_flywheel/images/svg"
+svg_dir = "books/vol3/13_trajectory_curation/images/svg"
 
 # 1. fig-vol3-failure-diagnostic-tree.svg
 diag_tree_svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" width="100%" height="100%">

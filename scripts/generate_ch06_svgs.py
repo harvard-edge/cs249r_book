@@ -12,7 +12,7 @@ import os
 import subprocess
 
 from pathlib import Path
-TARGET_DIR = str(Path(__file__).resolve().parent.parent / "books/vol3/06_episodic_memory/images/svg")
+TARGET_DIR = str(Path(__file__).resolve().parent.parent / "books/vol3/06_long_term_memory/images/svg")
 os.makedirs(TARGET_DIR, exist_ok=True)
 
 # 1. vol3-lexical-vs-ast.svg
