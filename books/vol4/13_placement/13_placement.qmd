@@ -225,9 +225,9 @@ In @eq-placement-dram-queuing, $\mathcal{Q}$ contains the transactions ahead of 
 ```{python}
 #| label: calc-placement-axi-fifo-contention
 #| echo: false
-from mlsysim.core.units import Q_
+from mlsysim.core.units import Q_, microsecond
 from mlsysim.physics.robotics import calc_axi_fifo_contention
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt_latency
 
 class PlacementBus:
     result = calc_axi_fifo_contention(
@@ -241,13 +241,13 @@ class PlacementBus:
         bank_switch_time=Q_("28 ns"),
         compute_time=Q_("95 us"),
     )
-    queue_us_str = fmt(result["queue_fifo"].to("us").magnitude, precision=3)
-    read_us_str = fmt((result["queue_fifo"] + result["own_read"]).to("us").magnitude, precision=3)
-    total_us_str = fmt(result["total_fifo"].to("us").magnitude, precision=3)
-    bypass_us_str = fmt(result["total_priority_bypass"].to("us").magnitude, precision=2)
+    queue_us_str = fmt_latency(result["queue_fifo"], unit=microsecond, precision=3)
+    read_us_str = fmt_latency(result["queue_fifo"] + result["own_read"], unit=microsecond, precision=3)
+    total_us_str = fmt_latency(result["total_fifo"], unit=microsecond, precision=3)
+    bypass_us_str = fmt_latency(result["total_priority_bypass"], unit=microsecond, precision=2)
 ```
 
-Consider a separate $65{,}536$-byte diagnostic sensor-history transfer for a $1000\text{ Hz}$ controller with a $120\,\mu\text{s}$ read-plus-compute subdeadline. The per-tick $4{,}096$-byte state read used in the preceding *average-bandwidth* calculation is a different workload. In this diagnostic case, compute takes an assumed $95\,\mu\text{s}$ and an unloaded $65{,}536$-byte read takes at least $65{,}536/(12.8\times10^9)=5.120\,\mu\text{s}$ at ideal peak bandwidth, leaving $19.880\,\mu\text{s}$ of the subdeadline. Immediately before the read arrives, assume the controller can admit all 88 earlier transactions and its FIFO contains 64 aligned $4{,}096$-byte tile transactions, 16 camera transactions ($65{,}536\text{ bytes}$), and eight telemetry transactions ($32{,}768\text{ bytes}$): 88 transactions or $360{,}448\text{ bytes}$ total. Their ideal transfer time is $28.160\,\mu\text{s}$; three assumed bank switches add $0.084\,\mu\text{s}$. Thus $t_{\text{queue}}=$ `{python} PlacementBus.queue_us_str` $\mu\text{s}$, $t_{\text{sensor,loaded}}=$ `{python} PlacementBus.read_us_str` $\mu\text{s}$, and $t_{\text{exec,loaded}}=$ `{python} PlacementBus.total_us_str` $\mu\text{s}$, exceeding the $120\,\mu\text{s}$ subdeadline by $8.364\,\mu\text{s}$. If priority service bypasses every queued transaction after the single in-flight $4{,}096$-byte transaction, the same idealized model gives `{python} PlacementBus.bypass_us_str` $\mu\text{s}$ total; actual bypass may be unavailable. Additional arrivals or controller overhead could make either path longer. A dedicated DMA route into a coherent MCU snapshot and a $131{,}072$-byte Tightly Coupled Memory (TCM) allocation for the $65{,}536$-byte buffer plus $8{,}192$-byte state table remove this DRAM read from the critical path only if transfer completion and coherence are validated. TCM access latency is per access, not per buffer. At an assumed 800 MHz and eight bytes per cycle, 8192 accesses take at least $10.24\,\mu\text{s}$, giving $105.24\,\mu\text{s}$ total and $14.76\,\mu\text{s}$ slack; at 200 MHz the $40.96\,\mu\text{s}$ read floor exceeds the subdeadline after $95\,\mu\text{s}$ compute.
+Consider a separate $65{,}536$-byte diagnostic sensor-history transfer for a $1000\text{ Hz}$ controller with a $120\,\mu\text{s}$ read-plus-compute subdeadline. The per-tick $4{,}096$-byte state read used in the preceding *average-bandwidth* calculation is a different workload. In this diagnostic case, compute takes an assumed $95\,\mu\text{s}$ and an unloaded $65{,}536$-byte read takes at least $65{,}536/(12.8\times10^9)=5.120\,\mu\text{s}$ at ideal peak bandwidth, leaving $19.880\,\mu\text{s}$ of the subdeadline. Immediately before the read arrives, assume the controller can admit all 88 earlier transactions and its FIFO contains 64 aligned $4{,}096$-byte tile transactions, 16 camera transactions ($65{,}536\text{ bytes}$), and eight telemetry transactions ($32{,}768\text{ bytes}$): 88 transactions or $360{,}448\text{ bytes}$ total. Their ideal transfer time is $28.160\,\mu\text{s}$; three assumed bank switches add $0.084\,\mu\text{s}$. Thus $t_{\text{queue}} =$ `{python} PlacementBus.queue_us_str`, $t_{\text{sensor,loaded}} =$ `{python} PlacementBus.read_us_str`, and $t_{\text{exec,loaded}} =$ `{python} PlacementBus.total_us_str`, exceeding the $120\,\mu\text{s}$ subdeadline by $8.364\,\mu\text{s}$. If priority service bypasses every queued transaction after the single in-flight $4{,}096$-byte transaction, the same idealized model gives `{python} PlacementBus.bypass_us_str` total; actual bypass may be unavailable. Additional arrivals or controller overhead could make either path longer. A dedicated DMA route into a coherent MCU snapshot and a $131{,}072$-byte Tightly Coupled Memory (TCM) allocation for the $65{,}536$-byte buffer plus $8{,}192$-byte state table remove this DRAM read from the critical path only if transfer completion and coherence are validated. TCM access latency is per access, not per buffer. At an assumed 800 MHz and eight bytes per cycle, 8192 accesses take at least $10.24\,\mu\text{s}$, giving $105.24\,\mu\text{s}$ total and $14.76\,\mu\text{s}$ slack; at 200 MHz the $40.96\,\mu\text{s}$ read floor exceeds the subdeadline after $95\,\mu\text{s}$ compute.
 
 ::: {#psp-placement-memory-contention .callout-perspective title="The memory contention invariant"}
 Average memory bandwidth cannot bound a deadline. Admission depends on bounded transaction sizes, queue policy, bank timing, and measured end-to-end response under the permitted load.
@@ -281,7 +281,14 @@ from mlsysim.physics.robotics import (
     calc_inductive_voltage_droop,
     calc_alpha_power_gate_delay_stretch,
 )
-from mlsysim.fmt import fmt, fmt_int, fmt_percent
+from mlsysim.fmt import (
+    fmt_current,
+    fmt_latency,
+    fmt_percent,
+    fmt_qty,
+    fmt_resistance,
+    fmt_voltage,
+)
 
 class InductivePDNVoltageDroop:
     v_core = 0.850 * ureg.volt
@@ -307,24 +314,24 @@ class InductivePDNVoltageDroop:
     delay_expansion_pct = res_stretch["delay_expansion_percent"]
 
     # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
-    v_core_str = fmt(v_core.to(ureg.volt).magnitude, precision=2)
-    v_core_3dec_str = fmt(v_core.to(ureg.volt).magnitude, precision=3)
-    l_pkg_str = fmt(l_pkg.to(ureg.picohenry).magnitude, precision=0)
-    r_pkg_str = fmt(r_pkg.to(ureg.milliohm).magnitude, precision=0)
-    delta_i_str = fmt(delta_i.to(ureg.ampere).magnitude, precision=0)
-    t_rise_str = fmt(t_rise.to(nanosecond).magnitude, precision=0)
-    v_ind_mv_str = fmt(v_ind.to(ureg.millivolt).magnitude, precision=0)
-    v_res_mv_str = fmt(v_res.to(ureg.millivolt).magnitude, precision=0)
-    v_droop_mv_str = fmt(v_droop.to(ureg.millivolt).magnitude, precision=0)
-    v_droop_v_str = fmt(v_droop.to(ureg.volt).magnitude, precision=3)
-    v_drooped_str = fmt(v_drooped.to(ureg.volt).magnitude, precision=3)
-    droop_pct_str = fmt_percent((v_droop / v_core).magnitude, precision=1)
-    delay_expansion_pct_str = fmt_int(round(delay_expansion_pct))
+    v_core_str = fmt_voltage(v_core, unit=ureg.volt, precision=2)
+    v_core_3dec_str = fmt_voltage(v_core, unit=ureg.volt, precision=3)
+    l_pkg_str = fmt_qty(l_pkg, unit=ureg.picohenry, precision=0)
+    r_pkg_str = fmt_resistance(r_pkg, unit=ureg.milliohm, precision=0)
+    delta_i_str = fmt_current(delta_i, unit=ureg.ampere, precision=0)
+    t_rise_str = fmt_latency(t_rise, unit=nanosecond, precision=0)
+    v_ind_mv_str = fmt_voltage(v_ind, unit=ureg.millivolt, precision=0)
+    v_res_mv_str = fmt_voltage(v_res, unit=ureg.millivolt, precision=0)
+    v_droop_mv_str = fmt_voltage(v_droop, unit=ureg.millivolt, precision=0)
+    v_droop_v_str = fmt_voltage(v_droop, unit=ureg.volt, precision=3)
+    v_drooped_str = fmt_voltage(v_drooped, unit=ureg.volt, precision=3)
+    droop_pct_str = fmt_percent((v_droop / v_core).magnitude, precision=1, style="prose")
+    delay_expansion_pct_str = fmt_percent(round(delay_expansion_pct) / 100, precision=0, style="prose")
 ```
 
-To ground this physical vulnerability on silicon, consider an analytical heterogeneous SoC powering a systolic array neural accelerator and a real-time safety processor from a shared $V_{\text{core}} =$ `{python} InductivePDNVoltageDroop.v_core_str` $\text{V}$ power distribution network. The PDN package loop exhibits parasitic inductance $L =$ `{python} InductivePDNVoltageDroop.l_pkg_str` $\text{pH}$ and equivalent series resistance $R =$ `{python} InductivePDNVoltageDroop.r_pkg_str` $\text{m}\Omega$. When the neural accelerator starts a matrix multiply, its current demand surges by $\Delta I =$ `{python} InductivePDNVoltageDroop.delta_i_str` $\text{A}$ with rise time $t_r =$ `{python} InductivePDNVoltageDroop.t_rise_str` $\text{ns}$ ($dI/dt = 3.0\text{ A/ns}$). Evaluating the electrical collapse via @eq-placement-voltage-droop yields inductive drop $\Delta V_{\text{ind}} = (30 \times 10^{-12}\text{ H}) \times (3.0 \times 10^9\text{ A/s}) = 0.090\text{ V} =$ `{python} InductivePDNVoltageDroop.v_ind_mv_str` $\text{mV}$ and resistive drop $\Delta V_{\text{res}} = 6\text{ A} \times 0.008\,\Omega =$ `{python} InductivePDNVoltageDroop.v_res_mv_str` $\text{mV}$, producing a total rail droop of $\Delta V_{\text{droop}} =$ `{python} InductivePDNVoltageDroop.v_droop_mv_str` $\text{mV} =$ `{python} InductivePDNVoltageDroop.v_droop_v_str` $\text{V}$. The drooped core voltage falls from `{python} InductivePDNVoltageDroop.v_core_3dec_str` $\text{V}$ to `{python} InductivePDNVoltageDroop.v_drooped_str` $\text{V}$—an instantaneous `{python} InductivePDNVoltageDroop.droop_pct_str` percent voltage drop.
+To ground this physical vulnerability on silicon, consider an analytical heterogeneous SoC powering a systolic array neural accelerator and a real-time safety processor from a shared $V_{\text{core}} =$ `{python} InductivePDNVoltageDroop.v_core_str` power distribution network. The PDN package loop exhibits parasitic inductance $L =$ `{python} InductivePDNVoltageDroop.l_pkg_str` and equivalent series resistance $R =$ `{python} InductivePDNVoltageDroop.r_pkg_str`. When the neural accelerator starts a matrix multiply, its current demand surges by $\Delta I =$ `{python} InductivePDNVoltageDroop.delta_i_str` with rise time $t_r =$ `{python} InductivePDNVoltageDroop.t_rise_str` ($dI/dt = 3.0\text{ A/ns}$). Evaluating the electrical collapse via @eq-placement-voltage-droop yields inductive drop $\Delta V_{\text{ind}} = (30 \times 10^{-12}\text{ H}) \times (3.0 \times 10^9\text{ A/s}) = 0.090\text{ V} =$ `{python} InductivePDNVoltageDroop.v_ind_mv_str` and resistive drop $\Delta V_{\text{res}} = 6\text{ A} \times 0.008\,\Omega =$ `{python} InductivePDNVoltageDroop.v_res_mv_str`, producing a total rail droop of $\Delta V_{\text{droop}} =$ `{python} InductivePDNVoltageDroop.v_droop_mv_str` $=$ `{python} InductivePDNVoltageDroop.v_droop_v_str`. The drooped core voltage falls from `{python} InductivePDNVoltageDroop.v_core_3dec_str` to `{python} InductivePDNVoltageDroop.v_drooped_str`—an instantaneous `{python} InductivePDNVoltageDroop.droop_pct_str` voltage drop.
 
-Under the stated alpha-power *gate* model ($V_{\text{th}}=0.42\text{ V}$, $\alpha=1.3$), the `{python} InductivePDNVoltageDroop.droop_pct_str` percent rail droop predicts a `{python} InductivePDNVoltageDroop.delay_expansion_pct_str` percent propagation-delay increase.[^fn-hw-alpha-power] This is not a measured thread-runtime expansion or proof that $V_{\min}$ was crossed. Whether it consumes a loop's slack, trips a watchdog, or affects a valve depends on the device threshold, circuit path, clock policy, and measured end-to-end response. A separate assumed $22\text{ A}$ step in $5\text{ ns}$ with the same $L$ and $R$ would instead give $132+176=308\text{ mV}$; the $138\text{ mV}$ result cannot stand in for that case.
+Under the stated alpha-power *gate* model ($V_{\text{th}}=0.42\text{ V}$, $\alpha=1.3$), the `{python} InductivePDNVoltageDroop.droop_pct_str` rail droop predicts a `{python} InductivePDNVoltageDroop.delay_expansion_pct_str` propagation-delay increase.[^fn-hw-alpha-power] This is not a measured thread-runtime expansion or proof that $V_{\min}$ was crossed. Whether it consumes a loop's slack, trips a watchdog, or affects a valve depends on the device threshold, circuit path, clock policy, and measured end-to-end response. A separate assumed $22\text{ A}$ step in $5\text{ ns}$ with the same $L$ and $R$ would instead give $132+176=308\text{ mV}$; the $138\text{ mV}$ result cannot stand in for that case.
 
 [^fn-hw-alpha-power]: **Alpha-Power CMOS Delay Model**\index{Alpha-Power CMOS delay law}\index{Gate propagation delay!voltage headroom}: The illustrative model uses $t_{\text{prop}} \propto V/(V-V_{\text{th}})^\alpha$ with assumed $V_{\text{th}}=0.42\text{ V}$ and $\alpha=1.3$. Its gate-delay ratio does not directly determine software execution time, setup failure, or brownout behavior; those require device characterization.
 
