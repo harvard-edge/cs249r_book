@@ -497,7 +497,7 @@ def gen_ch08(dst_dir: Path):
         log_pos = 0.06 + 0.92 * (np.log10(val) / np.log10(500))
         ax.barh(y, 1.0, height=bar_h, color="#F1F5F9", left=0.0)
         ax.barh(y, log_pos, height=bar_h, color=col, left=0.0)
-    ax.text(0.0, 0.015, "*Compromised: state leak (A > 0)", fontsize=3.6, color=CRIMSON, style="italic")
+    ax.text(0.0, 0.015, "*Compromised: state leak", fontsize=3.6, color=CRIMSON, style="italic")
     ax.set_xlim(-0.02, 1.02); ax.set_ylim(-0.02, 1.02)
     fig.savefig(dst_dir / "vol3_virtualization_margin_004.svg", format="svg", bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
