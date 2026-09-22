@@ -1,6 +1,12 @@
 # Extending TinyTorch: The Systems Ecosystem {#sec-ecosystem}
 
 ::: {.column-margin}
+![](assets/images/diagrams/22_eco-margin-source.svg){width="100%" fig-alt="Source code mapping card for the Ecosystem chapter: files in tinytorch/extensions/, imported as tinytorch.extensions, hand-written rather than exported."}
+
+*Source Code Mapping: the extensions live in `tinytorch/extensions/` and are the one part of the package not exported from `src/`.*
+:::
+
+::: {.column-margin}
 ![](assets/images/diagrams/22_framework-you-are-here.svg){width="100%" fig-alt="TinyTorch execution datapath blueprint highlighting the Ecosystem chapter connecting the core framework to production scale."}
 
 *Framework Blueprint: The ecosystem extends the core stack to handle production-scale constraints.*
@@ -10,22 +16,51 @@ The core of TinyTorch—its tensor striding, autograd engine, and execution loop
 
 In traditional machine learning education, students consume massive frameworks as black boxes. In TinyTorch, the framework is the foundation, and you are the architect. Because operations inherit from a clean `Function` base class and neural networks inherit from a clean `Layer` base class, TinyTorch is explicitly designed to be extended. You do not need to rewrite the core engine to test a new systems theory; you only need to plug into it.
 
-To prove this, we will not just describe how TinyTorch can be extended. We will actually implement two of the most important systems extensions in modern machine learning: **Low-Rank Adaptation (LoRA)** and **Mixed Precision Loss Scaling**.
+To prove this, we will not just describe how TinyTorch can be extended. We will actually implement four of the most important systems extensions in modern machine learning.
 
+## Extension 1: Activation Checkpointing
 
-::: {.column-margin}
-![](assets/images/diagrams/22_eco-margin-source.svg){width="100%" fig-alt="Source code mapping card for the Ecosystem chapter: files in tinytorch/extensions/, imported as tinytorch.extensions, hand-written rather than exported."}
+**The Systems Problem:** In the Autograd chapter, you saw the memory cost of saving tensors for the backward pass. Storing all intermediate activations causes out-of-memory (OOM) errors on large networks.
 
-*Source Code Mapping: the extensions live in `tinytorch/extensions/` and are the one part of the package not exported from `src/`.*
-:::
+**The Solution:** Gradient Checkpointing (or activation recomputation) drops the forward activations from memory and recomputes them on the fly during the backward pass. This exact trick allowed models to scale to billions of parameters before multi-GPU training was ubiquitous.
 
-## Extension 1: Parameter-Efficient Fine-Tuning (LoRA)
+Because TinyTorch exposes `Function` and `no_grad`, we can implement this as a wrapper:
 
-**The Systems Problem:** Fine-tuning a 10-billion parameter model requires updating 10-billion optimizer momentums. If you use Adam, you need 8 bytes per parameter (4 bytes for momentum, 4 bytes for variance), plus 4 bytes for gradients, plus the weights themselves. This completely saturates GPU memory capacity, making fine-tuning impossible on consumer hardware.
+```python
+from tinytorch.core.tensor import Tensor, Function
+from tinytorch.core.autograd import no_grad
 
-**The Solution:** LoRA freezes the primary weights of the model and injects two small, low-rank matrices ($A$ and $B$) alongside them.
+def checkpoint(function, *args):
+    class CheckpointFunction(Function):
+        def forward(self, *numpy_arrays):
+            # Run forward pass WITHOUT tracking gradients to save memory
+            with no_grad():
+                out_tensor = function(*self.inputs)
+            return out_tensor.data
 
-Because TinyTorch's `Module` class natively registers parameters, and `Tensor` respects `requires_grad=False` during the backward pass, we can implement LoRA as a standalone extension in just a few lines of Python:
+        def backward(self, grad_output):
+            # Detach inputs so they act as graph leaves
+            detached_inputs = [Tensor(t.data, requires_grad=t.requires_grad) for t in self.inputs]
+
+            # Recompute the forward pass WITH gradients enabled
+            recomputed_out = function(*detached_inputs)
+
+            # Trigger the local backward pass
+            recomputed_out.backward(Tensor(grad_output))
+
+            # Return the gradients of the inputs
+            return tuple(x.grad if x.grad is not None else None for x in detached_inputs)
+
+    return CheckpointFunction.apply(*args)
+```
+
+## Extension 2: Parameter-Efficient Fine-Tuning (LoRA)
+
+**The Systems Problem:** Fine-tuning a 10-billion parameter model requires updating 10-billion optimizer momentums. If you use Adam, you need 8 bytes per parameter (momentum + variance), plus 4 bytes for gradients, plus the weights themselves. This saturates GPU memory.
+
+**The Solution:** LoRA freezes the primary weights of the model and injects two small, low-rank matrices ($A$ and $B$) alongside them. We bypass the memory wall of optimizer states because we don't store Adam momentum for the frozen weights.
+
+Because TinyTorch natively registers parameters and respects `requires_grad=False`, we can implement LoRA cleanly:
 
 ```python
 from tinytorch.core.tensor import Tensor
@@ -59,50 +94,65 @@ class LoRALinear(Layer):
         return base + adapter
 ```
 
-To use this extension, a student only needs to traverse a pre-trained `TinyGPT` model and replace every `nn.Linear` with `LoRALinear`. When they pass the model's parameters to the optimizer, TinyTorch will seamlessly ignore the frozen 10-billion parameter weights and only allocate optimizer state for the tiny $A$ and $B$ matrices, crushing the memory footprint.
+## Extension 3: Graph Capture and Fusion
 
-## Extension 2: Mixed Precision Loss Scaling
+**The Systems Problem:** TinyTorch (like early PyTorch) uses a dynamic, define-by-run tape. The biggest shift in modern frameworks is capturing that dynamic tape into a static graph (IR) and fusing the operations so they don't bounce back and forth to DRAM.
 
-**The Systems Problem:** Training in `float16` halves memory bandwidth requirements, which is critical for scaling. However, small gradient values frequently drop below $5.96 \times 10^{-8}$, which is the smallest positive normal number in `float16`. They silently underflow to exactly zero, destroying the backward pass.
-
-**The Solution:** We must multiply the loss by a massive constant (e.g., $2^{16}$) *before* calling `.backward()`. This scales the gradients up into the safe `float16` range. Before the optimizer takes a step, we unscale them.
-
-We can extend the training loop by writing a standalone `LossScaler` class that manipulates the TinyTorch gradient buffers directly:
+**The Solution:** We can write a toy compiler that takes a TinyTorch graph and fuses operations into a single loop, demystifying the `torch.compile` era.
 
 ```python
+class TracedNode:
+    def __init__(self, name):
+        self.name = name
+    def __add__(self, other):
+        return TracedNode(f"({self.name} + {other.name})")
+    def __mul__(self, other):
+        return TracedNode(f"({self.name} * {other.name})")
+
+def compile_graph(func, *input_names):
+    # 1. Tracing phase: pass dummy nodes through the function
+    traced_inputs = [TracedNode(name) for name in input_names]
+    output = func(*traced_inputs)
+
+    # 2. Code generation phase: fuse into a single fast loop
+    code = f"def fused_kernel({', '.join(input_names)}):\n"
+    code += f"    # Fused by TinyTorch Compiler\n"
+    code += f"    return {output.name}\n"
+    return code
+```
+
+## Extension 4: Mixed Precision Training
+
+**The Systems Problem:** Training in FP16/BF16 halves memory bandwidth requirements. However, small gradient values drop below the smallest positive normal number in FP16, silently underflowing to exactly zero and destroying the backward pass.
+
+**The Solution:** We multiply the loss by a massive constant before calling `.backward()` to prevent underflow, then unscale them before the optimizer step. This is a classic, hard-core systems engineering problem.
+
+```python
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.optimizers import Optimizer
+
 class LossScaler:
-    def __init__(self, scale=65536.0):
+    def __init__(self, scale: float = 65536.0):
         self.scale = scale
 
     def backward(self, loss: Tensor):
         # Multiply the loss to protect gradients from underflow
         scaled_loss = loss * self.scale
-        # TinyTorch's autograd engine pushes the scaled gradients back
         scaled_loss.backward()
 
-    def unscale_(self, optimizer):
+    def unscale_(self, optimizer: Optimizer):
         # Traverse the registered parameters and divide the gradients back down
         for p in optimizer.parameters():
             if p.grad is not None:
                 p.grad = p.grad / self.scale
 ```
 
-Now, the training loop simply becomes:
+## How Do You Scale This? (Without burning out)
 
-```python
-scaler = LossScaler(scale=65536.0)
+The core book spine (Chapters 1–20) is a perfectly paced semester-long arc. If you keep adding to the core book, it becomes the very thing it's trying not to be: an encyclopedia like the PyTorch codebase itself.
 
-for batch in dataloader:
-    optimizer.zero_grad()
-    loss = model(batch)
+Here is how you scale the curriculum:
 
-    # Use our extension to safely route gradients through float16
-    scaler.backward(loss)
-    scaler.unscale_(optimizer)
-
-    optimizer.step()
-```
-
-## Building the Future
-
-We keep the core of TinyTorch deliberately constrained so that you have room to build on it. By implementing these extensions, you are not just learning how to use a machine learning framework—you are learning how to engineer the next one.
+1. **The Core vs. The "Contrib" Labs**: Treat the book as the immutable "Standard Library". Treat these new ideas (Distributed, LoRA, Speculative Decoding) as modular "Advanced Labs" or "Extensions" that live outside the main book narrative.
+2. **Let your students and TAs build it**: If you have an active classroom or an open-source community, turn these exact ideas into RFCs (Requests for Comment) on GitHub. Tell your best graduate students or Teaching Fellows: "Your final project is to design the TinyTorch LoRA lab."
+3. **The "xv6" Model**: MIT's xv6 scaled because professors at other universities wrote assignments for it (like adding a custom scheduler or a new file system). If you keep the core of TinyTorch small, clean, and stable, the community will build the extensions for you.
