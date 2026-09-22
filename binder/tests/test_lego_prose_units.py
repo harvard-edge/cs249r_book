@@ -111,3 +111,51 @@ def test_latex_dollar_after_ref_not_currency_dup(tmp_path):
         ),
     )
     assert check_file(p) == []
+
+
+def test_when_word_after_kw_str_not_flagged_as_wh(tmp_path):
+    p = _write(
+        tmp_path,
+        CELL.format(
+            assigns="full_server_draw_kw_str = fmt_power(2.5 * ureg.kilowatt, unit=ureg.kilowatt)",
+            prose="draws `{python} C.full_server_draw_kw_str` when CPUs are loaded",
+        ),
+    )
+    assert check_file(p) == []
+
+
+def test_closed_force_dup_newton(tmp_path):
+    p = _write(
+        tmp_path,
+        CELL.format(
+            assigns="force_str = fmt_force(50 * ureg.newton, unit=ureg.newton)",
+            prose="exerts `{python} C.force_str` newtons of grip force",
+        ),
+    )
+    issues = check_file(p)
+    assert issues, "expected duplicate newtons after closed force export"
+
+
+def test_closed_mass_dup_kg(tmp_path):
+    p = _write(
+        tmp_path,
+        CELL.format(
+            assigns="payload_str = fmt_mass(15 * ureg.kilogram, unit=ureg.kilogram)",
+            prose="rated for `{python} C.payload_str` kg payload",
+        ),
+    )
+    issues = check_file(p)
+    assert issues, "expected duplicate kg after closed mass export"
+
+
+def test_closed_angular_velocity_dup_rad_per_s(tmp_path):
+    p = _write(
+        tmp_path,
+        CELL.format(
+            assigns="omega_str = fmt_angular_velocity(3.14 * ureg.radian / ureg.second, unit=ureg.radian / ureg.second)",
+            prose="spins at `{python} C.omega_str` rad/s continuously",
+        ),
+    )
+    issues = check_file(p)
+    assert issues, "expected duplicate rad/s after closed angular velocity export"
+

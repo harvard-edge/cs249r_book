@@ -45,6 +45,7 @@ CLOSED_DOMAIN_FMT = re.compile(
     r"fmt_energy_per_byte|fmt_energy_per_bit|fmt_energy_per_flop|fmt_energy_per_op|"
     r"fmt_compute_efficiency|fmt_length|fmt_carbon_intensity|fmt_throughput|"
     r"fmt_temperature|fmt_temperature_rate|fmt_decibel|fmt_illuminance|"
+    r"fmt_force|fmt_force_rate|fmt_mass|fmt_angular_velocity|fmt_torque|fmt_torque_rate|fmt_velocity|"
     r"fmt_sci_qty)\s*\(",
     re.M | re.I,
 )
@@ -60,7 +61,8 @@ FMT_SUFFIX = re.compile(
 # Unit/currency tokens immediately after a closing backtick on a _str ref.
 PROSE_UNIT_AFTER_REF = re.compile(
     r"`\{python\}\s+([A-Za-z_][\w.]*_str)`\s*"
-    r"(FLOPs?/byte|flops?/byte|g/kWh|kg/kWh|km/h|"
+    r"((?:"
+    r"FLOPs?/byte|flops?/byte|g/kWh|kg/kWh|km/h|"
     r"ms|mW|MW|GW|kW|Wh|kWh|MWh|GWh|"
     r"pJ/byte|pJ/bit|pJ/FLOP|pJ/flop|pJ/op|pJ/operation|pJ|"
     r"GB|MB|KB|GiB|TiB|TB|"
@@ -68,7 +70,9 @@ PROSE_UNIT_AFTER_REF = re.compile(
     r"seconds?|secs?|minutes?|mins?|hours?|hrs?|weeks?|months?|years?|"
     r"percent|GPUs?|QPS|FPS|FLOPS|TFLOP/?s|PFLOP/?s|GFLOP/?s|"
     r"flights?|tokens?|images?|nodes?|servers?|"
-    r"USD|\$|%|×|x\b|tonnes?|metric tons?)",
+    r"rad/s|N/ms|N/s|kN/s|N·m|m/s|kg|grams?|kilograms?|newtons?|"
+    r"USD|x|tonnes?|metric tons?"
+    r")\b|\$|%|×)",
     re.I,
 )
 
@@ -129,6 +133,13 @@ _FMT_UNITS: dict[str, frozenset[str]] = {
                            "square meter", "square meters"}),
     "fmt_heat_flux": frozenset({"w/cm²", "w/cm^2", "w per square centimeter"}),
     "fmt_memory": frozenset({"b", "kb", "mb", "gb", "tb", "gib", "tib"}),
+    "fmt_mass": frozenset({"kg", "kilogram", "kilograms", "g", "gram", "grams", "t", "tonne", "tonnes", "mg"}),
+    "fmt_force": frozenset({"n", "newton", "newtons", "kn", "kilonewton", "kilonewtons"}),
+    "fmt_force_rate": frozenset({"n/s", "n/ms", "kn/s"}),
+    "fmt_angular_velocity": frozenset({"rad/s", "deg/s", "rpm"}),
+    "fmt_torque": frozenset({"n·m", "n*m", "nm", "newton-meter", "newton-meters"}),
+    "fmt_torque_rate": frozenset({"n·m/s", "n*m/s", "nm/s"}),
+    "fmt_velocity": frozenset({"m/s", "km/h", "mm/s"}),
     "fmt_qty": frozenset(),  # resolved from name suffix when present
 }
 
