@@ -118,6 +118,8 @@ The ordering of writes is what makes the stack survive a crash. When a compensab
 
 : **Saga Step States**: Every committed step ends either completed with its trajectory or compensated through the reverse path; a compensator that cannot finish sends the trajectory to escalation. {#tbl-vol3-saga-state-transitions}
 
+These are per-step saga states, kept in the trajectory record beside the trajectory's own state from @sec-vol3-controlplane-statemachine, not replacements for it. While a forward step or a compensator runs, the trajectory cycles through `WAITING_TOOL` as it does for any tool call. When a saga reaches `TERMINATED` after a clean unwind, the trajectory leaves through `FINALIZING` and ends `FAILED`. A step that enters `PANIC` drives the trajectory into terminal escalation, which pauses it for an operator, and the step is recorded as `ESCALATED` until that person resolves it.
+
 The unwind loop is short, and its structure matters more than its length. It peeks at the top compensator, runs it with its key, logs the result, and only then pops it, so that a crash between running and popping repeats the compensator rather than skipping it.
 
 ```python
@@ -136,7 +138,7 @@ def unwind_saga(record: TrajectoryRecord) -> None:
             record.log.append(Event.PANIC, comp.id, err)
             saga.set_state(SagaState.PANIC)
             raise EscalateToOperator(comp.id, err)
-    saga.set_state(SagaState.TERMINATED_CLEAN)
+    saga.set_state(SagaState.TERMINATED)
 ```
 
 If the host dies halfway through an unwind, recovery follows the same path as any other restart (@sec-vol3-persistence-migration). The runtime rebuilds the record from the log, finds the compensators that were started but not logged as finished, and runs them again with the same keys. Partial compensation therefore never strands a resource.
@@ -392,11 +394,12 @@ A model does not produce plans in this order by default. It samples actions in w
 
 Some failures leave no automated path. A compensator can fail permanently, for example when the API it calls has changed or the resource it would release is locked by someone else, and a step after the pivot can fail in a way no retry will fix, such as a downstream service in a long outage. In both cases the trajectory holds committed effects the runtime cannot resolve, and asking the model to improvise a way out would add effects in the conditions least likely to produce good ones. The runtime escalates.
 
-Escalation is a fixed procedure. The harness pauses the trajectory (@sec-vol3-controlplane-statemachine), so that no model call or dispatch happens while its record, workspace, and log stay available to the operator. It revokes the trajectory's grants and brokered credentials (@sec-vol3-sandboxes-credential-brokering) so that no pending callback can issue further effects while a person investigates. It classifies the residue by where the failure sits relative to the pivot, either as a failed compensation before the pivot, with a list of resources that remain uncompensated, or as a stalled finalization after it, with the committed pivot and the steps still owed. Finally, it pages an operator with an incident record that points to the exact log position, so the person starts from the same facts the runtime had.
+Escalation is a fixed procedure. The harness first settles whatever is in flight. It cancels an open model call, withdraws a held approval, and cancels each outstanding tool call or, when cancellation cannot be confirmed, marks it in doubt so that settlement by its idempotency key can resolve it later. With nothing outstanding, the trajectory is back at a turn boundary in `READY`, and the harness pauses it through the guarded transition of @sec-vol3-controlplane-statemachine, the only path into `PAUSED` that state machine allows. No model call or dispatch happens while paused, and the record, workspace, and log stay available to the operator. The harness then revokes the trajectory's grants and brokered credentials (@sec-vol3-sandboxes-credential-brokering) so that no pending callback can issue further effects while a person investigates. It classifies the residue by where the failure sits relative to the pivot, either as a failed compensation before the pivot, with a list of resources that remain uncompensated, or as a stalled finalization after it, with the committed pivot and the steps still owed. Finally, it pages an operator with an incident record that points to the exact log position, so the person starts from the same facts the runtime had.
 
 ```python
 def escalate(record: TrajectoryRecord, err: ToolError) -> None:
-    transition(record, "PAUSED", err)            # guarded; no model call, no dispatch
+    record.settle_in_flight(err)                 # cancel, or mark in doubt; ends in READY
+    transition(record, "PAUSED", err)            # guarded READY -> PAUSED; no model call, no dispatch
     record.grants.revoke_all()                   # no pending effect may land
     residue = (Residue.POST_PIVOT_STALLED if record.log.pivot_committed()
                else Residue.COMPENSATION_FAILED)
@@ -504,7 +507,7 @@ class LoopCost:
 
 **Result**: Stopping the loop at the first repeated state is about `{python} LoopCost.ratio_mult_str` cheaper than letting the ceiling stop it.
 
-**Systems insight**: The cost of a loop grows with the square of its length, because every turn re-sends a context that the loop keeps enlarging. Prefix caching lowers the price per re-sent token, as the budget example of @sec-vol3-controlplane-accounting showed, but not the turns or the minutes. A ceiling bounds the worst case, and only a progress signal keeps the typical loop short.
+**Systems insight**: The cost of a loop grows with the square of its length, because every turn re-sends a context that the loop keeps enlarging. Prefix caching lowers the price per re-sent token, as the budget example of @sec-vol3-controlplane-accounting showed, but not the turns or the minutes. A ceiling bounds the worst case, and only a progress signal keeps the typical loop short. What that does to the cost of each resolved task across a fleet is the goodput arithmetic of \ref{nbk-01-trajectory-goodput}. The detector's contribution is to move the early stop from an arbitrary turn to the first repeated state.
 
 :::
 

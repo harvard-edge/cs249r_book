@@ -47,7 +47,7 @@ Every token an agent keeps in context leaves attention state in accelerator memo
 
 ## From Context to KV State {#sec-vol3-kvcache-geometry}
 
-Return to the coding agent whose context layout was priced in napkin math \ref{nbk-04-quantitative-impact-of-prefix-layout}, now at its twentieth turn. Its context holds the system message and tool definitions, the task state and working files, and the latest tool results, including the stack trace the last test run produced, about thirty-two thousand tokens in all. The agent has just asked the harness to run the integration suite, which takes three-quarters of a minute. For those forty-five seconds the model emits nothing, yet the attention state computed for all thirty-two thousand tokens stays on the accelerator, waiting for the test log. @Sec-vol3-context-engineering decided which tokens this call should see. This chapter follows those tokens into the serving system, where they become the dominant consumer of accelerator memory, and asks what that state costs to keep, share, and release.
+Return to the coding agent whose context layout was priced in \ref{nbk-04-quantitative-impact-of-prefix-layout}, now at its twentieth turn. Its context holds the system message and tool definitions, the task state and working files, and the latest tool results, including the stack trace the last test run produced, about thirty-two thousand tokens in all. The agent has just asked the harness to run the integration suite, which takes three-quarters of a minute. For those forty-five seconds the model emits nothing, yet the attention state computed for all thirty-two thousand tokens stays on the accelerator, waiting for the test log. @Sec-vol3-context-engineering decided which tokens this call should see. This chapter follows those tokens into the serving system, where they become the dominant consumer of accelerator memory, and asks what that state costs to keep, share, and release.
 
 ::: {.column-margin}
 ![](images/svg/hsa_locator_s.svg){width="100%" fig-alt="H·S·A locator with the State axis highlighted."}
@@ -134,7 +134,7 @@ class KvGeometry:
     conc_long_str = fmt_int(conc_long)
 ```
 
-The formula becomes a budget once a model is fixed. Take a 70-billion-parameter model with grouped-query attention, where several query heads share each key-value head [@ainslie2023gqa]: `{python} KvGeometry.n_layers_str` layers, `{python} KvGeometry.n_kv_heads_str` key-value heads of dimension `{python} KvGeometry.d_head_str`, and 16-bit storage. @Fig-vol3-context-window-anatomy traces one agent context through that geometry, and the worked estimate below turns it into a concurrency ceiling.
+The formula becomes a budget once a model is fixed. Take a 70-billion-parameter model with grouped-query attention, where several query heads share each key-value head [@ainslie2023gqa]: `{python} KvGeometry.n_layers_str` layers, `{python} KvGeometry.n_kv_heads_str` key-value heads of dimension `{python} KvGeometry.d_head_str`, and 16-bit storage. @Sec-vol3-foundation-model-cost priced single calls to this model with 8-bit weights on one accelerator, the smallest deployment that holds it. A service that runs many agent trajectories at once instead spreads 16-bit weights across an eight-accelerator node, so that most of the node's memory is free for attention state, and that node is the deployment this chapter sizes. @Fig-vol3-context-window-anatomy traces one agent context through that geometry, and the worked estimate below turns it into a concurrency ceiling.
 
 ::: {#fig-vol3-context-window-anatomy fig-env="figure" fig-pos="htb" fig-cap="**From Agent Context to KV State**: A 32,768-token agent context (system prompt, tool definitions, workspace, turn history, and the latest observation) becomes key and value tensors for every layer. The per-token footprint of the 70B grouped-query model sets how many such trajectories fit in one node's KV pool." fig-alt="Top panel shows an agent context split into system prompt, tool schemas, workspace, multi-turn history, and latest observation. Arrows lead to a bottom panel listing model dimensions, the per-token and per-trajectory KV footprint, and concurrency at 8,192 and 32,768 tokens on an eight-accelerator node."}
 ![](images/svg/prompt_context_window_anatomy.svg)
@@ -230,7 +230,7 @@ Every one of these costs comes from one assumption, that a trajectory's attentio
 
 A planning agent that samples four candidate plans from an 8,192-token context wants four continuations of the same prefix. Under contiguous allocation each candidate needs its own copy of that prefix, because each will append tokens after it. The engine copies gigabytes before the first candidate token is generated, and the copies crowd out other trajectories. The same mechanism that removes fragmentation also removes this copy.
 
-**Paged KV allocation** stores attention state in fixed-size blocks, each holding the keys and values of $B$ tokens, drawn from a shared pool on demand [@kwon2023vllm]. The design borrows the page table from operating-system virtual memory, and here it does the same job. A per-trajectory block table maps the trajectory's logical block $l = \lfloor t/B \rfloor$ to whichever physical block holds it. The attention kernel reads the block table and gathers the blocks wherever they sit, so the trajectory's state no longer needs to be contiguous. The engine allocates a new block only when the last one fills, and when the trajectory ends its blocks return to a free list.
+**Paged KV allocation** stores attention state in fixed-size blocks, each holding the keys and values of $B$ tokens, drawn from a shared pool on demand [@kwon2023vllm]. The design adapts the page-table idea from virtual memory. A per-trajectory block table maps the trajectory's logical block $l = \lfloor t/B \rfloor$ to whichever physical block holds it. The attention kernel reads the block table and gathers the blocks wherever they sit, so the trajectory's state no longer needs to be contiguous. The engine allocates a new block only when the last one fills, and when the trajectory ends its blocks return to a free list.
 
 ::: {#dfn-paged-kv-cache .callout-definition title="Paged KV cache"}
 
@@ -558,9 +558,9 @@ An operator sizing a node for a coding-agent service starts from the chat-servin
 
 ### Sizing the pool {#sec-vol3-kv-capacity-formulations}
 
-Accelerator memory on a node divides among the weights, activation and runtime buffers, and the KV pool:
+Accelerator memory on a node, $C_{\text{acc}}$, divides among the weights, activation and runtime buffers, and the KV pool:
 
-$$C_{\text{HBM}} = M_{\text{weights}} + M_{\text{activations}} + M_{\text{runtime}} + M_{\text{KV}}$$ {#eq-hbm-partition}
+$$C_{\text{acc}} = M_{\text{weights}} + M_{\text{activations}} + M_{\text{runtime}} + M_{\text{KV}}$$ {#eq-hbm-partition}
 
 Only the last term of @eq-hbm-partition scales with the workload. For $n$ concurrent trajectories with average context $S_{\text{avg}}$ tokens and output $K_{\text{avg}}$ tokens, of which $S_{\text{shared}}$ tokens are a prefix common to all and held once, the pool must cover
 

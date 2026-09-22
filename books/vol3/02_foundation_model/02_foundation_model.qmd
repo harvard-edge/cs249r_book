@@ -9,11 +9,11 @@
 
 ::: {.content-visible when-format="pdf"}
 \noindent
-![](images/png/cover_processor_blueprint_labeled_print.png){fig-alt="Isometric illustration of a small robot laying orange token tiles along a track while a larger robot checks them, turning accepted tiles green and diverting a rejected red tile into a bin. Labels read token proposal stream, draft model execution core, memory streaming bus, target verification engine, token acceptance pool, and rollback diversion gate."}
+![](images/png/cover_processor_blueprint_labeled_print.png){fig-alt="Isometric illustration of a small robot laying orange token tiles along a track while a larger robot checks each tile, turning accepted tiles green and diverting a rejected red tile into a bin, so that only checked tokens continue down the track."}
 :::
 
 ::: {.content-visible unless-format="pdf"}
-![](images/webp/cover_processor_blueprint_labeled.webp){fig-alt="Isometric illustration of a small robot laying orange token tiles along a track while a larger robot checks them, turning accepted tiles green and diverting a rejected red tile into a bin. Labels read token proposal stream, draft model execution core, memory streaming bus, target verification engine, token acceptance pool, and rollback diversion gate."}
+![](images/webp/cover_processor_blueprint_labeled.webp){fig-alt="Isometric illustration of a small robot laying orange token tiles along a track while a larger robot checks each tile, turning accepted tiles green and diverting a rejected red tile into a bin, so that only checked tokens continue down the track."}
 :::
 
 :::
@@ -62,7 +62,8 @@ Every turn of an agent is one call to a foundation model. The runtime sends a co
 # │       from one set of inputs.
 # │ Show: Per-token decode and prefill floors, their ratio, per-call latency,
 # │       tokens processed per trajectory with and without prefix caching,
-# │       final KV footprint, cancellation savings, interface latencies.
+# │       final KV footprint and whether it fits beside the weights on one
+# │       accelerator, cancellation savings, interface latencies.
 # │ How:  Decode floor = weight bytes / memory bandwidth (batch of one).
 # │       Prefill floor = 2 x parameters / peak 8-bit rate. Trajectory re-send
 # │       is an arithmetic series over turns. Model and accelerator specs come
@@ -118,6 +119,8 @@ class CallPrice:
     kv_per_tok = 2 * model.layers * model.kv_heads * head_dim * kv_bytes
     kv_final_gb = sent_cache * kv_per_tok / 1e9
     weights_gb = params * weight_bytes / 1e9
+    resident_gb = kv_final_gb + weights_gb
+    accel_gb = accel.memory.capacity.to(GB).magnitude
 
     cancel_steps = k_cap - k_cut
     cancel_s = cancel_steps * t_dec
@@ -133,6 +136,7 @@ class CallPrice:
     check(input_share > 0.95, "Per trajectory, re-sent input should dominate tokens processed")
     check(cache_saving > 10, f"Prefix caching should cut prefill tokens by more than 10x, got {cache_saving:.1f}")
     check(t_full > deadline_s > t_diff, "The rewrite must miss the deadline and the diff must meet it")
+    check(resident_gb > accel_gb, "Weights plus the final KV cache should overflow one accelerator, which motivates node-level serving")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     params_b_str = fmt(params / 1e9, precision=1)
@@ -154,8 +158,10 @@ class CallPrice:
     pre_nocache_str = fmt_int(pre_nocache)
     pre_cache_str = fmt(pre_cache, precision=1)
     dec_total_str = fmt_int(dec_total)
-    kv_final_gb_str = fmt_qty_int(kv_final_gb * GB, GB)
-    weights_gb_str = fmt_qty_int(weights_gb * GB, GB)
+    kv_final_gb_str = fmt_qty(kv_final_gb * GB, GB, precision=1)
+    weights_gb_str = fmt_qty(weights_gb * GB, GB, precision=1)
+    resident_gb_str = fmt_qty(resident_gb * GB, GB, precision=1)
+    accel_gb_str = fmt_qty(accel_gb * GB, GB, precision=1)
     k_cap_str = fmt_int(k_cap)
     k_cut_str = fmt_int(k_cut)
     cancel_steps_str = fmt_int(cancel_steps)
@@ -183,7 +189,7 @@ class CallPrice:
 
 A coding agent is asked to make a failing test pass. On its first turn the harness sends the model about `{python} CallPrice.s0_str` tokens: a system prompt that states the agent's rules, the task, and the definitions of three tools, `read_file`, `edit_file`, and `run_tests`. The model does not return a fix. It returns one sentence of reasoning, a structured request to call `run_tests` with no arguments, and a stop reason saying that it stopped to wait for a tool. Nothing has run yet. The harness decides whether to honor the request, runs the tests in a sandbox, appends their output to the conversation as a new message, and calls the model again. Every turn of every trajectory in this book is a repetition of that exchange, the loop of @sec-vol3-intro-trajectory-engine seen from the inside of one step.
 
-The component at the center of that exchange is the foundation model, the neural core of the agent. It reads the whole context the runtime assembles, parses what the task, the history, and the tool results say, and proposes the next action. Concretely, a **foundation model**\index{Foundation model!in an agent} is a large network pretrained on broad text and code and then post-trained to follow instructions and to emit tool calls in a fixed format [@schick2023toolformer; @patil2023gorilla]. At inference time its weights are frozen. One call is a function of three things only: the tokens in the context, the sampling settings, and the weights. The model keeps no memory between calls, so anything the agent needs it to know on the next turn must be sent again.
+At the center of that exchange is the foundation model, the component the whole agent is built around. It reads the whole context the runtime assembles, parses what the task, the history, and the tool results say, and proposes the next action. Concretely, a **foundation model**\index{Foundation model!in an agent} is a large network pretrained on broad text and code and then post-trained to follow instructions and to emit tool calls in a fixed format [@schick2023toolformer; @patil2023gorilla]. At inference time its weights are frozen. One call is a function of three things only: the tokens in the context, the sampling settings, and the weights. The model keeps no memory between calls, so anything the agent needs it to know on the next turn must be sent again.
 
 Three properties of that function shape everything the runtime builds around it. The output is a **proposal**\index{Proposal!model output}, not a result. It is fluent and plausible whether or not it is correct, which is the fail-plausible fault model of @sec-vol3-intro-fail-plausible applied to one call. The output is nondeterministic, so the same request can yield a different proposal. The output is priced in tokens and seconds, and that price grows in ways that are easy to misjudge. Because the model holds zero ambient authority (@sec-vol3-intro-operational-incident), none of its output changes anything until the runtime acts on it. The runtime therefore owns every decision that has consequences, and @tbl-vol3-foundation-model-responsibilities names what each familiar model term obliges the runtime to do.
 
@@ -313,7 +319,7 @@ Next to the messages, the request lists the **tool definitions**\index{Tool defi
 
 The remaining fields bound the call. The output limit $K_{\max}$ caps how many tokens the model may generate. The deadline $T_{\max}$ is enforced by the runtime, which gives up on the call when it expires. The sampling fields set temperature, the truncation rule, and any stop sequences. Models trained to reason before answering accept one more limit, a **reasoning budget**\index{Reasoning budget}, which caps the intermediate reasoning tokens the model may generate before its visible answer. Those tokens are sampled like any other output, so they cost the same decode time per token and are metered as output. Depending on the interface, they may be returned to the runtime, summarized, or withheld. Written as a tuple, the request is
 
-$$\mathcal{R} = \langle \text{messages}, \text{tools}, \text{model}, K_{\max}, T_{\max}, B_{\text{reason}}, \text{stop sequences}, (\tau, p) \rangle$$ {#eq-vol3-call-request}
+$$\text{request} = \langle \text{messages}, \text{tools}, \text{model}, K_{\max}, T_{\max}, B_{\text{reason}}, \text{stop sequences}, (\tau, p) \rangle$$ {#eq-vol3-call-request}
 
 The limits $K_{\max}$, $T_{\max}$, and $B_{\text{reason}}$ in @eq-vol3-call-request are mechanical bounds that the service or the runtime enforces whatever the model generates. They are the invariant closure principle (\ref{pri-invariant-closure}) applied to the cost of one call. How much reasoning a given decision deserves is a question for @sec-vol3-test-time-compute. Here the budget is simply a field the runtime must set.
 
@@ -339,7 +345,7 @@ Streaming lets the runtime check a proposal while it is still being written. @Fi
 
 Model services, local runtimes, and network failures report outcomes in inconsistent forms. The runtime normalizes every outcome, whatever produced it, into one **status envelope**\index{Status envelope}:
 
-$$\mathcal{E} = \langle \text{status}, \text{stop reason}, \text{content}, \text{usage} \rangle$$ {#eq-vol3-status-envelope}
+$$\text{envelope} = \langle \text{status}, \text{stop reason}, \text{content}, \text{usage} \rangle$$ {#eq-vol3-status-envelope}
 
 The status field of @eq-vol3-status-envelope is a closed set. @Tbl-vol3-invocation-status lists it together with where each status comes from and what the loop does with it. One status covers every clean stop, and the rest come from limits, policies, the runtime's own checks, or the transport.
 
@@ -355,7 +361,7 @@ The status field of @eq-vol3-status-envelope is a closed set. @Tbl-vol3-invocati
 
 : **Normalized Status Envelope for a Model Call**: Every outcome of a call maps to one status, and each status has one admissible loop action. {#tbl-vol3-invocation-status}
 
-The closed set lets the runtime state its safety rule for a single call in terms of one field.
+These statuses describe one call. A trajectory has its own closed set of states (@sec-vol3-controlplane-statemachine), and where a name recurs there, as `COMPLETED` and `CANCELED` do, it describes the whole run rather than a single call. The closed set lets the runtime state its safety rule for a single call in terms of one field.
 
 ::: {#pri-02-quarantining-invariant .callout-principle title="The quarantining invariant"}
 
@@ -496,7 +502,7 @@ The model proposed a thread count because multi-threaded server configurations a
 
 ### Holding proposals until they are checked
 
-Because the model holds zero ambient authority, a proposal is inert data until the runtime acts on it. The runtime keeps each proposal in a **pending-proposal buffer**\index{Pending-proposal buffer}, host memory it owns and the model cannot touch, and moves it through a short lifecycle. A proposal is `RECEIVED` as tokens arrive. It is `HELD` once the envelope reports `COMPLETED`. It is `VALIDATING` while the runtime's checks run, and the model cannot change it during that phase. It ends `ADMITTED`, which makes it eligible for dispatch, or `REJECTED`, in which case the runtime records why and returns the reason to the model as an observation. Nothing leaves the buffer except through that last transition.
+Because the model holds zero ambient authority, a proposal is inert data until the runtime acts on it. The runtime keeps each proposal in a **pending-proposal buffer**\index{Pending-proposal buffer}, host memory it owns and the model cannot touch, and moves it through a short lifecycle. A proposal is `RECEIVED` as tokens arrive. It is `HELD` once the envelope reports `COMPLETED`. It is `VALIDATING` while the runtime's checks run, and the model cannot change it during that phase. It ends `ADMITTED`, which makes it eligible for dispatch, or `DENIED`, in which case the runtime records why and returns the reason to the model as an observation. Nothing leaves the buffer except through that last transition.
 
 ### Why the model cannot check itself
 
@@ -516,7 +522,7 @@ Self-review lowered the defect rate among approved proposals from 18 to about 14
 
 ### The verification perimeter
 
-The runtime therefore checks proposals with tools that hold ground truth about the environment. Arranged in order of cost, they form a **verification perimeter**\index{Verification perimeter} that rejects cheap failures cheaply and spends time only on proposals that survive (@tbl-verification-layers). Each layer supplies one of the closure evidence levels of @sec-vol3-intro-invariant-closure.
+The runtime therefore checks proposals with tools that hold ground truth about the environment. Arranged in order of cost, they form a **verification perimeter**\index{Verification perimeter} that rejects cheap failures cheaply and spends time only on proposals that survive (@tbl-verification-layers). Each layer supplies one of the closure evidence levels of @sec-vol3-intro-closure-evidence.
 
 | Layer                   | Check                                               | What it establishes                                        | Typical cost                 | Evidence level          |
 |:------------------------|:----------------------------------------------------|:-----------------------------------------------------------|:-----------------------------|:------------------------|
@@ -541,7 +547,7 @@ The time of one call has two main parts. **Time to first token**\index{Time to f
 
 $$T_{\text{call}} \approx \underbrace{T_{\text{queue}} + T_{\text{prefill}}(S)}_{\text{TTFT}} + K \cdot t_{\text{tok}}$$ {#eq-vol3-call-latency}
 
-The two phases of @eq-vol3-call-latency stress the hardware differently. Prefill processes many tokens against each weight it reads, so it is limited by arithmetic, and for a model with $P$ parameters it costs about $2P$ floating-point operations per prompt token. A decode step for one request processes a single token, yet it must still read every weight from memory, so its time is set by the bytes of the weights divided by memory bandwidth, not by arithmetic. That is why a call's latency is output-bound (principle \ref{pri-vol3-memory-bandwidth-decoding}). For a `{python} CallPrice.params_b_str`-billion-parameter model with 8-bit weights on a current data center accelerator with `{python} CallPrice.bw_str` TB/s of memory bandwidth, each decode step for a single stream takes at least `{python} CallPrice.t_dec_ms_str`, while each prompt token costs about `{python} CallPrice.t_pre_us_str` of prefill at the accelerator's peak arithmetic rate. An output token therefore costs about `{python} CallPrice.ratio_str` times as much time as a prompt token. Real prefill runs below peak, which narrows the ratio, but it remains about two orders of magnitude.
+The two phases of @eq-vol3-call-latency stress the hardware differently. Prefill processes many tokens against each weight it reads, so it is limited by arithmetic, and for a model with $P$ parameters it costs about $2P$ floating-point operations per prompt token. A decode step for one request processes a single token, yet it must still read every weight from memory, so its time is set by the bytes of the weights divided by memory bandwidth, not by arithmetic. That is why a call's latency is output-bound (principle \ref{pri-vol3-memory-bandwidth-decoding}). For a `{python} CallPrice.params_b_str`-billion-parameter model with 8-bit weights, served from one current data center accelerator (the smallest deployment that holds it) with `{python} CallPrice.bw_str` TB/s of memory bandwidth, each decode step for a single stream takes at least `{python} CallPrice.t_dec_ms_str`, while each prompt token costs about `{python} CallPrice.t_pre_us_str` of prefill at the accelerator's peak arithmetic rate. An output token therefore costs about `{python} CallPrice.ratio_str` times as much time as a prompt token. Real prefill runs below peak, which narrows the ratio, but it remains about two orders of magnitude. Sharding the weights across several accelerators, as a serving node does, divides the bytes each one reads per step and lowers both floors, but it leaves their ratio roughly where it is.
 
 For the first turn, prefill of `{python} CallPrice.s0_str` tokens takes about `{python} CallPrice.call1_pre_str` s at that floor, and decoding `{python} CallPrice.k_turn_str` tokens takes about `{python} CallPrice.call1_dec_str` s. Per call, output sets the latency. The practical controls follow directly. Keep outputs short through interface design (@sec-vol3-foundation-model-interface-design), cancel generations that have gone wrong (@sec-vol3-foundation-model-contract), and set $K_{\max}$ so that a runaway output cannot hold the loop hostage.
 
@@ -559,7 +565,7 @@ A service can avoid most of that work. When a new prompt begins with exactly the
 
 **Problem**: A coding agent runs `{python} CallPrice.turns_str` turns. Its first prompt is `{python} CallPrice.s0_str` tokens, each turn appends `{python} CallPrice.delta_str` tokens of model output and tool results, and each turn emits `{python} CallPrice.k_turn_str` output tokens. Using the per-token floors above, how many tokens does the trajectory process, how long does the model spend on them, and what does prefix caching change?
 
-**Math**: Without caching, @eq-vol3-trajectory-resend gives $N S_0 + \Delta\,N(N-1)/2 =$ `{python} CallPrice.sent_nocache_str` prompt tokens, against $N K =$ `{python} CallPrice.out_total_str` output tokens, so re-sent input is `{python} CallPrice.input_share_str` percent of all tokens processed. Prefill of those prompt tokens takes about `{python} CallPrice.pre_nocache_str` s, and decode of the output takes about `{python} CallPrice.dec_total_str` s. With prefix caching, only the first prompt and each later turn's new tokens are prefilled, $S_0 + (N-1)\Delta =$ `{python} CallPrice.sent_cache_str` tokens, about `{python} CallPrice.cache_saving_str` times fewer, and prefill time falls to about `{python} CallPrice.pre_cache_str` s. By the last turn the context holds `{python} CallPrice.sent_cache_str` tokens, whose KV cache at 16-bit precision occupies about `{python} CallPrice.kv_final_gb_str`, beside about `{python} CallPrice.weights_gb_str` of weights.
+**Math**: Without caching, @eq-vol3-trajectory-resend gives $N S_0 + \Delta\,N(N-1)/2 =$ `{python} CallPrice.sent_nocache_str` prompt tokens, against $N K =$ `{python} CallPrice.out_total_str` output tokens, so re-sent input is `{python} CallPrice.input_share_str` percent of all tokens processed. Prefill of those prompt tokens takes about `{python} CallPrice.pre_nocache_str` s, and decode of the output takes about `{python} CallPrice.dec_total_str` s. With prefix caching, only the first prompt and each later turn's new tokens are prefilled, $S_0 + (N-1)\Delta =$ `{python} CallPrice.sent_cache_str` tokens, about `{python} CallPrice.cache_saving_str` times fewer, and prefill time falls to about `{python} CallPrice.pre_cache_str` s. By the last turn the context holds `{python} CallPrice.sent_cache_str` tokens, whose KV cache at 16-bit precision occupies about `{python} CallPrice.kv_final_gb_str`, beside about `{python} CallPrice.weights_gb_str` of weights. Together they need about `{python} CallPrice.resident_gb_str`, more than the `{python} CallPrice.accel_gb_str` one accelerator holds before any activation or runtime buffers, so the single-accelerator deployment that sets the decode floor cannot keep this trajectory's last turn resident.
 
 **Systems insight**: On the agent's own critical path, the `{python} CallPrice.out_total_str` output tokens still take the most time, because each one is a serial, memory-bound step. The trajectory's work, however, is dominated by the prompt tokens it re-sends, and prefix caching removes almost all of that work only if the context is laid out so that each prompt extends the last one unchanged.
 
@@ -567,7 +573,7 @@ A service can avoid most of that work. When a new prompt begins with exactly the
 
 The two views of cost answer different questions. Latency is what the agent's own trajectory experiences, and on that path the agent runs as a single stream. Each call must wait for the previous tool result, so the agent cannot batch its own steps, and batching, the usual remedy for memory-bound decode, does not shorten its critical path. Cost is what the serving fleet experiences. A fleet batches many agents' decode steps together, so the weights read in each step are shared across many streams, and the cost of a generated token falls toward its arithmetic, about $2P$ operations, the same as a prompt token's. At that point the fleet's bill follows the total number of tokens processed, and for an agent that number is mostly re-sent input. Output sets latency, and re-sent input sets cost. Fleet batching and its queueing effects are derived in @sec-vol3-appendix-inference-queueing, and pricing a trajectory in dollars per accepted task is the work of @sec-vol3-agent-economics.
 
-Long contexts also cost memory. The KV cache of the final turn in the notebook is a sizable fraction of the model's own weights, and it stays resident for as long as the service keeps it, including while the agent waits for a slow tool. Deciding whether to keep, evict, or recompute that state belongs to @sec-vol3-kv-cache.
+Long contexts also cost memory. The KV cache of the final turn in the notebook is a sizable fraction of the model's own weights, enough that one accelerator cannot hold both, and it stays resident for as long as the service keeps it, including while the agent waits for a slow tool. A service that runs many trajectories therefore spreads the model across the accelerators of a serving node and sizes memory at the node level, and deciding whether to keep, evict, or recompute that state belongs to @sec-vol3-kv-cache.
 
 ::: {#chk-02-price-of-a-call .callout-checkpoint title="Pricing calls and trajectories"}
 

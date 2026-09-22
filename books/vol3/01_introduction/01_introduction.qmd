@@ -104,7 +104,7 @@ The second problem is that a trajectory outlives the processes that run it. A re
 
 ### What a tool wait costs {#sec-vol3-intro-memory-stranding}
 
-Long horizons also change where the time goes. Every turn alternates between the model generating a proposal and a tool carrying it out, and tool calls that compile code, run test suites, or wait on remote services routinely outlast the model calls that requested them. The worked profile in @sec-vol3-intro-duration-accounting shows a tool running three times as long as the model call before it. While the tool runs, the model has nothing to do for this trajectory, yet the serving system may still be holding the trajectory's attention state, its KV cache, in accelerator memory so that the next call can resume quickly.
+Long horizons also change where the time goes. Every turn alternates between the model generating a proposal and a tool carrying it out, and tool calls that compile code, run test suites, or wait on remote services routinely outlast the model calls that requested them. The worked profile in @sec-vol3-intro-duration-accounting shows one build and test run outlasting the model call that requested it. While the tool runs, the model has nothing to do for this trajectory, yet the serving system may still be holding the trajectory's attention state, its KV cache, in accelerator memory so that the next call can resume quickly.
 
 That idle residency is a real cost with a real trade-off. Keeping the state resident makes the next turn fast, while releasing it frees memory for other work but forces the serving system to rebuild or reload that state when the observation returns. Which choice wins depends on how long the wait lasts, how much state the trajectory holds, and how much of it the next call can reuse. @Sec-vol3-foundation-model-cost prices a single call, and @sec-vol3-kv-cache works out the retain, evict, recompute, or offload decision for trajectories that pause on tools.
 
@@ -446,30 +446,109 @@ the runtime treats the sentence as an unverified claim, like any other model out
 
 The two halves of the principle work together in \ref{nbk-blast-radius-containment}, where an advisory limit and a mechanical one meet the same looping trajectory.
 
+```{python}
+#| label: calc-vol3-intro-runaway-loop-cost
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WHAT A RUNTIME BUDGET SAVES ON A RUNAWAY LOOP (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: \ref{nbk-blast-radius-containment} in
+# │          @sec-vol3-intro-epistemic-boundary.
+# │
+# │ Goal: Price a looping trajectory under an advisory stop instruction and
+# │       under a runtime cost ceiling.
+# │ Show: Cost per turn, cost of the advisory loop, the turn the ceiling
+# │       rejects, the cost at rejection, and the saving.
+# │ How:  Per-turn cost = input tokens x input price + output tokens x output
+# │       price. The ceiling admits a turn only while the projected cumulative
+# │       cost stays at or below it. Prices are the illustrative per-million
+# │       set used throughout the volume ($3 input, $15 output).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.fmt import fmt_math
+
+class RunawayLoopCost:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    p_in = 3.00  # scenario: dollars per million input tokens (the volume's illustrative price set)
+    p_out = 15.00  # scenario: dollars per million output tokens (same set)
+    k_ctx = 64_000  # scenario: input tokens re-sent each turn
+    l_out = 1_024  # scenario: output tokens per turn
+    n_advisory = 450  # scenario: turns until a four-hour platform timeout
+    t_max = 25  # scenario: runtime turn ceiling
+    c_max = 5.00  # scenario: runtime cost ceiling, dollars
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    c_in = k_ctx * p_in / 1e6
+    c_out = l_out * p_out / 1e6
+    c_turn = c_in + c_out
+    c_advisory = n_advisory * c_turn
+    tok_advisory = n_advisory * (k_ctx + l_out)
+    n_paid = int(c_max // c_turn)  # turns dispatched before the projection crosses the ceiling
+    c_paid = n_paid * c_turn
+    c_projected = c_paid + c_turn
+    saving = 1 - c_paid / c_advisory
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(c_projected > c_max >= c_paid, "The ceiling must reject the next turn and admit the ones before it")
+    check(n_paid < t_max, "The cost ceiling should bind before the turn ceiling")
+    check(c_in > c_out, "Re-sent input should dominate each turn's cost")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    p_in_str = fmt_usd(p_in)
+    p_out_str = fmt_usd(p_out)
+    k_ctx_str = fmt_int(k_ctx)
+    l_out_str = fmt_int(l_out)
+    n_advisory_str = fmt_int(n_advisory)
+    t_max_str = fmt_int(t_max)
+    c_max_str = fmt_usd(c_max)
+    n_paid_str = fmt_int(n_paid)
+    n_next_str = fmt_int(n_paid + 1)
+    c_turn_str = fmt_usd(c_turn, precision=5)
+    c_advisory_str = fmt_usd(c_advisory, precision=2)
+    tok_advisory_m_str = fmt_int(tok_advisory / 1e6)
+    c_paid_str = fmt_usd(c_paid, precision=2)
+    saving_pct_str = fmt_int(saving * 100)
+
+    k_ctx_fmt = fmt_int(k_ctx).replace(",", "{,}")  # math-mode thousands separator
+    l_out_fmt = fmt_int(l_out).replace(",", "{,}")
+    c_turn_display_math = fmt_display_math(
+        rf"C_{{\text{{turn}}}} = {k_ctx_fmt} \times \frac{{{p_in_str}}}{{10^6}} + {l_out_fmt} \times \frac{{{p_out_str}}}{{10^6}}"
+        rf" = {fmt_usd(c_in, precision=3)} + {fmt_usd(c_out, precision=3)} = {c_turn_str}"
+    )
+    projection_math = fmt_math(
+        rf"{fmt_usd(c_paid, precision=3)} + {fmt_usd(c_turn, precision=3)} \approx {fmt_usd(c_projected, precision=2)} > C_{{\max}}"
+    )
+    reject_display_math = fmt_display_math(
+        rf"\mathcal{{I}}(a_{{{n_next_str}}}, \mathcal{{S}}_{{\text{{sys}}}}) = \bot \quad [\texttt{{BUDGET\_EXCEEDED}}]"
+    )
+```
+
 ::: {#nbk-blast-radius-containment .callout-notebook title="What a runtime budget saves"}
 
 **Problem**: A debugging agent falls into a loop, re-reading the code, making a trivial edit, and re-running a failing test harness. How much does the loop cost with an advisory stop instruction, and how much with a runtime cost ceiling?
 
-**Variables** (illustrative prices and sizes):
+**Variables** (the volume's illustrative prices, and illustrative sizes):
 
-* **Context per turn**: $K = 64{,}000$ input tokens at \$3.00 per million.
-* **Output per turn**: $L = 1{,}024$ tokens at \$15.00 per million.
-* **Advisory limit**: The system prompt says to stop after five failed attempts; the instruction stops governing the model's proposals, and the loop runs until a four-hour platform timeout, $N = 450$ turns.
-* **Mechanical limits**: A turn ceiling $T_{\max} = 25$ and a cost ceiling $C_{\max} = \$5.00$, both enforced by the runtime.
+* **Context per turn**: $K$ = `{python} RunawayLoopCost.k_ctx_str` input tokens at `{python} RunawayLoopCost.p_in_str` per million.
+* **Output per turn**: $L$ = `{python} RunawayLoopCost.l_out_str` tokens at `{python} RunawayLoopCost.p_out_str` per million.
+* **Advisory limit**: The system prompt says to stop after five failed attempts; the instruction stops governing the model's proposals, and the loop runs until a four-hour platform timeout, $N$ = `{python} RunawayLoopCost.n_advisory_str` turns.
+* **Mechanical limits**: A turn ceiling $T_{\max}$ = `{python} RunawayLoopCost.t_max_str` and a cost ceiling $C_{\max}$ = `{python} RunawayLoopCost.c_max_str`, both enforced by the runtime.
 
 **Math**:
 
 Each turn costs
-$$C_{\text{turn}} = 64{,}000 \times \frac{\$3.00}{10^6} + 1{,}024 \times \frac{\$15.00}{10^6} = \$0.192 + \$0.015 = \$0.20736.$$
 
-Under the advisory limit, the loop costs $450 \times \$0.20736 \approx \$93.31$ and bills about 29 million tokens.
+`{python} RunawayLoopCost.c_turn_display_math`
 
-Under the runtime limits, cumulative cost after 24 turns is $24 \times \$0.20736 \approx \$4.98$. Before dispatching turn 25, the runtime projects $\$4.977 + \$0.207 \approx \$5.18 > C_{\max}$ and rejects the call:
-$$\mathcal{I}(a_{25}, \mathcal{S}_{\text{sys}}) = \bot \quad [\texttt{BUDGET\_EXHAUSTED}]$$
+Under the advisory limit, the loop costs `{python} RunawayLoopCost.n_advisory_str` $\times$ `{python} RunawayLoopCost.c_turn_str` $\approx$ `{python} RunawayLoopCost.c_advisory_str` and bills about `{python} RunawayLoopCost.tok_advisory_m_str` million tokens.
 
-The trajectory ends as a failure at \$4.98, and the runtime discards the sandbox's uncommitted changes.
+Under the runtime limits, cumulative cost after `{python} RunawayLoopCost.n_paid_str` turns is `{python} RunawayLoopCost.n_paid_str` $\times$ `{python} RunawayLoopCost.c_turn_str` $\approx$ `{python} RunawayLoopCost.c_paid_str`. Before dispatching turn `{python} RunawayLoopCost.n_next_str`, the runtime projects `{python} RunawayLoopCost.projection_math` and rejects the call:
 
-**Systems insight**: The ceiling cut the cost of this failure by about 95 percent without making the model any better at debugging. Input tokens dominate each turn's cost here because the whole context is re-sent every turn, so the price of a loop grows with the context it drags along.
+`{python} RunawayLoopCost.reject_display_math`
+
+The trajectory ends as a failure at `{python} RunawayLoopCost.c_paid_str`, and the runtime discards the sandbox's uncommitted changes.
+
+**Systems insight**: The ceiling cut the cost of this failure by about `{python} RunawayLoopCost.saving_pct_str` percent without making the model any better at debugging. Input tokens dominate each turn's cost here because the whole context is re-sent every turn, so the price of a loop grows with the context it drags along.
 
 :::
 
@@ -567,30 +646,110 @@ $$S_{\text{trajectory}} = \frac{1}{(1 - f_{\text{model}}) + \dfrac{f_{\text{mode
 
 which can never exceed $1 / (1 - f_{\text{model}})$ however fast the model becomes. When builds, tests, and environment resets dominate the turn, the model is a minority of the time, and making it faster buys little.
 
+```{python}
+#| label: calc-vol3-intro-trajectory-time
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WHERE A TRAJECTORY'S TIME GOES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: \ref{nbk-amdahl-accounting} in
+# │          @sec-vol3-intro-duration-accounting.
+# │
+# │ Goal: Show that a faster model buys little when tools dominate the turn.
+# │ Show: Per-turn model time, trajectory time, the model's share of it, and
+# │       the speedups from a faster model and from faster tools.
+# │ How:  Model time uses the same per-token floors as the Part I cost
+# │       estimate (@sec-vol3-foundation-model-cost): decode = weight bytes /
+# │       memory bandwidth, prefill = 2 x parameters / peak 8-bit rate, from
+# │       the MLSysIM registry (Llama-3.1-70B, H100). The prose names neither.
+# │       Speedups follow Amdahl's law.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+class TrajectoryTime:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    model = Models.Language.Llama3_70B
+    accel = Hardware.Cloud.H100
+    weight_bytes = 1  # 8-bit weights, bytes per parameter (as in the Part I cost estimate)
+    s_turn = 18_000  # scenario: context tokens read per turn
+    k_turn = 450  # scenario: output tokens per turn
+    t_tool = 16.2  # scenario: seconds to compile a changed module and run targeted tests
+    t_runtime = 1.4  # scenario: seconds of snapshotting, diffing, and checks
+    t_wait = 0.3  # scenario: seconds of external waiting
+    horizon = 8  # scenario: turns in the trajectory
+    s_model = 3.5  # option A: model-call speedup
+    t_tool_b = 4.2  # option B: tool seconds with build caching and incremental tests
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    params = model.parameters.to(ureg.count).magnitude
+    bw = accel.memory.bandwidth.to(ureg.byte / ureg.second).magnitude
+    peak = accel.compute.precision_flops["fp8"].to(ureg.flop / ureg.second).magnitude
+    t_dec = params * weight_bytes / bw  # seconds per output token, batch of one
+    t_pre = 2 * params / peak  # seconds per context token at the peak rate
+    t_read = s_turn * t_pre
+    t_write = k_turn * t_dec
+    t_model = t_read + t_write
+    t_turn = t_model + t_tool + t_wait + t_runtime
+    t_task = horizon * t_turn
+    t_model_total = horizon * t_model
+    f_model = t_model_total / t_task
+    speed_a = 1 / ((1 - f_model) + f_model / s_model)
+    speed_a_max = 1 / (1 - f_model)
+    t_turn_b = t_model + t_tool_b + t_wait + t_runtime
+    t_task_b = horizon * t_turn_b
+    speed_b = t_task / t_task_b
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(t_write > t_read, "Generating the reply should outlast reading the context")
+    check(t_tool > t_model, "The tool should outlast the model call in this profile")
+    check(speed_b > speed_a_max, "Faster tools should beat even an infinitely fast model")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    s_turn_str = fmt_int(s_turn)
+    k_turn_str = fmt_int(k_turn)
+    t_read_str = fmt(t_read, precision=1)
+    t_write_str = fmt(t_write, precision=1)
+    t_model_str = fmt(t_model, precision=1)
+    t_tool_str = fmt(t_tool, precision=1)
+    t_runtime_str = fmt(t_runtime, precision=1)
+    t_wait_str = fmt(t_wait, precision=1)
+    horizon_str = fmt_int(horizon)
+    s_model_str = fmt(s_model, precision=1)
+    t_tool_b_str = fmt(t_tool_b, precision=1)
+    t_turn_str = fmt(t_turn, precision=1)
+    t_task_str = fmt_int(t_task)
+    t_model_total_str = fmt_int(t_model_total)
+    f_model_str = fmt(f_model, precision=2)
+    f_rest_str = fmt(1 - f_model, precision=2)
+    speed_a_str = fmt(speed_a, precision=2)
+    speed_a_max_str = fmt(speed_a_max, precision=1)
+    t_turn_b_str = fmt(t_turn_b, precision=1)
+    t_task_b_str = fmt_int(t_task_b)
+    speed_b_str = fmt(speed_b, precision=2)
+```
+
 ::: {#nbk-amdahl-accounting .callout-notebook title="Where a trajectory's time goes"}
 
-**Problem**: A bug-repair trajectory runs $H = 8$ turns. Should the team make model calls faster or make the tools faster?
+**Problem**: A bug-repair trajectory runs $H$ = `{python} TrajectoryTime.horizon_str` turns. Should the team make model calls faster or make the tools faster?
 
 **Variables** (illustrative per-turn profile):
 
-* **Model call**: 0.14 s to read an 18,000-token context plus 4.95 s to generate 450 tokens, so $T_{\text{model}} = 5.09$ s.
-* **Tool**: Compiling a changed module and running targeted tests, $T_{\text{tool}} = 16.2$ s.
-* **Runtime**: Snapshotting, diffing, and running checks, $T_{\text{runtime}} = 1.4$ s.
-* **External wait**: $T_{\text{wait}} = 0.3$ s.
-* **Option A**: A faster model or serving path that makes model calls $3.5\times$ faster.
-* **Option B**: Build caching and incremental testing that cut tool time from 16.2 s to 4.2 s.
+* **Model call**: At the per-token floors of @sec-vol3-foundation-model-cost for a 70-billion-parameter model on one accelerator, reading an `{python} TrajectoryTime.s_turn_str`-token context takes about `{python} TrajectoryTime.t_read_str` s and generating `{python} TrajectoryTime.k_turn_str` tokens about `{python} TrajectoryTime.t_write_str` s, so $T_{\text{model}} \approx$ `{python} TrajectoryTime.t_model_str` s.
+* **Tool**: Compiling a changed module and running targeted tests, $T_{\text{tool}}$ = `{python} TrajectoryTime.t_tool_str` s.
+* **Runtime**: Snapshotting, diffing, and running checks, $T_{\text{runtime}}$ = `{python} TrajectoryTime.t_runtime_str` s.
+* **External wait**: $T_{\text{wait}}$ = `{python} TrajectoryTime.t_wait_str` s.
+* **Option A**: A faster model or serving path that makes model calls `{python} TrajectoryTime.s_model_str` times faster.
+* **Option B**: Build caching and incremental testing that cut tool time from `{python} TrajectoryTime.t_tool_str` s to `{python} TrajectoryTime.t_tool_b_str` s.
 
 **Math**:
 
-Each turn takes $5.09 + 16.2 + 0.3 + 1.4 = 22.99$ s, so $T_{\text{task}} = 8 \times 22.99 \approx 183.9$ s. Model time is $8 \times 5.09 = 40.72$ s, giving $f_{\text{model}} = 40.72 / 183.9 \approx 0.22$.
+Each turn takes `{python} TrajectoryTime.t_model_str` + `{python} TrajectoryTime.t_tool_str` + `{python} TrajectoryTime.t_wait_str` + `{python} TrajectoryTime.t_runtime_str` = `{python} TrajectoryTime.t_turn_str` s, so $T_{\text{task}} \approx$ `{python} TrajectoryTime.t_task_str` s. Model time is about `{python} TrajectoryTime.t_model_total_str` s, giving $f_{\text{model}} \approx$ `{python} TrajectoryTime.f_model_str`.
 
-For option A,
-$$S_{\text{trajectory}} = \frac{1}{0.78 + 0.22/3.5} \approx 1.19,$$
-and even an infinitely fast model gives at most $1 / 0.78 \approx 1.28$.
+For option A, the speedup is 1 / (`{python} TrajectoryTime.f_rest_str` + `{python} TrajectoryTime.f_model_str` / `{python} TrajectoryTime.s_model_str`) $\approx$ `{python} TrajectoryTime.speed_a_str`, and even an infinitely fast model gives at most 1 / `{python} TrajectoryTime.f_rest_str` $\approx$ `{python} TrajectoryTime.speed_a_max_str`.
 
-For option B, each turn takes $5.09 + 4.2 + 0.3 + 1.4 = 10.99$ s, $T_{\text{task}} \approx 87.9$ s, and the speedup is $183.9 / 87.9 \approx 2.09$.
+For option B, each turn takes `{python} TrajectoryTime.t_turn_b_str` s, $T_{\text{task}} \approx$ `{python} TrajectoryTime.t_task_b_str` s, and the speedup is about `{python} TrajectoryTime.speed_b_str`.
 
-**Systems insight**: Here the tools, not the model, bound the trajectory. Cutting tool time more than doubled the trajectory's speed, while a model $3.5\times$ faster improved it by less than a fifth. Profile the whole turn before optimizing any part of it.
+**Systems insight**: Here the tools, not the model, bound the trajectory. Faster builds and tests sped it up by a factor of `{python} TrajectoryTime.speed_b_str`, more than even an infinitely fast model could deliver, while a model `{python} TrajectoryTime.s_model_str` times faster managed only `{python} TrajectoryTime.speed_a_str`. Profile the whole turn before optimizing any part of it.
 
 :::
 

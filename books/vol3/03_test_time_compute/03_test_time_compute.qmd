@@ -53,9 +53,10 @@ One model call returns one proposal, and on a hard decision that proposal is oft
 # │ TEST-TIME COMPUTE SCENARIOS PRICED AT ONE DECODE RATE (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: nbk-03-probe-versus-generation, nbk-03-matched-budget-axes,
-# │          nbk-03-compute-allocation-and-latency-trade-offs,
+# │          nbk-03-compute-overhead-and-yield-under, the plan-repair
+# │          token comparison, nbk-03-compute-allocation-and-latency-trade-offs,
 # │          nbk-03-strategy-comparison, the budget pitfall, and the
-# │          takeaways.
+# │          takeaways. Prices are the volume's shared illustrative set.
 # │
 # │ Goal: Price every worked example in this chapter at the same single-stream
 # │       decode rate as the worked estimate of @sec-vol3-foundation-model-cost,
@@ -77,8 +78,8 @@ class TTC:
     model = Models.Language.Llama3_70B
     accel = Hardware.Cloud.H100
     weight_bytes = 1  # 8-bit weights, bytes per parameter (same as ch2)
-    price_in = 2.0  # scenario: dollars per million input tokens
-    price_out = 10.0  # scenario: dollars per million output tokens
+    price_in = 3.0  # scenario: dollars per million input tokens (shared illustrative price set)
+    price_out = 15.0  # scenario: dollars per million output tokens (shared illustrative price set)
 
     # Probe versus a longer answer (stale-read diagnosis)
     k_answer = 1_024  # scenario: output tokens in the one-shot answer
@@ -94,6 +95,23 @@ class TTC:
     rounds = 3  # scenario: feedback rounds
     check_s = 1.5  # scenario: compile plus race detector per round
     report_tok = 340  # scenario: tokens in each race-detector report
+
+    # Yield and risk under asymmetric verifier error
+    y_n = 64  # scenario: candidate fixes sampled
+    y_tok = 1_024  # scenario: output tokens per candidate
+    y_p = 0.05  # scenario: generator valid rate
+    y_beta = 0.10  # scenario: verifier false rejection rate
+    y_alpha = 0.02  # scenario: verifier false acceptance rate
+    y_incident_usd = 500.0  # scenario: rollback and triage cost of a defective fix
+
+    # Plan repair versus regeneration
+    plan_nodes = 12  # scenario: nodes in the build plan
+    plan_step_tok = 150  # scenario: output tokens per plan node
+    plan_fail_at = 6  # scenario: node that fails (1-based)
+    plan_instr_tok = 4_096  # scenario: instructions and task context
+    plan_hist_tok = 550  # scenario: observation tokens logged per completed step
+    plan_repl_nodes = 3  # scenario: failed node plus its descendants
+    plan_scoped_tok = 1_200  # scenario: scoped repair prompt
 
     # Best-of-16 versus beam search with a step verifier
     steps = 4  # scenario: reasoning steps in a patch
@@ -153,6 +171,25 @@ class TTC:
     c_round_s = k_cand * t_tok
     c_lat = rounds * (c_round_s + check_s)
     depth_vs_breadth = a_lat / b_lat
+
+    # Yield and risk
+    y_valid = y_n * y_p
+    y_invalid = y_n - y_valid
+    y_acc_valid = y_valid * (1 - y_beta)
+    y_acc_invalid = y_invalid * y_alpha
+    y_acc = y_acc_valid + y_acc_invalid
+    y_precision = y_acc_valid / y_acc
+    y_defect = y_acc_invalid / y_acc
+    y_risk_usd = y_defect * y_incident_usd
+    y_sample_usd = y_n * y_tok * price_out / 1e6
+    y_risk_ratio = y_risk_usd / y_sample_usd
+
+    # Plan repair
+    plan_done = plan_fail_at - 1
+    plan_regen_in = plan_instr_tok + plan_done * (plan_step_tok + plan_hist_tok)
+    plan_regen_out = plan_nodes * plan_step_tok
+    plan_repl_out = plan_repl_nodes * plan_step_tok
+    plan_out_share = plan_repl_out / plan_regen_out
 
     # Ledger: best-of-16 versus beam
     bon_tok = steps * step_tok
@@ -217,6 +254,8 @@ class TTC:
     check(round_s < sc_lat < deadline_s < sc_worst, "Two feedback rounds must fit the deadline and three must not")
     check(2 * round_s <= deadline_s, "The second feedback round must finish inside the deadline")
     check(sc_ceff < sb_ceff and sc_ceff > sa_ceff, "Feedback should cost more per accepted task than one attempt and less than best-of-8")
+    check(y_risk_ratio > 100, "Expected incident cost should exceed sampling cost by more than two orders of magnitude")
+    check(0.2 < plan_out_share < 0.3, "Subgraph replacement should emit about a quarter of the regeneration output")
     check(pf_prm_ratio > 5, "The PRM should read several times the generator's output in the pitfall")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
@@ -295,6 +334,22 @@ class TTC:
     sc_worst_str = fmt_int(sc_worst)
     sc_third_str = fmt_int(sc_third * 100)
     c_vs_a_str = fmt_int(c_vs_a * 100)
+
+    y_tok_str = fmt_int(y_tok)
+    y_acc_valid_str = fmt(y_acc_valid, precision=2)
+    y_acc_invalid_str = fmt(y_acc_invalid, precision=3)
+    y_acc_str = fmt(y_acc, precision=3)
+    y_precision_str = fmt(y_precision, precision=2)
+    y_defect_str = fmt(y_defect, precision=2)
+    y_incident_str = fmt_int(y_incident_usd)
+    y_risk_usd_str = fmt_int(y_risk_usd)
+    y_sample_usd_str = fmt(y_sample_usd, precision=2)
+
+    plan_done_str = fmt_int(plan_done)
+    plan_regen_in_str = fmt_int(plan_regen_in)
+    plan_regen_out_str = fmt_int(plan_regen_out)
+    plan_scoped_str = fmt_int(plan_scoped_tok)
+    plan_repl_out_str = fmt_int(plan_repl_out)
 
     pf_gen_str = fmt_int(pf_gen)
     pf_prefix_str = fmt_int(pf_prefix)
@@ -604,9 +659,9 @@ so two of every three accepted candidates are invalid. Sampling more under these
 
 **Problem**: An agent samples 64 candidate fixes for a concurrency bug and accepts one that its verifier approves. How likely is the accepted fix to be defective, and how does that risk compare with the cost of sampling?
 
-**Variables**: These are scenario assumptions. Each candidate is $1{,}024$ output tokens at \$10 per million. The generator's valid rate is $p = 0.05$. The verifier's false rejection rate is $\beta = 0.10$ and its false acceptance rate is $\alpha = 0.02$. A defective fix that reaches production costs \$500 in rollback and triage.
+**Variables**: These are scenario assumptions. Each candidate is `{python} TTC.y_tok_str` output tokens at \$`{python} TTC.price_out_str` per million. The generator's valid rate is $p = 0.05$. The verifier's false rejection rate is $\beta = 0.10$ and its false acceptance rate is $\alpha = 0.02$. A defective fix that reaches production costs \$`{python} TTC.y_incident_str` in rollback and triage.
 
-**Math**: Of 64 candidates, $64 \times 0.05 = 3.2$ are valid and $60.8$ invalid. The verifier accepts $3.2 \times 0.90 = 2.88$ valid and $60.8 \times 0.02 = 1.216$ invalid candidates, so it accepts $4.096$ in expectation and its precision is $2.88 / 4.096 \approx 0.70$. If the runtime commits one accepted candidate, the chance it is defective is $1.216 / 4.096 \approx 0.30$, and the expected incident cost is $0.30 \times \$500 \approx \$148$ per task. Sampling costs $64 \times 1{,}024 \times \$10/10^6 \approx \$0.66$.
+**Math**: Of 64 candidates, $64 \times 0.05 = 3.2$ are valid and $60.8$ invalid. The verifier accepts $3.2 \times 0.90 =$ `{python} TTC.y_acc_valid_str` valid and $60.8 \times 0.02 =$ `{python} TTC.y_acc_invalid_str` invalid candidates, so it accepts `{python} TTC.y_acc_str` in expectation and its precision is about `{python} TTC.y_precision_str`. If the runtime commits one accepted candidate, the chance it is defective is about `{python} TTC.y_defect_str`, and the expected incident cost is about \$`{python} TTC.y_risk_usd_str` per task. Sampling all 64 candidates costs about \$`{python} TTC.y_sample_usd_str`.
 
 **Systems insight**: The expected cost of a false acceptance exceeds the sampling cost by more than two orders of magnitude, even though the verifier rejects 98 percent of invalid candidates. Reducing $\alpha$, or putting a sealed check in front of the commit, is worth far more than reducing $\beta$ or sampling more.
 
@@ -652,7 +707,7 @@ To a verifier that reads the exit status, this candidate scores a perfect pass. 
 
 $$1 - (1 - \epsilon)^N = 1 - 0.995^{1000} \approx 0.993$$
 
-A blind spot that almost never matters for a single candidate becomes a near-certainty under search. The defense is structural. The verifier runs out of process from the candidate, the tests and their libraries sit on read-only mounts the candidate cannot reach, and introspection into the harness is stripped; @sec-vol3-sandboxes builds that isolation. The same exploit reappears when a verifier is used as a training reward instead of a selector, where it is called reward hacking [@skalse2022defining] and handled in @sec-vol3-rlvr.
+A blind spot that almost never matters for a single candidate becomes a near-certainty under search. The defense is structural. The verifier runs out of process from the candidate, the tests and their libraries sit on read-only mounts the candidate cannot reach, and introspection into the harness is stripped. @Sec-vol3-sandboxes builds that isolation, @sec-vol3-evaluation-gyms applies it to the sealed verifier of an evaluation harness, and @sec-vol3-rlvr-sandboxing applies it to the reward of a training run. In training the same exploit is called reward hacking [@skalse2022defining], and the reward is then under sustained optimization pressure instead of a one-time search.
 
 ### Verification topologies
 
@@ -692,9 +747,10 @@ a subgoal description $g_i$ for the model, a deterministic precondition $\mathca
 
 ### Repair at the lowest level that works {#sec-vol3-test-time-compute-revision-mechanics}
 
-The linker failure shows the difference in practice:
+The linker failure shows the difference in practice. The illustrative log below is the kind of output such a step produces.
 
 ```bash
+# Illustrative linker failure (constructed example)
 FAILED: lib/libtransport.so
 /usr/bin/ld: cannot find -luring: No such file or directory
 clang-16: error: linker command failed with exit code 1
@@ -707,13 +763,13 @@ $$\mathcal{V}_{\text{invalid}} = \text{Desc}(v_i) = \{v_k \in \mathcal{V} \mid v
 
 and leaves nodes on independent branches untouched (@fig-vol3-plan-revision).
 
-::: {#fig-vol3-plan-revision fig-env="figure" fig-pos="htb" fig-cap="**Plan Revision by Subgraph Replacement**: Panel A: node $v_2$ fails, and the runtime invalidates its descendants $\\{v_3, v_4\\}$ while the independent branch $v_5$ is unaffected. Panel B: the verified nodes $v_0$, $v_1$, and $v_5$ are kept as committed state, and the model generates only a replacement path $\\{v_2', v_3'\\}$ that restores the preconditions of $v_4$." fig-alt="Two-panel plan graph. Panel A shows nodes v0 through v5 with v2 failed in red and v3 and v4 dashed as invalidated, while v5 stays green. Panel B shows v0, v1, and v5 grouped as preserved verified state, a new path v2 prime and v3 prime labeled build static and compile unit, and v4 reconnected."}
+::: {#fig-vol3-plan-revision fig-env="figure" fig-pos="htb" fig-cap="**Plan Revision by Subgraph Replacement**: Panel A: node $v_2$ fails, and the runtime invalidates its descendants $\\{v_3, v_4\\}$ while the independent branch $v_5$ is unaffected. Panel B: the verified nodes $v_0$, $v_1$, and $v_5$ are kept as the verified prefix of the plan, and the model generates only a replacement path $\\{v_2', v_3'\\}$ that restores the preconditions of $v_4$." fig-alt="Two-panel plan graph. Panel A shows nodes v0 through v5 with v2 failed in red and v3 and v4 dashed as invalidated, while v5 stays green. Panel B shows v0, v1, and v5 grouped as preserved verified state, a new path v2 prime and v3 prime labeled build static and compile unit, and v4 reconnected."}
 ![](images/svg/fig-vol3-plan-revision.svg)
 :::
 
-Repair then escalates only as far as necessary, following the systems practice of containing a fault at the lowest layer that can handle it. **Local repair** asks the model for a different action at the failed node that still produces the same expected observation, such as a corrected flag or an alternative path to the same library. The graph does not change and no descendant is disturbed. **Subgraph replacement** applies when the expected observation cannot be produced as specified. The runtime removes the failed node and its descendants, keeps the verified nodes as committed state, and asks the model only for a bridge from the verified frontier to the nodes that still need their preconditions met, here building the library from source. **Escalation** applies when the failure falsifies the task itself, such as missing credentials or an incompatible platform. More planning cannot succeed, so the runtime stops and reports the chain of verified steps and the failure that ended it.
+Repair then escalates only as far as necessary, following the systems practice of containing a fault at the lowest layer that can handle it. **Local repair** asks the model for a different action at the failed node that still produces the same expected observation, such as a corrected flag or an alternative path to the same library. The graph does not change and no descendant is disturbed. **Subgraph replacement** applies when the expected observation cannot be produced as specified. The runtime removes the failed node and its descendants, keeps the verified nodes as the verified prefix of the plan, and asks the model only for a bridge from the verified frontier to the nodes that still need their preconditions met, here building the library from source. **Escalation** applies when the failure falsifies the task itself, such as missing credentials or an incompatible platform. More planning cannot succeed, so the runtime stops and reports the chain of verified steps and the failure that ended it.
 
-The token difference is large. In a twelve-node plan whose steps average 150 tokens, failing at the sixth node, regenerating the whole plan reads a 7,596-token prompt of instructions and history and emits 1,800 tokens. Replacing the three affected nodes reads a scoped 1,200-token prompt and emits 450 tokens, a quarter of the output tokens and therefore about a quarter of the decode time. It also avoids re-running the five completed steps, which is the larger saving when those steps changed the environment. Recording plan state durably across a long trajectory, so a crash does not lose it, belongs to the runtime that executes plans (@sec-vol3-agent-harness).
+The token difference is large. Take a twelve-node plan whose steps average 150 output tokens, failing at the sixth node. Regenerating the whole plan reads a `{python} TTC.plan_regen_in_str`-token prompt of instructions and the history of `{python} TTC.plan_done_str` completed steps, and emits `{python} TTC.plan_regen_out_str` tokens. Replacing the three affected nodes reads a scoped `{python} TTC.plan_scoped_str`-token prompt and emits `{python} TTC.plan_repl_out_str` tokens, a quarter of the output tokens and therefore about a quarter of the decode time. It also avoids re-running the `{python} TTC.plan_done_str` completed steps, which is the larger saving when those steps changed the environment. Across a long trajectory the plan must outlive any one decision. The harness keeps a pointer to it in the trajectory record (@sec-vol3-agent-harness), and durable execution lets that record survive a crash (@sec-vol3-durable-execution).
 
 ### Damping replanning {#sec-vol3-test-time-compute-replanning-thrashing}
 

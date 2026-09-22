@@ -153,7 +153,7 @@ The harness prevents both by giving the trajectory a closed set of states and al
 | `CALLING_MODEL`                   | One model call in flight                   | An open request with an output ceiling and deadline | `READY`, `WAITING_TOOL`, `AWAITING_APPROVAL`, `FINALIZING` |
 | `WAITING_TOOL`                    | Tool calls dispatched, results outstanding | Pending call IDs, deadlines, job handles            | `READY`, `FINALIZING`                                      |
 | `AWAITING_APPROVAL`               | An irreversible call held for a decision   | The held call, its approval request, an expiry      | `WAITING_TOOL`, `READY`, `FINALIZING`                      |
-| `PAUSED`                          | Stopped at a turn boundary on request      | The record only                                     | `READY`, `FINALIZING`                                      |
+| `PAUSED`                          | Held at a turn boundary for a person       | The record only                                     | `READY`, `FINALIZING`                                      |
 | `FINALIZING`                      | Cleanup before exit                        | Open jobs to cancel, leases to release              | `COMPLETED`, `FAILED`, `CANCELED`                          |
 | `COMPLETED`, `FAILED`, `CANCELED` | Terminal                                   | Nothing                                             | None                                                       |
 
@@ -161,7 +161,9 @@ The harness prevents both by giving the trajectory a closed set of states and al
 
 @Fig-vol3-acb-lifecycle draws the same machine. The main cycle runs from `READY` through `CALLING_MODEL` to `WAITING_TOOL` and back. A reply with nothing to run, such as plain text or a truncated reply, returns directly to `READY` with an observation for the next call. An irreversible call diverts to `AWAITING_APPROVAL`, which leaves either toward `WAITING_TOOL` when the call is approved and still valid or back to `READY` with a refusal observation. Every exit, whether the model ended its turn or an operator, a kill, or an exhausted budget ended the run, passes through `FINALIZING`.
 
-::: {#fig-vol3-acb-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**Trajectory State Machine**: Six live states and three terminal states. A trajectory cycles through READY, CALLING_MODEL, and WAITING_TOOL, diverts irreversible calls to AWAITING_APPROVAL, and pauses only from READY. Every exit passes through FINALIZING, which cancels open work, releases leases, and runs the completion check before the trajectory settles in an absorbing terminal state." fig-alt="State diagram with a live-states region and an exit region. Live states are PAUSED, READY, CALLING_MODEL, WAITING_TOOL, and AWAITING_APPROVAL, connected by labeled arrows: pause and resume, call model, no call to run, granted tool call, irreversible call, approved, matching result or timeout, and a dashed arrow for denied, expired, or stale requests back to READY. An end_turn arrow and a dashed arrow from any live state lead to FINALIZING, which leads to COMPLETED, FAILED, and CANCELED."}
+`PAUSED` is entered only from `READY`, and that holds even when the pause is forced rather than requested. When automated recovery cannot continue, for example because an action that should undo an earlier step has failed for good, the failure can surface in any live state, often `WAITING_TOOL`. The harness then escalates to an operator in two steps. It first settles whatever is in flight, canceling an open model call, withdrawing a held approval, and canceling each outstanding tool call or marking it in doubt when cancellation cannot be confirmed, which returns the trajectory to `READY` with nothing outstanding. Only then does it pause the trajectory through the ordinary guarded transition and revoke its grants. Escalation therefore adds no path to the machine, and the operator inherits a trajectory with no half-finished work. @Sec-vol3-sagas-pivot describes the failures that lead there.
+
+::: {#fig-vol3-acb-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**Trajectory State Machine**: Six live states and three terminal states. A trajectory cycles through READY, CALLING_MODEL, and WAITING_TOOL, diverts irreversible calls to AWAITING_APPROVAL, and pauses only from READY, including when failed recovery escalates the trajectory to an operator. Every exit passes through FINALIZING, which cancels open work, releases leases, and runs the completion check before the trajectory settles in an absorbing terminal state." fig-alt="State diagram with a live-states region and an exit region. Live states are PAUSED, READY, CALLING_MODEL, WAITING_TOOL, and AWAITING_APPROVAL, connected by labeled arrows: pause and resume, call model, no call to run, granted tool call, irreversible call, approved, matching result or timeout, and a dashed arrow for denied, expired, or stale requests back to READY. An end_turn arrow and a dashed arrow from any live state lead to FINALIZING, which leads to COMPLETED, FAILED, and CANCELED."}
 ![](images/svg/ch09-acb-lifecycle.svg)
 :::
 
@@ -237,20 +239,9 @@ The rule separates arrival from effect. When a control request arrives, the harn
 
 Most requests wait for a turn boundary, which raises the question of how long a model call can take to reach one. A reply cannot end before it has emitted its last token, and decode time grows with the number of output tokens (@sec-vol3-foundation-model-cost). The worst-case wait is therefore the output-token ceiling multiplied by the time per output token. For a call allowed thousands of output tokens, that can reach a minute or more, far too long for an operator stopping a destructive action. Two mechanisms shorten it. The first is the output-token ceiling itself, which bounds the wait along with the cost. The second is **streaming cancellation**\index{Streaming cancellation}: the harness streams every model call and, when a cancel, pause, or kill is pending, aborts the stream, discards the partial reply, and records a cancellation event in place of a proposal. The partial reply is never parsed into a tool call. A truncated or aborted completion cannot pass verification, so it cannot be dispatched (principle \ref{pri-02-quarantining-invariant}). Tokens emitted before the abort are still billed, and the harness charges them like any others.
 
-Every model reply also reports why it ended, in the stop reason, and the harness treats each stop reason as an instruction about what to do next, as @tbl-vol3-stop-reasons summarizes. Providers name these values differently, but every call surface reports the same few cases.
+Every model reply also reports why it ended. The status envelope of @tbl-vol3-invocation-status already fixes what the loop may do with each outcome of a call; the harness adds only where each outcome leaves the trajectory. An end-of-turn reply moves it to `FINALIZING` for the completion check. A reply with tool calls moves it to `AWAITING_APPROVAL` if any call is irreversible and to `WAITING_TOOL` otherwise. A reply cut off at its output limit, ended by a stop sequence, or refused returns it to `READY` with an observation for the next call, unless the task's policy escalates or finalizes a refusal. A failed or timed-out call returns it to `READY` for a retry while the budget allows and to `FINALIZING` once it does not.
 
-| Stop reason                | What it means                               | Harness action                                                                     |
-|:---------------------------|:--------------------------------------------|:-----------------------------------------------------------------------------------|
-| **End of turn**            | The model proposes no further action        | Enter `FINALIZING` and run the completion check                                    |
-| **Tool use**               | The reply contains one or more tool calls   | Validate each call; hold irreversible calls for approval, dispatch the rest        |
-| **Output limit reached**   | The reply was cut off at the output ceiling | Dispatch nothing; return a truncation notice as an observation and count the event |
-| **Stop sequence**          | A configured delimiter ended the reply      | Parse according to the delimiter's configured meaning                              |
-| **Refusal or safety stop** | The provider or model declined to continue  | Record it; escalate or finalize as the task's policy directs                       |
-| **Error or deadline**      | The call failed or exceeded its deadline    | Retry within the trajectory's budget; otherwise finalize as `FAILED`               |
-
-: **Stop Reasons as Harness Control**: How the harness maps each class of stop reason reported by the call surface to its next action. {#tbl-vol3-stop-reasons}
-
-Kill is the one request that does not wait. It exists for cases where finishing the turn is itself the hazard, such as a sandbox escape attempt or a runaway tool writing to shared storage. The harness aborts any model call, terminates every process in the trajectory's sandbox through the process-group teardown of @sec-vol3-tool-calling-streaming, and enters `FINALIZING` with the reason recorded. Breaking a turn has a price. A tool call dispatched just before the kill may or may not have taken effect, and its outcome is now in doubt. The harness marks such calls as in doubt rather than failed and leaves them to the settlement machinery of @sec-vol3-tool-calling-idempotency, which uses the call's idempotency key to learn whether the effect happened. When the trajectory has spawned subagents, cancel and kill must also reach them; @sec-vol3-multiagent-backpressure extends the same rule across agents.
+Kill is the one request that does not wait. It exists for cases where finishing the turn is itself the hazard, such as a sandbox escape attempt or a runaway tool writing to shared storage. The harness aborts any model call, terminates every process in the trajectory's sandbox through the process-group teardown of @sec-vol3-tool-calling-async-governance, and enters `FINALIZING` with the reason recorded. Breaking a turn has a price. A tool call dispatched just before the kill may or may not have taken effect, and its outcome is now in doubt. The harness marks such calls as in doubt rather than failed and leaves them to the settlement machinery of @sec-vol3-tool-calling-idempotency, which uses the call's idempotency key to learn whether the effect happened. When the trajectory has spawned subagents, cancel and kill must also reach them; @sec-vol3-multiagent-backpressure extends the same rule across agents.
 
 Control actions give people and policies a way into the loop at well-defined moments. Most of a trajectory's wall-clock time, however, is spent not in model calls but waiting for tools to answer, and a request that arrives during that wait has to find the trajectory in a state where it can be applied.
 
@@ -288,7 +279,7 @@ The harness decides which calls go to the gate from facts it controls. The tool'
 ![](images/svg/fig-vol3-human-escrow.svg)
 :::
 
-Panel (b) is the protocol. The harness holds the call and moves the trajectory to `AWAITING_APPROVAL`, where it holds only its record. The wait is long on the machine's scale, minutes to hours against seconds per turn, and by Little's law the number of trajectories waiting at once is the rate of approval requests multiplied by the mean review time. A slow review queue therefore multiplies the number of waiting trajectories, which is why a waiting trajectory must cost nothing but its record. The wait counts against the request's expiry, not against the trajectory's compute budget, because a person's review time says nothing about whether the trajectory is making progress. A long wait also makes a host restart during the wait likely, so the held call and its request must survive the process; @sec-vol3-durable-execution provides that durability.
+Panel (b) is the protocol. The harness holds the call and moves the trajectory to `AWAITING_APPROVAL`, where it holds only its record. The wait is long on the machine's scale, minutes to hours against seconds per turn, and by Little's law (@sec-vol3-kv-capacity-formulations) the number of trajectories waiting at once is the rate of approval requests multiplied by the mean review time. A slow review queue therefore multiplies the number of waiting trajectories, which is why a waiting trajectory must cost nothing but its record. The wait counts against the request's expiry, not against the trajectory's compute budget, because a person's review time says nothing about whether the trajectory is making progress. A long wait also makes a host restart during the wait likely, so the held call and its request must survive the process; @sec-vol3-durable-execution provides that durability.
 
 An approval is a decision about the world as it was when the request was written, and by the time it arrives the world may have moved. The staging table may hold new rows, another process may have changed its schema, or the grant may have been revoked. Before dispatch, the harness therefore re-reads the preconditions recorded in the request, confirms that the digest still matches the held call, and checks that the grant and budget are still valid. Only when all of these hold does it dispatch the call, with the idempotency key that makes a retried dispatch safe (principle \ref{pri-vol3-exactly-once-settlement}). A policy that requires two reviewers from different roles changes only the decision step, which waits for both approvals before the re-check.
 
@@ -344,7 +335,7 @@ Spend is metered, not estimated. After every call the harness reads the usage th
 
 $$C^{(k)} = C^{(k-1)} + p_{\text{in}}\, n_{\text{in}}^{(k)} + p_{\text{cache}}\, n_{\text{cache}}^{(k)} + p_{\text{out}}\, n_{\text{out}}^{(k)} + \sum_{j} c_{\text{tool}}(t_{k,j})$$
 
-where $n_{\text{in}}^{(k)}$, $n_{\text{cache}}^{(k)}$, and $n_{\text{out}}^{(k)}$ are turn $k$'s uncached input, cached input, and output tokens, the $p$ terms are their unit prices, and $c_{\text{tool}}$ is any direct charge for a tool call, such as a paid search. The price structure comes from @sec-vol3-foundation-model-cost. Output tokens cost several times more than input tokens, but a trajectory re-sends its growing context on every turn, so input usually dominates the trajectory's bill, and prefix caching of that re-sent context (laid out for reuse in @sec-vol3-context-engineering-staging, served by the mechanism of @sec-vol3-kvcache-radix-tree) is the largest single lever on it. The worked example below shows how large.
+where $n_{\text{in}}^{(k)}$, $n_{\text{cache}}^{(k)}$, and $n_{\text{out}}^{(k)}$ are turn $k$'s uncached input, cached input, and output tokens, the $p$ terms are their unit prices, and $c_{\text{tool}}$ is any direct charge for a tool call, such as a paid search. The price structure comes from @sec-vol3-foundation-model-cost. Output tokens cost several times more than input tokens, but a trajectory re-sends its growing context on every turn, so input usually dominates the trajectory's bill, and prefix caching of that re-sent context (laid out for reuse in @sec-vol3-context-engineering-staging, served by the mechanism of @sec-vol3-kvcache-radix-tree) is the largest single lever on it. The worked example below shows what that lever does to a budget.
 
 ```{python}
 #| label: calc-vol3-harness-budget
@@ -355,48 +346,45 @@ where $n_{\text{in}}^{(k)}$, $n_{\text{cache}}^{(k)}$, and $n_{\text{out}}^{(k)}
 # │ Context: @sec-vol3-controlplane-accounting, the worked example on metering
 # │          a trajectory against a multi-dimensional budget.
 # │
-# │ Goal: Show which ceiling binds for a 50-turn trajectory, and how a broken
-# │       prefix cache moves the binding dimension from turns to dollars.
-# │ Show: Tokens processed, cached share, dollar cost with and without prefix
-# │       caching, and the budget share used in each dimension.
-# │ How:  Input re-sent per turn is an arithmetic series; with an append-only
-# │       layout only the first prompt and each turn's new tokens are uncached.
-# │       All inputs are illustrative scenario assumptions (no real price list
-# │       or model is named), so they live in LOAD rather than the registry.
+# │ Goal: Show which ceiling binds for the coding agent's thirty-turn
+# │       trajectory, and how a broken prefix cache moves the binding
+# │       dimension from turns to dollars.
+# │ Show: Tokens processed, dollar cost with and without prefix caching, and
+# │       the budget share used in each dimension.
+# │ How:  The trajectory is the one priced in tokens in the foundation-model
+# │       chapter (same first prompt, per-turn growth, output per turn, and
+# │       MLSysIM coding-agent trajectory length), so its numbers agree with
+# │       that chapter and with the agent-economics caching notebook. Prices
+# │       and the four ceilings are illustrative scenario inputs.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
 from mlsysim.fmt import fmt, fmt_int, fmt_usd, fmt_percent, check
 
 class HarnessBudget:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    turns = 50  # scenario: turns completed so far
-    h_max = 80  # scenario: turn ceiling
-    n_max = 1_500_000  # scenario: token ceiling
-    t_max = 900  # scenario: wall-clock ceiling, seconds
-    c_max = 3.00  # scenario: dollar ceiling
-    t_wall = 460  # scenario: harness clock reading, seconds
-    s0 = 6_000  # scenario: first prompt (system prompt, tools, task)
-    delta = 400  # scenario: tokens appended per turn
-    k_out = 350  # scenario: output tokens per reply
+    agent = Agents.Coding.SWE_Bench_Runner
+    turns = agent.max_trajectory_steps  # turns completed so far
+    s0 = 8_000  # scenario: first prompt (same as the foundation-model estimate)
+    delta = 1_500  # scenario: tokens appended per turn
+    k_out = 200  # scenario: output tokens per reply
     p_in = 3.00  # scenario: dollars per million uncached input tokens
     p_cache = 0.30  # scenario: dollars per million cached input tokens
     p_out = 15.00  # scenario: dollars per million output tokens
+    h_max = 40  # scenario: turn ceiling
+    n_max = 2_000_000  # scenario: token ceiling
+    t_max = 900  # scenario: wall-clock ceiling, seconds
+    c_max = 3.50  # scenario: dollar ceiling
+    t_wall = 460  # scenario: harness clock reading, seconds
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     n_in = turns * s0 + delta * turns * (turns - 1) // 2
     n_uncached = s0 + delta * (turns - 1)
     n_cached = n_in - n_uncached
-    hit_rate = n_cached / n_in
     n_out = turns * k_out
     n_total = n_in + n_out
 
-    c_out = n_out * p_out / 1e6
-    c_uncached = n_uncached * p_in / 1e6
-    c_cached = n_cached * p_cache / 1e6
-    c_total = c_out + c_uncached + c_cached
-    c_in_nocache = n_in * p_in / 1e6
-    c_total_nocache = c_in_nocache + c_out
-    cache_saving = c_total_nocache / c_total
-    price_ratio = p_out / p_in
+    c_total = (n_uncached * p_in + n_cached * p_cache + n_out * p_out) / 1e6
+    c_total_nocache = (n_in * p_in + n_out * p_out) / 1e6
 
     rho_turns = turns / h_max
     rho_tokens = n_total / n_max
@@ -407,36 +395,21 @@ class HarnessBudget:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(rho_turns == max(rho_turns, rho_tokens, rho_wall, rho_dollars), "With caching, the turn cap should bind")
     check(rho_dollars_nocache > max(rho_turns, rho_tokens, rho_wall), "Without caching, the dollar ceiling should bind")
-    check(c_in_nocache > c_out, "Re-sent input should dominate the uncached bill")
-    check(rho_dollars_nocache < 0.90, "The uncached run should sit in the steer band, not restrict")
+    check(0.70 <= rho_dollars_nocache < 0.90, "The uncached run should sit in the steer band, not restrict")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     turns_str = fmt_int(turns)
     h_max_str = fmt_int(h_max)
     n_max_m_str = fmt(n_max / 1e6, precision=1)
     t_max_str = fmt_int(t_max)
-    c_max_str = fmt_usd(c_max)
+    c_max_str = fmt_usd(c_max, precision=2)
     t_wall_str = fmt_int(t_wall)
-    s0_str = fmt_int(s0)
-    delta_str = fmt_int(delta)
-    k_out_str = fmt_int(k_out)
     p_in_str = fmt_usd(p_in)
     p_cache_str = fmt_usd(p_cache, precision=2)
     p_out_str = fmt_usd(p_out)
-    n_in_str = fmt_int(n_in)
-    n_uncached_str = fmt_int(n_uncached)
-    n_cached_str = fmt_int(n_cached)
-    hit_rate_str = fmt_percent(hit_rate, style="prose")
-    n_out_str = fmt_int(n_out)
     n_total_str = fmt_int(n_total)
-    c_out_str = fmt_usd(c_out, precision=2)
-    c_uncached_str = fmt_usd(c_uncached, precision=2)
-    c_cached_str = fmt_usd(c_cached, precision=2)
     c_total_str = fmt_usd(c_total, precision=2)
-    c_in_nocache_str = fmt_usd(c_in_nocache, precision=2)
     c_total_nocache_str = fmt_usd(c_total_nocache, precision=2)
-    cache_saving_str = fmt(cache_saving, precision=1)
-    price_ratio_str = fmt_int(price_ratio)
     rho_turns_str = fmt_percent(rho_turns, style="prose")
     rho_tokens_str = fmt_percent(rho_tokens, style="prose")
     rho_wall_str = fmt_percent(rho_wall, style="prose")
@@ -446,17 +419,13 @@ class HarnessBudget:
 
 ::: {#nbk-09-multi-dimensional-accounting-and-prefix-cache .callout-notebook title="Metering a trajectory against its budget"}
 
-**Problem**: A debugging trajectory has run `{python} HarnessBudget.turns_str` turns under a budget of `{python} HarnessBudget.h_max_str` turns, `{python} HarnessBudget.n_max_m_str` million tokens, `{python} HarnessBudget.t_max_str` s of wall-clock time, and `{python} HarnessBudget.c_max_str`. The inputs are illustrative assumptions. The first call sends `{python} HarnessBudget.s0_str` tokens (system prompt, tool definitions, task), each turn appends `{python} HarnessBudget.delta_str` tokens of action and observation, and each reply has `{python} HarnessBudget.k_out_str` output tokens. Prices are `{python} HarnessBudget.p_in_str` per million uncached input tokens, `{python} HarnessBudget.p_cache_str` per million cached input tokens, and `{python} HarnessBudget.p_out_str` per million output tokens. The context is laid out append-only, so every turn after the first reuses the previous prefix from the cache and pays full price only for its new tokens, and the harness's clock reads `{python} HarnessBudget.t_wall_str` s. Which ceiling binds, with and without a working prefix cache?
+**Problem**: The coding agent of @sec-vol3-foundation-model-cost has run its `{python} HarnessBudget.turns_str`-turn trajectory under a budget of `{python} HarnessBudget.h_max_str` turns, `{python} HarnessBudget.n_max_m_str` million tokens, `{python} HarnessBudget.t_max_str` s of wall-clock time, and `{python} HarnessBudget.c_max_str`, and the harness's clock reads `{python} HarnessBudget.t_wall_str` s. Its token counts are the ones already worked out in tokens (\ref{nbk-02-price-of-a-trajectory}). At illustrative prices of `{python} HarnessBudget.p_in_str` per million uncached input tokens, `{python} HarnessBudget.p_cache_str` per million cached input tokens, and `{python} HarnessBudget.p_out_str` per million output tokens, which ceiling binds, with and without a working prefix cache?
 
-**Tokens**: Turn $k$ re-sends $s_0 + \Delta (k-1)$ input tokens, so input across the run is $\sum_{k=1}^{H} \left(s_0 + \Delta (k-1)\right)$, which here is `{python} HarnessBudget.n_in_str` tokens. Only the first prompt and each later turn's appended tokens miss the cache, `{python} HarnessBudget.n_uncached_str` tokens in all, leaving `{python} HarnessBudget.n_cached_str` cached tokens, a hit rate of `{python} HarnessBudget.hit_rate_str`. Output adds `{python} HarnessBudget.n_out_str` tokens, for `{python} HarnessBudget.n_total_str` tokens processed.
+**Meter readings**: The trajectory has processed `{python} HarnessBudget.n_total_str` tokens, almost all of them re-sent context. With an append-only context, only the first prompt and each later turn's new tokens are billed at the uncached price, and the trajectory has cost `{python} HarnessBudget.c_total_str`. If the cache misses on every turn, the same tokens cost `{python} HarnessBudget.c_total_nocache_str`.
 
-**Dollars with caching**: Output costs `{python} HarnessBudget.c_out_str`, uncached input `{python} HarnessBudget.c_uncached_str`, and cached input `{python} HarnessBudget.c_cached_str`, for a total of `{python} HarnessBudget.c_total_str`.
+**Budget used**: With caching, the trajectory has used `{python} HarnessBudget.rho_turns_str` of its turns, `{python} HarnessBudget.rho_tokens_str` of its tokens, `{python} HarnessBudget.rho_wall_str` of its wall-clock time, and `{python} HarnessBudget.rho_dollars_str` of its dollars, so the turn cap binds. Without caching, the dollar share jumps to `{python} HarnessBudget.rho_dollars_nocache_str` and dollars become the binding dimension. The token share is the same either way, because a cache changes what a token costs, not how many are processed.
 
-**Dollars without caching**: Billed entirely at the uncached price, input costs `{python} HarnessBudget.c_in_nocache_str` and the total becomes `{python} HarnessBudget.c_total_nocache_str`, about `{python} HarnessBudget.cache_saving_str` times more. Input, not output, carries the trajectory's cost, even though each output token is priced `{python} HarnessBudget.price_ratio_str` times higher.
-
-**Budget used**: With caching, the trajectory has used `{python} HarnessBudget.rho_turns_str` of its turns, `{python} HarnessBudget.rho_tokens_str` of its tokens, `{python} HarnessBudget.rho_wall_str` of its wall-clock time, and `{python} HarnessBudget.rho_dollars_str` of its dollars, so the turn cap binds. Without caching, the dollar share jumps to `{python} HarnessBudget.rho_dollars_nocache_str` and dollars become the binding dimension.
-
-**Systems insight**: The same trajectory sits comfortably inside its budget or close to its dollar ceiling depending on whether its prefix cache hits. A change that breaks the cache, such as reordering the tool list on every turn (@sec-vol3-context-engineering-staging), shows up first as a dollar ceiling approached early, which is one reason the budget meters dollars separately from tokens.
+**Systems insight**: The same trajectory sits comfortably inside its budget or close to its dollar ceiling depending on whether its prefix cache hits. A change that breaks the cache, such as reordering the tool list on every turn (@sec-vol3-context-engineering-staging), shows up first as a dollar ceiling approached early, which is one reason the budget meters dollars separately from tokens. @Sec-vol3-agent-economics-caching prices the saving itself.
 
 :::
 
@@ -526,7 +495,7 @@ A turn cap chosen because "fifty turns sounds generous" fails in both directions
 
 A prototype agent loop keeps everything that matters about a trajectory (its state, its spend, what it is waiting for, and what it may do) inside the loop and the model's context, so nothing outside can pause it, bound it, or stop it. The harness moves that control state into a trajectory record it owns and changes the record only through guarded transitions over a closed set of states. The guards reject late tool results, keep held calls from dispatching without approval, route every exit through a cleanup barrier, and make terminal states final.
 
-On that record the harness builds the controls a long-running trajectory needs. Control requests are recorded on arrival and applied at turn boundaries, with streaming cancellation and output ceilings bounding the wait and kill reserved for cases where finishing the turn is itself the hazard. Stop reasons tell the harness what to do with each reply. Waiting trajectories hold a record rather than a worker, and irreversible calls wait in escrow for an approval that expires, binds to one exact call, and is re-checked before dispatch. A scheduler shares the node fairly across trajectories, and a metered, multi-dimensional budget steers, restricts, and finally halts a trajectory that will not finish, with ceilings read from measured cost-vs.-success curves.
+On that record the harness builds the controls a long-running trajectory needs. Control requests are recorded on arrival and applied at turn boundaries, with streaming cancellation and output ceilings bounding the wait and kill reserved for cases where finishing the turn is itself the hazard. Stop reasons tell the harness which state each reply leaves the trajectory in. Waiting trajectories hold a record rather than a worker, and irreversible calls wait in escrow for an approval that expires, binds to one exact call, and is re-checked before dispatch. A scheduler shares the node fairly across trajectories, and a metered, multi-dimensional budget steers, restricts, and finally halts a trajectory that will not finish, with ceilings read from measured cost-vs.-success curves.
 
 ::: {.callout-takeaways title="Control lives outside the model"}
 

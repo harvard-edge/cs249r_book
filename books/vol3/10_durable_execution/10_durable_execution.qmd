@@ -42,7 +42,7 @@ A long-running agent outlives the machine it starts on. Hosts crash, workers are
 - Explain how a resumed trajectory rebuilds its context, what re-prefill costs, and how resume handles pending approvals, late tool results, and drift in model, prompt, or tool schema.
 - Construct a replay mode that stubs the model and the tools, and use it for time-travel debugging, counterfactual branches, and harness regression tests.
 - Diagnose why a rerun diverges from its recording, separating model-side sources from harness-side and environment-side sources.
-- Design a retention policy that keeps the causal record of a trajectory while compacting bulky tool output.
+- Design a retention policy that keeps the causal record of a trajectory while offloading bulky tool output.
 
 :::
 
@@ -393,7 +393,7 @@ An engineer investigating a failure at turn 42 reruns the trajectory with the sa
 
 : **Sources of Replay Divergence**: The four places where a rerun can depart from its recording, and what the runtime records or controls for each. Only the first cannot be removed; it can only be recorded. {#tbl-vol3-nondeterminism-mitigation tbl-colwidths="[18,44,38]"}
 
-The model call is the source that surprises engineers most. Sampling at nonzero temperature obviously varies. Less obviously, serving systems vary even at temperature zero, because floating-point addition is not associative [@goldberg1991] and the order in which a serving engine sums partial results depends on how many other requests share the batch. When two candidate tokens are nearly tied, that difference can flip the choice, and one changed token changes everything after it in the trajectory. Making serving bit-exact is possible in principle but slows it down and holds only on identical hardware and software, so a runtime that wants reproducibility records the model's outputs instead of trying to regenerate them.
+The model call is the source that surprises engineers most, because a served call is not reproducible even at temperature zero, where batch composition changes the order of floating-point sums and a near-tie between two tokens can flip (@sec-vol3-foundation-model-autoregressive). One changed token changes everything after it in the trajectory, and making serving bit-exact would slow it down and hold only on identical hardware and software. A runtime that wants reproducibility therefore records the model's outputs instead of trying to regenerate them.
 
 Model drift is the same problem at a larger scale. A rerun weeks later may reach a different model version under the same name, and a divergence then says nothing about the harness. The version recorded in every `ModelReplied` event is what lets the engineer tell the two apart.
 
@@ -426,9 +426,9 @@ A team runs a few thousand coding agents a day. Each turn's model reply and tool
 
 The retention policy splits every event into two parts. The **causal record** is everything a replay or an audit needs to reconstruct what the model saw and what the runtime decided: event headers and tool-call IDs, every model reply, every authorization and approval, every intent, the status of every result, and the result content exactly as it was delivered into the context. The **bulk** is the rest of the raw tool output, the lines that truncation dropped before the model saw them.
 
-The causal record is never compacted, because replay depends on it. The bulk can be moved out of the log into cheaper content-addressed storage, with the log keeping a hash of the full output and a pointer to it. @Tbl-vol3-payload-compaction-schema shows one tool result before and after.
+The causal record never leaves the log, because replay depends on it. The bulk can be **offloaded**\index{Trajectory log!offloading}, moved out of the log into cheaper content-addressed storage while the log keeps a hash of the full output and a pointer to it. @Tbl-vol3-payload-compaction-schema shows one tool result before and after.
 
-| **Field**             | **In the live log**                     | **After compaction**                                             |
+| **Field**             | **In the live log**                     | **After offloading**                                             |
 |:----------------------|:----------------------------------------|:-----------------------------------------------------------------|
 | **Header**            | Turn, tool-call ID, tool name           | Unchanged                                                        |
 | **Status**            | Exit code, duration                     | Unchanged                                                        |
@@ -436,9 +436,9 @@ The causal record is never compacted, because replay depends on it. The bulk can
 | **Full output**       | Every line the tool produced            | A pointer to the full output in bulk storage                     |
 | **Integrity**         | None needed                             | A hash of the full output, so any retrieved copy can be verified |
 
-: **Compacting a Tool Result**: Compaction moves only the part of a tool result that the model never received. The delivered content and everything recovery or replay reads stay in the log. {#tbl-vol3-payload-compaction-schema tbl-colwidths="[20,36,44]"}
+: **Offloading a Tool Result**: Offloading moves only the part of a tool result that the model never received. The delivered content and everything recovery or replay reads stay in the log. {#tbl-vol3-payload-compaction-schema tbl-colwidths="[20,36,44]"}
 
-The rule that makes this safe is to compact only below the truncation line. A policy that summarized or trimmed the delivered content would leave replay showing an engineer an input the model never received, which is worse than no log at all.
+The rule that makes this safe is to offload only below the truncation line. A policy that summarized or trimmed the delivered content would leave replay showing an engineer an input the model never received, which is worse than no log at all.
 
 ### Retention by use
 
@@ -493,7 +493,7 @@ A timeout says the reply did not arrive, not that the request did nothing. Re-se
 ::: {.fallacy-pitfall}
 **Pitfall:** *Keeping every byte of raw tool output in the live log forever.*
 
-Test runners and compilers can produce megabytes per turn, most of which the model never received. Keeping it all in the live log slows appends, checkpoints, and moves between workers, and inflates storage costs without improving replay. Moving the bulk below the truncation line to content-addressed storage, while keeping the delivered content and a hash in the log (@sec-vol3-persistence-compaction), preserves everything replay and audit need.
+Test runners and compilers can produce megabytes per turn, most of which the model never received. Keeping it all in the live log slows appends, checkpoints, and moves between workers, and inflates storage costs without improving replay. Offloading the bulk below the truncation line to content-addressed storage, while keeping the delivered content and a hash in the log (@sec-vol3-persistence-compaction), preserves everything replay and audit need.
 :::
 
 ## Summary {#sec-vol3-durable-execution-summary}
@@ -502,11 +502,11 @@ Test runners and compilers can produce megabytes per turn, most of which the mod
 The chapter asked what a runtime must record so that a trajectory can survive a crash, a pause, or a move without repeating an effect it already caused. The answer is an append-only trajectory log from which the trajectory record is computed, written so that every world-changing call is preceded by a durable intent. With that ordering, recovery finds each action not sent, settled, or in doubt, and settles the third kind before continuing. Checkpoints capture what the log cannot rebuild, chiefly the workspace, at consistent turn boundaries. Resume combines the two, rebuilds the context from recorded events, pays one cold prefill, and handles approvals, late results, and version drift explicitly. Replay runs the harness against the log with the model and tools stubbed, which turns the log into a debugger, a source of counterfactual branches, and a regression suite for the harness, and it explains why reruns diverge.
 
 ::: {.callout-takeaways title="If it is not in the log, recovery cannot trust it"}
-1. **The log is the trajectory; the record is a view**: The trajectory record is recomputed by folding an append-only log of model replies, decisions, intents, and results. Recovery reads the log and never calls the model, because the model's samples cannot be regenerated.
-2. **Write the intent before the effect**: A world-changing call may leave the host only after its intent is durable. Recovery then finds every action not sent, settled, or in doubt, and an in-doubt action is settled with an idempotency key or a probe, never re-sent on assumption.
-3. **Checkpoints exist for what the log cannot rebuild**: The log does not contain the files that tools wrote. A checkpoint snapshots the record and the workspace together at a turn boundary, and its cadence trades pause time against the turns a failure costs.
-4. **Resume is recovery plus rebuilding the context**: A resumed trajectory reuses recorded summaries and versions, pays one cold prefill of its context, and treats a changed model, prompt, or tool schema as explicit drift rather than silently continuing under it.
-5. **Replay, not rerun, reproduces a trajectory**: Stubbing the model and tools makes the log a time-travel debugger and a harness regression suite at the cost of harness compute. A rerun diverges through sampling, serving, model drift, harness inputs, and the environment.
+- **The log is the trajectory; the record is a view**: The trajectory record is recomputed by folding an append-only log of model replies, decisions, intents, and results. Recovery reads the log and never calls the model, because the model's samples cannot be regenerated.
+- **Write the intent before the effect**: A world-changing call may leave the host only after its intent is durable. Recovery then finds every action not sent, settled, or in doubt, and an in-doubt action is settled with an idempotency key or a probe, never re-sent on assumption.
+- **Checkpoints exist for what the log cannot rebuild**: The log does not contain the files that tools wrote. A checkpoint snapshots the record and the workspace together at a turn boundary, and its cadence trades pause time against the turns a failure costs.
+- **Resume is recovery plus rebuilding the context**: A resumed trajectory reuses recorded summaries and versions, pays one cold prefill of its context, and treats a changed model, prompt, or tool schema as explicit drift rather than silently continuing under it.
+- **Replay, not rerun, reproduces a trajectory**: Stubbing the model and tools makes the log a time-travel debugger and a harness regression suite at the cost of harness compute. A rerun diverges through sampling, serving, model drift, harness inputs, and the environment.
 :::
 
 Recovery in this chapter never calls the model. The trajectory record is recomputed from the log, write-ahead ordering places every effect after its durable intent, and checkpoints bound what a restart must redo. That is intent before effect (principle \ref{pri-vol3-intent-before-effect}) with its costs attached, one durable write per world-changing call and a checkpoint cadence set by the failure rate. It also marks where the mechanical half of invariant closure (principle \ref{pri-invariant-closure}) ends for durability. The runtime can guarantee that no effect goes unrecorded and that no settled effect is repeated, but it cannot decide from the log alone whether an in-doubt effect took place, and it cannot decide whether a recorded effect was the right one.

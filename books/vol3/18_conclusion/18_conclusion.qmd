@@ -103,10 +103,10 @@ Every principle in the volume acted somewhere in that trajectory, and @tbl-vol3-
 | **#**                                    | **Principle**                                          | **Part**     | **Exposure it closes**                    | **Invariant in brief**                                                                                   |
 |:-----------------------------------------|:-------------------------------------------------------|:-------------|:------------------------------------------|:---------------------------------------------------------------------------------------------------------|
 | \ref{pri-invariant-closure}              | Invariant closure                                      | Introduction | All three (the closure requirement)       | Constraints never rest on the model; bounds close mechanically below it, acceptance on evidence above it |
-| \ref{pri-vol3-memory-bandwidth-decoding} | Memory-bandwidth-bounded decoding                      | I            | None (prices the single call)             | Output tokens cost far more than input tokens, and latency grows with output length                      |
+| \ref{pri-vol3-memory-bandwidth-decoding} | Output-bound latency                                   | I            | None (prices the single call)             | An output token takes far longer than a prompt token, so call latency grows with output length           |
+| \ref{pri-02-quarantining-invariant}      | The quarantining invariant                             | I            | None (single call)                        | A payload whose status is not `COMPLETED` never reaches verification, training, or a tool                |
 | \ref{pri-vol3-test-time-scaling}         | Evidence-bounded deliberation                          | I            | None (bounded by evidence)                | Extra inference compute helps only when it acquires evidence that separates candidates                   |
 | \ref{pri-vol3-verification-asymmetry}    | The verification asymmetry                             | I            | Closure evidence                          | Stated checks are cheap and sound verification is not; the commit gate is a sealed deterministic check   |
-| \ref{pri-02-quarantining-invariant}      | The quarantining invariant                             | I            | None (single call)                        | A payload whose status is not `COMPLETED` never reaches verification, training, or a tool                |
 | \ref{pri-vol3-attention-working-set}     | Context is a selected working set                      | II           | State                                     | Each call sees a bounded selection, compacted without losing identifiers                                 |
 | \ref{pri-vol3-prefix-coherence}          | Attention state is derived from the token prefix       | II           | State                                     | Cached attention state is a function of the exact prefix, reusable only from the left and rebuildable    |
 | \ref{pri-vol3-retrieval-contract}        | Retrieval is a contract, not recall                    | II           | State                                     | Durable data re-enters only through a typed retrieval contract; similarity is not permission             |
@@ -117,16 +117,16 @@ Every principle in the volume acted somewhere in that trajectory, and @tbl-vol3-
 | \ref{pri-vol3-trajectory-encapsulation}  | Trajectory-level encapsulation                         | IV           | Horizon                                   | The trajectory, held in a runtime-owned trajectory record, is the unit of scheduling and budgeting       |
 | \ref{pri-vol3-preemptive-interrupts}     | Out-of-band preemption and progress watchdogs          | IV           | Horizon                                   | Control, budgets, and judgment of progress sit outside the model                                         |
 | \ref{pri-vol3-intent-before-effect}      | Intent before effect                                   | IV           | Horizon (state as durability)             | No effect leaves the runtime before the record that authorizes it is durable                             |
-| \ref{pri-vol3-reversibility-sagas}       | The pivot boundary and compensating Sagas              | IV           | Horizon (authority as ordering)           | Register compensations first, allow one irreversible pivot, and order it last                            |
+| \ref{pri-vol3-reversibility-sagas}       | The pivot boundary and compensating sagas              | IV           | Horizon (authority as ordering)           | Register compensations first, allow one irreversible pivot, and order it last                            |
 | \ref{pri-vol3-release-evidence}          | Causal and statistical release evidence                | IV           | Closure evidence for the whole system     | Releases are gated statistically on verified state changes joined by one causal trace                    |
 | \ref{pri-vol3-trajectory-post-training}  | Verified trajectory post-training                      | V            | None moved (changes the model)            | Weight change is the last rung, trained on externally verified trajectories                              |
 | \ref{pri-vol3-action-masked-loss}        | Observation loss masking                               | V            | None moved                                | Loss covers only tokens the policy emits; observations stay in context without loss                      |
 | \ref{pri-vol3-verifiable-rewards}        | Reinforcement learning against isolated verifiers      | V            | None moved                                | Training learns whatever the check rewards; isolate the verifier and hold out tests                      |
 | \ref{pri-vol3-coordination-tax}          | The coordination tax                                   | VI           | All three, multiplied                     | Splitting a task pays only through partitioning, attenuation, or independent exploration                 |
+| \ref{pri-vol3-tri-axial-evaluation}      | Tri-axial multi-agent evaluation frontier              | VI           | All three, multiplied                     | At equal budget, a topology must be no worse on quality, makespan, and cost per accepted task            |
 | \ref{pri-vol3-monotonic-delegation}      | Monotonic delegation                                   | VI           | Authority across agents                   | A child's authority, time, and budget are a subset of what the parent still holds                        |
 | \ref{pri-vol3-trajectory-goodput}        | Trajectory goodput and the accepted task               | VI           | Fleet cost                                | Only verified trajectories deliver value; a fleet minimizes cost per accepted task                       |
 | \ref{pri-vol3-heavy-tailed-scheduling}   | Trajectory-lifetime capacity and tail-aware scheduling | VI           | Horizon at fleet scale                    | Size capacity by trajectory concurrency and run below the utilization knee                               |
-| \ref{pri-15-tri-axial-evaluation}        | Tri-axial multi-agent evaluation frontier              | VI           | All three, multiplied                     | At equal budget, a topology must be no worse on quality, makespan, and cost per accepted task            |
 | \ref{pri-vol3-specification-boundary}    | The specification boundary                             | VII          | Outside the machine                       | The agent can realize a design but cannot author the contract that governs it                            |
 
 : **Principles by Exposure**: The twenty-six principles of this book in the order they were introduced, with the H·S·A exposure each one closes and its invariant in brief. {#tbl-vol3-principle-ledger tbl-colwidths="[4,24,9,21,42]"}
@@ -257,27 +257,96 @@ $$N^* = \frac{C_{\text{invest}}}{C_{\text{task, base}} - C_{\text{task, adapt}}}
 
 Below $N^*$, the team spends more building and maintaining the training pipeline than it recovers per task. The break-even also assumes the task contract stays stable long enough to amortize the investment, since a fine-tuned model locks in the tool definitions it was trained on.
 
+```{python}
+#| label: calc-vol3-conclusion-weight-breakeven
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WHEN WEIGHT ADAPTATION PAYS BACK (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The break-even notebook in @sec-vol3-conclusion-adaptation,
+# │          applying @eq-vol3-breakeven-volume.
+# │
+# │ Goal: Price a code-review task before and after fine-tuning a smaller
+# │       model to absorb a long prompt, and find the break-even volume and
+# │       the payback period at the expected monthly volume.
+# │ Show: Per-step and per-task cost for both models, the one-time
+# │       investment, N*, and the payback in months.
+# │ How:  Per-task cost = steps x (input tokens x input price + output tokens
+# │       x output price). N* = investment / per-task saving. The baseline
+# │       uses the frontier-model scenario prices the volume uses elsewhere
+# │       ($3 in, $15 out per million tokens). The adapted-model prices and
+# │       all other inputs are illustrative scenario values.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+class WeightBreakEven:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    base_in = 12_000  # scenario: input tokens per step, long prompt with demonstrations
+    base_out = 800  # scenario: output tokens per step
+    base_steps = 5  # scenario: steps per task before adaptation
+    base_p_in = 3.00  # scenario: frontier model, $ per million input tokens
+    base_p_out = 15.00  # scenario: frontier model, $ per million output tokens
+    adapt_in = 1_500  # scenario: input tokens per step once the prompt is absorbed
+    adapt_out = 800  # scenario: output tokens per step
+    adapt_steps = 4  # scenario: steps per task after adaptation
+    adapt_p_in = 1.00  # scenario: smaller adapted model, $ per million input tokens
+    adapt_p_out = 4.00  # scenario: smaller adapted model, $ per million output tokens
+    c_data = 4_000  # scenario: data collection and curation, $
+    c_train = 500  # scenario: training compute, $
+    c_eval = 8_000  # scenario: evaluation and review, $
+    volume_month = 20_000  # scenario: pull requests per month
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    base_step = (base_in * base_p_in + base_out * base_p_out) / 1e6
+    base_task = base_steps * base_step
+    adapt_step = (adapt_in * adapt_p_in + adapt_out * adapt_p_out) / 1e6
+    adapt_task = adapt_steps * adapt_step
+    c_invest = c_data + c_train + c_eval
+    delta_task = base_task - adapt_task
+    n_star = c_invest / delta_task
+    payback_months = n_star / volume_month
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(base_steps == 5 and adapt_steps == 4, "Prose spells out five baseline steps and four adapted steps")
+    check(base_task > 10 * adapt_task, "The adapted model should cut per-task cost by more than 10x")
+    check(2.5 < payback_months < 3.0, f"Payback should land just inside a quarter, got {payback_months:.2f} months")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    base_in_str = fmt_int(base_in)
+    base_out_str = fmt_int(base_out)
+    base_p_in_str = fmt_usd(base_p_in, precision=0)
+    base_p_out_str = fmt_usd(base_p_out, precision=0)
+    adapt_in_str = fmt_int(adapt_in)
+    adapt_out_str = fmt_int(adapt_out)
+    adapt_p_in_str = fmt_usd(adapt_p_in, precision=0)
+    adapt_p_out_str = fmt_usd(adapt_p_out, precision=0)
+    c_data_str = fmt_usd(c_data)
+    c_train_str = fmt_usd(c_train)
+    c_eval_str = fmt_usd(c_eval)
+    c_invest_str = fmt_usd(c_invest)
+    volume_month_str = fmt_int(volume_month)
+    base_step_str = fmt_usd(base_step, precision=3)
+    base_task_str = fmt_usd(base_task, precision=2)
+    adapt_step_str = fmt_usd(adapt_step, precision=4)
+    adapt_task_str = fmt_usd(adapt_task, precision=3)
+    delta_task_str = fmt_usd(delta_task, precision=2)
+    n_star_str = fmt_int(round(n_star, -3))
+    payback_months_str = fmt(payback_months, precision=1)
+```
+
 ::: {#nbk-18-break-even-weight-adaptation .callout-notebook title="When fine-tuning pays"}
 **Problem**: A code-review agent handles a steady stream of pull requests. After context and tool fixes, it still needs a long system prompt with tool definitions and worked demonstrations. A team proposes fine-tuning a smaller model to absorb that prompt. At the volume the team expects, does the investment pay back within a quarter?
 
-**Given** (illustrative inputs):
+**Variables** (illustrative scenario values):
 
-- Baseline: 12,000 input tokens and 800 output tokens per step, 5 steps per task, at \$2.50 per million input tokens and \$10.00 per million output tokens.
-- Adapted model: 1,500 input tokens and 800 output tokens per step, 4 steps per task, at \$1.00 per million input tokens and \$4.00 per million output tokens.
-- One-time investment: \$4,000 for data, \$500 for training compute, \$8,000 for evaluation and review, so $C_{\text{invest}} = \$12{,}500$.
-- Expected volume: 20,000 pull requests per month.
+- Baseline: `{python} WeightBreakEven.base_in_str` input tokens and `{python} WeightBreakEven.base_out_str` output tokens per step, five steps per task, at the frontier-model scenario prices of earlier chapters, `{python} WeightBreakEven.base_p_in_str` per million input tokens and `{python} WeightBreakEven.base_p_out_str` per million output tokens.
+- Adapted model: `{python} WeightBreakEven.adapt_in_str` input tokens and `{python} WeightBreakEven.adapt_out_str` output tokens per step, four steps per task, at `{python} WeightBreakEven.adapt_p_in_str` per million input tokens and `{python} WeightBreakEven.adapt_p_out_str` per million output tokens.
+- One-time investment: `{python} WeightBreakEven.c_data_str` for data, `{python} WeightBreakEven.c_train_str` for training compute, and `{python} WeightBreakEven.c_eval_str` for evaluation and review, so $C_{\text{invest}}$ is `{python} WeightBreakEven.c_invest_str`.
+- Expected volume: `{python} WeightBreakEven.volume_month_str` pull requests per month.
 
-**Per-task cost**:
+**Math**: A baseline step costs `{python} WeightBreakEven.base_step_str` in input and output together, so $C_{\text{task, base}}$ is `{python} WeightBreakEven.base_task_str`. An adapted step costs `{python} WeightBreakEven.adapt_step_str`, so $C_{\text{task, adapt}}$ is `{python} WeightBreakEven.adapt_task_str`. The saving $\Delta C_{\text{task}}$ is `{python} WeightBreakEven.delta_task_str` per task, and @eq-vol3-breakeven-volume puts the break-even at about `{python} WeightBreakEven.n_star_str` tasks. At `{python} WeightBreakEven.volume_month_str` tasks per month, the investment pays back in about `{python} WeightBreakEven.payback_months_str` months, just inside a quarter.
 
-$$C_{\text{task, base}} = 5 \times \left(12{,}000 \times \$2.50 \times 10^{-6} + 800 \times \$10.00 \times 10^{-6}\right) = 5 \times \$0.038 = \$0.190$$
-
-$$C_{\text{task, adapt}} = 4 \times \left(1{,}500 \times \$1.00 \times 10^{-6} + 800 \times \$4.00 \times 10^{-6}\right) = 4 \times \$0.0047 = \$0.0188$$
-
-**Break-even**:
-
-$$N^* = \frac{\$12{,}500}{\$0.190 - \$0.0188} = \frac{\$12{,}500}{\$0.1712} \approx 73{,}000 \text{ tasks}$$
-
-At 20,000 tasks per month, the investment pays back in about 3.7 months, just outside a quarter. The answer turns on inputs the team controls. Doubling the volume halves the payback, while a change to the tool definitions that forces retraining resets it.
+**Systems insight**: The margin is thin, and the answer turns on inputs the team controls. Doubling the volume halves the payback, while a change to the tool definitions that forces retraining resets it, so the stability of the task contract matters as much as the per-task saving.
 :::
 
 The third decision is knowing what a climb cannot buy. However thoroughly a model is fine-tuned or optimized, it still samples from a distribution with nonzero support over every continuation at any finite temperature $\tau$:
@@ -363,7 +432,52 @@ Benchmarks freeze the environment, and production does not. An API schema valid 
 
 ### Credit over long horizons
 
-When a long trajectory fails at its final check, finding the step that caused the failure is an inverse problem. The log records one path, but the question of which different action at which step would have succeeded ranges over every branch the agent did not take. With an illustrative four candidate actions per step and a failure detected only at the end of a fifty-step task, that space holds $4^{50} \approx 10^{30}$ paths, far beyond any replay budget. Intermediate checks change the arithmetic. A check every five steps confines the failure to one window of $4^{5} = 1{,}024$ alternatives, which at about 1.2 seconds per replayed check is roughly twenty minutes of search. Replay and counterfactual branching (@sec-vol3-persistence-replay, @sec-vol3-evaluation-postmortems) make that localized search practical after the fact, provided the steps inside the window touched only state the runtime can restore. Assigning credit per turn during multi-turn reinforcement learning (@sec-vol3-rlvr) is harder, because the signal must be available at training scale rather than one postmortem at a time.
+```{python}
+#| label: calc-vol3-conclusion-credit-search
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SEARCH SPACE FOR CREDIT OVER A LONG HORIZON (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The credit-over-long-horizons paragraph in the open problems.
+# │
+# │ Goal: Contrast the counterfactual search space of a failure detected only
+# │       at the end of a long task with one confined to a checked window.
+# │ Show: Paths over the full horizon, paths inside one window, and the
+# │       replay time to search that window.
+# │ How:  Paths = branching factor ^ steps. Window search time = window paths
+# │       x seconds per replayed check. All inputs are illustrative scenario
+# │       values, not measurements.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.fmt import fmt_math
+
+class CreditSearch:
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    branch = 4  # scenario: candidate actions per step
+    horizon = 50  # scenario: steps in the task
+    window = 5  # scenario: steps between intermediate checks
+    t_check_s = 1.2  # scenario: seconds per replayed check
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    full_paths = branch**horizon
+    full_exp = round(math.log10(full_paths))
+    window_paths = branch**window
+    search_min = window_paths * t_check_s / 60
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check((branch, horizon, window) == (4, 50, 5), "Prose spells out four actions, fifty steps, and a five-step window")
+    check(full_exp == 30, f"Full search space should be about 10^30 paths, got 10^{full_exp}")
+    check(18 < search_min < 22, f"Window search should take about twenty minutes, got {search_min:.1f}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    full_paths_math = fmt_math(rf"{branch}^{{{horizon}}} \approx 10^{{{full_exp}}}")
+    window_paths_fmt = fmt_int(window_paths)
+    window_paths_math = fmt_math(rf"{branch}^{{{window}}} = {window_paths_fmt}")
+    t_check_str = fmt_qty(t_check_s * second, second, precision=1)
+```
+
+When a long trajectory fails at its final check, finding the step that caused the failure is an inverse problem. The log records one path, but the question of which different action at which step would have succeeded ranges over every branch the agent did not take. With an illustrative four candidate actions per step and a failure detected only at the end of a fifty-step task, that space holds `{python} CreditSearch.full_paths_math` paths, far beyond any replay budget. Intermediate checks change the arithmetic. A check every five steps confines the failure to one window of `{python} CreditSearch.window_paths_math` alternatives, which at about `{python} CreditSearch.t_check_str` per replayed check is roughly twenty minutes of search. Replay and counterfactual branching (@sec-vol3-persistence-replay, @sec-vol3-evaluation-postmortems) make that localized search practical after the fact, provided the steps inside the window touched only state the runtime can restore. Assigning credit per turn during multi-turn reinforcement learning (@sec-vol3-rlvr) is harder, because the signal must be available at training scale rather than one postmortem at a time.
 
 ### State that outlives the task
 

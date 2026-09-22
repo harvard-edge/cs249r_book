@@ -313,7 +313,7 @@ The key must identify the logical call, not the attempt, so the runtime derives 
 $$k_{\text{idem}} = \mathcal{H}\big(\text{trajectory\_id} \,\|\, \text{turn} \,\|\, \text{call\_id} \,\|\, \text{tool} \,\|\, \text{canonical\_args}\big)$$
 Determinism is what lets the key survive a crash of the runtime itself. A runtime that recovers a trajectory and re-issues a call it had already sent regenerates the same key, and the endpoint recognizes the repeat. Recording the intent to call before sending it, so recovery knows the call may have happened, is the job of the durable trajectory log (@sec-vol3-persistence-wal).
 
-::: {#fig-vol3-idempotency-flow fig-env="figure" fig-pos="htb" fig-cap="**Idempotency Key Execution Flow**: The runtime derives a deterministic key from the session, turn, tool, and canonical arguments (adding the call identifier when one turn can contain identical calls) and sends it with the call. The endpoint's deduplication gateway returns the stored result for a completed key (Branch A), refuses or delays a key still in flight (Branch B), and for an unseen key takes a lease, executes the mutation once, and records the result under the key (Branch C)." fig-alt="Three-column flow diagram. The left column, runtime (client), shows a mutating tool invocation, an idempotency key derivation using SHA-256 over session ID, turn, tool name, and canonical arguments, and an outbound request carrying an Idempotency-Key header. The middle column, dedup gateway, shows an atomic key lookup and three branches: completed, returning the cached result; in flight, returning a conflict; and not found, acquiring a lease. The right column, execution sandbox, shows a write-ahead log entry, a single mutation, and an atomic state transition that marks the key completed and stores the result."}
+::: {#fig-vol3-idempotency-flow fig-env="figure" fig-pos="htb" fig-cap="**Idempotency Key Execution Flow**: The runtime derives a deterministic key from the trajectory, turn, call identifier, tool, and canonical arguments and sends it with the call. The endpoint's deduplication gateway returns the stored result for a completed key (Branch A), refuses or delays a key still in flight (Branch B), and for an unseen key takes an in-flight lock with an expiry, executes the mutation once, and records the result under the key (Branch C)." fig-alt="Three-column flow diagram. The left column, runtime (client), shows a mutating tool invocation, an idempotency key derivation using SHA-256 over trajectory ID, turn, call ID, tool name, and canonical arguments, and an outbound request carrying an Idempotency-Key header. The middle column, dedup gateway, shows an atomic key lookup and three branches: completed, returning the cached result; in flight, returning a conflict; and not found, acquiring an in-flight lock. The right column, execution sandbox, shows a write-ahead log entry, a single mutation, and an atomic state transition that marks the key completed and stores the result."}
 ![](images/svg/idempotency_nonce_execution_flow.svg)
 :::
 
@@ -336,22 +336,22 @@ def dispatch_with_idempotency(client, call) -> dict:
     raise SettlementError(f"{call.tool} unsettled after {client.max_retries} attempts")
 ```
 
-The endpoint's in-flight lease needs one more constraint. If the lease expires while the first execution is still running, a retry can start a second execution in parallel. The lease duration $T_{\text{lease}}$ must therefore exceed the client's timeout, the worst-case execution time $\tau_{\text{proc\_max}}$, and the clock skew $\delta_{\text{drift}}$ between the two machines:
-$$T_{\text{lease}} > \tau_{\text{timeout}} + \delta_{\text{drift}} + \tau_{\text{proc\_max}}$$
+The endpoint's in-flight lock needs one more constraint. The lock carries an expiry so that a crashed execution cannot hold its key forever, but if the lock expires while the first execution is still running, a retry can start a second execution in parallel. The lock's expiry $T_{\text{lock}}$ must therefore exceed the client's timeout, the worst-case execution time $\tau_{\text{proc\_max}}$, and the clock skew $\delta_{\text{drift}}$ between the two machines:
+$$T_{\text{lock}} > \tau_{\text{timeout}} + \delta_{\text{drift}} + \tau_{\text{proc\_max}}$$
 
 ```{python}
 #| label: calc-vol3-tool-calling-settlement
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ DUPLICATE EFFECTS UNDER BLIND RETRY, AND THE MINIMUM SAFE LEASE (LEGO)
+# │ DUPLICATE EFFECTS UNDER BLIND RETRY, AND THE MINIMUM SAFE LOCK EXPIRY (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: The settlement worked example in @sec-vol3-tool-calling-idempotency.
 # │
 # │ Goal: Show how many duplicate side effects an open-loop retry policy
-# │       produces at fleet volume, and size the endpoint's in-flight lease.
-# │ Show: Daily timeouts, daily duplicates, and the minimum lease duration.
+# │       produces at fleet volume, and size the endpoint's in-flight lock expiry.
+# │ Show: Daily timeouts, daily duplicates, and the minimum lock expiry.
 # │ How:  Independent loss on request and reply; duplicates arise only when
-# │       the reply alone is lost; lease bound from the displayed inequality.
+# │       the reply alone is lost; expiry bound from the displayed inequality.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
@@ -373,11 +373,11 @@ class SettlementBudget:
     timeouts_day = dispatches_day * p_timeout
     duplicates_day = dispatches_day * p_reply_lost
     exec_max_ms = exec_mean_ms + exec_sigmas * exec_sd_ms
-    lease_min_ms = timeout_ms + clock_skew_ms + exec_max_ms
+    lock_min_ms = timeout_ms + clock_skew_ms + exec_max_ms
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(duplicates_day < timeouts_day, "Only the lost-reply share of timeouts duplicates an effect")
-    check(lease_min_ms > timeout_ms, "A lease must outlast the timeout it protects")
+    check(lock_min_ms > timeout_ms, "A lock expiry must outlast the timeout it protects")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     workers_str = fmt_int(workers)
@@ -394,17 +394,17 @@ class SettlementBudget:
     timeouts_day_str = fmt_int(timeouts_day)
     duplicates_day_str = fmt_int(duplicates_day)
     exec_max_ms_str = fmt_latency(Q_(exec_max_ms, 'ms'), unit='ms', precision=0, commas=True)
-    lease_min_ms_str = fmt_latency(Q_(lease_min_ms, 'ms'), unit='ms', precision=0, commas=True)
+    lock_min_ms_str = fmt_latency(Q_(lock_min_ms, 'ms'), unit='ms', precision=0, commas=True)
 ```
 
-::: {#nbk-07-settlement-budget .callout-notebook title="Duplicate effects under blind retry, and the lease that prevents them"}
-**Problem**: A fleet of `{python} SettlementBudget.workers_str` agent workers each sends `{python} SettlementBudget.dispatches_per_worker_day_str` mutating calls a day to an infrastructure provisioning API. Requests and replies are each lost independently with probability `{python} SettlementBudget.p_loss_str`, and the client timeout is `{python} SettlementBudget.timeout_ms_str`. Server execution takes `{python} SettlementBudget.exec_mean_ms_str` on average with a standard deviation of `{python} SettlementBudget.exec_sd_ms_str`, so execution time alone almost never causes a timeout, and clocks may differ by `{python} SettlementBudget.clock_skew_ms_str`. How many duplicate effects does a blind retry policy produce each day, and how long must the endpoint's in-flight lease be?
+::: {#nbk-07-settlement-budget .callout-notebook title="Duplicate effects under blind retry, and the lock that prevents them"}
+**Problem**: A fleet of `{python} SettlementBudget.workers_str` agent workers each sends `{python} SettlementBudget.dispatches_per_worker_day_str` mutating calls a day to an infrastructure provisioning API. Requests and replies are each lost independently with probability `{python} SettlementBudget.p_loss_str`, and the client timeout is `{python} SettlementBudget.timeout_ms_str`. Server execution takes `{python} SettlementBudget.exec_mean_ms_str` on average with a standard deviation of `{python} SettlementBudget.exec_sd_ms_str`, so execution time alone almost never causes a timeout, and clocks may differ by `{python} SettlementBudget.clock_skew_ms_str`. How many duplicate effects does a blind retry policy produce each day, and how long must the endpoint's in-flight lock last before it expires?
 
 **Timeouts.** A call times out when either message is lost, with probability $1 - (1 - p)^2 =$ `{python} SettlementBudget.p_timeout_str`. Across `{python} SettlementBudget.dispatches_day_str` calls a day, that is `{python} SettlementBudget.timeouts_day_str` timeouts.
 
 **Duplicates.** Only a lost reply, $\sigma_{\text{sever}}$, means the effect already happened. Its probability is $(1 - p)\,p =$ `{python} SettlementBudget.p_reply_lost_str`, so a policy that resends every timed-out call duplicates `{python} SettlementBudget.duplicates_day_str` effects a day. Each is a double charge, a second instance, or a repeated restart.
 
-**Lease.** Bounding execution at `{python} SettlementBudget.exec_sigmas_str` standard deviations gives $\tau_{\text{proc\_max}} =$ `{python} SettlementBudget.exec_max_ms_str`, so the lease must exceed `{python} SettlementBudget.lease_min_ms_str`.
+**Lock expiry.** Bounding execution at `{python} SettlementBudget.exec_sigmas_str` standard deviations gives $\tau_{\text{proc\_max}} =$ `{python} SettlementBudget.exec_max_ms_str`, so the lock must not expire before `{python} SettlementBudget.lock_min_ms_str`.
 
 **Takeaway**: Duplicates scale with call volume, not with how rare a lost reply seems on any one call. A loss rate of `{python} SettlementBudget.p_loss_str` is invisible in testing and produces thousands of duplicate effects a day in production, and keys turn each of them into a cache hit.
 :::
@@ -454,7 +454,7 @@ from mlsysim import *
 class ObservationBudget:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     raw_bytes = 24e6  # scenario assumption: stdout of a verbose regression run
-    bytes_per_token = 4  # scenario assumption: typical tokenizer density on log text
+    bytes_per_token = 3  # scenario assumption: log text (paths, hashes, escapes) tokenizes denser than prose's ~4
     window_tokens = 128_000  # scenario assumption: model context window
     shaped_tokens = 4_000  # runtime observation budget for one tool result
     remaining_turns = 30  # scenario assumption: later model calls that re-read the observation
@@ -492,7 +492,7 @@ class ObservationBudget:
 ```
 
 ::: {#nbk-07-observation-budget .callout-notebook title="The cost of carrying one observation through a trajectory"}
-**Problem**: A test run emits `{python} ObservationBudget.raw_mb_str` MB of output. At about `{python} ObservationBudget.bytes_per_token_str` bytes per token, the model has a `{python} ObservationBudget.window_tokens_str`-token context window, and the trajectory will make `{python} ObservationBudget.remaining_turns_str` more model calls after this one. Uncached input costs `{python} ObservationBudget.input_price_str` per million tokens, and cached input costs `{python} ObservationBudget.cached_fraction_str` of that. What does passing the output back cost, raw and shaped to a `{python} ObservationBudget.shaped_tokens_str`-token budget?
+**Problem**: A test run emits `{python} ObservationBudget.raw_mb_str` MB of output. Log text full of paths, hashes, and escapes tokenizes more densely than prose (@sec-vol3-foundation-model-tokenization), about `{python} ObservationBudget.bytes_per_token_str` bytes per token rather than four. The model has a `{python} ObservationBudget.window_tokens_str`-token context window, and the trajectory will make `{python} ObservationBudget.remaining_turns_str` more model calls after this one. Uncached input costs `{python} ObservationBudget.input_price_str` per million tokens, and cached input costs `{python} ObservationBudget.cached_fraction_str` of that. What does passing the output back cost, raw and shaped to a `{python} ObservationBudget.shaped_tokens_str`-token budget?
 
 **Raw.** The log is about `{python} ObservationBudget.raw_tokens_str` tokens, `{python} ObservationBudget.raw_windows_mult_str` the whole window. It cannot be passed back at all. A runtime that simply fills the window with its first part leaves no room for the task and carries a full window through every later call, about `{python} ObservationBudget.window_fill_cost_str` of cached input over the remaining calls, while the failing test at the end of the log never reaches the model.
 
@@ -551,7 +551,7 @@ The runtime stores nothing between pages, so abandonment costs nothing, at the p
 | **Consistency**          | Snapshot of the original query              | Read-committed; later pages may reflect newer data |
 | **Abandoned traversals** | Hold resources until a reaper collects them | Cost nothing                                       |
 | **Context overhead**     | A short identifier                          | A longer signed token                              |
-| **Tampering and replay** | Controlled by revoking the server lease     | Prevented by the signature and an expiry time      |
+| **Tampering and replay** | Controlled by closing the server cursor     | Prevented by the signature and an expiry time      |
 
 : **Stateful Server-Side versus Stateless Signed Cursors**: Trade-offs between the two places a pagination cursor's state can live, for callers that abandon traversals often. {#tbl-vol3-cursor-architecture-comparison}
 
@@ -682,9 +682,14 @@ class PollingBudget:
     input_price_per_mtok = 3.00  # scenario assumption: $ per million uncached input tokens
     cached_fraction_price = 0.10  # scenario assumption: cached input billed at this fraction
     output_price_per_mtok = 15.00  # scenario assumption: $ per million output tokens
-    decode_s_per_token = 0.025  # scenario assumption: decode time per output token
+    model = Models.Language.Llama3_70B  # same serving scenario as @sec-vol3-foundation-model-cost
+    accel = Hardware.Cloud.H100
+    weight_bytes = 1  # 8-bit weights, bytes per parameter (same as the call-price notebook)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    params = model.parameters.to(ureg.count).magnitude
+    bw = accel.memory.bandwidth.to(ureg.byte / ureg.second).magnitude
+    decode_s_per_token = params * weight_bytes / bw  # single-stream decode floor, seconds per token
     polls = job_s // poll_interval_s
     tokens_added_per_poll = poll_call_tokens + poll_ack_tokens + poll_result_tokens
     decode_tokens = polls * (poll_call_tokens + poll_ack_tokens)
@@ -716,10 +721,10 @@ class PollingBudget:
     input_price_str = fmt_usd(input_price_per_mtok)
     cached_fraction_str = fmt_percent(cached_fraction_price, style="prose")
     output_price_str = fmt_usd(output_price_per_mtok)
-    decode_ms_per_token_str = fmt_latency(Q_(decode_s_per_token * 1000, 'ms'), unit='ms', precision=0, commas=True)
+    decode_ms_per_token_str = fmt_latency(Q_(decode_s_per_token * 1000, 'ms'), unit='ms', precision=1, commas=True)
     polls_str = fmt_int(polls)
     decode_tokens_str = fmt_int(decode_tokens)
-    decode_s_str = fmt_time(Q_(decode_s, 's'), unit='s', precision=0)
+    decode_s_str = fmt_time(Q_(round(decode_s), 's'), unit='s', precision=0)  # rounded: prose says "about"
     uncached_per_poll_str = fmt_int(uncached_per_poll)
     prefill_tokens_str = fmt_int(prefill_tokens)
     cached_tokens_str = fmt_int(cached_tokens)
@@ -730,7 +735,7 @@ class PollingBudget:
 ```
 
 ::: {#nbk-07-token-cost-and-inference-overhead .callout-notebook title="Polling versus event-driven resumption"}
-**Problem**: An agent starts an integration suite that runs for `{python} PollingBudget.job_s_str` with `{python} PollingBudget.context_tokens_str` tokens of context. Under polling, the model checks every `{python} PollingBudget.poll_interval_s_str`, emitting a `{python} PollingBudget.poll_call_tokens_str`-token status call and a `{python} PollingBudget.poll_ack_tokens_str`-token acknowledgment around a `{python} PollingBudget.poll_result_tokens_str`-token status result. Prior context hits the prefix cache `{python} PollingBudget.cache_hit_str` of the time. Input costs `{python} PollingBudget.input_price_str` and output `{python} PollingBudget.output_price_str` per million tokens, cached input is billed at `{python} PollingBudget.cached_fraction_str` of the input price, and decoding takes `{python} PollingBudget.decode_ms_per_token_str` per token. How do polling and a single event-driven resumption compare?
+**Problem**: An agent starts an integration suite that runs for `{python} PollingBudget.job_s_str` with `{python} PollingBudget.context_tokens_str` tokens of context. Under polling, the model checks every `{python} PollingBudget.poll_interval_s_str`, emitting a `{python} PollingBudget.poll_call_tokens_str`-token status call and a `{python} PollingBudget.poll_ack_tokens_str`-token acknowledgment around a `{python} PollingBudget.poll_result_tokens_str`-token status result. Prior context hits the prefix cache `{python} PollingBudget.cache_hit_str` of the time. Input costs `{python} PollingBudget.input_price_str` and output `{python} PollingBudget.output_price_str` per million tokens, cached input is billed at `{python} PollingBudget.cached_fraction_str` of the input price, and decoding runs at the single-stream floor of @sec-vol3-foundation-model-cost, about `{python} PollingBudget.decode_ms_per_token_str` per token. How do polling and a single event-driven resumption compare?
 
 **Polling.** The job spans `{python} PollingBudget.polls_str` polls. They decode `{python} PollingBudget.decode_tokens_str` tokens, about `{python} PollingBudget.decode_s_str` of generation spent on status checks. Each poll re-reads the growing context, about `{python} PollingBudget.uncached_per_poll_str` uncached input tokens per poll, or `{python} PollingBudget.prefill_tokens_str` in all, plus `{python} PollingBudget.cached_tokens_str` cached tokens at the discounted rate. The total is `{python} PollingBudget.cost_polling_str`.
 
@@ -749,25 +754,9 @@ Running processes on the model's behalf gives the runtime a small set of chores 
 
 **Cap the bytes.** Draining must not become unbounded memory. The runtime counts total bytes read, and when a process exceeds a hard ceiling far above the observation budget, as a runaway loop printing forever will, it terminates the process and reports the ceiling in the observation.
 
-**Kill the process group.** Tools usually run through wrappers such as `bash -c "make -j8 && pytest"`. Terminating only the wrapper leaves its children running, holding locks and cores after the job is reported dead. The runtime starts every job in its own process group and signals the whole group, first with a request to exit and then, after a grace period, with a signal that cannot be ignored, as @lst-vol3-process-group-teardown shows.
+**Kill the process group.** Tools usually run through wrappers such as `bash -c "make -j8 && pytest"`. Terminating only the wrapper leaves its children running, holding locks and cores after the job is reported dead. The runtime starts every job in its own process group and signals the whole group, first with a request to exit and then, after a bounded grace period, with a signal that cannot be ignored, so no child outlives its job.
 
 **Record the exit.** The runtime records how the job ended, an exit status or a terminating signal, its duration, and whether it was cancelled or timed out, as fields of the observation and of the trajectory record, so neither the model nor a later reviewer has to infer them from text.
-
-::: {#lst-vol3-process-group-teardown lst-cap="**Process Group Teardown**: Signal the whole group, wait a bounded grace period, then escalate so no child outlives its job."}
-```python
-def terminate_job_group(pgid: int, grace_period_sec: float = 3.0) -> None:
-    """Terminate every process in a job's group, escalating if needed."""
-    os.killpg(pgid, signal.SIGTERM)
-    deadline = time.monotonic() + grace_period_sec
-    while time.monotonic() < deadline:
-        try:
-            pid, _ = os.waitpid(-pgid, os.WNOHANG)
-        except ChildProcessError:
-            return  # every process in the group has exited
-        time.sleep(0.05)
-    os.killpg(pgid, signal.SIGKILL)
-```
-:::
 
 Two further tools complete the job interface. An `inspect_job` call returns a bounded, shaped slice of the job's recent output, so the model or an operator can check progress without waiting for completion. A `send_input` call covers the process that stops to ask a question, such as a migration prompting `Apply changes [y/N]?`. The runtime marks the job as waiting for input, the model answers through the call, and the runtime validates the answer against the descriptor, stripping control characters, before writing it to the process. An interactive prompt that asks to confirm an irreversible step is an $A_3$ decision like any other and goes to approval, not to the model.
 
@@ -883,7 +872,7 @@ A tool call is where an agent's proposal first becomes an effect, and the model 
 * **The catalog is a design object, not a list**: Few deep, orthogonal tools usually beat many shallow ones on selection error and model calls per task, while code as action trades per-call mediation for expressiveness and must be run inside a sandbox with its tool calls still mediated.
 :::
 
-This chapter built the first two Part III principles into the tool-call loop. The typed action contract (principle \ref{pri-vol3-strict-action-abi}) became a host-owned descriptor, a closed schema with structured errors, and a per-call grant that no server advertisement can widen. Settlement before retry (principle \ref{pri-vol3-exactly-once-settlement}) became deterministic idempotency keys, an in-flight lease sized to outlast the timeout, and reconciliation probes for endpoints without keys. Both apply the invariant closure principle (\ref{pri-invariant-closure}) at the tool boundary, where model-side measures such as clear descriptions lower the probability of a bad call and only the runtime's checks prevent its effect, and where an exit status of zero shows that a process ended, not that the task succeeded.
+This chapter built the first two Part III principles into the tool-call loop. The typed action contract (principle \ref{pri-vol3-strict-action-abi}) became a host-owned descriptor, a closed schema with structured errors, and a per-call grant that no server advertisement can widen. Settlement before retry (principle \ref{pri-vol3-exactly-once-settlement}) became deterministic idempotency keys, an in-flight lock whose expiry outlasts the timeout, and reconciliation probes for endpoints without keys. Both apply the invariant closure principle (\ref{pri-invariant-closure}) at the tool boundary, where model-side measures such as clear descriptions lower the probability of a bad call and only the runtime's checks prevent its effect, and where an exit status of zero shows that a process ended, not that the task succeeded.
 
 ::: {.callout-chapter-connection title="From authorized calls to contained code"}
 What does a granted call reach once its code starts running? The grant decided that `run_tests` may run in this workspace. It did not decide what the test suite's own code, a shell command, or a model-written program can touch once it executes, and it cannot stop a poisoned observation from turning a permitted read into a permitted but harmful send. @Sec-vol3-sandboxes bounds that reach below the model. It starts from the threat model for prompt injection, then builds capabilities and brokered credentials, an isolation envelope sized to the code and the task's authority, a resettable workspace, and egress and dataflow controls, priced in the start-up latency and memory each costs.

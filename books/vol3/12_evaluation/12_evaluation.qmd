@@ -264,11 +264,7 @@ Two practices reduce the required size. Running both candidates on the same task
 
 Repeated runs of the same task answer a different question from more tasks. They say how consistently the agent solves a task it can solve. Two metrics summarize $n$ runs per task, of which $c$ succeed, and they answer opposite questions.
 
-The first is pass@$k$, the probability that at least one of $k$ runs succeeds. @Sec-vol3-test-time-compute-candidate-diversity used it as the ceiling on what selection among $k$ candidates can deliver. Chen et al. [-@chen2021evaluating] give the unbiased estimator from $n \ge k$ runs:
-
-$$\text{pass}@k = \mathbb{E}_{\text{tasks}} \left[ 1 - \frac{\binom{n-c}{k}}{\binom{n}{k}} \right]$$ {#eq-pass-at-k}
-
-Pass@$k$, as estimated by @eq-pass-at-k, measures potential. It is achievable only if something picks the successful run, and in production that something is a verifier the runtime can run before committing. With a sealed test suite in the loop, pass@$k$ is a fair target. Without one, users receive pass@1.
+The first is pass@$k$, the probability that at least one of $k$ runs succeeds. @Sec-vol3-test-time-compute-pass-at-k gives its unbiased estimator from $n \ge k$ runs, the first row of @tbl-vol3-statistical-metrics below, and uses it as the ceiling on what selection among $k$ candidates can deliver. As a reported metric, pass@$k$ measures potential. It is achievable only if something picks the successful run, and in production that something is a verifier the runtime can run before committing. With a sealed test suite in the loop, pass@$k$ is a fair target. Without one, users receive pass@1.
 
 The second is pass$^k$, the probability that all $k$ runs succeed:
 
@@ -342,6 +338,8 @@ where $\text{trace\_id}$ identifies the trajectory, $\text{parent\_id}$ links th
 
 Read as a whole, the waterfall answers the deadline question the logs could not. Model calls take 10.37 of the 14.85 seconds, about 70 percent, and the sandboxed tool call takes 4.20 seconds, about 28 percent. By the duration accounting of @sec-vol3-intro-duration-accounting, even infinitely fast model calls would cut the trajectory by at most a factor of about 3.3, because the tool time would remain. The subagent call appears as one child span of the root, with its own model call beneath it. How traces extend across teams of agents is the concern of @sec-vol3-multi-agent.
 
+The same reading applies to any trace. Spans that run one after another add, spans that run in parallel contribute only their longest member, and the sum along the longest chain is the critical path, so only spans on that chain can move the deadline. The trace supplies the measured durations, and @sec-vol3-agent-economics-criticalpath decides which span on the path to shorten and what shortening it is worth.
+
 ### A span schema for agents
 
 A trace is useful across teams only if every component names the same fact the same way. If one component records prompt length as `input_tokens` and another as `prompt_size`, no query can total token use across a trajectory. @Tbl-vol3-opentelemetry-span-taxonomy gives the span kinds an agent runtime emits. Attribute names in the `gen_ai.*` namespace follow the OpenTelemetry semantic conventions for generative AI, which are still evolving. The remaining names are this book's schema for facts those conventions do not yet cover.
@@ -377,24 +375,6 @@ def run_traced_tool(cmd, tracer, parent_ctx):
 ```
 
 Instrumented programs inside the sandbox read `TRACEPARENT` and attach their own spans as children, so a slow test run or a failing build appears in the same tree as the model call that requested it. Any component that drops the context splits the trajectory into disconnected traces, and the attribution methods later in this chapter lose the causal link they need.
-
-### Reading the critical path
-
-A trace turns a latency complaint into arithmetic. Spans that run one after another add, spans that run in parallel contribute only their longest member, and the sum along the longest chain is the critical path. The economics of shortening that path belong to @sec-vol3-agent-economics-criticalpath. Here the trace supplies the measured durations.
-
-::: {#nbk-16-critical-path-latency-and-bottleneck .callout-notebook title="Which span to optimize"}
-
-**Problem**: A coding agent's trace records five steps with a total wall-clock time of $T_{\text{wall}} = 18.25\text{ s}$: retrieval ($t_1 = 0.08\text{ s}$), a model call that writes a patch ($t_2 = 3.39\text{ s}$), a sandboxed test run ($t_3 = 6.20\text{ s}$), two checks run in parallel, a linter ($t_{4a} = 2.10\text{ s}$) and a reviewer model call ($t_{4b} = 3.85\text{ s}$), and a final model call ($t_5 = 3.74\text{ s}$). Which span should the team shorten first?
-
-**Math**: The parallel checks contribute their maximum, so the critical path is
-
-$$T_{\text{crit}} = t_1 + t_2 + t_3 + \max(t_{4a}, t_{4b}) + t_5 = 0.08 + 3.39 + 6.20 + 3.85 + 3.74 = 17.26\text{ s}$$
-
-The remaining $18.25 - 17.26 = 0.99\text{ s}$ is runtime overhead between spans. Along the critical path, the two model calls take $7.13\text{ s}$ (41 percent), the test run $6.20\text{ s}$ (36 percent), the reviewer call $3.85\text{ s}$ (22 percent), and retrieval $0.08\text{ s}$ (under 1 percent).
-
-**Systems insight**: The model calls and the test run together hold more than three quarters of the critical path, and the reviewer call, not the linter, sets the parallel stage. A faster retrieval index would save less than a tenth of a second.
-
-:::
 
 ### Retaining the traces that matter {#sec-vol3-evaluation-budgets}
 
