@@ -305,6 +305,234 @@ class KinematicRoofline:
 
 Just as an architect cannot resolve a memory-bound arithmetic pipeline by adding more ALU execution units, an autonomous vehicle systems engineer cannot resolve an emergency stopping clearance violation by adding model parameters if doing so lengthens the delay $\tau_{\text{delay}}$ before braking. A heavier foundation model that adds `{python} KinematicRoofline.model_extra_str` of computation consumes an extra `{python} KinematicRoofline.av_extra_travel_str` of physical travel at highway speeds, distance that no friction brake or collision-avoidance logic can recover.
 
+The physical reality of this trade-off is captured longitudinally across five decades of autonomous vehicle systems (@fig-boundary-latency-vs-velocity). The safe operating speed of any physical AI platform is strictly bounded by the **kinematic stopping roofline**:
+$$d_{\text{stop}} = v \tau_{\text{delay}} + \frac{v^2}{2 a_{\text{max}}} \le R_{\text{sensor}}$$
+where $v$ is vehicle velocity, $\tau_{\text{delay}}$ is the end-to-end sense-to-act loop latency, $a_{\text{max}}$ is emergency braking deceleration ($0.7\,\text{g} \approx 6.86\,\text{m/s}^2$ on dry asphalt), and $R_{\text{sensor}}$ is the effective sensor perception horizon.
+
+In the early deliberative era (1970–1980), SRI's Shakey and Moravec's Stanford Cart operated with loop latencies between $15$ and $30\,\text{seconds}$ due to offboard mainframe compute bottlenecks, capping safe crawl speeds below $0.2\,\text{km/h}$. By the mid-1980s and 1990s, Ernst Dickmanns' VaMoRs demonstrated that running custom 4D dynamic vision algorithms at $25\,\text{Hz}$ ($\tau = 40\,\text{ms}$) unlocked $96\,\text{km/h}$ highway speeds on the German Autobahn, proving that control loop cadence—rather than raw cognitive deliberation depth—governs safe mobility. During the DARPA Grand Challenges (2004–2007), Stanford Stanley and CMU Boss operated at $10\text{--}12\,\text{Hz}$ ($85\text{--}100\,\text{ms}$) to navigate desert trails and urban intersections at $48\text{--}60\,\text{km/h}$. Today, production robotaxis such as the Waymo Driver maintain $\sim 80\,\text{ms}$ loop latencies to ensure stopping envelopes remain well within their $200\,\text{m}$ sensor horizons at highway velocities ($110\,\text{km/h}$), while autonomous racing vehicles (such as the Indy Autonomous Challenge PoliMOVE team) push loop latencies down to $28\,\text{ms}$ ($>35\,\text{Hz}$) to operate safely at speeds exceeding $309\,\text{km/h}$.
+
+::: {#fig-boundary-latency-vs-velocity fig-env="figure" fig-pos="htb" fig-cap="**The causal boundary: sense-to-act loop latency versus vehicle operational speed envelope (1970–2026)**: Empirical milestones spanning five decades of autonomous ground vehicles plotted against physical kinematic stopping rooflines under emergency deceleration ($a_{\\text{max}} = 0.7\\,\\text{g} = 6.86\\,\\text{m/s}^2$) across four sensor horizons ($R = 5\\,\\text{m}$ to $200\\,\\text{m}$). Vehicles above the $R = 200\\,\\text{m}$ ceiling enter the physically unrecoverable regime, where stopping distance exceeds sensor range regardless of downstream algorithm cleverness. Milestones: SRI Shakey (1970), Stanford Cart (1979), CMU Navlab 1 (1986), UniBwM VaMoRs (1987), CMU Navlab 5 (1995), Stanford Stanley (2005), CMU Boss (2007), Waymo Driver Gen 5/6 (2024), and Indy Autonomous Challenge PoliMOVE AV-24 (2024)." fig-alt="Log-log scatter plot of sense-to-act loop latency from 10 milliseconds to 60 seconds against operational vehicle speed from 0.1 to 350 km/h. Four kinematic roofline curves show maximum safe speeds for sensor horizons from 5 to 200 meters. Historical vehicles are plotted from Shakey at 30 seconds and 0.18 km/h to modern Indy Autonomous racing at 28 milliseconds and 309 km/h, highlighting shaded eras from Deliberative (1970-1980) to High-Speed Real-Time (2020-2026)."}
+
+```{python}
+#| label: fig-boundary-latency-vs-velocity
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SENSE-TO-ACT LOOP LATENCY VS. OPERATIONAL SPEED ENVELOPE (1970–2026)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Section 1.2, @fig-boundary-latency-vs-velocity.
+# │ Goal:    Show the physical kinematic roofline bounding autonomous vehicles:
+# │          d_stop = v * tau + v^2 / (2 * a) <= R_sensor
+# │          Across 50+ years of milestones (Shakey, Navlab, Stanley, Waymo, IAC).
+# └─────────────────────────────────────────────────────────────────────────────
+import matplotlib as mpl
+
+mpl.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+import numpy as np
+
+plt.rcParams["font.sans-serif"] = ["Helvetica", "Arial", "DejaVu Sans"]
+plt.rcParams["axes.edgecolor"] = "#334155"
+plt.rcParams["axes.linewidth"] = 1.0
+
+fig, ax = plt.subplots(figsize=(14, 8), dpi=200, facecolor="#FFFFFF")
+ax.set_facecolor("#FFFFFF")
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.5, color="#E2E8F0")
+ax.set_axisbelow(True)
+
+# Era Shading
+era_colors = ["#F1F5F9", "#EFF6FF", "#ECFDF5", "#FFFBEB"]
+ax.axvspan(5000, 60000, color=era_colors[0], alpha=0.6, zorder=0)
+ax.axvspan(400, 5000, color=era_colors[1], alpha=0.5, zorder=0)
+ax.axvspan(50, 400, color=era_colors[2], alpha=0.4, zorder=0)
+ax.axvspan(10, 50, color=era_colors[3], alpha=0.5, zorder=0)
+
+era_y = 450
+ax.text(25000, era_y, "Deliberative Era\n(1970–1980)", ha="center", va="center", fontsize=8.5, fontweight="bold", color="#64748B", style="italic")
+ax.text(
+    2000, era_y, "Early Vision & Systolic\n(1985–1995)", ha="center", va="center", fontsize=8.5, fontweight="bold", color="#64748B", style="italic"
+)
+ax.text(180, era_y, "DARPA Grand Challenges\n(2004–2010)", ha="center", va="center", fontsize=8.5, fontweight="bold", color="#64748B", style="italic")
+ax.text(23, era_y, "High-Speed Real-Time\n(2020–2026)", ha="center", va="center", fontsize=8.5, fontweight="bold", color="#64748B", style="italic")
+
+# Kinematic Curves: d_stop = v * tau + v^2 / (2 * a) <= R
+a = 6.86  # 0.7 g emergency deceleration
+tau_ms = np.logspace(np.log10(10), np.log10(60000), 500)
+tau_s = tau_ms / 1000.0
+
+horizons = [
+    (200, "Sensor Horizon R = 200 m (Highway LiDAR/Radar)", "#A51C30", "-"),
+    (100, "R = 100 m (Suburban / Rural)", "#D97706", "--"),
+    (30, "R = 30 m (Urban Occlusion / Crosswalk)", "#008080", "-."),
+    (5, "R = 5 m (Indoor Warehouse / Hallway)", "#6B21A8", ":"),
+]
+
+for R, label, col, ls in horizons:
+    v_max_ms = np.sqrt((a * tau_s) ** 2 + 2 * a * R) - a * tau_s
+    v_max_kmh = v_max_ms * 3.6
+    ax.plot(tau_ms, v_max_kmh, linestyle=ls, color=col, linewidth=1.8, alpha=0.85, label=label, zorder=2)
+
+v_max_200 = (np.sqrt((a * tau_s) ** 2 + 2 * a * 200) - a * tau_s) * 3.6
+ax.fill_between(tau_ms, v_max_200, 520, color="#FEE2E2", alpha=0.35, zorder=1)
+ax.text(
+    12000,
+    180,
+    "PHYSICALLY UNRECOVERABLE REGIME\n(Stopping Distance > 200 m Sensor Horizon)",
+    fontsize=8.8,
+    fontweight="bold",
+    color="#A51C30",
+    alpha=0.75,
+    rotation=-14,
+    ha="center",
+)
+
+def add_badge(ax, text, xy, xytext, color="#1E293B", fontsize=8.2, arrow=True, arrow_color="#94A3B8"):
+    bbox = dict(boxstyle="round,pad=0.45", facecolor="#FFFFFF", edgecolor="#CBD5E1", alpha=0.96, linewidth=0.8)
+    ap = dict(arrowstyle="->", color=arrow_color, linewidth=1.1, shrinkA=3, shrinkB=4) if arrow else None
+    ax.annotate(
+        text, xy=xy, xytext=xytext, fontsize=fontsize, fontweight="medium", color=color, bbox=bbox, arrowprops=ap, ha="center", va="center", zorder=10
+    )
+
+milestones = [
+    {
+        "name": "SRI Shakey (1970)",
+        "tau": 30000,
+        "v": 0.18,
+        "badge_xytext": (14000, 0.45),
+        "text": "1970 · SRI Shakey\nτ ≈ 30 s · v = 0.18 km/h\nSTRIPS stop-and-plan",
+        "color": "#6B21A8",
+        "marker": "o",
+    },
+    {
+        "name": "Stanford Cart (1979)",
+        "tau": 15000,
+        "v": 0.10,
+        "badge_xytext": (4500, 0.20),
+        "text": "1979 · Stanford Cart (Moravec)\nτ ≈ 15 s · v = 0.10 km/h\nStereo obstacle mapping",
+        "color": "#475569",
+        "marker": "s",
+    },
+    {
+        "name": "CMU Navlab 1 (1986)",
+        "tau": 1500,
+        "v": 15.0,
+        "badge_xytext": (2800, 6.5),
+        "text": "1986 · CMU Navlab 1\nτ ≈ 1.5 s · v = 15 km/h\nALVINN neural net on WARP",
+        "color": "#D97706",
+        "marker": "o",
+    },
+    {
+        "name": "UniBwM VaMoRs (1987)",
+        "tau": 40,
+        "v": 96.0,
+        "badge_xytext": (16, 50),
+        "text": "1987 · Dickmanns VaMoRs\nτ = 40 ms (25 Hz) · v = 96 km/h\nAutobahn 4D dynamic vision",
+        "color": "#008080",
+        "marker": "^",
+    },
+    {
+        "name": "CMU Navlab 5 (1995)",
+        "tau": 120,
+        "v": 95.0,
+        "badge_xytext": (230, 85),
+        "text": "1995 · CMU Navlab 5\nτ ≈ 120 ms · v = 95 km/h\nNo Hands Across America",
+        "color": "#B45309",
+        "marker": "s",
+    },
+    {
+        "name": "Stanford Stanley (2005)",
+        "tau": 100,
+        "v": 60.0,
+        "badge_xytext": (40, 20),
+        "text": "2005 · Stanford Stanley\nτ ≈ 100 ms (10 Hz) · v = 60 km/h\nDARPA Grand Challenge winner",
+        "color": "#004B87",
+        "marker": "D",
+    },
+    {
+        "name": "CMU Tartan Boss (2007)",
+        "tau": 85,
+        "v": 48.0,
+        "badge_xytext": (150, 18),
+        "text": "2007 · CMU Boss (Urban Challenge)\nτ ≈ 85 ms · v = 48 km/h\nUrban intersection autonomy",
+        "color": "#1E793C",
+        "marker": "D",
+    },
+    {
+        "name": "Waymo Driver (2024)",
+        "tau": 80,
+        "v": 110.0,
+        "badge_xytext": (280, 220),
+        "text": "2024 · Waymo Driver (Gen 5/6)\nτ ≈ 80 ms · v = 110 km/h (68 mph)\nCommercial highway robotaxi fleet",
+        "color": "#0284C7",
+        "marker": "o",
+    },
+    {
+        "name": "Indy Autonomous (2024)",
+        "tau": 28,
+        "v": 309.3,
+        "badge_xytext": (13, 190),
+        "text": "2024 · Indy Autonomous (PoliMOVE)\nτ ≈ 28 ms (35+ Hz) · v = 309 km/h (192 mph)\nAV-24 oval racing world record",
+        "color": "#A51C30",
+        "marker": "*",
+    },
+]
+
+for m in milestones:
+    ax.scatter(
+        m["tau"], m["v"], color=m["color"], s=110 if m["marker"] != "*" else 220, marker=m["marker"], edgecolor="#FFFFFF", linewidth=1.5, zorder=12
+    )
+    add_badge(ax, m["text"], xy=(m["tau"], m["v"]), xytext=m["badge_xytext"], color="#1E293B", fontsize=8.2, arrow=True, arrow_color=m["color"])
+
+ax.set_xscale("log")
+ax.set_yscale("log")
+ax.set_xlim(10, 65000)
+ax.set_ylim(0.06, 520)
+
+ax.set_xticks([10, 30, 100, 300, 1000, 3000, 10000, 30000, 60000])
+ax.get_xaxis().set_major_formatter(ticker.FuncFormatter(lambda x, p: f"{int(x)} ms" if x < 1000 else f"{int(x/1000)} s"))
+ax.set_yticks([0.1, 0.5, 1, 5, 15, 50, 100, 200, 350])
+ax.get_yaxis().set_major_formatter(ticker.FuncFormatter(lambda y, p: f"{y:g} km/h"))
+
+ax.set_xlabel(r"Sense-to-Act Loop Latency $\tau_{\mathrm{delay}}$ (log scale)", fontsize=11, fontweight="bold", labelpad=8)
+ax.set_ylabel("Vehicle Operational Speed Envelope $v$ (km/h, log scale)", fontsize=11, fontweight="bold", labelpad=8)
+
+fig.suptitle(
+    "The Causal Boundary: Sense-to-Act Latency vs Safe Operating Speed (1970–2026)",
+    fontsize=14,
+    fontweight="bold",
+    x=0.08,
+    y=0.98,
+    ha="left",
+    color="#1E293B",
+)
+ax.set_title(
+    r"Physical AI kinematic roofline: stopping envelope $d_{\mathrm{stop}} = v \tau + \frac{v^2}{2 a_{\max}} \leq R_{\mathrm{sensor}}$ under emergency braking ($a = 0.7\,\mathrm{g}$)",
+    fontsize=9.5,
+    color="#475569",
+    loc="left",
+    pad=14,
+)
+
+legend = ax.legend(
+    loc="lower left",
+    frameon=True,
+    framealpha=0.95,
+    edgecolor="#CBD5E1",
+    fontsize=8.5,
+    title=r"Kinematic Safety Ceilings ($a_{\max} = 6.86\,\mathrm{m/s}^2$)",
+    title_fontsize=9.0,
+)
+legend.get_title().set_fontweight("bold")
+legend.set_zorder(15)
+
+plt.tight_layout()
+plt.subplots_adjust(top=0.90, bottom=0.10, left=0.08, right=0.96)
+plt.show()
+```
+:::
+
 Once digital commands transition into mechanical work, the state change becomes thermodynamically irreversible. The physical world provides no rollback mechanism.[^fn-phys-landauer-limit] When an actuator controller applies current to a motor, electrical energy transfers from the battery into kinetic energy in mechanical linkages or thermal energy dissipated through resistive Joule heating ($I^2 R$) in the stator windings. If an incorrect joint torque drives a manipulator into a rigid steel fixture, the kinetic energy converts into plastic deformation of the tool, mechanical strain on the gearbox teeth, and heat. No software interrupt can pull that kinetic energy out of the crushed structure or restore sheared gear teeth to their original geometry.
 
 [^fn-phys-landauer-limit]: **Thermodynamic Limits of Computation**\index{Thermodynamic Limits of Computation}: At a fundamental level, @landauer1961 established that erasing logical bits dissipates at least $k_B T \ln 2$ of heat per erased bit. In physical AI systems, however, the dominant irreversibility is macroscopic: motor inverters draw tens of Amperes from battery packs, dissipating kilowatt-scale Joule heat ($I^2 R$) and imparting momentum to moving linkages.

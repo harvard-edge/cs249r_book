@@ -71,6 +71,7 @@ def check_code_exec(path: Path, text: str | None = None) -> List[CodeExecIssue]:
     import warnings
 
     old_cwd = os.getcwd()
+    os.environ.setdefault("MPLBACKEND", "Agg")
 
     try:
         os.chdir(books_dir)
