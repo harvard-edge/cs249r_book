@@ -90,6 +90,78 @@ Simultaneously, the serialization engine must decouple meaningful empirical evid
 
 Furthermore, high-performing agent policies execute test-time deliberation to decompose goals, verify preconditions, and format tool call payloads before dispatching actions. The serialization contract must structurally separate internal reasoning from executable syntax. By wrapping deliberation inside explicit `<|thought|>` and `<|end_thought|>` delimiters and tool calls inside `<|call:tool_name|>` and `<|end_call|>`, the serialization format establishes clean syntactic boundaries. As detailed in the end-to-end flow of @fig-vol3-serialization-pipeline, Stage 1 captures the raw, asynchronous runtime ledger containing out-of-order events, process IDs, and ANSI escape sequences. Stage 2 executes the four-pass hygiene compiler, enforcing strict causal monotonicity ($t < T_k$), stripping non-deterministic noise, injecting non-decomposable role delimiters (`<|start_sys|>`, `<|start_asst|>`), and isolating internal deliberation from RPC payloads. Stage 3 emits the final contiguous 1D causal token sequence $\mathbf{x}_{1:S}$, establishing an invariant autoregressive order where each token $x_t$ attends strictly to its historical causal prefix without temporal leakage.
 
+```{python}
+#| label: lego-13-memory-footprint-and-accelerator-throughput
+#| echo: false
+# │ Show: Sanitization reduces tokens by 75%, yielding a 4x speedup (1.38 h to 20.7 min).
+# │ How: Model static memory, activation checkpointing, and cluster FLOP throughput.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_multiple, fmt_percent, fmt_time
+
+class TrajectorySanitizationSystemsFootprint:
+    """Trajectory sanitization systems footprint and training throughput."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_params = 8 * 10**9
+    n_traces = 5000
+    n_gpus = 8
+    l_raw = 24_576 * token
+    l_clean = 6144 * token
+    epochs = 3
+
+    r_gpu_peak = 989 * 1e12 * (1 / second)
+    mfu_achieved = 0.45
+    r_cluster = n_gpus * mfu_achieved * r_gpu_peak
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    # Static memory
+    m_weights = (n_params * 2) * byte
+    m_grads = (n_params * 2) * byte
+    m_opt = (n_params * 8) * byte
+    m_static_total = m_weights + m_grads + m_opt
+    m_static_per_gpu = m_static_total / n_gpus
+
+    # Activations
+    n_layers = 32
+    d_model = 4096
+    bytes_elem = 2
+    m_act_factor = 2 * n_layers * d_model * bytes_elem
+    m_act_raw = (m_act_factor * l_raw.magnitude) * byte
+    m_act_clean = (m_act_factor * l_clean.magnitude) * byte
+
+    # Compute
+    compute_per_token = 6 * n_params
+    total_tokens_raw = epochs * n_traces * l_raw.magnitude
+    flops_raw = total_tokens_raw * compute_per_token
+    t_raw = (flops_raw / r_cluster.magnitude) * second
+    t_raw_hours = t_raw.to(hour)
+
+    total_tokens_clean = epochs * n_traces * l_clean.magnitude
+    flops_clean = total_tokens_clean * compute_per_token
+    t_clean = (flops_clean / r_cluster.magnitude) * second
+    t_clean_min = t_clean.to(minute)
+
+    speedup = t_raw.magnitude / t_clean.magnitude
+    token_reduction = (total_tokens_raw - total_tokens_clean) / total_tokens_raw
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(abs(m_static_per_gpu.to(GB).magnitude - 12.0) < 1e-4, "m_static_per_gpu")
+    check(abs(m_act_raw.to(GB).magnitude - 12.88) < 0.02, "m_act_raw")
+    check(abs(m_act_clean.to(GB).magnitude - 3.22) < 0.02, "m_act_clean")
+    check(abs(t_raw_hours.magnitude - 1.38) < 0.02, "t_raw_hours")
+    check(abs(t_clean_min.magnitude - 20.7) < 0.2, "t_clean_min")
+    check(abs(speedup - 4.0) < 0.01, "speedup")
+    check(abs(token_reduction - 0.75) < 1e-4, "token_reduction")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    token_reduction_pct_str = fmt_percent(token_reduction, precision=0, style="prose")
+    speedup_mult_str = fmt_multiple(round(speedup))
+    t_raw_hours_str = fmt_time(t_raw_hours, unit=hour, precision=2)
+    t_clean_min_str = fmt_time(t_clean_min, unit=minute, precision=1)
+```
+
 ::: {#nbk-13-memory-footprint-and-accelerator-throughput .callout-notebook title="Trajectory sanitization systems footprint"}
 **Problem:** An engineering team adapts an 8-billion parameter dense foundation model ($N = 8 \times 10^9$) across a curated corpus of 5,000 multi-turn software engineering trajectories collected from containerized SWE-bench execution fixtures. Training executes on an 8-GPU node of NVIDIA H100 SXM5 GPUs (80 GB HBM3 per GPU, 3.35 TB/s memory bandwidth, 989 TFLOPS peak dense BF16 compute).
 
@@ -142,7 +214,7 @@ $$\text{Total FLOPs}_{\text{clean}} = 92.16 \times 10^6 \times 48 \times 10^9\te
 $$\text{Training Time}_{\text{clean}} = \frac{4.424 \times 10^{18}\text{ FLOPs}}{3.56 \times 10^{15}\text{ FLOPs/sec}} \approx 1{,}243\text{ seconds} \approx 20.7\text{ minutes}$$
 
 *Step 4: Systems Conclusion.*
-Sanitizing terminal noise and applying budgeted structural folding reduces total token volume by 75 percent, providing an immediate $4.0\times$ training speedup (reducing training time from 1.38 hours to 20.7 minutes). More crucially, the raw pipeline suffered severe data corruption: 1,750 trajectories lost their terminal test assertions and git commits due to tail truncation, teaching the model incomplete execution loops. The sanitized pipeline preserves 100 percent of terminal verification signals across all trajectories, guaranteeing behavioral integrity on accelerator silicon.
+Sanitizing terminal noise and applying budgeted structural folding reduces total token volume by {python} TrajectorySanitizationSystemsFootprint.token_reduction_pct_str, providing an immediate {python} TrajectorySanitizationSystemsFootprint.speedup_mult_str training speedup (reducing training time from {python} TrajectorySanitizationSystemsFootprint.t_raw_hours_str to {python} TrajectorySanitizationSystemsFootprint.t_clean_min_str). More crucially, the raw pipeline suffered severe data corruption: 1,750 trajectories lost their terminal test assertions and git commits due to tail truncation, teaching the model incomplete execution loops. The sanitized pipeline preserves 100 percent of terminal verification signals across all trajectories, guaranteeing behavioral integrity on accelerator silicon.
 :::
 
 Once an asynchronous execution trajectory has been deterministically compiled into a causally isolated, role-delimited token sequence, an immediate architectural question confronts the training system: which specific tokens within this thousands-of-tokens-long sequence should receive backpropagation gradients? In standard language modeling, cross-entropy loss is computed uniformly across every token in the sequence. In an agent trajectory containing immutable system prompts, user queries, internal rationales, tool calls, and verbose environment observations, does computing loss across all tokens produce a capable agent, or does optimizing the model to predict external environment state actively destroy its operational reliability?
@@ -278,6 +350,55 @@ The following unified diff illustrates the operational difference in model behav
 
 In the negative trace, the model trained without loss masking emitted a tool call and immediately hallucinated plausible test outputs within its own generation stream. The host supervisor detected that the agent attempted to advance its internal state without executing the command in the physical sandbox, aborting the trajectory. In the positive trace, the action-targeted model emitted its structured action, terminated its turn with the active `</tool_call>` delimiter, and yielded control to the host supervisor, ensuring verifiable, sandboxed execution.
 
+```{python}
+#| label: lego-13-gradient-budget-and-compute-allocation
+#| echo: false
+# │ Show: Action-targeted masking cuts logit memory by 85.6% (saving 3.59 GB/seq).
+# │ How: Model vocabulary projection dimensions under active vs unmasked tokens.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_memory, fmt_percent
+
+class ComputeAllocationActionMasking:
+    """Compute allocation and logit memory savings under action masking."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_params = 70 * 10**9
+    l_max = 16_384
+    n_prompt = 1200
+    n_problem = 184
+    n_rationale = 1400
+    n_action = 960
+    n_observation = 12_640
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    n_active = n_rationale + n_action
+    active_fraction = n_active / l_max
+    obs_fraction = n_observation / l_max
+
+    d_model = 8192
+    v_vocab = 128_000
+    m_logits = (l_max * v_vocab * 2) * byte
+    m_masked_logits = (n_active * v_vocab * 2) * byte
+
+    memory_savings = m_logits - m_masked_logits
+    memory_reduction = (m_logits.magnitude - m_masked_logits.magnitude) / m_logits.magnitude
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(n_active == 2360, "n_active")
+    check(abs(active_fraction - 0.1441) < 0.001, "active_fraction")
+    check(abs(obs_fraction - 0.7715) < 0.001, "obs_fraction")
+    check(abs(m_logits.to(GB).magnitude - 4.194) < 0.01, "m_logits")
+    check(abs(m_masked_logits.to(GB).magnitude - 0.604) < 0.01, "m_masked_logits")
+    check(abs(memory_savings.to(GB).magnitude - 3.59) < 0.02, "memory_savings")
+    check(abs(memory_reduction - 0.856) < 0.001, "memory_reduction")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    memory_reduction_pct_str = fmt_percent(memory_reduction, precision=1, style="prose")
+    memory_savings_gb_str = fmt_memory(memory_savings, unit=GB, precision=2)
+```
+
 ::: {#nbk-13-gradient-budget-and-compute-allocation .callout-notebook title="Compute allocation under action masking"}
 An engineering team is fine-tuning a 70-billion-parameter dense model ($N = 70 \times 10^9$) on software engineering trajectories using an accelerator cluster. The context window is configured to $L_{\max} = 16\text{K} = 16,384$ tokens.
 
@@ -318,7 +439,7 @@ In an action-targeted masking pipeline with index gathering, the training runtim
 
 $$\text{Memory}_{\text{masked\_logits}} = 2,360 \times 128,000 \times 2\text{ bytes} \approx 0.60\text{ GB}$$
 
-Selective logit projection yields an immediate $85.6\%$ reduction in logit activation memory (a savings of $3.59\text{ GB}$ per sequence), while eliminating $2 \times (16,384 - 2,360) \times 8,192 \times 128,000 \approx 29.4\text{ TFLOPs}$ of unnecessary matrix multiplication in the output projection layer for every training step.
+Selective logit projection yields an immediate {python} ComputeAllocationActionMasking.memory_reduction_pct_str reduction in logit activation memory (a savings of {python} ComputeAllocationActionMasking.memory_savings_gb_str per sequence), while eliminating $2 \times (16,384 - 2,360) \times 8,192 \times 128,000 \approx 29.4\text{ TFLOPs}$ of unnecessary matrix multiplication in the output projection layer for every training step.
 :::
 
 ::: {#chk-13-loss-masking .callout-checkpoint title="Evaluating action-targeted loss masking"}
@@ -394,6 +515,58 @@ By assembling multiple trajectories into each allocated row, the effective token
 A training optimization and data preconditioning mechanism that concatenates multiple independent variable-length sequences or agent execution traces into a single continuous tensor buffer of fixed capacity $S_{\text{pack}}$. By eliminating zero-gradient padding tokens, sequence packing maximizes accelerator compute density and memory bandwidth utilization while requiring 2D block-diagonal attention masking and position identifier resets to prevent cross-trajectory contamination.
 :::
 
+```{python}
+#| label: lego-13-packing-efficiency-and-compute-throughput
+#| echo: false
+# │ Show: Sequence packing cuts training time from 14.8 h to 2.6 h, saving 97.6 GPU-hours.
+# │ How: Model padded vs packed token allocation on an 8-GPU node.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_time, MarkdownStr
+
+class SequencePackingComputeThroughput:
+    """Sequence packing throughput acceleration and GPU-hour recovery."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_traces = 20_000
+    mu = 2800
+    l_max = 16_384
+    b_gpu = 2
+    n_gpus = 8
+    b_global = n_gpus * b_gpu
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    # Scenario A
+    tokens_step_alloc = b_global * l_max
+    tokens_step_active = b_global * mu
+    padding_waste_a = 1.0 - (tokens_step_active / tokens_step_alloc)
+    steps_a = n_traces // b_global
+    computed_tokens_a = steps_a * tokens_step_alloc
+
+    # Scenario B
+    u_pack = 0.985
+    k_bar = (l_max * u_pack) / mu
+    steps_b = 217
+    computed_tokens_b = steps_b * l_max * b_global
+
+    flop_reduction = computed_tokens_a / computed_tokens_b
+
+    t_a = 14.8 * hour
+    t_b = 2.6 * hour
+    gpu_hours_saved = n_gpus * (t_a.to(hour).magnitude - t_b.to(hour).magnitude)
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(padding_waste_a > 0.82, "padding_waste_a")
+    check(abs(flop_reduction - 5.76) < 0.02, "flop_reduction")
+    check(abs(gpu_hours_saved - 97.6) < 0.1, "gpu_hours_saved")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_a_hours_str = fmt_time(t_a, unit=hour, precision=1)
+    t_b_hours_str = fmt_time(t_b, unit=hour, precision=1)
+    gpu_hours_saved_str = MarkdownStr(f"{gpu_hours_saved:.1f}")
+```
+
 ::: {#nbk-13-packing-efficiency-and-compute-throughput .callout-notebook title="Sequence packing on an 8-GPU node"}
 An engineering team is fine-tuning an 8-billion parameter model ($d_{\text{model}} = 4,096$, $L = 32$ layers) on an 8-GPU node equipped with NVIDIA H100 SXM5 accelerators (80 GB HBM3 per GPU). The training dataset contains 20,000 agent trajectories. The empirical sequence length distribution has a mean $\mu = 2,800$ tokens, a standard deviation $\sigma = 1,900$ tokens, and a maximum length of $15,800$ tokens. The buffer limit is configured to $L_{\max} = 16,384$ tokens.
 
@@ -421,7 +594,7 @@ $$\text{Total Computed Tokens} = 217 \times 16,384 \times 16 \approx 5.689 \time
 **Throughput and Hardware Speedup:**
 By eliminating padding tokens from the forward and backward passes, the required floating-point operations drop by a factor of:
 $$\text{FLOP Reduction Factor} = \frac{3.277 \times 10^8}{5.689 \times 10^7} \approx 5.76\times$$
-On the H100 cluster, training wall-clock time drops from 14.8 hours to 2.6 hours, saving 97.6 GPU-hours while maintaining identical gradient semantics.
+On the H100 cluster, training wall-clock time drops from {python} SequencePackingComputeThroughput.t_a_hours_str to {python} SequencePackingComputeThroughput.t_b_hours_str, saving {python} SequencePackingComputeThroughput.gpu_hours_saved_str GPU-hours while maintaining identical gradient semantics.
 :::
 
 ### Block-diagonal attention isolation
@@ -589,6 +762,52 @@ $$J(\pi_\theta) - J(\pi^*) \le \sum_{t=1}^N \mathbb{E}_{s \sim d_{\pi_\theta}^t}
 
 Training the policy to recover from the off-manifold states it actually reaches bounds error growth linearly in the horizon $N$. That linear bound is the quantitative reason verified trajectory post-training (principle \ref{pri-vol3-trajectory-post-training}) keeps recovery traces in the corpus. The loop itself is still closed by the runtime, not by the weights. Adaptation changes how the model behaves inside each call; it lengthens no horizon, adds no state, and grants no authority, so every exposure of @sec-vol3-intro-hsa stays where it was.
 
+```{python}
+#| label: lego-13-quantifying-trajectory-collapse-and-dagger
+#| echo: false
+# │ Show: DAgger recovery eliminates 399,360 wasted tokens (96% compute waste reduction).
+# │ How: Contrast quadratic compounding regret with linear regret under closed-loop recovery.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+class TrajectoryCollapseDaggerRecovery:
+    """Trajectory collapse and DAgger recovery dynamics."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_steps = 50
+    epsilon = 0.02
+    l_ctx = 16_384
+    l_act = 256
+    l_step = l_ctx + l_act
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    # Scenario A
+    p_clean = (1 - epsilon) ** n_steps
+    corrupted_steps_a = (epsilon * n_steps**2) / 2.0
+    wasted_tokens_a = int(corrupted_steps_a * l_step)
+
+    # Scenario B
+    errors_b = n_steps * epsilon
+    corrupted_steps_b = 1.0
+    wasted_tokens_b = int(corrupted_steps_b * l_step)
+
+    tokens_saved = wasted_tokens_a - wasted_tokens_b
+    waste_reduction = tokens_saved / wasted_tokens_a
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(abs(p_clean - 0.364) < 0.005, "p_clean")
+    check(corrupted_steps_a == 25.0, "corrupted_steps_a")
+    check(wasted_tokens_a == 416_000, "wasted_tokens_a")
+    check(tokens_saved == 399_360, "tokens_saved")
+    check(abs(waste_reduction - 0.96) < 1e-4, "waste_reduction")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    tokens_saved_str = fmt_int(tokens_saved)
+    waste_reduction_pct_str = fmt_percent(waste_reduction, precision=0, style="prose")
+```
+
 ::: {#nbk-13-quantifying-trajectory-collapse-and-dagger .callout-notebook title="Trajectory collapse and DAgger recovery"}
 Consider an autonomous agent tasked with an end-to-end Python dependency migration and refactoring pipeline across an enterprise repository. The task requires $N = 50$ discrete tool invocations (directory discovery, AST parsing, modifying build targets, updating virtual environments, running test suites, and resolving runtime exceptions).
 
@@ -609,7 +828,7 @@ $$\mathbb{E}[\text{Errors}] \le N\epsilon = 50 \times 0.02 = 1.0 \text{ error}$$
 Because the policy has learned recovery transitions from off-manifold states, when the single error occurs, it emits a corrective tool call (such as analyzing `stderr`, restoring an uncommitted diff, or re-installing a missing wheel) and returns to the nominal manifold in exactly 1 step:
 $$\text{Corrupted Steps} = 1.0 \text{ step}$$
 $$\text{Wasted Tokens} = 1 \times 16,640 = 16,640 \text{ tokens}$$
-Interactive recovery eliminates $399,360$ wasted tokens ($96.0\%$ reduction in compute waste) and restores the task completion probability to over $90\%$.
+Interactive recovery eliminates {python} TrajectoryCollapseDaggerRecovery.tokens_saved_str wasted tokens ({python} TrajectoryCollapseDaggerRecovery.waste_reduction_pct_str reduction in compute waste) and restores the task completion probability to over $90\%$.
 :::
 
 ### Mitigation via interactive dataset aggregation
@@ -798,6 +1017,53 @@ By combining low-rank parameter adaptation with selective activation checkpointi
 
 : **Accelerator Memory Breakdown for Agent Adaptation**: Comprehensive accelerator memory breakdown across model scales and context lengths under Full SFT, LoRA, and QLoRA configurations with selective activation checkpointing. Values assume micro-batch size $B=1$ and FlashAttention-2 integration. {#tbl-vol3-sft-memory-breakdown}
 
+```{python}
+#| label: lego-13-high-bandwidth-memory-budgeting-for-an
+#| echo: false
+# │ Show: QLoRA + selective checkpointing requires 51.54 GB, leaving a 28.46 GB safety margin.
+# │ How: Model static adapter weights, activation boundaries, and CUDA overhead on an 80 GB GPU.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_memory
+
+class HbmBudgetingAgentPolicy:
+    """HBM budgeting for 32B agent policy adaptation."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_params = 32 * 10**9
+    n_layers = 64
+    d_model = 5120
+    d_ffn = 27392
+    t_seq = 32_768
+    b_batch = 1
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    # Static
+    m_qlora_base = (n_params * 0.55) * byte
+    m_adapter = 2.27 * GB
+    m_qlora_static = m_qlora_base.to(GB) + m_adapter
+
+    # Activations
+    m_boundary = (2 * n_layers * b_batch * t_seq * d_model) * byte
+    m_flash_attn = 4.2 * GB
+    m_act_total = m_boundary.to(GB) + m_flash_attn
+
+    m_cuda_overhead = 6.0 * GB
+    m_alloc = m_qlora_static + m_act_total + m_cuda_overhead
+    m_margin = 80.0 * GB - m_alloc
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(abs(m_qlora_base.to(GB).magnitude - 17.6) < 0.01, "m_qlora_base")
+    check(abs(m_boundary.to(GB).magnitude - 21.47) < 0.02, "m_boundary")
+    check(abs(m_alloc.magnitude - 51.54) < 0.1, "m_alloc")
+    check(abs(m_margin.magnitude - 28.46) < 0.1, "m_margin")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    m_alloc_gb_str = fmt_memory(m_alloc, unit=GB, precision=2)
+    m_margin_gb_str = fmt_memory(m_margin, unit=GB, precision=2)
+```
+
 ::: {#nbk-13-high-bandwidth-memory-budgeting-for-an .callout-notebook title="HBM budgeting for an agent policy"}
 Consider designing an adaptation job for a 32-billion parameter model ($L = 64$, $d_{\text{model}} = 5120$, $d_{\text{ffn}} = 27392$, 40 attention heads) trained on packed tool trajectories up to $T = 32{,}768$ tokens with per-device batch size $B=1$. The team must decide whether to provision an 8-way H100 node or execute the fine-tuning run on a single 80 GB H100 accelerator.
 
@@ -833,7 +1099,7 @@ Adding FlashAttention recomputation buffers ($4.2\text{ GB}$) yields a total act
 - *LoRA + Selective Checkpointing:* $66.27\text{ GB} + 25.67\text{ GB} = 91.94\text{ GB}$ (Exceeds a single 80 GB GPU; requires 2 GPUs via tensor parallelism or ZeRO-2).
 - *QLoRA + Selective Checkpointing:* $19.87\text{ GB} + 25.67\text{ GB} = 45.54\text{ GB}$.
 
-Adding $6.0\text{ GB}$ of static CUDA runtime overhead and workspace memory brings total allocation to $51.54\text{ GB}$. QLoRA combined with selective activation checkpointing allows the 32B model to train comfortably on a single 80 GB H100 accelerator with a $28.46\text{ GB}$ safety margin.
+Adding $6.0\text{ GB}$ of static CUDA runtime overhead and workspace memory brings total allocation to {python} HbmBudgetingAgentPolicy.m_alloc_gb_str. QLoRA combined with selective activation checkpointing allows the 32B model to train comfortably on a single 80 GB H100 accelerator with a {python} HbmBudgetingAgentPolicy.m_margin_gb_str safety margin.
 :::
 
 ### Multi-tenant adapter dispatch
@@ -937,6 +1203,48 @@ The fourth operator is *Schema-Dropout* ($\mathcal{P}_{\text{drop}}$). Real-worl
 
 : **Schema Regularization Operators for Trajectory Adaptation**: Mathematical transformations, mitigated failure modes, and training overheads across perturbation operators. {#tbl-vol3-schema-perturbation-operators}
 
+```{python}
+#| label: lego-13-attention-entropy-and-memory-footprint
+#| echo: false
+# │ Show: Distractor injection adds 393.2 MB activation memory per sequence (6.3 GB per batch).
+# │ How: Calculate KV activation footprint across layers, heads, and prompt length delta.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_memory
+
+class AttentionEntropyMemoryFootprint:
+    """Attention entropy and KV activation memory under distractor scaling."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_layers = 80
+    n_heads_kv = 8
+    d_head = 128
+    s_base = 2048
+    k_distractor = 8
+    s_tools = 150
+    delta_s = k_distractor * s_tools
+    s_dist = s_base + delta_s
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    bytes_elem = 2
+    m_base = (2 * n_layers * n_heads_kv * d_head * s_base * bytes_elem) * byte
+    m_dist = (2 * n_layers * n_heads_kv * d_head * s_dist * bytes_elem) * byte
+    delta_m = m_dist - m_base
+
+    b_batch = 16
+    batch_vram = delta_m * b_batch
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(m_base.magnitude == 671_088_640, "m_base")
+    check(m_dist.magnitude == 1_064_304_640, "m_dist")
+    check(delta_m.magnitude == 393_216_000, "delta_m")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    delta_m_mb_str = fmt_memory(delta_m, unit=MB, precision=1)
+    batch_vram_gb_str = fmt_memory(batch_vram, unit=GB, precision=1)
+```
+
 ::: {#nbk-13-attention-entropy-and-memory-footprint .callout-notebook title="Attention entropy under distractor scaling"}
 Consider fine-tuning a 70-billion-parameter policy ($L = 80$ layers, $d_{\text{model}} = 8192$, $n_{\text{heads\_kv}} = 8$ key-value heads, $d_{\text{head}} = 128$) using grouped-query attention. The base context includes a system prompt and conversation history totaling $S_{\text{base}} = 2048$ tokens, which defines 3 active tools occupying an average of 150 tokens each ($S_{\text{tools}} = 450$ tokens).
 
@@ -958,7 +1266,7 @@ With distractor injection:
 
 $$\text{Memory}_{\text{dist}} = 2 \times 80 \times 8 \times 128 \times 3248 \times 2 = 1,064,304,640 \text{ bytes} \approx 1015.0 \text{ MiB}$$
 
-Distractor injection incurs an additional $375.0\text{ MiB}$ of activation memory per sequence. In a packed training batch of $B = 16$ sequences, this requires $6.0\text{ GiB}$ of additional VRAM, a cost that must be balanced against gradient checkpointing limits.
+Distractor injection incurs an additional {python} AttentionEntropyMemoryFootprint.delta_m_mb_str of activation memory per sequence. In a packed training batch of $B = 16$ sequences, this requires {python} AttentionEntropyMemoryFootprint.batch_vram_gb_str of additional VRAM, a cost that must be balanced against gradient checkpointing limits.
 
 Second, consider the attention entropy $\mathcal{H}_t$ at the first action-generation token $t$, evaluated over the $M$ tokens representing all tool schemas in the prompt:
 
@@ -1298,6 +1606,62 @@ To maximize hardware throughput on Tensor Core architectures, sequence packing u
 $$U_{\text{pack}} = \frac{\sum_{k=1}^K T_k}{B_{\text{global}} \cdot L_{\max}} \times 100\%$$
 In unpadded naive batching, where trajectories of median length $2.4\text{k}$ tokens are padded to $32\text{k}$ with zeros, $U_{\text{pack}}$ drops below $10\%$. More than $90\%$ of matrix multiplication cycles compute arithmetic over mask zeros. Dynamic bin packing packs multiple non-interacting trajectories into each sequence, driving $U_{\text{pack}} \ge 96\%$ and multiplying real-world training throughput by nearly an order of magnitude.
 
+```{python}
+#| label: lego-13-sft-accelerator-budget-for-a
+#| echo: false
+# │ Show: 70B policy adaptation achieves 49.6 GB HBM headroom on an 8-GPU H100 node.
+# │ How: Model LoRA parameter count, activation boundary sharding, and sustained MFU.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_memory
+
+class SftAcceleratorBudget70bPolicy:
+    """SFT accelerator budget and headroom for a 70B policy."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_base = 70.6 * 10**9
+    n_layers = 80
+    d_model = 8192
+    d_ff = 28_672
+    n_gpus = 8
+    t_tokens = 10**8
+    l_max = 32_768
+    b_batch = 1
+    r_rank = 64
+
+    # ┌── 2. CALCULATE (Architecture & Simulation) ─────────────────────────
+    # LoRA parameters
+    p_attn = 4 * (d_model * r_rank + r_rank * d_model)
+    p_gate_up = 2 * (d_model * r_rank + r_rank * d_ff)
+    p_down = 1 * (d_ff * r_rank + r_rank * d_model)
+    p_per_layer = p_attn + p_gate_up + p_down
+    n_train = n_layers * p_per_layer
+
+    fraction_train = n_train / n_base
+
+    # Memory
+    m_peak_per_gpu = 30.42 * GB
+    m_headroom = 80.0 * GB - m_peak_per_gpu
+
+    # Compute
+    flops_total = 6 * n_base * t_tokens
+    r_peak = n_gpus * 989 * 1e12
+    mfu = 0.42
+    r_sustained = mfu * r_peak
+    t_train = (flops_total / r_sustained) * second
+    t_train_hours = t_train.to(hour)
+
+    # ┌── 3. ASSERT (Validation & Boundaries) ──────────────────────────────
+    check(n_train == 901_775_360, "n_train")
+    check(abs(fraction_train - 0.0128) < 0.001, "fraction_train")
+    check(abs(m_headroom.magnitude - 49.58) < 0.1, "m_headroom")
+    check(abs(t_train_hours.magnitude - 3.54) < 0.02, "t_train_hours")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    m_headroom_gb_str = fmt_memory(m_headroom, unit=GB, precision=1)
+```
+
 ::: {#nbk-13-sft-accelerator-budget-for-a .callout-notebook title="SFT accelerator budget for a 70B policy"}
 **Scenario:** An engineering team adapts a 70-billion-parameter foundation model ($L = 80, d_{\text{model}} = 8192, d_{\text{ff}} = 28{,}672$) on a cluster node containing 8 $\times$ NVIDIA H100 SXM5 GPUs (80 GB HBM3 per GPU, 989 TFLOP/s bfloat16 dense Tensor Core peak). The training dataset contains $10^8$ tokens of curated multi-turn agent trajectories. The adaptation configuration sets context window $L_{\max} = 32{,}768$, batch size per GPU $b = 1$, and gradient accumulation steps $= 8$, yielding an effective global batch size of $B_{\text{global}} = 8 \times 1 \times 8 = 64$ sequences ($\approx 2.1 \times 10^6$ tokens per parameter update). LoRA rank is $r = 64$ with $\alpha = 128$, targeted at all seven linear projections ($W_q, W_k, W_v, W_o, W_{\text{gate}}, W_{\text{up}}, W_{\text{down}}$). Full activation checkpointing is enabled.
 
@@ -1324,7 +1688,7 @@ This represents $901.8\text{M} / 70.6\text{B} \approx 1.28\%$ of the base model 
 
 - **Total Peak VRAM per GPU:**
   $$M_{\text{peak}} \approx 17.65 + 0.23 + 1.80 + 10.74 \approx 30.42\text{ GB/GPU}$$
-  This fits comfortably within the 80 GB physical HBM3 boundary, leaving $\approx 49.5\text{ GB}$ of headroom for dynamic KV cache structures and fused attention temporary workspaces.
+  This fits comfortably within the $80\text{ GB}$ physical HBM3 boundary, leaving $\approx$ {python} SftAcceleratorBudget70bPolicy.m_headroom_gb_str of headroom for dynamic KV cache structures and fused attention temporary workspaces.
 
 **3. Wall-Clock Training Duration:**
 With activation checkpointing recomputation, floating-point complexity is:
