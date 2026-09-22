@@ -104,8 +104,50 @@ The physical architecture of this defense-in-depth model is detailed in @fig-vol
 
 Containment also gives the supervisor evidence that the model cannot supply. Self-reports carry no evidential weight (@sec-vol3-intro-epistemic-boundary), so asking a foundation model whether its generated shell script is safe only issues another unprivileged inference subject to the same epistemic gap. An isolated sandbox instead lets the supervisor observe the proposal's actual interactions with the virtual file system (VFS), system call table, and network stack, and check them against deterministic policies before any effect leaves the envelope. Threat analysis must precisely locate the boundary where passive *content* transforms into an active *effect*, ensuring that untrusted text remains inert data until it enters an isolated execution boundary designed specifically to contain its blast radius.
 
+```{python}
+#| label: lego-08-quantitative-blast-radius-and-attention
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUANTITATIVE BLAST RADIUS AND ATTENTION HIJACKING (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-08-quantitative-blast-radius-and-attention
+# │ Goal: Dimension cross-attention matrix allocation and blast radius of untrusted prompt injection payloads.
+# │ Show: 4,096 untrusted tokens occupy 12.5% of total prefill attention; unmediated host access permits 15 ms exfiltration.
+# │ How: Model quadratic attention pairs L^2 and untrusted cross-pairs N_data * L.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_percent
+
+class AttentionBlastRadius:
+    """Quantitative blast radius and attention hijacking."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    l_ctx = 32_768
+    n_data = 4_096
+    n_exploit = 128
+    t_exfil = 15 * millisecond
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    total_pairs = l_ctx * l_ctx
+    untrusted_pairs = n_data * l_ctx
+    fraction_attention = untrusted_pairs / total_pairs
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(total_pairs == 1_073_741_824, "total_pairs")
+    check(untrusted_pairs == 134_217_728, "untrusted_pairs")
+    check(fraction_attention == 0.125, "fraction_attention")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    l_ctx_str = fmt_int(l_ctx)
+    n_data_str = fmt_int(n_data)
+    n_exploit_str = fmt_int(n_exploit)
+    fraction_attention_pct_str = fmt_percent(fraction_attention, precision=1, style="prose")
+    t_exfil_ms_str = fmt_time(t_exfil, unit=millisecond, precision=0)
+```
+
 ::: {#nbk-08-quantitative-blast-radius-and-attention .callout-notebook title="Quantitative blast radius and attention hijacking"}
-**Problem:** An autonomous software engineering agent runs an inference engine with an active context buffer of $L = 32{,}768$ tokens. During a documentation indexing task, the agent fetches an untrusted web page containing $N_{\text{data}} = 4{,}096$ tokens of HTML, within which an adversary has embedded an indirect prompt injection payload of $N_{\text{exploit}} = 128$ tokens. The payload instructs the model to execute a shell command reading `/etc/shadow` and transmitting its contents via `curl` to an external host.
+**Problem:** An autonomous software engineering agent runs an inference engine with an active context buffer of $L =$ `{python} AttentionBlastRadius.l_ctx_str` tokens. During a documentation indexing task, the agent fetches an untrusted web page containing $N_{\text{data}} =$ `{python} AttentionBlastRadius.n_data_str` tokens of HTML, within which an adversary has embedded an indirect prompt injection payload of $N_{\text{exploit}} =$ `{python} AttentionBlastRadius.n_exploit_str` tokens. The payload instructs the model to execute a shell command reading `/etc/shadow` and transmitting its contents via `curl` to an external host.
 
 1. Calculate the fraction of total attention compute allocated to the untrusted data during prefill.
 2. If the agent executes commands directly on the host under ambient authority versus inside a hardware-isolated microVM enforcing the Blast Radius Invariant, contrast the physical blast radius across the filesystem, process table, and network interfaces.
@@ -119,10 +161,10 @@ $$\text{Total Attention Pairs} = (32{,}768)^2 = 1{,}073{,}741{,}824\text{ pairs}
 The untrusted data tokens interact with all tokens in the sequence. The number of attention calculations where the key originates from the untrusted payload is:
 $$\text{Untrusted Attention Cross-Pairs} = N_{\text{data}} \times L = 4{,}096 \times 32{,}768 = 134{,}217{,}728\text{ pairs} \approx 1.342 \times 10^8\text{ pairs}$$
 
-This constitutes:
+This constitutes `{python} AttentionBlastRadius.fraction_attention_pct_str` of total prefill attention compute:
 $$\frac{134{,}217{,}728}{1{,}073{,}741{,}824} = 12.5\%\text{ of total prefill attention compute}$$
 
-Because the 128-token exploit payload shares the same 12.5 percent attention footprint and directly attends to the preceding system prompt tokens, it shifts the softmax probabilities of downstream generated tokens toward tool actuation. The attention mechanism provides no hardware bit to isolate this 12.5 percent slice of memory from modifying the generation logits.
+Because the 128-token exploit payload shares the same `{python} AttentionBlastRadius.fraction_attention_pct_str` attention footprint and directly attends to the preceding system prompt tokens, it shifts the softmax probabilities of downstream generated tokens toward tool actuation. The attention mechanism provides no hardware bit to isolate this `{python} AttentionBlastRadius.fraction_attention_pct_str` slice of memory from modifying the generation logits.
 
 *Step 2: Physical Blast Radius Comparison.*
 
@@ -130,7 +172,7 @@ Uncontained host execution (ambient authority):
 
 - *Filesystem:* The command executes with host process privileges. If the agent runs as `root` (or has `sudo` access), `/etc/shadow` is readable. The agent can mutate, truncate, or delete host files across `/bin`, `/lib`, and `/var`.
 - *Process Table:* The agent can spawn fork-bombs, inspect peer processes via `/proc`, kill host daemons, or inject code into running processes via `ptrace`.
-- *Network:* The host network interface transmits raw TCP packets directly to the external IP, completing data exfiltration in $T_{\text{exfil}} \approx 15\text{ ms}$.
+- *Network:* The host network interface transmits raw TCP packets directly to the external IP, completing data exfiltration in $T_{\text{exfil}} \approx$ `{python} AttentionBlastRadius.t_exfil_ms_str`.
 
 MicroVM with ephemeral overlay (Blast Radius Invariant enforced):
 
@@ -227,6 +269,48 @@ To statically prove that an untrusted dynamic script cannot access a forbidden p
 
 Any parser strict enough to eliminate all dynamic dispatch vectors reduces the language to a non-Turing-complete domain-specific language, destroying the computational utility required by modern agentic tasks.
 
+```{python}
+#| label: lego-08-trusted-computing-base-expansion-in
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TRUSTED COMPUTING BASE EXPANSION IN IN-PROCESS EXECUTION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-08-trusted-computing-base-expansion-in
+# │ Goal: Dimension TCB size and attack surface exposure of in-process vs isolated architectures.
+# │ Show: In-process TCB exposes 4,250,000 lines of code across 450 syscalls; mediated boundary cuts attack surface by 97.33%.
+# │ How: Sum runtime line counts; compare unconfined Linux syscalls to filtered seccomp-bpf subset.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+class TcbExpansionAnalysis:
+    """Trusted computing base expansion in in-process execution."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    cpython_lines = 800_000
+    numpy_lines = 350_000
+    pytorch_lines = 2_500_000
+    scipy_lines = 600_000
+    s_host = 450
+    s_isolated = 12
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    tcb_total_lines = cpython_lines + numpy_lines + pytorch_lines + scipy_lines
+    reduction = (s_host - s_isolated) / s_host
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(tcb_total_lines == 4_250_000, "tcb_total_lines")
+    check(abs(reduction - 0.973333) < 0.0001, "reduction")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    tcb_total_lines_str = fmt_int(tcb_total_lines)
+    s_host_str = fmt_int(s_host)
+    s_isolated_str = fmt_int(s_isolated)
+    reduction_pct_str = fmt_percent(reduction, precision=2, style="prose")
+    reduction_round_pct_str = fmt_percent(0.97, precision=0, style="prose")
+```
+
 ::: {#nbk-08-trusted-computing-base-expansion-in .callout-notebook title="Trusted computing base expansion in in-process execution"}
 Consider an autonomous data-science agent host written in Python. To execute model-generated analytics scripts, the architect considers two designs: an in-process AST-sanitized environment vs. an out-of-process isolation boundary.
 
@@ -235,23 +319,23 @@ Calculate the relative Trusted Computing Base (TCB) size and attack surface expo
 **Model Assumptions:**
 
 1.  *In-Process Python Host:* Runs CPython 3.12 (`~800,000` lines of C) linking standard machine learning libraries: NumPy (`~350,000` lines of C/C++), PyTorch (`~2,500,000` lines of C++/CUDA), and SciPy (`~600,000` lines of C/C++/Fortran).
-2.  *System Call Exposure:* The Linux x86_64 kernel exposes $S_{\text{host}} = 450$ system calls. An in-process runtime executes with no system call filtering, leaving all $450$ calls accessible.
-3.  *Out-of-Process Micro-boundary:* A separate, unprivileged worker process mediated via a strict system call filter (e.g., Linux `seccomp-bpf`), exposing only $S_{\text{isolated}} = 12$ deterministic I/O primitives (`read`, `write`, `exit`, `mmap`, `brk`, `fstat`, etc.).
+2.  *System Call Exposure:* The Linux x86_64 kernel exposes $S_{\text{host}} =$ `{python} TcbExpansionAnalysis.s_host_str` system calls. An in-process runtime executes with no system call filtering, leaving all `{python} TcbExpansionAnalysis.s_host_str` calls accessible.
+3.  *Out-of-Process Micro-boundary:* A separate, unprivileged worker process mediated via a strict system call filter (e.g., Linux `seccomp-bpf`), exposing only $S_{\text{isolated}} =$ `{python} TcbExpansionAnalysis.s_isolated_str` deterministic I/O primitives (`read`, `write`, `exit`, `mmap`, `brk`, `fstat`, etc.).
 
 **Calculations:**
-The in-process Trusted Computing Base ($TCB_{\text{in-process}}$) encompasses the entire interpreter runtime and all natively linked libraries:
+The in-process Trusted Computing Base ($TCB_{\text{in-process}}$) encompasses the entire interpreter runtime and all natively linked libraries, totaling `{python} TcbExpansionAnalysis.tcb_total_lines_str` lines of memory-unsafe code:
 $$
 TCB_{\text{in-process}} = 800\text{k} + 350\text{k} + 2,500\text{k} + 600\text{k} = 4,250,000 \text{ lines of memory-unsafe code}
 $$
 
-The ratio of kernel system call exposure between the unconfined in-process architecture and the filtered boundary is:
+The ratio of kernel system call exposure between the unconfined in-process architecture and the filtered boundary yields an attack surface reduction of `{python} TcbExpansionAnalysis.reduction_pct_str`:
 $$
 \text{Attack Surface Reduction} = \frac{S_{\text{host}} - S_{\text{isolated}}}{S_{\text{host}}} = \frac{450 - 12}{450} = \frac{438}{450} \approx 97.33\%
 $$
 
 **Takeaway:**
 In-process sandboxing forces the host system to trust more than $4.25\text{ million}$ lines of compiled C/C++ code. Any single memory-safety flaw in this massive footprint compromises the entire agent host.
-By contrast, decoupling execution into a strictly mediated external boundary reduces the privileged system call attack surface by over $97\%$, decoupling the host supervisor's survival from the language runtime's internal vulnerabilities.
+By contrast, decoupling execution into a strictly mediated external boundary reduces the privileged system call attack surface by over `{python} TcbExpansionAnalysis.reduction_round_pct_str`, decoupling the host supervisor's survival from the language runtime's internal vulnerabilities.
 :::
 
 ### Native memory corruption exploits
@@ -409,6 +493,63 @@ When an adversarial observation or stochastic planning failure attempts to escal
 
 By formalizing delegation as an irreversible descent down a capability lattice, the runtime guarantees that sub-tasks run inside increasingly tight authority envelopes. A compromised sub-task spawned deep within an agent's execution tree remains strictly bounded by the attenuated rights granted to that specific branch, preventing lateral movement across the broader system.
 
+```{python}
+#| label: lego-08-latency-budget-and-memory-overhead
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LATENCY BUDGET AND MEMORY OVERHEAD OF CRYPTOGRAPHIC CAPABILITY VERIFICATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-08-latency-budget-and-memory-overhead
+# │ Goal: Dimension CPU overhead and memory footprint of capability mediation across asymmetric vs handle architectures.
+# │ Show: Asymmetric verification consumes 0.143% CPU (adds 54.8 us); in-memory table consumes 1 MiB across 8,192 tokens.
+# │ How: Model verification latency at 5,000 calls/s against 192 host cores; compute descriptor table size.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_percent, fmt_memory_capacity
+
+class CapabilityMediationOverhead:
+    """Latency budget and memory overhead of cryptographic capability verification."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    dispatch_rate = 5000 * (1 / second)
+    t_dispatch_interval = 50.0 * millisecond
+    t_asym = 54.8 * microsecond
+    t_handle = 18.2 * nanosecond
+    host_cores = 192
+
+    n_agents = 256
+    tree_depth = 4
+    caps_per_node = 8
+    bytes_per_desc = 128 * byte
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    cpu_asym_cores = (dispatch_rate * t_asym).to_base_units().magnitude
+    cpu_asym_util = cpu_asym_cores / host_cores
+    rel_lat_asym = (t_asym.to(millisecond) / t_dispatch_interval).magnitude
+
+    cpu_handle_cores = (dispatch_rate * t_handle).to_base_units().magnitude
+    rel_lat_handle = (t_handle.to(millisecond) / t_dispatch_interval).magnitude
+
+    n_active_caps = n_agents * tree_depth * caps_per_node
+    mem_footprint = (n_active_caps * bytes_per_desc).to(byte)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(cpu_asym_cores - 0.274) < 0.001, "cpu_asym_cores")
+    check(abs(cpu_asym_util - 0.001427) < 0.0001, "cpu_asym_util")
+    check(abs(rel_lat_asym - 0.001096) < 0.0001, "rel_lat_asym")
+    check(n_active_caps == 8192, "n_active_caps")
+    check(mem_footprint == 1_048_576 * byte, "mem_footprint")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_asym_us_str = fmt_time(t_asym, unit=microsecond, precision=1)
+    cpu_asym_util_pct_str = fmt_percent(cpu_asym_util, precision=3, style="prose")
+    rel_lat_asym_pct_str = fmt_percent(rel_lat_asym, precision=3, style="prose")
+    t_handle_ns_str = fmt_time(t_handle, unit=nanosecond, precision=1)
+    n_active_caps_str = fmt_int(n_active_caps)
+    mem_footprint_mib_str = fmt_memory_capacity(1.0 * MiB, unit=MiB, precision=0)
+```
+
 ::: {#nbk-08-latency-budget-and-memory-overhead .callout-notebook title="Latency budget and memory overhead of cryptographic capability verification"}
 Consider a high-throughput agent runtime orchestrating code generation and verification across an enterprise codebase. The system executes on a dual-socket AMD EPYC 9654 server (192 physical cores, 2.4 GHz base clock, 768 GB DDR5 memory, PCIe 5.0 interconnect). The runtime processes an aggregate workload of 5,000 tool calls per second across 256 concurrent agent worker threads.
 
@@ -426,24 +567,24 @@ We analyze the computational latency and memory bandwidth consumed by enforcing 
 If every mediated tool call independently verifies an asymmetric Ed25519 signature generated by the root supervisor:
 $$\text{CPU Overhead per Second} = 5{,}000\text{ calls/s} \times 54.8\ \mu\text{s} = 274{,}000\ \mu\text{s/s} = 0.274\text{ core-seconds/s}$$
 $$\text{Core Allocation} = \frac{0.274\text{ core-seconds/s}}{1.0\text{ core}} \approx 0.274\text{ cores}$$
-Across 192 available cores, asymmetric verification consumes:
+Across 192 available cores, asymmetric verification consumes `{python} CapabilityMediationOverhead.cpu_asym_util_pct_str` of CPU capacity:
 $$\text{CPU Capacity Utilization} = \frac{0.274}{192} \times 100\% \approx 0.143\%$$
-The added latency per tool call is $54.8\ \mu\text{s}$. Relative to the $50\text{ ms}$ tool dispatch interval, asymmetric verification adds:
+The added latency per tool call is `{python} CapabilityMediationOverhead.t_asym_us_str`. Relative to the $50\text{ ms}$ tool dispatch interval, asymmetric verification represents a relative latency impact of `{python} CapabilityMediationOverhead.rel_lat_asym_pct_str`:
 $$\text{Relative Latency Impact} = \frac{0.0548\text{ ms}}{50.0\text{ ms}} \times 100\% = 0.110\%$$
 
 **Case 2: Hybrid In-Memory Handle Architecture**
 In production systems, asymmetric cryptography is reserved for crossing distributed node boundaries. Within a single host supervisor, the runtime verifies an asymmetric token once upon worker initialization, allocating an internal, unforgeable 64-bit capability handle stored in a kernel-protected table. Subsequent tool calls verify this in-memory handle directly:
 $$\text{CPU Overhead per Second} = 5{,}000\text{ calls/s} \times 18.2\text{ ns} = 91{,}000\text{ ns/s} = 0.091\text{ ms/s}$$
 $$\text{Core Allocation} = \frac{0.000091\text{ core-seconds/s}}{1.0\text{ core}} \approx 0.000091\text{ cores}$$
-The added latency per tool call is $18.2\text{ ns}$, representing less than $0.00004\%$ of the tool dispatch budget.
+The added latency per tool call is `{python} CapabilityMediationOverhead.t_handle_ns_str`, representing less than $0.00004\%$ of the tool dispatch budget.
 
 **Memory Overhead:**
-For 256 concurrent agents, each maintaining an active delegation tree of depth $D=4$ with 8 distinct capabilities per node:
+For 256 concurrent agents, each maintaining an active delegation tree of depth $D=4$ with 8 distinct capabilities per node, maintaining `{python} CapabilityMediationOverhead.n_active_caps_str` active capability tokens:
 $$\text{Total Active Capabilities} = 256 \times 4 \times 8 = 8{,}192\text{ tokens}$$
-At 128 bytes per token descriptor (resource URI prefix, bitmask operations, monotonic expiration timestamp, and 32-byte HMAC):
+At 128 bytes per token descriptor (resource URI prefix, bitmask operations, monotonic expiration timestamp, and 32-byte HMAC), the total memory footprint is `{python} CapabilityMediationOverhead.mem_footprint_mib_str`:
 $$\text{Total Memory Footprint} = 8{,}192 \times 128\text{ bytes} = 1{,}048{,}576\text{ bytes} = 1.0\text{ MiB}$$
 
-**Engineering Takeaway:** Enforcing complete mediation and cryptographic capability verification introduces negligible latency ($< 0.12\%$ under asymmetric verification, $< 0.0001\%$ under handle tables) and an imperceptible memory footprint ($1.0\text{ MiB}$). The computational overhead of capability mediation is several orders of magnitude smaller than the variance in LLM autoregressive inference latency, proving that rigorous security mediation can be incorporated into real-time agent loops without degrading throughput.
+**Engineering Takeaway:** Enforcing complete mediation and cryptographic capability verification introduces negligible latency ($< 0.12\%$ under asymmetric verification, $< 0.0001\%$ under handle tables) and an imperceptible memory footprint (`{python} CapabilityMediationOverhead.mem_footprint_mib_str`). The computational overhead of capability mediation is several orders of magnitude smaller than the variance in LLM autoregressive inference latency, proving that rigorous security mediation can be incorporated into real-time agent loops without degrading throughput.
 :::
 
 Even with mathematically sound capability attenuation and complete mediation implemented across the agent runtime's software interfaces, a critical systems question remains. When a permitted tool invocation authorizes an arbitrary compilation step or executes a bash script, how does the underlying operating system enforce these boundaries against hostile machine code or zero-day kernel exploits? If mediated commands run directly on the host operating system, a single kernel privilege escalation breaks all higher-level software guarantees. We must therefore determine how to enforce hardware-grade isolation boundaries beneath the capability layer without sacrificing the sub-millisecond instantiation latencies required by interactive agent systems.
@@ -586,6 +727,84 @@ Traditional hypervisors such as QEMU provide complete hardware isolation and ful
 
 Firecracker occupies the optimal Pareto frontier for untrusted agent tool execution. By paring the virtual device model down to its bare essentials, Firecracker matches the boot latency profile of standard containers while delivering the non-negotiable security guarantees of hardware-enforced hypervisor isolation.
 
+```{python}
+#| label: lego-08-quantifying-memory-density-and-boot
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUANTIFYING MEMORY DENSITY AND BOOT OVERHEAD IN HIGH-THROUGHPUT AGENT SANDBOX POOLS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-08-quantifying-memory-density-and-boot
+# │ Goal: Compare memory density and boot CPU capacity across QEMU/KVM, Docker, and Firecracker.
+# │ Show: Firecracker reduces hypervisor memory overhead by 96.4% (0.39 GiB vs 10.94 GiB) and boot CPU to 0.012%.
+# │ How: Little's Law for concurrency sizing; evaluate resident VMM memory and initialization CPU seconds.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_memory_capacity
+
+class SandboxPoolDensity:
+    """Quantifying memory density and boot overhead in high-throughput agent sandbox pools."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    r_tasks = 120
+    t_exec = 30 * second
+    n_pool = 80
+    host_cores = 128
+    m_guest = 512 * MiB
+
+    m_ovh_qemu = 140 * MiB
+    t_boot_qemu = 2.5 * second
+
+    m_ovh_docker = 1.5 * MiB
+    t_boot_docker = 0.20 * second
+
+    m_ovh_fc = 5.0 * MiB
+    t_boot_fc = 0.008 * second
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    lambda_rate = r_tasks / 60
+    n_active = int(round(lambda_rate * t_exec.magnitude))
+
+    m_total_qemu = (n_pool * (m_guest + m_ovh_qemu)).to(GiB)
+    m_ovh_total_qemu = (n_pool * m_ovh_qemu).to(GiB)
+    cpu_cores_qemu = lambda_rate * t_boot_qemu.magnitude
+    cpu_pct_qemu = cpu_cores_qemu / host_cores
+
+    m_total_docker = (n_pool * (m_guest + m_ovh_docker)).to(GiB)
+    m_ovh_total_docker = (n_pool * m_ovh_docker).to(GiB)
+    cpu_cores_docker = lambda_rate * t_boot_docker.magnitude
+    cpu_pct_docker = cpu_cores_docker / host_cores
+
+    m_total_fc = (n_pool * (m_guest + m_ovh_fc)).to(GiB)
+    m_ovh_total_fc = (n_pool * m_ovh_fc).to(GiB)
+    cpu_cores_fc = lambda_rate * t_boot_fc.magnitude
+    cpu_pct_fc = cpu_cores_fc / host_cores
+
+    mem_ovh_reduction = (m_ovh_total_qemu.magnitude - m_ovh_total_fc.magnitude) / m_ovh_total_qemu.magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(n_active == 60, "n_active")
+    check(abs(m_total_qemu.magnitude - 50.94) < 0.05, "m_total_qemu")
+    check(abs(m_ovh_total_qemu.magnitude - 10.94) < 0.05, "m_ovh_total_qemu")
+    check(abs(cpu_pct_qemu - 0.03906) < 0.001, "cpu_pct_qemu")
+    check(abs(m_ovh_total_fc.magnitude - 0.39) < 0.01, "m_ovh_total_fc")
+    check(abs(cpu_pct_fc - 0.000125) < 0.00001, "cpu_pct_fc")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_active_str = fmt_int(n_active)
+    n_pool_str = fmt_int(n_pool)
+    m_total_qemu_gib_str = fmt_memory_capacity(m_total_qemu, unit=GiB, precision=2)
+    m_ovh_total_qemu_gib_str = fmt_memory_capacity(m_ovh_total_qemu, unit=GiB, precision=2)
+    cpu_pct_qemu_str = fmt_percent(cpu_pct_qemu, precision=2, style="prose")
+    m_total_docker_gib_str = fmt_memory_capacity(m_total_docker, unit=GiB, precision=2)
+    m_ovh_total_docker_gib_str = fmt_memory_capacity(m_ovh_total_docker, unit=GiB, precision=2)
+    cpu_pct_docker_str = fmt_percent(cpu_pct_docker, precision=2, style="prose")
+    m_total_fc_gib_str = fmt_memory_capacity(m_total_fc, unit=GiB, precision=2)
+    m_ovh_total_fc_gib_str = fmt_memory_capacity(m_ovh_total_fc, unit=GiB, precision=2)
+    cpu_pct_fc_str = fmt_percent(cpu_pct_fc, precision=3, style="prose")
+    mem_ovh_reduction_pct_str = fmt_percent(mem_ovh_reduction, precision=1, style="prose")
+```
+
 ::: {#nbk-08-quantifying-memory-density-and-boot .callout-notebook title="Quantifying memory density and boot overhead in high-throughput agent sandbox pools"}
 **Problem Statement:** An agentic software engineering platform operates an evaluation cluster designed to execute untrusted code patches proposed by an ensemble of autonomous coding agents. The orchestrator must support a peak throughput of $R = 120$ sandbox instantiations per minute. Each sandbox executes a single test suite requiring an active execution duration of $T_{\text{exec}} = 30\text{ seconds}$, allocating $C_{\text{guest}} = 2\text{ vCPUs}$ and $M_{\text{guest}} = 512\text{ MiB}$ of guest working memory.
 
@@ -597,28 +816,28 @@ The evaluation server is a dual-socket machine equipped with 128 physical cores 
 ---
 
 **Step 1: Compute the number of concurrently active sandboxes.**
-Using Little's Law ($L = \lambda W$), the steady-state number of concurrently active sandboxes $N_{\text{active}}$ required to sustain the arrival rate $R = 120\text{ tasks/min} = 2.0\text{ tasks/sec}$ with an execution duration $T_{\text{exec}} = 30\text{ s}$ is:
+Using Little's Law ($L = \lambda W$), the steady-state number of concurrently active sandboxes $N_{\text{active}} =$ `{python} SandboxPoolDensity.n_active_str` required to sustain the arrival rate $R = 120\text{ tasks/min} = 2.0\text{ tasks/sec}$ with an execution duration $T_{\text{exec}} = 30\text{ s}$ is:
 
 $$N_{\text{active}} = \lambda \cdot T_{\text{exec}} = 2.0\text{ sandboxes/sec} \times 30\text{ s} = 60\text{ concurrent sandboxes}$$
 
-To absorb burst arrivals and allow for initialization and teardown overhead, the platform provisions a concurrency pool of $N_{\text{pool}} = 80$ sandboxes.
+To absorb burst arrivals and allow for initialization and teardown overhead, the platform provisions a concurrency pool of $N_{\text{pool}} =$ `{python} SandboxPoolDensity.n_pool_str` sandboxes.
 
 **Step 2: Calculate total runtime memory overhead.**
 Each sandbox allocates $M_{\text{guest}} = 512\text{ MiB}$ of physical guest memory. The total memory consumed by the cluster is:
 
 $$M_{\text{total}} = N_{\text{pool}} \times \left( M_{\text{guest}} + M_{\text{overhead}} \right)$$
 
-* **Traditional QEMU/KVM:** The baseline runtime memory footprint of the QEMU process (emulated device trees, ACPI tables, video buffers) averages $M_{\text{overhead}}^{\text{QEMU}} \approx 140\text{ MiB}$.
+* **Traditional QEMU/KVM:** The baseline runtime memory footprint of the QEMU process (emulated device trees, ACPI tables, video buffers) averages $M_{\text{overhead}}^{\text{QEMU}} \approx 140\text{ MiB}$, consuming approximately `{python} SandboxPoolDensity.m_total_qemu_gib_str`:
   $$M_{\text{total}}^{\text{QEMU}} = 80 \times (512\text{ MiB} + 140\text{ MiB}) = 80 \times 652\text{ MiB} = 52,160\text{ MiB} \approx 50.94\text{ GiB}$$
-  *Hypervisor overhead alone consumes:* $80 \times 140\text{ MiB} = 11,200\text{ MiB} \approx 10.94\text{ GiB}$.
+  *Hypervisor overhead alone consumes:* `{python} SandboxPoolDensity.m_ovh_total_qemu_gib_str`.
 
-* **Docker Containers:** Containers run directly on the host kernel; runtime memory overhead consists only of host kernel struct allocations for namespaces and cgroups ($M_{\text{overhead}}^{\text{Docker}} \approx 1.5\text{ MiB}$).
+* **Docker Containers:** Containers run directly on the host kernel; runtime memory overhead consists only of host kernel struct allocations for namespaces and cgroups ($M_{\text{overhead}}^{\text{Docker}} \approx 1.5\text{ MiB}$), consuming approximately `{python} SandboxPoolDensity.m_total_docker_gib_str`:
   $$M_{\text{total}}^{\text{Docker}} = 80 \times (512\text{ MiB} + 1.5\text{ MiB}) = 80 \times 513.5\text{ MiB} = 41,080\text{ MiB} \approx 40.12\text{ GiB}$$
-  *Runtime overhead alone consumes:* $80 \times 1.5\text{ MiB} = 120\text{ MiB} \approx 0.12\text{ GiB}$.
+  *Runtime overhead alone consumes:* `{python} SandboxPoolDensity.m_ovh_total_docker_gib_str`.
 
-* **Firecracker MicroVMs:** Firecracker's stripped VMM structure in Rust consumes $M_{\text{overhead}}^{\text{Firecracker}} \approx 5.0\text{ MiB}$ of resident memory.
+* **Firecracker MicroVMs:** Firecracker's stripped VMM structure in Rust consumes $M_{\text{overhead}}^{\text{Firecracker}} \approx 5.0\text{ MiB}$ of resident memory, consuming approximately `{python} SandboxPoolDensity.m_total_fc_gib_str`:
   $$M_{\text{total}}^{\text{Firecracker}} = 80 \times (512\text{ MiB} + 5.0\text{ MiB}) = 80 \times 517.0\text{ MiB} = 41,360\text{ MiB} \approx 40.39\text{ GiB}$$
-  *Hypervisor overhead alone consumes:* $80 \times 5.0\text{ MiB} = 400\text{ MiB} \approx 0.39\text{ GiB}$.
+  *Hypervisor overhead alone consumes:* `{python} SandboxPoolDensity.m_ovh_total_fc_gib_str`.
 
 **Step 3: Calculate CPU capacity consumed by initialization overhead.**
 Every sandbox initialization consumes CPU cycles on device initialization, kernel booting, and namespace configuration. Let $T_{\text{boot}}$ denote cold boot latency, during which an initialization thread consumes $100\%$ of one CPU core ($1.0\text{ core-second}$ per second of boot time). The rate of sandbox launches is $\lambda = 2.0\text{ boots/sec}$.
@@ -627,18 +846,20 @@ $$\text{CPU Overhead (Core-Seconds/sec)} = \lambda \times T_{\text{boot}}$$
 
 * **Traditional QEMU/KVM ($T_{\text{boot}} \approx 2.5\text{ seconds}$):**
   $$\text{CPU Core Usage} = 2.0\text{ boots/sec} \times 2.5\text{ s} = 5.0\text{ dedicated cores}$$
-  Expressed as a percentage of the host's 128 physical cores:
+  Expressed as a percentage of the host's 128 physical cores, consuming `{python} SandboxPoolDensity.cpu_pct_qemu_str`:
   $$\text{CPU Capacity Percentage} = \frac{5.0}{128} \times 100\% \approx 3.91\%$$
 
 * **Docker Containers ($T_{\text{boot}} \approx 0.20\text{ seconds}$):**
   $$\text{CPU Core Usage} = 2.0\text{ boots/sec} \times 0.20\text{ s} = 0.40\text{ dedicated cores}$$
+  consuming `{python} SandboxPoolDensity.cpu_pct_docker_str`:
   $$\text{CPU Capacity Percentage} = \frac{0.40}{128} \times 100\% \approx 0.31\%$$
 
 * **Firecracker MicroVMs ($T_{\text{boot}} \approx 0.008\text{ seconds}$):**
   $$\text{CPU Core Usage} = 2.0\text{ boots/sec} \times 0.008\text{ s} = 0.016\text{ dedicated cores}$$
+  consuming `{python} SandboxPoolDensity.cpu_pct_fc_str`:
   $$\text{CPU Capacity Percentage} = \frac{0.016}{128} \times 100\% \approx 0.012\%$$
 
-**Engineering Takeaway:** Firecracker achieves an isolation profile virtually identical to QEMU/KVM while reducing hypervisor memory overhead by $96.4\%$ (consuming $0.39\text{ GiB}$ across the pool versus $10.94\text{ GiB}$) and reducing boot-induced CPU overhead by a factor of over $300\times$ ($0.012\%$ vs. $3.91\%$). While Docker provides marginally lower memory overhead ($0.12\text{ GiB}$ vs $0.39\text{ GiB}$), it exposes the host's shared kernel directly to unprivileged code execution. Firecracker delivers hardware-grade hypervisor isolation at near-container density and initialization efficiency.
+**Engineering Takeaway:** Firecracker achieves an isolation profile virtually identical to QEMU/KVM while reducing hypervisor memory overhead by `{python} SandboxPoolDensity.mem_ovh_reduction_pct_str` (consuming `{python} SandboxPoolDensity.m_ovh_total_fc_gib_str` across the pool versus `{python} SandboxPoolDensity.m_ovh_total_qemu_gib_str`) and reducing boot-induced CPU overhead by a factor of over $300\times$ ($0.012\%$ vs. $3.91\%$). While Docker provides marginally lower memory overhead ($0.12\text{ GiB}$ vs $0.39\text{ GiB}$), it exposes the host's shared kernel directly to unprivileged code execution. Firecracker delivers hardware-grade hypervisor isolation at near-container density and initialization efficiency.
 :::
 
 While microVMs achieve hardware-enforced isolation with sub-10-millisecond cold boot latencies, they remain fundamentally tied to the operating system paradigm: every microVM must boot a Linux guest kernel, manage virtualized page tables, and maintain a guest root filesystem image containing dynamic C runtime libraries and system utilities. For workflows where an agent merely needs to execute a pure, deterministic algorithm or evaluate a safe expression without interacting with the broader POSIX filesystem or networking substrate, booting an entire operating system kernel remains an unnecessary systems abstraction. What lightweight, portable sandbox alternative exists when our workload requires provably safe, capability-bounded code execution without booting a full POSIX Linux kernel?
@@ -736,6 +957,78 @@ However, WebAssembly's performance advantages come at the cost of software compa
 
 When an agent's task involves executing untrusted code written in specialized or compiled languages (such as Rust, Go, or C), or running sandboxed evaluation of mathematical formulas, parsing untrusted JSON, or filtering structured logs, WebAssembly provides an ideal balance of performance and security. When the agent must run legacy developer workflows, manage package managers (`pip`, `npm`, `cargo`), or orchestrate multi-process compile chains, the operational cost of microVM isolation remains unavoidable.
 
+```{python}
+#| label: lego-08-quantitative-density-and-cold-start-scaling
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUANTITATIVE DENSITY AND COLD-START SCALING IN AGENT EVALUATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-08-quantitative-density-and-cold-start-scaling
+# │ Goal: Dimension cold-start latency, memory density, and CPU initialization waste across MicroVMs vs Wasm.
+# │ Show: Wasm reduces startup latency from 12 ms to 25 us, saving 96.68 GiB DRAM across 10,000 concurrent instances.
+# │ How: Lifecycle breakdown, Little's Law concurrency, and burst memory allocation modeling.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_time, fmt_percent, fmt_memory_capacity
+
+class MicrovmVsWasmScaling:
+    """Quantitative density and cold-start scaling in agent evaluation."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    host_cores = 64
+    host_ram = 256 * GiB
+    r_tasks_min = 2000
+    t_exec = 120 * millisecond
+    b_burst = 10_000
+
+    t_boot_vm = 12 * millisecond
+    m_base_vm = 10 * MiB
+    m_work = 6 * MiB
+
+    t_boot_wasm = 0.025 * millisecond
+    m_base_wasm = 0.1 * MiB
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    t_total_vm = t_boot_vm + t_exec
+    frac_init_vm = t_boot_vm.magnitude / t_total_vm.magnitude
+
+    t_total_wasm = t_boot_wasm + t_exec
+    frac_init_wasm = t_boot_wasm.magnitude / t_total_wasm.magnitude
+
+    m_peak_vm = (b_burst * (m_base_vm + m_work)).to(GiB)
+    pct_ram_vm = m_peak_vm.magnitude / host_ram.magnitude
+
+    m_peak_wasm = (b_burst * (m_base_wasm + m_work)).to(GiB)
+    pct_ram_wasm = m_peak_wasm.magnitude / host_ram.magnitude
+    savings_ram_gib = m_peak_vm - m_peak_wasm
+
+    t_stall_vm = (b_burst * t_boot_vm.to(second) / host_cores).to(second)
+    t_stall_wasm = (b_burst * t_boot_wasm.to(second) / host_cores).to(millisecond)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(t_total_vm == 132 * millisecond, "t_total_vm")
+    check(abs(frac_init_vm - 0.0909) < 0.001, "frac_init_vm")
+    check(abs(m_peak_vm.magnitude - 156.25) < 0.01, "m_peak_vm")
+    check(abs(pct_ram_vm - 0.6103) < 0.001, "pct_ram_vm")
+    check(abs(m_peak_wasm.magnitude - 59.57) < 0.05, "m_peak_wasm")
+    check(abs(pct_ram_wasm - 0.2327) < 0.001, "pct_ram_wasm")
+    check(abs(t_stall_vm.magnitude - 1.875) < 0.01, "t_stall_vm")
+    check(abs(t_stall_wasm.magnitude - 3.906) < 0.01, "t_stall_wasm")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_total_vm_ms_str = fmt_time(t_total_vm, unit=millisecond, precision=0)
+    frac_init_vm_pct_str = fmt_percent(frac_init_vm, precision=2, style="prose")
+    frac_init_wasm_pct_str = fmt_percent(frac_init_wasm, precision=2, style="prose")
+    m_peak_vm_gib_str = fmt_memory_capacity(m_peak_vm, unit=GiB, precision=2)
+    pct_ram_vm_str = fmt_percent(pct_ram_vm, precision=1, style="prose")
+    m_peak_wasm_gib_str = fmt_memory_capacity(m_peak_wasm, unit=GiB, precision=2)
+    pct_ram_wasm_str = fmt_percent(pct_ram_wasm, precision=1, style="prose")
+    savings_ram_gib_str = fmt_memory_capacity(savings_ram_gib, unit=GiB, precision=2)
+    t_stall_vm_s_str = fmt_time(t_stall_vm, unit=second, precision=2)
+    t_stall_wasm_ms_str = fmt_time(t_stall_wasm, unit=millisecond, precision=1)
+```
+
 ::: {#nbk-08-quantitative-density-and-cold-start-scaling .callout-notebook title="Quantitative density and cold-start scaling in agent evaluation"}
 Consider a high-throughput code verification cluster deployed to evaluate code proposed by an ensemble of autonomous software development agents. The cluster must support an aggregate throughput of $R = 2{,}000$ tool executions per minute. Each tool execution consists of running a lightweight linting and static-analysis pass on an unprivileged script, requiring an active execution duration of $T_{\text{exec}} = 120\text{ ms}$ of pure CPU time.
 
@@ -745,13 +1038,13 @@ We evaluate two architectural configurations on a host machine equipped with $64
 - **Configuration B (Wasmtime Wasm/WASI):** Cold instantiation latency $T_{\text{boot}} = 0.025\text{ ms}$ ($25\ \mu\text{s}$), base memory footprint $M_{\text{base}} = 0.1\text{ MiB}$ ($100\text{ KiB}$), guest working memory $M_{\text{work}} = 6\text{ MiB}$.
 
 **1. Total Lifecycle Latency Overhead:**
-Under Firecracker, the total wall-clock duration of each execution is:
+Under Firecracker, the total wall-clock duration of each execution is `{python} MicrovmVsWasmScaling.t_total_vm_ms_str`:
 $$T_{\text{total, VM}} = T_{\text{boot}} + T_{\text{exec}} = 12\text{ ms} + 120\text{ ms} = 132\text{ ms}$$
-Initialization represents $\frac{12}{132} \approx 9.09\%$ of the execution pipeline.
+Initialization represents `{python} MicrovmVsWasmScaling.frac_init_vm_pct_str` of the execution pipeline.
 
 Under Wasmtime, total duration is:
 $$T_{\text{total, Wasm}} = 0.025\text{ ms} + 120\text{ ms} = 120.025\text{ ms}$$
-Initialization represents $\frac{0.025}{120.025} \approx 0.02\%$ of the execution pipeline, virtually eliminating startup waste.
+Initialization represents `{python} MicrovmVsWasmScaling.frac_init_wasm_pct_str` of the execution pipeline, virtually eliminating startup waste.
 
 **2. Concurrency and Memory Provisioning:**
 By Little's Law, the average number of concurrently active sandboxes $N$ required to sustain throughput $R = 2{,}000\text{ tasks/min} = 33.33\text{ tasks/sec}$ is:
@@ -763,20 +1056,20 @@ Now examine a burst scenario where a batch of $B = 10{,}000$ unit tests must be 
 
 - **Firecracker Peak Memory Footprint:**
   $$M_{\text{total, VM}} = B \times (M_{\text{base}} + M_{\text{work}}) = 10{,}000 \times (10\text{ MiB} + 6\text{ MiB}) = 160{,}000\text{ MiB} \approx 156.25\text{ GiB}$$
-  This consumes $61.0\%$ of the server's entire $256\text{ GiB}$ physical memory.
+  This reaches approximately `{python} MicrovmVsWasmScaling.m_peak_vm_gib_str` and consumes `{python} MicrovmVsWasmScaling.pct_ram_vm_str` of the server's entire $256\text{ GiB}$ physical memory.
 
 - **Wasmtime Peak Memory Footprint:**
   $$M_{\text{total, Wasm}} = B \times (M_{\text{base}} + M_{\text{work}}) = 10{,}000 \times (0.1\text{ MiB} + 6\text{ MiB}) = 61{,}000\text{ MiB} \approx 59.57\text{ GiB}$$
-  This consumes only $23.3\%$ of the host's memory—a savings of $96.68\text{ GiB}$ of physical DRAM.
+  This reaches approximately `{python} MicrovmVsWasmScaling.m_peak_wasm_gib_str` and consumes only `{python} MicrovmVsWasmScaling.pct_ram_wasm_str` of the host's memory—a savings of `{python} MicrovmVsWasmScaling.savings_ram_gib_str` of physical DRAM.
 
 **3. Boot CPU Resource Waste:**
 During the burst of $10{,}000$ cold starts, Firecracker instances collectively burn:
 $$E_{\text{boot, VM}} = 10{,}000 \times 0.012\text{ s} = 120\text{ CPU-seconds}$$
-On a 64-core host, initializing the microVM guest kernels monopolizes all 64 cores for $\frac{120}{64} \approx 1.88\text{ seconds}$ purely on boot operations.
+On a 64-core host, initializing the microVM guest kernels monopolizes all 64 cores for `{python} MicrovmVsWasmScaling.t_stall_vm_s_str` purely on boot operations.
 
 Under Wasmtime:
 $$E_{\text{boot, Wasm}} = 10{,}000 \times 0.000025\text{ s} = 0.25\text{ CPU-seconds}$$
-The 64 cores absorb the entire initialization overhead in $\frac{0.25}{64} \approx 3.9\text{ milliseconds}$.
+The 64 cores absorb the entire initialization overhead in `{python} MicrovmVsWasmScaling.t_stall_wasm_ms_str`.
 
 **Systems Engineering Takeaway:** When tools can be compiled to WebAssembly, Wasm provides orders-of-magnitude improvements in memory density and cold-start latency over microVMs. However, if the verification suite requires executing unmodified Python scripts importing native C-extensions (such as Pandas or Torch), the runtime must fall back to microVMs or container sandboxes despite their steep resource footprint.
 :::
@@ -932,6 +1225,62 @@ chattr -p 10042 +P /tmp/sandbox_042/upper /tmp/sandbox_042/work
 xfs_quota -x -c 'limit -p bsoft=1800m bhard=2048m 10042' /tmp
 ```
 
+```{python}
+#| label: lego-08-copy-up-overhead-and-snapshot-reset
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COPY-UP OVERHEAD AND SNAPSHOT RESET LATENCY IN AGENTIC EVALUATION BENCHMARKS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-08-copy-up-overhead-and-snapshot-reset
+# │ Goal: Model storage I/O and latency overhead across physical copying, OverlayFS, and copy-up traps.
+# │ Show: OverlayFS shrinks write volume from 76.8 GB to 1.23 GB (0.35 s write time); single fixture mutation triggers 38.4 GB copy-up trap.
+# │ How: Dimension aggregate disk transfers against NVMe sequential bandwidth of 3,500 MB/s across 32 sandboxes.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_memory
+
+class CopyUpOverhead:
+    """Copy-up overhead and snapshot reset latency in agentic evaluation benchmarks."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    n_workers = 32
+    bw_write = 3500 * (MB / second)
+    s_base = 2.4 * GB
+    s_mod = 450 * KB
+    s_build = 38 * MB
+    s_fixture = 1.2 * GB
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    w_init_a = s_base
+    w_total_a = (n_workers * w_init_a).to(GB)
+    t_init_a = (w_total_a / bw_write).to(second)
+
+    w_agent_b = (s_mod.to(MB) + s_build).to(MB)
+    w_total_b = (n_workers * w_agent_b).to(GB)
+    t_write_b = (w_total_b / bw_write).to(second)
+
+    w_trap_c = (n_workers * s_fixture).to(GB)
+    t_stall_c = (w_trap_c / bw_write).to(second)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(w_total_a == 76.8 * GB, "w_total_a")
+    check(abs(t_init_a.magnitude - 21.94) < 0.05, "t_init_a")
+    check(abs(w_total_b.magnitude - 1.23) < 0.01, "w_total_b")
+    check(abs(t_write_b.magnitude - 0.35) < 0.02, "t_write_b")
+    check(w_trap_c == 38.4 * GB, "w_trap_c")
+    check(abs(t_stall_c.magnitude - 10.97) < 0.05, "t_stall_c")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_workers_str = fmt_int(n_workers)
+    w_total_a_gb_str = fmt_memory(w_total_a, unit=GB, precision=1)
+    t_init_a_s_str = fmt_time(t_init_a, unit=second, precision=2)
+    w_total_b_gb_str = fmt_memory(w_total_b, unit=GB, precision=2)
+    t_write_b_s_str = fmt_time(t_write_b, unit=second, precision=2)
+    w_trap_c_gb_str = fmt_memory(w_trap_c, unit=GB, precision=1)
+    t_stall_c_s_str = fmt_time(t_stall_c, unit=second, precision=2)
+```
+
 ::: {#nbk-08-copy-up-overhead-and-snapshot-reset .callout-notebook title="Copy-up overhead and snapshot reset latency in agentic evaluation benchmarks"}
 An engineering team is designing a continuous evaluation harness running 32 concurrent agent workers on an AMD EPYC server (64 cores, 256 GB RAM, PCIe 4.0 NVMe SSD delivering 3,500 MB/s sustained sequential write bandwidth and 120,000 random write IOPS).
 
@@ -941,9 +1290,9 @@ The target evaluation benchmark consists of a baseline codebase containing $N = 
 Before an agent begins execution, the harness creates a full physical copy of the repository.
 The data written to disk per sandbox initialization is:
 $$W_{\text{init}} = S_{\text{base}} = 2.4\text{ GB}$$
-Across 32 concurrent sandboxes starting simultaneously, the aggregate data transferred is:
+Across `{python} CopyUpOverhead.n_workers_str` concurrent sandboxes starting simultaneously, the aggregate data transferred reaches `{python} CopyUpOverhead.w_total_a_gb_str`:
 $$W_{\text{total}} = 32 \times 2.4\text{ GB} = 76.8\text{ GB}$$
-At a peak sequential write throughput of $B_{\text{write}} = 3{,}500\text{ MB/s}$, the minimum initialization latency $T_{\text{init}}$ is bounded by:
+At a peak sequential write throughput of $B_{\text{write}} = 3{,}500\text{ MB/s}$, the minimum initialization latency $T_{\text{init}}$ is bounded by approximately `{python} CopyUpOverhead.t_init_a_s_str`:
 $$T_{\text{init}} \ge \frac{76{,}800\text{ MB}}{3{,}500\text{ MB/s}} \approx 21.94\text{ seconds}$$
 Furthermore, the host must allocate $32 \times 2.4\text{ GB} = 76.8\text{ GB}$ of DRAM to cache the redundant directory trees, depleting over 30 percent of system memory.
 
@@ -952,9 +1301,9 @@ The 32 sandboxes mount an OverlayFS structure over a single read-only `lowerdir`
 At startup, zero bytes are copied ($T_{\text{init}} \approx 1.5\text{ ms}$ for the `mount` syscall).
 During task execution, only modified files and build outputs are written to `upperdir`:
 $$W_{\text{agent}} = S_{\text{mod}} + S_{\text{build}} = 0.45\text{ MB} + 38\text{ MB} = 38.45\text{ MB}$$
-For 32 workers, total disk write across the entire evaluation run is:
+For 32 workers, total disk write across the entire evaluation run is approximately `{python} CopyUpOverhead.w_total_b_gb_str`:
 $$W_{\text{total}} = 32 \times 38.45\text{ MB} = 1{,}230.4\text{ MB} \approx 1.23\text{ GB}$$
-The NVMe write bus is loaded for only:
+The NVMe write bus is loaded for only approximately `{python} CopyUpOverhead.t_write_b_s_str`:
 $$T_{\text{write}} = \frac{1{,}230.4\text{ MB}}{3{,}500\text{ MB/s}} \approx 0.35\text{ seconds}$$
 Shared unmodified files reside in a single shared page cache footprint in DRAM ($2.4\text{ GB}$ total across all 32 workers).
 
@@ -964,9 +1313,9 @@ Suppose an agent script appends an environmental variable or timestamp to the st
 echo "TEST_EPOCH=1719200000" >> tests/fixtures/test_suite.bin
 ```
 Although user space appends only 21 bytes, the kernel must execute `ovl_copy_up` on the entire $1.2\text{ GB}$ file. The single write syscall blocks while reading $1.2\text{ GB}$ from `lowerdir` and writing $1.2\text{ GB}$ to `upperdir`.
-If all 32 agents trigger this line in parallel, the storage subsystem must absorb:
+If all 32 agents trigger this line in parallel, the storage subsystem must absorb `{python} CopyUpOverhead.w_trap_c_gb_str`:
 $$W_{\text{trap}} = 32 \times 1.2\text{ GB} = 38.4\text{ GB}$$
-Introducing an unexpected stall of:
+Introducing an unexpected stall of approximately `{python} CopyUpOverhead.t_stall_c_s_str`:
 $$T_{\text{stall}} \ge \frac{38{,}400\text{ MB}}{3{,}500\text{ MB/s}} \approx 10.97\text{ seconds}$$
 **Systems Takeaway:** Systems architects must structure agent baselines so that massive, monolithic data files and binary fixtures are either marked read-only at the permission level or broken into partitioned chunk stores. Preventing inadvertent write handles on large files avoids triggering latency spikes from full-file copy-up routines.
 :::
@@ -1091,6 +1440,58 @@ $$H(S) = -\sum_{i=1}^{n} P(c_i) \log_2 P(c_i)$$
 
 Where $P(c_i)$ represents the frequency of character $c_i$ within label $S$. Because base64-encoded binary payloads exhibit a flat, uniform character distribution ($H(S) \ge 4.8\text{ bits/char}$), queries exceeding the entropy threshold trigger an immediate drop and fire an alert to the host monitor.
 
+```{python}
+#| label: lego-08-dns-exfiltration-bandwidth-vs-monitored
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DNS EXFILTRATION BANDWIDTH VS. MONITORED ENCLAVE BOUNDS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-08-dns-exfiltration-bandwidth-vs-monitored
+# │ Goal: Dimension covert channel bandwidth and exfiltration duration across unrestricted vs monitored enclaves.
+# │ Show: Rate-limiting and label clamping stretches exfiltration of 64 KB key from 0.28 s to 36.4 min (7,800x bandwidth reduction).
+# │ How: Model Base32 expansion, RFC 1035 label limits, UDP query round-trips, and resolver rate limiting.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_multiple
+
+class DnsExfiltrationBandwidth:
+    """DNS exfiltration bandwidth vs. monitored enclave bounds."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    m_data = 65_536 * byte
+    c_query_unrestricted = 55 * byte
+    threads_unrestricted = 64
+    r_unrestricted = 15 * millisecond
+
+    c_query_monitored = 15 * byte
+    q_limit_monitored = 2 * (1 / second)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    n_queries_unrestricted = int(math.ceil(m_data.magnitude / c_query_unrestricted.magnitude))
+    t_unrestricted = (n_queries_unrestricted * r_unrestricted / threads_unrestricted).to(second)
+
+    n_queries_monitored = int(math.ceil(m_data.magnitude / c_query_monitored.magnitude))
+    t_monitored = (n_queries_monitored / q_limit_monitored).to(second)
+    t_monitored_min = t_monitored.to(minute)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(n_queries_unrestricted == 1192, "n_queries_unrestricted")
+    check(abs(t_unrestricted.magnitude - 0.28) < 0.01, "t_unrestricted")
+    check(n_queries_monitored == 4370, "n_queries_monitored")
+    check(t_monitored == 2185 * second, "t_monitored")
+    check(abs(t_monitored_min.magnitude - 36.4) < 0.1, "t_monitored_min")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_queries_unrestricted_str = fmt_int(n_queries_unrestricted)
+    t_unrestricted_s_str = fmt_time(t_unrestricted, unit=second, precision=2)
+    t_unrestricted_bound_ms_str = fmt_time(300 * millisecond, unit=millisecond, precision=0)
+    n_queries_monitored_str = fmt_int(n_queries_monitored)
+    t_monitored_min_str = fmt_time(t_monitored_min, unit=minute, precision=1)
+    penalty_exfil_mult_str = fmt_multiple(7800, precision=0)
+```
+
 ::: {#nbk-08-dns-exfiltration-bandwidth-vs-monitored .callout-notebook title="DNS exfiltration bandwidth vs. monitored enclave bounds"}
 An agentic coding sandbox is compromised by a malicious dependency that attempts to exfiltrate an extracted $64\text{ KB}$ ($65{,}536\text{ bytes}$) private cryptographic key via iterative DNS lookups over UDP port 53.
 
@@ -1106,20 +1507,20 @@ An agentic coding sandbox is compromised by a malicious dependency that attempts
 **Calculations:**
 
 1. *Unrestricted Exfiltration Profile:*
-   Total queries required to transmit the private key:
+   Total queries required to transmit the private key reaches `{python} DnsExfiltrationBandwidth.n_queries_unrestricted_str` queries:
    $$N_{\text{queries}} = \left\lceil \frac{M_{\text{data}}}{C_{\text{query}}} \right\rceil = \left\lceil \frac{65{,}536}{55} \right\rceil = 1{,}192\text{ queries}$$
-   With 64 concurrent worker threads over raw UDP sockets:
+   With 64 concurrent worker threads over raw UDP sockets, the transmission completes in approximately `{python} DnsExfiltrationBandwidth.t_unrestricted_s_str`:
    $$T_{\text{unrestricted}} \approx \frac{1{,}192\text{ queries} \times 0.015\text{ seconds}}{64} \approx 0.28\text{ seconds}$$
-   The exfiltration completes in less than $300\text{ ms}$, flying entirely under the radar of asynchronous human review.
+   The exfiltration completes in less than `{python} DnsExfiltrationBandwidth.t_unrestricted_bound_ms_str`, flying entirely under the radar of asynchronous human review.
 
 2. *Monitored Enclave Impact:*
    Clamping the label length reduces usable raw payload per query to $C_{\text{monitored}} = 15\text{ bytes}$ ($15 \times 1.6 = 24\text{ characters}$).
-   New total queries required:
+   New total queries required reach `{python} DnsExfiltrationBandwidth.n_queries_monitored_str` queries:
    $$N_{\text{monitored}} = \left\lceil \frac{65{,}536}{15} \right\rceil = 4{,}370\text{ queries}$$
-   Under the enforced resolver rate limit of $Q_{\text{limit}} = 2\text{ queries/second}$:
+   Under the enforced resolver rate limit of $Q_{\text{limit}} = 2\text{ queries/second}$, transmission duration is approximately `{python} DnsExfiltrationBandwidth.t_monitored_min_str`:
    $$T_{\text{monitored}} = \frac{4{,}370\text{ queries}}{2\text{ queries/second}} = 2{,}185\text{ seconds} \approx 36.4\text{ minutes}$$
 
-**Systems Takeaway:** Clamping query rates and label sizes degrades covert channel bandwidth from $234\text{ KB/s}$ to $30\text{ B/s}$—a reduction of over $7{,}800\times$. This stretches the exfiltration window from a fraction of a second to over half an hour, providing ample margin for runtime anomaly detection engines to terminate the offending execution namespace.
+**Systems Takeaway:** Clamping query rates and label sizes degrades covert channel bandwidth from $234\text{ KB/s}$ to $30\text{ B/s}$—a reduction of over `{python} DnsExfiltrationBandwidth.penalty_exfil_mult_str`. This stretches the exfiltration window from a fraction of a second to over half an hour, providing ample margin for runtime anomaly detection engines to terminate the offending execution namespace.
 :::
 
 ## Pre-Warmed Sandbox Pooling {#sec-vol3-virtualization-pooling}
@@ -1266,6 +1667,81 @@ $$M_{\text{pool}} = M_{\text{template}} + N_{\text{active}} \cdot M_{\text{dirty
 
 where $M_{\text{template}}$ is the immutable physical memory of the golden snapshot mapped once into the host page cache, $M_{\text{dirty}}$ is the mean private memory allocated by active tasks due to copy-on-write page faults, and $M_{\text{standby}}$ is the negligible memory footprint of an idle, paused instance holding only hypervisor control blocks.
 
+```{python}
+#| label: lego-08-sizing-a-pre-warmed-microvm-pool
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SIZING A PRE-WARMED MICROVM POOL FOR AGENTIC WORKLOADS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @nbk-08-sizing-a-pre-warmed-microvm-pool
+# │ Goal: Dimension standby buffer capacity and host memory footprint of cold vs pre-warmed CoW sandbox pools.
+# │ Show: Pre-warmed pool cuts host DRAM from 120 GB to 5.202 GB (23x reduction) and eliminates 20 s latency per 40-step trajectory.
+# │ How: Little's Law, Poisson buffer sizing at z=3.09, CoW page sharing footprint, and trajectory execution latency.
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check, fmt_int, fmt_time, fmt_multiple, fmt_percent, fmt_memory_capacity
+
+class PreWarmedMicrovmPool:
+    """Sizing a pre-warmed MicroVM pool for agentic workloads."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    arrival_rate = 40 * (1 / second)
+    t_hold = 1.5 * second
+    t_boot_a = 500 * millisecond
+    m_guest_a = 1.5 * GB
+
+    m_template_b = 1.5 * GB
+    t_acq_b = 4 * millisecond
+    t_init_b = 200 * millisecond
+    m_dirty_b = 60 * MB
+    m_standby_b = 6 * MB
+    z_score = 3.09
+
+    n_steps_trajectory = 40
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    n_active = int(round((arrival_rate * t_hold).to_base_units().magnitude))
+
+    mu_replenish = (arrival_rate * t_init_b).to_base_units().magnitude
+    s_min_calc = mu_replenish + z_score * math.sqrt(mu_replenish)
+    s_min = int(math.ceil(s_min_calc))
+
+    n_total_a = int(round((arrival_rate * (t_hold + t_boot_a)).to_base_units().magnitude))
+    m_pool_a = (n_total_a * m_guest_a).to(GB)
+
+    m_pool_b = m_template_b + (n_active * m_dirty_b.to(GB)) + (s_min * m_standby_b.to(GB))
+    mem_reduction_ratio = m_pool_a.magnitude / m_pool_b.magnitude
+
+    lat_traj_a = (n_steps_trajectory * (t_boot_a + t_hold)).to(second)
+    lat_traj_b = (n_steps_trajectory * (t_acq_b + t_hold)).to(second)
+    lat_savings = lat_traj_a - lat_traj_b
+    lat_accel_pct = lat_savings.magnitude / lat_traj_a.magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(n_active == 60, "n_active")
+    check(s_min == 17, "s_min")
+    check(n_total_a == 80, "n_total_a")
+    check(m_pool_a == 120.0 * GB, "m_pool_a")
+    check(abs(m_pool_b.magnitude - 5.202) < 0.001, "m_pool_b")
+    check(abs(mem_reduction_ratio - 23.07) < 0.05, "mem_reduction_ratio")
+    check(abs(lat_traj_a.magnitude - 80.0) < 0.1, "lat_traj_a")
+    check(abs(lat_traj_b.magnitude - 60.16) < 0.01, "lat_traj_b")
+    check(abs(lat_accel_pct - 0.248) < 0.001, "lat_accel_pct")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    n_active_str = fmt_int(n_active)
+    s_min_str = fmt_int(s_min)
+    m_pool_a_gb_str = fmt_memory_capacity(m_pool_a, unit=GB, precision=0)
+    m_pool_b_gb_str = fmt_memory_capacity(m_pool_b, unit=GB, precision=3)
+    mem_reduction_mult_str = fmt_multiple(round(mem_reduction_ratio), precision=0)
+    lat_traj_a_s_str = fmt_time(lat_traj_a, unit=second, precision=0)
+    lat_traj_b_s_str = fmt_time(lat_traj_b, unit=second, precision=2)
+    lat_savings_round_s_str = fmt_time(20 * second, unit=second, precision=0)
+    lat_accel_pct_str = fmt_percent(lat_accel_pct, precision=1, style="prose")
+```
+
 ::: {#nbk-08-sizing-a-pre-warmed-microvm-pool .callout-notebook title="Sizing a pre-warmed MicroVM pool for agentic workloads"}
 **Problem Statement:** An enterprise agent platform runs automated code migration tasks. The system experiences an aggregate arrival rate of $\lambda = 40\text{ tool calls/second}$. Profiling reveals that typical tool execution takes $\mathbb{E}[T_{\text{hold}}] = 1.5\text{ seconds}$.
 
@@ -1286,7 +1762,7 @@ Calculate:
 **Solution:**
 
 *Step 1: Steady-state concurrency ($N_{\text{active}}$)*
-Applying Little's Law:
+Applying Little's Law, yielding $N_{\text{active}} =$ `{python} PreWarmedMicrovmPool.n_active_str` active instances:
 $$N_{\text{active}} = \lambda \cdot \mathbb{E}[T_{\text{hold}}] = 40\text{ calls/s} \times 1.5\text{ s} = 60\text{ active instances}$$
 
 *Step 2: Standby buffer sizing ($S_{\min}$)*
@@ -1295,30 +1771,31 @@ $$\mu_{\text{replenish}} = \lambda \cdot T_{\text{init}} = 40\text{ calls/s} \ti
 
 Applying the dimensioning equation with $z_{0.999} = 3.09$:
 $$S_{\min} \ge 8.0 + 3.09 \sqrt{8.0} = 8.0 + 3.09 \times 2.828 = 8.0 + 8.74 = 16.74$$
-Rounding up to the nearest integer yields a standby reserve of:
+Rounding up to the nearest integer yields a standby reserve of $S_{\min} =$ `{python} PreWarmedMicrovmPool.s_min_str` standby instances:
 $$S_{\min} = 17\text{ standby instances}$$
 
 *Step 3: Total physical host memory footprint ($M_{\text{pool}}$)*
 Under Design A (Cold Provisioning), instances must also remain allocated during their 500 ms initialization phase, increasing effective concurrency to:
 $$N_{\text{total, A}} = \lambda \cdot (\mathbb{E}[T_{\text{hold}}] + T_{\text{boot}}) = 40 \times (1.5 + 0.5) = 80\text{ instances}$$
-Because each instance allocates dedicated, non-shared physical RAM:
+Because each instance allocates dedicated, non-shared physical RAM, yielding `{python} PreWarmedMicrovmPool.m_pool_a_gb_str`:
 $$M_{\text{pool, A}} = 80 \times 1.5\text{ GB} = 120.0\text{ GB}$$
 
-Under Design B (Pre-Warmed CoW Snapshot Pool), physical memory is shared across all instances via copy-on-write page sharing:
+Under Design B (Pre-Warmed CoW Snapshot Pool), physical memory is shared across all instances via copy-on-write page sharing, requiring `{python} PreWarmedMicrovmPool.m_pool_b_gb_str`:
 $$M_{\text{pool, B}} = M_{\text{template}} + (N_{\text{active}} \cdot M_{\text{dirty}}) + (S_{\min} \cdot M_{\text{standby}})$$
 $$M_{\text{pool, B}} = 1.5\text{ GB} + (60 \times 0.060\text{ GB}) + (17 \times 0.006\text{ GB})$$
 $$M_{\text{pool, B}} = 1.5\text{ GB} + 3.60\text{ GB} + 0.102\text{ GB} = 5.202\text{ GB}$$
 
 **Memory Reduction Ratio:**
 $$\frac{M_{\text{pool, A}}}{M_{\text{pool, B}}} = \frac{120.0\text{ GB}}{5.202\text{ GB}} \approx 23.07\times$$
-Design B reduces physical host memory consumption by over $23\times$.
+Design B reduces physical host memory consumption by over `{python} PreWarmedMicrovmPool.mem_reduction_mult_str`.
 
 *Step 4: Cumulative trajectory execution latency*
 For a single agent executing a 40-step sequential trajectory where each step runs a tool for an average of $T_{\text{exec}} = 1.5\text{ seconds}$:
 $$\text{Latency}_{\text{Design A}} = 40 \times (T_{\text{boot}} + T_{\text{exec}}) = 40 \times (0.500\text{ s} + 1.500\text{ s}) = 80.0\text{ seconds}$$
+requiring `{python} PreWarmedMicrovmPool.lat_traj_a_s_str` under Design A, whereas Design B requires `{python} PreWarmedMicrovmPool.lat_traj_b_s_str`:
 $$\text{Latency}_{\text{Design B}} = 40 \times (T_{\text{acq}} + T_{\text{exec}}) = 40 \times (0.004\text{ s} + 1.500\text{ s}) = 60.16\text{ seconds}$$
 
-**Latency Saving:** The pre-warmed pool eliminates nearly 20 seconds of pure virtualization overhead across a single 40-turn agent session, accelerating task completion by 24.8 percent.
+**Latency Saving:** The pre-warmed pool eliminates nearly `{python} PreWarmedMicrovmPool.lat_savings_round_s_str` of pure virtualization overhead across a single 40-turn agent session, accelerating task completion by `{python} PreWarmedMicrovmPool.lat_accel_pct_str`.
 :::
 
 By formalizing pool dimensioning through queueing theory and backing the execution runtime with copy-on-write snapshot re-hydration, system architects transform hardware-enforced microVM isolation from an unwieldy, high-latency barrier into an efficient, predictable systems primitive. However, constructing high-throughput execution sandboxes is fraught with subtle architectural hazards: minor oversights in network proxy configuration, capability scoping, or snapshot generation frequently re-introduce the exact vulnerabilities the isolation perimeter was engineered to prevent.
