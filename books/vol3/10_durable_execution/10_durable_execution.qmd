@@ -100,26 +100,40 @@ With the log in place, under invariant closure (principle \ref{pri-invariant-clo
 
 ## Intent Before Effect {#sec-vol3-persistence-wal}
 
-Return to the provisioning request at turn forty. The harness has authorized it and must now do two things, write a record that the request is going out and send the request. If it sends first and the host dies before the record is durable, the replica exists but the log never mentions it. The recovered harness sees an authorized call with no sign of dispatch, concludes that nothing happened, and sends it again.
+Return to the provisioning request at turn forty. The harness has authorized it and must now do two things: write a record that the request is going out, and send the request over the network. If it dispatches first and the host loses power before the record is durably flushed to non-volatile storage, the external resource is allocated in the physical cloud, but the log never mentions it. Upon rebooting or migrating, the recovered harness inspects the log, finds an authorized call with no sign of dispatch, concludes that the step never executed, and issues the provisioning request a second time.
 
 ::: {.column-margin}
 **Phantom effect**\index{Phantom effect}\
-An external effect that a tool call produced but that no durable log record describes, because the host failed between dispatch and the write that would have recorded it.
+An external state mutation that an agent's tool execution produced in the world, but that no durable log record describes, because the host failed after network dispatch but before the disk barrier persisted the intent.
 :::
 
-The rule that prevents this is **write-ahead ordering**\index{Write-ahead ordering!definition}, the runtime form of intent before effect (principle \ref{pri-vol3-intent-before-effect}). No external effect may leave the host until the `ToolIntent` event that authorizes it is durable. For every call that can change the world, the events must occur in this order, where $a$ is the dispatch itself:
+The foundational invariant preventing this failure mode is **write-ahead logging (WAL) discipline**\index{Write-ahead logging!agent invariants}, the systems realization of the intent-before-effect principle (\ref{pri-vol3-intent-before-effect}). No external mutation may leave the host boundary until the `ToolIntent` event authorizing and specifying the action is durably committed to non-volatile media. Formally, for every world-changing tool execution, the runtime enforces the strict causal sequence:
 
-$$e_{\text{Authorized}} \prec e_{\text{ToolIntent}}^{\text{durable}} \prec a \prec e_{\text{ToolResult}}$$
+$$e_{\text{prop}} \prec e_{\text{auth}} \prec e_{\text{flush}} \prec a_{\text{ext}} \prec e_{\text{obs}}$$ {#eq-vol3-wal-ordering}
 
-The critical link is the second. "Durable" means the storage layer has acknowledged that the bytes survive a power loss, which requires an explicit flush. A buffered write that the operating system has accepted but not yet persisted does not count, and runtimes that confuse the two produce phantom effects under exactly the crashes the log exists for.
+where $e_{\text{prop}}$ represents the candidate tool call parsed from the model's generation, $e_{\text{auth}}$ records the supervisor's policy and capability approval, $e_{\text{flush}}$ marks the completion of the physical storage barrier acknowledging durable settlement on disk, $a_{\text{ext}}$ is the transmission of the network RPC to the external tool or sandbox, and $e_{\text{obs}}$ records the returned observation.
 
-::: {.column-margin}
-**The classical write-ahead log.** Databases have used this rule for decades to recover their own pages after a crash, and the ARIES algorithm [@mohan1992aries] can undo an uncommitted change by restoring the page. An agent's effects land in systems it does not own, so the log can record an effect but never undo it. @Sec-vol3-appendix-inference-distributed summarizes the classical protocol.
+The physical sequence of barriers and causal transitions is diagrammed in @fig-vol3-wal-sequence.
+
+::: {#fig-vol3-wal-sequence fig-env="figure" fig-pos="htb" fig-cap="**Agent Write-Ahead Logging Execution Sequence**: The runtime intercepts the model's candidate action proposal $e_{\text{prop}}$, evaluates authorization policies to emit $e_{\text{auth}}$, and enforces a strict durable storage barrier $e_{\text{flush}}$ before releasing the external action $a_{\text{ext}}$ to the sandboxed environment. Tool observation $e_{\text{obs}}$ settles the turn." fig-alt="Sequence diagram showing execution flow from model proposing tool call through supervisor policy evaluation, writev and fdatasync to disk, network tool dispatch, and observation reception."}
+![](images/svg/ch10-wal-sequence.svg)
 :::
+
+The critical constraint in @eq-vol3-wal-ordering is the storage barrier $e_{\text{flush}} \prec a_{\text{ext}}$. In operating systems programming, calling `write()` merely copies serialized bytes from user space into the kernel's volatile page cache. If power fails while bytes reside in volatile DRAM, dirty pages are permanently lost. Durability strictly requires an explicit hardware barrier via `fdatasync()` or direct I/O, as contrasted in @tbl-vol3-io-semantics.
+
+| Interface                  | Cache Semantics          | Kernel Return Condition | NVMe State on Return      | Safe for $e_{\text{flush}} \prec a_{\text{ext}}$? | Typical Latency ($\mu\text{s}$) |
+|:---------------------------|:-------------------------|:------------------------|:--------------------------|:--------------------------------------------------|:--------------------------------|
+| `write()`                  | Standard Page Cache      | Copied to kernel DRAM   | Volatile / Unwritten      | ❌ **Unsafe** (Data loss on crash)                 | $1 - 2$                         |
+| `write()` + `O_SYNC`       | Synchronous Page Cache   | Written to drive cache  | Controller DRAM / Unknown | ⚠️ **Conditional** (Depends on FUA)               | $150 - 500$                     |
+| `write()` + `fdatasync()`  | Explicit Flush           | Acknowledged by drive   | Committed to Flash Cells  | ✅ **Safe** (Minimal metadata overhead)            | $80 - 150$                      |
+| `write()` + `fsync()`      | Explicit Full Sync       | Acknowledged by drive   | Committed to Flash Cells  | ✅ **Safe** (Updates full inode attributes)        | $100 - 250$                     |
+| Group Commit (`fdatasync`) | Batched Vectorized Flush | Acknowledged for batch  | Committed to Flash Cells  | ✅ **Safe** (Amortized per event)                  | $\frac{85}{k} + \frac{W}{2}$    |
+
+: **POSIX I/O Persistence Interfaces and Durability Guarantees**: Comparison of POSIX file synchronization primitives, kernel return semantics, physical non-volatile storage state, and measured latencies on modern NVMe drives. {#tbl-vol3-io-semantics tbl-colwidths="[22,20,20,18,10,10]"}
 
 ### Three states after a crash
 
-The ordering fixes which combinations of records can survive a crash, so recovery finds every world-changing action in one of three states (@tbl-vol3-durable-recovery-states).
+The ordering in @eq-vol3-wal-ordering restricts the combinations of records that can survive a crash, guaranteeing that recovery discovers every world-changing action in one of three deterministic states (@tbl-vol3-durable-recovery-states).
 
 | **Records in the log**            | **State**    | **What recovery does**                                                                                          |
 |:----------------------------------|:-------------|:----------------------------------------------------------------------------------------------------------------|
@@ -127,52 +141,104 @@ The ordering fixes which combinations of records can survive a crash, so recover
 | `ToolIntent` and `ToolResult`     | Settled      | The outcome is known. Replay and resume use the recorded result and never re-dispatch.                          |
 | `ToolIntent` without `ToolResult` | **In doubt** | The request may never have arrived, or it may have committed with only the reply lost. Settle before any retry. |
 
-: **Recovery States of a Logged Action**: Write-ahead ordering guarantees that every world-changing action is found in exactly one of three states after a crash. Only the third requires work before the trajectory continues. {#tbl-vol3-durable-recovery-states tbl-colwidths="[30,16,54]"}
+: **Recovery States of a Logged Action**: Write-ahead ordering guarantees that every world-changing action is found in exactly one of three states after a crash. Only the third requires active reconciliation. {#tbl-vol3-durable-recovery-states tbl-colwidths="[30,16,54]"}
 
-Write-ahead ordering cannot resolve the third state, the **in-doubt action**\index{In-doubt action}. What it guarantees is that the state is visible, and settlement before retry (principle \ref{pri-vol3-exactly-once-settlement}) resolves it with the mechanisms of @sec-vol3-tool-calling-idempotency. The recovery path re-sends the call under the idempotency key recorded in the intent, which the tool deduplicates. When the tool accepts no key, the runtime first runs a reconciliation probe (does the replica exist?) and re-sends only if the environment is still in its pre-dispatch state. When neither works, the action stays in doubt and the trajectory escalates to a person rather than guessing. The runtime never re-sends on the assumption that the first attempt failed.
+Write-ahead ordering cannot magically resolve the third state, the **in-doubt action**\index{In-doubt action}. What it guarantees is that the in-doubt state is explicitly visible. Settlement before retry (principle \ref{pri-vol3-exactly-once-settlement}) resolves it using the mechanisms of @sec-vol3-tool-calling-idempotency:
 
-The ordering applies to effects, not to every call. A model call changes nothing outside the runtime, so the harness logs `ModelReplied` after the call returns, and a crash mid-call loses only the tokens that call spent. A read-only tool can safely run again, although its answer may differ the second time, which is why its `ToolResult` is logged too. Replay must see the answer the model saw, not a fresh one.
+1. **Idempotency keys**: The recovery manager re-issues the tool request using the identical idempotency nonce stored in the `ToolIntent` event record. If the tool server processed the earlier request, it returns the cached outcome without repeating the side effect.
+2. **Reconciliation probes**: When interacting with external APIs lacking native idempotency, the recovery manager runs a side-effect read probe (e.g., querying whether the database replica exists) to determine whether the mutation occurred.
+3. **Supervisory escalation**: If the environment remains indeterminate, the supervisor halts execution and escalates to human review (@sec-vol3-controlplane-hitl) rather than gambling on a blind retry.
 
-### What durability costs
+### What durability costs: Group commit amortization
 
-The durable write sits on the critical path of every world-changing call, so its cost matters. On local storage an explicit flush takes on the order of a millisecond or less. A turn spends seconds in the model call (@sec-vol3-foundation-model-cost) and often seconds more in the tool, so the flush adds well under 1 percent to a turn. Two situations change this arithmetic. Network-attached storage can make each flush tens of times slower, and many trajectories on one host each flushing on their own contend for the same device. The standard remedy is group commit [@dewitt1984], in which one flush covers the intents of every trajectory that arrived in the same short window. Each trajectory still waits for its own intent to be durable, so the ordering holds, while the device sees one flush instead of dozens.
+Enforcing a synchronous `fdatasync()` barrier on the critical path of every tool execution introduces non-volatile media latency. While a single NVMe flush takes between $80$ and $150\ \mu\text{s}$ on local flash, network-attached block volumes (such as AWS EBS or Google Persistent Disk) incur $2$ to $15\ \text{ms}$ per barrier. In multi-agent environments hosting tens or hundreds of concurrent agent trajectories on a shared node, serializing flushes causes severe queueing contention.
+
+The standard systems mechanism resolving this bottleneck is **group commit**\index{Group commit!trajectory logging} [@dewitt1984], detailed in @tbl-vol3-group-commit-pipeline. Instead of independently executing `fdatasync()`, concurrent agent worker threads enqueue authorized event records into a lock-free multi-producer ring buffer and park on completion futexes.
+
+| Pipeline Stage          | Operating Mechanism                                                                                                                                          | Latency Profile                   | Data Structures & I/O Primitives                   |
+|:------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------|:---------------------------------------------------|
+| **1. Ingestion**        | Concurrent agent threads serialize action proposals ($e_{\text{prop}}, e_{\text{auth}}$) and push to in-memory staging; threads park on completion promises. | Near-zero ($\le 5\ \mu\text{s}$)  | Lock-free multi-producer ring buffer (MPMC)        |
+| **2. Aggregation**      | Dedicated flush coordinator drains pending queue when batch size reaches $B_{\max}$ (e.g., 64 records) or timeout $W$ (e.g., 2 ms) expires.                  | $0.1 - 2.0\ \text{ms}$            | Vectorized scatter-gather memory array             |
+| **3. Vectorized Write** | Aggregated event records written to storage device via a single scatter-gather system call.                                                                  | $0.2 - 0.8\ \text{ms}$            | POSIX `writev()` / Linux `io_uring` submit         |
+| **4. Storage Barrier**  | Host kernel forces disk controller to commit dirty blocks from controller cache to non-volatile flash media.                                                 | $2.0 - 15.0\ \text{ms}$           | `fdatasync()` / NVMe flush command                 |
+| **5. Barrier Release**  | Coordinator notifies all parking completion promises; waiting agent threads unpark in parallel to dispatch tools.                                            | Near-zero ($\le 10\ \mu\text{s}$) | Atomic futex broadcast / condition variable unpark |
+
+: **Group Commit Pipeline Architecture**: Amortization of non-volatile storage barriers across concurrent agent worker threads via lock-free staging and vectorized synchronization. {#tbl-vol3-group-commit-pipeline tbl-colwidths="[20,40,16,24]"}
+
+We model the effective per-turn storage synchronization latency $t_{\text{eff}}$ under a Poisson arrival process of authorization events with aggregate arrival rate $\lambda$. If the group commit coordinator employs an aggregation window $W$ and maximum batch capacity $K_{\max}$, the expected number of events amortized per barrier is given by @eq-vol3-group-commit-k:
+
+$$\bar{k} = \min\left(K_{\max},\, \max\left(1,\, \lambda W\right)\right)$$ {#eq-vol3-group-commit-k}
+
+The effective latency experienced by an individual agent thread comprises the expected queueing delay in the buffer plus the physical barrier duration amortized across $\bar{k}$ events, formalized in @eq-vol3-group-commit-latency:
+
+$$t_{\text{eff}} = \frac{W}{2} + \frac{t_{\text{writev}}(\bar{k}) + t_{\text{sync}}}{\bar{k}}$$ {#eq-vol3-group-commit-latency}
+
+As trajectory concurrency scales ($\lambda \to \infty$), window $W$ can be shrunk toward zero, dividing the physical sync penalty $t_{\text{sync}}$ across $K_{\max}$ trajectories and reducing per-turn barrier overhead to negligible levels without violating the causal write-ahead invariant of any individual agent.
 
 ::: {#chk-10-wal-invariants .callout-checkpoint title="Write-ahead ordering"}
-Before moving on, check that you can answer the following.
+Before moving on, check that you can answer the following:
 
 - [ ] **Ordering**: Why must `ToolIntent` be durable before dispatch, and why is logging `ModelReplied` after the model call safe?
 - [ ] **Recovery states**: Given a log, can you classify each world-changing action as not sent, settled, or in doubt?
 - [ ] **Settlement**: What does recovery do with an in-doubt call whose tool accepts no idempotency key?
-- [ ] **Cost**: Why does group commit preserve each trajectory's ordering while reducing the number of flushes?
+- [ ] **Cost**: Why does group commit preserve each trajectory's causal ordering while reducing the frequency of storage barriers?
 :::
-
-The log now captures every decision and every effect in a safe order. Two problems remain. A trajectory that runs for hundreds of turns makes recovery read hundreds of turns of log, and, more fundamentally, some state that recovery needs is not in the log at all.
 
 ## Checkpoints {#sec-vol3-persistence-checkpointing}
 
-A coding agent is on turn three hundred. Its log says that at turn 212 an edit tool rewrote `parser.py` and at turn 250 a shell tool deleted a build directory. Folding the log rebuilds the trajectory record, but it does not rebuild `parser.py`. The log holds the tool calls and their results; the files those calls produced live in the sandbox workspace (@sec-vol3-sandboxes-cow), and if the host held the workspace, the workspace died with it. Replaying the log cannot recreate the files either, because replay never runs tools.
+A coding agent is on turn three hundred. Its log records that at turn 212 an edit tool rewrote `parser.py` and at turn 250 a shell tool deleted a build directory. Folding the log rebuilds the trajectory record, but it does not rebuild `parser.py`. The log holds the tool calls and their results; the files those calls produced live in the sandbox workspace (@sec-vol3-sandboxes-cow), and if the host holding the workspace suffered a hardware crash, the workspace died with it. Replaying the log cannot recreate the modified files either, because replay intentionally stubs tool execution.
 
-### What a checkpoint captures
+### What a checkpoint captures: Full vs. incremental delta encoding
 
-A **checkpoint**\index{Checkpoint!definition} is a durable snapshot of everything the log alone cannot rebuild cheaply, bound to the log position it corresponds to. It has three parts:
+A **checkpoint**\index{Checkpoint!definition} is a durable snapshot of everything the log alone cannot rebuild cheaply, bound to the exact log position it corresponds to. It comprises three components:
 
 1. **A record snapshot**: The serialized trajectory record $R_k$ at turn $k$, so a restart need not fold the whole log from $R_0$.
-2. **A workspace snapshot**: The sandbox filesystem at turn $k$, taken as a copy-on-write snapshot so it costs only the changed files (@sec-vol3-sandboxes-cow).
-3. **A `Checkpoint` event**: Appended to the log only after both snapshots are durable, naming the log position they cover.
+2. **A workspace snapshot**: The sandbox filesystem at turn $k$, captured via copy-on-write snapshotting (@sec-vol3-sandboxes-cow).
+3. **A `Checkpoint` event**: Appended to the log only after both snapshots are durable on non-volatile media.
 
-The order of the third step matters. A checkpoint that the log announces before its snapshots are durable can point recovery at a snapshot that does not exist.
+The architectural trade-off lies in whether the supervisor takes a *full state snapshot* or an *incremental delta snapshot*. In long-horizon tasks, the context buffer expands monotonically as code diffs and execution traces accumulate. If context reaches $128\text{ KiB}$ of structured tokens and metadata, committing a full snapshot every five turns over a 500-turn trajectory forces the storage engine to write:
 
-The two snapshots must also describe the same moment. Suppose the harness snapshots the record at turn 42, then a tool in turn 43 deletes `compiler.cc`, and only then does the workspace snapshot run. After a crash, recovery restores a record that expects `compiler.cc` next to a workspace that no longer has it, and the resumed agent fails on a file its own history says exists. The rule that prevents this torn checkpoint is simple. The harness takes checkpoints only at a turn boundary, when no tool is running and no model call is in flight, and it pauses dispatch until both snapshots are taken. Copy-on-write makes the pause short, since taking a snapshot copies no data.
+$$\text{Total Bytes Written} = \sum_{k=1}^{100} k \cdot \Delta_{\text{turn}} \approx 50 \cdot 100 \cdot 128\text{ KiB} \approx 640\text{ MiB}$$
+
+::: {.column-margin}
+**Write Amplification Factor ($\text{WAF}_{\text{snap}}$):**
+$$\text{WAF}_{\text{snap}} = \frac{\text{Bytes Written to Disk}}{\text{Unique State Changes}}$$
+For full snapshots over monotonic trajectories, $\text{WAF}_{\text{snap}} \propto t$, whereas for incremental delta encoding, $\text{WAF}_{\text{snap}} \approx 1$.
+:::
+
+Incremental delta encoding mitigates this write amplification by serializing only the differential mutations that occurred since the preceding checkpoint, formalized in @eq-vol3-delta-encoding:
+
+$$\Delta_t = \mathbf{S}_t \ominus \mathbf{S}_{t - \tau}$$ {#eq-vol3-delta-encoding}
+
+where $\tau$ is the checkpoint stride. Rather than re-serializing the full prompt buffer, the runtime records only newly appended message tokens, updated budget registers, and modified filesystem inodes (@tbl-vol3-snapshot-models).
+
+| Architectural Dimension    | Full State Snapshot                                                             | Incremental Delta Snapshot                                                   | Copy-on-Write (CoW) Memory Fork                                   |
+|:---------------------------|:--------------------------------------------------------------------------------|:-----------------------------------------------------------------------------|:------------------------------------------------------------------|
+| **Serialization Overhead** | High; scales linearly with context size $\mathcal{O}(\Vert \mathbf{S}_t \Vert)$ | Low; strictly bounded by window mutation $\mathcal{O}(\Vert \Delta_t \Vert)$ | Near-zero pause; page table duplication $\mathcal{O}(\text{RSS})$ |
+| **Storage Amplification**  | Severe quadratic growth over extended trajectories                              | Minimal; stores unique state transitions                                     | Moderate; proportional to dirty memory page volume                |
+| **Crash Recovery Time**    | Minimal $\mathcal{O}(1)$; single read and instantaneous memory unpack           | Moderate $\mathcal{O}(\tau)$; requires applying delta chain from base        | Minimal $\mathcal{O}(1)$; re-maps backing store or page files     |
+| **Log Compaction Impact**  | Trivial; all historical snapshots before $t$ can be pruned                      | Complex; requires periodic base consolidation to prune logs                  | Moderate; requires background page coalescing and cleanup         |
+| **Isolation Barrier**      | High; complete decoupling from live process memory space                        | Moderate; dependent on continuous replay engine verification                 | Process-bound; tied to local host kernel memory semantics         |
+
+: **State Checkpoint Architecture Trade-Offs**: Operational comparison across full state snapshots, incremental delta encoding, and copy-on-write memory forks. {#tbl-vol3-snapshot-models tbl-colwidths="[20,28,28,24]"}
+
+The trade-off between checkpoint overhead and re-execution recovery time is shown in @fig-vol3-checkpoint-cadence.
+
+::: {#fig-vol3-checkpoint-cadence fig-env="figure" fig-pos="htb" fig-cap="**Periodic Checkpoint Cadence and Replay Recovery**: State snapshots taken at cadence $\tau$ bound recovery recomputation. When a crash occurs at turn $t_{\text{crash}}$, the recovery manager restores snapshot $\mathbf{S}_k$ and replays only the suffix events $\langle e_{k+1}, \dots \rangle$ from the write-ahead log without re-invoking the model." fig-alt="Timeline diagram showing checkpoint snapshots S1, S2, crash event, and delta replay window."}
+![](images/svg/checkpoint-cadence.svg)
+:::
 
 ### What a crash costs, and how often to checkpoint
 
-With checkpoints, recovery restores the latest checkpoint and folds only the log suffix after it. For the trajectory record, that suffix is cheap to fold. For the workspace it is not free. Effects confined to the sandbox, such as file edits whose diffs are in the log, can be re-applied from the recorded results. Effects the log cannot reproduce force a choice. Either the harness rolls the trajectory back to the checkpoint, tells the model which external effects in the discarded turns already happened, and lets it redo the local work, or it escalates. Either way, a crash can cost up to the turns since the last checkpoint, measured in the units that matter to an agent (tokens re-spent, dollars, and wall-clock time).
+With checkpoints, recovery restores the latest checkpoint and folds only the log suffix after it. Effects confined to the sandbox, such as file edits whose diffs are in the log, can be re-applied from the recorded results. Effects the log cannot reproduce force a choice: either roll back to the checkpoint and redo the local turns, or escalate.
 
-That cost sets the cadence. Let $\delta$ be the time a checkpoint pauses the trajectory and $M$ the mean time between failures of the host or worker. Checkpointing every $T$ seconds spends $\delta / T$ of the run on checkpoints and loses on average $T/2$ of work per failure, and the classical first-order optimum [@young1974] balances the two:
+That cost sets the cadence. Let $\delta$ be the time a checkpoint pauses the trajectory and $M$ the mean time between failures of the host or worker. Checkpointing every $T$ seconds spends $\delta / T$ of the run on checkpoints and loses on average $T/2$ of work per failure, balanced by the classical first-order Young optimum [@young1974]:
 
 $$T^{\ast} \approx \sqrt{2\,\delta\,M}$$ {#eq-vol3-young-formula}
 
-Daly refines @eq-vol3-young-formula when $\delta$ is not small relative to $M$ [@daly2006]. Dividing $T^{\ast}$ by the mean turn time converts it into a cadence in turns, and pricing the lost turns in tokens shows what a wrong cadence costs.
+Accounting for second-order restart overhead $\delta_{\text{rec}}$, Daly's higher-order formulation [@daly2006] refines @eq-vol3-young-formula with @eq-vol3-daly-formula:
+
+$$T_{\text{opt}}^{\text{Daly}} = \sqrt{2 \cdot \delta \cdot \left(M + \delta_{\text{rec}}\right)} + \delta \cdot \left(\frac{1}{3}\sqrt{\frac{2\delta}{M}} - 1\right)$$ {#eq-vol3-daly-formula}
 
 ```{python}
 #| label: calc-vol3-durable-checkpoint-cadence
@@ -273,16 +339,12 @@ class CheckpointCadence:
 
 :::
 
-A copy-on-write checkpoint costs little next to a turn that spends seconds in a model call, and preemptible workers have a short $M$, so the optimum is usually every few turns rather than every few hundred.
-
 Four moments call for a checkpoint regardless of the formula, because each is a point the trajectory will want to return to or must not lose:
 
 - **Before an irreversible action**, so the work before the pivot is safe whatever happens after it (@sec-vol3-failure-recovery covers the pivot).
 - **When the trajectory pauses for an approval**, since a wait of hours makes a failure during the wait likely.
 - **Before compaction**, so the pre-compaction context stays reachable.
 - **When the harness moves the trajectory to another worker** (@sec-vol3-persistence-migration).
-
-A checkpoint and the log suffix after it are all that a new worker needs to continue a trajectory. What remains is the protocol for continuing, which does more than restore data.
 
 ## Resuming a Trajectory {#sec-vol3-persistence-migration}
 
@@ -309,10 +371,23 @@ A pause for approval is a resume that the harness planned. When a call is held (
 Long-running tools create the opposite case. A job started through an asynchronous tool (@sec-vol3-tool-calling-async-resumption) may finish after the worker that started it has died. Its result must therefore go to a durable inbox keyed by tool-call ID, not to the worker's memory. On resume, the harness matches each waiting result against the intents in the log and writes the matching `ToolResult`. A result whose tool-call ID has no intent in the log, or that arrives for a trajectory that has since been canceled, is rejected by the record's state guards (@sec-vol3-controlplane-statemachine) rather than delivered to the model.
 
 ### Moving a trajectory
+### Moving a trajectory and fencing tokens
 
-Moving a trajectory between workers, because a node is being drained or preempted, is a resume with a warning. The departing worker lets the current turn finish or cancels it at a turn boundary, takes a checkpoint, and releases its lease; the arriving worker resumes. Only the record, the log suffix, and the workspace's changed files move, typically far smaller than the base image the sandbox started from, which the new worker already has.
+Moving a trajectory between workers—due to node draining, thermal throttling, or spot preemption—is a scheduled resume. The departing worker allows the current turn to complete, takes a checkpoint, and releases its lease; the arriving worker restores the checkpoint and continues.
 
-The danger in any move is two workers acting for one trajectory. A worker cut off by a network partition may not know that its lease expired and that another worker has resumed. The runtime prevents this with a **fencing token**\index{Fencing token}, a generation number that the lease service increments each time ownership changes [@gray1989leases; @kleppmann2017designing]. Every tool dispatch carries the current token, and the tool gateway rejects a dispatch whose token is older than the latest it has seen. The stale worker's next call fails, and it stops. The fencing check sits below the model and below the harness logic, so it holds even if the stale worker's harness is still running normally.
+The sequential phases of live trajectory handoff are illustrated in @fig-vol3-trajectory-migration.
+
+::: {#fig-vol3-trajectory-migration fig-env="figure" fig-pos="htb" fig-cap="**Live Trajectory Migration Architecture**: End-to-end sequence across departing node, distributed coordinator, and arriving node. Clean turn-boundary quiescence ensures no in-flight tool actions during state handoff. Fencing tokens prevent split-brain dual execution." fig-alt="Distributed architecture diagram showing migration sequence between two worker hosts and a centralized coordinator."}
+![](images/svg/fig-vol3-trajectory-migration.svg)
+:::
+
+The critical failure hazard during migration is the **split-brain execution dilemma**\index{Split-brain!trajectory migration}: a worker experiencing a transient network partition or kernel freeze may not realize its lease has expired, continuing to execute steps and issue tool mutations simultaneously with the newly arrived worker. The runtime prevents this through a **monotonically increasing fencing token** $\gamma$\index{Fencing token!distributed lease}:
+
+1. When the distributed lease service grants ownership of trajectory $\tau$ to arriving worker $B$, it increments the epoch counter: $\gamma_B = \gamma_A + 1$.
+2. Every tool invocation payload dispatched by a worker must carry its assigned fencing token: $a = \langle \text{tool}, \text{args}, \gamma \rangle$.
+3. The tool execution gateway and external resource proxies enforce a monotonic gate: any dispatch arriving with $\gamma < \gamma_{\text{current}}$ is unconditionally dropped with an authorization fault.
+
+If stale worker $A$ wakes up from a temporary pause and attempts to issue an external tool call, the gateway rejects it because $\gamma_A < \gamma_B$, preventing phantom mutations and double execution.
 
 ### Resume under drift
 
@@ -378,83 +453,103 @@ Replay works because it never asks the model for anything. The moment an enginee
 
 ## Why Replays Diverge {#sec-vol3-persistence-non-determinism}
 
-An engineer investigating a failure at turn 42 reruns the trajectory with the same model at temperature zero against a copy of the repository at the same commit. The rerun diverges at turn 6, chooses a different tool, and never reaches the failure. Nothing is broken. A rerun has several independent ways to differ from its recording, and knowing them tells the engineer which to control, which to record, and which to accept.
+An engineer investigating an agent failure at turn 42 reruns the trajectory with the identical model at temperature zero against a copy of the repository at the same Git commit. The rerun diverges at turn 6, selects an entirely different tool call, and never reaches the failure. Nothing is broken. An autonomous agent rerun has multiple independent vectors of divergence.
 
 ### Four sources of divergence
 
-@Tbl-vol3-nondeterminism-mitigation groups the sources by where they enter the trajectory.
+@Tbl-vol3-nondeterminism-mitigation categorizes the four architectural strata where non-determinism enters an agent trajectory.
 
-| **Source**          | **How it enters**                                                                                             | **What the runtime does**                                                                           |
-|:--------------------|:--------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------|
-| **The model call**  | Sampling at nonzero temperature; batch composition and reduction order on the serving side at any temperature | Record every reply; never expect a rerun to reproduce one                                           |
-| **Model drift**     | A new model version or serving configuration behind the same model name                                       | Record the served version on every reply; compare versions before comparing behavior                |
-| **Harness inputs**  | Timestamps, random IDs, unordered directory listings, and retrieval results placed into the context           | Read each through the harness, record it as an event, and sort anything with no inherent order      |
-| **The environment** | External services, repositories, and data that changed since the recording                                    | Record every tool result; replay from the log, and pin or snapshot environments for counterfactuals |
+| **Source**          | **How it enters**                                                                                        | **What the runtime does**                                                                           |
+|:--------------------|:---------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------|
+| **The model call**  | Sampling at nonzero temperature; floating-point non-associativity in parallel reduction kernels at $T=0$ | Record every reply; never expect a rerun to reproduce one                                           |
+| **Model drift**     | A new model version or serving configuration behind the same model name                                  | Record the served version on every reply; compare versions before comparing behavior                |
+| **Harness inputs**  | Timestamps, random IDs, unordered directory listings, and retrieval results placed into the context      | Read each through the harness, record it as an event, and sort anything with no inherent order      |
+| **The environment** | External services, repositories, and data that changed since the recording                               | Record every tool result; replay from the log, and pin or snapshot environments for counterfactuals |
 
-: **Sources of Replay Divergence**: The four places where a rerun can depart from its recording, and what the runtime records or controls for each. Only the first cannot be removed; it can only be recorded. {#tbl-vol3-nondeterminism-mitigation tbl-colwidths="[18,44,38]"}
+: **Sources of Replay Divergence**: The four places where a rerun can depart from its recording, and what the runtime records or controls for each. Only the first cannot be eliminated; it must be virtualized and logged. {#tbl-vol3-nondeterminism-mitigation tbl-colwidths="[18,44,38]"}
 
-The model call is the source that surprises engineers most, because a served call is not reproducible even at temperature zero, where batch composition changes the order of floating-point sums and a near-tie between two tokens can flip (@sec-vol3-foundation-model-autoregressive). One changed token changes everything after it in the trajectory, and making serving bit-exact would slow it down and hold only on identical hardware and software. A runtime that wants reproducibility therefore records the model's outputs instead of trying to regenerate them.
+The model call surprises engineers most, because foundation model serving is not deterministic even at temperature zero ($T=0$). In GPU architectures, high-throughput GEMM operations and FlashAttention kernels execute parallel reductions across thousands of streaming multiprocessor cores. Because floating-point addition is non-associative:
 
-Model drift is the same problem at a larger scale. A rerun weeks later may reach a different model version under the same name, and a divergence then says nothing about the harness. The version recorded in every `ModelReplied` event is what lets the engineer tell the two apart.
+$$(a + b) + c \ne a + (b + c)$$
 
-Harness inputs are the source the runtime fully controls, and the most often neglected. A harness that writes the current time into the system prompt, generates a fresh random ID for each tool call, or lists a directory in whatever order the filesystem returns has built a context that can never be reproduced, even with the model stubbed. The fix is to route every such value through the harness, record it as an event on the live run, and read it back from the log on replay. Listings and search results get a stable sort order before they enter the context.
+variations in thread-block warp scheduling lead to micro-variations at the seventh decimal place of token logit distributions. When two candidate tokens hover near an argmax boundary, an imperceptible scheduling shift flips the emitted token. Because autoregressive decoding feeds emitted tokens directly back into the context, a single token divergence at turn $t$ compounds exponentially across future turns.
 
-The environment is what replay already handles by returning recorded tool results. It matters again for counterfactual branches, which run live. A branch that forks at turn 22 against today's repository is testing two changes at once, the engineer's fix and a month of other commits, unless the workspace is restored from the checkpoint and external tools are pointed at a pinned snapshot.
+### Deterministic replay via syscall interposition
+
+To achieve bit-exact replay for diagnostic debugging, the runtime employs **environment interposition**\index{Deterministic replay!syscall interposition}, inserting a syscall and I/O shim between the harness and the underlying host (@fig-vol3-syscall-shim-replay).
+
+::: {#fig-vol3-syscall-shim-replay fig-env="figure" fig-pos="htb" fig-cap="**Deterministic Replay via Environment Interposition**: A syscall shim intercepts non-deterministic host interactions (clocks, random seeds, tool calls) and serves recorded events from the trajectory log, guaranteeing bit-exact re-execution of supervisory logic." fig-alt="Architectural diagram showing syscall interception layer between agent runtime and host operating system."}
+![](images/svg/fig-vol3-syscall-shim-replay.svg)
+:::
+
+When the harness executes in replay mode:
+
+1. **Model virtualization**: Calls to the model API are intercepted and satisfied directly by returning the recorded `ModelReplied` token payload from the log.
+2. **Environment interposition**: System calls requesting the current wall-clock time (`gettimeofday`), process IDs, or cryptographic entropy (`/dev/urandom`) return the recorded timestamps and seeds captured in the `ContextBuilt` event.
+3. **Tool mock injection**: Tool dispatches are intercepted; rather than running shell commands or sending network requests, the shim injects the recorded `ToolResult` data.
+
+This architecture decouples the supervisory code from physical non-determinism, enabling reproducible regression tests and fine-grained root-cause attribution.
 
 ### Measuring a divergence
 
-When an engineer reruns the model on purpose, the useful measurement is where the rerun first departs from the recording. The first turn at which the chosen tool call differs locates the divergence. Comparing the two contexts at that turn shows whether the inputs already differed (a harness or environment source) or were identical (a model source). If the serving interface returns token log-probabilities, a small margin between the top two candidates at the first differing token confirms a near-tie in the model rather than a change in its inputs.
+When an engineer deliberately reruns the model to test resilience, the critical diagnostic metric is the **divergence point**: the earliest turn $t_{\text{div}}$ where the chosen tool action departs from the recorded baseline. Comparing context hashes at $t_{\text{div}}$ immediately isolates the root cause: identical context hashes confirm model-side stochasticity or floating-point non-determinism, whereas differing hashes indicate environmental drift or unsorted directory inputs.
 
 ::: {#chk-10-time-travel-debugging .callout-checkpoint title="Replay and divergence"}
-Before moving on, check that you can answer the following.
+Before moving on, check that you can answer the following:
 
 - [ ] **Replay versus rerun**: Why does replay cost only harness compute, while a rerun from the prompt spends tokens and risks repeating effects?
+- [ ] **Floating-point drift**: Why does floating-point non-associativity in GPU kernels cause temperature-zero decoding divergence?
 - [ ] **Strictness**: What does it mean when a replay attempts a model or tool call that the log does not account for?
-- [ ] **Divergence**: Which of the four sources of divergence can the runtime eliminate, and which can it only record?
-- [ ] **Counterfactuals**: Why must a counterfactual branch restore the workspace from a checkpoint before it continues live?
+- [ ] **Counterfactuals**: Why must a counterfactual branch restore the workspace from a checkpoint before continuing live?
 :::
-
-Everything in this chapter so far assumes the log is complete and available. Over weeks of operation across many agents, keeping it that way is itself a cost.
 
 ## Log Retention {#sec-vol3-persistence-compaction}
 
-[]{#sec-vol3-persistence-engine-design}
+## Trajectory Storage Engines {#sec-vol3-persistence-engine-design}
 
-A team runs a few thousand coding agents a day. Each turn's model reply and tool call amount to a few kilobytes, but test runners and compilers return megabytes of output, most of which the model never saw because the harness truncated it before it reached the context (@sec-vol3-tool-calling-streaming). Within weeks the raw tool output makes up nearly all of the log's volume and almost none of its value. Retention decides what to keep, for how long, and where, without breaking the three things the log is for: resume, replay, and audit.
+Operating an enterprise fleet generating tens of thousands of long-horizon trajectories daily exposes a fundamental storage dilemma: the system must sustain sub-millisecond synchronous write barriers for the active WAL on the critical execution path, while supporting relational indexing for active monitoring and dense columnar batch processing for downstream RL fine-tuning. A single storage technology cannot satisfy these conflicting constraints (@tbl-vol3-storage-engine-comparison).
 
-### The causal record and the bulk
+| Storage Architecture     | Primary Data Structure | Append Latency (p99)          | Random Scan Throughput             | Typical Write Amplification | Optimal Agent Lifecycle Role                                             |
+|:-------------------------|:-----------------------|:------------------------------|:-----------------------------------|:----------------------------|:-------------------------------------------------------------------------|
+| **LSM Tree (Embedded)**  | MemTable + SSTables    | $0.2 - 0.8\ \text{ms}$        | High (for sequential LSN ranges)   | $2 - 5\times$               | **Hot Tier**: Active WAL, local turn barriers, instant crash restart     |
+| **B+ Tree (Relational)** | Paged Disk Blocks      | $5 - 25\ \text{ms}$           | High (multi-attribute index scans) | $10 - 30\times$             | **Warm Tier**: Cluster-wide fleet coordination, HITL approval queues     |
+| **Columnar Lakehouse**   | Parquet / Zstd Blocks  | Batch import ($>1\ \text{s}$) | Ultra-High (vectorized SIMD scans) | $\approx 1.0\times$         | **Cold Tier**: Trajectory curation, safety audits, SFT and RLVR training |
 
-The retention policy splits every event into two parts. The **causal record** is everything a replay or an audit needs to reconstruct what the model saw and what the runtime decided: event headers and tool-call IDs, every model reply, every authorization and approval, every intent, the status of every result, and the result content exactly as it was delivered into the context. The **bulk** is the rest of the raw tool output, the lines that truncation dropped before the model saw them.
+: **Trajectory Storage Engine Paradigms**: Comparison of physical storage architectures, access patterns, write amplification factors, and lifecycle placement for agent systems. {#tbl-vol3-storage-engine-comparison tbl-colwidths="[20,18,16,22,12,12]"}
 
-The causal record never leaves the log, because replay depends on it. The bulk can be **offloaded**\index{Trajectory log!offloading}, moved out of the log into cheaper content-addressed storage while the log keeps a hash of the full output and a pointer to it. @Tbl-vol3-payload-compaction-schema shows one tool result before and after.
+::: {#fig-vol3-storage-pyramid fig-env="figure" fig-pos="htb" fig-cap="**Multi-Tier Trajectory Storage Pyramid**: Organization of event persistence across NVMe SSDs for active live trajectories, distributed key-value stores for recent analytical queries, and cold object storage for long-term audit and training data." fig-alt="Storage pyramid diagram showing tiered latencies and cost from local NVMe down to cold object storage."}
+![](images/svg/fig-vol3-storage-pyramid.svg)
+:::
 
-| **Field**             | **In the live log**                     | **After offloading**                                             |
-|:----------------------|:----------------------------------------|:-----------------------------------------------------------------|
-| **Header**            | Turn, tool-call ID, tool name           | Unchanged                                                        |
-| **Status**            | Exit code, duration                     | Unchanged                                                        |
-| **Delivered content** | The truncated output the model received | Unchanged, because replay must show the model's actual input     |
-| **Full output**       | Every line the tool produced            | A pointer to the full output in bulk storage                     |
-| **Integrity**         | None needed                             | A hash of the full output, so any retrieved copy can be verified |
+### The multi-tier storage pipeline
 
-: **Offloading a Tool Result**: Offloading moves only the part of a tool result that the model never received. The delivered content and everything recovery or replay reads stay in the log. {#tbl-vol3-payload-compaction-schema tbl-colwidths="[20,36,44]"}
+Production architectures resolve this tension by organizing storage into a three-tier lifecycle pyramid (@fig-vol3-storage-pyramid and @tbl-vol3-hybrid-storage-tiers):
 
-The rule that makes this safe is to offload only below the truncation line. A policy that summarized or trimmed the delivered content would leave replay showing an engineer an input the model never received, which is worse than no log at all.
+1. **Hot Tier (Local NVMe / Embedded RocksDB)**: Executes locally on the worker node. When the harness logs a `ToolIntent` or `ToolResult`, it appends directly to an embedded LSM-tree with `fdatasync()`. Because writes are strictly sequential and local, durable settlement completes in under $0.5\ \text{ms}$, satisfying @eq-vol3-wal-ordering without remote network hops.
+2. **Warm Tier (Clustered Relational Database / PostgreSQL)**: An asynchronous background streaming sidecar daemon tails the local RocksDB log and replicates committed event batches to a centralized relational database. This tier provides indexed multi-agent queries, administrative cancellation, and live dashboard monitoring without blocking the execution path.
+3. **Cold Tier (Columnar Object Storage / Apache Parquet)**: An offline batch pipeline consolidates completed trajectories older than 7 days into compressed Apache Parquet files on object storage (S3/GCS), partitioned by tenant, date, and model version. Analytical engines (DuckDB, Trino) and training pipelines stream these columnar chunks directly into GPU memory for policy training (@sec-vol3-trajectory-curation).
 
-### Retention by use
+| Storage Media | Storage Technology                                             | Query / Access Pattern                                            | Operational Function                                                       | Performance & Cost Envelopes                                              |
+|:--------------|:---------------------------------------------------------------|:------------------------------------------------------------------|:---------------------------------------------------------------------------|:--------------------------------------------------------------------------|
+| **Hot Tier**  | Local NVMe SSD; Embedded RocksDB with write-ahead logging      | Sequential append, point lookup via monotonic LSN                 | Real-time WAL, action authorization barrier, instant crash recovery        | Latency $\le 0.5\ \text{ms}$, WAF $\approx 1.0$                           |
+| **Warm Tier** | Clustered PostgreSQL with JSONB indexes and partitioned tables | Indexed range scans, multi-agent status queries, relational joins | Active trajectory monitoring, human-in-the-loop review, fleet coordination | Latency $5 - 50\ \text{ms}$, 99.99% availability                          |
+| **Cold Tier** | Distributed Cloud Object Storage (S3 / GCS Parquet with Zstd)  | Vectorized batch scans (DuckDB, Trino, PyTorch loaders)           | Compliance retention, safety auditing, offline SFT and RLVR                | Scans $\ge 10\ \text{GB/s}$, cost $\le \$0.02/\text{GB}\cdot\text{month}$ |
 
-Different readers need the log at different times, and each can live on storage priced for its access pattern (@tbl-vol3-storage-tiers).
+: **Production Multi-Tier Trajectory Storage Engine**: Characteristics across the three data lifecycle planes. {#tbl-vol3-hybrid-storage-tiers tbl-colwidths="[14,24,24,24,14]"}
 
-| **Stage**   | **Who reads it**                                              | **What it must support**                                             | **Typical storage**                                  |
-|:------------|:--------------------------------------------------------------|:---------------------------------------------------------------------|:-----------------------------------------------------|
-| **Live**    | The worker running the trajectory, and any worker resuming it | Fast durable appends, full content, reads from the latest checkpoint | Local append-only log, replicated                    |
-| **Recent**  | Engineers debugging and replaying; evaluation pipelines       | Queries by trajectory, tool, outcome, and version; full replay       | Shared queryable store, bulk moved to object storage |
-| **Archive** | Auditors; curation pipelines building training data           | Large scans over the causal record; occasional replay                | Compressed columnar files in object storage          |
+### Idempotent ingestion and data deduplication
 
-: **Log Retention by Use**: A trajectory log moves through three stages as its readers change. The causal record survives all three; the bulk may be dropped at any stage the policy allows. {#tbl-vol3-storage-tiers tbl-colwidths="[13,33,30,24]"}
+To preserve causal consistency across the network boundary between worker nodes and the Warm Tier, the relational schema enforces **idempotent upsert semantics** via unique composite keys:
 
-Two mechanical rules keep the stages consistent. Moving events between stages must be idempotent, keyed by trajectory ID and log position, so a copy retried after a crash does not duplicate them. Erasure requests must be satisfiable without rewriting immutable archives, which is usually achieved by encrypting each trajectory under its own key and destroying the key when the trajectory must be forgotten. The archive stage is where the log changes roles. It stops being a recovery mechanism and becomes the evidence base that evaluation reads (@sec-vol3-evaluation) and that curation turns into training data (@sec-vol3-flywheel-provenance), which is why the causal record must survive even when the bulk does not.
+```sql
+INSERT INTO trajectory_events (
+    trajectory_id, sequence_number, event_type,
+    payload, cryptographic_hash, created_at
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (trajectory_id, sequence_number) DO NOTHING;
+```
 
-A durable log, checkpoints, resume, replay, and retention together make the trajectory's history reliable. The mistakes teams make when building them are consistent enough to name.
+This ensures that if a streaming sidecar restarts following a node failure and retransmits an event batch, duplicate events are silently dropped without corrupting the historical sequence.
 
 ## Fallacies and Pitfalls {#sec-vol3-durable-execution-fallacies}
 

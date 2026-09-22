@@ -146,6 +146,31 @@ so a masked position contributes no error signal of its own. It does not disappe
 
 :::
 
+### Formal loss objective and gradient dynamics
+
+Formally, the supervised fine-tuning objective on an agent trajectory of length $T$ is governed by masked cross-entropy:
+$$
+\mathcal{L}_{\text{SFT}}(\theta) = -\frac{1}{\sum_{t=1}^T m_t} \sum_{t=1}^T m_t \log p_\theta(x_t \mid x_{<t})
+$$
+where $m_t \in \{0, 1\}$ is a binary token mask designating whether token $x_t$ is policed by gradient backpropagation:
+$$
+m_t = \begin{cases} 1 & \text{if } x_t \in \tau_{\text{thought}} \cup \tau_{\text{action}} \\ 0 & \text{if } x_t \in \tau_{\text{prompt}} \cup \tau_{\text{schema}} \cup \tau_{\text{observation}} \end{cases}
+$$
+
+If observations are not masked, the gradient decomposes into:
+$$
+\nabla_\theta \mathcal{L}_{\text{unmasked}} = \nabla_\theta \mathcal{L}_{\text{action}} + \nabla_\theta \mathcal{L}_{\text{obs}}
+$$
+Because observations contain stochastic environment outputs (such as non-deterministic file timestamps, ephemeral process IDs, and dynamic network payloads), $\nabla_\theta \mathcal{L}_{\text{obs}}$ injects high-variance noise that penalizes the model for failing to memorize random environmental entropy rather than optimizing the decision policy $\pi_\theta(a \mid s)$. The trade-offs across masking strata are detailed in @tbl-vol3-adaptation-masking-tradeoffs.
+
+| Adaptation Strategy            | Target Tokens ($N_{\text{active}} / T$) | Primary Optimization Target                          | Action Syntax Fidelity                            | Deliberative Planning Robustness                     | Runtime Sandbox Isolation                             |
+|:-------------------------------|:----------------------------------------|:-----------------------------------------------------|:--------------------------------------------------|:-----------------------------------------------------|:------------------------------------------------------|
+| **Unmasked Full Trajectory**   | $100\%$                                 | Environment simulation & textual perplexity          | Poor (gradient dilution across high-entropy logs) | Low (prone to hallucinating environment returns)     | Compromised (risks emitting simulated stdout)         |
+| **Action + Rationale Masking** | $15\% - 30\%$                           | Deliberative planning & structured tool synthesis    | High (gradients concentrated on policy decisions) | High (learns structured intermediate decomposition)  | Robust (clean yielding at tool invocation boundaries) |
+| **Action-Only Masking**        | $5\% - 15\%$                            | API schema compliance & argument accuracy            | Maximum (pure focus on syntax and parameter keys) | Moderate (treats reasoning prose as passive context) | Robust (strictly reinforces tool call boundaries)     |
+| **Observation-Only Masking**   | $70\% - 85\%$                           | World transition dynamics $P(s_{t+1} \mid s_t, a_t)$ | Degraded (learns to imitate external systems)     | Negligible (acts as an environment emulator)         | Inapplicable (functions as a simulator, not a policy) |
+: **Trajectory Adaptation and Loss Masking Trade-Offs**: Active token ratios, optimization targets, and runtime isolation across masking strategies. {#tbl-vol3-adaptation-masking-tradeoffs}
+
 ### Why observations must be masked
 
 Observation loss masking (principle \ref{pri-vol3-action-masked-loss}) exists because an agent trajectory is not one author's text. Unmasked training asks one set of weights to learn two different things at once. One is the policy, $P(a_t \mid s_t)$, which maps what the agent has seen to what it should do next. The other is a model of the environment, $P(s_{t+1} \mid s_t, a_t)$, which predicts what a shell, a compiler, or an API will return. In model-based reinforcement learning, learning the second is the point. In an agent with real tools, it is waste. The compiler is present at every turn and returns its output exactly; the model gains nothing from predicting a temporary path, a process identifier, or the column of a syntax error.
@@ -247,6 +272,26 @@ Per-token normalization (@eq-loss-token) weights every target token equally, so 
 
 : **Loss Normalization for Trajectory Batches**: How per-token and per-example averaging weight trajectories of different lengths. {#tbl-vol3-loss-normalization-comparison}
 
+### Loss normalization dynamics across variable-length trajectories
+
+When trajectories are packed into training batches, the choice of loss normalization significantly impacts gradient variance. Under token-level normalization:
+$$
+\mathcal{L}_{\text{token}} = \frac{\sum_{i=1}^B \sum_{t=1}^{T_i} m_{i,t} \ell_{i,t}}{\sum_{i=1}^B \sum_{t=1}^{T_i} m_{i,t}}
+$$
+where $\ell_{i,t} = -\log p_\theta(x_{i,t} \mid x_{i,<t})$. Under sequence-level normalization:
+$$
+\mathcal{L}_{\text{seq}} = \frac{1}{B} \sum_{i=1}^B \frac{1}{\sum_{t=1}^{T_i} m_{i,t}} \sum_{t=1}^{T_i} m_{i,t} \ell_{i,t}
+$$
+In token-level normalization, a 100-turn trajectory containing 16,384 tokens contributes 32 times more gradient mass than a 2-turn trajectory containing 512 tokens, causing updates to over-index on multi-turn failure recoveries at the expense of concise, single-turn tool calls. Sequence-level normalization restores equal policy gradient weight across tasks.
+
+### Block-diagonal attention isolation mechanics
+
+Packing multiple trajectories into a single sequence buffer eliminates zero-padding waste, but requires strict attention isolation. Rather than computing full $O(L^2)$ attention across the packed buffer, modern kernel implementations (such as FlashAttention-2 and FlashAttention-3) accept a cumulative sequence length vector $\mathtt{cu\_seqlens} = [0, T_1, T_1 + T_2, \dots, \sum T_i]$. The block-diagonal attention mask enforces:
+$$
+A_{i,j} = \begin{cases} \frac{Q_i K_j^T}{\sqrt{d}} & \text{if } \text{traj}(i) = \text{traj}(j) \land j \le i \\ -\infty & \text{otherwise} \end{cases}
+$$
+This guarantees that query token $i$ can attend only to preceding tokens within its own trajectory, preventing cross-trajectory state pollution.
+
 ### Packing and cross-trajectory attention
 
 ::: {#dfn-sequence-packing .callout-definition title="Sequence packing"}
@@ -342,6 +387,38 @@ $$9.3 \times 8{,}000 \approx 74{,}000 \text{ tokens} \quad \text{vs.} \quad 0.6 
 
 **Systems insight**: Per-step accuracy measured on demonstrations overstates task reliability, and the overstatement grows with the square of the horizon. On a long task, the tokens spent in unrecoverable states are paid in cost per accepted task, not just in failed runs.
 
+:::
+
+### Compounding regret derivation in behavioral cloning
+
+Under standard behavioral cloning (BC) with teacher forcing, training assumes that the policy observes demonstration states drawn from an expert distribution $d_{\pi^*}$. If the policy has an expected single-step error probability bounded by $\epsilon$:
+$$
+\mathbb{E}_{s \sim d_{\pi^*}}[\mathbb{I}(\pi_\theta(s) \neq \pi^*(s))] \le \epsilon
+$$
+in an autoregressive rollout of horizon $T$, the first mistake diverts the policy to an unmodeled state $s \notin \text{supp}(d_{\pi^*})$. Because the policy was never trained on its own error states, subsequent predictions have error probability approaching 1. The expected total trajectory regret compounds quadratically:
+$$
+\mathbb{E}[\text{Regret}_{\text{BC}}(T)] \le \sum_{t=1}^T t \cdot \epsilon = \epsilon \cdot \frac{T(T+1)}{2} = \mathcal{O}(\epsilon T^2)
+$$
+
+Under interactive dataset aggregation (DAgger), rollouts are collected on-policy from the agent's induced state distribution $d_{\pi_\theta}$, and an expert labels the correction action. The expected regret bounds linearly with the trajectory horizon:
+$$
+\mathbb{E}[\text{Regret}_{\text{DAgger}}(T)] \le \mathcal{O}(\epsilon T)
+$$
+
+The real-world failure mode of unmitigated exposure bias is demonstrated in @lst-vol3-exposure-bias-trace, where a fine-tuned coding agent becomes trapped in an infinite error-retry loop.
+
+::: {#lst-vol3-exposure-bias-trace lst-cap="**Failure Trace: Unmitigated Exposure Bias in Autonomous Trajectories**: An agent fine-tuned solely on pristine demonstrations encounters an unfamiliar Git CLI syntax error, entering an unrecoverable infinite loop because its training distribution contained zero recovery paths."}
+```bash
+# Policy loops on unmodeled state: git commit --force-resolve (Exit Code 128)
+[Step 14] ACTION: git commit -m "fix bug" --force-resolve
+[Step 14] OBS:    error: unknown option `force-resolve' (exit code 128)
+[Step 15] THOUGHT: Retrying command to resolve conflicts...
+[Step 15] ACTION: git commit -m "fix bug" --force-resolve
+[Step 15] OBS:    error: unknown option `force-resolve' (exit code 128)
+[Step 16] THOUGHT: Retrying command to resolve conflicts...
+[Step 16] ACTION: git commit -m "fix bug" --force-resolve
+[Step 16] OBS:    error: unknown option `force-resolve' (exit code 128)
+```
 :::
 
 ### On-policy data collection
@@ -447,6 +524,61 @@ One budget check keeps expectations honest. Adapters shrink the trained paramete
 
 Adapters also narrow what training can disturb, but they do not prevent it. An adapter trained only on tool-calling trajectories can still degrade general instruction following, reasoning, or knowledge the base model had, which is the classic catastrophic forgetting of sequential training [@kirkpatrick2017]. The effective fix is in the data rather than the parameterization. Mixing general instruction data into the agent corpus preserves general ability while adding agent skill [@zeng2023agenttuning], and the mixing ratio is a tuning parameter set by evaluation. That evaluation is the last and deciding step of the pipeline.
 
+### The activation memory wall in long-horizon trajectories
+
+Fine-tuning agent models on extended multi-turn trajectories ($L = 32{,}768$ to $128{,}000$ tokens) encounters the *activation memory wall*. While model weights remain fixed, activation memory during backward passes scales linearly with sequence length $L$ and batch size $B$. For a transformer layer with hidden dimension $d_{\text{model}}$, attention heads $a$, and selective activation checkpointing, layer activation memory satisfies:
+$$
+M_{\text{act}} = B \cdot L \cdot d_{\text{model}} \cdot \left(34 + 5 \cdot \frac{a \cdot L}{d_{\text{model}}}\right) \text{ bytes per layer}
+$$
+As quantified in @tbl-vol3-sft-memory-footprints and @tbl-vol3-sft-memory-breakdown, activation memory rapidly dwarfs static adapter parameter weights, necessitating sequence parallelism, activation recomputation, and FlashAttention kernel optimization.
+
+| SFT Adaptation Regime            | Base Weights & Gradients      | Optimizer State     | Dynamic Activations ($T=64\text{k}$) | Total HBM Footprint | Minimum Hardware Requirement                           |
+|:---------------------------------|:------------------------------|:--------------------|:-------------------------------------|:--------------------|:-------------------------------------------------------|
+| **Full Parameter SFT (16-bit)**  | 280 GB (Weights + Grads)      | 840 GB (AdamW fp32) | ~160 GB (No Checkpointing)           | ~1,280 GB HBM       | Multi-node cluster ($16\times 80\text{ GB}$ H100)      |
+| **QLoRA (NF4, No Checkpoint)**   | 35 GB (NF4 base + LoRA grads) | 3 GB (Paged AdamW)  | ~160 GB (No Checkpointing)           | ~198 GB HBM         | $4\times 80\text{ GB}$ or $2\times 141\text{ GB}$ H200 |
+| **QLoRA (NF4 + Act Checkpoint)** | 35 GB (NF4 base + LoRA grads) | 3 GB (Paged AdamW)  | 18 GB (Selective Rematerialization)  | ~56 GB HBM          | Single $1\times 80\text{ GB}$ H100 GPU                 |
+
+: **Accelerator Memory Footprint Across 70B SFT Configurations**: Hardware memory distribution across model weights, optimizer states, and dynamic activations ($T=64\text{k}$ tokens, micro-batch size $B=1$). {#tbl-vol3-sft-memory-footprints}
+
+| Model Architecture | Adaptation Method         | Static Memory (GB) | Dynamic Activations ($T=4\text{k}$) | Dynamic Activations ($T=16\text{k}$) | Dynamic Activations ($T=64\text{k}$) | Total Memory ($T=64\text{k}$) | Hardware Allocation                  |
+|:-------------------|:--------------------------|:-------------------|:------------------------------------|:-------------------------------------|:-------------------------------------|:------------------------------|:-------------------------------------|
+| **8B Dense**       | Full SFT (AdamW)          | $128.0$            | $8.4\text{ GB}$                     | $33.6\text{ GB}$                     | $134.4\text{ GB}$                    | $262.4\text{ GB}$             | $4\times \text{H}100\text{ (80GB)}$  |
+| ($L=32, d=4096$)   | LoRA ($r=16$)             | $17.2$             | $8.4\text{ GB}$                     | $33.6\text{ GB}$                     | $134.4\text{ GB}$                    | $151.6\text{ GB}$             | $2\times \text{H}100\text{ (80GB)}$  |
+|                    | LoRA + Sel. Checkpoint    | $17.2$             | $1.8\text{ GB}$                     | $7.2\text{ GB}$                      | $28.8\text{ GB}$                     | $46.0\text{ GB}$              | $1\times \text{H}100\text{ (80GB)}$  |
+|                    | QLoRA (4-bit) + Sel. Chk. | $5.8$              | $1.8\text{ GB}$                     | $7.2\text{ GB}$                      | $28.8\text{ GB}$                     | $34.6\text{ GB}$              | $1\times \text{A}100\text{ (40GB)}$  |
+| **32B Dense**      | Full SFT (AdamW)          | $512.0$            | $18.2\text{ GB}$                    | $72.8\text{ GB}$                     | $291.2\text{ GB}$                    | $803.2\text{ GB}$             | $16\times \text{H}100\text{ (80GB)}$ |
+| ($L=64, d=5120$)   | LoRA ($r=16$)             | $66.4$             | $18.2\text{ GB}$                    | $72.8\text{ GB}$                     | $291.2\text{ GB}$                    | $357.6\text{ GB}$             | $8\times \text{H}100\text{ (80GB)}$  |
+|                    | LoRA + Sel. Checkpoint    | $66.4$             | $3.2\text{ GB}$                     | $12.8\text{ GB}$                     | $51.2\text{ GB}$                     | $117.6\text{ GB}$             | $2\times \text{H}100\text{ (80GB)}$  |
+|                    | QLoRA (4-bit) + Sel. Chk. | $19.8$             | $3.2\text{ GB}$                     | $12.8\text{ GB}$                     | $51.2\text{ GB}$                     | $71.0\text{ GB}$              | $1\times \text{H}100\text{ (80GB)}$  |
+| **70B Dense**      | Full SFT (AdamW)          | $1{,}120.0$        | $31.5\text{ GB}$                    | $126.0\text{ GB}$                    | $504.0\text{ GB}$                    | $1{,}624.0\text{ GB}$         | $32\times \text{H}100\text{ (80GB)}$ |
+| ($L=80, d=8192$)   | LoRA ($r=16$)             | $144.2$            | $31.5\text{ GB}$                    | $126.0\text{ GB}$                    | $504.0\text{ GB}$                    | $648.2\text{ GB}$             | $16\times \text{H}100\text{ (80GB)}$ |
+|                    | LoRA + Sel. Checkpoint    | $144.2$            | $5.4\text{ GB}$                     | $21.6\text{ GB}$                     | $86.4\text{ GB}$                     | $230.6\text{ GB}$             | $4\times \text{H}100\text{ (80GB)}$  |
+|                    | QLoRA (4-bit) + Sel. Chk. | $41.8$             | $5.4\text{ GB}$                     | $21.6\text{ GB}$                     | $86.4\text{ GB}$                     | $128.2\text{ GB}$             | $2\times \text{H}100\text{ (80GB)}$  |
+
+: **Accelerator Memory Breakdown for Agent Adaptation**: Comprehensive accelerator memory breakdown across model scales and context lengths under Full SFT, LoRA, and QLoRA configurations with selective activation checkpointing. Values assume micro-batch size $B=1$ and FlashAttention-2 integration. {#tbl-vol3-sft-memory-breakdown}
+
+### Multi-tenant adapter dispatch and SRAM swapping
+
+In production agent platforms, multiple specialized adapters (such as coding specialists, schema translation adapters, and database query writers) share a single frozen base foundation model. Instead of maintaining dedicated GPU memory allocations for each fine-tuned variant, runtimes utilize Low-Rank Adaptation (LoRA) where weight updates are factored into low-rank matrices:
+$$
+W = W_0 + \frac{\alpha}{r} B A, \quad B \in \mathbb{R}^{d \times r}, A \in \mathbb{R}^{r \times k}, \quad r \ll \min(d, k)
+$$
+
+The runtime dynamically hot-swaps adapter matrices into GPU SRAM and high-bandwidth memory (HBM) on a per-request basis, diagrammed in @fig-vol3-lora-adapter-swapping.
+
+::: {#fig-vol3-lora-adapter-swapping fig-env="figure" fig-pos="htb" fig-cap="**Multi-Tenant Low-Rank Adapter Swapping in Agent Serving**: Architectural schematic of rank-$r$ parameter decomposition ($W = W_0 + \frac{\alpha}{r} B A$) alongside the multi-tenant serving engine using segmented batched GEMM (S-LoRA/Punica). In Panel (a), the forward pass computes base projection $h_{\text{base}} = x W_0$ concurrently with low-rank adapter projections $x A^T B^T$, while intrinsic parameter manifold geometry restricts updates to the $r(d_{\text{in}} + d_{\text{out}})$-dimensional subspace $\mathcal{M}_r \subset \mathbb{R}^D$. In Panel (b), an on-chip Adapter Page Table routes batched sequence requests to dedicated adapter weights in High Bandwidth Memory (HBM), performing segmented batched GEMM with zero base model reloading overhead." fig-alt="Systems architecture schematic illustrating low-rank adapter parameter decomposition, intrinsic subspace geometry, and multi-tenant HBM adapter page table dispatch with segmented batched GEMM."}
+![](images/svg/lora_adapter_swapping.svg)
+:::
+
+The latency, memory bandwidth, and capacity trade-offs across adapter serving tiers are detailed in @tbl-vol3-adapter-dispatch-arch.
+
+| Dispatch Architecture           | Base Weight Representation                                             | Per-Domain Memory Overhead                                | Concurrency & Scaling                                                   | Hardware Serving Efficiency                                     |
+|:--------------------------------|:-----------------------------------------------------------------------|:----------------------------------------------------------|:------------------------------------------------------------------------|:----------------------------------------------------------------|
+| **Dedicated Full Instances**    | Independent 70B parameter replicas ($140\text{ GB}$ per domain).       | $140\text{ GB}$ per concurrent capability.                | Low; requires distinct GPU clusters per domain.                         | Poor; $3\times$ hardware cost, severe idle capacity.            |
+| **Fused Dynamic LoRA Dispatch** | Single shared frozen 70B base model in GPU HBM ($35 - 140\text{ GB}$). | $10 - 50\text{ MB}$ per specialized adapter ($A_k, B_k$). | High; dynamically routes batches across Bash, SQL, and Python adapters. | Optimal; multiplexes dozens of capabilities on a single server. |
+
+: **Multi-Tenant LoRA Adapter Dispatch Architecture**: Comparison of dedicated full model instances versus fused dynamic adapter routing across diverse agent domains. {#tbl-vol3-adapter-dispatch-arch}
+
 ## Evaluating a Fine-Tuned Agent {#sec-vol3-fine-tuning-benchmarking}
 
 A fine-tuning run ends with a set of trained weights and a validation loss. Neither says whether the agent is better. The evaluation machinery of @sec-vol3-evaluation measures agents; this section decides what to measure for a fine-tuned one, and what each measurement protects against.
@@ -500,11 +632,56 @@ The fifth is capability retention. The candidate is also scored on held-out gene
 
 A scorecard is only meaningful if the comparison is controlled. The candidates run on the same task fixtures, with the same tool versions, the same sandbox configuration, the same budgets, and the same number of repeated runs, and the differences are reported with the confidence intervals of @sec-vol3-evaluation-rigor. The baseline always includes the cheaper alternative that triage considered, such as the base model with an improved prompt or schema, because the point of fine-tuning is to beat the fixes that do not change weights. Evaluation tasks must not overlap the training corpus at the level of repositories and task families, which the split hygiene of @sec-vol3-flywheel-evaluation enforces before training begins. A candidate that passes enters the staged release of @sec-vol3-evaluation-releases, which requires causal and statistical evidence before it replaces the running policy (principle \ref{pri-vol3-release-evidence}).
 
+### Perplexity divergence and multi-dimensional evaluation
+
+Evaluating fine-tuned agent policies using language modeling perplexity or token-level validation loss is notoriously unreliable. A policy can exhibit lower validation loss while simultaneously suffering catastrophic operational collapse—such as emitting invalid tool JSON or entering infinite retry loops upon receiving unexpected command line errors. Robust evaluation requires an empirical evaluation scorecard measuring task completion rates, syntactic validity, step efficiency, and catastrophic forgetting, as diagrammed in @fig-vol3-sft-evaluation-radar.
+
+::: {#fig-vol3-sft-evaluation-radar fig-env="figure" fig-pos="htb" fig-cap="**Multi-Metric Evaluation Radar for SFT Checkpoints**: Multi-metric radar comparison and quantitative scorecard evaluating candidate policy checkpoints against the unadapted base model and minimum production acceptance thresholds across four operational axes: Task Completion Rate, Syntactic Tool Validity, Trajectory Execution Efficiency, and Catastrophic Forgetting Audit. While Checkpoint A achieves high syntactic validity ($99.2\%$), it collapses on trajectory efficiency ($28\%$) and damages base reasoning ($58\%$). Checkpoint B comfortably clears the production threshold envelope across all four dimensions, ensuring robust deployment." fig-alt="Radar chart and scorecard comparing Base Model, Checkpoint A, and Checkpoint B against production thresholds across Task Completion, Syntax Validity, Trajectory Efficiency, and Forgetting Audit."}
+![](images/svg/ch13-sft-evaluation-radar.svg)
+:::
+
+The four operational evaluation dimensions are evaluated systematically in @tbl-vol3-sft-synthesis-scorecard.
+
+| Adaptation Configuration                                  | Sequence Packing ($U_{\text{pack}}$) | Training Time (8$\times$ H100 Node) | Tool Syntax Error Rate | SWE-bench Task Success | Checkpoint Artifact Size |
+|:----------------------------------------------------------|:-------------------------------------|:------------------------------------|:-----------------------|:-----------------------|:-------------------------|
+| **Zero-Shot Base Model** (Prompting only)                 | N/A                                  | 0.0 hrs                             | 14.8%                  | 18.2%                  | 141.2 GB (Base)          |
+| **Naive SFT** (Full loss, zero-padded)                    | 9.2%                                 | 34.2 hrs                            | 3.4%                   | 22.4%                  | 141.2 GB (Full)          |
+| **Unregularized SFT** (Action-masked, packed)             | 97.1%                                | 3.5 hrs                             | 2.1%                   | 26.8%                  | 1.8 GB (LoRA)            |
+| **Synthesized SFT Pipeline** (Masked, packed, schema-reg) | 97.4%                                | 3.6 hrs                             | **0.1%**               | **38.6%**              | **1.8 GB (LoRA)**        |
+
+: **Empirical Adaptation Strategy Scorecard**: Performance, training efficiency, and artifact size comparison across adaptation strategies on a 70B parameter policy evaluated on 300 held-out software engineering trajectories. {#tbl-vol3-sft-synthesis-scorecard}
+
+### Controlled evaluation protocols and harness components
+
+Benchmarking autonomous agents requires hermetic evaluation environments to prevent data leakage and non-deterministic network noise. Key architectural harness components are detailed in @tbl-vol3-evaluation-harness-components.
+
+| Harness Component        | Subsystem & Boundary     | Operational Mechanism                                                  | Determinism & Hermeticity Contract                                   |
+|:-------------------------|:-------------------------|:-----------------------------------------------------------------------|:---------------------------------------------------------------------|
+| **Candidate Checkpoint** | Model serving runtime    | Frozen model weights with greedy sampling ($T=0, \text{top\_p}=1.0$).  | Eliminates stochastic generation noise across repeat trials.         |
+| **Task Fixture**         | Task configuration store | Pinned initial state $\mathbf{S}_0$ and sealed validation test suites. | Strictly isolated from training corpus; zero data contamination.     |
+| **Hermetic Container**   | Sandbox runtime          | Isolated OverlayFS filesystem, loopback-only network namespace.        | Prevents host state leakage and external network dependency drifts.  |
+| **Pinned Tool Mocks**    | Sandbox IPC shim         | Injects deterministic execution latencies and canned return payloads.  | Insulates evaluation from third-party service latency and outages.   |
+| **Sealed Test Oracle**   | Privileged supervisor    | Executes authoritative unit tests from read-only host mount.           | Asserts invariant satisfaction; immune to agent workspace tampering. |
+
+: **Hermetic Evaluation Harness Architectural Components**: Component roles, isolation boundaries, and determinism mechanisms across benchmarking stages. {#tbl-vol3-evaluation-harness-components}
+
 ## What Training Leaves to the Runtime {#sec-vol3-fine-tuning-synthesis}
 
 The pipeline is now complete, and each stage exists because of a specific way imitation can go wrong. Serialization writes each admitted trajectory in the template the model is served with, in causal order, with evidence preserved. The observation mask trains the model on what it writes and nothing else. Packing isolates trajectories in attention and position and weights them per example. On-policy data and fault injection extend the corpus to the states the policy actually reaches, with every new label admitted through the same cascade as the original data. Schema perturbation keeps the model reading contracts from context. Distillation supplies trajectories and removes procedure from the prompt, adapters package the result per role, and closed-loop evaluation decides whether it ships.
 
 The result is a policy whose proposals pass the runtime's gates more often: more valid calls, fewer wasted turns, more recoveries after failed tests. It is not a policy the runtime can trust more. Model-side training lowers the probability of a bad proposal and cannot remove it, so the invariant closure principle (\ref{pri-invariant-closure}) holds exactly as before. Every call still passes the runtime's schema validator and authorization check, every command still runs inside the sandbox, and every claim of completion is still checked by sealed tests (@sec-vol3-intro-invariant-closure). A team that relaxes a runtime check because the fine-tuned model rarely trips it has converted a rare model error into an unchecked one.
+
+### The automated policy compilation pipeline
+
+The end-to-end lifecycle of trajectory collection, validation filtering, schema regularization, parameter-efficient fine-tuning, and empirical scorecard evaluation forms an automated policy compilation pipeline, diagrammed in @fig-vol3-sft-synthesis-flow.
+
+::: {#fig-vol3-sft-synthesis-flow fig-env="figure" fig-pos="htb" fig-cap="**The End-to-End Supervised Policy Compilation Pipeline**: Architectural directed acyclic graph (DAG) of the six hermetic stages governing supervised policy compilation, spanning trajectory data preparation, distributed parameter optimization, and artifact release verification. Raw multi-turn execution trajectories undergo schema validation (Stage 1), deterministic role serialization with action-targeted loss masking (Stage 2), and dynamic sequence packing with block-diagonal attention masking (Stage 3). The compiled sequence buffers feed distributed low-rank parameter optimization (Stage 4), producing immutable signed adapter manifests (Stage 5) that must clear sealed regression sandboxes (Stage 6) before promotion to production serving." fig-alt="Six-stage pipeline DAG showing Ingestion, Serialization, Dynamic Packing, Low-Rank Optimization, Artifact Packaging, and Regression Gating with verification and pass-fail promotion paths."}
+![](images/svg/fig-vol3-sft-synthesis-flow.svg)
+:::
+
+### The external enforcement invariant
+
+Fine-tuning adapts model priors to favor valid tool schemas, concise reasoning tokens, and robust error-recovery trajectories. However, no amount of parameter optimization can transform a stochastic neural network into an unbreachable security barrier. As formalized in the invariant closure principle (\ref{pri-invariant-closure}), runtime capabilities, filesystem isolation, network egress firewalls, and credential brokering must remain enforced mechanically beneath the model.
 
 ## Fallacies and Pitfalls {#sec-vol3-fine-tuning-fallacies}
 
