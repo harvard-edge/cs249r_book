@@ -118,11 +118,11 @@ def build():
         f'<tspan font-family="{SERIF}" font-size="82" font-style="italic" fill="{SUB_C}">. Build it.</tspan>'
         f'</text>'
     )
-    p.append(_t(L, 1135, "From Tensors to Hardware-Accelerated Transformers", SANS, 42, TEXT_C, ls=1))
+    p.append(_t(L, 1135, "From Tensors to Hardware-Accelerated Transformers and Systems Extensions", SANS, 38, TEXT_C, ls=1))
 
     # --- header divider bar -------------------------------------------------
     p.append(_t(L, 1330, "THE FULL RUNTIME STACK", MONO, 28, TEXT_C, ls=6))
-    p.append(_t(R, 1330, "20 MODULES / 4 TIERS", MONO, 28, ACCENT, anchor="end", ls=6))
+    p.append(_t(R, 1330, "21 MODULES / 5 TIERS", MONO, 28, ACCENT, anchor="end", ls=6))
     p.append(f'<line x1="{L}" y1="1360" x2="{R}" y2="1360" stroke="{DOTS}" stroke-width="2"/>')
 
     # --- hero: 20-module continuous circuit snaking flow --------------------
@@ -201,6 +201,24 @@ def build():
         f'</text>'
     )
     p.append(_t(cap_x, ly + n + 44, "Full TinyGPT Architecture · MLPerf Benchmark Olympics", SANS, 25, TEXT_C))
+
+    # Tier V: Extensions
+    ext_label_x = cap_x + cap_w + 120
+    p.append(_t(ext_label_x, ly + 58, "V", SERIF, 72, ACCENT, weight="bold"))
+    p.append(_t(ext_label_x, ly + 106, "EXTENSIONS", SANS, 32, TITLE_C, weight="bold", ls=4))
+    p.append(_t(ext_label_x, ly + 144, "MODULE 21", MONO, 24, TEXT_C, ls=2))
+
+    ext_x, ext_w = ext_label_x + 300, 420
+    p.append(f'<rect x="{ext_x}" y="{ly}" width="{ext_w}" height="{n}" rx="8" fill="{BOX_BG}" stroke="{BOX_BORDER}" stroke-width="2.5"/>')
+    p.append(
+        f'<text x="{ext_x + ext_w/2}" y="{ly + n/2 + 18}" text-anchor="middle" xml:space="preserve">'
+        f'<tspan font-family="{MONO}" font-size="42" font-weight="bold" fill="{BOX_TEXT}">21  </tspan>'
+        f'<tspan font-family="{SERIF}" font-size="56" font-weight="bold" fill="{BOX_TEXT}">Contrib</tspan>'
+        f'</text>'
+    )
+    p.append(_t(ext_x, ly + n + 44, "Native Hardware &amp; Systems Ecosystem Labs", SANS, 25, TEXT_C))
+
+    p.append(f'<line x1="{cap_x + cap_w}" y1="{ly + n/2}" x2="{ext_x - 12}" y2="{ly + n/2}" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" marker-end="url(#arr)"/>')
 
     # --- author -------------------------------------------------------------
     p.append(f'<rect x="{L}" y="2780" width="120" height="4" fill="{ACCENT}"/>')
