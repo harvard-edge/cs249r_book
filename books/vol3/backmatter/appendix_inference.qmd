@@ -9,6 +9,7 @@ This appendix is a quantitative reference for the hardware and serving constrain
 | If you are diagnosing or sizing...                                                  | Jump to...                               | Reference payoff                                                                                       |
 |:------------------------------------------------------------------------------------|:-----------------------------------------|:-------------------------------------------------------------------------------------------------------|
 | Underutilized Tensor Cores or low single-token decode throughput                    | @sec-vol3-appendix-inference-roofline    | The Roofline model, ridge point derivation, and the single-batch parameter shuttle floor               |
+| Where sampling and grammar masks run, or how speculative decoding preserves output  | @sec-vol3-appendix-inference-decode-loop | Logit vs. token-ID transfer volume, per-state mask tables, and the speculative acceptance rule         |
 | Accelerator out-of-memory (OOM) faults or context memory budgeting                  | @sec-vol3-appendix-inference-kv-cache    | The $2LH_{\text{kv}}d_{\text{head}}b$ tensor geometry derivation, GQA scaling, and tool-wait stranding |
 | Queue buildup, memory exhaustion under concurrency, or tool latency inflation       | @sec-vol3-appendix-inference-queueing    | Little's Law with tool-wait residency, continuous batching, and memory-headroom sizing                 |
 | Inconsistent distributed state or partial failure across non-atomic external tools  | @sec-vol3-appendix-inference-distributed | Two-Phase Commit limitations, compensating Saga invariants, and Write-Ahead Logging (ARIES)            |
@@ -114,6 +115,44 @@ $$\text{Throughput}_{\max}(B=1) = \frac{1}{t_{\text{shuttle}}} = \frac{\beta}{N 
 : **Single-Batch Parameter Shuttle Floors Across Accelerator Generations**: Minimum physical time and maximum throughput per token for unbatched decode ($B=1$) across parameter scales and memory interfaces. Sized for single-node tensor parallelism where aggregate $\beta$ equals the combined bus bandwidth. {#tbl-appdx-shuttle-floors}
 
 The values in @tbl-appdx-shuttle-floors demonstrate why engineering agentic systems requires strict control over generated token counts. When an agent produces hundreds of tokens of extraneous stream-of-consciousness text or redundant verbosity, it directly converts memory bandwidth into operational delay.
+
+## Decode-loop mechanics {#sec-vol3-appendix-inference-decode-loop}
+
+Three pieces of per-token work sit inside every decode step besides the forward pass: turning logits into a token, applying any grammar mask, and, when speculative decoding is used, checking drafted tokens. Each is cheap only if it stays beside the sampler. This section sizes them.
+
+### Where sampling runs
+
+At each step the model produces one logit per vocabulary entry. With a vocabulary of $|\mathcal{V}| = 128{,}000$ entries stored in 16-bit precision, one logit vector is
+
+$$128{,}000 \times 2\text{ bytes} = 256{,}000\text{ bytes}$$
+
+per stream per token. A server running $B = 64$ streams at $R = 40$ tokens per second per stream emits $B \cdot R = 2{,}560$ tokens per second, so shipping raw logits to a host process for sampling would move
+
+$$2{,}560 \times 256{,}000\text{ bytes/s} \approx 655\text{ MB/s}$$
+
+across the host interconnect, in 2,560 small transfers per second, each paying fixed transfer and synchronization overhead on the decode critical path. Sampling on the accelerator reduces each step's output to one integer token identifier of 4 bytes, or about 10 KB/s for the same load, a reduction of $256{,}000 / 4 = 64{,}000\times$. The token identifier is therefore the natural unit of exchange between the model service and everything outside it.
+
+### Grammar masks
+
+A grammar-constrained decoder needs the set of legal tokens for the current automaton state at every step. Stored as one bit per vocabulary entry, a mask for $|\mathcal{V}| = 131{,}072$ occupies
+
+$$\frac{131{,}072}{8} = 16{,}384\text{ bytes}$$
+
+and a schema that compiles into $|Q| = 512$ automaton states needs $512 \times 16{,}384 = 8{,}388{,}608$ bytes, about 8.4 MB, for the full table. A table that size fits in an accelerator's on-chip cache, so applying the mask costs one table lookup and one element-wise addition fused into the sampling step.
+
+The alternative is to advance the automaton in a separate host process. Each step then pays a device-to-host transfer of the sampled token, a host-side state transition, a host-to-device transfer of the next mask, and a relaunch of the next step. Summed, these are on the order of 20 µs per token under ideal conditions and can reach 50 to 150 µs under host contention. Over a 500-token output that is roughly 10 to 75 ms of stall on the critical path, a direct tax on decode throughput. Large or recursive grammars whose state space is too big for dense tables use compressed token tries and precompute masks for likely next states, but the principle is unchanged: the mask must be ready when the logits are.
+
+### Speculative decoding
+
+Speculative decoding shortens the serial chain without changing the output distribution [@leviathan2023fast]. A small draft model $q$ proposes $k$ tokens $\tilde{x}_1, \dots, \tilde{x}_k$ one after another, which is cheap because the draft model is small. The target model $p$ then scores all $k$ positions in a single forward pass. Scanning left to right, candidate $\tilde{x}_j$ is accepted with probability
+
+$$\alpha_j = \min\left(1, \frac{p(\tilde{x}_j \mid \cdot)}{q(\tilde{x}_j \mid \cdot)}\right)$$ {#eq-appdx-spec-accept}
+
+At the first rejection, the remaining drafts are discarded and one replacement token is drawn from the normalized residual distribution
+
+$$p_{\text{res}}(v) = \frac{\max\left(0,\; p(v) - q(v)\right)}{\sum_{w \in \mathcal{V}} \max\left(0,\; p(w) - q(w)\right)}$$ {#eq-appdx-spec-residual}
+
+Together, the acceptance test of @eq-appdx-spec-accept and the resampling rule of @eq-appdx-spec-residual make each emitted token distributed exactly as if it had been sampled from $p$ alone. Each target pass therefore emits between one and $k + 1$ tokens, and the speedup depends on how often the draft agrees with the target. The serial dependence remains: the target still verifies the drafted tokens in order, and a rejection discards everything after it, so speculative decoding reduces the constant cost per emitted token rather than removing the chain.
 
 ## Attention cache geometry and memory architecture {#sec-vol3-appendix-inference-kv-cache}
 
