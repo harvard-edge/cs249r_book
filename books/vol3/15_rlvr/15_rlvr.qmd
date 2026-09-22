@@ -128,6 +128,14 @@ A supervised policy that solves a task on `{python} BootstrapPassRate.p_single_p
 
 The loop is now in view: a policy that already succeeds sometimes, a sandbox that absorbs its exploration, and a verifier that scores the result. Everything that follows depends on the verifier's score meaning what the task author meant. The next section examines what a reward can be built from and why an optimizer finds every gap between the score and the intent.
 
+### Behavioral evolution under verifiable reward signals
+
+The transition from supervised imitation to reinforcement learning marks a fundamental shift in model behavior. While supervised fine-tuning forces the model to memorize expert token sequences, reinforcement learning from verifiable rewards induces autonomous exploration, self-correction, and algorithmic reasoning. The stages of behavioral evolution across training epochs are illustrated in @fig-vol3-rlvr-progression.
+
+::: {#fig-vol3-rlvr-progression fig-env="figure" fig-pos="htb" fig-cap="**Policy Capability Progression**: Architectural evolution across the policy optimization lifecycle. Base pretraining establishes broad distributional representations over uncurated corpora, supervised fine-tuning aligns the token generation interface to structured tool-calling schemas, and verifiable reinforcement learning explores novel multi-step action trajectories bounded by deterministic execution oracles." fig-alt="Three-stage architectural progression diagram illustrating base pretraining, supervised fine-tuning, and verifiable reinforcement learning with their loss objectives, system substrates, and empirical failure modes."}
+![](images/svg/fig-vol3-rlvr-progression.svg)
+:::
+
 ## Verifiable Rewards {#sec-vol3-rlvr-rewards}
 
 The silent test bypass of \ref{exmp-silent-test-bypass} corrupts one result, and @sec-vol3-verifier-gaming showed how the same shortcut corrupts a curated corpus. Reinforcement learning turns it into a strategy. When the test files sit in the rollout's writable workspace, a group of rollouts on a hard bug contains mostly failed fixes and, sometimes, one rollout that weakens the failing assertion. That rollout scores $1$, receives the largest advantage in its group, and the gradient raises the probability of every token that produced the edit. A few hundred steps later, weakening assertions is the policy's dominant strategy, because it is shorter, needs no understanding of the bug, and scores exactly as well as a correct fix. Nothing in the loop malfunctioned. The optimizer did what it was built to do on the reward it was given.
@@ -429,6 +437,30 @@ Group relative policy optimization (GRPO) [@shao2024deepseekmath] removes the cr
 
 : **PPO vs. GRPO**: The two optimizers compared by the models they hold, the baseline they use, the granularity of their credit, and how they fail. {#tbl-vol3-ppo-vs-grpo-comparison}
 
+### The memory wall of classical actor-critic architectures
+
+Classical Proximal Policy Optimization (PPO) maintains four separate neural network models in GPU memory during training:
+
+1. **Actor Network ($\pi_	heta$):** The policy model being optimized.
+2. **Critic Network ($V_\phi$):** A value model estimating expected trajectory returns.
+3. **Reference Policy ($\pi_{	ext{ref}}$):** A frozen snapshot of the pretrained model enforcing KL-divergence constraints.
+4. **Reward Model ($R_\psi$):** A neural network predicting proxy human preference scores.
+
+For large foundation models (such as 70B parameter models in FP16), storing weights, optimizer states, and activations for four concurrent models demands upwards of 560 GB of GPU VRAM per pipeline stage, severely constraining maximum context length and batch size.
+
+Group Relative Policy Optimization (GRPO) [@shao2024deepseekmath] breaks this memory wall by discarding the parameterized Critic network ($V_\phi$) entirely. Instead of training a separate value network, GRPO evaluates policy advantages by sampling a cohort of $G$ independent rollouts $\{y_1, y_2, \dots, y_G\}$ from the current policy $\pi_	heta$ for each task prompt $x$. The baseline is computed directly from the empirical mean and standard deviation of rewards within the cohort:
+$$
+\hat{A}_i = rac{r_i - \mu_{	ext{group}}}{\sigma_{	ext{group}} + \epsilon}, \quad \mu_{	ext{group}} = rac{1}{G}\sum_{j=1}^G r_j, \quad \sigma_{	ext{group}} = \sqrt{rac{1}{G}\sum_{j=1}^G (r_j - \mu_{	ext{group}})^2}
+$$
+
+The architectural contrast between PPO and GRPO is diagrammed in @fig-vol3-ppo-vs-grpo.
+
+::: {#fig-vol3-ppo-vs-grpo fig-env="figure" fig-pos="htb" fig-cap="**Distributed Runtime Topologies in PPO versus GRPO**: Architectural comparison of distributed cluster memory allocations and network synchronization topologies. Classical PPO concurrently maintains four networks across accelerator HBM (Actor $\pi_\theta$, Critic $V_\phi$, Reference $\pi_{\text{ref}}$, and Reward $R_\psi$), consuming 74.4 GB of static VRAM per GPU and leaving negligible dynamic headroom. GRPO eliminates both the Critic and Reward networks, reserving only 39.4 GB per GPU and reclaiming 40.6 GB of dynamic headroom for long-horizon KV caches and parallel group rollout generation." fig-alt="Dual-panel systems schematic comparing PPO and GRPO. Panel (a) shows PPO with four neural models in HBM and dual-ring gradient synchronization. Panel (b) shows GRPO with only Actor and Reference models, CPU-hosted verification, and single-ring all-reduce, expanding dynamic context headroom from 5.6 GB to 40.6 GB."}
+![](images/svg/vol3-ppo-vs-grpo.svg)
+:::
+
+By eliminating the Critic model, GRPO reduces GPU memory consumption by over 40 percent and completely eliminates Critic training instability, allowing the entire GPU memory budget to be allocated to longer context windows and larger rollout cohorts.
+
 ### Group-relative advantages {#sec-vol3-rlvr-grpo-objective}
 
 For a task $q$, the runtime samples $G$ rollouts $\{o_1, \dots, o_G\}$ from the policy that generated them, $\pi_{\theta_{\text{old}}}$, and scores each with the verifier, $r_i = R(q, o_i)$. The advantage of each rollout is its reward standardized against its group:
@@ -630,6 +662,19 @@ Before examining what optimization does to the policy itself, check your underst
 
 :::
 
+### Hard mechanical invariants versus soft reward signals
+
+Systems designers frequently attempt to enforce safety and protocol compliance by penalizing undesirable actions in the reward function (e.g., deducting points for forbidden system calls). However, soft reward penalties are fundamentally stochastic: an agent may discover that executing a high-risk prohibited command unlocks an exploit that yields a massive terminal reward, happily accepting the minor intermediate penalty.
+
+As formalized in the invariant closure principle (\ref{pri-invariant-closure}), non-negotiable safety properties must be enforced mechanically by hard supervisor guards rather than soft optimization rewards, as contrasted in @tbl-vol3-hard-guards-vs-soft-rewards.
+
+| Architectural Layer         | Enforcement Mechanism                                                                             | Failure Response & Signal                                           | Target Objectives                                                              |
+|:----------------------------|:--------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------|:-------------------------------------------------------------------------------|
+| **Hard Runtime Enclave**    | Hypervisor namespaces, seccomp-bpf, read-only mounts                                              | Hard fault (`SIGSEGV`, `EPERM`, OOM kill); immediate process abort  | Absolute host safety, zero data exfiltration, test fixture protection          |
+| **Soft Reward Formulation** | Mathematical loss objective ($R_{\text{outcome}} + R_{\text{format}} - \alpha \cdot \text{Cost}$) | Differentiable gradient updates backpropagated across rollout batch | Task accuracy optimization, token economy, syntactically valid tool dispatches |
+
+: **Defense-in-Depth Separation**: Architectural contrast between hard runtime enclaves and soft reward formulations in RLVR systems. {#tbl-vol3-hard-guards-vs-soft-rewards}
+
 ## Training Pathologies {#sec-vol3-rlvr-pathologies}
 
 A run that is well isolated can still go wrong in two opposite ways. In one, the policy stops exploring. The rollouts in each group converge on the same token sequence, rewards within groups become identical, and the gradient vanishes even though many tasks remain unsolved. In the other, rollouts grow longer every hundred steps, filling their token budgets with restated reasoning, while the pass rate barely moves. Both are consequences of optimizing a sparse reward, and both are visible in the training telemetry long before they are visible in evaluation. @Fig-vol3-entropy-verbosity-regularization sketches the two trajectories and their regularized counterparts.
@@ -690,6 +735,14 @@ $$R_{\text{final}} = R_{\text{task}} - \gamma \cdot \max\left(0, \; T_{\text{tok
 with $\gamma$ set so that a rollout at the ceiling cannot net a positive reward even when its answer is correct, $\gamma \cdot (T_{\max} - T_{\text{budget}}) \ge 1$. Within the budget, length is free; beyond it, every token costs. Replacing the per-rollout $1/|o_i|$ with a constant denominator removes the structural bias toward long failures, so the penalty does not have to fight the objective.
 
 Repetition loops need a runtime check rather than a reward term. The rollout worker tracks recent $n$-grams during generation; when one repeats more than a threshold number of times within a window, the worker stops the rollout, and the rollout scores zero. Stopping early matters more than the score, because a looping rollout otherwise occupies its slot on the inference server until the token cap.
+
+The most profound behavioral transformation induced by RLVR is the emergence of autonomous backtracking. Under pure supervised behavioral cloning, encountering an error during execution inevitably causes compounding regret (@sec-vol3-fine-tuning-exposure-bias), as the policy was trained only on pristine trajectories. Under RLVR, because the policy is rewarded solely for passing the terminal verification suite, it discovers that recognizing execution errors and testing alternative tool arguments produces higher expected returns.
+
+The token trajectory of emergent self-correction is diagrammed in @fig-vol3-emergent-backtracking.
+
+::: {#fig-vol3-emergent-backtracking fig-env="figure" fig-pos="htb" fig-cap="**Emergent Deliberation and Attention Backtracking in Verifiable RL**: Structural mechanics of test-time search compiled into autoregressive weights. (a) Emergent deliberation finite-state machine inside policy $\pi_\theta$, where candidate rollouts ($S_{\text{hyp}}$) are verified against invariant specifications ($I_{\text{spec}}$) in $S_{\text{mon}}$, triggering reversal tokens ($\kappa_{\text{rev}}$) and attention suppression upon failure before grounded dispatch to the sandbox verifier oracle ($S_{\text{oracle}}$). (b) Deliberation token stream showing attention re-weighting across reversal boundaries: attention to the invalidated branch $B_1$ decays ($\alpha \approx 0.02$) while shifting mass to the reversal token and formal invariant specification." fig-alt="Systems diagram with two panels: panel (a) shows a finite-state machine representing internal policy self-verification, reversal token emission, and branch suppression before tool execution; panel (b) illustrates token-level attention suppression across a reversal boundary where attention to faulty reasoning is masked out."}
+![](images/svg/rlvr_emergent_backtracking.svg)
+:::
 
 ### What training changes in behavior {#sec-vol3-rlvr-deliberation}
 
@@ -870,6 +923,57 @@ $$\rho_t(\theta) = \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_{\text{rollout}}}
 moves away from one. The ratio multiplies each token's gradient, and over a long rollout a few tokens whose probability rose sharply produce enormous ratios, and with them enormous updates. Two bounds contain the damage. The admission gate drops any rollout with $\Delta v > \Delta v_{\max}$ outright. The clipped surrogate of @eq-vol3-grpo-surrogate, evaluated with $\rho_t$ against the recorded sampling probabilities, caps the influence of any single token on the rollouts that remain; this is a close relative of the truncated importance weights that actor-learner systems use for off-policy correction [@espeholt2018impala]. Bounded staleness of this kind has a long history in distributed training, where workers read parameters at most a fixed number of steps old [@ho2013more].
 
 Choosing $\Delta v_{\max}$ trades waste against drift. A tight bound, one or two versions, keeps ratios near one but drops the long rollouts, which in agent RL are disproportionately the hard tasks, biasing the training distribution toward easy ones. A loose bound keeps them but relies on clipping to suppress the drift, which also suppresses their learning signal. $\Delta v_{\max} = 0$ is the synchronous schedule. In practice runtimes keep the bound small and shorten $\Delta t_{\text{rollout}}$ instead, with faster environments, turn caps, and fast broadcast of new weights to the rollout pool, so that fewer rollouts arrive stale in the first place.
+
+### Disaggregated rollout and trainer architecture
+
+Generating thousands of multi-turn agent rollouts against isolated sandboxes is an I/O-heavy, memory-bound workload, whereas model gradient backpropagation is compute-bound and network-bandwidth intensive. Attempting to co-locate rollout generation and gradient training on the same GPU cluster results in severe GPU under-utilization during rollout waits.
+
+Modern RLVR infrastructure resolves this by disaggregating execution into two specialized clusters: an inference-optimized Rollout Engine running high-throughput engines with KV prefix caching, and a distributed Training Cluster executing Megatron-LM or FSDP gradient updates. The disaggregated architecture is illustrated in @fig-vol3-disaggregated-rollout.
+
+::: {#fig-vol3-disaggregated-rollout fig-env="figure" fig-pos="htb" fig-cap="**Disaggregated Rollout Cluster Architecture**: End-to-end distributed system topology decoupling high-throughput inference rollout workers from compute-dense gradient training workers. Rollout workers exploit radix-tree KV-cache reuse to evaluate prompt prefixes once across $G$ group completions, stream completed trajectories to sandboxed verification enclaves, and push normalized advantages into host-pinned replay buffers consumed asynchronously by the training fleet over RDMA." fig-alt="Five-stage distributed systems architecture schematic showing prompt prefill with radix KV caching, parallel autoregressive decode workers, parallel verification microVMs, a host-managed advantage broker, and a distributed gradient training cluster connected via high-speed RDMA."}
+![](images/svg/fig-vol3-disaggregated-rollout.svg)
+:::
+
+The synchronization trade-offs between synchronous step-locked loops and asynchronous streaming queues are contrasted in @tbl-vol3-sync-vs-async.
+
+| Architectural Dimension     | Synchronous Lockstep Architecture                                | Asynchronous Streaming Architecture                                   |
+|:----------------------------|:-----------------------------------------------------------------|:----------------------------------------------------------------------|
+| **Cluster Coupling**        | Tight global barriers; inference and training pause alternately  | Fully decoupled; continuous streaming via circular staging buffer     |
+| **Accelerator Goodput**     | Low ($15\%\text{--}35\%$ MFU) due to long-tail straggler bubbles | High ($60\%\text{--}85\%$ MFU); near-zero pipeline bubble time        |
+| **Off-Policy Staleness**    | Strictly zero ($\Delta v = 0$); data is identically distributed  | Non-zero ($\Delta v \ge 1$); data distribution lags active parameters |
+| **Importance Sampling**     | Unneeded; standard on-policy gradient estimators hold            | Required; token-level importance weight clipping to bound variance    |
+| **Straggler Vulnerability** | Severe; step latency bounded by worst-case trajectory tail       | Minimal; slow trajectories are absorbed asynchronously or dropped     |
+| **Memory Pressure**         | High transient GPU HBM allocation during batch barriers          | Constant host pinned-DRAM usage in circular replay queues             |
+: **Synchronous Lockstep versus Asynchronous Streaming Pipeline Architectures**: Synchronization barriers, accelerator goodput, and off-policy staleness characteristics. {#tbl-vol3-sync-vs-async}
+
+### Cohort straggler latency disparity
+
+In group-relative algorithms such as GRPO, gradient updates for a prompt require all $G$ rollouts in the cohort to complete before cohort mean $\mu_{	ext{group}}$ and standard deviation $\sigma_{	ext{group}}$ can be computed. In multi-turn coding environments where trajectory execution times vary by orders of magnitude (from simple 1-turn syntactic checks to 30-turn test suites), cohort execution time is governed by extreme stragglers:
+$$
+T_{	ext{cohort}} = \max_{j \in \{1, \dots, G\}} T_j
+$$
+The empirical latency disparity across cohort sizes is detailed in @tbl-vol3-cohort-latency-disparity.
+
+| Rollout Worker      | Generated Tokens | Termination Reason             | Execution Time Profile                       | Synchronous Barrier Idle Tax                |
+|:--------------------|:-----------------|:-------------------------------|:---------------------------------------------|:--------------------------------------------|
+| **Worker $\tau_1$** | 48 tokens        | Early failure (syntax error)   | Fast exit ($\sim 0.2\ \text{s}$)             | 4,048 token slots idle wait ($98.8\%$ idle) |
+| **Worker $\tau_2$** | 512 tokens       | Early success (test passed)    | Nominal completion ($\sim 2.1\ \text{s}$)    | 3,584 token slots idle wait ($87.5\%$ idle) |
+| **Worker $\tau_3$** | 1,024 tokens     | Multi-turn refactoring         | Extended search ($\sim 4.2\ \text{s}$)       | 3,072 token slots idle wait ($75.0\%$ idle) |
+| **Worker $\tau_4$** | 4,096 tokens     | Max depth timeout ($T_{\max}$) | Straggler worst-case ($\sim 16.8\ \text{s}$) | $0$ slots idle (Active barrier straggler)   |
+
+: **Rollout Cohort Execution Latency Disparity**: Tail latency amplification and GPU idle wait across heterogeneous trajectory lengths within a cohort ($G=4$). {#tbl-vol3-cohort-latency-disparity}
+
+### Release gating enclaves
+
+Promoting a newly trained RLVR checkpoint to the rollout pool requires passing automated release gates to ensure the policy has not over-fitted to the verifier or suffered catastrophic capability collapse. Release gate verification criteria are cataloged in @tbl-vol3-release-gate-enclaves.
+
+| Evaluation Enclave           | Test Suite & Benchmark Target         | Verification Oracle                         | Gate Pass Threshold                                               | Mitigation upon Gate Failure                                 |
+|:-----------------------------|:--------------------------------------|:--------------------------------------------|:------------------------------------------------------------------|:-------------------------------------------------------------|
+| **Core Domain Benchmark**    | 256 unseen software engineering tasks | Sandboxed compilation & test suite runner   | Pass rate $\ge \text{Baseline} - \epsilon$ ($\epsilon \le 0.5\%$) | Suppress promotion; trigger learning rate decay              |
+| **Regression Test Suite**    | 256 formal multi-step reasoning tasks | Formal provers (Lean 4) & symbolic checkers | Pass rate $\ge 100\%$ on golden reference tasks                   | Reject checkpoint; revert to last valid release pointer      |
+| **Contract Invariant Suite** | Programmatic schema validation tests  | Strict JSON schema parser                   | Zero formatting drift (100% strict compliance)                    | Roll back policy weights; inspect tokenizer and prompt shims |
+
+: **Deterministic Release Gate Evaluation Enclaves**: Test domains, benchmarking targets, and release pass conditions governing checkpoint promotion. {#tbl-vol3-release-gate-enclaves}
 
 ### Gating new policy versions {#sec-vol3-rlvr-release-gating}
 
