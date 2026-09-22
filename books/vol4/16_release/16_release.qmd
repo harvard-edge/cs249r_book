@@ -98,7 +98,7 @@ For the mobile manipulator, the release question is whether the evidence meets t
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt, fmt_velocity, fmt_length, fmt_mass, fmt_force, fmt_latency, check
-from mlsysim.physics.robotics import calc_max_permitted_velocity, calc_c2_stop_suffix
+from mlsysim.physics.robotics import calc_max_permitted_velocity, calc_c2_effective_deceleration
 
 # ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
@@ -106,24 +106,15 @@ AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene;
 g_std = (1 * ureg.standard_gravity).to(meter / second**2)  # category: datasheet (standard gravity, a defined physical constant; Pint)
 v_restricted = 1.0 * meter / second  # category: chosen (scenario assumption: restricted mode on inspected floors, the value @sec-frontier uses)
 
-def _a_eff(a_peak):
-    """Constant deceleration giving the C2 suffix's distance: v^2 / (2 d_C2).
-
-    d_C2 is proportional to v^2 / a, so v^2 / (2 d_C2) = a / 1.5 at any speed;
-    evaluating it at aisle speed stays exact where a solver works at another speed.
-    """
-    d_c2 = calc_c2_stop_suffix(AISLE.v_aisle, a_peak)["distance"]
-    return (AISLE.v_aisle**2 / (2 * d_c2)).to(meter / second**2)
-
 # ┌── 2. EXECUTE: ceilings and friction bands ───────────────────────────────────
-a_eff = _a_eff(AISLE.a_brake)  # C2 stop suffix as an equivalent constant deceleration
+a_eff = calc_c2_effective_deceleration(AISLE.a_brake)  # C2 stop suffix as an equivalent constant deceleration
 overhead_loc = AISLE.delta_loc + AISLE.eps_track
 v_ceiling = calc_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, a_eff, overhead_loc, AISLE.delta_margin).to(meter / second)
 mu_min = (AISLE.a_brake / g_std).to("dimensionless").magnitude
 a_inspected = min(AISLE.a_brake, (AISLE.mu_inspected_floor * g_std).to(meter / second**2))
-v_inspected_ceiling = calc_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, _a_eff(a_inspected), overhead_loc, AISLE.delta_margin).to(
-    meter / second
-)
+v_inspected_ceiling = calc_max_permitted_velocity(
+    AISLE.d_clear, AISLE.tau_delay, calc_c2_effective_deceleration(a_inspected), overhead_loc, AISLE.delta_margin
+).to(meter / second)
 v_handover_ceiling = (AISLE.f_contact_criterion / (AISLE.k_contact_human * RM.arm_effective_contact_mass) ** 0.5).to(meter / second)
 
 # ┌── 3. GUARD: canon values quoted in the prose and the table ──────────────────
@@ -249,20 +240,16 @@ from mlsysim.fmt import (
     fmt_sci_qty,
     check,
 )
-from mlsysim.physics.robotics import calc_safe_stopping_distance, calc_transient_impact_force, calc_c2_stop_suffix
+from mlsysim.physics.robotics import (
+    calc_safe_stopping_distance,
+    calc_transient_impact_force,
+    calc_c2_stop_suffix,
+    calc_c2_effective_deceleration,
+)
 
 # ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
 AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
-
-def _a_eff(a_peak):
-    """Constant deceleration giving the C2 suffix's distance: v^2 / (2 d_C2).
-
-    d_C2 is proportional to v^2 / a, so v^2 / (2 d_C2) = a / 1.5 at any speed;
-    evaluating it at aisle speed stays exact where a solver works at another speed.
-    """
-    d_c2 = calc_c2_stop_suffix(AISLE.v_aisle, a_peak)["distance"]
-    return (AISLE.v_aisle**2 / (2 * d_c2)).to(meter / second**2)
 
 # ┌── 2. EXECUTE: contact forces, then the budget at aisle speed ────────────────
 m_eff = RM.arm_effective_contact_mass
@@ -272,7 +259,7 @@ f_at_handover = calc_transient_impact_force(AISLE.v_handover, m_eff, AISLE.k_con
 v_handover_ceiling = (AISLE.f_contact_criterion / (AISLE.k_contact_human * m_eff) ** 0.5).to(meter / second)
 
 c2_braking = calc_c2_stop_suffix(AISLE.v_aisle, AISLE.a_brake)["distance"].to(meter)
-a_eff = _a_eff(AISLE.a_brake)  # C2 stop suffix as an equivalent constant deceleration
+a_eff = calc_c2_effective_deceleration(AISLE.a_brake)  # C2 stop suffix as an equivalent constant deceleration
 overhead_loc = AISLE.delta_loc + AISLE.eps_track
 budget_aisle = calc_safe_stopping_distance(AISLE.v_aisle, AISLE.tau_delay, a_eff, overhead_loc, AISLE.delta_margin).to(millimeter)
 spare_aisle = (AISLE.d_clear - budget_aisle).to(millimeter)
@@ -353,28 +340,19 @@ Connecting evidence to a claim requires a **warrant**\index{Warrant!inferential 
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt_latency, fmt_length, fmt_velocity, fmt_percent, check
-from mlsysim.physics.robotics import calc_safe_stopping_distance, calc_c2_stop_suffix
+from mlsysim.physics.robotics import calc_safe_stopping_distance, calc_c2_effective_deceleration
 
 # ┌── 1. LOAD: the running machine, plus one chapter-local input ────────────────
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustrative (running machine)
 AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
 low_light_exposure_factor = 2.0  # category: illustrative (scenario assumption: a dim aisle doubles the exposure)
 
-def _a_eff(a_peak):
-    """Constant deceleration giving the C2 suffix's distance: v^2 / (2 d_C2).
-
-    d_C2 is proportional to v^2 / a, so v^2 / (2 d_C2) = a / 1.5 at any speed;
-    evaluating it at aisle speed stays exact where a solver works at another speed.
-    """
-    d_c2 = calc_c2_stop_suffix(AISLE.v_aisle, a_peak)["distance"]
-    return (AISLE.v_aisle**2 / (2 * d_c2)).to(meter / second**2)
-
 # ┌── 2. EXECUTE ────────────────────────────────────────────────────────────────
 t_exp_nominal = RM.nav_camera.exposure_time.to(millisecond)
 t_exp_low = (low_light_exposure_factor * t_exp_nominal).to(millisecond)
 dt_age = ((t_exp_low - t_exp_nominal) / 2).to(millisecond)  # mid-exposure timestamp
 d_added = (AISLE.v_aisle * dt_age).to(millimeter)
-a_eff = _a_eff(AISLE.a_brake)  # C2 stop suffix as an equivalent constant deceleration
+a_eff = calc_c2_effective_deceleration(AISLE.a_brake)  # C2 stop suffix as an equivalent constant deceleration
 budget = calc_safe_stopping_distance(AISLE.v_aisle, AISLE.tau_delay, a_eff, AISLE.delta_loc + AISLE.eps_track, AISLE.delta_margin).to(millimeter)
 spare = (AISLE.d_clear - budget).to(millimeter)
 share_of_spare = (d_added / spare).to("dimensionless").magnitude
@@ -431,9 +409,9 @@ from mlsysim.core.units import *
 from mlsysim.fmt import fmt, fmt_force, fmt_mass, fmt_latency, fmt_acceleration, fmt_length, fmt_velocity, check
 from mlsysim.physics.robotics import (
     calc_safe_stopping_distance,
-    calc_tripwire_contact_force_accumulation,
+    calc_c2_effective_deceleration,
+    calc_latch_contact_stopping_profile,
     calc_transient_impact_force,
-    calc_c2_stop_suffix,
 )
 
 # ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
@@ -441,26 +419,18 @@ RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # category: illustra
 AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene; speeds, lease, and tick chosen)
 g_std = (1 * ureg.standard_gravity).to(meter / second**2)  # category: datasheet (standard gravity, a defined physical constant; Pint)
 
-def _a_eff(a_peak):
-    """Constant deceleration giving the C2 suffix's distance: v^2 / (2 d_C2).
-
-    d_C2 is proportional to v^2 / a, so v^2 / (2 d_C2) = a / 1.5 at any speed;
-    evaluating it at aisle speed stays exact where a solver works at another speed.
-    """
-    d_c2 = calc_c2_stop_suffix(AISLE.v_aisle, a_peak)["distance"]
-    return (AISLE.v_aisle**2 / (2 * d_c2)).to(meter / second**2)
-
 # ┌── 2. EXECUTE: one warrant quantity per claim ────────────────────────────────
 # C1 base: finished budget at aisle speed.
-a_eff = _a_eff(AISLE.a_brake)  # C2 stop suffix as an equivalent constant deceleration
+a_eff = calc_c2_effective_deceleration(AISLE.a_brake)  # C2 stop suffix as an equivalent constant deceleration
 budget_aisle = calc_safe_stopping_distance(AISLE.v_aisle, AISLE.tau_delay, a_eff, AISLE.delta_loc + AISLE.eps_track, AISLE.delta_margin).to(
     millimeter
 )
 spare_aisle = (AISLE.d_clear - budget_aisle).to(millimeter)
 # C1 door: force at brake command and the arm stop that keeps it under the limit.
-f_cmd = calc_tripwire_contact_force_accumulation(AISLE.f_latch_tripwire, AISLE.k_latch, AISLE.v_latch_approach, AISLE.t_contact_response).to(newton)
-x_remaining = ((AISLE.f_latch_limit - f_cmd) / AISLE.k_latch).to(millimeter)
-a_arm_needed = (AISLE.v_latch_approach**2 / (2 * x_remaining)).to(meter / second**2)
+latch_stop = calc_latch_contact_stopping_profile(scenario=AISLE)
+f_cmd = latch_stop["f_at_brake_onset"]
+x_remaining = latch_stop["x_remaining"]
+a_arm_needed = latch_stop["a_arm_needed"]
 # C1 handover: unbraked elastic force at the handover speed.
 f_handover = calc_transient_impact_force(AISLE.v_handover, RM.arm_effective_contact_mass, AISLE.k_contact_human).to(newton)
 # C2: last valid renewal to brake onset.
@@ -738,9 +708,9 @@ from mlsysim.fmt import fmt, fmt_force, fmt_sci_qty, fmt_latency, fmt_accelerati
 from mlsysim.physics.robotics import (
     calc_safe_stopping_distance,
     calc_max_permitted_velocity,
-    calc_tripwire_contact_force_accumulation,
+    calc_c2_effective_deceleration,
+    calc_latch_contact_stopping_profile,
     calc_transient_impact_force,
-    calc_c2_stop_suffix,
 )
 
 # ┌── 1. LOAD: the running machine and its site ─────────────────────────────────
@@ -749,36 +719,28 @@ AISLE = Embodied.Scenario.WarehouseAisle  # category: illustrative (aisle scene;
 g_std = (1 * ureg.standard_gravity).to(meter / second**2)  # category: datasheet (standard gravity, a defined physical constant; Pint)
 v_restricted = ReleaseEnvelope.v_restricted  # chosen; set once in calc-release-operating-envelope
 
-def _latch_stop(v_approach):
-    """Force at brake command, remaining compression, and the arm deceleration needed."""
-    f_cmd = calc_tripwire_contact_force_accumulation(AISLE.f_latch_tripwire, AISLE.k_latch, v_approach, AISLE.t_contact_response).to(newton)
-    x_rem = ((AISLE.f_latch_limit - f_cmd) / AISLE.k_latch).to(millimeter)
-    a_need = (v_approach**2 / (2 * x_rem)).to(meter / second**2)
-    return f_cmd, x_rem, a_need
-
-def _a_eff(a_peak):
-    """Constant deceleration giving the C2 suffix's distance: v^2 / (2 d_C2).
-
-    d_C2 is proportional to v^2 / a, so v^2 / (2 d_C2) = a / 1.5 at any speed;
-    evaluating it at aisle speed stays exact where a solver works at another speed.
-    """
-    d_c2 = calc_c2_stop_suffix(AISLE.v_aisle, a_peak)["distance"]
-    return (AISLE.v_aisle**2 / (2 * d_c2)).to(meter / second**2)
-
 # ┌── 2. EXECUTE: the door branch, then the base spare ──────────────────────────
-f_cmd_lo, x_rem_lo, a_arm_lo = _latch_stop(AISLE.v_latch_approach)
-t_arm_stop = (AISLE.v_latch_approach / a_arm_lo).to(millisecond)
-f_cmd_hi, x_rem_hi, a_arm_hi = _latch_stop(AISLE.v_latch_high)
+stop_lo = calc_latch_contact_stopping_profile(AISLE.v_latch_approach, scenario=AISLE)
+f_cmd_lo = stop_lo["f_at_brake_onset"]
+x_rem_lo = stop_lo["x_remaining"]
+a_arm_lo = stop_lo["a_arm_needed"]
+t_arm_stop = stop_lo["t_arm_stop"]
+
+stop_hi = calc_latch_contact_stopping_profile(AISLE.v_latch_high, scenario=AISLE)
+f_cmd_hi = stop_hi["f_at_brake_onset"]
+x_rem_hi = stop_hi["x_remaining"]
+a_arm_hi = stop_hi["a_arm_needed"]
 
 overhead_loc = AISLE.delta_loc + AISLE.eps_track
-budget_aisle = calc_safe_stopping_distance(AISLE.v_aisle, AISLE.tau_delay, _a_eff(AISLE.a_brake), overhead_loc, AISLE.delta_margin).to(millimeter)
+a_eff = calc_c2_effective_deceleration(AISLE.a_brake)
+budget_aisle = calc_safe_stopping_distance(AISLE.v_aisle, AISLE.tau_delay, a_eff, overhead_loc, AISLE.delta_margin).to(millimeter)
 spare_aisle = (AISLE.d_clear - budget_aisle).to(millimeter)
 mu_min = (AISLE.a_brake / g_std).to("dimensionless").magnitude
 a_inspected = min(AISLE.a_brake, (AISLE.mu_inspected_floor * g_std).to(meter / second**2))
-v_inspected_ceiling = calc_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, _a_eff(a_inspected), overhead_loc, AISLE.delta_margin).to(
-    meter / second
-)
-v_ceiling = calc_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, _a_eff(AISLE.a_brake), overhead_loc, AISLE.delta_margin).to(meter / second)
+v_inspected_ceiling = calc_max_permitted_velocity(
+    AISLE.d_clear, AISLE.tau_delay, calc_c2_effective_deceleration(a_inspected), overhead_loc, AISLE.delta_margin
+).to(meter / second)
+v_ceiling = calc_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, a_eff, overhead_loc, AISLE.delta_margin).to(meter / second)
 t_renewal_to_onset = (AISLE.t_lease + AISLE.t_tick + AISLE.t_bus + AISLE.t_brake_onset).to(millisecond)
 f_handover = calc_transient_impact_force(AISLE.v_handover, RM.arm_effective_contact_mass, AISLE.k_contact_human).to(newton)
 

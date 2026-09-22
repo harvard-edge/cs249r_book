@@ -384,34 +384,47 @@ When a multi-turn agent executes an action, the runtime invokes an external tool
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time, fmt_memory_capacity, fmt_usd
+from mlsysim.physics.agents import calc_kv_cache_bytes_per_token, calc_tool_wait_stranded_tax
 
 class ToolWaitTax:
     """Memory stranding and idle silicon expenditure during blocking tool calls."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    n_gpus = 8
+    agent = CodingAgents.SWE_Bench_Runner
+    n_gpus = agent.serving_node.accelerators_per_node
     c_hbm_node = 640.0 * GB
     cost_rate_hr = 24.0
     tp_degree = 8
     m_weights = 160.0 * GB
     t_context = 160_000
-    m_token = 320 * KiB
+    m_token = calc_kv_cache_bytes_per_token(agent)
     t_wait = 60 * second
     n_agents_concurrent = 4
     n_tools_pipeline = 20
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    cost_rate_s = cost_rate_hr / 3600.0
-    m_hbm_dynamic = c_hbm_node - m_weights
-    m_hbm_dynamic_per_gpu = m_hbm_dynamic / n_gpus
     m_kv_gb = 51.2 * GB
-    pct_stranded_single = (m_kv_gb / m_hbm_dynamic).magnitude
-    m_stranded_concurrent = n_agents_concurrent * m_kv_gb
-    pct_stranded_concurrent = (m_stranded_concurrent / m_hbm_dynamic).magnitude
-    cost_turn = t_wait.to(second).magnitude * cost_rate_s
-    cost_pipeline = n_tools_pipeline * cost_turn
+    tax = calc_tool_wait_stranded_tax(
+        node_hbm_capacity=c_hbm_node,
+        model_weights_memory=m_weights,
+        kv_memory=m_kv_gb,
+        tool_wait_duration=t_wait,
+        hourly_node_cost=cost_rate_hr,
+        num_gpus=n_gpus,
+        num_concurrent_agents=n_agents_concurrent,
+        num_pipeline_tools=n_tools_pipeline,
+    )
+    cost_rate_s = cost_rate_hr / 3600.0
+    m_hbm_dynamic = tax["m_hbm_dynamic"]
+    m_hbm_dynamic_per_gpu = tax["m_hbm_dynamic_per_gpu"]
+    pct_stranded_single = tax["pct_stranded_single"]
+    m_stranded_concurrent = tax["m_stranded_concurrent"]
+    pct_stranded_concurrent = tax["pct_stranded_concurrent"]
+    cost_turn = tax["cost_turn"]
+    cost_pipeline = tax["cost_pipeline"]
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(m_token.to(KiB).magnitude - 320.0) < 1e-6, "m_token is 320 KiB")
     check(m_hbm_dynamic.magnitude == 480.0, "m_hbm_dynamic")
     check(m_hbm_dynamic_per_gpu.magnitude == 60.0, "m_hbm_dynamic_per_gpu")
     check(abs(pct_stranded_single - 0.1067) < 0.001, "pct_stranded_single")

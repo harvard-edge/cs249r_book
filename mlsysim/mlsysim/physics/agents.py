@@ -489,3 +489,174 @@ def calc_multiagent_optimal_concurrency(s_serial: float, alpha: float, beta: flo
         else:
             high = mid
     return float(0.5 * (low + high))
+
+
+def calc_kv_cache_bytes_per_token(
+    model=None,
+    *,
+    n_layers: int | None = None,
+    n_kv_heads: int | None = None,
+    head_dim: int | None = None,
+    bytes_per_elem=2,
+):
+    """
+    Calculate the Key-Value (KV) cache memory footprint per token.
+
+    For a transformer architecture with L layers, H_kv Key/Value attention
+    heads, and head dimension d_head:
+
+        m_token = 2 * L * H_kv * d_head * bytes_per_elem
+
+    The leading factor of 2 accounts for storing separate Key and Value tensors.
+
+    Parameters
+    ----------
+    model : TransformerWorkload or AgentArchitecture, optional
+        Model from which layers, heads, and dimensions are extracted.
+    n_layers : int, optional
+        Number of transformer layers (if model is omitted).
+    n_kv_heads : int, optional
+        Number of Key/Value attention heads (if model is omitted).
+    head_dim : int, optional
+        Dimension per attention head (if model is omitted).
+    bytes_per_elem : Quantity or int, optional
+        Numerical precision in bytes (default: 2 for FP16/BF16).
+
+    Returns
+    -------
+    Quantity
+        Memory size per token (in bytes).
+    """
+    if model is not None:
+        if hasattr(model, "reference_model"):
+            model = model.reference_model
+        layers = model.layers if n_layers is None else n_layers
+        kv_heads = getattr(model, "kv_heads", model.heads) if n_kv_heads is None else n_kv_heads
+        if head_dim is not None:
+            d_head = head_dim
+        elif hasattr(model, "hidden_dim") and hasattr(model, "heads") and model.heads > 0:
+            d_head = model.hidden_dim // model.heads
+        else:
+            d_head = getattr(model, "head_dim", 128)
+    else:
+        layers = n_layers
+        kv_heads = n_kv_heads
+        d_head = head_dim
+
+    if layers is None or kv_heads is None or d_head is None:
+        raise ValueError("Must provide model or all of (n_layers, n_kv_heads, head_dim).")
+
+    validate_at_least(layers, 1, "n_layers")
+    validate_at_least(kv_heads, 1, "n_kv_heads")
+    validate_at_least(d_head, 1, "head_dim")
+
+    bpe = bytes_per_elem if hasattr(bytes_per_elem, "units") else bytes_per_elem * ureg.byte
+    return (2 * layers * kv_heads * d_head * bpe).to(ureg.byte)
+
+
+def calc_tool_wait_stranded_tax(
+    node_hbm_capacity,
+    model_weights_memory,
+    *,
+    context_tokens: int | None = None,
+    kv_bytes_per_token=None,
+    kv_memory=None,
+    tool_wait_duration,
+    hourly_node_cost: float,
+    num_gpus: int = 8,
+    num_concurrent_agents: int = 1,
+    num_pipeline_tools: int = 1,
+):
+    """
+    Calculate stranded HBM capacity and idle financial expenditure during synchronous tool calls.
+
+    When an agent blocks on external execution (compilation, container sandbox,
+    network RPC), its active context KV cache remains pinned in accelerator HBM
+    without performing active compute:
+    1. Dynamic HBM pool: m_dynamic = node_capacity - weights_memory
+    2. Single-agent KV footprint: m_kv = kv_memory if given else context_tokens * kv_bytes_per_token
+    3. Stranded fraction (single): pct_single = m_kv / m_dynamic
+    4. Stranded memory (concurrent): m_concurrent = num_concurrent_agents * m_kv
+    5. Stranded fraction (concurrent): pct_concurrent = m_concurrent / m_dynamic
+    6. Idle cost per turn: cost_turn = tool_wait_duration * (hourly_node_cost / 3600 s)
+    7. Pipeline cost: cost_pipeline = num_pipeline_tools * cost_turn
+
+    Parameters
+    ----------
+    node_hbm_capacity : Quantity
+        Total aggregate HBM capacity on the serving node (e.g. 640 GB).
+    model_weights_memory : Quantity
+        Static memory consumed by partitioned model weights (e.g. 160 GB).
+    context_tokens : int, optional
+        Active sequence token length for the agent trajectory (e.g. 160,000).
+    kv_bytes_per_token : Quantity, optional
+        Memory consumed per token (e.g. 320 KiB).
+    kv_memory : Quantity, optional
+        Total KV cache memory for a single agent session (overrides context_tokens * kv_bytes_per_token).
+    tool_wait_duration : Quantity
+        Duration of the external blocking tool invocation (e.g. 60 s).
+    hourly_node_cost : float
+        Cost of the node in dollars per hour (e.g. $24.00/hr).
+    num_gpus : int, optional
+        Number of GPUs in the node (default: 8).
+    num_concurrent_agents : int, optional
+        Number of concurrent agents stranding memory (default: 1).
+    num_pipeline_tools : int, optional
+        Number of tool invocations across the end-to-end trajectory (default: 1).
+
+    Returns
+    -------
+    dict
+        - "m_hbm_dynamic": Available dynamic memory pool (Quantity in GB).
+        - "m_hbm_dynamic_per_gpu": Available dynamic memory pool per GPU (Quantity in GB).
+        - "m_kv": KV cache memory footprint per agent (Quantity in GB).
+        - "pct_stranded_single": Fraction of dynamic pool stranded by one agent (0.0 to 1.0).
+        - "m_stranded_concurrent": Memory stranded by concurrent agents (Quantity in GB).
+        - "pct_stranded_concurrent": Fraction stranded by concurrent agents (0.0 to 1.0).
+        - "cost_turn": Dollar cost during the tool wait ($).
+        - "cost_pipeline": Cumulative dollar cost across pipeline tools ($).
+    """
+    validate_positive(node_hbm_capacity, "node_hbm_capacity")
+    validate_positive(model_weights_memory, "model_weights_memory")
+    validate_positive(tool_wait_duration, "tool_wait_duration")
+    validate_positive(hourly_node_cost, "hourly_node_cost")
+    validate_at_least(num_gpus, 1, "num_gpus")
+    validate_at_least(num_concurrent_agents, 1, "num_concurrent_agents")
+    validate_at_least(num_pipeline_tools, 1, "num_pipeline_tools")
+
+    if kv_memory is not None:
+        m_kv = kv_memory.to(ureg.gigabyte)
+    elif context_tokens is not None and kv_bytes_per_token is not None:
+        validate_at_least(context_tokens, 1, "context_tokens")
+        validate_positive(kv_bytes_per_token, "kv_bytes_per_token")
+        m_kv = (context_tokens * kv_bytes_per_token).to(ureg.gigabyte)
+    else:
+        raise ValueError("Must provide either kv_memory or both (context_tokens, kv_bytes_per_token).")
+
+    c_node = node_hbm_capacity.to(ureg.gigabyte)
+    m_weights = model_weights_memory.to(ureg.gigabyte)
+    if m_weights >= c_node:
+        raise ValueError(f"Model weights ({m_weights}) exceed or equal node HBM capacity ({c_node}).")
+
+    m_dynamic = c_node - m_weights
+    m_dynamic_per_gpu = m_dynamic / num_gpus
+
+    pct_single = float((m_kv / m_dynamic).magnitude)
+    m_concurrent = num_concurrent_agents * m_kv
+    pct_concurrent = float((m_concurrent / m_dynamic).magnitude)
+
+    cost_s = hourly_node_cost / 3600.0
+    cost_turn = float(tool_wait_duration.to(ureg.second).magnitude * cost_s)
+    cost_pipeline = float(num_pipeline_tools * cost_turn)
+
+    return {
+        "m_hbm_dynamic": m_dynamic,
+        "m_hbm_dynamic_per_gpu": m_dynamic_per_gpu,
+        "m_kv": m_kv,
+        "pct_stranded_single": pct_single,
+        "m_stranded_concurrent": m_concurrent,
+        "pct_stranded_concurrent": pct_concurrent,
+        "cost_turn": cost_turn,
+        "cost_pipeline": cost_pipeline,
+    }
+

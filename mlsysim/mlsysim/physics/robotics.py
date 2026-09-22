@@ -1738,3 +1738,203 @@ def calc_axi_fifo_contention(
         "total_fifo": (compute + queue_fifo + own_read).to(ureg.microsecond),
         "total_priority_bypass": (compute + queue_bypass + own_read).to(ureg.microsecond),
     }
+
+
+def calc_c2_effective_deceleration(peak_deceleration):
+    """
+    Calculate the equivalent constant deceleration for a C2-continuous stop.
+
+    A C2-continuous stop suffix entered from cruise velocity v with peak
+    deceleration a_peak requires stopping distance d_C2 = 0.75 * v^2 / a_peak
+    (derived in calc_c2_stop_suffix). The equivalent constant deceleration
+    a_eff that achieves the exact same stopping distance (v^2 / (2 * a_eff) = d_C2) is:
+
+        a_eff = a_peak / 1.5 = (2 / 3) * a_peak
+
+    Parameters
+    ----------
+    peak_deceleration : Quantity
+        Peak credible deceleration of the C2 stop profile (e.g. m/s^2).
+
+    Returns
+    -------
+    Quantity
+        Equivalent constant deceleration in m/s^2.
+    """
+    validate_positive(peak_deceleration, "peak_deceleration")
+    a = peak_deceleration.to(ureg.meter / ureg.second**2)
+    return (a / 1.5).to(ureg.meter / ureg.second**2)
+
+
+def calc_latch_contact_stopping_profile(
+    approach_velocity=None,
+    tripwire_force=None,
+    latch_stiffness=None,
+    response_time=None,
+    force_limit=None,
+    *,
+    scenario=None,
+):
+    """
+    Calculate contact force rise, brake command force, and required arm deceleration upon latch contact.
+
+    When a robot manipulator contacts a compliant latch or strike plate:
+    1. Force accumulation rate: df/dt = k_latch * v_approach
+    2. Force at brake command onset (tripwire force + accumulation during response time):
+       f_cmd = f_tripwire + k_latch * v_approach * t_response
+    3. Remaining allowable deflection before exceeding contact limit f_limit:
+       x_remaining = (f_limit - f_cmd) / k_latch
+    4. Required constant arm deceleration to halt within x_remaining:
+       a_arm_needed = v_approach^2 / (2 * x_remaining)
+    5. Duration of the arm stopping phase:
+       t_arm_stop = v_approach / a_arm_needed
+
+    Parameters
+    ----------
+    approach_velocity : Quantity, optional
+        Arm approach speed (e.g. m/s). If omitted and scenario is given, defaults to scenario.v_latch_approach.
+    tripwire_force : Quantity, optional
+        Tripwire threshold force (e.g. N). Defaults to scenario.f_latch_tripwire if scenario is given.
+    latch_stiffness : Quantity, optional
+        Spring stiffness of the latch mechanism (e.g. N/m). Defaults to scenario.k_latch.
+    response_time : Quantity, optional
+        Contact-loop response latency from tripwire detection to brake onset (e.g. ms).
+        Defaults to scenario.t_contact_response.
+    force_limit : Quantity, optional
+        Maximum permissible contact force limit (e.g. N). Defaults to scenario.f_latch_limit.
+    scenario : EmbodiedSiteScenario, optional
+        Site scenario supplying default latch physical parameters.
+
+    Returns
+    -------
+    dict
+        - "f_at_brake_onset": Force at brake command onset (Quantity in N).
+        - "x_remaining": Remaining allowable displacement (Quantity in mm).
+        - "a_arm_needed": Required arm deceleration to honor force limit (Quantity in m/s^2).
+        - "t_arm_stop": Arm stopping duration (Quantity in ms).
+        - "df_dt": Force rate of rise during contact (Quantity in N/s).
+    """
+    if scenario is not None:
+        if approach_velocity is None:
+            approach_velocity = scenario.v_latch_approach
+        if tripwire_force is None:
+            tripwire_force = scenario.f_latch_tripwire
+        if latch_stiffness is None:
+            latch_stiffness = scenario.k_latch
+        if response_time is None:
+            response_time = scenario.t_contact_response
+        if force_limit is None:
+            force_limit = scenario.f_latch_limit
+
+    if approach_velocity is None or tripwire_force is None or latch_stiffness is None or response_time is None or force_limit is None:
+        raise ValueError("All parameters must be provided directly or inferred from scenario.")
+
+    validate_positive(approach_velocity, "approach_velocity")
+    validate_positive(tripwire_force, "tripwire_force")
+    validate_positive(latch_stiffness, "latch_stiffness")
+    validate_positive(response_time, "response_time")
+    validate_positive(force_limit, "force_limit")
+
+    v = approach_velocity.to(ureg.meter / ureg.second)
+    k = latch_stiffness.to(ureg.newton / ureg.meter)
+    f_trip = tripwire_force.to(ureg.newton)
+    t_resp = response_time.to(ureg.second)
+    f_lim = force_limit.to(ureg.newton)
+
+    df_dt = (k * v).to(ureg.newton / ureg.second)
+    f_cmd = calc_tripwire_contact_force_accumulation(f_trip, k, v, t_resp).to(ureg.newton)
+    if f_cmd >= f_lim:
+        raise ValueError(f"Brake onset force {f_cmd} already exceeds or meets limit {f_lim}")
+
+    x_rem = ((f_lim - f_cmd) / k).to(ureg.millimeter)
+    x_rem_m = x_rem.to(ureg.meter)
+    a_need = (v**2 / (2 * x_rem_m)).to(ureg.meter / ureg.second**2)
+    t_stop = (v / a_need).to(ureg.millisecond)
+
+    return {
+        "f_at_brake_onset": f_cmd,
+        "x_remaining": x_rem,
+        "a_arm_needed": a_need,
+        "t_arm_stop": t_stop,
+        "df_dt": df_dt,
+    }
+
+
+def calc_scenario_stopping_budget(
+    scenario,
+    *,
+    velocity=None,
+    deceleration=None,
+    c2_profile=True,
+):
+    """
+    Calculate stopping distance budget, spare clearance, and speed ceiling for a scenario.
+
+    Consolidates scenario-level stopping physics from an EmbodiedSiteScenario
+    (e.g., WarehouseAisle):
+    1. Pre-braking delay tau_delay is taken from scenario.tau_delay.
+    2. Operating velocity defaults to scenario.v_aisle.
+    3. Peak deceleration defaults to scenario.a_brake.
+    4. When c2_profile=True, calculates effective constant deceleration
+       a_eff = calc_c2_effective_deceleration(deceleration); otherwise a_eff = deceleration.
+    5. Localization and tracking overhead is overhead_loc = scenario.delta_loc + scenario.eps_track.
+    6. Physical margin is phys_margin = scenario.delta_margin.
+    7. Total stopping distance budget:
+       budget = calc_safe_stopping_distance(v, tau_delay, a_eff, loc_margin=overhead_loc, physical_margin=phys_margin)
+    8. Residual spare clearance:
+       spare = scenario.d_clear - budget
+    9. Maximum permitted velocity ceiling:
+       v_ceiling = calc_max_permitted_velocity(scenario.d_clear, tau_delay, a_eff, loc_margin=overhead_loc, physical_margin=phys_margin)
+
+    Parameters
+    ----------
+    scenario : EmbodiedSiteScenario
+        Site scenario instance containing d_clear, delta_loc, eps_track, delta_margin,
+        tau_delay, and default speeds.
+    velocity : Quantity, optional
+        Operating velocity to evaluate (default: scenario.v_aisle).
+    deceleration : Quantity, optional
+        Loaded deceleration (default: scenario.a_brake).
+    c2_profile : bool, optional
+        Whether the stop follows a C2-continuous profile (default: True).
+
+    Returns
+    -------
+    dict
+        - "budget": Total safe stopping distance budget (Quantity in mm).
+        - "spare": Residual clearance margin d_clear - budget (Quantity in mm).
+        - "v_ceiling": Maximum safe operating velocity (Quantity in m/s).
+        - "a_eff": Effective deceleration used (Quantity in m/s^2).
+        - "tau_delay": Pre-braking delay (Quantity in ms).
+        - "overhead_loc": Localization and tracking uncertainty (Quantity in m).
+    """
+    v = velocity if velocity is not None else scenario.v_aisle
+    a_peak = deceleration if deceleration is not None else scenario.a_brake
+
+    validate_positive(v, "velocity")
+    validate_positive(a_peak, "deceleration")
+
+    a_eff = calc_c2_effective_deceleration(a_peak) if c2_profile else a_peak
+    tau = scenario.tau_delay
+    overhead_loc = (scenario.delta_loc + scenario.eps_track).to(ureg.meter)
+    phys_margin = scenario.delta_margin.to(ureg.meter)
+
+    budget = calc_safe_stopping_distance(
+        v, tau, a_eff, loc_margin=overhead_loc, physical_margin=phys_margin
+    ).to(ureg.millimeter)
+
+    spare = (scenario.d_clear - budget).to(ureg.millimeter)
+
+    v_ceil = calc_max_permitted_velocity(
+        scenario.d_clear, tau, a_eff, loc_margin=overhead_loc, physical_margin=phys_margin
+    ).to(ureg.meter / ureg.second)
+
+    return {
+        "budget": budget,
+        "spare": spare,
+        "v_ceiling": v_ceil,
+        "a_eff": a_eff,
+        "tau_delay": tau,
+        "overhead_loc": overhead_loc,
+    }
+

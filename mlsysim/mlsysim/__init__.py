@@ -34,7 +34,14 @@ from .reference_stats.registry import ReferenceStats
 from .embodied.registry import Embodied
 from .sensors.registry import Sensors
 from .actuators.registry import Actuators
-from .agents.registry import Agents, ReferencePlatforms as AgentPlatforms
+from .agents.registry import (
+    Agents,
+    ReferencePlatforms as AgentPlatforms,
+    CodingAgents,
+    DeliberationAgents,
+    MultiAgents,
+    InteractiveAgents,
+)
 from .ops import Ops
 from .engine import calibration
 
