@@ -1042,7 +1042,7 @@ def save_submission(submission: Dict[str, Any], filepath: str = "submission.json
     Returns:
         Path to saved file
     """
-    Path(filepath).write_text(json.dumps(submission, indent=2))
+    Path(filepath).write_text(json.dumps(submission, indent=2), encoding="utf-8")
     print(f"\n✅ Submission saved to: {filepath}")
     return filepath
 
@@ -1507,7 +1507,7 @@ def test_unit_json_serialization():
     assert Path(filepath).exists(), "Submission file should exist"
 
     # Load and verify JSON is valid
-    loaded_json = json.loads(Path(test_file).read_text())
+    loaded_json = json.loads(Path(test_file).read_text(encoding="utf-8"))
 
     # Verify structure is preserved
     assert loaded_json['tinytorch_version'] == submission['tinytorch_version'], "Version should match"

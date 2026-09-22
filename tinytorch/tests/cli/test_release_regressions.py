@@ -214,3 +214,46 @@ def test_workflow_detects_all_milestones_for_module():
 
     assert "05" in milestone_ids
     assert "06" in milestone_ids
+
+
+def test_open_jupyter_logs_to_file_not_pipe(monkeypatch, tmp_path):
+    """Regression test: verify _open_jupyter redirects stdout/stderr to a log file instead of PIPE.
+
+    Unconsumed subprocess.PIPE buffers fill up rapidly and deadlock the Jupyter
+    Tornado event loop, causing kernel connection freezes on Windows/WSL/Linux.
+    """
+    command = ModuleWorkflowCommand(CLIConfig.from_project_root(tmp_path))
+    module_dir = tmp_path / "modules" / "01_tensor"
+    module_dir.mkdir(parents=True)
+    (module_dir / "01_tensor.ipynb").touch()
+
+    popen_calls = []
+
+    class DummyProcess:
+        pid = 12345
+
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, **kwargs):
+        popen_calls.append(kwargs)
+        return DummyProcess()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    ret = command._open_jupyter("01_tensor")
+    assert ret == 0
+    assert len(popen_calls) == 1
+    call_kwargs = popen_calls[0]
+
+    # Must NOT be subprocess.PIPE
+    assert call_kwargs.get("stdout") != subprocess.PIPE
+    assert call_kwargs.get("stderr") != subprocess.PIPE
+    assert call_kwargs.get("stderr") == subprocess.STDOUT
+
+    # stdout must be a file object pointing to .tito/jupyter.log
+    stdout_file = call_kwargs.get("stdout")
+    assert hasattr(stdout_file, "write") or hasattr(stdout_file, "fileno")
+    assert Path(stdout_file.name) == command._jupyter_log_file()
+
