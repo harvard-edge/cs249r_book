@@ -118,11 +118,11 @@ def build():
         f'<tspan font-family="{SERIF}" font-size="82" font-style="italic" fill="{SUB_C}">. Build it.</tspan>'
         f'</text>'
     )
-    p.append(_t(L, 1135, "From Tensors to Hardware-Accelerated Transformers and Systems Extensions", SANS, 38, TEXT_C, ls=1))
+    p.append(_t(L, 1135, "From Tensors to Hardware-Accelerated Transformers—and Beyond.", SANS, 42, TEXT_C, ls=1))
 
     # --- header divider bar -------------------------------------------------
     p.append(_t(L, 1330, "THE FULL RUNTIME STACK", MONO, 28, TEXT_C, ls=6))
-    p.append(_t(R, 1330, "21 MODULES / 5 TIERS", MONO, 28, ACCENT, anchor="end", ls=6))
+    p.append(_t(R, 1330, "20 MODULES / 4 TIERS", MONO, 28, ACCENT, anchor="end", ls=6))
     p.append(f'<line x1="{L}" y1="1360" x2="{R}" y2="1360" stroke="{DOTS}" stroke-width="2"/>')
 
     # --- hero: 20-module continuous circuit snaking flow --------------------
@@ -202,23 +202,24 @@ def build():
     )
     p.append(_t(cap_x, ly + n + 44, "Full TinyGPT Architecture · MLPerf Benchmark Olympics", SANS, 25, TEXT_C))
 
-    # Tier V: Extensions
-    ext_label_x = cap_x + cap_w + 120
-    p.append(_t(ext_label_x, ly + 58, "V", SERIF, 72, ACCENT, weight="bold"))
-    p.append(_t(ext_label_x, ly + 106, "EXTENSIONS", SANS, 32, TITLE_C, weight="bold", ls=4))
-    p.append(_t(ext_label_x, ly + 144, "MODULE 21", MONO, 24, TEXT_C, ls=2))
+    # Community Expansion Ports (Branching out from Capstone)
+    node_out_x = cap_x + cap_w
+    node_out_y = ly + n/2
+    
+    # Label for the branches
+    p.append(_t(node_out_x + 280, node_out_y - 120, "COMMUNITY LABS &amp; EXTENSIONS", SANS, 22, TITLE_C, weight="bold", anchor="middle", ls=2))
+    
+    # 1. Straight right
+    p.append(f'<path d="M {node_out_x} {node_out_y} L {node_out_x + 100} {node_out_y}" fill="none" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" marker-end="url(#arr)"/>')
+    p.append(_t(node_out_x + 130, node_out_y + 8, "LoRA / PEFT", MONO, 26, ACCENT, weight="bold"))
 
-    ext_x, ext_w = ext_label_x + 300, 420
-    p.append(f'<rect x="{ext_x}" y="{ly}" width="{ext_w}" height="{n}" rx="8" fill="{BOX_BG}" stroke="{BOX_BORDER}" stroke-width="2.5"/>')
-    p.append(
-        f'<text x="{ext_x + ext_w/2}" y="{ly + n/2 + 18}" text-anchor="middle" xml:space="preserve">'
-        f'<tspan font-family="{MONO}" font-size="42" font-weight="bold" fill="{BOX_TEXT}">21  </tspan>'
-        f'<tspan font-family="{SERIF}" font-size="56" font-weight="bold" fill="{BOX_TEXT}">Contrib</tspan>'
-        f'</text>'
-    )
-    p.append(_t(ext_x, ly + n + 44, "Native Hardware &amp; Systems Ecosystem Labs", SANS, 25, TEXT_C))
+    # 2. Up and right
+    p.append(f'<path d="M {node_out_x} {node_out_y} L {node_out_x + 40} {node_out_y} Q {node_out_x + 60} {node_out_y} {node_out_x + 60} {node_out_y - 30} L {node_out_x + 60} {node_out_y - 50} Q {node_out_x + 60} {node_out_y - 70} {node_out_x + 80} {node_out_y - 70} L {node_out_x + 100} {node_out_y - 70}" fill="none" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" marker-end="url(#arr)"/>')
+    p.append(_t(node_out_x + 130, node_out_y - 70 + 8, "Torch.Compile", MONO, 26, ACCENT, weight="bold"))
 
-    p.append(f'<line x1="{cap_x + cap_w}" y1="{ly + n/2}" x2="{ext_x - 12}" y2="{ly + n/2}" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" marker-end="url(#arr)"/>')
+    # 3. Down and right
+    p.append(f'<path d="M {node_out_x} {node_out_y} L {node_out_x + 40} {node_out_y} Q {node_out_x + 60} {node_out_y} {node_out_x + 60} {node_out_y + 30} L {node_out_x + 60} {node_out_y + 50} Q {node_out_x + 60} {node_out_y + 70} {node_out_x + 80} {node_out_y + 70} L {node_out_x + 100} {node_out_y + 70}" fill="none" stroke="{ACCENT}" stroke-width="3.5" stroke-dasharray="8,5" marker-end="url(#arr)"/>')
+    p.append(_t(node_out_x + 130, node_out_y + 70 + 8, "Distributed", MONO, 26, ACCENT, weight="bold"))
 
     # --- author -------------------------------------------------------------
     p.append(f'<rect x="{L}" y="2780" width="120" height="4" fill="{ACCENT}"/>')
