@@ -338,6 +338,295 @@ $$\mathbf{a}_t = \frac{\sum_{i=0}^{\min(t, H-1)} w_i \, \mathbf{a}_{t \mid t-i}}
 
 where $\mathbf{a}_{t \mid t-i}$ represents the action predicted for time step $t$ by the action chunk initiated at time $t-i$, and $m > 0$ is a tunable temporal discount factor. The permission path interpolates the blended waypoints below the proposal boundary (@sec-nervous-cadences). Ensembling averages setpoints without enforcing derivative continuity, so a seam can still need the $C^2$ bridge that @sec-planning-kinodynamic-feasibility builds.
 
+This operational tension between neural deliberation capacity and physical control latency defines the central scaling frontier of modern robotic brains (@fig-03-vla-scaling-timeline). Between 2020 and 2023, pioneering vision-language-action (VLA)\index{Vision-language-action model} models such as RT-1 [@brohan2023rt1], RT-2 [@brohan2023rt2], and OpenVLA [@kim2024openvla] tokenized continuous actions into discrete bins, predicting one action step per autoregressive forward pass. However, because each forward pass requires streaming every model parameter from DRAM across the silicon memory bus, policy update rates collapsed as model capacity scaled ($f_{\text{action}} \propto 1 / M_{\text{weights}}$)—trapping multi-billion-parameter models behind an insurmountable "deliberation wall" ($1\text{--}3\,\text{Hz}$) that fell far below the $50\,\text{Hz}$ closed-loop threshold required for dynamic contact and reactive manipulation.
+
+Action chunking fundamentally decoupled deliberation from actuation frequency. Instead of streaming billions of parameters for every low-level setpoint, architectures such as ACT [@zhao2023learning], Diffusion Policy [@chi2024diffusionpolicy], and modern flow-matching foundation models (e.g., Physical Intelligence $\pi_0$ [@black2024pi0] and NVIDIA Project GR00T) evaluate their large perceptual backbones periodically to generate entire multi-step action trajectories ($H = 16\text{--}64$). Compact, highly optimized generative action heads then denoise or integrate these trajectories at $50\text{--}100\,\text{Hz}$, shattering the autoregressive memory wall and reconciling multi-billion parameter semantic reasoning with millisecond closed-loop physical control.
+
+::: {#fig-03-vla-scaling-timeline fig-env="figure" fig-pos="htb" fig-cap="**The embodied brain frontier: model parameter scaling versus physical action frequency across robotic policies (2020–2026)**: Trade-off between foundation policy parameter capacity ($M_{\\text{weights}}$, log scale, $20\\,\\text{M}$ to $100\\,\\text{B}$ parameters) and onboard closed-loop action frequency ($f_{\\text{action}}$, log scale, $0.5\\,\\text{Hz}$ to $200\\,\\text{Hz}$). Single-token discrete autoregressive policies (RT-1, RT-2-PaLM-E, RT-2-PaLI-X, OpenVLA Base) hit an insurmountable memory wall ($f \\propto 1/M_{\\text{weights}}$) bounded by DRAM streaming bandwidth ($B_{\\text{mem}} / M_{\\text{weights}}$), stranding large models at $1\\text{--}3\\,\\text{Hz}$. Continuous action chunking (ACT, Diffusion Policy) and flow-matching dual-system architectures (Physical Intelligence $\\pi_0$, NVIDIA Project GR00T, 2026 dual-brain SoCs) shatter this bottleneck: decoupling multi-step chunk generation ($H = 16\\text{--}64$) from low-latency generative action heads enables multi-billion parameter foundation models to achieve $50\\text{--}100\\,\\text{Hz}$ real-time reactive control." fig-alt="Log-log plot comparing model parameter count from 15 million to 120 billion on the horizontal axis against onboard action frequency from 0.35 Hz to 210 Hz on the vertical axis. Highlights the steep performance drop of single-token autoregressive models along the deliberation wall versus the high-frequency frontier of action chunking and flow matching architectures reaching 50 to 100 Hz."}
+
+```{python}
+#| label: fig-03-vla-scaling-timeline
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ VLA SCALING TIMELINE: PARAMETERS VS ACTION FREQUENCY (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Section 3.2, @fig-03-vla-scaling-timeline.
+# │ Goal:    Show why single-token autoregression hits a memory wall (1–3 Hz)
+# │          and how action chunking and flow matching achieve 50–100 Hz control.
+# └─────────────────────────────────────────────────────────────────────────────
+import matplotlib as mpl
+
+mpl.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+from matplotlib.lines import Line2D
+import numpy as np
+
+plt.rcParams["font.sans-serif"] = ["Helvetica", "Arial", "DejaVu Sans"]
+plt.rcParams["axes.edgecolor"] = "#334155"
+plt.rcParams["axes.linewidth"] = 1.0
+
+fig, ax = plt.subplots(figsize=(14, 8.5), dpi=200, facecolor="#FFFFFF")
+ax.set_facecolor("#FFFFFF")
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.5, color="#E2E8F0")
+ax.set_axisbelow(True)
+
+# 1. Regimes
+ax.axhspan(0.35, 8.0, color="#FEF2F2", alpha=0.55, zorder=0)
+ax.axhspan(25.0, 200.0, color="#ECFDF5", alpha=0.5, zorder=0)
+
+ax.text(
+    2.2e7,
+    180.0,
+    "CONTINUOUS ACTION CHUNKING & FLOW MATCHING FRONTIER (2023–2026)\nDecoupled proposal generation: multi-step chunks ($H = 16\\text{--}64$) + fast generative decoders\nMulti-billion parameter foundation models achieve real-time 50–100 Hz closed-loop control",
+    fontsize=8.5,
+    fontweight="bold",
+    color="#047857",
+    alpha=0.9,
+    va="top",
+)
+
+ax.text(
+    2.2e8,
+    0.48,
+    "AUTOREGRESSIVE DELIBERATION WALL (2020–2023)\nSingle-token weight streaming bound by DRAM bandwidth ($f \\leq B_{\\mathrm{mem}} / M_{\\mathrm{weights}}$)\nEach action step requires a full model pass -> catastrophic latency scaling",
+    fontsize=8.5,
+    fontweight="bold",
+    color="#B91C1C",
+    alpha=0.85,
+    va="center",
+)
+
+# 2. Deadlines
+deadlines = [
+    (50.0, "50 Hz: Real-Time Dynamic Manipulation & Tactile Contact Deadline", "#1E793C", "--"),
+    (10.0, "10 Hz: Coarse Visual Servoing & Quasistatic Pick-and-Place Limit", "#D97706", ":"),
+    (2.0, "2 Hz: Cloud VLM Autoregressive Latency Floor (0.5–2 s)", "#A51C30", "-."),
+]
+for freq, lbl, col, ls in deadlines:
+    ax.axhline(freq, color=col, linestyle=ls, linewidth=1.2, alpha=0.7, zorder=1)
+    ax.text(9.5e10, freq * 1.08, lbl, fontsize=7.5, fontweight="bold", color=col, ha="right", va="bottom")
+
+# 3. Trajectory Curves
+ar_params = np.logspace(np.log10(3.5e7), np.log10(5.5e10), 100)
+ar_freq = 3.0 * (3.5e7 / ar_params) ** 0.15
+ax.plot(ar_params, ar_freq, color="#A51C30", lw=2.2, ls="--", zorder=4, alpha=0.8)
+ax.text(
+    1.2e9,
+    2.4,
+    "Autoregressive Memory Wall: $f \\propto 1 / M_{\\mathrm{weights}}$",
+    fontsize=8.5,
+    fontweight="bold",
+    color="#A51C30",
+    rotation=-6,
+    ha="center",
+    bbox=dict(boxstyle="round,pad=0.2", facecolor="#FFFFFF", edgecolor="#FECACA", alpha=0.9),
+)
+
+fx = np.array([8e7, 5e8, 2e9, 3.3e9, 5e9, 1.5e10])
+fy = np.array([50.0, 50.0, 50.0, 52.0, 80.0, 100.0])
+ax.plot(fx, fy, color="#1E793C", lw=2.5, ls="-", zorder=4, alpha=0.85)
+ax.text(
+    1.8e8, 56.0, "Action Chunking Frontier ($H \\geq 16$, Flow Matching)", fontsize=8.5, fontweight="bold", color="#1E793C", ha="left", va="bottom"
+)
+
+def add_badge(ax, text, xy, xytext, color="#1E293B", fontsize=7.8, arrow=True, arrow_color="#94A3B8"):
+    bbox = dict(boxstyle="round,pad=0.45", facecolor="#FFFFFF", edgecolor="#CBD5E1", alpha=0.96, linewidth=0.8)
+    ap = dict(arrowstyle="->", color=arrow_color, linewidth=1.1, shrinkA=3, shrinkB=4) if arrow else None
+    ax.annotate(
+        text, xy=xy, xytext=xytext, fontsize=fontsize, fontweight="medium", color=color, bbox=bbox, arrowprops=ap, ha="center", va="center", zorder=10
+    )
+
+models = [
+    {
+        "name": "BC-Z (2022)",
+        "params": 1e8,
+        "plot_params": 7.5e7,
+        "freq": 10.0,
+        "color": "#475569",
+        "marker": "s",
+        "badge_xytext": (2.2e7, 14.0),
+        "text": "2022 · Google BC-Z\n100M params · 10 Hz\nResNet behavioral cloning",
+    },
+    {
+        "name": "RT-1 (2022)",
+        "params": 3.5e7,
+        "plot_params": 3.5e7,
+        "freq": 3.0,
+        "color": "#004B87",
+        "marker": "o",
+        "badge_xytext": (1.8e7, 4.8),
+        "text": "2022 · Google RT-1\n35M params · 3 Hz (330 ms)\nEfficientNet + TokenLearner",
+    },
+    {
+        "name": "RT-2-PaLM-E (2023)",
+        "params": 1.2e10,
+        "plot_params": 1.2e10,
+        "freq": 3.0,
+        "color": "#D97706",
+        "marker": "D",
+        "badge_xytext": (4.0e9, 4.5),
+        "text": "2023 · RT-2-PaLM-E (12B)\n12B params · ~3 Hz\nDiscrete action tokenization",
+    },
+    {
+        "name": "RT-2-PaLI-X (2023)",
+        "params": 5.5e10,
+        "plot_params": 5.5e10,
+        "freq": 1.0,
+        "color": "#A51C30",
+        "marker": "D",
+        "badge_xytext": (2.5e10, 0.65),
+        "text": "2023 · RT-2-PaLI-X (55B)\n55B params · ~1 Hz (1,000 ms)\nCloud TPU v4 multi-token sweep",
+    },
+    {
+        "name": "OpenVLA (Base, 2024)",
+        "params": 7e9,
+        "plot_params": 7e9,
+        "freq": 6.0,
+        "color": "#E11D48",
+        "marker": "o",
+        "badge_xytext": (1.5e9, 7.5),
+        "text": "2024 · OpenVLA (Base)\n7B params · 6 Hz (RTX 4090)\nLlama-2 + SigLIP discrete bins",
+    },
+    {
+        "name": "ACT (Zhao et al., 2023)",
+        "params": 8e7,
+        "plot_params": 8e7,
+        "freq": 50.0,
+        "color": "#008080",
+        "marker": "^",
+        "badge_xytext": (2.0e7, 72.0),
+        "text": "2023 · Stanford ACT\n80M params · 50 Hz actions\nAction Chunking Transformer ($H=100$)",
+    },
+    {
+        "name": "Diffusion Policy (2023)",
+        "params": 1e8,
+        "plot_params": 1e8,
+        "freq": 30.0,
+        "color": "#6B21A8",
+        "marker": "^",
+        "badge_xytext": (1.8e8, 23.0),
+        "text": "2023 · Diffusion Policy\n100M params · 30 Hz execution\nReceding-horizon DDPM ($H=16$)",
+    },
+    {
+        "name": "Octo-Base (2023)",
+        "params": 9.3e7,
+        "plot_params": 1.35e8,
+        "freq": 10.0,
+        "color": "#0284C7",
+        "marker": "s",
+        "badge_xytext": (2.2e8, 14.0),
+        "text": "2023 · Octo-Base (UC Berkeley)\n93M params · 10 Hz actions\nTransformer diffusion policy",
+    },
+    {
+        "name": "OpenVLA-OFT+ (2024)",
+        "params": 7e9,
+        "plot_params": 7e9,
+        "freq": 50.0,
+        "color": "#B45309",
+        "marker": "*",
+        "badge_xytext": (4.5e9, 25.0),
+        "text": "2024 · OpenVLA-OFT+\n7B params · 50 Hz actions\nChunked parallel decoding",
+    },
+    {
+        "name": "Physical Intelligence pi0 (2024)",
+        "params": 3.3e9,
+        "plot_params": 3.3e9,
+        "freq": 50.0,
+        "color": "#1E793C",
+        "marker": "*",
+        "badge_xytext": (1.4e9, 82.0),
+        "text": "2024 · Physical Intelligence π₀\n3.3B params · 50 Hz actions\nFlow Matching Action Expert",
+    },
+    {
+        "name": "NVIDIA Project GR00T (2024–25)",
+        "params": 5e9,
+        "plot_params": 5e9,
+        "freq": 80.0,
+        "color": "#004B87",
+        "marker": "*",
+        "badge_xytext": (3.5e9, 140.0),
+        "text": "2024–25 · NVIDIA Project GR00T\n~5B params · 50–100 Hz closed-loop\nDual-System slow VLM + fast DiT policy",
+    },
+    {
+        "name": "2026 Frontier (Dual-Brain SoCs)",
+        "params": 1.5e10,
+        "plot_params": 1.5e10,
+        "freq": 100.0,
+        "color": "#A51C30",
+        "marker": "*",
+        "badge_xytext": (2.6e10, 140.0),
+        "text": "2026 Frontier · Embodied Dual-Brain\n15B params · 100 Hz actuation\nHardware-isolated proposal-permission SoC",
+    },
+]
+
+for m in models:
+    s_size = 200 if m["marker"] == "*" else (110 if m["marker"] == "D" else 100)
+    ax.scatter(m["plot_params"], m["freq"], color=m["color"], s=s_size, marker=m["marker"], edgecolor="#FFFFFF", linewidth=1.5, zorder=10)
+    add_badge(
+        ax, m["text"], xy=(m["plot_params"], m["freq"]), xytext=m["badge_xytext"], color="#1E293B", fontsize=7.8, arrow=True, arrow_color=m["color"]
+    )
+
+ax.set_xscale("log")
+ax.set_yscale("log")
+
+ax.set_xlim(1.5e7, 1.2e11)
+ax.set_ylim(0.35, 210)
+
+ax.set_xticks([2e7, 1e8, 1e9, 1e10, 1e11])
+ax.get_xaxis().set_major_formatter(ticker.FuncFormatter(lambda x, p: f"{int(x/1e6)}M" if x < 1e9 else f"{int(x/1e9)}B"))
+
+ax.set_yticks([0.5, 1, 2, 5, 10, 20, 50, 100, 200])
+ax.get_yaxis().set_major_formatter(ticker.FuncFormatter(lambda y, p: f"{y:g} Hz"))
+
+ax.set_xlabel("Foundation Policy Parameter Count $M_{\\mathrm{weights}}$ (log scale)", fontsize=11, fontweight="bold", labelpad=8)
+ax.set_ylabel("Onboard Physical Action Frequency (Hz, log scale)", fontsize=11, fontweight="bold", labelpad=8)
+
+fig.suptitle(
+    "The Embodied Brain Frontier: Parameter Scaling vs Physical Action Frequency (2020–2026)",
+    fontsize=14,
+    fontweight="bold",
+    x=0.08,
+    y=0.98,
+    ha="left",
+    color="#1E293B",
+)
+ax.set_title(
+    "Overcoming the deliberation wall: how continuous action chunking and flow matching break the memory wall ($1\\,\\mathrm{Hz} \\rightarrow 100\\,\\mathrm{Hz}$)",
+    fontsize=9.5,
+    color="#475569",
+    loc="left",
+    pad=14,
+)
+
+legend_elements = [
+    Line2D([0], [0], marker='o', color='w', markerfacecolor='#A51C30', markersize=8, label='Discrete Autoregressive Tokenization (Single-Step)'),
+    Line2D([0], [0], marker='^', color='w', markerfacecolor='#008080', markersize=8, label='Diffusion Action Chunking (ACT / DDPM)'),
+    Line2D([0], [0], marker='*', color='w', markerfacecolor='#1E793C', markersize=12, label='Continuous Flow Matching / Dual-System VLA (π₀, GR00T)'),
+    Line2D([0], [0], color='#A51C30', lw=2, ls='--', label='Autoregressive Memory Wall Trend ($f \\propto 1/M$)'),
+    Line2D([0], [0], color='#1E793C', lw=2, ls='-', label='Action Chunking Scaling Frontier'),
+]
+legend = ax.legend(
+    handles=legend_elements,
+    loc="lower left",
+    frameon=True,
+    framealpha=0.96,
+    edgecolor="#CBD5E1",
+    fontsize=7.8,
+    title="Embodied Policy Architectures",
+    title_fontsize=8.2,
+)
+legend.get_title().set_fontweight("bold")
+legend.set_zorder(15)
+
+plt.tight_layout()
+plt.subplots_adjust(top=0.90, bottom=0.10, left=0.08, right=0.94)
+plt.show()
+```
+:::
+
 ### The machine's two proposers {.unnumbered}
 
 On the mobile manipulator's own application processor, the memory wall and the amortization that chunking offers decide how the machine divides proposal work between its models.

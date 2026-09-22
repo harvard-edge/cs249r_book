@@ -602,7 +602,11 @@ class FieldbusSchedulability:
 **Systems insight**: For the machine's `{python} FieldbusSchedulability.num_axes_str` axes at 64 bytes per axis, CAN-FD serialization alone misses the `{python} FieldbusSchedulability.cycle_time_str` bus cycle, while EtherCAT frame and forwarding occupancy leaves room for other work. **TSN Ethernet**\index{Time-sensitive networking} can carry gigabit camera feeds and microsecond servo frames on one physical link, but only if its time-gated queues are configured and verified across every switch so that video bursts cannot collide with time-critical control slots.
 :::
 
-Real-time dependability cannot be achieved by buying faster clock speeds or measuring statistical latency percentiles on an idle bench. Dependability requires structural analysis of the execution path: eliminating all unbounded variance sources ($I_{\text{unbounded}} = 0$), bounding shared hardware blocking ($B$), enforcing zero-allocation static memory layouts, and selecting fieldbuses with cycle-deterministic distributed clocks. @Fig-04-fieldbus-evolution plots nominal link rates against selected cycle targets for five fieldbus families;[^fn-net-tsn-fieldbus] bandwidth alone does not determine schedulability.
+Real-time dependability cannot be achieved by buying faster clock speeds or measuring statistical latency percentiles on an idle bench. Dependability requires structural analysis of the execution path: eliminating all unbounded variance sources ($I_{\text{unbounded}} = 0$), bounding shared hardware blocking ($B$), enforcing zero-allocation static memory layouts, and selecting fieldbuses with cycle-deterministic distributed clocks (@fig-04-fieldbus-evolution).
+
+While bandwidth determines how many bytes can cross the bus in a given interval, **synchronization jitter** ($\sigma_{\text{jitter}}$)—the worst-case temporal variation in when distributed nodes sample sensors and apply actuator setpoints—determines whether multi-axis physical systems can maintain stable dynamical contact. In multi-axis robotic arms and legged humanoids, field-oriented control (FOC) switches inverter pulse-width modulation (PWM) gates at $20\text{--}40\,\text{kHz}$, demanding sub-microsecond phase synchronization ($\le 1\,\mu\text{s}$) across all joint drives to prevent phase distortion, audible acoustic resonance, and destructive torque ripple.
+
+As mapped across four decades of communication standards in @fig-04-fieldbus-evolution, legacy serial protocols (Modbus RTU) and carrier-sense priority-arbitrated buses (CAN 2.0B, CAN-FD) exhibit milliseconds of non-deterministic queuing jitter under heavy bus loads, restricting them to low-rate telemetry and supervisory commands. Achieving the sub-microsecond synchronization required for dynamic physical AI necessitates hardware-scheduled time-triggered architectures: either processing-on-the-fly industrial Ethernet with hardware Distributed Clocks (EtherCAT, EtherCAT G) or IEEE 802.1AS/Qbv Time-Sensitive Networking (TSN).[^fn-net-tsn-fieldbus] These architectures anchor clock alignment in silicon PHY timestamps, achieving sub-100 nanosecond jitter across dozens of coordinated actuators and bridging high-bandwidth neural policies directly to hard real-time motor inverters.
 
 ::: {.column-margin}
 <!-- fig-alt below hand-types values because fig-alt cannot hold inline python. Keep them in sync with these cell outputs:
@@ -617,45 +621,276 @@ Real-time dependability cannot be achieved by buying faster clock speeds or meas
 
 [^fn-net-tsn-fieldbus]: **Time-Sensitive Networking**\index{Time-sensitive networking}: IEEE 802.1Qbv Time-Sensitive Networking establishes deterministic Ethernet communication by configuring time-aware traffic shapers across network switches. High-priority control frames execute within dedicated, pre-scheduled transmission windows, while asynchronous high-bandwidth payloads (such as uncompressed camera streams) are temporarily gated. This scheduled time-division multiplexing allows vision telemetry and microsecond servo commands to coexist over a unified physical link without packet collision or buffer bloat.
 
-::: {#fig-04-fieldbus-evolution fig-env="figure" fig-pos="htb" fig-cap="**Illustrative fieldbus design space**: Nominal link bandwidth and selected multi-axis cycle targets for five protocol scenarios. Bandwidth is each protocol's nominal maximum; the CAN-FD serialization example in the text runs its data phase below that maximum." fig-alt="Log-log scatter plot of nominal link bandwidth and multi-axis cycle targets for Modbus RTU, CAN, CAN-FD, EtherCAT, and TSN Ethernet; lower cycle targets appear higher on the inverted vertical axis."}
+::: {#fig-04-fieldbus-evolution fig-env="figure" fig-pos="htb" fig-cap="**The nervous system frontier: fieldbus bandwidth versus clock synchronization jitter across industrial robotic protocols (1979–2026)**: Trade-off between raw transmission bandwidth (log scale, $100\\,\\text{kbps}$ to $10\\,\\text{Gbps}$) and worst-case synchronization jitter (log scale, $10\\,\\text{ns}$ to $20\\,\\text{ms}$). Regime I (top): Non-deterministic soft real-time protocols (Modbus RTU, CAN 2.0B, CAN-FD) subject to CSMA/CR collision arbitration and unmanaged queuing jitter ($0.2\\text{--}20\\,\\text{ms}$). Regime II (middle): Coordinated multi-axis joint servo loops ($1\\,\\text{kHz}$, jitter $\\le 100\\,\\mu\\text{s}$) utilizing switched Ethernet and static TDMA (FlexRay, PROFINET RT). Regime III (bottom): Sub-microsecond motor inverter and physical AI synchronization frontier (EtherCAT, EtherCAT G, IEEE TSN 802.1AS/Qbv), achieving sub-100 ns clock alignment via hardware distributed clocks and processing-on-the-fly forwarding to eliminate torque ripple during $20\\text{--}40\\,\\text{kHz}$ PWM field-oriented control." fig-alt="Log-log plot of fieldbus raw bandwidth from 0.05 Mbps to 25 Gbps on the horizontal axis against worst-case synchronization jitter from 10 ns to 50 ms on the vertical axis. Three distinct shaded regions demarcate soft real-time CSMA protocols, 1 kHz coordinated joint servo protocols, and sub-microsecond hardware-synchronized EtherCAT and TSN fabrics. Specific milestones from 1979 Modbus to 2024 TSN highlight bandwidth gains and jitter reductions."}
 
 ```{python}
+#| label: fig-04-fieldbus-evolution
 #| echo: false
-import pandas as pd
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NERVOUS SYSTEM FRONTIER: FIELDBUS BANDWIDTH VS JITTER (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Section 4.5, @fig-04-fieldbus-evolution.
+# │ Goal:    Show the trade-off between raw transmission bandwidth and clock
+# │          synchronization jitter across 40+ years of industrial fieldbuses.
+# └─────────────────────────────────────────────────────────────────────────────
+import matplotlib as mpl
+
+mpl.use("Agg")
 import matplotlib.pyplot as plt
-from mlsysim import viz
+import matplotlib.ticker as ticker
+from matplotlib.lines import Line2D
+import numpy as np
 
-data = pd.read_csv("vol4/04_nervous/data/fieldbus_evolution.csv")
+plt.rcParams["font.sans-serif"] = ["Helvetica", "Arial", "DejaVu Sans"]
+plt.rcParams["axes.edgecolor"] = "#334155"
+plt.rcParams["axes.linewidth"] = 1.0
 
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 5))
+fig, ax = plt.subplots(figsize=(14, 8.5), dpi=200, facecolor="#FFFFFF")
+ax.set_facecolor("#FFFFFF")
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+ax.grid(True, linestyle="--", linewidth=0.6, alpha=0.5, color="#E2E8F0")
+ax.set_axisbelow(True)
 
-# Plot Cycle time vs Bandwidth
-scatter = ax.scatter(data["bandwidth_mbps"], data["cycle_time_ms"], color=COLORS["BlueLine"], s=100, zorder=3)
+# 1. Regimes
+ax.axhspan(1000.0, 50000.0, color="#FEF2F2", alpha=0.55, zorder=0)
+ax.axhspan(1.0, 1000.0, color="#FFFBEB", alpha=0.45, zorder=0)
+ax.axhspan(0.006, 1.0, color="#ECFDF5", alpha=0.55, zorder=0)
+
+ax.text(
+    2.5,
+    22000.0,
+    "NON-DETERMINISTIC / SOFT REAL-TIME REGIME\nCSMA/CR arbitration, unmanaged switches, non-preemptive packet delays\nSuitable for supervisory diagnostics, BMS telemetry, and human interfaces",
+    fontsize=8.2,
+    fontweight="bold",
+    color="#B91C1C",
+    alpha=0.9,
+    va="center",
+)
+
+ax.text(
+    0.07,
+    40.0,
+    "COORDINATED MULTI-AXIS JOINT SERVO REGIME (1 kHz Control Loops)\nHardware-scheduled TDMA or priority-bypassed Layer 2 industrial Ethernet\nRequired for smooth multi-axis trajectory interpolation, impedance control, and haptics",
+    fontsize=8.0,
+    fontweight="bold",
+    color="#B45309",
+    alpha=0.9,
+    va="center",
+)
+
+ax.text(
+    0.07,
+    0.021,
+    "SUB-MICROSECOND INVERTER &\nPHYSICAL AI SYNCHRONIZATION FRONTIER\nHardware Distributed Clocks (EtherCAT DC) & IEEE 802.1AS gPTP\nEnables 20–40 kHz PWM Field-Oriented Control (FOC) without torque ripple",
+    fontsize=8.0,
+    fontweight="bold",
+    color="#047857",
+    alpha=0.95,
+    va="center",
+)
+
+# 2. Deadlines
+deadlines = [
+    (1000.0, "1,000 µs (1 ms): Soft Real-Time Supervisory & Telemetry Limit", "#475569", "-."),
+    (100.0, "100 µs: 1 kHz Coordinated Multi-Axis Joint Servo Jitter Boundary", "#D97706", ":"),
+    (1.0, "1.0 µs: Motor Inverter PWM Commutation Deadline (FOC 20–40 kHz)", "#A51C30", "--"),
+    (0.1, "100 ns: Ultra-Precision Distributed Clocks Boundary (Beckhoff DC / IEEE 1588)", "#1E793C", ":"),
+]
+for jitter, lbl, col, ls in deadlines:
+    ax.axhline(jitter, color=col, linestyle=ls, linewidth=1.2, alpha=0.75, zorder=1)
+    ax.text(22000.0, jitter * 1.15, lbl, fontsize=7.5, fontweight="bold", color=col, ha="right", va="bottom")
+
+# 3. Frontier Line & Fill
+fx = [100.0, 1000.0, 10000.0]
+fy = [0.05, 0.035, 0.02]
+ax.plot(fx, fy, color="#1E793C", lw=2.2, ls="-", zorder=3, alpha=0.85)
+
+ax.fill_between([80.0, 100.0, 1000.0, 10000.0, 23000.0], [0.05, 0.05, 0.035, 0.02, 0.02], 0.006, color="#A7F3D0", alpha=0.25, zorder=1)
+
+ax.text(
+    220.0,
+    0.28,
+    "Physical AI Actuation Frontier\nEtherCAT · EtherCAT G · IEEE TSN (802.1AS/Qbv)\nSub-100 ns sync for 50+ coordinated actuators",
+    fontsize=8.0,
+    fontweight="bold",
+    color="#1E793C",
+    va="center",
+)
+
+def add_badge(ax, text, xy, xytext, color="#1E293B", fontsize=7.8, arrow=True, arrow_color="#94A3B8"):
+    bbox = dict(boxstyle="round,pad=0.45", facecolor="#FFFFFF", edgecolor="#CBD5E1", alpha=0.96, linewidth=0.8)
+    ap = dict(arrowstyle="->", color=arrow_color, linewidth=1.1, shrinkA=3, shrinkB=4) if arrow else None
+    ax.annotate(
+        text, xy=xy, xytext=xytext, fontsize=fontsize, fontweight="medium", color=color, bbox=bbox, arrowprops=ap, ha="center", va="center", zorder=10
+    )
+
+protocols = [
+    {
+        "name": "Modbus RTU",
+        "bw": 0.115,
+        "jitter": 20000.0,
+        "year": 1979,
+        "color": "#475569",
+        "marker": "s",
+        "badge_xytext": (0.10, 26000.0),
+        "text": "1979 · Modbus RTU (RS-485)\n115.2 kbps · ~20 ms jitter\nSerial polling master-slave",
+    },
+    {
+        "name": "CAN 2.0B",
+        "bw": 1.0,
+        "jitter": 2500.0,
+        "year": 1986,
+        "color": "#A51C30",
+        "marker": "o",
+        "badge_xytext": (0.22, 2500.0),
+        "text": "1986 · Classic CAN 2.0B\n1 Mbps · 1,000–5,000 µs jitter\nCSMA/CR priority arbitration",
+    },
+    {
+        "name": "CAN-FD",
+        "bw": 5.0,
+        "jitter": 350.0,
+        "year": 2012,
+        "color": "#E11D48",
+        "marker": "o",
+        "badge_xytext": (8.5, 350.0),
+        "text": "2012 · CAN-FD\n5 Mbps · 200–500 µs jitter\n64-byte payload, dual bitrate",
+    },
+    {
+        "name": "FlexRay",
+        "bw": 10.0,
+        "jitter": 1.5,
+        "year": 2005,
+        "color": "#008080",
+        "marker": "^",
+        "badge_xytext": (3.5, 4.5),
+        "text": "2005 · FlexRay\n10 Mbps · 1–2 µs jitter\nDeterministic static TDMA cycle",
+    },
+    {
+        "name": "PROFINET RT",
+        "bw": 100.0,
+        "jitter": 1000.0,
+        "year": 2003,
+        "color": "#D97706",
+        "marker": "D",
+        "badge_xytext": (32.0, 2200.0),
+        "text": "2003 · PROFINET RT\n100 Mbps · ~1 ms jitter\nSoftware Layer 2 bypass",
+    },
+    {
+        "name": "PROFINET IRT",
+        "bw": 100.0,
+        "jitter": 0.5,
+        "year": 2006,
+        "color": "#B45309",
+        "marker": "D",
+        "badge_xytext": (25.0, 0.45),
+        "text": "2006 · PROFINET IRT\n100 Mbps · 0.2–0.5 µs jitter\nHardware TDMA ASIC + PTCP sync",
+    },
+    {
+        "name": "EtherCAT (100BASE-TX)",
+        "bw": 100.0,
+        "jitter": 0.05,
+        "year": 2003,
+        "color": "#1E793C",
+        "marker": "*",
+        "badge_xytext": (20.0, 0.045),
+        "text": "2003 · EtherCAT (Beckhoff)\n100 Mbps · 20–80 ns jitter\nProcessing-on-the-fly, Distributed Clocks",
+    },
+    {
+        "name": "EtherCAT G",
+        "bw": 1000.0,
+        "jitter": 0.035,
+        "year": 2018,
+        "color": "#004B87",
+        "marker": "*",
+        "badge_xytext": (420.0, 0.016),
+        "text": "2018 · EtherCAT G\n1 Gbps · 30–50 ns jitter\nBranch controller gigabit fabric",
+    },
+    {
+        "name": "IEEE TSN (802.1AS/Qbv)",
+        "bw": 10000.0,
+        "jitter": 0.02,
+        "year": 2024,
+        "color": "#6B21A8",
+        "marker": "*",
+        "badge_xytext": (3200.0, 0.040),
+        "text": "2024 · IEEE TSN (802.1AS + 802.1Qbv)\n1–10 Gbps · 10–30 ns jitter\nConverged IT/OT Time-Aware Shaper",
+    },
+]
+
+for p in protocols:
+    s_size = 220 if p["marker"] == "*" else (110 if p["marker"] == "D" else 100)
+    ax.scatter(p["bw"], p["jitter"], color=p["color"], s=s_size, marker=p["marker"], edgecolor="#FFFFFF", linewidth=1.5, zorder=10)
+    add_badge(ax, p["text"], xy=(p["bw"], p["jitter"]), xytext=p["badge_xytext"], color="#1E293B", fontsize=7.8, arrow=True, arrow_color=p["color"])
 
 ax.set_xscale("log")
 ax.set_yscale("log")
-ax.invert_yaxis()
 
-ax.set_xlabel("Nominal link bandwidth (Mbps)")
-ax.set_ylabel("Illustrative multi-axis cycle target (ms; lower is faster)")
+ax.set_xlim(0.05, 25000.0)
+ax.set_ylim(0.006, 50000.0)
 
-for i, row in data.iterrows():
-    ax.annotate(
-        f'{row["protocol"]} ({row["year"]})',
-        (row["bandwidth_mbps"], row["cycle_time_ms"]),
-        textcoords="offset points",
-        xytext=(-8, -14) if row["protocol"] == "TSN (GbE)" else (7, 5),
-        ha="right" if row["protocol"] == "TSN (GbE)" else "left",
-        fontsize=10,
-    )
+ax.yaxis.set_minor_locator(ticker.NullLocator())
 
-ax.grid(True, linestyle="--", alpha=0.6, zorder=0)
+ax.set_xticks([0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0])
+ax.get_xaxis().set_major_formatter(
+    ticker.FuncFormatter(lambda x, p: f"{int(x*1000)} kbps" if x < 1.0 else (f"{int(x)} Mbps" if x < 1000.0 else f"{int(x/1000)} Gbps"))
+)
 
-ax.set_xlim(0.07, 1800)
-ax.set_ylim(35, 0.007)
+ax.set_yticks([0.01, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0])
+ax.get_yaxis().set_major_formatter(
+    ticker.FuncFormatter(lambda y, p: f"{int(y*1000)} ns" if y < 1.0 else (f"{int(y)} µs" if y < 1000.0 else f"{int(y/1000)} ms"))
+)
+
+ax.set_xlabel("Fieldbus Raw Bandwidth / Bitrate (log scale)", fontsize=11, fontweight="bold", labelpad=8)
+ax.set_ylabel(
+    "Worst-Case Clock Synchronization Jitter (log scale)  [ $\\downarrow$ Lower Jitter = Higher Determinism ]",
+    fontsize=10.5,
+    fontweight="bold",
+    labelpad=8,
+)
+
+fig.suptitle(
+    "The Nervous System Frontier: Fieldbus Bandwidth vs Synchronization Jitter",
+    fontsize=14,
+    fontweight="bold",
+    x=0.08,
+    y=0.98,
+    ha="left",
+    color="#1E293B",
+)
+ax.set_title(
+    "From asynchronous CSMA arbitration to gigabit sub-microsecond determinism: enabling 20–40 kHz distributed motor control",
+    fontsize=9.5,
+    color="#475569",
+    loc="left",
+    pad=14,
+)
+
+legend_elements = [
+    Line2D([0], [0], marker='s', color='w', markerfacecolor='#475569', markersize=8, label='Serial Master-Slave (Modbus RS-485)'),
+    Line2D([0], [0], marker='o', color='w', markerfacecolor='#A51C30', markersize=8, label='Asynchronous CSMA/CR (CAN, CAN-FD)'),
+    Line2D([0], [0], marker='^', color='w', markerfacecolor='#008080', markersize=8, label='Time-Triggered Static TDMA (FlexRay)'),
+    Line2D(
+        [0], [0], marker='D', color='w', markerfacecolor='#B45309', markersize=8, label='Switched / Isochronous Industrial Ethernet (PROFINET RT/IRT)'
+    ),
+    Line2D([0], [0], marker='*', color='w', markerfacecolor='#1E793C', markersize=12, label='On-the-Fly & Converged TSN (EtherCAT, TSN 802.1AS/Qbv)'),
+]
+legend = ax.legend(
+    handles=legend_elements,
+    loc="upper right",
+    frameon=True,
+    framealpha=0.96,
+    edgecolor="#CBD5E1",
+    fontsize=7.8,
+    title="Industrial Fieldbus Architectures",
+    title_fontsize=8.2,
+)
+legend.get_title().set_fontweight("bold")
+legend.set_zorder(15)
+
 plt.tight_layout()
+plt.subplots_adjust(top=0.90, bottom=0.10, left=0.08, right=0.94)
 plt.show()
-plt.close()
 ```
 
 :::
